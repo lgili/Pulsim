@@ -50,10 +50,12 @@ measured; all three are refuted, which is why this is pinned:
   stopping on a spurious branch of a multi-root system, so making it
   relative trades an abort for a silent wrong operating point.
 
-What that leaves: the stall is real and the fix is NOT a tolerance
-change. It needs the step controller not to drive h to h_min here
-(why is a landing step of ~1e-12 s attempted at all?), or a
-row-equilibrated Jacobian so the 2L/h rows do not set the scale.
+What that leaves: the fix was NOT a tolerance change. Cured in the
+TR-BDF2 event follow-up: the zero-time diode cascades decided the diode
+bits on probes whose Newton solve had FAILED (the warm start, read as a
+state). Probes are now retaken longer and a cascade with no converged
+probe refuses by name; the flyback completes at 15.3104 V against
+15.31 V on the fixed engine.
 
 DEFECT 2 — the fixed engine fails at 10 ns in the PSFB rectifier
 whenever a Newton device is in the primary, and the cause is DIODE-MASK
@@ -198,22 +200,22 @@ def _snubbed_flyback():
 
 @pytest.mark.parametrize("engine", [None, "trbdf2"])
 def test_the_newton_abort_does_not_recommend_loosening_tolerances(engine):
+    # The flyback no longer stalls; a Newton budget of 2 iterations makes
+    # every stage fail so the run reaches h_min and shows the message.
     b, sf = _snubbed_flyback()
     kw = {} if engine is None else {"engine": engine}
     with pytest.raises(p.SimulationAborted) as exc:
-        p.simulate(b, t_end=1e-3, switch_fn=sf, **kw)
+        p.simulate(b, t_end=1e-3, switch_fn=sf, max_newton_iterations=2,
+                   **kw)
     msg = str(exc.value)
-    # Still the h_min stall, with its diagnostics intact.
-    assert "h already at h_min" in msg, msg
+    assert "h already at h_min" in msg or "no converged probe" in msg, msg
     assert "dx/|x| =" in msg and "res/|b| =" in msg, msg
     # The refuted advice is gone, and the message says why.
     assert "sized to your circuit" not in msg, msg
     assert "Do not loosen tol_newton_dx / tol_newton_res" in msg, msg
     assert "silently wrong" in msg, msg
-    # The safe next steps are there.
+    # The safe next step is there.
     assert "engine='pwl' with an explicit dt" in msg, msg
-    assert "known TR-BDF2 stall at h_min" in msg, msg
-    assert "KNOWN_LIMITATIONS.md" in msg, msg
 
 
 def test_the_fixed_engine_abort_does_not_send_the_user_to_a_smaller_dt():

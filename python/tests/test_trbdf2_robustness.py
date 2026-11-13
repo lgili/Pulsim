@@ -275,7 +275,17 @@ def test_sliding_mode_warning_names_the_engine_that_was_asked():
     """The boundary-ride warning said engine='auto' when engine='trbdf2'
     had been requested by name."""
     b, pwm = _snubbed_boost()
-    _, msgs = _run(b, 6e-3, engine="trbdf2", switch_fn=pwm)
+    res, _ = _run(b, 2e-4, engine="trbdf2", switch_fn=pwm)
+    # The snubbed boost no longer rides its boundary (0 chatter breaks
+    # since no-change zero-time cascades are decided on the
+    # post-crossing probe, DECISIONS.md 12 of
+    # update-trbdf2-post-event-restart), so the confession is driven
+    # from its stats with the count it had (5).
+    stats = dict(res._trbdf2_stats, n_chatter_breaks=5)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        p._trbdf2_warn_stats(res, b, stats, "trbdf2")
+    msgs = [str(w.message) for w in caught]
     ride = [m for m in msgs if "conduction boundary" in m]
     assert ride and all(m.startswith("simulate(engine='trbdf2')")
                         for m in ride), msgs
@@ -441,11 +451,14 @@ def test_smooth_spwm_over_many_cycles_raises_no_pulse_warning():
     assert not [m for m in msgs if "gate pulse" in m], msgs
 
 
-def test_held_diode_warning_names_a_floating_subnet():
-    """The floating bridge with a 1 mH DC choke learns no probe floor,
-    but a missed commutation swings dq/dn to a 76.7 kV common-mode
-    sample: the held-diode warning names the subnet and the cure (with
-    dc_neg grounded no diode is held)."""
+def test_floating_bridge_with_choke_holds_no_diode():
+    """The floating bridge with a 1 mH DC choke: a missed commutation
+    swung dq/dn to a 76.7 kV common-mode sample and the held-diode
+    warning fired (9 events, 2 chatter breaks, 12 forced accepts at
+    rtol 2e-5). Since landings and zero-time cascades that commutate
+    nothing record no event (DECISIONS.md 12 of
+    update-trbdf2-post-event-restart) no diode is held, dn stays within
+    344 V and no step is forced; the bus is unchanged (329.0959 V)."""
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("Vac", "s", "gnd", 0.0, 325.0, 50.0)
     b.add_resistor("Rs", "s", "a", 1e-3)
@@ -454,6 +467,9 @@ def test_held_diode_warning_names_a_floating_subnet():
     b.add_inductor("Lf", "dp", "dq", 1e-3)
     b.add_capacitor("C", "dq", "dn", 470e-6)
     b.add_resistor("RL", "dq", "dn", 1e3)
-    _, msgs = _run(b, 0.06)
-    held = [m for m in msgs if "commutation rule forbids" in m]
-    assert held and "Node(s) dp, dn, dq reach the rest" in held[0], msgs
+    r, msgs = _run(b, 0.06, rtol=2e-5, atol=2e-8)
+    assert not [m for m in msgs if "commutation rule forbids" in m], msgs
+    assert np.abs(np.asarray(r.v("dn"))).max() < 400.0
+    assert r._trbdf2_stats["n_forced_accepts"] == 0
+    bus = float(r.v("dq")[-1] - r.v("dn")[-1])
+    assert bus == pytest.approx(329.0959, abs=1e-3)

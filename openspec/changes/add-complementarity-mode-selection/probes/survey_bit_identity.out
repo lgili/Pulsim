@@ -1,0 +1,5 @@
+pulsim from /Users/lgili/pulsim_wt/p4-mosfet/python/pulsim/__init__.py
+CHANGED X:double-crossing LC tank, V_th = 0|default events 2 -> 4 end state [-5.17799262 -5.17797794  9.5       ] -> [-5.43794694  9.49998506  9.5       ]
+CHANGED X:double-crossing LC tank, V_th = 0|lcp events 2 -> 4 end state [-5.17799262 -5.17797794  9.5       ] -> [-5.43794694  9.49998506  9.5       ]
+CHANGED X:double-crossing LC tank, V_th = 0|settle events 2 -> 4 end state [-5.27328293  9.49998523  9.5       ] -> [-5.43794694  9.49998506  9.5       ]
+bit-identical 87, changed 3

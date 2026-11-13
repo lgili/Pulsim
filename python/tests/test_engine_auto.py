@@ -177,14 +177,17 @@ def test_vth_hysteresis_gives_tolerance_convergence():
     assert st5["n_chatter_breaks"] <= 3
 
 
-def test_sliding_mode_diode_confesses():
-    """A diode that rides its conduction boundary is averaged, and the
-    engine must WARN with the mechanism, not stay silent. The circuit
-    is the snubbed boost (100 nF across a V_th = 0.7 diode), whose
-    diode current sits at zero while the snubber rings: 10 chatter
-    breaks in 6 ms, and the average still lands on the fixed engine
-    (last 3 ms: 53.678 V against 53.666 / 53.653 V at dt = 1e-8 /
-    5e-9).
+def test_snubbed_boost_boundary_is_decided_not_averaged():
+    """The snubbed boost (100 nF across a V_th = 0.7 diode), whose
+    diode current sits at zero while the snubber rings, took 5 chatter
+    breaks in 6 ms (10 before update-trbdf2-error-control) and warned
+    that it rode its conduction boundary. Those breaks were zero-time
+    cascades whose probe at t flipped nothing; they are now decided on
+    the post-crossing probe (DECISIONS.md 12 of
+    update-trbdf2-post-event-restart): 0 breaks, so no warning, and the
+    average is unchanged (last 3 ms: 53.678 V against 53.666 / 53.653 V
+    at dt = 1e-8 / 5e-9). The warning itself is pinned in
+    test_trbdf2_robustness.py.
 
     The V_th = 0 buck this used to run is in CCM and never slid: its
     5 "boundary rides" were the crossing detector reading the step
@@ -205,8 +208,12 @@ def test_sliding_mode_diode_confesses():
         m.set(q, (t % T) < 0.5 * T)
         return m
 
-    with pytest.warns(UserWarning, match="conduction boundary"):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
         res = p.simulate(b, t_end=6e-3, switch_fn=sf, engine="auto")
+    assert not [w for w in caught
+                if "conduction boundary" in str(w.message)]
+    assert res._trbdf2_stats["n_chatter_breaks"] == 0
     assert _mean_tail(res, "out") == pytest.approx(53.66, abs=0.05)
 
 
@@ -414,7 +421,15 @@ def test_fft_and_rms_survive_the_irregular_grid():
     sel_u = t_u > 4e-3
     p2p_raw = v_raw[sel_r].max() - v_raw[sel_r].min()
     p2p_u = v_u[sel_u].max() - v_u[sel_u].min()
-    assert p2p_u == pytest.approx(p2p_raw, rel=5e-3)
+    # About 8 uniform samples per period (the median spacing): linear
+    # interpolation clips the ripple's cusp at the edges. 0.1 % when
+    # the samples happened to align with them; 5.8 % (0.0640 vs
+    # 0.0680 V, analytic 0.068 V) since update-trbdf2-error-control.
+    # The loss is the resampler's (dt = T/8), so the engine's own grid is
+    # pinned at the old 5e-3: (1-D)V_out/(8 L C f^2) = 68.2 mV, 68.0 here.
+    assert p2p_raw == pytest.approx(0.0682, rel=5e-3)
+    # Interpolation can only clip the ripple, never add to it.
+    assert 0.9 * p2p_raw <= p2p_u <= p2p_raw
 
     # Time-weighted RMS matches the fixed-dt reference; the
     # sample mean does not have to.
@@ -491,7 +506,7 @@ def test_newton_kwargs_reach_the_variable_engine():
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "in", "gnd", 5.0)
     b.add_resistor("R", "in", "n1", 1e3)
-    b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams())
+    b.add_nonlinear_diode("D", "n1", "gnd", _k.IdealDiodeParams(), allow_non_passive=True)
     b.add_capacitor("C", "n1", "gnd", 1e-6)
     res = p.simulate(b, t_end=1e-3, engine="auto",
                       max_newton_iterations=80,
@@ -534,7 +549,7 @@ def test_real_diode_rectifier_matches_the_fixed_reference():
         b.add_sine_voltage_source("Vac", "ac", "gnd",
                                    0.0, 10.0, 50.0, 0.0)
         b.add_nonlinear_diode("D", "ac", "out",
-                               _k.IdealDiodeParams())
+                               _k.IdealDiodeParams(), allow_non_passive=True)
         b.add_capacitor("Co", "out", "gnd", 100e-6)
         b.add_resistor("Rl", "out", "gnd", 100.0)
         return b
@@ -558,7 +573,7 @@ def test_real_diode_and_mosfet_buck_matches_the_reference():
                                       R_on=1e-3, R_off=1e9,
                                       V_F=0.7)
         b.add_nonlinear_diode("DFW", "gnd", "sw",
-                               _k.IdealDiodeParams())
+                               _k.IdealDiodeParams(), allow_non_passive=True)
         b.add_inductor("L", "sw", "out", 22e-6)
         b.add_capacitor("C", "out", "gnd", 100e-6)
         b.add_resistor("R", "out", "gnd", 1.0)
@@ -606,7 +621,7 @@ def test_newton_failure_shrinks_the_step_instead_of_aborting():
     b.add_voltage_source("Vin", "in", "gnd", 48.0)
     b.add_switch("Q1", "in", "sw", 1e3, 1e-9)
     b.add_inductor("L", "sw", "m", 1e-3)
-    b.add_nonlinear_diode("D", "m", "out", _k.IdealDiodeParams())
+    b.add_nonlinear_diode("D", "m", "out", _k.IdealDiodeParams(), allow_non_passive=True)
     b.add_capacitor("Co", "out", "gnd", 10e-6)
     b.add_resistor("Ro", "out", "gnd", 20.0)
     b.add_resistor("Rsn", "sw", "sn", 100.0)

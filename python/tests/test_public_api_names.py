@@ -78,7 +78,8 @@ _COLD_IMPORT_CHECK = """
 import sys
 import types
 import pulsim as p
-assert p._HAS_SCOPE, "pulsim.scope (LiveScope) did not import"
+assert p._HAS_SCOPE, "pyqtgraph not found"
+assert "pulsim.scope" not in sys.modules, "import pulsim loaded the GUI stack"
 assert callable(p.scope), f"p.scope is {p.scope!r}"
 assert not isinstance(p.scope, types.ModuleType), "p.scope is the submodule"
 assert p.scope is p.plot.scope
@@ -101,3 +102,41 @@ def test_scope_callable_after_live_scope_import_in_fresh_interpreter(qt):
     proc = subprocess.run([sys.executable, "-c", code],
                           capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, proc.stderr
+
+
+# ---- lazy import of the scope GUI stack ----------------------------------
+
+def _run(code):
+    proc = subprocess.run([sys.executable, "-c", code],
+                          capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_import_pulsim_leaves_the_gui_stack_unloaded():
+    _run("import sys, pulsim\n"
+         "bad = [m for m in ('pyqtgraph', 'PySide6', 'pulsim.scope')\n"
+         "       if m in sys.modules]\n"
+         "assert not bad, bad\n")
+
+
+@pytest.mark.parametrize("first", ["attribute", "from_import"])
+def test_live_scope_resolves_on_demand(first):
+    access = ("L = p.LiveScope" if first == "attribute"
+              else "from pulsim.scope import LiveScope as L")
+    _run(_PYQTGRAPH_STUB + "import sys, pulsim as p\n" + access + "\n"
+         "assert 'pyqtgraph' in sys.modules and 'pulsim.scope' in sys.modules\n"
+         "assert L is p.LiveScope is sys.modules['pulsim.scope'].LiveScope\n"
+         "assert callable(p.scope) and p.scope is p.plot.scope\n")
+
+
+def test_live_scope_without_pyqtgraph_names_the_dependency():
+    _run("import sys\n"
+         "sys.modules['pyqtgraph'] = None\n"
+         "import pulsim as p\n"
+         "assert not p._HAS_SCOPE and 'LiveScope' not in p.__all__\n"
+         "assert not hasattr(p, 'LiveScope')\n"
+         "try:\n"
+         "    p.LiveScope\n"
+         "except AttributeError as e:\n"
+         "    assert 'pyqtgraph' in str(e), e\n"
+         "assert callable(p.scope) and p.simulate\n")

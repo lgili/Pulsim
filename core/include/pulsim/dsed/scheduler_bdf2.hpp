@@ -21,7 +21,7 @@
 //     trivial extension once we land an LLC test scenario at Gate 5.
 //   * State management:
 //       - On mask change: invalidate BDF2 history (y_prev) + LU cache.
-//         The next step uses Crank-Nicolson bootstrap to restart.
+//         The next step uses the backward-Euler bootstrap to restart.
 //       - On h change: invalidate LU cache only (history is still
 //         valid in time-domain; BDF2 just needs to re-factor J).
 //
@@ -247,7 +247,7 @@ private:
 
         system_.set_mask(new_mask);
         // A and b changed → both history (y_prev) and LU (J = I - (2h/3) A_old)
-        // are invalidated; next step starts fresh via Crank-Nicolson bootstrap.
+        // are invalidated; next step starts fresh via the backward-Euler bootstrap.
         bdf2_state.invalidate();
 
         result.event_log.push_back(EventRecord<MaskT>{

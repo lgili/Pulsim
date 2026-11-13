@@ -35,7 +35,7 @@ def _one_of_everything():
     b.add_inductor("L1", "b", "c", 1e-3)
     b.add_diode("D1", "c", "gnd", 1e3, 1e-9, 0.7)
     b.add_nonlinear_diode("D2", "c", "d",
-                           p.IdealDiodeParams())
+                           p.IdealDiodeParams(), allow_non_passive=True)
     b.add_current_source("I1", "d", "gnd", 1.0)
     b.add_pwm_voltage_source("VP", "e", "gnd", 10.0, 0.0,
                               1e5, 0.5)

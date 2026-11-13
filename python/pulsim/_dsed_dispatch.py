@@ -22,9 +22,12 @@ User-facing knobs:
 
 * ``rtol`` / ``atol`` — RK45 tolerances (default 1e-6 / 1e-9)
 * ``dt`` — interpreted as ``dt_max`` (step cap) for the dsed engine
-* ``integrator`` — ``'auto'`` (default), ``'rk45'``, or ``'bdf2'``
+* ``integrator`` — ``'auto'`` (default), ``'rk45'``, or ``'bdf2'``.
+  ``'auto'`` takes, in order: the exact (closed-form) stepper when the
+  mode has one; otherwise the stiffness detector's choice of DOPRI5 or
+  BDF2. ``'rk45'`` also takes the exact stepper when it exists.
 * ``stiffness_threshold`` — when ``|λ_max|·h > threshold``, dispatcher
-  picks BDF2 (default 10.0)
+  picks BDF2 (default 10.0) for a mode with no exact stepper
 * ``h_bdf2`` — fixed step for BDF2 segments (default 1e-6)
 
 See ``notes/GATE5_PROGRESS.md`` for captured performance across 13
@@ -43,15 +46,18 @@ from ._pulsim import (  # type: ignore[import-not-found]
     NativeMultiMaskPwm,
     NativePwm2Switch,
     SwitchSchedule,
+    UnsupportedError,
 )
+from ._refusal import _UnsupportedNotImplemented, unsupported
 
 
 # =============================================================================
 # Type aliases (public for downstream type-hints)
 # =============================================================================
 
-# Auto = pick per mode via stiffness detector;
-# rk45/bdf2 = force one integrator for ALL modes.
+# Auto = exact stepper when the mode has one, else the stiffness
+# detector's DOPRI5/BDF2 choice; rk45/bdf2 = force one integrator for
+# ALL modes (rk45 still takes the exact stepper where it exists).
 IntegratorChoice = Literal["auto", "rk45", "bdf2"]
 
 
@@ -87,7 +93,9 @@ class DSEDOptions:
 # =============================================================================
 
 
-_VALID_ENGINES = ("auto", "pwl", "dsed", "trbdf2")
+# 'exact' is the canonical name of the event-driven exact engine, 'dsed' its
+# legacy alias (add-exact-propagator-strategy D11; simulate() maps one to the other).
+_VALID_ENGINES = ("auto", "pwl", "exact", "dsed", "trbdf2")
 _VALID_INTEGRATORS = ("auto", "rk45", "bdf2")
 
 # (The dsed-only kwargs that get the leak-warning if user passes
@@ -342,7 +350,9 @@ class _PEDSimulationResult:
 
     * ``n_accept`` / ``n_reject`` — PI controller accept/reject counts
     * ``n_events`` — number of mask transitions fired
-    * ``n_rk45_steps`` / ``n_bdf2_steps`` — per-integrator step counts
+    * ``n_rk45_steps`` / ``n_bdf2_steps`` / ``n_exact_steps`` —
+      per-integrator step counts (``n_exact_steps``: closed-form LTI
+      propagator)
       (only populated when ``integrator='auto'`` was selected)
     * ``cpu_time_seconds`` — wall-clock from the PED scheduler
     * ``event_iteration_count`` / ``commutation_events`` — empty lists
@@ -383,6 +393,7 @@ class _PEDSimulationResult:
         n_events: int = 0,
         n_rk45_steps: int = 0,
         n_bdf2_steps: int = 0,
+        n_exact_steps: int = 0,
         cpu_time_seconds: float = 0.0,
     ) -> None:
         self.times = times
@@ -415,7 +426,17 @@ class _PEDSimulationResult:
         self.n_events = n_events
         self.n_rk45_steps = n_rk45_steps
         self.n_bdf2_steps = n_bdf2_steps
+        self.n_exact_steps = n_exact_steps
         self.cpu_time_seconds = cpu_time_seconds
+        # add-exact-propagator-strategy D10: per visited mask the
+        # propagator tier (1 eig, 2 Pade, 3 none), kappa2 and the reason
+        # for any tier but 1, plus n_eig / n_pade / n_phi_cache_hits /
+        # n_predicate_evals. Event instants and predicate types as
+        # arrays. Set by the native builder path; None elsewhere.
+        self.exact = None
+        self.initial_condition_adjustment = None
+        self.event_times = None
+        self.event_types = None
         # PWL-engine diagnostic fields — empty for PED, but exposed
         # for API-compat with code that destructures both result types.
         self.event_iteration_count: list = []
@@ -474,6 +495,46 @@ class _PEDSimulationResult:
         )
 
 
+def _result_from_native(native_res, t_start: float):
+    """The result of a Bridge.11 run (``run_*_native_builder``)."""
+    import numpy as np
+    # One array conversion, not one per sample.
+    times = (np.asarray(native_res["times"], dtype=float)
+             + float(t_start)).tolist()
+    res = _PEDSimulationResult(
+        times=times,
+        states=native_res["states"],
+        states_full=native_res.get("states_full"),
+        switch_states=native_res.get("switch_states"),
+        right_limit_index=native_res.get("right_limit_index"),
+        right_limit_states=native_res.get("right_limit_states"),
+        right_limit_switch_states=native_res.get(
+            "right_limit_switch_states"),
+        n_accept=native_res.get("n_accept", 0),
+        n_reject=native_res.get("n_reject", 0),
+        n_events=native_res.get("n_events", 0),
+        n_rk45_steps=native_res.get("n_rk45_steps", 0),
+        n_bdf2_steps=native_res.get("n_bdf2_steps", 0),
+        n_exact_steps=native_res.get("n_exact_steps", 0),
+        cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
+    )
+    res.exact = native_res.get("exact")
+    if res.exact is not None:
+        # add-exact-propagator-strategy D11: the route record (report only)
+        from ._exact_route import segments_from_exact
+        res.exact["segments"] = segments_from_exact(
+            res.exact, native_res.get("switch_states"))
+    et = native_res.get("event_times")
+    res.event_times = (None if et is None
+                       else np.asarray(et) + float(t_start))
+    res.event_types = native_res.get("event_types")
+    res.diagnostics = {}
+    for key in ("mode_shadow", "mode_selection", "mode_guard"):
+        if key in native_res:
+            res.diagnostics[key] = native_res[key]
+    return res
+
+
 def _has_edge_oracle(sf) -> bool:
     """Whether the DSED scheduler can ask ``sf`` for its next gate edge."""
     if isinstance(sf, (NativePwm2Switch, NativeMultiMaskPwm)):
@@ -481,6 +542,29 @@ def _has_edge_oracle(sf) -> bool:
     if isinstance(sf, SwitchSchedule):
         return bool(sf.has_edges)
     return hasattr(sf, "next_edge_after")
+
+
+# add-complementarity-mode-selection D5: the event step of the shadow LCP.
+# h_e = H_E_REL * T_ref (measured band 1e-9..1e-6, probes/h_e_band.out), T_ref the shortest declared period (sine / PWM
+# source) or the run length (see DECISIONS.md for the measured band).
+H_E_REL = 1e-7
+# Slice 2, task 4: the default-mode guard (judge each settled mode, re-decide a
+# violating one with the LCP). Module switch for A/B measurements only.
+MODE_GUARD = True
+
+
+def _shadow_h_e(builder: Any, switch_fn: Any, t_window: float) -> float:
+    import math
+    from . import _pulsim as _kern
+    periods = [float(t_window),
+               float(_kern._min_source_period(builder.graph, builder.pool))]
+    nxt = getattr(switch_fn, "next_edge_after", None)
+    if nxt is not None:                 # a periodic gate: two edges per period
+        e1 = float(nxt(0.0))
+        e3 = float(nxt(float(nxt(e1))))
+        if math.isfinite(e3) and e3 > e1:
+            periods.append(e3 - e1)
+    return H_E_REL * min(periods)
 
 
 def run_dsed_from_builder(
@@ -500,8 +584,16 @@ def run_dsed_from_builder(
     b_extra_fn: Optional[Callable[[float], Any]] = None,
     initial_state: Optional[Any] = None,
     progress: Any = False,
+    builder_initial_state: Optional[Any] = None,
+    mode_selection: Optional[str] = None,
 ):
     """Run a PED simulation from a :class:`pulsim.CircuitBuilder`.
+
+    ``builder_initial_state`` (not None) says the builder declared
+    ``c0=`` / ``i0=`` / ``set_initial`` values; they are mapped per
+    device onto the reduced state (add-exact-propagator-strategy D5)
+    and the largest capacitor-voltage adjustment is
+    ``result.initial_condition_adjustment``.
 
     Production path. Tries the native C++ adapter (Bridge.11) and
     falls back to the Python adapter + native scheduler (Bridge.10)
@@ -565,7 +657,8 @@ def run_dsed_from_builder(
         # 'auto' quietly becomes 'rk45'; an EXPLICIT 'bdf2' request
         # is refused rather than silently downgraded.
         if integrator == "bdf2":
-            raise ValueError(
+            raise unsupported(
+                "dsed", "integrator", kind="Diode", message=
                 f"simulate(engine='dsed', integrator='bdf2'): this "
                 f"circuit has {_n_diodes} PWL diode(s), and diode "
                 f"commutation is only implemented on the RK45 "
@@ -575,14 +668,11 @@ def run_dsed_from_builder(
                 f"integrator='bdf2' (the default routes correctly) "
                 f"or use engine='pwl'.")
         integrator = "rk45"
-    if builder.pool.has_nonlinear_devices():
-        raise ValueError(
-            "simulate(engine='dsed'): this circuit has nonlinear "
-            "devices (smooth diode / MOSFET / IGBT / saturable "
-            "inductor), which the dsed engine's LTI extraction "
-            "silently treats as ABSENT — the run would simulate a "
-            "different circuit. Use the default engine "
-            "(engine='pwl'), which Newton-iterates them.")
+    # Device kinds: the kernel's capability table, before any adapter
+    # is built (the Python adapter below would extract the LTI system
+    # with every Newton device silently ABSENT). The native adapter
+    # repeats the check for C++ callers.
+    _kern._require_supported(builder.graph, builder.pool, "dsed")
 
     opts = _resolve_dsed_options(
         dt=dt,
@@ -683,7 +773,9 @@ def run_dsed_from_builder(
     try:
         _ = adapter.A_matrix()
     except NotImplementedError as e:
-        raise NotImplementedError(_BRIDGE_FALLBACK_MESSAGE.format(
+        raise unsupported(
+            "dsed", "extraction", cls=_UnsupportedNotImplemented,
+            message=_BRIDGE_FALLBACK_MESSAGE.format(
             rtol=opts.rtol,
             atol=opts.atol,
             dt_max=opts.dt_max,
@@ -739,17 +831,41 @@ def run_dsed_from_builder(
             native_adapter = NativeAdapterCls(
                 builder, cache,
                 b_extra_fn if b_extra_fn is not None else None)
+            ic_adjustment = None
+            if builder_initial_state is not None:
+                native_adapter.set_mask(initial_mask)
+                x0, ic_adjustment = native_adapter.reduced_initial_state(
+                    builder)
+            shadow_kw = {}
+            if mode_selection in ("shadow", "lcp") and (
+                    opts.integrator != "rk45" or _n_diodes == 0):
+                raise unsupported(
+                    "dsed", "mode_selection", message=
+                    f"simulate(engine='dsed', mode_selection="
+                    f"{mode_selection!r}): the complementarity selection "
+                    f"is wired into the event-driven integrator "
+                    f"only; integrator={opts.integrator!r} has no hook. "
+                    "Drop mode_selection, or run a circuit with diodes.")
+            if opts.integrator == "rk45" and _n_diodes > 0:
+                h_e = _shadow_h_e(builder, sf, t_window)
+                if mode_selection == "lcp":
+                    shadow_kw["mode_lcp_h_e"] = h_e
+                elif MODE_GUARD:    # default and shadow: the settle, guarded
+                    shadow_kw["mode_guard_h_e"] = h_e
+                if mode_selection == "shadow":
+                    shadow_kw["mode_shadow_h_e"] = h_e
             if opts.integrator == "rk45":
                 native_res = run_ped_b11(
                     native_adapter, sf, x0, t_window,
                     rtol=opts.rtol, atol=opts.atol,
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
-                    store_every=opts.store_every)
+                    store_every=opts.store_every, event_log=False,
+                    **shadow_kw)
             elif opts.integrator == "bdf2":
                 native_res = run_bdf2_b11(
                     native_adapter, sf, x0, t_window,
                     h_fixed=opts.h_bdf2,
-                    store_every=opts.store_every)
+                    store_every=opts.store_every, event_log=False)
             else:  # 'auto'
                 native_res = run_auto_b11(
                     native_adapter, sf, x0, t_window,
@@ -757,28 +873,14 @@ def run_dsed_from_builder(
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
                     h_bdf2=opts.h_bdf2,
                     stiffness_threshold=opts.stiffness_threshold,
-                    store_every=opts.store_every)
-            times_arr = native_res["times"]
-            states_arr = native_res["states"]
-            times = [float(t) + float(opts.t_start) for t in times_arr]
-            states = [np.asarray(states_arr[i], dtype=float)
-                      for i in range(len(times))]
-            return _PEDSimulationResult(
-                times=times,
-                states=states,
-                states_full=native_res.get("states_full"),
-                switch_states=native_res.get("switch_states"),
-                right_limit_index=native_res.get("right_limit_index"),
-                right_limit_states=native_res.get("right_limit_states"),
-                right_limit_switch_states=native_res.get(
-                    "right_limit_switch_states"),
-                n_accept=native_res.get("n_accept", 0),
-                n_reject=native_res.get("n_reject", 0),
-                n_events=native_res.get("n_events", 0),
-                n_rk45_steps=native_res.get("n_rk45_steps", 0),
-                n_bdf2_steps=native_res.get("n_bdf2_steps", 0),
-                cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
-            )
+                    store_every=opts.store_every, event_log=False)
+            res = _result_from_native(native_res, opts.t_start)
+            res.initial_condition_adjustment = ic_adjustment
+            return res
+        except UnsupportedError:
+            # A refusal is an answer, not a reason to try the next
+            # bridge (which would run the circuit without the device).
+            raise
         except (RuntimeError, ValueError):
             # Bridge.11 native adapter rejected the circuit (e.g. nonlinear
             # device that the C++ extractor can't handle). Silently fall
@@ -792,6 +894,21 @@ def run_dsed_from_builder(
             if _n_diodes > 0:
                 raise
             pass
+
+    if mode_selection in ("shadow", "lcp"):
+        raise unsupported(
+            "dsed", "mode_selection", message=
+            f"simulate(engine='dsed', mode_selection={mode_selection!r}): "
+            "the native adapter rejected this circuit and the fallback "
+            "path has no complementarity hook. Drop mode_selection.")
+
+    if builder_initial_state is not None:
+        raise unsupported(
+            "dsed", "initial_conditions", message=
+            "simulate(engine='dsed'): builder initial conditions "
+            "(c0= / i0= / set_initial) are mapped onto the reduced "
+            "state by the native adapter only, which rejected this "
+            "circuit. Use engine='pwl' or 'trbdf2'.")
 
     # Bridge.10 path — Python adapter + native scheduler.
     run_ped_native = (getattr(_native, "run_ped_native", None)
@@ -837,6 +954,7 @@ def run_dsed_from_builder(
             n_events=native_res.get("n_events", 0),
             n_rk45_steps=native_res.get("n_rk45_steps", 0),
             n_bdf2_steps=native_res.get("n_bdf2_steps", 0),
+            n_exact_steps=native_res.get("n_exact_steps", 0),
             cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
         )
 
@@ -850,7 +968,8 @@ def run_dsed_from_builder(
     # fallback that used to live here was demoted to the test
     # tree in v1.6.3 (see `python/tests/_dsed_reference/`); the
     # production path is C++-only.
-    raise NotImplementedError(
+    raise unsupported(
+        "dsed", "extraction", cls=_UnsupportedNotImplemented, message=
         "pulsim.simulate(engine='dsed'): both the native C++ "
         "builder adapter (Bridge.11) and the Python builder "
         "adapter (Bridge.10) rejected this circuit. This usually "
@@ -873,3 +992,51 @@ __all__ = [
     "_resolve_dsed_options",
     "run_dsed_from_builder",
 ]
+
+
+class DiodeModeInconsistentError(RuntimeError):
+    """A dsed run whose settled diode modes break their own law."""
+
+
+def check_diode_modes(res, builder, rel: float = 1e-3) -> None:
+    """Raise if a stored sample has an ON PWL diode carrying reverse
+    current, or an OFF one forward-biased past its threshold, by more
+    than ``rel`` of that diode's peak current / voltage over the run.
+
+    Containment for the zero-band settle of add-exact-propagator-strategy
+    slice 1 (integration batch 4): a boost with ``V_th`` = 0 or 1e-3 kept
+    its diode ON through -1.07 A at R = 50 Ohm (V_out 0.16 V low), and a
+    half-wave RL rectifier conducted -0.85 A for half a period, silently.
+    Agreeing circuits (bridges, three-phase rectifier, buck DCM) show no
+    sample beyond 1e-3. The complementarity mode selection replaces this.
+    """
+    try:
+        S = _np.asarray(res.switch_states)
+        comps = [c for c in builder.components() if c.get("kind") == "diode"]
+    except Exception:  # noqa: BLE001 - no record, nothing to check
+        return
+    if S.ndim != 2 or not comps:
+        return
+    for c in comps:
+        prm = c["params"]
+        on = S[:, builder.switch_index_of(c["name"])].astype(bool)
+        i = _np.asarray(res.i(c["name"]), dtype=float)
+        thr = max(float(prm.get("V_th", 0.0)), float(prm.get("V_f", 0.0)))
+        v_off = i / float(prm.get("g_off", 1e-9))
+        i_pk = max(float(_np.abs(i).max()), 1e-12)
+        v_pk = max(float(_np.abs(v_off[~on]).max()) if (~on).any() else 0.0,
+                   thr, 1e-12)
+        bad_on = on & (i < -rel * i_pk)
+        bad_off = ~on & (v_off > thr + rel * v_pk)
+        if bad_on.any() or bad_off.any():
+            k = int(_np.argmax(bad_on | bad_off))
+            what = (f"ON while carrying {i[k]:.4g} A" if bad_on[k] else
+                    f"OFF while forward-biased by {v_off[k]:.4g} V")
+            raise DiodeModeInconsistentError(
+                f"simulate(engine='dsed'): diode {c['name']!r} is {what} at "
+                f"t = {float(res.times[k]):.6g} s ({int(bad_on.sum() + bad_off.sum())} "
+                "samples break the diode law): the event settle chose a "
+                "wrong mode, and the run would be silently wrong. Give the "
+                "diode a small threshold band (V_th = 1e-2 V worked on the "
+                "measured boosts; 1e-3 V on some), or use engine='pwl' or "
+                "'trbdf2'. Known limitation of the exact-propagator slice.")

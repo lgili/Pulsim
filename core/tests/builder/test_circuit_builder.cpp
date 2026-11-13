@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/pwl/cache.hpp"
@@ -334,12 +335,45 @@ TEST_CASE("add_mosfet_with_body_diode body-diode V_F default = 0.7 V",
     CircuitBuilder b;
     b.add_mosfet_with_body_diode(
         "Q1", "drain", "source");
-    // The diode branch is at index 1.
-    // We can't easily reach into the diode params without
-    // an accessor, but we can verify the diode WAS added
-    // by counting branches and kinds.
+    // The diode branch is at index 1. V_F is its conduction DROP
+    // (V_f), with no separate threshold (V_th = 0).
     REQUIRE(b.pool().kind_of(1) ==
               DevicePool::StoredKind::Diode);
+    REQUIRE(b.pool().diode_params(1).V_f == Approx(0.7));
+    REQUIRE(b.pool().diode_params(1).V_th == 0.0);
+}
+
+TEST_CASE("composite diodes: V_F is the conduction drop, validated by name",
+          "[v2][layer2_v1][mosfet][body_diode]") {
+    CircuitBuilder b;
+    b.add_mosfet("Q1", "d1", "gnd", 1e-3, 1e9, true, 1.2);
+    b.add_mosfet_with_body_diode("Q2", "d2", "gnd", 1e-3, 1e9, 0.0, 20.0);
+    b.add_mosfet_level1("M3", "d3", "gnd", "g3", 5.0, 3.0,
+                        0.02, 15.0, true, 1.0);
+    b.add_igbt_level1("Z4", "c4", "gnd", "g4", 1.5, 0.05, 5.0, 10.0,
+                      0.01, /*with_fwd=*/true);
+    const auto drop = [&](const char* n) {
+        return b.pool().diode_params(b.branch_id_of(n));
+    };
+    REQUIRE(drop("Q1_body").V_f == Approx(1.2));
+    REQUIRE(drop("Q2_body").V_f == 0.0);
+    REQUIRE(drop("Q2_body").g_on == Approx(20.0));
+    REQUIRE(drop("M3_body").V_f == Approx(1.0));
+    REQUIRE(drop("Z4_fwd").V_f == Approx(0.7));  // default
+    for (const char* n : {"Q1_body", "Q2_body", "M3_body", "Z4_fwd"}) {
+        REQUIRE(drop(n).V_th == 0.0);
+    }
+    REQUIRE_THROWS_WITH(
+        b.add_mosfet("Q5", "d5", "gnd", 1e-3, 1e9, true, -0.1),
+        Catch::Matchers::ContainsSubstring("add_mosfet_with_body_diode(\"Q5\")")
+        && Catch::Matchers::ContainsSubstring("V_F"));
+    REQUIRE_THROWS(b.add_mosfet_level1("M6", "d6", "gnd", "g6", 5.0, 3.0,
+                                       0.02, 15.0, true, -1.0));
+    REQUIRE_THROWS(b.add_igbt_level1("Z7", "c7", "gnd", "g7", 1.5, 0.05,
+                                     5.0, 10.0, 0.01, true, 0.0, 0.0,
+                                     std::numeric_limits<double>::quiet_NaN()));
+    // No diode, nothing to validate: the bare devices ignore V_F.
+    REQUIRE_NOTHROW(b.add_mosfet("Q8", "d8", "gnd", 1e-3, 1e9, false, -1.0));
 }
 
 TEST_CASE("add_igbt adds one branch with IGBT defaults",

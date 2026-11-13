@@ -119,3 +119,9 @@ pip install -e .         # editable; rebuilds on Python import
 
 The wheel is driven by `pyproject.toml` + `scikit-build-core`,
 which runs the same top-level `CMakeLists.txt` with `SKBUILD=ON`.
+
+## Reproducing the Linux CI jobs locally
+
+`scripts/ci_linux_repro.sh` builds this checkout as a wheel in an `ubuntu:24.04` Docker container (GCC 13, Eigen 3.4.0, as `.github/workflows/ci.yml`) and runs the `python-tests` pytest invocation; `scripts/ci_linux_repro.sh reference` runs `reference-smoke`, and `-- <pytest args>` any selection.
+The container is kept between runs (build reused). On Apple silicon it is aarch64-linux; `PULSIM_CI_PLATFORM=linux/amd64` emulates CI's x86-64 (slow).
+Numbers that differ only on Linux usually come from Eigen 3.4.0 vs 5.x or libm last bits; the project builds with `-ffp-contract=off`, so FMA contraction is not the cause.

@@ -11,6 +11,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include "pulsim/builder/circuit_builder.hpp"
+#include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/solver/trbdf2_transient.hpp"
 
 #include <cmath>
@@ -234,8 +235,11 @@ TEST_CASE("TR-BDF2: half-wave rectifier localizes diode edges",
     REQUIRE(worst_on < 2e-2);
 }
 
-TEST_CASE("TR-BDF2: nonlinear devices refuse with the mechanism",
+TEST_CASE("TR-BDF2: nonlinear devices are stamped without a callback",
           "[v2][trbdf2]") {
+    // add-engine-conformance-matrix: the kernel owns the static Newton
+    // chain. This call used to be refused (and the raw fixed engine ran
+    // the diode as an open circuit, 5.000 V); now the diode clamps.
     builder::CircuitBuilder b;
     b.add_voltage_source("V", "in", "gnd", 5.0);
     b.add_resistor("R", "in", "n1", 1e3);
@@ -245,11 +249,12 @@ TEST_CASE("TR-BDF2: nonlinear devices refuse with the mechanism",
     solver::TrBdf2Options o;
     o.t_end = 1e-3;
     const Size n_sw = b.graph().num_switches();
-    REQUIRE_THROWS_AS(
-        solver::run_transient_trbdf2(
-            cache, b.graph(), b.pool(), o,
-            [&](Real) { return all_open(n_sw); }),
-        std::invalid_argument);
+    const auto r = solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o,
+        [&](Real) { return all_open(n_sw); });
+    const Real v = r.states.back()[b.node_id_of("n1")];
+    REQUIRE(v > 0.3);
+    REQUIRE(v < 1.0);
 }
 
 // -----------------------------------------------------------------------------
@@ -457,6 +462,42 @@ TEST_CASE("TR-BDF2: a gate edge at a step boundary re-settles the diodes",
     REQUIRE(shoot_through == 0);
 }
 
+TEST_CASE("TR-BDF2: controller sources at three rates tick at their "
+          "own instants", "[v2][trbdf2][control]") {
+    // fix-control-tick-semantics: before, one observer_period served
+    // every source, so a 1 kHz and a 4 kHz controller both ticked at
+    // 4 kHz. Source j ticks at k*T_j, ceil(span/T_j) times, and
+    // sources due at one instant fire in index order.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V1", "in", "gnd", 1.0);
+    b.add_resistor("R1", "in", "o", 1e3);
+    b.add_capacitor("C1", "o", "gnd", 1e-6);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    auto sf = [n_sw](Real) { return topology::SwitchStateMask(n_sw); };
+    solver::TrBdf2Options o;
+    o.t_end = 10e-3;
+    o.observer_periods = {1e-3, 0.5e-3, 0.25e-3};
+    solver::TrBdf2Stats st;
+    std::vector<std::pair<Size, Real>> ticks;
+    solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st, {},
+        {}, {}, {}, nullptr,
+        [&](Size j, Real t, const Vector&) { ticks.emplace_back(j, t); });
+    REQUIRE(st.ctrl_tick_counts == std::vector<Size>{10, 20, 40});
+    REQUIRE(st.n_ctrl_ticks == 70);
+    std::vector<Size> k(3, 0);
+    for (const auto& [j, t] : ticks) {
+        const Real want = static_cast<Real>(k[j]++) * o.observer_periods[j];
+        REQUIRE(std::abs(t - want) <= 1e-9 * o.observer_periods[j]);
+    }
+    // At t = 0 and every 1 ms all three are due: index order.
+    REQUIRE(ticks[0].first == 0);
+    REQUIRE(ticks[1].first == 1);
+    REQUIRE(ticks[2].first == 2);
+}
+
 TEST_CASE("TR-BDF2: a line-inductance bridge does not grind at one "
           "commutation", "[v2][trbdf2][robustness]") {
     // V_th = 0.7 bridge behind 0.1 ohm + 1 mH, 470 µF || 1 kOhm. With
@@ -492,4 +533,162 @@ TEST_CASE("TR-BDF2: a line-inductance bridge does not grind at one "
     REQUIRE(st.n_accept < 20'000);
     REQUIRE(tail_mean(res, b.node_id_of("dc"), 0.48)
             == Approx(321.865).margin(0.1));
+}
+
+// update-trbdf2-post-event-restart: after a gate edge the history's
+// derivative slots hold the POST-edge derivative (read from a probe
+// under the new mask), not the open-switch value. The run ends on the
+// edge, so the final snapshot's history is the refreshed one.
+TEST_CASE("TR-BDF2: derivative slots are refreshed after a gate edge",
+          "[v2][trbdf2][post-event]") {
+    const Real V = 10.0, R = 10.0, r_on = 1e-3, t_close = 1.2345e-4;
+    for (const bool refresh : {true, false}) {
+        for (const bool inductor : {true, false}) {
+            builder::CircuitBuilder b;
+            b.add_voltage_source("V", "in", "gnd", V);
+            b.add_switch("S", "in", "n1", 1.0 / r_on, 1e-9);
+            b.add_resistor("R", "n1", "n2", R);
+            if (inductor) {
+                b.add_inductor("L", "n2", "gnd", 1e-3);
+            } else {
+                b.add_capacitor("C", "n2", "gnd", 1e-6);
+            }
+            pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+            cache.build_lazy(1e-6);
+            const Size n_sw = b.graph().num_switches();
+            auto sf = [&](Real t) {
+                topology::SwitchStateMask m(n_sw);
+                m.set(0, t >= t_close);
+                return m;
+            };
+            solver::TrBdf2Options o;
+            o.t_end = t_close;
+            o.refresh_after_event = refresh;
+            solver::TrBdf2Stats st;
+            const auto res = solver::run_transient_trbdf2(
+                cache, b.graph(), b.pool(), o, sf, {}, std::nullopt,
+                &st);
+            REQUIRE(st.n_gate_events == 1);
+            const auto& hist = res.final_snapshot.history;
+            REQUIRE(hist.size() == 2);
+            const Real v_prev = hist[0], i_prev = hist[1];
+            if (inductor) {
+                // v_L(te+) = V - (R + r_on)·i(te); 0 V (open switch)
+                // without the refresh.
+                const Real expect = V - (R + r_on) * i_prev;
+                if (refresh) {
+                    REQUIRE(v_prev == Approx(expect).epsilon(1e-8));
+                    REQUIRE(st.n_derivative_refreshes == 1);
+                } else {
+                    REQUIRE(std::abs(v_prev) < 1e-6);
+                    REQUIRE(st.n_derivative_refreshes == 0);
+                }
+            } else {
+                const Real expect = (V - v_prev) / (R + r_on);
+                if (refresh) {
+                    REQUIRE(i_prev == Approx(expect).epsilon(1e-8));
+                } else {
+                    REQUIRE(std::abs(i_prev) < 1e-6);
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("TR-BDF2: a failed Newton probe at a gate edge is retried, "
+          "never read",
+          "[v2][trbdf2][post-event]") {
+    // A saturable inductor as a buck's inductor. At a turn-off edge the
+    // cascade's probe (a 2e-16 s trap step) puts one ulp of inductor
+    // current far above Newton's absolute tolerances (2L/h = 1e12 ohm).
+    // Without roundoff acceptance that probe fails; its out_x was the
+    // warm start, the cascade decided the diode bits on it, never
+    // turned the freewheeling diode on, and one step under all-OFF bits
+    // cut the 10 A to zero: v_out 7.68 V against 12.85 V on pwl. The
+    // probe now climbs 100x per failure (a longer probe is still a
+    // probe), and a cascade with no converged probe refuses by name.
+    for (const bool roundoff : {false, true}) {
+        builder::CircuitBuilder b;
+        b.add_voltage_source("Vin", "vin", "gnd", 24.0);
+        b.add_switch("S", "vin", "sw", 1e3, 1e-9);
+        b.add_diode("D1", "gnd", "sw", 1e3, 1e-9);
+        b.add_saturable_inductor("L", "sw", "out", 100e-6, 20.0, 10e-6);
+        b.add_capacitor("C", "out", "gnd", 47e-6);
+        b.add_resistor("RL", "out", "gnd", 2.0);
+        pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+        cache.build_lazy(1e-6);
+        const Size n_sw = b.graph().num_switches();
+        const auto k = static_cast<Size>(b.switch_index_of("S"));
+        const Real T = 1e-5;
+        auto sf = [&](Real t) {
+            topology::SwitchStateMask m(n_sw);
+            const Real ph = t / T - std::floor(t / T + 1e-9);
+            m.set(k, ph < 0.5 - 1e-9);
+            return m;
+        };
+        solver::TrBdf2Options o;
+        o.t_end = 20 * T;
+        o.rtol = 1e-5;
+        o.atol = 1e-8;
+        o.newton_roundoff_acceptance = roundoff;
+        solver::TrBdf2Stats st;
+        const auto res = solver::run_transient_trbdf2(
+            cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st,
+            {}, {}, {}, pwl::make_combined_diode_mosfet_refresh());
+        REQUIRE(st.n_gate_events >= 38);
+        if (!roundoff) {
+            REQUIRE(st.n_probe_newton_retries > 0);
+        }
+        // engine='pwl' at T/400: 12.8491 V; trbdf2 12.8507 V.
+        const Real v = tail_mean(res, b.node_id_of("out"), 10 * T);
+        REQUIRE(v == Approx(12.849).epsilon(1e-3));
+    }
+}
+
+TEST_CASE("TR-BDF2: one SDIRK step after a diode event, filter on or off",
+          "[v2][trbdf2]") {
+    // Half-wave RL rectifier: linear, so the filtered estimate applies.
+    // The variants must agree on the output; the counters prove each
+    // path ran (one SDIRK step per diode event, filter off by default).
+    builder::CircuitBuilder b;
+    b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, 10.0, 50.0, 0.0);
+    b.add_diode("D", "ac", "a", 1e3, 1e-9, 0.7);
+    b.add_inductor("L", "a", "out", 10e-3);
+    b.add_resistor("Rl", "out", "gnd", 10.0);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    auto run = [&](Size n_sdirk, bool filter, solver::TrBdf2Stats& st) {
+        solver::TrBdf2Options o;
+        o.t_end = 60e-3;
+        o.sdirk_after_diode_event = n_sdirk;
+        o.filter_error_estimate = filter;
+        o.sdirk_on_linear_circuits = true;
+        const auto res = solver::run_transient_trbdf2(
+            cache, b.graph(), b.pool(), o,
+            [&](Real) { return all_open(n_sw); }, {}, std::nullopt, &st);
+        return tail_mean(res, b.node_id_of("out"), 20e-3);
+    };
+    solver::TrBdf2Stats s_def, s_off, s_filt;
+    const Real v_def = run(solver::TrBdf2Options{}.sdirk_after_diode_event,
+                           false, s_def);
+    const Real v_off = run(0, false, s_off);
+    const Real v_filt = run(1, true, s_filt);
+    REQUIRE(s_def.n_diode_events >= 4);
+    REQUIRE(s_def.n_sdirk_steps > 0);
+    REQUIRE(s_def.n_sdirk_steps <= s_def.n_diode_events);
+    REQUIRE(s_def.n_filtered_estimates == 0);
+    REQUIRE(s_off.n_sdirk_steps == 0);
+    REQUIRE(s_filt.n_filtered_estimates > 0);
+    REQUIRE(v_def > 1.0);
+    REQUIRE(v_def == Approx(v_off).epsilon(1e-3));
+    REQUIRE(v_filt == Approx(v_off).epsilon(1e-3));
+    // Default: a piecewise-linear circuit takes no SDIRK step.
+    solver::TrBdf2Options o;
+    o.t_end = 60e-3;
+    solver::TrBdf2Stats s_lin;
+    (void)solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o,
+        [&](Real) { return all_open(n_sw); }, {}, std::nullopt, &s_lin);
+    REQUIRE(s_lin.n_sdirk_steps == 0);
 }

@@ -1,9 +1,12 @@
 """Ensure the locally built pulsim extension is used for all tests."""
 
-import importlib
 import glob
+import hashlib
+import importlib
 import os
 import sys
+
+import pytest
 
 
 def _normalize_path(path: str) -> str:
@@ -100,3 +103,41 @@ def _reload_pulsim_if_needed(
 _prefer_build_tree, _build_path, _source_python_path = _ensure_pulsim_path()
 _ensure_benchmarks_path()
 _reload_pulsim_if_needed(_prefer_build_tree, _build_path, _source_python_path)
+
+
+# The pulsim under test must be this checkout: its source tree, or an
+# installed build of it (CI installs a wheel into site-packages). A stale
+# install (the developer Mac has pulsim 1.8.0 in site-packages) is refused.
+_CHECKOUT_PKG = os.path.join(_source_python_path, "pulsim")
+# Files a wheel copies verbatim; __init__.py carries __version__.
+_FINGERPRINT = ("__init__.py", "design.py", "_pulsim.pyi")
+
+
+def _digest(pkg: str) -> dict:
+    out = {}
+    for f in _FINGERPRINT:
+        path = os.path.join(pkg, f)
+        out[f] = (hashlib.sha256(open(path, "rb").read()).hexdigest()
+                  if os.path.isfile(path) else None)
+    return out
+
+
+def pulsim_checkout_mismatch(mod) -> str:
+    """'' when ``mod`` is this checkout's pulsim, else why it is not."""
+    pkg = os.path.dirname(os.path.realpath(mod.__file__))
+    if _is_within(pkg, os.path.realpath(_CHECKOUT_PKG)):
+        return ""
+    stale = [f for f, h in _digest(pkg).items() if h != _digest(_CHECKOUT_PKG)[f]]
+    if not stale:
+        return ""
+    return (f"the imported pulsim is not this checkout: {mod.__file__} "
+            f"(version {getattr(mod, '__version__', '?')}) differs from "
+            f"{_CHECKOUT_PKG} in {stale}; build this tree or put "
+            f"{_source_python_path} on PYTHONPATH")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _pulsim_is_this_checkout():
+    msg = pulsim_checkout_mismatch(sys.modules["pulsim"])
+    if msg:
+        pytest.fail(msg, pytrace=False)

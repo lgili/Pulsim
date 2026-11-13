@@ -1,0 +1,212 @@
+# Analytic reference set: per case and engine, the ceiling on the
+# time-weighted err_rms against the closed form (benchmarks/analytic).
+#   ceiling   - 2 x measured, floored at 1e-9 (pwl, trbdf2) / 1e-6 (dsed);
+#               a ceiling above 2 x measured needs a `reason`
+#   refused   - the engine refuses the circuit (the test asserts it raises)
+#   known     - a recorded engine defect: the test asserts it still does not
+#               agree, so a fix shows up as a failure asking for a ceiling
+# Regenerate with `benchmarks/tools/freeze_analytic.py --write`; review the diff.
+cases:
+  rc_charge:
+    pwl:
+      ceiling: 0.00318
+      measured: 0.00159
+    trbdf2:
+      ceiling: 4.52e-07
+      measured: 2.26e-07
+    dsed:
+      ceiling: 1.0e-06
+      measured: 1.545e-15
+  rc_discharge:
+    pwl:
+      ceiling: 0.00318
+      measured: 0.00159
+    trbdf2:
+      ceiling: 1.32e-06
+      measured: 6.601e-07
+    dsed:
+      ceiling: 1.0e-06
+      measured: 1.184e-14
+  rl_step:
+    pwl:
+      ceiling: 0.00223
+      measured: 0.001117
+    trbdf2:
+      ceiling: 1.25e-06
+      measured: 6.251e-07
+    dsed:
+      ceiling: 1.0e-06
+      measured: 4.368e-15
+  rlc_underdamped:
+    pwl:
+      ceiling: 0.00123
+      measured: 0.000613
+    trbdf2:
+      ceiling: 0.000116
+      measured: 5.781e-05
+    dsed:
+      ceiling: 1.0e-06
+      measured: 4.706e-14
+  rlc_overdamped:
+    pwl:
+      ceiling: 0.000106
+      measured: 5.306e-05
+    trbdf2:
+      ceiling: 4.48e-07
+      measured: 2.238e-07
+    dsed:
+      ceiling: 1.0e-06
+      measured: 2.705e-12
+  lc_lossless:
+    pwl:
+      ceiling: 0.00356
+      measured: 0.00178
+    trbdf2:
+      ceiling: 0.00011
+      measured: 5.499e-05
+    dsed:
+      ceiling: 1.0e-06
+      measured: 4.996e-14
+  sine_rc:
+    pwl:
+      ceiling: 1.93e-06
+      measured: 9.653e-07
+    trbdf2:
+      ceiling: 1.17e-05
+      measured: 5.85e-06
+    dsed:
+      ceiling: 1.0e-06
+      measured: 4.492e-16
+  sine_rl:
+    pwl:
+      ceiling: 1.93e-06
+      measured: 9.653e-07
+    trbdf2:
+      ceiling: 1.26e-05
+      measured: 6.303e-06
+    dsed:
+      ceiling: 1.0e-06
+      measured: 4.964e-16
+  wheatstone:
+    pwl:
+      ceiling: 1.0e-09
+      measured: 0.0
+    trbdf2:
+      ceiling: 1.0e-09
+      measured: 0.0
+    dsed:
+      refused: NotImplementedError
+  pulse_rc:
+    pwl:
+      ceiling: 6.5e-06
+      measured: 3.248e-06
+    trbdf2:
+      ceiling: 2.01e-06
+      measured: 1.006e-06
+    dsed:
+      ceiling: 1.0e-06
+      measured: 4.632e-07
+  coupled_k099:
+    pwl:
+      ceiling: 0.00153
+      measured: 0.000765
+    trbdf2:
+      ceiling: 1.63e-06
+      measured: 8.127e-07
+    dsed:
+      refused: NotImplementedError
+  ideal_transformer:
+    pwl:
+      ceiling: 1.0e-09
+      measured: 0.0
+    trbdf2:
+      ceiling: 1.0e-09
+      measured: 0.0
+    dsed:
+      refused: NotImplementedError
+  vcvs_gain2:
+    pwl:
+      ceiling: 1.0e-09
+      measured: 0.0
+    trbdf2:
+      ceiling: 1.0e-09
+      measured: 0.0
+    dsed:
+      refused: NotImplementedError
+  shockley_op:
+    pwl:
+      ceiling: 1.0e-09
+      measured: 6.67e-13
+    trbdf2:
+      ceiling: 1.0e-09
+      measured: 6.67e-13
+    dsed:
+      refused: ValueError
+  pwl_diode_drop:
+    pwl:
+      ceiling: 1.0e-09
+      measured: 0.0
+    trbdf2:
+      ceiling: 1.0e-09
+      measured: 0.0
+    dsed:
+      refused: NotImplementedError
+  halfwave_r:
+    pwl:
+      ceiling: 1.08e-08
+      measured: 5.383e-09
+    trbdf2:
+      ceiling: 7.61e-08
+      measured: 3.807e-08
+    dsed:
+      refused: NotImplementedError
+  halfwave_rl:
+    pwl:
+      ceiling: 1.93e-05
+      measured: 9.646e-06
+    trbdf2:
+      ceiling: 7.52e-06
+      measured: 3.761e-06
+    dsed:  # was known: error (the stored-sample diode guard); the complementarity guard repairs it (batch 6a)
+      ceiling: 1.14e-08
+      measured: 5.694e-09
+      reason: 'exact-propagator slice 1 settles D ON through -0.85 A reverse current after the 2nd cycle
+        (err_rms 0.3995, silently); the integration batch-4 diode-law guard turns that into DiodeModeInconsistentError
+        (before the slice: "did not settle after 64 rounds")'
+      measured: DiodeModeInconsistentError
+  hard_switched_rc:
+    pwl:
+      known: disagree
+      reason: trapezoidal ringing in the on-state, tau_on = R_on*C = 1 ps << dt = 1 ns (max error 100
+        % of span); review P5 resolution diagnostics
+      measured: 0.01005
+    trbdf2:
+      ceiling: 4.45e-06
+      measured: 2.224e-06
+      reason: 'update-trbdf2-error-control (estimate x2, landed pulse corners): 1.098e-06 -> 2.224e-06
+        at rtol 1e-6 (integration batch 5, reported; pre-merge ceiling 2.2e-06)'
+    dsed:
+      ceiling: 1.0e-06
+      measured: 1.071e-13
+  buck_ccm:
+    pwl:
+      ceiling: 0.000512
+      measured: 0.0002561
+    trbdf2:
+      ceiling: 6.73e-07
+      measured: 3.367e-07
+    dsed:
+      ceiling: 1.0e-06
+      measured: 2.584e-15
+  buck_dcm:
+    pwl:
+      ceiling: 0.00108
+      measured: 0.0005377
+    trbdf2:
+      ceiling: 1.13e-06
+      measured: 5.635e-07
+      reason: 'update-trbdf2-post-event-restart / error-control: 4.136e-07 -> 5.635e-07 (integration batch
+        5, reported; pre-merge ceiling 8.27e-07)'
+    dsed:
+      ceiling: 1.0e-06
+      measured: 7.338e-10

@@ -43,15 +43,18 @@
 #include "pulsim/dsed/scheduler.hpp"
 #include "pulsim/dsed/scheduler_bdf2.hpp"
 #include "pulsim/dsed/scheduler_auto.hpp"
+#include "pulsim/dsed/period_integrals.hpp"
 #include "pulsim/dsed/step_controller.hpp"
 #include "pulsim/dsed/stiffness_detector.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/dsed/time_eps.hpp"
+#include "pulsim/events/mode_selector.hpp"
 #include "pulsim/sources/native_pwm_switch_fn.hpp"
 #include "pulsim/sources/switch_schedule.hpp"
 #include "pulsim/topology/switch_state.hpp"
+#include "switch_fn_adapter.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -361,10 +364,21 @@ py::array_t<double> reconstruct_full_states(
         if (!(masks[i] == masks[i - 1])) {
             adapter.set_mask(masks[i]);
         }
-        const pulsim::Vector full =
-            adapter.recover_full(res.times[i], state_of(i));
-        for (py::ssize_t j = 0; j < n_mna; ++j) {
-            ptr[static_cast<py::ssize_t>(i) * n_mna + j] = full[j];
+        double* row = ptr + static_cast<py::ssize_t>(i) * n_mna;
+        if constexpr (requires {
+                          adapter.recover_full_into(
+                              Real{0}, state_of(i),
+                              Eigen::Map<pulsim::Vector>(row, n_mna));
+                      }) {
+            adapter.recover_full_into(
+                res.times[i], state_of(i),
+                Eigen::Map<pulsim::Vector>(row, n_mna));
+        } else {
+            const pulsim::Vector full =
+                adapter.recover_full(res.times[i], state_of(i));
+            for (py::ssize_t j = 0; j < n_mna; ++j) {
+                row[j] = full[j];
+            }
         }
     }
     return out;
@@ -501,9 +515,24 @@ py::array_t<bool> sample_masks_to_array(const ResultT& res) {
     }
 }
 
+/// Event times and predicate types as arrays (cheap, always present).
+template <class ResultT>
+void event_arrays(const ResultT& res, py::dict& d) {
+    const auto m = static_cast<py::ssize_t>(res.event_log.size());
+    py::array_t<double> et(m);
+    py::array_t<int> ty(m);
+    for (py::ssize_t i = 0; i < m; ++i) {
+        const auto& e = res.event_log[static_cast<std::size_t>(i)];
+        et.mutable_data()[i] = e.t;
+        ty.mutable_data()[i] = static_cast<int>(e.type);
+    }
+    d["event_times"] = std::move(et);
+    d["event_types"] = std::move(ty);
+}
+
 template <class MaskT>
 py::dict ped_result_to_dict(
-    const pulsim::dsed::PEDResult<MaskT>& res) {
+    const pulsim::dsed::PEDResult<MaskT>& res, bool event_log = true) {
     // Convert times + states to numpy arrays
     const auto n_steps = static_cast<py::ssize_t>(res.times.size());
     const auto n_state = res.states.empty()
@@ -528,11 +557,17 @@ py::dict ped_result_to_dict(
     d["n_accept"] = res.n_accept;
     d["n_reject"] = res.n_reject;
     d["n_events"] = res.n_events;
+    d["n_exact_steps"] = res.n_exact_steps;
+    d["n_predicate_evals"] = res.n_predicate_evals;
     d["cpu_time_seconds"] = res.cpu_time_seconds;
+    event_arrays(res, d);
     // Event log: skip the MaskT objects (they're py::object wrappers
-    // around Python objects that we just hand back).
+    // around Python objects that we just hand back). event_log=False
+    // (the simulate() path) skips the per-event dicts and their two
+    // mask objects each: a 2000-period buck has 4000 events.
     py::list events;
     for (const auto& e : res.event_log) {
+        if (!event_log) break;
         py::dict ed;
         ed["t"] = e.t;
         ed["name"] = e.name;
@@ -560,7 +595,7 @@ py::dict ped_result_to_dict(
 
 template <class MaskT>
 py::dict ped_result_auto_to_dict(
-    const pulsim::dsed::PEDResultAuto<MaskT>& res) {
+    const pulsim::dsed::PEDResultAuto<MaskT>& res, bool event_log = true) {
     const auto n_steps = static_cast<py::ssize_t>(res.times.size());
     const auto n_state = res.states.empty()
         ? py::ssize_t{0}
@@ -586,9 +621,12 @@ py::dict ped_result_auto_to_dict(
     d["n_events"] = res.n_events;
     d["n_rk45_steps"] = res.n_rk45_steps;
     d["n_bdf2_steps"] = res.n_bdf2_steps;
+    d["n_exact_steps"] = res.n_exact_steps;
     d["cpu_time_seconds"] = res.cpu_time_seconds;
+    event_arrays(res, d);
     py::list events;
     for (const auto& e : res.event_log) {
+        if (!event_log) break;
         py::dict ed;
         ed["t"] = e.t;
         ed["name"] = e.name;
@@ -614,7 +652,138 @@ py::dict ped_result_auto_to_dict(
 //   run_auto_native(system, switch_fn, x0, t_end, rtol, atol, dt_init,
 //                    dt_max, h_bdf2, stiffness_threshold)
 // ---------------------------------------------------------------------------
+/// D10 — the exact propagator's per-mask tier record and counters.
+template <class AdapterT>
+py::dict exact_report_dict(const AdapterT& adapter,
+                           std::size_t n_predicate_evals) {
+    py::list masks;
+    for (const auto& r : adapter.exact_report()) {
+        py::list bits;
+        for (pulsim::Size i = 0; i < r.mask.size(); ++i) {
+            bits.append(static_cast<bool>(r.mask.get(i)));
+        }
+        py::dict row;
+        row["mask"] = bits;
+        row["tier"] = r.tier;
+        row["kappa"] = r.kappa;
+        row["norm_Ah"] = r.norm_Ah;
+        row["reason"] = r.reason;
+        masks.append(row);
+    }
+    py::dict d;
+    d["masks"] = masks;
+    d["n_eig"] = adapter.n_eig();
+    d["n_pade"] = adapter.n_pade();
+    d["n_phi_cache_hits"] = adapter.n_pade_hits();
+    d["n_predicate_evals"] = n_predicate_evals;
+    return d;
+}
+
+/// Task 5.1: the circuit's passivity class at its diode ports (D3).
+inline py::dict passivity_dict(const pulsim::events::PassivityClass& c) {
+    py::dict d;
+    d["class"] = std::string(c.name());
+    d["device"] = c.passive() ? c.nonreciprocal_device : c.device;
+    d["kind"] = c.passive() ? c.nonreciprocal_kind : c.kind;
+    return d;
+}
+
+/// add-complementarity-mode-selection — result.diagnostics['mode_shadow'].
+inline py::dict mode_shadow_dict(const pulsim::dsed::ModeShadowReport& r,
+                                 const std::vector<std::string>& names,
+                                 std::size_t port_problems) {
+    auto bits = [](const std::vector<char>& v) {
+        py::tuple t(v.size());
+        for (std::size_t i = 0; i < v.size(); ++i) t[i] = py::bool_(v[i] != 0);
+        return t;
+    };
+    py::list dis;
+    for (const auto& e : r.disagreements) {
+        py::dict d;
+        d["t"] = e.t;
+        d["settle_mode"] = bits(e.settle_mode);
+        d["lcp_mode"] = bits(e.lcp_mode);
+        d["previous_mode"] = bits(e.previous_mode);
+        d["settle_rounds"] = e.settle_rounds;
+        d["pivots"] = e.pivots;
+        d["ties"] = e.ties;
+        d["status"] = pulsim::events::to_string(e.status);
+        d["lcp_current"] = e.lcp_current;
+        d["lcp_gap"] = e.lcp_gap;
+        auto verdict = [](int c) -> py::object {
+            return c < 0 ? py::object(py::none()) : py::object(py::bool_(c != 0));
+        };
+        d["settle_consistent"] = verdict(e.settle_consistent);
+        d["lcp_consistent"] = verdict(e.lcp_consistent);
+        d["settle_violation"] = e.settle_violation;
+        d["lcp_violation"] = e.lcp_violation;
+        dis.append(d);
+    }
+    py::dict d;
+    d["diodes"] = names;
+    d["h_e"] = r.h_e;
+    d["events"] = r.lcp_events;
+    d["disagreements"] = dis;
+    d["lcp_count"] = r.lcps;
+    d["lcp_pivots_total"] = r.pivots_total;
+    d["max_pivots_per_event"] = r.max_pivots_per_event;
+    d["ties"] = r.ties;
+    d["widenings"] = r.widenings;
+    d["leak_pins"] = r.leak_pins;
+    d["pin_judgements"] = r.pin_judgements;
+    d["unfixed"] = r.unfixed;
+    d["enumerations"] = r.enumerations;
+    d["nonunique_modes"] = r.nonunique_modes;
+    d["hysteresis_released"] = r.released;
+    d["settle_rounds_total"] = r.settle_rounds_total;
+    d["port_model_problems"] = port_problems;
+    d["errors"] = r.errors;
+    d["last_error"] = r.last_error;
+    return d;
+}
+
 void init_module(py::module_& m) {
+    // add-complementarity-mode-selection task 2: the dense Lemke solver,
+    // for the oracle comparison against tests/oracles/lcp_reference.py.
+    m.def("_lcp_lemke",
+        [](const pulsim::DenseMatrix& M, const Vector& q) {
+            pulsim::events::LemkeSolver solver;
+            Vector z, w;
+            const auto o = solver.solve(M, q, z, w);
+            return py::make_tuple(z, w, o.pivots,
+                                  pulsim::events::to_string(o.status));
+        },
+        py::arg("M"), py::arg("q"),
+        "Lemke with the lexicographic ratio test on w = M z + q "
+        "(add-complementarity-mode-selection D4). Returns "
+        "(z, w, pivots, status).");
+    m.def("_min_source_period",
+        [](const pulsim::topology::Graph& g, const pulsim::pwl::DevicePool& pool) {
+            using K = pulsim::pwl::DevicePool::StoredKind;
+            Real T = std::numeric_limits<Real>::infinity();
+            for (pulsim::Index b = 0; b < g.num_branches(); ++b) {
+                K k;
+                try { k = pool.kind_of(b); } catch (const std::out_of_range&) { continue; }
+                Real f = 0;
+                if (k == K::SineVoltageSource) f = pool.sine_voltage_source_params(b).frequency;
+                else if (k == K::PWMVoltageSource) f = pool.pwm_voltage_source_params(b).frequency;
+                if (f > 0) T = std::min(T, Real{1} / f);
+            }
+            return T;
+        },
+        py::arg("graph"), py::arg("pool"),
+        "Shortest period of the sine / PWM sources (inf when none): T_ref "
+        "of the shadow LCP's event step (add-complementarity-mode-selection D5).");
+    m.def("_lcp_enumerate",
+        [](const pulsim::DenseMatrix& M, const Vector& q) {
+            Vector z, w;
+            const int n = pulsim::events::enumerate_lcp(M, q, z, w);
+            return py::make_tuple(n, z, w);
+        },
+        py::arg("M"), py::arg("q"),
+        "2^k enumeration (k <= 12): (number of solutions, z, w) with the "
+        "fewest basic z.");
+
     using pulsim::dsed::PEDSimulator;
     using pulsim::dsed::PEDSimulatorBDF2;
     using pulsim::dsed::PEDSimulatorAuto;
@@ -759,61 +928,35 @@ void init_module(py::module_& m) {
     struct PySwitchFnSSM {
         explicit PySwitchFnSSM(py::object fn)
             : fn_{std::move(fn)} {
-            // Try to detect the native PWM types first. py::cast<T*>
-            // returns the C++ pointer if the py::object holds an
-            // instance of the bound type; throws py::cast_error
-            // otherwise.
-            try {
-                native_pwm2_ =
-                    fn_.cast<pulsim::sources::NativePwm2Switch*>();
-            } catch (const py::cast_error&) {
-                native_pwm2_ = nullptr;
-            }
-            if (!native_pwm2_) {
-                try {
-                    native_multi_ =
-                        fn_.cast<pulsim::sources::NativeMultiMaskPwm*>();
-                } catch (const py::cast_error&) {
-                    native_multi_ = nullptr;
-                }
-            }
-            if (!native_pwm2_ && !native_multi_ &&
-                py::isinstance<pulsim::sources::SwitchSchedule>(fn_)) {
-                // Built-in PWM helper (make_pwm_switch_fn & co.):
-                // copy the C++ schedule; mask and edge oracle then
-                // run without the GIL.
-                sched_ = fn_.cast<pulsim::sources::SwitchSchedule>();
-                has_sched_ = true;
-            }
-            if (!native_pwm2_ && !native_multi_ && !has_sched_) {
-                // Fallback path — generic Python callable. Pre-resolve
-                // `next_edge_after` attribute (if any) to avoid the
-                // hasattr cost per call.
-                if (py::hasattr(fn_, "next_edge_after")) {
-                    nea_attr_ = fn_.attr("next_edge_after");
-                    has_nea_  = true;
-                }
+            // The native schedules (SwitchSchedule, NativePwm2Switch,
+            // NativeMultiMaskPwm) are recognised by the adapter every
+            // engine binding shares; they run without the GIL.
+            if (py::isinstance<pulsim::sources::SwitchSchedule>(fn_)
+                || py::isinstance<pulsim::sources::NativePwm2Switch>(fn_)
+                || py::isinstance<pulsim::sources::NativeMultiMaskPwm>(fn_)) {
+                native_ = pulsim_bindings_common::adapt_switch_fn(fn_);
+                is_native_ = true;
+            } else if (py::hasattr(fn_, "next_edge_after")) {
+                // Generic Python callable: pre-resolve the attribute
+                // to avoid the hasattr cost per call.
+                nea_attr_ = fn_.attr("next_edge_after");
+                has_nea_  = true;
             }
         }
 
         [[nodiscard]] SSM operator()(Real t) const {
-            // Bridge.12 native fast path — pure C++, no GIL touch.
-            if (native_pwm2_) return (*native_pwm2_)(t);
-            if (native_multi_) return (*native_multi_)(t);
-            if (has_sched_) return sched_(t);
+            if (is_native_) return native_.fn(t);
             // Generic Python fallback (Bridge.11 path).
             py::gil_scoped_acquire gil;
+            if (n_python_calls) ++*n_python_calls;
             return fn_(t).cast<SSM>();
         }
 
         [[nodiscard]] Real next_edge_after(Real t) const {
-            if (native_pwm2_)  return native_pwm2_->next_edge_after(t);
-            if (native_multi_) return native_multi_->next_edge_after(t);
-            if (has_sched_ && sched_.has_edges()) {
-                return sched_.next_edge_after(t);
-            }
+            if (is_native_ && native_.next_edge) return native_.next_edge(t);
             if (has_nea_) {
                 py::gil_scoped_acquire gil;
+                if (n_python_calls) ++*n_python_calls;
                 return nea_attr_(t).cast<Real>();
             }
             // No oracle: bisect inside the poll window (EdgeSearch).
@@ -823,11 +966,12 @@ void init_module(py::module_& m) {
 
         void set_poll(Real poll) noexcept { search_.set_poll(poll); }
 
+        // dsed_period_map: Python calls of this schedule (owned by the
+        // caller's frame; null elsewhere).
+        std::size_t* n_python_calls = nullptr;
         py::object fn_;
-        pulsim::sources::NativePwm2Switch*   native_pwm2_  = nullptr;
-        pulsim::sources::NativeMultiMaskPwm* native_multi_ = nullptr;
-        pulsim::sources::SwitchSchedule      sched_;
-        bool       has_sched_ = false;
+        pulsim_bindings_common::SwitchFnAdapter native_;
+        bool       is_native_ = false;
         py::object nea_attr_;
         bool       has_nea_ = false;
         EdgeSearch<SSM> search_;
@@ -885,6 +1029,15 @@ void init_module(py::module_& m) {
             &NativeAdapter::rhs,
             py::arg("t"), py::arg("x"),
             "Continuous-time RHS: dx/dt = A·x + b(t).")
+        .def("node_pair_voltage",
+            &NativeAdapter::node_pair_voltage,
+            py::arg("from_node"), py::arg("to_node"),
+            py::arg("t"), py::arg("x"),
+            "v(from_node) − v(to_node) recovered from the reduced "
+            "state `x` under the active mask (−1 is ground). The "
+            "quantity a PWL diode predicate evaluates; affine in "
+            "`x`, so its gradient is the predicate's recovery row "
+            "(used by pulsim.periodic_steady_state for saltation).")
         .def_property_readonly("n_state",
             &NativeAdapter::n_state,
             "Number of continuous-time state variables for the "
@@ -894,6 +1047,73 @@ void init_module(py::module_& m) {
             &NativeAdapter::has_dynamic_sources,
             "Whether any time-varying source is present. Determined "
             "once at construction by probing compute_*_b_extra.")
+        .def("reduced_initial_state",
+            [](const NativeAdapter& ad,
+               const pulsim::builder::CircuitBuilder& b) {
+                return ad.reduced_initial_state(b.initial_conditions());
+            },
+            py::arg("builder"),
+            "add-exact-propagator-strategy D5: the reduced state of the "
+            "current mask from a full-MNA initial vector "
+            "(the builder's c0= / i0= / set_initial), and the largest capacitor-voltage "
+            "adjustment the charge-conserving projection made (0 when the "
+            "declared values are consistent).")
+        .def("_mode_select_at",
+            [](const NativeAdapter& ad, const pulsim::topology::SwitchStateMask& mask,
+               Real t, const Vector& x_full, Real h_e, Real tol) {
+                // add-complementarity-mode-selection task 3: the port model
+                // and the selector at one held state (full-MNA vector at
+                // t⁻), previous mode = the diode bits of `mask`.
+                pulsim::pwl::DiodeEventState census(ad.graph(), ad.pool());
+                std::vector<pulsim::events::DiodePort> ports;
+                std::vector<std::pair<pulsim::Index, pulsim::Index>> nodes;
+                std::vector<char> prev;
+                std::vector<std::string> names;
+                for (const auto& d : census.entries()) {
+                    ports.push_back({Real{1} / d.g_on, d.g_off, d.V_f, d.V_th});
+                    nodes.emplace_back(d.from, d.to);
+                    prev.push_back(mask.get(d.switch_idx) ? 1 : 0);
+                    names.push_back(pulsim::pwl::branch_label(ad.graph(), d.branch_id));
+                }
+                pulsim::DenseMatrix Z, H;
+                Vector u, q;
+                ad.diode_port_problem_full(mask, t, x_full, h_e, nodes, Z, u);
+                pulsim::events::ModeSelector::hybrid_lcp(Z, u, ports, prev, H, q);
+                pulsim::events::ModeSelector sel;
+                sel.tol = tol;
+                const auto sc = ad.port_scale_full(x_full);
+                const auto out = sel.select(ports, prev,
+                    [&](Real h, pulsim::DenseMatrix& Zh, Vector& uh) {
+                        ad.diode_port_problem_full(mask, t, x_full, h, nodes, Zh, uh);
+                    }, h_e, sc);
+                py::dict d;
+                d["diodes"] = names;
+                py::tuple on(out.on.size());
+                for (std::size_t i = 0; i < out.on.size(); ++i) on[i] = py::bool_(out.on[i] != 0);
+                d["mode"] = on;
+                d["status"] = pulsim::events::to_string(out.status);
+                d["pivots"] = out.pivots;
+                d["pivots_total"] = out.pivots_total;
+                d["ties"] = out.ties;
+                d["widenings"] = out.widenings;
+                d["leak_pins"] = out.leak_pins;
+                d["pin_judgements"] = out.pin_judgements;
+                d["unfixed"] = out.unfixed;
+                d["released"] = out.released;
+                d["first_pass_ties"] = out.first_pass_ties;
+                d["tie_currents"] = out.tie_currents;
+                d["Z"] = Z; d["u"] = u; d["H"] = H; d["q"] = q;
+                d["current"] = sel.last_current();
+                d["gap"] = sel.last_gap();
+                d["vscale"] = sc.vscale; d["iscale"] = sc.iscale; d["c_max"] = sc.c_max;
+                return d;
+            },
+            py::arg("mask"), py::arg("t"), py::arg("x_full"), py::arg("h_e"),
+            py::arg("tol") = Real{1e-9},
+            "add-complementarity-mode-selection: the diode-port LCP of the "
+            "backward-Euler companion at step h_e from the full-MNA state "
+            "x_full held at t, posed in the previous mode (the diode bits "
+            "of `mask`), and the selector's answer. Test/probe surface.")
         .def_property_readonly("num_cached_masks",
             &NativeAdapter::num_cached_masks,
             "Number of distinct masks resolved (and thus cached) "
@@ -909,7 +1129,11 @@ void init_module(py::module_& m) {
            Real dt_init,
            Real dt_max,
            std::size_t store_every,
-           bool enable_event_projection) {
+           bool enable_event_projection,
+           bool event_log,
+           Real mode_shadow_h_e,
+           Real mode_lcp_h_e,
+           Real mode_guard_h_e) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
@@ -1002,12 +1226,57 @@ void init_module(py::module_& m) {
                     std::move(sched_diodes));
             }
             sim.set_event_projection(enable_event_projection);
+            std::vector<std::string> diode_names;
+            if (mode_shadow_h_e > Real{0}) {
+                pulsim::pwl::DiodeEventState census(adapter.graph(), adapter.pool());
+                for (const auto& d : census.entries())
+                    diode_names.push_back(pulsim::pwl::branch_label(adapter.graph(), d.branch_id));
+                if (!diode_names.empty()) sim.enable_mode_shadow(mode_shadow_h_e);
+            }
+            // add-complementarity-mode-selection slice 2: the LCP decides
+            // (mode_selection='lcp'), or guards the settle (default)
+            const bool any_diode = diode_owned.count() > 0;
+            if (any_diode && mode_lcp_h_e > Real{0}) {
+                sim.enable_mode_lcp(mode_lcp_h_e, adapter.passivity());
+            } else if (any_diode && mode_guard_h_e > Real{0}) {
+                sim.enable_mode_guard(mode_guard_h_e, adapter.passivity());
+            }
+            if (any_diode && diode_names.empty()) {
+                pulsim::pwl::DiodeEventState census(adapter.graph(), adapter.pool());
+                for (const auto& dd : census.entries())
+                    diode_names.push_back(pulsim::pwl::branch_label(adapter.graph(), dd.branch_id));
+            }
             // Release the GIL during simulate(); the C++ scheduler
             // only re-acquires it at gate edges to call switch_fn.
             py::gil_scoped_release release;
             auto res = sim.simulate(x0, t_end);
             py::gil_scoped_acquire acquire;
-            auto d = ped_result_to_dict(res);
+            auto d = ped_result_to_dict(res, event_log);
+            d["exact"] = exact_report_dict(adapter, res.n_predicate_evals);
+            if (mode_shadow_h_e > Real{0}) {
+                d["mode_shadow"] = mode_shadow_dict(res.mode_shadow, diode_names,
+                                                    adapter.n_port_problems());
+            }
+            if (res.mode_shadow.decides) {
+                auto ms = mode_shadow_dict(res.mode_shadow, diode_names,
+                                           adapter.n_port_problems());
+                ms["passivity"] = passivity_dict(adapter.passivity());
+                d["mode_selection"] = ms;
+            }
+            if (res.mode_guard.enabled) {
+                const auto& g = res.mode_guard;
+                py::dict gd;
+                gd["checks"] = g.checks;
+                gd["unchecked"] = g.unchecked;
+                gd["repairs"] = g.repairs;
+                gd["confirmed"] = g.confirmed;
+                gd["repair_times"] = g.repair_times;
+                gd["repair_diodes"] = g.repair_diodes;
+                gd["repair_violations"] = g.repair_violations;
+                gd["lcp"] = mode_shadow_dict(g.lcp, diode_names, adapter.n_port_problems());
+                gd["passivity"] = passivity_dict(adapter.passivity());
+                d["mode_guard"] = gd;
+            }
             // v2.0 Phase 3 item 5 — the unified result: full MNA
             // trajectory reconstructed per recorded sample.
             d["states_full"] = reconstruct_full_states(adapter, res);
@@ -1024,6 +1293,10 @@ void init_module(py::module_& m) {
         py::arg("dt_max")      = Real{1e-5},
         py::arg("store_every") = std::size_t{1},
         py::arg("enable_event_projection") = true,
+        py::arg("event_log") = true,
+        py::arg("mode_shadow_h_e") = Real{0},
+        py::arg("mode_lcp_h_e") = Real{0},
+        py::arg("mode_guard_h_e") = Real{0},
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "
@@ -1041,7 +1314,8 @@ void init_module(py::module_& m) {
            Vector x0,
            Real t_end,
            Real h_fixed,
-           std::size_t store_every) {
+           std::size_t store_every,
+           bool event_log) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_poll(poll_window(h_fixed));
             PEDSimulatorBDF2<NativeAdapter, PySwitchFnSSM> sim(
@@ -1049,7 +1323,7 @@ void init_module(py::module_& m) {
             py::gil_scoped_release release;
             auto res = sim.simulate(x0, t_end);
             py::gil_scoped_acquire acquire;
-            auto d = ped_result_to_dict(res);
+            auto d = ped_result_to_dict(res, event_log);
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
             return d;
@@ -1060,6 +1334,7 @@ void init_module(py::module_& m) {
         py::arg("t_end"),
         py::arg("h_fixed")     = Real{1e-6},
         py::arg("store_every") = std::size_t{1},
+        py::arg("event_log") = true,
         "Bridge.11 — native PEDSimulatorBDF2 over a "
         "NativeCircuitBuilderAdapter (implicit BDF2 + CN bootstrap).");
 
@@ -1074,7 +1349,8 @@ void init_module(py::module_& m) {
            Real dt_max,
            Real h_bdf2,
            Real stiffness_threshold,
-           std::size_t store_every) {
+           std::size_t store_every,
+           bool event_log) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
@@ -1086,7 +1362,8 @@ void init_module(py::module_& m) {
             py::gil_scoped_release release;
             auto res = sim.simulate(x0, t_end);
             py::gil_scoped_acquire acquire;
-            auto d = ped_result_auto_to_dict(res);
+            auto d = ped_result_auto_to_dict(res, event_log);
+            d["exact"] = exact_report_dict(adapter, 0);
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
             return d;
@@ -1102,8 +1379,133 @@ void init_module(py::module_& m) {
         py::arg("h_bdf2")              = Real{1e-6},
         py::arg("stiffness_threshold") = Real{10.0},
         py::arg("store_every")          = std::size_t{1},
+        py::arg("event_log") = true,
         "Bridge.11 — native PEDSimulatorAuto over a "
         "NativeCircuitBuilderAdapter (per-mode RK45↔BDF2 dispatch).");
+
+    // add-design-optimization-workflow (kernel item 3): one period of
+    // the exact stepper as a map, with M and the period integrals
+    // (pulsim/dsed/period_integrals.hpp), the GIL released for the run
+    // AND its post-processing.
+    m.def("dsed_period_map",
+        [](NativeAdapter& adapter, py::object switch_fn_obj, Vector x0,
+           Real period, py::list observables,
+           std::vector<std::pair<int, int>> pairs, bool monodromy,
+           Real rtol, Real atol, Real mode_guard_h_e) {
+            if (adapter.has_dynamic_sources()) {
+                throw py::value_error(
+                    "dsed_period_map: time-varying sources are not "
+                    "handled (their b(t) has no closed form here)");
+            }
+            std::vector<pulsim::dsed::PeriodObservable> obs;
+            for (const auto& item : observables) {
+                const auto t = item.cast<py::tuple>();
+                pulsim::dsed::PeriodObservable o;
+                const auto idx = t[0].cast<std::vector<pulsim::Index>>();
+                const auto cf = t[1].cast<std::vector<Real>>();
+                for (std::size_t i = 0; i < idx.size(); ++i) {
+                    o.w.emplace_back(idx[i], cf.at(i));
+                }
+                o.bit = t[2].cast<int>();
+                o.g_on = t[3].cast<Real>();
+                o.g_off = t[4].cast<Real>();
+                o.v_on = t[5].cast<Real>();
+                o.extrema = t[6].cast<bool>();
+                obs.push_back(std::move(o));
+            }
+            for (const auto& [a, c] : pairs) {
+                if (a < 0 || c < 0 || a >= static_cast<int>(obs.size())
+                    || c >= static_cast<int>(obs.size())) {
+                    throw py::value_error("dsed_period_map: pair index out "
+                                          "of range");
+                }
+            }
+            std::size_t n_python_calls = 0;
+            PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_poll(poll_window(period));
+            sf.n_python_calls = &n_python_calls;
+            EventPredictor pred;
+            auto diodes = pulsim::dsed::add_diode_predicates(adapter, pred);
+            PEDSimulator<NativeAdapter, PySwitchFnSSM> sim(
+                adapter, std::move(sf), PIController(rtol, atol),
+                std::move(pred), period * Real{1e-6}, period, 1);
+            if (!diodes.list.empty()) {
+                const auto n_sw = static_cast<pulsim::Size>(
+                    adapter.graph().num_switches());
+                sim.enable_diode_commutation(
+                    diodes.owned, pulsim::topology::SwitchStateMask(n_sw),
+                    diodes.list);
+                if (mode_guard_h_e > Real{0}) {
+                    // the kernel diode-mode guard, as the pss runs set it
+                    sim.enable_mode_guard(mode_guard_h_e, adapter.passivity());
+                }
+            }
+            sim.set_event_projection(false);
+            pulsim::dsed::PeriodMapResult<SSM> r;
+            bool nogil = false;
+            {
+                py::gil_scoped_release release;
+                nogil = PyGILState_Check() == 0;
+                auto res = sim.simulate(x0, period);
+                r = pulsim::dsed::period_map_from_run(
+                    adapter, res, diodes, obs, pairs, monodromy);
+            }
+            py::dict d;
+            d["x_end"] = r.x_end;
+            d["monodromy"] = r.monodromy.size()
+                ? py::object(py::cast(r.monodromy)) : py::object(py::none());
+            d["grazing"] = r.grazing;
+            py::list evs;
+            for (const auto& e : r.events) {
+                py::dict ed;
+                ed["t"] = e.t;
+                ed["name"] = e.name;
+                ed["predicate_type"] = e.type;
+                ed["old_mask"] = py::cast(e.old_mask);
+                ed["new_mask"] = py::cast(e.new_mask);
+                ed["x"] = e.x;
+                evs.append(ed);
+            }
+            d["events"] = evs;
+            d["first_mask"] = py::cast(r.first_mask);
+            d["last_mask"] = py::cast(r.last_mask);
+            d["scale"] = r.scale;
+            d["n_accept"] = r.n_steps;
+            d["n_exact_steps"] = r.n_exact_steps;
+            d["python_callbacks"] = n_python_calls;
+            d["nogil"] = nogil;
+            d["integrals_ok"] = r.integrals_ok;
+            d["integrals_reason"] = r.integrals_reason;
+            const auto n_obs = static_cast<py::ssize_t>(r.stats.size());
+            py::array_t<double> st(std::vector<py::ssize_t>{n_obs, 6});
+            for (py::ssize_t j = 0; j < n_obs; ++j) {
+                const auto& s = r.stats[static_cast<std::size_t>(j)];
+                const double row[6] = {s.int1, s.int2, s.peak, s.t_peak,
+                                       s.valley, s.t_valley};
+                for (int c = 0; c < 6; ++c) st.mutable_at(j, c) = row[c];
+            }
+            d["stats"] = st;
+            d["cross"] = r.cross;
+            d["y_left"] = r.y_left;
+            d["y_right"] = r.y_right;
+            d["y_start"] = r.y_start;
+            d["y_end"] = r.y_end;
+            return d;
+        },
+        py::arg("adapter"), py::arg("switch_fn"), py::arg("x0"),
+        py::arg("period"), py::arg("observables") = py::list(),
+        py::arg("pairs") = std::vector<std::pair<int, int>>{},
+        py::arg("monodromy") = true, py::arg("rtol") = Real{1e-11},
+        py::arg("atol") = Real{1e-14},
+        py::arg("mode_guard_h_e") = Real{0},
+        "One period of the exact stepper from x0 (events located, no "
+        "projection) with the GIL released: x(T), the events, the "
+        "monodromy M = dP/dx0 and, per observable "
+        "(indices, coefs, bit, g_on, g_off, v_on, extrema), the closed-form "
+        "integrals stats[j] = (int y, int y^2, peak, t_peak, valley, "
+        "t_valley) and cross[q] = int y_a*y_b per pair. integrals_ok is "
+        "False with a reason when a mode has no modal form or a step "
+        "was numeric. DC sources only.");
 }
 
 }  // namespace pulsim_dsed_bindings

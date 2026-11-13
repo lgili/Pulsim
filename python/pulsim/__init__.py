@@ -32,7 +32,7 @@ For full control, fall back to the explicit pipeline:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from ._pulsim import (  # type: ignore[import-not-found]
     # v2.0 Phase 2 — raised when a transient cannot continue. Unlike
@@ -43,6 +43,12 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # were whole would be the silent wrong answer this API exists to
     # avoid, so the partial trace has to be asked for.
     SimulationAborted,
+    ConvergenceError,
+    # add-engine-conformance-matrix: the typed refusal (a ValueError
+    # carrying engine / feature / device / kind) and the kernel's
+    # device-kind capability table it is raised from.
+    UnsupportedError,
+    engine_capabilities,
     # Builder API (Layer 6).
     CircuitBuilder,
     # Topology / device handles (opaque — produced by the
@@ -74,6 +80,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     load_yaml_file,
     # Source helpers (Layer 2 V5+).
     make_pwm_switch_fn,
+    make_constant_switch_fn,
     make_dead_time_pwm_pair_fn,
     make_spwm_pair_fn,
     ThreePhaseLegIndices,
@@ -331,7 +338,14 @@ from .spice_import import (
     parse_spice_netlist,
     spice_to_builder,
 )
+# add-power-mosfet-datasheet-device: charge laws, double pulse, fitters.
+from ._pulsim import ChargeLaw, ChargeTable  # type: ignore[import-not-found]
+# add-in-kernel-event-losses: kernel datasheet tables (LossTable.to_kernel()).
+from ._pulsim import ConductionTable, LossTable3D  # type: ignore[import-not-found]
+from . import datasheet as datasheet  # noqa: F401  (re-export submodule)
+from .double_pulse import DoublePulseResult, double_pulse_metrics, double_pulse_test
 from .stream import LiveStream, NativeLiveStream
+from ._exact_route import exact_route
 from .electrothermal import (
     TempCoResistance,
     make_bidirectional_observer,
@@ -419,6 +433,18 @@ from .steady_state import (
     steady_state,  # noqa: F401
     SteadyStateResult,  # noqa: F401
 )
+from .periodic_steady_state import (
+    periodic_steady_state,  # noqa: F401
+    periodic_steady_state_supported,  # noqa: F401
+    PeriodicSteadyStateResult,  # noqa: F401
+    SampledModel,  # noqa: F401
+)
+# add-parameter-sensitivities — exact gradients on the dsed path.
+from .sensitivity import (
+    value_and_grad,  # noqa: F401
+    KpiValue,  # noqa: F401
+    SensitivityResult,  # noqa: F401
+)
 
 # v2.0 Phase 3 — subsystems: define once, instantiate many, with
 # scoped names (audit A.7). Pure builder-level; the kernel never
@@ -443,24 +469,26 @@ from .mmc_thevenin import (
 # raise a clear ImportError pointing at the install command.
 from . import schematic  # noqa: F401
 
-# LiveScope is an optional import — only available when pyqtgraph
-# is installed. We tolerate the absence so headless environments
-# still load `pulsim` without complaint.
+# LiveScope is optional (pyqtgraph + a Qt binding) and slow to import
+# (about half of `import pulsim`), so `pulsim.LiveScope` is resolved on
+# first access by the module `__getattr__` below; `import pulsim` never
+# imports `pulsim.scope`. Availability is probed without importing.
 try:
-    from .scope import LiveScope  # noqa: F401  (re-exported below via __all__)
-    _HAS_SCOPE = True
-except ImportError:  # pragma: no cover
-    _HAS_SCOPE = False
+    import importlib.util as _ilu
+    _HAS_SCOPE = _ilu.find_spec("pyqtgraph") is not None
+except ValueError:  # already in sys.modules without a __spec__ (a stub)
+    import sys as _sys
+    _HAS_SCOPE = _sys.modules.get("pyqtgraph") is not None
 
-# Importing the ``pulsim.scope`` submodule (above) makes the import
-# system bind the *module* to the package attribute ``scope``, which
-# silently replaced the ``pulsim.scope(builder, result, ...)`` plotting
-# function imported from ``.plot`` -- ``p.scope(...)`` then raised
-# ``TypeError: 'module' object is not callable``. Rebind the function.
-# The submodule stays importable: it is cached in ``sys.modules``, so
-# ``import pulsim.scope`` and ``from pulsim.scope import LiveScope`` keep
-# working and do not re-bind the attribute. (``import pulsim.scope as m``
-# resolves the attribute first and therefore yields the function; use
+# Importing the ``pulsim.scope`` submodule makes the import system bind
+# the *module* to the package attribute ``scope``, which silently replaced
+# the ``pulsim.scope(builder, result, ...)`` plotting function imported
+# from ``.plot`` -- ``p.scope(...)`` then raised ``TypeError: 'module'
+# object is not callable``. The package refuses that one rebinding (see
+# `_PulsimModule` at the end of this file), so ``import pulsim.scope``
+# and ``from pulsim.scope import LiveScope`` work at any time and leave
+# the function in place. (``import pulsim.scope as m`` resolves the
+# attribute first and therefore yields the function; use
 # ``from pulsim.scope import LiveScope`` or ``pulsim.LiveScope``.)
 from .plot import scope  # noqa: E402,F811
 
@@ -470,6 +498,7 @@ from .plot import scope  # noqa: E402,F811
 from ._ai_guide import ai_guide  # noqa: E402
 
 __all__ = [
+    "ResolutionWarning",
     "ai_guide",
     "CircuitBuilder",
     "Graph",
@@ -495,6 +524,7 @@ __all__ = [
     "NativeMultiMaskPwm",
     "wire_chain_from_yaml",
     "make_pwm_switch_fn",
+    "make_constant_switch_fn",
     "make_dead_time_pwm_pair_fn",
     "make_spwm_pair_fn",
     "ThreePhaseLegIndices",
@@ -504,11 +534,21 @@ __all__ = [
     "SwitchSchedule",
     # Proposal #3.3 ergonomics — high-level entry point.
     "simulate",
+    # add-exact-propagator-strategy D11 (report only).
+    "exact_route",
     # add-python-named-lookups (v1.5).
     "NameNotFoundError",
     # add-python-builder-ergonomics (v1.5).
     "Cancelled",
+    "RetiredDeviceError",
     "SimulationAborted",
+    "ConvergenceError",
+    "periodic_steady_state_supported",
+    "UnsupportedError",
+    "value_and_grad",
+    "KpiValue",
+    "SensitivityResult",
+    "engine_capabilities",
     # Closed-loop control building blocks (Phase 2 + add-python-closed-loop-helper v1.5).
     "PIController",
     "ClosedLoop",
@@ -707,6 +747,13 @@ __all__ = [
     "parse_spice_value",
     "parse_spice_netlist",
     "spice_to_builder",
+    "ChargeLaw",
+    "ChargeTable",
+    "LossTable3D",
+    "ConductionTable",
+    "DoublePulseResult",
+    "double_pulse_metrics",
+    "double_pulse_test",
     # Live streaming output + cancellation (foundation for GUI scope).
     "LiveStream",
     "NativeLiveStream",
@@ -748,7 +795,122 @@ if _HAS_SCOPE:
 # analyses with `should_continue` cancellation.
 from . import _builder_ergonomics as _berg
 _berg.install(CircuitBuilder)
+
+
+# add-fixed-step-resolution-diagnostics thresholds (design D3).
+_RESOLUTION_LTE_MAX = 1e-2
+_RESOLUTION_UNESTIMATED_MAX = 0.5
+
+
+def _warn_unlocated_edges(res):
+    """Event splitting without an edge oracle (review M3): say so once."""
+    c = getattr(res, "counters", None) or {}
+    n = c.get("unlocated_gate_steps", 0)
+    if n:
+        import warnings
+        warnings.warn(
+            f"simulate(enable_substep_state_correction=True): {n} gate "
+            "change(s) came from a switch_fn without next_edge_after(t) "
+            "and could not be located inside the step; each was taken "
+            "at the next grid point (first order there). Give the "
+            "schedule an oracle (make_pwm_switch_fn & co. have one) or "
+            "put the edges on the dt grid. See res.counters.",
+            UserWarning, stacklevel=3)
+
+
+def _resolution_flagged(res) -> bool:
+    """True when :func:`_warn_resolution` warns for this run."""
+    rd = getattr(res, "resolution", None)
+    return rd is not None and bool(
+        rd.lte_max > _RESOLUTION_LTE_MAX or list(rd.ringing)
+        or rd.unestimated_fraction > _RESOLUTION_UNESTIMATED_MAX)
+
+
+def _warn_resolution(builder, res, dt):
+    """One ResolutionWarning per run (see ResolutionWarning)."""
+    if not _resolution_flagged(res):
+        return
+    rd = res.resolution
+    ring = list(rd.ringing)
+    unest = rd.unestimated_fraction > _RESOLUTION_UNESTIMATED_MAX
+    import warnings
+    lines = []
+    if rd.lte_max > _RESOLUTION_LTE_MAX:
+        name = builder.graph.branch_name(rd.lte_branch) or \
+            f"branch #{rd.lte_branch}"
+        lines.append(
+            f"  * {name}: estimated truncation {rd.lte_max:.3g} of its "
+            f"peak in one step, at t = {rd.lte_time:.6g} s.")
+    if ring:
+        try:
+            names = builder.state_var_names()
+        except Exception:  # noqa: BLE001 — test doubles without names
+            names = []
+        worst = max(ring, key=lambda r: r.length)
+        nm = names[worst.var] if worst.var < len(names) else \
+            f"x[{worst.var}]"
+        lines.append(
+            f"  * {nm}: {worst.length} sign-alternating steps from "
+            f"t = {worst.t_start:.6g} s (largest step change "
+            f"{worst.max_delta:.4g}); {len(ring)} such run(s) in all.")
+    if unest:
+        lines.append(
+            f"  * {rd.unestimated_fraction:.0%} of the steps could not be "
+            "estimated (a mask change, restart, split or source jump "
+            "within three steps): the run is not shown to be resolved.")
+    warnings.warn(
+        f"simulate(): dt = {dt:.4g} s does not resolve this circuit "
+        "(fixed-step engine).\n" + "\n".join(lines) +
+        "\n  Reduce dt, or omit dt to let the variable-step engine "
+        "choose. The estimate is not an error bound. Details: "
+        "res.resolution.",
+        ResolutionWarning, stacklevel=3)
+
+
+class ResolutionWarning(UserWarning):
+    """A fixed-step (`pwl`) run whose `dt` does not resolve the circuit:
+    a large truncation estimate or a Nyquist alternation
+    (`res.resolution`). Silence with
+    ``warnings.filterwarnings("ignore", category=pulsim.ResolutionWarning)``
+    or by leaving ``resolution_diagnostics`` off (the default)."""
+
 Cancelled = _berg.Cancelled
+RetiredDeviceError = _berg.RetiredDeviceError
+
+
+def _yaml_retired_as_retired_error(native):
+    import functools
+
+    @functools.wraps(native)
+    def load(*args, **kwargs):
+        try:
+            return native(*args, **kwargs)
+        except RuntimeError as e:
+            # The C++ loader's refusal of a retired type stays a
+            # RuntimeError (every YAML refusal is) and is also the
+            # builder's RetiredDeviceError, so one except catches both.
+            if " is retired: " in str(e) and not isinstance(
+                    e, RetiredDeviceError):
+                raise _berg.RetiredYamlDeviceError(str(e)) from None
+            raise
+    return load
+
+
+load_yaml_string = _yaml_retired_as_retired_error(load_yaml_string)
+load_yaml_file = _yaml_retired_as_retired_error(load_yaml_file)
+from ._refusal import unsupported as _unsupported  # noqa: E402
+from ._control_plan import FixedStepTicks as _FixedStepTicks  # noqa: E402
+from ._control_plan import compose_control as _compose_control  # noqa: E402
+
+# add-mna-native-machines: CircuitBuilder.add_dc_machine (a linear
+# composite of existing kernel elements, solved inside the matrix).
+from . import machines as _machines  # noqa: E402
+_machines.install(CircuitBuilder)
+
+# add-realistic-passives: esr / esl / c_par / rac keywords on
+# add_capacitor / add_inductor and add_transmission_line (composites).
+from . import passives as _passives  # noqa: E402
+_passives.install(CircuitBuilder)
 
 
 
@@ -858,7 +1020,7 @@ def _result_v(self, name: str, t=None):
     return col[t]
 
 
-def _result_i(self, name: str, t=None):
+def _result_i(self, name: str, t=None, *, port=None):
     """Return the branch-current trace for ``name``.
 
     ``result.i()`` aims at the PLECS-style output-equation convention:
@@ -883,6 +1045,16 @@ def _result_i(self, name: str, t=None):
     | ``resistor``               | ``(V_from − V_to) / R_ohms``            |
     | ``capacitor``              | ``C · d(V_from − V_to)/dt``             |
     | ``current_source``         | constant ``I`` from params              |
+    | ``sine_current_source``,   | the source's value at each sample time  |
+    | ``pulse_current_source``,  | (positive OUT of ``n_pos``, as for      |
+    | ``pwl_current_source``     | ``current_source``)                     |
+    | ``vccs``                   | ``gm·(V_in_pos − V_in_neg)`` out of     |
+    |                            | ``n_pos``                               |
+    | ``cccs``                   | ``gain·i(control)`` out of ``n_pos``    |
+    | ``ccvs``                   | its branch unknown (a voltage source)   |
+    | ``gyrator``                | ``port=2`` (default): ``i_2 = −g·v_1``; |
+    |                            | ``port=1``: ``i_1 = g·v_2``; both INTO  |
+    |                            | the device at ``p1_pos`` / ``p2_pos``   |
     | ``diode`` (PWL switched)   | ``g_on·(V_from − V_to − V_f)`` on       |
     |                            | samples the solver stamped the diode    |
     |                            | ON, ``g_off·(V_from − V_to)`` otherwise |
@@ -944,6 +1116,8 @@ def _result_i(self, name: str, t=None):
     t
         Optional step selection (``int`` / ``slice`` / array-like).
         ``None`` returns the full per-sample trace.
+    port
+        Gyrator only: ``1`` or ``2`` (default ``2``, the branch).
     """
     import numpy as _np
     from ._result_views import (
@@ -971,6 +1145,15 @@ def _result_i(self, name: str, t=None):
         import difflib as _difflib
         sugg = _difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
         raise NameNotFoundError(name, "branch", sugg) from None
+
+    if port is not None:
+        kinds = {d.get("branch_id"): d.get("kind")
+                 for d in builder.components()}
+        if kinds.get(b_id) != "gyrator" or port not in (1, 2):
+            raise ValueError(
+                f"result.i({name!r}, port={port!r}): `port` is 1 or 2 and "
+                f"only for a gyrator (this branch is "
+                f"{kinds.get(b_id)!r}).")
 
     # ---- Fast path: state-vector-native kinds (inductor, VS family) ----
     # Try inductor first (most common case), then the source family
@@ -1097,6 +1280,27 @@ def _result_i(self, name: str, t=None):
                 f"`I` ({exc!r})") from None
         return _finalize(_np.full(states.shape[0], I_A))
 
+    # ---------- add-controlled-source-set --------------------------
+    if kind in ("sine_current_source", "pulse_current_source",
+                "pwl_current_source"):
+        val = builder.pool.current_waveform_value
+        return _finalize(_np.array([val(b_id, float(tt))
+                                    for tt in _ta(self)], dtype=float))
+    if kind == "vccs":
+        v_c = (_node_v(states, int(params["in_pos"]))
+               - _node_v(states, int(params["in_neg"])))
+        return _finalize(float(params["gm"]) * v_c)
+    if kind == "cccs":
+        col = int(builder.pool.control_column(b_id, builder.graph))
+        return _finalize(float(params["gain"]) * states[:, col])
+    if kind == "gyrator":
+        g = float(params["g"])
+        if port == 1:  # i_1 = g·v_2, v_2 across the branch
+            return _finalize(g * _v_branch())
+        v_1 = (_node_v(states, int(params["p1_pos"]))
+               - _node_v(states, int(params["p1_neg"])))
+        return _finalize(-g * v_1)
+
     # ----------------------- diode -----------------------------------
     if kind == "diode":
         # PWL switched diode: g_on in series with the forward drop V_f
@@ -1179,7 +1383,8 @@ def _result_i(self, name: str, t=None):
         f"reconstruct currents for this device family, and "
         f"device_loss_summary does not report it either. Currently "
         f"supported: inductor, voltage_source (incl. pwm / sine / "
-        f"pulse variants), resistor, capacitor, current_source, "
+        f"pulse variants), resistor, capacitor, current_source (incl. "
+        f"sine / pulse / pwl), vccs, cccs, ccvs, gyrator, "
         f"diode, shockley_diode, switch. To measure this device's "
         f"current, put a small resistor in series with it (1 mOhm) "
         f"and read `res.i(<that resistor>)`; its loss is then the "
@@ -1461,7 +1666,17 @@ class SolverOptions:
     # disables event iteration entirely (the pre-V2.1 behaviour) —
     # so it cannot double as the "not set" sentinel.
     max_event_iterations: Optional[int] = None
+    # Fixed engine: split a step at a gate edge (schedules with
+    # next_edge_after), source jump or diode crossing inside it; needs
+    # discontinuity_restart (None = off).
     enable_substep_state_correction: Optional[bool] = None
+    # Fixed engine: three SDIRK(2,2) steps after every discontinuity,
+    # gate sampled at the step start (None = off).
+    discontinuity_restart: Optional[bool] = None
+    # Fixed engine: record res.resolution and warn once
+    # (ResolutionWarning) when dt does not resolve the circuit
+    # (None = on).
+    resolution_diagnostics: Optional[bool] = None
 
     # Topology preflight ---------------------------------------------
     # None = engine default (True). False must mean "the user
@@ -1500,6 +1715,40 @@ class SolverOptions:
     dt_init: Optional[float] = None
 
 
+def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
+    """Names of the hooks that put a Python callable in the step loop.
+
+    Pass the objects actually handed to the engine. A switch_fn is
+    native when the kernel calls it in C++: a native PWM class, or a
+    `SwitchSchedule` with an edge oracle (a combination that holds a
+    Python callable has none). Any other non-None hook is Python.
+    """
+    out = []
+    for name, fn in hooks.items():
+        if fn is None:
+            continue
+        if name == "switch_fn" and (
+                isinstance(fn, (NativePwm2Switch, NativeMultiMaskPwm))
+                or (isinstance(fn, SwitchSchedule) and fn.has_edges)):
+            continue
+        out.append(name)
+    return tuple(out)
+
+
+def _carry_jumps(fn, parts):
+    """Give a composed b_extra_fn the declared jumps of its parts.
+
+    A part declares its jump instants with `next_jump_after(t)` (first
+    jump strictly after t); the composition jumps at the earliest.
+    Undeclared parts stay undeclared (the restart rule cannot see them).
+    """
+    nj = [q.next_jump_after for q in parts
+          if q is not None and hasattr(q, "next_jump_after")]
+    if nj:
+        fn.next_jump_after = lambda t, _nj=nj: min(f(t) for f in _nj)
+    return fn
+
+
 def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
                         label):
     """Compose an internal (observer, b_extra) pair with the user's.
@@ -1534,7 +1783,7 @@ def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
                         f"b_extra_fn returned shape {u.shape}, "
                         f"expected ({_n},) when composed with {_lbl}")
                 return _np.asarray(_i(t)) + u
-            b_extra_fn = _b
+            b_extra_fn = _carry_jumps(_b, (b, _u_b))
     return step_observer, b_extra_fn
 
 
@@ -1602,6 +1851,8 @@ def simulate(
     enable_newton_line_search: Optional[bool] = None,
     enable_newton_lm: Optional[bool] = None,
     enable_substep_state_correction: Optional[bool] = None,
+    discontinuity_restart: Optional[bool] = None,
+    resolution_diagnostics: Optional[bool] = None,
     inductor_freeze_di_max: Optional[float] = None,
     inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
@@ -1615,6 +1866,9 @@ def simulate(
     resume_from=None,
     # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
     solver: Optional["SolverOptions"] = None,
+    # --- forward parameter sensitivities (exact path only) ---
+    sensitivities: "Optional[Sequence[str]]" = None,
+    mode_selection: Optional[str] = None,
 ) -> SimulationResult:
     """Build the cache and run a transient simulation.
 
@@ -1745,18 +1999,30 @@ def simulate(
         ``engine='trbdf2'`` / ``'dsed'``: the step CEILING (``dsed``
         defaults to 10 µs); the grid is variable either way.
     engine
-        ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'dsed'`` —
-        see above.
+        ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'exact'`` —
+        see above. ``'exact'`` is the canonical name of the event-driven
+        exact engine; ``'dsed'`` is its alias (one engine: the result's
+        ``engine_used`` and refusals name ``'dsed'``).
+        :func:`pulsim.exact_route` reports which segments of a run are
+        exact-eligible.
     rtol, atol
         Relative / absolute tolerance for the DSED PI controller.
         Ignored if ``engine='pwl'`` (warning emitted). Defaults:
-        ``rtol=1e-6, atol=1e-9``.
+        ``rtol=1e-6, atol=1e-9``. For ``'trbdf2'`` / ``'auto'``
+        (defaults ``1e-5`` / ``1e-8``) they bound the local error
+        estimate, which since update-trbdf2-error-control is the true
+        local error (it was half of it): pass doubled values for the
+        previous step density.
     dt_init
         Initial step for the DSED PI controller (default 1e-9).
     integrator
         DSED override: ``'auto'`` (default), ``'rk45'``, or ``'bdf2'``.
-        ``'auto'`` picks per mode via stiffness detector. Force one
-        for debug / repeatability.
+        ``'auto'`` advances every mode that has a closed-form
+        propagator (LTI, supported sources, non-defective eigenbasis)
+        with the exact stepper, capped at ``dt``; only modes without
+        one go to the stiffness detector, which picks DOPRI5 or BDF2.
+        ``result.n_exact_steps`` counts the exact steps. ``'bdf2'``
+        starts each segment with one backward-Euler step.
     stiffness_threshold
         DSED override: ``|λ_max|·h`` ratio above which auto-dispatch
         picks BDF2 (default 10.0).
@@ -1775,8 +2041,24 @@ def simulate(
         PWL-only: If ``True``, seed the initial state from
         :func:`compute_dc_op` instead of zero.
     enable_nonlinear_refresh
-        PWL-only: Force-enable/-disable the Newton refresh pass.
-        ``None`` (default) means auto-detect.
+        ``None`` (default): the kernel stamps the Newton devices when
+        the circuit has any. ``True`` forces the static chain.
+        ``False`` on a circuit with a smooth / Shockley diode, MOSFET
+        or IGBT raises :class:`UnsupportedError` (it would simulate
+        them as open circuits).
+    closed_loops, step_observer, controller_period
+        Controllers, on ``pwl`` and ``trbdf2`` (``dsed`` refuses
+        them). Each ``ClosedLoop`` (``period``) and a
+        ``step_observer`` with ``controller_period`` (or a ``.period``)
+        is a tick source: source j runs at ``t_start + k*T_j``,
+        ``ceil(span / T_j)`` times, sources due at one instant in
+        registration order (loops, then the observer). ``trbdf2``
+        lands each instant; ``pwl`` delivers it at the first grid
+        point at or after it (warns when ``T_j`` is not a multiple of
+        ``dt``; ``T_j < dt`` raises). A ``step_observer`` without a
+        period runs every ``pwl`` step. ``controller_period`` without
+        a ``step_observer`` raises ``ValueError``. The result carries
+        ``control_tick_counts`` and ``control_tick_jitter_max``.
     max_newton_iterations, max_event_iterations
         PWL-only: forwarded to :class:`SimulationOptions`.
     tol_newton_dx, tol_newton_res
@@ -1787,6 +2069,39 @@ def simulate(
         :class:`SolverOptions`). Cross-check on the other engine
         instead (``engine='pwl'`` with an explicit ``dt`` after a
         TR-BDF2 abort).
+    sensitivities
+        ``engine='dsed'`` only (every other engine refuses it):
+        parameter names ``"<component>.<field>"`` (``R``, ``L``,
+        ``C``, ``V``; ``"<switch>.duty"`` of a trailing-edge PWM).
+        The run is the exact stepper with events located and no event
+        projection; the result gains ``.sensitivity`` (``states``
+        ``(n, n_state, n_p)``), ``.sens(signal, param)`` and
+        ``.kpi(signal, kind, with_grad=True)``. Exact or refused, never
+        a finite difference: see :mod:`pulsim.sensitivity`.
+
+    mode_selection
+        How PWL diodes are decided at an event. ``None`` / ``'legacy'``
+        (default): today's settle; on ``engine='dsed'`` a guard judges
+        each settled mode on its own exact trajectory and re-decides an
+        event whose mode violates a diode's law with the complementarity
+        problem (LCP) — counted in ``result.diagnostics['mode_guard']``.
+        ``'lcp'`` (``engine='dsed'``): the LCP decides every event,
+        counters in ``result.diagnostics['mode_selection']``.
+        ``'shadow'`` (``engine='dsed'``): the default run, plus the LCP
+        solved beside it; disagreements in
+        ``result.diagnostics['mode_shadow']``. ``'shadow'`` / ``'lcp'``
+        on ``pwl`` / ``trbdf2`` raise :class:`UnsupportedError`.
+
+    resolution_diagnostics
+        ``engine='pwl'`` only, default OFF (it costs 5-14 %): ``True``
+        records ``res.resolution`` (a per-step truncation estimate of
+        the linear capacitors and inductors relative to each one's
+        running peak, floored at 1e-3 of its kind's peak, the runs of
+        >= 4 sign-alternating steps of any state entry, and the fraction
+        of steps that could not be estimated) and warns once
+        (:class:`ResolutionWarning`) when ``lte_max > 1e-2``, a run
+        exists or over half the steps are unestimated. An estimate, not
+        an error bound; the states are the same bit for bit either way.
 
     Returns
     -------
@@ -1801,14 +2116,22 @@ def simulate(
         On unknown ``engine``; on ``engine='pwl'`` without ``dt``;
         on invalid DSED options (negative tolerance, unknown
         ``integrator``).
+    ResolutionWarning
+        A ``UserWarning``: the fixed ``dt`` does not resolve the circuit
+        (see ``resolution_diagnostics``).
     UserWarning
         When DSED-only kwargs are passed with ``engine='pwl'`` (they
         are silently ignored — the warning is informational so
         scripts that copy-paste kwargs don't break suddenly).
+    UnsupportedError
+        A ``ValueError`` naming ``engine`` and the ``device`` (branch)
+        or ``feature`` (keyword) the engine cannot simulate or honour;
+        ``pulsim.engine_capabilities()`` is the device-kind table.
+        Catch it by name, never with ``except Exception``.
     NotImplementedError
         On ``engine='dsed'`` from a :class:`CircuitBuilder` when
         the per-mask (A, b) extractor rejects the circuit (e.g.
-        nonlinear device the extractor doesn't yet support). For
+        coupled inductors); it is also an ``UnsupportedError``. For
         PED today with a user-supplied LTI system, use
         :func:`pulsim.dsed.run_user_lti` directly.
     """
@@ -1869,6 +2192,10 @@ def simulate(
         if enable_substep_state_correction is None:
             enable_substep_state_correction = (
                 solver.enable_substep_state_correction)
+        if discontinuity_restart is None:
+            discontinuity_restart = solver.discontinuity_restart
+        if resolution_diagnostics is None:
+            resolution_diagnostics = solver.resolution_diagnostics
         if inductor_freeze_di_max is None:
             inductor_freeze_di_max = solver.inductor_freeze_di_max
         if inductor_abs_clamp is None:
@@ -1886,6 +2213,12 @@ def simulate(
     # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
     # (rtol/atol/dt_init/integrator/stiffness_threshold/h_bdf2). For
     # engine='pwl' it just warns on DSED-only kwarg leakage.
+    # add-exact-propagator-strategy D11: 'exact' is the canonical name of the
+    # event-driven exact engine and 'dsed' its alias. One run: the result's
+    # engine_used and every refusal keep naming 'dsed' (the capability-table
+    # column) until the default flip (DECISIONS #3).
+    if engine == "exact":
+        engine = "dsed"
     from . import _dsed_dispatch as _dsed
     _dsed._validate_engine_kwargs(
         engine=engine,
@@ -1897,6 +2230,10 @@ def simulate(
         stiffness_threshold=stiffness_threshold,
         h_bdf2=h_bdf2,
     )
+    if mode_selection not in (None, "legacy", "shadow", "lcp"):
+        raise ValueError(
+            f"simulate(): mode_selection={mode_selection!r}; expected "
+            "None, 'legacy', 'shadow' or 'lcp'.")
 
     # ---- Topology preflight (v2.0 Phase 2) --------------------------
     #
@@ -1967,7 +2304,8 @@ def simulate(
                 "populated). Resuming from it would start from zero "
                 "without saying so.")
         if engine == "dsed":
-            raise ValueError(
+            raise _unsupported(
+                "dsed", "resume_from",
                 'simulate(engine="dsed"): resume_from is not supported '
                 "by the event-driven engine, which has no snapshot of "
                 'its own; use engine="pwl" (exact resume) or '
@@ -1987,26 +2325,49 @@ def simulate(
         except Exception:  # noqa: BLE001 — test mocks etc.
             pass
 
+    # ---- Controllers: one composition for every engine ----
+    # (fix-control-tick-semantics). Above the dispatch so its refusals
+    # (controller_period without an observer, a bad period) hold on
+    # every engine; dsed refuses closed_loops / step_observer itself.
+    _plan = _compose_control(builder, closed_loops, step_observer,
+                             controller_period, switch_fn)
+
+    # ---- Parameter sensitivities: the exact path only. Above the
+    # dispatch (three early returns below), so every engine refuses or
+    # honours it.
+    if sensitivities is not None and engine != "dsed":
+        raise _unsupported(
+            engine, "sensitivities",
+            f"simulate(engine={engine!r}, sensitivities=...): forward "
+            "sensitivities are computed on the exact path only "
+            "(engine='dsed'); on this engine a gradient would be a "
+            "finite difference of runs whose events sit on the step grid "
+            "(off by a factor of ten on the DCM buck). Pass "
+            "engine='dsed'.")
+    if sensitivities is not None and mode_selection in ("shadow", "lcp"):
+        raise _unsupported(
+            engine, "sensitivities",
+            f"simulate(sensitivities=..., mode_selection={mode_selection!r})"
+            ": the sensitivity run differentiates the legacy event "
+            "settle; a mode chosen by the complementarity problem has no "
+            "derivative here. Drop mode_selection.")
+
     # ---- Engine dispatch: DSED takes the early-return path. ----
     # For engine='dsed', `integrator` ∈ {'auto', 'rk45', 'bdf2', None}.
     # The DSED dispatcher owns its own validation; main's Phase 2.4
     # adaptive-RK selector below is PWL-specific and must NOT apply
     # to DSED integrator names.
     if engine == "dsed":
-        if getattr(builder, "_c_blocks", None):
-            import warnings
-            warnings.warn(
-                "simulate(engine='dsed'): C blocks added via add_c_block() "
-                "are not yet wired into the DSED engine (their outputs use "
-                "b_extra, which DSED does not consume). Use engine='pwl' to "
-                "run C blocks.")
         # Hard-fail on kwargs the DSED path cannot honor. Silently
         # dropping these is the worst failure mode a simulator can
         # have: a closed-loop circuit would run OPEN-loop and return
-        # plausible-looking (wrong) waveforms. Mirror of the C-block
-        # warning above, but these change the *physics* of the run,
-        # so they raise instead of warn.
+        # plausible-looking (wrong) waveforms. C blocks were a warning
+        # followed by an open-loop run until add-engine-conformance-
+        # matrix; they change the physics, so they refuse too.
         _dsed_unsupported = {
+            # C blocks drive the circuit through b_extra, which the
+            # DSED engine does not consume.
+            "c_blocks": bool(getattr(builder, "_c_blocks", None)),
             "step_observer": step_observer is not None,
             "closed_loops": bool(closed_loops),
             "should_continue": should_continue is not None,
@@ -2037,10 +2398,20 @@ def simulate(
             # no such cache, so the hook would never be called and
             # the coupling it was meant to close would stay open.
             "on_cache": on_cache is not None,
+            # Fixed-step post-solve guards and the commutation split:
+            # nothing in the DSED engine reads them.
+            "inductor_freeze_di_max": inductor_freeze_di_max is not None,
+            "inductor_abs_clamp": inductor_abs_clamp is not None,
+            "enable_substep_state_correction": bool(
+                enable_substep_state_correction),
+            "discontinuity_restart": bool(discontinuity_restart),
+            # Per-step truncation of a fixed grid: none to estimate.
+            "resolution_diagnostics": bool(resolution_diagnostics),
         }
         _offending = [k for k, hit in _dsed_unsupported.items() if hit]
         if _offending:
-            raise ValueError(
+            raise _unsupported(
+                "dsed", _offending[0],
                 f"simulate(engine='dsed'): {', '.join(_offending)} "
                 "is/are not supported by the DSED engine yet — the "
                 "run would silently ignore them (e.g. a closed-loop "
@@ -2050,58 +2421,40 @@ def simulate(
                 "Observer/closed-loop support inside DSED is tracked "
                 "for v2.0 (event-synchronised controller cadence)."
             )
-        if _ic_from_builder:
-            # The builder recorded `c0=` / `i0=` initial conditions
-            # and DSED cannot apply them. It used to START AT ZERO
-            # in silence: an inductor declared `i0=100` began its
-            # run at 0 A, the solve converged, and the trace looked
-            # like a perfectly ordinary energisation transient —
-            # the same circuit answering differently depending on
-            # which engine the router happened to pick.
-            #
-            # It is not a matter of forwarding the vector. DSED
-            # solves a REDUCED state (one entry per reactive
-            # element) while `builder.initial_state()` is a
-            # full-MNA vector, and for a FLOATING capacitor the
-            # reduced state is the congruence-transformed
-            # difference v_pos − v_neg, not the row the gather
-            # would pick up. A naive gather would therefore be
-            # right for inductors and grounded caps and quietly
-            # wrong for floating ones — which is the failure this
-            # message exists to stop. Refuse by name until the
-            # projection is built and tested.
-            raise ValueError(
-                "simulate(engine='dsed'): this circuit declares "
-                "initial conditions (c0= / i0= / set_initial), and "
-                "the DSED engine cannot apply them yet — it would "
-                "start every state at ZERO and return a plausible "
-                "but wrong transient. Use engine='pwl' (or "
-                "'trbdf2'), which honour them, or pass "
-                "initial_state=<reduced state vector> explicitly if "
-                "you know DSED's state ordering "
-                "([v_C..., i_L...])."
-            )
         # The DSED branch returns here, ~400 lines before the PWL
         # tail that attaches `_builder` / `_preflight`. Attach the
         # preflight report on the way out, so `result._preflight` —
         # which the warning tells every user to read — is not a
         # PWL-only attribute.
-        _dsed_res = _dsed.run_dsed_from_builder(
-            builder=builder,
-            t_end=t_end,
-            dt=dt,
-            rtol=rtol,
-            atol=atol,
-            dt_init=dt_init,
-            integrator=integrator,
-            stiffness_threshold=stiffness_threshold,
-            h_bdf2=h_bdf2,
-            t_start=t_start,
-            switch_fn=switch_fn,
-            b_extra_fn=b_extra_fn,
-            initial_state=initial_state,
-            progress=progress,
-        )
+        if sensitivities is not None:
+            from .sensitivity import simulate_sensitivities
+            _dsed_res = simulate_sensitivities(
+                builder, t_end, sensitivities=sensitivities, dt=dt,
+                t_start=t_start, switch_fn=switch_fn,
+                initial_state=None if _ic_from_builder else initial_state,
+                ic_from_builder=_ic_from_builder, dt_init=dt_init,
+                b_extra_fn=b_extra_fn, integrator=integrator)
+        else:
+            _dsed_res = _dsed.run_dsed_from_builder(
+                builder=builder,
+                t_end=t_end,
+                dt=dt,
+                rtol=rtol,
+                atol=atol,
+                dt_init=dt_init,
+                integrator=integrator,
+                stiffness_threshold=stiffness_threshold,
+                h_bdf2=h_bdf2,
+                t_start=t_start,
+                switch_fn=switch_fn,
+                b_extra_fn=b_extra_fn,
+                # Builder ICs (c0= / i0=) are a full-MNA vector: the
+                # dispatcher maps them per device onto the reduced state.
+                initial_state=None if _ic_from_builder else initial_state,
+                builder_initial_state=initial_state if _ic_from_builder else None,
+                progress=progress,
+                mode_selection=mode_selection,
+            )
         try:
             _dsed_res._preflight = _preflight_report
             _dsed_res.engine_used = "dsed"
@@ -2111,8 +2464,18 @@ def simulate(
             # accessors the pwl engine gets now mean the same thing
             # here. `_builder` is what they resolve names against.
             _dsed_res._builder = builder
+            # No switch_fn: the DSED dispatcher installs a Python
+            # all-closed lambda, so a placeholder stands in for it.
+            _dsed_res.step_loop_python_callbacks = (
+                _step_loop_python_callbacks(
+                    switch_fn=(switch_fn if switch_fn is not None
+                               else "default"),
+                    b_extra_fn=b_extra_fn))
         except AttributeError:  # pragma: no cover
             pass
+        _auto_check_voltage_sanity(_dsed_res, builder,
+                                    voltage_sanity_factor)
+        _dsed.check_diode_modes(_dsed_res, builder)
         return _dsed_res
 
     if resume_from is not None and t_start == 0.0:
@@ -2141,6 +2504,8 @@ def simulate(
             on_cache=on_cache,
             enable_substep_state_correction=(
                 enable_substep_state_correction),
+            discontinuity_restart=discontinuity_restart,
+            resolution_diagnostics=resolution_diagnostics,
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
             switch_fn=switch_fn)
@@ -2187,11 +2552,22 @@ def simulate(
             else:
                 engine = "trbdf2"
         elif _route_reasons:
-            raise ValueError(
+            raise _unsupported(
+                "trbdf2", getattr(_route_reasons[0], "feature", ""),
                 "simulate(engine='trbdf2'): "
                 + "; ".join(_route_reasons)
                 + ". Use engine='auto' to route to the fixed-step "
                 "engine automatically, or engine='pwl' explicitly.")
+
+    # engine is now 'trbdf2' or 'pwl' ('auto' never routes to dsed)
+    if mode_selection in ("shadow", "lcp"):
+        raise _unsupported(
+            engine, "mode_selection",
+            f"simulate(engine={_engine_asked!r}, mode_selection="
+            f"{mode_selection!r}): the complementarity selection is "
+            f"implemented on engine='dsed' only; this run lands on "
+            f"engine={engine!r}, whose settle has no hook yet. Use "
+            "engine='dsed', or drop mode_selection.")
 
     if engine == "trbdf2":
         # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse
@@ -2213,77 +2589,21 @@ def simulate(
                 "construction.",
                 stacklevel=2)
         # ---- controllers on an EXACT cadence ----
-        # A digital controller samples at k·T_ctrl. The fixed
-        # engine only THROTTLES an every-step observer on that
-        # period, so the tick lands on whichever step first crosses
-        # the boundary and the error accumulates (measured: 198
-        # ticks instead of 200 over 20 ms at 10 kHz). Here the tick
-        # instants are SCHEDULED like gate edges — landed exactly,
-        # observer fired there, and the duty it sets is what the
-        # coming step's mask is built from.
-        _cl_list = list(closed_loops) if closed_loops else []
-        _auto_obs_list = []
-        _auto_periods = []
-        for _cl in _cl_list:
-            # `.tick` is the loop's UNTHROTTLED update. Calling the
-            # throttled `step_observer` on an exactly-scheduled
-            # cadence loses ticks to floating point (measured 129
-            # of 200), which quietly changes the loop gain.
-            _auto_obs_list.append(
-                getattr(_cl.step_observer, "tick", _cl.step_observer))
-            _p = float(getattr(_cl, "period", 0.0) or 0.0)
-            if _p > 0.0:
-                _auto_periods.append(_p)
-        if step_observer is not None:
-            _auto_obs_list.append(
-                getattr(step_observer, "tick", step_observer))
-            _p_obs = controller_period
-            if _p_obs is None:
-                _p_obs = getattr(step_observer, "period", None)
-            if _p_obs is not None:
-                _auto_periods.append(float(_p_obs))
-        if _auto_obs_list and not _auto_periods:
-            raise ValueError(
+        # Each tick source of the plan is scheduled at its own
+        # t_start + k*T_j, landed like a gate edge; `.tick` (the
+        # loop's unthrottled update) is what the plan holds. An
+        # every-step observer has no grid to ride here.
+        if _plan.every_step:
+            raise _unsupported(
+                "trbdf2", "step_observer",
                 "simulate(engine='auto'): a step_observer needs a "
                 "cadence. This engine has no fixed grid to ride, "
                 "so pass controller_period=<T_ctrl seconds> (the "
                 "rate your controller samples at) and the tick "
                 "instants are scheduled exactly. A ClosedLoop from "
                 "bind_pi_to_switch carries its own period.")
-        _auto_period = min(_auto_periods) if _auto_periods else 0.0
-        if len(set(_auto_periods)) > 1:
-            # Different rates: tick every observer on the fastest
-            # schedule and let each one's own throttle decide (the
-            # binder's observers already throttle on their period).
-            pass
-        if len(_auto_obs_list) == 1:
-            _auto_observer = _auto_obs_list[0]
-        elif _auto_obs_list:
-            def _auto_observer(t, x, _obs=tuple(_auto_obs_list)):
-                for _o in _obs:
-                    _o(t, x)
-        else:
-            _auto_observer = None
-        if _cl_list:
-            _cl_switch_fns = [c.switch_fn for c in _cl_list]
-            if switch_fn is None and len(_cl_switch_fns) == 1:
-                switch_fn = _cl_switch_fns[0]
-            elif _cl_switch_fns:
-                _n_sw_cl = builder.graph.num_switches
-                _user_sf = switch_fn
+        switch_fn = _plan.switch_fn
 
-                def switch_fn(t, _fns=tuple(_cl_switch_fns),
-                               _u=_user_sf, _n=_n_sw_cl):
-                    m = SwitchStateMask(_n)
-                    if _u is not None:
-                        m = _u(t)
-                    for _f in _fns:
-                        m = m | _f(t)
-                    return m
-
-        _auto_nl = (enable_nonlinear_refresh
-                     if enable_nonlinear_refresh is not None
-                     else builder.pool.has_nonlinear_devices())
         _span = float(t_end) - float(t_start)
         # 0 = let the kernel pick: it knows the circuit's fastest
         # periodic source and caps the ceiling at 20 steps per
@@ -2301,8 +2621,7 @@ def simulate(
             # fixed engine's all-CLOSED legacy default is what the
             # router sends this case to instead — flipping THAT is
             # its own breaking change, not this one).
-            switch_fn = (lambda _n=_n_sw:
-                          (lambda t: SwitchStateMask(_n)))()
+            switch_fn = make_constant_switch_fn(SwitchStateMask(_n_sw))
         cache = PwlStateSpaceCache(builder.graph, builder.pool)
         # Lazy build only needs a positive dt to mark the cache
         # dynamic; the stepper solves at its own per-step dt via
@@ -2322,9 +2641,10 @@ def simulate(
                     0 if max_event_iterations is None
                     else int(max_event_iterations)),
                 should_continue=should_continue,
-                observer_period=_auto_period,
-                step_observer=_auto_observer,
-                enable_nonlinear_refresh=_auto_nl,
+                observer_periods=[_p for _, _p in _plan.ticks],
+                observers=[_f for _f, _ in _plan.ticks],
+                # None: the kernel stamps the Newton devices itself.
+                enable_nonlinear_refresh=enable_nonlinear_refresh,
                 max_newton_iterations=int(max_newton_iterations or 0),
                 tol_newton_dx=float(tol_newton_dx or 0.0),
                 tol_newton_res=float(tol_newton_res or 0.0),
@@ -2349,8 +2669,16 @@ def simulate(
         res._preflight = _preflight_report
         res._switch_fn = switch_fn
         res._trbdf2_stats = _stats
+        res.control_tick_counts = list(_stats["control_tick_counts"])
+        res.control_tick_jitter_max = 0.0
         res.engine_used = "trbdf2"
         res.engine_route_reason = None
+        res.step_loop_python_callbacks = _step_loop_python_callbacks(
+            switch_fn=switch_fn, b_extra_fn=b_extra_fn,
+            # the loops' ticks are reported under closed_loops
+            step_observer=step_observer,
+            should_continue=should_continue,
+            closed_loops=closed_loops or None)
         # The implausible-voltage detector is engine-independent
         # (it reads the trace, not the stepper) and this engine's
         # new all-OPEN default mask makes the inductor-open case it
@@ -2418,43 +2746,28 @@ def simulate(
         )
     _ = rtol, atol, dt_init  # Reserved for the v1.6 RK path; recorded only.
 
-    if closed_loops:
-        # Compose closed_loops with any user-supplied switch_fn /
-        # step_observer. Pre-v1.6.5 this raised ValueError because
-        # the loop owns its own switch indices and observer state;
-        # but real drives need this composition: e.g. a closed-loop
-        # PFC boost stage (owns the boost MOSFET via ClosedLoop) +
-        # an openly-switched 3φ VSI (owns its own switches via a
-        # separate switch_fn) + a PMSM observer (b_extra_fn /
-        # step_observer). Each owner addresses a disjoint set of
-        # switch indices, so the merged switch_fn is the bitwise OR
-        # of every contributor's mask — exactly what
-        # `make_combined_switch_fn` already does. Step observers
-        # compose by running each callback in registration order:
-        # closed-loop observers first (they update PI state /
-        # closed-loop bookkeeping), then the user's step_observer
-        # (e.g. PMSM mechanical state, custom probes).
-        loops = list(closed_loops)
-        n_sw_compose = builder.graph.num_switches
-        per_switch_fns = [loop.switch_fn for loop in loops]
-        if switch_fn is not None:
-            per_switch_fns.append(switch_fn)
-        switch_fn = make_combined_switch_fn(n_sw_compose, per_switch_fns)
-
-        per_observers: list[Callable[[float, object], None]] = [
-            loop.step_observer for loop in loops]
-        if step_observer is not None:
-            per_observers.append(step_observer)
-
-        def _composed_observer(t: float, x) -> None:
-            for obs in per_observers:
+    # Controllers from the plan composed above the dispatch: the
+    # gates merged into one switch_fn, the periodic sources through
+    # the integer-k scheduler (tick 0 at t_start, none lost), then the
+    # every-step observers. Order: closed loops in list order, then
+    # the user observer. Before fix-control-tick-semantics the loops'
+    # own elapsed-time throttles lost ticks (198 of 200) and
+    # controller_period was ignored here.
+    switch_fn = _plan.switch_fn
+    _tick_sched = None
+    if _plan.ticks:
+        _tick_sched = _FixedStepTicks(_plan.ticks, float(t_start),
+                                      float(t_end), float(dt))
+    _per_step = ([_tick_sched] if _tick_sched is not None else []) \
+        + list(_plan.every_step)
+    if _tick_sched is not None or len(_per_step) > 1:
+        def _composed_observer(t: float, x, _obs=tuple(_per_step)) -> None:
+            for obs in _obs:
                 obs(t, x)
 
-        # T2.2: stash the inner observers so the post-run
-        # _auto_attach_motor_traces can walk into any MotorObserverBundle
-        # that the user passed via step_observer= (now wrapped here).
-        _composed_observer._inner_observers = per_observers  # type: ignore[attr-defined]
-
+        # T2.2: the post-run _auto_attach_motor_traces walks these to
+        # find a MotorObserverBundle passed via step_observer=.
+        _composed_observer._inner_observers = _plan.inner_observers  # type: ignore[attr-defined]
         step_observer = _composed_observer
 
     # Custom-code blocks (C blocks) registered via add_c_block(): compose
@@ -2488,7 +2801,7 @@ def simulate(
             return total if total is not None else []
 
         step_observer = _cblock_observer
-        b_extra_fn = _cblock_b_extra
+        b_extra_fn = _carry_jumps(_cblock_b_extra, [_prior_bex, *_cb_bex])
 
     # Build the PWL cache — LAZY by default (Phase-0 fix #7).
     # A PWM converter visits only a handful of the 2^N switch
@@ -2541,6 +2854,12 @@ def simulate(
                 "re-fire), silently corrupting the capacitor "
                 "bookkeeping. The ladder is disabled automatically "
                 "when mmc_arms is set; do not request it.")
+        if discontinuity_restart:
+            raise ValueError(
+                "simulate(mmc_arms=..., discontinuity_restart=True): "
+                "the restart half-steps re-solve at dt/2 with the "
+                "arm's full-dt Thevenin stamp — the dt-halving "
+                "corruption again.")
         if enable_substep_state_correction:
             raise ValueError(
                 "simulate(mmc_arms=..., "
@@ -2632,6 +2951,10 @@ def simulate(
         opts.enable_newton_lm = enable_newton_lm
     if enable_substep_state_correction is not None:
         opts.enable_substep_state_correction = enable_substep_state_correction
+    if discontinuity_restart is not None:
+        opts.discontinuity_restart = bool(discontinuity_restart)
+    if resolution_diagnostics is not None:
+        opts.resolution_diagnostics = bool(resolution_diagnostics)
     if inductor_freeze_di_max is not None and inductor_freeze_di_max > 0:
         opts.inductor_freeze_di_max = float(inductor_freeze_di_max)
     if inductor_abs_clamp is not None and inductor_abs_clamp > 0:
@@ -2670,11 +2993,12 @@ def simulate(
         default_mask = SwitchStateMask(n_sw)
         for i in range(n_sw):
             default_mask.set(i, True)
-        switch_fn = lambda _t: default_mask  # noqa: E731
+        # Evaluated in C++: no Python callable in the step loop.
+        switch_fn = make_constant_switch_fn(default_mask)
 
-    # Auto-detect nonlinear devices (proposal #3.4).
-    if enable_nonlinear_refresh is None:
-        enable_nonlinear_refresh = builder.pool.has_nonlinear_devices()
+    # enable_nonlinear_refresh=None goes through as is: the kernel
+    # stamps the Newton devices when the circuit has any, and refuses
+    # False on such a circuit (it used to simulate them as open).
 
     # Progress bar via step_observer: print a percentage at
     # configurable intervals. The user can pass:
@@ -2892,6 +3216,21 @@ def simulate(
         res.engine_used = "pwl"
         res.engine_route_reason = (
             "; ".join(_route_reasons) if _route_reasons else None)
+        res.step_loop_python_callbacks = _step_loop_python_callbacks(
+            switch_fn=switch_fn, b_extra_fn=b_extra_fn,
+            # the chain fast path runs the observer's C++ chain
+            step_observer=None if cxx_chain is not None else step_observer,
+            should_continue=should_continue,
+            closed_loops=_closed_loops_user or None)
+    except AttributeError:  # pragma: no cover
+        pass
+    try:
+        # Per tick source, registration order; the largest lateness
+        # of a tick on this grid (0 when every T_j is a multiple of dt).
+        res.control_tick_counts = (
+            list(_tick_sched.counts) if _tick_sched is not None else [])
+        res.control_tick_jitter_max = (
+            _tick_sched.jitter_max if _tick_sched is not None else 0.0)
     except AttributeError:  # pragma: no cover
         pass
     try:
@@ -2955,6 +3294,10 @@ def simulate(
             f"{first.reason[:200]}",
             stacklevel=2)
 
+    _warn_newton_roundoff(res, "simulate()")
+    _warn_resolution(builder, res, dt)
+    _warn_unlocated_edges(res)
+
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:
         import warnings
@@ -3006,12 +3349,37 @@ def simulate(
     return res
 
 
+def _warn_newton_roundoff(res, eng) -> None:
+    """add-newton-roundoff-acceptance: say when a transient Newton
+    solve was accepted at roundoff level instead of aborting."""
+    n = int(getattr(res, "newton_roundoff_accepts", 0) or 0)
+    if n > 0:
+        import warnings
+        warnings.warn(
+            f"{eng}: {n} Newton solve(s) ran out of iterations with "
+            f"||dx|| stagnated at roundoff and were accepted: every "
+            f"row's residual is within "
+            f"{res.newton_roundoff_omega_max:.2g} of the magnitudes it "
+            f"sums (at most 8 eps; worst at MNA row "
+            f"{res.newton_roundoff_row}, measured against the "
+            f"magnitudes at the solve's start state). Each would "
+            f"otherwise have aborted at its iteration budget; the "
+            f"state kept is the iterate whose residual was checked. "
+            f"It is not a loosened tol_newton_dx, and it does not "
+            f"validate the state itself: a run that starts from a "
+            f"wrong state can be accepted at roundoff all the way. "
+            f"More than 130 consecutive accepts abort the run. Check "
+            f"result.newton_roundoff_accepts.",
+            stacklevel=3)
+
+
 def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
     """The variable-step engine's own confessions, from its stats and
     its switch-state record. Each one names what the engine could not
     guarantee and how to cross-check it."""
     import warnings
     eng = f"simulate(engine={engine_asked!r})"
+    _warn_newton_roundoff(res, eng)
     if stats.get("n_forced_accepts", 0) > 0:
         warnings.warn(
             f"{eng}: "
@@ -3174,6 +3542,12 @@ def _floating_subnets(builder) -> list:
                   for grp in groups.values() if storage.intersection(grp))
 
 
+class _Blocker(str):
+    """A `_trbdf2_blockers` reason; `.feature` is the keyword name."""
+
+    feature = ""
+
+
 def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                      on_cache=None,
                       controller_period, live_stream, progress,
@@ -3181,7 +3555,8 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                       max_dt_halvings, store_every, mmc_arms,
                       enable_substep_state_correction,
                       inductor_freeze_di_max, inductor_abs_clamp,
-                      switch_fn):
+                      switch_fn, discontinuity_restart=None,
+                      resolution_diagnostics=None):
     """Why the variable-step engine cannot serve this run.
 
     Returns a list of human-readable reasons — empty means it can.
@@ -3193,6 +3568,13 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     asked for it wants to know.
     """
     why = []
+
+    def _blk(feature, text):
+        # A route reason that also names the keyword behind it, so the
+        # explicit-engine refusal can say which feature it refuses.
+        r = _Blocker(text)
+        r.feature = feature
+        return r
     # No device-kind blockers remain. Every nonlinear device is
         # served on the variable-step engine now: the diodes /
     # MOSFETs / IGBTs were always fine (each stage is a Newton solve
@@ -3218,55 +3600,60 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     # was still inside that guard: an import failure would have
     # dropped a real blocker in silence. It is a plain check now.
     if on_cache is not None:
-        why.append(
+        why.append(_blk("on_cache",
             "on_cache refactors the fixed-step engine's PWL cache "
             "mid-run; TR-BDF2 has no such cache, so the hook would "
             "never fire and whatever it was closing (an "
             "electro-thermal loop, usually) would silently stay "
-            "open")
+            "open"))
     if getattr(builder, "_c_blocks", None):
-        why.append("C blocks sample on a fixed dt grid")
+        why.append(_blk("c_blocks", "C blocks sample on a fixed dt grid"))
     if live_stream is not None:
-        why.append("live_stream needs the fixed-step kernel's "
-                    "per-step ring push")
+        why.append(_blk("live_stream", "live_stream needs the fixed-step kernel's "
+                    "per-step ring push"))
     if progress:
-        why.append("progress has no per-step hook here")
+        why.append(_blk("progress", "progress has no per-step hook here"))
     if start_from_dc_op:
-        why.append("start_from_dc_op is a fixed-step entry point")
+        why.append(_blk("start_from_dc_op", "start_from_dc_op is a fixed-step entry point"))
     if strict_event_iterations:
-        why.append("strict_event_iterations belongs to the "
-                    "fixed-step diode iteration")
+        why.append(_blk("strict_event_iterations", "strict_event_iterations belongs to the "
+                    "fixed-step diode iteration"))
     if max_dt_halvings is not None and int(max_dt_halvings) > 0:
-        why.append("max_dt_halvings re-solves at sub-dt against a "
-                    "full-dt companion")
+        why.append(_blk("max_dt_halvings", "max_dt_halvings re-solves at sub-dt against a "
+                    "full-dt companion"))
     if enable_substep_state_correction:
-        why.append("enable_substep_state_correction is the "
-                    "fixed-step commutation split")
+        why.append(_blk("enable_substep_state_correction", "enable_substep_state_correction is the "
+                    "fixed-step commutation split"))
+    if discontinuity_restart:
+        why.append(_blk("discontinuity_restart", "discontinuity_restart is the "
+                    "fixed-step engine's restart rule"))
+    if resolution_diagnostics:
+        why.append(_blk("resolution_diagnostics", "resolution_diagnostics "
+                    "estimates a fixed step's truncation"))
     if store_every is not None and int(store_every) != 1:
-        why.append("store_every decimates a uniform grid")
+        why.append(_blk("store_every", "store_every decimates a uniform grid"))
     if mmc_arms:
-        why.append("mmc_arms drives the fixed-step observer/"
-                    "b_extra pair")
+        why.append(_blk("mmc_arms", "mmc_arms drives the fixed-step observer/"
+                    "b_extra pair"))
     if inductor_freeze_di_max is not None:
-        why.append("inductor_freeze_di_max is a fixed-step "
-                    "post-solve guard")
+        why.append(_blk("inductor_freeze_di_max", "inductor_freeze_di_max is a fixed-step "
+                    "post-solve guard"))
     if inductor_abs_clamp is not None:
-        why.append("inductor_abs_clamp is a fixed-step post-solve "
-                    "guard")
-    # An observer needs a CADENCE here — there is no grid to ride.
-    _has_cadence = controller_period is not None
-    if closed_loops:
-        for _cl in closed_loops:
-            if float(getattr(_cl, "period", 0.0) or 0.0) > 0.0:
-                _has_cadence = True
-    if step_observer is not None and not _has_cadence:
-        if getattr(step_observer, "period", None) is None:
-            why.append(
-                "a step_observer with no cadence (pass "
-                "controller_period=<T_ctrl>, or use a ClosedLoop, "
-                "which carries its own)")
-    if closed_loops and not _has_cadence:
-        why.append("closed_loops whose handles carry no period")
+        why.append(_blk("inductor_abs_clamp", "inductor_abs_clamp is a fixed-step post-solve "
+                    "guard"))
+    # Every controller needs its OWN cadence here — there is no grid
+    # to ride (the same split `_compose_control` makes: a source with
+    # no period runs every step, which only the fixed engine has).
+    if step_observer is not None and controller_period is None \
+            and getattr(step_observer, "period", None) is None:
+        why.append(_blk("step_observer",
+            "a step_observer with no cadence (pass "
+            "controller_period=<T_ctrl>, or use a ClosedLoop, "
+            "which carries its own)"))
+    if closed_loops and any(
+            not float(getattr(_cl, "period", 0.0) or 0.0) > 0.0
+            for _cl in closed_loops):
+        why.append(_blk("closed_loops", "closed_loops whose handles carry no period"))
     if switch_fn is None and not closed_loops:
         # (A ClosedLoop brings its own switch_fn, so the circuit is
         # driven even when the caller passed none.)
@@ -3281,10 +3668,10 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
         except Exception:  # noqa: BLE001 — test doubles
             _ctl = []
         if _ctl:
-            why.append(
+            why.append(_blk("switch_fn",
                 f"{len(_ctl)} controlled switch(es) with no "
                 "switch_fn (the two engines' undriven-switch "
-                "defaults differ)")
+                "defaults differ)"))
     del dt
     return why
 
@@ -3301,9 +3688,16 @@ def _auto_check_voltage_sanity(res, builder, factor):
     """
     try:
         from . import _pulsim as _k  # type: ignore[import-not-found]
-        volt = _k.find_implausible_voltage(
-            builder.graph, builder.pool, res,
-            100.0 if factor is None else float(factor))
+        f = 100.0 if factor is None else float(factor)
+        if isinstance(res, _k.SimulationResult):
+            volt = _k.find_implausible_voltage(builder.graph,
+                                               builder.pool, res, f)
+        else:   # the dsed result: full-MNA samples as arrays
+            import numpy as _np
+            volt = _k.find_implausible_voltage(
+                builder.graph, builder.pool,
+                list(_np.asarray(res.times, dtype=float)),
+                _np.asarray(res.states, dtype=float), f)
     except Exception:  # pragma: no cover — never break a good run
         return
     if volt is not None and volt.node >= 0:
@@ -3529,6 +3923,16 @@ def __getattr__(name: str):
     if name.startswith("__"):
         raise AttributeError(
             f"module 'pulsim' has no attribute {name!r}")
+    if name == "LiveScope":
+        try:
+            from .scope import LiveScope
+        except ImportError as exc:
+            raise AttributeError(
+                "pulsim.LiveScope needs the optional dependency "
+                "pyqtgraph (and a Qt binding such as PySide6): "
+                f"pip install pyqtgraph PySide6. ({exc})") from exc
+        globals()["LiveScope"] = LiveScope
+        return LiveScope
     # A name that lives in an already-imported submodule: say where.
     import sys as _sys
     homes = sorted(
@@ -3543,3 +3947,22 @@ def __getattr__(name: str):
         f"{name!r}.{where} Run `python -m pulsim.guide` for the "
         f"current API, and see docs/migration-guide.md if you're "
         f"porting v1 code.")
+
+
+import sys as _sys  # noqa: E402
+import types as _types  # noqa: E402
+
+
+class _PulsimModule(_types.ModuleType):
+    """Keeps ``pulsim.scope`` the plotting function: the import system
+    sets the package attribute to the submodule on the first
+    ``import pulsim.scope`` (see the note above ``from .plot import
+    scope``)."""
+
+    def __setattr__(self, name, value):
+        if name == "scope" and isinstance(value, _types.ModuleType):
+            return
+        super().__setattr__(name, value)
+
+
+_sys.modules[__name__].__class__ = _PulsimModule

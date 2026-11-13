@@ -51,6 +51,116 @@ benchmarks/
 └── kpi_baselines/               # frozen KPI snapshots + artifact manifests
 ```
 
+## Reference harness (2.0)
+
+The 126 circuits are `schema: pulsim-v1` files, which the 2.0 kernel
+loader refuses on purpose. They run through a reader that belongs to the
+harness, never to `pulsim`:
+
+| Piece | Where |
+|---|---|
+| v1 reader (`load(path).run(engine)`) | `tools/v1_reader.py` — mapping table in its docstring |
+| Triage of all 126 files (`runs` / `skipped` / `error`, `known` cells) | `manifests/v2_triage.yaml` |
+| Time-weighted metrics (`err_rms`, `err_max`, `time_mean`) | `tools/metrics.py` |
+| Differential runner, circuit x engine | `tools/differential_runner.py` |
+| 20 analytic circuits and their ceilings | `analytic/__init__.py`, `manifests/analytic.yaml` |
+| Golden checkpoints of `engine='pwl'` (45 circuits) | `goldens/pwl/*.json`, `tools/goldens.py` |
+| Counter gate (12 circuits x engines) | `manifests/perf_counters.yaml`, `tools/counters.py` |
+| Tests | `python/tests/test_benchmark_harness.py` (marker `reference`) |
+
+```bash
+make reference-smoke     # analytic set + goldens + counters (the PR job, ~1 min)
+make reference-nightly   # all `runs` circuits x 3 engines + ngspice parity
+```
+
+Rules the harness keeps:
+
+- **Every average, RMS and error is time-weighted** (trapezoid on the
+  samples); a plain `.mean()` over a variable-step trace once invented an
+  engine defect. `err_rms = sqrt(∫(y − ref)² dt / window) / span`.
+- **The gate is strict.** A differential cell agrees or disagrees, and a
+  `known:` entry is frozen, on the `interp` measure only: every
+  observable (source-forced nodes included), every interval, linearly
+  interpolated on the union of both grids. Nothing is left out of it.
+- **The edge measure is a diagnostic, never the gate.** Each cell also
+  records the error with the steps that hold a recorded switch-state
+  change (either trace) and the nodes a voltage source ties to ground
+  left out, the excluded fraction of the compared span, the worst
+  observable, and the edge-timing mismatch (max |t_edge − t_edge,ref|
+  over switching instants matched per switch and new state, in s and in
+  the engine's `dt` on pwl). It tells "late by one step" from "states
+  wrong", but it cannot see a late edge on a resistive load (the late
+  interval is the excluded step) and dropping a chattering trace's
+  switching steps drops exactly its wrong intervals. So above 10 %
+  excluded it reports `undersampled`, and when one trace records more
+  than twice the other's switch-state changes it reports `chatter`;
+  neither is a number and no other measure is substituted.
+- **A trbdf2 cell graded against the trbdf2 reference is a
+  self-consistency check, not an agreement.** The differential reference
+  is `trbdf2` at `rtol = 1e-8`, so the `trbdf2` column compares the
+  engine with itself at a tighter tolerance; it cannot see a defect both
+  share. Where a circuit has an analytic or independent reference
+  (the analytic set, ngspice, a closed form), prefer it.
+- **A broken reference grades nothing.** A circuit whose reference is
+  itself wrong carries `reference: suspect` and a `reference_reason` in
+  the triage manifest: every cell on it is `unverified` (none agrees,
+  none disagrees) and it leaves the agree count. `cuk_converter`
+  (ill-posed as written) is marked so.
+- **Every configuration has its own freeze, with its error.** `known:`
+  is keyed by configuration (`pwl`, `pwl+restart`, `pwl+split`,
+  `trbdf2`, `dsed`), and a frozen `disagree` stores its `err_rms` under
+  `known_err:`. The cell fails when that error grows past 2x the frozen
+  value; when it shrinks past 2x the status page prompts a re-freeze.
+- **The first stored sample is excluded** where it is the initial state
+  rather than the `t = 0⁺` solution (on `pwl` / `trbdf2` an RL step reads
+  0 V across the inductor at `t = 0`; the answer is 10 V).
+- **Goldens compare integers exactly** (`n_steps`, `n_commutations`,
+  sha256 of the switch-state record) and **values with a tolerance**
+  (`rtol` ≤ 1e-9 linear, ≤ 1e-6 with a Newton device; `atol` is `rtol`
+  times the state's own scale). A bit-exact hash of floats is never the
+  key: platforms differ in the last bits.
+- **No wall-clock assertion.** The counter gate compares deterministic
+  counters (`pwl` ≤ frozen, `trbdf2` / `dsed` ≤ 1.02 × frozen); wall time
+  is printed only.
+- **Nothing is skipped silently.** A `skipped` triage entry must still
+  fail to load for its reason; an `error` entry must still fail; a
+  `known` analytic defect must still disagree. A fix therefore shows up as
+  a failing test that asks to promote the entry.
+
+### Adding an analytic case
+
+Add a `Case` to `analytic/__init__.py` (`build(k)` scaling one component
+by `k`, `observe`, `exact`, `t_end`, `dt`, engines), then
+`python benchmarks/tools/freeze_analytic.py --write` and review the diff:
+each ceiling is 2 × the measured error (floors 1e-9, dsed 1e-6). The test
+also checks that a 1 % component error fails every engine.
+
+### Re-freezing goldens and counters
+
+A change that moves `engine='pwl'` on purpose (roadmap rows marked **B**)
+re-freezes in its own pull request and says so:
+
+```bash
+python benchmarks/tools/goldens.py --update-goldens
+python benchmarks/tools/counters.py --freeze
+python benchmarks/tools/freeze_analytic.py --write
+git diff benchmarks/goldens benchmarks/manifests     # review every change
+```
+
+A ceiling may be tightened freely; loosening one needs a `reason` on the
+entry. Disagreements found by the differential runner are recorded as
+`known:` cells in the triage manifest (to be filed as issues), never as
+looser tolerances.
+
+### Legacy files
+
+`baselines/*.csv.gz` (70) were captured from the retired v1 engine and
+are an informational "drift from v1" column of `benchmark_runner.py`,
+not a reference. `manifests/benchmarks.yaml` keeps its v1 scenario names
+(`direct_trap`, `gmres_trbdf2`, …) as history; the reference harness
+uses the engine list instead. The KPI tools and `kpi_baselines/` are not
+ported.
+
 ## Path conventions
 
 All relative paths in `manifests/*.yaml` and inside circuit YAMLs

@@ -85,6 +85,11 @@ struct SimulationOptions {
     /// cascade stop 10.67 V from the right answer). Do not loosen it
     /// to get past a Newton abort — that has produced silently wrong
     /// operating points (a flyback at 3.53 V instead of 15.31 V).
+    /// One ulp of an inductor current is 2L/h·ε·|i| of residual, so at
+    /// small h this test can be out of reach: transient solves that
+    /// stagnate there are accepted on a row-wise backward error of at
+    /// most 8ε instead (pwl::NewtonRoundoffAcceptance, counted in
+    /// SimulationResult::newton_roundoff_accepts). DC never is.
     Real tol_newton_dx = Real{1e-9};
 
     /// Newton convergence tolerance on ||residual||_inf.
@@ -132,21 +137,43 @@ struct SimulationOptions {
     /// 0 disables the retry and restores the pre-v2.0 hard failure.
     Size max_dt_halvings = Size{6};   // dt/64 floor
 
-    /// Layer 5 V3 — sub-step state correction.
+    /// Fixed-step event splitting (add-fixed-step-event-splitting).
     ///
-    /// When `true` AND `cache.dt() > 0` (dynamic path), each
-    /// time step that detects a commutation event mid-step
-    /// is RETROACTIVELY split into two sub-steps at the
-    /// estimated event time `t_est`. Sub-step 1 uses the
-    /// pre-event mask and `cache.solve_at(mask_pre, dt₁, …)`
-    /// (Layer 4 V7's auxiliary-dt solve). Sub-step 2 uses
-    /// the post-event mask and `cache.solve_at(mask_post,
-    /// dt₂, …)`. The result eliminates the single-shot
-    /// commutation wobble visible at coarse dt.
-    ///
-    /// V0 corrects ONLY the first detected event per step.
-    /// Default `false` to preserve V2.2 behaviour.
+    /// A step (t_{k-1}, t_k] that contains an event is split at it: a
+    /// trapezoidal sub-step up to the event under the pre-event mask,
+    /// then an SDIRK(2,2) restart step from the event to t_k (and the
+    /// two grid steps after it, the restart window). Events: gate edges
+    /// named by the schedule's `next_edge_after` (an opaque switch_fn
+    /// keeps the restart rule's start-of-step sampling), built-in source
+    /// jumps, and a diode crossing located by linear interpolation of
+    /// `SwitchedDiode::crossing_signal` between x_{k-1} and the step's
+    /// first solve (pre-event bits). Up to 8 events per step in time
+    /// order; one within 1 % of dt of a boundary is taken at it.
+    /// Samples stay on the uniform grid. REQUIRES
+    /// `discontinuity_restart` (run_transient throws otherwise).
+    /// Default `false`: off = the restart rule alone, bit for bit.
     bool enable_substep_state_correction = false;
+
+    /// Discontinuity restart (add-discontinuity-restart-rule). The step
+    /// containing a discontinuity — a change of the stamped mask, a
+    /// diode flip inside the step, a source jump (or a b_extra_fn jump
+    /// declared through its next-jump oracle), the first step of a run
+    /// that does not start consistent — and the next two are taken as
+    /// Alexander SDIRK(2,2) steps (γ = 1 − 1/√2, L-stable) instead of
+    /// trapezoidal ones: second order across events on the grid, no
+    /// Nyquist alternation after them, resonant modes kept. It also makes the gate mask of the
+    /// step (t_{k-1}, t_k] switch_fn(t_{k-1}) (start-sampled) and
+    /// evaluates a pulse/PWM source at its LEFT limit on a jump that
+    /// coincides with the step end. Off = the engine before the rule,
+    /// bit for bit.
+    bool discontinuity_restart = false;
+
+    /// add-fixed-step-resolution-diagnostics: per-step normalised
+    /// truncation estimate of the linear capacitors and inductors and a
+    /// Nyquist-ringing detector over the state vector, recorded in
+    /// `SimulationResult::resolution`. Read-only: the states are the
+    /// same bit for bit either way; off skips both passes.
+    bool resolution_diagnostics = false;   // opt-in (review M5: cost > 3 %)
 
     /// Floating-inductor freeze (post-solve guard).
     ///

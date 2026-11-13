@@ -27,6 +27,15 @@ The 1.0 surface is **flat** — there's no `pulsim.v2` namespace. All
 device builders, analyses, and helpers live directly on the
 `pulsim` module.
 
+### `res.times` is a numpy array (Unreleased)
+
+`SimulationResult.times` is a read-only, zero-copy `numpy.ndarray`
+(it was a list). `len`, indexing, slicing and `np.asarray(res.times)`
+are unchanged; list-only idioms (`res.times + [...]`, `.index`,
+`if res.times:`) need `list(res.times)`. `np.asarray(res.times)` is now
+the read-only view itself: use `np.array(res.times)` or `.copy()` before
+writing into it.
+
 ## Top-level objects
 
 ### `pulsim.Circuit` → `pulsim.CircuitBuilder`
@@ -130,7 +139,7 @@ Available blocks: `PIController`, `PIDController`, `Comparator`,
 
 | Pre-1.0 | 1.0 |
 |---|---|
-| `Simulator.run_ac_sweep(...)` | `p.run_ac_sweep(b, freqs=..., excite_fn=..., output_idx=...)` (swept-sine) or `p.run_mna_sweep(b, ...)` (linearised, faster) |
+| `Simulator.run_ac_sweep(...)` | `p.run_ac_sweep(b, freqs=..., excite_fn=..., output_idx=...)` (swept-sine) or `p.run_mna_sweep(b, ...)` (linear circuits and switches at a fixed `mask=`; refuses Newton devices) |
 | `Simulator.run_fra(...)` | `p.run_fra(...)` — swept-sine FRA (closed-loop and nonlinear-friendly) |
 | `Simulator.run_periodic_steady_state(...)` | not yet on 1.0 — file an issue if you need it |
 | `pulsim.sweep.run(...)` (Monte-Carlo / LHS / Cartesian) | `p.sweep(builder_factory, ...)` and `p.monte_carlo(...)` |

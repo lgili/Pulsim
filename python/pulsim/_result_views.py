@@ -705,7 +705,8 @@ class TimeWindow:
         self._beta = 0.0 if self._b_on else (b - t[j - 1]) / (t[j] - t[j - 1])
         self._lo = i - 1 if self._a_on else i
         self._hi = j if self._b_on else j - 1
-        self.times = self.cont(t)[0]
+        # A copy: `t` may be the result's read-only `times` view.
+        self.times = np.array(self.cont(t)[0], dtype=float)
         self.times[0], self.times[-1] = a, b
 
     @property

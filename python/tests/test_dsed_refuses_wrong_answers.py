@@ -40,7 +40,7 @@ def _nonlinear_diode_circuit():
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "vin", "gnd", 5.0)
     b.add_resistor("R", "vin", "na", 1000.0)
-    b.add_nonlinear_diode("D", "na", "gnd", p.IdealDiodeParams())
+    b.add_nonlinear_diode("D", "na", "gnd", p.IdealDiodeParams(), allow_non_passive=True)
     b.add_capacitor("C", "na", "gnd", 1e-6)
     return b
 
@@ -58,9 +58,11 @@ def test_dsed_now_commutates_pwl_diodes():
 
 
 def test_dsed_refuses_nonlinear_devices():
-    with pytest.raises(ValueError, match="nonlinear"):
+    with pytest.raises(p.UnsupportedError, match="NonlinearDiode") as e:
         p.simulate(_nonlinear_diode_circuit(), t_end=1e-3,
                     engine="dsed")
+    assert isinstance(e.value, ValueError)
+    assert (e.value.engine, e.value.kind) == ("dsed", "NonlinearDiode")
 
 
 def test_the_pwl_engine_still_takes_both():

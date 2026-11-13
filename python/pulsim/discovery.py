@@ -94,10 +94,11 @@ _CATEGORIES: dict[str, list[_Entry]] = {
                "Freewheel diodes, bridge rectifiers, snubbers. v2's "
                "event detection finds zero-crossings within sub-step "
                "and re-solves at the exact commutation time."),
-        _Entry("add_nonlinear_diode",
-               "Smooth-blend IdealDiode (AD-driven, Newton refresh)",
-               "When you need a smooth I-V (Shockley-like) and don't "
-               "want event detection — useful inside Newton loops."),
+        _Entry("add_shockley_diode",
+               "Shockley junction i = I_S(exp(v/nV_T) - 1) (Newton)",
+               "When you need a smooth I-V and don't want event "
+               "detection. (add_nonlinear_diode is retired: its law "
+               "sources power below V_F0.)"),
     ],
 
     "Active devices (nonlinear, Newton)": [

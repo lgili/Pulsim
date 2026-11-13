@@ -43,6 +43,7 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_diode_events.cpp    # Gate 3 — buck DCM + body-diode commutation
         tests/dsed/test_bdf2.cpp            # Gate 4 — BDF2 + stiffness detector
         tests/dsed/test_bdf2_scheduler.cpp  # Gate 4.C — end-to-end BDF2 PED scheduler
+        tests/dsed/test_bdf2_bootstrap.cpp  # L-stable backward-Euler start
         tests/dsed/test_mmc_thevenin_arm.cpp
         tests/dsed/test_trbdf2_transient.cpp
         tests/dsed/test_switch_state_record.cpp  # per-sample stamped mask
@@ -50,6 +51,7 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_exact_lti.cpp
         tests/dsed/test_event_projection.cpp
         tests/dsed/test_scheduler_auto.cpp  # Gate 4.D — auto-dispatch RK45↔BDF2 per mode
+        tests/dsed/test_period_integrals.cpp  # period map, M, closed-form integrals
     )
     target_link_libraries(pulsim_core_dsed_tests
         PRIVATE
@@ -60,6 +62,37 @@ if(PULSIM_BUILD_TESTS)
         pulsim_apply_target_defaults(pulsim_core_dsed_tests)
     endif()
     catch_discover_tests(pulsim_core_dsed_tests)
+
+    # add-complementarity-mode-selection — the dense LCP mode selector
+    # (core/include/pulsim/events/), its own small binary so it iterates
+    # without rebuilding the tree.
+    add_executable(pulsim_core_mode_tests
+        tests/modes/test_mode_selector.cpp
+    )
+    target_link_libraries(pulsim_core_mode_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_mode_tests)
+    endif()
+    catch_discover_tests(pulsim_core_mode_tests)
+
+    # add-in-kernel-event-losses group 1 — the kernel loss tables
+    # (core/include/pulsim/thermal/loss_table.hpp), header-only.
+    add_executable(pulsim_core_thermal_tests
+        tests/thermal/test_loss_table.cpp
+    )
+    target_link_libraries(pulsim_core_thermal_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_thermal_tests)
+    endif()
+    catch_discover_tests(pulsim_core_thermal_tests)
 
     # =============================================================================
     # pulsim_core_layer0_tests — bootstrap-pulsim-v2-kernel
@@ -137,8 +170,10 @@ if(PULSIM_BUILD_TESTS)
         tests/layer2/test_multi_winding_transformer.cpp  # Layer 2 V16
         tests/layer2/test_ideal_transformer.cpp         # Phase 4 C.4
         tests/layer2/test_flux_table.cpp                # Phase 4 C.4
+        tests/layer2/test_charge_table.cpp              # add-power-mosfet-datasheet-device
         tests/layer2/test_gapped_core.cpp               # Phase 4 C.4
         tests/layer2/test_jiles_atherton_core.cpp       # Phase 4 C.4 (JA in loop)
+        tests/layer2/test_controlled_sources.cpp        # add-controlled-source-set
     )
     target_link_libraries(pulsim_core_layer2_tests
         PRIVATE
@@ -159,6 +194,7 @@ if(PULSIM_BUILD_TESTS)
         tests/analysis/test_main.cpp
         tests/analysis/test_core_loss.cpp
         tests/analysis/test_mna_sweep.cpp   # v1.4.0 — in-house complex solver integration
+        tests/analysis/test_mna_sweep_assembly.cpp  # fix-mna-sweep-correctness
     )
     target_link_libraries(pulsim_core_analysis_tests
         PRIVATE
@@ -235,6 +271,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4/test_row_names.cpp   # v2.0 Phase 1 — named diagnostics
         tests/layer4/test_preflight.cpp    # v2.0 Phase 2 — preflight
         tests/layer4/test_gmin.cpp         # v2.0 Phase 2 — gmin + DC cascade
+        tests/layer4/test_engine_capabilities.cpp  # engine conformance table
         tests/layer4/test_cache.cpp
         tests/layer4/test_integration_chopper.cpp
         tests/layer4/test_pwl_cache_rank1.cpp       # Layer 4 V8 — rank-1 fast path
@@ -291,6 +328,8 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4_v1/test_dt_aware_cache.cpp
         tests/layer4_v1/test_lazy_cache.cpp      # V6 lazy
         tests/layer4_v1/test_multi_dt_cache.cpp  # V7 multi-dt
+        tests/layer4_v1/test_linear_time_assembly.cpp  # slot map + shared symbolic
+        tests/layer4_v1/test_newton_workspace.cpp  # Newton workspace (A1)
     )
     target_link_libraries(pulsim_core_layer4_v1_tests
         PRIVATE
@@ -336,6 +375,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v1/test_integration_rlc.cpp
         tests/layer5_v1/test_integration_buck.cpp
         tests/layer5_v1/test_transformer.cpp          # Layer 2 V2
+        tests/layer5_v1/test_backward_euler_stage.cpp # restart rule
     )
     target_link_libraries(pulsim_core_layer5_v1_tests
         PRIVATE
@@ -383,6 +423,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v3/test_main.cpp
         tests/layer5_v3/test_snapshot_restore.cpp
         tests/layer5_v3/test_substep_correction.cpp
+        tests/layer5_v3/test_resolution_diagnostics.cpp
     )
     target_link_libraries(pulsim_core_layer5_v3_tests
         PRIVATE
@@ -533,12 +574,15 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v4/test_continuation_rectifier.cpp  # V8 continuation
         tests/layer5_v4/test_vf0_continuation_rectifier.cpp  # V9 V_F0 cont
         tests/layer5_v4/test_pseudo_transient_rectifier.cpp  # V10 PTC
+        tests/layer5_v4/test_newton_roundoff_acceptance.cpp
     )
     target_link_libraries(pulsim_core_layer5_v4_tests
         PRIVATE
             pulsim::core
             Catch2::Catch2WithMain
     )
+    target_compile_definitions(pulsim_core_layer5_v4_tests PRIVATE
+        PULSIM_PWL_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/include/pulsim/pwl")
     if(COMMAND pulsim_apply_target_defaults)
         pulsim_apply_target_defaults(pulsim_core_layer5_v4_tests)
     endif()

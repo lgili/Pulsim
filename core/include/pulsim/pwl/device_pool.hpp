@@ -35,6 +35,7 @@
 #include "pulsim/models/switched_diode.hpp"
 #include "pulsim/models/transformer.hpp"
 #include "pulsim/models/vcvs.hpp"
+#include "pulsim/models/controlled_sources.hpp"
 #include "pulsim/models/voltage_source.hpp"
 #include "pulsim/numeric/dictionary.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -42,14 +43,55 @@
 
 #include <array>
 #include <format>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
+#include <string_view>
 #include <variant>
 #include <vector>
 
 namespace pulsim::pwl {
+
+/// The transient drivers (and the kernel AC sweep) a device kind can
+/// declare support for. Names: `engine_name`.
+enum class Engine : std::uint8_t { FixedTrap, TrBdf2, Dsed, Bdf1, AcSweep };
+inline constexpr std::array<std::string_view, 5> kEngineNames{
+    "pwl", "trbdf2", "dsed", "bdf1", "ac_sweep"};
+[[nodiscard]] constexpr std::string_view engine_name(Engine e) noexcept {
+    return kEngineNames[static_cast<std::size_t>(e)];
+}
+[[nodiscard]] constexpr std::uint8_t engine_bit(Engine e) noexcept {
+    return static_cast<std::uint8_t>(1u << static_cast<unsigned>(e));
+}
+inline constexpr std::uint8_t kAllEngines = 0x1F;
+inline constexpr std::uint8_t kNewtonEngines =
+    engine_bit(Engine::FixedTrap) | engine_bit(Engine::TrBdf2);
+
+/// How a device kind enters the solve.
+enum class SolveClass : std::uint8_t {
+    Linear, Source, Switch, PwlDiode, NewtonStatic, NewtonStateful };
+inline constexpr std::array<std::string_view, 6> kSolveClassNames{
+    "Linear", "Source", "Switch", "PwlDiode", "NewtonStatic",
+    "NewtonStateful"};
+
+/// One row of `kKindCaps` (defined after `DevicePool`).
+struct KindCaps {
+    std::string_view name;
+    SolveClass       cls;
+    std::uint8_t     engines;  // bit per Engine
+    [[nodiscard]] constexpr bool supports(Engine e) const noexcept {
+        return (engines & engine_bit(e)) != 0;
+    }
+    [[nodiscard]] constexpr bool newton() const noexcept {
+        return cls == SolveClass::NewtonStatic
+            || cls == SolveClass::NewtonStateful;
+    }
+};
 
 class DevicePool {
 public:
@@ -77,6 +119,14 @@ public:
         LauritzenDiode     = 17, // Phase 4 C.1 (reverse recovery)
         PmsmMna            = 18, // Phase 4 C.3 (MNA-native PMSM)
         IdealTransformer   = 19, // Phase 4 C.4 (v_s = n v_p, i_p = -n i_s)
+        // add-controlled-source-set (models/controlled_sources.hpp)
+        VCCS               = 20, // i = g_m·v_c, no extra unknown
+        CCCS               = 21, // i = β·i_c, no extra unknown
+        CCVS               = 22, // v = r_m·i_c, own branch unknown
+        Gyrator            = 23, // i_1 = g·v_2, i_2 = −g·v_1
+        SineCurrentSource  = 24, // overlaid on the node rows
+        PulseCurrentSource = 25, // overlaid on the node rows
+        PwlCurrentSource   = 26, // overlaid on the node rows
     };
 
     struct SwitchParams {
@@ -450,27 +500,163 @@ public:
         return transformer_couplings_;
     }
 
+    // -------- Controlled sources + waveform current sources ----------------
+    //
+    // `add-controlled-source-set`. Linear and mask-independent; stamped by
+    // `stamping/stamp_controlled.hpp`. Every output branch is
+    // `BranchKind::Source` (as for the DC current source and the VCVS);
+    // only the CCVS adds a branch-current unknown. Current outputs follow
+    // `add_current_source`: a positive value leaves at the branch `from`.
+
+    /// VCCS: `branch_id` is the output (from → to); `cp`, `cn` sense.
+    void add_vccs(Index branch_id, Index cp, Index cn,
+                  models::VCCS::Params p) {
+        entries_[branch_id] = Entry{p};
+        control_nodes_[branch_id] = std::pair<Index, Index>{cp, cn};
+    }
+
+    /// CCCS: `control_branch_id` carries a current unknown (a source with
+    /// a branch row or an inductor); the builder checks that.
+    void add_cccs(Index branch_id, Index control_branch_id,
+                  models::CCCS::Params p) {
+        entries_[branch_id] = Entry{p};
+        control_branch_[branch_id] = control_branch_id;
+    }
+
+    /// CCVS: a voltage source (own unknown) set by a sensed current.
+    void add_ccvs(Index branch_id, Index control_branch_id,
+                  models::CCVS::Params p) {
+        entries_[branch_id] = Entry{p};
+        source_branch_var_id_[branch_id] =
+            static_cast<Index>(num_sources_++);
+        control_branch_[branch_id] = control_branch_id;
+    }
+
+    /// Gyrator: `branch_id` is port 2 (p2_pos → p2_neg); port 1 is a node
+    /// pair, as the ideal transformer's primary.
+    void add_gyrator(Index branch_id, Index p1_pos, Index p1_neg,
+                     models::Gyrator::Params p) {
+        entries_[branch_id] = Entry{p};
+        control_nodes_[branch_id] = std::pair<Index, Index>{p1_pos, p1_neg};
+    }
+
+    void add_sine_current_source(Index branch_id,
+                                 models::SineCurrentSource::Params p) {
+        entries_[branch_id] = Entry{std::move(p)};
+    }
+    void add_pulse_current_source(Index branch_id,
+                                  models::PulseCurrentSource::Params p) {
+        entries_[branch_id] = Entry{std::move(p)};
+    }
+    void add_pwl_current_source(Index branch_id,
+                                models::PwlCurrentSource::Params p) {
+        entries_[branch_id] = Entry{std::move(p)};
+    }
+
+    /// VCCS sense nodes, or gyrator port-1 nodes.
+    [[nodiscard]] std::pair<Index, Index> control_nodes(Index branch_id) const {
+        const auto it = control_nodes_.find(branch_id);
+        if (it == control_nodes_.end()) {
+            throw std::out_of_range(std::format(
+                "DevicePool::control_nodes: branch {} is not a VCCS or "
+                "a Gyrator", branch_id));
+        }
+        return it->second;
+    }
+
+    /// Branch whose current a CCCS / CCVS senses.
+    [[nodiscard]] Index control_branch(Index branch_id) const {
+        const auto it = control_branch_.find(branch_id);
+        if (it == control_branch_.end()) {
+            throw std::out_of_range(std::format(
+                "DevicePool::control_branch: branch {} is not a CCCS or "
+                "a CCVS", branch_id));
+        }
+        return it->second;
+    }
+
+    /// Absolute state-vector column of the sensed current.
+    [[nodiscard]] Index control_column(Index branch_id,
+                                       const topology::Graph& graph) const {
+        const Index c = control_branch(branch_id);
+        return is_voltage_source(c) ? branch_var_id_for_source(c, graph)
+                                    : branch_var_id_for_inductor(c, graph);
+    }
+
+    [[nodiscard]] const models::VCCS::Params& vccs_params(Index b) const {
+        return require_params_<models::VCCS::Params>(b, "vccs_params", "a VCCS");
+    }
+    [[nodiscard]] const models::CCCS::Params& cccs_params(Index b) const {
+        return require_params_<models::CCCS::Params>(b, "cccs_params", "a CCCS");
+    }
+    [[nodiscard]] const models::CCVS::Params& ccvs_params(Index b) const {
+        return require_params_<models::CCVS::Params>(b, "ccvs_params", "a CCVS");
+    }
+    [[nodiscard]] const models::Gyrator::Params& gyrator_params(Index b) const {
+        return require_params_<models::Gyrator::Params>(
+            b, "gyrator_params", "a Gyrator");
+    }
+    [[nodiscard]] const models::SineCurrentSource::Params&
+    sine_current_source_params(Index b) const {
+        return require_params_<models::SineCurrentSource::Params>(
+            b, "sine_current_source_params", "a SineCurrentSource");
+    }
+    [[nodiscard]] const models::PulseCurrentSource::Params&
+    pulse_current_source_params(Index b) const {
+        return require_params_<models::PulseCurrentSource::Params>(
+            b, "pulse_current_source_params", "a PulseCurrentSource");
+    }
+    [[nodiscard]] const models::PwlCurrentSource::Params&
+    pwl_current_source_params(Index b) const {
+        return require_params_<models::PwlCurrentSource::Params>(
+            b, "pwl_current_source_params", "a PwlCurrentSource");
+    }
+
+    /// Value of a sine / pulse / table current source at `t` [A],
+    /// leaving at the branch `from`.
+    [[nodiscard]] Real current_waveform_value(Index b, Real t) const {
+        const auto& e = entry_at(b);
+        if (const auto* s = std::get_if<models::SineCurrentSource::Params>(&e)) {
+            return models::SineCurrentSource::value_at(*s, t);
+        }
+        if (const auto* u = std::get_if<models::PulseCurrentSource::Params>(&e)) {
+            return models::PulseCurrentSource::value_at(*u, t);
+        }
+        if (const auto* w = std::get_if<models::PwlCurrentSource::Params>(&e)) {
+            return models::PwlCurrentSource::value_at(*w, t);
+        }
+        throw std::out_of_range(std::format(
+            "DevicePool::current_waveform_value: branch {} is not a "
+            "sine, pulse or table current source", b));
+    }
+
+    /// First declared corner strictly after `t` (pulse edges, table
+    /// knots); +inf for a sine or when none is left.
+    [[nodiscard]] Real current_waveform_next_breakpoint(Index b, Real t) const {
+        const auto& e = entry_at(b);
+        if (const auto* u = std::get_if<models::PulseCurrentSource::Params>(&e)) {
+            return models::PulseCurrentSource::next_breakpoint_after(*u, t);
+        }
+        if (const auto* w = std::get_if<models::PwlCurrentSource::Params>(&e)) {
+            return w->w.next_breakpoint_after(t);
+        }
+        return std::numeric_limits<Real>::infinity();
+    }
+
     // -------- Lookups -------------------------------------------------------
 
-    /// Proposal #3.4 ergonomics: scan the pool to see if any
-    /// device requires Newton (smooth-blend diode, SH1 MOSFET,
-    /// Level 1 IGBT, or saturable inductor). Used by the
-    /// Python `simulate()` wrapper to auto-enable the
-    /// nonlinear-refresh pass.
+    /// Does any device need a Newton solve? Read from `kKindCaps`
+    /// (classes NewtonStatic / NewtonStateful), never from a hand list:
+    /// the list this replaced omitted NonlinearCapacitor, and two
+    /// engines then ran a junction capacitor as if it were absent.
+    [[nodiscard]] bool requires_newton() const noexcept;
+    /// Does any device need the static Newton chain
+    /// (`make_combined_diode_mosfet_refresh`)? The stateful kinds bring
+    /// their own wrappers inside the transient kernels.
+    [[nodiscard]] bool requires_static_refresh() const noexcept;
+    /// Alias of `requires_newton()`, kept for the bound Python API.
     [[nodiscard]] bool has_nonlinear_devices() const noexcept {
-        for (const auto& [branch_id, entry] : entries_) {
-            const auto k = static_cast<StoredKind>(entry.index());
-            if (k == StoredKind::NonlinearDiode ||
-                k == StoredKind::ShockleyDiode  ||
-                k == StoredKind::LauritzenDiode ||
-                k == StoredKind::PmsmMna        ||
-                k == StoredKind::MosfetLevel1   ||
-                k == StoredKind::IgbtLevel1     ||
-                k == StoredKind::SaturableInductor) {
-                return true;
-            }
-        }
-        return false;
+        return requires_newton();
     }
 
     /// Non-throwing companion to `kind_of`: is there a device
@@ -713,6 +899,9 @@ public:
     /// alternative to `Entry` causes a compile error here unless
     /// it's explicitly classified (compiler reminds you to update
     /// the visitor — exhaustiveness check on a closed variant).
+    /// Registered devices; an insert moves the stored parameters.
+    [[nodiscard]] Size num_entries() const noexcept { return entries_.size(); }
+
     [[nodiscard]] Size num_dynamic_branches() const noexcept {
         Size n = 0;
         for (const auto& [_, entry] : entries_) {
@@ -922,8 +1111,20 @@ private:
                                 models::ShockleyDiode::Params,
                                 models::LauritzenDiode::Params,
                                 models::PmsmMna::Params,
-                                models::IdealTransformer::Params>;
+                                models::IdealTransformer::Params,
+                                models::VCCS::Params,
+                                models::CCCS::Params,
+                                models::CCVS::Params,
+                                models::Gyrator::Params,
+                                models::SineCurrentSource::Params,
+                                models::PulseCurrentSource::Params,
+                                models::PwlCurrentSource::Params>;
 
+public:
+    /// Number of device kinds; `kKindCaps` must have this many rows.
+    static constexpr std::size_t kNumKinds = std::variant_size_v<Entry>;
+
+private:
     // ---- Compile-time source-of-truth guard (audit 2026-05, #17) ----------
     // `kind_of()` / `has_nonlinear_devices()` cast the variant index straight
     // to `StoredKind`, so the enum and the `Entry` alternative list MUST stay
@@ -934,8 +1135,8 @@ private:
     static constexpr bool kind_maps_to_ = std::is_same_v<
         std::variant_alternative_t<static_cast<std::size_t>(K), Entry>, P>;
 
-    static_assert(std::variant_size_v<Entry> == 20,
-        "StoredKind has 20 values; Entry must list 20 alternatives in the "
+    static_assert(std::variant_size_v<Entry> == 27,
+        "StoredKind has 27 values; Entry must list 27 alternatives in the "
         "same order — update both together.");
     static_assert(kind_maps_to_<StoredKind::Resistor,           models::Resistor::Params>);
     static_assert(kind_maps_to_<StoredKind::VoltageSource,      models::VoltageSource::Params>);
@@ -957,6 +1158,13 @@ private:
     static_assert(kind_maps_to_<StoredKind::LauritzenDiode,     models::LauritzenDiode::Params>);
     static_assert(kind_maps_to_<StoredKind::PmsmMna,            models::PmsmMna::Params>);
     static_assert(kind_maps_to_<StoredKind::IdealTransformer,   models::IdealTransformer::Params>);
+    static_assert(kind_maps_to_<StoredKind::VCCS,               models::VCCS::Params>);
+    static_assert(kind_maps_to_<StoredKind::CCCS,               models::CCCS::Params>);
+    static_assert(kind_maps_to_<StoredKind::CCVS,               models::CCVS::Params>);
+    static_assert(kind_maps_to_<StoredKind::Gyrator,            models::Gyrator::Params>);
+    static_assert(kind_maps_to_<StoredKind::SineCurrentSource,  models::SineCurrentSource::Params>);
+    static_assert(kind_maps_to_<StoredKind::PulseCurrentSource, models::PulseCurrentSource::Params>);
+    static_assert(kind_maps_to_<StoredKind::PwlCurrentSource,   models::PwlCurrentSource::Params>);
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -1058,6 +1266,78 @@ private:
     // pairs two already-added inductor branches with the
     // coupling parameters (L_p, L_s, k → M).
     std::vector<TransformerCoupling> transformer_couplings_;
+
+    // add-controlled-source-set: VCCS sense / gyrator port-1 nodes, and
+    // the branch a CCCS / CCVS senses.
+    numeric::Dictionary<Index, std::pair<Index, Index>> control_nodes_;
+    numeric::Dictionary<Index, Index> control_branch_;
 };
+
+/// One row per `StoredKind`, in enum order: the kind's name (spelled as
+/// the Python `StoredKind` member), its solve class and the engines that
+/// simulate it. Every "does this circuit need Newton" and "can engine E
+/// run kind K" decision is derived from this table; a new kind is one
+/// added row (the static_assert below fails the build until it exists).
+inline constexpr auto kKindCaps = std::to_array<KindCaps>({
+    {"Resistor",           SolveClass::Linear,         kAllEngines},
+    {"VoltageSource",      SolveClass::Source,         kAllEngines},
+    {"Switch",             SolveClass::Switch,         kAllEngines},
+    {"Capacitor",          SolveClass::Linear,         kAllEngines},
+    {"Inductor",           SolveClass::Linear,         kAllEngines},
+    // BDF1 has no diode event iteration: the bit would stay frozen.
+    {"Diode",              SolveClass::PwlDiode,       kAllEngines & ~engine_bit(Engine::Bdf1)},
+    {"NonlinearDiode",     SolveClass::NewtonStatic,   kNewtonEngines},
+    {"CurrentSource",      SolveClass::Source,         kAllEngines},
+    {"PWMVoltageSource",   SolveClass::Source,         kAllEngines},
+    {"SineVoltageSource",  SolveClass::Source,         kAllEngines},
+    {"PulseVoltageSource", SolveClass::Source,         kAllEngines},
+    {"MosfetLevel1",       SolveClass::NewtonStatic,   kNewtonEngines},
+    {"IgbtLevel1",         SolveClass::NewtonStatic,   kNewtonEngines},
+    {"VCVS",               SolveClass::Linear,         kAllEngines},
+    {"SaturableInductor",  SolveClass::NewtonStateful, kNewtonEngines},
+    {"NonlinearCapacitor", SolveClass::NewtonStateful, kNewtonEngines},
+    {"ShockleyDiode",      SolveClass::NewtonStatic,   kNewtonEngines},
+    {"LauritzenDiode",     SolveClass::NewtonStateful, kNewtonEngines},
+    {"PmsmMna",            SolveClass::NewtonStateful, kNewtonEngines},
+    {"IdealTransformer",   SolveClass::Linear,         kAllEngines},
+    // add-controlled-source-set: linear stamps in the cached matrix and
+    // current waveforms overlaid on the node rows (no AC excitation).
+    {"VCCS",               SolveClass::Linear,         kAllEngines},
+    {"CCCS",               SolveClass::Linear,         kAllEngines},
+    {"CCVS",               SolveClass::Linear,         kAllEngines},
+    {"Gyrator",            SolveClass::Linear,         kAllEngines},
+    {"SineCurrentSource",  SolveClass::Source,         kAllEngines},
+    {"PulseCurrentSource", SolveClass::Source,         kAllEngines},
+    {"PwlCurrentSource",   SolveClass::Source,         kAllEngines},
+});
+static_assert(kKindCaps.size() == DevicePool::kNumKinds,
+    "kKindCaps needs one row per DevicePool::StoredKind");
+
+[[nodiscard]] constexpr const KindCaps&
+kind_caps(DevicePool::StoredKind k) noexcept {
+    return kKindCaps[static_cast<std::size_t>(k)];
+}
+
+/// Name of a stored kind, identical to the Python `StoredKind` enum
+/// member, for refusals that must name the device kind.
+[[nodiscard]] constexpr std::string_view
+stored_kind_name(DevicePool::StoredKind k) noexcept {
+    const auto i = static_cast<std::size_t>(k);
+    return i < kKindCaps.size() ? kKindCaps[i].name : std::string_view{"Unknown"};
+}
+
+inline bool DevicePool::requires_newton() const noexcept {
+    for (const auto& [branch_id, entry] : entries_) {
+        if (kKindCaps[entry.index()].newton()) return true;
+    }
+    return false;
+}
+
+inline bool DevicePool::requires_static_refresh() const noexcept {
+    for (const auto& [branch_id, entry] : entries_) {
+        if (kKindCaps[entry.index()].cls == SolveClass::NewtonStatic) return true;
+    }
+    return false;
+}
 
 }  // namespace pulsim::pwl
