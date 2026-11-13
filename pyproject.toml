@@ -149,6 +149,7 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 markers = [
     "doc_snippets: executes the python blocks of the user-facing docs (python/tests/test_doc_snippets.py)",
+    "examples: runs every example script / audited notebook and checks its stated numbers; slow, needs PULSIM_RUN_EXAMPLES=1 (python/tests/test_examples_claims.py)",
 ]
 
 [tool.coverage.run]
