@@ -45,9 +45,11 @@ opts.tol_newton_res = 1e-9       # |F(x)|∞ termination (absolute)
 opts.enable_newton_line_search = True   # Armijo backtracking
 opts.enable_newton_lm = True            # Levenberg-Marquardt trust region
 
-# Sub-step state correction — when a commutation event lands inside
-# a fixed-dt step, split the step in two at the linearly-interpolated
-# crossing instant. Big accuracy win on PWM converters; small cost.
+# Event splitting — a gate edge (schedules with next_edge_after), a
+# source jump or a diode crossing inside a fixed-dt step splits it
+# there (needs the restart rule). Buck at T/100: +7..10 % per step,
+# second order for edges off the grid.
+opts.discontinuity_restart = True
 opts.enable_substep_state_correction = True
 
 # Event-detection iteration cap.
@@ -62,6 +64,7 @@ res = p.simulate(
     b, t_end=1e-3, dt=1e-6,
     enable_nonlinear_refresh=True,
     enable_newton_line_search=True,
+    discontinuity_restart=True,
     enable_substep_state_correction=True,
     max_newton_iterations=50,
 )

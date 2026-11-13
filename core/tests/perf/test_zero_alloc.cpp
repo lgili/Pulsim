@@ -368,6 +368,7 @@ TEST_CASE("substep event correction path is allocation-free per event",
     opts.t_end   = 5e-3;   // 5 line cycles → ~10 commutations
     opts.dt      = 1e-6;
     opts.enable_substep_state_correction = true;
+    opts.discontinuity_restart = true;   // the split requires the rule
 
     solver::SwitchScheduleFn switch_fn = [](Real) {
         return SwitchStateMask(1);

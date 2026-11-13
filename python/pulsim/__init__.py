@@ -1473,9 +1473,12 @@ class SolverOptions:
     # disables event iteration entirely (the pre-V2.1 behaviour) —
     # so it cannot double as the "not set" sentinel.
     max_event_iterations: Optional[int] = None
+    # Fixed engine: split a step at a gate edge (schedules with
+    # next_edge_after), source jump or diode crossing inside it; needs
+    # discontinuity_restart (None = off).
     enable_substep_state_correction: Optional[bool] = None
-    # Fixed engine: two backward-Euler half-steps after every
-    # discontinuity, gate sampled at the step start (None = off).
+    # Fixed engine: three SDIRK(2,2) steps after every discontinuity,
+    # gate sampled at the step start (None = off).
     discontinuity_restart: Optional[bool] = None
 
     # Topology preflight ---------------------------------------------

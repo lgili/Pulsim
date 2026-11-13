@@ -6,6 +6,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed engine: event splitting (opt-in, needs the restart rule)
+
+`simulate(..., discontinuity_restart=True,
+enable_substep_state_correction=True)` splits a fixed step at an event
+inside it: a trapezoidal sub-step to the event under the pre-event mask,
+then an SDIRK(2,2) restart step to the grid point, then the window's two
+grid steps. Samples stay at `t_start + k·dt`.
+
+Events:
+- gate edges of a schedule with `next_edge_after` (every C++ helper,
+  and a Python schedule object that defines the method); an opaque
+  `switch_fn` is not split;
+- built-in PWM/pulse source jumps;
+- diode crossings, located from the step's first solve (pre-event
+  bits) by `SwitchedDiode::crossing_signal`.
+
+Up to 8 events per step in time order; one within 1 % of `dt` of a step
+boundary is taken there. `res.n_split_steps` counts the split steps.
+
+| Engine, restart rule on | rule alone | rule + split |
+|---|---|---|
+| RL edge +0.3 dt off the grid, dt = 8/4/2/1 µs | −3.40e-2 … −4.25e-3 A, order 1.00 | +1.58e-5 … +2.58e-7 A, order 1.98 |
+| Buck CCM D = 0.4567 `v_C`, T/50 … T/400 | 8.08e-2 V (T/50…T/200), 1.96e-2 V | 1.07e-6 … 1.43e-8 V, order 2.1 |
+| DCM buck, rel. error at T/100 / T/101 / T/400 (default engine −0.023 / −0.497 / −0.022 %) | 8.6e-7 / 6.9e-6 / 2.1e-7 | 7.2e-8 / 7.3e-8 / 1.3e-9 |
+| DCM turn-off `t_estimated` vs the current zero | grid index, 0.98 dt early | < 1e-4 dt |
+| Q = 50 tank, edges 0.37 dt off the grid, T/50 / T/100 | −0.663 / −0.024 % | −0.592 / −0.011 % |
+
+Cost on the buck at T/100 (fixed off-grid duty / a duty that moves every
+period): 0.76 / 2.96 off-nominal refactorisations per period;
++10 % / +7 % wall time per step against the rule alone.
+
+* **BREAKING (with the option on): `enable_substep_state_correction`
+  is the event split.** It now requires `discontinuity_restart=True`
+  (`UnsupportedError(engine='pwl', feature=
+  'enable_substep_state_correction')`, a `ValueError`) where the rule
+  refused it before. The old sub-step correction never fired (its
+  1 %-of-dt guard always rejected the estimate) and solved Newton
+  devices linearly; it is removed.
+* `commutation_events.t_estimated` of a located crossing is the
+  crossing time, not a grid index.
+* Limits: a retried step (dt-retry ladder) is re-taken without its
+  interior events; a diode crossing inside an SDIRK interval keeps the
+  grid interpolation for its record; an even number of edges of an
+  opaque `switch_fn` inside one step is not seen.
+
 ### Fixed engine: discontinuity restart rule (opt-in)
 
 `simulate(..., discontinuity_restart=True)` (also `SolverOptions`,
@@ -65,11 +110,11 @@ backward-Euler half-steps, never shipped. It drained resonant modes:
     order.
   The callback is called once per stage time; a restart step calls it
   at `t_prev + γ·dt` (off the grid) and at `t`.
-* Refused: `discontinuity_restart=True` with
-  `enable_substep_state_correction=True` (`ValueError` naming both).
+* `enable_substep_state_correction=True` now needs the rule (event
+  splitting, above).
 * Limits:
-  - an edge off the `dt` grid stays first order (event splitting is a
-    separate change);
+  - an edge off the `dt` grid stays first order without the event
+    split (above);
   - sample 0 of a node voltage still reads 0 V;
   - `mmc_arms` refuses the flag;
   - a Jiles–Atherton core extrapolates its stage-1 flux from the

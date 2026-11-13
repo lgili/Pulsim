@@ -247,12 +247,19 @@ and samples the gate at the step start. Off by default until the flip
 of the migration plan.
 
 Limits with the rule on:
-- an edge off the `dt` grid stays first order (event splitting is a
-  separate change);
+- an edge off the `dt` grid stays first order unless
+  `enable_substep_state_correction=True` splits the step at it (order
+  2: RL edge +0.3 dt 1.01e-6 A at 2 µs; buck D = 0.4567 `v_C` 1.07e-6 V
+  at T/50 instead of 8.08e-2 V). The split needs an edge oracle
+  (`next_edge_after`): an opaque `switch_fn` is still taken at the next
+  grid point;
 - a `b_extra_fn` jump restarts only when the callable declares it
-  through `next_jump_after(t)`; undeclared ones stay first order;
-- `enable_substep_state_correction` is refused with the rule;
-- an MNA PMSM retries every fixed step at dt/2 with the rule on or off.
+  through `next_jump_after(t)`; undeclared ones stay first order and
+  are not split;
+- a step that needs the dt-retry ladder is re-taken without its
+  interior events (the next step restarts on the new mask);
+- an MNA PMSM retries every fixed step at dt/2 with the rule on or off,
+  so its steps are never split.
 
 ### Fixed-step controller ticks land on the `dt` grid
 

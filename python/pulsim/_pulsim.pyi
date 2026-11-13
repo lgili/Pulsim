@@ -1198,6 +1198,11 @@ class SimulationResult:
         Steps taken as SDIRK(2,2) restart steps (discontinuity_restart). 0 with the rule off.
         """
     @property
+    def n_split_steps(self) -> int:
+        """
+        Steps split at a gate edge, source jump or diode crossing inside them (enable_substep_state_correction). 0 with the split off.
+        """
+    @property
     def states(self) -> typing.Any:
         """
         Recorded state samples as a read-only (num_steps, state_size) numpy view — zero-copy over the kernel's contiguous buffer. Use `.copy()` for a mutable array.

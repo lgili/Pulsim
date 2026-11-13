@@ -132,20 +132,21 @@ struct SimulationOptions {
     /// 0 disables the retry and restores the pre-v2.0 hard failure.
     Size max_dt_halvings = Size{6};   // dt/64 floor
 
-    /// Layer 5 V3 — sub-step state correction.
+    /// Fixed-step event splitting (add-fixed-step-event-splitting).
     ///
-    /// When `true` AND `cache.dt() > 0` (dynamic path), each
-    /// time step that detects a commutation event mid-step
-    /// is RETROACTIVELY split into two sub-steps at the
-    /// estimated event time `t_est`. Sub-step 1 uses the
-    /// pre-event mask and `cache.solve_at(mask_pre, dt₁, …)`
-    /// (Layer 4 V7's auxiliary-dt solve). Sub-step 2 uses
-    /// the post-event mask and `cache.solve_at(mask_post,
-    /// dt₂, …)`. The result eliminates the single-shot
-    /// commutation wobble visible at coarse dt.
-    ///
-    /// V0 corrects ONLY the first detected event per step.
-    /// Default `false` to preserve V2.2 behaviour.
+    /// A step (t_{k-1}, t_k] that contains an event is split at it: a
+    /// trapezoidal sub-step up to the event under the pre-event mask,
+    /// then an SDIRK(2,2) restart step from the event to t_k (and the
+    /// two grid steps after it, the restart window). Events: gate edges
+    /// named by the schedule's `next_edge_after` (an opaque switch_fn
+    /// keeps the restart rule's start-of-step sampling), built-in source
+    /// jumps, and a diode crossing located by linear interpolation of
+    /// `SwitchedDiode::crossing_signal` between x_{k-1} and the step's
+    /// first solve (pre-event bits). Up to 8 events per step in time
+    /// order; one within 1 % of dt of a boundary is taken at it.
+    /// Samples stay on the uniform grid. REQUIRES
+    /// `discontinuity_restart` (run_transient throws otherwise).
+    /// Default `false`: off = the restart rule alone, bit for bit.
     bool enable_substep_state_correction = false;
 
     /// Discontinuity restart (add-discontinuity-restart-rule). The step

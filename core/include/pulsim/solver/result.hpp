@@ -46,7 +46,9 @@ namespace pulsim::solver {
 /// `t_estimated` is the linear-interpolated zero crossing of the
 /// watched signal (v_diode − turn_on_voltage for both directions on
 /// the pwl engine, see run_transient's interp_commutation_time)
-/// between two grid points. The state vectors
+/// between two grid points; with the fixed-step event split on it is
+/// the located crossing the step was split at (not a grid index). The
+/// state vectors
 /// themselves remain at the dt grid; only the COMMUTATION
 /// timestamp is sub-step accurate.
 struct CommutationEvent {
@@ -230,6 +232,9 @@ struct SimulationResult {
     /// Factorisations made for the restart stages (one per mask at
     /// 2γ·dt, more only if the segment byte budget evicts). 0 off.
     Size n_restart_factorizations = 0;
+    /// Steps split at an event inside them
+    /// (SimulationOptions::enable_substep_state_correction). 0 off.
+    Size n_split_steps = 0;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or

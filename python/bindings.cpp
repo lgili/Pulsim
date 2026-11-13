@@ -2160,6 +2160,11 @@ void init_module(py::module_& m) {
                        "Factorisations made for the restart stages: one "
                        "per mask at 2*gamma*dt (more only if the segment "
                        "byte budget evicts). 0 with the rule off.")
+        .def_readonly("n_split_steps", &SimulationResult::n_split_steps,
+                       "Steps split at a gate edge, source jump or diode "
+                       "crossing inside them "
+                       "(enable_substep_state_correction). 0 with the "
+                       "split off.")
         .def_readonly("event_iteration_breaches",
                        &SimulationResult::event_iteration_breaches)
         .def("num_steps", &SimulationResult::num_steps);
@@ -2725,8 +2730,19 @@ void init_module(py::module_& m) {
            py::object resume_from_obj) {
             // Bridge.13: native schedules run their mask in C++ (no
             // Python __call__); the detection is shared by every engine.
-            const SwitchScheduleFn switch_fn =
-                pulsim_bindings_common::adapt_switch_fn(switch_fn_obj).fn;
+            auto adapted =
+                pulsim_bindings_common::adapt_switch_fn(switch_fn_obj);
+            const SwitchScheduleFn switch_fn = std::move(adapted.fn);
+            // add-fixed-step-event-splitting: the schedule's edges, read
+            // only when enable_substep_state_correction splits steps.
+            // A Python schedule may declare its edges the same way, with a
+            // `next_edge_after(t)` method (the DSED engine reads it too).
+            std::function<Real(Real)> next_edge_fn =
+                std::move(adapted.next_edge);
+            if (!next_edge_fn && py::hasattr(switch_fn_obj, "next_edge_after")) {
+                next_edge_fn = switch_fn_obj.attr("next_edge_after")
+                                   .cast<std::function<Real(Real)>>();
+            }
             // add-discontinuity-restart-rule: a b_extra_fn may DECLARE
             // its jumps with a `next_jump_after(t)` attribute (first
             // jump strictly after t, inf when none); the restart rule
@@ -2804,7 +2820,8 @@ void init_module(py::module_& m) {
                                           x_init_ptr,
                                           continue_eff,
                                           resume_ptr,
-                                          b_extra_next_jump);
+                                          b_extra_next_jump,
+                                          next_edge_fn);
             }
             return result;
         },

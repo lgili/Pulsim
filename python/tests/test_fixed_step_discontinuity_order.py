@@ -476,14 +476,20 @@ def test_one_factor_per_mask_and_no_refactor():
     assert (on.num_built_segments(), off.num_built_segments()) == (2, 4)
 
 
-def test_restart_and_substep_correction_are_refused_together():
+def test_substep_correction_requires_the_restart_rule():
+    # add-fixed-step-event-splitting: the option is now the event split,
+    # which ends every split step with the rule's SDIRK window (was:
+    # refused together with the rule).
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "a", "gnd", 1.0)
     b.add_resistor("R", "a", "c", 1.0)
     b.add_capacitor("C", "c", "gnd", 1e-6)
-    with pytest.raises(ValueError, match="discontinuity_restart.*substep|substep.*discontinuity_restart"):
+    with pytest.raises(p.UnsupportedError, match="requires discontinuity_restart") as ei:
         p.simulate(b, t_end=1e-5, dt=1e-6, engine="pwl",
-                   enable_substep_state_correction=True, **ON)
+                   enable_substep_state_correction=True)
+    assert (ei.value.engine, ei.value.feature) == ("pwl", "enable_substep_state_correction")
+    p.simulate(b, t_end=1e-5, dt=1e-6, engine="pwl",
+               enable_substep_state_correction=True, **ON)
 
 
 # --- the step observer and the recorded mask --------------------------------------

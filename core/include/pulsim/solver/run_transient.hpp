@@ -53,6 +53,7 @@
 #include "pulsim/pwl/saturable_inductor_history.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
+#include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/sources/pwm_b_extra.hpp"
 #include "pulsim/sources/source_jumps.hpp"
@@ -60,6 +61,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <format>
@@ -306,7 +308,12 @@ inline SimulationResult run_transient(
     /// strictly after t, +inf when none. Only read with
     /// `discontinuity_restart`; an undeclared callback jump is not
     /// restarted (and is not detected).
-    const std::function<Real(Real)>& b_extra_next_jump = {}) {
+    const std::function<Real(Real)>& b_extra_next_jump = {},
+    /// add-fixed-step-event-splitting — the schedule's analytic gate
+    /// edges (`SwitchSchedule::next_edge_after`): the first edge
+    /// strictly after t, +inf when none. Empty: the gate edges of an
+    /// opaque switch_fn are not located (start-of-step sampling).
+    const std::function<Real(Real)>& next_edge_fn = {}) {
 
     // ---- Input validation ---------------------------------------------
     if (!opts.valid()) {
@@ -315,15 +322,16 @@ inline SimulationResult run_transient(
             "(check t_start < t_end, dt > 0, store_every >= 1, "
             "all finite)");
     }
-    if (opts.discontinuity_restart && opts.enable_substep_state_correction) {
-        // The V3 correction re-takes a commutation step as two
-        // trapezoidal solves straight after the flip — the stale-
-        // derivative step the restart rule exists to remove.
-        throw std::invalid_argument(
-            "run_transient: discontinuity_restart=True cannot be combined "
-            "with enable_substep_state_correction=True (the sub-step "
-            "correction re-takes the step after a commutation "
-            "trapezoidally, which the restart rule replaces); set one");
+    if (opts.enable_substep_state_correction && !opts.discontinuity_restart) {
+        // The event split ends every step that contains an event with
+        // the restart rule's SDIRK window; without the rule there is no
+        // window to end it with.
+        throw UnsupportedError(
+            "pwl", "enable_substep_state_correction", "", "",
+            "run_transient: enable_substep_state_correction=True requires "
+            "discontinuity_restart=True (the event split ends every step "
+            "that contains an event with the restart rule's SDIRK "
+            "window); set both, or neither");
     }
     if (!switch_fn) {
         throw std::invalid_argument(
@@ -732,7 +740,20 @@ inline SimulationResult run_transient(
     std::vector<bool> diodes_snap;                  // V3 diode-bit snapshot
     std::vector<bool> last_solved_bits;             // breach re-sync bits
     std::vector<CommutationEvent> step_events;      // per-step event scratch
-    std::vector<bool> post_event_bits;              // substep-correction scratch
+    std::vector<bool> post_event_bits;              // event-split scratch
+    // add-fixed-step-event-splitting workspace: the step's first solve
+    // (pre-event bits) and its mask, the located gate/source events,
+    // the diode events located in the step.
+    Vector x_first;
+    topology::SwitchStateMask mask_first(
+        static_cast<std::size_t>(graph.num_switches()));
+    constexpr Size kMaxStepEvents = 8;
+    std::array<Real, kMaxStepEvents> ev_t{};
+    std::vector<CommutationEvent> split_events;
+    split_events.reserve(8);
+    std::vector<Real> cross_scratch;
+    Real edge_from = std::numeric_limits<Real>::infinity();   // oracle memo:
+    Real edge_next = -std::numeric_limits<Real>::infinity();  // first edge after edge_from
     // The mask of the LAST solve that produced x — recorded with
     // each stored sample (SimulationResult::switch_state_bits).
     topology::SwitchStateMask stamped_mask(
@@ -834,10 +855,21 @@ inline SimulationResult run_transient(
         return has_b_jumps && b_jump_after(at_t - left_by) <= at_t
             ? at_t - left_by : at_t;
     };
+    // add-fixed-step-event-splitting (validated above to imply the rule).
+    const bool split = opts.enable_substep_state_correction;
+    // Events this close to a step boundary are taken at it (design D4).
+    const Real snap = opts.dt * Real{0.01};
+    // A source jump snapped to the step end (t - snap <= tau < t): the
+    // solve AT `src_end_at` reads the built-in sources at `src_end_read`
+    // (= tau, so value_at(tau - left_by) is the pre-jump level). NaN
+    // compares unequal to every time: off.
+    Real src_end_at = std::numeric_limits<Real>::quiet_NaN();
+    Real src_end_read = Real{0};
     // `backward_euler`: a restart stage (no stored derivative), the
     // BE-like solve of size for_dt/2 on the factor of for_dt.
     auto accumulate_b_extra = [&](Real at_t, Real for_dt,
                                   bool backward_euler = false) {
+        const Real src_t = at_t == src_end_at ? src_end_read : at_t;
         if (backward_euler) {
             history.compute_b_extra_backward_euler(for_dt * Real{0.5},
                                                    b_extra);
@@ -848,7 +880,7 @@ inline SimulationResult run_transient(
             b_extra += b_extra_fn(b_read_t(at_t));
         }
         if (has_pwm) {
-            sources::compute_pwm_b_extra(pool, graph, at_t, be_pwm,
+            sources::compute_pwm_b_extra(pool, graph, src_t, be_pwm,
                                          left_by);
             b_extra += be_pwm;
         }
@@ -857,7 +889,7 @@ inline SimulationResult run_transient(
             b_extra += be_sine;
         }
         if (has_pulse) {
-            sources::compute_pulse_b_extra(pool, graph, at_t, be_pulse,
+            sources::compute_pulse_b_extra(pool, graph, src_t, be_pulse,
                                            left_by);
             b_extra += be_pulse;
         }
@@ -971,10 +1003,82 @@ inline SimulationResult run_transient(
             // gate is sampled at the step START (design D4); the
             // observer keeps its (t_k, x_{k-1}) label, whose move to
             // t_{k-1} belongs to fix-control-tick-semantics.
-            const Real gate_t = restart_rule ? t_prev : t;
+            Real gate_t = restart_rule ? t_prev : t;
             if (step_observer) {
                 step_observer(t, x_prev);
             }
+            // ---- add-fixed-step-event-splitting: the step's events ----
+            // Gate edges from the schedule's oracle and built-in source
+            // jumps inside [t_prev + snap, t - snap), in time order. One
+            // before that is taken at t_prev (the gate is sampled at it;
+            // a source jump triggers the restart below), one after it at
+            // t (the next step's; a source jump is read at its left
+            // limit by this step's last solve).
+            Size n_ev = 0;
+            bool ev_overflow = false;
+            bool capture_first = false;   // keep the first solve (diode split)
+            if (split) {
+                src_end_at = std::numeric_limits<Real>::quiet_NaN();
+                auto push_ev = [&](Real e) {
+                    if (n_ev < kMaxStepEvents) {
+                        ev_t[n_ev++] = e;
+                    } else {
+                        ev_overflow = true;
+                    }
+                };
+                if (next_edge_fn) {
+                    // The oracle's answer stays valid until the step
+                    // passes it (an SPWM oracle bisects on every call).
+                    if (!(edge_from <= t_prev && t_prev < edge_next)) {
+                        edge_from = t_prev;
+                        edge_next = next_edge_fn(t_prev);
+                    }
+                    Real e = edge_next;
+                    if (e < t) {
+                        auto gate_mask = switch_fn(t_prev);
+                        for (Size q = 0; q < 4 * kMaxStepEvents && e < t; ++q) {
+                            if (e < t - snap) {
+                                // A no-op edge (same mask both sides) is
+                                // not an event.
+                                auto m = switch_fn(e);
+                                if (!(m == gate_mask)) {
+                                    if (e < t_prev + snap) {
+                                        gate_t = e;
+                                    } else {
+                                        push_ev(e);
+                                    }
+                                    gate_mask = std::move(m);
+                                }
+                            }
+                            edge_from = e;
+                            e = next_edge_fn(e);
+                            edge_next = e;
+                        }
+                    }
+                }
+                if (has_jump_sources) {
+                    Real e = sources::next_source_jump_after(pool, graph, t_prev);
+                    for (Size q = 0; q < 4 * kMaxStepEvents && e < t; ++q) {
+                        if (e >= t - snap) {
+                            src_end_at = t;
+                            src_end_read = e;
+                        } else if (e >= t_prev + snap) {
+                            push_ev(e);
+                        }
+                        e = sources::next_source_jump_after(pool, graph, e);
+                    }
+                }
+                std::sort(ev_t.begin(), ev_t.begin() + n_ev);
+                // Events closer than `snap` merge into the earlier one.
+                Size m = 0;
+                for (Size q = 0; q < n_ev; ++q) {
+                    if (m == 0 || ev_t[q] - ev_t[m - 1] >= snap) {
+                        ev_t[m++] = ev_t[q];
+                    }
+                }
+                n_ev = m;
+            }
+            const Real gate_t0 = gate_t;
             // V3 snapshots — taken regardless of whether
             // correction fires (cheap; vectors are small per
             // dynamic-branch). Restored only if a commutation
@@ -1033,8 +1137,12 @@ inline SimulationResult run_transient(
             // (v2.0 Phase 2, B.4) — the nominal `for_dt == opts.dt`
             // call still takes the cached factorization and is
             // bit-identical to before.
+            // `single`: one solve under the current bits, no re-decision
+            // (sub-step 1 of a diode split, whose bits are the pre-event
+            // ones by construction).
             auto run_event_iteration = [&](Real at_t, Real for_dt,
-                                           bool backward_euler = false) {
+                                           bool backward_euler = false,
+                                           bool single = false) {
             // Phase 4 C.1 — EVERY solve tells the nonlinear
             // refresh which step it is taking. This is the single
             // point all of them pass through, including the
@@ -1141,10 +1249,14 @@ inline SimulationResult run_transient(
                 // BEFORE re-solving, so this stays the last solve).
                 stamped_mask = mask;
                 stamped_known = true;
+                if (capture_first && iters == 0) {
+                    x_first = x;
+                    mask_first = mask;
+                }
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
-                flipped = has_diodes &&
+                flipped = !single && has_diodes &&
                           diodes.update_from_state(x);
                 ++iters;
             } while (flipped && iters < max_iters);
@@ -1178,10 +1290,15 @@ inline SimulationResult run_transient(
             // flips arm the window where they happen.)
             // Each trigger (re-)arms the window; a restart step consumes
             // one of it.
+            // With the split a built-in source jump inside the step is an
+            // event of its own; only one taken at t_prev (within snap
+            // either side) restarts the step.
             if (restart_rule &&
                 (!stamped_known || !(mask_pre == stamped_mask) ||
                  (has_jump_sources &&
-                  sources::source_jump_in(pool, graph, t_prev, t)) ||
+                  (split ? sources::source_jump_in(pool, graph, t_prev - snap,
+                                                   t_prev + snap)
+                         : sources::source_jump_in(pool, graph, t_prev, t))) ||
                  (has_b_jumps && b_jump_after(t_prev - left_by) < t - left_by))) {
                 restart_left = kRestartSteps;
             }
@@ -1243,10 +1360,173 @@ inline SimulationResult run_transient(
                 iters += iters_1 - 1;
                 flipped = flipped || breach_1;
             };
-            if (!restart) {
+            // ---- add-fixed-step-event-splitting (design D1, D3, D4) ----
+            // The step as sub-intervals between the located events: the
+            // first one trapezoidal (or an SDIRK step when the step
+            // restarts), every later one an SDIRK step from its event. A
+            // diode crossing inside the first, trapezoidal interval is
+            // located from its first solve (pre-event bits) and split at
+            // too. Intermediate commits are inline; the last is the
+            // caller's (deferred past the freeze guard). Any split arms
+            // the window for the next two grid steps explicitly: their
+            // masks equal the post-event one, so no trigger would.
+            auto commit_trap = [&](Real h) {
+                history.update_from_state(x, h);
+                coss_history.update_from_state(x, h);
+                laur_history.update_from_state(x, h);
+                pmsm_history.update_from_state(x, h);
+                tail_history.update_from_state(x, h);
+                if (has_saturable) {
+                    sat_history.update_from_state(x);
+                }
+            };
+            auto split_step = [&]() {
+                split_events.clear();
+                bool any_split = false;
+                bool breach = false;
+                Real a = t_prev;
+                for (Size i = 0; i <= n_ev; ++i) {
+                    const bool last = i == n_ev;
+                    const Real b = last ? t : ev_t[i];
+                    // The whole step keeps opts.dt exactly (t - t_prev
+                    // is not, in floating point): the nominal factor.
+                    Real h = (i == 0 && last) ? opts.dt : b - a;
+                    bool be = i == 0 ? restart : true;
+                    if (i > 0) {
+                        gate_t = a;   // the edge's post side (grid-exact schedules)
+                        any_split = true;
+                    }
+                    if (be) {
+                        run_restart(a, h);
+                    } else {
+                        if (i > 0 || h != opts.dt) {
+                            accumulate_b_extra(b, h);
+                        }   // else: accumulated at (t, dt) above
+                        capture_first = has_diodes;
+                        run_event_iteration(b, h);
+                        capture_first = false;
+                        if (iters > 1) {
+                            // D1: the crossing from x_prev and the first
+                            // solve, both under the step's start bits
+                            // (only interval 0 is trapezoidal: a == t_prev).
+                            Real t_d = b;
+                            const auto ents = diodes.entries();
+                            cross_scratch.assign(ents.size(), b + h);
+                            for (Size j = 0; j < ents.size(); ++j) {
+                                const auto& e = ents[j];
+                                const bool on = diodes_snap[j];
+                                const Real v1 =
+                                    stamping::read_node_voltage(x_first, e.from) -
+                                    stamping::read_node_voltage(x_first, e.to);
+                                if (models::SwitchedDiode::decide(
+                                        on, v1, e.params()) == on) {
+                                    continue;
+                                }
+                                const Real v0 =
+                                    stamping::read_node_voltage(x_prev, e.from) -
+                                    stamping::read_node_voltage(x_prev, e.to);
+                                // Already on the far side at the start:
+                                // the crossing is at a (the rule alone).
+                                cross_scratch[j] =
+                                    models::SwitchedDiode::decide(
+                                        on, v0, e.params()) != on
+                                    ? a
+                                    : interp_commutation_time(
+                                          a, b,
+                                          models::SwitchedDiode::crossing_signal(
+                                              on, v0, e.params()),
+                                          models::SwitchedDiode::crossing_signal(
+                                              on, v1, e.params()));
+                                t_d = std::min(t_d, cross_scratch[j]);
+                            }
+                            // Back to the step start, then: the crossing
+                            // at a (an SDIRK step, as the rule alone), at
+                            // b (keep the pre-event solve, flip there) or
+                            // inside (split).
+                            x = x_prev;
+                            history.restore(history_snap);
+                            coss_history.restore(coss_snap);
+                            laur_history.restore(laur_snap);
+                            pmsm_history.restore(pmsm_snap);
+                            tail_history.restore(tail_snap);
+                            sat_history.restore(sat_snap);
+                            diodes.restore_on_bits(diodes_snap);
+                            mask_cycle = false;
+                            // Post-event bits: the diodes that cross
+                            // within snap of the first one flip.
+                            post_event_bits = diodes_snap;
+                            for (Size j = 0; j < ents.size(); ++j) {
+                                if (cross_scratch[j] <= b &&
+                                    cross_scratch[j] - t_d < snap) {
+                                    post_event_bits[j] = !diodes_snap[j];
+                                    split_events.push_back(CommutationEvent{
+                                        .t_estimated = cross_scratch[j],
+                                        .branch_id = ents[j].branch_id,
+                                        .new_state = post_event_bits[j]});
+                                }
+                            }
+                            if (t_d - a < snap) {
+                                split_events.clear();
+                                restart = true;
+                                be = true;
+                                restart_left = std::max(restart_left,
+                                                        kRestartSteps - 1);
+                                run_restart(a, h);
+                            } else if (b - t_d < snap) {
+                                x = x_first;
+                                stamped_mask = mask_first;
+                                stamped_known = true;
+                                diodes.restore_on_bits(post_event_bits);
+                                iters = 1;
+                                flipped = false;
+                                // The flip is at b: the window starts at
+                                // the next interval (this step's, or the
+                                // next grid step when b = t).
+                                restart_left = std::max(
+                                    restart_left,
+                                    last ? kRestartSteps : kRestartSteps - 1);
+                            } else {
+                                const Real h1 = t_d - a;
+                                accumulate_b_extra(t_d, h1);
+                                run_event_iteration(t_d, h1, false, true);
+                                commit_trap(h1);
+                                diodes.restore_on_bits(post_event_bits);
+                                h = b - t_d;
+                                run_restart(t_d, h);
+                                be = true;
+                                any_split = true;
+                            }
+                        }
+                    }
+                    breach = breach || flipped;
+                    if (!last) {
+                        if (be) {
+                            commit_backward_euler(kGamma * h);
+                        } else {
+                            commit_trap(h);
+                        }
+                    } else {
+                        committed_dt = h;
+                        committed_be = be;
+                    }
+                    a = b;
+                }
+                if (any_split) {
+                    ++result.n_split_steps;
+                    // The event's step and the next two (the rule's window).
+                    restart_left = std::max(restart_left, kRestartSteps - 1);
+                }
+                flipped = breach || ev_overflow;
+            };
+            // (A split step accumulates per sub-interval: no discarded
+            // b_extra_fn call at (t, dt).)
+            if (!restart && n_ev == 0) {
                 accumulate_b_extra(t, opts.dt);
             }
             try {
+                if (split) {
+                    split_step();
+                } else {
                 if (!restart) {
                     run_event_iteration(t, opts.dt);
                     if (restart_rule && iters > 1) {
@@ -1273,6 +1553,7 @@ inline SimulationResult run_transient(
                     run_restart(t_prev, opts.dt);
                     committed_be = true;
                 }
+                }   // !split
             } catch (const std::runtime_error& nominal_failed) {
                 // NOTE the narrow catch. Everything the solver throws
                 // is a runtime_error; a foreign exception is not.
@@ -1318,6 +1599,14 @@ inline SimulationResult run_transient(
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }
+                    // shortcut: the retry ignores events inside the step
+                    // (the gate keeps the step's start sample, as the
+                    // restart rule alone; a built-in source jump inside it
+                    // is read where the sub-steps fall and not restarted);
+                    // retries are rare.
+                    gate_t = gate_t0;
+                    capture_first = false;
+                    split_events.clear();
 
                     const Size n_sub = Size{1} << h;
                     const Real sub_dt =
@@ -1489,16 +1778,27 @@ inline SimulationResult run_transient(
                      .cycle_detected = mask_cycle});
             }
 
-            // 4. Sub-step commutation timing (Layer 5 V2.2) +
-            //    state correction (Layer 5 V3).
-            //
-            // Detect zero-crossing events for diode signals
-            // and (if enabled) retroactively split the step
-            // into two sub-steps at the first detected
-            // event's t_est.
+            // 4. Commutation records (Layer 5 V2.2). With the event
+            //    split the diode crossings it located come first, at the
+            //    located time; every other diode whose watched signal
+            //    changed sign over the step gets the interpolation
+            //    between x_prev and x. (The V3 sub-step correction that
+            //    lived here solved Newton devices linearly and read the
+            //    crossing from the post-flip state; the split replaced
+            //    it: design D5.)
             step_events.clear();
+            if (split) {
+                step_events.assign(split_events.begin(), split_events.end());
+            }
             if (has_diodes) {
                 for (const auto& e : diodes.entries()) {
+                    if (split && std::any_of(
+                            split_events.begin(), split_events.end(),
+                            [&](const CommutationEvent& ev) {
+                                return ev.branch_id == e.branch_id;
+                            })) {
+                        continue;
+                    }
                     const Real v_a_prev =
                         stamping::read_node_voltage(x_prev, e.from);
                     const Real v_k_prev =
@@ -1523,128 +1823,6 @@ inline SimulationResult run_transient(
                         .branch_id   = e.branch_id,
                         .new_state   = e.is_on,
                     });
-                }
-            }
-
-            // Apply V3 sub-step correction if enabled AND an
-            // event was detected. V0 corrects only the FIRST
-            // event (sort to pick earliest if multiple).
-            // Minimum sub-step duration as a fraction of the
-            // main dt. Events landing within this fraction of
-            // either step boundary are NOT corrected — the
-            // trap-companion's `g_eq = 2C/dt` becomes
-            // ill-conditioned at tiny dt, and the boundary
-            // events offer no accuracy benefit anyway (the
-            // shorter sub-step is essentially a single point).
-            //
-            // 1% of dt is conservative: for dt = 200 µs that
-            // means events within the first/last 2 µs are
-            // skipped.
-            const Real substep_min_dt = opts.dt * Real{0.01};
-            // dt of the FINAL solve in this outer step, fed to the deferred
-            // trap-history commit below. Stays opts.dt on the normal path;
-            // becomes dt2 when sub-step correction splits the step (sub-step 1
-            // commits the dt1 half inline; the dt2 commit is deferred past the
-            // freeze guard). This also distinguishes the corrected path — no
-            // separate `corrected` flag is needed.
-            if (opts.enable_substep_state_correction &&
-                !step_retried && !step_events.empty()) {
-                // Find earliest event in the step.
-                Real t_est = step_events.front().t_estimated;
-                for (const auto& ev : step_events) {
-                    if (ev.t_estimated < t_est) {
-                        t_est = ev.t_estimated;
-                    }
-                }
-                const Real dt1 = t_est - t_prev;
-                const Real dt2 = opts.dt - dt1;
-                if (dt1 > substep_min_dt &&
-                    dt2 > substep_min_dt) {
-                    // Roll back to pre-step state.
-                    x = x_prev;
-                    history.restore(history_snap);
-                    coss_history.restore(coss_snap);
-                    laur_history.restore(laur_snap);
-                    pmsm_history.restore(pmsm_snap);
-                    tail_history.restore(tail_snap);
-                    sat_history.restore(sat_snap);
-                    if (has_diodes) {
-                        diodes.restore_on_bits(diodes_snap);
-                    }
-
-                    // Sub-step 1: pre-event mask, dt1.
-                    {
-                        // Accumulate the sub-step b_extra into the reused
-                        // outer buffer (audit #16), in the same order as
-                        // before — history, user fn, then present source kinds
-                        // — so the result is bit-identical. The outer
-                        // `b_extra` is free here: the main event-iteration
-                        // solve already consumed it this step.
-                        accumulate_b_extra(t_est, dt1);
-                        cache.solve_at(
-                            mask_pre, dt1, b_extra, x);
-                        history.update_from_state(x, dt1);
-                        coss_history.update_from_state(x, dt1);
-                        laur_history.update_from_state(x, dt1);
-                        pmsm_history.update_from_state(x, dt1);
-                        tail_history.update_from_state(x, dt1);
-                        if (has_saturable) {
-                            sat_history.update_from_state(x);
-                        }
-                    }
-
-                    // Apply commutation events directly from
-                    // V2.2's detection (don't rely on
-                    // `update_from_state` to re-decide — at the
-                    // exact zero-crossing both v_diode and
-                    // i_diode are near the threshold, and the
-                    // SwitchedDiode decision may keep the
-                    // pre-event state).
-                    if (has_diodes) {
-                        post_event_bits = diodes_snap;
-                        const auto entries = diodes.entries();
-                        for (const auto& ev : step_events) {
-                            for (Size i = 0;
-                                 i < entries.size(); ++i) {
-                                if (entries[i].branch_id ==
-                                    ev.branch_id) {
-                                    post_event_bits[i] =
-                                        ev.new_state;
-                                    break;
-                                }
-                            }
-                        }
-                        diodes.restore_on_bits(
-                            post_event_bits);
-                    }
-
-                    // Sub-step 2: post-event mask, dt2.
-                    {
-                        topology::SwitchStateMask mask_post =
-                            switch_fn(gate_t);
-                        if (has_diodes) {
-                            mask_post = combine_masks(
-                                mask_post,
-                                diodes.current_diode_mask(),
-                                diode_owned);
-                        }
-                        // Same reused-buffer accumulation as sub-step 1
-                        // (audit #16), at time t with dt2.
-                        accumulate_b_extra(t, dt2);
-                        cache.solve_at(
-                            mask_post, dt2, b_extra, x);
-                        stamped_mask = mask_post;
-                        stamped_known = true;
-                        // History commit DEFERRED to after the freeze guard
-                        // (below): the guard must be able to snap an
-                        // unphysical i_L back BEFORE it is baked into the
-                        // trap history. Sub-step 1 already committed the dt1
-                        // half above; this records dt2 as the final commit dt.
-                        committed_dt = dt2;
-                        // The split re-took the step trapezoidally
-                        // across a mask change: the next one restarts.
-                        committed_be = false;   // never with the rule (refused)
-                    }
                 }
             }
 

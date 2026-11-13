@@ -31,8 +31,13 @@ Pulsim's transient kernel supports two **fixed-step** integrators
   The result is order 2 across edges on the grid instead of 1, with no
   alternation after them, and resonant modes keep their energy. The
   gate is sampled at the step start, and a source reads its left limit
-  at a jump on the step end. `engine='trbdf2'` and `'dsed'` refuse it,
-  and so does `enable_substep_state_correction`.
+  at a jump on the step end. `engine='trbdf2'` and `'dsed'` refuse it.
+  With it, `enable_substep_state_correction=True` splits a step at an
+  event inside it (a gate edge of a schedule with `next_edge_after`, a
+  built-in source jump, a located diode crossing): trapezoid to the
+  event, then the SDIRK window from it. Edges off the grid become
+  second order (buck D = 0.4567, `v_C` at T/50: 8.08e-2 V snapped,
+  1.07e-6 V split); `res.n_split_steps` counts the split steps.
 
 ### BDF1 (implicit Euler)
 

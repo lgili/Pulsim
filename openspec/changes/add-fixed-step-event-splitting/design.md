@@ -55,10 +55,13 @@ trajectory.
   `NativePwm2Switch`, `NativeMultiMaskPwm`, the dead-time pair, the
   phase-shift full bridge, three-phase SPWM, combined schedules) is
   asked once per step for the next edge after `t_prev`.
-- An opaque `switch_fn` is bisected on `(t_prev, t]` only when
-  `switch_fn(t_prev) ≠ switch_fn(t)`, to `1e-3·dt` (10 calls). An even
-  number of edges inside one step is not seen; that is today's
-  behaviour and is stated in the guide.
+  A Python schedule object that defines `next_edge_after(t)` is read
+  the same way.
+- (As proposed) an opaque `switch_fn` would be bisected on
+  `(t_prev, t]` when `switch_fn(t_prev) ≠ switch_fn(t)`. Not
+  implemented: open question 4 took the conservative option
+  (DECISIONS.md), so an opaque `switch_fn` keeps the restart rule's
+  start-of-step sampling.
 - Source jumps come from the table `add-discontinuity-restart-rule`
   builds.
 
@@ -70,13 +73,16 @@ For the earliest event `t_e` in `(t_prev, t)`:
 2. Sub-step 1, `dt1 = t_e − t_prev`, pre-event mask, trapezoidal
    (`solve_at(mask_pre, dt1)`; on the Newton path the segment is
    assembled at `dt1` exactly as the dt-retry does). If the step was
-   itself a restart step, sub-step 1 is two backward-Euler half-steps
-   of `dt1/2`. Commit every history with the step and stage used.
+   itself a restart step, sub-step 1 is an SDIRK(2,2) step of `dt1`.
+   Commit every history with the step and rule used (an SDIRK
+   interval commits `commit_backward_euler(γ·dt1)`, as the rule does).
 3. Apply the event: gate bits from the schedule, diode bits from the
    located crossing.
-4. Sub-step 2, `dt2 = t − t_e`: the restart rule, two backward-Euler
-   half-steps of `dt2/2` on the matrix at `dt2`
-   (`solve_at(mask_post, dt2)`), each with its event iteration.
+4. Sub-step 2, `dt2 = t − t_e`: the restart rule, one SDIRK(2,2) step
+   of `dt2` (two stages of `γ·dt2` on the factor of `2γ·dt2`,
+   `solve_at(mask_post, 2γ·dt2)`), each stage with its event iteration.
+   The window counter is set to `max(left, 2)` explicitly: the next
+   step's mask equals the post-event one, so no trigger would arm it.
 5. If another event lies in `(t_e, t)`, repeat from 1 on the remaining
    interval, at most `max_events_per_step` (8) times; beyond that the
    remainder is taken as one restart sub-step and an
@@ -110,7 +116,7 @@ most 0.01 dt.
 
 Both sub-steps go through `run_event_iteration`, which sets
 `refresh_dt` and `refresh_stage` for every solve, so the five stateful
-devices stamp `dt1` (trapezoidal) and `dt2/2` (backward Euler). The
+devices stamp `dt1` (trapezoidal) and `γ·dt2` (the SDIRK stages). The
 present correction path calls `cache.solve_at` directly and therefore
 solves a circuit with Newton devices linearly; that call is removed.
 
@@ -118,14 +124,16 @@ solves a circuit with Newton devices linearly; that call is removed.
 
 `enable_substep_state_correction` already means "split a step at a
 commutation". It keeps its name and gains gate edges and source jumps.
-It requires the restart rule; set alone, the engine raises an error
-that says so.
+It requires the restart rule; set alone, the engine raises
+`UnsupportedError(engine='pwl', feature=
+'enable_substep_state_correction')` naming both options (the rule
+refused the pair until this change).
 
 ### D7. Cost
 
-A split step costs sub-step 1 plus two half-steps, each with its event
+A split step costs sub-step 1 plus two SDIRK stages, each with its event
 iteration, against one solve. On the linear path it also needs the
-factors `(mask_pre, dt1)` and `(mask_post, dt2)`. With fixed off-grid
+factors `(mask_pre, dt1)` and `(mask_post, 2γ·dt2)`. With fixed off-grid
 edges they repeat every period and the event cache serves them; with a
 duty that changes every period they are refactored at every edge. On
 the Newton path there is no extra factorisation.

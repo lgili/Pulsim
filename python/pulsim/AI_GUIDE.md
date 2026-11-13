@@ -116,8 +116,8 @@ v_C(tau) = 3.161 V [trbdf2], exact 3.161 V
 ### 3.2 Buck converter with a PWM `switch_fn`
 
 A `switch_fn` maps `t` to a `SwitchStateMask`. On the fixed-step engine
-gate edges can only fall on the `dt` grid, so make the on-time a whole
-number of steps (trap 10):
+gate edges fall on the `dt` grid (unless split), so make the on-time a
+whole number of steps (trap 10):
 
 ```python
 DT = 1e-7
@@ -460,7 +460,7 @@ Each row was measured on this version. The fix column is what to write.
 | 7 | Tie an isolated secondary or a floating neutral to ground with a tiny resistor | A milliohm tie is a galvanic bond. On Tutorial 04's VSI a 1 mOhm neutral-to-rail tie drove 58.8 A DC through each phase (0.0 A floating or with 1 MOhm) | Leave it to `auto_regularize` (default on): it ties each floating subnet with 1 GOhm and warns. Own tie: 1 MOhm or more |
 | 8 | `res.v` of a floating DC rail is the DC voltage | It is to ground. Bridge with `ac_b="gnd"`, load across `dp`/`dn`: `v("dp")` spans -0.7..325.0 V, `v("dn")` -325.0..0.7 V; `dp - dn` averages 321.85 V on both engines. Without `dt` it warns the rails "reach the rest of the circuit only through switches/diodes"; with 10 mF: 323.94 V, 324.51 V with `dt` | `res.v("dp") - res.v("dn")`, or ground one DC rail (3.3) |
 | 9 | A fixed-step run is second order | By default each gate edge, source jump and start (ICs too) leaves a stale history: first order, ringing. RL decay, `i0=1`: 1.85e-3 at `dt=1e-5`, 0.92e-3 at `5e-6` | `discontinuity_restart=True` (6.3): gate read at step start; jumping `b_extra_fn` needs `.next_jump_after`. Sample 0 reads 0 V |
-| 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid (restart rule: exact on it, first order off it). Buck D = 0.25 at 100 kHz with `make_pwm_switch_fn`: 6.24 V with `dt=2e-7` (on-time 12.5 steps, run as 13), 6.00 V with `dt=1e-7` | Make `D/f_sw` a whole number of steps; helpers then hold it exactly (3.2) |
+| 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid unless split. Buck D = 0.25, 100 kHz, `make_pwm_switch_fn`: 6.24 V at `dt=2e-7` (12.5 on-steps run as 13), 6.00 V at `1e-7` | Whole-step `D/f_sw` (3.2), or 6.3 + `enable_substep_state_correction=True`: helper edges are split, order 2 |
 | 11 | Omitting `switch_fn` leaves switches open | With `dt`, undriven controlled switches are ALL CLOSED and `simulate` only warns: the buck of 3.2 runs at D = 1 and settles at 24.0 V, not 12 V; without `dt`, `auto` refuses | Always pass `switch_fn` when the circuit has controlled switches |
 | 12 | `except Exception:` around `simulate` keeps a script robust | A broad except turns a refusal into a silent wrong answer | Let it raise, or catch `pulsim.UnsupportedError` (`.engine`, `.feature`); never `Exception` |
 | 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee: a diode that "rode its conduction boundary" or held a state "its commutation rule forbids" (also named by `res.i`), a `switch_fn` pulse narrower than its sampling. Silence is no proof: a one-shot `switch_fn` pulse under a quarter of the step ceiling (`dt`, else at most `t_end/1000`) can be skipped silently (2 us in 20 ms: 11 of 20 phases) | Rerun with `dt`, compare (6.2); `dt` <= 4x the narrowest pulse |
