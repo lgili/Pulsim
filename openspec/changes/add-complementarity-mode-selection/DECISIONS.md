@@ -156,3 +156,27 @@ choices it did not pin.
     `trbdf2` and a diode-free dsed run (#11 still holds for the hooks).
     → The other engines' hooks sit in files this change does not own. →
     Reverse: refuse 'lcp' everywhere again in `pulsim.simulate`.
+
+## Slice 3 (2026-11-13)
+
+19. **Zero-start predicates: skip only the one that fired (fixes #16).**
+    `locate_event_exact_` and `locate_event_in_step_` skipped every armed
+    predicate with `g(t0) == 0`. Now: the predicate that fired the last
+    event is skipped only on a step starting at that instant; a diode
+    predicate at exactly zero is evaluated at `t0 + d` (`d = 100·h_e`,
+    the judge's shortest propagation; `1e-6·h` without h_e; at most half
+    a scan interval) and located from there when it moves into its
+    admissible side (DiodeOn `v − V_on < 0`, DiodeOff `v − V_f > 0`).
+    One that stays at zero (a diode at rest) or leaves on its event side
+    (an inconsistent mode — the guard's case) is skipped; nothing fires
+    at zero length, so no Zeno loop exists by construction
+    (`test_diode_resting_at_exactly_zero_does_not_spin`). Non-diode
+    predicates keep the old skip (no direction is known for them).
+    → Measured: the V_th = 0 tank now switches at 1.2532358877,
+    1.8877214715, 7.5370567364, 8.1702737953 µs (solve_ivp DOP853 rtol
+    1e-13: within 3e-16 s; pwl at 0.1 ns: same edges to its grid); worst
+    ON reverse current −1.83e-2 → 0 A. Every other survey circuit
+    (shadow_survey + extra_circuits, 29 circuits × settle / guard /
+    'lcp' = 87 runs) is bit-identical to 11ab8e95
+    (`probes/survey_bit_identity.out`); `bit_identity.py` 36/36. → Reverse: restore `if (g == 0) continue;` in both locators.
+

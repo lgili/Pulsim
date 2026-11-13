@@ -248,20 +248,17 @@ capacitors) are refused by the extractor, so the charge-conserving
 start for inconsistent `c0=` values is not reachable yet. Coupled
 inductors stay refused (task 7).
 
-### Complementarity mode selection: dsed only; double crossings at `V_th = 0`
+### Complementarity mode selection: dsed only
 
 `mode_selection='lcp'` and the default-mode guard run on `engine='dsed'`
 only; `pwl` and `trbdf2` still decide with their settle and refuse
 `'shadow'`/`'lcp'` by name (hooks: add-complementarity-mode-selection
 task 4.2). The guard and the LCP decide at events; a commutation the
-event locator misses is not decided. With `V_th = 0` a diode that turns
-on at exactly `v = 0` starts its next step with the turn-off predicate
-at 0, which the dsed locator skips, so a return through zero inside that
-step is lost: an LC tank into a series diode stays ON at −18 mA from
-2.25 µs (`test_double_crossing_inside_one_step_is_seen`'s circuit). A
-band of `V_th = 1e-3` gives the exact windows. The guard repairs only
-the modes it judges inconsistent over `1e4·h_e`; a mode consistent that
-long and wrong later is not caught.
+event locator misses is not decided. A diode predicate that starts a
+step at exactly zero is located from the side it leaves to over the
+first `100·h_e` (DECISIONS #19); a crossing back inside that sliver is
+not seen. The guard repairs only the modes it judges inconsistent over
+`1e4·h_e`; a mode consistent that long and wrong later is not caught.
 
 ### Fixed-step controller ticks land on the `dt` grid
 

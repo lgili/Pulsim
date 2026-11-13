@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### dsed: a diode predicate starting a step at exactly zero is located (fix)
+
+The dsed event locator skipped every armed predicate whose value was
+exactly 0 at the start of a step ("just fired"). With `V_th = 0` a
+turn-on lands at `v = 0`, so the armed turn-off predicate started the
+next step at 0 and a return through zero inside that step was never an
+event: the double-crossing LC tank held its diode ON at −18 mA from
+1.89 µs to 7.66 µs. Now only the predicate that fired at that instant is
+skipped; a diode predicate at zero is read just after the step start
+(`100·h_e` on the exact trajectory) and located when it moves into its
+admissible side, never fired at zero length. The tank's edges are now
+1.2532358877 / 1.8877214715 / 7.5370567364 / 8.1702737953 µs (solve_ivp
+DOP853 rtol 1e-13 agrees to 3e-16 s), end `v(t)` −5.17799 → −5.43795 V.
+Every other circuit of the mode-selection surveys (29 circuits × settle /
+guard / 'lcp') and `pwl`/`trbdf2` are bit-identical.
+
 ### Diode mode selection: default-mode guard on dsed (BREAKING for wrong numbers)
 
 `engine='dsed'` now judges the diode mode its settle picks at `t = 0`

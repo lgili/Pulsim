@@ -165,7 +165,37 @@ def test_double_crossing_inside_one_step_is_seen():
     on = r.event_times[r.event_types == 1]
     assert len(on) >= 1
     assert abs(on[0] - np.arcsin(0.95) / 1e6) < 1e-12
-    assert np.count_nonzero(r.event_types == 2) >= 1
+    # V_th = 0: the turn-on lands at v_D = 0 exactly, so the armed turn-off
+    # predicate starts the next step at g = 0. It was skipped as "just
+    # fired" and the return through zero 0.63 us later was never an event
+    # (one OFF at 7.655 us, the diode ON at -18 mA in between). Reference:
+    # solve_ivp DOP853 rtol 1e-13 with terminal events (pwl at dt = 0.1 ns
+    # gives the same edges to its grid): 1.2532358876657, 1.8877214714713,
+    # 7.5370567364184, 8.1702737952621 us; v(t) end -5.437946944009 V.
+    assert r.event_times == pytest.approx(
+        [1.2532358876657e-6, 1.8877214714713e-6, 7.5370567364184e-6, 8.1702737952621e-6],
+        abs=1e-12)
+    assert list(r.event_types) == [1, 2, 1, 2]
+    on = np.asarray(r.switch_states)[:, b.switch_index_of("D")].astype(bool)
+    i_d = GON * (np.asarray(r.v("t")) - np.asarray(r.v("k")))
+    assert i_d[on].min() > -1e-9          # was -1.83e-2 A
+    assert np.asarray(r.v("t"))[-1] == pytest.approx(-5.437946944009, abs=1e-9)
+
+
+def test_diode_resting_at_exactly_zero_does_not_spin():
+    # V_th = 0 and v_D = 0 for the whole run: both predicates start every step at g = 0
+    # and stay there. A predicate leaving zero is located only when it moves into its
+    # admissible side, and nothing fires at zero length -- no event, one step per dt_max.
+    b = p.CircuitBuilder()
+    b.add_capacitor("C", "a", "gnd", 1e-6)
+    b.add_resistor("R", "a", "gnd", 100.0)
+    b.add_diode("D", "a", "gnd", GON, GOFF, 0.0)
+    b.add_inductor("L", "a", "b", 1e-3)
+    b.add_resistor("R2", "b", "gnd", 10.0)
+    r = _run(b, t_end=1e-3)
+    assert r.n_events == 0
+    assert len(r.times) == 1001
+    assert np.abs(np.asarray(r.states)).max() == 0.0
 
 
 def test_ten_megahertz_duty():

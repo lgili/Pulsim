@@ -13,10 +13,9 @@ the guard / LCP counters; or the error.
 The v1 benchmarks (diode_half_wave_rl_load, chopper_with_rc_snubber, cuk_converter, sepic) are
 refused by the 2.0 YAML loader; they are rebuilt here with the builder (the half-wave RL case IS
 diode_half_wave_rl_load). The double-crossing tank is the circuit of
-test_double_crossing_inside_one_step_is_seen; its V_th = 0 failure is not a mode-selection
-defect: the turn-on is decided at v = 0, so the armed turn-off predicate (i = g_on v) starts the
-next step at exactly 0, which locate_event_in_step_ skips as "just fired" -- the return of i
-through zero at 1.89 us inside that 1 us step is never located, and no event = no decision.
+test_double_crossing_inside_one_step_is_seen; its V_th = 0 failure was not a mode-selection defect
+but the event locator's (DECISIONS #16, fixed by #19): the turn-on is decided at v = 0, the armed
+turn-off predicate started the next step at exactly 0 and was skipped as "just fired".
 """
 import sys
 import time
