@@ -290,3 +290,29 @@ TEST_CASE("solve_rank1 builds no structure after the first call",
     REQUIRE(cache.metrics().structure_builds == builds);
     REQUIRE(cache.metrics().symbolic_analyses == analyses);
 }
+
+TEST_CASE("the assembler's per-branch lookups follow parameter updates and added devices",
+          "[v2][layer4][assembly]") {
+    // SegmentAssembler caches each branch's kind, parameter pointer and
+    // branch-current unknown. An in-place update must be read through the
+    // pointer; an added device (a pool insert moves the parameters) must
+    // rebuild the table. Both checked byte for byte against a fresh build.
+    auto b = bridge();
+    SegmentAssembler sa;
+    const auto mask = mask_of(8, 0xA5U);
+    auto check = [&] {
+        sparse::Matrix J, J_ref;
+        Vector bb, b_ref;
+        sa.assemble(b.graph(), b.pool(), mask, 1e-7, J, bb);
+        assemble_segment(b.graph(), b.pool(), mask, 1e-7, J_ref, b_ref);
+        sparse::compress_in_place(J_ref);
+        REQUIRE(same_bytes(J, J_ref));
+        REQUIRE(same_bytes(bb, b_ref));
+    };
+    check();
+    b.pool().update_resistor_R(b.branch_id_of("R1"), 7.5);
+    check();
+    b.add_resistor("Rx", "m", "gnd", 33.0);
+    b.add_inductor("Lx", "x", "gnd", 2e-3);
+    check();
+}

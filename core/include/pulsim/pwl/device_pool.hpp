@@ -713,6 +713,9 @@ public:
     /// alternative to `Entry` causes a compile error here unless
     /// it's explicitly classified (compiler reminds you to update
     /// the visitor — exhaustiveness check on a closed variant).
+    /// Registered devices; an insert moves the stored parameters.
+    [[nodiscard]] Size num_entries() const noexcept { return entries_.size(); }
+
     [[nodiscard]] Size num_dynamic_branches() const noexcept {
         Size n = 0;
         for (const auto& [_, entry] : entries_) {

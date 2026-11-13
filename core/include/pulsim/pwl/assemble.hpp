@@ -77,8 +77,9 @@ namespace detail {
 inline void stamp_switch_branch(const DevicePool& pool, Index branch_id,
                                 bool closed, sparse::Matrix& J, Vector& b,
                                 const Vector& x,
-                                const stamping::BranchCoord& coord) {
-    if (pool.kind_of(branch_id) == DevicePool::StoredKind::Diode) {
+                                const stamping::BranchCoord& coord,
+                                DevicePool::StoredKind kind) {
+    if (kind == DevicePool::StoredKind::Diode) {
         const auto& p = pool.diode_params(branch_id);
         stamping::stamp_switch_fixed(J, b, x, coord, closed, p.g_on,
                                      p.g_off, p.V_f);
@@ -88,6 +89,27 @@ inline void stamp_switch_branch(const DevicePool& pool, Index branch_id,
                                      pool.switch_g_off(branch_id));
     }
 }
+
+inline void stamp_switch_branch(const DevicePool& pool, Index branch_id,
+                                bool closed, sparse::Matrix& J, Vector& b,
+                                const Vector& x,
+                                const stamping::BranchCoord& coord) {
+    stamp_switch_branch(pool, branch_id, closed, J, b, x, coord,
+                        pool.kind_of(branch_id));
+}
+
+// One branch's pool lookups, resolved once per assembler instead of once
+// per stamp (the segment build spent ~37 % of its samples in
+// `DevicePool::kind_of` / `entry_at`). `params` points into the pool for
+// the four kinds whose values `refactor_parametric` updates in place
+// (Resistor, Capacitor, Inductor, VoltageSource), so the stamps read the
+// current value; `var` is the branch-current unknown, or -1.
+struct BranchLookup {
+    DevicePool::StoredKind kind{};
+    const void* params = nullptr;
+    Index var = -1;
+    bool ok = false;   // registered in the pool
+};
 
 // Per-column reserve from the node incidence (update-linear-time-assembly
 // tier 1). An estimate: a column that overflows is grown by Eigen, so
@@ -132,7 +154,8 @@ inline void assemble_impl(const topology::Graph& graph,
                            const topology::SwitchStateMask& mask,
                            sparse::Matrix& S,
                            sparse::Matrix* C_out,
-                           Vector& b) {
+                           Vector& b,
+                           const BranchLookup* lk = nullptr) {
     const Size state_size = pool.state_size(graph);
     if (state_size == 0) {
         return;
@@ -150,22 +173,31 @@ inline void assemble_impl(const topology::Graph& graph,
         const auto& branch = graph.branch(b_id);
         const stamping::BranchCoord coord{branch.from, branch.to,
                                             branch.id};
+        const BranchLookup* bl =
+            lk != nullptr && lk[b_id].ok ? &lk[b_id] : nullptr;
+        const auto kind_of = [&] {
+            return bl != nullptr ? bl->kind : pool.kind_of(branch.id);
+        };
 
         switch (branch.kind) {
         case topology::BranchKind::PassiveLinear: {
             // V1 dispatch: PassiveLinear may be Resistor, Capacitor,
             // or Inductor. Use the pool's StoredKind to discriminate.
-            const auto k = pool.kind_of(branch.id);
+            const auto k = kind_of();
             switch (k) {
             case DevicePool::StoredKind::Resistor: {
-                const auto& p = pool.resistor_params(branch.id);
+                const auto& p = bl != nullptr
+                    ? *static_cast<const models::Resistor::Params*>(bl->params)
+                    : pool.resistor_params(branch.id);
                 stamping::stamp_device<models::Resistor>(S, b, x,
                                                           coord, p);
                 break;
             }
             case DevicePool::StoredKind::Capacitor: {
                 if (C_out != nullptr) {
-                    const auto& p = pool.capacitor_params(branch.id);
+                    const auto& p = bl != nullptr
+                        ? *static_cast<const models::Capacitor::Params*>(bl->params)
+                        : pool.capacitor_params(branch.id);
                     // Coefficient of 1/dt: g_eq(dt) = 2C/dt →
                     // stamp the block with 2C into C_out.
                     stamping::stamp_capacitor_companion(
@@ -176,9 +208,12 @@ inline void assemble_impl(const topology::Graph& graph,
             }
             case DevicePool::StoredKind::Inductor: {
                 if (C_out != nullptr) {
-                    const auto& p = pool.inductor_params(branch.id);
-                    const Index branch_var_id =
-                        pool.branch_var_id_for_inductor(branch.id, graph);
+                    const auto& p = bl != nullptr
+                        ? *static_cast<const models::Inductor::Params*>(bl->params)
+                        : pool.inductor_params(branch.id);
+                    const Index branch_var_id = bl != nullptr
+                        ? bl->var
+                        : pool.branch_var_id_for_inductor(branch.id, graph);
                     // Incidence (±1) → S; diagonal coefficient
                     // (−2L) → C_out.
                     stamping::stamp_inductor_companion_split(
@@ -199,7 +234,12 @@ inline void assemble_impl(const topology::Graph& graph,
             // VoltageSource, CurrentSource, AND
             // PWMVoltageSource (a time-varying voltage
             // source). Dispatch on the pool's StoredKind.
-            const auto src_kind = pool.kind_of(branch.id);
+            const auto src_kind = kind_of();
+            const auto source_var = [&] {
+                return bl != nullptr
+                    ? bl->var
+                    : pool.branch_var_id_for_source(branch.id, graph);
+            };
             if (src_kind == DevicePool::StoredKind::CurrentSource) {
                 const auto& p =
                     pool.current_source_params(branch.id);
@@ -210,23 +250,20 @@ inline void assemble_impl(const topology::Graph& graph,
                 // baseline. The time-varying PWM value is
                 // overlaid via b_extra at runtime by
                 // run_transient's PWM pass.
-                const Index branch_var_id =
-                    pool.branch_var_id_for_source(branch.id, graph);
+                const Index branch_var_id = source_var();
                 stamping::stamp_voltage_source(S, b, x, coord,
                                                 branch_var_id, Real{0});
             } else if (src_kind ==
                        DevicePool::StoredKind::SineVoltageSource) {
                 // V11: same V=0 baseline pattern; sine
                 // value comes from b_extra each step.
-                const Index branch_var_id =
-                    pool.branch_var_id_for_source(branch.id, graph);
+                const Index branch_var_id = source_var();
                 stamping::stamp_voltage_source(S, b, x, coord,
                                                 branch_var_id, Real{0});
             } else if (src_kind ==
                        DevicePool::StoredKind::PulseVoltageSource) {
                 // V12: same V=0 baseline + b_extra overlay.
-                const Index branch_var_id =
-                    pool.branch_var_id_for_source(branch.id, graph);
+                const Index branch_var_id = source_var();
                 stamping::stamp_voltage_source(S, b, x, coord,
                                                 branch_var_id, Real{0});
             } else if (src_kind ==
@@ -254,9 +291,10 @@ inline void assemble_impl(const topology::Graph& graph,
                 stamping::stamp_ideal_transformer(
                     S, b, x, coord, p_from, p_to, branch_var_id, tp.n);
             } else {
-                const auto& p = pool.voltage_source_params(branch.id);
-                const Index branch_var_id =
-                    pool.branch_var_id_for_source(branch.id, graph);
+                const auto& p = bl != nullptr
+                    ? *static_cast<const models::VoltageSource::Params*>(bl->params)
+                    : pool.voltage_source_params(branch.id);
+                const Index branch_var_id = source_var();
                 stamping::stamp_voltage_source(S, b, x, coord,
                                                 branch_var_id, p.V);
             }
@@ -264,7 +302,7 @@ inline void assemble_impl(const topology::Graph& graph,
         }
         case topology::BranchKind::Switch: {
             stamp_switch_branch(pool, branch.id, mask.get(switch_idx),
-                                S, b, x, coord);
+                                S, b, x, coord, kind_of());
             ++switch_idx;
             break;
         }
@@ -278,7 +316,7 @@ inline void assemble_impl(const topology::Graph& graph,
             // tiny "G_min" diagonal here so the cache builds;
             // the Newton refresh's stamping dwarfs G_min in
             // the combined Jacobian.
-            const auto src_kind = pool.kind_of(branch.id);
+            const auto src_kind = kind_of();
             if (src_kind ==
                     DevicePool::StoredKind::SaturableInductor) {
                 const Index branch_var_id =
@@ -437,7 +475,8 @@ public:
             zero_values_(G);
             zero_values_(C);
             b = Vector::Zero(n);
-            detail::assemble_impl(graph, pool, mask, G, &C, b);
+            detail::assemble_impl(graph, pool, mask, G, &C, b,
+                                  lookups_(graph, pool));
             if (G.nonZeros() == dyn_.G.nonZeros() &&
                 C.nonZeros() == dyn_.C.nonZeros()) {
                 return;
@@ -461,7 +500,8 @@ public:
             J = stat_J_;
             zero_values_(J);
             b = Vector::Zero(n);
-            detail::assemble_impl(graph, pool, mask, J, nullptr, b);
+            detail::assemble_impl(graph, pool, mask, J, nullptr, b,
+                                  lookups_(graph, pool));
             if (J.nonZeros() == stat_J_.nonZeros()) {
                 return;
             }
@@ -531,6 +571,53 @@ public:
     }
 
 private:
+    // The per-branch lookups, rebuilt when the assembler sees another pool,
+    // another branch count or another device count (an insert into the
+    // pool's flat map moves the parameters the table points to).
+    // shortcut: re-registering an existing branch as another kind is not
+    // detected; nothing does that today — key on a pool generation if it ever does.
+    const detail::BranchLookup* lookups_(const topology::Graph& graph,
+                                         const DevicePool& pool) {
+        const Index nb = graph.num_branches();
+        if (lk_pool_ == &pool && lk_branches_ == nb &&
+            lk_entries_ == pool.num_entries()) {
+            return lk_.data();
+        }
+        using SK = DevicePool::StoredKind;
+        lk_.assign(static_cast<std::size_t>(nb), detail::BranchLookup{});
+        for (Index b_id = 0; b_id < nb; ++b_id) {
+            const auto& br = graph.branch(b_id);
+            auto& e = lk_[static_cast<std::size_t>(b_id)];
+            if (!pool.is_registered(br.id)) continue;   // never stamped
+            e.kind = pool.kind_of(br.id);
+            e.ok = true;
+            switch (e.kind) {
+            case SK::Resistor: e.params = &pool.resistor_params(br.id); break;
+            case SK::Capacitor: e.params = &pool.capacitor_params(br.id); break;
+            case SK::Inductor:
+                e.params = &pool.inductor_params(br.id);
+                e.var = pool.branch_var_id_for_inductor(br.id, graph);
+                break;
+            case SK::VoltageSource:
+                e.params = &pool.voltage_source_params(br.id);
+                e.var = pool.branch_var_id_for_source(br.id, graph);
+                break;
+            case SK::PWMVoltageSource:
+            case SK::SineVoltageSource:
+            case SK::PulseVoltageSource:
+            case SK::VCVS:
+            case SK::IdealTransformer:
+                e.var = pool.branch_var_id_for_source(br.id, graph);
+                break;
+            default: break;
+            }
+        }
+        lk_pool_ = &pool;
+        lk_branches_ = nb;
+        lk_entries_ = pool.num_entries();
+        return lk_.data();
+    }
+
     static void zero_values_(sparse::Matrix& M) noexcept {
         std::fill_n(M.valuePtr(), static_cast<std::size_t>(M.nonZeros()),
                     Real{0});
@@ -575,6 +662,10 @@ private:
     sparse::Matrix stat_J_;
     sparse::Matrix G_, C_;   // scratch of `assemble` at dt > 0
     std::uint64_t structure_builds_ = 0;
+    std::vector<detail::BranchLookup> lk_;
+    const DevicePool* lk_pool_ = nullptr;
+    Index lk_branches_ = -1;
+    Size lk_entries_ = 0;
 };
 
 }  // namespace pulsim::pwl

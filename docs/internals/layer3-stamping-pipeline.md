@@ -150,6 +150,14 @@ inserts were gone, a `sample` profile of repeated segment builds on a
 below the numeric `factorize` (25 %) and the pool lookups
 `DevicePool::kind_of` / `entry_at` (36 %); the steady-state step at
 n = 1502 shows no assembly at all (the triangular solves dominate).
+`SegmentAssembler` now resolves those lookups once per pool and branch
+count (`detail::BranchLookup`: kind, parameter pointer, branch-current
+unknown) and passes the table to `assemble_impl`; the per-mask build at
+n = 3008 dropped from 337 to 212 µs, bit-identically. The parameter
+pointers stay valid because `refactor_parametric` updates values in
+place, and the table is rebuilt whenever the graph's branch count or
+the pool's device count (`DevicePool::num_entries`) changes, since an
+insert into the pool's flat map moves the stored parameters.
 
 ## What this layer does NOT do
 

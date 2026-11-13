@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Segment build: per-branch device lookups resolved once (performance)
+
+* **Changed** `SegmentAssembler` resolves each branch's device kind,
+  parameter pointer and branch-current unknown once per pool instead of
+  one `DevicePool` lookup per stamp (`update-linear-time-assembly`).
+  Bit-identical on all 19 golden cases. Per-mask eager build of the
+  switched ladder (n = 3008) 337 → 212 µs; the VSI (n = 12) is
+  unchanged within noise. Tiers 2 (first visit by `partial_refactor`)
+  and 3 (reciprocal pivots) and the low-rank Newton update were
+  measured and not landed; see the changes' DECISIONS.md.
+
 ### Newton on the in-house LU, no allocation per iteration (performance)
 
 * **Changed** the engines' Newton workspace factorises the combined
