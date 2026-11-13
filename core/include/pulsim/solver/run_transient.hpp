@@ -514,7 +514,7 @@ inline SimulationResult run_transient(
                 if (user_refresh) {
                     max_i = user_refresh(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 return std::max(
@@ -539,7 +539,7 @@ inline SimulationResult run_transient(
                 if (user_refresh) {
                     max_i = user_refresh(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 return std::max(
@@ -561,7 +561,7 @@ inline SimulationResult run_transient(
                 if (user_refresh) {
                     max_i = user_refresh(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 return std::max(
@@ -583,7 +583,7 @@ inline SimulationResult run_transient(
                 if (user_refresh) {
                     max_i = user_refresh(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 return std::max(
@@ -617,7 +617,7 @@ inline SimulationResult run_transient(
                 if (user_refresh) {
                     max_i = user_refresh(x, J_nl, f_nl, g, p);
                 } else {
-                    if (J_nl.rows() > 0) J_nl.setZero();
+                    if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
                     if (f_nl.size() > 0) f_nl.setZero();
                 }
                 // Additive saturable-inductor stamping, through
@@ -2061,6 +2061,7 @@ inline SimulationResult run_transient(
     result.final_snapshot.stamped_mask =
         stamped_known ? mask_bits(stamped_mask) : std::vector<bool>{};
     result.final_snapshot.valid = true;
+    result.newton = newton_ws.take_counters();
 
     return result;
 }

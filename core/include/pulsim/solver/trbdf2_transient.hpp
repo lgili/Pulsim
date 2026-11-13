@@ -613,7 +613,7 @@ inline SimulationResult run_transient_trbdf2(
                 if (user) {
                     m = user(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 return std::max(
@@ -633,7 +633,7 @@ inline SimulationResult run_transient_trbdf2(
                 if (user) {
                     m = user(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 return std::max(m, pwl::refresh_lauritzen_diodes(
@@ -651,7 +651,7 @@ inline SimulationResult run_transient_trbdf2(
                 if (user) {
                     m = user(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 return std::max(m, pwl::refresh_igbt_tails(
@@ -669,7 +669,7 @@ inline SimulationResult run_transient_trbdf2(
                 if (user) {
                     m = user(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 return std::max(m, pwl::refresh_pmsm_mna(
@@ -687,7 +687,7 @@ inline SimulationResult run_transient_trbdf2(
                 if (user) {
                     m = user(xx, J_nl, f_nl, g, pp);
                 } else {
-                    J_nl.setZero();
+                    sparse::zero_keep_pattern(J_nl);
                     f_nl.setZero();
                 }
                 Real mx = Real{0};
@@ -1904,6 +1904,7 @@ inline SimulationResult run_transient_trbdf2(
     result.final_snapshot.igbt_tail_history = tail.to_flat();
     result.final_snapshot.pmsm_history = pmsm.to_flat();
     result.final_snapshot.valid = true;
+    result.newton = newton_ws.take_counters();
     return result;
 }
 

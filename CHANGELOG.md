@@ -644,6 +644,43 @@ once, above the engine dispatch, and both engines consume that plan.
   +0.07 %, plateau +0.35 %; Lauritzen body diode at T_M = 0.01·TT
   against SPICE TT recovery: I_rrm −0.09 %, Q_rr +0.11 %.
 
+### Segment build: per-branch device lookups resolved once (performance)
+
+* **Changed** `SegmentAssembler` resolves each branch's device kind,
+  parameter pointer and branch-current unknown once per pool instead of
+  one `DevicePool` lookup per stamp (`update-linear-time-assembly`).
+  Bit-identical on all 19 golden cases. Per-mask eager build of the
+  switched ladder (n = 3008) 337 → 212 µs; the VSI (n = 12) is
+  unchanged within noise. Tiers 2 (first visit by `partial_refactor`)
+  and 3 (reciprocal pivots) and the low-rank Newton update were
+  measured and not landed; see the changes' DECISIONS.md.
+
+### Newton on the in-house LU, no allocation per iteration (performance)
+
+* **Changed** the engines' Newton workspace factorises the combined
+  Jacobian with the in-house Gilbert–Peierls LU (one symbolic analysis
+  per pattern, numeric refactor in place) instead of `Eigen::SparseLU`
+  (`update-newton-persistent-solver`, stage A2). Calls without a
+  workspace — the DC operating point and continuation — keep
+  `Eigen::SparseLU`. Listed as a numerical change; on the 19 golden
+  cases (every Newton case on `pwl` and `trbdf2`) states, step times,
+  switch states and the iteration count of every Newton call are
+  bit-identical to before.
+* **Changed** the device refreshers and the engines' refresh wrappers
+  zero `J_nl`'s values and keep its pattern (`sparse::zero_keep_pattern`)
+  instead of `setZero()` + re-insert. With the in-house refactor a
+  Newton iteration now performs no heap allocation after the first call
+  (was ~20 Eigen mallocs). ns/step against the previous build
+  (interleaved, best of 9): Shockley buck `pwl` 3478 → 859, `trbdf2`
+  11410 → 3186; Shockley rectifier n = 51 12153 → 4860, n = 483
+  134789 → 59458; MOSFET Level-1 3824 → 989; saturable inductor
+  3555 → 834.
+* **Added** `SimulationResult.newton` (`NewtonCounters`: `solves`,
+  `iterations`, `analyses`, `factorizations`, `partial_refactors`,
+  `lm_attempts`, and `iterations_per_solve`, the iteration count of
+  every Newton call), and `pwl::solve_with_newton_in_place`, the
+  out-parameter form of `solve_with_newton_b_extra`.
+
 ### Newton: one sparse-LU analysis per run (performance, bit-identical)
 
 * **Changed** `solve_with_newton_b_extra` takes an optional

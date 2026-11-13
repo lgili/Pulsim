@@ -677,13 +677,20 @@ public:
         // scan and the O(n) pattern check with pattern-proportional
         // work; the factor now stores PIVOTAL row ids, and pivotal row
         // j < k is resolved by eliminated column j).
+        // The factorize work vectors, reused: no allocation once sized.
         const std::size_t nz = static_cast<std::size_t>(n_);
-        std::vector<Scalar> x(nz, Scalar{0});
-        std::vector<Index>  xi(nz, Index{0});
-        std::vector<Index>  rstack(nz, Index{0});
-        std::vector<Index>  pstack(nz, Index{0});
-        std::vector<Index>  visit(nz, Index{-1});
-        std::vector<bool>   in_pattern(nz, false);
+        auto& x = fw_x_;
+        auto& xi = fw_xi_;
+        auto& rstack = fw_rstack_;
+        auto& pstack = fw_pstack_;
+        auto& visit = fw_visit_;
+        auto& in_pattern = fw_in_pattern_;
+        x.assign(nz, Scalar{0});
+        xi.assign(nz, Index{0});
+        rstack.assign(nz, Index{0});
+        pstack.assign(nz, Index{0});
+        visit.assign(nz, Index{-1});
+        in_pattern.assign(nz, char{0});
         const Index*  Ap = new_M.outerIndexPtr();
         const Index*  Ai = new_M.innerIndexPtr();
         const Scalar* Ax = new_M.valuePtr();
@@ -779,12 +786,12 @@ public:
             for (Index q = u_col_ptr_[static_cast<std::size_t>(k)];
                  q < u_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
                 in_pattern[static_cast<std::size_t>(
-                    u_row_idx_[static_cast<std::size_t>(q)])] = true;
+                    u_row_idx_[static_cast<std::size_t>(q)])] = 1;
             }
             for (Index q = l_col_ptr_[static_cast<std::size_t>(k)];
                  q < l_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
                 in_pattern[static_cast<std::size_t>(
-                    l_row_idx_[static_cast<std::size_t>(q)])] = true;
+                    l_row_idx_[static_cast<std::size_t>(q)])] = 1;
             }
             bool pattern_ok = true;
             for (Index p = top; p < n_; ++p) {
@@ -815,12 +822,12 @@ public:
             for (Index q = u_col_ptr_[static_cast<std::size_t>(k)];
                  q < u_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
                 in_pattern[static_cast<std::size_t>(
-                    u_row_idx_[static_cast<std::size_t>(q)])] = false;
+                    u_row_idx_[static_cast<std::size_t>(q)])] = 0;
             }
             for (Index q = l_col_ptr_[static_cast<std::size_t>(k)];
                  q < l_col_ptr_[static_cast<std::size_t>(k + 1)]; ++q) {
                 in_pattern[static_cast<std::size_t>(
-                    l_row_idx_[static_cast<std::size_t>(q)])] = false;
+                    l_row_idx_[static_cast<std::size_t>(q)])] = 0;
             }
             for (Index p = top; p < n_; ++p) {
                 x[static_cast<std::size_t>(
@@ -1402,6 +1409,7 @@ private:
     // `factorize` work vectors, kept between calls (see factorize).
     std::vector<Index>  fw_pinv_, fw_xi_, fw_rstack_, fw_pstack_, fw_visit_;
     std::vector<Scalar> fw_x_;
+    std::vector<char>   fw_in_pattern_;   // partial_refactor's marker
 
     bool analyzed_         = false;
     bool factorized_       = false;

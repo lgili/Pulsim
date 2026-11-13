@@ -210,6 +210,18 @@ but the Layer 5 `run_transient` driver does not yet call
 that integration is tracked as `add-pwl-rank1-runtime-integration`
 (TBD — see CHANGELOG § 1.3.0 *Not changed*).
 
+### First visit of a switch state: full factorisation
+
+A lazy cache factorises every newly visited mask in full, on the
+shared symbolic analysis. Tier 2 of `update-linear-time-assembly`
+(`partial_refactor` on the nearest resident mask's factor) was
+measured on 2026-11-13 and not landed: on the switched ladder most
+single-switch flips exceed the 0.6·n path gate and the first visit got
+slower. Tier 3 (stored reciprocal pivots, 1.2× on the triangular
+solve) is held until the TR-BDF2 step grid stops amplifying last-bit
+differences beyond the 1e-9 gate. See that change's DECISIONS.md,
+items 13–14.
+
 ---
 
 ## LiveScope GUI
@@ -361,15 +373,21 @@ the owner's accuracy sign-off.
 
 ### Newton: what the persistent analysis does not cover
 
-Since `update-newton-persistent-solver` (stage A1) a run analyses the
-Newton Jacobian once per sparsity pattern. Still per iteration: the
-numeric `Eigen::SparseLU::factorize` (which allocates its work memory
-each call) and the device refreshers' `setZero()` + re-insert of
-`J_nl`. The Levenberg-Marquardt fallback builds and analyses a fresh
-solver on every attempt. A user refresher whose stamp positions depend
-on `x` changes the pattern and re-analyses on each change (correct,
-just slower). Stages A2 (in-house LU) and B (low-rank update) are
-proposed, not implemented.
+Since `update-newton-persistent-solver` (stages A1 and A2) a run
+analyses the Newton Jacobian once per sparsity pattern and refactorises
+it in place with the in-house LU, without allocating. Still per
+iteration: one full numeric factorisation, although only the device
+columns change. Stage B (the low-rank update) was measured on
+2026-11-13 and not landed: `partial_refactor` on the device columns
+gains ≤ 1.26× and never runs on the rectifier; Woodbury gains 1.87× at
+n = 483 but changes the iteration trace and diverges on two golden
+circuits (see that change's DECISIONS.md, item 17). The Levenberg-Marquardt fallback and the line-search
+trial refresh build their matrices afresh on every attempt. A user
+refresher whose stamp positions depend on `x` changes the pattern and
+re-analyses on each change (correct, just slower); a refresher that
+stamps nothing on a call keeps the explicit zeros of earlier calls in
+`J_nl`. The DC operating point and continuation (calls without a run
+workspace) still use `Eigen::SparseLU`.
 
 ### Fixed engine: diode-mask chatter inside Newton at a small `dt`
 

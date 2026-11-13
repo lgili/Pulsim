@@ -3,6 +3,7 @@
     python golden_baseline.py record  [--dir D]   # save goldens (pre-change tree)
     python golden_baseline.py compare [--dir D]   # strict byte compare + counter diff
     python golden_baseline.py perf    [--reps N]  # ns/step and build cost (report only)
+    python golden_baseline.py gate    [--dir D]   # rounding gate (see gate())
 
 Result arrays (times, states, switch states, TR-BDF2 stats, error text)
 are compared byte for byte: any difference, even a sign of zero, fails.
@@ -221,6 +222,15 @@ def run_case(name):
     for k in ("n_restart_steps", "n_restart_factorizations"):
         if getattr(res, k, 0):
             counters[f"res.{k}"] = int(getattr(res, k))
+
+    nw = getattr(res, "newton", None)
+    if nw is not None:
+        # Iterations of every Newton call, in call order: the per-step
+        # iteration counts the rounding gate requires to be identical.
+        arrays["newton_trace"] = np.asarray(nw.iterations_per_solve, dtype=np.uint16)
+        for k in ("solves", "iterations", "analyses", "factorizations",
+                  "partial_refactors", "lm_attempts"):
+            counters[f"newton.{k}"] = int(getattr(nw, k))
     for i, c in enumerate(_caches):
         for k, v in _int_fields(c.metrics()).items():
             counters[f"cache.{k}"] = counters.get(f"cache.{k}", 0) + v
@@ -247,6 +257,8 @@ def compare(d: Path, names) -> int:
         keys = sorted(set(k for k in g.files if not k.startswith("counter_")) | set(arrays))
         verdict = []
         for k in keys:
+            if k not in g.files and k == "newton_trace":
+                continue  # golden recorded before the trace existed
             if k not in arrays or k not in g.files:
                 verdict.append(f"{k}:MISSING")
                 bad += 1
@@ -266,6 +278,53 @@ def compare(d: Path, names) -> int:
         status = "IDENTICAL" if not verdict else "NOT IDENTICAL " + " ".join(verdict)
         print(f"{name:20s} {status}  counters moved: {moved or 'none'}")
     print("GOLDEN COMPARE:", "ALL IDENTICAL" if bad == 0 else f"{bad} DIFFERENCES")
+    return 1 if bad else 0
+
+
+def gate(d: Path, names, tol=1e-9) -> int:
+    """Rounding gate (maintainer, 2026-11-13) against goldens recorded
+    with the Newton trace: step count, switch-state sequence and the
+    iteration count of every Newton call identical; states within `tol`
+    relative per variable (|a - r| / range of r over the run); a case
+    without Newton calls must stay byte-identical."""
+    bad = 0
+    for name in names:
+        g = np.load(d / f"{name}.npz")
+        arrays, counters, wall, n = run_case(name)
+        msgs, ok = [], True
+        if "error" in g.files or "error" in arrays:
+            ok = "error" in g.files and "error" in arrays and np.array_equal(g["error"], arrays["error"])
+            msgs.append("error text " + ("same" if ok else "DIFFERS"))
+        else:
+            newton = "newton_trace" in g.files and g["newton_trace"].size > 0
+            for k in ("switch_states", "newton_trace"):
+                if k in g.files or k in arrays:
+                    same = k in g.files and k in arrays and np.array_equal(g[k], arrays[k])
+                    ok &= same
+                    if not same:
+                        msgs.append(f"{k} DIFFERS")
+            if g["times"].shape != arrays["times"].shape:
+                ok = False
+                msgs.append(f"steps {g['times'].shape[0]} -> {arrays['times'].shape[0]}")
+            else:
+                r, a = g["states"], arrays["states"]
+                rng = r.max(axis=0) - r.min(axis=0)
+                rng = np.where(rng > 0, rng, np.maximum(np.abs(r).max(axis=0), 1.0))
+                rel = float(np.max(np.abs(a - r) / rng)) if r.size else 0.0
+                trel = float(np.max(np.abs(arrays["times"] - g["times"])) / max(g["times"][-1], 1e-300))
+                exact = all(np.array_equal(g[k], arrays[k]) for k in ("times", "states"))
+                if not newton:
+                    ok &= exact
+                else:
+                    ok &= rel <= tol and trel <= tol
+                msgs.append(f"max rel state diff {rel:.2e}, times {trel:.2e}"
+                            + (" (bit-identical)" if exact else ""))
+        old = dict(zip(g["counter_keys"].tolist(), g["counter_vals"].tolist()))
+        nk = [k for k in sorted(set(old) | set(counters)) if k.startswith("newton.")]
+        moved = {k.split(".", 1)[1]: f"{old.get(k, '-')}->{counters.get(k, '-')}" for k in nk}
+        bad += 0 if ok else 1
+        print(f"{name:20s} {'PASS' if ok else 'FAIL'}  {'; '.join(msgs)}  newton {moved or '-'}")
+    print("ROUNDING GATE:", "ALL PASS" if bad == 0 else f"{bad} FAIL")
     return 1 if bad else 0
 
 
@@ -312,7 +371,7 @@ def perf(names, reps):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=["record", "compare", "perf"])
+    ap.add_argument("mode", choices=["record", "compare", "perf", "gate"])
     ap.add_argument("--dir", type=Path, default=DEFAULT_DIR)
     ap.add_argument("--only", nargs="*", default=None)
     ap.add_argument("--reps", type=int, default=3)
@@ -323,6 +382,8 @@ def main() -> int:
         return 0
     if a.mode == "compare":
         return compare(a.dir, names)
+    if a.mode == "gate":
+        return gate(a.dir, names)
     perf(names, a.reps)
     return 0
 
