@@ -251,7 +251,7 @@ def _resolve(builder, names, switch_fn) -> list:
 
 def _duty_period(sf, bit, t_end, name):
     """Trailing-edge PWM of one switch bit: rising edges on a fixed grid
-    of period T, falling edges at rise + D T. Returns T; refuses any
+    of period T, falling edges at rise + D T. Returns (T, D); refuses any
     other schedule (the duty would not be a timing parameter with
     dtau/dD = T)."""
     rises, falls, t = [], [], 0.0
@@ -284,7 +284,7 @@ def _duty_period(sf, bit, t_end, name):
             "whose edge moves by T per unit. Build it with "
             "make_pwm_switch_fn.", device=name.rsplit(".", 1)[0],
             kind="duty")
-    return float(T)
+    return float(T), float(D[0])
 
 
 # ----------------------------------------------------------------------
@@ -383,7 +383,14 @@ class _Mode:
         self.reason = ""
         self._pade = {}
         try:
-            mu, V = np.linalg.eig(As)
+            # graded order (largest rows first): LAPACK's QR deflates from
+            # the bottom, and with the 5e12 1/s idle-mode row last the
+            # -425 1/s eigenvalue of the DCM buck was off by 2.7e-4
+            # (u ||A||), 1e-9 of v_C per step
+            order = np.argsort(-np.abs(As).sum(axis=1), kind="stable")
+            mu, Vp = np.linalg.eig(As[np.ix_(order, order)])
+            V = np.empty_like(Vp)
+            V[order] = Vp
             kappa = float(np.linalg.cond(V))
         except np.linalg.LinAlgError:
             mu, V, kappa = None, None, math.inf
@@ -1001,23 +1008,28 @@ def _extrema(sr, row, kind, t0, t1, K=16):
 
         ys = np.array([y(s) for s in ss])
         pts = [s0, s1]
-        sgn = 1.0 if kind in ("peak", "ripple") else -1.0
         for kind_ in (("peak", "valley") if kind == "ripple" else (kind,)):
             sg = 1.0 if kind_ == "peak" else -1.0
-            for i in range(1, K):
-                if sg * ys[i] >= sg * ys[i - 1] and sg * ys[i] >= sg * ys[i + 1]:
-                    s = ss[i]
-                    for _ in range(50):
-                        d2 = dy(s, 2)
-                        if d2 == 0:
-                            break
-                        s_new = min(max(s - dy(s) / d2, ss[i - 1]), ss[i + 1])
-                        if abs(s_new - s) <= 4 * _U * max(abs(s), 1e-300):
-                            s = s_new
-                            break
-                        s = s_new
-                    pts.append(s)
-        _ = sgn
+            # sub-grid maxima, the end cells included (a peak inside the
+            # first or last cell has its sub-grid maximum on the end
+            # point); Newton on y' within the neighbouring cells, kept
+            # only when it converges inside the piece
+            for i in range(K + 1):
+                lo, hi = max(i - 1, 0), min(i + 1, K)
+                if sg * ys[i] < sg * ys[lo] or sg * ys[i] < sg * ys[hi]:
+                    continue
+                s = ss[i]
+                for _ in range(50):
+                    d2 = dy(s, 2)
+                    if d2 == 0:
+                        break
+                    s_new = min(max(s - dy(s) / d2, ss[lo]), ss[hi])
+                    if abs(s_new - s) <= max(4 * _U * abs(s),
+                                             1e-13 * (s1 - s0)):
+                        if s0 < s_new < s1:
+                            pts.append(s_new)
+                        break
+                    s = s_new
         for s in pts:
             x1, S1 = mode.advance(xb, Sb, s)
             g = c @ S1 + dc @ x1
@@ -1155,7 +1167,8 @@ def _prepare(builder, names, sf, t_end):
     params = _resolve(builder, names, sf)
     for prm in params:
         if prm.kind == "duty":
-            prm.period = _duty_period(sf, prm.bit, t_end, prm.name)
+            prm.period, prm.value = _duty_period(sf, prm.bit, t_end,
+                                                 prm.name)
     return params
 
 

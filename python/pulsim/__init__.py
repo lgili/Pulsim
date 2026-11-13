@@ -433,6 +433,12 @@ from .periodic_steady_state import (
     PeriodicSteadyStateResult,  # noqa: F401
     SampledModel,  # noqa: F401
 )
+# add-parameter-sensitivities — exact gradients on the dsed path.
+from .sensitivity import (
+    value_and_grad,  # noqa: F401
+    KpiValue,  # noqa: F401
+    SensitivityResult,  # noqa: F401
+)
 
 # v2.0 Phase 3 — subsystems: define once, instantiate many, with
 # scoped names (audit A.7). Pure builder-level; the kernel never
@@ -527,6 +533,9 @@ __all__ = [
     "RetiredDeviceError",
     "SimulationAborted",
     "UnsupportedError",
+    "value_and_grad",
+    "KpiValue",
+    "SensitivityResult",
     "engine_capabilities",
     # Closed-loop control building blocks (Phase 2 + add-python-closed-loop-helper v1.5).
     "PIController",

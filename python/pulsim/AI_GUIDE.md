@@ -327,13 +327,14 @@ R_load =  10.0 ohm -> V_out = 12.00 V
 R_load = 100.0 ohm -> V_out = 15.79 V
 ```
 
-At 100 ohm the inductor current reaches zero each cycle (discontinuous
-conduction), so `V_out` rises above `D * V_in` (physics). `p.sweep_path_aware` reuses the factorisation for R/L/C-only
+At 100 ohm the buck is in DCM, so `V_out` > `D * V_in`. `p.sweep_path_aware` reuses the factorisation for R/L/C-only
 sweeps; `parallel=True` runs on threads when the step loop is native.
 For optimisers, `p.design`: `Evaluator(build, period=T,
 loads=("RL",), output="vout").evaluate(d)`, `build(d) -> (b, switch_fn)`.
 Read `rec.kpis` only for status `ok`/`infeasible`; `refused`/`failed`
-carry `rec.reason` and no number.
+carry `rec.reason` and no number. Exact gradients (dsed only):
+`r = p.simulate(..., engine="dsed", sensitivities=["L.L", "S.duty"])`,
+`v, g = r.kpi("vout", "avg")`; other engines refuse.
 
 ### 3.7 Three-phase inverter with sinusoidal PWM
 
@@ -654,10 +655,8 @@ with the checks in its section 6 before reporting it.
 
 ## 9. Where to read more
 
-Paths are from the repository root (the site mirrors `docs/`).
-
 - `docs/getting-started.md`; `docs/tutorials/01-rc-charging.md` ...
-  `08-design-optimisation.md` (executed, end to end).
+  `08-design-optimisation.md`.
 - `docs/api-reference.md`, `docs/gotchas.md`, `docs/troubleshooting.md`,
   `docs/losses-and-thermal.md`,
   `docs/loss-thermal.md`, `docs/mental-model.md`, `docs/how-pulsim-works/`.

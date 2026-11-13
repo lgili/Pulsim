@@ -109,6 +109,42 @@ refused in this slice (they need the eigenbasis). Peak / ripple carry
 `non_unique` when the extremum is attained at two instants. → Reverse:
 the Kronecker block exponential for the quadratic KPIs on tier 2.
 
+## 9. Eigenproblem order
+
+→ The eigen-decomposition of tier 1 is computed on the matrix permuted
+by descending row norm (a similarity, undone on `V`). Evidence: the DCM
+buck's idle mode (rows -425 and -5e12 1/s) had its slow eigenvalue
+2.7e-4 off (`u·‖A‖`, LAPACK deflating from the bottom with the stiff row
+last), which cost 1e-9 of `v_C` per step: invisible to the 1e-7 step
+check, but central differences of the KPI values were noise at 3.6e-6.
+Graded: exact to 1e-15 against a 50-digit `expm`, and every KPI of the
+DCM buck within 7e-9 of central differences. → Reverse: a Schur-based
+propagator (tier 3) would not need the order.
+
+## 10. Extremum search
+
+→ Sub-grid scan (16 cells per step) with the end cells included, Newton
+on `y'` within the neighbouring cells, a root kept only when it
+converges inside the step; the step ends are always candidates (with
+`y'·dτ/dp` when they are events). Evidence: the orbit run (`T/50`
+steps) put the `v_out` peak and valley in end cells; read at the step
+end, the ripple's duty gradient was 1.8e-3 off; scanned, within 1e-6 of
+central differences of the PSS. → Reverse: none.
+
+## 11. `Evaluator(gradients=…)`
+
+→ A map `{design variable: "<component>.<field>"}` (a list of names that
+are both is accepted), not `True`: the evaluator cannot know how
+`build` turns a variable into a circuit value. A variable whose value
+differs from the circuit value (a scaled map, e.g. µH) is refused rather
+than given a scaled gradient. Gradients of `v_out`, `ripple_v` and
+`ripple_i.<L>` only (the losses and the efficiency go through
+`device_loss_summary`, which is not differentiated), on the `pss` route
+only; those KPI values become the closed forms the gradients belong to.
+Transient route and thermal loop: `UnsupportedError(feature=
+"gradients")`. → Reverse: chain rule through a user `d value/d variable`
+when `add-immutable-circuit-ir` names parameters.
+
 ## Open questions of `design.md`
 
 1. Forward mode with a 64-parameter guard: kept (the optimisation use

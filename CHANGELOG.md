@@ -37,6 +37,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `UserWarning`. Every other engine refuses `sensitivities=` by name.
   Runs without `sensitivities` are bit-identical (golden probe: all
   identical; dsed / pwl / trbdf2 / steady-state hashes unchanged).
+* **Added** KPI gradients (group 7): `res.kpi(signal, kind, t_from=,
+  t_to=)` for `final`, `avg`, `rms`, `energy`, `peak`, `valley`,
+  `ripple` returns a `KpiValue` (`value, grad = ...`, `non_unique` for an
+  extremum attained twice); closed forms of the exact trajectory plus the
+  event-time terms of a jumping signal. Orbit KPIs:
+  `PeriodicSteadyStateResult.kpi`. `pulsim.value_and_grad` for
+  `scipy.optimize.minimize(jac=True)`. DCM buck, last ten periods:
+  avg / RMS / energy / final / peak / ripple of `v_out`, peak / RMS of
+  `i_L`, avg / RMS of `v_sw` within 7e-9 of central differences; the
+  orbit's avg / RMS / ripple within 1e-6. Eight parameters: one engine
+  run, 8 propagations per step, 29 assemblies (16 runs by central
+  differences). See `docs/sensitivities.md`.
+* **Added** `pulsim.design.Evaluator(..., gradients={var: "C.C"})`:
+  exact gradients of `v_out`, `ripple_v`, `ripple_i.<L>` in
+  `record.grads` on the `pss` route; the transient route, the thermal
+  loop and a scaled variable map are refused (`feature="gradients"`).
+* **Fixed** (sensitivity path, before release) the exact propagator of a
+  stiff mode lost 1e-9 of `v_C` per step: LAPACK's QR put the DCM idle
+  mode's -425 1/s eigenvalue 2.7e-4 off with its 5e12 1/s row last; the
+  eigenproblem is now solved in graded order (exact to 1e-15 against
+  50-digit `expm`). A peak inside the first or last sub-grid cell of a
+  step was read at the step end.
 
 ### Design evaluation for optimisers (`pulsim.design`, first slice)
 

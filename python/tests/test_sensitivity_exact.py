@@ -108,7 +108,7 @@ def test_dcm_transient_equals_a_central_difference(dcm, name):
 
 
 def test_duty_has_no_sensitivity_without_the_gate_edge_jump(monkeypatch):
-    monkeypatch.setattr(sens, "_duty_period", lambda *a: 0.0)
+    monkeypatch.setattr(sens, "_duty_period", lambda *a: (0.0, 0.3))
     r = _buck_run(["S.duty"])
     assert np.abs(r.sensitivity.states).max() == 0.0
 

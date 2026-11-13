@@ -117,6 +117,10 @@ class EvaluationRecord:
     counters: Mapping[str, Any]
     provenance: Mapping[str, str]
     wall_s: float = field(default=0.0, compare=False)
+    #: kpi -> {design variable: d kpi / d variable}, exact (the
+    #: ``gradients=`` of the evaluator); empty otherwise.
+    grads: Mapping[str, Mapping[str, float]] = field(
+        default_factory=lambda: FrozenDict())
 
     @property
     def seed(self) -> int:
@@ -387,6 +391,16 @@ class Evaluator:
         Keywords of :func:`pulsim.device_loss_summary`
         (``switch_specs``, ``diode_specs``, ``core_loss_specs``,
         ``conduction_specs``).
+    gradients
+        ``{design variable: '<component>.<field>'}`` (or a list of names
+        that are both): exact gradients of ``v_out``, ``ripple_v`` and
+        ``ripple_i.<L>`` on the ``pss`` route (the orbit sensitivities of
+        :func:`pulsim.periodic_steady_state`), in ``record.grads``; those
+        KPI values are then the closed forms the gradients belong to.
+        The circuit value must equal the design value (a scaled mapping
+        would give a scaled gradient: refused). The transient route and
+        the thermal loop are refused (``UnsupportedError``, feature
+        ``'gradients'``); no gradient is ever a finite difference.
     """
 
     def __init__(self, build: Callable, *, period,
@@ -400,7 +414,8 @@ class Evaluator:
                  engine: str = "auto",
                  samples_per_period: int = 2000,
                  options: Optional[Mapping[str, Any]] = None,
-                 loss_options: Optional[Mapping[str, Any]] = None):
+                 loss_options: Optional[Mapping[str, Any]] = None,
+                 gradients: Any = None):
         if steady.method not in ("pss", "transient", "auto"):
             raise ValueError(f"SteadySpec.method must be 'pss', 'transient' "
                              f"or 'auto', got {steady.method!r}")
@@ -432,6 +447,16 @@ class Evaluator:
         self.samples_per_period = samples_per_period
         self.options = dict(options or {})
         self.loss_options = dict(loss_options or {})
+        if gradients is not None and not isinstance(gradients, Mapping):
+            gradients = {str(g): str(g) for g in gradients}
+        self.gradients = dict(gradients) if gradients else None
+        if self.gradients and thermal is not None:
+            from ._refusal import unsupported
+            raise unsupported(
+                "design.evaluate", "gradients", "Evaluator: gradients= with "
+                "a thermal loop: the junction temperature depends on the "
+                "parameters through the loss model, which the exact path "
+                "does not differentiate (refused, never approximated).")
         self._options_digest = _digest(self._config())
 
     # -- identity --------------------------------------------------------
@@ -446,7 +471,7 @@ class Evaluator:
             constraints=self.constraints, thermal=th,
             steady=asdict(self.steady), engine=self.engine,
             samples=self.samples_per_period, options=self.options,
-            loss_options=self.loss_options)
+            loss_options=self.loss_options, gradients=self.gradients)
 
     def design_id(self, design: Mapping[str, Any]) -> str:
         return _digest({"design": dict(design),
@@ -468,16 +493,19 @@ class Evaluator:
         base = dict(design=_fz(design), design_id=did,
                     provenance=_fz(self._provenance()))
 
+        grads: dict = {}
+
         def rec(status, kpis=(), losses=(), t_j=(), violations=(),
                 reason=None, refusal=None):
             return EvaluationRecord(
                 status=status, kpis=_fz(dict(kpis)), losses=_fz(dict(losses)),
                 t_j=_fz(dict(t_j)), violations=_fz(dict(violations)),
                 reason=reason, refusal=refusal, counters=_fz(counters),
-                wall_s=time.perf_counter() - t0, **base)
+                wall_s=time.perf_counter() - t0,
+                grads=_fz({k: _fz(v) for k, v in grads.items()}), **base)
 
         try:
-            kpis, losses, t_j = self._evaluate(design, did, counters)
+            kpis, losses, t_j = self._evaluate(design, did, counters, grads)
         except UnsupportedError as e:
             return rec("refused", reason=str(e), refusal=(
                 str(e.engine), str(e.feature), str(e.device), str(e.kind)))
@@ -555,7 +583,7 @@ class Evaluator:
             return out
         return out, None
 
-    def _evaluate(self, design, did, counters):
+    def _evaluate(self, design, did, counters, grads=None):
         T = self._period_of(design)
         b, sf = self._build(design)
         run, a, z = self._steady(b, sf, T, counters)
@@ -564,6 +592,8 @@ class Evaluator:
             rows, losses = self._loss_rows(b, run, a, z)
             kpis = self._kpis(b, run, a, z, design, did, rows, losses,
                               counters)
+            if self.gradients:
+                self._gradients(b, run, design, kpis, grads)
             return kpis, losses, {}
         names = {c["name"] for c in b.components()}
         for d in th.r_th:
@@ -669,6 +699,13 @@ class Evaluator:
                         f"pss refused: {e.feature or e.kind or 'circuit'}"
                         f"{' (' + e.device + ')' if e.device else ''}")
         counters["steady_method"] = method
+        if self.gradients and method != "pss":
+            from ._refusal import unsupported
+            raise unsupported(
+                "design.evaluate", "gradients", "Evaluator: gradients= on "
+                f"the {method} route ({counters.get('steady_route_reason', '')}"
+                "): exact gradients exist on the pss route only (refused, "
+                "never a finite difference).")
         if method == "pss":
             return self._pss(b, sf, T, counters)
         return self._transient(b, sf, T, counters)
@@ -717,7 +754,9 @@ class Evaluator:
         try:
             r = _engine(lambda: periodic_steady_state(
                 b, period=T, switch_fn=sf,
-                max_period_runs=self.steady.max_period_runs))
+                max_period_runs=self.steady.max_period_runs,
+                sensitivities=(sorted(set(self.gradients.values()))
+                               if self.gradients else None)))
         except ValueError as e:
             if _is_pss_failure(e):
                 raise _Failed(str(e)) from e
@@ -736,7 +775,41 @@ class Evaluator:
             b, t_end=T, dt=T / self.samples_per_period, engine="dsed",
             switch_fn=sf, initial_state=r.x0, rtol=1e-11, atol=1e-14))
         self._count(run, counters)
+        if self.gradients:
+            run.pss_orbit = r
         return run, 0.0, T
+
+    def _gradients(self, b, run, design, kpis, grads):
+        """``grads[kpi][variable]`` from the orbit sensitivities; the
+        KPI values are replaced by the closed forms they belong to."""
+        from .sensitivity import _prepare
+        r = run.pss_orbit
+        sr = r.sensitivity
+        vals = {p.name: p.value for p in _prepare(
+            b, list(sr.params), r._ctx.sf, r.period)}
+        for var, name in self.gradients.items():
+            if var not in design:
+                raise KeyError(f"gradients: design variable {var!r} is not "
+                               f"in the design {sorted(design)}")
+            dv, pv = float(design[var]), vals[name]
+            if not abs(dv - pv) <= 1e-12 * max(abs(dv), abs(pv)):
+                raise ValueError(
+                    f"gradients: design[{var!r}] = {dv!r} but {name} = "
+                    f"{pv!r} in the circuit; the gradient is with respect "
+                    "to the circuit value, so a scaled mapping would be "
+                    "wrong. Map variables that ARE the circuit value.")
+        want = {}
+        if self.output is not None:
+            want["v_out"] = (self.output, "avg")
+            want["ripple_v"] = (self.output, "ripple")
+        for c in b.components():
+            if c["kind"] == "inductor":
+                want[f"ripple_i.{c['name']}"] = (c["name"], "ripple")
+        for k, (sig, kind) in want.items():
+            kv = sr.kpi(sig, kind)
+            kpis[k] = kv.value
+            grads[k] = {var: float(kv.grad[name])
+                        for var, name in self.gradients.items()}
 
     @staticmethod
     def _count(run, counters):

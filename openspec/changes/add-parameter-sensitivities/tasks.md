@@ -47,16 +47,16 @@ Reference values.
 - [ ] 6.3 Tests: DCM buck transient values within 1e-5 relative on TR-BDF2 (rtol 1e-9) and on the fixed engine with event splitting; a rectifier with `V_th = V_f + 1e-3` (field jump at turn-on) within 1e-5 of a central difference on the exact path; the fixed engine without event splitting raises naming the diode
 
 ## 7. KPI gradients and optimisation interface
-- [ ] 7.1 `res.sens`, `res.sensitivity.states`, `res.kpi(…, with_grad=True)` for final value, average, RMS, energy, peak, ripple; `non_unique` flag
-- [ ] 7.2 Orbit KPIs with the second sensitivity period (D5)
-- [ ] 7.3 `pulsim.value_and_grad`
-- [ ] 7.4 Tests: average and RMS gradients of `v_out` on the DCM buck against central differences of the exact path within 1e-6; `scipy.optimize.minimize(jac=True)` on an LC output filter (two parameters, ripple target) converges and its reported gradient at the start equals a central difference within 1e-6
-- [ ] 7.5 Measurement gate: a gradient with respect to 8 parameters costs one run with 8 back-substitutions per stage, against 16 runs by central differences (counted as period runs or steps, not wall time)
+- [x] 7.1 `res.sens`, `res.sensitivity.states`, `res.kpi(…, with_grad=True)` for final value, average, RMS, energy, peak, ripple; `non_unique` flag
+- [x] 7.2 Orbit KPIs with the second sensitivity period (D5)
+- [x] 7.3 `pulsim.value_and_grad`
+- [x] 7.4 Tests: average and RMS gradients of `v_out` on the DCM buck against central differences of the exact path within 1e-6; `scipy.optimize.minimize(jac=True)` on an LC output filter (two parameters, ripple target) converges and its reported gradient at the start equals a central difference within 1e-6
+- [x] 7.5 Measurement gate: a gradient with respect to 8 parameters costs one run with 8 back-substitutions per stage, against 16 runs by central differences (counted as period runs or steps, not wall time)
 
 ## 8. Controller gains (needs `add-compiled-control-graph`)
 - [ ] 8.1 Block parameters as parameters; discrete-state sensitivities updated at ticks
 - [ ] 8.2 Test: discrete P loop on an RC (`K_p = 2`, 100 µs): `∂v[10]/∂K_p` equals the derivative of the closed-form recurrence within 1e-9
 
 ## 9. Docs and verification
-- [ ] 9.1 Sensitivity guide (what is differentiated, the event rule, when it is refused, discrete against continuous gradient), sweep guide, AI_GUIDE, CHANGELOG
+- [ ] 9.1 Sensitivity guide (what is differentiated, the event rule, when it is refused, discrete against continuous gradient), sweep guide, AI_GUIDE, CHANGELOG — sensitivity guide (`docs/sensitivities.md`), AI_GUIDE and CHANGELOG done; the sweep guide waits for group 6
 - [ ] 9.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check
