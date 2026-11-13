@@ -482,6 +482,22 @@ public:
         return full;
     }
 
+    /// The current mask's recovery map (x_full = R·x + r, DC sources)
+    /// and energy scale √m per state: period_integrals.hpp reads the
+    /// observables and the modal basis of a mode from them.
+    [[nodiscard]] const DenseMatrix& recover_from_state() const {
+        ensure_current_resolved_();
+        return current_entry_->recover_from_state;
+    }
+    [[nodiscard]] const Vector& recover_const() const {
+        ensure_current_resolved_();
+        return current_entry_->recover_const;
+    }
+    [[nodiscard]] Vector energy_scale() const {
+        ensure_current_resolved_();
+        return energy_scale_(*current_entry_, 0);
+    }
+
     /// The graph / pool this adapter was built over — the diode
     /// predicate derivation (v2.0 Phase 3) runs its census on the
     /// same objects so the two engines cannot drift.
@@ -869,12 +885,15 @@ public:
     }
 
     /// add-complementarity-mode-selection D3 / task 5.1: structural
-    /// passivity at the diode ports. A VCVS (gain), or a resistor,
-    /// capacitor or inductor with a negative value, makes the circuit
-    /// non-passive; the first one found is named. The ideal transformer
-    /// is passive (not reciprocal): Lemke keeps its guarantee.
+    /// passivity at the diode ports. Non-passive (the first found is
+    /// named): a VCVS (gain); a resistor, capacitor or inductor with a
+    /// negative value; a group of coupled inductors whose inductance
+    /// matrix is not positive semidefinite (pairwise |k| <= 1 does not
+    /// make three or more windings PSD). Passive but not reciprocal: an
+    /// ideal transformer (named in `nonreciprocal_*`).
     [[nodiscard]] events::PassivityClass passivity() const {
         using K = pwl::DevicePool::StoredKind;
+        events::PassivityClass out;
         for (Index b = 0; b < graph_.num_branches(); ++b) {
             if (!pool_.is_registered(b)) continue;
             const K kind = pool_.kind_of(b);
@@ -884,7 +903,78 @@ public:
                 || (kind == K::Inductor && pool_.inductor_params(b).L < Real{0});
             if (kind == K::VCVS || neg)
                 return {std::string(graph_.branch_name(b)),
-                        std::string(pwl::stored_kind_name(kind))};
+                        std::string(pwl::stored_kind_name(kind)), {}, {}};
+            if (kind == K::IdealTransformer && out.nonreciprocal_device.empty()) {
+                out.nonreciprocal_device = std::string(graph_.branch_name(b));
+                out.nonreciprocal_kind = std::string(pwl::stored_kind_name(kind));
+            }
+        }
+        if (auto bad = coupled_inductors_not_psd_(); !bad.empty()) {
+            out.device = std::move(bad);
+            out.kind = "InductorCoupling";
+        }
+        return out;
+    }
+
+    /// The coupled-inductor groups (connected by couplings) whose
+    /// inductance matrix L (L_ii self, L_ij = k·sqrt(L_i·L_j)) has an
+    /// eigenvalue below −1e-12·max L_ii: the windings of the first such
+    /// group, joined by '+'; empty when every group is PSD.
+    [[nodiscard]] std::string coupled_inductors_not_psd_() const {
+        const auto& cps = pool_.transformer_couplings();
+        if (cps.empty()) return {};
+        std::vector<Index> ids;
+        const auto idx = [&](Index b) {
+            for (std::size_t i = 0; i < ids.size(); ++i)
+                if (ids[i] == b) return i;
+            ids.push_back(b);
+            return ids.size() - 1;
+        };
+        std::vector<std::pair<std::size_t, std::size_t>> edges;
+        for (const auto& c : cps)
+            edges.emplace_back(idx(c.primary_branch_id), idx(c.secondary_branch_id));
+        // union-find over the windings
+        std::vector<std::size_t> root(ids.size());
+        for (std::size_t i = 0; i < root.size(); ++i) root[i] = i;
+        const auto find = [&](std::size_t i) {
+            while (root[i] != i) i = root[i] = root[root[i]];
+            return i;
+        };
+        for (const auto& [a, b] : edges) root[find(a)] = find(b);
+        for (std::size_t g = 0; g < ids.size(); ++g) {
+            if (find(g) != g) continue;
+            std::vector<std::size_t> mem;
+            for (std::size_t i = 0; i < ids.size(); ++i)
+                if (find(i) == g) mem.push_back(i);
+            const auto n = static_cast<Index>(mem.size());
+            DenseMatrix L = DenseMatrix::Zero(n, n);
+            const auto pos = [&](std::size_t i) {
+                for (Index r = 0; r < n; ++r)
+                    if (mem[static_cast<std::size_t>(r)] == i) return r;
+                return Index{-1};
+            };
+            for (std::size_t e = 0; e < cps.size(); ++e) {
+                const Index r = pos(edges[e].first), c = pos(edges[e].second);
+                if (r < 0) continue;
+                const auto& p = cps[e].params;
+                L(r, r) = p.L_p;
+                L(c, c) = p.L_s;
+                // couplings on one pair add, as the assembly stamps them (assemble.hpp)
+                L(r, c) += models::TwoWindingTransformer::mutual_inductance(p);
+                L(c, r) = L(r, c);
+            }
+            const Real lmax = L.diagonal().cwiseAbs().maxCoeff();
+            Eigen::SelfAdjointEigenSolver<DenseMatrix> es(L, Eigen::EigenvaluesOnly);
+            if (es.info() == Eigen::Success
+                && es.eigenvalues().minCoeff() >= -Real{1e-12} * lmax) {
+                continue;
+            }
+            std::string names;
+            for (const auto i : mem) {
+                if (!names.empty()) names += "+";
+                names += std::string(graph_.branch_name(ids[i]));
+            }
+            return names;
         }
         return {};
     }

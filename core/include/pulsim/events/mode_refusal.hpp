@@ -24,11 +24,22 @@
 namespace pulsim::events {
 
 /// What makes a circuit non-passive at its diode ports (D3); empty
-/// `device` for a passive one.
+/// `device` for a passive one. A passive circuit with an ideal
+/// transformer (or a gyrator) is not reciprocal: its port matrix is PSD
+/// but not symmetric, so Lemke keeps its guarantee while the port
+/// voltages may be non-unique with ideal (R_on = 0) diodes — recorded in
+/// `nonreciprocal_*` and reported, never refused (task 5.1).
 struct PassivityClass {
     std::string device;
     std::string kind;
+    std::string nonreciprocal_device;
+    std::string nonreciprocal_kind;
     [[nodiscard]] bool passive() const noexcept { return device.empty(); }
+    [[nodiscard]] const char* name() const noexcept {
+        return !passive() ? "non_passive"
+             : nonreciprocal_device.empty() ? "passive_reciprocal"
+                                            : "passive_nonreciprocal";
+    }
 };
 
 /// Throw the named refusal for a failed selection; no-op on a solution.

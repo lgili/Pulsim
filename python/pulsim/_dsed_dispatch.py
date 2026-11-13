@@ -93,7 +93,9 @@ class DSEDOptions:
 # =============================================================================
 
 
-_VALID_ENGINES = ("auto", "pwl", "dsed", "trbdf2")
+# 'exact' is the canonical name of the event-driven exact engine, 'dsed' its
+# legacy alias (add-exact-propagator-strategy D11; simulate() maps one to the other).
+_VALID_ENGINES = ("auto", "pwl", "exact", "dsed", "trbdf2")
 _VALID_INTEGRATORS = ("auto", "rk45", "bdf2")
 
 # (The dsed-only kwargs that get the leak-warning if user passes
@@ -493,6 +495,46 @@ class _PEDSimulationResult:
         )
 
 
+def _result_from_native(native_res, t_start: float):
+    """The result of a Bridge.11 run (``run_*_native_builder``)."""
+    import numpy as np
+    # One array conversion, not one per sample.
+    times = (np.asarray(native_res["times"], dtype=float)
+             + float(t_start)).tolist()
+    res = _PEDSimulationResult(
+        times=times,
+        states=native_res["states"],
+        states_full=native_res.get("states_full"),
+        switch_states=native_res.get("switch_states"),
+        right_limit_index=native_res.get("right_limit_index"),
+        right_limit_states=native_res.get("right_limit_states"),
+        right_limit_switch_states=native_res.get(
+            "right_limit_switch_states"),
+        n_accept=native_res.get("n_accept", 0),
+        n_reject=native_res.get("n_reject", 0),
+        n_events=native_res.get("n_events", 0),
+        n_rk45_steps=native_res.get("n_rk45_steps", 0),
+        n_bdf2_steps=native_res.get("n_bdf2_steps", 0),
+        n_exact_steps=native_res.get("n_exact_steps", 0),
+        cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
+    )
+    res.exact = native_res.get("exact")
+    if res.exact is not None:
+        # add-exact-propagator-strategy D11: the route record (report only)
+        from ._exact_route import segments_from_exact
+        res.exact["segments"] = segments_from_exact(
+            res.exact, native_res.get("switch_states"))
+    et = native_res.get("event_times")
+    res.event_times = (None if et is None
+                       else np.asarray(et) + float(t_start))
+    res.event_types = native_res.get("event_types")
+    res.diagnostics = {}
+    for key in ("mode_shadow", "mode_selection", "mode_guard"):
+        if key in native_res:
+            res.diagnostics[key] = native_res[key]
+    return res
+
+
 def _has_edge_oracle(sf) -> bool:
     """Whether the DSED scheduler can ask ``sf`` for its next gate edge."""
     if isinstance(sf, (NativePwm2Switch, NativeMultiMaskPwm)):
@@ -832,36 +874,8 @@ def run_dsed_from_builder(
                     h_bdf2=opts.h_bdf2,
                     stiffness_threshold=opts.stiffness_threshold,
                     store_every=opts.store_every, event_log=False)
-            # One array conversion, not one per sample.
-            times = (np.asarray(native_res["times"], dtype=float)
-                     + float(opts.t_start)).tolist()
-            res = _PEDSimulationResult(
-                times=times,
-                states=native_res["states"],
-                states_full=native_res.get("states_full"),
-                switch_states=native_res.get("switch_states"),
-                right_limit_index=native_res.get("right_limit_index"),
-                right_limit_states=native_res.get("right_limit_states"),
-                right_limit_switch_states=native_res.get(
-                    "right_limit_switch_states"),
-                n_accept=native_res.get("n_accept", 0),
-                n_reject=native_res.get("n_reject", 0),
-                n_events=native_res.get("n_events", 0),
-                n_rk45_steps=native_res.get("n_rk45_steps", 0),
-                n_bdf2_steps=native_res.get("n_bdf2_steps", 0),
-                n_exact_steps=native_res.get("n_exact_steps", 0),
-                cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
-            )
-            res.exact = native_res.get("exact")
+            res = _result_from_native(native_res, opts.t_start)
             res.initial_condition_adjustment = ic_adjustment
-            et = native_res.get("event_times")
-            res.event_times = (None if et is None
-                               else np.asarray(et) + float(opts.t_start))
-            res.event_types = native_res.get("event_types")
-            res.diagnostics = {}
-            for key in ("mode_shadow", "mode_selection", "mode_guard"):
-                if key in native_res:
-                    res.diagnostics[key] = native_res[key]
             return res
         except UnsupportedError:
             # A refusal is an answer, not a reason to try the next

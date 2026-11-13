@@ -128,6 +128,8 @@ nav:
       - 'Tutorial 05 — LDO with Op-Amp': tutorials/05-ldo-feedback.md
       - 'Tutorial 06 — IGBT Boost': tutorials/06-igbt-boost.md
       - 'Tutorial 07 — DC Machine': tutorials/07-dc-machine.md
+      - 'Tutorial 08 — Using Pulsim inside an optimiser': tutorials/08-design-optimisation.md
+      - 'Parameter Sensitivities': sensitivities.md
       - 'Motors — Induction (Phase 2)': motors-induction.md
       - 'Motors — Sensorless Observers (Phase 2)': motors-sensorless.md
       - 'Modular Multilevel Converters (MMC)': mmc.md

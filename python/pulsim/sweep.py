@@ -59,6 +59,7 @@ and `n_samples=500`.
 
 from __future__ import annotations
 
+import functools
 import itertools
 import time
 from dataclasses import dataclass, field
@@ -131,27 +132,36 @@ def _run_one_simulation(args):
             tuple(getattr(res, "step_loop_python_callbacks", ("unknown",))))
 
 
-def _run_one_captured(args):
+def _run_one_captured(args, job=None):
     """Process-pool worker: ``("ok", result)`` or ``("failed", message)``;
     a configuration refusal is raised (and re-raised in the parent)."""
     try:
-        return "ok", _run_one_simulation(args)
+        return "ok", (job or _run_one_simulation)(args)
     except _REFUSALS:
         raise
     except Exception as exc:  # noqa: BLE001 — recorded, as on threads
         return "failed", str(exc)
 
 
+def _run_one_reraise(args, job):
+    """Process-pool worker that lets every exception propagate."""
+    return "ok", job(args)
+
+
 _BACKENDS = ("auto", "thread", "process")
 
 
-def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose):
+def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose,
+              job=_run_one_simulation, reraise=False):
     """Run every job; returns ``(kpi_list, failed, backend_used)``.
 
-    Results are in job order on every backend. Every backend records a
-    raising job in ``failed`` and goes on, except a configuration
-    refusal (``UnsupportedError``, ``RetiredDeviceError``), which holds
-    for every point and propagates.
+    ``job(args) -> (value, step_loop_python_callbacks)``; default one
+    ``simulate`` + ``kpi_fn``. Results are in job order on every
+    backend. Every backend records a raising job in ``failed`` and goes
+    on, except a configuration refusal (``UnsupportedError``,
+    ``RetiredDeviceError``), which holds for every point and
+    propagates; with ``reraise`` every exception propagates (a job
+    that turns design outcomes into values, ``pulsim.design``).
     """
     if backend not in _BACKENDS:
         raise ValueError(
@@ -162,10 +172,12 @@ def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose):
 
     def run_captured(i):
         try:
-            kpis, cbs = _run_one_simulation(args_iter[i])
+            kpis, cbs = job(args_iter[i])
         except _REFUSALS:
             raise   # a refusal holds for every point
         except Exception as exc:
+            if reraise:
+                raise
             failed.append((i, str(exc)))
             return None
         kpi_list[i] = kpis
@@ -204,9 +216,11 @@ def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose):
         from multiprocessing import Pool
         with Pool(nw) as pool:
             try:
+                worker = (functools.partial(_run_one_captured, job=job)
+                          if not reraise else
+                          functools.partial(_run_one_reraise, job=job))
                 for k, (i, (status, out)) in enumerate(zip(rest, pool.imap(
-                        _run_one_captured,
-                        [args_iter[i] for i in rest])), first + 1):
+                        worker, [args_iter[i] for i in rest])), first + 1):
                     if status == "ok":
                         kpi_list[i] = out[0]
                     else:

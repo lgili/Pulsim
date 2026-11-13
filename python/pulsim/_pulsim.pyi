@@ -10,10 +10,12 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'CircuitBuilder', 'CommutationEvent', 'ControlGraphBuildError', 'CxxBlockChain', 'CxxChainBExtra', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxChainBExtra', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
-class SimulationAborted(RuntimeError):
+class ConvergenceError(RuntimeError):
+    pass
+class SimulationAborted(ConvergenceError):
     pass
 class UnsupportedError(ValueError):
     device: typing.ClassVar[str] = ''
@@ -224,6 +226,51 @@ class PreflightOptions:
         """
     @tie_resistance.setter
     def tie_resistance(self, arg0: float) -> None:
+        ...
+class LossTable3D:
+    """
+    Switching energy E(v, i, Tj) [J] on a rectilinear grid, read like pulsim.LossTable: multilinear, linear extrapolation past the edges, clamped at 0. Build it with LossTable.to_kernel().
+    """
+    def __call__(self, v: float, i: float, tj: float) -> float:
+        """
+        E [J] at one point.
+        """
+    def __init__(self, v_axis: collections.abc.Sequence[float], i_axis: collections.abc.Sequence[float], tj_axis: collections.abc.Sequence[float], energy: collections.abc.Sequence[float]) -> None:
+        """
+        Strictly ascending axes; energy row-major (v, i, Tj).
+        """
+    @property
+    def energy(self) -> list[float]:
+        ...
+    @property
+    def i_axis(self) -> list[float]:
+        ...
+    @property
+    def tj_axis(self) -> list[float]:
+        ...
+    @property
+    def v_axis(self) -> list[float]:
+        ...
+class ConductionTable:
+    """
+    On-state voltage V_on(i, Tj) [V] on a rectilinear grid, read like pulsim.LossTable (multilinear, extrapolated, clamped at 0).
+    """
+    def __call__(self, i: float, tj: float) -> float:
+        """
+        V_on [V] at one point.
+        """
+    def __init__(self, i_axis: collections.abc.Sequence[float], tj_axis: collections.abc.Sequence[float], v_on: collections.abc.Sequence[float]) -> None:
+        """
+        Strictly ascending axes; v_on row-major (i, Tj).
+        """
+    @property
+    def i_axis(self) -> list[float]:
+        ...
+    @property
+    def tj_axis(self) -> list[float]:
+        ...
+    @property
+    def v_on(self) -> list[float]:
         ...
 class ChargeTable:
     """
@@ -2911,6 +2958,10 @@ def describe_implausible_voltage(graph: Graph, pool: DevicePool, finding: Implau
 def dopri5_solve(f: collections.abc.Callable, t0: float, t_end: float, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], rtol: float = 1e-05, atol: float = 1e-08, dt_min: float = 1e-12, dt_max: float = 0.0, safety: float = 0.9, growth_max: float = 5.0, shrink_min: float = 0.2, dt_init: float = -1.0) -> dict[typing.Any, typing.Any]:
     """
     Dormand-Prince 5(4) embedded adaptive Runge-Kutta solver (Phase 2.4 C++ port). Solves dx/dt = f(t, x) from t0 to t_end. Returns a dict with t, x, n_accepted, n_rejected, n_f_evals. The Python f(t, x) callable is invoked from C++ with the GIL re-acquired around each evaluation.
+    """
+def dsed_period_map(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], period: float, observables: list[typing.Any] = [], pairs: collections.abc.Sequence[tuple[int, int]] = [], monodromy: bool = True, rtol: float = 1e-11, atol: float = 1e-14, mode_guard_h_e: float = 0.0) -> dict[typing.Any, typing.Any]:
+    """
+    One period of the exact stepper from x0 (events located, no projection) with the GIL released: x(T), the events, the monodromy M = dP/dx0 and, per observable (indices, coefs, bit, g_on, g_off, v_on, extrema), the closed-form integrals stats[j] = (int y, int y^2, peak, t_peak, valley, t_valley) and cross[q] = int y_a*y_b per pair. integrals_ok is False with a reason when a mode has no modal form or a step was numeric. DC sources only.
     """
 def engine_capabilities() -> dict[typing.Any, typing.Any]:
     """

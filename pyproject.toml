@@ -60,6 +60,11 @@ fast = [
 lib = [
     "PyYAML>=6.0",
 ]
+# The worked optimisation example's NSGA-II (examples/optimization);
+# without it the example falls back to a Latin-hypercube sample.
+opt = [
+    "pymoo>=0.6",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",

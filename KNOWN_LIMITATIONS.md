@@ -357,28 +357,59 @@ trbdf2 rtol 1e-10 (7 / 16 / 23 / 1 / 3 repairs), and the half-wave RL
 rectifiers run right (2 and 1 repairs). The batch-4 stored-sample guard
 stays: it checks every stored sample against the diode law and raises
 `DiodeModeInconsistentError` (a `RuntimeError`, in
-`pulsim._dsed_dispatch`), and it catches what the kernel guard does
-not: the `V_th = 0` LC tank of
-`test_double_crossing_inside_one_step_is_seen` (the kernel guard repairs
-one event and returns v(k) = -5.18 V at 10 µs; trbdf2 9.50 V), and every
-case above when `MODE_GUARD = False`. It reads stored samples only, so a
-wrong mode shorter than one stored step is not seen. Workaround for the
-double crossing: `V_th = 1e-3`.
+`pulsim._dsed_dispatch`); it is cheap and independent of the kernel.
+Until the event-locator fix (integration batch 6b) it caught what the
+kernel guard did not: the `V_th = 0` LC tank of
+`test_double_crossing_inside_one_step_is_seen` returned v(k) = -5.18 V at
+10 µs (trbdf2 and a DOP853 reference: 9.49998506 V); now dsed finds all
+four edges and the end state of the reference. With the kernel guard on
+in default mode it fired on no circuit of the test suite (batch 6b); it
+names every case above when `MODE_GUARD = False`, and under
+`mode_selection='lcp'` it catches the floating-bus bridge below. It reads
+stored samples only, so a wrong mode shorter than one stored step is not
+seen.
 
-### Complementarity mode selection: dsed only; double crossings at `V_th = 0`
+### Complementarity mode selection: dsed only
 
 `mode_selection='lcp'` and the default-mode guard run on `engine='dsed'`
 only; `pwl` and `trbdf2` still decide with their settle and refuse
 `'shadow'`/`'lcp'` by name (hooks: add-complementarity-mode-selection
 task 4.2). The guard and the LCP decide at events; a commutation the
-event locator misses is not decided. With `V_th = 0` a diode that turns
-on at exactly `v = 0` starts its next step with the turn-off predicate
-at 0, which the dsed locator skips, so a return through zero inside that
-step is lost: an LC tank into a series diode stays ON at −18 mA from
-2.25 µs (`test_double_crossing_inside_one_step_is_seen`'s circuit). A
-band of `V_th = 1e-3` gives the exact windows. The guard repairs only
-the modes it judges inconsistent over `1e4·h_e`; a mode consistent that
-long and wrong later is not caught.
+event locator misses is not decided. A diode predicate that starts a
+step at exactly zero is located from the side it leaves to over the
+first `100·h_e` (DECISIONS #19); a crossing back inside that sliver is
+not seen, nor is a predicate at zero that leaves toward its event side
+(a mode the decision at that instant should have set). With the guard
+off (`h_e = 0`) the read-ahead is `1e-6·h`, so a diode sliding on its
+threshold advances by that much per event until the chatter detector
+stops it. Current zero-crossing and custom predicates starting at zero
+are still skipped for the step. The guard repairs only the modes it
+judges inconsistent over `1e4·h_e`; a mode consistent that long and
+wrong later is not caught.
+
+### `mode_selection='lcp'` on a bridge whose DC bus floats on leak resistors
+
+A four-diode bridge fed from a floating secondary (an ideal transformer,
+or a sine source between two non-ground nodes) whose DC bus is held only
+by 1 MΩ ties and the diodes' `g_off` runs wrong under `'lcp'`: two diodes
+never conduct and one blocks +49.86 V (11.73 V against 31.88 V). The
+result flips with the `h_e` ratio, and the default (settle + guard) is
+right (add-complementarity-mode-selection DECISIONS #21). `'lcp'` is
+opt-in; use the default there. On the integrated tree the
+ideal-transformer bridge (`test_mode_passivity`) is loud, not wrong: the stored-sample guard raises `DiodeModeInconsistentError`
+(D2 OFF while forward-biased by 0.063 V from t = 10.008 ms); up to 9 ms
+`'lcp'` matches pwl to 5e-9 V.
+
+### Many-diode rectifiers with line inductance on dsed
+
+Ten three-phase bridges (60 diodes) behind 0.2 mH line inductors chatter
+at a natural commutation ("is chattering at t = 4.33 ms") from five
+bridges on, at `V_th = 0` and `1e-2`, in every mode; paralleled onto one
+DC bus they fail to settle at `t = 0` from five bridges on, and
+`trbdf2` aborts on them ("non-finite step … h_min"). The same bank
+without line inductance runs (add-complementarity-mode-selection
+DECISIONS #20). `engine='pwl'` runs both (181.81 V / 200.01 V at
+`dt = 1 µs`); no reference was available to check them.
 
 ### Fixed-step controller ticks land on the `dt` grid
 
@@ -387,37 +418,6 @@ after `t_start + k*T`. When `T` is not a multiple of `dt` each tick is
 late by less than `dt` (`simulate` warns; `result.control_tick_jitter_max`
 records the largest lateness); `T < dt` is refused. `trbdf2` lands every
 tick exactly. Pick `dt = T/n` for an exact fixed-step cadence.
-
-### TR-BDF2 stalls at `h_min` after a hard switching edge
-
-With a Newton device in the circuit (a saturable transformer, a
-saturable inductor, a smooth junction), `engine='trbdf2'` — and
-`engine='auto'` when it routes there — can abort right after a hard
-switching edge with `Newton failed at t = ... with h already at
-h_min`. Both Newton norms are at their noise floor; the worst residual
-sits on a LINEAR inductor row scaled by `2L/h`. Reproducer: the
-snubbed flyback in
-`python/tests/test_saturable_transformer.py::test_engines_agree_below_saturation`
-(strict xfail), characterised in
-`python/tests/test_newton_stall_and_mask_chatter.py`.
-
-**Do not loosen `tol_newton_dx` / `tol_newton_res` to get past it.**
-That flyback, re-run with `tol_newton_dx=1e-5, tol_newton_res=1e-4`,
-completes and reports V_out = 3.53 V; the fixed engine
-(`engine='pwl', dt=1e-8`) gives 15.31 V. The absolute step test is
-load-bearing: making it scale-aware lets the DC cascade stop at a
-spurious root 10.67 V away (CHANGELOG 2.0.0, *Two engine defects
-characterised, and one tempting fix refuted*).
-
-**Workaround.** Run the circuit on `engine='pwl'` with an explicit
-`dt`. **Fix.** Needs the step controller not to drive `h` to `h_min`
-after an event landing, or a row-equilibrated Jacobian — not a
-tolerance change.
-
-A saturable inductor used as a buck's own inductor loses its whole
-current at a turn-off edge on TR-BDF2 (`v_sw` = 2.6e7 V; comment above
-`_gated_buck` in `test_trbdf2_stateful_with_diodes.py`; a fix is in
-progress). Use `engine='pwl'` with a `dt`.
 
 ### TR-BDF2 still refactors on every new step size
 
@@ -491,16 +491,41 @@ on `pwl` (3): `buck_igbt` (Newton does not converge),
 `ll05_diode_rectifier_filter` (no consistent DC diode configuration),
 `ll13_active_clamp_forward` (no DC operating point).
 `ll16_flyback_closed_loop` completes since the Newton roundoff
-acceptance, through 1,645 roundoff accepts with a diverged state
-(I(Lm_core) ≈ 2.4e13 A from t = 0); a fix that makes it loud again is in
-progress.
+acceptance, but its state is wrong from t = 0 (I(Lm_core) ≈ 2.4e13 A).
+The cause is the DC operating point it starts from: `compute_dc_op` on
+a voltage source across series inductors (ll16's Vin, Lleak, Lm)
+returns 2.4e13 A (the source over the inductors' DC regularisation)
+instead of refusing; reproducer
+`openspec/changes/add-newton-roundoff-acceptance/probes/ll16_dc_op.py`.
+Every Newton solve from there is at roundoff, and the run stays inside
+the acceptance's run budget (longest run 5, the budget 130).
 The differential matrix (strict gate: every observable, every interval)
-records 65 `disagree` / `error` cells over 55 circuits as `known:` in
-`benchmarks/manifests/v2_triage.yaml`,
-plus `sepic` on pwl and trbdf2, whose trbdf2 reference grinds to
-`max_steps` (a TR-BDF2 regression, not frozen; integrated tree,
-2026-11-13, `benchmarks/REFERENCE_STATUS.md`). Each is an
-open finding, not a tolerance. Circuits whose v1 file has no `uic: true`
+records its `disagree` / `error` cells as `known:` per configuration in
+`benchmarks/manifests/v2_triage.yaml` (counts in
+`benchmarks/REFERENCE_STATUS.md`). Each is an open finding, not a
+tolerance. One circuit has no valid reference and is `unverified`
+on every engine (`reference: suspect`), `cuk_converter`. (`sepic`
+carried the mark while its trbdf2 reference ground to `max_steps`. That
+grind is fixed, and the reference now gives pwl 1.9e-3 and trbdf2
+3.0e-5, both agree; dsed is a frozen `error`.)
+
+**`cuk_converter` is ill-posed as written; its reference is marked
+suspect.** `Drect` is reversed: the file (and its ngspice deck) put the
+anode at ground and the cathode at `mid`, so the diode conducts while S1
+is ON and blocks the freewheel path while S1 is OFF. With S1 and Drect
+both OFF, L1's current (through `Ccpl`) and L2's current meet at `mid`
+with only Drect's `g_off` = 1e-6 S between them: an inductor cut-set,
+so `mid` reaches 2.6e4-3.5e6 V. The trbdf2 rtol 1e-8 reference accepts
+3,163 steps at `h_min` above tolerance and ends V(out) at +11.92 V; pwl
+does not converge with dt (0.233 / 0.232 / 0.226). With the diode turned
+round (`nodes: [mid, 0]`) both engines agree (V(out) over 1.5-2 ms:
+-17.4951 V trbdf2 rtol 1e-8, -17.4971 V pwl; `|mid|` <= 39.1 V), though
+that trbdf2 run forces 748,763 accepts, so it is not yet a clean reference.
+Reproducer (from `benchmarks/tools`): `v1_reader.load('../circuits/switching/buck_boost/cuk_converter.yaml').run('trbdf2', rtol=1e-8, atol=1e-12)`,
+then `max |v(mid)|` (3.55e6 V) and `result._trbdf2_stats['n_forced_accepts']` (3163). The manifest marks the reference `suspect`
+(every cell `unverified`); the netlist is kept as the v1 file wrote it.
+
+Circuits whose v1 file has no `uic: true`
 start from the DC operating point, which `dsed` cannot take (refused).
 
 ### First stored sample of algebraic nodes

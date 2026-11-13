@@ -1079,6 +1079,9 @@ inline SimulationResult run_transient(
         const Real restart_dt = Real{2} * (kGamma * opts.dt);
         Size restart_factorizations = 0;
 
+        pwl::NewtonRoundoffAcceptance newton_roundoff_run;
+        newton_roundoff_run.enabled = true;
+
         // ---- add-fixed-step-resolution-diagnostics (read-only) ----
         // Truncation: e = (h/12)|f_{k+1} − 2f_k + f_{k−1}| per linear
         // C/L (f = i/C, v/L from the committed companion), over the
@@ -1323,8 +1326,8 @@ inline SimulationResult run_transient(
             // add-newton-roundoff-acceptance: a dynamic-path Newton
             // solve that exhausts its budget at row roundoff is
             // accepted and counted (DC and static paths: never).
-            pwl::NewtonRoundoffAcceptance newton_roundoff;
-            newton_roundoff.enabled = true;
+            // One object for the run: its counters are the run budget.
+            pwl::NewtonRoundoffAcceptance& newton_roundoff = newton_roundoff_run;
             auto note_roundoff = [&]() {
                 if (!newton_roundoff.accepted) return;
                 ++result.newton_roundoff_accepts;
@@ -1657,6 +1660,8 @@ inline SimulationResult run_transient(
                         run_event_iteration(t_from + h, Real{2} * h_b, true);
                         diodes.snapshot_on_bits_into(rs_bits_be);
                         keep_be = rs_bits_be == rs_bits;
+                    } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                        throw;   // a run budget: never swallowed by a retry
                     } catch (const std::runtime_error&) {
                         ++result.stage2_retry_failures;
                     }
@@ -1887,6 +1892,8 @@ inline SimulationResult run_transient(
                     committed_be = true;
                 }
                 }   // !split
+            } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                throw;   // a run budget: never retried at a smaller dt
             } catch (const std::runtime_error& nominal_failed) {
                 // NOTE the narrow catch. Everything the solver throws
                 // is a runtime_error; a foreign exception is not.
@@ -1960,6 +1967,8 @@ inline SimulationResult run_transient(
                             } else {
                                 run_event_iteration(t_sub, sub_dt);
                             }
+                        } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                            throw;   // a run budget: never retried at a smaller dt
                         } catch (const std::runtime_error& sub_failed) {
                             why = sub_failed.what();
                             all_ok = false;

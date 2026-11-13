@@ -32,7 +32,7 @@ For full control, fall back to the explicit pipeline:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from ._pulsim import (  # type: ignore[import-not-found]
     # v2.0 Phase 2 — raised when a transient cannot continue. Unlike
@@ -43,6 +43,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # were whole would be the silent wrong answer this API exists to
     # avoid, so the partial trace has to be asked for.
     SimulationAborted,
+    ConvergenceError,
     # add-engine-conformance-matrix: the typed refusal (a ValueError
     # carrying engine / feature / device / kind) and the kernel's
     # device-kind capability table it is raised from.
@@ -344,9 +345,12 @@ from .spice_import import (
 )
 # add-power-mosfet-datasheet-device: charge laws, double pulse, fitters.
 from ._pulsim import ChargeLaw, ChargeTable  # type: ignore[import-not-found]
+# add-in-kernel-event-losses: kernel datasheet tables (LossTable.to_kernel()).
+from ._pulsim import ConductionTable, LossTable3D  # type: ignore[import-not-found]
 from . import datasheet as datasheet  # noqa: F401  (re-export submodule)
 from .double_pulse import DoublePulseResult, double_pulse_metrics, double_pulse_test
 from .stream import LiveStream, NativeLiveStream
+from ._exact_route import exact_route
 from .electrothermal import (
     TempCoResistance,
     make_bidirectional_observer,
@@ -436,8 +440,15 @@ from .steady_state import (
 )
 from .periodic_steady_state import (
     periodic_steady_state,  # noqa: F401
+    periodic_steady_state_supported,  # noqa: F401
     PeriodicSteadyStateResult,  # noqa: F401
     SampledModel,  # noqa: F401
+)
+# add-parameter-sensitivities — exact gradients on the dsed path.
+from .sensitivity import (
+    value_and_grad,  # noqa: F401
+    KpiValue,  # noqa: F401
+    SensitivityResult,  # noqa: F401
 )
 
 # v2.0 Phase 3 — subsystems: define once, instantiate many, with
@@ -528,14 +539,21 @@ __all__ = [
     "SwitchSchedule",
     # Proposal #3.3 ergonomics — high-level entry point.
     "simulate",
+    # add-exact-propagator-strategy D11 (report only).
+    "exact_route",
     # add-python-named-lookups (v1.5).
     "NameNotFoundError",
     # add-python-builder-ergonomics (v1.5).
     "Cancelled",
     "RetiredDeviceError",
     "SimulationAborted",
+    "ConvergenceError",
+    "periodic_steady_state_supported",
     "UnsupportedError",
     "ControlGraphBuildError",
+    "value_and_grad",
+    "KpiValue",
+    "SensitivityResult",
     "engine_capabilities",
     # Closed-loop control building blocks (Phase 2 + add-python-closed-loop-helper v1.5).
     "PIController",
@@ -739,6 +757,8 @@ __all__ = [
     "spice_to_builder",
     "ChargeLaw",
     "ChargeTable",
+    "LossTable3D",
+    "ConductionTable",
     "DoublePulseResult",
     "double_pulse_metrics",
     "double_pulse_test",
@@ -806,15 +826,21 @@ def _warn_unlocated_edges(res):
             UserWarning, stacklevel=3)
 
 
+def _resolution_flagged(res) -> bool:
+    """True when :func:`_warn_resolution` warns for this run."""
+    rd = getattr(res, "resolution", None)
+    return rd is not None and bool(
+        rd.lte_max > _RESOLUTION_LTE_MAX or list(rd.ringing)
+        or rd.unestimated_fraction > _RESOLUTION_UNESTIMATED_MAX)
+
+
 def _warn_resolution(builder, res, dt):
     """One ResolutionWarning per run (see ResolutionWarning)."""
-    rd = getattr(res, "resolution", None)
-    if rd is None:
+    if not _resolution_flagged(res):
         return
+    rd = res.resolution
     ring = list(rd.ringing)
     unest = rd.unestimated_fraction > _RESOLUTION_UNESTIMATED_MAX
-    if not (rd.lte_max > _RESOLUTION_LTE_MAX or ring or unest):
-        return
     import warnings
     lines = []
     if rd.lte_max > _RESOLUTION_LTE_MAX:
@@ -1848,6 +1874,8 @@ def simulate(
     resume_from=None,
     # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
     solver: Optional["SolverOptions"] = None,
+    # --- forward parameter sensitivities (exact path only) ---
+    sensitivities: "Optional[Sequence[str]]" = None,
     mode_selection: Optional[str] = None,
 ) -> SimulationResult:
     """Build the cache and run a transient simulation.
@@ -1979,8 +2007,12 @@ def simulate(
         ``engine='trbdf2'`` / ``'dsed'``: the step CEILING (``dsed``
         defaults to 10 µs); the grid is variable either way.
     engine
-        ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'dsed'`` —
-        see above.
+        ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'exact'`` —
+        see above. ``'exact'`` is the canonical name of the event-driven
+        exact engine; ``'dsed'`` is its alias (one engine: the result's
+        ``engine_used`` and refusals name ``'dsed'``).
+        :func:`pulsim.exact_route` reports which segments of a run are
+        exact-eligible.
     rtol, atol
         Relative / absolute tolerance for the DSED PI controller.
         Ignored if ``engine='pwl'`` (warning emitted). Defaults:
@@ -2048,6 +2080,16 @@ def simulate(
         :class:`SolverOptions`). Cross-check on the other engine
         instead (``engine='pwl'`` with an explicit ``dt`` after a
         TR-BDF2 abort).
+    sensitivities
+        ``engine='dsed'`` only (every other engine refuses it):
+        parameter names ``"<component>.<field>"`` (``R``, ``L``,
+        ``C``, ``V``; ``"<switch>.duty"`` of a trailing-edge PWM).
+        The run is the exact stepper with events located and no event
+        projection; the result gains ``.sensitivity`` (``states``
+        ``(n, n_state, n_p)``), ``.sens(signal, param)`` and
+        ``.kpi(signal, kind, with_grad=True)``. Exact or refused, never
+        a finite difference: see :mod:`pulsim.sensitivity`.
+
     mode_selection
         How PWL diodes are decided at an event. ``None`` / ``'legacy'``
         (default): today's settle; on ``engine='dsed'`` a guard judges
@@ -2182,6 +2224,12 @@ def simulate(
     # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
     # (rtol/atol/dt_init/integrator/stiffness_threshold/h_bdf2). For
     # engine='pwl' it just warns on DSED-only kwarg leakage.
+    # add-exact-propagator-strategy D11: 'exact' is the canonical name of the
+    # event-driven exact engine and 'dsed' its alias. One run: the result's
+    # engine_used and every refusal keep naming 'dsed' (the capability-table
+    # column) until the default flip (DECISIONS #3).
+    if engine == "exact":
+        engine = "dsed"
     from . import _dsed_dispatch as _dsed
     _dsed._validate_engine_kwargs(
         engine=engine,
@@ -2298,6 +2346,26 @@ def simulate(
     # dispatch: add-compiled-control-graph).
     b_extra_fn = _plan.merge_b_extra(b_extra_fn)
 
+    # ---- Parameter sensitivities: the exact path only. Above the
+    # dispatch (three early returns below), so every engine refuses or
+    # honours it.
+    if sensitivities is not None and engine != "dsed":
+        raise _unsupported(
+            engine, "sensitivities",
+            f"simulate(engine={engine!r}, sensitivities=...): forward "
+            "sensitivities are computed on the exact path only "
+            "(engine='dsed'); on this engine a gradient would be a "
+            "finite difference of runs whose events sit on the step grid "
+            "(off by a factor of ten on the DCM buck). Pass "
+            "engine='dsed'.")
+    if sensitivities is not None and mode_selection in ("shadow", "lcp"):
+        raise _unsupported(
+            engine, "sensitivities",
+            f"simulate(sensitivities=..., mode_selection={mode_selection!r})"
+            ": the sensitivity run differentiates the legacy event "
+            "settle; a mode chosen by the complementarity problem has no "
+            "derivative here. Drop mode_selection.")
+
     # ---- Engine dispatch: DSED takes the early-return path. ----
     # For engine='dsed', `integrator` ∈ {'auto', 'rk45', 'bdf2', None}.
     # The DSED dispatcher owns its own validation; main's Phase 2.4
@@ -2372,26 +2440,35 @@ def simulate(
         # preflight report on the way out, so `result._preflight` —
         # which the warning tells every user to read — is not a
         # PWL-only attribute.
-        _dsed_res = _dsed.run_dsed_from_builder(
-            builder=builder,
-            t_end=t_end,
-            dt=dt,
-            rtol=rtol,
-            atol=atol,
-            dt_init=dt_init,
-            integrator=integrator,
-            stiffness_threshold=stiffness_threshold,
-            h_bdf2=h_bdf2,
-            t_start=t_start,
-            switch_fn=switch_fn,
-            b_extra_fn=b_extra_fn,
-            # Builder ICs (c0= / i0=) are a full-MNA vector: the
-            # dispatcher maps them per device onto the reduced state.
-            initial_state=None if _ic_from_builder else initial_state,
-            builder_initial_state=initial_state if _ic_from_builder else None,
-            progress=progress,
-            mode_selection=mode_selection,
-        )
+        if sensitivities is not None:
+            from .sensitivity import simulate_sensitivities
+            _dsed_res = simulate_sensitivities(
+                builder, t_end, sensitivities=sensitivities, dt=dt,
+                t_start=t_start, switch_fn=switch_fn,
+                initial_state=None if _ic_from_builder else initial_state,
+                ic_from_builder=_ic_from_builder, dt_init=dt_init,
+                b_extra_fn=b_extra_fn, integrator=integrator)
+        else:
+            _dsed_res = _dsed.run_dsed_from_builder(
+                builder=builder,
+                t_end=t_end,
+                dt=dt,
+                rtol=rtol,
+                atol=atol,
+                dt_init=dt_init,
+                integrator=integrator,
+                stiffness_threshold=stiffness_threshold,
+                h_bdf2=h_bdf2,
+                t_start=t_start,
+                switch_fn=switch_fn,
+                b_extra_fn=b_extra_fn,
+                # Builder ICs (c0= / i0=) are a full-MNA vector: the
+                # dispatcher maps them per device onto the reduced state.
+                initial_state=None if _ic_from_builder else initial_state,
+                builder_initial_state=initial_state if _ic_from_builder else None,
+                progress=progress,
+                mode_selection=mode_selection,
+            )
         try:
             _dsed_res._preflight = _preflight_report
             _dsed_res.engine_used = "dsed"
@@ -3300,9 +3377,15 @@ def _warn_newton_roundoff(res, eng) -> None:
             f"row's residual is within "
             f"{res.newton_roundoff_omega_max:.2g} of the magnitudes it "
             f"sums (at most 8 eps; worst at MNA row "
-            f"{res.newton_roundoff_row}). This replaces an abort that "
-            f"no tolerance could have passed; it is not a loosened "
-            f"tol_newton_dx. Check result.newton_roundoff_accepts.",
+            f"{res.newton_roundoff_row}, measured against the "
+            f"magnitudes at the solve's start state). Each would "
+            f"otherwise have aborted at its iteration budget; the "
+            f"state kept is the iterate whose residual was checked. "
+            f"It is not a loosened tol_newton_dx, and it does not "
+            f"validate the state itself: a run that starts from a "
+            f"wrong state can be accepted at roundoff all the way. "
+            f"More than 130 consecutive accepts abort the run. Check "
+            f"result.newton_roundoff_accepts.",
             stacklevel=3)
 
 

@@ -77,9 +77,9 @@ circuit of `numerics/p2_buck.py`: 24 V, 100 µH, 47 µF, `g_on = 1e3`,
 <!-- Re-centred scope, 2026-11-13: groups 13–19 are appended; groups 1–12 are unchanged. -->
 
 ## 13. Default route (re-centred scope, D11)
-- [ ] 13.1 Segment eligibility test (D11 rules 1–4) and route record `result.exact['segments']` with the reason for every implicit segment
-- [ ] 13.2 `engine='exact'` canonical, `'dsed'` alias; refusal of a non-eligible segment with `UnsupportedError` naming the rule, unless `allow_implicit_segments=True`
-- [ ] 13.3 Tests: `auto` routes the DCM buck, the boost, the single- and three-phase bridges (resistor-pair and, after `add-branch-form-ideal-switch` group 8, ideal) to exact for every segment; a Shockley rectifier is routed implicit with reason `'device'`; `auto` and explicit `'exact'` give bit-identical states on the exact-only circuits
+- [ ] 13.1 Segment eligibility test (D11 rules 1–4) and route record `result.exact['segments']` with the reason for every implicit segment. Report-only slice (DECISIONS, group 13 slice): one row per mask on every exact run (`exact`, `reason` 'device' / 'source' / 'extraction' / 'cost', `device`, `kind`, `detail`, `tier`, `n_segments`) and `pulsim.exact_route(builder, t_end, ...)`; open: implicit segments (group 14) and the route of 'auto'
+- [ ] 13.2 `engine='exact'` canonical, `'dsed'` alias; refusal of a non-eligible segment with `UnsupportedError` naming the rule, unless `allow_implicit_segments=True`. Done: the name and alias (`simulate()` maps above the dispatch; `_require_supported` takes either; results and refusals report 'dsed'). Open: the refusal and `allow_implicit_segments`
+- [ ] 13.3 Tests: `auto` routes the DCM buck, the boost, the single- and three-phase bridges (resistor-pair and, after `add-branch-form-ideal-switch` group 8, ideal) to exact for every segment; a Shockley rectifier is routed implicit with reason `'device'`; `auto` and explicit `'exact'` give bit-identical states on the exact-only circuits. Report-only part (`python/tests/test_exact_route.py`): buck, boost, single-phase bridge, three-phase C-filter bridge and the three-phase rectifier example classify exact on every mask; Shockley → 'device' (Dsh, ShockleyDiode); coupled inductors, an inductor cut-set and a floating capacitor loop → 'extraction'; a PWM source → 'source'; 'exact' and 'dsed' bit-identical. Open: `auto` does not route yet
 
 ## 14. Hybrid segments (D12; needs groups 9 and 11)
 - [ ] 14.1 Classification at events; implicit segment to the next event; `affine_region` re-test at each accepted implicit step scheduling a re-entry event; SDIRK×3 on entry to an implicit segment
@@ -93,8 +93,8 @@ circuit of `numerics/p2_buck.py`: 24 V, 100 µH, 47 µF, `g_on = 1e3`,
 - [ ] 15.4 Calibrate the flop constants, `m_max` and the dense budget against C++ timings with the counter harness; record them here
 
 ## 16. Exact sources (D14)
-- [ ] 16.1 Augmented source states: polynomial chain, exponential, shared oscillator pairs; PWL corners as time events
-- [ ] 16.2 Tests: 100 V 50 Hz sine into 1 Ω, 1 mH at `h = T/20` within 1e-10 A of the closed form over 5 periods (prototype 1.6e-12); a 0 → 10 V ramp over 1 ms into an RC within 1e-12 of the closed form; a PWL source's corners appear as events
+- [ ] 16.1 Augmented source states: polynomial chain, exponential, shared oscillator pairs; PWL corners as time events. Done before this change: shared oscillator pairs (sine). Open, recorded in DECISIONS (group 16 slice): polynomial / ramp states and pulse / PWM corners as time events — every mask with such a source is tier 3 today
+- [ ] 16.2 Tests: 100 V 50 Hz sine into 1 Ω, 1 mH at `h = T/20` within 1e-10 A of the closed form over 5 periods (prototype 1.6e-12); a 0 → 10 V ramp over 1 ms into an RC within 1e-12 of the closed form; a PWL source's corners appear as events. Sine part done (`python/tests/test_exact_sources.py`: 3.2e-13 A; a sine-driven series RLC to 2.7e-13 relative). Open: the ramp (numeric today, 8.97e-8 V) and the corner events
 
 ## 17. Output samples and controller ticks as events (D15; needs `add-unified-event-queue`)
 - [ ] 17.1 Samples evaluated from the last event (modal O(n), or a cached `Φ(dt_out)`); ticks as queue events with zero-order hold

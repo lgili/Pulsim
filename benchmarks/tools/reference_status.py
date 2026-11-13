@@ -41,7 +41,7 @@ CONFIGS = {"pwl": ("pwl", {}), "pwl+restart": ("pwl", {"discontinuity_restart": 
            "pwl+split": ("pwl", {"discontinuity_restart": True,
                                  "enable_substep_state_correction": True}),
            "trbdf2": ("trbdf2", {}), "dsed": ("dsed", {})}
-KINDS = ("agree", "disagree", "error", "refused")
+KINDS = ("agree", "disagree", "error", "refused", "unverified")
 
 
 @contextlib.contextmanager
@@ -54,6 +54,23 @@ def extra_kwargs(kw):
         yield
     finally:
         pulsim.simulate = orig
+
+
+def _annotate(rec, entry):
+    """Freeze of this configuration (its own ``known:`` / ``known_err:``
+    key), the suspect-reference rule, and why the cell is unexpected."""
+    if "was" in rec:                       # re-annotating a saved cell
+        rec["outcome"] = rec.pop("was")
+    for k in ("unexpected", "note"):
+        rec.pop(k, None)
+    cfg = rec["config"]
+    rec["known"] = (entry.get("known") or {}).get(cfg)
+    rec["known_err"] = (entry.get("known_err") or {}).get(cfg)
+    dr.mark_suspect(rec, entry)
+    why = dr.frozen_check(rec, entry, cfg)
+    if why:
+        rec["unexpected"] = why
+    return rec
 
 
 def differential(patterns):
@@ -72,15 +89,14 @@ def differential(patterns):
         for cfg, (eng, kw) in CONFIGS.items():
             with extra_kwargs(kw):
                 kind, res, _, msg = dr.run_cell(case, eng)
-            rec = dict(circuit=rel, config=cfg, reference=ref_name, tol=tols[eng], message=msg,
-                       known=entry.get("known", {}).get(eng))
+            rec = dict(circuit=rel, config=cfg, reference=ref_name, tol=tols[eng], message=msg)
             if kind != "ran":
                 rec["outcome"] = kind
             elif ref is None:
                 rec.update(outcome="error", message="no converged reference")
             else:
                 dr.classify(rec, res, case, cols, ref, tols[eng], case.dt if eng == "pwl" else None)
-            out.append(rec)
+            out.append(_annotate(rec, entry))
             print(f"{rec['outcome']:9s} {cfg:12s} {rel} {rec.get('err_rms', '')}", flush=True)
     return out
 
@@ -112,11 +128,13 @@ def _counts(recs):
     for cfg in CONFIGS:
         n = [sum(r["config"] == cfg and r["outcome"] == k for r in recs) for k in KINDS]
         rows.append(f"| {cfg} | " + " | ".join(map(str, n)) + " |")
-    return ["| configuration | " + " | ".join(KINDS) + " |", "|---|---:|---:|---:|---:|", *rows]
+    return ["| configuration | " + " | ".join(KINDS) + " |", "|---|" + "---:|" * len(KINDS), *rows]
 
 
 def _e(r):
-    return f"{r['err_rms']:.3g}" if "err_rms" in r else r["outcome"]
+    if r["outcome"] == "unverified" or "err_rms" not in r:
+        return r["outcome"]
+    return f"{r['err_rms']:.3g}"
 
 
 def _g(x, fmt=".2g"):
@@ -142,7 +160,12 @@ def render(diff, ana, notes):
          "time-weighted RMS error over the observables' span against the reference",
          "(trbdf2 rtol 1e-8, else pwl dt/4), tolerance 2e-2 (pwl, switched) / 1e-3.",
          "Gate: the strict `interp` measure (every observable, every interval). The edge",
-         "diagnostic below explains a disagreement and never decides one.",
+         "diagnostic below explains a disagreement and never decides one. A `trbdf2` cell",
+         "graded against the trbdf2 reference is a SELF-CONSISTENCY check (default vs rtol",
+         "1e-8 of one engine), not an agreement; prefer an analytic or independent reference.",
+         "`unverified`: the manifest marks the circuit's reference `suspect`; no cell on it",
+         "is graded. Every configuration has its own `known:` freeze; a frozen `disagree`",
+         f"fails when its err_rms grows past {dr.GROWTH:g}x the frozen `known_err:`.",
          "", f"## Differential matrix ({len(circuits)} circuits)", "", *_counts(diff), "",
          "### Fixed engine: restart rule and split (circuits where any of the three does not agree)", "",
          "| circuit | tol | pwl | pwl+restart | pwl+split |", "|---|---:|---:|---:|---:|"]
@@ -150,17 +173,19 @@ def render(diff, ana, notes):
         a, b, sp = by[(c, "pwl")], by[(c, "pwl+restart")], by[(c, "pwl+split")]
         if a["outcome"] != "agree" or b["outcome"] != "agree" or sp["outcome"] != "agree":
             L.append(f"| {c.removeprefix('circuits/')} | {a['tol']:g} | {_e(a)} | {_e(b)} | {_e(sp)} |")
-    L += ["", "### Every cell whose outcome differs from the frozen `known:` entry", "",
-          "| circuit | engine | frozen | now | err_rms |", "|---|---|---|---|---:|"]
+    L += ["", "### Every cell that differs from its frozen `known:` entry (every configuration)", "",
+          "| circuit | config | frozen | now | err_rms | why |", "|---|---|---|---|---:|---|"]
     for r in diff:
-        if r["config"] in ("pwl+restart", "pwl+split"):
-            continue
-        frozen = r["known"] or "agree/refused"
-        if (r["known"] or None) != (r["outcome"] if r["outcome"] in ("disagree", "error") else None):
+        why = r.get("unexpected") or r.get("note") or (
+            f"now {r['outcome']}: drop the freeze"
+            if r.get("known") and r["outcome"] in ("agree", "refused") else "")
+        if why:
+            frozen = (f"{r['known']} ({r['known_err']:.3g})" if r.get("known_err") is not None
+                      else (r.get("known") or "agree/refused"))
             L.append(f"| {r['circuit'].removeprefix('circuits/')} | {r['config']} | {frozen} "
-                     f"| {r['outcome']} | {_e(r) if 'err_rms' in r else ''} |")
+                     f"| {r['outcome']} | {_e(r) if 'err_rms' in r else ''} | {why} |")
     if L[-1].startswith("|---|---|---|---|"):
-        L.append("| (none) | | | | |")
+        L.append("| (none) | | | | | |")
     L += ["", "### Edge diagnostic of every cell that disagrees on the gate", "",
           "`worst observable`: the one with the largest strict err_rms. `edge err`: err_rms",
           "with the steps holding a recorded switch-state change (either trace) and the",
@@ -206,7 +231,7 @@ def main(argv=None) -> int:
         diff, ana = d["differential"], d["analytic"]
         triage = dr.load_triage()                  # freezes as they are now, not as saved
         for r in diff:
-            r["known"] = (triage[r["circuit"]].get("known") or {}).get(CONFIGS[r["config"]][0])
+            _annotate(r, triage[r["circuit"]])
     else:
         pats = [p if p.startswith("circuits/") else f"circuits/{p}" for p in args.circuits.split(",")]
         diff, ana = differential(pats), analytic()
@@ -217,7 +242,10 @@ def main(argv=None) -> int:
     notes = old.split("\n## Notes\n", 1)[1] if "\n## Notes\n" in old else "\n(none)\n"
     OUT.write_text(render(diff, ana, notes), encoding="utf-8")
     print(f"wrote {OUT}")
-    return 0
+    bad = [r for r in diff if r.get("unexpected")]
+    for r in bad:
+        print(f"UNEXPECTED {r['config']} {r['circuit']}: {r['unexpected']}")
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":
