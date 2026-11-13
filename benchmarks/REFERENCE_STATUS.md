@@ -14,7 +14,7 @@ diagnostic below explains a disagreement and never decides one.
 | pwl | 77 | 23 | 8 | 0 |
 | pwl+restart | 81 | 19 | 8 | 0 |
 | trbdf2 | 96 | 4 | 2 | 6 |
-| dsed | 38 | 17 | 14 | 39 |
+| dsed | 39 | 17 | 13 | 39 |
 
 ### Fixed engine: restart rule off vs on (circuits that do not agree with it off)
 
@@ -148,7 +148,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | diodes/back_to_back_diodes_sine.yaml | 1.14e-05 | 1.14e-05 | 0 | refused |
 | diodes/diode_bridge_rectifier.yaml | 0.000216 | 0.000177 | 3.22e-05 | 6.59e-06 |
 | diodes/diode_clamp_overvoltage.yaml | 0.00565 | 0.00565 | 0 | refused |
-| diodes/diode_half_wave_rl_load.yaml | 0.0186 | 0.000598 | 1.65e-05 | error |
+| diodes/diode_half_wave_rl_load.yaml | 0.0186 | 0.000598 | 1.65e-05 | 0.000135 |
 | diodes/diode_rectifier.yaml | 0.0139 | 0.00202 | 0.000183 | 0.000996 |
 | diodes/half_wave_rectifier_sine.yaml | 0.000393 | 0.000112 | 2.36e-05 | 4.63e-06 |
 | diodes/voltage_doubler.yaml | 0.000222 | 3e-05 | 5.04e-06 | 5.5e-07 |
@@ -255,7 +255,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | pwl | 19 | 1 | 0 | 0 |
 | pwl+restart | 20 | 0 | 0 | 0 |
 | trbdf2 | 20 | 0 | 0 | 0 |
-| dsed | 12 | 0 | 1 | 7 |
+| dsed | 13 | 0 | 0 | 7 |
 
 | case | pwl | pwl+restart | trbdf2 | dsed |
 |---|---:|---:|---:|---:|
@@ -275,7 +275,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | shockley_op | 6.67e-13 | 6.67e-13 | 6.67e-13 | refused |
 | pwl_diode_drop | 0 | 0 | 0 | refused |
 | halfwave_r | 5.38e-09 | 5.38e-09 | 3.81e-08 | refused |
-| halfwave_rl | 9.65e-06 | 1.44e-06 | 3.76e-06 | error ✗ |
+| halfwave_rl | 9.65e-06 | 1.44e-06 | 3.76e-06 | 5.69e-09 |
 | hard_switched_rc | 0.01 ✗ | 4.92e-05 | 2.22e-06 | 1.07e-13 |
 | buck_ccm | 0.000256 | 1.23e-08 | 3.37e-07 | 3.84e-15 |
 | buck_dcm | 0.000538 | 5.32e-08 | 5.63e-07 | 7.34e-10 |
@@ -327,7 +327,20 @@ resistive stage); `half_bridge_transformer_dc`, `ll06`, `ll08`, DAB,
 `cuk`, `synchronous_flyback` and the three-phase rectifier on pwl have
 an edge error above the tolerance (the states differ), flyback and
 forward on pwl `chatter`; dsed's switching-rate traces are
-`undersampled` (86-100 % of the span in switching steps).
+`undersampled` (16-100 % of the span in switching steps).
+
+**Complementarity mode selection merged (11ab8e95, batch 6a).** On the
+strict gate pwl, pwl+restart and trbdf2 are unchanged cell for cell
+(and bit-identical); dsed goes from 38 / 17 / 14 / 39 to
+39 / 17 / 13 / 39: `diode_half_wave_rl_load` error
+(`DiodeModeInconsistentError`) -> agree 1.35e-4 (the kernel guard
+repairs 2 events), and the analytic `halfwave_rl` error -> 5.7e-9. No
+`disagree` cell moves: the dsed disagreements are interpolation of
+switching-rate samples (`undersampled`, 16-100 % of the span in
+switching steps) or sit on a source node; none moved with the guard.
+The other 13 dsed `error` cells are unchanged: 8 "diode configuration
+did not settle" (the settle fails before the guard judges anything) and
+5 "no meaningful progress".
 
 Measured 2026-11-13 on `feat/core-integration-wip` (integration batch 4:
 phase0b harness + composite diode drop + exact-propagator slice 1).
