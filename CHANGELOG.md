@@ -15,13 +15,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   workspace: its backward error reads the workspace's copy of the
   iterate. A solve the Eigen path aborted can now converge (100 µH at
   `tol_newton_dx` = 1e-11 completes; its test pin changed).
-* **Changed** the reference harness compares on an edge-tolerant
-  measure: source-forced nodes are dropped and the step that contains a
-  switching edge is not interpolated (`--metric interp` keeps the old
-  measure). `benchmarks/REFERENCE_STATUS.md` states which one it uses.
-  A trace that switches across more than half its span (dsed sampled at
-  the switching rate) keeps its steps. Re-frozen triage: 21 `known:`
-  cells cleared (they agree), `ll08_buck_mosfet` error → disagree.
+* **Changed** the reference harness drops nothing from its gate. Batch 5
+  first gated on an `edge` measure (switching steps and source-forced
+  nodes left out) and cleared 21 `known:` cells, saying they agree; a
+  review showed that measure cannot see a late edge on a resistive load
+  (`vcswitch_resistor` pwl 0.0332 strict, 1.1e-21 edge) and drops exactly
+  the wrong intervals of a chattering trace. The gate and every freeze
+  are now the strict `interp` measure; each cell also records an edge
+  DIAGNOSTIC (edge error, excluded fraction of the span, worst
+  observable, edge-timing mismatch in s and in pwl steps; `undersampled`
+  above 10 % excluded, `chatter` when one trace has more than twice the
+  other's switch-state changes), which never decides. Of the 21 cells,
+  9 agree on the strict gate and stay cleared — trbdf2 on `ll02`,
+  `ll06`, `ll07`, `ll10`, `ll12`, `full_bridge_dc`,
+  `flying_capacitor_3level`, `t_type_3level_halfbridge` (the TR-BDF2
+  merge) and pwl `cascaded_h_bridge_5level` (its reference moved) —
+  and 12 came from the measure alone and are frozen again (pwl on nine
+  circuits, trbdf2 `ll09`, dsed `ll03` and `full_bridge_dc`); dsed
+  `ll02` (1.14e-3, moved with its reference) is frozen too.
+  `ll08_buck_mosfet` error → disagree on pwl and trbdf2. Strict counts:
+  pwl 77/23/8/0, trbdf2 96/4/2/6, dsed 38/17/14/39.
 * **Known regression** `engine='trbdf2'` at `rtol=1e-8, atol=1e-12`
   grinds to `max_steps` on the SEPIC benchmark (it ran before the
   error-control change); the harness has no reference for it, so its
@@ -285,6 +298,56 @@ backward-Euler half-steps, never shipped. It drained resonant modes:
   - `mmc_arms` refuses the flag;
   - a Jiles–Atherton core extrapolates its stage-1 flux from the
     committed state (O(h) at a loop tip).
+
+### Diode mode selection: default-mode guard on dsed (BREAKING for wrong numbers)
+
+`engine='dsed'` now judges the diode mode its settle picks at `t = 0`
+and at every event (both candidate modes propagated exactly over
+`100·h_e` and `1e4·h_e`); an inconsistent mode is decided by the LCP
+instead and listed in `result.diagnostics['mode_guard']` (`checks`,
+`repairs`, `repair_times`, `repair_diodes`, `repair_violations`). Runs
+whose modes were consistent are bit-identical. Changed numbers, all
+toward trbdf2 at rtol 1e-10: the `V_th = 0` boost after 400 periods,
+R = 500 Ω 43.70907 → 44.72165 V (error −1.01 V → −1.1e-5 V), R = 50 Ω
+23.67304 → 23.80642 V, R = 20 Ω +3.6e-2 → −1.5e-6 V (D1 was held ON at
+−0.86 to −1.18 A); the `V_th = 1e-3` boost at 20/50 Ω (−0.44/−1.04 A);
+the half-wave RL rectifier (`diode_half_wave_rl_load`), whose diode was
+held OFF while forward-biased by 10 V, mean `v(out)` 2.12046 → 3.18068 V
+(trbdf2 3.18066 V); the single-phase bridges and the three-phase
+rectifier example by ≤ 1.2e-12 V. A selection refusal at a repaired
+event raises `UnsupportedError(engine, 'consistent_mode', <diode>, 'Diode')`.
+
+### Diode mode selection: `mode_selection='lcp'` on dsed
+
+The LCP decides the mode at `t = 0` and at every event in place of the
+settle (`diagnostics['mode_selection']`: `lcp_count`, pivots, `ties`,
+`widenings`, `leak_pins`, `pin_judgements`, `unfixed`, `enumerations`,
+`nonunique_modes`). New tie rule (design D5): decided ports stay fixed
+while the ties are widened, and a tie carrying the leak current that
+holds a floating node is ON unless the all-OFF mode passes the exact
+judge — the three-phase C-filter bridge's 30 wrong shadow decisions are
+0 now. Non-passive circuits (VCVS, negative R/C/L) fall back to
+enumeration up to 12 ports, then `UnsupportedError(engine,
+'non_passive_ports', <device>, <kind>)`. Event counts are equal or
+larger than the settle's (the correct mode commutes more); `pwl` and
+`trbdf2` refuse `'lcp'` by name.
+
+### Diode mode selection as a complementarity problem: shadow mode
+
+`simulate(engine='dsed', mode_selection='shadow')` keeps today's settle
+deciding (states bit-identical) and solves, at every event, the diode
+LCP of the backward-Euler companion network at `h_e = 1e-7·T_ref`
+(lexicographic Lemke, hybrid previous-mode coordinates, tie widening,
+`V_th > V_f` hysteresis). `result.diagnostics['mode_shadow']` lists each
+disagreement with both modes judged by their exact trajectories, plus
+`lcp_count`, `lcp_pivots_total`, `max_pivots_per_event`, `ties`,
+`widenings`, `settle_rounds_total` (add-complementarity-mode-selection
+tasks 1–4). `'shadow'` on `pwl`/`trbdf2` raises
+`UnsupportedError(engine, 'mode_selection')`. Over 19 circuits: the
+`V_th = 0` boost's 15 (R = 50 Ω) and 24 (R = 500 Ω) disagreements are
+all the settle's error (it ends 1.01 V low at R = 500 Ω); banded runs
+agree at every event; the three-phase C-filter bridge showed 30 where the
+slice-1 tie rule was wrong (0 with the rule above). Max 3 pivots per event.
 
 ### DSED: exact propagator with a stated accuracy per mask
 

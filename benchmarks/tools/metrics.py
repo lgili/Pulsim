@@ -65,8 +65,7 @@ def err_rms(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = 
     floored at ``abs_scale`` (for a flat reference).
 
     ``exclude``: ``(lo, hi)`` time intervals left out of the integral and the
-    window (the edge-tolerant measure: the step of either trace that contains
-    a switching instant, where that trace holds no sample to interpolate)."""
+    window (the edge DIAGNOSTIC of the differential runner, never its gate)."""
     t, y = _window(t, y, exclude_t0)
     g, a, r = _on_grid(t, y, ref)
     span = max(float(r.max() - r.min()), abs_scale)

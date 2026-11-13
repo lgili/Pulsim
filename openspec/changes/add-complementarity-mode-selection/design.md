@@ -209,6 +209,37 @@ missed. The widening is the fallback; task 3 measures the band of
 `h_e` over which every family gives the same modes, and the default is
 set from that measurement, not from this estimate.
 
+**Slice 2 (DECISIONS #13) replaces "tied after `1e4·h_e` → OFF".**
+Slice 1 measured that rule wrong on the conductance-form three-phase C
+filter (30 events, `V_th = 0` and `1e-2` alike): at each pair turn-off
+the LCP's own solution keeps one diode ON with ~49 nA, the leak current
+that holds the floating DC bus; taking it OFF lets the leak divider
+forward-bias another OFF diode by 8.14 V (a zero-time loop in the
+prototype). The rule now:
+
+1. Pass 0 at `h_e` classifies each port: OFF if `w > tol_w`, ON if
+   `i > tol_i`, otherwise a tie.
+2. Each widening (`100·h_e`, `1e4·h_e`) keeps the decided ports FIXED
+   in their mode (a principal pivot to their coordinates) and re-solves
+   the LCP on the ties alone. A fixed port whose complement the
+   widened solution violates is released into the ties and the pass is
+   re-solved (at most `k` rounds, counted `unfixed`). A widening that
+   fails keeps the earlier decision.
+3. A tie still open after `1e4·h_e` whose current pins a node
+   (`i·R_jj > tol_w`, `R_jj` the port's driving-point resistance in the
+   pivoted problem) is a *pin*: it is ON unless the all-ties-OFF mode
+   passes the exact judge (DECISIONS #9), in which case it is OFF.
+   Other ties go OFF as before. Counted `leak_pins`, `pin_judgements`.
+
+Measured (`probes/tie_rule.out`, `probes/shadow_survey.out`): 0 wrong
+modes under the exact judge on every family, ideal and conductance,
+banded and unbanded, prototype and engine; the three-phase C filter
+30 → 0 (18 pins over 0.06 s, one per pair turn-off). Rules tried and
+rejected: "checked at `h_e`" (too strict on the single-phase bridges),
+an impedance test at pass 0 (pinned pA event-location residuals, some
+of which the judge found wrong), per-port merging across widenings
+(non-complementary mixes).
+
 ### D6. One event, in order
 
 1. Gates and sources take their `t⁺` values (D7).
@@ -309,6 +340,14 @@ Today the leak picks a value and the engines disagree: `v(p)` at
   quantity the dynamics determine;
 - reports the island's potential at the centre of the interval its
   OFF diodes allow, and marks it in `result.diagnostics['gauge_nodes']`.
+
+Slice 2 measured that the conductance form needs none of this: the
+leak makes the island's potential physical, and the D5 pin keeps the
+one diode that carries it ON. Task 7 is therefore scoped to the ideal
+form (`g_off = 0`, `add-branch-form-ideal-switch`); every comparison
+of a floating DC side between engines reads `p − n`, which is
+gauge-free (the common mode still differs: 0 V on `trbdf2`, 47.6 V on
+`pwl`/`dsed`).
 
 This supersedes "a floating node is always an error" of the earlier
 `add-branch-form-ideal-switch` D3 for islands bounded by diodes; an

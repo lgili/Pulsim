@@ -56,7 +56,7 @@ def extra_kwargs(kw):
         pulsim.simulate = orig
 
 
-def differential(patterns, metric="edge"):
+def differential(patterns):
     triage = dr.load_triage()
     out = []
     for rel, entry in sorted(triage.items()):
@@ -66,9 +66,9 @@ def differential(patterns, metric="edge"):
         _, sw, _ = case.build()
         switched = sw is not None or any(k in json.dumps(case._components)
                                          for k in ('"diode"', '"pwm"', '"pulse"'))
-        cols = dr.observables_of(case, metric)
+        cols = dr.observables_of(case)
         tols = {e: entry.get("tol", {}).get(e, dr.default_tol(e, switched)) for e in dr.ENGINES}
-        ref_name, ref = dr.reference(case, cols, min(tols.values()), metric)
+        ref_name, ref = dr.reference(case, cols, min(tols.values()))
         for cfg, (eng, kw) in CONFIGS.items():
             with extra_kwargs(kw):
                 kind, res, _, msg = dr.run_cell(case, eng)
@@ -79,8 +79,7 @@ def differential(patterns, metric="edge"):
             elif ref is None:
                 rec.update(outcome="error", message="no converged reference")
             else:
-                er, em = dr.compare(dr.traces(res, cols), ref, cols, 1e-3, metric)
-                rec.update(err_rms=er, err_max=em, outcome="agree" if er <= tols[eng] else "disagree")
+                dr.classify(rec, res, case, cols, ref, tols[eng], case.dt if eng == "pwl" else None)
             out.append(rec)
             print(f"{rec['outcome']:9s} {cfg:12s} {rel} {rec.get('err_rms', '')}", flush=True)
     return out
@@ -120,7 +119,21 @@ def _e(r):
     return f"{r['err_rms']:.3g}" if "err_rms" in r else r["outcome"]
 
 
-def render(diff, ana, notes, metric="edge"):
+def _g(x, fmt=".2g"):
+    return "" if x is None else ("unmatched" if x == float("inf") else format(x, fmt))
+
+
+def _diag(r):
+    """The edge diagnostic of a cell: edge error or its status word, excluded
+    fraction, edge-timing mismatch (s, engine steps)."""
+    if "edge" not in r:
+        return "| | | | |"
+    edge = _g(r["edge_rms"], ".3g") if r["edge"] == "ok" else r["edge"]
+    return (f"| {r['worst']} | {edge} | {r['excluded_frac']:.1%} | {_g(r['edge_timing_s'])} "
+            f"| {_g(r['edge_timing_steps'])} |")
+
+
+def render(diff, ana, notes):
     by = {(r["circuit"], r["config"]): r for r in diff}
     circuits = sorted({r["circuit"] for r in diff})
     L = ["# Reference status", "",
@@ -128,9 +141,8 @@ def render(diff, ana, notes, metric="edge"):
          "`## Notes`). Outcomes as in `differential_runner.py`: `err_rms` is the",
          "time-weighted RMS error over the observables' span against the reference",
          "(trbdf2 rtol 1e-8, else pwl dt/4), tolerance 2e-2 (pwl, switched) / 1e-3.",
-         f"Measure: `{metric}`" + (" (source-forced nodes dropped from the default observables;"
-                                   " the steps that contain a switching instant left out)."
-                                   if metric == "edge" else " (the previous measure)."),
+         "Gate: the strict `interp` measure (every observable, every interval). The edge",
+         "diagnostic below explains a disagreement and never decides one.",
          "", f"## Differential matrix ({len(circuits)} circuits)", "", *_counts(diff), "",
          "### Fixed engine: restart rule and split (circuits where any of the three does not agree)", "",
          "| circuit | tol | pwl | pwl+restart | pwl+split |", "|---|---:|---:|---:|---:|"]
@@ -149,6 +161,21 @@ def render(diff, ana, notes, metric="edge"):
                      f"| {r['outcome']} | {_e(r) if 'err_rms' in r else ''} |")
     if L[-1].startswith("|---|---|---|---|"):
         L.append("| (none) | | | | |")
+    L += ["", "### Edge diagnostic of every cell that disagrees on the gate", "",
+          "`edge err`: err_rms with the steps holding a recorded switch-state change (either",
+          "trace) and the source-forced nodes left out; `undersampled` when more than",
+          f"{dr.EDGE_CAP:.0%} of the span is excluded, `chatter` when one trace records more than",
+          f"{dr.CHATTER:g}x the other's switch-state changes. `timing`: max |t_edge - t_edge,ref| over",
+          "matched switching instants (`unmatched`: an instant without a partner), in s and in",
+          "the engine's `dt` (pwl). Edge err within the tolerance and timing <= 1 step: the",
+          "cell disagrees by edge timing; edge err above it: the states differ.", "",
+          "| circuit | config | tol | err_rms | worst observable | edge err | excluded | timing (s) "
+          "| timing (steps) |", "|---|---|---:|---:|---|---:|---:|---:|---:|"]
+    for c in circuits:
+        for k in CONFIGS:
+            r = by[(c, k)]
+            if r["outcome"] == "disagree":
+                L.append(f"| {c.removeprefix('circuits/')} | {k} | {r['tol']:g} | {_e(r)} " + _diag(r))
     L += ["", "### All cells (err_rms or outcome)", "",
           "| circuit | " + " | ".join(CONFIGS) + " |", "|---|" + "---:|" * len(CONFIGS)]
     for c in circuits:
@@ -168,23 +195,20 @@ def main(argv=None) -> int:
     ap.add_argument("--circuits", default="*")
     ap.add_argument("--json", help="also write the cells to this file")
     ap.add_argument("--from-json", help="re-render from a --json file, no runs")
-    ap.add_argument("--metric", choices=dr.METRICS, default="edge",
-                    help="differential measure (see differential_runner.py)")
     args = ap.parse_args(argv)
     warnings.simplefilter("ignore")
     if args.from_json:
         d = json.loads(Path(args.from_json).read_text())
         diff, ana = d["differential"], d["analytic"]
-        args.metric = d.get("metric", "interp")
     else:
         pats = [p if p.startswith("circuits/") else f"circuits/{p}" for p in args.circuits.split(",")]
-        diff, ana = differential(pats, args.metric), analytic()
+        diff, ana = differential(pats), analytic()
     if args.json:
         Path(args.json).write_text(json.dumps(dict(differential=diff, analytic=ana,
-                                                   metric=args.metric), indent=1))
+                                                   measure="interp"), indent=1))
     old = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
     notes = old.split("\n## Notes\n", 1)[1] if "\n## Notes\n" in old else "\n(none)\n"
-    OUT.write_text(render(diff, ana, notes, args.metric), encoding="utf-8")
+    OUT.write_text(render(diff, ana, notes), encoding="utf-8")
     print(f"wrote {OUT}")
     return 0
 
