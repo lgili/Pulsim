@@ -706,6 +706,35 @@ private:
         int pred_index = -1;  // index in predictor_.predicates()
     };
 
+    /// The sign of a diode predicate's signal on its admissible side
+    /// (DiodeOn: v − V_on < 0 while OFF; DiodeOff: v − V_f > 0 while ON);
+    /// 0 for a predicate with no side.
+    [[nodiscard]] static int admissible_sign_(PredicateType t) noexcept {
+        return t == PredicateType::DiodeOn ? -1
+             : t == PredicateType::DiodeOff ? 1 : 0;
+    }
+
+    /// Whether a bracket that starts at `ga` can hold an event: a diode
+    /// predicate fires only when its signal LEAVES the admissible side.
+    /// One that starts past its threshold by more than the zero band
+    /// `band` and comes back is not an event: after a commutation the
+    /// projection leaves ~1e-14 A of rounding in an inductor in series
+    /// with an OFF diode, which g_off turns into 1e-5 V that relaxes in
+    /// L·g_off (1e-13 s). Firing on that return re-decided the same mode
+    /// until the chatter guard threw. A start inside the band is read
+    /// both ways, as before: an ON diode left at i = 0 (±1e-14 V) by a
+    /// series-pair turn-off whose current then drifts negative at leak
+    /// scale is caught by that crossing (the single-phase bridge with a
+    /// floating bus held D1 ON at −190 nA for 4.9 ms without it).
+    /// `band_of()` gives the zero band (zero_band_tol_ at the step
+    /// start); it is evaluated only for a start past the threshold.
+    template <class Band>
+    [[nodiscard]] static bool starts_admissible_(PredicateType t, Real ga,
+                                                 Band&& band_of) {
+        const Real s = ga * static_cast<Real>(admissible_sign_(t));
+        return !(s < Real{0}) || !(s < -band_of());
+    }
+
     /// The probe step for a predicate that starts a step exactly on
     /// zero: the judge's shortest propagation (100·h_e), or 1e-6 of the
     /// step when no h_e is set (guard and LCP off).
@@ -728,9 +757,7 @@ private:
     [[nodiscard]] bool zero_start_admissible_(const EventPredicate& p, int ip,
                                               Real t0, Real d, G&& g_at,
                                               Real& g_out) const {
-        const int s = p.type == PredicateType::DiodeOn    ? -1
-                    : p.type == PredicateType::DiodeOff   ? 1
-                                                          : 0;
+        const int s = admissible_sign_(p.type);
         if (s == 0 || (ip == last_fired_index_ && t0 == last_fired_t_)) {
             return false;
         }
@@ -807,6 +834,11 @@ private:
             Real{1e-12} * h);
 
         const auto& preds = predictor_.predicates();
+        Real band = Real{-1};
+        const auto band_of = [&]() -> Real {
+            if (band < Real{0}) band = zero_band_tol_(t0, x0);
+            return band;
+        };
         for (std::size_t ip = 0; ip < preds.size(); ++ip) {
             const auto& p = preds[ip];
             if (p.required_bit >= 0 &&
@@ -837,7 +869,9 @@ private:
                 const Real tb = t_at(k + 1);
                 const Real gb = p.value(tb, x_at(k + 1));
                 ++result.n_predicate_evals;
-                if (gb == Real{0}) {
+                if (!starts_admissible_(p.type, ga, band_of)) {
+                    // coming back from past the threshold: no event
+                } else if (gb == Real{0}) {
                     root = tb;
                 } else if (ga * gb < Real{0}) {
                     auto g_at = [&](Real tau) -> Real {
@@ -1107,6 +1141,11 @@ private:
         int best_priority = std::numeric_limits<int>::max();
 
         const auto& preds = predictor_.predicates();
+        Real band = Real{-1};
+        const auto band_of = [&]() -> Real {
+            if (band < Real{0}) band = zero_band_tol_(t0, x0);
+            return band;
+        };
         for (std::size_t ip = 0; ip < preds.size(); ++ip) {
             const auto& p = preds[ip];
             // v2.0 Phase 3 — state-dependent arming. A diode's
@@ -1139,7 +1178,7 @@ private:
                 }
                 ta = t0 + d;
             }
-            if (g0 * g1 >= Real{0}) continue;
+            if (g0 * g1 >= Real{0} || !starts_admissible_(p.type, g0, band_of)) continue;
 
             // Locate root via Illinois on the Hermite interpolant.
             auto g_at = [&hermite_g, ta, t1, g0, g1](Real tau) -> Real {

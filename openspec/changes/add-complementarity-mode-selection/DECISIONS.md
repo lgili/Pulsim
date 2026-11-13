@@ -215,14 +215,21 @@ choices it did not pin.
     was made cheaper. Per-event time is dominated by mask extraction
     (add-exact-propagator-strategy owns the mask cache).
 
-    Variants that do not run on dsed in any mode, identical on the HEAD
-    11ab8e95 extension (not caused by #19): 0.2 mH line inductors
-    chatter ("commutated 32 times") at `V_th = 0` and `1e-2`; the same
-    bank paralleled onto one 2 mF ‖ 5 Ω bus does not settle at `t = 0`
-    (settle, guard) or makes no progress ('lcp'); trbdf2 aborts on both
-    ("non-finite step … h_min"); pwl at `dt = 1 µs` runs both (181.81 V /
-    200.01 V, no reference to check against). Recorded in
-    KNOWN_LIMITATIONS. → Reverse: nothing to reverse (a measurement); a
+    Variants, as measured at slice 3 (11ab8e95, not caused by #19): 0.2 mH
+    line inductors chattered ("commutated 32 times") at `V_th = 0` and
+    `1e-2` in every mode; the same bank paralleled onto one 2 mF ‖ 5 Ω bus
+    does not settle at `t = 0` (settle, guard) or makes no progress
+    ('lcp'); trbdf2 aborts on both ("non-finite step … h_min"); pwl at
+    `dt = 1 µs` runs both (181.81 V / 200.01 V). **Re-measured after #23**
+    (`bank60_cost.out`): the line-inductance bank on independent buses
+    runs on the default (521 events at `V_th = 0`, 408 at `1e-2`) and on
+    'lcp' at `V_th = 0` (515 events), ending at 181.808127 V; the settle
+    alone still chatters (7.39 ms, 32.2 ms) and 'lcp' at `V_th = 1e-2`
+    chatters at t = 1.4e-19 s; the paralleled bus is unchanged. The cost
+    case keeps its end value (−2.71e-11 V against trbdf2) with 435 / 311 /
+    311 events (settle / default / 'lcp'; 373 before #23: the removed
+    events are the return re-decisions of #23), max 30 pivots per event.
+    Recorded in KNOWN_LIMITATIONS. → Reverse: nothing to reverse (a measurement); a
     cheaper guard would cache the judge's two propagations per mask.
 
 21. **Passivity classes at build time (task 5.1).**
@@ -295,3 +302,50 @@ choices it did not pin.
     test fails in all six cases at 11.726609512 V and
     `test_mode_selector.py[bridge1_vf0]` reads 3 pins. → Reverse: the
     history right-hand side in `diode_port_problem_full`.
+
+23. **A diode predicate fires only when its signal leaves its
+    admissible side (beyond the zero band).** Five three-phase bridges
+    behind 0.2 mH line inductors (each on its own 200 µF ‖ 50 Ω) chattered
+    at 4.333 ms ("Db2b … commutated 32 times inside 1e-7 s"), default and
+    'lcp' alike. After a commutation the projection leaves ~3e-14 A of
+    rounding in an inductor in series with an OFF diode; g_off = 1 nS
+    turns it into +2e-5 V across that diode, relaxing to its reverse
+    value in L·g_off ≈ 2e-13 s. Both locators accepted a sign change in
+    either direction and read the return as a turn-ON crossing, so the
+    same mode was re-decided until the chatter guard threw. Now
+    (`starts_admissible_` in `locate_event_exact_` and
+    `locate_event_in_step_`) a bracket whose start is past the
+    threshold by more than the zero band (`zero_band_tol_`, 1e-12 × the
+    largest node voltage, evaluated only for such a start) holds no
+    event. A start inside the band is read both ways, as before: the
+    first version of this fix skipped every start past zero and held
+    D1 of the floating single-phase bridge ON at −1.9e-7 A from 5.103 to
+    10 ms (series-pair turn-off, D1 left at v_D = −1.4e-14 V, then
+    drifting at leak scale; mean v(p) 43.38 V against 47.62 V, pwl at
+    0.1 µs within 6e-3 V of the latter). The zero-start rule (#19) is
+    untouched: the tank's edges 1.2532358877 / 1.8877214715 /
+    7.5370567364 / 8.1702737953 µs are unchanged (test pins 1e-12 s).
+    Who catches a diode that starts a step OFF with v above V_on by more
+    than the band (an inconsistent mode)? The decision at the instant
+    that left it there: the guard's judge (default) and the LCP
+    ('lcp'); before this change the return crossing was not a catch
+    either (it fired a turn-ON while the signal fell back below V_on).
+    With the guard off nothing judges it (KNOWN_LIMITATIONS).
+    → Measured: the five-bridge bank runs on the default and on 'lcp'
+    (16 events to 6 ms; end error 4.8e-6 … 3.4e-4 V against pwl
+    extrapolated from 0.5 / 0.25 µs, first order); ten bridges run
+    too (34 events). Without the fix (scratch build, everything else as
+    committed) `test_a_signal_returning_below_its_threshold_is_not_an_event`
+    chatters at 4.333333575e-3 s in both modes; without the band
+    `test_a_signal_drifting_out_of_the_zero_band_is_still_an_event`
+    reads −1.9e-7 A. `survey_bit_identity.py` against 450314ff: 83
+    bit-identical, 7 changed, every change a removed return event: the
+    single-phase bridges (V_f = 0 and 0.7, default 78 → 59 / 80 → 60
+    events, 'lcp' 80 → 39 / 81 → 40; node voltages old − new ≤ 1.9e-8 V,
+    both 5.8e-9 / 1.05e-8 V from pwl at 0.1 µs on v(p) − v(n)), the
+    three-phase example (default and 'lcp' 59 → 50; old − new 1.2e-12 V)
+    and the half-wave RL settle (5 → 4; 1.5e-14 V). `bit_identity.py`:
+    34/36 arrays — every pwl and trbdf2 array unchanged; dsed bridge1_vf07 changes
+    (12 events, old − new 6.7e-9 V on v(p) − v(n), both 1.05e-8 V from
+    pwl). → Reverse: drop the `starts_admissible_` tests in both
+    locators.

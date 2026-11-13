@@ -262,20 +262,25 @@ not seen, nor is a predicate at zero that leaves toward its event side
 off (`h_e = 0`) the read-ahead is `1e-6·h`, so a diode sliding on its
 threshold advances by that much per event until the chatter detector
 stops it. Current zero-crossing and custom predicates starting at zero
-are still skipped for the step. The guard repairs only the modes it
+are still skipped for the step. A diode predicate that starts a step
+past its threshold by more than the zero band (1e-12 × the largest node
+voltage) is not an event, whether it comes back or not (DECISIONS #23):
+such a start is a mode the decision at that instant (guard or LCP)
+should have set, and with the guard off nothing judges it. The guard repairs only the modes it
 judges inconsistent over `1e4·h_e`; a mode consistent that long and
 wrong later is not caught.
 
 ### Many-diode rectifiers with line inductance on dsed
 
-Ten three-phase bridges (60 diodes) behind 0.2 mH line inductors chatter
-at a natural commutation ("is chattering at t = 4.33 ms") from five
-bridges on, at `V_th = 0` and `1e-2`, in every mode; paralleled onto one
-DC bus they fail to settle at `t = 0` from five bridges on, and
-`trbdf2` aborts on them ("non-finite step … h_min"). The same bank
-without line inductance runs (add-complementarity-mode-selection
-DECISIONS #20). `engine='pwl'` runs both (181.81 V / 200.01 V at
-`dt = 1 µs`); no reference was available to check them.
+Ten three-phase bridges (60 diodes) behind 0.2 mH line inductors, each
+on its own DC bus, run on the dsed default and on `'lcp'` at `V_th = 0`
+(181.808127 V, pwl at `dt = 1 µs` 181.81 V); with the guard off the
+settle chatters ("is chattering at t = 7.39 ms"), and `'lcp'` at
+`V_th = 1e-2` chatters at `t = 0`. Paralleled onto one DC bus they fail
+to settle at `t = 0` from five bridges on (default) or make no progress
+(`'lcp'`), and `trbdf2` aborts on them ("non-finite step … h_min").
+`engine='pwl'` runs both (181.81 V / 200.01 V at `dt = 1 µs`)
+(add-complementarity-mode-selection DECISIONS #20, #23).
 
 ### Fixed-step controller ticks land on the `dt` grid
 

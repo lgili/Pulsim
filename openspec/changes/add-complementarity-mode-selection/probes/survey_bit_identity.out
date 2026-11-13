@@ -1,5 +1,10 @@
+# against 450314ff (HEAD before DECISIONS #22/#23); every change is a removed return re-decision (#23)
 pulsim from /Users/lgili/pulsim_wt/p4-mosfet/python/pulsim/__init__.py
-CHANGED X:double-crossing LC tank, V_th = 0|default events 2 -> 4 end state [-5.17799262 -5.17797794  9.5       ] -> [-5.43794694  9.49998506  9.5       ]
-CHANGED X:double-crossing LC tank, V_th = 0|lcp events 2 -> 4 end state [-5.17799262 -5.17797794  9.5       ] -> [-5.43794694  9.49998506  9.5       ]
-CHANGED X:double-crossing LC tank, V_th = 0|settle events 2 -> 4 end state [-5.27328293  9.49998523  9.5       ] -> [-5.43794694  9.49998506  9.5       ]
-bit-identical 87, changed 3
+CHANGED 1-ph bridge V_f=0, 0.2 s (ii)|default events 78 -> 59 end state [ 4.65613376e-13  4.75855585e+01 -4.75855585e+01] -> [ 4.65613376e-13  4.75855585e+01 -4.75855585e+01]
+CHANGED 1-ph bridge V_f=0, 0.2 s (ii)|lcp events 80 -> 39 end state [ 4.65613376e-13  4.75855585e+01 -4.75855585e+01] -> [ 4.65613376e-13  4.75855585e+01 -4.75855585e+01]
+CHANGED 1-ph bridge V_f=0.7, 0.2 s (ii)|default events 80 -> 60 end state [ 4.65613376e-13  4.69190279e+01 -4.69190279e+01] -> [ 4.65613376e-13  4.69190279e+01 -4.69190279e+01]
+CHANGED 1-ph bridge V_f=0.7, 0.2 s (ii)|lcp events 81 -> 40 end state [ 4.65613376e-13  4.69190279e+01 -4.69190279e+01] -> [ 4.65613376e-13  4.69190279e+01 -4.69190279e+01]
+CHANGED X:half-wave RL rectifier = benchmark diode_half_wave_rl_load (builder), V_th = 0|settle events 5 -> 4 end state [-7.34788079e-15  3.14152983e-06  3.14156124e-06] -> [-7.34788079e-15  3.14152983e-06  3.14156124e-06]
+CHANGED examples/three_phase_diode_rectifier|default events 59 -> 50 end state [-7.34788079e-14 -8.66025404e+01  8.66025404e+01] -> [-7.34788079e-14 -8.66025404e+01  8.66025404e+01]
+CHANGED examples/three_phase_diode_rectifier|lcp events 59 -> 50 end state [-7.34788079e-14 -8.66025404e+01  8.66025404e+01] -> [-7.34788079e-14 -8.66025404e+01  8.66025404e+01]
+bit-identical 83, changed 7

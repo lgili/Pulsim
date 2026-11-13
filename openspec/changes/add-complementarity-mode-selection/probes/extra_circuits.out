@@ -18,7 +18,7 @@ pulsim from /Users/lgili/pulsim_wt/p4-mosfet/python/pulsim/__init__.py
    trbdf2 rtol 1e-10: v(out) end=23.806555568 mean=28.080889833 law: rev 0 A  fwd 0 V 
    settle : events=975 law: rev 1.04 A D1 fwd 0 V  | v(out) end=23.764172135 mean=28.044674405 d_end=-4.24e-02 d_mean=-3.62e-02 [0.00 s]
    default: events=978 law: rev 0 A  fwd 0 V  | v(out) end=23.806545145 mean=28.078919775 d_end=-1.04e-05 d_mean=-1.97e-03 | guard repairs=3/979 [0.00 s]
-   lcp    : events=978 law: rev 0 A  fwd 0 V  | v(out) end=23.806545145 mean=28.078919775 d_end=-1.04e-05 d_mean=-1.97e-03 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
+   lcp    : events=978 law: rev 0 A  fwd 0 V  | v(out) end=23.806545145 mean=28.078919775 d_end=-1.04e-05 d_mean=-1.97e-03 | lcp piv_max=2 pins=0 ties=0 [0.01 s]
 == boost 500 ohm, V_th = 1e-3
    trbdf2 rtol 1e-10: v(out) end=44.722105420 mean=43.759028794 law: rev 0 A  fwd 0 V 
    settle : events=1157 law: rev 0 A  fwd 0 V  | v(out) end=44.722098290 mean=43.758451023 d_end=-7.13e-06 d_mean=-5.78e-04 [0.00 s]
@@ -26,9 +26,9 @@ pulsim from /Users/lgili/pulsim_wt/p4-mosfet/python/pulsim/__init__.py
    lcp    : events=1157 law: rev 0 A  fwd 0 V  | v(out) end=44.722098290 mean=43.758451023 d_end=-7.13e-06 d_mean=-5.78e-04 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
 == half-wave RL rectifier = benchmark diode_half_wave_rl_load (builder), V_th = 0
    trbdf2 rtol 1e-10: v(out) end=0.000003142 mean=3.180662149 law: rev 0 A  fwd 0 V 
-   settle : events=5 law: rev 0 A  fwd 10 V D1 | v(out) end=0.000003142 mean=2.120456524 d_end=-2.31e-11 d_mean=-1.06e+00 [0.06 s]
-   default: events=5 law: rev 0 A  fwd 0 V  | v(out) end=0.000003142 mean=3.180684787 d_end=-2.31e-11 d_mean=+2.26e-05 | guard repairs=2/6 [0.06 s]
-   lcp    : events=5 law: rev 0 A  fwd 0 V  | v(out) end=0.000003142 mean=3.180684787 d_end=-2.31e-11 d_mean=+2.26e-05 | lcp piv_max=2 pins=0 ties=0 [0.06 s]
+   settle : events=4 law: rev 0 A  fwd 10 V D1 | v(out) end=0.000003142 mean=2.120456524 d_end=-2.31e-11 d_mean=-1.06e+00 [0.10 s]
+   default: events=5 law: rev 0 A  fwd 0 V  | v(out) end=0.000003142 mean=3.180684787 d_end=-2.31e-11 d_mean=+2.26e-05 | guard repairs=2/6 [0.07 s]
+   lcp    : events=5 law: rev 0 A  fwd 0 V  | v(out) end=0.000003142 mean=3.180684787 d_end=-2.31e-11 d_mean=+2.26e-05 | lcp piv_max=2 pins=0 ties=0 [0.09 s]
 == double-crossing LC tank, V_th = 0
    trbdf2 rtol 1e-10: v(t) end=-5.437891218 mean=1.838735571 law: rev 0.000192 A D fwd 0 V 
    settle : events=4 law: rev 0 A  fwd 0 V  | v(t) end=-5.437946944 mean=1.786403760 d_end=-5.57e-05 d_mean=-5.23e-02 [0.00 s]
@@ -56,7 +56,7 @@ pulsim from /Users/lgili/pulsim_wt/p4-mosfet/python/pulsim/__init__.py
    trbdf2 rtol 1e-10: v(out) end=11.947819644 mean=12.713618866 law: rev 0 A  fwd 0 V 
    settle : events=265 law: rev 0 A  fwd 0 V  | v(out) end=11.947815179 mean=12.702202691 d_end=-4.47e-06 d_mean=-1.14e-02 [0.00 s]
    default: events=265 law: rev 0 A  fwd 0 V  | v(out) end=11.947815179 mean=12.702202691 d_end=-4.47e-06 d_mean=-1.14e-02 | guard repairs=0/266 [0.00 s]
-   lcp    : events=265 law: rev 0 A  fwd 0 V  | v(out) end=11.947815179 mean=12.702202691 d_end=-4.47e-06 d_mean=-1.14e-02 | lcp piv_max=2 pins=0 ties=0 [0.00 s]
+   lcp    : events=265 law: rev 0 A  fwd 0 V  | v(out) end=11.947815179 mean=12.702202691 d_end=-4.47e-06 d_mean=-1.14e-02 | lcp piv_max=2 pins=0 ties=0 [0.01 s]
 == benchmark sepic (builder; duty 0.5 @ 50 kHz, dead time dropped)
    trbdf2 rtol 1e-10: v(out) end=17.704006607 mean=18.131326754 law: rev 0 A  fwd 0 V 
    settle : events=290 law: rev 0 A  fwd 0 V  | v(out) end=17.704008169 mean=18.110182594 d_end=+1.56e-06 d_mean=-2.11e-02 [0.00 s]

@@ -1,15 +1,15 @@
 pulsim from /Users/lgili/pulsim_wt/p4-mosfet/python/pulsim/__init__.py
 == cost case: 60-diode bank {'vth': 0.0}, no line inductance, t_end = 0.04 s
-   reference trbdf2 rtol 1e-9: v_pn0 end = 173.198150009 [0.3 s]
-   settle events=435 v_pn0 end d=-2.71e-11 | guard checks=0 repairs=0 | lcp problems=0 pivots=0 max/event=0 port_models=0 ties=0 widenings=0 pins=0 enum=0 | masks=221 n_eig=221 | wall median 21156 ms (48635 us/event) min 13468 max 36873
-   guard  events=373 v_pn0 end d=-2.71e-11 | guard checks=374 repairs=98 | lcp problems=292 pivots=699 max/event=30 port_models=292 ties=0 widenings=188 pins=0 enum=0 | masks=204 n_eig=204 | wall median 21447 ms (57499 us/event) min 16994 max 30012
-   lcp    events=373 v_pn0 end d=-2.71e-11 | guard checks=0 repairs=0 | lcp problems=1102 pivots=1177 max/event=30 port_models=1102 ties=0 widenings=728 pins=0 enum=0 | masks=126 n_eig=126 | wall median 21707 ms (58196 us/event) min 16940 max 29155
+   reference trbdf2 rtol 1e-9: v_pn0 end = 173.198150009 [0.2 s]
+   settle events=435 v_pn0 end d=-2.71e-11 | guard checks=0 repairs=0 | lcp problems=0 pivots=0 max/event=0 port_models=0 ties=0 widenings=0 pins=0 enum=0 | masks=221 n_eig=221 | wall median 7606 ms (17486 us/event) min 6926 max 13376
+   guard  events=311 v_pn0 end d=-2.71e-11 | guard checks=312 repairs=99 | lcp problems=291 pivots=706 max/event=30 port_models=291 ties=0 widenings=190 pins=0 enum=0 | masks=204 n_eig=204 | wall median 7527 ms (24202 us/event) min 7314 max 11252
+   lcp    events=311 v_pn0 end d=-2.71e-11 | guard checks=0 repairs=0 | lcp problems=924 pivots=1184 max/event=30 port_models=924 ties=0 widenings=612 pins=0 enum=0 | masks=126 n_eig=126 | wall median 7832 ms (25183 us/event) min 6810 max 10084
 == variants that do not run (one run each, every mode; not cost cases)
-   {'vth': 0.0, 'ls': 0.0002} settle: RuntimeError: PEDSimulator: Dt2b (branch #36) is chattering at t = 7.868987182e-03 s — it commutated 32 times inside 1.00000
-   {'vth': 0.0, 'ls': 0.0002} guard: RuntimeError: PEDSimulator: Db1b (branch #22) is chattering at t = 4.666667322e-03 s — it commutated 32 times inside 1.00000
-   {'vth': 0.0, 'ls': 0.0002} lcp: RuntimeError: PEDSimulator: Db1b (branch #22) is chattering at t = 4.666667322e-03 s — it commutated 32 times inside 1.00000
-   {'vth': 0.01, 'ls': 0.0002} settle: RuntimeError: PEDSimulator: Db9b (branch #142) is chattering at t = 1.356069631e-02 s — it commutated 32 times inside 1.0000
-   {'vth': 0.01, 'ls': 0.0002} guard: RuntimeError: PEDSimulator: Db5c (branch #86) is chattering at t = 9.999816110e-03 s — it commutated 32 times inside 1.00000
+   {'vth': 0.0, 'ls': 0.0002} settle: RuntimeError: PEDSimulator: Dt8b (branch #126) is chattering at t = 7.389095027e-03 s — it commutated 32 times inside 1.0000
+   {'vth': 0.0, 'ls': 0.0002} guard: runs, 521 events, v_pn0 end 181.808127 [13.2 s]
+   {'vth': 0.0, 'ls': 0.0002} lcp: runs, 515 events, v_pn0 end 181.808127 [10.6 s]
+   {'vth': 0.01, 'ls': 0.0002} settle: RuntimeError: PEDSimulator: Db3c (branch #56) is chattering at t = 3.222554509e-02 s — it commutated 32 times inside 1.00000
+   {'vth': 0.01, 'ls': 0.0002} guard: runs, 408 events, v_pn0 end 181.808106 [9.8 s]
    {'vth': 0.01, 'ls': 0.0002} lcp: RuntimeError: PEDSimulator: Dt0c (branch #10) is chattering at t = 1.357924531e-19 s — it commutated 32 times inside 1.00000
    {'vth': 0.0, 'ls': 0.0002, 'shared_bus': True} settle: RuntimeError: PEDSimulator: diode configuration did not settle after 64 rounds at t = 2.882623321e-13 s (diodes: Dt0a (branc
    {'vth': 0.0, 'ls': 0.0002, 'shared_bus': True} guard: RuntimeError: PEDSimulator: diode configuration did not settle after 64 rounds at t = 2.882623321e-13 s (diodes: Dt0a (branc

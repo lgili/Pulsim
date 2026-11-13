@@ -52,6 +52,23 @@ the increment, `J·δ = −(G·x(t⁻) + b(t + h_e))`. That bridge ends at
 All 90 runs of the mode-selection surveys and the 36 arrays of
 `bit_identity.py` (`pwl`, `trbdf2`, `dsed`) are bit-identical.
 
+### dsed: a diode signal returning to its admissible side is not an event (fix)
+
+Rectifier banks behind line inductance chattered on `engine='dsed'`
+("Db2b is chattering at t = 4.333e-3 s", five three-phase bridges behind
+0.2 mH): after a commutation the projection leaves ~3e-14 A of rounding
+in an inductor in series with an OFF diode, `g_off` turns it into
++2e-5 V of forward bias that relaxes in 2e-13 s, and the event locator
+read that return as a turn-ON crossing. A diode predicate now fires
+only when its signal leaves its admissible side; a start past the
+threshold by more than the zero band (1e-12 × the largest node voltage)
+that comes back is not an event, while a start inside the band is read
+both ways as before. Five- and ten-bridge banks on independent buses
+now run on the default and on `'lcp'`. Seven survey runs drop
+re-decision events (the single-phase bridges 78 → 59 and 80 → 39
+events; node voltages move by at most 1.9e-8 V and keep their distance
+to pwl); `pwl` and `trbdf2` are bit-identical.
+
 ### dsed: a diode predicate starting a step at exactly zero is located (fix)
 
 The dsed event locator skipped every armed predicate whose value was
