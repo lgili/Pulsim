@@ -50,6 +50,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Each point now continues the same run window by window until two
   windows agree within `settle_rtol` (1 %), and warns when
   `max_extra_windows` runs out.
+* **Fixed** (project model) `projects/inverters/pfc_vsi_drive` put a
+  470 µF capacitor (C011) on the rectified bus ahead of the boost. PSIM's
+  own KPIs rule it out (I_D001_rms 4.984 A ≈ I_L002_rms 4.948 A, line
+  PF 0.979 at OP 2.3); with it the simulated line PF was 0.62 and
+  I_L002_rms 3.67 A. Removed: I_in_rms 5.08 A (PSIM 5.06), I_L002_rms
+  5.02 A (4.95), PF 0.992 (0.979); OP 2.2 within 1 %. `losses.py` and
+  `run_validation.py` now use the simulated line current (they assumed
+  PF = 0.95), count all four bridge diodes (the bridge loss was half),
+  and average over whole line cycles. The cascade gains are re-derived
+  per OP (inner PI zero at ω_i/5 instead of at ω_i; outer loop including
+  the V_link low-pass and the load pole); `measure_loop_gain.py`
+  measures 637–692 Hz / 48–58° (inner) and 19.6–20.3 Hz / 55–63°
+  (outer), where the old gains gave 21–23° on the inner loop at 220 V.
+  P_total now reads +4.8 / +13.7 / +6.3 % against PSIM, but PSIM's
+  OP 2.3 terms sum to 60.2 W against its stated 41.79 W (README).
 * **Documented** (not defects) the `b_extra` sign — it is an addend to the
   residual F = J·x + b, so an entry e on a voltage source's row gives
   v(+) − v(−) = V − e, and on a node row draws e out of the node — and

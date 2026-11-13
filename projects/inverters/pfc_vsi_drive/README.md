@@ -36,6 +36,7 @@ Three operating points are validated:
 | `validation_data.py` | The 30 PSIM-reported KPIs per OP, as `KpiSet` dataclasses. |
 | `pfc_vsi_drive_pulsim_validation.py` | The Pulsim circuit builder + `simulate_frontend` / `simulate_inverter` entry points. |
 | `losses.py` | Per-device loss + thermal model (conduction, switching, ESR, magnetic, Foster R_thja). |
+| `measure_loop_gain.py` | Measures both cascade loop gains by injection on the switching model, per OP. |
 | `smoke_test.py` | Quick 1-OP smoke pass (`OP_2.3`) — confirms both sims run and compares 5 headline KPIs. |
 | `run_validation.py` | Full sweep across all 3 OPs with per-KPI delta table + optional CSV export. |
 | `00_pfc_vsi_drive_pulsim_validation.ipynb` | Narrative notebook — runs the 3-OP sweep and renders time-domain waveforms (V_link, i_L002, IGBT line-line), the loss-breakdown table and an η vs T_J bar chart. |
@@ -75,21 +76,22 @@ separately:
   ideal DC source** at `V_link_target = 380 V`.
 
 The shared *contract* is the bus voltage. PSIM reports
-`V_link_avg = 378.98 V` for OP 2.3; our front-end sim lands at
-383.5 V with the default cascade loop (+1.2 %).
+`V_link_avg = 378.98 V` for OP 2.3; the front-end sim lands at
+380.1 V with the default cascade loop (+0.3 %).
 
-## Loss-extraction strategy: hybrid waveform + analytical
+## Loss extraction: simulated waveforms + analytical switching
 
-`losses.py` computes per-device losses by *direct integration* of the
-Pulsim-simulated branch currents wherever the waveform is clean (boost
-loop: i_L002, i_T001/T002, i_D002, i_Cbus, boost shunts, R508).
+`losses.py` integrates the simulated branch currents over the last whole
+line cycles: the line current i_L001 (bridge D001, L001 DCR), i_L002,
+i_T001/T002, i_D002, i_Cbus, the boost shunts and R508. Switching losses
+are analytical (energy per event × f_sw): Pulsim's switches are ideal.
+The bridge loss is `2·(V_F·mean|i_in| + R_on·mean(i_in²))`, two diodes in
+series with the line at every instant.
 
-For the *line-side* devices (bridge D001, L001 DCR, F500) `losses.py`
-back-computes the losses from power balance instead of integrating
-i_L001:
-`I_in_rms = P_link / (V_ac_rms · PF)` with an assumed PF = 0.95.
-That is an assumption, not a simulated result: `I_in_rms` lands
-+3.3 / +5.0 / −26.6 % from PSIM on OP 2.2 / 2.3 / 2.4.
+Until 2026-11 the line-side numbers (`I_in_rms`, `PF`, `P_cond_D001`,
+`P_ohm_L001`) were not simulated: they were back-computed from the bus
+power with an assumed PF = 0.95, and the bridge term counted two of the
+four diodes. They are simulated now.
 
 ## PFC control modes
 
@@ -98,98 +100,134 @@ The front-end supports three control modes, selectable via flags on
 
 | Mode | Flags | Description |
 |------|-------|------------|
-| **Open-loop, constant duty** | both flags `False` | Boost MOSFET fires at a fixed duty `D = 1 − V_in_pk/V_link_target` derived from the CCM gain formula. Stable but the boost only conducts near the line peaks → `I_L002_rms` ~ 15 × lower than PSIM. Kept for ablation; the headline numbers below use the cascade. |
-| **Feed-forward trajectory** | `sp.pfc_closed_loop = True` | Modulates `D(t) = (1 − V_rect(t)/V_link_target) · K_load` (the textbook CCM steady-state duty trajectory). Shapes the current well but cannot regulate V_link without an outer loop. |
-| **Full cascade — V outer + I inner PI** *(default)* | `sp.pfc_cascade_loop = True` | Real avg-current-mode PFC controller (Erickson §18.4): outer V_link PI generates `K_amp`, inner I_L002 PI generates duty. Implemented as `PfcCascadeController` (wired via `switch_fn` + `step_observer` pair, see source). Gives a properly shaped sinusoidal `I_L002` envelope at unity PF. Gains in `DriveSimParams` are tuned for OP 2.3; OP 2.2 (low line) and OP 2.4 (max load) need per-OP scaling — left as a follow-up. |
+| **Open-loop, constant duty** | both flags `False` | Boost MOSFET fires at a fixed duty `D = 1 − V_in_pk/V_link_target` derived from the CCM gain formula. Kept for ablation. |
+| **Feed-forward trajectory** | `sp.pfc_closed_loop = True` | Modulates `D(t) = (1 − V_rect(t)/V_link_target) · K_load` (the textbook CCM steady-state duty trajectory). Shapes the current but cannot regulate V_link without an outer loop. |
+| **Full cascade — V outer + I inner PI** *(default)* | `sp.pfc_cascade_loop = True` | Average-current-mode PFC (Erickson §18.4): outer V_link PI generates `K_amp`, inner I_L002 PI generates the duty around the CCM feed-forward `1 − V_rect/V_link`. `PfcCascadeController`, wired via `switch_fn` + `step_observer`. |
 
-## Known limitations of the open-loop model
+### Cascade design and measured margins
 
-1. **L001-C006-bridge tank rings past ≈ 50 ms** because there's
-   no current-loop damping. All sims default to ≤ 60 ms and KPIs
-   are extracted from the middle 40 % (30 %–70 %) of the window
-   where the L001 state is well-behaved.
+The gains are computed per operating point from the averaged plants
+(`PfcCascadeController.__init__`):
 
-2. **Boost-leg conduction losses lean low** (P_cond_T1/T2 -90 %)
-   because the open-loop boost only conducts near the line peaks.
-   The boost *peak* current matches PSIM (~5 A at OP 2.3), but the
-   cycle-RMS is ~15 × lower than PSIM's closed-loop value. Flip
-   `sp.pfc_cascade_loop = True` to enable the full V+I PI cascade,
-   which shapes the inductor current to the line envelope (unity-PF
-   behaviour) — at the cost of needing per-OP gain re-tuning.
+* inner loop, plant `V_link/(L·s)`: `Kp_i = ω_i·L/V_link` for
+  `pfc_i_bw_hz = 1 kHz`, PI zero at `ω_i/5`;
+* outer loop, plant `(V_pk²/2V)/(C·s + 2/R_eq)` seen through the V_link
+  low-pass (τ = 6.7 ms): `Kp_v` sets the loop magnitude to 1 at
+  `pfc_v_bw_hz = 20 Hz`, PI zero a decade below.
 
-3. **Compressor is a 3φ RL load** (no back-EMF source). Speed is
+`measure_loop_gain.py` measures both loops on the switching model by
+injection (L = −X_ctrl/X_applied, one DFT bin over whole line cycles,
+so the result is the line-cycle average):
+
+| OP | inner crossover | inner PM | outer crossover | outer PM |
+|----|----------------:|---------:|----------------:|---------:|
+| 2.2 | 682 Hz | 57.9° | 19.7 Hz | 58.5° |
+| 2.3 | 692 Hz | 48.3° | 20.3 Hz | 55.0° |
+| 2.4 | 637 Hz | 49.7° | 19.6 Hz | 62.5° |
+
+No −180° crossing in either sweep (inner 0.3–2.4 kHz, outer 5–48 Hz),
+so the gain margin is beyond the sweep. The inner crossover sits below
+its 1 kHz design: the CCM plant holds only away from the line zero
+crossings, where the duty saturates and the inductor current goes
+discontinuous. The previous tuning put the inner PI zero at the
+crossover and gave 21–23° at 220 V; the outer loop crossed at 15–16 Hz
+because its design ignored the low-pass and the load pole.
+
+## Known limitations
+
+1. **The compressor is a 3φ RL load** (no back-EMF source). Speed is
    set by the SPWM frequency × slip assumption rather than torque
    balance.
+2. **The front end feeds a resistor** (`R_eq = V_link²/P_in_target`),
+   so the bus capacitors carry only the 2·f_line ripple, not the
+   inverter's 5 kHz current: `P_esr_C009/C010` read ~92 % below PSIM.
+3. **The two stages run separately**; they share only `V_link`.
 
-## Validation results (current snapshot — cascade, all OPs)
+## Validation results (cascade, all OPs)
 
-After ~ 0.5 s of compute time per OP.
+`python3 run_validation.py`, 10 line cycles, KPIs over the last whole
+line cycles of the run. About 1 s of compute per OP.
 
-### OP 2.2 (115 V / 1000 W / 40 °C) — low line
+### What changed on 2026-11-13
 
-| KPI | Pulsim cascade | PSIM | %err |
-|------|---------------:|-----:|-----:|
-| **`V_link_avg`** | **383.9 V** | **(≈ 380)** | **+1.0 %** |
-| `I_in_rms` | 9.34 A | 9.04 A | +3.3 % |
-| `I_L002_rms` | 6.79 A | 9.00 A | −24.6 % |
+The model used to put a 470 µF capacitor (C011) on `rect_p`, between
+the bridge and the boost inductor. PSIM's own KPIs rule that out: by
+KCL at `rect_p`, `i_D001 = i_L002 + i_C`, and PSIM reports
+`I_D001_rms = 4.984 A` against `I_L002_rms = 4.948 A` with a line PF
+of 0.979 (OP 2.3). With 470 µF the bridge peak-charges the capacitor:
+the simulated line PF was 0.62, `I_in_rms` 8.33 A (PSIM 5.06 A) and
+`I_L002` nearly DC, 3.67 A rms (PSIM 4.95 A). That was the 25–30 %
+`I_L002_rms` gap of the previous snapshot, and the PF = 0.95 line-side
+estimate hid the line-current error. Without C011 the line current
+and `I_L002` match PSIM within 1.5 % at OP 2.2 and OP 2.3.
+
+### OP 2.2 (115 V / 60 Hz / 1000 W / 40 °C) — low line
+
+| KPI | Pulsim | PSIM | %err |
+|------|-------:|-----:|-----:|
+| `V_link_avg` | 380.0 V | — | |
+| `I_in_rms` | 8.97 A | 9.04 A | −0.8 % |
+| `PF` | 0.997 | — | |
+| `I_L002_rms` | 8.94 A | 9.00 A | −0.7 % |
 | `I_F500_rms` | 3.39 A | 3.38 A | +0.3 % |
-| `P_total` | 57.8 W | 70.9 W | −18.5 % |
-| `eta_inverter` | 94.2 % | 93.0 % | +1.3 % |
+| `P_ohm_L001` | 8.85 W | 8.99 W | −1.5 % |
+| `P_ohm_L002` | 4.00 W | 4.05 W | −1.4 % |
+| `P_total` | 74.3 W | 70.9 W | +4.8 % |
+| `eta_inverter` | 92.6 % | 93.0 % | −0.5 % |
 
-### OP 2.3 (220 V / 1090 W / 50 °C) — high line, nominal
+### OP 2.3 (220 V / 50 Hz / 1090 W / 50 °C) — high line, nominal
 
-| KPI | Pulsim cascade | PSIM | %err |
-|------|---------------:|-----:|-----:|
-| **`V_link_avg`** | **383.5 V** | **379.0 V** | **+1.2 %** |
-| **`I_in_rms`** | **5.31 A** | **5.06 A** | **+5.0 %** |
-| `I_L002_rms` | 3.67 A | 4.95 A | −25.8 % |
-| **`I_F500_rms`** | **3.40 A** | **3.51 A** | **−3.4 %** |
-| `P_total` | 38.7 W | 41.8 W | −7.3 % |
-| **`eta_inverter`** | **96.5 %** | **95.9 %** | **+0.6 %** |
-| **`T_J_D002`** | **78.8 °C** | **76.1 °C** | **+3.6 %** |
-| **`T_J_IGBT_IC500`** | **66.5 °C** | **67.0 °C** | **−0.8 %** |
+| KPI | Pulsim | PSIM | %err |
+|------|-------:|-----:|-----:|
+| `V_link_avg` | 380.1 V | 379.0 V | +0.3 % |
+| `I_in_rms` | 5.08 A | 5.06 A | +0.4 % |
+| `PF` | 0.992 | 0.979 | +1.3 % |
+| `I_L002_rms` | 5.02 A | 4.95 A | +1.5 % |
+| `I_F500_rms` | 3.40 A | 3.51 A | −3.4 % |
+| `P_ohm_L001` | 2.84 W | 2.81 W | +0.9 % |
+| `P_ohm_L002` | 1.26 W | 1.22 W | +2.9 % |
+| `P_cond_D001` | 9.97 W | 15.58 W | −36.0 % |
+| `P_cond_T1` | 0.32 W | 4.27 W | −92.5 % |
+| `P_total` | 47.5 W | 41.8 W | +13.7 % |
+| `eta_inverter` | 95.6 % | 95.9 % | −0.3 % |
+| `T_J_D001` | 104.5 °C | 102.1 °C | +2.3 % |
+| `T_J_D002` | 81.8 °C | 76.1 °C | +7.4 % |
+| `T_J_IGBT_IC500` | 66.3 °C | 67.0 °C | −1.0 % |
 
-### OP 2.4 (220 V / 1023 W / 50 °C) — high line, current-limited
+### OP 2.4 (220 V / 50 Hz / 1023 W / 50 °C) — high line, current-limited
 
-| KPI | Pulsim cascade | PSIM | %err |
-|------|---------------:|-----:|-----:|
-| **`V_link_avg`** | **383.2 V** | **377.9 V** | **+1.4 %** |
-| `I_in_rms` | 4.98 A | 6.78 A | −26.6 % |
-| **`I_F500_rms`** | **3.40 A** | **3.51 A** | **−3.4 %** |
-| `P_total` | 36.4 W | 41.8 W | −12.8 % |
-| **`eta_inverter`** | **96.4 %** | **95.9 %** | **+0.5 %** |
-| `T_J_T001` | 66.0 °C | 70.4 °C | −6.3 % |
-| **`T_J_D002`** | **76.9 °C** | **80.4 °C** | **−4.3 %** |
-| `T_J_IGBT_IC500` | 65.4 °C | 78.8 °C | −17.0 % |
+| KPI | Pulsim | PSIM | %err |
+|------|-------:|-----:|-----:|
+| `V_link_avg` | 380.2 V | 377.9 V | +0.6 % |
+| `I_in_rms` | 4.77 A | 6.78 A | −29.6 % |
+| `PF` | 0.991 | 0.923 | +7.4 % |
+| `I_L002_rms` | 4.71 A | 4.95 A | −4.8 % |
+| `P_total` | 44.4 W | 41.8 W | +6.3 % |
+| `eta_inverter` | 95.7 % | 95.9 % | −0.3 % |
+| `T_J_D002` | 79.5 °C | 80.4 °C | −1.1 % |
+| `T_J_IGBT_IC500` | 65.3 °C | 78.8 °C | −17.2 % |
 
-Note: OP 2.4's nameplate rating is 1400 W "max load" but PSIM only
-actually delivers 1023 W (= KPI_24.P_in) at this OP — the boost
-current loop saturates well short of nameplate. We use PSIM's
-measured power as the cascade target so the loss budget tracks
-PSIM directly.
+### Reading the comparison
 
-### Headline summary
-
-Inverter efficiency within +0.5 / +0.6 % at OP 2.3 / 2.4 and +1.3 % at
-OP 2.2. V_link within ±1.5 %, I_F500 (motor return) within ±4 %,
-T_J_D002 within ±5 % at OP 2.3 / 2.4. P_total is 7–19 % below PSIM and
-I_L002_rms 25–30 % below PSIM on every OP: the boost-stage currents do
-not match PSIM.
-(`python3 run_validation.py`, cascade, 10 line cycles.)
-
-Read these with three caveats:
-
-* `I_in_rms`, `P_cond_D001` and `P_ohm_L001` are **not simulated**:
-  `losses.py` derives them from the bus power with an assumed
-  PF = 0.95. Their agreement with PSIM validates that assumption, not
-  the simulator.
-* Earlier snapshots (P_total +1.3 / −4.2 / −10.2 %) came from a front
-  end with a 1 mΩ `ac_b`→gnd tie that shorted a bridge diode; a
-  post-solve current clamp then replaced the L001 current on ~40 % of
-  the steps. The tie is now 1 MΩ and no guard fires.
-* The cascade gains are tuned on OP 2.3 and OP 2.4's power target is
-  PSIM's own `P_in`; OP 2.2/2.3 PSIM junction temperatures for D001,
-  T001 and D002 are missed by 21–94 °C.
+* The front end now reproduces PSIM's line and boost currents at
+  OP 2.2 and OP 2.3: `I_in_rms`, `I_L002_rms`, `V_link` and the L001 /
+  L002 copper losses within 3 %.
+* `P_total` is not a usable target. PSIM's OP 2.3 loss terms sum to
+  60.2 W against its stated `P_total` of 41.79 W, and OP 2.4 repeats
+  OP 2.3's `P_total`, `I_L002_rms` and `P_ohm_L002` to the last digit.
+  Against the sum of PSIM's own terms, OP 2.3 is 21 % low.
+* The device-level misses are in the loss models, not the currents:
+  the boost MOSFET conduction loss is 92 % low (PSIM's 4.27 W at
+  `I_T001_rms = 1.42 A` implies 2.1 Ω), the bridge 36 % low and the SiC
+  diode 53 % high.
+* OP 2.4 is internally inconsistent in the reference: PSIM's
+  `I_in_rms = 6.78 A` at PF 0.923 is 1373 W of line power, while its
+  `P_in` field is 1023 W and its `I_L002_rms` equals OP 2.3's. The
+  model targets 1023 W, so `I_in_rms` reads 30 % low. PSIM's `P_in`
+  field is not the line power at OP 2.3 either (V·I·PF = 1086 W against
+  1014.6 W), so the `P_in` row is not compared like for like.
+* OP 2.2 boost-MOSFET and SiC-diode junction temperatures are 36–41 %
+  below PSIM.
 
 ## References
 

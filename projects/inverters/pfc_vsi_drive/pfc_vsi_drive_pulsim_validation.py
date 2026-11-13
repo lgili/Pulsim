@@ -58,7 +58,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 from bom import (  # noqa: E402  — after sys.path bootstrap
-    C006, C009, C010, C011, COMPRESSOR_PARAMS,
+    C006, C009, C010, COMPRESSOR_PARAMS,
     D001, D002, F500, IC500, L001, L002,
     R002, R003, R036, R508, T001, T002,
 )
@@ -276,14 +276,10 @@ def _build_frontend(sp: DriveSimParams) -> "tuple[_p.CircuitBuilder, FrontendSwi
     # rated line current.
     b.add_resistor("R_L001_snub", "n_l001_d", "gnd", 5.0e3)
 
-    # X-cap (C006, EMI filter) + bulk smoothing cap (C011) on the
-    # rectified bus. C011 matches the 470 µF electrolytic PSIM
-    # includes on rect_p — keeps the bridge in CCM across the line
-    # cycle. Without it the boost stage has to compensate for V_rect
-    # collapsing between line peaks with much higher peak inductor
-    # current than the design actually carries.
+    # X-cap (C006, EMI filter) only: no bulk capacitor after the bridge,
+    # so V_rect follows |v_ac| and the PFC can shape the line current
+    # (see the C011 note in bom.py for why it is not stamped here).
     b.add_capacitor("C006", "rect_p", "gnd", float(C006.C))
-    b.add_capacitor("C011", "rect_p", "gnd", float(C011.C))
     b.add_resistor("R_C006_bleed", "rect_p", "gnd", 10.0e3)
 
     # Boost inductor + DCR
@@ -390,29 +386,34 @@ class PfcCascadeController:
 
         self.pwm_period = 1.0 / float(sp.f_sw_pfc)
 
-        # ---- Adaptive gain calculation -------------------------------
-        # Inner current loop plant:  dI_L/dD = V_link / L  (s-domain)
-        #   |G_plant_i(s)| = V_link / (L · s)
-        # PI compensator C_i(s) = Kp_i + Ki_i/s.
-        # At crossover ω_i (rad/s): |C_i · G_plant_i| = 1 →
-        #   Kp_i = ω_i · L / V_link
-        # Pick Ki_i = ω_i · Kp_i  (PI zero at the crossover).
-        L_boost = 1.4e-3                              # H (L002 from BoM)
+        # ---- Gains from the averaged plants ---------------------------
+        # Checked on the switching model by measure_loop_gain.py (loop
+        # injection, line-cycle average); the README table has the result.
+        #
+        # Inner loop: dI_L/dD = V_link/(L·s). PI C_i = Kp_i + Ki_i/s with
+        # Kp_i = ω_i·L/V_link puts |C_i·G| = 1 at ω_i. The PI zero sits at
+        # ω_i/5 (11° of lag at crossover). It used to sit AT ω_i, which
+        # costs 45°: with the 40 µs feedback low-pass and the PWM delay the
+        # measured margin was 21–23° at 220 V.
+        L_boost = float(L002.L)
         V_link = float(sp.V_link_target)
         omega_i = 2.0 * math.pi * float(sp.pfc_i_bw_hz)
         self.Kp_i = omega_i * L_boost / max(V_link, 1.0)
-        self.Ki_i = omega_i * self.Kp_i
+        self.Ki_i = (omega_i / 5.0) * self.Kp_i
 
-        # Outer voltage loop plant:  dV_link / dK_amp ≈ V_pk²/(2·V·C·s)
-        #   For OP 2.3: ~289 k / s. PI compensator: Kp_v + Ki_v/s.
-        # At crossover ω_v: Kp_v · V_pk²/(2·V·C·ω_v) = 1 →
-        #   Kp_v = 2·V·C·ω_v / V_pk²
-        # Pick Ki_v = (ω_v / 10) · Kp_v  (zero a decade below ω_v
-        # for ≥ 60° phase margin against the L001 tank resonance).
+        # Outer loop: with I_L = K_amp·|V_rect| the bus receives
+        # P = K_amp·V_pk²/2 and feeds R_eq, so
+        #   v/k = (V_pk²/(2·V)) / (C·s + 2/R_eq),
+        # seen through the V_link low-pass (τ_v = dt/α_v). Kp_v makes the
+        # loop magnitude 1 at ω_v; the PI zero sits a decade below.
         V_pk = math.sqrt(2.0) * float(sp.op.V_ac)
-        C_bus = 440e-6                                # F (C009 + C010 parallel)
+        C_bus = float(C009.C) + float(C010.C)
+        R_eq = float(sp.V_link_target ** 2 / max(sp.op.P_in_target, 1.0))
+        tau_v = float(sp.dt) / float(sp.pfc_v_lp_alpha)
         omega_v = 2.0 * math.pi * float(sp.pfc_v_bw_hz)
-        self.Kp_v = 2.0 * V_link * C_bus * omega_v / max(V_pk * V_pk, 1.0)
+        g_v = (V_pk * V_pk / (2.0 * V_link)) / abs(1j * omega_v * C_bus + 2.0 / R_eq) \
+            / abs(1.0 + 1j * omega_v * tau_v)
+        self.Kp_v = 1.0 / g_v
         self.Ki_v = (omega_v / 10.0) * self.Kp_v
 
         # K_amp_steady is the expected operating-point K_amp for the
@@ -455,6 +456,14 @@ class PfcCascadeController:
 
         # Bookkeeping for variable-dt observer calls
         self.last_obs_t = -1.0
+
+        # Loop-gain measurement hooks (measure_loop_gain.py): optional
+        # t -> perturbation added to K_amp / the duty, and a per-step
+        # trace (t, K_amp from the PI, K_amp applied, duty from the PI,
+        # duty applied).
+        self.k_inj = None
+        self.d_inj = None
+        self.trace = None
 
     # ------------------------------------------------------------------
     # step_observer side — runs the cascade at each macro step
@@ -505,6 +514,9 @@ class PfcCascadeController:
             self.K_amp = K_amp_raw * ramp
         else:
             self.K_amp = K_amp_raw
+        k_ctrl = self.K_amp
+        if self.k_inj is not None:
+            self.K_amp += self.k_inj(t)
 
         # LP filter the i_L002 feedback so the inner loop reacts to
         # the *cycle-averaged* current, not the PWM ripple.
@@ -520,7 +532,12 @@ class PfcCascadeController:
         # Feed-forward CCM duty + PI correction
         D_ff = 1.0 - (abs(V_rect) / max(V_link, 1.0)) if V_link > 1.0 else 0.5
         D = D_ff + self.Kp_i * e_i + self.i_int
+        d_ctrl = D
+        if self.d_inj is not None:
+            D += self.d_inj(t)
         self.duty = max(0.02, min(D, 0.95))
+        if self.trace is not None:
+            self.trace.append((t, k_ctrl, self.K_amp, d_ctrl, self.duty))
 
     # ------------------------------------------------------------------
     # switch_fn side — sample the duty into a PWM gate signal
@@ -799,6 +816,7 @@ def simulate_frontend(sp: DriveSimParams,
                        *, t_end: Optional[float] = None,
                        dt: Optional[float] = None,
                        precharge_vlink: Optional[bool] = None,
+                       on_controller=None,
                        ) -> FrontendResult:
     """Run the front-end (rectifier + boost) sim with the inverter
     replaced by a constant-power resistor on the bus.
@@ -827,6 +845,8 @@ def simulate_frontend(sp: DriveSimParams,
     observer = None
     if bool(sp.pfc_cascade_loop):
         ctrl = PfcCascadeController(sp, sw_map)
+        if on_controller is not None:   # measure_loop_gain.py sets hooks
+            on_controller(ctrl)
         sw_fn = ctrl.switch_fn
         observer = ctrl.observe
         # Cascade benefits from pre-charge: V loop starts at the right

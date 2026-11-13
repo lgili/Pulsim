@@ -238,8 +238,13 @@ NOTEBOOKS = {
         (r"V_mean:\s+" + F, near(23954, 24)),
         (r"Released to RUNNING:\s+" + F, near(1.372, 0.02)),
     ],
+    # 57.79 -> 74.27 W: no 470 uF on rect_p any more (line PF 0.62 ->
+    # 0.997) and the bridge loss counts all four diodes on the simulated
+    # line current; L001 copper now within 1 % of PSIM at OP 2.3.
     "projects/inverters/pfc_vsi_drive/00_pfc_vsi_drive_pulsim_validation.ipynb": [
-        (r"OP_2.2\s+P_total\s+" + F, near(57.79, 0.058))],
+        (r"OP_2.2\s+P_total\s+" + F, near(74.27, 0.074)),
+        (r"OP_2.3\s+P_ohm_L001\s+" + F, near(2.838, 0.028)),
+        (r"OP_2.3\s+eta_inverter\s+" + F, near(0.956, 0.001))],
 }
 
 

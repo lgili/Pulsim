@@ -23,8 +23,8 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass, field
-from typing import Dict, Optional
+from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 
@@ -33,8 +33,8 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 from bom import (  # noqa: E402
-    C006, C009, C010,
-    D001, D002, F500, IC500,
+    C009, C010,
+    D001, D002, IC500,
     L001, L002,
     R002, R003, R036, R508,
     T001, T002,
@@ -200,6 +200,16 @@ def _avg(x: np.ndarray) -> float:
     return float(np.mean(x))
 
 
+def whole_line_cycles_start(times: np.ndarray, f_line: float,
+                            settle_fraction: float) -> int:
+    """Index where the KPI window starts: the last whole line cycles that
+    fit after ``settle_fraction`` of the run (a 60 Hz run's last 30 % of
+    200 ms is 3.6 cycles, which biases every RMS and average)."""
+    t_end = float(times[-1])
+    n_cycles = max(1, int((1.0 - settle_fraction) * t_end * f_line + 1e-9))
+    return int(np.searchsorted(times, t_end - n_cycles / f_line - 1e-12))
+
+
 def _pk(x: np.ndarray) -> float:
     return float(np.max(np.abs(x)))
 
@@ -293,13 +303,12 @@ def compute_losses(sim_result, *, settle_fraction: float = 0.7,
     fe = sim_result.frontend
     inv = sim_result.inverter
 
-    n_fe_lo = int(len(fe.times) * settle_fraction)
+    n_fe_lo = whole_line_cycles_start(fe.times, op.f_line, settle_fraction)
     n_fe_hi = int(len(fe.times) * end_fraction)
     n_in_lo = int(len(inv.times) * settle_fraction)
     n_in_hi = int(len(inv.times) * end_fraction)
 
     # --- Slice all waveforms into the settled window -----------------
-    v_ac   = fe.v_ac[n_fe_lo:n_fe_hi]
     v_link = fe.v_link[n_fe_lo:n_fe_hi]
     i_in   = fe.i_in[n_fe_lo:n_fe_hi]
     i_L002 = fe.i_L002[n_fe_lo:n_fe_hi]
@@ -310,36 +319,17 @@ def compute_losses(sim_result, *, settle_fraction: float = 0.7,
     v_shunt_inv = inv.v_n_shunt_inv[n_in_lo:n_in_hi]
 
     v_link_avg = _avg(v_link)
-    v_in_rms   = _rms(v_ac)
-    # i_in (the simulated line current) is intentionally NOT used for
-    # loss extraction here — it's contaminated by the open-loop bridge
-    # DCM oscillation. The line-current scale is back-derived from
-    # power balance instead (``I_in_rms_est`` below).
-    _ = i_in  # silence "unused" hint
-
-    # --- Line-current reference (from power balance) -----------------
-    # The simulated i_in / i_L001 is contaminated by the open-loop
-    # bridge-DCM oscillation. We back out the *expected* line current
-    # from the power being delivered to the bus, which is a much more
-    # reliable basis for the rectifier-side loss model. PSIM does the
-    # same thing under the hood — its line current is a steady-state
-    # consequence of the closed-loop controller, not a free state.
     R_eq = float(sp.V_link_target ** 2 / max(op.P_in_target, 1.0))
     P_link_load = float(v_link_avg ** 2 / R_eq)
-    PF_assumed = 0.95
-    I_in_rms_est = float(P_link_load / max(v_in_rms * PF_assumed, 1.0))
-    # Sinusoid → half-wave avg = (I_pk·2/π), pk = √2·rms
-    I_in_pk = I_in_rms_est * np.sqrt(2.0)
 
-    # ---- Bridge rectifier (D001) — analytical from power balance ----
-    # 2 diodes always conduct in a half-wave full-bridge. Each diode
-    # sees a half-cycle of |I_in(t)| = I_pk·|sin|, so:
-    #     I_avg_per_diode = I_pk / π
-    #     I_rms_per_diode = I_pk / 2
-    I_D001_avg = I_in_pk / np.pi
-    I_D001_rms = I_in_pk / 2.0
-    P_cond_D001 = 2.0 * (float(D001.V_F) * I_D001_avg
-                          + float(D001.R_on) * I_D001_rms ** 2)
+    # ---- Bridge rectifier (D001) — from the simulated line current ----
+    # Two of the four diodes are in series with the line at every
+    # instant, each carrying |i_in|: P = 2·(V_F·mean|i_in| + R_on·mean(i_in²)).
+    # (An earlier version multiplied the per-diode averages by 2 instead
+    # of 4 and so reported half of this, on a line current assumed at
+    # PF = 0.95 instead of the simulated one.)
+    P_cond_D001 = 2.0 * (float(D001.V_F) * _avg(np.abs(i_in))
+                          + float(D001.R_on) * _avg(i_in * i_in))
 
     # ---- Boost MOSFETs (T001 / T002) --------------------------------
     P_cond_T1 = float(T001.R_DS_on) * float(np.mean(i_T001 ** 2))
@@ -372,11 +362,10 @@ def compute_losses(sim_result, *, settle_fraction: float = 0.7,
     # ---- Magnetics --------------------------------------------------
     # L002 sits in the boost loop where the sim is clean → integrate
     # the *true* RMS (including PWM ripple), which is what actually
-    # heats the winding. L001 sits on the line where i_in is noisy
-    # → use the analytical I_in_rms_est for a clean DCR loss.
+    # heats the winding; L001's DCR carries the simulated line current.
     P_ohm_L002 = float(L002.DCR) * float(np.mean(i_L002 ** 2))
     P_mag_L002 = float(L002.P_core_nom)
-    P_ohm_L001 = float(L001.DCR) * I_in_rms_est ** 2
+    P_ohm_L001 = float(L001.DCR) * _avg(i_in * i_in)
 
     # ---- DC bus capacitors (C009 + C010 in parallel) ----------------
     # Each carries half the i_Cbus ripple current.
