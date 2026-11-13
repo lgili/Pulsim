@@ -231,6 +231,15 @@ struct TrBdf2Stats {
     Size n_derivative_refreshes = 0;
     Size n_refresh_probes = 0;
     Real h_post_event_min = 0;
+    /// What set the step ceiling h_max (update-trbdf2-error-control):
+    /// 0 = span/1000, 1 = a source's period or pulse width,
+    /// 2 = the user's h_max. The derived floors (h_min, probe floor,
+    /// chatter floor, gate-pulse floor) scale with it, not with the
+    /// span.
+    Size h_max_basis = 0;
+    /// Steps clamped to a source breakpoint (a pulse or PWM-source
+    /// corner) and landed on it.
+    Size n_source_breakpoints = 0;
 };
 
 namespace detail_trbdf2 {
@@ -376,6 +385,17 @@ inline SimulationResult run_transient_trbdf2(
     // FASTEST periodic source in the circuit: at least 20 steps
     // per period, and at most a third of the narrowest pulse.
     Real h_default = span / Real{1000};
+    // Source breakpoints: the corners of every pulse source and the
+    // edges of every PWM voltage source, per period. A step is clamped
+    // to land on the next one (like a gate edge), so the error estimate
+    // never straddles a jump or a ramp kink: a pulse-driven RC took 32
+    // rejects and steps of 1.4e-14 s at its 3.3 us jump (p13b.py).
+    struct SourceCorners {
+        Real t0, period;   // period 0 = single shot
+        std::array<Real, 4> off;
+        int n;
+    };
+    std::vector<SourceCorners> corners;
     for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
         if (graph.branch(b_id).kind != topology::BranchKind::Source) {
             continue;
@@ -386,6 +406,13 @@ inline SimulationResult run_transient_trbdf2(
             if (pp.frequency > Real{0}) {
                 h_default = std::min(
                     h_default, Real{1} / (Real{20} * pp.frequency));
+                const Real Tp = Real{1} / pp.frequency;
+                SourceCorners c{pp.phase, Tp, {}, 0};
+                c.off[static_cast<std::size_t>(c.n++)] = Real{0};
+                if (pp.duty > Real{0} && pp.duty < Real{1}) {
+                    c.off[static_cast<std::size_t>(c.n++)] = pp.duty * Tp;
+                }
+                corners.push_back(c);
             }
             break;
         }
@@ -407,6 +434,16 @@ inline SimulationResult run_transient_trbdf2(
                 h_default = std::min(
                     h_default, up.pulse_width / Real{3});
             }
+            SourceCorners c{up.t_start, up.period, {}, 0};
+            Real o = Real{0};
+            for (const Real d : {Real{0}, up.rise_time, up.pulse_width,
+                                 up.fall_time}) {
+                o += d;
+                if (c.n == 0 || o > c.off[static_cast<std::size_t>(c.n - 1)]) {
+                    c.off[static_cast<std::size_t>(c.n++)] = o;
+                }
+            }
+            corners.push_back(c);
             break;
         }
         default: break;
@@ -414,8 +451,19 @@ inline SimulationResult run_transient_trbdf2(
     }
     const Real h_max = opts.h_max > Real{0} ? opts.h_max
                                              : h_default;
-    const Real h_min = opts.h_min > Real{0} ? opts.h_min
-                                             : span * Real{1e-11};
+    // Span-free floors (update-trbdf2-error-control D3): every floor
+    // scales with the resolved ceiling instead of t_end - t_start, as
+    // the old span fraction of span_ref = 1000 * h_max. While the
+    // ceiling IS span/1000, span_ref is the span itself, so the floors
+    // are bit-identical to before (a roundoff-level change of h_chatter
+    // tipped a diode bridge into a max_steps grind). The smallest step
+    // that still advances the clock bounds h_min from below.
+    const Real span_ref = (h_max == span / Real{1000})
+        ? span : h_max * Real{1000};
+    const Real t_ulp = Real{16} * std::numeric_limits<Real>::epsilon()
+        * std::max(std::abs(opts.t_start), std::abs(opts.t_end));
+    const Real h_min = opts.h_min > Real{0}
+        ? opts.h_min : std::max(t_ulp, span_ref * Real{1e-11});
     // Probe steps are a DIFFERENT quantity from the step floor.
     // A probe is a throwaway solve whose only job is to pin (v, i)
     // and ask the diodes which way they conduct — nothing is
@@ -424,7 +472,7 @@ inline SimulationResult run_transient_trbdf2(
     // committed step at 2C/h = 1e11 S is meaningless). Conflating
     // them cost 1.2 mV and 100x the chatter on a buck when the
     // step floor was raised.
-    const Real h_probe_floor = std::min(h_min, span * Real{1e-12});
+    const Real h_probe_floor = std::min(h_min, span_ref * Real{1e-12});
     const Real gamma = pwl::HistoryState::trbdf2_gamma();
     const Real c1    = pwl::HistoryState::trbdf2_c1();
     const Real c2    = pwl::HistoryState::trbdf2_c2();
@@ -815,7 +863,7 @@ inline SimulationResult run_transient_trbdf2(
                             Vector& out_x) -> bool {
         Real dt_try = std::max(dt, h_probe_learned);
         const Real dt_cap = std::max(
-            dt_try, std::min(span * Real{1e-6}, h_max * Real{1e-2}));
+            dt_try, span_ref * Real{1e-6});
         for (;;) {
             try {
                 const bool ok = trap_solve(m, t0, dt_try, out_x);
@@ -884,8 +932,12 @@ inline SimulationResult run_transient_trbdf2(
         const Real h_probe = h_probe_floor;
         const Real t_gates = opts.t_start + Real{0.5} * h_min;
         for (Size it = 0; it < opts.max_event_iterations; ++it) {
-            probe_solve(mask_at(t_gates), opts.t_start, h_probe,
-                        x_trial);
+            // A failed (Newton) probe leaves x_trial unwritten — unsized
+            // on this first call: keep the bits (it read null, SIGSEGV).
+            if (!probe_solve(mask_at(t_gates), opts.t_start, h_probe,
+                             x_trial)) {
+                break;
+            }
             x_sig = x_trial;
             if (!diodes.update_from_state(x_trial)) {
                 break;
@@ -953,7 +1005,7 @@ inline SimulationResult run_transient_trbdf2(
     Real chatter_short_t = opts.t_start - span;
     Real chatter_x1_t = opts.t_start - span;
     Real chatter_exhaust_t = opts.t_start - span;
-    const Real h_chatter = std::max(h_min, span * Real{1e-7});
+    const Real h_chatter = std::max(h_min, span_ref * Real{1e-7});
     // Post-GATE-edge restart memory, one slot per edge parity (a
     // periodic PWM alternates rising/falling, and the two corners
     // want different h). Restarting at the h that survived the
@@ -980,6 +1032,34 @@ inline SimulationResult run_transient_trbdf2(
     Real t_next_tick = opts.t_start;
     TrBdf2Stats local_stats;
     TrBdf2Stats& st = stats_out ? *stats_out : local_stats;
+    st.h_max_basis = opts.h_max > Real{0} ? Size{2}
+        : (h_default < span / Real{1000} ? Size{1} : Size{0});
+    // Earliest source corner strictly after t (+inf when none).
+    auto next_breakpoint_after = [&](Real at_t) {
+        Real best = std::numeric_limits<Real>::infinity();
+        const Real after = at_t + Real{0.5} * h_min;
+        for (const auto& c : corners) {
+            Real k0 = Real{0};
+            if (c.period > Real{0} && after > c.t0) {
+                k0 = std::floor((after - c.t0) / c.period);
+            }
+            for (int kk = 0; kk < 2; ++kk) {
+                const Real base = c.period > Real{0}
+                    ? c.t0 + (k0 + static_cast<Real>(kk)) * c.period
+                    : c.t0;
+                for (int j = 0; j < c.n; ++j) {
+                    const Real bp = base + c.off[static_cast<std::size_t>(j)];
+                    if (bp > after && bp < best) {
+                        best = bp;
+                    }
+                }
+                if (c.period <= Real{0}) {
+                    break;
+                }
+            }
+        }
+        return best;
+    };
 
     // ---- opaque switch_fn: sample densely, learn the pulse width ----
     // Without an edge oracle the engine sees the gates only where it
@@ -1006,7 +1086,7 @@ inline SimulationResult run_transient_trbdf2(
     // A "pulse" shorter than this is a floating-point glitch of the
     // user's phase comparison, not a pulse a step could resolve.
     const Real gate_pulse_floor =
-        std::max(Real{16} * h_min, span * Real{1e-9});
+        std::max(Real{16} * h_min, span_ref * Real{1e-9});
     Real gate_spacing_max = Real{0};
     // Per gate bit: the largest sampling spacing used since that bit's
     // PREVIOUS seen toggle (or the run start, before its first one),
@@ -1246,6 +1326,18 @@ inline SimulationResult run_transient_trbdf2(
                 h = std::max(t_next_tick - t, h_min);
             }
 
+            // ---- source-breakpoint landing ----
+            bool landed_on_bp = false;
+            Real bp_t = Real{0};
+            const Real h_pre_bp = h;
+            if (!corners.empty()) {
+                bp_t = next_breakpoint_after(t);
+                if (bp_t <= t + h) {
+                    h = std::max(bp_t - t, h_min);
+                    landed_on_bp = true;
+                }
+            }
+
             // ---- gate-edge landing ----
             bool landed_on_edge = false;
             if (next_edge_fn) {
@@ -1348,9 +1440,22 @@ inline SimulationResult run_transient_trbdf2(
                 solve_dispatch(mask_step, hg, b_stage, x_g);
             ++st.n_solves;
 
+            // A gate edge before the breakpoint shortened the step.
+            if (landed_on_bp && t + h < bp_t - h_min) {
+                landed_on_bp = false;
+            }
             // ---- stage 2: BDF2 over the remainder, SAME factor ----
             history.compute_b_extra_trbdf2_stage2(h, x_g, b_stage);
-            accumulate_sources(t + h, b_src);
+            // A step landed on a source jump reads its LEFT limit; the
+            // jump applies from the next step.
+            accumulate_sources(
+                landed_on_bp
+                    ? t + h - std::min(Real{0.5} * h,
+                          std::max(Real{1e-9} * h,
+                                   Real{512} * std::numeric_limits<Real>::epsilon()
+                                       * (std::abs(t) + h)))
+                    : t + h,
+                b_src);
             b_stage += b_src;
             if (stage_ok) {
                 if (has_coss) {
@@ -1453,8 +1558,11 @@ inline SimulationResult run_transient_trbdf2(
                     y_old = e.i_prev;
                     y_new = x_1[e.inductor_branch_var_id];
                 }
+                // Factor 2 (Bank et al.): without it the estimate was
+                // half the true local error (true/estimate 1.97 at
+                // h*lambda = -0.05, p10_lte.py), so rtol meant twice itself.
                 const Real lte =
-                    clte * h
+                    Real{2} * clte * h
                     * (f_n / gamma
                        - f_g / (gamma * (Real{1} - gamma))
                        + f_1 / (Real{1} - gamma));
@@ -1944,8 +2052,20 @@ inline SimulationResult run_transient_trbdf2(
                             * std::pow(e_used,
                                         Real{-1.0 / 3.0}),
                         Real{0.2}, Real{5.0});
+                    const Real h_done = h;
                     h = h * fac;
-                    if (pending_gate_slot >= 0) {
+                    if (landed_on_bp && !landed_on_edge) {
+                        // Landed on a source jump or corner: restart as
+                        // after a gate edge (commit a probe under the
+                        // post-jump source) and do not let the clamped
+                        // remainder set the next step.
+                        ++st.n_source_breakpoints;
+                        h = std::max(h, h_pre_bp);
+                        const Real hp =
+                            std::max(h_probe_floor, h_done * Real{1e-6});
+                        restart_after_gate_event(false, t + hp, hp,
+                                                 /*commit=*/true);
+                    } else if (pending_gate_slot >= 0) {
                         // Post-edge memory = the controller's proposal
                         // after the first accepted post-edge step: with
                         // a refreshed derivative it is the right

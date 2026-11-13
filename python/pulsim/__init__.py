@@ -1750,7 +1750,11 @@ def simulate(
     rtol, atol
         Relative / absolute tolerance for the DSED PI controller.
         Ignored if ``engine='pwl'`` (warning emitted). Defaults:
-        ``rtol=1e-6, atol=1e-9``.
+        ``rtol=1e-6, atol=1e-9``. For ``'trbdf2'`` / ``'auto'``
+        (defaults ``1e-5`` / ``1e-8``) they bound the local error
+        estimate, which since update-trbdf2-error-control is the true
+        local error (it was half of it): pass doubled values for the
+        previous step density.
     dt_init
         Initial step for the DSED PI controller (default 1e-9).
     integrator

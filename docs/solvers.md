@@ -116,6 +116,26 @@ after a gate edge:
   capped at `h_max`, is where the next edge of that parity restarts.
   It can grow as well as shrink. Diode events have no memory.
 
+Error control:
+
+- **Estimate.** The local error estimate carries the factor 2 of
+  Bank et al. (1985), so it is the true local error to leading order;
+  before, it was half of it and `rtol` meant twice itself. The Python
+  defaults (`rtol=1e-5`, `atol=1e-8`) are unchanged; doubled values
+  give the previous step density.
+- **Ceiling and floors.** The default ceiling is
+  `min(span/1000, period/20 of a periodic source, pulse width/3)`;
+  `dt` overrides it. The step floor, probe floor, probe cap, chatter
+  floor and gate-pulse floor are fixed fractions of `1000·h_max`
+  (exactly the old span fractions while the ceiling is `span/1000`),
+  so with a ceiling set by `dt` or a source the steps up to a time do
+  not depend on `t_end`. `h_max_basis`: 0 span, 1 source, 2 user.
+- **Source breakpoints.** Every corner of a pulse source (start, end
+  of rise, start and end of fall, per period) and every edge of a PWM
+  voltage source is landed like a gate edge; the landing step reads
+  the source's left limit and the engine restarts as after a gate
+  edge (`n_source_breakpoints`).
+
 `res._trbdf2_stats` reports `n_derivative_refreshes`,
 `n_refresh_probes` and `h_post_event_min` (smallest accepted first
 step after a refreshed edge).

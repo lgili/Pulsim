@@ -240,8 +240,8 @@ average output over 2–3 ms:
 | engine | samples | `v[t >= 2e-3].mean()` | `p.time_average(t, v, 2e-3)` |
 |---|---:|---:|---:|
 | `pwl`, `dt=2e-7` | 15001 | 6.3295 V | 6.3308 V |
-| `trbdf2`, `dt=4e-6` (ceiling) | 1775 | **3.0408 V** | 6.3298 V |
-| `auto`, no `dt` | 1297 | **5.0070 V** | 6.3300 V |
+| `trbdf2`, `dt=4e-6` (ceiling) | 1270 | **3.9677 V** | 6.3298 V |
+| `auto`, no `dt` | 1432 | **4.5746 V** | 6.3300 V |
 
 The engines agree; the sample mean does not. The same applies to
 `np.sqrt((v**2).mean())`, and to slicing by index

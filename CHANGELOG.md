@@ -6,6 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### TR-BDF2 error control (update-trbdf2-error-control)
+
+* **Changed (BREAKING, tolerance meaning)** `engine='trbdf2'` /
+  `'auto'`: the local error estimate gets the factor 2 of Bank et al.;
+  it was half the true local error, so `rtol` / `atol` meant twice
+  themselves. Defaults unchanged (`1e-5` / `1e-8`); pass doubled values
+  for the previous step density (measured: a diode bridge then repeats
+  its previous step sequence exactly). Up to 27 % more steps.
+* **Changed (BREAKING, step sequence)** the step floor, probe floor,
+  probe cap, chatter floor and gate-pulse floor follow the step
+  ceiling instead of `t_end − t_start` (bit-identical while the
+  ceiling is `span/1000`): with `dt` given, a buck's steps up to 39 T
+  no longer depend on `t_end`. The default ceiling is unchanged.
+  `_trbdf2_stats["h_max_basis"]`.
+* **Added** source breakpoints: pulse-source corners and PWM voltage
+  source edges are landed and restarted like gate edges. Pulse into an
+  RC: rejects 32 → 4, no accepted step below 1e-9 s before a jump
+  (1.2e-10 s before), error at rtol 1e-6 1.82e-4 → 1.16e-4 V.
+  `_trbdf2_stats["n_source_breakpoints"]`.
+* Measured against update-trbdf2-post-event-restart (default
+  tolerances, probes/trbdf2_baseline.py): buck CCM error 7.18e-5 →
+  5.98e-5 (1636 → 1651 steps); rtol 1e-8: 1.18e-6 → 7.55e-7 (9152 →
+  11628); LC tank 2.06e-1 → 1.30e-1 (2562 → 3239); MOSFET half
+  bridge 4.14e-4 → 3.12e-4 (2088 → 1692). Moved the wrong way, both
+  because the same `rtol` is now twice as strict and these two do not
+  converge monotonically in `rtol` (they did the same at `rtol/2`
+  before): Shockley rectifier 2.74e-5 → 3.73e-5, diode bridge
+  time-weighted 3.07e-2 → 5.57e-2 (1242 → 1437 steps).
+* **Fixed** a SIGSEGV in the initial diode settle when its (Newton)
+  probe failed: it read an unsized state (PMSM beside a rectifier).
+* Re-baselined, not loosened: two TR-BDF2 tests run at doubled
+  tolerances (the previous density): the Lauritzen gated buck (at the
+  new defaults it hits the known h_min stall at 15 µs, as it did
+  before at rtol 5e-6) and the kilovolt-artefact strict xfail (at
+  1e-6 the new sequence misses the spike by chance; 1897 V at the
+  defaults).
+* Not done: the Hosea–Shampine stiff filter (needs a solve on an
+  existing factor in `PwlStateSpaceCache`); `h_chatter` stays.
+
 ### TR-BDF2 restart after a gate edge (update-trbdf2-post-event-restart)
 
 * **Changed (BREAKING, step sequence)** `engine='trbdf2'` / `'auto'`:

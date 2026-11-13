@@ -184,7 +184,11 @@ def test_switched_diode_turn_off_with_series_inductor_on_trbdf2(kind):
                           "event, resume from a physical step size rather than "
                           "the probe floor.")
 def test_no_kilovolt_artefact_on_the_internal_node():
-    _assert_internal_node_is_sane("linear")
+    # rtol 2e-6 / atol 2e-9: the density rtol 1e-6 had before
+    # update-trbdf2-error-control doubled the estimate (1460 V here). At
+    # 1e-6 the new step sequence happens to miss the spike (20 V), while
+    # the default tolerances show 1897 V: the defect is still there.
+    _assert_internal_node_is_sane("linear", rtol=2e-6, atol=2e-9)
 
 
 @pytest.mark.parametrize("kind", ["atan", "gapped"])
@@ -197,9 +201,9 @@ def test_a_flux_device_in_the_same_place_has_no_artefact(kind):
     _assert_internal_node_is_sane(kind)
 
 
-def _assert_internal_node_is_sane(kind):
-    res = p.simulate(_rectifier(kind), t_end=3e-3, dt=4e-6, rtol=1e-6,
-                     atol=1e-9, engine="trbdf2")
+def _assert_internal_node_is_sane(kind, rtol=1e-6, atol=1e-9):
+    res = p.simulate(_rectifier(kind), t_end=3e-3, dt=4e-6, rtol=rtol,
+                     atol=atol, engine="trbdf2")
     v_m = np.abs(np.asarray(res.v("m")))
     # Nothing in this circuit can exceed the 20 V source by much.
     assert float(v_m.max()) < 40.0, float(v_m.max())
@@ -242,7 +246,12 @@ def _gated_buck(kind, engine):
         m = p.SwitchStateMask(n)
         m.set(k, bool((t / T) - np.floor(t / T + 1e-9) < 0.5 - 1e-9))
         return m
-    kw = dict(dt=T / 400) if engine == "pwl" else {}
+    # trbdf2 at rtol 2e-5 / atol 2e-8, the density the defaults had
+    # before update-trbdf2-error-control: at the defaults (twice as
+    # strict now) the Lauritzen case hits the known h_min stall at
+    # t = 15 us, as it did before at rtol 5e-6.
+    kw = dict(dt=T / 400) if engine == "pwl" else dict(rtol=2e-5,
+                                                         atol=2e-8)
     return p.simulate(b, t_end=20 * T, engine=engine, switch_fn=fn, **kw)
 
 
