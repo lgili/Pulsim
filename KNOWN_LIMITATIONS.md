@@ -231,9 +231,17 @@ AC sweep refuse them with `pulsim.UnsupportedError`. Before the table, a
 junction capacitor on `dsed` / `bdf1` was silently absent (6.3186 V
 instead of 1.0216 V). The retired `add_nonlinear_diode` is opt-in only
 (`allow_non_passive=True`). Feature keywords an engine cannot honour
-refuse the same way, with `feature` set to the keyword. Three control
-cells (`controller_period` on `pwl`, two `ClosedLoop`s and loops at two
-rates on `trbdf2`) are strict xfails owned by `fix-control-tick-semantics`.
+refuse the same way, with `feature` set to the keyword. Controllers
+(`closed_loops`, `step_observer`) run on `pwl` and `trbdf2` only; `dsed`
+refuses them.
+
+### Fixed-step controller ticks land on the `dt` grid
+
+On `pwl` a controller tick is delivered at the first grid point at or
+after `t_start + k*T`. When `T` is not a multiple of `dt` each tick is
+late by less than `dt` (`simulate` warns; `result.control_tick_jitter_max`
+records the largest lateness); `T < dt` is refused. `trbdf2` lands every
+tick exactly. Pick `dt = T/n` for an exact fixed-step cadence.
 
 ### TR-BDF2 stalls at `h_min` after a hard switching edge
 

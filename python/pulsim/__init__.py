@@ -759,6 +759,8 @@ _berg.install(CircuitBuilder)
 Cancelled = _berg.Cancelled
 RetiredDeviceError = _berg.RetiredDeviceError
 from ._refusal import unsupported as _unsupported  # noqa: E402
+from ._control_plan import FixedStepTicks as _FixedStepTicks  # noqa: E402
+from ._control_plan import compose_control as _compose_control  # noqa: E402
 
 
 
@@ -1794,6 +1796,19 @@ def simulate(
         ``False`` on a circuit with a smooth / Shockley diode, MOSFET
         or IGBT raises :class:`UnsupportedError` (it would simulate
         them as open circuits).
+    closed_loops, step_observer, controller_period
+        Controllers, on ``pwl`` and ``trbdf2`` (``dsed`` refuses
+        them). Each ``ClosedLoop`` (``period``) and a
+        ``step_observer`` with ``controller_period`` (or a ``.period``)
+        is a tick source: source j runs at ``t_start + k*T_j``,
+        ``ceil(span / T_j)`` times, sources due at one instant in
+        registration order (loops, then the observer). ``trbdf2``
+        lands each instant; ``pwl`` delivers it at the first grid
+        point at or after it (warns when ``T_j`` is not a multiple of
+        ``dt``; ``T_j < dt`` raises). A ``step_observer`` without a
+        period runs every ``pwl`` step. ``controller_period`` without
+        a ``step_observer`` raises ``ValueError``. The result carries
+        ``control_tick_counts`` and ``control_tick_jitter_max``.
     max_newton_iterations, max_event_iterations
         PWL-only: forwarded to :class:`SimulationOptions`.
     tol_newton_dx, tol_newton_res
@@ -2009,6 +2024,13 @@ def simulate(
                 _ic_from_builder = True
         except Exception:  # noqa: BLE001 — test mocks etc.
             pass
+
+    # ---- Controllers: one composition for every engine ----
+    # (fix-control-tick-semantics). Above the dispatch so its refusals
+    # (controller_period without an observer, a bad period) hold on
+    # every engine; dsed refuses closed_loops / step_observer itself.
+    _plan = _compose_control(builder, closed_loops, step_observer,
+                             controller_period, switch_fn)
 
     # ---- Engine dispatch: DSED takes the early-return path. ----
     # For engine='dsed', `integrator` ∈ {'auto', 'rk45', 'bdf2', None}.
@@ -2241,36 +2263,11 @@ def simulate(
                 "construction.",
                 stacklevel=2)
         # ---- controllers on an EXACT cadence ----
-        # A digital controller samples at k·T_ctrl. The fixed
-        # engine only THROTTLES an every-step observer on that
-        # period, so the tick lands on whichever step first crosses
-        # the boundary and the error accumulates (measured: 198
-        # ticks instead of 200 over 20 ms at 10 kHz). Here the tick
-        # instants are SCHEDULED like gate edges — landed exactly,
-        # observer fired there, and the duty it sets is what the
-        # coming step's mask is built from.
-        _cl_list = list(closed_loops) if closed_loops else []
-        _auto_obs_list = []
-        _auto_periods = []
-        for _cl in _cl_list:
-            # `.tick` is the loop's UNTHROTTLED update. Calling the
-            # throttled `step_observer` on an exactly-scheduled
-            # cadence loses ticks to floating point (measured 129
-            # of 200), which quietly changes the loop gain.
-            _auto_obs_list.append(
-                getattr(_cl.step_observer, "tick", _cl.step_observer))
-            _p = float(getattr(_cl, "period", 0.0) or 0.0)
-            if _p > 0.0:
-                _auto_periods.append(_p)
-        if step_observer is not None:
-            _auto_obs_list.append(
-                getattr(step_observer, "tick", step_observer))
-            _p_obs = controller_period
-            if _p_obs is None:
-                _p_obs = getattr(step_observer, "period", None)
-            if _p_obs is not None:
-                _auto_periods.append(float(_p_obs))
-        if _auto_obs_list and not _auto_periods:
+        # Each tick source of the plan is scheduled at its own
+        # t_start + k*T_j, landed like a gate edge; `.tick` (the
+        # loop's unthrottled update) is what the plan holds. An
+        # every-step observer has no grid to ride here.
+        if _plan.every_step:
             raise _unsupported(
                 "trbdf2", "step_observer",
                 "simulate(engine='auto'): a step_observer needs a "
@@ -2279,36 +2276,7 @@ def simulate(
                 "rate your controller samples at) and the tick "
                 "instants are scheduled exactly. A ClosedLoop from "
                 "bind_pi_to_switch carries its own period.")
-        _auto_period = min(_auto_periods) if _auto_periods else 0.0
-        if len(set(_auto_periods)) > 1:
-            # Different rates: tick every observer on the fastest
-            # schedule and let each one's own throttle decide (the
-            # binder's observers already throttle on their period).
-            pass
-        if len(_auto_obs_list) == 1:
-            _auto_observer = _auto_obs_list[0]
-        elif _auto_obs_list:
-            def _auto_observer(t, x, _obs=tuple(_auto_obs_list)):
-                for _o in _obs:
-                    _o(t, x)
-        else:
-            _auto_observer = None
-        if _cl_list:
-            _cl_switch_fns = [c.switch_fn for c in _cl_list]
-            if switch_fn is None and len(_cl_switch_fns) == 1:
-                switch_fn = _cl_switch_fns[0]
-            elif _cl_switch_fns:
-                _n_sw_cl = builder.graph.num_switches
-                _user_sf = switch_fn
-
-                def switch_fn(t, _fns=tuple(_cl_switch_fns),
-                               _u=_user_sf, _n=_n_sw_cl):
-                    m = SwitchStateMask(_n)
-                    if _u is not None:
-                        m = _u(t)
-                    for _f in _fns:
-                        m = m | _f(t)
-                    return m
+        switch_fn = _plan.switch_fn
 
         _span = float(t_end) - float(t_start)
         # 0 = let the kernel pick: it knows the circuit's fastest
@@ -2348,8 +2316,8 @@ def simulate(
                     0 if max_event_iterations is None
                     else int(max_event_iterations)),
                 should_continue=should_continue,
-                observer_period=_auto_period,
-                step_observer=_auto_observer,
+                observer_periods=[_p for _, _p in _plan.ticks],
+                observers=[_f for _f, _ in _plan.ticks],
                 # None: the kernel stamps the Newton devices itself.
                 enable_nonlinear_refresh=enable_nonlinear_refresh,
                 max_newton_iterations=int(max_newton_iterations or 0),
@@ -2376,6 +2344,8 @@ def simulate(
         res._preflight = _preflight_report
         res._switch_fn = switch_fn
         res._trbdf2_stats = _stats
+        res.control_tick_counts = list(_stats["control_tick_counts"])
+        res.control_tick_jitter_max = 0.0
         res.engine_used = "trbdf2"
         res.engine_route_reason = None
         # The implausible-voltage detector is engine-independent
@@ -2445,43 +2415,28 @@ def simulate(
         )
     _ = rtol, atol, dt_init  # Reserved for the v1.6 RK path; recorded only.
 
-    if closed_loops:
-        # Compose closed_loops with any user-supplied switch_fn /
-        # step_observer. Pre-v1.6.5 this raised ValueError because
-        # the loop owns its own switch indices and observer state;
-        # but real drives need this composition: e.g. a closed-loop
-        # PFC boost stage (owns the boost MOSFET via ClosedLoop) +
-        # an openly-switched 3φ VSI (owns its own switches via a
-        # separate switch_fn) + a PMSM observer (b_extra_fn /
-        # step_observer). Each owner addresses a disjoint set of
-        # switch indices, so the merged switch_fn is the bitwise OR
-        # of every contributor's mask — exactly what
-        # `make_combined_switch_fn` already does. Step observers
-        # compose by running each callback in registration order:
-        # closed-loop observers first (they update PI state /
-        # closed-loop bookkeeping), then the user's step_observer
-        # (e.g. PMSM mechanical state, custom probes).
-        loops = list(closed_loops)
-        n_sw_compose = builder.graph.num_switches
-        per_switch_fns = [loop.switch_fn for loop in loops]
-        if switch_fn is not None:
-            per_switch_fns.append(switch_fn)
-        switch_fn = make_combined_switch_fn(n_sw_compose, per_switch_fns)
-
-        per_observers: list[Callable[[float, object], None]] = [
-            loop.step_observer for loop in loops]
-        if step_observer is not None:
-            per_observers.append(step_observer)
-
-        def _composed_observer(t: float, x) -> None:
-            for obs in per_observers:
+    # Controllers from the plan composed above the dispatch: the
+    # gates merged into one switch_fn, the periodic sources through
+    # the integer-k scheduler (tick 0 at t_start, none lost), then the
+    # every-step observers. Order: closed loops in list order, then
+    # the user observer. Before fix-control-tick-semantics the loops'
+    # own elapsed-time throttles lost ticks (198 of 200) and
+    # controller_period was ignored here.
+    switch_fn = _plan.switch_fn
+    _tick_sched = None
+    if _plan.ticks:
+        _tick_sched = _FixedStepTicks(_plan.ticks, float(t_start),
+                                      float(t_end), float(dt))
+    _per_step = ([_tick_sched] if _tick_sched is not None else []) \
+        + list(_plan.every_step)
+    if _tick_sched is not None or len(_per_step) > 1:
+        def _composed_observer(t: float, x, _obs=tuple(_per_step)) -> None:
+            for obs in _obs:
                 obs(t, x)
 
-        # T2.2: stash the inner observers so the post-run
-        # _auto_attach_motor_traces can walk into any MotorObserverBundle
-        # that the user passed via step_observer= (now wrapped here).
-        _composed_observer._inner_observers = per_observers  # type: ignore[attr-defined]
-
+        # T2.2: the post-run _auto_attach_motor_traces walks these to
+        # find a MotorObserverBundle passed via step_observer=.
+        _composed_observer._inner_observers = _plan.inner_observers  # type: ignore[attr-defined]
         step_observer = _composed_observer
 
     # Custom-code blocks (C blocks) registered via add_c_block(): compose
@@ -2922,6 +2877,15 @@ def simulate(
     except AttributeError:  # pragma: no cover
         pass
     try:
+        # Per tick source, registration order; the largest lateness
+        # of a tick on this grid (0 when every T_j is a multiple of dt).
+        res.control_tick_counts = (
+            list(_tick_sched.counts) if _tick_sched is not None else [])
+        res.control_tick_jitter_max = (
+            _tick_sched.jitter_max if _tick_sched is not None else 0.0)
+    except AttributeError:  # pragma: no cover
+        pass
+    try:
         res._switch_fn = switch_fn
     except AttributeError:  # pragma: no cover
         pass
@@ -3293,19 +3257,18 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     if inductor_abs_clamp is not None:
         why.append(_blk("inductor_abs_clamp", "inductor_abs_clamp is a fixed-step post-solve "
                     "guard"))
-    # An observer needs a CADENCE here — there is no grid to ride.
-    _has_cadence = controller_period is not None
-    if closed_loops:
-        for _cl in closed_loops:
-            if float(getattr(_cl, "period", 0.0) or 0.0) > 0.0:
-                _has_cadence = True
-    if step_observer is not None and not _has_cadence:
-        if getattr(step_observer, "period", None) is None:
-            why.append(_blk("step_observer",
-                "a step_observer with no cadence (pass "
-                "controller_period=<T_ctrl>, or use a ClosedLoop, "
-                "which carries its own)"))
-    if closed_loops and not _has_cadence:
+    # Every controller needs its OWN cadence here — there is no grid
+    # to ride (the same split `_compose_control` makes: a source with
+    # no period runs every step, which only the fixed engine has).
+    if step_observer is not None and controller_period is None \
+            and getattr(step_observer, "period", None) is None:
+        why.append(_blk("step_observer",
+            "a step_observer with no cadence (pass "
+            "controller_period=<T_ctrl>, or use a ClosedLoop, "
+            "which carries its own)"))
+    if closed_loops and any(
+            not float(getattr(_cl, "period", 0.0) or 0.0) > 0.0
+            for _cl in closed_loops):
         why.append(_blk("closed_loops", "closed_loops whose handles carry no period"))
     if switch_fn is None and not closed_loops:
         # (A ClosedLoop brings its own switch_fn, so the circuit is

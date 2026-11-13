@@ -109,7 +109,8 @@ def test_guide_fits_the_budget_and_is_ascii(guide_text):
 # ---------------------------------------------------------------------------
 _REF = re.compile(
     r"(?<![\w.])(?P<obj>p|pulsim|b|CircuitBuilder|res)\.(?P<name>[A-Za-z_]\w*)(?![\w*])")
-_RESULT_ATTRS = {"engine_used", "engine_route_reason"}  # set by simulate()
+_RESULT_ATTRS = {"engine_used", "engine_route_reason",  # set by simulate()
+                 "control_tick_counts", "control_tick_jitter_max"}
 
 
 def _unresolved(text: str) -> list[str]:

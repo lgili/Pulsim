@@ -1209,6 +1209,14 @@ class SimulationResult:
     engine_route_reason: str | None
     """Why ``engine="auto"`` did not take the variable-step path, or
     ``None`` when it did (or when the engine was chosen explicitly)."""
+    control_tick_counts: list[int]
+    """Controller ticks per tick source, in registration order (closed
+    loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by
+    :func:`pulsim.simulate` on ``pwl`` and ``trbdf2``."""
+    control_tick_jitter_max: float
+    """Largest lateness of a controller tick [s]: below ``dt`` on
+    ``pwl`` (0 when every period is a multiple of ``dt``), 0 on
+    ``trbdf2``."""
     @typing.overload
     def v(self, name: str, t: None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
         """
@@ -2519,9 +2527,9 @@ def run_transient_bdf1(builder: CircuitBuilder, opts: SimulationOptions, switch_
     """
     BDF1 (implicit Euler) transient simulation. Use when the trapezoidal path rings on stiff problems — BDF1 is L-stable (adds artificial damping that kills numerical oscillation). Slower than trap because it assembles + factors per step; intended for ROBUSTNESS over speed.
     """
-def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: collections.abc.Callable[[float], typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]] | None = None, initial_state: typing.Any = None, max_event_iterations: int = 0, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int = 0, tol_newton_dx: float = 0.0, tol_newton_res: float = 0.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
+def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: collections.abc.Callable[[float], typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]] | None = None, initial_state: typing.Any = None, max_event_iterations: int = 0, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int = 0, tol_newton_dx: float = 0.0, tol_newton_res: float = 0.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = []) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
     """
-    Variable-step TR-BDF2 transient (engine='auto'): L-stable, 2nd order, LTE-controlled step, gate edges landed by bisection, diode crossings localized by Illinois. Returns (SimulationResult, stats dict).
+    Variable-step TR-BDF2 transient (engine='auto'): L-stable, 2nd order, LTE-controlled step, gate edges landed by bisection, diode crossings localized by Illinois. Returns (SimulationResult, stats dict). `observers[j]` ticks at t_start + k*observer_periods[j] (ceil(span/T_j) times, index order when coincident); stats['control_tick_counts'] counts each.
     """
 def run_transient_with_chain(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: collections.abc.Callable[[float], SwitchStateMask], chain: CxxBlockChain, chain_dt: float, b_extra_fn: collections.abc.Callable[[float], typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]] | None = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None) -> SimulationResult:
     """

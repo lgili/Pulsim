@@ -604,8 +604,6 @@ def test_observer_on_a_cadence_is_honoured_on_trbdf2():
     assert len(calls) == 20
 
 
-@pytest.mark.xfail(strict=True, reason="fix-control-tick-semantics: "
-                   "controller_period is ignored on pwl (2001 calls)")
 def test_observer_on_a_cadence_is_honoured_on_pwl():
     calls = []
     _sim("pwl", step_observer=lambda t, x: calls.append(t),
@@ -633,8 +631,6 @@ def _loop(b, out, sw, freq):
         switch=sw, freq=freq)
 
 
-@pytest.mark.xfail(strict=True, reason="fix-control-tick-semantics: two "
-                   "ClosedLoops on trbdf2 fail composing their masks")
 def test_two_closed_loops_on_trbdf2():
     b = _two_bucks()
     la = _loop(b, "outa", "Qa", 20e3)
@@ -645,8 +641,6 @@ def test_two_closed_loops_on_trbdf2():
     assert (len(la.duty_history), len(lb.duty_history)) == (200, 20)
 
 
-@pytest.mark.xfail(strict=True, reason="fix-control-tick-semantics: "
-                   "trbdf2 ticks every source at the fastest rate")
 def test_loops_at_two_rates_on_trbdf2():
     b = _two_bucks()
     lb = _loop(b, "outb", "Qb", 2e3)

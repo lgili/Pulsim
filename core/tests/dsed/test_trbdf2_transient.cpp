@@ -461,6 +461,42 @@ TEST_CASE("TR-BDF2: a gate edge at a step boundary re-settles the diodes",
     REQUIRE(shoot_through == 0);
 }
 
+TEST_CASE("TR-BDF2: controller sources at three rates tick at their "
+          "own instants", "[v2][trbdf2][control]") {
+    // fix-control-tick-semantics: before, one observer_period served
+    // every source, so a 1 kHz and a 4 kHz controller both ticked at
+    // 4 kHz. Source j ticks at k*T_j, ceil(span/T_j) times, and
+    // sources due at one instant fire in index order.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V1", "in", "gnd", 1.0);
+    b.add_resistor("R1", "in", "o", 1e3);
+    b.add_capacitor("C1", "o", "gnd", 1e-6);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    auto sf = [n_sw](Real) { return topology::SwitchStateMask(n_sw); };
+    solver::TrBdf2Options o;
+    o.t_end = 10e-3;
+    o.observer_periods = {1e-3, 0.5e-3, 0.25e-3};
+    solver::TrBdf2Stats st;
+    std::vector<std::pair<Size, Real>> ticks;
+    solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st, {},
+        {}, {}, {}, nullptr,
+        [&](Size j, Real t, const Vector&) { ticks.emplace_back(j, t); });
+    REQUIRE(st.ctrl_tick_counts == std::vector<Size>{10, 20, 40});
+    REQUIRE(st.n_ctrl_ticks == 70);
+    std::vector<Size> k(3, 0);
+    for (const auto& [j, t] : ticks) {
+        const Real want = static_cast<Real>(k[j]++) * o.observer_periods[j];
+        REQUIRE(std::abs(t - want) <= 1e-9 * o.observer_periods[j]);
+    }
+    // At t = 0 and every 1 ms all three are due: index order.
+    REQUIRE(ticks[0].first == 0);
+    REQUIRE(ticks[1].first == 1);
+    REQUIRE(ticks[2].first == 2);
+}
+
 TEST_CASE("TR-BDF2: a line-inductance bridge does not grind at one "
           "commutation", "[v2][trbdf2][robustness]") {
     // V_th = 0.7 bridge behind 0.1 ohm + 1 mH, 470 µF || 1 kOhm. With

@@ -4033,7 +4033,9 @@ void init_module(py::module_& m) {
            Size max_newton_iterations,
            Real tol_newton_dx, Real tol_newton_res,
            bool enable_newton_line_search, bool enable_newton_lm,
-           py::object resume_from) {
+           py::object resume_from,
+           std::vector<Real> observer_periods,
+           std::vector<py::object> observers) {
             solver::TrBdf2Options o;
             o.t_start = t_start;
             o.t_end   = t_end;
@@ -4045,6 +4047,12 @@ void init_module(py::module_& m) {
                 o.max_event_iterations = max_event_iterations;
             }
             o.observer_period = observer_period;
+            if (observers.size() != observer_periods.size()) {
+                throw std::invalid_argument(
+                    "run_transient_trbdf2: observers and "
+                    "observer_periods must have the same length");
+            }
+            o.observer_periods = std::move(observer_periods);
             if (max_newton_iterations > 0) {
                 o.max_newton_iterations = max_newton_iterations;
             }
@@ -4079,6 +4087,17 @@ void init_module(py::module_& m) {
                 observer_fn = observer_obj.cast<
                     std::function<void(Real, const Vector&)>>();
             }
+            std::vector<std::function<void(Real, const Vector&)>> obs_fns;
+            for (const auto& ob : observers) {
+                obs_fns.push_back(ob.cast<
+                    std::function<void(Real, const Vector&)>>());
+            }
+            std::function<void(Size, Real, const Vector&)> tick_fn;
+            if (!obs_fns.empty()) {
+                tick_fn = [&obs_fns](Size j, Real t, const Vector& x) {
+                    obs_fns[j](t, x);
+                };
+            }
             solver::TrBdf2Stats st;
             SimulationResult res;
             SolverSnapshot resume_snap;
@@ -4101,7 +4120,7 @@ void init_module(py::module_& m) {
                 res = solver::run_transient_trbdf2(
                     cache, graph, pool, o, switch_fn, b_extra_fn,
                     x0, &st, next_edge_fn, should_continue,
-                    observer_fn, nl_refresh, resume_ptr);
+                    observer_fn, nl_refresh, resume_ptr, tick_fn);
             }
             py::dict d;
             d["n_accept"]       = st.n_accept;
@@ -4112,6 +4131,7 @@ void init_module(py::module_& m) {
             d["n_chatter_breaks"] = st.n_chatter_breaks;
             d["n_forced_accepts"] = st.n_forced_accepts;
             d["n_ctrl_ticks"]     = st.n_ctrl_ticks;
+            d["control_tick_counts"] = st.ctrl_tick_counts;
             d["n_newton_retries"] = st.n_newton_retries;
             d["gate_pulse_min"]   = st.gate_pulse_min;
             d["n_gate_undersampled"] = st.n_gate_undersampled;
@@ -4139,10 +4159,15 @@ void init_module(py::module_& m) {
         py::arg("enable_newton_line_search") = false,
         py::arg("enable_newton_lm") = false,
         py::arg("resume_from") = py::none(),
+        py::arg("observer_periods") = std::vector<Real>{},
+        py::arg("observers") = std::vector<py::object>{},
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "
-        "Illinois. Returns (SimulationResult, stats dict).");
+        "Illinois. Returns (SimulationResult, stats dict). "
+        "`observers[j]` ticks at t_start + k*observer_periods[j] "
+        "(ceil(span/T_j) times, index order when coincident); "
+        "stats['control_tick_counts'] counts each.");
 
     m.def("run_transient_with_chain",
         [](const pwl::PwlStateSpaceCache& cache,

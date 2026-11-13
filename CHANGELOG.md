@@ -6,6 +6,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Controller ticks: one rule on every engine
+
+Source j with period `T_j` (a `ClosedLoop`'s `period`, or `step_observer`
+with `controller_period=` / a `.period`) ticks at `t_start + k*T_j` for
+every instant `< t_end`, `ceil(span / T_j)` times, the first at `t_start`.
+Sources due at one instant fire in registration order (closed loops in
+list order, then `step_observer`). `simulate()` composes the controllers
+once, above the engine dispatch, and both engines consume that plan.
+
+* **Fixed** two `ClosedLoop`s without `dt` (`trbdf2`) raised `TypeError`
+  composing their masks; they run (200 and 20 ticks at 20 kHz and 2 kHz
+  over 10 ms), also with a user `switch_fn` on another switch.
+* **Fixed** loops at two rates on `trbdf2` all ticked at the fastest rate
+  (a 2 kHz PI updated 400 times instead of 40 next to a 20 kHz monitor,
+  V_out 12.091 V instead of 13.033 V). The kernel takes
+  `observer_periods` / `observers` lists (`run_transient_trbdf2`) and
+  reports `stats['control_tick_counts']`.
+* **BREAKING** `controller_period` is honoured on `pwl`: an observer with
+  `controller_period=1e-4` over 2 ms is called 20 times (was every step,
+  2001). Migration: drop `controller_period` to keep an every-step
+  observer.
+* **BREAKING** `pwl` closed loops tick on an integer-k schedule through
+  `.tick`, not their elapsed-time throttle: 200 and 20 ticks over 10 ms at
+  `dt = 1e-6` (was 198 and 20), tick 0 at `t_start` with the initial
+  state. Closed-loop waveforms on `pwl` move accordingly. A period that is
+  not a multiple of `dt` runs with a warning (each tick at the first grid
+  point at or after its instant; `result.control_tick_jitter_max`);
+  a period shorter than `dt` raises `ValueError`.
+* **BREAKING** `controller_period` without a `step_observer` raises
+  `ValueError` (was ignored). On `trbdf2` every controller needs its own
+  period: a period-less `step_observer` next to a `ClosedLoop` used to
+  ride the loop's rate and now routes `auto` to `pwl` (or refuses
+  without `dt`).
+* **Added** `result.control_tick_counts` (per source, registration order)
+  and `result.control_tick_jitter_max` on `pwl` and `trbdf2`.
+
 ### Engine conformance: one capability table, one typed refusal
 
 * **Added** `pulsim.UnsupportedError` (a `ValueError`; C++

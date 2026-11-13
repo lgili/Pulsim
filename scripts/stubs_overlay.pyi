@@ -35,6 +35,14 @@ class SimulationResult:
     engine_route_reason: str | None
     """Why ``engine="auto"`` did not take the variable-step path, or
     ``None`` when it did (or when the engine was chosen explicitly)."""
+    control_tick_counts: list[int]
+    """Controller ticks per tick source, in registration order (closed
+    loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by
+    :func:`pulsim.simulate` on ``pwl`` and ``trbdf2``."""
+    control_tick_jitter_max: float
+    """Largest lateness of a controller tick [s]: below ``dt`` on
+    ``pwl`` (0 when every period is a multiple of ``dt``), 0 on
+    ``trbdf2``."""
     @typing.overload
     def v(self, name: str, t: None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
     @typing.overload
