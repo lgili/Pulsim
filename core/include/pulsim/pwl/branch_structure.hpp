@@ -59,6 +59,11 @@ struct DependentStructure {
 
 struct ModeStructure {
     std::vector<DependentStructure> dependent;
+    /// ON ideal diodes that close a loop of voltage sources and closed
+    /// ideal elements (not refused here: the engine turns them OFF, the
+    /// only consistent state for a diode across a stiff loop, and lets the
+    /// diode law re-decide; a diode that comes back is refused there).
+    std::vector<Index> loop_diodes;
 };
 
 class BranchStructureChecker {
@@ -186,8 +191,18 @@ private:
             for (const auto& e : edges) {
                 if (e.r == Role::ZeroImp) uf.unite(e.a, e.c);
             }
+            // Switches first, so a loop that a diode closes blames the diode.
+            const auto is_diode = [&](Index b) {
+                return pool_.kind_of(b) == DevicePool::StoredKind::Diode;
+            };
+            for (int pass = 0; pass < 2; ++pass)
             for (const auto& e : edges) {
-                if (e.r != Role::Ideal || uf.unite(e.a, e.c)) continue;
+                if (e.r != Role::Ideal || is_diode(e.b) != (pass == 1)) continue;
+                if (uf.unite(e.a, e.c)) continue;
+                if (pass == 1) {
+                    out.loop_diodes.push_back(e.b);
+                    continue;
+                }
                 throw UnsupportedError(
                     engine_, "ideal_voltage_loop",
                     std::string(graph_.branch_name(e.b)), kind_name_(e.b),

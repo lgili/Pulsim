@@ -53,6 +53,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   infinite `g_on` built and aborted mid-run "numerically singular", and a
   negative value ran on a negative resistance. Every existing example
   and test circuit still builds; no valid number changes.
+* **Added** re-initialisation of dependent modes on `pwl` under
+  `discontinuity_restart=True`: an ideal switch opening an inductor
+  cut-set or closing a capacitor loop is realised by the SDIRK×3 restart
+  and recorded in `res.reinit_records` (`t`, `kind`, `devices`, `states`,
+  `lambda` = the impulse, `dW` = the energy dissipated, `projection_gap`,
+  `sample` = the index of the pulse sample). Opening 9.9327 A at
+  `h = τ/20`: `i_L = 0` from the first step, node voltages 0 within 1e-9 V
+  from the second (was ±397 V ringing with `g_off = 1e-9`), `|Λ| = L·i`
+  within 1e-12, `dW` = 49.3291 mJ = ½·L·i² within 1e-9. Two capacitors
+  (8 V, 0 V) closed by `R_on = 0`: both at 4.0 V within 1e-12, 6 µC,
+  24 µJ. `simulate(on_impulse='record' | 'warn' | 'error')`; `'error'`
+  raises `UnsupportedError(feature='impulse')` naming the switch. Without
+  the restart rule a dependent mode is still refused by name; `trbdf2`
+  keeps its static refusal. A diode turning off at zero current makes no
+  record.
+* **Added** the ideal DCM buck on `pwl` (branch-form switch and diode,
+  restart + event split): `v_C` error −2.660e-6, −6.591e-7, −1.709e-7,
+  −4.354e-8 V at N = 50, 100, 200, 400 steps per period (prototype
+  −2.442e-6 … −4.345e-8), order 1.97, `i_L` exactly 0 while the diode is
+  off. An ON ideal diode that would close a loop with the source and a
+  closed switch is turned OFF and the mode re-formed
+  (`counters['ideal_loop_releases']`); a second release of the same diode
+  in one step is refused as `ideal_voltage_loop`.
 
 ### Integration fixes (batch 6a: complementarity mode selection merged)
 

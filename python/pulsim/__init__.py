@@ -1862,6 +1862,7 @@ def simulate(
     enable_substep_state_correction: Optional[bool] = None,
     discontinuity_restart: Optional[bool] = None,
     resolution_diagnostics: Optional[bool] = None,
+    on_impulse: str = "record",
     inductor_freeze_di_max: Optional[float] = None,
     inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
@@ -2915,6 +2916,10 @@ def simulate(
         opts.enable_substep_state_correction = enable_substep_state_correction
     if discontinuity_restart is not None:
         opts.discontinuity_restart = bool(discontinuity_restart)
+    if on_impulse not in ("record", "warn", "error"):
+        raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
+                         "'record', 'warn' or 'error'")
+    opts.on_impulse_error = on_impulse == "error"
     if resolution_diagnostics is not None:
         opts.resolution_diagnostics = bool(resolution_diagnostics)
     if inductor_freeze_di_max is not None and inductor_freeze_di_max > 0:
@@ -3259,6 +3264,15 @@ def simulate(
     _warn_newton_roundoff(res, "simulate()")
     _warn_resolution(builder, res, dt)
     _warn_unlocated_edges(res)
+    if on_impulse == "warn" and list(getattr(res, "reinit_records", ())):
+        import warnings
+        r0 = res.reinit_records[0]
+        warnings.warn(
+            f"simulate(on_impulse='warn'): {len(res.reinit_records)} "
+            f"impulsive re-initialisation(s); first at t = {r0.t:g}: "
+            f"{', '.join(r0.devices)} made {', '.join(r0.states)} dependent "
+            f"({r0.kind}, {r0.dW:.6g} J removed). See res.reinit_records.",
+            UserWarning, stacklevel=2)
 
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:

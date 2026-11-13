@@ -2310,6 +2310,11 @@ void init_module(py::module_& m) {
                         "Record SimulationResult.resolution (truncation "
                         "estimate + ringing detector) on the pwl engine. "
                         "Read-only: states are bit-identical either way.")
+        .def_readwrite("on_impulse_error",
+                        &SimulationOptions::on_impulse_error,
+                        "add-branch-form-ideal-switch: refuse the run at the "
+                        "first impulsive re-initialisation (simulate("
+                        "on_impulse='error')) instead of recording it.")
         .def_readwrite("discontinuity_restart",
                         &SimulationOptions::discontinuity_restart,
                         "Fixed engine: take the step after a discontinuity "
@@ -2490,6 +2495,21 @@ void init_module(py::module_& m) {
         .def_readonly("cycle_detected",
                        &solver::EventIterationBreach::cycle_detected);
 
+    py::class_<ReinitRecord>(m, "ReinitRecord",
+        "One impulsive re-initialisation (add-branch-form-ideal-switch "
+        "D4): kind 'cut_set' (lambda = flux, V*s) or 'capacitor_loop' "
+        "(lambda = charge, C); dW the energy removed [J]; sample the "
+        "stored sample of the step that carried the pulse (-1: not "
+        "stored).")
+        .def_readonly("t", &ReinitRecord::t)
+        .def_readonly("kind", &ReinitRecord::kind)
+        .def_readonly("devices", &ReinitRecord::devices)
+        .def_readonly("states", &ReinitRecord::states)
+        .def_readonly("lambda_", &ReinitRecord::lambda)
+        .def_readonly("dW", &ReinitRecord::dW)
+        .def_readonly("projection_gap", &ReinitRecord::projection_gap)
+        .def_readonly("sample", &ReinitRecord::sample);
+
     py::class_<CommutationEvent>(m, "CommutationEvent",
         "Sub-step commutation timing event (V2.2 + V3).")
         .def_readonly("t_estimated",
@@ -2586,6 +2606,7 @@ void init_module(py::module_& m) {
                 d["unlocated_gate_steps"] = r.unlocated_gate_steps;
                 d["split_event_overflows"] = r.split_event_overflows;
                 d["mode_structure_checks"] = r.mode_structure_checks;
+                d["ideal_loop_releases"] = r.ideal_loop_releases;
                 return d;
             },
             "Fixed-step loop counters (pwl engine; 0 elsewhere): "
@@ -2725,6 +2746,10 @@ void init_module(py::module_& m) {
             "Bytes held by the stamped-mask record.")
         .def_readonly("commutation_events",
                        &SimulationResult::commutation_events)
+        .def_readonly("reinit_records",
+                       &SimulationResult::reinit_records,
+                       "Impulsive re-initialisations of dependent modes "
+                       "(add-branch-form-ideal-switch D4).")
         .def_readonly("inductor_guard_actions",
                        &SimulationResult::inductor_guard_actions,
                        "Inductors whose current a post-solve guard "

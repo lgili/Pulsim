@@ -284,8 +284,8 @@ def test_signature_check_catches_swapped_and_wrong_defaults(guide_text, stub_ind
         "b.add_sine_voltage_source(name, n_pos, n_neg, v_amplitude, v_dc,")
     assert swapped != guide_text
     assert any("add_sine_voltage_source" in p for p in signature_problems(swapped, stub_index))
-    wrong = guide_text.replace("b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.0,",
-                               "b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.7,")
+    wrong = guide_text.replace("b.add_diode(name, anode, cathode, g_on=None, g_off=None, V_th=0.0,",
+                               "b.add_diode(name, anode, cathode, g_on=None, g_off=None, V_th=0.7,")
     assert wrong != guide_text
     assert any("add_diode" in p for p in signature_problems(wrong, stub_index))
 

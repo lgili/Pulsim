@@ -1116,6 +1116,8 @@ public:
                 ++n_state_extras;
             }
         }
+        // Branch-form switch currents (add-branch-form-ideal-switch) start at 0.
+        n_state_extras += static_cast<Index>(pool_.num_branch_switches());
         pulsim::Vector x0 = pulsim::Vector::Zero(
             static_cast<int>(n_nodes + n_state_extras));
         for (const auto& [b_id, value] : initial_conditions_) {

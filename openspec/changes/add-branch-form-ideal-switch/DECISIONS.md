@@ -94,3 +94,43 @@ Each entry: question → option taken → evidence → how to reverse.
    cancel to the solver residual (7.6e-12 A in both forms; the gap scales
    with `Rg`: 7.6e-6 V at 1 MΩ, 7.8e-9 V at 1 kΩ), differential mode
    1.3e-11 V. → Reverse: none needed; the absolute node is ill-posed.
+
+9. **Dependent modes on `pwl` need the restart rule.** The projection of
+   D4 is realised by the SDIRK x3 restart, which the fixed engine runs
+   only with `discontinuity_restart=True`. → With the rule a dependent
+   mode runs and is recorded; without it the mode is refused
+   (`dependent_states`, the message says to pass the flag), since the
+   trapezoid rings on it (+-396.8 V, task 1.1). → Forcing the rule on for
+   such runs was rejected: it changes every other event's integration
+   too. → Reverse: arm the restart window on dependent-mode entry alone.
+
+10. **The record is the explicit projection, `d` read after the restart.**
+    One scalar constraint per dependent structure, `M` diagonal (`L` or
+    `C` per state; coupled inductors are not in the structure). `d` is
+    `K x(t+h)` (the restart leaves the constraint exact), so
+    `lambda = (K x- - d) / sum(s_j^2 / M_j)` and `dW = lambda (K x- - d)/2`;
+    `projection_gap` = max |x- - s_j lambda / M_j - x(t+h)| (0 on the
+    cut-set; the step's own dynamics elsewhere). → Records are made after
+    the step's commit, with x- the state at the step start: with the
+    event split the split instant's state would be the right x- (noted as
+    a shortcut in the code). → A mode entered only by diode changes is a
+    consistent commutation and makes no record; neither does `K x- = d`
+    exactly. → Reverse: compute `d` from the sources at t+.
+
+11. **`on_impulse='error'` raises `UnsupportedError(feature='impulse')`.**
+    It must pass through the step loop's `runtime_error` catches (dt
+    halving would retry it); the typed refusal does. `'warn'` is one
+    `UserWarning` per run from Python.
+
+12. **An ON ideal diode that closes an ideal voltage loop is released.**
+    In the ideal DCM buck the switch turns on while the freewheel diode is
+    still ON, so the mode (source, closed switch, ON diode, all `R_on = 0`)
+    is an ideal voltage loop and the run was refused at the first CCM
+    turn-on. → The structural pass checks switches first (a loop of
+    gated switches and sources is still refused) and returns the diodes
+    of a remaining loop; the step loop turns them OFF and re-forms the
+    mask (`counters['ideal_loop_releases']`). A second release of the same
+    diode in one step is refused as `ideal_voltage_loop` (no cycling). →
+    Evidence: the DCM buck then matches the prototype within 1.09× at
+    N = 50 and 1.002× at N = 400 (task 6.2). → Reverse: drop the
+    `loop_diodes` branch in `check_mode`; the refusal returns.

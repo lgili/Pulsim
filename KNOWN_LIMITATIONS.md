@@ -279,8 +279,10 @@ slice runs the switch on `pwl` and `trbdf2` and the diode on `pwl`
 (`docs/known-limitations.md`, branch-form table); other engines refuse
 with `feature='branch_form'`. A mode that makes a state dependent (an
 inductor opened by an ideal switch with `g_off = 0`, two capacitors
-paralleled through `R_on = 0`) is refused with
-`feature='dependent_states'` until the re-initialisation service lands;
+paralleled through `R_on = 0`) runs on `pwl` only with
+`discontinuity_restart=True` (re-initialised and recorded in
+`res.reinit_records`); without the rule, and always on `trbdf2`, it is
+refused with `feature='dependent_states'`;
 an island bounded only by open ideal elements (OFF ideal diodes
 included: the gauge of D3 is not implemented) with `floating_node`; a
 loop of closed ideal elements and voltage sources with

@@ -68,11 +68,13 @@ refused on `dsed`, `bdf1` and the kernel AC sweep, naming the channel.
 
 The branch form of a switch or diode (`add_ideal_switch`,
 `add_diode(form='branch')`, YAML `form: branch`; opt-in) has its own
-column; "no" raises `UnsupportedError(feature='branch_form')`. On `pwl`
-and `trbdf2` a mode whose ideal elements (`R_on = 0` or `g_off = 0`)
-make a state dependent (an inductor cut-set, a capacitor loop) is
-refused with `feature='dependent_states'` until the re-initialisation
-service lands; a node bounded only by open ideal elements with
+column; "no" raises `UnsupportedError(feature='branch_form')`. A mode
+whose ideal elements (`R_on = 0` or `g_off = 0`) make a state dependent
+(an inductor cut-set, a capacitor loop) runs on `pwl` with
+`discontinuity_restart=True` and is recorded in `res.reinit_records`
+(`on_impulse='error'` refuses it with `feature='impulse'`); without the
+rule, and on `trbdf2`, it is refused with
+`feature='dependent_states'`; a node bounded only by open ideal elements with
 `g_off = 0` is refused with `feature='floating_node'`, a loop of closed
 ideal elements and voltage sources with `feature='ideal_voltage_loop'`.
 

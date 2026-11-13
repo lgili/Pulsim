@@ -996,6 +996,44 @@ def test_branch_form_cell(kind, engine):
                 k._branch_form_capabilities()[kind][engine])
 
 
+# Dependent modes (a switch opening an inductor cut-set, task 5.5): pwl
+# re-initialises under the restart rule; every other cell is refused by
+# name (trbdf2 statically, dsed/bdf1 because the branch form is refused).
+_DEP_REFUSAL = {"pwl": "dependent_states", "trbdf2": "dependent_states",
+                "dsed": "branch_form", "bdf1": "branch_form"}
+
+
+@pytest.mark.parametrize("engine,restart", [(e, False) for e in ENGINES] + [("pwl", True)])
+def test_dependent_states_cell(engine, restart):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_ideal_switch("S", "vin", "a", 0.0, 0.0)
+    b.add_resistor("R", "a", "m", 1.0)
+    b.add_inductor("L", "m", "gnd", 1e-3)
+
+    def fn(t):
+        m = p.SwitchStateMask(1)
+        m.set(0, t < 2e-4)
+        return m
+    kw = dict(discontinuity_restart=True) if restart else {}
+    if engine in ("pwl", "dsed"):
+        kw["dt"] = 5e-6
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if engine == "bdf1":
+                r = k.run_transient_bdf1(
+                    b, k.SimulationOptions(t_start=0.0, t_end=3e-4, dt=5e-6), fn)
+            else:
+                r = p.simulate(b, 3e-4, engine=engine, switch_fn=fn, **kw)
+    except p.UnsupportedError as e:
+        assert (e.engine, e.feature, e.device) == (engine, _DEP_REFUSAL[engine], "S")
+        assert not (engine == "pwl" and restart), f"pwl+restart refused: {e}"
+        return
+    assert engine == "pwl" and restart, f"{engine} ran a dependent mode silently"
+    assert len(r.reinit_records) == 1
+
+
 def test_branch_form_matrix_equals_the_docs():
     import pathlib
     doc = (pathlib.Path(__file__).resolve().parents[2] / "docs"

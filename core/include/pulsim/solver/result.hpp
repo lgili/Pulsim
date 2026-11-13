@@ -51,6 +51,22 @@ namespace pulsim::solver {
 /// state vectors
 /// themselves remain at the dt grid; only the COMMUTATION
 /// timestamp is sub-step accurate.
+/// add-branch-form-ideal-switch D4: one impulsive re-initialisation. The
+/// mode entered at `t` makes `states` dependent (sum_j s_j x_j = d); the
+/// states jump by the projection x+ = x- - M^-1 K^T lambda with M = L (a
+/// cut-set: lambda is the flux in V*s) or C (a capacitor loop: the charge
+/// in C), and `dW = lambda * (K x- - d) / 2` J leaves the circuit.
+struct ReinitRecord {
+    Real t = 0;                      ///< start of the step that carried it
+    std::string kind;                ///< "cut_set" | "capacitor_loop"
+    std::vector<std::string> devices;  ///< the ideal elements involved
+    std::vector<std::string> states;   ///< the inductors / capacitors
+    Real lambda = 0;                 ///< V*s (cut-set) or C (loop), signed
+    Real dW = 0;                     ///< energy removed [J], >= 0
+    Real projection_gap = 0;         ///< max |x_proj - x(t+h)| over states
+    long sample = -1;                ///< stored sample of the pulse, or -1
+};
+
 struct CommutationEvent {
     Real  t_estimated;
     Index branch_id;
@@ -294,6 +310,11 @@ struct SimulationResult {
     // add-branch-form-ideal-switch D3: structural passes run (one per
     // distinct mode of a circuit with an ideal branch-form element).
     Size mode_structure_checks = 0;
+    /// Ideal diodes turned OFF because they closed a loop of sources and
+    /// closed ideal elements (add-branch-form-ideal-switch D3).
+    Size ideal_loop_releases = 0;
+    /// add-branch-form-ideal-switch D4: impulsive re-initialisations.
+    std::vector<ReinitRecord> reinit_records;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or
