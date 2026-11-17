@@ -104,6 +104,10 @@ _VALID_INTEGRATORS = ("auto", "rk45", "bdf2")
 # usage site so it doesn't drift out of sync.)
 
 
+class _InconsistentInitialState(ValueError):
+    """A full-MNA initial_state that no reduced state reproduces."""
+
+
 def _validate_engine_kwargs(
     *,
     engine: str,
@@ -749,9 +753,19 @@ def run_dsed_from_builder(
 
     # ---- Stage 3: initial state -------------------------------------
     n_state = adapter.n_state
+    full_x0 = None
+    ambiguous = False
     if opts.initial_state is not None:
         x0 = np.asarray(opts.initial_state, dtype=float)
-        if x0.shape != (n_state,):
+        n_mna = builder.pool.state_size(builder.graph)
+        if x0.shape == (n_mna,):
+            # a full-MNA vector (a DC operating point): projected onto the
+            # reduced state by the native adapter below, checked consistent.
+            # When the two sizes coincide the reading is ambiguous: it is
+            # accepted only where both readings give the same state.
+            full_x0, x0 = x0, np.zeros(n_state, dtype=float)
+            ambiguous = n_mna == n_state
+        elif x0.shape != (n_state,):
             raise ValueError(
                 f"simulate(engine='dsed'): initial_state has shape "
                 f"{x0.shape}, expected ({n_state},)."
@@ -800,6 +814,24 @@ def run_dsed_from_builder(
             # 13.2: engine='exact' refuses a segment with no exact step
             native_adapter.set_refuse_implicit(not allow_implicit_segments)
             ic_adjustment = None
+            if full_x0 is not None:
+                native_adapter.set_mask(initial_mask)
+                x0, adj = native_adapter.reduced_state_from_full(full_x0)
+                x0 = np.asarray(x0, dtype=float)
+                nn = builder.graph.num_nodes
+                scale = max(1.0, float(np.abs(full_x0[:nn]).max(initial=0.0)))
+                if ambiguous and not np.allclose(x0, full_x0, rtol=0.0, atol=1e-12 * scale):
+                    raise _InconsistentInitialState(
+                        f"simulate(engine='dsed'): initial_state has {n_state} entries, "
+                        "both the reduced state size and the full-MNA size of this "
+                        "circuit, and the two readings differ; pass the reduced states "
+                        "through the builder's c0= / i0= / set_initial instead.")
+                if adj > 1e-9 * scale:
+                    raise _InconsistentInitialState(
+                        f"simulate(engine='dsed'): initial_state is a full-MNA vector "
+                        f"whose capacitor voltages are not consistent with one reduced "
+                        f"state of the starting mode (largest adjustment {adj:.3g} V); "
+                        f"pass a consistent vector or the {n_state} reduced states.")
             if builder_initial_state is not None:
                 native_adapter.set_mask(initial_mask)
                 x0, ic_adjustment = native_adapter.reduced_initial_state(
@@ -883,7 +915,7 @@ def run_dsed_from_builder(
                 if key in native_res:
                     res.diagnostics[key] = native_res[key]
             return res
-        except UnsupportedError:
+        except (UnsupportedError, _InconsistentInitialState):
             # A refusal is an answer, not a reason to try the next
             # bridge (which would run the circuit without the device).
             raise
@@ -901,6 +933,13 @@ def run_dsed_from_builder(
                 raise
             pass
 
+    if full_x0 is not None and ambiguous:
+        x0 = full_x0          # the non-native bridges read it as reduced, as before
+    elif full_x0 is not None:
+        raise ValueError(
+            f"simulate(engine='dsed'): initial_state has shape {full_x0.shape}, "
+            f"expected ({n_state},); a full-MNA vector is accepted only on the "
+            "native adapter.")
     if mode_selection in ("shadow", "lcp"):
         raise unsupported(
             "dsed", "mode_selection", message=

@@ -1076,6 +1076,33 @@ void init_module(py::module_& m) {
             "(the builder's c0= / i0= / set_initial), and the largest capacitor-voltage "
             "adjustment the charge-conserving projection made (0 when the "
             "declared values are consistent).")
+        .def("reduced_state_from_full",
+            [](const NativeAdapter& ad, const Vector& x) {
+                // A full-MNA vector (a DC operating point) read the way the
+                // builder's c0= / i0= are: every capacitor's branch voltage,
+                // every inductor's current, projected onto the current
+                // mask's reduced state.
+                const auto& g = ad.graph();
+                const auto& pool = ad.pool();
+                if (x.size() != pool.state_size(g))
+                    throw std::invalid_argument("reduced_state_from_full: size mismatch");
+                using K = pulsim::pwl::DevicePool::StoredKind;
+                std::unordered_map<pulsim::Index, Real> ics;
+                auto v = [&](pulsim::Index n) { return n >= 0 ? x[n] : Real{0}; };
+                for (pulsim::Index bid = 0; bid < g.num_branches(); ++bid) {
+                    if (!pool.is_registered(bid)) continue;
+                    const auto k = pool.kind_of(bid);
+                    if (k == K::Capacitor)
+                        ics[bid] = v(g.branch(bid).from) - v(g.branch(bid).to);
+                    else if (k == K::Inductor)
+                        ics[bid] = x[pool.branch_var_id_for_inductor(bid, g)];
+                }
+                return ad.reduced_initial_state(ics);
+            },
+            py::arg("x_full"),
+            "The reduced state of the current mask from a full-MNA vector "
+            "(e.g. a DC operating point) and the largest capacitor-voltage "
+            "adjustment its projection needed (0 when consistent).")
         .def("_mode_select_at",
             [](const NativeAdapter& ad, const pulsim::topology::SwitchStateMask& mask,
                Real t, const Vector& x_full, Real h_e, Real tol) {

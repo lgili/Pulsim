@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### `engine='exact'` accepts a full-MNA `initial_state` (a DC operating point)
+
+It is projected onto the starting mode's reduced state (capacitor voltages, inductor currents),
+as `c0=` / `i0=` are; an inconsistent vector raises ValueError. It raised a shape error before.
+
 ### `engine='exact'`: diode modes on a floating DC bus no longer depend on rounding
 
 The complementarity selector imposes a floating island's KCL exactly in its port problem

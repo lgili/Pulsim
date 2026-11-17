@@ -2735,6 +2735,10 @@ class _NativeCircuitBuilderAdapter:
         """
         add-exact-propagator-strategy D5: the reduced state of the current mask from a full-MNA initial vector (the builder's c0= / i0= / set_initial), and the largest capacitor-voltage adjustment the charge-conserving projection made (0 when the declared values are consistent).
         """
+    def reduced_state_from_full(self, x_full: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> tuple[typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], float]:
+        """
+        The reduced state of the current mask from a full-MNA vector (e.g. a DC operating point) and the largest capacitor-voltage adjustment its projection needed (0 when consistent).
+        """
     def rhs(self, t: float, x: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
         """
         Continuous-time RHS: dx/dt = A·x + b(t).

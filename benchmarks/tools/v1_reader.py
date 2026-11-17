@@ -98,8 +98,8 @@ class BenchCase:
     def _dc_start(self, b, switch_fn):
         """v1 without ``uic`` started from the DC operating point. Return it
         only when it gives a reactive state a non-zero value (otherwise it is
-        the zero start every engine already takes); dsed refuses a full
-        state vector, which is reported as its refusal."""
+        the zero start every engine already takes); dsed projects a full
+        state vector onto its reduced state (refusing an inconsistent one)."""
         names = b.state_var_names()
         op = pulsim.compute_dc_op(b, mask=switch_fn(self.t_start) if switch_fn else None)
         idx = {n: i for i, n in enumerate(names)}
