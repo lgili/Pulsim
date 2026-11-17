@@ -482,6 +482,22 @@ public:
         return full;
     }
 
+    /// The current mask's recovery map (x_full = R·x + r, DC sources)
+    /// and energy scale √m per state: period_integrals.hpp reads the
+    /// observables and the modal basis of a mode from them.
+    [[nodiscard]] const DenseMatrix& recover_from_state() const {
+        ensure_current_resolved_();
+        return current_entry_->recover_from_state;
+    }
+    [[nodiscard]] const Vector& recover_const() const {
+        ensure_current_resolved_();
+        return current_entry_->recover_const;
+    }
+    [[nodiscard]] Vector energy_scale() const {
+        ensure_current_resolved_();
+        return energy_scale_(*current_entry_, 0);
+    }
+
     /// The graph / pool this adapter was built over — the diode
     /// predicate derivation (v2.0 Phase 3) runs its census on the
     /// same objects so the two engines cannot drift.

@@ -118,9 +118,11 @@ refused [1.e+30 1.e+30] [1.e+30]
   the last step) is below `tol`; the circuit is re-simulated only when
   `temperature_dependent=True` (then `build` reads `design["_T_j"]`).
 * `ev.evaluate_many(designs, workers=8)` keeps the input order and gives
-  the same records on 1 or 8 threads. The `pss` route is mostly Python
-  today, so threads do not speed it up; `backend="process"` helps for
-  large batches.
+  the same records on 1 or 8 threads. On the `pss` route the period
+  runs and the KPI integrals are one kernel call with the GIL released
+  (`counters["kpi_path"] == "kernel"`, about 0.4 ms per buck design),
+  but the Newton loop is Python, so threads do not speed it up;
+  `backend="process"` helps for large batches of picklable evaluators.
 
 ## 4. Why derivative-free
 

@@ -115,11 +115,8 @@ def _volume(per):
     """Box volume (m^3) of the illustrative law; heatsink sized so the
     hotter switch sits at 125 C."""
     d, k, loss = per.design, per.kpis, per.losses
-    i_l = np.asarray(per.result.i("L"))
-    t = np.asarray(per.result.times)
-    i_pk = float(np.abs(i_l[(t >= per.t_from) & (t <= per.t_to)]).max())
-    i_rms = per.rms(i_l)
-    v_l = K_L * (d["L"] * i_pk * i_rms) ** 0.75
+    # default KPIs (closed forms on the kernel path): no waveform needed
+    v_l = K_L * (d["L"] * k["i_peak.L"] * k["i_rms.L"]) ** 0.75
     v_c = K_C * d["C"] * k["v_out"] ** 2
     r_sa = _r_th_sa(d, loss)
     # finite at the smallest heatsink: the r_th_sa constraint flags it
