@@ -931,8 +931,13 @@ public:
             return ids.size() - 1;
         };
         std::vector<std::pair<std::size_t, std::size_t>> edges;
-        for (const auto& c : cps)
-            edges.emplace_back(idx(c.primary_branch_id), idx(c.secondary_branch_id));
+        for (const auto& c : cps) {
+            // two statements: argument order is unspecified (GCC numbered the
+            // secondary first and named the group "L2+L1")
+            const auto a = idx(c.primary_branch_id);
+            const auto b = idx(c.secondary_branch_id);
+            edges.emplace_back(a, b);
+        }
         // union-find over the windings
         std::vector<std::size_t> root(ids.size());
         for (std::size_t i = 0; i < root.size(); ++i) root[i] = i;
