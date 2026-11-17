@@ -1100,9 +1100,13 @@ void init_module(py::module_& m) {
                 pulsim::events::ModeSelector sel;
                 sel.tol = tol;
                 const auto sc = ad.port_scale_full(x_full);
+                std::vector<pulsim::Size> sidx;
+                for (const auto& d : census.entries()) sidx.push_back(d.switch_idx);
                 const auto out = sel.select(ports, prev,
-                    [&](Real h, pulsim::DenseMatrix& Zh, Vector& uh) {
-                        ad.diode_port_problem_full(mask, t, x_full, h, nodes, Zh, uh);
+                    [&](Real h, const std::vector<char>& anchor, pulsim::DenseMatrix& Zh, Vector& uh) {
+                        auto m = mask;   // posed in the anchor mode (DECISIONS #30)
+                        for (std::size_t i = 0; i < sidx.size(); ++i) m.set(sidx[i], anchor[i] != 0);
+                        ad.diode_port_problem_full(m, t, x_full, h, nodes, Zh, uh);
                     }, h_e, sc);
                 py::dict d;
                 d["diodes"] = names;

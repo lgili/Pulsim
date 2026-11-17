@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### `engine='exact'`: diode modes on a floating DC bus no longer depend on rounding
+
+The complementarity selector imposes a floating island's KCL exactly in its port problem
+(an all-OFF bridge's bus, tied only through g_off or a >= 1 Mohm tie) and poses its widened
+passes in the candidate mode. Before, the selected mode at a series-pair turn-off changed with
+the platform (GitHub CI, Linux). Survey trajectories are bit-identical; the selection counters
+(`leak_pins`, `ties`) can change.
+
 ### `engine='exact'`: current waveforms exact, event samples read their sources' left limit
 
 Sine, pulse and table current sources (`add_sine_current_source`,

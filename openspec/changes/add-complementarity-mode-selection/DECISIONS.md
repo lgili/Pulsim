@@ -533,3 +533,71 @@ choices it did not pin.
     included), median of 3 interleaved runs: `'lcp'` 0.9–2.6× the
     default; the per-decision time is not separated by any counter.
     Information, not a gate. → Reverse: n/a (measurement).
+
+30. **A floating island's KCL is imposed exactly in the port problem, and
+    a widened pass is posed in its candidate mode (fixes the Linux CI
+    selector divergence; revisits #22 and #27).** GitHub CI (Linux,
+    Eigen 3.4.0) selected a different mode from the prototype at two
+    bridge1_vf0 events, and the leak-pin count changed with the
+    platform (Mac vf0 3 / vf07 2, Linux arm64 vf07 3). Two rounding
+    sources, measured:
+    - *The island's common mode in the port factor.* `probes/island_rounding.py`
+      poses the bridge's all-OFF companion at a consistent state and
+      solves it in double and in mpmath (60 digits), h_e/T_ref 1e-12 …
+      1e-4, tie none / 1 MΩ / 1 GΩ / 1 TΩ. Worst port-voltage error:
+      history form 2.7e-3 … 60 V (it grows as 1/h_e); increment form
+      (#22) 2e-11 … 2.3e-8 V, flat in h_e, the bound of #27
+      (ε·|internal current|/G_tie, about tol_w = 1e-7 V here); the
+      island's own impedance (a Z entry, 2.5e8 Ω) is wrong by 2.2e-5 …
+      0.78 relative. Neither form is robust. With the island's KCL sum
+      imposed exactly both forms give 2e-15 … 3.5e-14 V and the island
+      impedance to 2.4e-16, at every h_e and tie. The sum must be taken
+      from the boundary branches themselves: column sums of the
+      assembled G keep the 1/R rounding of the leaks (1.4e-8 … 1.7e-8 V).
+      Implementation (`NativeCircuitBuilderAdapter::port_islands_of_`,
+      per mask): union-find over the nodes joining every element except
+      OFF switches / diodes and resistors of ≤ 1 µS (ties: the builder's
+      1 GΩ and user 1 MΩ); a component without ground, of ≥ 2 nodes, with
+      a non-empty boundary is an island; any device kind the rule does
+      not classify (controlled sources, transformers, nonlinear devices)
+      disables it for the circuit. Sources join their nodes, so no source
+      sits on an island's boundary and its KCL sum has no source term.
+      After each solve J·s = f: σ = g·s − Σ_S f, s −= w·σ/(g·w),
+      w = J⁻¹e_ref — one more back-substitution per island and port
+      problem.
+    - *The candidate's split read through the previous mode.* At a
+      series-pair turn-off (D1 + D4 ON, both at a pA residual) the
+      widened passes pivoted the ON-mode port matrix onto the all-OFF
+      candidate: the 2×2 block has condition 4.5e11–5e11, and the pair's
+      gaps came out ±0.507 V (×1) and ±3.6e-3 V (×100) where the
+      all-OFF mask gives −9.77e-12 / −9.88e-8 V on both (`probes/pair_split.py`;
+      the same numbers to 10 digits when the pivot is
+      redone in mpmath from the double H: the information is lost in H,
+      not in the pivot). A pass > 0 is now posed in the candidate mode
+      (decided ports as decided, ties OFF) when the caller's port
+      callback takes the mode (`std::is_invocable`; the scheduler and
+      `_mode_select_at` do; a 3-argument callback keeps the old
+      behaviour); hysteresis still holds only ports OFF before the event.
+      Pass 0 is unchanged.
+    Result: on bridge1_vf0 / vf07 the selected mode equals the
+    prototype's at every event with no leak pins (were 2 / 2, and 3 with
+    the history form); bridge3_cfilter keeps its 12 pins, one per
+    turn-off (#13, structural). Rounding fuzz (20 random last-bit
+    perturbations of each event state): the selection never changes on
+    bridge1_vf0 / vf07 / bridge3_cfilter / bridge3_overlap (before: two
+    bridge1_vf0 events, 0.0051 and 0.0251 s, changed mode); the
+    prototype's own decisions are fuzz-stable on the same families (it
+    is double precision; its decisions sit outside rounding, so it is
+    not ported to mpmath). dsed runs of the bridges (V_f 0 / 0.7, and
+    the 325 V bridge on a 1 MΩ tie that chattered on trbdf2 under Linux)
+    with every component perturbed at 1e-15: one mode sequence over 21
+    runs, the bus within 2.2e-11 of pwl at dt 1e-7 / 5e-8. Bit identity:
+    golden 21/21, `bit_identity.py` 36/36, `survey_bit_identity.py` 81
+    identical + the 9 settle-only refusals unchanged (the engine's judge
+    had already overruled those pins; the trajectories never moved).
+    Tests: `test_floating_island_rounding.py`;
+    `test_mode_selector.py::LEAK_PINS` keeps only bridge3_cfilter. Not
+    removed: #27's refusal where the factor itself is numerically
+    singular (1 TΩ ties, h_e ≤ 1e-10·T_ref: no LU to correct). → Reverse:
+    drop the `fix` calls in `diode_port_problem_full` and the
+    anchored callbacks (each half alone is measurable with the probes).

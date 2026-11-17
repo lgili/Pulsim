@@ -50,6 +50,8 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <numbers>
@@ -970,6 +972,31 @@ public:
         }
         Vector& sol = port_sol_;
         cache_.solve_at(mask, dt, rhs, sol);
+        // Floating islands (DECISIONS #30): the factor rounds the island's
+        // common mode to ε·(internal current)/G_tie, about tol_w on a bridge
+        // with every diode OFF, so rounding picked modes. Each island's KCL
+        // sum (boundary conductances only) is imposed exactly.
+        const auto& islands = port_islands_of_(mask);
+        std::vector<Vector> ws;
+        std::vector<Real> kap;
+        for (const auto& isl : islands) {
+            rhs = -b_c;
+            rhs[isl.ref] -= Real{1};          // J·w = e_ref
+            cache_.solve_at(mask, dt, rhs, port_w_);
+            ws.push_back(port_w_);
+            kap.push_back(island_dot_(isl, port_w_));
+        }
+        // J·s = f: σ = g·(base + s) − Σ_S f, with Σ_S f = src(island)
+        auto fix = [&](Vector& s, const Vector* base, auto&& src) {
+            for (std::size_t m = 0; m < islands.size(); ++m) {
+                Real sig = island_dot_(islands[m], s) - src(islands[m]);
+                if (base) sig += island_dot_(islands[m], *base);
+                if (kap[m] != Real{0} && std::isfinite(kap[m])) s -= ws[m] * (sig / kap[m]);
+            }
+        };
+        // J·δ = −(G·x + b): summed over an island, g·(x + δ) = 0 (no source
+        // sits on an island's boundary, internal ones cancel)
+        fix(sol, &xf, [](const PortIsland&) { return Real{0}; });
         const auto k = static_cast<Eigen::Index>(ports.size());
         auto vp = [&](const Vector& s, std::size_t j) {
             const auto [a, c] = ports[j];
@@ -988,6 +1015,10 @@ public:
             if (a >= 0) rhs[a] += Real{1};
             if (c >= 0) rhs[c] -= Real{1};
             cache_.solve_at(mask, dt, rhs, sol);
+            fix(sol, nullptr, [&](const PortIsland& isl) {   // Σ_S(−E_j)
+                return Real((c >= 0 && isl.in[static_cast<Size>(c)]) ? 1 : 0)
+                     - Real((a >= 0 && isl.in[static_cast<Size>(a)]) ? 1 : 0);
+            });
             for (Eigen::Index i = 0; i < k; ++i)
                 Z(i, j) = -vp(sol, static_cast<std::size_t>(i));
         }
@@ -1168,6 +1199,125 @@ private:
     mutable std::unordered_map<MaskT, std::pair<sparse::Matrix, Vector>> port_gb_;   // (G, b_c)
     mutable Vector port_x_full_, port_rhs_, port_sol_;
     mutable std::size_t n_port_solves_ = 0;
+
+    /// A floating island of the port companion (DECISIONS #30): nodes
+    /// joined by strong elements only, tied to the rest through weak
+    /// conductances (OFF switches / diodes, resistors ≤ 1 µS). `g`: the
+    /// island's KCL sum as a row over the MNA unknowns, from the boundary
+    /// branches alone (every internal stamp, C/h included, cancels
+    /// analytically and is left out).
+    struct PortIsland {
+        Index ref = -1;                         // an island node (the correction's injection row)
+        std::vector<std::pair<Index, Real>> g;  // (column, Σ_S G_column) of the boundary
+        std::vector<char> in;                   // in[node]: node belongs to the island
+    };
+    mutable std::unordered_map<MaskT, std::vector<PortIsland>> port_islands_;
+    mutable Vector port_w_;
+
+    /// The islands of `mask` (empty when the circuit has a device the
+    /// rule below does not classify, or none floats).
+    const std::vector<PortIsland>& port_islands_of_(const MaskT& mask) const {
+        auto it = port_islands_.find(mask);
+        if (it != port_islands_.end()) return it->second;
+        std::vector<PortIsland> out;
+        const Index nn = graph_.num_nodes();
+        std::vector<Index> up(static_cast<Size>(nn + 1));   // union-find; nn = ground
+        for (Index i = 0; i <= nn; ++i) up[static_cast<Size>(i)] = i;
+        auto root = [&](Index i) {
+            const Index v = i < 0 ? nn : i;
+            Index r = v;
+            while (up[static_cast<Size>(r)] != r) r = up[static_cast<Size>(r)];
+            return r;
+        };
+        auto join = [&](Index a, Index b) { up[static_cast<Size>(root(a))] = root(b); };
+        struct Weak { Index a, b; Real g; };
+        std::vector<Weak> weak;
+        constexpr Real kWeakResistor = Real{1e-6};   // siemens: ties (1 MΩ) and the builder's 1 GΩ
+        using K = pwl::DevicePool::StoredKind;
+        bool known = true;
+        Index sw = 0;
+        for (Index b = 0; b < graph_.num_branches() && known; ++b) {
+            const auto& br = graph_.branch(b);
+            K kind;
+            try {
+                kind = pool_.kind_of(b);
+            } catch (const std::out_of_range&) {
+                known = false;
+                break;
+            }
+            if (br.kind == topology::BranchKind::Switch) {
+                const bool on = mask.get(static_cast<Size>(sw++));
+                if (kind == K::Diode || kind == K::Switch) {
+                    if (on) join(br.from, br.to);
+                    else weak.push_back({br.from, br.to, kind == K::Diode
+                        ? pool_.diode_params(b).g_off : pool_.switch_g_off(b)});
+                } else {
+                    known = false;
+                }
+                continue;
+            }
+            switch (kind) {
+            case K::Resistor: {
+                const Real g = pool_.resistor_params(b).G;
+                if (std::abs(g) <= kWeakResistor) weak.push_back({br.from, br.to, g});
+                else join(br.from, br.to);
+                break;
+            }
+            case K::Capacitor: case K::Inductor: case K::VoltageSource:
+            case K::PWMVoltageSource: case K::SineVoltageSource: case K::PulseVoltageSource:
+            case K::CurrentSource: case K::SineCurrentSource: case K::PulseCurrentSource:
+            case K::PwlCurrentSource:
+                // strong, or a source: an island never has one on its boundary,
+                // so its source terms cancel in the KCL sum too
+                join(br.from, br.to);
+                break;
+            default:
+                known = false;
+            }
+        }
+        if (known) {
+            std::vector<Index> rt(static_cast<Size>(nn));
+            std::unordered_map<Index, Index> size;
+            for (Index i = 0; i < nn; ++i) ++size[rt[static_cast<Size>(i)] = root(i)];
+            const Index gr = root(-1);
+            std::unordered_map<Index, Size> slot;
+            for (Index i = 0; i < nn; ++i) {
+                const Index r = rt[static_cast<Size>(i)];
+                if (r == gr || size[r] < 2) continue;   // grounded, or nothing internal to cancel
+                auto [s, fresh] = slot.try_emplace(r, out.size());
+                if (fresh) {
+                    out.emplace_back();
+                    out.back().ref = i;
+                    out.back().in.assign(static_cast<Size>(nn), 0);
+                }
+                out[s->second].in[static_cast<Size>(i)] = 1;
+            }
+            for (auto& isl : out) {
+                std::unordered_map<Index, Real> col;
+                for (const auto& w : weak) {
+                    const bool ia = w.a >= 0 && isl.in[static_cast<Size>(w.a)];
+                    const bool ib = w.b >= 0 && isl.in[static_cast<Size>(w.b)];
+                    if (ia == ib) continue;   // internal, or not touching the island
+                    const Index i = ia ? w.a : w.b, o = ia ? w.b : w.a;
+                    col[i] += w.g;
+                    if (o >= 0) col[o] -= w.g;
+                }
+                isl.g.assign(col.begin(), col.end());
+                std::sort(isl.g.begin(), isl.g.end());   // a fixed summation order
+            }
+            std::erase_if(out, [](const PortIsland& isl) { return isl.g.empty(); });
+        }
+        return port_islands_.emplace(mask, std::move(out)).first->second;
+    }
+
+    /// Impose island `isl`'s KCL sum exactly on `s`, a solution of
+    /// J·s = f with Σ_S f = `src` (DECISIONS #30): s −= w·σ/(g·w),
+    /// σ = g·s − src, w = J⁻¹·e_ref.
+    static Real island_dot_(const PortIsland& isl, const Vector& s) {
+        Real a = Real{0};
+        for (const auto& [j, g] : isl.g) a += g * s[j];
+        return a;
+    }
 
     /// Sum sine + PWM + pulse + user-supplied contributions at time t.
     /// Always returns a full-MNA-size vector even when no dynamic

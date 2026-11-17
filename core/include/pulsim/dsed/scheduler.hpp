@@ -1049,8 +1049,11 @@ private:
         selector_.passive = passivity_.passive();
         const auto sel = selector_.select(
             shadow_ports_, prev,
-            [&](Real h, DenseMatrix& Z, Vector& u) {
-                system_.diode_port_problem(gates_prev, t, x_held, h, shadow_nodes_, Z, u);
+            [&](Real h, const std::vector<char>& anchor, DenseMatrix& Z, Vector& u) {
+                auto m = gates_prev;   // posed in the anchor mode (DECISIONS #30)
+                for (std::size_t j = 0; j < diodes_.size(); ++j)
+                    m.set(diodes_[j].switch_idx, anchor[j] != 0);
+                system_.diode_port_problem(m, t, x_held, h, shadow_nodes_, Z, u);
             },
             shadow_.h_e, sc,
             [&](const std::vector<char>& m) {
