@@ -68,6 +68,9 @@ opt = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    # CI runs pytest with --timeout: a hang fails with a traceback in
+    # minutes instead of a job cancelled after hours.
+    "pytest-timeout>=2.2",
     "pytest-asyncio>=0.21.0",
     "PyYAML>=6.0",
     # benchmark CLI visual layer (Onda 1 of bench-tool refresh):

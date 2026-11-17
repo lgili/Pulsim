@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import functools
 import itertools
+import pickle
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Sequence
@@ -148,6 +149,20 @@ def _run_one_reraise(args, job):
     return "ok", job(args)
 
 
+def _run_one_pickled(blob, job, reraise):
+    """Process-pool worker: loads its job here, so a job that does not
+    load in the child (its module is not importable there) raises in the
+    parent by name instead of killing the worker."""
+    try:
+        args = pickle.loads(blob)
+    except Exception as exc:  # noqa: BLE001 — re-raised with the cause
+        raise RuntimeError(
+            f"backend='process': a worker could not load its job ({exc!r}); "
+            "every function in a job must be importable by module name in "
+            "a fresh interpreter, with the same pulsim") from None
+    return (_run_one_reraise if reraise else _run_one_captured)(args, job)
+
+
 _BACKENDS = ("auto", "thread", "process")
 
 
@@ -213,21 +228,36 @@ def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose,
             for k, _ in enumerate(ex.map(run_captured, rest), first + 1):
                 progress(k)
     else:
-        from multiprocessing import Pool
-        with Pool(nw) as pool:
+        # A multiprocessing.Pool waits forever for a worker that died
+        # (spawn: a job whose module the child cannot import); this
+        # executor raises BrokenProcessPool instead.
+        from concurrent.futures import ProcessPoolExecutor
+        from concurrent.futures.process import BrokenProcessPool
+        blobs = []
+        for i in rest:   # refused before any worker starts
             try:
-                worker = (functools.partial(_run_one_captured, job=job)
-                          if not reraise else
-                          functools.partial(_run_one_reraise, job=job))
-                for k, (i, (status, out)) in enumerate(zip(rest, pool.imap(
-                        worker, [args_iter[i] for i in rest])), first + 1):
+                blobs.append(pickle.dumps(args_iter[i]))
+            except Exception as exc:
+                raise TypeError(
+                    f"backend='process': job {i} does not pickle ({exc}); "
+                    "use backend='thread' or top-level functions") from exc
+        worker = functools.partial(_run_one_pickled, job=job, reraise=reraise)
+        with ProcessPoolExecutor(nw) as ex:
+            try:
+                for k, (i, (status, out)) in enumerate(
+                        zip(rest, ex.map(worker, blobs)), first + 1):
                     if status == "ok":
                         kpi_list[i] = out[0]
                     else:
                         failed.append((i, out))
                     progress(k)
-            except Exception:
-                pool.terminate()
+            except BrokenProcessPool as exc:
+                raise RuntimeError(
+                    "backend='process': a worker process died before "
+                    f"returning ({exc}); a spawned worker must import the "
+                    "same pulsim and every function of the job") from exc
+            except BaseException:
+                ex.shutdown(wait=False, cancel_futures=True)
                 raise
     failed.sort()
     return kpi_list, failed, backend
@@ -268,7 +298,7 @@ def sweep(builder_factory: Callable[..., Any],
         ``res.step_loop_python_callbacks``: empty (the step loop is
         native, e.g. a ``make_pwm_switch_fn`` schedule) → the other
         jobs run on threads, which share the GIL-free kernel; any
-        Python callable → a `multiprocessing.Pool`. On threads,
+        Python callable → a process pool. On threads,
         `builder_factory` and `kpi_fn` run concurrently in this
         interpreter, so they must not share mutable state;
         ``"process"`` restores the separate-process model (arguments

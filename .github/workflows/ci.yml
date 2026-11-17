@@ -188,7 +188,7 @@ jobs:
       - name: Run Python tests
         run: |
           # the reference harness runs in its own job (reference-smoke)
-          pytest python/tests -v -m "not reference"
+          pytest python/tests -v -m "not reference" --timeout=900
 
   # =============================================================================
   # Reference harness (restore-reference-benchmark-harness): analytic set,
@@ -237,7 +237,7 @@ jobs:
           pip install ".[dev]"
 
       - name: Reference smoke (analytic, goldens, counters)
-        run: pytest python/tests/test_benchmark_harness.py -v -m reference
+        run: pytest python/tests/test_benchmark_harness.py -v -m reference --timeout=900
 
   # =============================================================================
   # Code Quality

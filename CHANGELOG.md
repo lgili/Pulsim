@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Process backend: a dead worker raises instead of hanging (integration batch 7)
+
+* **Fixed** `sweep(..., backend="process")` and
+  `Evaluator.evaluate_many(..., backend="process")` waited forever when a
+  worker died: under `spawn` (macOS, Windows) a job whose module the child
+  cannot import killed the worker while unpickling, and
+  `multiprocessing.Pool` never noticed (the CI python-tests jobs on macOS
+  and Windows hung for hours). The runner now uses a
+  `ProcessPoolExecutor`: the job is pickled in the parent (an unpicklable
+  job is refused by index before any worker starts, `TypeError`), loaded
+  inside the worker (an import failure comes back by name,
+  `RuntimeError`), and a worker that dies raises `RuntimeError` from
+  `BrokenProcessPool`.
+* CI runs pytest with `--timeout=900` (`pytest-timeout` joins the `dev`
+  extra).
+
 ### Design evaluation: review fixes (integration batch 6c)
 
 * **Fixed** a gate edge taken at the next grid point under sub-step

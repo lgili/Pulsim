@@ -370,7 +370,7 @@ out.kpis["v_out"]; out.failed; out.backend   # "serial" | "thread" | "process"
 - `"auto"` (default) runs the first job in the calling thread and reads
   its `res.step_loop_python_callbacks`. Empty (native schedule) → the
   other jobs run on a thread pool; the kernel releases the GIL, so they
-  run in parallel. Any Python callable → a `multiprocessing.Pool`, since
+  run in parallel. Any Python callable → a process pool, since
   threads would serialise on the GIL.
 - `"thread"` forces threads. `builder_factory` and `kpi_fn` then run
   concurrently in one interpreter: they must not share mutable state.
