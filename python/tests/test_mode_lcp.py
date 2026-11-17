@@ -61,13 +61,19 @@ def _half_wave_rl():
 
 
 def _sim(b, t_end, fn=None, guard=True, **kw):
+    """guard=False: the settle alone, with BOTH guards off (the kernel's
+    MODE_GUARD and the stored-sample check_diode_modes, which would name
+    the wrong mode instead of returning it)."""
     if fn is not None:
         kw["switch_fn"] = fn
+    check = DD.check_diode_modes
     DD.MODE_GUARD = guard
+    if not guard:
+        DD.check_diode_modes = lambda *a, **k: None
     try:
         return p.simulate(b, t_end=t_end, engine="dsed", **kw)
     finally:
-        DD.MODE_GUARD = True
+        DD.MODE_GUARD, DD.check_diode_modes = True, check
 
 
 def _end(r, node):

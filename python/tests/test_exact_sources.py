@@ -295,3 +295,22 @@ def test_ramp_into_rl_matches_the_closed_form():
     assert np.abs(np.asarray(r.i("L")) - ref).max() <= 1e-10 * 1.0
     assert np.any(t == TR)
     assert r.n_exact_steps == len(t) - 1
+
+
+def test_a_left_limit_sample_reads_its_sources_left_limit():
+    """Merge seam: a stored event sample is the left limit (the old mode), so at a source corner
+    it reads the source's left limit too. Before, the sample at the PWM's 50 us falling edge paired
+    D ON with the new 0 V level -- i(D) = -0.4966 A, which the stored-sample guard
+    (DiodeModeInconsistentError) named. The right limit carries the new level and mode."""
+    b = p.CircuitBuilder()
+    b.add_pwm_voltage_source("Vg", "in", "gnd", 5.0, 0.0, 1e4, 0.5)
+    b.add_resistor("R", "in", "a", 10.0)
+    b.add_diode("D", "a", "o", 1e3, 1e-9)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    r = p.simulate(b, t_end=3e-4, engine="exact")
+    t = np.asarray(r.times)
+    (k,) = np.flatnonzero(np.abs(t - 5e-5) < 1e-15)
+    assert r.v("in")[k] == 5.0 and bool(np.asarray(r.switch_states)[k, 0])
+    j = list(np.asarray(r.right_limit_index)).index(k)
+    assert np.asarray(r.right_limit_states)[j, b.node_id_of("in")] == 0.0
+    assert not np.asarray(r.right_limit_switch_states)[j, 0]

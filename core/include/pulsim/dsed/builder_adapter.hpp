@@ -44,6 +44,7 @@
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
+#include "pulsim/sources/current_waveform_b_extra.hpp"
 #include "pulsim/sources/pwm_b_extra.hpp"
 #include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -350,11 +351,24 @@ public:
     [[nodiscard]] Real next_source_corner_after(Real t) const {
         Real c = std::numeric_limits<Real>::infinity();
         for (const auto& ps : pwl_sources_) {
-            c = std::min(c, ps.pulse
-                ? models::PulseVoltageSource::next_corner_after(
-                      pool_.pulse_voltage_source_params(ps.branch), t)
-                : models::PWMVoltageSource::next_corner_after(
-                      pool_.pwm_voltage_source_params(ps.branch), t));
+            switch (ps.kind) {
+            case PwlSource::PulseV:
+                c = std::min(c, models::PulseVoltageSource::next_corner_after(
+                                    pool_.pulse_voltage_source_params(ps.branch), t));
+                break;
+            case PwlSource::PulseI:
+                c = std::min(c, models::PulseVoltageSource::next_corner_after(
+                                    pool_.pulse_current_source_params(ps.branch).w, t));
+                break;
+            case PwlSource::TableI:
+                c = std::min(c, pool_.pwl_current_source_params(ps.branch)
+                                    .w.next_breakpoint_after(t));
+                break;
+            case PwlSource::PwmV:
+            default:
+                c = std::min(c, models::PWMVoltageSource::next_corner_after(
+                                    pool_.pwm_voltage_source_params(ps.branch), t));
+            }
         }
         return c;
     }
@@ -488,14 +502,14 @@ public:
 
     /// The full MNA vector (recover_full) written into `out`.
     void recover_full_into(Real t, const Vector& x,
-                           Eigen::Ref<Vector> out) const {
+                           Eigen::Ref<Vector> out, Real left_by = Real{0}) const {
         ensure_current_resolved_();
         const LTIEntry& e = *current_entry_;
         out.noalias() = e.recover_from_state * x;
         out += e.recover_const;
         if (has_dynamic_sources_) {
             out.noalias() += e.recover_from_b *
-                             build_time_varying_b_extra_(t);
+                             build_time_varying_b_extra_(t, left_by);
         }
     }
 
@@ -602,7 +616,8 @@ private:
             }
             if (kind == K::PWMVoltageSource ||
                 kind == K::SineVoltageSource ||
-                kind == K::PulseVoltageSource) {
+                kind == K::PulseVoltageSource ||
+                sources::is_current_waveform(kind)) {
                 return true;
             }
         }
@@ -639,8 +654,9 @@ private:
                                          energy_scale_(entry, 0), h_max_);
             ++n_eig_;
         } else if (!b_extra_fn_) {
-            // sine pairs augmented; PWM / pulse sources enter each step
-            // as level + ramp through pwl_cols (D14)
+            // sine pairs augmented (voltage or current); PWM / pulse /
+            // table sources enter each step as level + ramp through
+            // pwl_cols (D14)
             if (has_sine_sources_) {
                 build_augmented_exact_(entry);
             } else {
@@ -652,8 +668,12 @@ private:
             const auto m = static_cast<Index>(pwl_sources_.size());
             entry.pwl_cols = DenseMatrix::Zero(entry.A.rows(), m);
             for (Index j = 0; j < m; ++j) {
-                entry.pwl_cols.col(j) =
-                    -entry.b_projection.col(pwl_sources_[static_cast<Size>(j)].src_var);
+                const auto& ps = pwl_sources_[static_cast<Size>(j)];
+                if (ps.kind == PwlSource::PwmV || ps.kind == PwlSource::PulseV) {
+                    entry.pwl_cols.col(j) = -entry.b_projection.col(ps.src_var);
+                } else {
+                    entry.pwl_cols.col(j) = entry.b_projection * current_stamp_(ps.branch);
+                }
             }
         } else {
             entry.exact.reason =
@@ -663,25 +683,38 @@ private:
         // path owns it.
     }
 
-    /// Whether a SineVoltageSource exists (its oscillator pair is
-    /// augmented into every mode's exact stepper).
+    /// Whether a sine voltage or current source exists (its oscillator
+    /// pair is augmented into every mode's exact stepper).
     [[nodiscard]] bool detect_sine_() const {
         using K = pwl::DevicePool::StoredKind;
         for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
             try {
-                if (pool_.kind_of(b_id) == K::SineVoltageSource) return true;
+                const K k = pool_.kind_of(b_id);
+                if (k == K::SineVoltageSource || k == K::SineCurrentSource) return true;
             } catch (const std::out_of_range&) {
             }
         }
         return false;
     }
 
-    /// A piecewise-linear source: PWM (levels) or pulse (levels and
-    /// ramps), by its MNA source row.
+    /// b_extra of a current source per ampere (compute_current_waveform_b_extra:
+    /// the current leaves `from` and returns at `to`).
+    [[nodiscard]] Vector current_stamp_(Index b_id) const {
+        Vector st = Vector::Zero(static_cast<Index>(pool_.state_size(graph_)));
+        const auto& br = graph_.branch(b_id);
+        if (br.from >= 0) st[br.from] -= Real{1};
+        if (br.to >= 0) st[br.to] += Real{1};
+        return st;
+    }
+
+    /// A piecewise-linear source: PWM (levels), pulse (levels and
+    /// ramps) voltage source by its MNA source row; pulse or table
+    /// current source by its stamp (current_stamp_).
     struct PwlSource {
+        enum Kind { PwmV, PulseV, PulseI, TableI };
         Index branch;
         Index src_var;
-        bool pulse;
+        Kind kind;
     };
 
     void collect_pwl_sources_() {
@@ -695,7 +728,17 @@ private:
             const K kind = pool_.kind_of(b_id);
             if (kind == K::PWMVoltageSource || kind == K::PulseVoltageSource) {
                 pwl_sources_.push_back({b_id, pool_.branch_var_id_for_source(b_id, graph_),
-                                        kind == K::PulseVoltageSource});
+                                        kind == K::PulseVoltageSource ? PwlSource::PulseV
+                                                                      : PwlSource::PwmV});
+            }
+        }
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            if (!pool_.is_registered(b_id)) continue;
+            const K kind = pool_.kind_of(b_id);
+            if (kind == K::PulseCurrentSource || kind == K::PwlCurrentSource) {
+                pwl_sources_.push_back({b_id, kInvalidIndex,
+                                        kind == K::PulseCurrentSource ? PwlSource::PulseI
+                                                                      : PwlSource::TableI});
             }
         }
     }
@@ -703,13 +746,36 @@ private:
     /// (value, right slope) of one PWL source at t, as the overlay
     /// (compute_pwm_b_extra / compute_pulse_b_extra) evaluates it.
     [[nodiscard]] std::pair<Real, Real> pwl_value_slope_(const PwlSource& ps, Real t) const {
-        if (ps.pulse) {
+        switch (ps.kind) {
+        case PwlSource::PulseV: {
             const auto& p = pool_.pulse_voltage_source_params(ps.branch);
             return {models::PulseVoltageSource::value_at(p, t),
                     models::PulseVoltageSource::slope_at(p, t)};
         }
-        return {models::PWMVoltageSource::value_at(
-                    pool_.pwm_voltage_source_params(ps.branch), t), Real{0}};
+        case PwlSource::PulseI: {
+            const auto& p = pool_.pulse_current_source_params(ps.branch).w;
+            return {models::PulseVoltageSource::value_at(p, t),
+                    models::PulseVoltageSource::slope_at(p, t)};
+        }
+        case PwlSource::TableI: {
+            // the piece the step from t lies in: the one holding the
+            // midpoint to the next knot (a knot landed on exactly reads
+            // its new piece however fmod rounded the wrap)
+            const auto& w = pool_.pwl_current_source_params(ps.branch).w;
+            const Real tn = w.next_breakpoint_after(t);
+            const Real v = w.value_at(t);
+            if (!std::isfinite(tn)) return {v, Real{0}};
+            const Real u = w.local_time(t + Real{0.5} * (tn - t));
+            if (u <= w.t.front() || u >= w.t.back()) return {v, Real{0}};
+            const auto it = std::upper_bound(w.t.begin(), w.t.end(), u);
+            const auto k = static_cast<std::size_t>(it - w.t.begin());
+            return {v, (w.v[k] - w.v[k - 1]) / (w.t[k] - w.t[k - 1])};
+        }
+        case PwlSource::PwmV:
+        default:
+            return {models::PWMVoltageSource::value_at(
+                        pool_.pwm_voltage_source_params(ps.branch), t), Real{0}};
+        }
     }
 
     /// Build the augmented exact stepper for a sine-driven mode.
@@ -726,7 +792,8 @@ private:
     void build_augmented_exact_(LTIEntry& entry) const {
         using K = pwl::DevicePool::StoredKind;
         struct SineInfo {
-            Index src_var;
+            Index src_var;          // a voltage source's row, or kInvalidIndex
+            Index branch;           // a current source's branch (its stamp)
             Real omega, amp, phase, v_dc;
         };
         std::vector<SineInfo> sines;
@@ -744,9 +811,23 @@ private:
                 continue;    // value_at degenerates to v_dc: DC-only
             }
             sines.push_back({
-                pool_.branch_var_id_for_source(b_id, graph_),
+                pool_.branch_var_id_for_source(b_id, graph_), kInvalidIndex,
                 Real{2} * std::numbers::pi_v<Real> * p.frequency,
                 p.v_amplitude, p.phase, p.v_dc});
+        }
+        // sine CURRENT sources: the same oscillator, entering by their stamp
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            if (!pool_.is_registered(b_id)
+                || pool_.kind_of(b_id) != K::SineCurrentSource) {
+                continue;
+            }
+            const auto& p = pool_.sine_current_source_params(b_id).w;
+            if (p.frequency <= Real{0}) {
+                continue;
+            }
+            sines.push_back({kInvalidIndex, b_id,
+                             Real{2} * std::numbers::pi_v<Real> * p.frequency,
+                             p.v_amplitude, p.phase, p.v_dc});
         }
 
         const auto n = entry.A.rows();
@@ -769,6 +850,13 @@ private:
             b_dc_mna[pool_.branch_var_id_for_source(b_id, graph_)]
                 += -p.v_dc;
         }
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            if (pool_.is_registered(b_id)
+                && pool_.kind_of(b_id) == K::SineCurrentSource) {
+                b_dc_mna += current_stamp_(b_id)
+                            * pool_.sine_current_source_params(b_id).w.v_dc;
+            }
+        }
 
         // Distinct frequencies, amplitude+phase folded per source.
         std::vector<Real> omegas;
@@ -790,7 +878,11 @@ private:
             // −amp·sin(ωt+φ) on the source row, reduced through
             // b_projection.
             Vector stamp = Vector::Zero(n_mna);
-            stamp[sn.src_var] = Real{-1};
+            if (sn.src_var != kInvalidIndex) {
+                stamp[sn.src_var] = Real{-1};
+            } else {
+                stamp = current_stamp_(sn.branch);
+            }
             const Vector col = entry.b_projection * stamp;
             q_sin[static_cast<Size>(j)]
                 += col * (sn.amp * std::cos(sn.phase));
@@ -1081,10 +1173,18 @@ private:
     /// Always returns a full-MNA-size vector even when no dynamic
     /// sources are present (the caller decides whether to short-
     /// circuit via `has_dynamic_sources_`).
-    [[nodiscard]] Vector build_time_varying_b_extra_(Real t) const {
-        Vector b = sources::compute_pwm_b_extra(pool_, graph_, t);
+    /// `left_by` > 0: a source that jumps exactly at t reads its LEFT
+    /// limit, value_at(t − left_by) (a stored event sample is the left
+    /// limit of the step that ended there).
+    [[nodiscard]] Vector build_time_varying_b_extra_(Real t, Real left_by = Real{0}) const {
+        Vector b;
+        sources::compute_pwm_b_extra(pool_, graph_, t, b, left_by);
         b += sources::compute_sine_b_extra(pool_, graph_, t);
-        b += sources::compute_pulse_b_extra(pool_, graph_, t);
+        Vector w;
+        sources::compute_pulse_b_extra(pool_, graph_, t, w, left_by);
+        b += w;
+        sources::compute_current_waveform_b_extra(pool_, graph_, t, w, left_by);
+        b += w;
         if (b_extra_fn_) {
             b += b_extra_fn_(t);
         }

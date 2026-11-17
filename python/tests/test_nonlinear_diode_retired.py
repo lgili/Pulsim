@@ -76,8 +76,17 @@ circuit:
 
 
 def test_yaml_refuses_the_retired_device_without_the_opt_in():
-    with pytest.raises(RuntimeError, match=r"Dn.*retired.*allow_non_passive"):
+    with pytest.raises(RuntimeError, match=r"Dn.*retired.*allow_non_passive") as ei:
         p.load_yaml_string(_YAML.format(extra=""))
+    # One type on every path: also the builder's RetiredDeviceError.
+    assert isinstance(ei.value, p.RetiredDeviceError)
+
+
+def test_yaml_file_refusal_is_a_retired_device_error(tmp_path):
+    f = tmp_path / "c.yaml"
+    f.write_text(_YAML.format(extra=""), encoding="utf-8")
+    with pytest.raises(p.RetiredDeviceError, match="Dn"):
+        p.load_yaml_file(str(f))
 
 
 def test_yaml_builds_it_with_the_opt_in():

@@ -94,12 +94,13 @@ def test_boost_zero_threshold_dsed_settle_is_wrong_and_the_guard_repairs_it(R, s
     import pulsim._dsed_dispatch as DD
     b, fn = _boost(0.0, R)
     assert REF_BOOST[R] - settle > 0.1
-    DD.MODE_GUARD = False
+    check = DD.check_diode_modes                 # isolate the kernel's own refusal
+    DD.MODE_GUARD, DD.check_diode_modes = False, (lambda *a, **k: None)
     try:
         with pytest.raises(p.UnsupportedError) as ei:
             p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn)
     finally:
-        DD.MODE_GUARD = True
+        DD.MODE_GUARD, DD.check_diode_modes = True, check
     assert (ei.value.feature, ei.value.device.split()[0]) == ("consistent_mode", "D1")
     r = p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn)
     assert _end(r, "out") == pytest.approx(REF_BOOST[R], abs=1e-5)

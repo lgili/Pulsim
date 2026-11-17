@@ -12,25 +12,35 @@ Steady-state gradient used by the small-signal test:
 `∂v_C*/∂D = 23.0895697 V` on the DCM buck (prototype, equal to a
 central finite difference to 3.5e-10).
 
+Slice 1 (tasks 1–4, 8) is implemented; decisions and deviations are in
+`DECISIONS.md`. The spec's source refusals ("a source that is not
+`T`-periodic") were true only for sine voltage sources until the
+integration fix of DECISIONS 12 extended them to the current sources. Notes on ticked items: 3.3's CCM Bode is checked on the
+Q = 8 buck of `test_sampled_ac.py`; 6.3's saltation guard is covered in
+slice 1 only by a hysteresis-band rectifier (M against a finite
+difference; without saltation it is off by 3.1e-5); 8.1's guides are a
+section of `docs/api-reference.md` (there is no separate steady-state or
+Bode guide).
+
 ## 1. Characterisation (no behaviour change)
-- [ ] 1.1 Tests that pin today's behaviour on the two bucks: `steady_state` CCM passes, DCM raises "no periodic orbit found"; `run_periodic_shooting` DCM returns 8.8998 V (−1.07 %); mark the DCM cases as the ones this change flips
-- [ ] 1.2 Port `probes/shooting_dcm.py` and `probes/peak_current_mode.py` into the test tree as reference implementations (numpy only), with the table above as constants
+- [x] 1.1 Tests that pin today's behaviour on the two bucks: `steady_state` CCM passes, DCM raises "no periodic orbit found"; `run_periodic_shooting` DCM returns 8.8998 V (−1.07 %); mark the DCM cases as the ones this change flips
+- [x] 1.2 Port `probes/shooting_dcm.py` and `probes/peak_current_mode.py` into the test tree as reference implementations (numpy only), with the table above as constants
 
 ## 2. Solver on the exact path (today's `dsed` adapter)
-- [ ] 2.1 Binding: per-mask `(A, b)`, the recovery row of each predicate, and an event log entry `(t, predicate, mask before, mask after)` for one period started from a given reduced state
-- [ ] 2.2 `periodic_steady_state`: map evaluation, `M = Π S_k·Φ_k` with `Φ_k` from the modal form, saltation from `f⁻`, `f⁺`, `∇g`
-- [ ] 2.3 Newton with the scaled norm, backtracking, transient fallback, budget, verification run (D4)
-- [ ] 2.4 Singular `I − M` and grazing-event diagnostics (D6, D2)
-- [ ] 2.5 Tests: DCM orbit within 1e-8 of the reference from the zero state in at most 8 period runs (prototype: 5, plus the verification run); the iteration passes through a CCM pattern; CCM orbit within 1e-9 in at most 4 period runs; agreement with a 4000-period transient within 1e-9; residual sequence shows quadratic convergence (each residual at most the square of the previous one times 1e3; prototype 2.2e-4, 3.0e-7, 5.7e-13)
+- [x] 2.1 Binding: per-mask `(A, b)`, the recovery row of each predicate, and an event log entry `(t, predicate, mask before, mask after)` for one period started from a given reduced state
+- [x] 2.2 `periodic_steady_state`: map evaluation, `M = Π S_k·Φ_k` with `Φ_k` from the modal form, saltation from `f⁻`, `f⁺`, `∇g`
+- [x] 2.3 Newton with the scaled norm, backtracking, transient fallback, budget, verification run (D4)
+- [x] 2.4 Singular `I − M` and grazing-event diagnostics (D6, D2)
+- [x] 2.5 Tests: DCM orbit within 1e-8 of the reference from the zero state in at most 8 period runs (prototype: 5, plus the verification run); the iteration passes through a CCM pattern; CCM orbit within 1e-9 in at most 4 period runs; agreement with a 4000-period transient within 1e-9; residual sequence shows quadratic convergence (each residual at most the square of the previous one times 1e3; prototype 2.2e-4, 3.0e-7, 5.7e-13)
 
 ## 3. Outputs
-- [ ] 3.1 Result type of D5; multipliers with their type; `stable`
-- [ ] 3.2 `sampled_model(inputs, outputs)` with `B_d = ∂P/∂u` from the same propagators (duty and source amplitude as inputs)
-- [ ] 3.3 Tests: DCM multipliers 0 (within 1e-9) and 0.988977 (within 1e-6); `M` equals a central finite difference of the map within 1e-7; `H(z = 1)` of duty-to-`v_C` equals 23.0895697 V within 1e-6 relative; duty-to-output of a 100 kHz CCM buck below 5 kHz within 1 % of `V_in/(1 + sL/R + s²LC)` (0.77 % today, `sampled_ac.py` docstring)
+- [x] 3.1 Result type of D5; multipliers with their type; `stable`
+- [x] 3.2 `sampled_model(inputs, outputs)` with `B_d = ∂P/∂u` from the same propagators (duty and source amplitude as inputs)
+- [x] 3.3 Tests: DCM multipliers 0 (within 1e-9) and 0.988977 (within 1e-6); `M` equals a central finite difference of the map within 1e-7; `H(z = 1)` of duty-to-`v_C` equals 23.0895697 V within 1e-6 relative; duty-to-output of a 100 kHz CCM buck below 5 kHz within 1 % of `V_in/(1 + sL/R + s²LC)` (0.77 % today, `sampled_ac.py` docstring)
 
 ## 4. Delegation on the exact path
-- [ ] 4.1 `steady_state` and `frequency_response` call the solver when the circuit is within the exact stepper's coverage; otherwise the existing code runs unchanged
-- [ ] 4.2 Tests: `steady_state` on the DCM buck (PWL diode, C++ schedule) returns the reference orbit; `frequency_response` on the DCM buck returns a finite response whose DC gain matches task 3.3
+- [x] 4.1 `steady_state` and `frequency_response` call the solver when the circuit is within the exact stepper's coverage; otherwise the existing code runs unchanged
+- [x] 4.2 Tests: `steady_state` on the DCM buck (PWL diode, C++ schedule) returns the reference orbit; `frequency_response` on the DCM buck returns a finite response whose DC gain matches task 3.3
 
 ## 5. Fixed and TR-BDF2 engines (needs `add-discontinuity-restart-rule`, `add-fixed-step-event-splitting`)
 - [ ] 5.1 Map on the true state with a restart at the section `t₀`
@@ -49,5 +59,5 @@ central finite difference to 3.5e-10).
 - [ ] 7.2 Tests: voltage-mode buck with a PI at the switching rate — the orbit has zero mean error within 1e-9 and equals a long transient within 1e-8
 
 ## 8. Docs and verification
-- [ ] 8.1 Steady-state guide (true state, section, what a multiplier outside the unit circle means), Bode guide, AI_GUIDE, CHANGELOG with the before/after numbers
-- [ ] 8.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check
+- [x] 8.1 Steady-state guide (true state, section, what a multiplier outside the unit circle means), Bode guide, AI_GUIDE, CHANGELOG with the before/after numbers
+- [x] 8.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check (slice 1: ctest not run — no core header changed and the ctest build does not compile the bindings)

@@ -38,6 +38,7 @@ namespace pulsim::pwl {
 enum class CossStage {
     Trapezoidal,   //!< i = (2/h)(Q(v) - Q_n) - i_n
     Bdf2Stage2,    //!< i = (c1 Q(v) + c2 Q_gamma + c3 Q_n)/h
+    BackwardEuler, //!< i = (Q(v) - Q_n)/h, h = the interval advanced
 };
 
 /// ADDS the Coss contributions to an already-zeroed (J_nl, f_nl).
@@ -59,13 +60,15 @@ inline Real refresh_nonlinear_capacitors(
     if (history.empty() || !(h > Real{0})) {
         return max_i;
     }
-    const Real two_over_h = Real{2} / h;
     const Real c1 = Real{2} + std::sqrt(Real{2});
     const Real gam = Real{2} - std::sqrt(Real{2});
     const Real rho = (Real{1} - gam) / gam;
     const Real c2 = -(Real{1} + rho) / (Real{1} - gam);
     const Real c3 = Real{1} / std::sqrt(Real{2});
     const bool bdf2 = (stage == CossStage::Bdf2Stage2);
+    // Backward Euler over h: the trapezoidal stamp at 2h without i_n.
+    const bool be = (stage == CossStage::BackwardEuler);
+    const Real two_over_h = be ? Real{1} / h : Real{2} / h;
     if (bdf2 && (q_gamma == nullptr
                   || q_gamma->size() != history.entries().size())) {
         throw std::invalid_argument(
@@ -83,7 +86,7 @@ inline Real refresh_nonlinear_capacitors(
         const Real i =
             bdf2 ? (c1 * q + c2 * (*q_gamma)[idx] + c3 * e.q_prev)
                        / h
-                 : two_over_h * (q - e.q_prev) - e.i_prev;
+                 : two_over_h * (q - e.q_prev) - (be ? Real{0} : e.i_prev);
         // Same conductance either way: c1/h == 2/(gamma*h).
         const Real g = bdf2 ? c1 * c / h : two_over_h * c;
         ++idx;

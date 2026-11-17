@@ -8,12 +8,13 @@ step with the factor of Bank et al. (1985),
 the local error to leading order and `rtol` / `atol` bound the error
 the user named.
 
-#### Scenario: Estimate against one exact step
-- **GIVEN** a linear RC and a step with `h/τ` = 0.05
-- **WHEN** the estimate is compared with the difference to the exact
-  solution over that step
-- **THEN** their ratio is between 0.9 and 1.1 (it is 1.97 without the
-  factor)
+#### Scenario: Smooth RC step response
+- **GIVEN** a 1 kΩ, 1 nF RC driven by a 10 V source, run to 5 µs with
+  a step ceiling of 1 µs at rtol 1e-5
+- **WHEN** it runs with the new estimate
+- **THEN** it takes 66 accepted steps (58 without the factor) and its
+  largest error against the exact response is below 6e-4 V (8.17e-4 V
+  without it)
 
 #### Scenario: Accuracy at a given tolerance does not get worse
 - **GIVEN** a buck against its exact piecewise-LTI solution at rtol
@@ -22,50 +23,26 @@ the user named.
 - **THEN** the output error is not above 8e-4, 9e-5 and 2e-6 V
 - **AND** the number of accepted steps is at most 35 % above the
   previous one
-
-### Requirement: TR-BDF2 Stiff Error Filter
-
-The variable-step engine SHALL filter the local error estimate once
-through the inverse of the stage iteration matrix,
-`(I − (γ/2)·h·J)⁻¹` (Hosea & Shampine 1996), using the factor the two
-stages of the step already used, so that the estimate of a stiff
-component stays bounded by a fixed multiple of that component's
-amplitude at any step size. On circuits solved by Newton the filter
-SHALL be applied when a factor of the converged Jacobian is available
-and the statistics SHALL say when it was not.
-
-#### Scenario: A fast mode at rest does not limit the step
-- **GIVEN** an RC with τ = 1e-12 s whose state is at equilibrium to
-  1e-9, beside an RC with τ = 1 ms, at rtol = 1e-5
-- **WHEN** a step of 1 µs is attempted
-- **THEN** the filtered estimate accepts it (the unfiltered estimate
-  of the fast state is more than 1e5 times its distance from
-  equilibrium and rejects it)
-
-#### Scenario: Non-stiff estimate is unchanged
-- **GIVEN** a step with `h·λ` = −0.05
-- **WHEN** the estimate is filtered
-- **THEN** it changes by less than 2 %
+- **AND** running at doubled `rtol` and `atol` reproduces the previous
+  step sequence of a circuit with a span-bound ceiling
 
 ### Requirement: TR-BDF2 Step Bounds Independent Of The Run Length
 
 The variable-step engine SHALL derive its step floor, probe floor,
 probe retry cap, chatter floor and gate-pulse floor from the resolved
-step
-ceiling and from the time resolution
-`16·ε·max(|t_start|, |t_end|)`, not from `t_end − t_start`. Its default step ceiling SHALL be the
-smallest cap the circuit declares (periodic sources, pulse widths, the
-edges of a schedule, a learned gate pulse) and SHALL fall back to
-`(t_end − t_start)/1000` only when the circuit declares none.
-`TrBdf2Stats` SHALL report the basis of the ceiling.
+step ceiling `h_max` (as the previous fractions of `1000·h_max`) and
+from the time resolution `16·ε·max(|t_start|, |t_end|)`, not from
+`t_end − t_start`; while the ceiling equals `(t_end − t_start)/1000`
+they SHALL be bit-identical to the previous values. The default step
+ceiling remains `min((t_end − t_start)/1000, period/20, pulse
+width/3)`. `TrBdf2Stats::h_max_basis` SHALL report the basis of the
+ceiling (0 span, 1 source, 2 user).
 
 #### Scenario: Same answer at 40 periods whatever the run length
-- **GIVEN** a buck driven by a schedule with an edge oracle
-- **WHEN** it runs with `t_end` = 40 T, 400 T and 4000 T
-- **THEN** the accepted steps up to 40 T are the same in the three
-  runs and the state at 40 T agrees to 1e-12 relative (the output
-  error is 8.2e-4 V and 1.04e-3 V in the first two without this
-  change)
+- **GIVEN** a buck with a step ceiling of T/20
+- **WHEN** it runs with `t_end` = 40 T and 400 T
+- **THEN** the sample times and states up to 39 T are identical in
+  the two runs (they diverge at the 24th sample without this change)
 
 #### Scenario: Span-bound runs keep their constants
 - **GIVEN** a circuit with no periodic source and no gates

@@ -38,6 +38,10 @@ TEST_CASE("kKindCaps has one row per StoredKind, named as the enum",
             == "NonlinearCapacitor");
     REQUIRE(stored_kind_name(DevicePool::StoredKind::IdealTransformer)
             == "IdealTransformer");
+    // add-controlled-source-set appended kinds 20-26 after the table.
+    REQUIRE(stored_kind_name(DevicePool::StoredKind::VCCS) == "VCCS");
+    REQUIRE(stored_kind_name(DevicePool::StoredKind::PwlCurrentSource)
+            == "PwlCurrentSource");
     for (const auto& row : kKindCaps) {
         INFO(row.name);
         REQUIRE(row.supports(Engine::FixedTrap));  // the reference engine

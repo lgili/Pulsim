@@ -42,6 +42,7 @@ finer pace.
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -253,6 +254,15 @@ class Mechanical:
 # 1. DC motor
 # =============================================================================
 
+_DC_OBSERVER_DEPRECATION = (
+    "{fn} is deprecated: the DC motor observer advances the speed by "
+    "forward Euler from the previous step (first order, 13.6 % speed "
+    "error at dt = 100 us on the add-mna-native-machines probe; pwl "
+    "only). Use CircuitBuilder.add_dc_machine, which solves the "
+    "machine inside the matrix (second order, pwl, trbdf2 and the DC "
+    "operating point). The observer is kept until a later release.")
+
+
 @dataclass
 class DcMotor:
     """A DC motor instance. Holds parameters + a `Mechanical` block.
@@ -289,6 +299,10 @@ def add_dc_motor(builder,
                     ) -> DcMotor:
     """Add a DC motor to the builder.
 
+    .. deprecated:: forward-Euler observer, first order and ``pwl``
+       only. Use :meth:`CircuitBuilder.add_dc_machine` (MNA-native,
+       second order, every engine). Emits a ``DeprecationWarning``.
+
     Topology added (between `armature_pos` and `armature_neg`):
 
         armature_pos ── R_a ── L_a ── (V_bemf=0) ── armature_neg
@@ -319,6 +333,8 @@ def add_dc_motor(builder,
         Constant load torque (Nm). For variable loads, pass
         `T_load_fn(t, omega) -> Nm`.
     """
+    warnings.warn(_DC_OBSERVER_DEPRECATION.format(fn="add_dc_motor"),
+                  DeprecationWarning, stacklevel=2)
     if Kt is None:
         Kt = Ke
     mech = Mechanical(J_kgm2=J, B_Nms_per_rad=B,
@@ -384,6 +400,9 @@ def make_dc_motor_observer(builder, motor: DcMotor, *, dt: float,
     name
         Trace prefix for :meth:`MotorObserverBundle.attach_to_result`.
     """
+    warnings.warn(
+        _DC_OBSERVER_DEPRECATION.format(fn="make_dc_motor_observer"),
+        DeprecationWarning, stacklevel=2)
     state_size = builder.pool.state_size(builder.graph)
     i_idx = builder.pool.branch_var_id_for_inductor(
         motor.inductor_branch_id, builder.graph)

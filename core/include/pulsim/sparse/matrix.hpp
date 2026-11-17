@@ -26,6 +26,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <vector>
 
@@ -117,6 +118,23 @@ inline void reserve_capacity(Matrix& M, Size nnz_estimate) noexcept {
 // -----------------------------------------------------------------------------
 inline void compress_in_place(Matrix& M) noexcept {
     M.makeCompressed();
+}
+
+// -----------------------------------------------------------------------------
+// zero_keep_pattern — `setZero()` that keeps a compressed matrix's pattern.
+//
+// Eigen's `setZero()` drops every stored entry, so the next `coeffRef +=`
+// inserts (and allocates). Zeroing the values instead lets a stamp find its
+// entry; `0 + v` is the value a fresh insert followed by `+= v` gives, so
+// the stamped values are unchanged (update-newton-persistent-solver 2.3).
+// An uncompressed matrix is cleared as before.
+// -----------------------------------------------------------------------------
+inline void zero_keep_pattern(Matrix& M) noexcept {
+    if (M.isCompressed()) {
+        std::fill_n(M.valuePtr(), M.nonZeros(), Real{0});
+    } else {
+        M.setZero();
+    }
 }
 
 // -----------------------------------------------------------------------------

@@ -60,6 +60,11 @@ fast = [
 lib = [
     "PyYAML>=6.0",
 ]
+# The worked optimisation example's NSGA-II (examples/optimization);
+# without it the example falls back to a Latin-hypercube sample.
+opt = [
+    "pymoo>=0.6",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -149,6 +154,7 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 markers = [
     "doc_snippets: executes the python blocks of the user-facing docs (python/tests/test_doc_snippets.py)",
+    "reference: reference benchmark harness (analytic set, pwl goldens, counter gate); its own CI job",
 ]
 
 [tool.coverage.run]

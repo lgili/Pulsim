@@ -166,6 +166,20 @@ public:
         return flux_and_inductance(e, x[e.branch_var_id], stage).first;
     }
 
+    /// SDIRK restart: pseudo previous flux λ0 + c·(λ1 − λ0). For the
+    /// hysteretic law λ1 is evaluated from the committed (H_n, M_n) —
+    /// the base stage 2 integrates from as well (a reversal inside the
+    /// step is the O(h) loop-tip error TR-BDF2's stage-1 base avoids).
+    void extrapolate_previous(const Vector& x1, Real c) {
+        for (auto& e : entries_) {
+            const Real lam = e.params.ja
+                ? models::JilesAthertonCore::evaluate(
+                      *e.params.ja, e.ja_state, x1[e.branch_var_id]).lambda
+                : lambda_at(e, x1);
+            e.lambda_old += c * (lam - e.lambda_old);
+        }
+    }
+
     /// Snapshot λ at the γ stage point; the BDF2 history term reads
     /// it. Must run between the two stages of a step. For the
     /// hysteretic law it also captures (H_γ, M_γ) — from the same
@@ -234,6 +248,15 @@ public:
                 e.lambda_old =
                     models::SaturableInductor::flux(e.i_L_old, e.params);
             }
+        }
+    }
+
+    /// TR-BDF2 post-event refresh: the stored voltage becomes the
+    /// probe's `v_from − v_to`; (λ, i, H, M) are not touched.
+    void refresh_derivatives(const Vector& x_probe) {
+        for (auto& e : entries_) {
+            e.V_L_old = stamping::read_node_voltage(x_probe, e.from)
+                        - stamping::read_node_voltage(x_probe, e.to);
         }
     }
 

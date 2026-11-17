@@ -1016,7 +1016,7 @@ def _warn_chatter_gaps(name: str, n_gaps: int, n_turn_offs: int,
     'trbdf2' / 'auto' and the event-driven 'dsed' do not have, and the
     warning's advice (compare with TR-BDF2) would be circular there.
     ``n_possible_chatter_gaps`` is still reported on every engine."""
-    if engine in ("trbdf2", "dsed"):
+    if engine in ("trbdf2", "dsed", "exact"):
         return
     if (n_gaps < 3 or 2 * n_gaps < n_turn_offs
             or not (t_gaps >= 0.01 * (t_cond + t_gaps))):

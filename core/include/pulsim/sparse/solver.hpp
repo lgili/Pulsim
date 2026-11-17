@@ -45,6 +45,7 @@
 
 #include <complex>
 #include <memory>
+#include <vector>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -69,6 +70,20 @@ namespace pulsim::sparse {
 // `DirectSolver = DirectSolverT<Real>` is the backward-compat alias
 // every existing Layer 1-9 consumer uses unchanged.
 // -----------------------------------------------------------------------------
+/// Symbolic analysis of one sparsity pattern, shared read-only between
+/// the solvers of every matrix with that pattern
+/// (update-linear-time-assembly tier 1). `outer` / `inner` are the
+/// compressed index arrays it was computed for; an adopting solver
+/// checks them against its matrix before using it.
+struct SymbolicAnalysis {
+    std::vector<Index> outer;
+    std::vector<Index> inner;
+    std::vector<Index> col_perm;       // new position -> original column
+    std::vector<Index> col_perm_inv;   // original column -> new position
+    std::vector<Index> etree;
+    int ordering = 0;                  // backend-specific ordering tag
+};
+
 template <typename Scalar = Real>
 class DirectSolverT {
 public:
@@ -185,6 +200,34 @@ public:
     /// `kInvalidIndex` and degrade to the un-named message.
     [[nodiscard]] virtual Index singular_index() const noexcept {
         return kInvalidIndex;
+    }
+
+    /// The analysis of the last successful `analyze(M)`, for sharing.
+    /// `M` must be the analysed matrix (its pattern is recorded) and
+    /// compressed. Default: nullptr (backend cannot share).
+    [[nodiscard]] virtual std::shared_ptr<const SymbolicAnalysis>
+    export_symbolic([[maybe_unused]] const MatrixType& M) const {
+        return nullptr;
+    }
+
+    /// Use `sym` as this solver's analysis of `M` instead of analysing.
+    /// Returns false — and leaves the solver un-analysed — when `M`'s
+    /// pattern is not the one `sym` was computed for, or the backend
+    /// cannot adopt; the caller then calls `analyze(M)`. Default: false.
+    [[nodiscard]] virtual bool adopt_symbolic(
+        [[maybe_unused]] const SymbolicAnalysis& sym,
+        [[maybe_unused]] const MatrixType& M) {
+        return false;
+    }
+
+    /// `x = M⁻¹ · (−(a + c))`, the cache's solve. Bit-equal to forming
+    /// `rhs = −(a + c)` and calling `solve(rhs, x)`; backends may fuse
+    /// the right-hand side into their row-permutation pass.
+    virtual void solve_neg_sum(const VectorType& a, const VectorType& c,
+                               VectorType& x) const {
+        static thread_local VectorType rhs;
+        rhs = -(a + c);
+        solve(rhs, x);
     }
 };
 

@@ -57,3 +57,44 @@ Choices made where the design left room:
 | `project_slow` with a ramp | The cached slow projection is used only when no PWL source exists; otherwise the full affine advance | The cache holds `hφ₁(Ah)b` for a fixed b; a ramp changes c0 at every step | — |
 | Table sources | None to make exact | The builder has no table / PWL voltage source; only `add_saturable_inductor_table` takes a table | — |
 | Single-shot pulse: which piece holds at a corner landed on exactly (reviewer finding) | `value_at` / `slope_at` compare `t < t_start + x` (the rounded sum `next_corner_after` returns) when `period == 0`; the periodic branch keeps `cycle_position`'s snap | Fresh-context review: `(t_start + e) - t_start` rounds below `e` for about 43 % of (t_start, e); the step landed on the corner then read the old piece, and `next_corner_after(corner)` already pointed past it, so the next exact step ran on the stale level. A 10 V, 300 ns pulse from 1 ms into 1 kohm / 1 nF peaked at 7.27 V instead of 2.59 V; the earlier tests all started at t = 0 or were periodic. Now `test_delayed_single_shot_pulse_reads_the_new_piece_at_its_corner` (instant and ramped edges, corners at 300 / 200 / 600 ns that round down) is within 1e-10; on the old build it was 6.3 V and 36 V off. pwl / trbdf2 bit-identical vs 450314ff, `bit_identity.py` 36/36 vs 25ceafec | Restore the `elapsed < x` comparison |
+
+## Merge of `feat/core-integration` (2026-11-13)
+
+The merge (integration 1aef1a52 into this branch at 876757ab) met four seams. Each was resolved
+by intent; pwl / trbdf2 are the merged tree's (the bit-identity baseline of every later step).
+
+| Question | Option taken | Evidence | How to reverse |
+|---|---|---|---|
+| Integration's sine / pulse / table CURRENT sources on the exact engine (they were numeric there; 13.2 refuses a numeric segment by default) | Exact: a sine current is a shared oscillator pair (`build_augmented_exact_`, entering by its node stamp); a pulse / table current is level + ramp between corners (`PwlSource::PulseI` / `TableI`, `pwl_cols` = `b_projection · stamp`), each corner a time event (`next_source_corner_after`). A table's slope is read at the midpoint to its next knot, so a knot landed on exactly reads its new piece whatever `fmod` rounded | The refusal broke the capability table (3 conformance cells said supported) and the periodic-steady-state solver (4 tests). `test_current_waveforms_are_exact_on_the_exact_engine`: every step exact, every corner a sample; `test_waveform_sources_agree_on_trbdf2_and_dsed` (trbdf2 rtol 1e-10) within 1e-6 on all three, unchanged | Refuse them as `'source'` in `refuse_implicit_step` |
+| A stored event sample at a source corner | It reads the sources' LEFT limit (`build_time_varying_b_extra_(t, left_by)` with half the last step, in `reconstruct_full_states` for the pre-event samples); the right limit keeps the new value | Integration's stored-sample guard named it: a PWM → R → D → C run paired D ON with the new 0 V level at the 50 µs edge (i(D) = −0.4966 A, `DiodeModeInconsistentError`). The sample was neither limit. `test_a_left_limit_sample_reads_its_sources_left_limit` | Pass `left_by = 0` |
+| The C++ `pulsim::ConvergenceFailure` in Python | Left as pybind11's default translation, `RuntimeError` (the class derives from `std::runtime_error`). No `pulsim.ConvergenceError` exists on the merged tree; inventing a name would compete with the branch that defines it. When that branch meets this one, register the translator there (`py::register_exception<pulsim::ConvergenceFailure>` onto its class); callers catching `RuntimeError` keep working only if its base stays a `RuntimeError` | `grep ConvergenceError` on the merged tree: only the comment in `errors/convergence.hpp` | — |
+| How the reference harness runs the exact engine | `v1_reader.BenchCase.run` passes the netlist's `dt` to the exact engine as its output grid (`dt_max`), as it does to pwl; trbdf2 adapts and is unchanged. The gate and the metric are unchanged | The exact engine's samples are exact, but its default grid is 10 µs: two samples per 20 µs period, and the strict gate interpolates linearly between them. On the 15 dsed cells that disagreed after the merge, the error AT the engine's own samples was 1.8e-10 … 5.9e-5 relative (`exact_triage.py`), while the gate read 1.1e-3 … 0.36. Re-measured independently (`.scratch/s5/undersample_check.py`, the merged tree run with and without `dt` against the same trbdf2 rtol 1e-8 reference): 13 cells disagree without `dt`; with it 10 agree (gate 1.1e-3 … 0.288 → ≤ 8.8e-5; error at the engine's own samples ≤ 4.8e-5 of the span; values at instants both grids share equal to ≤ 2.3e-13, so the trajectory does not depend on the output grid) and 3 stay (chopper, full bridge, flying capacitor) | Drop `"dsed", "exact"` from the tuple |
+
+Cells moved by the merge (dsed column of `REFERENCE_STATUS.md`, strict gate, the integration
+tree's numbers → the merged tree's with the harness change; agree = within 1e-3):
+
+| circuit | integration 1aef1a52 | merged (err_rms) | cause |
+|---|---|---|---|
+| linear/ll02_rc_pulse_charge | disagree 1.14e-3 | agree 4.5e-7 | merge code (agrees without `dt` too) |
+| linear/ll03_rl_step | disagree 1.61e-3 | agree 5.6e-7 | merge code |
+| linear/pulse_voltage_rl | disagree 1.97e-3 | agree 5.1e-6 | merge code |
+| resonance/ll04_rlc_underdamped | disagree 1.59e-3 | agree 7.3e-7 | merge code |
+| magnetics/core_loss_steinmetz_sine | disagree 1.06e-2 | agree 3.5e-6 | output grid (1.06e-2 without `dt`) |
+| stress/stiff_rc_high_freq_switching | disagree 1.10e-3 | agree 1.1e-5 | output grid (1.12e-3) |
+| buck/buck_with_current_sense | disagree 1.23e-3 | agree 1.3e-6 | output grid (1.24e-3) |
+| buck/cascaded_buck_buck | disagree 1.69e-3 | agree 1.5e-6 | output grid (1.84e-3) |
+| buck/high_freq_gan_buck | disagree 5.38e-2 | agree 5.1e-6 | output grid (1.53e-2) |
+| buck/sync_buck_500khz | disagree 1.14e-3 | agree 2.0e-6 | output grid (1.15e-3) |
+| buck/synchronous_buck | disagree 1.22e-3 | agree 1.4e-6 | output grid (1.24e-3) |
+| buck_boost/bidirectional_buck_boost | disagree 1.22e-3 | agree 1.3e-6 | output grid (1.24e-3) |
+| inverter/half_bridge_lc_filter | disagree 1.21e-3 | agree 1.5e-6 | output grid (1.22e-3) |
+| inverter/lcc_resonant_inverter | disagree 9.92e-2 | agree 8.8e-5 | output grid (0.288) |
+| isolated/full_bridge_dc | disagree 0.148 | disagree 0.0815 | output grid lowers it (0.356 without `dt`); the rest = pwl's own error (pwl+restart 0.0815) |
+| multilevel/flying_capacitor_3level | disagree 0.287 | disagree 0.050 | as above (0.294 without `dt`; pwl+split 0.05) |
+| basic/chopper_with_rc_snubber | error (did not settle) | disagree 0.0146 | settle fixed by the merge; residue: a PWM-edge sample stores the right limit at some edges (0.7, 0.9 ms read 5.38 V, the left limit 19.99 V) and the left at others — the trajectory is identical, the label is not |
+| boost/boost_classic, boost_pfc_open_loop, cascaded_boost_buck, textbook_erickson_boost_ccm, two_phase_interleaved_boost; buck/buck_dcm, buck_hard_switching_reference, buck_switching, textbook_erickson_buck_ccm; buck_boost/buck_boost (10) | error (did not settle) | agree 2.7e-7 … 2.2e-6 | the complementarity selector (this branch) |
+
+Totals (agree / disagree / error / refused / unverified): 39 / 16 / 11 / 40 / 2 → 63 / 3 / 0 / 40 / 2;
+`reference_status` exit 0. The plan's "15 undersampled" over-counted: 10 cells moved by the grid,
+4 by the merged code. Neither `metrics.py` nor `differential_runner.py` differs from 1aef1a52; the
+harness diff is the one `dt` line.

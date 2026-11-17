@@ -454,6 +454,10 @@ def test_held_diode_warning_names_a_floating_subnet():
     b.add_inductor("Lf", "dp", "dq", 1e-3)
     b.add_capacitor("C", "dq", "dn", 470e-6)
     b.add_resistor("RL", "dq", "dn", 1e3)
-    _, msgs = _run(b, 0.06)
+    # rtol 2e-5 / atol 2e-8: the default density before
+    # update-trbdf2-error-control. At the new defaults this run takes
+    # no missed commutation, so nothing is held and the warning (the
+    # subject of this test) is not exercised.
+    _, msgs = _run(b, 0.06, rtol=2e-5, atol=2e-8)
     held = [m for m in msgs if "commutation rule forbids" in m]
     assert held and "Node(s) dp, dn, dq reach the rest" in held[0], msgs

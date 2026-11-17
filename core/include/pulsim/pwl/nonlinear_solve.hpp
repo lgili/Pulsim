@@ -29,14 +29,20 @@
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/segment.hpp"
+#include "pulsim/solver/result.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <algorithm>
+#include <cstdint>
 #include <format>
+#include <memory>
+#include <optional>
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace pulsim::pwl {
 
@@ -57,6 +63,143 @@ using NonlinearRefreshFn = std::function<
          const topology::Graph& graph,
          const DevicePool& pool)>;
 
+/// Per-run Newton workspace (update-newton-persistent-solver, stages A1
+/// and A2).
+///
+/// Holds the combined Jacobian `J = J_lin + J_nl` on the union pattern
+/// of the two operands, written in place through two slot arrays (the
+/// per-entry sum is Eigen's: `a + b`, `a + 0`, `0 + b`), and one direct
+/// solver analysed once per pattern and refactorised in place. The
+/// pattern is checked after every refresh (index arrays of both
+/// operands); a change rebuilds the slots and analyses again.
+///
+/// `backend` (stage A2): the engines' run workspaces use the in-house
+/// Gilbert–Peierls LU (`Pulsim`), whose refactor allocates nothing; a
+/// call without a workspace (DC paths, continuation) keeps
+/// `Eigen::SparseLU`, so the DC cascade is unchanged. One workspace per
+/// run: never shared between threads.
+struct NewtonWorkspace {
+    sparse::Backend backend = sparse::Backend::Pulsim;
+
+    // Counters, monotonic over the workspace's life.
+    std::uint64_t solves         = 0;   // solve_with_newton_b_extra calls
+    std::uint64_t iterations     = 0;   // Newton iterations
+    std::uint64_t analyses       = 0;   // symbolic analyses (plain path)
+    std::uint64_t factorizations = 0;   // numeric factorisations (plain path)
+    std::uint64_t lm_attempts    = 0;   // LM factorisation attempts
+    std::vector<std::uint16_t> iterations_per_solve;   // per call
+
+    /// Move the counters out, for `SimulationResult::newton`.
+    [[nodiscard]] solver::NewtonCounters take_counters() {
+        solver::NewtonCounters c;
+        c.solves = solves;
+        c.iterations = iterations;
+        c.analyses = analyses;
+        c.factorizations = factorizations;
+        c.lm_attempts = lm_attempts;
+        c.iterations_per_solve = std::move(iterations_per_solve);
+        return c;
+    }
+
+    sparse::Matrix J;                    // combined Jacobian
+    sparse::Matrix J_nl;                 // refresh target
+    // Line-search / LM refresh target. Compressed after every refresh,
+    // like J_nl. On Eigen 3.4.x, inserting into an emptied compressed
+    // matrix (resize / setZero) hands all its spare capacity to the first
+    // column, and an out-of-order insert then reallocates to that
+    // capacity plus a few entries: a persistent target that is never
+    // squeezed grows on every refill and is copied whole on every
+    // insert (120 s CI timeout on Ubuntu's 3.4.0; Eigen 5 is immune).
+    // makeCompressed squeezes the storage back to nnz.
+    sparse::Matrix J_nl_trial;
+    Vector f_nl, f_nl_trial, jx, f, neg_f, dx, x_trial, f_trial;
+    Vector ro_f, ro_x;   // roundoff acceptance: f(x_k), x_k of the last iteration
+    std::unique_ptr<sparse::DirectSolver> solver;   // analysed for J
+    std::vector<Real> ls, ns;            // operands scattered on J
+
+    /// Write `J = L + N` (bit-equal to `L; += N` in Eigen) and return
+    /// true when the analysis of the previous call still applies.
+    bool combine(const sparse::Matrix& L, const sparse::Matrix& N) {
+        bool same = valid_ && same_pattern_(L, l_outer_, l_inner_) &&
+                    same_pattern_(N, n_outer_, n_inner_);
+        if (!same) {
+            record_(L, l_outer_, l_inner_);
+            record_(N, n_outer_, n_inner_);
+            if (N.nonZeros() > 0) {
+                J = L + N;   // union pattern
+            } else {
+                J = L;
+            }
+            J.makeCompressed();
+            slots_(L, l2j_);
+            slots_(N, n2j_);
+            valid_ = true;
+        }
+        const auto nnz = static_cast<std::size_t>(J.nonZeros());
+        Real* jv = J.valuePtr();
+        if (N.nonZeros() == 0) {
+            // Today's path copies J_lin unchanged when J_nl is empty.
+            std::copy_n(L.valuePtr(), nnz, jv);
+            return same;
+        }
+        ls.assign(nnz, Real{0});
+        ns.assign(nnz, Real{0});
+        const Real* lv = L.valuePtr();
+        for (std::size_t k = 0; k < l2j_.size(); ++k) ls[l2j_[k]] = lv[k];
+        const Real* nv = N.valuePtr();
+        for (std::size_t k = 0; k < n2j_.size(); ++k) ns[n2j_[k]] = nv[k];
+        for (std::size_t k = 0; k < nnz; ++k) jv[k] = ls[k] + ns[k];
+        return same;
+    }
+
+private:
+    bool valid_ = false;
+    std::vector<Index> l_outer_, l_inner_, n_outer_, n_inner_, l2j_, n2j_;
+
+    static bool same_pattern_(const sparse::Matrix& A,
+                              const std::vector<Index>& outer,
+                              const std::vector<Index>& inner) {
+        const auto no = static_cast<std::size_t>(A.outerSize() + 1);
+        const auto nnz = static_cast<std::size_t>(A.nonZeros());
+        return outer.size() == no && inner.size() == nnz &&
+               std::equal(outer.begin(), outer.end(), A.outerIndexPtr()) &&
+               std::equal(inner.begin(), inner.end(), A.innerIndexPtr());
+    }
+    static void record_(const sparse::Matrix& A, std::vector<Index>& outer,
+                        std::vector<Index>& inner) {
+        outer.assign(A.outerIndexPtr(), A.outerIndexPtr() + A.outerSize() + 1);
+        inner.assign(A.innerIndexPtr(), A.innerIndexPtr() + A.nonZeros());
+    }
+    void slots_(const sparse::Matrix& A, std::vector<Index>& out) const {
+        out.resize(static_cast<std::size_t>(A.nonZeros()));
+        const Index* ap = A.outerIndexPtr();
+        const Index* ai = A.innerIndexPtr();
+        const Index* up = J.outerIndexPtr();
+        const Index* ui = J.innerIndexPtr();
+        for (Index j = 0; j < A.outerSize(); ++j) {
+            Index q = up[j];
+            for (Index p = ap[j]; p < ap[j + 1]; ++p) {
+                while (ui[q] != ai[p]) ++q;
+                out[static_cast<std::size_t>(p)] = q;
+            }
+        }
+    }
+};
+
+/// Transient-only acceptance of an iterate whose residual is at the
+/// roundoff of its own row (add-newton-roundoff-acceptance). Checked
+/// only where the solve would throw for an exhausted budget; DC
+/// callers pass nothing and compile to the old loop. The fields after
+/// `dx_rel_max` report the last call.
+struct NewtonRoundoffAcceptance {
+    bool enabled = false;
+    Real omega_max = Real{8} * std::numeric_limits<Real>::epsilon();
+    Real dx_rel_max = Real{1e-6};
+    bool accepted = false;
+    Real omega = 0;
+    Index row = kInvalidIndex;
+};
+
 /// Newton-iterated solve on top of a cached PwlSegment, with an
 /// explicit `b_extra` vector. This overload composes with the
 /// trap-companion history contributions from Layer 4 V1: at
@@ -68,28 +211,70 @@ using NonlinearRefreshFn = std::function<
 /// identical to `cache.solve(mask, b_extra, x)`.
 ///
 /// Throws `std::runtime_error` on non-convergence.
-[[nodiscard]] inline Vector solve_with_newton_b_extra(
+///
+/// In-place form (task 2.4): `x` is the initial iterate on entry and the
+/// solution on return; on a throw it holds the last iterate.
+inline void solve_with_newton_in_place(
     const PwlSegment& seg,
     const NonlinearRefreshFn& refresh,
     const topology::Graph& graph,
     const DevicePool& pool,
-    const Vector& x_init,
+    Vector& x,
     const Vector& b_extra,
     Size max_iters = Size{50},
     Real tol_dx  = Real{1e-9},
     Real tol_res = Real{1e-9},
     bool enable_line_search = false,
-    bool enable_lm = false) {
+    bool enable_lm = false,
+    NewtonWorkspace* ws = nullptr,
+    NewtonRoundoffAcceptance* roundoff = nullptr) {
     const Size n = seg.state_size;
-    Vector x = x_init;
+    const bool ro_on = roundoff != nullptr && roundoff->enabled;
+    if (roundoff != nullptr) {
+        roundoff->accepted = false;
+    }
+    // Roundoff acceptance state: whether f(x_k), x_k were recorded this
+    // call (in the workspace: no allocation per call) and the last three
+    // ||dx||.
+    bool ro_set = false;
+    Real ro_dx[3] = {std::numeric_limits<Real>::infinity(),
+                     std::numeric_limits<Real>::infinity(),
+                     std::numeric_limits<Real>::infinity()};
     if (static_cast<Size>(x.size()) != n) {
         x = Vector::Zero(static_cast<Index>(n));
     }
 
-    sparse::Matrix J_nl(static_cast<Index>(n),
-                         static_cast<Index>(n));
-    Vector f_nl = Vector::Zero(static_cast<Index>(n));
-    Vector dx;
+    // A call without a run workspace gets a call-local one: the same
+    // code path, with the analysis reused across this call's iterations,
+    // on Eigen's LU (the DC paths keep their factorisation).
+    // Built only when needed: an Eigen sparse matrix allocates on
+    // default construction.
+    std::optional<NewtonWorkspace> local_ws;
+    if (ws == nullptr) {
+        local_ws.emplace();
+        local_ws->backend = sparse::Backend::Eigen;
+    }
+    NewtonWorkspace& w = ws != nullptr ? *ws : *local_ws;
+    ++w.solves;
+    // Records this call's iteration count on every exit, throws included.
+    struct TraceGuard {
+        NewtonWorkspace& w;
+        std::uint64_t start;
+        ~TraceGuard() {
+            const auto k = std::min<std::uint64_t>(w.iterations - start, 65535);
+            w.iterations_per_solve.push_back(static_cast<std::uint16_t>(k));
+        }
+    } trace_guard{w, w.iterations};
+    sparse::Matrix& J_nl = w.J_nl;
+    // J_nl keeps its pattern between calls of one run (task 2.3): the
+    // refreshers zero its values and stamp into existing entries.
+    if (J_nl.rows() != static_cast<Index>(n) || J_nl.cols() != static_cast<Index>(n)) {
+        J_nl.resize(static_cast<Index>(n), static_cast<Index>(n));
+    }
+    sparse::zero_keep_pattern(J_nl);
+    Vector& f_nl = w.f_nl;
+    f_nl.setZero(static_cast<Index>(n));
+    Vector& dx = w.dx;
 
     // Levenberg-Marquardt damping state.
     Real lm_lambda = Real{1e-6};
@@ -148,27 +333,32 @@ using NonlinearRefreshFn = std::function<
                 iter));
         }
 
+        ++w.iterations;
         // 1. Refresh nonlinear contributions at current x.
         const Real nl_residual_norm =
             refresh(x, J_nl, f_nl, graph, pool);
         sparse::compress_in_place(J_nl);
 
-        // 2. Build combined J = J_lin + J_nl. We can't add an
-        //    Eigen::SparseMatrix to a const reference cheaply
-        //    without making a copy, so we copy J_lin once per
-        //    iteration. Future perf optimisation: avoid the copy
-        //    via pattern-sharing.
-        sparse::Matrix J_combined = seg.J;
-        sparse::compress_in_place(J_combined);
-        if (J_nl.nonZeros() > 0) {
-            J_combined += J_nl;
+        // 2. Combined J = J_lin + J_nl, in place on the workspace's
+        //    union pattern (bit-equal to `J = seg.J; J += J_nl`).
+        //    A caller's uncompressed `seg.J` is compressed in a copy,
+        //    as the old path did.
+        std::optional<sparse::Matrix> L_compressed;   // see local_ws
+        const sparse::Matrix* L = &seg.J;
+        if (!seg.J.isCompressed()) {
+            L_compressed.emplace(seg.J);
+            L_compressed->makeCompressed();
+            L = &*L_compressed;
         }
-        sparse::compress_in_place(J_combined);
+        const bool reuse_analysis = w.combine(*L, J_nl);
+        const sparse::Matrix& J_combined = w.J;
 
         // 3. Build combined f(x) = J_lin·x + (b_constant +
-        //    b_extra) + f_nl.
-        Vector f_combined =
-            seg.J * x + seg.b_constant + b_extra + f_nl;
+        //    b_extra) + f_nl — the product into a hoisted buffer
+        //    first, then the additions in the original order.
+        w.jx.noalias() = seg.J * x;
+        Vector& f_combined = w.f;
+        f_combined = w.jx + seg.b_constant + b_extra + f_nl;
 
         // Companion guard: catch a NaN/Inf that entered via the nonlinear
         // refresh (f_nl) or b_extra even when x itself is still finite —
@@ -242,11 +432,15 @@ using NonlinearRefreshFn = std::function<
             if (baseline_norm < tol_res) {
                 last_dx_norm  = Real{0};
                 last_res_norm = baseline_norm;
-                return x;
+                return;
             }
-            sparse::Matrix J_nl_trial(static_cast<Index>(n),
-                                       static_cast<Index>(n));
-            Vector f_nl_trial = Vector::Zero(static_cast<Index>(n));
+            sparse::Matrix& J_nl_trial = w.J_nl_trial;
+            if (J_nl_trial.rows() != static_cast<Index>(n)) {
+                J_nl_trial.resize(static_cast<Index>(n), static_cast<Index>(n));
+            }
+            sparse::zero_keep_pattern(J_nl_trial);
+            Vector& f_nl_trial = w.f_nl_trial;
+            f_nl_trial.setZero(static_cast<Index>(n));
             bool accepted = false;
             for (Size attempt = 0;
                  attempt < lm_max_attempts;
@@ -258,6 +452,7 @@ using NonlinearRefreshFn = std::function<
                     J_lm.coeffRef(i, i) += lm_lambda;
                 }
                 sparse::compress_in_place(J_lm);
+                ++w.lm_attempts;
                 auto lm_solver = sparse::make_default_solver();
                 if (!lm_solver->analyze(J_lm) ||
                     !lm_solver->factorize(J_lm)) {
@@ -273,10 +468,13 @@ using NonlinearRefreshFn = std::function<
                 }
                 Vector lm_neg_f = -f_combined;
                 lm_solver->solve(lm_neg_f, dx);
-                const Vector x_trial = x + dx;
+                Vector& x_trial = w.x_trial;
+                x_trial = x + dx;
                 (void)refresh(x_trial, J_nl_trial, f_nl_trial,
                                graph, pool);
-                const Vector f_trial =
+                sparse::compress_in_place(J_nl_trial);   // see J_nl_trial
+                Vector& f_trial = w.f_trial;
+                f_trial =
                     seg.J * x_trial + seg.b_constant +
                     b_extra + f_nl_trial;
                 // Accept when the trial residual is no worse
@@ -307,16 +505,25 @@ using NonlinearRefreshFn = std::function<
                     top_entries_by_name(graph, pool, f_combined)));
             }
         } else {
-            // Plain Newton + optional line search.
-            auto solver = sparse::make_default_solver();
-            if (!solver->analyze(J_combined)) {
-                throw std::runtime_error(std::format(
-                    "solve_with_newton: combined matrix is "
-                    "structurally singular at iter {}{}",
-                    iter,
-                    explain_singular(graph, pool, J_combined,
-                                      solver.get())));
+            // Plain Newton + optional line search. One analysis per
+            // pattern, reused while the pattern holds (stage A1).
+            if (!reuse_analysis || !w.solver) {
+                w.solver = sparse::make_default_solver(n, w.backend);
+                ++w.analyses;
+                if (!w.solver->analyze(J_combined)) {
+                    auto& solver = w.solver;
+                    std::string msg = std::format(
+                        "solve_with_newton: combined matrix is "
+                        "structurally singular at iter {}{}",
+                        iter,
+                        explain_singular(graph, pool, J_combined,
+                                          solver.get()));
+                    w.solver.reset();
+                    throw std::runtime_error(msg);
+                }
             }
+            auto& solver = w.solver;
+            ++w.factorizations;
             if (!solver->factorize(J_combined)) {
                 // Auto-LM promotion (GUI integration findings T1.2):
                 // numerically singular Jacobian usually means a
@@ -329,20 +536,28 @@ using NonlinearRefreshFn = std::function<
                 enable_lm = true;
                 continue;
             }
-            Vector neg_f = -f_combined;
+            Vector& neg_f = w.neg_f;
+            neg_f = -f_combined;
             solver->solve(neg_f, dx);
 
             if (enable_line_search) {
-                sparse::Matrix J_nl_trial(static_cast<Index>(n),
-                                           static_cast<Index>(n));
-                Vector f_nl_trial =
-                    Vector::Zero(static_cast<Index>(n));
+                sparse::Matrix& J_nl_trial = w.J_nl_trial;
+                if (J_nl_trial.rows() != static_cast<Index>(n)) {
+                    J_nl_trial.resize(static_cast<Index>(n),
+                                      static_cast<Index>(n));
+                }
+                sparse::zero_keep_pattern(J_nl_trial);
+                Vector& f_nl_trial = w.f_nl_trial;
+                f_nl_trial.setZero(static_cast<Index>(n));
                 bool accepted = false;
                 for (Size bt = 0; bt < Size{8}; ++bt) {
-                    const Vector x_trial = x + alpha * dx;
+                    Vector& x_trial = w.x_trial;
+                    x_trial = x + alpha * dx;
                     (void)refresh(x_trial, J_nl_trial, f_nl_trial,
                                    graph, pool);
-                    const Vector f_trial =
+                    sparse::compress_in_place(J_nl_trial);   // see J_nl_trial
+                    Vector& f_trial = w.f_trial;
+                    f_trial =
                         seg.J * x_trial + seg.b_constant +
                         b_extra + f_nl_trial;
                     if (f_trial.lpNorm<Eigen::Infinity>() <
@@ -356,6 +571,11 @@ using NonlinearRefreshFn = std::function<
                     alpha = Real{1};
                 }
             }
+        }
+        if (ro_on) {
+            w.ro_f = f_combined;
+            w.ro_x = x;
+            ro_set = true;
         }
         x += alpha * dx;
 
@@ -391,8 +611,11 @@ using NonlinearRefreshFn = std::function<
             ? kInvalidIndex : static_cast<Index>(dx_at);
         worst_res_row = f_combined.size() == 0
             ? kInvalidIndex : static_cast<Index>(res_at);
+        ro_dx[2] = ro_dx[1];
+        ro_dx[1] = ro_dx[0];
+        ro_dx[0] = last_dx_norm;
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
-            return x;
+            return;
         }
         // SCALE-RELATIVE residual acceptance. `tol_res` is
         // ABSOLUTE, and a residual is a current: on a converter
@@ -424,7 +647,7 @@ using NonlinearRefreshFn = std::function<
                     ? Real{0}
                     : b_extra.cwiseAbs().maxCoeff()});
             if (last_res_norm < tol_res * scale) {
-                return x;
+                return;
             }
         }
         // Auto-LM promotion #2: near-miss stall (GUI T1.2).
@@ -446,6 +669,61 @@ using NonlinearRefreshFn = std::function<
         } else {
             near_miss_streak = Size{0};
         }
+    }
+
+    // Budget exhausted. Transient callers may accept x_k + dx_k when
+    // the last two steps did not contract, the step is tiny against
+    // the state, and every row's residual is within omega_max of the
+    // magnitudes that row sums (Oettli-Prager backward error): the
+    // iterate solves a system perturbed by 8 eps per coefficient. The
+    // absolute tol_dx stays the test everywhere else.
+    std::string ro_note;
+    if (ro_on && ro_set) {
+        // The terms of the residual at x_k: J_lin = seg.J, and the
+        // workspace's J_nl / f_nl, last refreshed at x_k.
+        const Vector& ro_f = w.ro_f;
+        const Vector& ro_x = w.ro_x;
+        const bool stagnated = ro_dx[0] >= Real{0.5} * ro_dx[1]
+                            && ro_dx[1] >= Real{0.5} * ro_dx[2];
+        const Real dx_cap = roundoff->dx_rel_max
+            * std::max(Real{1}, ro_x.cwiseAbs().maxCoeff());
+        const Vector ax = ro_x.cwiseAbs();
+        Vector scale = seg.J.cwiseAbs() * ax;
+        scale += seg.b_constant.cwiseAbs() + b_extra.cwiseAbs()
+               + f_nl.cwiseAbs();
+        if (J_nl.nonZeros() > 0) {
+            scale += J_nl.cwiseAbs() * ax;
+        }
+        Real omega = Real{0};
+        Index row = kInvalidIndex;
+        for (Index i = 0; i < static_cast<Index>(n); ++i) {
+            const Real fi = std::abs(ro_f[i]);
+            const Real be = scale[i] > Real{0}
+                ? fi / scale[i]
+                : (fi == Real{0} ? Real{0}
+                                 : std::numeric_limits<Real>::infinity());
+            if (be > omega) {
+                omega = be;
+                row = i;
+            }
+        }
+        if (stagnated && ro_dx[0] <= dx_cap
+            && omega <= roundoff->omega_max) {
+            roundoff->accepted = true;
+            roundoff->omega = omega;
+            roundoff->row = row;
+            return;
+        }
+        ro_note = std::format(
+            " Roundoff acceptance declined: row backward error {:.2g} eps "
+            "at {} (limit {:.2g} eps), ||dx|| {} 1e-6·|x|, last two "
+            "steps {} (||dx|| {:.3e}, {:.3e}, {:.3e}).",
+            omega / std::numeric_limits<Real>::epsilon(),
+            row_equation_label(graph, pool, row),
+            roundoff->omega_max / std::numeric_limits<Real>::epsilon(),
+            ro_dx[0] <= dx_cap ? "within" : "above",
+            stagnated ? "stagnated" : "still contracting",
+            ro_dx[2], ro_dx[1], ro_dx[0]);
     }
 
     // Report the norms RELATIVE to the circuit's own scale as well as
@@ -489,14 +767,37 @@ using NonlinearRefreshFn = std::function<
         "tolerances, reported 3.5 V instead of 15.3 V). Instead, look "
         "at the device named above, and cross-check on the other "
         "transient engine (engine='pwl' with an explicit dt, if this "
-        "came from TR-BDF2 or 'auto').",
+        "came from TR-BDF2 or 'auto').{}",
         max_iters,
         last_dx_norm, row_label(graph, pool, worst_dx_row),
         last_res_norm,
         row_equation_label(graph, pool, worst_res_row),
         last_dx_norm / x_scale, x_scale,
         last_res_norm / rhs_scale, rhs_scale,
-        tol_dx, tol_res));
+        tol_dx, tol_res, ro_note));
+}
+
+/// By-value form of `solve_with_newton_in_place`: `x_init` is left
+/// untouched when the solve throws.
+[[nodiscard]] inline Vector solve_with_newton_b_extra(
+    const PwlSegment& seg,
+    const NonlinearRefreshFn& refresh,
+    const topology::Graph& graph,
+    const DevicePool& pool,
+    const Vector& x_init,
+    const Vector& b_extra,
+    Size max_iters = Size{50},
+    Real tol_dx  = Real{1e-9},
+    Real tol_res = Real{1e-9},
+    bool enable_line_search = false,
+    bool enable_lm = false,
+    NewtonWorkspace* ws = nullptr,
+    NewtonRoundoffAcceptance* roundoff = nullptr) {
+    Vector x = x_init;
+    solve_with_newton_in_place(seg, refresh, graph, pool, x, b_extra,
+                               max_iters, tol_dx, tol_res,
+                               enable_line_search, enable_lm, ws, roundoff);
+    return x;
 }
 
 /// Layer 4 V3 entry point — Newton without trap-companion

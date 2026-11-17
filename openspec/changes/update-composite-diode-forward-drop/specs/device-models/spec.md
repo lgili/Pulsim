@@ -43,8 +43,8 @@ SHALL remain a controlled switch with no diode.
   whose low-side device is an `add_mosfet` held off
 - **WHEN** 400 periods run on `pwl`, `trbdf2` and `dsed`
 - **THEN** the time-weighted output over the last 100 periods is
-  11.640 V within 0.005 V and the body-diode loss is 3.479 W within
-  0.01 W on each engine (11.990 V and 0.052 W before)
+  11.640 V within 0.005 V and the body-diode loss over the same window is
+  3.442 W within 0.01 W on each engine (11.990 V before)
 
 #### Scenario: Invalid drop refused by name
 - **WHEN** `add_mosfet("Q1", ..., V_F=-0.1)` is called

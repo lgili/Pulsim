@@ -158,6 +158,32 @@ public:
         }
     }
 
+    /// SDIRK restart: pseudo previous flux λ0 + c·(λ1 − λ0), λ1 from
+    /// the model's law at the stage-1 solve.
+    void extrapolate_previous(const Vector& x1, Real c) {
+        for (auto& e : entries_) {
+            const auto lam = lambda_at(e, x1);
+            for (Size k = 0; k < 3; ++k) {
+                e.lambda_old[k] += c * (lam[k] - e.lambda_old[k]);
+            }
+        }
+    }
+
+    /// TR-BDF2 post-event refresh: the phase voltages and dλ/dt from
+    /// the probe; (λ, i) are not touched.
+    void refresh_derivatives(const Vector& x_probe) {
+        for (auto& e : entries_) {
+            const Real v_n =
+                stamping::read_node_voltage(x_probe, e.neutral);
+            for (Size k = 0; k < 3; ++k) {
+                e.v_old[k] =
+                    stamping::read_node_voltage(x_probe, e.phase_node[k])
+                    - v_n;
+                e.dlam_old[k] = e.v_old[k] - e.params.R_s * e.i_old[k];
+            }
+        }
+    }
+
     /// Seed from a warm-start / DC operating point — same fields as
     /// a commit, so the first stamp sees a consistent previous step.
     void seed_from_dc_op(const Vector& x) { update_from_state(x, Real{0}); }

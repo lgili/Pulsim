@@ -61,6 +61,12 @@ class RetiredDeviceError(ValueError):
     the legacy device."""
 
 
+class RetiredYamlDeviceError(RetiredDeviceError, RuntimeError):
+    """The YAML loader's refusal of a retired device type. A
+    ``RetiredDeviceError`` like the builder's, and still a
+    ``RuntimeError`` like every other YAML refusal."""
+
+
 class Cancelled(RuntimeError):
     """Raised by long-running analyses when the user's
     ``should_continue`` callback returns ``False``.

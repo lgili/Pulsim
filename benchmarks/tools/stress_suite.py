@@ -9,7 +9,7 @@ import json
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
 from benchmark_runner import ScenarioResult, load_yaml, run_benchmarks, suite_root, yaml
 

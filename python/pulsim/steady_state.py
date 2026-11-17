@@ -125,13 +125,16 @@ def _snapshot_like(base, history):
     # The mask x was stamped under (x is base's, unchanged), so the
     # resumed record's row 0 stays a solved row.
     s.stamped_mask = list(getattr(base, "stamped_mask", ()))
+    # An unfinished discontinuity_restart window (the steps after an
+    # edge just before the boundary) is part of the period map's state.
+    s.restart_steps_left = int(getattr(base, "restart_steps_left", 0))
     for attr, _w, _n in _STATEFUL_FIELDS:
         setattr(s, attr, [float(v) for v in getattr(base, attr, ())])
     s.valid = True
     return s
 
 
-def steady_state(builder, *, period: float, dt: float,
+def steady_state(builder, *, period: float, dt: float | None = None,
                   switch_fn=None, start_from=None,
                   probe_scale: float = 1e-4,
                   verify: bool = True,
@@ -150,7 +153,14 @@ def steady_state(builder, *, period: float, dt: float,
     dt
         Fixed step (this uses the fixed-step engine so every
         propagation lands on the same grid — a variable grid would
-        make the propagations incomparable).
+        make the propagations incomparable). OMIT it to use
+        `pulsim.periodic_steady_state` instead: Newton shooting on
+        the true state on the dsed exact stepper, which also works
+        in discontinuous conduction (where this affine solve raises
+        "no periodic orbit found"). It returns a
+        `PeriodicSteadyStateResult` and refuses by name what it does
+        not cover; `start_from` is then a state vector or a previous
+        result.
     switch_fn
         The gate schedule, as for `simulate`.
     start_from
@@ -182,6 +192,17 @@ def steady_state(builder, *, period: float, dt: float,
     """
     from . import simulate as _simulate
 
+    if dt is None:
+        from .periodic_steady_state import periodic_steady_state
+        if simulate_kwargs:
+            raise ValueError(
+                "steady_state without dt runs periodic_steady_state on "
+                "the dsed exact stepper, which takes no simulate "
+                f"options; got {sorted(simulate_kwargs)}. Pass dt= for "
+                "the fixed engine.")
+        return periodic_steady_state(builder, period=period,
+                                     switch_fn=switch_fn,
+                                     start_from=start_from)
     if not (period > 0):
         raise ValueError(f"steady_state: period must be > 0, "
                           f"got {period!r}")

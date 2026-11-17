@@ -166,6 +166,11 @@ inline void dc_assemble(const topology::Graph& graph,
             break;
         }
         case topology::BranchKind::Source: {
+            if (detail::stamp_controlled_source(graph, pool, branch.id, J,
+                                                b, x, coord, /*at_dc=*/true,
+                                                t_eval, source_scale)) {
+                break;
+            }
             const auto k = pool.kind_of(branch.id);
             switch (k) {
             case DevicePool::StoredKind::VoltageSource: {

@@ -155,23 +155,30 @@ def test_double_crossing_inside_one_step_is_seen():
     # 9.5 V rail through 1 kOhm: v_D > 0 only for w t in (1.253, 1.889),
     # 0.64 us inside one 10 us step whose ends both read v_D < 0. The
     # scan step pi/(4 w) = 0.79 us finds the window.
-    b = p.CircuitBuilder()
-    b.add_capacitor("C", "t", "gnd", 100e-9)
-    b.add_inductor("L", "t", "gnd", 10e-6, i0=-1.0)
-    b.add_diode("D", "t", "k", GON, GOFF, 0.0)
-    b.add_resistor("R", "k", "r", 1e3)
-    b.add_voltage_source("Vr", "r", "gnd", 9.5)
-    r = _run(b, t_end=10e-6)
-    on = r.event_times[r.event_types == 1]
-    assert len(on) >= 1
-    assert abs(on[0] - np.arcsin(0.95) / 1e6) < 1e-12
-    # V_th = 0: the turn-on lands at v_D = 0 exactly, so the armed turn-off
-    # predicate starts the next step at g = 0. It was skipped as "just
-    # fired" and the return through zero 0.63 us later was never an event
-    # (one OFF at 7.655 us, the diode ON at -18 mA in between). Reference:
+    # Integration batch 4: with V_th = 0 the run was silently wrong after
+    # the turn-on (D ON at -18 mA at 4.25 us; pwl at dt = 0.1 ns has D OFF
+    # there) and the diode-law guard now names it; with V_th = 1e-3 both
+    # windows are right (1.2536-1.8877 us and 7.537-8.170 us, pwl ends 8.170).
+    def build(v_th):
+        b = p.CircuitBuilder()
+        b.add_capacitor("C", "t", "gnd", 100e-9)
+        b.add_inductor("L", "t", "gnd", 10e-6, i0=-1.0)
+        b.add_diode("D", "t", "k", GON, GOFF, v_th)
+        b.add_resistor("R", "k", "r", 1e3)
+        b.add_voltage_source("Vr", "r", "gnd", 9.5)
+        return b
+    # Batch 6a: the kernel guard did not catch the V_th = 0 run (one event
+    # repaired, v(k) = -5.18 V at 10 us against trbdf2 9.50 V); only the
+    # stored-sample guard named it. Re-pin (batch 6b, 48924aca): raise ->
+    # right. The turn-on lands at v_D = 0 exactly, so the armed turn-off
+    # predicate starts the next step at g = 0; it was skipped as "just fired"
+    # and the return through zero 0.63 us later was never an event. Reference:
     # solve_ivp DOP853 rtol 1e-13 with terminal events (pwl at dt = 0.1 ns
     # gives the same edges to its grid): 1.2532358876657, 1.8877214714713,
-    # 7.5370567364184, 8.1702737952621 us; v(t) end -5.437946944009 V.
+    # 7.5370567364184, 8.1702737952621 us; end v(t) -5.437946944009 V,
+    # v(k) 9.49998506 V (trbdf2's 9.50 V; -5.18 was v(k), not v(t)).
+    b = build(0.0)
+    r = _run(b, t_end=10e-6)
     assert r.event_times == pytest.approx(
         [1.2532358876657e-6, 1.8877214714713e-6, 7.5370567364184e-6, 8.1702737952621e-6],
         abs=1e-12)
@@ -180,6 +187,13 @@ def test_double_crossing_inside_one_step_is_seen():
     i_d = GON * (np.asarray(r.v("t")) - np.asarray(r.v("k")))
     assert i_d[on].min() > -1e-9          # was -1.83e-2 A
     assert np.asarray(r.v("t"))[-1] == pytest.approx(-5.437946944009, abs=1e-9)
+    assert np.asarray(r.v("k"))[-1] == pytest.approx(9.49998506, abs=1e-7)
+    r = _run(build(1e-3), t_end=10e-6)
+    on = r.event_times[r.event_types == 1]
+    assert len(on) == 2
+    assert abs(on[0] - np.arcsin(0.9501) / 1e6) < 1e-12
+    assert list(r.event_types) == [1, 2, 1, 2]
+    assert abs(r.event_times[1] - 1.88772e-6) < 1e-11
 
 
 def test_diode_resting_at_exactly_zero_does_not_spin():
@@ -307,3 +321,86 @@ def test_consistent_initial_conditions_report_no_adjustment():
     t = np.asarray(r.times)
     ref = 5.0 - 3.0 * np.exp(-t / 1e-3)
     assert np.max(np.abs(np.asarray(r.v("a")) - ref)) < 1e-10
+
+
+# Integration batch 4: the zero-band settle can keep a diode in a mode its
+# law forbids; check_diode_modes turns that silent answer into a named error.
+def _boost(v_th, R):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_inductor("L", "vin", "sw", 100e-6)
+    b.add_switch("S", "sw", "gnd", 1e3, 1e-9)
+    b.add_diode("D1", "sw", "vout", 1e3, 1e-9, v_th)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", R)
+    fn = p.make_pwm_switch_fn(1e5, 0.5, b.switch_index_of("S"), b.graph.num_switches)
+    return b, fn
+
+
+@pytest.mark.parametrize("v_th,R,v_end", [(0.0, 50.0, 24.5295), (1e-3, 50.0, 24.5296),
+                                          (0.0, 500.0, 45.4835)])
+def test_boost_with_a_wrong_settled_mode_is_repaired_or_named(v_th, R, v_end):
+    # The settle alone holds D1 ON at -1.07 A (R = 50, V_th = 0; 0.76 V low at
+    # R = 500). Batch 4: the stored-sample guard named it. Since the
+    # complementarity guard (batch 6a) the kernel repairs those events and
+    # the run lands on trbdf2 rtol 1e-10 (end v(vout) to 1e-4, measured
+    # <= 1e-5); with the kernel guard off the stored-sample guard still
+    # names it. Re-pin: raise -> repaired run.
+    import pulsim._dsed_dispatch as DD
+    b, fn = _boost(v_th, R)
+    r = p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
+    assert r.diagnostics["mode_guard"]["repairs"] > 0
+    assert np.asarray(r.v("vout"))[-1] == pytest.approx(v_end, abs=1e-4)
+    # Merge re-pin (DECISIONS #26 of add-complementarity-mode-selection): with the kernel guard
+    # off the settle is still judged and refuses at its first wrong event, before the
+    # stored-sample guard reads a sample (was: DiodeModeInconsistentError naming D1).
+    b, fn = _boost(v_th, R)
+    DD.MODE_GUARD = False
+    try:
+        with pytest.raises(p.UnsupportedError) as ei:
+            p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
+    finally:
+        DD.MODE_GUARD = True
+    assert (ei.value.feature, ei.value.device.split()[0]) == ("consistent_mode", "D1")
+
+
+def test_boost_with_a_threshold_band_runs_and_agrees():
+    b, fn = _boost(1e-2, 50.0)
+    r = p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
+    b, fn = _boost(1e-2, 50.0)
+    ref = p.simulate(b, 3e-3, engine="trbdf2", switch_fn=fn, rtol=1e-10, atol=1e-13)
+    # on dsed's own samples (its sparse output is not interpolated across edges)
+    v = np.interp(np.asarray(r.times), np.asarray(ref.times), np.asarray(ref.v("vout")))
+    assert np.abs(v - np.asarray(r.v("vout"))).max() < 1e-3
+
+
+def test_half_wave_rl_rectifier_with_a_zero_band_diode_is_repaired_or_named():
+    # Re-pin (batch 6a): the kernel guard repairs the one wrong event; the
+    # stored-sample guard still names it with the kernel guard off.
+    import pulsim._dsed_dispatch as DD
+
+    def build():
+        b = p.CircuitBuilder()
+        b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
+        b.add_diode("D", "in", "a", 1e3, 1e-9)
+        b.add_resistor("R", "a", "b", 10.0)
+        b.add_inductor("L", "b", "gnd", 1e-3)
+        return b
+    r = p.simulate(build(), 3e-3, engine="dsed")
+    assert r.diagnostics["mode_guard"]["repairs"] == 1
+    # The repaired run against trbdf2 rtol 1e-10 (batch 6b, checkpoint review M2): mean i(L)
+    # 0.2937666 vs 0.2937670 A (measured 3.7e-7), v(a) on dsed's samples within 5.8e-5 V.
+    ref = p.simulate(build(), 3e-3, engine="trbdf2", rtol=1e-10, atol=1e-13)
+    t, tr = np.asarray(r.times), np.asarray(ref.times)
+    assert np.trapezoid(r.i("L"), t) / 3e-3 == pytest.approx(
+        np.trapezoid(ref.i("L"), tr) / 3e-3, abs=1e-4)
+    assert np.abs(np.interp(t, tr, ref.v("a")) - np.asarray(r.v("a"))).max() < 1e-4
+    # merge re-pin as in the boost test above (was: DiodeModeInconsistentError, 'D' ON while
+    # carrying reverse current): the judged settle refuses first, naming D
+    DD.MODE_GUARD = False
+    try:
+        with pytest.raises(p.UnsupportedError) as ei:
+            p.simulate(build(), 3e-3, engine="dsed")
+    finally:
+        DD.MODE_GUARD = True
+    assert (ei.value.feature, ei.value.device.split()[0]) == ("consistent_mode", "D")

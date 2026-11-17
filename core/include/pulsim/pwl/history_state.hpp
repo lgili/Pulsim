@@ -158,6 +158,20 @@ public:
     /// steady-state transient loop. The returning overload above
     /// delegates here.
     void compute_b_extra(Real dt, Vector& out) const {
+        compute_b_extra_(dt, out, /*backward_euler=*/false);
+    }
+
+    /// Restart stage (add-discontinuity-restart-rule): backward
+    /// Euler over `h_e` is the trapezoidal companion at 2·h_e with the
+    /// stored derivative (capacitor i_prev, inductor v_prev) left
+    /// out. Same conductance 2C/(2h_e) = C/h_e, so the factor built
+    /// at dt = 2·h_e serves; the mutual term (2M/dt)·i_other,n stays.
+    void compute_b_extra_backward_euler(Real h_e, Vector& out) const {
+        compute_b_extra_(Real{2} * h_e, out, /*backward_euler=*/true);
+    }
+
+private:
+    void compute_b_extra_(Real dt, Vector& out, bool backward_euler) const {
         out.setZero(static_cast<Index>(state_size_));
         Vector& b_extra = out;
         if (entries_.empty() || dt <= Real{0}) {
@@ -167,7 +181,7 @@ public:
             if (e.kind == DevicePool::StoredKind::Capacitor) {
                 models::Capacitor::Params p{e.C_or_L};
                 const Real i_hist = models::Capacitor::history_term(
-                    e.v_prev, e.i_prev, dt, p);
+                    e.v_prev, backward_euler ? Real{0} : e.i_prev, dt, p);
                 if (stamping::node_is_active(e.from)) {
                     b_extra[e.from] -= i_hist;
                 }
@@ -178,7 +192,7 @@ public:
                 // Inductor
                 models::Inductor::Params p{e.C_or_L};
                 const Real i_hist_L = models::Inductor::history_term(
-                    e.v_prev, e.i_prev, dt, p);
+                    backward_euler ? Real{0} : e.v_prev, e.i_prev, dt, p);
                 // Constraint row residual (in J·x + b = 0 form):
                 //   v_from − v_to − (2L/dt)·i_L + (2L/dt)·I_hist,L = 0
                 // So the assembled `b` part of that row equals
@@ -213,6 +227,8 @@ public:
             b_extra[tcr.s_row] += cross * i_p_prev;
         }
     }
+
+public:
 
     // ------------------------------------------------------------------
     // TR-BDF2 (v2.0 Phase 3 — the variable-step mode). One composite
@@ -358,6 +374,18 @@ public:
     ///   v_new = v_from − v_to
     ///   i_new = x[branch_var_id]    (direct unknown)
     void update_from_state(const Vector& x, Real dt) {
+        update_from_state_(x, dt, /*backward_euler=*/false);
+    }
+
+    /// Commit a restart stage of `h_e`: i_C = (C/h_e)(v − v_n),
+    /// the trapezoidal commit at 2·h_e without i_prev; the inductor
+    /// commit (read i_L and v_L from x) is the same either way.
+    void update_from_state_backward_euler(const Vector& x, Real h_e) {
+        update_from_state_(x, Real{2} * h_e, /*backward_euler=*/true);
+    }
+
+private:
+    void update_from_state_(const Vector& x, Real dt, bool backward_euler) {
         if (entries_.empty() || dt <= Real{0}) {
             return;
         }
@@ -368,7 +396,8 @@ public:
             if (e.kind == DevicePool::StoredKind::Capacitor) {
                 models::Capacitor::Params p{e.C_or_L};
                 const Real g_eq = models::Capacitor::g_eq(dt, p);
-                const Real i_new = g_eq * (v_new - e.v_prev) - e.i_prev;
+                const Real i_new = g_eq * (v_new - e.v_prev)
+                                   - (backward_euler ? Real{0} : e.i_prev);
                 e.v_prev = v_new;
                 e.i_prev = i_new;
             } else {
@@ -376,6 +405,51 @@ public:
                 const Real i_new = x[e.inductor_branch_var_id];
                 e.v_prev = v_new;
                 e.i_prev = i_new;
+            }
+        }
+    }
+
+public:
+    /// SDIRK(2,2) restart (add-discontinuity-restart-rule): between the
+    /// two backward-Euler-like stages of one step, move the previous
+    /// STATE (capacitor v, inductor i) to the pseudo previous state
+    /// x0* = x0 + c·(x1 − x0), c = (1 − γ)/γ, x1 the stage-1 solve.
+    /// Stage 2 then is the BE-like solve of size γh from x0*, and the
+    /// BE commit after it refreshes the derivative slots as
+    /// (x2 − x0*)/(γh) — stage 2's own derivative.
+    void extrapolate_previous(const Vector& x1, Real c) {
+        for (auto& e : entries_) {
+            if (e.kind == DevicePool::StoredKind::Capacitor) {
+                const Real v1 = stamping::read_node_voltage(x1, e.from)
+                              - stamping::read_node_voltage(x1, e.to);
+                e.v_prev += c * (v1 - e.v_prev);
+            } else {
+                e.i_prev += c * (x1[e.inductor_branch_var_id] - e.i_prev);
+            }
+        }
+    }
+
+    /// TR-BDF2 post-event derivative refresh: replace the DERIVATIVE
+    /// slot of each entry (capacitor current, inductor voltage) with
+    /// its value in `x_probe`, a trapezoidal probe of step `h_probe`
+    /// solved under the post-event mask from this history. The states
+    /// (capacitor v_prev, inductor i_prev) are left untouched: the
+    /// probe exists to pin them.
+    void refresh_derivatives(const Vector& x_probe, Real h_probe) {
+        if (entries_.empty() || h_probe <= Real{0}) {
+            return;
+        }
+        for (auto& e : entries_) {
+            const Real v_p = stamping::read_node_voltage(x_probe, e.from)
+                             - stamping::read_node_voltage(x_probe, e.to);
+            if (e.kind == DevicePool::StoredKind::Capacitor) {
+                // The probe's own companion current at t + h_probe.
+                models::Capacitor::Params p{e.C_or_L};
+                e.i_prev = models::Capacitor::g_eq(h_probe, p)
+                               * (v_p - e.v_prev)
+                           - e.i_prev;
+            } else {
+                e.v_prev = v_p;
             }
         }
     }
@@ -476,6 +550,21 @@ public:
         out.assign(entries_.begin(), entries_.end());
     }
 
+    /// Flat rollback snapshot (update-fixed-step-loop-bookkeeping):
+    /// only the two fields a step mutates, as (v_prev, i_prev) pairs.
+    void snapshot_into(std::vector<Real>& out) const {
+        out.resize(2 * entries_.size());
+        for (Size k = 0; k < entries_.size(); ++k) {
+            out[2 * k] = entries_[k].v_prev;
+            out[2 * k + 1] = entries_[k].i_prev;
+        }
+    }
+    void restore(const std::vector<Real>& snap) {
+        for (Size k = 0; k < entries_.size(); ++k) {
+            entries_[k].v_prev = snap[2 * k];
+            entries_[k].i_prev = snap[2 * k + 1];
+        }
+    }
     void restore(const std::vector<HistoryEntry>& snap) {
         // We do not enforce snap.size() == entries_.size()
         // because callers always pair snapshot/restore on the

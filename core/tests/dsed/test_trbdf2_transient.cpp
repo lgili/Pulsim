@@ -533,3 +533,63 @@ TEST_CASE("TR-BDF2: a line-inductance bridge does not grind at one "
     REQUIRE(tail_mean(res, b.node_id_of("dc"), 0.48)
             == Approx(321.865).margin(0.1));
 }
+
+// update-trbdf2-post-event-restart: after a gate edge the history's
+// derivative slots hold the POST-edge derivative (read from a probe
+// under the new mask), not the open-switch value. The run ends on the
+// edge, so the final snapshot's history is the refreshed one.
+TEST_CASE("TR-BDF2: derivative slots are refreshed after a gate edge",
+          "[v2][trbdf2][post-event]") {
+    const Real V = 10.0, R = 10.0, r_on = 1e-3, t_close = 1.2345e-4;
+    for (const bool refresh : {true, false}) {
+        for (const bool inductor : {true, false}) {
+            builder::CircuitBuilder b;
+            b.add_voltage_source("V", "in", "gnd", V);
+            b.add_switch("S", "in", "n1", 1.0 / r_on, 1e-9);
+            b.add_resistor("R", "n1", "n2", R);
+            if (inductor) {
+                b.add_inductor("L", "n2", "gnd", 1e-3);
+            } else {
+                b.add_capacitor("C", "n2", "gnd", 1e-6);
+            }
+            pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+            cache.build_lazy(1e-6);
+            const Size n_sw = b.graph().num_switches();
+            auto sf = [&](Real t) {
+                topology::SwitchStateMask m(n_sw);
+                m.set(0, t >= t_close);
+                return m;
+            };
+            solver::TrBdf2Options o;
+            o.t_end = t_close;
+            o.refresh_after_event = refresh;
+            solver::TrBdf2Stats st;
+            const auto res = solver::run_transient_trbdf2(
+                cache, b.graph(), b.pool(), o, sf, {}, std::nullopt,
+                &st);
+            REQUIRE(st.n_gate_events == 1);
+            const auto& hist = res.final_snapshot.history;
+            REQUIRE(hist.size() == 2);
+            const Real v_prev = hist[0], i_prev = hist[1];
+            if (inductor) {
+                // v_L(te+) = V - (R + r_on)·i(te); 0 V (open switch)
+                // without the refresh.
+                const Real expect = V - (R + r_on) * i_prev;
+                if (refresh) {
+                    REQUIRE(v_prev == Approx(expect).epsilon(1e-8));
+                    REQUIRE(st.n_derivative_refreshes == 1);
+                } else {
+                    REQUIRE(std::abs(v_prev) < 1e-6);
+                    REQUIRE(st.n_derivative_refreshes == 0);
+                }
+            } else {
+                const Real expect = (V - v_prev) / (R + r_on);
+                if (refresh) {
+                    REQUIRE(i_prev == Approx(expect).epsilon(1e-8));
+                } else {
+                    REQUIRE(std::abs(i_prev) < 1e-6);
+                }
+            }
+        }
+    }
+}

@@ -79,6 +79,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     load_yaml_file,
     # Source helpers (Layer 2 V5+).
     make_pwm_switch_fn,
+    make_constant_switch_fn,
     make_dead_time_pwm_pair_fn,
     make_spwm_pair_fn,
     ThreePhaseLegIndices,
@@ -336,6 +337,10 @@ from .spice_import import (
     parse_spice_netlist,
     spice_to_builder,
 )
+# add-power-mosfet-datasheet-device: charge laws, double pulse, fitters.
+from ._pulsim import ChargeLaw, ChargeTable  # type: ignore[import-not-found]
+from . import datasheet as datasheet  # noqa: F401  (re-export submodule)
+from .double_pulse import DoublePulseResult, double_pulse_metrics, double_pulse_test
 from .stream import LiveStream, NativeLiveStream
 from ._exact_route import exact_route
 from .electrothermal import (
@@ -425,6 +430,11 @@ from .steady_state import (
     steady_state,  # noqa: F401
     SteadyStateResult,  # noqa: F401
 )
+from .periodic_steady_state import (
+    periodic_steady_state,  # noqa: F401
+    PeriodicSteadyStateResult,  # noqa: F401
+    SampledModel,  # noqa: F401
+)
 
 # v2.0 Phase 3 — subsystems: define once, instantiate many, with
 # scoped names (audit A.7). Pure builder-level; the kernel never
@@ -449,24 +459,26 @@ from .mmc_thevenin import (
 # raise a clear ImportError pointing at the install command.
 from . import schematic  # noqa: F401
 
-# LiveScope is an optional import — only available when pyqtgraph
-# is installed. We tolerate the absence so headless environments
-# still load `pulsim` without complaint.
+# LiveScope is optional (pyqtgraph + a Qt binding) and slow to import
+# (about half of `import pulsim`), so `pulsim.LiveScope` is resolved on
+# first access by the module `__getattr__` below; `import pulsim` never
+# imports `pulsim.scope`. Availability is probed without importing.
 try:
-    from .scope import LiveScope  # noqa: F401  (re-exported below via __all__)
-    _HAS_SCOPE = True
-except ImportError:  # pragma: no cover
-    _HAS_SCOPE = False
+    import importlib.util as _ilu
+    _HAS_SCOPE = _ilu.find_spec("pyqtgraph") is not None
+except ValueError:  # already in sys.modules without a __spec__ (a stub)
+    import sys as _sys
+    _HAS_SCOPE = _sys.modules.get("pyqtgraph") is not None
 
-# Importing the ``pulsim.scope`` submodule (above) makes the import
-# system bind the *module* to the package attribute ``scope``, which
-# silently replaced the ``pulsim.scope(builder, result, ...)`` plotting
-# function imported from ``.plot`` -- ``p.scope(...)`` then raised
-# ``TypeError: 'module' object is not callable``. Rebind the function.
-# The submodule stays importable: it is cached in ``sys.modules``, so
-# ``import pulsim.scope`` and ``from pulsim.scope import LiveScope`` keep
-# working and do not re-bind the attribute. (``import pulsim.scope as m``
-# resolves the attribute first and therefore yields the function; use
+# Importing the ``pulsim.scope`` submodule makes the import system bind
+# the *module* to the package attribute ``scope``, which silently replaced
+# the ``pulsim.scope(builder, result, ...)`` plotting function imported
+# from ``.plot`` -- ``p.scope(...)`` then raised ``TypeError: 'module'
+# object is not callable``. The package refuses that one rebinding (see
+# `_PulsimModule` at the end of this file), so ``import pulsim.scope``
+# and ``from pulsim.scope import LiveScope`` work at any time and leave
+# the function in place. (``import pulsim.scope as m`` resolves the
+# attribute first and therefore yields the function; use
 # ``from pulsim.scope import LiveScope`` or ``pulsim.LiveScope``.)
 from .plot import scope  # noqa: E402,F811
 
@@ -476,6 +488,7 @@ from .plot import scope  # noqa: E402,F811
 from ._ai_guide import ai_guide  # noqa: E402
 
 __all__ = [
+    "ResolutionWarning",
     "ai_guide",
     "CircuitBuilder",
     "Graph",
@@ -501,6 +514,7 @@ __all__ = [
     "NativeMultiMaskPwm",
     "wire_chain_from_yaml",
     "make_pwm_switch_fn",
+    "make_constant_switch_fn",
     "make_dead_time_pwm_pair_fn",
     "make_spwm_pair_fn",
     "ThreePhaseLegIndices",
@@ -718,6 +732,11 @@ __all__ = [
     "parse_spice_value",
     "parse_spice_netlist",
     "spice_to_builder",
+    "ChargeLaw",
+    "ChargeTable",
+    "DoublePulseResult",
+    "double_pulse_metrics",
+    "double_pulse_test",
     # Live streaming output + cancellation (foundation for GUI scope).
     "LiveStream",
     "NativeLiveStream",
@@ -759,11 +778,116 @@ if _HAS_SCOPE:
 # analyses with `should_continue` cancellation.
 from . import _builder_ergonomics as _berg
 _berg.install(CircuitBuilder)
+
+
+# add-fixed-step-resolution-diagnostics thresholds (design D3).
+_RESOLUTION_LTE_MAX = 1e-2
+_RESOLUTION_UNESTIMATED_MAX = 0.5
+
+
+def _warn_unlocated_edges(res):
+    """Event splitting without an edge oracle (review M3): say so once."""
+    c = getattr(res, "counters", None) or {}
+    n = c.get("unlocated_gate_steps", 0)
+    if n:
+        import warnings
+        warnings.warn(
+            f"simulate(enable_substep_state_correction=True): {n} gate "
+            "change(s) came from a switch_fn without next_edge_after(t) "
+            "and could not be located inside the step; each was taken "
+            "at the next grid point (first order there). Give the "
+            "schedule an oracle (make_pwm_switch_fn & co. have one) or "
+            "put the edges on the dt grid. See res.counters.",
+            UserWarning, stacklevel=3)
+
+
+def _warn_resolution(builder, res, dt):
+    """One ResolutionWarning per run (see ResolutionWarning)."""
+    rd = getattr(res, "resolution", None)
+    if rd is None:
+        return
+    ring = list(rd.ringing)
+    unest = rd.unestimated_fraction > _RESOLUTION_UNESTIMATED_MAX
+    if not (rd.lte_max > _RESOLUTION_LTE_MAX or ring or unest):
+        return
+    import warnings
+    lines = []
+    if rd.lte_max > _RESOLUTION_LTE_MAX:
+        name = builder.graph.branch_name(rd.lte_branch) or \
+            f"branch #{rd.lte_branch}"
+        lines.append(
+            f"  * {name}: estimated truncation {rd.lte_max:.3g} of its "
+            f"peak in one step, at t = {rd.lte_time:.6g} s.")
+    if ring:
+        try:
+            names = builder.state_var_names()
+        except Exception:  # noqa: BLE001 — test doubles without names
+            names = []
+        worst = max(ring, key=lambda r: r.length)
+        nm = names[worst.var] if worst.var < len(names) else \
+            f"x[{worst.var}]"
+        lines.append(
+            f"  * {nm}: {worst.length} sign-alternating steps from "
+            f"t = {worst.t_start:.6g} s (largest step change "
+            f"{worst.max_delta:.4g}); {len(ring)} such run(s) in all.")
+    if unest:
+        lines.append(
+            f"  * {rd.unestimated_fraction:.0%} of the steps could not be "
+            "estimated (a mask change, restart, split or source jump "
+            "within three steps): the run is not shown to be resolved.")
+    warnings.warn(
+        f"simulate(): dt = {dt:.4g} s does not resolve this circuit "
+        "(fixed-step engine).\n" + "\n".join(lines) +
+        "\n  Reduce dt, or omit dt to let the variable-step engine "
+        "choose. The estimate is not an error bound. Details: "
+        "res.resolution.",
+        ResolutionWarning, stacklevel=3)
+
+
+class ResolutionWarning(UserWarning):
+    """A fixed-step (`pwl`) run whose `dt` does not resolve the circuit:
+    a large truncation estimate or a Nyquist alternation
+    (`res.resolution`). Silence with
+    ``warnings.filterwarnings("ignore", category=pulsim.ResolutionWarning)``
+    or by leaving ``resolution_diagnostics`` off (the default)."""
+
 Cancelled = _berg.Cancelled
 RetiredDeviceError = _berg.RetiredDeviceError
+
+
+def _yaml_retired_as_retired_error(native):
+    import functools
+
+    @functools.wraps(native)
+    def load(*args, **kwargs):
+        try:
+            return native(*args, **kwargs)
+        except RuntimeError as e:
+            # The C++ loader's refusal of a retired type stays a
+            # RuntimeError (every YAML refusal is) and is also the
+            # builder's RetiredDeviceError, so one except catches both.
+            if " is retired: " in str(e) and not isinstance(
+                    e, RetiredDeviceError):
+                raise _berg.RetiredYamlDeviceError(str(e)) from None
+            raise
+    return load
+
+
+load_yaml_string = _yaml_retired_as_retired_error(load_yaml_string)
+load_yaml_file = _yaml_retired_as_retired_error(load_yaml_file)
 from ._refusal import unsupported as _unsupported  # noqa: E402
 from ._control_plan import FixedStepTicks as _FixedStepTicks  # noqa: E402
 from ._control_plan import compose_control as _compose_control  # noqa: E402
+
+# add-mna-native-machines: CircuitBuilder.add_dc_machine (a linear
+# composite of existing kernel elements, solved inside the matrix).
+from . import machines as _machines  # noqa: E402
+_machines.install(CircuitBuilder)
+
+# add-realistic-passives: esr / esl / c_par / rac keywords on
+# add_capacitor / add_inductor and add_transmission_line (composites).
+from . import passives as _passives  # noqa: E402
+_passives.install(CircuitBuilder)
 
 
 
@@ -873,7 +997,7 @@ def _result_v(self, name: str, t=None):
     return col[t]
 
 
-def _result_i(self, name: str, t=None):
+def _result_i(self, name: str, t=None, *, port=None):
     """Return the branch-current trace for ``name``.
 
     ``result.i()`` aims at the PLECS-style output-equation convention:
@@ -898,6 +1022,16 @@ def _result_i(self, name: str, t=None):
     | ``resistor``               | ``(V_from − V_to) / R_ohms``            |
     | ``capacitor``              | ``C · d(V_from − V_to)/dt``             |
     | ``current_source``         | constant ``I`` from params              |
+    | ``sine_current_source``,   | the source's value at each sample time  |
+    | ``pulse_current_source``,  | (positive OUT of ``n_pos``, as for      |
+    | ``pwl_current_source``     | ``current_source``)                     |
+    | ``vccs``                   | ``gm·(V_in_pos − V_in_neg)`` out of     |
+    |                            | ``n_pos``                               |
+    | ``cccs``                   | ``gain·i(control)`` out of ``n_pos``    |
+    | ``ccvs``                   | its branch unknown (a voltage source)   |
+    | ``gyrator``                | ``port=2`` (default): ``i_2 = −g·v_1``; |
+    |                            | ``port=1``: ``i_1 = g·v_2``; both INTO  |
+    |                            | the device at ``p1_pos`` / ``p2_pos``   |
     | ``diode`` (PWL switched)   | ``g_on·(V_from − V_to − V_f)`` on       |
     |                            | samples the solver stamped the diode    |
     |                            | ON, ``g_off·(V_from − V_to)`` otherwise |
@@ -959,6 +1093,8 @@ def _result_i(self, name: str, t=None):
     t
         Optional step selection (``int`` / ``slice`` / array-like).
         ``None`` returns the full per-sample trace.
+    port
+        Gyrator only: ``1`` or ``2`` (default ``2``, the branch).
     """
     import numpy as _np
     from ._result_views import (
@@ -986,6 +1122,15 @@ def _result_i(self, name: str, t=None):
         import difflib as _difflib
         sugg = _difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
         raise NameNotFoundError(name, "branch", sugg) from None
+
+    if port is not None:
+        kinds = {d.get("branch_id"): d.get("kind")
+                 for d in builder.components()}
+        if kinds.get(b_id) != "gyrator" or port not in (1, 2):
+            raise ValueError(
+                f"result.i({name!r}, port={port!r}): `port` is 1 or 2 and "
+                f"only for a gyrator (this branch is "
+                f"{kinds.get(b_id)!r}).")
 
     # ---- Fast path: state-vector-native kinds (inductor, VS family) ----
     # Try inductor first (most common case), then the source family
@@ -1112,6 +1257,27 @@ def _result_i(self, name: str, t=None):
                 f"`I` ({exc!r})") from None
         return _finalize(_np.full(states.shape[0], I_A))
 
+    # ---------- add-controlled-source-set --------------------------
+    if kind in ("sine_current_source", "pulse_current_source",
+                "pwl_current_source"):
+        val = builder.pool.current_waveform_value
+        return _finalize(_np.array([val(b_id, float(tt))
+                                    for tt in _ta(self)], dtype=float))
+    if kind == "vccs":
+        v_c = (_node_v(states, int(params["in_pos"]))
+               - _node_v(states, int(params["in_neg"])))
+        return _finalize(float(params["gm"]) * v_c)
+    if kind == "cccs":
+        col = int(builder.pool.control_column(b_id, builder.graph))
+        return _finalize(float(params["gain"]) * states[:, col])
+    if kind == "gyrator":
+        g = float(params["g"])
+        if port == 1:  # i_1 = g·v_2, v_2 across the branch
+            return _finalize(g * _v_branch())
+        v_1 = (_node_v(states, int(params["p1_pos"]))
+               - _node_v(states, int(params["p1_neg"])))
+        return _finalize(-g * v_1)
+
     # ----------------------- diode -----------------------------------
     if kind == "diode":
         # PWL switched diode: g_on in series with the forward drop V_f
@@ -1194,7 +1360,8 @@ def _result_i(self, name: str, t=None):
         f"reconstruct currents for this device family, and "
         f"device_loss_summary does not report it either. Currently "
         f"supported: inductor, voltage_source (incl. pwm / sine / "
-        f"pulse variants), resistor, capacitor, current_source, "
+        f"pulse variants), resistor, capacitor, current_source (incl. "
+        f"sine / pulse / pwl), vccs, cccs, ccvs, gyrator, "
         f"diode, shockley_diode, switch. To measure this device's "
         f"current, put a small resistor in series with it (1 mOhm) "
         f"and read `res.i(<that resistor>)`; its loss is then the "
@@ -1476,7 +1643,17 @@ class SolverOptions:
     # disables event iteration entirely (the pre-V2.1 behaviour) —
     # so it cannot double as the "not set" sentinel.
     max_event_iterations: Optional[int] = None
+    # Fixed engine: split a step at a gate edge (schedules with
+    # next_edge_after), source jump or diode crossing inside it; needs
+    # discontinuity_restart (None = off).
     enable_substep_state_correction: Optional[bool] = None
+    # Fixed engine: three SDIRK(2,2) steps after every discontinuity,
+    # gate sampled at the step start (None = off).
+    discontinuity_restart: Optional[bool] = None
+    # Fixed engine: record res.resolution and warn once
+    # (ResolutionWarning) when dt does not resolve the circuit
+    # (None = on).
+    resolution_diagnostics: Optional[bool] = None
 
     # Topology preflight ---------------------------------------------
     # None = engine default (True). False must mean "the user
@@ -1515,6 +1692,40 @@ class SolverOptions:
     dt_init: Optional[float] = None
 
 
+def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
+    """Names of the hooks that put a Python callable in the step loop.
+
+    Pass the objects actually handed to the engine. A switch_fn is
+    native when the kernel calls it in C++: a native PWM class, or a
+    `SwitchSchedule` with an edge oracle (a combination that holds a
+    Python callable has none). Any other non-None hook is Python.
+    """
+    out = []
+    for name, fn in hooks.items():
+        if fn is None:
+            continue
+        if name == "switch_fn" and (
+                isinstance(fn, (NativePwm2Switch, NativeMultiMaskPwm))
+                or (isinstance(fn, SwitchSchedule) and fn.has_edges)):
+            continue
+        out.append(name)
+    return tuple(out)
+
+
+def _carry_jumps(fn, parts):
+    """Give a composed b_extra_fn the declared jumps of its parts.
+
+    A part declares its jump instants with `next_jump_after(t)` (first
+    jump strictly after t); the composition jumps at the earliest.
+    Undeclared parts stay undeclared (the restart rule cannot see them).
+    """
+    nj = [q.next_jump_after for q in parts
+          if q is not None and hasattr(q, "next_jump_after")]
+    if nj:
+        fn.next_jump_after = lambda t, _nj=nj: min(f(t) for f in _nj)
+    return fn
+
+
 def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
                         label):
     """Compose an internal (observer, b_extra) pair with the user's.
@@ -1549,7 +1760,7 @@ def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
                         f"b_extra_fn returned shape {u.shape}, "
                         f"expected ({_n},) when composed with {_lbl}")
                 return _np.asarray(_i(t)) + u
-            b_extra_fn = _b
+            b_extra_fn = _carry_jumps(_b, (b, _u_b))
     return step_observer, b_extra_fn
 
 
@@ -1617,6 +1828,8 @@ def simulate(
     enable_newton_line_search: Optional[bool] = None,
     enable_newton_lm: Optional[bool] = None,
     enable_substep_state_correction: Optional[bool] = None,
+    discontinuity_restart: Optional[bool] = None,
+    resolution_diagnostics: Optional[bool] = None,
     inductor_freeze_di_max: Optional[float] = None,
     inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
@@ -1771,7 +1984,11 @@ def simulate(
     rtol, atol
         Relative / absolute tolerance for the DSED PI controller.
         Ignored if ``engine='pwl'`` (warning emitted). Defaults:
-        ``rtol=1e-6, atol=1e-9``.
+        ``rtol=1e-6, atol=1e-9``. For ``'trbdf2'`` / ``'auto'``
+        (defaults ``1e-5`` / ``1e-8``) they bound the local error
+        estimate, which since update-trbdf2-error-control is the true
+        local error (it was half of it): pass doubled values for the
+        previous step density.
     dt_init
         Initial step for the DSED PI controller (default 1e-9).
     integrator
@@ -1850,6 +2067,17 @@ def simulate(
         ``integrator='bdf2'`` (deprecated) is numeric throughout and is not
         refused. On other engines passing it raises :class:`UnsupportedError`.
 
+    resolution_diagnostics
+        ``engine='pwl'`` only, default OFF (it costs 5-14 %): ``True``
+        records ``res.resolution`` (a per-step truncation estimate of
+        the linear capacitors and inductors relative to each one's
+        running peak, floored at 1e-3 of its kind's peak, the runs of
+        >= 4 sign-alternating steps of any state entry, and the fraction
+        of steps that could not be estimated) and warns once
+        (:class:`ResolutionWarning`) when ``lte_max > 1e-2``, a run
+        exists or over half the steps are unestimated. An estimate, not
+        an error bound; the states are the same bit for bit either way.
+
     Returns
     -------
     SimulationResult
@@ -1863,6 +2091,9 @@ def simulate(
         On unknown ``engine``; on ``engine='pwl'`` without ``dt``;
         on invalid DSED options (negative tolerance, unknown
         ``integrator``).
+    ResolutionWarning
+        A ``UserWarning``: the fixed ``dt`` does not resolve the circuit
+        (see ``resolution_diagnostics``).
     UserWarning
         When DSED-only kwargs are passed with ``engine='pwl'`` (they
         are silently ignored — the warning is informational so
@@ -1936,6 +2167,10 @@ def simulate(
         if enable_substep_state_correction is None:
             enable_substep_state_correction = (
                 solver.enable_substep_state_correction)
+        if discontinuity_restart is None:
+            discontinuity_restart = solver.discontinuity_restart
+        if resolution_diagnostics is None:
+            resolution_diagnostics = solver.resolution_diagnostics
         if inductor_freeze_di_max is None:
             inductor_freeze_di_max = solver.inductor_freeze_di_max
         if inductor_abs_clamp is None:
@@ -2124,6 +2359,9 @@ def simulate(
             "inductor_abs_clamp": inductor_abs_clamp is not None,
             "enable_substep_state_correction": bool(
                 enable_substep_state_correction),
+            "discontinuity_restart": bool(discontinuity_restart),
+            # Per-step truncation of a fixed grid: none to estimate.
+            "resolution_diagnostics": bool(resolution_diagnostics),
         }
         _offending = [k for k, hit in _dsed_unsupported.items() if hit]
         if _offending:
@@ -2173,8 +2411,18 @@ def simulate(
             # accessors the pwl engine gets now mean the same thing
             # here. `_builder` is what they resolve names against.
             _dsed_res._builder = builder
+            # No switch_fn: the DSED dispatcher installs a Python
+            # all-closed lambda, so a placeholder stands in for it.
+            _dsed_res.step_loop_python_callbacks = (
+                _step_loop_python_callbacks(
+                    switch_fn=(switch_fn if switch_fn is not None
+                               else "default"),
+                    b_extra_fn=b_extra_fn))
         except AttributeError:  # pragma: no cover
             pass
+        _auto_check_voltage_sanity(_dsed_res, builder,
+                                    voltage_sanity_factor)
+        _dsed.check_diode_modes(_dsed_res, builder)
         return _dsed_res
 
     if resume_from is not None and t_start == 0.0:
@@ -2203,6 +2451,8 @@ def simulate(
             on_cache=on_cache,
             enable_substep_state_correction=(
                 enable_substep_state_correction),
+            discontinuity_restart=discontinuity_restart,
+            resolution_diagnostics=resolution_diagnostics,
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
             switch_fn=switch_fn)
@@ -2325,8 +2575,7 @@ def simulate(
             # fixed engine's all-CLOSED legacy default is what the
             # router sends this case to instead — flipping THAT is
             # its own breaking change, not this one).
-            switch_fn = (lambda _n=_n_sw:
-                          (lambda t: SwitchStateMask(_n)))()
+            switch_fn = make_constant_switch_fn(SwitchStateMask(_n_sw))
         cache = PwlStateSpaceCache(builder.graph, builder.pool)
         # Lazy build only needs a positive dt to mark the cache
         # dynamic; the stepper solves at its own per-step dt via
@@ -2378,6 +2627,12 @@ def simulate(
         res.control_tick_jitter_max = 0.0
         res.engine_used = "trbdf2"
         res.engine_route_reason = None
+        res.step_loop_python_callbacks = _step_loop_python_callbacks(
+            switch_fn=switch_fn, b_extra_fn=b_extra_fn,
+            # the loops' ticks are reported under closed_loops
+            step_observer=step_observer,
+            should_continue=should_continue,
+            closed_loops=closed_loops or None)
         # The implausible-voltage detector is engine-independent
         # (it reads the trace, not the stepper) and this engine's
         # new all-OPEN default mask makes the inductor-open case it
@@ -2500,7 +2755,7 @@ def simulate(
             return total if total is not None else []
 
         step_observer = _cblock_observer
-        b_extra_fn = _cblock_b_extra
+        b_extra_fn = _carry_jumps(_cblock_b_extra, [_prior_bex, *_cb_bex])
 
     # Build the PWL cache — LAZY by default (Phase-0 fix #7).
     # A PWM converter visits only a handful of the 2^N switch
@@ -2553,6 +2808,12 @@ def simulate(
                 "re-fire), silently corrupting the capacitor "
                 "bookkeeping. The ladder is disabled automatically "
                 "when mmc_arms is set; do not request it.")
+        if discontinuity_restart:
+            raise ValueError(
+                "simulate(mmc_arms=..., discontinuity_restart=True): "
+                "the restart half-steps re-solve at dt/2 with the "
+                "arm's full-dt Thevenin stamp — the dt-halving "
+                "corruption again.")
         if enable_substep_state_correction:
             raise ValueError(
                 "simulate(mmc_arms=..., "
@@ -2644,6 +2905,10 @@ def simulate(
         opts.enable_newton_lm = enable_newton_lm
     if enable_substep_state_correction is not None:
         opts.enable_substep_state_correction = enable_substep_state_correction
+    if discontinuity_restart is not None:
+        opts.discontinuity_restart = bool(discontinuity_restart)
+    if resolution_diagnostics is not None:
+        opts.resolution_diagnostics = bool(resolution_diagnostics)
     if inductor_freeze_di_max is not None and inductor_freeze_di_max > 0:
         opts.inductor_freeze_di_max = float(inductor_freeze_di_max)
     if inductor_abs_clamp is not None and inductor_abs_clamp > 0:
@@ -2682,7 +2947,8 @@ def simulate(
         default_mask = SwitchStateMask(n_sw)
         for i in range(n_sw):
             default_mask.set(i, True)
-        switch_fn = lambda _t: default_mask  # noqa: E731
+        # Evaluated in C++: no Python callable in the step loop.
+        switch_fn = make_constant_switch_fn(default_mask)
 
     # enable_nonlinear_refresh=None goes through as is: the kernel
     # stamps the Newton devices when the circuit has any, and refuses
@@ -2904,6 +3170,12 @@ def simulate(
         res.engine_used = "pwl"
         res.engine_route_reason = (
             "; ".join(_route_reasons) if _route_reasons else None)
+        res.step_loop_python_callbacks = _step_loop_python_callbacks(
+            switch_fn=switch_fn, b_extra_fn=b_extra_fn,
+            # the chain fast path runs the observer's C++ chain
+            step_observer=None if cxx_chain is not None else step_observer,
+            should_continue=should_continue,
+            closed_loops=_closed_loops_user or None)
     except AttributeError:  # pragma: no cover
         pass
     try:
@@ -2976,6 +3248,10 @@ def simulate(
             f"{first.reason[:200]}",
             stacklevel=2)
 
+    _warn_newton_roundoff(res, "simulate()")
+    _warn_resolution(builder, res, dt)
+    _warn_unlocated_edges(res)
+
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:
         import warnings
@@ -3027,12 +3303,31 @@ def simulate(
     return res
 
 
+def _warn_newton_roundoff(res, eng) -> None:
+    """add-newton-roundoff-acceptance: say when a transient Newton
+    solve was accepted at roundoff level instead of aborting."""
+    n = int(getattr(res, "newton_roundoff_accepts", 0) or 0)
+    if n > 0:
+        import warnings
+        warnings.warn(
+            f"{eng}: {n} Newton solve(s) ran out of iterations with "
+            f"||dx|| stagnated at roundoff and were accepted: every "
+            f"row's residual is within "
+            f"{res.newton_roundoff_omega_max:.2g} of the magnitudes it "
+            f"sums (at most 8 eps; worst at MNA row "
+            f"{res.newton_roundoff_row}). This replaces an abort that "
+            f"no tolerance could have passed; it is not a loosened "
+            f"tol_newton_dx. Check result.newton_roundoff_accepts.",
+            stacklevel=3)
+
+
 def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
     """The variable-step engine's own confessions, from its stats and
     its switch-state record. Each one names what the engine could not
     guarantee and how to cross-check it."""
     import warnings
     eng = f"simulate(engine={engine_asked!r})"
+    _warn_newton_roundoff(res, eng)
     if stats.get("n_forced_accepts", 0) > 0:
         warnings.warn(
             f"{eng}: "
@@ -3208,7 +3503,8 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                       max_dt_halvings, store_every, mmc_arms,
                       enable_substep_state_correction,
                       inductor_freeze_di_max, inductor_abs_clamp,
-                      switch_fn):
+                      switch_fn, discontinuity_restart=None,
+                      resolution_diagnostics=None):
     """Why the variable-step engine cannot serve this run.
 
     Returns a list of human-readable reasons — empty means it can.
@@ -3276,6 +3572,12 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     if enable_substep_state_correction:
         why.append(_blk("enable_substep_state_correction", "enable_substep_state_correction is the "
                     "fixed-step commutation split"))
+    if discontinuity_restart:
+        why.append(_blk("discontinuity_restart", "discontinuity_restart is the "
+                    "fixed-step engine's restart rule"))
+    if resolution_diagnostics:
+        why.append(_blk("resolution_diagnostics", "resolution_diagnostics "
+                    "estimates a fixed step's truncation"))
     if store_every is not None and int(store_every) != 1:
         why.append(_blk("store_every", "store_every decimates a uniform grid"))
     if mmc_arms:
@@ -3334,9 +3636,16 @@ def _auto_check_voltage_sanity(res, builder, factor):
     """
     try:
         from . import _pulsim as _k  # type: ignore[import-not-found]
-        volt = _k.find_implausible_voltage(
-            builder.graph, builder.pool, res,
-            100.0 if factor is None else float(factor))
+        f = 100.0 if factor is None else float(factor)
+        if isinstance(res, _k.SimulationResult):
+            volt = _k.find_implausible_voltage(builder.graph,
+                                               builder.pool, res, f)
+        else:   # the dsed result: full-MNA samples as arrays
+            import numpy as _np
+            volt = _k.find_implausible_voltage(
+                builder.graph, builder.pool,
+                list(_np.asarray(res.times, dtype=float)),
+                _np.asarray(res.states, dtype=float), f)
     except Exception:  # pragma: no cover — never break a good run
         return
     if volt is not None and volt.node >= 0:
@@ -3562,6 +3871,16 @@ def __getattr__(name: str):
     if name.startswith("__"):
         raise AttributeError(
             f"module 'pulsim' has no attribute {name!r}")
+    if name == "LiveScope":
+        try:
+            from .scope import LiveScope
+        except ImportError as exc:
+            raise AttributeError(
+                "pulsim.LiveScope needs the optional dependency "
+                "pyqtgraph (and a Qt binding such as PySide6): "
+                f"pip install pyqtgraph PySide6. ({exc})") from exc
+        globals()["LiveScope"] = LiveScope
+        return LiveScope
     # A name that lives in an already-imported submodule: say where.
     import sys as _sys
     homes = sorted(
@@ -3576,3 +3895,22 @@ def __getattr__(name: str):
         f"{name!r}.{where} Run `python -m pulsim.guide` for the "
         f"current API, and see docs/migration-guide.md if you're "
         f"porting v1 code.")
+
+
+import sys as _sys  # noqa: E402
+import types as _types  # noqa: E402
+
+
+class _PulsimModule(_types.ModuleType):
+    """Keeps ``pulsim.scope`` the plotting function: the import system
+    sets the package attribute to the submodule on the first
+    ``import pulsim.scope`` (see the note above ``from .plot import
+    scope``)."""
+
+    def __setattr__(self, name, value):
+        if name == "scope" and isinstance(value, _types.ModuleType):
+            return
+        super().__setattr__(name, value)
+
+
+_sys.modules[__name__].__class__ = _PulsimModule

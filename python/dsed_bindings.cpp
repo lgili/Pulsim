@@ -341,12 +341,22 @@ py::array_t<double> reconstruct_full_states(
         res.step_masks.size() == n
         && res.pre_event_index.size() == res.pre_event_states.size();
     std::size_t next_pre = 0;
+    bool pre = false;   // sample i is an event's LEFT limit
     auto state_of = [&](std::size_t i) -> const pulsim::Vector& {
+        pre = false;
         if (have_pre && next_pre < res.pre_event_index.size()
             && res.pre_event_index[next_pre] == i) {
+            pre = true;
             return res.pre_event_states[next_pre++];
         }
         return res.states[i];
+    };
+    // A left-limit sample reads its sources' left limit too: a source
+    // corner is an event, and an instant edge there (PWM, pulse) would
+    // otherwise pair the old mode with the new source value. Half the
+    // last step lies inside the piece that step covered.
+    auto left_by = [&](std::size_t i) {
+        return pre && i > 0 ? Real{0.5} * (res.times[i] - res.times[i - 1]) : Real{0};
     };
     // Probe the width from the first sample.
     adapter.set_mask(masks[0]);
@@ -365,6 +375,15 @@ py::array_t<double> reconstruct_full_states(
         }
         double* row = ptr + static_cast<py::ssize_t>(i) * n_mna;
         if constexpr (requires {
+                          adapter.recover_full_into(
+                              Real{0}, state_of(i),
+                              Eigen::Map<pulsim::Vector>(row, n_mna), Real{0});
+                      }) {
+            const pulsim::Vector& xi = state_of(i);
+            adapter.recover_full_into(
+                res.times[i], xi,
+                Eigen::Map<pulsim::Vector>(row, n_mna), left_by(i));
+        } else if constexpr (requires {
                           adapter.recover_full_into(
                               Real{0}, state_of(i),
                               Eigen::Map<pulsim::Vector>(row, n_mna));
@@ -1028,6 +1047,15 @@ void init_module(py::module_& m) {
             &NativeAdapter::rhs,
             py::arg("t"), py::arg("x"),
             "Continuous-time RHS: dx/dt = A·x + b(t).")
+        .def("node_pair_voltage",
+            &NativeAdapter::node_pair_voltage,
+            py::arg("from_node"), py::arg("to_node"),
+            py::arg("t"), py::arg("x"),
+            "v(from_node) − v(to_node) recovered from the reduced "
+            "state `x` under the active mask (−1 is ground). The "
+            "quantity a PWL diode predicate evaluates; affine in "
+            "`x`, so its gradient is the predicate's recovery row "
+            "(used by pulsim.periodic_steady_state for saltation).")
         .def_property_readonly("n_state",
             &NativeAdapter::n_state,
             "Number of continuous-time state variables for the "

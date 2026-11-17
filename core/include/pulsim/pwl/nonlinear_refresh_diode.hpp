@@ -49,7 +49,7 @@ inline Real refresh_smooth_diodes(
     Vector& f_nl,
     const topology::Graph& graph,
     const DevicePool& pool) {
-    if (J_nl.rows() > 0) J_nl.setZero();
+    if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
     if (f_nl.size() > 0) f_nl.setZero();
     return stamp_nonlinear_branches<models::IdealDiode>(
         x, J_nl, f_nl, graph, pool,
@@ -70,7 +70,7 @@ make_kappa_override_refresh(Real kappa_override) {
     return [kappa_override](const Vector& x, sparse::Matrix& J_nl,
                             Vector& f_nl, const topology::Graph& graph,
                             const DevicePool& pool) -> Real {
-        if (J_nl.rows() > 0) J_nl.setZero();
+        if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
         if (f_nl.size() > 0) f_nl.setZero();
         return stamp_nonlinear_branches<models::IdealDiode>(
             x, J_nl, f_nl, graph, pool,
@@ -95,7 +95,7 @@ make_vf0_override_refresh(Real V_F0_override) {
     return [V_F0_override](const Vector& x, sparse::Matrix& J_nl,
                            Vector& f_nl, const topology::Graph& graph,
                            const DevicePool& pool) -> Real {
-        if (J_nl.rows() > 0) J_nl.setZero();
+        if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
         if (f_nl.size() > 0) f_nl.setZero();
         return stamp_nonlinear_branches<models::IdealDiode>(
             x, J_nl, f_nl, graph, pool,
@@ -118,7 +118,7 @@ make_kappa_vf0_override_refresh(Real kappa_override, Real V_F0_override) {
     return [kappa_override, V_F0_override](
                const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
                const topology::Graph& graph, const DevicePool& pool) -> Real {
-        if (J_nl.rows() > 0) J_nl.setZero();
+        if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
         if (f_nl.size() > 0) f_nl.setZero();
         return stamp_nonlinear_branches<models::IdealDiode>(
             x, J_nl, f_nl, graph, pool,

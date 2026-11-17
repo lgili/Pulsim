@@ -510,6 +510,58 @@ class Part:
             raise ValueError(f"{self!r}: no {which} curve.")
         return self.curves[which]
 
+    # -- power MOSFET (add-power-mosfet-datasheet-device) --------------
+    @property
+    def power_mosfet_block(self) -> Dict[str, Any]:
+        blk = self.params.get("power_mosfet")
+        if not blk:
+            raise ValueError(f"{self!r}: no 'power_mosfet' block — this part has no "
+                             "device model, only loss tables.")
+        return blk
+
+    def power_mosfet_kwargs(self) -> Dict[str, Any]:
+        """The block's ``model`` as ``CircuitBuilder.add_power_mosfet``
+        keyword arguments (charge laws built as ``ChargeLaw`` objects)."""
+        import pulsim as _p
+        kw = dict(self.power_mosfet_block["model"])
+        for key in ("C_gd", "C_ds"):
+            c = kw.get(key, 0.0)
+            if isinstance(c, Mapping):
+                c = dict(c)
+                law = c.pop("law")
+                if law == "junction":
+                    kw[key] = _p.ChargeLaw.junction(**c)
+                elif law == "vdmos_cgd":
+                    kw[key] = _p.ChargeLaw.vdmos_cgd(**c)
+                else:  # table, validated at load
+                    tab = (_p.ChargeTable(c["v"], c["Q"], c["C"]) if "Q" in c
+                           else _p.ChargeTable.from_capacitance(c["v"], c["C"]))
+                    kw[key] = _p.ChargeLaw.table(tab)
+        return kw
+
+    def add_to(self, builder, name: str, drain: str, source: str, gate: str,
+               *, T_j: float = 25.0):
+        """Add this part to ``builder`` with ``add_power_mosfet``."""
+        kw = self.power_mosfet_kwargs()
+        kw["T_j"] = T_j
+        return builder.add_power_mosfet(name, drain, source, gate, **kw)
+
+    def acceptance_check(self, *, engine: str = "trbdf2") -> Dict[str, Any]:
+        """Run the part's datasheet double-pulse condition and compare E_on
+        and E_off with the datasheet values. Returns ``{"E_on", "E_off",
+        "err_on", "err_off", "tolerance", "passed"}``. This is what gates the
+        ``validated`` label in CI; the data compared are in ``validated_on``,
+        never in ``fitted_on``."""
+        from ..double_pulse import double_pulse_test
+        dp = dict(self.power_mosfet_block["double_pulse"])
+        ref_on, ref_off, tol = dp.pop("E_on"), dp.pop("E_off"), dp.pop("tolerance")
+        dp.pop("assumed", None)
+        r = double_pulse_test(self, engine=engine, **dp)
+        e_on = abs(r.E_on - ref_on) / ref_on
+        e_off = abs(r.E_off - ref_off) / ref_off
+        return {"E_on": r.E_on, "E_off": r.E_off, "err_on": e_on, "err_off": e_off,
+                "tolerance": tol, "passed": bool(e_on <= tol and e_off <= tol)}
+
 
 # =============================================================================
 # YAML → Part
@@ -550,6 +602,98 @@ def _load_yaml(path: Path) -> Mapping[str, Any]:
     return _coerce_numbers(doc)
 
 
+_CURVE_METHODS = ("transcribed", "digitised", "vendor_spice")
+_CURVE_REF_KEYS = ("document", "revision", "date", "figure", "method")
+_SWITCHING_ENERGIES = ("E_on", "E_off", "E_oss", "Eon", "Eoff", "Eoss")
+_PM_MODEL_KEYS = ("K", "V_T", "lambda_", "kappa", "R_d", "C_gs", "C_gd", "C_ds", "R_g",
+                  "L_s", "body_diode", "rds_tc1", "rds_tc2", "vt_tc")
+_DP_KEYS = ("V_dd", "I_load", "R_g_ext", "V_drive", "L_load", "L_stray", "T_j",
+            "freewheel", "E_on", "E_off", "tolerance", "assumed")
+_VALIDATED_TOLERANCE_CEILING = 0.25
+
+
+def _validate_power_mosfet(blk: Any, what: str) -> Dict[str, Any]:
+    """The ``power_mosfet`` block of a mosfet part file::
+
+        power_mosfet:
+          model: {K, V_T, C_gs, C_gd, C_ds, R_g, ...}   # add_power_mosfet kwargs;
+                 # C_gd / C_ds: number or {law: junction|vdmos_cgd|table, ...}
+          curves:                 # one datasheet reference per curve used
+            Crss: {document, revision, date, figure, method: transcribed|digitised|vendor_spice}
+          fitted_on: [transfer, Crss, ...]
+          validated_on: [E_on, E_off, Qg]
+          double_pulse: {V_dd, I_load, R_g_ext, V_drive, L_load, [L_stray, T_j,
+                         freewheel], E_on, E_off, tolerance, [assumed: [...]]}
+          validated: false
+
+    Refused by name: ``fitted_on`` and ``validated_on`` intersecting (a
+    model checked against its own fit data is not validated), a curve
+    named in either list without a datasheet reference, a switching
+    energy in ``fitted_on``, ``validated: true`` without a
+    ``double_pulse`` block, a tolerance above 25 %.
+    """
+    if not isinstance(blk, Mapping):
+        raise ValueError(f"{what}: power_mosfet must be a mapping.")
+    unknown = sorted(set(blk) - {"model", "curves", "fitted_on", "validated_on",
+                                 "double_pulse", "validated"})
+    if unknown:
+        raise ValueError(f"{what}: power_mosfet has unknown keys {unknown}.")
+    model = blk.get("model")
+    if not isinstance(model, Mapping) or "K" not in model or "V_T" not in model:
+        raise ValueError(f"{what}: power_mosfet.model needs at least K and V_T.")
+    bad = sorted(set(model) - set(_PM_MODEL_KEYS))
+    if bad:
+        raise ValueError(f"{what}: power_mosfet.model has unknown keys {bad}.")
+    for key in ("C_gd", "C_ds"):
+        c = model.get(key, 0.0)
+        if isinstance(c, Mapping) and c.get("law") not in ("junction", "vdmos_cgd", "table"):
+            raise ValueError(f"{what}: power_mosfet.model.{key}.law must be junction, "
+                             f"vdmos_cgd or table (got {c.get('law')!r}).")
+    curves = blk.get("curves") or {}
+    for name, ref in curves.items():
+        if not isinstance(ref, Mapping):
+            raise ValueError(f"{what}: power_mosfet.curves.{name} must be a mapping.")
+        missing = [k for k in _CURVE_REF_KEYS if not str(ref.get(k, "")).strip()]
+        if missing:
+            raise ValueError(
+                f"{what}: power_mosfet.curves.{name} is missing {missing} — every curve "
+                "names the datasheet document, revision, date, figure and how it was read.")
+        if ref["method"] not in _CURVE_METHODS:
+            raise ValueError(f"{what}: power_mosfet.curves.{name}.method = {ref['method']!r}; "
+                             f"expected one of {_CURVE_METHODS}.")
+    fitted = [str(x) for x in (blk.get("fitted_on") or [])]
+    held = [str(x) for x in (blk.get("validated_on") or [])]
+    both = sorted(set(fitted) & set(held))
+    if both:
+        raise ValueError(
+            f"{what}: {both} listed in both fitted_on and validated_on — data a model "
+            "was fitted on never counts as its validation.")
+    energies = sorted(set(fitted) & set(_SWITCHING_ENERGIES))
+    if energies:
+        raise ValueError(f"{what}: switching energies {energies} may not be in fitted_on; "
+                         "they are the held-out check.")
+    for name in fitted + held:
+        if name not in curves and name not in _SWITCHING_ENERGIES:
+            raise ValueError(f"{what}: {name!r} is in fitted_on/validated_on but has no "
+                             "datasheet reference under power_mosfet.curves.")
+    dp = blk.get("double_pulse")
+    if dp is not None:
+        if not isinstance(dp, Mapping):
+            raise ValueError(f"{what}: power_mosfet.double_pulse must be a mapping.")
+        bad = sorted(set(dp) - set(_DP_KEYS))
+        need = [k for k in ("V_dd", "I_load", "R_g_ext", "V_drive", "L_load", "E_on",
+                            "E_off", "tolerance") if k not in dp]
+        if bad or need:
+            raise ValueError(f"{what}: power_mosfet.double_pulse: unknown {bad}, missing {need}.")
+        if not 0 < float(dp["tolerance"]) <= _VALIDATED_TOLERANCE_CEILING:
+            raise ValueError(f"{what}: double_pulse.tolerance = {dp['tolerance']} must be in "
+                             f"(0, {_VALIDATED_TOLERANCE_CEILING}].")
+    if blk.get("validated") and dp is None:
+        raise ValueError(f"{what}: power_mosfet.validated is true but there is no double_pulse "
+                         "block — the label needs a datasheet switching-energy check.")
+    return dict(blk)
+
+
 def part_from_mapping(doc: Mapping[str, Any], what: str, path: Optional[Path] = None) -> Part:
     doc = _coerce_numbers(doc)
     cls = str(doc.get("class", "")).strip().lower()
@@ -569,6 +713,10 @@ def part_from_mapping(doc: Mapping[str, Any], what: str, path: Optional[Path] = 
             "Coss", "Ciss", "Crss", "Eon", "Eoff", "Erec", "Eon_table", "Eoff_table",
             "Erec_table", "Eon_diode_table", "bh_curve", "v_on", "v_on_diode", "limits"}
     params = {k: v for k, v in doc.items() if k not in skip}
+    if "power_mosfet" in doc:
+        if cls != "mosfet":
+            raise ValueError(f"{what}: a power_mosfet block belongs to class mosfet, not {cls}.")
+        params["power_mosfet"] = _validate_power_mosfet(doc["power_mosfet"], what)
 
     curves: Dict[str, np.ndarray] = {}
     for c in ("Coss", "Ciss", "Crss"):
@@ -787,6 +935,14 @@ def part(number: str, *, cls: Optional[str] = None, vendor: Optional[str] = None
 
 def mosfet(number: str, **kw) -> Part:
     return part(number, cls="mosfet", **kw)
+
+
+def power_mosfet(number: str, **kw) -> Part:
+    """A mosfet part that carries a ``power_mosfet`` device block (refused
+    otherwise); use ``Part.add_to(builder, ...)`` to place it."""
+    p_ = part(number, cls="mosfet", **kw)
+    p_.power_mosfet_block  # raises by name if absent
+    return p_
 
 
 def igbt(number: str, **kw) -> Part:

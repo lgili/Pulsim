@@ -35,6 +35,11 @@ class SimulationResult:
     engine_route_reason: str | None
     """Why ``engine="auto"`` did not take the variable-step path, or
     ``None`` when it did (or when the engine was chosen explicitly)."""
+    step_loop_python_callbacks: tuple[str, ...]
+    """Names of the Python callables :func:`pulsim.simulate` installed in
+    the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,
+    ``"step_observer"``, ``"should_continue"``, ``"closed_loops"``);
+    empty when the loop ran fully native."""
     control_tick_counts: list[int]
     """Controller ticks per tick source, in registration order (closed
     loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by
@@ -50,11 +55,11 @@ class SimulationResult:
     @typing.overload
     def v(self, name: str, t: slice | typing.Sequence[int] | numpy.ndarray[typing.Any, typing.Any]) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
     @typing.overload
-    def i(self, name: str, t: None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
+    def i(self, name: str, t: None = None, *, port: int | None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
     @typing.overload
-    def i(self, name: str, t: int) -> float: ...
+    def i(self, name: str, t: int, *, port: int | None = None) -> float: ...
     @typing.overload
-    def i(self, name: str, t: slice | typing.Sequence[int] | numpy.ndarray[typing.Any, typing.Any]) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
+    def i(self, name: str, t: slice | typing.Sequence[int] | numpy.ndarray[typing.Any, typing.Any], *, port: int | None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
     @property
     def switch_states(self) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.bool_]] | None: ...
     @property

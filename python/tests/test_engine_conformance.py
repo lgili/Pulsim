@@ -237,6 +237,45 @@ def _ndiode_clamp(on):
     return b
 
 
+def _ctl(add):
+    # add-controlled-source-set: a 1 V source (its current, 1 mA through
+    # Ra, is the CCCS/CCVS control) drives "x" only through the device.
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "a", "gnd", 1.0)
+        b.add_resistor("Ra", "a", "gnd", 1e3)
+        b.add_resistor("Rx", "x", "gnd", 1e3)
+        if on:
+            add(b)
+        _rc_tail(b, "x")
+        return b
+    return build
+
+
+def _gyrator(on):
+    # A gyrator loaded by 1 uF is an inductor of C/g^2 = 1.11 mH at port 1.
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_resistor("R1", "in", "o", 10.0)
+    b.add_resistor("R2", "o", "gnd", 1e3)
+    if on:
+        b.add_gyrator("Gd", "o", "gnd", "y", "gnd", 0.03)
+        b.add_capacitor("Cy", "y", "gnd", 1e-6)
+        b.add_resistor("Ry", "y", "gnd", 1e6)
+    return b
+
+
+def _iwave(add):
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_resistor("R1", "o", "gnd", 1e3)
+        b.add_capacitor("C", "o", "gnd", 100e-9)
+        if on:
+            add(b)
+        return b
+    return build
+
+
 # kind -> (build, observable node, device branch, t_end, reference dt,
 #          needs a switch_fn)
 CELLS = {
@@ -279,6 +318,26 @@ CELLS = {
         "Dd", "o", "gnd")), "o", "Dd", 2e-3, 2e-7, False),
     "PmsmMna": (_pmsm, "ua2", "Md", 2e-2, 1e-5, False),
     "IdealTransformer": (_xfmr, "o", "Td", 5e-4, 1e-7, False),
+    "VCCS": (_ctl(lambda b: b.add_vccs("Gd", "a", "gnd", "x", "gnd", 5e-3)),
+             "o", "Gd", 5e-4, 1e-7, False),
+    "CCCS": (_ctl(lambda b: b.add_cccs("Fd", "V", "x", "gnd", 5.0)),
+             "o", "Fd", 5e-4, 1e-7, False),
+    "CCVS": (_ctl(lambda b: b.add_ccvs("Hd", "V", "x", "gnd", 5e3)),
+             "o", "Hd", 5e-4, 1e-7, False),
+    "Gyrator": (_gyrator, "o", "Gd", 5e-4, 1e-7, False),
+    "SineCurrentSource": (
+        _iwave(lambda b: b.add_sine_current_source(
+            "Id", "o", "gnd", 0.0, 10e-3, 1e3)),
+        "o", "Id", 2e-3, 2e-7, False),
+    "PulseCurrentSource": (
+        _iwave(lambda b: b.add_pulse_current_source(
+            "Id", "o", "gnd", 0.0, 10e-3, 1e-4, 2e-4, 0.0, 2e-5, 2e-5)),
+        "o", "Id", 5e-4, 1e-7, False),
+    "PwlCurrentSource": (
+        _iwave(lambda b: b.add_pwl_current_source(
+            "Id", "o", "gnd", [0.0, 1e-4, 3e-4, 5e-4],
+            [0.0, 10e-3, -5e-3, 0.0])),
+        "o", "Id", 5e-4, 1e-7, False),
 }
 # Circuit-level cell (not a kind): coupled inductors.
 COUPLED = (_coupled, "x", "Kd", 3e-3, 1e-6, False)
@@ -503,8 +562,11 @@ def test_pwm2_on_trbdf2_unchanged_by_the_adapter():
         warnings.simplefilter("ignore")
         r = p.simulate(b, 10 * T, engine="trbdf2", switch_fn=fn)
     st = r._trbdf2_stats
+    # Re-pinned by update-trbdf2-post-event-restart / error-control
+    # (integration batch 5): (1104, 2254, 20) -> (1031, 2058, 20); the
+    # post-edge restart removes the post-edge step collapse; same 20 edges.
     assert (len(r.times), st["n_solves"], st["n_gate_events"]) == (
-        1104, 2254, 20)
+        1031, 2058, 20)
 
 
 # ---------------------------------------------------------------------
@@ -552,10 +614,28 @@ _REFUSED = {
                                ("trbdf2", "dsed")),
     "enable_substep_state_correction": (
         {"enable_substep_state_correction": True}, ("trbdf2", "dsed")),
+    "discontinuity_restart": (
+        {"discontinuity_restart": True}, ("trbdf2", "dsed")),
+    "resolution_diagnostics": (
+        {"resolution_diagnostics": True}, ("trbdf2", "dsed")),
     # add-complementarity-mode-selection: the shadow is on the dsed event
     # integrator only (this RC has no diode, so dsed routes to "auto")
     "mode_selection": ({"mode_selection": "shadow"}, ("trbdf2", "dsed")),
 }
+
+
+@pytest.mark.parametrize("kw", [
+    {"discontinuity_restart": True, "enable_substep_state_correction": True},
+    {"resolution_diagnostics": True},
+])
+def test_fixed_step_features_are_honoured_on_pwl(kw):
+    """The pwl side of the two cells above: split and diagnostics run and
+    leave their trace (the split's counters, the resolution record)."""
+    r = _sim("pwl", **kw)
+    if "resolution_diagnostics" in kw:
+        assert r.resolution is not None
+    else:
+        assert r.n_split_steps == 0 and "unlocated_gate_steps" in r.counters
 
 
 @pytest.mark.parametrize("engine", ("trbdf2", "dsed"))
@@ -593,6 +673,18 @@ def _half_wave():
     b.add_resistor("R", "o", "gnd", 100.0)
     b.add_capacitor("C", "o", "gnd", 1e-6)
     return b
+
+
+@pytest.mark.parametrize("mode", ("shadow", "lcp"))
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto"))
+def test_mode_selection_refused_by_name_on_a_diode_circuit_off_dsed(engine, mode):
+    # Integration batch 6a: pwl had no cell. With a diode present the
+    # refusal is the missing hook, not "nothing to select".
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim(engine, _half_wave(), mode_selection=mode)
+    assert ei.value.feature == "mode_selection"
+    if engine != "auto":                       # auto names the engine it lands on
+        assert ei.value.engine == engine
 
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
@@ -748,6 +840,127 @@ def test_known_limitations_matrix_equals_the_kernel_table():
     assert doc_table == p.engine_capabilities()
 
 
+# ---------------------------------------------------------------------
+# The kernel AC sweep column for the add-controlled-source-set kinds
+# (task 5.1): the controlled ones are stamped, the waveform current
+# sources are independent sources and add no AC excitation.
+# ---------------------------------------------------------------------
+
+_AC_NEW = ("VCCS", "CCCS", "CCVS", "Gyrator", "SineCurrentSource",
+           "PulseCurrentSource", "PwlCurrentSource")
+
+
+@pytest.mark.parametrize("kind", _AC_NEW)
+def test_ac_sweep_cell_of_the_controlled_source_kinds(kind):
+    assert p.engine_capabilities()[kind]["ac_sweep"]
+    build = CELLS[kind][0]
+
+    def H(on):
+        b = build(on)
+        if kind in ("VCCS", "CCCS", "CCVS"):
+            inp = b.pool.branch_var_id_for_source(b.branch_index_of("V"),
+                                                  b.graph)
+        else:   # unit current injected at the observable node
+            inp = b.node_id_of("o")
+        r = k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e2, 1e4], inp, b.node_id_of("o"))
+        return np.asarray(r.H, dtype=complex)
+
+    on, off = H(True), H(False)
+    if kind.endswith("CurrentSource"):
+        assert np.array_equal(on, off)
+    else:
+        assert np.max(np.abs(on - off)) > PRESENCE * np.max(np.abs(on))
+
+
+# ---------------------------------------------------------------------
+# add-power-mosfet-datasheet-device (task 2.9): the charge-law variants
+# are the NonlinearCapacitor kind and add_power_mosfet is a composite of
+# existing kinds, so they add no table row. Their cells: run where every
+# kind they are made of runs (agreeing with pwl), refused by name
+# elsewhere, transient and kernel AC sweep alike.
+# ---------------------------------------------------------------------
+
+def _law_cap(law):
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "in", "gnd", 10.0)
+        b.add_resistor("R", "in", "o", 1e3)
+        b.add_capacitor("C", "o", "gnd", 100e-9)
+        b.add_resistor("Rl", "o", "gnd", 1e6)
+        if on:
+            b.add_nonlinear_capacitor("Cn", "o", "gnd", law())
+        return b
+    return build
+
+
+def _pm(on):
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
+    b.add_voltage_source("Vg", "g", "gnd", 15.0)
+    b.add_resistor("R", "in", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 10e-9)
+    if on:
+        b.add_power_mosfet(
+            "Md", "o", "gnd", "g", K=1e-2, V_T=2.0, C_gs=1e-9, R_g=10.0,
+            C_gd=p.ChargeLaw.vdmos_cgd(1e-9, 50e-12, 0.5),
+            C_ds=p.ChargeLaw.junction(1e-9, 25.0, 0.5),
+            body_diode={"model": "shockley"})
+    return b
+
+
+# name -> (cell, kinds it is made of)
+VARIANT_CELLS = {
+    "NonlinearCapacitor[table]": (
+        (_law_cap(lambda: p.ChargeLaw.table(p.ChargeTable.from_capacitance(
+            [-1.0, 0.0, 5.0, 10.0, 20.0], [1.2e-6, 1e-6, 5e-7, 3e-7, 2e-7]))),
+         "o", "Cn", 1e-4, 1e-7, False), ("NonlinearCapacitor",)),
+    "NonlinearCapacitor[vdmos_cgd]": (
+        (_law_cap(lambda: p.ChargeLaw.vdmos_cgd(1e-6, 1e-7, 0.5)),
+         "o", "Cn", 1e-4, 1e-7, False), ("NonlinearCapacitor",)),
+    "power_mosfet": (
+        (_pm, "o", "Md", 2e-3, 2e-7, False),
+        ("MosfetLevel1", "Capacitor", "NonlinearCapacitor", "ShockleyDiode",
+         "Resistor")),
+}
+
+
+def _composite_supported(kinds, column):
+    caps = p.engine_capabilities()
+    return all(caps[kd][column] for kd in kinds)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("name", list(VARIANT_CELLS))
+def test_charge_law_and_power_mosfet_cells(name, engine):
+    cell, kinds = VARIANT_CELLS[name]
+    _check_cell(name, cell, engine, _composite_supported(kinds, engine))
+
+
+@pytest.mark.parametrize("name", list(VARIANT_CELLS))
+def test_charge_law_and_power_mosfet_refused_by_the_ac_sweep(name):
+    cell, kinds = VARIANT_CELLS[name]
+    assert not _composite_supported(kinds, "ac_sweep")
+    b = cell[0](True)
+    with pytest.raises(p.UnsupportedError) as ei:
+        k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
+    assert ei.value.engine == "ac_sweep"
+    assert ei.value.device == cell[2]
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
+def test_voltage_sanity_factor_honoured_on_every_engine(engine):
+    # A 10 V node against a bound of 0.5 x 10 V: every engine's trace is
+    # scanned (dsed returned without the scan, ignoring the keyword).
+    kw = {"dt": 1e-6} if engine == "pwl" else {}
+    with pytest.warns(UserWarning, match="largest voltage"):
+        r = p.simulate(_rc(), 1e-3, engine=engine,
+                       voltage_sanity_factor=0.5, **kw)
+    assert r._implausible_voltage.peak == pytest.approx(10.0)
+
 # add-exact-propagator-strategy group 13: engine='exact' is the canonical name of the event-driven
 # exact engine, 'dsed' its alias. Every keyword cell of 'dsed' holds under 'exact', and the
 # refusal keeps naming 'dsed' (the capability-table column; DECISIONS, group 13 slice).
@@ -772,3 +985,21 @@ def test_exact_segments_only_on_the_exact_engine(engine):
     assert segs and all(s["exact"] and s["reason"] is None for s in segs)
     assert sum(s["n_segments"] for s in segs) >= 2      # the diode commutates
     assert ex["auto_would_route"] is True               # 13.3 report-only field, same on both names
+
+
+# Integration batch 6b: 'exact' and 'dsed' are one engine on every device cell and the
+# coupled-inductor cell -- the same refusal, or bit-identical times and samples.
+@pytest.mark.parametrize("kind", [*CELLS, "coupled"])
+def test_exact_and_dsed_are_bit_identical_on_every_cell(kind):
+    args = _args(COUPLED if kind == "coupled" else CELLS[kind])
+    out = {}
+    for eng in ("dsed", "exact"):
+        try:
+            out[eng] = _run(*args, eng)
+        except p.UnsupportedError as e:
+            out[eng] = (type(e), e.engine, e.feature, e.device, e.kind)
+    a, b = out["dsed"], out["exact"]
+    if isinstance(a[0], type):
+        assert a == b
+        return
+    assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1])

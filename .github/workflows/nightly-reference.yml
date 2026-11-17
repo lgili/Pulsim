@@ -1,0 +1,86 @@
+name: Nightly reference
+
+# restore-reference-benchmark-harness: the full differential matrix
+# (every `runs` circuit of benchmarks/manifests/v2_triage.yaml x pwl,
+# trbdf2, dsed) and the ngspice comparison of every circuit with a netlist.
+# Never gates a pull request. A cell whose outcome differs from the triage
+# manifest's `known:` record fails the run and opens / updates one issue.
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  reference:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libeigen3-dev gcc-13 g++-13 ngspice
+          python -m pip install --upgrade pip
+          pip install pytest numpy scipy
+
+      - name: Build and install package
+        env:
+          CC: gcc-13
+          CXX: g++-13
+          CMAKE_BUILD_PARALLEL_LEVEL: '2'
+        run: pip install ".[dev]"
+
+      - name: Differential matrix
+        id: diff
+        continue-on-error: true
+        run: |
+          mkdir -p nightly
+          set -o pipefail
+          python benchmarks/tools/differential_runner.py --out nightly/results.json | tee nightly/differential.txt
+
+      - name: ngspice comparison
+        continue-on-error: true
+        run: |
+          mkdir -p nightly
+          ngspice --version | head -2 > nightly/ngspice_version.txt
+          python benchmarks/tools/benchmark_ngspice.py --backend ngspice --quiet \
+            --output-dir nightly/ngspice | tee nightly/ngspice.txt
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-reference
+          path: nightly/
+
+      - name: Report outcome changes
+        if: steps.diff.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body=$(grep -- '<-- NEW' nightly/differential.txt | head -100)
+          title="Nightly reference: outcome changed"
+          num=$(gh issue list --state open --search "\"$title\" in:title" --json number -q '.[0].number')
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --body "Run ${{ github.run_id }}: cells that changed outcome
+          \`\`\`
+          $body
+          \`\`\`"
+          else
+            gh issue create --title "$title" \
+              --body "Run ${{ github.run_id }}:
+          \`\`\`
+          $body
+          \`\`\`"
+          fi
+          exit 1

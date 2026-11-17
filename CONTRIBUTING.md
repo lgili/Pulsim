@@ -79,8 +79,15 @@ export PYTHONPATH="$(pwd)/build/python:$PYTHONPATH"
 Verify everything still works:
 ```bash
 ctest --test-dir build --output-on-failure
-python -m pytest python/tests
+python -m pytest python/tests     # includes the reference harness (marker `reference`)
+ruff check python/
 ```
+
+The reference harness (`make reference-smoke`: analytic set, `pwl`
+goldens, counter gate) is part of the verification set; CI runs it as
+the `reference-smoke` job. A change that moves `engine='pwl'` on purpose
+re-freezes the goldens in the same pull request — see
+[`benchmarks/README.md`](benchmarks/README.md#reference-harness-20).
 
 ### 3. Code style
 

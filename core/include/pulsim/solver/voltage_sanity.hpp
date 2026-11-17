@@ -154,7 +154,11 @@ struct ImplausibleVoltage {
     for (Index b = 0; b < graph.num_branches(); ++b) {
         if (graph.branch(b).kind == topology::BranchKind::Source &&
             pool.is_registered(b) &&
-            pool.kind_of(b) == pwl::DevicePool::StoredKind::VCVS) {
+            (pool.kind_of(b) == pwl::DevicePool::StoredKind::VCVS ||
+             pool.kind_of(b) == pwl::DevicePool::StoredKind::VCCS ||
+             pool.kind_of(b) == pwl::DevicePool::StoredKind::CCCS ||
+             pool.kind_of(b) == pwl::DevicePool::StoredKind::CCVS ||
+             pool.kind_of(b) == pwl::DevicePool::StoredKind::Gyrator)) {
             return out;
         }
     }

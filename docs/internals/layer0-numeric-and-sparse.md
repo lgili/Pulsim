@@ -104,6 +104,26 @@ Out-of-order calls throw `std::logic_error` with a clear message
 naming the missing prerequisite. The contract is enforced at the
 type level, not by documentation.
 
+### Shared symbolic analysis (`SymbolicAnalysis`)
+
+The column ordering and elimination tree depend on the sparsity
+pattern only. `DirectSolver::export_symbolic(M)` hands out the last
+analysis together with `M`'s compressed index arrays;
+`adopt_symbolic(sym, M)` uses it instead of analysing, after checking
+`M`'s index arrays are exactly the recorded ones, and returns false
+otherwise (the caller then calls `analyze(M)`). The in-house LU copies
+the ordering, its inverse and the tree; its `factorize` reads only the
+ordering, so a factor on an adopted analysis is bit-equal to one on a
+private analysis. An adopted solver does not run the symbolic L/U fill
+(`factorize` rebuilds L/U anyway); `l_nnz()` / `u_nnz()` after
+`analyze()` alone still report the symbolic fill. Backends that cannot
+share (Eigen) keep the default: export nothing, adopt nothing.
+
+`solve_neg_sum(a, c, x)` solves `M·x = −(a + c)`. The in-house LU forms
+the right-hand side inside its row-permutation pass
+(`y[i] = −(a[P[i]] + c[P[i]])`), the same arithmetic as forming it
+first, with one pass and no right-hand-side vector.
+
 ### `SparseLuSolver` as the reference backend
 
 Layer 0 ships ONE concrete solver: `Eigen::SparseLU` with explicit

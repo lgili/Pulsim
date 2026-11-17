@@ -9,8 +9,8 @@ located by linear interpolation of `SwitchedDiode::crossing_signal`
 between the state at the start of the step and the first solve of the
 event iteration, taken under the bits the step started with. A gate
 edge SHALL be taken from the schedule's `next_edge_after` when it has
-one and otherwise from a bisection of `switch_fn` on the steps whose
-end masks differ. `SimulationResult::commutation_events` SHALL record
+one; a `switch_fn` without it SHALL keep the restart rule's
+start-of-step sampling. `SimulationResult::commutation_events` SHALL record
 the located time.
 
 #### Scenario: Diode turn-off in a DCM buck
@@ -25,15 +25,15 @@ the located time.
 - **GIVEN** a `NativePwm2Switch` whose duty is not a whole number of
   steps
 - **WHEN** it drives a fixed-step run
-- **THEN** each edge is split at `next_edge_after` and no bisection
-  call is made
+- **THEN** each edge is split at `next_edge_after`
 
 ### Requirement: Fixed-Step Event Splitting
 
 The fixed-step engine SHALL take a step that contains a located event
 as a trapezoidal sub-step up to the event under the pre-event mask,
-followed by the discontinuity restart rule from the event to the grid
-point. The stored samples SHALL stay on the uniform grid
+followed by the discontinuity restart rule from the event: an
+SDIRK(2,2) step to the grid point and SDIRK steps for the next two grid
+steps. The stored samples SHALL stay on the uniform grid
 `t_start + k·dt`. Events in one step SHALL be taken in time order; an
 event closer than 1 % of dt to a boundary of its interval SHALL be
 taken at that boundary. Every sub-step solve SHALL pass the stateful
@@ -64,7 +64,8 @@ on the grid. The number of split steps SHALL be reported in
   T/100, T/101 and T/400
 - **WHEN** the output voltage at the end is compared
 - **THEN** the three values agree to below 1e-4 relative (T/101 is
-  0.47 % away from the other two without this change)
+  0.47 % away from the other two on the default engine; the restart
+  rule alone already brings it to 6.9e-6)
 
 #### Scenario: Output grid is unchanged
 - **GIVEN** any run with split steps
@@ -77,8 +78,8 @@ on the grid. The number of split steps SHALL be reported in
   gate edge inside a step
 - **WHEN** the step is split
 - **THEN** the device is stamped at `dt1` under the trapezoidal rule
-  and at `dt2/2` under backward Euler, and its charge at T/200 agrees
-  with T/800 to the second-order bound
+  and at `γ·dt2` for the SDIRK stages, and its result converges at
+  second order (Richardson ratio between 3.4 and 4.7)
 
 ### Requirement: Event Splitting Is Opt-In With The Restart Rule
 
@@ -91,7 +92,8 @@ SHALL produce the results of the restart rule alone, bit for bit.
 - **GIVEN** `enable_substep_state_correction=True` and
   `discontinuity_restart=False`
 - **WHEN** `simulate` is called
-- **THEN** it raises an error that names both options
+- **THEN** it raises `UnsupportedError` (a `ValueError`) that names
+  both options
 
 #### Scenario: Option off
 - **GIVEN** a circuit with off-grid edges

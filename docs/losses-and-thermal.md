@@ -146,6 +146,18 @@ loss = p.device_loss_summary(b, res)
 print(next(e for e in loss if e["name"] == "R_load")["P_avg"])
 ```
 
+## Capacitor ESR, inductor DCR and AC-resistance ladder
+
+`b.add_capacitor(..., esr=)` and `b.add_inductor(..., esr=)` add a series
+resistor named `{name}.esr`; its row in `device_loss_summary` is the
+`i²·esr` loss (1 A rms through 50 mΩ: 50.000 mW). An inductor built with
+`rac=p.passives.fit_rac_ladder(f, R_ac, L=...)` dissipates in `{name}.esr`
+(`R_dc`) and the cell resistors `{name}.rac_r{k}`, so every harmonic of
+the current is charged at its own `R_ac`: 1 A peak at 1 kHz plus 1 A
+peak at 100 kHz through `R_dc` = 10 mΩ and one 90 mΩ ∥ 143.24 nH cell
+dissipates 32.50 mW. ESR is one number: read it at the switching
+frequency.
+
 ## Switch — PSIM-style E_on / E_off
 
 ```python
@@ -348,6 +360,21 @@ The switching-loss and core-loss contributions are layered on the
 conduction trace as a **constant offset** (thermal time constants ≫
 nanosecond switching transitions, so the impulse energy is smeared
 across the cycle — standard PSIM convention).
+
+## Device-level switching energy — `add_power_mosfet`
+
+To simulate the switching transient itself instead of annotating it,
+build the device with `CircuitBuilder.add_power_mosfet` (channel, C_gs,
+C_gd(v), C_ds(v), R_g, body diode) and measure it with
+`p.double_pulse_test(device_kwargs, V_dd=, I_load=, R_g_ext=, V_drive=,
+L_load=)`, which returns E_on, E_off, the Miller plateau, dv/dt, di/dt
+and I_rr as time-weighted integrals, starting from the off-state bias
+(an all-zero start turns the device on through C_gd before the gate
+command). Use `engine="trbdf2"`; on `pwl`
+the step must resolve the gate transient (0.2 ns for a 60 ns plateau).
+The datasheet fitters are in `pulsim.datasheet`. Losses of the
+composite are not in `device_loss_summary` yet (unified device
+interface).
 
 ## What's *not* covered
 

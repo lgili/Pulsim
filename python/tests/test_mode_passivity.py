@@ -51,10 +51,13 @@ def test_bridge_behind_an_ideal_transformer_is_passive_nonreciprocal():
         vd = np.asarray(r.v(an)) - np.asarray(r.v(ca))
         assert on.any() and (1e3 * vd[on]).min() > -1e-9      # each diode conducts, never in reverse
         assert vd[~on].max() < 1e-9                             # and blocks only reverse voltage
-    # the class is a build-time property: 'lcp' reports the same (its numbers on this circuit:
+    # the class is a build-time property: 'lcp' reports the same. Re-pinned at the merge of the
+    # increment-form port model (was: right to 9 ms, then DiodeModeInconsistentError naming D2 at
+    # 10.008 ms): the full 'lcp' run now lands on pwl, 31.876241228 V (more numbers:
     # test_mode_lcp.py::test_lcp_bridge_on_a_floating_source_is_not_decided_by_rounding)
     r_lcp = _run(_bridge_behind_ideal_transformer(), "dsed", mode_selection="lcp")
     assert r_lcp.diagnostics["mode_selection"]["passivity"] == cls
+    assert _vpn(r_lcp)[-1] == pytest.approx(_vpn(ref)[-1], abs=1e-7)
 
 
 def test_plain_rectifier_is_passive_reciprocal():

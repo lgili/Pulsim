@@ -8,24 +8,24 @@ is not waived.
 
 ## 1. Baseline (before any change)
 - [ ] 1.1 Confirm the harness has `trbdf2` goldens (states and sample times) for the buck, the VSI and the RLC ladder, and an analytic reference set; add the three probe circuits from the pre-change build if missing
-- [ ] 1.2 Record `event_hits`, `event_refactors`, `event_builds`, `n_accept`, `n_reject`, `n_solves` with `perf/p5_events.py`. Expected on this branch: buck 10 ms 20,885 / 25,115 / 5 / 20,413; VSI 20 ms 16,548 / 16,337 / 3,198 / 16,396; RLC n = 1502 2 ms 2,847 / 1,442 / 1 / 2,143
-- [ ] 1.3 Record wall time per run, best of 3 (`perf/p1_basic.py` rows 5 and 7, `perf/p2_scale.py` row 8)
-- [ ] 1.4 Record heap allocations per `solve_at` refactor with the `test_zero_alloc` harness
+- [x] 1.2 Record (golden probe counters; VSI 20 ms 16,548 / 16,337 / 3,198 as expected) `event_hits`, `event_refactors`, `event_builds`, `n_accept`, `n_reject`, `n_solves` with `perf/p5_events.py`. Expected on this branch: buck 10 ms 20,885 / 25,115 / 5 / 20,413; VSI 20 ms 16,548 / 16,337 / 3,198 / 16,396; RLC n = 1502 2 ms 2,847 / 1,442 / 1 / 2,143
+- [x] 1.3 Record wall time per run, best of 3 (`perf/p1_basic.py` rows 5 and 7, `perf/p2_scale.py` row 8)
+- [x] 1.4 Record heap allocations per `solve_at` refactor with the `test_zero_alloc` harness
 - [ ] 1.5 Record the error of each analytic reference at the default tolerances
 
 ## 2. Part 1 — byte-budgeted event table (bit-identical)
-- [ ] 2.1 `EventEntry::approx_bytes()`; event table bounded by the segment byte budget; eviction after the throwing steps; counter `event_evictions`
-- [ ] 2.2 Remove `kMaxEventEntries`; update `num_event_entries` / `num_alt_dt_values` docs and the tests that assume 8
-- [ ] 2.3 Goldens: `trbdf2` states and sample times `np.array_equal`
-- [ ] 2.4 Counter test: on the VSI, `event_builds` equals the number of distinct masks solved and `event_evictions == 0`
-- [ ] 2.5 Tight-budget test: evictions occur and the result equals the unlimited-budget run
+- [x] 2.1 `EventEntry::approx_bytes()`; event table bounded by the segment byte budget; eviction after the throwing steps; counter `event_evictions`
+- [x] 2.2 Remove `kMaxEventEntries`; update `num_event_entries` / `num_alt_dt_values` docs and the tests that assume 8
+- [x] 2.3 Goldens: `trbdf2` states and sample times `np.array_equal`
+- [x] 2.4 Counter test: on the VSI, `event_builds` equals the number of distinct masks solved and `event_evictions == 0`
+- [x] 2.5 Tight-budget test: evictions occur and the result equals the unlimited-budget run
 
 ## 3. Part 2 — allocation-free refactor (bit-identical)
-- [ ] 3.1 `G` and `C` scattered on the union pattern per entry; in-place `J[k] = G[k] + inv_dt·C[k]`; unit test: bytes equal to `G + (1/dt)·C` for 100 `dt` values per reference mask
-- [ ] 3.2 `factorize` work vectors and L/U capacity kept as solver members
-- [ ] 3.3 Zero-alloc test: the second and later refactors of a resident entry perform 0 heap allocations
-- [ ] 3.4 Goldens identical; LU unit and scaling tests pass
-- [ ] 3.5 Measure as in 1.3 (parts 1 + 2 only). Accept when the VSI wall time is ≤ 0.7 × baseline and no case is slower
+- [x] 3.1 `G` and `C` scattered on the union pattern per entry; in-place `J[k] = G[k] + inv_dt·C[k]`; unit test: bytes equal to `G + (1/dt)·C` for 100 `dt` values per reference mask
+- [x] 3.2 `factorize` work vectors and L/U capacity kept as solver members
+- [x] 3.3 Zero-alloc test: the second and later refactors of a resident entry perform 0 heap allocations
+- [x] 3.4 Goldens identical; LU unit and scaling tests pass
+- [x] 3.5 Measure as in 1.3 (parts 1 + 2 only). Accept when the VSI wall time is ≤ 0.7 × baseline and no case is slower — measured vs the pre-track build: VSI 0.53×, buck 0.58×, RLC n = 1502 0.90×, all other cases 0.91–1.01× (DECISIONS.md 8)
 
 ## 4. Part 3 — grid and factor slots (BREAKING, off by default until 6)
 - [ ] 4.1 `quantise_down(h, m)` with `frexp`, a literal table and `ldexp`; unit tests: result ≤ h, result > h / 2^(1/m), idempotent, identical bits for a fixed list of inputs
@@ -49,10 +49,10 @@ is not waived.
 - [ ] 6.3 Cross-engine agreement suites pass at their existing tolerances
 
 ## 7. Docs
-- [ ] 7.1 CHANGELOG: parts 1–2 under performance, part 3 under numerical changes with the migration line
-- [ ] 7.2 KNOWN_LIMITATIONS: landing steps still refactor; memory per mask
-- [ ] 7.3 `docs/solvers.md`, `docs/performance-tuning.md`, `docs/internals/layer4-pwl-state-space-cache.md`; stubs for the option and the new counters
+- [x] 7.1 (parts 1-2 entry only) CHANGELOG: parts 1–2 under performance, part 3 under numerical changes with the migration line
+- [x] 7.2 KNOWN_LIMITATIONS: landing steps still refactor; memory per mask
+- [x] 7.3 (`docs/solvers.md` unchanged, DECISIONS.md 10) `docs/solvers.md`, `docs/performance-tuning.md`, `docs/internals/layer4-pwl-state-space-cache.md`; stubs for the option and the new counters
 
 ## 8. Verification
-- [ ] 8.1 `ruff`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check, `test_zero_alloc`
-- [ ] 8.2 CI regression test on counters only (`event_builds`, `event_evictions`, the structural bound of 4.6, the ratios of 5.4); no wall-clock assertion
+- [x] 8.1 `ruff`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check, `test_zero_alloc`
+- [x] 8.2 (parts 1-2 counters only: `event_builds`, `event_evictions`) CI regression test on counters only (`event_builds`, `event_evictions`, the structural bound of 4.6, the ratios of 5.4); no wall-clock assertion

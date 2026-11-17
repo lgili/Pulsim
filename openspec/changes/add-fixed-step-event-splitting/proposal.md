@@ -32,23 +32,25 @@ branch):
   `SwitchedDiode::crossing_signal` between the state at `t_prev` and
   the FIRST solve of the event iteration (taken under the pre-event
   bits), not the post-flip one. A gate edge is located by
-  `next_edge_after` when the schedule offers it, and by bisection of an
-  opaque `switch_fn` on the steps where the mask at the two ends
-  differs. A source jump inside a step is located from the jump table.
+  `next_edge_after` when the schedule offers it (an opaque `switch_fn`
+  is not bisected: DECISIONS.md, open question 4). A source jump inside a step is located from the jump table.
 - **Split (PSIM-style).** The step `(t_prev, t]` with an event at `t_e`
   becomes a trapezoidal sub-step of `dt1 = t_e − t_prev` under the
-  pre-event mask and then the restart rule from `t_e`: two
-  backward-Euler half-steps of `dt2/2`, `dt2 = t − t_e`, each with its
-  own event iteration. The run lands on the grid point `t`; the output
-  grid and the integer step counter are unchanged.
+  pre-event mask and then the restart rule from `t_e`: one SDIRK(2,2)
+  step over `dt2 = t − t_e` (two stages of `γ·dt2`, each with its own
+  event iteration), and the window's two following grid steps as SDIRK
+  steps too. The run lands on the grid point `t`; the output grid and
+  the integer step counter are unchanged.
 - **Several events in one step** are taken in time order, up to a fixed
   count; an event closer than 1 % of dt to a step boundary is snapped
   to it and handled by the restart rule.
 - `commutation_events.t_estimated` becomes the located time. A new
   `SimulationResult::n_split_steps` counts the splits.
 - **BREAKING.** `enable_substep_state_correction` is the switch for
-  this behaviour and its default becomes true together with the
-  restart rule's. Fixed-step results with an off-grid edge or a diode
+  this behaviour; it requires the restart rule (refused with
+  `UnsupportedError` without it, where the rule refused the pair
+  before). Its default stays false here and is flipped together with
+  the restart rule's by the maintainer. Fixed-step results with an off-grid edge or a diode
   crossing change; the sub-step solves use off-nominal `(mask, dt)`
   factors through `cache.solve_at`.
 
