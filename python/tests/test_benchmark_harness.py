@@ -449,8 +449,8 @@ def test_a_suspect_reference_grades_nothing_and_a_frozen_error_may_not_grow():
         assert r["outcome"] == "unverified" and r["was"] == out
         assert dr.frozen_check(r, sus, "trbdf2") == ""
     assert dr.mark_suspect({"outcome": "refused"}, sus)["outcome"] == "refused"
-    rel = "circuits/switching/buck_boost/cuk_converter.yaml"
-    assert TRIAGE[rel]["reference"] == "suspect" and TRIAGE[rel]["reference_reason"]
+    # cuk's diode is turned round (2026-11): its reference is graded again
+    assert "reference" not in TRIAGE["circuits/switching/buck_boost/cuk_converter.yaml"]
     # sepic's reference grinds no more (TR-BDF2 roundoff floor): graded again
     assert "reference" not in TRIAGE["circuits/switching/buck_boost/sepic.yaml"]
     e = {"known": {"pwl+split": "disagree"}, "known_err": {"pwl+split": 0.01}}

@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Benchmarks: the Cuk converter's diode turned round
+
+* **Fixed** `benchmarks/circuits/switching/buck_boost/cuk_converter.yaml`
+  and its ngspice deck had the output diode reversed (anode at ground),
+  so with the switch and the diode both off the two inductor currents met
+  at `mid` through `g_off` (2.6e4-3.5e6 V). The anode is now at `mid`, the
+  `reference: suspect` mark is removed and the circuit is graded again:
+  pwl 8.5e-4, pwl+restart 7.8e-6, pwl+split 6.2e-6, trbdf2 9.3e-5, all
+  agree; dsed is a frozen `error` ("diode configuration did not settle"
+  at 3.3e-4 s). The output is about −17.5 V, not the −12 V the file's
+  comment promised: the design runs in DCM (K = 2·(L1‖L2)/(R·T) = 0.1175
+  < (1−D)² = 0.26, V_out = −V_in·D/√K = −17.15 V; CCM would be −11.5 V).
+  The pwl golden `benchmarks/goldens/pwl/cuk_converter.json` is
+  regenerated.
+
 ### DC operating point: refuse a loop that has no solution
 
 * **Fixed** `compute_dc_op`, `compute_dc_operating_point`,

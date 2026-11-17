@@ -499,27 +499,25 @@ The differential matrix (strict gate: every observable, every interval)
 records its `disagree` / `error` cells as `known:` per configuration in
 `benchmarks/manifests/v2_triage.yaml` (counts in
 `benchmarks/REFERENCE_STATUS.md`). Each is an open finding, not a
-tolerance. One circuit has no valid reference and is `unverified`
-on every engine (`reference: suspect`), `cuk_converter`. (`sepic`
-carried the mark while its trbdf2 reference ground to `max_steps`. That
-grind is fixed, and the reference now gives pwl 1.9e-3 and trbdf2
-3.0e-5, both agree; dsed is a frozen `error`.)
+tolerance. No circuit is `unverified` any more. (`sepic` carried a
+`reference: suspect` mark while its trbdf2 reference ground to
+`max_steps`; that grind is fixed and the reference gives pwl 1.9e-3 and
+trbdf2 3.0e-5, both agree; dsed is a frozen `error`. `cuk_converter`
+carried it because its diode was reversed; see below.)
 
-**`cuk_converter` is ill-posed as written; its reference is marked
-suspect.** `Drect` is reversed: the file (and its ngspice deck) put the
-anode at ground and the cathode at `mid`, so the diode conducts while S1
-is ON and blocks the freewheel path while S1 is OFF. With S1 and Drect
-both OFF, L1's current (through `Ccpl`) and L2's current meet at `mid`
-with only Drect's `g_off` = 1e-6 S between them: an inductor cut-set,
-so `mid` reaches 2.6e4-3.5e6 V. The trbdf2 rtol 1e-8 reference accepts
-3,163 steps at `h_min` above tolerance and ends V(out) at +11.92 V; pwl
-does not converge with dt (0.233 / 0.232 / 0.226). With the diode turned
-round (`nodes: [mid, 0]`) both engines agree (V(out) over 1.5-2 ms:
--17.4951 V trbdf2 rtol 1e-8, -17.4971 V pwl; `|mid|` <= 39.1 V), though
-that trbdf2 run forces 748,763 accepts, so it is not yet a clean reference.
-Reproducer (from `benchmarks/tools`): `v1_reader.load('../circuits/switching/buck_boost/cuk_converter.yaml').run('trbdf2', rtol=1e-8, atol=1e-12)`,
-then `max |v(mid)|` (3.55e6 V) and `result._trbdf2_stats['n_forced_accepts']` (3163). The manifest marks the reference `suspect`
-(every cell `unverified`); the netlist is kept as the v1 file wrote it.
+**`cuk_converter` runs in DCM: −17.5 V, not −12 V.** Until 2026-11 the
+file and its ngspice deck had `Drect` reversed (anode at ground), so with
+S1 and Drect both OFF the two inductor currents met at `mid` through
+`g_off` = 1e-6 S (`mid` at 2.6e4-3.5e6 V). The diode now has its anode at
+`mid`. The output is not the CCM value: D = 0.49 (dead time),
+K = 2·(L1‖L2)/(R·T) = 2·23.5 µH/(20 Ω·20 µs) = 0.1175 < (1−D)² = 0.26,
+so the converter is in DCM and V_out = −V_in·D/√K = −17.15 V in steady
+state (CCM would give −V_in·D/(1−D) = −11.5 V). The 2 ms run has not
+settled: V(out) over 1.5-2 ms is −17.4951 V (trbdf2 rtol 1e-8) and
+−17.4971 V (pwl). Every configuration agrees with the trbdf2 reference
+(pwl 8.5e-4, pwl+restart 7.8e-6, pwl+split 6.2e-6, trbdf2 9.3e-5); the
+reference takes 18,192 steps with 15 forced accepts. dsed is a frozen
+`error`: "diode configuration did not settle" at t = 3.3e-4 s.
 
 Circuits whose v1 file has no `uic: true`
 start from the DC operating point, which `dsed` cannot take (refused).

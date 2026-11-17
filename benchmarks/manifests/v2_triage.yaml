@@ -115,7 +115,8 @@ circuits:
   circuits/switching/buck_boost/bidirectional_buck_boost.yaml: {status: runs, known: {dsed: disagree}, known_err: {dsed: 0.00122}}
   circuits/switching/buck_boost/buck_boost.yaml: {status: runs, known: {dsed: error}}
   # dsed refused the builder ICs until the exact-propagator slice; now "no meaningful progress".
-  circuits/switching/buck_boost/cuk_converter.yaml: {status: runs, reference: suspect, reference_reason: "ill-posed as written: Drect is reversed (anode at ground), so with S1 and Drect OFF the two inductor currents meet at mid through g_off = 1e-6 S; the trbdf2 reference takes 3163 steps at h_min above tolerance, puts mid at 2.6e4-3.5e6 V and V(out) at +11.92 V (KNOWN_LIMITATIONS)"}
+  # Diode turned round 2026-11 (it was reversed): dsed "diode configuration did not settle" at 3.3e-4 s.
+  circuits/switching/buck_boost/cuk_converter.yaml: {status: runs, known: {dsed: error}}
   # dsed refused the builder ICs until the exact-propagator slice; now "did not settle" at 2.35e-4 s.
   circuits/switching/buck_boost/sepic.yaml: {status: runs, known: {dsed: error}}
   circuits/switching/inverter/half_bridge_inverter.yaml: {status: runs}

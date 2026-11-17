@@ -16,11 +16,11 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 
 | configuration | agree | disagree | error | refused | unverified |
 |---|---:|---:|---:|---:|---:|
-| pwl | 78 | 23 | 7 | 0 | 1 |
-| pwl+restart | 84 | 17 | 7 | 0 | 1 |
-| pwl+split | 85 | 16 | 7 | 0 | 1 |
-| trbdf2 | 99 | 2 | 1 | 6 | 1 |
-| dsed | 39 | 16 | 12 | 41 | 1 |
+| pwl | 79 | 23 | 7 | 0 | 0 |
+| pwl+restart | 85 | 17 | 7 | 0 | 0 |
+| pwl+split | 86 | 16 | 7 | 0 | 0 |
+| trbdf2 | 100 | 2 | 1 | 6 | 0 |
+| dsed | 39 | 16 | 13 | 41 | 0 |
 
 ### Fixed engine: restart rule and split (circuits where any of the three does not agree)
 
@@ -43,7 +43,6 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | switching/boost/ll12_pfc_boost_continuous.yaml | 0.02 | 0.083 | 0.0806 | 0.0806 |
 | switching/buck/ll06_buck_vcswitch.yaml | 0.02 | 0.0781 | 0.118 | 0.0704 |
 | switching/buck/ll08_buck_mosfet.yaml | 0.02 | 0.228 | 0.0842 | 0.0842 |
-| switching/buck_boost/cuk_converter.yaml | 0.02 | unverified | unverified | unverified |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | 0.02 | 0.0707 | 0.0587 | 0.0587 |
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | 0.02 | 0.05 | 0.05 | 0.05 |
 | switching/isolated/flyback_converter.yaml | 0.02 | 0.949 | 0.11 | 0.11 |
@@ -239,7 +238,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/buck/triple_sync_buck.yaml | 0.00132 | 1.02e-06 | 1.02e-06 | 3.18e-06 | 0.000307 |
 | switching/buck_boost/bidirectional_buck_boost.yaml | 0.00132 | 1.05e-06 | 1.05e-06 | 3.15e-06 | 0.00122 |
 | switching/buck_boost/buck_boost.yaml | 0.00072 | 9.1e-07 | 6.34e-07 | 7.97e-06 | error |
-| switching/buck_boost/cuk_converter.yaml | unverified | unverified | unverified | unverified | unverified |
+| switching/buck_boost/cuk_converter.yaml | 0.000854 | 7.85e-06 | 6.2e-06 | 9.25e-05 | error |
 | switching/buck_boost/sepic.yaml | 0.00186 | 6.01e-06 | 1.73e-06 | 2.96e-05 | error |
 | switching/inverter/half_bridge_inverter.yaml | 0.000376 | 1.16e-06 | 1.16e-06 | 9.06e-07 | 0.000125 |
 | switching/inverter/half_bridge_inverter_lc.yaml | 0.00103 | 7.93e-06 | 7.93e-06 | 0.000304 | refused |
@@ -300,6 +299,18 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | buck_dcm | 0.000538 | 5.32e-08 | 1.87e-08 | 5.63e-07 | 7.34e-10 |
 
 ## Notes
+
+**`cuk_converter` diode turned round, 2026-11-17.** The file and its ngspice
+deck had `Drect` reversed (anode at ground); with the anode at `mid` the
+`reference: suspect` mark is gone and the circuit is graded again: pwl
+79 / 23 / 7 / 0 / 0, pwl+restart 85 / 17, pwl+split 86 / 16, trbdf2
+100 / 2 / 1 / 6, dsed 39 / 16 / 13 / 41 (the new dsed `error`, "diode
+configuration did not settle" at t = 3.3e-4 s, is frozen). Cells: pwl
+8.5e-4, pwl+restart 7.8e-6, pwl+split 6.2e-6, trbdf2 9.3e-5, all agree.
+The output is −17.5 V because the circuit runs in DCM (K = 0.1175 <
+(1−D)² = 0.26, V_out = −V_in·D/√K = −17.15 V in steady state; see
+KNOWN_LIMITATIONS.md). The rows below that call `cuk` ill-posed or
+`unverified` are the record before this fix.
 
 **Fixed-step event splitting (pwl+split), 2026-11-13.** `pwl+split` is
 `discontinuity_restart` + `enable_substep_state_correction` (opt-in, off
