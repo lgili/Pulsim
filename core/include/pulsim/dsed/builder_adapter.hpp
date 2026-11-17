@@ -988,6 +988,8 @@ public:
         }
         // J·s = f: σ = g·(base + s) − Σ_S f, with Σ_S f = src(island)
         auto fix = [&](Vector& s, const Vector* base, auto&& src) {
+            // islands are disjoint: g_m·w_n = Σ_{S_m} e_ref(n) = 0 for m ≠ n,
+            // so the sequential corrections do not interact (beyond rounding)
             for (std::size_t m = 0; m < islands.size(); ++m) {
                 Real sig = island_dot_(islands[m], s) - src(islands[m]);
                 if (base) sig += island_dot_(islands[m], *base);
@@ -1234,7 +1236,9 @@ private:
         std::vector<Weak> weak;
         constexpr Real kWeakResistor = Real{1e-6};   // siemens: ties (1 MΩ) and the builder's 1 GΩ
         using K = pwl::DevicePool::StoredKind;
-        bool known = true;
+        // a user b_extra_fn can inject a net current into an island: its KCL
+        // sum would need that source term (reviewer finding), so no islands
+        bool known = !static_cast<bool>(b_extra_fn_);
         Index sw = 0;
         for (Index b = 0; b < graph_.num_branches() && known; ++b) {
             const auto& br = graph_.branch(b);

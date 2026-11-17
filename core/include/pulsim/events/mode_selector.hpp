@@ -392,7 +392,7 @@ public:
         constexpr bool kAnchored = std::is_invocable_v<PortFn&, Real, const std::vector<char>&,
                                                        DenseMatrix&, Vector&>;
         anchor_ = prev_on;
-        prev_ = &prev_on;
+        prev_ = &prev_on;   // valid during this call only (read by solve_with_hysteresis_)
         for (int pass = 0; pass < 3; ++pass) {
             Real h = h_e * factors[pass];
             if (pass > 0) {

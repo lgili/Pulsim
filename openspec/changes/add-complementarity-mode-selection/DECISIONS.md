@@ -560,7 +560,8 @@ choices it did not pin.
       1 GΩ and user 1 MΩ); a component without ground, of ≥ 2 nodes, with
       a non-empty boundary is an island; any device kind the rule does
       not classify (controlled sources, transformers, nonlinear devices)
-      disables it for the circuit. Sources join their nodes, so no source
+      disables it for the circuit, as does a user `b_extra_fn` (it can inject
+      a net current into an island; fresh-context review). Sources join their nodes, so no source
       sits on an island's boundary and its KCL sum has no source term.
       After each solve J·s = f: σ = g·s − Σ_S f, s −= w·σ/(g·w),
       w = J⁻¹e_ref — one more back-substitution per island and port
