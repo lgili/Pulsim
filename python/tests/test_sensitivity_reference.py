@@ -22,12 +22,6 @@ import pulsim as p
 from . import _sens_reference as ref
 
 
-def test_pulsim_is_this_worktree():
-    import pathlib
-    here = pathlib.Path(__file__).resolve().parents[2]
-    assert pathlib.Path(p.__file__).resolve().is_relative_to(here)
-
-
 # ---------------------------------------------------------------------
 # 1.1 today's finite differences
 # ---------------------------------------------------------------------

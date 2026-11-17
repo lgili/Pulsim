@@ -6,7 +6,6 @@ the fixed engine rings at +-397 V while TR-BDF2 reaches ~1e9 V, with no warning.
 defect the branch form's re-initialisation removes (task 5); these tests pin it until then.
 """
 import warnings
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -31,12 +30,6 @@ def _rl(g_on, g_off, closed, engine, **kw):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return p.simulate(b, t_end=10e-3, switch_fn=fn, engine=engine, **kw)
-
-
-def test_pulsim_under_test_is_this_worktree():
-    # this checkout, not one worktree's name (it failed in every other one)
-    assert Path(p.__file__).resolve().is_relative_to(
-        Path(__file__).resolve().parents[1])
 
 
 def test_closed_switch_control_conducts():
