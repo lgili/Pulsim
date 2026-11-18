@@ -228,7 +228,7 @@ template <class P>
         .add("substep_frac", num(p.substep_frac)).add("M0", num(p.M0)).str();
 }
 
-inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdmos_cgd"};
+inline constexpr std::array<std::string_view, 4> kLaws{"junction", "table", "vdmos_cgd", "tanh"};
 
 [[nodiscard]] inline std::string capacitance(const m::PowerMosfet::Capacitance& c) {
     if (const Real* x = std::get_if<Real>(&c)) return num(*x);
@@ -495,6 +495,21 @@ namespace yaml_detail {
             "which this YAML dialect does not carry yet; build the circuit "
             "without it to serialise or pickle it", ls.front().device));
     }
+    // add-permeance-magnetic-domain: magnetic nodes and segment geometry.
+    if (!pool.flux_nodes().empty()) {
+        o += "magnetic_nodes: [";
+        for (std::size_t i = 0; i < pool.flux_nodes().size(); ++i) {
+            o += (i ? ", " : "") + node(pool.flux_nodes()[i]);
+        }
+        o += "]\n";
+    }
+    if (!pool.magnetic_geometry().empty()) {
+        o += "magnetic_geometry:\n";
+        for (const auto& mg : pool.magnetic_geometry()) {
+            o += "  - " + Map{}.add("device", bname(mg.branch, "a magnetic segment"))
+                .add("area", num(mg.area)).add("length", num(mg.length)).str() + "\n";
+        }
+    }
     if (const auto cs = c.controls(); !cs.empty()) {
         o += "controls:\n";
         for (const auto& ct : cs) {
@@ -700,13 +715,14 @@ struct YamlIo {
         keys(root, "document", {"pulsim_circuit", "nodes", "devices", "couplings",
                                 "branch_form", "scopes", "parameters", "bindings",
                                 "initial_conditions", "aliases", "power_mosfets",
-                                "controls"});
+                                "controls", "magnetic_nodes", "magnetic_geometry"});
         if (text(root["pulsim_circuit"], "document", "pulsim_circuit") != "1") {
             fail("document", "pulsim_circuit must be 1");
         }
         for (const auto* k : {"nodes", "devices", "couplings", "branch_form", "scopes", "parameters",
                               "bindings", "initial_conditions", "aliases",
-                              "power_mosfets", "controls"}) {
+                              "power_mosfets", "controls", "magnetic_nodes",
+                              "magnetic_geometry"}) {
             if (root[k] && !root[k].IsSequence()) fail(k, "must be a list");
         }
         builder::CircuitBuilder b;
@@ -838,6 +854,24 @@ struct YamlIo {
                 fail(nm, std::format("hash \"{}\" is not hexadecimal", hs));
             }
             b.add_control(ControlDecl{nm, text(ct["kind"], nm, "kind"), h, nullptr});
+        }
+        for (const auto& mn : root["magnetic_nodes"]) {
+            const auto nm = text(mn, "magnetic_nodes", "magnetic_nodes");
+            if (b.node_map_.find(std::string_view{nm}) == b.node_map_.end()) {
+                fail("magnetic_nodes", std::format("\"{}\" is not a listed node", nm));
+            }
+            b.pool_.mark_flux_node(b.resolve_node_(nm));
+        }
+        for (const auto& mg : root["magnetic_geometry"]) {
+            keys(mg, "a magnetic segment", {"device", "area", "length"});
+            const auto nm = text(mg["device"], "a magnetic segment", "device");
+            const Index bi = b.branch_id_of(nm);
+            const Real area = real(mg["area"], nm, "area");
+            const Real length = real(mg["length"], nm, "length");
+            if (!(area > 0) || !(length > 0)) {
+                fail("magnetic_geometry", std::format("\"{}\": area and length must be > 0", nm));
+            }
+            b.pool_.set_magnetic_geometry(bi, area, length);
         }
         return Circuit::from_builder(b);
     }

@@ -367,6 +367,9 @@ inline void check_device(const ParamsVariant& v, std::string_view field) {
             const bool vdmos_field = field == "cgd_max" || field == "cgd_min" || field == "a";
             if (p.law == L::Table) unread("table");
             if (p.law == L::VdmosCgd && !vdmos_field) unread("vdmos_cgd");
+            if (p.law == L::Tanh && field != "cgd_max" && field != "cgd_min" && field != "V0") {
+                unread("tanh");
+            }
             if (p.law == L::Junction && vdmos_field) unread("junction");
             m::NonlinearCapacitor::validate(p);
         } else if constexpr (std::is_same_v<P, m::SaturableInductor::Params>) {

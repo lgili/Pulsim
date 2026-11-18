@@ -287,6 +287,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Added** two analytic reference cases, `im_locked_rotor` and
   `im_free_acceleration` (`dsed` refused).
 
+### Magnetic networks in permeance form (add-permeance-magnetic-domain)
+
+* **Added** a magnetic domain in gyrator–capacitor form: node potential
+  = MMF, branch current = flux rate. `add_winding` (gyrator `g = 1/N`),
+  `add_permeance`, `add_air_gap` (`P = μ₀·A/l`),
+  `add_magnetic_resistance` (in-loop eddy loss `R_m·(dΦ/dt)²`) and
+  `add_saturable_permeance` (area, length, `mu_r`, `B_sat`, or
+  `table=`). No new device kinds: they are the gyrator, capacitor,
+  resistor and nonlinear capacitor, and inherit those kinds' engine
+  support (a saturable permeance runs on `pwl` / `trbdf2` and is
+  refused by name elsewhere), IR and conformance cells. The nonlinear capacitor gained
+  the odd `ChargeLaw.tanh` law (the `GappedCore` material law).
+* **Added** `res.flux(name)`, `res.b_field(name)`, `res.h_field(name)`;
+  magnetic resistances in `device_loss_summary` under `core_loss`;
+  `builder.magnetic_element(name)` and `builder.magnetic_nodes()`; YAML
+  types `winding`, `permeance`, `air_gap`, `magnetic_resistance`,
+  `saturable_permeance` (strict keys); `hysteretic_permeance` and
+  `excess_loss` are refused by name until the unified device interface.
+* **Added** DC flux rows: a magnetic node reached only through
+  permeances, or a group of magnetic nodes joined only by magnetic
+  resistances and winding ports, gets `Σ P·ΔF = 0` (from zero flux)
+  instead of the conductance floor, so a gapped core under DC bias has
+  an operating point. A saturable
+  permeance on such a node is refused by name at DC.
+* **Added** the preflight rule: a magnetic island without a node on
+  `gnd` is refused (no tie resistor). Circuits without magnetic nodes
+  assemble, hash and run exactly as before.
+* **Docs**: tutorial 09 (three-limb transformer under unbalanced load,
+  integrated coupled inductor); two analytic reference circuits
+  (`gapped_core_rl`, `three_limb_zero_seq`).
+
 ### Integration batch 11: circuit IR YAML, TR-BDF2 ideal switch, pwl complementarity, exact step 3, control graph G23, optimisation slice 6 merged
 
 * **Fixed** `make_combined_switch_fn` of a control-graph gate whose loop

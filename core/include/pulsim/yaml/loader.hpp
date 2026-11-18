@@ -473,6 +473,46 @@ inline void load_device(
                       require_string(dev, idx, type, "p2_pos"),
                       require_string(dev, idx, type, "p2_neg"),
                       require_real(dev, idx, type, "g"));
+    } else if (type == "winding") {  // add-permeance-magnetic-domain
+        require_only_keys(dev, idx, type,
+                          {"e_pos", "e_neg", "m_pos", "m_neg", "turns"});
+        b.add_winding(name, require_string(dev, idx, type, "e_pos"),
+                      require_string(dev, idx, type, "e_neg"),
+                      require_string(dev, idx, type, "m_pos"),
+                      require_string(dev, idx, type, "m_neg"),
+                      require_real(dev, idx, type, "turns"));
+    } else if (type == "permeance") {
+        require_only_keys(dev, idx, type, {"from", "to", "P"});
+        b.add_permeance(name, require_string(dev, idx, type, "from"),
+                        require_string(dev, idx, type, "to"),
+                        require_real(dev, idx, type, "P"));
+    } else if (type == "air_gap") {
+        require_only_keys(dev, idx, type, {"from", "to", "area", "length"});
+        b.add_air_gap(name, require_string(dev, idx, type, "from"),
+                      require_string(dev, idx, type, "to"),
+                      require_real(dev, idx, type, "area"),
+                      require_real(dev, idx, type, "length"));
+    } else if (type == "magnetic_resistance") {
+        require_only_keys(dev, idx, type, {"from", "to", "R_m"});
+        b.add_magnetic_resistance(name, require_string(dev, idx, type, "from"),
+                                  require_string(dev, idx, type, "to"),
+                                  require_real(dev, idx, type, "R_m"));
+    } else if (type == "saturable_permeance") {
+        require_only_keys(dev, idx, type,
+                          {"from", "to", "area", "length", "mu_r", "B_sat"});
+        b.add_saturable_permeance(name, require_string(dev, idx, type, "from"),
+                                  require_string(dev, idx, type, "to"),
+                                  require_real(dev, idx, type, "area"),
+                                  require_real(dev, idx, type, "length"),
+                                  require_real(dev, idx, type, "mu_r"),
+                                  require_real(dev, idx, type, "B_sat"));
+    } else if (type == "hysteretic_permeance" || type == "excess_loss") {
+        throw std::runtime_error(
+            "yaml::load: device " + device_label(dev, idx) + " has type '" +
+            type + "', which add-permeance-magnetic-domain defines but has not "
+            "shipped yet (it needs the unified device interface). Use "
+            "hysteretic_inductor for a Jiles-Atherton core and "
+            "magnetic_resistance for in-loop eddy loss.");
     } else if (type == "sine_current_source") {
         require_only_keys(dev, idx, type, {"from", "to", "i_dc", "i_amplitude",
                                            "frequency", "phase"});
@@ -1147,7 +1187,8 @@ inline void load_device(
             "pwl_current_source, op_amp_ideal, "
             "gapped_core_inductor, transformer, multi_winding_transformer, "
             "ideal_transformer, saturable_transformer, induction_motor, "
-            "induction_machine, dc_machine");
+            "induction_machine, dc_machine, winding, permeance, air_gap, "
+            "magnetic_resistance, saturable_permeance");
     }
     if (dev["losses"]) load_losses(b, dev, idx, type, name);
 }

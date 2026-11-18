@@ -249,10 +249,11 @@ def _err(case, engine, k=1.0):
                            abs_scale=case.abs_scale, exclude_t0=case.exclude_t0)
 
 
-def test_there_are_twenty_four_analytic_cases_and_each_has_a_manifest_entry():
-    # 20 + igbt_knee, scr_halfwave_r (IGBT track) + im_locked_rotor,
-    # im_free_acceleration (machines track)
-    assert len(CASES) == 24
+def test_every_analytic_case_is_unique_and_has_a_manifest_entry():
+    # The count derives from the catalog: tracks that add cases (IGBT,
+    # machines, permeance, ...) no longer collide on a literal.
+    ids = [c.id for c in CASES]
+    assert len(ids) == len(set(ids)) >= 26
     assert set(ANALYTIC) == {c.id for c in CASES}
 
 

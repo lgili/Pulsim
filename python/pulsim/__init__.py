@@ -1578,6 +1578,53 @@ def _result_currents(self, *, skip_unsupported: bool = True
     return out
 
 
+def _magnetic_segment(self, name: str, what: str):
+    """(element, F trace) of a permeance-type magnetic element."""
+    builder = getattr(self, "_builder", None)
+    if builder is None:
+        raise RuntimeError(
+            f"SimulationResult.{what} requires the result to carry a "
+            "_builder reference; use pulsim.simulate(...).")
+    el = builder.magnetic_element(name)
+    if el["kind"] not in ("permeance", "saturable_permeance"):
+        raise ValueError(
+            f"{what}({name!r}): '{name}' is a {el['kind']}; flux, B and H are "
+            "defined for a permeance, an air gap or a saturable permeance.")
+    return el, self.v(el["m_a"]) - self.v(el["m_b"])
+
+
+def _result_flux(self, name: str):
+    """Flux Phi [Wb] through the permeance-type element ``name`` (a
+    permeance, an air gap or a saturable permeance), per sample: P*F, or
+    the element's law Phi(F) (add-permeance-magnetic-domain)."""
+    import numpy as _np
+    el, F = _magnetic_segment(self, name, "flux")
+    if el["kind"] == "permeance":
+        return el["P"] * F
+    law = el["law"]
+    return _np.array([law.charge(float(f)) for f in F])
+
+
+def _result_b_field(self, name: str):
+    """Flux density B = Phi/area [T] of an air gap or a saturable
+    permeance (elements built from geometry)."""
+    el, _ = _magnetic_segment(self, name, "b_field")
+    if el["area"] is None:
+        raise ValueError(f"b_field({name!r}): '{name}' has no area (built "
+                         "from a permeance value, not from geometry).")
+    return _result_flux(self, name) / el["area"]
+
+
+def _result_h_field(self, name: str):
+    """Field H = F/length [A/m] of an air gap or a saturable permeance
+    (elements built from geometry)."""
+    el, F = _magnetic_segment(self, name, "h_field")
+    if el["length"] is None:
+        raise ValueError(f"h_field({name!r}): '{name}' has no length (built "
+                         "from a permeance value, not from geometry).")
+    return F / el["length"]
+
+
 # Monkey-patch the methods onto the C++-bound SimulationResult class.
 # We can't subclass it cleanly because run_transient returns the
 # concrete C++ type, but the type itself accepts attribute injection
@@ -1599,6 +1646,12 @@ SimulationResult.power = _result_power  # type: ignore[attr-defined]
 SimulationResult.signal = _result_signal      # type: ignore[attr-defined]
 SimulationResult.signals = _result_signals    # type: ignore[attr-defined]
 SimulationResult.currents = _result_currents  # type: ignore[attr-defined]
+SimulationResult.flux = _result_flux          # type: ignore[attr-defined]
+SimulationResult.b_field = _result_b_field    # type: ignore[attr-defined]
+SimulationResult.h_field = _result_h_field    # type: ignore[attr-defined]
+_PEDRes.flux = _result_flux                    # type: ignore[attr-defined]
+_PEDRes.b_field = _result_b_field              # type: ignore[attr-defined]
+_PEDRes.h_field = _result_h_field              # type: ignore[attr-defined]
 
 
 def _result_plot(self, *signals, save=None, show=None, **kwargs):

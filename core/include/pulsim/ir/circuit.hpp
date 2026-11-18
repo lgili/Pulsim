@@ -654,6 +654,18 @@ private:
             }
         }
 
+        // add-permeance-magnetic-domain: hashed only when present, so a
+        // circuit without magnetic nodes keeps its hashes.
+        if (const auto& fn = d->lowered.pool().flux_nodes(); !fn.empty()) {
+            s.word(0x6d61676e65746963ULL);  // "magnetic", then the nodes
+            s.word(fn.size());
+            for (const Index n : fn) s.idx(n);
+        }
+        if (const auto& mg = d->lowered.pool().magnetic_geometry(); !mg.empty()) {
+            s.word(mg.size());
+            for (const auto& g : mg) { s.idx(g.branch); v.real(g.area); v.real(g.length); }
+        }
+
         using AK = builder::CircuitBuilder::AliasKind;
         for (const auto& [name, t] : dd.lowered.aliases()) {
             d->aliases.push_back(Alias{name, t.kind == AK::Node, t.target});
@@ -703,6 +715,7 @@ inline Circuit::Regularized Circuit::with_preflight(
 
 namespace pulsim::builder {
 inline ir::Circuit CircuitBuilder::build() const {
+    pwl::require_magnetic_reference(graph_, pool_);
     return ir::Circuit::from_builder(*this);
 }
 }  // namespace pulsim::builder
