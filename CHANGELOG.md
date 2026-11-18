@@ -34,7 +34,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Fixed** `make_combined_switch_fn` of a control-graph gate whose loop
   object was dropped (`[_pi_loop(b).switch_fn]`) segfaulted on its first
   call: the gate reads its chain through a pointer. The combination now
-  keeps its parts alive.
+  keeps each gate alive (not only the list it came in: clearing the list
+  freed the chain). The same class of bug is fixed in
+  `CxxBlockChain.make_step_observer`, `make_b_extra_fn`,
+  `make_chain_switch_fn` and `compose_chain_observers`, whose callables
+  outlived a dropped chain.
+* **Fixed** a C block's per-run reset (G22) with one value that cannot be
+  deep-copied (a lock) copied the whole state dict shallowly, so its
+  lists carried over, and the restore then raised; each key is now
+  copied on its own and only the uncopyable one is kept by reference.
 * **Fixed** `Evaluator(circuit=..., switch_fn=<a controller's gate>)` died
   in its options digest (TypeError, or the segfault above), and a
   circuit-form evaluator whose circuit carries C blocks or graph-driven
@@ -162,7 +170,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Changed** the record arithmetic sums with CPython 3.12's compensated
   float sum on every Python version (`design._psum`): records on Python
   3.10 / 3.11 may move by one ulp and now equal 3.12+'s.
-* **Fixed** `p_in` (and time-weighted means) of the evaluator on the
+* **Fixed** `p_in` of the evaluator on the
   fixed-step `pwl` engine's `pss` route: the sample at a gate edge held
   the left limit and the integral ran straight across it, 1.0 % high on
   a DCM buck at T/200 (first order). Each side of a gate edge is now
@@ -298,7 +306,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Measured** (group 7): branch against conductance form on `pwl`,
   12-switch three-phase inverter 1.073× ns/step, buck 1.018× — inside
   the 1.5× gate for making the branch form the default; the switch of
-  the default is not made here, and trbdf2 still refuses the form.
+  the default is not made here (on trbdf2 the branch form runs and its
+  smallest step is not the smaller one, task 7.2 / DECISIONS #16).
 
 ### Complementarity mode selection on the fixed engine (`pwl`)
 

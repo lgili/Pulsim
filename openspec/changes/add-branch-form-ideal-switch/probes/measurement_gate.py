@@ -5,7 +5,7 @@
 The circuits are test_branch_form_switch.py's: the three-phase inverter (6 switches + 6 antiparallel
 diodes = 12 switching elements, 400 V, 10 kHz carrier, dt = 1 us, 4 ms) and the buck (switch +
 diode, T = 10 us, dt = T/100, 2 ms), each built in both forms, on pwl (the implicit trapezoid on
-the cache; trbdf2 refuses the branch form by name, so 7.2 cannot be measured yet).
+the cache; 7.2, the trbdf2 smallest step, is measured separately: DECISIONS #16).
 ns/step is the median of REPS interleaved wall-clock runs divided by the stored steps; counters are from one run. 7.3: the flip
 is allowed only if the inverter's branch-form ns/step is at most 1.5x the conductance form's.
 """

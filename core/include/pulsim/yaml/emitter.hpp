@@ -527,7 +527,10 @@ struct YamlIo {
         if (const auto ns = root["nodes"]) {
             for (const auto& n : ns) {
                 const auto name = text(n, "nodes", "nodes");
-                if (b.resolve_node_(name) != b.graph().num_nodes() - 1) {
+                // Sequenced: the operands of != have no evaluation order (MSVC
+                // read num_nodes() before resolve_node_ created the node).
+                const Index created = b.resolve_node_(name);
+                if (created != b.graph().num_nodes() - 1) {
                     fail("nodes", std::format("\"{}\" is listed twice or names ground", name));
                 }
             }
@@ -561,7 +564,10 @@ struct YamlIo {
                     const auto nm = text(x["name"], p.name, "name");
                     const auto pins = x["pins"];
                     if (!pins || !pins.IsSequence() || pins.size() != 2) fail(nm, "needs two pins");
-                    p.branches.push_back(b.add_branch_(nm, pin(pins[0], nm), pin(pins[1], nm),
+                    // braced: the two lookups run in order (function arguments
+                    // do not; with two unknown pins MSVC named the second)
+                    const std::array<Index, 2> ab{pin(pins[0], nm), pin(pins[1], nm)};
+                    p.branches.push_back(b.add_branch_(nm, ab[0], ab[1],
                                                        topology::BranchKind::Nonlinear));
                 }
             } else {
@@ -578,8 +584,9 @@ struct YamlIo {
                     if (ri == yaml_detail::kRoles.end()) fail(p.name, std::format("unknown role \"{}\"", rs));
                     role = static_cast<topology::BranchKind>(ri - yaml_detail::kRoles.begin());
                 }
-                p.branches.push_back(b.add_branch_(p.name, pin(pins[0], p.name),
-                                                   pin(pins[1], p.name), role));
+                // braced: the two lookups run in order (not as two arguments)
+                const std::array<Index, 2> ab{pin(pins[0], p.name), pin(pins[1], p.name)};
+                p.branches.push_back(b.add_branch_(p.name, ab[0], ab[1], role));
             }
             pend.push_back(std::move(p));
         }
@@ -589,8 +596,11 @@ struct YamlIo {
         for (const auto& cp : root["couplings"]) {
             keys(cp, "a coupling", {"primary", "secondary", "L_p", "L_s", "k"});
             const auto pr = text(cp["primary"], "a coupling", "primary");
+            // ordered (a declaration each): which bad field is named first
+            const auto bp = b.branch_id_of(pr);
+            const auto bs = b.branch_id_of(text(cp["secondary"], pr, "secondary"));
             b.pool_.add_transformer_coupling(
-                b.branch_id_of(pr), b.branch_id_of(text(cp["secondary"], pr, "secondary")),
+                bp, bs,
                 models::TwoWindingTransformer::Params{
                     real(cp["L_p"], pr, "L_p"), real(cp["L_s"], pr, "L_s"),
                     real(cp["k"], pr, "k")});
@@ -661,6 +671,8 @@ private:
         auto& pool = b.pool_;
         const Index bi = br.front();
         auto xpin = [&](std::size_t k) { return pin(n["pins"][k], who); };
+        // control pins 2 and 3 resolved in order (braced), not as two arguments
+        auto xpins = [&] { return std::array<Index, 2>{xpin(2), xpin(3)}; };
         std::visit([&](auto& p) {
             using P = std::decay_t<decltype(p)>;
             if constexpr (std::is_same_v<P, m::Resistor::Params>) pool.add_resistor(bi, p);
@@ -676,7 +688,7 @@ private:
             else if constexpr (std::is_same_v<P, m::PulseVoltageSource::Params>) pool.add_pulse_voltage_source(bi, p);
             else if constexpr (std::is_same_v<P, m::MosfetLevel1::Params>) pool.add_mosfet_level1(bi, xpin(2), p);
             else if constexpr (std::is_same_v<P, m::IgbtLevel1::Params>) pool.add_igbt_level1(bi, xpin(2), p);
-            else if constexpr (std::is_same_v<P, m::VCVS::Params>) pool.add_vcvs(bi, xpin(2), xpin(3), p);
+            else if constexpr (std::is_same_v<P, m::VCVS::Params>) { const auto c = xpins(); pool.add_vcvs(bi, c[0], c[1], p); }
             else if constexpr (std::is_same_v<P, m::SaturableInductor::Params>) {
                 if (const auto t = n["table"]) {
                     keys(t, who, {"i", "lambda", "slope", "L_tail"});
@@ -705,13 +717,14 @@ private:
             } else if constexpr (std::is_same_v<P, m::ShockleyDiode::Params>) pool.add_shockley_diode(bi, p);
             else if constexpr (std::is_same_v<P, m::LauritzenDiode::Params>) pool.add_lauritzen_diode(bi, p);
             else if constexpr (std::is_same_v<P, m::PmsmMna::Params>) {
-                pool.add_pmsm_mna({br[0], br[1], br[2]}, pin(n["omega"], who),
-                                  pin(n["theta"], who), p);
-            } else if constexpr (std::is_same_v<P, m::IdealTransformer::Params>) pool.add_ideal_transformer(bi, xpin(2), xpin(3), p);
-            else if constexpr (std::is_same_v<P, m::VCCS::Params>) pool.add_vccs(bi, xpin(2), xpin(3), p);
+                // braced: omega before theta (not as two arguments)
+                const std::array<Index, 2> ot{pin(n["omega"], who), pin(n["theta"], who)};
+                pool.add_pmsm_mna({br[0], br[1], br[2]}, ot[0], ot[1], p);
+            } else if constexpr (std::is_same_v<P, m::IdealTransformer::Params>) { const auto c = xpins(); pool.add_ideal_transformer(bi, c[0], c[1], p); }
+            else if constexpr (std::is_same_v<P, m::VCCS::Params>) { const auto c = xpins(); pool.add_vccs(bi, c[0], c[1], p); }
             else if constexpr (std::is_same_v<P, m::CCCS::Params>) pool.add_cccs(bi, b.branch_id_of(text(n["control"], who, "control")), p);
             else if constexpr (std::is_same_v<P, m::CCVS::Params>) pool.add_ccvs(bi, b.branch_id_of(text(n["control"], who, "control")), p);
-            else if constexpr (std::is_same_v<P, m::Gyrator::Params>) pool.add_gyrator(bi, xpin(2), xpin(3), p);
+            else if constexpr (std::is_same_v<P, m::Gyrator::Params>) { const auto c = xpins(); pool.add_gyrator(bi, c[0], c[1], p); }
             else if constexpr (std::is_same_v<P, m::SineCurrentSource::Params>) pool.add_sine_current_source(bi, p);
             else if constexpr (std::is_same_v<P, m::PulseCurrentSource::Params>) pool.add_pulse_current_source(bi, p);
             else if constexpr (std::is_same_v<P, m::PwlCurrentSource::Params>) {

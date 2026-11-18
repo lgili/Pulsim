@@ -556,10 +556,7 @@ def add_c_block(builder,
         block._keep = fn          # the library and its state pointer
     else:
         block = CBlock(n_in, n_out, fn=fn, state=dict(state or {}), name=name)
-    try:                                          # every run starts here (G22)
-        block._state0 = copy.deepcopy(block.state)
-    except Exception:  # noqa: BLE001 - an uncopyable value (a lock, a handle)
-        block._state0 = dict(block.state)        # restored by reference
+    block._state0 = _copy_state(block.state)    # every run starts here (G22)
     handle = CBlockHandle(
         name=name, n_in=n_in, n_out=n_out, dt_block=float(dt),
         state=block.state, inputs=block.inputs, outputs=block.outputs,
@@ -620,11 +617,23 @@ def _reset_c_blocks(graph) -> None:
             keep._reinit()
         else:
             b.state.clear()
-            b.state.update(copy.deepcopy(getattr(b, "_state0", {})))
+            b.state.update(_copy_state(getattr(b, "_state0", {})))
         b.inputs[:] = 0.0
         b.outputs[:] = 0.0
     if graph._cxx_chain is not None:
         graph._cxx_chain.reset()
+
+
+def _copy_state(state: dict) -> dict:
+    """Deep copy per key; a value that cannot be copied (a lock, a handle)
+    is kept by reference, the other keys are still restored (G22)."""
+    out = {}
+    for k, v in state.items():
+        try:
+            out[k] = copy.deepcopy(v)
+        except Exception:  # noqa: BLE001 - uncopyable: restored by reference
+            out[k] = v
+    return out
 
 
 def _c_graph_observer(builder, fresh: bool = True):
