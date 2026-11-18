@@ -566,8 +566,14 @@ diodes of a half-cycle turn off at the same current zero (a tie), and
 through the OFF interval the floating rail is set by nano-amp g_off
 leakage whose sign flips at the source's zero crossings. The bus
 differential (dp − dn) of the unperturbed run is within 9e-4 V of pwl;
-the common mode is not. A real bridge has a defined reference (Y
-capacitors, a grounded rail): give the model one.
+the common mode is not. The branch-form bridge (`form='branch'`) takes
+8-12 diode events over the same 20 runs and its bus average is
+311.1547 V in every run. The engines do not agree on the answer either:
+dsed / exact give 311.3167 V and pwl 311.3439 V (it chatters the series
+pair every dt at 4.66 ms); the round-off of the floating rail's common
+mode is the mechanism (`DECISIONS #19` of add-branch-form-ideal-switch).
+A real bridge has a defined reference (Y capacitors, a grounded rail):
+give the model one.
 
 ### First stored sample of algebraic nodes
 
