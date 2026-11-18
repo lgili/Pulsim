@@ -61,6 +61,11 @@ inline SwitchFnAdapter adapt_switch_fn(const pybind11::object& obj) {
         auto* p = obj.cast<pulsim::blockchain::ChainPwmGate*>();
         a.fn = [p](Real t) { return (*p)(t); };
         a.next_edge = [p](Real t) { return p->next_edge_after(t); };
+    } else if (py::isinstance<pulsim::blockchain::ChainSignalGate>(obj)) {
+        // A discrete gate: edges at the graph's publication instants.
+        auto* p = obj.cast<pulsim::blockchain::ChainSignalGate*>();
+        a.fn = [p](Real t) { return (*p)(t); };
+        a.next_edge = [p](Real t) { return p->next_edge_after(t); };
     } else {
         a.fn = obj.cast<std::function<
             pulsim::topology::SwitchStateMask(Real)>>();

@@ -76,6 +76,18 @@ struct Parameter {
     std::optional<Real> lo;
     std::optional<Real> hi;
     std::string expr{};   // group 7: defined by this expression (empty: a literal)
+    std::uint32_t scope = 0;  // group 8: the scope it was declared in (0 = root)
+};
+
+/// A scope (group 8): one instance of a subsystem, or a path segment
+/// above one. Id 0 is the root (implicit); scope `i > 0` is
+/// `scopes()[i - 1]`. Members are found by name: an element belongs to
+/// the deepest scope whose `path + "/"` prefixes its flattened name.
+struct Scope {
+    std::string name;         // its own segment ("sm17")
+    std::uint32_t parent;     // 0 = the root
+    std::string kind;         // the subsystem definition ("" = a plain path segment)
+    std::string path;         // "leg_a/sm17"
 };
 
 struct ParamId { std::uint32_t v; };
@@ -254,6 +266,15 @@ inline constexpr std::array kPmsm{
     direct<PM, &PM::psi_pm>("psi_pm", B::NonNegative),
     direct<PM, &PM::pole_pairs>("pole_pairs", B::Positive),
     direct<PM, &PM::T_load>("T_load", B::Finite)};
+using IM = m::InductionMachineMna::Params;
+inline constexpr std::array kInductionMachine{
+    direct<IM, &IM::R_s>("R_s", B::NonNegative),
+    direct<IM, &IM::L_ls>("L_ls", B::Positive),
+    direct<IM, &IM::R_r>("R_r", B::Positive),
+    direct<IM, &IM::L_lr>("L_lr", B::Positive),
+    direct<IM, &IM::L_m>("L_m", B::Positive),
+    direct<IM, &IM::pole_pairs>("pole_pairs", B::Positive),
+    direct<IM, &IM::T_load>("T_load", B::Finite)};
 inline constexpr std::array kIdealXfmr{
     direct<m::IdealTransformer::Params, &m::IdealTransformer::Params::n>("n", B::Positive)};
 inline constexpr std::array kVccs{
@@ -296,7 +317,8 @@ inline constexpr std::array<std::span<const FieldSpec>, pwl::DevicePool::kNumKin
         detail::kNonlinearCap, detail::kShockley,      detail::kLauritzen,
         detail::kPmsm,         detail::kIdealXfmr,     detail::kVccs,
         detail::kCccs,         detail::kCcvs,          detail::kGyrator,
-        detail::kSineI,        detail::kPulseI,        detail::kPwlI};
+        detail::kSineI,        detail::kPulseI,        detail::kPwlI,
+        detail::kInductionMachine};
 static_assert(kKindFields.size() == pwl::kKindCaps.size(),
               "every device kind needs a row in ir::kKindFields");
 
@@ -334,7 +356,10 @@ inline void check_device(const ParamsVariant& v, std::string_view field) {
         } else if constexpr (std::is_same_v<P, m::ShockleyDiode::Params>) {
             m::ShockleyDiode::validate(p);
         } else if constexpr (std::is_same_v<P, m::PmsmMna::Params>) {
+            if (p.harmonics && field == "psi_pm") unread("PM-harmonic");
             m::PmsmMna::validate(p);
+        } else if constexpr (std::is_same_v<P, m::InductionMachineMna::Params>) {
+            m::InductionMachineMna::validate(p);
         } else if constexpr (std::is_same_v<P, m::IgbtLevel1::Params>) {
             // As add_igbt_level1: k_tail < 1, and a tail needs both.
             if (!(p.k_tail < Real{1})) {

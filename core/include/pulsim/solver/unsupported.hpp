@@ -86,10 +86,56 @@ inline void require_branch_form_supported(const topology::Graph& graph,
     }
 }
 
+/// add-in-kernel-event-losses: the event-loss hook is in engine='pwl'
+/// only (solver/loss_tracker.hpp); every other engine refuses a circuit
+/// with a loss port rather than run with the junction temperature held
+/// constant. One line at each engine entry.
+inline void refuse_device_losses(const pwl::DevicePool& pool,
+                                 std::string_view engine) {
+    if (pool.device_losses().empty()) return;
+    const auto& s = pool.device_losses().front();
+    throw UnsupportedError(
+        std::string(engine), "device_losses", s.device, "",
+        std::format(
+            "engine '{}' cannot honour the loss port of '{}' "
+            "(set_device_losses): the commutation energy and the junction "
+            "temperature are read inside the time loop of engine='pwl' "
+            "only. Use engine='pwl', or post-process with "
+            "device_loss_summary.", engine, s.device));
+}
+
+/// add-pwl-igbt-and-thyristor: the first gated device (IGBT with reverse
+/// blocking, GTO, thyristor, TRIAC) engine `e` does not run refuses as
+/// `UnsupportedError(engine, 'gated_diode', device, 'Diode')`.
+inline void require_gated_supported(const topology::Graph& graph,
+                                    const pwl::DevicePool& pool,
+                                    pwl::Engine e) {
+    if (pool.num_gated_diodes() == 0) return;
+    for (Index b = 0; b < graph.num_branches(); ++b) {
+        if (!pool.is_registered(b)
+            || pool.kind_of(b) != pwl::DevicePool::StoredKind::Diode) continue;
+        const auto gate = pool.diode_params(b).gate;
+        for (const auto& row : pwl::kGatedCaps) {
+            if (row.gate != gate || row.supports(e)) continue;
+            throw UnsupportedError(
+                std::string(pwl::engine_name(e)), "gated_diode",
+                std::string(graph.branch_name(b)), "Diode",
+                std::format(
+                    "engine '{}' cannot simulate '{}', a gated PWL device "
+                    "({}: IGBT with reverse blocking, GTO, thyristor or "
+                    "TRIAC): it would run a different circuit. Use "
+                    "engine='pwl' or engine='trbdf2'.",
+                    pwl::engine_name(e), graph.branch_name(b), row.name));
+        }
+    }
+}
+
 /// Throw `UnsupportedError` for the first branch engine `e` cannot run.
 inline void require_supported(const topology::Graph& graph,
                               const pwl::DevicePool& pool, pwl::Engine e) {
     require_branch_form_supported(graph, pool, e);
+    if (e != pwl::Engine::FixedTrap) refuse_device_losses(pool, pwl::engine_name(e));
+    require_gated_supported(graph, pool, e);
     const auto b = find_unsupported(graph, pool, e);
     if (!b) return;
     const auto kind = pwl::stored_kind_name(pool.kind_of(*b));

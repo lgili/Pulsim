@@ -86,6 +86,74 @@ def test_every_registry_kind_has_a_yaml_entry():
     assert squash == {n.lower() for n in k.StoredKind.__members__}
 
 
+def test_every_registry_kind_loads_in_a_netlist():
+    """One schema table for the loader and the emitter: every kind the
+    emitter writes is a `type:` the authoring loader reads (its own
+    authoring reader, or the emitter's entry for a kind without one),
+    and the emitter's whole document is a netlist `load_yaml_string`
+    takes, with the same hash."""
+    import yaml
+    seen = set()
+    for build, *_ in ALL_CELLS.values():
+        c = build(True).build()
+        text = c.to_yaml()
+        assert p.load_yaml_string(text).builder.build().value_hash() == \
+            c.value_hash()
+        for d in yaml.safe_load(text)["devices"]:
+            seen.add(d["kind"])
+            d["type"] = d.pop("kind")
+            doc = yaml.safe_dump({"circuit": {"devices": [d]}})
+            try:
+                p.load_yaml_string(doc)
+            except Exception as e:  # noqa: BLE001 — authoring keys differ
+                assert "unknown type" not in str(e), (d["type"], e)
+    assert len(seen) == len(k.StoredKind.__members__)
+
+
+def test_from_yaml_applies_the_authoring_bounds():
+    head = 'pulsim_circuit: 1\nnodes: ["a"]\ndevices:\n  - '
+    for dev, match in (
+            ('{kind: resistor, name: "R1", pins: ["a", "gnd"], G: -1}',
+             "R1: G must be a finite number > 0"),
+            ('{kind: capacitor, name: "C1", pins: ["a", "gnd"], C: 0}',
+             "C1: C must be a finite number > 0"),
+            ('{kind: pwm_voltage_source, name: "P", pins: ["a", "gnd"], duty: 2}',
+             r"P: duty must be a number in \[0, 1\]")):
+        with pytest.raises(ValueError, match=match):
+            p.Circuit.from_yaml(head + dev + "\n")
+    # add_resistor takes R < 0 (with_value would not): a pickle, text this
+    # library wrote, still reads back; from_yaml of that text refuses it
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 1.0)
+    b.add_resistor("Rn", "a", "gnd", -5.0)
+    c = b.build()
+    assert pickle.loads(pickle.dumps(c)).value_hash() == c.value_hash()
+    with pytest.raises(ValueError, match="Rn: G must be a finite number > 0"):
+        p.Circuit.from_yaml(c.to_yaml())
+
+
+def test_a_non_finite_value_is_refused_at_emit_and_at_load():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 1.0)
+    b.add_resistor("R1", "a", "gnd", float("nan"))     # add_resistor checks nothing
+    c = b.build()
+    with pytest.raises(ValueError, match=r'to_yaml: device "R1": "G" is \.nan'):
+        c.to_yaml()
+    with pytest.raises(ValueError):
+        pickle.dumps(c)
+    head = 'pulsim_circuit: 1\nnodes: ["a"]\ndevices:\n  - '
+    for tok in (".nan", ".inf", "-.inf", "nan", "inf"):
+        with pytest.raises(ValueError, match=r'V: "V" must be a finite number|V: "V" is not a number'):
+            p.Circuit.from_yaml(head + '{kind: voltage_source, name: "V", pins: ["a", "gnd"], V: '
+                                + tok + "}\n")
+    q = p.CircuitBuilder()
+    q.param("k", 1.0)
+    q.add_resistor("R", "a", "gnd", 1.0)
+    y = q.build().to_yaml().replace("value: 1", "value: .inf")
+    with pytest.raises(ValueError, match=r'"value" (must be a finite number|is not a number)'):
+        p.Circuit.from_yaml(y)
+
+
 @pytest.mark.parametrize("path", EXAMPLES, ids=[q.name for q in EXAMPLES])
 def test_shipped_example_round_trips(path):
     lc = p.load_yaml_file(str(path))
@@ -254,3 +322,39 @@ def test_hostile_power_mosfet_fields_are_refused():
         p.Circuit.from_yaml(bad)
     with pytest.raises(ValueError, match='needs "shockley"'):
         p.Circuit.from_yaml(re.sub(r", shockley: \{[^}]*\}", "", y))
+
+
+def test_pmsm_harmonics_round_trip():
+    # The PM-flux series is not a scalar field: written as a flat list.
+    b = p.CircuitBuilder()
+    for i, n in enumerate(("ua", "ub", "uc")):
+        b.add_sine_voltage_source(f"V{n}", n, "gnd", 0.0, 12.0, 30.0, -2.0944 * i)
+    b.add_bldc_mna("M", "ua", "ub", "uc", "nn", "w", "th", R_s=0.3, L_s=1e-3,
+                   k_e=0.05, pole_pairs=4, J=1e-4, n_harmonics=7)
+    c = b.build()
+    assert "harmonics: [" in c.to_yaml()
+    _same_run(c, _round(c), t_end=50 * 5e-5, dt=5e-5, engine="pwl")
+
+
+def _im_circuit():
+    b = p.CircuitBuilder()
+    for i, n in enumerate(("ua", "ub", "uc")):
+        b.add_sine_voltage_source(f"V{n}", n, "gnd", 0.0, 141.0, 60.0, -2.0944 * i)
+    b.add_induction_machine_mna("M", "ua", "ub", "uc", "nn", "w", R_s=0.6,
+                                L_ls=2.5e-3, R_r=0.3, L_lr=3e-3, L_m=50e-3,
+                                pole_pairs=3, J=0.01, B=1e-3, T_load=1.5)
+    return b.build()
+
+
+def test_induction_machine_with_its_fields_round_trips():
+    c = _im_circuit()
+    y = c.to_yaml()
+    for key in ("R_s", "L_ls", "R_r", "L_lr", "L_m", "pole_pairs", "rotor:"):
+        assert key in y, key
+    _same_run(c, _round(c), t_end=50 * 5e-5, dt=5e-5, engine="pwl")
+
+
+def test_a_machine_key_on_the_other_machine_is_refused():
+    y = _im_circuit().to_yaml().replace("rotor:", "harmonics: [1, 0.05, 0], rotor:")
+    with pytest.raises(Exception, match="harmonics is a pmsm_mna key"):
+        p.Circuit.from_yaml(y)

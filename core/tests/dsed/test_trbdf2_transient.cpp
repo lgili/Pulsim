@@ -15,6 +15,8 @@
 #include "pulsim/solver/trbdf2_transient.hpp"
 
 #include <cmath>
+#include <limits>
+#include <vector>
 
 using namespace pulsim;
 using Catch::Approx;
@@ -502,6 +504,47 @@ TEST_CASE("TR-BDF2: controller sources at three rates tick at their "
     REQUIRE(ticks[2].first == 2);
 }
 
+TEST_CASE("TR-BDF2: a controller rate with an offset ticks at "
+          "t0 + offset + k*T", "[v2][trbdf2][control]") {
+    // add-unified-event-queue: per-source offsets on the event queue.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V1", "in", "gnd", 1.0);
+    b.add_resistor("R1", "in", "o", 1e3);
+    b.add_capacitor("C1", "o", "gnd", 1e-6);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    auto sf = [n_sw](Real) { return topology::SwitchStateMask(n_sw); };
+    solver::TrBdf2Options o;
+    o.t_start = 1e-3;
+    o.t_end = 11e-3;
+    o.observer_periods = {1e-3, 1e-3};
+    o.observer_offsets = {0.0, 0.25e-3};
+    solver::TrBdf2Stats st;
+    std::vector<std::pair<Size, Real>> ticks;
+    auto tick = [&](Size j, Real t, const Vector&) {
+        ticks.emplace_back(j, t);
+    };
+    solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st, {},
+        {}, {}, {}, nullptr, tick);
+    REQUIRE(st.ctrl_tick_counts == std::vector<Size>{10, 10});
+    std::vector<Size> k(2, 0);
+    for (const auto& [j, t] : ticks) {
+        const Real want = o.t_start + o.observer_offsets[j]
+            + static_cast<Real>(k[j]++) * o.observer_periods[j];
+        REQUIRE(std::abs(t - want) <= 1e-9 * o.observer_periods[j]);
+    }
+    o.observer_offsets = {0.0};
+    REQUIRE_THROWS_AS(solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st, {},
+        {}, {}, {}, nullptr, tick), std::invalid_argument);
+    o.observer_offsets = {0.0, -1e-4};
+    REQUIRE_THROWS_AS(solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st, {},
+        {}, {}, {}, nullptr, tick), std::invalid_argument);
+}
+
 TEST_CASE("TR-BDF2: a line-inductance bridge does not grind at one "
           "commutation", "[v2][trbdf2][robustness]") {
     // V_th = 0.7 bridge behind 0.1 ohm + 1 mH, 470 µF || 1 kOhm. With
@@ -573,7 +616,8 @@ TEST_CASE("TR-BDF2: derivative slots are refreshed after a gate edge",
                 cache, b.graph(), b.pool(), o, sf, {}, std::nullopt,
                 &st);
             REQUIRE(st.n_gate_events == 1);
-            const auto& hist = res.final_snapshot.history;
+            const auto hist = res.final_snapshot.view(
+                device::StateBlock::LinearCompanion);
             REQUIRE(hist.size() == 2);
             const Real v_prev = hist[0], i_prev = hist[1];
             if (inductor) {
@@ -753,4 +797,67 @@ TEST_CASE("TR-BDF2: an ON diode's noise floor reads the voltage across it, "
     REQUIRE(tol0 < 2e-12);
     REQUIRE(tolh < 1e-9);    // 64 eps * 2e4 = 2.8e-10; it was 2e-8
     REQUIRE(tolh > tol0);
+}
+
+TEST_CASE("TR-BDF2: step hooks see every landed gate edge as a commutation",
+          "[v2][trbdf2][event_queue]") {
+    // add-unified-event-queue: the commutation callback the in-kernel
+    // event losses hook on. A PWM-driven RC: every edge the engine lands
+    // is one mask change between two accepted steps, reported at the
+    // edge with the state before (solved under the old mask) and after.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "in", "gnd", 5.0);
+    b.add_switch("S", "in", "n1", 1e3, 1e-9);
+    b.add_resistor("R", "n1", "n2", 1e3);
+    b.add_capacitor("C", "n2", "gnd", 1e-6);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    const Real T = 1e-4, D = 0.3;
+    auto edge = [&](Real t) {   // first edge strictly after t
+        const Real k = std::floor(t / T);
+        for (Real kk = k; kk <= k + 2; kk += 1) {
+            if (kk * T > t) return kk * T;
+            if (kk * T + D * T > t) return kk * T + D * T;
+        }
+        return std::numeric_limits<Real>::infinity();
+    };
+    auto sf = [&](Real t) {
+        topology::SwitchStateMask m(n_sw);
+        const Real k = std::floor(t / T);
+        m.set(0, t >= k * T && t < k * T + D * T);
+        return m;
+    };
+    solver::TrBdf2Options o;
+    o.t_end = 1.05e-3;
+    solver::TrBdf2Stats st;
+    events::StepHooks hooks;
+    std::vector<Real> t_com;
+    std::size_t n_acc = 0, bad = 0;
+    Real t_last = 0.0;
+    hooks.on_accept([&](Real t0, Real t1, const Vector&,
+                        const topology::SwitchStateMask&) {
+        ++n_acc;
+        bad += !(t1 > t0) || t0 < t_last;
+        t_last = t1;
+    });
+    hooks.on_commutation([&](const events::Commutation& c) {
+        t_com.push_back(c.t);
+        bad += c.before == c.after || c.x_before.size() != c.x_after.size();
+    });
+    const auto res = solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st, edge,
+        {}, {}, {}, nullptr, {}, &hooks);
+    CHECK(bad == 0);
+    CHECK(n_acc > 0);
+    // Edges in (0, t_end): 0.3T, T, 1.3T, ..., 10T, 10.3T = 21; the one
+    // at 0 is the initial mask.
+    CHECK(st.n_gate_events == 21);
+    REQUIRE(t_com.size() == st.n_gate_events);
+    for (std::size_t i = 0; i < t_com.size(); ++i) {
+        const Real ref = (i % 2 == 0) ? (i / 2) * T + D * T : (i / 2 + 1) * T;
+        CHECK(std::abs(t_com[i] - ref) < 1e-12);
+    }
+    CHECK(hooks.commutations() == t_com.size());
+    (void)res;
 }

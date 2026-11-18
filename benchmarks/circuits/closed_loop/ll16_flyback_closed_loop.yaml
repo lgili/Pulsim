@@ -9,6 +9,7 @@ simulation:
   tstart: 0.0
   tstop: 2e-3
   dt: 0.25e-6
+  uic: true   # a flyback's DC point shorts Lm through the switch
 components:
   - type: voltage_source
     name: Vin
@@ -24,22 +25,22 @@ components:
       type: dc
       value: 12.0
 
-  # Power Stage - Flyback Transformer T-Model Equivalent
-  # Ratio Np/Ns = 4. Lm_pri = 160u.
+  # Power Stage - flyback transformer, Np/Ns = 4, Lm_pri = 160u: the
+  # magnetizing inductance across an ideal transformer (a coupled
+  # inductor with k = 1; Lsec = Lm / 16 = 10u is implied). Before
+  # 2026-11-18 the secondary inductor was not coupled to anything and
+  # Lm_core sat in parallel with the switch, so V(vout) = 0 and every
+  # turn-off interrupted 604 A into roff; the authored 2u leakage had no
+  # clamp to take its current at turn-off, so it is folded into Lm.
   - type: inductor
     name: Lm_core
-    nodes: [drain, 0]
-    value: 158u
-
-  - type: inductor
-    name: Lleak_prim
     nodes: [vin, drain]
-    value: 2u
+    value: 160u
 
-  - type: inductor
-    name: Lsec
-    nodes: [0, sec] # Note dot convention inverted for flyback
-    value: 10u
+  - type: transformer
+    name: T1
+    nodes: [vin, drain, 0, sec] # dot at sec reversed: a flyback
+    turns_ratio: 4.0
 
   - type: vcswitch
     name: S_main

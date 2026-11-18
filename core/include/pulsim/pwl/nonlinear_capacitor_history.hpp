@@ -29,6 +29,7 @@
 #include "pulsim/stamping/branch_coord.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -62,6 +63,42 @@ public:
                 e.params, Real{0});
             e.i_prev = Real{0};
             entries_.push_back(e);
+        }
+        q_gamma_.assign(entries_.size(), Real{0});
+    }
+
+    /// TR-BDF2: the charge at the stage point, one per device, read by
+    /// the BDF2 stage-2 stamp and by `commit_bdf2_stage2`.
+    void capture_gamma(const Vector& x_gamma) {
+        Size qi = 0;
+        for (const auto& e : entries_) {
+            const Real vg = stamping::read_node_voltage(x_gamma, e.from)
+                            - stamping::read_node_voltage(x_gamma, e.to);
+            q_gamma_[qi++] = models::NonlinearCapacitor::charge(e.params, vg);
+        }
+    }
+    [[nodiscard]] const std::vector<Real>& q_gamma() const noexcept {
+        return q_gamma_;
+    }
+
+    /// Commit a TR-BDF2 step under the BDF2 rule its second stage used
+    /// (`h_full` = the whole step) — never re-derived from C(v)dv/dt,
+    /// which would not conserve charge.
+    void commit_bdf2_stage2(const Vector& x_end, Real h_full) {
+        const Real c1 = Real{2} + std::sqrt(Real{2});
+        const Real gam = Real{2} - std::sqrt(Real{2});
+        const Real rho = (Real{1} - gam) / gam;
+        const Real c2 = -(Real{1} + rho) / (Real{1} - gam);
+        const Real c3 = Real{1} / std::sqrt(Real{2});
+        Size qi = 0;
+        for (auto& e : entries_) {
+            const Real v = stamping::read_node_voltage(x_end, e.from)
+                           - stamping::read_node_voltage(x_end, e.to);
+            const Real q = models::NonlinearCapacitor::charge(e.params, v);
+            e.i_prev = (c1 * q + c2 * q_gamma_[qi] + c3 * e.q_prev) / h_full;
+            e.v_prev = v;
+            e.q_prev = q;
+            ++qi;
         }
     }
 
@@ -177,6 +214,7 @@ public:
 
 private:
     std::vector<Entry> entries_;
+    std::vector<Real> q_gamma_;   // TR-BDF2 stage scratch, not state
 };
 
 }  // namespace pulsim::pwl

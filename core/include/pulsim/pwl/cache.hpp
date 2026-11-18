@@ -769,11 +769,21 @@ public:
             }
             for (int i = 0; i < ns; ++i) smass.push_back(std::abs(Mss(i, i)));
             Eigen::FullPivLU<DenseMatrix> mlu(Mss);
-            if (ns > 0 && !mlu.isInvertible()) {
-                throw std::runtime_error(
-                    "compute_lti_state_space: the inductance / capacitance matrix "
-                    "of the states is singular (a coupling with |k| = 1?); use "
-                    "engine='pwl' or 'trbdf2'.");
+            if (ns > 0) {
+                // the energy weight must be positive definite, by the structural
+                // path's criterion on the unit-diagonal scaling (a pivot of
+                // sqrt(1 − k²) ≤ 1e-6 is |k| = 1 to rounding): refused by name
+                const Vector dinv = E.diagonal().cwiseAbs().cwiseSqrt().cwiseInverse();
+                const DenseMatrix En = dinv.asDiagonal() * E * dinv.asDiagonal();
+                const Eigen::LLT<DenseMatrix> ellt(En);
+                if (!dinv.allFinite() || ellt.info() != Eigen::Success
+                    || ellt.matrixL().toDenseMatrix().diagonal().minCoeff() <= Real{1e-6}) {
+                    throw std::runtime_error(
+                        "compute_lti_state_space: the coupled-inductor "
+                        "matrix is not positive definite (|k| >= 1 on a "
+                        "transformer / coupled-inductor pair): the winding "
+                        "currents are not independent states.");
+                }
             }
             // G_aa: rank-revealing. The structural path found it singular
             // (its sparse LU failed, or the equilibrated block is past the

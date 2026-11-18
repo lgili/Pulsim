@@ -6,24 +6,24 @@
 - [x] 1.5 Test (DC operating point): 10 V, `K = 0.1`, `R_a = 0.5 Ω`, `T_load = 0.2 N·m` → `i = 2 A`, `ω = 90 rad/s` within 1e-9 — preflight false positive found and fixed (DECISIONS D9)
 - [x] 1.6 Test (`trbdf2`): same case, error ≤ 2e-4 (measured 9.2e-5); energy check `∫v·i dt = ∫R i² dt + ΔE_L + ΔE_J` within 1e-6 — measured 9.19e-5; energy 4.2e-9 on `pwl` (bound 1e-8), 5.5e-6 on `trbdf2` (bound 2e-5, not 1e-6: DECISIONS D8)
 - [x] 1.7 Test: a legacy call with `Kt ≠ Ke` routed to the native path is refused with the SI explanation
-- [ ] 1.8 Optional `theta_node` through the VCCS of `add-controlled-source-set`: `θ(t) = ∫ω dt` within 1e-6 — NOT DONE: refused by name until the VCCS exists (DECISIONS D5)
+- [x] 1.8 Optional `theta_node` through the VCCS of `add-controlled-source-set`: `θ(t) = ∫ω dt` within 1e-6 — unit VCCS `{name}.th` into a 1 F capacitor `{name}.ct`; measured 2.9e-7 rad against the exact augmented solution at dt = 2 µs
 - [x] 1.9 AC check: armature admittance of the composite against the analytic `1/(R_a + sL_a + K²/(sJ + B))` at 10 frequencies within 1e-6 (after `fix-mna-sweep-correctness` if the sweep needs it) — kernel complex MNA sweep, measured 1.9e-12
 - [ ] 1.10 Conformance rows (`add-engine-conformance-matrix`): `dc_machine` × {pwl ok, trbdf2 ok, dsed refused, DC ok, AC ok} — NOT DONE: the conformance matrix does not exist yet
 
 ## 2. Induction machine (after `add-unified-device-interface`)
-- [ ] 2.1 `models/induction_machine_mna.hpp`: parameters, validation, `eval` with f and q for 3 stator rows, 2 rotor-flux rows and the speed-node torque; closed-form Jacobian
-- [ ] 2.2 C++ test: Jacobian against central differences at 100 random states (1e-7); power balance `Σ v_k i_k = R_s|i|² + R_r|i_r|² + dW/dt + T_em·ω` within 1e-9
-- [ ] 2.3 `add_induction_machine`, binding, stubs, YAML type `induction_machine`; `induction_motor` gains `model: mna | observer`
-- [ ] 2.4 Tests with the declared test machine (0.5 Ω, 2 mH, 0.4 Ω, 2 mH, 60 mH, pp = 2; 100 V rms phase, 60 Hz), speed node held by a source: locked rotor 57.88 A rms; synchronous speed 4.277 A rms and |mean torque| ≤ 0.01 N·m; slip 0.05 → 16.12 N·m and 12.29 A rms; each within 0.5 %
-- [ ] 2.5 Free acceleration against an independent SciPy integration (rtol 1e-10): 1e-4 on `trbdf2`; order ≥ 3.5 per halving on `pwl`
-- [ ] 2.6 Engine agreement `pwl` / `trbdf2` within 1e-3; inverter-fed case (PWL bridge + machine)
-- [ ] 2.7 Conformance rows: `induction_machine` × {pwl, trbdf2, dsed refused, DC held, AC}
+- [x] 2.1 `models/induction_machine_mna.hpp`: parameters, validation, `eval` with f and q for 3 stator rows, 2 rotor-flux rows and the speed-node torque; closed-form Jacobian — stamp in `pwl/nonlinear_refresh_pmsm_mna.hpp` (shared machine history, DECISIONS D11); rotor flux = two internal nodes with 1 F
+- [x] 2.2 C++ test: Jacobian against central differences at 100 random states (1e-7); power balance `Σ v_k i_k = R_s|i|² + R_r|i_r|² + dW/dt + T_em·ω` within 1e-9 — `core/tests/layer4_v3/test_induction_machine_mna.cpp`, all three stages
+- [x] 2.3 `add_induction_machine`, binding, stubs, YAML type `induction_machine`; `induction_motor` gains `model: mna | observer` — named `add_induction_machine_mna` (C++ builder + binding), YAML pinned equal to the builder
+- [x] 2.4 Tests with the declared test machine (0.5 Ω, 2 mH, 0.4 Ω, 2 mH, 60 mH, pp = 2; 100 V rms phase, 60 Hz), speed node held by a source: locked rotor 57.88 A rms; synchronous speed 4.277 A rms and |mean torque| ≤ 0.01 N·m; slip 0.05 → 16.12 N·m and 12.29 A rms; each within 0.5 %
+- [x] 2.5 Free acceleration against an independent SciPy integration (rtol 1e-10): 1e-4 on `trbdf2`; order ≥ 3.5 per halving on `pwl` — rtol 1e-12, Radau and DOP853 agree to 1e-11, numbers pinned (`_machine_reference/induction_reference.py`); `trbdf2` 1.6e-5 (rtol 1e-8; 3.4e-4 at the default rtol); `pwl` 1.60e-4, 4.01e-5, 1.00e-5 at 80/40/20 µs, ratios 3.99, 4.00 with `discontinuity_restart=True` (2.1 without: the engine's inconsistent start, same on a plain RL load)
+- [x] 2.6 Engine agreement `pwl` / `trbdf2` within 1e-3; inverter-fed case (PWL bridge + machine) — sine-fed start and a six-step bridge start (switches, edge oracle): 3.3e-4 of synchronous speed
+- [ ] 2.7 Conformance rows: `induction_machine` × {pwl, trbdf2, dsed refused, DC held, AC} — PARTIAL: pwl ok, trbdf2 ok, dsed / bdf1 / AC refused by name; DC held not done (DECISIONS D13)
 
 ## 3. PM-flux harmonics and BLDC
-- [ ] 3.1 `PmsmMna::Params` harmonic list `(h, ψ_h, φ_h)`; `λ_pm`, `dλ_pm/dθ`, `d²λ_pm/dθ²` from the series; `ψ_1` only is bit-identical to the current device
-- [ ] 3.2 `add_bldc_mna(..., k_e, flat_top_deg=120, n_harmonics=25)` and `pm_harmonics_from_waveform(theta, emf, omega)`
-- [ ] 3.3 Test: open-circuit back-EMF at constant speed against the ideal trapezoid, RMS deviation ≤ 0.5 % of the flat top at 25 harmonics (computed 0.40 %)
-- [ ] 3.4 Test: torque from `∫ Σ e_k i_k dt / (ω·t)` equals the device's `T_em` mean within 1e-6 (co-energy consistency)
+- [x] 3.1 `PmsmMna::Params` harmonic list `(h, ψ_h, φ_h)`; `λ_pm`, `dλ_pm/dθ`, `d²λ_pm/dθ²` from the series; `ψ_1` only is bit-identical to the current device
+- [x] 3.2 `add_bldc_mna(..., k_e, flat_top_deg=120, n_harmonics=25)` and `pm_harmonics_from_waveform(theta, emf, omega)` — Python (`pulsim.machines`), `omega` is the electrical speed
+- [x] 3.3 Test: open-circuit back-EMF at constant speed against the ideal trapezoid, RMS deviation ≤ 0.5 % of the flat top at 25 harmonics (computed 0.40 %)
+- [x] 3.4 Test: torque from `∫ Σ e_k i_k dt / (ω·t)` equals the device's `T_em` mean within 1e-6 (co-energy consistency) — generator into 2 Ω at held speed: mechanical power from the holding source = copper loss within 2.1e-7; `T_em` trace mean = shaft torque (test bound rel 1e-9). 3.3: RMS deviation 0.40 % of the flat top (series alone 0.395 %)
 - [ ] 3.5 DC operating point with held mechanics for `PmsmMna` (today: fails, no DC stamp): at `θ0`, `ω0 = 0`, `i = v/R_s` within 1e-9
 - [ ] 3.6 YAML types `pmsm`, `bldc`
 - [ ] 3.7 Conformance rows: `pmsm_mna[harmonics]`, `pmsm_mna[flux_map]` × {pwl, trbdf2, dsed refused, DC held, AC}

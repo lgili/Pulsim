@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <format>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -96,20 +97,32 @@ class Circuit {
 public:
     /// Snapshot `b` (a clone; `b` is not touched).
     [[nodiscard]] static Circuit from_builder(const builder::CircuitBuilder& b) {
-        return Circuit{b.clone()};
+        auto c = b.clone();
+        c.cur_scope_ = 0;          // a scope left open is the author's state,
+        c.scope_stack_.clear();    // not the circuit's
+        return Circuit{std::move(c)};
     }
 
-    [[nodiscard]] std::span<const Node> nodes() const noexcept { return d_->nodes; }
-    [[nodiscard]] std::span<const Device> devices() const noexcept { return d_->devices; }
-    [[nodiscard]] std::span<const InitialCondition> initial_conditions() const noexcept {
-        return d_->ics;
+    [[nodiscard]] std::span<const Node> nodes() const { return tables_().nodes; }
+    [[nodiscard]] std::span<const Device> devices() const { return tables_().devices; }
+    [[nodiscard]] std::span<const InitialCondition> initial_conditions() const {
+        return tables_().ics;
     }
-    [[nodiscard]] std::span<const Alias> aliases() const noexcept { return d_->aliases; }
+    [[nodiscard]] std::span<const Alias> aliases() const { return tables_().aliases; }
     [[nodiscard]] std::span<const ControlDecl> controls() const noexcept {
         return d_->lowered.controls();
     }
     [[nodiscard]] std::span<const Parameter> parameters() const noexcept {
         return d_->lowered.parameters();
+    }
+
+    /// The scope tree (group 8): scope `i > 0` is `scopes()[i - 1]`.
+    [[nodiscard]] std::span<const Scope> scopes() const noexcept {
+        return d_->lowered.scopes();
+    }
+    /// The scope a device, node or parameter named `name` belongs to.
+    [[nodiscard]] std::uint32_t scope_of(std::string_view name) const {
+        return d_->lowered.scope_of(name);
     }
 
     /// The number a field value stands for.
@@ -120,10 +133,10 @@ public:
 
     /// Topology, kinds and names (what a symbolic analysis depends on,
     /// and identity).
-    [[nodiscard]] std::uint64_t structure_hash() const noexcept { return d_->structure_hash; }
+    [[nodiscard]] std::uint64_t structure_hash() const { return tables_().structure_hash; }
     /// Structure plus every value: fields, couplings, tables, initial
     /// conditions and aliases.
-    [[nodiscard]] std::uint64_t value_hash() const noexcept { return d_->value_hash; }
+    [[nodiscard]] std::uint64_t value_hash() const { return tables_().value_hash; }
 
     /// The lowered form: today's `Graph` + `DevicePool`, read-only.
     [[nodiscard]] const builder::CircuitBuilder& lowered() const noexcept { return d_->lowered; }
@@ -197,16 +210,34 @@ public:
     [[nodiscard]] bool same_data(const Circuit& o) const noexcept { return d_ == o.d_; }
 
 private:
-    struct Data {
-        builder::CircuitBuilder lowered;
+    /// What is read off the lowered builder: filled on first use (once,
+    /// thread-safe), so a derivation (`with_value` / `with_params`, a
+    /// sweep point) pays only for its clone until someone asks.
+    struct Tables {
         std::vector<Node> nodes;
         std::vector<Device> devices;
         std::vector<InitialCondition> ics;
         std::vector<Alias> aliases;
         std::uint64_t structure_hash = 0;
         std::uint64_t value_hash = 0;
-        std::shared_ptr<pwl::SymbolicPlan> plan;
     };
+    struct Data {
+        Data(builder::CircuitBuilder&& b, std::shared_ptr<pwl::SymbolicPlan> p)
+            : lowered{std::move(b)}, plan{std::move(p)} {}
+        builder::CircuitBuilder lowered;
+        std::shared_ptr<pwl::SymbolicPlan> plan;
+        mutable std::once_flag once;
+        mutable Tables t;
+    };
+
+    [[nodiscard]] const Tables& tables_() const {
+        std::call_once(d_->once, [this] {   // a throw leaves t untouched for the retry
+            Tables t;
+            fill_tables_(*d_, t);
+            d_->t = std::move(t);
+        });
+        return d_->t;
+    }
 
     explicit Circuit(builder::CircuitBuilder&& b,
                      std::shared_ptr<pwl::SymbolicPlan> plan = nullptr)
@@ -259,14 +290,19 @@ private:
 
     static std::shared_ptr<const Data> make_data_(
         builder::CircuitBuilder&& b, std::shared_ptr<pwl::SymbolicPlan> plan) {
-        auto d = std::make_shared<Data>(Data{std::move(b), {}, {}, {}, {}, 0, 0,
-            plan ? std::move(plan) : std::make_shared<pwl::SymbolicPlan>()});
-        const auto& g = d->lowered.graph();
-        const auto& pool = d->lowered.pool();
+        auto d = std::make_shared<Data>(std::move(b),
+            plan ? std::move(plan) : std::make_shared<pwl::SymbolicPlan>());
         // Fill the graph's lazy id cache now: after construction nothing
         // writes it, so threads sharing the circuit never race on it
         // (with_ties / with_preflight add branches, which clear it).
-        (void)g.id();
+        (void)d->lowered.graph().id();
+        return d;
+    }
+
+    static void fill_tables_(const Data& dd, Tables& out) {
+        auto* d = &out;
+        const auto& g = dd.lowered.graph();
+        const auto& pool = dd.lowered.pool();
 
         Hash s;  // structure
         s.idx(g.num_nodes());
@@ -341,12 +377,25 @@ private:
                                              j->substep_frac, j->M0}) v.real(x);
                         v.word(static_cast<std::uint64_t>(j->substeps_min));
                     }
+                } else if constexpr (std::is_same_v<P, models::SwitchedDiode::Params>) {
+                    // A gated diode's mode is structure, I_H a value;
+                    // an ungated diode hashes as before.
+                    if (p.gate != models::SwitchedDiode::Gate::None) {
+                        s.word(0x6761746564ULL + static_cast<std::uint64_t>(p.gate));
+                        v.real(p.I_H);
+                    }
                 } else if constexpr (std::is_same_v<P, models::NonlinearCapacitor::Params>) {
                     v.word(static_cast<std::uint64_t>(p.law));
                     v.word(p.table ? 1u : 0u);
                     if (p.table) {
                         reals(p.table->v_knots()); reals(p.table->q_knots());
                         reals(p.table->c_knots());
+                    }
+                } else if constexpr (std::is_same_v<P, models::PmsmMna::Params>) {
+                    if (p.harmonics) {
+                        for (const auto& t : *p.harmonics) {
+                            v.real(t.h); v.real(t.psi); v.real(t.phi);
+                        }
                     }
                 }
             }, params);
@@ -363,17 +412,30 @@ private:
             s.idx(m.omega_node);
             s.idx(m.theta_node);
         }
+        for (const auto& m : pool.induction_machines()) {
+            s.idx(m.omega_node);
+            s.idx(m.rotor_node[0]);
+            s.idx(m.rotor_node[1]);
+        }
         // Which fields a parameter drives is structure; parameter values
         // are values.
-        const auto& params = d->lowered.parameters();
+        // The scope tree is structure; hashed only when there is one, so
+        // a circuit without scopes keeps its hashes.
+        if (const auto sc = dd.lowered.scopes(); !sc.empty()) {
+            s.word(0x73636f706573ULL);  // "scopes", then the count
+            s.word(sc.size());
+            for (const auto& x : sc) { s.str(x.path); s.str(x.kind); }
+        }
+        const auto& params = dd.lowered.parameters();
         for (const auto& p : params) {
             v.str(p.name); v.real(p.value); v.str(p.unit);
+            if (p.scope != 0) s.word(p.scope);   // where its expression looks names up
             if (!p.expr.empty()) { s.word(0x65787072ULL); s.str(p.name); s.str(p.expr); }
             v.word(p.lo.has_value()); v.real(p.lo.value_or(0));
             v.word(p.hi.has_value()); v.real(p.hi.value_or(0));
         }
-        auto binds = std::vector(d->lowered.param_bindings().begin(),
-                                 d->lowered.param_bindings().end());
+        auto binds = std::vector(dd.lowered.param_bindings().begin(),
+                                 dd.lowered.param_bindings().end());
         std::ranges::sort(binds, {}, [](const auto& x) {
             return std::pair{x.branch, x.field};
         });
@@ -384,14 +446,14 @@ private:
             }
         }
 
-        for (const auto& [bid, val] : d->lowered.initial_conditions()) {
+        for (const auto& [bid, val] : dd.lowered.initial_conditions()) {
             d->ics.push_back(InitialCondition{DeviceId{static_cast<std::uint32_t>(bid)}, val});
         }
         std::ranges::sort(d->ics, {}, [](const InitialCondition& ic) { return ic.device.v; });
         for (const auto& ic : d->ics) { v.word(ic.device.v); v.real(ic.value); }
         // Hashed only when present: a circuit without controls keeps
         // its hashes.
-        if (const auto& cs = d->lowered.controls(); !cs.empty()) {
+        if (const auto& cs = dd.lowered.controls(); !cs.empty()) {
             s.word(0x636f6e74726f6cULL);  // "control", then the count
             s.word(cs.size());
             for (const auto& c : cs) {
@@ -400,7 +462,7 @@ private:
         }
 
         using AK = builder::CircuitBuilder::AliasKind;
-        for (const auto& [name, t] : d->lowered.aliases()) {
+        for (const auto& [name, t] : dd.lowered.aliases()) {
             d->aliases.push_back(Alias{name, t.kind == AK::Node, t.target});
         }
         std::ranges::sort(d->aliases, {}, &Alias::name);
@@ -409,7 +471,6 @@ private:
         d->structure_hash = s.h;
         v.word(s.h);
         d->value_hash = v.h;
-        return d;
     }
 
     std::shared_ptr<const Data> d_;

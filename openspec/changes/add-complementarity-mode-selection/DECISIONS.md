@@ -708,6 +708,122 @@ choices it did not pin.
 
     → Reverse: each fix is local (the named function).
 
+34. **The dsed guard judges what the projection skips; ties the LCP leaves
+    are released; a settle mode the extraction cannot pose goes to the
+    LCP (2026-11-18, exact-engine session 6).** Question: why did three
+    runs come out wrong or refused with the guard on? → Options taken,
+    each in `dsed/scheduler.hpp`:
+    - **Held-state judge.** When the settled mode is consistent from the
+      projected state, it is judged again from the held state (constraint
+      re-initialised, no slow projection). The forward converter kept
+      D_rect ON at gate-off: consistent at t+ and after the projection,
+      which drained L_o (2.7 A) through 2 MΩ of g_off in 23 ps. D_fw broke
+      its law only inside that skipped transient.
+    - **Impulsive-record trigger.** If the settled mode needs a cut-set or
+      capacitor-loop re-initialisation, the LCP confirms or repairs: the
+      value law cannot see a diode's bias there. A g_off = 0 freewheel
+      diode stayed OFF and the switch cut the inductor (ΔW = ½·L·i²) at
+      every gate-off.
+    - **Re-settle after the LCP's projection.** Any diode whose value law
+      the projection reverses beyond the zero band is flipped, then the
+      state is projected again (at most four rounds; ties untouched). The
+      repaired forward converter left D_rect forward-biased by the
+      freewheel drop (0.0137 V) for the whole off interval. A first
+      version re-ran the settle cascade and cycled 64 rounds on a bridge
+      at rest (rounding fuzz, 14 of 21 runs). A flip needs a violation
+      on the circuit's scale, 1e-6 of its sources and drops (a held node can sit at MV behind g_off). It
+      is then confirmed on the OFF-mode trajectory, as the settle confirms
+      one. At a zero crossing the LCP's companion decides. The forward
+      converter's rectifier is off by 0.0137 V. With the zero band, and
+      then with the LCP's own band (1e-9·vscale), a voltage doubler's D2
+      chattered 32 times: the LCP put it ON at −1.05e-8 V and at
+      −2.9e-8 V, and the flip took it OFF again. That band applies to ON
+      diodes only. An OFF diode past its threshold sits on its predicate's
+      event side, so no event would ever turn it ON; it keeps the floored
+      zero band. With the wide band on both, a tied bridge (V_f = 0.7,
+      1 MΩ tie) was left with D1 OFF 3e-7 V above V_f after the guard's
+      second repair, and D1 stayed OFF while forward-biased by 1.1 V
+      (rounding fuzz: 21 of 21 runs refused by the Python check;
+      `test_a_tied_bridge_with_a_forward_drop_conducts_after_the_guard_repairs`).
+    - **`release_band_ties_`.** A diode the LCP leaves OFF inside the
+      zero band is decided by the settle's look-ahead (`zero_band_on_`).
+      The gated bridge from rest had a pin holding D4 ON and left D1 OFF
+      with its signal rising from exactly 0. The predicate starts on its
+      event side and never fires, so D1 was OFF and forward-biased by
+      0.314 V (the open item in #33). Its band is at least 1e-12 of
+      the circuit's voltage scale (sources included). From rest every
+      node is at 0 V, so `zero_band_tol_` is 0, and a rounding-level
+      look-ahead turned D2 of a tied bridge ON (rounding fuzz, 11 of 21
+      perturbed runs).
+    - **Extraction failure in the settle.** With the guard on, it is
+      arbitrated like a settle cap. A g_off = 0 series diode behind the
+      freewheel turned OFF after the cut-set and left its node with no
+      conductance at all (G_aa singular, a RuntimeError).
+    - **The Python check.** `check_diode_modes` uses the engine's zero
+      band (1e-12 of the largest node voltage or drop), not an absolute
+      1e-12 V. The phase-shift full bridge starts at 5e-15 V across an
+      OFF diode. A g_off = 0 diode's OFF voltage is read from its nodes
+      (it was 0/0).
+
+    Tests: `test_exact_guard_transient.py`. Moved: on the bridge behind an
+    ideal transformer (`test_mode_passivity.py`), D2 is ON from the 20 ms
+    repair carrying down to −6.4e-8 A (−6.4e-11 V, inside the 1e-10 V zero
+    band); the end bus moved 31.876241227679 → 31.876241227676 V (pwl at
+    1e-7: 31.876241231725). The test's absolute −1e-9 A bound became the
+    zero band.
+
+    **Fresh-context review (opus, medium, read-only) of this diff.**
+    Fixed:
+    - The re-settle now keeps the records of the final mode only,
+      re-initialised once from the held state (it double-counted ΔW).
+    - A fifth flip refuses (`consistent_mode`) instead of continuing
+      unchecked.
+    - The re-settle uses the same floored band as the release.
+    - The extraction catch matches "G_aa is singular" only.
+    - The held judge runs only on a judged-consistent event (`c == 1`),
+      so `c < 0` stays unchecked.
+    - The `past` test in `next_time_event_` keeps its 1e-12 s floor; only
+      the run-end tie is ulps.
+    - The joint island solve needs rcond > 1e3·ε.
+    - The Python check uses a per-sample band and survives missing
+      states.
+    - A run-end test with t_end built as an accumulated sum.
+
+    Left:
+    - An extraction failure in a mode chosen by the LCP still escapes as
+      a RuntimeError, not a named refusal (unchanged from before).
+    - Releases after the LCP have no counter in the report.
+    - Found after the review: the judge's 1e4·h_e probe (2e-5 s at
+      h_e = 2e-9 s) reaches past the mode's own next crossing. On the tied
+      bridge it calls D4's regular turn-on 6.9 µs later a violation, and
+      the guard repairs 4 events per run that need none. The result is
+      right (the bus matches across selections); the cost is LCP calls.
+
+    **Final review (opus, medium, read-only).** Fixed: the Python check
+    read a reduced state as node voltages (now only with
+    `has_full_states`); the phase-shift full bridge test runs 2e-5 s (the
+    breach was at t = 0); a test indexed D1 as switch 0; the gate row
+    names the bit-identity commands; the survey row points to the recount.
+    Left, with reasons:
+    - The re-settle's ON band (1e-6·scale, a voltage) lets an ON diode
+      keep a reverse current up to g_on·1e-6·scale (0.1 A at 1e3 S, 100 V)
+      when the look-ahead does not confirm the flip. The doubler needed
+      more than the LCP's 1e-9·vscale; a current-based band was not
+      measured. The Python check (rel 1e-3 of the peak current) refuses
+      such a run; a C++ caller has no such net.
+    - The run-end tie is ulps only. An edge a few ulps more than 8ε·t_end
+      before the end takes a sliver step, and the last sample reads the
+      new gate state. Continuous states move by rounding only.
+    - An impulsive-record LCP call has no counter of its own (it is counted
+      as a repair, with no diode named).
+    - `release_band_ties_` runs after LCP decisions only. When the LCP
+      confirms the settle, the settle's own `zero_band_on_` has already
+      decided its band ties.
+    - Within one re-settle pass later diodes are read under the mask from
+      before the pass (Jacobi); the next pass sees the flips.
+
+    → Reverse: each block is local to its function.
+
 ## Slice 4: the fixed engine (2026-11-13 … 2026-11-17)
 
 Numbered F1, F2, … so they do not collide with #22–#33 of

@@ -206,11 +206,11 @@ An offset-plus-slope conduction model `V_f0*|i| + r_on*i^2` comes from
 `conduction_specs`. `p.device_thermal_summary` adds a Foster network per
 device (`p.FosterStage(R_th_K_per_W, tau_s)`). Both cover the WHOLE
 record unless you pass `t_from=` / `t_to=` (seconds; bounds interpolated
-on any grid, edges counted when they start inside): on the bridge of
-trap 13 (`t_end = 0.1 s`, `V_f0 = 0.7`, `r_on = 0.02`) the run's diode
-conduction loss is 17x its 80-100 ms value. `T_j_trace` starts at
-`T_ambient_C` at t = 0 and settles only after several of the largest
-`tau`; `T_j_avg` / `T_j_peak` cover the window.
+on any grid, edges counted when they start inside; trap 13's whole run
+reads 17x the 80-100 ms diode loss). `T_j_trace` starts at `T_ambient_C`
+and settles after a few of the largest `tau`.
+In-run (`pwl`): `b.set_device_losses("Q1", junction="tj", E_on=, E_off=)`
+heats `tj` (a capacitor on it) per edge; `Tj=125` reads fixed.
 
 ```python
 b = p.CircuitBuilder()
@@ -407,7 +407,7 @@ b.add_diode(name, anode, cathode, g_on=None, g_off=None, V_th=0.0, V_f=0.0, ...)
 b.add_shockley_diode(name, anode, cathode, I_S=1e-12, n=1.0, V_T=0.025852, G_min=1e-12, BV=0.0)
 b.add_switch(name, n_pos, n_neg, g_on, g_off)
 b.add_mosfet(name, drain, source, R_on=0.001, R_off=1000000000.0, body_diode=True, V_F=0.7)
-b.add_igbt(name, collector, emitter, R_on=0.01, R_off=1000000000.0)
+b.add_igbt(name, collector, emitter, R_on=0.01, R_off=1000000000.0, ...)
 b.add_transformer(name, p_from, p_to, s_from, s_to, L_p, L_s, k=1.0)
 b.node_id_of(name)
 b.switch_index_of(name)
@@ -636,11 +636,11 @@ names but change results:
 | `YamlParser(...).load(path)` | `p.load_yaml_file(path)` / `p.load_yaml_string(text)` |
 | `simulate` implied the fixed-step engine | `engine='auto'`: `dt` gives a fixed step; no `dt` usually gives TR-BDF2 |
 | `add_mosfet` was one switch bit | it is two (`<name>_body`); use `b.switch_index_of` |
-| an IGBT conducted in reverse | `b.add_igbt_level1` blocks it (`with_fwd=True` adds the freewheel diode). The PWL `b.add_igbt` is still a bidirectional switch: gated on, -10 A gives -0.1 V |
+| an IGBT conducted in reverse | `b.add_igbt(..., V_ce0=0.9, reverse_blocking=True)` blocks it; unset it is the old two-way switch (FutureWarning). SCR: `b.add_thyristor` |
 | `add_three_phase_vsi` built six bare switches | it adds six freewheel diodes (`with_freewheel_diodes=True`) |
 | `p.add_hysteretic_inductor` + `p.make_hysteretic_inductor_observer` | the inductor is solved inside Newton; drop the observer, whose factory now raises |
-| `p.add_pmsm` (observer, one average L) | still there; `b.add_pmsm_mna` stamps the machine with full saliency |
-| `p.add_dc_motor` (observer) | deprecated; `b.add_dc_machine` solves it in the matrix |
+| `p.add_pmsm`/`add_bldc`/`add_induction_motor` (observers) | native: `b.add_pmsm_mna`, `b.add_bldc_mna`, `b.add_induction_machine_mna` |
+| `p.add_dc_motor` (observer) | deprecated; `b.add_dc_machine` |
 | parts in `pulsim.lib` resolved by part number | they are synthetic; pass `allow_synthetic=True` to use them |
 
 ## 8. Paste this into your project's assistant config

@@ -242,8 +242,15 @@ def test_snapshot_without_stamped_mask_flags_row_zero():
     b, pwm, T = _buck()
     r0 = _run(b, 12 * T, "pwl", dt=T / 200, switch_fn=pwm)
     snap = r0.final_snapshot
-    st = snap.__getstate__()
-    assert len(st) == 12   # 11 + restart_steps_left (add-discontinuity-restart-rule)
+    # The Pulsim 2.0 pickle tuple (12 fields: 11 + restart_steps_left);
+    # the current pickle is version 3 (add-unified-device-interface).
+    st = (snap.t, list(snap.x), list(snap.history), list(snap.diode_on),
+          list(snap.saturable_history), list(snap.coss_history),
+          list(snap.lauritzen_history), list(snap.igbt_tail_history),
+          list(snap.pmsm_history), snap.valid, list(snap.stamped_mask),
+          int(snap.restart_steps_left))
+    # version 3: tag, version, 9 fields + the controllers-state marker (G26)
+    assert len(snap.__getstate__()) == 13
     again = pickle.loads(pickle.dumps(snap))
     assert list(again.stamped_mask) == list(snap.stamped_mask)
     pre = type(snap).__new__(type(snap))   # an 11-field pickle still loads

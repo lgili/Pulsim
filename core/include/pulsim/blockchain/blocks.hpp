@@ -328,23 +328,8 @@ struct SpaceVectorModulator {
     };
 
     [[nodiscard]] DutyTriple update(Real v_alpha, Real v_beta) const noexcept {
-        // Inverse Clarke → 3-phase voltages, then center modulation.
-        const Real va_ref = v_alpha;
-        const Real vb_ref = -Real{0.5} * v_alpha
-                              + Real{0.8660254037844386} * v_beta;
-        const Real vc_ref = -Real{0.5} * v_alpha
-                              - Real{0.8660254037844386} * v_beta;
-        const Real v_max = std::max({va_ref, vb_ref, vc_ref});
-        const Real v_min = std::min({va_ref, vb_ref, vc_ref});
-        const Real v_cm = -(v_max + v_min) * Real{0.5};
-        const Real inv_dc = (v_dc > Real{0}) ? Real{1} / v_dc : Real{0};
         DutyTriple d;
-        d.da = py_exact::clamp(Real{0}, Real{1},
-                            (va_ref + v_cm) * inv_dc + Real{0.5});
-        d.db = py_exact::clamp(Real{0}, Real{1},
-                            (vb_ref + v_cm) * inv_dc + Real{0.5});
-        d.dc = py_exact::clamp(Real{0}, Real{1},
-                            (vc_ref + v_cm) * inv_dc + Real{0.5});
+        pl_svm(v_dc, v_alpha, v_beta, &d.da, &d.db, &d.dc);   // the one law
         return d;
     }
 };
@@ -361,9 +346,7 @@ struct ClarkeTransform {
 
     [[nodiscard]] Out update(Real a, Real b, Real c) const noexcept {
         Out o;
-        o.alpha = (Real{2} * a - b - c) / Real{3};
-        o.beta  = (b - c) / Real{1.7320508075688772};   // (b - c) / √3
-        o.zero  = (a + b + c) / Real{3};
+        pl_clarke(a, b, c, &o.alpha, &o.beta, &o.zero);   // the one law
         return o;
     }
 };
@@ -377,9 +360,7 @@ struct InverseClarkeTransform {
     [[nodiscard]] Out update(Real alpha, Real beta,
                                 Real zero = Real{0}) const noexcept {
         Out o;
-        o.a = alpha + zero;
-        o.b = -Real{0.5} * alpha + Real{0.8660254037844386} * beta + zero;
-        o.c = -Real{0.5} * alpha - Real{0.8660254037844386} * beta + zero;
+        pl_inverse_clarke(alpha, beta, zero, &o.a, &o.b, &o.c);   // the one law
         return o;
     }
 };
