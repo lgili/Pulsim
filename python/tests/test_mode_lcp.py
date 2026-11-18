@@ -358,8 +358,9 @@ def _paralleled_bank(n):
 def test_paralleled_bridges_meet_a_mode_refused_for_inaccurate_eigenpairs(n):
     """add-exact-propagator-strategy D2 (review of slice 5): identical paralleled bridges reach
     a mode whose eigenpairs carry a propagator defect far above 1e-10 (3.3e-7 with three, at a
-    backward error of 3.8 u: the cluster is ill-conditioned, no better pairs exist in this
-    matrix); the exact engine refuses it by name instead of stepping it."""
+    backward error of 3.8 u: the eigenpair method cannot resolve this degenerate cluster;
+    refine_pairs keeps no cluster basis with kappa2 > 1e4); the exact engine refuses it by name
+    instead of stepping it."""
     # The defect of a degenerate cluster depends on the basis the eigensolver picks inside
     # it (Eigen versions may differ): either the mode is refused by that name, or every
     # visited mode met the 1e-10 bar -- never a step on pairs that missed it.

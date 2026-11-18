@@ -969,8 +969,17 @@ public:
             for (int i = 0; i < W.rows(); ++i)
                 if (d > 0 && W.row(i).cwiseAbs().maxCoeff() > Real{1e-9})
                     crow.push_back(arows[static_cast<Size>(i)]);
+            // (a branch-form switch first: impulse_losses books the record to
+            // devices[0], and a source in the same loop is not the cause)
+            auto is_switch_row = [&](Index r) {
+                for (Index b = 0; b < graph_.num_branches(); ++b)
+                    if (pool_.is_registered(b) && pool_.is_branch_form(b)
+                        && pool_.branch_var_id_for_switch(b, graph_) == r) return true;
+                return false;
+            };
             const bool any_branch = std::any_of(crow.begin(), crow.end(),
                 [&](Index r) { return r >= graph_.num_nodes(); });
+            std::stable_partition(crow.begin(), crow.end(), is_switch_row);
             for (const Index r : crow)
                 if (!any_branch || r >= graph_.num_nodes())
                     out.constraint_devices.push_back(record_label_(r));

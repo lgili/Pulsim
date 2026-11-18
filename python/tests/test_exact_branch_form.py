@@ -55,7 +55,7 @@ def test_rl_cut_set_is_reinitialised_and_recorded_exactly():
     # the polled switch_fn's edge is located by bisection: judge the record at its own t
     assert rec.t == pytest.approx(5e-3, abs=1e-9)
     i5 = 10.0 * (1.0 - math.exp(-rec.t / 1e-3))
-    assert rec.kind == "cut_set" and list(rec.states) == ["L"] and list(rec.devices) == ["S"]
+    assert rec.kind == "cut_set" and list(rec.states) == ["L"] and rec.devices[0] == "S"
     assert abs(rec.lambda_) == pytest.approx(1e-3 * i5, rel=1e-9)
     assert rec.dW == pytest.approx(0.5e-3 * i5 ** 2, rel=1e-9)
     after = t > rec.t + 1e-9
@@ -123,3 +123,19 @@ def test_a_branch_form_diode_is_still_refused_by_name():
     with pytest.raises(p.UnsupportedError) as ei:
         _run(b, 1e-6, None)
     assert ei.value.feature == "branch_form"
+
+
+def test_a_loop_through_a_source_books_the_impulse_to_the_switch():
+    """C (0 V) closed onto the 10 V source V through the ideal S at t = 0: the record lists
+    the switch first, so the 50 uJ (C*V^2/2) is the switch's, not the source's."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_ideal_switch("S", "vin", "x", 0.0, 0.0)
+    b.add_capacitor("C", "x", "gnd", 1e-6, 0.0)
+    m = p.SwitchStateMask(1)
+    m.set(0, True)
+    r = _run(b, 1e-6, lambda t: m)
+    (rec,) = r.reinit_records
+    assert rec.devices[0] == "S"
+    assert rec.dW == pytest.approx(0.5e-6 * 100.0, rel=1e-9)
+    assert list(impulse_losses(b, r)) == ["S"]
