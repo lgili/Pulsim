@@ -429,6 +429,6 @@ def test_a_shipped_example_in_a_subsystem_is_the_example(path):
     lc = p.load_yaml_file(str(path))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        _compare_wrapped(path.read_text(),
+        _compare_wrapped(path.read_text(encoding="utf-8"),
                          run={"t_end": lc.t_start + 50 * lc.dt, "dt": lc.dt,
                               "engine": "pwl"})

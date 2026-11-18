@@ -114,7 +114,13 @@ jobs:
           if [ "${{ matrix.sanitizers }}" = "ON" ]; then
             # libc++ on Linux can report alloc/dealloc mismatch false positives
             # for certain std::exception message paths under ASan.
-            export ASAN_OPTIONS="alloc_dealloc_mismatch=0"
+            # yaml-cpp is built without -fsanitize (the flags go to Pulsim's
+            # targets only), so a std::vector grown inside it carries no
+            # container annotations: ASan then reports container-overflow on
+            # a write within capacity (YAML::Node::operator[] after
+            # YAML::Clone). The documented remedy for partly instrumented
+            # code is detect_container_overflow=0.
+            export ASAN_OPTIONS="alloc_dealloc_mismatch=0:detect_container_overflow=0"
             ctest --output-on-failure --timeout 600
           else
             ctest --output-on-failure --timeout 120
