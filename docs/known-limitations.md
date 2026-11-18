@@ -151,6 +151,15 @@ event where the signal jumps.
 | A device whose power no loss model covers (Lauritzen diode, level-1 MOSFET/IGBT, controlled sources) refuses the efficiency. | Buck with a Lauritzen diode: efficiency would read 0.99989 without the diode's 1.36 W of 28.4 W; it is `refused` (`feature="losses"`). | Evaluate without `loads=` for the other KPIs, or use the PWL diode / switch. |
 | `method="transient"` settles to the engine's own orbit. | DCM buck on `trbdf2`: estimated distance 1.4e-10, true error 2.2e-5 (the engine's accuracy). A PWM voltage source on `trbdf2` never settles to 1e-6 (period noise 2.7e-4). | `method="pss"` (exact stepper), or a switch with a schedule instead of a PWM source. |
 
+## Event losses in the transient (`set_device_losses`)
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| Only `engine="pwl"` reads loss tables inside the run; `trbdf2`, `dsed`, `bdf1` and `auto` without `dt=` (with `dt=` it routes to `pwl` and honours the port) refuse a circuit with a loss port by name (`UnsupportedError`, feature `device_losses`, the device). | Conformance cell `test_device_losses_cell`. The variable-step hook waits for the unified event queue (task 3.1). | `engine="pwl"`, or the post-hoc `device_loss_summary` / the periodic-orbit evaluator on the other engines. |
+| The event energy is not drawn from the circuit: the PWL switch is ideal, the table energy only heats the junction. | By design, as in PLECS and PSIM. | Model the transition (`add_power_mosfet`) when the electrical side must see it. |
+| `T_j` does not feed back into the device (`V_f`, `g_on` stay fixed). | Task 4.1 (optional) not done. | Re-run with `V_f` / `g_on` at the settled `T_j`. |
+| A resumed run (`resume_from=`) drops the heat of the step in flight, and a loss port is not part of the circuit's IR or content hash. | One step's heat at the resume point. | Run the thermal transient in one piece. |
+
 ## Devices
 
 | Limitation | Measured | Workaround |

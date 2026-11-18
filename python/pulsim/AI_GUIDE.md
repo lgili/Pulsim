@@ -206,11 +206,11 @@ An offset-plus-slope conduction model `V_f0*|i| + r_on*i^2` comes from
 `conduction_specs`. `p.device_thermal_summary` adds a Foster network per
 device (`p.FosterStage(R_th_K_per_W, tau_s)`). Both cover the WHOLE
 record unless you pass `t_from=` / `t_to=` (seconds; bounds interpolated
-on any grid, edges counted when they start inside): on the bridge of
-trap 13 (`t_end = 0.1 s`, `V_f0 = 0.7`, `r_on = 0.02`) the run's diode
-conduction loss is 17x its 80-100 ms value. `T_j_trace` starts at
-`T_ambient_C` at t = 0 and settles only after several of the largest
-`tau`; `T_j_avg` / `T_j_peak` cover the window.
+on any grid, edges counted when they start inside; trap 13's whole run
+reads 17x the 80-100 ms diode loss). `T_j_trace` starts at `T_ambient_C`
+and settles after a few of the largest `tau`.
+In-run (`pwl`): `b.set_device_losses("Q1", junction="tj", E_on=, E_off=)`
+heats `tj` (a capacitor on it) per edge; `Tj=125` reads fixed.
 
 ```python
 b = p.CircuitBuilder()

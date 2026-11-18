@@ -39,6 +39,7 @@
 #include "pulsim/models/voltage_source.hpp"
 #include "pulsim/numeric/dictionary.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/topology/graph.hpp"
 
 #include <algorithm>
@@ -942,6 +943,23 @@ public:
         }
     }
 
+    // add-in-kernel-event-losses: loss ports (CircuitBuilder::
+    // set_device_losses validates them; a run resolves the names).
+    /// Add or replace the loss port of `spec.device`.
+    void set_device_losses(thermal::DeviceLossSpec spec) {
+        for (auto& s : device_losses_) {
+            if (s.device == spec.device) {
+                s = std::move(spec);
+                return;
+            }
+        }
+        device_losses_.push_back(std::move(spec));
+    }
+    [[nodiscard]] const std::vector<thermal::DeviceLossSpec>&
+    device_losses() const noexcept {
+        return device_losses_;
+    }
+
     [[nodiscard]] bool is_branch_form(Index branch_id) const noexcept {
         return branch_form_.contains(branch_id);
     }
@@ -1325,6 +1343,7 @@ private:
     };
     numeric::Dictionary<Index, BranchForm> branch_form_;
     Size num_branch_switches_ = 0;
+    std::vector<thermal::DeviceLossSpec> device_losses_;
 
     // Diode branches in insertion order. Layer 5 V2's
     // DiodeEventState iterates this list to build per-diode

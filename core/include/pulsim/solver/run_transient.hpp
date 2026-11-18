@@ -53,6 +53,7 @@
 #include "pulsim/pwl/nonlinear_refresh_nonlinear_capacitor.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/saturable_inductor_history.hpp"
+#include "pulsim/solver/loss_tracker.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/unsupported.hpp"
@@ -1168,6 +1169,11 @@ inline SimulationResult run_transient(
     // compares unequal to every time: off.
     Real src_end_at = std::numeric_limits<Real>::quiet_NaN();
     Real src_end_read = Real{0};
+    // add-in-kernel-event-losses: the loss ports (none: no tracker, and
+    // nothing below changes a bit of the run).
+    std::optional<LossTracker> loss_tracker;
+    if (!pool.device_losses().empty()) loss_tracker.emplace(graph, pool, "pwl");
+    LossTracker* const lt = loss_tracker ? &*loss_tracker : nullptr;
     // `backward_euler`: a restart stage (no stored derivative), the
     // BE-like solve of size for_dt/2 on the factor of for_dt.
     auto accumulate_b_extra = [&](Real at_t, Real for_dt,
@@ -1192,6 +1198,7 @@ inline SimulationResult run_transient(
                                                       be_iwave, left_by);
             b_extra += be_iwave;
         }
+        if (lt) lt->inject(b_extra);   // heat owed for this step
     };
 
     // v2.0 Phase 2: a run that dies part-way keeps what it computed.
@@ -1244,6 +1251,7 @@ inline SimulationResult run_transient(
         if (step_observer) {
             step_observer(opts.t_start, x);
         }
+        if (lt) lt->begin(x, stamped_mask);
 
         // ---- discontinuity restart (add-discontinuity-restart-rule) --
         // The next step restarts: the first step of a run that does
@@ -1336,6 +1344,8 @@ inline SimulationResult run_transient(
             t_reached = t;
             const Real t_prev = opts.t_start +
                                  static_cast<Real>(k - 1) * opts.dt;
+            // The heat the previous step queued, as this step's power.
+            if (lt) lt->advance(opts.dt);
 
             // Snapshot the state at t_prev for sub-step
             // commutation timing (Layer 5 V2.2) and state
@@ -2531,6 +2541,9 @@ inline SimulationResult run_transient(
             if (restart) {
                 ++result.n_restart_steps;
             }
+            // add-in-kernel-event-losses: the step is accepted; read its
+            // commutations and conduction energy (reading rule).
+            if (lt) lt->accept(t_prev, t, x, stamped_mask);
 
             if (diag) {
                 const bool src_jump = (has_pwm || has_pulse || has_iwave) &&
@@ -2668,6 +2681,14 @@ inline SimulationResult run_transient(
         // No dynamic devices → cache.solve gives the DC operating
         // point for the requested switch state. Diode iteration
         // still applies.
+        if (lt) {
+            throw UnsupportedError(
+                "pwl", "device_losses", pool.device_losses().front().device, "",
+                "device losses: the circuit has no capacitor or inductor, so "
+                "it runs on the static path, which reads no commutations (a "
+                "record-only port included); give it its dynamic devices or "
+                "the thermal network.");
+        }
         for (Size k = 0; k < n_steps; ++k) {
             const Real t = opts.t_start +
                             static_cast<Real>(k) * opts.dt;
@@ -2928,6 +2949,7 @@ inline SimulationResult run_transient(
         throw;                       // already carries its payload
     }
     catch (const pwl::NewtonRoundoffBudgetExceeded& e) {
+        if (lt) lt->write(result);
         throw SimulationAborted(e.what(), std::move(result), t_reached,
                                 /*roundoff_budget=*/true);
     }
@@ -2937,6 +2959,7 @@ inline SimulationResult run_transient(
         // callback's exception is not, and re-labelling one as
         // SimulationAborted would destroy its type and traceback for
         // the sake of attaching a partial trace it never asked for.
+        if (lt) lt->write(result);
         throw SimulationAborted(e.what(), std::move(result),
                                  t_reached);
     }
@@ -2956,6 +2979,7 @@ inline SimulationResult run_transient(
         stamped_known ? mask_bits(stamped_mask) : std::vector<bool>{};
     result.final_snapshot.valid = true;
     result.newton = newton_ws.take_counters();
+    if (lt) lt->write(result);
 
     return result;
 }

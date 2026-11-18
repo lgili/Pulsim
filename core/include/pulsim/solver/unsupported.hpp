@@ -86,10 +86,29 @@ inline void require_branch_form_supported(const topology::Graph& graph,
     }
 }
 
+/// add-in-kernel-event-losses: the event-loss hook is in engine='pwl'
+/// only (solver/loss_tracker.hpp); every other engine refuses a circuit
+/// with a loss port rather than run with the junction temperature held
+/// constant. One line at each engine entry.
+inline void refuse_device_losses(const pwl::DevicePool& pool,
+                                 std::string_view engine) {
+    if (pool.device_losses().empty()) return;
+    const auto& s = pool.device_losses().front();
+    throw UnsupportedError(
+        std::string(engine), "device_losses", s.device, "",
+        std::format(
+            "engine '{}' cannot honour the loss port of '{}' "
+            "(set_device_losses): the commutation energy and the junction "
+            "temperature are read inside the time loop of engine='pwl' "
+            "only. Use engine='pwl', or post-process with "
+            "device_loss_summary.", engine, s.device));
+}
+
 /// Throw `UnsupportedError` for the first branch engine `e` cannot run.
 inline void require_supported(const topology::Graph& graph,
                               const pwl::DevicePool& pool, pwl::Engine e) {
     require_branch_form_supported(graph, pool, e);
+    if (e != pwl::Engine::FixedTrap) refuse_device_losses(pool, pwl::engine_name(e));
     const auto b = find_unsupported(graph, pool, e);
     if (!b) return;
     const auto kind = pwl::stored_kind_name(pool.kind_of(*b));

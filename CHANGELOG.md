@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Optimisation slice 7: event losses inside the transient (`pwl`)
+
+* **Added** `CircuitBuilder.set_device_losses(device, junction= | Tj=,
+  heat_node=, E_on=, E_off=, V_on=, conduction=)`: the fixed-step engine
+  reads the loss tables at every commutation by the reading rule
+  (turn-on `v` before / `i` after, turn-off the reverse) and deposits the
+  heat into a thermal node of the circuit, closing the electro-thermal
+  loop inside one run. `res.loss_events(device)`,
+  `res.device_energy(device)`, `res.heat_injected` / `heat_pending`.
+  YAML `losses:` block; `Part.attach_losses` builds a part's thermal
+  chain and hands its tables over unreduced. Other engines refuse a loss
+  port by name (`UnsupportedError`, feature `device_losses`).
+* **Changed** the periodic-orbit route (`_period_kpis.commutations`)
+  calls the kernel's reading rule, so both routes share one function.
+* **Fixed** an `Evaluator` whose `kpis=` or `constraints=` were changed
+  after its first batch ran the cached kernel plan with the old ones;
+  it is now refused by name.
+* **Fixed** `Evaluator(options=)` was silently dropped on the pss/dsed
+  route, and a keyword simulate() only warned it ignores (`rtol` on
+  `pwl`, `integrator` on `trbdf2`) was dropped on the others; both are
+  now refused by name (`refusal` feature `options`).
+
 ### Integration batch 11: circuit IR YAML, TR-BDF2 ideal switch, pwl complementarity, exact step 3, control graph G23, optimisation slice 6 merged
 
 * **Fixed** `make_combined_switch_fn` of a control-graph gate whose loop

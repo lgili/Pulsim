@@ -239,6 +239,120 @@ inline void read_table_file(const std::string& path, const std::string& who,
 }
 
 /// Parse a single device entry; dispatches by `type`.
+/// add-in-kernel-event-losses 3.5: a `losses:` block on a switch-class
+/// device. Strict keys; tables as nested lists:
+///   e_on / e_off: {v: [...], i: [...], tj: [...], energy: [[[...]]]}
+///   v_on:         {i: [...], tj: [...], v: [[...]]}
+inline void load_losses(builder::CircuitBuilder& b, const YAML::Node& dev,
+                        std::size_t idx, const std::string& type,
+                        const std::string& name) {
+    const std::string who = device_label(dev, idx, type);
+    if (type != "switch" && type != "diode" && type != "mosfet" &&
+        type != "mosfet_with_body_diode" && type != "igbt") {
+        throw std::runtime_error(std::format(
+            "yaml::load: device {}: a losses: block is for switch, diode, "
+            "mosfet, mosfet_with_body_diode and igbt", who));
+    }
+    const YAML::Node l = dev["losses"];
+    if (!l.IsMap()) {
+        throw std::runtime_error(std::format(
+            "yaml::load: device {}: losses: must be a mapping", who));
+    }
+    for (const auto& kv : l) {
+        const std::string key = kv.first.as<std::string>();
+        if (key != "junction" && key != "Tj" && key != "heat_node" &&
+            key != "e_on" && key != "e_off" && key != "v_on" &&
+            key != "conduction") {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: unknown key '{}' in losses (accepted: "
+                "junction, Tj, heat_node, e_on, e_off, v_on, conduction)",
+                who, key));
+        }
+    }
+    // a table's own keys are strict too: a misspelt axis is not "absent"
+    auto keys = [&](const YAML::Node& t, const char* table,
+                    std::initializer_list<std::string_view> ok) {
+        if (!t.IsMap()) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: losses.{} must be a mapping", who,
+                table));
+        }
+        for (const auto& kv : t) {
+            const std::string k = kv.first.as<std::string>();
+            if (std::find(ok.begin(), ok.end(), k) == ok.end()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: device {}: unknown key '{}' in losses.{}",
+                    who, k, table));
+            }
+        }
+    };
+    auto list = [&](const YAML::Node& t, const char* table, const char* f) {
+        if (!t[f] || !t[f].IsSequence()) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: losses.{} needs '{}' as a list", who,
+                table, f));
+        }
+        return t[f];
+    };
+    auto flat = [](const YAML::Node& n, std::vector<Real>& out, auto& self) -> void {
+        if (n.IsSequence()) {
+            for (const auto& c : n) self(c, out, self);
+        } else {
+            out.push_back(n.as<Real>());
+        }
+    };
+    auto e_table = [&](const char* key) -> std::shared_ptr<const thermal::LossTable3D> {
+        if (!l[key]) return nullptr;
+        const YAML::Node t = l[key];
+        keys(t, key, {"v", "i", "tj", "energy"});
+        std::vector<Real> e;
+        flat(list(t, key, "energy"), e, flat);
+        try {
+            return std::make_shared<const thermal::LossTable3D>(
+                list(t, key, "v").as<std::vector<Real>>(),
+                list(t, key, "i").as<std::vector<Real>>(),
+                list(t, key, "tj").as<std::vector<Real>>(), std::move(e));
+        } catch (const std::invalid_argument& ex) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: losses.{}: {}", who, key, ex.what()));
+        }
+    };
+    thermal::DeviceLossSpec s;
+    s.device = name;
+    s.junction = string_or(l, "junction", "");
+    s.heat_node = string_or(l, "heat_node", "");
+    s.tj = l["Tj"] ? l["Tj"].as<Real>() : std::nan("");
+    s.e_on = e_table("e_on");
+    s.e_off = e_table("e_off");
+    if (l["v_on"]) {
+        const YAML::Node t = l["v_on"];
+        keys(t, "v_on", {"i", "tj", "v"});
+        std::vector<Real> v;
+        flat(list(t, "v_on", "v"), v, flat);
+        try {
+            s.v_on = std::make_shared<const thermal::ConductionTable>(
+                list(t, "v_on", "i").as<std::vector<Real>>(),
+                list(t, "v_on", "tj").as<std::vector<Real>>(), std::move(v));
+        } catch (const std::invalid_argument& ex) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: losses.v_on: {}", who, ex.what()));
+        }
+    }
+    const std::string cond = string_or(l, "conduction", "electrical");
+    if (cond != "electrical" && cond != "table") {
+        throw std::runtime_error(std::format(
+            "yaml::load: device {}: losses.conduction must be electrical or "
+            "table, not '{}'", who, cond));
+    }
+    s.conduction = cond == "table" ? thermal::ConductionHeat::Table
+                                   : thermal::ConductionHeat::Electrical;
+    try {
+        b.set_device_losses(std::move(s));
+    } catch (const std::invalid_argument& ex) {
+        throw std::runtime_error(std::format("yaml::load: {}", ex.what()));
+    }
+}
+
 inline void load_device(
     builder::CircuitBuilder& b, const YAML::Node& dev,
     std::size_t idx) {
@@ -917,6 +1031,7 @@ inline void load_device(
             "ideal_transformer, saturable_transformer, induction_motor, "
             "dc_machine");
     }
+    if (dev["losses"]) load_losses(b, dev, idx, type, name);
 }
 
 /// Keys `load_simulation_options` reads. Anything else in the block

@@ -278,3 +278,35 @@ def test_a_diode_recovery_table_runs_in_the_kernel_batch():
                   steady=SteadySpec(method="pss"),
                   loss_options={"switch_specs": {"D1": {
                       "E_on_table": rec_t, "Tj": 90.0}}}).evaluate(DESIGNS[0])
+
+
+# batch-11 review #7: an Evaluator option is honoured or refused by name
+# on every route, never dropped. Each row: (method, engine, options,
+# honoured?). The exact stepper takes no simulate keyword at all; the
+# engine routes refuse what simulate() would only warn it ignores.
+_OPT_ROWS = [
+    ("pss", "dsed", {"dt": T / 100}, False),
+    ("pss", "dsed", {"rtol": 1e-8}, False),
+    ("pss", "auto", {"discontinuity_restart": True}, False),
+    ("transient", "pwl", {"dt": T / 200}, True),
+    ("transient", "pwl", {"dt": T / 200, "rtol": 1e-6}, False),
+    ("pss", "pwl", {"dt": T / 200}, True),
+    ("pss", "pwl", {"dt": T / 200, "atol": 1e-9}, False),
+    ("pss", "trbdf2", {"rtol": 1e-8}, True),
+    ("pss", "trbdf2", {"integrator": "bdf2"}, False),
+    ("transient", "trbdf2", {"integrator": "bdf2"}, False),
+]
+
+
+@pytest.mark.parametrize("method,engine,options,honoured", _OPT_ROWS)
+def test_evaluator_options_are_honoured_or_refused_on_every_route(
+        method, engine, options, honoured):
+    ev = Evaluator(buck, period=T, loads=("RL",), output="vout",
+                   steady=SteadySpec(method=method), engine=engine,
+                   options=options)
+    r = ev.evaluate({})
+    if honoured:
+        assert r.status == "ok", r.reason
+    else:
+        assert r.status == "refused", (r.status, r.reason)
+        assert r.refusal[1] == "options"

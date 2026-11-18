@@ -1658,6 +1658,11 @@ def _result_plot(self, *signals, save=None, show=None, **kwargs):
 
 
 SimulationResult.plot = _result_plot  # type: ignore[attr-defined]
+
+# add-in-kernel-event-losses: CircuitBuilder.set_device_losses,
+# SimulationResult.loss_events / device_energy.
+from . import loss_tables as _loss_tables  # noqa: E402
+_loss_tables.install(CircuitBuilder, SimulationResult)
 # add-immutable-circuit-ir: the circuit that ran and what the run did to it.
 for _cls in (SimulationResult, _PEDRes):
     _cls.plan = property(  # type: ignore[attr-defined]

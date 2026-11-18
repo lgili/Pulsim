@@ -1747,6 +1747,58 @@ public:
                             Real{1} / R_off);
     }
 
+    /// add-in-kernel-event-losses 2.2: a loss port on a PWL switch or
+    /// diode (`add_switch`, `add_mosfet` and its `<name>_body`,
+    /// `add_igbt`, `add_diode`, their branch forms). Exactly one of
+    /// `junction` (a thermal node: tables read at its temperature, heat
+    /// deposited into it) and a finite `tj` (°C, fixed; heat deposited
+    /// into `heat_node` when one is named). Refuses, naming the device:
+    /// an unknown device, another kind, both or neither temperature
+    /// source, `heat_node` with `junction`, table conduction without a
+    /// `v_on` table. Node names are resolved when a run starts (the
+    /// thermal network may be added after this call).
+    void set_device_losses(thermal::DeviceLossSpec spec) {
+        const std::string& n = spec.device;
+        const auto hit = branch_index_.find(n);
+        if (hit == branch_index_.end()) {
+            throw std::invalid_argument(std::format(
+                "set_device_losses(\"{}\"): no device of that name", n));
+        }
+        using K = pwl::DevicePool::StoredKind;
+        const auto k = pool_.kind_of(hit->second);
+        if (k != K::Switch && k != K::Diode) {
+            throw std::invalid_argument(std::format(
+                "set_device_losses(\"{}\"): a {} has no loss port; it is "
+                "for PWL switches and diodes (add_switch, add_mosfet, "
+                "add_igbt, add_diode)", n, pwl::stored_kind_name(k)));
+        }
+        const bool has_j = !spec.junction.empty();
+        const bool has_t = !std::isnan(spec.tj);
+        if (has_j == has_t) {
+            throw std::invalid_argument(std::format(
+                "set_device_losses(\"{}\"): give exactly one of junction= "
+                "(a thermal node: closed loop) and Tj= (a fixed junction "
+                "temperature: open loop); {}", n,
+                has_j ? "both junction and Tj were given"
+                      : "neither junction nor Tj was given"));
+        }
+        if (has_t && !std::isfinite(spec.tj)) {
+            throw std::invalid_argument(std::format(
+                "set_device_losses(\"{}\"): Tj must be finite", n));
+        }
+        if (has_j && !spec.heat_node.empty()) {
+            throw std::invalid_argument(std::format(
+                "set_device_losses(\"{}\"): heat_node goes with Tj; with "
+                "junction the heat goes into the junction", n));
+        }
+        if (spec.conduction == thermal::ConductionHeat::Table && !spec.v_on) {
+            throw std::invalid_argument(std::format(
+                "set_device_losses(\"{}\"): conduction='table' needs a V_on "
+                "table", n));
+        }
+        pool_.set_device_losses(std::move(spec));
+    }
+
     /// Layer 2 V2 — two-winding linear transformer.
     /// Adds two coupled inductor branches:
     ///   * primary  (p_from → p_to)  with L_p

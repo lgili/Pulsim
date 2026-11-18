@@ -1302,6 +1302,37 @@ def test_allow_implicit_segments_is_refused_off_the_exact_engine(engine):
     assert ei.value.feature == "allow_implicit_segments"
 
 
+# add-in-kernel-event-losses: a device loss port is honoured on the
+# fixed-step engine only; every other engine refuses it by name, with the
+# device, before a step is taken (task 3.1 brings trbdf2 and dsed in).
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "bdf1", "auto"))
+def test_device_losses_cell(engine):
+    b = _rc()
+    b.add_diode("S", "o", "gnd", 1e3, 1e-9)
+    b.add_voltage_source("Vamb", "amb", "gnd", 25.0)
+    b.add_resistor("Rth", "tj", "amb", 1.0)
+    b.add_capacitor("Cth", "tj", "amb", 1e-3)
+    b.set_device_losses("S", junction="tj")
+    if engine != "pwl":
+        with pytest.raises(p.UnsupportedError) as ei:
+            if engine == "bdf1":
+                k.run_transient_bdf1(
+                    b, k.SimulationOptions(t_start=0.0, t_end=1e-4, dt=1e-6),
+                    lambda _t: p.SwitchStateMask(b.graph.num_switches))
+            else:
+                _sim(engine, b)
+        assert (ei.value.feature, ei.value.device) == ("device_losses", "S")
+        # 'auto' names the engine it resolved to
+        assert ei.value.engine == engine or (
+            engine == "auto" and ei.value.engine in ("trbdf2", "dsed"))
+        return
+    r = _sim(engine, b)
+    assert r.device_energy("S")["E_cond_electrical"] > 0.0
+    # 'auto' with a step routes to pwl and honours the port
+    r = _sim("auto", b, dt=1e-6)
+    assert r.engine_used == "pwl" and r.device_energy("S")["n_on"] >= 0
+
+
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "exact"))
 def test_reinit_records_only_on_the_exact_engine(engine):
     # result.reinit_records (dependent states: the impulse at a mode entry) rides on the event

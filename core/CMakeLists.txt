@@ -88,6 +88,7 @@ if(PULSIM_BUILD_TESTS)
     # (core/include/pulsim/thermal/loss_table.hpp), header-only.
     add_executable(pulsim_core_thermal_tests
         tests/thermal/test_loss_table.cpp
+        tests/thermal/test_device_losses.cpp
     )
     target_link_libraries(pulsim_core_thermal_tests
         PRIVATE

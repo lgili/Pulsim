@@ -290,15 +290,12 @@ def commutations(seq):
     """``(on, off)``: the ``(|v|, |i|)`` of every turn-on and turn-off of
     an edge sequence (:meth:`Period.edges`), by the reading rule -- a
     turn-on reads the blocking ``v`` before and the load ``i`` after, a
-    turn-off the reverse."""
-    on, off = [], []
-    for (c0, v0, i0), (c1, v1, i1) in zip(seq, seq[1:]):
-        if c0 != c1:
-            if c1:
-                on.append((abs(v0), abs(i1)))
-            else:
-                off.append((abs(v1), abs(i0)))
-    return on, off
+    turn-off the reverse. The rule is the kernel's
+    (``thermal::commutation_point``), the one the transient engine reads
+    with ``set_device_losses``: one implementation for both routes."""
+    from ._pulsim import _commutation_points
+    return _commutation_points([(bool(c), float(v), float(i))
+                                for c, v, i in seq])
 
 
 def _diode_recovery_only(spec):
