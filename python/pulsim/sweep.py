@@ -242,6 +242,8 @@ def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose,
                     f"backend='process': job {i} does not pickle ({exc}); "
                     "use backend='thread' or top-level functions") from exc
         worker = functools.partial(_run_one_pickled, job=job, reraise=reraise)
+        if os.name == "nt":
+            nw = min(nw, 61)   # ProcessPoolExecutor's limit on Windows
         with ProcessPoolExecutor(nw) as ex:
             try:
                 for k, (i, (status, out)) in enumerate(
@@ -254,8 +256,9 @@ def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose,
             except BrokenProcessPool as exc:
                 raise RuntimeError(
                     "backend='process': a worker process died before "
-                    f"returning ({exc}); a spawned worker must import the "
-                    "same pulsim and every function of the job") from exc
+                    f"returning, or its result did not unpickle ({exc}); a "
+                    "spawned worker must import the same pulsim and every "
+                    "function of the job") from exc
             except BaseException:
                 ex.shutdown(wait=False, cancel_futures=True)
                 raise

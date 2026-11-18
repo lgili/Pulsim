@@ -50,7 +50,7 @@ def _ensure_pulsim_path() -> tuple[bool, str, str]:
     # Prefer local build tree only when native extension is actually present.
     if _build_tree_has_extension(build_path):
         _remove_path(build_path)
-        _remove_path(source_python_path)
+        _demote_path(source_python_path)
         sys.path.insert(0, build_path)
         return True, build_path, source_python_path
     _remove_path(build_path)
@@ -153,6 +153,5 @@ def _pulsim_is_this_checkout():
 def _source_tree_after_installed_pulsim():
     # pytest prepends <repo>/python again whenever it imports a test module
     # or package; a process-backend worker must not see it first
-    if not _prefer_build_tree and not _is_within(
-            sys.modules["pulsim"].__file__, _source_python_path):
+    if not _is_within(sys.modules["pulsim"].__file__, _source_python_path):
         _demote_path(_source_python_path)

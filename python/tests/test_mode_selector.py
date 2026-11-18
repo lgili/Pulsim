@@ -123,7 +123,7 @@ def test_selected_mode_equals_the_prototype_mode_at_every_event(name):
     if bad:
         assert bad == [0.0]
     if name in LEAK_PIN_BOUND:
-        assert len(pins) <= LEAK_PIN_BOUND[name], pins
+        assert 2 <= len(pins) <= LEAK_PIN_BOUND[name], pins
     else:
         assert len(pins) == LEAK_PINS.get(name, 0), pins
 
