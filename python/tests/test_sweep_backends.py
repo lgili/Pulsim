@@ -310,7 +310,9 @@ class _DiesWhenLoaded:
         return os._exit, (3,)
 
 
-@pytest.mark.timeout(30)
+# A hang is what this guards; 30 s was a timing assumption (two spawned
+# workers importing numpy + pulsim on a loaded Windows runner), not a bound
+@pytest.mark.timeout(300)
 @pytest.mark.parametrize("how", ["import", "exit"])
 def test_a_worker_that_cannot_load_its_job_raises_instead_of_hanging(how):
     """CI (spawn, installed wheel): a worker that died unpickling its job
