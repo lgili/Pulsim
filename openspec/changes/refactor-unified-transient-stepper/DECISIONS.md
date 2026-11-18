@@ -135,3 +135,48 @@ says where the implementation departs from them or what it settled.
    (d) `load` validates (finite values, h > 0, slots in range) and
    changes nothing on refusal. (e) The FixedClock unit test compares two
    runtime expressions (a folded constant may contract differently).
+
+10. **The skeleton exists before any engine runs on it.**
+    `solver/step/stepper.hpp` is the D4 order as a function template,
+    `step_once<I>(controller, body)`: poll → `begin` (instant
+    processing) → `clamp(propose)` → [rollback copy] → `take` (the
+    stage solves through the body's one `solve_stage(spec, s, frame)`;
+    default `run_stages<I>`) → `error` → the controller's
+    accept / retry / abort → `after_solve` (the event policy: accept, or
+    truncate the frame and re-solve) → `commit` → `on_step`. Controllers:
+    `FixedController` (the grid `t0 + k·dt`; the frame's `t1` is the grid
+    point, never `t0 + h`; no rollback, no error call, no retry branch
+    compiled) and `LteClock<I>` (the factor laws with the integrator's
+    `err_exponent`). The body is a duck-typed set of members, not a
+    virtual interface (D1); the concepts `Integrator` and
+    `StepController` are plain requires-expressions. Proven on a toy body
+    (`core/tests/step/test_stepper.cpp`): orders 2 / 1 / 2 / 2 for
+    trapezoidal, backward Euler, TR-BDF2 and SDIRK(2,2) on the fixed
+    clock; both 2-stage methods under the LTE clock with a rejected first
+    step; the phase order; abort before commit; the event truncation.
+    Neither driver runs on it yet: the two loop bodies are under edit by
+    three other tracks with large unmerged diffs (device interface −628
+    lines of `run_transient.hpp`, ideal switch +256, TR-BDF2 track 8
+    +271), so carving them into body members now would make every one of
+    those merges a rewrite. They move after integration batch 13 lands.
+
+11. **`steady_state(engine='trbdf2', dt=1e-7)` on the 24 V buck: not the
+    step sequence; a derivative slot over a sliver step.** Reproducer:
+    `probes/ss_trbdf2_sliver.py`. Every monodromy probe (relative 1e-4,
+    1e-6, 1e-8) runs on exactly the base run's accepted grid, so the
+    map is evaluated with a frozen step sequence already. What is not
+    smooth is history slot 3, the capacitor's `i_prev` (the trapezoidal
+    derivative slot, `2C/h·Δv − i_prev`): the user's `switch_fn` puts the
+    edge 1e-9·T before the period boundary, TR-BDF2 lands on it, and the
+    period ends with a 9.2e-15 s step (`h_post_event_min`; a 6.9e-14 s one
+    follows the mid-period edge), over which `2C/h` multiplies the
+    rounding of `v` by ~1e10. The slot's column entry scales as
+    1/probe (a fixed jump of ~5.8e-7 A, not a derivative), and one
+    period from the linear-solve answer moves that slot by 4.9e-3 while
+    the physical slots move 1e-7. With the edges exactly on the boundary
+    a second defect shows: a run resumed AT an edge time misses that edge
+    (slot 0 moves −24 V in the second period), the "resume at a gate
+    edge" gap of the event queue's edge cache (DECISIONS 8). Owners: the
+    TR-BDF2 track (a gate edge within rounding of `t_end`, or the history
+    commit after a sub-`h_min` post-edge step) and the event queue (edge
+    cache in the snapshot). Not fixed here: both change results.

@@ -91,6 +91,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_step_tests
         tests/step/test_integrators.cpp
         tests/step/test_controllers.cpp
+        tests/step/test_stepper.cpp
     )
     target_link_libraries(pulsim_core_step_tests
         PRIVATE

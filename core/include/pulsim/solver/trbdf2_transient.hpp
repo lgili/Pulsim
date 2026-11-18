@@ -2265,14 +2265,8 @@ inline SimulationResult run_transient_trbdf2(
                     y_old = e.i_prev;
                     y_new = x_1[e.inductor_branch_var_id];
                 }
-                // Factor 2 (Bank et al.): without it the estimate was
-                // half the true local error (true/estimate 1.97 at
-                // h*lambda = -0.05, p10_lte.py), so rtol meant twice itself.
-                const Real lte =
-                    Real{2} * clte * h
-                    * (f_n / gamma
-                       - f_g / (gamma * (Real{1} - gamma))
-                       + f_1 / (Real{1} - gamma));
+                // The integrator's estimate (step::TrBdf2::lte, Bank et al.).
+                const Real lte = step::TrBdf2::lte(h, f_n, f_g, f_1);
                 const Real sc =
                     opts.atol
                     + opts.rtol
