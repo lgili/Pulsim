@@ -8,21 +8,21 @@ lands).
 
 ## 0. Preconditions and baseline
 - [ ] 0.1 `add-kernel-simulation-object` section 10 merged (`Simulation{Circuit, RunOptions}` with `Circuit` as a view)
-- [ ] 0.2 Record: `components()` dumps of every shipped example and harness circuit; build + analyse + assemble time of a 100-point sweep on the audit's buck and on the n = 1502 ladder; the list of builder private attributes set from Python (4) and read with `getattr` (7 sites)
+- [x] 0.2 Record: `components()` dumps of every shipped example and harness circuit; build + analyse + assemble time of a 100-point sweep on the audit's buck and on the n = 1502 ladder; the list of builder private attributes set from Python (4) and read with `getattr` (7 sites) — `probes/components_baseline.json` (152 circuits, 136 load), `probes/sweep_probe.py`, BASELINE.md
 
 ## 1. Immutable snapshot of the builder
-- [ ] 1.1 `core/include/pulsim/ir/circuit.hpp`: ids, `Value` (literal only for now), `Node`, `Device`, `Scope` (root only), `InitialCondition`, `Alias`, `Circuit` handle over shared const data
-- [ ] 1.2 `CircuitBuilder::build()`; `Circuit::lowered()` reproducing `Graph` + `DevicePool` in the builder's insertion order
-- [ ] 1.3 `sim::Simulation` takes `ir::Circuit`; `simulate()` calls `build()`; binding `pulsim.Circuit`
-- [ ] 1.4 Tests: `components()`, unknown indices, switch order and `initial_state()` equal between the builder and `build().lowered()` for every example and harness circuit
-- [ ] 1.5 Oracle: suite and goldens bit-identical; zero-alloc tests green
-- [ ] 1.6 Docs: `docs/mental-model.md` (builder → circuit → lowered); stubs
+- [x] 1.1 `core/include/pulsim/ir/circuit.hpp`: ids, `Value` (literal only for now), `Node`, `Device`, `Scope` (root only), `InitialCondition`, `Alias`, `Circuit` handle over shared const data — the root scope is implicit (no `Scope` table until group 8)
+- [x] 1.2 `CircuitBuilder::build()`; `Circuit::lowered()` reproducing `Graph` + `DevicePool` in the builder's insertion order
+- [ ] 1.3 `sim::Simulation` takes `ir::Circuit`; `simulate()` calls `build()`; binding `pulsim.Circuit` — binding and `simulate(circuit)` done; the `Simulation` part waits for 0.1 (maintainer's slice decision, DECISIONS.md)
+- [x] 1.4 Tests: `components()`, unknown indices, switch order and `initial_state()` equal between the builder and `build().lowered()` for every example and harness circuit
+- [x] 1.5 Oracle: suite and goldens bit-identical; zero-alloc tests green
+- [x] 1.6 Docs: `docs/mental-model.md` (builder → circuit → lowered); stubs
 
 ## 2. Stop mutating the caller's circuit (**BREAKING**)
-- [ ] 2.1 `Circuit::with_ties`; the preflight regularises the run's own circuit; `result.circuit` and `result.plan.ties` expose it
-- [ ] 2.2 Update the warning text (no longer "the ties persist on the builder")
-- [ ] 2.3 Tests: `builder.build().value_hash()` equal before and after `simulate()`; a second run with `auto_regularize=False` raises the original singular error; results of regularised runs unchanged
-- [ ] 2.4 Docs: CHANGELOG migration note; `AI_GUIDE.md` preflight section
+- [x] 2.1 `Circuit::with_ties`; the preflight regularises the run's own circuit; `result.circuit` and `result.plan.ties` expose it
+- [x] 2.2 Update the warning text (no longer "the ties persist on the builder")
+- [x] 2.3 Tests: `builder.build().value_hash()` equal before and after `simulate()`; a second run with `auto_regularize=False` raises the original singular error; results of regularised runs unchanged
+- [x] 2.4 Docs: CHANGELOG migration note; `AI_GUIDE.md` preflight section
 
 ## 3. Python side state into the IR
 - [ ] 3.1 Initial conditions (`c0=`, `i0=`, `set_initial`) and aliases stored in the builder / IR; delete `_pulsim_ic`, `_pulsim_aliases`
@@ -39,15 +39,15 @@ lands).
 - [ ] 4.6 Docs: YAML reference (new kinds), `AI_GUIDE.md`
 
 ## 5. Sweeps over a circuit
-- [ ] 5.1 `sweep(circuit, params=...)` and `monte_carlo(circuit, ...)` beside the `builder_factory` forms; the circuit is shared by the worker threads
+- [x] 5.1 `sweep(circuit, params=...)` and `monte_carlo(circuit, ...)` beside the `builder_factory` forms; the circuit is shared by the worker threads
 - [ ] 5.2 Oracle: results equal the factory form; `test_sweep_path_aware.py` green; an 8-job thread sweep scales as audit row 23 (within the noise of the shared machine)
 
 ## 6. Named parameters and generic updates
-- [ ] 6.1 `Parameter`, `builder.param(name, value, unit)`; `Value` overloads on every `add_*`
-- [ ] 6.2 `Circuit::with_params`, `Circuit::with_value("dev.field", v)`; bounds checks from the parameter and from the field table; errors name device and field
-- [ ] 6.3 Deprecate `update_resistor_R`, `update_inductor_L`, `update_capacitor_C`, `update_voltage_source_V` (warning naming `with_value`)
-- [ ] 6.4 Tests: for one field of every kind, `with_value` equals rebuilding with the new literal, bit for bit; the receiver's `value_hash` is unchanged
-- [ ] 6.5 Docs: parameters page; CHANGELOG
+- [x] 6.1 `Parameter`, `builder.param(name, value, unit)`; `Value` overloads on every `add_*`
+- [x] 6.2 `Circuit::with_params`, `Circuit::with_value("dev.field", v)`; bounds checks from the parameter and from the field table; errors name device and field
+- [x] 6.3 Deprecate `update_resistor_R`, `update_inductor_L`, `update_capacitor_C`, `update_voltage_source_V` (warning naming `with_value`)
+- [x] 6.4 Tests: for one field of every kind, `with_value` equals rebuilding with the new literal, bit for bit; the receiver's `value_hash` is unchanged
+- [x] 6.5 Docs: parameters page; CHANGELOG
 
 ## 7. Expressions
 - [ ] 7.1 `ir/expr.hpp`: recursive-descent parser to a postfix program; evaluator; dependency ordering; cycle, unknown-name and non-finite errors naming device, field and text
@@ -71,9 +71,9 @@ lands).
 - [ ] 9.6 Docs: domains page; `docs/known-limitations.md`
 
 ## 10. Structure sharing
-- [ ] 10.1 `SymbolicPlan` held by structure hash and reused by `with_params` (requires `update-linear-time-assembly`; skipped with a note otherwise)
-- [ ] 10.2 Measure the 100-point sweep of 0.2 again; counter gate: one symbolic analysis for the whole sweep
-- [ ] 10.3 Oracle: sweep results equal
+- [x] 10.1 `SymbolicPlan` held by structure hash and reused by `with_params` (requires `update-linear-time-assembly`; skipped with a note otherwise)
+- [x] 10.2 Measure the 100-point sweep of 0.2 again; counter gate: one symbolic analysis for the whole sweep
+- [x] 10.3 Oracle: sweep results equal
 
 ## 11. Remove the deprecated surface (one release later)
 - [ ] 11.1 Delete the four `update_*` bindings and the string-prefix code of the subsystem proxy

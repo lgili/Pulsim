@@ -81,7 +81,10 @@ class BenchCase:
             args["switch_fn"] = switch_fn
         if observer is not None:
             args["step_observer"] = observer
-        if engine == "pwl":
+        # The netlist's dt is the output grid of every engine that takes one: pwl's step, the
+        # exact engine's sample spacing (dt_max; its samples are exact, but its 10 us default
+        # leaves two per 20 us period and the gate interpolates between them). trbdf2 adapts.
+        if engine in ("pwl", "dsed", "exact"):
             args["dt"] = dt if dt is not None else self.dt
         elif dt is not None:
             args["dt"] = dt
@@ -95,8 +98,8 @@ class BenchCase:
     def _dc_start(self, b, switch_fn):
         """v1 without ``uic`` started from the DC operating point. Return it
         only when it gives a reactive state a non-zero value (otherwise it is
-        the zero start every engine already takes); dsed refuses a full
-        state vector, which is reported as its refusal."""
+        the zero start every engine already takes); dsed projects a full
+        state vector onto its reduced state (refusing an inconsistent one)."""
         names = b.state_var_names()
         op = pulsim.compute_dc_op(b, mask=switch_fn(self.t_start) if switch_fn else None)
         idx = {n: i for i, n in enumerate(names)}

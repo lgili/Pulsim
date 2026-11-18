@@ -415,7 +415,9 @@ def test_next_jump_after_is_a_no_op_on_the_variable_step_engines(engine):
     declared.next_jump_after = lambda t: 2e-6 if t < 2e-6 else math.inf
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        r0 = p.simulate(build(), t_end=6e-6, engine=engine, b_extra_fn=bx)
-        r1 = p.simulate(build(), t_end=6e-6, engine=engine, b_extra_fn=declared)
+        # a b_extra_fn has no exact step: dsed runs it numerically only when allowed (13.2)
+        kw = {"allow_implicit_segments": True} if engine == "dsed" else {}
+        r0 = p.simulate(build(), t_end=6e-6, engine=engine, b_extra_fn=bx, **kw)
+        r1 = p.simulate(build(), t_end=6e-6, engine=engine, b_extra_fn=declared, **kw)
     assert np.array_equal(np.asarray(r0.times), np.asarray(r1.times))
     assert np.array_equal(np.asarray(r0.states), np.asarray(r1.states))

@@ -287,6 +287,21 @@ def test_table_breakpoints_are_not_stepped_over_on_trbdf2():
         assert np.min(np.abs(t - knot)) < 1e-15, knot
 
 
+@pytest.mark.parametrize("kind", ["sine", "pulse", "pwl"])
+def test_current_waveforms_are_exact_on_the_exact_engine(kind):
+    """Merge seam (integration's current waveforms x 13.2's refusal): a sine current is an
+    augmented oscillator, a pulse / table current is level + ramp between corners and every
+    corner a time event -- so every step is exact (they ran numerically before)."""
+    ds = p.simulate(waveform_rc(kind), t_end=2e-3, dt=1e-5, engine="exact")
+    assert ds.n_exact_steps == len(ds.times) - 1
+    assert ds.exact["auto_would_route"] is True
+    if kind != "sine":
+        t = np.asarray(ds.times)
+        corners = [1e-3] if kind == "pwl" else [1e-4, 1.5e-4, 3.5e-4, 4e-4]
+        for c in corners:
+            assert np.min(np.abs(t - c)) < 1e-15, c
+
+
 @pytest.mark.parametrize("t,i,needle", [
     ([0.0], [1.0], "two"),
     ([0.0, 2e-3, 1e-3], [0.0, 1.0, 0.0], "increase"),

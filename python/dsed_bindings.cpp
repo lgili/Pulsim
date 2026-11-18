@@ -44,6 +44,8 @@
 #include "pulsim/dsed/scheduler_bdf2.hpp"
 #include "pulsim/dsed/scheduler_auto.hpp"
 #include "pulsim/dsed/period_integrals.hpp"
+#include "pulsim/dsed/periodic_orbit.hpp"
+#include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/dsed/step_controller.hpp"
 #include "pulsim/dsed/stiffness_detector.hpp"
 #include "pulsim/numeric/dense.hpp"
@@ -342,12 +344,25 @@ py::array_t<double> reconstruct_full_states(
         res.step_masks.size() == n
         && res.pre_event_index.size() == res.pre_event_states.size();
     std::size_t next_pre = 0;
+    bool pre = false;   // sample i is an event's LEFT limit
     auto state_of = [&](std::size_t i) -> const pulsim::Vector& {
+        pre = false;
         if (have_pre && next_pre < res.pre_event_index.size()
             && res.pre_event_index[next_pre] == i) {
+            pre = true;
             return res.pre_event_states[next_pre++];
         }
         return res.states[i];
+    };
+    // A left-limit sample reads its sources' left limit too: a source
+    // corner is an event, and an instant edge there (PWM, pulse) would
+    // otherwise pair the old mode with the new source value. Half the
+    // last step lies inside the piece that step covered. The final
+    // sample is the left limit of t_end too: a corner exactly at t_end
+    // never fires (the run ends), so its new piece is never integrated.
+    auto left_by = [&](std::size_t i) {
+        return (pre || i + 1 == n) && i > 0
+            ? Real{0.5} * (res.times[i] - res.times[i - 1]) : Real{0};
     };
     // Probe the width from the first sample.
     adapter.set_mask(masks[0]);
@@ -366,6 +381,15 @@ py::array_t<double> reconstruct_full_states(
         }
         double* row = ptr + static_cast<py::ssize_t>(i) * n_mna;
         if constexpr (requires {
+                          adapter.recover_full_into(
+                              Real{0}, state_of(i),
+                              Eigen::Map<pulsim::Vector>(row, n_mna), Real{0});
+                      }) {
+            const pulsim::Vector& xi = state_of(i);
+            adapter.recover_full_into(
+                res.times[i], xi,
+                Eigen::Map<pulsim::Vector>(row, n_mna), left_by(i));
+        } else if constexpr (requires {
                           adapter.recover_full_into(
                               Real{0}, state_of(i),
                               Eigen::Map<pulsim::Vector>(row, n_mna));
@@ -429,6 +453,28 @@ void reconstruct_right_limits(AdapterT& adapter, const ResultT& res,
                     const auto& xs = res.states[i];
                     fired = xp.size() != xs.size()
                             || (xp.array() != xs.array()).any();
+                    // A source corner leaves the reduced state alone but
+                    // moves the source-driven nodes: the sample reads the
+                    // sources' left limit (reconstruct_full_states), so
+                    // the right limit differs and is recorded too.
+                    if constexpr (requires {
+                                      adapter.recover_full_into(
+                                          Real{0}, xs,
+                                          Eigen::Map<pulsim::Vector>(nullptr, 0),
+                                          Real{0});
+                                  }) {
+                        if (!fired && i > 0
+                            && res.step_masks[i] == res.sample_masks[i]) {
+                            adapter.set_mask(res.sample_masks[i]);
+                            const pulsim::Vector r =
+                                adapter.recover_full(res.times[i], xs);
+                            pulsim::Vector l(r.size());
+                            adapter.recover_full_into(
+                                res.times[i], xs, l,
+                                Real{0.5} * (res.times[i] - res.times[i - 1]));
+                            fired = (l.array() != r.array()).any();
+                        }
+                    }
                 }
                 if (fired || !(res.step_masks[i] == res.sample_masks[i])) {
                     idx.push_back(i);
@@ -732,6 +778,7 @@ inline py::dict mode_shadow_dict(const pulsim::dsed::ModeShadowReport& r,
     d["leak_pins"] = r.leak_pins;
     d["pin_judgements"] = r.pin_judgements;
     d["unfixed"] = r.unfixed;
+    d["capped"] = r.capped;
     d["enumerations"] = r.enumerations;
     d["nonunique_modes"] = r.nonunique_modes;
     d["hysteresis_released"] = r.released;
@@ -1018,6 +1065,10 @@ void init_module(py::module_& m) {
             py::arg("builder"),
             py::arg("cache"),
             py::arg("b_extra_fn") = py::none())
+        .def("set_refuse_implicit", &NativeAdapter::set_refuse_implicit,
+             py::arg("on"),
+             "add-exact-propagator-strategy 13.2: refuse a segment with no "
+             "exact step (engine='exact' without allow_implicit_segments).")
         .def("set_mask", &NativeAdapter::set_mask,
             "Set the active mask. Subsequent A_matrix / b_vector / "
             "rhs queries resolve against this mask (cached lazily).")
@@ -1069,6 +1120,33 @@ void init_module(py::module_& m) {
             "(the builder's c0= / i0= / set_initial), and the largest capacitor-voltage "
             "adjustment the charge-conserving projection made (0 when the "
             "declared values are consistent).")
+        .def("reduced_state_from_full",
+            [](const NativeAdapter& ad, const Vector& x) {
+                // A full-MNA vector (a DC operating point) read the way the
+                // builder's c0= / i0= are: every capacitor's branch voltage,
+                // every inductor's current, projected onto the current
+                // mask's reduced state.
+                const auto& g = ad.graph();
+                const auto& pool = ad.pool();
+                if (x.size() != pool.state_size(g))
+                    throw std::invalid_argument("reduced_state_from_full: size mismatch");
+                using K = pulsim::pwl::DevicePool::StoredKind;
+                std::unordered_map<pulsim::Index, Real> ics;
+                auto v = [&](pulsim::Index n) { return n >= 0 ? x[n] : Real{0}; };
+                for (pulsim::Index bid = 0; bid < g.num_branches(); ++bid) {
+                    if (!pool.is_registered(bid)) continue;
+                    const auto k = pool.kind_of(bid);
+                    if (k == K::Capacitor)
+                        ics[bid] = v(g.branch(bid).from) - v(g.branch(bid).to);
+                    else if (k == K::Inductor)
+                        ics[bid] = x[pool.branch_var_id_for_inductor(bid, g)];
+                }
+                return ad.reduced_initial_state(ics);
+            },
+            py::arg("x_full"),
+            "The reduced state of the current mask from a full-MNA vector "
+            "(e.g. a DC operating point) and the largest capacitor-voltage "
+            "adjustment its projection needed (0 when consistent).")
         .def("_mode_select_at",
             [](const NativeAdapter& ad, const pulsim::topology::SwitchStateMask& mask,
                Real t, const Vector& x_full, Real h_e, Real tol) {
@@ -1093,9 +1171,13 @@ void init_module(py::module_& m) {
                 pulsim::events::ModeSelector sel;
                 sel.tol = tol;
                 const auto sc = ad.port_scale_full(x_full);
+                std::vector<pulsim::Size> sidx;
+                for (const auto& d : census.entries()) sidx.push_back(d.switch_idx);
                 const auto out = sel.select(ports, prev,
-                    [&](Real h, pulsim::DenseMatrix& Zh, Vector& uh) {
-                        ad.diode_port_problem_full(mask, t, x_full, h, nodes, Zh, uh);
+                    [&](Real h, const std::vector<char>& anchor, pulsim::DenseMatrix& Zh, Vector& uh) {
+                        auto m = mask;   // posed in the anchor mode (DECISIONS #30)
+                        for (std::size_t i = 0; i < sidx.size(); ++i) m.set(sidx[i], anchor[i] != 0);
+                        ad.diode_port_problem_full(m, t, x_full, h, nodes, Zh, uh);
                     }, h_e, sc);
                 py::dict d;
                 d["diodes"] = names;
@@ -1110,6 +1192,7 @@ void init_module(py::module_& m) {
                 d["leak_pins"] = out.leak_pins;
                 d["pin_judgements"] = out.pin_judgements;
                 d["unfixed"] = out.unfixed;
+                d["capped"] = out.capped;
                 d["released"] = out.released;
                 d["first_pass_ties"] = out.first_pass_ties;
                 d["tie_currents"] = out.tie_currents;
@@ -1144,7 +1227,8 @@ void init_module(py::module_& m) {
            bool event_log,
            Real mode_shadow_h_e,
            Real mode_lcp_h_e,
-           Real mode_guard_h_e) {
+           Real mode_guard_h_e,
+           bool mode_guard_refuse) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(dt_max));
@@ -1251,7 +1335,7 @@ void init_module(py::module_& m) {
             if (any_diode && mode_lcp_h_e > Real{0}) {
                 sim.enable_mode_lcp(mode_lcp_h_e, adapter.passivity());
             } else if (any_diode && mode_guard_h_e > Real{0}) {
-                sim.enable_mode_guard(mode_guard_h_e, adapter.passivity());
+                sim.enable_mode_guard(mode_guard_h_e, adapter.passivity(), mode_guard_refuse);
             }
             if (any_diode && diode_names.empty()) {
                 pulsim::pwl::DiodeEventState census(adapter.graph(), adapter.pool());
@@ -1281,6 +1365,7 @@ void init_module(py::module_& m) {
                 gd["checks"] = g.checks;
                 gd["unchecked"] = g.unchecked;
                 gd["repairs"] = g.repairs;
+                gd["settle_caps"] = g.settle_caps;
                 gd["confirmed"] = g.confirmed;
                 gd["repair_times"] = g.repair_times;
                 gd["repair_diodes"] = g.repair_diodes;
@@ -1309,6 +1394,7 @@ void init_module(py::module_& m) {
         py::arg("mode_shadow_h_e") = Real{0},
         py::arg("mode_lcp_h_e") = Real{0},
         py::arg("mode_guard_h_e") = Real{0},
+        py::arg("mode_guard_refuse") = false,
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "
@@ -1397,6 +1483,121 @@ void init_module(py::module_& m) {
         "Bridge.11 — native PEDSimulatorAuto over a "
         "NativeCircuitBuilderAdapter (per-mode RK45↔BDF2 dispatch).");
 
+    // A non-owning view of a PySwitchFnSSM: copying it touches no Python
+    // object, so a period run is set up with the GIL released.
+    struct SwitchFnRef {
+        const PySwitchFnSSM* p;
+        [[nodiscard]] SSM operator()(Real t) const { return (*p)(t); }
+        [[nodiscard]] Real next_edge_after(Real t) const {
+            return p->next_edge_after(t);
+        }
+    };
+    using pulsim::dsed::PeriodMapResult;
+    using pulsim::dsed::PeriodObservable;
+    using Pairs = std::vector<std::pair<int, int>>;
+    // (indices, coefs, bit, g_on, g_off, v_on, extrema) per observable
+    static const auto parse_observables = [](const py::list& observables,
+                                             const Pairs& pairs) {
+        std::vector<PeriodObservable> obs;
+        for (const auto& item : observables) {
+            const auto t = item.cast<py::tuple>();
+            PeriodObservable o;
+            const auto idx = t[0].cast<std::vector<pulsim::Index>>();
+            const auto cf = t[1].cast<std::vector<Real>>();
+            for (std::size_t i = 0; i < idx.size(); ++i) {
+                o.w.emplace_back(idx[i], cf.at(i));
+            }
+            o.bit = t[2].cast<int>();
+            o.g_on = t[3].cast<Real>();
+            o.g_off = t[4].cast<Real>();
+            o.v_on = t[5].cast<Real>();
+            o.extrema = t[6].cast<bool>();
+            obs.push_back(std::move(o));
+        }
+        for (const auto& [a, c] : pairs) {
+            if (a < 0 || c < 0 || a >= static_cast<int>(obs.size())
+                || c >= static_cast<int>(obs.size())) {
+                throw py::value_error("dsed_period_map: pair index out "
+                                      "of range");
+            }
+        }
+        return obs;
+    };
+    // One period of the exact stepper from x0 (events located, no
+    // projection) and its post-processing; no Python object is touched
+    // except through a Python schedule, which takes the GIL itself.
+    static const auto period_run = [](
+            NativeAdapter& adapter, const PySwitchFnSSM& sf, const Vector& x0,
+            Real period, const std::vector<PeriodObservable>& obs,
+            const Pairs& pairs, bool monodromy, Real rtol, Real atol,
+            Real mode_guard_h_e) {
+        EventPredictor pred;
+        auto diodes = pulsim::dsed::add_diode_predicates(adapter, pred);
+        PEDSimulator<NativeAdapter, SwitchFnRef> sim(
+            adapter, SwitchFnRef{&sf}, PIController(rtol, atol),
+            std::move(pred), period * Real{1e-6}, period, 1);
+        if (!diodes.list.empty()) {
+            const auto n_sw = static_cast<pulsim::Size>(
+                adapter.graph().num_switches());
+            sim.enable_diode_commutation(
+                diodes.owned, pulsim::topology::SwitchStateMask(n_sw),
+                diodes.list);
+            if (mode_guard_h_e > Real{0}) {
+                // the kernel diode-mode guard, as the pss runs set it
+                sim.enable_mode_guard(mode_guard_h_e, adapter.passivity());
+            }
+        }
+        sim.set_event_projection(false);
+        auto res = sim.simulate(x0, period);
+        return pulsim::dsed::period_map_from_run(adapter, res, diodes, obs,
+                                                 pairs, monodromy);
+    };
+    static const auto period_dict = [](const PeriodMapResult<SSM>& r,
+                                       std::size_t n_python_calls,
+                                       bool nogil) {
+        py::dict d;
+        d["x_end"] = r.x_end;
+        d["monodromy"] = r.monodromy.size()
+            ? py::object(py::cast(r.monodromy)) : py::object(py::none());
+        d["grazing"] = r.grazing;
+        py::list evs;
+        for (const auto& e : r.events) {
+            py::dict ed;
+            ed["t"] = e.t;
+            ed["name"] = e.name;
+            ed["predicate_type"] = e.type;
+            ed["old_mask"] = py::cast(e.old_mask);
+            ed["new_mask"] = py::cast(e.new_mask);
+            ed["x"] = e.x;
+            evs.append(ed);
+        }
+        d["events"] = evs;
+        d["first_mask"] = py::cast(r.first_mask);
+        d["last_mask"] = py::cast(r.last_mask);
+        d["scale"] = r.scale;
+        d["n_accept"] = r.n_steps;
+        d["n_exact_steps"] = r.n_exact_steps;
+        d["python_callbacks"] = n_python_calls;
+        d["nogil"] = nogil;
+        d["integrals_ok"] = r.integrals_ok;
+        d["integrals_reason"] = r.integrals_reason;
+        const auto n_obs = static_cast<py::ssize_t>(r.stats.size());
+        py::array_t<double> st(std::vector<py::ssize_t>{n_obs, 6});
+        for (py::ssize_t j = 0; j < n_obs; ++j) {
+            const auto& s = r.stats[static_cast<std::size_t>(j)];
+            const double row[6] = {s.int1, s.int2, s.peak, s.t_peak,
+                                   s.valley, s.t_valley};
+            for (int c = 0; c < 6; ++c) st.mutable_at(j, c) = row[c];
+        }
+        d["stats"] = st;
+        d["cross"] = r.cross;
+        d["y_left"] = r.y_left;
+        d["y_right"] = r.y_right;
+        d["y_start"] = r.y_start;
+        d["y_end"] = r.y_end;
+        return d;
+    };
+
     // add-design-optimization-workflow (kernel item 3): one period of
     // the exact stepper as a map, with M and the period integrals
     // (pulsim/dsed/period_integrals.hpp), the GIL released for the run
@@ -1411,100 +1612,20 @@ void init_module(py::module_& m) {
                     "dsed_period_map: time-varying sources are not "
                     "handled (their b(t) has no closed form here)");
             }
-            std::vector<pulsim::dsed::PeriodObservable> obs;
-            for (const auto& item : observables) {
-                const auto t = item.cast<py::tuple>();
-                pulsim::dsed::PeriodObservable o;
-                const auto idx = t[0].cast<std::vector<pulsim::Index>>();
-                const auto cf = t[1].cast<std::vector<Real>>();
-                for (std::size_t i = 0; i < idx.size(); ++i) {
-                    o.w.emplace_back(idx[i], cf.at(i));
-                }
-                o.bit = t[2].cast<int>();
-                o.g_on = t[3].cast<Real>();
-                o.g_off = t[4].cast<Real>();
-                o.v_on = t[5].cast<Real>();
-                o.extrema = t[6].cast<bool>();
-                obs.push_back(std::move(o));
-            }
-            for (const auto& [a, c] : pairs) {
-                if (a < 0 || c < 0 || a >= static_cast<int>(obs.size())
-                    || c >= static_cast<int>(obs.size())) {
-                    throw py::value_error("dsed_period_map: pair index out "
-                                          "of range");
-                }
-            }
+            const auto obs = parse_observables(observables, pairs);
             std::size_t n_python_calls = 0;
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_poll(poll_window(period));
             sf.n_python_calls = &n_python_calls;
-            EventPredictor pred;
-            auto diodes = pulsim::dsed::add_diode_predicates(adapter, pred);
-            PEDSimulator<NativeAdapter, PySwitchFnSSM> sim(
-                adapter, std::move(sf), PIController(rtol, atol),
-                std::move(pred), period * Real{1e-6}, period, 1);
-            if (!diodes.list.empty()) {
-                const auto n_sw = static_cast<pulsim::Size>(
-                    adapter.graph().num_switches());
-                sim.enable_diode_commutation(
-                    diodes.owned, pulsim::topology::SwitchStateMask(n_sw),
-                    diodes.list);
-                if (mode_guard_h_e > Real{0}) {
-                    // the kernel diode-mode guard, as the pss runs set it
-                    sim.enable_mode_guard(mode_guard_h_e, adapter.passivity());
-                }
-            }
-            sim.set_event_projection(false);
-            pulsim::dsed::PeriodMapResult<SSM> r;
+            PeriodMapResult<SSM> r;
             bool nogil = false;
             {
                 py::gil_scoped_release release;
                 nogil = PyGILState_Check() == 0;
-                auto res = sim.simulate(x0, period);
-                r = pulsim::dsed::period_map_from_run(
-                    adapter, res, diodes, obs, pairs, monodromy);
+                r = period_run(adapter, sf, x0, period, obs, pairs,
+                               monodromy, rtol, atol, mode_guard_h_e);
             }
-            py::dict d;
-            d["x_end"] = r.x_end;
-            d["monodromy"] = r.monodromy.size()
-                ? py::object(py::cast(r.monodromy)) : py::object(py::none());
-            d["grazing"] = r.grazing;
-            py::list evs;
-            for (const auto& e : r.events) {
-                py::dict ed;
-                ed["t"] = e.t;
-                ed["name"] = e.name;
-                ed["predicate_type"] = e.type;
-                ed["old_mask"] = py::cast(e.old_mask);
-                ed["new_mask"] = py::cast(e.new_mask);
-                ed["x"] = e.x;
-                evs.append(ed);
-            }
-            d["events"] = evs;
-            d["first_mask"] = py::cast(r.first_mask);
-            d["last_mask"] = py::cast(r.last_mask);
-            d["scale"] = r.scale;
-            d["n_accept"] = r.n_steps;
-            d["n_exact_steps"] = r.n_exact_steps;
-            d["python_callbacks"] = n_python_calls;
-            d["nogil"] = nogil;
-            d["integrals_ok"] = r.integrals_ok;
-            d["integrals_reason"] = r.integrals_reason;
-            const auto n_obs = static_cast<py::ssize_t>(r.stats.size());
-            py::array_t<double> st(std::vector<py::ssize_t>{n_obs, 6});
-            for (py::ssize_t j = 0; j < n_obs; ++j) {
-                const auto& s = r.stats[static_cast<std::size_t>(j)];
-                const double row[6] = {s.int1, s.int2, s.peak, s.t_peak,
-                                       s.valley, s.t_valley};
-                for (int c = 0; c < 6; ++c) st.mutable_at(j, c) = row[c];
-            }
-            d["stats"] = st;
-            d["cross"] = r.cross;
-            d["y_left"] = r.y_left;
-            d["y_right"] = r.y_right;
-            d["y_start"] = r.y_start;
-            d["y_end"] = r.y_end;
-            return d;
+            return period_dict(r, n_python_calls, nogil);
         },
         py::arg("adapter"), py::arg("switch_fn"), py::arg("x0"),
         py::arg("period"), py::arg("observables") = py::list(),
@@ -1520,6 +1641,98 @@ void init_module(py::module_& m) {
         "t_valley) and cross[q] = int y_a*y_b per pair. integrals_ok is "
         "False with a reason when a mode has no modal form or a step "
         "was numeric. DC sources only.");
+
+    // add-design-optimization-workflow DECISIONS 19: the whole Newton
+    // shooting (pulsim/dsed/periodic_orbit.hpp) in one call, the GIL
+    // released for every period run and every Newton step.
+    m.def("dsed_periodic_orbit",
+        [](NativeAdapter& adapter, py::object switch_fn_obj, Vector x0,
+           Real period, py::list observables,
+           std::vector<std::pair<int, int>> pairs, Real rtol,
+           int max_period_runs, int n_relax, Real run_rtol, Real run_atol,
+           Real mode_guard_h_e) {
+            if (adapter.has_dynamic_sources()) {
+                throw py::value_error(
+                    "dsed_periodic_orbit: time-varying sources are not "
+                    "handled (their b(t) has no closed form here)");
+            }
+            const auto obs = parse_observables(observables, pairs);
+            const std::vector<PeriodObservable> no_obs;
+            const Pairs no_pairs;
+            std::size_t n_python_calls = 0;
+            PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_poll(poll_window(period));
+            sf.n_python_calls = &n_python_calls;
+            pulsim::dsed::OrbitOptions opt;
+            opt.rtol = rtol;
+            opt.max_period_runs = max_period_runs;
+            opt.n_relax = n_relax;
+            pulsim::dsed::OrbitResult<SSM> r;
+            bool nogil = false;
+            {
+                py::gil_scoped_release release;
+                nogil = PyGILState_Check() == 0;
+                auto run = [&](const Vector& x, bool with_obs) {
+                    try {
+                        return period_run(adapter, sf, x, period,
+                                          with_obs ? obs : no_obs,
+                                          with_obs ? pairs : no_pairs, true,
+                                          run_rtol, run_atol, mode_guard_h_e);
+                    } catch (const pulsim::analysis::Cancelled&) {
+                        throw;
+                    } catch (const py::builtin_exception&) {
+                        throw;
+                    } catch (const std::runtime_error& e) {
+                        // the engine's own non-convergence: a typed outcome
+                        throw pulsim::dsed::PeriodRunFailed(e.what());
+                    }
+                };
+                r = pulsim::dsed::periodic_orbit_newton<SSM>(
+                    run, std::move(x0), period, opt);
+            }
+            py::dict d;
+            d["status"] = pulsim::dsed::to_string(r.status);
+            d["message"] = r.message;
+            d["verify_budget"] = r.verify_budget;
+            d["x0"] = r.x0;
+            d["monodromy"] = r.monodromy.size()
+                ? py::object(py::cast(r.monodromy)) : py::object(py::none());
+            d["multipliers"] = r.multipliers;
+            d["scale"] = r.scale;
+            d["history"] = r.history;
+            d["patterns"] = r.patterns;
+            d["last_pattern"] = r.last_pattern;
+            d["last_mu"] = r.last_mu;
+            d["marginal_direction"] = r.marginal_direction;
+            d["marginal_mu"] = r.marginal_mu;
+            d["residual"] = r.residual;
+            d["n_period_runs"] = r.n_runs;
+            d["n_iterations"] = r.n_iterations;
+            d["n_relax_rounds"] = r.n_relax_rounds;
+            d["n_engine_steps"] = r.n_steps;
+            d["python_callbacks"] = n_python_calls;
+            d["nogil"] = nogil;
+            d["period"] = r.has_period
+                ? py::object(period_dict(r.period, n_python_calls, nogil))
+                : py::object(py::none());
+            return d;
+        },
+        py::arg("adapter"), py::arg("switch_fn"), py::arg("x0"),
+        py::arg("period"), py::arg("observables") = py::list(),
+        py::arg("pairs") = std::vector<std::pair<int, int>>{},
+        py::arg("rtol") = Real{1e-9}, py::arg("max_period_runs") = 60,
+        py::arg("n_relax") = 5, py::arg("run_rtol") = Real{1e-11},
+        py::arg("run_atol") = Real{1e-14},
+        py::arg("mode_guard_h_e") = Real{0},
+        "Newton shooting for the periodic orbit on the exact stepper, the "
+        "GIL released for the whole solve: the loop of "
+        "pulsim.periodic_steady_state (scaled-norm residual, Armijo "
+        "backtracking, relaxation rounds, stop on the Newton step, period-"
+        "run budget). status is 'converged' or the typed outcome "
+        "('budget', 'no_progress', 'singular', 'marginal', 'grazing', "
+        "'run_failed', 'irreproducible'); 'period' is the verification "
+        "period (dsed_period_map's dict, with the observables). DC "
+        "sources only.");
 }
 
 }  // namespace pulsim_dsed_bindings

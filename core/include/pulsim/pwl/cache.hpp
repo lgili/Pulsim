@@ -26,6 +26,7 @@
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/segment.hpp"
+#include "pulsim/pwl/symbolic_plan.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
 #include "pulsim/topology/enumerator.hpp"
@@ -638,11 +639,31 @@ public:
         const int n_ind = static_cast<int>(inds.size());
         const int n_state = n_cap + n_ind;
         if (n_state == 0) {
-            throw std::runtime_error(
-                "compute_lti_state_space: circuit has no "
-                "dynamic elements (caps or inductors); the "
-                "PED engine integrates state equations, so a "
-                "purely static circuit has no state to evolve.");
+            // A static mode (no capacitor, no inductor): nothing to
+            // propagate, every unknown is algebraic, x = −G⁻¹(b + b_extra).
+            // The exact engine still lands its events (source corners,
+            // switch edges, diode predicates read through this map);
+            // add-exact-propagator-strategy DECISIONS, static circuits.
+            auto solver = sparse::make_default_solver();
+            if (!solver->analyze(G_st_sp) || !solver->factorize(G_st_sp)) {
+                throw std::runtime_error(
+                    "compute_lti_state_space: algebraic block "
+                    "G_aa is singular in a static mode; circuit "
+                    "topology does not have a unique algebraic "
+                    "solution for this switch mask.");
+            }
+            DenseMatrix Ginv(n_mna, n_mna);
+            Vector rhs = Vector::Zero(n_mna), sol;
+            for (int j = 0; j < n_mna; ++j) {
+                rhs[j] = Real{1};
+                solver->solve(rhs, sol);
+                Ginv.col(j) = sol;
+                rhs[j] = Real{0};
+            }
+            Vector rec_const0 = -(Ginv * b_a);
+            return ContinuousLTI{DenseMatrix(0, 0), Vector(0), {}, {},
+                                 DenseMatrix(0, n_mna), DenseMatrix(n_mna, 0),
+                                 std::move(rec_const0), DenseMatrix(-Ginv), {}};
         }
 
         // Declared OUTSIDE the n_cap > 0 block so it stays in scope
@@ -1464,6 +1485,13 @@ public:
         }
     }
 
+    /// Share symbolic analyses with every cache given the same plan
+    /// (`ir::Circuit::symbolic_plan()`: all circuits of one structure).
+    /// Set before the first factorisation.
+    void share_symbolic(std::shared_ptr<SymbolicPlan> plan) noexcept {
+        plan_ = std::move(plan);
+    }
+
     /// Snapshot the rank-1 telemetry counters. Read-only from outside;
     /// monotonic across the cache's lifetime.
     [[nodiscard]] CacheMetrics metrics() const noexcept {
@@ -2153,6 +2181,7 @@ private:
     mutable std::shared_ptr<const sparse::SymbolicAnalysis> sym_static_;
     mutable std::atomic<std::uint64_t> symbolic_analyses_{0};
     mutable std::atomic<std::uint64_t> symbolic_fallbacks_{0};
+    std::shared_ptr<SymbolicPlan> plan_;  // add-immutable-circuit-ir
 
     /// Analyse `J` on `solver`, adopting the regime's shared analysis
     /// when `J` has its pattern. Returns `analyze`'s verdict.
@@ -2160,9 +2189,15 @@ private:
                                        const sparse::Matrix& J,
                                        bool dynamic) const {
         auto& sym = dynamic ? sym_dynamic_ : sym_static_;
+        bool seeded = false;
+        if (!sym && plan_) {
+            sym = plan_->get(dynamic);
+            seeded = sym != nullptr;
+        }
         if (sym && solver.adopt_symbolic(*sym, J)) {
             return true;
         }
+        if (seeded) sym.reset();  // the plan's pattern is not this one
         if (!solver.analyze(J)) {
             return false;
         }
@@ -2170,6 +2205,7 @@ private:
         auto mine = solver.export_symbolic(J);
         if (!sym) {
             sym = std::move(mine);
+            if (plan_ && sym) plan_->offer(dynamic, sym);
         } else if (mine) {
             // A sharing-capable backend refused the shared analysis:
             // the pattern differs from the regime's.

@@ -51,7 +51,10 @@ def test_auto_takes_the_exact_stepper():
     t = np.asarray(res.times)
     v = np.asarray(res.v("sw"))
     m = (t > T + 1e-9) & (t < 1.5 * T - 1e-9)
-    exact = 100.0 - (100.0 - 0.01) * np.exp(-(t[m] - T) / TAU)
+    # the switch opens at the landed edge, 9.3e-15 s before T (the switch_fn's 1e-9 tolerance);
+    # the samples that resolve the 10 ns transient (task: fast-mode samples) see that offset
+    t_e = float(np.asarray(res.event_times)[np.argmin(np.abs(np.asarray(res.event_times) - T))])
+    exact = 100.0 - (100.0 - 0.01) * np.exp(-(t[m] - t_e) / TAU)
     assert np.abs(v[m] - exact).max() <= 1e-5          # was 96.07 V
     assert v.min() >= 0.0 and v.max() <= 100.001       # was -99.98 ... 196.08 V
     assert res.n_exact_steps > 0
@@ -72,9 +75,10 @@ def test_bdf2_starts_each_segment_with_backward_euler():
 
 
 def test_a_mode_without_an_exact_stepper_still_runs_on_auto():
-    # A trapezoidal pulse source: no closed-form propagator (sine sources
-    # have one), so 'auto' integrates numerically (DOPRI5/BDF2) and must
-    # still match the fixed engine.
+    # A user b_extra_fn has no closed-form propagator (sine, pulse and PWM
+    # sources do), so 'auto' integrates numerically (DOPRI5/BDF2) and must
+    # still match the fixed engine. The callable adds zero: the physics is
+    # the pulse-driven RC the pwl run sees.
     def build():
         b = p.CircuitBuilder()
         b.add_pulse_voltage_source("V", "in", "gnd", 0.0, 10.0, 0.2e-3,
@@ -84,7 +88,10 @@ def test_a_mode_without_an_exact_stepper_still_runs_on_auto():
         return b
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        rd = p.simulate(build(), t_end=2e-3, engine="dsed")
+        bd = build()
+        zero = [0.0] * bd.pool.state_size(bd.graph)
+        rd = p.simulate(bd, t_end=2e-3, engine="dsed", b_extra_fn=lambda _t: zero,
+                        allow_implicit_segments=True)
         rp = p.simulate(build(), t_end=2e-3, engine="pwl", dt=1e-7)
     assert rd.n_exact_steps == 0
     assert rd.n_rk45_steps + rd.n_bdf2_steps > 0

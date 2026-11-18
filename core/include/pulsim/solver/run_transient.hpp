@@ -1037,6 +1037,7 @@ inline SimulationResult run_transient(
         r.max_pivots_per_event = std::max(r.max_pivots_per_event, s.pivots_total);
         r.ties += static_cast<Size>(s.ties);
         r.widenings += static_cast<Size>(s.widenings);
+        r.capped += static_cast<Size>(s.capped);
         r.leak_pins += static_cast<Size>(s.leak_pins);
         r.pin_judgements += static_cast<Size>(s.pin_judgements);
         r.unfixed += static_cast<Size>(s.unfixed);
@@ -1993,6 +1994,7 @@ inline SimulationResult run_transient(
                 }
                 if (result.mode_guard.enabled) {
                     ++result.mode_guard.checks;
+                    if (flipped || mask_cycle) ++result.mode_guard.settle_caps;
                     if ((flipped || mask_cycle) &&
                         mode_guard_site(at_t, gates, for_dt, backward_euler, b_extra,
                                         [&](const topology::SwitchStateMask& m, Vector& out) {
@@ -3197,6 +3199,7 @@ inline SimulationResult run_transient(
                 }
                 if (result.mode_guard.enabled) {
                     ++result.mode_guard.checks;
+                    if (flipped || mask_cycle) ++result.mode_guard.settle_caps;
                     if ((flipped || mask_cycle) &&
                         mode_guard_site(t, gates, Real{0}, false, b_extra_user, solve_s)) {
                         flipped = false;

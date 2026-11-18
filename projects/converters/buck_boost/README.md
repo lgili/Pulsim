@@ -51,15 +51,13 @@ higher than the boost's (4.6 kHz), so the loop can run faster. Set
 $D = 0.8$ in `BuckBoostParams(V_o=48)` to see the zero collapse to
 ~600 Hz — the loop has to slow down dramatically.
 
-## Pulsim cross-validation: known limitation
+## Pulsim cross-validation
 
-Same caveat as the boost notebook: Pulsim's switching engine has
-numerical-stability issues with the ideal-switch buck-boost (decoupled
-output cap → no natural damping for switch-transition dV/dt spikes).
-The math self-consistency checks in notebook 1 (poles, DC gains, ss2tf
-round-trip) are the rigorous validation; the closed-loop pure-Python
-simulation in notebook 2 is the proof-of-life on the actual switched
-waveform.
+`00_buck_boost_pulsim_validation.ipynb` runs the switched buck-boost in
+Pulsim: the steady-state $|V_o|$ lands within 0.1 % of
+$D/(1-D) \cdot V_g$. Notebook 1 adds the math self-consistency checks
+(poles, DC gains, ss2tf round-trip); notebook 2 closes the loop on a
+pure-Python switched model, not in Pulsim.
 
 ## How to run
 

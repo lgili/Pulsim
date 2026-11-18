@@ -49,9 +49,11 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_switch_state_record.cpp  # per-sample stamped mask
         tests/dsed/test_trbdf2_stage_coeffs.cpp
         tests/dsed/test_exact_lti.cpp
+        tests/dsed/test_convergence_failure.cpp  # typed give-up sites
         tests/dsed/test_event_projection.cpp
         tests/dsed/test_scheduler_auto.cpp  # Gate 4.D — auto-dispatch RK45↔BDF2 per mode
         tests/dsed/test_period_integrals.cpp  # period map, M, closed-form integrals
+        tests/dsed/test_periodic_orbit.cpp  # the Newton shooting loop in the kernel
     )
     target_link_libraries(pulsim_core_dsed_tests
         PRIVATE
@@ -445,6 +447,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_builder_tests
         tests/builder/test_main.cpp
         tests/builder/test_circuit_builder.cpp
+        tests/builder/test_circuit_ir.cpp
     )
     target_link_libraries(pulsim_core_builder_tests
         PRIVATE

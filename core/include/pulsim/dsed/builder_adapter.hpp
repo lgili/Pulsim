@@ -50,7 +50,10 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <numbers>
 #include <functional>
 #include <stdexcept>
@@ -105,6 +108,10 @@ public:
         std::vector<Real> aug_omegas;   // one per oscillator pair
         bool exact_built = false;       // lazy — see item 4 note
         std::vector<Real> state_mass;   // C or L per state (energy scale)
+        // add-exact-propagator-strategy D14: one reduced column per
+        // piecewise-linear source (b_projection of its −1 stamp); the
+        // source enters each step as level + ramp (exact_advance_affine).
+        DenseMatrix pwl_cols;
     };
 
     /// @param graph        Circuit's topology graph (non-owning ref).
@@ -123,7 +130,8 @@ public:
           cache_{cache},
           b_extra_fn_{std::move(b_extra_fn)},
           has_dynamic_sources_{detect_dynamic_sources_()},
-          sine_only_sources_{detect_sine_only_()} {
+          has_sine_sources_{detect_sine_()} {
+        collect_pwl_sources_();
         // The LTI extraction drops Newton devices; refuse them here so
         // every caller (not only simulate()) gets the typed refusal.
         require_supported(graph, pool, pwl::Engine::Dsed);
@@ -254,6 +262,29 @@ public:
         return current_entry_->exact.valid;
     }
 
+    /// add-exact-propagator-strategy 13.2: with `engine='exact'` a
+    /// segment the exact kernel cannot step (tier 3) is refused unless
+    /// the caller allows implicit segments.
+    void set_refuse_implicit(bool on) noexcept { refuse_implicit_ = on; }
+
+    /// Called by the schedulers where the current mode has no exact step
+    /// and they would integrate it numerically: refuses when asked to,
+    /// naming the D11 rule ('source' for a user b_extra_fn, else 'cost').
+    void refuse_implicit_step(Real t) const {
+        if (!refuse_implicit_) return;
+        ensure_current_resolved_();
+        const bool src = static_cast<bool>(b_extra_fn_);
+        const std::string& why = current_entry_->exact.reason;
+        char tb[32];
+        std::snprintf(tb, sizeof tb, "%.9e", t);
+        throw UnsupportedError(
+            "dsed", src ? "source" : "cost", "", "",
+            std::string{"engine='exact' at t = "} + tb + " s: this segment's mode has no "
+            "exact step (" + (why.empty() ? std::string{"no closed form"} : why) + "). "
+            "Pass allow_implicit_segments=True to integrate it numerically, or use "
+            "engine='pwl' / 'trbdf2'.");
+    }
+
     /// Advance the reduced state from absolute time `t` by `h`,
     /// exactly. For a sine-driven circuit the oscillator sub-state
     /// is rebuilt from `t` analytically on every call, so phase
@@ -275,8 +306,29 @@ public:
         const auto n = x.size();
         const auto k =
             static_cast<Index>(e.aug_omegas.size());
+        const bool pwl = !pwl_sources_.empty();
+        if (pwl) {
+            // level and ramp of every PWL source just after t; the
+            // scheduler never steps across a corner (next_source_corner_after)
+            const auto m = static_cast<Index>(pwl_sources_.size());
+            pwl_v_.resize(m);
+            pwl_s_.resize(m);
+            for (Index j = 0; j < m; ++j) {
+                const auto [v, sl] = pwl_value_slope_(pwl_sources_[static_cast<Size>(j)], t);
+                pwl_v_[j] = v;
+                pwl_s_[j] = sl;
+            }
+            pwl_c0_.setZero(n + 2 * k);
+            pwl_c1_.setZero(n + 2 * k);
+            pwl_c0_.head(n).noalias() = e.pwl_cols * pwl_v_;
+            pwl_c1_.head(n).noalias() = e.pwl_cols * pwl_s_;
+        }
         if (k == 0) {
-            exact_advance_into(e.exact, x, h, out);
+            if (pwl) {
+                exact_advance_affine_into(e.exact, x, h, pwl_c0_, pwl_c1_, out);
+            } else {
+                exact_advance_into(e.exact, x, h, out);
+            }
             return;
         }
         aug_in_.resize(n + 2 * k);
@@ -287,8 +339,40 @@ public:
             aug_in_[n + 2 * j]     = std::sin(w * t);
             aug_in_[n + 2 * j + 1] = std::cos(w * t);
         }
-        exact_advance_into(e.exact, aug_in_, h, aug_out_);
+        if (pwl) {
+            exact_advance_affine_into(e.exact, aug_in_, h, pwl_c0_, pwl_c1_, aug_out_);
+        } else {
+            exact_advance_into(e.exact, aug_in_, h, aug_out_);
+        }
         out = aug_out_.head(n);
+    }
+
+    /// The first corner of a piecewise-linear source strictly after t
+    /// (+∞ when there is none): a time event of the scheduler, so no
+    /// exact step straddles a change of a source's piece (D14).
+    [[nodiscard]] Real next_source_corner_after(Real t) const {
+        Real c = std::numeric_limits<Real>::infinity();
+        for (const auto& ps : pwl_sources_) {
+            switch (ps.kind) {
+            case PwlSource::PulseV:
+                c = std::min(c, models::PulseVoltageSource::next_corner_after(
+                                    pool_.pulse_voltage_source_params(ps.branch), t));
+                break;
+            case PwlSource::PulseI:
+                c = std::min(c, models::PulseVoltageSource::next_corner_after(
+                                    pool_.pulse_current_source_params(ps.branch).w, t));
+                break;
+            case PwlSource::TableI:
+                c = std::min(c, pool_.pwl_current_source_params(ps.branch)
+                                    .w.next_breakpoint_after(t));
+                break;
+            case PwlSource::PwmV:
+            default:
+                c = std::min(c, models::PWMVoltageSource::next_corner_after(
+                                    pool_.pwm_voltage_source_params(ps.branch), t));
+            }
+        }
+        return c;
     }
 
     /// Event-scan step of the current mode (exact_scan_step).
@@ -296,6 +380,14 @@ public:
         ensure_current_resolved_();
         ensure_exact_built_(*current_entry_);
         return pulsim::dsed::exact_scan_step(current_entry_->exact);
+    }
+
+    /// Output instants resolving the current mode's fast transient after
+    /// an event at t_e (exact_fast_samples).
+    void exact_fast_samples(Real t_e, Real h, std::vector<Real>& out) const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        pulsim::dsed::exact_fast_samples(current_entry_->exact, t_e, h, out);
     }
 
     /// The tier-1 bound's longest step (D2); the scheduler sets its
@@ -318,7 +410,7 @@ public:
         ensure_current_resolved_();
         ensure_exact_built_(*current_entry_);
         const LTIEntry& e = *current_entry_;
-        if (e.aug_omegas.empty()
+        if (e.aug_omegas.empty() && pwl_sources_.empty()
             && exact_project_slow(e.exact, x, fast_threshold)) {
             return;
         }
@@ -420,14 +512,14 @@ public:
 
     /// The full MNA vector (recover_full) written into `out`.
     void recover_full_into(Real t, const Vector& x,
-                           Eigen::Ref<Vector> out) const {
+                           Eigen::Ref<Vector> out, Real left_by = Real{0}) const {
         ensure_current_resolved_();
         const LTIEntry& e = *current_entry_;
         out.noalias() = e.recover_from_state * x;
         out += e.recover_const;
         if (has_dynamic_sources_) {
             out.noalias() += e.recover_from_b *
-                             build_time_varying_b_extra_(t);
+                             build_time_varying_b_extra_(t, left_by);
         }
     }
 
@@ -587,46 +679,129 @@ private:
             entry.exact = make_exact_lti(entry.A, entry.exact_b,
                                          energy_scale_(entry, 0), h_max_);
             ++n_eig_;
-        } else if (sine_only_sources_) {
-            build_augmented_exact_(entry);
+        } else if (!b_extra_fn_) {
+            // sine pairs augmented (voltage or current); PWM / pulse /
+            // table sources enter each step as level + ramp through
+            // pwl_cols (D14)
+            if (has_sine_sources_) {
+                build_augmented_exact_(entry);
+            } else {
+                entry.exact_b = entry.b_constant;
+                entry.exact = make_exact_lti(entry.A, entry.exact_b,
+                                             energy_scale_(entry, 0), h_max_);
+            }
             ++n_eig_;
+            const auto m = static_cast<Index>(pwl_sources_.size());
+            entry.pwl_cols = DenseMatrix::Zero(entry.A.rows(), m);
+            for (Index j = 0; j < m; ++j) {
+                const auto& ps = pwl_sources_[static_cast<Size>(j)];
+                if (ps.kind == PwlSource::PwmV || ps.kind == PwlSource::PulseV) {
+                    entry.pwl_cols.col(j) = -entry.b_projection.col(ps.src_var);
+                } else {
+                    entry.pwl_cols.col(j) = entry.b_projection * current_stamp_(ps.branch);
+                }
+            }
         } else {
-            entry.exact.reason = b_extra_fn_
-                ? "b_extra_fn: a user source function has no closed form"
-                : "PWM / pulse voltage source or a sine / pulse / table "
-                  "current source: no closed form yet";
+            entry.exact.reason =
+                "b_extra_fn: a user source function has no closed form";
         }
-        // PWM/pulse sources, current waveforms or a user b_extra_fn:
-        // b(t) is not a finite sum of the sine-voltage oscillators the
-        // augmented stepper models — the numeric path owns those.
+        // a user b_extra_fn: b(t) has no closed form — the numeric
+        // path owns it.
     }
 
-    /// True iff every time-varying contribution is a
-    /// SineVoltageSource (no PWM, no pulse, no user callback) —
-    /// the class the augmented-oscillator exact stepper covers.
-    [[nodiscard]] bool detect_sine_only_() const {
-        if (!has_dynamic_sources_ || b_extra_fn_) {
-            return false;
-        }
+    /// Whether a sine voltage or current source exists (its oscillator
+    /// pair is augmented into every mode's exact stepper).
+    [[nodiscard]] bool detect_sine_() const {
         using K = pwl::DevicePool::StoredKind;
-        bool any_sine = false;
         for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
-            K kind;
             try {
-                kind = pool_.kind_of(b_id);
+                const K k = pool_.kind_of(b_id);
+                if (k == K::SineVoltageSource || k == K::SineCurrentSource) return true;
             } catch (const std::out_of_range&) {
+            }
+        }
+        return false;
+    }
+
+    /// b_extra of a current source per ampere (compute_current_waveform_b_extra:
+    /// the current leaves `from` and returns at `to`).
+    [[nodiscard]] Vector current_stamp_(Index b_id) const {
+        Vector st = Vector::Zero(static_cast<Index>(pool_.state_size(graph_)));
+        const auto& br = graph_.branch(b_id);
+        if (br.from >= 0) st[br.from] -= Real{1};
+        if (br.to >= 0) st[br.to] += Real{1};
+        return st;
+    }
+
+    /// A piecewise-linear source: PWM (levels), pulse (levels and
+    /// ramps) voltage source by its MNA source row; pulse or table
+    /// current source by its stamp (current_stamp_).
+    struct PwlSource {
+        enum Kind { PwmV, PulseV, PulseI, TableI };
+        Index branch;
+        Index src_var;
+        Kind kind;
+    };
+
+    void collect_pwl_sources_() {
+        using K = pwl::DevicePool::StoredKind;
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            const auto& branch = graph_.branch(b_id);
+            if (branch.kind != topology::BranchKind::Source
+                || !pool_.is_registered(b_id)) {
                 continue;
             }
-            if (kind == K::PWMVoltageSource ||
-                kind == K::PulseVoltageSource ||
-                sources::is_current_waveform(kind)) {
-                return false;
-            }
-            if (kind == K::SineVoltageSource) {
-                any_sine = true;
+            const K kind = pool_.kind_of(b_id);
+            if (kind == K::PWMVoltageSource || kind == K::PulseVoltageSource) {
+                pwl_sources_.push_back({b_id, pool_.branch_var_id_for_source(b_id, graph_),
+                                        kind == K::PulseVoltageSource ? PwlSource::PulseV
+                                                                      : PwlSource::PwmV});
             }
         }
-        return any_sine;
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            if (!pool_.is_registered(b_id)) continue;
+            const K kind = pool_.kind_of(b_id);
+            if (kind == K::PulseCurrentSource || kind == K::PwlCurrentSource) {
+                pwl_sources_.push_back({b_id, kInvalidIndex,
+                                        kind == K::PulseCurrentSource ? PwlSource::PulseI
+                                                                      : PwlSource::TableI});
+            }
+        }
+    }
+
+    /// (value, right slope) of one PWL source at t, as the overlay
+    /// (compute_pwm_b_extra / compute_pulse_b_extra) evaluates it.
+    [[nodiscard]] std::pair<Real, Real> pwl_value_slope_(const PwlSource& ps, Real t) const {
+        switch (ps.kind) {
+        case PwlSource::PulseV: {
+            const auto& p = pool_.pulse_voltage_source_params(ps.branch);
+            return {models::PulseVoltageSource::value_at(p, t),
+                    models::PulseVoltageSource::slope_at(p, t)};
+        }
+        case PwlSource::PulseI: {
+            const auto& p = pool_.pulse_current_source_params(ps.branch).w;
+            return {models::PulseVoltageSource::value_at(p, t),
+                    models::PulseVoltageSource::slope_at(p, t)};
+        }
+        case PwlSource::TableI: {
+            // the piece the step from t lies in: the one holding the
+            // midpoint to the next knot (a knot landed on exactly reads
+            // its new piece however fmod rounded the wrap)
+            const auto& w = pool_.pwl_current_source_params(ps.branch).w;
+            const Real tn = w.next_breakpoint_after(t);
+            const Real v = w.value_at(t);
+            if (!std::isfinite(tn)) return {v, Real{0}};
+            const Real u = w.local_time(t + Real{0.5} * (tn - t));
+            if (u <= w.t.front() || u >= w.t.back()) return {v, Real{0}};
+            const auto it = std::upper_bound(w.t.begin(), w.t.end(), u);
+            const auto k = static_cast<std::size_t>(it - w.t.begin());
+            return {v, (w.v[k] - w.v[k - 1]) / (w.t[k] - w.t[k - 1])};
+        }
+        case PwlSource::PwmV:
+        default:
+            return {models::PWMVoltageSource::value_at(
+                        pool_.pwm_voltage_source_params(ps.branch), t), Real{0}};
+        }
     }
 
     /// Build the augmented exact stepper for a sine-driven mode.
@@ -643,7 +818,8 @@ private:
     void build_augmented_exact_(LTIEntry& entry) const {
         using K = pwl::DevicePool::StoredKind;
         struct SineInfo {
-            Index src_var;
+            Index src_var;          // a voltage source's row, or kInvalidIndex
+            Index branch;           // a current source's branch (its stamp)
             Real omega, amp, phase, v_dc;
         };
         std::vector<SineInfo> sines;
@@ -661,9 +837,23 @@ private:
                 continue;    // value_at degenerates to v_dc: DC-only
             }
             sines.push_back({
-                pool_.branch_var_id_for_source(b_id, graph_),
+                pool_.branch_var_id_for_source(b_id, graph_), kInvalidIndex,
                 Real{2} * std::numbers::pi_v<Real> * p.frequency,
                 p.v_amplitude, p.phase, p.v_dc});
+        }
+        // sine CURRENT sources: the same oscillator, entering by their stamp
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            if (!pool_.is_registered(b_id)
+                || pool_.kind_of(b_id) != K::SineCurrentSource) {
+                continue;
+            }
+            const auto& p = pool_.sine_current_source_params(b_id).w;
+            if (p.frequency <= Real{0}) {
+                continue;
+            }
+            sines.push_back({kInvalidIndex, b_id,
+                             Real{2} * std::numbers::pi_v<Real> * p.frequency,
+                             p.v_amplitude, p.phase, p.v_dc});
         }
 
         const auto n = entry.A.rows();
@@ -686,6 +876,13 @@ private:
             b_dc_mna[pool_.branch_var_id_for_source(b_id, graph_)]
                 += -p.v_dc;
         }
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            if (pool_.is_registered(b_id)
+                && pool_.kind_of(b_id) == K::SineCurrentSource) {
+                b_dc_mna += current_stamp_(b_id)
+                            * pool_.sine_current_source_params(b_id).w.v_dc;
+            }
+        }
 
         // Distinct frequencies, amplitude+phase folded per source.
         std::vector<Real> omegas;
@@ -707,7 +904,11 @@ private:
             // −amp·sin(ωt+φ) on the source row, reduced through
             // b_projection.
             Vector stamp = Vector::Zero(n_mna);
-            stamp[sn.src_var] = Real{-1};
+            if (sn.src_var != kInvalidIndex) {
+                stamp[sn.src_var] = Real{-1};
+            } else {
+                stamp = current_stamp_(sn.branch);
+            }
             const Vector col = entry.b_projection * stamp;
             q_sin[static_cast<Size>(j)]
                 += col * (sn.amp * std::cos(sn.phase));
@@ -764,35 +965,64 @@ public:
         diode_port_problem_full(mask, t, xf, h, ports, Z, u);
     }
 
-    /// Same, from a full-MNA vector at t⁻ (capacitor branch voltages and
-    /// inductor currents are read from it; the rest is ignored).
+    /// Same, from a full-MNA vector at t⁻ (only capacitor branch voltages
+    /// and inductor currents decide the answer).
+    ///
+    /// Solved for the increment δ = s − x(t⁻): J·δ = −(G·x + b(t + h)),
+    /// u = v(x) + v(δ). The history form J·s = (C/h)·x − b puts C·v_C/h
+    /// (1.6e6 A for 100 µF, 32 V, h = 2 ns) on both nodes of a capacitor;
+    /// on an island held by weak ties (1 MΩ, g_off) its rounding, 2e-10 A,
+    /// is 2e-4 V of common mode — more than a turn-on gap moves in h_e, so
+    /// rounding chose the mode (DECISIONS #21: a bridge on a floating
+    /// source, D2 never ON).
     void diode_port_problem_full(
         const MaskT& mask, Real t, const Vector& xf, Real h,
         const std::vector<std::pair<Index, Index>>& ports, DenseMatrix& Z,
         Vector& u) const {
-        if (!port_C_set_) {
-            sparse::Matrix G;
-            Vector b;
-            pwl::assemble_segment_split(graph_, pool_, mask, G, port_C_, b);
-            port_C_set_ = true;
-        }
-        auto it = port_b_.find(mask);
-        if (it == port_b_.end()) {
+        auto it = port_gb_.find(mask);
+        if (it == port_gb_.end()) {
             sparse::Matrix G, C;
             Vector b;
             pwl::assemble_segment_split(graph_, pool_, mask, G, C, b);
-            it = port_b_.emplace(mask, std::move(b)).first;
+            it = port_gb_.emplace(mask, std::pair{std::move(G), std::move(b)}).first;
         }
-        const Vector& b_c = it->second;
-        const Real dt = Real{2} * h;
-        // BE history −(C_phys/h)·x(t⁻) = −(C_coef/(2h))·x(t⁻); sources at t + h
+        const Vector& b_c = it->second.second;
+        const Real dt = Real{2} * h;   // J(2h) = G + C_phys/h: backward Euler at h
+        // solve_at: J·δ = −(b_c + rhs), rhs = G·x(t⁻) + sources at t + h
         Vector& rhs = port_rhs_;
-        rhs = (Real{-1} / dt) * (port_C_ * xf);
+        rhs = it->second.first * xf;
         if (has_dynamic_sources_) {
             rhs += build_time_varying_b_extra_(t + h);
         }
         Vector& sol = port_sol_;
         cache_.solve_at(mask, dt, rhs, sol);
+        // Floating islands (DECISIONS #30): the factor rounds the island's
+        // common mode to ε·(internal current)/G_tie, about tol_w on a bridge
+        // with every diode OFF, so rounding picked modes. Each island's KCL
+        // sum (boundary conductances only) is imposed exactly.
+        const auto& islands = port_islands_of_(mask);
+        std::vector<Vector> ws;
+        std::vector<Real> kap;
+        for (const auto& isl : islands) {
+            rhs = -b_c;
+            rhs[isl.ref] -= Real{1};          // J·w = e_ref
+            cache_.solve_at(mask, dt, rhs, port_w_);
+            ws.push_back(port_w_);
+            kap.push_back(island_dot_(isl, port_w_));
+        }
+        // J·s = f: σ = g·(base + s) − Σ_S f, with Σ_S f = src(island)
+        auto fix = [&](Vector& s, const Vector* base, auto&& src) {
+            // islands are disjoint: g_m·w_n = Σ_{S_m} e_ref(n) = 0 for m ≠ n,
+            // so the sequential corrections do not interact (beyond rounding)
+            for (std::size_t m = 0; m < islands.size(); ++m) {
+                Real sig = island_dot_(islands[m], s) - src(islands[m]);
+                if (base) sig += island_dot_(islands[m], *base);
+                if (kap[m] != Real{0} && std::isfinite(kap[m])) s -= ws[m] * (sig / kap[m]);
+            }
+        };
+        // J·δ = −(G·x + b): summed over an island, g·(x + δ) = 0 (no source
+        // sits on an island's boundary, internal ones cancel)
+        fix(sol, &xf, [](const PortIsland&) { return Real{0}; });
         const auto k = static_cast<Eigen::Index>(ports.size());
         auto vp = [&](const Vector& s, std::size_t j) {
             const auto [a, c] = ports[j];
@@ -800,7 +1030,10 @@ public:
         };
         u.resize(k);
         Z.resize(k, k);
-        for (Eigen::Index j = 0; j < k; ++j) u[j] = vp(sol, static_cast<std::size_t>(j));
+        for (Eigen::Index j = 0; j < k; ++j) {
+            const auto ju = static_cast<std::size_t>(j);
+            u[j] = vp(xf, ju) + vp(sol, ju);
+        }
         for (Eigen::Index j = 0; j < k; ++j) {
             // J·s = −(b_c + b_extra) with b_extra = E_j − b_c: J·s = −E_j
             rhs = -b_c;
@@ -808,6 +1041,10 @@ public:
             if (a >= 0) rhs[a] += Real{1};
             if (c >= 0) rhs[c] -= Real{1};
             cache_.solve_at(mask, dt, rhs, sol);
+            fix(sol, nullptr, [&](const PortIsland& isl) {   // Σ_S(−E_j)
+                return Real((c >= 0 && isl.in[static_cast<Size>(c)]) ? 1 : 0)
+                     - Real((a >= 0 && isl.in[static_cast<Size>(a)]) ? 1 : 0);
+            });
             for (Eigen::Index i = 0; i < k; ++i)
                 Z(i, j) = -vp(sol, static_cast<std::size_t>(i));
         }
@@ -931,8 +1168,13 @@ public:
             return ids.size() - 1;
         };
         std::vector<std::pair<std::size_t, std::size_t>> edges;
-        for (const auto& c : cps)
-            edges.emplace_back(idx(c.primary_branch_id), idx(c.secondary_branch_id));
+        for (const auto& c : cps) {
+            // two statements: argument order is unspecified (GCC numbered the
+            // secondary first and named the group "L2+L1")
+            const auto a = idx(c.primary_branch_id);
+            const auto b = idx(c.secondary_branch_id);
+            edges.emplace_back(a, b);
+        }
         // union-find over the windings
         std::vector<std::size_t> root(ids.size());
         for (std::size_t i = 0; i < root.size(); ++i) root[i] = i;
@@ -985,23 +1227,147 @@ public:
     }
 
 private:
-    mutable std::unordered_map<MaskT, Vector> port_b_;
-    mutable sparse::Matrix port_C_;
-    mutable bool port_C_set_ = false;
+    mutable std::unordered_map<MaskT, std::pair<sparse::Matrix, Vector>> port_gb_;   // (G, b_c)
     mutable Vector port_x_full_, port_rhs_, port_sol_;
     mutable std::size_t n_port_solves_ = 0;
+
+    /// A floating island of the port companion (DECISIONS #30): nodes
+    /// joined by strong elements only, tied to the rest through weak
+    /// conductances (OFF switches / diodes, resistors ≤ 1 µS). `g`: the
+    /// island's KCL sum as a row over the MNA unknowns, from the boundary
+    /// branches alone (every internal stamp, C/h included, cancels
+    /// analytically and is left out).
+    struct PortIsland {
+        Index ref = -1;                         // an island node (the correction's injection row)
+        std::vector<std::pair<Index, Real>> g;  // (column, Σ_S G_column) of the boundary
+        std::vector<char> in;                   // in[node]: node belongs to the island
+    };
+    mutable std::unordered_map<MaskT, std::vector<PortIsland>> port_islands_;
+    mutable Vector port_w_;
+
+    /// The islands of `mask` (empty when the circuit has a device the
+    /// rule below does not classify, or none floats).
+    const std::vector<PortIsland>& port_islands_of_(const MaskT& mask) const {
+        auto it = port_islands_.find(mask);
+        if (it != port_islands_.end()) return it->second;
+        std::vector<PortIsland> out;
+        const Index nn = graph_.num_nodes();
+        std::vector<Index> up(static_cast<Size>(nn + 1));   // union-find; nn = ground
+        for (Index i = 0; i <= nn; ++i) up[static_cast<Size>(i)] = i;
+        auto root = [&](Index i) {
+            const Index v = i < 0 ? nn : i;
+            Index r = v;
+            while (up[static_cast<Size>(r)] != r) r = up[static_cast<Size>(r)];
+            return r;
+        };
+        auto join = [&](Index a, Index b) { up[static_cast<Size>(root(a))] = root(b); };
+        struct Weak { Index a, b; Real g; };
+        std::vector<Weak> weak;
+        constexpr Real kWeakResistor = Real{1e-6};   // siemens: ties (1 MΩ) and the builder's 1 GΩ
+        using K = pwl::DevicePool::StoredKind;
+        // a user b_extra_fn can inject a net current into an island: its KCL
+        // sum would need that source term (reviewer finding), so no islands
+        bool known = !static_cast<bool>(b_extra_fn_);
+        Index sw = 0;
+        for (Index b = 0; b < graph_.num_branches() && known; ++b) {
+            const auto& br = graph_.branch(b);
+            K kind;
+            try {
+                kind = pool_.kind_of(b);
+            } catch (const std::out_of_range&) {
+                known = false;
+                break;
+            }
+            if (br.kind == topology::BranchKind::Switch) {
+                const bool on = mask.get(static_cast<Size>(sw++));
+                if (kind == K::Diode || kind == K::Switch) {
+                    if (on) join(br.from, br.to);
+                    else weak.push_back({br.from, br.to, kind == K::Diode
+                        ? pool_.diode_params(b).g_off : pool_.switch_g_off(b)});
+                } else {
+                    known = false;
+                }
+                continue;
+            }
+            switch (kind) {
+            case K::Resistor: {
+                const Real g = pool_.resistor_params(b).G;
+                if (std::abs(g) <= kWeakResistor) weak.push_back({br.from, br.to, g});
+                else join(br.from, br.to);
+                break;
+            }
+            case K::Capacitor: case K::Inductor: case K::VoltageSource:
+            case K::PWMVoltageSource: case K::SineVoltageSource: case K::PulseVoltageSource:
+            case K::CurrentSource: case K::SineCurrentSource: case K::PulseCurrentSource:
+            case K::PwlCurrentSource:
+                // strong, or a source: an island never has one on its boundary,
+                // so its source terms cancel in the KCL sum too
+                join(br.from, br.to);
+                break;
+            default:
+                known = false;
+            }
+        }
+        if (known) {
+            std::vector<Index> rt(static_cast<Size>(nn));
+            std::unordered_map<Index, Index> size;
+            for (Index i = 0; i < nn; ++i) ++size[rt[static_cast<Size>(i)] = root(i)];
+            const Index gr = root(-1);
+            std::unordered_map<Index, Size> slot;
+            for (Index i = 0; i < nn; ++i) {
+                const Index r = rt[static_cast<Size>(i)];
+                if (r == gr || size[r] < 2) continue;   // grounded, or nothing internal to cancel
+                auto [s, fresh] = slot.try_emplace(r, out.size());
+                if (fresh) {
+                    out.emplace_back();
+                    out.back().ref = i;
+                    out.back().in.assign(static_cast<Size>(nn), 0);
+                }
+                out[s->second].in[static_cast<Size>(i)] = 1;
+            }
+            for (auto& isl : out) {
+                std::unordered_map<Index, Real> col;
+                for (const auto& w : weak) {
+                    const bool ia = w.a >= 0 && isl.in[static_cast<Size>(w.a)];
+                    const bool ib = w.b >= 0 && isl.in[static_cast<Size>(w.b)];
+                    if (ia == ib) continue;   // internal, or not touching the island
+                    const Index i = ia ? w.a : w.b, o = ia ? w.b : w.a;
+                    col[i] += w.g;
+                    if (o >= 0) col[o] -= w.g;
+                }
+                isl.g.assign(col.begin(), col.end());
+                std::sort(isl.g.begin(), isl.g.end());   // a fixed summation order
+            }
+            std::erase_if(out, [](const PortIsland& isl) { return isl.g.empty(); });
+        }
+        return port_islands_.emplace(mask, std::move(out)).first->second;
+    }
+
+    /// Impose island `isl`'s KCL sum exactly on `s`, a solution of
+    /// J·s = f with Σ_S f = `src` (DECISIONS #30): s −= w·σ/(g·w),
+    /// σ = g·s − src, w = J⁻¹·e_ref.
+    static Real island_dot_(const PortIsland& isl, const Vector& s) {
+        Real a = Real{0};
+        for (const auto& [j, g] : isl.g) a += g * s[j];
+        return a;
+    }
 
     /// Sum sine + PWM + pulse + user-supplied contributions at time t.
     /// Always returns a full-MNA-size vector even when no dynamic
     /// sources are present (the caller decides whether to short-
     /// circuit via `has_dynamic_sources_`).
-    [[nodiscard]] Vector build_time_varying_b_extra_(Real t) const {
-        Vector b = sources::compute_pwm_b_extra(pool_, graph_, t);
+    /// `left_by` > 0: a source that jumps exactly at t reads its LEFT
+    /// limit, value_at(t − left_by) (a stored event sample is the left
+    /// limit of the step that ended there).
+    [[nodiscard]] Vector build_time_varying_b_extra_(Real t, Real left_by = Real{0}) const {
+        Vector b;
+        sources::compute_pwm_b_extra(pool_, graph_, t, b, left_by);
         b += sources::compute_sine_b_extra(pool_, graph_, t);
-        b += sources::compute_pulse_b_extra(pool_, graph_, t);
-        Vector iw;
-        sources::compute_current_waveform_b_extra(pool_, graph_, t, iw);
-        b += iw;
+        Vector w;
+        sources::compute_pulse_b_extra(pool_, graph_, t, w, left_by);
+        b += w;
+        sources::compute_current_waveform_b_extra(pool_, graph_, t, w, left_by);
+        b += w;
         if (b_extra_fn_) {
             b += b_extra_fn_(t);
         }
@@ -1050,8 +1416,11 @@ private:
     const pwl::DevicePool&    pool_;
     pwl::PwlStateSpaceCache&  cache_;
     std::function<Vector(Real)> b_extra_fn_;
+    bool refuse_implicit_ = false;     // 13.2: refuse a tier-3 segment
     bool                       has_dynamic_sources_;
-    bool                       sine_only_sources_;
+    bool                       has_sine_sources_;
+    std::vector<PwlSource>     pwl_sources_;
+    mutable Vector pwl_v_, pwl_s_, pwl_c0_, pwl_c1_;
 
     MaskT  current_mask_{};
     bool   current_mask_set_ = false;

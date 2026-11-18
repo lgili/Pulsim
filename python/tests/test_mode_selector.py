@@ -87,11 +87,13 @@ def test_port_model_equals_the_prototype_port_lcp(name):
 MODEL_DIFFERENCE = {"boost_50": 1, "boost_500": 1}
 # Slice-2 D5 leak pins (DECISIONS.md #13): a tie left after widening whose current holds a floating
 # island (i * R_jj > tol_w) is ON unless the engine's exact judge accepts the all-ties-OFF mode. This
-# probe surface has no judge, so every pin stands. bridge3_cfilter: every turn-off; conductance-form
-# physics (the leak divider forward-biases an OFF diode by volts), the ideal reference has a gauge
-# instead. bridge1: series-pair turn-offs where event-location residuals (pA) look like pins; on dsed
-# the judge sends them OFF (test_mode_shadow.py: 0 LCP errors on the bridges).
-LEAK_PINS = {"bridge1_vf07": 2, "bridge1_vf0": 3, "bridge3_cfilter": 12}
+# probe surface has no judge, so every pin stands. bridge3_cfilter: one per turn-off (structural:
+# conductance-form physics, the leak divider forward-biases an OFF diode by volts; the ideal
+# reference has a gauge instead). bridge1 had 2-3 rounding-dependent pins at its series-pair
+# turn-offs (and CI x86-64 two mismatches): the widened passes pivoted the previous mode's port
+# matrix onto the all-OFF candidate through a block of condition ~5e11 and read the pair's split as
+# +-0.5 V. Posed in the candidate mode with the island's KCL exact (DECISIONS.md #30) they are gone.
+LEAK_PINS = {"bridge3_cfilter": 12}
 
 
 @pytest.mark.parametrize("name", list(B.FAMILIES))

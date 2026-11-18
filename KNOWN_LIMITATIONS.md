@@ -363,12 +363,16 @@ remove).
 `engine='dsed'` steps a mask with constant sources exactly (tier 1
 eigen, tier 2 Padé; `result.exact["masks"]`). A mask that passes
 neither bound (tier 3: stiff and non-normal, e.g. a 1e12 Jordan block)
-runs on the old numeric path for that mask, recorded with its reason;
-the implicit hand-off and a strict refusal need the unified stepper
-(`add-exact-propagator-strategy` task 2.4). Masks with PWM / pulse
-voltage sources or a sine / pulse / table current source are numeric too
-(task 8; tier 3 in `result.exact`); sine voltage sources are exact
-(an augmented oscillator state). Capacitor loops (parallel
+is refused by name (`UnsupportedError('dsed', 'cost')`) unless
+`allow_implicit_segments=True`, which runs it on the old numeric path,
+recorded with its reason (task 13.2); the implicit strategy hand-off
+needs the unified stepper (task 2.4). Sine, PWM and pulse voltage
+sources and sine / pulse / table current sources are exact (corners are
+time events); a user `b_extra_fn` makes the mask numeric, refused as
+`'source'` unless allowed. `integrator='bdf2'` is numeric throughout and
+not refused. Without `dt` the exact engine samples every 10 µs plus its
+events: exact at those instants, but a waveform interpolated between
+them is not (pass `dt` for a finer output grid). Capacitor loops (parallel
 capacitors) are refused by the extractor, so the charge-conserving
 start for inconsistent `c0=` values is not reachable yet. Coupled
 inductors stay refused (task 7).
@@ -429,33 +433,65 @@ not seen, nor is a predicate at zero that leaves toward its event side
 off (`h_e = 0`) the read-ahead is `1e-6·h`, so a diode sliding on its
 threshold advances by that much per event until the chatter detector
 stops it. Current zero-crossing and custom predicates starting at zero
-are still skipped for the step. The guard repairs only the modes it
-judges inconsistent over `1e4·h_e`; a mode consistent that long and
-wrong later is not caught.
+are still skipped for the step. A diode predicate that starts a step
+past its threshold by more than the zero band (1e-12 × the largest node
+voltage) is not an event, whether it comes back or not (DECISIONS #23):
+such a start is a mode the decision at that instant (guard or LCP)
+should have set. With the guard off (a module switch for A/B runs) the
+settle is still judged and refuses where the guard would repair
+(DECISIONS #26). The guard repairs only the modes it judges
+inconsistent over `1e4·h_e`; a mode consistent that long and wrong
+later is not caught.
 
-### `mode_selection='lcp'` on a bridge whose DC bus floats on leak resistors
+### dsed: a diode island tied to ground through a huge resistor
 
-A four-diode bridge fed from a floating secondary (an ideal transformer,
-or a sine source between two non-ground nodes) whose DC bus is held only
-by 1 MΩ ties and the diodes' `g_off` runs wrong under `'lcp'`: two diodes
-never conduct and one blocks +49.86 V (11.73 V against 31.88 V). The
-result flips with the `h_e` ratio, and the default (settle + guard) is
-right (add-complementarity-mode-selection DECISIONS #21). `'lcp'` is
-opt-in; use the default there. On the integrated tree the
-ideal-transformer bridge (`test_mode_passivity`) is loud, not wrong: the stored-sample guard raises `DiodeModeInconsistentError`
-(D2 OFF while forward-biased by 0.063 V from t = 10.008 ms); up to 9 ms
-`'lcp'` matches pwl to 5e-9 V.
+On `engine='dsed'` a diode island whose only path to ground is R_tie
+(a floating DC bus) is decided through G + C/h; its rounding error on
+the island gap is about ε·C·|dv/dt|/G_tie. Where that exceeds the tie
+tolerance (1e-9 × the voltage scale) the run stops with RuntimeError
+"factorize failed (numerically singular)" naming the node, e.g. 1e12 Ω
+with 2 mF, and at 1e9 Ω only at some `h_e`. Use `pwl`, or a smaller
+R_tie (1 MΩ runs within 6.2e-9 V of pwl). The failure is a
+`RuntimeError`, not a typed `UnsupportedError`.
 
 ### Many-diode rectifiers with line inductance on dsed
 
-Ten three-phase bridges (60 diodes) behind 0.2 mH line inductors chatter
-at a natural commutation ("is chattering at t = 4.33 ms") from five
-bridges on, at `V_th = 0` and `1e-2`, in every mode; paralleled onto one
-DC bus they fail to settle at `t = 0` from five bridges on, and
-`trbdf2` aborts on them ("non-finite step … h_min"). The same bank
-without line inductance runs (add-complementarity-mode-selection
-DECISIONS #20). `engine='pwl'` runs both (181.81 V / 200.01 V at
-`dt = 1 µs`); no reference was available to check them.
+Ten three-phase bridges (60 diodes) behind 0.2 mH line inductors, each
+on its own DC bus, run on the dsed default and on `'lcp'` at `V_th = 0`
+(181.808127 V, pwl at `dt = 1 µs` 181.81 V); with the guard off the
+settle chatters ("is chattering at t = 7.39 ms"), and `'lcp'` at
+`V_th = 1e-2` chatters at `t = 0`. Paralleled onto one DC bus, five
+bridges run on the default and on `'lcp'` (1.5e-4 V from pwl; the
+default's settle hits its round cap at rest and the LCP decides those
+events); ten bridges do not: the mode at rest (all 30 diodes ON) has no
+exact step (tier 3, a near-defective eigenbasis) and the numeric
+fallback makes no progress past 1 µs. `trbdf2` aborts on them
+("non-finite step … h_min"). `engine='pwl'` runs both (183.28 V /
+200.01 V at `dt = 1 µs`) (add-complementarity-mode-selection DECISIONS
+#20, #23, #24, #25).
+
+### Cross-platform engine gaps on Linux (strict platform xfails)
+
+Two TR-BDF2 results differ on Linux (Eigen 3.4.0 / glibc libm; arm64 and
+x86-64 alike, `-ffp-contract=off`) from macOS (Eigen 5.0.1). The tests
+assert the property every platform must meet and carry
+`pytest.mark.xfail(strict=True, condition=sys.platform.startswith("linux"),
+reason="KNOWN_LIMITATIONS XP-n")`: CI stays green, the gap shows in the
+report, and the day the engine meets the property on Linux the strict
+xfail fails and must be removed. Reproduce with
+`scripts/ci_linux_repro.sh -- <test id>` (container `pulsim-ci147`).
+
+| Id | Test | macOS | Linux | Owner |
+|----|------|-------|-------|-------|
+| XP-1 | `test_trbdf2_error_control.py::test_doubled_tolerances_restore_the_previous_density` (diode bridge, DC bus floating on a 1 MΩ tie, rtol 2e-5 / atol 2e-8) | 1235 steps, 14 diode events, 3 forced accepts | Linux: 1398 steps, 122 diode events, 87 forced accepts (measured at 485ab770): chatter from t ≈ 4.4533 ms with every diode OFF; Windows: 1362 steps (CI at ed85a697) | TR-BDF2 track |
+| XP-2 | `test_saturable_transformer.py::test_engines_agree_below_saturation` (snubbed flyback, saturable core) | completes: 45,736 steps, 161 roundoff accepts | aborts at t = 0.34 ms, h at h_min, Newton 50 iterations still contracting (‖dx‖ 4.6e-7 → 1.7e-7 → 4.1e-8 V; 16.77160 V vs 16.77750 V at 0.339 ms) | TR-BDF2 track |
+
+XP-1 is not a Linux-only defect: on macOS the same bridge chatters at the
+neighbouring tolerances (rtol 1e-5: 1356 steps, 51 diode events, D4 held
+OFF against 4.72 V; rtol 4e-5: 56 events, 41 forced accepts, D4 by
+29.5 V, both with the missed-commutation warning). 2e-5 is clean on
+macOS by rounding luck. Workaround: `engine='pwl'` with a fixed `dt`, or
+tie the DC bus with a resistor well below 1 MΩ.
 
 ### Fixed-step controller ticks land on the `dt` grid
 

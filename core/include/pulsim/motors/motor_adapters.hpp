@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -66,8 +67,8 @@ inline void add_dc_motor_to_chain(
     auto step = [mech, Ke_V_s_per_rad, Kt_Nm_per_A,
                     R_a_ohm, L_a_H,
                     armature_branch_var_idx, bemf_source_idx,
-                    omega_channel = std::move(omega_channel),
-                    theta_channel = std::move(theta_channel)]
+                    omega_channel = chain.out(omega_channel),
+                    theta_channel = chain.out(theta_channel)]
                    (ChainContext& ctx) {
         const Real i_a = (ctx.x && armature_branch_var_idx >= 0 &&
                             armature_branch_var_idx <
@@ -76,8 +77,8 @@ inline void add_dc_motor_to_chain(
                           : Real{0};
         const Real T_em = Kt_Nm_per_A * i_a;
         mech->integrate(ctx.t, T_em, ctx.dt);
-        ctx.channels[omega_channel] = mech->omega_rad_s;
-        ctx.channels[theta_channel] = mech->theta_rad;
+        ctx.put(omega_channel, mech->omega_rad_s);
+        ctx.put(theta_channel, mech->theta_rad);
         const Real V_bemf = Ke_V_s_per_rad * mech->omega_rad_s;
         if (ctx.b_extra) {
             (*ctx.b_extra)[bemf_source_idx] = -V_bemf;
@@ -182,12 +183,12 @@ inline void add_induction_motor_to_chain(
                     pole_pairs,
                     R_s_ohm, L_s_H,
                     phase_inductor_idx, bemf_source_idx,
-                    omega_channel   = std::move(omega_channel),
-                    theta_channel   = std::move(theta_channel),
-                    psi_alpha_channel = std::move(psi_alpha_channel),
-                    psi_beta_channel  = std::move(psi_beta_channel),
-                    torque_channel    = std::move(torque_channel),
-                    slip_channel      = std::move(slip_channel)]
+                    omega_channel   = chain.out(omega_channel),
+                    theta_channel   = chain.out(theta_channel),
+                    psi_alpha_channel = chain.out(psi_alpha_channel),
+                    psi_beta_channel  = chain.out(psi_beta_channel),
+                    torque_channel    = chain.out(torque_channel),
+                    slip_channel      = chain.out(slip_channel)]
                    (ChainContext& ctx) {
         if (!ctx.x) return;
         const Index n_state = static_cast<Index>(ctx.x->size());
@@ -210,13 +211,26 @@ inline void add_induction_motor_to_chain(
         const Real omega_m = mech->omega_rad_s;
         const Real omega_e = static_cast<Real>(pole_pairs) * omega_m;
 
-        // Rotor flux dynamics (Krause Eq. 6.6-12 / 6.6-13).
+        // Rotor flux dynamics (Krause Eq. 6.6-12 / 6.6-13) as one
+        // complex ODE dψ/dt = a·ψ + (Lm/Tr)·i, a = −1/Tr + jω_e,
+        // integrated EXACTLY over the step with i held. Forward Euler
+        // grew |ψ| by |1 + a·dt| per step: 0.9432 / 0.9290 / 0.9220 Wb
+        // at dt = 50 / 25 / 12.5 µs on a 4 kW machine at 50 Hz (the
+        // limit is 0.915). The EMF applied over the coming step is the
+        // MEAN dψ/dt over it. Same law as make_induction_motor_observer.
         const Real psi_a = (*psi)[0];
         const Real psi_b = (*psi)[1];
-        const Real dpsi_a = -inv_Tr * psi_a + Lm_inv_Tr * i_alpha
-                                - omega_e * psi_b;
-        const Real dpsi_b = -inv_Tr * psi_b + Lm_inv_Tr * i_beta
-                                + omega_e * psi_a;
+        const std::complex<Real> a_c{-inv_Tr, omega_e};
+        const std::complex<Real> ead = std::exp(a_c * ctx.dt);
+        const std::complex<Real> phi1 =
+            std::abs(a_c * ctx.dt) > Real{1e-12}
+                ? (ead - Real{1}) / a_c
+                : std::complex<Real>{ctx.dt, Real{0}};
+        const std::complex<Real> psi_next =
+            ead * std::complex<Real>{psi_a, psi_b} +
+            phi1 * Lm_inv_Tr * std::complex<Real>{i_alpha, i_beta};
+        const Real dpsi_a = (psi_next.real() - psi_a) / ctx.dt;
+        const Real dpsi_b = (psi_next.imag() - psi_b) / ctx.dt;
 
         // Induced stator back-EMF reflected from the rotor (αβ).
         const Real e_alpha = Lm_over_Lr * dpsi_a;
@@ -232,26 +246,25 @@ inline void add_induction_motor_to_chain(
                           Lm_over_Lr *
                           (i_beta * psi_a - i_alpha * psi_b);
 
-        // Forward-Euler integration of the rotor flux state.
-        (*psi)[0] = psi_a + dpsi_a * ctx.dt;
-        (*psi)[1] = psi_b + dpsi_b * ctx.dt;
+        (*psi)[0] = psi_next.real();
+        (*psi)[1] = psi_next.imag();
 
         // Mechanical integration (matches the other motor adapters).
         mech->integrate(ctx.t, T_em, ctx.dt);
 
         // Diagnostic channels (omitted when the user passes "").
-        ctx.channels[omega_channel] = mech->omega_rad_s;
-        ctx.channels[theta_channel] = mech->theta_rad;
-        if (!psi_alpha_channel.empty()) {
-            ctx.channels[psi_alpha_channel] = (*psi)[0];
+        ctx.put(omega_channel, mech->omega_rad_s);
+        ctx.put(theta_channel, mech->theta_rad);
+        if (psi_alpha_channel >= 0) {
+            ctx.put(psi_alpha_channel, (*psi)[0]);
         }
-        if (!psi_beta_channel.empty()) {
-            ctx.channels[psi_beta_channel] = (*psi)[1];
+        if (psi_beta_channel >= 0) {
+            ctx.put(psi_beta_channel, (*psi)[1]);
         }
-        if (!torque_channel.empty()) {
-            ctx.channels[torque_channel] = T_em;
+        if (torque_channel >= 0) {
+            ctx.put(torque_channel, T_em);
         }
-        if (!slip_channel.empty()) {
+        if (slip_channel >= 0) {
             // Slip fraction = (ω_psi − ω_m_elec) / ω_psi, clamped
             // to [-1, 1] for usability when ω_psi ≈ 0.
             const Real psi_mag = std::sqrt(
@@ -264,8 +277,7 @@ inline void add_induction_motor_to_chain(
                 slip = (omega_psi - omega_e) /
                        std::max(std::abs(omega_psi), Real{1e-9});
             }
-            ctx.channels[slip_channel] =
-                std::clamp(slip, Real{-1}, Real{1});
+            ctx.put(slip_channel, std::clamp(slip, Real{-1}, Real{1}));
         }
 
         // Back-EMF injection — same sign convention as the PMSM
@@ -310,8 +322,8 @@ inline void add_three_phase_motor_to_chain(
     auto step = [mech, psi_pm_Wb, pole_pairs, bemf_kind,
                     R_s_ohm, L_s_H,
                     phase_inductor_idx, bemf_source_idx,
-                    omega_channel = std::move(omega_channel),
-                    theta_channel = std::move(theta_channel)]
+                    omega_channel = chain.out(omega_channel),
+                    theta_channel = chain.out(theta_channel)]
                    (ChainContext& ctx) {
         if (!ctx.x) return;
         const Index n_state = static_cast<Index>(ctx.x->size());
@@ -348,8 +360,8 @@ inline void add_three_phase_motor_to_chain(
         }
         mech->integrate(ctx.t, T_em, ctx.dt);
 
-        ctx.channels[omega_channel] = mech->omega_rad_s;
-        ctx.channels[theta_channel] = mech->theta_rad;
+        ctx.put(omega_channel, mech->omega_rad_s);
+        ctx.put(theta_channel, mech->theta_rad);
 
         if (ctx.b_extra) {
             (*ctx.b_extra)[bemf_source_idx[0]] = -e_a;

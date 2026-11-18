@@ -74,11 +74,10 @@ def _conv(msg: str) -> ValueError:
 
 
 def _unsup(feature: str, msg: str, *, device: str = "",
-           kind: str = "") -> ValueError:
+           kind: str = "", analysis: str = "periodic_steady_state") -> ValueError:
     """A capability refusal of this analysis (a ValueError subclass)."""
     from ._refusal import unsupported
-    return unsupported("periodic_steady_state", feature,
-                       "periodic_steady_state: " + msg,
+    return unsupported(analysis, feature, f"{analysis}: " + msg,
                        device=device, kind=kind)
 
 
@@ -163,6 +162,10 @@ class PeriodicSteadyStateResult:
     #: The verification period as the kernel map returned it (with the
     #: integrals of the observables the caller asked for), or ``None``.
     _period: Any = field(default=None, repr=False)
+    #: ``engine='pwl'``/``'trbdf2'``: the engine's full MNA vector at the
+    #: section after the verification period (resume a transient from
+    #: it); ``None`` on the exact path.
+    full_state: Any = field(default=None, repr=False)
 
     @property
     def orbit(self):
@@ -284,8 +287,63 @@ def _schedule_edges(sf, t_lo, t_hi):
         t = e
 
 
-def _check_schedule(sf, T):
+def _closed_loop_source(sf):
+    """Where ``sf``'s gate comes from when it follows a controller: its
+    own ``_closed_loop`` mark, or one on an object its code closes over
+    or reads as a global (a hand-written gate around ``duty_get`` of
+    ``bind_pi_to_duty_callable``, a lambda around ``loop.switch_fn``)."""
+    src = getattr(sf, "_closed_loop", None)
+    if src or not callable(sf):
+        return src
+    import inspect
+    try:
+        cv = inspect.getclosurevars(sf)
+    except (TypeError, ValueError):
+        return None
+    for v in (*cv.nonlocals.values(), *cv.globals.values()):
+        src = getattr(v, "_closed_loop", None)
+        if isinstance(src, str):
+            return src
+    return None
+
+
+def _refuse_graph_driven(builder, analysis="periodic_steady_state"):
+    """A control graph's ``drive_source`` adds a 0 V / 0 A source whose
+    value only the graph's observer supplies: without it the source
+    would sit at zero."""
+    driven = getattr(builder, "_graph_driven", None)
+    if driven:
+        raise _unsup(
+            "closed_loop",
+            f"source(s) {', '.join(driven)} are driven by a control graph "
+            "(drive_source); the period runs run no controller, so they "
+            "would sit at 0. Run simulate() to steady state.",
+            device=driven[0], analysis=analysis)
+
+
+def _refuse_closed_loop(sf, analysis="periodic_steady_state"):
+    """A gate that reads a controller's output (``bind_pi_to_switch``, a
+    control graph's ``make_pwm_switch_fn``) is refused by name on every
+    engine: the shooting state is the circuit's true state, the
+    controller's is not in it, and the period runs call no observer, so
+    the orbit would be the plant's under a frozen duty. A hand-written
+    closure over controller state cannot be recognised: a gate the map
+    cannot name as closed-loop is taken as open-loop."""
+    src = _closed_loop_source(sf)
+    if src:
+        raise _unsup(
+            "closed_loop",
+            f"switch_fn comes from {src}: the gate follows a controller "
+            "whose state is not part of the section's true state, and the "
+            "period runs do not run the controller, so the result would "
+            "be an orbit of the plant under a frozen duty. Run simulate() "
+            "to steady state, or shoot the open-loop plant at a fixed "
+            "duty (make_pwm_switch_fn).", analysis=analysis)
+
+
+def _check_schedule(sf, T, analysis="periodic_steady_state"):
     from . import SwitchSchedule
+    _refuse_closed_loop(sf, analysis)
     if isinstance(sf, SwitchSchedule) and not sf.has_edges:
         raise _unsup(
             "switch_fn", "the gate schedule cannot name its edges (a "
@@ -465,6 +523,7 @@ class _Solver:
         self.builder = builder
         self.T = float(period)
         self.comps = list(builder.components())
+        _refuse_graph_driven(builder)
         _check_circuit(builder, self.T, self.comps)
         n_sw = builder.graph.num_switches
         _n, _nd, controlled = _pulsim._switch_census(builder.graph,
@@ -514,6 +573,8 @@ class _Solver:
         # integrals); DC sources only, a sine b(t) takes the old path
         self._map = (None if self.dynamic
                      else getattr(_pulsim, "dsed_period_map", None))
+        self._orbit = (None if self._map is None
+                       else getattr(_pulsim, "dsed_periodic_orbit", None))
         self.n_python_callbacks = 0
         self.n_nogil_runs = 0
 
@@ -590,6 +651,10 @@ class _Solver:
         self.n_steps += int(d["n_accept"])
         self.n_python_callbacks += int(d["python_callbacks"])
         self.n_nogil_runs += bool(d["nogil"])
+        return self._traj(x, d)
+
+    def _traj(self, x, d):
+        """A :class:`_Traj` from a kernel period dict."""
         log = list(d["events"])
         seg_masks = [log[0]["old_mask"] if log else d["first_mask"]]
         events, bounds = [], [0.0]
@@ -824,7 +889,7 @@ class _SourceInput:
         self.dV = max(1.0, abs(self.V))
         self._b, self._g, self._y = {}, {}, {}
         b = s.builder
-        b.update_voltage_source_V(name, self.V + self.dV)
+        b.set_value(f"{name}.V", self.V + self.dV)
         try:
             cache = PwlStateSpaceCache(b.graph, b.pool)
             cache.build_lazy(s.T)
@@ -857,7 +922,7 @@ class _SourceInput:
                             - float(s.ad.node_pair_voltage(
                                 node, -1, 0.0, self._x0))) / self.dV
         finally:
-            b.update_voltage_source_V(name, self.V)
+            b.set_value(f"{name}.V", self.V)
 
     def dbdu(self, mask, t):
         return self._b[(str(mask), t)]
@@ -879,31 +944,103 @@ class _SourceInput:
 # Newton
 # ----------------------------------------------------------------------
 
+def _kernel_orbit(s, x, rtol, max_period_runs, n_relax, spec):
+    """:func:`periodic_steady_state`'s Newton loop as one kernel call
+    (``dsed_periodic_orbit``): the same iteration, counters and typed
+    outcomes, the messages formatted here."""
+    d = s._orbit(
+        s.ad, s.sf, x, s.T, spec.obs if spec is not None else [],
+        spec.pairs if spec is not None else [], float(rtol),
+        int(max_period_runs), int(n_relax), 1e-11, 1e-14,
+        float(s._guard.get("mode_guard_h_e", 0.0)))
+    s.n_runs = int(d["n_period_runs"])
+    s.n_steps = int(d["n_engine_steps"])
+    s.n_python_callbacks += int(d["python_callbacks"])
+    s.n_nogil_runs += s.n_runs if d["nogil"] else 0
+    history = [float(h) for h in d["history"]]
+    patterns = [list(p) for p in d["patterns"]]
+    st = d["status"]
+    scale = np.asarray(d["scale"], dtype=float)
+    tail = (f"Residual history max|P(x)-x|: {[f'{h:.3e}' for h in history]}; "
+            f"last pattern: {[tuple(p) for p in d['last_pattern']]}; ")
+    mu_last = np.asarray(d["last_mu"])
+    if st == "budget":
+        extra = (" (no run left for the verification period)"
+                 if d["verify_budget"] else "")
+        raise _conv(
+            f"no periodic orbit found within max_period_runs="
+            f"{max_period_runs}{extra}. {tail}multipliers of the last "
+            f"monodromy: {mu_last}.")
+    if st == "no_progress":
+        raise _conv(
+            "Newton made no progress after three rounds of "
+            f"{n_relax} relaxation periods. {tail}multipliers: {mu_last}.")
+    if st == "singular":
+        raise _conv(
+            "I - M is singular: a Floquet multiplier equals 1, so "
+            "the orbit is not isolated (a floating capacitor, an "
+            "inductor loop with no resistance, an integrator with "
+            "no path to its input). States of the marginal "
+            f"direction: {s.name_states(d['marginal_direction'], scale)}.")
+    if st == "marginal":
+        raise _conv(
+            f"the orbit is not isolated: Floquet multiplier "
+            f"{complex(d['marginal_mu']):.12g} "
+            "lies on the unit circle, so neighbouring solutions "
+            "never decay to it (a lossless loop or an undamped "
+            "integrator). States of the marginal direction: "
+            f"{s.name_states(d['marginal_direction'], scale)}.")
+    if st == "grazing":
+        raise _conv(str(d["message"]))
+    if st == "run_failed":
+        raise _conv(f"a period run failed: {d['message']}")
+    if st == "irreproducible":
+        raise _conv(
+            f"the verification period moved the orbit by {d['residual']:.3e} "
+            f"(the last Newton residual was {history[-1]:.3e}): the "
+            "map is not reproducible between runs.")
+    if st != "converged":
+        raise RuntimeError(f"dsed_periodic_orbit: unknown status {st!r}")
+    x0 = np.asarray(d["x0"], dtype=float)
+    period = d["period"]
+    traj = s._traj(x0, period)
+    return (x0, np.asarray(d["monodromy"], dtype=float),
+            np.asarray(d["multipliers"]), traj, history, patterns, period,
+            float(d["residual"]))
+
+
 def _classify(mu):
     if abs(mu.imag) > 1e-12 * max(1.0, abs(mu)):
         return "complex pair (Neimark-Sacker)"
     return "flip (period-doubling)" if mu.real < 0 else "fold"
 
 
-def _pss_refusal(builder, period, switch_fn=None):
+def _pss_refusal(builder, period, switch_fn=None, engine="exact",
+                 dt=None, options=None):
     """The ``UnsupportedError`` :func:`periodic_steady_state` would raise
     for this circuit and schedule before its first run (its
     applicability checks), or ``None``."""
     from ._refusal import UnsupportedError
     try:
-        _Solver(builder, float(period), switch_fn)
+        if engine in ("exact", "dsed"):
+            _Solver(builder, float(period), switch_fn)
+        else:
+            from ._transient_shooting import TransientMap
+            TransientMap(builder, float(period), switch_fn, engine, dt,
+                         options)
     except UnsupportedError as e:
         return e
     return None
 
 
-def periodic_steady_state_supported(builder, period, switch_fn=None):
+def periodic_steady_state_supported(builder, period, switch_fn=None, *,
+                                    engine="exact", dt=None, options=None):
     """``(True, "")`` when :func:`periodic_steady_state` can solve this
-    circuit with this schedule, else ``(False, reason)`` with the
-    message of the ``UnsupportedError`` it would raise. Runs the same
-    checks, and no period; a configuration error (a bad period, a
-    schedule that is not T-periodic) still raises."""
-    e = _pss_refusal(builder, period, switch_fn)
+    circuit with this schedule on ``engine``, else ``(False, reason)``
+    with the message of the ``UnsupportedError`` it would raise. Runs
+    the same checks, and no period; a configuration error (a bad period,
+    a schedule that is not T-periodic) still raises."""
+    e = _pss_refusal(builder, period, switch_fn, engine, dt, options)
     return (True, "") if e is None else (False, str(e))
 
 
@@ -912,7 +1049,11 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
                           n_relax: int = 5,
                           rtol: float = _RTOL,
                           sensitivities=None,
-                          _observables=None) -> PeriodicSteadyStateResult:
+                          engine: str = "exact",
+                          dt: float | None = None,
+                          options: dict | None = None,
+                          _observables=None,
+                          _python_loop: bool = False) -> PeriodicSteadyStateResult:
     """Periodic steady state of a switching circuit by Newton shooting
     on the true state, on the ``dsed`` exact stepper.
 
@@ -954,12 +1095,36 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
         ``sensitivity`` (orbit KPI gradients through ``kpi``) at the
         cost of one more period run; see ``pulsim.sensitivity``.
 
+    engine
+        ``'exact'`` (also ``'dsed'``; default): the exact stepper, ``M``
+        from its propagators and saltation matrices. ``'pwl'`` (the fixed
+        trapezoidal engine, ``dt`` required, ``T/dt`` an integer, a gate
+        edge at ``t = 0``) or ``'trbdf2'`` (variable step): the orbit of
+        THAT engine's own transient, ``M`` by finite differences with
+        Broyden updates; ``sensitivities`` are refused there.
+    dt, options
+        The step and further ``simulate`` keywords of the period runs on
+        ``'pwl'`` / ``'trbdf2'``.
+
     The section is ``t = 0``: for the zero-phase built-in PWM helpers
     that is the rising gate edge.
     """
     if not (period > 0 and math.isfinite(period)):
         raise _err(f"period must be a positive finite number, got "
                    f"{period!r}")
+    if engine not in ("exact", "dsed"):
+        if engine not in ("pwl", "trbdf2"):
+            raise _err(f"engine must be 'exact', 'dsed', 'pwl' or "
+                       f"'trbdf2', got {engine!r}")
+        from ._transient_shooting import periodic_steady_state_on
+        return periodic_steady_state_on(
+            builder, period=float(period), switch_fn=switch_fn,
+            engine=engine, dt=dt, options=options, start_from=start_from,
+            max_period_runs=max_period_runs, n_relax=n_relax, rtol=rtol,
+            sensitivities=sensitivities)
+    if dt is not None or options:
+        raise _err("dt and options set the period runs of engine='pwl' / "
+                   "'trbdf2'; the exact stepper takes neither.")
     s = _Solver(builder, period, switch_fn)
     n = s.n
     if start_from is None:
@@ -971,6 +1136,14 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
     if x.shape != (n,):
         raise _err(f"start_from has {x.size} entries; the state has {n} "
                    f"({s.labels}).")
+    s.loop = "python"
+    if s._orbit is not None and not _python_loop:
+        # the whole Newton loop in the kernel, GIL released (DECISIONS 19)
+        s.loop = "kernel"
+        x0, M, mu, traj, history, patterns, period, residual = \
+            _kernel_orbit(s, x, rtol, max_period_runs, n_relax, _observables)
+        return _result(builder, s, x0, M, mu, traj, history, patterns,
+                       period, residual, sensitivities)
 
     scale = np.zeros(n)
 
@@ -1091,12 +1264,25 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
         s.n_steps += int(getattr(orbit, "n_accept", 0))
         x_back = np.asarray(orbit.states_reduced[-1], dtype=float)
     residual = float(np.abs(x_back - x0).max())
-    if residual > 1e3 * max(history[-1], rtol * float(
+    if not residual <= 1e3 * max(history[-1], rtol * float(
             (scale + np.abs(x0)).max())):
         raise _conv(
             f"the verification period moved the orbit by {residual:.3e} "
             f"(the last Newton residual was {history[-1]:.3e}): the "
             "map is not reproducible between runs.")
+    return _result(builder, s, x0, M, mu, traj, history, patterns, period,
+                   residual, sensitivities, orbit)
+
+
+def _result(builder, s, x0, M, mu, traj, history, patterns, period,
+            residual, sensitivities, orbit=None):
+    if orbit is None:
+        from . import simulate as _simulate
+
+        def orbit():
+            return _simulate(builder, t_end=s.T, dt=s.T, engine="dsed",
+                             switch_fn=s.sf, initial_state=x0, rtol=1e-11,
+                             atol=1e-14)
     unstable = [(i, complex(m_), _classify(m_)) for i, m_ in
                 enumerate(mu) if abs(m_) >= 1.0]
     res = PeriodicSteadyStateResult(

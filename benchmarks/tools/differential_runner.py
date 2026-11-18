@@ -8,7 +8,11 @@ within / outside the tolerance), ``refused`` (the engine's typed refusal:
 available: ``trbdf2`` at
 ``rtol = 1e-8``, ``pwl`` at ``dt/4`` when ``dt/2`` and ``dt/4`` agree within
 a quarter of the tolerance. The first stored sample is excluded from every
-comparison (on pwl / trbdf2 it is the initial state, not t = 0+).
+comparison (on pwl / trbdf2 it is the initial state, not t = 0+). A result
+that records right limits (the exact engine: its sample at an event is the
+left limit) is read two-sided, the right limit one ulp after the event
+(``pulsim._result_views.with_right_limits``), so a jump is compared side for
+side with the reference's own left / right samples, never as a ramp.
 
 The GATE (agree / disagree, and every ``known:`` freeze) is the strict
 ``interp`` measure: every observable, every interval, linearly
@@ -57,6 +61,7 @@ import metrics  # noqa: E402
 import v1_reader  # noqa: E402
 
 import pulsim  # noqa: E402
+from pulsim._result_views import with_right_limits  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 TRIAGE = ROOT / "manifests" / "v2_triage.yaml"
@@ -149,7 +154,8 @@ def switching_steps(s, t):
 
 
 def traces(res, cols):
-    """``(t, {col: y}, switch record or None)``."""
+    """``(t, {col: y}, switch record or None)``, every jump two-sided."""
+    res = with_right_limits(res)
     t = np.asarray(res.times, dtype=float)
     return (t, {c: np.asarray(v1_reader.observable(res, c), dtype=float) for c in cols},
             switch_record(res, t))

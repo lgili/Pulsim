@@ -106,7 +106,10 @@ refused [1.e+30 1.e+30] [1.e+30]
 ## 3. Steady state, junction temperature, batches
 
 * `SteadySpec(method="pss")` is Newton shooting on the exact stepper
-  (`pulsim.periodic_steady_state`); `"transient"` simulates until the
+  (`pulsim.periodic_steady_state`), or, with `engine="pwl"` (and
+  `options={"dt": T/100}`) or `engine="trbdf2"`, on that engine's own
+  period runs (`counters["route"] == "pss/pwl"`; about twice the period
+  runs, no `gradients=`); `"transient"` simulates until the
   estimated distance to the orbit is below `tol` (else `failed`,
   `not_settled`); `"auto"` (default) takes `pss` when its applicability
   check accepts the circuit and the transient otherwise, and says so in
@@ -121,8 +124,10 @@ refused [1.e+30 1.e+30] [1.e+30]
   the same records on 1 or 8 threads. On the `pss` route the period
   runs and the KPI integrals are one kernel call with the GIL released
   (`counters["kpi_path"] == "kernel"`, about 0.4 ms per buck design),
-  but the Newton loop is Python, so threads do not speed it up;
-  `backend="process"` helps for large batches of picklable evaluators.
+  and so is the whole Newton loop (`counters["pss_loop"] == "kernel"`),
+  but building the circuit, the loss rows and the KPIs hold the GIL, so
+  threads still do not speed it up; `backend="process"` helps for large
+  batches of picklable evaluators.
 
 ## 4. Why derivative-free
 

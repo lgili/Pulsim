@@ -67,90 +67,229 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   nothing reads it). No shipped example, doc snippet or test relied on a
   short mask (the `SwitchStateMask(0)` snippets drive switchless circuits).
 
-### Fixed engine: restart/split checkpoint-review fixes
+### Integration batch 9: the exact engine merged
 
-* A restart stage-2 backward-Euler re-try that throws (now forced in a
-  test by a node singular exactly at its dt) keeps the SDIRK stage 2 as
-  before and now also warns (`UserWarning` naming
-  `stage2_retry_failures`); the three-phase rectifier then returns to the
-  pre-fallback 37.20 V bus peak, the number the warning protects.
-  `split_event_overflows` warns too.
-* `unlocated_gate_steps` no longer counts an opaque `switch_fn` edge that
-  falls on the grid point itself (it was taken where it is).
-* A `step_observer` that moves the declared `b_extra_fn` jumps is honoured
-  (the memo of the next jump is reset after it, as the gate oracle's was).
-* `n_restart_factorizations` counts every restart-stage refactor (split
-  sub-intervals, the stage-2 re-try). Results bit-identical; Newton
-  round-off counters still include solves a discarded re-try made.
+* **Added** the exact engine's give-ups (C++ `pulsim::ConvergenceFailure`:
+  settle, chatter, no_progress, max_steps, nan) reach Python as
+  `pulsim.ConvergenceError` with `kind`, `t_failed` and `device` (they
+  were bare `RuntimeError`s); a design evaluation records them as
+  `failed` by type.
+* **Fixed** a give-up of a run the native adapter had accepted fell
+  through to the Python-adapter bridge on a diode-free circuit, which
+  re-ran it without the refusal of implicit segments; it raises.
+* **Changed** the reference gate's dsed column: 39 agree / 16 disagree /
+  12 error / 40 refused -> 83 / 0 / 0 / 24 (`sepic`'s frozen `error`
+  dropped: it agrees, 1.5e-6); pwl / trbdf2 cells identical to the digit.
 
-### Ideal switch in branch form (add-branch-form-ideal-switch)
+### Integration batch 8: control graph, optimisation slice 4 and circuit IR merged
 
-* **Added** (opt-in) the branch form of a switch and a diode:
-  `add_ideal_switch(name, a, b, R_on=0, g_off=0)`,
-  `add_diode(..., form='branch', R_on=0, g_off=0)`, YAML `form: branch`.
-  The switch current is an unknown (row `v − R_on·i = V_f` ON,
-  `−g_off·v + i = 0` OFF), so `R_on = 0` and `g_off = 0` are exact; the
-  sparsity pattern is the same for every mask (one symbolic analysis on a
-  16-mask bridge, residual ≤ 1e-12 with every `R_on = 0`). With
-  `R_on = 1e-3`, `g_off = 1e-9` it reproduces the conductance form within
-  1e-10 on a buck, a bridge rectifier and a three-phase inverter. An
-  ideal switch charges an RL to 9.99954600 A at 10 ms on `trbdf2`
-  (conductance form: 9.98955 A). `res.i` reads the solved current;
-  `components()` reports `R_on` and `branch_form`.
-* Runs on `pwl` (switch and diode) and `trbdf2` (switch); other engines
-  and the AC sweep refuse with `UnsupportedError(feature='branch_form')`.
-  A per-mode structural pass refuses, by name, a node bounded only by
-  open ideal elements (`floating_node`), a loop of closed ideal elements
-  and voltage sources (`ideal_voltage_loop`) and, until the
-  re-initialisation service, a mode with dependent states
-  (`dependent_states`); it runs once per mode
-  (`counters['mode_structure_checks']`) and never for the conductance
-  form. Every conductance-form result is bit-identical.
-* **BREAKING** (invalid values only) `add_switch`, `add_diode` and YAML
-  `switch` / `diode` refuse at build time a `g_on` that is not finite and
-  > 0, or a `g_off` that is not finite and >= 0; `add_mosfet`,
-  `add_mosfet_with_body_diode` and `add_igbt` refuse `R_on` / `R_off` the
-  same way, naming the device and the field (`ValueError`). Before, an
-  infinite `g_on` built and aborted mid-run "numerically singular", and a
-  negative value ran on a negative resistance. Every existing example
-  and test circuit still builds; no valid number changes.
-* **Added** re-initialisation of dependent modes on `pwl` under
-  `discontinuity_restart=True`: an ideal switch opening an inductor
-  cut-set or closing a capacitor loop is realised by the SDIRK×3 restart
-  and recorded in `res.reinit_records` (`t`, `kind`, `devices`, `states`,
-  `lambda` = the impulse, `dW` = the energy dissipated, `projection_gap`,
-  `sample` = the index of the pulse sample). Opening 9.9327 A at
-  `h = τ/20`: `i_L = 0` from the first step, node voltages 0 within 1e-9 V
-  from the second (was ±397 V ringing with `g_off = 1e-9`), `|Λ| = L·i`
-  within 1e-12, `dW` = 49.3291 mJ = ½·L·i² within 1e-9. Two capacitors
-  (8 V, 0 V) closed by `R_on = 0`: both at 4.0 V within 1e-12, 6 µC,
-  24 µJ. `simulate(on_impulse='record' | 'warn' | 'error')`; `'error'`
-  raises `UnsupportedError(feature='impulse')` naming the switch. Without
-  the restart rule a dependent mode is still refused by name; `trbdf2`
-  keeps its static refusal. A diode turning off at zero current makes no
-  record.
-* **Added** the ideal DCM buck on `pwl` (branch-form switch and diode,
-  restart + event split): `v_C` error −2.660e-6, −6.591e-7, −1.709e-7,
-  −4.354e-8 V at N = 50, 100, 200, 400 steps per period (prototype
-  −2.442e-6 … −4.345e-8), order 1.97, `i_L` exactly 0 while the diode is
-  off. An ON ideal diode that would close a loop with the source and a
-  closed switch is turned OFF and the mode re-formed
-  (`counters['ideal_loop_releases']`); a second release of the same diode
-  in one step is refused as `ideal_voltage_loop`.
-* **Fixed** (review of the above, all opt-in paths): an ideal diode
-  forward-biased by a loop of sources and closed ideal elements is
-  refused (`ideal_voltage_loop`) instead of breaching on every step with
-  the diode stuck OFF; a saturable inductor, nonlinear capacitor or PMSM
-  next to an ideal element is refused (`dependent_states`, naming it)
-  instead of escaping the structural pass; `engine='auto'` routes an
-  ideal-switch circuit to `pwl` (or asks for `dt`) instead of raising the
-  trbdf2 refusal; a capacitor loop closed through several ideal switches
-  records whichever one changed; a gate edge that forces a diode into a
-  dependent mode records it; the transformer primary no longer reads as
-  a floating node; the refusal and the record are decided on the
-  committed step (an ideal CCM buck runs without the restart rule);
-  `start_from_dc_op` checks the converged DC mode;
-  `device_loss_summary` warns when it leaves out an ideal element.
+* **Fixed** (control graph review) `PIController`, `Limiter`,
+  `PIDController`, `Integrator` and the space-vector modulator of the
+  kernel clamped with `std::clamp`: NaN passed through, -0.0 kept its
+  sign and `lo > hi` was undefined. They now compute Python's
+  `max(lo, min(hi, u))` operation for operation (NaN -> hi). A block with
+  `output_min > output_max` (`rail_min > rail_max` for `OpAmp`) is
+  refused at build time, naming the block (`ControlGraphBuildError`).
+* **Fixed** a `PythonBlock` returning the wrong number of values was
+  retried as a step failure and surfaced as `SimulationAborted`; it is a
+  `ValueError` from `simulate()`.
+* **Added** `PythonBlock.reset()` forwards to the wrapped object's
+  `reset` (`MixedDomainBlockChain.reset()` reaches it).
+* **Changed (BREAKING)** `CxxBlockChain.add_pwm_generator(phase=)` and
+  `CxxPwmGenerator.phase` read seconds, a delay, as
+  `PwmGenerator(phase=)` does (they read an advance in periods).
+  **Migration:** `add_pwm_generator(f, x, ...)` becomes
+  `add_pwm_generator(f, phase_fraction=x, ...)` (same numbers, bit for
+  bit) or `phase=-x / f`; `duty`, `t`, `output` are keyword-only.
+* **Fixed** (circuit IR x ideal switch) a branch-form switch or diode
+  kept its `R_on` beside the pool's `g_on`: `with_value("S.R_on", ...)`
+  changed a `g_on` the branch law does not read, and the diode's `R_on`
+  was unreachable. `with_value` / `set_value` / `get_value` now read and
+  write `R_on` and `g_off` of a branch-form element (0 allowed, as
+  `add_ideal_switch` allows it); `g_on` / `R_off` are refused by name; a
+  parameter cannot drive a branch-form `R_on` / `g_off` yet (refused by
+  name). The branch form is part of `structure_hash()` (with
+  `R_on == 0` / `g_off == 0`), its `R_on` of `value_hash()`; a
+  conductance-form circuit hashes as before.
+* **Fixed** (optimisation x control graph) a gate that follows a
+  controller (`bind_pi_to_switch`, `bind_pi_to_duty_callable`'s
+  `duty_get` in a hand-written gate, a control graph's
+  `make_pwm_switch_fn`) and a control graph's `drive_source` reached
+  `periodic_steady_state` (every engine) and the design `Evaluator`,
+  which run no controller: the result was the plant's orbit under a
+  frozen duty (or a source at 0). Refused by name
+  (`UnsupportedError`, `feature='closed_loop'`). `sweep(circuit,
+  parallel=True)` with a `step_observer` or a closed-loop gate is
+  refused (the threads would share one controller). The pwl shooting
+  refuses `options` that switch off the restart rule or event splitting.
+* CI: an `examples-guard` job runs the slow examples guard
+  (`PULSIM_RUN_EXAMPLES=1`) against the installed wheel; the guard's
+  subprocesses import the parent's pulsim.
+
+### Periodic steady state on the fixed and TR-BDF2 engines
+
+* **Added** `periodic_steady_state(..., engine='pwl' | 'trbdf2', dt=,
+  options=)`: Newton shooting on the true state (capacitor voltages,
+  inductor currents) with that engine's own period runs (the fixed
+  engine with `discontinuity_restart` and event splitting, so a period
+  starts from the true state alone), `M` by finite differences with
+  Broyden updates. The orbit is the one the engine's own transient
+  reaches: 1.2e-11 (`pwl`) and 2.6e-9 (`trbdf2`) of the state scale
+  from a 4000-period transient on the DCM buck; 12 period runs from zero
+  on `pwl`. `result.full_state` is the engine's MNA vector at the
+  section. `pwl` needs a gate edge at `t = 0`, `trbdf2` an edge oracle;
+  nonlinear devices and `sensitivities=` are refused by name.
+  `periodic_steady_state_supported(..., engine=)` answers per engine.
+* **Changed** `run_periodic_shooting` and `run_harmonic_balance` are
+  deprecated delegates (`DeprecationWarning`): the DCM buck now reads
+  8.996246 V instead of 8.8998 V (−1.07 %); `b_extra_fn` and
+  `step_observer` are refused by name; a non-convergence returns
+  `converged=False` with an all-NaN `x_steady_state` and the reason in
+  `message`, not the last iterate.
+* **Changed** `Evaluator(engine='pwl' | 'trbdf2',
+  steady=SteadySpec('pss'))` is accepted (it raised `ValueError`):
+  `counters["route"] == "pss/pwl"`; `method='auto'` is unchanged.
+
+### The Newton shooting loop in the kernel
+
+* **Added** `pulsim._pulsim.dsed_periodic_orbit` (header
+  `core/include/pulsim/dsed/periodic_orbit.hpp`): the whole Newton
+  shooting of `periodic_steady_state` (scaled-norm residual, Armijo
+  backtracking, relaxation rounds, stop on the Newton step, period-run
+  budget, singular `I − M`, multipliers on the unit circle, the
+  verification period with the caller's integrals) in one call with the
+  GIL released. Every non-converged outcome is a status the wrapper
+  turns into the same `ConvergenceError` as before; a NaN period is
+  never accepted.
+* **Changed** `periodic_steady_state` runs on it for DC sources (a sine
+  `b(t)` keeps the Python loop). Same orbit (within 2e-14 of the state
+  scale), same period-run, step and iteration counts on the CCM/DCM
+  buck and the CCM/DCM boost; `counters["pss_loop"]` and
+  `counters["pss_iterations"]` name the route in an evaluation record.
+  An exception raised by a Python gate schedule inside a period run now
+  propagates as itself instead of becoming "a period run failed".
+* **Changed** the evaluator's per-evaluation Python: a datasheet loss
+  table's energies are read by its kernel copy (`LossTable.total`, bit
+  for bit `np.sum(table(v, i, tj))`), the provenance mapping is built
+  once per evaluator and records freeze scalars without an `abc`
+  check. Buck Pareto (64 designs, interleaved best of 5): 1354 → 2167
+  evaluations/s on one thread; threads still do not scale (see
+  DECISIONS 19 of add-design-optimization-workflow).
+
+### Compiled control graph, part 3: blocks (add-compiled-control-graph, 2026-11-13)
+
+* **Removed (BREAKING)** the Python evaluator of `MixedDomainBlockChain`
+  and its silent fallback: a block with no kernel implementation is a
+  `ControlGraphBuildError` naming `pulsim.PythonBlock(fn)` (new: runs a
+  callable in the graph, one Python call per evaluation);
+  `make_step_observer(use_kernel=False)` raises `DeprecationWarning`;
+  `MixedDomainBlockChain.update()` is gone.
+* **Added** kernel ports, bit-identical to their Python classes on 10^4
+  random inputs each: `Comparator`, `RateLimiter`, `SampleHold`,
+  `TransferFunction`, `StateMachine`, `OpAmp`, `SignalMux`,
+  `SignalDemux`, `LookupTable1D`, `MathBlock`, `MovingAverageFilter`,
+  `Differentiator`, `PIDController`, `Integrator`, `Sum`,
+  `FirstOrderLowPass`, `PwmGenerator`, `DelayBlock`. N-input blocks take
+  a tuple of sources (`inputs=dict(inputs=("channel:a", "vout"))`).
+* **Fixed (numbers change)** silent mapping defects of the kernel chain:
+  `PIDController` ran a different law (derivative on the measurement,
+  `tau_d = 0`); `Integrator` had no anti-windup hold (9559 of 10^4
+  inputs differed, up to 2.3e-2); `Sum` ignored its `weights` and a `c`
+  input; `FirstOrderLowPass` passed the input through at `dt = 0`; a
+  block's initial state (`integrator_state=`, `state=`) was ignored;
+  `PwmGenerator(phase=)` was read as a fraction of the period with the
+  opposite sign (the class: seconds), and `frequency <= 0` gave
+  `duty > 0` instead of 0; `record_channel` before `make_step_observer`
+  recorded nothing.
+* **Changed** `pulsim.control.Sum` and `TransferFunction` sum left to
+  right: the builtin `sum()` is compensated since Python 3.12, so the
+  classes gave a different last bit on 3.10/3.11 than on 3.12/3.13.
+* **Fixed** rate groups: `make_pwm_switch_fn` gates honour
+  `compute_delay`; a reused observer restarts its tick grid (it never
+  ticked again); a period below the fixed step and a `PwmGenerator`
+  inheriting a controller rate are `ControlGraphBuildError`s;
+  `controller_period=` with a rated chain is a `ValueError`; a driven
+  source's `b_extra` runs in C++ on `pwl` and `trbdf2` (it went through
+  a Python wrapper per call).
+* **Changed** the converter design notebooks drop `use_kernel=False`;
+  the FOC / motor examples and `wire_pmsm_foc` run their custom blocks
+  as kernel `Sum`s or `PythonBlock`s. Migration table in
+  [docs/control-graph.md](docs/control-graph.md).
+
+### Compiled control graph, part 2: rates (add-compiled-control-graph, 2026-11-13)
+
+* **Added** `pulsim.Rate(period, offset=0, compute_delay=0)` on a
+  `MixedDomainBlockChain` (`rate=` on the chain or per block) and
+  `drive_source(builder, signal, ("v", name, node))`. Each rate group
+  ticks at `t_start + offset + k*period` with an integer counter, on
+  `pwl` (at the tick's own state, `x(tau)`) and `trbdf2` (a landed step
+  per tick, called in C++); a stateless block inherits the fastest rate
+  feeding it, a stateful one without a rate is a build error.
+  `chain.tick_counts`; see [docs/control-graph.md](docs/control-graph.md).
+* **Added** `compute_delay`: `0`, a time (pwl), or `"one_sample"`.
+  A rate `offset` and a delay time are refused on `trbdf2`
+  (`UnsupportedError`, features `control_rate_offset`, `compute_delay`).
+* **Added** a driven source declares its tick instants
+  (`next_jump_after`): with `discontinuity_restart=True` the fixed
+  engine holds it exactly (discrete P loop `v[10]` error 6.1e-5 →
+  7.2e-9 at dt = 1 µs).
+* **Changed** the float time throttles of `control.py`'s duty observer
+  and `add_c_block` are integer tick counters (same ticks: the 3001
+  updates over 30 ms of `test_control_loop_truth.py` are unchanged).
+* **Fixed** `run_transient_with_chain` (the `pwl` path of every chain
+  observer) dropped a `b_extra_fn`'s `next_jump_after` and a native
+  schedule's edges, so `discontinuity_restart` never saw a declared
+  jump there (a 0→1 V step into an RC: 5.0e-4 → 2.5e-8 at dt = 1 µs).
+* **Fixed** (review) an empty channel name read and wrote slot -1 out of
+  bounds; a nameless node index -1 (ground) was refused; a failed block
+  add left its reads behind for the next block; `DelayBlock(samples<1)`
+  is a typed `ControlGraphBuildError` (a negative count was a
+  `TypeError` swallowed by the fallback); a YAML chain is compiled when
+  wired.
+
+### Compiled control graph, part 1 (add-compiled-control-graph, 2026-11-13)
+
+* **Changed (BREAKING where a chain relied on it)** a
+  `MixedDomainBlockChain` / `CxxBlockChain` no longer runs its blocks in
+  insertion order: they run in the topological order of the
+  direct-feedthrough graph (ties by insertion), so a block inserted
+  before the block that feeds it no longer reads last step's value (or
+  0 on the first step). The build warns once with every such pair; a
+  `DelayBlock` keeps a delay explicitly. Chains already in order are
+  bit-identical.
+* **Added** `pulsim.ControlGraphBuildError` (a `ValueError`): an
+  algebraic loop (named by its blocks), a block reading its own output,
+  a signal written by two blocks.
+* **Added** `DelayBlock` in the kernel chain (two-phase: it breaks a
+  loop).
+* **Fixed** a `Gain` reading a node and any `Limiter` made the C++ chain
+  build fail and the whole chain ran on the Python evaluator behind a
+  warning; both compile now (same numbers).
+* **Changed** signals are integer slots in the kernel chain (no string
+  hashing per step); `CxxBlockChain` gains `schedule()`, `reorders()`,
+  `n_evals`, `n_block_evals`.
+
+### Process backend: a dead worker raises instead of hanging (integration batch 7)
+
+* **Fixed** `sweep(..., backend="process")` and
+  `Evaluator.evaluate_many(..., backend="process")` waited forever when a
+  worker died: under `spawn` (macOS, Windows) a job whose module the child
+  cannot import killed the worker while unpickling, and
+  `multiprocessing.Pool` never noticed (the CI python-tests jobs on macOS
+  and Windows hung for hours). The runner now uses a
+  `ProcessPoolExecutor`: the job is pickled in the parent (an unpicklable
+  job is refused by index before any worker starts, `TypeError`), loaded
+  inside the worker (an import failure comes back by name,
+  `RuntimeError`), and a worker that dies raises `RuntimeError` from
+  `BrokenProcessPool`.
+* CI runs pytest with `--timeout=900` (`pytest-timeout` joins the `dev`
+  extra).
+* **Fixed** `simulate()` read the builder's initial conditions inside a
+  broad `except`, so capacitor ICs that break KVL (refused by
+  `CircuitBuilder.initial_state()` since the examples audit) ran silently
+  from x0 = 0 on every engine; the `ValueError` now reaches the caller.
+  The dead Python fallback `initial_state` (positive-terminal placement)
+  is removed and the `add_capacitor` docstring says "voltage across it".
 
 ### Design evaluation: review fixes (integration batch 6c)
 
@@ -390,6 +529,240 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   quantisation and the bus common mode (DECISIONS 11). The ripple test
   pins the engine's own peak-to-peak at 5e-3 again.
 
+### Fixed engine: restart/split checkpoint-review fixes
+
+* A restart stage-2 backward-Euler re-try that throws (now forced in a
+  test by a node singular exactly at its dt) keeps the SDIRK stage 2 as
+  before and now also warns (`UserWarning` naming
+  `stage2_retry_failures`); the three-phase rectifier then returns to the
+  pre-fallback 37.20 V bus peak, the number the warning protects.
+  `split_event_overflows` warns too.
+* `unlocated_gate_steps` no longer counts an opaque `switch_fn` edge that
+  falls on the grid point itself (it was taken where it is).
+* A `step_observer` that moves the declared `b_extra_fn` jumps is honoured
+  (the memo of the next jump is reset after it, as the gate oracle's was).
+* `n_restart_factorizations` counts every restart-stage refactor (split
+  sub-intervals, the stage-2 re-try). Results bit-identical; Newton
+  round-off counters still include solves a discarded re-try made.
+
+### Ideal switch in branch form (add-branch-form-ideal-switch)
+
+* **Added** (opt-in) the branch form of a switch and a diode:
+  `add_ideal_switch(name, a, b, R_on=0, g_off=0)`,
+  `add_diode(..., form='branch', R_on=0, g_off=0)`, YAML `form: branch`.
+  The switch current is an unknown (row `v − R_on·i = V_f` ON,
+  `−g_off·v + i = 0` OFF), so `R_on = 0` and `g_off = 0` are exact; the
+  sparsity pattern is the same for every mask (one symbolic analysis on a
+  16-mask bridge, residual ≤ 1e-12 with every `R_on = 0`). With
+  `R_on = 1e-3`, `g_off = 1e-9` it reproduces the conductance form within
+  1e-10 on a buck, a bridge rectifier and a three-phase inverter. An
+  ideal switch charges an RL to 9.99954600 A at 10 ms on `trbdf2`
+  (conductance form: 9.98955 A). `res.i` reads the solved current;
+  `components()` reports `R_on` and `branch_form`.
+* Runs on `pwl` (switch and diode) and `trbdf2` (switch); other engines
+  and the AC sweep refuse with `UnsupportedError(feature='branch_form')`.
+  A per-mode structural pass refuses, by name, a node bounded only by
+  open ideal elements (`floating_node`), a loop of closed ideal elements
+  and voltage sources (`ideal_voltage_loop`) and, until the
+  re-initialisation service, a mode with dependent states
+  (`dependent_states`); it runs once per mode
+  (`counters['mode_structure_checks']`) and never for the conductance
+  form. Every conductance-form result is bit-identical.
+* **BREAKING** (invalid values only) `add_switch`, `add_diode` and YAML
+  `switch` / `diode` refuse at build time a `g_on` that is not finite and
+  > 0, or a `g_off` that is not finite and >= 0; `add_mosfet`,
+  `add_mosfet_with_body_diode` and `add_igbt` refuse `R_on` / `R_off` the
+  same way, naming the device and the field (`ValueError`). Before, an
+  infinite `g_on` built and aborted mid-run "numerically singular", and a
+  negative value ran on a negative resistance. Every existing example
+  and test circuit still builds; no valid number changes.
+* **Added** re-initialisation of dependent modes on `pwl` under
+  `discontinuity_restart=True`: an ideal switch opening an inductor
+  cut-set or closing a capacitor loop is realised by the SDIRK×3 restart
+  and recorded in `res.reinit_records` (`t`, `kind`, `devices`, `states`,
+  `lambda` = the impulse, `dW` = the energy dissipated, `projection_gap`,
+  `sample` = the index of the pulse sample). Opening 9.9327 A at
+  `h = τ/20`: `i_L = 0` from the first step, node voltages 0 within 1e-9 V
+  from the second (was ±397 V ringing with `g_off = 1e-9`), `|Λ| = L·i`
+  within 1e-12, `dW` = 49.3291 mJ = ½·L·i² within 1e-9. Two capacitors
+  (8 V, 0 V) closed by `R_on = 0`: both at 4.0 V within 1e-12, 6 µC,
+  24 µJ. `simulate(on_impulse='record' | 'warn' | 'error')`; `'error'`
+  raises `UnsupportedError(feature='impulse')` naming the switch. Without
+  the restart rule a dependent mode is still refused by name; `trbdf2`
+  keeps its static refusal. A diode turning off at zero current makes no
+  record.
+* **Added** the ideal DCM buck on `pwl` (branch-form switch and diode,
+  restart + event split): `v_C` error −2.660e-6, −6.591e-7, −1.709e-7,
+  −4.354e-8 V at N = 50, 100, 200, 400 steps per period (prototype
+  −2.442e-6 … −4.345e-8), order 1.97, `i_L` exactly 0 while the diode is
+  off. An ON ideal diode that would close a loop with the source and a
+  closed switch is turned OFF and the mode re-formed
+  (`counters['ideal_loop_releases']`); a second release of the same diode
+  in one step is refused as `ideal_voltage_loop`.
+* **Fixed** (review of the above, all opt-in paths): an ideal diode
+  forward-biased by a loop of sources and closed ideal elements is
+  refused (`ideal_voltage_loop`) instead of breaching on every step with
+  the diode stuck OFF; a saturable inductor, nonlinear capacitor or PMSM
+  next to an ideal element is refused (`dependent_states`, naming it)
+  instead of escaping the structural pass; `engine='auto'` routes an
+  ideal-switch circuit to `pwl` (or asks for `dt`) instead of raising the
+  trbdf2 refusal; a capacitor loop closed through several ideal switches
+  records whichever one changed; a gate edge that forces a diode into a
+  dependent mode records it; the transformer primary no longer reads as
+  a floating node; the refusal and the record are decided on the
+  committed step (an ideal CCM buck runs without the restart rule);
+  `start_from_dc_op` checks the converged DC mode;
+  `device_loss_summary` warns when it leaves out an ideal element.
+
+### Immutable circuit IR (add-immutable-circuit-ir, first slice)
+
+* **Added** `pulsim.Circuit`: `builder.build()` returns an immutable
+  snapshot — one shared pointer to read-only data, safe to share between
+  threads — whose lowered form is the builder's own graph and pool in
+  insertion order. `simulate(circuit, ...)` runs it bit-identically to
+  `simulate(builder, ...)` on `pwl`, `trbdf2` and `dsed`. Queries:
+  `devices()` (per branch: name, kind, pins, value fields), `nodes`,
+  `components()`, `initial_state()`, `state_var_names()`,
+  `switch_index_of()`, `structure_hash()`, `value_hash()`,
+  `to_builder()` (an independent mutable copy).
+* **Added** `builder.set_value("R1.R", 2.0)` / `get_value(...)`: every
+  value field of every device kind by name (the table is
+  `core/include/pulsim/ir/fields.hpp`); out-of-bound values and unknown
+  names raise `ValueError` naming the device and the field.
+* **BREAKING** `simulate()` and `compute_dc_op()` no longer change the
+  caller's builder. The topology preflight regularises the run's own
+  copy: its ties (1 GOhm per floating subnet) are in
+  `result.plan.ties`, the circuit that ran is `result.circuit`, and
+  the warning now says your builder is unchanged. Results are
+  bit-identical to before. **Migration:** code that relied on the ties
+  persisting (a second `simulate(..., auto_regularize=False)` on the
+  same builder, or reading `R_auto_iso_*` from it) gets the original
+  singular-matrix error; keep `auto_regularize=True`, add the tie
+  yourself, or run `result.circuit` / `circuit.with_ties(...)`.
+  `Circuit.with_preflight(options)` returns `(circuit, report, ties)`
+  without running.
+* **Added** named parameters and generic value updates
+  (docs/parameters.md): `p = builder.param("Lbase", 1e-3, "H", lo=,
+  hi=)` passed to any `add_*` in place of a number drives that field;
+  `circuit.with_params(Lbase=2e-3)` and `circuit.with_value("RL.R",
+  8.0)` return new circuits equal, bit for bit, to rebuilding (one
+  field of every device kind is tested), and leave the receiver
+  unchanged. Errors name the parameter, the device and the field.
+  Field updates are checked as `add_*` checks the device (cross-field
+  rules, fields the device's law does not read).
+* **Deprecated** `update_resistor_R`, `update_inductor_L`,
+  `update_capacitor_C`, `update_voltage_source_V`
+  (`DeprecationWarning`): use `circuit.with_value("R1.R", v)` or, in
+  place, `builder.set_value("R1.R", v)` — which also checks the bound.
+* **Changed** `builder.build()` refuses a builder carrying C blocks
+  (`UnsupportedError`; a Circuit cannot hold them yet — simulate the
+  builder); `simulate(circuit, mmc_arms=...)` asks for the builder.
+  Shockley loss/thermal parameters are read from the device's fields,
+  so `set_value("D1.I_S", ...)` reaches them.
+* **Added** `pulsim.sweep(circuit, params=...)` and
+  `pulsim.monte_carlo(circuit, distributions=...)`: a `pulsim.Circuit`
+  in place of the builder factory. Parameter names go through
+  `with_params`, `"device.field"` names through `with_value`; the
+  points share the circuit's symbolic analysis (one per sweep, where
+  the factory form does one per point: the 100-point ladder sweep runs
+  in 168 ms against 497 ms) and the results are bit-identical. With
+  `parallel=True` the points run on threads sharing the circuit;
+  `backend="process"` is refused (a Circuit does not pickle).
+
+### `engine='exact'` accepts a full-MNA `initial_state` (a DC operating point)
+
+It is projected onto the starting mode's reduced state (capacitor voltages, inductor currents),
+as `c0=` / `i0=` are; an inconsistent vector raises ValueError. It raised a shape error before.
+
+### `engine='exact'`: diode modes on a floating DC bus no longer depend on rounding
+
+The complementarity selector imposes a floating island's KCL exactly in its port problem
+(an all-OFF bridge's bus, tied only through g_off or a >= 1 Mohm tie) and poses its widened
+passes in the candidate mode. Before, the selected mode at a series-pair turn-off changed with
+the platform (GitHub CI, Linux). Survey trajectories are bit-identical; the selection counters
+(`leak_pins`, `ties`) can change.
+
+### `engine='exact'`: current waveforms exact, event samples read their sources' left limit
+
+Sine, pulse and table current sources (`add_sine_current_source`,
+`add_pulse_current_source`, `add_pwl_current_source`) are stepped exactly
+on `engine='exact'` / `'dsed'`: a sine as an oscillator pair, a pulse or
+table as level + ramp with every corner a time event (they ran
+numerically, which 13.2's default would now refuse). A stored event
+sample is the left limit of the step that ended there; at a source
+corner it now reads the sources' left limit too (it paired the old diode
+mode with the new source level: a PWM edge into a diode read −0.50 A of
+reverse current). The reference harness gives the exact engine the
+netlist's `dt` as its output grid, as it gives pwl (its 10 µs default
+left two samples per 20 µs period for the strict gate to interpolate).
+
+### `engine='exact'` refuses a segment it cannot step exactly (breaking for `b_extra_fn` users)
+
+With `engine='exact'` (alias `'dsed'`) a segment whose mode has no exact
+step now raises `UnsupportedError('dsed', feature)` naming the rule:
+`'source'` for a user `b_extra_fn`, `'cost'` for a stiff, near-defective
+mode, `'extraction'` when the native extractor rejects the circuit. Pass
+`allow_implicit_segments=True` to integrate such segments numerically,
+as before. Ten diode bridges paralleled on one bus, which ground for
+minutes into "no meaningful progress", are now refused at their first
+segment. `integrator='bdf2'` is unaffected. The keyword is refused by name
+on `pwl`, `trbdf2` and `auto`. Reference runs are unchanged.
+
+### Fixed: a delayed single-shot pulse on `engine='exact'`
+
+A pulse source with `period=0` and a start time whose corners round
+below `t_start + e` held its old level for the step after the corner
+(a 300 ns, 10 V pulse from 1 ms into 1 kΩ / 1 nF peaked at 7.27 V
+instead of 2.59 V). The source now reads the new piece at its corner.
+The law is shared, so a `pwl` / `trbdf2` sample landing exactly on such
+a corner now reads the new piece too; the reference sets are
+bit-identical.
+
+### Exact-engine record: `auto_would_route`; floating-island bound recorded
+
+Every exact run now carries `result.exact['auto_would_route']`: `True`
+when every mask it visited was exact. Report only: `engine='auto'` still
+picks `pwl`. On the 25 loadable `examples/*.yaml`, 13 would route exact;
+7 hold a Newton device and 5 are rejected by the extractor
+(add-exact-propagator-strategy DECISIONS, group 13). The diode-mode
+port factor on an island tied to ground through a large resistor is
+bounded by ε·C·|dv/dt|/G_tie; beyond the tie tolerance the run fails
+with the singular-factor error naming the node, never a rounded mode
+decision (add-complementarity-mode-selection DECISIONS #27).
+
+### dsed give-up sites throw one typed C++ exception
+
+The event-driven engine's own failures (diode settle round cap, diode
+chatter, no progress, the 10M-step cap, a non-finite RK45 / BDF2 step)
+now throw `pulsim::ConvergenceFailure` (`core/include/pulsim/errors/
+convergence.hpp`) with `kind()` = settle | chatter | no_progress |
+max_steps | nan, `time()` and `device()` (the chattering diode). It
+derives from `std::runtime_error` and keeps every message, so Python
+still sees `RuntimeError` with the same text; a Python translator is not
+registered in this change.
+
+### dsed diode modes: no early release, no crash on a paralleled bus, no silent settle
+
+Three fixes to the diode-mode decision on `engine='dsed'`
+(add-complementarity-mode-selection DECISIONS #24–#26):
+
+- A widened selection step no longer reaches past the decided mode's own
+  next event. A conducting diode whose current reached zero inside the
+  `1e4·h_e` window was released and cut early: three-phase bridge banks
+  behind line inductors read 0.128 V off pwl; now 3.3e-4 V (2 bridges),
+  3.5e-4 V (5), 3.4e-4 V (10). New counter `capped`.
+- With the default guard, a settle that hits its 64-round cap is decided
+  by the LCP instead of raising: five bridges paralleled on one bus now
+  run (1.5e-4 V from pwl, as `'lcp'`). New counter
+  `diagnostics['mode_guard']['settle_caps']`.
+- The guard-off A/B switch (`pulsim._dsed_dispatch.MODE_GUARD = False`)
+  now refuses with `UnsupportedError('dsed', 'consistent_mode', <diode>)`
+  where the guard would repair, instead of returning the settle's wrong
+  mode (it did on 9 of 30 survey circuits; the other 21 are unchanged).
+
+Default runs are bit-identical on the reference sets (36/36 arrays, 90/90
+survey runs).
+
 ### Integration fixes (batch 6b: design optimisation, exact route)
 
 * **Fixed** `pulsim.design` returned `ok` for a run that `simulate`
@@ -428,6 +801,142 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   11.73 V (pwl 31.88 V) silently; here the stored-sample guard raises
   `DiodeModeInconsistentError` naming D2 at t = 10.008 ms. The test
   checks the class on a 9 ms run (matches pwl to 5e-9 V) and the raise.
+
+### Examples audit × integration merge (2026-11-13)
+
+* **Fixed** `examples/scripts/run_adversarial_sweep.py`, case "substep
+  correction ON": the kernel now refuses the event split without the
+  restart rule, so the case crashed; it sets both (10.931 V).
+
+### Examples audit, follow-up (2026-11-13)
+
+* **Fixed** (project model) the M3C L1 plant (`build_l1_plant`) built
+  R_load + L_out only, while its docstring, the PI/dq tuning, the DBPC,
+  `predict_i_out_peak` and Tab 16 all assume the 0.9 PF load R_load +
+  jω·L_load. At 100 A the converter then needed ±1.35 of its 4 kV
+  levels: DBPC delivered 86.5 A of fundamental at 12.3 % THD (PI/dq
+  99.5 A, 10.5 %), and notebook 05 differentiated the staircase current
+  with an inductance the plant did not have (V_ab "28.64 kV" against
+  15.56 kV). With L_load in the plant: V_ab fundamental 15.54 kV, DBPC
+  99.95 A at 2.87 % THD, PI/dq 99.78 A at 6.28 % (notebook 06).
+* **Fixed** (project model) the M3C capacitor bookkeeping (Eq 162) used
+  each period's START current; the voltage chosen for that period is
+  what moves it, so the ideal module sources delivered a net 156 kW at
+  Tab 16 (P_in 1.656 MW, P_out 1.812 MW) while the capacitors held
+  24 kV. It now uses the mean of the start and end currents
+  (P_in − P_out = −0.18 %).
+* **Fixed** (project model) the M3C PI/dq rotated currents sampled at
+  the start of a period with the angle of its centre, and the DBPC aimed
+  at i_ref(t_centre + T_s): both half a period (4.05° at 45 Hz) late.
+  PI/dq: +4.18° and i_q = 7.31 A for i_q_ref = 0 → −0.03°; DBPC +2.88° →
+  −0.90°. Notebook 08's precharge release moves 1.349 → 1.372 s.
+* **Fixed** `compute_dc_op(strategy="pseudo_trans")` diverged on a linear
+  divider (||F|| = 1.4e84): the continuation shift (1/dt)·I sat on the
+  voltage-source rows too, a negative resistance in the loop. It now sits
+  on the node rows only (`pwl/pseudo_transient.hpp`), and one Newton
+  step on the unshifted system polishes the point the continuation
+  stops at (it stopped 1e-4 V short): 8.3333 V.
+* **Fixed** `run_transient_adaptive` restarted every segment from the
+  state alone, re-inventing the companion history as zero at each
+  boundary: a 10 kHz buck on the fixed-step grid read 7.962 V against
+  8.043 V. Segments now resume from `final_snapshot` and match the fixed
+  run to 1e-6 V.
+* **Fixed** the induction-motor rotor flux (`make_induction_motor_observer`
+  and the C++ BlockChain adapter) was forward Euler: |ψ_r| 0.9432 /
+  0.9290 / 0.9220 Wb at dt = 50 / 25 / 12.5 µs. It is now integrated
+  exactly over each step with the current held: 0.9158 / 0.9155 /
+  0.9153 Wb.
+* **Fixed** `run_ac_sweep` counted settling in test cycles only, so a
+  high-frequency point could be read inside the plant's start-up: an LC
+  filter started from zero read −6.09 dB at 11 kHz against −26.65 dB.
+  Each point now continues the same run window by window until two
+  windows agree within `settle_rtol` (1 %), and warns when
+  `max_extra_windows` runs out.
+* **Fixed** (project model) `projects/inverters/pfc_vsi_drive` put a
+  470 µF capacitor (C011) on the rectified bus ahead of the boost. PSIM's
+  own KPIs rule it out (I_D001_rms 4.984 A ≈ I_L002_rms 4.948 A, line
+  PF 0.979 at OP 2.3); with it the simulated line PF was 0.62 and
+  I_L002_rms 3.67 A. Removed: I_in_rms 5.08 A (PSIM 5.06), I_L002_rms
+  5.02 A (4.95), PF 0.992 (0.979); OP 2.2 within 1 %. `losses.py` and
+  `run_validation.py` now use the simulated line current (they assumed
+  PF = 0.95), count all four bridge diodes (the bridge loss was half),
+  and average over whole line cycles. The cascade gains are re-derived
+  per OP (inner PI zero at ω_i/5 instead of at ω_i; outer loop including
+  the V_link low-pass and the load pole); `measure_loop_gain.py`
+  measures 637–692 Hz / 48–58° (inner) and 19.6–20.3 Hz / 55–63°
+  (outer), where the old gains gave 21–23° on the inner loop at 220 V.
+  P_total now reads +4.7 / +13.7 / +6.3 % against PSIM, but PSIM's
+  OP 2.3 terms sum to 60.2 W against its stated 41.79 W (README).
+* **Fixed** (project model) every 3-φ MMC builder in
+  `projects/inverters/mmc_3phase` (L0, L1, L2, both IGBT variants, the
+  closed loop) took the load-inductor state index inside the load loop,
+  before the phase-b/c and star nodes existed, so `i_a` read an arm
+  current: THD 81.7 % and a 13.0 A fundamental. Now THD 1.7 % and
+  26.06 A (V̂/|Z_AC| = 26.76 A). The notebooks' "L0 already has 81.6 %
+  THD, so the thesis is inconsistent" conclusion is withdrawn. The
+  arm-sum v_C ripple (185 V) is the arm energy balance with the
+  simulated 10 A 2f circulating current (first order: 178.4 V, with
+  Î and φ from Z_AC); no 2f current brings it below 172 V, so the thesis' ~50 V is not the arm
+  sum at these parameters. The closed-loop energy loop's v_C low-pass
+  started at 0 V and wound its integrator to a −2.6 A bias on i_d_ref
+  (i_d_pre −0.59 A for a 2 A reference); it now starts at the set-point.
+* **Fixed** `examples/half_bridge_pwm.yaml` returned the RL load to a
+  100 kΩ divider (i_L half peak-to-peak 1.2 mA instead of 0.62 A) and
+  had no freewheeling diodes for the dead time; it has a split capacitor
+  bus and anti-parallel diodes now (0.617 A, analytic 0.622 A; the
+  −0.02 A DC offset is the start transient's 47 µC on the bus midpoint).
+* **Fixed** `run_psfb_ja_loss_analysis.py` printed 75.09 / 165.4 /
+  24.43 W from the primary current (which carries the reflected load
+  current) on a core whose J-A B was 0.42 T against the circuit's
+  23 mT. It now uses the magnetising current on an ETD49 with N = 3 and
+  prints a loss only where the J-A B matches the circuit's: ferrite
+  18.05 W (B ratio 0.83); the other two sets are not the circuit's core.
+  `compute_bh_loop`'s negative loop area for `permalloy` is a known
+  limitation (`probes/ja_negative_loop_area.py`).
+* **Fixed** (notebook) `buck_converter_design` counted the diode
+  conduction loss as V_T0·I_avg only; with the 20 mΩ slope it is
+  V_T0·I_avg + R_d·I_rms² with V_T0 = V_F(1 A) − R_d·1 A = 3.115 W
+  (was 2.812 W), η 92.05 → 91.63 %.
+* **Documented** (not defects) the `b_extra` sign — it is an addend to the
+  residual F = J·x + b, so an entry e on a voltage source's row gives
+  v(+) − v(−) = V − e, and on a node row draws e out of the node — and
+  that `branch_var_id_for_*` returns `num_nodes + k`, which moves when a
+  node is added afterwards. Both pinned by tests.
+
+### Control helpers: report the loop they build (examples audit, 2026-11-13)
+
+* **Fixed** `tune_pi_from_bode` returned `achieved_pm_deg` "by
+  construction" (the target) without looking at the loop it built. On
+  the buck of `run_auto_tune_buck.py` (Q = 3.4) asked for 60° at 2 kHz,
+  |L| rises above 1 again at the LC peak and the last 0 dB crossing has
+  6.0° (37.9° on the measured Bode); the fallback branch printed 172.8°
+  for a loop with 23.6°. It now reads the margin off
+  `loop_gain(freqs, H, Kp, Ki)` at its last crossing, warns when the
+  loop crosses 0 dB anywhere but `f_crossover`, and returns
+  `loop_crossovers_hz`. The plant phase is unwrapped along the sweep.
+* **Fixed** `phase_margin_from_loop` read the wrapped angle: a loop
+  lagging 205° at crossover (unstable) reported +335° instead of −25°.
+* **Fixed** the self-throttle of `bind_pi_to_switch` /
+  `bind_pi_to_duty_callable` (`loop.step_observer` called every step)
+  skipped a tick whenever a step landed a floating-point hair before
+  k·T: 2978 PI updates instead of 3000 over 30 ms at dt = T/100, each
+  late one a step off the carrier edge. It now follows the
+  t_start + k·T schedule (3001 updates, k = 0..3000).
+* **Fixed** `add_foster_network` (and `add_shared_heatsink` given
+  `FosterStage` values) put every stage capacitor to ambient, which is
+  a Cauer ladder: 10 W into (0.05 K/W, 0.1 ms), (0.3, 5 ms), (0.8, 0.5 s)
+  read 0.016 / 0.159 / 2.79 K at 1 ms / 10 ms / 0.2 s against the
+  Foster 1.06 / 3.25 / 6.14 K. Each capacitor now sits across its own
+  R (1.057 / 3.252 / 6.137 K at `dt` = 10 µs). Thermal numbers from
+  `make_thermal_observer` runs move (e.g. `run_thermal_buck.py`).
+* **Fixed** `compute_temperature` heated sample 0 with `P[0]`, so the
+  trace led `t` by one step (1.90 K at t = 0 for 20 W into 1 K/W, 1 s,
+  `dt` = 0.1 s). Sample 0 is now the start; negligible on fine grids.
+* **Fixed** `CircuitBuilder.initial_state()` wrote a capacitor's `c0`
+  into its positive node alone: two series capacitors given 10 V each
+  started at 0 V and 10 V, in either build order. `c0` now sets
+  v(from) − v(to) for every capacitor (each group walked from ground);
+  a loop of `c0` values that breaks KVL raises `ValueError`.
 
 ### Integration fixes (batch 6a: complementarity mode selection merged)
 
@@ -821,8 +1330,23 @@ with the reason (`'device'`, `'source'`, `'extraction'`, `'cost'`), the
 device and kind, the tier and `n_segments`. `pulsim.exact_route(builder,
 t_end, ...)` returns the same record, and classifies circuits the exact
 engine refuses (a Shockley diode → `'device'`; coupled inductors, an
-inductor cut-set or a capacitor loop → `'extraction'`; a PWM / pulse
-source → `'source'`). The route of `engine='auto'` does not change.
+inductor cut-set or a capacitor loop → `'extraction'`; a user
+`b_extra_fn` → `'source'`). The route of `engine='auto'` does not change.
+
+### `engine='exact'`: pulse and PWM sources are exact
+
+A pulse or PWM voltage source is level + ramp between corners; the exact
+engine now steps it in closed form (`e^{Ah}x + hφ₁(Ah)(b + c0) +
+h²φ₂(Ah)c1`) and lands every corner as a time event, so the diode modes
+are re-decided there. Before, every mask with such a source was tier 3
+and numeric. A 0 → 10 V ramp over 1 ms into 1 kΩ / 1 µF: 8.97e-8 V off
+the closed form with 0 exact steps → 2.7e-13 V with 5000 / 5000 exact
+and a sample at the 1 ms corner. A PWM source → R → diode → C that
+raised a chatter error at 50 µs now runs (4.999998216 V, pwl at dt =
+1e-8 the same). Pulse trains, a PWM-source buck and a corner on a gate
+edge match an exact affine propagation within 1e-10. `exact_route` no
+longer answers `'source'` for these sources. pwl and trbdf2 are
+bit-identical.
 
 ### Diode mode selection: passivity classes in the diagnostics
 
@@ -837,8 +1361,41 @@ nothing refused) or `passive_reciprocal`. Numbers do not change. A diode
 bridge behind an ideal transformer (n = 0.5) runs on the dsed default at
 31.876241228 V against pwl 31.876241232 V. A rectifier fed by coupled
 inductors is still refused by the dsed extractor
-(`UnsupportedError('dsed', 'extraction')`). Known: `mode_selection='lcp'`
-is wrong on that bridge (11.73 V; KNOWN_LIMITATIONS).
+(`UnsupportedError('dsed', 'extraction')`). `mode_selection='lcp'` on
+that bridge: see the port-model fix below.
+
+### dsed `mode_selection='lcp'`: the port model no longer decides by rounding (fix)
+
+The diode-port problem of the LCP was solved in history form,
+`J·s = (C/h_e)·x(t⁻) − b`, which puts `C·v_C/h_e` (1.6e6 A for 100 µF at
+32 V and `h_e` = 2 ns) on both nodes of a capacitor. On a DC bus held
+only by 1 MΩ ties and `g_off` leaks its rounding (2e-10 A over a 1 µS
+pivot, 2e-4 V) exceeded the 3.1e-5 V a turn-on gap moves in `h_e`, so
+rounding chose the mode: a bridge behind an ideal transformer (or a
+floating sine source) ended at 11.726610 V under `'lcp'` with D2 and D3
+never conducting and D2 blocking +49.86 V. The problem is now solved for
+the increment, `J·δ = −(G·x(t⁻) + b(t + h_e))`. That bridge ends at
+31.876241228 V for `H_E_REL` = 1e-10 … 1e-4 (pwl at 0.1 µs:
+31.876241232 V), bit-identical to the default at the default `h_e`.
+All 90 runs of the mode-selection surveys and the 36 arrays of
+`bit_identity.py` (`pwl`, `trbdf2`, `dsed`) are bit-identical.
+
+### dsed: a diode signal returning to its admissible side is not an event (fix)
+
+Rectifier banks behind line inductance chattered on `engine='dsed'`
+("Db2b is chattering at t = 4.333e-3 s", five three-phase bridges behind
+0.2 mH): after a commutation the projection leaves ~3e-14 A of rounding
+in an inductor in series with an OFF diode, `g_off` turns it into
++2e-5 V of forward bias that relaxes in 2e-13 s, and the event locator
+read that return as a turn-ON crossing. A diode predicate now fires
+only when its signal leaves its admissible side; a start past the
+threshold by more than the zero band (1e-12 × the largest node voltage)
+that comes back is not an event, while a start inside the band is read
+both ways as before. Five- and ten-bridge banks on independent buses
+now run on the default and on `'lcp'`. Seven survey runs drop
+re-decision events (the single-phase bridges 78 → 59 and 80 → 39
+events; node voltages move by at most 1.9e-8 V and keep their distance
+to pwl); `pwl` and `trbdf2` are bit-identical.
 
 ### dsed: a diode predicate starting a step at exactly zero is located (fix)
 

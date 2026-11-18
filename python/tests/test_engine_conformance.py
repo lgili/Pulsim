@@ -665,6 +665,87 @@ def test_sensitivities_cell(engine):
     assert r.sensitivity.states.shape[2] == 1
 
 
+# add-periodic-steady-state-shooting group 5: periodic_steady_state(engine=)
+# and SteadySpec(method='pss') x engine. Honoured on the exact stepper
+# ('exact' and 'dsed' one engine, bit-identical), 'pwl' and 'trbdf2' (the
+# orbit of that engine's transient); anything else refused before a run.
+_PSS_T = 1e-5
+
+
+def _pss_buck(d=None, shockley=False):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9)
+    if shockley:
+        b.add_shockley_diode("D1", "gnd", "sw")
+    else:
+        b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "vout", 100e-6)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", 50.0)
+    return b, p.make_pwm_switch_fn(1 / _PSS_T, 0.3, b.switch_index_of("S"),
+                                   b.graph.num_switches)
+
+
+def _pss_kw(engine):
+    return {"dt": _PSS_T / 100} if engine in ("pwl", "trbdf2") else {}
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "exact", "bdf1"))
+def test_periodic_steady_state_engine_cell(engine):
+    b, sf = _pss_buck()
+    if engine == "bdf1":
+        with pytest.raises(ValueError, match="engine must be"):
+            p.periodic_steady_state(b, period=_PSS_T, switch_fn=sf,
+                                    engine=engine)
+        return
+    r = p.periodic_steady_state(b, period=_PSS_T, switch_fn=sf,
+                                engine=engine, **_pss_kw(engine))
+    v = r.x0[r.state_labels.index("v(vout)")]
+    assert v == pytest.approx(8.99624708728943, rel=1e-6)
+    assert r._ctx.loop == ("fd-broyden" if engine in ("pwl", "trbdf2")
+                           else "kernel")
+    # a Newton device is refused by name on every engine, before a run
+    bs, sfs = _pss_buck(shockley=True)
+    ok, why = p.periodic_steady_state_supported(
+        bs, _PSS_T, sfs, engine=engine, **_pss_kw(engine))
+    assert not ok and "D1" in why
+
+
+def test_periodic_steady_state_exact_and_dsed_are_bit_identical():
+    out = []
+    for eng in ("dsed", "exact"):
+        b, sf = _pss_buck()
+        r = p.periodic_steady_state(b, period=_PSS_T, switch_fn=sf,
+                                    engine=eng)
+        out.append((r.x0, r.monodromy, r.n_period_runs))
+    assert np.array_equal(out[0][0], out[1][0])
+    assert np.array_equal(out[0][1], out[1][1]) and out[0][2] == out[1][2]
+
+
+@pytest.mark.parametrize("engine", ("auto", "dsed", "exact", "pwl", "trbdf2"))
+def test_steady_spec_pss_engine_cell(engine):
+    from pulsim.design import Evaluator, SteadySpec
+
+    def build(_d):
+        return _pss_buck()
+    recs = {}
+    for eng in dict.fromkeys(("exact", engine)):
+        recs[eng] = Evaluator(build, period=_PSS_T, loads=("RL",),
+                              output="vout", engine=eng,
+                              options=_pss_kw(eng),
+                              steady=SteadySpec("pss")).evaluate({})
+    r = recs[engine]
+    assert r.status == "ok"
+    route = {"auto": "dsed", "exact": "dsed"}.get(engine, engine)
+    assert r.counters["route"] == f"pss/{route}"
+    assert r.counters["pss_period_runs"] >= 1
+    assert r.kpis["v_out"] == pytest.approx(recs["exact"].kpis["v_out"],
+                                            rel=1e-6)
+    if engine == "dsed":
+        assert r.kpis == recs["exact"].kpis
+
+
 @pytest.mark.parametrize("engine", ("trbdf2", "dsed"))
 def test_mode_selection_lcp_refused_by_name_without_the_event_integrator(engine):
     # 'lcp' decides on the dsed event integrator only; this RC routes to "auto"
@@ -726,10 +807,12 @@ def test_mode_guard_diagnostics_on_pwl_and_dsed(engine):
         assert g is None
         return
     assert g["checks"] > 0 and g["repairs"] == 0 and g["repair_times"] == []
+    assert g["settle_caps"] == 0 and g["lcp"]["capped"] == 0     # DECISIONS #24, #25
     rec = {"class": "passive_reciprocal", "device": "", "kind": ""}
     assert g["passivity"] == rec        # task 5.1 class
     r = _sim(engine, _half_wave(), mode_selection="lcp")
     assert r.diagnostics["mode_selection"]["lcp_count"] > 0
+    assert r.diagnostics["mode_selection"]["capped"] == 0
     assert r.diagnostics["mode_selection"]["passivity"] == rec
     assert "mode_guard" not in r.diagnostics
 
@@ -1091,6 +1174,48 @@ def test_branch_form_matrix_equals_the_docs():
         doc_table[cells[0]] = {c: v == "yes" for c, v in zip(cols, cells[1:])}
     assert doc_table == k._branch_form_capabilities()
 
+# ---------------------------------------------------------------------
+# add-compiled-control-graph task 4: a control-graph Rate on each engine
+# ---------------------------------------------------------------------
+
+def _rated_chain(b, rate):
+    ch = p.MixedDomainBlockChain(rate=rate)
+    ch.add("g", p.Gain(k=0.5), inputs=dict(x="o"), output="y")
+    return ch
+
+
+@pytest.mark.parametrize("rate,feature", [
+    (dict(period=1e-4, offset=2e-5), "control_rate_offset"),
+    (dict(period=1e-4, compute_delay=2e-5), "compute_delay"),
+])
+def test_control_rate_offset_and_delay_time_refused_on_trbdf2(rate, feature):
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(**rate))
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim("trbdf2", b, step_observer=ch.make_step_observer(b))
+    assert (ei.value.engine, ei.value.feature) == ("trbdf2", feature)
+
+
+@pytest.mark.parametrize("rate", [
+    dict(period=1e-4, offset=2e-5), dict(period=1e-4, compute_delay=2e-5),
+    dict(period=1e-4, compute_delay="one_sample"),
+])
+def test_control_rate_keywords_honoured_on_pwl(rate):
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(**rate))
+    _sim("pwl", b, step_observer=ch.make_step_observer(b))
+    assert ch.tick_counts == [20]     # ceil((2e-3 - offset) / 1e-4)
+
+
+@pytest.mark.parametrize("engine", ("dsed", "exact"))
+def test_control_rate_refused_on_dsed(engine):
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(1e-4))
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim(engine, b, step_observer=ch.make_step_observer(b))
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "step_observer")
+
+
 # add-exact-propagator-strategy group 13: engine='exact' is the canonical name of the event-driven
 # exact engine, 'dsed' its alias. Every keyword cell of 'dsed' holds under 'exact', and the
 # refusal keeps naming 'dsed' (the capability-table column; DECISIONS, group 13 slice).
@@ -1114,6 +1239,7 @@ def test_exact_segments_only_on_the_exact_engine(engine):
     segs = ex["segments"]
     assert segs and all(s["exact"] and s["reason"] is None for s in segs)
     assert sum(s["n_segments"] for s in segs) >= 2      # the diode commutates
+    assert ex["auto_would_route"] is True               # 13.3 report-only field, same on both names
 
 
 # Integration batch 6b: 'exact' and 'dsed' are one engine on every device cell and the
@@ -1132,3 +1258,48 @@ def test_exact_and_dsed_are_bit_identical_on_every_cell(kind):
         assert a == b
         return
     assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1])
+
+
+# Integration batch 9: the exact engine's new cells (allow_implicit_segments, a static circuit,
+# a DC start) hold under both names, bit for bit; the keyword is refused by name elsewhere.
+def _divider():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 12.0)
+    b.add_resistor("R1", "a", "o", 2e3)
+    b.add_resistor("R2", "o", "gnd", 1e3)
+    return b
+
+
+def _rc_b_extra():
+    b = _rc()
+    zero = [0.0] * b.pool.state_size(b.graph)
+    return b, (lambda _t: zero)
+
+
+@pytest.mark.parametrize("cell", ["static", "dc_start", "allow_implicit_segments"])
+def test_exact_engine_cells_are_identical_under_both_names(cell):
+    out = {}
+    for eng in ("dsed", "exact"):
+        if cell == "static":
+            r = _sim(eng, _divider(), dt=1e-4)
+            assert np.abs(np.asarray(r.v("o")) - 4.0).max() < 1e-12      # 12 V * 1k / 3k
+        elif cell == "dc_start":
+            x = np.asarray(p.compute_dc_op(_rc()), float)
+            r = _sim(eng, initial_state=x, dt=1e-4)
+        else:
+            b, fn = _rc_b_extra()
+            with pytest.raises(p.UnsupportedError) as ei:
+                _sim(eng, b, b_extra_fn=fn)
+            assert (ei.value.engine, ei.value.feature) == ("dsed", "source")
+            b, fn = _rc_b_extra()
+            r = _sim(eng, b, b_extra_fn=fn, allow_implicit_segments=True)
+        out[eng] = (np.asarray(r.times), np.asarray(r.states))
+    assert np.array_equal(out["dsed"][0], out["exact"][0])
+    assert np.array_equal(out["dsed"][1], out["exact"][1])
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto"))
+def test_allow_implicit_segments_is_refused_off_the_exact_engine(engine):
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim(engine, allow_implicit_segments=True)
+    assert ei.value.feature == "allow_implicit_segments"

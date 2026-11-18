@@ -76,11 +76,12 @@ The one-call high-level API (proposal #3.3). Builds the PWL cache, derives a def
 | `dt` | `float` or `None` | `None` | Fixed time step, seconds. Passing it selects the fixed-step `pwl` engine; omit it to let `engine='auto'` pick the engine and step. |
 | `t_start` | `float` | `0.0` | Start time. |
 | `switch_fn` | `Callable[[float], SwitchStateMask]` | all closed | Switch driver. |
-| `b_extra_fn` | `Callable[[float], list[float]]` | `None` | Per-step constant residual extras. |
+| `b_extra_fn` | `Callable[[float], list[float]]` | `None` | Per-step addend to the residual F = J·x + b. An entry e on a voltage source's row gives v(+) − v(−) = V − e (write −v to add v); on a node row it draws a current e out of the node. Index rows with `pool.branch_var_id_for_source(id, graph)` / `node_id_of` AFTER the last `add_*`: a branch row is `num_nodes + k` and moves when a node is added. |
 | `start_from_dc_op` | `bool` | `False` | Seed initial state from DC OP. |
 | `enable_nonlinear_refresh` | `bool` or `None` | `None` | `None`: the kernel stamps the Newton devices when the circuit has any. `True` forces the static chain. `False` on a circuit with a smooth / Shockley diode, MOSFET or IGBT raises `UnsupportedError` (it used to simulate them as open circuits). |
 | `max_newton_iterations` | `int` | `0` (engine default) | Newton iteration cap. |
 | `max_event_iterations` | `int` or `None` | `None` (engine default) | Event-iteration cap. |
+| `allow_implicit_segments` | `bool` or `None` | `None` | `engine='exact'` only. A segment the exact kernel cannot step raises `UnsupportedError('dsed', feature)` with `feature` the failed rule (`'source'`: a `b_extra_fn`; `'cost'`: a stiff, near-defective mode; `'extraction'`: the extractor rejected the circuit) unless `True`, which integrates it numerically. Refused by name on other engines. |
 | `engine` | `str` | `'auto'` | `'auto'`, `'pwl'`, `'trbdf2'` or `'exact'`. `'exact'` is the canonical name of the event-driven exact engine and `'dsed'` its alias: one engine, bit-identical runs; `result.engine_used` and every refusal's `engine` field read `'dsed'` (the capability-table column) until the default flip. |
 
 `pulsim.exact_route(builder, t_end, switch_fn=None, **kw)` runs the
@@ -89,10 +90,12 @@ exact-eligible or not (add-exact-propagator-strategy D11, report only —
 `'auto'` does not read it): `{"exact": bool, "reason": ..., "segments":
 [{"mask", "exact", "reason", "device", "kind", "detail", "tier",
 "n_segments"}, ...]}`. Reasons: `'device'` (a device with no linear / PWL
-law, named), `'source'` (a PWM / pulse source or a `b_extra_fn`),
+law, named), `'source'` (a user `b_extra_fn`; sine, PWM and pulse sources are exact),
 `'extraction'` (coupled inductors, a capacitor loop, an inductor
 cut-set), `'cost'` (the mask's propagator outside its accuracy tiers).
-The same rows ride on every exact run as `result.exact["segments"]`.
+The same rows ride on every exact run as `result.exact["segments"]`, with
+`result.exact["auto_would_route"]`: `True` when every visited mask was
+exact (what `'auto'` would route to exact; report only, read by nothing).
 
 Returns a `SimulationResult` with parallel arrays:
 - `result.times` — `list[float]`. With a fixed `dt`: length `floor((t_end − t_start) / dt) + 1`, or that divided by `store_every` (rounded up) when decimation is on. Without one the grid is **variable-step** and the spacing is not uniform — average with [the time-weighted helpers](#statistics-over-a-result-time-weighted), not `.mean()`.
@@ -370,7 +373,7 @@ out.kpis["v_out"]; out.failed; out.backend   # "serial" | "thread" | "process"
 - `"auto"` (default) runs the first job in the calling thread and reads
   its `res.step_loop_python_callbacks`. Empty (native schedule) → the
   other jobs run on a thread pool; the kernel releases the GIL, so they
-  run in parallel. Any Python callable → a `multiprocessing.Pool`, since
+  run in parallel. Any Python callable → a process pool, since
   threads would serialise on the GIL.
 - `"thread"` forces threads. `builder_factory` and `kpi_fn` then run
   concurrently in one interpreter: they must not share mutable state.
@@ -538,6 +541,16 @@ sm = r.sampled_model(inputs=[("duty", "S")], outputs=["vout"])
 sm.response([0.0])                   # H(z=1): d v_out / d D = 23.09 V
 ```
 
+* **Other engines.** `engine="pwl", dt=T/100` (a gate edge at
+  `t = 0`, `T/dt` an integer) or `engine="trbdf2"` (step ceiling `dt`,
+  default `T/100`) shoot with that engine's own period runs — the fixed
+  engine with its restart rule — and `M` by finite differences with
+  Broyden updates: the orbit is the one that engine's transient
+  reaches (DCM buck: 12 period runs on `pwl`, 1.2e-11 of the state
+  scale from a 4000-period transient). `r.full_state` resumes a
+  transient; `sensitivities=` and nonlinear devices are refused.
+  `run_periodic_shooting` / `run_harmonic_balance` are deprecated
+  delegates of it.
 * **Multipliers.** `stable = max|μ| < 1`. An orbit with a multiplier
   outside the unit circle is returned with `stable=False`, and
   `r.unstable_multipliers` names each one: −1 side `flip

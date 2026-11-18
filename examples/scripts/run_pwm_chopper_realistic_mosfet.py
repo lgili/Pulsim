@@ -8,8 +8,8 @@
 The gate V_g is driven by a pulse source (4 µs ON / 6 µs OFF →
 40 % duty at 100 kHz). When the MOSFET is OFF, the voltage divider
 gives V_drain = V_in·R_load/(R_in+R_load) = 8 V. When ON, the
-triode law settles at V_drain ≈ 1.45 V. Time-averaged V_drain ≈
-5.4 V.
+triode law settles at V_drain ≈ 1.33 V. Time-averaged V_drain ≈
+0.4·1.33 + 0.6·8 = 5.33 V.
 
 Demonstrates a "no switch_fn needed" pattern: the MOSFET is driven
 intrinsically by a `PulseVoltageSource` on the gate; there are no
@@ -71,9 +71,9 @@ def main() -> None:
     v_gate  = res.v("V_g")
 
     print(f"  V_drain range: [{v_drain.min():.2f}, {v_drain.max():.2f}] V "
-          f"(target ~[1.45, 8])")
+          f"(KCL: [1.33, 8.00])")
     # Time-weighted over the whole run (correct on any grid; a sample mean is not).
-    print(f"  V_drain mean:  {p.time_average(res.times, v_drain):.2f} V (target ~5.4)")
+    print(f"  V_drain mean:  {p.time_average(res.times, v_drain):.2f} V (0.4·1.33 + 0.6·8 = 5.33)")
 
     try:
         import matplotlib.pyplot as plt

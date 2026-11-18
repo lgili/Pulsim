@@ -91,6 +91,7 @@ struct ModeReport {
     Size lcp_events = 0, lcps = 0, pivots_total = 0;
     int max_pivots_per_event = 0;
     Size ties = 0, widenings = 0, leak_pins = 0, pin_judgements = 0;
+    Size capped = 0;               ///< tie passes shortened to the mode's next event (#24)
     Size unfixed = 0, enumerations = 0, nonunique_modes = 0, released = 0;
     Size settle_rounds_total = 0;  ///< 'lcp': 0 (the settle never runs)
     Size mask_cycles = 0;          ///< 'lcp': 0
@@ -109,6 +110,7 @@ struct ModeGuardReport {
     Size repairs = 0;              ///< settled mode inconsistent, LCP mode applied
     Size confirmed = 0;            ///< inconsistent, the LCP returned the same mode
     Size failed = 0;               ///< no consistent LCP mode: the breach is kept
+    Size settle_caps = 0;          ///< settles judged: round budget hit or mask cycle (dsed: #25)
     std::vector<Real> repair_times;
     std::vector<std::string> repair_diodes;
     std::vector<Real> repair_violations;

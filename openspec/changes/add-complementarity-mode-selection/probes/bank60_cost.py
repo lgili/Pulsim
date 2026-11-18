@@ -1,8 +1,9 @@
 """Task 8.3, the cost gate: a 60-diode bank (ten three-phase bridges fed straight from their
 sources, 6-degree phase steps, each feeding its own 200 uF || 50 ohm; one LCP of 60 ports) on dsed
 with the settle alone (guard off), the default (settle + guard) and mode_selection='lcp'. The
-variants with 0.2 mH line inductors, and the ten bridges paralleled onto one bus, chatter or fail
-to settle on every dsed mode (listed at the end; DECISIONS #20).
+variants with 0.2 mH line inductors and the ten bridges paralleled onto one bus are run once
+each at the end (DECISIONS #20; since #23 the independent-bus line-inductance bank runs on the
+default and on 'lcp').
 
     PYTHONPATH=<worktree>/python python3 bank60_cost.py [n_rounds] [--cost-only] > bank60_cost.out
 
@@ -88,11 +89,18 @@ def main():
     res = {}
     for _ in range(n_rounds):
         for tag, mode, guard in modes:
-            r, dt = run(mode, guard, b_kw)
+            try:
+                r, dt = run(mode, guard, b_kw)
+            except p.UnsupportedError as e:   # the settle alone, judged (DECISIONS #26)
+                res[tag] = e
+                continue
             times[tag].append(dt)
             res[tag] = r
     for tag, _, _ in modes:
         r = res[tag]
+        if isinstance(r, p.UnsupportedError):
+            print(f"   {tag:6s} refused: ({r.feature}, {r.device}) {str(r)[:90]}")
+            continue
         dg = r.diagnostics or {}
         g = dg.get("mode_guard", {})
         s = dg.get("mode_selection") or g.get("lcp", {})
@@ -109,7 +117,7 @@ def main():
     sys.stdout.flush()
     if "--cost-only" in sys.argv:
         return 0
-    print("== variants that do not run (one run each, every mode; not cost cases)")
+    print("== variants (one run each, every mode; not cost cases)")
     for b_kw in ({"vth": 0.0, "ls": LS}, {"vth": 1e-2, "ls": LS}, {"vth": 0.0, "ls": LS, "shared_bus": True}):
         for tag, mode, guard in modes:
             try:

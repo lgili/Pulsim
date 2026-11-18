@@ -14,7 +14,11 @@ give explicit numerical THD or step-response times. We compare:
     after the multilevel modulation.
   * Input current at 50 Hz under power transfer (i_d_in > 0).
   * Capacitor voltage balance — mean should stay near
-    N · v_cap_nominal = 24 kV with bounded spread.
+    N · v_cap_nominal = 24 kV with bounded spread. This needs
+    ``closed_loop=True`` (dq current loops + cap-energy loop): the default
+    open-loop run has no cap control and the caps collapse to a few kV.
+    At 5 Hz the measurement window is shorter than 3 output periods, so
+    that row is not a meaningful fundamental-tracking check.
 
 References:
   * Gili (2024) Tab. 16 (HIL parameters)
@@ -32,7 +36,6 @@ import numpy as np
 
 from m3c_3phase_model import (
     M3cParams,
-    abc_to_dq,
     build_l1_plant,
     predict_i_out_peak,
     run_l1_cost_loop,
@@ -109,8 +112,6 @@ def run_validation_at_freq(
         ia = result.i_a_out[len(result.i_a_out) // 2:]
     else:
         ia = result.i_a_out[-3 * n_per_period:]
-    ib = result.i_b_out[-len(ia):]
-    ic = result.i_c_out[-len(ia):]
     ia_in = result.i_a_in[-len(ia):]
 
     # Compute fundamental from FFT.
@@ -169,7 +170,7 @@ def format_validation_table(
 
 
 if __name__ == "__main__":
-    print("Running M3C validation sweep (Tab. 16 frequencies)...")
+    print("Running M3C closed-loop validation sweep (Tab. 16 frequencies)...")
     print()
-    results = run_tab16_sweep()
+    results = run_tab16_sweep(closed_loop=True)
     print(format_validation_table(results))

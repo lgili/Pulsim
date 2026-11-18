@@ -93,6 +93,8 @@ capacitor loops (parallel capacitors) on `dsed`; C blocks, controllers
 `live_stream`, `max_dt_halvings`, `mmc_arms`, `on_cache`, the inductor
 guards, `enable_substep_state_correction` and `discontinuity_restart` on
 `dsed`; the fixed-step keywords (`discontinuity_restart` among them) on
+`trbdf2`; a control-graph `Rate` with an `offset`
+(`control_rate_offset`) or a `compute_delay` time (`compute_delay`) on
 `trbdf2`; a `b_extra_fn.next_jump_after` declaration is read by `pwl`
 only (a no-op on `trbdf2` / `dsed`, which control the step on their own
 error estimate); `enable_nonlinear_refresh=False` with a smooth /
@@ -136,12 +138,13 @@ event where the signal jumps.
 | Limitation | Measured | Workaround |
 |---|---|---|
 | A slow mode limits the orbit's accuracy to the map's rounding over one minus the Floquet radius. | Zero-mean sine current into 1 µF ∥ 1 TΩ (Floquet radius 1 - 1e-9): v(0) = 0.15726 V against 0.159155 V. | Add the real loss; check `floquet_radius`. |
+| `engine='pwl'` / `'trbdf2'` shooting differentiates the map by finite differences (`n` period runs per Jacobian, Broyden updates between them), so it costs more runs than the exact stepper and has no orbit sensitivities (`sensitivities=` refused). `pwl` needs a gate edge at `t = 0` and `T/dt` an integer; `trbdf2` needs a schedule with `next_edge_after` and fixes the step ceiling at `dt` (default `T/100`); nonlinear devices are refused on both. | DCM buck from zero: 12 period runs on `pwl` (6 on the exact stepper). Orbit vs the engine's own 4000-period transient: 1.2e-11 (`pwl`) and 2.6e-9 (`trbdf2`) of the state scale. | `engine='exact'` when the circuit is in its coverage. |
 
 ## Design evaluation (`pulsim.design`)
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| Threads do not speed up the `pss` route: the shooting Newton and the KPI post-processing are Python and hold the GIL. | 64 DCM-buck designs: 1 thread 0.50 s, 8 threads 0.47 s; the kernel is 13 % of an evaluation. | `evaluate_many(..., backend="process")` for large batches. |
+| Threads do not speed up the `pss` route: the shooting Newton runs in the kernel without the GIL, but circuit building, the loss rows and the KPIs are Python and hold it. | 64 SYN-A designs: 2445 evaluations/s on 1 thread, 1848 on 4, 1740 on 8; the kernel is 21 % of an evaluation. | `evaluate_many(..., backend="process")` for large batches. |
 | A device whose power no loss model covers (Lauritzen diode, level-1 MOSFET/IGBT, controlled sources) refuses the efficiency. | Buck with a Lauritzen diode: efficiency would read 0.99989 without the diode's 1.36 W of 28.4 W; it is `refused` (`feature="losses"`). | Evaluate without `loads=` for the other KPIs, or use the PWL diode / switch. |
 | `method="transient"` settles to the engine's own orbit. | DCM buck on `trbdf2`: estimated distance 1.4e-10, true error 2.2e-5 (the engine's accuracy). A PWM voltage source on `trbdf2` never settles to 1e-6 (period noise 2.7e-4). | `method="pss"` (exact stepper), or a switch with a schedule instead of a PWM source. |
 
@@ -190,7 +193,7 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **Only the DC machine is solved in the matrix.** `b.add_dc_machine` is MNA-native; the PMSM observer, BLDC and induction motor are still forward-Euler observers on `pwl` only (`b.add_pmsm_mna` is native). No machine model is validated against measurements: the tests check analytic limits of the equations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). | Use `b.add_dc_machine`; halve `dt` to check an observer run. |
+| **Only the DC machine is solved in the matrix.** `b.add_dc_machine` is MNA-native; the PMSM observer, BLDC and induction motor are still explicit observers on `pwl` only (forward Euler; the induction motor's rotor flux is integrated exactly over each step since 2026-11, but its EMF still reaches the circuit one step late) (`b.add_pmsm_mna` is native). No machine model is validated against measurements: the tests check analytic limits of the equations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). | Use `b.add_dc_machine`; halve `dt` to check an observer run. |
 | No angle node on `add_dc_machine` (`theta_node` raises `UnsupportedError`); no `components()` entry for the machine as a whole (its sub-elements are listed). | — | Integrate `res.v(omega_node)`, or build the angle: `add_vccs` from the speed node into a 1 F capacitor. |
 
 ## Passives
@@ -201,6 +204,22 @@ event where the signal jumps.
 | **YAML has no `rac:` ladder or `transmission_line` type.** `rac:` on an inductor is refused by name; `esr`, `esl`, `c_par` are read. Other unknown per-device keys are still ignored without a warning. | — | Build ladders and lines from Python. |
 | One ESR value (no frequency dependence), single-pair line (no coupled three-phase cable). The DC-bias capacitance is `odd_charge_table` only: no `fit_mlcc_dc_bias`, no YAML, and it is a Newton device (`pwl` / `trbdf2`). | — | Read ESR at the switching frequency; fit `R_ac(f)` of windings with `fit_rac_ladder`; integrate the datasheet C(V) curve into knots yourself. |
 | **A winding with an `rac=` ladder cannot be coupled.** `add_inductor_coupling` refuses it with `UnsupportedError` (feature `rac`): coupling the main inductor alone would leave the cells' flux uncoupled. | — | Couple windings built with `esr=`, or use `add_transformer`. |
+
+## Found by the examples audit (2026-11-13)
+
+Reproducers are in `probes/` (run them against the tree to re-measure);
+each example affected says so where it prints the number. Fixed since
+the audit (see the CHANGELOG): the `pseudo_trans` divergence,
+`run_transient_adaptive` reading low, the forward-Euler induction-motor
+flux and `run_ac_sweep` reading inside the start-up. The `b_extra` sign
+and the moving `branch_var_id_for_*` index are contracts, documented in
+`simulate` and `docs/api-reference.md`.
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **`device_loss_summary`'s resistor `P_avg` is first order in `dt` on PWM currents** (each edge becomes a one-step ramp in the stored samples; the switch `P_avg` is exact). Owner: `python/pulsim/losses.py`, `device_loss_summary` (line 1556). Probe: `probes/loss_resistor_first_order_edges.py`. | R in series with a PWM switch: 1114.24 / 1121.77 / 1125.54 W at 50 / 100 / 200 steps per period against the exact 1129.30 W; M1 11.2926 W against 11.2930 W. | `p.time_average(t, R * i**2)` with `i` from `res.i`, or halve `dt`. |
+| **`compute_bh_loop` can return a negative loop area (a negative core loss).** A closed sine loop on the `permalloy` J-A set has ∮H dB < 0 above ~300 A/m, and the `ferrite_n87` area shrinks as the drive rises into saturation. Owner: `python/pulsim/hysteresis.py`, `JilesAthertonModel.update`, the irreversible slope at line 336. Probe: `probes/ja_negative_loop_area.py`. | permalloy 29.1 / −12.4 / −14.8 J/m³ at 100 / 300 / 1000 A/m; ferrite_n87 42.8 / 28.8 / 13.9 J/m³ at 300 / 1000 / 3000 A/m. The δ_M guard and a ≥ 0 clamp on the slope do not remove it. | Check the sign of `energy_per_cycle_per_m3`, and that the J-A B matches the circuit's B (`run_psfb_ja_loss_analysis.py` does both). |
+| **Tightly coupled half bridge: `trbdf2` aborted and a coarse fixed step read low without warning** (audit report). Owner: `core/include/pulsim/solver/trbdf2_transient.hpp`. Probe: `probes/half_bridge_tight_coupling.py`. | Audit: `refactorize failed (numerically singular)` at h ≈ 5e-14 s for k = 0.999 / 0.99999; at k = 0.99999 `dt` = 2e-8 gave 4.17 V against 4.99 V at 1e-8. NOT reproduced on this tree with the project's half bridge (3 ms, mean over 2–3 ms): k = 0.99999 reads 4.869 / 4.870 V at `dt` = 2e-8 / 1e-8 and `trbdf2` runs (4.924 V); k = 0.999: 4.685 / 4.688 / 4.695 V. The configuration behind the audit's numbers was not recorded. | `engine='pwl'`; halve `dt` and compare. |
 
 ## Older entries
 

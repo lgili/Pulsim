@@ -36,6 +36,7 @@
 #include "pulsim/blockchain/blocks.hpp"
 #include "pulsim/blockchain/block_adapters.hpp"
 #include "pulsim/blockchain/chain.hpp"
+#include "pulsim/blockchain/ported_blocks.hpp"
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/mmc/arm.hpp"
 #include "pulsim/motors/mechanical.hpp"
@@ -64,6 +65,7 @@
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/solver/trbdf2_transient.hpp"
 #include "pulsim/solver/unsupported.hpp"
+#include "pulsim/errors/convergence.hpp"
 #include "pulsim/sources/combined_switch_fn.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
 #include "pulsim/sources/dead_time_pwm_pair_fn.hpp"
@@ -86,6 +88,28 @@ namespace py = pybind11;
 using namespace pybind11::literals;  // for "name"_a kwarg shorthand
 
 namespace pulsim_kernel_bindings {
+
+/// A b_extra_fn argument as (fn, next_jump_after). A control graph's
+/// CxxChainBExtra runs in C++ (no GIL per call); any other callable goes
+/// through pybind's functional caster, its optional next_jump_after too.
+inline void resolve_b_extra(const py::object& obj,
+                            pulsim::solver::BExtraFn& fn,
+                            std::function<pulsim::Real(pulsim::Real)>& next_jump) {
+    if (obj.is_none()) return;
+    if (py::isinstance<pulsim::blockchain::ChainBExtra>(obj)) {
+        const auto& c = obj.cast<const pulsim::blockchain::ChainBExtra&>();
+        fn = c.fn;
+        next_jump = [ch = c.chain](pulsim::Real t) {
+            return ch->next_jump_after(t);
+        };
+        return;
+    }
+    fn = obj.cast<pulsim::solver::BExtraFn>();
+    if (py::hasattr(obj, "next_jump_after")) {
+        next_jump = obj.attr("next_jump_after")
+                        .cast<std::function<pulsim::Real(pulsim::Real)>>();
+    }
+}
 
 /// The static Newton chain for a transient driver. `None` lets the kernel
 /// decide (it builds the standard chain when the pool needs one); `True`
@@ -170,6 +194,15 @@ void init_module(py::module_& m) {
                 inst.attr("partial") = py::cast(e.partial());
                 inst.attr("t_failed") = py::cast(e.t_failed());
                 PyErr_SetObject(aborted_exc.ptr(), inst.ptr());
+            } catch (const ConvergenceFailure& e) {
+                // The exact engine's give-up sites (settle | chatter |
+                // no_progress | max_steps | nan): typed, so no caller
+                // has to match message text.
+                py::object inst = convergence_exc(e.what());
+                inst.attr("kind") = e.kind_name();
+                inst.attr("t_failed") = e.time();
+                inst.attr("device") = e.device();
+                PyErr_SetObject(convergence_exc.ptr(), inst.ptr());
             }
         });
 
@@ -1006,7 +1039,8 @@ void init_module(py::module_& m) {
               "Add a linear capacitor. C in farads.\n"
               "Optional `c0` records an initial voltage (V) on the\n"
               "capacitor — consumed by `simulate(initial_state=None)`\n"
-              "to seed the cap's positive-terminal node.")
+              "as the voltage across it, v(n_pos) - v(n_neg); a loop of\n"
+              "c0 values that breaks KVL raises ValueError.")
         .def("add_inductor",
               &builder::CircuitBuilder::add_inductor,
               py::arg("name"), py::arg("n_pos"),
@@ -2674,6 +2708,7 @@ void init_module(py::module_& m) {
                     d["max_pivots_per_event"] = m.max_pivots_per_event;
                     d["ties"] = m.ties;
                     d["widenings"] = m.widenings;
+                    d["capped"] = m.capped;
                     d["leak_pins"] = m.leak_pins;
                     d["pin_judgements"] = m.pin_judgements;
                     d["unfixed"] = m.unfixed;
@@ -2720,6 +2755,8 @@ void init_module(py::module_& m) {
                     d["repairs"] = g.repairs;
                     d["confirmed"] = g.confirmed;
                     d["failed"] = g.failed;
+                    d["settle_caps"] = g.settle_caps;
+                    d["lcp"] = rep(g.lcp);   // dsed's nesting; the flat keys stay
                     d["repair_times"] = g.repair_times;
                     d["repair_diodes"] = g.repair_diodes;
                     d["repair_violations"] = g.repair_violations;
@@ -3513,14 +3550,7 @@ void init_module(py::module_& m) {
             // then restarts on them and reads their left limit.
             BExtraFn b_extra_fn;
             std::function<Real(Real)> b_extra_next_jump;
-            if (!b_extra_obj.is_none()) {
-                b_extra_fn = b_extra_obj.cast<BExtraFn>();
-                if (py::hasattr(b_extra_obj, "next_jump_after")) {
-                    b_extra_next_jump =
-                        b_extra_obj.attr("next_jump_after")
-                            .cast<std::function<Real(Real)>>();
-                }
-            }
+            resolve_b_extra(b_extra_obj, b_extra_fn, b_extra_next_jump);
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "pwl");
             // Convert optional initial_state to a Vector pointer.
@@ -4100,7 +4130,8 @@ void init_module(py::module_& m) {
         "C++ PWM generator (sawtooth comparator, 0/1 output).")
         .def(py::init<>())
         .def_readwrite("frequency", &PwmGenerator::frequency)
-        .def_readwrite("phase",     &PwmGenerator::phase)
+        .def_readwrite("phase",     &PwmGenerator::phase,
+                        "Seconds, a delay (an advance in periods before 2026-11).")
         .def("reset", &PwmGenerator::reset)
         .def("update", &PwmGenerator::update,
               py::arg("duty"), py::arg("t"));
@@ -4203,6 +4234,26 @@ void init_module(py::module_& m) {
         .def_static("time",        &InputRef::from_time)
         .def_static("dt",          &InputRef::from_dt);
 
+    // add-compiled-control-graph: an algebraic loop, a signal with two
+    // writers, an unknown block kind. A ValueError subclass.
+    py::register_exception<pulsim::blockchain::ControlGraphBuildError>(
+        m, "ControlGraphBuildError", PyExc_ValueError);
+
+    py::class_<ChainTick>(m, "CxxChainTick",
+        "A control-graph tick callback the variable-step engine calls in "
+        "C++ (no Python call per tick).")
+        .def("__call__", [](ChainTick& self, Real t, const Vector& x) {
+            self.fn(t, x);
+        });
+
+    py::class_<ChainBExtra>(m, "CxxChainBExtra",
+        "A control graph's driven-source b_extra_fn(t), with the instants "
+        "its value may jump (next_jump_after), both in C++.")
+        .def("__call__", [](ChainBExtra& self, Real t) { return self.fn(t); })
+        .def("next_jump_after", [](ChainBExtra& self, Real t) {
+            return self.chain->next_jump_after(t);
+        });
+
     py::class_<BlockChain>(m, "CxxBlockChain",
         "C++ block chain executor. Build via add_<block>(...) "
         "methods, bind nodes, then pass make_step_observer(dt) to "
@@ -4210,22 +4261,67 @@ void init_module(py::module_& m) {
         .def(py::init<>())
         .def("size", &BlockChain::size)
         .def("reset", &BlockChain::reset)
+        .def("name_last", &BlockChain::name_last, py::arg("name"),
+            py::arg("kind") = std::string{},
+            "Name (and kind) of the most recently added block.")
+        .def("compile", &BlockChain::compile,
+            "Order the blocks (direct-feedthrough topological order, "
+            "ties by insertion); raises ControlGraphBuildError on an "
+            "algebraic loop.")
+        .def("schedule", &BlockChain::schedule,
+            "Block names in evaluation order.")
+        .def("reorders", &BlockChain::reorders,
+            "Pairs whose evaluation order differs from insertion order.")
+        .def("add_group", &BlockChain::add_group, py::arg("period"),
+            py::arg("offset") = 0.0, py::arg("delay_kind") = 0,
+            py::arg("delay_time") = 0.0,
+            "Add a Discrete{period, offset} rate group (delay_kind 0 = "
+            "zero, 1 = a time, 2 = one sample); returns its id (>= 1).")
+        .def("set_block_group", &BlockChain::set_block_group,
+            py::arg("block"), py::arg("group"))
+        .def_property_readonly("has_rates", &BlockChain::has_rates)
+        .def("group_period", &BlockChain::group_period, py::arg("group"))
+        .def("tick_counts", &BlockChain::tick_counts,
+            "Ticks per group (index 0: evaluations of the every-call group).")
+        .def_property_readonly("tick_jitter_max", &BlockChain::tick_jitter_max)
+        .def("add_source_sink", &BlockChain::add_source_sink,
+            py::arg("name"), py::arg("row"), py::arg("gain"),
+            "b_extra[row] += gain * (signal `name` after compute_delay).")
+        .def("set_solver_dt", &BlockChain::set_solver_dt, py::arg("dt"))
+        .def("make_tick_observer", [](BlockChain& self) {
+                return ChainTick{&self, self.make_tick_observer()};
+            }, py::keep_alive<0, 1>(),
+            "Tick callback for the variable-step engine (exact protocol).")
+        .def_property_readonly("n_evals", &BlockChain::n_evals)
+        .def_property_readonly("n_block_evals", &BlockChain::n_block_evals)
         .def("get_channel", &BlockChain::get_channel, py::arg("name"))
+        .def("sink_value", [](BlockChain& self, const std::string& name) {
+            return self.sink_value(self.find_slot(name));
+        }, py::arg("name"),
+        "What a circuit sink (switch mask, driven source) sees: a rate "
+        "group's output after its compute_delay.")
         .def("set_channel", [](BlockChain& self, const std::string& name,
                                    Real value) {
-            self.channels()[name] = value;
+            self.set_channel(name, value);
         }, py::arg("name"), py::arg("value"))
         .def("bind_nodes", [](BlockChain& self,
                                 const std::function<Index(const std::string&)>&
                                     node_id_of) {
             self.bind_nodes(node_id_of);
         }, py::arg("node_id_of"),
-            "Resolve every InputRef::Node by calling node_id_of(name).")
+            "Resolve InputRef::Node inputs given by name, by calling "
+            "node_id_of(name), for the blocks added AFTER this call.")
         .def("make_step_observer", [](BlockChain& self, Real dt) {
             return self.make_step_observer(dt);
         }, py::arg("dt"),
             "Return a step_observer(t, x) callable that the kernel "
             "uses to invoke the chain each step.")
+        .def("make_sink_b_extra_fn",
+            [](BlockChain& self, Size state_size) {
+                return ChainBExtra{&self, self.make_b_extra_fn(state_size)};
+            }, py::arg("state_size"), py::keep_alive<0, 1>(),
+            "Return the driven-source b_extra_fn(t) with next_jump_after(t) "
+            "(the instants the published values may change).")
         .def("make_b_extra_fn",
             [](BlockChain& self, Size state_size) {
                 return self.make_b_extra_fn(state_size);
@@ -4272,8 +4368,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, Index idx, Real value) {
                 // No public accessor — go through ctx; the user
                 // typically sets via motor adapters, not directly.
-                self.channels()["__noop"] = value;  // placeholder
-                (void)idx;
+                (void)self; (void)idx; (void)value;  // placeholder
             }, py::arg("idx"), py::arg("value"),
             "Diagnostic — directly set a b_extra entry. Most "
             "users should add motor blocks instead.")
@@ -4282,16 +4377,13 @@ void init_module(py::module_& m) {
             [](BlockChain& self, Real k, InputRef x, std::string out) {
                 auto blk = std::make_shared<Gain>();
                 blk->k = k;
-                auto p = make_gain_step(blk, x, out);
-                if (x.kind == InputRef::Kind::Node) {
-                    self.register_node_ref(&x);
-                }
+                auto p = make_gain_step(self, blk, x, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("k"), py::arg("x"), py::arg("output"))
         .def("add_subtract",
             [](BlockChain& self, InputRef a, InputRef b, std::string out) {
                 auto blk = std::make_shared<Subtract>();
-                auto p = make_subtract_step(blk, a, b, out);
+                auto p = make_subtract_step(self, blk, a, b, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("a"), py::arg("b"), py::arg("output"))
         .def("add_sum",
@@ -4300,7 +4392,7 @@ void init_module(py::module_& m) {
                 std::string out) {
                 auto blk = std::make_shared<Sum>();
                 blk->w0 = w0; blk->w1 = w1; blk->w2 = w2;
-                auto p = make_sum_step(blk, a, b, c, out);
+                auto p = make_sum_step(self, blk, a, b, c, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("w0") = 1.0, py::arg("w1") = 1.0,
                 py::arg("w2") = 0.0,
@@ -4320,7 +4412,7 @@ void init_module(py::module_& m) {
                 else if (op == "sqrt") blk->op = MathBlock::Op::Sqrt;
                 else if (op == "pow2") blk->op = MathBlock::Op::Pow2;
                 else throw std::runtime_error("unknown MathBlock op: " + op);
-                auto p = make_math_block_step(blk, a, b, out);
+                auto p = make_math_block_step(self, blk, a, b, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("op"), py::arg("a"), py::arg("b"),
                 py::arg("output"))
@@ -4328,17 +4420,21 @@ void init_module(py::module_& m) {
             [](BlockChain& self, Real Kp, Real Ki,
                 Real output_min, Real output_max,
                 InputRef setpoint, InputRef measured, InputRef dt_ref,
-                std::string out) {
+                std::string out, Real integrator_state, Real prev_error) {
                 auto blk = std::make_shared<PIController>();
                 blk->Kp = Kp; blk->Ki = Ki;
                 blk->output_min = output_min; blk->output_max = output_max;
-                auto p = make_pi_controller_step(blk, setpoint, measured,
+                blk->integral = integrator_state;
+                blk->prev_error = prev_error;
+                auto p = make_pi_controller_step(self, blk, setpoint, measured,
                                                        dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("Kp"), py::arg("Ki"),
                 py::arg("output_min"), py::arg("output_max"),
                 py::arg("setpoint"), py::arg("measured"),
-                py::arg("dt"), py::arg("output"))
+                py::arg("dt"), py::arg("output"),
+                py::arg("integrator_state") = Real{0},
+                py::arg("prev_error") = Real{0})
         .def("add_pid_controller",
             [](BlockChain& self, Real Kp, Real Ki, Real Kd, Real tau_d,
                 Real output_min, Real output_max,
@@ -4348,7 +4444,7 @@ void init_module(py::module_& m) {
                 blk->Kp = Kp; blk->Ki = Ki; blk->Kd = Kd;
                 blk->tau_d = tau_d;
                 blk->output_min = output_min; blk->output_max = output_max;
-                auto p = make_pid_controller_step(blk, setpoint, measured,
+                auto p = make_pid_controller_step(self, blk, setpoint, measured,
                                                         dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("Kp"), py::arg("Ki"), py::arg("Kd"),
@@ -4361,7 +4457,7 @@ void init_module(py::module_& m) {
                 std::string out) {
                 auto blk = std::make_shared<FirstOrderLowPass>();
                 blk->tau = tau;
-                auto p = make_first_order_lpf_step(blk, input_value,
+                auto p = make_first_order_lpf_step(self, blk, input_value,
                                                          dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("tau"), py::arg("input_value"), py::arg("dt"),
@@ -4373,7 +4469,7 @@ void init_module(py::module_& m) {
                 auto blk = std::make_shared<Integrator>();
                 blk->gain = gain;
                 blk->output_min = output_min; blk->output_max = output_max;
-                auto p = make_integrator_step(blk, x, dt_ref, out);
+                auto p = make_integrator_step(self, blk, x, dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("gain"), py::arg("output_min"),
                 py::arg("output_max"), py::arg("x"), py::arg("dt"),
@@ -4383,7 +4479,7 @@ void init_module(py::module_& m) {
                 InputRef x, InputRef dt_ref, std::string out) {
                 auto blk = std::make_shared<Differentiator>();
                 blk->filter_alpha = filter_alpha;
-                auto p = make_differentiator_step(blk, x, dt_ref, out);
+                auto p = make_differentiator_step(self, blk, x, dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("filter_alpha"), py::arg("x"), py::arg("dt"),
                 py::arg("output"))
@@ -4392,7 +4488,7 @@ void init_module(py::module_& m) {
                 InputRef x, std::string out) {
                 auto blk = std::make_shared<Limiter>();
                 blk->min_v = min_v; blk->max_v = max_v;
-                auto p = make_limiter_step(blk, x, out);
+                auto p = make_limiter_step(self, blk, x, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("min_v"), py::arg("max_v"),
                 py::arg("x"), py::arg("output"))
@@ -4401,25 +4497,41 @@ void init_module(py::module_& m) {
                 std::string out) {
                 auto blk = std::make_shared<MovingAverageFilter>();
                 blk->window = window;
-                auto p = make_moving_average_step(blk, x, out);
+                auto p = make_moving_average_step(self, blk, x, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("window"), py::arg("x"), py::arg("output"))
         .def("add_pwm_generator",
             [](BlockChain& self, Real frequency, Real phase,
+                std::optional<Real> phase_fraction,
                 InputRef duty, InputRef t_ref, std::string out) {
                 auto blk = std::make_shared<PwmGenerator>();
                 blk->frequency = frequency; blk->phase = phase;
-                auto p = make_pwm_generator_step(blk, duty, t_ref, out);
+                if (phase_fraction) {
+                    if (phase != Real{0}) {
+                        throw std::invalid_argument(
+                            "add_pwm_generator: give phase (seconds) or "
+                            "phase_fraction (of the period), not both");
+                    }
+                    // The old `phase` reading (an advance of f periods),
+                    // bit for bit: offset -(f * (1/frequency)).
+                    blk->phase = -(*phase_fraction * (Real{1} / frequency));
+                }
+                auto p = make_pwm_generator_step(self, blk, duty, t_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("frequency"), py::arg("phase") = 0.0,
-                py::arg("duty"), py::arg("t"), py::arg("output"))
+                py::kw_only(), py::arg("phase_fraction") = py::none(),
+                py::arg("duty"), py::arg("t"), py::arg("output"),
+            "PWM comparator. phase is in seconds, a delay, as "
+            "PwmGenerator(phase=); phase_fraction= is an advance in periods "
+            "(what phase= read before 2026-11: phase=x is now "
+            "phase_fraction=x, or phase=-x/frequency).")
         .def("add_svm",
             [](BlockChain& self, Real v_dc,
                 InputRef v_alpha, InputRef v_beta,
                 std::string da, std::string db, std::string dc) {
                 auto blk = std::make_shared<SpaceVectorModulator>();
                 blk->v_dc = v_dc;
-                auto p = make_svm_step(blk, v_alpha, v_beta, da, db, dc);
+                auto p = make_svm_step(self, blk, v_alpha, v_beta, da, db, dc);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("v_dc"), py::arg("v_alpha"), py::arg("v_beta"),
                 py::arg("output_a"), py::arg("output_b"),
@@ -4428,7 +4540,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, InputRef a, InputRef b, InputRef c,
                 std::string alpha, std::string beta, std::string zero) {
                 auto blk = std::make_shared<ClarkeTransform>();
-                auto p = make_clarke_step(blk, a, b, c, alpha, beta, zero);
+                auto p = make_clarke_step(self, blk, a, b, c, alpha, beta, zero);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("a"), py::arg("b"), py::arg("c"),
                 py::arg("output_alpha"), py::arg("output_beta"),
@@ -4437,7 +4549,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, InputRef alpha, InputRef beta,
                 InputRef zero, std::string a, std::string b, std::string c) {
                 auto blk = std::make_shared<InverseClarkeTransform>();
-                auto p = make_inverse_clarke_step(blk, alpha, beta, zero,
+                auto p = make_inverse_clarke_step(self, blk, alpha, beta, zero,
                                                         a, b, c);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("alpha"), py::arg("beta"),
@@ -4448,7 +4560,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, InputRef alpha, InputRef beta,
                 InputRef theta, std::string d, std::string q) {
                 auto blk = std::make_shared<ParkTransform>();
-                auto p = make_park_step(blk, alpha, beta, theta, d, q);
+                auto p = make_park_step(self, blk, alpha, beta, theta, d, q);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("alpha"), py::arg("beta"), py::arg("theta"),
                 py::arg("output_d"), py::arg("output_q"))
@@ -4456,7 +4568,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, InputRef d, InputRef q, InputRef theta,
                 std::string alpha, std::string beta) {
                 auto blk = std::make_shared<InverseParkTransform>();
-                auto p = make_inverse_park_step(blk, d, q, theta,
+                auto p = make_inverse_park_step(self, blk, d, q, theta,
                                                       alpha, beta);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("d"), py::arg("q"), py::arg("theta"),
@@ -4467,13 +4579,89 @@ void init_module(py::module_& m) {
                 std::string theta, std::string omega, std::string freq) {
                 auto blk = std::make_shared<PLL>();
                 blk->f_nominal = f_nominal; blk->Kp = Kp; blk->Ki = Ki;
-                auto p = make_pll_step(blk, v_alpha, v_beta, dt_ref,
+                auto p = make_pll_step(self, blk, v_alpha, v_beta, dt_ref,
                                             theta, omega, freq);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("f_nominal"), py::arg("Kp"), py::arg("Ki"),
                 py::arg("v_alpha"), py::arg("v_beta"), py::arg("dt"),
                 py::arg("output_theta"), py::arg("output_omega"),
                 py::arg("output_freq"))
+
+        // ---- Ported from pulsim.control (add-compiled-control-graph) ----
+        .def("add_ported",
+            [](BlockChain& self, const std::string& kind,
+               const PortedParams& params, std::vector<InputRef> inputs,
+               const std::vector<std::string>& outputs) {
+                try {
+                    auto p = make_ported_step(self, kind, params,
+                                              std::move(inputs), outputs);
+                    self.add(std::move(p.step), std::move(p.reset),
+                             std::move(p.update));
+                } catch (...) {
+                    self.discard_pending();
+                    throw;
+                }
+            }, py::arg("kind"), py::arg("params"), py::arg("inputs"),
+                py::arg("outputs"),
+            "A block ported from pulsim.control, Python-exact (kinds: "
+            "comparator, rate_limiter, sample_hold, transfer_function, "
+            "state_machine, op_amp, lookup_table_1d, math, ema, "
+            "differentiator, pid, sum, signal_mux, signal_demux).")
+        .def("add_python_block",
+            [](BlockChain& self, py::function fn,
+               std::vector<InputRef> inputs,
+               const std::vector<std::string>& outputs) {
+                std::vector<InputRef> in;
+                for (auto& r : inputs) in.push_back(self.in(std::move(r)));
+                std::vector<Index> out;
+                for (const auto& o : outputs) out.push_back(self.out(o));
+                // Owned by the chain; the chain dies under the GIL.
+                auto f = std::make_shared<py::function>(std::move(fn));
+                auto step = [f, in, out](ChainContext& c) {
+                    py::gil_scoped_acquire gil;   // the kernel runs without it
+                    py::tuple args(in.size());
+                    for (Size i = 0; i < in.size(); ++i) {
+                        args[i] = py::float_(resolve(in[i], c));
+                    }
+                    py::object r = (*f)(*args);
+                    if (out.size() == 1) {
+                        c.put(out[0], r.cast<Real>());
+                        return;
+                    }
+                    const auto v = r.cast<std::vector<Real>>();
+                    if (v.size() != out.size()) {
+                        // std::invalid_argument crosses the kernel's run
+                        // loop as itself (ValueError), a py::value_error
+                        // became SimulationAborted.
+                        throw std::invalid_argument(
+                            "PythonBlock returned " + std::to_string(v.size()) +
+                            " values for " + std::to_string(out.size()) +
+                            " outputs");
+                    }
+                    for (Size i = 0; i < out.size(); ++i) c.put(out[i], v[i]);
+                };
+                self.add(std::move(step), {});
+            }, py::arg("fn"), py::arg("inputs"), py::arg("outputs"),
+            "A block that calls fn(*input_values) (Python, under the GIL) "
+            "once per evaluation; returns a float or one value per output.")
+        .def("add_delay",
+            [](BlockChain& self, long long samples, Real initial_value,
+                InputRef x, std::string out) {
+                if (samples < 1) {
+                    throw ControlGraphBuildError(
+                        "DelayBlock: samples must be >= 1 (got " +
+                        std::to_string(samples) + ")");
+                }
+                auto blk = std::make_shared<DelayBlock>();
+                blk->samples = static_cast<Size>(samples);
+                blk->initial_value = initial_value;
+                auto p = make_delay_step(self, blk, x, out);
+                self.add(std::move(p.step), std::move(p.reset),
+                         std::move(p.update));
+            }, py::arg("samples"), py::arg("initial_value"),
+                py::arg("x"), py::arg("output"),
+            "y[k] = x[k - samples]; not direct feedthrough, so it breaks "
+            "an algebraic loop.")
 
         // ---- Motor blocks (Phase D / C++ port) ----
         .def("add_dc_motor",
@@ -4810,7 +4998,7 @@ void init_module(py::module_& m) {
         },
         py::arg("chain"), py::arg("num_switches"), py::arg("mapping"),
         "Build a switch_fn(t) that sets bit `idx` ON when "
-        "`chain.channels[channel_name] > 0.5`. `mapping` is a list "
+        "`chain.sink_value(channel_name) > 0.5`. `mapping` is a list "
         "of (channel_name, switch_idx) pairs.");
 
     // ----- BDF1 (implicit Euler) — Phase B.2 ------------------------------
@@ -4857,7 +5045,7 @@ void init_module(py::module_& m) {
            Real t_start, Real t_end, Real rtol, Real atol,
            Real h_init, Real h_max,
            py::object switch_fn_obj,
-           solver::BExtraFn b_extra_fn,
+           py::object b_extra_obj,
            py::object initial_state,
            Size max_event_iterations,
            solver::ShouldContinueFn should_continue,
@@ -4870,6 +5058,9 @@ void init_module(py::module_& m) {
            py::object resume_from,
            std::vector<Real> observer_periods,
            std::vector<py::object> observers) {
+            solver::BExtraFn b_extra_fn;
+            std::function<Real(Real)> unused_next_jump;  // trbdf2 lands its ticks
+            resolve_b_extra(b_extra_obj, b_extra_fn, unused_next_jump);
             solver::TrBdf2Options o;
             o.t_start = t_start;
             o.t_end   = t_end;
@@ -4923,6 +5114,10 @@ void init_module(py::module_& m) {
             }
             std::vector<std::function<void(Real, const Vector&)>> obs_fns;
             for (const auto& ob : observers) {
+                if (py::isinstance<ChainTick>(ob)) {   // control graph: C++ path
+                    obs_fns.push_back(ob.cast<ChainTick&>().fn);
+                    continue;
+                }
                 obs_fns.push_back(ob.cast<
                     std::function<void(Real, const Vector&)>>());
             }
@@ -4989,7 +5184,7 @@ void init_module(py::module_& m) {
         py::arg("rtol"), py::arg("atol"),
         py::arg("h_init"), py::arg("h_max"),
         py::arg("switch_fn"),
-        py::arg("b_extra_fn") = solver::BExtraFn{},
+        py::arg("b_extra_fn") = py::none(),
         py::arg("initial_state") = py::none(),
         py::arg("max_event_iterations") = Size{0},
         py::arg("should_continue") = solver::ShouldContinueFn{},
@@ -5017,10 +5212,10 @@ void init_module(py::module_& m) {
            const topology::Graph& graph,
            const pwl::DevicePool& pool,
            const SimulationOptions& opts,
-           SwitchScheduleFn switch_fn,
+           py::object switch_fn_obj,
            BlockChain& chain,
            Real chain_dt,
-           BExtraFn b_extra_fn,
+           py::object b_extra_obj,
            bool start_from_dc_op,
            std::optional<bool> enable_nonlinear_refresh,
            py::object initial_state,
@@ -5029,8 +5224,23 @@ void init_module(py::module_& m) {
            py::object resume_from) {
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "pwl");
+            // The declarations run_transient reads (a native schedule's
+            // edges, a b_extra_fn's next_jump_after): this path dropped
+            // them, so the restart rule never saw a declared jump here.
+            auto adapted =
+                pulsim_bindings_common::adapt_switch_fn(switch_fn_obj);
+            const SwitchScheduleFn switch_fn = std::move(adapted.fn);
+            std::function<Real(Real)> next_edge_fn = std::move(adapted.next_edge);
+            if (!next_edge_fn && py::hasattr(switch_fn_obj, "next_edge_after")) {
+                next_edge_fn = switch_fn_obj.attr("next_edge_after")
+                                   .cast<std::function<Real(Real)>>();
+            }
+            BExtraFn b_extra_fn;
+            std::function<Real(Real)> b_extra_next_jump;
+            resolve_b_extra(b_extra_obj, b_extra_fn, b_extra_next_jump);
             // Build a step_observer that calls the chain DIRECTLY in
             // C++ — no Python roundtrip per step.
+            chain.set_solver_dt(opts.dt);   // rate groups: state at the tick
             auto step_observer = chain.make_step_observer(chain_dt);
             // Wrap with a LiveRing push when streaming is requested.
             // Both layers are GIL-free in the hot path: chain step is
@@ -5079,14 +5289,16 @@ void init_module(py::module_& m) {
                                           observer_eff,
                                           x_init_ptr,
                                           continue_eff,
-                                          resume_ptr);
+                                          resume_ptr,
+                                          b_extra_next_jump,
+                                          next_edge_fn);
             }
             return result;
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
         py::arg("opts"), py::arg("switch_fn"),
         py::arg("chain"), py::arg("chain_dt"),
-        py::arg("b_extra_fn") = BExtraFn{},
+        py::arg("b_extra_fn") = py::none(),
         py::arg("start_from_dc_op") = false,
         py::arg("enable_nonlinear_refresh") = py::none(),
         py::arg("initial_state") = py::none(),
@@ -5350,6 +5562,9 @@ void init_module(py::module_& m) {
 namespace pulsim_dsed_bindings {
     void init_module(pybind11::module_& m);
 }
+namespace pulsim_ir_bindings {  // add-immutable-circuit-ir (ir_bindings.cpp)
+    void init_module(pybind11::module_& m);
+}
 
 PYBIND11_MODULE(_pulsim, m) {
     m.doc() = "Pulsim — power-electronics simulator. Header-only C++23 "
@@ -5357,4 +5572,5 @@ PYBIND11_MODULE(_pulsim, m) {
               "Newton refinement, and the high-level CircuitBuilder API.";
     pulsim_kernel_bindings::init_module(m);
     pulsim_dsed_bindings::init_module(m);
+    pulsim_ir_bindings::init_module(m);
 }

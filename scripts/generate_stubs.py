@@ -160,6 +160,9 @@ def run_stubgen(pythonpath: list[str]) -> str:
             pythonpath + [p for p in [env.get("PYTHONPATH", "")] if p])
     # Plotting/backends must not open windows while pulsim imports.
     env.setdefault("MPLBACKEND", "Agg")
+    # The add_* Parameter wrappers forward to the native methods: stub
+    # the native signatures (pulsim/_circuit_ir.py install()).
+    env["PULSIM_STUBGEN_NATIVE"] = "1"
     with tempfile.TemporaryDirectory() as tmp:
         cmd = [
             sys.executable, "-m", "pybind11_stubgen", MODULE,
