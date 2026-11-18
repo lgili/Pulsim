@@ -167,12 +167,14 @@ def test_python_calls_per_evaluation_are_bounded():
     pr.disable()
     # pulsim's own frames only: the stdlib / importlib / numpy calls under
     # them depend on the Python version (all frames: 445 on 3.13, 514 on
-    # 3.11 in Linux CI; pulsim's own: 157 on 3.13)
+    # 3.11 in Linux CI; pulsim's own: 157 on 3.13, 201 on 3.10 / 3.11,
+    # where each comprehension is a frame of its own -- PEP 709 inlined
+    # them in 3.12)
     root = os.path.dirname(p.__file__)
     own = sum(v[1] for k, v in pstats.Stats(pr).stats.items()
               if k[0].startswith(root))
     per = own / len(DESIGNS)
-    assert per < 200, per
+    assert per < 260, per
 
 
 def test_schedule_per_design_and_parameters():
