@@ -41,6 +41,18 @@ def test_add_switch_form():
         b.add_switch("X", "a", "b", 1e3, 1e-9, R_on=1.0)
 
 
+@pytest.mark.parametrize("creator", ["add_switch", "add_diode"])
+def test_branch_form_refuses_r_on_with_g_on(creator):
+    # one resistance given twice: refused by name, never one of them dropped
+    b = p.CircuitBuilder()
+    with pytest.raises(ValueError, match=rf"{creator}\(\"X\"\): form='branch' takes R_on or g_on"):
+        getattr(b, creator)("X", "a", "b", 1e3, 1e-9, form="branch", R_on=0.5)
+    getattr(b, creator)("Y", "a", "b", None, 1e-9, form="branch", R_on=0.5)    # either alone runs
+    getattr(b, creator)("Z", "a", "b", 2.0, 1e-9, form="branch")
+    c = _comps(b)
+    assert c["Y"]["R_on"] == 0.5 and c["Z"]["R_on"] == 0.5
+
+
 def test_add_switch_branch_is_add_ideal_switch():
     def run(add):
         b = p.CircuitBuilder()
@@ -196,7 +208,7 @@ def test_ir_hash_tells_the_forms_apart():
     assert h("branch") == h("branch")
 
 
-# ---- DC point: a closed ideal switch in a voltage loop (DECISIONS #41) --------------
+# ---- DC point: a closed ideal switch in a voltage loop (DECISIONS #47) --------------
 def _loop(**sw):
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "a", "gnd", 12.0)

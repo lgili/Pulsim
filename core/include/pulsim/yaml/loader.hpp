@@ -478,6 +478,46 @@ inline void load_device(
                       require_string(dev, idx, type, "p2_pos"),
                       require_string(dev, idx, type, "p2_neg"),
                       require_real(dev, idx, type, "g"));
+    } else if (type == "winding") {  // add-permeance-magnetic-domain
+        require_only_keys(dev, idx, type,
+                          {"e_pos", "e_neg", "m_pos", "m_neg", "turns"});
+        b.add_winding(name, require_string(dev, idx, type, "e_pos"),
+                      require_string(dev, idx, type, "e_neg"),
+                      require_string(dev, idx, type, "m_pos"),
+                      require_string(dev, idx, type, "m_neg"),
+                      require_real(dev, idx, type, "turns"));
+    } else if (type == "permeance") {
+        require_only_keys(dev, idx, type, {"from", "to", "P"});
+        b.add_permeance(name, require_string(dev, idx, type, "from"),
+                        require_string(dev, idx, type, "to"),
+                        require_real(dev, idx, type, "P"));
+    } else if (type == "air_gap") {
+        require_only_keys(dev, idx, type, {"from", "to", "area", "length"});
+        b.add_air_gap(name, require_string(dev, idx, type, "from"),
+                      require_string(dev, idx, type, "to"),
+                      require_real(dev, idx, type, "area"),
+                      require_real(dev, idx, type, "length"));
+    } else if (type == "magnetic_resistance") {
+        require_only_keys(dev, idx, type, {"from", "to", "R_m"});
+        b.add_magnetic_resistance(name, require_string(dev, idx, type, "from"),
+                                  require_string(dev, idx, type, "to"),
+                                  require_real(dev, idx, type, "R_m"));
+    } else if (type == "saturable_permeance") {
+        require_only_keys(dev, idx, type,
+                          {"from", "to", "area", "length", "mu_r", "B_sat"});
+        b.add_saturable_permeance(name, require_string(dev, idx, type, "from"),
+                                  require_string(dev, idx, type, "to"),
+                                  require_real(dev, idx, type, "area"),
+                                  require_real(dev, idx, type, "length"),
+                                  require_real(dev, idx, type, "mu_r"),
+                                  require_real(dev, idx, type, "B_sat"));
+    } else if (type == "hysteretic_permeance" || type == "excess_loss") {
+        throw std::runtime_error(
+            "yaml::load: device " + device_label(dev, idx) + " has type '" +
+            type + "', which add-permeance-magnetic-domain defines but has not "
+            "shipped yet (it needs the unified device interface). Use "
+            "hysteretic_inductor for a Jiles-Atherton core and "
+            "magnetic_resistance for in-loop eddy loss.");
     } else if (type == "sine_current_source") {
         require_only_keys(dev, idx, type, {"from", "to", "i_dc", "i_amplitude",
                                            "frequency", "phase"});
@@ -1152,7 +1192,8 @@ inline void load_device(
             "pwl_current_source, op_amp_ideal, "
             "gapped_core_inductor, transformer, multi_winding_transformer, "
             "ideal_transformer, saturable_transformer, induction_motor, "
-            "induction_machine, dc_machine");
+            "induction_machine, dc_machine, winding, permeance, air_gap, "
+            "magnetic_resistance, saturable_permeance");
     }
     if (dev["losses"]) load_losses(b, dev, idx, type, name);
 }
@@ -1418,6 +1459,37 @@ struct BlockNames {
 /// scopes), and every device and node name it writes is prefixed with
 /// its path, except its ports (bound to nodes of the enclosing block)
 /// and ground.
+/// `nodes:` entries: a name (electrical unless a pin implies otherwise)
+/// or `{name, domain}` with domain electrical / thermal / mechanical
+/// (group 9); an unknown domain is refused naming node and domain.
+inline void load_nodes(builder::CircuitBuilder& b, const YAML::Node& ns,
+                       const BlockNames& names) {
+    for (const auto& n : ns) {
+        if (n.IsScalar()) {
+            b.node(names.node(n.as<std::string>()));
+            continue;
+        }
+        if (!n.IsMap() || n.size() != 2 || !n["name"] || !n["name"].IsScalar() ||
+            !n["domain"] || !n["domain"].IsScalar()) {
+            throw std::runtime_error(
+                "yaml::load: a 'nodes' entry is a name or {name, domain}");
+        }
+        const auto name = n["name"].as<std::string>();
+        const auto dn = n["domain"].as<std::string>();
+        const auto d = ir::domain_from_name(dn);
+        if (!d || *d == ir::Domain::Magnetic) {
+            throw std::runtime_error(std::format(
+                "yaml::load: node '{}': unknown domain '{}' (electrical, thermal, "
+                "mechanical)", name, dn));
+        }
+        try {
+            b.node(names.node(name), *d);
+        } catch (const std::invalid_argument& e) {
+            throw std::runtime_error(std::format("yaml::load: {}", e.what()));
+        }
+    }
+}
+
 inline void load_subsystems(builder::CircuitBuilder& b, const YAML::Node& list,
                             const BlockNames& outer, std::vector<std::string>& warnings) {
     if (!list.IsSequence()) {
@@ -1462,11 +1534,7 @@ inline void load_subsystems(builder::CircuitBuilder& b, const YAML::Node& list,
             throw std::runtime_error(std::format("yaml::load: subsystem: {}", e.what()));
         }
         if (blk["parameters"]) load_parameters(b, blk["parameters"]);
-        if (blk["nodes"] && blk["nodes"].IsSequence()) {
-            for (const auto& n : blk["nodes"]) {
-                if (n.IsScalar()) b.node(inner.node(n.as<std::string>()));
-            }
-        }
+        if (blk["nodes"] && blk["nodes"].IsSequence()) load_nodes(b, blk["nodes"], inner);
         if (const auto devs = blk["devices"]) {
             if (!devs.IsSequence()) {
                 throw std::runtime_error(std::format(
@@ -1601,12 +1669,8 @@ namespace detail {
     // reference anyway, but exposing it gives the user
     // explicit control of insertion order).
     if (circuit["nodes"] && circuit["nodes"].IsSequence()) {
-        for (const auto& node_name : circuit["nodes"]) {
-            if (node_name.IsScalar()) {
-                loaded.builder.node(
-                    node_name.as<std::string>());
-            }
-        }
+        detail::load_nodes(loaded.builder, circuit["nodes"],
+                           detail::BlockNames{loaded.builder, {}});
     }
 
     const YAML::Node devices = circuit["devices"];

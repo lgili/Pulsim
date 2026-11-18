@@ -894,13 +894,12 @@ def run_dsed_from_builder(
                     builder)
             shadow_kw = {}
             if mode_selection == "auto":
-                # 'lcp' where it applies (rk45, diodes), else the settle
+                # 'lcp' where it applies (diodes), else the settle. A diode
+                # circuit always reaches here on rk45: 'auto' became 'rk45'
+                # and 'bdf2' was refused above (the census of _n_diodes).
                 from . import _mode_auto_record
                 if _n_diodes == 0:
                     mode_selection, mode_auto = _mode_auto_record(None, "no_diodes")
-                elif opts.integrator != "rk45":
-                    mode_selection, mode_auto = _mode_auto_record(
-                        None, f"integrator={opts.integrator!r}", warn=True)
                 else:
                     mode_selection, mode_auto = _mode_auto_record("lcp", None)
             if mode_selection in ("shadow", "lcp") and (

@@ -21,7 +21,7 @@ Method: `rg` over the tree, excluding `build*/`, `.scratch/`, `node_modules`,
 | F1 | No caller in the repository passes `form='conductance'` or `mode_selection='legacy'`. Every diode/switch and every simulation relies on today's defaults for both. | `rg "form\s*=\s*['\"]conductance"` and `rg "mode_selection\s*=\s*['\"]legacy"` hit only `yaml/loader.hpp:263` (an error message) |
 | F2 | The Python `add_switch` and the conductance `add_diode` have **no numeric defaults** today: `g_on`/`g_off` are required. D6 row 1 ("`add_switch(name, a, b)`: `g_on = 1e3`, `g_off = 1e-9`") does not match the code. So every existing call passes `g_on, g_off`, and after the flip each one maps to `R_on = 1/g_on` (D6 row 2), not to the ideal element. | `bindings.cpp:1230-1234`, `bindings.cpp:1191-1195`, `circuit_builder.hpp:1576-1578` |
 | F3 | `add_switch` has no `form=` keyword. Today the only branch-form switch is `add_ideal_switch`. A "keep today's numbers" path for switches (`form='conductance'`) has to be added before 9.2. | `bindings.cpp:1230`, `_pulsim.pyi:544` |
-| F4 | The branch form runs on `pwl` and `trbdf2` only. `dsed`/exact, `bdf1` and the C++ AC sweep refuse it by name. The flip-evidence run measured 54 of 109 reference circuits newly refused on dsed. | `device_pool.hpp:1422-1429` (`kBranchFormCaps`), `unsupported.hpp:65-87`, `bdf1.hpp:305`, `mna_sweep.hpp:85`, `dsed/builder_adapter.hpp:159`; DECISIONS #29 |
+| F4 | The branch form runs on `pwl` and `trbdf2` only. `dsed`/exact, `bdf1` and the C++ AC sweep refuse it by name. The flip-evidence run measured 54 of 109 reference circuits newly refused on dsed. | `device_pool.hpp:1422-1429` (`kBranchFormCaps`), `unsupported.hpp:65-87`, `bdf1.hpp:305`, `mna_sweep.hpp:85`, `dsed/builder_adapter.hpp:159`; DECISIONS #39 |
 | F5 | Today `'lcp'` refuses several common cases: circuits with no PWL diode, a Newton device, `max_event_iterations=0`, `engine='trbdf2'` (hook 4.2 is still missing), a non-rk45 dsed integrator, and `sensitivities=`. If the default became a literal `'lcp'`, all of these runs would raise. **(inferred)** The default needs a fallback that a caller who passes `'lcp'` explicitly does not get. | `run_transient.hpp:946-981`, `__init__.py:2521-2527`, `__init__.py:2779-2786`, `_dsed_dispatch.py:895-903` |
 | F6 | `g_on > 1e9 S` maps to `R_on < 1e-9 Ω`, which the builder refuses (`kBranchRonMin`). One call site seen. | `circuit_builder.hpp:2391-2405`; `python/tests/test_switch_conductance_validation.py:63` (`g_on = 1e12`) |
 
@@ -168,7 +168,7 @@ need re-checking, not only the form.
 
 All other Python test files (about 75) build conductance devices through the
 default with explicit `g_on`/`g_off` on pwl/trbdf2. D6 row 2 says those agree
-within 1e-10 (task 3.4), and DECISIONS #29 shows the same outcome on 109/109
+within 1e-10 (task 3.4), and DECISIONS #39 shows the same outcome on 109/109
 circuits on pwl. They need a re-run, not a rewrite **(inferred)**.
 
 ### 3b. C++ (`core/tests/`, 52 files touch switches/diodes)
@@ -188,7 +188,7 @@ circuits on pwl. They need a re-run, not a rewrite **(inferred)**.
   Branch (finite `R_on = 1/g_on`): same outcome on 109/109 on pwl;
   trbdf2: 2 better, 106 same, 1 new error (`ll13_active_clamp_forward`);
   dsed: 54 newly refused. `'lcp'`: 2 refused by design (Newton devices), dsed 5
-  errors (DECISIONS #29). Cost after DECISIONS #30: lcp/default median
+  errors (DECISIONS #39). Cost after DECISIONS #40: lcp/default median
   1.058-1.088× on pwl.
 - Goldens and reference status (`goldens.py`, `reference_status.py`,
   `counters.py`, `differential_runner.py`) pin today's numbers through
@@ -236,17 +236,20 @@ circuits on pwl. They need a re-run, not a rewrite **(inferred)**.
    `mna_sweep.hpp:85` refuses it; whether the Python `run_ac_sweep` reaches that
    code was not checked.
 
-## 6. Status after ideal switch 6 (2026-11-18, no default flipped)
+## 6. Status after ideal switch 7 (2026-11-18, no default flipped)
 
 | Item | Status | Where |
 |---|---|---|
-| F3 / risk 3: no `form=` on switches and helpers | **Closed.** `form=` on `add_switch`, `add_mosfet`, `add_mosfet_with_body_diode`, `add_igbt`, `add_mosfet_level1`, `add_igbt_level1`, `add_bridge_rectifier`, `add_three_phase_vsi`, `add_buck`, `add_boost`, `add_flyback`, and the matching YAML types. Default `'conductance'` unchanged. A gated diode (`add_igbt(reverse_blocking=True)`) has no branch form and is refused by name. | DECISIONS #39; `python/tests/test_form_keyword.py` |
+| F3 / risk 3: no `form=` on switches and helpers | **Closed.** `form=` on `add_switch`, `add_mosfet`, `add_mosfet_with_body_diode`, `add_igbt`, `add_mosfet_level1`, `add_igbt_level1`, `add_bridge_rectifier`, `add_three_phase_vsi`, `add_buck`, `add_boost`, `add_flyback`, and the matching YAML types. Default `'conductance'` unchanged. A gated diode (`add_igbt(reverse_blocking=True)`) has no branch form and is refused by name. | DECISIONS #45; `python/tests/test_form_keyword.py` |
 | Risk 4 (second half): VSI `R_on = 0` became 1 mOhm | **Closed (BREAKING).** Conductance refuses `R_on <= 0` / `R_d <= 0` by name; `form='branch'` takes the ideal value. | CHANGELOG |
-| F2: D6 assumes `g_on`/`g_off` defaults | **Resolved in D6.** Conductance keeps them required; `add_switch(..., form='branch')` with no values is the ideal element; with values, `R_on = 1/g_on`. | DECISIONS #39 |
+| F2: D6 assumes `g_on`/`g_off` defaults | **Resolved in D6.** Conductance keeps them required; `add_switch(..., form='branch')` with no values is the ideal element; with values, `R_on = 1/g_on`. | DECISIONS #45 |
 | F5 / risk 2: a literal `'lcp'` default raises | **Mitigated, not flipped.** `mode_selection='auto'`: `'lcp'` where it applies, the settle with a recorded reason where `'lcp'` would refuse (`diagnostics['mode_selection_auto']`). Bit-identical to `'lcp'` where `'lcp'` runs. A mid-run `'lcp'` failure is not caught (needs a loop edit). | complementarity DECISIONS F5; `python/tests/test_mode_auto.py` |
-| Ideal DC point of ll10 / ll15 | **Refused by name** (`feature = "ideal_voltage_loop"`): a closed `R_on = 0` switch closes a loop of fixed voltages with a nonzero sum (-12 V, -220 V). The circuit has no DC solution; this is not a solver gap. | DECISIONS #41 |
+| Ideal DC point of ll10 / ll15 | **Refused by name** (`feature = "ideal_voltage_loop"`): a closed `R_on = 0` switch closes a loop of fixed voltages with a nonzero sum (-12 V, -220 V). The circuit has no DC solution; this is not a solver gap. | DECISIONS #47 |
 | Risk 1 (dsed refuses the branch form) | Open (task 8). | |
-| Risk 4 (first half: thermal summary skips ideal elements) | Open. | `thermal.py:866`, `:908` |
+| Risk 4 (first half: thermal summary skips ideal elements) | **Closed.** `device_thermal_summary` reports a branch-form element (solved `v·i`, 0 W for an ideal one, `P_impulse_avg` as a constant offset); `device_loss_summary` always carries the impulsive category on it. A kernel loss port still does not heat its junction with the impulse: `impulse_in_junction=False` + warning (event-losses track). | DECISIONS #51; `test_impulse_losses.py` |
+| `add_switch` / `add_diode(form='branch')` dropped `g_on` given with `R_on` | **Closed.** Refused by name. | DECISIONS #51 |
+| Asymmetric edge metric (`boost_switching_complex` 0.030 / 0.0023) | **Closed for the diagnostic** (`metrics.err_rms_symmetric`). The gate keeps the reference's first sample and span: making it symmetric is part of the re-baseline (6c). | DECISIONS #48 |
+| References that converge on ideal circuits | **Tooling closed**: ideal-twin references show their convergence (two tools, Richardson estimate with the measured order) and state an uncertainty; a cell is graded only when it is <= tol/10. Result: see 6e. | DECISIONS #49, #50 |
 
 ### 6a. The "worse" ideal-twin cells, classified
 
@@ -293,10 +296,10 @@ The 74 agree → agree cells are counted as circuit by their err ratio.
 |---|---|---|
 | L1 | `run_transient.hpp:~1086` | Gate the multi-port loop search on `mode_selector.passive` (it runs on a non-passive enumeration with 0 modes). |
 | L2 | `run_transient.hpp:~1090-1094` | Throw only when the loop's net voltage exceeds `tol_w`; at zero bias the search can mis-name ports. |
-| L3 | `run_transient.hpp:~980-984` | Comment: passivity (PSD) gives a unique *strictly complementary* solution, not a unique solution (DECISIONS #40). |
+| L3 | `run_transient.hpp:~980-984` | Comment: passivity (PSD) gives a unique *strictly complementary* solution, not a unique solution (DECISIONS #46). |
 | L4 | `mode_lcp_site` (run_transient) | `'auto'` per-site fallback: on a mid-run Lemke failure, settle that site and record it, instead of raising. |
 | L5 | `ReinitRecord` (`result.hpp`) + the pulse step in run_transient | Record the pulse step's start (or post-jump) state, so the energy partition is exact under `store_every > 1` and across a diode split. Post-processing cannot recover it: the record has no pre/post state. |
-| L7 | `run_transient.hpp:~853` | Two passivity flags: the narrow class for `ModeSelector::passive` (it also decides the DEFAULT guard's D3 enumeration), a wide one (VCCS / CCCS / CCVS, non-PSD coupled inductors) for the `'lcp'` fast paths at `:1015` / `:1026`. Widening `passivity_of` alone changes the default (tried, reverted; DECISIONS #40). |
+| L7 | `run_transient.hpp:~853` | Two passivity flags: the narrow class for `ModeSelector::passive` (it also decides the DEFAULT guard's D3 enumeration), a wide one (VCCS / CCCS / CCVS, non-PSD coupled inductors) for the `'lcp'` fast paths at `:1015` / `:1026`. Widening `passivity_of` alone changes the default (tried, reverted; DECISIONS #46). |
 | L6 | `trbdf2_transient.hpp` | Set `ModeSelector::passive` (TR-BDF2 track); document that `drop_superseded_event_sample` can skip a row. |
 
 ### 6c. Before the flip (ordered)
@@ -304,13 +307,14 @@ The 74 agree → agree cells are counted as circuit by their err ratio.
 1. Task 8: the branch form on dsed / exact (risk 1; 54 of 109 circuits).
 2. Loop edits L7 (passivity of the fast paths), L1, L2, L4 (the `'auto'`
    mid-run fallback), then L5.
-3. `'lcp'` cost in the tie band: `correct()` no longer builds the port
-   matrix (F6); a Lemke warm start and a reuse of Z's factorization remain
-   (branch+lcp median wall ratio ~7× in the evidence; target <= 1.2×).
+3. `'lcp'` cost: the selector-side work is memoized (DECISIONS #52); what
+   remains is outside `pwl/mode_ports.hpp` / `events/mode_selector.hpp`
+   (see the cost row above and DECISIONS #52).
 4. TR-BDF2 hook 4.2 (`'lcp'` on trbdf2) and the ll07 trbdf2-ideal defect.
-5. Thermal summary: report ideal elements or warn (risk 4).
-6. Re-baseline the reference set with references that converge on ideal
-   circuits (the 16 reference cells), and a symmetric edge metric.
+5. Re-baseline: make the strict gate symmetric (the diagnostic already is),
+   and adopt the converged references of 6e for the ideal twins.
+6. Kernel loss ports: book the impulsive energy into the junction
+   (event-losses track; today `impulse_in_junction=False` + warning).
 7. Then 9.1-9.3 of both proposals.
 
 ### 6d. `mode_selection='auto'` on the reference set (109 circuits)

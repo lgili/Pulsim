@@ -339,7 +339,7 @@ Each entry: question → option taken → evidence → how to reverse.
 
 ## TR-BDF2 track 6 (feat/core-p2-trbdf2)
 
-35. **The DCM grind: one filtered SDIRK step after a turn-off (linear
+24. **The DCM grind: one filtered SDIRK step after a turn-off (linear
     circuits).** Question: 1,806 accepted steps below 1e-11 s on the DCM
     buck (400 periods) followed each diode turn-off. Cause, from the trace:
     the step after the turn-off was retried at the pre-event h (2.8e-8 s)
@@ -418,7 +418,7 @@ Each entry: question → option taken → evidence → how to reverse.
     spread 4.7e-8, 4,212 accepted and 800 sub-1e-11 intervals in every run.
     → Reverse: `sdirk_after_turn_off = false`.
 
-36. **A tick at a gate edge fires before the edge probe is committed, and
+25. **A tick at a gate edge fires before the edge probe is committed, and
     the pulse cap follows the recent pulses.** (a) `restart_after_gate_event`
     refused the commit when a tick was due within the probe, and a closed
     loop's period start is a tick: no post-edge sample at 0 of 199 rising
@@ -460,7 +460,7 @@ Each entry: question → option taken → evidence → how to reverse.
     (2.4e-3 at rtol 1e-5, 5.6e-4 at 1e-6): a global-error question of
     the Newton path, not of ticks or caps.
 
-37. **Reviewer leftovers of step 3.** (a) The no-flip branch of the
+26. **Reviewer leftovers of step 3.** (a) The no-flip branch of the
     chatter-safe cascade reset x_sig to the committed x. When an earlier
     cascade at the same t (a gate edge) had decided the bits on its probe,
     x was solved under the bits before that cascade (the stale reference
@@ -474,7 +474,7 @@ Each entry: question → option taken → evidence → how to reverse.
     landing (no solve at dt_land) takes its noise bound on the bracket
     end's step if the dt_land factor is singular, instead of aborting.
 
-38. **An ON diode's noise floor reads v_D, not its common mode** (batch 11
+27. **An ON diode's noise floor reads v_D, not its common mode** (batch 11
     review, finding 4). The leakage-scale floor of item 18 was
     g_off/g_on (1 + |V_th| + |V_f| + |v_a| + |v_k|): a diode floating at
     10 kV had a floor of 2e-8 V, i.e. a 2e-5 A reverse current taken for
@@ -486,14 +486,192 @@ Each entry: question → option taken → evidence → how to reverse.
     trace there was wrong yet; the floor was only waiting for a slower
     crossing. The common-mode-free runs are unchanged (golden, baseline).
 
-<!-- The TR-BDF2 track and this branch both numbered #24-#27 in parallel. The
-     TR-BDF2 track 6 entries above are renumbered #35-#38 (ideal switch 6; nothing
-     outside this file cited them); #24-#34 below keep their numbers (code cites
-     them), and later entries continue from #39. -->
+## TR-BDF2 track 7 (feat/core-p2-trbdf2)
+
+28. **ll15 / ll14: the error control was right; a periodic gate in a
+    controlled run now caps the step like a PWM source.** Question: ll15's
+    I(L) at 23 T read 27.394 A against 27.328 A converged (2.4e-3 relative
+    at rtol 1e-5): does the estimate under-read during the 600 A start-up?
+    → No. Measured (`.scratch/t7/ll15_lte.py`): the true local error of
+    every accepted step (Radau at rtol 1e-13 from the engine's own state,
+    steps inside one gate phase) over rtol·|x| + atol is at most 1.26 on the
+    integration steps (2.7 on a 1e-12 s landing step, 2.8e-8 A), median
+    0.88 at rtol 1e-7. The error came from one 4 us step per 5 us period
+    (duty at its 0.05 floor): ratio ~1 each, all of one sign, 23 of them =
+    0.066 A. That is what a per-step tolerance gives (global error ~ N·tol,
+    ~ rtol^(2/3) for a second-order method); against the 400-600 A it built
+    up on it is 1.1e-4 = 11 rtol, not two orders. Newton (absolute dx 1e-9)
+    and the start (a DC operating point, consistent) play no part: the
+    error falls as rtol^(2/3) down to 1e-10. The defect: the closed-loop
+    gate escaped the ceiling every PWM / pulse / sine source gets (20 steps
+    per period, #20); its ceiling was span/1000 = 5 us = one period. → In a
+    run with controller ticks, once a gate bit rises three times a constant
+    period p apart, the step is capped at p/20 (the default ceiling only;
+    floors unchanged). Scoped to runs with ticks after the review: on every
+    switch_fn gate it cost the CCM buck 8,803 steps in 400 periods against
+    its pinned <= 8 per period, and a monitor-only tick period (the first
+    version capped at T_tick/20) is no gate's period. The second review
+    found any tick (a monitor's) still capped open-loop gates (1,729 ->
+    8,960 steps): a rise now counts only at a tick (learned where the tick
+    fires: at a step start, or at a gate-edge landing, whose committed probe
+    starts the next step h_probe after the tick), the period must exceed 20
+    pulse floors, and the cap does not go below the chatter floor. Monitor
+    run 1,706 vs 1,729 without the monitor. Open-loop gates are therefore
+    unchanged (owner question: should they get p/20 too?), with one known
+    exception (final review): the engine cannot tell a monitor observer
+    from a controller, so a monitor ticking at the PWM period or a divisor
+    of it sees every rise at a tick and caps an open-loop gate at T/20
+    (~2.5x the CCM buck's <= 8 steps per period). Also by design and
+    untested: three equally spaced rises at ticks (a controller chattering
+    at its tick rate for two periods) set the run-wide cap for the rest
+    of the run; a resume relearns it from nothing.
+    ll15 I(L) at 23 T minus converged, rtol 1e-4, 1e-5, 1e-6, 1e-7, 1e-8,
+    1e-10: before 0.142, 0.066, 0.0155, 3.6e-3, 7.9e-4, 4.7e-5 A; after
+    5.3e-3, 3.5e-3, 1.25e-3, 5.9e-4, 4.6e-4, 4.7e-5 A (the first three
+    periods, before the rises prove periodic, still take the long steps:
+    rtol-dependent; from 1e-7 the cap binds). ll14's duty error per tick
+    against the independent closed-loop reference (`closed_loop_reference.py`)
+    at the same rtols: before 8.8e-6, 4.9e-6, 1.1e-6, 2.2e-7, 7.4e-8,
+    3.5e-8; after 1.2e-6, 4.4e-7, 2.0e-7, 8.3e-8, 5.2e-8, 2.1e-9. The ticks
+    sample landed, solved states: the duty error was tolerance error (11x
+    smaller now at the default). Harness cells (interp measure; vs the rtol
+    1e-8 reference / vs rtol 1e-10): ll15 1.23e-3 / 1.23e-3 -> 2.6e-4 /
+    2.9e-4, ll14 1.06e-3 / 1.07e-3 -> 5.5e-4 / 5.6e-4: both agree
+    (tolerance 1e-3, untouched). The rtol 1e-8 reference is capped too; the
+    vs-1e-10 figures are the honest ones and agree as well. Cost (accepted,
+    default tolerances): ll14 13,336 -> 20,673; ll15 39,660 -> 55,541;
+    cl_buck_pi 13,367 -> 19,264; cl_buck_aggressive_pi 6,776 -> 7,988;
+    cl_boost_pi (30 ms) 19,839 -> 72,154 (3.6x; wall 0.06 -> 0.08-0.14 s,
+    one run each on a loaded machine). Errors vs rtol 1e-10: cl_buck_pi
+    8.5e-5 -> 1.9e-5, cl_buck_aggressive_pi 8.1e-5 -> 3.7e-5, cl_boost_pi
+    6.9e-5 -> 1.5e-6. ll16 (reference suspect) still aborts in Newton (at
+    34 us; it ran with the first, tick-period version: an accident of the
+    step sequence, cause not found). Rounding fuzz (20 runs, values x (1 +
+    1e-15 u)): ll15 I(L)(23 T) spread 2.8e-6 A. → Reverse: `learn_gate_period`
+    and its cap at the step start in run_transient_trbdf2.
+
+29. **Track 6 reviewer leftovers (a) and (b).** (a) `be_solve` (the
+    post-turn-off backward-Euler record) called `mask_at(t)`, which settles
+    the mode and can release an ideal diode, inside each of its two solves.
+    → On that path the record decides the mode once (`m_rec`) and both BE
+    solves and the switch-state row read it; the plain record keeps its one
+    `mask_at(t)` for the row, after its early returns, as before. Results
+    of the golden runs are identical (vsi_trbdf2: +2 event-cache
+    refactors, 5443 -> 5445, same samples and states). (b) The flat exception of `_diode_turn_offs` (a long
+    step after trbdf2's post-event record with equal ends counts as
+    resolved): restricted to forced turn-offs it failed 8 tests, all
+    natural turn-offs on trbdf2 traces (4 boost recovery-energy cells,
+    the V_th = 0 chatter case, 3 half-wave RL `auto` cells). Equal ends
+    prove nothing on a fixed step, which can alias a ring (the 2 us L-Cs
+    ring at T/20). → The exception holds for a forced turn-off or a trbdf2
+    trace (`engine_used == 'trbdf2'`); a natural turn-off on a fixed-step
+    trace is unresolved. Not exact on trbdf2 either (review): the step
+    after a turn-off record on a linear circuit is the L-stable SDIRK step
+    with a filtered estimate, which damps a ring much faster than the step
+    instead of reporting it; kept as a commented shortcut (upgrade: compare
+    the step with the post-turn-off mode's ring period). → Reverse:
+    `controlled=` in `_diode_turn_offs`.
+
+30. **Learning a periodic opaque gate: the step cap is 64 w, sampled every
+    w/2.** Question: cl_boost_pi behind an opaque lambda took 26,944 of its
+    28,049 steps in the first 0.1 ms. Measured per period: 37, 17,922,
+    8,568, then 56-62: the PI starts from duty 0, the first pulses are
+    0.28 ns and 0.585 ns wide, and the cap 2 w held until the third rise
+    proved the gate periodic (lifting after two rises would trust one
+    period, which a gate that pauses breaks). The cap 2 w with 4 gate
+    samples per step and a cap of K w with samples w/2 apart see the same
+    pulses (a pulse >= w spans a sample in both); only the number of
+    solves differs. → Cap = 64 w (kCapPulses) with `ceil(2 h / w)` samples
+    (<= 4,096), the dense sampling a lifted step already had. Result
+    (0.3 ms): accepted 28,049 -> 2,357 (first 0.1 ms 26,944 -> 1,295;
+    periods 1-2 26,490 -> 866), solves 56,681 -> 5,296, steady state 580
+    -> 558 per 0.1 ms (558 with declared edges), 29 rises / 30 falls in
+    both. Track 6's gate tests (pause, speed-up, 1 ns pulse) and the DCM
+    buck (4,212 accepted) are unchanged. Rounding fuzz (20 runs, R and L
+    x (1 + 1e-15 u)): 2,357 accepted in every run, v_end spread 4.6e-9 V.
+    → Reverse: kCapPulses = 2.
+
+31. **Track 6 reviewer leftovers (c) and (d).** (c) The pulse-cap test's
+    1 ns start-up pulse was seen only because the start-up steps were short
+    there. → It now rises on a single-shot pulse-source breakpoint (a step
+    always ends there; its rise is a step start, its fall located); passes
+    with `dt_init` 1e-12 .. 2e-8. Its undersampling warning depended on the
+    start-up steps too and is no longer asserted. (d) The learned probe
+    floor: a capacitor held only by OFF diodes (1e-9 S against 2C/h) has an
+    exactly zero pivot at a femtosecond probe (A + g rounds to A), so the
+    run learns a floor (1e-11 s beside a DCM buck). With the floor in force
+    a secant landing raised `dt_land` to it but stored the state at t_lin
+    (a time/state mismatch of up to the floor). → The state is taken along
+    the bracket at the stored time; `n_interp_floor_landings` counts the
+    landings the floor moved. Reachable? Scanned (island C 1e-6 .. 1e-4 F,
+    g_off 1e-9 / 1e-10, two loads): the one floor that runs (1e-11 s) moves
+    no landing (0); every larger floor aborts in a step solve first (below).
+    So the branch is unexercised; the test pins what is reachable: floor
+    > 0, the DCM buck with and without the decoupled island gives 100
+    turn-offs each, landing instants within 5.0e-10 s (the localisation
+    resolution max(h_min, 1e-4 h)), v(out) within 1e-4 VIN. FOUND, not
+    fixed: the same circuit at rtol 1e-10 aborts ("refactorize failed
+    (numerically singular)", dt = 5.9e-14 s): only the probes climb the
+    floor ladder, a step or landing solve that small does not; with
+    C = 1 mF, g_off = 1e-12 the probe ladder itself reaches its cap
+    (span_ref·1e-6) and aborts at the default tolerance.
+
+32. **Track 8 speed: where trbdf2 time goes, and what moved.** Measured
+    with `openspec/changes/update-trbdf2-factor-reuse/probes/trbdf2_speed.py`
+    (work-precision against pwl / pwl+split, independent truths; never a
+    timing assertion). Profiles (macOS `sample`): buck / boost spend 99 % of
+    engine time in Python `switch_fn` (88.7 calls per period against pwl's
+    22); the bridge spent 24 % assembling matrices for the round-off noise
+    bounds and 9 % rebuilding the sine b vector; Shockley is 81 % Newton
+    (one factorization per iteration). Changes:
+    (a) gate-edge bisection first probes the predicted next toggle
+    (periodic history, ± 4 h_min); bit-identical under the bisection's
+    one-change assumption. (b) noise bounds read the cache's resident
+    event matrix (`PwlStateSpaceCache::resident_event_matrix`, a const
+    accessor), else assemble via `SegmentAssembler`; the Newton carrier
+    uses `SegmentAssembler` too; sine sources are written into their rows
+    only. Bit-identical (16 trbdf2 runs + pwl/dsed hashes). (c) once a
+    pulse width w is known a step takes `ceil(2h/w)` gate samples, min 1
+    (was 4): the floor of 4 is for gates not yet seen. This moves bits on
+    gated circuits only: final states within 4e-10 .. 1.4e-8 relative,
+    grids by <= 3.9e-10 s (1.7e-8 s on buck_ccm rtol 1e-8), counts equal
+    except vsi12 rtol 1e-7 accepted 1429 -> 1430, rejected 89 -> 91, and
+    factorizations (the dt sequence shifts): buck CCM 1576 -> 1691, boost
+    1924 -> 2036 at default rtol. Result, per period at default rtol:
+    switch_fn calls buck CCM 88.7 -> 38.6, DCM 154.7 -> 74.3, boost 92.5 ->
+    40.3, VSI12 326.6 -> 260.9; accuracy unchanged to 3 digits. Factor reuse
+    (hits / (hits + builds + refactors)): buck 0.60, DCM 0.57, boost 0.59,
+    VSI12 0.68, bridge 0.79 (0.62 .. 0.88 over rtol 1e-7 .. 1e-3).
+    Not done: hysteresis on h (moves every number for a small gain),
+    modified Newton (algorithm change), skipping samples on the declared-
+    edge path (those helpers are native: 0 Python calls already).
+    Committed edge probes: each edge already has one probe whose solve the
+    cascade reuses; committing it costs 0 solves and 1 sample.
+
+33. **Track 8 aborts (a), (b): the conditioning floor.** (a) A capacitor
+    between two OFF diodes (1 µF, g_off 1e-9) beside a buck at rtol 1e-10 /
+    atol 1e-13: the controller chased the L·g_off mode (τ ~ 1e-13 s) at t = 0
+    until the stage-1 factor was singular (2C/h against g_off below eps)
+    and aborted. → A singular stage-1 factor on a controller-chosen step
+    learns `h_cond = 4 h` (a reject, counted `n_conditioning_rejects`,
+    floor in `h_conditioning_floor`); h never goes below it again. A
+    singular LANDING or a step that cannot grow (4h > ceiling) raises a
+    named SimulationAborted ("give it a DC path (a resistor) or raise
+    g_off"); a singular final sliver (<= 64 h_min before t_end, an edge
+    landed there) ends the run as the loop does within h_min. Result
+    (100 periods): runs, 27,095 accepted, floor 4.0e-13 s, ~4 steps per
+    period at it (diode turn-off), against 33,574 accepted without the
+    island; v(out) within 5.4e-5 V of the island-free run. (b) C = 1 mF,
+    g_off 1e-12: was a bare RuntimeError from the probe ladder cap; now a
+    typed SimulationAborted naming node y. The initial settle's singular
+    error is typed the same way. Bit-identical on the 16 hash runs.
 
 ## Ideal switch 4 (feat/core-a-ideal-switch, 2026-11-18)
 
-24. **Task 6.1: the LCP decides ideal diodes from their crossing signals
+(Numbered 24-29 on the branch; renumbered 34-39 at integration batch 13
+behind TR-BDF2 tracks 6-8, which took 24-33.)
+
+34. **Task 6.1: the LCP decides ideal diodes from their crossing signals
     and replaces the structural loop release under `'lcp'`.** Question:
     how does an ideal diode (R_on = 0) enter the port LCP, whose hybrid
     coordinates put an ON port's row at 1/R_on? → Option taken: an ideal
@@ -524,7 +702,7 @@ Each entry: question → option taken → evidence → how to reverse.
     shown by a test: that the leg's residual is nonzero on a given
     platform (the C++ case injects ±1e-13 into the selector; the Python
     leg no longer claims it). Held and released short ports are counted
-    (`mode_diagnostics` `shorted_held` / `shorted_released`, #33). The
+    (`mode_diagnostics` `shorted_held` / `shorted_released`, #43). The
     judge reads the law voltage (`V_f + i_s` for an ON branch-form diode,
     so an ON ideal diode is judged on i_s; conductance entries: same
     bits). The default guard stays off on branch-form circuits (it would
@@ -550,7 +728,7 @@ Each entry: question → option taken → evidence → how to reverse.
     → Reverse: drop `coords_of_` (ideal ports refused again) and restore
     the `branch_form_diode` refusal in `run_transient`.
 
-25. **Task 6.4 (last clause): the impulsive energy is a loss category
+35. **Task 6.4 (last clause): the impulsive energy is a loss category
     booked to a switch.** Question: to which device is a re-initialisation
     dW booked, and where is it read? → Option taken: every `ReinitRecord`
     carries `cause` (`pwl/reinit.hpp`, shared by pwl and trbdf2): the
@@ -572,12 +750,12 @@ Each entry: question → option taken → evidence → how to reverse.
     to −2.57e-5 at τ/20 and −6.48e-6 at τ/40 on pwl (second order, taken
     around the pulse step: across it the sample quadrature is first
     order), −3.2e-7 on trbdf2. The pulse step itself is partitioned
-    exactly (#32): dW at its start, conduction at its end power. The cause is searched
+    exactly (#42): dW at its start, conduction at its end power. The cause is searched
     among the structure's own elements (a gate first, then a diode),
     never a switch toggling elsewhere on the step (review finding).
     → Reverse: drop the field and the keys.
 
-26. **Shared island correction (`events/islands.hpp`).** Question: pwl and
+36. **Shared island correction (`events/islands.hpp`).** Question: pwl and
     dsed each carried a floating-island KCL correction; which is shared?
     → Option taken: `find_islands(graph, pool, mask, weak_g)` and
     `IslandCorrection` (joint LU when there are 2+ islands and the
@@ -588,18 +766,19 @@ Each entry: question → option taken → evidence → how to reverse.
     `[pwl_ports]`). dsed (`dsed/*`) is not edited here: its switch to the
     header is the dsed owner's (weak_g 1e-6 there, 1e-3 on pwl, as today).
 
-27. **Engine-neutral site driver for trbdf2 (complementarity 4.2).**
+37. **Engine-neutral site driver for trbdf2 (complementarity 4.2).**
     `pwl::select_site(selector, ports, cache, diodes, mask_of, prev_on,
     x0, dt, h_site, b_extra, Z, u, xj, coords)` in `pwl/mode_ports.hpp`
-    is the whole decision of one site: run_transient now calls it, and
-    trbdf2's settle calls it with its own stage's (mask, dt, b_extra).
+    is the whole decision of one site: run_transient now calls it;
+    trbdf2's settle is to call it with its own stage's (mask, dt, b_extra)
+    once the hook lands (not yet: batch 13 review).
     `trbdf2_transient.hpp` is not edited here (its owner's branch has
     commits on it after this branch's base). The shared tests skip trbdf2
     while it refuses `mode_selection` by name and run once the hook lands
     (`test_lcp_agrees_with_the_default_settle_on_every_engine`); the cost
     gate (`probes/measurement_gate.py`) runs over pwl and trbdf2.
 
-28. **Nits.** (a) A branch-form diode flip forced by a gate edge at the
+38. **Nits.** (a) A branch-form diode flip forced by a gate edge at the
     step start is decided in the restart's first stage; it was stamped at
     the step end (one dt late). It is now stamped at t_prev when the
     step's gate bits changed at its start and the flip is already in the
@@ -611,7 +790,7 @@ Each entry: question → option taken → evidence → how to reverse.
     / `settle_rounds_total` (were always 0; no test reaches a guard mask
     cycle without a hook, so this is not tested).
 
-29. **Default-flip evidence (not the flip).** `benchmarks/tools/
+39. **Default-flip evidence (not the flip).** `benchmarks/tools/
     ideal_switch_flip_evidence.py` writes `benchmarks/IDEAL_SWITCH_FLIP_
     EVIDENCE.md`: 109 reference circuits × 5 configurations × {default,
     branch, lcp, branch+lcp}, graded the same way in both directions
@@ -635,7 +814,11 @@ Each entry: question → option taken → evidence → how to reverse.
 
 ## Ideal switch 5 (feat/core-a-ideal-switch, 2026-11-18)
 
-30. **`'lcp'` poses the LCP only where its answer can differ from a known
+(Ideal switch 5 and 6 were numbered 30-34 and 39-41 on the branch;
+renumbered 40-47 when the branch took integration batch 13, which numbers
+TR-BDF2 tracks 6-8 24-33 and ideal switch 4 34-39.)
+
+40. **`'lcp'` poses the LCP only where its answer can differ from a known
     one.** Question: `'lcp'` cost 4.4–5.6× the default on pwl (one LCP and
     two solves per site); which sites need Lemke? → Option taken
     (`run_transient` `mode_lcp_site`, `PwlModePorts`): (a) the start mode
@@ -675,7 +858,7 @@ Each entry: question → option taken → evidence → how to reverse.
     the LCP is the decision, plus noise of the loaded machine on sub-ms
     runs. → Reverse: drop (a)/(b) (Lemke at every site).
 
-31. **Smallest branch-form R_on.** Question: `R_on == 0` is compared
+41. **Smallest branch-form R_on.** Question: `R_on == 0` is compared
     exactly; what does 1e-300 do? → Option taken: the builder refuses
     0 < R_on < 1e-9 Ω by name (`CircuitBuilder::kBranchRonMin`,
     `ValueError` naming the device and field): below it the port's ON row
@@ -684,7 +867,7 @@ Each entry: question → option taken → evidence → how to reverse.
     (`test_ideal_loop_release.py`): 1e-300 and 1e-12 refused; 1e-6 runs as
     a resistor to 1e-12 relative. → Reverse: drop the bound.
 
-32. **The pulse step is partitioned exactly.** Question: a
+42. **The pulse step is partitioned exactly.** Question: a
     re-initialisation's dW and the conduction loss both touched the pulse
     step (sample−1, sample]; conduction integrated the step's linear
     interpolation from the pre-jump value, an O(h) excess. → Option taken:
@@ -702,7 +885,7 @@ Each entry: question → option taken → evidence → how to reverse.
     to 1e-12 relative; on the cut-set, R's E_total over the pulse step is
     its end power × h to 1e-12. → Reverse: drop `_reinit_step_starts`.
 
-33. **Reviewer leftovers of slice 4.** (a) Every pwl `ideal_voltage_loop`
+43. **Reviewer leftovers of slice 4.** (a) Every pwl `ideal_voltage_loop`
     message names the loop element by element (trbdf2's is the trbdf2
     owner's) in loop order
     (`ModeStructure::loop_texts`, "D3 -> D2 -> D1 -> V1"); under `'lcp'` a
@@ -719,7 +902,7 @@ Each entry: question → option taken → evidence → how to reverse.
     may land on two adjacent steps under the default, one breach logged).
 
 
-34. **Ideal-twin flip evidence.** Question: what does the R_on = 0,
+44. **Ideal-twin flip evidence.** Question: what does the R_on = 0,
     V_f = 0 twin of every reference circuit do, graded against a reference
     regenerated for that circuit? → Option taken:
     `ideal_switch_flip_evidence.py` variants `ideal` / `ideal+lcp`
@@ -753,7 +936,7 @@ Each entry: question → option taken → evidence → how to reverse.
 
 ## Ideal switch 6 (feat/core-a-ideal-switch, 2026-11-18)
 
-39. **Design D6 against the code: `form=` on every creator, no new
+45. **Design D6 against the code: `form=` on every creator, no new
     numeric defaults.** Question: D6 row 1 assumed `add_switch(name, a, b)`
     defaults `g_on = 1e3`, `g_off = 1e-9`; they are required (migration
     audit F2), so a flip has no "default conductances" to convert, and
@@ -782,7 +965,7 @@ Each entry: question → option taken → evidence → how to reverse.
     CHANGELOG). → Reverse: drop the keyword (no caller outside the
     tests uses it yet).
 
-40. **Passivity gate of the 'lcp' fast paths (review of slice 5): not
+46. **Passivity gate of the 'lcp' fast paths (review of slice 5): not
     fixed here, needs a loop edit.** The cached and quiet-with-ideal-ON
     paths are Lemke's answer only on a positive semidefinite port matrix;
     `passivity_of` names VCVS and negative R/C/L but reads VCCS / CCCS /
@@ -802,7 +985,7 @@ Each entry: question → option taken → evidence → how to reverse.
     enumeration that found no mode; it can name a loop for ports at zero
     bias) need loop edits too: migration audit 6b.
 
-41. **DC operating point with a closed ideal switch in a voltage loop.**
+47. **DC operating point with a closed ideal switch in a voltage loop.**
     The ideal twins of ll10 / ll15 failed with a bare `RuntimeError` after
     a solve of 1.2e13 A: their switch is closed at t = 0 in a loop of the
     source and inductors (shorts at DC), which has no DC solution (its
@@ -815,3 +998,99 @@ Each entry: question → option taken → evidence → how to reverse.
     refuse a solvable point. Without such a loop the DC system with branch
     unknowns is solved as before. → Reverse: the `mask` argument of
     `find_dc_voltage_loop`.
+
+## Ideal switch 7 (feat/core-a-ideal-switch, 2026-11-18)
+
+48. **A symmetric edge diagnostic; the gate stays one-sided.** Question:
+    `boost_switching_complex` (ideal twin) graded 0.030 with the pwl dt/16
+    trace under test against trbdf2 and 0.0023 the other way. Cause, measured:
+    `err_rms` drops the initial sample of the trace under test only and
+    divides by the reference's span. `V(out)` holds 24 V with 6 mV of
+    ripple, so the span is the 1e-3 floor (24 mV) one way; the other way the
+    reference's own initial sample (0 V at t = 0, the stored initial state)
+    is interpolated into the window up to the other trace's first sample
+    (14.4 V at 5 ns), which inflates the span 600x and hides the error.
+    Decision: the edge DIAGNOSTIC is symmetric
+    (`metrics.err_rms_symmetric`: both traces lose their initial samples,
+    the span is the larger of the two; `diagnose` takes its window start
+    from both traces too): `diagnose(a, b) == diagnose(b, a)` bit for bit,
+    pinned with the 24 V case in `test_benchmark_harness.py`. On the real
+    cell the symmetric measure reads 0.030 both ways and 8.1e-6 with the
+    switching steps left out. The gate (`compare`, the `interp` measure) is
+    unchanged, as ordered: making it symmetric moves every graded cell and
+    belongs to the release's re-baseline (migration audit 6c).
+
+49. **References with a shown convergence and a stated uncertainty.**
+    Question: which reference may grade an ideal-twin cell? Decision
+    (`ideal_switch_flip_evidence.converged_reference`): two independent
+    tools, trbdf2 refined by rtol (1e-8, 1e-9, 1e-10) and pwl + restart
+    refined by dt (dt/8 ... dt/256), each until its error estimate is at most
+    tol/10. The estimate is Richardson's with the order measured from the
+    last two moves, not the last move: the interp measure converges at order
+    ~0.5 across a jump (a ramp over one step, rms ~ J·sqrt(h/T); measured
+    0.0030 → 0.0021 → 0.0015 → 0.0011 on `boost_switching_complex`,
+    0.0158 → 0.0112 → 0.0079 → 0.0056 on ll07's `V(ctrl)`), where the last
+    move understates the error 2.4x. The reference is the tool with the
+    smaller estimate; when the other tool's own estimate is below half of
+    the two tools' distance, that distance is a real disagreement and
+    becomes the uncertainty (ll07's ideal twin: trbdf2's estimate stays at
+    0.069 at rtol 1e-10, pwl's is 0.013 at dt/256, the two differ by 0.04). A cell is graded only when the
+    uncertainty is at most its tol/10, else `not comparable` with the
+    number. The gate's own reference keeps `differential_runner.reference`
+    and gets its uncertainty measured (trbdf2 1e-8 against 1e-9, or pwl dt/2
+    against dt/4); both are in the References table of
+    `IDEAL_SWITCH_FLIP_EVIDENCE.md`. Not a gate change.
+
+50. **One command for the evidence, resumable per circuit.**
+    `ideal_switch_flip_evidence.py --resume DIR` measures every variant
+    (default, branch, lcp, branch+lcp, auto, ideal, ideal+lcp) on every
+    configuration in one run, writes each circuit's cells to `DIR` as soon as
+    they exist (atomic rename), and a restarted run measures only the
+    missing cells, never cells stamped with another tree (commit + dirty
+    flag). The rendered file names the tree it measured.
+
+51. **Loss and thermal summaries of branch-form elements.**
+    `device_loss_summary` always gives a branch-form element the impulsive
+    category (`E_impulse_total`, `n_impulses`, `P_impulse_avg`; 0 when
+    nothing was booked to it) next to its solved `v·i` (0 W of conduction for
+    an ideal one). `device_thermal_summary` used to drop a branch-form
+    element silently (its `g_on` is infinite): it now reports it
+    (`form='branch'`, `P_impulse_avg`) and heats it with the impulsive energy
+    as a constant offset, as `P_sw_avg`. A kernel loss port
+    (`set_device_losses`) still does not carry that energy into its own
+    junction (pinned at integration batch 13 as a known limitation): the
+    loss summary marks such entries `impulse_in_junction=False` and warns.
+    The wiring is the in-kernel event-losses track's. Also:
+    `add_switch` / `add_diode` with `form='branch'` refuse `R_on` together
+    with `g_on` (one resistance given twice; `g_on` was dropped), and the
+    dsed `mode_selection='auto'` branch for an integrator other than rk45 is
+    removed: a diode circuit reaches it only on rk45 (`'auto'` is routed to
+    rk45 and `'bdf2'` refused before it).
+
+52. **The `'lcp'` cost: exact memos, not a Lemke warm start.** Question:
+    where do the 3.9-5.4x cells (NPC three-level half bridge, boost PFC)
+    spend the time, and can a warm start remove it without changing a
+    result? Measured (macOS `sample`, NPC on pwl, 10 s): the site driver
+    is 73 % of the run; inside it `hybrid_lcp` 30 %, the driving-point
+    resistance of the tie pins 20 %, the hysteresis loop 11 %, of which
+    Lemke itself 3 %; 39 % of all samples are `malloc` / `free` from those
+    small dense temporaries. Lemke pivots 187 times in 3704 LCPs (0.05 per
+    LCP): the problem is already posed in the previous mode's coordinates
+    (the hybrid LCP), so an unchanged active set is `q >= 0`, a trivial
+    solve with 0 pivots — that IS the warm start, and a Lemke warm start
+    from the previous basis has nothing left to save. Not done, so the
+    question of a warm start that ends on another solution of a degenerate
+    LCP does not arise: every result comes from the same cold Lemke as
+    before. Decision: three exact memos in `ModeSelector`, each returning
+    what its computation returns on bit-equal inputs (the same code made
+    the stored values, so a hit and a recomputation give the same bits):
+    (a) `hybrid_lcp`'s factor (H, the LU of I + ZΓ, B, c) per
+    (Z, ports, coordinates) compared bitwise, and q per u — the site's Z is
+    already one per (mask, dt) (`PwlModePorts`), so a quiet stretch pays one
+    back-substitution and a widened pass on the site's own (Z, u) nothing;
+    (b) the widened passes' principal pivots per (H generation, target
+    coordinates), q pivoted with the stored blocks by the same expressions;
+    (c) the driving-point resistance per (H generation, pivot set, port).
+    A generation number names one H content: equal generations, equal H.
+    Pinned: `[modes][memo]` (one selector over repeated / new (Z, u) against a
+    fresh selector per site, equal to the bit) and the 102-cell byte check.

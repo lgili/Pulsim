@@ -30,6 +30,8 @@
 #include "pulsim/pwl/trbdf2_stage.hpp"
 
 #include <algorithm>
+#include <concepts>
+#include <optional>
 
 namespace pulsim::pwl {
 
@@ -58,17 +60,77 @@ struct StepCtx {
     return make_combined_diode_mosfet_refresh();
 }
 
+/// The refresh of a DC operating point (no stateful pass: DC has no
+/// step). `enable` unset means "decide from the pool": the standard chain
+/// whenever the pool has any Newton device; false solves them as open
+/// circuits (the caller asked for it).
+[[nodiscard]] inline NonlinearRefreshFn dc_device_refresh(
+    const DevicePool& pool, std::optional<bool> enable) {
+    const bool want =
+        enable.has_value() ? *enable : pool.has_nonlinear_devices();
+    if (!want) return {};
+    return make_combined_diode_mosfet_refresh();
+}
+
+// The Newton stamp of each stateful kind, reading the step ONLY from `c`.
+// `inc`: the engine's form of the saturable flux residual (closed-form
+// increment on TR-BDF2, direct on the fixed engine), a run constant.
+inline Real stamp_kind(NonlinearCapacitorHistory& k, const Vector& x,
+                       sparse::Matrix& J, Vector& f, const StepCtx& c,
+                       [[maybe_unused]] bool inc) {
+    return refresh_nonlinear_capacitors(x, J, f, k, c.h,
+                                        coss_stage_of(c.stage),
+                                        &k.q_gamma());
+}
+inline Real stamp_kind(LauritzenDiodeHistory& k, const Vector& x,
+                       sparse::Matrix& J, Vector& f, const StepCtx& c,
+                       [[maybe_unused]] bool inc) {
+    return refresh_lauritzen_diodes(x, J, f, k, c.h, c.stage);
+}
+inline Real stamp_kind(PmsmMnaHistory& k, const Vector& x,
+                       sparse::Matrix& J, Vector& f, const StepCtx& c,
+                       [[maybe_unused]] bool inc) {
+    return refresh_pmsm_mna(x, J, f, k, c.h, c.stage);
+}
+inline Real stamp_kind(IgbtTailHistory& k, const Vector& x,
+                       sparse::Matrix& J, Vector& f, const StepCtx& c,
+                       [[maybe_unused]] bool inc) {
+    return refresh_igbt_tails(x, J, f, k, c.h, c.stage);
+}
+inline Real stamp_kind(SaturableInductorHistory& k, const Vector& x,
+                       sparse::Matrix& J, Vector& f, const StepCtx& c,
+                       [[maybe_unused]] bool inc) {
+    Real m = Real{0};
+    for (const auto& e : k.entries()) {
+        m = std::max(m, stamp_saturable_inductor(e, x, J, f, c.h, c.stage,
+                                                 inc));
+    }
+    return m;
+}
+
+namespace detail {
+template <class K>
+concept HasStamp = requires(K& k, const Vector& x, sparse::Matrix& J,
+                            Vector& f, const StepCtx& c, bool inc) {
+    { stamp_kind(k, x, J, f, c, inc) } -> std::same_as<Real>;
+};
+template <class List> struct AllStamp;
+template <class... Ks> struct AllStamp<device::TypeList<Ks...>> {
+    static constexpr bool value = (HasStamp<Ks> && ...);
+};
+}  // namespace detail
+static_assert(detail::AllStamp<StatefulKinds>::value,
+              "every StatefulKinds entry needs a stamp_kind overload");
+
 /// The whole Newton refresh: `base` (from `static_device_refresh`), then
-/// every stateful history. Empty when there is nothing to stamp, so a
-/// linear circuit keeps its linear path. `hs` and `ctx` are captured by
-/// reference and must outlive the returned function.
-/// `sat_increment_form`: the saturable inductor's flux residual in the
-/// closed-form increment form (TR-BDF2) or the direct form (fixed step).
+/// every stateful kind in list order. Empty when there is nothing to
+/// stamp, so a linear circuit keeps its linear path. `hs` and `ctx` are
+/// captured by reference and must outlive the returned function.
 [[nodiscard]] inline NonlinearRefreshFn build_device_refresh(
     NonlinearRefreshFn base, StatefulHistories& hs, const StepCtx& ctx,
-    bool sat_increment_form) {
+    bool increment_form) {
     if (!hs.any()) return base;
-    return [base = std::move(base), &hs, &ctx, sat_increment_form](
+    return [base = std::move(base), &hs, &ctx, increment_form](
                const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
                const topology::Graph& g, const DevicePool& pool) -> Real {
         Real m = Real{0};
@@ -78,29 +140,12 @@ struct StepCtx {
             sparse::zero_keep_pattern(J_nl);
             f_nl.setZero();
         }
-        if (!hs.coss.empty()) {
-            m = std::max(m, refresh_nonlinear_capacitors(
-                                x, J_nl, f_nl, hs.coss, ctx.h,
-                                coss_stage_of(ctx.stage),
-                                &hs.coss.q_gamma()));
-        }
-        if (!hs.laur.empty()) {
-            m = std::max(m, refresh_lauritzen_diodes(x, J_nl, f_nl, hs.laur,
-                                                     ctx.h, ctx.stage));
-        }
-        if (!hs.pmsm.empty()) {
-            m = std::max(m, refresh_pmsm_mna(x, J_nl, f_nl, hs.pmsm, ctx.h,
-                                             ctx.stage));
-        }
-        if (!hs.tail.empty()) {
-            m = std::max(m, refresh_igbt_tails(x, J_nl, f_nl, hs.tail,
-                                               ctx.h, ctx.stage));
-        }
-        for (const auto& e : hs.sat.entries()) {
-            m = std::max(m, stamp_saturable_inductor(e, x, J_nl, f_nl, ctx.h,
-                                                     ctx.stage,
-                                                     sat_increment_form));
-        }
+        hs.for_each([&](auto& k) {
+            if (!k.empty()) {
+                m = std::max(m, stamp_kind(k, x, J_nl, f_nl, ctx,
+                                           increment_form));
+            }
+        });
         return m;
     };
 }

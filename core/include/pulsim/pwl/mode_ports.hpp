@@ -106,7 +106,7 @@ public:
     /// −(b_c + b_extra) — the cache's direct solve of that (mask, dt), then
     /// each floating island's KCL imposed exactly. dt = 0: static.
     /// Z and the island correction depend on (mask, dt) only (unit
-    /// right-hand sides): built once per pair and kept (DECISIONS #30), so a
+    /// right-hand sides): built once per pair and kept (branch-form DECISIONS #40), so a
     /// site costs the one solve for u — none when `x_site` is the engine's
     /// own solve of J(mask, dt)·s = −(b_c + b_extra), the same bits.
     void site(const topology::SwitchStateMask& mask, Real dt,
@@ -447,7 +447,7 @@ inline int judge_mode(const DiodeEventState& diodes, const std::vector<char>& on
 /// (Z, u) (DECISIONS F2); an ideal diode is cut out of it (OFF coordinates);
 /// the judge reads the engine's own solve of each candidate.
 /// `Z`, `u`, `xj`, `coords`: caller scratch (no allocation once sized).
-/// `x_site` (optional, added for pwl's cost: DECISIONS #30): the caller's
+/// `x_site` (optional, added for pwl's cost: branch-form DECISIONS #40): the caller's
 /// own solve of the site's system under the start mask, given only when no
 /// ideal diode is ON in `prev_on` (the start mask is then the posed one);
 /// the port voltages are read from it instead of solving again.

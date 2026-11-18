@@ -1189,8 +1189,9 @@ public:
     /// Circuit scales of the LCP tolerances (design D4, prototype
     /// `_lcp_at`): vscale = largest source / drop / node-voltage
     /// magnitude (1 V floor), iscale = largest current-source, branch
-    /// current (inductors, sources) or vscale·G of a resistor, c_max =
-    /// largest capacitance. State read under the CURRENT mask.
+    /// current (inductors, sources) or vscale·G of a resistor, G capped at
+    /// the largest ON conductance of a diode or switch, c_max = largest
+    /// capacitance. State read under the CURRENT mask.
     [[nodiscard]] events::CircuitScale port_scale(Real t,
                                                   const Vector& x) const {
         ensure_current_resolved_();
@@ -1206,7 +1207,7 @@ public:
     [[nodiscard]] events::CircuitScale port_scale_full(const Vector& xf) const {
         const Index nn = graph_.num_nodes();
         events::CircuitScale sc;
-        Real vs = Real{1}, is = Real{1e-12}, gmax = Real{0};
+        Real vs = Real{1}, is = Real{1e-12}, gmax = Real{0}, gon_max = Real{0};
         for (Index i = 0; i < static_cast<Index>(xf.size()); ++i) {
             if (i < nn) vs = std::max(vs, std::abs(xf[i]));
             else is = std::max(is, std::abs(xf[i]));
@@ -1236,8 +1237,12 @@ public:
             case K::Diode: {
                 const auto& p = pool_.diode_params(b);
                 vs = std::max({vs, std::abs(p.V_f), std::abs(p.V_th)});
+                gon_max = std::max(gon_max, std::abs(p.g_on));
                 break;
             }
+            case K::Switch:
+                gon_max = std::max(gon_max, std::abs(pool_.switch_g_on(b)));
+                break;
             case K::CurrentSource:
                 is = std::max(is, std::abs(pool_.current_source_params(b).I));
                 break;
@@ -1252,6 +1257,11 @@ public:
             }
         }
         sc.vscale = vs;
+        // A resistor stiffer than every ON switching element (a 1 µΩ ground
+        // link) does not set the current scale: vs·G = 4.8e7 A on a 48 V
+        // flyback let the judge and the LCP read 0.05 A of reverse current in
+        // an ON clamp diode as rounding. The ON conductances bound what flows.
+        if (gon_max > Real{0}) gmax = std::min(gmax, gon_max);
         sc.iscale = std::max(is, vs * gmax);
         return sc;
     }

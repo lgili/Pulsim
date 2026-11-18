@@ -21,7 +21,11 @@ interpolated on the union of both grids. Next to it each cell records the
 the error with the steps that hold a recorded switch-state change (either
 trace) and the nodes a voltage source ties to ground left out, the
 excluded fraction of the compared span, and the edge-timing mismatch
-between matched switching instants. Above ``EDGE_CAP`` excluded, or when
+between matched switching instants. The diagnostic is symmetric (neither
+trace is the reference: both lose their initial sample, the span is the
+larger of the two; ``metrics.err_rms_symmetric``); the gate is not (it
+keeps the reference's first sample and divides by the reference's span).
+Above ``EDGE_CAP`` excluded, or when
 one trace records ``CHATTER`` times the other's switch-state changes, the
 diagnostic is the word ``undersampled`` / ``chatter`` (``missed edges`` when
 one trace never switches), not a number. The
@@ -221,14 +225,28 @@ def edge_timing(t, sa, tr_, sb, hi=math.inf):
     return worst
 
 
+def _sym(tr, ref, c, scale, exclude=()):
+    """The edge diagnostic's error: symmetric in the two traces
+    (``metrics.err_rms_symmetric``), so it never depends on which side is
+    the reference."""
+    (t, ys, _), (tr_, yr, _) = tr, ref
+    s = max(scale * max(np.abs(ys[c]).max(), np.abs(yr[c]).max()), 1e-9)
+    return metrics.err_rms_symmetric((t, ys[c]), (tr_, yr[c]), abs_scale=s, exclude=exclude)
+
+
 def diagnose(tr, ref, cols, scale, forced=(), step=None):
-    """The edge diagnostic of one cell (never the gate)."""
+    """The edge diagnostic of one cell (never the gate). Its numbers are
+    symmetric: ``diagnose(a, b)`` and ``diagnose(b, a)`` give the same
+    ``edge_rms`` and ``excluded_frac`` (``worst`` names the gate's worst
+    observable)."""
     t, _, sa = tr
     tr_, _, sb = ref
-    lo, hi = max(t[np.searchsorted(t, t[0], side="right")], tr_[0]), min(t[-1], tr_[-1])
+    lo = max(t[np.searchsorted(t, t[0], side="right")],
+             tr_[np.searchsorted(tr_, tr_[0], side="right")])
+    hi = min(t[-1], tr_[-1])
     excl = switching_steps(sa, t) + switching_steps(sb, tr_)
     frac = _covered(excl, lo, hi) / (hi - lo) if hi > lo else 1.0
-    worst = max(cols, key=lambda c: _errs(tr, ref, c, scale)[0])
+    worst = max(cols, key=lambda c: _errs(tr, ref, c, scale)[0])   # the gate's worst
     fa, fb = (int(np.sum(s[1:] != s[:-1])) if s is not None else 0 for s in (sa, sb))
     d = dict(worst=worst, excluded_frac=frac, edge_rms=None,
              edge_timing_s=edge_timing(t, sa, tr_, sb, hi), edge_timing_steps=None)
@@ -244,7 +262,7 @@ def diagnose(tr, ref, cols, scale, forced=(), step=None):
         d["edge"] = "undersampled"
     else:
         d["edge"] = "ok"
-        d["edge_rms"] = max(_errs(tr, ref, c, scale, excl)[0]
+        d["edge_rms"] = max(_sym(tr, ref, c, scale, excl)
                             for c in ([c for c in cols if c not in forced] or cols))
     if step and d["edge_timing_s"] is not None:
         d["edge_timing_steps"] = d["edge_timing_s"] / step

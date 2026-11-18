@@ -34,8 +34,8 @@ import metrics  # noqa: E402
 import v1_reader  # noqa: E402
 from analytic import BY_ID, CASES  # noqa: E402
 
-ANALYTIC = yaml.safe_load((BENCH / "manifests" / "analytic.yaml").read_text())["cases"]
-TRIAGE = yaml.safe_load((BENCH / "manifests" / "v2_triage.yaml").read_text())["circuits"]
+ANALYTIC = yaml.safe_load((BENCH / "manifests" / "analytic.yaml").read_text(encoding="utf-8"))["cases"]
+TRIAGE = yaml.safe_load((BENCH / "manifests" / "v2_triage.yaml").read_text(encoding="utf-8"))["circuits"]
 
 
 @pytest.fixture(autouse=True)
@@ -249,10 +249,11 @@ def _err(case, engine, k=1.0):
                            abs_scale=case.abs_scale, exclude_t0=case.exclude_t0)
 
 
-def test_there_are_twenty_four_analytic_cases_and_each_has_a_manifest_entry():
-    # 20 + igbt_knee, scr_halfwave_r (IGBT track) + im_locked_rotor,
-    # im_free_acceleration (machines track)
-    assert len(CASES) == 24
+def test_every_analytic_case_is_unique_and_has_a_manifest_entry():
+    # The count derives from the catalog: tracks that add cases (IGBT,
+    # machines, permeance, ...) no longer collide on a literal.
+    ids = [c.id for c in CASES]
+    assert len(ids) == len(set(ids)) >= 26
     assert set(ANALYTIC) == {c.id for c in CASES}
 
 
@@ -346,7 +347,7 @@ def test_forty_goldens():
 
 @pytest.mark.parametrize("name,run,names,newton", GOLDEN, ids=[g[0] for g in GOLDEN])
 def test_golden(name, run, names, newton):
-    golden = json.loads((goldens.GOLDEN_DIR / f"{name}.json").read_text())
+    golden = json.loads((goldens.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
     assert golden["rtol"] <= (goldens.RTOL_NEWTON if newton else goldens.RTOL_LINEAR)
     bad = goldens.compare(golden, goldens.snapshot(run(), names, newton))
     assert not bad, "\n".join(bad[:10])
@@ -354,7 +355,7 @@ def test_golden(name, run, names, newton):
 
 def test_golden_catches_one_part_per_million():
     c = BY_ID["rc_charge"]
-    golden = json.loads((goldens.GOLDEN_DIR / "analytic__rc_charge.json").read_text())
+    golden = json.loads((goldens.GOLDEN_DIR / "analytic__rc_charge.json").read_text(encoding="utf-8"))
     b, _ = c.build(1.0 + 1e-6)
     res = pulsim.simulate(b, c.t_end, c.dt, engine="pwl")
     bad = goldens.compare(golden, goldens.snapshot(res, b.state_var_names(), False))
@@ -363,7 +364,7 @@ def test_golden_catches_one_part_per_million():
 
 def test_golden_catches_a_changed_switching_sequence_before_values():
     name, run, names, newton = next(g for g in GOLDEN if g[0] == "buck_switching")
-    golden = json.loads((goldens.GOLDEN_DIR / f"{name}.json").read_text())
+    golden = json.loads((goldens.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
     res = run()
 
     class Shifted:  # the diode commutates one step earlier
@@ -378,7 +379,7 @@ def test_golden_catches_a_changed_switching_sequence_before_values():
 
 # ------------------------------------------------------------ counters ---
 
-FROZEN = yaml.safe_load((BENCH / "manifests" / "perf_counters.yaml").read_text())["counters"]
+FROZEN = yaml.safe_load((BENCH / "manifests" / "perf_counters.yaml").read_text(encoding="utf-8"))["counters"]
 
 
 @pytest.mark.parametrize("name", list(counters.CIRCUITS))
@@ -429,7 +430,7 @@ def test_runner_classifies_a_junction_capacitor_rc_on_dsed_as_not_agree():
 def test_runner_end_to_end_on_one_family(tmp_path):
     out = tmp_path / "results.json"
     rc = dr.main(["--circuits", "linear/rc_step.yaml", "--out", str(out)])
-    recs = json.loads(out.read_text())
+    recs = json.loads(out.read_text(encoding="utf-8"))
     assert rc == 0
     assert [(r["engine"], r["outcome"]) for r in recs] == [
         ("pwl", "agree"), ("trbdf2", "agree"), ("dsed", "agree")]
@@ -437,7 +438,7 @@ def test_runner_end_to_end_on_one_family(tmp_path):
 
 
 def test_benchmark_runner_imports_without_the_retired_backend():
-    src = (BENCH / "tools" / "benchmark_runner.py").read_text()
+    src = (BENCH / "tools" / "benchmark_runner.py").read_text(encoding="utf-8")
     assert "import pulsim_python_backend" not in src and "from pulsim_python_backend" not in src
     import benchmark_runner  # noqa: F401
 
@@ -465,3 +466,40 @@ def test_a_suspect_reference_grades_nothing_and_a_frozen_error_may_not_grow():
         for cfg, out in (ent.get("known") or {}).items():
             if out == "disagree":
                 assert (ent.get("known_err") or {}).get(cfg), (rel, cfg)
+
+
+def test_the_edge_diagnostic_is_symmetric_and_the_gate_is_not():
+    # Two converged traces of a held 24 V output (6 mV ripple), each with its
+    # stored initial state 0 V at t = 0 and a different first step: the gate keeps
+    # the reference's first sample and divides by the reference's span, so it
+    # depends on the side; the edge diagnostic does not, to the bit.
+    def trace(t1, dt):
+        t = np.concatenate(([0.0], np.arange(t1, 1e-3, dt)))
+        y = 24.0 + 3e-3 * np.sin(2 * np.pi * 5e3 * t)
+        y[0] = 0.0
+        return (t, {"V(out)": y}, None)
+    a, b = trace(1.25e-8, 1.25e-8), trace(5e-9, 1e-7)
+    cols = ["V(out)"]
+    ab, ba = dr.compare(a, b, cols, 1e-3)[0], dr.compare(b, a, cols, 1e-3)[0]
+    assert max(ab, ba) > 3 * min(ab, ba)                       # the gate is one-sided
+    da, db = dr.diagnose(a, b, cols, 1e-3), dr.diagnose(b, a, cols, 1e-3)
+    assert da["edge_rms"] == db["edge_rms"] and da["excluded_frac"] == db["excluded_frac"]
+    assert da["edge_rms"] < 1e-2                               # both traces are the same signal
+    ya, yb = (a[0], a[1]["V(out)"]), (b[0], b[1]["V(out)"])
+    assert metrics.err_rms_symmetric(ya, yb) == metrics.err_rms_symmetric(yb, ya)
+
+
+def test_flip_evidence_resumes_per_circuit(tmp_path, monkeypatch):
+    # a second run with the same cache measures nothing; a missing cell is measured again
+    import ideal_switch_flip_evidence as ev
+    pat = ["circuits/linear/rc_step.yaml"]
+    recs, refs, tree = ev.run(pat, ("default",), tmp_path)
+    assert recs and {r["variant"] for r in recs} == {"default"}
+    assert refs["circuits/linear/rc_step.yaml"]["default"]["name"]
+    monkeypatch.setattr(ev, "run_circuit", lambda *a, **k: pytest.fail("measured again"))
+    again, _, _ = ev.run(pat, ("default",), tmp_path)
+    assert again == recs
+    monkeypatch.undo()
+    more, _, _ = ev.run(pat, ("default", "auto"), tmp_path)
+    assert {r["variant"] for r in more} == {"default", "auto"}
+    assert [r for r in more if r["variant"] == "default"] == recs

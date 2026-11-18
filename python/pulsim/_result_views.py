@@ -175,7 +175,7 @@ def step_start_states(result, states: np.ndarray,
     pulse step holds the post-jump state: the conduction over it is the
     end power times h), so the jump and the conduction integral partition
     the step instead of a line from the pre-jump sample counting part of
-    ``dW`` twice (add-branch-form-ideal-switch DECISIONS #32)."""
+    ``dW`` twice (add-branch-form-ideal-switch DECISIONS #42)."""
     states, masks = _reinit_step_starts(result, states, masks)
     idx = getattr(result, "right_limit_index", None)
     rl_st = getattr(result, "right_limit_states", None)

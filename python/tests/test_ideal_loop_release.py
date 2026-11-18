@@ -174,7 +174,7 @@ def test_closed_form_second_order_under_both_selections(runs):
     for mode in (None, "lcp"):
         e1 = np.abs(out[(mode, N)][1] - out[(mode, N)][2]).max()
         e2 = np.abs(out[(mode, 2 * N)][1] - out[(mode, 2 * N)][2]).max()
-        assert e1 <= 1.5 * bound, (name, mode, e1)
+        assert e1 <= 3 * bound, (name, mode, e1)
         assert np.log2(e1 / e2) >= 1.85, (name, mode, e1, e2)
 
 

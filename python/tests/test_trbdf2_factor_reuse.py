@@ -60,3 +60,38 @@ def test_tight_budget_evicts_without_changing_the_result(monkeypatch):
     assert cache.metrics().event_evictions > 0
     assert np.array_equal(np.asarray(res.times), np.asarray(ref.times))
     assert np.array_equal(np.asarray(res.states), np.asarray(ref.states))
+
+
+def _buck_calls(R, D, nper=200):
+    b = pulsim.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9)
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "vout", 100e-6)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", R)
+    n, k, T, t0 = b.graph.num_switches, b.switch_index_of("S"), 1e-5, 2e-6
+    calls = [0]
+
+    def fn(t):
+        calls[0] += 1
+        m = pulsim.SwitchStateMask(n)
+        ph = (t - t0) / T
+        m.set(k, bool(t >= t0 - 1e-13 and ph - np.floor(ph + 1e-9) < D - 1e-9))
+        return m
+    r = pulsim.simulate(b, t_end=t0 + nper * T, engine="trbdf2", switch_fn=fn)
+    return r, calls[0] / nper
+
+
+def test_opaque_gate_calls_per_period_on_the_buck():
+    """switch_fn is the buck's cost (99 % of engine time). The edge
+    bisection now probes the predicted edge first, and once a pulse
+    width is known a step takes ceil(2h/w) samples (min 1, was 4):
+    CCM 88.7 -> 38.7 calls per period, DCM 154.7 -> 74.4."""
+    r, ccm = _buck_calls(1.0, 0.5)
+    assert ccm < 65   # adaptive: 38.7 measured, 88.7 before
+    st = r._trbdf2_stats
+    assert st["n_factor_hits"] > st["n_factor_refactors"] > 0
+    assert st["n_factor_builds"] >= 2
+    _, dcm = _buck_calls(50.0, 0.3)
+    assert dcm < 120  # 74.4 measured, 154.7 before

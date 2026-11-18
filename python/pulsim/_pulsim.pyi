@@ -176,6 +176,11 @@ class PreflightFinding:
         Human-facing explanation, naming the node.
         """
     @property
+    def domain(self) -> str:
+        """
+        Domain of the subnet (electrical, thermal, mechanical); set by Circuit.with_preflight.
+        """
+    @property
     def inserted_resistance(self) -> float:
         """
         Ohms of the inserted tie; 0 when the pass only reported the issue.
@@ -377,6 +382,11 @@ class ChargeLaw:
         Charge law from a ChargeTable.
         """
     @staticmethod
+    def tanh(c_max: float, c_min: float, v0: float) -> ChargeLaw:
+        """
+        Odd saturation law Q = c_min*v + (c_max - c_min)*v0*tanh(v/v0); C(0) = c_max, C -> c_min. The law of add_saturable_permeance.
+        """
+    @staticmethod
     def vdmos_cgd(cgd_max: float, cgd_min: float, a: float) -> ChargeLaw:
         """
         ngspice VDMOS C_gd(v_gd): s = (CGDMAX-CGDMIN)/(1+pi/2), C = CGDMAX - s + s*tanh(a*u) for u > 0, CGDMAX - s + s*atan(a*u) for u <= 0.
@@ -392,7 +402,7 @@ class ChargeLaw:
     @property
     def kind(self) -> str:
         """
-        'junction', 'table' or 'vdmos_cgd'.
+        'junction', 'table', 'vdmos_cgd' or 'tanh'.
         """
 class CircuitBuilder:
     """
@@ -407,6 +417,10 @@ class CircuitBuilder:
     def _set_device_losses(self, device: str, junction: str, tj: float, heat_node: str, e_on: LossTable3D, e_off: LossTable3D, v_on: ConductionTable, conduction: str) -> None:
         """
         Kernel half of CircuitBuilder.set_device_losses (tj = NaN when not given, '' for an absent node name).
+        """
+    def add_air_gap(self, name: str, m_a: str, m_b: str, area: float, length: float) -> CircuitBuilder:
+        """
+        Air gap: permeance mu0*area/length (area [m^2], length [m]; no fringing).
         """
     def add_bldc_mna(self, name: str, phase_a: str, phase_b: str, phase_c: str, neutral: str, omega_node: str, theta_node: str, *, R_s: float, L_s: float, k_e: float, pole_pairs: int, J: float, B: float = 0.0, T_load: float = 0.0, flat_top_deg: float = 120.0, n_harmonics: int = 25, omega0: float = 0.0, theta0: float = 0.0) -> 'CircuitBuilder':
         """
@@ -525,6 +539,10 @@ class CircuitBuilder:
         """
         Add a Lauritzen-Mattsson diode: an exponential junction that also STORES CHARGE, so it RECOVERS. Every other diode here is static I-V, and a static law cannot recover, because recovery is stored charge leaving the device — on a double-pulse test (400 V, 20 A, 50 nH loop) `add_diode` and `add_shockley_diode` both commutate 20 A straight to zero with a reverse peak of exactly 0 A, while a real fast-recovery Si part peaks 15-30 A NEGATIVE through the turning-on switch, where it usually dominates turn-on loss. `tau` (carrier lifetime) sets HOW LONG recovery lasts — 10-100 ns for fast-recovery Si, microseconds for a standard rectifier; `T_M` (transit time) sets HOW HARD the reverse peak is and must stay well below `tau`. The DC curve is unchanged: in steady state this is an ordinary Shockley junction with I_S scaled by tau/(tau + T_M). A Schottky stores no charge at all — use `add_shockley_diode` for one rather than driving `tau` toward zero here.
         """
+    def add_magnetic_resistance(self, name: str, m_a: str, m_b: str, R_m: float) -> CircuitBuilder:
+        """
+        Magnetic resistance R_m [S = A/V]: F = R_m*dPhi/dt, loss R_m*(dPhi/dt)^2 inside the solve (classical eddy loss; a lamination: R_m = sigma*d^2*l/(12*A)). Seen from a winding of N turns it is a resistance N^2/R_m across the winding.
+        """
     def add_mosfet(self, name: str, drain: str, source: str, R_on: float = 0.001, R_off: float = 1000000000.0, body_diode: bool = True, V_F: float = 0.7, *, form: str = 'conductance') -> CircuitBuilder:
         """
         Add an n-channel power MOSFET: a controlled switch (drain → source) PLUS its intrinsic anti-parallel body diode (source → drain), named `<name>_body`, which is on by DEFAULT. No vertical power MOSFET exists without one, and a gate-off device in an inductive path has no freewheeling route without it. Pass `body_diode=False` for an eGaN HEMT (which conducts in reverse through the channel, not a p-n junction) or for a bare switch. Defaults: R_on=1mΩ, R_off=1GΩ, body V_F=0.7 V. V_F is the body diode's CONDUCTION DROP (add_diode's V_f): v_SD = V_F + i/1e3 S while on, and it turns on at V_F.
@@ -563,6 +581,10 @@ class CircuitBuilder:
         """
         Add an ideal op-amp (single-ended output to gnd, high gain). Combine with negative feedback to enforce V_in_pos ≈ V_in_neg.
         """
+    def add_permeance(self, name: str, m_a: str, m_b: str, P: float) -> CircuitBuilder:
+        """
+        Linear permeance P [H] between magnetic nodes (MMF [A] is the node potential, flux rate [V] the through variable): Phi = P*F. Every magnetic island needs one node tied to gnd.
+        """
     def add_pmsm_mna(self, name: str, phase_a: str, phase_b: str, phase_c: str, neutral: str, omega_node: str, theta_node: str, R_s: float, L_d: float, L_q: float, psi_pm: float, pole_pairs: float, J: float, B: float = 0.0, T_load: float = 0.0, L_0: float = 0.0, omega0: float = 0.0, theta0: float = 0.0, harmonics: collections.abc.Sequence[typing.Annotated[collections.abc.Sequence[float], "FixedSize(3)"]] = []) -> CircuitBuilder:
         """
         Add an MNA-NATIVE PMSM (audit C.3): three stator branches `<name>_a/_b/_c` (phase -> neutral) stamped per Newton iteration with the FULL theta-dependent inductance matrix L(theta) = T^-1 diag(L_d, L_q, L_0) T and the PM flux, so an IPM's d/q dynamics are exact and there is no one-step lag; mechanics are NODES (`omega_node` carries a capacitor J and a resistor 1/B, `theta_node` a 1 F capacitor fed by omega), so they get the same trapezoidal companion in the same solve. T_em comes from the co-energy of the same L(theta) — the reluctance torque appears because L(theta) is in the matrix. A speed-dependent load is just another element on `omega_node`. Read speed with res.v(omega_node), angle with res.v(theta_node), phase currents with res.i('<name>_a'). Compare with the observer-based `add_pmsm` + `make_pmsm_observer`, which uses one average L (tau_d +100 %, tau_q -33 % on a 1/3 mH IPM) and a first-order lag (-0.37 % of speed at dt=5e-5). `harmonics=[(h, psi_h, phi_h), ...]` replaces the PM flux psi_pm*cos(theta_e) by sum psi_h*cos(h*theta_e + phi_h) (phases b, c at theta_e -/+ 120 deg): a non-sinusoidal back-EMF with the torque from the same series; see `CircuitBuilder.add_bldc_mna`. The `<name>.i_d/i_q` traces stay on the theta_e axis, so they are off the PM-fundamental axis by phi_1 when phi_1 != 0.
@@ -598,6 +620,10 @@ class CircuitBuilder:
     def add_saturable_inductor_table(self, name: str, n_pos: str, n_neg: str, i_knots: collections.abc.Sequence[float], lambda_knots: collections.abc.Sequence[float]) -> CircuitBuilder:
         """
         Saturable inductor from a (i, lambda) table for i >= 0 starting at the origin, strictly increasing in both; odd-extended, monotone-cubic between knots, linear beyond the last. Same device as add_saturable_inductor with a tabulated law.
+        """
+    def add_saturable_permeance(self, name: str, m_a: str, m_b: str, area: float | None = None, length: float | None = None, *, mu_r: float | None = None, B_sat: float | None = None, table: ChargeTable | None = None) -> CircuitBuilder:
+        """
+        Saturable core segment (area [m^2], length [m]) with the GappedCore material law B = mu0*(H + Ms*tanh(H/H0)), Ms = B_sat/mu0, H0 = Ms/(mu_r - 1): Phi(F) = mu0*A*[F/l + Ms*tanh(F/(l*H0))], stamped in flux form. Or table= a ChargeTable with knots (F, Phi, P) covering both signs. Newton engines (pwl, trbdf2) only.
         """
     def add_saturable_transformer(self, name: str, p_from: str, p_to: str, s_from: str, s_to: str, N_p: float, N_s: float, Ae: float, le: float, lg: float, mu_r0: float = 2000.0, B_sat: float = 0.35, L_leak_p: float = 0.0, L_leak_s: float = 0.0) -> CircuitBuilder:
         """
@@ -672,6 +698,10 @@ class CircuitBuilder:
         """
         Add a DC voltage source. V in volts.
         """
+    def add_winding(self, name: str, e_pos: str, e_neg: str, m_pos: str, m_neg: str, turns: float) -> CircuitBuilder:
+        """
+        Winding of `turns` turns between an electrical port (e_pos, e_neg) and a magnetic port (m_pos, m_neg): v = N*dPhi/dt, F(m_pos) - F(m_neg) = N*i, with i INTO e_pos and the flux rate leaving m_pos. A gyrator with g = 1/N (lossless). res.i(name, port=1) is the winding current.
+        """
     def aliases(self) -> dict[typing.Any, typing.Any]:
         """
         Return the registered `{human_name: (kind, target)}` map
@@ -736,13 +766,27 @@ class CircuitBuilder:
         elsewhere. Consumed by `pulsim.simulate` when
         `initial_state=None`.
         """
+    def magnetic_element(self, name: str) -> dict[typing.Any, typing.Any]:
+        """
+        Description of a magnetic element: kind ('winding', 'permeance', 'saturable_permeance', 'magnetic_resistance'), its magnetic nodes m_a, m_b, its value (P, law, R_m or turns) and area / length (None without geometry). KeyError otherwise.
+        """
+    def magnetic_nodes(self) -> list[str]:
+        """
+        Names of the magnetic nodes (touched by a magnetic element).
+        """
     def name_of(self, branch_id: int) -> str:
         """
         User-supplied component name for `branch_id`, set by the `add_*` call. Returns an empty string if the branch was never registered or had no name.
         """
+    @typing.overload
     def node(self, name: str) -> int:
         """
         Look up or create a node by name. "gnd" / "GND" / "0" alias to ground.
+        """
+    @typing.overload
+    def node(self, name: str, domain: str) -> int:
+        """
+        Look up or create node `name` and declare its domain: "electrical", "thermal" or "mechanical". A pin of another domain connected to it is refused at build(), naming device, pin and node.
         """
     def node_id_of(self, name: str) -> int:
         """
@@ -2203,6 +2247,25 @@ class SimulationResult:
             If any signal can't be resolved as a node OR a branch.
         """
         ...
+    def flux(self, name: str) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
+        """
+        Flux Phi [Wb] through the permeance-type element ``name`` (a
+        permeance, an air gap or a saturable permeance), per sample: P*F, or
+        the element's law Phi(F) (add-permeance-magnetic-domain).
+        """
+        ...
+    def b_field(self, name: str) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
+        """
+        Flux density B = Phi/area [T] of an air gap or a saturable
+        permeance (elements built from geometry).
+        """
+        ...
+    def h_field(self, name: str) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
+        """
+        Field H = F/length [A/m] of an air gap or a saturable permeance
+        (elements built from geometry).
+        """
+        ...
     @property
     def plan(self) -> typing.Any:
         """
@@ -2414,7 +2477,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, bool]:
+    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, bool, tuple[float, int, float, bool]]:
         ...
     def __init__(self) -> None:
         ...
@@ -2465,6 +2528,30 @@ class SolverSnapshot:
     def diode_on(self, arg1: collections.abc.Sequence[bool]) -> None:
         ...
     @property
+    def grid_dt(self) -> float:
+        """
+        Step of the fixed-step grid (see ``grid_origin``); NaN: none.
+        """
+    @grid_dt.setter
+    def grid_dt(self, arg0: float) -> None:
+        ...
+    @property
+    def grid_origin(self) -> float:
+        """
+        The fixed-step grid ``t`` sits on: t == grid_origin + grid_step * grid_dt to rounding (NaN: none). A fixed-step resume with the same dt continues it, so its trace is the continuous run's bit for bit.
+        """
+    @grid_origin.setter
+    def grid_origin(self, arg0: float) -> None:
+        ...
+    @property
+    def grid_step(self) -> int:
+        """
+        Index of ``t`` on the fixed-step grid (see ``grid_origin``).
+        """
+    @grid_step.setter
+    def grid_step(self, arg0: int) -> None:
+        ...
+    @property
     def history(self) -> list[float]:
         """
         Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
@@ -2508,6 +2595,14 @@ class SolverSnapshot:
         """
     @pmsm_history.setter
     def pmsm_history(self, arg1: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def post_edge_derivatives(self) -> bool:
+        """
+        True when a variable-step run ended exactly on a gate edge after refreshing the device derivatives for the post-edge circuit (``x`` is the pre-edge solve). engine='pwl' refuses to resume from it; engine='trbdf2' resumes.
+        """
+    @post_edge_derivatives.setter
+    def post_edge_derivatives(self, arg0: bool) -> None:
         ...
     @property
     def restart_pending(self) -> bool:
@@ -3459,6 +3554,10 @@ class Circuit:
         """
         As CircuitBuilder.initial_state().
         """
+    def node_domain(self, name: str) -> str:
+        """
+        Domain of node `name`: declared, implied by a typed pin (a PMSM's speed and angle are mechanical) or electrical.
+        """
     def node_id_of(self, name: str) -> int:
         """
         As CircuitBuilder.node_id_of().
@@ -3494,6 +3593,10 @@ class Circuit:
     def to_yaml(self) -> str:
         """
         The lowered circuit as YAML; `Circuit.from_yaml` reads it back with the same `value_hash`. Refuses a C block (a Python callable).
+        """
+    def unit_of(self, name: str) -> str:
+        """
+        Across unit a probe on node `name` reports: V, degC (thermal), rad/s or rad (a PMSM's speed / angle node).
         """
     def value_hash(self) -> int:
         """
@@ -3608,6 +3711,10 @@ def _require_supported(graph: Graph, pool: DevicePool, engine: str) -> None:
 def _run_pwl_points(circuit: Circuit, names: collections.abc.Sequence[str], table: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], options: SimulationOptions, dt: float, switch_fn: typing.Any, start_from_dc_op: bool, enable_nonlinear_refresh: bool | None, initial_state: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"] | None, auto_regularize: bool, n_threads: int) -> tuple[typing.Any, ...]:
     """
     Internal (sweep(circuit, ...) kernel path, task 5.2): run the points of a parameter table (rows = points, columns = names: parameters, or "device.field") on the pwl engine, n_threads native threads, without the GIL. Returns ([(result, circuit, builder, own_preflight) or None per point], stats); None = re-run that point through simulate().
+    """
+def _stateful_kinds() -> dict[typing.Any, typing.Any]:
+    """
+    The kernel's stateful Newton kinds (pwl::StatefulKinds), in fold order: {state block name: StoredKind name of the kind-table row it runs under}.
     """
 def _switch_census(graph: Graph, pool: DevicePool) -> tuple[int, int, list[int]]:
     """

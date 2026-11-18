@@ -73,9 +73,9 @@ public:
                     .V_f        = p.V_f,
                     .is_on      = false,
                     .var        = var,
-                    .ideal      = var >= 0 && pool.branch_R_on(branch.id) == Real{0},
                     .gate       = p.gate,
                     .I_H        = p.I_H,
+                    .ideal      = var >= 0 && pool.branch_R_on(branch.id) == Real{0},
                 });
                 any_ideal_ = any_ideal_ || diodes_.back().ideal;
                 if (p.gate != models::SwitchedDiode::Gate::None) ++num_gated_;
@@ -229,10 +229,10 @@ public:
         Real  V_f;
         bool  is_on;
         Index var = -1;   // branch-form current unknown, or -1
-        bool  ideal = false;   // branch form with R_on = 0
         models::SwitchedDiode::Gate gate = models::SwitchedDiode::Gate::None;
         Real  I_H = Real{0};
         bool  g = true;   // gate bit of the latest apply_gates
+        bool  ideal = false;   // branch form with R_on = 0
 
         /// The voltage the diode law reads for state `on`: v_a - v_k; for
         /// an ON branch-form diode V_f + i_s (see the constructor).
@@ -305,8 +305,8 @@ public:
 
 private:
     Size num_switches_;
-    bool any_ideal_ = false;
     Size num_gated_ = 0;
+    bool any_ideal_ = false;
     std::vector<DiodeEntry> diodes_;
     topology::SwitchStateMask owned_{0};
 };
