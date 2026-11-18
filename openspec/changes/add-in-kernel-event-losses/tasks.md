@@ -38,3 +38,9 @@
 
 ## 7. Verification
 - [ ] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
+
+## 8. The exact steady-state route (period post-processing, no engine file)
+- [x] 8.1 The reading rule on the periodic orbit: every commutation of the steady period read from the period map's left and right limits (turn-on: `v` before, `i` after; turn-off the reverse); a diode's `E_off_table` in `switch_specs` is its recovery, read at each turn-off; the sampled `device_loss_summary` refuses a diode there by name
+- [x] 8.2 Parity at fixed `T_j = 125 °C`: a three-phase SPWM inverter with dead time, kernel `E_on` / `E_off` per switch equal `device_loss_summary` on a settled `dsed` period within 1e-9 (measured 1.8e-13); each diode's recovery count equals its turn-off count (`test_design_thermal_kernel.py`)
+- [x] 8.3 The junction fixed point `T_j = T_amb + R_th P(T_j)` in the kernel (`dsed/period_thermal.hpp`), runaway detected by `R_th dP/dT_j >= 1`; oracles: `(T_amb + R_th P0 (1 - 25 a)) / (1 - R_th P0 a)` within 0.01 K (measured 1e-12) and a runaway at `R_th P0 a = 1.2` (`test_period_thermal.cpp`, `test_design_thermal_kernel.py`)
+- [x] 8.4 Conduction heat from a `ConductionTable` linear in `i` in closed form over the on-state current, or the circuit's own closed-form integrals; tables that are not closed-form refused by name

@@ -124,3 +124,15 @@ def test_on_impulse_warn_on_the_exact_engine(engine):
     with pytest.warns(UserWarning, match="impulsive re-initialisation"):
         r = p.simulate(_cap_loop(), 1e-4, engine=engine, dt=1e-6, on_impulse="warn")
     assert len(r.reinit_records) == 1
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_user_injection_on_a_constraint_is_refused(engine):
+    # the flow keeps K x' = 0: a b_extra_fn current into the loop would break K x = k unseen
+    b = _cap_loop()
+    zero = [0.0] * b.pool.state_size(b.graph)
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(b, 1e-3, engine=engine, dt=1e-6, b_extra_fn=lambda _t: zero,
+                   allow_implicit_segments=True)
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "extraction")
+    assert "dependent states" in str(ei.value)

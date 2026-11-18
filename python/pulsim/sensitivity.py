@@ -550,6 +550,14 @@ def _check_circuit(builder, switch_fn, b_extra_fn):
             raise _unsup("switch_fn", "sensitivities: the circuit has "
                          "controlled switches and no switch_fn.")
         return _ConstSchedule(builder.graph.num_switches)
+    from .periodic_steady_state import _closed_loop_source
+    src = _closed_loop_source(switch_fn)
+    if src:
+        raise _unsup(
+            "closed_loop", f"sensitivities: switch_fn comes from {src}: its "
+            "edges follow a controller this path does not run, so they "
+            "would be those of a frozen duty. Differentiate the open-loop "
+            "plant at a fixed duty (make_pwm_switch_fn).")
     from . import SwitchSchedule
     if not hasattr(switch_fn, "next_edge_after") or (
             isinstance(switch_fn, SwitchSchedule)

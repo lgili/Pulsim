@@ -163,3 +163,175 @@ Each entry: question → option taken → evidence → how to reverse.
       opt-in split runs with an opaque `switch_fn`); L4 (commutation
       events of ideal diodes, C++ `run_trbdf2` callers, `res.i` hold —
       listed as remaining work).
+
+## TR-BDF2 (feat/core-p2-trbdf2, task 5.5 and the trbdf2 half of group 4)
+
+14. **One record, two engines.** → The detection of an entered dependent
+    structure and the record (explicit projection, `on_impulse`) moved from
+    `run_transient.hpp` into `pwl/reinit.hpp` (`in_dependent_mode`,
+    `ReinitTracker::entering / record / note`), arithmetic unchanged; the
+    fixed engine calls it from the same place. → Evidence: the golden probe
+    and a byte compare of pwl's cut-set, capacitor-loop and ideal DCM buck
+    runs (times, states, records) are identical before and after. On
+    `trbdf2` the record is made after each committed step from the step's
+    start state, as on `pwl`; `test_the_record_means_the_same_on_both_engines`
+    pins Λ and ΔW of the same circuit to 1e-12. → Reverse: inline the
+    tracker back into both engines.
+
+15. **Which TR-BDF2 steps re-initialise.** Design D7: SDIRK x3 after an event
+    with dependent states. → Every step whose mode has a dependent structure
+    the last committed mode had not is an SDIRK(2,2) step, and so are the
+    next two, whatever the circuit (the post-event SDIRK of
+    `update-trbdf2-post-event-restart` stays Newton-only). Gated entries (and
+    the start) are recorded when impulsive; diode-only entries (an ideal
+    diode stopping at i = 0) are consistent and only take the steps. The
+    gate-edge probe (a trapezoidal step of femtoseconds) is not committed
+    when the post-edge mode is such an entry (it read 1e13 V on a 10 A
+    cut-set). → Evidence: with gated entries only, the ideal DCM buck's TR
+    stage after each diode turn-off read the pre-event derivative slot of the
+    now-algebraic inductor current: 5 steps below 1e-12 s per period and 910
+    rejects in 100 periods; with diode-only entries too: none, 210 rejects,
+    orbit error 9.3e-8 V. A circuit with a Coss, Lauritzen, IGBT-tail, PMSM
+    or saturable-inductor history that enters such a mode is refused
+    (`dependent_states`): the SDIRK step has no stage law for them. →
+    Reverse: `entering(..., gated_only=true)` in the step loop.
+
+16. **The error estimate of the re-initialisation step.** The states of the
+    entered structure jump by design (flux / charge conserved by the BE
+    stages at any h), so their k1 − k2 is the jump over γ_s·h, not an error;
+    left in, it does not shrink with h and rejects to h_min. → Their entries
+    are zero in that one step's estimate; other states keep theirs. Task
+    7.2 is measured away from the committed gate-edge probes (h_probe_floor,
+    1e-14 s in both forms): 1.56e-10 s branch against 1.11e-14 s conductance.
+    → Reverse: drop the exclusion loop in the SDIRK estimate.
+
+17. **No crossing inside the re-initialisation step.** A landing there would
+    be a trapezoidal sub-step across the impulse. → Crossing detection is
+    skipped on that step (shortcut noted in the code); a diode left on its
+    forbidden side is re-decided at the next step's start by the held-diode
+    path. The `engine='auto'` route (review H4) is reversed by design D7: an
+    ideal-switch circuit without `dt` now runs on `trbdf2`. → Reverse: land
+    with an SDIRK sub-step.
+
+18. **What the step-1 review changed.** The re-initialisation step's
+    estimate skips the dependent states, so with every state dependent its
+    proposal is 5x. → It does not set the post-edge h memory (it ratcheted
+    the restart 5x per period); its growth is not capped (capping it left
+    step 2 at 5e-12 s on the capacitor loop, and the switch current, a
+    C*dv/h round-off, rose from 4.5e-10 to 1.14e-9 A). A resumed run
+    continues its committed mode (no re-initialisation at the seam); the
+    probe-commit gate counts diode-only entries; an ON branch diode's held
+    tolerance scales with its current. → Reverse: each is one condition in
+    trbdf2_transient.hpp marked "review M1/M3/L1/L5".
+
+19. **Bridge on a 1 MOhm-tied floating bus: trbdf2 was right, the metric
+    was wrong (step 2; corrected against the exact reference).** The exact
+    30-40 ms bus average is 311.343881428885841697 V
+    (benchmarks/tools/bridge_ground_truth.py, mpmath; unique mode sequence
+    of 11 events). trbdf2 follows that sequence (D2's turn-on lands at
+    13.234077 ms, exact 13.234043 ms). The "311.154 V, -0.19 V" read here
+    before came from averaging the samples t >= 30 ms over 10 ms without
+    clipping the window: trbdf2's first sample is at 30.006 ms, so 6 us of
+    ~311 V were dropped (311.154 V branch, 311.155 or 311.341 V conductance
+    by where that sample fell). Clipped: 311.341410 V, -2.47e-3 V in both
+    forms, the integration error at the default ceiling (span/1000 =
+    4e-5 s), O(h^2): -1.8e-4 V with a 1e-5 s ceiling, -7.3e-6 V with 2e-6 s,
+    -1.91e-4 V at rtol 1e-7 (within rtol*|v| = 6.2e-3 V per step at
+    rtol 2e-5). Over 20 runs with 1e-15 perturbations the average moves by
+    <= 9e-6 V (rtol 2e-5) and <= 3e-6 V (rtol 1e-7) in both forms, while
+    the diode-event count varies (6-13): leakage-scale decisions at the
+    zero-current turn-offs (D3 at 1e-12 A), with no effect on the answer.
+    The island KCL correction tried before (eps * 2C/h * v / G_tie on the
+    common mode) is not needed and was not shipped. → Pinned:
+    test_bridge_ground_truth.py (within 1e-3 V at rtol 1e-7, 3e-3 V at
+    2e-5, rounding spread <= 1e-4 V). → Reverse: none (no engine change).
+
+20. **trbdf2's periodic-source step ceiling stays at T/20 (step-ceiling
+    study).** Question: would T/40 or T/80 buy accuracy? Evidence, the
+    floating-bus bridge against its exact average (40 ms, both forms;
+    error / accepted steps). The T/20, T/40, T/80 rows force `dt` = h_max;
+    on this 40 ms run the default is min(span/1000, T/20) = 4e-5 s, the
+    last row:
+
+    | ceiling | rtol 1e-5 | rtol 2e-5 |
+    |---|---|---|
+    | T/20 (1 ms) | -3.08e-3 V / 632 | -4.59e-3 V / 512 |
+    | T/40 | -2.98e-3 V / 631 | -4.72e-3 V / 522 |
+    | T/80 | -3.75e-3 V / 687 | -5.95e-3 V / 581 |
+    | span/1000 (4e-5 s) | -2.20e-3 V / 1306 | -2.47e-3 V / 1230 |
+
+    The tolerance, not the ceiling, sets the error between T/20 and T/80
+    (no monotone gain, +9 % steps at T/80). → Option kept: T/20, no
+    breaking default change (no CHANGELOG entry, no re-pins). → Reverse:
+    the cap in run_transient_trbdf2's periodic-source ceiling.
+
+21. **Step-3 leftovers (order check, round-off floor, DCM xfail, ceiling).**
+    (a) The C++ order check of the SDIRK(2,2) restart (half-wave RL
+    rectifier, an SDIRK step after every event, controller off at rtol 1 so
+    every step is the ceiling): error ratio per halving 4.09 (4.07, 4.04,
+    4.0 down to 25 us), second order; plain TR-BDF2 on the same grid 2.28.
+    A first attempt read 1.95 because tail_mean starts at the first sample
+    past the window (an O(h) metric error); the check interpolates the
+    window start. (b) spike_ok accepts a post-landing signal within the
+    predicate noise: boost CCM pss gap 5.2e-9 -> 2.8e-9, everything else
+    unchanged. (c) test_dcm_no_step_below_1e_11 stays strict-xfail: 2,606
+    sub-1e-11 steps, 400 at each gate edge (probe commits) and 1,806 in
+    the stiff L*g_off mode after a turn-off; fixing them needs an
+    estimate that ignores the tau ~ 2e-13 s mode, not a landing change.
+    (d) hard_switched_rc trbdf2 ceiling 4.45e-6 -> 2.5e-6 (measured
+    2.2236e-6). (e) Not done: x_sig is still the pre-cascade solve after a
+    second cascade at the same t. → Reverse: revert the step-3 commit.
+
+## pwl losses and outputs of ideal elements (feat/core-a-ideal-switch)
+
+22. **Losses, currents and commutations of ideal elements (tasks 6.4 /
+    6.5, 2026-11-18).** Question: how are an R_on = 0 element's current,
+    loss and turn-off reported, with no conductance law to apply? →
+    Options taken: the current is the solved unknown i_s everywhere
+    (`res.i` already read it; `_diode_state.DiodeStateTrace` now carries
+    the column, so the state traces and every caller see a finite
+    current instead of `inf·0`); `device_loss_summary` reports the
+    element (`form='branch'`) instead of leaving it out (M5), integrating
+    the power as the line between each step's end powers v·i (exact
+    while ON: P = V_f·i is linear in i; the g_off·v² leak while OFF):
+    the product of the v-line and the i-line across a commutation step
+    invented 0.038 W on a 24 V, 0.5 A ideal buck, against 3.5e-10 W
+    (the leak) now. Tabulated `E_on`/`E_off` go through the same
+    `_switch_switching_loss` as the conductance switch. Ideal diodes sit
+    exactly at V_on while ON, so the voltage-crossing commutation
+    record never saw them turn off: their commutations are read from the
+    stamped state at each step (time = the step end unless the event
+    split located it). → Evidence (`python/tests/test_ideal_losses.py`):
+    forced 10 A with V_f = 0.7 gives v_D = 0.7 V and P_avg = 7.0 W
+    (window from 10 µs; the whole run reads 6.965 W, its first step
+    ramps 0 → 10 A); `E_on = 10 µJ·(i/1 A)·(v/24 V)` books 5.0 µJ per
+    turn-on within 4.8e-11 relative — not the 1e-12 of the task: the
+    OFF leak g_off·24 V = 2.4e-11 A rides on the 0.5 A; 10 turn-ons and
+    9 turn-offs of the ideal freewheeling diode recorded in 10 periods.
+    Not done: the impulse energy category (6.4's last clause).
+    (Numbered 14 on the ideal-switch branch; renumbered 22 at
+    integration batch 11 behind the TR-BDF2 entries 14–21.)
+    → Reverse: the `_ideal_entry` call sites in `losses.py`, `i_branch`
+    in `_diode_state.py`, `has_ideal_diode` in `run_transient.hpp`.
+    Review fixes (fresh-context review, 2026-11-18): `conducting` read
+    `g_on·(v − V_f)` = `inf·0` = NaN for an ideal diode, so it was False
+    on every ON step — it now reads `i_branch`; the static (dt = 0) path
+    recorded no ideal-diode commutation (a sine source into an ideal
+    diode and a resistor: 0 events, now 7, each within one dt after the
+    zero); a result with no recorded mask, or a `conduction_specs` /
+    `diode_specs` entry for an ideal element, now warns instead of
+    dropping the duty, switching energy or spec silently.
+
+23. **Group-7 measurement gate: the flip is allowed on pwl (2026-11-18).**
+    (Numbered 15 on the ideal-switch branch; 23 at integration batch 11.)
+    Question: does the branch form cost too much to become the default?
+    → Measured (`probes/measurement_gate.py` → `measurement_gate.out`,
+    median of 7 interleaved runs on a shared Mac): the 12-switch
+    three-phase inverter at 1922 ns/step branch against 1791
+    conductance (1.073×, 24 vs 12 unknowns, the same 251 event rounds
+    and 492 segment searches); the buck at 680 vs 668 ns/step (1.018×).
+    7.3's bound is 1.5×: the flip is allowed on pwl. Not done: the flip
+    itself (out of this slice's scope), and 7.2 — trbdf2 refuses the
+    branch form by name, so its smallest committed step cannot be
+    measured; the flip stays held on trbdf2 until it runs there.
+    → Reverse: none needed (measurement only).

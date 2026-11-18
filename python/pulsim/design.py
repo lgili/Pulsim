@@ -41,6 +41,7 @@ from . import _period_kpis as _pk
 from ._pulsim import ConvergenceError  # type: ignore[import-not-found]
 from ._refusal import UnsupportedError, unsupported
 from .periodic_steady_state import _closed_loop_source
+from ._design_kernel import _psum
 
 # modules read at call time (tests replace their attributes): a
 # function-level import costs importlib calls in every evaluation
@@ -184,7 +185,7 @@ class SteadySpec:
 
 @dataclass(frozen=True)
 class ThermalSpec:
-    """Junction temperature by a damped fixed point (design D4).
+    """Junction temperature: ``T_j = t_amb + r_th P(T_j)`` per device.
 
     ``r_th`` maps a device name to its junction-to-ambient thermal
     resistance (K/W). ``loss_at`` (optional) is a callable
@@ -193,7 +194,23 @@ class ThermalSpec:
     simulated loss (no temperature dependence). ``temperature_dependent``
     tells the evaluator that ``build`` reads ``design['_T_j']`` (a
     mapping device -> deg C) so the circuit must be re-simulated at
-    each iterate."""
+    each iterate.
+
+    ``mode``: ``'kernel'`` solves the fixed point in the kernel on the
+    exact steady-state route (DECISIONS 28): the orbit is fixed, the
+    loss tables are re-read at each commutation of the period (turn-on:
+    ``v`` before, ``i`` after; turn-off the reverse) at the trial
+    ``T_j``, and the root is exact (``thermal_residual``, K), with a
+    runaway refused when ``r_th dP/dT_j >= 1``. ``'fixed_point'`` is the
+    damped iteration, stopping within ``tol`` of the fixed point.
+    ``'auto'`` (default): ``'kernel'`` on the exact route without
+    ``loss_at`` or ``temperature_dependent``, else ``'fixed_point'``.
+    ``conduction`` (kernel mode): device -> ``{"i": [...], "tj": [...],
+    "v_on": [[...]]}``, an on-state voltage table ``V_on(i, T_j)`` linear
+    in ``i`` (one or two current knots); the device's heat is then
+    ``V_on(|i|, T_j) |i|`` over its on-state current, reported as
+    ``p_cond_table.<device>``, while the record's ``conduction`` loss
+    stays the circuit's own (the energy balance)."""
 
     r_th: Mapping[str, float]
     t_amb: float = 25.0
@@ -202,6 +219,44 @@ class ThermalSpec:
     max_iter: int = 20
     loss_at: Optional[Callable[[str, float, float], float]] = None
     temperature_dependent: bool = False
+    mode: str = "auto"
+    conduction: Optional[Mapping[str, Mapping[str, Any]]] = None
+
+
+def _check_thermal(th):
+    """Refuse a ThermalSpec that cannot run, by name, at construction."""
+    if th.mode not in ("auto", "kernel", "fixed_point"):
+        raise ValueError(f"ThermalSpec.mode: 'auto', 'kernel' or "
+                         f"'fixed_point', got {th.mode!r}")
+    if th.mode == "kernel" and (th.loss_at is not None
+                                or th.temperature_dependent):
+        raise ValueError(
+            "ThermalSpec(mode='kernel'): the kernel reads the loss tables "
+            "on a fixed orbit; loss_at= and temperature_dependent= need "
+            "the Python loop (mode='fixed_point')")
+    for d, c in (th.conduction or {}).items():
+        if th.mode == "fixed_point" or th.loss_at is not None \
+                or th.temperature_dependent:
+            raise ValueError(
+                f"ThermalSpec.conduction[{d!r}]: conduction tables are "
+                "read by the kernel fixed point only (mode='kernel' or "
+                "'auto', without loss_at / temperature_dependent)")
+        if d not in th.r_th:
+            raise KeyError(f"ThermalSpec.conduction names {d!r}, which has "
+                           "no r_th")
+        _conduction_table(c)
+
+
+def _conduction_table(c):
+    """``{"i", "tj", "v_on"}`` -> the kernel ``ConductionTable``."""
+    from ._pulsim import ConductionTable
+    extra = sorted(set(c) - {"i", "tj", "v_on"})
+    if extra:
+        raise ValueError(f"a conduction table takes i, tj, v_on; got {extra}")
+    v = np.asarray(c["v_on"], dtype=float)
+    return ConductionTable([float(x) for x in c["i"]],
+                           [float(x) for x in c["tj"]],
+                           v.ravel(order="C").tolist())
 
 
 @dataclass(frozen=True)
@@ -217,7 +272,8 @@ class Kpi:
     KPI is that default. ``Kpi.efficiency()``, ``Kpi.ripple(node)``
     (peak-to-peak, ``ripple_v.<node>``), ``Kpi.mean(node)``
     (time-weighted, ``v_avg.<node>``), ``Kpi.i_peak(inductor)``,
-    ``Kpi.i_rms(inductor)``, ``Kpi.ripple_i(inductor)``."""
+    ``Kpi.i_rms(inductor)``, ``Kpi.ripple_i(inductor)``,
+    ``Kpi.formula(name, expr)``."""
 
     name: str
     fn: Callable[["SteadyPeriod"], float]
@@ -247,6 +303,17 @@ class Kpi:
         return cls(f"ripple_i.{inductor}", _KpiSpec("ripple_i",
                                                      str(inductor)))
 
+    @classmethod
+    def formula(cls, name: str, expr: str) -> "Kpi":
+        """``name = expr``: arithmetic over KPI names computed before it
+        (``i_peak.L``, ``v_out``, earlier user KPIs), design variables
+        and ``loss.<device>`` (that device's total loss): numbers,
+        ``+ - * / **``, ``max``, ``min``, ``abs``, ``sqrt``, ``exp``,
+        ``log``, ``inf``. Declarative, so it pickles and the kernel batch
+        computes it (DECISIONS 26)."""
+        from ._design_kernel import Formula
+        return cls(str(name), _KpiSpec("formula", Formula(expr)))
+
 
 @dataclass(frozen=True)
 class _KpiSpec:
@@ -254,7 +321,7 @@ class _KpiSpec:
     evaluator; calling it on a :class:`SteadyPeriod` is an error)."""
 
     kind: str
-    target: Optional[str] = None
+    target: Any = None      # a node / device name, or a Formula
 
     def __call__(self, per):
         raise TypeError("a declarative Kpi is computed by the Evaluator")
@@ -456,19 +523,95 @@ def _build_hash() -> str:
 # traces
 # ----------------------------------------------------------------------
 
-def _with_right_limits(res, y_of_states):
+def _with_right_limits(res, y_of_states, edges=None):
     """``(t, y)`` with each event's right limit inserted after its left
-    limit (repeated instant), so a jump is integrated as a jump."""
+    limit (repeated instant), so a jump is integrated as a jump.
+
+    ``edges`` (for integrals; the schedule's gate-edge instants): a
+    fixed-step ``pwl`` run records no right limit. Where the sample AT a
+    gate edge holds the left limit, integrating across it charged half a
+    step of the old value to the new mask's step (``p_in`` 1 % high on a
+    DCM buck at T/200, O(h), DECISIONS 29). Each side is integrated
+    separately: the right limit at the edge is extrapolated from the two
+    samples after it (exact for a quantity linear there; O(h^2))."""
     from ._result_views import states_as_array
     t = np.asarray(res.times, dtype=float)
     y = np.asarray(y_of_states(states_as_array(res)), dtype=float)
     idx = getattr(res, "right_limit_index", None)
     rl = getattr(res, "right_limit_states", None)
+    if edges is not None and (idx is None or len(idx) == 0):
+        ss = getattr(res, "switch_states", None)
+        ss = np.asarray([] if ss is None else ss, dtype=bool)
+        if ss.ndim == 2 and ss.shape[0] == t.size and ss.shape[1] > 0:
+            return _two_sided(t, y, ss, *edges)
     if idx is None or rl is None or len(idx) == 0:
         return t, y
     idx = np.asarray(idx, dtype=np.int64)
     yr = np.asarray(y_of_states(np.asarray(rl, dtype=float)), dtype=float)
     return np.insert(t, idx + 1, t[idx]), np.insert(y, idx + 1, yr)
+
+
+def _two_sided(t, y, ss, sf, edges):
+    """:func:`_with_right_limits` on a fixed-step run: where a gate edge
+    of ``sf`` falls AT sample j and sample j still holds the old gate
+    mask (the left limit) while j+1 holds the new one, the step after
+    t_j ran on the new mask; the right limit is inserted at t_j, from
+    samples j+1, j+2 (from j+1 alone when the mask lasts one step). Where the edge is at sample j+1 instead, the step
+    ending there was taken with the new mask at its end (the engine's
+    own first order at an edge, docs/known-limitations.md): the
+    trapezoid of the samples is that step's energy, and the balance
+    closes on it; left as it is."""
+    n_bits = ss.shape[1]
+
+    def bits(m):
+        return np.array([bool(m.get(i)) for i in range(n_bits)])
+    tol = 1e-12 * max(1.0, float(np.abs(t).max()))
+    h = float(np.min(np.diff(t))) if t.size > 1 else 0.0
+    ins_at, ins_t, ins_y = [], [], []
+    for e in edges:
+        j = int(np.searchsorted(t, e - tol))
+        before, after = bits(sf(e - 1e-6 * h)), bits(sf(e))
+        g = before != after
+        if not g.any():
+            continue                 # a schedule instant, no mask change
+        if not (j < t.size and abs(t[j] - e) <= tol):
+            # an edge between samples is first order in the engine and
+            # pairs with its neighbours' trapezoids (a dead time): one
+            # side corrected and not the other measured worse (VSI,
+            # 4e-4 -> 1.5e-3); no correction for the run
+            return t, y
+        if not (j + 2 < t.size and t[j + 2] > t[j + 1] > t[j]):
+            continue
+        if (ss[j][g] != before[g]).any() \
+                or (ss[j + 1][g] != after[g]).any():
+            continue
+        ins_at.append(j + 1)
+        ins_t.append(t[j])
+        # the new side's own samples: two give a line; one (a mask held
+        # for a single step, a dead time) gives its value
+        ins_y.append(y[j + 1] - (y[j + 2] - y[j + 1])
+                     * ((t[j + 1] - t[j]) / (t[j + 2] - t[j + 1]))
+                     if (ss[j + 1] == ss[j + 2]).all() else y[j + 1])
+    if not ins_at:
+        return t, y
+    return np.insert(t, ins_at, ins_t), np.insert(y, ins_at, ins_y)
+
+
+def _gate_edges(sf, a, z):
+    """``(sf, edge instants in [a, z])``, or None (an opaque callable,
+    or no edge)."""
+    nxt = getattr(sf, "next_edge_after", None)
+    if nxt is None or not callable(nxt):
+        return None
+    out, t = [], a - 1e-9 * (z - a)
+    for _ in range(1_000_000):
+        t_new = float(nxt(t))
+        if not math.isfinite(t_new) or t_new > z + 1e-12 * abs(z):
+            return (sf, out) if out else None
+        if not t_new > t:
+            return None          # a schedule that does not advance: no correction
+        out.append(t := t_new)
+    return None                  # over a million edges: no correction
 
 
 def _node_col(builder, name):
@@ -677,6 +820,23 @@ class Evaluator:
             if switch_fn is not None and schedule is not None:
                 raise TypeError("Evaluator: give switch_fn= (fixed) or "
                                 "schedule= (per design), not both")
+            src = _closed_loop_source(switch_fn)
+            from ._circuit_ir import c_blocks_of, graph_driven_of
+            if not src and graph_driven_of(circuit):
+                src = ("a control graph's drive_source ("
+                       f"{', '.join(graph_driven_of(circuit))})")
+            if not src and c_blocks_of(circuit):
+                src = "C block(s) of add_c_block ({})".format(", ".join(
+                    str(getattr(h, "name", h)) for h in c_blocks_of(circuit)))
+            if src:
+                # here, not per design: the kernel batch never calls _build
+                # (and before the options digest, which cannot read a gate)
+                raise unsupported(
+                    "design", "closed_loop",
+                    f"Evaluator(circuit=...): driven by {src}; "
+                    "the evaluator runs no controller, so it would hold its "
+                    "initial value. Give an open-loop schedule "
+                    "(make_pwm_switch_fn at the design's duty).")
             if thermal is not None and thermal.temperature_dependent:
                 raise ValueError(
                     "Evaluator(circuit=...): ThermalSpec.temperature_"
@@ -717,11 +877,12 @@ class Evaluator:
             if len(v) != 2:
                 raise ValueError(f"constraint {k!r}: give (lo, hi), got {v!r}")
         self.thermal = thermal
+        if thermal is not None:
+            _check_thermal(thermal)
         self.steady = steady
         self.engine = engine
         self.samples_per_period = samples_per_period
         self.options = dict(options or {})
-        from ._pulsim import CxxChainBExtra  # type: ignore[import-not-found]
         for k in ("closed_loops", "step_observer"):
             if self.options.get(k) is not None:
                 raise unsupported(
@@ -731,7 +892,7 @@ class Evaluator:
                     "design (its state carries over), so records would "
                     "depend on evaluation order. Evaluate the open-loop plant "
                     "at a fixed duty.")
-        if isinstance(self.options.get("b_extra_fn"), CxxChainBExtra):
+        if _closed_loop_source(self.options.get("b_extra_fn")):
             raise unsupported(
                 "design", "closed_loop",
                 "Evaluator: options['b_extra_fn'] is a control graph's "
@@ -754,6 +915,8 @@ class Evaluator:
         st["_spec_cache"] = {}
         st["periodicity_checks"] = {}
         st.pop("_prov", None)
+        st.pop("_kplan", None)      # kernel tables: rebuilt on demand
+        st.pop("last_batch", None)
         if self._circuit_factory is not None:
             st["circuit"] = None     # rebuilt by the factory in the worker
         return st
@@ -876,16 +1039,54 @@ class Evaluator:
 
     def evaluate_many(self, designs: Sequence[Mapping[str, Any]], *,
                       workers: Optional[int] = None,
-                      backend: str = "thread") -> list:
-        """Records in input order (design D6), on the job runner of
-        :func:`pulsim.sweep` (``'thread'``: the kernel releases the
-        GIL; ``'process'`` for Python-heavy designs -- ``build`` and
-        the KPIs must then pickle). Design-specific outcomes never stop
-        the batch; it stops with the refusal when its first three
-        designs are ``refused`` with identical fields (the
-        configuration, not the design, is unsupported). Any other
-        exception propagates."""
+                      backend: Optional[str] = None) -> list:
+        """Records in input order (design D6). ``backend``:
+
+        * ``None`` (default): the kernel batch when the evaluator's plan
+          allows it (circuit form, exact steady-state route, declarative
+          KPIs and constraints: DECISIONS 26) -- every design in one
+          kernel call on ``workers`` native threads, no Python per
+          design; otherwise, and for a design the kernel does not
+          finish, the Python path, its record's ``counters['batch']``
+          naming why. ``self.last_batch`` counts both.
+        * ``'kernel'``: the same, refused (``ValueError`` naming the
+          reason) when the plan does not allow it.
+        * ``'thread'``: the Python path on the job runner of
+          :func:`pulsim.sweep` (the kernel releases the GIL).
+        * ``'process'``: Python-heavy designs -- ``build`` and the KPIs
+          must then pickle.
+
+        Design-specific outcomes never stop the batch; it stops with the
+        refusal when its first three designs are ``refused`` with
+        identical fields (the configuration, not the design, is
+        unsupported). Any other exception propagates."""
         from .sweep import _run_jobs
+        if backend not in (None, "kernel", "thread", "process"):
+            raise ValueError(f"backend must be None, 'kernel', 'thread' or "
+                             f"'process', got {backend!r}")
+        if backend in (None, "kernel"):
+            from . import _design_kernel as _dk
+            plan = _dk.plan_of(self)
+            if isinstance(plan, str):
+                if backend == "kernel":
+                    raise ValueError(f"evaluate_many(backend='kernel'): the "
+                                     f"evaluator has no kernel plan: {plan}")
+                recs = self.evaluate_many(designs, workers=workers,
+                                          backend="thread")
+                self.last_batch = _fz({"designs": len(recs), "kernel": 0,
+                                       "python": len(recs),
+                                       "python_reasons": {plan: len(recs)}})
+                return [dataclasses_replace(r, counters=_fz(
+                    {**r.counters, "batch": "python: " + plan}))
+                        for r in recs]
+            designs = [dict(d) for d in designs]
+            out = _dk.run(self, plan, designs[:3], 1)
+            self._refusal_rule(out)
+            if len(designs) > 3:
+                head = self.last_batch
+                out += _dk.run(self, plan, designs[3:], workers)
+                self.last_batch = _merge_batches(head, self.last_batch)
+            return out
         jobs = [(self, dict(d)) for d in designs]
         if backend == "process" and workers != 1 and len(jobs) > 3:
             # refused by name before the head runs or a worker starts
@@ -894,16 +1095,7 @@ class Evaluator:
         out, _, _ = _run_jobs(head, parallel=False, backend="thread",
                               n_workers=1, verbose=False,
                               job=_evaluate_job, reraise=True)
-        refs = {r.refusal for r in out}
-        # 'consistent_mode' is found mid-run, at a state that depends on
-        # the design: it never condemns the configuration
-        if len(out) == 3 and all(r.status == "refused" for r in out) \
-                and len(refs) == 1 and out[0].refusal[1] != "consistent_mode":
-            e, f, d, k = out[0].refusal
-            raise unsupported(
-                e, f, "evaluate_many: the first three designs were refused "
-                "with identical fields, so the configuration is "
-                f"unsupported: {out[0].reason}", device=d, kind=k)
+        self._refusal_rule(out)
         rest = jobs[3:]
         if rest and backend == "process" and workers != 1:
             # chunks: the evaluator is pickled once per chunk, not per
@@ -924,6 +1116,19 @@ class Evaluator:
                 reraise=True)
             out += more
         return out
+
+    @staticmethod
+    def _refusal_rule(out):
+        refs = {r.refusal for r in out}
+        # 'consistent_mode' is found mid-run, at a state that depends on
+        # the design: it never condemns the configuration
+        if len(out) == 3 and all(r.status == "refused" for r in out) \
+                and len(refs) == 1 and out[0].refusal[1] != "consistent_mode":
+            e, f, d, k = out[0].refusal
+            raise unsupported(
+                e, f, "evaluate_many: the first three designs were refused "
+                "with identical fields, so the configuration is "
+                f"unsupported: {out[0].reason}", device=d, kind=k)
 
     def _check_picklable(self, designs):
         """Refuse a process batch whose evaluator or designs do not
@@ -1028,7 +1233,7 @@ class Evaluator:
         if th is None:
             rows, losses = self._loss_rows(b, run, a, z)
             kpis = self._kpis(b, run, a, z, design, did, rows, losses,
-                              counters)
+                              counters, sf)
             if self.gradients:
                 self._gradients(b, run, design, kpis, grads, counters)
             return kpis, losses, {}
@@ -1037,6 +1242,27 @@ class Evaluator:
             if d not in names:
                 raise KeyError(f"ThermalSpec.r_th names {d!r}, which is not "
                                f"a device of the circuit")
+        mode = th.mode
+        exact = isinstance(run, _pk.Period)
+        if mode == "auto":
+            mode = ("kernel" if exact and th.loss_at is None
+                    and not th.temperature_dependent else "fixed_point")
+        if mode == "kernel" and not exact:
+            raise unsupported(
+                "design", "thermal",
+                f"ThermalSpec(mode='kernel'): the route is "
+                f"{counters.get('route', '?')!r}, not the exact steady-state "
+                "route (steady=SteadySpec(method='pss'), engine 'dsed') "
+                "whose period map the kernel reads; use mode='fixed_point'")
+        if mode == "fixed_point" and th.conduction:
+            raise unsupported(
+                "design", "thermal",
+                "ThermalSpec.conduction: conduction tables are read by the "
+                f"kernel fixed point, which needs the exact route (this is "
+                f"{counters.get('route', '?')!r})")
+        if mode == "kernel":
+            return self._thermal_kernel(b, run, a, z, design, did, counters)
+        counters["thermal_mode"] = "fixed_point"
         tj = {d: float(th.t_amb) for d in th.r_th}
         omega, prev, dist = 1.0, math.inf, math.inf
         for k in range(1, th.max_iter + 1):
@@ -1044,7 +1270,7 @@ class Evaluator:
             losses = self._losses_at(losses, tj)
             new = {}
             for d, r in th.r_th.items():
-                t_hat = th.t_amb + float(r) * sum(losses[d].values())
+                t_hat = th.t_amb + float(r) * _psum(losses[d].values())
                 new[d] = tj[d] + omega * (t_hat - tj[d])
             inc = max(abs(new[d] - tj[d]) for d in tj)
             if not math.isfinite(inc):
@@ -1087,9 +1313,97 @@ class Evaluator:
         # the run is within th.tol of them)
         rows, losses = self._loss_rows(b, run, a, z, tj)
         losses = self._losses_at(losses, tj)
+        kpis = self._kpis(b, run, a, z, design, did, rows, losses, counters,
+                          sf)
+        for d in tj:
+            kpis[f"t_j.{d}"] = tj[d]
+        return kpis, losses, tj
+
+    def _thermal_kernel(self, b, run, a, z, design, did, counters):
+        """``mode='kernel'``: each device's ``T_j = t_amb + r_th P(T_j)``
+        solved by the kernel on the fixed orbit (DECISIONS 28)."""
+        from ._pulsim import _junction_fixed_point
+        th = self.thermal
+        rows, losses = self._loss_rows(b, run, a, z)
+        specs = self.loss_options.get("switch_specs") or {}
+        semis = {n: bit for n, _, bit in run.spec.semis}
+        tj, evals, resid, heat = {}, 0, 0.0, {}
+        for d, r_th in th.r_th.items():
+            sp = specs.get(d) or {}
+            on_t, off_t = sp.get("E_on_table"), sp.get("E_off_table")
+            cat = dict(losses.get(d) or {})
+            on = off = []
+            if on_t is not None or off_t is not None:
+                for t, ref, curve in ((on_t, "E_on_ref", "E_on_curve"),
+                                      (off_t, "E_off_ref", "E_off_curve")):
+                    if t is None and (float(sp.get(ref, 0.0)) > 0
+                                      or sp.get(curve) is not None):
+                        raise unsupported(
+                            "design", "thermal",
+                            f"switch_specs[{d!r}] mixes a loss table with "
+                            f"{ref} / {curve}; the kernel fixed point reads "
+                            "tables only (mode='fixed_point')")
+                on, off = _pk.commutations(run.edges(d, semis[d]))
+                cat.pop("switching", None)
+                cat.pop("recovery", None)
+            cond, q1, q2, i_max = None, 0.0, 0.0, 0.0
+            if d in (th.conduction or {}):
+                cond = _conduction_table(th.conduction[d])
+                st = run.st[run.spec.idx[("ion", d)]]
+                if float(st[4]) >= 0.0:
+                    q1, i_max = float(st[0]), float(st[2])
+                elif float(st[2]) <= 0.0:
+                    q1, i_max = -float(st[0]), -float(st[4])
+                else:
+                    raise unsupported(
+                        "design", "thermal",
+                        f"ThermalSpec.conduction[{d!r}]: the on-state "
+                        "current changes sign over the period, so int |i| "
+                        "is not a period integral")
+                q2 = float(st[1])
+                cat.pop("conduction", None)
+            try:
+                out = _junction_fixed_point(
+                    on, off, None if on_t is None else on_t._kernel(),
+                    None if off_t is None else off_t._kernel(), run.T,
+                    _psum(cat.values()), float(r_th), float(th.t_amb), cond,
+                    q1, q2, i_max)
+            except ValueError as e:
+                if cond is not None and "conduction table" in str(e):
+                    raise unsupported(
+                        "design", "thermal",
+                        f"ThermalSpec.conduction[{d!r}]: {e}") from e
+                raise _Failed(f"thermal: {d}: {e}") from e
+            except RuntimeError as e:    # the root was not located
+                raise _Failed(f"thermal: {d}: {e}") from e
+            evals += int(out["evaluations"])
+            if out["runaway"]:
+                counters["thermal_mode"] = "kernel"
+                counters["thermal_iterations"] = evals
+                raise _Infeasible(
+                    f"thermal_runaway: {d} has no junction temperature above "
+                    f"t_amb = {th.t_amb:g} C (r_th dP/dT_j = "
+                    f"{out['slope']:.4g} >= 1 at {out['tj']:.4g} C)",
+                    {"thermal_runaway": max(out["slope"] - 1.0, 1e-12)})
+            tj[d] = float(out["tj"])
+            resid = max(resid, abs(float(out["residual"])))
+            if cond is not None:
+                heat[d] = float(out["p_cond_table"])
+        counters["thermal_mode"] = "kernel"
+        counters["thermal_iterations"] = evals
+        counters["thermal_residual"] = resid
+        hot = max(tj[d] - th.t_limit for d in tj)
+        if hot > 0:
+            raise _Infeasible(
+                f"thermal_limit: the fixed point T_j = {max(tj.values()):.4g} C "
+                f"exceeds t_limit = {th.t_limit:g} C", {"thermal_limit": hot})
+        rows, losses = self._loss_rows(b, run, a, z, tj)
+        losses = self._losses_at(losses, tj)
         kpis = self._kpis(b, run, a, z, design, did, rows, losses, counters)
         for d in tj:
             kpis[f"t_j.{d}"] = tj[d]
+        for d, v in heat.items():
+            kpis[f"p_cond_table.{d}"] = v
         return kpis, losses, tj
 
     def _losses_at(self, losses, tj):
@@ -1103,7 +1417,7 @@ class Evaluator:
             return out
         for d in th.r_th:
             cat = out.get(d) or {"conduction": 0.0}
-            p0 = sum(cat.values())
+            p0 = _psum(cat.values())
             p1 = float(th.loss_at(d, p0, tj[d]))
             out[d] = ({c: v * p1 / p0 for c, v in cat.items()} if p0 > 0
                       else {"conduction": p1})
@@ -1245,8 +1559,10 @@ class Evaluator:
         key = src.structure_hash() if static else None
         spec = self._spec_cache.get(key) if static else None
         if spec is None:
-            spec = _pk.spec_for(_as_builder(src), self.output,
-                                self.loss_options, self._nodes)
+            spec = _pk.spec_for(
+                _as_builder(src), self.output, self.loss_options,
+                self._nodes, tuple(sorted(
+                    (self.thermal.conduction or {}) if self.thermal else ())))
             if static:
                 self._spec_cache[key] = spec   # read-only once stored
         return spec
@@ -1544,8 +1860,13 @@ class Evaluator:
                 losses[n] = cat
         return rows, losses
 
-    def _kpis(self, b, run, a, z, design, did, rows, losses, counters):
+    def _kpis(self, b, run, a, z, design, did, rows, losses, counters,
+              sf=None):
         kp = run if isinstance(run, _pk.Period) else None
+        # a fixed-step run's gate edges: its integrals take each side
+        # separately (_with_right_limits)
+        gates = (_gate_edges(sf, a, z) if kp is None and getattr(
+            run, "engine_used", "") == "pwl" else None)
         comps = {c["name"]: c for c in b.components()}
         kpis: dict = {}
         src = self.sources
@@ -1584,17 +1905,18 @@ class Evaluator:
                 p_in -= float(c["params"]["V"]) * kp.mean(("i", n))
                 continue
             col = int(b.pool.branch_var_id_for_source(c["branch_id"], b.graph))
-            t, i = _with_right_limits(run, lambda st, col=col: st[:, col])
+            t, i = _with_right_limits(run, lambda st, col=col: st[:, col],
+                                      edges=gates)
             p_in -= float(c["params"]["V"]) * _mean(t, i, a, z)
         if p_in is not None:
             kpis["p_in"] = p_in
         if uncovered:
             counters["losses_not_covered"] = ", ".join(uncovered)
         else:
-            p_loss = sum(sum(c.values()) for c in losses.values())
+            p_loss = _psum(_psum(c.values()) for c in losses.values())
             kpis["p_loss"] = p_loss
         if self.loads:
-            p_out = sum(float(rows[n]["P_avg"]) for n in self.loads)
+            p_out = _psum(float(rows[n]["P_avg"]) for n in self.loads)
             kpis["p_out"] = p_out
             # P_out / (P_out + losses): with a datasheet model or a
             # loss table the losses include what the resistor-pair
@@ -1644,7 +1966,8 @@ class Evaluator:
         user = []
         for k in self.kpis:
             if isinstance(k.fn, _KpiSpec):
-                kpis[k.name] = _declared(k, kpis, kp, run, a, z, b)
+                kpis[k.name] = _declared(k, kpis, kp, run, a, z, b,
+                                         design, losses)
             elif k.name in kpis:
                 raise ValueError(f"user KPI {k.name!r} has the name of a "
                                  "default KPI")
@@ -1662,11 +1985,15 @@ class Evaluator:
         return kpis
 
 
-def _declared(k, kpis, kp, run, a, z, b):
+def _declared(k, kpis, kp, run, a, z, b, design, losses):
     """The value of a declarative :class:`Kpi`: the default KPI it names,
-    or a node's peak-to-peak / time-weighted mean on the route's own
-    footing (closed form on the kernel route, samples otherwise)."""
+    a node's peak-to-peak / time-weighted mean on the route's own
+    footing (closed form on the kernel route, samples otherwise), or a
+    formula of those."""
     s = k.fn
+    if s.kind == "formula":
+        from ._design_kernel import formula_lookup
+        return s.target.evaluate(formula_lookup(kpis, design, losses))
     if s.kind in ("efficiency", "i_peak", "i_rms", "ripple_i"):
         name = s.kind if s.target is None else f"{s.kind}.{s.target}"
         if name not in kpis:
@@ -1689,6 +2016,25 @@ def _declared(k, kpis, kp, run, a, z, b):
         t, v = _with_right_limits(run, lambda st, col=col: st[:, col])
         return _p2p(t, v, a, z) if s.kind == "ripple_v" else _mean(t, v, a, z)
     raise ValueError(f"unknown declarative KPI kind {s.kind!r}")
+
+
+def dataclasses_replace(rec, **kw):
+    from dataclasses import replace
+    return replace(rec, **kw)
+
+
+def _merge_batches(a, b):
+    """Batch counters of two consecutive kernel runs, summed."""
+    out = dict(b)
+    for k in ("designs", "kernel", "python", "symbolic_analyses",
+              "python_calls_in_kernel", "periodicity_checks"):
+        out[k] = a.get(k, 0) + b.get(k, 0)
+    reasons = dict(a.get("python_reasons", {}))
+    for k, v in b.get("python_reasons", {}).items():
+        reasons[k] = reasons.get(k, 0) + v
+    out["python_reasons"] = reasons
+    out["wall_s"] = a.get("wall_s", 0.0) + b.get("wall_s", 0.0)
+    return _fz(out)
 
 
 def _as_builder(src):
@@ -1914,8 +2260,8 @@ def _stored_power_kernel(kp, comps):
         return float((kp.y_end if end else kp.y_start)[kp._j(key)])
 
     def vc(nodes, end):
-        return sum(sg * at(("node#", int(k)), end)
-                   for k, sg in zip(nodes, (1.0, -1.0)) if int(k) >= 0)
+        return _psum(sg * at(("node#", int(k)), end)
+                     for k, sg in zip(nodes, (1.0, -1.0)) if int(k) >= 0)
     e = 0.0
     for n, c in comps.items():
         if c["kind"] == "inductor":
@@ -1950,12 +2296,12 @@ def _energy_balance(comps, src, rows, losses, p_in, counters, p_stored,
             or any(c["kind"] == "voltage_source" and n not in src
                    for n, c in comps.items()):
         return
-    p_dis = sum(float(r["P_avg"]) for r in rows.values() if "P_avg" in r)
+    p_dis = _psum(float(r["P_avg"]) for r in rows.values() if "P_avg" in r)
     res = (p_in - p_dis - p_stored) / p_in
     counters["energy_residual"] = res
-    counters["p_table"] = sum(v for c in losses.values()
-                              for k, v in c.items()
-                              if k in ("switching", "recovery", "core"))
+    counters["p_table"] = _psum(v for c in losses.values()
+                                for k, v in c.items()
+                                if k in ("switching", "recovery", "core"))
     tol = _ENERGY_RTOL[route] * (max(1.0, (2000.0 / n_samples) ** 2)
                                  if route == "sampled" else 1.0)
     if not abs(res) <= tol:

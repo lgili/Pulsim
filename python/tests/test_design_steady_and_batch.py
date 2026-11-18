@@ -214,4 +214,4 @@ def test_process_backend_gives_the_thread_records():
     ev = _dcm(steady=SteadySpec(method="pss"))
     ds = _designs(5)
     assert ev.evaluate_many(ds, workers=2, backend="process") == \
-        ev.evaluate_many(ds, workers=1)
+        ev.evaluate_many(ds, workers=1, backend="thread")

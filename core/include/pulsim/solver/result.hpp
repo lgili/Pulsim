@@ -68,6 +68,56 @@ struct ReinitRecord {
     long sample = -1;                ///< stored sample of the pulse, or -1
 };
 
+/// add-complementarity-mode-selection on pwl: one decision site where the
+/// settle and the LCP chose different diode modes ('shadow').
+struct ModeDisagreement {
+    Real t = 0;                    ///< end of the site's step
+    std::string site;              ///< "step" | "restart" | "substep" | "static"
+    std::string settle_mode;       ///< diode bits in diode order, '1' = ON
+    std::string lcp_mode;
+    std::string previous_mode;     ///< the bits the site started from
+    Size settle_rounds = 0;
+    int pivots = 0;
+    std::string status;
+    int settle_consistent = -1;    ///< the engine's own law on the site's solve (1 / 0)
+    int lcp_consistent = -1;
+    Real settle_violation = 0;     ///< worst violation (V; ON: -i/g_on)
+    Real lcp_violation = 0;
+};
+
+/// Counters of the LCP posed at pwl decision sites (task 8.1 names).
+struct ModeReport {
+    int mode = 0;                  ///< 0 settle, 1 'shadow', 2 'lcp'
+    Size sites_step = 0, sites_restart = 0, sites_substep = 0, sites_static = 0;
+    Size lcp_events = 0, lcps = 0, pivots_total = 0;
+    int max_pivots_per_event = 0;
+    Size ties = 0, widenings = 0, leak_pins = 0, pin_judgements = 0;
+    Size capped = 0;               ///< tie passes shortened to the mode's next event (#24)
+    Size unfixed = 0, enumerations = 0, nonunique_modes = 0, released = 0;
+    Size settle_rounds_total = 0;  ///< 'lcp': 0 (the settle never runs)
+    Size mask_cycles = 0;          ///< 'lcp': 0
+    Size inconsistent = 0;         ///< 'lcp': selected modes the site's solve violates (D6 step 4)
+    Size port_solves = 0;
+    Size errors = 0;
+    std::string last_error;
+    std::string passivity, passivity_device, passivity_kind;
+    std::vector<ModeDisagreement> disagreements;
+};
+
+/// The default-mode guard on pwl (task 4b.3).
+struct ModeGuardReport {
+    bool enabled = false;
+    Size checks = 0;               ///< settles judged
+    Size repairs = 0;              ///< settled mode inconsistent, LCP mode applied
+    Size confirmed = 0;            ///< inconsistent, the LCP returned the same mode
+    Size failed = 0;               ///< no consistent LCP mode: the breach is kept
+    Size settle_caps = 0;          ///< settles judged: round budget hit or mask cycle (dsed: #25)
+    std::vector<Real> repair_times;
+    std::vector<std::string> repair_diodes;
+    std::vector<Real> repair_violations;
+    ModeReport lcp;                ///< the repairs' LCP counters
+};
+
 struct CommutationEvent {
     Real  t_estimated;
     Index branch_id;
@@ -363,6 +413,9 @@ struct SimulationResult {
     Size ideal_loop_releases = 0;
     /// add-branch-form-ideal-switch D4: impulsive re-initialisations.
     std::vector<ReinitRecord> reinit_records;
+    /// add-complementarity-mode-selection on pwl.
+    ModeReport mode_report;
+    ModeGuardReport mode_guard;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or

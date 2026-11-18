@@ -71,10 +71,12 @@ The branch form of a switch or diode (`add_ideal_switch`,
 column; "no" raises `UnsupportedError(feature='branch_form')`. A mode
 whose ideal elements (`R_on = 0` or `g_off = 0`) make a state dependent
 (an inductor cut-set, a capacitor loop) runs on `pwl` with
-`discontinuity_restart=True` and is recorded in `res.reinit_records`
-(`on_impulse='error'` refuses it with `feature='impulse'`); without the
-rule, and on `trbdf2`, it is refused with
-`feature='dependent_states'`; a node bounded only by open ideal elements with
+`discontinuity_restart=True` and on `trbdf2` (always: three SDIRK(2,2)
+steps after the entry), and an impulsive entry is recorded in
+`res.reinit_records` (`on_impulse='error'` refuses it with
+`feature='impulse'`); on `pwl` without the rule, and on `trbdf2` with a
+Coss, Lauritzen, IGBT-tail, PMSM or saturable-inductor history, it is
+refused with `feature='dependent_states'`; a node bounded only by open ideal elements with
 `g_off = 0` is refused with `feature='floating_node'`, a loop of closed
 ideal elements and voltage sources with `feature='ideal_voltage_loop'`.
 
@@ -82,7 +84,7 @@ ideal elements and voltage sources with `feature='ideal_voltage_loop'`.
 | Form | pwl | trbdf2 | dsed | bdf1 | ac_sweep |
 |---|---|---|---|---|---|
 | Switch | yes | yes | no | no | no |
-| Diode | yes | no | no | no | no |
+| Diode | yes | yes | no | no | no |
 <!-- branch-form-capabilities:end -->
 
 Circuit-level limits, also raised as `UnsupportedError` (with `feature`
@@ -143,7 +145,9 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| Threads do not speed up the `pss` route: the shooting Newton runs in the kernel without the GIL, but circuit building, the loss rows and the KPIs are Python and hold it. | 64 SYN-A designs: 2445 evaluations/s on 1 thread, 1848 on 4, 1740 on 8; the kernel is 21 % of an evaluation. | `evaluate_many(..., backend="process")` for large batches. |
+| The `pss` route's thread scaling needs the kernel batch: a circuit-form evaluator with declarative KPIs (`Kpi.*`, `Kpi.formula`) runs in one GIL-free call; a factory (`build=`), a callable KPI, `gradients=` or a thermal loop take the Python path (named in `counters["batch"]`). | Buck Pareto, 4096 designs, load 15-19 on 10 cores: kernel batch 10022 / 21621 / 25369 evaluations/s on 1 / 4 / 8 threads; the Python thread path 3597 / 2286 / 2405. | `Evaluator(circuit=..., fields=..., schedule=...)` with `Kpi.formula`; else `backend="process"`. |
+| `method="transient"` on the fixed-step `pwl` engine is first order at gate edges (the step ending at an edge takes the new mask at its end), and its KPIs with it; the energy balance closes on the engine's own trajectory, so it does not flag this. | DCM buck at T/200: `p_out` 0.87 % low, T/800 0.083 % (probe `openspec/changes/add-design-optimization-workflow/probes/pin_quadrature.py`). | `method="pss"` (2e-7 at T/200), or `options={"discontinuity_restart": True}` (3.5e-6). |
+| The `dsed` engine does not resolve a gate pulse much shorter than the period at the period's END: the period map then has no edge and no switching loss for it, while the same pulse at the period's start is counted. | Buck, `make_pwm_switch_fn(1e5, D)`, loss tables: `D = 1 - 1e-6` gives 2.70 W of switching loss; `D = 1 - 1e-7` (a 1 ps off-pulse) 0.0 W, `D = 1e-7` 0.80 W. Plain `simulate(engine='dsed')` at `D = 1 - 1e-7` shows 4 transitions in 3 periods. The scheduler, not the evaluator (DECISIONS 31). | Keep duty cycles away from 0 and 1 by more than about 1e-6 of the period, or shift the phase so no edge sits just before the period end. |
 | A device whose power no loss model covers (Lauritzen diode, level-1 MOSFET/IGBT, controlled sources) refuses the efficiency. | Buck with a Lauritzen diode: efficiency would read 0.99989 without the diode's 1.36 W of 28.4 W; it is `refused` (`feature="losses"`). | Evaluate without `loads=` for the other KPIs, or use the PWL diode / switch. |
 | `method="transient"` settles to the engine's own orbit. | DCM buck on `trbdf2`: estimated distance 1.4e-10, true error 2.2e-5 (the engine's accuracy). A PWM voltage source on `trbdf2` never settles to 1e-6 (period noise 2.7e-4). | `method="pss"` (exact stepper), or a switch with a schedule instead of a PWM source. |
 
@@ -186,7 +190,7 @@ event where the signal jumps.
 | **`add_power_mosfet` non-goals:** p-channel, live T_j inside the law (T_j is run-constant), drain inductance and package networks, avalanche, SiC/GaN effects, a table channel (constant-K Level-1 only), AC analysis. | - | - |
 | **A gate transient on `pwl` needs a step that resolves it.** | The 400 V / 10 A double pulse with a 65 ns plateau: 7501 steps at `dt` = 0.2 ns; `trbdf2` takes about 1200. | `engine="trbdf2"`. |
 | **VDMOS import: absent capacitances are 0 (LTspice), not ngspice's defaults** (CGDMAX 2 nF, CGDMIN 20 pF, CGS 1.4 nF, CJO 0.5 nF). CJO uses the junction law without SPICE's FC linearisation. | - | Write every charge parameter in the card; `charge="drop"` restores the ideal-gate device. |
-| **`spice_to_builder` reads a subset of SPICE.** | `Q` (BJT) and `K` (coupled inductors) raise `NotImplementedError`. A `.param` expression such as `{R*2}` raises `KeyError`. `B` sources raise `ValueError`. `.subckt` is flattened correctly. | Build those parts with `CircuitBuilder` (`add_transformer` for coupled inductors) or a YAML netlist. |
+| **`spice_to_builder` reads a subset of SPICE.** | `Q` (BJT) and `K` (coupled inductors) raise `NotImplementedError`. A `{...}` expression takes the parameter grammar (no unit suffixes inside the braces). `B` sources raise `ValueError`. `.subckt` is flattened correctly. | Build those parts with `CircuitBuilder` (`add_transformer` for coupled inductors) or a YAML netlist. |
 
 ## Machines
 

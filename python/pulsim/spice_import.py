@@ -23,7 +23,12 @@ Supported elements (Phase E.10):
     outer ones; ``.GLOBAL`` nodes and ``0``/``gnd`` are not scoped.
   * `K` — coupled L (deferred — magnetics need more work)
   * `Q` / `J` — BJT / JFET (deferred)
-  * `.param` — parameter assignments (numeric only, no expressions)
+  * `.param` — parameter assignments; a ``{expression}`` value or element
+    value is evaluated (``{2*L}``, grammar of ``pulsim.Parameter``
+    expressions: no unit suffixes inside braces). Top-level ``.param``
+    lines become builder parameters, and a top-level R / L / C value
+    that names one (``{L}``, ``{2*L}``) is driven by it, so
+    ``circuit.with_params`` re-values the circuit.
   * `.model` / `.subckt` … `.ends` / `.global` / `.options DEFW DEFL`
   * `*` / `;` — comments
   * `.end` — terminator (ignored)
@@ -183,15 +188,39 @@ class _Scope(dict):
 _NUM_UNIT_RE = re.compile(r"^([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)([A-Za-z]*)$")
 
 
+_IDENT_RE = re.compile(r"(?<![\w.])[A-Za-z_]\w*(?!\w*\s*\()")
+
+
+def _spice_expr(text: str, names) -> str:
+    """``text`` with each parameter name spelled as in ``names`` (SPICE
+    names are case-insensitive; function names are left alone)."""
+    by_upper = {str(n).upper(): str(n) for n in names}
+    return _IDENT_RE.sub(lambda m: by_upper.get(m.group(0).upper(), m.group(0)), text)
+
+
+def _eval_brace(body: str, scope) -> float:
+    from . import _pulsim
+    keys = list(scope.keys()) if scope is not None else []
+    try:
+        return _pulsim._eval_expr(_spice_expr(body, keys), keys,
+                                  [float(scope[x]) for x in keys], "SPICE")
+    except ValueError as e:
+        if scope is not None and body.strip() not in scope and \
+                re.fullmatch(r"[A-Za-z_]\w*", body.strip()):
+            raise KeyError(f"undefined SPICE param {body.strip()!r}") from None
+        raise ValueError(f"SPICE value {{{body}}}: {e}") from None
+
+
 def _num(token: str, scope: Optional[Dict[str, float]]) -> float:
     """A SPICE number: engineering suffix, trailing unit letters
-    (``50ns``, ``10Vdc``), ``{param}``, or a bare parameter name."""
+    (``50ns``, ``10Vdc``), ``{param}`` / ``{expression}``, or a bare
+    parameter name."""
     s = str(token).strip()
     if s.startswith("{") and s.endswith("}"):
         name = s[1:-1].strip()
-        if scope is None or name not in scope:
-            raise KeyError(f"undefined SPICE param {name!r}")
-        return float(scope[name])
+        if scope is not None and name in scope:
+            return float(scope[name])
+        return _eval_brace(name, scope)
     if scope is not None and s in scope and not _NUM_UNIT_RE.match(s):
         return float(scope[s])
     try:
@@ -505,6 +534,7 @@ def parse_spice_netlist(text: str, *, return_models: bool = False):
     scope = _Scope()
     for k, v in params_raw:
         scope[k] = _num(v, scope)
+    scope.raw = list(params_raw)   # the top-level .param lines, as written
     for k, v in options.items():
         scope[f"__{k}__"] = _num(v, scope)
     models: Dict[str, SpiceModel] = {}
@@ -974,6 +1004,43 @@ def spice_to_builder(text_or_path, *, strict: bool = False, charge: str = "keep"
     notes: List[str] = []
     drops: List[str] = []
 
+    # Top-level .param lines become builder parameters (a {...} value an
+    # expression over the earlier ones), in file order.
+    raw = list(getattr(params, "raw", ()))
+    names = [k for k, _ in raw]
+    seen = [k.upper() for k in names]
+    ir = {}
+    for k_, v_ in raw:
+        # A name assigned twice, or one the parameter grammar cannot
+        # spell, stays a plain number (its value is unchanged).
+        if seen.count(k_.upper()) > 1 or not re.fullmatch(r"[A-Za-z_]\w*", k_):
+            continue
+        v_ = str(v_).strip()
+        try:
+            ir[k_.upper()] = (b.param(k_, _spice_expr(v_[1:-1], names))
+                              if v_.startswith("{") and v_.endswith("}")
+                              else b.param(k_, float(params[k_])))
+        except ValueError:
+            # shortcut: an expression over a name kept as a number stays
+            # a number too (correct value, not re-valued by with_params).
+            ir[k_.upper()] = b.param(k_, float(params[k_]))
+
+    def _value(designator, tok0, scope, field):
+        """A top-level R / L / C value naming parameters: the parameter
+        itself ({L} or L), or a derived one ({2*L}) named <designator>:<field>."""
+        s = str(tok0).strip()
+        if scope is not params or not ir:
+            return _num(s, scope)
+        body = s[1:-1].strip() if s.startswith("{") and s.endswith("}") else s
+        if body.upper() in ir:
+            return ir[body.upper()]
+        if s.startswith("{"):
+            try:
+                return b.param(f"{designator}:{field}", _spice_expr(body, names))
+            except ValueError:
+                pass   # reads a name kept as a number: the value, as before
+        return _num(s, scope)
+
     for elem in elements:
         kind = elem.kind
         designator = elem.designator
@@ -984,15 +1051,18 @@ def spice_to_builder(text_or_path, *, strict: bool = False, charge: str = "keep"
         if kind == "R":
             if len(tok) < 1:
                 raise ValueError(f"{designator}: missing value")
-            b.add_resistor(designator, nodes[0], nodes[1], _num(tok[0], scope))
+            b.add_resistor(designator, nodes[0], nodes[1],
+                           _value(designator, tok[0], scope, "R"))
         elif kind == "C":
             if len(tok) < 1:
                 raise ValueError(f"{designator}: missing value")
-            b.add_capacitor(designator, nodes[0], nodes[1], _num(tok[0], scope))
+            b.add_capacitor(designator, nodes[0], nodes[1],
+                            _value(designator, tok[0], scope, "C"))
         elif kind == "L":
             if len(tok) < 1:
                 raise ValueError(f"{designator}: missing value")
-            b.add_inductor(designator, nodes[0], nodes[1], _num(tok[0], scope))
+            b.add_inductor(designator, nodes[0], nodes[1],
+                           _value(designator, tok[0], scope, "L"))
         elif kind == "V":
             spec = _parse_source_spec(tok, scope)
             if spec["kind"] == "dc":
