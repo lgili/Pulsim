@@ -26,7 +26,9 @@
 // include in the TU, and the operator-new replacement is
 // program-global.
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <new>
 #include <stdexcept>
@@ -45,6 +47,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include "pulsim/builder/circuit_builder.hpp"
+#include "pulsim/events/event_queue.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/nonlinear_refresh_diode.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
@@ -538,4 +541,44 @@ TEST_CASE("Newton iteration on a run workspace is allocation-free",
         REQUIRE(after - before == 0);
     }
     REQUIRE(w.analyses == 1);
+}
+
+TEST_CASE("event queue: no allocation after start (ticks, edges, end)",
+          "[v2][perf][zero_alloc][event_queue]") {
+    using namespace pulsim::events;
+    // A three-phase inverter's worth of sources: two tick rates, a
+    // dead-time gate oracle (six edges per 100 µs carrier period), the end.
+    EventQueue q;
+    const auto t1 = q.add_periodic(Kind::ControlTick, Rate{1e-4});
+    q.add_periodic(Kind::ControlTick, Rate{2.5e-5, 1e-6});
+    const Real T = 1e-4;
+    const auto gate = q.add_function(Kind::GateEdge, [T](Real t) {
+        const Real k = std::floor(t / T);
+        for (const Real f : {0.1, 0.12, 0.4, 0.42, 0.7, 0.72, 1.1}) {
+            const Real e = (k + std::floor(f)) * T + (f - std::floor(f)) * T;
+            if (e > t) return e;
+        }
+        return (k + 2) * T;
+    });
+    q.add_once(Kind::EndOfRun, 1.0);
+    q.start(0.0, 1.0);
+    Real t = 0.0;
+    std::size_t n_events = 0;
+    const std::size_t before = g_new_count.load();
+    for (int step = 0; step < 10000; ++step) {   // 1 µs steps
+        n_events += q.take_due(t, 1e-15, kind_bit(Kind::ControlTick)).size();
+        const Real e = q.next_after(gate, t);
+        Real t_next = t + 1e-6;
+        t_next = std::min({t_next, e, q.next_of(Kind::ControlTick)});
+        if (step % 97 == 0) {
+            q.invalidate(gate);
+        }
+        t = t_next;
+    }
+    const std::size_t after = g_new_count.load();
+    INFO("events taken: " << n_events);
+    REQUIRE(q.taken(t1) > 0);
+    if (kCountsMeaningful) {
+        REQUIRE(after - before == 0);
+    }
 }

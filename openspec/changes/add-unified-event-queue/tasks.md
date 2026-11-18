@@ -8,7 +8,7 @@ full suite plus the per-step hash test added in 0.2); "matrix" = the
 conformance test of `add-engine-conformance-matrix`.
 
 ## 0. Preconditions and baseline
-- [ ] 0.1 `add-engine-conformance-matrix` merged; record its schedule × engine and feature × engine cells
+- [ ] 0.1 `add-engine-conformance-matrix` merged (it is); record its schedule × engine and feature × engine cells
 - [ ] 0.2 Record for the buck, the synchronous buck with dead time, the three-phase VSI and one closed-loop buck: fixed-engine state hash, TR-BDF2 `n_accept` / `n_reject` / `n_gate_events` / `n_ctrl_ticks` / `n_diode_events`, DSED event count, ns/step (audit rows 1, 2, 16–18)
 - [ ] 0.3 Analytic edge counts for those circuits (edges per period × periods) written into the test as constants
 
@@ -18,11 +18,11 @@ conformance test of `add-engine-conformance-matrix`.
 - [ ] 1.3 Oracle: goldens bit-identical; TR-BDF2 counters identical; `test_pwm_grid_edges.py`; matrix unchanged or improved (`NativeMultiMaskPwm` exact on every engine)
 
 ## 2. The queue, used by TR-BDF2
-- [ ] 2.1 `events/time_event.hpp`, `events/event_queue.hpp`: `Kind`, `TimeEvent`, `TimeSource`, `EventQueue` (fixed-size heap, `next_landing`, `take_at`, `invalidate`, counters)
+- [x] 2.1 `events/time_event.hpp`, `events/event_queue.hpp`: `Kind`, `TimeEvent`, `TimeSource`, `EventQueue` (fixed-size heap, `next_landing`, `take_at`, `invalidate`, counters) — done as one header with three source shapes, a linear scan and `take_due` (DECISIONS 1)
 - [ ] 2.2 `events/gate_source.hpp`: `GateSource`, `ScheduleGate`, index composition with the overlap check
-- [ ] 2.3 Unit tests: k-way merge order, simultaneity order, integer-counter times (no drift over 10⁷ periods), no allocation after `start`
-- [ ] 2.4 TR-BDF2 uses the queue for gate, tick and end-of-run landing; `next_edge_fn` / `observer_period` become adapters that register sources
-- [ ] 2.5 Oracle: for every harness circuit with an analytic schedule, the accepted-step sequence and the states are identical to 0.2; zero-alloc tests green
+- [x] 2.3 Unit tests: k-way merge order, simultaneity order, integer-counter times (no drift over 10⁷ periods), no allocation after `start`
+- [x] 2.4 TR-BDF2 uses the queue for gate, tick and end-of-run landing; `next_edge_fn` / `observer_period` become adapters that register sources
+- [x] 2.5 Oracle: for every harness circuit with an analytic schedule, the accepted-step sequence and the states are identical to 0.2; zero-alloc tests green — oracle used: the 34-case byte compare against a50a2c77 (DECISIONS 2), not a committed baseline
 
 ## 3. The opaque-callable adapter
 - [ ] 3.1 `events/sampled_gate.hpp`: move the sampling, pulse-width learning and bisection of `trbdf2_transient.hpp:960-1190` into `SampledGate` without changing the algorithm; `resolution()`, `n_gate_undersampled`, `gate_pulse_min`

@@ -1182,10 +1182,9 @@ def _rated_chain(b, rate):
 
 
 @pytest.mark.parametrize("rate,feature", [
-    (dict(period=1e-4, offset=2e-5), "control_rate_offset"),
     (dict(period=1e-4, compute_delay=2e-5), "compute_delay"),
 ])
-def test_control_rate_offset_and_delay_time_refused_on_trbdf2(rate, feature):
+def test_control_rate_delay_time_refused_on_trbdf2(rate, feature):
     b = _rc()
     ch = _rated_chain(b, p.Rate(**rate))
     with pytest.raises(p.UnsupportedError) as ei:
@@ -1201,6 +1200,13 @@ def test_control_rate_keywords_honoured_on_pwl(rate):
     b = _rc()
     ch = _rated_chain(b, p.Rate(**rate))
     _sim("pwl", b, step_observer=ch.make_step_observer(b))
+    assert ch.tick_counts == [20]     # ceil((2e-3 - offset) / 1e-4)
+
+
+def test_control_rate_offset_honoured_on_trbdf2():
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(period=1e-4, offset=2e-5))
+    _sim("trbdf2", b, step_observer=ch.make_step_observer(b))
     assert ch.tick_counts == [20]     # ceil((2e-3 - offset) / 1e-4)
 
 

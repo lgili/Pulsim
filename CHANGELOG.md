@@ -49,6 +49,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `t_off + t_rr` (on a variable grid a long step there now flags the
   turn-off; uniform grids are unchanged).
 
+### Unified event queue (add-unified-event-queue, group 2 and the trbdf2 part of 4.1)
+
+* **Added** `core/include/pulsim/events/event_queue.hpp`: one queue of
+  time events per run (control ticks, gate edges, source breakpoints,
+  output samples, the end of the run). Periodic events are computed from
+  an integer counter, `(t0 + offset) + k*period`, never accumulated;
+  events at one instant come out in a fixed order (sample, tick, gate
+  edge, breakpoint, end; registration order inside a kind); nothing
+  allocates after `start`.
+* **Changed** the TR-BDF2 engine takes its controller ticks, its
+  gate-edge cache and its step clamp from the queue. Results are
+  byte-identical (34-case compare: the golden circuits, closed loops,
+  multi-rate ticks, opaque gates, pulse sources).
+* **Added** a control-graph `Rate` with an `offset` runs on `trbdf2`
+  (ticks at `t_start + offset + k*period`); it was refused
+  (`UnsupportedError`, feature `control_rate_offset`).
+  `run_transient_trbdf2(observer_offsets=...)`.
+* The control graph's PWM gate states its edges through the control
+  graph's G23 (`CxxChainPwmGate.next_edge_after`, see the batch 11 entry
+  below); `trbdf2` reads them from the queue's gate source, which a tick
+  invalidates.
+
 ### Integration batch 11: circuit IR YAML, TR-BDF2 ideal switch, pwl complementarity, exact step 3, control graph G23, optimisation slice 6 merged
 
 * **Fixed** `make_combined_switch_fn` of a control-graph gate whose loop

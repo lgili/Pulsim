@@ -76,6 +76,7 @@
 // tail, the MNA-native PMSM and the saturable inductor. There are
 // no refusals left.
 
+#include "pulsim/events/event_queue.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
@@ -159,6 +160,10 @@ struct TrBdf2Options {
     /// times, through `tick_fn(j, t, x)`; sources due at one instant
     /// fire in index order. Non-empty overrides `observer_period`.
     std::vector<Real> observer_periods;
+    /// Per-source tick offset (add-unified-event-queue): source j ticks
+    /// at t_start + offset_j + k*T_j, ceil((span - offset_j)/T_j) times.
+    /// Empty = every offset 0; else as long as `observer_periods`.
+    std::vector<Real> observer_offsets;
     /// Newton settings, used only when the circuit has nonlinear
     /// devices. Same knobs and defaults as the fixed engine. The
     /// tolerances are absolute; loosening them is not a fix for an
@@ -1223,8 +1228,6 @@ inline SimulationResult run_transient_trbdf2(
     // Gate-edge cache: an LTE-reject inside an edge-clamped step
     // re-enters with the SAME upcoming edge; re-bisecting it costs
     // ~30 switch_fn calls (Python round-trips in the common case).
-    Real cached_edge_t = opts.t_start - span;
-    bool edge_cache_valid = false;
     // Controller-tick schedule. Absolute k·T from t_start (never
     // accumulated) so the cadence cannot drift — the whole point
     // of scheduling it instead of throttling on elapsed time.
@@ -1246,9 +1249,36 @@ inline SimulationResult run_transient_trbdf2(
                 "a positive finite number of seconds");
         }
     }
-    std::vector<Size> tick_k(t_ctrl.size(), 0);
-    std::vector<Real> t_next_src(t_ctrl.size(), opts.t_start);
-    Real t_next_tick = opts.t_start;
+    // The run's event queue (add-unified-event-queue): tick source j has
+    // id j (registered first), then the gate-edge source (the analytic
+    // oracle, or the edges the sampling below locates), then the end.
+    if (!opts.observer_offsets.empty()
+        && opts.observer_offsets.size() != opts.observer_periods.size()) {
+        throw std::invalid_argument(
+            "run_transient_trbdf2: observer_offsets must be empty or as "
+            "long as observer_periods");
+    }
+    for (const Real off : opts.observer_offsets) {
+        if (!(off >= Real{0}) || !std::isfinite(off)) {
+            throw std::invalid_argument(
+                "run_transient_trbdf2: every controller offset must be a "
+                "finite number of seconds >= 0");
+        }
+    }
+    events::EventQueue queue;
+    if (has_ticks) {
+        for (std::size_t j = 0; j < t_ctrl.size(); ++j) {
+            const Real off = multi_rate && !opts.observer_offsets.empty()
+                ? opts.observer_offsets[j] : Real{0};
+            queue.add_periodic(events::Kind::ControlTick,
+                               events::Rate{t_ctrl[j], off});
+        }
+    }
+    const std::uint32_t edge_src = next_edge_fn
+        ? queue.add_function(events::Kind::GateEdge, next_edge_fn)
+        : queue.add_located(events::Kind::GateEdge);
+    queue.add_once(events::Kind::EndOfRun, opts.t_end);
+    queue.start(opts.t_start, opts.t_end);
     TrBdf2Stats local_stats;
     TrBdf2Stats& st = stats_out ? *stats_out : local_stats;
     st.ctrl_tick_counts.assign(t_ctrl.size(), 0);
@@ -1538,7 +1568,7 @@ inline SimulationResult run_transient_trbdf2(
         // No commit across t_end or a controller tick (it would fire
         // dtp late): replace the slots only.
         if (!commit || t + dtp >= opts.t_end - h_min
-            || (has_ticks && t + dtp >= t_next_tick - h_min)) {
+            || t + dtp >= queue.next_of(events::Kind::ControlTick) - h_min) {
             history.refresh_derivatives(x_trial, dtp);
             hs.refresh_derivatives(x_trial, dtp);
             return;
@@ -1717,7 +1747,7 @@ inline SimulationResult run_transient_trbdf2(
             xr = &x_rec;
         }
         if (tp >= opts.t_end - h_min
-            || (has_ticks && tp >= t_next_tick - h_min)) {
+            || tp >= queue.next_of(events::Kind::ControlTick) - h_min) {
             return;
         }
         result.times.push_back(tp);
@@ -1780,14 +1810,15 @@ inline SimulationResult run_transient_trbdf2(
     // ---- controller tick: every due source, in source order ----
     auto fire_due_ticks = [&]() {
         // None at t_end: no step follows (the run's tick count is ceil).
-        if (!has_ticks || t < t_next_tick - h_min
+        if (t < queue.next_of(events::Kind::ControlTick) - h_min
             || t >= opts.t_end - h_min) {
             return;
         }
-        for (std::size_t j = 0; j < t_ctrl.size(); ++j) {
-            if (t < t_next_src[j] - h_min) {
-                continue;
-            }
+        // Every due source, in source order (the queue's order for
+        // events of one kind).
+        for (const auto& ev : queue.take_due(
+                 t, h_min, events::kind_bit(events::Kind::ControlTick))) {
+            const Size j = ev.source;
             if (multi_rate) {
                 tick_fn(j, t, x);
             } else {
@@ -1795,17 +1826,12 @@ inline SimulationResult run_transient_trbdf2(
             }
             ++st.n_ctrl_ticks;
             ++st.ctrl_tick_counts[j];
-            ++tick_k[j];
-            t_next_src[j] = opts.t_start
-                + static_cast<Real>(tick_k[j]) * t_ctrl[j];
         }
-        t_next_tick = *std::min_element(t_next_src.begin(),
-                                        t_next_src.end());
         // A controller just moved its duty, so switch_fn has a DIFFERENT
         // shape from here on and any bisected edge time is stale.
         // Closed-loop runs missed a quarter of their PWM edges (307 of 400
         // over 200 periods) before this.
-        edge_cache_valid = false;
+        queue.invalidate(edge_src);
     };
 
     try {
@@ -1826,8 +1852,9 @@ inline SimulationResult run_transient_trbdf2(
             const Real h_lo =
                 (t - chatter_exhaust_t <= Real{1e3} * h_chatter)
                     ? h_chatter : h_min;
-            h = std::clamp(h, std::min(h_lo, opts.t_end - t),
-                           std::min(h_max, opts.t_end - t));
+            const Real t_stop = queue.next_of(events::Kind::EndOfRun);
+            h = std::clamp(h, std::min(h_lo, t_stop - t),
+                           std::min(h_max, t_stop - t));
             // The gates as the step starts (one switch_fn call), and
             // the step cap the narrowest pulse seen so far implies.
             SwitchStateMask sw_now = switch_fn(t + Real{0.5} * h_min);
@@ -1864,8 +1891,9 @@ inline SimulationResult run_transient_trbdf2(
                 ++st.n_gate_boundary_settles;
             }
             // Land the next tick exactly, like a gate edge.
-            if (has_ticks && t_next_tick > t
-                && t_next_tick - t < h) {
+            const Real t_next_tick =
+                queue.next_of(events::Kind::ControlTick);
+            if (t_next_tick > t && t_next_tick - t < h) {
                 h = std::max(t_next_tick - t, h_min);
             }
             // ---- source-breakpoint landing ----
@@ -1882,18 +1910,12 @@ inline SimulationResult run_transient_trbdf2(
 
             // ---- gate-edge landing ----
             bool landed_on_edge = false;
-            if (next_edge_fn) {
-                if (!edge_cache_valid || cached_edge_t <= t) {
-                    cached_edge_t = next_edge_fn(t);
-                    edge_cache_valid = true;
-                }
-            }
-            if (edge_cache_valid && cached_edge_t > t
-                && cached_edge_t <= t + h) {
-                h = std::max(cached_edge_t - t, h_min);
+            // The oracle is asked again only when its edge is passed or
+            // a tick invalidated it; a located edge is dropped when passed.
+            const Real next_edge_t = queue.next_after(edge_src, t);
+            if (next_edge_t > t && next_edge_t <= t + h) {
+                h = std::max(next_edge_t - t, h_min);
                 landed_on_edge = true;
-            } else if (edge_cache_valid && cached_edge_t <= t) {
-                edge_cache_valid = false;
             }
             // True when every switch_fn sample over (t, t + h] equals
             // sw_now, so the step's gate mask IS sw_now (the midpoint
@@ -1951,8 +1973,7 @@ inline SimulationResult run_transient_trbdf2(
                     }
                     h = std::max(hi - t, h_min);
                     landed_on_edge = true;
-                    cached_edge_t = hi;
-                    edge_cache_valid = true;
+                    queue.locate(edge_src, hi);
                 }
             }
 
@@ -2835,7 +2856,7 @@ inline SimulationResult run_transient_trbdf2(
                     // parity memory desyncs for the rest of the
                     // run.
                     if (landed_on_edge
-                        && t >= cached_edge_t - h_min) {
+                        && t >= queue.pending(edge_src) - h_min) {
                         ++st.n_gate_events;
                     }
                     commutated = true;
