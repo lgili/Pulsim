@@ -76,6 +76,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (ticks at `t_start + offset + k*period`); it was refused
   (`UnsupportedError`, feature `control_rate_offset`).
   `run_transient_trbdf2(observer_offsets=...)`.
+* **Changed** the fixed-step engine's Python tick sources (a closed loop
+  with a period, a `step_observer` with `controller_period`) are scheduled
+  by the kernel's event queue instead of a Python scheduler object in the
+  step observer: the same instants, counts and lateness
+  (`control_tick_counts`, `control_tick_jitter_max`), byte-identical
+  results and the same order inside a step, and Python is entered only at
+  a tick. `run_transient(tick_periods=, tick_fns=, tick_before=)`;
+  `SimulationResult.kernel_tick_counts` / `kernel_tick_jitter_max`.
+* **Added** `core/include/pulsim/events/step_hooks.hpp`: accepted-step and
+  commutation callbacks (`StepHooks::on_accept`, `on_commutation`), called
+  by the pwl and trbdf2 engines (`run_transient(..., hooks)`,
+  `run_transient_trbdf2(..., hooks)`); the hook of in-kernel event losses.
+  `events::TickPlan` / `TickInfo{scheduled_t, k}`: the kernel's tick
+  registration.
+* **Changed** trbdf2 reads its source breakpoints and its end of run from
+  the queue (byte-identical).
 * The control graph's PWM gate states its edges through the control
   graph's G23 (`CxxChainPwmGate.next_edge_after`, see the batch 11 entry
   below); `trbdf2` reads them from the queue's gate source, which a tick

@@ -406,6 +406,11 @@ struct SimulationResult {
     // list overflowed (kMaxStepEvents or the per-step search cap).
     Size unlocated_gate_steps = 0;
     Size split_event_overflows = 0;
+    // add-unified-event-queue group 5: the fixed engine's control ticks
+    // (one count per TickPlan source) and the largest lateness of a tick
+    // on the grid (step time minus scheduled instant).
+    std::vector<std::uint64_t> control_tick_counts;
+    Real control_tick_jitter_max = Real{0};
     // add-branch-form-ideal-switch D3: structural passes run (one per
     // distinct mode of a circuit with an ideal branch-form element).
     Size mode_structure_checks = 0;

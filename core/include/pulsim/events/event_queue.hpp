@@ -25,6 +25,7 @@
 // a run has a handful of sources (gates, a few rates, the end). Upgrade
 // to a binary heap if a run ever registers more than ~32 sources.
 
+#include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 
 #include <cmath>
@@ -63,6 +64,31 @@ struct TimeEvent {
 struct Rate {
     Real period;
     Real offset = Real{0};
+};
+
+/// What a tick handler is told (task 4.1): the instant the tick was
+/// scheduled for and its integer index. On an engine that lands its
+/// ticks (trbdf2) the step time equals `scheduled_t` to the landing
+/// tolerance; on the fixed grid the step time is the first grid point at
+/// or after it.
+struct TickInfo {
+    Real scheduled_t;
+    std::uint64_t k;
+};
+
+/// Control-tick sources of one engine run, registered on the run's queue
+/// in this order (source j = rates[j]). `fn(j, info, t, x)` runs at each
+/// tick with the step time t and the state there. The tick registration
+/// API of add-unified-event-queue: a modulator or a control graph that
+/// needs its ticks scheduled by the kernel fills one of these.
+struct TickPlan {
+    std::vector<Rate> rates;
+    std::function<void(std::uint32_t j, const TickInfo& info, Real t,
+                       const Vector& x)> fn;
+    /// Optional: runs at every observer call BEFORE the ticks (the fixed
+    /// engine's label-time graphs and internal drivers, which ran before
+    /// the Python tick sources when those were part of the observer).
+    std::function<void(Real t, const Vector& x)> before;
 };
 
 class EventQueue {

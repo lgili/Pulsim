@@ -3038,6 +3038,16 @@ void init_module(py::module_& m) {
                        "restart stage of another size (event-split "
                        "sub-intervals, the stage-2 re-try). 0 with the "
                        "rule off.")
+        .def_readonly("kernel_tick_counts",
+                       &SimulationResult::control_tick_counts,
+                       "Ticks delivered per tick_fns source (run_transient "
+                       "tick_periods=); simulate() copies them into "
+                       "control_tick_counts.")
+        .def_readonly("kernel_tick_jitter_max",
+                       &SimulationResult::control_tick_jitter_max,
+                       "Largest step time minus scheduled instant of a "
+                       "kernel tick (0 when every period is a multiple of "
+                       "dt).")
         .def_readonly("n_split_steps", &SimulationResult::n_split_steps,
                        "Steps split at a gate edge, source jump or diode "
                        "crossing inside them "
@@ -3761,7 +3771,31 @@ void init_module(py::module_& m) {
            py::object initial_state,
            ShouldContinueFn should_continue,
            std::shared_ptr<streaming::LiveRing> live_ring,
-           py::object resume_from_obj) {
+           py::object resume_from_obj,
+           std::vector<Real> tick_periods,
+           std::vector<std::function<void(Real, const Vector&)>> tick_fns,
+           py::object tick_before_obj) {
+            // add-unified-event-queue group 5: Python tick sources, which
+            // the kernel's queue schedules (source j calls tick_fns[j]).
+            if (tick_periods.size() != tick_fns.size()) {
+                throw std::invalid_argument(
+                    "run_transient: tick_periods and tick_fns must have the "
+                    "same length");
+            }
+            pulsim::events::TickPlan tick_plan;
+            for (const Real T : tick_periods) {
+                tick_plan.rates.push_back(pulsim::events::Rate{T, Real{0}});
+            }
+            tick_plan.fn = [&tick_fns](std::uint32_t j, const pulsim::events::TickInfo&,
+                                       Real t, const Vector& xs) {
+                tick_fns[j](t, xs);
+            };
+            if (py::isinstance<pulsim::blockchain::ChainTick>(tick_before_obj)) {
+                tick_plan.before =
+                    tick_before_obj.cast<pulsim::blockchain::ChainTick&>().fn;
+            } else if (!tick_before_obj.is_none()) {
+                tick_plan.before = tick_before_obj.cast<StepObserverFn>();
+            }
             // A composed control graph (CxxChainTick) runs in C++.
             StepObserverFn step_observer;
             if (py::isinstance<pulsim::blockchain::ChainTick>(step_observer_obj)) {
@@ -3856,7 +3890,9 @@ void init_module(py::module_& m) {
                                           continue_eff,
                                           resume_ptr,
                                           b_extra_next_jump,
-                                          next_edge_fn);
+                                          next_edge_fn,
+                                          tick_periods.empty() ? nullptr
+                                                               : &tick_plan);
             }
             return result;
         },
@@ -3870,6 +3906,10 @@ void init_module(py::module_& m) {
         py::arg("should_continue") = ShouldContinueFn{},
         py::arg("live_ring") = std::shared_ptr<streaming::LiveRing>{},
         py::arg("resume_from") = py::none(),
+        py::arg("tick_periods") = std::vector<Real>{},
+        py::arg("tick_fns") =
+            std::vector<std::function<void(Real, const Vector&)>>{},
+        py::arg("tick_before") = py::none(),
         "Run a fixed-dt transient simulation. switch_fn(t) "
         "→ SwitchStateMask; b_extra_fn(t) → Vector adds "
         "to b_constant at each step. `step_observer(t, x)` "

@@ -51,7 +51,12 @@ class ControlPlan:
     tick_graph: List[Optional[TickFn]] = field(default_factory=list)
     # The builder's C-block graph (add_c_block), last in every order.
     c_graph: Optional[TickFn] = None
-    _sched: Optional["FixedStepTicks"] = None
+    # The fixed engine's Python tick sources (callback, period), which
+    # the kernel's event queue schedules (run_transient tick_fns=).
+    _kernel_ticks: List[Tuple[TickFn, float]] = field(default_factory=list)
+    # With kernel ticks: what runs before them at each step (the loop
+    # graphs, then simulate() adds its MMC / on_cache drivers in front).
+    tick_before: Optional[TickFn] = None
     _ticks0: dict = field(default_factory=dict)
 
     def merge_b_extra(self, user_fn):
@@ -75,9 +80,12 @@ class ControlPlan:
 
     def for_fixed_step(self, t_start: float, t_end: float, dt: float):
         """The fixed engine's observer: the closed-loop graphs (label
-        time), the Python tick sources through `FixedStepTicks`, the
-        every-step observers, then the C-block graph — in that order,
-        the order the old composition used. All graphs: one C++ observer
+        time), the Python tick sources, the every-step observers, then the
+        C-block graph — in that order. The Python tick sources are
+        scheduled by the kernel's event queue (add-unified-event-queue
+        group 5): with any, the graphs go to `fixed_tick_kwargs()`'s
+        `tick_before` (run before the ticks) and the observer returned
+        here holds the rest (run after them). All graphs: one C++ observer
         (no Python call per step)."""
         _check_fixed_periods(
             [p for (_f, p), g in zip(self.ticks, self.tick_graph)
@@ -93,19 +101,25 @@ class ControlPlan:
                 cxx.set_horizon(float(t_end))
                 # a reused helper graph keeps counting: report this run's
                 self._ticks0[id(cxx)] = int(sum(cxx.tick_counts()[1:]))
-        py_ticks = [(f, p) for (f, p), g in zip(self.ticks, self.tick_graph)
-                    if g is None]
-        self._sched = (FixedStepTicks(py_ticks, float(t_start), float(t_end),
-                                      float(dt)) if py_ticks else None)
-        parts = list(self.loop_graphs) \
-            + ([self._sched] if self._sched is not None else []) \
-            + list(self.every_step) \
+        self._kernel_ticks = [(f, p) for (f, p), g
+                              in zip(self.ticks, self.tick_graph) if g is None]
+        _check_fixed_periods([p for _f, p in self._kernel_ticks], float(dt))
+        post = list(self.every_step) \
             + ([self.c_graph] if self.c_graph is not None else [])
-        if not parts:
-            return None
+        if self._kernel_ticks:
+            self.tick_before = self._compose(list(self.loop_graphs))
+            return self._compose(post)
+        self.tick_before = None
+        parts = list(self.loop_graphs) + post
         if len(parts) == 1 and getattr(parts[0], "_cxx_chain", None) is not None \
                 and not parts[0]._cxx_chain.label_time:
             return parts[0]          # one user chain: the chain fast path
+        return self._compose(parts)
+
+    def _compose(self, parts):
+        """One observer running `parts` in order (None when empty)."""
+        if not parts:
+            return None
         if all(getattr(o, "_cxx_chain", None) is not None for o in parts):
             from ._pulsim import compose_chain_observers  # type: ignore[import-not-found]
             tick = compose_chain_observers(
@@ -124,14 +138,25 @@ class ControlPlan:
         _composed_observer._inner_observers = self.inner_observers  # type: ignore[attr-defined]
         return _composed_observer
 
-    def fixed_tick_counts(self):
+    def fixed_tick_kwargs(self) -> dict:
+        """run_transient's tick sources: empty without Python ticks."""
+        if not self._kernel_ticks:
+            return {}
+        kw = {"tick_periods": [float(p) for _f, p in self._kernel_ticks],
+              "tick_fns": [f for f, _p in self._kernel_ticks]}
+        if self.tick_before is not None:
+            kw["tick_before"] = self.tick_before
+        return kw
+
+    def fixed_tick_counts(self, res):
         """Per tick source in registration order (graphs read their own
-        counters) and the largest lateness, after a fixed-step run."""
+        counters, the Python sources the kernel's) and the largest
+        lateness, after a fixed-step run."""
         counts, jitter, j = [], 0.0, 0
-        sched = self._sched
+        kcounts = list(getattr(res, "kernel_tick_counts", ()))
         for g in self.tick_graph:
             if g is None:
-                counts.append(sched.counts[j])
+                counts.append(int(kcounts[j]))
                 j += 1
             else:
                 cxx = g._cxx_chain
@@ -144,8 +169,8 @@ class ControlPlan:
                 counts.append(int(sum(cxx.tick_counts()[1:]))
                               - self._ticks0.get(id(cxx), 0))
                 jitter = max(jitter, float(cxx.tick_jitter_max))
-        if sched is not None:
-            jitter = max(jitter, sched.jitter_max)
+        if self._kernel_ticks:
+            jitter = max(jitter, float(res.kernel_tick_jitter_max))
         return counts, jitter
 
     def for_variable_step(self, engine: str = "trbdf2") -> "ControlPlan":
@@ -269,33 +294,3 @@ def _check_fixed_periods(periods, dt: float, stacklevel: int = 4) -> None:
             f"late by less than dt (result.control_tick_jitter_max "
             "records the largest lateness). Pick dt = T/n to remove it.",
             stacklevel=stacklevel)
-
-
-class FixedStepTicks:
-    """The fixed engine's scheduler: tick k of source j is delivered at
-    the first grid point t_n >= t_start + k*T_j (to 1e-9*dt), counted
-    with an integer k, so no tick is lost and nothing drifts. Called at
-    the start of every step with (t_n, x), before the step's mask; the
-    kernel also calls it at t_end, where no tick is due (instants are
-    < t_end)."""
-
-    def __init__(self, ticks, t_start: float, t_end: float, dt: float):
-        self._fns = [fn for fn, _ in ticks]
-        self._periods = [float(p) for _, p in ticks]
-        self._t0 = float(t_start)
-        self._dt = float(dt)
-        self._t_end = float(t_end)
-        self._k = [0] * len(ticks)
-        self.counts = [0] * len(ticks)
-        self.jitter_max = 0.0
-        _check_fixed_periods(self._periods, self._dt, stacklevel=5)
-
-    def __call__(self, t: float, x) -> None:
-        tol = 1e-9 * self._dt
-        for j, fn in enumerate(self._fns):
-            due = self._t0 + self._k[j] * self._periods[j]
-            if t >= due - tol and due < self._t_end - tol:
-                fn(t, x)
-                self._k[j] += 1
-                self.counts[j] += 1
-                self.jitter_max = max(self.jitter_max, t - due)

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "pulsim/events/event_queue.hpp"
+#include "pulsim/sources/native_pwm_switch_fn.hpp"
 
 using pulsim::Real;
 using namespace pulsim::events;
@@ -247,4 +248,86 @@ TEST_CASE("invalidate leaves periodic and one-shot sources alone; an oracle "
     CHECK(q.take_due(0.25, 0.0, kind_bit(Kind::GateEdge)).size() == 1);
     CHECK(q.pending(stuck) == kInf);   // 0.25 is not after its own event
     CHECK(q.take_due(0.25, 0.0, kind_bit(Kind::GateEdge)).empty());
+}
+
+// ---- a short pulse at a period boundary (the exact engine's dropped
+// edge pair: a PWM at D = 1 - 1e-7 lost both edges and gave 0 W) --------
+namespace {
+// Walks a gate source the way an engine does: land on the next edge,
+// take what is due there (every call until empty), repeat.
+std::vector<Real> walk_edges(EventQueue& q, std::uint32_t g, Real t_end,
+                             Real tol) {
+    std::vector<Real> out;
+    Real t = 0.0;
+    while (true) {
+        const Real e = q.next_after(g, t);
+        if (!(e < t_end)) break;
+        t = e;
+        for (auto ev = q.take_due(t, tol); !ev.empty();
+             ev = q.take_due(t, tol)) {
+            for (const auto& x : ev) out.push_back(x.t);
+        }
+    }
+    return out;
+}
+}  // namespace
+
+TEST_CASE("both edges of a pulse shorter than the tolerance come out, in "
+          "order, at their own instants", "[event_queue]") {
+    const Real T = 1e-5;
+    const pulsim::sources::NativePwm2Switch pwm(T, 1.0 - 1e-7, 2);
+    for (const Real tol : {0.0, 1e-15, 1e-11}) {   // pulse is ~1e-12 s
+        EventQueue q;
+        const auto g = q.add_function(
+            Kind::GateEdge, [&](Real t) { return pwm.next_edge_after(t); });
+        q.start(0.0, 1.0);
+        // Ends mid-period: an edge within tol of the last landing is due
+        // there and taken with it (3T would ride with 3T - 1e-12).
+        const auto e = walk_edges(q, g, 2.5 * T, tol);
+        INFO("tol = " << tol);
+        // D*T, T, T + D*T, 2T: the pair at every boundary.
+        REQUIRE(e.size() == 4);
+        CHECK(std::is_sorted(e.begin(), e.end()));
+        CHECK(std::adjacent_find(e.begin(), e.end()) == e.end());
+        for (std::size_t i = 0; i < e.size(); ++i) {
+            CHECK(e[i] == pwm.next_edge_after(i == 0 ? 0.0 : e[i - 1]));
+        }
+        // Each edge changes the mask (no edge is a no-op or merged away).
+        // Compared at interval midpoints: pwm_phase snaps 64 ulps, so one
+        // ulp before an edge already reads the post-edge mask.
+        std::vector<Real> b{0.0};
+        b.insert(b.end(), e.begin(), e.end());
+        b.push_back(pwm.next_edge_after(e.back()));
+        for (std::size_t i = 1; i + 1 < b.size(); ++i) {
+            CHECK(!(pwm(0.5 * (b[i - 1] + b[i])) == pwm(0.5 * (b[i] + b[i + 1]))));
+        }
+    }
+}
+
+TEST_CASE("a one-ulp pulse at a period boundary keeps both edges in order",
+          "[event_queue]") {
+    // Edges at k*T - 1ulp and k*T (k = 1..1000): the shortest pulse a
+    // double can hold. The queue takes events by identity, never merges
+    // two events of one source by time.
+    const Real T = 1e-5;
+    auto next = [T](Real t) {
+        const Real k = std::floor(t / T);
+        for (Real kk = k; kk <= k + 2; kk += 1) {
+            const Real hi = kk * T;
+            const Real lo = std::nextafter(hi, 0.0);
+            if (lo > t) return lo;
+            if (hi > t) return hi;
+        }
+        return kInf;
+    };
+    EventQueue q;
+    const auto g = q.add_function(Kind::GateEdge, next);
+    q.start(0.0, 1.0);
+    const auto e = walk_edges(q, g, 1000.5 * T, /*tol=*/1e-12);
+    REQUIRE(e.size() == 2000);
+    std::size_t bad = 0;
+    for (std::size_t i = 0; i + 1 < e.size(); i += 2) {
+        bad += !(e[i] < e[i + 1]) || e[i + 1] != std::nextafter(e[i], kInf);
+    }
+    CHECK(bad == 0);
 }
