@@ -285,6 +285,21 @@ void init_module(py::module_& m) {
         "The gated PWL devices' engine column (add-pwl-igbt-and-"
         "thyristor): {'GateHeld'|'Latching': {engine: bool}}; False "
         "refuses with UnsupportedError(feature='gated_diode').");
+
+    m.def("_stateful_kinds",
+        []() {
+            py::dict out;
+            const pwl::StatefulHistories kinds;
+            kinds.for_each([&out](const auto& k) {
+                out[py::str(std::string(device::kStateBlocks[
+                    static_cast<std::size_t>(k.kBlock)].name))] =
+                    std::string(pwl::stored_kind_name(k.kStoredKind));
+            });
+            return out;
+        },
+        "The kernel's stateful Newton kinds (pwl::StatefulKinds), in fold "
+        "order: {state block name: StoredKind name of the kind-table row "
+        "it runs under}.");
     m.def("_require_supported",
         [](const topology::Graph& graph, const pwl::DevicePool& pool,
            const std::string& engine_in) {
@@ -3831,6 +3846,21 @@ void init_module(py::module_& m) {
             "Deprecated view of one block of ``dev_state`` (the 2.0 field). "
             "Writing it turns the snapshot into a 2.0-style payload.")
         .def_readwrite("valid", &SolverSnapshot::valid)
+        .def_readwrite("grid_origin", &SolverSnapshot::grid_origin,
+            "The fixed-step grid ``t`` sits on: t == grid_origin + "
+            "grid_step * grid_dt to rounding (NaN: none). A fixed-step resume "
+            "with the same dt continues it, so its trace is the continuous "
+            "run's bit for bit.")
+        .def_readwrite("grid_step", &SolverSnapshot::grid_step,
+            "Index of ``t`` on the fixed-step grid (see ``grid_origin``).")
+        .def_readwrite("grid_dt", &SolverSnapshot::grid_dt,
+            "Step of the fixed-step grid (see ``grid_origin``); NaN: none.")
+        .def_readwrite("post_edge_derivatives",
+            &SolverSnapshot::post_edge_derivatives,
+            "True when a variable-step run ended exactly on a gate edge "
+            "after refreshing the device derivatives for the post-edge "
+            "circuit (``x`` is the pre-edge solve). engine='pwl' refuses "
+            "to resume from it; engine='trbdf2' resumes.")
         .def_readwrite("restart_steps_left",
             &SolverSnapshot::restart_steps_left,
             "discontinuity_restart: SDIRK restart steps still owed when "
@@ -3873,11 +3903,15 @@ void init_module(py::module_& m) {
         })
         .def(py::pickle(
             [](const SolverSnapshot& s) {
-                // Version 3: a tag first, so it never reads as the 2.0
-                // tuples (which start with t).
+                // A tag first, so it never reads as the 2.0 tuples
+                // (which start with t). Version 4 = version 3 + the
+                // controllers'-state marker (field 12) + the grid and the
+                // edge flag (field 13). Read: v3 with 12 or 13 fields
+                // (13 = the marker), v4 with 13 (grid at 12, the
+                // device-interface branch) or 14 fields.
                 const auto& L = s.legacy;
                 return py::make_tuple(
-                    std::string("SolverSnapshot"), 3, s.t, s.x, s.dev_state,
+                    std::string("SolverSnapshot"), 4, s.t, s.x, s.dev_state,
                     s.dev_layout, s.layout_signature, s.mask, s.stamped_mask,
                     s.restart_steps_left, s.valid,
                     s.is_legacy()
@@ -3889,20 +3923,36 @@ void init_module(py::module_& m) {
                     // the controllers' state does not pickle: a resume
                     // from the copy refuses by name instead of
                     // continuing whatever the graphs hold
-                    static_cast<bool>(s.control_state));
+                    static_cast<bool>(s.control_state),
+                    py::make_tuple(s.grid_origin, s.grid_step, s.grid_dt,
+                                   s.post_edge_derivatives));
             },
             [](py::tuple t) {
                 SolverSnapshot s;
                 if (t.size() >= 2 && py::isinstance<py::str>(t[0])) {
+                    const int ver = t[1].cast<int>();
                     if (t[0].cast<std::string>() != "SolverSnapshot"
-                        || t[1].cast<int>() != 3
-                        || (t.size() != 12 && t.size() != 13)) {
+                        || !((ver == 3 && (t.size() == 12 || t.size() == 13))
+                             || (ver == 4 && (t.size() == 13 || t.size() == 14)))) {
                         throw std::runtime_error(
                             "SolverSnapshot: pickle version "
-                            + std::to_string(t[1].cast<int>()) + " with "
+                            + std::to_string(ver) + " with "
                             + std::to_string(t.size())
                             + " fields; this Pulsim reads version 3 "
-                              "(12 or 13 fields)");
+                              "(12 or 13 fields) and 4 (13 or 14 fields)");
+                    }
+                    if (ver == 4) {
+                        auto G = t[t.size() - 1].cast<py::tuple>();
+                        if (G.size() != 4) {
+                            throw std::runtime_error(
+                                "SolverSnapshot: the version-4 grid field "
+                                "has " + std::to_string(G.size())
+                                + " values, expected 4");
+                        }
+                        s.grid_origin = G[0].cast<Real>();
+                        s.grid_step = G[1].cast<Size>();
+                        s.grid_dt = G[2].cast<Real>();
+                        s.post_edge_derivatives = G[3].cast<bool>();
                     }
                     s.t = t[2].cast<Real>();
                     s.x = t[3].cast<Vector>();
@@ -3930,7 +3980,10 @@ void init_module(py::module_& m) {
                         g.igbt_tail_history = L[4].cast<std::vector<Real>>();
                         g.pmsm_history = L[5].cast<std::vector<Real>>();
                     }
-                    if (t.size() == 13 && t[12].cast<bool>()) {
+                    // the marker: field 12 of a 13-field v3 or a 14-field v4
+                    const bool has_marker = (ver == 3 && t.size() == 13)
+                                            || (ver == 4 && t.size() == 14);
+                    if (has_marker && t[12].cast<bool>()) {
                         // a marker the resume refuses by name (pulsim._control_state)
                         s.control_state = std::shared_ptr<void>(
                             new py::object(py::str("dropped by pickling")),
@@ -4380,17 +4433,7 @@ void init_module(py::module_& m) {
     // a bool default here could not distinguish "the user asked for
     // no refresh" from "the user said nothing", and getting that
     // wrong is the difference between 0.7 V and 5.0 V at a diode.
-    auto resolve_refresh =
-        [](const pwl::DevicePool& pool,
-            std::optional<bool> enable) -> pwl::NonlinearRefreshFn {
-            const bool want =
-                enable.has_value() ? *enable
-                                    : pool.has_nonlinear_devices();
-            if (!want) {
-                return {};
-            }
-            return pwl::make_combined_diode_mosfet_refresh();
-        };
+    auto resolve_refresh = &pwl::dc_device_refresh;
 
     m.def("compute_dc_op_with_strategy",
         [resolve_refresh](const topology::Graph& graph,

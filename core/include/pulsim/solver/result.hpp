@@ -36,6 +36,7 @@
 #include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <limits>
 #include <algorithm>
 #include <cstdint>
 #include <memory>
@@ -287,12 +288,26 @@ private:
         case device::StateBlock::NonlinearCapacitor: return legacy.coss_history;
         case device::StateBlock::LauritzenDiode: return legacy.lauritzen_history;
         case device::StateBlock::IgbtTail: return legacy.igbt_tail_history;
-        case device::StateBlock::PmsmMna: break;
+        case device::StateBlock::PmsmMna: return legacy.pmsm_history;
         }
-        return legacy.pmsm_history;
+        // A block appended after 2.0 has no named field: never alias one.
+        throw std::logic_error(
+            "SolverSnapshot: this device-state block has no 2.0 named field");
     }
 
 public:
+    /// The fixed-step grid `t` sits on, t == grid_origin + grid_step ·
+    /// grid_dt to rounding (NaN: none — a variable-step or hand-built
+    /// snapshot). A fixed-step resume with the same dt continues it, so
+    /// the resumed trace is the continuous run's bit for bit.
+    Real grid_origin = std::numeric_limits<Real>::quiet_NaN();
+    Size grid_step = 0;
+    Real grid_dt = std::numeric_limits<Real>::quiet_NaN();
+    /// Set by the variable-step engine when the run ended exactly on a
+    /// gate edge after replacing the device derivative slots: `x` is the
+    /// pre-edge solve, the slots the post-edge ones. The fixed engine
+    /// refuses to resume from it (it rings and fails at the next edge).
+    bool post_edge_derivatives = false;
     /// Restart steps still owed (discontinuity_restart): the rule takes
     /// the step of a discontinuity and the next two as SDIRK(2,2)
     /// steps, so a run stopped inside that window resumes it. 0 = none.

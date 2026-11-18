@@ -42,6 +42,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   circuit with a loss port and dropped each period's turn-on and its
   last step's heat; it now refuses the port by name.
 
+### Unified device interface, slice 2: one stateful-kind registry, exact resume
+
+* **Fixed** a fixed-step run split by `resume_from=` was not the continuous
+  run bit for bit: the resumed time grid restarted at the split time, so
+  sample times moved by ~1e-20 s and a gate edge landed a rounding apart
+  (states then within 8e-12 of scale). The snapshot carries its grid
+  (`grid_origin`, `grid_step`, `grid_dt`); an `engine='pwl'` resume with
+  the same `dt` continues it and is bit-identical (states, times, final
+  device state), split between edges or on one. Pickle version 4 (14
+  fields: version 3's 13, the controllers'-state marker included, plus
+  the grid); version 3 (12 or 13 fields), the slice's own 13-field
+  version 4 and Pulsim 2.0 pickles load and resume as before (restarted
+  grid).
+* **Fixed** a TR-BDF2 snapshot taken exactly on a gate edge made a
+  fixed-step resume ring and abort at the next edge (its `x` is the
+  pre-edge solve, its device derivatives the post-edge ones). The snapshot
+  says so (`post_edge_derivatives`) and `engine='pwl'` refuses it by name;
+  `engine='trbdf2'` resumes from it.
+* **Changed** (internal) the five stateful Newton kinds are one
+  compile-time list (`pwl::StatefulKinds`, concept `device::StatefulKind`);
+  the drivers, the Newton refresh, the in-run rollback and the snapshot
+  iterate it, and the rollback is one flat vector that includes each
+  device's TR-BDF2 stage scratch. `device/device.hpp` adds the `Device` contract
+  (one law over the scalar, `Params<S>` for parameter sensitivities),
+  unused by the engines yet. Results bit-identical.
+
 ### Unified device interface, steps 1–3: one history fold, one kernel-built refresh, one device-state vector
 
 * **Changed** (internal) the five stateful-device histories (Coss,

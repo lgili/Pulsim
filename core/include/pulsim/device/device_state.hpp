@@ -74,14 +74,18 @@ struct DeviceStateLayout {
         const auto b = static_cast<std::size_t>(blk);
         return std::size_t{count[b]} * kStateBlocks[b].reals_per_instance;
     }
-    /// FNV-1a over (block name, count, reals per instance).
-    [[nodiscard]] std::uint64_t signature() const noexcept {
+    /// FNV-1a over (block name, count, reals per instance) of the first
+    /// `n_blocks` blocks. A snapshot is signed over the blocks it has, so
+    /// a build with a block appended still verifies (and zero-pads) an
+    /// older snapshot.
+    [[nodiscard]] std::uint64_t signature(
+        std::size_t n_blocks = kNumStateBlocks) const noexcept {
         std::uint64_t h = 0xcbf29ce484222325ULL;
         auto mix = [&h](std::uint64_t byte) {
             h ^= byte;
             h *= 0x100000001b3ULL;
         };
-        for (std::size_t b = 0; b < kNumStateBlocks; ++b) {
+        for (std::size_t b = 0; b < kNumStateBlocks && b < n_blocks; ++b) {
             for (char c : kStateBlocks[b].name) mix(static_cast<unsigned char>(c));
             for (int s = 0; s < 32; s += 8) mix((count[b] >> s) & 0xffU);
             mix(kStateBlocks[b].reals_per_instance);

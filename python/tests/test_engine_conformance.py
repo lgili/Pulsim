@@ -1029,8 +1029,30 @@ def _pm(on):
     return b
 
 
+def _tail(on):
+    # An IGBT switched off by its gate: the tail charge (tau_tail, k_tail)
+    # keeps conducting after cutoff and slows the collector's rise. The
+    # control is the same IGBT with no tail, so presence proves the TAIL
+    # stamp runs (not merely the IGBT).
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_pulse_voltage_source("Vg", "g", "gnd", 0.0, 15.0, 0.0, 1e-4,
+                               2e-4, 2e-6, 2e-6)
+    b.add_resistor("R", "in", "o", 100.0)
+    b.add_capacitor("C", "o", "gnd", 100e-9)
+    if on:
+        b.add_igbt_level1("Qd", "o", "gnd", "g", tau_tail=1e-5, k_tail=0.5)
+    else:
+        b.add_igbt_level1("Qd", "o", "gnd", "g")
+    return b
+
+
 # name -> (cell, kinds it is made of)
 VARIANT_CELLS = {
+    "IgbtLevel1[tail]": (
+        (_tail, "o", "Qd", 4e-4, 2e-7, False),
+        ("IgbtLevel1", "Capacitor", "Resistor", "VoltageSource",
+         "PulseVoltageSource")),
     "NonlinearCapacitor[table]": (
         (_law_cap(lambda: p.ChargeLaw.table(p.ChargeTable.from_capacitance(
             [-1.0, 0.0, 5.0, 10.0, 20.0], [1.2e-6, 1e-6, 5e-7, 3e-7, 2e-7]))),
@@ -1048,6 +1070,28 @@ VARIANT_CELLS = {
 def _composite_supported(kinds, column):
     caps = p.engine_capabilities()
     return all(caps[kd][column] for kd in kinds)
+
+
+# Every stateful Newton kind of the kernel's list (pwl::StatefulKinds,
+# device/kind.hpp) -> the conformance cell that runs it on every engine.
+STATEFUL_CELLS = {
+    "nonlinear_capacitor": "NonlinearCapacitor",
+    "lauritzen_diode": "LauritzenDiode",
+    "pmsm_mna": "PmsmMna",
+    "igbt_tail": "IgbtLevel1[tail]",
+    "saturable_inductor": "SaturableInductor",
+}
+
+
+def test_every_stateful_kind_has_a_conformance_cell():
+    kinds = k._stateful_kinds()
+    assert set(kinds) == set(STATEFUL_CELLS), (
+        "a stateful kind without a conformance cell (add it to "
+        "STATEFUL_CELLS and give it a cell)")
+    for name, cell in STATEFUL_CELLS.items():
+        assert cell in CELLS or cell in VARIANT_CELLS, cell
+        # the kind-table row whose engine column the cell is checked against
+        assert kinds[name] == cell.split("[")[0], (name, kinds[name])
 
 
 @pytest.mark.parametrize("engine", ENGINES)
