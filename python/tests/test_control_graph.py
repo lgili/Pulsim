@@ -218,3 +218,30 @@ def test_reset_zeroes_signals_and_refills_the_delay():
     obs(0.0, np.zeros(1))
     assert seq == [0.25, 0.25, 1.0, 1.0] and ch.get_channel("y") == 0.25
 
+
+# make_step_observer / make_b_extra_fn / make_chain_switch_fn /
+# compose_chain_observers return callables that read the chain through a
+# pointer: the chain must live as long as they do (it was freed before)
+@pytest.mark.parametrize("make", [
+    lambda k, ch: ch.make_step_observer(1e-6),
+    lambda k, ch: ch.make_b_extra_fn(2),
+    lambda k, ch: k.make_chain_switch_fn(ch, 1, [("y", 0)]),
+    lambda k, ch: k.compose_chain_observers([(ch, 1e-6)]),
+    lambda k, ch: k.make_combined_switch_fn(
+        1, [k.make_chain_switch_fn(ch, 1, [("y", 0)])]),
+], ids=["step_observer", "b_extra_fn", "chain_switch_fn", "composed",
+        "combined_chain_switch_fn"])
+def test_a_chain_callable_keeps_its_chain_alive(make):
+    import gc
+    import weakref
+    k = p._pulsim
+    ch = k.CxxBlockChain()
+    ch.add_gain(2.0, k.CxxInputRef.const_value(1.0), "y")
+    fn = make(k, ch)
+    alive = weakref.ref(ch)
+    del ch
+    gc.collect()
+    assert alive() is not None
+    del fn
+    gc.collect()
+    assert alive() is None

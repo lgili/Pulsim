@@ -28,6 +28,7 @@
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/typing.h>
 
 #include <optional>
 
@@ -3319,14 +3320,18 @@ void init_module(py::module_& m) {
                     cpp_fns.emplace_back(fn.cast<SwitchScheduleFn>());
                 }
             }
-            return sources::make_combined_switch_fn(
-                num_switches, std::move(cpp_fns));
+            py::object out = py::cast(sources::make_combined_switch_fn(
+                num_switches, std::move(cpp_fns)));
+            using Ret = py::typing::Union<sources::SwitchSchedule>;  // stub type
+            // a ChainPwmGate (or a chain's SwitchSchedule) is copied by value
+            // but reads its chain through a pointer: each part (which pins
+            // its chain) must outlive the combination, not just the list
+            // (clearing the list freed the chain)
+            for (const auto& fn : fns)
+                if (!fn.is_none()) py::detail::keep_alive_impl(out, fn);
+            return py::reinterpret_steal<Ret>(out.release());
         },
         py::arg("num_switches"), py::arg("fns"),
-        // a ChainPwmGate is copied by value but reads its chain through a
-        // pointer: the parts must outlive the combination (a temporary
-        // loop's gate segfaulted on the first call)
-        py::keep_alive<0, 2>(),
         "Compose multiple switch_fn callbacks into a single "
         "SwitchSchedule whose mask is the bitwise OR of all "
         "sub-masks. Useful for combining e.g. a primary-"
@@ -4388,7 +4393,7 @@ void init_module(py::module_& m) {
             "node_id_of(name), for the blocks added AFTER this call.")
         .def("make_step_observer", [](BlockChain& self, Real dt) {
             return self.make_step_observer(dt);
-        }, py::arg("dt"),
+        }, py::arg("dt"), py::keep_alive<0, 1>(),
             "Return a step_observer(t, x) callable that the kernel "
             "uses to invoke the chain each step.")
         .def("make_sink_b_extra_fn",
@@ -4400,7 +4405,7 @@ void init_module(py::module_& m) {
         .def("make_b_extra_fn",
             [](BlockChain& self, Size state_size) {
                 return self.make_b_extra_fn(state_size);
-            }, py::arg("state_size"),
+            }, py::arg("state_size"), py::keep_alive<0, 1>(),
             "Return a b_extra_fn(t) callable for run_transient. "
             "Use together with make_step_observer when the chain "
             "has motor blocks that inject back-EMF / current "
@@ -5118,9 +5123,15 @@ void init_module(py::module_& m) {
         [](const std::vector<std::pair<BlockChain*, Real>>& parts) {
             std::vector<std::function<void(Real, const Vector&)>> fns;
             for (const auto& [ch, dt] : parts) fns.push_back(ch->make_step_observer(dt));
-            return ChainTick{nullptr, [fns](Real t, const Vector& x) {
+            py::object out = py::cast(ChainTick{nullptr, [fns](Real t, const Vector& x) {
                 for (const auto& f : fns) f(t, x);
-            }};
+            }});
+            // the observers read each chain through a pointer: pin each
+            // chain (its existing Python wrapper), not just the list
+            for (const auto& part : parts)
+                py::detail::keep_alive_impl(
+                    out, py::cast(part.first, py::return_value_policy::reference));
+            return py::reinterpret_steal<py::typing::Union<ChainTick>>(out.release());
         }, py::arg("parts"),
         "One CxxChainTick that runs each (chain, dt)'s step observer in "
         "order; run_transient calls it in C++.");
@@ -5132,7 +5143,7 @@ void init_module(py::module_& m) {
             const std::vector<std::pair<std::string, Index>>& mapping) {
             return make_chain_switch_fn(chain, num_switches, mapping);
         },
-        py::arg("chain"), py::arg("num_switches"), py::arg("mapping"),
+        py::arg("chain"), py::arg("num_switches"), py::arg("mapping"), py::keep_alive<0, 1>(),
         "Build a switch_fn(t) that sets bit `idx` ON when "
         "`chain.sink_value(channel_name) > 0.5`. `mapping` is a list "
         "of (channel_name, switch_idx) pairs.");
