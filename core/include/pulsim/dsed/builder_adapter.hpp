@@ -1065,7 +1065,7 @@ public:
             rhs += build_time_varying_b_extra_(t + h);
         }
         Vector& sol = port_sol_;
-        cache_.solve_at(mask, dt, rhs, sol);
+        port_solve_(mask, dt, rhs, sol);
         // Floating islands (DECISIONS #30): the factor rounds the island's
         // common mode to ε·(internal current)/G_tie, about tol_w on a bridge
         // with every diode OFF, so rounding picked modes. Each island's KCL
@@ -1076,7 +1076,7 @@ public:
         for (const auto& isl : islands) {
             rhs = -b_c;
             rhs[isl.ref] -= Real{1};          // J·w = e_ref
-            cache_.solve_at(mask, dt, rhs, port_w_);
+            port_solve_(mask, dt, rhs, port_w_);
             ws.push_back(port_w_);
             kap.push_back(island_dot_(isl, port_w_));
         }
@@ -1110,7 +1110,7 @@ public:
             const auto [a, c] = ports[static_cast<std::size_t>(j)];
             if (a >= 0) rhs[a] += Real{1};
             if (c >= 0) rhs[c] -= Real{1};
-            cache_.solve_at(mask, dt, rhs, sol);
+            port_solve_(mask, dt, rhs, sol);
             fix(sol, nullptr, [&](const PortIsland& isl) {   // Σ_S(−E_j)
                 return Real((c >= 0 && isl.in[static_cast<Size>(c)]) ? 1 : 0)
                      - Real((a >= 0 && isl.in[static_cast<Size>(a)]) ? 1 : 0);
@@ -1309,6 +1309,38 @@ private:
     };
     mutable std::unordered_map<MaskT, std::vector<PortIsland>> port_islands_;
     mutable Vector port_w_;
+
+    /// `solve_at` of the port problem. Its factor numerically singular on a
+    /// floating island is the bound of DECISIONS #27 exceeded (the
+    /// cancellation on the island's pivot is above the tie tolerance): the
+    /// typed refusal, naming the island node the factor's diagnosis names
+    /// (else the first island's reference node). Any other failure passes.
+    void port_solve_(const MaskT& mask, Real dt, const Vector& rhs, Vector& out) const {
+        try {
+            cache_.solve_at(mask, dt, rhs, out);
+        } catch (const std::runtime_error& e) {
+            const std::string msg = e.what();
+            const auto& islands = port_islands_of_(mask);
+            if (islands.empty() || msg.find("numerically singular") == std::string::npos) throw;
+            std::string node;
+            for (const auto& isl : islands) {
+                for (Size i = 0; i < isl.in.size(); ++i) {
+                    if (!isl.in[i]) continue;
+                    const std::string& nm = graph_.node(static_cast<Index>(i)).name;
+                    if (!nm.empty() && msg.find("node " + nm) != std::string::npos) node = nm;
+                }
+            }
+            if (node.empty()) node = graph_.node(islands.front().ref).name;
+            throw UnsupportedError(
+                "dsed", "floating_island", node, "Node",
+                "dsed: the diode port problem's factor is numerically singular on the "
+                "floating island at node " + node + ": its tie to ground is too weak for "
+                "the cancellation on the island's pivot to stay under the selector's tie "
+                "tolerance (add-complementarity-mode-selection DECISIONS #27). Tie the "
+                "island to ground with a smaller resistance, or use engine='pwl' or "
+                "'trbdf2'. Factor: " + msg);
+        }
+    }
 
     /// The islands of `mask` (empty when the circuit has a device the
     /// rule below does not classify, or none floats).

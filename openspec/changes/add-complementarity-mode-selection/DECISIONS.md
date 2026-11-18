@@ -487,7 +487,7 @@ choices it did not pin.
       a refusal with the guard off). For a single-shot pulse T_ref is the
       run length. Fix: cap the probe at the next time event; it changes
       every guarded run's selection trace, so it needs its own
-      bit-identity pass. Not seen on any survey circuit.
+      bit-identity pass. Not seen on any survey circuit. Fixed 2026-11-18: #31.
     - With no exact step (tier 3, allowed numeric), `first_departure_`
       returns +∞, so the widening is uncapped and #24's early release is
       possible again. Under the default (13.2) such a mode is refused
@@ -602,3 +602,57 @@ choices it did not pin.
     singular (1 TΩ ties, h_e ≤ 1e-10·T_ref: no LU to correct). → Reverse:
     drop the `fix` calls in `diode_port_problem_full` and the
     anchored callbacks (each half alone is measurable with the probes).
+
+31. **The selector's probes stop at the next time event (closes the
+    first risk of #28).** The judge's probes and `first_departure_` used
+    to propagate up to 12 800·h_e with the gates and the source piece
+    frozen at t. Each probe is now capped at `next_time_event_(t)`: the
+    next edge the switch function announces, or the next source corner,
+    else the run's end. An edge within `near_time` of t is the one just
+    landed, so the edge after it is used. When the mode holds up to the
+    cap, `first_departure_` returns the time event itself, so the
+    widening (#24) never looks past a gate edge or a source corner.
+    Before, it returned +∞ there.
+    - **No edge oracle.** A switch function without `next_edge_after`
+      adds no cap. Its scheduler adapter (`PySwitchFnSSM`, `PySwitchFn`)
+      answers `next_edge_after` with the dt_max/10 poll boundary of
+      `EdgeSearch`, which is not an edge, and caches its search. The
+      adapters now say so through `has_edge_oracle()`, an optional member
+      of the scheduler's SwitchFn contract. A type without it is trusted.
+    - **Measured failure without that rule.** Capping at the poll
+      boundary brought #24's defect back: the bridge bank released a
+      diode early again, 0.128 V off pwl
+      (`test_a_widened_pass_does_not_release_a_diode_before_its_own_turn_off[lcp]`).
+    - **Bit identity.** `survey_bit_identity.py` against the step-2b
+      build: 81 trajectories identical, plus the 9 settle-only refusals
+      unchanged (same t, same violation). Golden ALL IDENTICAL;
+      `bit_identity.py` 36/36 default and shadow (pwl / trbdf2 do not
+      use the selector).
+    - **Interface.** `ModeSelector`'s public interface is unchanged. Only
+      the value its `horizon` callback can return on the dsed scheduler
+      changed: finite at a time event.
+    - **Tests.** Rounding fuzz in `test_probe_horizon.py`: a DCM buck
+      whose diode turns off a few µs before each gate edge, 21 runs with
+      every component perturbed at 1e-15, default and `'lcp'`, gives one
+      mode sequence (ptp of the output 1.5e-13 V on 17.1 V).
+    - **Reverse.** Drop the `cap` lines in `judge_` and
+      `first_departure_`.
+
+32. **The singular port factor on a floating island is a typed refusal
+    (#27).** `diode_port_problem_full` solves through `port_solve_`.
+    When `solve_at` fails "numerically singular" and the mask has a
+    floating island, the failure becomes
+    `pulsim.UnsupportedError(engine='dsed', feature='floating_island',
+    device=<island node>, kind='Node')`. The node is the island node
+    named in the factor's diagnosis, else the island's reference node.
+    The message keeps the factor's text and names the remedies: a
+    smaller tie resistance, or engine 'pwl' / 'trbdf2'. Any other failure
+    passes unchanged.
+    - **Why typed.** Before, it reached Python as a `RuntimeError`, and
+      callers that try the next bridge on `RuntimeError` could take it
+      for an extraction failure.
+    - **Tests.** `test_port_factor_beyond_the_bound_refuses_instead_of_rounding`
+      runs on 'dsed' and 'exact' alike (1 TΩ ties, 2 mF), with
+      `engine == 'dsed'` and `feature == 'floating_island'`.
+      `exact_triage.cause()` names the cause.
+    - **Reverse.** Call `cache_.solve_at` directly again.

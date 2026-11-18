@@ -283,6 +283,10 @@ public:
 
     void set_poll(Real poll) noexcept { search_.set_poll(poll); }
 
+    /// Whether next_edge_after names real edges (the selector's probe
+    /// horizon); the EdgeSearch fallback returns poll boundaries.
+    [[nodiscard]] bool has_edge_oracle() const noexcept { return has_nea_; }
+
 private:
     py::object fn_;
     py::object nea_attr_;
@@ -1042,6 +1046,12 @@ void init_module(py::module_& m) {
         }
 
         void set_poll(Real poll) noexcept { search_.set_poll(poll); }
+
+        /// Whether next_edge_after names real edges (the selector's probe
+        /// horizon); the EdgeSearch fallback returns poll boundaries.
+        [[nodiscard]] bool has_edge_oracle() const noexcept {
+            return (is_native_ && native_.next_edge) || has_nea_;
+        }
 
         py::object fn_;
         pulsim_bindings_common::SwitchFnAdapter native_;

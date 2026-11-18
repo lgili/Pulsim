@@ -395,9 +395,14 @@ def test_port_factor_cancellation_stays_below_the_tie_tolerance(h_e_rel, monkeyp
     assert _end(r, "p-n") == pytest.approx(_end(ref, "p-n"), abs=2e-8)
 
 
-def test_port_factor_beyond_the_bound_refuses_instead_of_rounding():
+@pytest.mark.parametrize("engine", ["dsed", "exact"])
+def test_port_factor_beyond_the_bound_refuses_instead_of_rounding(engine):
     """The same bridge on 1 Tohm ties (bound 7e-3 V, 1.4e5 x the tie tolerance): the port
-    factor is numerically singular at the island's node and says so; no run returns a mode
-    chosen by rounding (DECISIONS #27, the sweep)."""
-    with pytest.raises(RuntimeError, match="numerically singular"):
-        _sim(_island_bridge(1e12, 2e-3), 0.04, mode_selection="lcp")
+    factor is numerically singular at the island's node and the run stops with the typed
+    refusal naming that node; no run returns a mode chosen by rounding (DECISIONS #27, the
+    sweep). 'exact' and 'dsed' refuse alike."""
+    with pytest.raises(p.UnsupportedError, match="numerically singular") as ei:
+        p.simulate(_island_bridge(1e12, 2e-3), t_end=0.04, engine=engine, mode_selection="lcp")
+    e = ei.value
+    assert (e.engine, e.feature, e.kind) == ("dsed", "floating_island", "Node")
+    assert e.device in {"s", "r", "p", "n"}

@@ -326,6 +326,7 @@ public:
 
     /// Run the simulation from ``t = 0`` to ``t = t_end``.
     [[nodiscard]] PEDResult<MaskT> simulate(const Vector& x0, Real t_end) {
+        probe_t_end_ = t_end;
         using clock = std::chrono::high_resolution_clock;
         const auto t0_wall = clock::now();
 
@@ -813,6 +814,33 @@ private:
             return std::min(t_g, system_.next_source_corner_after(t_now));
         }
         return t_g;
+    }
+
+    /// The selector probes' horizon (DECISIONS #28): the next gate edge
+    /// the switch function announces or the next source corner, else the
+    /// run's end. A switch function that says it has no edge oracle
+    /// (`has_edge_oracle()` false: its next_edge_after is a dt_max/10 poll
+    /// boundary, not an edge, and it caches its search) adds no cap.
+    [[nodiscard]] Real next_time_event_(Real t_now) const {
+        // an edge a few ulps after t_now is the one just landed (#28)
+        const auto past = [&](auto&& next) {
+            Real r = next(t_now);
+            if (std::isfinite(r) && near_time(r, t_now)) r = next(r);
+            return r;
+        };
+        Real e = probe_t_end_;
+        if constexpr (HasNextEdge<SwitchFn>) {
+            bool oracle = true;
+            if constexpr (requires { switch_fn_.has_edge_oracle(); })
+                oracle = switch_fn_.has_edge_oracle();
+            const Real raw = oracle ? past([&](Real s) { return switch_fn_.next_edge_after(s); })
+                                    : std::numeric_limits<Real>::infinity();
+            if (std::isfinite(raw)) e = std::min(e, raw);
+        }
+        if constexpr (requires { system_.next_source_corner_after(t_now); }) {
+            e = std::min(e, past([&](Real s) { return system_.next_source_corner_after(s); }));
+        }
+        return e;
     }
 
     [[nodiscard]] Real next_switch_edge_(Real t_now, Real t_end) const {
@@ -1675,8 +1703,10 @@ private:
             if (!system_.has_exact_step()) return -1;
             const Real tol_v = Real{1e-9} * sc.vscale;
             const Real zs = sc.vscale / sc.iscale;
+            const Real cap = next_time_event_(t) - t;   // DECISIONS #28
             for (const Real f : {Real{1e2}, Real{1e4}}) {
-                const Real d = f * shadow_.h_e;
+                const Real d = std::min(f * shadow_.h_e, cap);
+                if (!(d > Real{0})) break;
                 advance_(t, x, d, x_tmp_);
                 for (std::size_t j = 0; j < diodes_.size(); ++j) {
                     const auto& dd = diodes_[j];
@@ -1705,6 +1735,9 @@ private:
     /// 100·h_e·2^k, k = 0..7, at which a `decided` diode of `mode` breaks
     /// its own law on the exact trajectory (the judge's measure), +∞ if
     /// none up to 12 800·h_e or no exact step. The event lies in (d/2, d].
+    /// The probe stops at the next time event (#28), and that event is
+    /// returned when the mode holds up to it: the widening never looks
+    /// past a gate edge or source corner.
     /// Leaves the system's mask to the caller to restore.
     Real first_departure_(const MaskT& gates, const std::vector<char>& mode,
                           const std::vector<char>& decided, Real t, const Vector& x,
@@ -1719,8 +1752,13 @@ private:
             if (!system_.has_exact_step()) return inf;
             const Real tol_v = Real{1e-9} * sc.vscale;
             const Real zs = sc.vscale / sc.iscale;
+            // the probe stops at the next time event: past it the gates or a
+            // source's piece differ, so the trajectory does not happen (#28)
+            const Real cap = next_time_event_(t) - t;
             Real d = Real{100} * shadow_.h_e;
             for (int k = 0; k < 8; ++k, d *= Real{2}) {
+                if (d > cap) d = cap;
+                if (!(d > Real{0})) return inf;
                 advance_(t, x, d, x_tmp_);
                 for (std::size_t j = 0; j < diodes_.size(); ++j) {
                     if (!decided[j]) continue;
@@ -1731,6 +1769,7 @@ private:
                         : v - std::max(dd.V_th, dd.V_f);
                     if (!(viol <= tol_v)) return d;   // NaN counts as a departure
                 }
+                if (d == cap) return cap;   // the mode's trajectory ends at the time event
             }
             return inf;
         } else {
@@ -1808,6 +1847,7 @@ private:
     // default so the demo systems and raw-LTI paths are untouched;
     // the builder runners enable it.
     bool enable_event_projection_ = false;
+    Real probe_t_end_ = std::numeric_limits<Real>::infinity();   // next_time_event_
     std::vector<Real> fast_t_;     // plan_fast_samples_
     std::size_t fast_k_ = 0;
     Real dt_init_;
