@@ -642,10 +642,13 @@ Each entry: question → option taken → evidence → how to reverse.
     V_on), after the floating islands' KCL, is clear of zero by 1e-8 of the
     circuit scale (10× the selector's tie tolerance, with the selector's own
     σ·C_max/h term), the start mode is a strictly complementary solution of
-    a passive LCP and the step is that solve (`quiet_sites`). (b) Else the
+    a passive LCP and the step is that solve (`quiet_sites`; Lemke returns
+    it with no pivot, any circuit; with an ideal diode ON, posed open so
+    Lemke pivots, only on a passive circuit). (b) Else the
     LCP's last answer from the same start mask (gates + diode bits; at most
     256 kept) is solved and kept when it is clear of the band the same way
-    (`cached_sites`; not with ideal ports in the circuit, nor with a
+    (`cached_sites`; passive circuits only — a unique solution — and not
+    with ideal ports in the circuit, nor with a
     hysteresis port, V_th > V_f, whose turn-on reads V_th on the START
     solve: the cache broke `test_lcp_banded_dcm_buck_equals_the_default`
     by 1.1e-2 before this exclusion). (c) Else Lemke
@@ -686,17 +689,23 @@ Each entry: question → option taken → evidence → how to reverse.
     `step_start_states` (`_result_views.py`) takes the right limit at the
     start of a pulse step: the row before the record's sample is replaced
     by the sample's own state and mask, so the step conducts its end power
-    only and dW is the jump. dsed records (dicts) are untouched. →
+    only and dW is the jump. dsed records (dicts) are untouched; a record
+    whose stored interval is not the pulse step alone (store_every > 1:
+    the interval's earlier steps conducted from the pre-jump state) moves
+    nothing. Limit: under the diode split the pulse step's first sub-step
+    ran in the old mode, so "end power over the whole step" is exact only
+    without the split (review finding). →
     Evidence (`test_impulse_losses.py`): on the capacitor loop at
     h = 1e-8 … 1e-5, E_impulse + E_total(S) equals the stored-energy drop
     to 1e-12 relative; on the cut-set, R's E_total over the pulse step is
     its end power × h to 1e-12. → Reverse: drop `_reinit_step_starts`.
 
-33. **Reviewer leftovers of slice 4.** (a) Every `ideal_voltage_loop`
-    message names the loop element by element in loop order
+33. **Reviewer leftovers of slice 4.** (a) Every pwl `ideal_voltage_loop`
+    message names the loop element by element (trbdf2's is the trbdf2
+    owner's) in loop order
     (`ModeStructure::loop_texts`, "D3 -> D2 -> D1 -> V1"); under `'lcp'` a
     loop through several ideal ports (none shorted alone: the LCP ends on
-    a secondary ray) is found by closing every ideal port the posed network
+    a secondary ray; only on that status) is found by closing every ideal port the posed network
     does not reverse-bias, and refused by the same name (was
     `consistent_mode`). (b) `shorted_held` / `shorted_released` count the
     short ports held OFF before Lemke and released by it. (c) The leg test

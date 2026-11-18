@@ -73,7 +73,7 @@ def test_capacitor_loop_energy_is_booked_to_the_switch_and_closes_the_balance(en
     assert list(imp) == ["S"] and imp["S"]["records"][0] is not None
 
 
-def _caploop_closing(h, k_close=10, steps=40):
+def _caploop_closing(h, k_close=10, steps=40, **kw):
     # the switch closes at a gate edge mid-run, after leaking g_off while open
     b = p.CircuitBuilder()
     b.add_capacitor("C1", "x", "gnd", C1, V1)
@@ -88,7 +88,7 @@ def _caploop_closing(h, k_close=10, steps=40):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         r = p.simulate(b, t_end=steps * h + 1e-3 * h, engine="pwl", dt=h, switch_fn=fn,
-                       discontinuity_restart=True, auto_regularize=False)
+                       discontinuity_restart=True, auto_regularize=False, **kw)
     return b, r
 
 
@@ -175,3 +175,15 @@ def test_no_records_no_new_keys():
     r = p.simulate(b, t_end=1e-5, dt=1e-6, engine="pwl", switch_fn=lambda t: m)
     assert len(r.reinit_records) == 0
     assert all("E_impulse_total" not in e for e in device_loss_summary(b, r))
+
+
+def test_a_decimated_pulse_interval_moves_no_row():
+    # store_every = 4 stores t = 0, 4h, 8h, 12h, ...: the pulse step (11h, 12h] is
+    # the last of the stored interval (8h, 12h]; its first three steps conducted
+    # from the pre-jump state, so the interval's start row is not replaced
+    from pulsim._result_views import _reinit_step_starts
+    _, r = _caploop_closing(1e-6, store_every=4)
+    assert r.reinit_records
+    x = np.asarray(r.states)
+    st, _ = _reinit_step_starts(r, x, None)
+    assert st is x

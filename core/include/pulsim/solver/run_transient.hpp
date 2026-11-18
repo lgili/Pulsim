@@ -934,8 +934,8 @@ inline SimulationResult run_transient(
     };
     // The quiet-site test of 'lcp' (DECISIONS #30): every diode's crossing
     // signal on the start solve `xs` clear of zero by kQuietBand of the
-    // circuit scale — 1e3 times the selector's tie tolerance, far above the
-    // rounding the LCP's own reading of the same signals differs by.
+    // circuit scale (10× the selector's tie tolerance, with its σ·C_max/h
+    // term): the LCP reads the same signals from the same solve.
     topology::SwitchStateMask mode_last_gates;
     bool mode_gates_known = false;
     Vector mode_xq, mode_xc;
@@ -972,15 +972,16 @@ inline SimulationResult run_transient(
     // 'lcp': the LCP decides the site; one solve under its mode. Returns
     // whether the mode changed from the start bits (DECISIONS #30). The start
     // mode is solved first (`x_start`: given by the caller, or solved here).
-    //   * quiet site — a step or static site with the gates of the previous
-    //     site, whose start solve gives every diode's crossing signal (ON:
-    //     the current; OFF: the gap to V_on) clear of zero by kQuietBand of
-    //     the circuit scale, after the floating islands' KCL: the LCP's answer
-    //     is the start mode (a nondegenerate solution of a passive LCP, which
-    //     Lemke finds with no pivot), so it is not posed and the start solve
-    //     is the step. Any other site (a gate edge, a restart stage after an
-    //     event or re-initialisation, a split sub-step, the first site, a
-    //     signal within the band) poses the LCP.
+    //   * quiet site — any site whose start solve gives every diode's
+    //     crossing signal (ON: the current; OFF: the gap to V_on) clear of
+    //     zero by kQuietBand of the circuit scale, after the floating
+    //     islands' KCL: the LCP's q is that start mode, nonnegative, so Lemke
+    //     returns it with no pivot and the start solve is the step. With an
+    //     ideal diode ON (posed open: Lemke pivots) only on a passive circuit,
+    //     whose LCP has one solution.
+    //   * cached site — the LCP's last answer from the same start mask, clear
+    //     of the band on its own solve: kept on a passive circuit without
+    //     ideal or hysteresis ports (one solution, and nothing held).
     //   * the LCP reads the port voltages from that solve (no ideal diode ON
     //     at the start: the LCP poses those cut out, another system) and,
     //     when it keeps the start mode, the start solve is the step.
@@ -1011,7 +1012,8 @@ inline SimulationResult run_transient(
         }
         const Real h_site = for_dt <= Real{0} ? Real{1} : be ? for_dt * Real{0.5} : for_dt;
         // (a) the start mode, clear of the band: the LCP's answer
-        if (x_start && mode_quiet(mode_bits0, start_mask, for_dt, h_site, bx, *x_start)) {
+        if (x_start && (!ideal_on || mode_selector.passive) &&
+            mode_quiet(mode_bits0, start_mask, for_dt, h_site, bx, *x_start)) {
             x = *x_start;
             stamped_mask = start_mask;
             stamped_known = true;
@@ -1021,7 +1023,7 @@ inline SimulationResult run_transient(
         }
         // (b) the LCP's last answer from this start mask (the active-set cache),
         // clear of the band on its own solve: the LCP's answer
-        if (x_start && !structure.active() && !mode_hysteresis) {
+        if (x_start && mode_selector.passive && !structure.active() && !mode_hysteresis) {
             const auto it = mode_answers.find(start_mask);
             if (it != mode_answers.end() && it->second != mode_bits0) {
                 diodes.restore_on_bits(it->second);
@@ -1081,7 +1083,7 @@ inline SimulationResult run_transient(
             // posed open, none with Z_jj = 0) leaves the LCP a secondary ray.
             // Close every ideal port the posed network does not reverse-bias;
             // a loop among them is the refusal, named as the settle names it.
-            if (structure.active()) {
+            if (structure.active() && sel.status == events::LcpStatus::SecondaryRay) {
                 const auto sc = mode_ports->scale(mode_x0);
                 const Real tol_w = mode_selector.tol * sc.vscale;
                 std::vector<char> on_f = mode_coords;

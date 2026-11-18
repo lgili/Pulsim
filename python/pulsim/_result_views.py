@@ -130,10 +130,11 @@ def _reinit_step_starts(result, states: np.ndarray, masks):
         return states, masks
     ks = set()
     for rec in recs:
+        # only when the stored interval (t[k-1], t[k]] is the pulse step itself:
+        # under store_every > 1 it spans several steps (the earlier ones
+        # conducted from the pre-jump state), and sample < 0 is no row at all
         k = int(getattr(rec, "sample", -1))
-        if k <= 0:
-            k = int(np.searchsorted(t, float(rec.t), side="right"))
-        if 0 < k < t.shape[0]:
+        if 0 < k < t.shape[0] and abs(t[k - 1] - float(rec.t)) <= 1e-6 * (t[k] - t[k - 1]):
             ks.add(k)
     if not ks:
         return states, masks
