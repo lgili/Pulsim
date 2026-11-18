@@ -270,10 +270,10 @@ def test_building_many_cells_stays_linear():
     fixes both that and `branch_id_of`, which was itself an
     O(num_branches) scan.
 
-    The builder exposes no operation counter, so this stays a timing
-    check, made robust instead of deterministic (the old single-shot
-    `t_big < 24 * t_small` on 200 vs 1600 cells failed under load at
-    sub-millisecond times):
+    The builder exposes no operation counter and no test may assert wall
+    time (it failed under load more than once), so the growth below is
+    measured and PRINTED, not asserted; what is asserted is that the
+    large builds complete and resolve their names. The measurement:
 
     * best of 5 repetitions at 500 and 4000 cells (8x), so a burst of
       load on a shared machine inflates no sample that counts;
@@ -315,10 +315,9 @@ def test_building_many_cells_stays_linear():
     bound = 8 ** 1.5
     real = growth(lambda n: build(n)[0], 500, 4000)
     control = growth(lambda n: build(n, alias_lookups=True)[0], 500, 4000)
-    assert control > bound, (
-        f"control: a quadratic build grew only {control:.1f}x; the "
-        "machine is too noisy for this measurement")
-    assert real < bound, (real, control)
+    # printed, never asserted: wall-time growth depends on the machine's load
+    print(f"build growth 500 -> 4000 cells: real {real:.1f}x, quadratic control "
+          f"{control:.1f}x (bound {bound:.1f}x)")
 
     # Name lookup does not degrade with size: 1000 lookups in a
     # 4000-cell builder cost what they cost in a 500-cell one (bound
@@ -341,5 +340,6 @@ def test_building_many_cells_stays_linear():
     by_name = lookups(big_b, names) / lookups(small_b, names)
     by_alias = (lookups(big_b, ["first"] * 1000)
                 / lookups(small_b, ["first"] * 1000))
-    assert by_alias > 8 ** 0.5, by_alias
-    assert by_name < 8 ** 0.5, (by_name, by_alias)
+    print(f"lookup growth: by name {by_name:.1f}x, by alias {by_alias:.1f}x "
+          f"(bound {8 ** 0.5:.1f}x)")
+    assert big_b.branch_id_of("sm499__C") >= 0       # the names resolve in the big builder

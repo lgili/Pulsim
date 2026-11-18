@@ -165,8 +165,9 @@ def test_dcm_runs_exactly_and_matches_pwl():
     b = mk()
     t0 = time.perf_counter()
     rd = _run_dsed(b, 5e-3, switch_fn=pwm_for(b))
-    elapsed = time.perf_counter() - t0
-    assert elapsed < 5.0, elapsed          # was a 10M-step grind
+    print(f"dsed DCM buck 5 ms: {time.perf_counter() - t0:.3f} s")   # printed, never asserted
+    # was a 10M-step grind: the step count is the structural check (10,158 measured)
+    assert rd.n_accept < 100_000, rd.n_accept
 
     td = np.asarray(rd.times)
     vo = np.asarray(rd.v("vout"))
