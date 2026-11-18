@@ -615,3 +615,53 @@ Each entry: question → option taken → evidence → how to reverse.
     floor ladder, a step or landing solve that small does not; with
     C = 1 mF, g_off = 1e-12 the probe ladder itself reaches its cap
     (span_ref·1e-6) and aborts at the default tolerance.
+
+32. **Track 8 speed: where trbdf2 time goes, and what moved.** Measured
+    with `openspec/changes/update-trbdf2-factor-reuse/probes/trbdf2_speed.py`
+    (work-precision against pwl / pwl+split, independent truths; never a
+    timing assertion). Profiles (macOS `sample`): buck / boost spend 99 % of
+    engine time in Python `switch_fn` (88.7 calls per period against pwl's
+    22); the bridge spent 24 % assembling matrices for the round-off noise
+    bounds and 9 % rebuilding the sine b vector; Shockley is 81 % Newton
+    (one factorization per iteration). Changes:
+    (a) gate-edge bisection first probes the predicted next toggle
+    (periodic history, ± 4 h_min); bit-identical under the bisection's
+    one-change assumption. (b) noise bounds read the cache's resident
+    event matrix (`PwlStateSpaceCache::resident_event_matrix`, a const
+    accessor), else assemble via `SegmentAssembler`; the Newton carrier
+    uses `SegmentAssembler` too; sine sources are written into their rows
+    only. Bit-identical (16 trbdf2 runs + pwl/dsed hashes). (c) once a
+    pulse width w is known a step takes `ceil(2h/w)` gate samples, min 1
+    (was 4): the floor of 4 is for gates not yet seen. This moves bits on
+    gated circuits only: final states within 4e-10 .. 1.4e-8 relative,
+    grids by <= 3.9e-10 s (1.7e-8 s on buck_ccm rtol 1e-8), counts equal
+    except vsi12 rtol 1e-7 accepted 1429 -> 1430, rejected 89 -> 91, and
+    factorizations (the dt sequence shifts): buck CCM 1576 -> 1691, boost
+    1924 -> 2036 at default rtol. Result, per period at default rtol:
+    switch_fn calls buck CCM 88.7 -> 38.6, DCM 154.7 -> 74.3, boost 92.5 ->
+    40.3, VSI12 326.6 -> 260.9; accuracy unchanged to 3 digits. Factor reuse
+    (hits / (hits + builds + refactors)): buck 0.60, DCM 0.57, boost 0.59,
+    VSI12 0.68, bridge 0.79 (0.62 .. 0.88 over rtol 1e-7 .. 1e-3).
+    Not done: hysteresis on h (moves every number for a small gain),
+    modified Newton (algorithm change), skipping samples on the declared-
+    edge path (those helpers are native: 0 Python calls already).
+    Committed edge probes: each edge already has one probe whose solve the
+    cascade reuses; committing it costs 0 solves and 1 sample.
+
+33. **Track 8 aborts (a), (b): the conditioning floor.** (a) A capacitor
+    between two OFF diodes (1 µF, g_off 1e-9) beside a buck at rtol 1e-10 /
+    atol 1e-13: the controller chased the L·g_off mode (τ ~ 1e-13 s) at t = 0
+    until the stage-1 factor was singular (2C/h against g_off below eps)
+    and aborted. → A singular stage-1 factor on a controller-chosen step
+    learns `h_cond = 4 h` (a reject, counted `n_conditioning_rejects`,
+    floor in `h_conditioning_floor`); h never goes below it again. A
+    singular LANDING or a step that cannot grow (4h > ceiling) raises a
+    named SimulationAborted ("give it a DC path (a resistor) or raise
+    g_off"); a singular final sliver (<= 64 h_min before t_end, an edge
+    landed there) ends the run as the loop does within h_min. Result
+    (100 periods): runs, 27,095 accepted, floor 4.0e-13 s, ~4 steps per
+    period at it (diode turn-off), against 33,574 accepted without the
+    island; v(out) within 5.4e-5 V of the island-free run. (b) C = 1 mF,
+    g_off 1e-12: was a bare RuntimeError from the probe ladder cap; now a
+    typed SimulationAborted naming node y. The initial settle's singular
+    error is typed the same way. Bit-identical on the 16 hash runs.

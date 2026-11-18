@@ -312,6 +312,17 @@ struct TrBdf2Stats {
     /// Probes retaken 10x longer because a flip they proposed was inside
     /// their own round-off bound (see decide_probe).
     Size n_probe_noise_retakes = 0;
+    /// Linear-cache factor traffic of the run (`solve_at`): fresh
+    /// (mask, dt) entries (analysis + factor), numeric refactors of a
+    /// known mask at a new dt, and solves on the resident factor.
+    Size n_factor_builds = 0;
+    Size n_factor_refactors = 0;
+    Size n_factor_hits = 0;
+    /// Steps retaken longer because their factorization was singular (a
+    /// step below the matrix's conditioning floor), and the step floor
+    /// that learned (0 = none).
+    Size n_conditioning_rejects = 0;
+    Real h_conditioning_floor = 0;
 };
 
 namespace detail_trbdf2 {
@@ -649,6 +660,16 @@ inline SimulationResult run_transient_trbdf2(
     }
     Vector be_pwm, be_sine, be_pulse, b_src, b_stage, x_g, x_1,
         x_trial;
+    std::vector<std::pair<Index, Index>> sine_vars;   // (branch, source row)
+    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
+        const auto& br = graph.branch(b_id);
+        if (br.kind == topology::BranchKind::Source
+            && pool.kind_of(br.id)
+                   == pwl::DevicePool::StoredKind::SineVoltageSource) {
+            sine_vars.emplace_back(br.id,
+                                   pool.branch_var_id_for_source(br.id, graph));
+        }
+    }
     const bool has_iwave =
         sources::has_current_waveform_sources(pool, graph);
     Vector be_iwave;
@@ -664,8 +685,14 @@ inline SimulationResult run_transient_trbdf2(
             out += be_pwm;
         }
         if (has_sine) {
-            sources::compute_sine_b_extra(pool, graph, at_t,
-                                           be_sine);
+            // compute_sine_b_extra's arithmetic on the sine branches found
+            // once (it scanned every branch with a pool lookup per call:
+            // 9 % of the bridge rectifier's run time).
+            be_sine.setZero(static_cast<Index>(state_size));
+            for (const auto& [b_id, var] : sine_vars) {
+                be_sine[var] += -models::SineVoltageSource::value_at(
+                    pool.sine_voltage_source_params(b_id), at_t);
+            }
             out += be_sine;
         }
         if (has_pulse) {
@@ -877,6 +904,11 @@ inline SimulationResult run_transient_trbdf2(
     Real ro_omega_max = 0;
     Index ro_row = kInvalidIndex;
     pwl::PwlSegment nl_seg;
+    // One stamp-slot template for every assembly the engine does itself
+    // (Newton carrier, round-off bounds): values bit-equal to
+    // assemble_segment + compress_in_place, without its per-call
+    // allocation (24 % of the bridge rectifier's run time).
+    pwl::SegmentAssembler seg_asm;
     pwl::NewtonWorkspace newton_ws;   // one Newton analysis per pattern per run
     Real nl_seg_dt = Real{-1};
     topology::SwitchStateMask nl_seg_mask(
@@ -897,9 +929,8 @@ inline SimulationResult run_transient_trbdf2(
         }
         if (!nl_seg_valid || nl_seg_dt != dt_use
             || !(nl_seg_mask == m)) {
-            pwl::assemble_segment(graph, pool, m, dt_use,
-                                   nl_seg.J, nl_seg.b_constant);
-            sparse::compress_in_place(nl_seg.J);
+            seg_asm.assemble(graph, pool, m, dt_use, nl_seg.J,
+                             nl_seg.b_constant);
             nl_seg.state_size = state_size;
             nl_seg_dt = dt_use;
             nl_seg_mask = m;
@@ -1035,6 +1066,9 @@ inline SimulationResult run_transient_trbdf2(
     // past 1 % of h_max), and keep the step that worked as this run's
     // probe floor so the failure is paid once, not at every cascade.
     Real h_probe_learned = Real{0};
+    // The learned step floor below which a step's factorization is
+    // singular (0 = none seen; see stage 1).
+    Real h_cond = Real{0};
     // Step and outcome of the last probe (the post-event refresh
     // reads the capacitor current back through this step).
     Real last_probe_dt = Real{0};
@@ -1069,8 +1103,22 @@ inline SimulationResult run_transient_trbdf2(
                     h_probe_learned = dt_try;
                 }
             } catch (const std::runtime_error& e) {
-                if (!is_singular_error(e) || dt_try >= dt_cap) {
+                if (!is_singular_error(e)) {
                     throw;
+                }
+                if (dt_try >= dt_cap) {
+                    // Every probe step up to the cap is below the matrix's
+                    // conditioning floor (2C/h against g_off; C = 1 mF and
+                    // g_off = 1e-12 S need h ~ 4e-7 s): no probe can say
+                    // which way a diode conducts here.
+                    throw std::runtime_error(std::format(
+                        "run_transient_trbdf2: the diode probe at t = {} is "
+                        "numerically singular at every probe step up to {} s "
+                        "(the conditioning floor of this circuit is above "
+                        "it): {} A node held only by OFF conductances has "
+                        "2C/h far above g_off/eps at short steps; give it a "
+                        "DC path (a resistor) or raise g_off.",
+                        t0, dt_cap, e.what()));
                 }
                 singular = true;
             }
@@ -1130,9 +1178,15 @@ inline SimulationResult run_transient_trbdf2(
     // pn_bound[d] for the state xs solved under (m, dt) with b_stage.
     auto predicate_noise = [&](const Vector& xs, const SwitchStateMask& m,
                                Real dt) {
-        pwl::assemble_segment(graph, pool, m, dt, pn_J, pn_bc);
-        pn_r = pn_J.cwiseAbs() * xs.cwiseAbs();
-        pn_r += pn_bc.cwiseAbs() + b_stage.cwiseAbs();
+        const Vector* bc = nullptr;
+        const sparse::Matrix* J = cache.resident_event_matrix(m, dt, &bc);
+        if (J == nullptr) {
+            seg_asm.assemble(graph, pool, m, dt, pn_J, pn_bc);
+            J = &pn_J;
+            bc = &pn_bc;
+        }
+        pn_r = J->cwiseAbs() * xs.cwiseAbs();
+        pn_r += bc->cwiseAbs() + b_stage.cwiseAbs();
         pn_rhs = -pn_r;
         cache.solve_at(m, dt, pn_rhs, pn_y);
         pn_rhs.setZero(static_cast<Index>(state_size));
@@ -1298,6 +1352,12 @@ inline SimulationResult run_transient_trbdf2(
             throw SimulationAborted(e.what(), SimulationResult{},
                                     opts.t_start,
                                     /*roundoff_budget=*/true);
+        } catch (const std::runtime_error& e) {
+            // A singular probe at every step up to the cap (above), typed
+            // like every in-run failure instead of escaping untyped.
+            if (!is_singular_error(e)) throw;
+            throw SimulationAborted(e.what(), SimulationResult{},
+                                    opts.t_start);
         }
     }
 
@@ -1406,6 +1466,14 @@ inline SimulationResult run_transient_trbdf2(
     Real t_next_tick = opts.t_start;
     TrBdf2Stats local_stats;
     TrBdf2Stats& st = stats_out ? *stats_out : local_stats;
+    const pwl::CacheMetrics cache_m0 = cache.metrics();
+    auto record_factor_traffic = [&] {
+        const pwl::CacheMetrics m1 = cache.metrics();
+        st.n_factor_builds = static_cast<Size>(m1.event_builds - cache_m0.event_builds);
+        st.n_factor_refactors =
+            static_cast<Size>(m1.event_refactors - cache_m0.event_refactors);
+        st.n_factor_hits = static_cast<Size>(m1.event_hits - cache_m0.event_hits);
+    };
     st.ctrl_tick_counts.assign(t_ctrl.size(), 0);
     st.h_max_basis = opts.h_max > Real{0} ? Size{2}
         : (h_default < span / Real{1000} ? Size{1} : Size{0});
@@ -2058,9 +2126,10 @@ inline SimulationResult run_transient_trbdf2(
             // walk h below h_chatter: under all-OFF bridge bits a 1 mH
             // line and g_off make a 1 ps mode whose kink the LTE reads
             // as error at any h, and h sat at h_min until max_steps.
-            const Real h_lo =
+            const Real h_lo = std::max(
                 (t - chatter_exhaust_t <= Real{1e3} * h_chatter)
-                    ? h_chatter : h_min;
+                    ? h_chatter : h_min,
+                h_cond);
             h = std::clamp(h, std::min(h_lo, opts.t_end - t),
                            std::min(h_max, opts.t_end - t));
             // The gates as the step starts (one switch_fn call), and
@@ -2074,9 +2143,12 @@ inline SimulationResult run_transient_trbdf2(
                 learn_gate_toggles(sw_now, t);
                 const Real cap = gate_pulse_cap(t);
                 if (std::isfinite(cap)) {
-                    h = std::min(h, std::max(cap, h_min));
+                    h = std::min(h, std::max({cap, h_min, h_cond}));
                 }
             }
+            // The step the controller and the caps chose; a landing below
+            // shortens it (see the conditioning floor at stage 1).
+            const Real h_ctrl = h;
             if (has_diodes && gates_differ(sw_now, gates_decided)) {
                 // An edge at this step boundary that no step landed
                 // (see gates_decided): settle the diodes under the
@@ -2141,12 +2213,16 @@ inline SimulationResult run_transient_trbdf2(
             if (!landed_on_edge) {
                 // Samples per step: 4, or half the recent narrowest pulse
                 // apart in a lifted step (switch_fn calls only, no solves).
+                // Once a recent pulse width w is known the samples are w/2
+                // apart (DECISIONS #30), and a step shorter than w/2 needs
+                // only its end: the floor of 4 is for gates not yet seen.
+                // It cost the CCM buck 3 Python switch_fn calls per step.
                 int n_gs = kGateSamples;
                 if (learn_gates && std::isfinite(gate_sample_w)
                     && gate_sample_w > Real{0}) {
                     n_gs = static_cast<int>(std::clamp(
                         std::ceil(Real{2} * h / gate_sample_w),
-                        Real{kGateSamples}, Real{4096}));
+                        Real{1}, Real{4096}));
                 }
                 if (learn_gates) {
                     const Real spacing =
@@ -2188,10 +2264,47 @@ inline SimulationResult run_transient_trbdf2(
                 }
                 gates_flat = !edge_found;
                 if (edge_found) {
+                    // A periodic bit predicts its next toggle: two calls
+                    // 4 h_min either side of it bound the edge, and the
+                    // bisection reads every midpoint outside the bounds
+                    // from them instead of calling switch_fn (~25 calls ->
+                    // ~5 per edge). Same result: the bisection already
+                    // assumes one change of the mask in (lo, hi], under
+                    // which a point the gate was verified at answers for
+                    // every midpoint on its side.
+                    Real known_lo = lo, known_hi = hi;
+                    if (learn_gates) {
+                        Real te = std::numeric_limits<Real>::infinity();
+                        for (const Size i : gate_bits) {
+                            const Real* d3 =
+                                &gate_dir_t[6 * i + (sw_now.get(i) ? 0 : 3)];
+                            const Real p1 = d3[2] - d3[1], p0 = d3[1] - d3[0];
+                            if (std::isfinite(p0) && p1 > Real{0}
+                                && std::abs(p1 - p0)
+                                       <= Real{1e-6} * p1 + Real{4} * h_min
+                                && d3[2] + p1 > lo) {
+                                te = std::min(te, d3[2] + p1);
+                            }
+                        }
+                        if (te > lo && te < hi) {
+                            for (const Real tv : {te - Real{4} * h_min,
+                                                  te + Real{4} * h_min}) {
+                                if (!(tv > known_lo && tv < known_hi)) continue;
+                                if (switch_fn(tv) == sw_now) {
+                                    known_lo = tv;
+                                } else {
+                                    known_hi = tv;
+                                }
+                            }
+                        }
+                    }
                     for (int it = 0; it < 60 && (hi - lo) > h_min;
                          ++it) {
                         const Real mid = Real{0.5} * (lo + hi);
-                        if (switch_fn(mid) == sw_now) {
+                        const bool same = mid <= known_lo ? true
+                            : mid >= known_hi ? false
+                            : (switch_fn(mid) == sw_now);
+                        if (same) {
                             lo = mid;
                         } else {
                             hi = mid;
@@ -2265,8 +2378,35 @@ inline SimulationResult run_transient_trbdf2(
             coss_h = hg;
             dev_stage = pwl::TrBdf2Stage::Trapezoidal;
             dev_h = hg;
-            bool stage_ok =
-                solve_dispatch(mask_step, hg, b_stage, x_g);
+            // A step below the matrix's conditioning floor: 2C/h against
+            // a node held only by g_off (a capacitor between two OFF
+            // diodes) leaves a pivot below eps, and the factorization
+            // refuses it. Smaller steps cannot resolve that node, so the
+            // floor is learned (h_cond, x4 per retry) and the controller
+            // stops there (accepts at it are forced, counted), instead of
+            // aborting where it chased an L*g_off mode at a tight atol.
+            bool stage_singular = false;
+            bool stage_ok = false;
+            try {
+                stage_ok = solve_dispatch(mask_step, hg, b_stage, x_g);
+            } catch (const std::runtime_error& e) {
+                if (!is_singular_error(e) || nl_effective) throw;
+                // A final sliver (an edge landed a few h_min before t_end)
+                // ends the run here, as the loop already does within h_min.
+                if (t + h >= opts.t_end && h <= Real{64} * h_min) break;
+                const bool landing = h < h_ctrl * (Real{1} - Real{1e-12});
+                if (landing || Real{4} * h > std::min(h_max, opts.t_end - t)) {
+                    throw std::runtime_error(std::format(
+                        "run_transient_trbdf2: at t = {} the step matrix is "
+                        "numerically singular at h = {} s{}, and a longer step "
+                        "is not possible here: {} A node held only by OFF "
+                        "conductances has 2C/h far above g_off/eps at short "
+                        "steps; give it a DC path (a resistor) or raise g_off.",
+                        t, h, landing ? " (a step landing on an event)" : "",
+                        e.what()));
+                }
+                stage_singular = true;
+            }
             ++st.n_solves;
 
             // A gate edge before the breakpoint shortened the step.
@@ -2338,6 +2478,14 @@ inline SimulationResult run_transient_trbdf2(
                 stage_ok =
                     solve_dispatch(mask_step, hg, b_stage, x_1);
                 ++st.n_solves;
+            }
+            if (stage_singular) {
+                ++st.n_reject;
+                ++st.n_conditioning_rejects;
+                h_cond = Real{4} * h;
+                st.h_conditioning_floor = h_cond;
+                h = h_cond;
+                continue;
             }
             if (!stage_ok) {
                 // Newton did not converge at this h. Shrink and
@@ -2488,10 +2636,17 @@ inline SimulationResult run_transient_trbdf2(
             // estimate is within it. Steps that pass are unchanged.
             if (err > Real{1} && !nl_effective && !sdirk
                 && !entries.empty()) {
-                pwl::assemble_segment(graph, pool, mask_step, hg,
-                                      noise_J, noise_bc);
-                noise_r = noise_J.cwiseAbs() * x_1.cwiseAbs();
-                noise_r += noise_bc.cwiseAbs() + b_stage.cwiseAbs();
+                const Vector* nbc = nullptr;
+                const sparse::Matrix* nJ =
+                    cache.resident_event_matrix(mask_step, hg, &nbc);
+                if (nJ == nullptr) {
+                    seg_asm.assemble(graph, pool, mask_step, hg, noise_J,
+                                     noise_bc);
+                    nJ = &noise_J;
+                    nbc = &noise_bc;
+                }
+                noise_r = nJ->cwiseAbs() * x_1.cwiseAbs();
+                noise_r += nbc->cwiseAbs() + b_stage.cwiseAbs();
                 noise_rhs = -noise_r;
                 cache.solve_at(mask_step, hg, noise_rhs, noise_y);
                 noise_rhs.setZero(static_cast<Index>(state_size));
@@ -3363,6 +3518,7 @@ inline SimulationResult run_transient_trbdf2(
         st.n_probe_newton_retries = n_probe_newton_retries;
         result.mode_structure_checks = structure.checks_run();
         result.ideal_loop_releases = n_loop_releases;
+        record_factor_traffic();
     } catch (const SimulationAborted&) {
         st.n_probe_newton_retries = n_probe_newton_retries;
         throw;

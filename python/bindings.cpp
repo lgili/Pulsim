@@ -5333,6 +5333,11 @@ void init_module(py::module_& m) {
             d["n_roundoff_floor_accepts"] = st.n_roundoff_floor_accepts;
             d["n_noise_held_decisions"] = st.n_noise_held_decisions;
             d["n_probe_noise_retakes"] = st.n_probe_noise_retakes;
+            d["n_factor_builds"] = st.n_factor_builds;
+            d["n_factor_refactors"] = st.n_factor_refactors;
+            d["n_factor_hits"] = st.n_factor_hits;
+            d["n_conditioning_rejects"] = st.n_conditioning_rejects;
+            d["h_conditioning_floor"] = st.h_conditioning_floor;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
