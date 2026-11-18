@@ -8,8 +8,9 @@
                           gate
 
 DC bias: V_drain ≈ 4.55 V, I_D ≈ 1.09 mA.
-Small-signal gain Av = −g_m·R_D ≈ −10 V/V → 0.1 V_pp at gate
-inverts and amplifies to ~1 V_pp at drain.
+Small-signal gain Av = −g_m·(R_D‖r_o) = −9.92 V/V (≈ −g_m·R_D = −10
+ignoring λ) → 0.2 V_pp at the gate inverts and amplifies to ~2 V_pp
+at the drain.
 
 Demonstrates: V13 SH1 MOSFET + V11 SineVoltageSource + auto
 Newton-refresh detection (the MOSFET makes
@@ -66,21 +67,22 @@ def main() -> None:
                      progress=True)
     print(f"  samples: {res.num_steps()}")
 
-    # Steady-state stats over the last 50 % of the run.
+    # Steady-state stats over the last 2 signal periods (a whole number:
+    # the last 50 % = 1.5 periods biased the mean by +0.2 V).
     # Time-weighted (p.steady_state_stats): correct on any grid, including
     # the variable-step one simulate() uses when no dt is given -- a plain
     # mean over the samples is not.
-    half = 0.5 * (t_end - t_start)
+    half = 2.0e-3   # 2 periods of the 1 kHz input
     ss_drain    = p.steady_state_stats(res, "drain", last=half)
     v_drain_dc  = ss_drain.mean
     v_drain_pp  = ss_drain.ripple_pp
     v_gate_pp   = p.steady_state_stats(res, "gate", last=half).ripple_pp
     av = -v_drain_pp / v_gate_pp if v_gate_pp > 1e-9 else float("nan")
 
-    print(f"  V_drain DC ≈ {v_drain_dc:.3f} V (target 4.55)")
+    print(f"  V_drain DC ≈ {v_drain_dc:.3f} V (analytic 4.545)")
     print(f"  V_gate  pp ≈ {v_gate_pp:.3f} V (target 0.20)")
     print(f"  V_drain pp ≈ {v_drain_pp:.3f} V (target ~2.0)")
-    print(f"  Av (sim)   ≈ {av:+.2f}  V/V (target -10)")
+    print(f"  Av (sim)   ≈ {av:+.2f}  V/V (−g_m·(R_D‖r_o) = −9.92)")
 
     # One-line plot via p.scope().
     out = Path(__file__).resolve().parent / "output" / "common_source_amplifier.png"

@@ -34,7 +34,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | closed_loop/ll16_flyback_closed_loop.yaml | 0.02 | error | error | error |
 | linear/current_source_rl_step.yaml | 0.001 | 0.00577 | 3.99e-05 | 3.99e-05 |
 | linear/rl_natural_response.yaml | 0.001 | 0.00577 | 3.98e-05 | 3.98e-05 |
-| magnetics/half_bridge_transformer_dc.yaml | 0.02 | 0.151 | 0.000459 | 0.000459 |
+| magnetics/half_bridge_transformer_dc.yaml | 0.02 | 0.101 | 0.00113 | 0.00113 |
 | magnetics/transformer_leakage.yaml | 0.001 | 0.0041 | 0.00409 | 0.00409 |
 | stress/high_q_rlc_ringdown.yaml | 0.02 | 0.0229 | 0.0149 | 0.0149 |
 | switching/basic/vcswitch_resistor.yaml | 0.02 | 0.0332 | 0.0682 | 0.0332 |
@@ -54,7 +54,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | switching/multilevel/cascaded_h_bridge_5level.yaml | 0.02 | 0.0274 | 0.0269 | 0.0269 |
 | switching/multilevel/flying_capacitor_3level.yaml | 0.02 | 0.0466 | 0.05 | 0.05 |
 | switching/multilevel/mmc_4cell_chain.yaml | 0.02 | 0.0268 | 0.0264 | 0.0264 |
-| switching/multilevel/t_type_3level_halfbridge.yaml | 0.02 | 0.0749 | 0.0738 | 0.0738 |
+| switching/multilevel/t_type_3level_halfbridge.yaml | 0.02 | 0.0782 | 0.0771 | 0.0771 |
 | three_phase/three_phase_diode_rectifier.yaml | 0.02 | 1.51 | 0.00632 | 0.00631 |
 
 ### Every cell that differs from its frozen `known:` entry (every configuration)
@@ -82,7 +82,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | linear/pulse_voltage_rl.yaml | dsed | 0.001 | 0.00197 | V(out) | 0.00197 | 0.0% |  |  |
 | linear/rl_natural_response.yaml | pwl | 0.001 | 0.00577 | V(node) | 0.00577 | 0.0% |  |  |
 | magnetics/core_loss_steinmetz_sine.yaml | dsed | 0.001 | 0.0106 | I(L1) | 0.0106 | 0.0% |  |  |
-| magnetics/half_bridge_transformer_dc.yaml | pwl | 0.02 | 0.151 | V(out) | 0.15 | 2.5% | 9.2e-06 | 92 |
+| magnetics/half_bridge_transformer_dc.yaml | pwl | 0.02 | 0.101 | V(out) | chatter | 5.6% | 1.1e-05 | 1.1e+02 |
 | magnetics/transformer_leakage.yaml | pwl | 0.001 | 0.0041 | V(sec) | 0.0041 | 0.0% |  |  |
 | magnetics/transformer_leakage.yaml | pwl+restart | 0.001 | 0.00409 | V(sec) | 0.00409 | 0.0% |  |  |
 | magnetics/transformer_leakage.yaml | pwl+split | 0.001 | 0.00409 | V(sec) | 0.00409 | 0.0% |  |  |
@@ -142,9 +142,9 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/multilevel/mmc_4cell_chain.yaml | pwl | 0.02 | 0.0268 | V(out) | 1.54e-08 | 0.4% | 1e-12 | 5e-06 |
 | switching/multilevel/mmc_4cell_chain.yaml | pwl+restart | 0.02 | 0.0264 | V(out) | 3.21e-21 | 0.4% | 2e-07 | 1 |
 | switching/multilevel/mmc_4cell_chain.yaml | pwl+split | 0.02 | 0.0264 | V(out) | 3.21e-21 | 0.4% | 2e-07 | 1 |
-| switching/multilevel/t_type_3level_halfbridge.yaml | pwl | 0.02 | 0.0749 | V(out) | 0.000758 | 2.0% | 1.2e-13 | 5.9e-07 |
-| switching/multilevel/t_type_3level_halfbridge.yaml | pwl+restart | 0.02 | 0.0738 | V(out) | 1.31e-06 | 2.0% | 2e-07 | 1 |
-| switching/multilevel/t_type_3level_halfbridge.yaml | pwl+split | 0.02 | 0.0738 | V(out) | 1.31e-06 | 2.0% | 2e-07 | 1 |
+| switching/multilevel/t_type_3level_halfbridge.yaml | pwl | 0.02 | 0.0782 | V(out) | 0.000801 | 2.0% | 1.2e-13 | 6.1e-07 |
+| switching/multilevel/t_type_3level_halfbridge.yaml | pwl+restart | 0.02 | 0.0771 | V(out) | 1.37e-06 | 2.0% | 2e-07 | 1 |
+| switching/multilevel/t_type_3level_halfbridge.yaml | pwl+split | 0.02 | 0.0771 | V(out) | 1.37e-06 | 2.0% | 2e-07 | 1 |
 | three_phase/three_phase_diode_rectifier.yaml | pwl | 0.02 | 1.51 | V(out) | 1.52 | 8.0% | 0.071 | 1.4e+03 |
 
 ### All cells (err_rms or outcome)
@@ -184,7 +184,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | linear/voltage_divider_3stage.yaml | 0 | 0 | 0 | 0 | refused |
 | magnetics/core_loss_steinmetz_sine.yaml | 0.000228 | 0.000227 | 0.000227 | 0.000123 | 0.0106 |
 | magnetics/coupled_inductor_step.yaml | 0.00032 | 0.00032 | 0.00032 | 3.76e-06 | refused |
-| magnetics/half_bridge_transformer_dc.yaml | 0.151 | 0.000459 | 0.000459 | 2.37e-05 | refused |
+| magnetics/half_bridge_transformer_dc.yaml | 0.101 | 0.00113 | 0.00113 | 2.08e-05 | refused |
 | magnetics/inductor_chain_step.yaml | 0.00231 | 5.34e-06 | 5.34e-06 | 9.05e-07 | refused |
 | magnetics/transformer_leakage.yaml | 0.0041 | 0.00409 | 0.00409 | 0.000231 | refused |
 | magnetics/transformer_step_up.yaml | 4.64e-06 | 4.64e-06 | 4.64e-06 | 0 | refused |
@@ -237,7 +237,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/buck_boost/cuk_converter.yaml | unverified | unverified | unverified | unverified | unverified |
 | switching/buck_boost/sepic.yaml | 0.00186 | 6.01e-06 | 1.73e-06 | 2.96e-05 | error |
 | switching/inverter/half_bridge_inverter.yaml | 0.000376 | 1.16e-06 | 1.16e-06 | 9.06e-07 | 0.000125 |
-| switching/inverter/half_bridge_inverter_lc.yaml | 0.00103 | 7.93e-06 | 7.93e-06 | 0.000304 | refused |
+| switching/inverter/half_bridge_inverter_lc.yaml | 0.00103 | 7.91e-06 | 7.91e-06 | 0.000303 | refused |
 | switching/inverter/half_bridge_lc_filter.yaml | 0.00131 | 1.11e-06 | 1.11e-06 | 5e-06 | 0.00121 |
 | switching/inverter/lcc_resonant_inverter.yaml | 0.00565 | 0.000232 | 0.000232 | 8.37e-05 | 0.0992 |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | 0.0707 | 0.0587 | 0.0587 | 4.27e-05 | refused |
@@ -252,8 +252,8 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/multilevel/cascaded_h_bridge_5level.yaml | 0.0274 | 0.0269 | 0.0269 | 0 | refused |
 | switching/multilevel/flying_capacitor_3level.yaml | 0.0466 | 0.05 | 0.05 | 6.78e-05 | 0.287 |
 | switching/multilevel/mmc_4cell_chain.yaml | 0.0268 | 0.0264 | 0.0264 | 0 | refused |
-| switching/multilevel/npc_three_level_halfbridge.yaml | 0.000937 | 1.79e-06 | 1.79e-06 | 1.71e-06 | refused |
-| switching/multilevel/t_type_3level_halfbridge.yaml | 0.0749 | 0.0738 | 0.0738 | 0.000108 | refused |
+| switching/multilevel/npc_three_level_halfbridge.yaml | 0.00319 | 5.06e-06 | 5.06e-06 | 7.9e-06 | refused |
+| switching/multilevel/t_type_3level_halfbridge.yaml | 0.0782 | 0.0771 | 0.0771 | 0.000112 | refused |
 | thermal/electrothermal_resistor_self_heating.yaml | 0 | 0 | 0 | 0 | refused |
 | thermal/long_run_drift_buck.yaml | 0.000603 | 1.12e-05 | 1.12e-05 | 2.58e-06 | 0.000271 |
 | three_phase/interleaved_buck_3ph.yaml | 0.00217 | 0.00249 | 1.75e-06 | 6.65e-08 | 6.88e-06 |
@@ -294,6 +294,26 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | buck_dcm | 0.000538 | 5.32e-08 | 1.87e-08 | 5.63e-07 | 7.34e-10 |
 
 ## Notes
+
+**Integration batch 7: examples audit (ac850b08) merged, 2026-11-17.**
+The tables above are regenerated on the merged tree (`reference_status`,
+exit 0; `pytest -m reference` 324 passed). Against the tree before the
+merge (03a6ea11) no outcome changes; only the four circuits whose
+capacitor ICs now mean the voltage across the capacitor (25707fe8, below)
+move: `half_bridge_transformer_dc` pwl 0.1506 -> 0.1013 (disagree),
+pwl+restart / pwl+split 4.59e-4 -> 1.13e-3, trbdf2 2.37e-5 -> 2.08e-5;
+`half_bridge_inverter_lc` <= 0.2 % relative on every configuration;
+`npc_three_level_halfbridge` pwl 9.37e-4 -> 3.19e-3, restart / split
+1.79e-6 -> 5.06e-6, trbdf2 1.71e-6 -> 7.90e-6; `t_type_3level_halfbridge`
+pwl 0.0749 -> 0.0782 and restart / split 0.0738 -> 0.0771 (disagree,
+as before), trbdf2 1.08e-4 -> 1.12e-4. The analytic set is unchanged.
+
+**Series-capacitor ICs (25707fe8), 2026-11-13.** A capacitor's `ic` is
+now the voltage across it, so four triaged circuits start from a
+different x0: `half_bridge_transformer_dc`, `half_bridge_inverter_lc`,
+`npc_three_level_halfbridge`, `t_type_3level_halfbridge`. Their rows
+above were re-measured with `reference_status.differential` on those four
+only (no full regeneration); every outcome is unchanged.
 
 **Fixed-step event splitting (pwl+split), 2026-11-13.** `pwl+split` is
 `discontinuity_restart` + `enable_substep_state_correction` (opt-in, off
@@ -412,7 +432,8 @@ edges (pointwise < 5e-5 of span).
 **What the restart rule does on pwl (23 disagreements with the flag
 off).** On the strict gate today (table above) it removes 6:
 `current_source_rl_step`, `rl_natural_response` (5.8e-3 -> 4e-5),
-`half_bridge_transformer_dc` (0.151 -> 4.6e-4), `high_q_rlc_ringdown`
+`half_bridge_transformer_dc` (0.151 -> 4.6e-4; 0.101 -> 1.1e-3 once the
+series-capacitor IC fix 25707fe8 starts Cdiv1 at its 24 V), `high_q_rlc_ringdown`
 (0.0229 -> 0.0149), `synchronous_flyback` (0.207 -> 1.01e-6) and, since
 the b6 merge, `three_phase_diode_rectifier` (1.51 -> 6.3e-3). It cuts
 DAB 3.58 -> 0.081, flyback 0.95 -> 0.11 and forward 0.71 -> 0.092

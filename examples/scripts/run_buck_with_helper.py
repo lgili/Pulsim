@@ -42,5 +42,11 @@ res = p.simulate(b, t_end=20e-3, dt=2e-6, closed_loops=[loop])
 v_out_ss = float(np.mean(res.v("vout")[-1000:]))
 final_duty = loop.duty_history[-1][1]
 print(f"V_out steady-state: {v_out_ss:.4f} V  (target 5.0 V)")
-print(f"Final duty:         {final_duty:.4f}  (ideal 5/12 = {5/12:.4f})")
+# 220 µH is below L_crit = (1−D)·R/(2·f) ≈ 233 µH, so the buck runs in DCM
+# and needs less than the CCM duty 5/12: M = 2/(1+√(1+4K/D²)), K = 2L/(R·T).
+K_dcm = 2 * 220e-6 / (8.0 * 1e-4)
+D_dcm = float(np.sqrt(4 * K_dcm / ((2 / (5 / 12) - 1) ** 2 - 1)))
+# The gate edge sits on the 2 µs grid (duty steps of 0.02), so the
+# commanded duty dithers around D_dcm by up to one step.
+print(f"Final duty:         {final_duty:.4f}  (DCM {D_dcm:.4f}; CCM 5/12 = {5/12:.4f})")
 print(f"Error:              {abs(v_out_ss - 5.0) / 5.0 * 100:.2f}%")

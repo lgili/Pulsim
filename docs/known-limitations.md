@@ -190,7 +190,7 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **Only the DC machine is solved in the matrix.** `b.add_dc_machine` is MNA-native; the PMSM observer, BLDC and induction motor are still forward-Euler observers on `pwl` only (`b.add_pmsm_mna` is native). No machine model is validated against measurements: the tests check analytic limits of the equations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). | Use `b.add_dc_machine`; halve `dt` to check an observer run. |
+| **Only the DC machine is solved in the matrix.** `b.add_dc_machine` is MNA-native; the PMSM observer, BLDC and induction motor are still explicit observers on `pwl` only (forward Euler; the induction motor's rotor flux is integrated exactly over each step since 2026-11, but its EMF still reaches the circuit one step late) (`b.add_pmsm_mna` is native). No machine model is validated against measurements: the tests check analytic limits of the equations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). | Use `b.add_dc_machine`; halve `dt` to check an observer run. |
 | No angle node on `add_dc_machine` (`theta_node` raises `UnsupportedError`); no `components()` entry for the machine as a whole (its sub-elements are listed). | — | Integrate `res.v(omega_node)`, or build the angle: `add_vccs` from the speed node into a 1 F capacitor. |
 
 ## Passives
@@ -201,6 +201,22 @@ event where the signal jumps.
 | **YAML has no `rac:` ladder or `transmission_line` type.** `rac:` on an inductor is refused by name; `esr`, `esl`, `c_par` are read. Other unknown per-device keys are still ignored without a warning. | — | Build ladders and lines from Python. |
 | One ESR value (no frequency dependence), single-pair line (no coupled three-phase cable). The DC-bias capacitance is `odd_charge_table` only: no `fit_mlcc_dc_bias`, no YAML, and it is a Newton device (`pwl` / `trbdf2`). | — | Read ESR at the switching frequency; fit `R_ac(f)` of windings with `fit_rac_ladder`; integrate the datasheet C(V) curve into knots yourself. |
 | **A winding with an `rac=` ladder cannot be coupled.** `add_inductor_coupling` refuses it with `UnsupportedError` (feature `rac`): coupling the main inductor alone would leave the cells' flux uncoupled. | — | Couple windings built with `esr=`, or use `add_transformer`. |
+
+## Found by the examples audit (2026-11-13)
+
+Reproducers are in `probes/` (run them against the tree to re-measure);
+each example affected says so where it prints the number. Fixed since
+the audit (see the CHANGELOG): the `pseudo_trans` divergence,
+`run_transient_adaptive` reading low, the forward-Euler induction-motor
+flux and `run_ac_sweep` reading inside the start-up. The `b_extra` sign
+and the moving `branch_var_id_for_*` index are contracts, documented in
+`simulate` and `docs/api-reference.md`.
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **`device_loss_summary`'s resistor `P_avg` is first order in `dt` on PWM currents** (each edge becomes a one-step ramp in the stored samples; the switch `P_avg` is exact). Owner: `python/pulsim/losses.py`, `device_loss_summary` (line 1556). Probe: `probes/loss_resistor_first_order_edges.py`. | R in series with a PWM switch: 1114.24 / 1121.77 / 1125.54 W at 50 / 100 / 200 steps per period against the exact 1129.30 W; M1 11.2926 W against 11.2930 W. | `p.time_average(t, R * i**2)` with `i` from `res.i`, or halve `dt`. |
+| **`compute_bh_loop` can return a negative loop area (a negative core loss).** A closed sine loop on the `permalloy` J-A set has ∮H dB < 0 above ~300 A/m, and the `ferrite_n87` area shrinks as the drive rises into saturation. Owner: `python/pulsim/hysteresis.py`, `JilesAthertonModel.update`, the irreversible slope at line 336. Probe: `probes/ja_negative_loop_area.py`. | permalloy 29.1 / −12.4 / −14.8 J/m³ at 100 / 300 / 1000 A/m; ferrite_n87 42.8 / 28.8 / 13.9 J/m³ at 300 / 1000 / 3000 A/m. The δ_M guard and a ≥ 0 clamp on the slope do not remove it. | Check the sign of `energy_per_cycle_per_m3`, and that the J-A B matches the circuit's B (`run_psfb_ja_loss_analysis.py` does both). |
+| **Tightly coupled half bridge: `trbdf2` aborted and a coarse fixed step read low without warning** (audit report). Owner: `core/include/pulsim/solver/trbdf2_transient.hpp`. Probe: `probes/half_bridge_tight_coupling.py`. | Audit: `refactorize failed (numerically singular)` at h ≈ 5e-14 s for k = 0.999 / 0.99999; at k = 0.99999 `dt` = 2e-8 gave 4.17 V against 4.99 V at 1e-8. NOT reproduced on this tree with the project's half bridge (3 ms, mean over 2–3 ms): k = 0.99999 reads 4.869 / 4.870 V at `dt` = 2e-8 / 1e-8 and `trbdf2` runs (4.924 V); k = 0.999: 4.685 / 4.688 / 4.695 V. The configuration behind the audit's numbers was not recorded. | `engine='pwl'`; halve `dt` and compare. |
 
 ## Older entries
 

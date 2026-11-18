@@ -15,21 +15,20 @@ With V_in = 24 V, L = 100 µH, C = 47 µF, R = 5 Ω:
     DC gain = V_in = 24 V (i.e. +27.6 dB)
     Q = R·√(C/L) = 5·√(0.47) ≈ 3.43
 
-The measured Bode matches the analytical to ~1 dB / 1° across
-the entire 50 Hz – 20 kHz sweep:
-  * DC gain ≈ +27.6 dB ✓
-  * Resonance peak at f_LC = 2115 Hz ✓
-  * Phase 0° → -180° crossing through -90° at resonance ✓
-  * -40 dB/decade roll-off above resonance ✓
+Measured against the analytical G_vd (printed at the end):
+  * rms magnitude error over the 20 points ≈ 0.3 dB
+  * DC gain 27.57 vs 27.62 dB
+  * Resonance peak ~1.2 dB below the analytical 37.9 dB: ε = 0.05 is
+    large-signal at the Q ≈ 3.4 peak (ε = 0.02 gives 37.83 dB, at
+    2.5× the run time)
+  * Phase 0° → -180°, -40 dB/decade roll-off above f_LC ≈ 2.3 kHz
 
 PWM RESOLUTION CONSTRAINT: dt must be ≪ ε·T_PWM, otherwise the
 duty perturbation gets quantised to dt-slots inside each PWM
-cycle. The result is a square-wave V_out instead of a sine, whose
-DFT bin at the test frequency picks up the (4/π) Fourier
-coefficient of the square — manifesting as a constant +10 dB
-offset on the Bode magnitude. We enforce dt ≤ ε·T_PWM / 4 via
-`dt_fn`. Earlier versions of this script used dt = T_PWM/20
-(too coarse) and were off by +10 dB; see git history for details.
+cycle. A sine quantised to N levels keeps a fundamental of
+0.954·ε at N = 4 (−0.41 dB on every point) and 0.994·ε at N = 16,
+so `dt_fn` enforces dt ≤ ε·T_PWM / 16. Each point also settles
+≥ 5 ms so the cold-start LC ring (τ = 2RC ≈ 0.47 ms) has died out.
 """
 
 from __future__ import annotations
@@ -49,9 +48,9 @@ R_LOAD   = 5.0
 F_PWM    = 100e3
 T_PWM    = 1.0 / F_PWM
 D_OP     = 0.5
-# Pick ε large enough that dt = ε·T_PWM/4 stays tractable, but
-# small enough to stay in the small-signal regime. ε=0.05 gives
-# dt = 125 ns (fine PWM grid) with linearity error well under 1 %.
+# Pick ε large enough that dt = ε·T_PWM/16 stays tractable (31 ns).
+# ε=0.05 is small-signal off resonance; at the Q≈3.4 peak it reads
+# ~1.2 dB low (large-signal), see the docstring.
 EPS_DUTY = 0.05
 F_MIN    = 100.0
 F_MAX    = 20e3              # well below F_PWM/5
@@ -105,23 +104,39 @@ def main() -> None:
     # to the PWM grid and the response becomes a square wave
     # (which the DFT sees as a sine with 4/π ≈ +2.1 dB extra
     # gain — measured originally as +10 dB before this fix).
-    # Rule: dt ≤ ε·T_PWM / 4. With ε=0.01: dt ≤ 25 ns.
-    DT_PWM_RESOLVED = T_PWM * EPS_DUTY / 4.0
+    # Even then the duty sine is quantised to ε·T_PWM/dt levels: at 4
+    # levels (dt = ε·T_PWM/4) its fundamental is 0.954·ε (−0.41 dB on
+    # every point); at 16 levels 0.994·ε (−0.05 dB). Rule used here:
+    # dt ≤ ε·T_PWM / 16.
+    DT_PWM_RESOLVED = T_PWM * EPS_DUTY / 16.0
     def dt_fn(f: float) -> float:
         return min(DT_PWM_RESOLVED, (1.0 / f) / 200.0)
 
-    result = p.run_ac_sweep(
-        builder,
-        freqs=freqs,
-        excite_fn=excite,
-        switch_fn_factory=make_switch_fn,
-        output_idx=vout_idx,
-        dt_fn=dt_fn,
+    # Settling must outlast the cold-start LC ring (τ = 2RC ≈ 0.47 ms),
+    # not a fixed number of test cycles: with 8 cycles the high-
+    # frequency points (0.7 ms at 11 kHz) still carried the start-up
+    # ring and read −16 dB / +10 dB off. Settle ≥ 5 ms at every point.
+    points = []
+    for f in freqs:
+        points.append(p.run_ac_sweep(
+            builder,
+            freqs=[f],
+            excite_fn=excite,
+            switch_fn_factory=make_switch_fn,
+            output_idx=vout_idx,
+            dt_fn=dt_fn,
+            perturbation_amplitude=EPS_DUTY,
+            cycles_per_point=4,
+            settling_cycles=max(1, math.ceil(5e-3 * f)),
+            start_from_dc_op=False,
+            verbose=True,
+        ))
+    result = type(points[0])(
+        freqs=np.concatenate([q.freqs for q in points]),
+        H=np.concatenate([q.H for q in points]),
+        mag_dB=np.concatenate([q.mag_dB for q in points]),
+        phase_deg=np.concatenate([q.phase_deg for q in points]),
         perturbation_amplitude=EPS_DUTY,
-        cycles_per_point=10,
-        settling_cycles=8,
-        start_from_dc_op=False,
-        verbose=True,
     )
 
     # Analytical: G_vd(s) = V_in / (LCs² + (L/R)s + 1)
@@ -131,7 +146,7 @@ def main() -> None:
 
     H_ref = analytical(freqs)
     err_dB = result.mag_dB - 20 * np.log10(np.abs(H_ref))
-    print(f"\n  Verification (analytical G_vd = V_in / (LCs²+L/R·s+1)):")
+    print("\n  Verification (analytical G_vd = V_in / (LCs²+L/R·s+1)):")
     print(f"    DC gain (measured/analytical): "
           f"{result.mag_dB[0]:.2f} / {20*math.log10(abs(H_ref[0])):.2f} dB")
     # Peak resonance — measured + predicted.
@@ -143,6 +158,8 @@ def main() -> None:
           f"{20*math.log10(abs(H_ref[k_peak_ref])):.2f} dB "
           f"at f = {result.freqs[k_peak_ref]:.0f} Hz")
     print(f"    rms |dB error|: {np.sqrt((err_dB**2).mean()):.2f} dB")
+    err_ph = (result.phase_deg - np.degrees(np.angle(H_ref)) + 180) % 360 - 180
+    print(f"    max |phase error|: {np.abs(err_ph).max():.1f} deg")
 
     try:
         import matplotlib.pyplot as plt

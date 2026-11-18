@@ -150,8 +150,12 @@ def run_transient_adaptive(builder,
 
     # Track previous state for derivative estimation between segments.
 
-    # Track the state at the end of the previous segment so the next
-    # segment resumes from there instead of restarting at zero.
+    # Each segment resumes the previous one EXACTLY (`final_snapshot`:
+    # the state, the companion history and the diode bits). Passing
+    # only the state (`initial_state`) re-invented the history as zero
+    # at every boundary, a first-order kick per segment: a 10 kHz buck
+    # read 7.962 V against 8.043 V fixed-step on the same grid.
+    last_snapshot = None
     last_state = None
 
     while t < t_end - 1e-15:
@@ -169,7 +173,9 @@ def run_transient_adaptive(builder,
             step_observer=step_observer,
             start_from_dc_op=start_from_dc_op and (t == t_start),
             max_event_iterations=max_event_iterations,
-            initial_state=last_state,   # carry state across segments
+            resume_from=last_snapshot,
+            # A segment that left no valid snapshot hands on its state.
+            initial_state=None if last_snapshot is not None else last_state,
         )
         seg_times = np.asarray(res.times)
         seg_states = np.asarray(res.states)
@@ -218,6 +224,8 @@ def run_transient_adaptive(builder,
         dt_history.append(seg_dt)
         t = float(seg_times[-1])
         last_state = np.asarray(seg_states[-1], dtype=float)
+        snap = getattr(res, "final_snapshot", None)
+        last_snapshot = snap if getattr(snap, "valid", False) else None
 
         # Update dt for next segment using PI step controller.
         if lte_estimate > 0.0:

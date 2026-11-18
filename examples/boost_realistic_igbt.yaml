@@ -9,9 +9,8 @@
 #     smoothly through the transition (the "continuation in
 #     time" trick that resolves the V13 boost convergence
 #     corner)
-#   * Smooth-blend nonlinear_diode for the freewheel diode
-#     (avoids SwitchedDiode event-mask coupling with the
-#     IGBT's Newton refresh)
+#   * An event-commutated (switched) diode for the freewheel
+#     (the old smooth-blend nonlinear_diode is retired)
 #
 # Topology:
 #   V_in ─ L ─┬─ D ─┬─ vout ─ C ─ gnd
@@ -92,5 +91,5 @@ circuit:
 
 simulation:
   t_start: 0.0
-  t_end:   5.0e-3
+  t_end:   20.0e-3      # the output rings down with τ = 2·R·C = 4 ms
   dt:      1.0e-7
