@@ -36,6 +36,7 @@
 #include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <limits>
 #include <algorithm>
 #include <cstdint>
 #include <functional>
@@ -69,6 +70,11 @@ struct ReinitRecord {
     Real dW = 0;                     ///< energy removed [J], >= 0
     Real projection_gap = 0;         ///< max |x_proj - x(t+h)| over states
     long sample = -1;                ///< stored sample of the pulse, or -1
+    /// The switch the impulsive energy is booked to (task 6.4): the gated
+    /// element of the structure whose state changed on the step, else any
+    /// gated element that changed (a gate forcing a diode into the mode),
+    /// else the structure's first element. Empty: not attributed.
+    std::string cause;
 };
 
 /// add-complementarity-mode-selection on pwl: one decision site where the
@@ -288,12 +294,26 @@ private:
         case device::StateBlock::NonlinearCapacitor: return legacy.coss_history;
         case device::StateBlock::LauritzenDiode: return legacy.lauritzen_history;
         case device::StateBlock::IgbtTail: return legacy.igbt_tail_history;
-        case device::StateBlock::PmsmMna: break;
+        case device::StateBlock::PmsmMna: return legacy.pmsm_history;
         }
-        return legacy.pmsm_history;
+        // A block appended after 2.0 has no named field: never alias one.
+        throw std::logic_error(
+            "SolverSnapshot: this device-state block has no 2.0 named field");
     }
 
 public:
+    /// The fixed-step grid `t` sits on, t == grid_origin + grid_step ·
+    /// grid_dt to rounding (NaN: none — a variable-step or hand-built
+    /// snapshot). A fixed-step resume with the same dt continues it, so
+    /// the resumed trace is the continuous run's bit for bit.
+    Real grid_origin = std::numeric_limits<Real>::quiet_NaN();
+    Size grid_step = 0;
+    Real grid_dt = std::numeric_limits<Real>::quiet_NaN();
+    /// Set by the variable-step engine when the run ended exactly on a
+    /// gate edge after replacing the device derivative slots: `x` is the
+    /// pre-edge solve, the slots the post-edge ones. The fixed engine
+    /// refuses to resume from it (it rings and fails at the next edge).
+    bool post_edge_derivatives = false;
     /// Restart steps still owed (discontinuity_restart): the rule takes
     /// the step of a discontinuity and the next two as SDIRK(2,2)
     /// steps, so a run stopped inside that window resumes it. 0 = none.

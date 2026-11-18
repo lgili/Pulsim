@@ -76,12 +76,14 @@ public:
                     .var        = var,
                     .gate       = p.gate,
                     .I_H        = p.I_H,
+                    .ideal      = var >= 0 && pool.branch_R_on(branch.id) == Real{0},
                 });
                 if (p.gate != models::SwitchedDiode::Gate::None) {
                     ++num_gated_;   // switch indices rise: the index is sorted
                     gated_index_.emplace_back(static_cast<Size>(switch_idx),
                                               diodes_.size() - 1);
                 }
+                any_ideal_ = any_ideal_ || diodes_.back().ideal;
             }
             ++switch_idx;
         }
@@ -204,6 +206,29 @@ public:
         return changed;
     }
 
+    /// As update_from_state(x), except that an OFF ideal (R_on = 0)
+    /// branch-form diode turns ON only past a round-off floor,
+    /// 1e-12·max(1, ‖x‖∞): with V_f = 0 across a closed ideal switch (an
+    /// inverter leg) its voltage is the loop's residual, and a positive ulp
+    /// turned it ON into an undefined loop current (ideal_voltage_loop).
+    /// Without such a diode it is update_from_state(x), bit for bit.
+    bool update_from_state_floored(const Vector& x) {
+        if (!any_ideal_) return update_from_state(x);
+        const Real floor = Real{1e-12} * std::max(Real{1}, x.lpNorm<Eigen::Infinity>());
+        bool changed = false;
+        for (auto& d : diodes_) {
+            const Real v = d.law_voltage(x, d.is_on);
+            const bool next = models::SwitchedDiode::decide(d.is_on, v, d.params());
+            if (next == d.is_on) continue;
+            if (d.ideal && !d.is_on &&
+                !(models::SwitchedDiode::crossing_signal(false, v, d.params()) > floor))
+                continue;
+            d.is_on = next;
+            changed = true;
+        }
+        return changed;
+    }
+
     /// Public DiodeEntry layout for Layer 5 V2.2's sub-step
     /// commutation timing. Layer 5 reads the entries to compute
     /// the watched signal at the pre/post-step states.
@@ -221,6 +246,7 @@ public:
         models::SwitchedDiode::Gate gate = models::SwitchedDiode::Gate::None;
         Real  I_H = Real{0};
         bool  g = true;   // gate bit of the latest apply_gates
+        bool  ideal = false;   // branch form with R_on = 0
 
         /// The voltage the diode law reads for state `on`: v_a - v_k; for
         /// an ON branch-form diode V_f + i_s (see the constructor).
@@ -318,6 +344,7 @@ private:
     Size num_switches_;
     Size num_gated_ = 0;
     std::vector<std::pair<Size, Size>> gated_index_;   //!< (switch idx, entry)
+    bool any_ideal_ = false;
     std::vector<DiodeEntry> diodes_;
     topology::SwitchStateMask owned_{0};
 };

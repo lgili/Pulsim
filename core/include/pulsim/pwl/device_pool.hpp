@@ -715,6 +715,39 @@ public:
         return requires_newton();
     }
 
+    // ---- add-permeance-magnetic-domain ------------------------------
+    /// Mark `node` as a magnetic node (potential = MMF [A]). Ground is
+    /// the shared reference and is never marked. Preflight refuses a
+    /// magnetic island without a reference instead of tying it, counts a
+    /// permeance on a magnetic node as a DC path, and the DC assembly
+    /// writes flux conservation on a magnetic node that touches only
+    /// permeances.
+    void mark_flux_node(Index node) {
+        if (node < 0) return;
+        const auto it = std::ranges::lower_bound(flux_nodes_, node);
+        if (it == flux_nodes_.end() || *it != node) flux_nodes_.insert(it, node);
+    }
+    [[nodiscard]] bool is_flux_node(Index node) const noexcept {
+        return node >= 0 && std::ranges::binary_search(flux_nodes_, node);
+    }
+    /// Magnetic nodes, ascending.
+    [[nodiscard]] const std::vector<Index>& flux_nodes() const noexcept {
+        return flux_nodes_;
+    }
+    /// Geometry of a magnetic segment (area [m²], length [m]) for the
+    /// B = Φ/A and H = F/l outputs; branches without geometry have none.
+    struct MagneticGeometry {
+        Index branch;
+        Real area;
+        Real length;
+    };
+    void set_magnetic_geometry(Index branch, Real area, Real length) {
+        magnetic_geometry_.push_back(MagneticGeometry{branch, area, length});
+    }
+    [[nodiscard]] const std::vector<MagneticGeometry>& magnetic_geometry() const noexcept {
+        return magnetic_geometry_;
+    }
+
     /// Non-throwing companion to `kind_of`: is there a device
     /// registered on this branch at all? Diagnostic passes (the
     /// preflight sweep, error paths) need to ask without risking a
@@ -1454,6 +1487,11 @@ private:
     // the branch a CCCS / CCVS senses.
     numeric::Dictionary<Index, std::pair<Index, Index>> control_nodes_;
     numeric::Dictionary<Index, Index> control_branch_;
+
+    // add-permeance-magnetic-domain: magnetic nodes (sorted) and segment
+    // geometry, in insertion order.
+    std::vector<Index> flux_nodes_;
+    std::vector<MagneticGeometry> magnetic_geometry_;
 };
 
 /// One row per `StoredKind`, in enum order: the kind's name (spelled as

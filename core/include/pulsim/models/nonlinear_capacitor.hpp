@@ -54,6 +54,7 @@ enum class ChargeLawKind : int {
     Junction = 0,  //!< C0 / (1 + v/V0)^m — the original law, unchanged
     Table    = 1,  //!< a `ChargeTable` (datasheet curve)
     VdmosCgd = 2,  //!< SPICE VDMOS gate-drain law (CGDMAX, CGDMIN, A)
+    Tanh     = 3,  //!< odd tanh saturation (a saturable permeance)
 };
 
 /// Junction-law nonlinear capacitor: C(v) = C0 / (1 + v/V0)^m.
@@ -82,6 +83,16 @@ enum class ChargeLawKind : int {
 ///     as u·C(u) − s·ln(1+a²u²)/(2a) and C below a·u = −1 from CGDMIN
 ///     (atan(x) = −π/2 − atan(1/x)), so Q stays monotone at 1 pV spacing
 ///     at −400 V where the expanded form cancels ten-fold.
+///
+/// add-permeance-magnetic-domain adds `Tanh`, the odd saturation law of
+/// a saturable permeance (`add_saturable_permeance`), on the VDMOS fields
+/// (`cgd_max` = C_max, `cgd_min` = C_min) and `V0`:
+///         Q(v) = C_min·v + (C_max − C_min)·V0·tanh(v/V0)
+///         C(v) = C_min + (C_max − C_min)·sech²(v/V0)
+/// C^∞ and odd, C(0) = C_max, C → C_min from above, so Q is strictly
+/// increasing. For a core segment of area A and length l with the
+/// `GappedCore` material law B = μ₀(H + M_s·tanh(H/H₀)), v = F (the MMF),
+/// Q = Φ: C_min = μ₀A/l, C_max = μ_r·μ₀A/l, V0 = l·H₀.
 struct NonlinearCapacitor {
     struct Params {
         Real C0 = Real{1e-12};   //!< zero-bias capacitance [F]
@@ -104,6 +115,15 @@ struct NonlinearCapacitor {
                                          Real v_floor = Real{-0.9}) {
         return Params{.C0 = C0, .V0 = V0, .m = m, .v_floor = v_floor};
     }
+    /// Tanh-law params: Q = c_min·v + (c_max − c_min)·v0·tanh(v/v0).
+    [[nodiscard]] static Params tanh_law(Real c_max, Real c_min, Real v0) {
+        Params p;
+        p.law = ChargeLawKind::Tanh;
+        p.cgd_max = c_max;
+        p.cgd_min = c_min;
+        p.V0 = v0;
+        return p;
+    }
     /// Table-law params.
     [[nodiscard]] static Params from_table(std::shared_ptr<const ChargeTable> t) {
         Params p;
@@ -124,6 +144,7 @@ struct NonlinearCapacitor {
         switch (p.law) {
         case ChargeLawKind::Table:    return "table";
         case ChargeLawKind::VdmosCgd: return "vdmos_cgd";
+        case ChargeLawKind::Tanh:     return "tanh";
         case ChargeLawKind::Junction: break;
         }
         return "junction";
@@ -157,7 +178,32 @@ struct NonlinearCapacitor {
         return u * vdmos_capacitance_(p, u) - s * std::log1p(x * x) / (Real{2} * p.a);
     }
 
+    /// sech²(x) as 4e^{−2|x|}/(1 + e^{−2|x|})²: no overflow of cosh and
+    /// no 1 − tanh² cancellation in the tail.
+    [[nodiscard]] static Real sech2_(Real x) noexcept {
+        const Real e = std::exp(Real{-2} * std::abs(x));
+        const Real d = Real{1} + e;
+        return Real{4} * e / (d * d);
+    }
+
     static void validate(const Params& p) {
+        if (p.law == ChargeLawKind::Tanh) {
+            if (!(p.cgd_min > Real{0}) || !std::isfinite(p.cgd_min)) {
+                throw std::invalid_argument(std::format(
+                    "NonlinearCapacitor: the tanh law needs C_min > 0 (got {})",
+                    p.cgd_min));
+            }
+            if (!(p.cgd_max > p.cgd_min) || !std::isfinite(p.cgd_max)) {
+                throw std::invalid_argument(std::format(
+                    "NonlinearCapacitor: the tanh law needs C_max > C_min "
+                    "(got C_max = {}, C_min = {})", p.cgd_max, p.cgd_min));
+            }
+            if (!(p.V0 > Real{0}) || !std::isfinite(p.V0)) {
+                throw std::invalid_argument(std::format(
+                    "NonlinearCapacitor: the tanh law needs V0 > 0 (got {})", p.V0));
+            }
+            return;
+        }
         if (p.law == ChargeLawKind::Table) {
             if (!p.table || p.table->size() < 3) {
                 throw std::invalid_argument(
@@ -218,6 +264,9 @@ struct NonlinearCapacitor {
         noexcept {
         if (p.law == ChargeLawKind::Table) return p.table->capacitance(v);
         if (p.law == ChargeLawKind::VdmosCgd) return vdmos_capacitance_(p, v);
+        if (p.law == ChargeLawKind::Tanh) {
+            return p.cgd_min + (p.cgd_max - p.cgd_min) * sech2_(v / p.V0);
+        }
         return p.C0 / std::pow(Real{1} + u_of(p, v), p.m);
     }
 
@@ -228,6 +277,9 @@ struct NonlinearCapacitor {
         noexcept {
         if (p.law == ChargeLawKind::Table) return p.table->charge(v);
         if (p.law == ChargeLawKind::VdmosCgd) return vdmos_charge_(p, v);
+        if (p.law == ChargeLawKind::Tanh) {
+            return p.cgd_min * v + (p.cgd_max - p.cgd_min) * p.V0 * std::tanh(v / p.V0);
+        }
         const Real u = u_of(p, v);
         const Real e = Real{1} - p.m;
         return p.C0 * p.V0 / e

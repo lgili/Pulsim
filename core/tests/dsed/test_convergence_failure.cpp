@@ -69,7 +69,8 @@ struct ZeroMask {
 
 // The binding's wiring (python/dsed_bindings.cpp, run_ped_native_builder):
 // two predicates per PWL diode, diode commutation on, optionally the LCP.
-ConvergenceFailure run_builder(builder::CircuitBuilder& b, Real t_end, Real lcp_h_e) {
+ConvergenceFailure run_builder(builder::CircuitBuilder& b, Real t_end, Real lcp_h_e,
+                               int settle_cap = 64) {
     pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
     using Adapter = NativeCircuitBuilderAdapter<>;
     Adapter ad{b.graph(), b.pool(), cache};
@@ -104,6 +105,7 @@ ConvergenceFailure run_builder(builder::CircuitBuilder& b, Real t_end, Real lcp_
                                         std::move(pred), Real{1e-9}, Real{1e-5}, 1);   // simulate()'s defaults
     sim.enable_diode_commutation(owned, topology::SwitchStateMask(n_sw), std::move(diodes));
     sim.set_event_projection(true);
+    sim.set_settle_round_cap(settle_cap);
     if (lcp_h_e > 0) sim.enable_mode_lcp(lcp_h_e, ad.passivity());
     ad.set_mask(topology::SwitchStateMask(n_sw));
     const Vector x0 = Vector::Zero(ad.n_state());
@@ -181,12 +183,15 @@ TEST_CASE("ConvergenceFailure: the step cap is kind max_steps",
 TEST_CASE("ConvergenceFailure: a settle that hits its round cap is kind settle",
           "[v2][dsed][convergence]") {
     // Five bridges paralleled on one bus, no guard: the pairs fight at rest.
+    // Whether that fight settles inside 64 rounds is a rounding outcome (it
+    // stopped hitting the cap when the exact propagator's eigenpairs changed),
+    // so the cap is the test hook's 1 round: any event where a diode flips.
     builder::CircuitBuilder b;
     bridge_bank(b, 5, 0.0, true);
-    const auto e = run_builder(b, 0.02, 0.0);
+    const auto e = run_builder(b, 0.02, 0.0, 1);
     REQUIRE(e.kind() == ConvergenceKind::Settle);
     REQUIRE(e.time() < 1e-9);
-    REQUIRE(std::string{e.what()}.find("did not settle after 64 rounds") != std::string::npos);
+    REQUIRE(std::string{e.what()}.find("did not settle after 1 rounds") != std::string::npos);
 }
 
 TEST_CASE("ConvergenceFailure: a chattering diode is kind chatter and named",

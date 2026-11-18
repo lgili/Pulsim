@@ -51,7 +51,7 @@ namespace pulsim::pwl {
                       ? *user
                       : topology::SwitchStateMask(
                             static_cast<std::size_t>(graph.num_switches())));
-    d.update_from_state(dc_x);
+    d.update_from_state_floored(dc_x);
     return d;
 }
 

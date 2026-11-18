@@ -350,3 +350,45 @@ TEST_CASE("Non-passive ports: enumeration finds the mode Lemke cannot certify", 
     CHECK(z.minCoeff() >= 0.0);
     CHECK(w.minCoeff() >= -1e-12);
 }
+
+// add-branch-form-ideal-switch 6.1: an ideal port (R_on = 0) is posed in OFF
+// coordinates from either previous mode; (Z, u) is the network with it cut out.
+TEST_CASE("An ideal port is decided from its crossing signals in OFF coordinates",
+          "[modes][ideal]") {
+    ModeSelector sel;
+    const CircuitScale sc{24.0, 2.0, 0.0};
+    auto run = [&](Real z, Real u, char prev, Real V_f = 0.0) {
+        const std::vector<DiodePort> ports = {{0.0, 0.0, V_f, 0.0}};
+        const std::vector<char> pv = {prev};
+        return sel.select(ports, pv, [&](Real, DenseMatrix& Z, Vector& uu) {
+            Z = DenseMatrix::Constant(1, 1, z);
+            uu = Vector::Constant(1, u);
+        }, 1e-9, sc);
+    };
+    for (const char prev : {char(0), char(1)}) {
+        INFO("previous mode " << int(prev));
+        // a loop of a source and closed ideal elements reverse-biases it
+        // (Z = 0, v = -24 V): released OFF, the gap w = 24 V
+        auto out = run(0.0, -24.0, prev);
+        CHECK(out.status == LcpStatus::Trivial);
+        CHECK(out.on[0] == 0);
+        CHECK_THAT(sel.last_gap()[0], Catch::Matchers::WithinAbs(24.0, 1e-12));
+        // the same loop forward-biasing it: no consistent mode
+        out = run(0.0, 1.0, prev);
+        CHECK(out.status == LcpStatus::SecondaryRay);
+        // V_f = 0 across a closed ideal switch: the gap is the loop's
+        // round-off residual, of either sign; OFF both ways
+        for (const Real r : {1e-13, -1e-13}) {
+            for (const Real z : {0.0, 1e-15}) {
+                out = run(z, r, prev);
+                CHECK(out.status == LcpStatus::Trivial);
+                CHECK(out.on[0] == 0);
+            }
+        }
+        // 10 V behind 5 ohm, V_f = 0.7: ON, i_s = 1.86 A, w = 0
+        out = run(5.0, 10.0, prev, 0.7);
+        CHECK(out.on[0] == 1);
+        CHECK_THAT(sel.last_current()[0], Catch::Matchers::WithinAbs(1.86, 1e-12));
+        CHECK_THAT(sel.last_gap()[0], Catch::Matchers::WithinAbs(0.0, 1e-12));
+    }
+}

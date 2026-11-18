@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import random
+import struct
 import warnings
 
 import numpy as np
@@ -78,7 +79,8 @@ def test_fuzz_exact_operations_bit_for_bit():
         if not math.isfinite(want):
             continue
         got = k._eval_expr(text, list(env), list(env.values()))
-        assert got == want, (text, got, want)
+        # the same bits, the sign of a zero included
+        assert struct.pack("<d", got) == struct.pack("<d", want), (text, got, want)
 
 
 def _libm_case(rng, env):
@@ -99,6 +101,13 @@ def _libm_case(rng, env):
         e = rng.choice((2.0, 0.5, 3.0, -1.0))
         return f"(abs({ta}) + 0.5)^{e!r}", math.pow(abs(a) + 0.5, e)
     return f"atan2({ta}, {tb})", math.atan2(a, b)
+
+
+def test_min_max_keep_the_first_operand_on_a_tie():
+    # Python's rule, so a signed zero does not depend on the libm's fmin
+    for text, want in (("min(0, -0)", 0.0), ("min(-0, 0)", -0.0),
+                       ("max(0, -0)", 0.0), ("max(-0, 0)", -0.0)):
+        assert struct.pack("<d", k._eval_expr(text, [], [])) == struct.pack("<d", want), text
 
 
 def test_fuzz_libm_functions_within_a_few_ulp():

@@ -173,6 +173,7 @@ public:
                                               std::abs(proj - xb[j]));
             }
             rec.sample = sample;
+            rec.cause = cause_(d, stamped);
             if (on_impulse_error) {
                 std::string sts;
                 for (const auto& s : rec.states) {
@@ -203,6 +204,25 @@ public:
     }
 
 private:
+    /// The element of `d` whose bit changed since the last committed mode,
+    /// a gated one first (the gate that entered the mode), else a diode of
+    /// `d` that changed, else d's first element. Only `d`'s own elements:
+    /// a switch toggling elsewhere on the same step is not the cause.
+    [[nodiscard]] std::string cause_(const DependentStructure& d,
+                                     const topology::SwitchStateMask& now) const {
+        auto changed = [&](Index el, bool gated) {
+            const long s = slot_[static_cast<std::size_t>(el)];
+            return known_ && s >= 0 && pool_.is_registered(el) &&
+                   (pool_.kind_of(el) != DevicePool::StoredKind::Diode) == gated &&
+                   now.get(static_cast<Size>(s)) != prev_.get(static_cast<Size>(s));
+        };
+        for (const bool gated : {true, false})
+            for (const Index el : d.elements)
+                if (changed(el, gated)) return std::string(graph_.branch_name(el));
+        return d.elements.empty() ? std::string{}
+                                  : std::string(graph_.branch_name(d.elements.front()));
+    }
+
     const topology::Graph& graph_;
     const DevicePool& pool_;
     std::vector<long> slot_;

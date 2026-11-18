@@ -1,21 +1,28 @@
 #pragma once
 
 // =============================================================================
-// Pulsim — the five stateful-device histories as one object
+// Pulsim — the stateful-device kinds of a run, as one object
 // =============================================================================
 //
-// add-unified-device-interface step 1. The Coss, Lauritzen, PMSM, IGBT-tail
-// and saturable-inductor histories share one de-facto API; the two transient
-// drivers used to call each by name (99 call sites), so a sixth kind or a new
-// commit path had to be added in every place and was silently missing where
-// it was not. Every driver operation is now one call here that visits all
-// five in one fixed order. The histories' arithmetic is unchanged.
+// add-unified-device-interface steps 1 and 4. The Coss, Lauritzen, PMSM,
+// IGBT-tail and saturable-inductor histories are the kinds of one list,
+// `StatefulKinds`, each modelling `device::StatefulKind`
+// (device/kind.hpp). The two transient drivers used to call each by name
+// (99 call sites), so a sixth kind or a new commit path had to be added in
+// every place and was silently missing where it was not. Every driver
+// operation is now one fold over the list, in its fixed order (also the
+// stamp order of the Newton refresh). The kinds' arithmetic is unchanged.
 //
-// The per-kind argument conventions (Coss takes a bool for backward Euler
-// and has its own BDF2 commit; the saturable inductor takes no h) are
-// mapped here, once, from (h, TrBdf2Stage).
+// The in-run rollback is ONE flat vector of reals: every real each kind
+// carries from step to step, its stage scratch included (`for_each_state`;
+// the Coss kind-level `q_gamma` is not: `capture_gamma` rewrites it before
+// every read), so
+// restoring it is bit-identical to restoring the entries. The snapshot of a
+// run (`save` / `load`) is the physical subset, `to_flat`, in the block
+// order of `device::kStateBlocks`.
 
 #include "pulsim/device/device_state.hpp"
+#include "pulsim/device/kind.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/device_pool.hpp"
@@ -31,111 +38,137 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace pulsim::pwl {
 
+/// THE list of stateful Newton kinds, in fold (and stamp) order. A new
+/// kind is appended here (design.md, "How to add a device kind").
+using StatefulKinds = device::TypeList<
+    NonlinearCapacitorHistory, LauritzenDiodeHistory, PmsmMnaHistory,
+    IgbtTailHistory, SaturableInductorHistory>;
+
+using StatefulCheck = device::detail::ListCheck<StatefulKinds>;
+static_assert(StatefulCheck::kinds,
+              "every StatefulKinds entry must model device::StatefulKind");
+static_assert(StatefulCheck::reals,
+              "a kind's kFlatPerDevice must equal its block's "
+              "reals_per_instance in device::kStateBlocks");
+static_assert(StatefulCheck::newton,
+              "a stateful kind's kStoredKind must be a Newton row of "
+              "kKindCaps (engines without a Newton solve refuse it)");
+static_assert(StatefulCheck::blocks_claimed_once(),
+              "every device::StateBlock but LinearCompanion must be "
+              "claimed by exactly one stateful kind");
+
 class StatefulHistories {
 public:
-    NonlinearCapacitorHistory coss;
-    LauritzenDiodeHistory laur;
-    PmsmMnaHistory pmsm;
-    IgbtTailHistory tail;
-    SaturableInductorHistory sat;
+    /// A rollback point: every real of every kind, stage scratch included.
+    using Snapshot = std::vector<Real>;
 
-    /// A rollback point: every history's entries.
-    struct Snapshot {
-        std::vector<NonlinearCapacitorHistory::Entry> coss;
-        std::vector<LauritzenDiodeHistory::Entry> laur;
-        std::vector<PmsmMnaHistory::Entry> pmsm;
-        std::vector<IgbtTailHistory::Entry> tail;
-        std::vector<SaturableInductorHistory::Entry> sat;
-    };
+    template <class K> [[nodiscard]] K& get() noexcept {
+        return std::get<K>(kinds_);
+    }
+    template <class K> [[nodiscard]] const K& get() const noexcept {
+        return std::get<K>(kinds_);
+    }
 
-    /// Visit the five histories in the one fixed order (also the stamp
-    /// order of the Newton refresh).
+    /// Visit the kinds in list order.
     template <class F> void for_each(F&& f) {
-        f(coss); f(laur); f(pmsm); f(tail); f(sat);
+        std::apply([&](auto&... k) { (f(k), ...); }, kinds_);
     }
     template <class F> void for_each(F&& f) const {
-        f(coss); f(laur); f(pmsm); f(tail); f(sat);
+        std::apply([&](const auto&... k) { (f(k), ...); }, kinds_);
     }
 
     void init(const topology::Graph& graph, const DevicePool& pool) {
-        for_each([&](auto& h) { h.init(graph, pool); });
+        for_each([&](auto& k) { k.init(graph, pool); });
     }
     [[nodiscard]] bool any() const noexcept {
         bool a = false;
-        for_each([&](const auto& h) { a = a || !h.empty(); });
+        for_each([&](const auto& k) { a = a || !k.empty(); });
         return a;
     }
     void seed_from_dc_op(const Vector& x) {
-        for_each([&](auto& h) { h.seed_from_dc_op(x); });
+        for_each([&](auto& k) { k.seed_from_dc_op(x); });
     }
 
     /// Commit the just-solved step of `h` under `stage` (the rule its
     /// solve stamped). `Bdf2Stage2` needs `capture_gamma` at the stage
     /// point of the same step first.
     void commit(const Vector& x, Real h, TrBdf2Stage stage) {
-        if (stage == TrBdf2Stage::Bdf2Stage2) {
-            coss.commit_bdf2_stage2(x, h);
-        } else {
-            coss.update_from_state(x, h,
-                                   stage == TrBdf2Stage::BackwardEuler);
-        }
-        laur.update_from_state(x, h, stage);
-        pmsm.update_from_state(x, h, stage);
-        tail.update_from_state(x, h, stage);
-        sat.update_from_state(x, stage);
+        for_each([&](auto& k) { k.commit(x, h, stage); });
     }
     void capture_gamma(const Vector& x_gamma) {
-        for_each([&](auto& h) { h.capture_gamma(x_gamma); });
+        for_each([&](auto& k) { k.capture_gamma(x_gamma); });
     }
     /// SDIRK restart: pseudo previous state x0 + c·(x1 − x0).
     void extrapolate_previous(const Vector& x1, Real c) {
-        for_each([&](auto& h) { h.extrapolate_previous(x1, c); });
+        for_each([&](auto& k) { k.extrapolate_previous(x1, c); });
     }
     /// TR-BDF2 post-event refresh of the derivative slots from a
     /// trapezoidal probe of step `h`; the states are not touched.
     void refresh_derivatives(const Vector& x_probe, Real h) {
-        coss.refresh_derivatives(x_probe, h);
-        laur.refresh_derivatives(x_probe);
-        pmsm.refresh_derivatives(x_probe);
-        tail.refresh_derivatives(x_probe);
-        sat.refresh_derivatives(x_probe);
+        for_each([&](auto& k) { k.refresh_derivatives(x_probe, h); });
     }
 
-    /// Into a preallocated rollback point (assign keeps the capacity).
+    /// Into a preallocated rollback point (its size is the run's, so only
+    /// the first call of a run allocates).
     void snapshot_into(Snapshot& s) const {
-        s.coss.assign(coss.entries().begin(), coss.entries().end());
-        s.laur.assign(laur.entries().begin(), laur.entries().end());
-        s.pmsm.assign(pmsm.entries().begin(), pmsm.entries().end());
-        s.tail.assign(tail.entries().begin(), tail.entries().end());
-        s.sat.assign(sat.entries().begin(), sat.entries().end());
+        s.resize(reals_in_rollback());
+        std::size_t p = 0;
+        for_each([&](const auto& k) {
+            using K = std::remove_cvref_t<decltype(k)>;
+            for (const auto& e : k.entries()) {
+                K::for_each_state(e, [&](const auto& v) {
+                    s[p++] = static_cast<Real>(v);
+                });
+            }
+        });
+    }
+    /// Number of reals `snapshot_into` writes for this run.
+    [[nodiscard]] std::size_t reals_in_rollback() const {
+        std::size_t n = 0;
+        for_each([&n](const auto& k) {
+            using K = std::remove_cvref_t<decltype(k)>;
+            for (const auto& e : k.entries()) {
+                K::for_each_state(e, [&n](const auto&) { ++n; });
+            }
+        });
+        return n;
     }
     void restore(const Snapshot& s) {
-        coss.restore(s.coss);
-        laur.restore(s.laur);
-        pmsm.restore(s.pmsm);
-        tail.restore(s.tail);
-        sat.restore(s.sat);
+        // Rare (a rejected step), so the size is checked every time: a
+        // stale or never-taken rollback point must not be read past its end.
+        if (s.size() != reals_in_rollback()) {
+            throw std::logic_error(
+                "StatefulHistories::restore: the rollback point holds "
+                + std::to_string(s.size()) + " reals, this run carries "
+                + std::to_string(reals_in_rollback()));
+        }
+        std::size_t p = 0;
+        for_each([&](auto& k) {
+            using K = std::remove_cvref_t<decltype(k)>;
+            for (auto& e : k.mutable_entries()) {
+                K::for_each_state(e, [&](auto& v) {
+                    v = static_cast<std::remove_cvref_t<decltype(v)>>(s[p++]);
+                });
+            }
+        });
     }
 
     /// The device-state layout of a run: `history` (the linear
-    /// companions) and these five.
+    /// companions) and one block per kind.
     [[nodiscard]] device::DeviceStateLayout layout(
         const HistoryState& history) const {
-        using device::StateBlock;
         device::DeviceStateLayout l;
-        auto put = [&l](StateBlock b, std::size_t n) {
-            l.count[static_cast<std::size_t>(b)] = static_cast<std::uint32_t>(n);
-        };
-        put(StateBlock::LinearCompanion, history.num_dynamic_branches());
-        put(StateBlock::SaturableInductor, sat.entries().size());
-        put(StateBlock::NonlinearCapacitor, coss.entries().size());
-        put(StateBlock::LauritzenDiode, laur.entries().size());
-        put(StateBlock::IgbtTail, tail.entries().size());
-        put(StateBlock::PmsmMna, pmsm.entries().size());
+        l.count[static_cast<std::size_t>(device::StateBlock::LinearCompanion)] =
+            static_cast<std::uint32_t>(history.num_dynamic_branches());
+        for_each([&l](const auto& k) {
+            l.count[static_cast<std::size_t>(k.kBlock)] =
+                static_cast<std::uint32_t>(k.entries().size());
+        });
         return l;
     }
 
@@ -148,23 +181,18 @@ public:
         // is reused, so a run end allocates as little as the 2.0 fields
         s.dev_state = history.to_flat();
         s.dev_state.reserve(l.size());
-        auto append = [&s](const std::vector<Real>& v) {
+        for_each_in_block_order([&s](const auto& k) {
+            const auto v = k.to_flat();
             s.dev_state.insert(s.dev_state.end(), v.begin(), v.end());
-        };
-        append(sat.to_flat());
-        append(coss.to_flat());
-        append(laur.to_flat());
-        append(tail.to_flat());
-        append(pmsm.to_flat());
+        });
         s.legacy = {};
     }
 
     /// Resume: refuses a layout that is not this circuit's, naming the
     /// first block that differs; a legacy payload is converted field by
-    /// field, each history refusing a size mismatch by name.
+    /// field, each kind refusing a size mismatch by name.
     void load(const solver::SolverSnapshot& s, HistoryState& history,
               const char* engine) {
-        using device::StateBlock;
         if (s.is_legacy() && !s.dev_state.empty()) {
             // a hand-filled dev_state with no layout would be ignored
             throw std::invalid_argument(
@@ -177,8 +205,10 @@ public:
             const auto mine = layout(history);
             const auto theirs = s.layout();
             const std::string diff = mine.first_difference(theirs);
-            if (!diff.empty() || s.dev_layout.size() != device::kNumStateBlocks
-                || s.layout_signature != theirs.signature()
+            // A snapshot from a build with fewer blocks (appended later)
+            // loads with the missing blocks empty.
+            if (!diff.empty() || s.dev_layout.size() > device::kNumStateBlocks
+                || s.layout_signature != theirs.signature(s.dev_layout.size())
                 || s.dev_state.size() != theirs.size()) {
                 throw std::invalid_argument(
                     std::string(engine) + "(resume_from=...): the snapshot "
@@ -191,13 +221,31 @@ public:
                       "wrong state.");
             }
         }
-        history.from_flat(s.view(StateBlock::LinearCompanion));
-        sat.from_flat(s.view(StateBlock::SaturableInductor));
-        coss.from_flat(s.view(StateBlock::NonlinearCapacitor));
-        laur.from_flat(s.view(StateBlock::LauritzenDiode));
-        pmsm.from_flat(s.view(StateBlock::PmsmMna));
-        pmsm.rebase_reference(s.x);   // increment-form reference = x
-        tail.from_flat(s.view(StateBlock::IgbtTail));
+        history.from_flat(s.view(device::StateBlock::LinearCompanion));
+        for_each_in_block_order(
+            [&s](auto& k) { k.from_flat(s.view(k.kBlock)); });
+        // increment-form reference = the snapshot's x
+        get<PmsmMnaHistory>().rebase_reference(s.x);
+    }
+
+private:
+    StatefulKinds::Tuple kinds_;
+
+    /// The kinds in snapshot block order (device::kStateBlocks), which is
+    /// not the fold order.
+    template <class F> void for_each_in_block_order(F&& f) const {
+        for (std::size_t b = 1; b < device::kNumStateBlocks; ++b) {
+            for_each([&](const auto& k) {
+                if (static_cast<std::size_t>(k.kBlock) == b) f(k);
+            });
+        }
+    }
+    template <class F> void for_each_in_block_order(F&& f) {
+        for (std::size_t b = 1; b < device::kNumStateBlocks; ++b) {
+            for_each([&](auto& k) {
+                if (static_cast<std::size_t>(k.kBlock) == b) f(k);
+            });
+        }
     }
 };
 
