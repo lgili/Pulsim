@@ -449,3 +449,21 @@ Each entry: question → option taken → evidence → how to reverse.
     mask cycles and settle rounds now reach `mode_guard.lcp.mask_cycles`
     / `settle_rounds_total` (were always 0; no test reaches a guard mask
     cycle without a hook, so this is not tested).
+
+29. **Default-flip evidence (not the flip).** `benchmarks/tools/
+    ideal_switch_flip_evidence.py` writes `benchmarks/IDEAL_SWITCH_FLIP_
+    EVIDENCE.md`: 109 reference circuits × 5 configurations × {default,
+    branch, lcp, branch+lcp}. Branch form: same outcome on all 109 on
+    pwl / pwl+restart / pwl+split; trbdf2 2 better, 106 same, 1 new error
+    (`ll13_active_clamp_forward`, Newton fails at t = 0 with h at h_min:
+    trbdf2-side); dsed refuses the branch form by name (54 newly refused,
+    task 8). `'lcp'` (34 circuits with a PWL diode): same outcome on all
+    it runs on pwl; 2 refused by design (a Newton device: the port model
+    is linear); trbdf2 refused until hook 4.2; dsed 5 errors
+    (`DiodeModeInconsistentError` on transformer / coupled-inductor
+    circuits — dsed builds its ports with R_on = 1/g_on > 0, which this
+    change does not touch, so dsed-side). Cost: branch / conductance
+    median-of-7 ns/step 0.85 (inverter) / 1.46 (buck, loaded machine;
+    1.02 earlier) on pwl, 1.006 / 1.027 on trbdf2; `'lcp'` costs 4.4–6.9×
+    the default in wall time on pwl (one run per cell): two site solves
+    per step, the cost item before `'lcp'` can be a default.
