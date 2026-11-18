@@ -72,12 +72,12 @@ _STEP_RTOL = 1e-10            # re-derived step against the engine's sample
 _BRANCH_RE = re.compile(r"\(branch #(\d+)\)")
 _GATE, _DIODE_ON, _DIODE_OFF = 0, 1, 2
 
-# kind -> (accepted field names, builder update method, params key)
+# kind -> (accepted field names, set_value field, params key)
 _FIELDS = {
-    "resistor": (("R", "R_ohms"), "update_resistor_R", "R_ohms"),
-    "inductor": (("L", "L_henries"), "update_inductor_L", "L_henries"),
-    "capacitor": (("C", "C_farads"), "update_capacitor_C", "C_farads"),
-    "voltage_source": (("V",), "update_voltage_source_V", "V"),
+    "resistor": (("R", "R_ohms"), "R", "R_ohms"),
+    "inductor": (("L", "L_henries"), "L", "L_henries"),
+    "capacitor": (("C", "C_farads"), "C", "C_farads"),
+    "voltage_source": (("V",), "V", "V"),
 }
 
 
@@ -244,9 +244,9 @@ def _resolve(builder, names, switch_fn) -> list:
                 "topology and table parameters, switch conductances and "
                 "Newton-device parameters are refused.",
                 device=cname, kind=fld)
-        upd = getattr(builder, spec[1])
         out.append(_Param(nm, cname, kind, float(c["params"][spec[2]]),
-                          setter=lambda v, _u=upd, _n=cname: _u(_n, v)))
+                          setter=lambda v, _k=f"{cname}.{spec[1]}":
+                          builder.set_value(_k, v)))
     return out
 
 
