@@ -234,10 +234,15 @@ def test_a_twelve_field_version_3_pickle_still_loads():
     snap = p.simulate(b, 2e-4, dt=1e-6, switch_fn=lambda t, n=b.graph.num_switches: p.SwitchStateMask(n)
                       ).final_snapshot
     st = snap.__getstate__()
-    # version 4 (batch 13): the 13 fields of version 3 + the grid
-    assert st[:2] == ("SolverSnapshot", 4) and len(st) == 14 and st[12] is False
+    # version 4 = version 3 + the grid (field 12); the marker is field 13
+    assert st[:2] == ("SolverSnapshot", 4) and len(st) == 14 and st[13] is False
+    v3 = ("SolverSnapshot", 3) + tuple(st[2:12])
     old = type(snap).__new__(type(snap))
-    old.__setstate__(("SolverSnapshot", 3) + tuple(st[2:12]))
+    old.__setstate__(v3)
+    assert list(old.dev_state) == list(snap.dev_state)
+    assert old._control_state is None
+    old = type(snap).__new__(type(snap))
+    old.__setstate__(v3 + (False,))
     assert list(old.dev_state) == list(snap.dev_state)
     assert old._control_state is None
 

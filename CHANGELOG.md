@@ -47,6 +47,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   refused; a plain Python tick source resumed on pwl keeps the run's
   grid instead of restarting it at `t_start`.
 
+### Unified device interface, slice 3: the dual device path
+
+* **Added** `simulate(..., device_path='interface')` (and
+  `compute_dc_op(..., device_path=)`, kernel `SimulationOptions.device_path`
+  / `DevicePath`): every Newton kind runs through ONE law on the device
+  interface (`device/laws.hpp`) instead of its hand-written stamp. The
+  default stays `'legacy'`, bit-identical. Ported: smooth / Shockley
+  diode, MOSFET and IGBT level 1 (steady state), the nonlinear capacitor
+  (junction, VDMOS C_gd, table) and the saturable inductor (atan, table,
+  Jiles–Atherton) on `pwl`, `trbdf2` and the DC operating point; agreement
+  with `'legacy'` within 1e-12 of scale on the fixed-step engine. On a
+  transient engine a circuit with a kind not ported yet (Lauritzen diode,
+  IGBT tail, MNA PMSM, induction machine) refuses `'interface'` by name
+  (the DC operating point stamps only the static kinds, all ported);
+  `engine='dsed'` refuses it. The closed-form laws give parameter
+  derivatives by AD (∂f/∂p, ∂q/∂p); the table and Jiles–Atherton laws have
+  none (`param_tangent`).
+* **Added** the step controller's snapshot block
+  (`SolverSnapshot.controller_state` → `(kind, values)`, the unified
+  stepper's `step::ControllerState`; pickle version 4 gains a 15th field,
+  written only when the block is filled): empty until the stepper fills
+  it (a resume restarts the controller, as before); version-4 pickles of
+  13 and 14 fields and version 3 (12 and 13 fields) still load.
+
+### Unified device interface, slice 2: one stateful-kind registry, exact resume
+
+* **Fixed** a fixed-step run split by `resume_from=` was not the continuous
+  run bit for bit: the resumed time grid restarted at the split time, so
+  sample times moved by ~1e-20 s and a gate edge landed a rounding apart
+  (states then within 8e-12 of scale). The snapshot carries its grid
+  (`grid_origin`, `grid_step`, `grid_dt`); an `engine='pwl'` resume with
+  the same `dt` continues it and is bit-identical (states, times, final
+  device state), split between edges or on one. Pickle version 4; version
+  3 and Pulsim 2.0 pickles load and resume as before (restarted grid).
+* **Fixed** a TR-BDF2 snapshot taken exactly on a gate edge made a
+  fixed-step resume ring and abort at the next edge (its `x` is the
+  pre-edge solve, its device derivatives the post-edge ones). The snapshot
+  says so (`post_edge_derivatives`) and `engine='pwl'` refuses it by name;
+  `engine='trbdf2'` resumes from it.
+* **Changed** (internal) the five stateful Newton kinds are one
+  compile-time list (`pwl::StatefulKinds`, concept `device::StatefulKind`);
+  the drivers, the Newton refresh, the in-run rollback and the snapshot
+  iterate it, and the rollback is one flat vector that includes each
+  device's TR-BDF2 stage scratch. `device/device.hpp` adds the `Device` contract
+  (one law over the scalar, `Params<S>` for parameter sensitivities),
+  unused by the engines yet. Results bit-identical.
+
 ### Integration batch 12: unified device interface 1–3, in-kernel event losses, IR scopes, TR-BDF2 track 6, event queue, control graph 4, PWL IGBT / thyristor, exact engine session 6 merged
 
 * **Fixed** `periodic_steady_state` by shooting ran a thyristor / TRIAC
@@ -108,6 +155,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   device's TR-BDF2 stage scratch. `device/device.hpp` adds the `Device` contract
   (one law over the scalar, `Params<S>` for parameter sensitivities),
   unused by the engines yet. Results bit-identical.
+
 
 ### Unified device interface, steps 1–3: one history fold, one kernel-built refresh, one device-state vector
 

@@ -27,6 +27,7 @@
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/igbt_tail_history.hpp"
+#include "pulsim/pwl/interface_stamps.hpp"
 #include "pulsim/pwl/lauritzen_diode_history.hpp"
 #include "pulsim/pwl/nonlinear_capacitor_history.hpp"
 #include "pulsim/pwl/pmsm_mna_history.hpp"
@@ -35,9 +36,11 @@
 #include "pulsim/solver/result.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -98,10 +101,73 @@ public:
     /// solve stamped). `Bdf2Stage2` needs `capture_gamma` at the stage
     /// point of the same step first.
     void commit(const Vector& x, Real h, TrBdf2Stage stage) {
-        for_each([&](auto& k) { k.commit(x, h, stage); });
+        for_each([&](auto& k) {
+            using K = std::remove_cvref_t<decltype(k)>;
+            if constexpr (iface::kPorted<K>) {
+                if (interface()) { iface::commit(k, x, h, stage); return; }
+            }
+            k.commit(x, h, stage);
+        });
     }
     void capture_gamma(const Vector& x_gamma) {
-        for_each([&](auto& k) { k.capture_gamma(x_gamma); });
+        for_each([&](auto& k) {
+            using K = std::remove_cvref_t<decltype(k)>;
+            if constexpr (iface::kPorted<K>) {
+                if (interface()) { iface::capture_gamma(k, x_gamma); return; }
+            }
+            k.capture_gamma(x_gamma);
+        });
+    }
+
+    // ---- the device path (DECISIONS #23) ----
+    /// Choose the path for this run. `Interface` refuses, by name, a
+    /// circuit holding a Newton kind whose law is not on the `Device`
+    /// contract yet (a run is never mixed).
+    void set_path(device::DevicePath p, const topology::Graph& graph,
+                  const DevicePool& pool, const char* engine) {
+        path_ = p;
+        if (p != device::DevicePath::Interface) return;
+        std::vector<std::string> names;
+        auto add = [&names](std::string_view name) {
+            if (std::find(names.begin(), names.end(), name) == names.end()) {
+                names.emplace_back(name);
+            }
+        };
+        for_each([&](const auto& k) {
+            using K = std::remove_cvref_t<decltype(k)>;
+            if (!iface::kPorted<K> && !k.empty()) {
+                add(device::kStateBlocks[static_cast<std::size_t>(K::kBlock)].name);
+            }
+        });
+        for (Index b = 0; b < graph.num_branches(); ++b) {
+            const Index id = graph.branch(b).id;
+            if (!pool.is_registered(id)) continue;
+            const auto sk = pool.kind_of(id);
+            if (kind_caps(sk).cls == SolveClass::NewtonStatic
+                && !iface::static_kind_ported(sk)) {
+                add(stored_kind_name(sk));
+            }
+            if (kind_caps(sk).cls == SolveClass::NewtonStateful) {
+                bool covered = false;
+                for_each([&](const auto& k) {
+                    using K = std::remove_cvref_t<decltype(k)>;
+                    if (iface::kPorted<K> && K::kStoredKind == sk) covered = true;
+                });
+                if (!covered) add(stored_kind_name(sk));
+            }
+        }
+        if (!names.empty()) {
+            std::string missing;
+            for (const auto& n : names) missing += (missing.empty() ? "" : ", ") + n;
+            throw std::invalid_argument(
+                std::string(engine) + "(device_path='interface'): not on the "
+                "device interface yet: " + missing
+                + ". Run this circuit with device_path='legacy'.");
+        }
+    }
+    [[nodiscard]] device::DevicePath path() const noexcept { return path_; }
+    [[nodiscard]] bool interface() const noexcept {
+        return path_ == device::DevicePath::Interface;
     }
     /// SDIRK restart: pseudo previous state x0 + c·(x1 − x0).
     void extrapolate_previous(const Vector& x1, Real c) {
@@ -228,6 +294,7 @@ public:
 
 private:
     StatefulKinds::Tuple kinds_;
+    device::DevicePath path_ = device::DevicePath::Legacy;
 
     /// The kinds in snapshot block order (device::kStateBlocks), which is
     /// not the fold order.

@@ -20,6 +20,7 @@
 // t_end, or the last sample <= t_end if dt doesn't divide the
 // span evenly).
 
+#include "pulsim/device/device_path.hpp"
 #include "pulsim/numeric/types.hpp"
 
 #include <cmath>
@@ -67,6 +68,12 @@ struct SimulationOptions {
     /// compute. true: restore the pre-v1.8 hard throw (paper-grade
     /// strictness).
     bool strict_event_iterations = false;
+
+    /// Which code stamps the Newton kinds (add-unified-device-interface
+    /// DECISIONS #23): the hand stamps (default, bit-identical) or every
+    /// kind's law on the `device::Device` contract. A circuit with a kind
+    /// not yet ported refuses `Interface` by name.
+    device::DevicePath device_path = device::DevicePath::Legacy;
 
     // ---- Newton (Layer 5 V4) ----------------------------------------
     //

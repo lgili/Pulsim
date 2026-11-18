@@ -95,9 +95,9 @@ struct MosfetLevel1 {
 
     /// The one-directional law with the terminal roles as given.
     /// `current` below calls it once per quadrant.
-    template <numeric::FloatingPoint S>
+    template <numeric::FloatingPoint S, class P = Params>
     [[nodiscard]] static S forward_current_(
-        const S& V_OV, const S& V_DS, const Params& p) noexcept {
+        const S& V_OV, const S& V_DS, const P& p) noexcept {
         const S alpha_on =
             numeric::logistic(S{p.kappa * V_OV});
         const S beta_triode =
@@ -116,9 +116,11 @@ struct MosfetLevel1 {
     ///
     /// Templated on FloatingPoint S — instantiates for `Real`
     /// (forward) and `ADRealN<3>` (Newton Jacobian).
-    template <numeric::FloatingPoint S>
+    // `P`: the parameter struct, or a law's `Params<S>` with the same
+    // member names (device/laws.hpp), so ∂i/∂p comes from this body too.
+    template <numeric::FloatingPoint S, class P = Params>
     [[nodiscard]] static S current(
-        const S* v, const Params& p) noexcept {
+        const S* v, const P& p) noexcept {
         using std::exp;
         // Branch voltages.
         const S V_GS = v[2] - v[1];
