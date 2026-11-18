@@ -281,6 +281,20 @@ private:
             s.word(dev.kind);
             s.word(dev.pins.size());
             for (const Index p : dev.pins) s.idx(p);
+            // Branch form (its own current unknown) is structure, its R_on
+            // a value; a conductance-form circuit hashes as before.
+            if (pool.is_branch_form(bi)) {
+                s.word(0x6272616e6368ULL);   // "branch"
+                // R_on = 0 (a 0 V source) and g_off = 0 (open) change the
+                // stamp's role: structure. Their values are values.
+                const Real R_on = pool.branch_R_on(bi);
+                Real g_off = 0;
+                std::visit([&](const auto& prm) {
+                    if constexpr (requires { prm.g_off; }) g_off = prm.g_off;
+                }, pool.params_of(bi));
+                s.word((R_on == Real{0} ? 1u : 0u) | (g_off == Real{0} ? 2u : 0u));
+                v.real(R_on);
+            }
 
             const auto& params = pool.params_of(bi);
             const auto row = fields_of(kind);

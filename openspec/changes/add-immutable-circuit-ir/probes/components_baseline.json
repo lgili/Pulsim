@@ -483,12 +483,12 @@
   "sha": "80953f27a906e88f"
  },
  "examples/flyback.yaml": {
-  "n": 9,
-  "sha": "e1344338ecfa1297"
+  "n": 12,
+  "sha": "791c3560c1844aac"
  },
  "examples/half_bridge_pwm.yaml": {
-  "n": 7,
-  "sha": "6d78b1e6926f2f1e"
+  "n": 11,
+  "sha": "42c74f6ee7cb9cbe"
  },
  "examples/half_wave_rectifier.yaml": {
   "n": 3,
@@ -553,7 +553,7 @@
  },
  "examples/three_phase_inverter.yaml": {
   "n": 20,
-  "sha": "746c6e453acbaffa"
+  "sha": "abcb4d8731baf477"
  },
  "examples/voltage_divider.yaml": {
   "n": 3,

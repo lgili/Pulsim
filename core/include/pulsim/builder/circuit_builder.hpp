@@ -134,6 +134,19 @@ public:
     /// takes the parameter's value now and on every `set_param`.
     void bind_param(std::string_view device_dot_field, std::string_view name) {
         const auto pi = require_param_("bind_param", name);
+        if (const auto dot = device_dot_field.rfind('.');
+            dot != std::string_view::npos) {
+            const auto hit = branch_index_.find(device_dot_field.substr(0, dot));
+            const auto field = device_dot_field.substr(dot + 1);
+            if (hit != branch_index_.end() && pool_.is_branch_form(hit->second) &&
+                field != "V_th" && field != "V_f") {
+                throw std::invalid_argument(std::format(
+                    "bind_param(\"{}\"): device \"{}\" is in branch form; a "
+                    "parameter cannot drive its {} yet (set it with "
+                    "with_value / set_value)", device_dot_field,
+                    device_dot_field.substr(0, dot), field));
+            }
+        }
         const auto r = resolve_field_("bind_param", device_dot_field);
         const Real v = params_[pi].value;
         if (!ir::within(r.spec->bound, v)) {
@@ -203,6 +216,11 @@ public:
             ? nullptr
             : ir::find_field(pool_.kind_of(hit->second),
                              device_dot_field.substr(dot + 1));
+        if (hit != branch_index_.end() && dot != std::string_view::npos &&
+            pool_.is_branch_form(hit->second) &&
+            device_dot_field.substr(dot + 1) == "R_on") {
+            return pool_.branch_R_on(hit->second);
+        }
         if (spec == nullptr) {
             throw std::invalid_argument(std::format(
                 "get_value(\"{}\"): no such device value field",
@@ -2522,8 +2540,57 @@ private:
         pool_.sync_derived_values(r.branch);
     }
 
+    /// A branch-form switch or diode (add-branch-form-ideal-switch) is
+    /// stamped from its R_on (kept beside the pool's g_on) and g_off, both
+    /// allowed to be 0; its V_th / V_f go through the field table. g_on
+    /// and R_off are not read by the branch law: refused by name, as
+    /// `check_device` refuses an unread field. Returns false when
+    /// `device_dot_field` is not a branch-form R_on / g_off / g_on / R_off.
+    bool set_branch_form_value_(std::string_view fn,
+                                std::string_view device_dot_field, Real value) {
+        const auto dot = device_dot_field.rfind('.');
+        if (dot == std::string_view::npos) return false;
+        const auto dev = device_dot_field.substr(0, dot);
+        const auto field = device_dot_field.substr(dot + 1);
+        const auto hit = branch_index_.find(dev);
+        if (hit == branch_index_.end() || !pool_.is_branch_form(hit->second) ||
+            field == "V_th" || field == "V_f") {
+            return false;
+        }
+        const Index b = hit->second;
+        auto params = pool_.params_of(b);
+        Real* g_on = nullptr;
+        Real* g_off = nullptr;
+        bool diode = false;
+        std::visit([&](auto& prm) {
+            if constexpr (requires { prm.g_on; prm.g_off; }) {
+                g_on = &prm.g_on;
+                g_off = &prm.g_off;
+                diode = requires { prm.V_f; };
+            }
+        }, params);
+        if (g_on == nullptr) return false;
+        Real R_on = pool_.branch_R_on(b);
+        if (field == "R_on") {
+            R_on = value;
+        } else if (field == "g_off") {
+            *g_off = value;
+        } else {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): device \"{}\" is in branch form: its fields "
+                "are R_on, g_off{} (the branch law does not read {})", fn,
+                device_dot_field, dev, diode ? ", V_th, V_f" : "", field));
+        }
+        require_branch_values_(fn, dev, R_on, *g_off);
+        *g_on = branch_g_on_(R_on);
+        pool_.params_of_mut(b) = std::move(params);
+        pool_.set_branch_form(b, R_on);   // R_on / g_off are never bound
+        return true;
+    }
+
     void set_value_(std::string_view fn, std::string_view device_dot_field,
                     Real value) {
+        if (set_branch_form_value_(fn, device_dot_field, value)) return;
         const auto r = resolve_field_(fn, device_dot_field);
         if (!ir::within(r.spec->bound, value)) {
             throw std::invalid_argument(std::format(
