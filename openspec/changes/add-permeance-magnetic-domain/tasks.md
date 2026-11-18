@@ -39,4 +39,4 @@ Deferred: add-unified-device-interface is not on this branch's base (DECISIONS 7
 - [x] 6.2 Tutorials: three-limb transformer; integrated coupled inductor
 
 ## 7. Verification
-- [ ] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
+- [x] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check — plus `pytest -m reference`, golden compare (ALL IDENTICAL), `reference_status` (exit 0), [permeance] on an Eigen 3.4.0 build
