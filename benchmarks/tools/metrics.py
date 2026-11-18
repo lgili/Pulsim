@@ -76,8 +76,6 @@ def err_rms(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = 
 
 def _rms(g, d2, exclude):
     """sqrt of the time mean of ``d2`` on ``g``, ``exclude`` intervals left out."""
-    if len(g) < 2 or g[-1] <= g[0]:
-        raise ValueError("the two traces share no time window")
     if not len(exclude):
         return float(np.sqrt(np.trapezoid(d2, g) / (g[-1] - g[0])))
     seg = np.diff(g) * 0.5 * (d2[1:] + d2[:-1])
@@ -102,6 +100,8 @@ def err_rms_symmetric(a: tuple, b: tuple, *, abs_scale: float = 0.0, exclude=())
     ta, ya = _window(*a, exclude_t0=True)
     tb, yb = _window(*b, exclude_t0=True)
     g, va, vb = _on_grid(ta, ya, (tb, yb))
+    if len(g) < 2 or g[-1] <= g[0]:
+        raise ValueError("the two traces share no time window")
     span = max(float(np.ptp(va)), float(np.ptp(vb)), abs_scale)
     if span <= 0.0:
         raise ValueError("flat traces: give abs_scale > 0")

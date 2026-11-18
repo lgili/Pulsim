@@ -1573,15 +1573,15 @@ def _estimate_dominant_frequency(B: np.ndarray,
 # ---------------------------------------------------------------
 
 def _warn_ideal_skipped(desc) -> None:
-    # An ideal branch-form element (R_on = 0: g_on = inf) has no
-    # conductance law to integrate; its losses are add-branch-form-ideal-switch
-    # task 6.4. Say so instead of dropping the row silently (review M5).
+    # An ideal branch-form element (R_on = 0: g_on = inf) whose branch
+    # unknown was not found: no v·i to report. Say so instead of dropping
+    # the row silently (review M5).
     if desc.get("params", {}).get("branch_form"):
         warnings.warn(
             f"device_loss_summary: '{desc.get('name')}' is an ideal "
-            "branch-form element (R_on = 0); its losses are not computed "
-            "yet and it is left out of the summary (and of the thermal "
-            "summary).", UserWarning, stacklevel=3)
+            "branch-form element (R_on = 0) whose branch current was not "
+            "found in the result; it is left out of the summary (and of the "
+            "thermal summary).", UserWarning, stacklevel=3)
 
 
 def _impulse_cause(builder, result, rec) -> str:
@@ -1691,13 +1691,15 @@ def device_loss_summary(
       recorded stamped mask; without a record, ``switch_fn`` is
       re-evaluated (with a warning), and without either the switch
       entry is skipped (kept honest — no silent default).
-    * **branch form** (``form='branch'``, ``R_on >= 0``, ideal at 0) — the
-      solved branch current and ``v · i`` (``form='branch'``; 0 W of
-      conduction for an ideal element), and always the impulsive category
-      ``E_impulse_total`` / ``n_impulses`` / ``P_impulse_avg`` (0 when
-      nothing was booked to it). On a device with a kernel loss port that
-      energy is not in the port's junction: ``impulse_in_junction=False``
-      and a ``RuntimeWarning``.
+    * **ideal branch form** (``form='branch'``, ``R_on = 0``) — the solved
+      branch current and ``v · i`` (``form='branch'``; 0 W of conduction),
+      and always the impulsive category ``E_impulse_total`` /
+      ``n_impulses`` / ``P_impulse_avg`` (0 when nothing was booked to it).
+      A branch-form element with ``R_on > 0`` is reported as a conductance
+      switch (``g_on = 1/R_on``) and gets the impulsive keys only when
+      energy was booked to it. When a device with a kernel loss port has
+      impulsive energy booked to it, that energy is not in the port's
+      junction: ``impulse_in_junction=False`` and a ``RuntimeWarning``.
     * **shockley_diode** (``add_shockley_diode``) — the current is the
       kernel's exponential law at the recorded ``v_D``
       (``pulsim._diode_state.shockley_current``, the parameters

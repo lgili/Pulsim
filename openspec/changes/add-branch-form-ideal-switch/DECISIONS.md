@@ -1044,14 +1044,17 @@ TR-BDF2 tracks 6-8 24-33 and ideal switch 4 34-39.)
 50. **One command for the evidence, resumable per circuit.**
     `ideal_switch_flip_evidence.py --resume DIR` measures every variant
     (default, branch, lcp, branch+lcp, auto, ideal, ideal+lcp) on every
-    configuration in one run, writes each circuit's cells to `DIR` as soon as
-    they exist (atomic rename), and a restarted run measures only the
-    missing cells, never cells stamped with another tree (commit + dirty
-    flag). The rendered file names the tree it measured.
+    configuration in one run, writes each circuit's cells to `DIR` once that
+    circuit is done (atomic rename), and a restarted run measures only the
+    missing cells, never cells stamped with another tree (commit + a digest
+    of the uncommitted tracked diff); cached cells and the ideal-twin
+    reference of variants not asked for are kept. A ladder whose last two
+    settings give identical output is saturated, not exact: its estimate is
+    the previous move. The rendered file names the tree it measured.
 
 51. **Loss and thermal summaries of branch-form elements.**
-    `device_loss_summary` always gives a branch-form element the impulsive
-    category (`E_impulse_total`, `n_impulses`, `P_impulse_avg`; 0 when
+    `device_loss_summary` always gives an ideal (`R_on = 0`) branch-form
+    element the impulsive category (`E_impulse_total`, `n_impulses`, `P_impulse_avg`; 0 when
     nothing was booked to it) next to its solved `v·i` (0 W of conduction for
     an ideal one). `device_thermal_summary` used to drop a branch-form
     element silently (its `g_on` is infinite): it now reports it
@@ -1059,7 +1062,10 @@ TR-BDF2 tracks 6-8 24-33 and ideal switch 4 34-39.)
     as a constant offset, as `P_sw_avg`. A kernel loss port
     (`set_device_losses`) still does not carry that energy into its own
     junction (pinned at integration batch 13 as a known limitation): the
-    loss summary marks such entries `impulse_in_junction=False` and warns.
+    loss summary marks such entries with booked impulsive energy
+    `impulse_in_junction=False` and warns. A branch-form element with
+    `R_on > 0` is a conductance switch to the loss summary (`g_on = 1/R_on`)
+    and gets the impulsive keys only when energy was booked to it.
     The wiring is the in-kernel event-losses track's. Also:
     `add_switch` / `add_diode` with `form='branch'` refuse `R_on` together
     with `g_on` (one resistance given twice; `g_on` was dropped), and the

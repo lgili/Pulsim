@@ -13,10 +13,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `P_cond_avg` from the solved `v·i`, 0 W for an ideal element,
   `P_impulse_avg`) and heats it with the impulsive re-initialisation
   energy as a constant offset.
-* **Changed** `device_loss_summary` gives every branch-form element the
-  impulsive category (`E_impulse_total`, `n_impulses`, `P_impulse_avg`)
+* **Changed** `device_loss_summary` gives every ideal (`R_on = 0`)
+  branch-form element the impulsive category (`E_impulse_total`, `n_impulses`, `P_impulse_avg`)
   even when nothing was booked to it (0). On a device with a kernel loss
-  port the entry carries `impulse_in_junction=False` and a
+  port and booked impulsive energy the entry carries `impulse_in_junction=False` and a
   `RuntimeWarning` says the port's junction does not get that energy
   (known limitation).
 * **Changed** `add_switch` / `add_diode(form='branch')` refuse `R_on`

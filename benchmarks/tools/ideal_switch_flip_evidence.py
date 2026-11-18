@@ -169,8 +169,8 @@ def _ladder(case, cols, target, ladder):
         prev, name = (nm, cur), nm
         if len(moves) >= 2:
             e1, e2 = moves[-2:]
-            if e2 == 0.0:
-                u = 0.0
+            if e2 == 0.0:      # identical outputs: a saturated ladder, not a proof of 0
+                u = e1
             elif e1 > e2:
                 u = e2 / (f ** math.log(e1 / e2, f) - 1.0)
             else:
@@ -333,6 +333,8 @@ def run(patterns, want=VARIANTS, cache=None):
             recs, meta = [have[(c, v)] for c in rs.CONFIGS for v in VARIANTS if v in want], old["refs"]
         else:
             recs, meta = run_circuit(rel, entry, want, have)
+            if have and not any(v.startswith("ideal") for v in want):
+                meta["ideal"] = old["refs"].get("ideal", meta["ideal"])   # kept with its cells
         if f is not None:
             f.parent.mkdir(parents=True, exist_ok=True)
             tmp = f.with_suffix(".tmp")
@@ -364,7 +366,7 @@ def _cmp(a, b):
     return "better" if eb < ea else "worse"     # graded the same way both directions
 
 
-def render(recs, refs=None, tree=("unknown", True)):
+def render(recs, refs=None, tree=("unknown", "")):
     by = {(r["circuit"], r["config"], r["variant"]): r for r in recs}
     circuits = sorted({r["circuit"] for r in recs})
     cfgs = [c for c in rs.CONFIGS if any(r["config"] == c for r in recs)]
@@ -461,7 +463,7 @@ def _render_refs(refs):
     L = ["", "## References and their uncertainty", "",
          "`default`: the gate's reference (`differential_runner.reference`, unchanged); its",
          "uncertainty is its distance to the next refinement (trbdf2 rtol 1e-9, or pwl dt/2",
-         "against dt/4). `ideal twin`: each tool refined until two successive settings agree",
+         "against dt/4). `ideal twin`: each tool refined",
          "until its error estimate is at most tol/10 or its ladder ends (trbdf2 rtol 1e-8 → 1e-10,",
          "pwl + restart dt/8 → dt/256); the estimate is Richardson's with the order measured from",
          "the last two moves (the interp measure converges at order ~0.5 across a jump). The",
