@@ -933,8 +933,11 @@ def _diode_turn_offs(trace, times: np.ndarray,
         # The step that holds t_eval: a short sample right after the
         # turn-off (trbdf2's post-event record) does not resolve a long
         # step that follows it, unless that step is flat (the sample before
-        # it already holds the post-jump plateau: v_D is the same at both
-        # ends, so where t_eval falls inside it does not matter).
+        # it already holds the post-jump plateau). shortcut: at a natural
+        # turn-off a ring across that long step with equal ends (the aliased
+        # "plateau" above) passes as flat; before the record existed the
+        # short step alone passed it, so this is no wider than it was.
+        # Upgrade: test the long step against the ring period.
         k_e = min(max(int(np.searchsorted(t, t_eval)), k), max(end - 1, k))
         flat_after = k_e > k and abs(float(v[k_e] - v[k_e - 1])) <= (
             _RR_FLAT_RTOL * max(abs(float(v[k_e])), abs(float(v[k_e - 1])))

@@ -390,7 +390,9 @@ Each entry: question → option taken → evidence → how to reverse.
     except the first event's 9.2e-13 s in the first nanosecond. A record
     or SDIRK step that is skipped (probe failed, BE solve singular, jump
     not instant, step rejected for any reason) leaves the plain TR-BDF2
-    restart. The undersampled-gate count now covers every closed pulse
+    restart; a rejected turn-off SDIRK step also removes its record (the
+    jump it called instant is then resolved by TR-BDF2 steps). The
+    undersampled-gate count now covers every closed pulse
     narrower than its sampling, not only a new minimum (25b lets the cap
     lapse on a quiet bit).
     Measured (rtol 1e-5 unless noted; error = max |iL|, |vC| at the end
@@ -430,9 +432,14 @@ Each entry: question → option taken → evidence → how to reverse.
     the last high and low widths, counted while the bit keeps toggling;
     when one toggle direction is periodic (three toggles a constant period
     apart, 1e-6 relative), a step may run to just before its next
-    predicted toggle (margin 2 w + 1e-3 period): every pulse ends or starts
-    on a periodic toggle, so no step can hold a whole pulse, and a toggle
-    it does hold is seen at its end and located. A quiet bit keeps the
+    predicted toggle (margin 2 w + 1e-3 period). That a step then holds no
+    whole pulse assumes the gate does not get faster (every pulse bounded
+    by a toggle at its predicted time); pulse skipping that resumes, or a
+    rising frequency, breaks it (review: a pulse every 3T, then every T).
+    So a lifted step calls switch_fn every w/2 inside it (up to 4,096
+    calls, no solves): the pulse that comes where none is predicted is
+    still seen and located (test: 74 of 78 such pulses without the dense
+    samples, 78 of 78 with). A quiet bit keeps the
     run's narrowest pulse as its cap (a cap that lapsed missed 4 of 99
     10 ns pulses after a pause, and every 1 ns one). cl_boost_pi, 0.3 ms:
     28,049 accepted (26,947 in the first 0.1 ms, before the three periods
