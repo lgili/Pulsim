@@ -54,9 +54,9 @@ Reference values.
 - [x] 6.5 `res.i` is the solved unknown; `device_loss_summary`, `_diode_state` updated (DECISIONS 22; ideal-diode turn-offs in `commutation_events`; `python/tests/test_ideal_losses.py`)
 
 ## 7. Measurement gate (before the flip)
-- [ ] 7.1 Counters on the three-phase inverter and the buck, branch against conductance form on the implicit route: unknowns (+1 per switch), factorizations per run, partial-refactor fallbacks, solves per step; ns/step reported
+- [x] 7.1 Counters on the three-phase inverter and the buck, branch against conductance form on the implicit route: unknowns (+1 per switch), factorizations per run, partial-refactor fallbacks, solves per step; ns/step reported (pwl, `probes/measurement_gate.out`, DECISIONS 23: inverter 24 vs 12 unknowns, 1922 vs 1791 ns/step, same 251 event rounds and 492 segment searches; buck 7 vs 5 unknowns, 680 vs 668 ns/step; factorizations are not exposed by `simulate`, `segment_searches` bounds them)
 - [x] 7.2 On TR-BDF2 the smallest committed step in the DCM buck for both forms (8.26e-13 s with the resistor pair in the audit); the branch form's must not be the smaller (rtol 1e-9, 100 periods, gate-edge probes left out: 1.56e-10 s branch, 1.11e-14 s conductance; DECISIONS #16)
-- [ ] 7.3 Gate for the flip: ns/step of the 12-switch inverter on the implicit route at most 1.5 times the conductance form's; if not met, the flip is held and the measurement recorded here
+- [x] 7.3 Gate for the flip: ns/step of the 12-switch inverter on the implicit route at most 1.5 times the conductance form's; if not met, the flip is held and the measurement recorded here Met on pwl: 1.073× (median of 7 interleaved, DECISIONS 23); the flip itself is not done in this slice
 
 ## 8. Exact route with ideal switches (needs `add-exact-propagator-strategy` groups 1–6)
 - [ ] 8.1 Reduced state per mode (dimension `n_x − rank(K)`), explicit projection at mode entry, gauge directions from `add-complementarity-mode-selection` D10; saltation with the projection as reset map

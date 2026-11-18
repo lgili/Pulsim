@@ -1953,6 +1953,20 @@ def device_loss_summary(
                     closed, times, _branch_v(states, nodes), states[:, col], spec,
                     closed_start=closed_s, v_start=_branch_v(states_s, nodes),
                     i_start=states_s[:, col], window=win))
+        else:
+            warnings.warn(
+                f"device_loss_summary: ideal {kind} {entry['name']!r} has no recorded "
+                "mask in this result: its duty and switching energy are left out.",
+                RuntimeWarning, stacklevel=3)
+        ignored = [k for k, by_bid, by_name in (
+            ("conduction_specs", cond_by_bid, cond_by_name),
+            ("diode_specs", diode_by_bid, diode_by_name))
+            if by_bid.get(bid) or by_name.get(entry["name"])]
+        if ignored:
+            warnings.warn(
+                f"device_loss_summary: {', '.join(ignored)} for ideal (R_on = 0) "
+                f"{kind} {entry['name']!r} ignored: its conduction is the solved v·i "
+                "and it has no reverse-recovery model.", RuntimeWarning, stacklevel=3)
         return entry
 
     summary: List[Dict[str, Any]] = []

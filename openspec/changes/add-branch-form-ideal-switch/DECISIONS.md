@@ -313,3 +313,25 @@ Each entry: question → option taken → evidence → how to reverse.
     integration batch 11 behind the TR-BDF2 entries 14–21.)
     → Reverse: the `_ideal_entry` call sites in `losses.py`, `i_branch`
     in `_diode_state.py`, `has_ideal_diode` in `run_transient.hpp`.
+    Review fixes (fresh-context review, 2026-11-18): `conducting` read
+    `g_on·(v − V_f)` = `inf·0` = NaN for an ideal diode, so it was False
+    on every ON step — it now reads `i_branch`; the static (dt = 0) path
+    recorded no ideal-diode commutation (a sine source into an ideal
+    diode and a resistor: 0 events, now 7, each within one dt after the
+    zero); a result with no recorded mask, or a `conduction_specs` /
+    `diode_specs` entry for an ideal element, now warns instead of
+    dropping the duty, switching energy or spec silently.
+
+23. **Group-7 measurement gate: the flip is allowed on pwl (2026-11-18).**
+    (Numbered 15 on the ideal-switch branch; 23 at integration batch 11.)
+    Question: does the branch form cost too much to become the default?
+    → Measured (`probes/measurement_gate.py` → `measurement_gate.out`,
+    median of 7 interleaved runs on a shared Mac): the 12-switch
+    three-phase inverter at 1922 ns/step branch against 1791
+    conductance (1.073×, 24 vs 12 unknowns, the same 251 event rounds
+    and 492 segment searches); the buck at 680 vs 668 ns/step (1.018×).
+    7.3's bound is 1.5×: the flip is allowed on pwl. Not done: the flip
+    itself (out of this slice's scope), and 7.2 — trbdf2 refuses the
+    branch form by name, so its smallest committed step cannot be
+    measured; the flip stays held on trbdf2 until it runs there.
+    → Reverse: none needed (measurement only).
