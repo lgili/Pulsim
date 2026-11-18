@@ -155,3 +155,23 @@ def test_two_circuits_sharing_an_exported_library_start_clean(tmp_path):
         xa = np.asarray(p.simulate(ca, 2e-4, dt=DT, engine="pwl").states)
         xb = np.asarray(p.simulate(cb, 2e-4, dt=DT, engine="pwl").states)
     assert xa.tobytes() == xb.tobytes()
+
+
+def test_an_uncopyable_state_value_does_not_stop_the_reset():
+    # one uncopyable value made the whole dict shallow (the list carried
+    # over) and the restore's deepcopy then raised on the lock
+    import threading
+    b = _rc()
+
+    def step(t, dt, inp, out, state):
+        state["hist"].append(inp[0])
+        out[0] = len(state["hist"])
+    p.add_c_block(b, inputs=[("v", "o")], outputs=[("v", "c", "gnd")],
+                  dt=1e-5, fn=step, name="ctl",
+                  state={"hist": [], "lock": threading.Lock()})
+    c = b.build()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        runs = [np.asarray(p.simulate(c, 1e-4, dt=DT, engine="pwl").states)
+                for _ in range(2)]
+    np.testing.assert_array_equal(runs[0], runs[1])

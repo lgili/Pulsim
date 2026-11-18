@@ -331,9 +331,10 @@ Each entry: question → option taken → evidence → how to reverse.
     conductance (1.073×, 24 vs 12 unknowns, the same 251 event rounds
     and 492 segment searches); the buck at 680 vs 668 ns/step (1.018×).
     7.3's bound is 1.5×: the flip is allowed on pwl. Not done: the flip
-    itself (out of this slice's scope), and 7.2 — trbdf2 refuses the
-    branch form by name, so its smallest committed step cannot be
-    measured; the flip stays held on trbdf2 until it runs there.
+    itself (out of this slice's scope). 7.2 was measured once the
+    TR-BDF2 track landed the branch form there (#16: 1.56e-10 s branch
+    against 1.11e-14 s conductance, so the branch form's smallest step
+    is not the smaller one).
     → Reverse: none needed (measurement only).
 
 ## Ideal switch 4 (feat/core-a-ideal-switch, 2026-11-18)

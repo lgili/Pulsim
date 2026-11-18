@@ -260,6 +260,22 @@ def test_a_combination_keeps_a_temporary_loops_gate_alive():
     assert sf.next_edge_after(0.0) == pytest.approx(0.5 * T)
 
 
+def test_a_combination_outlives_the_list_its_gates_came_in():
+    # keep_alive on the list alone freed the chain once the list was cleared
+    import gc
+    import weakref
+    b = _buck()
+    gate = _pi_loop(b).switch_fn
+    parts = [gate]
+    sf = p.make_combined_switch_fn(b.graph.num_switches, parts)
+    alive = weakref.ref(gate)
+    del gate
+    parts.clear()
+    gc.collect()
+    assert alive() is not None
+    assert sf(0.0).get(b.switch_index_of("S"))
+
+
 @pytest.mark.parametrize("gate", [
     lambda b: _pi_loop(b).switch_fn,
     lambda b: p.make_combined_switch_fn(b.graph.num_switches,
