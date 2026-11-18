@@ -465,19 +465,24 @@ _CIRCUITS = {
 # D boost_dcm 7.7e-7 -> 2.9e-6 off pwl (rel 4e-5, within the DCM error).
 # Again by update-trbdf2-error-control (estimate x2): bridge diodes
 # 3.8e-7 -> 3.4e-7 W off pwl; boost_dcm D 2.9e-6 -> 3.1e-6.
+# Again by the round-off gate on diode decisions (DECISIONS 15, 2026-11-17):
+# bridge D1 / D3 3.41e-7 -> 3.36e-7 / 3.49e-7 W off pwl, D2 / D4
+# 1.46e-7 -> 1.44e-7 / 1.50e-7 (rel 7.5e-5; the two half-cycles no longer
+# agree to the last digit because their decisions are no longer read
+# from round-off the same way).
 _V_F0_REF = {
     ("boost_dcm", "auto"): {"S": 0.0452787560282, "D": 0.0649630799915},
     ("boost_dcm", "dsed"): {"S": 0.0452721300653, "D": 0.0641693129544},
     ("boost_dcm", "pwl"): {"S": 0.0452766957162, "D": 0.0649599299511},
     ("boost_dcm", "trbdf2"): {"S": 0.0452787560282, "D": 0.0649630799915},
-    ("bridge", "auto"): {"BR__D1": 0.000138546610073, "BR__D2": 5.67807984390e-05,
-                         "BR__D3": 0.000138546610071, "BR__D4": 5.67807984293e-05},
+    ("bridge", "auto"): {"BR__D1": 0.000138541297066, "BR__D2": 5.67793781857e-05,
+                         "BR__D3": 0.000138554749381, "BR__D4": 5.67850519110e-05},
     ("bridge", "dsed"): {"BR__D1": 0.000138571769601, "BR__D2": 5.67576669568e-05,
                          "BR__D3": 0.000138582323524, "BR__D4": 5.67838168133e-05},
     ("bridge", "pwl"): {"BR__D1": 0.000138205386016, "BR__D2": 5.66352667669e-05,
                         "BR__D3": 0.000138205386014, "BR__D4": 5.66352667572e-05},
-    ("bridge", "trbdf2"): {"BR__D1": 0.000138546610073, "BR__D2": 5.67807984390e-05,
-                           "BR__D3": 0.000138546610071, "BR__D4": 5.67807984293e-05},
+    ("bridge", "trbdf2"): {"BR__D1": 0.000138541297066, "BR__D2": 5.67793781857e-05,
+                           "BR__D3": 0.000138554749381, "BR__D4": 5.67850519110e-05},
     ("buck", "auto"): {"S": 0.00355077782274, "D": 0.00533935149256},
     ("buck", "dsed"): {"S": 0.00354982022022, "D": 0.00533604800703},
     ("buck", "pwl"): {"S": 0.00354999944119, "D": 0.00533789852559},

@@ -143,6 +143,29 @@ struct SaturableInductor {
                      * std::atan(i_L / p.I_sat);
     }
 
+    /// λ(i1) − λ(i0) of the atan law without forming either flux:
+    /// atan a − atan b = atan((a − b)/(1 + ab)) for ab > −1, so the
+    /// increment is accurate RELATIVE TO ITSELF. The difference of two
+    /// fluxes carries eps·|λ|; a residual that multiplies it by 2/h
+    /// (1e15 at a femtosecond landing step) turned that ulp into 1e-7 V
+    /// of Newton noise on a saturable transformer, above the 1e-9 V
+    /// absolute step tolerance, and which side of it a run fell on was
+    /// decided by the last bit (TR-BDF2 aborted at h_min on Linux CI,
+    /// and in 2 of 22 rounding-fuzzed runs on macOS). Monotone in i1:
+    /// d/di1 of (a − b)/(1 + ab) is (1 + b²)/(1 + ab)² > 0. The atan law
+    /// only (`table` and `ja` are not closed forms).
+    [[nodiscard]] static Real flux_increment(Real i1, Real i0,
+                                             const Params& p) noexcept {
+        const Real a = i1 / p.I_sat;
+        const Real b = i0 / p.I_sat;
+        const Real den = Real{1} + a * b;
+        const Real datan = den > Real{0}
+            ? std::atan(((i1 - i0) / p.I_sat) / den)
+            : std::atan(a) - std::atan(b);   // opposite signs: no cancellation
+        return p.L_residual * (i1 - i0)
+               + (p.L_0 - p.L_residual) * p.I_sat * datan;
+    }
+
     /// L(i) = dλ/di, for the law in force — the EXACT derivative of
     /// the same expression `flux()` evaluates, table or atan. The
     /// stamp reads this, not `current<Real>()`, so a table-backed

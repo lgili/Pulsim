@@ -4786,6 +4786,8 @@ void init_module(py::module_& m) {
             d["n_sdirk_steps"] = st.n_sdirk_steps;
             d["n_filtered_estimates"] = st.n_filtered_estimates;
             d["n_roundoff_floor_accepts"] = st.n_roundoff_floor_accepts;
+            d["n_noise_held_decisions"] = st.n_noise_held_decisions;
+            d["n_probe_noise_retakes"] = st.n_probe_noise_retakes;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),

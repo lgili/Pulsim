@@ -522,6 +522,23 @@ reference takes 18,192 steps with 15 forced accepts. dsed is a frozen
 Circuits whose v1 file has no `uic: true`
 start from the DC operating point, which `dsed` cannot take (refused).
 
+### TR-BDF2 on a bridge whose DC side floats on a tie resistor
+
+`engine='trbdf2'` on a diode bridge whose DC bus is referenced only by a
+1 MΩ tie still depends on rounding. Under a 1e-15 relative perturbation
+of the element values (20 runs) the run always finishes, but takes
+1231-1454 steps and 7-17 diode events, and the 30-40 ms bus average is
+311.155 to 311.341 V (pwl at dt 1e-6 and 2.5e-7: 311.344 V). A few
+picosecond samples right after a turn-off at the source zero crossing
+show an OFF diode 0.6 V forward (the L·g_off ringing of the line
+inductor). The two
+diodes of a half-cycle turn off at the same current zero (a tie), and
+through the OFF interval the floating rail is set by nano-amp g_off
+leakage whose sign flips at the source's zero crossings. The bus
+differential (dp − dn) of the unperturbed run is within 9e-4 V of pwl;
+the common mode is not. A real bridge has a defined reference (Y
+capacitors, a grounded rail): give the model one.
+
 ### First stored sample of algebraic nodes
 
 On `engine='pwl'` and `'trbdf2'` the first stored sample is the initial

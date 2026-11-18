@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### TR-BDF2: no diode decision made by round-off (Linux CI failures)
+
+* **Fixed** `engine='trbdf2'` decided diode bits from round-off on a
+  subnet held only by OFF conductances. At a tiny probe or landing step
+  (2C/h = 2.8e9 S against a 1 MΩ tie) such a subnet's common mode is
+  noise; a landing read a floating bridge bus 83 V up and turned the OFF
+  return diode back ON. A diode now flips only when its signal is past
+  the threshold by more than that solve's own round-off bound; a probe
+  that cannot decide is retaken 10x longer (up to span·1e-6). Under a
+  1e-15 rounding fuzz the bridge of `test_doubled_tolerances_restore_the_previous_density`
+  ground to `max_steps` in 9 of 20 runs (Linux CI: 122 events instead of
+  14); now 0 of 20, 0 forced accepts, 7-17 events, 1231-1454 steps; an
+  rtol sweep 1e-6 … 1e-4 gives 8-12 events (14-56 before). The
+  event count and the floating bus level still depend on rounding
+  (KNOWN_LIMITATIONS). New stats `n_noise_held_decisions`,
+  `n_probe_noise_retakes`.
+* **Fixed** the saturable inductor's TR-BDF2 residual took the flux
+  increment as a difference of two fluxes: 2/h·λ (1.4e12 at a 1e-13 s
+  step) put its round-off above the 1e-9 V Newton step tolerance, and the
+  run aborted at `h_min` when the last bit fell the wrong way
+  (`test_engines_agree_below_saturation` on Linux; 2 of 22 fuzzed runs
+  on macOS). The atan law's increment is now taken in closed form; 20 of
+  20 fuzzed runs finish with step counts within 0.02 %. `engine='pwl'`
+  is unchanged.
+* **Fixed** a diode turn-off landed past its current zero (by up to
+  1e-4 of the step) left the overshoot current in the inductor with only
+  g_off to go through; the trace recorded the L·g_off mode (3854 V on a
+  24 V DCM buck, `implausible_voltage` in the design evaluator's trbdf2
+  transient route). A turn-off is now bracketed until the voltage the
+  residual current puts across g_off is inside the run's tolerance. The
+  evaluator's DCM buck orbit is 8.996246827 V against the pss orbit
+  8.996247087 V (−2.6e-7 V). trbdf2 numbers that moved
+  (`trbdf2_baseline.py`): buck_dcm steps 9457 → 7608, error 1.25e-5 →
+  1.17e-5; boost steps 1482 → 1458; MOSFET half bridge error 5.44e-5 →
+  5.08e-5; floating-bus bridge time-averaged v(dp) error 0.027 → 0.054 V,
+  all of it in the 1 MΩ-tied common mode (dp − dn within 9e-4 V of pwl).
+
 ### Benchmarks: the Cuk converter's diode turned round
 
 * **Fixed** `benchmarks/circuits/switching/buck_boost/cuk_converter.yaml`
