@@ -282,9 +282,63 @@ Each entry: question → option taken → evidence → how to reverse.
     2.2236e-6). (e) Not done: x_sig is still the pre-cascade solve after a
     second cascade at the same t. → Reverse: revert the step-3 commit.
 
+## pwl losses and outputs of ideal elements (feat/core-a-ideal-switch)
+
+22. **Losses, currents and commutations of ideal elements (tasks 6.4 /
+    6.5, 2026-11-18).** Question: how are an R_on = 0 element's current,
+    loss and turn-off reported, with no conductance law to apply? →
+    Options taken: the current is the solved unknown i_s everywhere
+    (`res.i` already read it; `_diode_state.DiodeStateTrace` now carries
+    the column, so the state traces and every caller see a finite
+    current instead of `inf·0`); `device_loss_summary` reports the
+    element (`form='branch'`) instead of leaving it out (M5), integrating
+    the power as the line between each step's end powers v·i (exact
+    while ON: P = V_f·i is linear in i; the g_off·v² leak while OFF):
+    the product of the v-line and the i-line across a commutation step
+    invented 0.038 W on a 24 V, 0.5 A ideal buck, against 3.5e-10 W
+    (the leak) now. Tabulated `E_on`/`E_off` go through the same
+    `_switch_switching_loss` as the conductance switch. Ideal diodes sit
+    exactly at V_on while ON, so the voltage-crossing commutation
+    record never saw them turn off: their commutations are read from the
+    stamped state at each step (time = the step end unless the event
+    split located it). → Evidence (`python/tests/test_ideal_losses.py`):
+    forced 10 A with V_f = 0.7 gives v_D = 0.7 V and P_avg = 7.0 W
+    (window from 10 µs; the whole run reads 6.965 W, its first step
+    ramps 0 → 10 A); `E_on = 10 µJ·(i/1 A)·(v/24 V)` books 5.0 µJ per
+    turn-on within 4.8e-11 relative — not the 1e-12 of the task: the
+    OFF leak g_off·24 V = 2.4e-11 A rides on the 0.5 A; 10 turn-ons and
+    9 turn-offs of the ideal freewheeling diode recorded in 10 periods.
+    Not done: the impulse energy category (6.4's last clause).
+    (Numbered 14 on the ideal-switch branch; renumbered 22 at
+    integration batch 11 behind the TR-BDF2 entries 14–21.)
+    → Reverse: the `_ideal_entry` call sites in `losses.py`, `i_branch`
+    in `_diode_state.py`, `has_ideal_diode` in `run_transient.hpp`.
+    Review fixes (fresh-context review, 2026-11-18): `conducting` read
+    `g_on·(v − V_f)` = `inf·0` = NaN for an ideal diode, so it was False
+    on every ON step — it now reads `i_branch`; the static (dt = 0) path
+    recorded no ideal-diode commutation (a sine source into an ideal
+    diode and a resistor: 0 events, now 7, each within one dt after the
+    zero); a result with no recorded mask, or a `conduction_specs` /
+    `diode_specs` entry for an ideal element, now warns instead of
+    dropping the duty, switching energy or spec silently.
+
+23. **Group-7 measurement gate: the flip is allowed on pwl (2026-11-18).**
+    (Numbered 15 on the ideal-switch branch; 23 at integration batch 11.)
+    Question: does the branch form cost too much to become the default?
+    → Measured (`probes/measurement_gate.py` → `measurement_gate.out`,
+    median of 7 interleaved runs on a shared Mac): the 12-switch
+    three-phase inverter at 1922 ns/step branch against 1791
+    conductance (1.073×, 24 vs 12 unknowns, the same 251 event rounds
+    and 492 segment searches); the buck at 680 vs 668 ns/step (1.018×).
+    7.3's bound is 1.5×: the flip is allowed on pwl. Not done: the flip
+    itself (out of this slice's scope), and 7.2 — trbdf2 refuses the
+    branch form by name, so its smallest committed step cannot be
+    measured; the flip stays held on trbdf2 until it runs there.
+    → Reverse: none needed (measurement only).
+
 ## TR-BDF2 track 6 (feat/core-p2-trbdf2)
 
-22. **The DCM grind: one filtered SDIRK step after a turn-off (linear
+24. **The DCM grind: one filtered SDIRK step after a turn-off (linear
     circuits).** Question: 1,806 accepted steps below 1e-11 s on the DCM
     buck (400 periods) followed each diode turn-off. Cause, from the trace:
     the step after the turn-off was retried at the pre-event h (2.8e-8 s)
@@ -337,7 +391,7 @@ Each entry: question → option taken → evidence → how to reverse.
     or SDIRK step that is skipped (probe failed, BE solve singular, jump
     not instant, step rejected for any reason) leaves the plain TR-BDF2
     restart. The undersampled-gate count now covers every closed pulse
-    narrower than its sampling, not only a new minimum (23b lets the cap
+    narrower than its sampling, not only a new minimum (25b lets the cap
     lapse on a quiet bit).
     Measured (rtol 1e-5 unless noted; error = max |iL|, |vC| at the end
     against expm):
@@ -361,7 +415,7 @@ Each entry: question → option taken → evidence → how to reverse.
     spread 4.7e-8, 4,212 accepted and 800 sub-1e-11 intervals in every run.
     → Reverse: `sdirk_after_turn_off = false`.
 
-23. **A tick at a gate edge fires before the edge probe is committed, and
+25. **A tick at a gate edge fires before the edge probe is committed, and
     the pulse cap follows the recent pulses.** (a) `restart_after_gate_event`
     refused the commit when a tick was due within the probe, and a closed
     loop's period start is a tick: no post-edge sample at 0 of 199 rising
@@ -373,14 +427,32 @@ Each entry: question → option taken → evidence → how to reverse.
     (b) The step cap of an opaque switch_fn was twice the narrowest pulse
     of the run (a running minimum): cl_boost_pi's 0.28 ns start-up pulse
     capped every later step (519,783 accepted in 0.3 ms). → Per gate bit,
-    the last high and low widths, counted while the bit keeps toggling
-    (quiet at most twice its last period): 58,514 steps, max h after 0.1 ms
-    3.76e-8 s = twice the duty ramp's real pulses (the same circuit with
-    declared edges: 1,590 on feat/core-p4-control-graph). The run-wide
-    minimum is still reported (`gate_pulse_min`) and still drives the
-    undersampling warning. → Reverse: the cap from gate_pulse_min.
+    the last high and low widths, counted while the bit keeps toggling;
+    when one toggle direction is periodic (three toggles a constant period
+    apart, 1e-6 relative), a step may run to just before its next
+    predicted toggle (margin 2 w + 1e-3 period): every pulse ends or starts
+    on a periodic toggle, so no step can hold a whole pulse, and a toggle
+    it does hold is seen at its end and located. A quiet bit keeps the
+    run's narrowest pulse as its cap (a cap that lapsed missed 4 of 99
+    10 ns pulses after a pause, and every 1 ns one). cl_boost_pi, 0.3 ms:
+    28,049 accepted (26,947 in the first 0.1 ms, before the three periods
+    prove the rises regular; 580 per 0.1 ms after, against 558 with the
+    edges declared: 1,594 in all); 29 / 30 edges in both runs. The
+    run-wide minimum is still reported (`gate_pulse_min`) and still drives
+    the undersampling warning. → Reverse: the cap from gate_pulse_min.
+    Reference cells after the merge of integration batch 11 (the
+    reference is trbdf2 at rtol 1e-8): ll14 0.214 -> 0.00106, ll15
+    0.00124 -> 0.00123, both still above their 1e-3 tolerance; edge
+    timing 4.2e-6 -> 4.7e-11 s and 2e-7 -> 3.4e-12 s. What is left is not
+    the sampling: ll14's is the default tolerance's duty error, 4.9e-6
+    against the independent closed-loop reference (rtol 1e-8: 7.4e-8),
+    which moves each edge 4.9e-11 s on a 24.9 V V(sw) jump; ll15's is one
+    current zero 8 ns late at 1.1857e-4 s, because the inrush through the
+    Shockley diode leaves I(L) at 27.394 A against 27.328 A converged
+    (2.4e-3 at rtol 1e-5, 5.6e-4 at 1e-6): a global-error question of
+    the Newton path, not of ticks or caps.
 
-24. **Reviewer leftovers of step 3.** (a) The no-flip branch of the
+26. **Reviewer leftovers of step 3.** (a) The no-flip branch of the
     chatter-safe cascade reset x_sig to the committed x. When an earlier
     cascade at the same t (a gate edge) had decided the bits on its probe,
     x was solved under the bits before that cascade (the stale reference
@@ -394,7 +466,7 @@ Each entry: question → option taken → evidence → how to reverse.
     landing (no solve at dt_land) takes its noise bound on the bracket
     end's step if the dt_land factor is singular, instead of aborting.
 
-25. **An ON diode's noise floor reads v_D, not its common mode** (batch 11
+27. **An ON diode's noise floor reads v_D, not its common mode** (batch 11
     review, finding 4). The leakage-scale floor of item 18 was
     g_off/g_on (1 + |V_th| + |V_f| + |v_a| + |v_k|): a diode floating at
     10 kV had a floor of 2e-8 V, i.e. a 2e-5 A reverse current taken for

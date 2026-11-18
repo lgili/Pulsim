@@ -31,18 +31,22 @@ designs and checks the status counts, that the front is non-empty
 and that every member satisfies the constraints. The printed front
 of a 512-design run is an OBSERVATION of this model.
 
-    python examples/optimization/buck_pareto.py [n_designs] [--lhs]
+    python examples/optimization/buck_pareto.py [n_designs] [--lhs] [--process]
+
+``--process`` evaluates the Latin-hypercube sample on a process pool
+(one worker per core but one): the evaluators pickle.
 """
 
 from __future__ import annotations
 
-import math
+import functools
 import sys
 
 import numpy as np
 
 import pulsim as p
-from pulsim.design import Evaluator, Kpi, SteadySpec, as_constraints, as_objectives
+from pulsim.design import (Constraint, Evaluator, Kpi, SteadySpec,
+                           as_constraints, as_objectives)
 from pulsim.lib.parts import part_from_mapping
 
 VIN, D, R_LOAD = 48.0, 0.25, 1.2
@@ -111,46 +115,73 @@ def build(design):
     return b, sf
 
 
-def _volume(per):
-    """Box volume (m^3) of the illustrative law; heatsink sized so the
-    hotter switch sits at 125 C."""
-    d, k, loss = per.design, per.kpis, per.losses
-    # default KPIs (closed forms on the kernel path): no waveform needed
-    v_l = K_L * (d["L"] * k["i_peak.L"] * k["i_rms.L"]) ** 0.75
-    v_c = K_C * d["C"] * k["v_out"] ** 2
-    r_sa = _r_th_sa(d, loss)
-    # finite at the smallest heatsink: the r_th_sa constraint flags it
-    v_hs = K_HS / max(r_sa, R_TH_SA_MIN)
-    return v_l + v_c + v_hs
+def build_circuit(part_name):
+    """The circuit form: ONE immutable circuit per part (its switch
+    conductance); a design is ``with_value`` of ``L.L`` and ``C.C`` of
+    it, shared by every worker thread, with no rebuild."""
+    b, _ = build({"part": part_name, "L": 10e-6, "C": 100e-6, "f_sw": 1e5})
+    return b.build()
 
 
-def _r_th_sa(design, losses):
-    """Largest sink-to-ambient resistance that keeps both switches at
-    or below 125 C on one sink: 85 K over the total semiconductor loss,
-    minus the hotter device's junction-to-case drop."""
-    part = PARTS[design["part"]]
-    p_q = {q: sum(losses.get(q, {}).values()) for q in ("Q1", "Q2")}
-    p_tot = sum(p_q.values())
-    r_jc = float(part.params["R_th_jc"])
-    if p_tot <= 0:
-        return math.inf
-    return (T_J_MAX - T_AMB - r_jc * max(p_q.values())) / p_tot
+def schedule(design):
+    """The gate schedule of a design (``Q1`` is bit 0, ``Q2`` bit 1)."""
+    return p.make_dead_time_pwm_pair_fn(design["f_sw"], D, 0, 1, 2, 0.0)
 
 
-def make_evaluator():
+def kpis_of(part_name):
+    """The two design KPIs as formulas (``Kpi.formula``): declarative,
+    so they pickle and the kernel batch computes them with no Python
+    per design (DECISIONS 26).
+
+    ``r_th_sa``: the largest sink-to-ambient resistance that keeps both
+    switches at or below 125 C on one sink -- 85 K over the total
+    semiconductor loss, minus the hotter device's junction-to-case drop.
+    ``volume``: box volume (m^3) of the illustrative law, heatsink sized
+    by ``r_th_sa`` (floored at ``R_TH_SA_MIN``: the ``r_th_sa``
+    constraint flags a design below it)."""
+    r_jc = float(PARTS[part_name].params["R_th_jc"])
+    return [
+        Kpi.formula("r_th_sa", f"({T_J_MAX!r} - {T_AMB!r} - {r_jc!r} * "
+                    "max(loss.Q1, loss.Q2)) / (loss.Q1 + loss.Q2)"),
+        Kpi.formula("volume", f"{K_L!r} * (L * i_peak.L * i_rms.L) ** 0.75"
+                    f" + {K_C!r} * C * v_out ** 2"
+                    f" + {K_HS!r} / max(r_th_sa, {R_TH_SA_MIN!r})"),
+    ]
+
+
+def switching_period(design):
+    return 1.0 / design["f_sw"]
+
+
+def make_evaluator(form="circuit", thermal=None):
+    """One evaluator per part. ``form='circuit'`` (default): one shared
+    immutable circuit per part, a design being ``with_value`` of it;
+    ``'factory'``: ``build`` per design. Same records. Everything is a
+    module-level function or a value (``Constraint``), so the evaluator
+    pickles and ``evaluate_many(backend='process')`` runs it (each
+    worker builds the part's circuit once). With the circuit form and
+    formula KPIs, ``evaluate_many`` runs the kernel batch: every design
+    in one GIL-free kernel call, on ``workers`` native threads.
+    ``thermal`` (a ``ThermalSpec``, optional) closes each switch's
+    junction temperature on its loss tables (tutorial 08)."""
     t_switch_specs = {
         name: {"Q1": part.switch_spec(Tj=T_J_MAX)} for name, part in
         PARTS.items()}
+
+    def source(name):
+        if form == "factory":
+            return dict(build=build)
+        return dict(circuit=functools.partial(build_circuit, name),
+                    fields={"L": "L.L", "C": "C.C"}, schedule=schedule)
     # One evaluator per part: the switch's loss table belongs to the
     # options, so it is part of every record's options digest.
     return {name: Evaluator(
-        build, period=lambda d: 1.0 / d["f_sw"], loads=("R_load",),
+        **source(name), period=switching_period, loads=("R_load",),
         output="vout",
-        kpis=[Kpi("volume", _volume),
-              Kpi("r_th_sa", lambda per: _r_th_sa(per.design, per.losses))],
-        constraints={"ripple_v": (None, RIPPLE_MAX),
-                     "r_th_sa": (R_TH_SA_MIN, None)},
-        steady=SteadySpec(method="pss"),
+        kpis=kpis_of(name),
+        constraints=[Constraint.max("ripple_v", RIPPLE_MAX),
+                     Constraint.min("r_th_sa", R_TH_SA_MIN)],
+        steady=SteadySpec(method="pss"), thermal=thermal,
         loss_options={"switch_specs": t_switch_specs[name]})
         for name in PARTS}
 
@@ -170,13 +201,14 @@ def latin_hypercube(n, seed=0):
     return out
 
 
-def evaluate_all(designs, workers=1):
-    evs = make_evaluator()
+def evaluate_all(designs, workers=1, form="circuit", backend="thread"):
+    evs = make_evaluator(form)
     recs = [None] * len(designs)
     for name, ev in evs.items():
         idx = [i for i, d in enumerate(designs) if d["part"] == name]
         for i, r in zip(idx, ev.evaluate_many([designs[i] for i in idx],
-                                              workers=workers)):
+                                              workers=workers,
+                                              backend=backend)):
             recs[i] = r
     return recs
 
@@ -208,9 +240,9 @@ def status_counts(records):
             for s in ("ok", "refused", "failed", "infeasible")}
 
 
-def run_lhs(n=512, seed=0, workers=1):
+def run_lhs(n=512, seed=0, workers=1, backend="thread"):
     designs = latin_hypercube(n, seed)
-    recs = evaluate_all(designs, workers=workers)
+    recs = evaluate_all(designs, workers=workers, backend=backend)
     return recs, pareto(recs)
 
 
@@ -281,12 +313,13 @@ def main(argv):
     Latin-hypercube sample of ``n`` designs (default 512)."""
     n = int(argv[1]) if len(argv) > 1 and argv[1].isdigit() else 512
     try:
-        if "--lhs" in argv:
+        if "--lhs" in argv or "--process" in argv:
             raise ImportError
         import pymoo  # noqa: F401
         records, front = run_pymoo()
     except ImportError:
-        records, front = run_lhs(n)
+        records, front = (run_lhs(n, workers=None, backend="process")
+                          if "--process" in argv else run_lhs(n))
     report(records, front)
     try:
         print("plot:", plot(front))

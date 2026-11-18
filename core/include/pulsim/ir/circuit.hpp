@@ -105,6 +105,9 @@ public:
         return d_->ics;
     }
     [[nodiscard]] std::span<const Alias> aliases() const noexcept { return d_->aliases; }
+    [[nodiscard]] std::span<const ControlDecl> controls() const noexcept {
+        return d_->lowered.controls();
+    }
     [[nodiscard]] std::span<const Parameter> parameters() const noexcept {
         return d_->lowered.parameters();
     }
@@ -138,7 +141,7 @@ public:
     [[nodiscard]] Circuit with_params(
         std::span<const std::pair<std::string_view, Real>> values) const {
         auto b = d_->lowered.clone();
-        for (const auto& [name, v] : values) b.set_param(name, v);
+        b.set_params(values);
         return Circuit{std::move(b), d_->plan};
     }
 
@@ -148,6 +151,15 @@ public:
                                      Real value) const {
         auto b = d_->lowered.clone();
         b.set_value_("with_value", device_dot_field, value);
+        return Circuit{std::move(b), d_->plan};
+    }
+
+    /// The circuit with control declarations `decls` appended (C blocks,
+    /// graph-driven sources). Controls never change the matrix structure,
+    /// so the symbolic plan is shared; the receiver is unchanged.
+    [[nodiscard]] Circuit with_controls(std::span<const ControlDecl> decls) const {
+        auto b = d_->lowered.clone();
+        for (const auto& c : decls) b.add_control(c);
         return Circuit{std::move(b), d_->plan};
     }
 
@@ -303,8 +315,12 @@ private:
                 dev.fields.push_back(Field{static_cast<std::uint16_t>(f), Value{x}});
                 v.real(x);
             }
-            // Values outside the scalar rows. Tables are shared immutable
-            // objects, identified by address (decision 4 in DECISIONS.md).
+            // Values outside the scalar rows, tables by CONTENT (decision
+            // 16: an address differs per process and per round trip).
+            auto reals = [&](const std::vector<Real>& xs) {
+                v.word(xs.size());
+                for (const Real x : xs) v.real(x);
+            };
             std::visit([&](const auto& p) {
                 using P = std::decay_t<decltype(p)>;
                 if constexpr (std::is_same_v<P, models::PwlCurrentSource::Params>) {
@@ -313,11 +329,25 @@ private:
                     for (const Real y : p.w.v) v.real(y);
                     v.word(p.w.periodic ? 1u : 0u);
                 } else if constexpr (std::is_same_v<P, models::SaturableInductor::Params>) {
-                    v.word(reinterpret_cast<std::uintptr_t>(p.table.get()));
-                    v.word(reinterpret_cast<std::uintptr_t>(p.ja.get()));
+                    v.word(p.table ? 1u : 0u);
+                    if (p.table) {
+                        reals(p.table->i_knots()); reals(p.table->lambda_knots());
+                        reals(p.table->slope_knots()); v.real(p.table->L_residual());
+                    }
+                    v.word(p.ja ? 1u : 0u);
+                    if (const auto* j = p.ja.get()) {
+                        for (const Real x : {j->N, j->Ae, j->le, j->lg, j->ja.Ms, j->ja.a,
+                                             j->ja.alpha, j->ja.c, j->ja.k,
+                                             j->substep_frac, j->M0}) v.real(x);
+                        v.word(static_cast<std::uint64_t>(j->substeps_min));
+                    }
                 } else if constexpr (std::is_same_v<P, models::NonlinearCapacitor::Params>) {
                     v.word(static_cast<std::uint64_t>(p.law));
-                    v.word(reinterpret_cast<std::uintptr_t>(p.table.get()));
+                    v.word(p.table ? 1u : 0u);
+                    if (p.table) {
+                        reals(p.table->v_knots()); reals(p.table->q_knots());
+                        reals(p.table->c_knots());
+                    }
                 }
             }, params);
             d->devices.push_back(std::move(dev));
@@ -338,6 +368,7 @@ private:
         const auto& params = d->lowered.parameters();
         for (const auto& p : params) {
             v.str(p.name); v.real(p.value); v.str(p.unit);
+            if (!p.expr.empty()) { s.word(0x65787072ULL); s.str(p.name); s.str(p.expr); }
             v.word(p.lo.has_value()); v.real(p.lo.value_or(0));
             v.word(p.hi.has_value()); v.real(p.hi.value_or(0));
         }
@@ -358,6 +389,15 @@ private:
         }
         std::ranges::sort(d->ics, {}, [](const InitialCondition& ic) { return ic.device.v; });
         for (const auto& ic : d->ics) { v.word(ic.device.v); v.real(ic.value); }
+        // Hashed only when present: a circuit without controls keeps
+        // its hashes.
+        if (const auto& cs = d->lowered.controls(); !cs.empty()) {
+            s.word(0x636f6e74726f6cULL);  // "control", then the count
+            s.word(cs.size());
+            for (const auto& c : cs) {
+                s.str(c.name); s.str(c.kind); v.word(c.content_hash);
+            }
+        }
 
         using AK = builder::CircuitBuilder::AliasKind;
         for (const auto& [name, t] : d->lowered.aliases()) {

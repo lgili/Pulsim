@@ -687,7 +687,7 @@ TEST_CASE("TR-BDF2: one SDIRK step after a diode event, filter on or off",
     REQUIRE(v_def > 1.0);
     REQUIRE(v_def == Approx(v_off).epsilon(1e-3));
     REQUIRE(v_filt == Approx(v_off).epsilon(1e-3));
-    // Default (add-branch-form-ideal-switch DECISIONS 22): a piecewise-linear
+    // Default (add-branch-form-ideal-switch DECISIONS 24): a piecewise-linear
     // circuit takes the SDIRK step after a diode turn-off, its estimate
     // filtered, and none after a turn-on.
     solver::TrBdf2Options o;

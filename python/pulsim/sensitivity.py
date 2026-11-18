@@ -526,7 +526,8 @@ def _check_circuit(builder, switch_fn, b_extra_fn):
         raise _unsup("b_extra_fn", "sensitivities: a b_extra_fn is an "
                      "opaque callback between the parameters and the "
                      "circuit; its derivative is unknown.")
-    if getattr(builder, "_c_blocks", None):
+    from ._circuit_ir import c_blocks_of
+    if c_blocks_of(builder):
         raise _unsup("c_blocks", "sensitivities: C blocks drive the "
                      "circuit through an opaque callback.")
     for c in builder.components():
@@ -549,6 +550,14 @@ def _check_circuit(builder, switch_fn, b_extra_fn):
             raise _unsup("switch_fn", "sensitivities: the circuit has "
                          "controlled switches and no switch_fn.")
         return _ConstSchedule(builder.graph.num_switches)
+    from .periodic_steady_state import _closed_loop_source
+    src = _closed_loop_source(switch_fn)
+    if src:
+        raise _unsup(
+            "closed_loop", f"sensitivities: switch_fn comes from {src}: its "
+            "edges follow a controller this path does not run, so they "
+            "would be those of a frozen duty. Differentiate the open-loop "
+            "plant at a fixed duty (make_pwm_switch_fn).")
     from . import SwitchSchedule
     if not hasattr(switch_fn, "next_edge_after") or (
             isinstance(switch_fn, SwitchSchedule)
@@ -571,6 +580,30 @@ class _Traj:
     events: dict                   # k -> list of event dicts
     native: dict
     n_steps: int
+
+
+_EVENT_SAMPLE_TOL = 1e-12   # = detail::kEventSampleTol (period_integrals.hpp)
+
+
+def _attach_events(times, log) -> dict:
+    """``k -> [event]``: each logged event goes to the first sample at or
+    after it (within 4 ulp, as the kernel's period map does) and must be
+    at that sample, since its jump is applied to the sample's left limit."""
+    events: dict = {}
+    t_last = float(times[-1])
+    t_tol = 4 * np.finfo(float).eps * max(abs(t_last), t_last - times[0])
+    for e in log:
+        t = float(e["t"])
+        k = int(np.searchsorted(times, t - t_tol, side="left"))
+        if k == len(times) or times[k] - t > _EVENT_SAMPLE_TOL * max(
+                abs(t), t_last):
+            raise RuntimeError(
+                f"sensitivities: event {e['name']!r} at t = {e['t']!r} has "
+                "no sample of its own in the trajectory.")
+        events.setdefault(k, []).append(dict(
+            t=t, name=str(e["name"]), type=int(e["predicate_type"]),
+            old=e["old_mask"], new=e["new_mask"]))
+    return events
 
 
 def _run(builder, sf, x0, t_end, dt_max, dt_init, ic_from_builder):
@@ -601,17 +634,7 @@ def _run(builder, sf, x0, t_end, dt_max, dt_init, ic_from_builder):
     times = np.asarray(r["times"], dtype=float)
     states = np.asarray(r["states"], dtype=float).reshape(len(times), -1)
     log = list(r["event_log"])
-    events: dict = {}
-    for e in log:
-        k = int(np.argmin(np.abs(times - e["t"])))
-        if abs(times[k] - e["t"]) > 1e-12 * max(abs(e["t"]), t_end):
-            raise RuntimeError(
-                f"sensitivities: event {e['name']!r} at t = {e['t']!r} has "
-                "no sample of its own in the trajectory.")
-        events.setdefault(k, []).append(dict(
-            t=float(e["t"]), name=str(e["name"]),
-            type=int(e["predicate_type"]), old=e["old_mask"],
-            new=e["new_mask"]))
+    events = _attach_events(times, log)
     masks, left = [], []
     cur = log[0]["old_mask"] if log else m0
     for k in range(len(times)):
@@ -637,7 +660,10 @@ class _Context:
         self.params = params
         self.comps = list(builder.components())
         self.mask_by_key = {}
-        for m in traj.masks + traj.mask_left:
+        # with the masks between two events logged at one sample (a7)
+        between = [m for evs in traj.events.values() for e in evs
+                   for m in (e["old"], e["new"])]
+        for m in traj.masks + traj.mask_left + between:
             self.mask_by_key.setdefault(str(m), m)
         base = _snapshot(builder, self.mask_by_key, h_max, ic_from_builder)
         n_p = len(params)
@@ -1036,6 +1062,11 @@ def _kpi(sr, row, kind, t0, t1):
     return rms, Ig / (2 * W * rms) if rms > 0 else Ig * 0.0, False, None
 
 
+#: Relative tie of two extremum values (detail::kExtremumTie in
+#: core/include/pulsim/dsed/period_integrals.hpp): reported at the earliest.
+_EXTREMUM_TIE = 1e-12
+
+
 def _extrema_grid(s0, s1, K, re_max):
     """K uniform cells of [s0, s1] plus s0 + (s1 - s0)/2^m down to about
     1/(2 re_max): a fast mode's extremum near the start is bracketed (16
@@ -1155,20 +1186,36 @@ def _extrema(sr, row, kind, t0, t1, K=16):
     out = {}
     for kind_ in (("peak", "valley") if kind == "ripple" else (kind,)):
         sg = 1.0 if kind_ == "peak" else -1.0
-        i = int(np.argmax(sg * ys))
+        i, j = _running_extremum(ys, [cd[1] for cd in cands], sg)
         tie = [cd for cd in cands
                if sg * (ys[i] - cd[0]) <= 1e-9 * span
-               and abs(cd[1] - cands[i][1]) > 1e-9 * (t1 - t0)
+               and abs(cd[1] - cands[j][1]) > 1e-9 * (t1 - t0)
                # the two ends of an orbit are one point
-               and not (sr.periodic and abs(abs(cd[1] - cands[i][1])
+               and not (sr.periodic and abs(abs(cd[1] - cands[j][1])
                                             - (t1 - t0)) <= 1e-9 * (t1 - t0)
                         and t0 == tr.times[0] and t1 == tr.times[-1])]
-        out[kind_] = (cands[i][0], cands[i][2], bool(tie), cands[i][1])
+        out[kind_] = (cands[i][0], cands[j][2], bool(tie), cands[j][1])
     if kind == "ripple":
         p_, v_ = out["peak"], out["valley"]
         return (p_[0] - v_[0], p_[1] - v_[1], p_[2] or v_[2],
                 (p_[3], v_[3]))
     return out[kind]
+
+
+def _running_extremum(ys, ts, sg):
+    """``(i, j)``: the kernel's running rule (detail::extremum_candidate)
+    over the candidates in time order. A value within ``_EXTREMUM_TIE`` of
+    the running best is a tie: it keeps the larger value (index ``i``) and
+    the earlier instant (``j``, whose gradient is reported)."""
+    i = j = -1
+    for q in sorted(range(len(ys)), key=lambda q: ts[q]):
+        if i >= 0 and abs(ys[q] - ys[i]) <= _EXTREMUM_TIE * max(
+                abs(ys[q]), abs(ys[i])):
+            if sg * ys[q] > sg * ys[i]:
+                i = q
+        elif i < 0 or sg * ys[q] > sg * ys[i]:
+            i = j = q
+    return i, j
 
 
 def _one_dtau(ev, kind):

@@ -71,10 +71,10 @@ def test_plain_rectifier_is_passive_reciprocal():
         "class": "passive_reciprocal", "device": "", "kind": ""}
 
 
-def test_rectifier_fed_by_coupled_inductors_is_refused_by_the_extractor():
-    # The coupled-inductor matrix is classified (PSD here, k = 0.99), but the dsed extraction has
-    # no inductance-matrix block yet (add-exact-propagator-strategy task 7): refused by name,
-    # before any mode is selected. pwl runs it.
+def test_rectifier_fed_by_coupled_inductors_is_passive_reciprocal():
+    # The coupled-inductor matrix is classified (PSD here, k = 0.99) and the dsed extraction takes
+    # it (add-exact-propagator-strategy, coupled inductors): the run is passive-reciprocal and
+    # follows pwl at a 1 us step (0.0007 V of a 50 V output measured).
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "a", "gnd", 0.0, 100.0, 50.0)
     b.add_transformer("T", "a", "gnd", "s", "r", 10e-3, 2.5e-3, 0.99)
@@ -82,8 +82,10 @@ def test_rectifier_fed_by_coupled_inductors_is_refused_by_the_extractor():
     b.add_diode("D1", "s", "o", 1e3, 1e-9)
     b.add_capacitor("C", "o", "r", 100e-6)
     b.add_resistor("R", "o", "r", 100.0)
-    with pytest.raises(p.UnsupportedError) as ei:
-        _run(b, "dsed")
-    assert (ei.value.engine, ei.value.feature) == ("dsed", "extraction")
-    r = _run(b, "pwl", dt=1e-6)
-    assert np.isfinite(np.asarray(r.v("o"))).all()
+    r = _run(b, "dsed")
+    assert r.diagnostics["mode_guard"]["passivity"]["class"] == "passive_reciprocal"
+    ref = _run(b, "pwl", dt=1e-6)
+    t = np.asarray(r.times)
+    v = np.asarray(r.v("o")) - np.asarray(r.v("r"))
+    v_ref = np.interp(t, np.asarray(ref.times), np.asarray(ref.v("o")) - np.asarray(ref.v("r")))
+    assert np.abs(v - v_ref).max() < 1e-3 * np.abs(v_ref).max()

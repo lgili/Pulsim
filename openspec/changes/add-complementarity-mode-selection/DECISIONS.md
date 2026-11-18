@@ -487,7 +487,7 @@ choices it did not pin.
       a refusal with the guard off). For a single-shot pulse T_ref is the
       run length. Fix: cap the probe at the next time event; it changes
       every guarded run's selection trace, so it needs its own
-      bit-identity pass. Not seen on any survey circuit.
+      bit-identity pass. Not seen on any survey circuit. Fixed 2026-11-18: #31.
     - With no exact step (tier 3, allowed numeric), `first_departure_`
       returns +∞, so the widening is uncapped and #24's early release is
       possible again. Under the default (13.2) such a mode is refused
@@ -602,3 +602,268 @@ choices it did not pin.
     singular (1 TΩ ties, h_e ≤ 1e-10·T_ref: no LU to correct). → Reverse:
     drop the `fix` calls in `diode_port_problem_full` and the
     anchored callbacks (each half alone is measurable with the probes).
+
+31. **The selector's probes stop at the next time event (closes the
+    first risk of #28).** The judge's probes and `first_departure_` used
+    to propagate up to 12 800·h_e with the gates and the source piece
+    frozen at t. Each probe is now capped at `next_time_event_(t)`: the
+    next edge the switch function announces, or the next source corner,
+    else the run's end. An edge within `near_time` of t is the one just
+    landed, so the edge after it is used. When the mode holds up to the
+    cap, `first_departure_` returns the time event itself, so the
+    widening (#24) never looks past a gate edge or a source corner.
+    Before, it returned +∞ there.
+    - **No edge oracle.** A switch function without `next_edge_after`
+      adds no cap. Its scheduler adapter (`PySwitchFnSSM`, `PySwitchFn`)
+      answers `next_edge_after` with the dt_max/10 poll boundary of
+      `EdgeSearch`, which is not an edge, and caches its search. The
+      adapters now say so through `has_edge_oracle()`, an optional member
+      of the scheduler's SwitchFn contract. A type without it is trusted.
+    - **Measured failure without that rule.** Capping at the poll
+      boundary brought #24's defect back: the bridge bank released a
+      diode early again, 0.128 V off pwl
+      (`test_a_widened_pass_does_not_release_a_diode_before_its_own_turn_off[lcp]`).
+    - **Bit identity.** `survey_bit_identity.py` against the step-2b
+      build: 81 trajectories identical, plus the 9 settle-only refusals
+      unchanged (same t, same violation). Golden ALL IDENTICAL;
+      `bit_identity.py` 36/36 default and shadow (pwl / trbdf2 do not
+      use the selector).
+    - **Interface.** `ModeSelector`'s public interface is unchanged. Only
+      the value its `horizon` callback can return on the dsed scheduler
+      changed: finite at a time event.
+    - **Tests.** Rounding fuzz in `test_probe_horizon.py`: a DCM buck
+      whose diode turns off a few µs before each gate edge, 21 runs with
+      every component perturbed at 1e-15, default and `'lcp'`, gives one
+      mode sequence (ptp of the output 1.5e-13 V on 17.1 V).
+    - **Reverse.** Drop the `cap` lines in `judge_` and
+      `first_departure_`.
+
+32. **The singular port factor on a floating island is a typed refusal
+    (#27).** `diode_port_problem_full` solves through `port_solve_`.
+    When `solve_at` fails "numerically singular" and the mask has a
+    floating island, the failure becomes
+    `pulsim.UnsupportedError(engine='dsed', feature='floating_island',
+    device=<island node>, kind='Node')`. The node is the island node
+    named in the factor's diagnosis, else the island's reference node.
+    The message keeps the factor's text and names the remedies: a
+    smaller tie resistance, or engine 'pwl' / 'trbdf2'. Any other failure
+    passes unchanged.
+    - **Why typed.** Before, it reached Python as a `RuntimeError`, and
+      callers that try the next bridge on `RuntimeError` could take it
+      for an extraction failure.
+    - **Tests.** `test_port_factor_beyond_the_bound_refuses_instead_of_rounding`
+      runs on 'dsed' and 'exact' alike (1 TΩ ties, 2 mF), with
+      `engine == 'dsed'` and `feature == 'floating_island'`.
+      `exact_triage.cause()` names the cause.
+    - **Reverse.** Call `cache_.solve_at` directly again.
+
+33. **Fresh-context review (2026-11-18) of the exact-engine steps.** A
+    read-only reviewer (opus, medium) read 98225161 … e9a10fe7. It found
+    no change to the pwl / trbdf2 paths, and the projection algebra,
+    dW ≥ 0, the LLT coupling path and the typed island refusal sound.
+    **Fixed:**
+    - **Undone projections.** Records of a projection the scheduler
+      undid (`x = shadow_x_` in the guard's repair and in the settle-cap
+      path) are dropped (`truncate_reinit_log`). Before, a repaired event
+      listed a record whose λ and dW never happened.
+    - **#31's skip rule.** An edge within `near_time` of t is skipped
+      only when it is the edge just fired (`last_time_event_t_`, 0 at
+      the start). Before, a predicate located a few ulps before an
+      unfired gate edge probed a whole period past it.
+    - **`judge_` with no room before the event.** It returns −1 (not
+      judged) instead of 1 (consistent).
+    - **The island refusal's node name.** It now matches the whole name
+      ("n" no longer matches "node n1").
+    - **The auto scheduler's numeric paths.** A gate edge that projects
+      a dependent state keeps its left limit, only when x moved, so
+      nothing else changes.
+    - **Periodic steady state.** A constrained mode is refused by name
+      (feature `dependent_states`). The period map has no Jacobian of
+      the projection, and K x = k gives a multiplier of exactly 1.
+    - **User injection on a constraint.** A user `b_extra_fn` on a
+      constrained mode is refused (feature `extraction`). The flow keeps
+      K ẋ = 0, so the injection would break K x = k unseen.
+    - **Tests.** `test_probe_horizon.py` says that it is the fuzz of the
+      decision and does not show the cap firing.
+
+    **Recorded, not fixed:**
+    - Records follow the eigen-directions of KE⁻¹Kᵀ. Two identical
+      independent loops (a symmetric split link) give a degenerate
+      eigenvalue, and the records mix the loops. The sum is exact.
+    - `kind` can be "mixed".
+    - The selector judges a candidate from the unprojected state
+      (already open under dependent states).
+    - The structural cond₁ cut and the general SVD tolerance differ by
+      up to a factor of n.
+    - `fast_t_` is not cleared per `simulate()` (latent: one simulator
+      per call).
+    - `test_dsed_auto_integrator` takes its event time from the engine.
+    - `with_right_limits` extends only times, states and switch rows.
+    - Found while trying to make the cap fire: a gated single-phase
+      bridge (100 V sine, 100 µF ∥ 100 Ω bus, a 10 kHz switch to 5 Ω)
+      fails on `mode_selection='lcp'` with D1 OFF and forward-biased by
+      0.314 V at t = 1e-5 s. It fails identically with the cap disabled,
+      so the cap is not the cause. The default selection runs it with
+      2 repairs.
+
+    → Reverse: each fix is local (the named function).
+
+## Slice 4: the fixed engine (2026-11-13 … 2026-11-17)
+
+Numbered F1, F2, … so they do not collide with #22–#33 of
+`feat/core-a-complementarity` (written in parallel on dsed, merged here
+2026-11-18 through `feat/core-integration`). The 2026-11-13
+work in progress recorded its port model as "22."; F1 replaces it.
+
+F1. **The pwl port model is the site's own system, solved directly, with
+    every floating island's KCL imposed exactly (revises the WIP's
+    "22." premise; the idea of #30, re-implemented for pwl).** Question: at which
+    discretisation, and in which form, does a `pwl` decision site pose
+    its LCP? → Option taken: pass 0 is the site's own linear system
+    `J(mask₀, dt)·s = −(b_c + b_extra)` — the trapezoidal step at `dt`,
+    a restart stage on the factor of `2γh` with its backward-Euler
+    history, a split sub-step at `dt₂`, the static step at `dt = 0` —
+    solved through the cache's factor of the settle's first mask
+    (`cache.solve_at(mask₀, dt, b_extra)`: the very solve the settle's
+    first round makes; on the static path the engine solves through its
+    segment, the port model through the dt = 0 entry of the same
+    matrix), so the LCP and the settle answer the same discrete
+    question. After each solve, every floating island (nodes
+    joined by capacitors, inductors, sources, ON switches / diodes and
+    resistors > 1 mS, tied to the rest only through OFF switches /
+    diodes and resistors ≤ 1 mS) gets its KCL sum imposed exactly:
+    `σ = g·s − Σ_S f`, `s −= w·σ/(g·w)`, `w = J⁻¹e_ref`, with `g` the
+    island's summed row from its boundary branches alone and `Σ_S f` the
+    exact (Neumaier) sum of the site's right-hand side over the island's
+    rows (so a user `b_extra_fn` injection is honoured, unlike #30's
+    analytic zero, which needed #30's follow-up refusal). One more
+    back-substitution per island and site; several islands are corrected
+    jointly, `K·α = σ` with `K(m, n) = g_m·w_n`: K is the identity in
+    exact arithmetic (disjoint islands, `g_m` sums J's rows over `S_m`),
+    but behind a 1e7 Ω tie its off-diagonal rounding left two buses
+    joined by 1 MΩ 6.5e-9 V off (u) and 4.3e-9 relative (Z) when they
+    were corrected one after another, as the dsed adapter does (#30);
+    jointly: within the 1e-10 V bound; disabled for a circuit with a
+    device kind the rule does not classify (controlled sources,
+    transformers, Newton devices). The WIP's increment form
+    (`J·δ = −(b_c + b_extra + J·x₀)`, `u = v(x₀) + v(δ)`) is dropped: it
+    is no more accurate than the direct solve (table).
+    → Evidence (Catch2 `[pwl_ports]`, floating-bus rectifier 100 V,
+    1 mF ‖ 50 Ω, both diodes OFF, tie 1e4 … 1e9 Ω, sub-step `f·dt`,
+    dt = 10 µs; reference: the same system assembled and solved in
+    double-double arithmetic (~32 digits; `long double` is `double` on
+    arm64, so the previous "long-double" reference — and the f = 1e-3
+    numbers quoted in the wind-down — were double-precision LU against
+    double-precision LU); worst |u − u_ref| over both ports):
+
+    | tie Ω | f | direct cache solve | increment form (WIP) | direct + island KCL |
+    |---|---|---|---|---|
+    | 1e4 | 1 … 1e-3 | 1.2e-9 … 3.1e-6 | 8.0e-9 … 2.1e-5 | ≤ 6.0e-15 |
+    | 1e6 | 1 … 1e-3 | 6.7e-7 … 5.2e-4 | 2.8e-6 … 8.0e-4 | ≤ 7.9e-15 |
+    | 1e7 | 1 … 1e-3 | 1.8e-6 … 4.0e-3 | 1.1e-5 … 1.5e-2 | ≤ 1.1e-14 |
+    | 1e9 | 1 … 1e-3 | 3.4e-4 … 3.2e-1 | 1.5e-4 … 4.3e-2 | ≤ 9.9e-15 |
+
+    Neither form is accurate on an island; the form matters less than
+    the island's common mode (the dsed finding of #30 holds on pwl). The
+    test asserts ≤ 1e-10 V on u and ≤ 1e-12 relative on Z at every tie,
+    f ∈ {1, 0.5, 0.1, 0.01, 0.001} and both an island and a grounded
+    mask, and on two buses joined by 1 MΩ (ties 1e5 … 1e9 Ω). The engine's own settle solve is NOT corrected (it is the
+    trajectory; changing it changes every floating-bus default run):
+    the first column is the rounding the pwl settle itself decides on
+    (KNOWN_LIMITATIONS). → Reverse: drop the `fix_` calls in
+    `PwlModePorts::site`. Duplicated from the dsed adapter
+    (`NativeCircuitBuilderAdapter::port_islands_of_`, c4255226): the
+    island classification and the correction formula; to unify in a
+    shared `pwl/port_islands.hpp` once both branches are integrated.
+
+F2. **On pwl every selector pass, the tie widenings included, is posed
+    on the site's own step.** Question: what does the port callback
+    return for the selector's 100·h and 1e4·h tie passes on the fixed
+    engine? → The WIP posed them as backward Euler over 100·dt and
+    1e4·dt from the step start (0.1 s = five 50 Hz cycles at dt = 10 µs)
+    with the sources frozen. Measured on the single-phase bridge
+    (100 V, 50 Hz, 1 mF ‖ 100 Ω, V_f = 0, bus on a 1 GΩ tie, dt = 10 µs,
+    40 ms, standalone C++ driver on run_transient): 'lcp' ended at
+    p − n = 0.848 V (settle 95.171 V; trbdf2 95.1711166 V) with 990
+    sites whose selected mode its own solve violated, and 'shadow'
+    reported 846 disagreements. At the first wrong site (t = 12.14 ms,
+    all OFF, bus at 93.2 V, source at −62 V) D2 leaks 5e-10 A forward —
+    a tie at the site's step — and the widened passes (bus discharged
+    over 0.1 s) turned D2 AND D3 on: the port model itself predicted
+    −4410 A for that mode, matching the solve (−4410.07 A), so the model
+    was right and the look-ahead wrong. The dsed band (#3.2) is
+    h_e = 1e-7·T_ref, where 1e4·h_e is still a sliver of the period; on
+    pwl the site's step IS the decision horizon (the next site is one
+    step away). → Option taken: the callback returns the site's own
+    (Z, u) at every pass (computed once per site); a tie left after the
+    passes goes OFF unless it pins an island and the engine's judge
+    rejects the all-OFF mode (the selector's own rule). The widened
+    backward-Euler model (`PwlModePorts::widened`) is deleted. The
+    selector-side remedy on feat/core-a-complementarity (#24: a widened
+    pass stops short of the decided mode's next event) is not on this
+    branch; it would not help here, the pass ends five cycles out.
+    → Evidence: see the survey (F3). → Reverse: restore `widened` and
+    the h ≠ h_site branch of the callback.
+
+F3. **What the shadow found on pwl, and what the guard repairs.**
+    Question: where do the settle and the LCP disagree on the fixed
+    engine, and who is right? → Measured over 15 circuits × 3 configs
+    (`probes/pwl_shadow_survey.py` / `.out`: buck at rest, DCM buck
+    V_th = 0 and 1e-2, boost 50 / 500 Ω V_th = 0, half-wave RL, the
+    single-phase bridges V_f = 0 / 0.7, the three-phase overlap and
+    C-filter bridges, L·(1 ± δ) × 6, the 5- and 10-bridge banks with
+    0.2 mH lines); each disagreement judged by the engine's law on the
+    site's solve under both modes. No disagreement at all on the
+    converters, the half-wave rectifier, the overlap bridge and the
+    banks; 'lcp' is bit-identical to the default there. On the
+    single-phase bridges 505–567 (V_f = 0.7) and 21–47 (V_f = 0)
+    disagreements, nearly all "both" (a diode at the leak current, both
+    labels consistent; the waveforms agree to 3.1e-11 V); the LCP alone
+    right at 2 sites per config of the V_f = 0 bridge (pwl, restart),
+    the settle alone right at 1–27 sites (the LCP's choice violates the
+    raw, uncorrected solve by ≤ 3e-4 V — the island rounding of F1, the
+    same reason 'lcp' counts 3–87 `inconsistent` sites there); the
+    three-phase C-filter bridge 1 "both". The settle ended without a
+    fixed point 25–43 times on the V_f = 0 bridge, nowhere else; the
+    guard repaired 2 of them in the pwl and restart configs (D1 at
+    105.12 / 125.12 ms, 9.9e-7 V; D2 at 115.12 / 175.12 ms, 9.1e-4 V);
+    old → new: pwl, max |Δ(p − n)| 4.5e-13 V, end 95.171220828299 V
+    unchanged; restart, max |Δ(p − n)| 7.07e-3 V near 185 ms, end
+    95.177877798615 V unchanged, distance to trbdf2 over 175–190 ms
+    7.099e-3 → 7.098e-3 V. Every other default run is bit-identical.
+    The restart and split runs of the V_f = 0 bridge settle 6.8e-3 /
+    4.5e-3 V off trbdf2 (95.1711166 V) where 'lcp' lands within
+    3.1e-5 / 4.6e-7 V: a converged settle decided on the island's
+    rounding, which the guard (it judges breaches only) cannot see. →
+    Option taken: the guard stays breach-only (a converged settle is
+    consistent with its own solve by construction; judging it on the
+    corrected model would move every floating-bus default run); 'lcp'
+    stays opt-in on pwl. → Rounding fuzz (20 last-bit perturbations of
+    C and R): one waveform within 2.7e-11 V on every bridge, one mode
+    sequence on the three-phase bridge; on the single-phase bridges ≤ 6
+    of 4001 samples label a diode differently while every diode carries
+    < 1e-7 A (ties). → Found on the way (engine, not changed here): a
+    restart stage or split sub-step entered with the previous stage's
+    mask cycle never solves — `mask_cycle` is kept per outer step on
+    purpose (breach reporting), and `run_event_iteration` breaks on it
+    before its first round. The shadow and the guard skip such a site
+    (they read an empty settled mode before; the review found it in two
+    survey rows). 'shadow' leaves the trajectory bit-identical but not
+    the cache counters: its judge solves candidate masks through the
+    cache (event entries, restart factorizations, segment searches
+    move). → Reverse: `_PWL_MODE_GUARD = False`.
+
+F4. **Guard counters on pwl follow dsed's names; a site judges only its
+    own breach (2026-11-18, merge of #24/#25 and the final review).**
+    `mode_guard['settle_caps']` counts the settles the guard judged (round
+    budget hit, or a mask cycle found at this site), `mode_guard['lcp']`
+    nests the guard's LCP counters (the flat keys stay), `capped` counts
+    tie passes shortened to the mode's next event. The outer step's
+    `mask_cycle` survives its sub-steps and restart stages on purpose
+    (one breach per outer step); the guard read it as the site's own,
+    so a later sub-step re-counted it and, on repairing its own breach,
+    cleared the earlier unrepaired one from `event_iteration_breaches`.
+    Each site now remembers the cycle it was entered with and restores
+    it after a repair. The 54-run shadow survey is unchanged (every
+    value column identical; only wall times moved). → Reverse: the
+    `cycle_in` lines in `run_transient.hpp`.

@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -74,9 +75,23 @@ struct Parameter {
     std::string unit;
     std::optional<Real> lo;
     std::optional<Real> hi;
+    std::string expr{};   // group 7: defined by this expression (empty: a literal)
 };
 
 struct ParamId { std::uint32_t v; };
+
+/// A control declaration (group 3): a block the circuit carries but the
+/// IR does not model — a C block (`kind == "c_block"`), a source driven
+/// by a control graph (`"graph_driven"`). Opaque: `handle` belongs to the
+/// binding that made it (a Python object for these two) and is passed
+/// through to the run; the IR hashes `name` and `kind` (structure) and
+/// `content_hash` (value), which the declaring side computes stably.
+struct ControlDecl {
+    std::string name;
+    std::string kind;
+    std::uint64_t content_hash = 0;
+    std::shared_ptr<const void> handle;
+};
 
 struct FieldSpec {
     std::string_view name;
@@ -84,6 +99,7 @@ struct FieldSpec {
     Bound bound;
     Real (*get)(const ParamsVariant&);
     void (*set)(ParamsVariant&, Real);
+    bool derived = false;    // computed from a stored member (R = 1/G): not serialised
 
     [[nodiscard]] constexpr bool named(std::string_view n) const noexcept {
         return n == name || (!alias.empty() && n == alias);
@@ -123,7 +139,8 @@ template <class P, auto M>
         [](const ParamsVariant& e) -> Real {
             return Real{1} / (std::get<P>(e).*M);
         },
-        [](ParamsVariant& e, Real v) { std::get<P>(e).*M = Real{1} / v; }};
+        [](ParamsVariant& e, Real v) { std::get<P>(e).*M = Real{1} / v; },
+        true};
 }
 
 namespace m = ::pulsim::models;

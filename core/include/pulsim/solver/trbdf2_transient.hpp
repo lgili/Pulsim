@@ -209,7 +209,7 @@ struct TrBdf2Options {
     bool filter_error_estimate = false;
     /// One SDIRK(2,2) step, its estimate filtered, after a turn-off of a
     /// diode with g_off > 0 on a linear circuit (add-branch-form-ideal-switch
-    /// DECISIONS 22). C++-only; false restores the previous run.
+    /// DECISIONS 24). C++-only; false restores the previous run.
     bool sdirk_after_turn_off = true;
     /// add-branch-form-ideal-switch D4: an impulsive re-initialisation
     /// raises UnsupportedError(feature='impulse') instead of being recorded
@@ -1460,6 +1460,9 @@ inline SimulationResult run_transient_trbdf2(
     std::vector<Real> gate_last_toggle(n_sw_total, Real{0});
     // The last closed high / low pulse width of each gate bit (0 = none).
     std::vector<Real> gate_w_last(2 * n_sw_total, Real{0});
+    // The last three toggle times of each bit per direction (fall, rise).
+    std::vector<Real> gate_dir_t(6 * n_sw_total,
+                                 -std::numeric_limits<Real>::infinity());
     std::vector<bool> gate_toggled(n_sw_total, false);
     SwitchStateMask gate_prev = switch_fn(opts.t_start
                                           + Real{0.5} * h_min);
@@ -1537,27 +1540,66 @@ inline SimulationResult run_transient_trbdf2(
             }
             gate_toggled[i] = true;
             gate_last_toggle[i] = at_t;
+            Real* dt3 = &gate_dir_t[6 * i + (sw.get(i) ? 3 : 0)];
+            dt3[0] = dt3[1];
+            dt3[1] = dt3[2];
+            dt3[2] = at_t;
         }
         gate_prev = sw;
     };
     // The step cap: twice the narrowest RECENT pulse. Per bit, the last
     // high and low widths count while the bit keeps toggling (quiet for at
-    // most twice its last period); a running minimum over the run held a
+    // most twice its last period; a quiet bit keeps the run's narrowest
+    // pulse as its cap); a running minimum over the run held a
     // closed loop's 0.28 ns start-up pulse as the cap for ever (519,783
-    // steps in 0.3 ms of cl_boost_pi with an opaque gate).
+    // steps in 0.3 ms of cl_boost_pi with an opaque gate). A phase whose
+    // ending toggle comes at a regular period (a trailing-edge PWM's rise
+    // at kT) is not capped until just before the predicted toggle: the
+    // same run took 58,514 steps with the cap over the whole long phase.
+    // Returns the step limit (infinite: none).
     auto gate_pulse_cap = [&](Real at_t) {
-        Real cap = std::numeric_limits<Real>::infinity();
+        Real lim = std::numeric_limits<Real>::infinity();
         for (const Size i : gate_bits) {
             const Real wh = gate_w_last[2 * i + 1];
             const Real wl = gate_w_last[2 * i];
-            if (!gate_toggled[i] || (wh <= Real{0} && wl <= Real{0})
-                || at_t - gate_last_toggle[i] > Real{2} * (wh + wl)) {
+            if (!gate_toggled[i] || (wh <= Real{0} && wl <= Real{0})) {
                 continue;
             }
-            if (wh > Real{0}) cap = std::min(cap, wh);
-            if (wl > Real{0}) cap = std::min(cap, wl);
+            if (at_t - gate_last_toggle[i] > Real{2} * (wh + wl)) {
+                // Quiet: the narrowest pulse of the run, as before. Pulses
+                // resuming after a pause (burst mode, a soft-start pulse
+                // then PWM) were stepped over with the cap lapsed: 4 of 99
+                // 10 ns pulses, every 1 ns one.
+                if (std::isfinite(gate_pulse_min)) {
+                    lim = std::min(lim, Real{2} * gate_pulse_min);
+                }
+                continue;
+            }
+            Real w = std::numeric_limits<Real>::infinity();
+            if (wh > Real{0}) w = std::min(w, wh);
+            if (wl > Real{0}) w = std::min(w, wl);
+            // A step may not hold a whole pulse. A pulse ends with a toggle
+            // in each direction once per period; when one direction is
+            // regular, a step that ends before its next predicted toggle
+            // cannot hold a pulse that ends there, and any other toggle it
+            // holds is seen at its end and located.
+            Real reg = std::numeric_limits<Real>::infinity();
+            bool any_reg = false;
+            for (const Size dir : {Size{0}, Size{3}}) {
+                const Real* d3 = &gate_dir_t[6 * i + dir];
+                const Real p1 = d3[2] - d3[1], p0 = d3[1] - d3[0];
+                if (!std::isfinite(p0) || p1 <= Real{0}
+                    || std::abs(p1 - p0) > Real{1e-6} * p1 + Real{4} * h_min) {
+                    continue;
+                }
+                any_reg = true;
+                const Real margin = Real{2} * w + Real{1e-3} * p1;
+                reg = std::min(reg, d3[2] + p1 - margin - at_t);
+            }
+            lim = std::min(lim, any_reg ? std::max(Real{2} * w, reg)
+                                        : Real{2} * w);
         }
-        return cap;
+        return lim;
     };
     // Diode bits found held in a forbidden state at a step's start
     // (see the crossing detector).
@@ -1715,7 +1757,7 @@ inline SimulationResult run_transient_trbdf2(
     // in h), so on that step the estimate is filtered, W^-1 est with the
     // stage factor W (Hosea-Shampine). Measured on the DCM buck: 7,608 ->
     // 4,212 accepted steps, 4,306 -> 2,753 rejects, no step below 1e-11 s
-    // away from the event records (add-branch-form-ideal-switch DECISIONS 22).
+    // away from the event records (add-branch-form-ideal-switch DECISIONS 24).
     const bool sdirk_off_lin = opts.sdirk_after_turn_off && sdirk_possible
                                && !nl_effective && !sdirk_ok;
     bool sdirk_event = false;   // the pending restart came from such an event
@@ -1964,7 +2006,7 @@ inline SimulationResult run_transient_trbdf2(
                 learn_gate_toggles(sw_now, t);
                 const Real cap = gate_pulse_cap(t);
                 if (std::isfinite(cap)) {
-                    h = std::min(h, std::max(Real{2} * cap, h_min));
+                    h = std::min(h, std::max(cap, h_min));
                 }
             }
             if (has_diodes && gates_differ(sw_now, gates_decided)) {

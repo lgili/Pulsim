@@ -232,7 +232,7 @@ Each output wire creates **one controlled source**:
 | `("i", "n+", "n-")` | a current `out[k]` flowing from `n+` to `n−` |
 
 Outputs are injected through Pulsim's `b_extra` path, which is part of
-the fixed-step (**PWL**) engine — see [Engines](#engines-and-limits).
+the `pwl` and `trbdf2` engines — see [Engines](#engines-and-limits).
 
 ---
 
@@ -266,6 +266,13 @@ p.add_c_block(b, ..., dt=50e-6, fn=step)   # sim with dt=2e-6
 | Python | the `state` dict argument; persists across steps. Seed it with `state={...}` on `add_c_block`. |
 | Compiled C/C++ | the opaque `*state` pointer — allocate in `init` (or lazily), free in `term`. One instance per `add_c_block` call. |
 | Inline C/C++ | works the same via `*state`. **Caveat:** a `static` variable in inline code is shared by every block compiled from *identical* source (they share one cached library) — use `*state` for per-instance state. |
+
+Every `simulate()` without `resume_from=` starts each block over: the
+Python `state` dict goes back to the one passed to `add_c_block`, and a
+compiled block's `term` (if any) then `init` (if any) run again, with
+`*state` set to `NULL` in between. A library with no `init` that
+allocates lazily needs a `term`, or each run leaks that allocation;
+a `static` variable outside `*state` is never reset.
 
 ---
 
@@ -344,10 +351,14 @@ together.
 
 ## Engines and limits
 
-- **Outputs require the PWL engine** (`engine="pwl"`, the default) — they
-  are injected via `b_extra`, which the variable-step DSED engine does
-  not consume. A block with **inputs only** (logging, an observer, a
-  software trip) also runs under `engine="dsed"`.
+- **Engines.** `pwl` (the default) runs a block in label time: the tick
+  at `kT` samples the state of the step before and holds from there
+  (docs/control-graph.md). `engine="trbdf2"` lands its steps on the
+  block's ticks: it samples `v(kT)` and holds from `kT` (the state-time
+  law), and agrees with `pwl` as `dt -> 0`. `engine="auto"` keeps routing
+  a circuit with C blocks to `pwl`. The exact strategy
+  (`engine="exact"` / `"dsed"`) refuses C blocks by name
+  (`UnsupportedError`, feature `c_blocks`): it has no `b_extra` input.
 - One-sample (ZOH) feedback delay; no algebraic feedthrough.
 - Inline compilation needs a system C/C++ compiler; without one, use a
   precompiled `lib=`.
@@ -375,7 +386,7 @@ together.
 | output has the wrong sign | check the output wire orientation `("v", n+, n-)` |
 | block never updates | `dt` larger than `t_end`; lower `dt` |
 | `dt … < simulation dt … clamping` warning | block `dt` below the sim step — raise it |
-| outputs ignored under `engine="dsed"` | outputs are PWL-only; use `engine="pwl"` |
+| `UnsupportedError ... c_blocks` under `engine="exact"` / `"dsed"` | use `engine="pwl"` or `"trbdf2"` |
 
 ---
 

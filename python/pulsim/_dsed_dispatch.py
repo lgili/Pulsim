@@ -540,6 +540,13 @@ def _result_from_native(native_res, t_start: float):
     for key in ("mode_shadow", "mode_selection", "mode_guard"):
         if key in native_res:
             res.diagnostics[key] = native_res[key]
+    # dependent states: the impulsive re-initialisations at mode entry,
+    # with the fixed engine's ReinitRecord fields (lambda as lambda_)
+    from types import SimpleNamespace
+    res.reinit_records = [
+        SimpleNamespace(**{("lambda_" if k == "lambda" else k): v
+                           for k, v in r.items()})
+        for r in native_res.get("reinit_records", [])]
     return res
 
 
@@ -1091,7 +1098,10 @@ def check_diode_modes(res, builder, rel: float = 1e-3) -> None:
         return
     for c in comps:
         prm = c["params"]
-        on = S[:, builder.switch_index_of(c["name"])].astype(bool)
+        k = builder.switch_index_of(c["name"])
+        if k >= S.shape[1]:
+            continue    # a schedule narrower than the circuit: no record
+        on = S[:, k].astype(bool)
         i = _np.asarray(res.i(c["name"]), dtype=float)
         thr = max(float(prm.get("V_th", 0.0)), float(prm.get("V_f", 0.0)))
         v_off = i / float(prm.get("g_off", 1e-9))

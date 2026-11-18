@@ -36,16 +36,19 @@ One run takes 4 s.
 - The model is well posed. With V_th = V_f = 0 the diode's i(v) law is
   continuous and strictly monotone, so the network is a Lipschitz ODE in
   (iL, vC), and its solution is unique.
-- **pwl is right** to every digit it prints. dsed/exact is wrong by 0.027 V; trbdf2
-  by 2.5e-3 V (its step-ceiling error at rtol 2e-5). Their errors are engine errors, not an
-  ambiguity in the model.
+- **pwl is right** to every digit it prints, and so is dsed/exact since the
+  floating-island fix (it read 0.027 V low before); trbdf2 is off by
+  2.2e-3 V (its step-ceiling error at rtol 2e-5). That is an engine error,
+  not an ambiguity in the model.
 
 | Engine (reported in DECISIONS #19) | 30–40 ms bus average [V] | Error vs truth [V] | Relative |
 |---|---|---|---|
 | exact (this script) | 311.3438814289 | 0 | 0 |
 | pwl, dt 1e-6 and 2.5e-7 | 311.343881 | −4.3e-7 (below its last printed digit) | 1.4e-9 |
-| dsed / exact | 311.316685 | −0.027196 | −8.7e-5 |
-| trbdf2, both forms, rtol 2e-5, window clipped at 30 ms (every fuzz run) | 311.341410 | −2.47e-3 | −7.9e-6 |
+| dsed / exact, integration batch 11 tree (default options) | 311.343881428 | −4.5e-10 | −1.4e-12 |
+| dsed / exact, before the floating-island fix (as first reported) | 311.316685 | −0.027196 | −8.7e-5 |
+| trbdf2, both forms, rtol 2e-5, window clipped at 30 ms (every fuzz run; TR-BDF2 track) | 311.341410 | −2.47e-3 | −7.9e-6 |
+| trbdf2, conductance form, default options, integration batch 11 tree | 311.341678 | −2.20e-3 | −7.1e-6 |
 | trbdf2, both forms, rtol 1e-7 | 311.343690 | −1.91e-4 | −6.1e-7 |
 
 The trbdf2 "311.154 V" first reported was the average of the samples
@@ -131,8 +134,9 @@ only g_off·v².
 
 ## Not computed
 
-- Why dsed lands on 311.3167 V. No engine was run here (no build was
-  allowed). trbdf2 was measured afterwards on the TR-BDF2 track: the
+- Why dsed landed on 311.3167 V before: not traced here (no build was
+  allowed); on the integration batch 11 tree it reads 311.343881428 V
+  (−4.5e-10 V; with dt = 1e-6, −1.1e-10 V). trbdf2 was measured afterwards on the TR-BDF2 track: the
   exact event sequence, 311.341410 V at rtol 2e-5 (DECISIONS #19 of
   add-branch-form-ideal-switch).
 - Where the pwl run's D1/D4 chatter at 4.66 ms comes from. The exact

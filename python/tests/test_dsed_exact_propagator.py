@@ -298,12 +298,12 @@ def test_floating_capacitor_initial_voltage():
 
 def test_inconsistent_parallel_capacitors_are_refused_by_name():
     # Parallel capacitors (1 uF at 10 V, 3 uF at 2 V) are a capacitor
-    # loop; the LTI extractor refuses every capacitor loop, so the
-    # charge-conserving start (4.0 V) is not reachable through
-    # simulate() yet. It must be a named refusal, never a wrong start.
-    # Since the examples audit the builder refuses the IC loop first
-    # (c0 is the voltage across each cap: 10 V and 2 V break KVL), on
-    # every engine; dsed's own "capacitors form a cycle" refusal is behind it.
+    # loop. Since the examples audit the builder refuses the IC loop
+    # (c0 is the voltage across each cap: 10 V and 2 V break KVL) on
+    # every engine, before any engine runs. Behind that refusal the exact
+    # engine now reduces a capacitor loop and starts it charge-conserving
+    # (test_exact_dependent_states.py, test_reinit_records_*); the
+    # builder's refusal of a KVL-breaking IC set is the earlier answer.
     b = p.CircuitBuilder()
     b.add_capacitor("C1", "a", "gnd", 1e-6, c0=10.0)
     b.add_capacitor("C2", "a", "gnd", 3e-6)

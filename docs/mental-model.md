@@ -56,6 +56,13 @@ run. Values change by derivation too: `c.with_value("RL.R", 8.0)` and
 `c.with_params(Lbase=2e-3)` return new circuits
 ([Parameters and value updates](parameters.md)).
 
+A circuit carries everything the builder recorded: initial conditions
+per device (`c.initial_conditions()`: a capacitor's voltage across it,
+an inductor's current through it; a loop of capacitor ICs that breaks
+KVL is refused when the state is synthesised, naming the capacitor),
+aliases (`c.aliases()`), and control declarations (`c.controls()`: C
+blocks and control-graph-driven sources, which `simulate(c)` runs).
+
 ## 1. Graph + DevicePool — the circuit description
 
 The `Graph` stores topology: each branch has a `from` node id, a `to` node id, and a `kind` enum:
@@ -126,6 +133,19 @@ pwm = p.make_pwm_switch_fn(100e3, 0.5, loaded.builder.switch_index_of("Q1"),
                            loaded.builder.graph.num_switches)
 res = p.simulate(loaded, switch_fn=pwm)     # t_end / dt from the file
 ```
+
+A built circuit also writes itself out: `circuit.to_yaml()` emits the
+lowered form (`pulsim_circuit: 1`, `nodes`, then one `devices` entry per
+registry kind instance with its pins and every stored field that differs
+from the kind's default, then `couplings`, `branch_form`, `parameters`,
+`bindings`, `initial_conditions`, `aliases`, `power_mosfets` and
+`controls`), and `pulsim.Circuit.from_yaml(text)` reads it back with the
+same `structure_hash` / `value_hash`; the result simulates bit for bit
+like the original. Fields are the stored members (a resistor's `G`, not
+`R`), so nothing is divided on the way back. Pickle goes through this
+text, which is how `sweep(circuit, backend="process")` ships a circuit
+to its workers. A C block (a Python callable) is refused by name. This
+is not the authoring format below: `load_yaml_*` reads that one.
 
 The YAML loader builds a `LoadedCircuit` with two attributes: `.builder` (the populated `CircuitBuilder`) and `.options` (the top-level `simulation:` block — `t_end`, `dt`, ...), plus read-only shortcuts (`t_end`, `dt`, `switch_names`, `node_names`, `source`). `simulate(loaded)` reads `t_end` / `dt` from it. The YAML does not carry the gate drive: build the `switch_fn` from the loaded builder, asking it for the switch's bit by name.
 

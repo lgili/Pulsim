@@ -217,7 +217,7 @@ def test_a_rising_edge_on_a_controller_tick_gets_its_post_edge_sample():
                                measured=lambda x, i=b.node_id_of("out"): x[i],
                                setpoint=5.0, switch="S", freq=1 / Tp)
     r = p.simulate(b, 2e-3, engine="trbdf2", switch_fn=loop.switch_fn,
-                   step_observer=loop.step_observer, controller_period=Tp)
+                   step_observer=loop.step_observer)
     up_s, up, dn_s, dn = _edges_sampled(r, b.switch_index_of("S"))
     assert up > 150 and dn > 150
     assert (up_s, dn_s) == (up, dn)
@@ -228,7 +228,10 @@ def test_the_pulse_cap_follows_the_recent_pulses():
     """An opaque gate caps the step at twice the narrowest pulse it has
     shown. That was a run-wide minimum: one 1 ns pulse at start-up held
     every later step at 2 ns (cl_boost_pi: 519,783 steps in 0.3 ms). It now
-    follows each gate bit's last pulses, and no later edge is missed. The
+    follows each gate bit's last pulses, lifted between predicted toggles of
+    a periodic direction; the quiet gap before the 10 ns PWM pulses keeps the
+    run's minimum, so none of them is stepped over (the cap that lapsed
+    there missed 4 of 99). The
     1 ns pulse sits where the start-up steps are short enough to see it
     (gate_pulse_min proves it was seen)."""
     Tp = 1e-5
@@ -237,7 +240,7 @@ def test_the_pulse_cap_follows_the_recent_pulses():
 
     def fn(t):
         m = p.SwitchStateMask(b.graph.num_switches)
-        on = (1e-8 <= t < 1.1e-8) or (t >= 1e-5 and (t % Tp) < 0.5 * Tp)
+        on = (1e-8 <= t < 1.1e-8) or (t >= 1e-5 and (t % Tp) < 1e-3 * Tp)
         m.set(k, bool(on))
         return m
     with pytest.warns(UserWarning, match="narrower than the spacing"):
@@ -248,3 +251,10 @@ def test_the_pulse_cap_follows_the_recent_pulses():
     up_s, up, dn_s, dn = _edges_sampled(r, k)
     assert (up, dn) == (100, 100)                    # every edge landed
     assert r._trbdf2_stats["n_accept"] < 20_000
+    # Once the rises prove periodic, the long phase is not capped: the
+    # steady state costs what the same PWM with declared edges costs (the
+    # run-wide 1 ns minimum: 2 ns steps, 250,000 in this window).
+    ref = p.simulate(b, 1e-3, engine="trbdf2", switch_fn=p.make_pwm_switch_fn(
+        1 / Tp, 1e-3, k, b.graph.num_switches))
+    tr = np.asarray(ref.times)
+    assert np.sum(t > 0.5e-3) <= 2 * np.sum(tr > 0.5e-3)

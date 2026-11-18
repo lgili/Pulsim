@@ -31,6 +31,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <array>
 #include <cstddef>
 #include <unordered_map>
 #include <utility>
@@ -45,6 +46,9 @@
 #include "pulsim/dsed/scheduler_auto.hpp"
 #include "pulsim/dsed/period_integrals.hpp"
 #include "pulsim/dsed/periodic_orbit.hpp"
+#include "pulsim/dsed/design_batch.hpp"
+#include "pulsim/dsed/period_thermal.hpp"
+#include "pulsim/ir/circuit.hpp"
 #include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/dsed/step_controller.hpp"
 #include "pulsim/dsed/stiffness_detector.hpp"
@@ -60,6 +64,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -285,6 +290,10 @@ public:
 
     void set_poll(Real poll) noexcept { search_.set_poll(poll); }
 
+    /// Whether next_edge_after names real edges (the selector's probe
+    /// horizon); the EdgeSearch fallback returns poll boundaries.
+    [[nodiscard]] bool has_edge_oracle() const noexcept { return has_nea_; }
+
 private:
     py::object fn_;
     py::object nea_attr_;
@@ -425,6 +434,40 @@ py::array_t<double> reconstruct_full_states(
 /// current read 0.0234 A against 0.0535 A. Integrating each step from
 /// the right limit of its start sample to the left limit of its end
 /// sample closes that charge exactly.
+/// Dependent states (add-exact-propagator-strategy DECISIONS): the
+/// impulsive re-initialisations of the run as `d["reinit_records"]`, a
+/// list of dicts with the fixed engine's ReinitRecord fields; `sample`
+/// is the stored sample at the record's time (its left limit), or -1.
+template <class AdapterT, class ResultT>
+void reinit_records_into(AdapterT& adapter, const ResultT& res, py::dict& d) {
+    py::list out;
+    if constexpr (requires { adapter.take_reinit_log(); }) {
+        for (const auto& r : adapter.take_reinit_log()) {
+            long sample = -1;
+            const auto it = std::lower_bound(res.times.begin(), res.times.end(),
+                                             r.t - 4 * std::numeric_limits<Real>::epsilon()
+                                                       * std::max(Real{1}, std::abs(r.t)));
+            if (it != res.times.end()
+                && std::abs(*it - r.t)
+                       <= 4 * std::numeric_limits<Real>::epsilon()
+                              * std::max(Real{1}, std::abs(r.t))) {
+                sample = static_cast<long>(it - res.times.begin());
+            }
+            py::dict rd;
+            rd["t"] = r.t;
+            rd["kind"] = r.kind;
+            rd["devices"] = r.devices;
+            rd["states"] = r.states;
+            rd["lambda"] = r.lambda;
+            rd["dW"] = r.dW;
+            rd["projection_gap"] = r.projection_gap;
+            rd["sample"] = sample;
+            out.append(std::move(rd));
+        }
+    }
+    d["reinit_records"] = std::move(out);
+}
+
 template <class AdapterT, class ResultT>
 void reconstruct_right_limits(AdapterT& adapter, const ResultT& res,
                               py::dict& d) {
@@ -992,12 +1035,21 @@ void init_module(py::module_& m) {
         }
 
         [[nodiscard]] SSM operator()(Real t) const {
-            if (is_native_) return native_.fn(t);
-            // Generic Python fallback (Bridge.11 path).
-            py::gil_scoped_acquire gil;
-            if (n_python_calls) ++*n_python_calls;
-            return fn_(t).cast<SSM>();
+            SSM m = [&] {
+                if (is_native_) return native_.fn(t);
+                // Generic Python fallback (Bridge.11 path).
+                py::gil_scoped_acquire gil;
+                if (n_python_calls) ++*n_python_calls;
+                return fn_(t).cast<SSM>();
+            }();
+            if (check_width_) {
+                pulsim::topology::require_mask_width(m, width_);
+            }
+            return m;
         }
+
+        /// The circuit's switch count; a mask of another width is refused.
+        void set_width(pulsim::Size n) noexcept { width_ = n; check_width_ = true; }
 
         [[nodiscard]] Real next_edge_after(Real t) const {
             if (is_native_ && native_.next_edge) return native_.next_edge(t);
@@ -1016,12 +1068,21 @@ void init_module(py::module_& m) {
         // dsed_period_map: Python calls of this schedule (owned by the
         // caller's frame; null elsewhere).
         std::size_t* n_python_calls = nullptr;
+
+        /// Whether next_edge_after names real edges (the selector's probe
+        /// horizon); the EdgeSearch fallback returns poll boundaries.
+        [[nodiscard]] bool has_edge_oracle() const noexcept {
+            return (is_native_ && native_.next_edge) || has_nea_;
+        }
+
         py::object fn_;
         pulsim_bindings_common::SwitchFnAdapter native_;
         bool       is_native_ = false;
         py::object nea_attr_;
         bool       has_nea_ = false;
         EdgeSearch<SSM> search_;
+        bool check_width_ = false;
+        pulsim::Size width_ = 0;
     };
 
     py::class_<NativeAdapter>(m, "_NativeCircuitBuilderAdapter",
@@ -1071,6 +1132,9 @@ void init_module(py::module_& m) {
                 return self.A_matrix();
             },
             "Continuous-time A matrix for the active mask.")
+        .def("n_constraints", &NativeAdapter::n_constraints,
+            "Rows of the dependent-state constraint K x = k on the active "
+            "mask (a capacitor loop or an inductor cut-set; 0 otherwise).")
         .def("b_vector",
             &NativeAdapter::b_vector,
             py::arg("t"),
@@ -1220,6 +1284,7 @@ void init_module(py::module_& m) {
            bool mode_guard_refuse,
            int settle_round_cap) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
             EventPredictor pred;
@@ -1368,6 +1433,7 @@ void init_module(py::module_& m) {
             // trajectory reconstructed per recorded sample.
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
+            reinit_records_into(adapter, res, d);
             return d;
         },
         py::arg("adapter"),
@@ -1406,6 +1472,7 @@ void init_module(py::module_& m) {
            std::size_t store_every,
            bool event_log) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(h_fixed));
             PEDSimulatorBDF2<NativeAdapter, PySwitchFnSSM> sim(
                 adapter, std::move(sf), h_fixed, store_every);
@@ -1415,6 +1482,7 @@ void init_module(py::module_& m) {
             auto d = ped_result_to_dict(res, event_log);
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
+            reinit_records_into(adapter, res, d);
             return d;
         },
         py::arg("adapter"),
@@ -1441,6 +1509,7 @@ void init_module(py::module_& m) {
            std::size_t store_every,
            bool event_log) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
             StiffnessDetector det(stiffness_threshold);
@@ -1455,6 +1524,7 @@ void init_module(py::module_& m) {
             d["exact"] = exact_report_dict(adapter, 0);
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
+            reinit_records_into(adapter, res, d);
             return d;
         },
         py::arg("adapter"),
@@ -1604,6 +1674,7 @@ void init_module(py::module_& m) {
             const auto obs = parse_observables(observables, pairs);
             std::size_t n_python_calls = 0;
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(period));
             sf.n_python_calls = &n_python_calls;
             PeriodMapResult<SSM> r;
@@ -1650,6 +1721,7 @@ void init_module(py::module_& m) {
             const Pairs no_pairs;
             std::size_t n_python_calls = 0;
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(period));
             sf.n_python_calls = &n_python_calls;
             pulsim::dsed::OrbitOptions opt;
@@ -1722,6 +1794,235 @@ void init_module(py::module_& m) {
         "'run_failed', 'irreproducible'); 'period' is the verification "
         "period (dsed_period_map's dict, with the observables). DC "
         "sources only.");
+
+    // add-design-optimization-workflow DECISIONS 28: one device's junction
+    // temperature on a fixed periodic orbit (pulsim/dsed/period_thermal.hpp).
+    m.def("_junction_fixed_point",
+        [](std::vector<std::array<Real, 2>> on_pts,
+           std::vector<std::array<Real, 2>> off_pts,
+           const pulsim::thermal::LossTable3D* on,
+           const pulsim::thermal::LossTable3D* off, Real period, Real p_fixed,
+           Real r_th, Real t_amb, const pulsim::thermal::ConductionTable* cond,
+           Real q1, Real q2, Real i_max) {
+            namespace pt = pulsim::dsed::period_thermal;
+            pt::DevicePower d;
+            d.on_pts = std::move(on_pts);
+            d.off_pts = std::move(off_pts);
+            d.on = on;
+            d.off = off;
+            d.cond = cond;
+            d.q1 = q1;
+            d.q2 = q2;
+            d.i_max = i_max;
+            d.p_fixed = p_fixed;
+            d.period = period;
+            pt::Junction j;
+            {
+                py::gil_scoped_release nogil;
+                j = pt::solve_junction(d, r_th, t_amb);
+            }
+            const auto parts = d.at(j.tj);
+            py::dict out;
+            out["runaway"] = j.runaway;
+            out["tj"] = j.tj;
+            out["p"] = j.p;
+            out["residual"] = j.residual;
+            out["slope"] = j.slope;
+            out["evaluations"] = j.evaluations;
+            out["e_on"] = parts[1];
+            out["e_off"] = parts[2];
+            out["p_cond_table"] = parts[3];
+            return out;
+        },
+        py::arg("on_pts"), py::arg("off_pts"), py::arg("on").none(true),
+        py::arg("off").none(true), py::arg("period"), py::arg("p_fixed"),
+        py::arg("r_th"), py::arg("t_amb"), py::arg("cond").none(true),
+        py::arg("q1") = 0.0, py::arg("q2") = 0.0, py::arg("i_max") = 0.0,
+        "Smallest T_j >= t_amb with T_j = t_amb + r_th P(T_j), P the "
+        "device's loss on a fixed orbit: p_fixed + (sum E_on + sum E_off) / "
+        "period over the commutation points (|v|, |i|), plus a conduction "
+        "table's (a q1 + b q2) / period. Returns runaway, tj, p, residual, "
+        "slope (r_th dP/dT), evaluations, e_on, e_off, p_cond_table.");
+
+    // add-design-optimization-workflow DECISIONS 26: the kernel batch
+    // evaluator (pulsim/dsed/design_batch.hpp). The plan is parsed and the
+    // schedules adapted with the GIL; the whole table then runs on native
+    // threads with the GIL released; outputs are arrays.
+    m.def("_design_batch",
+        [](const pulsim::ir::Circuit& base, const py::dict& pd,
+           const Eigen::Matrix<Real, Eigen::Dynamic, Eigen::Dynamic,
+                               Eigen::RowMajor>& table,
+           const std::vector<Real>& periods, const py::list& schedules,
+           int n_threads) {
+            namespace dz = pulsim::dsed::design;
+            dz::Plan plan;
+            plan.names = pd["names"].cast<std::vector<std::string>>();
+            plan.is_param = pd["is_param"].cast<std::vector<bool>>();
+            plan.pairs = pd["pairs"].cast<Pairs>();
+            plan.obs = parse_observables(pd["obs"].cast<py::list>(), plan.pairs);
+            plan.slots = pd["slots"].cast<std::vector<std::string>>();
+            for (const auto& it : pd["switching"].cast<py::list>()) {
+                const auto t = it.cast<py::tuple>();
+                dz::SwitchingEntry e;
+                e.bit = t[0].cast<int>();
+                e.obs_v = t[1].cast<int>();
+                e.obs_i = t[2].cast<int>();
+                if (!t[3].is_none()) e.on = std::make_shared<const pulsim::thermal::LossTable3D>(t[3].cast<const pulsim::thermal::LossTable3D&>());
+                if (!t[4].is_none()) e.off = std::make_shared<const pulsim::thermal::LossTable3D>(t[4].cast<const pulsim::thermal::LossTable3D&>());
+                e.tj = t[5].cast<Real>();
+                plan.switching.push_back(std::move(e));
+            }
+            for (const auto& it : pd["code"].cast<py::list>()) {
+                const auto t = it.cast<py::tuple>();
+                plan.code.push_back({static_cast<dz::Op>(t[0].cast<int>()),
+                                     t[1].cast<std::int32_t>(),
+                                     t[2].cast<std::int32_t>(), t[3].cast<Real>()});
+            }
+            plan.n_regs = pd["n_regs"].cast<int>();
+            plan.kpi_regs = pd["kpi_regs"].cast<std::vector<int>>();
+            plan.loss_regs = pd["loss_regs"].cast<std::vector<int>>();
+            plan.viol_regs = pd["viol_regs"].cast<std::vector<int>>();
+            plan.energy_static = pd["energy_static"].cast<bool>();
+            plan.p_in_reg = pd["p_in_reg"].cast<int>();
+            plan.res_reg = pd["res_reg"].cast<int>();
+            plan.p_table_reg = pd["p_table_reg"].cast<int>();
+            plan.energy_tol = pd["energy_tol"].cast<Real>();
+            plan.node_obs0 = pd["node_obs0"].cast<int>();
+            plan.n_nodes = pd["n_nodes"].cast<int>();
+            plan.n_full = pd["n_full"].cast<int>();
+            plan.orbit.rtol = pd["rtol"].cast<Real>();
+            plan.orbit.max_period_runs = pd["max_period_runs"].cast<int>();
+            plan.orbit.n_relax = pd["n_relax"].cast<int>();
+            plan.mode_guard = pd["mode_guard"].cast<bool>();
+            plan.h_e_rel = pd["h_e_rel"].cast<Real>();
+            const auto n = static_cast<std::size_t>(table.rows());
+            if (static_cast<std::size_t>(table.cols()) != plan.names.size()
+                || periods.size() != n || py::len(schedules) != n) {
+                throw py::value_error("_design_batch: the table, periods and "
+                                      "schedules do not match");
+            }
+            for (const auto& c : plan.code) {
+                if (static_cast<int>(c.op) < 0 || static_cast<int>(c.op) > 24) {
+                    throw py::value_error("_design_batch: unknown operation");
+                }
+            }
+            std::vector<std::unique_ptr<PySwitchFnSSM>> own;
+            std::vector<const PySwitchFnSSM*> ss;
+            for (std::size_t i = 0; i < n; ++i) {
+                own.push_back(std::make_unique<PySwitchFnSSM>(schedules[i]));
+                if (!own.back()->is_native_ || !own.back()->native_.next_edge) {
+                    throw py::value_error("_design_batch: every schedule must be "
+                                          "a native schedule with edges");
+                }
+                own.back()->set_poll(poll_window(periods[i]));
+                ss.push_back(own.back().get());
+            }
+            std::vector<std::size_t> calls(n, 0);   // Python calls, per design
+            for (std::size_t i = 0; i < n; ++i) own[i]->n_python_calls = &calls[i];
+            const Real run_rtol = pd["run_rtol"].cast<Real>();
+            const Real run_atol = pd["run_atol"].cast<Real>();
+            auto rp = [run_rtol, run_atol](auto& ad, const PySwitchFnSSM& sf,
+                                           const Vector& x, Real T,
+                                           const std::vector<PeriodObservable>& obs,
+                                           const Pairs& pairs, Real h_e) {
+                try {
+                    return period_run(ad, sf, x, T, obs, pairs, true, run_rtol,
+                                      run_atol, h_e);
+                } catch (const pulsim::analysis::Cancelled&) {
+                    throw;
+                } catch (const std::runtime_error& e) {
+                    throw pulsim::dsed::PeriodRunFailed(e.what());
+                }
+            };
+            std::vector<dz::DesignOut> out;
+            bool nogil = false;
+            {
+                py::gil_scoped_release release;
+                nogil = PyGILState_Check() == 0;
+                out = dz::evaluate_batch<PySwitchFnSSM>(
+                    base, plan, table.data(), n, periods,
+                    std::span<const PySwitchFnSSM* const>(ss), rp, n_threads);
+            }
+            auto mat = [&](auto get, std::size_t w) {
+                py::array_t<double> a(std::vector<py::ssize_t>{
+                    static_cast<py::ssize_t>(n), static_cast<py::ssize_t>(w)});
+                auto m = a.mutable_unchecked<2>();
+                for (std::size_t i = 0; i < n; ++i) {
+                    const auto& v = get(out[i]);
+                    for (std::size_t j = 0; j < w; ++j) {
+                        m(static_cast<py::ssize_t>(i), static_cast<py::ssize_t>(j)) =
+                            j < v.size() ? v[j] : std::numeric_limits<double>::quiet_NaN();
+                    }
+                }
+                return a;
+            };
+            py::dict d;
+            std::vector<int> status(n), runs(n), iters(n);
+            std::vector<std::size_t> steps(n);
+            std::vector<double> res(n), ptab(n), wall(n);
+            std::vector<bool> applied(n);
+            py::list reasons;
+            std::uint64_t analyses = 0;
+            for (std::size_t i = 0; i < n; ++i) {
+                status[i] = static_cast<int>(out[i].status);
+                runs[i] = out[i].n_runs;
+                iters[i] = out[i].n_iterations;
+                steps[i] = out[i].n_steps;
+                res[i] = out[i].energy_res;
+                ptab[i] = out[i].p_table;
+                wall[i] = out[i].wall_s;
+                applied[i] = out[i].energy_applied;
+                reasons.append(out[i].reason);
+                analyses += out[i].symbolic_analyses;
+            }
+            d["status"] = status;
+            d["reasons"] = reasons;
+            d["kpis"] = mat([](const dz::DesignOut& o) -> const auto& { return o.kpis; },
+                            plan.kpi_regs.size());
+            d["losses"] = mat([](const dz::DesignOut& o) -> const auto& { return o.losses; },
+                              plan.loss_regs.size());
+            d["viol"] = mat([](const dz::DesignOut& o) -> const auto& { return o.viol; },
+                            plan.viol_regs.size());
+            d["energy_applied"] = applied;
+            d["energy_res"] = res;
+            d["p_table"] = ptab;
+            d["n_runs"] = runs;
+            d["n_steps"] = steps;
+            d["n_iterations"] = iters;
+            d["wall_s"] = wall;
+            d["symbolic_analyses"] = analyses;
+            std::size_t n_calls = 0;
+            for (auto c : calls) n_calls += c;
+            d["python_calls"] = n_calls;
+            d["nogil"] = nogil;
+            // the periodicity check's samples: every design that reached
+            // it, grouped by event names (first in input order), and the
+            // designs with an event at the section (always checked)
+            std::map<std::vector<std::string>, std::size_t> first;
+            py::list groups, at_section;
+            for (std::size_t i = 0; i < n; ++i) {
+                if (out[i].x0.size() == 0) continue;
+                std::vector<std::string> names;
+                bool sec = false;
+                for (const auto& [nm, f] : out[i].pattern) {
+                    names.push_back(nm);
+                    sec = sec || std::min(f, 1.0 - f) <= 1e-9;
+                }
+                if (sec) {
+                    at_section.append(py::make_tuple(i, out[i].x0));
+                } else if (first.emplace(names, i).second) {
+                    groups.append(py::make_tuple(py::cast(names), i, out[i].x0));
+                }
+            }
+            d["groups"] = groups;
+            d["at_section"] = at_section;
+            return d;
+        },
+        py::arg("base"), py::arg("plan"), py::arg("table"), py::arg("periods"),
+        py::arg("schedules"), py::arg("n_threads") = 1,
+        "pulsim.design's kernel batch: every design of `table` evaluated "
+        "on the exact steady-state route with the GIL released "
+        "(pulsim/dsed/design_batch.hpp). Internal.");
 }
 
 }  // namespace pulsim_dsed_bindings

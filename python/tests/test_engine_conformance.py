@@ -437,20 +437,14 @@ def test_device_cell(kind, engine):
 
 @pytest.mark.parametrize("engine", ENGINES)
 def test_coupled_inductor_cell(engine):
-    # Circuit-level limit: refused on dsed (also a NotImplementedError,
-    # its legacy base) and on bdf1 (no mutual stamp: it read 9.38 V off
-    # an 18 V span, silently, before this change).
+    # Circuit-level limit: refused on bdf1 (no mutual stamp: it read 9.38 V
+    # off an 18 V span, silently, before this change). dsed extracts the full
+    # inductance matrix (add-exact-propagator-strategy, coupled inductors).
     if engine == "bdf1":
         with pytest.raises(p.UnsupportedError) as ei:
             _run(*_args(COUPLED), "bdf1")
         assert (ei.value.engine, ei.value.feature) == (
             "bdf1", "coupled_inductors")
-        return
-    if engine == "dsed":
-        with pytest.raises(p.UnsupportedError) as ei:
-            _run(*_args(COUPLED), "dsed")
-        assert isinstance(ei.value, NotImplementedError)
-        assert ei.value.engine == "dsed"
         return
     _check_cell("coupled", COUPLED, engine, True)
 
@@ -618,8 +612,8 @@ _REFUSED = {
         {"discontinuity_restart": True}, ("trbdf2", "dsed")),
     "resolution_diagnostics": (
         {"resolution_diagnostics": True}, ("trbdf2", "dsed")),
-    # add-complementarity-mode-selection: the shadow is on the dsed event
-    # integrator only (this RC has no diode, so dsed routes to "auto")
+    # add-complementarity-mode-selection: the shadow runs on pwl and the
+    # dsed event integrator (this RC has no diode, so dsed routes to "auto")
     "mode_selection": ({"mode_selection": "shadow"}, ("trbdf2", "dsed")),
 }
 
@@ -773,31 +767,43 @@ def _half_wave():
 
 
 @pytest.mark.parametrize("mode", ("shadow", "lcp"))
-@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto"))
-def test_mode_selection_refused_by_name_on_a_diode_circuit_off_dsed(engine, mode):
-    # Integration batch 6a: pwl had no cell. With a diode present the
-    # refusal is the missing hook, not "nothing to select".
+def test_mode_selection_refused_by_name_on_a_diode_circuit_on_trbdf2(mode):
+    # trbdf2's settle has no hook yet: refused by name (pwl and dsed run it).
     with pytest.raises(p.UnsupportedError) as ei:
-        _sim(engine, _half_wave(), mode_selection=mode)
-    assert ei.value.feature == "mode_selection"
-    if engine != "auto":                       # auto names the engine it lands on
-        assert ei.value.engine == engine
+        _sim("trbdf2", _half_wave(), mode_selection=mode)
+    assert (ei.value.engine, ei.value.feature) == ("trbdf2", "mode_selection")
+
+
+@pytest.mark.parametrize("mode", ("shadow", "lcp"))
+def test_mode_selection_refused_on_a_diode_free_pwl_run(mode):
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim("pwl", mode_selection=mode)
+    assert (ei.value.engine, ei.value.feature) == ("pwl", "mode_selection")
+
+
+@pytest.mark.parametrize("mode", ("shadow", "lcp"))
+def test_mode_selection_runs_on_pwl(mode):
+    # add-complementarity-mode-selection 4.2 / 6.3: the cell flipped from
+    # refuse to support on the fixed engine.
+    r = _sim("pwl", _half_wave(), mode_selection=mode)
+    key = "mode_shadow" if mode == "shadow" else "mode_selection"
+    assert r.diagnostics[key]["lcp_count"] > 0
 
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
-def test_mode_guard_diagnostics_only_on_dsed(engine):
-    # The default-mode guard (add-complementarity-mode-selection task 4)
-    # judges every settled diode mode on dsed and reports there; the
-    # other engines have no hook yet and carry no such key.
+def test_mode_guard_diagnostics_on_pwl_and_dsed(engine):
+    # The default-mode guard (add-complementarity-mode-selection task 4,
+    # 4b.3 on pwl) judges every settled diode mode and reports there;
+    # trbdf2 has no hook yet and carries no such key.
     r = _sim(engine, _half_wave())
     g = (getattr(r, "diagnostics", None) or {}).get("mode_guard")
-    if engine != "dsed":
+    if engine == "trbdf2":
         assert g is None
         return
     assert g["checks"] > 0 and g["repairs"] == 0 and g["repair_times"] == []
     assert g["settle_caps"] == 0 and g["lcp"]["capped"] == 0     # DECISIONS #24, #25
     rec = {"class": "passive_reciprocal", "device": "", "kind": ""}
-    assert g["passivity"] == rec        # task 5.1 class, dsed only
+    assert g["passivity"] == rec        # task 5.1 class
     r = _sim(engine, _half_wave(), mode_selection="lcp")
     assert r.diagnostics["mode_selection"]["lcp_count"] > 0
     assert r.diagnostics["mode_selection"]["capped"] == 0
@@ -805,13 +811,14 @@ def test_mode_guard_diagnostics_only_on_dsed(engine):
     assert "mode_guard" not in r.diagnostics
 
 
-@pytest.mark.parametrize("engine", ("trbdf2", "dsed"))
+@pytest.mark.parametrize("engine", ("dsed", "exact"))
 def test_c_blocks_refused(engine):
+    # trbdf2 runs C blocks since task 9.3 (test_c_block_engines.py)
     b = _rc()
     b._c_blocks = [_CBlock()]
     with pytest.raises(p.UnsupportedError) as ei:
         _sim(engine, b)
-    assert (ei.value.engine, ei.value.feature) == (engine, "c_blocks")
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "c_blocks")
 
 
 @pytest.mark.parametrize("vth", (0.0, 0.7))
@@ -1293,3 +1300,28 @@ def test_allow_implicit_segments_is_refused_off_the_exact_engine(engine):
     with pytest.raises(p.UnsupportedError) as ei:
         _sim(engine, allow_implicit_segments=True)
     assert ei.value.feature == "allow_implicit_segments"
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "exact"))
+def test_reinit_records_only_on_the_exact_engine(engine):
+    # result.reinit_records (dependent states: the impulse at a mode entry) rides on the event
+    # integrator's runs only, the same on both names: two 1.5 uF capacitors at 8 V and 0 V tied
+    # by a 0 V source share 6 uC at t = 0
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "a", "gnd", 1.5e-6, 8.0)
+    b.add_capacitor("C2", "b", "gnd", 1.5e-6, 0.0)
+    b.add_voltage_source("V0", "a", "b", 0.0)
+    b.add_resistor("R", "a", "gnd", 1e3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 1e-4, engine=engine, dt=1e-6)
+    recs = getattr(r, "reinit_records", None)
+    if engine in ("pwl", "trbdf2"):
+        # the fixed engines' result has the field too (the branch-form ideal
+        # switch's records, add-branch-form-ideal-switch D4); they do not
+        # reduce dependent states, so nothing is recorded here
+        assert not recs
+        return
+    (rec,) = recs
+    assert (rec.kind, rec.sample) == ("capacitor_loop", 0)
+    assert rec.lambda_ == pytest.approx(6e-6, rel=1e-12)

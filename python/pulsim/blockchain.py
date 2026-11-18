@@ -161,6 +161,17 @@ class PythonBlock:
         return call
 
 
+# class -> (ported kind, input names in order, accepted output counts)
+_PORTED_TRANSFORMS = {
+    "SpaceVectorModulator": ("svm", ("v_alpha", "v_beta"), (3,)),
+    "ClarkeTransform": ("clarke", ("a", "b", "c"), (3,)),
+    "InverseClarkeTransform": ("inverse_clarke",
+                               ("alpha", "beta", "zero"), (3,)),
+    "ParkTransform": ("park", ("alpha", "beta", "theta"), (2,)),
+    "InverseParkTransform": ("inverse_park", ("d", "q", "theta"), (2,)),
+    "PLL": ("pll", ("v_alpha", "v_beta", "dt"), (2, 3)),
+}
+
 # pulsim blocks whose implementation is Python (PythonBlock adapter).
 _PY_LIBRARY = frozenset({"SlidingModeObserver", "FluxMRASObserver"})
 
@@ -220,11 +231,16 @@ class BlockSpec:
 class MixedDomainBlockChain:
     """Topologically-evaluated list of mixed-domain blocks."""
 
-    def __init__(self, rate: "Rate | None" = None) -> None:
+    def __init__(self, rate: "Rate | None" = None, *,
+                 label_time: bool = False) -> None:
         # Default rate of the blocks that declare none (a stateless
         # block inherits its inputs' rate first). No rate anywhere: the
         # chain runs on every solver step with make_step_observer's dt.
         self.rate = rate
+        # Label time (docs/control-graph.md): on pwl a tick runs at the
+        # call's label t_n with the state x_{n-1}, the protocol of the
+        # closed-loop helpers and C blocks, which build such graphs.
+        self.label_time = bool(label_time)
         self._sinks: list = []
         self.blocks: list[BlockSpec] = []
         # node-name → state-vector index (populated by bind()).
@@ -319,6 +335,12 @@ class MixedDomainBlockChain:
         self._cxx_chain = None
         self._cxx_chain = self._compile_to_cxx(builder)
         # Use the C++ chain's step_observer.
+        if self.label_time:
+            if not has_rate:
+                raise ValueError(
+                    "MixedDomainBlockChain(label_time=True) needs a Rate: "
+                    "label time says when a rate group ticks")
+            self._cxx_chain.set_label_time(True)
         cxx_observer = self._cxx_chain.make_step_observer(dt)
         # Tag the returned observer so simulate() knows it
         # can use run_transient_with_chain() (the kernel
@@ -326,6 +348,11 @@ class MixedDomainBlockChain:
         def observer(t, x):
             cxx_observer(t, x)
         observer._cxx_chain = self._cxx_chain  # type: ignore[attr-defined]
+        # Blocks that call Python per evaluation (the counter gate).
+        observer._n_python_blocks = sum(  # type: ignore[attr-defined]
+            type(sp.block).__name__ in ("PythonBlock", *_PY_LIBRARY)
+            or (type(sp.block).__name__ == "CBlock" and sp.block.native is None)
+            for sp in self.blocks)
         observer._chain_dt = float(dt)  # type: ignore[attr-defined]
         cxx = self._cxx_chain
         if cxx.has_rates:
@@ -389,6 +416,8 @@ class MixedDomainBlockChain:
                 if src.kind == "node":
                     idx = int(builder.node_id_of(str(src.value)))
                     return _k.CxxInputRef.node_idx(idx)
+                if src.kind == "index":     # a state-vector index
+                    return _k.CxxInputRef.node_idx(int(src.value))
                 if src.kind == "time":
                     return _k.CxxInputRef.time()
                 if src.kind == "dt":
@@ -544,63 +573,47 @@ class MixedDomainBlockChain:
                 # wrapped explicitly.
                 pyb = block if cls_name == "PythonBlock" else PythonBlock(block)
                 names = list(inputs)
+                # An input of kind "state" (the closed-loop helpers'
+                # `measured(x)`) is the state vector, passed first.
+                st = [n for n in names if inputs[n].kind == "state"]
+                if st and (len(st) > 1 or names[0] != st[0]):
+                    raise ControlGraphBuildError(
+                        f"block '{spec.name}': the state input must be the "
+                        "first and only one")
                 cxx_chain.add_python_block(
-                    pyb._call_with(names), [ref(n) for n in names],
-                    _outs(output))
+                    pyb._call_with(names), [ref(n) for n in names[len(st):]],
+                    _outs(output), with_state=bool(st))
+            elif cls_name == "CBlock":
+                # A C block (pulsim.add_c_block): compiled code in C++,
+                # a Python step through the PythonBlock-style adapter.
+                block._add_to(cxx_chain, [ref(n) for n in inputs],
+                              _outs(output))
             elif cls_name == "PwmGenerator":
                 # Python-exact: the kernel PwmGenerator reads phase as a
                 # fraction of the period, the class as seconds.
                 add_ported("pwm", dict(frequency=block.frequency,
                                        phase=block.phase),
                            [ref("duty"), ref("t")])
-            elif cls_name == "SpaceVectorModulator":
-                if not isinstance(output, (tuple, list)) or len(output) != 3:
-                    raise ValueError("SVM output must be 3-tuple")
-                cxx_chain.add_svm(
-                    v_dc=float(block.v_dc),
-                    v_alpha=ref("v_alpha"), v_beta=ref("v_beta"),
-                    output_a=output[0], output_b=output[1],
-                    output_c=output[2])
-            elif cls_name == "ClarkeTransform":
-                if not isinstance(output, (tuple, list)) or len(output) != 3:
-                    raise ValueError("Clarke output must be 3-tuple")
-                cxx_chain.add_clarke(
-                    a=ref("a"), b=ref("b"), c=ref("c"),
-                    output_alpha=output[0], output_beta=output[1],
-                    output_zero=output[2])
-            elif cls_name == "InverseClarkeTransform":
-                if not isinstance(output, (tuple, list)) or len(output) != 3:
-                    raise ValueError("InverseClarke output must be 3-tuple")
-                zero_ref = ref("zero") if "zero" in inputs \
-                            else _k.CxxInputRef.const_value(0.0)
-                cxx_chain.add_inverse_clarke(
-                    alpha=ref("alpha"), beta=ref("beta"),
-                    zero=zero_ref,
-                    output_a=output[0], output_b=output[1],
-                    output_c=output[2])
-            elif cls_name == "ParkTransform":
-                if not isinstance(output, (tuple, list)) or len(output) != 2:
-                    raise ValueError("Park output must be 2-tuple")
-                cxx_chain.add_park(
-                    alpha=ref("alpha"), beta=ref("beta"),
-                    theta=ref("theta"),
-                    output_d=output[0], output_q=output[1])
-            elif cls_name == "InverseParkTransform":
-                if not isinstance(output, (tuple, list)) or len(output) != 2:
-                    raise ValueError("InverseParkTransform output must be 2-tuple")
-                cxx_chain.add_inverse_park(
-                    d=ref("d"), q=ref("q"), theta=ref("theta"),
-                    output_alpha=output[0], output_beta=output[1])
-            elif cls_name == "PLL":
-                if not isinstance(output, (tuple, list)) or len(output) != 3:
-                    raise ValueError("PLL output must be 3-tuple")
-                cxx_chain.add_pll(
-                    f_nominal=float(block.f_nominal),
-                    Kp=float(block.Kp), Ki=float(block.Ki),
-                    v_alpha=ref("v_alpha"), v_beta=ref("v_beta"),
-                    dt=ref("dt"),
-                    output_theta=output[0], output_omega=output[1],
-                    output_freq=output[2])
+            elif cls_name in _PORTED_TRANSFORMS:
+                # Python-exact (block_laws.h): the kernel add_svm /
+                # add_clarke are different laws (G17); add_park / add_pll
+                # share these since G25, with the kernel's own signatures.
+                kind, names, n_out = _PORTED_TRANSFORMS[cls_name]
+                if not isinstance(output, (tuple, list)) or \
+                        len(output) not in n_out:
+                    raise ValueError(
+                        f"{cls_name} output must be a "
+                        f"{' or '.join(map(str, n_out))}-tuple")
+                params = {}
+                if cls_name == "SpaceVectorModulator":
+                    params = dict(v_dc=block.v_dc)
+                elif cls_name == "PLL":
+                    params = dict(f_nominal=block.f_nominal, Kp=block.Kp,
+                                  Ki=block.Ki, theta_hat=block.theta_hat,
+                                  omega_hat=block.omega_hat,
+                                  integ=block._integ)
+                add_ported(kind, params, [
+                    ref(n_, 0.0 if n_ == "zero" else None) for n_ in names])
             elif cls_name == "DelayBlock":
                 cxx_chain.add_delay(
                     samples=int(block.samples),
@@ -689,7 +702,9 @@ class MixedDomainBlockChain:
                 groups[r] = cxx_chain.add_group(float(r.period),
                                                 float(r.offset), kind, td)
             cxx_chain.set_block_group(i, groups[r])
+            rate[i] = r
         self._groups = groups
+        self._block_rates = rate        # resolved, per block (export_c)
 
     def drive_source(self, builder, channel: str, wire) -> None:
         """Drive a controlled source from signal ``channel``: ``wire`` is

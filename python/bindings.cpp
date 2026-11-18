@@ -300,11 +300,28 @@ void init_module(py::module_& m) {
         .def(py::init<Size>(), py::arg("num_switches") = 0)
         .def("set",
               [](topology::SwitchStateMask& self,
-                 Size i, bool v) { self.set(i, v); },
+                 Size i, bool v) {
+                  // An index past the width wrote a bit nothing reads.
+                  if (i >= self.size()) {
+                      throw py::index_error(
+                          "SwitchStateMask.set: bit " + std::to_string(i) +
+                          " is out of range for a mask of width " +
+                          std::to_string(self.size()));
+                  }
+                  self.set(i, v);
+              },
               py::arg("i"), py::arg("v"),
               "Set switch `i` to state `v` (True=ON).")
         .def("get",
-              &topology::SwitchStateMask::get,
+              [](const topology::SwitchStateMask& self, Size i) {
+                  if (i >= self.size()) {
+                      throw py::index_error(
+                          "SwitchStateMask.get: bit " + std::to_string(i) +
+                          " is out of range for a mask of width " +
+                          std::to_string(self.size()));
+                  }
+                  return self.get(i);
+              },
               py::arg("i"),
               "Return True if switch `i` is ON.")
         .def_property_readonly("size",
@@ -1080,6 +1097,7 @@ void init_module(py::module_& m) {
               "the string \"node\" or \"branch\".")
         .def("initial_state",
               &builder::CircuitBuilder::initial_state,
+              py::call_guard<py::gil_scoped_release>(),
               "Synthesise the flat initial-state vector from recorded\n"
               "ICs. Returns a numpy array of size num_nodes +\n"
               "num_state_branches with each IC slot populated and zero\n"
@@ -2198,7 +2216,7 @@ void init_module(py::module_& m) {
         .def("build_lazy",
               [](pwl::PwlStateSpaceCache& self, Real dt) {
                   self.build_lazy(dt);
-              }, py::arg("dt"),
+              }, py::arg("dt"), py::call_guard<py::gil_scoped_release>(),
               "Lazy build: store dt but defer per-mask "
               "factorisation to first access. A PWM converter "
               "visits only a handful of the 2^N switch states, "
@@ -2398,6 +2416,14 @@ void init_module(py::module_& m) {
                         "add-branch-form-ideal-switch: refuse the run at the "
                         "first impulsive re-initialisation (simulate("
                         "on_impulse='error')) instead of recording it.")
+        .def_readwrite("mode_selection",
+                        &SimulationOptions::mode_selection,
+                        "Fixed engine diode decision: 0 the settle (guarded "
+                        "by mode_guard), 1 'shadow', 2 'lcp' "
+                        "(add-complementarity-mode-selection).")
+        .def_readwrite("mode_guard", &SimulationOptions::mode_guard,
+                        "Fixed engine: re-decide with the LCP a settle that "
+                        "ends in a mode violating a diode's law.")
         .def_readwrite("discontinuity_restart",
                         &SimulationOptions::discontinuity_restart,
                         "Fixed engine: take the step after a discontinuity "
@@ -2677,6 +2703,83 @@ void init_module(py::module_& m) {
             },
             "Resolution diagnostics of a pwl run (None when off, and "
             "for trbdf2/dsed). See pulsim.ResolutionWarning.")
+        .def_property_readonly("mode_diagnostics",
+            [](const SimulationResult& r) {
+                // add-complementarity-mode-selection on pwl: the dsed keys.
+                auto rep = [](const solver::ModeReport& m) {
+                    py::dict d;
+                    d["events"] = m.lcp_events;
+                    d["lcp_count"] = m.lcp_events;
+                    d["sites"] = py::dict(
+                        py::arg("step") = m.sites_step,
+                        py::arg("restart") = m.sites_restart,
+                        py::arg("substep") = m.sites_substep,
+                        py::arg("static") = m.sites_static);
+                    d["lcps"] = m.lcps;
+                    d["lcp_pivots_total"] = m.pivots_total;
+                    d["max_pivots_per_event"] = m.max_pivots_per_event;
+                    d["ties"] = m.ties;
+                    d["widenings"] = m.widenings;
+                    d["capped"] = m.capped;
+                    d["leak_pins"] = m.leak_pins;
+                    d["pin_judgements"] = m.pin_judgements;
+                    d["unfixed"] = m.unfixed;
+                    d["enumerations"] = m.enumerations;
+                    d["nonunique_modes"] = m.nonunique_modes;
+                    d["hysteresis_released"] = m.released;
+                    d["settle_rounds_total"] = m.settle_rounds_total;
+                    d["mask_cycles"] = m.mask_cycles;
+                    d["inconsistent"] = m.inconsistent;
+                    d["port_solves"] = m.port_solves;
+                    d["port_model_problems"] = m.lcps;
+                    d["errors"] = m.errors;
+                    d["last_error"] = m.last_error;
+                    d["passivity"] = py::dict(py::arg("class") = m.passivity,
+                                              py::arg("device") = m.passivity_device,
+                                              py::arg("kind") = m.passivity_kind);
+                    py::list dl;
+                    for (const auto& x : m.disagreements) {
+                        py::dict e;
+                        e["t"] = x.t;
+                        e["site"] = x.site;
+                        e["settle_mode"] = x.settle_mode;
+                        e["lcp_mode"] = x.lcp_mode;
+                        e["previous_mode"] = x.previous_mode;
+                        e["settle_rounds"] = x.settle_rounds;
+                        e["pivots"] = x.pivots;
+                        e["status"] = x.status;
+                        e["settle_consistent"] = x.settle_consistent;
+                        e["lcp_consistent"] = x.lcp_consistent;
+                        e["settle_violation"] = x.settle_violation;
+                        e["lcp_violation"] = x.lcp_violation;
+                        dl.append(e);
+                    }
+                    d["disagreements"] = dl;
+                    return d;
+                };
+                py::dict out;
+                if (r.mode_report.mode == 1) out["mode_shadow"] = rep(r.mode_report);
+                if (r.mode_report.mode == 2) out["mode_selection"] = rep(r.mode_report);
+                if (r.mode_guard.enabled) {
+                    const auto& g = r.mode_guard;
+                    py::dict d = rep(g.lcp);
+                    d["checks"] = g.checks;
+                    d["repairs"] = g.repairs;
+                    d["confirmed"] = g.confirmed;
+                    d["failed"] = g.failed;
+                    d["settle_caps"] = g.settle_caps;
+                    d["lcp"] = rep(g.lcp);   // dsed's nesting; the flat keys stay
+                    d["repair_times"] = g.repair_times;
+                    d["repair_diodes"] = g.repair_diodes;
+                    d["repair_violations"] = g.repair_violations;
+                    d["passivity"] = rep(r.mode_report)["passivity"];
+                    out["mode_guard"] = d;
+                }
+                return out;
+            },
+            "add-complementarity-mode-selection on pwl: 'mode_shadow' / "
+            "'mode_selection' counters and the default guard's "
+            "'mode_guard' (simulate() copies them to res.diagnostics).")
         .def_property_readonly("counters",
             [](const SimulationResult& r) {
                 py::dict d;
@@ -3104,7 +3207,14 @@ void init_module(py::module_& m) {
               "False when the schedule cannot name its edges (a "
               "make_combined_switch_fn with a plain Python callable "
               "in it); the variable-step engines then search for "
-              "them by sampling.");
+              "them by sampling.")
+        .def_property_readonly("follows_controller",
+              [](const sources::SwitchSchedule& s) {
+                  return s.follows_controller;
+              },
+              "True when a part is a control graph's PWM gate (a "
+              "closed loop): its edges are those of the duty held "
+              "now, so shooting and sensitivities refuse it.");
 
     m.def("make_pwm_switch_fn",
         &sources::make_pwm_switch_fn,
@@ -3199,6 +3309,12 @@ void init_module(py::module_& m) {
                 } else if (py::isinstance<sources::SwitchSchedule>(fn)) {
                     cpp_fns.emplace_back(
                         fn.cast<sources::SwitchSchedule>());
+                } else if (py::isinstance<pulsim::blockchain::ChainPwmGate>(fn)) {
+                    const auto g = fn.cast<pulsim::blockchain::ChainPwmGate>();
+                    sources::SwitchSchedule s{
+                        g, [g](Real t) { return g.next_edge_after(t); }};
+                    s.follows_controller = true;
+                    cpp_fns.emplace_back(std::move(s));
                 } else {
                     cpp_fns.emplace_back(fn.cast<SwitchScheduleFn>());
                 }
@@ -3207,6 +3323,10 @@ void init_module(py::module_& m) {
                 num_switches, std::move(cpp_fns));
         },
         py::arg("num_switches"), py::arg("fns"),
+        // a ChainPwmGate is copied by value but reads its chain through a
+        // pointer: the parts must outlive the combination (a temporary
+        // loop's gate segfaulted on the first call)
+        py::keep_alive<0, 2>(),
         "Compose multiple switch_fn callbacks into a single "
         "SwitchSchedule whose mask is the bitwise OR of all "
         "sub-masks. Useful for combining e.g. a primary-"
@@ -3433,11 +3553,19 @@ void init_module(py::module_& m) {
            py::object b_extra_obj,
            bool start_from_dc_op,
            std::optional<bool> enable_nonlinear_refresh,
-           StepObserverFn step_observer,
+           py::object step_observer_obj,
            py::object initial_state,
            ShouldContinueFn should_continue,
            std::shared_ptr<streaming::LiveRing> live_ring,
            py::object resume_from_obj) {
+            // A composed control graph (CxxChainTick) runs in C++.
+            StepObserverFn step_observer;
+            if (py::isinstance<pulsim::blockchain::ChainTick>(step_observer_obj)) {
+                step_observer =
+                    step_observer_obj.cast<pulsim::blockchain::ChainTick&>().fn;
+            } else if (!step_observer_obj.is_none()) {
+                step_observer = step_observer_obj.cast<StepObserverFn>();
+            }
             // Bridge.13: native schedules run their mask in C++ (no
             // Python __call__); the detection is shared by every engine.
             auto adapted =
@@ -3533,7 +3661,7 @@ void init_module(py::module_& m) {
         py::arg("b_extra_fn") = py::none(),
         py::arg("start_from_dc_op") = false,
         py::arg("enable_nonlinear_refresh") = py::none(),
-        py::arg("step_observer") = StepObserverFn{},
+        py::arg("step_observer") = py::none(),
         py::arg("initial_state") = py::none(),
         py::arg("should_continue") = ShouldContinueFn{},
         py::arg("live_ring") = std::shared_ptr<streaming::LiveRing>{},
@@ -4148,12 +4276,21 @@ void init_module(py::module_& m) {
     py::register_exception<pulsim::blockchain::ControlGraphBuildError>(
         m, "ControlGraphBuildError", PyExc_ValueError);
 
-    py::class_<ChainTick>(m, "CxxChainTick",
+    py::class_<ChainTick>(m, "CxxChainTick", py::dynamic_attr(),
         "A control-graph tick callback the variable-step engine calls in "
         "C++ (no Python call per tick).")
         .def("__call__", [](ChainTick& self, Real t, const Vector& x) {
             self.fn(t, x);
         });
+
+    py::class_<ChainPwmGate>(m, "CxxChainPwmGate", py::dynamic_attr(),
+        "A PWM switch_fn whose duty is a control-graph signal; every "
+        "engine calls it in C++.")
+        .def("__call__", [](const ChainPwmGate& self, Real t) { return self(t); },
+            py::arg("t"))
+        .def("next_edge_after", &ChainPwmGate::next_edge_after, py::arg("t"),
+            "First gate edge strictly after t under the duties held now "
+            "(period starts and OFF thresholds); stale after a tick.");
 
     py::class_<ChainBExtra>(m, "CxxChainBExtra",
         "A control graph's driven-source b_extra_fn(t), with the instants "
@@ -4197,6 +4334,35 @@ void init_module(py::module_& m) {
             py::arg("name"), py::arg("row"), py::arg("gain"),
             "b_extra[row] += gain * (signal `name` after compute_delay).")
         .def("set_solver_dt", &BlockChain::set_solver_dt, py::arg("dt"))
+        .def("set_label_time", &BlockChain::set_label_time, py::arg("on"),
+            "Label-time mode: on the fixed engine a tick runs at the call's "
+            "label t_n with the state x_{n-1} (the closed-loop helpers' "
+            "protocol); see docs/control-graph.md.")
+        .def_property_readonly("label_time", &BlockChain::label_time)
+        .def("set_horizon", &BlockChain::set_horizon, py::arg("t_end"),
+            "Label-time mode: no tick at or after t_end on the fixed engine.")
+        .def("set_output", &BlockChain::set_output, py::arg("name"),
+            py::arg("value"),
+            "Set a signal and what its circuit sinks see before the first "
+            "tick (call after compile()).")
+        .def("make_pwm_gate",
+            [](BlockChain& self, Size num_switches,
+               const std::vector<std::tuple<std::string, Index, Real, Real>>& legs) {
+                ChainPwmGate g{&self, num_switches, {}};
+                for (const auto& [ch, idx, period, phase] : legs) {
+                    if (idx < 0 || static_cast<Size>(idx) >= num_switches ||
+                        !(period > Real{0})) {
+                        throw std::invalid_argument(
+                            "make_pwm_gate: switch index out of range or "
+                            "period <= 0");
+                    }
+                    g.legs.push_back({self.slot(ch), idx, period, phase});
+                }
+                return g;
+            }, py::arg("num_switches"), py::arg("legs"), py::keep_alive<0, 1>(),
+            "A switch_fn (C++, no GIL): for each (channel, switch_idx, "
+            "period, phase) the bit is ON while pulsim.control.pwm_on(t, "
+            "period, duty, phase) with duty = what the channel's sinks see.")
         .def("make_tick_observer", [](BlockChain& self) {
                 return ChainTick{&self, self.make_tick_observer()};
             }, py::keep_alive<0, 1>(),
@@ -4519,18 +4685,23 @@ void init_module(py::module_& m) {
         .def("add_python_block",
             [](BlockChain& self, py::function fn,
                std::vector<InputRef> inputs,
-               const std::vector<std::string>& outputs) {
+               const std::vector<std::string>& outputs, bool with_state) {
                 std::vector<InputRef> in;
                 for (auto& r : inputs) in.push_back(self.in(std::move(r)));
                 std::vector<Index> out;
                 for (const auto& o : outputs) out.push_back(self.out(o));
                 // Owned by the chain; the chain dies under the GIL.
                 auto f = std::make_shared<py::function>(std::move(fn));
-                auto step = [f, in, out](ChainContext& c) {
+                auto step = [f, in, out, with_state](ChainContext& c) {
                     py::gil_scoped_acquire gil;   // the kernel runs without it
-                    py::tuple args(in.size());
+                    const Size k0 = with_state ? 1 : 0;
+                    py::tuple args(in.size() + k0);
+                    if (with_state) {   // the state vector, as an observer gets it
+                        args[0] = c.x != nullptr ? py::cast(*c.x)
+                                                 : py::cast(Vector{});
+                    }
                     for (Size i = 0; i < in.size(); ++i) {
-                        args[i] = py::float_(resolve(in[i], c));
+                        args[k0 + i] = py::float_(resolve(in[i], c));
                     }
                     py::object r = (*f)(*args);
                     if (out.size() == 1) {
@@ -4551,8 +4722,45 @@ void init_module(py::module_& m) {
                 };
                 self.add(std::move(step), {});
             }, py::arg("fn"), py::arg("inputs"), py::arg("outputs"),
+                py::arg("with_state") = false,
             "A block that calls fn(*input_values) (Python, under the GIL) "
-            "once per evaluation; returns a float or one value per output.")
+            "once per evaluation; returns a float or one value per output. "
+            "with_state=True passes the state vector x first.")
+        .def("add_c_function_block",
+            [](BlockChain& self, std::uintptr_t step_addr,
+               std::uintptr_t state_addr, std::uintptr_t in_addr,
+               std::uintptr_t out_addr, std::vector<InputRef> inputs,
+               const std::vector<std::string>& outputs) {
+                // The C-block ABI (pulsim.CBLOCK_ABI), called in C++: the
+                // caller (add_c_block) keeps the library, the state pointer
+                // and the two double buffers alive with the handle.
+                using CStep = void (*)(const double*, int, double*, int,
+                                       double, double, void**);
+                auto* f = reinterpret_cast<CStep>(step_addr);
+                auto* st = reinterpret_cast<void**>(state_addr);
+                auto* inb = reinterpret_cast<double*>(in_addr);
+                auto* outb = reinterpret_cast<double*>(out_addr);
+                if (f == nullptr || st == nullptr ||
+                    (!inputs.empty() && inb == nullptr) ||
+                    (!outputs.empty() && outb == nullptr)) {
+                    throw std::invalid_argument("add_c_function_block: null pointer");
+                }
+                std::vector<InputRef> in;
+                for (auto& r : inputs) in.push_back(self.in(std::move(r)));
+                std::vector<Index> out;
+                for (const auto& o : outputs) out.push_back(self.out(o));
+                auto step = [f, st, inb, outb, in, out](ChainContext& c) {
+                    for (Size i = 0; i < in.size(); ++i) inb[i] = resolve(in[i], c);
+                    f(inb, static_cast<int>(in.size()), outb,
+                      static_cast<int>(out.size()), c.t, c.dt, st);
+                    for (Size i = 0; i < out.size(); ++i) c.put(out[i], outb[i]);
+                };
+                self.add(std::move(step), {});
+            }, py::arg("step_addr"), py::arg("state_addr"), py::arg("in_addr"),
+                py::arg("out_addr"), py::arg("inputs"), py::arg("outputs"),
+            "A compiled C block (pulsim.CBLOCK_ABI) evaluated in C++ (no GIL): "
+            "inputs are copied to in_addr, the step writes out_addr, whose "
+            "values become the outputs. Used by add_c_block.")
         .def("add_delay",
             [](BlockChain& self, long long samples, Real initial_value,
                 InputRef x, std::string out) {
@@ -4898,6 +5106,25 @@ void init_module(py::module_& m) {
             "when the integral exceeds i2t_threshold (A²·s). "
             "output_channel: 1.0 intact, 0.0 blown.");
 
+    // Several graphs' fixed-step observers composed in C++, in order (each
+    // chain must outlive the run): the kernel calls them without the GIL.
+    m.def("block_laws_source", [] {
+        return std::string(
+#include "block_laws_source.inc"
+        );
+    }, "The C99 law table (block_laws.h) the kernel graph calls; "
+       "pulsim.export_c copies it into the C it generates.");
+    m.def("compose_chain_observers",
+        [](const std::vector<std::pair<BlockChain*, Real>>& parts) {
+            std::vector<std::function<void(Real, const Vector&)>> fns;
+            for (const auto& [ch, dt] : parts) fns.push_back(ch->make_step_observer(dt));
+            return ChainTick{nullptr, [fns](Real t, const Vector& x) {
+                for (const auto& f : fns) f(t, x);
+            }};
+        }, py::arg("parts"),
+        "One CxxChainTick that runs each (chain, dt)'s step observer in "
+        "order; run_transient calls it in C++.");
+
     // Helper for make_chain_switch_fn — wires chain channels →
     // SwitchStateMask bits.
     m.def("make_chain_switch_fn",
@@ -5013,8 +5240,8 @@ void init_module(py::module_& m) {
             // function in pure C++ AND hands the stepper its analytic
             // next_edge_after — edge landing then costs zero Python
             // round-trips and no bisection.
-            auto adapted =
-                pulsim_bindings_common::adapt_switch_fn(switch_fn_obj);
+            auto adapted = pulsim_bindings_common::adapt_switch_fn(
+                switch_fn_obj, static_cast<Size>(graph.num_switches()));
             const solver::SwitchScheduleFn switch_fn = std::move(adapted.fn);
             const std::function<Real(Real)> next_edge_fn =
                 std::move(adapted.next_edge);
