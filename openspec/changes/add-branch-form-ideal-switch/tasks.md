@@ -63,7 +63,7 @@ Reference values.
 - [ ] 8.2 Tests: ideal DCM buck orbit within 1e-9 of 8.9963970815477 V and diode-off instant within 1e-11·T of `0.79983739563545·T` (prototype: 4.5e-12 V, 2.0e-12·T); Floquet multipliers 0 and 0.9889768767 within 1e-8; capacitor-loop and cut-set records equal to the implicit strategies' within 1e-9
 
 ## 9. Default flip (in the single number-changing release)
-- [ ] 9.1 Migration audit: every example, tutorial and test circuit built with the ideal default; every refusal listed with its remedy and fixed in the repository
+- [ ] 9.1 Migration audit: every example, tutorial and test circuit built with the ideal default; every refusal listed with its remedy and fixed in the repository Audit written (`MIGRATION_AUDIT.md`, DECISIONS #44: the ideal twin of every reference circuit and its refusals by name); the fixes in the repository remain
 - [ ] 9.2 Default form = branch, ideal (D6); `form='conductance'` warns; topology helpers follow the default
 - [ ] 9.3 Re-baseline through the reference harness together with the other number-changing defaults; CHANGELOG lists each changed number and its cause
 

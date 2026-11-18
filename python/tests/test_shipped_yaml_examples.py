@@ -90,8 +90,9 @@ def test_example_runs_a_short_fixed_step_window(path):
     assert np.allclose(np.diff(times), lc.dt, rtol=1e-6)
     for name in lc.node_names:
         assert np.all(np.isfinite(res.v(name))), f"{path.name}: v({name})"
-    budget = 60.0 if path.name in HEAVY else 20.0
-    assert elapsed < budget, f"{path.name}: {elapsed:.1f} s"
+    # at most MAX_STEPS steps (asserted above); the wall time is printed,
+    # never asserted (machine load)
+    print(f"{path.name}: {elapsed:.2f} s")
 
 
 @needs_examples

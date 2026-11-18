@@ -2896,6 +2896,9 @@ private:
         }
     }
 
+    /// Smallest nonzero branch-form R_on (Ohm): DECISIONS #41.
+    static constexpr Real kBranchRonMin = Real{1e-9};
+
     static void require_branch_values_(std::string_view fn,
                                        std::string_view name, Real R_on,
                                        Real g_off) {
@@ -2903,6 +2906,17 @@ private:
             throw std::invalid_argument(std::format(
                 "{}(\"{}\"): R_on = {} is invalid: the branch form needs a "
                 "finite R_on >= 0 (0 is the ideal switch).", fn, name, R_on));
+        }
+        // 0 is decided exactly everywhere (structure, port coordinates); an
+        // R_on below kBranchRonMin is neither: its ON port row 1/R_on is
+        // past any circuit's conductance scale (add-branch-form-ideal-switch
+        // DECISIONS #41).
+        if (R_on > Real{0} && R_on < kBranchRonMin) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): R_on = {} is invalid: a branch-form R_on below {} "
+                "Ohm is past the round-off resolution of the port. Give R_on = 0 "
+                "for the ideal switch, or R_on >= {} Ohm.", fn, name, R_on,
+                kBranchRonMin, kBranchRonMin));
         }
         if (!(g_off >= Real{0}) || !std::isfinite(g_off)) {
             throw std::invalid_argument(std::format(
