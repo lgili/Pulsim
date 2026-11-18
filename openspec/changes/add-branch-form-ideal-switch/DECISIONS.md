@@ -248,7 +248,7 @@ Each entry: question → option taken → evidence → how to reverse.
 
 ## pwl losses and outputs of ideal elements (feat/core-a-ideal-switch)
 
-20. **Losses, currents and commutations of ideal elements (tasks 6.4 /
+22. **Losses, currents and commutations of ideal elements (tasks 6.4 /
     6.5, 2026-11-18).** Question: how are an R_on = 0 element's current,
     loss and turn-off reported, with no conductance law to apply? →
     Options taken: the current is the solved unknown i_s everywhere
@@ -273,7 +273,8 @@ Each entry: question → option taken → evidence → how to reverse.
     OFF leak g_off·24 V = 2.4e-11 A rides on the 0.5 A; 10 turn-ons and
     9 turn-offs of the ideal freewheeling diode recorded in 10 periods.
     Not done: the impulse energy category (6.4's last clause).
-    (Numbered 14 on the ideal-switch branch; renumbered 20 at
-    integration batch 11 behind the TR-BDF2 entries 14–19.)
+    (Numbered 14 on the ideal-switch branch; renumbered 22 at
+    integration batch 11 behind the TR-BDF2 entries 14–21; 20–21 are on
+    feat/core-p2-trbdf2 7bcd9509, not merged yet.)
     → Reverse: the `_ideal_entry` call sites in `losses.py`, `i_branch`
     in `_diode_state.py`, `has_ideal_diode` in `run_transient.hpp`.
