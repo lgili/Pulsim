@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Ideal (branch-form) elements: losses, state traces, turn-off records
+
+* **Added**: `device_loss_summary` reports an ideal `R_on = 0` switch or
+  diode (`form='branch'`) from its solved current instead of leaving it
+  out with a warning: conduction (forced 10 A through an ideal diode with
+  `V_f = 0.7` reads 0.7 V and 7.0 W) and tabulated `E_on`/`E_off`
+  (`E_on = 10 µJ·(i/1 A)·(v/24 V)` books 5.0 µJ per turn-on at 0.5 A,
+  24 V, within 4.8e-11 relative — the `g_off` leak). Its power is the
+  line between each step's end powers, so a commutation step does not
+  invent a loss (0.038 W on a 24 V, 0.5 A ideal buck with the
+  voltage-line × current-line product). The thermal summary follows.
+* **Fixed**: the diode state traces (`pulsim._diode_state`) carry an
+  ideal diode's solved current (they computed `inf·0`), and
+  `result.commutation_events` records an ideal diode's turn-on and
+  turn-off on `pwl` (it sat exactly at `V_on` while ON, so the
+  voltage-crossing record never saw it turn off; time = the step end
+  unless the event split located it).
+
 ### Complementarity mode selection on the fixed engine (`pwl`)
 
 * **Added**: `mode_selection='shadow'` and `'lcp'` run on `engine='pwl'`

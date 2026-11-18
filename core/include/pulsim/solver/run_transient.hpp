@@ -663,6 +663,13 @@ inline SimulationResult run_transient(
     }
     const auto diode_owned = diodes.diode_owned_bits();
     const bool has_diodes = diodes.num_diodes() > 0;
+    // Ideal (R_on = 0) branch-form diodes sit exactly at V_on while ON, so
+    // the voltage-crossing record below never sees them turn off; their
+    // commutations are read from the stamped state, step start to step end.
+    std::vector<char> commut_on_prev;
+    bool has_ideal_diode = false;
+    for (const auto& e : diodes.entries())
+        has_ideal_diode = has_ideal_diode || pool.is_branch_form(e.branch_id);
 
     // add-branch-form-ideal-switch D3: the per-mode structural pass, run
     // once per mode before its first solve (inactive, and free, without
@@ -1558,6 +1565,11 @@ inline SimulationResult run_transient(
             // correction (Layer 5 V3). Assignment into the hoisted
             // buffer — no per-step allocation.
             x_prev = x;
+            if (has_ideal_diode) {
+                const auto& es0 = diodes.entries();
+                commut_on_prev.resize(es0.size());
+                for (std::size_t j = 0; j < es0.size(); ++j) commut_on_prev[j] = es0[j].is_on;
+            }
 
             // State-aware observer fires BEFORE `switch_fn(t)`
             // so the user can update a Python-side PI / sampler /
@@ -2640,12 +2652,23 @@ inline SimulationResult run_transient(
                 step_events.assign(split_events.begin(), split_events.end());
             }
             if (has_diodes) {
-                for (const auto& e : diodes.entries()) {
+                for (std::size_t j = 0; j < diodes.entries().size(); ++j) {
+                    const auto& e = diodes.entries()[j];
                     if (split && std::any_of(
                             split_events.begin(), split_events.end(),
                             [&](const CommutationEvent& ev) {
                                 return ev.branch_id == e.branch_id;
                             })) {
+                        continue;
+                    }
+                    if (has_ideal_diode && pool.is_branch_form(e.branch_id)) {
+                        // shortcut: stamped at the step end, not interpolated;
+                        // the event split locates it when it is on.
+                        if (static_cast<bool>(commut_on_prev[j]) != e.is_on) {
+                            step_events.push_back(CommutationEvent{
+                                .t_estimated = t, .branch_id = e.branch_id,
+                                .new_state = e.is_on});
+                        }
                         continue;
                     }
                     const Real v_a_prev =

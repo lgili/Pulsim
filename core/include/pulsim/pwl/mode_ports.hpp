@@ -298,17 +298,19 @@ private:
             solve(rhs_, ws_[m]);
             kap_[m] = dot_(isl[m], ws_[m]);
         }
-        // Several islands: correcting one moves another's sum by g_m·w_n
-        // (a weak edge between them, a shared boundary node), so they are
-        // corrected jointly, K·α = σ with K(m, n) = g_m·w_n.
+        // Several islands: K(m, n) = g_m·w_n is the identity in exact
+        // arithmetic (disjoint islands, g_m sums J's rows over S_m), but
+        // behind a 1e7 Ω tie the off-diagonal rounding moved two buses
+        // joined by 1 MΩ by 6.5e-9 V when corrected one after another.
+        joint_ok_ = false;
         if (isl.size() > 1) {
             const auto k = static_cast<Index>(isl.size());
             DenseMatrix K(k, k);
             for (Index m = 0; m < k; ++m)
                 for (Index n = 0; n < k; ++n)
-                    K(m, n) = dot_(isl[static_cast<std::size_t>(m)], ws_[static_cast<std::size_t>(n)]);
-            joint_ok_ = K.allFinite();
-            if (joint_ok_) {
+                    K(m, n) = dot_(isl[static_cast<std::size_t>(m)],
+                                   ws_[static_cast<std::size_t>(n)]);
+            if (K.allFinite()) {
                 joint_lu_.compute(K);
                 joint_ok_ = std::isfinite(joint_lu_.rcond()) && joint_lu_.rcond() > Real{0};
             }

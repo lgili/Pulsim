@@ -103,12 +103,18 @@ def test_m4_primary_behind_an_open_switch_is_not_floating():
     assert np.all(np.isfinite(np.asarray(r.v("o"))))
 
 
-def test_m5_loss_summary_says_it_skips_an_ideal_element():
+def test_m5_loss_summary_reports_an_ideal_element():
+    # It was left out with a warning; task 6.4 reports it from its solved
+    # current (test_ideal_losses.py has the numbers).
     b = _rl_ideal()
     r = _quiet(lambda: p.simulate(b, 1e-5, dt=1e-6, engine="pwl",
                                   switch_fn=lambda t: _mask(True)))
-    with pytest.warns(UserWarning, match="'S' is an ideal branch-form element"):
-        p.device_loss_summary(b, r, switch_fn=lambda t: _mask(True))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        s = p.device_loss_summary(b, r, switch_fn=lambda t: _mask(True))
+    (e,) = [e for e in s if e["name"] == "S"]
+    assert e["form"] == "branch" and e["duty_closed"] == 1.0
+    assert abs(e["P_avg"]) < 1e-9                      # R_on = 0: v = 0 while closed
 
 
 def test_m6_ccm_buck_ideal_pair_runs_without_the_restart_rule():

@@ -292,8 +292,12 @@ F1. **The pwl port model is the site's own system, solved directly, with
     rows (so a user `b_extra_fn` injection is honoured, unlike #30's
     analytic zero, which needed #30's follow-up refusal). One more
     back-substitution per island and site; several islands are corrected
-    jointly (`K·α = σ`, `K(m, n) = g_m·w_n`: a weak edge between two
-    buses moves both sums); disabled for a circuit with a
+    jointly, `K·α = σ` with `K(m, n) = g_m·w_n`: K is the identity in
+    exact arithmetic (disjoint islands, `g_m` sums J's rows over `S_m`),
+    but behind a 1e7 Ω tie its off-diagonal rounding left two buses
+    joined by 1 MΩ 6.5e-9 V off (u) and 4.3e-9 relative (Z) when they
+    were corrected one after another, as the dsed adapter does (#30);
+    jointly: within the 1e-10 V bound; disabled for a circuit with a
     device kind the rule does not classify (controlled sources,
     transformers, Newton devices). The WIP's increment form
     (`J·δ = −(b_c + b_extra + J·x₀)`, `u = v(x₀) + v(δ)`) is dropped: it
