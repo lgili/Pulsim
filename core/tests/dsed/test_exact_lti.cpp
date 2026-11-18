@@ -467,3 +467,46 @@ TEST_CASE("Passivity: coupled inductors, ideal transformer, VCVS",
         REQUIRE(c.device == "E1");
     }
 }
+
+TEST_CASE("Exact: a stiff winding row does not leak into the slow modes (balancing)",
+          "[v2][dsed][exact_lti]") {
+    // A flyback mode (examples/flyback.yaml, Q1 ON, D1 / D_cl OFF): states
+    // (v_Cout, v_Ccl, i_p, i_s). The secondary current is limited by D1's
+    // g_off, a −4.1e14 /s row. Without balancing, the eigensolver's backward
+    // error (ε·‖A‖ in every entry) drove v_Cout to +1.3e-3 V at 1 ms; the
+    // exact solution of this matrix (mpmath, 50 digits) is −9.234e-8 V.
+    DenseMatrix A(4, 4);
+    A << -2000.0, 0.0, 0.0, 10000.0,
+         0.0, -500.00100000000003, 9.9999999998e-06, 0.0,
+         194871.7948717948, -1.0256410256205122e-06, -1025.6410256205122, 194871794871794.78,
+         -410256.4102564101, 1.948717948678973e-06, 1948.717948678973, -410256410256410.06;
+    Vector b(4);
+    b << 0.0, -0.048000000000275767, 4923076.92302769, -9353846.15375261;
+    const Vector ref = (Vector(4) << -9.2340255851271658e-8, -3.5796794290654677e-5,
+                        456.78039343209462, -2.0630293038677716e-8).finished();
+    // the adapter's energy coordinates (√C, √L); this test pins that path
+    const Vector scale = (Vector(4) << 1e-2, 1e-3, 1e-2, 5e-3).finished();
+    {
+        const auto e = make_exact_lti(A, b, scale, 1e-3);
+        REQUIRE(e.valid);
+        Vector x = Vector::Zero(4), out(4);
+        for (int k = 0; k < 1000; ++k) {   // the output grid of 1 µs
+            exact_advance_into(e, x, 1e-6, out);
+            x = out;
+        }
+        // within 1e-10 of the circuit's scale (48 V, 457 A): the tier-1 claim
+        const Real margin[4] = {48e-10, 48e-10, 457e-10, 457e-10};
+        for (int i = 0; i < 4; ++i)
+            REQUIRE(x[i] == Approx(ref[i]).epsilon(1e-12).margin(margin[i]));
+    }
+}
+
+TEST_CASE("Exact: balancing leaves a balanced matrix untouched",
+          "[v2][dsed][exact_lti]") {
+    DenseMatrix M(2, 2);
+    M << -1.0, 2.0, -2.0, -1.0;
+    DenseMatrix B = M;
+    const Vector s = balance_in_place(B);
+    REQUIRE((s.array() == 1.0).all());
+    REQUIRE((B.array() == M.array()).all());
+}
