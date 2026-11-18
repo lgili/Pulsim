@@ -6,6 +6,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Periodic steady state on the fixed and TR-BDF2 engines
+
+* **Added** `periodic_steady_state(..., engine='pwl' | 'trbdf2', dt=,
+  options=)`: Newton shooting on the true state (capacitor voltages,
+  inductor currents) with that engine's own period runs (the fixed
+  engine with `discontinuity_restart` and event splitting, so a period
+  starts from the true state alone), `M` by finite differences with
+  Broyden updates. The orbit is the one the engine's own transient
+  reaches: 1.2e-11 (`pwl`) and 2.6e-9 (`trbdf2`) of the state scale
+  from a 4000-period transient on the DCM buck; 12 period runs from zero
+  on `pwl`. `result.full_state` is the engine's MNA vector at the
+  section. `pwl` needs a gate edge at `t = 0`, `trbdf2` an edge oracle;
+  nonlinear devices and `sensitivities=` are refused by name.
+  `periodic_steady_state_supported(..., engine=)` answers per engine.
+* **Changed** `run_periodic_shooting` and `run_harmonic_balance` are
+  deprecated delegates (`DeprecationWarning`): the DCM buck now reads
+  8.996246 V instead of 8.8998 V (−1.07 %); `b_extra_fn` and
+  `step_observer` are refused by name; a non-convergence returns
+  `converged=False` with an all-NaN `x_steady_state` and the reason in
+  `message`, not the last iterate.
+* **Changed** `Evaluator(engine='pwl' | 'trbdf2',
+  steady=SteadySpec('pss'))` is accepted (it raised `ValueError`):
+  `counters["route"] == "pss/pwl"`; `method='auto'` is unchanged.
+
+### The Newton shooting loop in the kernel
+
+* **Added** `pulsim._pulsim.dsed_periodic_orbit` (header
+  `core/include/pulsim/dsed/periodic_orbit.hpp`): the whole Newton
+  shooting of `periodic_steady_state` (scaled-norm residual, Armijo
+  backtracking, relaxation rounds, stop on the Newton step, period-run
+  budget, singular `I − M`, multipliers on the unit circle, the
+  verification period with the caller's integrals) in one call with the
+  GIL released. Every non-converged outcome is a status the wrapper
+  turns into the same `ConvergenceError` as before; a NaN period is
+  never accepted.
+* **Changed** `periodic_steady_state` runs on it for DC sources (a sine
+  `b(t)` keeps the Python loop). Same orbit (within 2e-14 of the state
+  scale), same period-run, step and iteration counts on the CCM/DCM
+  buck and the CCM/DCM boost; `counters["pss_loop"]` and
+  `counters["pss_iterations"]` name the route in an evaluation record.
+  An exception raised by a Python gate schedule inside a period run now
+  propagates as itself instead of becoming "a period run failed".
+* **Changed** the evaluator's per-evaluation Python: a datasheet loss
+  table's energies are read by its kernel copy (`LossTable.total`, bit
+  for bit `np.sum(table(v, i, tj))`), the provenance mapping is built
+  once per evaluator and records freeze scalars without an `abc`
+  check. Buck Pareto (64 designs, interleaved best of 5): 1354 → 2167
+  evaluations/s on one thread; threads still do not scale (see
+  DECISIONS 19 of add-design-optimization-workflow).
+
 ### Compiled control graph, part 3: blocks (add-compiled-control-graph, 2026-11-13)
 
 * **Removed (BREAKING)** the Python evaluator of `MixedDomainBlockChain`
