@@ -352,7 +352,8 @@ class CircuitBuilder:
         Add a linear capacitor. C in farads.
         Optional `c0` records an initial voltage (V) on the
         capacitor — consumed by `simulate(initial_state=None)`
-        to seed the cap's positive-terminal node.
+        as the voltage across it, v(n_pos) - v(n_neg); a loop of
+        c0 values that breaks KVL raises ValueError.
 
         Optional keyword parasitics (openspec add-realistic-passives): esr [Ω] and esl [H] in series, expanded into {name}.esr and {name}.esl with internal nodes; zero adds nothing. c0 is the voltage of the ideal capacitor {name}.
         """

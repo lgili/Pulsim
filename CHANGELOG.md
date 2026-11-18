@@ -21,6 +21,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `BrokenProcessPool`.
 * CI runs pytest with `--timeout=900` (`pytest-timeout` joins the `dev`
   extra).
+* **Fixed** `simulate()` read the builder's initial conditions inside a
+  broad `except`, so capacitor ICs that break KVL (refused by
+  `CircuitBuilder.initial_state()` since the examples audit) ran silently
+  from x0 = 0 on every engine; the `ValueError` now reaches the caller.
+  The dead Python fallback `initial_state` (positive-terminal placement)
+  is removed and the `add_capacitor` docstring says "voltage across it".
 
 ### Design evaluation: review fixes (integration batch 6c)
 

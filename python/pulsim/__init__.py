@@ -2365,6 +2365,8 @@ def simulate(
             if _np_check.any(_np_check.asarray(candidate) != 0.0):
                 initial_state = candidate
                 _ic_from_builder = True
+        except ValueError:
+            raise   # capacitor ICs that break KVL: a refusal, not a mock
         except Exception:  # noqa: BLE001 — test mocks etc.
             pass
 

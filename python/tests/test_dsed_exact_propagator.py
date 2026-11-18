@@ -301,12 +301,15 @@ def test_inconsistent_parallel_capacitors_are_refused_by_name():
     # loop; the LTI extractor refuses every capacitor loop, so the
     # charge-conserving start (4.0 V) is not reachable through
     # simulate() yet. It must be a named refusal, never a wrong start.
+    # Since the examples audit the builder refuses the IC loop first
+    # (c0 is the voltage across each cap: 10 V and 2 V break KVL), on
+    # every engine; dsed's own "capacitors form a cycle" refusal is behind it.
     b = p.CircuitBuilder()
     b.add_capacitor("C1", "a", "gnd", 1e-6, c0=10.0)
     b.add_capacitor("C2", "a", "gnd", 3e-6)
     b.set_initial("C2", 2.0)
     b.add_resistor("R", "a", "gnd", 1e3)
-    with pytest.raises(p.UnsupportedError, match="capacitors form a cycle"):
+    with pytest.raises(ValueError, match="break KVL"):
         _run(b, t_end=1e-4)
 
 

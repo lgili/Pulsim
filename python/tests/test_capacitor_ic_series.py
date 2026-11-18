@@ -63,3 +63,17 @@ def test_capacitor_ics_that_break_kvl_are_refused():
     b.add_capacitor("C2", "a", "gnd", 1e-6, c0=3.0)
     with pytest.raises(ValueError, match="break KVL"):
         b.initial_state()
+
+
+def test_simulate_does_not_swallow_the_kvl_refusal():
+    """simulate() read builder ICs inside a broad except: the refused loop
+    ran silently from x0 = 0 (integration batch 7 review)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 1.0)
+    b.add_resistor("R", "in", "a", 1.0)
+    b.add_capacitor("C1", "a", "gnd", 1e-6, c0=5.0)
+    b.add_capacitor("C2", "a", "gnd", 1e-6, c0=3.0)
+    for engine in ("pwl", "trbdf2", "dsed"):
+        with pytest.raises(ValueError, match="break KVL"):
+            p.simulate(b, t_end=1e-5, dt=1e-6, engine=engine)
+

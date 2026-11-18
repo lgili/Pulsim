@@ -989,7 +989,8 @@ void init_module(py::module_& m) {
               "Add a linear capacitor. C in farads.\n"
               "Optional `c0` records an initial voltage (V) on the\n"
               "capacitor — consumed by `simulate(initial_state=None)`\n"
-              "to seed the cap's positive-terminal node.")
+              "as the voltage across it, v(n_pos) - v(n_neg); a loop of\n"
+              "c0 values that breaks KVL raises ValueError.")
         .def("add_inductor",
               &builder::CircuitBuilder::add_inductor,
               py::arg("name"), py::arg("n_pos"),

@@ -307,13 +307,13 @@ pwl+restart / pwl+split 4.59e-4 -> 1.13e-3, trbdf2 2.37e-5 -> 2.08e-5;
 1.79e-6 -> 5.06e-6, trbdf2 1.71e-6 -> 7.90e-6; `t_type_3level_halfbridge`
 pwl 0.0749 -> 0.0782 and restart / split 0.0738 -> 0.0771 (disagree,
 as before), trbdf2 1.08e-4 -> 1.12e-4. The analytic set is unchanged.
+The measure is `edge` (README, *Measure*) since integration batch 5.
 
 **Series-capacitor ICs (25707fe8), 2026-11-13.** A capacitor's `ic` is
 now the voltage across it, so four triaged circuits start from a
 different x0: `half_bridge_transformer_dc`, `half_bridge_inverter_lc`,
-`npc_three_level_halfbridge`, `t_type_3level_halfbridge`. Their rows
-above were re-measured with `reference_status.differential` on those four
-only (no full regeneration); every outcome is unchanged.
+`npc_three_level_halfbridge`, `t_type_3level_halfbridge`; every outcome
+is unchanged (the full regeneration of batch 7 above has their numbers).
 
 **Fixed-step event splitting (pwl+split), 2026-11-13.** `pwl+split` is
 `discontinuity_restart` + `enable_substep_state_correction` (opt-in, off
