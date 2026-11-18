@@ -2208,7 +2208,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any]:
+    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, tuple[float, int, float, bool]]:
         ...
     def __init__(self) -> None:
         ...
@@ -2249,6 +2249,30 @@ class SolverSnapshot:
         """
     @diode_on.setter
     def diode_on(self, arg1: collections.abc.Sequence[bool]) -> None:
+        ...
+    @property
+    def grid_dt(self) -> float:
+        """
+        Step of the fixed-step grid (see ``grid_origin``); NaN: none.
+        """
+    @grid_dt.setter
+    def grid_dt(self, arg0: float) -> None:
+        ...
+    @property
+    def grid_origin(self) -> float:
+        """
+        The fixed-step grid ``t`` sits on: t == grid_origin + grid_step * grid_dt exactly (NaN: none). A fixed-step resume with the same dt continues it, so its trace is the continuous run's bit for bit.
+        """
+    @grid_origin.setter
+    def grid_origin(self, arg0: float) -> None:
+        ...
+    @property
+    def grid_step(self) -> int:
+        """
+        Index of ``t`` on the fixed-step grid (see ``grid_origin``).
+        """
+    @grid_step.setter
+    def grid_step(self, arg0: int) -> None:
         ...
     @property
     def history(self) -> list[float]:
@@ -2294,6 +2318,14 @@ class SolverSnapshot:
         """
     @pmsm_history.setter
     def pmsm_history(self, arg1: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def post_edge_derivatives(self) -> bool:
+        """
+        True when a variable-step run ended exactly on a gate edge after refreshing the device derivatives for the post-edge circuit (``x`` is the pre-edge solve). engine='pwl' refuses to resume from it; engine='trbdf2' resumes.
+        """
+    @post_edge_derivatives.setter
+    def post_edge_derivatives(self, arg0: bool) -> None:
         ...
     @property
     def restart_pending(self) -> bool:
@@ -3321,6 +3353,10 @@ def _require_supported(graph: Graph, pool: DevicePool, engine: str) -> None:
 def _run_pwl_points(circuit: Circuit, names: collections.abc.Sequence[str], table: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], options: SimulationOptions, dt: float, switch_fn: typing.Any, start_from_dc_op: bool, enable_nonlinear_refresh: bool | None, initial_state: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"] | None, auto_regularize: bool, n_threads: int) -> tuple[typing.Any, ...]:
     """
     Internal (sweep(circuit, ...) kernel path, task 5.2): run the points of a parameter table (rows = points, columns = names: parameters, or "device.field") on the pwl engine, n_threads native threads, without the GIL. Returns ([(result, circuit, builder, own_preflight) or None per point], stats); None = re-run that point through simulate().
+    """
+def _stateful_kinds() -> dict[typing.Any, typing.Any]:
+    """
+    The kernel's stateful Newton kinds (pwl::StatefulKinds), in fold order: {state block name: StoredKind name of the kind-table row it runs under}.
     """
 def _switch_census(graph: Graph, pool: DevicePool) -> tuple[int, int, list[int]]:
     """

@@ -427,6 +427,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_layer5_v3_tests
         tests/layer5_v3/test_main.cpp
         tests/layer5_v3/test_snapshot_restore.cpp
+        tests/layer5_v3/test_device_interface.cpp
         tests/layer5_v3/test_substep_correction.cpp
         tests/layer5_v3/test_resolution_diagnostics.cpp
     )

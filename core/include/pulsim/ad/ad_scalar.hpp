@@ -260,6 +260,81 @@ inline ADRealN<N> abs(const ADRealN<N>& x) noexcept {
     return ADRealN<N>{std::abs(x.value()), d};
 }
 
+template <Size N>
+inline ADRealN<N> sin(const ADRealN<N>& x) noexcept {
+    const Real cv = std::cos(x.value());
+    std::array<Real, N> d{};
+    for (Size i = 0; i < N; ++i) d[i] = cv * x.deriv(i);
+    return ADRealN<N>{std::sin(x.value()), d};
+}
+
+template <Size N>
+inline ADRealN<N> cos(const ADRealN<N>& x) noexcept {
+    const Real sv = std::sin(x.value());
+    std::array<Real, N> d{};
+    for (Size i = 0; i < N; ++i) d[i] = -sv * x.deriv(i);
+    return ADRealN<N>{std::cos(x.value()), d};
+}
+
+template <Size N>
+inline ADRealN<N> atan(const ADRealN<N>& x) noexcept {
+    const Real g = Real{1} / (Real{1} + x.value() * x.value());
+    std::array<Real, N> d{};
+    for (Size i = 0; i < N; ++i) d[i] = g * x.deriv(i);
+    return ADRealN<N>{std::atan(x.value()), d};
+}
+
+/// atan2(y, x); derivative (x·dy − y·dx)/(x² + y²), undefined at (0, 0).
+template <Size N>
+inline ADRealN<N> atan2(const ADRealN<N>& y, const ADRealN<N>& x) noexcept {
+    const Real r2 = x.value() * x.value() + y.value() * y.value();
+    std::array<Real, N> d{};
+    for (Size i = 0; i < N; ++i) {
+        d[i] = (x.value() * y.deriv(i) - y.value() * x.deriv(i)) / r2;
+    }
+    return ADRealN<N>{std::atan2(y.value(), x.value()), d};
+}
+
+/// x^e for a constant exponent: d = e·x^(e−1)·dx.
+template <Size N>
+inline ADRealN<N> pow(const ADRealN<N>& x, Real e) noexcept {
+    const Real v = std::pow(x.value(), e);
+    const Real g = e * std::pow(x.value(), e - Real{1});
+    std::array<Real, N> d{};
+    for (Size i = 0; i < N; ++i) d[i] = g * x.deriv(i);
+    return ADRealN<N>{v, d};
+}
+
+/// x^y, x > 0: d = x^y·(y·dx/x + ln x·dy).
+template <Size N>
+inline ADRealN<N> pow(const ADRealN<N>& x, const ADRealN<N>& y) noexcept {
+    const Real v = std::pow(x.value(), y.value());
+    const Real lx = std::log(x.value());
+    std::array<Real, N> d{};
+    for (Size i = 0; i < N; ++i) {
+        d[i] = v * (y.value() * x.deriv(i) / x.value() + lx * y.deriv(i));
+    }
+    return ADRealN<N>{v, d};
+}
+
+// -----------------------------------------------------------------------------
+// chain(x, value, dvalue_dx) — a law whose value and exact tangent are
+// computed by other means (a Hermite table, the Jiles–Atherton tangent):
+// the result carries `value` and dvalue_dx·dx in every slot. The Real
+// overload returns `value`, so one law body serves both scalars.
+// -----------------------------------------------------------------------------
+template <Size N>
+[[nodiscard]] inline ADRealN<N> chain(const ADRealN<N>& x, Real value,
+                                      Real dvalue_dx) noexcept {
+    std::array<Real, N> d{};
+    for (Size i = 0; i < N; ++i) d[i] = dvalue_dx * x.deriv(i);
+    return ADRealN<N>{value, d};
+}
+[[nodiscard]] inline Real chain(Real /*x*/, Real value,
+                                Real /*dvalue_dx*/) noexcept {
+    return value;
+}
+
 // -----------------------------------------------------------------------------
 // seed<N>(v0, v1, ..., vN-1) — canonical input-seeding helper.
 //

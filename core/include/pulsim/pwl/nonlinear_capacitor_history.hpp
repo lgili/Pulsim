@@ -24,8 +24,10 @@
 // resolving adaptively.
 
 #include "pulsim/models/nonlinear_capacitor.hpp"
+#include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/trbdf2_stage.hpp"
 #include "pulsim/stamping/branch_coord.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -178,11 +180,30 @@ public:
         }
     }
 
-    [[nodiscard]] std::vector<Entry> snapshot() const {
+    // ---- device::StatefulKind (device/kind.hpp) ----
+    static constexpr device::StateBlock kBlock = device::StateBlock::NonlinearCapacitor;
+    static constexpr DevicePool::StoredKind kStoredKind =
+        DevicePool::StoredKind::NonlinearCapacitor;
+    static constexpr Size kFlatPerDevice = 3;
+    /// Every real an entry carries from step to step, the snapshot's
+    /// (`to_flat` order) first, then the stage scratch: the in-run
+    /// rollback copies exactly these.
+    template <class E, class F> static void for_each_state(E& e, F&& f) {
+        f(e.v_prev);
+        f(e.q_prev);
+        f(e.i_prev);
+    }
+    [[nodiscard]] std::vector<Entry>& mutable_entries() noexcept {
         return entries_;
     }
-    void restore(const std::vector<Entry>& snap) {
-        entries_ = snap;
+    /// Commit under the rule the solve stamped (BDF2 stage: the stage
+    /// commit; backward Euler: the restart rule).
+    void commit(const Vector& x, Real h, TrBdf2Stage stage) {
+        if (stage == TrBdf2Stage::Bdf2Stage2) {
+            commit_bdf2_stage2(x, h);
+        } else {
+            update_from_state(x, h, stage == TrBdf2Stage::BackwardEuler);
+        }
     }
 
     /// Flat (v, q, i) per device, for a run snapshot.

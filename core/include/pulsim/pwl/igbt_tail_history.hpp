@@ -48,6 +48,7 @@
 // is unchanged; only the history term moves.
 
 #include "pulsim/models/igbt_level1.hpp"
+#include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/trbdf2_stage.hpp"
@@ -216,11 +217,30 @@ public:
             v, e.params);
     }
 
-    [[nodiscard]] std::vector<Entry> snapshot() const {
+    // ---- device::StatefulKind (device/kind.hpp) ----
+    static constexpr device::StateBlock kBlock = device::StateBlock::IgbtTail;
+    static constexpr DevicePool::StoredKind kStoredKind =
+        DevicePool::StoredKind::IgbtLevel1;
+    static constexpr Size kFlatPerDevice = 2;
+    /// Every real an entry carries from step to step, the snapshot's
+    /// (`to_flat` order) first, then the stage scratch: the in-run
+    /// rollback copies exactly these.
+    template <class E, class F> static void for_each_state(E& e, F&& f) {
+        f(e.q_prev);
+        f(e.f_prev);
+        f(e.q_gamma);
+        f(e.k0);
+        f(e.k1);
+    }
+    [[nodiscard]] std::vector<Entry>& mutable_entries() noexcept {
         return entries_;
     }
-    void restore(const std::vector<Entry>& snap) {
-        entries_ = snap;
+    void commit(const Vector& x, Real h, TrBdf2Stage stage) {
+        update_from_state(x, h, stage);
+    }
+    /// The slot refresh reads the law, not the probe step.
+    void refresh_derivatives(const Vector& x_probe, Real /*h*/) {
+        refresh_derivatives(x_probe);
     }
 
     /// Flat (Q, f) pairs, for `SolverSnapshot`.
