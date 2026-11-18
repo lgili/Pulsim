@@ -1891,6 +1891,58 @@ def device_loss_summary(
         return (_node_voltage_trace(st, int(f))
                 - _node_voltage_trace(st, int(to)))
 
+    def _ideal_entry(bid: int, desc, kind: str) -> "Optional[Dict[str, Any]]":
+        # An ideal branch-form element (R_on = 0) has no conductance law:
+        # its current is its own solved unknown i_s (what result.i reads),
+        # its voltage the node difference. Each step is the line in i; the
+        # power is the line between the step's end powers v·i (V_f·i while
+        # ON — linear in i, so exact; g_off·v² while OFF), never v-line
+        # times i-line: across a commutation step that product invents a
+        # loss (0.038 W on a 24 V, 0.5 A ideal buck) the element cannot have.
+        try:
+            col = int(builder.pool.branch_var_id_for_switch(bid, builder.graph))
+        except Exception:  # noqa: BLE001 — no branch unknown: leave it out
+            return None
+        nodes = desc.get("nodes", (None, None))
+        if col < 0 or nodes[0] is None or nodes[1] is None:
+            return None
+        i_w, i_ws = states_w[:, col], states_s_w[:, col]
+        p_w, p_ws = win.cont(_branch_v(states, nodes) * states[:, col],
+                             _branch_v(states_s, nodes) * states_s[:, col])
+        if times_w.size > 1 and T > 0:
+            i_avg = _views.pl_integral(times_w, i_w, i_ws) / T
+            E = _views.pl_integral(times_w, p_w, p_ws)
+            P = E / T
+        else:
+            i_avg, E, P = float(i_w.mean()), 0.0, float(p_w.mean())
+        bit = switch_bits.get(int(bid), -1)
+        entry: Dict[str, Any] = {
+            "branch_id": int(bid), "kind": kind, "name": desc.get("name", ""),
+            "form": "branch",
+            "i_avg": float(i_avg),
+            "i_rms": _time_weighted_rms(i_w, times_w, i_ws),
+            "i_peak": float(max(np.abs(i_w).max(), np.abs(i_ws).max())) if i_w.size else 0.0,
+            "P_avg": float(P), "E_total": float(E),
+        }
+        params = desc.get("params", {})
+        if kind == "diode":
+            entry["V_th"] = float(params.get("V_th", 0.0))
+            entry["V_f"] = float(params.get("V_f", 0.0))
+        if kernel_masks is not None and 0 <= bit < kernel_masks.shape[1]:
+            closed = np.asarray(kernel_masks[:, bit], dtype=bool)
+            entry["duty_conducting" if kind == "diode" else "duty_closed"] = _duty(closed)
+            spec = (switch_by_bid.get(bid) or switch_by_name.get(entry["name"])
+                    if kind == "switch" else None)
+            if spec is not None:
+                closed_s = closed
+                if masks_s is not None and masks_s is not kernel_masks:
+                    closed_s = np.asarray(masks_s[:, bit], dtype=bool)
+                entry.update(_switch_switching_loss(
+                    closed, times, _branch_v(states, nodes), states[:, col], spec,
+                    closed_start=closed_s, v_start=_branch_v(states_s, nodes),
+                    i_start=states_s[:, col], window=win))
+        return entry
+
     summary: List[Dict[str, Any]] = []
     switch_seq_idx = 0  # increments once per Switch / Diode branch
                         # in branch-id order — matches the kernel
@@ -2002,7 +2054,12 @@ def device_loss_summary(
             V_th  = float(params.get("V_th", 0.0))
             V_f   = float(params.get("V_f", 0.0))
             if not (np.isfinite(g_on) and np.isfinite(g_off)):
-                _warn_ideal_skipped(desc)
+                ideal = (_ideal_entry(bid, desc, "diode")
+                         if params.get("branch_form") else None)
+                if ideal is None:
+                    _warn_ideal_skipped(desc)
+                else:
+                    summary.append(ideal)
                 switch_seq_idx += 1
                 continue
             from_id, to_id = desc.get("nodes", (None, None))
@@ -2097,7 +2154,12 @@ def device_loss_summary(
             g_on  = float(params.get("g_on", float("nan")))
             g_off = float(params.get("g_off", float("nan")))
             if not (np.isfinite(g_on) and np.isfinite(g_off)):
-                _warn_ideal_skipped(desc)
+                ideal = (_ideal_entry(bid, desc, "switch")
+                         if params.get("branch_form") else None)
+                if ideal is None:
+                    _warn_ideal_skipped(desc)
+                else:
+                    summary.append(ideal)
                 switch_seq_idx += 1
                 continue
             sw_bit = switch_bits.get(int(bid), switch_seq_idx)

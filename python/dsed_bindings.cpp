@@ -1027,12 +1027,21 @@ void init_module(py::module_& m) {
         }
 
         [[nodiscard]] SSM operator()(Real t) const {
-            if (is_native_) return native_.fn(t);
-            // Generic Python fallback (Bridge.11 path).
-            py::gil_scoped_acquire gil;
-            if (n_python_calls) ++*n_python_calls;
-            return fn_(t).cast<SSM>();
+            SSM m = [&] {
+                if (is_native_) return native_.fn(t);
+                // Generic Python fallback (Bridge.11 path).
+                py::gil_scoped_acquire gil;
+                if (n_python_calls) ++*n_python_calls;
+                return fn_(t).cast<SSM>();
+            }();
+            if (check_width_) {
+                pulsim::topology::require_mask_width(m, width_);
+            }
+            return m;
         }
+
+        /// The circuit's switch count; a mask of another width is refused.
+        void set_width(pulsim::Size n) noexcept { width_ = n; check_width_ = true; }
 
         [[nodiscard]] Real next_edge_after(Real t) const {
             if (is_native_ && native_.next_edge) return native_.next_edge(t);
@@ -1057,6 +1066,8 @@ void init_module(py::module_& m) {
         py::object nea_attr_;
         bool       has_nea_ = false;
         EdgeSearch<SSM> search_;
+        bool check_width_ = false;
+        pulsim::Size width_ = 0;
     };
 
     py::class_<NativeAdapter>(m, "_NativeCircuitBuilderAdapter",
@@ -1255,6 +1266,7 @@ void init_module(py::module_& m) {
            bool mode_guard_refuse,
            int settle_round_cap) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
             EventPredictor pred;
@@ -1442,6 +1454,7 @@ void init_module(py::module_& m) {
            std::size_t store_every,
            bool event_log) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(h_fixed));
             PEDSimulatorBDF2<NativeAdapter, PySwitchFnSSM> sim(
                 adapter, std::move(sf), h_fixed, store_every);
@@ -1478,6 +1491,7 @@ void init_module(py::module_& m) {
            std::size_t store_every,
            bool event_log) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
             StiffnessDetector det(stiffness_threshold);

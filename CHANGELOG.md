@@ -125,6 +125,67 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   conductance form (task 7.2), rejects 210 against 1108. Default-option
   results of conductance-form circuits are bit-identical.
 
+### Ideal (branch-form) elements: losses, state traces, turn-off records
+
+* **Added**: `device_loss_summary` reports an ideal `R_on = 0` switch or
+  diode (`form='branch'`) from its solved current instead of leaving it
+  out with a warning: conduction (forced 10 A through an ideal diode with
+  `V_f = 0.7` reads 0.7 V and 7.0 W) and tabulated `E_on`/`E_off`
+  (`E_on = 10 µJ·(i/1 A)·(v/24 V)` books 5.0 µJ per turn-on at 0.5 A,
+  24 V, within 4.8e-11 relative — the `g_off` leak). Its power is the
+  line between each step's end powers, so a commutation step does not
+  invent a loss (0.038 W on a 24 V, 0.5 A ideal buck with the
+  voltage-line × current-line product). The thermal summary follows.
+* **Fixed**: the diode state traces (`pulsim._diode_state`) carry an
+  ideal diode's solved current (they computed `inf·0`), and
+  `result.commutation_events` records an ideal diode's turn-on and
+  turn-off on `pwl` (it sat exactly at `V_on` while ON, so the
+  voltage-crossing record never saw it turn off; time = the step end
+  unless the event split located it).
+
+### Complementarity mode selection on the fixed engine (`pwl`)
+
+* **Added**: `mode_selection='shadow'` and `'lcp'` run on `engine='pwl'`
+  (they were refused by name). Every decision site — a trapezoidal step,
+  a restart stage, a split sub-step, the static step — poses the LCP of
+  its diode ports on its own discretisation (the cache's factor of the
+  site's mask and step). `'shadow'` leaves every number bit-identical (the cache counters move) and
+  reports disagreements in `result.diagnostics['mode_shadow']`; `'lcp'`
+  decides every site (settle rounds and mask cycles 0) and reports in
+  `result.diagnostics['mode_selection']`. `trbdf2` still refuses both.
+* **Added**: the default-mode guard on `pwl`: a settle that ends without a
+  fixed point (a mask cycle or an exhausted round budget) is judged by the
+  diode law and, when its mode violates it, re-decided by the LCP;
+  counters in `result.diagnostics['mode_guard']`. Default results change
+  only where the guard repaired: on the floating single-phase bridge
+  (V_f = 0) two steps per run, end value unchanged (DECISIONS F3).
+* **Fixed** (port model accuracy): a floating island's KCL sum (a bridge's
+  DC bus on a tie) is imposed exactly in the port problem; against a
+  double-double solve of the site's system the port voltages are within
+  1.1e-14 V for ties 1e4–1e9 Ω and sub-steps dt…dt/1000 (the plain solve
+  was off by up to 0.32 V, the increment form by up to 4.3e-2 V).
+* **Fixed** (wrong decisions under `'lcp'` on `pwl`): the selector's tie
+  passes at 100·h and 1e4·h were posed as a backward-Euler look-ahead of
+  up to 0.1 s with frozen sources, which turned a floating bridge's ties
+  ON (p − n = 0.85 V against 95.17 V). On `pwl` every pass now uses the
+  site's own step (DECISIONS F2); the bridge's `'lcp'` run equals the
+  settle to the last printed digit (95.171220741846 V).
+* **Added** (refusal): `mode_selection='shadow'`/`'lcp'` with
+  `max_event_iterations=0` on `pwl` raises `UnsupportedError` (the modes
+  are frozen there; before, the request was dropped in silence).
+
+### Switch masks of the wrong width are refused
+
+* **Fixed** (silent wrong answer; **BREAKING** for invalid input only): a
+  `switch_fn` or schedule returning a `SwitchStateMask` whose width is not
+  `graph.num_switches` raises `ValueError` naming both widths, on `pwl`,
+  `trbdf2`, `dsed` and `run_transient_bdf1`. Before, the user mask's width
+  won the overlay, so a narrower mask silently dropped the missing bits (a
+  branch-form diode's, or a diode's on any engine). `SwitchStateMask.set` /
+  `.get` past the width raise `IndexError` (the bit was written where
+  nothing reads it). No shipped example, doc snippet or test relied on a
+  short mask (the `SwitchStateMask(0)` snippets drive switchless circuits).
+
 ### Integration batch 9: the exact engine merged
 
 * **Added** the exact engine's give-ups (C++ `pulsim::ConvergenceFailure`:

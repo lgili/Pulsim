@@ -271,6 +271,14 @@ refuse the same way, with `feature` set to the keyword. Controllers
 (`closed_loops`, `step_observer`) run on `pwl` and `trbdf2` only; `dsed`
 refuses them.
 
+### Switch-mask width: checked at the Python entry points and on `pwl`
+
+A mask whose width is not `graph.num_switches` is refused on every
+engine reached from Python and on the C++ `run_transient` /
+`run_transient_bdf1`. The C++ `trbdf2` and `dsed` kernels
+(`trbdf2_transient.hpp`, `dsed/scheduler*.hpp`) called directly from C++
+do not check it yet; their Python bindings do.
+
 ### Ideal switch (branch form): opt-in, first slice
 
 `add_ideal_switch` / `add_diode(form='branch')` solve the switch current
@@ -403,12 +411,32 @@ names every case above when `MODE_GUARD = False`, and under
 stored samples only, so a wrong mode shorter than one stored step is not
 seen.
 
-### Complementarity mode selection: dsed only
+### Complementarity mode selection: dsed and pwl, not trbdf2
 
-`mode_selection='lcp'` and the default-mode guard run on `engine='dsed'`
-only; `pwl` and `trbdf2` still decide with their settle and refuse
-`'shadow'`/`'lcp'` by name (hooks: add-complementarity-mode-selection
-task 4.2). The guard and the LCP decide at events; a commutation the
+`mode_selection='shadow'` / `'lcp'` and the default-mode guard run on
+`engine='dsed'` and `engine='pwl'`; `trbdf2` still decides with its
+settle and refuses `'shadow'`/`'lcp'` by name (add-complementarity-mode-selection
+task 4.2). On `pwl` they are not posed for a circuit with a Newton device
+or a branch-form (ideal) diode (`'shadow'`/`'lcp'` refuse by name there;
+the guard is off), nor with `max_event_iterations = 0`. The pwl guard
+judges only a settle that ended without a fixed point (a mask cycle or an
+exhausted round budget): a converged settle obeys the diode law by
+construction. The settle's own solve on a floating island (a bridge's DC
+bus on a tie) rounds the island's common mode to ε·(C/h·v)/G_tie — 3e-4 …
+0.3 V behind 1 GΩ at dt/1 … dt/1000, measured against a double-double solve
+(DECISIONS F1) — and the settle decides on that; the LCP's port model
+corrects it, the trajectory is not changed. On the V_f = 0 bridge with
+the restart rule or the event split the settle ends 6.8e-3 / 4.5e-3 V off
+trbdf2 where `'lcp'` lands within 3.1e-5 / 4.6e-7 V (DECISIONS F3); the
+guard does not see it (the settle converged). `'shadow'` keeps the
+trajectory bit-identical but not the cache counters (its judge solves
+candidate masks). A restart stage or split sub-step entered with the
+previous stage's mask cycle is not solved by the settle at all (the
+cycle flag is kept per outer step and the event iteration stops on it
+before its first round); the shadow and the guard skip that site
+(DECISIONS F3).
+
+On `dsed` the guard and the LCP decide at events; a commutation the
 event locator misses is not decided. A diode predicate that starts a
 step at exactly zero is located from the side it leaves to over the
 first `100·h_e` (DECISIONS #19); a crossing back inside that sliver is

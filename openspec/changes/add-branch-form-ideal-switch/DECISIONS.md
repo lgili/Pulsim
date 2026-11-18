@@ -245,3 +245,35 @@ Each entry: question → option taken → evidence → how to reverse.
     common mode) is not needed and was not shipped. → Pinned:
     test_bridge_ground_truth.py (within 1e-3 V at rtol 1e-7, 3e-3 V at
     2e-5, rounding spread <= 1e-4 V). → Reverse: none (no engine change).
+
+## pwl losses and outputs of ideal elements (feat/core-a-ideal-switch)
+
+20. **Losses, currents and commutations of ideal elements (tasks 6.4 /
+    6.5, 2026-11-18).** Question: how are an R_on = 0 element's current,
+    loss and turn-off reported, with no conductance law to apply? →
+    Options taken: the current is the solved unknown i_s everywhere
+    (`res.i` already read it; `_diode_state.DiodeStateTrace` now carries
+    the column, so the state traces and every caller see a finite
+    current instead of `inf·0`); `device_loss_summary` reports the
+    element (`form='branch'`) instead of leaving it out (M5), integrating
+    the power as the line between each step's end powers v·i (exact
+    while ON: P = V_f·i is linear in i; the g_off·v² leak while OFF):
+    the product of the v-line and the i-line across a commutation step
+    invented 0.038 W on a 24 V, 0.5 A ideal buck, against 3.5e-10 W
+    (the leak) now. Tabulated `E_on`/`E_off` go through the same
+    `_switch_switching_loss` as the conductance switch. Ideal diodes sit
+    exactly at V_on while ON, so the voltage-crossing commutation
+    record never saw them turn off: their commutations are read from the
+    stamped state at each step (time = the step end unless the event
+    split located it). → Evidence (`python/tests/test_ideal_losses.py`):
+    forced 10 A with V_f = 0.7 gives v_D = 0.7 V and P_avg = 7.0 W
+    (window from 10 µs; the whole run reads 6.965 W, its first step
+    ramps 0 → 10 A); `E_on = 10 µJ·(i/1 A)·(v/24 V)` books 5.0 µJ per
+    turn-on within 4.8e-11 relative — not the 1e-12 of the task: the
+    OFF leak g_off·24 V = 2.4e-11 A rides on the 0.5 A; 10 turn-ons and
+    9 turn-offs of the ideal freewheeling diode recorded in 10 periods.
+    Not done: the impulse energy category (6.4's last clause).
+    (Numbered 14 on the ideal-switch branch; renumbered 20 at
+    integration batch 11 behind the TR-BDF2 entries 14–19.)
+    → Reverse: the `_ideal_entry` call sites in `losses.py`, `i_branch`
+    in `_diode_state.py`, `has_ideal_diode` in `run_transient.hpp`.
