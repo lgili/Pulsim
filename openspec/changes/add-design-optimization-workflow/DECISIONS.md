@@ -899,7 +899,7 @@ Recorded, not changed:
 * (b3, b4) The stepped tolerance 1e-1 cannot see a dropped loss row on a
   95 % efficient design (losses are 5 % of P_in), and the sampled
   1e-8 (2000/n)^2 rests on one circuit. Both are re-measured with the
-  `p_in` quadrature work (slice 6 item 4, §27).
+  `p_in` quadrature work (slice 6 item 4, §29).
 * (b5) `_schedule_fingerprint` reads 64 edges (32 periods of one PWM):
   a soft-start differing later shares a `design_id`. Nothing in pulsim
   caches records by it; a longer horizon costs native calls on every
@@ -1079,6 +1079,160 @@ thermal evaluator takes the Python path, `counters["batch"] ==
 To reverse: `ThermalSpec(mode="fixed_point")` restores the loop per
 evaluator; dropping the `"auto"` resolution in `_evaluate` restores it
 everywhere; the diode refusal in `device_loss_summary` is one block.
+
+## 29. `p_in` on the fixed-step engine and the stepped tolerance (slice 6, item 4)
+
+Question: why does `p_in` read about 1 % high on the DCM buck on
+`SteadySpec(method="pss")` with `engine="pwl"`, and is the efficiency
+wrong with it?
+
+Evidence (probe `probes/pin_quadrature.py`). The sampled source current
+equals the exact orbit's at every sample (six digits printed), and
+`p_out` is within 1.0e-7 at T/200. The efficiency is `p_out / (p_out +
+losses)` and never reads `p_in`: 8e-10 from the exact route. The error
+in `p_in` is first order: +9.99e-3 at T/200, +2.50e-3 at T/800, +6.24e-4
+at T/3200. In this run the sample AT a gate edge holds the LEFT limit,
+and the step after it ran on the new mask. Integrating straight across
+the edge charged half a step of the switch's peak current (1.22 A) to
+the step after it: 0.5 x 5e-8 x 1.22 x 24 / 1e-5 = 0.073 W, the excess
+measured. Verdict: quadrature across a discontinuity, mine (the
+evaluator's integral), not the restart and not an engine error.
+
+Fix: the schedule's gate edges reach the KPI integrals
+(`_gate_edges`, `_two_sided`). Where an edge sits at a sample that
+still holds the old gate bits and the next sample holds the new ones,
+the right limit is inserted at the edge. It is extrapolated from the two
+samples after it, or taken from one sample when the mask lasts a single
+step (a dead time). Measured: -1.47e-7 at T/200, -9.1e-9 at T/800,
+-3.1e-10 at T/3200 (O(h^2)). The residual is 4.5e-8 (was 9.9e-3); CCM
+buck 2.9e-10 (was 2.5e-4).
+
+Not applied:
+- When the edge sits at the sample AFTER the step (the transient route
+  here, by rounding of the sample time): that step took the new mask
+  at its end. That is the engine's first order at an edge, and the
+  trapezoid of the samples is that step's energy, so the balance closes
+  (1.0e-7). Inserting the left limit broke it (1 %). The route's
+  `p_out` is 0.87 % low at T/200 (0.083 % at T/800). This is the known
+  fixed-engine limitation, now listed under design evaluation with
+  `discontinuity_restart=True` (3.5e-6) and `pss` as workarounds.
+- When any gate edge of the window falls between samples (an SPWM
+  VSI). A partial correction unbalanced the dead-time pairs: VSI on
+  pss/pwl, -4.1e-4 -> -1.5e-3 against the exact `p_in`. The run is
+  left as it was.
+
+Stepped tolerance (b3, b4). Measured `energy_residual` after the fix:
+
+| route | buck CCM | buck DCM | boost CCM | boost DCM | VSI (no neutral path) |
+|---|---|---|---|---|---|
+| pss/pwl | -2.9e-10 | -4.5e-8 | -1.4e-9 | +1.7e-4 | -1.6e-3 |
+| transient/pwl | +5.0e-10 | +1.0e-7 | +4.5e-9 | not settled | +6.5e-7 |
+| transient/trbdf2 | -5.5e-7 | failed | failed | failed | -9.5e-5 |
+
+The stepped tolerance stays 1e-1. 1e-2 (six times the worst above) was
+tried and failed a legitimate record: a CCM buck on transient/pwl at
+dt = T/25 with `discontinuity_restart` and the sub-step state
+correction reads -3.9e-2 (`test_unlocated_gate_edges_are_failed_not_ok`,
+the run unchanged by the two-sided integration, measured with it off).
+The stepped engines are first order at gate edges, so their residual
+grows with dt; the table is at T/200 only. A fixed number below 1e-1
+would refuse coarse steps the user chose, not a defect. The sampled
+`1e-8 (2000/n)^2` is unchanged.
+
+The two-sided integration is applied to `p_in` only. Applied to the
+declared `mean` it broke the contract that a declared KPI equals the
+callable a user would write on the same record bit for bit
+(`test_on_a_sampled_route_the_specs_are_the_callables_bit_for_bit`,
+9.5905044 vs 9.5905045); `v_out` is a capacitor voltage, continuous at
+the edge, so it gains nothing (6e-9).
+
+To reverse: `edges=None` at the `p_in` call of `_with_right_limits`.
+
+## 30. The saltation hook (§23), written and measured, not landed (slice 6, item 6)
+
+Question: land the event hook comparator-gate saltation needs, with
+`scheduler.hpp` not editable in this slice? Option taken: the patch as a
+probe file, checked by one compile against a patched copy of the header
+(no tree edited, no second build tree).
+
+* `probes/saltation_hook.patch` (two hunks, 13 lines): a concept
+  `HasEventRegister` (`register_event(Real t, const std::string& name,
+  PredicateType type, int pred_index) -> void`) and, in
+  `PEDSimulator::fire_event_` after the ZCD notification and before the
+  mask is re-sampled, `if constexpr (HasEventRegister<SwitchFn>)
+  switch_fn_.register_event(t_event, name, ptype, aux_index);`. The
+  ZCD call is kept.
+* `probes/saltation_hook_check.cpp` (Eigen 3.4.0, `-O2`): the DCM buck of
+  `test_diode_events.cpp` over 20 periods, plain schedule vs the same
+  schedule plus a recording `register_event`. Patched: trajectory
+  bit-identical (108 samples, `==` on every state), 59 hook calls, all 20
+  logged state events seen in order by name and type, exit 0. Unpatched:
+  bit-identical, 0 calls, exit 1. Every schedule in the tree lacks
+  `register_event`, so the `if constexpr` compiles away and simulate()
+  is bit-identical by construction.
+* `python/tests/test_saltation_hook_patch.py` keeps the patch's context
+  lines present in the header (or, once landed, the call there).
+
+What remains of `add-periodic-steady-state-shooting` 6.1/6.3 after the
+hook lands, all additive: a native `ComparatorGate` schedule (clock edges
+in `next_edge_after`, latched off in `register_event` by its own
+predicate), its predicate `w.x - I_ref` in a `period_run` overload, and
+the saltation `S = I + (f+ - f-) w^T / (w . f-)` in
+`period_map_from_run` for that event; the oracle is
+`probes/peak_current_mode.py`. Not started here (the hysteresis-band
+diodes and reset maps of 6.1 need the same per-event identity).
+
+To reverse: delete the three files; nothing else references them.
+
+## 31. Fresh-context review of slice 6 and what changed
+
+Reviewer (opus, read-only) on 1128f953..5c422914. No disagreement
+between the kernel batch and the Python path was found. Acted on:
+
+* (1, bug) `_gate_edges` looped a million times on a schedule whose
+  `next_edge_after(t)` returns `t`, then inserted a million duplicate
+  points; past a million edges it truncated silently. A schedule that
+  does not advance, or has over a million edges in the window, now turns
+  the two-sided correction off (the straight integral, as before DECISIONS
+  29). Test: `test_a_schedule_that_does_not_advance_turns_the_correction_off`.
+* (3, risk) A `std::system_error` while starting a worker thread left the
+  started threads joinable and `std::terminate`d; the spawn loop now stops
+  and the started threads plus the caller drain the table.
+* (4, risk) `analysis::Cancelled` (a `std::runtime_error`) was caught as a
+  kernel error: a cancelled batch finished every design as a fallback and
+  re-ran it in Python. It is re-thrown, the other workers stop at their
+  next design, and the first exception is re-thrown after the join
+  (`test_design_batch.cpp`, "a cancellation stops the batch").
+* (5, 7) `solve_junction` declared a runaway when the expanding bracket
+  passed 1e6 C with g still rising (slope reported < 1), and returned the
+  last iterate after 200 regula falsi steps unconverged. Runaway is now
+  only `r_th dP/dT_j >= 1`; a root above 1e6 C is a root (test:
+  `R P0 a = 1 - 1e-7`, T* = 2.65e9 C, within 1e-6), infeasible by `t_limit` like any hot root;
+  an unconverged search throws and the record is `failed`.
+* (6) Every `ValueError` of the fixed point was labelled a conduction-table
+  refusal; only the table's own refusals are `unsupported` now, the rest
+  (a non-finite loss) `failed`.
+* (11) `boost_gradient.grid` raises a named error when no design is ok.
+
+Measured, not changed:
+
+* (2) An edge within 1e-12 T of a period end with its own sample would be
+  dropped by the `tol < t < T - tol` filter (both paths). Not reachable
+  with the schedules measured: the scheduler does not resolve such a pulse
+  at all. Buck with loss tables: `D = 1 - 1e-6` 2.70 W switching,
+  `D = 1 - 1e-7 .. 1 - 1e-15` 0.0 W (no event in the period map), `D =
+  1e-7 .. 1e-9` 0.80 W (both edges counted at the start). Plain
+  `simulate(engine='dsed')` at `1 - 1e-7`: 4 transitions in 3 periods. The
+  cause is in `scheduler.hpp` (not editable here); KNOWN_LIMITATIONS row.
+* (8) The kernel plan is built once per evaluator (`ev._kplan`), like
+  `_spec_cache`: changing `kpis` or `constraints` on an evaluator after
+  its first `evaluate_many` is not supported; build a new evaluator.
+* (9, 10) Operand indices of the internal plan are not range-checked (the
+  plan is generated, never user input); the fallback note names the first
+  eight indices. Left.
+
+To reverse: the edits are independent; each named test fails without its
+change (the thread-spawn guard has none: it needs the thread limit hit).
 
 ## Missing from the kernel (recorded, worked around in Python)
 

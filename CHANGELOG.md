@@ -84,6 +84,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Optimisation slice 6: the kernel batch evaluator, event losses on the orbit
 
+* **Fixed** (review of slice 6, DECISIONS 31) a schedule whose
+  `next_edge_after(t)` returns `t` hung the fixed-step `p_in` correction
+  (a million iterations); a cancellation inside the kernel batch became a
+  silent Python re-run of every design and is now re-raised; a thread that
+  cannot start no longer terminates the process; the junction fixed point
+  no longer calls a root above 1e6 C a runaway, an unconverged search is
+  `failed` instead of a root, and only a conduction table's own refusal is
+  labelled one. Known limitation added: a gate pulse shorter than about
+  1e-7 of the period at the period's end is not resolved by `dsed`.
+* **Added** `examples/optimization/boost_gradient.py`: a boost's L and C
+  sized with exact orbit-sensitivity gradients
+  (`value_and_grad` + `scipy.optimize.minimize(jac=True)`), falling back
+  to a grid on the kernel batch without scipy. Tested: gradient equals a
+  central difference within 1e-6, both ripple targets met within 5 %,
+  the grid all in the kernel and equal to the Python path. Tutorial 08
+  section 7.
 * **Added** the kernel batch evaluator: `Evaluator.evaluate_many` (new
   default `backend=None`) runs a circuit-form evaluator with declarative
   KPIs on the exact steady-state route as one kernel call
@@ -119,6 +135,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Changed** the record arithmetic sums with CPython 3.12's compensated
   float sum on every Python version (`design._psum`): records on Python
   3.10 / 3.11 may move by one ulp and now equal 3.12+'s.
+* **Fixed** `p_in` (and time-weighted means) of the evaluator on the
+  fixed-step `pwl` engine's `pss` route: the sample at a gate edge held
+  the left limit and the integral ran straight across it, 1.0 % high on
+  a DCM buck at T/200 (first order). Each side of a gate edge is now
+  integrated separately: 1.5e-7 (second order). The efficiency never
+  read `p_in` and was right (8e-10).
 * **Fixed** the evaluator's periodicity check: when its own plain
   `simulate` period failed, the first design of its event pattern was
   recorded `failed` and later designs passed on another design's check;
