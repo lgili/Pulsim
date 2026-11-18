@@ -353,6 +353,12 @@ Each entry: question → option taken → evidence → how to reverse.
   dict, buffers, signals and the tick grid are cleared
   (`BlockChain::reset`). (c) needs a state size from each library, which
   the ABI does not give. Carry-over is explicit: `resume_from` only.
+  Every fresh run resets, the first included (two circuits on one
+  export_c library share its static state; review of the merge).
+  A serial `sweep(circuit)` with C blocks is allowed now (points are
+  independent); `parallel=True` stays refused (one state on threads).
+  `resume_from` continues the state the last run left, so resume from
+  that run's snapshot (a snapshot-borne block state is the 6.1 hook).
   Chains and closed loops the caller passes (`step_observer=`,
   `closed_loops=`) are the caller's objects, not the circuit's: they
   keep the documented carry-over. Evidence: `test_control_graph_rerun.py`

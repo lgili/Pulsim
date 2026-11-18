@@ -518,6 +518,14 @@ def add_c_block(builder,
             code, lang, symbol, include_dirs=include_dirs,
             extra_compile_args=extra_compile_args,
             extra_link_args=extra_link_args))
+    sealed = _c_graph_of(builder)
+    if sealed is not None and getattr(sealed, "_sealed", False):
+        raise ValueError(
+            f"add_c_block({name!r}): this builder's C blocks are already "
+            "carried by a pulsim.Circuit from build() (or the builder came "
+            "from Circuit.to_builder()); the new block would also run in "
+            "that circuit. Add every C block before build(), or start from "
+            "a new builder.")
     if lib is not None:
         from ._circuit_ir import c_blocks_of
         # libraries this circuit's blocks already load, through the handles
@@ -548,7 +556,10 @@ def add_c_block(builder,
         block._keep = fn          # the library and its state pointer
     else:
         block = CBlock(n_in, n_out, fn=fn, state=dict(state or {}), name=name)
-    block._state0 = copy.deepcopy(block.state)   # every run starts here (G22)
+    try:                                          # every run starts here (G22)
+        block._state0 = copy.deepcopy(block.state)
+    except Exception:  # noqa: BLE001 - an uncopyable value (a lock, a handle)
+        block._state0 = dict(block.state)        # restored by reference
     handle = CBlockHandle(
         name=name, n_in=n_in, n_out=n_out, dt_block=float(dt),
         state=block.state, inputs=block.inputs, outputs=block.outputs,
@@ -563,13 +574,6 @@ def add_c_block(builder,
     # simulate() composes it with the other graphs above the dispatch.
     from .blockchain import MixedDomainBlockChain, Rate, _InputSource
     graph = _c_graph_of(builder)
-    if graph is not None and getattr(graph, "_sealed", False):
-        raise ValueError(
-            f"add_c_block({name!r}): this builder's C blocks are already "
-            "carried by a pulsim.Circuit from build() (or the builder came "
-            "from Circuit.to_builder()); the new block would also run in "
-            "that circuit. Add every C block before build(), or start from "
-            "a new builder.")
     if graph is None:
         graph = MixedDomainBlockChain(label_time=True)
     k0 = len(graph.blocks)
@@ -630,7 +634,7 @@ def _c_graph_observer(builder, fresh: bool = True):
     graph = _c_graph_of(builder)
     if graph is None or not graph.blocks:
         return None
-    if fresh and getattr(graph, "_c_obs", None) is not None:
+    if fresh:       # the first run too: a library may be shared (export_c)
         _reset_c_blocks(graph)
     # Compiled once per circuit layout; a resume_from run continues its
     # tick grid and states, any other run restarts both (above).

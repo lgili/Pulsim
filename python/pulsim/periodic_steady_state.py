@@ -301,7 +301,7 @@ def _direct_source(obj):
     src = getattr(obj, "_closed_loop", None)
     if isinstance(src, str):
         return src
-    if getattr(obj, "follows_controller", False):
+    if getattr(obj, "follows_controller", False) is True:
         return "make_combined_switch_fn with a control-graph gate in it"
     if isinstance(obj, CxxChainPwmGate):
         return "a control graph's PWM gate"

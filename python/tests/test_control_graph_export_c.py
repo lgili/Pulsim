@@ -169,13 +169,14 @@ def test_every_block_kind_is_bit_identical_in_c(tmp_path):
     # cos / sin / fmod come from the C compiler's libm here and from the
     # extension's in the kernel: on Windows MinGW's against MSVC's UCRT.
     # Signals of the Park / PLL laws are bit-identical when the two libms
-    # agree on 10^4 inputs; otherwise within 1e-10 of their scale (an
-    # ulp per call, 1e4 steps of a stable loop: <= 1e4 * 2.2e-16 * 10).
+    # agree on this run's values; otherwise within 1e-10 of their scale
+    # (an ulp per call over 1e4 steps is 2.2e-12; the PLL's integrators
+    # accumulate it, hence the margin: a judgement, not a derivation).
     trig = [ex.signals.index(s) for s in ("th", "w", "f", "pd", "pq",
                                           "pa", "pb")]
     rest = [j for j in range(n) if j not in trig]
     assert got[:, rest].tobytes() == want[:, rest].tobytes()
-    if _libm_agrees(tmp_path):
+    if _libm_agrees(tmp_path, want[:, ex.signals.index("th")]):
         assert got[:, trig].tobytes() == want[:, trig].tobytes()
     else:
         scale = 1.0 + np.abs(want[:, trig]).max(axis=0)
@@ -184,9 +185,9 @@ def test_every_block_kind_is_bit_identical_in_c(tmp_path):
     assert all(np.unique(want[:, j]).size > 1 for j in range(n))
 
 
-def _libm_agrees(tmp_path) -> bool:
+def _libm_agrees(tmp_path, xs) -> bool:
     """Whether the C compiler's cos / sin / fmod give Python's (the
-    extension's libm) bit for bit on 10^4 inputs over the PLL's range."""
+    extension's libm) bit for bit on the values the test produced."""
     src = tmp_path / "libm_probe.c"
     src.write_text(
         "#include <math.h>\n"
@@ -202,7 +203,6 @@ def _libm_agrees(tmp_path) -> bool:
         f.restype, f.argtypes = ctypes.c_double, [ctypes.c_double]
     lib.probe_fmod.restype = ctypes.c_double
     lib.probe_fmod.argtypes = [ctypes.c_double, ctypes.c_double]
-    xs = np.random.default_rng(3).uniform(-20.0, 20.0, 10_000)
     two_pi = 2.0 * math.pi
     return all(lib.probe_cos(x) == math.cos(x) and
                lib.probe_sin(x) == math.sin(x) and

@@ -3,7 +3,8 @@ with a stateful C block starts the block from its declared initial
 state, so two runs are bit-identical on every engine that runs C blocks,
 for a Python step, inline C and an export_c library; only resume_from
 continues the block (explicit carry-over). Before: the block's state
-carried over (1.383 V, then 1.785 V)."""
+carried over (reported 1.383 V, then 1.785 V; _py here 0.358, 0.466,
+0.574 V on three runs)."""
 from __future__ import annotations
 
 import sys
@@ -118,3 +119,19 @@ def test_resume_from_continues_the_block():
     j = c.to_builder().node_id_of("c")
     xf, xr = np.asarray(full.states), np.asarray(rest.states)
     assert xr[-1, j] == pytest.approx(xf[-1, j], rel=1e-9)
+
+
+def test_two_circuits_sharing_an_exported_library_start_clean(tmp_path):
+    # one static state behind both circuits: B's first run must not start
+    # from A's last state (review of the merge: the first run was not reset)
+    _cc()
+    add = _exported(tmp_path)
+    ba, bb = _rc(), _rc()
+    add(ba)
+    add(bb)
+    ca, cb = ba.build(), bb.build()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        xa = np.asarray(p.simulate(ca, 2e-4, dt=DT, engine="pwl").states)
+        xb = np.asarray(p.simulate(cb, 2e-4, dt=DT, engine="pwl").states)
+    assert xa.tobytes() == xb.tobytes()
