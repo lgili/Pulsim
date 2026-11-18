@@ -28,6 +28,7 @@
 #include "pulsim/models/flux_table.hpp"
 #include "pulsim/models/jiles_atherton.hpp"
 #include "pulsim/models/power_mosfet.hpp"
+#include "pulsim/numeric/parse_real.hpp"
 
 #include <yaml-cpp/yaml.h>
 
@@ -431,8 +432,7 @@ struct YamlIo {
         if (s == ".inf") return std::numeric_limits<Real>::infinity();
         if (s == "-.inf") return -std::numeric_limits<Real>::infinity();
         Real x{};
-        const auto r = std::from_chars(s.data(), s.data() + s.size(), x);
-        if (r.ec != std::errc{} || r.ptr != s.data() + s.size()) {
+        if (!numeric::parse_real(s.data(), s.data() + s.size(), x)) {
             fail(who, std::format("\"{}\" is not a number: \"{}\"", key, s));
         }
         return x;

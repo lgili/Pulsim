@@ -15,6 +15,7 @@
 // program on doubles in the order written, so a result is bit-identical
 // to the same arithmetic written out by hand.
 
+#include "pulsim/numeric/parse_real.hpp"
 #include "pulsim/numeric/types.hpp"
 
 #include <algorithm>
@@ -228,8 +229,7 @@ private:
                     }
                 }
                 Real v{};
-                const auto r = std::from_chars(t.data() + pos, t.data() + e, v);
-                if (r.ec != std::errc{} || r.ptr != t.data() + e) {
+                if (!numeric::parse_real(t.data() + pos, t.data() + e, v)) {
                     fail(std::format("bad number \"{}\"", t.substr(pos, e - pos)));
                 }
                 if (e < t.size() && ident(t[e])) {
