@@ -142,6 +142,29 @@ def analytic(repeats):
     return out
 
 
+def law_circuits(repeats):
+    """Circuits that exercise every ported Newton law (the reference set's
+    switched circuits use PWL devices and barely reach them): the
+    equivalence circuits of python/tests/test_device_path_equivalence.py
+    (MOSFET L1, Coss junction + VDMOS, saturable inductor, Shockley, IGBT L1
+    with and without its tail, Lauritzen) on both Newton engines."""
+    sys.path.insert(0, str(ROOT / "python" / "tests"))
+    import test_device_path_equivalence as T  # noqa: PLC0415 - test circuits
+    out = []
+    runs = {"pwl": dict(t_end=200e-6, dt=20e-9, engine="pwl"),
+            "trbdf2": dict(t_end=200e-6, engine="trbdf2", rtol=1e-6, atol=1e-9)}
+    for name, make in sorted(T.CIRCUITS.items()):
+        for eng, kw in runs.items():
+            def run(make=make, kw=kw):
+                b = make()
+                return pulsim.simulate(b, **T._gate(b.graph.num_switches), **kw)
+            rec = _pair(run, repeats, lambda res: (None, "ran"))
+            rec.update(circuit=f"law:{name}", engine=eng)
+            out.append(rec)
+            print(_line(rec), flush=True)
+    return out
+
+
 def _g(x):
     return "—" if x is None else f"{x:.3g}"
 
@@ -197,7 +220,8 @@ def main(argv=None) -> int:
     ap.add_argument("--repeats", type=int, default=2)
     ap.add_argument("--json")
     a = ap.parse_args(argv)
-    recs = differential(a.circuits.split(","), a.repeats) + analytic(a.repeats)
+    recs = (law_circuits(a.repeats) + differential(a.circuits.split(","), a.repeats)
+            + analytic(a.repeats))
     OUT.write_text(render(recs))
     if a.json:
         Path(a.json).write_text(json.dumps(recs, indent=1, default=str))

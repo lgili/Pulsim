@@ -11,6 +11,7 @@
 #include "pulsim/models/device_model.hpp"
 #include "pulsim/models/flux_table.hpp"
 #include "pulsim/models/jiles_atherton.hpp"
+#include "pulsim/pwl/device_readings.hpp"
 #include "pulsim/pwl/device_refresh.hpp"
 #include "pulsim/sparse/matrix.hpp"
 
@@ -21,6 +22,8 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 using namespace pulsim;
@@ -185,9 +188,13 @@ TEST_CASE("the Coss law stamps, commits and captures as the hand stamp",
                                                   pwl::coss_stage_of(st),
                                                   &hist.q_gamma());
                 pwl::iface::stamp(hist, x, Ji, fi, h, st, false);
-                // F = a·q + r: terms of size a·|q|.
+                // F = a·q + r: terms of size a·|q|. The junction law takes
+                // Q from ONE pow, (1+u)·(1+u)^(−m) − 1, the model from
+                // (1+u)^(1−m) − 1: both cancel near v = 0 against the
+                // C0·V0/(1−m) prefactor, so they agree to ulps of THAT.
+                const Real qterm = law == 0 ? mp.C0 * mp.V0 / (1.0 - mp.m) : 0.0;
                 const Real a = Real{4} / h;
-                const Real qs = a * std::max({std::abs(e.q_prev),
+                const Real qs = a * std::max({qterm, std::abs(e.q_prev),
                     std::abs(hist.q_gamma()[0]),
                     std::abs(models::NonlinearCapacitor::charge(mp, x[0] - x[1]))});
                 for (Index r = 0; r < 2; ++r) {
@@ -204,12 +211,13 @@ TEST_CASE("the Coss law stamps, commits and captures as the hand stamp",
                 const auto& el = hl.entries()[0];
                 const auto& ei = hi.entries()[0];
                 CHECK(close(ei.v_prev, el.v_prev, el.v_prev, 4));
-                CHECK(close(ei.q_prev, el.q_prev, el.q_prev, 4));
+                CHECK(close(ei.q_prev, el.q_prev, std::max(qterm, el.q_prev), 4));
                 CHECK(close(ei.i_prev, el.i_prev,
                             std::max(qs, std::abs(e.i_prev)), 16));
                 hl.capture_gamma(x);
                 pwl::iface::capture_gamma(hi, x);
-                CHECK(close(hi.q_gamma()[0], hl.q_gamma()[0], hl.q_gamma()[0], 4));
+                CHECK(close(hi.q_gamma()[0], hl.q_gamma()[0],
+                            std::max(qterm, hl.q_gamma()[0]), 4));
             }
         }
         if (law < 2) {
@@ -369,4 +377,202 @@ TEST_CASE("Params<Real> evaluates the legacy law to rounding",
         const Real ref = models::MosfetLevel1::current<Real>(v.data(), mp);
         CHECK(close(o.f[0], ref, Real{1}, 1));
     }
+}
+
+TEST_CASE("below its floor the junction Coss keeps C(floor) on both paths",
+          "[device][laws]") {
+    // DECISIONS #26 / #29: Q is flat below u = v_floor, and both Jacobians
+    // stay a·C(floor) (a zero row would be a singular Newton matrix).
+    const auto jn = models::NonlinearCapacitor::junction(1e-9, 0.8, 0.45);
+    pwl::NonlinearCapacitorHistory hist;
+    pwl::NonlinearCapacitorHistory::Entry e{};
+    e.from = 0;
+    e.to = 1;
+    e.params = jn;
+    hist.mutable_entries().push_back(e);
+    Vector x(2);
+    x << -3.0, 0.0;   // u = −3.75 < −0.9
+    const Real h = 1e-7;
+    sparse::Matrix Jh(2, 2), Ji(2, 2);
+    Vector fh = Vector::Zero(2), fi = Vector::Zero(2);
+    pwl::refresh_nonlinear_capacitors(x, Jh, fh, hist, h);
+    pwl::iface::stamp(hist, x, Ji, fi, h, pwl::TrBdf2Stage::Trapezoidal, false);
+    const Real g = Real{2} / h * models::NonlinearCapacitor::capacitance(jn, x[0]);
+    REQUIRE(g > Real{0});
+    CHECK(close(dense(Ji, 0, 0), g, g, 4));
+    CHECK(close(dense(Jh, 0, 0), g, g, 4));
+    CHECK(close(dense(Ji, 0, 1), -g, g, 4));
+}
+
+namespace {
+// A stored-charge kind (one local row) against its hand stamp: F, J, the
+// commit and the stage capture, every stage, random states.
+template <class H, class Hand, class Mk>
+void check_local_kind(Mk&& make, Hand&& hand, std::uint64_t seed, Real vlo, Real vhi) {
+    Lcg rng{seed};
+    for (int t = 0; t < 100; ++t) {
+        H hist;
+        hist.mutable_entries().push_back(make(rng));
+        const std::size_t n = 3;
+        Vector x(n);
+        for (std::size_t k = 0; k < n; ++k) x[k] = rng(vlo, vhi);
+        const Real h = rng(1e-9, 1e-6);
+        for (auto st : {pwl::TrBdf2Stage::Trapezoidal, pwl::TrBdf2Stage::BackwardEuler,
+                        pwl::TrBdf2Stage::Bdf2Stage2}) {
+            INFO("trial " << t << " stage " << static_cast<int>(st));
+            auto hl = hist, hi = hist;
+            sparse::Matrix Jh(n, n), Ji(n, n);
+            Vector fh = Vector::Zero(n), fi = Vector::Zero(n);
+            hand(x, Jh, fh, hl, h, st);
+            pwl::iface::stamp(hi, x, Ji, fi, h, st, false);
+            Real fs = 0, js = 0;
+            for (Index r = 0; r < Index(n); ++r) {
+                fs = std::max(fs, std::abs(fh[r]));
+                for (Index c = 0; c < Index(n); ++c) js = std::max(js, std::abs(dense(Jh, r, c)));
+            }
+            for (Index r = 0; r < Index(n); ++r) {
+                CHECK(close(fi[r], fh[r], fs, 64));
+                for (Index c = 0; c < Index(n); ++c) {
+                    CHECK(close(dense(Ji, r, c), dense(Jh, r, c), js, 64));
+                }
+            }
+            // the K0/K1 the history's restart helpers read stay current
+            CHECK(hi.entries()[0].k0 == hl.entries()[0].k0);
+            CHECK(hi.entries()[0].k1 == hl.entries()[0].k1);
+            // The engine's order: the stage point is captured after a
+            // trapezoidal (stage-1) solve, and the BDF2 stage is restamped
+            // with it before its commit; never capture between a BDF2 stamp
+            // and its commit (the hand commit reads the K0 of the stamp).
+            if (st == pwl::TrBdf2Stage::Trapezoidal) {
+                hl.capture_gamma(x);
+                pwl::iface::capture_gamma(hi, x);
+            }
+            hl.commit(x, h, st);
+            pwl::iface::commit(hi, x, h, st);
+            const auto& el = hl.entries()[0];
+            const auto& ei = hi.entries()[0];
+            const Real qs = std::max({std::abs(pwl::iface::q_of(el)),
+                                      std::abs(pwl::iface::qg_of(el)), Real{1e-300}});
+            CHECK(close(pwl::iface::qg_of(ei), pwl::iface::qg_of(el), qs, 64));
+            CHECK(close(pwl::iface::q_of(ei), pwl::iface::q_of(el), qs, 64));
+            // q̇: the hand BDF2 commit takes the formula value, the law −f;
+            // they differ by the solved local row's residual (rounding of
+            // terms of size a·q).
+            CHECK(close(ei.f_prev, el.f_prev, std::max(std::abs(el.f_prev), qs / h), 64));
+        }
+    }
+}
+}  // namespace
+
+TEST_CASE("the Lauritzen law (local q_M row) stamps, commits and captures as the "
+          "hand stamp", "[device][laws]") {
+    check_local_kind<pwl::LauritzenDiodeHistory>(
+        [](Lcg& rng) {
+            pwl::LauritzenDiodeHistory::Entry e{};
+            e.from = 0;
+            e.to = 1;
+            e.params.tau = rng(1e-8, 1e-6);
+            e.params.T_M = e.params.tau * rng(0.02, 0.3);
+            e.q_m_prev = rng(-1e-7, 1e-7);
+            e.f_prev = rng(-1.0, 1.0);
+            e.q_m_gamma = rng(-1e-7, 1e-7);
+            return e;
+        },
+        [](const Vector& x, sparse::Matrix& J, Vector& f, auto& hst, Real h,
+           pwl::TrBdf2Stage st) { pwl::refresh_lauritzen_diodes(x, J, f, hst, h, st); },
+        21, -0.3, 0.45);
+    const L::LauritzenDiode::Params<Real> lp =
+        L::LauritzenDiode::from(models::LauritzenDiode::Params{});
+    check_param_tangent<L::LauritzenDiode>({}, lp, {0.62, 0.0, 3e-8});
+    check_param_tangent<L::LauritzenDiode>({}, lp, {-2.0, 0.1, -1e-8});
+}
+
+TEST_CASE("the IGBT tail law (local Q row) stamps, commits and captures as the "
+          "hand stamp", "[device][laws]") {
+    check_local_kind<pwl::IgbtTailHistory>(
+        [](Lcg& rng) {
+            pwl::IgbtTailHistory::Entry e{};
+            e.collector = 0;
+            e.emitter = 1;
+            e.gate = 2;
+            e.params.tau_tail = rng(1e-7, 1e-5);
+            e.params.k_tail = rng(0.1, 0.9);
+            e.q_prev = rng(-1e-5, 1e-5);
+            e.f_prev = rng(-10.0, 10.0);
+            e.q_gamma = rng(-1e-5, 1e-5);
+            return e;
+        },
+        [](const Vector& x, sparse::Matrix& J, Vector& f, auto& hst, Real h,
+           pwl::TrBdf2Stage st) { pwl::refresh_igbt_tails(x, J, f, hst, h, st); },
+        22, -1.0, 15.0);
+    models::IgbtLevel1::Params ip{};
+    ip.tau_tail = 1e-6;
+    ip.k_tail = 0.4;
+    const auto tp = L::IgbtTail::from(ip);
+    check_param_tangent<L::IgbtTail>({}, tp, {8.0, 0.5, 12.0, 2e-6});
+    check_param_tangent<L::IgbtTail>({}, tp, {3.0, 0.0, 5.2, -1e-7});
+}
+
+TEST_CASE("a sensitivity of a law without a parameter tangent is refused by name",
+          "[device][laws]") {
+    std::vector<Real> tv{0.0, 1.0, 2.0}, tq{0.0, 1e-9, 1.8e-9}, tc{1e-9, 0.9e-9, 0.7e-9};
+    const auto table = models::NonlinearCapacitor::from_table(
+        std::make_shared<const models::ChargeTable>(tv, tq, tc, "t"));
+    const auto aux_tab = L::NonlinearCapacitor::aux_from(table);
+    const auto aux_j = L::NonlinearCapacitor::aux_from(
+        models::NonlinearCapacitor::junction(1e-9, 0.8, 0.45));
+    CHECK_FALSE(L::has_param_tangent<L::NonlinearCapacitor>(aux_tab));
+    CHECK(L::has_param_tangent<L::NonlinearCapacitor>(aux_j));
+    CHECK(L::has_param_tangent<L::ShockleyDiode>({}));
+    CHECK(L::has_param_tangent<L::LauritzenDiode>({}));
+    try {
+        L::require_param_tangent<L::NonlinearCapacitor>(aux_tab, "Coss1", 0);
+        FAIL("the table law reported a parameter derivative");
+    } catch (const std::invalid_argument& e) {
+        const std::string m = e.what();
+        CHECK(m.find("Coss1.C0") != std::string::npos);
+    }
+    CHECK_NOTHROW(L::require_param_tangent<L::NonlinearCapacitor>(aux_j, "Coss2", 2));
+    CHECK_THROWS_AS(L::require_param_tangent<L::NonlinearCapacitor>(aux_j, "Coss2", 6),
+                    std::invalid_argument);
+    CHECK(L::IgbtTail::kParamNames[5] == "tau_tail");
+}
+
+TEST_CASE("step 9: pin currents, power and outputs read from the laws",
+          "[device][laws]") {
+    pwl::StatefulHistories hs;
+    pwl::NonlinearCapacitorHistory::Entry c{};
+    c.from = 0; c.to = -1; c.params = models::NonlinearCapacitor::junction(1e-9, 0.8, 0.45);
+    c.i_prev = 0.25;
+    hs.get<pwl::NonlinearCapacitorHistory>().mutable_entries().push_back(c);
+    pwl::SaturableInductorHistory::Entry s{};
+    s.from = 0; s.to = 1; s.branch_var_id = 2;
+    hs.get<pwl::SaturableInductorHistory>().mutable_entries().push_back(s);
+    pwl::LauritzenDiodeHistory::Entry d{};
+    d.from = 1; d.to = -1; d.q_m_prev = 2e-8;
+    hs.get<pwl::LauritzenDiodeHistory>().mutable_entries().push_back(d);
+    Vector x(3);
+    x << 10.0, 0.6, 1.5;   // v(0), v(1), i_L
+    int seen = 0;
+    pwl::for_each_stateful_reading(hs, x, [&](const pwl::DeviceReading& r) {
+        ++seen;
+        if (r.kind == "nonlinear_capacitor") {
+            CHECK(r.i_pin[0] == 0.25);
+            CHECK(close(r.power, 10.0 * 0.25, 2.5, 4));
+        } else if (r.kind == "saturable_inductor") {
+            CHECK(r.i_pin[0] == 1.5);
+            CHECK(r.i_pin[1] == -1.5);
+            CHECK(close(r.power, (10.0 - 0.6) * 1.5, 14.1, 4));
+            CHECK(close(r.f[0], 9.4, 9.4, 4));   // the branch voltage
+            const Real lam = models::SaturableInductor::flux(1.5, s.params);
+            CHECK(close(r.q[0], -lam, lam, 4));
+        } else if (r.kind == "lauritzen_diode") {
+            const auto& p = d.params;
+            const Real qe = models::LauritzenDiode::junction_charge<Real>(0.6, p);
+            const Real i = (qe - 2e-8) / p.T_M + 0.6 * p.G_min;
+            CHECK(close(r.i_pin[0], i, i, 8));
+            CHECK(r.q[0] == 2e-8);
+        }
+    });
+    CHECK(seen == 3);
 }
