@@ -57,6 +57,7 @@
 #include <numbers>
 #include <functional>
 #include <stdexcept>
+#include <cctype>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -163,6 +164,12 @@ public:
     [[nodiscard]] const DenseMatrix& A_matrix() const {
         ensure_current_resolved_();
         return current_entry_->A;
+    }
+
+    /// Rows of K·x = k on the active mask (0 on every structural mode).
+    [[nodiscard]] Index n_constraints() const {
+        ensure_current_resolved_();
+        return current_entry_->constraint_K.rows();
     }
 
     [[nodiscard]] Vector b_vector(Real t) const {
@@ -498,6 +505,11 @@ public:
             reinit_log_.push_back(std::move(rec));
         }
     }
+
+    /// Records so far, and dropping those of a projection the scheduler
+    /// undid (it restored the pre-event state and projects again).
+    [[nodiscard]] std::size_t reinit_log_size() const noexcept { return reinit_log_.size(); }
+    void truncate_reinit_log(std::size_t n) { if (n < reinit_log_.size()) reinit_log_.resize(n); }
 
     /// The run's records, handed over (the log starts empty again).
     [[nodiscard]] std::vector<ReinitRecord> take_reinit_log() {
@@ -1327,7 +1339,14 @@ private:
                 for (Size i = 0; i < isl.in.size(); ++i) {
                     if (!isl.in[i]) continue;
                     const std::string& nm = graph_.node(static_cast<Index>(i)).name;
-                    if (!nm.empty() && msg.find("node " + nm) != std::string::npos) node = nm;
+                    if (nm.empty()) continue;
+                    // whole name only: island node "n" must not match "node n1"
+                    const auto at = msg.find("node " + nm);
+                    const auto end = at + 5 + nm.size();
+                    if (at != std::string::npos
+                        && (end == msg.size() || !(std::isalnum(static_cast<unsigned char>(msg[end]))
+                                                   || msg[end] == '_')))
+                        node = nm;
                 }
             }
             if (node.empty()) node = graph_.node(islands.front().ref).name;
@@ -1482,6 +1501,16 @@ private:
         auto it = mask_cache_.find(current_mask_);
         if (it == mask_cache_.end()) {
             auto lti = cache_.compute_lti_state_space(current_mask_);
+            if (b_extra_fn_ && lti.constraint_K.rows() > 0) {
+                // the flow keeps K·x' = 0, so a user injection on a
+                // constraint row would break K·x = k unseen (no closed form)
+                throw UnsupportedError(
+                    "dsed", "extraction", "", "",
+                    "dsed: this mode has dependent states (a capacitor loop or an "
+                    "inductor cut-set) and the run has a user b_extra_fn, whose "
+                    "injection on the constraint has no closed form. Add a series "
+                    "resistance, or use engine='pwl' or 'trbdf2'.");
+            }
             LTIEntry entry{
                 std::move(lti.A),
                 std::move(lti.b_constant),

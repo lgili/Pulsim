@@ -6,7 +6,9 @@ next_edge_after is a dt_max/10 poll boundary, not an edge).
 The poll case is the bridge bank of test_mode_lcp
 (`test_a_widened_pass_does_not_release_a_diode_before_its_own_turn_off`): capping its probes at
 the poll boundary brought back the 0.128 V early release of #24. Here: the decisions on a
-gated circuit do not depend on rounding.
+gated circuit do not depend on rounding. This is the rounding fuzz of the new decision; it
+does not show the cap changing a decision (no surveyed circuit does: the survey stayed
+bit-identical).
 """
 import warnings
 

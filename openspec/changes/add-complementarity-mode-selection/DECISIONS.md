@@ -656,3 +656,54 @@ choices it did not pin.
       `engine == 'dsed'` and `feature == 'floating_island'`.
       `exact_triage.cause()` names the cause.
     - **Reverse.** Call `cache_.solve_at` directly again.
+
+33. **Fresh-context review (2026-11-18) of the exact-engine steps.** A
+    read-only reviewer (opus, medium) read 98225161 … e9a10fe7. It found
+    no change to the pwl / trbdf2 paths, and the projection algebra,
+    dW ≥ 0, the LLT coupling path and the typed island refusal sound.
+    **Fixed:**
+    - **Undone projections.** Records of a projection the scheduler
+      undid (`x = shadow_x_` in the guard's repair and in the settle-cap
+      path) are dropped (`truncate_reinit_log`). Before, a repaired event
+      listed a record whose λ and dW never happened.
+    - **#31's skip rule.** An edge within `near_time` of t is skipped
+      only when it is the edge just fired (`last_time_event_t_`, 0 at
+      the start). Before, a predicate located a few ulps before an
+      unfired gate edge probed a whole period past it.
+    - **`judge_` with no room before the event.** It returns −1 (not
+      judged) instead of 1 (consistent).
+    - **The island refusal's node name.** It now matches the whole name
+      ("n" no longer matches "node n1").
+    - **The auto scheduler's numeric paths.** A gate edge that projects
+      a dependent state keeps its left limit, only when x moved, so
+      nothing else changes.
+    - **Periodic steady state.** A constrained mode is refused by name
+      (feature `dependent_states`). The period map has no Jacobian of
+      the projection, and K x = k gives a multiplier of exactly 1.
+    - **User injection on a constraint.** A user `b_extra_fn` on a
+      constrained mode is refused (feature `extraction`). The flow keeps
+      K ẋ = 0, so the injection would break K x = k unseen.
+    - **Tests.** `test_probe_horizon.py` says that it is the fuzz of the
+      decision and does not show the cap firing.
+
+    **Recorded, not fixed:**
+    - Records follow the eigen-directions of KE⁻¹Kᵀ. Two identical
+      independent loops (a symmetric split link) give a degenerate
+      eigenvalue, and the records mix the loops. The sum is exact.
+    - `kind` can be "mixed".
+    - The selector judges a candidate from the unprojected state
+      (already open under dependent states).
+    - The structural cond₁ cut and the general SVD tolerance differ by
+      up to a factor of n.
+    - `fast_t_` is not cleared per `simulate()` (latent: one simulator
+      per call).
+    - `test_dsed_auto_integrator` takes its event time from the engine.
+    - `with_right_limits` extends only times, states and switch rows.
+    - Found while trying to make the cap fire: a gated single-phase
+      bridge (100 V sine, 100 µF ∥ 100 Ω bus, a 10 kHz switch to 5 Ω)
+      fails on `mode_selection='lcp'` with D1 OFF and forward-biased by
+      0.314 V at t = 1e-5 s. It fails identically with the cap disabled,
+      so the cap is not the cause. The default selection runs it with
+      2 repairs.
+
+    → Reverse: each fix is local (the named function).

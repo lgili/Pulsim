@@ -106,3 +106,15 @@ def test_the_rank_decision_survives_rounding():
         seqs.add((tuple(np.round(np.asarray(r.event_times), 12)),
                   tuple((rec.kind, len(rec.states)) for rec in r.reinit_records)))
     assert len(seqs) == 1
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_user_injection_on_a_constraint_is_refused(engine):
+    # the flow keeps K x' = 0: a b_extra_fn current into the loop would break K x = k unseen
+    b = _cap_loop()
+    zero = [0.0] * b.pool.state_size(b.graph)
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(b, 1e-3, engine=engine, dt=1e-6, b_extra_fn=lambda _t: zero,
+                   allow_implicit_segments=True)
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "extraction")
+    assert "dependent states" in str(ei.value)

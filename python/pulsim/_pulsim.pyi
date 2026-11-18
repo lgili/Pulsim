@@ -2727,6 +2727,10 @@ class _NativeCircuitBuilderAdapter:
         """
         Return the currently-active mask.
         """
+    def n_constraints(self) -> int:
+        """
+        Rows of the dependent-state constraint K x = k on the active mask (a capacitor loop or an inductor cut-set; 0 otherwise).
+        """
     def node_pair_voltage(self, from_node: int, to_node: int, t: float, x: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> float:
         """
         v(from_node) − v(to_node) recovered from the reduced state `x` under the active mask (−1 is ground). The quantity a PWL diode predicate evaluates; affine in `x`, so its gradient is the predicate's recovery row (used by pulsim.periodic_steady_state for saltation).

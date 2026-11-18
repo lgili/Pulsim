@@ -523,3 +523,16 @@ def test_boost_with_a_zero_band_diode_settles(v_th, R, v_out, i_l):
     assert r.x0[lab.index("v(vout)")] == pytest.approx(v_out, abs=1e-5)
     assert r.x0[lab.index("i(L)")] == pytest.approx(i_l, abs=1e-5)
     assert r.exact["masks"]
+
+
+def test_dependent_states_are_refused_by_name():
+    # a capacitor across the source is a loop (K x = k): the period map would
+    # carry the mode-entry projection and a Floquet multiplier of exactly 1
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "s", "gnd", 5.0)
+    b.add_capacitor("C1", "s", "gnd", 1e-6)
+    b.add_resistor("R", "s", "o", 10.0)
+    b.add_capacitor("C2", "o", "gnd", 1e-6)
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.periodic_steady_state(b, period=1e-3)
+    assert (ei.value.engine, ei.value.feature) == ("periodic_steady_state", "dependent_states")

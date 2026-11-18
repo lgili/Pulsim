@@ -1108,6 +1108,9 @@ void init_module(py::module_& m) {
                 return self.A_matrix();
             },
             "Continuous-time A matrix for the active mask.")
+        .def("n_constraints", &NativeAdapter::n_constraints,
+            "Rows of the dependent-state constraint K x = k on the active "
+            "mask (a capacitor loop or an inductor cut-set; 0 otherwise).")
         .def("b_vector",
             &NativeAdapter::b_vector,
             py::arg("t"),

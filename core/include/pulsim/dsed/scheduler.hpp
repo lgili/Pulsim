@@ -327,6 +327,7 @@ public:
     /// Run the simulation from ``t = 0`` to ``t = t_end``.
     [[nodiscard]] PEDResult<MaskT> simulate(const Vector& x0, Real t_end) {
         probe_t_end_ = t_end;
+        last_time_event_t_ = Real{0};   // the start samples the gates like a landed edge
         using clock = std::chrono::high_resolution_clock;
         const auto t0_wall = clock::now();
 
@@ -822,10 +823,14 @@ private:
     /// (`has_edge_oracle()` false: its next_edge_after is a dt_max/10 poll
     /// boundary, not an edge, and it caches its search) adds no cap.
     [[nodiscard]] Real next_time_event_(Real t_now) const {
-        // an edge a few ulps after t_now is the one just landed (#28)
+        // an edge a few ulps after t_now is skipped only when it is the one
+        // just fired; a predicate located just before an edge that has not
+        // fired yet keeps that edge as its horizon (#31)
         const auto past = [&](auto&& next) {
             Real r = next(t_now);
-            if (std::isfinite(r) && near_time(r, t_now)) r = next(r);
+            if (std::isfinite(r) && near_time(r, t_now) && std::isfinite(last_time_event_t_)
+                && near_time(r, last_time_event_t_))
+                r = next(r);
             return r;
         };
         Real e = probe_t_end_;
@@ -1013,6 +1018,17 @@ private:
 
     /// Consistent reinitialisation (event_projection.hpp), through the
     /// System's cached eigenbasis when it has one.
+    /// The dependent-state records of the settle's projections, which a
+    /// reset to shadow_x_ undoes (the arbiter's mode projects again).
+    [[nodiscard]] std::size_t reinit_log_size_() const {
+        if constexpr (requires { system_.reinit_log_size(); }) return system_.reinit_log_size();
+        return 0;
+    }
+    void undo_reinit_records_() {
+        if constexpr (requires { system_.truncate_reinit_log(reinit_mark_); })
+            system_.truncate_reinit_log(reinit_mark_);
+    }
+
     void project_(Real t, Vector& x) {
         // dependent states first, whatever the event projection says: an
         // inconsistent state is not a state of the mode (DECISIONS,
@@ -1070,6 +1086,7 @@ private:
                 return;
             }
             if (shadow_.enabled || guard_) shadow_x_ = x;
+            reinit_mark_ = reinit_log_size_();
             settle_rounds_ = 0;
             try {
                 settle_and_project_(t, x, mask);
@@ -1081,6 +1098,7 @@ private:
                 result.mode_guard.enabled = true;
                 ++result.mode_guard.settle_caps;
                 x = shadow_x_;
+                undo_reinit_records_();
                 diode_bits_ = prev_bits;
                 mask = lcp_apply_(t, x, gates_prev, prev_bits, rec, result.mode_guard.lcp);
                 project_(t, x);
@@ -1231,6 +1249,7 @@ private:
         mask = gates_prev.overlay(diode_bits_, diode_owned_);
         system_.set_mask(mask);
         x = shadow_x_;
+        undo_reinit_records_();
         project_(t, x);
     }
 
@@ -1362,6 +1381,7 @@ private:
                        int aux_index = -1) {
         const MaskT old_mask = system_.current_mask();
         const MaskT prev_bits = diode_bits_;
+        if (ptype == PredicateType::GateEdge) last_time_event_t_ = t_event;   // next_time_event_
 
         // Notify switch_fn of non-gate (diode/ZCD) events so it can
         // latch the post-event mode for the remainder of this cycle.
@@ -1704,6 +1724,7 @@ private:
             const Real tol_v = Real{1e-9} * sc.vscale;
             const Real zs = sc.vscale / sc.iscale;
             const Real cap = next_time_event_(t) - t;   // DECISIONS #28
+            if (!(cap > Real{0})) return -1;            // nothing to judge before the event
             for (const Real f : {Real{1e2}, Real{1e4}}) {
                 const Real d = std::min(f * shadow_.h_e, cap);
                 if (!(d > Real{0})) break;
@@ -1848,6 +1869,8 @@ private:
     // the builder runners enable it.
     bool enable_event_projection_ = false;
     Real probe_t_end_ = std::numeric_limits<Real>::infinity();   // next_time_event_
+    std::size_t reinit_mark_ = 0;   // reinit_log_size_() before the settle
+    Real last_time_event_t_ = std::numeric_limits<Real>::quiet_NaN();   // last gate edge / corner fired
     std::vector<Real> fast_t_;     // plan_fast_samples_
     std::size_t fast_k_ = 0;
     Real dt_init_;
