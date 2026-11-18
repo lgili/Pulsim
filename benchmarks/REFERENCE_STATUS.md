@@ -20,7 +20,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | pwl+restart | 83 | 16 | 7 | 0 | 2 |
 | pwl+split | 84 | 15 | 7 | 0 | 2 |
 | trbdf2 | 97 | 2 | 1 | 6 | 2 |
-| dsed | 82 | 0 | 0 | 24 | 2 |
+| dsed | 88 | 1 | 0 | 17 | 2 |
 
 ### Fixed engine: restart rule and split (circuits where any of the three does not agree)
 
@@ -115,6 +115,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/isolated/forward_converter.yaml | pwl | 0.02 | 0.707 | V(out) | chatter | 6.2% | 9.9e-06 | 99 |
 | switching/isolated/forward_converter.yaml | pwl+restart | 0.02 | 0.092 | V(out) | 0.092 | 1.5% | 0.0018 | 1.8e+04 |
 | switching/isolated/forward_converter.yaml | pwl+split | 0.02 | 0.092 | V(out) | 0.092 | 1.5% | 0.0018 | 1.8e+04 |
+| switching/isolated/forward_converter.yaml | dsed | 0.001 | 0.648 | V(out) | 0.648 | 0.0% | unmatched |  |
 | switching/isolated/full_bridge_dc.yaml | pwl | 0.02 | 0.0828 | V(load_p) | 3.54e-06 | 4.0% | 1e-07 | 0.5 |
 | switching/isolated/full_bridge_dc.yaml | pwl+restart | 0.02 | 0.0815 | V(load_p) | 1.11e-08 | 3.9% | 2e-07 | 1 |
 | switching/isolated/full_bridge_dc.yaml | pwl+split | 0.02 | 0.0815 | V(load_p) | 1.11e-08 | 3.9% | 2e-07 | 1 |
@@ -169,10 +170,10 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | linear/two_stage_rc_lowpass.yaml | 0.00145 | 1.01e-05 | 1.01e-05 | 3.44e-06 | 4.62e-07 |
 | linear/voltage_divider_3stage.yaml | 0 | 0 | 0 | 0 | 0 |
 | magnetics/core_loss_steinmetz_sine.yaml | 0.000228 | 0.000227 | 0.000227 | 0.000123 | 3.5e-06 |
-| magnetics/coupled_inductor_step.yaml | 0.00032 | 0.00032 | 0.00032 | 3.76e-06 | refused |
+| magnetics/coupled_inductor_step.yaml | 0.00032 | 0.00032 | 0.00032 | 3.76e-06 | 6.72e-06 |
 | magnetics/half_bridge_transformer_dc.yaml | 0.151 | 0.000459 | 0.000459 | 2.37e-05 | refused |
 | magnetics/inductor_chain_step.yaml | 0.00231 | 5.34e-06 | 5.34e-06 | 9.05e-07 | refused |
-| magnetics/transformer_leakage.yaml | 0.0041 | 0.00409 | 0.00409 | 0.000231 | refused |
+| magnetics/transformer_leakage.yaml | 0.0041 | 0.00409 | 0.00409 | 0.000231 | 3.11e-05 |
 | magnetics/transformer_step_up.yaml | 4.64e-06 | 4.64e-06 | 4.64e-06 | 0 | 5.1e-06 |
 | motors/motor_dc_brush_step_load.yaml | 0.000289 | 4.5e-07 | 4.5e-07 | 6.06e-06 | 3.62e-07 |
 | motors/motor_induction_locked_rotor.yaml | 2.25e-06 | 2.25e-06 | 2.25e-06 | 5.1e-05 | refused |
@@ -228,13 +229,13 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/inverter/lcc_resonant_inverter.yaml | 0.00565 | 0.000232 | 0.000232 | 8.37e-05 | 8.81e-05 |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | 0.0707 | 0.0587 | 0.0587 | 4.27e-05 | 0.000167 |
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | 0.05 | 0.05 | 0.05 | 9.18e-05 | 0.000127 |
-| switching/isolated/active_clamp_forward.yaml | 0.00425 | 0.00375 | 0.00374 | 0.000117 | refused |
-| switching/isolated/dual_active_bridge.yaml | 0.000265 | 2.4e-06 | 2.4e-06 | 3.49e-05 | refused |
-| switching/isolated/flyback_converter.yaml | 0.949 | 0.11 | 0.11 | 4.29e-05 | refused |
-| switching/isolated/forward_converter.yaml | 0.707 | 0.092 | 0.092 | 2.16e-05 | refused |
+| switching/isolated/active_clamp_forward.yaml | 0.00425 | 0.00375 | 0.00374 | 0.000117 | 1.24e-06 |
+| switching/isolated/dual_active_bridge.yaml | 0.000265 | 2.4e-06 | 2.4e-06 | 3.49e-05 | 1.86e-06 |
+| switching/isolated/flyback_converter.yaml | 0.949 | 0.11 | 0.11 | 4.29e-05 | 2.72e-06 |
+| switching/isolated/forward_converter.yaml | 0.707 | 0.092 | 0.092 | 2.16e-05 | 0.648 |
 | switching/isolated/full_bridge_dc.yaml | 0.0828 | 0.0815 | 0.0815 | 0.000142 | 2.65e-05 |
 | switching/isolated/ll11_llc_resonant_converter.yaml | error | error | error | error | refused |
-| switching/isolated/synchronous_flyback.yaml | 0.207 | 1.01e-06 | 1.01e-06 | 9.15e-06 | refused |
+| switching/isolated/synchronous_flyback.yaml | 0.207 | 1.01e-06 | 1.01e-06 | 9.15e-06 | 1.02e-06 |
 | switching/multilevel/cascaded_h_bridge_5level.yaml | 0.0274 | 0.0269 | 0.0269 | 0 | 5.69e-05 |
 | switching/multilevel/flying_capacitor_3level.yaml | 0.0466 | 0.05 | 0.05 | 6.78e-05 | 3.71e-05 |
 | switching/multilevel/mmc_4cell_chain.yaml | 0.0268 | 0.0264 | 0.0264 | 0 | 5.74e-05 |
@@ -254,7 +255,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | pwl+restart | 20 | 0 | 0 | 0 | 0 |
 | pwl+split | 20 | 0 | 0 | 0 | 0 |
 | trbdf2 | 20 | 0 | 0 | 0 | 0 |
-| dsed | 18 | 0 | 0 | 2 | 0 |
+| dsed | 19 | 0 | 0 | 1 | 0 |
 
 | case | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
@@ -268,7 +269,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | sine_rl | 9.65e-07 | 9.65e-07 | 9.65e-07 | 6.3e-06 | 7.43e-15 |
 | wheatstone | 0 | 0 | 0 | 0 | 8.88e-17 |
 | pulse_rc | 3.25e-06 | 3.25e-06 | 3.25e-06 | 1.01e-06 | 7.8e-14 |
-| coupled_k099 | 0.000765 | 8.27e-06 | 8.27e-06 | 8.13e-07 | refused |
+| coupled_k099 | 0.000765 | 8.27e-06 | 8.27e-06 | 8.13e-07 | 1.32e-14 |
 | ideal_transformer | 0 | 0 | 0 | 0 | 3.05e-17 |
 | vcvs_gain2 | 0 | 0 | 0 | 0 | 0 |
 | shockley_op | 6.67e-13 | 6.67e-13 | 6.67e-13 | 6.67e-13 | refused |

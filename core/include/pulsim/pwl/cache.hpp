@@ -1042,26 +1042,33 @@ public:
         // would be a false positive whose message ("would silently
         // return dynamics computed as if the coupling were absent")
         // is itself untrue for that circuit.
-        Size coupled_pairs = 0;
+        // Coupled windings (k != 0): the inductor block of M_ss is the
+        // full inductance matrix Lmat (L_ii self, L_ij = M, the same
+        // −2L / −2M pair assemble.hpp stamps into C), applied as a
+        // solve −Lmat⁻¹ on the inductor rows. Without coupling the
+        // per-row scaling below is kept unchanged (bit identity).
+        DenseMatrix Lmat;
         for (const auto& tc : pool_.transformer_couplings()) {
-            if (models::TwoWindingTransformer::mutual_inductance(
-                    tc.params) != Real{0}) {
-                ++coupled_pairs;
+            const Real M = models::TwoWindingTransformer::
+                mutual_inductance(tc.params);
+            if (M == Real{0}) continue;      // k = 0: independent windings
+            const auto row_of = [&](Index branch_id) {
+                const Index bv =
+                    pool_.branch_var_id_for_inductor(branch_id, graph_);
+                for (int i = 0; i < n_ind; ++i)
+                    if (inds[i].branch_var == bv) return i;
+                throw std::runtime_error(
+                    "compute_lti_state_space: a coupled winding is not "
+                    "a linear inductor state.");
+            };
+            if (Lmat.size() == 0) {
+                Lmat = DenseMatrix::Zero(n_ind, n_ind);
+                for (int i = 0; i < n_ind; ++i) Lmat(i, i) = inds[i].L;
             }
-        }
-        if (coupled_pairs > 0) {
-            throw std::runtime_error(std::format(
-                "compute_lti_state_space: this circuit has {} "
-                "magnetically coupled inductor pair(s) (k != 0 on the "
-                "transformer / coupled-inductor API). The "
-                "continuous-time LTI extraction applies a DIAGONAL "
-                "inverse mass matrix, so it cannot represent the "
-                "mutual-inductance off-diagonal terms and would "
-                "silently return dynamics computed as if the coupling "
-                "were absent. Use the fixed-step PWL engine "
-                "(engine='pwl'), which stamps the mutual terms "
-                "exactly, for magnetically coupled circuits.",
-                coupled_pairs));
+            const int p = row_of(tc.primary_branch_id);
+            const int s = row_of(tc.secondary_branch_id);
+            Lmat(p, s) += M;
+            Lmat(s, p) += M;
         }
         // ---------------------------------------------------------
         DenseMatrix A = Schur_G;
@@ -1072,11 +1079,33 @@ public:
             b_reduced(i) *= inv;
             B.row(i) *= inv;
         }
-        for (int i = 0; i < n_ind; ++i) {
-            const Real inv = Real{-1} / inds[i].L;
-            A.row(n_cap + i) *= inv;
-            b_reduced(n_cap + i) *= inv;
-            B.row(n_cap + i) *= inv;
+        if (Lmat.size() == 0) {
+            for (int i = 0; i < n_ind; ++i) {
+                const Real inv = Real{-1} / inds[i].L;
+                A.row(n_cap + i) *= inv;
+                b_reduced(n_cap + i) *= inv;
+                B.row(n_cap + i) *= inv;
+            }
+        } else {
+            // Positive definite or refused: |k| = 1 makes Lmat singular
+            // (the winding currents are then not independent states).
+            Eigen::LLT<DenseMatrix> llt(Lmat);
+            const Real lmax = Lmat.diagonal().cwiseAbs().maxCoeff();
+            if (llt.info() != Eigen::Success
+                || llt.matrixL().toDenseMatrix().diagonal().minCoeff()
+                       <= Real{1e-6} * std::sqrt(lmax)) {
+                throw std::runtime_error(
+                    "compute_lti_state_space: the coupled-inductor "
+                    "matrix is not positive definite (|k| >= 1 on a "
+                    "transformer / coupled-inductor pair): the winding "
+                    "currents are not independent states.");
+            }
+            A.middleRows(n_cap, n_ind) =
+                -llt.solve(DenseMatrix(A.middleRows(n_cap, n_ind)));
+            b_reduced.segment(n_cap, n_ind) =
+                -llt.solve(Vector(b_reduced.segment(n_cap, n_ind)));
+            B.middleRows(n_cap, n_ind) =
+                -llt.solve(DenseMatrix(B.middleRows(n_cap, n_ind)));
         }
 
         return ContinuousLTI{

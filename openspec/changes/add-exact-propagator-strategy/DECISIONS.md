@@ -193,3 +193,18 @@ voltage_divider_3stage 0, transformer_step_up 5.1e-6, vcswitch_resistor 3.2e-6,
 cascaded_h_bridge_5level 5.7e-5, mmc_4cell_chain 5.7e-5,
 electrothermal_resistor_self_heating 0. Against pwl at dt/40: the sine cells 1.3e-8; the
 switched ones 3.6e-3 … 4.3e-3, pwl's own edge ramp (step 1).
+
+## Coupled inductors (2026-11-17)
+
+| Question | Option taken | Evidence | How to reverse |
+|---|---|---|---|
+| Magnetically coupled windings (k ≠ 0) in the extraction | The inductor block of M_ss is the full inductance matrix (L_ii self, L_ij = M = k·√(L_i L_j), the −2L / −2M pair `assemble.hpp` stamps into C), applied as a Cholesky solve −L⁻¹ on the inductor rows of A, b and B; without coupling the per-row −1/L scaling is kept byte for byte. Not positive definite (|k| = 1: the winding currents are not independent states) is refused, a typed `UnsupportedError(dsed, extraction)` through the bridge | C++ `compute_lti_state_space extracts magnetically coupled circuits`: A = −L⁻¹R and b = L⁻¹(Vin, 0) to 1e-9 (k = 0.98), k = 1 refused; `test_named_diagnostics` the same closed form; `test_exact_coupled_inductors.py`: sine → 1 Ω → 1:1 transformer (k = 0.95) → diode → 10 µF ∥ 100 Ω against pwl at dt = 62.5 ns: 1.1e-7 relative rms (pwl itself at 250 ns: 1.4e-6), k = 1 refused on dsed / exact | Restore the `coupled_pairs > 0` throw |
+
+Cells moved (dsed, strict gate, refused → new): coupled_inductor_step 6.7e-6, transformer_leakage
+3.1e-5, active_clamp_forward 1.2e-6, dual_active_bridge 1.9e-6, flyback_converter 2.7e-6,
+synchronous_flyback 1.0e-6 (agree); forward_converter → disagree 0.648, frozen with its cause:
+the diode settle, not the coupling — at every gate-off it picks (D_rect, D_fw) = (off, off)
+with a 1.1e5 V forward violation on D_fw at the held state, the slow-manifold projection relaxes
+L_o through g_off, and the guard judges the projected trajectory (200 checks, 0 repairs); the
+shadow LCP picks D_fw ON (0.014 V). pwl at the netlist dt reads 0.707 on the same cell, pwl at
+dt/10 0.032. The conformance coupled-inductor cell now requires dsed to agree.

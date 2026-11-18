@@ -437,20 +437,14 @@ def test_device_cell(kind, engine):
 
 @pytest.mark.parametrize("engine", ENGINES)
 def test_coupled_inductor_cell(engine):
-    # Circuit-level limit: refused on dsed (also a NotImplementedError,
-    # its legacy base) and on bdf1 (no mutual stamp: it read 9.38 V off
-    # an 18 V span, silently, before this change).
+    # Circuit-level limit: refused on bdf1 (no mutual stamp: it read 9.38 V
+    # off an 18 V span, silently, before this change). dsed extracts the full
+    # inductance matrix (add-exact-propagator-strategy, coupled inductors).
     if engine == "bdf1":
         with pytest.raises(p.UnsupportedError) as ei:
             _run(*_args(COUPLED), "bdf1")
         assert (ei.value.engine, ei.value.feature) == (
             "bdf1", "coupled_inductors")
-        return
-    if engine == "dsed":
-        with pytest.raises(p.UnsupportedError) as ei:
-            _run(*_args(COUPLED), "dsed")
-        assert isinstance(ei.value, NotImplementedError)
-        assert ei.value.engine == "dsed"
         return
     _check_cell("coupled", COUPLED, engine, True)
 

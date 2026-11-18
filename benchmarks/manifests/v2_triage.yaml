@@ -133,7 +133,13 @@ circuits:
   # pwm phase as a fraction (batch 6b): pwl 3.58 -> 2.6e-4, trbdf2 0.00244 -> 3.5e-5, both agree.
   circuits/switching/isolated/dual_active_bridge.yaml: {status: runs}
   circuits/switching/isolated/flyback_converter.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.949, pwl+restart: 0.11, pwl+split: 0.11}}
-  circuits/switching/isolated/forward_converter.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.707, pwl+restart: 0.092, pwl+split: 0.092}}
+  # dsed: refused (coupled inductors) until the extractor took the inductance matrix; now a
+  # disagreement of the diode settle, not of the coupling: at every gate-off the settle picks
+  # (D_rect, D_fw) = (off, off) with a 1.1e5 V forward violation on D_fw at the held state, the
+  # slow-manifold projection then relaxes L_o's current through g_off and the guard, judging
+  # the projected trajectory, sees nothing (200 checks, 0 repairs); the shadow LCP picks D_fw ON
+  # (violation 0.014 V). mode_selection='lcp' stops at 48 us on D_rect's diode law. Open.
+  circuits/switching/isolated/forward_converter.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, dsed: disagree}, known_err: {pwl: 0.707, pwl+restart: 0.092, pwl+split: 0.092, dsed: 0.648}}
   # dsed disagree on the gate is interpolation of sparse exact samples across edges (pointwise < 5e-5
   # of span; 0.024 at dt/4 output).
   circuits/switching/isolated/full_bridge_dc.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0828, pwl+restart: 0.0815, pwl+split: 0.0815}}

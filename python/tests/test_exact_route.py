@@ -79,7 +79,8 @@ def test_shockley_rectifier_is_not_exact_device():
     assert (row["device"], row["kind"]) == ("Dsh", "ShockleyDiode")
 
 
-def test_coupled_inductors_are_not_exact_extraction():
+def test_coupled_inductors_route_exact():
+    # the extraction takes the inductance matrix (add-exact-propagator-strategy, coupled inductors)
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "a", "gnd", 0.0, 100.0, 50.0)
     b.add_transformer("T", "a", "gnd", "s", "r", 10e-3, 2.5e-3, 0.99)
@@ -88,7 +89,7 @@ def test_coupled_inductors_are_not_exact_extraction():
     b.add_capacitor("C", "o", "r", 100e-6)
     b.add_resistor("R", "o", "r", 100.0)
     rep = p.exact_route(b, 0.02)
-    assert (rep["exact"], rep["reason"]) == (False, "extraction")
+    assert (rep["exact"], rep["reason"]) == (True, None)
 
 
 def test_inductor_cut_set_is_not_exact_extraction():
