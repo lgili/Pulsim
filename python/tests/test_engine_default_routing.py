@@ -150,12 +150,12 @@ def test_trbdf2_reads_dt_as_the_step_ceiling():
     assert np.diff(np.asarray(res.times)).max() <= 1e-5 * 1.001
 
 
-def test_routed_run_still_warns_about_ignored_kwargs():
-    """Validation ran against the engine the caller ASKED for, so
-    a kwarg the destination ignores would slip through silently."""
-    with pytest.warns(UserWarning, match="ignored by the "
-                                          "fixed-step engine"):
+def test_routed_run_refuses_kwargs_the_destination_ignores():
+    """A kwarg the engine the run lands on cannot honour is refused by
+    name (add-kernel-simulation-object; it was a warning, then ignored)."""
+    with pytest.raises(p.UnsupportedError, match="rtol") as e:
         p.simulate(_rc(), t_end=1e-3, dt=1e-6, rtol=1e-6)
+    assert (e.value.engine, e.value.feature) == ("pwl", "rtol")
 
 
 def test_engine_used_is_stamped_on_every_path():

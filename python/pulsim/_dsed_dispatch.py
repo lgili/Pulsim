@@ -49,6 +49,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     SwitchSchedule,
     UnsupportedError,
 )
+from ._pulsim import run_option_defaults as _run_option_defaults  # type: ignore[import-not-found]
 from ._refusal import _UnsupportedNotImplemented, unsupported
 
 
@@ -60,6 +61,8 @@ from ._refusal import _UnsupportedNotImplemented, unsupported
 # detector's DOPRI5/BDF2 choice; rk45/bdf2 = force one integrator for
 # ALL modes (rk45 still takes the exact stepper where it exists).
 IntegratorChoice = Literal["auto", "rk45", "bdf2"]
+
+_DEFAULTS = _run_option_defaults()
 
 
 # =============================================================================
@@ -75,13 +78,14 @@ class DSEDOptions:
     through :func:`_resolve_dsed_options` which produces one of these.
     The scheduler downstream reads ONLY this struct.
     """
-    rtol: float = 1e-6
-    atol: float = 1e-9
-    dt_max: float = 1e-5
-    dt_init: float = 1e-9
+    # Defaults: sim::Defaults (the one table, add-kernel-simulation-object).
+    rtol: float = _DEFAULTS["rtol_exact"]
+    atol: float = _DEFAULTS["atol_exact"]
+    dt_max: float = _DEFAULTS["dt_max_exact"]
+    dt_init: float = _DEFAULTS["dt_init_exact"]
     integrator: IntegratorChoice = "auto"
-    stiffness_threshold: float = 10.0
-    h_bdf2: float = 1e-6
+    stiffness_threshold: float = _DEFAULTS["stiffness_threshold"]
+    h_bdf2: float = _DEFAULTS["h_bdf2"]
     store_every: int = 1
     t_start: float = 0.0
     switch_fn: Optional[Callable[[float], Any]] = None
@@ -143,25 +147,10 @@ def _validate_engine_kwargs(
                 "switch to `engine='dsed'` for variable-step (no dt "
                 "needed)."
             )
-        leaked = {
-            name: val for name, val in (
-                ("rtol", rtol), ("atol", atol),
-                ("dt_init", dt_init),
-                ("integrator", integrator),
-                ("stiffness_threshold", stiffness_threshold),
-                ("h_bdf2", h_bdf2),
-            )
-            if val is not None
-        }
-        if leaked:
-            warnings.warn(
-                f"simulate(engine='pwl'): the following kwargs are "
-                f"ignored by the fixed-step engine: "
-                f"{sorted(leaked.keys())}. Either remove them or "
-                f"switch to engine='dsed'.",
-                UserWarning,
-                stacklevel=3,
-            )
+        # Options this engine does not honour (rtol, atol, dt_init,
+        # integrator, ...) are refused by simulate() from the option x
+        # engine table once the run's engine is known; they used to be a
+        # warning here, and then ignored.
         return
 
     # --- engine='auto' / 'trbdf2' branch. 'auto' ROUTES (to the
@@ -190,22 +179,6 @@ def _validate_engine_kwargs(
                 f"simulate(engine={engine!r}): dt_init must be "
                 f"positive, "
                 f"got {dt_init!r}")
-        leaked = {
-            name: val for name, val in (
-                ("integrator", integrator),
-                ("stiffness_threshold", stiffness_threshold),
-                ("h_bdf2", h_bdf2),
-            )
-            if val is not None
-        }
-        if leaked:
-            warnings.warn(
-                f"simulate(engine={engine!r}): the following kwargs "
-                "belong to the dsed engine and are ignored here: "
-                f"{sorted(leaked.keys())}.",
-                UserWarning,
-                stacklevel=3,
-            )
         return
 
     # --- engine='dsed' branch ---
@@ -278,7 +251,7 @@ def _resolve_dsed_options(
     Validation must be called FIRST — this function assumes its
     inputs are sane.
     """
-    dt_max = dt if (dt is not None and dt > 0) else 1e-5
+    dt_max = dt if (dt is not None and dt > 0) else _DEFAULTS["dt_max_exact"]
 
     # integrator was already validated to be in _VALID_INTEGRATORS;
     # cast for the type checker.
@@ -288,15 +261,16 @@ def _resolve_dsed_options(
     )
 
     return DSEDOptions(
-        rtol=rtol if rtol is not None else 1e-6,
-        atol=atol if atol is not None else 1e-9,
+        rtol=rtol if rtol is not None else _DEFAULTS["rtol_exact"],
+        atol=atol if atol is not None else _DEFAULTS["atol_exact"],
         dt_max=dt_max,
-        dt_init=dt_init if dt_init is not None else 1e-9,
+        dt_init=dt_init if dt_init is not None else _DEFAULTS["dt_init_exact"],
         integrator=resolved_integrator,
         stiffness_threshold=(
-            stiffness_threshold if stiffness_threshold is not None else 10.0
+            stiffness_threshold if stiffness_threshold is not None
+            else _DEFAULTS["stiffness_threshold"]
         ),
-        h_bdf2=h_bdf2 if h_bdf2 is not None else 1e-6,
+        h_bdf2=h_bdf2 if h_bdf2 is not None else _DEFAULTS["h_bdf2"],
         store_every=store_every,
         t_start=t_start,
         switch_fn=switch_fn,

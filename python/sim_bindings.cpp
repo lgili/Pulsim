@@ -1,0 +1,365 @@
+// =============================================================================
+// add-kernel-simulation-object — Python bindings of `sim::RunOptions`, the
+// option x engine table and `sim::Simulation`
+// =============================================================================
+//
+// A separate translation unit (like ir_bindings.cpp) so the hunk in
+// bindings.cpp is three lines.
+
+#include <pybind11/eigen.h>
+#include <pybind11/functional.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+
+#include "pulsim/ir/circuit.hpp"
+#include "pulsim/sim/options.hpp"
+#include "pulsim/sim/simulation.hpp"
+#include "switch_fn_adapter.hpp"
+
+#include <limits>
+#include <optional>
+#include <string>
+
+namespace py = pybind11;
+
+namespace pulsim_sim_bindings {
+
+using namespace pulsim;
+using sim::RunOptions;
+
+namespace {
+
+py::list engine_names(std::uint8_t bits) {
+    py::list out;
+    for (auto e : sim::kRunEngines) {
+        if (bits & pwl::engine_bit(e)) out.append(std::string(pwl::engine_name(e)));
+    }
+    return out;
+}
+
+const char* unset_name(sim::Unset u) {
+    switch (u) {
+        case sim::Unset::Always: return "always";
+        case sim::Unset::None: return "none";
+        case sim::Unset::Falsy: return "falsy";
+        case sim::Unset::NoneOrOne: return "none_or_one";
+        case sim::Unset::NoneOrZero: return "none_or_zero";
+        case sim::Unset::Legacy: return "legacy";
+        case sim::Unset::Integrator: return "integrator";
+    }
+    return "?";
+}
+
+template <class E>
+E parse_enum(const std::string& v, std::initializer_list<std::pair<const char*, E>> m,
+             const char* what) {
+    for (const auto& [k, e] : m) {
+        if (v == k) return e;
+    }
+    std::string ok;
+    for (const auto& [k, e] : m) ok += (ok.empty() ? "'" : ", '") + std::string(k) + "'";
+    throw sim::OptionsError(what, "RunOptions." + std::string(what) + "='" + v
+                                      + "': expected one of " + ok);
+}
+
+std::string engine_str(sim::EngineChoice e) {
+    switch (e) {
+        case sim::EngineChoice::Pwl: return "pwl";
+        case sim::EngineChoice::TrBdf2: return "trbdf2";
+        case sim::EngineChoice::Exact: return "exact";
+        case sim::EngineChoice::Auto: break;
+    }
+    return "auto";
+}
+
+py::dict trbdf2_dict(const solver::TrBdf2Options& o) {
+    py::dict d;
+    d["t_start"] = o.t_start;
+    d["t_end"] = o.t_end;
+    d["rtol"] = o.rtol;
+    d["atol"] = o.atol;
+    d["h_init"] = o.h_init;
+    d["h_max"] = o.h_max;
+    d["max_event_iterations"] = o.max_event_iterations;
+    d["max_newton_iterations"] = o.max_newton_iterations;
+    d["tol_newton_dx"] = o.tol_newton_dx;
+    d["tol_newton_res"] = o.tol_newton_res;
+    d["enable_newton_line_search"] = o.enable_newton_line_search;
+    d["enable_newton_lm"] = o.enable_newton_lm;
+    d["newton_roundoff_budget"] = o.newton_roundoff_budget;
+    d["on_impulse_error"] = o.on_impulse_error;
+    return d;
+}
+
+py::dict stats_dict(const solver::TrBdf2Stats& st) {
+    py::dict d;
+    d["n_accept"] = st.n_accept;
+    d["n_reject"] = st.n_reject;
+    d["n_gate_events"] = st.n_gate_events;
+    d["n_diode_events"] = st.n_diode_events;
+    d["n_solves"] = st.n_solves;
+    d["n_forced_accepts"] = st.n_forced_accepts;
+    d["n_ctrl_ticks"] = st.n_ctrl_ticks;
+    d["control_tick_counts"] = st.ctrl_tick_counts;
+    return d;
+}
+
+}  // namespace
+
+void init_module(py::module_& m) {
+    m.def("run_option_table", [] {
+            py::list rows;
+            for (const auto& o : sim::kRunOptionTable) {
+                py::dict r;
+                r["name"] = std::string(o.name);
+                r["engines"] = engine_names(o.engines);
+                r["unset"] = unset_name(o.unset);
+                r["default"] = std::string(o.default_text);
+                r["why"] = std::string(o.why);
+                rows.append(r);
+            }
+            return rows;
+        },
+        "The option x engine table (sim::kRunOptionTable): one row per "
+        "simulate() keyword, the engines that honour it, which value means "
+        "'not requested', its documented default and the mechanism the "
+        "other engines lack. pulsim.option_capabilities() is the public "
+        "view.");
+
+    m.def("run_option_defaults", [] {
+            using D = sim::Defaults;
+            py::dict d;
+            d["rtol_variable"] = D::rtol_variable;
+            d["atol_variable"] = D::atol_variable;
+            d["rtol_exact"] = D::rtol_exact;
+            d["atol_exact"] = D::atol_exact;
+            d["dt_init_exact"] = D::dt_init_exact;
+            d["dt_max_exact"] = D::dt_max_exact;
+            d["stiffness_threshold"] = D::stiffness_threshold;
+            d["h_bdf2"] = D::h_bdf2;
+            d["max_newton_iterations"] = D::max_newton_iterations;
+            d["tol_newton_dx"] = D::tol_newton_dx;
+            d["tol_newton_res"] = D::tol_newton_res;
+            d["newton_roundoff_budget"] = D::newton_roundoff_budget;
+            d["max_event_iterations"] = D::max_event_iterations;
+            d["max_dt_halvings"] = D::max_dt_halvings;
+            d["store_every"] = D::store_every;
+            d["voltage_sanity_factor"] = D::voltage_sanity_factor;
+            return d;
+        },
+        "THE default values of a run (sim::Defaults).");
+
+    py::class_<RunOptions>(m, "RunOptions",
+        "Run options of sim::Simulation: one field per simulate() keyword "
+        "the kernel reads. None = not set (the default of sim::Defaults "
+        "for the engine that runs); never a sentinel value.")
+        .def(py::init([](Real t_end, std::optional<Real> dt,
+                         const std::string& engine, Real t_start) {
+                 RunOptions o;
+                 o.t_end = t_end;
+                 o.dt = dt;
+                 o.t_start = t_start;
+                 o.engine = parse_enum<sim::EngineChoice>(engine,
+                     {{"auto", sim::EngineChoice::Auto},
+                      {"pwl", sim::EngineChoice::Pwl},
+                      {"trbdf2", sim::EngineChoice::TrBdf2},
+                      {"exact", sim::EngineChoice::Exact},
+                      {"dsed", sim::EngineChoice::Exact}}, "engine");
+                 return o;
+             }),
+             py::arg("t_end") = Real{0}, py::arg("dt") = py::none(),
+             py::arg("engine") = "auto", py::arg("t_start") = Real{0})
+        .def_property("engine",
+            [](const RunOptions& o) { return engine_str(o.engine); },
+            [](RunOptions& o, const std::string& v) {
+                o.engine = parse_enum<sim::EngineChoice>(v,
+                    {{"auto", sim::EngineChoice::Auto},
+                     {"pwl", sim::EngineChoice::Pwl},
+                     {"trbdf2", sim::EngineChoice::TrBdf2},
+                     {"exact", sim::EngineChoice::Exact},
+                     {"dsed", sim::EngineChoice::Exact}}, "engine");
+            })
+        .def_readwrite("t_start", &RunOptions::t_start)
+        .def_readwrite("t_end", &RunOptions::t_end)
+        .def_readwrite("dt", &RunOptions::dt)
+        .def_readwrite("rtol", &RunOptions::rtol)
+        .def_readwrite("atol", &RunOptions::atol)
+        .def_readwrite("dt_init", &RunOptions::dt_init)
+        .def_readwrite("stiffness_threshold", &RunOptions::stiffness_threshold)
+        .def_readwrite("h_bdf2", &RunOptions::h_bdf2)
+        .def_readwrite("enable_nonlinear_refresh",
+                       &RunOptions::enable_nonlinear_refresh)
+        .def_readwrite("max_newton_iterations", &RunOptions::max_newton_iterations)
+        .def_readwrite("tol_newton_dx", &RunOptions::tol_newton_dx)
+        .def_readwrite("tol_newton_res", &RunOptions::tol_newton_res)
+        .def_readwrite("enable_newton_line_search",
+                       &RunOptions::enable_newton_line_search)
+        .def_readwrite("enable_newton_lm", &RunOptions::enable_newton_lm)
+        .def_readwrite("newton_roundoff_budget", &RunOptions::newton_roundoff_budget)
+        .def_readwrite("max_event_iterations", &RunOptions::max_event_iterations)
+        .def_readwrite("strict_event_iterations",
+                       &RunOptions::strict_event_iterations)
+        .def_property("mode_selection",
+            [](const RunOptions& o) {
+                return std::string(o.mode_selection == sim::ModeSelection::Shadow
+                                       ? "shadow"
+                                       : o.mode_selection == sim::ModeSelection::Lcp
+                                             ? "lcp" : "legacy");
+            },
+            [](RunOptions& o, const std::string& v) {
+                o.mode_selection = parse_enum<sim::ModeSelection>(v,
+                    {{"legacy", sim::ModeSelection::Legacy},
+                     {"shadow", sim::ModeSelection::Shadow},
+                     {"lcp", sim::ModeSelection::Lcp}}, "mode_selection");
+            })
+        .def_property("on_impulse",
+            [](const RunOptions& o) {
+                return std::string(o.on_impulse == sim::OnImpulse::Warn
+                                       ? "warn"
+                                       : o.on_impulse == sim::OnImpulse::Error
+                                             ? "error" : "record");
+            },
+            [](RunOptions& o, const std::string& v) {
+                o.on_impulse = parse_enum<sim::OnImpulse>(v,
+                    {{"record", sim::OnImpulse::Record},
+                     {"warn", sim::OnImpulse::Warn},
+                     {"error", sim::OnImpulse::Error}}, "on_impulse");
+            })
+        .def_readwrite("mode_guard", &RunOptions::mode_guard)
+        .def_readwrite("max_dt_halvings", &RunOptions::max_dt_halvings)
+        .def_readwrite("store_every", &RunOptions::store_every)
+        .def_readwrite("start_from_dc_op", &RunOptions::start_from_dc_op)
+        .def_readwrite("enable_substep_state_correction",
+                       &RunOptions::enable_substep_state_correction)
+        .def_readwrite("discontinuity_restart", &RunOptions::discontinuity_restart)
+        .def_readwrite("resolution_diagnostics",
+                       &RunOptions::resolution_diagnostics)
+        .def_readwrite("inductor_freeze_di_max", &RunOptions::inductor_freeze_di_max)
+        .def_readwrite("inductor_abs_clamp", &RunOptions::inductor_abs_clamp)
+        .def_readwrite("auto_regularize", &RunOptions::auto_regularize)
+        .def_readwrite("voltage_sanity_factor", &RunOptions::voltage_sanity_factor)
+        .def("requested", [](const RunOptions& o) {
+                std::vector<std::string> r;
+                for (auto n : sim::requested_options(o)) r.emplace_back(n);
+                return r;
+            },
+            "The table rows these options request, in table order.")
+        .def("__repr__", [](const RunOptions& o) {
+            return "<RunOptions engine=" + engine_str(o.engine)
+                   + " t=[" + std::to_string(o.t_start) + ", "
+                   + std::to_string(o.t_end) + "]>";
+        });
+
+    m.def("_to_simulation_options", &sim::to_simulation_options,
+          py::arg("options"),
+          "The fixed-step driver's SimulationOptions resolved from a "
+          "RunOptions (sim::to_simulation_options).");
+    m.def("_to_trbdf2_options",
+          [](const RunOptions& o) { return trbdf2_dict(sim::to_trbdf2_options(o)); },
+          py::arg("options"),
+          "The variable-step driver's options resolved from a RunOptions, as "
+          "a dict (sim::to_trbdf2_options).");
+
+    py::class_<sim::Simulation>(m, "Simulation",
+        "The kernel object that is a simulation: Simulation(circuit, "
+        "options) plans the run (preflight on a private copy, routing, the "
+        "option x engine refusals, the device capability check, the Newton "
+        "stamps); attach gate sources, ticks and source terms; run() or "
+        "run_until(t) + snapshot() / restore(). Engines 'pwl' and "
+        "'trbdf2'; the exact engine is refused (pulsim.simulate composes "
+        "it). C blocks / graph-driven sources are refused (simulate "
+        "composes them).")
+        .def(py::init<ir::Circuit, RunOptions>(), py::arg("circuit"),
+             py::arg("options"))
+        .def("set_switch_fn",
+            [](sim::Simulation& s, py::object fn) {
+                auto a = pulsim_bindings_common::adapt_switch_fn(fn);
+                std::function<Real(Real)> edge = std::move(a.next_edge);
+                if (!edge && py::hasattr(fn, "next_edge_after")) {
+                    edge = fn.attr("next_edge_after")
+                               .cast<std::function<Real(Real)>>();
+                }
+                s.set_switch_fn(std::move(a.fn), std::move(edge));
+            },
+            py::arg("switch_fn"), py::keep_alive<1, 2>(),
+            "The gate source: t -> SwitchStateMask (a native schedule runs "
+            "in C++). Kept alive by the Simulation.")
+        .def("set_source_term",
+            [](sim::Simulation& s, py::object fn) {
+                std::function<Real(Real)> jump;
+                if (py::hasattr(fn, "next_jump_after")) {
+                    jump = fn.attr("next_jump_after")
+                               .cast<std::function<Real(Real)>>();
+                }
+                s.set_source_term(fn.cast<solver::BExtraFn>(), std::move(jump));
+            },
+            py::arg("b_extra_fn"), py::keep_alive<1, 2>())
+        .def("set_step_observer",
+            [](sim::Simulation& s, py::object fn) {
+                s.set_step_observer(fn.cast<solver::StepObserverFn>());
+            },
+            py::arg("step_observer"), py::keep_alive<1, 2>())
+        .def("add_tick",
+            [](sim::Simulation& s, Real period, py::object fn) {
+                s.add_tick(period,
+                           fn.cast<std::function<void(Real, const Vector&)>>());
+            },
+            py::arg("period"), py::arg("fn"), py::keep_alive<1, 3>())
+        .def("set_cancel",
+            [](sim::Simulation& s, py::object fn) {
+                s.set_cancel(fn.cast<solver::ShouldContinueFn>());
+            },
+            py::arg("should_continue"), py::keep_alive<1, 2>())
+        .def("set_initial_state", &sim::Simulation::set_initial_state,
+             py::arg("x"))
+        .def("run",
+            [](sim::Simulation& s) {
+                py::gil_scoped_release rel;
+                return s.run();
+            })
+        .def("run_until",
+            [](sim::Simulation& s, Real t) {
+                py::gil_scoped_release rel;
+                return s.run_until(t);
+            },
+            py::arg("t"))
+        .def("snapshot", &sim::Simulation::snapshot)
+        .def("restore", &sim::Simulation::restore, py::arg("snapshot"))
+        .def_property_readonly("circuit", &sim::Simulation::circuit,
+            "The circuit the run solves: the caller's plus any preflight "
+            "ties (the caller's circuit is never changed).")
+        .def_property_readonly("plan", [](const sim::Simulation& s) {
+                const auto& p = s.plan();
+                py::dict d;
+                d["engine"] = std::string(pwl::engine_name(p.engine));
+                d["engine_asked"] = engine_str(p.asked);
+                d["route_reasons"] = p.route_reasons;
+                py::list ties;
+                for (const auto& t : p.ties) {
+                    ties.append(py::make_tuple(t.name, t.node, t.resistance));
+                }
+                d["ties"] = ties;
+                d["undriven"] = p.undriven;
+                return d;
+            })
+        .def_property_readonly("diagnostics", [](const sim::Simulation& s) {
+                py::list out;
+                for (const auto& d : s.diagnostics()) {
+                    py::dict r;
+                    r["severity"] = d.severity == sim::Severity::Error ? "error"
+                                    : d.severity == sim::Severity::Info ? "info"
+                                                                        : "warning";
+                    r["code"] = d.code;
+                    r["message"] = d.message;
+                    r["device"] = d.device;
+                    r["t"] = d.t;
+                    out.append(r);
+                }
+                return out;
+            })
+        .def_property_readonly("trbdf2_stats", [](const sim::Simulation& s) {
+                return stats_dict(s.trbdf2_stats());
+            });
+}
+
+}  // namespace pulsim_sim_bindings

@@ -562,6 +562,9 @@ __all__ = [
     "KpiValue",
     "SensitivityResult",
     "engine_capabilities",
+    "option_capabilities",
+    "RunOptions",
+    "Simulation",
     # Closed-loop control building blocks (Phase 2 + add-python-closed-loop-helper v1.5).
     "PIController",
     "ClosedLoop",
@@ -948,6 +951,9 @@ load_yaml_string = _yaml_retired_as_retired_error(load_yaml_string)
 load_yaml_file = _yaml_retired_as_retired_error(load_yaml_file)
 from ._refusal import unsupported as _unsupported  # noqa: E402
 from ._control_plan import compose_control as _compose_control  # noqa: E402
+from ._pulsim import RunOptions  # type: ignore[import-not-found]  # noqa: E402
+from ._run_options import option_capabilities  # noqa: E402
+from ._simulation import Simulation  # noqa: E402
 
 # add-mna-native-machines: CircuitBuilder.add_dc_machine (a linear
 # composite of existing kernel elements, solved inside the matrix).
@@ -1721,7 +1727,8 @@ class SolverOptions:
     """
     # Newton / nonlinear refresh ------------------------------------
     enable_nonlinear_refresh: Optional[bool] = None
-    max_newton_iterations: int = 0
+    # None = the default (50); 0 is deprecated as a "not set" sentinel.
+    max_newton_iterations: Optional[int] = None
     tol_newton_dx: Optional[float] = None
     tol_newton_res: Optional[float] = None
     enable_newton_line_search: Optional[bool] = None
@@ -1939,7 +1946,7 @@ def simulate(
     step_observer: Optional[Callable[[float, "object"], None]] = None,
     start_from_dc_op: bool = False,
     enable_nonlinear_refresh: Optional[bool] = None,
-    max_newton_iterations: int = 0,
+    max_newton_iterations: Optional[int] = None,
     max_event_iterations: Optional[int] = None,
     strict_event_iterations: bool = False,
     max_dt_halvings: Optional[int] = None,
@@ -2312,7 +2319,7 @@ def simulate(
     if solver is not None:
         if enable_nonlinear_refresh is None:
             enable_nonlinear_refresh = solver.enable_nonlinear_refresh
-        if max_newton_iterations == 0:
+        if max_newton_iterations is None:
             max_newton_iterations = solver.max_newton_iterations
         if max_event_iterations is None:
             max_event_iterations = solver.max_event_iterations
@@ -2352,6 +2359,23 @@ def simulate(
             atol = solver.atol
         if dt_init is None:
             dt_init = solver.dt_init
+
+    # add-kernel-simulation-object: 0 was "not set" for this one keyword
+    # (every other uses None); it is a value now, and refused below 1.
+    if max_newton_iterations is not None and not isinstance(
+            max_newton_iterations, bool) and max_newton_iterations == 0:
+        import warnings
+        warnings.warn(
+            "simulate(max_newton_iterations=0): 0 as 'the default' is "
+            "deprecated; pass None (the default, 50). From the next release "
+            "0 is refused.", DeprecationWarning, stacklevel=2)
+        max_newton_iterations = None
+    # The option x engine table (sim::kRunOptionTable) judges every keyword
+    # against the engine the run lands on: honoured, or refused by name.
+    from . import _run_options as _ro
+    _l = locals()
+    _opt_values = {n: _l[n] for n in _ro.TABLE if n in _l}
+    del _l
 
     # ---- Validate first — fail fast on user mistakes (DSED side). ----
     # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
@@ -2538,53 +2562,11 @@ def simulate(
         # plausible-looking (wrong) waveforms. C blocks were a warning
         # followed by an open-loop run until add-engine-conformance-
         # matrix; they change the physics, so they refuse too.
-        _dsed_unsupported = {
-            # C blocks drive the circuit through b_extra, which the
-            # DSED engine does not consume.
-            "c_blocks": bool(_c_blocks_of(builder)),
-            "step_observer": step_observer is not None,
-            "closed_loops": bool(closed_loops),
-            "should_continue": should_continue is not None,
-            "live_stream": live_stream is not None,
-            "start_from_dc_op": bool(start_from_dc_op),
-            # review finding PY-4: DSED has no diode event iteration,
-            # so silently accepting this flag would be the exact
-            # pattern this block exists to prevent.
-            "strict_event_iterations": bool(strict_event_iterations),
-            # A fixed-step concept: the DSED engine already adapts its
-            # own step, so accepting this would promise a mechanism
-            # that does not exist there.
-            "max_dt_halvings": max_dt_halvings is not None,
-            # DSED runs no Newton roundoff acceptance.
-            "newton_roundoff_budget": newton_roundoff_budget is not None,
-            # v2.0 Phase 1: output decimation is a fixed-grid
-            # concept; the DSED engine emits variable-step samples,
-            # so honouring `store_every` there would mean something
-            # different (and unstated). Fail loudly rather than
-            # returning a full-rate trace the caller did not ask for.
-            "store_every": store_every is not None
-                            and int(store_every) != 1,
-            # v2.0 Phase 3 "obra №2": the Thevenin arm's exact
-            # coupling is driven by the pwl engine's per-step
-            # observer/b_extra pair and the parametric refactor of
-            # its cache — none of which exist in the DSED path.
-            "mmc_arms": bool(mmc_arms),
-            # v2.0 Phase 4 C.2: `on_cache` hands the caller the PWL
-            # cache so it can refactor parameters mid-run. DSED has
-            # no such cache, so the hook would never be called and
-            # the coupling it was meant to close would stay open.
-            "on_cache": on_cache is not None,
-            # Fixed-step post-solve guards and the commutation split:
-            # nothing in the DSED engine reads them.
-            "inductor_freeze_di_max": inductor_freeze_di_max is not None,
-            "inductor_abs_clamp": inductor_abs_clamp is not None,
-            "enable_substep_state_correction": bool(
-                enable_substep_state_correction),
-            "discontinuity_restart": bool(discontinuity_restart),
-            # Per-step truncation of a fixed grid: none to estimate.
-            "resolution_diagnostics": bool(resolution_diagnostics),
-        }
-        _offending = [k for k, hit in _dsed_unsupported.items() if hit]
+        # The option x engine table (sim::kRunOptionTable): every keyword
+        # the exact engine cannot honour, plus C blocks (they drive the
+        # circuit through b_extra, which this engine does not consume).
+        _offending = _ro.refused("dsed", {
+            **_opt_values, "c_blocks": bool(_c_blocks_of(builder))})
         if _offending:
             raise _unsupported(
                 "dsed", _offending[0],
@@ -2785,6 +2767,52 @@ def simulate(
             "engine='trbdf2', whose settle has no hook yet. Use "
             "engine='pwl' or 'dsed', or drop mode_selection.")
 
+    # Phase 2.4 — adaptive RK selector (schema v1.5, wiring v1.6).
+    # Today only the kernel trap path is wired into run_transient.
+    # Reject other choices with a clear pointer at the deferred
+    # cache refactor so users get actionable feedback instead of a
+    # silent default-back to "kernel".
+    if engine == "pwl" and integrator not in ("kernel", "default", None):
+        if integrator not in ("dopri5", "radau"):
+            raise _unsupported("pwl", "integrator",
+                f"simulate(integrator={integrator!r}): unknown "
+                "integrator for engine='pwl'. Supported names: "
+                "'kernel' (default), 'dopri5', 'radau'. For DSED's "
+                "RK45/BDF2/auto integrators, use engine='dsed'."
+            )
+        raise NotImplementedError(
+            f"simulate(integrator={integrator!r}) is reserved for "
+            "the v1.6 cache refactor — `PwlStateSpaceCache` would "
+            "need to expose continuous-time (G, M, b) and the "
+            "Python adaptive RK integrators would need DAE Index-1 "
+            "support (M·dx/dt = g, with M structurally singular "
+            "for augmented MNA). Track this under the "
+            "'add-adaptive-runge-kutta-solvers' OpenSpec proposal. "
+            "For Phase 2.4, the integrator name and its tolerances "
+            "round-trip through `SimulationOptions` and YAML so "
+            "your config stays forward-compatible — drop "
+            "`integrator='kernel'` (or omit) to run today. "
+            "Note: engine='dsed' offers RK45/BDF2/auto today via the "
+            "Path-Based Event-Driven scheduler."
+        )
+    # The option x engine table: every keyword the landing engine cannot
+    # honour is refused by name (they used to be warned about and ignored:
+    # rtol / atol / dt_init on the fixed step, the exact engine's
+    # integrator / stiffness_threshold / h_bdf2 on both MNA engines).
+    _refused = _ro.refused(engine, _opt_values)
+    if _refused:
+        _routed = ("" if engine == _engine_asked else
+                   f" (engine={_engine_asked!r} routed it there: "
+                   + "; ".join(_route_reasons) + ")")
+        raise _unsupported(
+            engine, _refused[0],
+            f"simulate(engine={_engine_asked!r}): this run lands on "
+            f"engine={engine!r}{_routed}, which cannot honour "
+            f"{', '.join(_refused)}: "
+            + "; ".join(_ro.why(n) for n in _refused)
+            + ". Drop the keyword(s), or pick the engine that honours them "
+            "(pulsim.option_capabilities()).")
+
     if engine == "trbdf2":
         # The capability table by name (the branch form runs here).
         from . import _pulsim as _k  # type: ignore[import-not-found]
@@ -2799,14 +2827,6 @@ def simulate(
         # Every unsupported combination was already caught by
         # _trbdf2_blockers above (which is also what routes
         # engine='auto' away from here).
-        if integrator is not None:
-            import warnings
-            warnings.warn(
-                f"simulate(engine={_engine_asked!r}): integrator= "
-                "selects a dsed integrator and is ignored by the "
-                "variable-step engine, which is TR-BDF2 by "
-                "construction.",
-                stacklevel=2)
         # ---- controllers on an EXACT cadence ----
         # Each tick source of the plan is scheduled at its own
         # t_start + k*T_j, landed like a gate edge; `.tick` (the
@@ -2832,10 +2852,19 @@ def simulate(
         # span/1000 here instead would step straight over a narrow
         # pulse train on a long run (measured: a peak detector read
         # 0 V instead of 9.87).
-        _h_max = float(dt) if dt is not None else 0.0
-        _h_init = float(dt_init) if dt_init else 0.0
-        _rtol = float(rtol) if rtol is not None else 1e-5
-        _atol = float(atol) if atol is not None else 1e-8
+        # The kernel resolves the options (sim::to_trbdf2_options): h_max
+        # = dt or 0, h_init = dt_init or 0, rtol / atol from sim::Defaults.
+        _to = _ro.trbdf2_options(
+            engine="trbdf2", t_start=t_start, t_end=t_end, dt=dt,
+            rtol=rtol, atol=atol, dt_init=dt_init or None,
+            max_event_iterations=max_event_iterations,
+            max_newton_iterations=max_newton_iterations,
+            tol_newton_dx=tol_newton_dx, tol_newton_res=tol_newton_res,
+            enable_newton_line_search=enable_newton_line_search,
+            enable_newton_lm=enable_newton_lm,
+            newton_roundoff_budget=newton_roundoff_budget,
+            on_impulse=on_impulse)
+        _h_max = _to["h_max"]
         _n_sw = builder.graph.num_switches
         if switch_fn is None:
             # No driver: all-OPEN here (the v2.0 semantics; the
@@ -2854,28 +2883,25 @@ def simulate(
             res, _stats = run_transient_trbdf2(
                 cache, builder.graph, builder.pool,
                 t_start=float(t_start), t_end=float(t_end),
-                rtol=_rtol, atol=_atol,
-                h_init=_h_init, h_max=_h_max,
+                rtol=_to["rtol"], atol=_to["atol"],
+                h_init=_to["h_init"], h_max=_h_max,
                 switch_fn=switch_fn,
                 b_extra_fn=b_extra_fn,
                 initial_state=initial_state,
                 resume_from=resume_from,
-                max_event_iterations=(
-                    0 if max_event_iterations is None
-                    else int(max_event_iterations)),
+                max_event_iterations=_to["max_event_iterations"],
                 should_continue=should_continue,
                 observer_periods=[_p for _, _p in _plan.ticks],
                 observers=[_f for _f, _ in _plan.ticks],
                 # None: the kernel stamps the Newton devices itself.
                 enable_nonlinear_refresh=enable_nonlinear_refresh,
-                max_newton_iterations=int(max_newton_iterations or 0),
-                tol_newton_dx=float(tol_newton_dx or 0.0),
-                tol_newton_res=float(tol_newton_res or 0.0),
-                enable_newton_line_search=bool(
-                    enable_newton_line_search),
-                enable_newton_lm=bool(enable_newton_lm),
-                newton_roundoff_budget=int(newton_roundoff_budget or 0),
-                on_impulse_error=on_impulse == "error",
+                max_newton_iterations=_to["max_newton_iterations"],
+                tol_newton_dx=_to["tol_newton_dx"],
+                tol_newton_res=_to["tol_newton_res"],
+                enable_newton_line_search=_to["enable_newton_line_search"],
+                enable_newton_lm=_to["enable_newton_lm"],
+                newton_roundoff_budget=_to["newton_roundoff_budget"],
+                on_impulse_error=_to["on_impulse_error"],
             )
         except SimulationAborted as _aborted:
             try:
@@ -2932,48 +2958,6 @@ def simulate(
     _closed_loops_user = closed_loops
     _switch_fn_user = switch_fn
 
-    # Fall back to documented PWL defaults for any remaining None values
-    # introduced by the `solver=` plumbing (these used to be flat
-    # defaults at the signature; the DSED engine has its own defaults
-    # owned by the dispatcher above).
-    if integrator is None:
-        integrator = "kernel"
-    if rtol is None:
-        rtol = 1.0e-5
-    if atol is None:
-        atol = 1.0e-8
-    if dt_init is None:
-        dt_init = 0.0
-
-    # Phase 2.4 — adaptive RK selector (schema v1.5, wiring v1.6).
-    # Today only the kernel trap path is wired into run_transient.
-    # Reject other choices with a clear pointer at the deferred
-    # cache refactor so users get actionable feedback instead of a
-    # silent default-back to "kernel".
-    if integrator not in ("kernel", "default", None):
-        if integrator not in ("dopri5", "radau"):
-            raise ValueError(
-                f"simulate(integrator={integrator!r}): unknown "
-                "integrator for engine='pwl'. Supported names: "
-                "'kernel' (default), 'dopri5', 'radau'. For DSED's "
-                "RK45/BDF2/auto integrators, use engine='dsed'."
-            )
-        raise NotImplementedError(
-            f"simulate(integrator={integrator!r}) is reserved for "
-            "the v1.6 cache refactor — `PwlStateSpaceCache` would "
-            "need to expose continuous-time (G, M, b) and the "
-            "Python adaptive RK integrators would need DAE Index-1 "
-            "support (M·dx/dt = g, with M structurally singular "
-            "for augmented MNA). Track this under the "
-            "'add-adaptive-runge-kutta-solvers' OpenSpec proposal. "
-            "For Phase 2.4, the integrator name and its tolerances "
-            "round-trip through `SimulationOptions` and YAML so "
-            "your config stays forward-compatible — drop "
-            "`integrator='kernel'` (or omit) to run today. "
-            "Note: engine='dsed' offers RK45/BDF2/auto today via the "
-            "Path-Based Event-Driven scheduler."
-        )
-    _ = rtol, atol, dt_init  # Reserved for the v1.6 RK path; recorded only.
 
     # Controllers, closed-loop graphs and C blocks from the plan composed
     # above the dispatch (_control_plan.compose_control; its b_extra was
@@ -3094,59 +3078,37 @@ def simulate(
                 step_observer, b_extra_fn, _hk_obs, _hk_b,
                 builder.pool.state_size(builder.graph), "on_cache")
 
-    # Construct options.
-    opts = SimulationOptions(t_start=t_start, t_end=t_end, dt=dt)
-    if store_every is not None and int(store_every) != 1:
-        if int(store_every) < 1:
-            raise ValueError(
-                f"simulate(store_every={store_every}): must be >= 1 "
-                "(1 records every step)")
-        opts.store_every = int(store_every)
-    if max_newton_iterations > 0:
-        opts.max_newton_iterations = max_newton_iterations
-    if max_event_iterations is not None:
-        # Including 0 — "disable event iteration" is a documented
-        # request, and gating on `> 0` silently discarded it (the
-        # kernel default of 16 applied instead).
-        if int(max_event_iterations) < 0:
-            raise ValueError(
-                f"simulate(max_event_iterations={max_event_iterations}"
-                "): must be >= 0 (0 disables event iteration)")
-        opts.max_event_iterations = int(max_event_iterations)
-    if strict_event_iterations:
-        opts.strict_event_iterations = True
-    if max_dt_halvings is not None:
-        # 0 is a MEANINGFUL value here (disable the retry and restore
-        # the pre-v2.0 hard failure), which is why the default is
-        # None rather than 0.
-        if int(max_dt_halvings) < 0:
-            raise ValueError(
-                f"simulate(max_dt_halvings={max_dt_halvings}): must "
-                "be >= 0 (0 disables the retry)")
-        opts.max_dt_halvings = int(max_dt_halvings)
-    if tol_newton_dx is not None:
-        opts.tol_newton_dx = tol_newton_dx
-    if tol_newton_res is not None:
-        opts.tol_newton_res = tol_newton_res
-    if enable_newton_line_search is not None:
-        opts.enable_newton_line_search = enable_newton_line_search
-    if enable_newton_lm is not None:
-        opts.enable_newton_lm = enable_newton_lm
-    if newton_roundoff_budget is not None:
-        opts.newton_roundoff_budget = int(newton_roundoff_budget)
-    if enable_substep_state_correction is not None:
-        opts.enable_substep_state_correction = enable_substep_state_correction
-    if discontinuity_restart is not None:
-        opts.discontinuity_restart = bool(discontinuity_restart)
-    opts.on_impulse_error = on_impulse == "error"
-    opts.mode_selection = {"shadow": 1, "lcp": 2}.get(mode_selection, 0)
-    opts.mode_guard = _PWL_MODE_GUARD
-    if resolution_diagnostics is not None:
-        opts.resolution_diagnostics = bool(resolution_diagnostics)
-    if inductor_freeze_di_max is not None and inductor_freeze_di_max > 0:
-        opts.inductor_freeze_di_max = float(inductor_freeze_di_max)
-    if inductor_abs_clamp is not None and inductor_abs_clamp > 0:
-        opts.inductor_abs_clamp = float(inductor_abs_clamp)
+    # Construct options: the kernel resolves them from one RunOptions
+    # (sim::to_simulation_options; every default in sim::Defaults).
+    if store_every is not None and int(store_every) < 1:
+        raise ValueError(
+            f"simulate(store_every={store_every}): must be >= 1 "
+            "(1 records every step)")
+    if max_event_iterations is not None and int(max_event_iterations) < 0:
+        raise ValueError(
+            f"simulate(max_event_iterations={max_event_iterations}"
+            "): must be >= 0 (0 disables event iteration)")
+    if max_dt_halvings is not None and int(max_dt_halvings) < 0:
+        raise ValueError(
+            f"simulate(max_dt_halvings={max_dt_halvings}): must "
+            "be >= 0 (0 disables the retry)")
+    opts = _ro.simulation_options(
+        engine="pwl", t_start=t_start, t_end=t_end, dt=dt,
+        store_every=store_every,
+        max_newton_iterations=max_newton_iterations,
+        max_event_iterations=max_event_iterations,
+        strict_event_iterations=strict_event_iterations,
+        max_dt_halvings=max_dt_halvings, tol_newton_dx=tol_newton_dx,
+        tol_newton_res=tol_newton_res,
+        enable_newton_line_search=enable_newton_line_search,
+        enable_newton_lm=enable_newton_lm,
+        newton_roundoff_budget=newton_roundoff_budget,
+        enable_substep_state_correction=enable_substep_state_correction,
+        discontinuity_restart=discontinuity_restart, on_impulse=on_impulse,
+        mode_selection=mode_selection, mode_guard=_PWL_MODE_GUARD,
+        resolution_diagnostics=resolution_diagnostics,
+        inductor_freeze_di_max=inductor_freeze_di_max,
+        inductor_abs_clamp=inductor_abs_clamp)
 
     # Default switch_fn: all switches closed (v1.x behaviour).
     #
@@ -3797,48 +3759,25 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     # and `on_cache` — which has nothing to do with device kinds —
     # was still inside that guard: an import failure would have
     # dropped a real blocker in silence. It is a plain check now.
-    if on_cache is not None:
-        why.append(_blk("on_cache",
-            "on_cache refactors the fixed-step engine's PWL cache "
-            "mid-run; TR-BDF2 has no such cache, so the hook would "
-            "never fire and whatever it was closing (an "
-            "electro-thermal loop, usually) would silently stay "
-            "open"))
+    # The fixed-step-only keywords: the rows of the option x engine table
+    # (sim::kRunOptionTable) that pwl honours and trbdf2 does not.
+    from . import _run_options as _ro
+    for n in _ro.refused("trbdf2", dict(
+            on_cache=on_cache, live_stream=live_stream, progress=progress,
+            start_from_dc_op=start_from_dc_op,
+            strict_event_iterations=strict_event_iterations,
+            max_dt_halvings=max_dt_halvings,
+            enable_substep_state_correction=enable_substep_state_correction,
+            discontinuity_restart=discontinuity_restart,
+            resolution_diagnostics=resolution_diagnostics,
+            store_every=store_every, mmc_arms=mmc_arms,
+            inductor_freeze_di_max=inductor_freeze_di_max,
+            inductor_abs_clamp=inductor_abs_clamp)):
+        why.append(_blk(n, _ro.why(n)))
+    # A routing preference, not a capability: trbdf2 lands a C block's
+    # ticks when asked by name (task 9.3), 'auto' keeps them on pwl.
     if _c_blocks_of(builder):
-        why.append(_blk("c_blocks", "C blocks sample on a fixed dt grid"))
-    if live_stream is not None:
-        why.append(_blk("live_stream", "live_stream needs the fixed-step kernel's "
-                    "per-step ring push"))
-    if progress:
-        why.append(_blk("progress", "progress has no per-step hook here"))
-    if start_from_dc_op:
-        why.append(_blk("start_from_dc_op", "start_from_dc_op is a fixed-step entry point"))
-    if strict_event_iterations:
-        why.append(_blk("strict_event_iterations", "strict_event_iterations belongs to the "
-                    "fixed-step diode iteration"))
-    if max_dt_halvings is not None and int(max_dt_halvings) > 0:
-        why.append(_blk("max_dt_halvings", "max_dt_halvings re-solves at sub-dt against a "
-                    "full-dt companion"))
-    if enable_substep_state_correction:
-        why.append(_blk("enable_substep_state_correction", "enable_substep_state_correction is the "
-                    "fixed-step commutation split"))
-    if discontinuity_restart:
-        why.append(_blk("discontinuity_restart", "discontinuity_restart is the "
-                    "fixed-step engine's restart rule"))
-    if resolution_diagnostics:
-        why.append(_blk("resolution_diagnostics", "resolution_diagnostics "
-                    "estimates a fixed step's truncation"))
-    if store_every is not None and int(store_every) != 1:
-        why.append(_blk("store_every", "store_every decimates a uniform grid"))
-    if mmc_arms:
-        why.append(_blk("mmc_arms", "mmc_arms drives the fixed-step observer/"
-                    "b_extra pair"))
-    if inductor_freeze_di_max is not None:
-        why.append(_blk("inductor_freeze_di_max", "inductor_freeze_di_max is a fixed-step "
-                    "post-solve guard"))
-    if inductor_abs_clamp is not None:
-        why.append(_blk("inductor_abs_clamp", "inductor_abs_clamp is a fixed-step post-solve "
-                    "guard"))
+        why.append(_blk("c_blocks", _ro.why("c_blocks")))
     # Every controller needs its OWN cadence here — there is no grid
     # to ride (the same split `_compose_control` makes: a source with
     # no period runs every step, which only the fixed engine has).

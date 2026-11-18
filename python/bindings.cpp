@@ -5229,10 +5229,12 @@ void init_module(py::module_& m) {
             if (max_newton_iterations > 0) {
                 o.max_newton_iterations = max_newton_iterations;
             }
-            if (tol_newton_dx > Real{0}) {
+            // A value when >= 0 (simulate() passes the resolved one); the
+            // negative default keeps the kernel's (sim::Defaults).
+            if (tol_newton_dx >= Real{0}) {
                 o.tol_newton_dx = tol_newton_dx;
             }
-            if (tol_newton_res > Real{0}) {
+            if (tol_newton_res >= Real{0}) {
                 o.tol_newton_res = tol_newton_res;
             }
             o.enable_newton_line_search = enable_newton_line_search;
@@ -5347,8 +5349,8 @@ void init_module(py::module_& m) {
         py::arg("step_observer") = py::none(),
         py::arg("enable_nonlinear_refresh") = py::none(),
         py::arg("max_newton_iterations") = Size{0},
-        py::arg("tol_newton_dx") = Real{0},
-        py::arg("tol_newton_res") = Real{0},
+        py::arg("tol_newton_dx") = Real{-1},
+        py::arg("tol_newton_res") = Real{-1},
         py::arg("enable_newton_line_search") = false,
         py::arg("enable_newton_lm") = false,
         py::arg("resume_from") = py::none(),
@@ -5722,6 +5724,9 @@ namespace pulsim_dsed_bindings {
 namespace pulsim_ir_bindings {  // add-immutable-circuit-ir (ir_bindings.cpp)
     void init_module(pybind11::module_& m);
 }
+namespace pulsim_sim_bindings {  // add-kernel-simulation-object (sim_bindings.cpp)
+    void init_module(pybind11::module_& m);
+}
 
 PYBIND11_MODULE(_pulsim, m) {
     m.doc() = "Pulsim — power-electronics simulator. Header-only C++23 "
@@ -5730,4 +5735,5 @@ PYBIND11_MODULE(_pulsim, m) {
     pulsim_kernel_bindings::init_module(m);
     pulsim_dsed_bindings::init_module(m);
     pulsim_ir_bindings::init_module(m);
+    pulsim_sim_bindings::init_module(m);
 }
