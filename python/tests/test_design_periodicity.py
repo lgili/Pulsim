@@ -85,3 +85,41 @@ def test_the_check_restarts_in_a_pickled_evaluator():
     ev.evaluate(DESIGNS[0])
     assert len(ev.periodicity_checks) == 1
     assert pickle.loads(pickle.dumps(ev)).periodicity_checks == {}
+
+
+def test_a_check_the_engine_cannot_run_stops_the_batch(monkeypatch):
+    # review of slice 5 (b1): the check's own simulate failing was a
+    # `failed` record of whichever design was checked first, uncached, so
+    # a later design of the pattern passed on another design's check
+    real = p.simulate
+
+    def sim(*a, **kw):
+        if kw.get("initial_state") is not None and kw.get("dt") == T:
+            raise RuntimeError("probe: the check period fails")
+        return real(*a, **kw)
+
+    monkeypatch.setattr(p, "simulate", sim)
+    ev = _ev()
+    for d in DESIGNS[:2]:
+        with pytest.raises(design.PeriodicityError, match="failed"):
+            ev.evaluate(d)
+    assert ev.periodicity_checks == {}
+
+
+def test_an_event_at_the_section_is_always_checked(monkeypatch):
+    # review of slice 5 (b2): the pattern's names do not stand for a
+    # design whose event sits where the map's and the engine's attach
+    # rules can differ
+    calls = _spy(monkeypatch)
+    real = design._pss.periodic_steady_state
+
+    def pss(*a, **kw):
+        r = real(*a, **kw)
+        r.pattern = [(n, 1e-12 if k == 0 else f)
+                     for k, (n, f) in enumerate(r.pattern)]
+        return r
+
+    monkeypatch.setattr(design._pss, "periodic_steady_state", pss)
+    ev = _ev()
+    assert [ev.evaluate(d).status for d in DESIGNS] == ["ok"] * 3
+    assert len(calls) == 3 and ev.periodicity_checks == {}

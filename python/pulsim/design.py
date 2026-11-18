@@ -1173,18 +1173,32 @@ class Evaluator:
         ``x*``. It costs one to two evaluations (DECISIONS 22), so it runs
         once per (topology, event pattern) per evaluator and process,
         logged in ``periodicity_checks``. A passing check is a sample,
-        not a per-design guarantee; a mismatch raises
-        :class:`PeriodicityError` out of the batch (a defect of the map,
-        not an outcome of the design), so no record depends on which
-        design was checked."""
+        not a per-design guarantee; a mismatch -- or a check run that the
+        engine itself fails -- raises :class:`PeriodicityError` out of the
+        batch (a defect of the map, not an outcome of the design), so no
+        record depends on which design was checked. A design with an
+        event within 1e-9 T of the section (where the map's attach rule
+        and the engine's can differ) is always checked: the pattern alone
+        does not stand for it."""
         key = (tuple((c["kind"], tuple(c.get("nodes", ())))
                      for c in b.components()),
                tuple(name for name, _ in r.pattern))
-        done = self.periodicity_checks.get(key)
+        at_section = any(min(f, 1.0 - f) <= 1e-9 for _, f in r.pattern)
+        done = None if at_section else self.periodicity_checks.get(key)
         if done is None:
-            run = _engine(lambda: _pkg.simulate(
-                src, t_end=T, dt=T, engine="dsed", switch_fn=sf,
-                initial_state=r.x0, rtol=1e-11, atol=1e-14))
+            try:
+                run = _pkg.simulate(
+                    src, t_end=T, dt=T, engine="dsed", switch_fn=sf,
+                    initial_state=r.x0, rtol=1e-11, atol=1e-14)
+            except (RuntimeError, ValueError) as e:
+                if type(e).__name__ == "_CxxCancelled":
+                    raise
+                raise PeriodicityError(
+                    "periodicity: a plain simulate(engine='dsed') period "
+                    f"from the shooting's x* failed ({type(e).__name__}: "
+                    f"{e}) where the shooting map ran it: the map and the "
+                    "engine disagree for the event pattern "
+                    f"{[n for n, _ in r.pattern]}") from e
             xs = np.asarray(run.states_reduced, dtype=float)
             dev = np.abs(xs[-1] - r.x0)
             den = np.abs(xs).max(axis=0) + np.abs(r.x0)
@@ -1193,7 +1207,9 @@ class Evaluator:
             with np.errstate(divide="ignore", invalid="ignore"):
                 q = np.where(dev == 0.0, 0.0, dev / np.where(den > 0, den,
                                                              1e-300))
-            done = self.periodicity_checks[key] = float(q.max())
+            done = float(q.max())
+            if not at_section:
+                self.periodicity_checks[key] = done
         if not done <= _PERIODIC_RTOL:
             raise PeriodicityError(
                 "periodicity: a plain simulate(engine='dsed') period from "

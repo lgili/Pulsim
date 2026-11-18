@@ -219,3 +219,18 @@ def test_an_event_without_its_own_sample_is_refused_as_in_the_kernel():
         assert list(sens._attach_events(times, [dict(ev, t=t)])) == [k]
     with pytest.raises(RuntimeError, match="no sample of its own"):
         sens._attach_events(times, [dict(ev, t=3e-6)])
+
+
+def test_a_chain_of_ties_follows_the_kernels_running_rule():
+    """Review of slice 5 (b6): the kernel compares each candidate with the
+    running best, so 1, 1+8e-13, 1+1.6e-12 is ONE extremum, valued at the
+    largest and reported at the first instant (the old global rule
+    measured from the maximum and reported the second instant)."""
+    from pulsim.sensitivity import _running_extremum
+    ys = [1.0 + 1.6e-12, 1.0, 1.0 + 8e-13, 0.5]
+    ts = [3.0, 1.0, 2.0, 0.0]
+    i, j = _running_extremum(ys, ts, 1.0)
+    assert (i, j) == (0, 1)
+    # a valley: the smaller value, the earliest instant
+    i, j = _running_extremum([-1.0, -1.0 - 5e-13, 0.0], [5.0, 6.0, 0.0], -1.0)
+    assert (i, j) == (1, 0)

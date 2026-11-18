@@ -1177,13 +1177,7 @@ def _extrema(sr, row, kind, t0, t1, K=16):
     out = {}
     for kind_ in (("peak", "valley") if kind == "ripple" else (kind,)):
         sg = 1.0 if kind_ == "peak" else -1.0
-        i = int(np.argmax(sg * ys))
-        # canonical instant: the earliest candidate within the extremum
-        # tie (the orbit's two ends agree to rounding; the kernel's rule,
-        # detail::extremum_candidate, is the same)
-        j = min((q for q in range(len(cands))
-                 if abs(ys[q] - ys[i]) <= _EXTREMUM_TIE * max(
-                     abs(ys[q]), abs(ys[i]))), key=lambda q: cands[q][1])
+        i, j = _running_extremum(ys, [cd[1] for cd in cands], sg)
         tie = [cd for cd in cands
                if sg * (ys[i] - cd[0]) <= 1e-9 * span
                and abs(cd[1] - cands[j][1]) > 1e-9 * (t1 - t0)
@@ -1197,6 +1191,22 @@ def _extrema(sr, row, kind, t0, t1, K=16):
         return (p_[0] - v_[0], p_[1] - v_[1], p_[2] or v_[2],
                 (p_[3], v_[3]))
     return out[kind]
+
+
+def _running_extremum(ys, ts, sg):
+    """``(i, j)``: the kernel's running rule (detail::extremum_candidate)
+    over the candidates in time order. A value within ``_EXTREMUM_TIE`` of
+    the running best is a tie: it keeps the larger value (index ``i``) and
+    the earlier instant (``j``, whose gradient is reported)."""
+    i = j = -1
+    for q in sorted(range(len(ys)), key=lambda q: ts[q]):
+        if i >= 0 and abs(ys[q] - ys[i]) <= _EXTREMUM_TIE * max(
+                abs(ys[q]), abs(ys[i])):
+            if sg * ys[q] > sg * ys[i]:
+                i = q
+        elif i < 0 or sg * ys[q] > sg * ys[i]:
+            i = j = q
+    return i, j
 
 
 def _one_dtau(ev, kind):

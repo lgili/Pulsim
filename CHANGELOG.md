@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Optimisation slice 6: the kernel batch evaluator, event losses on the orbit
+
+* **Fixed** the evaluator's periodicity check: when its own plain
+  `simulate` period failed, the first design of its event pattern was
+  recorded `failed` and later designs passed on another design's check;
+  it now raises `PeriodicityError` for every design of the pattern. A
+  design with an event within 1e-9 T of the section is always checked.
+* **Fixed** `sensitivity`'s extremum tie rule now runs the kernel's
+  running rule over candidates in time order (a chain of ties gave a
+  different instant in Python and in the kernel).
+
 ### Optimisation slice 5: the evaluator on the circuit IR
 
 * **Added** `pulsim.design.Evaluator(circuit=..., fields=..., switch_fn=

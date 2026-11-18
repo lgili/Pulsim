@@ -869,6 +869,47 @@ Processes give about 2x the threads under load; worker start-up (spawn, import p
 unpickle, build the base) is about 0.3 s per worker, so a batch needs
 thousands of designs before processes pay.
 
+## 25. Second fresh-context review of slice 5 (00c7df92, 02b76db6, 33d3eafb)
+
+Reviewer (opus, medium, read-only). Acted on:
+
+* (b1, bug) The periodicity check's own `simulate` ran inside `_engine`,
+  so when it raised, the first design of its pattern became a `failed`
+  record (with a reason that was the check's, not the design's) and
+  nothing was cached; the next design checked again and, if that
+  passed, every later design was `ok`. Status depended on batch order.
+  A check that the engine cannot run now raises `PeriodicityError` (the
+  map ran that period from x*, the engine does not): raised for every
+  design of the pattern, cached by nobody. Test shown failing before.
+* (b2, risk) A cache hit skips the check, and the key (topology + event
+  names) does not see event times. A design with an event within
+  1e-9 T of the section (0 or T), where the map's attach rule (first
+  sample at or after, 4 ulp) and the engine's can differ, is now always
+  checked and never cached. Option kept rejected: event times binned
+  into the key (one check per design: 1-2 evaluations each, DECISIONS
+  22). Reverse: drop `at_section` in `_check_periodic`.
+* (b6) Python's tie rule now IS the kernel's running rule
+  (`sensitivity._running_extremum`, candidates in time order): a chain
+  1, 1+8e-13, 1+1.6e-12 is one extremum reported at the first instant
+  on both (it was the second in Python). §24 item 6's chain case is
+  closed; the absolute floor near zero is still not there (unchanged
+  reason: the streaming kernel search has no span).
+
+Recorded, not changed:
+* (b3, b4) The stepped tolerance 1e-1 cannot see a dropped loss row on a
+  95 % efficient design (losses are 5 % of P_in), and the sampled
+  1e-8 (2000/n)^2 rests on one circuit. Both are re-measured with the
+  `p_in` quadrature work (slice 6 item 4, §27).
+* (b5) `_schedule_fingerprint` reads 64 edges (32 periods of one PWM):
+  a soft-start differing later shares a `design_id`. Nothing in pulsim
+  caches records by it; a longer horizon costs native calls on every
+  `design_id`. Accepted, documented in the function.
+* (b7, b8, b9, nits) The kernel-route `Kpi.ripple` / `Kpi.mean` are the
+  closed forms (a sampled callable differs by up to 1e-5 on ripple);
+  `Kpi.i_peak` is a magnitude; the process backend checks each pattern
+  once per chunk (its cache is emptied on pickling). Documented
+  behaviour, unchanged.
+
 ## Missing from the kernel (recorded, worked around in Python)
 
 Items 1 and 2 are done (add-parameter-sensitivities slice, 2026-11):
