@@ -3575,7 +3575,8 @@ void init_module(py::module_& m) {
            py::object resume_from_obj,
            std::vector<Real> tick_periods,
            std::vector<std::function<void(Real, const Vector&)>> tick_fns,
-           py::object tick_before_obj) {
+           py::object tick_before_obj,
+           Real tick_origin) {
             // add-unified-event-queue group 5: Python tick sources, which
             // the kernel's queue schedules (source j calls tick_fns[j]).
             if (tick_periods.size() != tick_fns.size()) {
@@ -3585,7 +3586,8 @@ void init_module(py::module_& m) {
             }
             pulsim::events::TickPlan tick_plan;
             for (const Real T : tick_periods) {
-                tick_plan.rates.push_back(pulsim::events::Rate{T, Real{0}});
+                tick_plan.rates.push_back(
+                    pulsim::events::Rate{T, Real{0}, tick_origin});
             }
             tick_plan.fn = [&tick_fns](std::uint32_t j, const pulsim::events::TickInfo&,
                                        Real t, const Vector& xs) {
@@ -3711,6 +3713,7 @@ void init_module(py::module_& m) {
         py::arg("tick_fns") =
             std::vector<std::function<void(Real, const Vector&)>>{},
         py::arg("tick_before") = py::none(),
+        py::arg("tick_origin") = std::numeric_limits<Real>::quiet_NaN(),
         "Run a fixed-dt transient simulation. switch_fn(t) "
         "→ SwitchStateMask; b_extra_fn(t) → Vector adds "
         "to b_constant at each step. `step_observer(t, x)` "
@@ -5246,7 +5249,8 @@ void init_module(py::module_& m) {
            std::vector<Real> observer_periods,
            std::vector<py::object> observers,
            Size newton_roundoff_budget, bool on_impulse_error,
-           std::vector<Real> observer_offsets) {
+           std::vector<Real> observer_offsets,
+           Real observer_origin) {
             solver::BExtraFn b_extra_fn;
             std::function<Real(Real)> unused_next_jump;  // trbdf2 lands its ticks
             resolve_b_extra(b_extra_obj, b_extra_fn, unused_next_jump);
@@ -5268,6 +5272,7 @@ void init_module(py::module_& m) {
             }
             o.observer_periods = std::move(observer_periods);
             o.observer_offsets = std::move(observer_offsets);
+            o.observer_origin = observer_origin;
             if (max_newton_iterations > 0) {
                 o.max_newton_iterations = max_newton_iterations;
             }
@@ -5399,6 +5404,7 @@ void init_module(py::module_& m) {
         py::arg("newton_roundoff_budget") = Size{0},
         py::arg("on_impulse_error") = false,
         py::arg("observer_offsets") = std::vector<Real>{},
+        py::arg("observer_origin") = std::numeric_limits<Real>::quiet_NaN(),
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "
@@ -5406,6 +5412,8 @@ void init_module(py::module_& m) {
         "`observers[j]` ticks at t_start + observer_offsets[j] + "
         "k*observer_periods[j] (ceil((span - offset_j)/T_j) times, index "
         "order when coincident; offsets default to 0); "
+        "observer_origin (NaN = t_start) moves the grid's origin, so a "
+        "resumed run ticks where the uninterrupted one would; "
         "stats['control_tick_counts'] counts each.");
 
     m.def("run_transient_with_chain",

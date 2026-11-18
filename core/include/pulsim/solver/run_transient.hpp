@@ -404,7 +404,9 @@ inline SimulationResult run_transient(
         for (const auto& r : ticks->rates) {
             tick_queue.add_periodic(events::Kind::ControlTick, r);
         }
-        tick_queue.start(opts.t_start, opts.t_end - tick_tol);
+        // t0_tol = the take tolerance: a tick a previous run left out at
+        // its t_end (within tick_tol of it) is a resumed run's first.
+        tick_queue.start(opts.t_start, opts.t_end - tick_tol, tick_tol);
         result.control_tick_counts.assign(ticks->rates.size(), 0);
     }
     const StepObserverFn step_observer = !has_ticks ? StepObserverFn{} :

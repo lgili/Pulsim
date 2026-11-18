@@ -64,6 +64,11 @@ struct TimeEvent {
 struct Rate {
     Real period;
     Real offset = Real{0};
+    /// The grid's origin: ticks at (origin + offset) + k*period. NaN (the
+    /// default) is the run's t0. A RESUMED run passes the original run's
+    /// t0 here, so it ticks bit-exactly where the uninterrupted run would,
+    /// with the same k (the first k whose instant is >= t0 - start tol).
+    Real origin = std::numeric_limits<Real>::quiet_NaN();
 };
 
 /// What a tick handler is told (task 4.1): the instant the tick was
@@ -109,6 +114,11 @@ public:
                 "EventQueue: an offset must be a finite number of seconds "
                 ">= 0");
         }
+        if (std::isinf(rate.origin)) {
+            throw std::invalid_argument(
+                "EventQueue: a grid origin must be finite (or NaN for the "
+                "run's t0)");
+        }
         Slot s = make(kind, lands);
         s.periodic = true;
         s.rate = rate;
@@ -139,7 +149,10 @@ public:
     }
 
     /// Arms every source for a run over [t0, t_end). Resets the counters.
-    void start(Real t0, Real t_end) {
+    /// A periodic source with an `origin` starts at its first instant
+    /// >= t0 - t0_tol (t0_tol: the engine's take tolerance, so a tick the
+    /// previous run left out at its t_end is the resumed run's first).
+    void start(Real t0, Real t_end, Real t0_tol = Real{0}) {
         t_end_ = t_end;
         taken_buf_.resize(slots_.size());   // the only allocation, here
         for (auto& s : slots_) {
@@ -148,7 +161,12 @@ public:
             s.valid = false;
             s.pending = kNone;
             if (s.periodic) {
-                s.base = t0 + s.rate.offset;
+                if (std::isnan(s.rate.origin)) {
+                    s.base = t0 + s.rate.offset;
+                } else {
+                    s.base = s.rate.origin + s.rate.offset;
+                    s.k = first_k_at_or_after(s, t0 - t0_tol);
+                }
                 set_periodic(s);
             } else if (s.once) {
                 s.pending = s.once_t;
@@ -320,6 +338,19 @@ private:
     std::uint32_t push(Slot s) {
         slots_.push_back(std::move(s));
         return static_cast<std::uint32_t>(slots_.size() - 1);
+    }
+
+    // Smallest k >= 0 with base + k*period >= t (the same expression as
+    // set_periodic, so the comparison is on the instants actually used).
+    static std::uint64_t first_k_at_or_after(const Slot& s, Real t) {
+        const Real x = std::ceil((t - s.base) / s.rate.period);
+        std::uint64_t k = x > Real{0} ? static_cast<std::uint64_t>(x) : 0;
+        const auto at = [&](std::uint64_t j) {
+            return s.base + static_cast<Real>(j) * s.rate.period;
+        };
+        while (k > 0 && at(k - 1) >= t) --k;
+        while (at(k) < t) ++k;
+        return k;
     }
 
     void set_periodic(Slot& s) const noexcept {
