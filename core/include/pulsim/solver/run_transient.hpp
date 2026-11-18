@@ -947,7 +947,7 @@ inline SimulationResult run_transient(
         // site's own step (DECISIONS F2): the next site is one step away, and
         // a 100·h / 1e4·h backward-Euler look-ahead with the sources frozen
         // decided a floating bridge's ties on a trajectory that never happens.
-        // pwl::select_site is the engine-neutral driver trbdf2 calls too.
+        // pwl::select_site is the engine-neutral driver (trbdf2 hook: not yet).
         return pwl::select_site(
             mode_selector, *mode_ports, cache, diodes,
             [&](const std::vector<char>& on) {

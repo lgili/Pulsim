@@ -22,8 +22,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   mechanical (`rad/s`), as the PMSM's.
 * **Added** a warning when an impulsive re-initialisation is booked to a
   device with a loss port: its energy (`E_impulse_total`) is not in
-  `heat_injected` or the junction temperature (known limitation; was
-  silent).
+  `heat_injected` or the junction temperature, and the port's conduction
+  integral across the impulse step is not physical (a capacitor loop read
+  −38.6 µJ and cooled the junction below ambient). Known limitation; it
+  was silent.
 * **Fixed** a trbdf2 run ended by a final sliver inside an SDIRK step left
   the derivative-free stage history in its final snapshot.
 

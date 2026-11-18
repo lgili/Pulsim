@@ -365,10 +365,10 @@ def test_a_linear_magnetic_circuit_on_the_exact_route():
 
 
 def test_impulse_energy_on_a_loss_port_device_is_warned_not_heat():
-    """Batch 13 review: a loss port heats its junction with the table
-    energies only; the 24 uJ an ideal switch's capacitor loop dissipates
-    (E_impulse_total) is not in heat_injected. Pinned with a warning (owner:
-    the in-kernel event-losses track) so wiring it shows up as a change."""
+    """Batch 13 review: a loss port does not carry the 24 uJ an ideal
+    switch's capacitor loop dissipates (E_impulse_total), and its electrical
+    conduction integral across the impulse step is not physical. simulate()
+    now warns (it was silent); the numbers are pinned below."""
     b = p.CircuitBuilder()
     b.add_capacitor("C1", "x", "gnd", 1e-6, 10.0)
     b.add_capacitor("C2", "y", "gnd", 3e-6, 2.0)
@@ -389,5 +389,13 @@ def test_impulse_energy_on_a_loss_port_device_is_warned_not_heat():
                        switch_fn=lambda t: m, auto_regularize=False)
     imp = p.losses.impulse_losses(b, r)
     assert imp["S"]["E_impulse_total"] == pytest.approx(24e-6, rel=1e-9)
-    assert any("does not carry its impulsive" in str(x.message) for x in w)
-    assert r.heat_injected < 24e-6     # the impulse is not in the heat
+    assert any("do not carry their impulsive" in str(x.message) for x in w)
+    # the heat is the table energy (1e-5 J per event) only, not the 24 uJ
+    # Pinned gap: the switch is ON from t = 0 (no table event) and the
+    # electrical conduction integral across the impulse step reads -38.6 uJ,
+    # so the junction COOLS below ambient (24.96 degC). Owner: the in-kernel
+    # event-losses track (skip v*i across a re-initialisation step and
+    # deposit dW instead); a fix shows up here.
+    e = r.device_energy("S")
+    assert e["n_on"] == 0 and e["E_cond_electrical"] < 0.0
+    assert r.heat_injected == pytest.approx(e["E_cond_electrical"], rel=1e-12)

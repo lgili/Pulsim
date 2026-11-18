@@ -1906,12 +1906,14 @@ def _warn_impulse_heat(res, builder) -> None:
            if n in ported}
     if hit:
         import warnings
-        n, e = next(iter(hit.items()))
+        who = ", ".join(f"'{n}' ({e:.6g} J)" for n, e in hit.items())
         warnings.warn(
-            f"simulate(): the loss port of '{n}' does not carry its impulsive "
-            f"re-initialisation energy ({e:.6g} J, E_impulse_total): heat_injected "
-            "and the junction temperature hold the table energies only. Add it to "
-            "the thermal network yourself (losses.impulse_losses).",
+            f"simulate(): the loss port(s) of {who} do not carry their impulsive "
+            "re-initialisation energy (E_impulse_total), and their conduction "
+            "integral across the impulse step is not physical (it can be "
+            "negative): heat_injected and the junction temperature are wrong "
+            "around an impulse. Add losses.impulse_losses(...) to the thermal "
+            "network yourself.",
             UserWarning, stacklevel=3)
 
 
