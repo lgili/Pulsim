@@ -150,6 +150,16 @@ def test_a_circuit_factory_must_rebuild_the_same_circuit():
         bad.__setstate__(st)
 
 
+def test_a_circuit_reaches_process_workers():
+    """A Circuit pickles as its YAML text (add-immutable-circuit-ir 4.3),
+    so the circuit form runs on the process backend as on threads."""
+    ev = Evaluator(circuit=base_circuit(), fields={"L": "L.L"},
+                   schedule=schedule, period=T, steady=SteadySpec("pss"))
+    ds = [DESIGNS[0] | {"L": L} for L in (50e-6, 80e-6)]
+    assert ev.evaluate_many(ds, workers=2, backend="process") == \
+        ev.evaluate_many(ds, workers=1)
+
+
 def test_unpicklable_parts_are_refused_by_name_before_a_worker_starts(
         monkeypatch):
     started = []
@@ -158,9 +168,7 @@ def test_unpicklable_parts_are_refused_by_name_before_a_worker_starts(
     cases = [
         (_ev([Kpi("vx", lambda per: 0.0)]), "kpis['vx']"),
         (Evaluator(buck, period=lambda d: T, loads=("RL",)), "period"),
-        # a Circuit pickles since the IR's group 4 (integration batch 11):
-        # with a module-level schedule= it reaches the workers; a native
-        # SwitchSchedule still does not pickle
+        # a Circuit pickles; the switch_fn object beside it does not
         (Evaluator(circuit=base_circuit(), fields={"L": "L.L"},
                    switch_fn=schedule({}), period=T), "switch_fn"),
     ]

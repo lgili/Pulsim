@@ -106,6 +106,39 @@ keeps top-level `.param` lines as parameters, evaluates `{expression}`
 values, and drives a top-level R / L / C whose value names a parameter.
 `Circuit.to_yaml()` writes the expression text, not its value.
 
+## Scopes (subsystems)
+
+A subsystem instance is a scope of the circuit. `define_subsystem(...)
+.instantiate(b, "leg_a/sm17", ...)` opens it (`with b.scope("x",
+kind="K"):` does the same by hand); `Circuit.scopes()` lists the tree
+(`path`, `name`, `kind` = the definition, `parent`), and
+`Circuit.scope_of(name)` says which scope a device, node or parameter
+belongs to — the deepest scope whose path prefixes its name. Names are
+the old prefixed names (`leg_a/sm17/C`), so a scoped circuit is its
+hand-prefixed twin element for element and simulates bit for bit like
+it; only `structure_hash` differs (the tree is structure).
+
+A parameter declared while a scope is open belongs to it and is stored
+under its path (`s.param("Ron", s.p.r_on)` in a body is
+`leg_a/sm17/Ron`). An expression looks a name up in its own scope, then
+in each enclosing scope, then at the root: an inner name shadows an
+outer one, and an outer expression cannot see into a scope (`a/b` is a
+division). `with_params({"leg_a/sm17/Ron": 2e-3})` re-values one
+instance, `with_params({"leg_a/g": ...})` every expression of the arm
+that reads it; `with_value("leg_a/sm17/C.C", ...)` sets one field.
+Inside a scope a parameter name has no `/`; a path whose last segment
+already instantiated a definition is refused (`already used by an
+instance`).
+
+YAML: `circuit.subsystems: [{name, kind, ports, parameters, nodes,
+devices, subsystems}]`, nested. `ports` maps a local name to a node of
+the enclosing block; every other node and device name the block writes
+gets the block's path, ground excepted; a field or parameter expression
+looks names up from the block outward, and a cycle inside a block is
+refused naming it (a cycle across scopes cannot be written: names only
+resolve outward). `Circuit.to_yaml()` writes the tree (`scopes:`) and
+each scoped parameter's `scope`, and `from_yaml` restores both.
+
 ## Sweeping a circuit
 
 `pulsim.sweep(circuit, params={"Lbase": [...], "RL.R": [...]}, ...)`

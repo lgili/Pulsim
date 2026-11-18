@@ -66,6 +66,7 @@ inline StepResetPair make_delay_step(BlockChain& chain,
     p.step = [blk, o](ChainContext& ctx) { ctx.put(o, blk->output()); };
     p.update = [blk, xi](ChainContext& ctx) { blk->push(resolve(xi, ctx)); };
     p.reset = [blk]() { blk->reset(); };
+    chain.capture(blk);
     return p;
 }
 
@@ -291,19 +292,19 @@ inline StepResetPair make_ported_step(BlockChain& chain, const std::string& kind
         b->output_high = param(p, kind, "output_high");
         b->output_low = param(p, kind, "output_low");
         b->state = param(p, kind, "state") != Real{0};
-        unary(b); r.reset = [b] { b->reset(); };
+        unary(b); r.reset = [b] { b->reset(); }; chain.capture(b);
     } else if (kind == "rate_limiter") {
         auto b = std::make_shared<PyRateLimiter>();
         b->slew_up = param(p, kind, "slew_up");
         b->slew_down = param(p, kind, "slew_down");
         b->state = param(p, kind, "state");
-        binary(b); r.reset = [b] { b->reset(); };
+        binary(b); r.reset = [b] { b->reset(); }; chain.capture(b);
     } else if (kind == "sample_hold") {
         auto b = std::make_shared<PySampleHold>();
         b->sample_period = param(p, kind, "sample_period");
         b->state = param(p, kind, "state");
         b->last_t = param(p, kind, "last_t");
-        binary(b); r.reset = [b] { b->reset(); };
+        binary(b); r.reset = [b] { b->reset(); }; chain.capture(b);
     } else if (kind == "transfer_function") {
         auto b = std::make_shared<PyTransferFunction>();
         b->num = detail::list(p, "num");
@@ -315,7 +316,7 @@ inline StepResetPair make_ported_step(BlockChain& chain, const std::string& kind
         // capacity before the first update (update() resizes to it)
         b->xh.resize(std::max(b->xh.size(), b->num.size()));
         b->yh.resize(std::max<Size>(b->yh.size(), std::max<Size>(1, b->den.size())));
-        unary(b); r.reset = [b] { b->reset(); };
+        unary(b); r.reset = [b] { b->reset(); }; chain.capture(b);
     } else if (kind == "state_machine") {
         auto b = std::make_shared<PyStateMachine>();
         b->mode = static_cast<int>(param(p, kind, "mode"));
@@ -329,13 +330,13 @@ inline StepResetPair make_ported_step(BlockChain& chain, const std::string& kind
             const Real vt = resolve(t, c), vs = resolve(s, c);
             c.put(o, b->update(vt, vs, resolve(q, c)));
         };
-        r.reset = [b] { b->reset(); };
+        r.reset = [b] { b->reset(); }; chain.capture(b);
     } else if (kind == "op_amp") {
         auto b = std::make_shared<PyOpAmp>();
         b->gain = param(p, kind, "gain");
         b->rail_min = param(p, kind, "rail_min");
         b->rail_max = param(p, kind, "rail_max");
-        binary(b); r.reset = [] {};
+        binary(b); r.reset = {};   // stateless
     } else if (kind == "lookup_table_1d") {
         auto b = std::make_shared<PyLookupTable1D>();
         b->xs = detail::list(p, "xs");
@@ -343,39 +344,39 @@ inline StepResetPair make_ported_step(BlockChain& chain, const std::string& kind
         if (b->xs.size() != b->ys.size()) {
             throw ControlGraphBuildError("lookup_table_1d: xs and ys differ in length");
         }
-        unary(b); r.reset = [] {};
+        unary(b); r.reset = {};   // stateless
     } else if (kind == "math") {
         auto b = std::make_shared<PyMathBlock>();
         b->op = static_cast<int>(param(p, kind, "op"));
-        binary(b); r.reset = [] {};
+        binary(b); r.reset = {};   // stateless
     } else if (kind == "first_order_low_pass") {
         auto b = std::make_shared<PyLowPass>();
         b->tau = param(p, kind, "tau");
         b->state = param(p, kind, "state");
-        binary(b); r.reset = [b] { b->reset(); };
+        binary(b); r.reset = [b] { b->reset(); }; chain.capture(b);
     } else if (kind == "pwm") {
         auto b = std::make_shared<PyPwm>();
         b->frequency = param(p, kind, "frequency");
         b->phase = param(p, kind, "phase");
-        binary(b); r.reset = [] {};
+        binary(b); r.reset = {};   // stateless
     } else if (kind == "ema") {
         auto b = std::make_shared<PyEma>();
         b->alpha = param(p, kind, "alpha");
         b->state = param(p, kind, "state");
-        unary(b); r.reset = [b] { b->reset(); };
+        unary(b); r.reset = [b] { b->reset(); }; chain.capture(b);
     } else if (kind == "integrator") {
         auto b = std::make_shared<PyIntegrator>();
         b->gain = param(p, kind, "gain");
         b->output_min = param(p, kind, "output_min");
         b->output_max = param(p, kind, "output_max");
         b->state = param(p, kind, "state");
-        binary(b); r.reset = [b] { b->reset(); };
+        binary(b); r.reset = [b] { b->reset(); }; chain.capture(b);
     } else if (kind == "differentiator") {
         auto b = std::make_shared<PyDifferentiator>();
         b->alpha = param(p, kind, "alpha");
         b->state = param(p, kind, "state");
         b->prev_x = param(p, kind, "prev_x");
-        binary(b); r.reset = [b] { b->reset(); };
+        binary(b); r.reset = [b] { b->reset(); }; chain.capture(b);
     } else if (kind == "pid") {
         auto b = std::make_shared<PyPID>();
         b->Kp = param(p, kind, "Kp"); b->Ki = param(p, kind, "Ki");
@@ -390,7 +391,7 @@ inline StepResetPair make_ported_step(BlockChain& chain, const std::string& kind
             const Real vs = resolve(s, c), vm = resolve(m, c);
             c.put(o, b->update(vs, vm, resolve(d, c)));
         };
-        r.reset = [b] { b->reset(); };
+        r.reset = [b] { b->reset(); }; chain.capture(b);
     } else if (kind == "sum") {
         // y = sum(w_i * x_i), Python's left-to-right sum from 0.
         auto w = detail::list(p, "weights");
@@ -400,7 +401,7 @@ inline StepResetPair make_ported_step(BlockChain& chain, const std::string& kind
             for (Size i = 0; i < in.size(); ++i) x[i] = resolve(in[i], c);
             c.put(o, pl_sum(w.data(), x.data(), static_cast<int>(w.size())));
         };
-        r.reset = [] {};
+        r.reset = {};   // stateless
     } else if (kind == "signal_mux") {
         // inputs: selector, then the N candidates.
         if (ni < 2 || no != 1) {
@@ -416,10 +417,10 @@ inline StepResetPair make_ported_step(BlockChain& chain, const std::string& kind
             const int idx = pl_mux_index(static_cast<int>(n), raw);
             c.put(o, resolve(in[static_cast<Size>(idx) + 1], c));
         };
-        r.reset = [] {};
+        r.reset = {};   // stateless
     } else if (kind == "svm") {
-        // pulsim.control.SpaceVectorModulator (the kernel add_svm is a
-        // different expression: (va + v_cm) * (1/v_dc) + 0.5).
+        // pulsim.control.SpaceVectorModulator (pl_svm; the kernel
+        // add_svm uses the same law since G29).
         detail::arity(kind, ni, 2, no, 3);
         const Real v_dc = param(p, kind, "v_dc");
         r.step = [v_dc, in, out](ChainContext& c) {
@@ -428,7 +429,7 @@ inline StepResetPair make_ported_step(BlockChain& chain, const std::string& kind
             pl_svm(v_dc, va, resolve(in[1], c), &d[0], &d[1], &d[2]);
             for (Size i = 0; i < 3; ++i) c.put(out[i], d[i]);
         };
-        r.reset = [] {};
+        r.reset = {};   // stateless
     } else if (kind == "clarke" || kind == "inverse_clarke" ||
                kind == "park" || kind == "inverse_park") {
         // pulsim.control.{,Inverse}ClarkeTransform / {,Inverse}ParkTransform
@@ -446,7 +447,7 @@ inline StepResetPair make_ported_step(BlockChain& chain, const std::string& kind
             else pl_inverse_park(a, b, z, &y[0], &y[1]);
             for (Size i = 0; i < out.size(); ++i) c.put(out[i], y[i]);
         };
-        r.reset = [] {};
+        r.reset = {};   // stateless
     } else if (kind == "pll") {
         // pulsim.control.PLL: outputs (theta_hat, omega_hat[, freq]),
         // freq = omega_hat / (2*pi) for the three-output form.
@@ -467,14 +468,14 @@ inline StepResetPair make_ported_step(BlockChain& chain, const std::string& kind
             c.put(out[1], b->omega);
             if (out.size() == 3) c.put(out[2], b->omega / (2.0 * 3.141592653589793));
         };
-        r.reset = [b] { b->reset(); };
+        r.reset = [b] { b->reset(); }; chain.capture(b);
     } else if (kind == "signal_demux") {
         detail::arity(kind, ni, 1, no, static_cast<Size>(param(p, kind, "n_outputs")));
         r.step = [x = in[0], out](ChainContext& c) {
             const Real v = resolve(x, c);
             for (Index o : out) c.put(o, v);
         };
-        r.reset = [] {};
+        r.reset = {};   // stateless
     } else {
         throw ControlGraphBuildError("control graph: unknown block kind '" + kind + "'");
     }

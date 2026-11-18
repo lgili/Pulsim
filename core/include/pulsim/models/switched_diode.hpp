@@ -34,6 +34,7 @@
 // that Layer 4's cache can swallow at one segment per state.
 
 #include <algorithm>
+#include <cstdint>
 
 #include "pulsim/numeric/concepts.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -47,7 +48,16 @@ struct SwitchedDiode {
         Real g_off;  // reverse conductance (typ. 1e-9 S)
         Real V_th;   // turn-on threshold (effective max(V_th, V_f))
         Real V_f = Real{0};  // forward drop while ON (PSIM "Diode Voltage Drop")
+        // add-pwl-igbt-and-thyristor: a gated diode. `gate` is the mode,
+        // `I_H` the latch's holding current, `g` the gate bit of the
+        // current mask (runtime, set by DiodeEventState::apply_gates; it
+        // rides in Params so every decision site reads it unchanged).
+        enum class Gate : std::uint8_t { None, Held, Latching };
+        Gate gate = Gate::None;
+        Real I_H  = Real{0};
+        bool g    = true;
     };
+    using Gate = Params::Gate;
 
     [[nodiscard]] static Real turn_on_voltage(const Params& p) noexcept {
         return p.V_f == Real{0} ? p.V_th : std::max(p.V_th, p.V_f);
@@ -60,15 +70,29 @@ struct SwitchedDiode {
     }
 
     /// Next state from the solved terminal voltage v = v_a − v_k.
+    /// Gated (design table): Held   c+ = g ∧ (c ? i > 0 : v ≥ V_on);
+    ///                       Latching c+ = c ? (g ? i > 0 : i > I_H)
+    ///                                       : (g ∧ v ≥ V_on).
     [[nodiscard]] static bool decide(bool on, Real v,
                                      const Params& p) noexcept {
+        if (p.gate == Gate::Held && !p.g) return false;
+        if (!on && p.gate != Gate::None && !p.g) return false;
+        if (on && p.gate == Gate::Latching && !p.g) {
+            return branch_current(true, v, p) > p.I_H;
+        }
         return on ? branch_current(true, v, p) > Real{0}
                   : v >= turn_on_voltage(p);
     }
 
-    /// Signal whose sign change marks the commutation from `on`.
+    /// Signal whose sign change marks the commutation from `on`. A gated
+    /// device that cannot turn on (OFF, gate off) has no crossing: a
+    /// constant −1. A latch with the gate off turns off at i = I_H.
     [[nodiscard]] static Real crossing_signal(bool on, Real v,
                                               const Params& p) noexcept {
+        if (p.gate != Gate::None && !p.g) {
+            if (!on || p.gate == Gate::Held) return Real{-1};
+            return v - p.V_f - p.I_H / p.g_on;
+        }
         return on ? v - p.V_f : v - turn_on_voltage(p);
     }
 

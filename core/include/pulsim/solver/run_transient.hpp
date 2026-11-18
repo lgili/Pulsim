@@ -53,6 +53,9 @@
 #include "pulsim/pwl/nonlinear_refresh_nonlinear_capacitor.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/saturable_inductor_history.hpp"
+#include "pulsim/solver/loss_tracker.hpp"
+#include "pulsim/events/event_queue.hpp"
+#include "pulsim/events/step_hooks.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/unsupported.hpp"
@@ -303,7 +306,7 @@ inline SimulationResult run_transient(
     const BExtraFn& b_extra_fn = {},
     bool start_from_dc_op = false,
     const pwl::NonlinearRefreshFn& nl_refresh = {},
-    const StepObserverFn& step_observer = {},
+    const StepObserverFn& step_observer_in = {},
     const Vector* initial_state = nullptr,
     const ShouldContinueFn& should_continue = {},
     /// v2.0 Phase 4 — resume EXACTLY from a previous run's
@@ -321,7 +324,15 @@ inline SimulationResult run_transient(
     /// edges (`SwitchSchedule::next_edge_after`): the first edge
     /// strictly after t, +inf when none. Empty: the gate edges of an
     /// opaque switch_fn are not located (start-of-step sampling).
-    const std::function<Real(Real)>& next_edge_fn = {}) {
+    const std::function<Real(Real)>& next_edge_fn = {},
+    /// add-unified-event-queue group 5 — control ticks scheduled by the
+    /// kernel's event queue: tick k of source j is delivered at the first
+    /// grid point t_n >= t_start + offset_j + k*T_j (to 1e-9*dt), for the
+    /// instants < t_end - 1e-9*dt, after `ticks->before` and before
+    /// `step_observer` at that step.
+    const events::TickPlan* ticks = nullptr,
+    /// Accepted-step / commutation listeners (events/step_hooks.hpp).
+    events::StepHooks* hooks = nullptr) {
 
     // ---- Input validation ---------------------------------------------
     if (!opts.valid()) {
@@ -340,6 +351,11 @@ inline SimulationResult run_transient(
             "discontinuity_restart=True (the event split ends every step "
             "that contains an event with the restart rule's SDIRK "
             "window); set both, or neither");
+    }
+    if (!(opts.split_snap >= Real{1e-12} && opts.split_snap <= Real{0.25})) {
+        throw std::invalid_argument(
+            "run_transient: split_snap must be in [1e-12, 0.25] (a "
+            "fraction of dt)");
     }
     if (!switch_fn_user) {
         throw std::invalid_argument(
@@ -380,6 +396,43 @@ inline SimulationResult run_transient(
     // DECIMATED sample count (opts.store_every).
     result.reserve(opts.expected_sample_count(),
                     static_cast<Index>(state_size));
+
+    // ---- add-unified-event-queue group 5: control ticks on the queue --
+    // The ticks run at the start of a step, before the caller's observer,
+    // wherever the observer runs (the priming call at t_start included).
+    // The rule of the scheduler this replaces (_control_plan.py
+    // FixedStepTicks): integer k, due when t >= t_k - 1e-9*dt, instants
+    // t_k < t_end - 1e-9*dt, one tick per source per step.
+    events::EventQueue tick_queue;
+    const Real tick_tol = Real{1e-9} * opts.dt;
+    const bool has_ticks = ticks != nullptr && !ticks->rates.empty();
+    if (has_ticks) {
+        if (!ticks->fn) {
+            throw std::invalid_argument(
+                "run_transient: a TickPlan with rates needs fn");
+        }
+        for (const auto& r : ticks->rates) {
+            tick_queue.add_periodic(events::Kind::ControlTick, r);
+        }
+        // t0_tol = the take tolerance: a tick a previous run left out at
+        // its t_end (within tick_tol of it) is a resumed run's first.
+        tick_queue.start(opts.t_start, opts.t_end - tick_tol, tick_tol);
+        result.control_tick_counts.assign(ticks->rates.size(), 0);
+    }
+    const StepObserverFn step_observer = !has_ticks ? StepObserverFn{} :
+        StepObserverFn([&](Real t, const Vector& xs) {
+            if (ticks->before) ticks->before(t, xs);
+            for (const auto& ev : tick_queue.take_due(
+                     t, tick_tol,
+                     events::kind_bit(events::Kind::ControlTick))) {
+                ++result.control_tick_counts[ev.source];
+                result.control_tick_jitter_max =
+                    std::max(result.control_tick_jitter_max, t - ev.t);
+                ticks->fn(ev.source, events::TickInfo{ev.t, ev.ordinal}, t,
+                          xs);
+            }
+            if (step_observer_in) step_observer_in(t, xs);
+        });
     result.begin_switch_state_record(
         static_cast<Size>(graph.num_switches()),
         opts.expected_sample_count());
@@ -653,8 +706,7 @@ inline SimulationResult run_transient(
         // start mask (diodes OFF) can be a false floating island (review
         // L2). On a failed solve the start mask's check names the cause.
         const auto dc_start_mask = has_diodes
-            ? combine_masks(switch_fn(opts.t_start),
-                            diodes.current_diode_mask(), diode_owned)
+            ? diodes.combine(switch_fn(opts.t_start))
             : switch_fn(opts.t_start);
         auto dc = [&] {
             try {
@@ -743,6 +795,9 @@ inline SimulationResult run_transient(
     // only while x is still a seeded, unsolved sample 0) — what
     // final_snapshot.stamped_mask carries.
     bool stamped_known = false;
+    // add-pwl-igbt-and-thyristor: the stamped mask at the step start,
+    // so a gated device's commutation record follows its stamped state.
+    topology::SwitchStateMask gated_prev_stamp = stamped_mask;
 
     // Event-iteration cap. 0 disables iteration entirely
     // (matching Layer 5 V2 behaviour for regression testing).
@@ -773,7 +828,25 @@ inline SimulationResult run_transient(
     DenseMatrix mode_Z;
     std::vector<bool> mode_bits0, mode_bits;
     std::vector<char> mode_prev_on, mode_settled;
-    if (has_diodes && (opts.mode_selection != 0 || opts.mode_guard)) {
+    // add-pwl-igbt-and-thyristor: the mode LCP and judge_mode know no gate
+    // (they would turn a gate-off IGBT on), so gated circuits keep the settle.
+    const bool has_gated = diodes.num_gated() > 0;
+    if (opts.mode_selection != 0 && has_gated) {
+        std::string gated_name;
+        for (const auto& e : diodes.entries()) {
+            if (e.gate != models::SwitchedDiode::Gate::None) {
+                gated_name = std::string(graph.branch_name(e.branch_id));
+                break;
+            }
+        }
+        throw UnsupportedError(
+            "pwl", "mode_selection", gated_name, "Diode",
+            std::format("engine 'pwl': mode_selection with the gated device '{}' "
+                        "(IGBT with reverse blocking, GTO, thyristor or TRIAC): the "
+                        "complementarity port knows no gate. Drop mode_selection.",
+                        gated_name));
+    }
+    if (has_diodes && (opts.mode_selection != 0 || (opts.mode_guard && !has_gated))) {
         mode_ports.emplace(cache, graph, pool, diodes);
         const std::string bf = mode_ports->branch_form_diode();
         const char* mname = opts.mode_selection == 1 ? "shadow" : "lcp";
@@ -1142,6 +1215,12 @@ inline SimulationResult run_transient(
     // Last nominal-dt segment, valid while the cache generation holds
     // (a lazy insert/eviction or a parametric refactor bumps it). A hit
     // still writes the LRU tick, so eviction order is unchanged.
+    // The MNA-native machines' flux rows exist only in the Newton
+    // refresh: their linear part is singular, so the cache cannot
+    // factorise it and every nominal step failed into a dt/2 retry.
+    // They take the assembled (unfactorised) carrier at every dt.
+    const bool newton_only_rows = !pool.pmsm_mna_machines().empty() ||
+                                  !pool.induction_machines().empty();
     topology::SwitchStateMask seg_memo_mask;
     const pwl::PwlSegment* seg_memo = nullptr;
     std::uint64_t seg_memo_gen = 0;
@@ -1195,13 +1274,18 @@ inline SimulationResult run_transient(
     // add-fixed-step-event-splitting (validated above to imply the rule).
     const bool split = opts.enable_substep_state_correction;
     // Events this close to a step boundary are taken at it (design D4).
-    const Real snap = opts.dt * Real{0.01};
+    const Real snap = opts.dt * opts.split_snap;
     // A source jump snapped to the step end (t - snap <= tau < t): the
     // solve AT `src_end_at` reads the built-in sources at `src_end_read`
     // (= tau, so value_at(tau - left_by) is the pre-jump level). NaN
     // compares unequal to every time: off.
     Real src_end_at = std::numeric_limits<Real>::quiet_NaN();
     Real src_end_read = Real{0};
+    // add-in-kernel-event-losses: the loss ports (none: no tracker, and
+    // nothing below changes a bit of the run).
+    std::optional<LossTracker> loss_tracker;
+    if (!pool.device_losses().empty()) loss_tracker.emplace(graph, pool, "pwl");
+    LossTracker* const lt = loss_tracker ? &*loss_tracker : nullptr;
     // `backward_euler`: a restart stage (no stored derivative), the
     // BE-like solve of size for_dt/2 on the factor of for_dt.
     auto accumulate_b_extra = [&](Real at_t, Real for_dt,
@@ -1226,6 +1310,7 @@ inline SimulationResult run_transient(
                                                       be_iwave, left_by);
             b_extra += be_iwave;
         }
+        if (lt) lt->inject(b_extra);   // heat owed for this step
     };
 
     // v2.0 Phase 2: a run that dies part-way keeps what it computed.
@@ -1264,9 +1349,7 @@ inline SimulationResult run_transient(
             const bool seeded =
                 initial_state != nullptr || resume_snap != nullptr;
             stamped_mask = has_diodes
-                    ? combine_masks(switch_fn(opts.t_start),
-                                    diodes.current_diode_mask(),
-                                    diode_owned)
+                    ? diodes.combine(switch_fn(opts.t_start))
                     : switch_fn(opts.t_start);
             stamped_known = !seeded;
             result.record_switch_state(stamped_mask,
@@ -1276,9 +1359,12 @@ inline SimulationResult run_transient(
         // Prime the observer with the initial condition so a
         // discrete-time PI / sampler / lookup-table sees the
         // true starting state at t_start.
-        if (step_observer) {
-            step_observer(opts.t_start, x);
+        if (step_observer || step_observer_in) {
+            (has_ticks ? step_observer : step_observer_in)(opts.t_start, x);
         }
+        if (lt) lt->begin(x, stamped_mask);
+
+        if (hooks) hooks->start(x, stamped_mask);
 
         // ---- discontinuity restart (add-discontinuity-restart-rule) --
         // The next step restarts: the first step of a run that does
@@ -1372,6 +1458,8 @@ inline SimulationResult run_transient(
             k_reached = k;
             const Real t_prev = t_origin +
                                  static_cast<Real>(k_off + k - 1) * opts.dt;
+            // The heat the previous step queued, as this step's power.
+            if (lt) lt->advance(opts.dt);
 
             // Snapshot the state at t_prev for sub-step
             // commutation timing (Layer 5 V2.2) and state
@@ -1392,8 +1480,8 @@ inline SimulationResult run_transient(
             // observer keeps its (t_k, x_{k-1}) label, whose move to
             // t_{k-1} belongs to fix-control-tick-semantics.
             Real gate_t = restart_rule ? t_prev : t;
-            if (step_observer) {
-                step_observer(t, x_prev);
+            if (step_observer || step_observer_in) {
+                (has_ticks ? step_observer : step_observer_in)(t, x_prev);
                 // An observer (or a control tick) may mutate the
                 // schedule: its oracle answer is stale (review M3).
                 edge_from = std::numeric_limits<Real>::infinity();
@@ -1532,9 +1620,7 @@ inline SimulationResult run_transient(
                 ++result.split_event_overflows;
             }
             if (has_diodes) {
-                mask_pre = combine_masks(
-                    mask_pre, diodes.current_diode_mask(),
-                    diode_owned);
+                mask_pre = diodes.combine(mask_pre);
             }
 
             // Accumulate b_extra into the reused buffer (audit #6), in the
@@ -1668,17 +1754,12 @@ inline SimulationResult run_transient(
             do {
                 auto mask = gate_at(restart_rule ? gate_t : at_t);
                 if (has_diodes) {
-                    const auto diode_mask =
-                        diodes.current_diode_mask();
-                    mask = combine_masks(mask, diode_mask,
-                                          diode_owned);
+                    mask = diodes.combine(mask);
                 }
                 bool released = false;
                 while (structure.active() && check_mode(mask, true, at_t)) {
                     released = true;
-                    mask = combine_masks(gate_at(restart_rule ? gate_t : at_t),
-                                         diodes.current_diode_mask(),
-                                         diode_owned);
+                    mask = diodes.combine(gate_at(restart_rule ? gate_t : at_t));
                 }
                 // A release back onto a mask already solved this step is the
                 // loop forward-biasing the diode: refuse rather than let the
@@ -1725,7 +1806,7 @@ inline SimulationResult run_transient(
                     }
                 }
                 if (nl_refresh_effective) {
-                    if (for_dt == opts.dt) {
+                    if (for_dt == opts.dt && !newton_only_rows) {
                         const auto& seg = nominal_segment(mask);
                         x = pwl::solve_with_newton_b_extra(
                             seg, nl_refresh_effective, graph, pool,
@@ -1838,6 +1919,9 @@ inline SimulationResult run_transient(
             Real committed_dt = opts.dt;
             bool step_retried = false;
             mask_cycle = false;    // per OUTER step, not per sub-step
+            // a gated device's record compares with the last OUTER step's
+            // stamp: restart stages and split sub-steps re-stamp in between
+            if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
 
             // ---- discontinuity restart (add-discontinuity-restart-rule)
             // Triggers: an unknown previous stamp, a mask that differs
@@ -2418,6 +2502,19 @@ inline SimulationResult run_transient(
                             })) {
                         continue;
                     }
+                    if (e.gate != models::SwitchedDiode::Gate::None) {
+                        // A gate decides, not v - V_on: record the stamped
+                        // state's change, effective from the step start.
+                        const bool now = stamped_mask.get(e.switch_idx);
+                        if (now != gated_prev_stamp.get(e.switch_idx)) {
+                            step_events.push_back(CommutationEvent{
+                                .t_estimated = t_prev,
+                                .branch_id   = e.branch_id,
+                                .new_state   = now,
+                            });
+                        }
+                        continue;
+                    }
                     if (has_ideal_diode && pool.is_branch_form(e.branch_id)) {
                         // shortcut: stamped at the step end, not interpolated;
                         // the event split locates it when it is on.
@@ -2567,6 +2664,9 @@ inline SimulationResult run_transient(
             if (restart) {
                 ++result.n_restart_steps;
             }
+            // add-in-kernel-event-losses: the step is accepted; read its
+            // commutations and conduction energy (reading rule).
+            if (lt) lt->accept(t_prev, t, x, stamped_mask);
 
             if (diag) {
                 const bool src_jump = (has_pwm || has_pulse || has_iwave) &&
@@ -2662,6 +2762,7 @@ inline SimulationResult run_transient(
             // Decimated recording (v2.0 Phase 1): uniform grid at
             // m·dt. Sample 0 (the IC, k = 0) is always recorded
             // above, keeping the parallel arrays aligned.
+            if (hooks) hooks->accepted(t_prev, t, x, stamped_mask);
             if (k % opts.store_every == 0) {
                 result.times.push_back(t);
                 result.states.push_back(x);
@@ -2704,6 +2805,14 @@ inline SimulationResult run_transient(
         // No dynamic devices → cache.solve gives the DC operating
         // point for the requested switch state. Diode iteration
         // still applies.
+        if (lt) {
+            throw UnsupportedError(
+                "pwl", "device_losses", pool.device_losses().front().device, "",
+                "device losses: the circuit has no capacitor or inductor, so "
+                "it runs on the static path, which reads no commutations (a "
+                "record-only port included); give it its dynamic devices or "
+                "the thermal network.");
+        }
         for (Size k = 0; k < n_steps; ++k) {
             const Real t = t_origin +
                             static_cast<Real>(k_off + k) * opts.dt;
@@ -2726,8 +2835,8 @@ inline SimulationResult run_transient(
 
             // State-aware observer fires before switch_fn(t) so
             // discrete-time controllers can update.
-            if (step_observer) {
-                step_observer(t, x_prev);
+            if (step_observer || step_observer_in) {
+                (has_ticks ? step_observer : step_observer_in)(t, x_prev);
             }
             gate_memo_n = 0;
 
@@ -2780,6 +2889,7 @@ inline SimulationResult run_transient(
             // restored on breach so x and the diode state agree
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
+            if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
             const bool mode_site_s = mode_ports.has_value() && !nl_refresh_effective;
             auto solve_s = [&](const topology::SwitchStateMask& m, Vector& out) {
                 cache.solve_segment(nominal_segment(m), b_extra_user, out);
@@ -2793,10 +2903,7 @@ inline SimulationResult run_transient(
             do {
                 auto mask = gate_at(gate_t);
                 if (has_diodes) {
-                    const auto diode_mask =
-                        diodes.current_diode_mask();
-                    mask = combine_masks(mask, diode_mask,
-                                          diode_owned);
+                    mask = diodes.combine(mask);
                 }
                 // Phase-0 fix #9: a repeated mask within one step's
                 // event iteration is a CYCLE (mask A -> B -> A ...,
@@ -2908,6 +3015,18 @@ inline SimulationResult run_transient(
             if (has_diodes && k > 0) {
                 for (std::size_t j = 0; j < diodes.entries().size(); ++j) {
                     const auto& e = diodes.entries()[j];
+                    if (e.gate != models::SwitchedDiode::Gate::None) {
+                        const bool now = stamped_mask.get(e.switch_idx);
+                        if (now != gated_prev_stamp.get(e.switch_idx)) {
+                            result.commutation_events.push_back(
+                                CommutationEvent{
+                                    .t_estimated = t_prev,
+                                    .branch_id   = e.branch_id,
+                                    .new_state   = now,
+                                });
+                        }
+                        continue;
+                    }
                     if (has_ideal_diode && pool.is_branch_form(e.branch_id)) {
                         // at s = 0 while ON: the crossing test never fires
                         if (static_cast<bool>(commut_on_prev[j]) != e.is_on) {
@@ -2945,6 +3064,14 @@ inline SimulationResult run_transient(
                 }
             }
 
+            // The static path's first solve (k = 0) is the start state.
+            if (hooks) {
+                if (k == 0) {
+                    hooks->start(x, stamped_mask);
+                } else {
+                    hooks->accepted(t_prev, t, x, stamped_mask);
+                }
+            }
             if (k % opts.store_every == 0) {
                 result.times.push_back(t);
                 result.states.push_back(x);
@@ -2965,6 +3092,7 @@ inline SimulationResult run_transient(
         throw;                       // already carries its payload
     }
     catch (const pwl::NewtonRoundoffBudgetExceeded& e) {
+        if (lt) lt->write(result);
         throw SimulationAborted(e.what(), std::move(result), t_reached,
                                 /*roundoff_budget=*/true);
     }
@@ -2974,6 +3102,7 @@ inline SimulationResult run_transient(
         // callback's exception is not, and re-labelling one as
         // SimulationAborted would destroy its type and traceback for
         // the sake of attaching a partial trace it never asked for.
+        if (lt) lt->write(result);
         throw SimulationAborted(e.what(), std::move(result),
                                  t_reached);
     }
@@ -2996,6 +3125,7 @@ inline SimulationResult run_transient(
         stamped_known ? mask_bits(stamped_mask) : std::vector<bool>{};
     result.final_snapshot.valid = true;
     result.newton = newton_ws.take_counters();
+    if (lt) lt->write(result);
 
     return result;
 }

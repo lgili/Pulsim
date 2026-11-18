@@ -103,18 +103,33 @@ def test_ccm_error_not_above_twice_the_previous(ccm):
     assert err < 2 * 9.84e-4
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "not met: 2,606 accepted steps below 1e-11 s (smallest 6.6e-15 s; "
-    "4,325 and 4e-15 s before the 2026-11-17 turn-off landing fix) are "
-    "the stiff L*g_off mode after a turn-off with residual current "
-    "(tau ~ 2e-13 s), which the raw estimate reads as error, and the "
-    "committed gate-edge probe steps; the roundoff floor does not fire "
-    "here (0 accepts) and the filter needs the SDIRK step (DECISIONS.md "
-    "9, 12)"))
 def test_dcm_no_step_below_1e_11(dcm):
-    """Runs of accepted steps between 4e-14 and 1e-12 s before this
-    change."""
-    assert np.diff(np.asarray(dcm.times)).min() > 1e-11
+    """No integration step below 1e-11 s. Runs of accepted steps between
+    4e-14 and 1e-12 s before the post-event restart; 2,606 below 1e-11 s
+    before the filtered SDIRK restart on piecewise-linear circuits
+    (1,806 of them in the tau ~ 2e-13 s L*g_off mode after each diode
+    turn-off, which the raw estimate read as error at any h).
+
+    The only shorter intervals are the two samples recorded AT an event by
+    design: the committed gate-edge probe (one per edge) and the post-event
+    record of a diode event (one per event). Each starts at an event
+    instant; structurally exact, so their count is bounded exactly. The
+    run's first nanosecond (h_init) is left out."""
+    t = np.asarray(dcm.times)
+    k = np.flatnonzero(np.diff(t) < 1e-11)
+    k = k[t[k] > 1e-9]   # the start: h_init and the first diode turn-on
+    edges = np.concatenate([T0 + np.arange(NPER + 1) * T,
+                            T0 + (np.arange(NPER) + 0.3) * T])
+    ev = np.asarray([e.t_estimated for e in dcm.commutation_events])
+    inst = np.sort(np.concatenate([edges, ev]))
+    j = np.clip(np.searchsorted(inst, t[k]), 1, len(inst) - 1)
+    dist = np.minimum(np.abs(inst[j] - t[k]), np.abs(inst[j - 1] - t[k]))
+    # 5e-13: well above the landing's h_min noise (4e-14) and below the
+    # record after a turn-off (>= 9.6e-11 s here), so a short step after
+    # the record does not pass as "at the event".
+    assert dist.max(initial=0.0) < 5e-13   # every short interval is at an event
+    assert len(k) <= len(inst)
+    assert dcm._trbdf2_stats["n_diode_events"] > NPER // 2   # the DCM turn-offs ran
 
 
 def _mosfet_half_bridge(engine, **kw):
@@ -165,3 +180,109 @@ def test_diode_event_is_recorded_where_it_happens():
     assert np.all(np.diff(t) > 0)
     nxt = t[np.searchsorted(t, ev, side="right")]
     assert (nxt - ev).max() < 1e-9
+
+
+def _tick_buck():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 10.0)
+    b.add_switch("S", "vin", "sw", 100.0, 1e-6)
+    b.add_diode("D", "gnd", "sw", 100.0, 1e-6)
+    b.add_inductor("L", "sw", "out", 100e-6)
+    b.add_capacitor("C", "out", "gnd", 100e-6)
+    b.add_resistor("R", "out", "gnd", 10.0)
+    return b
+
+
+def _edges_sampled(r, k_sw):
+    """(rising with a post-edge sample within 1 ns, rising, falling with
+    one, falling) of switch column k_sw."""
+    t = np.asarray(r.times)
+    s = np.asarray(r.switch_states)[:, k_sw]
+    k = np.flatnonzero(s[1:] != s[:-1])
+    near = (t[k + 1] - t[k]) < 1e-9
+    up = s[k + 1]
+    return (int(np.sum(near & up)), int(np.sum(up)),
+            int(np.sum(near & ~up)), int(np.sum(~up)))
+
+
+def test_a_rising_edge_on_a_controller_tick_gets_its_post_edge_sample():
+    """A closed loop's period start is both a tick and a rising edge. The
+    tick now fires before the edge probe is committed; before, the commit
+    was refused there and 0 of 199 rising edges had a sample just after the
+    edge (V(sw) ramped across the first post-edge step). Every edge, both
+    directions, structurally."""
+    Tp = 1e-5
+    b = _tick_buck()
+    pi = p.PIController(Kp=0.02, Ki=40.0, output_min=0.1, output_max=0.9)
+    loop = p.bind_pi_to_switch(b, pi=pi,
+                               measured=lambda x, i=b.node_id_of("out"): x[i],
+                               setpoint=5.0, switch="S", freq=1 / Tp)
+    r = p.simulate(b, 2e-3, engine="trbdf2", switch_fn=loop.switch_fn,
+                   step_observer=loop.step_observer)
+    up_s, up, dn_s, dn = _edges_sampled(r, b.switch_index_of("S"))
+    assert up > 150 and dn > 150
+    assert (up_s, dn_s) == (up, dn)
+    assert r._trbdf2_stats["n_ctrl_ticks"] == 200
+
+
+def test_the_pulse_cap_follows_the_recent_pulses():
+    """An opaque gate caps the step at twice the narrowest pulse it has
+    shown. That was a run-wide minimum: one 1 ns pulse at start-up held
+    every later step at 2 ns (cl_boost_pi: 519,783 steps in 0.3 ms). It now
+    follows each gate bit's last pulses, lifted between predicted toggles of
+    a periodic direction; the quiet gap before the 10 ns PWM pulses keeps the
+    run's minimum, so none of them is stepped over (the cap that lapsed
+    there missed 4 of 99). The
+    1 ns pulse sits where the start-up steps are short enough to see it
+    (gate_pulse_min proves it was seen)."""
+    Tp = 1e-5
+    b = _tick_buck()
+    k = b.switch_index_of("S")
+
+    def fn(t):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        on = (1e-8 <= t < 1.1e-8) or (t >= 1e-5 and (t % Tp) < 1e-3 * Tp)
+        m.set(k, bool(on))
+        return m
+    with pytest.warns(UserWarning, match="narrower than the spacing"):
+        r = p.simulate(b, 1e-3, engine="trbdf2", switch_fn=fn)
+    assert r._trbdf2_stats["gate_pulse_min"] < 2e-9
+    t = np.asarray(r.times)
+    assert np.diff(t[t > 0.5e-3]).max() > 1e-7      # 2e-9 before
+    up_s, up, dn_s, dn = _edges_sampled(r, k)
+    assert (up, dn) == (100, 100)                    # every edge landed
+    assert r._trbdf2_stats["n_accept"] < 20_000
+    # Once the rises prove periodic, the long phase is not capped: the
+    # steady state costs what the same PWM with declared edges costs (the
+    # run-wide 1 ns minimum: 2 ns steps, 250,000 in this window).
+    ref = p.simulate(b, 1e-3, engine="trbdf2", switch_fn=p.make_pwm_switch_fn(
+        1 / Tp, 1e-3, k, b.graph.num_switches))
+    tr = np.asarray(ref.times)
+    assert np.sum(t > 0.5e-3) <= 2 * np.sum(tr > 0.5e-3)
+
+
+def test_a_gate_that_gets_faster_loses_no_pulse():
+    """A 100 ns pulse every third period, then every period (pulse skipping
+    resuming). The rises prove periodic at 3T and the cap lifts between
+    them; the new pulses come where none is predicted, and only the gate
+    samples inside the lifted step can see them: they stay half a pulse
+    apart. Every edge, structurally."""
+    Tp, w = 1e-5, 1e-7
+    b = _tick_buck()
+    k = b.switch_index_of("S")
+
+    def fn(t):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        n = int(t // Tp)
+        m.set(k, bool(n >= 1 and t - n * Tp < w
+                      and (n % 3 == 0 or n * Tp >= 3e-4 - 1e-12)))
+        return m
+    r = p.simulate(b, 1e-3, engine="trbdf2", switch_fn=fn)
+    # From the second pulse on: a pulse before any is seen can be stepped
+    # over by any opaque-gate run (nothing to cap by yet).
+    want = sum(1 for n in range(4, 100) if n % 3 == 0 or n * Tp >= 3e-4 - 1e-12)
+    t = np.asarray(r.times)
+    s = np.asarray(r.switch_states)[:, k]
+    j = np.flatnonzero(s[1:] != s[:-1])
+    j = j[t[j] > 3.5 * Tp]
+    assert (int(np.sum(s[j + 1])), int(np.sum(~s[j + 1]))) == (want, want)

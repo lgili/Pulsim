@@ -817,6 +817,18 @@ class Evaluator:
             self._targets, self._spec_static = _resolve_fields(
                 circuit, self.fields)
             self._circuit_hash = f"{circuit.value_hash():016x}"
+            lb = circuit.to_builder() if hasattr(circuit, "to_builder") \
+                else circuit
+            ports = getattr(lb, "_device_loss_names", lambda: [])()
+            if ports:
+                # value_hash (design ids, the process cache) does not see
+                # loss ports, and the evaluator reads losses from loss_options
+                raise unsupported(
+                    "design", "device_losses",
+                    f"Evaluator(circuit=...): {ports[0]!r} has a loss port "
+                    "(set_device_losses); the evaluator's losses come from "
+                    "loss_options= and its design ids do not cover loss "
+                    "ports. Build the circuit without it.", device=ports[0])
             if switch_fn is not None and schedule is not None:
                 raise TypeError("Evaluator: give switch_fn= (fixed) or "
                                 "schedule= (per design), not both")
@@ -908,6 +920,7 @@ class Evaluator:
                 "parameters through the loss model, which the exact path "
                 "does not differentiate (refused, never approximated).")
         self._options_digest = _digest(self._config())
+        self._frozen = (self.kpis, dict(self.constraints))
 
     # -- pickling (the process backend) ---------------------------------
     def __getstate__(self):
@@ -993,6 +1006,7 @@ class Evaluator:
     def evaluate(self, design: Mapping[str, Any]) -> EvaluationRecord:
         """One design -> one record (design D3 status mapping)."""
         t0 = time.perf_counter()
+        self._check_frozen()
         design = dict(design)
         did = self.design_id(design)
         counters: dict = {"simulations": 0}
@@ -1037,6 +1051,19 @@ class Evaluator:
 
     __call__ = evaluate
 
+    def _check_frozen(self):
+        """kpis= and constraints= key every design id and the kernel plan;
+        a change after construction is refused, never run with the old
+        ones. (Not a config digest: a schedule closure that records its
+        calls changes its digest and is legitimate.)"""
+        k0, c0 = self._frozen
+        if self.kpis is not k0 or self.constraints != c0:
+            raise ValueError(
+                "Evaluator: kpis= or constraints= changed "
+                "after the evaluator was made; the design ids and the "
+                "kernel plan were built from the old ones. Make a new "
+                "Evaluator instead of mutating this one.")
+
     def evaluate_many(self, designs: Sequence[Mapping[str, Any]], *,
                       workers: Optional[int] = None,
                       backend: Optional[str] = None) -> list:
@@ -1061,6 +1088,7 @@ class Evaluator:
         identical fields (the configuration, not the design, is
         unsupported). Any other exception propagates."""
         from .sweep import _run_jobs
+        self._check_frozen()
         if backend not in (None, "kernel", "thread", "process"):
             raise ValueError(f"backend must be None, 'kernel', 'thread' or "
                              f"'process', got {backend!r}")
@@ -1465,10 +1493,13 @@ class Evaluator:
         spec = self.steady
         engine = self.engine
         kw = dict(self.options)
+        _refuse_ignored_options(kw, engine)
         n = max(2, spec.min_periods)
         while True:
             run = _engine(lambda: _pkg.simulate(
                 src, t_end=n * T, engine=engine, switch_fn=sf, **kw))
+            # 'auto' resolves per circuit: check against what ran
+            _refuse_ignored_options(kw, getattr(run, "engine_used", engine))
             self._count(run, counters, b, sf)
             counters["route"] = f"transient/{getattr(run, 'engine_used', engine)}"
             counters["periods"] = n
@@ -1571,6 +1602,17 @@ class Evaluator:
         if self.engine in ("pwl", "trbdf2"):
             return self._pss_transient(src, sf, T, counters)
         counters["route"] = "pss/dsed"
+        if self.options:
+            # the exact stepper takes no simulate keywords: dropping them
+            # would answer a question the caller did not ask
+            raise unsupported(
+                "design.evaluate", "options",
+                f"Evaluator: options {sorted(self.options)} on the pss/dsed "
+                "route: the exact stepper has no step size, tolerance or "
+                "other simulate keyword to honour them with (refused, never "
+                "dropped). Remove options=, or pick the transient route "
+                "(SteadySpec(method='transient')) or engine='pwl' / "
+                "'trbdf2'.")
         spec = self._spec(src)
         obs = spec if isinstance(spec, _pk.Spec) else None
 
@@ -1651,6 +1693,7 @@ class Evaluator:
                 f"pss/{engine}: exact orbit sensitivities exist on the "
                 "exact stepper only (refused, never a finite difference).")
         kw = dict(self.options)
+        _refuse_ignored_options(kw, engine)
         dt = kw.pop("dt", None)
 
         def solve():
@@ -2207,6 +2250,27 @@ def _raise_if_suspect_kernel(kp, b) -> None:
     if volt is not None and volt.node >= 0:
         raise _Failed("implausible_voltage: " + _k.describe_implausible_voltage(
             b.graph, b.pool, volt))
+
+
+# simulate() keywords an engine only WARNS it ignores (_dsed_dispatch.
+# _validate_engine_kwargs, simulate's integrator note): an Evaluator option
+# among them is refused by name instead of dropped.
+_IGNORED_BY = {
+    "pwl": ("rtol", "atol", "dt_init", "integrator", "stiffness_threshold",
+            "h_bdf2"),
+    "trbdf2": ("integrator", "stiffness_threshold", "h_bdf2"),
+}
+
+
+def _refuse_ignored_options(options, engine):
+    bad = sorted(k for k in _IGNORED_BY.get(engine, ())
+                 if options.get(k) is not None)
+    if bad:
+        raise unsupported(
+            "design.evaluate", "options",
+            f"Evaluator options {bad}: engine {engine!r} ignores them "
+            "(refused, never dropped). Remove them or pick an engine that "
+            "honours them.")
 
 
 def _engine(fn):

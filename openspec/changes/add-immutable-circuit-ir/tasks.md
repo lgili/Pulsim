@@ -57,10 +57,10 @@ lands).
 - [x] 7.5 Docs: expression grammar; YAML reference; SPICE import notes
 
 ## 8. Scopes
-- [ ] 8.1 `Scope` tree; `builder.scope(name, kind)`; scoped lookup of parameters
-- [ ] 8.2 `subsystem.py` opens scopes instead of prefixing strings; flattened names unchanged (`/` separator)
-- [ ] 8.3 YAML `circuit.subsystems` (nested); emitter writes the scope tree
-- [ ] 8.4 Oracle: `test_subsystems.py` unchanged; the 302-branch subsystem circuit has identical `components()` names and results; round trip preserves the tree
+- [x] 8.1 `Scope` tree; `builder.scope(name, kind)`; scoped lookup of parameters
+- [x] 8.2 `subsystem.py` opens scopes instead of prefixing strings; flattened names unchanged (`/` separator) — each instance opens a scope; the proxy still joins the names (`path/local`, the builder's `scoped_name` rule), its string code goes with 11.1 (DECISIONS 20)
+- [x] 8.3 YAML `circuit.subsystems` (nested); emitter writes the scope tree
+- [x] 8.4 Oracle: `test_subsystems.py` unchanged; the 302-branch subsystem circuit has identical `components()` names and results; round trip preserves the tree
 
 ## 9. Domains
 - [ ] 9.1 `ir::Domain`; `builder.node(name, domain)`; YAML node entries with `domain`

@@ -155,12 +155,22 @@ def test_invalid_parameters_are_refused_by_name(bad):
         p.CircuitBuilder().add_dc_machine("M7", "a", "gnd", "w", **kw)
 
 
-def test_theta_node_is_refused_by_name():
-    with pytest.raises(p.UnsupportedError, match="add_vccs") as ei:
-        p.CircuitBuilder().add_dc_machine("M", "a", "gnd", "w", R_a=R,
-                                          L_a=L, K=K, J=J,
-                                          theta_node="th")
-    assert (ei.value.feature, ei.value.device) == ("theta_node", "M")
+def test_theta_node_integrates_the_speed():
+    # Exact angle from the augmented system z = [i, w, theta, sin, cos].
+    A = np.zeros((5, 5))
+    A[:2, :2], A[0, 3] = _A[:2, :2], V / L
+    A[2, 1], A[3, 4], A[4, 3] = 1.0, _W, -_W
+    lam, S = np.linalg.eig(A)
+    c0 = np.linalg.solve(S, np.array([0, 0, 0, 0, 1.0], dtype=complex))
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "a", "gnd", 0.0, V, F)
+    b.add_dc_machine("M", "a", "gnd", "w", R_a=R, L_a=L, K=K, J=J,
+                     theta_node="th")
+    r = p.simulate(b, t_end=T_END, dt=2e-6, engine="pwl")
+    t = np.asarray(r.times)
+    th_ex = ((S * c0) @ np.exp(np.outer(lam, t)))[2].real
+    err = np.max(np.abs(np.asarray(r.v("th")) - th_ex))
+    assert err <= 1e-6, err             # rad; measured 2.9e-7 (peak 0.19)
 
 
 def test_observer_is_deprecated_in_favour_of_add_dc_machine():

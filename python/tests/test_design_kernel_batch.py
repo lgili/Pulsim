@@ -237,3 +237,39 @@ def test_constraint_objects_and_formula_kpis_run_in_the_kernel():
     r = ev.evaluate_many(DESIGNS[:3])
     assert ev.last_batch["kernel"] == 3
     assert r == _python(ev, DESIGNS[:3])
+
+
+def test_changing_kpis_or_constraints_after_a_batch_is_refused():
+    """The kernel plan and the design ids froze kpis= and constraints=
+    when the evaluator was made: mutating them later is refused by name,
+    never a batch that reads the old ones."""
+    ev = _cir()
+    ev.evaluate_many(DESIGNS[:1])
+    ev.constraints["ripple_v"] = (None, 0.5)
+    with pytest.raises(ValueError, match="constraints="):
+        ev.evaluate_many(DESIGNS[:1])
+    ev = _cir()
+    ev.evaluate_many(DESIGNS[:1])
+    ev.kpis = ev.kpis[:1]
+    with pytest.raises(ValueError, match="kpis="):
+        ev.evaluate_many(DESIGNS[:1])
+    # before any batch, and on the single-design and thread paths too
+    ev = _cir()
+    ev.constraints["ripple_v"] = (None, 0.5)
+    with pytest.raises(ValueError, match="constraints="):
+        ev.evaluate(DESIGNS[0])
+    with pytest.raises(ValueError, match="constraints="):
+        ev.evaluate_many(DESIGNS[:1], backend="thread")
+
+
+def test_a_circuit_with_a_loss_port_is_refused_by_the_evaluator():
+    """value_hash (design ids, the process cache) does not cover loss
+    ports, and the evaluator reads losses from loss_options=."""
+    b = _C.to_builder()
+    b.add_voltage_source("Vamb", "amb", "gnd", 25.0)
+    b.add_resistor("Rth", "tj", "amb", 1.0)
+    b.add_capacitor("Cth", "tj", "amb", 1e-3)
+    b.set_device_losses("S", junction="tj")
+    with pytest.raises(p.UnsupportedError) as ei:
+        _cir(circuit=b.build())
+    assert (ei.value.feature, ei.value.device) == ("device_losses", "S")

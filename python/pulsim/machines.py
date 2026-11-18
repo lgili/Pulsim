@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from ._pulsim import CircuitBuilder
 
-__all__ = ["install"]
+__all__ = ["install", "pm_harmonics_from_waveform", "trapezoid_harmonics"]
 
 
 def _check(name: str, label: str, value: float, *, positive: bool) -> float:
@@ -72,9 +72,9 @@ def add_dc_machine(self, name: str, a_pos: str, a_neg: str,
     units they are the same constant, so a call with ``Kt != Ke`` is
     refused (the coupling would not conserve power).
 
-    ``theta_node`` is not built yet and raises ``UnsupportedError``
-    (feature ``"theta_node"``); the message shows how to integrate the
-    speed with ``add_vccs`` into a 1 F capacitor.
+    ``theta_node`` (optional) gets the shaft angle [rad]: a unit VCCS
+    ``{name}.th`` from the speed node into a 1 F capacitor ``{name}.ct``,
+    so ``v(theta_node) = ∫ω dt`` (starting at 0).
     """
     given = {k: v for k, v in (("K", K), ("Ke", Ke), ("Kt", Kt))
              if v is not None}
@@ -100,16 +100,6 @@ def add_dc_machine(self, name: str, a_pos: str, a_neg: str,
     if not math.isfinite(t_load):
         raise ValueError(f"add_dc_machine({name!r}): T_load must be "
                          f"finite (got {T_load!r}).")
-    if theta_node is not None:
-        from ._refusal import unsupported
-        raise unsupported(
-            "", "theta_node",
-            f"add_dc_machine({name!r}): theta_node is not built yet "
-            "(openspec add-mna-native-machines, task 1.8). Integrate "
-            "result.v(omega_node), or add the angle yourself: "
-            "b.add_vccs(name, omega_node, 'gnd', theta, 'gnd', 1.0) into "
-            "a 1 F capacitor on theta (v(theta) = integral of omega).",
-            device=name)
 
     l_from = f"{name}.ra_la" if r_a > 0.0 else a_pos
     emf = f"{name}.emf"
@@ -127,11 +117,109 @@ def add_dc_machine(self, name: str, a_pos: str, a_neg: str,
         # A current source pushes I out of n_pos: n_pos = gnd draws
         # T_load out of the speed node.
         self.add_current_source(f"{name}.tl", "gnd", omega_node, t_load)
+    if theta_node is not None:
+        # θ = ∫ω dt: a unit VCCS from the speed into a 1 F capacitor.
+        self.add_vccs(f"{name}.th", omega_node, "gnd", theta_node, "gnd",
+                      1.0)
+        self.add_capacitor(f"{name}.ct", theta_node, "gnd", 1.0, 0.0)
     return self
 
 
+def trapezoid_harmonics(k_e: float, pole_pairs: int, *,
+                        flat_top_deg: float = 120.0,
+                        n_harmonics: int = 25) -> list:
+    """PM-flux harmonic series ``[(h, psi_h, phi_h), ...]`` of a
+    trapezoidal back-EMF (``add-mna-native-machines`` design, BLDC).
+
+    ``k_e`` [V·s/rad] is the phase back-EMF on the flat top per unit
+    MECHANICAL speed; the flat top is ``flat_top_deg`` electrical degrees
+    wide and the ramps are straight. With ramp half-width
+    ``gamma = (180° − flat_top)/2``, odd ``h`` up to ``n_harmonics``::
+
+        psi_h = (k_e/pp)·4·sin(h·gamma)/(pi·gamma·h³),   phi_h = 0
+
+    so ``lambda_pm,a(theta_e) = sum psi_h·cos(h·theta_e)`` and the
+    back-EMF ``-pp·omega·dlambda/dtheta_e`` is the truncated trapezoid
+    (RMS deviation 0.40 % of the flat top at 25 harmonics, 120°).
+    """
+    k_e, pp = float(k_e), int(pole_pairs)
+    if not (math.isfinite(k_e) and k_e > 0.0) or pp < 1:
+        raise ValueError("trapezoid_harmonics: k_e must be > 0 and "
+                         "pole_pairs a positive integer")
+    if not 0.0 <= flat_top_deg < 180.0:
+        raise ValueError("trapezoid_harmonics: flat_top_deg must be in "
+                         "[0, 180)")
+    gamma = math.radians(180.0 - flat_top_deg) / 2.0
+    out = []
+    for h in range(1, int(n_harmonics) + 1, 2):
+        s = (math.sin(h * gamma) / (h * gamma)) if gamma > 0 else 1.0
+        out.append((float(h), (k_e / pp) * 4.0 * s / (math.pi * h * h),
+                    0.0))
+    return out
+
+
+def pm_harmonics_from_waveform(theta_e, emf, omega_e: float, *,
+                               n_harmonics: int = 25) -> list:
+    """PM-flux series ``[(h, psi_h, phi_h), ...]`` from one electrical
+    period of a measured phase-a back-EMF.
+
+    ``theta_e`` are ``N`` uniformly spaced electrical angles covering
+    one period (``[0, 2π)``, endpoint excluded), ``emf`` the phase-a
+    back-EMF [V] at those angles, recorded at the constant ELECTRICAL
+    speed ``omega_e`` [rad/s] with the motor convention ``e = dλ/dt``.
+    Returns the harmonics ``1..n_harmonics`` (the DC term is dropped:
+    a constant flux has no back-EMF and no torque).
+    """
+    import numpy as np
+
+    th = np.asarray(theta_e, dtype=float)
+    e = np.asarray(emf, dtype=float)
+    n = th.size
+    if e.size != n or n < 2 * n_harmonics + 2:
+        raise ValueError("pm_harmonics_from_waveform: theta_e and emf "
+                         "must have the same length, >= 2·n_harmonics + 2")
+    if not (math.isfinite(omega_e) and omega_e != 0.0):
+        raise ValueError("pm_harmonics_from_waveform: omega_e must be "
+                         "finite and non-zero")
+    c = np.fft.rfft(e / omega_e) / n * 2.0           # dλ/dθ_e coefficients
+    out = []
+    for h in range(1, int(n_harmonics) + 1):
+        ch = c[h] * np.exp(-1j * h * th[0])          # phase at theta = 0
+        amp = abs(ch)
+        if amp == 0.0:
+            continue
+        # dλ/dθ = amp·cos(hθ + β) = −h·psi·sin(hθ + φ), φ = β − π/2.
+        out.append((float(h), float(amp / h),
+                    float(np.angle(ch) - math.pi / 2.0)))
+    return out
+
+
+def add_bldc_mna(self, name: str, phase_a: str, phase_b: str, phase_c: str,
+                 neutral: str, omega_node: str, theta_node: str, *,
+                 R_s: float, L_s: float, k_e: float, pole_pairs: int,
+                 J: float, B: float = 0.0, T_load: float = 0.0,
+                 flat_top_deg: float = 120.0, n_harmonics: int = 25,
+                 omega0: float = 0.0, theta0: float = 0.0
+                 ) -> "CircuitBuilder":
+    """Add an MNA-native BLDC: ``add_pmsm_mna`` (round rotor,
+    ``L_d = L_q = L_s``) with the PM flux of a trapezoidal back-EMF
+    (:func:`trapezoid_harmonics`). Back-EMF and torque come from the
+    same series and its exact derivatives, so the torque is consistent
+    with the back-EMF (co-energy). ``k_e`` [V·s/rad]: phase back-EMF on
+    the flat top per unit mechanical speed."""
+    harm = trapezoid_harmonics(k_e, pole_pairs, flat_top_deg=flat_top_deg,
+                               n_harmonics=n_harmonics)
+    return self.add_pmsm_mna(
+        name, phase_a, phase_b, phase_c, neutral, omega_node, theta_node,
+        R_s=R_s, L_d=L_s, L_q=L_s, psi_pm=harm[0][1],
+        pole_pairs=pole_pairs, J=J, B=B, T_load=T_load, omega0=omega0,
+        theta0=theta0, harmonics=harm)
+
+
 def install(builder_cls) -> None:
-    """Patch ``add_dc_machine`` onto ``builder_cls`` (idempotent)."""
-    if not hasattr(builder_cls, "add_dc_machine"):
-        add_dc_machine.__qualname__ = "CircuitBuilder.add_dc_machine"
-        builder_cls.add_dc_machine = add_dc_machine
+    """Patch ``add_dc_machine`` / ``add_bldc_mna`` onto ``builder_cls``
+    (idempotent)."""
+    for fn in (add_dc_machine, add_bldc_mna):
+        if not hasattr(builder_cls, fn.__name__):
+            fn.__qualname__ = f"CircuitBuilder.{fn.__name__}"
+            setattr(builder_cls, fn.__name__, fn)

@@ -33,11 +33,13 @@
 #include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/solver/state_trajectory.hpp"
+#include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
 #include <limits>
 #include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <stdexcept>
 #include <vector>
@@ -310,6 +312,10 @@ public:
     /// the step of a discontinuity and the next two as SDIRK(2,2)
     /// steps, so a run stopped inside that window resumes it. 0 = none.
     Size restart_steps_left = 0;
+    /// The controllers' state at `t` (control graphs, C blocks), owned
+    /// by the language binding that ran them; the solver never reads it
+    /// and a copy of the snapshot shares it.
+    std::shared_ptr<void> control_state;
     /// True once populated by a run.
     bool valid = false;
 };
@@ -420,6 +426,11 @@ struct SimulationResult {
     // list overflowed (kMaxStepEvents or the per-step search cap).
     Size unlocated_gate_steps = 0;
     Size split_event_overflows = 0;
+    // add-unified-event-queue group 5: the fixed engine's control ticks
+    // (one count per TickPlan source) and the largest lateness of a tick
+    // on the grid (step time minus scheduled instant).
+    std::vector<std::uint64_t> control_tick_counts;
+    Real control_tick_jitter_max = Real{0};
     // add-branch-form-ideal-switch D3: structural passes run (one per
     // distinct mode of a circuit with an ideal branch-form element).
     Size mode_structure_checks = 0;
@@ -431,6 +442,16 @@ struct SimulationResult {
     /// add-complementarity-mode-selection on pwl.
     ModeReport mode_report;
     ModeGuardReport mode_guard;
+
+    /// add-in-kernel-event-losses: one record per device with a loss
+    /// port (events, energy totals), in set_device_losses order. Empty
+    /// for a circuit without one.
+    std::vector<thermal::DeviceLossRecord> device_losses;
+    /// Heat (J) the run deposited into thermal nodes, and heat recorded
+    /// in its last step that the next step would have deposited.
+    /// injected + pending = every event plus every conduction energy.
+    Real heat_injected = 0;
+    Real heat_pending = 0;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or

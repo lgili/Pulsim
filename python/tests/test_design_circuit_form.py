@@ -238,10 +238,12 @@ def test_configuration_errors_name_the_problem():
     _, cir = _pair()
     with pytest.raises(KeyError, match="'C'"):
         cir.evaluate({k: v for k, v in CCM.items() if k != "C"})
-    # the circuit pickles (IR group 4); the native schedule does not:
-    # refused by name before any worker starts
-    with pytest.raises(p.UnsupportedError, match="switch_fn does not pickle"):
+    # a Circuit pickles (its YAML text, add-immutable-circuit-ir 4.3), so
+    # the process backend names the next part that does not: the
+    # SwitchSchedule given as switch_fn, before any worker starts
+    with pytest.raises(p.UnsupportedError, match="switch_fn does not pickle") as ei:
         cir.evaluate_many(DESIGNS, workers=2, backend="process")
+    assert ei.value.device == "switch_fn"
 
 
 def test_user_kpis_run_on_the_circuit_form():

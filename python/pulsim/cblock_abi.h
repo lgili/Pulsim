@@ -36,6 +36,15 @@ void *pulsim_cblock_init(int n_in, int n_out);
 /* Optional: free whatever pulsim_cblock_init allocated. */
 void pulsim_cblock_term(void *state);
 
+/* Optional pair, for simulate(resume_from=...): save returns the number
+ * of bytes the block's state needs and, when cap >= that, copies it into
+ * buf; restore puts n such bytes back and returns 0 (nonzero: refused,
+ * e.g. a size from another build). Without them a resumed run that
+ * holds this block is refused (its *state is opaque to pulsim).
+ * export_c libraries define both. */
+long pulsim_cblock_save(void *state, void *buf, long cap);
+long pulsim_cblock_restore(void *state, const void *buf, long n);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

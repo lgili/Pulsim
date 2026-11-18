@@ -205,7 +205,29 @@ struct ImplausibleVoltage {
     if (v.node == kInvalidIndex) {
         return {};
     }
-    return std::format(
+    // add-pwl-igbt-and-thyristor 3.6: a gated device (IGBT with reverse
+    // blocking, GTO, thyristor) at the node conducts one way only and not
+    // at all with its gate off; the usual cause is a missing freewheel path.
+    std::string gated;
+    for (Index b = 0; b < graph.num_branches(); ++b) {
+        const auto& br = graph.branch(b);
+        if (!pool.is_registered(b)
+            || pool.kind_of(b) != pwl::DevicePool::StoredKind::Diode
+            || pool.diode_params(b).gate == models::SwitchedDiode::Gate::None
+            || (br.from != v.node && br.to != v.node)) {
+            continue;
+        }
+        gated += std::format("{}'{}'", gated.empty() ? "" : ", ",
+                             graph.branch_name(b));
+    }
+    if (!gated.empty()) {
+        gated = std::format(
+            " The gated device(s) {} at this node conduct one way only and "
+            "not at all with the gate off: an inductive current through "
+            "them needs a freewheel path (add_diode(..., V_f=...) across "
+            "the device or the load).", gated);
+    }
+    return gated.empty() ? std::format(
         "{} reached {:.3e} V at t = {:.6g} s, but the largest "
         "voltage any source in this circuit can produce is {:.4g} V "
         "— a factor of {:.0f}. Nothing in the solver is wrong: an "
@@ -217,7 +239,13 @@ struct ImplausibleVoltage {
         "the switching device is the usual one), or read this number "
         "as the model telling you it is missing one.",
         pwl::row_label(graph, pool, v.node), v.peak,
-        v.t_peak, v.source_scale, v.peak / v.source_scale);
+        v.t_peak, v.source_scale, v.peak / v.source_scale)
+        : std::format(
+        "{} reached {:.3e} V at t = {:.6g} s, but the largest "
+        "voltage any source in this circuit can produce is {:.4g} V "
+        "— a factor of {:.0f}.{}",
+        pwl::row_label(graph, pool, v.node), v.peak,
+        v.t_peak, v.source_scale, v.peak / v.source_scale, gated);
 }
 
 }  // namespace pulsim::solver

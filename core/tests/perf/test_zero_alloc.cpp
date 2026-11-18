@@ -26,7 +26,9 @@
 // include in the TU, and the operator-new replacement is
 // program-global.
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <new>
 #include <stdexcept>
@@ -45,6 +47,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include "pulsim/builder/circuit_builder.hpp"
+#include "pulsim/events/event_queue.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/nonlinear_refresh_diode.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
@@ -538,4 +541,144 @@ TEST_CASE("Newton iteration on a run workspace is allocation-free",
         REQUIRE(after - before == 0);
     }
     REQUIRE(w.analyses == 1);
+}
+
+TEST_CASE("event queue: no allocation after start (ticks, edges, end)",
+          "[v2][perf][zero_alloc][event_queue]") {
+    using namespace pulsim::events;
+    // A three-phase inverter's worth of sources: two tick rates, a
+    // dead-time gate oracle (six edges per 100 µs carrier period), the end.
+    EventQueue q;
+    const auto t1 = q.add_periodic(Kind::ControlTick, Rate{1e-4});
+    q.add_periodic(Kind::ControlTick, Rate{2.5e-5, 1e-6});
+    const Real T = 1e-4;
+    const auto gate = q.add_function(Kind::GateEdge, [T](Real t) {
+        const Real k = std::floor(t / T);
+        for (const Real f : {0.1, 0.12, 0.4, 0.42, 0.7, 0.72, 1.1}) {
+            const Real e = (k + std::floor(f)) * T + (f - std::floor(f)) * T;
+            if (e > t) return e;
+        }
+        return (k + 2) * T;
+    });
+    q.add_once(Kind::EndOfRun, 1.0);
+    q.start(0.0, 1.0);
+    Real t = 0.0;
+    std::size_t n_events = 0;
+    const std::size_t before = g_new_count.load();
+    for (int step = 0; step < 10000; ++step) {   // 1 µs steps
+        n_events += q.take_due(t, 1e-15, kind_bit(Kind::ControlTick)).size();
+        const Real e = q.next_after(gate, t);
+        Real t_next = t + 1e-6;
+        t_next = std::min({t_next, e, q.next_of(Kind::ControlTick)});
+        if (step % 97 == 0) {
+            q.invalidate(gate);
+        }
+        t = t_next;
+    }
+    const std::size_t after = g_new_count.load();
+    INFO("events taken: " << n_events);
+    REQUIRE(q.taken(t1) > 0);
+    if (kCountsMeaningful) {
+        REQUIRE(after - before == 0);
+    }
+}
+
+TEST_CASE("fixed engine: control ticks from the queue and step hooks",
+          "[v2][perf][zero_alloc][event_queue]") {
+    // add-unified-event-queue group 5: the kernel schedules the control
+    // ticks (integer k, instants < t_end) and calls the accepted-step and
+    // commutation hooks; neither allocates per step.
+    SwitchedRC f;
+    f.cache->build_lazy(Real{1e-6});
+    solver::SimulationOptions opts;
+    opts.t_start = 0.0;
+    opts.dt = 1e-6;
+    opts.resolution_diagnostics = false;
+    solver::SwitchScheduleFn switch_fn = [](Real t) {
+        SwitchStateMask m(2);
+        const auto k = static_cast<int>(t / 1e-6 + 0.5);
+        m.set(0, (k / 10) % 2 != 0);   // toggles every 10 steps
+        return m;
+    };
+    std::vector<std::uint32_t> order;   // tick sources, then 99 = observer
+    order.reserve(16384);
+    events::TickPlan plan;
+    plan.rates = {events::Rate{5e-5}, events::Rate{3e-5}};   // 20, 33.3 kHz
+    std::uint64_t k_seen[2] = {0, 0};
+    std::size_t bad_info = 0;
+    plan.fn = [&](std::uint32_t j, const events::TickInfo& ti, Real t,
+                  const Vector&) {
+        order.push_back(j);
+        // A grid point up to the take tolerance (1e-9*dt) before the
+        // scheduled instant counts as on it.
+        bad_info += ti.k != k_seen[j]++ || t < ti.scheduled_t - 1e-15;
+    };
+    solver::StepObserverFn obs = [&](Real, const Vector&) {
+        order.push_back(99);
+    };
+    events::StepHooks hooks;
+    std::size_t n_acc = 0, n_com = 0, bad_com = 0;
+    hooks.on_accept([&](Real t0, Real t1, const Vector&,
+                        const SwitchStateMask&) {
+        ++n_acc;
+        bad_com += !(t1 > t0);
+    });
+    hooks.on_commutation([&](const events::Commutation& c) {
+        ++n_com;
+        bad_com += c.before == c.after;
+    });
+    auto run = [&](Real t_end) {
+        opts.t_end = t_end;
+        order.clear();
+        k_seen[0] = k_seen[1] = 0;
+        n_acc = n_com = bad_info = 0;
+        const std::size_t b0 = g_new_count.load();
+        auto r = solver::run_transient(*f.cache, f.g, f.pool, opts,
+                                       switch_fn, {}, false, {}, obs, nullptr,
+                                       {}, nullptr, {}, {}, &plan, &hooks);
+        return std::pair{g_new_count.load() - b0, std::move(r)};
+    };
+    run(2e-3);   // warm-up: lazy masks
+    auto [d2, r2] = run(2e-3);
+    // ceil(2e-3 / T): 40 and 67 ticks, each before the step's observer.
+    REQUIRE(r2.control_tick_counts.size() == 2);
+    CHECK(r2.control_tick_counts[0] == 40);
+    CHECK(r2.control_tick_counts[1] == 67);
+    CHECK(bad_info == 0);
+    // Every period is a multiple of dt: no lateness.
+    CHECK(r2.control_tick_jitter_max < 1e-9 * opts.dt);
+    REQUIRE(order.size() >= 3);
+    CHECK(order[0] == 0);
+    CHECK(order[1] == 1);
+    CHECK(order[2] == 99);            // t_start: both ticks, then observer
+    CHECK(n_acc == 2000);
+    CHECK(n_com == 200);              // a toggle every 10 steps
+    CHECK(bad_com == 0);
+    auto [d4, r4] = run(4e-3);
+    CHECK(r4.control_tick_counts[0] == 80);
+    INFO("operator-new: 2000 steps " << d2 << ", 4000 steps " << d4);
+    if (kCountsMeaningful) {
+        CHECK(d4 <= d2 + 2);          // no per-step or per-tick allocation
+    }
+}
+
+TEST_CASE("fixed engine: a tick instant within 1e-9*dt of t_end does not fire",
+          "[event_queue]") {
+    SwitchedRC f;
+    f.cache->build_lazy(Real{1e-6});
+    solver::SimulationOptions opts;
+    opts.t_start = 0.0;
+    opts.t_end = 1e-4;
+    opts.dt = 1e-6;
+    solver::SwitchScheduleFn sw = [](Real) { return SwitchStateMask(2); };
+    events::TickPlan plan;
+    plan.rates = {events::Rate{2.5e-5}};   // 0, 25, 50, 75 us; 100 us = t_end
+    std::uint64_t n = 0;
+    plan.fn = [&](std::uint32_t, const events::TickInfo&, Real, const Vector&) {
+        ++n;
+    };
+    auto r = solver::run_transient(*f.cache, f.g, f.pool, opts, sw, {}, false,
+                                   {}, {}, nullptr, {}, nullptr, {}, {}, &plan);
+    CHECK(n == 4);
+    CHECK(r.control_tick_counts[0] == 4);
 }

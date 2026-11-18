@@ -20,8 +20,8 @@
 // with `std::from_chars`, so `to_yaml` is a fixed point after one round.
 //
 // Not serialisable, and refused naming the device: a C block (its step
-// function is a Python callable) and an unnamed device another entry
-// must refer to.
+// function is a Python callable), an unnamed device another entry
+// must refer to, and a loss port (set_device_losses; not in the dialect).
 
 #include "pulsim/ir/circuit.hpp"
 #include "pulsim/models/charge_table.hpp"
@@ -60,7 +60,7 @@ inline constexpr std::array<std::string_view, pwl::DevicePool::kNumKinds> kKindY
     "igbt_level1", "vcvs", "saturable_inductor", "nonlinear_capacitor",
     "shockley_diode", "lauritzen_diode", "pmsm_mna", "ideal_transformer",
     "vccs", "cccs", "ccvs", "gyrator", "sine_current_source",
-    "pulse_current_source", "pwl_current_source"};
+    "pulse_current_source", "pwl_current_source", "induction_machine_mna"};
 
 namespace yaml_detail {
 
@@ -102,6 +102,7 @@ namespace m = ::pulsim::models;
         case K::NonlinearDiode: case K::MosfetLevel1: case K::IgbtLevel1:
         case K::SaturableInductor: case K::NonlinearCapacitor:
         case K::ShockleyDiode: case K::LauritzenDiode: case K::PmsmMna:
+        case K::InductionMachineMna:
             return BK::Nonlinear;
         default:
             return BK::Source;
@@ -157,10 +158,28 @@ inline constexpr std::array<std::string_view, 4> kRoles{
     return o + "]";
 }
 
+/// A non-finite number met while writing key `key` (to_yaml names the
+/// entry): NaN / inf cannot round-trip as a value of a circuit.
+struct NonFinite { std::string key, token; };
+
+/// The non-finite token in `v` (a number or a list of numbers), or "".
+[[nodiscard]] inline std::string_view non_finite_in(std::string_view v) noexcept {
+    if (v.empty() || v.front() == '"' || v.front() == '{' ||
+        v.find('"') != std::string_view::npos) return {};
+    for (const std::string_view t : {std::string_view{"-.inf"}, std::string_view{".inf"},
+                                     std::string_view{".nan"}}) {
+        if (v.find(t) != std::string_view::npos) return t;
+    }
+    return {};
+}
+
 /// A flow map built key by key; values are already YAML text.
 struct Map {
     std::string s;
     Map& add(std::string_view k, std::string v) {
+        if (const auto t = non_finite_in(v); !t.empty()) {
+            throw NonFinite{std::string{k}, std::string{t}};
+        }
         s += s.empty() ? "{" : ", ";
         s += k; s += ": "; s += v;
         return *this;
@@ -173,10 +192,12 @@ struct Map {
 }
 
 /// The non-derived rows of `row` whose value differs from the default.
-inline void put_fields(Map& m, const ParamsVariant& v, std::span<const FieldSpec> row) {
+/// `skip` names a field written elsewhere (a branch-form g_on = 1/R_on).
+inline void put_fields(Map& m, const ParamsVariant& v, std::span<const FieldSpec> row,
+                       std::string_view skip = {}) {
     const ParamsVariant d = make_params(v.index());
     for (const auto& f : row) {
-        if (f.derived) continue;
+        if (f.derived || (!skip.empty() && f.name == skip)) continue;
         const Real x = f.get(v);
         if (!same_bits(x, f.get(d))) m.add(f.name, num(x));
     }
@@ -223,9 +244,26 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
 
 }  // namespace yaml_detail
 
+namespace yaml_detail {
+[[nodiscard]] inline std::string to_yaml_body_(const Circuit& c, std::string& where);
+}  // namespace yaml_detail
+
 /// The circuit as YAML (see the file comment). Throws
-/// `std::invalid_argument` naming what cannot be written.
+/// `std::invalid_argument` naming what cannot be written, a NaN or an
+/// infinity among them (`to_yaml: device "R1": "G" is .nan ...`).
 [[nodiscard]] inline std::string to_yaml(const Circuit& c) {
+    std::string where = "the document";
+    try {
+        return yaml_detail::to_yaml_body_(c, where);
+    } catch (const yaml_detail::NonFinite& e) {
+        throw std::invalid_argument(std::format(
+            "to_yaml: {}: \"{}\" is {}; a non-finite value cannot be written "
+            "(set a finite one)", where, e.key, e.token));
+    }
+}
+
+[[nodiscard]] inline std::string yaml_detail::to_yaml_body_(const Circuit& c,
+                                                            std::string& where) {
     using namespace yaml_detail;
     const auto& g = c.graph();
     const auto& pool = c.pool();
@@ -248,34 +286,50 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
     o += "]\ndevices:\n";
 
     const auto& machines = pool.pmsm_mna_machines();
+    const auto& inductions = pool.induction_machines();
     const auto devs = c.devices();
     for (Index bi = 0; bi < g.num_branches(); ++bi) {
         const auto kind = pool.kind_of(bi);
         const auto& dev = devs[static_cast<std::size_t>(bi)];
         const auto& prm = pool.params_of(bi);
+        where = std::format("device \"{}\"", dev.name);
         Map e;
         e.add("kind", std::string{kKindYaml[static_cast<std::size_t>(kind)]});
-        if (kind == K::PmsmMna) {
-            const auto mach = std::ranges::find_if(machines, [&](const auto& mc) {
+        if (kind == K::PmsmMna || kind == K::InductionMachineMna) {
+            auto owns = [&](const auto& mc) {
                 return std::ranges::find(mc.branch_id, bi) != mc.branch_id.end();
-            });
-            if (mach->branch_id[0] != bi) continue;  // written with phase a
+            };
+            const auto pm = std::ranges::find_if(machines, owns);
+            const auto im = std::ranges::find_if(inductions, owns);
+            const auto& ids = kind == K::PmsmMna ? pm->branch_id : im->branch_id;
+            if (ids[0] != bi) continue;  // written with phase a
             for (std::size_t ph = 1; ph < 3; ++ph) {
-                if (mach->branch_id[ph] != bi + static_cast<Index>(ph)) {
+                if (ids[ph] != bi + static_cast<Index>(ph)) {
                     throw std::invalid_argument(std::format(
-                        "to_yaml: PMSM \"{}\": its phase branches are not "
+                        "to_yaml: machine \"{}\": its phase branches are not "
                         "consecutive", dev.name));
                 }
             }
             std::string phases = "[";
             for (std::size_t ph = 0; ph < 3; ++ph) {
-                const auto& br = g.branch(mach->branch_id[ph]);
+                const auto& br = g.branch(ids[ph]);
                 phases += (ph ? ", " : "") + Map{}
-                    .add("name", quote(g.branch_name(mach->branch_id[ph])))
+                    .add("name", quote(g.branch_name(ids[ph])))
                     .add("pins", "[" + node(br.from) + ", " + node(br.to) + "]").str();
             }
             e.add("phases", phases + "]");
-            e.add("omega", node(mach->omega_node)).add("theta", node(mach->theta_node));
+            if (kind == K::PmsmMna) {
+                e.add("omega", node(pm->omega_node)).add("theta", node(pm->theta_node));
+                if (const auto& hs = pm->params.harmonics) {
+                    std::vector<Real> flat;  // h, psi, phi per term
+                    for (const auto& t : *hs) flat.insert(flat.end(), {t.h, t.psi, t.phi});
+                    e.add("harmonics", nums(flat));
+                }
+            } else {
+                e.add("omega", node(im->omega_node))
+                    .add("rotor", "[" + node(im->rotor_node[0]) + ", " +
+                                  node(im->rotor_node[1]) + "]");
+            }
             put_fields(e, prm, fields_of(kind));
             o += "  - " + e.str() + "\n";
             continue;
@@ -292,9 +346,17 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
         if (kind == K::CCCS || kind == K::CCVS) {
             e.add("control", bname(pool.control_branch(bi), dev.name));
         }
-        put_fields(e, prm, fields_of(kind));
+        // a branch-form g_on is 1/R_on (inf when ideal): branch_form carries R_on
+        put_fields(e, prm, fields_of(kind), pool.is_branch_form(bi) ? "g_on" : "");
         std::visit([&](const auto& p) {
             using P = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<P, m::SwitchedDiode::Params>) {
+                // add-pwl-igbt-and-thyristor: a gated device keeps its gate
+                if (p.gate != m::SwitchedDiode::Gate::None) {
+                    e.add("gate", std::to_string(static_cast<int>(p.gate)));
+                    if (p.I_H != Real{0}) e.add("I_H", num(p.I_H));
+                }
+            }
             if constexpr (std::is_same_v<P, m::SaturableInductor::Params>) {
                 if (p.table) e.add("table", flux_table(*p.table));
                 if (p.ja) e.add("ja", ja_core(*p.ja));
@@ -332,11 +394,22 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
                 .add("R_on", num(pool.branch_R_on(bi))).str() + "\n";
         }
     }
+    if (const auto sc = b.scopes(); !sc.empty()) {
+        o += "scopes:\n";   // parents before children (creation order)
+        for (const auto& x : sc) {
+            Map mm;
+            mm.add("path", quote(x.path));
+            if (!x.kind.empty()) mm.add("kind", quote(x.kind));
+            o += "  - " + mm.str() + "\n";
+        }
+    }
     if (const auto ps = b.parameters(); !ps.empty()) {
         o += "parameters:\n";
         for (const auto& p : ps) {
+            where = std::format("parameter \"{}\"", p.name);
             Map mm;
             mm.add("name", quote(p.name));
+            if (p.scope != 0) mm.add("scope", quote(b.scope_path(p.scope)));
             if (p.expr.empty()) mm.add("value", num(p.value));
             else mm.add("expr", quote(p.expr));
             if (!p.unit.empty()) mm.add("unit", quote(p.unit));
@@ -358,6 +431,7 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
     if (const auto ics = c.initial_conditions(); !ics.empty()) {
         o += "initial_conditions:\n";
         for (const auto& ic : ics) {
+            where = "an initial condition";
             o += "  - " + Map{}.add("device", bname(static_cast<Index>(ic.device.v), "an initial condition"))
                 .add("value", num(ic.value)).str() + "\n";
         }
@@ -377,6 +451,7 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
         o += "power_mosfets:\n";
         for (const Index ch : channels) {
             const auto& r = *b.power_mosfet_record(ch);
+            where = std::format("power MOSFET \"{}\"", g.branch_name(ch));
             const auto& p = r.params;
             std::string members = "[";
             for (std::size_t i = 0; i < r.sub_elements.size(); ++i) {
@@ -399,6 +474,14 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
                 .add("rds_tc2", num(p.rds_tc2)).add("vt_tc", num(p.vt_tc));
             o += "  - " + mm.str() + "\n";
         }
+    }
+    // shortcut: refused, not written; the IR track adds loss ports to the
+    // dialect (and to value_hash). Silently dropping one lost its heat.
+    if (const auto& ls = pool.device_losses(); !ls.empty()) {
+        throw std::invalid_argument(std::format(
+            "to_yaml: device \"{}\" has a loss port (set_device_losses), "
+            "which this YAML dialect does not carry yet; build the circuit "
+            "without it to serialise or pickle it", ls.front().device));
     }
     if (const auto cs = c.controls(); !cs.empty()) {
         o += "controls:\n";
@@ -425,15 +508,17 @@ struct YamlIo {
         throw std::invalid_argument(std::format("from_yaml: {}: {}", who, what));
     }
 
+    static std::string num_text_(Real x) { return yaml_detail::num(x); }
+
     static Real real(const YAML::Node& n, std::string_view who, std::string_view key) {
         if (!n || !n.IsScalar()) fail(who, std::format("\"{}\" must be a number", key));
         const std::string& s = n.Scalar();
-        if (s == ".nan") return std::numeric_limits<Real>::quiet_NaN();
-        if (s == ".inf") return std::numeric_limits<Real>::infinity();
-        if (s == "-.inf") return -std::numeric_limits<Real>::infinity();
         Real x{};
         if (!numeric::parse_real(s.data(), s.data() + s.size(), x)) {
             fail(who, std::format("\"{}\" is not a number: \"{}\"", key, s));
+        }
+        if (!std::isfinite(x)) {   // from_chars reads "nan" / "inf"; to_yaml never writes them
+            fail(who, std::format("\"{}\" must be a finite number, got \"{}\"", key, s));
         }
         return x;
     }
@@ -502,62 +587,21 @@ struct YamlIo {
         return p;
     }
 
-    static Circuit read(std::string_view text_in) {
-        const YAML::Node root = [&] {
-            try {
-                return YAML::Load(std::string{text_in});
-            } catch (const YAML::Exception& e) {
-                fail("document", e.what());
-            }
-        }();
-        if (!root.IsMap()) fail("document", "expected a mapping");
-        keys(root, "document", {"pulsim_circuit", "nodes", "devices", "couplings",
-                                "branch_form", "parameters", "bindings",
-                                "initial_conditions", "aliases", "power_mosfets",
-                                "controls"});
-        if (text(root["pulsim_circuit"], "document", "pulsim_circuit") != "1") {
-            fail("document", "pulsim_circuit must be 1");
-        }
-        for (const auto* k : {"nodes", "devices", "couplings", "branch_form", "parameters",
-                              "bindings", "initial_conditions", "aliases",
-                              "power_mosfets", "controls"}) {
-            if (root[k] && !root[k].IsSequence()) fail(k, "must be a list");
-        }
-        builder::CircuitBuilder b;
-        if (const auto ns = root["nodes"]) {
-            for (const auto& n : ns) {
-                const auto name = text(n, "nodes", "nodes");
-                // Sequenced: the operands of != have no evaluation order (MSVC
-                // read num_nodes() before resolve_node_ created the node).
-                const Index created = b.resolve_node_(name);
-                if (created != b.graph().num_nodes() - 1) {
-                    fail("nodes", std::format("\"{}\" is listed twice or names ground", name));
-                }
-            }
-        }
-        const auto n_nodes = b.graph().num_nodes();
-        auto pin = [&](const YAML::Node& n, std::string_view who) {
-            const Index i = b.resolve_node_(text(n, who, "pins"));
-            if (b.graph().num_nodes() != n_nodes) {
-                fail(who, std::format("pin \"{}\" is not in nodes", n.Scalar()));
-            }
-            return i;
-        };
+    struct Pending { YAML::Node n; K kind; std::string name; std::vector<Index> branches; };
 
-        // Pass 1: every branch, so a sensed branch named later resolves.
-        struct Pending { YAML::Node n; K kind; std::string name; std::vector<Index> branches; };
-        std::vector<Pending> pend;
-        for (const auto& d : root["devices"]) {
+    /// Pass 1 of one device entry: its branches (names, pins, roles).
+    template <class Pin>
+    static Pending begin_entry_(builder::CircuitBuilder& b, const YAML::Node& d, Pin& pin) {
             if (!d.IsMap()) fail("a device", "expected a mapping");
             const auto ks = text(d["kind"], "a device", "kind");
             const auto it = std::ranges::find(kKindYaml, std::string_view{ks});
             if (it == kKindYaml.end()) fail(ks, "unknown kind");
             const auto kind = static_cast<K>(it - kKindYaml.begin());
             Pending p{d, kind, {}, {}};
-            if (kind == K::PmsmMna) {
+            if (kind == K::PmsmMna || kind == K::InductionMachineMna) {
                 const auto ph = d["phases"];
                 p.name = ph && ph.IsSequence() && ph.size() == 3
-                    ? text(ph[0]["name"], "pmsm_mna", "name") : "pmsm_mna";
+                    ? text(ph[0]["name"], ks, "name") : ks;
                 if (!ph || !ph.IsSequence() || ph.size() != 3) fail(p.name, "needs three phases");
                 for (const auto& x : ph) {
                     if (!x.IsMap()) fail(p.name, "each phase is {name, pins}");
@@ -588,8 +632,94 @@ struct YamlIo {
                 const std::array<Index, 2> ab{pin(pins[0], p.name), pin(pins[1], p.name)};
                 p.branches.push_back(b.add_branch_(p.name, ab[0], ab[1], role));
             }
-            pend.push_back(std::move(p));
+            return p;
+    }
+
+    static void check_bounds_(builder::CircuitBuilder& b, const Pending& pd) {
+        const Index bi = pd.branches.front();
+        const bool form = b.pool_.is_branch_form(bi);
+        for (const auto& f : fields_of(pd.kind)) {
+            if (f.derived || !pd.n[std::string{f.name}]) continue;
+            if (form && (f.name == "g_on" || f.name == "g_off")) continue;
+            const Real x = f.get(b.pool_.params_of(bi));
+            if (!within(f.bound, x)) {
+                fail(pd.name, std::format("{} must be {} (got {})", f.name,
+                                          bound_text(f.bound), num_text_(x)));
+            }
         }
+        if (form) {
+            Real g_off = 0;
+            std::visit([&](const auto& prm) {
+                if constexpr (requires { prm.g_off; }) g_off = prm.g_off;
+            }, b.pool_.params_of(bi));
+            try {
+                builder::CircuitBuilder::require_branch_values_(
+                    "from_yaml", pd.name, b.pool_.branch_R_on(bi), g_off);
+            } catch (const std::invalid_argument& e) {
+                fail(pd.name, e.what());
+            }
+        }
+    }
+
+    /// One entry of this dialect (`{kind, name, pins, <fields>}`) read into
+    /// `b` with its pins created by name: the authoring loader's reader
+    /// for a registry kind it has no authoring type for, so every kind
+    /// the emitter writes is a kind `yaml::load` reads (one table,
+    /// `kKindYaml` / `kKindFields`, checked at compile time).
+    static void read_entry(builder::CircuitBuilder& b, const YAML::Node& d) {
+        auto pin = [&](const YAML::Node& n, std::string_view who) {
+            return b.resolve_node_(text(n, who, "pins"));
+        };
+        const auto p = begin_entry_(b, d, pin);
+        add_device_(b, p.n, p.kind, p.name, p.branches, pin);
+        check_bounds_(b, p);
+    }
+
+    static Circuit read(std::string_view text_in, bool bounds = true) {
+        const YAML::Node root = [&] {
+            try {
+                return YAML::Load(std::string{text_in});
+            } catch (const YAML::Exception& e) {
+                fail("document", e.what());
+            }
+        }();
+        if (!root.IsMap()) fail("document", "expected a mapping");
+        keys(root, "document", {"pulsim_circuit", "nodes", "devices", "couplings",
+                                "branch_form", "scopes", "parameters", "bindings",
+                                "initial_conditions", "aliases", "power_mosfets",
+                                "controls"});
+        if (text(root["pulsim_circuit"], "document", "pulsim_circuit") != "1") {
+            fail("document", "pulsim_circuit must be 1");
+        }
+        for (const auto* k : {"nodes", "devices", "couplings", "branch_form", "scopes", "parameters",
+                              "bindings", "initial_conditions", "aliases",
+                              "power_mosfets", "controls"}) {
+            if (root[k] && !root[k].IsSequence()) fail(k, "must be a list");
+        }
+        builder::CircuitBuilder b;
+        if (const auto ns = root["nodes"]) {
+            for (const auto& n : ns) {
+                const auto name = text(n, "nodes", "nodes");
+                // Sequenced: the operands of != have no evaluation order (MSVC
+                // read num_nodes() before resolve_node_ created the node).
+                const Index created = b.resolve_node_(name);
+                if (created != b.graph().num_nodes() - 1) {
+                    fail("nodes", std::format("\"{}\" is listed twice or names ground", name));
+                }
+            }
+        }
+        const auto n_nodes = b.graph().num_nodes();
+        auto pin = [&](const YAML::Node& n, std::string_view who) {
+            const Index i = b.resolve_node_(text(n, who, "pins"));
+            if (b.graph().num_nodes() != n_nodes) {
+                fail(who, std::format("pin \"{}\" is not in nodes", n.Scalar()));
+            }
+            return i;
+        };
+
+        // Pass 1: every branch, so a sensed branch named later resolves.
+        std::vector<Pending> pend;
+        for (const auto& d : root["devices"]) pend.push_back(begin_entry_(b, d, pin));
         // Pass 2: the pool, in branch order (its counters follow it).
         for (const auto& p : pend) add_device_(b, p.n, p.kind, p.name, p.branches, pin);
 
@@ -611,17 +741,49 @@ struct YamlIo {
             const auto bi = b.branch_id_of(nm);
             const auto fk = b.pool_.kind_of(bi);
             if (fk != K::Switch && fk != K::Diode) fail(nm, "branch form is for a switch or a diode");
-            b.pool_.set_branch_form(bi, real(f["R_on"], nm, "R_on"));
+            const Real R_on = real(f["R_on"], nm, "R_on");
+            b.pool_.set_branch_form(bi, R_on);
+            for (const auto& fs : fields_of(fk)) {   // g_on is not written: 1/R_on, as add_* sets it
+                if (fs.name == "g_on") fs.set(b.pool_.params_of_mut(bi), builder::CircuitBuilder::branch_g_on_(R_on));
+            }
+        }
+        // The authoring bounds (`ir::kKindFields`), as with_value applies
+        // them, on every value the document writes (an omitted value is
+        // the model's default). A branch-form switch or diode has its own
+        // rule (R_on, g_off >= 0; g_on = 1/R_on). Not every add_* checks
+        // them (add_resistor takes R < 0), so a pickle, whose text this
+        // library wrote, reads with bounds = false.
+        if (bounds) for (const auto& pd : pend) check_bounds_(b, pd);
+        for (const auto& x : root["scopes"]) {
+            keys(x, "a scope", {"path", "kind"});
+            const auto path = text(x["path"], "a scope", "path");
+            const auto kind = x["kind"] ? text(x["kind"], path, "kind") : std::string{};
+            const auto slash = path.rfind('/');
+            if (b.scope_index_.contains(path)) fail(path, "scope listed twice");
+            if (slash != std::string::npos && !b.scope_index_.contains(path.substr(0, slash))) {
+                fail(path, "a scope must follow its parent");
+            }
+            (void)b.open_scope(path, kind);   // creates exactly this scope
+            b.close_scope();
         }
         for (const auto& p : root["parameters"]) {
-            keys(p, "a parameter", {"name", "value", "expr", "unit", "lo", "hi"});
-            const auto nm = text(p["name"], "a parameter", "name");
+            keys(p, "a parameter", {"name", "scope", "value", "expr", "unit", "lo", "hi"});
+            auto nm = text(p["name"], "a parameter", "name");
             std::optional<Real> lo, hi;
             if (p["lo"]) lo = real(p["lo"], nm, "lo");
             if (p["hi"]) hi = real(p["hi"], nm, "hi");
             const auto unit = p["unit"] ? text(p["unit"], nm, "unit") : std::string{};
+            if (p["scope"]) {   // declared inside it: name = scope path + "/" + local
+                const auto sp = text(p["scope"], nm, "scope");
+                const auto it = b.scope_index_.find(sp);
+                if (it == b.scope_index_.end()) fail(nm, std::format("unknown scope \"{}\"", sp));
+                if (!nm.starts_with(sp + "/")) fail(nm, std::format("not a name in scope \"{}\"", sp));
+                nm = nm.substr(sp.size() + 1);
+                b.cur_scope_ = it->second;
+            }
             if (p["expr"]) b.param_expr(nm, text(p["expr"], nm, "expr"), unit, lo, hi);
             else b.param(nm, real(p["value"], nm, "value"), unit, lo, hi);
+            b.cur_scope_ = 0;
         }
         for (const auto& bd : root["bindings"]) {
             keys(bd, "a binding", {"param", "field"});
@@ -665,7 +827,11 @@ private:
         namespace m = ::pulsim::models;
         const auto row = fields_of(kind);
         keys(n, who, {"kind", "name", "pins", "role", "control", "phases", "omega", "theta",
-                      "table", "ja", "law", "t", "i", "periodic"}, row);
+                      "rotor", "harmonics", "table", "ja", "law", "t", "i", "periodic", "gate", "I_H"}, row);
+        if (n["harmonics"] && kind != K::PmsmMna) fail(who, "harmonics is a pmsm_mna key");
+        if (n["rotor"] && kind != K::InductionMachineMna) {
+            fail(who, "rotor is an induction_machine_mna key");
+        }
         ParamsVariant v = yaml_detail::make_params(static_cast<std::size_t>(kind));
         set_fields(v, n, who, row);
         auto& pool = b.pool_;
@@ -680,7 +846,15 @@ private:
             else if constexpr (std::is_same_v<P, pwl::DevicePool::SwitchParams>) pool.add_switch(bi, p.g_on, p.g_off);
             else if constexpr (std::is_same_v<P, m::Capacitor::Params>) pool.add_capacitor(bi, p);
             else if constexpr (std::is_same_v<P, m::Inductor::Params>) pool.add_inductor(bi, p);
-            else if constexpr (std::is_same_v<P, m::SwitchedDiode::Params>) pool.add_diode(bi, p.g_on, p.g_off, p.V_th, p.V_f);
+            else if constexpr (std::is_same_v<P, m::SwitchedDiode::Params>) {
+                const int gate = n["gate"] ? integer(n["gate"], who, "gate", 1, 2) : 0;
+                const Real I_H = n["I_H"] ? real(n["I_H"], who, "I_H") : Real{0};
+                if (gate == 0 && n["I_H"]) fail(who, "I_H without a gate");
+                if (!(I_H >= Real{0}) || !std::isfinite(I_H)) fail(who, "I_H must be a finite number >= 0");
+                if (gate == 0) pool.add_diode(bi, p.g_on, p.g_off, p.V_th, p.V_f);
+                else pool.add_gated_diode(bi, p.g_on, p.g_off, p.V_th, p.V_f,
+                                          static_cast<m::SwitchedDiode::Gate>(gate), I_H);
+            }
             else if constexpr (std::is_same_v<P, m::IdealDiode::Params>) pool.add_nonlinear_diode(bi, p);
             else if constexpr (std::is_same_v<P, m::CurrentSource::Params>) pool.add_current_source(bi, p);
             else if constexpr (std::is_same_v<P, m::PWMVoltageSource::Params>) pool.add_pwm_voltage_source(bi, p);
@@ -717,9 +891,27 @@ private:
             } else if constexpr (std::is_same_v<P, m::ShockleyDiode::Params>) pool.add_shockley_diode(bi, p);
             else if constexpr (std::is_same_v<P, m::LauritzenDiode::Params>) pool.add_lauritzen_diode(bi, p);
             else if constexpr (std::is_same_v<P, m::PmsmMna::Params>) {
+                if (const auto hn = n["harmonics"]) {
+                    const auto flat = reals(hn, who, "harmonics");
+                    if (flat.size() % 3 != 0) fail(who, "harmonics is a flat list of (h, psi, phi)");
+                    std::vector<m::PmsmMna::PmHarmonic> hs;
+                    for (std::size_t k = 0; k < flat.size(); k += 3) {
+                        hs.push_back({flat[k], flat[k + 1], flat[k + 2]});
+                    }
+                    p.harmonics = std::make_shared<const std::vector<m::PmsmMna::PmHarmonic>>(
+                        std::move(hs));
+                }
                 // braced: omega before theta (not as two arguments)
                 const std::array<Index, 2> ot{pin(n["omega"], who), pin(n["theta"], who)};
                 pool.add_pmsm_mna({br[0], br[1], br[2]}, ot[0], ot[1], p);
+            } else if constexpr (std::is_same_v<P, m::InductionMachineMna::Params>) {
+                const auto rn = n["rotor"];
+                if (!rn || !rn.IsSequence() || rn.size() != 2) fail(who, "rotor needs two nodes");
+                // braced: omega, then the rotor nodes, in order
+                const std::array<Index, 3> orr{pin(n["omega"], who), pin(rn[0], who),
+                                               pin(rn[1], who)};
+                pool.add_induction_machine_mna({br[0], br[1], br[2]}, orr[0],
+                                               {orr[1], orr[2]}, p);
             } else if constexpr (std::is_same_v<P, m::IdealTransformer::Params>) { const auto c = xpins(); pool.add_ideal_transformer(bi, c[0], c[1], p); }
             else if constexpr (std::is_same_v<P, m::VCCS::Params>) { const auto c = xpins(); pool.add_vccs(bi, c[0], c[1], p); }
             else if constexpr (std::is_same_v<P, m::CCCS::Params>) pool.add_cccs(bi, b.branch_id_of(text(n["control"], who, "control")), p);
@@ -785,10 +977,11 @@ private:
 };
 
 /// Inverse of `to_yaml`. Throws `std::invalid_argument` naming the
-/// device and the key on a malformed document.
-[[nodiscard]] inline Circuit from_yaml(std::string_view text) {
+/// device and the key on a malformed document, or on a value outside
+/// its bound unless `bounds` is false (pickle: text this library wrote).
+[[nodiscard]] inline Circuit from_yaml(std::string_view text, bool bounds = true) {
     try {
-        return YamlIo::read(text);
+        return YamlIo::read(text, bounds);
     } catch (const YAML::Exception& e) {  // a shape the checks above missed
         throw std::invalid_argument(std::format("from_yaml: malformed document: {}", e.what()));
     } catch (const std::out_of_range& e) {  // branch_id_of: an unknown device name

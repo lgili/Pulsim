@@ -31,8 +31,8 @@ def sf(t):
 
 try:
     var = p.simulate(build(), t_end=1e-3, switch_fn=sf, engine="trbdf2", rtol=1e-6, atol=1e-9)
-    t = np.asarray(var.times); v = np.asarray(var.v("vout")); m = t > 0.8e-3
-    dc = np.trapezoid(v[m], t[m]) / (t[m][-1] - t[m][0])
+    t = np.asarray(var.times)
+    dc = p.time_average(t, var.v("vout"), t_from=0.8e-3)   # exactly clipped
     print(f"COMPLETED: V_out(0.8-1 ms, time-weighted) = {dc:.4f} V (pwl dt=1e-8: 15.31 V); "
           f"min step {np.diff(t).min():.2e}; stats {var._trbdf2_stats}")
 except p.SimulationAborted as e:

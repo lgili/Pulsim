@@ -90,7 +90,7 @@ public:
             if (!pool.is_registered(b)) continue;
             const auto k = pool.kind_of(b);
             if (k != K::SaturableInductor && k != K::NonlinearCapacitor &&
-                k != K::PmsmMna) {
+                k != K::PmsmMna && k != K::InductionMachineMna) {
                 continue;
             }
             throw UnsupportedError(

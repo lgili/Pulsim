@@ -35,7 +35,18 @@
 // stamp: the two stages read one committed quantity instead of each
 // deriving its own, and cannot disagree about what the last step
 // did.
+//
+// INDUCTION MACHINES (add-mna-native-machines group 2) share this
+// history: their stator rows are the same flux rows with
+// λ_abc = L·i + M·λ_r, a CONSTANT L and the rotor flux λ_r read from
+// two internal nodes (1 F capacitors the engine integrates itself).
+// An entry with `induction == true` reads `im` instead of `params`;
+// every commit / snapshot / stage path below is the PMSM's, so the
+// engines need no second plumbing. PMSM entries come first, then the
+// induction machines, in insertion order (the flat snapshot relies on
+// it).
 
+#include "pulsim/models/induction_machine_mna.hpp"
 #include "pulsim/models/pmsm_mna.hpp"
 #include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -69,6 +80,10 @@ public:
         std::array<Real, 3> dlam_old{};
         //! λ at the γ stage point, for the BDF2 stage.
         std::array<Real, 3> lambda_gamma{};
+        //! Induction machine: rotor-flux nodes and parameters.
+        bool induction = false;
+        std::array<Index, 2> rotor_node{-1, -1};
+        models::InductionMachineMna::Params im{};
     };
 
     void init(const topology::Graph& graph, const DevicePool& pool) {
@@ -94,6 +109,27 @@ public:
                 e.params, Real{0}, 0);
             entries_.push_back(e);
         }
+        for (const auto& m : pool.induction_machines()) {
+            Entry e;
+            e.induction = true;
+            e.branch_id = m.branch_id;
+            for (Size k = 0; k < 3; ++k) {
+                const auto& br = graph.branch(m.branch_id[k]);
+                e.phase_node[k] = br.from;
+                e.neutral = br.to;
+                e.cur_row[k] =
+                    pool.branch_var_id_for_inductor(m.branch_id[k],
+                                                    graph);
+            }
+            e.omega_node = m.omega_node;
+            e.rotor_node = m.rotor_node;
+            e.im = m.params;
+            entries_.push_back(e);   // λ_old = 0: no current, no rotor flux
+        }
+    }
+
+    [[nodiscard]] static Real r_s(const Entry& e) noexcept {
+        return e.induction ? e.im.R_s : e.params.R_s;
     }
 
     [[nodiscard]] bool empty() const noexcept {
@@ -112,6 +148,12 @@ public:
     /// λ at the terminal voltages in `x`, from the model's own law.
     [[nodiscard]] static std::array<Real, 3> lambda_at(
         const Entry& e, const Vector& x) {
+        if (e.induction) {
+            return models::InductionMachineMna::lambda_s(
+                e.im, {x[e.cur_row[0]], x[e.cur_row[1]], x[e.cur_row[2]]},
+                {stamping::read_node_voltage(x, e.rotor_node[0]),
+                 stamping::read_node_voltage(x, e.rotor_node[1])});
+        }
         const Real th = theta_e_of(e, x);
         const auto ind = models::PmsmMna::inductance(e.params, th);
         const auto lpm = models::PmsmMna::lambda_pm(e.params, th, 0);
@@ -139,22 +181,17 @@ public:
         const Vector& x, Real /*h*/,
         TrBdf2Stage /*stage*/ = TrBdf2Stage::Trapezoidal) {
         for (auto& e : entries_) {
-            const Real th = theta_e_of(e, x);
-            const auto ind = models::PmsmMna::inductance(e.params, th);
-            const auto lpm = models::PmsmMna::lambda_pm(e.params, th, 0);
+            const auto lam = lambda_at(e, x);
             const Real v_n = stamping::read_node_voltage(x, e.neutral);
-            std::array<Real, 3> i{};
-            for (Size k = 0; k < 3; ++k) i[k] = x[e.cur_row[k]];
             for (Size k = 0; k < 3; ++k) {
-                Real lam = lpm[k];
-                for (Size j = 0; j < 3; ++j) lam += ind.L[k][j] * i[j];
-                e.lambda_old[k] = lam;
-                e.i_old[k] = i[k];
+                const Real i = x[e.cur_row[k]];
+                e.lambda_old[k] = lam[k];
+                e.i_old[k] = i;
                 e.v_old[k] =
                     stamping::read_node_voltage(x, e.phase_node[k]) - v_n;
                 // dλ/dt from the device equation itself, exact at
                 // the converged point under either stage.
-                e.dlam_old[k] = e.v_old[k] - e.params.R_s * i[k];
+                e.dlam_old[k] = e.v_old[k] - r_s(e) * i;
             }
         }
     }
@@ -180,7 +217,7 @@ public:
                 e.v_old[k] =
                     stamping::read_node_voltage(x_probe, e.phase_node[k])
                     - v_n;
-                e.dlam_old[k] = e.v_old[k] - e.params.R_s * e.i_old[k];
+                e.dlam_old[k] = e.v_old[k] - r_s(e) * e.i_old[k];
             }
         }
     }
@@ -252,7 +289,7 @@ public:
             for (Size k = 0; k < 3; ++k) e.i_old[k] = flat[p++];
             for (Size k = 0; k < 3; ++k) e.v_old[k] = flat[p++];
             for (Size k = 0; k < 3; ++k) {
-                e.dlam_old[k] = e.v_old[k] - e.params.R_s * e.i_old[k];
+                e.dlam_old[k] = e.v_old[k] - r_s(e) * e.i_old[k];
             }
         }
     }

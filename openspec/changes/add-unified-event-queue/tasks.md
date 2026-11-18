@@ -8,7 +8,7 @@ full suite plus the per-step hash test added in 0.2); "matrix" = the
 conformance test of `add-engine-conformance-matrix`.
 
 ## 0. Preconditions and baseline
-- [ ] 0.1 `add-engine-conformance-matrix` merged; record its schedule × engine and feature × engine cells
+- [ ] 0.1 `add-engine-conformance-matrix` merged (it is); record its schedule × engine and feature × engine cells
 - [ ] 0.2 Record for the buck, the synchronous buck with dead time, the three-phase VSI and one closed-loop buck: fixed-engine state hash, TR-BDF2 `n_accept` / `n_reject` / `n_gate_events` / `n_ctrl_ticks` / `n_diode_events`, DSED event count, ns/step (audit rows 1, 2, 16–18)
 - [ ] 0.3 Analytic edge counts for those circuits (edges per period × periods) written into the test as constants
 
@@ -18,11 +18,11 @@ conformance test of `add-engine-conformance-matrix`.
 - [ ] 1.3 Oracle: goldens bit-identical; TR-BDF2 counters identical; `test_pwm_grid_edges.py`; matrix unchanged or improved (`NativeMultiMaskPwm` exact on every engine)
 
 ## 2. The queue, used by TR-BDF2
-- [ ] 2.1 `events/time_event.hpp`, `events/event_queue.hpp`: `Kind`, `TimeEvent`, `TimeSource`, `EventQueue` (fixed-size heap, `next_landing`, `take_at`, `invalidate`, counters)
-- [ ] 2.2 `events/gate_source.hpp`: `GateSource`, `ScheduleGate`, index composition with the overlap check
-- [ ] 2.3 Unit tests: k-way merge order, simultaneity order, integer-counter times (no drift over 10⁷ periods), no allocation after `start`
-- [ ] 2.4 TR-BDF2 uses the queue for gate, tick and end-of-run landing; `next_edge_fn` / `observer_period` become adapters that register sources
-- [ ] 2.5 Oracle: for every harness circuit with an analytic schedule, the accepted-step sequence and the states are identical to 0.2; zero-alloc tests green
+- [x] 2.1 `events/time_event.hpp`, `events/event_queue.hpp`: `Kind`, `TimeEvent`, `TimeSource`, `EventQueue` (fixed-size heap, `next_landing`, `take_at`, `invalidate`, counters) — done as one header with three source shapes, a linear scan and `take_due` (DECISIONS 1)
+- [x] 2.2 `events/gate_source.hpp`: `GateSource`, `ScheduleGate`, index composition with the overlap check (DECISIONS 7; engines consume it through `to_schedule()`)
+- [x] 2.3 Unit tests: k-way merge order, simultaneity order, integer-counter times (no drift over 10⁷ periods), no allocation after `start`
+- [x] 2.4 TR-BDF2 uses the queue for gate, tick and end-of-run landing; `next_edge_fn` / `observer_period` become adapters that register sources
+- [x] 2.5 Oracle: for every harness circuit with an analytic schedule, the accepted-step sequence and the states are identical to 0.2; zero-alloc tests green — oracle used: the 34-case byte compare against a50a2c77 (DECISIONS 2), not a committed baseline
 
 ## 3. The opaque-callable adapter
 - [ ] 3.1 `events/sampled_gate.hpp`: move the sampling, pulse-width learning and bisection of `trbdf2_transient.hpp:960-1190` into `SampledGate` without changing the algorithm; `resolution()`, `n_gate_undersampled`, `gate_pulse_min`
@@ -32,12 +32,12 @@ conformance test of `add-engine-conformance-matrix`.
 - [ ] 3.5 Docs: `docs/dsed.md`, `AI_GUIDE.md` (switch_fn section), CHANGELOG migration note
 
 ## 4. Per-rate control ticks
-- [ ] 4.1 `Rate`, `add_tick`, `TickInfo{scheduled_t, k}`; exact count `ceil((t_end − t0 − offset)/T)` (ticks earlier than `t_end`)
-- [ ] 4.2 The one composition function of `fix-control-tick-semantics` registers one rate per closed loop and per observer on the queue; the per-source period list of the TR-BDF2 driver and the fixed engine's tick counters become queue sources; `result.control_tick_counts` is filled from the queue
+- [ ] 4.1 `Rate`, `add_tick`, `TickInfo{scheduled_t, k}`; exact count `ceil((t_end − t0 − offset)/T)` (ticks earlier than `t_end`) — partial: `TickInfo{scheduled_t, k}` and `TickPlan` (the kernel tick registration) exist and the fixed engine passes them; offsets on trbdf2 (DECISIONS 3); no `add_tick` name, handlers of Python callbacks still get (t, x)
+- [ ] 4.2 The one composition function of `fix-control-tick-semantics` registers one rate per closed loop and per observer on the queue; the per-source period list of the TR-BDF2 driver and the fixed engine's tick counters become queue sources; `result.control_tick_counts` is filled from the queue — partial: the fixed engine's Python tick sources are queue sources (`FixedStepTicks` deleted) and its counts come from the kernel (DECISIONS 5); the label-time graphs still tick themselves on pwl
 - [ ] 4.3 Oracle: the tests of `fix-control-tick-semantics` (2 kHz PI + 20 kHz monitor: 40 and 400 ticks; two loops without `dt`); `test_engine_auto_closed_loop.py`, `test_closed_loop_helper.py`
 
 ## 5. The fixed engine on the queue
-- [ ] 5.1 The fixed engine builds the mask of step `k` from the gate sources and reuses it until `next_landing`; ticks come from the queue
+- [ ] 5.1 The fixed engine builds the mask of step `k` from the gate sources and reuses it until `next_landing`; ticks come from the queue — partial: ticks from the queue (done, byte-identical); mask reuse between oracle edges NOT done (not provably bit-identical at grid-coincident edges, DECISIONS 5)
 - [ ] 5.2 Delete the second composition (`__init__.py:2420-2455`) and the default-mask lambdas in favour of index composition (the undriven-switch policy itself is `add-kernel-simulation-object`; until then the current per-engine behaviour is kept)
 - [ ] 5.3 `n_gate_events` and `n_gate_events_unresolved` on the fixed engine and on DSED
 - [ ] 5.4 Oracle: fixed goldens bit-identical (no ticks); with ticks identical to the Phase 0 behaviour; `n_gate_events` equals the analytic count of 0.3 on pwl, trbdf2 and dsed; ns/step on audit rows 1–2 not above 0.2
@@ -52,7 +52,7 @@ conformance test of `add-engine-conformance-matrix`.
 - [ ] 6.6 Docs: closed-loop guide, `AI_GUIDE.md`, stubs
 
 ## 7. Source breakpoints
-- [ ] 7.1 `next_breakpoint(t)` for the pulse and PWM voltage sources; registered as time sources (moving the table of `update-trbdf2-error-control` if present)
+- [ ] 7.1 `next_breakpoint(t)` for the pulse and PWM voltage sources; registered as time sources (moving the table of `update-trbdf2-error-control` if present) — trbdf2 part done (corner table is a queue source, byte-identical); the fixed engine's source jumps still read `next_source_jump_after` directly
 - [ ] 7.2 Oracle: pulse-driven RC on TR-BDF2: error below 1.8e-4 V and decreasing with `rtol`; fixed goldens bit-identical
 
 ## 8. State events
