@@ -67,9 +67,11 @@ circuit:
 simulation: {t_end: 1.0e-4, dt: 1.0e-6}
 """).options
     assert (y.max_newton_iterations, y.max_event_iterations,
-            y.tol_newton_dx, y.tol_newton_res, y.store_every) == (
+            y.tol_newton_dx, y.tol_newton_res, y.store_every,
+            y.rtol, y.atol) == (
         d["max_newton_iterations"], d["max_event_iterations"],
-        d["tol_newton_dx"], d["tol_newton_res"], d["store_every"])
+        d["tol_newton_dx"], d["tol_newton_res"], d["store_every"],
+        d["rtol_variable"], d["atol_variable"])
 
 
 # A value per keyword that asks its engine for something.
@@ -138,6 +140,15 @@ def test_zero_newton_iterations_still_defers_to_the_bundle():
         p.simulate(_buck(), t_end=2e-5, dt=2e-7, switch_fn=_gate(),
                    solver=bundle, max_newton_iterations=0)
     p.simulate(_buck(), t_end=2e-5, dt=2e-7, switch_fn=_gate())  # 50 runs
+
+
+def test_option_values_are_type_checked_as_before():
+    for bad in ({"enable_newton_lm": "False"}, {"max_newton_iterations": 30.7},
+                {"tol_newton_dx": "1e-9"}):
+        with pytest.raises(TypeError):
+            p.simulate(_rc(), t_end=1e-5, dt=1e-6, **bad)
+    with pytest.warns(DeprecationWarning):  # False was "not set" (False == 0)
+        p.simulate(_rc(), t_end=1e-5, dt=1e-6, max_newton_iterations=False)
 
 
 def test_a_negative_count_is_refused_by_name():
@@ -224,9 +235,14 @@ def test_simulation_keeps_its_python_callables_alive():
     sim = p.Simulation(b.build(), p.RunOptions(t_end=20 * dt, dt=dt))
     hits = []
     # A native PWM is held by raw pointer: only keep_alive holds it.
-    sim.set_switch_fn(p.NativePwm2Switch(8 * dt, 0.5, 2))
+    import weakref
+    pwm = p.NativePwm2Switch(8 * dt, 0.5, 2)
+    alive = weakref.ref(pwm)
+    sim.set_switch_fn(pwm)
+    del pwm
     sim.add_tick(4 * dt, lambda t, x: hits.append(t))
     gc.collect()
+    assert alive() is not None
     sim.run()
     assert hits == [k * 4 * dt for k in range(5)]
 

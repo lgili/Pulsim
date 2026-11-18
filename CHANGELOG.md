@@ -49,7 +49,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **BREAKING** `max_newton_iterations=0` (and
   `SolverOptions(max_newton_iterations=0)`) as "the default" is deprecated
   (`DeprecationWarning`; the run uses the default, 50); the signature
-  default is `None`. Migration: pass `None` or omit it.
+  default and the `SolverOptions.max_newton_iterations` field default are
+  `None`. Migration: pass `None` or omit it.
 * **BREAKING** a negative `max_newton_iterations` (any engine) or
   `max_event_iterations` (`trbdf2`) raises `pulsim.OptionsError` naming
   it; the first used to fall back to the default in silence. Migration:

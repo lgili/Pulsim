@@ -279,9 +279,22 @@ void init_module(py::module_& m) {
              {"trbdf2", sim::EngineChoice::TrBdf2},
              {"exact", sim::EngineChoice::Exact},
              {"dsed", sim::EngineChoice::Exact}}, "engine");
-        const auto count = [](std::string_view key, py::handle v) {
-            const long long n = py::int_(py::reinterpret_borrow<py::object>(v))
-                                    .cast<long long>();
+        // As strict as the pybind setters the old path used: an integer
+        // (bool and numpy integers included) for a count, a number (not a
+        // string) for a real, a bool / integer for a flag.
+        const auto bad = [](std::string_view key, py::handle v, const char* want) {
+            return py::type_error("simulate(" + std::string(key) + "="
+                + py::repr(v).cast<std::string>() + "): expected " + want);
+        };
+        const auto count = [&bad](std::string_view key, py::handle v) {
+            PyObject* i = PyNumber_Index(v.ptr());
+            if (i == nullptr) {
+                PyErr_Clear();
+                throw bad(key, v, "an integer");
+            }
+            const long long n = PyLong_AsLongLong(i);
+            Py_DECREF(i);
+            if (n == -1 && PyErr_Occurred()) throw py::error_already_set();
             if (n < 0) {
                 throw sim::OptionsError(std::string(key), "simulate("
                     + std::string(key) + "=" + py::repr(v).cast<std::string>()
@@ -289,12 +302,31 @@ void init_module(py::module_& m) {
             }
             return static_cast<Size>(n);
         };
-        const auto real = [](py::handle v) {
-            return py::float_(py::reinterpret_borrow<py::object>(v)).cast<Real>();
+        const auto real = [&bad](std::string_view key, py::handle v) {
+            if (PyUnicode_Check(v.ptr()) || PyBytes_Check(v.ptr())) {
+                throw bad(key, v, "a number");
+            }
+            const double x = PyFloat_AsDouble(v.ptr());
+            if (x == -1.0 && PyErr_Occurred()) {
+                PyErr_Clear();
+                throw bad(key, v, "a number");
+            }
+            return static_cast<Real>(x);
         };
-        const auto flag = [](py::handle v) {
-            const int t = PyObject_IsTrue(v.ptr());
-            if (t < 0) throw py::error_already_set();
+        const auto flag = [&bad](std::string_view key, py::handle v) {
+            if (PyBool_Check(v.ptr())) return v.ptr() == Py_True;
+            PyObject* i = PyNumber_Index(v.ptr());  // numpy.bool_, 0 / 1
+            if (i == nullptr) {
+                PyErr_Clear();
+                const int t = PyObject_IsTrue(v.ptr());
+                if (t < 0 || !py::hasattr(v, "dtype")) {
+                    PyErr_Clear();
+                    throw bad(key, v, "a bool");
+                }
+                return t == 1;
+            }
+            const int t = PyObject_IsTrue(i);
+            Py_DECREF(i);
             return t == 1;
         };
         for (const auto& [k, v] : kw) {
@@ -308,26 +340,26 @@ void init_module(py::module_& m) {
             else if (key == "newton_roundoff_budget") o.newton_roundoff_budget = count(key, v);
             else if (key == "max_dt_halvings") o.max_dt_halvings = count(key, v);
             else if (key == "store_every") o.store_every = count(key, v);
-            else if (key == "rtol") o.rtol = real(v);
-            else if (key == "atol") o.atol = real(v);
-            else if (key == "dt_init") o.dt_init = real(v);
-            else if (key == "stiffness_threshold") o.stiffness_threshold = real(v);
-            else if (key == "h_bdf2") o.h_bdf2 = real(v);
-            else if (key == "tol_newton_dx") o.tol_newton_dx = real(v);
-            else if (key == "tol_newton_res") o.tol_newton_res = real(v);
-            else if (key == "inductor_freeze_di_max") o.inductor_freeze_di_max = real(v);
-            else if (key == "inductor_abs_clamp") o.inductor_abs_clamp = real(v);
-            else if (key == "voltage_sanity_factor") o.voltage_sanity_factor = real(v);
-            else if (key == "enable_nonlinear_refresh") o.enable_nonlinear_refresh = flag(v);
-            else if (key == "enable_newton_line_search") o.enable_newton_line_search = flag(v);
-            else if (key == "enable_newton_lm") o.enable_newton_lm = flag(v);
-            else if (key == "enable_substep_state_correction") o.enable_substep_state_correction = flag(v);
-            else if (key == "discontinuity_restart") o.discontinuity_restart = flag(v);
-            else if (key == "resolution_diagnostics") o.resolution_diagnostics = flag(v);
-            else if (key == "strict_event_iterations") o.strict_event_iterations = flag(v);
-            else if (key == "mode_guard") o.mode_guard = flag(v);
-            else if (key == "start_from_dc_op") o.start_from_dc_op = flag(v);
-            else if (key == "auto_regularize") o.auto_regularize = flag(v);
+            else if (key == "rtol") o.rtol = real(key, v);
+            else if (key == "atol") o.atol = real(key, v);
+            else if (key == "dt_init") o.dt_init = real(key, v);
+            else if (key == "stiffness_threshold") o.stiffness_threshold = real(key, v);
+            else if (key == "h_bdf2") o.h_bdf2 = real(key, v);
+            else if (key == "tol_newton_dx") o.tol_newton_dx = real(key, v);
+            else if (key == "tol_newton_res") o.tol_newton_res = real(key, v);
+            else if (key == "inductor_freeze_di_max") o.inductor_freeze_di_max = real(key, v);
+            else if (key == "inductor_abs_clamp") o.inductor_abs_clamp = real(key, v);
+            else if (key == "voltage_sanity_factor") o.voltage_sanity_factor = real(key, v);
+            else if (key == "enable_nonlinear_refresh") o.enable_nonlinear_refresh = flag(key, v);
+            else if (key == "enable_newton_line_search") o.enable_newton_line_search = flag(key, v);
+            else if (key == "enable_newton_lm") o.enable_newton_lm = flag(key, v);
+            else if (key == "enable_substep_state_correction") o.enable_substep_state_correction = flag(key, v);
+            else if (key == "discontinuity_restart") o.discontinuity_restart = flag(key, v);
+            else if (key == "resolution_diagnostics") o.resolution_diagnostics = flag(key, v);
+            else if (key == "strict_event_iterations") o.strict_event_iterations = flag(key, v);
+            else if (key == "mode_guard") o.mode_guard = flag(key, v);
+            else if (key == "start_from_dc_op") o.start_from_dc_op = flag(key, v);
+            else if (key == "auto_regularize") o.auto_regularize = flag(key, v);
             else if (key == "mode_selection") {
                 o.mode_selection = parse_enum<sim::ModeSelection>(
                     v.cast<std::string>(),

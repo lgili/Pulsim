@@ -1841,7 +1841,7 @@ def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
 
 def _zero_newton_iterations_is_none(n):
     """simulate(max_newton_iterations=0): the deprecated "default" spelling."""
-    if n is not None and not isinstance(n, bool) and n == 0:
+    if n is not None and n == 0:  # False too: it was "not set" (False == 0)
         import warnings
         warnings.warn(
             "simulate(max_newton_iterations=0): 0 as 'the default' is "
@@ -3951,7 +3951,8 @@ def _auto_check_voltage_sanity(res, builder, factor):
     """
     try:
         _k = _pulsim_module
-        f = 100.0 if factor is None else float(factor)
+        f = (_ro.DEFAULTS["voltage_sanity_factor"] if factor is None
+             else float(factor))
         if isinstance(res, _k.SimulationResult):
             volt = _k.find_implausible_voltage(builder.graph,
                                                builder.pool, res, f)

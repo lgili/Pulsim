@@ -56,6 +56,8 @@ from typing import Optional
 
 import numpy as np
 
+from . import _run_options as _ro
+
 
 __all__ = [
     "DCStrategy",
@@ -358,8 +360,9 @@ def compute_dc_op(builder,
             strategy=getattr(_k.DCStrategy,
                               _KERNEL_STRATEGIES[strategy]),
             enable_cascade=(strategy == "auto"),
-            max_event_iterations=(16 if max_event_iterations is None
-                                   else int(max_event_iterations)),
+            max_event_iterations=(_ro.DEFAULTS["max_event_iterations"]
+                                  if max_event_iterations is None
+                                  else int(max_event_iterations)),
             ss_n_steps=int(source_step.n_steps),
             t_eval=float(t_eval),
             enable_nonlinear_refresh=enable_nonlinear_refresh,
