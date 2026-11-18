@@ -62,8 +62,9 @@ is not a precondition; `simulate()` keeps its entry points and calls
   `R` / `R_on` / `R_off` setters write `1 / R` exactly as the builder
   does, so the stored bits equal a rebuild. Table-valued parameters
   (flux tables, charge tables, Jiles–Atherton cores) are shared
-  immutable objects and enter `value_hash` by identity; the PWL
-  current-source knots enter by content.
+  immutable objects; the PWL current-source knots enter `value_hash` by
+  content. (Tables entered by identity until decision 16, which hashes
+  them by content.)
 - **Evidence:** the per-kind test (6.4) sets one field of every kind with
   `with_value` and compares against a rebuild with the new literal.
 - **Reverse:** when `add-unified-device-interface` lands its field
@@ -336,7 +337,115 @@ is not a precondition; `simulate()` keeps its entry points and calls
   backend label is `"kernel"` only when a point ran in the kernel; a
   thread that cannot be started leaves its points to the others.
 
-## 16. Needs recorded by the optimisation slice 5 (Evaluator(circuit=...))
+## 16. The YAML round trip writes the lowered form (group 4)
+
+- **Option:** `core/include/pulsim/yaml/emitter.hpp` (free functions
+  `ir::to_yaml(circuit)` / `ir::from_yaml(text)`; Python
+  `Circuit.to_yaml()` / `Circuit.from_yaml()`). The document is the
+  LOWERED circuit: nodes in unknown order, one entry per registry-kind
+  instance in branch order (a PMSM's three phase branches as one entry),
+  then the side records (couplings, branch-form order, parameters,
+  bindings, initial conditions, aliases, power-MOSFET records, control
+  declarations). `from_yaml` adds every branch first (so a sensed branch
+  named later resolves), then the pool entries in branch order, so the
+  pool's counters (source, inductor and branch-form slots) come back in
+  the same order. Additions only: a `derived` flag on `FieldSpec`
+  (reciprocal rows), `friend struct ir::YamlIo` on the builder.
+- **Schema table:** a kind's keys are its non-derived rows of
+  `kKindFields` plus its pins and its table / law / waveform keys; its
+  name is `kKindYaml`, checked against `kKindCaps` by a `static_assert`,
+  and a kind without a reader fails to compile (`static_assert` in the
+  visitor). The authoring loader (`yaml/loader.hpp`, composite types
+  such as `mosfet` with a body diode) is unchanged: composites do not
+  survive lowering one to one, so the round-trip format is a second,
+  exact dialect, not the authoring one.
+- **Stored members, not authoring values.** A resistor is written as
+  `G`, a branch switch as `g_on` plus its `R_on` in `branch_form`:
+  writing `R` would read back as `1/(1/G)`, which differs from `G` by an
+  ulp for some values. Defaults (a value-initialised `Params`) are
+  omitted bit for bit.
+- **Numbers shortest-round-trip, not `%.17g`.** `std::to_chars` writes
+  the shortest text that reads back to the same double (never more than
+  17 significant digits; `0.1`, not `0.10000000000000001`), and
+  `std::from_chars` reads it; both are locale-free. The guarantee asked
+  of 17 digits (exact round trip, fixed point after one round) holds and
+  is tested; the text is what a person would type.
+- **Tables hash by content.** `value_hash` read a flux / charge table's
+  address, so the same circuit hashed differently per process and after
+  a round trip. It now hashes the knots (and every Jiles-Atherton
+  scalar). Changes the value_hash of circuits with such tables only.
+- **Not serialised:** a control with a handle (a C block: a Python
+  callable) is refused by name; graph-driven declarations (no handle)
+  round-trip with their content hash. `from_yaml` validates syntax,
+  kinds, keys, pin counts, node and branch names, and the models' own
+  `validate` (the pool's add path); it does not re-apply authoring
+  bounds (a branch-form `g_off = 0` is legal there and would fail the
+  field bound).
+- **Pickle / clone:** pickle is the YAML text; `clone()` returns another
+  handle to the same data. `sweep(circuit, backend="process")` is
+  therefore allowed (its workers do not share the symbolic plan).
+- **Evidence:** `test_circuit_yaml.py` — one cell per kind (the
+  engine-conformance cells, plus the table / vdmos / power-MOSFET and
+  branch-form variants) on pwl, trbdf2 and dsed: equal hashes, fixed
+  point, bit-identical `times` / `states` or the same refusal; the 25
+  shipped examples; the 111 v1 harness circuits that the reader loads
+  (15 use unmapped v1 blocks). Pinned: `structure_hash` 0x57BF94FE7FA50967,
+  `value_hash` 0x746D6010F3DC01E0 for the V-R-C cell (C++ and Python).
+- **Reverse:** when `add-unified-device-interface` lands generated field
+  tables, `kKindYaml` and the reader's visitor come from them.
+
+## 17. Expressions are derived parameters (group 7)
+
+- **Option:** an expression defines a PARAMETER (`ir::Parameter::expr`,
+  compiled to a postfix `ir::Expr` kept beside it), never a field
+  directly. Fields keep binding to parameters exactly as in group 6; a
+  YAML or SPICE field expression becomes a derived parameter named
+  `<device>:<field>` bound to that field. One mechanism, one hash rule
+  (the text is structure), one round-trip path.
+- **No cycles by construction in the builder:** `param_expr` resolves
+  only parameters declared before it, so `set_param` re-evaluates the
+  derived parameters after the changed one in one forward pass. Files
+  (YAML `circuit.parameters`) may list them in any order: the loader
+  orders them (`ir::dependency_order`) and refuses a cycle naming it.
+- **Grammar without unit suffixes.** `10k` is refused inside an
+  expression (`bad number "10k" (no unit suffixes)`): a suffix grammar
+  differs between SPICE dialects and would make `1m` ambiguous (milli /
+  mega). SPICE plain values keep their suffixes; only `{...}` uses this
+  grammar.
+- **Evidence:** fuzz of 10^4 random expressions (all operators and
+  functions, domains kept real) against a Python reference: worst
+  relative error 0 (bound 1e-15) — the evaluator does the same IEEE
+  operations in the same order. A circuit with `2*Lbase*1.5` and
+  `Vin/4` simulates bit for bit like its literal twin.
+- **Reverse:** scopes (group 8) widen name lookup to the enclosing
+  scopes; the grammar and the program are unchanged.
+
+## 18. Final review (fresh-context reviewer, groups 4 and 7), and what changed
+
+- **with_params checked derived bounds on half-updated values** (D =
+  Ton / T moved with both was refused or not depending on dict order):
+  `CircuitBuilder::set_params` sets every literal, then evaluates and
+  checks once; `Circuit::with_params` calls it (signature unchanged).
+- **from_yaml UB on hostile integers** (`body: 1e300` cast to int):
+  integer keys are parsed as integers with a range.
+- **Untyped yaml-cpp exceptions / zombie-node access** on a map where a
+  list belongs, a scalar device, a phase that is not a map, a power
+  MOSFET without its diode records: shape checks, and any remaining
+  `YAML::Exception` or unknown-name `out_of_range` becomes
+  `invalid_argument` ("from_yaml: ..."). `branch_form` must name a
+  switch or a diode.
+- **The loader's number test** (from_chars) read `.inf` / `+5` as
+  expressions; it now asks yaml-cpp's own decode, so every value that
+  loaded as a number still does and creates no parameter.
+- **`pi`**: a parameter named `pi` now shadows the constant (it was the
+  other way round, and SPICE's scope disagreed with the builder).
+- **Deep parameter chains**: `dependency_order` is iterative (a 20 000
+  link chain loads); `_eval_expr` checks names / values lengths.
+- **Accepted, documented:** `spice_to_builder` declares top-level
+  `.param` lines as parameters (CHANGELOG migration note). `from_yaml`
+  takes field values as written (no authoring bounds; see 16).
+
+## 19. Needs recorded by the optimisation slice 5 (Evaluator(circuit=...))
 
 What the design evaluator needed from the IR and used instead
 (add-design-optimization-workflow DECISIONS 20):
@@ -354,5 +463,5 @@ What the design evaluator needed from the IR and used instead
   ~105 us of Python per evaluation.
 
 (Numbered 13 on the optimisation branch; renumbered at integration batch 10
-behind this branch's 13–15. Since 14 the graph-driven sources survive
+behind this branch's 13–15, and 19 at batch 11 behind 16–18. Since 14 the graph-driven sources survive
 `build()` as ControlDecls.)

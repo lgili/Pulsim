@@ -133,7 +133,7 @@ def test_the_exact_route_shares_labels_and_observables(monkeypatch):
     monkeypatch.setattr(pss, "_labels", lab)
     monkeypatch.setattr(pk, "spec_for", spec)
     fac, cir = _pair()
-    cir.evaluate_many(DESIGNS, workers=1)
+    cir.evaluate_many(DESIGNS, workers=1, backend="thread")
     assert n == {"labels": 1, "spec": 1}
     n.update(labels=0, spec=0)
     fac.evaluate_many(DESIGNS, workers=1)
@@ -182,7 +182,8 @@ def test_schedule_per_design_and_parameters():
 
     def schedule(d):
         calls.append(d["D"])
-        return p.make_pwm_switch_fn(1 / T, d["D"], 0, 1)
+        return p.make_pwm_switch_fn(1 / T, d["D"], b.switch_index_of("S"),
+                                    b.graph.num_switches)
     ev = Evaluator(circuit=b.build(), fields={"L": "Lbase"},
                    schedule=schedule, period=T, loads=("RL",),
                    output="vout", steady=SteadySpec(method="pss"))
@@ -228,9 +229,9 @@ def test_configuration_errors_name_the_problem():
     _, cir = _pair()
     with pytest.raises(KeyError, match="'C'"):
         cir.evaluate({k: v for k, v in CCM.items() if k != "C"})
-    # a Circuit does not pickle: refused by name (a factory function
-    # passed as circuit= reaches the workers, test_design_declarative)
-    with pytest.raises(p.UnsupportedError, match="circuit does not pickle"):
+    # the circuit pickles (IR group 4); the native schedule does not:
+    # refused by name before any worker starts
+    with pytest.raises(p.UnsupportedError, match="switch_fn does not pickle"):
         cir.evaluate_many(DESIGNS, workers=2, backend="process")
 
 

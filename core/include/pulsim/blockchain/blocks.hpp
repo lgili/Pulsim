@@ -392,11 +392,8 @@ struct ParkTransform {
 
     [[nodiscard]] Out update(Real alpha, Real beta,
                                 Real theta) const noexcept {
-        const Real ct = std::cos(theta);
-        const Real st = std::sin(theta);
         Out o;
-        o.d =  ct * alpha + st * beta;
-        o.q = -st * alpha + ct * beta;
+        pl_park(alpha, beta, theta, &o.d, &o.q);   // the one law
         return o;
     }
 };
@@ -409,11 +406,8 @@ struct InverseParkTransform {
 
     [[nodiscard]] Out update(Real d, Real q,
                                 Real theta) const noexcept {
-        const Real ct = std::cos(theta);
-        const Real st = std::sin(theta);
         Out o;
-        o.alpha = ct * d - st * q;
-        o.beta  = st * d + ct * q;
+        pl_inverse_park(d, q, theta, &o.alpha, &o.beta);   // the one law
         return o;
     }
 };
@@ -422,7 +416,9 @@ struct InverseParkTransform {
 // 5. Synchronisation
 // =============================================================================
 
-/// Phase-locked loop on αβ — cross-product phase detector + PI on q.
+/// Phase-locked loop on αβ — cross-product phase detector + PI on q;
+/// the law of `pulsim.control.PLL` (block_laws.h pl_pll): angle in
+/// [0, 2π). Before 2.1 a second law wrapped it to [-π, π).
 struct PLL {
     Real f_nominal = Real{50};
     Real Kp = Real{50};
@@ -441,23 +437,9 @@ struct PLL {
     struct Out { Real theta, omega, freq; };
 
     [[nodiscard]] Out update(Real v_alpha, Real v_beta, Real dt) {
-        // Project (v_alpha, v_beta) onto the rotating frame at θ; q
-        // component is the phase error.
-        const Real ct = std::cos(theta);
-        const Real st = std::sin(theta);
-        const Real vq = -st * v_alpha + ct * v_beta;
-        // Loop filter (PI) on the q-component (proxy for phase error).
-        integral += Ki * vq * dt;
-        const Real omega_nom = Real{2} * Real{3.141592653589793238462643}
-                                  * f_nominal;
-        omega = omega_nom + Kp * vq + integral;
-        theta += omega * dt;
-        // Wrap to [-π, π).
-        const Real two_pi = Real{2} *
-                              Real{3.141592653589793238462643};
-        while (theta >  Real{3.141592653589793238462643}) theta -= two_pi;
-        while (theta < -Real{3.141592653589793238462643}) theta += two_pi;
-        return Out{theta, omega, omega / two_pi};
+        pl_pll(f_nominal, Kp, Ki, &theta, &omega, &integral, v_alpha,
+               v_beta, dt);   // the one law
+        return Out{theta, omega, omega / (Real{2} * Real{3.141592653589793})};
     }
 };
 

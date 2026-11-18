@@ -326,6 +326,8 @@ public:
 
     /// Run the simulation from ``t = 0`` to ``t = t_end``.
     [[nodiscard]] PEDResult<MaskT> simulate(const Vector& x0, Real t_end) {
+        probe_t_end_ = t_end;
+        last_time_event_t_ = Real{0};   // the start samples the gates like a landed edge
         using clock = std::chrono::high_resolution_clock;
         const auto t0_wall = clock::now();
 
@@ -819,6 +821,37 @@ private:
         return t_g;
     }
 
+    /// The selector probes' horizon (DECISIONS #28): the next gate edge
+    /// the switch function announces or the next source corner, else the
+    /// run's end. A switch function that says it has no edge oracle
+    /// (`has_edge_oracle()` false: its next_edge_after is a dt_max/10 poll
+    /// boundary, not an edge, and it caches its search) adds no cap.
+    [[nodiscard]] Real next_time_event_(Real t_now) const {
+        // an edge a few ulps after t_now is skipped only when it is the one
+        // just fired; a predicate located just before an edge that has not
+        // fired yet keeps that edge as its horizon (#31)
+        const auto past = [&](auto&& next) {
+            Real r = next(t_now);
+            if (std::isfinite(r) && near_time(r, t_now) && std::isfinite(last_time_event_t_)
+                && near_time(r, last_time_event_t_))
+                r = next(r);
+            return r;
+        };
+        Real e = probe_t_end_;
+        if constexpr (HasNextEdge<SwitchFn>) {
+            bool oracle = true;
+            if constexpr (requires { switch_fn_.has_edge_oracle(); })
+                oracle = switch_fn_.has_edge_oracle();
+            const Real raw = oracle ? past([&](Real s) { return switch_fn_.next_edge_after(s); })
+                                    : std::numeric_limits<Real>::infinity();
+            if (std::isfinite(raw)) e = std::min(e, raw);
+        }
+        if constexpr (requires { system_.next_source_corner_after(t_now); }) {
+            e = std::min(e, past([&](Real s) { return system_.next_source_corner_after(s); }));
+        }
+        return e;
+    }
+
     [[nodiscard]] Real next_switch_edge_(Real t_now, Real t_end) const {
         if constexpr (HasNextEdge<SwitchFn>) {
             // Fast path: switch_fn knows when its next edge is
@@ -989,6 +1022,17 @@ private:
 
     /// Consistent reinitialisation (event_projection.hpp), through the
     /// System's cached eigenbasis when it has one.
+    /// The dependent-state records of the settle's projections, which a
+    /// reset to shadow_x_ undoes (the arbiter's mode projects again).
+    [[nodiscard]] std::size_t reinit_log_size_() const {
+        if constexpr (requires { system_.reinit_log_size(); }) return system_.reinit_log_size();
+        return 0;
+    }
+    void undo_reinit_records_() {
+        if constexpr (requires { system_.truncate_reinit_log(reinit_mark_); })
+            system_.truncate_reinit_log(reinit_mark_);
+    }
+
     void project_(Real t, Vector& x) {
         // dependent states first, whatever the event projection says: an
         // inconsistent state is not a state of the mode (DECISIONS,
@@ -1046,6 +1090,7 @@ private:
                 return;
             }
             if (shadow_.enabled || guard_) shadow_x_ = x;
+            reinit_mark_ = reinit_log_size_();
             settle_rounds_ = 0;
             try {
                 settle_and_project_(t, x, mask);
@@ -1057,6 +1102,7 @@ private:
                 result.mode_guard.enabled = true;
                 ++result.mode_guard.settle_caps;
                 x = shadow_x_;
+                undo_reinit_records_();
                 diode_bits_ = prev_bits;
                 mask = lcp_apply_(t, x, gates_prev, prev_bits, rec, result.mode_guard.lcp);
                 project_(t, x);
@@ -1207,6 +1253,7 @@ private:
         mask = gates_prev.overlay(diode_bits_, diode_owned_);
         system_.set_mask(mask);
         x = shadow_x_;
+        undo_reinit_records_();
         project_(t, x);
     }
 
@@ -1338,6 +1385,7 @@ private:
                        int aux_index = -1) {
         const MaskT old_mask = system_.current_mask();
         const MaskT prev_bits = diode_bits_;
+        if (ptype == PredicateType::GateEdge) last_time_event_t_ = t_event;   // next_time_event_
 
         // Notify switch_fn of non-gate (diode/ZCD) events so it can
         // latch the post-event mode for the remainder of this cycle.
@@ -1679,8 +1727,11 @@ private:
             if (!system_.has_exact_step()) return -1;
             const Real tol_v = Real{1e-9} * sc.vscale;
             const Real zs = sc.vscale / sc.iscale;
+            const Real cap = next_time_event_(t) - t;   // DECISIONS #28
+            if (!(cap > Real{0})) return -1;            // nothing to judge before the event
             for (const Real f : {Real{1e2}, Real{1e4}}) {
-                const Real d = f * shadow_.h_e;
+                const Real d = std::min(f * shadow_.h_e, cap);
+                if (!(d > Real{0})) break;
                 advance_(t, x, d, x_tmp_);
                 for (std::size_t j = 0; j < diodes_.size(); ++j) {
                     const auto& dd = diodes_[j];
@@ -1709,6 +1760,9 @@ private:
     /// 100·h_e·2^k, k = 0..7, at which a `decided` diode of `mode` breaks
     /// its own law on the exact trajectory (the judge's measure), +∞ if
     /// none up to 12 800·h_e or no exact step. The event lies in (d/2, d].
+    /// The probe stops at the next time event (#28), and that event is
+    /// returned when the mode holds up to it: the widening never looks
+    /// past a gate edge or source corner.
     /// Leaves the system's mask to the caller to restore.
     Real first_departure_(const MaskT& gates, const std::vector<char>& mode,
                           const std::vector<char>& decided, Real t, const Vector& x,
@@ -1723,8 +1777,13 @@ private:
             if (!system_.has_exact_step()) return inf;
             const Real tol_v = Real{1e-9} * sc.vscale;
             const Real zs = sc.vscale / sc.iscale;
+            // the probe stops at the next time event: past it the gates or a
+            // source's piece differ, so the trajectory does not happen (#28)
+            const Real cap = next_time_event_(t) - t;
             Real d = Real{100} * shadow_.h_e;
             for (int k = 0; k < 8; ++k, d *= Real{2}) {
+                if (d > cap) d = cap;
+                if (!(d > Real{0})) return inf;
                 advance_(t, x, d, x_tmp_);
                 for (std::size_t j = 0; j < diodes_.size(); ++j) {
                     if (!decided[j]) continue;
@@ -1735,6 +1794,7 @@ private:
                         : v - std::max(dd.V_th, dd.V_f);
                     if (!(viol <= tol_v)) return d;   // NaN counts as a departure
                 }
+                if (d == cap) return cap;   // the mode's trajectory ends at the time event
             }
             return inf;
         } else {
@@ -1812,6 +1872,9 @@ private:
     // default so the demo systems and raw-LTI paths are untouched;
     // the builder runners enable it.
     bool enable_event_projection_ = false;
+    Real probe_t_end_ = std::numeric_limits<Real>::infinity();   // next_time_event_
+    std::size_t reinit_mark_ = 0;   // reinit_log_size_() before the settle
+    Real last_time_event_t_ = std::numeric_limits<Real>::quiet_NaN();   // last gate edge / corner fired
     std::vector<Real> fast_t_;     // plan_fast_samples_
     std::size_t fast_k_ = 0;
     Real dt_init_;

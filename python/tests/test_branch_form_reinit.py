@@ -159,13 +159,14 @@ def test_a_consistent_dcm_turn_off_records_nothing():
     assert len(r.reinit_records) == 0
 
 
-def test_trbdf2_refuses_the_cutset_by_name():
+def test_trbdf2_runs_a_cutset_open_from_the_start():
+    """Task 5.5: the cut-set entered at t = 0 with i_L = 0 is consistent (no record); the
+    impulsive cases are in test_branch_form_trbdf2.py."""
     b = _cutset_builder()
-    with pytest.raises(p.UnsupportedError) as ei:
-        p.simulate(b, t_end=1e-3, engine="trbdf2",
+    r = p.simulate(b, t_end=1e-3, engine="trbdf2",
                    switch_fn=lambda t: p.SwitchStateMask(1))
-    assert (ei.value.engine, ei.value.feature, ei.value.device) == (
-        "trbdf2", "dependent_states", "S")
+    assert len(r.reinit_records) == 0
+    assert np.all(np.asarray(r.i("L")) == 0.0)
 
 
 @pytest.mark.parametrize("engine", ["pwl", "trbdf2", "dsed", "exact", "auto"])

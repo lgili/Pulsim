@@ -389,6 +389,9 @@ def export_c(chain, builder, outputs, *, prefix: str = "pulsim_graph"
             f"lib=...) with {n_in} input(s) and {n_out} output(s) "
             f"[{', '.join(outputs)}] and dt = {rates[0].period!r}. */",
             f"static {P}_state {P}_static;",
+            "/* marks the static state: add_c_block runs one instance */",
+            "extern const int pulsim_cblock_static_state;",
+            "const int pulsim_cblock_static_state = 1;",
             "void* pulsim_cblock_init(int n_in, int n_out) {",
             "    (void)n_in; (void)n_out;",
             f"    {P}_init(&{P}_static);",

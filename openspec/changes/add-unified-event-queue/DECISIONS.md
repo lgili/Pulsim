@@ -104,26 +104,26 @@
 
 ## 4. The control graph's PWM gate is a modulator with edges (towards group 6)
 
-- `ChainPwmGate::next_edge_after(t)` is the `pwm_phase` crossing of each
-  leg for the duty its sink holds now (the arithmetic of
-  `NativePwm2Switch`); valid until the graph's next tick. The engines
-  already re-ask an oracle after a tick (trbdf2: the queue's
-  `invalidate`; pwl: the observer call resets its edge cache), which is
-  the duty-register invalidation of D3 without a separate register type.
-  `CarrierPwm` / `DutyRegister` / `LatchPolicy` are not added: the gate
-  with its chain sink is that pair, with `Immediate` latching.
-- Results that change (documented, not bit-identical): closed loops on
-  trbdf2 (edges landed instead of bisected; the step is no longer capped
-  at twice the narrowest sampled pulse) — cl1/cl2/clmon of the golden
-  compare move by at most 6.4e-2 V on a switch node at one sample next to
-  an edge (sample instants differ by 7e-8 s), output 1e-9 relative;
-  pwl with `enable_substep_state_correction=True` now splits at the
-  loop's edges. Reference status: `cl_boost_pi` error -> agree on trbdf2
-  and pwl+split, disagree (0.058) on pwl / pwl+restart (it had no
-  reference before); `ll15_boost` trbdf2 3.9e-4 -> 1.24e-3 (tol 1e-3:
-  agree -> disagree); `ll14_buck` trbdf2 0.16 -> 0.214, pwl+split
-  0.212 -> 0.178. These two trbdf2 regressions are the cost of dropping
-  the sampling cap; frozen, not diagnosed (a step cap from the
-  modulator's period, as `update-trbdf2-error-control` does for sources,
-  is the candidate).
-  Freezes updated in `benchmarks/manifests/v2_triage.yaml`.
+Superseded at the merge of integration batch 11 (a0ae6bb8). Slice 1
+implemented the gate's edge declaration (db687962) at the same time as the
+control graph's G23, which batch 11 merged. The merge keeps ONE
+implementation, G23's: `ChainPwmGate::next_edge_after`, the adapter branch
+in `switch_fn_adapter.hpp`, and `make_combined_switch_fn` building a
+`SwitchSchedule` with `follows_controller = true`. What this change adds
+on top is only the consumer: trbdf2 reads that oracle through the queue's
+gate source, and a tick invalidates it (the duty-register invalidation of
+D3 without a separate register type; `CarrierPwm` / `DutyRegister` /
+`LatchPolicy` are group 6). Slice 1's test file
+`python/tests/test_control_graph_gate_edges.py` is kept: it checks the
+edges equal `make_pwm_switch_fn`'s exactly, that the mask is constant
+between edges, the trbdf2 counters of a landed closed loop, and the
+combination.
+
+The closed-loop reference rows are those of a0ae6bb8 (cl_boost_pi agree on
+trbdf2 and pwl+split; ll14 / ll15 disagree as frozen there). Slice 1 called
+the ll14/ll15 trbdf2 movement a cost of losing the gate-sampling step cap;
+the control-graph agent's diagnosis replaces that: trbdf2 records no
+post-edge sample when a rising edge falls on a control tick (the reference
+and the cell then differ on V(sw) between samples), plus a sticky
+narrowest-pulse cap. Both are fixed in `trbdf2_transient.hpp` by the
+TR-BDF2 track, not here; no step cap from the modulator's period is added.

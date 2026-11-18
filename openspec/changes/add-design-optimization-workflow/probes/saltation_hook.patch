@@ -1,0 +1,29 @@
+--- a/core/include/pulsim/dsed/scheduler.hpp
++++ b/core/include/pulsim/dsed/scheduler.hpp
+@@ -274,6 +274,15 @@
+     { fn.register_zcd_transition(t) } -> std::same_as<void>;
+ };
+ 
++/// Whether ``SwitchFn`` wants to know WHICH predicate fired (name, type,
++/// index), e.g. a comparator gate latched off by its own threshold
++/// predicate (add-design-optimization-workflow DECISIONS 23).
++template <class SwitchFn>
++concept HasEventRegister = requires(SwitchFn& fn, Real t, const std::string& n,
++                                    PredicateType p, int i) {
++    { fn.register_event(t, n, p, i) } -> std::same_as<void>;
++};
++
+ /// Cubic Hermite interpolation over ``(t, t+h)`` using FSAL's
+ /// pre-/post-step derivatives. DOPRI5's FSAL gives ``k1 = f(t, x)``
+ /// before the step and ``k7 = f(t+h, x_new)`` after at no extra cost.
+@@ -1337,6 +1346,10 @@
+                 || ptype == PredicateType::DiodeOn) {
+                 switch_fn_.register_zcd_transition(t_event);
+             }
++        }
++        // Every state event, named, before the mask is re-sampled below.
++        if constexpr (HasEventRegister<SwitchFn>) {
++            switch_fn_.register_event(t_event, name, ptype, aux_index);
+         }
+ 
+         // State projection — clamp algebraic constraints at the event.

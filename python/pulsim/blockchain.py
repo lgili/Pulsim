@@ -596,8 +596,8 @@ class MixedDomainBlockChain:
                            [ref("duty"), ref("t")])
             elif cls_name in _PORTED_TRANSFORMS:
                 # Python-exact (block_laws.h): the kernel add_svm /
-                # add_clarke / add_park / add_pll are different laws
-                # (DECISIONS G17).
+                # add_clarke are different laws (G17); add_park / add_pll
+                # share these since G25, with the kernel's own signatures.
                 kind, names, n_out = _PORTED_TRANSFORMS[cls_name]
                 if not isinstance(output, (tuple, list)) or \
                         len(output) not in n_out:

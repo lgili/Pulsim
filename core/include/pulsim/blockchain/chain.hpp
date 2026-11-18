@@ -943,12 +943,10 @@ struct ChainPwmGate {
         return mask;
     }
 
-    /// First edge strictly after `t` for the duties the sinks see NOW
-    /// (add-unified-event-queue: a modulator reading a duty register).
-    /// Valid until the graph next ticks; an engine re-asks after every
-    /// tick (trbdf2's event queue, pwl's observer call). The same
-    /// `pwm_phase` arithmetic as the mask, so an edge may be a no-op
-    /// (a period start at duty 0), never a missed one.
+    /// First gate edge strictly after `t` under the duties held now: each
+    /// leg's period start and its OFF threshold. A tick that moves a duty
+    /// makes the answer stale: trbdf2 re-queries after a tick, pwl after
+    /// every observer call (a loop ticks through its observer).
     [[nodiscard]] Real next_edge_after(Real t) const {
         Real best = std::numeric_limits<Real>::infinity();
         for (const auto& l : legs) {

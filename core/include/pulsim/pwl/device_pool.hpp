@@ -1423,7 +1423,9 @@ inline constexpr auto kBranchFormCaps = std::to_array<FormCaps>({
     {"Switch", DevicePool::StoredKind::Switch,
      static_cast<std::uint8_t>(engine_bit(Engine::FixedTrap) |
                                engine_bit(Engine::TrBdf2))},
-    {"Diode", DevicePool::StoredKind::Diode, engine_bit(Engine::FixedTrap)},
+    {"Diode", DevicePool::StoredKind::Diode,
+     static_cast<std::uint8_t>(engine_bit(Engine::FixedTrap) |
+                               engine_bit(Engine::TrBdf2))},
 });
 
 static_assert(kKindCaps.size() == DevicePool::kNumKinds,

@@ -42,6 +42,10 @@ struct SwitchSchedule {
     solver::SwitchScheduleFn mask_fn;
     /// t -> first edge strictly after t. Empty: unknown (+inf).
     std::function<Real(Real)> next_edge_fn;
+    /// The mask follows a controller's output (a control-graph PWM gate
+    /// in it): its edges are those of the duty held now, so analyses
+    /// that run no controller (shooting, sensitivities) refuse it.
+    bool follows_controller = false;
 
     SwitchSchedule() = default;
     explicit SwitchSchedule(solver::SwitchScheduleFn mask,

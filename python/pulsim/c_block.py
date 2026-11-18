@@ -40,6 +40,7 @@ Usage
 """
 from __future__ import annotations
 
+import copy
 import ctypes
 import hashlib
 import os
@@ -252,9 +253,13 @@ _STEP_ARGTYPES = [_DBL, ctypes.c_int, _DBL, ctypes.c_int,
                   ctypes.POINTER(ctypes.c_void_p)]
 
 
+# Marks a library whose state is one static struct (export_c's shim).
+_STATIC_MARK = "pulsim_cblock_static_state"
+
+
 def _load_native_step(lib_path, symbol, n_in, n_out, *,
                       init_symbol="pulsim_cblock_init",
-                      term_symbol="pulsim_cblock_term"):
+                      term_symbol="pulsim_cblock_term", static_taken=None):
     """Load a compiled C-block library and return ``(step_fn, teardown)``.
 
     ``step_fn(t, dt, inp, out, _state)`` calls the C ABI, marshalling the
@@ -271,6 +276,13 @@ def _load_native_step(lib_path, symbol, n_in, n_out, *,
             f"C++).") from exc
     step_c.restype = None
     step_c.argtypes = _STEP_ARGTYPES
+    if static_taken is not None and hasattr(dll, _STATIC_MARK):
+        # two blocks of one circuit would step one state twice per tick
+        if dll._handle in static_taken:
+            raise ValueError(
+                f"c_block: {lib_path!r} keeps one static state (export_c's "
+                "shim) and this circuit already has a block of it. Compile "
+                "the file again under another name for a second instance.")
 
     state_ptr = ctypes.c_void_p(None)
     if hasattr(dll, init_symbol):
@@ -293,6 +305,13 @@ def _load_native_step(lib_path, symbol, n_in, n_out, *,
             term_c(state_ptr)
             state_ptr.value = None
 
+    def reinit():
+        """Back to the library's initial state (a new run, G22)."""
+        teardown()
+        state_ptr.value = (init_c(int(n_in), int(n_out))
+                           if hasattr(dll, init_symbol) else None)
+
+    step._reinit = reinit    # type: ignore[attr-defined]
     step._dll = dll          # keep the library alive  # type: ignore[attr-defined]
     step._step_c = step_c    # type: ignore[attr-defined]
     step._state_ptr = state_ptr  # type: ignore[attr-defined]
@@ -325,11 +344,25 @@ def _cache_dir() -> Path:
                     or Path.home() / ".cache")
     d = base / "pulsim" / "cblock"
     d.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if os.name == "posix" and d.lstat().st_uid == os.getuid() \
-            and not d.is_symlink():
-        os.chmod(d, 0o700)          # mkdir's mode is masked by the umask
-    _check_owned(d)
+    if os.name != "posix":
+        _check_in_profile(d)
+    for p in (d.parent, d):         # pulsim/ too: its owner could swap cblock/
+        if os.name == "posix" and p.lstat().st_uid == os.getuid() \
+                and not p.is_symlink():
+            os.chmod(p, 0o700)      # mkdir's mode is masked by the umask
+        _check_owned(p)
     return d
+
+
+def _check_in_profile(path: Path) -> None:
+    """Windows has no POSIX owner or mode: keep the cache inside
+    %USERPROFILE%, whose ACL is the user's by default."""
+    home = Path(os.environ.get("USERPROFILE") or Path.home()).resolve()
+    if not Path(path).resolve().is_relative_to(home):
+        raise RuntimeError(
+            f"c_block: refusing {path}: it is outside your profile "
+            f"({home}), so pulsim cannot tell who may write it. Point "
+            "LOCALAPPDATA inside your profile.")
 
 
 def _check_owned(path: Path) -> None:
@@ -470,7 +503,8 @@ def add_c_block(builder,
     if sim_dt is not None and dt < sim_dt:
         warnings.warn(
             f"c_block {name!r}: dt={dt:g}s < simulation dt={sim_dt:g}s; "
-            f"clamping the block to run every simulation step.")
+            f"clamping the block to run every simulation step.",
+            stacklevel=2)
         dt = float(sim_dt)
 
     # Resolve the step function from exactly one of fn / lib / code.
@@ -484,8 +518,22 @@ def add_c_block(builder,
             code, lang, symbol, include_dirs=include_dirs,
             extra_compile_args=extra_compile_args,
             extra_link_args=extra_link_args))
+    sealed = _c_graph_of(builder)
+    if sealed is not None and getattr(sealed, "_sealed", False):
+        raise ValueError(
+            f"add_c_block({name!r}): this builder's C blocks are already "
+            "carried by a pulsim.Circuit from build() (or the builder came "
+            "from Circuit.to_builder()); the new block would also run in "
+            "that circuit. Add every C block before build(), or start from "
+            "a new builder.")
     if lib is not None:
-        fn, teardown = _load_native_step(lib, symbol, n_in, n_out)
+        from ._circuit_ir import c_blocks_of
+        # libraries this circuit's blocks already load, through the handles
+        loaded = {k._dll._handle for h in c_blocks_of(builder)
+                  if (k := getattr(getattr(h, "block", None), "_keep", None))
+                  is not None}
+        fn, teardown = _load_native_step(
+            lib, symbol, n_in, n_out, static_taken=loaded)
     assert fn is not None
 
     if lib is None:
@@ -508,6 +556,10 @@ def add_c_block(builder,
         block._keep = fn          # the library and its state pointer
     else:
         block = CBlock(n_in, n_out, fn=fn, state=dict(state or {}), name=name)
+    try:                                          # every run starts here (G22)
+        block._state0 = copy.deepcopy(block.state)
+    except Exception:  # noqa: BLE001 - an uncopyable value (a lock, a handle)
+        block._state0 = dict(block.state)        # restored by reference
     handle = CBlockHandle(
         name=name, n_in=n_in, n_out=n_out, dt_block=float(dt),
         state=block.state, inputs=block.inputs, outputs=block.outputs,
@@ -522,13 +574,6 @@ def add_c_block(builder,
     # simulate() composes it with the other graphs above the dispatch.
     from .blockchain import MixedDomainBlockChain, Rate, _InputSource
     graph = _c_graph_of(builder)
-    if graph is not None and getattr(graph, "_sealed", False):
-        raise ValueError(
-            f"add_c_block({name!r}): this builder's C blocks are already "
-            "carried by a pulsim.Circuit from build() (or the builder came "
-            "from Circuit.to_builder()); the new block would also run in "
-            "that circuit. Add every C block before build(), or start from "
-            "a new builder.")
     if graph is None:
         graph = MixedDomainBlockChain(label_time=True)
     k0 = len(graph.blocks)
@@ -562,15 +607,37 @@ def _c_graph_of(builder):
                  is not None), None)
 
 
-def _c_graph_observer(builder):
+def _reset_c_blocks(graph) -> None:
+    """Every block back to its declared initial state (G22): a Circuit is
+    immutable, so simulate(c) twice gives the same answer. Native
+    libraries re-run their init (term first); Python steps get a copy of
+    their initial state dict; the buffers and the graph's signals and
+    tick grid are cleared."""
+    for spec in graph.blocks:
+        b = spec.block
+        keep = getattr(b, "_keep", None)
+        if keep is not None:
+            keep._reinit()
+        else:
+            b.state.clear()
+            b.state.update(copy.deepcopy(getattr(b, "_state0", {})))
+        b.inputs[:] = 0.0
+        b.outputs[:] = 0.0
+    if graph._cxx_chain is not None:
+        graph._cxx_chain.reset()
+
+
+def _c_graph_observer(builder, fresh: bool = True):
     """The builder's C-block graph compiled for one run (None without C
-    blocks): its observer, with the outputs each block holds."""
+    blocks): its observer, with the outputs each block holds. A fresh
+    run (not resume_from) starts every block from its initial state."""
     graph = _c_graph_of(builder)
     if graph is None or not graph.blocks:
         return None
-    # Compiled once per circuit layout: the graph keeps its tick grid
-    # across runs, so a resume_from run continues it (a run that goes
-    # back in time restarts it, BlockChain.rearm_if_restarted).
+    if fresh:       # the first run too: a library may be shared (export_c)
+        _reset_c_blocks(graph)
+    # Compiled once per circuit layout; a resume_from run continues its
+    # tick grid and states, any other run restarts both (above).
     key = (len(graph.blocks), int(builder.pool.state_size(builder.graph)))
     cached = getattr(graph, "_c_obs", None)
     if cached is None or cached[0] != key:

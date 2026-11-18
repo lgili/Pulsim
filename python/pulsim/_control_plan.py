@@ -181,7 +181,7 @@ class ControlPlan:
 
 
 def compose_control(builder, closed_loops, step_observer, controller_period,
-                    switch_fn) -> ControlPlan:
+                    switch_fn, resume: bool = False) -> ControlPlan:
     from ._pulsim import make_combined_switch_fn  # type: ignore[import-not-found]
 
     loops = list(closed_loops or [])
@@ -241,7 +241,7 @@ def compose_control(builder, closed_loops, step_observer, controller_period,
             plan.rate_delays = list(step_observer._rate_delays)
         plan.b_extra_fn = getattr(step_observer, "_b_extra_fn", None)
     from .c_block import _c_graph_observer
-    plan.c_graph = _c_graph_observer(builder)
+    plan.c_graph = _c_graph_observer(builder, fresh=not resume)
     for _fn, period in plan.ticks:
         if not (period > 0.0 and math.isfinite(period)):
             raise ValueError(
@@ -250,7 +250,7 @@ def compose_control(builder, closed_loops, step_observer, controller_period,
     return plan
 
 
-def _check_fixed_periods(periods, dt: float) -> None:
+def _check_fixed_periods(periods, dt: float, stacklevel: int = 4) -> None:
     """A period below dt is refused (two ticks in one step); a period
     that is not a multiple of dt warns (ticks late by less than dt)."""
     for period in periods:
@@ -268,7 +268,7 @@ def _check_fixed_periods(periods, dt: float) -> None:
             "delivered at the first step at or after its instant, "
             f"late by less than dt (result.control_tick_jitter_max "
             "records the largest lateness). Pick dt = T/n to remove it.",
-            stacklevel=5)
+            stacklevel=stacklevel)
 
 
 class FixedStepTicks:
@@ -288,7 +288,7 @@ class FixedStepTicks:
         self._k = [0] * len(ticks)
         self.counts = [0] * len(ticks)
         self.jitter_max = 0.0
-        _check_fixed_periods(self._periods, self._dt)
+        _check_fixed_periods(self._periods, self._dt, stacklevel=5)
 
     def __call__(self, t: float, x) -> None:
         tol = 1e-9 * self._dt
