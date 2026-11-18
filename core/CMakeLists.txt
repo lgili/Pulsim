@@ -90,6 +90,7 @@ if(PULSIM_BUILD_TESTS)
     # controllers and policies (core/include/pulsim/solver/step/).
     add_executable(pulsim_core_step_tests
         tests/step/test_integrators.cpp
+        tests/step/test_controllers.cpp
     )
     target_link_libraries(pulsim_core_step_tests
         PRIVATE

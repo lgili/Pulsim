@@ -33,7 +33,7 @@ at equal times or time-weighted measures, never sample means.
 ## 4. Integrators as stage tables
 - [ ] 4.1 `solver/step/integrators.hpp`: `Trapezoidal`, `BackwardEuler`, `TrBdf2` (`stage`, `lte` moved from `trbdf2_transient.hpp:1286-1375`)
 - [ ] 4.2 Both drivers obtain their `StageSpec`s from the tables
-- [ ] 4.3 Unit tests: both TR-BDF2 stages return the same `factor_dt`; `BackwardEuler::stage(h/2)` returns `factor_dt == h`; every stage's `h_elapsed` sums to `h`
+- [x] 4.3 Unit tests: both TR-BDF2 stages return the same `factor_dt`; `BackwardEuler::stage(h/2)` returns `factor_dt == h`; every stage's `h_elapsed` sums to `h` (as `t_off`: the last stage ends at `h`, DECISIONS 3; `core/tests/step/test_integrators.cpp`)
 - [ ] 4.4 Oracle: goldens; step-identical; counter gate equal
 
 ## 5. Controllers and policies as types

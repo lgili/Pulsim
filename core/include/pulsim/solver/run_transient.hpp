@@ -58,6 +58,7 @@
 #include "pulsim/events/step_hooks.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
+#include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/solver/step/integrators.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
@@ -389,6 +390,8 @@ inline SimulationResult run_transient(
 
     // ---- Pre-allocate ---------------------------------------------------
     const Size n_steps = opts.expected_step_count();
+    // The grid: t = t_start + k*dt from the integer counter k.
+    const step::FixedClock fixed_grid{opts.t_start, opts.dt};
     SimulationResult result;
     // v2.0 Phase 1: state size up front → the contiguous sample
     // buffer is allocated ONCE for the whole run, sized by the
@@ -1418,11 +1421,9 @@ inline SimulationResult run_transient(
             if (should_continue && !should_continue()) {
                 break;
             }
-            const Real t = opts.t_start +
-                            static_cast<Real>(k) * opts.dt;
+            const Real t = fixed_grid.at(k);
             t_reached = t;
-            const Real t_prev = opts.t_start +
-                                 static_cast<Real>(k - 1) * opts.dt;
+            const Real t_prev = fixed_grid.at(k - 1);
             // The heat the previous step queued, as this step's power.
             if (lt) lt->advance(opts.dt);
 
@@ -2777,12 +2778,10 @@ inline SimulationResult run_transient(
                 "the thermal network.");
         }
         for (Size k = 0; k < n_steps; ++k) {
-            const Real t = opts.t_start +
-                            static_cast<Real>(k) * opts.dt;
+            const Real t = fixed_grid.at(k);
             t_reached = t;
             const Real t_prev = k > 0
-                ? (opts.t_start +
-                    static_cast<Real>(k - 1) * opts.dt)
+                ? fixed_grid.at(k - 1)
                 : opts.t_start;
             // Sub-step bisection snapshot (Layer 5 V2.2). At
             // k=0 we don't have a prev step; just use the

@@ -101,6 +101,7 @@
 #include "pulsim/models/switched_diode.hpp"
 #include "pulsim/models/transformer.hpp"
 #include "pulsim/solver/result.hpp"
+#include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/solver/step/integrators.hpp"
 #include "pulsim/solver/run_transient.hpp"   // combine_masks, SimulationAborted
 #include "pulsim/sources/pwm_b_extra.hpp"
@@ -1213,7 +1214,12 @@ inline SimulationResult run_transient_trbdf2(
 
     Real t = opts.t_start;
     t_now = &t;
-    Real h = opts.h_init > Real{0} ? opts.h_init : h_max / Real{100};
+    // The step memory is one object (refactor-unified-transient-stepper
+    // 5.1): what a snapshot carries for an exact variable-step resume.
+    // The names below are references into it.
+    step::LteController lte_ctrl;
+    Real& h = lte_ctrl.h;
+    h = opts.h_init > Real{0} ? opts.h_init : h_max / Real{100};
     h = std::min(h, h_max);
     Size steps = 0;
     // Zero-time chatter guard: a boundary-riding diode may flip at
@@ -1237,8 +1243,8 @@ inline SimulationResult run_transient_trbdf2(
     // quintupled the flyback's event count and biased its average
     // (measured) — the controller's own h is the right restart
     // there.
-    Real h_mem_gate[2] = {Real{0}, Real{0}};
-    int  pending_gate_slot = -1;
+    Real (&h_mem_gate)[2] = lte_ctrl.h_mem_gate;
+    int& pending_gate_slot = lte_ctrl.pending_gate_slot;
     // Gate-edge cache: an LTE-reject inside an edge-clamped step
     // re-enters with the SAME upcoming edge; re-bisecting it costs
     // ~30 switch_fn calls (Python round-trips in the common case).
@@ -1695,8 +1701,8 @@ inline SimulationResult run_transient_trbdf2(
     // accepted at about half). Like the post-gate-edge memory, the
     // controller's proposal after the last accepted restart step for
     // the same diode turning the same way starts the next one.
-    std::vector<Real> h_mem_diode;
-    Size diode_slot = Size(-1);
+    std::vector<Real>& h_mem_diode = lte_ctrl.h_mem_diode;
+    Size& diode_slot = lte_ctrl.diode_slot;
     auto restart_size_after_diode_event = [&](Size d) {
         if (!restart_ok() || n_sdirk_diode == 0) {
             diode_slot = Size(-1);   // no restart: remember no size for it
@@ -2373,10 +2379,7 @@ inline SimulationResult run_transient_trbdf2(
             }
             if (err > Real{1} && h > h_lo * Real{1.0001}) {
                 // reject: elementary controller, order-3 exponent
-                const Real fac = std::clamp(
-                    Real{0.9} * std::pow(err, sdirk ? Real{-0.5}
-                                                    : Real{-1.0 / 3.0}),
-                    Real{0.1}, Real{0.9});
+                const Real fac = step::LteController::reject_factor(err, sdirk);
                 h = std::max(h * fac, h_lo);
                 ++st.n_reject;
                 if (sdirk && sdirk_event && !reinit_step) {
@@ -3055,13 +3058,7 @@ inline SimulationResult run_transient_trbdf2(
                     }
                     pending_gate_slot = slot;
                 } else {
-                    const Real e_used =
-                        std::max(err, Real{1e-4});
-                    const Real fac = std::clamp(
-                        Real{0.9}
-                            * std::pow(e_used, sdirk ? Real{-0.5}
-                                                     : Real{-1.0 / 3.0}),
-                        Real{0.2}, Real{5.0});
+                    const Real fac = step::LteController::accept_factor(err, sdirk);
                     const Real h_done = h;
                     h = h * fac;
                     if (sdirk && diode_slot != Size(-1)) {
