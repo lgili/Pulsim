@@ -297,6 +297,9 @@ struct TrBdf2Stats {
     Size n_reinit_steps = 0;
     /// Steps whose error estimate was filtered (W^-1 est).
     Size n_filtered_estimates = 0;
+    /// Secant (no-solve) diode turn-off landings that a probe floor moved
+    /// past the secant root (their state is taken at the moved time).
+    Size n_interp_floor_landings = 0;
     /// Steps accepted because their error estimate was within the
     /// estimate's own roundoff floor (eps * J^-1 (|J||x| + |b|) read
     /// through each entry), not within atol + rtol*|y|: the requested
@@ -1455,6 +1458,7 @@ inline SimulationResult run_transient_trbdf2(
     // capped at twice the narrowest pulse any gate bit has shown, so
     // those samples stay half a pulse apart once a pulse is known.
     constexpr int kGateSamples = 4;
+    constexpr Real kCapPulses = 64;   // step cap in recent narrowest pulses
     const bool learn_gates = !next_edge_fn;
     const Size n_sw_total = static_cast<Size>(graph.num_switches());
     std::vector<Real> gate_last_toggle(n_sw_total, Real{0});
@@ -1547,6 +1551,37 @@ inline SimulationResult run_transient_trbdf2(
         }
         gate_prev = sw;
     };
+    // A periodic gate is a periodic source too: the default ceiling gives
+    // every PWM / pulse / sine source 20 steps per period, and a gate from
+    // switch_fn (a closed loop's, declared edges or not) got span/1000. On
+    // ll15 (closed-loop boost, 5 ms) that was one 4 us step per 5 us
+    // period, each at its local tolerance and all errors of one sign:
+    // I(L) 0.066 A off after 23 periods. In a run with controller ticks,
+    // once a gate bit rises three times a constant period p apart, a step
+    // is capped at p/20 (default ceiling only; the floors stay those of
+    // h_max). An open-loop gate keeps its fewer steps per period (the CCM
+    // buck's <= 8 per period is a pinned decision); a tick that drives no
+    // periodic gate caps nothing.
+    std::vector<Real> gate_rise_t(3 * n_sw_total,
+                                  -std::numeric_limits<Real>::infinity());
+    SwitchStateMask gate_rise_prev = gate_prev;
+    Real gate_period_cap = std::numeric_limits<Real>::infinity();
+    auto learn_gate_period = [&](const SwitchStateMask& sw, Real at_t) {
+        if (sw == gate_rise_prev) return;
+        for (const Size i : gate_bits) {
+            if (!sw.get(i) || gate_rise_prev.get(i)) continue;
+            Real* r3 = &gate_rise_t[3 * i];
+            r3[0] = r3[1];
+            r3[1] = r3[2];
+            r3[2] = at_t;
+            const Real p1 = r3[2] - r3[1], p0 = r3[1] - r3[0];
+            if (std::isfinite(p0) && p1 > Real{0}
+                && std::abs(p1 - p0) <= Real{1e-6} * p1 + Real{4} * h_min) {
+                gate_period_cap = std::min(gate_period_cap, p1 / Real{20});
+            }
+        }
+        gate_rise_prev = sw;
+    };
     // The step cap: twice the narrowest RECENT pulse. Per bit, the last
     // high and low widths count while the bit keeps toggling (quiet for at
     // most twice its last period; a quiet bit keeps the run's narrowest
@@ -1603,8 +1638,13 @@ inline SimulationResult run_transient_trbdf2(
                 const Real margin = Real{2} * w + Real{1e-3} * p1;
                 reg = std::min(reg, d3[2] + p1 - margin - at_t);
             }
-            lim = std::min(lim, any_reg ? std::max(Real{2} * w, reg)
-                                        : Real{2} * w);
+            // kCapPulses * w with the gate sampled every w/2 inside the
+            // step (gate_sample_w): the same sampling as 2 w with 4 samples,
+            // in 32x fewer solves. cl_boost_pi's start-up pulses (0.28 ns,
+            // then 0.585 ns, before the rises prove periodic) cost 26,490
+            // steps in two periods at 2 w.
+            lim = std::min(lim, any_reg ? std::max(kCapPulses * w, reg)
+                                        : kCapPulses * w);
             gate_sample_w = std::min(gate_sample_w, w);
         }
         return lim;
@@ -1842,7 +1882,7 @@ inline SimulationResult run_transient_trbdf2(
     // skipped, its V(out) cell went 1.58e-5 -> 1.67e-4): TR-BDF2 steps.
     std::vector<pwl::HistoryEntry> hist_rec, hist_rec0;
     Vector b_rec, b_rec_src, x_rec, x_rec2;
-    auto be_solve = [&](Real dt, Vector& out) {
+    auto be_solve = [&](const SwitchStateMask& m, Real dt, Vector& out) {
         history.snapshot_into(hist_rec0);
         hist_rec = hist_rec0;
         for (auto& e : hist_rec) {   // backward Euler: no derivative slot
@@ -1859,7 +1899,7 @@ inline SimulationResult run_transient_trbdf2(
         b_rec += b_rec_src;
         out = x;
         try {
-            return solve_dispatch(mask_at(t), Real{2} * dt, b_rec, out)
+            return solve_dispatch(m, Real{2} * dt, b_rec, out)
                 && out.allFinite();
         } catch (const std::runtime_error&) {
             return false;   // no record rather than a wrong one
@@ -1873,11 +1913,15 @@ inline SimulationResult run_transient_trbdf2(
         }
         Real tp = t + last_probe_dt;
         const Vector* xr = &x_sig;
+        // The mode is decided once (mask_at settles it: an ideal diode
+        // closing a loop is released); the BE solves and the row read it.
+        std::optional<SwitchStateMask> m_rec;
         if (sdirk_event) {
+            m_rec = mask_at(t);
             const Real dt_rec = std::max({h_min, Real{1e-4} * h,
                                           h_probe_learned});
-            bool instant = be_solve(dt_rec, x_rec)
-                           && be_solve(Real{2} * dt_rec, x_rec2);
+            bool instant = be_solve(*m_rec, dt_rec, x_rec)
+                           && be_solve(*m_rec, Real{2} * dt_rec, x_rec2);
             for (Size i = 0; instant && i < entries.size(); ++i) {
                 const auto& e = entries[i];
                 const bool cap = e.kind == pwl::DevicePool::StoredKind::Capacitor;
@@ -1905,7 +1949,7 @@ inline SimulationResult run_transient_trbdf2(
         result.event_iteration_count.push_back(0);
         // The bits the probe was solved under (a landing has already
         // reset gates_decided to its pre-commutation mask).
-        result.record_switch_state(mask_at(t));
+        result.record_switch_state(m_rec ? *m_rec : mask_at(t));
         event_sample_t = tp;
     };
     Size sdirk_left = has_diodes ? opts.sdirk_after_settle : Size{0};
@@ -2011,6 +2055,10 @@ inline SimulationResult run_transient_trbdf2(
             // The gates as the step starts (one switch_fn call), and
             // the step cap the narrowest pulse seen so far implies.
             SwitchStateMask sw_now = switch_fn(t + Real{0.5} * h_min);
+            learn_gate_period(sw_now, t);
+            if (has_ticks && !(opts.h_max > Real{0}) && gate_period_cap < h) {
+                h = std::max(gate_period_cap, h_min);
+            }
             if (learn_gates) {
                 learn_gate_toggles(sw_now, t);
                 const Real cap = gate_pulse_cap(t);
@@ -2915,12 +2963,18 @@ inline SimulationResult run_transient_trbdf2(
                         const Real th = sa_raw / (sa_raw - sb_raw);
                         const Real t_lin = ta + th * (tb - ta);
                         // Post-crossing side by a hair, as the solve lands.
-                        const Real thp = std::min(Real{1}, th * (Real{1} + Real{1e-6}));
-                        x_trial = x_ta + thp * (x_tb - x_ta);
                         // Not below the probes' learned conditioning floor
                         // (a singular solve there), never past the bracket.
                         dt_land = std::max({t_lin - t, h_probe_floor,
                                             std::min(h_probe_learned, tb - t)});
+                        // The state where the landing is recorded: a floor
+                        // that moved the time past t_lin moves the state
+                        // along the bracket with it (it was stored at t_lin).
+                        const Real thp = std::min(Real{1}, std::max(
+                            th * (Real{1} + Real{1e-6}),
+                            (t + dt_land - ta) / (tb - ta)));
+                        x_trial = x_ta + thp * (x_tb - x_ta);
+                        if (t + dt_land > t_lin) ++st.n_interp_floor_landings;
                     } else {
                         land_ok = trap_solve(mask_step, t, dt_land, x_trial);
                     }

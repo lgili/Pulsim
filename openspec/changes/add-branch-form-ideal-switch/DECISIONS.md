@@ -485,3 +485,120 @@ Each entry: question → option taken → evidence → how to reverse.
     before the change, a few ulps of the node voltages through g_on, so no
     trace there was wrong yet; the floor was only waiting for a slower
     crossing. The common-mode-free runs are unchanged (golden, baseline).
+
+## TR-BDF2 track 7 (feat/core-p2-trbdf2)
+
+28. **ll15 / ll14: the error control was right; a periodic gate in a
+    controlled run now caps the step like a PWM source.** Question: ll15's
+    I(L) at 23 T read 27.394 A against 27.328 A converged (2.4e-3 relative
+    at rtol 1e-5): does the estimate under-read during the 600 A start-up?
+    → No. Measured (`.scratch/t7/ll15_lte.py`): the true local error of
+    every accepted step (Radau at rtol 1e-13 from the engine's own state,
+    steps inside one gate phase) over rtol·|x| + atol is at most 1.26 on the
+    integration steps (2.7 on a 1e-12 s landing step, 2.8e-8 A), median
+    0.88 at rtol 1e-7. The error came from one 4 us step per 5 us period
+    (duty at its 0.05 floor): ratio ~1 each, all of one sign, 23 of them =
+    0.066 A. That is what a per-step tolerance gives (global error ~ N·tol,
+    ~ rtol^(2/3) for a second-order method); against the 400-600 A it built
+    up on it is 1.1e-4 = 11 rtol, not two orders. Newton (absolute dx 1e-9)
+    and the start (a DC operating point, consistent) play no part: the
+    error falls as rtol^(2/3) down to 1e-10. The defect: the closed-loop
+    gate escaped the ceiling every PWM / pulse / sine source gets (20 steps
+    per period, #20); its ceiling was span/1000 = 5 us = one period. → In a
+    run with controller ticks, once a gate bit rises three times a constant
+    period p apart, the step is capped at p/20 (the default ceiling only;
+    floors unchanged). Scoped to runs with ticks after the review: on every
+    switch_fn gate it cost the CCM buck 8,803 steps in 400 periods against
+    its pinned <= 8 per period, and a monitor-only tick period (the first
+    version capped at T_tick/20) is no gate's period. Open-loop gates are
+    therefore unchanged (owner question: should they get p/20 too?).
+    ll15 I(L) at 23 T minus converged, rtol 1e-4, 1e-5, 1e-6, 1e-7, 1e-8,
+    1e-10: before 0.142, 0.066, 0.0155, 3.6e-3, 7.9e-4, 4.7e-5 A; after
+    5.3e-3, 3.5e-3, 1.25e-3, 5.9e-4, 4.6e-4, 4.7e-5 A (the first three
+    periods, before the rises prove periodic, still take the long steps:
+    rtol-dependent; from 1e-7 the cap binds). ll14's duty error per tick
+    against the independent closed-loop reference (`closed_loop_reference.py`)
+    at the same rtols: before 8.8e-6, 4.9e-6, 1.1e-6, 2.2e-7, 7.4e-8,
+    3.5e-8; after 1.2e-6, 4.4e-7, 2.0e-7, 8.3e-8, 5.2e-8, 2.1e-9. The ticks
+    sample landed, solved states: the duty error was tolerance error (11x
+    smaller now at the default). Harness cells (interp measure; vs the rtol
+    1e-8 reference / vs rtol 1e-10): ll15 1.23e-3 / 1.23e-3 -> 2.6e-4 /
+    2.9e-4, ll14 1.06e-3 / 1.07e-3 -> 5.6e-4 / 5.7e-4: both agree
+    (tolerance 1e-3, untouched). The rtol 1e-8 reference is capped too; the
+    vs-1e-10 figures are the honest ones and agree as well. Cost (accepted,
+    default tolerances): ll14 13,336 -> 20,718; ll15 39,660 -> 55,757;
+    cl_buck_pi 13,367 -> 19,264; cl_buck_aggressive_pi 6,776 -> 7,988;
+    cl_boost_pi (30 ms) 19,839 -> 72,154 (3.6x; wall 0.06 -> 0.08-0.14 s,
+    one run each on a loaded machine). Errors vs rtol 1e-10: cl_buck_pi
+    8.5e-5 -> 1.9e-5, cl_buck_aggressive_pi 8.1e-5 -> 3.7e-5, cl_boost_pi
+    6.9e-5 -> 1.5e-6. ll16 (reference suspect) still aborts in Newton (at
+    34 us; it ran with the first, tick-period version: an accident of the
+    step sequence, cause not found). Rounding fuzz (20 runs, values x (1 +
+    1e-15 u)): ll15 I(L)(23 T) spread 2.8e-6 A. → Reverse: `learn_gate_period`
+    and its cap at the step start in run_transient_trbdf2.
+
+29. **Track 6 reviewer leftovers (a) and (b).** (a) `be_solve` (the
+    post-turn-off backward-Euler record) called `mask_at(t)`, which settles
+    the mode and can release an ideal diode, inside each of its two solves.
+    → On that path the record decides the mode once (`m_rec`) and both BE
+    solves and the switch-state row read it; the plain record keeps its one
+    `mask_at(t)` for the row, after its early returns, as before. Results
+    of the golden runs are identical (vsi_trbdf2: +2 event-cache
+    refactors, 5443 -> 5445, same samples and states). (b) The flat exception of `_diode_turn_offs` (a long
+    step after trbdf2's post-event record with equal ends counts as
+    resolved): restricted to forced turn-offs it failed 8 tests, all
+    natural turn-offs on trbdf2 traces (4 boost recovery-energy cells,
+    the V_th = 0 chatter case, 3 half-wave RL `auto` cells). Equal ends
+    prove nothing on a fixed step, which can alias a ring (the 2 us L-Cs
+    ring at T/20). → The exception holds for a forced turn-off or a trbdf2
+    trace (`engine_used == 'trbdf2'`); a natural turn-off on a fixed-step
+    trace is unresolved. Not exact on trbdf2 either (review): the step
+    after a turn-off record on a linear circuit is the L-stable SDIRK step
+    with a filtered estimate, which damps a ring much faster than the step
+    instead of reporting it; kept as a commented shortcut (upgrade: compare
+    the step with the post-turn-off mode's ring period). → Reverse:
+    `controlled=` in `_diode_turn_offs`.
+
+30. **Learning a periodic opaque gate: the step cap is 64 w, sampled every
+    w/2.** Question: cl_boost_pi behind an opaque lambda took 26,947 of its
+    28,049 steps in the first 0.1 ms. Measured per period: 37, 17,922,
+    8,568, then 56-62: the PI starts from duty 0, the first pulses are
+    0.28 ns and 0.585 ns wide, and the cap 2 w held until the third rise
+    proved the gate periodic (lifting after two rises would trust one
+    period, which a gate that pauses breaks). The cap 2 w with 4 gate
+    samples per step and a cap of K w with samples w/2 apart see the same
+    pulses (a pulse >= w spans a sample in both); only the number of
+    solves differs. → Cap = 64 w (kCapPulses) with `ceil(2 h / w)` samples
+    (<= 4,096), the dense sampling a lifted step already had. Result
+    (0.3 ms): accepted 28,049 -> 2,357 (first 0.1 ms 26,944 -> 1,295;
+    periods 1-2 26,490 -> 866), solves 56,681 -> 5,296, steady state 580
+    -> 558 per 0.1 ms (558 with declared edges), 29 rises / 30 falls in
+    both. Track 6's gate tests (pause, speed-up, 1 ns pulse) and the DCM
+    buck (4,212 accepted) are unchanged. Rounding fuzz (20 runs, R and L
+    x (1 + 1e-15 u)): 2,357 accepted in every run, v_end spread 4.6e-9 V.
+    → Reverse: kCapPulses = 2.
+
+31. **Track 6 reviewer leftovers (c) and (d).** (c) The pulse-cap test's
+    1 ns start-up pulse was seen only because the start-up steps were short
+    there. → It now rises on a single-shot pulse-source breakpoint (a step
+    always ends there; its rise is a step start, its fall located); passes
+    with `dt_init` 1e-12 .. 2e-8. Its undersampling warning depended on the
+    start-up steps too and is no longer asserted. (d) The learned probe
+    floor: a capacitor held only by OFF diodes (1e-9 S against 2C/h) has an
+    exactly zero pivot at a femtosecond probe (A + g rounds to A), so the
+    run learns a floor (1e-11 s beside a DCM buck). With the floor in force
+    a secant landing raised `dt_land` to it but stored the state at t_lin
+    (a time/state mismatch of up to the floor). → The state is taken along
+    the bracket at the stored time; `n_interp_floor_landings` counts the
+    landings the floor moved. Reachable? Scanned (island C 1e-6 .. 1e-4 F,
+    g_off 1e-9 / 1e-10, two loads): the one floor that runs (1e-11 s) moves
+    no landing (0); every larger floor aborts in a step solve first (below).
+    So the branch is unexercised; the test pins what is reachable: floor
+    > 0, the DCM buck with and without the decoupled island gives 100
+    turn-offs each, landing instants within 5.0e-10 s (the localisation
+    resolution max(h_min, 1e-4 h)), v(out) within 1e-4 VIN. FOUND, not
+    fixed: the same circuit at rtol 1e-10 aborts ("refactorize failed
+    (numerically singular)", dt = 5.9e-14 s): only the probes climb the
+    floor ladder, a step or landing solve that small does not; with
+    C = 1 mF, g_off = 1e-12 the probe ladder itself reaches its cap
+    (span_ref·1e-6) and aborts at the default tolerance.
