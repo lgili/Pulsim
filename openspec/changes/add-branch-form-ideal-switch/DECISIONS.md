@@ -245,3 +245,37 @@ Each entry: question → option taken → evidence → how to reverse.
     common mode) is not needed and was not shipped. → Pinned:
     test_bridge_ground_truth.py (within 1e-3 V at rtol 1e-7, 3e-3 V at
     2e-5, rounding spread <= 1e-4 V). → Reverse: none (no engine change).
+
+20. **trbdf2's periodic-source step ceiling stays at T/20 (step-ceiling
+    study).** Question: would T/40 or T/80 buy accuracy? Evidence, the
+    floating-bus bridge against its exact average (40 ms, both forms;
+    error / accepted steps):
+
+    | ceiling | rtol 1e-5 | rtol 2e-5 |
+    |---|---|---|
+    | T/20 (1 ms) | -3.08e-3 V / 632 | -4.59e-3 V / 512 |
+    | T/40 | -2.98e-3 V / 631 | -4.72e-3 V / 522 |
+    | T/80 | -3.75e-3 V / 687 | -5.95e-3 V / 581 |
+    | span/1000 (4e-5 s) | -2.20e-3 V / 1306 | -2.47e-3 V / 1230 |
+
+    The tolerance, not the ceiling, sets the error between T/20 and T/80
+    (no monotone gain, +9 % steps at T/80). → Option kept: T/20, no
+    breaking default change (no CHANGELOG entry, no re-pins). → Reverse:
+    the cap in run_transient_trbdf2's periodic-source ceiling.
+
+21. **Step-3 leftovers (order check, round-off floor, DCM xfail, ceiling).**
+    (a) The C++ order check of the SDIRK(2,2) restart (half-wave RL
+    rectifier, an SDIRK step after every event, controller off at rtol 1 so
+    every step is the ceiling): error ratio per halving 4.09 (4.07, 4.04,
+    4.0 down to 25 us), second order; plain TR-BDF2 on the same grid 2.28.
+    A first attempt read 1.95 because tail_mean starts at the first sample
+    past the window (an O(h) metric error); the check interpolates the
+    window start. (b) spike_ok accepts a post-landing signal within the
+    predicate noise: boost CCM pss gap 5.2e-9 -> 2.8e-9, everything else
+    unchanged. (c) test_dcm_no_step_below_1e_11 stays strict-xfail: 2,606
+    sub-1e-11 steps, 400 at each gate edge (probe commits) and 1,806 in
+    the stiff L*g_off mode after a turn-off; fixing them needs an
+    estimate that ignores the tau ~ 2e-13 s mode, not a landing change.
+    (d) hard_switched_rc trbdf2 ceiling 4.45e-6 -> 2.5e-6 (measured
+    2.2236e-6). (e) Not done: x_sig is still the pre-cascade solve after a
+    second cascade at the same t. → Reverse: revert the step-3 commit.

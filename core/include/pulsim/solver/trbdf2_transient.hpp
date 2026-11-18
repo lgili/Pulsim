@@ -2609,9 +2609,12 @@ inline SimulationResult run_transient_trbdf2(
                     const bool turn_off = ce.is_on && ce.g_off > Real{0};
                     const Real v_tol =
                         opts.atol + opts.rtol * x.cwiseAbs().maxCoeff();
+                    // Round-off floor: a signal within the solve's own noise
+                    // cannot be bracketed further (it walked to h_min).
                     auto spike_ok = [&](Real s_post) {
                         return !turn_off
-                            || std::abs(s_post) * ce.g_on / ce.g_off <= v_tol;
+                            || std::abs(s_post) * ce.g_on / ce.g_off <= v_tol
+                            || std::abs(s_post) <= noise_at(cross_idx);
                     };
                     Real sb_raw = sb;   // the unhalved signal at tb
                     Real sa_raw = sa;
