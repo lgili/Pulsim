@@ -306,8 +306,9 @@ Event queue, 2026-11-18 (add-unified-event-queue): the graph's PWM gate now
 states its edges (valid until the next tick), so trbdf2 lands them instead
 of sampling the gate. `cl_boost_pi` gets a reference: trbdf2 6.9e-5 and
 pwl+split 8.6e-5 agree, pwl 0.058 / restart 0.058 disagree. `ll15_boost` on
-trbdf2 moves 3.9e-4 -> 1.24e-3 (tol 1e-3, now disagree): the sampling step
-cap (twice the narrowest pulse seen) no longer bounds h. `ll16_flyback`
+trbdf2 moves 3.9e-4 -> 1.24e-3 (tol 1e-3, now disagree) and `ll14_buck` on trbdf2
+0.16 -> 0.214: the sampling step cap (twice the narrowest pulse seen) no
+longer bounds h. `ll16_flyback`
 still errors. The other closed-loop numbers move with the new reference.
 
 **`cuk_converter` diode turned round, 2026-11-17.** The file and its ngspice

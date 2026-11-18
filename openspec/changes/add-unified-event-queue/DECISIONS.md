@@ -120,5 +120,10 @@
   pwl with `enable_substep_state_correction=True` now splits at the
   loop's edges. Reference status: `cl_boost_pi` error -> agree on trbdf2
   and pwl+split, disagree (0.058) on pwl / pwl+restart (it had no
-  reference before); `ll15_boost` trbdf2 3.9e-4 -> 1.24e-3 (tol 1e-3).
+  reference before); `ll15_boost` trbdf2 3.9e-4 -> 1.24e-3 (tol 1e-3:
+  agree -> disagree); `ll14_buck` trbdf2 0.16 -> 0.214, pwl+split
+  0.212 -> 0.178. These two trbdf2 regressions are the cost of dropping
+  the sampling cap; frozen, not diagnosed (a step cap from the
+  modulator's period, as `update-trbdf2-error-control` does for sources,
+  is the candidate).
   Freezes updated in `benchmarks/manifests/v2_triage.yaml`.

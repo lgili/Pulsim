@@ -27,12 +27,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `make_pwm_gate`) states its edges for the duty it holds
   (`CxxChainPwmGate.next_edge_after`, valid until the graph's next tick);
   `trbdf2` lands them instead of sampling the gate five times per step, and
-  `make_combined_switch_fn` keeps them. Closed loops on `trbdf2` change at
-  the solver tolerance (a closed-loop buck's output to 1e-9 relative);
-  `cl_boost_pi`, which hit `max_steps` at 5.6 ms on trbdf2, now runs and
-  agrees with its reference on trbdf2 and pwl+split; `ll15_boost` on trbdf2
-  moves 3.9e-4 -> 1.24e-3 (tolerance 1e-3; the gate-sampling step cap no
-  longer bounds the step). `pwl` is unchanged unless
+  `make_combined_switch_fn` keeps them. Closed-loop results on `trbdf2`
+  change: the step is no longer capped at twice the narrowest sampled
+  pulse. A 2 kHz closed-loop buck's output moves by 1e-9 relative, but the
+  reference status moves more: `cl_boost_pi`, which hit `max_steps` at
+  5.6 ms on trbdf2, now runs and agrees with its reference on trbdf2 and
+  pwl+split (error before); **`ll15_boost` on trbdf2 goes from agree to
+  disagree** (3.9e-4 -> 1.24e-3, tolerance 1e-3) and **`ll14_buck` on
+  trbdf2 from 0.16 to 0.214** (already disagreeing); both are frozen, not
+  diagnosed. `pwl` is unchanged unless
   `enable_substep_state_correction=True`, which now splits at the loop's
   edges.
 

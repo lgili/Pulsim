@@ -295,3 +295,18 @@ def test_the_chain_fast_path_passes_a_declared_b_extra_jump():
     t = np.asarray(r.times)
     exact = np.where(t >= tau, 1.0 - np.exp(-(t - tau) / 1e-3), 0.0)
     assert np.max(np.abs(np.asarray(r.v("v")) - exact)) < 1e-7
+
+
+def test_two_offset_groups_on_trbdf2():
+    # Two groups with different offsets and periods, t_start != 0: the
+    # graph's t0 is its first tick minus the smallest offset.
+    b = _rc()
+    ch = p.MixedDomainBlockChain()
+    ch.add("g", p.Gain(k=1.0), inputs=dict(x="out"), output="u",
+           rate=p.Rate(1e-4, offset=2e-5))
+    ch.add("h", p.Gain(k=2.0), inputs=dict(x="out"), output="w",
+           rate=p.Rate(3e-4, offset=7e-5))
+    obs = ch.make_step_observer(b)
+    t0 = 2.5e-4
+    p.simulate(b, t0 + 1.2e-3, engine="trbdf2", t_start=t0, step_observer=obs)
+    assert ch.tick_counts == [12, 4]

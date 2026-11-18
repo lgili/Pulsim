@@ -73,3 +73,13 @@ def test_closed_loop_edges_are_landed_not_sampled_on_trbdf2():
     # Two edges per carrier period (duty strictly inside (0, 1) after
     # the first periods): about 2 * 100.
     assert 150 <= st["n_gate_events"] <= 200
+
+
+def test_combined_gate_keeps_the_edges():
+    ch, gate = _gate(0.3)
+    other = p.make_pwm_switch_fn(2e4, 0.5, 0, 2)
+    comb = p.make_combined_switch_fn(2, [gate, other])
+    assert comb.has_edges
+    for t in np.linspace(0.0, 2e-4, 101):
+        assert comb.next_edge_after(t) == min(gate.next_edge_after(t),
+                                              other.next_edge_after(t))
