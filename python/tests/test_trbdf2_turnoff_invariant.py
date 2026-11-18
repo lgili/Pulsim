@@ -46,6 +46,10 @@ def test_no_turn_off_carries_reverse_current(name):
     diodes = [c["name"] for c in b.components() if c["name"].startswith("D")]
     i_max = max(float(np.abs(np.asarray(r.i(n))).max()) for n in diodes)
     tol = atol + rtol * i_max
+    if sf is None:
+        # bridge: leakage scale, not rtol*71 A = 1.4e-3 A (measured worst
+        # -6.1e-7 A = 2 * g_off * 311 V)
+        tol = 1e-6
     n_off = 0
     for nm in diodes:
         k = b.switch_index_of(nm)

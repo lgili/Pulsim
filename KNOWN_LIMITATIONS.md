@@ -645,6 +645,8 @@ events still varies under rounding (leakage-scale decisions at the
 zero-current turn-offs), without effect on the waveforms. Average a
 variable-step result over a window with its end points interpolated: the
 samples after 30 ms divided by 10 ms read 311.154 V here.
+`engine='dsed'` (exact) reads 311.316685 V on the same bridge, 0.0272 V
+low; the cause is not yet located (`BRIDGE_GROUND_TRUTH.md`).
 
 ### First stored sample of algebraic nodes
 
