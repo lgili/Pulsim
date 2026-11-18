@@ -430,7 +430,9 @@ def _circuit_form(builder_factory, parallel, backend, simulate_kwargs):
             "that adds the blocks per point.")
     stateful = [k for k in ("step_observer", "closed_loops")
                 if simulate_kwargs.get(k) is not None]
-    if getattr(simulate_kwargs.get("switch_fn"), "_closed_loop", None):
+    sf = simulate_kwargs.get("switch_fn")
+    if getattr(sf, "_closed_loop", None) or \
+            getattr(sf, "follows_controller", False):
         stateful.append("switch_fn (a closed loop)")
     if parallel and stateful:
         # one controller object would run every point at once on threads

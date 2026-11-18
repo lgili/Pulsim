@@ -252,9 +252,13 @@ _STEP_ARGTYPES = [_DBL, ctypes.c_int, _DBL, ctypes.c_int,
                   ctypes.POINTER(ctypes.c_void_p)]
 
 
+# Marks a library whose state is one static struct (export_c's shim).
+_STATIC_MARK = "pulsim_cblock_static_state"
+
+
 def _load_native_step(lib_path, symbol, n_in, n_out, *,
                       init_symbol="pulsim_cblock_init",
-                      term_symbol="pulsim_cblock_term"):
+                      term_symbol="pulsim_cblock_term", static_taken=None):
     """Load a compiled C-block library and return ``(step_fn, teardown)``.
 
     ``step_fn(t, dt, inp, out, _state)`` calls the C ABI, marshalling the
@@ -271,6 +275,14 @@ def _load_native_step(lib_path, symbol, n_in, n_out, *,
             f"C++).") from exc
     step_c.restype = None
     step_c.argtypes = _STEP_ARGTYPES
+    if static_taken is not None and hasattr(dll, _STATIC_MARK):
+        # two blocks of one circuit would step one state twice per tick
+        if dll._handle in static_taken:
+            raise ValueError(
+                f"c_block: {lib_path!r} keeps one static state (export_c's "
+                "shim) and this circuit already has a block of it. Compile "
+                "the file again under another name for a second instance.")
+        static_taken.add(dll._handle)
 
     state_ptr = ctypes.c_void_p(None)
     if hasattr(dll, init_symbol):
@@ -325,11 +337,25 @@ def _cache_dir() -> Path:
                     or Path.home() / ".cache")
     d = base / "pulsim" / "cblock"
     d.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if os.name == "posix" and d.lstat().st_uid == os.getuid() \
-            and not d.is_symlink():
-        os.chmod(d, 0o700)          # mkdir's mode is masked by the umask
-    _check_owned(d)
+    if os.name != "posix":
+        _check_in_profile(d)
+    for p in (d.parent, d):         # pulsim/ too: its owner could swap cblock/
+        if os.name == "posix" and p.lstat().st_uid == os.getuid() \
+                and not p.is_symlink():
+            os.chmod(p, 0o700)      # mkdir's mode is masked by the umask
+        _check_owned(p)
     return d
+
+
+def _check_in_profile(path: Path) -> None:
+    """Windows has no POSIX owner or mode: keep the cache inside
+    %USERPROFILE%, whose ACL is the user's by default."""
+    home = Path(os.environ.get("USERPROFILE") or Path.home()).resolve()
+    if not Path(path).resolve().is_relative_to(home):
+        raise RuntimeError(
+            f"c_block: refusing {path}: it is outside your profile "
+            f"({home}), so pulsim cannot tell who may write it. Point "
+            "LOCALAPPDATA inside your profile.")
 
 
 def _check_owned(path: Path) -> None:
@@ -470,7 +496,8 @@ def add_c_block(builder,
     if sim_dt is not None and dt < sim_dt:
         warnings.warn(
             f"c_block {name!r}: dt={dt:g}s < simulation dt={sim_dt:g}s; "
-            f"clamping the block to run every simulation step.")
+            f"clamping the block to run every simulation step.",
+            stacklevel=2)
         dt = float(sim_dt)
 
     # Resolve the step function from exactly one of fn / lib / code.
@@ -485,7 +512,10 @@ def add_c_block(builder,
             extra_compile_args=extra_compile_args,
             extra_link_args=extra_link_args))
     if lib is not None:
-        fn, teardown = _load_native_step(lib, symbol, n_in, n_out)
+        if not hasattr(builder, "_c_static_libs"):
+            builder._c_static_libs = set()
+        fn, teardown = _load_native_step(
+            lib, symbol, n_in, n_out, static_taken=builder._c_static_libs)
     assert fn is not None
 
     if lib is None:

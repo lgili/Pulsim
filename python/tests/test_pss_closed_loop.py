@@ -209,3 +209,37 @@ def test_shooting_refuses_a_chain_overlay_as_b_extra_fn():
         p.periodic_steady_state(b2, period=T, switch_fn=sf, engine="pwl",
                                 dt=T / 100, options={"b_extra_fn": bex})
     assert e.value.feature == "closed_loop"
+
+
+def test_a_combined_schedule_with_a_closed_loop_part_is_refused():
+    # since G23 the loop's gate declares its edges, so a combination of it
+    # has edges too: only the closed-loop mark the combination carries
+    # (SwitchSchedule.follows_controller) keeps it refused (before G23:
+    # refused as edgeless)
+    b = _buck()
+    sf = p.make_combined_switch_fn(b.graph.num_switches,
+                                   [_pi_loop(b).switch_fn])
+    assert sf.has_edges and sf.follows_controller
+    # it survives a second combination
+    assert p.make_combined_switch_fn(b.graph.num_switches,
+                                     [sf]).follows_controller
+    with pytest.raises(p.UnsupportedError, match="frozen duty"):
+        p.periodic_steady_state(b, period=T, switch_fn=sf, engine="pwl",
+                                dt=T / 100)
+    open_loop = p.make_combined_switch_fn(b.graph.num_switches, [
+        p.make_pwm_switch_fn(1 / T, 0.5, b.switch_index_of("S"),
+                             b.graph.num_switches)])
+    assert not open_loop.follows_controller
+
+
+@pytest.mark.parametrize("combine", [False, True])
+def test_sensitivities_refuse_a_closed_loop_gate(combine):
+    from pulsim.sensitivity import simulate_sensitivities
+    b = _buck()
+    sf = _pi_loop(b).switch_fn
+    if combine:
+        sf = p.make_combined_switch_fn(b.graph.num_switches, [sf])
+    with pytest.raises(p.UnsupportedError) as e:
+        simulate_sensitivities(b, 10 * T, sensitivities=["RL.R"],
+                               switch_fn=sf)
+    assert e.value.feature == "closed_loop"

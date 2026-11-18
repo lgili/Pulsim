@@ -490,6 +490,41 @@ late by less than `dt` (`simulate` warns; `result.control_tick_jitter_max`
 records the largest lateness); `T < dt` is refused. `trbdf2` lands every
 tick exactly. Pick `dt = T/n` for an exact fixed-step cadence.
 
+### Closed loops: what each engine gets right
+
+Measured against an independent reference outside pulsim (expm flow per
+mode / Radau, the PI law re-typed, ticks at `kT`:
+`openspec/changes/add-compiled-control-graph/probes/closed_loop_reference.py`).
+The gate of `bind_pi_to_switch` declares its edges (G23).
+
+- **`trbdf2` is the reference.** At rtol 1e-10 it meets `v(kT)` within
+  1.1e-7 of the span on the five closed-loop benchmark circuits; default
+  tolerances within 7e-5.
+- **`pwl` is first order** in a helper loop: label time samples
+  `x(kT - dt)`. Without the event split it also samples the gate on the
+  grid, so the duty moves in steps of `dt/T` (5 % at 100 kHz, `dt` =
+  0.5 µs) and the loop dithers: `cl_boost_pi` 0.20 of the span. Pass
+  `discontinuity_restart=True, enable_substep_state_correction=True` to
+  split at the gate's edges: 4.2e-4.
+- **`trbdf2`: no post-edge sample at an edge that is also a tick**
+  (`core/include/pulsim/solver/trbdf2_transient.hpp`,
+  `restart_after_gate_event` refuses its commit when
+  `t + h_p >= t_next_tick - h_min`). A loop's period start is a tick, so
+  every rising edge ramps in the record across the first post-edge step,
+  whose length follows rtol: the states converge, `V(sw)` does not
+  (`ll14` rtol 1e-8 vs 1e-10: 0.06). Reproducer
+  `probes/trbdf2_tick_edge_sample.py` (closed loop 0/199 rising edges
+  with a post-edge sample, open loop 199/199). `ll14` / `ll15` trbdf2 and
+  pwl+split are frozen `disagree` on `V(sw)` until the engine fires the
+  tick before the commit; pwl and pwl+restart also miss the states (gate
+  sampled on the grid, duty in steps of dt/T: `ll14` I(L1) 0.13).
+- **`trbdf2`: the learned narrowest pulse never relaxes**
+  (same file, `learn_gate_toggles`: `gate_pulse_min` is a running
+  minimum and caps every later step at twice it). A `switch_fn` with no
+  edge oracle that shows one 0.28 ns pulse is stepped at 0.56 ns for the
+  rest of the run (`cl_boost_pi` hit `max_steps` at 5.59 ms of 30 ms
+  before G23). Reproducer `probes/trbdf2_sticky_pulse_cap.py`.
+
 ### TR-BDF2 still refactors on every new step size
 
 `engine='trbdf2'` solves through one event solver per switch state.
@@ -570,11 +605,16 @@ The differential matrix (strict gate: every observable, every interval)
 records its `disagree` / `error` cells as `known:` per configuration in
 `benchmarks/manifests/v2_triage.yaml` (counts in
 `benchmarks/REFERENCE_STATUS.md`). Each is an open finding, not a
-tolerance. No circuit is `unverified` any more. (`sepic` carried a
-`reference: suspect` mark while its trbdf2 reference ground to
-`max_steps`; that grind is fixed and the reference gives pwl 1.9e-3 and
-trbdf2 3.0e-5, both agree; dsed is a frozen `error`. `cuk_converter`
-carried it because its diode was reversed; see below.)
+tolerance. One circuit has no valid reference and is `unverified` on
+every engine (`reference: suspect`): `ll16_flyback_closed_loop`, which is
+not a flyback (`Lsec` is not coupled, `V(vout)` = 0, so the PI
+integrates a constant error; every turn-off forces `I(Lleak) - I(Lm)`
+through `roff` = 1e7 Ω: `V(drain)` peaks at 7.4e8 V on trbdf2 and
+9.5e3 V on pwl, and trbdf2 rtol 1e-8 vs 1e-10 differ by 6.7e-3).
+(`sepic` carried a `reference: suspect` mark while its trbdf2 reference
+ground to `max_steps`; that grind is fixed and the reference gives pwl
+1.9e-3 and trbdf2 3.0e-5, both agree; dsed is a frozen `error`.
+`cuk_converter` carried it because its diode was reversed; see below.)
 
 **`cuk_converter` runs in DCM: −17.5 V, not −12 V.** Until 2026-11 the
 file and its ngspice deck had `Drect` reversed (anode at ground), so with

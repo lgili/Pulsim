@@ -2086,6 +2086,11 @@ class SwitchSchedule:
         First gate-edge time strictly greater than `t`; inf when the schedule does not know it (a combination with a plain Python callable). An edge may be a no-op (same mask on both sides), never a missed one.
         """
     @property
+    def follows_controller(self) -> bool:
+        """
+        True when a part is a control graph's PWM gate (a closed loop): its edges are those of the duty held now, so shooting and sensitivities refuse it.
+        """
+    @property
     def has_edges(self) -> bool:
         """
         False when the schedule cannot name its edges (a make_combined_switch_fn with a plain Python callable in it); the variable-step engines then search for them by sampling.
@@ -2719,6 +2724,10 @@ class CxxChainPwmGate:
     """
     def __call__(self, t: float) -> SwitchStateMask:
         ...
+    def next_edge_after(self, t: float) -> float:
+        """
+        First gate edge strictly after t under the duties held now (period starts and OFF thresholds); stale after a tick.
+        """
 class CxxChainBExtra:
     """
     A control graph's driven-source b_extra_fn(t), with the instants its value may jump (next_jump_after), both in C++.
