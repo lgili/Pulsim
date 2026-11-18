@@ -1181,7 +1181,8 @@ public:
         Real R_s, Real L_d, Real L_q, Real psi_pm, Real pole_pairs,
         Real J, Real B = Real{0}, Real T_load = Real{0},
         Real L_0 = Real{0},
-        Real omega0 = Real{0}, Real theta0 = Real{0}) {
+        Real omega0 = Real{0}, Real theta0 = Real{0},
+        const std::vector<std::array<Real, 3>>& harmonics = {}) {
         if (!(J > Real{0})) {
             throw std::invalid_argument(std::format(
                 "add_pmsm_mna(\"{}\"): J must be > 0 (got {}); it is the "
@@ -1192,12 +1193,23 @@ public:
             throw std::invalid_argument(std::format(
                 "add_pmsm_mna(\"{}\"): B must be >= 0 (got {}).", name, B));
         }
-        const models::PmsmMna::Params p{
+        models::PmsmMna::Params p{
             .R_s = R_s, .L_d = L_d, .L_q = L_q, .L_0 = L_0,
             .psi_pm = psi_pm, .pole_pairs = pole_pairs,
             .T_load = T_load,
         };
-        models::PmsmMna::validate(p);
+        if (!harmonics.empty()) {
+            std::vector<models::PmsmMna::PmHarmonic> hs;
+            for (const auto& t : harmonics) hs.push_back({t[0], t[1], t[2]});
+            p.harmonics = std::make_shared<
+                const std::vector<models::PmsmMna::PmHarmonic>>(std::move(hs));
+        }
+        try {
+            models::PmsmMna::validate(p);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::format(
+                "add_pmsm_mna(\"{}\"): {}", name, e.what()));
+        }
         const Index n_idx = resolve_node_(neutral);
         const std::array<std::string_view, 3> ph{phase_a, phase_b,
                                                  phase_c};
@@ -1221,6 +1233,74 @@ public:
         }
         add_capacitor(std::string{name} + "_theta", theta_node, "gnd",
                       Real{1}, theta0);
+        return *this;
+    }
+
+    /// Add an MNA-native squirrel-cage induction machine
+    /// (add-mna-native-machines group 2; `models/induction_machine_mna.hpp`).
+    ///
+    /// Three stator branches `name_a/_b/_c` from the phase nodes to
+    /// `neutral` (branch-current unknowns, constant stator inductance
+    /// in the stationary frame), two internal nodes `name_psi_ra`,
+    /// `name_psi_rb` whose voltages ARE the rotor flux linkage λ_rα,
+    /// λ_rβ [Wb] (1 F capacitors `name_Cra`, `name_Crb`), and the
+    /// torque into `omega_node` (mechanical speed [rad/s], capacitor J
+    /// `name_J`, resistor 1/B `name_B`). Rotor quantities referred to
+    /// the stator; amplitude-invariant Clarke.
+    ///
+    ///   R_s, L_ls, R_r, L_lr, L_m [Ω, H]   pole_pairs
+    ///   J [kg·m²]   B [N·m·s/rad]   T_load [N·m]   omega0 [rad/s]
+    CircuitBuilder& add_induction_machine_mna(
+        std::string_view name,
+        std::string_view phase_a, std::string_view phase_b,
+        std::string_view phase_c, std::string_view neutral,
+        std::string_view omega_node,
+        Real R_s, Real L_ls, Real R_r, Real L_lr, Real L_m,
+        Real pole_pairs, Real J, Real B = Real{0}, Real T_load = Real{0},
+        Real omega0 = Real{0}) {
+        if (!(J > Real{0})) {
+            throw std::invalid_argument(std::format(
+                "add_induction_machine_mna(\"{}\"): J must be > 0 (got {}); "
+                "it is the capacitor on the omega node.", name, J));
+        }
+        if (!(B >= Real{0})) {
+            throw std::invalid_argument(std::format(
+                "add_induction_machine_mna(\"{}\"): B must be >= 0 (got {}).",
+                name, B));
+        }
+        const models::InductionMachineMna::Params p{
+            .R_s = R_s, .L_ls = L_ls, .R_r = R_r, .L_lr = L_lr,
+            .L_m = L_m, .pole_pairs = pole_pairs, .T_load = T_load,
+        };
+        try {
+            models::InductionMachineMna::validate(p);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::format(
+                "add_induction_machine_mna(\"{}\"): {}", name, e.what()));
+        }
+        const Index n_idx = resolve_node_(neutral);
+        const std::array<std::string_view, 3> ph{phase_a, phase_b,
+                                                 phase_c};
+        std::array<Index, 3> ids{};
+        for (Size k = 0; k < 3; ++k) {
+            const std::string bname =
+                std::string{name} + "_" + "abc"[k];
+            ids[k] = add_branch_(bname, resolve_node_(ph[k]), n_idx,
+                                 topology::BranchKind::Nonlinear);
+        }
+        const std::string ra = std::string{name} + "_psi_ra";
+        const std::string rb = std::string{name} + "_psi_rb";
+        const Index om_idx = resolve_node_(omega_node);
+        const std::array<Index, 2> rn{resolve_node_(ra), resolve_node_(rb)};
+        pool_.add_induction_machine_mna(ids, om_idx, rn, p);
+        add_capacitor(std::string{name} + "_Cra", ra, "gnd", Real{1});
+        add_capacitor(std::string{name} + "_Crb", rb, "gnd", Real{1});
+        add_capacitor(std::string{name} + "_J", omega_node, "gnd", J,
+                      omega0);
+        if (B > Real{0}) {
+            add_resistor(std::string{name} + "_B", omega_node, "gnd",
+                         Real{1} / B);
+        }
         return *this;
     }
 

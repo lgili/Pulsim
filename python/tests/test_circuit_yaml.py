@@ -322,3 +322,39 @@ def test_hostile_power_mosfet_fields_are_refused():
         p.Circuit.from_yaml(bad)
     with pytest.raises(ValueError, match='needs "shockley"'):
         p.Circuit.from_yaml(re.sub(r", shockley: \{[^}]*\}", "", y))
+
+
+def test_pmsm_harmonics_round_trip():
+    # The PM-flux series is not a scalar field: written as a flat list.
+    b = p.CircuitBuilder()
+    for i, n in enumerate(("ua", "ub", "uc")):
+        b.add_sine_voltage_source(f"V{n}", n, "gnd", 0.0, 12.0, 30.0, -2.0944 * i)
+    b.add_bldc_mna("M", "ua", "ub", "uc", "nn", "w", "th", R_s=0.3, L_s=1e-3,
+                   k_e=0.05, pole_pairs=4, J=1e-4, n_harmonics=7)
+    c = b.build()
+    assert "harmonics: [" in c.to_yaml()
+    _same_run(c, _round(c), t_end=50 * 5e-5, dt=5e-5, engine="pwl")
+
+
+def _im_circuit():
+    b = p.CircuitBuilder()
+    for i, n in enumerate(("ua", "ub", "uc")):
+        b.add_sine_voltage_source(f"V{n}", n, "gnd", 0.0, 141.0, 60.0, -2.0944 * i)
+    b.add_induction_machine_mna("M", "ua", "ub", "uc", "nn", "w", R_s=0.6,
+                                L_ls=2.5e-3, R_r=0.3, L_lr=3e-3, L_m=50e-3,
+                                pole_pairs=3, J=0.01, B=1e-3, T_load=1.5)
+    return b.build()
+
+
+def test_induction_machine_with_its_fields_round_trips():
+    c = _im_circuit()
+    y = c.to_yaml()
+    for key in ("R_s", "L_ls", "R_r", "L_lr", "L_m", "pole_pairs", "rotor:"):
+        assert key in y, key
+    _same_run(c, _round(c), t_end=50 * 5e-5, dt=5e-5, engine="pwl")
+
+
+def test_a_machine_key_on_the_other_machine_is_refused():
+    y = _im_circuit().to_yaml().replace("rotor:", "harmonics: [1, 0.05, 0], rotor:")
+    with pytest.raises(Exception, match="harmonics is a pmsm_mna key"):
+        p.Circuit.from_yaml(y)

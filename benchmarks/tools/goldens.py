@@ -70,7 +70,8 @@ def cases():
     """(golden name, run() -> result, state names, has Newton device)."""
     for cid, c in BY_ID.items():
         names = c.build(1.0)[0].state_var_names()
-        yield f"analytic__{cid}", (lambda c=c: c.run("pwl")), names, cid == "shockley_op"
+        newton = cid in ("shockley_op", "im_locked_rotor", "im_free_acceleration")
+        yield f"analytic__{cid}", (lambda c=c: c.run("pwl")), names, newton
     for rel in TRIAGED:
         case = v1_reader.load(ROOT / rel)
         names = case.build()[0].state_var_names()

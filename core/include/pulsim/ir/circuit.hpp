@@ -391,6 +391,12 @@ private:
                         reals(p.table->v_knots()); reals(p.table->q_knots());
                         reals(p.table->c_knots());
                     }
+                } else if constexpr (std::is_same_v<P, models::PmsmMna::Params>) {
+                    if (p.harmonics) {
+                        for (const auto& t : *p.harmonics) {
+                            v.real(t.h); v.real(t.psi); v.real(t.phi);
+                        }
+                    }
                 }
             }, params);
             d->devices.push_back(std::move(dev));
@@ -405,6 +411,11 @@ private:
         for (const auto& m : pool.pmsm_mna_machines()) {
             s.idx(m.omega_node);
             s.idx(m.theta_node);
+        }
+        for (const auto& m : pool.induction_machines()) {
+            s.idx(m.omega_node);
+            s.idx(m.rotor_node[0]);
+            s.idx(m.rotor_node[1]);
         }
         // Which fields a parameter drives is structure; parameter values
         // are values.

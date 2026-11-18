@@ -639,8 +639,8 @@ names but change results:
 | an IGBT conducted in reverse | `b.add_igbt(..., V_ce0=0.9, reverse_blocking=True)` blocks it; unset it is the old two-way switch (FutureWarning). SCR: `b.add_thyristor` |
 | `add_three_phase_vsi` built six bare switches | it adds six freewheel diodes (`with_freewheel_diodes=True`) |
 | `p.add_hysteretic_inductor` + `p.make_hysteretic_inductor_observer` | the inductor is solved inside Newton; drop the observer, whose factory now raises |
-| `p.add_pmsm` (observer, one average L) | still there; `b.add_pmsm_mna` stamps the machine with full saliency |
-| `p.add_dc_motor` (observer) | deprecated; `b.add_dc_machine` solves it in the matrix |
+| `p.add_pmsm`/`add_bldc`/`add_induction_motor` (observers) | native: `b.add_pmsm_mna`, `b.add_bldc_mna`, `b.add_induction_machine_mna` |
+| `p.add_dc_motor` (observer) | deprecated; `b.add_dc_machine` |
 | parts in `pulsim.lib` resolved by part number | they are synthetic; pass `allow_synthetic=True` to use them |
 
 ## 8. Paste this into your project's assistant config

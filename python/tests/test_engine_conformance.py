@@ -212,6 +212,20 @@ def _pmsm(on):
     return b
 
 
+def _induction(on):
+    b = p.CircuitBuilder()
+    for i, node in enumerate(("ua", "ub", "uc")):
+        b.add_sine_voltage_source(f"Vs{i}", node, "gnd", 0.0, 40.0, 60.0,
+                                  -2.0 * math.pi / 3.0 * i)
+        b.add_resistor(f"Rs{i}", node, node + "2", 1.0)
+        b.add_resistor(f"Rl{i}", node + "2", "gnd", 1e3)
+    if on:
+        b.add_induction_machine_mna("Md", "ua2", "ub2", "uc2", "nn", "w",
+                                    R_s=0.5, L_ls=2e-3, R_r=0.4, L_lr=2e-3,
+                                    L_m=60e-3, pole_pairs=2, J=1e-2)
+    return b
+
+
 def _junction_cap(on):
     # tasks.md 1.1: 10 V, 1 kΩ, 100 nF ∥ Cn(1 µF, 1 V, 0.5), 1 MΩ load.
     b = p.CircuitBuilder()
@@ -317,6 +331,7 @@ CELLS = {
     "LauritzenDiode": (_clamp(lambda b: b.add_lauritzen_diode(
         "Dd", "o", "gnd")), "o", "Dd", 2e-3, 2e-7, False),
     "PmsmMna": (_pmsm, "ua2", "Md", 2e-2, 1e-5, False),
+    "InductionMachineMna": (_induction, "ua2", "Md", 2e-2, 1e-5, False),
     "IdealTransformer": (_xfmr, "o", "Td", 5e-4, 1e-7, False),
     "VCCS": (_ctl(lambda b: b.add_vccs("Gd", "a", "gnd", "x", "gnd", 5e-3)),
              "o", "Gd", 5e-4, 1e-7, False),

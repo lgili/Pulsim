@@ -235,3 +235,25 @@ cases:
     dsed:
       ceiling: 1.0e-06
       measured: 7.338e-10
+  im_locked_rotor:
+    pwl:
+      ceiling: 2.7e-06
+      measured: 1.348e-06
+      reason: 'add-mna-native-machines D15: the first figure was measured at dt/2 (every
+        step failed into a retry); now at the dt asked for, 3.371e-07 -> 1.348e-06'
+    trbdf2:
+      ceiling: 1.65e-05
+      measured: 8.225e-06
+    dsed:
+      refused: UnsupportedError
+  im_free_acceleration:
+    pwl:
+      ceiling: 0.000192
+      measured: 9.618e-05
+      reason: 'add-mna-native-machines D15: the first figure was measured at dt/2 (every
+        step failed into a retry); now at the dt asked for, 4.711e-05 -> 9.618e-05'
+    trbdf2:
+      ceiling: 8.49e-05
+      measured: 4.247e-05
+    dsed:
+      refused: UnsupportedError

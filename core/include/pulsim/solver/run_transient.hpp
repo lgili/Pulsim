@@ -1181,6 +1181,12 @@ inline SimulationResult run_transient(
     // Last nominal-dt segment, valid while the cache generation holds
     // (a lazy insert/eviction or a parametric refactor bumps it). A hit
     // still writes the LRU tick, so eviction order is unchanged.
+    // The MNA-native machines' flux rows exist only in the Newton
+    // refresh: their linear part is singular, so the cache cannot
+    // factorise it and every nominal step failed into a dt/2 retry.
+    // They take the assembled (unfactorised) carrier at every dt.
+    const bool newton_only_rows = !pool.pmsm_mna_machines().empty() ||
+                                  !pool.induction_machines().empty();
     topology::SwitchStateMask seg_memo_mask;
     const pwl::PwlSegment* seg_memo = nullptr;
     std::uint64_t seg_memo_gen = 0;
@@ -1765,7 +1771,7 @@ inline SimulationResult run_transient(
                     }
                 }
                 if (nl_refresh_effective) {
-                    if (for_dt == opts.dt) {
+                    if (for_dt == opts.dt && !newton_only_rows) {
                         const auto& seg = nominal_segment(mask);
                         x = pwl::solve_with_newton_b_extra(
                             seg, nl_refresh_effective, graph, pool,

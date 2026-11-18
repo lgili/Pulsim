@@ -56,8 +56,8 @@
 #include "pulsim/ir/expr.hpp"
 #include "pulsim/yaml/emitter.hpp"
 
+#include <array>
 #include <charconv>
-
 #include <cmath>
 #include <format>
 #include <fstream>
@@ -861,7 +861,71 @@ inline void load_device(
             require_string(dev, idx, type, "s_from"),
             require_string(dev, idx, type, "s_to"),
             require_real(dev, idx, type, "n"));
+    } else if (type == "induction_machine" ||
+               (type == "induction_motor" &&
+                string_or(dev, "model", "observer") == "mna")) {
+        // add-mna-native-machines: CircuitBuilder::add_induction_machine_mna.
+        // `induction_machine` takes leakages (L_ls, L_lr); the legacy
+        // `induction_motor` with `model: mna` keeps its self-inductance
+        // keys (L_s, L_r) and is converted here.
+        if (const auto m = string_or(dev, "model", "mna"); m != "mna") {
+            throw std::runtime_error(std::format(
+                "yaml::load: induction_machine '{}': model must be 'mna' "
+                "(got '{}'); the observer is type: induction_motor",
+                name, m));
+        }
+        if (type == "induction_machine") {
+            require_only_keys(dev, idx, type,
+                              {"model", "phase_nodes", "neutral_node",
+                               "omega_node", "R_s", "L_ls", "R_r", "L_lr",
+                               "L_m", "pole_pairs", "J", "B", "T_load",
+                               "omega0"});
+        } else {
+            require_only_keys(dev, idx, type,
+                              {"model", "phase_nodes", "neutral_node",
+                               "omega_node", "R_s", "L_s", "R_r", "L_r",
+                               "L_m", "pole_pairs", "J", "B", "T_load",
+                               "omega0"});
+        }
+        if (!dev["phase_nodes"] || !dev["phase_nodes"].IsSequence() ||
+            dev["phase_nodes"].size() != 3) {
+            throw std::runtime_error(std::format(
+                "yaml::load: {} '{}' requires phase_nodes: [a, b, c] "
+                "(sequence of 3 strings)", type, name));
+        }
+        std::array<std::string, 3> ph;
+        for (std::size_t k = 0; k < 3; ++k) {
+            if (!dev["phase_nodes"][k].IsScalar()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: {} '{}' phase_nodes[{}] must be a scalar "
+                    "node name", type, name, k));
+            }
+            ph[k] = dev["phase_nodes"][k].as<std::string>();
+        }
+        const Real L_m = require_real(dev, idx, type, "L_m");
+        const bool legacy = type == "induction_motor";
+        const Real L_ls = legacy ? require_real(dev, idx, type, "L_s") - L_m
+                                 : require_real(dev, idx, type, "L_ls");
+        const Real L_lr = legacy ? require_real(dev, idx, type, "L_r") - L_m
+                                 : require_real(dev, idx, type, "L_lr");
+        b.add_induction_machine_mna(
+            name, ph[0], ph[1], ph[2],
+            require_string(dev, idx, type, "neutral_node"),
+            require_string(dev, idx, type, "omega_node"),
+            require_real(dev, idx, type, "R_s"), L_ls,
+            require_real(dev, idx, type, "R_r"), L_lr, L_m,
+            require_real(dev, idx, type, "pole_pairs"),
+            require_real(dev, idx, type, "J"),
+            nonneg_or_zero(dev, type, name, "B"),
+            real_or(dev, "T_load", Real{0}),
+            real_or(dev, "omega0", Real{0}));
     } else if (type == "induction_motor") {
+        if (const auto m = string_or(dev, "model", "observer");
+            m != "observer") {
+            throw std::runtime_error(std::format(
+                "yaml::load: induction_motor '{}': model must be 'observer' "
+                "or 'mna' (got '{}')", name, m));
+        }
         // Phase 2.1 composite device — the YAML defines the TOPOLOGY
         // (3× per-phase Rs + σ·Ls + dummy V source). The user wires
         // the BlockChain (`chain.add_induction_motor(...)`) in Python
@@ -1083,7 +1147,7 @@ inline void load_device(
             "pwl_current_source, op_amp_ideal, "
             "gapped_core_inductor, transformer, multi_winding_transformer, "
             "ideal_transformer, saturable_transformer, induction_motor, "
-            "dc_machine");
+            "induction_machine, dc_machine");
     }
     if (dev["losses"]) load_losses(b, dev, idx, type, name);
 }

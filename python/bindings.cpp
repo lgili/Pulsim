@@ -978,6 +978,7 @@ void init_module(py::module_& m) {
               py::arg("L_0")    = 0.0,
               py::arg("omega0") = 0.0,
               py::arg("theta0") = 0.0,
+              py::arg("harmonics") = std::vector<std::array<Real, 3>>{},
               py::return_value_policy::reference,
               "Add an MNA-NATIVE PMSM (audit C.3): three stator "
               "branches `<name>_a/_b/_c` (phase -> neutral) stamped "
@@ -996,7 +997,38 @@ void init_module(py::module_& m) {
               "res.i('<name>_a'). Compare with the observer-based "
               "`add_pmsm` + `make_pmsm_observer`, which uses one "
               "average L (tau_d +100 %, tau_q -33 % on a 1/3 mH IPM) "
-              "and a first-order lag (-0.37 % of speed at dt=5e-5).")
+              "and a first-order lag (-0.37 % of speed at dt=5e-5). "
+              "`harmonics=[(h, psi_h, phi_h), ...]` replaces the PM flux "
+              "psi_pm*cos(theta_e) by sum psi_h*cos(h*theta_e + phi_h) "
+              "(phases b, c at theta_e -/+ 120 deg): a non-sinusoidal "
+              "back-EMF with the torque from the same series; see "
+              "`CircuitBuilder.add_bldc_mna`. The `<name>.i_d/i_q` "
+              "traces stay on the theta_e axis, so they are off the "
+              "PM-fundamental axis by phi_1 when phi_1 != 0.")
+        .def("add_induction_machine_mna",
+              &builder::CircuitBuilder::add_induction_machine_mna,
+              py::arg("name"),
+              py::arg("phase_a"), py::arg("phase_b"), py::arg("phase_c"),
+              py::arg("neutral"), py::arg("omega_node"),
+              py::arg("R_s"), py::arg("L_ls"), py::arg("R_r"),
+              py::arg("L_lr"), py::arg("L_m"), py::arg("pole_pairs"),
+              py::arg("J"),
+              py::arg("B")      = 0.0,
+              py::arg("T_load") = 0.0,
+              py::arg("omega0") = 0.0,
+              py::return_value_policy::reference,
+              "Add an MNA-NATIVE squirrel-cage induction machine: three "
+              "stator branches `<name>_a/_b/_c` (phase -> neutral) with a "
+              "constant stationary-frame inductance, the rotor flux "
+              "linkage as the voltages of two internal nodes "
+              "`<name>_psi_ra`, `<name>_psi_rb` [Wb] (1 F capacitors), "
+              "and the torque 1.5*pp*(L_m/L_r)*(psi_ra*i_sb - psi_rb*i_sa) "
+              "into `omega_node` (mechanical speed [rad/s], capacitor J, "
+              "resistor 1/B). Rotor quantities referred to the stator, "
+              "amplitude-invariant Clarke. Solved by Newton on pwl and "
+              "trbdf2; dsed and the AC sweep refuse it by name. Read speed "
+              "with res.v(omega_node), phase currents with "
+              "res.i('<name>_a').")
         .def("add_igbt_level1",
               &builder::CircuitBuilder::add_igbt_level1,
               py::arg("name"),
@@ -1708,6 +1740,8 @@ void init_module(py::module_& m) {
                               kind_str = "lauritzen_diode"; break;
                           case K::PmsmMna:
                               kind_str = "pmsm_mna"; break;
+                          case K::InductionMachineMna:
+                              kind_str = "induction_machine_mna"; break;
                           case K::IdealTransformer: {
                               kind_str = "ideal_transformer";
                               params["n"] =
@@ -2154,6 +2188,13 @@ void init_module(py::module_& m) {
                       pr["psi_pm"] = m.params.psi_pm;
                       pr["pole_pairs"] = m.params.pole_pairs;
                       pr["T_load"] = m.params.T_load;
+                      py::list hs;
+                      if (m.params.harmonics) {
+                          for (const auto& t : *m.params.harmonics) {
+                              hs.append(py::make_tuple(t.h, t.psi, t.phi));
+                          }
+                      }
+                      pr["harmonics"] = hs;
                       d["params"] = pr;
                       out.append(d);
                   }
@@ -2163,6 +2204,35 @@ void init_module(py::module_& m) {
               "machine: branch_ids (a, b, c), omega_node, theta_node "
               "(state-vector indices) and params. `simulate` reads this "
               "to attach the `<name>.omega/theta/T_em/i_d/i_q` traces.")
+        .def("induction_machines",
+              [](const pwl::DevicePool& self) {
+                  py::list out;
+                  for (const auto& m : self.induction_machines()) {
+                      py::dict d;
+                      d["branch_ids"] = py::make_tuple(
+                          static_cast<int>(m.branch_id[0]),
+                          static_cast<int>(m.branch_id[1]),
+                          static_cast<int>(m.branch_id[2]));
+                      d["omega_node"] = static_cast<int>(m.omega_node);
+                      d["rotor_nodes"] = py::make_tuple(
+                          static_cast<int>(m.rotor_node[0]),
+                          static_cast<int>(m.rotor_node[1]));
+                      py::dict pr;
+                      pr["R_s"] = m.params.R_s;
+                      pr["L_ls"] = m.params.L_ls;
+                      pr["R_r"] = m.params.R_r;
+                      pr["L_lr"] = m.params.L_lr;
+                      pr["L_m"] = m.params.L_m;
+                      pr["pole_pairs"] = m.params.pole_pairs;
+                      pr["T_load"] = m.params.T_load;
+                      d["params"] = pr;
+                      out.append(d);
+                  }
+                  return out;
+              },
+              "MNA-native induction machines on this pool, one dict per "
+              "machine: branch_ids (a, b, c), omega_node, rotor_nodes "
+              "(state-vector indices of psi_ra, psi_rb) and params.")
         .def("igbt_has_tail",
               &pwl::DevicePool::igbt_has_tail,
               py::arg("branch_id"),
@@ -2215,7 +2285,8 @@ void init_module(py::module_& m) {
         .value("Gyrator",             pwl::DevicePool::StoredKind::Gyrator)
         .value("SineCurrentSource",   pwl::DevicePool::StoredKind::SineCurrentSource)
         .value("PulseCurrentSource",  pwl::DevicePool::StoredKind::PulseCurrentSource)
-        .value("PwlCurrentSource",    pwl::DevicePool::StoredKind::PwlCurrentSource);
+        .value("PwlCurrentSource",    pwl::DevicePool::StoredKind::PwlCurrentSource)
+        .value("InductionMachineMna", pwl::DevicePool::StoredKind::InductionMachineMna);
 
     // ---- Phase 4 C.4: exact B–H replay for the in-loop JA device ----------
     m.def("ja_replay",
