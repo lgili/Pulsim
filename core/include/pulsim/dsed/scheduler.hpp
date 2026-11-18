@@ -64,8 +64,10 @@
 
 #include "pulsim/errors/convergence.hpp"
 #include "pulsim/dsed/event_predictor.hpp"
+#include "pulsim/events/event_queue.hpp"
 #include "pulsim/events/mode_refusal.hpp"
 #include "pulsim/events/mode_selector.hpp"
+#include "pulsim/events/step_hooks.hpp"
 #include "pulsim/models/switched_diode.hpp"
 #include "pulsim/dsed/event_projection.hpp"
 #include "pulsim/dsed/exact_lti.hpp"
@@ -338,6 +340,7 @@ public:
         if constexpr (requires { system_.set_max_step(dt_max_); }) {
             system_.set_max_step(dt_max_);
         }
+        start_time_events_(t_end);
         MaskT mask = effective_mask_(switch_fn_(t));
         system_.set_mask(mask);
         // A diode may be forward-biased already at t = 0 (a
@@ -350,6 +353,15 @@ public:
             const MaskT prev0 = diode_bits_;
             const MaskT old0 = m0;
             decide_modes_(t, x, m0, old0, prev0, old0, result);
+        }
+        // The ticks at t = 0 run before the first sample; the gate is
+        // sampled again with what they wrote.
+        if (run_due_ticks_(t, x)) {
+            fire_event_(t, "control_tick", PredicateType::GateEdge, x, rk_state, result);
+        }
+        run_due_monitors_(t, x);
+        if constexpr (std::is_same_v<MaskT, topology::SwitchStateMask>) {
+            if (hooks_ != nullptr) hooks_->start(x, system_.current_mask());
         }
         ped_push_sample(result, t, x, system_.current_mask(),
                         system_.current_mask(), nullptr);
@@ -371,15 +383,26 @@ public:
                     "PEDSimulator: exceeded max-step cap");
             }
 
-            // 1. Next gate-edge time (analytical fast path)
-            Real t_gate = next_gate_edge_(t, t_end);
+            // 0. A control tick not taken at a landing (a run that sits
+            // on its instant): run it and sample the gate again.
+            if (run_due_ticks_(t, x)) {
+                const MaskT before = system_.current_mask();
+                rk_state.invalidate();
+                fire_event_(t, "control_tick", PredicateType::GateEdge, x, rk_state, result);
+                plan_fast_samples_(t, !(system_.current_mask() == before));
+            }
+            run_due_monitors_(t, x);
+
+            // 1. Next time event from the queue: gate edge, source corner, tick
+            Real t_sw = t_end;
+            Real t_gate = next_gate_edge_(t, t_end, t_sw);
             // an edge a few ulps before t_end is t_end (scheduler_auto.hpp); ulps
             // only: the 1e-12 s floor swallowed a 1 ps pulse ending a period run
             if (t_gate < t_end && near_time(t_gate, t_end, Real{0})) t_gate = t_end;
-            const Real t_target = std::min(t_gate, t_end);
+            const Real t_target = std::min({t_gate, t_end, queue_.next_of(events::Kind::ControlTick)});
             // a source corner is landed on exactly: a single-shot pulse
             // read one ulp early would keep its old piece for a step
-            const bool at_corner = t_gate < next_switch_edge_(t, t_end);
+            const bool at_corner = t_gate < t_sw;
 
             // 2. Propose step capped at next gate
             Real h_use = std::min({h, dt_max_, t_target - t});
@@ -396,6 +419,7 @@ public:
             }
             step_mask = system_.current_mask();
             step_fired = false;
+            const Real t_step0 = t;
 
             // 2b. v2.0 Phase 3 item 2 — EXACT segment stepping.
             //
@@ -457,20 +481,24 @@ public:
                     } else {
                         t += h_ex;
                         x.swap(x_new_);
-                        if (t_gate < t_end && near_time(t, t_gate)) {
-                            if (at_corner) t = t_gate;
+                        const bool on_edge = t_gate < t_end && near_time(t, t_gate);
+                        if (on_edge || tick_due_(t)) {
+                            if (on_edge && at_corner) t = t_gate;
                             x_pre_event = x;
                             step_fired = true;
-                            fire_event_(t_gate, "gate_edge",
+                            run_due_ticks_(t, x);   // a tick at the edge's instant first (D2)
+                            fire_event_(on_edge ? t_gate : t, on_edge ? "gate_edge" : "control_tick",
                                           PredicateType::GateEdge,
                                           x, rk_state, result);
                             plan_fast_samples_(
-                                t, at_corner || !(system_.current_mask() == mask_before));
+                                t, (on_edge && at_corner)
+                                       || !(system_.current_mask() == mask_before));
                         }
                     }
                     rk_state.invalidate();
                     ++result.n_accept;
                     ++result.n_exact_steps;
+                    hook_accepted_(t_step0, t, step_fired ? x_pre_event : x, step_mask);
                     ++step_idx;
                     if (step_idx % store_every_ == 0) {
                         ped_push_sample(result, t, x,
@@ -641,18 +669,21 @@ public:
                 h = h_next;
                 ++result.n_accept;
 
-                // 7. Did we land on a gate edge?
-                if (t_gate < t_end &&
-                    near_time(t, t_gate)) {
-                    if (at_corner) t = t_gate;
+                // 7. Did we land on a gate edge or a control tick?
+                const bool on_edge = t_gate < t_end && near_time(t, t_gate);
+                if (on_edge || tick_due_(t)) {
+                    if (on_edge && at_corner) t = t_gate;
                     x_pre_event = x;
                     step_fired = true;
-                    fire_event_(t_gate, "gate_edge", PredicateType::GateEdge,
+                    if (run_due_ticks_(t, x)) rk_state.invalidate();   // D2: tick first
+                    fire_event_(on_edge ? t_gate : t, on_edge ? "gate_edge" : "control_tick",
+                                  PredicateType::GateEdge,
                                   x, rk_state, result);
                 }
             }
 
             // 8. Record
+            hook_accepted_(t_step0, t, step_fired ? x_pre_event : x, step_mask);
             ++step_idx;
             if (step_idx % store_every_ == 0) {
                 ped_push_sample(result, t, x, system_.current_mask(),
@@ -661,6 +692,7 @@ public:
             }
         }
 
+        run_due_monitors_(t, x);   // instants inside the last step
         // Final state
         if (result.times.back() != t) {
             ped_push_sample(result, t, x, system_.current_mask(),
@@ -815,13 +847,114 @@ private:
     /// source (add-exact-propagator-strategy D14: no step straddles a
     /// change of a source's piece; the corner is fired like a gate edge,
     /// so the diode modes are decided again after a source jump).
-    [[nodiscard]] Real next_gate_edge_(Real t_now, Real t_end) const {
-        const Real t_g = next_switch_edge_(t_now, t_end);
-        if constexpr (requires { system_.next_source_corner_after(t_now); }) {
-            return std::min(t_g, system_.next_source_corner_after(t_now));
+    /// add-unified-event-queue group 3: both come from the run's queue
+    /// (`start_time_events_`). `t_sw` is the switch function's part (the
+    /// gate edge, its poll, or `t_end`), which tells a corner apart.
+    [[nodiscard]] Real next_gate_edge_(Real t_now, Real t_end, Real& t_sw) {
+        // Both sources are asked again at every step, as before the queue:
+        // an SPWM oracle's answer moves by an ulp with the query point
+        // (DECISIONS 9), so a cached edge would move the trajectory.
+        t_sw = t_end;
+        if constexpr (HasNextEdge<SwitchFn>) {
+            queue_.invalidate(gate_src_);
+            const Real raw = queue_.next_after(gate_src_, t_now);
+            if (std::isfinite(raw)) {
+                t_sw = std::min(raw, t_end);
+            } else {
+                // A gate that names no edge is sampled every dt_max/10 and
+                // re-read at each landing; without it a plain Python gate
+                // ran with its t = 0 mask frozen.
+                t_sw = std::min(t_now + dt_max_ * Real{0.1}, t_end);
+            }
         }
-        return t_g;
+        if constexpr (requires { system_.next_source_corner_after(t_now); }) {
+            queue_.invalidate(corner_src_);
+            return std::min(t_sw, queue_.next_after(corner_src_, t_now));
+        }
+        return t_sw;
     }
+
+    // ---- control ticks on the queue (add-unified-event-queue group 3) ----
+    void start_time_events_(Real t_end) {
+        queue_ = events::EventQueue{};
+        n_tick_src_ = static_cast<std::uint32_t>(ticks_.rates.size());
+        for (std::size_t j = 0; j < ticks_.rates.size(); ++j) {   // ids 0..n-1 = j
+            const bool mon = j < ticks_.monitor.size() && ticks_.monitor[j];
+            queue_.add_periodic(mon ? events::Kind::Monitor : events::Kind::ControlTick,
+                                ticks_.rates[j], /*lands=*/!mon);
+        }
+        if constexpr (HasNextEdge<SwitchFn>) {
+            gate_src_ = queue_.add_function(events::Kind::GateEdge,
+                [this](Real s) { return switch_fn_.next_edge_after(s); });
+        }
+        if constexpr (requires { system_.next_source_corner_after(Real{0}); }) {
+            corner_src_ = queue_.add_function(events::Kind::SourceBreakpoint,
+                [this](Real s) { return system_.next_source_corner_after(s); });
+        }
+        queue_.start(Real{0}, t_end);
+    }
+
+    [[nodiscard]] static Real tick_tol_(Real t) noexcept {
+        return std::max(Real{1e-12}, Real{8} * std::numeric_limits<Real>::epsilon() * std::abs(t));
+    }
+
+    [[nodiscard]] bool tick_due_(Real t) const noexcept {
+        return n_tick_src_ > 0 && t >= queue_.next_of(events::Kind::ControlTick) - tick_tol_(t);
+    }
+
+    /// Runs every tick due at `t` (Kind order, then registration) with the
+    /// step time and state; a tick may move the gate's edges, so the gate
+    /// source asks its oracle again. True when any ran.
+    bool run_due_ticks_(Real t, const Vector& x) {
+        if (!tick_due_(t)) return false;
+        const auto due = queue_.take_due(t, tick_tol_(t), events::kind_bit(events::Kind::ControlTick));
+        for (const auto& ev : due) {
+            ticks_.fn(ev.source, events::TickInfo{ev.t, ev.ordinal}, t, x);
+        }
+        if constexpr (HasNextEdge<SwitchFn>) queue_.invalidate(gate_src_);
+        return !due.empty();
+    }
+
+    /// Monitors due at `t` (Kind::Monitor): called with the accepted state,
+    /// nothing else happens (no landing, no gate sample, no FSAL reset).
+    void run_due_monitors_(Real t, const Vector& x) {
+        // a step may span several instants (monitors never cap it): take
+        // them all; take_due gives one per source per call
+        while (n_tick_src_ > 0 && t >= queue_.next_of(events::Kind::Monitor) - tick_tol_(t)) {
+            for (const auto& ev : queue_.take_due(t, tick_tol_(t),
+                                                  events::kind_bit(events::Kind::Monitor))) {
+                ticks_.fn(ev.source, events::TickInfo{ev.t, ev.ordinal}, t, x);
+            }
+        }
+    }
+
+    /// An accepted step [t0, t] integrated under `mask`, ending in x (the
+    /// left limit when an event ended it): the step hooks' commutation
+    /// is the pre-event state, as on pwl and trbdf2.
+    void hook_accepted_(Real t0, Real t, const Vector& x, const MaskT& mask) {
+        if constexpr (std::is_same_v<MaskT, topology::SwitchStateMask>) {
+            if (hooks_ != nullptr) hooks_->accepted(t0, t, x, mask);
+        }
+    }
+
+public:
+    /// Step hooks (events/step_hooks.hpp): on_accept per accepted step,
+    /// on_commutation at every change of the integrated mask. Not owned.
+    void set_hooks(events::StepHooks* hooks) noexcept { hooks_ = hooks; }
+
+    /// Control ticks scheduled by the run's event queue: `fn(j, info, t, x)`
+    /// with the reduced state x at each instant of `rates[j]` before t_end;
+    /// the gate is sampled again after the ticks of an instant.
+    void set_ticks(events::TickPlan plan) { ticks_ = std::move(plan); }
+
+    /// Ticks taken per source in the last run.
+    [[nodiscard]] std::vector<std::uint64_t> tick_counts() const {
+        std::vector<std::uint64_t> n;
+        for (std::uint32_t j = 0; j < n_tick_src_; ++j) n.push_back(queue_.taken(j));
+        return n;
+    }
+
+private:
 
     /// The selector probes' horizon (DECISIONS #28): the next gate edge
     /// the switch function announces or the next source corner, else the
@@ -851,33 +984,8 @@ private:
         if constexpr (requires { system_.next_source_corner_after(t_now); }) {
             e = std::min(e, past([&](Real s) { return system_.next_source_corner_after(s); }));
         }
-        return e;
-    }
-
-    [[nodiscard]] Real next_switch_edge_(Real t_now, Real t_end) const {
-        if constexpr (HasNextEdge<SwitchFn>) {
-            // Fast path: switch_fn knows when its next edge is
-            // (e.g. NativePwm2Switch with an analytical formula).
-            const Real raw = switch_fn_.next_edge_after(t_now);
-            if (std::isfinite(raw)) {
-                return std::min(raw, t_end);
-            }
-            // Fallback: the predictor returned ∞, which on the
-            // pybind11 `PySwitchFn` adapter means "the user's
-            // Python switch_fn doesn't expose next_edge_after".
-            // Cap at `t_now + dt_max/10` so the scheduler is
-            // forced to land at that boundary and re-sample the
-            // switch_fn via fire_gate_event_ (catches any
-            // mask change the user didn't pre-announce). Without
-            // this cap, PWM-driven simulations with plain Python
-            // switch_fns silently produced trajectories with the
-            // mask frozen at t=0.
-            constexpr Real kPollFractionOfDtMax = Real{0.1};
-            return std::min(t_now + dt_max_ * kPollFractionOfDtMax,
-                              t_end);
-        } else {
-            return t_end;
-        }
+        // a control tick may move the gate's edges: no probe looks past it
+        return std::min(e, queue_.next_of(events::Kind::ControlTick));
     }
 
     /// The exact-branch twin of `locate_event_in_step_`: the same
@@ -2050,6 +2158,13 @@ private:
     std::size_t reinit_mark_ = 0;   // reinit_log_size_() before the settle
     Vector settle_x0_;   // settle_and_project_: the pre-event state (its records)
     Real last_time_event_t_ = std::numeric_limits<Real>::quiet_NaN();   // last gate edge / corner fired
+    // add-unified-event-queue group 3: the run's time events (start_time_events_)
+    events::EventQueue queue_;
+    events::TickPlan ticks_;
+    std::uint32_t n_tick_src_ = 0;
+    std::uint32_t gate_src_ = 0;
+    std::uint32_t corner_src_ = 0;
+    events::StepHooks* hooks_ = nullptr;
     std::vector<Real> fast_t_;     // plan_fast_samples_
     std::size_t fast_k_ = 0;
     Real dt_init_;

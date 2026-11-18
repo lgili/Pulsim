@@ -33,7 +33,7 @@ conformance test of `add-engine-conformance-matrix`.
 
 ## 4. Per-rate control ticks
 - [ ] 4.1 `Rate`, `add_tick`, `TickInfo{scheduled_t, k}`; exact count `ceil((t_end − t0 − offset)/T)` (ticks earlier than `t_end`) — partial: `TickInfo{scheduled_t, k}` and `TickPlan` (the kernel tick registration) exist and the fixed engine passes them; offsets on trbdf2 (DECISIONS 3); no `add_tick` name, handlers of Python callbacks still get (t, x)
-- [ ] 4.2 The one composition function of `fix-control-tick-semantics` registers one rate per closed loop and per observer on the queue; the per-source period list of the TR-BDF2 driver and the fixed engine's tick counters become queue sources; `result.control_tick_counts` is filled from the queue — partial: the fixed engine's Python tick sources are queue sources (`FixedStepTicks` deleted) and its counts come from the kernel (DECISIONS 5); the label-time graphs still tick themselves on pwl
+- [ ] 4.2 The one composition function of `fix-control-tick-semantics` registers one rate per closed loop and per observer on the queue; the per-source period list of the TR-BDF2 driver and the fixed engine's tick counters become queue sources; `result.control_tick_counts` is filled from the queue — partial: the fixed engine's Python tick sources are queue sources (`FixedStepTicks` deleted) and its counts come from the kernel (DECISIONS 5); the label-time graphs still tick themselves on pwl; dsed ticks controllers, observers with a period and rated graphs from its queue (DECISIONS 9); `Kind::Monitor` for read-only ticks (DECISIONS 10)
 - [ ] 4.3 Oracle: the tests of `fix-control-tick-semantics` (2 kHz PI + 20 kHz monitor: 40 and 400 ticks; two loops without `dt`); `test_engine_auto_closed_loop.py`, `test_closed_loop_helper.py`
 
 ## 5. The fixed engine on the queue
@@ -52,7 +52,7 @@ conformance test of `add-engine-conformance-matrix`.
 - [ ] 6.6 Docs: closed-loop guide, `AI_GUIDE.md`, stubs
 
 ## 7. Source breakpoints
-- [ ] 7.1 `next_breakpoint(t)` for the pulse and PWM voltage sources; registered as time sources (moving the table of `update-trbdf2-error-control` if present) — trbdf2 part done (corner table is a queue source, byte-identical); the fixed engine's source jumps still read `next_source_jump_after` directly
+- [ ] 7.1 `next_breakpoint(t)` for the pulse and PWM voltage sources; registered as time sources (moving the table of `update-trbdf2-error-control` if present) — trbdf2 part done (corner table is a queue source, byte-identical); dsed's corners and gate edges are queue sources (re-asked every step, DECISIONS 9); the fixed engine's source jumps still read `next_source_jump_after` directly
 - [ ] 7.2 Oracle: pulse-driven RC on TR-BDF2: error below 1.8e-4 V and decreasing with `rtol`; fixed goldens bit-identical
 
 ## 8. State events

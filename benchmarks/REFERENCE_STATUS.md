@@ -20,7 +20,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | pwl+restart | 87 | 21 | 1 | 0 | 0 |
 | pwl+split | 89 | 19 | 1 | 0 | 0 |
 | trbdf2 | 103 | 5 | 1 | 0 | 0 |
-| dsed | 97 | 0 | 0 | 12 | 0 |
+| dsed | 100 | 0 | 0 | 9 | 0 |
 
 ### Fixed engine: restart rule and split (circuits where any of the three does not agree)
 
@@ -154,9 +154,9 @@ cell disagrees by edge timing; edge err above it: the states differ.
 
 | circuit | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
-| closed_loop/cl_boost_pi.yaml | 0.0582 | 0.0579 | 8.56e-05 | 6.86e-05 | refused |
-| closed_loop/cl_buck_aggressive_pi.yaml | 0.00662 | 0.00709 | 0.00404 | 8.12e-05 | refused |
-| closed_loop/cl_buck_pi.yaml | 0.0121 | 0.0123 | 0.00049 | 8.54e-05 | refused |
+| closed_loop/cl_boost_pi.yaml | 0.0582 | 0.0579 | 8.56e-05 | 6.86e-05 | 1.31e-06 |
+| closed_loop/cl_buck_aggressive_pi.yaml | 0.00662 | 0.00709 | 0.00404 | 8.12e-05 | 3.24e-05 |
+| closed_loop/cl_buck_pi.yaml | 0.0121 | 0.0123 | 0.00049 | 8.54e-05 | 1.77e-05 |
 | closed_loop/ll14_buck_closed_loop.yaml | 0.278 | 0.228 | 0.196 | 0.00106 | refused |
 | closed_loop/ll15_boost_closed_loop.yaml | 0.3 | 0.0685 | 0.0515 | 0.00123 | refused |
 | closed_loop/ll16_flyback_closed_loop.yaml | 0.114 | 0.211 | 0.116 | 0.00153 | refused |

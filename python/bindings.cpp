@@ -5720,7 +5720,8 @@ void init_module(py::module_& m) {
            std::vector<py::object> observers,
            Size newton_roundoff_budget, bool on_impulse_error,
            std::vector<Real> observer_offsets,
-           Real observer_origin) {
+           Real observer_origin,
+           std::vector<bool> observer_monitors) {
             solver::BExtraFn b_extra_fn;
             std::function<Real(Real)> unused_next_jump;  // trbdf2 lands its ticks
             resolve_b_extra(b_extra_obj, b_extra_fn, unused_next_jump);
@@ -5742,6 +5743,13 @@ void init_module(py::module_& m) {
             }
             o.observer_periods = std::move(observer_periods);
             o.observer_offsets = std::move(observer_offsets);
+            if (!observer_monitors.empty()
+                && observer_monitors.size() != o.observer_periods.size()) {
+                throw std::invalid_argument(
+                    "run_transient_trbdf2: observer_monitors must be empty or "
+                    "as long as observer_periods");
+            }
+            o.observer_monitors.assign(observer_monitors.begin(), observer_monitors.end());
             o.observer_origin = observer_origin;
             if (max_newton_iterations > 0) {
                 o.max_newton_iterations = max_newton_iterations;
@@ -5875,6 +5883,7 @@ void init_module(py::module_& m) {
         py::arg("on_impulse_error") = false,
         py::arg("observer_offsets") = std::vector<Real>{},
         py::arg("observer_origin") = std::numeric_limits<Real>::quiet_NaN(),
+        py::arg("observer_monitors") = std::vector<bool>{},
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "

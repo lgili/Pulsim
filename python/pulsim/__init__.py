@@ -2165,8 +2165,8 @@ def simulate(
         or IGBT raises :class:`UnsupportedError` (it would simulate
         them as open circuits).
     closed_loops, step_observer, controller_period
-        Controllers, on ``pwl`` and ``trbdf2`` (``dsed`` refuses
-        them). Each ``ClosedLoop`` (``period``) and a
+        Controllers, on ``pwl``, ``trbdf2`` and ``dsed`` (``dsed``: from
+        ``t_start=0``; every-step observers refused). Each ``ClosedLoop`` (``period``) and a
         ``step_observer`` with ``controller_period`` (or a ``.period``)
         is a tick source: source j runs at ``t_start + k*T_j``,
         ``ceil(span / T_j)`` times, sources due at one instant in
@@ -2515,11 +2515,12 @@ def simulate(
     # ---- Controllers: one composition for every engine ----
     # (fix-control-tick-semantics). Above the dispatch so its refusals
     # (controller_period without an observer, a bad period) hold on
-    # every engine; dsed refuses closed_loops / step_observer itself.
+    # every engine; dsed ticks them on its event queue.
     if control_tick not in ("label", "state"):
         raise ValueError(
             f"simulate(control_tick={control_tick!r}): use 'label' (the "
             "default) or 'state'")
+    from ._control_plan import monitor_flags as _monitor_flags
     _plan = _compose_control(builder, closed_loops, step_observer,
                              controller_period, switch_fn,
                              resume=resume_from is not None,
@@ -2565,8 +2566,6 @@ def simulate(
             # C blocks drive the circuit through b_extra, which the
             # DSED engine does not consume.
             "c_blocks": bool(_c_blocks_of(builder)),
-            "step_observer": step_observer is not None,
-            "closed_loops": bool(closed_loops),
             "should_continue": should_continue is not None,
             "live_stream": live_stream is not None,
             "start_from_dc_op": bool(start_from_dc_op),
@@ -2617,9 +2616,32 @@ def simulate(
                 "converter would simulate OPEN-loop). Use "
                 "engine='pwl' for these features, or drop the "
                 "kwarg(s) if the open-loop behaviour is intended. "
-                "Observer/closed-loop support inside DSED is tracked "
-                "for v2.0 (event-synchronised controller cadence)."
             )
+        # Controllers tick on the integrator's event queue
+        # (add-unified-event-queue group 3), as on trbdf2.
+        _plan = _plan.for_variable_step("dsed")
+        if _plan.every_step:
+            raise _unsupported(
+                "dsed", "step_observer",
+                "simulate(engine='dsed'): a step_observer needs a cadence: "
+                "this engine has no fixed grid to ride, so pass "
+                "controller_period=<T_ctrl seconds> and the ticks are "
+                "scheduled exactly. A ClosedLoop from bind_pi_to_switch "
+                "carries its own period.")
+        if _plan.ticks and sensitivities is not None:
+            raise _unsupported(
+                "dsed", "sensitivities",
+                "simulate(engine='dsed', sensitivities=...) with controllers: "
+                "the sensitivity run has no control ticks, so the loop would "
+                "run open. Drop sensitivities or the controllers.")
+        if _plan.ticks and float(t_start) != 0.0:
+            raise _unsupported(
+                "dsed", "step_observer",
+                "simulate(engine='dsed', t_start != 0) with controllers: the "
+                "engine runs the gate in its own time from 0, the controller "
+                "in simulate()'s time. Start at t_start=0, or use "
+                "engine='trbdf2'.")
+        switch_fn = _plan.switch_fn
         # The DSED branch returns here, ~400 lines before the PWL
         # tail that attaches `_builder` / `_preflight`. Attach the
         # preflight report on the way out, so `result._preflight` —
@@ -2654,6 +2676,8 @@ def simulate(
                 progress=progress,
                 mode_selection=mode_selection,
                 allow_implicit_segments=bool(allow_implicit_segments),
+                ticks=[(f, p, o) for (f, p), o in zip(
+                    _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
             )
         try:
             _dsed_res._preflight = _preflight_report
@@ -2901,6 +2925,7 @@ def simulate(
                 observer_periods=[_p for _, _p in _plan.ticks],
                 observers=[_f for _f, _ in _plan.ticks],
                 observer_offsets=list(_plan.tick_offsets),
+                observer_monitors=_monitor_flags(_plan.ticks),
                 # None: the kernel stamps the Newton devices itself.
                 enable_nonlinear_refresh=enable_nonlinear_refresh,
                 max_newton_iterations=int(max_newton_iterations or 0),
