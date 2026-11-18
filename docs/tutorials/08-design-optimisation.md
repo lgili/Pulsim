@@ -52,7 +52,9 @@ reference of the same orbit to 2e-12 and 6e-11 relative, and the total
 loss to 8e-15 (`python/tests/test_design_evaluation.py`). The record also carries the
 design, a SHA-256 `design_id`, the per-device losses by category, the
 route and solver counters, and the provenance (version, extension
-hash, options digest).
+hash, options digest), and `counters["energy_residual"]` (2e-13 here)
+with `counters["p_table"]`, the datasheet losses outside that balance
+(observation; the guard fails a record above 1e-8).
 
 ## 2. Four statuses, never a default number
 
@@ -61,7 +63,7 @@ hash, options digest).
 | `ok` | steady period reached, every bound met | KPIs, violations all 0 |
 | `infeasible` | a bound exceeded, or a thermal runaway | KPIs and `violations[name]` in the KPI's unit (runaway: no KPIs) |
 | `refused` | `pulsim.UnsupportedError` anywhere | `refusal = (engine, feature, device, kind)`, no KPIs |
-| `failed` | an engine's non-convergence, `not_settled`, a non-finite KPI | `reason`, counters, no KPIs |
+| `failed` | an engine's non-convergence, `not_settled`, a non-finite KPI, `energy_balance` (P_in ≠ ΣP + dE/T beyond the route's tolerance), `periodicity` (a plain period from the orbit leaves it) | `reason`, counters, no KPIs |
 
 Any other exception propagates: it is a bug, not a design outcome. Do
 not wrap `evaluate` in a broad `except`; that is how refusals became
@@ -134,7 +136,16 @@ refused [1.e+30 1.e+30] [1.e+30]
   with the GIL released (`counters["pss_loop"] == "kernel"`), but the
   set-up, the loss rows, the KPIs and the record still hold the GIL
   (about two thirds of an evaluation), so threads do not speed the buck
-  up; `backend="process"` (picklable evaluators, `build=` form) does.
+  up; `backend="process"` does, on batches large enough to pay the
+  workers' start-up (DECISIONS 21).
+* For processes the evaluator must pickle. Name KPIs and bounds as data:
+  `kpis={"i_pk": Kpi.i_peak("L")}`, `Kpi.efficiency()`,
+  `Kpi.ripple("vout")`, `Kpi.mean("vout")`, `Kpi.i_rms("L")`,
+  `constraints=[Constraint.max("ripple_v", 0.05)]`; give the circuit form
+  a module-level factory, `circuit=functools.partial(build_circuit,
+  part)`, which each worker calls once. Lambdas still work on threads;
+  on processes the first part that does not pickle is refused by name
+  (`UnsupportedError`) before any worker starts.
 
 ## 4. Why derivative-free
 

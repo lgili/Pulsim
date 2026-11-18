@@ -654,6 +654,126 @@ Needed from the IR (recorded in its DECISIONS): a picklable `Circuit`
 (`_graph_driven`) is lost by `build()`, so a control graph's driven
 source cannot be refused on the circuit form (group 3).
 
+## 21. Declarative KPIs and the process backend (slice 5, item 2)
+
+* `Kpi.efficiency()`, `Kpi.ripple(node)`, `Kpi.mean(node)`,
+  `Kpi.i_peak(L)`, `Kpi.i_rms(L)`, `Kpi.ripple_i(L)` are frozen
+  dataclasses (`_KpiSpec(kind, target)`): they pickle, hash and compare
+  by value, and the options digest (hence `design_id`) covers them by
+  value, the same in every process. `Constraint.max/min/between` are
+  the bounds as data. Callables are still accepted (threads).
+* What they compute: a name the evaluator already computes (the
+  default KPI) is that default, bit for bit; a node's ripple / mean is
+  the kernel's closed-form extrema / integral on the kernel route and
+  `_p2p` / `_mean` on the right-limit samples otherwise -- on the
+  sampled route bit for bit what the equivalent callable on
+  `SteadyPeriod` gives, on the kernel route the closed form (the
+  callable reads samples: ripple within 1e-5, mean within 1e-9,
+  O(h^2) of the trapezoid; tested). A node they name is resolved with
+  the kernel observables, so an unknown node is a `KeyError` naming it.
+* `backend='process'`: before the first design runs, every part is
+  pickled in turn and the first that fails is refused,
+  `UnsupportedError(device=<part>)` (`circuit`, `build`, `schedule`,
+  `kpis['name']`, `designs[i]`, ...), with no worker started. Jobs are
+  chunks (4 per worker), the evaluator pickled once per chunk. The
+  circuit form pickles through a factory: `circuit=` a zero-argument
+  module-level callable (`functools.partial(build_circuit, part)`);
+  each worker calls it once (cached by value hash) and refuses a
+  factory whose circuit hashes differently from the parent's ("must be
+  deterministic"). A built `Circuit` does not pickle (IR needs, §20).
+* The buck example uses only module-level functions and `Constraint`s;
+  `--process` runs its Latin hypercube on processes, records bit for
+  bit those of the thread backend and of 7b195243 (512 designs, 376 ok
+  / 136 infeasible, the same 4-design front).
+
+## 22. Independent periodicity check and energy balance (slice 5, items 3, 4)
+
+Periodicity (review c1). On the kernel route the verification period
+is the shooting map itself, so it cannot catch a defect of that map.
+The evaluator now runs one plain `simulate(engine='dsed', dt=T)` period
+from `x*` -- another entry point (dispatch, adapter construction,
+event projection on) -- and requires it to return within 1e-8 relative
+(an order above the shooting's own 1e-9 stop). Measured: 2.2e-16 (CCM
+buck), 6.9e-17 (DCM buck), 2.0e-16 (boost), 4.0e-16 (buck Pareto, both
+parts). Cost: 200-390 us per check against 90-310 us per whole
+evaluation (load 10, observation), i.e. one to two evaluations, so it
+runs ONCE per (topology, orbit event-name pattern) per evaluator and
+process, logged in `Evaluator.periodicity_checks`, never in a record:
+record counters must not depend on batch order or backend (they are
+compared bit for bit across 1/8 threads and processes). A mismatch
+fails every design of that pattern, `reason='periodicity: ...'`. The
+Python-loop route (no kernel map) already verifies with `simulate`; the
+`pwl` / `trbdf2` routes' map IS that engine's transient, so the check
+does not apply there. The first check found a crash: a schedule
+narrower than the circuit's switch count (`make_pwm_switch_fn(.., 0,
+1)` on a switch + diode buck) made `simulate(engine='dsed')` raise
+`IndexError` in `check_diode_modes`, where shooting accepted it; the
+containment check now skips a diode the record has no column for (its
+"no record, nothing to check" rule).
+
+Energy balance. On every record with KPIs and `loads=`: `res = (P_in -
+sum P_avg - dE/T) / P_in` from the same integrals as the KPIs (sources'
+delivered power, every device's dissipated `P_avg`, loads included;
+`dE/T` of L and C between the window ends, 0 on a kernel period). The
+record carries `counters['energy_residual']` and `counters['p_table']`
+(switching, recovery and core losses from tables / datasheets: outside
+the circuit's balance, so never in `res`). Not formed when a source of
+power is not measured (a voltage source outside `sources=`, a current
+or controlled source). Measured |res|:
+
+| circuit | pss/dsed | transient/dsed | pss/pwl T/200 | transient/pwl | transient/trbdf2 |
+|---|---|---|---|---|---|
+| buck CCM | 2.1e-13 | 3.7e-12 | 2.5e-4 | 5.0e-10 | 5.5e-7 |
+| buck DCM | 1.0e-11 | 1.3e-9 (4.8e-6 without dE/T) | 9.9e-3 | 1.0e-7 | failed (implausible V) |
+| boost CCM | 6.5e-13 | 1.0e-10 | 2.1e-9 | 4.5e-9 | failed |
+| boost DCM | 8.4e-14 | not settled | 1.7e-4 | not settled | failed |
+| 3-phase VSI (SPWM, dt 1 us) | refused | refused | 1.6e-3 | 6.5e-7 | 9.5e-5 |
+| buck Pareto, 512 designs | <= 1.2e-13 | | | | |
+| pwl T/25, sub-step correction (test) | | | | 3.9e-2 | |
+
+Tolerance by route, an order above the worst measured: 1e-8 when the
+KPIs come from the exact stepper (kernel period or a `dsed` run), 1e-1
+on the time-stepping engines. A violation is `failed`,
+`'energy_balance: ...'` with both powers and the residual; a test
+scales one load's `P_avg` by 1 + 1e-6 and the record fails.
+
+What the stepped tolerance lets through: the `pss/pwl` route's `P_in`
+is off. DCM buck at T/200: `P_out` 7.31746 W equals the exact orbit's
+7.31746 W, but `P_in` reads 7.394 W against the exact 7.321 W (+1 %,
+res 9.9e-3; at T/1000 2.0e-3), while the long `pwl` transient at T/200
+balances to 1e-7 (its own `P_out` is 0.9 % low, the engine's
+discretisation). So the restart run of the `pss/pwl` window measures
+the source current wrongly by ~1 %; `efficiency` does not read `P_in`
+(P_out / (P_out + losses)) and is unaffected. Recorded, not fixed here:
+the window run is `TransientMap.simulate` from the full state, the
+fixed engine's first-order restart is the first suspect.
+
+## 23. Saltation for comparator-driven gates: not done, the hook it needs
+
+`add-periodic-steady-state-shooting` 6.1/6.3 (peak-current-mode buck,
+multipliers -1.267293 and 0.998949) needs a gate that turns off when a
+state crosses a threshold (`i_L = I_ref`) and on at the clock. The
+period runs (`period_run` in `python/dsed_bindings.cpp`) arm only the
+diode predicates, and the scheduler tells a schedule about a state
+event only through `register_zcd_transition(Real t)` (concept
+`HasZcdRegister`), called for every `CurrentZC`, `DiodeOn` and
+`DiodeOff` firing alike. A comparator gate latched there would also
+latch on the freewheel diode's own events, so it cannot be written
+without knowing WHICH predicate fired. Hook needed in
+`core/include/pulsim/dsed/scheduler.hpp` (not editable in this slice),
+`PEDSimulator::fire_event_`: call, when the schedule offers it,
+`switch_fn_.register_event(Real t, const std::string& name,
+PredicateType type, int pred_index)` before re-sampling the mask (a new
+concept `HasEventRegister`, the ZCD call kept). With it, the kernel
+side is additive: a native `ComparatorGate` schedule (clock edges in
+`next_edge_after`, latched off by its own predicate), its predicate
+`g = w.x - I_ref` added next to the diode predicates in a new
+`period_run` overload, and in `period_map_from_run` the saltation `S =
+I + (f+ - f-) w^T / (w . f-)` for that event (today only diode events
+get one; no other state event reaches the period runs, so nothing is
+silently missing now). The probe `probes/peak_current_mode.py` is the
+oracle. Not started: this slice ran out of time after items 1-4.
+
 ## Missing from the kernel (recorded, worked around in Python)
 
 Items 1 and 2 are done (add-parameter-sensitivities slice, 2026-11):

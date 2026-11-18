@@ -51,6 +51,7 @@ __all__ = [
     "EvaluationRecord",
     "Evaluator",
     "Kpi",
+    "Constraint",
     "SteadySpec",
     "ThermalSpec",
     "SteadyPeriod",
@@ -196,10 +197,83 @@ class ThermalSpec:
 
 @dataclass(frozen=True)
 class Kpi:
-    """A user KPI: ``fn(period: SteadyPeriod) -> float``."""
+    """A user KPI: ``fn(period: SteadyPeriod) -> float``.
+
+    The constructors are declarative -- a kind and a target, no code --
+    so they hash by value, pickle (``evaluate_many(backend='process')``)
+    and are computed by the evaluator itself: on the kernel route from
+    the closed-form period integrals (the node joins the kernel's
+    observables), on a sampled route from the period's samples with
+    right limits, exactly as the default KPIs. One that names a default
+    KPI is that default. ``Kpi.efficiency()``, ``Kpi.ripple(node)``
+    (peak-to-peak, ``ripple_v.<node>``), ``Kpi.mean(node)``
+    (time-weighted, ``v_avg.<node>``), ``Kpi.i_peak(inductor)``,
+    ``Kpi.i_rms(inductor)``, ``Kpi.ripple_i(inductor)``."""
 
     name: str
     fn: Callable[["SteadyPeriod"], float]
+
+    @classmethod
+    def efficiency(cls) -> "Kpi":
+        return cls("efficiency", _KpiSpec("efficiency"))
+
+    @classmethod
+    def ripple(cls, node: str) -> "Kpi":
+        return cls(f"ripple_v.{node}", _KpiSpec("ripple_v", str(node)))
+
+    @classmethod
+    def mean(cls, node: str) -> "Kpi":
+        return cls(f"v_avg.{node}", _KpiSpec("v_avg", str(node)))
+
+    @classmethod
+    def i_peak(cls, inductor: str) -> "Kpi":
+        return cls(f"i_peak.{inductor}", _KpiSpec("i_peak", str(inductor)))
+
+    @classmethod
+    def i_rms(cls, inductor: str) -> "Kpi":
+        return cls(f"i_rms.{inductor}", _KpiSpec("i_rms", str(inductor)))
+
+    @classmethod
+    def ripple_i(cls, inductor: str) -> "Kpi":
+        return cls(f"ripple_i.{inductor}", _KpiSpec("ripple_i",
+                                                     str(inductor)))
+
+
+@dataclass(frozen=True)
+class _KpiSpec:
+    """The body of a declarative :class:`Kpi` (computed by the
+    evaluator; calling it on a :class:`SteadyPeriod` is an error)."""
+
+    kind: str
+    target: Optional[str] = None
+
+    def __call__(self, per):
+        raise TypeError("a declarative Kpi is computed by the Evaluator")
+
+
+@dataclass(frozen=True)
+class Constraint:
+    """A bound on a KPI that hashes by value and pickles:
+    ``Constraint.max('ripple_v', 0.05)``, ``Constraint.min('efficiency',
+    0.95)``, ``Constraint.between(kpi, lo, hi)``.
+    ``Evaluator(constraints=[...])`` takes a sequence of them as well as
+    the ``{kpi: (lo, hi)}`` mapping."""
+
+    kpi: str
+    lo: Optional[float] = None
+    hi: Optional[float] = None
+
+    @classmethod
+    def max(cls, kpi: str, hi: float) -> "Constraint":
+        return cls(str(kpi), None, float(hi))
+
+    @classmethod
+    def min(cls, kpi: str, lo: float) -> "Constraint":
+        return cls(str(kpi), float(lo), None)
+
+    @classmethod
+    def between(cls, kpi: str, lo: float, hi: float) -> "Constraint":
+        return cls(str(kpi), float(lo), float(hi))
 
 
 @dataclass(frozen=True)
@@ -460,6 +534,10 @@ class Evaluator:
         evaluation and every worker thread: a design is
         ``circuit.with_params`` / ``with_value`` of it through
         ``fields``, with no rebuild and one symbolic analysis per batch.
+        Or a picklable zero-argument function returning it (a
+        module-level function, a ``functools.partial``): the evaluator
+        then reaches process workers, each building the base once and
+        checking its ``value_hash`` against the parent's.
     fields
         With ``circuit``: ``{design variable: target}``, the target a
         named parameter (``builder.param``) or ``"<component>.<field>"``
@@ -550,6 +628,10 @@ class Evaluator:
         if (build is None) == (circuit is None):
             raise TypeError("Evaluator: give build= (a factory) or circuit= "
                             "(a pulsim.Circuit), exactly one")
+        self._circuit_factory = None
+        if circuit is not None and callable(circuit) and \
+                not isinstance(circuit, _pkg.Circuit):
+            self._circuit_factory, circuit = circuit, circuit()
         self.circuit = circuit
         self.fields = dict(fields or {})
         self.switch_fn = switch_fn
@@ -562,6 +644,7 @@ class Evaluator:
         else:
             self._targets, self._spec_static = _resolve_fields(
                 circuit, self.fields)
+            self._circuit_hash = f"{circuit.value_hash():016x}"
             if switch_fn is not None and schedule is not None:
                 raise TypeError("Evaluator: give switch_fn= (fixed) or "
                                 "schedule= (per design), not both")
@@ -571,12 +654,35 @@ class Evaluator:
                     "dependent needs a build= factory that reads "
                     "design['_T_j']; a fixed circuit has no such input")
         self._spec_cache: dict = {}
+        #: (topology, event pattern) -> relative deviation of the independent
+        #: periodicity check (review item c1), this process only
+        self.periodicity_checks: dict = {}
         self.build = build
         self.period = period
         self.loads = tuple(loads)
         self.sources = None if sources is None else tuple(sources)
         self.output = output
         self.kpis = tuple(kpis)
+        names = [k.name for k in self.kpis]
+        dup = sorted({n for n in names if names.count(n) > 1})
+        if dup:
+            raise ValueError(f"kpis: {dup} given twice")
+        self._nodes = tuple(sorted({
+            k.fn.target for k in self.kpis if isinstance(k.fn, _KpiSpec)
+            and k.fn.kind in ("ripple_v", "v_avg")} - {output}))
+        if constraints is not None and not isinstance(constraints, Mapping):
+            cs = list(constraints)
+            bad = [c for c in cs if not isinstance(c, Constraint)]
+            if bad:
+                raise TypeError(f"constraints: give a {{kpi: (lo, hi)}} "
+                                f"mapping or Constraint objects, got "
+                                f"{bad[0]!r}")
+            names = [c.kpi for c in cs]
+            dup = sorted({n for n in names if names.count(n) > 1})
+            if dup:
+                raise ValueError(f"constraints: {dup} bounded twice; use "
+                                 "Constraint.between")
+            constraints = {c.kpi: (c.lo, c.hi) for c in cs}
         self.constraints = {k: tuple(v) for k, v in (constraints or {}).items()}
         for k, v in self.constraints.items():
             if len(v) != 2:
@@ -598,6 +704,33 @@ class Evaluator:
                 "does not differentiate (refused, never approximated).")
         self._options_digest = _digest(self._config())
 
+    # -- pickling (the process backend) ---------------------------------
+    def __getstate__(self):
+        st = dict(self.__dict__)
+        st["_spec_cache"] = {}
+        st["periodicity_checks"] = {}
+        st.pop("_prov", None)
+        if self._circuit_factory is not None:
+            st["circuit"] = None     # rebuilt by the factory in the worker
+        return st
+
+    def __setstate__(self, st):
+        self.__dict__.update(st)
+        if self.circuit is None and self._circuit_factory is not None:
+            want = f"{self._circuit_hash}"
+            c = _BASES.get(want)
+            if c is None:
+                c = self._circuit_factory()
+                got = f"{c.value_hash():016x}"
+                if got != want:
+                    raise RuntimeError(
+                        "Evaluator(circuit=<factory>): the factory built a "
+                        f"circuit with value_hash {got} in this process, "
+                        f"not the parent's {want}; it must be "
+                        "deterministic")
+                _BASES[want] = c
+            self.circuit = c
+
     # -- identity --------------------------------------------------------
     def _config(self):
         th = None
@@ -607,7 +740,7 @@ class Evaluator:
         if self.circuit is not None:
             # the base by its value hash (structure and every value), the
             # design by its variables: no per-record circuit hashing
-            form = dict(circuit=f"{self.circuit.value_hash():016x}",
+            form = dict(circuit=self._circuit_hash,
                         fields=self.fields, switch_fn=self.switch_fn,
                         schedule=self.schedule)
         return dict(
@@ -709,14 +842,10 @@ class Evaluator:
         configuration, not the design, is unsupported). Any other
         exception propagates."""
         from .sweep import _run_jobs
-        if backend == "process" and self.circuit is not None and \
-                workers != 1:
-            raise TypeError(
-                "Evaluator(circuit=...).evaluate_many(backend='process'): a "
-                "pulsim.Circuit does not pickle (yet), so it cannot reach a "
-                "worker process. Use backend='thread' (the circuit is "
-                "immutable and shared by the threads) or a build= factory.")
         jobs = [(self, dict(d)) for d in designs]
+        if backend == "process" and workers != 1 and len(jobs) > 3:
+            # refused by name before the head runs or a worker starts
+            self._check_picklable([d for _, d in jobs[3:]])
         head = jobs[:3]
         out, _, _ = _run_jobs(head, parallel=False, backend="thread",
                               n_workers=1, verbose=False,
@@ -732,13 +861,60 @@ class Evaluator:
                 "with identical fields, so the configuration is "
                 f"unsupported: {out[0].reason}", device=d, kind=k)
         rest = jobs[3:]
-        if rest:
+        if rest and backend == "process" and workers != 1:
+            # chunks: the evaluator is pickled once per chunk, not per
+            # design; four chunks per worker balance the load
+            import os
+            nw = workers or max(1, (os.cpu_count() or 2) - 1)
+            size = -(-len(rest) // (4 * nw))
+            chunks = [(self, [d for _, d in rest[i:i + size]])
+                      for i in range(0, len(rest), size)]
+            more, _, _ = _run_jobs(
+                chunks, parallel=True, backend="process", n_workers=nw,
+                verbose=False, job=_evaluate_chunk, reraise=True)
+            out += [r for recs in more for r in recs]
+        elif rest:
             more, _, _ = _run_jobs(
                 rest, parallel=workers != 1, backend=backend,
                 n_workers=workers, verbose=False, job=_evaluate_job,
                 reraise=True)
             out += more
         return out
+
+    def _check_picklable(self, designs):
+        """Refuse a process batch whose evaluator or designs do not
+        pickle, naming the part, before a worker starts."""
+        import pickle
+        parts = []
+        if self._circuit_factory is not None:
+            parts.append(("circuit (factory)", self._circuit_factory))
+        elif self.circuit is not None:
+            parts.append(("circuit", self.circuit))
+        parts += [("build", self.build), ("switch_fn", self.switch_fn),
+                  ("schedule", self.schedule), ("period", self.period)]
+        parts += [(f"kpis[{k.name!r}]", k.fn) for k in self.kpis]
+        if self.thermal is not None:
+            parts.append(("thermal.loss_at", self.thermal.loss_at))
+        parts += [(f"options[{k!r}]", v) for k, v in self.options.items()]
+        parts += [(f"loss_options[{k!r}]", v)
+                  for k, v in self.loss_options.items()]
+        parts += [(f"designs[{i + 3}]", d) for i, d in enumerate(designs)]
+        parts.append(("the evaluator", self))   # anything not named above
+        for name, obj in parts:
+            try:
+                pickle.dumps(obj)
+            except Exception as e:  # noqa: BLE001 - any pickling failure
+                hint = ("pass circuit= a module-level function returning the "
+                        "circuit (it then rebuilds in each worker)"
+                        if name == "circuit" else
+                        "use a module-level function, a declarative Kpi "
+                        "(Kpi.ripple(node), Kpi.i_peak(inductor), ...) or "
+                        "Constraint objects")
+                raise unsupported(
+                    "design.evaluate_many", "backend", "evaluate_many("
+                    f"backend='process'): {name} does not pickle ({e}), so "
+                    f"a process worker cannot receive it; {hint}, or use "
+                    "backend='thread'.", device=name) from e
 
     # -- one evaluation --------------------------------------------------
     def _period_of(self, design):
@@ -960,6 +1136,39 @@ class Evaluator:
         self._count(run2, counters, b, sf)
         return run2, 0.0, T, b
 
+    def _check_periodic(self, src, sf, T, r, b):
+        """Review item c1: the kernel's verification period IS the
+        shooting map, so it cannot catch a defect of that map. One plain
+        ``simulate(engine='dsed')`` period from ``x*`` (another entry
+        point: dispatch, adapter, event projection) must return to
+        ``x*``. It costs one to two evaluations (DECISIONS 22), so it runs
+        once per (topology, event pattern) per evaluator and process and
+        is logged in ``periodicity_checks``, not in the records (whose
+        counters must not depend on the order of a batch); a mismatch
+        fails every design of that pattern."""
+        key = (tuple((c["kind"], tuple(c.get("nodes", ())))
+                     for c in b.components()),
+               tuple(name for name, _ in r.pattern))
+        done = self.periodicity_checks.get(key)
+        if done is None:
+            run = _engine(lambda: _pkg.simulate(
+                src, t_end=T, dt=T, engine="dsed", switch_fn=sf,
+                initial_state=r.x0, rtol=1e-11, atol=1e-14))
+            xs = np.asarray(run.states_reduced, dtype=float)
+            dev = np.abs(xs[-1] - r.x0)
+            den = np.abs(xs).max(axis=0) + np.abs(r.x0)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                q = np.where(dev == 0.0, 0.0, dev / np.where(den > 0, den,
+                                                             1e-300))
+            done = self.periodicity_checks[key] = float(q.max())
+        if not done <= _PERIODIC_RTOL:
+            raise _Failed(
+                "periodicity: a plain simulate(engine='dsed') period from "
+                "the shooting's x* moved it by "
+                f"{done:.3e} (relative, tolerance {_PERIODIC_RTOL:.0e}); the "
+                "shooting map and the engine disagree for this event "
+                f"pattern {[n for n, _ in r.pattern]}")
+
     def _spec(self, src):
         """The kernel observables: once per evaluator on the circuit
         form when no design variable moves a value they read."""
@@ -967,7 +1176,8 @@ class Evaluator:
         key = src.structure_hash() if static else None
         spec = self._spec_cache.get(key) if static else None
         if spec is None:
-            spec = _pk.spec_for(_as_builder(src), self.output, self.loss_options)
+            spec = _pk.spec_for(_as_builder(src), self.output,
+                                self.loss_options, self._nodes)
             if static:
                 self._spec_cache[key] = spec   # read-only once stored
         return spec
@@ -1007,6 +1217,8 @@ class Evaluator:
         counters["simulations"] += int(r.n_period_runs)
         ctx = r._ctx
         b = ctx.builder
+        if ctx._map is not None:
+            self._check_periodic(src, sf, T, r, b)
         counters["python_callbacks"] = int(ctx.n_python_callbacks)
         counters["nogil_period_runs"] = int(ctx.n_nogil_runs)
         counters["pss_loop"] = ctx.loop
@@ -1321,6 +1533,11 @@ class Evaluator:
             # P_out / P_in at the orbit (DECISIONS 4).
             kpis["efficiency"] = (p_out / (p_out + p_loss)
                                   if p_out + p_loss > 0 else math.nan)
+            _energy_balance(
+                comps, src, rows, losses, p_in, counters,
+                0.0 if kp is not None else _stored_power(run, comps, a, z),
+                "exact" if kp is not None or getattr(
+                    run, "engine_used", "") == "dsed" else "stepped")
         if self.output is not None:
             if kp is not None:
                 kpis["v_out"] = kp.mean(("node", self.output))
@@ -1353,19 +1570,54 @@ class Evaluator:
                 t, v = _with_right_limits(run, _pair_col(c["nodes"]))
                 _, vw = _window(t, v, a, z)
                 kpis[f"v_peak.{n}"] = float(np.abs(vw).max())
-        if self.kpis:
+        user = []
+        for k in self.kpis:
+            if isinstance(k.fn, _KpiSpec):
+                kpis[k.name] = _declared(k, kpis, kp, run, a, z, b)
+            elif k.name in kpis:
+                raise ValueError(f"user KPI {k.name!r} has the name of a "
+                                 "default KPI")
+            else:
+                user.append(k)
+        if user:
             if kp is not None:
                 # the waveforms of the orbit, simulated on first access
                 run, a, z = kp.lazy_run, kp.T, 2 * kp.T
             per = SteadyPeriod(run, builder=b, design=design,
                                t_from=a, t_to=z, seed=int(did, 16) % 2**32,
                                kpis=_fz(kpis), losses=_fz(losses))
-            for k in self.kpis:
-                if k.name in kpis:
-                    raise ValueError(f"user KPI {k.name!r} has the name of a "
-                                     "default KPI")
+            for k in user:
                 kpis[k.name] = float(k.fn(per))
         return kpis
+
+
+def _declared(k, kpis, kp, run, a, z, b):
+    """The value of a declarative :class:`Kpi`: the default KPI it names,
+    or a node's peak-to-peak / time-weighted mean on the route's own
+    footing (closed form on the kernel route, samples otherwise)."""
+    s = k.fn
+    if s.kind in ("efficiency", "i_peak", "i_rms", "ripple_i"):
+        name = s.kind if s.target is None else f"{s.kind}.{s.target}"
+        if name not in kpis:
+            raise KeyError(
+                f"Kpi.{s.kind}({s.target or ''}): {name!r} is not a KPI of "
+                "this evaluation (efficiency needs loads=; the current "
+                f"KPIs name inductors). KPIs: {sorted(kpis)}")
+        return float(kpis[name])
+    if s.kind in ("ripple_v", "v_avg"):
+        try:
+            col = int(b.node_id_of(s.target))
+        except Exception as e:  # noqa: BLE001 - re-raised by name
+            raise KeyError(f"Kpi.{'ripple' if s.kind == 'ripple_v' else 'mean'}"
+                           f"({s.target!r}): no such node") from e
+        if col < 0:
+            return 0.0       # ground
+        if kp is not None:
+            key = ("node", s.target)
+            return kp.p2p(key) if s.kind == "ripple_v" else kp.mean(key)
+        t, v = _with_right_limits(run, lambda st, col=col: st[:, col])
+        return _p2p(t, v, a, z) if s.kind == "ripple_v" else _mean(t, v, a, z)
+    raise ValueError(f"unknown declarative KPI kind {s.kind!r}")
 
 
 def _as_builder(src):
@@ -1552,6 +1804,86 @@ def _engine(fn):
         if type(e).__name__ == "_CxxCancelled":
             raise
         raise _Failed(f"{type(e).__name__}: {e}") from e
+
+
+# |P_in - sum P - dE/T| / P_in, an order above the worst record measured
+# (DECISIONS 22): exact stepper 1.3e-9 (DCM buck, transient route; <=
+# 1e-11 on the kernel period); time-stepping engines 3.9e-2 (pwl at
+# T/25 with sub-step correction; 9.9e-3 pss/pwl DCM buck, 9.5e-5 trbdf2)
+_ENERGY_RTOL = {"exact": 1e-8, "stepped": 1e-1}
+
+
+def _stored_power(run, comps, a, z):
+    """``dE/T`` of the inductors and capacitors from ``a`` to ``z`` of a
+    sampled window (a transient route ends a settle tolerance short of
+    the orbit; a kernel period is the orbit: 0)."""
+    from ._result_views import states_as_array
+    t = np.asarray(run.times, dtype=float)
+    st = None
+    e = 0.0
+    for n, c in comps.items():
+        if c["kind"] == "inductor":
+            y, k = np.asarray(run.i(n), dtype=float), float(
+                c["params"]["L_henries"])
+        elif c["kind"] == "capacitor":
+            st = states_as_array(run) if st is None else st
+            y, k = _pair_col(c["nodes"])(st), float(c["params"]["C_farads"])
+        else:
+            continue
+        e += 0.5 * k * (float(np.interp(z, t, y)) ** 2
+                        - float(np.interp(a, t, y)) ** 2)
+    return e / (z - a)
+
+
+def _energy_balance(comps, src, rows, losses, p_in, counters, p_stored,
+                    route):
+    """``P_in = P_out + sum P_loss`` over the steady period, from the
+    same integrals as the KPIs: the sources' delivered power against
+    every device's dissipated ``P_avg`` (loads included) and the power
+    stored in L and C over the window (``p_stored``; 0 on the orbit).
+    Recorded as
+    ``counters['energy_residual']`` (relative to ``P_in``) with
+    ``counters['p_table']``, the datasheet / table losses (switching,
+    recovery, core) that are outside the circuit's own balance. A
+    residual above ``_ENERGY_RTOL[route]`` fails the design: the KPIs disagree
+    with each other. Not formed (no counter) when a source of power is
+    outside the measurement (an unnamed source, a current source)."""
+    if p_in is None or not p_in > 0:
+        return
+    if any(c["kind"] not in ("resistor", "inductor", "capacitor", "switch",
+                             "diode", "voltage_source") for c in comps.values()) \
+            or any(c["kind"] == "voltage_source" and n not in src
+                   for n, c in comps.items()):
+        return
+    p_dis = sum(float(r["P_avg"]) for r in rows.values() if "P_avg" in r)
+    res = (p_in - p_dis - p_stored) / p_in
+    counters["energy_residual"] = res
+    counters["p_table"] = sum(v for c in losses.values()
+                              for k, v in c.items()
+                              if k in ("switching", "recovery", "core"))
+    tol = _ENERGY_RTOL[route]
+    if not abs(res) <= tol:
+        raise _Failed(
+            f"energy_balance: P_in = {p_in:.9g} W but the devices dissipate "
+            f"{p_dis:.9g} W and store {p_stored:.3g} W (relative residual "
+            f"{res:.3e}, tolerance {tol:.0e} on the {route} route): the "
+            "steady period's integrals disagree")
+
+
+# a plain period from x* returns within rounding (measured: 2.2e-16 CCM
+# buck, 6.9e-17 DCM buck, 2.0e-16 boost, 4.0e-16 buck Pareto); the
+# shooting stops at a scaled residual of 1e-9, one order above that
+_PERIODIC_RTOL = 1e-8
+
+_BASES: dict = {}   # value hash -> base Circuit, per worker process
+
+
+def _evaluate_chunk(args):
+    """Process job: ``(records of a chunk of designs, callbacks)``."""
+    ev, designs = args
+    recs = [ev.evaluate(d) for d in designs]
+    return recs, (("python",) if any(r.counters.get("python_callbacks")
+                                     for r in recs) else ())
 
 
 def _evaluate_job(args):

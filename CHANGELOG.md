@@ -20,6 +20,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   buck Pareto 751 -> 378 Python calls and ~440 -> 164 us per design,
   1 thread 3239 -> 5025 evaluations/s, records bit for bit unchanged
   (512 designs). Threads still do not scale (DECISIONS 20).
+* **Added** declarative, picklable KPIs and bounds: `Kpi.efficiency()`,
+  `Kpi.ripple(node)`, `Kpi.mean(node)`, `Kpi.i_peak(L)`, `Kpi.i_rms(L)`,
+  `Kpi.ripple_i(L)`, `Constraint.max/min/between`; `circuit=` also takes
+  a zero-argument factory. `evaluate_many(backend='process')` refuses
+  the first part that does not pickle by name before any worker starts
+  and sends chunks; the buck example runs on processes (`--process`)
+  with the same 512 records (DECISIONS 21).
+* **Added** an independent periodicity check on the exact route (one
+  plain `simulate(engine='dsed')` period from `x*`, once per topology
+  and event pattern, `Evaluator.periodicity_checks`; a mismatch is
+  `failed`, `'periodicity'`) and an energy-balance guard on every
+  record: `counters['energy_residual']` (P_in − ΣP − dE/T over P_in;
+  1e-8 on the exact stepper, 1e-1 on the stepped engines, else
+  `failed`, `'energy_balance'`) and `counters['p_table']` (DECISIONS
+  22). It shows the `pss/pwl` route's `p_in` 1 % high on a DCM buck.
+* **Fixed** `simulate(engine='dsed')` raised `IndexError` for a schedule
+  narrower than the circuit's switch count (diode mode check).
 
 ### Integration batch 9: the exact engine merged
 

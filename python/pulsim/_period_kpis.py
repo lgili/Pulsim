@@ -45,7 +45,7 @@ class Spec:
                          bool(extrema)))
 
 
-def spec_for(b, output, loss_options):
+def spec_for(b, output, loss_options, extra_nodes=()):
     """A :class:`Spec`, or a string naming why the kernel path does not
     apply (the evaluator then samples the period)."""
     from ._result_views import switch_bits_by_branch
@@ -92,9 +92,13 @@ def spec_for(b, output, loss_options):
                   extrema=True)
             s.pairs.append((s.idx[("i", name)], s.idx[("v", name)]))
             s.semis.append((name, kind, bits[bid]))
-    if output is not None:
-        s.add(("node", output), [(int(b.node_id_of(output)), 1.0)],
-              extrema=True)
+    for name in ((output,) if output is not None else ()) + tuple(extra_nodes):
+        try:
+            k = int(b.node_id_of(name))
+        except IndexError as e:    # a configuration error, named
+            raise KeyError(f"node {name!r} (output= or a Kpi): no such "
+                           "node") from e
+        s.add(("node", name), [(k, 1.0)], extrema=True)
     # every node's extrema: the implausible-voltage check of a sampled run
     s.n_full = len(b.state_var_names())
     s.n_nodes = int(b.graph.num_nodes)

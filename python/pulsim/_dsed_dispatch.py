@@ -1081,7 +1081,10 @@ def check_diode_modes(res, builder, rel: float = 1e-3) -> None:
         return
     for c in comps:
         prm = c["params"]
-        on = S[:, builder.switch_index_of(c["name"])].astype(bool)
+        k = builder.switch_index_of(c["name"])
+        if k >= S.shape[1]:
+            continue    # a schedule narrower than the circuit: no record
+        on = S[:, k].astype(bool)
         i = _np.asarray(res.i(c["name"]), dtype=float)
         thr = max(float(prm.get("V_th", 0.0)), float(prm.get("V_f", 0.0)))
         v_off = i / float(prm.get("g_off", 1e-9))
