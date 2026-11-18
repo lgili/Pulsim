@@ -70,6 +70,7 @@ if(PULSIM_BUILD_TESTS)
     # without rebuilding the tree.
     add_executable(pulsim_core_mode_tests
         tests/modes/test_mode_selector.cpp
+        tests/modes/test_event_queue.cpp  # add-unified-event-queue
     )
     target_link_libraries(pulsim_core_mode_tests
         PRIVATE
