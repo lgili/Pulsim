@@ -182,6 +182,9 @@ struct TrBdf2Options {
     /// Empty = `observer_origin` for every source; else one origin per
     /// source (a resume passes its snapshot's `tick_origin`).
     std::vector<Real> observer_origins;
+    /// With observer_origins: each source's first unfired index from the
+    /// snapshot (`tick_next_k`), empty = recompute from t_start.
+    std::vector<std::uint64_t> observer_next_k;
     /// Newton settings, used only when the circuit has nonlinear
     /// devices. Same knobs and defaults as the fixed engine. The
     /// tolerances are absolute; loosening them is not a fix for an
@@ -1387,7 +1390,11 @@ inline SimulationResult run_transient_trbdf2(
                                events::Rate{t_ctrl[j], off,
                                             opts.observer_origins.empty()
                                                 ? opts.observer_origin
-                                                : opts.observer_origins[j]},
+                                                : opts.observer_origins[j],
+                                            opts.observer_next_k.size() == t_ctrl.size()
+                                                    && !opts.observer_origins.empty()
+                                                ? opts.observer_next_k[j]
+                                                : std::numeric_limits<std::uint64_t>::max()},
                                /*lands=*/!mon);
         }
     }
@@ -2062,9 +2069,13 @@ inline SimulationResult run_transient_trbdf2(
     auto fire_due_monitors = [&]() {
         // a step may span several instants: take them all (one per
         // source per take_due call)
-        while (t >= queue.next_of(events::Kind::Monitor) - h_min) {
+        // Not at t_end (as fire_due_ticks): an instant within h_min of
+        // the end belongs to a resumed run, which takes it back from its
+        // start tolerance; firing it here too called the monitor twice.
+        const Real t_take = std::min(t, opts.t_end - Real{2} * h_min);
+        while (t_take >= queue.next_of(events::Kind::Monitor) - h_min) {
             for (const auto& ev : queue.take_due(
-                     t, h_min, events::kind_bit(events::Kind::Monitor))) {
+                     t_take, h_min, events::kind_bit(events::Kind::Monitor))) {
                 tick_fn(ev.source, t, x);
                 ++st.ctrl_tick_counts[ev.source];
             }

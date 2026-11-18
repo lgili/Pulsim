@@ -198,9 +198,9 @@ def main(argv=None) -> int:
     ap.add_argument("--json")
     a = ap.parse_args(argv)
     recs = differential(a.circuits.split(","), a.repeats) + analytic(a.repeats)
-    OUT.write_text(render(recs))
+    OUT.write_text(render(recs), encoding="utf-8")
     if a.json:
-        Path(a.json).write_text(json.dumps(recs, indent=1, default=str))
+        Path(a.json).write_text(json.dumps(recs, indent=1, default=str), encoding="utf-8")
     print(f"wrote {OUT}")
     return 0
 

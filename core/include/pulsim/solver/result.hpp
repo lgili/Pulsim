@@ -332,7 +332,8 @@ public:
     /// The step-size controller's state at `t`
     /// (refactor-unified-transient-stepper task 12): the variable-step
     /// engine's step memory. Empty (`Kind::None`) from the fixed engine,
-    /// an older snapshot or a pickle: the resumed controller then starts
+    /// an older snapshot or a pickle older than version 5 (or than the
+    /// device interface's 15-field version 4): the resumed controller starts
     /// from its initial step (exact in state, to tolerance in trajectory).
     step::ControllerState controller;
     /// The controllers' state at `t` (control graphs, C blocks), owned

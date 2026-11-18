@@ -129,3 +129,37 @@ def test_a_snapshot_without_the_tick_grid_is_still_refused_off_grid():
     with pytest.raises(p.UnsupportedError, match="between two"):
         p.simulate(b, T2, engine="trbdf2", step_observer=obs,
                    switch_fn=_sw(b), resume_from=snap)
+
+
+def _count_split(t1, t2, T, monitor, second):
+    """Observer calls of one trbdf2 run to t2 and of a trbdf2 run split at
+    t1 and resumed on `second`."""
+    def run(t_end, seen, engine="trbdf2", **extra):
+        b = _buck()
+        fn = (lambda t, x: seen.append(t))
+        obs = dict(step_observer=p.control.Monitor(fn, T)) if monitor else \
+            dict(step_observer=fn, controller_period=T)
+        kw = dict(rtol=1e-6) if engine == "trbdf2" else dict(dt=1e-7)
+        return p.simulate(b, t_end, engine=engine, switch_fn=_sw(b), **obs, **kw,
+                          **extra)
+    full, split = [], []
+    run(t2, full)
+    first = run(t1, split)
+    run(t2, split, engine=second, resume_from=first.final_snapshot,
+        t_start=first.final_snapshot.t)
+    return full, split
+
+
+@pytest.mark.parametrize("second", ["trbdf2", "pwl"])
+@pytest.mark.parametrize("monitor", [True, False])
+def test_an_instant_just_below_the_split_is_called_once(monitor, second):
+    """Batch 14a review: an instant within h_min below the split fired at
+    the end of the first run (monitors had no end cut) and again at the
+    start of the resumed run; a control tick in the gap between the two
+    runs' start tolerances could be fired by neither (the resume now takes
+    the snapshot's tick_next_k; that gap was not reproduced on these
+    circuits, the test pins the count)."""
+    T = 1e-5
+    t1 = 37 * T + 2e-15        # h_min of the first run ~3.7e-15 s, of the second ~1e-16
+    full, split = _count_split(t1, t1 + T * 1.5, T, monitor, second)
+    assert len(split) == len(full), (len(split), len(full))

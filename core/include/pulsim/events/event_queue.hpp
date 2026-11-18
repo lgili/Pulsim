@@ -74,6 +74,12 @@ struct Rate {
     /// t0 here, so it ticks bit-exactly where the uninterrupted run would,
     /// with the same k (the first k whose instant is >= t0 - start tol).
     Real origin = std::numeric_limits<Real>::quiet_NaN();
+    /// With `origin`: the index of the first tick the original run had not
+    /// fired (its snapshot's `tick_next_k`), max = unknown. A resume takes it
+    /// over the index recomputed from t0, which uses THIS run's start
+    /// tolerance: a tick inside the gap between the two runs' tolerances
+    /// was otherwise fired by neither run.
+    std::uint64_t k0 = std::numeric_limits<std::uint64_t>::max();
 };
 
 /// What a tick handler is told (task 4.1): the instant the tick was
@@ -175,6 +181,12 @@ public:
                 } else {
                     s.base = s.rate.origin + s.rate.offset;
                     s.k = first_k_at_or_after(s, t0 - t0_tol);
+                    // the snapshot's index, when it is the tolerance gap's
+                    // neighbour (anything else is a different split)
+                    if (s.rate.k0 != std::numeric_limits<std::uint64_t>::max()
+                        && s.rate.k0 + 1 >= s.k && s.rate.k0 <= s.k + 1) {
+                        s.k = s.rate.k0;
+                    }
                 }
                 set_periodic(s);
             } else if (s.once) {

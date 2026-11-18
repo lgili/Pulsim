@@ -4407,7 +4407,8 @@ void init_module(py::module_& m) {
            std::vector<std::function<void(Real, const Vector&)>> tick_fns,
            py::object tick_before_obj,
            Real tick_origin,
-           std::vector<Real> tick_origins) {
+           std::vector<Real> tick_origins,
+           std::vector<std::uint64_t> tick_next_ks) {
             // add-unified-event-queue group 5: Python tick sources, which
             // the kernel's queue schedules (source j calls tick_fns[j]).
             if (tick_periods.size() != tick_fns.size()) {
@@ -4424,7 +4425,10 @@ void init_module(py::module_& m) {
             for (std::size_t j = 0; j < tick_periods.size(); ++j) {
                 tick_plan.rates.push_back(pulsim::events::Rate{
                     tick_periods[j], Real{0},
-                    tick_origins.empty() ? tick_origin : tick_origins[j]});
+                    tick_origins.empty() ? tick_origin : tick_origins[j],
+                    tick_next_ks.size() == tick_periods.size() && !tick_origins.empty()
+                        ? tick_next_ks[j]
+                        : std::numeric_limits<std::uint64_t>::max()});
             }
             tick_plan.fn = [&tick_fns](std::uint32_t j, const pulsim::events::TickInfo&,
                                        Real t, const Vector& xs) {
@@ -4552,6 +4556,7 @@ void init_module(py::module_& m) {
         py::arg("tick_before") = py::none(),
         py::arg("tick_origin") = std::numeric_limits<Real>::quiet_NaN(),
         py::arg("tick_origins") = std::vector<Real>{},
+        py::arg("tick_next_ks") = std::vector<std::uint64_t>{},
         "Run a fixed-dt transient simulation. switch_fn(t) "
         "→ SwitchStateMask; b_extra_fn(t) → Vector adds "
         "to b_constant at each step. `step_observer(t, x)` "
@@ -6137,6 +6142,7 @@ void init_module(py::module_& m) {
            Real observer_origin,
            std::vector<bool> observer_monitors,
            std::vector<Real> observer_origins,
+           std::vector<std::uint64_t> observer_next_k,
            device::DevicePath device_path) {
             solver::BExtraFn b_extra_fn;
             std::function<Real(Real)> unused_next_jump;  // trbdf2 lands its ticks
@@ -6169,6 +6175,7 @@ void init_module(py::module_& m) {
             o.observer_monitors.assign(observer_monitors.begin(), observer_monitors.end());
             o.observer_origin = observer_origin;
             o.observer_origins = std::move(observer_origins);
+            o.observer_next_k = std::move(observer_next_k);
             if (max_newton_iterations > 0) {
                 o.max_newton_iterations = max_newton_iterations;
             }
@@ -6309,6 +6316,7 @@ void init_module(py::module_& m) {
         py::arg("observer_origin") = std::numeric_limits<Real>::quiet_NaN(),
         py::arg("observer_monitors") = std::vector<bool>{},
         py::arg("observer_origins") = std::vector<Real>{},
+        py::arg("observer_next_k") = std::vector<std::uint64_t>{},
         py::arg("device_path") = device::DevicePath::Legacy,
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "

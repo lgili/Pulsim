@@ -361,11 +361,11 @@ def main(argv=None) -> int:
         recs = run(pats, tuple(a.variants.split(",")))
         if a.merge:
             have = {(r["circuit"], r["config"], r["variant"]) for r in recs}
-            recs += [r for r in json.loads(Path(a.merge).read_text())
+            recs += [r for r in json.loads(Path(a.merge).read_text(encoding="utf-8"))
                      if (r["circuit"], r["config"], r["variant"]) not in have]
         if a.json:
-            Path(a.json).write_text(json.dumps(recs, indent=1))
-    Path(a.out).write_text(render(recs))
+            Path(a.json).write_text(json.dumps(recs, indent=1), encoding="utf-8")
+    Path(a.out).write_text(render(recs), encoding="utf-8")
     return 0
 
 

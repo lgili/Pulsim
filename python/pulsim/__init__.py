@@ -3032,6 +3032,7 @@ def simulate(
                 observer_monitors=_monitor_flags(_plan.ticks),
                 observer_origins=_resume_tick_origins(resume_from,
                                                       len(_plan.ticks)),
+                observer_next_k=_resume_tick_next_k(resume_from, len(_plan.ticks)),
                 # None: the kernel stamps the Newton devices itself.
                 enable_nonlinear_refresh=enable_nonlinear_refresh,
                 max_newton_iterations=int(max_newton_iterations or 0),
@@ -3532,6 +3533,7 @@ def simulate(
                                         len(kwargs.get("tick_periods", ())))
         if _origins:   # a resume keeps the run's tick grid
             kwargs["tick_origins"] = _origins
+            kwargs["tick_next_ks"] = _resume_tick_next_k(resume_from, len(_origins))
         if _PWL_RECIPE.get() is not None:  # sweep(circuit, ...) replays it
             _PWL_RECIPE.get().update(
                 opts=opts, dt=dt, kwargs=dict(kwargs), mmc=bool(mmc_arms),
@@ -3763,6 +3765,15 @@ def _resume_tick_origins(resume_from, n: int) -> "list[float]":
         return []
     origins = list(getattr(resume_from, "tick_origin", None) or [])
     return [float(o) for o in origins] if len(origins) == n else []
+
+
+def _resume_tick_next_k(resume_from, n: int) -> "list[int]":
+    """The snapshot's first unfired tick index per source (as
+    _resume_tick_origins), else [] (the index is recomputed from t_start)."""
+    if resume_from is None or n == 0:
+        return []
+    ks = list(getattr(resume_from, "tick_next_k", None) or [])
+    return [int(k) for k in ks] if len(ks) == n else []
 
 
 def _off_tick_grid(cxx, t_start: float, origins=()) -> bool:
