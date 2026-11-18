@@ -157,15 +157,25 @@ public:
             if (why[k].empty()) why[k] = std::format("pin {} of \"{}\"", pin, dev);
             if (!u.empty()) unit[k] = u;
         };
+        // Magnetic nodes (winding / permeance pins, add-permeance-magnetic-
+        // domain): MMF in A. A winding joins an electrical and a magnetic
+        // pair by design (a gyrator); a semiconductor pin there is refused.
+        for (const Index nd : pool.flux_nodes()) {
+            typed("magnetic network", "mmf", nd, Domain::Magnetic, "A");
+        }
         for (const auto& m : pool.pmsm_mna_machines()) {
             const auto dev = g.branch_name(m.branch_id[0]);
             typed(dev, "omega", m.omega_node, Domain::Mechanical, "rad/s");
             typed(dev, "theta", m.theta_node, Domain::Mechanical, "rad");
         }
+        for (const auto& m : pool.induction_machines()) {   // add-mna-native-machines
+            typed(g.branch_name(m.branch_id[0]), "omega", m.omega_node,
+                  Domain::Mechanical, "rad/s");
+        }
         std::vector<Index> pins;
         for (Index bi = 0; bi < g.num_branches(); ++bi) {
             const auto kind = pool.kind_of(bi);
-            if (!electrical_only_(kind)) continue;
+            if (!electrical_only_(kind) || saturable_permeance_(pool, g, bi, kind)) continue;
             const auto& br = g.branch(bi);
             pins.assign({br.from, br.to});
             extra_pins_(pool, bi, kind, pins);
@@ -186,7 +196,7 @@ public:
         };
         for (Index bi = 0; bi < g.num_branches(); ++bi) {
             const auto kind = pool.kind_of(bi);
-            if (electrical_only_(kind)) continue;
+            if (electrical_only_(kind) && !saturable_permeance_(pool, g, bi, kind)) continue;
             const auto& br = g.branch(bi);
             pins.assign({br.from, br.to});
             extra_pins_(pool, bi, kind, pins);
@@ -429,6 +439,15 @@ private:
             default:
                 return false;
         }
+    }
+    /// A saturable permeance is a nonlinear capacitor on magnetic nodes
+    /// (add-permeance-magnetic-domain): domain-generic, not electrical.
+    [[nodiscard]] static bool saturable_permeance_(const pwl::DevicePool& pool,
+                                                   const topology::Graph& g, Index bi,
+                                                   pwl::DevicePool::StoredKind k) noexcept {
+        const auto& br = g.branch(bi);
+        return k == pwl::DevicePool::StoredKind::NonlinearCapacitor
+            && (pool.is_flux_node(br.from) || pool.is_flux_node(br.to));
     }
     [[nodiscard]] static constexpr std::string_view pin_name_(pwl::DevicePool::StoredKind k,
                                                               std::size_t p) noexcept {

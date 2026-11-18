@@ -133,8 +133,11 @@ def test_builder_refusals():
     b.node("t", "thermal")
     with pytest.raises(ValueError, match='already declared thermal, now mechanical'):
         b.node("t", "mechanical")
-    with pytest.raises(ValueError, match="magnetic domain is reserved"):
-        b.node("m", "magnetic")
+    b.node("m", "magnetic")   # the permeance domain: a flux node
+    with pytest.raises(ValueError, match="already magnetic"):
+        b.node("m", "thermal")
+    with pytest.raises(ValueError, match="already declared thermal, now magnetic"):
+        b.node("t", "magnetic")
     with pytest.raises(ValueError, match="ground is the reference"):
         b.node("gnd", "thermal")
     with pytest.raises(ValueError, match='unknown domain "fluid"'):
@@ -211,3 +214,52 @@ def test_an_infinite_parameter_bound_is_no_bound():
     assert pickle.loads(pickle.dumps(c)).value_hash() == c.value_hash()
     with pytest.raises(ValueError, match="hi must be a number or none"):
         b.param("y", 1.0, "", None, float("nan"))
+
+
+def _magnetic(diode_on_core=False, sat=False):
+    # A winding (gyrator) joins an electrical pair and a magnetic pair by
+    # design; the core's nodes are magnetic (MMF, A) from its pins.
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_resistor("R", "in", "e", 10.0)
+    b.add_winding("W", "e", "gnd", "m1", "gnd", 25)
+    if sat:
+        b.add_saturable_permeance("Ps", "m1", "m2", area=76e-6, length=72e-3,
+                                  mu_r=2000.0, B_sat=0.35)
+    else:
+        b.add_permeance("Pc", "m1", "m2", 2.6e-6)
+    b.add_air_gap("G", "m2", "gnd", 76e-6, 0.5e-3)
+    if diode_on_core:
+        b.add_diode("D", "m1", "gnd")
+    return b
+
+
+@pytest.mark.parametrize("sat", [False, True])
+def test_magnetic_nodes_are_the_magnetic_domain(sat):
+    c = _magnetic(sat=sat).build()
+    for n in ("m1", "m2"):
+        assert (c.node_domain(n), c.unit_of(n)) == ("magnetic", "A")
+    assert (c.node_domain("e"), c.unit_of("e")) == ("electrical", "V")
+    # a declared magnetic node is the same flux node (YAML round trip)
+    b = _magnetic(sat=sat)
+    b.node("m2", "magnetic")
+    c2 = b.build()
+    assert c2.structure_hash() == c.structure_hash()
+    assert p.Circuit.from_yaml(c.to_yaml()).node_domain("m1") == "magnetic"
+
+
+def test_a_semiconductor_pin_on_a_magnetic_node_is_refused_by_name():
+    with pytest.raises(ValueError, match=r'device "D": pin from \(electrical\) is '
+                                         r'connected to node "m1", which is magnetic'):
+        _magnetic(diode_on_core=True).build()
+
+
+def test_the_induction_machine_speed_pin_is_mechanical():
+    b = p.CircuitBuilder()
+    for i, n in enumerate(("ua", "ub", "uc")):
+        b.add_sine_voltage_source(f"V{i}", n, "gnd", 0.0, 100.0, 60.0, -2.0944 * i)
+    b.add_induction_machine_mna("M", "ua", "ub", "uc", "nn", "w", R_s=0.5, L_ls=2e-3,
+                                R_r=0.4, L_lr=2e-3, L_m=60e-3, pole_pairs=2, J=0.01)
+    c = b.build()
+    assert (c.node_domain("w"), c.unit_of("w")) == ("mechanical", "rad/s")
+    assert c.node_domain("ua") == "electrical"

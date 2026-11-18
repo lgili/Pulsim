@@ -412,20 +412,32 @@ public:
     /// `node("tj", ir::Domain::Thermal)`. A node never declared is
     /// electrical unless a typed pin implies otherwise (a PMSM's speed
     /// and angle pins are mechanical). Ground is the reference of every
-    /// domain and takes no tag; a second, different declaration and the
-    /// reserved magnetic domain are refused.
+    /// domain and takes no tag; a second, different declaration is
+    /// refused. Magnetic is the permeance domain: declaring it marks a
+    /// magnetic node (as a winding or permeance pin does), which is the
+    /// one record of it (YAML `magnetic_nodes`, the content hash).
     Index node(std::string_view name, ir::Domain d) {
-        if (d == ir::Domain::Magnetic) {
-            throw std::invalid_argument(std::format(
-                "node(\"{}\"): the magnetic domain is reserved "
-                "(add-permeance-magnetic-domain)", name));
-        }
         if (is_ground_alias_(name)) {
             throw std::invalid_argument(std::format(
                 "node(\"{}\"): ground is the reference of every domain and "
                 "takes no domain", name));
         }
         const Index i = resolve_node_(name);
+        const auto declared = node_domains_.find(i);
+        if (d == ir::Domain::Magnetic) {
+            if (declared != node_domains_.end()) {
+                throw std::invalid_argument(std::format(
+                    "node(\"{}\"): already declared {}, now magnetic", name,
+                    ir::domain_name(declared->second)));
+            }
+            pool_.mark_flux_node(i);
+            return i;
+        }
+        if (pool_.is_flux_node(i)) {
+            throw std::invalid_argument(std::format(
+                "node(\"{}\"): already magnetic (a winding / permeance pin "
+                "or a declaration), now {}", name, ir::domain_name(d)));
+        }
         const auto [it, fresh] = node_domains_.emplace(i, d);
         if (!fresh && it->second != d) {
             throw std::invalid_argument(std::format(

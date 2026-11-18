@@ -180,7 +180,7 @@ event where the signal jumps.
 | Limitation | Measured | Workaround |
 |---|---|---|
 | Result traces carry no unit. `Circuit.unit_of(node)` knows it (`degC` on a thermal node, `rad/s` / `rad` on a PMSM's speed / angle node); `SimulationResult` does not. | — | `circuit.unit_of(name)` when labelling a plot. |
-| Only declared tags and PMSM speed/angle pins set a domain. A DC machine's `omega_node`, the mechanical helpers and user-built mechanical networks stay electrical unless declared. | DC machine with `omega_node` declared mechanical: `node_domain` reads `mechanical`, samples bit-identical to the untagged run. | `builder.node(name, "mechanical")` before `build()`. |
+| Only declared tags, PMSM speed/angle pins, the induction machine's speed pin and the magnetic (winding / permeance) pins set a domain. A DC machine's `omega_node`, the mechanical helpers and user-built mechanical networks stay electrical unless declared. | DC machine with `omega_node` declared mechanical: `node_domain` reads `mechanical`, samples bit-identical to the untagged run. | `builder.node(name, "mechanical")` before `build()`. |
 
 ## Devices
 

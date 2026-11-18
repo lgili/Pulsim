@@ -81,8 +81,9 @@ struct Parameter {
 
 /// The physical domain of a node (group 9). All domains are solved in
 /// one MNA system; the tag drives the connection check, the preflight's
-/// per-domain findings and the unit a probe reports. `Magnetic` is
-/// reserved for add-permeance-magnetic-domain.
+/// per-domain findings and the unit a probe reports. `Magnetic` is the
+/// permeance domain (add-permeance-magnetic-domain): the pool's flux
+/// nodes, MMF in A.
 enum class Domain : std::uint8_t { Electrical, Thermal, Mechanical, Magnetic };
 
 inline constexpr std::array<std::string_view, 4> kDomainNames{
