@@ -284,3 +284,12 @@
     differs by up to the Newton tolerance (~1e-10 of a 12 V scale), so a
     platform failure of that gate is a stopping difference, not a law
     difference — check the iteration counts first.
+    The first `DEVICE_PATH_EVIDENCE.md` (2026-11-18): 261 reference cells
+    run on both paths, all with the same outcome and error, all with diff
+    0 — the reference set's switched circuits use PWL devices, so it
+    barely exercises the ported Newton laws; the laws' evidence is
+    `test_device_path_equivalence.py`, the path cells of
+    `test_engine_conformance.py` and `test_device_laws.cpp`. Its speed
+    column was taken at load 15 (A/A noise up to 17 %); the 3 % gate
+    (15.7) is open: the saturable-inductor stamp is ~1.4× the hand stamp
+    per call (17.8 vs 12.8 ns), 7–11 % on the inductor-only case.
