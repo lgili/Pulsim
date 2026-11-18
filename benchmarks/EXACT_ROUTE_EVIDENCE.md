@@ -9,123 +9,123 @@ Exact = `engine='exact'`; auto = today's default `engine='auto'` (trbdf2 on thes
 | engine | agree | disagree | error | refused |
 |---|---|---|---|---|
 | exact | 97 | 0 | 0 | 12 |
-| auto | 103 | 4 | 2 | 0 |
+| auto | 106 | 2 | 1 | 0 |
 
-Median wall-time ratio exact / auto where both ran and exact agrees: 6.36 over 97 circuits.
+Median wall-time ratio exact / auto where both ran and exact agrees: 5.69 over 97 circuits.
 
 ## Reference circuits
 
 | circuit | tol | exact | exact err | exact s | exact events | auto would route | auto | auto err | auto s | auto events |
 |---|---|---|---|---|---|---|---|---|---|---|
-| closed_loop/cl_boost_pi.yaml | 1e-03 | refused | step_observer: simulate(engine='dsed'): step_observer is/are not supported by the DSED engine yet — the r | 0.000435 |  |  | agree | 6.9e-05 | 0.0466 |  |
-| closed_loop/cl_buck_aggressive_pi.yaml | 1e-03 | refused | step_observer: simulate(engine='dsed'): step_observer is/are not supported by the DSED engine yet — the r | 0.000234 |  |  | agree | 8.1e-05 | 0.0115 |  |
-| closed_loop/cl_buck_pi.yaml | 1e-03 | refused | step_observer: simulate(engine='dsed'): step_observer is/are not supported by the DSED engine yet — the r | 0.000296 |  |  | agree | 8.5e-05 | 0.0195 |  |
-| closed_loop/ll14_buck_closed_loop.yaml | 1e-03 | refused | step_observer: simulate(engine='dsed'): step_observer is/are not supported by the DSED engine yet — the r | 0.000419 |  |  | disagree | 0.21 | 0.116 |  |
-| closed_loop/ll15_boost_closed_loop.yaml | 1e-03 | refused | step_observer: simulate(engine='dsed'): step_observer is/are not supported by the DSED engine yet — the r | 0.000368 |  |  | disagree | 0.0012 | 0.269 |  |
-| closed_loop/ll16_flyback_closed_loop.yaml | 1e-03 | refused | step_observer: simulate(engine='dsed'): step_observer is/are not supported by the DSED engine yet — the r | 0.000405 |  |  | error | SimulationAborted: run_transient_trbdf2: Newton failed at t = 0.000028 with h already at h_min — solve_with_n | 0.00313 |  |
-| diodes/back_to_back_diodes_sine.yaml | 1e-03 | agree | 1.1e-05 | 0.067 | 5 | True | agree | 0 | 0.00129 |  |
-| diodes/diode_bridge_rectifier.yaml | 1e-03 | agree | 6.6e-06 | 0.0367 | 19 | True | agree | 3.2e-05 | 0.000868 |  |
-| diodes/diode_clamp_overvoltage.yaml | 1e-03 | agree | 6e-12 | 0.0114 | 2 | True | agree | 0 | 0.00128 |  |
-| diodes/diode_half_wave_rl_load.yaml | 1e-03 | agree | 6.9e-06 | 0.058 | 5 | True | agree | 1.6e-05 | 0.000794 |  |
-| diodes/diode_rectifier.yaml | 1e-03 | agree | 1.3e-05 | 0.0337 | 199 | True | agree | 0.00018 | 0.00232 |  |
-| diodes/half_wave_rectifier_sine.yaml | 1e-03 | agree | 4.6e-06 | 0.0267 | 9 | True | agree | 2.4e-05 | 0.00129 |  |
-| diodes/voltage_doubler.yaml | 1e-03 | agree | 5.5e-07 | 0.0208 | 19 | True | agree | 5e-06 | 0.00161 |  |
-| linear/bridge_resistive_pure.yaml | 1e-03 | agree | 1.3e-13 | 0.00109 | 0 | True | agree | 0 | 0.000343 |  |
-| linear/capacitor_natural_discharge.yaml | 1e-03 | agree | 6.1e-07 | 0.00638 | 0 | True | agree | 5.6e-06 | 0.000679 |  |
-| linear/current_divider_3way.yaml | 1e-03 | agree | 0 | 0.00104 | 0 | True | agree | 0 | 0.000374 |  |
-| linear/current_source_rc.yaml | 1e-03 | agree | 3.6e-10 | 0.0591 | 0 | True | agree | 0 | 0.000784 |  |
-| linear/current_source_rl_step.yaml | 1e-03 | agree | 6e-07 | 0.00113 | 0 | True | agree | 2.1e-06 | 0.000932 |  |
-| linear/lc_low_pass_sine.yaml | 1e-03 | agree | 1.1e-06 | 0.0486 | 0 | True | agree | 0.00012 | 0.00333 |  |
-| linear/ll01_resistive_divider_dc.yaml | 1e-03 | agree | 1.1e-09 | 0.0291 | 0 | True | agree | 0 | 0.000464 |  |
-| linear/ll02_rc_pulse_charge.yaml | 1e-03 | agree | 4.5e-07 | 0.0807 | 0 | True | agree | 1.5e-07 | 0.000462 |  |
-| linear/ll03_rl_step.yaml | 1e-03 | agree | 5.6e-07 | 0.097 | 0 | True | agree | 6.4e-06 | 0.000488 |  |
-| linear/pulse_voltage_rl.yaml | 1e-03 | agree | 5.1e-06 | 0.00959 | 0 | True | agree | 3e-05 | 0.00075 |  |
-| linear/rc_dc.yaml | 1e-03 | agree | 4.3e-07 | 0.0269 | 0 | True | agree | 6.8e-07 | 0.000424 |  |
-| linear/rc_step.yaml | 1e-03 | agree | 4.3e-07 | 0.0662 | 0 | True | agree | 6.8e-07 | 0.000791 |  |
-| linear/rl_natural_response.yaml | 1e-03 | agree | 6e-07 | 0.00117 | 0 | True | agree | 6.7e-06 | 0.000333 |  |
-| linear/rl_step.yaml | 1e-03 | agree | 5e-07 | 0.0161 | 0 | True | agree | 1.8e-06 | 0.000398 |  |
-| linear/rlc_series_resonant.yaml | 1e-03 | agree | 3.4e-06 | 0.0812 | 0 | True | agree | 0.00035 | 0.00373 |  |
-| linear/sine_voltage_rc.yaml | 1e-03 | agree | 3.1e-06 | 0.0237 | 0 | True | agree | 0.00011 | 0.00132 |  |
-| linear/two_stage_rc_lowpass.yaml | 1e-03 | agree | 4.6e-07 | 0.0102 | 0 | True | agree | 3.4e-06 | 0.000449 |  |
-| linear/voltage_divider_3stage.yaml | 1e-03 | agree | 0 | 0.00103 | 0 | True | agree | 0 | 0.000308 |  |
-| magnetics/core_loss_steinmetz_sine.yaml | 1e-03 | agree | 3.5e-06 | 0.0134 | 0 | True | agree | 0.00012 | 0.00137 |  |
-| magnetics/coupled_inductor_step.yaml | 1e-03 | agree | 6.7e-06 | 0.0153 | 0 | True | agree | 3.8e-06 | 0.000582 |  |
-| magnetics/half_bridge_transformer_dc.yaml | 1e-03 | agree | 3.4e-06 | 0.0888 | 258 | True | agree | 2.1e-05 | 0.0251 |  |
-| magnetics/inductor_chain_step.yaml | 1e-03 | agree | 4.9e-07 | 0.00592 | 0 | True | agree | 9.1e-07 | 0.000587 |  |
-| magnetics/transformer_leakage.yaml | 1e-03 | agree | 3.1e-05 | 0.00542 | 0 | True | agree | 0.00023 | 0.00343 |  |
-| magnetics/transformer_step_up.yaml | 1e-03 | agree | 5.1e-06 | 0.0245 | 0 | True | agree | 0 | 0.00043 |  |
-| motors/motor_dc_brush_step_load.yaml | 1e-03 | agree | 3.6e-07 | 0.0416 | 0 | True | agree | 6.1e-06 | 0.000461 |  |
-| motors/motor_induction_locked_rotor.yaml | 1e-03 | agree | 1.6e-06 | 0.0844 | 0 | True | agree | 5.1e-05 | 0.00155 |  |
-| motors/motor_pmsm_dq_open_loop.yaml | 1e-03 | agree | 4.5e-07 | 0.0807 | 0 | True | agree | 6.5e-06 | 0.000583 |  |
-| resonance/bode_rlc_low_pass.yaml | 1e-03 | agree | 0 | 0.00519 | 0 | True | agree | 0 | 0.000392 |  |
-| resonance/driven_lc_series_resonance.yaml | 1e-03 | agree | 2.1e-06 | 0.145 | 0 | True | agree | 0.00022 | 0.00702 |  |
-| resonance/lc_resonant_tank.yaml | 1e-03 | agree | 4.3e-06 | 0.00988 | 0 | True | agree | 5.3e-05 | 0.000871 |  |
-| resonance/ll04_rlc_underdamped.yaml | 1e-03 | agree | 7.3e-07 | 0.118 | 0 | True | agree | 3e-05 | 0.00138 |  |
-| resonance/rl_high_pass_sine.yaml | 1e-03 | agree | 7.5e-06 | 0.00376 | 0 | True | agree | 7.6e-05 | 0.00112 |  |
-| resonance/rlc_overdamped_step.yaml | 1e-03 | agree | 5.6e-07 | 0.0159 | 0 | True | agree | 5.8e-06 | 0.000484 |  |
-| resonance/rlc_parallel_step.yaml | 1e-03 | agree | 1e-05 | 0.016 | 0 | True | agree | 1.6e-05 | 0.000466 |  |
-| resonance/rlc_step.yaml | 1e-03 | agree | 1.9e-07 | 0.0711 | 0 | True | agree | 1.3e-05 | 0.000465 |  |
-| stress/high_q_rlc_ringdown.yaml | 1e-03 | agree | 5.6e-05 | 0.0618 | 0 | True | disagree | 0.0057 | 0.0027 |  |
-| stress/periodic_rc_pwm.yaml | 1e-03 | agree | 4.4e-07 | 0.00364 | 0 | True | agree | 2e-07 | 0.000385 |  |
-| stress/stiff_rc_high_freq_switching.yaml | 1e-03 | agree | 1.1e-05 | 0.00362 | 499 | True | agree | 1.4e-05 | 0.00635 |  |
-| stress/stiff_rlc.yaml | 1e-03 | agree | 3.6e-09 | 0.00526 | 0 | True | agree | 0 | 0.000422 |  |
-| stress/stiff_two_timescale_rc.yaml | 1e-03 | agree | 4.6e-07 | 0.117 | 0 | True | agree | 7.8e-07 | 0.000486 |  |
-| switching/basic/chopper_with_rc_snubber.yaml | 1e-03 | agree | 2.9e-05 | 0.0202 | 21 | True | agree | 3.8e-05 | 0.0017 |  |
-| switching/basic/mosfet_nmos_dc.yaml | 1e-03 | refused | : engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it would run a d | 0.000213 |  |  | agree | 0 | 0.000876 |  |
-| switching/basic/pwm_voltage_rc.yaml | 1e-03 | agree | 1.1e-07 | 0.0429 | 0 | True | agree | 9e-09 | 0.00151 |  |
-| switching/basic/pwm_voltage_rl_filter.yaml | 1e-03 | agree | 2.3e-06 | 0.0265 | 0 | True | agree | 6.5e-05 | 0.000486 |  |
-| switching/basic/snubber_rc.yaml | 1e-03 | agree | 1.7e-07 | 0.009 | 0 | True | agree | 1.7e-07 | 0.000362 |  |
-| switching/basic/vcswitch_resistor.yaml | 1e-03 | agree | 3.2e-06 | 0.000677 | 4 | True | agree | 0 | 0.000728 |  |
-| switching/boost/boost_classic.yaml | 1e-03 | agree | 6.9e-07 | 0.00897 | 191 | True | agree | 9.5e-06 | 0.00219 |  |
-| switching/boost/boost_pfc_open_loop.yaml | 1e-03 | agree | 4.2e-07 | 0.242 | 3125 | True | agree | 1.7e-07 | 0.0552 |  |
-| switching/boost/boost_switching_complex.yaml | 1e-03 | agree | 3e-05 | 0.00468 | 139 | True | agree | 1.1e-05 | 0.000996 |  |
-| switching/boost/cascaded_boost_buck.yaml | 1e-03 | agree | 2.2e-06 | 0.0334 | 478 | True | agree | 5.9e-05 | 0.00786 |  |
-| switching/boost/ll07_boost_vcswitch.yaml | 1e-03 | agree | 0.00018 | 0.0142 | 399 | True | agree | 0.00012 | 0.0022 |  |
-| switching/boost/ll12_pfc_boost_continuous.yaml | 1e-03 | refused | : engine 'dsed' cannot simulate branch 'D_rec1', a ShockleyDiode (NewtonStatic): it would ru | 0.000394 |  |  | agree | 0.00012 | 0.0561 |  |
-| switching/boost/synchronous_boost.yaml | 1e-03 | agree | 3.1e-07 | 0.0137 | 499 | True | agree | 8.2e-08 | 0.00261 |  |
-| switching/boost/textbook_erickson_boost_ccm.yaml | 1e-03 | agree | 6.9e-07 | 0.0146 | 191 | True | agree | 9.5e-06 | 0.00218 |  |
-| switching/boost/two_phase_interleaved_boost.yaml | 1e-03 | agree | 6.6e-07 | 0.0316 | 491 | True | agree | 5.5e-06 | 0.00557 |  |
-| switching/buck/buck_dcm.yaml | 1e-03 | agree | 6e-07 | 0.00539 | 113 | True | agree | 7.7e-06 | 0.00165 |  |
-| switching/buck/buck_hard_switching_reference.yaml | 1e-03 | agree | 8.3e-07 | 0.00323 | 64 | True | agree | 2.3e-06 | 0.000996 |  |
-| switching/buck/buck_mosfet_nonlinear.yaml | 1e-03 | refused | : engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it would run a d | 0.000136 |  |  | agree | 5.1e-07 | 0.00496 |  |
-| switching/buck/buck_switching.yaml | 1e-03 | agree | 1e-06 | 0.00257 | 42 | True | agree | 1.4e-06 | 0.000857 |  |
-| switching/buck/buck_with_current_sense.yaml | 1e-03 | agree | 1.3e-06 | 0.00178 | 49 | True | agree | 3.2e-06 | 0.00068 |  |
-| switching/buck/cascaded_buck_buck.yaml | 1e-03 | agree | 1.5e-06 | 0.0038 | 79 | True | agree | 1.4e-05 | 0.00113 |  |
-| switching/buck/high_freq_gan_buck.yaml | 1e-03 | agree | 5.1e-06 | 0.0111 | 399 | True | agree | 8.5e-05 | 0.0105 |  |
-| switching/buck/ll06_buck_vcswitch.yaml | 1e-03 | agree | 0.00017 | 0.0123 | 286 | True | agree | 7.7e-05 | 0.00495 |  |
-| switching/buck/ll08_buck_mosfet.yaml | 1e-03 | refused | : engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it would run a d | 0.000266 |  |  | agree | 0.00011 | 0.0158 |  |
-| switching/buck/sync_buck_500khz.yaml | 1e-03 | agree | 2e-06 | 0.0032 | 199 | True | agree | 1.7e-05 | 0.00113 |  |
-| switching/buck/synchronous_buck.yaml | 1e-03 | agree | 1.3e-06 | 0.00175 | 49 | True | agree | 3.1e-06 | 0.000614 |  |
-| switching/buck/textbook_erickson_buck_ccm.yaml | 1e-03 | agree | 4.3e-07 | 0.0297 | 739 | True | agree | 9.9e-06 | 0.00782 |  |
-| switching/buck/triple_sync_buck.yaml | 1e-03 | agree | 1.3e-06 | 0.00347 | 99 | True | agree | 3.2e-06 | 0.00135 |  |
-| switching/buck_boost/bidirectional_buck_boost.yaml | 1e-03 | agree | 1.3e-06 | 0.00195 | 49 | True | agree | 3.2e-06 | 0.000799 |  |
-| switching/buck_boost/buck_boost.yaml | 1e-03 | agree | 1.1e-06 | 0.00884 | 193 | True | agree | 8e-06 | 0.00214 |  |
-| switching/buck_boost/cuk_converter.yaml | 1e-03 | agree | 2.5e-06 | 0.0147 | 286 | True | agree | 9.3e-05 | 0.00425 |  |
-| switching/buck_boost/sepic.yaml | 1e-03 | agree | 1.5e-06 | 0.0203 | 290 | True | agree | 3e-05 | 0.00625 |  |
-| switching/inverter/half_bridge_inverter.yaml | 1e-03 | agree | 1.2e-06 | 0.00571 | 199 | True | agree | 9.1e-07 | 0.00113 |  |
-| switching/inverter/half_bridge_inverter_lc.yaml | 1e-03 | agree | 3.9e-06 | 0.0421 | 99 | True | agree | 0.0003 | 0.0109 |  |
-| switching/inverter/half_bridge_lc_filter.yaml | 1e-03 | agree | 1.5e-06 | 0.00203 | 59 | True | agree | 5e-06 | 0.000646 |  |
-| switching/inverter/lcc_resonant_inverter.yaml | 1e-03 | agree | 8.8e-05 | 0.00292 | 39 | True | agree | 8.4e-05 | 0.00471 |  |
-| switching/inverter/ll09_half_bridge_inverter_leg.yaml | 1e-03 | agree | 0.00017 | 0.00755 | 239 | True | agree | 4.3e-05 | 0.00856 |  |
-| switching/inverter/ll10_full_bridge_inverter_lc.yaml | 1e-03 | agree | 0.00013 | 0.0113 | 119 | True | agree | 9.2e-05 | 0.00104 |  |
-| switching/isolated/active_clamp_forward.yaml | 1e-03 | agree | 1.2e-06 | 0.0762 | 679 | True | agree | 0.00012 | 0.0572 |  |
-| switching/isolated/dual_active_bridge.yaml | 1e-03 | agree | 1.9e-06 | 0.0039 | 159 | True | agree | 3.5e-05 | 0.00185 |  |
-| switching/isolated/flyback_converter.yaml | 1e-03 | agree | 2.7e-06 | 0.0316 | 199 | True | agree | 4.3e-05 | 0.0211 |  |
-| switching/isolated/forward_converter.yaml | 1e-03 | agree | 1.1e-06 | 0.0565 | 298 | True | agree | 2.2e-05 | 0.0351 |  |
-| switching/isolated/full_bridge_dc.yaml | 1e-03 | agree | 2.7e-05 | 0.0109 | 162 | True | agree | 0.00014 | 0.00526 |  |
-| switching/isolated/ll11_llc_resonant_converter.yaml | 1e-03 | refused | : engine 'dsed' cannot simulate branch 'D1', a ShockleyDiode (NewtonStatic): it would run a  | 0.000284 |  |  | error | SimulationAborted: run_transient_trbdf2: Newton failed at t = 0.000005 with h already at h_min — solve_with_n | 0.001 |  |
-| switching/isolated/ll13_active_clamp_forward.yaml | 1e-03 | refused | : engine 'dsed' cannot simulate branch 'D_fwd', a ShockleyDiode (NewtonStatic): it would run | 0.00026 |  |  | disagree | 0.0013 | 0.0356 |  |
-| switching/isolated/synchronous_flyback.yaml | 1e-03 | agree | 1e-06 | 0.0153 | 199 | True | agree | 9.1e-06 | 0.0257 |  |
-| switching/multilevel/cascaded_h_bridge_5level.yaml | 1e-03 | agree | 5.7e-05 | 0.00467 | 19 | True | agree | 0 | 0.00145 |  |
-| switching/multilevel/flying_capacitor_3level.yaml | 1e-03 | agree | 3.7e-05 | 0.00336 | 79 | True | agree | 6.8e-05 | 0.000983 |  |
-| switching/multilevel/mmc_4cell_chain.yaml | 1e-03 | agree | 5.7e-05 | 0.00365 | 19 | True | agree | 0 | 0.00171 |  |
-| switching/multilevel/npc_three_level_halfbridge.yaml | 1e-03 | agree | 5.1e-06 | 0.00771 | 59 | True | agree | 7.9e-06 | 0.00305 |  |
-| switching/multilevel/t_type_3level_halfbridge.yaml | 1e-03 | agree | 4.2e-05 | 0.00271 | 59 | True | agree | 0.00011 | 0.00184 |  |
-| thermal/electrothermal_resistor_self_heating.yaml | 1e-03 | agree | 0 | 0.00166 | 0 | True | agree | 0 | 0.000261 |  |
-| thermal/long_run_drift_buck.yaml | 1e-03 | agree | 1.1e-05 | 0.102 | 19999 | True | agree | 2.6e-06 | 0.109 |  |
-| three_phase/interleaved_buck_3ph.yaml | 1e-03 | agree | 2.2e-07 | 0.0311 | 269 | True | agree | 6.6e-08 | 0.00258 |  |
-| three_phase/three_phase_balanced_rl_load.yaml | 1e-03 | agree | 6e-07 | 0.0812 | 0 | True | agree | 4.2e-05 | 0.0012 |  |
-| three_phase/three_phase_diode_rectifier.yaml | 1e-03 | agree | 0.00034 | 0.0914 | 96 | True | agree | 5.5e-05 | 0.00352 |  |
+| closed_loop/cl_boost_pi.yaml | 1e-03 | refused | step_observer: simulate(engine='dsed'): step_observer is/are not supported by the DSED engine yet — the r | 0.00054 |  |  | agree | 1.3e-06 | 0.0699 |  |
+| closed_loop/cl_buck_aggressive_pi.yaml | 1e-03 | refused | step_observer: simulate(engine='dsed'): step_observer is/are not supported by the DSED engine yet — the r | 0.000928 |  |  | agree | 3.7e-05 | 0.0129 |  |
+| closed_loop/cl_buck_pi.yaml | 1e-03 | refused | step_observer: simulate(engine='dsed'): step_observer is/are not supported by the DSED engine yet — the r | 0.000284 |  |  | agree | 1.9e-05 | 0.0292 |  |
+| closed_loop/ll14_buck_closed_loop.yaml | 1e-03 | refused | step_observer: simulate(engine='dsed'): step_observer is/are not supported by the DSED engine yet — the r | 0.000359 |  |  | agree | 0.00055 | 0.148 |  |
+| closed_loop/ll15_boost_closed_loop.yaml | 1e-03 | refused | step_observer: simulate(engine='dsed'): step_observer is/are not supported by the DSED engine yet — the r | 0.000387 |  |  | agree | 0.00026 | 0.409 |  |
+| closed_loop/ll16_flyback_closed_loop.yaml | 1e-03 | refused | step_observer: simulate(engine='dsed'): step_observer is/are not supported by the DSED engine yet — the r | 0.000263 |  |  | agree | 0.00036 | 0.0518 |  |
+| diodes/back_to_back_diodes_sine.yaml | 1e-03 | agree | 1.1e-05 | 0.0651 | 5 | True | agree | 0 | 0.00168 |  |
+| diodes/diode_bridge_rectifier.yaml | 1e-03 | agree | 6.6e-06 | 0.0395 | 19 | True | agree | 3.2e-05 | 0.00182 |  |
+| diodes/diode_clamp_overvoltage.yaml | 1e-03 | agree | 6e-12 | 0.0215 | 2 | True | agree | 0 | 0.000646 |  |
+| diodes/diode_half_wave_rl_load.yaml | 1e-03 | agree | 6.9e-06 | 0.0521 | 5 | True | agree | 1.6e-05 | 0.000802 |  |
+| diodes/diode_rectifier.yaml | 1e-03 | agree | 1.3e-05 | 0.0368 | 199 | True | agree | 0.00018 | 0.0037 |  |
+| diodes/half_wave_rectifier_sine.yaml | 1e-03 | agree | 4.6e-06 | 0.0167 | 9 | True | agree | 2.4e-05 | 0.00129 |  |
+| diodes/voltage_doubler.yaml | 1e-03 | agree | 5.8e-07 | 0.0223 | 19 | True | agree | 5.1e-06 | 0.0033 |  |
+| linear/bridge_resistive_pure.yaml | 1e-03 | agree | 1.3e-13 | 0.000691 | 0 | True | agree | 0 | 0.000809 |  |
+| linear/capacitor_natural_discharge.yaml | 1e-03 | agree | 6.1e-07 | 0.00768 | 0 | True | agree | 5.6e-06 | 0.000464 |  |
+| linear/current_divider_3way.yaml | 1e-03 | agree | 0 | 0.00136 | 0 | True | agree | 0 | 0.000779 |  |
+| linear/current_source_rc.yaml | 1e-03 | agree | 3.6e-10 | 0.0364 | 0 | True | agree | 0 | 0.00118 |  |
+| linear/current_source_rl_step.yaml | 1e-03 | agree | 6e-07 | 0.000805 | 0 | True | agree | 2.1e-06 | 0.000295 |  |
+| linear/lc_low_pass_sine.yaml | 1e-03 | agree | 1.1e-06 | 0.0802 | 0 | True | agree | 0.00012 | 0.00232 |  |
+| linear/ll01_resistive_divider_dc.yaml | 1e-03 | agree | 1.1e-09 | 0.0173 | 0 | True | agree | 0 | 0.00269 |  |
+| linear/ll02_rc_pulse_charge.yaml | 1e-03 | agree | 4.5e-07 | 0.0597 | 0 | True | agree | 1.5e-07 | 0.000961 |  |
+| linear/ll03_rl_step.yaml | 1e-03 | agree | 5.6e-07 | 0.0993 | 0 | True | agree | 6.4e-06 | 0.000936 |  |
+| linear/pulse_voltage_rl.yaml | 1e-03 | agree | 5.1e-06 | 0.00607 | 0 | True | agree | 3e-05 | 0.000466 |  |
+| linear/rc_dc.yaml | 1e-03 | agree | 4.3e-07 | 0.0306 | 0 | True | agree | 6.8e-07 | 0.000483 |  |
+| linear/rc_step.yaml | 1e-03 | agree | 4.3e-07 | 0.0462 | 0 | True | agree | 6.8e-07 | 0.000543 |  |
+| linear/rl_natural_response.yaml | 1e-03 | agree | 6e-07 | 0.000749 | 0 | True | agree | 6.7e-06 | 0.000287 |  |
+| linear/rl_step.yaml | 1e-03 | agree | 5e-07 | 0.00663 | 0 | True | agree | 1.8e-06 | 0.00042 |  |
+| linear/rlc_series_resonant.yaml | 1e-03 | agree | 3.4e-06 | 0.0636 | 0 | True | agree | 0.00035 | 0.00268 |  |
+| linear/sine_voltage_rc.yaml | 1e-03 | agree | 3.1e-06 | 0.0226 | 0 | True | agree | 0.00011 | 0.00144 |  |
+| linear/two_stage_rc_lowpass.yaml | 1e-03 | agree | 4.6e-07 | 0.0073 | 0 | True | agree | 3.4e-06 | 0.000465 |  |
+| linear/voltage_divider_3stage.yaml | 1e-03 | agree | 0 | 0.000666 | 0 | True | agree | 0 | 0.000316 |  |
+| magnetics/core_loss_steinmetz_sine.yaml | 1e-03 | agree | 3.5e-06 | 0.00647 | 0 | True | agree | 0.00012 | 0.00128 |  |
+| magnetics/coupled_inductor_step.yaml | 1e-03 | agree | 6.7e-06 | 0.00746 | 0 | True | agree | 3.8e-06 | 0.00115 |  |
+| magnetics/half_bridge_transformer_dc.yaml | 1e-03 | agree | 3.4e-06 | 0.0735 | 258 | True | agree | 2.1e-05 | 0.0503 |  |
+| magnetics/inductor_chain_step.yaml | 1e-03 | agree | 4.9e-07 | 0.0029 | 0 | True | agree | 9.1e-07 | 0.000463 |  |
+| magnetics/transformer_leakage.yaml | 1e-03 | agree | 3.1e-05 | 0.0106 | 0 | True | agree | 0.00023 | 0.00202 |  |
+| magnetics/transformer_step_up.yaml | 1e-03 | agree | 5.1e-06 | 0.014 | 0 | True | agree | 0 | 0.000894 |  |
+| motors/motor_dc_brush_step_load.yaml | 1e-03 | agree | 3.6e-07 | 0.0343 | 0 | True | agree | 6.1e-06 | 0.00046 |  |
+| motors/motor_induction_locked_rotor.yaml | 1e-03 | agree | 1.6e-06 | 0.0996 | 0 | True | agree | 5.1e-05 | 0.000857 |  |
+| motors/motor_pmsm_dq_open_loop.yaml | 1e-03 | agree | 4.5e-07 | 0.0787 | 0 | True | agree | 6.5e-06 | 0.000549 |  |
+| resonance/bode_rlc_low_pass.yaml | 1e-03 | agree | 0 | 0.00383 | 0 | True | agree | 0 | 0.000394 |  |
+| resonance/driven_lc_series_resonance.yaml | 1e-03 | agree | 2.1e-06 | 0.149 | 0 | True | agree | 0.00022 | 0.00661 |  |
+| resonance/lc_resonant_tank.yaml | 1e-03 | agree | 4.3e-06 | 0.00449 | 0 | True | agree | 5.3e-05 | 0.000432 |  |
+| resonance/ll04_rlc_underdamped.yaml | 1e-03 | agree | 7.3e-07 | 0.164 | 0 | True | agree | 3e-05 | 0.00112 |  |
+| resonance/rl_high_pass_sine.yaml | 1e-03 | agree | 7.5e-06 | 0.0028 | 0 | True | agree | 7.6e-05 | 0.000602 |  |
+| resonance/rlc_overdamped_step.yaml | 1e-03 | agree | 5.6e-07 | 0.0164 | 0 | True | agree | 5.8e-06 | 0.000599 |  |
+| resonance/rlc_parallel_step.yaml | 1e-03 | agree | 1e-05 | 0.00743 | 0 | True | agree | 1.6e-05 | 0.000497 |  |
+| resonance/rlc_step.yaml | 1e-03 | agree | 1.9e-07 | 0.0932 | 0 | True | agree | 1.3e-05 | 0.00146 |  |
+| stress/high_q_rlc_ringdown.yaml | 1e-03 | agree | 5.6e-05 | 0.0732 | 0 | True | disagree | 0.0057 | 0.00407 |  |
+| stress/periodic_rc_pwm.yaml | 1e-03 | agree | 4.4e-07 | 0.0026 | 0 | True | agree | 2e-07 | 0.000454 |  |
+| stress/stiff_rc_high_freq_switching.yaml | 1e-03 | agree | 1.1e-05 | 0.0111 | 499 | True | agree | 1.4e-05 | 0.00255 |  |
+| stress/stiff_rlc.yaml | 1e-03 | agree | 3.6e-09 | 0.00374 | 0 | True | agree | 0 | 0.000437 |  |
+| stress/stiff_two_timescale_rc.yaml | 1e-03 | agree | 4.6e-07 | 0.168 | 0 | True | agree | 7.8e-07 | 0.000519 |  |
+| switching/basic/chopper_with_rc_snubber.yaml | 1e-03 | agree | 2.9e-05 | 0.0342 | 21 | True | agree | 3.8e-05 | 0.00285 |  |
+| switching/basic/mosfet_nmos_dc.yaml | 1e-03 | refused | : engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it would run a d | 0.000588 |  |  | agree | 0 | 0.002 |  |
+| switching/basic/pwm_voltage_rc.yaml | 1e-03 | agree | 1.1e-07 | 0.0798 | 0 | True | agree | 9e-09 | 0.00362 |  |
+| switching/basic/pwm_voltage_rl_filter.yaml | 1e-03 | agree | 2.3e-06 | 0.0209 | 0 | True | agree | 6.5e-05 | 0.000531 |  |
+| switching/basic/snubber_rc.yaml | 1e-03 | agree | 1.7e-07 | 0.00625 | 0 | True | agree | 1.7e-07 | 0.000435 |  |
+| switching/basic/vcswitch_resistor.yaml | 1e-03 | agree | 3.2e-06 | 0.000528 | 4 | True | agree | 0 | 0.000374 |  |
+| switching/boost/boost_classic.yaml | 1e-03 | agree | 7e-07 | 0.0158 | 191 | True | agree | 9.5e-06 | 0.00683 |  |
+| switching/boost/boost_pfc_open_loop.yaml | 1e-03 | agree | 4.2e-07 | 0.462 | 3125 | True | agree | 1.7e-07 | 0.0859 |  |
+| switching/boost/boost_switching_complex.yaml | 1e-03 | agree | 3e-05 | 0.00389 | 139 | True | agree | 1.1e-05 | 0.00296 |  |
+| switching/boost/cascaded_boost_buck.yaml | 1e-03 | agree | 2.2e-06 | 0.046 | 478 | True | agree | 5.9e-05 | 0.0133 |  |
+| switching/boost/ll07_boost_vcswitch.yaml | 1e-03 | agree | 0.00018 | 0.0236 | 399 | True | agree | 0.00012 | 0.00238 |  |
+| switching/boost/ll12_pfc_boost_continuous.yaml | 1e-03 | refused | : engine 'dsed' cannot simulate branch 'D_rec1', a ShockleyDiode (NewtonStatic): it would ru | 0.000366 |  |  | agree | 0.00012 | 0.0823 |  |
+| switching/boost/synchronous_boost.yaml | 1e-03 | agree | 3.1e-07 | 0.0269 | 499 | True | agree | 8.2e-08 | 0.0078 |  |
+| switching/boost/textbook_erickson_boost_ccm.yaml | 1e-03 | agree | 7e-07 | 0.025 | 191 | True | agree | 9.5e-06 | 0.00394 |  |
+| switching/boost/two_phase_interleaved_boost.yaml | 1e-03 | agree | 6.6e-07 | 0.0407 | 491 | True | agree | 5.6e-06 | 0.00896 |  |
+| switching/buck/buck_dcm.yaml | 1e-03 | agree | 6e-07 | 0.00572 | 113 | True | agree | 7.7e-06 | 0.00501 |  |
+| switching/buck/buck_hard_switching_reference.yaml | 1e-03 | agree | 8.3e-07 | 0.00287 | 64 | True | agree | 2.3e-06 | 0.00546 |  |
+| switching/buck/buck_mosfet_nonlinear.yaml | 1e-03 | refused | : engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it would run a d | 0.000156 |  |  | agree | 5.1e-07 | 0.00841 |  |
+| switching/buck/buck_switching.yaml | 1e-03 | agree | 1e-06 | 0.00186 | 42 | True | agree | 1.4e-06 | 0.000732 |  |
+| switching/buck/buck_with_current_sense.yaml | 1e-03 | agree | 1.3e-06 | 0.00154 | 49 | True | agree | 3.2e-06 | 0.00064 |  |
+| switching/buck/cascaded_buck_buck.yaml | 1e-03 | agree | 1.5e-06 | 0.0266 | 79 | True | agree | 1.4e-05 | 0.00112 |  |
+| switching/buck/high_freq_gan_buck.yaml | 1e-03 | agree | 5.1e-06 | 0.0227 | 399 | True | agree | 8.5e-05 | 0.00508 |  |
+| switching/buck/ll06_buck_vcswitch.yaml | 1e-03 | agree | 0.00017 | 0.0301 | 286 | True | agree | 8.2e-05 | 0.0117 |  |
+| switching/buck/ll08_buck_mosfet.yaml | 1e-03 | refused | : engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it would run a d | 0.00029 |  |  | agree | 0.00011 | 0.0202 |  |
+| switching/buck/sync_buck_500khz.yaml | 1e-03 | agree | 2e-06 | 0.003 | 199 | True | agree | 1.7e-05 | 0.00234 |  |
+| switching/buck/synchronous_buck.yaml | 1e-03 | agree | 1.3e-06 | 0.00156 | 49 | True | agree | 3.1e-06 | 0.000629 |  |
+| switching/buck/textbook_erickson_buck_ccm.yaml | 1e-03 | agree | 4.3e-07 | 0.0369 | 739 | True | agree | 9.9e-06 | 0.0131 |  |
+| switching/buck/triple_sync_buck.yaml | 1e-03 | agree | 1.3e-06 | 0.00762 | 99 | True | agree | 3.2e-06 | 0.00234 |  |
+| switching/buck_boost/bidirectional_buck_boost.yaml | 1e-03 | agree | 1.3e-06 | 0.00181 | 49 | True | agree | 3.2e-06 | 0.000829 |  |
+| switching/buck_boost/buck_boost.yaml | 1e-03 | agree | 1.1e-06 | 0.0217 | 193 | True | agree | 8e-06 | 0.00382 |  |
+| switching/buck_boost/cuk_converter.yaml | 1e-03 | agree | 2.5e-06 | 0.0164 | 286 | True | agree | 9.3e-05 | 0.00488 |  |
+| switching/buck_boost/sepic.yaml | 1e-03 | agree | 1.5e-06 | 0.0369 | 290 | True | agree | 3e-05 | 0.0116 |  |
+| switching/inverter/half_bridge_inverter.yaml | 1e-03 | agree | 1.2e-06 | 0.0054 | 199 | True | agree | 9.1e-07 | 0.00262 |  |
+| switching/inverter/half_bridge_inverter_lc.yaml | 1e-03 | agree | 3.9e-06 | 0.0636 | 99 | True | agree | 0.0003 | 0.014 |  |
+| switching/inverter/half_bridge_lc_filter.yaml | 1e-03 | agree | 1.5e-06 | 0.00197 | 59 | True | agree | 5e-06 | 0.000678 |  |
+| switching/inverter/lcc_resonant_inverter.yaml | 1e-03 | agree | 8.8e-05 | 0.00473 | 39 | True | agree | 8.4e-05 | 0.0156 |  |
+| switching/inverter/ll09_half_bridge_inverter_leg.yaml | 1e-03 | agree | 0.00017 | 0.0142 | 239 | True | agree | 4.3e-05 | 0.00899 |  |
+| switching/inverter/ll10_full_bridge_inverter_lc.yaml | 1e-03 | agree | 0.00013 | 0.0113 | 119 | True | agree | 9.2e-05 | 0.00111 |  |
+| switching/isolated/active_clamp_forward.yaml | 1e-03 | agree | 1.2e-06 | 0.0783 | 674 | True | agree | 0.00012 | 0.0646 |  |
+| switching/isolated/dual_active_bridge.yaml | 1e-03 | agree | 1.9e-06 | 0.00481 | 159 | True | agree | 3.5e-05 | 0.00298 |  |
+| switching/isolated/flyback_converter.yaml | 1e-03 | agree | 2.7e-06 | 0.0341 | 199 | True | agree | 4.3e-05 | 0.0258 |  |
+| switching/isolated/forward_converter.yaml | 1e-03 | agree | 1.1e-06 | 0.0586 | 298 | True | agree | 2.2e-05 | 0.0572 |  |
+| switching/isolated/full_bridge_dc.yaml | 1e-03 | agree | 2.7e-05 | 0.0172 | 162 | True | agree | 0.00014 | 0.00607 |  |
+| switching/isolated/ll11_llc_resonant_converter.yaml | 1e-03 | refused | : engine 'dsed' cannot simulate branch 'D1', a ShockleyDiode (NewtonStatic): it would run a  | 0.00183 |  |  | error | SimulationAborted: run_transient_trbdf2: Newton failed at t = 0.000005 with h already at h_min — solve_with_n | 0.00325 |  |
+| switching/isolated/ll13_active_clamp_forward.yaml | 1e-03 | refused | : engine 'dsed' cannot simulate branch 'D_fwd', a ShockleyDiode (NewtonStatic): it would run | 0.00172 |  |  | disagree | 0.0013 | 0.0379 |  |
+| switching/isolated/synchronous_flyback.yaml | 1e-03 | agree | 1e-06 | 0.0148 | 199 | True | agree | 9.1e-06 | 0.034 |  |
+| switching/multilevel/cascaded_h_bridge_5level.yaml | 1e-03 | agree | 5.7e-05 | 0.00503 | 19 | True | agree | 0 | 0.00411 |  |
+| switching/multilevel/flying_capacitor_3level.yaml | 1e-03 | agree | 3.7e-05 | 0.004 | 79 | True | agree | 6.8e-05 | 0.00113 |  |
+| switching/multilevel/mmc_4cell_chain.yaml | 1e-03 | agree | 5.7e-05 | 0.00335 | 19 | True | agree | 0 | 0.00103 |  |
+| switching/multilevel/npc_three_level_halfbridge.yaml | 1e-03 | agree | 5.1e-06 | 0.0128 | 59 | True | agree | 7.9e-06 | 0.00121 |  |
+| switching/multilevel/t_type_3level_halfbridge.yaml | 1e-03 | agree | 4.2e-05 | 0.00484 | 59 | True | agree | 0.00011 | 0.000918 |  |
+| thermal/electrothermal_resistor_self_heating.yaml | 1e-03 | agree | 0 | 0.00183 | 0 | True | agree | 0 | 0.000655 |  |
+| thermal/long_run_drift_buck.yaml | 1e-03 | agree | 1.1e-05 | 0.146 | 19999 | True | agree | 2.6e-06 | 0.14 |  |
+| three_phase/interleaved_buck_3ph.yaml | 1e-03 | agree | 2.2e-07 | 0.0157 | 269 | True | agree | 6.6e-08 | 0.00593 |  |
+| three_phase/three_phase_balanced_rl_load.yaml | 1e-03 | agree | 6e-07 | 0.0893 | 0 | True | agree | 4.2e-05 | 0.00208 |  |
+| three_phase/three_phase_diode_rectifier.yaml | 1e-03 | agree | 0.00034 | 0.112 | 96 | True | agree | 5.5e-05 | 0.0032 |  |
 
 ## Shipped examples against an independent truth
 
@@ -133,15 +133,15 @@ Each example is run in the route survey's setting (`survey`: no switch_fn, every
 
 | example | setting | truth | truth unc. | exact err (column) | exact s | auto err (column) | auto s |
 |---|---|---|---|---|---|---|---|
-| rc_pulse | survey | closed form | 0 | 2.7e-08 (V(out)) | 0.0511 | 0.026 (Is(Vpulse)) | 0.00081 |
-| stress_large_rc_ladder | survey | closed form (eigendecomposition) | 0 | 5.8e-07 (V(n206)) | 5.35 | 0.012 (Is(Vsrc)) | 0.0153 |
-| half_bridge_pwm | survey | pwl+split dt/32 (vs dt/8) | 4e-12 | 7.8e-10 (I(Lload)) | 0.02 | 23 (Is(Vdc)) | 0.000856 |
-| half_bridge_pwm | doc | trbdf2 rtol 1e-10 (vs 1e-9) | 3.3e-05 | 2.8e-05 (Is(Vdc)) | 0.00345 | 4.3e+04 (Is(Vdc)) | 0.0013 |
-| three_phase_diode_rectifier | survey | trbdf2 rtol 1e-10 (vs 1e-9) | 3.2e-06 | 0.00018 (Is(V_c)) | 2.65 | 3.1 (Is(V_b)) | 0.0151 |
-| flyback | survey | pwl+split dt/8 (vs dt) | 4.5e-08 | 4.5e-08 (V(sec_anode)) | 7.68 | 1e-06 (I(T1.p)) | 0.105 |
-| flyback | doc | pwl+split dt/8 (vs dt) | 0.033 | 0.013 (V(sec_anode)) | 0.438 | 0.55 (V(sec_anode)) | 0.109 |
-| phase_shift_full_bridge | survey | pwl+split dt/32 (vs dt/8) | 1.4e-10 | 1.2e-10 (V(rect_pos)) | 1.89 | 1e-10 (V(rect_pos)) | 0.0482 |
-| phase_shift_full_bridge | doc | pwl+split dt/32 (vs dt/8) | 0.01 | 0.0068 (V(mid_a)) | 0.188 | 0.1 (V(sec_neg)) | 0.0329 |
+| rc_pulse | survey | closed form | 0 | 2.7e-08 (V(out)) | 0.0614 | 0.026 (Is(Vpulse)) | 0.00238 |
+| stress_large_rc_ladder | survey | closed form (eigendecomposition) | 0 | 5.8e-07 (V(n206)) | 9.91 | 0.012 (Is(Vsrc)) | 0.0175 |
+| half_bridge_pwm | survey | pwl+split dt/32 (vs dt/8) | 4e-12 | 7.8e-10 (I(Lload)) | 0.02 | 23 (Is(Vdc)) | 0.00135 |
+| half_bridge_pwm | doc | trbdf2 rtol 1e-10 (vs 1e-9) | 3.4e-05 | 2.6e-05 (Is(Vdc)) | 0.00215 | 4.3e+04 (Is(Vdc)) | 0.000982 |
+| three_phase_diode_rectifier | survey | trbdf2 rtol 1e-10 (vs 1e-9) | 3.2e-06 | 0.00018 (Is(V_c)) | 3.51 | 3.1 (Is(V_b)) | 0.024 |
+| flyback | survey | pwl+split dt/8 (vs dt) | 4.5e-08 | 4.5e-08 (V(sec_anode)) | 6.11 | 1e-06 (I(T1.p)) | 0.187 |
+| flyback | doc | pwl+split dt/8 (vs dt) | 0.033 | 0.013 (V(sec_anode)) | 0.51 | 0.55 (V(sec_anode)) | 0.219 |
+| phase_shift_full_bridge | survey | pwl+split dt/32 (vs dt/8) | 1.4e-10 | 1.2e-10 (V(rect_pos)) | 1.84 | 1e-10 (V(rect_pos)) | 0.061 |
+| phase_shift_full_bridge | doc | pwl+split dt/32 (vs dt/8) | 0.01 | 0.0068 (V(mid_a)) | 0.199 | 0.1 (V(sec_neg)) | 0.0386 |
 
 ### The examples' stated numbers
 
@@ -164,29 +164,29 @@ Each example is run in the route survey's setting (`survey`: no switch_fn, every
 
 | example | exact_route | exact | exact s | exact samples | auto | auto s | auto samples |
 |---|---|---|---|---|---|---|---|
-| boost_realistic_igbt | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'T1', a IgbtLevel1 (NewtonStatic): it would | 0.000349 |  | ran  | 0.258 | 200001 |
-| boost_realistic_mosfet_v14 | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it wou | 0.000468 |  | ran  | 0.0715 | 50001 |
-| boost_saturable_inductor | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'L_boost', a SaturableInductor (NewtonState | 0.000368 |  | ran  | 0.409 | 200001 |
-| buck | exact | ran  | 0.505 | 500002 | ran  | 0.00894 | 50001 |
-| buck_converter | exact | ran  | 0.038 | 40002 | ran  | 0.00131 | 4001 |
-| common_source_amplifier | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it wou | 0.000256 |  | ran  | 0.000784 | 601 |
-| flyback | exact | ran  | 9.9 | 5000001 | ran  | 0.124 | 500001 |
-| half_bridge_pwm | exact | ran  | 0.017 | 20001 | ran  | 0.000941 | 2001 |
-| half_wave_rectifier | exact | ran  | 0.00628 | 3333 | ran  | 0.000558 | 334 |
-| hysteretic_inductor_demo | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'L_core', a SaturableInductor (NewtonStatef | 0.000237 |  | ran  | 0.208 | 3001 |
-| induction_motor_dol | exact | ran  | 0.0282 | 50001 | ran  | 0.00216 | 5001 |
-| ldo_with_opamp | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it wou | 0.000622 |  | ran  | 0.00057 | 201 |
-| phase_shift_full_bridge | exact | ran  | 1.32 | 1000001 | ran  | 0.0345 | 100001 |
-| pwm_chopper_realistic_mosfet | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it wou | 0.000312 |  | ran  | 0.000465 | 301 |
-| rc_circuit | exact | ran  | 0.0214 | 50001 | ran  | 0.000894 | 5001 |
-| rc_pulse | exact | ran  | 0.0396 | 50006 | ran  | 0.000971 | 5001 |
+| boost_realistic_igbt | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'T1', a IgbtLevel1 (NewtonStatic): it would | 0.000476 |  | ran  | 0.384 | 200001 |
+| boost_realistic_mosfet_v14 | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it wou | 0.000703 |  | ran  | 0.0822 | 50001 |
+| boost_saturable_inductor | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'L_boost', a SaturableInductor (NewtonState | 0.000349 |  | ran  | 0.462 | 200001 |
+| buck | exact | ran  | 0.385 | 500002 | ran  | 0.0131 | 50001 |
+| buck_converter | exact | ran  | 0.0297 | 40002 | ran  | 0.00121 | 4001 |
+| common_source_amplifier | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it wou | 0.000213 |  | ran  | 0.000757 | 601 |
+| flyback | exact | ran  | 7.92 | 5000001 | ran  | 0.538 | 500001 |
+| half_bridge_pwm | exact | ran  | 0.0257 | 20001 | ran  | 0.00152 | 2001 |
+| half_wave_rectifier | exact | ran  | 0.00965 | 3333 | ran  | 0.000588 | 334 |
+| hysteretic_inductor_demo | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'L_core', a SaturableInductor (NewtonStatef | 0.000223 |  | ran  | 0.357 | 3001 |
+| induction_motor_dol | exact | ran  | 0.0405 | 50001 | ran  | 0.00175 | 5001 |
+| ldo_with_opamp | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it wou | 0.000319 |  | ran  | 0.000478 | 201 |
+| phase_shift_full_bridge | exact | ran  | 1.33 | 1000001 | ran  | 0.0555 | 100001 |
+| pwm_chopper_realistic_mosfet | device | refused UnsupportedError: engine 'dsed' cannot simulate branch 'M1', a MosfetLevel1 (NewtonStatic): it wou | 0.000398 |  | ran  | 0.000499 | 301 |
+| rc_circuit | exact | ran  | 0.0226 | 50001 | ran  | 0.00114 | 5001 |
+| rc_pulse | exact | ran  | 0.045 | 50006 | ran  | 0.00119 | 5001 |
 | refrigerator_compressor_cc | not loadable (RuntimeError) | | | | | | |
-| rl_circuit | exact | ran  | 0.00419 | 10002 | ran  | 0.000306 | 1001 |
-| rlc_circuit | exact | ran  | 0.00949 | 20001 | ran  | 0.000667 | 2001 |
-| rlc_step_response | exact | ran  | 0.0598 | 60001 | ran  | 0.0013 | 6001 |
-| stress_buck_switching | exact | ran  | 0.724 | 800001 | ran  | 0.019 | 80001 |
-| stress_large_rc_ladder | exact | ran  | 5.21 | 5001 | ran  | 0.0158 | 501 |
-| stress_large_resistive_ladder | exact | ran  | 0.16 | 101 | ran  | 0.0284 | 11 |
-| three_phase_diode_rectifier | exact | ran  | 2.52 | 402626 | ran  | 0.0158 | 40001 |
-| three_phase_inverter | exact | ran  | 2.44 | 1500002 | ran  | 0.0871 | 150001 |
-| voltage_divider | exact | ran  | 0.00405 | 10002 | ran  | 0.000464 | 1001 |
+| rl_circuit | exact | ran  | 0.00331 | 10002 | ran  | 0.000486 | 1001 |
+| rlc_circuit | exact | ran  | 0.00733 | 20001 | ran  | 0.000641 | 2001 |
+| rlc_step_response | exact | ran  | 0.0599 | 60001 | ran  | 0.00145 | 6001 |
+| stress_buck_switching | exact | ran  | 0.579 | 800001 | ran  | 0.0317 | 80001 |
+| stress_large_rc_ladder | exact | ran  | 8.78 | 5001 | ran  | 0.0341 | 501 |
+| stress_large_resistive_ladder | exact | ran  | 0.252 | 101 | ran  | 0.0583 | 11 |
+| three_phase_diode_rectifier | exact | ran  | 3.46 | 402626 | ran  | 0.0111 | 40001 |
+| three_phase_inverter | exact | ran  | 2.34 | 1500002 | ran  | 0.095 | 150001 |
+| voltage_divider | exact | ran  | 0.00266 | 10002 | ran  | 0.000446 | 1001 |

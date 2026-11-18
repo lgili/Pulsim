@@ -23,6 +23,7 @@
 #include "pulsim/numeric/dictionary.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/assemble.hpp"
+#include "pulsim/pwl/branch_structure.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/segment.hpp"
@@ -464,6 +465,30 @@ public:
         std::vector<std::string> state_labels;
     };
 
+    /// The device names of an MNA row for a re-initialisation record, as the
+    /// fixed engine's ReinitRecord names them: a node row by its
+    /// capacitors ("C1"; "C1, C3" when several share it), a branch-current
+    /// row by its inductor, source or branch-form switch; else row_label.
+    [[nodiscard]] std::string record_label_(Index r) const {
+        std::string caps;
+        for (Index b = 0; b < graph_.num_branches(); ++b) {
+            const auto& br = graph_.branch(b);
+            if (!pool_.is_registered(b)) continue;
+            const auto k = pool_.kind_of(b);
+            if (r < graph_.num_nodes()) {
+                if (k == DevicePool::StoredKind::Capacitor && (br.from == r || br.to == r))
+                    caps += (caps.empty() ? "" : ", ") + std::string(graph_.branch_name(b));
+                continue;
+            }
+            const bool owns =
+                (pool_.is_inductor(b) && pool_.branch_var_id_for_inductor(b, graph_) == r) ||
+                (pool_.is_voltage_source(b) && pool_.branch_var_id_for_source(b, graph_) == r) ||
+                (pool_.is_branch_form(b) && pool_.branch_var_id_for_switch(b, graph_) == r);
+            if (owns) return std::string(graph_.branch_name(b));
+        }
+        return caps.empty() ? row_label(graph_, pool_, r) : caps;
+    }
+
     /// Extract continuous-time `(A, b)` for the given switch mask.
     ///
     /// v2.0 Phase 1: uses the assembler's EXACT (G, C, b) split —
@@ -506,6 +531,14 @@ public:
         const topology::SwitchStateMask& mask,
         Real h_a = Real{1e-6},
         Real h_b = Real{5e-7}) const {
+        // add-branch-form-ideal-switch task 8: the implicit engines'
+        // per-mode structural pass before the extraction, refusing by the
+        // same names (floating_node, ideal_voltage_loop, dependent_states);
+        // this extractor is the exact engine's
+        if (pool_.num_branch_switches() > 0) {
+            BranchStructureChecker structure{graph_, pool_, "dsed"};
+            if (structure.active()) (void)structure.check(mask, true);
+        }
         // ---------------------------------------------------------
         // Steps 1-2 (v2.0 Phase 1): EXACT (G, C, b) split from the
         // assembler — no more two-assembly finite-difference
@@ -929,11 +962,18 @@ public:
             out.constraint_k = std::move(kc);
             out.energy_weight = std::move(E);
             for (const Index r : out.state_row_indices)
-                out.state_labels.push_back(row_label(graph_, pool_, r));
+                out.state_labels.push_back(record_label_(r));
+            // devices as pwl names them: the branch rows (switches, sources,
+            // inductors) that carry the constraint; node rows only if none does
+            std::vector<Index> crow;
             for (int i = 0; i < W.rows(); ++i)
                 if (d > 0 && W.row(i).cwiseAbs().maxCoeff() > Real{1e-9})
-                    out.constraint_devices.push_back(
-                        row_label(graph_, pool_, arows[static_cast<Size>(i)]));
+                    crow.push_back(arows[static_cast<Size>(i)]);
+            const bool any_branch = std::any_of(crow.begin(), crow.end(),
+                [&](Index r) { return r >= graph_.num_nodes(); });
+            for (const Index r : crow)
+                if (!any_branch || r >= graph_.num_nodes())
+                    out.constraint_devices.push_back(record_label_(r));
             return out;
         };
 

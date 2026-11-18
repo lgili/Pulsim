@@ -66,13 +66,14 @@ def _sim(b, t_end, fn=None, guard=True, **kw):
     the wrong mode instead of returning it)."""
     if fn is not None:
         kw["switch_fn"] = fn
+    saved = DD.MODE_GUARD, DD.DIODE_LAW_REL
     DD.MODE_GUARD = guard
     if not guard:
         DD.DIODE_LAW_REL = 0.0
     try:
         return p.simulate(b, t_end=t_end, engine="dsed", **kw)
     finally:
-        DD.MODE_GUARD, DD.DIODE_LAW_REL = True, 1e-3
+        DD.MODE_GUARD, DD.DIODE_LAW_REL = saved
 
 
 def _end(r, node):
@@ -338,6 +339,41 @@ def test_a_widened_pass_does_not_release_a_diode_before_its_own_turn_off(mode):
     assert sel["capped"] > 0
 
 
+def _paralleled_bank(n):
+    b = p.CircuitBuilder()
+    for k in range(n):
+        for ph, ang in (("a", 0.0), ("b", -120.0), ("c", 120.0)):
+            b.add_sine_voltage_source(f"V{k}{ph}", f"s{k}{ph}", "gnd", 0.0, 100.0, 50.0,
+                                      np.deg2rad(ang + 6.0 * k))
+            b.add_inductor(f"L{k}{ph}", f"s{k}{ph}", f"x{k}{ph}", 0.2e-3)
+            b.add_diode(f"Dt{k}{ph}", f"x{k}{ph}", "p", 1e3, 1e-9, 0.0)
+            b.add_diode(f"Db{k}{ph}", "n", f"x{k}{ph}", 1e3, 1e-9, 0.0)
+    b.add_capacitor("C", "p", "n", 2e-3)
+    b.add_resistor("R", "p", "n", 5.0)
+    b.add_resistor("Rg", "n", "gnd", 1e6)
+    return b
+
+
+@pytest.mark.parametrize("n", [3, 5])
+def test_paralleled_bridges_meet_a_mode_refused_for_inaccurate_eigenpairs(n):
+    """add-exact-propagator-strategy D2 (review of slice 5): identical paralleled bridges reach
+    a mode whose eigenpairs carry a propagator defect far above 1e-10 (3.3e-7 with three, at a
+    backward error of 3.8 u: the cluster is ill-conditioned, no better pairs exist in this
+    matrix); the exact engine refuses it by name instead of stepping it."""
+    # The defect of a degenerate cluster depends on the basis the eigensolver picks inside
+    # it (Eigen versions may differ): either the mode is refused by that name, or every
+    # visited mode met the 1e-10 bar -- never a step on pairs that missed it.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            r = p.simulate(_paralleled_bank(n), t_end=0.02, engine="dsed")
+        except p.UnsupportedError as e:
+            assert "inaccurate eigenpairs" in str(e)
+            return
+    rows = r.exact["masks"]
+    assert rows and all(m["tier"] != 1 or m["defect"] <= 1e-10 for m in rows)
+
+
 @pytest.mark.parametrize("cap", [64, 1])
 def test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp(cap, monkeypatch):
     """DECISIONS #25. Bridges paralleled on one 2 mF || 5 ohm bus: at rest every diode
@@ -347,26 +383,17 @@ def test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp(cap, monkeypatch
     from the held state. The engine's own cap at 1 round (the test hook) throws at any
     event where a diode flips, so the give-up is forced on any platform; either way the
     result is within 1e-3 V of pwl extrapolated in dt (measured 1.1e-4 V), and the forced
-    cap is counted. Four bridges since the propagator is judged by its error
-    (add-exact-propagator-strategy, review of slice 4): five reach a mode at 8.17 ms whose
-    eigenpairs carry a propagator defect of 5.2e-4 over the run, now a typed refusal."""
+    cap is counted. Two bridges since the propagator is judged by its error
+    (add-exact-propagator-strategy, reviews of slices 4 and 5): three or more identical banks
+    reach a mode near 8.2-8.4 ms whose eigenpairs carry a propagator defect of 1.3e-7 (four)
+    to 3.3e-7 (three) at a backward error of 3-4 u -- an ill-conditioned cluster, a typed
+    refusal (test_paralleled_bridges_meet_a_mode_refused_for_inaccurate_eigenpairs)."""
     monkeypatch.setattr(DD, "SETTLE_ROUND_CAP", cap)
-    t_end, n = 0.02, 4
+    t_end, n = 0.02, 2
     tg = np.linspace(0.0, t_end, 2001)
 
     def bank():
-        b = p.CircuitBuilder()
-        for k in range(n):
-            for ph, ang in (("a", 0.0), ("b", -120.0), ("c", 120.0)):
-                b.add_sine_voltage_source(f"V{k}{ph}", f"s{k}{ph}", "gnd", 0.0, 100.0, 50.0,
-                                          np.deg2rad(ang + 6.0 * k))
-                b.add_inductor(f"L{k}{ph}", f"s{k}{ph}", f"x{k}{ph}", 0.2e-3)
-                b.add_diode(f"Dt{k}{ph}", f"x{k}{ph}", "p", 1e3, 1e-9, 0.0)
-                b.add_diode(f"Db{k}{ph}", "n", f"x{k}{ph}", 1e3, 1e-9, 0.0)
-        b.add_capacitor("C", "p", "n", 2e-3)
-        b.add_resistor("R", "p", "n", 5.0)
-        b.add_resistor("Rg", "n", "gnd", 1e6)
-        return b
+        return _paralleled_bank(n)
 
     def bus(r):
         return np.interp(tg, r.times, np.asarray(r.v("p")) - np.asarray(r.v("n")))

@@ -1530,7 +1530,9 @@ inline constexpr auto kKindCaps = std::to_array<KindCaps>({
 /// Switch and Diode kinds (a form, not a kind: one row each, by the
 /// kind's name). The fixed trapezoid runs both; TR-BDF2 runs the
 /// controlled switch (its diode decision sites read the voltage only);
-/// dsed, bdf1 and the AC sweep refuse by name (`feature='branch_form'`).
+/// dsed runs the controlled switch (task 8: its diode sites read the
+/// conductance law); bdf1 and the AC sweep refuse by name
+/// (`feature='branch_form'`).
 struct FormCaps {
     std::string_view name;      // "Switch" / "Diode"
     DevicePool::StoredKind kind;
@@ -1542,7 +1544,8 @@ struct FormCaps {
 inline constexpr auto kBranchFormCaps = std::to_array<FormCaps>({
     {"Switch", DevicePool::StoredKind::Switch,
      static_cast<std::uint8_t>(engine_bit(Engine::FixedTrap) |
-                               engine_bit(Engine::TrBdf2))},
+                               engine_bit(Engine::TrBdf2) |
+                               engine_bit(Engine::Dsed))},
     {"Diode", DevicePool::StoredKind::Diode,
      static_cast<std::uint8_t>(engine_bit(Engine::FixedTrap) |
                                engine_bit(Engine::TrBdf2))},

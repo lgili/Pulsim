@@ -766,6 +766,7 @@ py::dict exact_report_dict(const AdapterT& adapter,
     py::dict d;
     d["masks"] = masks;
     d["n_eig"] = adapter.n_eig();
+    d["build_seconds"] = adapter.build_seconds();
     d["n_pade"] = adapter.n_pade();
     d["n_phi_cache_hits"] = adapter.n_pade_hits();
     d["n_predicate_evals"] = n_predicate_evals;
@@ -1172,7 +1173,8 @@ void init_module(py::module_& m) {
             py::arg("t"), py::arg("x"),
             "Continuous-time RHS: dx/dt = A·x + b(t).")
         .def("node_pair_voltage",
-            &NativeAdapter::node_pair_voltage,
+            [](const NativeAdapter& self, pulsim::Index from, pulsim::Index to, Real t,
+               const pulsim::Vector& x) { return self.node_pair_voltage(from, to, t, x); },
             py::arg("from_node"), py::arg("to_node"),
             py::arg("t"), py::arg("x"),
             "v(from_node) − v(to_node) recovered from the reduced "
@@ -1636,6 +1638,7 @@ void init_module(py::module_& m) {
             }
         }
         sim.set_event_projection(false);
+        sim.set_diode_law_check(0.0);   // judged by the period map's own residual
         auto res = sim.simulate(x0, period);
         return pulsim::dsed::period_map_from_run(adapter, res, diodes, obs,
                                                  pairs, monodromy);

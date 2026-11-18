@@ -35,6 +35,9 @@
 #include <cmath>
 #include <unordered_map>
 #include <utility>
+#include <cstdio>
+#include <limits>
+#include <stdexcept>
 #include <vector>
 
 #include <Eigen/Dense>
@@ -189,7 +192,9 @@ public:
             if (K.allFinite()) {
                 K_ = K;
                 joint_lu_.compute(K);
-                joint_ok_ = std::isfinite(joint_lu_.rcond()) && joint_lu_.rcond() > Real{0};
+                // a K singular to round-off admits a huge a with a small
+                // residual (review of slice 5): the joint solve needs a real rcond
+                joint_ok_ = std::isfinite(joint_lu_.rcond()) && joint_lu_.rcond() > Real{1e-12};
             }
         }
     }
@@ -217,12 +222,43 @@ public:
                 return;
             }
         }
-        for (std::size_t m = 0; m < isl.size(); ++m) {
-            const Real sig = sigma(m);
-            if (kap_[m] != Real{0} && std::isfinite(kap_[m])) {
-                s -= ws_[m] * (sig / kap_[m]);
-                ++fixes_;
+        // Sequential (Gauss–Seidel) sweeps: one is exact for a single island;
+        // coupled islands sweep until every correctable sum is within 1e-8 of
+        // its first value, and a sum still off is an error, never a silent
+        // KCL violation (review of slice 5).
+        // a sum cannot fall below the rounding of its own terms: the floor
+        // is 1e3·u times the scale of island_dot itself, Σ|g_j|(|s_j|+|base_j|)
+        // + |src| (amperes, like σ)
+        auto floor_of = [&](std::size_t m) {
+            Real a = std::abs(src(isl[m]));
+            for (const auto& [j, g] : isl[m].g)
+                a += std::abs(g) * (std::abs(s[j]) + (base ? std::abs((*base)[j]) : Real{0}));
+            return Real{1e3} * std::numeric_limits<Real>::epsilon() * a;
+        };
+        Real sig0 = Real{0}, worst = Real{0}, tol = Real{0};
+        for (int sweep = 0; sweep < 16; ++sweep) {
+            worst = Real{0};
+            for (std::size_t m = 0; m < isl.size(); ++m) {
+                if (!(kap_[m] != Real{0} && std::isfinite(kap_[m]))) continue;
+                const Real sig = sigma(m);
+                const Real e = std::isfinite(sig) ? std::abs(sig) : std::numeric_limits<Real>::infinity();
+                if (sweep == 0) sig0 = std::max(sig0, e);
+                else worst = std::max(worst, e - floor_of(m));
+                if (sweep == 0 || std::abs(sig) > std::max(tol, floor_of(m))) {
+                    s -= ws_[m] * (sig / kap_[m]);
+                    ++fixes_;
+                }
             }
+            tol = Real{1e-8} * sig0;
+            if (isl.size() == 1 || !(sig0 > Real{0})) return;
+            if (sweep > 0 && worst <= tol) return;
+        }
+        if (!(worst <= tol)) {
+            char buf[160];
+            std::snprintf(buf, sizeof buf,
+                          "floating islands: the coupled KCL sums of %zu islands could not be "
+                          "imposed (residual %.3e of %.3e)", isl.size(), worst, sig0);
+            throw std::runtime_error(buf);
         }
     }
 

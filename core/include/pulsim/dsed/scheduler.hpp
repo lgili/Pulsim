@@ -266,7 +266,7 @@ struct SchedulerDiode {
 /// A stored sample breaks the PWL diode law: an ON diode carries reverse
 /// current, or an OFF one is forward-biased past its threshold, by more
 /// than `rel` of that diode's peak over the run (PEDSimulator::check_diode_law,
-/// run at the end of every simulate(); every caller gets it, Python maps it to DiodeModeInconsistentError).
+/// run at the end of every simulate() unless set_diode_law_check(0); Python maps it to DiodeModeInconsistentError).
 class DiodeLawViolation : public std::runtime_error {
 public:
     DiodeLawViolation(std::string diode, Real t, const std::string& what)
@@ -686,11 +686,12 @@ public:
                             step_mask,
                             step_fired ? &x_pre_event : nullptr);
         }
-        // Only a projected run claims consistent modes: a period map run without
-        // projection (periodic_steady_state, the orbit kernel) starts from Newton
-        // trial states and is judged by its own residual instead.
-        if constexpr (HasNodePairVoltage<System>)
-            if (enable_event_projection_) check_diode_law(result);
+        // Every run is checked (review of slice 5: gating it on the event
+        // projection, off by default, skipped every plain C++ caller). A period
+        // map run (periodic_steady_state, the orbit kernel) starts from Newton
+        // trial states and is judged by its own residual: those callers set
+        // set_diode_law_check(0).
+        if constexpr (HasNodePairVoltage<System>) check_diode_law(result);
 
         const auto t1_wall = clock::now();
         result.cpu_time_seconds =
@@ -1439,7 +1440,8 @@ public:
     /// Relative threshold of the end-of-run diode-law check (0: off).
     void set_diode_law_check(Real rel) noexcept { law_rel_ = rel; }
 
-    /// Every stored sample against the PWL diode law under its own mask: ON
+    /// Every stored sample, and every stored left limit at an event under
+    /// the mask that produced it (step_masks), against the PWL diode law: ON
     /// with i = g_on·(v − V_f) < −max(rel·i_pk, band·g_on), or OFF with
     /// v > V_on + max(rel·v_pk, band), band = zero_band_tol_ of the sample
     /// (the rule python's check_diode_modes applied, moved here so a C++
@@ -1447,18 +1449,47 @@ public:
     void check_diode_law(const PEDResult<MaskT>& result)
         requires HasNodePairVoltage<System> {
         if (!has_diodes_ || !(law_rel_ > Real{0}) || diodes_.empty()) return;
-        const std::size_t n = result.times.size(), nd = diodes_.size();
+        // (sample index, state, mask): the samples, then the left limits
+        // a left limit reads its sources' left limit too (a PWM corner at t),
+        // value_at(t − left_by) with left_by half the step that ended there,
+        // as the stored outputs do; the last sample is the left limit of t_end
+        struct Row { std::size_t k; const Vector* x; const MaskT* m; Real left_by; };
+        const std::size_t ns = result.times.size();
+        const auto half_step = [&](std::size_t k) {
+            return k > 0 ? Real{0.5} * (result.times[k] - result.times[k - 1]) : Real{0};
+        };
+        // an event on the last step stores the post-event state there: its
+        // sources are the right limit, its left limit is the pre-event row
+        const bool last_has_left = ns > 0 && !result.pre_event_index.empty()
+                                   && result.pre_event_index.back() + 1 == ns;
+        std::vector<Row> rows;
+        rows.reserve(result.times.size() + result.pre_event_states.size());
+        for (std::size_t k = 0; k < result.times.size(); ++k)
+            rows.push_back({k, &result.states[k], &result.sample_masks[k],
+                            k + 1 == ns && !last_has_left ? half_step(k) : Real{0}});
+        for (std::size_t j = 0; j < result.pre_event_states.size()
+                                && j < result.pre_event_index.size(); ++j) {
+            const std::size_t k = result.pre_event_index[j];
+            if (k < result.step_masks.size())
+                rows.push_back({k, &result.pre_event_states[j], &result.step_masks[k], half_step(k)});
+        }
+        const std::size_t n = rows.size(), nd = diodes_.size();
         std::vector<Real> v(n * nd), band(n);
         std::vector<Real> ipk(nd, Real{1e-12}), vpk(nd, Real{0});
+        const MaskT m_end = system_.current_mask();
         for (std::size_t k = 0; k < n; ++k) {
-            const MaskT& m = result.sample_masks[k];
+            const MaskT& m = *rows[k].m;
             if (!(system_.current_mask() == m)) system_.set_mask(m);
-            const Real t = result.times[k];
-            const Vector& x = result.states[k];
+            const Real t = result.times[rows[k].k];
+            const Vector& x = *rows[k].x;
             band[k] = zero_band_tol_(t, x);
             for (std::size_t j = 0; j < nd; ++j) {
                 const auto& d = diodes_[j];
-                const Real vd = system_.node_pair_voltage(d.from, d.to, t, x);
+                Real vd;
+                if constexpr (requires { system_.node_pair_voltage(d.from, d.to, t, x, Real{0}); })
+                    vd = system_.node_pair_voltage(d.from, d.to, t, x, rows[k].left_by);
+                else
+                    vd = system_.node_pair_voltage(d.from, d.to, t, x);
                 v[k * nd + j] = vd;
                 const bool on = m.get(d.switch_idx);
                 const Real i = on ? d.g_on * (vd - d.V_f) : d.g_off * vd;
@@ -1466,29 +1497,33 @@ public:
                 if (!on) vpk[j] = std::max(vpk[j], std::abs(vd));
             }
         }
+        if (!(system_.current_mask() == m_end)) system_.set_mask(m_end);
         for (std::size_t j = 0; j < nd; ++j) {
             const auto& d = diodes_[j];
             const Real thr = std::max(d.V_th, d.V_f);
             const Real vp = std::max({vpk[j], thr, Real{1e-12}});
             std::size_t bad = 0, first = n;
             for (std::size_t k = 0; k < n; ++k) {
-                const bool on = result.sample_masks[k].get(d.switch_idx);
+                const bool on = rows[k].m->get(d.switch_idx);
                 const Real vd = v[k * nd + j];
                 const bool b = on
                     ? d.g_on * (vd - d.V_f) < -std::max(law_rel_ * ipk[j], band[k] * d.g_on)
                     : vd > thr + std::max(law_rel_ * vp, band[k]);
-                if (b) { ++bad; if (first == n) first = k; }
+                if (b) {   // the earliest row (samples precede left limits in rows)
+                    ++bad;
+                    if (first == n || result.times[rows[k].k] < result.times[rows[first].k]) first = k;
+                }
             }
             if (bad == 0) continue;
-            const bool on = result.sample_masks[first].get(d.switch_idx);
+            const bool on = rows[first].m->get(d.switch_idx);
             const Real vd = v[first * nd + j];
             const std::string what = on
                 ? "ON while carrying " + sci_(d.g_on * (vd - d.V_f)) + " A"
                 : "OFF while forward-biased by " + sci_(vd) + " V";
             throw DiodeLawViolation(
-                d.label, result.times[first],
+                d.label, result.times[rows[first].k],
                 "simulate(engine='dsed'): diode '" + d.label + "' is " + what + " at t = "
-                + sci_(result.times[first]) + " s (" + std::to_string(bad) + " samples break "
+                + sci_(result.times[rows[first].k]) + " s (" + std::to_string(bad) + " samples break "
                 "the diode law): the event settle chose a wrong mode, and the run would be "
                 "silently wrong. Give the diode a small threshold band (V_th = 1e-2 V), or use "
                 "engine='pwl' or 'trbdf2'.");

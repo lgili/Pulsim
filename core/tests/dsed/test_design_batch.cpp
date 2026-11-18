@@ -56,6 +56,7 @@ struct Run {
             sim.enable_diode_commutation(diodes.owned, SSM(1), diodes.list);
         }
         sim.set_event_projection(false);
+        sim.set_diode_law_check(0.0);  // as the period-map callers do
         const auto res = sim.simulate(x0, T);
         return dsed::period_map_from_run(ad, res, diodes, obs, pairs, true);
     }

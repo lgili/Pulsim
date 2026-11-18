@@ -195,6 +195,7 @@ TEST_CASE("Orbit loop: the DCM buck orbit of the shooting prototype",
         sim.enable_diode_commutation(diodes.owned,
                                      SSM(b.graph().num_switches()), diodes.list);
         sim.set_event_projection(false);
+        sim.set_diode_law_check(0.0);  // as the period-map callers do
         const auto res = sim.simulate(x, T);
         return dsed::period_map_from_run(ad, res, diodes, {}, {}, true);
     };

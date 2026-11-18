@@ -19,8 +19,8 @@
 //
 //   tier 1  eigendecomposition, accepted when u·κ₂(Ṽ) ≤ 1e-10 AND its
 //           first-order propagator error over the run horizon,
-//           ‖Ṽ(G∘Ṽ⁻¹R)Ṽ⁻¹‖_F, is ≤ 1e-10 or its row-wise backward
-//           error is ≤ 64 u (pair_quality); pairs that miss are
+//           ‖Ṽ(G∘Ṽ⁻¹R)Ṽ⁻¹‖_F, max over a halving grid of t ≤ H, is ≤ 1e-10
+//           (pair_quality); pairs that miss are
 //           refined (refine_pairs), then the balanced pairs tried
 //   tier 2  Padé [13/13] scaling and squaring of [[Ãh, b̃h],[0,0]]
 //           (Higham 2005, Eigen's MatrixFunctions), cached per h,
@@ -55,10 +55,6 @@ namespace pulsim::dsed {
 inline constexpr Real kExactRoundoff = std::numeric_limits<Real>::epsilon();
 /// The accepted error level of tiers 1 and 2 (`u·κ`, `u·‖Ah‖₁`).
 inline constexpr Real kExactTierBound = Real{1e-10};
-/// Tier 1's alternative bar: a row-wise backward error within this many
-/// roundoffs of Ã's own rows (pair_quality). Good pairs measure 0.3–4.4 u,
-/// the leaking flyback pairs 2.8e11 u, a wrong balanced bridge pair 3.2e3 u.
-inline constexpr Real kExactBackwardBound = Real{64};
 
 /// The propagator of one mode.
 struct ExactLTI {
@@ -192,8 +188,8 @@ inline std::string fmt_e(Real v) {
 ///    are Schur complements carrying their own rounding u·‖Ã_i‖ (a row of
 ///    ±1.4e14 entries fixes a near-conserved bridge mode only to ~0.03 /s:
 ///    its eigenvalue in the stored matrix is +0.031), so no method resolves a
-///    mode better than that from this matrix; ≤ kExactBackwardBound·u is
-///    "exact for the data to its own rounding".
+///    mode better than that from this matrix. Reported only: such a mode is
+///    refused, not called exact (review of slice 5).
 /// R = Ã·Ṽ − Ṽ·Λ with every sum compensated (error-free products through
 /// fma, TwoSum accumulation), rounded once: a row of ±1e15 entries leaves
 /// u·1e15 of noise in a plain product, which drowns the residual of a slow
@@ -237,7 +233,7 @@ inline std::string fmt_e(Real v) {
 struct PairQuality {
     Real defect = std::numeric_limits<Real>::infinity();
     Real backward = std::numeric_limits<Real>::infinity();
-    /// ≤ 1: tier 1 may use the pairs (either bar met).
+    /// ≤ 1: tier 1 may use the pairs (defect ≤ kExactTierBound).
     [[nodiscard]] Real score() const;
 };
 [[nodiscard]] inline PairQuality pair_quality(const DenseMatrix& As, const Eigen::MatrixXcd& V,
@@ -245,17 +241,29 @@ struct PairQuality {
     const auto n = V.cols();
     const Eigen::MatrixXcd W = V.fullPivLu().inverse();
     const Eigen::MatrixXcd R = residual_compensated(As, V, lam);
-    Eigen::MatrixXcd E = W * R;
-    for (Eigen::Index j = 0; j < n; ++j) {
-        for (Eigen::Index k = 0; k < n; ++k) {
-            const bool jhi = lam[j].real() >= lam[k].real();
-            const std::complex<Real> hi = jhi ? lam[j] : lam[k];
-            const std::complex<Real> lo = jhi ? lam[k] : lam[j];
-            E(j, k) *= H * std::exp(hi * H) * phi1((lo - hi) * H);
+    const Eigen::MatrixXcd E0 = W * R;
+    // The propagator is used over every segment length up to H, and
+    // G_jk(t) of a decaying pair peaks at t ≈ 1/|Re λ| ≪ H (review of slice
+    // 5): the defect is the largest over t = H·2^-k down to 1/(8‖Ã‖₁), where
+    // a halving grid sees at least 0.93 of each peak.
+    const Real na = As.cwiseAbs().colwise().sum().maxCoeff();
+    const Real t_lo = std::max(na > Real{0} ? Real{0.125} / na : H, H * Real{0x1p-60});
+    Real d = Real{0};
+    Eigen::MatrixXcd E(n, n);
+    for (Real t = H; ; t *= Real{0.5}) {
+        for (Eigen::Index j = 0; j < n; ++j) {
+            for (Eigen::Index k = 0; k < n; ++k) {
+                const bool jhi = lam[j].real() >= lam[k].real();
+                const std::complex<Real> hi = jhi ? lam[j] : lam[k];
+                const std::complex<Real> lo = jhi ? lam[k] : lam[j];
+                E(j, k) = E0(j, k) * (t * std::exp(hi * t) * phi1((lo - hi) * t));
+            }
         }
+        const Real dt = (V * E * W).norm();
+        d = std::isfinite(dt) ? std::max(d, dt) : std::numeric_limits<Real>::infinity();
+        if (!(t > t_lo) || !std::isfinite(d)) break;
     }
     PairQuality q;
-    const Real d = (V * E * W).norm();
     if (std::isfinite(d)) q.defect = d;
     const Eigen::MatrixXcd dA = R * W;
     Real b = Real{0};
@@ -268,9 +276,10 @@ struct PairQuality {
     return q;
 }
 
-inline Real PairQuality::score() const {
-    return std::min(defect / kExactTierBound, backward / (kExactBackwardBound * kExactRoundoff));
-}
+// The backward error is reported, not a pass (review of slice 5): pairs
+// within 64 u of a row whose norm is 1e15 still move a slow mode by 0.03 /s,
+// a propagator 5e-5 off per 2 ms; the exact engine refuses that mode.
+inline Real PairQuality::score() const { return defect / kExactTierBound; }
 
 /// One Newton step on every eigenpair from E = Ṽ⁻¹(ÃṼ − ṼΛ):
 /// λ_j += E_jj, v_k += Σ_{j≠k} E_jk/(λ_k − λ_j)·v_j between pairs whose gap
@@ -447,8 +456,9 @@ inline int refine_pairs(const DenseMatrix& As, Eigen::MatrixXcd& V, Eigen::Vecto
         out.reason = kExactRoundoff * out.kappa > kExactTierBound
             ? "kappa2(V) = " + detail::fmt_e(out.kappa) + " > 1e-10/u (near-defective eigenbasis)"
             : "propagator defect = " + detail::fmt_e(out.defect)
-                  + " > 1e-10 over the run horizon and backward error = "
-                  + detail::fmt_e(out.backward) + " u > 64 u (inaccurate eigenpairs)";
+                  + " > 1e-10 over the run horizon (inaccurate eigenpairs"
+                  + (out.backward <= Real{64} ? ": an ill-conditioned eigenvalue cluster" : "")
+                  + "; backward error = " + detail::fmt_e(out.backward) + " u)";
     } else {
         out.reason = "eigensolver failed";
     }

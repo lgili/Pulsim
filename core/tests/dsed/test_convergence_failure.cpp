@@ -213,7 +213,7 @@ TEST_CASE("ConvergenceFailure: a chattering diode is kind chatter and named",
     REQUIRE(std::string{e.what()}.find(e.device() + " is chattering") != std::string::npos);
 }
 
-// The end-of-run diode-law check every C++ caller gets: a stored sample whose
+// The end-of-run diode-law check every simulate() runs (set_diode_law_check(0) to skip): a stored sample whose
 // mask has D ON while the circuit drives it backwards is refused, typed.
 TEST_CASE("A stored sample breaking the diode law throws DiodeLawViolation",
           "[v2][dsed][diode_law]") {
@@ -250,4 +250,12 @@ TEST_CASE("A stored sample breaking the diode law throws DiodeLawViolation",
     }
     sim.set_diode_law_check(0.0);
     REQUIRE_NOTHROW(sim.check_diode_law(res));
+    // a left limit at an event is checked under the mask that produced it
+    sim.set_diode_law_check(1e-3);
+    res.sample_masks.back().set(di, false);
+    REQUIRE_NOTHROW(sim.check_diode_law(res));
+    res.pre_event_index.push_back(res.times.size() - 1);
+    res.pre_event_states.push_back(res.states.back());
+    res.step_masks.back().set(di, true);
+    REQUIRE_THROWS_AS(sim.check_diode_law(res), DiodeLawViolation);
 }

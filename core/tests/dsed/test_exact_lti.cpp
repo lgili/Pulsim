@@ -553,12 +553,16 @@ TEST_CASE("Exact: pair_quality states the propagator error of a wrong eigenvalue
     const auto good = pair_quality(A, V, lam, 2.0);
     REQUIRE(good.defect == 0.0);
     REQUIRE(good.score() <= 1.0);
-    // a fast pair's error is damped: the same 1e-3 on lambda = -1e6 over H = 2
+    // a fast pair's error is damped at H = 2 but not over the segments the
+    // propagator is used on: 1e-3 on lambda = -1e6 peaks at t = 1 us at
+    // 1e-3·1e-6/e = 3.68e-10 (review of slice 5: judged at H alone it read 0)
     lam[0] = 0.0;
     DenseMatrix F = DenseMatrix::Zero(2, 2);
     F(1, 1) = -1e6;
     lam[1] = std::complex<Real>{-1e6 + 1e-3, 0};
-    REQUIRE(pair_quality(F, V, lam, 2.0).defect < 1e-14);
+    const auto fast = pair_quality(F, V, lam, 2.0);
+    REQUIRE(fast.defect == Approx(1e-9 / std::exp(1.0)).epsilon(0.05));
+    REQUIRE(fast.score() > 1.0);
 }
 
 TEST_CASE("Exact: balancing leaves a balanced matrix untouched",

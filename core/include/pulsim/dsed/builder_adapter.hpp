@@ -51,6 +51,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <chrono>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -256,13 +257,16 @@ public:
     /// and two more of length n_mna. Illinois calls this ~30 times
     /// per located event; events are sparse, so correctness beats
     /// caching here.
+    /// `left_by` > 0 reads a source jumping at t at its left limit
+    /// (build_time_varying_b_extra_).
     [[nodiscard]] Real node_pair_voltage(Index from, Index to,
                                            Real t,
-                                           const Vector& x) const {
+                                           const Vector& x,
+                                           Real left_by = Real{0}) const {
         ensure_current_resolved_();
         const LTIEntry& e = *current_entry_;
         const Vector* b_extra =
-            has_dynamic_sources_ ? &build_time_varying_b_extra_(t) : nullptr;
+            has_dynamic_sources_ ? &build_time_varying_b_extra_(t, left_by) : nullptr;
         auto node_v = [&](Index n) -> Real {
             if (n < 0) {
                 return Real{0};
@@ -671,6 +675,8 @@ public:
     /// Eigendecompositions built, Padé exponentials evaluated, Padé
     /// cache hits — summed over the visited masks.
     [[nodiscard]] std::size_t n_eig() const noexcept { return n_eig_; }
+    /// Wall time spent building propagators (eig, pair judgement, Padé setup).
+    [[nodiscard]] Real build_seconds() const noexcept { return build_seconds_; }
     [[nodiscard]] std::size_t n_pade() const {
         std::size_t s = 0;
         for (const auto& [m, e] : mask_cache_) s += e.exact.n_pade;
@@ -798,6 +804,12 @@ private:
         if (entry.exact_built) {
             return;
         }
+        const auto t0 = std::chrono::steady_clock::now();
+        ensure_exact_built_impl_(entry);
+        build_seconds_ += std::chrono::duration<Real>(std::chrono::steady_clock::now() - t0).count();
+    }
+
+    void ensure_exact_built_impl_(LTIEntry& entry) const {
         entry.exact_built = true;
         if (!has_dynamic_sources_) {
             entry.exact_b = entry.b_constant;
@@ -1522,6 +1534,7 @@ private:
     Real h_max_ = Real{1e-5};
     Real horizon_ = Real{0};
     mutable std::size_t n_eig_ = 0;
+    mutable Real build_seconds_ = 0;
     mutable Vector aug_in_, aug_out_;
 };
 
