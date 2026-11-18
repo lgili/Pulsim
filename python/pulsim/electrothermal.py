@@ -259,7 +259,9 @@ def make_bidirectional_observer(
                 # loop, and a settled thermal network stops changing
                 # long before the run does.
                 if abs(r_new - prev) > 1e-12 * max(abs(prev), 1e-30):
-                    builder.update_resistor_R(tc.branch, r_new)
+                    # refactor_parametric writes the run's own pool
+                    # (the cache's); the caller's builder is not
+                    # touched (add-immutable-circuit-ir).
                     cache.refactor_parametric(d["id"], r_new)
                     r_now[tc.branch] = r_new
                 applied[tc.branch] = r_now[tc.branch]

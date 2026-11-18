@@ -10,12 +10,10 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ConvergenceError', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
-class ConvergenceError(RuntimeError):
-    pass
-class SimulationAborted(ConvergenceError):
+class SimulationAborted(RuntimeError):
     pass
 class UnsupportedError(ValueError):
     device: typing.ClassVar[str] = ''
@@ -226,51 +224,6 @@ class PreflightOptions:
         """
     @tie_resistance.setter
     def tie_resistance(self, arg0: float) -> None:
-        ...
-class LossTable3D:
-    """
-    Switching energy E(v, i, Tj) [J] on a rectilinear grid, read like pulsim.LossTable: multilinear, linear extrapolation past the edges, clamped at 0. Build it with LossTable.to_kernel().
-    """
-    def __call__(self, v: float, i: float, tj: float) -> float:
-        """
-        E [J] at one point.
-        """
-    def __init__(self, v_axis: collections.abc.Sequence[float], i_axis: collections.abc.Sequence[float], tj_axis: collections.abc.Sequence[float], energy: collections.abc.Sequence[float]) -> None:
-        """
-        Strictly ascending axes; energy row-major (v, i, Tj).
-        """
-    @property
-    def energy(self) -> list[float]:
-        ...
-    @property
-    def i_axis(self) -> list[float]:
-        ...
-    @property
-    def tj_axis(self) -> list[float]:
-        ...
-    @property
-    def v_axis(self) -> list[float]:
-        ...
-class ConductionTable:
-    """
-    On-state voltage V_on(i, Tj) [V] on a rectilinear grid, read like pulsim.LossTable (multilinear, extrapolated, clamped at 0).
-    """
-    def __call__(self, i: float, tj: float) -> float:
-        """
-        V_on [V] at one point.
-        """
-    def __init__(self, i_axis: collections.abc.Sequence[float], tj_axis: collections.abc.Sequence[float], v_on: collections.abc.Sequence[float]) -> None:
-        """
-        Strictly ascending axes; v_on row-major (i, Tj).
-        """
-    @property
-    def i_axis(self) -> list[float]:
-        ...
-    @property
-    def tj_axis(self) -> list[float]:
-        ...
-    @property
-    def v_on(self) -> list[float]:
         ...
 class ChargeTable:
     """
@@ -524,8 +477,6 @@ class CircuitBuilder:
         """
     def add_shockley_diode(self, name: str, anode: str, cathode: str, I_S: float = 1e-12, n: float = 1.0, V_T: float = 0.025852, G_min: float = 1e-12, BV: float = 0.0) -> CircuitBuilder:
         """
-        add_shockley_diode(self: pulsim._pulsim.CircuitBuilder, name: str, anode: str, cathode: str, I_S: float = 1e-12, n: float = 1.0, V_T: float = 0.025852, G_min: float = 1e-12, BV: float = 0.0) -> pulsim._pulsim.CircuitBuilder
-
         Add an EXPONENTIAL (Shockley) diode: i = I_S*(exp(v/(n*V_T)) - 1) + v*G_min. Unlike `add_diode` (binary PWL) and the smooth-blend nonlinear diode, the forward drop is not fixed: a real junction's V_F rises ~60 mV per decade of current, so the same device drops 0.53 V at 1 mA and 0.77 V at 10 A. Use `thermal_voltage(T_kelvin)` for a junction temperature other than ~300 K. `BV` is a POSITIVE breakdown magnitude (0 disables it) — give 5.1 for a 5.1 V Zener. No series-resistance parameter on purpose: put a resistor in series, which is exact.
         """
     def add_sine_current_source(self, name: str, n_pos: str, n_neg: str, i_dc: float, i_amplitude: float, frequency: float, phase: float = 0.0) -> CircuitBuilder:
@@ -587,6 +538,10 @@ class CircuitBuilder:
         for round-tripping through GUI file formats. `kind` is
         the string "node" or "branch".
         """
+    def bind_param(self, device_dot_field: str, name: str) -> None:
+        """
+        Drive one field by a parameter: bind_param("L1.L", "Lbase"). add_* does this for a Parameter argument.
+        """
     def branch_id_of(self, name: str) -> int:
         """
         Inverse of name_of: lookup the branch_id for a user-supplied component name. v1.4.0+ — used by the parametric refactor pipeline to translate user-facing strings like 'L_out' into the pool's branch_id for update_* calls. Raises ValueError if the name was never registered.
@@ -597,6 +552,10 @@ class CircuitBuilder:
         `SimulationResult.i(name)` accessor's promise that
         the returned int is the post-node state-vector
         offset (`state_idx == num_nodes + branch_index_of(name)`).
+        """
+    def build(self) -> Circuit:
+        """
+        Immutable snapshot of this builder (a pulsim.Circuit). The builder can keep being edited; the circuit does not change.
         """
     def components(self) -> list[typing.Any]:
         """
@@ -612,6 +571,10 @@ class CircuitBuilder:
         device the builder has accepted. Anonymous branches
         (snubber RC expansion, transformer parallels) are
         skipped. List order matches `add_*` call order.
+        """
+    def get_value(self, device_dot_field: str) -> float:
+        """
+        Value of one field, e.g. get_value("R1.R").
         """
     def ground(self) -> int:
         """
@@ -641,6 +604,14 @@ class CircuitBuilder:
         """
         Role hint for `node_id`. V0 returns 'ground' for the ground node and 'internal' for all others.
         """
+    def param(self, name: str, value: float, unit: str = '', lo: float | None = None, hi: float | None = None) -> Parameter:
+        """
+        Declare a named parameter and return it (a pulsim.Parameter); pass it to any add_* in place of a number. lo / hi bound its value.
+        """
+    def parameters(self) -> list[Parameter]:
+        """
+        The named parameters, in declaration order.
+        """
     def position_hints(self) -> dict[typing.Any, typing.Any]:
         """
         Dict mapping every node_id used in the circuit to its current role hint.
@@ -662,6 +633,14 @@ class CircuitBuilder:
         capacitor (volts) or inductor (amps). Raises
         out_of_range if the name doesn't match a registered
         branch.
+        """
+    def set_param(self, name: str, value: float) -> None:
+        """
+        Re-value a parameter and every field bound to it, in place.
+        """
+    def set_value(self, device_dot_field: str, value: float) -> None:
+        """
+        Set one value field in place, e.g. set_value("R1.R", 2.0); every field of every kind (see Circuit.devices()). Raises ValueError naming device and field on an unknown name or an out-of-bound value.
         """
     def state_var_names(self) -> list[str]:
         """
@@ -727,6 +706,8 @@ class CircuitBuilder:
         - Python fallback: same shape via ``_aliases``.
         """
         ...
+    def _snapshot(self) -> Circuit:
+        """``build()`` without the side-state check (``simulate`` keeps the builder's Python side state beside it)."""
 class BranchKind:
     """
     Topological category of a branch. Layer 4 enumerates over `Switch`-kind branches; the rest are unconditional.
@@ -1132,6 +1113,10 @@ class PwlStateSpaceCache:
     def set_segment_budget_bytes(self, bytes: int) -> None:
         """
         Set the lazy-mode segment cache byte budget. Once the estimated resident bytes would exceed it, the least-recently-solved mask's factor is evicted (transparently rebuilt on re-visit). 0 disables eviction. Default: 1 GiB. Eager build() never evicts.
+        """
+    def share_symbolic(self, circuit: Circuit) -> None:
+        """
+        Share symbolic analyses with every cache of a circuit of this structure (with_params / with_value derivations): one analysis per sweep. Call before the first build; results are bit-identical.
         """
 class SimulationOptions:
     """
@@ -1874,6 +1859,18 @@ class SimulationResult:
             that case.
         NameNotFoundError
             If any signal can't be resolved as a node OR a branch.
+        """
+        ...
+    @property
+    def plan(self) -> typing.Any:
+        """
+        The run's RunPlan (circuit, ties, preflight); None for a run from a builder stand-in.
+        """
+        ...
+    @property
+    def circuit(self) -> Circuit | None:
+        """
+        The pulsim.Circuit this run simulated (with any regularising ties); the caller's builder is never changed.
         """
         ...
 class LoadedCircuit:
@@ -2805,6 +2802,115 @@ class _NativeCircuitBuilderAdapter:
         """
         Number of distinct masks resolved (and thus cached) so far. Useful for tests + diagnostics.
         """
+class Parameter:
+    """
+    A named parameter (`builder.param(name, value, unit)`). Pass it to any `add_*` in place of a number: the field takes its value, and `Circuit.with_params` re-values it.
+    """
+    def __repr__(self) -> str:
+        ...
+    @property
+    def hi(self) -> float | None:
+        ...
+    @property
+    def lo(self) -> float | None:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def unit(self) -> str:
+        ...
+    @property
+    def value(self) -> float:
+        ...
+class Circuit:
+    """
+    Immutable circuit (add-immutable-circuit-ir). Built with `builder.build()`; a handle to shared, read-only data, cheap to copy and safe to share between threads. `simulate(circuit, ...)` runs it; the builder it came from can keep being edited.
+    """
+    def __repr__(self) -> str:
+        ...
+    def aliases(self) -> dict[typing.Any, typing.Any]:
+        """
+        {alias: (kind, target)}, as CircuitBuilder.aliases().
+        """
+    def branch_id_of(self, name: str) -> int:
+        """
+        As CircuitBuilder.branch_id_of().
+        """
+    def components(self) -> typing.Any:
+        """
+        As CircuitBuilder.components().
+        """
+    def devices(self) -> list[typing.Any]:
+        """
+        One dict per lowered branch, in insertion order: name, kind (capability-table name), pins (node indices, -1 = ground), fields ({name: value}, the names `with_value` takes) and params ({field: parameter name} for the fields a parameter drives).
+        """
+    def get_value(self, device_dot_field: str) -> float:
+        """
+        Value of one field, e.g. get_value("R1.R").
+        """
+    def initial_conditions(self) -> dict[typing.Any, typing.Any]:
+        """
+        {device name: value} of the recorded initial conditions.
+        """
+    def initial_state(self) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
+        """
+        As CircuitBuilder.initial_state().
+        """
+    def node_id_of(self, name: str) -> int:
+        """
+        As CircuitBuilder.node_id_of().
+        """
+    def parameters(self) -> list[Parameter]:
+        """
+        The named parameters, in declaration order.
+        """
+    def state_var_names(self) -> list[str]:
+        """
+        As CircuitBuilder.state_var_names().
+        """
+    def structure_hash(self) -> int:
+        """
+        64-bit hash of topology, kinds and names.
+        """
+    def switch_index_of(self, name: str) -> int:
+        """
+        As CircuitBuilder.switch_index_of().
+        """
+    def to_builder(self) -> CircuitBuilder:
+        """
+        A new, independent CircuitBuilder holding this circuit (the circuit is not affected by edits to it).
+        """
+    def value_hash(self) -> int:
+        """
+        64-bit hash of the structure and every value (fields, couplings, initial conditions, aliases).
+        """
+    def with_params(self, values: dict[typing.Any, typing.Any] = {}, **kwargs) -> Circuit:
+        """
+        A new circuit with parameter values replaced: with_params({"Lbase": 2e-3}) or with_params(Lbase=2e-3). Every field bound to a parameter follows it; the structure (and structure_hash) is unchanged, the receiver too.
+        """
+    def with_preflight(self, options: PreflightOptions) -> tuple[Circuit, PreflightReport, list[typing.Any]]:
+        """
+        Run the topology preflight on this circuit without changing it: returns (circuit, report, ties) — the circuit a run uses (this one when no tie was needed), the PreflightReport, and the inserted ties as (name, node index, resistance).
+        """
+    def with_ties(self, ties: list[typing.Any]) -> Circuit:
+        """
+        The circuit with regularising ties added: a list of (name, node index, resistance) to ground, as `result.plan.ties` reports them. The receiver is unchanged.
+        """
+    def with_value(self, device_dot_field: str, value: float) -> Circuit:
+        """
+        A new circuit with one field set, e.g. with_value("R1.R", 2.0): equal, bit for bit, to rebuilding with that literal. Every field of every kind (see devices()); the receiver is unchanged. ValueError names device and field on an unknown name or an out-of-bound value.
+        """
+    @property
+    def nodes(self) -> list[typing.Any]:
+        """
+        Node names; entry i is unknown i.
+        """
+    @property
+    def num_switches(self) -> int:
+        """
+        Number of switching branches (the SwitchStateMask size).
+        """
 def _cpp_ipd_switching_function(m_ref: float, t: float, n_sm: int, f_carrier: float, sm_type: str = 'half_bridge') -> int:
     """
     C++ hotpath: IPD (In-Phase Disposition) switching function. All N carriers share the same phase but sit at stacked DC offsets, so the output only switches between two adjacent levels per step. Cleaner spectrum than PS-PWM at small N.
@@ -2872,14 +2978,6 @@ def describe_implausible_voltage(graph: Graph, pool: DevicePool, finding: Implau
 def dopri5_solve(f: collections.abc.Callable, t0: float, t_end: float, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], rtol: float = 1e-05, atol: float = 1e-08, dt_min: float = 1e-12, dt_max: float = 0.0, safety: float = 0.9, growth_max: float = 5.0, shrink_min: float = 0.2, dt_init: float = -1.0) -> dict[typing.Any, typing.Any]:
     """
     Dormand-Prince 5(4) embedded adaptive Runge-Kutta solver (Phase 2.4 C++ port). Solves dx/dt = f(t, x) from t0 to t_end. Returns a dict with t, x, n_accepted, n_rejected, n_f_evals. The Python f(t, x) callable is invoked from C++ with the GIL re-acquired around each evaluation.
-    """
-def dsed_period_map(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], period: float, observables: list[typing.Any] = [], pairs: collections.abc.Sequence[tuple[int, int]] = [], monodromy: bool = True, rtol: float = 1e-11, atol: float = 1e-14, mode_guard_h_e: float = 0.0) -> dict[typing.Any, typing.Any]:
-    """
-    One period of the exact stepper from x0 (events located, no projection) with the GIL released: x(T), the events, the monodromy M = dP/dx0 and, per observable (indices, coefs, bit, g_on, g_off, v_on, extrema), the closed-form integrals stats[j] = (int y, int y^2, peak, t_peak, valley, t_valley) and cross[q] = int y_a*y_b per pair. integrals_ok is False with a reason when a mode has no modal form or a step was numeric. DC sources only.
-    """
-def dsed_periodic_orbit(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], period: float, observables: list[typing.Any] = [], pairs: collections.abc.Sequence[tuple[int, int]] = [], rtol: float = 1e-09, max_period_runs: int = 60, n_relax: int = 5, run_rtol: float = 1e-11, run_atol: float = 1e-14, mode_guard_h_e: float = 0.0) -> dict[typing.Any, typing.Any]:
-    """
-    Newton shooting for the periodic orbit on the exact stepper, the GIL released for the whole solve: the loop of pulsim.periodic_steady_state (scaled-norm residual, Armijo backtracking, relaxation rounds, stop on the Newton step, period-run budget). status is 'converged' or the typed outcome ('budget', 'no_progress', 'singular', 'marginal', 'grazing', 'run_failed', 'irreproducible'); 'period' is the verification period (dsed_period_map's dict, with the observables). DC sources only.
     """
 def engine_capabilities() -> dict[typing.Any, typing.Any]:
     """

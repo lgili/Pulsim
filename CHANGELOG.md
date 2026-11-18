@@ -494,6 +494,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `start_from_dc_op` checks the converged DC mode;
   `device_loss_summary` warns when it leaves out an ideal element.
 
+### Immutable circuit IR (add-immutable-circuit-ir, first slice)
+
+* **Added** `pulsim.Circuit`: `builder.build()` returns an immutable
+  snapshot — one shared pointer to read-only data, safe to share between
+  threads — whose lowered form is the builder's own graph and pool in
+  insertion order. `simulate(circuit, ...)` runs it bit-identically to
+  `simulate(builder, ...)` on `pwl`, `trbdf2` and `dsed`. Queries:
+  `devices()` (per branch: name, kind, pins, value fields), `nodes`,
+  `components()`, `initial_state()`, `state_var_names()`,
+  `switch_index_of()`, `structure_hash()`, `value_hash()`,
+  `to_builder()` (an independent mutable copy).
+* **Added** `builder.set_value("R1.R", 2.0)` / `get_value(...)`: every
+  value field of every device kind by name (the table is
+  `core/include/pulsim/ir/fields.hpp`); out-of-bound values and unknown
+  names raise `ValueError` naming the device and the field.
+* **BREAKING** `simulate()` and `compute_dc_op()` no longer change the
+  caller's builder. The topology preflight regularises the run's own
+  copy: its ties (1 GOhm per floating subnet) are in
+  `result.plan.ties`, the circuit that ran is `result.circuit`, and
+  the warning now says your builder is unchanged. Results are
+  bit-identical to before. **Migration:** code that relied on the ties
+  persisting (a second `simulate(..., auto_regularize=False)` on the
+  same builder, or reading `R_auto_iso_*` from it) gets the original
+  singular-matrix error; keep `auto_regularize=True`, add the tie
+  yourself, or run `result.circuit` / `circuit.with_ties(...)`.
+  `Circuit.with_preflight(options)` returns `(circuit, report, ties)`
+  without running.
+* **Added** named parameters and generic value updates
+  (docs/parameters.md): `p = builder.param("Lbase", 1e-3, "H", lo=,
+  hi=)` passed to any `add_*` in place of a number drives that field;
+  `circuit.with_params(Lbase=2e-3)` and `circuit.with_value("RL.R",
+  8.0)` return new circuits equal, bit for bit, to rebuilding (one
+  field of every device kind is tested), and leave the receiver
+  unchanged. Errors name the parameter, the device and the field.
+  Field updates are checked as `add_*` checks the device (cross-field
+  rules, fields the device's law does not read).
+* **Deprecated** `update_resistor_R`, `update_inductor_L`,
+  `update_capacitor_C`, `update_voltage_source_V`
+  (`DeprecationWarning`): use `circuit.with_value("R1.R", v)` or, in
+  place, `builder.set_value("R1.R", v)` — which also checks the bound.
+* **Changed** `builder.build()` refuses a builder carrying C blocks
+  (`UnsupportedError`; a Circuit cannot hold them yet — simulate the
+  builder); `simulate(circuit, mmc_arms=...)` asks for the builder.
+  Shockley loss/thermal parameters are read from the device's fields,
+  so `set_value("D1.I_S", ...)` reaches them.
+* **Added** `pulsim.sweep(circuit, params=...)` and
+  `pulsim.monte_carlo(circuit, distributions=...)`: a `pulsim.Circuit`
+  in place of the builder factory. Parameter names go through
+  `with_params`, `"device.field"` names through `with_value`; the
+  points share the circuit's symbolic analysis (one per sweep, where
+  the factory form does one per point: the 100-point ladder sweep runs
+  in 168 ms against 497 ms) and the results are bit-identical. With
+  `parallel=True` the points run on threads sharing the circuit;
+  `backend="process"` is refused (a Circuit does not pickle).
+
 ### Integration fixes (batch 6b: design optimisation, exact route)
 
 * **Fixed** `pulsim.design` returned `ok` for a run that `simulate`
