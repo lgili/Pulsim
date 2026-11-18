@@ -2282,7 +2282,12 @@ inline SimulationResult run_transient_trbdf2(
                 if (!is_singular_error(e) || nl_effective) throw;
                 // A final sliver (an edge landed a few h_min before t_end)
                 // ends the run here, as the loop already does within h_min.
-                if (t + h >= opts.t_end && h <= Real{64} * h_min) break;
+                if (t + h >= opts.t_end && h <= Real{64} * h_min) {
+                    // the SDIRK stage swapped in derivative-free history:
+                    // the run's final snapshot must hold the real one
+                    if (sdirk) history.restore(hist_snap);
+                    break;
+                }
                 const bool landing = h < h_ctrl * (Real{1} - Real{1e-12});
                 if (landing || Real{4} * h > std::min(h_max, opts.t_end - t)) {
                     throw std::runtime_error(std::format(
