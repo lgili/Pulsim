@@ -493,6 +493,68 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `cl_buck_aggressive_pi`, `ll16` (pwl) agree; `ll14`, `ll15` and `ll16`
   (trbdf2) disagree, not yet diagnosed; `cl_boost_pi` grinds on trbdf2.
 
+### Circuit IR slice 3 (add-immutable-circuit-ir)
+
+* **Added** scopes (group 8). A subsystem instance is a scope of the
+  circuit: `Circuit.scopes()` lists the tree (`path`, `name`, `kind` =
+  the `define_subsystem` definition, `parent`), `Circuit.scope_of(name)`
+  the scope of a device, node or parameter. `define_subsystem(...)
+  .instantiate` opens one per instance; `with builder.scope(path,
+  kind=...)` (C++ `open_scope` / `close_scope`) opens one by hand. A
+  parameter declared in a scope belongs to it (`leg_a/sm17/Ron`), and an
+  expression looks names up from its scope outward (an inner name
+  shadows an outer one), so `with_params({"leg_a/sm17/Ron": ...})`
+  re-values one instance. Names are unchanged (`leg_a/sm17/C`): a scoped
+  circuit equals its hand-prefixed twin element for element and
+  simulates bit for bit like it on pwl, trbdf2 and dsed (pinned on a
+  302-branch arm); its
+  `structure_hash` (and so `value_hash`) and `scopes()` differ. YAML netlists take
+  `circuit.subsystems` (nested blocks with `name`, `kind`, `ports`,
+  `parameters`, `nodes`, `devices`, `subsystems`); `Circuit.to_yaml()`
+  writes the tree and `from_yaml` restores it. A circuit without scopes
+  hashes as before. **Migration:** instantiating a definition twice at
+  one path was refused by the duplicate device name; it is now refused
+  first, by the path (`already used by an instance`). A nested
+  `instantiate` through a body's proxy after that body returned is
+  refused (it would have opened the scope at the wrong level). Inside
+  a scope, `param("Ron", "2*Ron")` is refused as a cycle (it read the
+  outer `Ron`), and `bind_param` / `set_param` find the scope's own name
+  first: a body's `s.param("Cv")` is stored as `<path>/Cv` and found by
+  its local name while the body runs. A YAML block name holding `/` is
+  refused (nest blocks).
+* **Added** `yaml::load` / `load_yaml_string` read the emitter's
+  document (`Circuit.to_yaml()`, same `value_hash`), and a `type:` that
+  names a registry kind without an authoring type of its own
+  (`shockley_diode`, `lauritzen_diode`, `nonlinear_capacitor`,
+  `pmsm_mna`) is read with the emitter's entry (`pins: [...]`, stored
+  fields): one schema table (`ir::kKindYaml` / `kKindFields`, compile-time
+  checked) for both readers.
+* **Changed** `Circuit.from_yaml` applies the authoring bounds to every
+  value a document writes (`R1: G must be a finite number > 0 (got
+  -1)`), as `with_value` does; a branch-form switch or diode keeps its
+  own rule (`R_on`, `g_off` >= 0). Not every `add_*` checks them
+  (`add_resistor` takes R < 0): such a circuit still pickles (the pickle
+  reads its own text without the bounds), but `from_yaml(c.to_yaml())`
+  refuses it. **Migration:** a document with an out-of-bound value is
+  refused by name.
+* **Changed** a NaN or an infinity is refused by name at both ends:
+  `to_yaml` (and so pickling) raises `to_yaml: device "R1": "G" is .nan`,
+  and `from_yaml` reads no `.nan` / `.inf` / `nan` / `inf` (`"V" must be
+  a finite number`). A branch-form switch or diode no longer writes its
+  `g_on` (1/R_on, infinite when ideal); `from_yaml` sets it from
+  `branch_form.R_on` as `add_*` does. **Migration:** a document written
+  before this change with `g_on: .inf` on a branch-form device is
+  refused; delete that key.
+* **Changed** a `Circuit`'s tables and hashes (`nodes()`, `devices()`,
+  `structure_hash()`, ...) are computed on first use: a derivation
+  (`with_value`, `with_params`, a sweep point) costs its clone only.
+* **Changed** `Evaluator(circuit=...).evaluate_many(backend="process")`
+  runs the circuit form (a `Circuit` pickles); a part beside it that
+  does not pickle is still refused by name.
+* Numbers in `to_yaml` stay shortest-round-trip (`std::to_chars`), not
+  `%.17g`: the same exact round trip (tested), text a person would type
+  (DECISIONS 16).
+
 ### Circuit IR slice 2 (add-immutable-circuit-ir)
 
 * **Changed** `sweep(circuit, ...)` / `monte_carlo(circuit, ...)` run

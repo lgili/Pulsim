@@ -76,6 +76,18 @@ struct Parameter {
     std::optional<Real> lo;
     std::optional<Real> hi;
     std::string expr{};   // group 7: defined by this expression (empty: a literal)
+    std::uint32_t scope = 0;  // group 8: the scope it was declared in (0 = root)
+};
+
+/// A scope (group 8): one instance of a subsystem, or a path segment
+/// above one. Id 0 is the root (implicit); scope `i > 0` is
+/// `scopes()[i - 1]`. Members are found by name: an element belongs to
+/// the deepest scope whose `path + "/"` prefixes its flattened name.
+struct Scope {
+    std::string name;         // its own segment ("sm17")
+    std::uint32_t parent;     // 0 = the root
+    std::string kind;         // the subsystem definition ("" = a plain path segment)
+    std::string path;         // "leg_a/sm17"
 };
 
 struct ParamId { std::uint32_t v; };

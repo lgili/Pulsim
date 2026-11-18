@@ -108,17 +108,8 @@ public:
                         std::string_view unit = {},
                         std::optional<Real> lo = std::nullopt,
                         std::optional<Real> hi = std::nullopt) {
-        if (name.empty() || name.find('.') != std::string_view::npos) {
-            throw std::invalid_argument(std::format(
-                "param(\"{}\"): a parameter name must be non-empty and "
-                "contain no '.'", name));
-        }
-        if (find_param_(name) != kNoParam_) {
-            throw std::invalid_argument(std::format(
-                "param(\"{}\"): a parameter of that name already exists",
-                name));
-        }
-        ir::Parameter p{std::string{name}, value, std::string{unit}, lo, hi};
+        const auto full = declare_name_(std::format("param(\"{}\")", name), name);
+        ir::Parameter p{full, value, std::string{unit}, lo, hi, {}, cur_scope_};
         check_param_(p, value);
         params_.push_back(p);
         exprs_.emplace_back();
@@ -134,18 +125,15 @@ public:
                              std::optional<Real> lo = std::nullopt,
                              std::optional<Real> hi = std::nullopt) {
         const auto who = std::format("param(\"{}\")", name);
-        if (name.empty() || name.find('.') != std::string_view::npos) {
-            throw std::invalid_argument(std::format(
-                "{}: a parameter name must be non-empty and contain no '.'", who));
-        }
-        if (find_param_(name) != kNoParam_) {
-            throw std::invalid_argument(std::format(
-                "{}: a parameter of that name already exists", who));
-        }
-        auto e = ir::Expr::compile(text, [&](std::string_view n) -> std::optional<std::uint32_t> {
-            const auto i = find_param_(n);
-            if (i == kNoParam_) return std::nullopt;
-            return static_cast<std::uint32_t>(i);
+        const auto full = declare_name_(who, name);
+        auto e = ir::Expr::compile(text, [&](std::string_view n) {
+            // as YAML refuses it: an outer `Ron` is not read by an inner `Ron`
+            if (n == name) {
+                throw std::invalid_argument(std::format(
+                    "parameter \"{}\": its expression depends on itself ({} -> {})",
+                    full, name, name));
+            }
+            return lookup_param(n);
         }, who);
         std::vector<Real> vals;
         for (const auto& q : params_) vals.push_back(q.value);
@@ -154,7 +142,7 @@ public:
             throw std::invalid_argument(std::format(
                 "{}: expression \"{}\" evaluates to {}", who, text, v));
         }
-        ir::Parameter p{std::string{name}, v, std::string{unit}, lo, hi, std::string{text}};
+        ir::Parameter p{full, v, std::string{unit}, lo, hi, std::string{text}, cur_scope_};
         check_param_(p, v);
         params_.push_back(p);
         exprs_.push_back(std::move(e));
@@ -166,6 +154,101 @@ public:
     }
     [[nodiscard]] std::span<const ParamBinding> param_bindings() const noexcept {
         return bindings_;
+    }
+
+    // ---- add-immutable-circuit-ir group 8: scopes --------------------
+    /// Open scope `path` ('/'-separated, relative to the open scope),
+    /// creating its segments; `kind` names the subsystem definition it
+    /// instantiates. Parameters declared until `close_scope()` belong to
+    /// it, and expressions look names up from it outward (a name in an
+    /// inner scope shadows an outer one). Names of devices and nodes are
+    /// not rewritten here: a scope's members are the elements whose
+    /// flattened name starts with its path (`scope_of`), which is what
+    /// `define_subsystem` and the YAML `subsystems` produce. A path whose
+    /// last segment already instantiated a definition is refused.
+    std::uint32_t open_scope(std::string_view path, std::string_view kind = {}) {
+        auto bad = [&](std::string_view why) {
+            throw std::invalid_argument(std::format("scope(\"{}\"): {}", path, why));
+        };
+        if (path.empty() || path.front() == '/' || path.back() == '/' ||
+            path.find("//") != std::string_view::npos) {
+            bad("a scope path is one or more non-empty names separated by '/'");
+        }
+        std::uint32_t at = cur_scope_;
+        for (std::size_t pos = 0;;) {
+            const auto slash = path.find('/', pos);
+            const bool last = slash == std::string_view::npos;
+            const auto seg = path.substr(pos, last ? std::string_view::npos : slash - pos);
+            std::string full = at == 0 ? std::string{seg}
+                                       : std::format("{}/{}", scopes_[at - 1].path, seg);
+            auto it = scope_index_.find(full);
+            if (it == scope_index_.end()) {
+                scopes_.push_back(ir::Scope{std::string{seg}, at,
+                                            last ? std::string{kind} : std::string{}, full});
+                it = scope_index_.emplace(std::move(full),
+                                          static_cast<std::uint32_t>(scopes_.size())).first;
+            } else if (last && !kind.empty()) {
+                auto& sc = scopes_[it->second - 1];
+                if (!sc.kind.empty()) {
+                    bad(std::format("the path is already used by an instance of \"{}\"; "
+                                    "instance paths must be unique", sc.kind));
+                }
+                sc.kind = std::string{kind};
+            }
+            at = it->second;
+            if (last) break;
+            pos = slash + 1;
+        }
+        scope_stack_.push_back(cur_scope_);
+        cur_scope_ = at;
+        return at;
+    }
+
+    /// Return to the scope that was open before the last `open_scope`.
+    void close_scope() {
+        if (scope_stack_.empty()) {
+            throw std::logic_error("close_scope: no scope is open");
+        }
+        cur_scope_ = scope_stack_.back();
+        scope_stack_.pop_back();
+    }
+
+    [[nodiscard]] std::span<const ir::Scope> scopes() const noexcept { return scopes_; }
+    [[nodiscard]] std::uint32_t current_scope() const noexcept { return cur_scope_; }
+    /// Path of scope `id` ("" for the root).
+    [[nodiscard]] std::string_view scope_path(std::uint32_t id) const {
+        return id == 0 ? std::string_view{} : std::string_view{scopes_.at(id - 1).path};
+    }
+    /// `local` as named in the open scope: "leg_a/sm17/C".
+    [[nodiscard]] std::string scoped_name(std::string_view local) const {
+        return cur_scope_ == 0 ? std::string{local}
+                               : std::format("{}/{}", scopes_[cur_scope_ - 1].path, local);
+    }
+    /// "gnd" / "GND" / "0": ground, in every scope (never prefixed).
+    [[nodiscard]] static constexpr bool is_ground_name(std::string_view n) noexcept {
+        return is_ground_alias_(n);
+    }
+    /// The scope an element named `name` belongs to: the deepest scope
+    /// whose path followed by '/' prefixes it (0 = the root).
+    [[nodiscard]] std::uint32_t scope_of(std::string_view name) const {
+        for (auto pos = name.rfind('/'); pos != std::string_view::npos && pos > 0;
+             pos = name.rfind('/', pos - 1)) {
+            if (const auto it = scope_index_.find(name.substr(0, pos));
+                it != scope_index_.end()) {
+                return it->second;
+            }
+        }
+        return 0;
+    }
+    /// Parameter `name` as an expression in the open scope sees it: the
+    /// open scope first, then each enclosing scope, then the root.
+    [[nodiscard]] std::optional<std::uint32_t> lookup_param(std::string_view name) const {
+        for (std::uint32_t s = cur_scope_;; s = scopes_[s - 1].parent) {
+            const auto i = s == 0 ? find_param_(name)
+                                  : find_param_(std::format("{}/{}", scopes_[s - 1].path, name));
+            if (i != kNoParam_) return static_cast<std::uint32_t>(i);
+            if (s == 0) return std::nullopt;
+        }
     }
 
     /// Drive field `device_dot_field` by parameter `name`: the field
@@ -2749,6 +2832,32 @@ private:
         });
     }
 
+    /// The stored (flattened) name of a parameter `local` declared in
+    /// the open scope; refuses an empty name, '.', a '/' inside a scope
+    /// and a name already declared there.
+    [[nodiscard]] std::string declare_name_(std::string_view who, std::string_view local) const {
+        if (local.empty() || local.find('.') != std::string_view::npos ||
+            (cur_scope_ != 0 && local.find('/') != std::string_view::npos)) {
+            throw std::invalid_argument(std::format(
+                "{}: a parameter name must be non-empty and contain no '.'{}", who,
+                cur_scope_ != 0 ? " (and, inside a scope, no '/')" : ""));
+        }
+        auto full = scoped_name(local);
+        if (full.find('.') != std::string::npos) {
+            throw std::invalid_argument(std::format(
+                "{}: scope \"{}\" contains a '.', so a parameter cannot be "
+                "declared in it (\"{}\" would read as device.field)", who,
+                scope_path(cur_scope_), full));
+        }
+        if (find_param_(full) != kNoParam_) {
+            throw std::invalid_argument(std::format(
+                "{}: a parameter of that name already exists{}", who,
+                cur_scope_ != 0 ? std::format(" in scope \"{}\"", scope_path(cur_scope_))
+                                : std::string{}));
+        }
+        return full;
+    }
+
     static constexpr std::size_t kNoParam_ = static_cast<std::size_t>(-1);
     [[nodiscard]] std::size_t find_param_(std::string_view name) const noexcept {
         for (std::size_t i = 0; i < params_.size(); ++i) {
@@ -2758,7 +2867,9 @@ private:
     }
     [[nodiscard]] std::size_t require_param_(std::string_view fn,
                                              std::string_view name) const {
-        const auto i = find_param_(name);
+        // lexical first (an open scope's own name, then outward), then the full name
+        const auto l = lookup_param(name);
+        const auto i = l ? std::size_t{*l} : find_param_(name);
         if (i == kNoParam_) {
             std::string names;
             for (const auto& p : params_) {
@@ -2785,6 +2896,13 @@ private:
     std::vector<ir::Parameter> params_;
     std::vector<ir::Expr>      exprs_;     // parallel to params_ (empty: literal)
     std::vector<ParamBinding>  bindings_;
+    // group 8: the scope tree (id i > 0 is scopes_[i - 1]), its index by
+    // path, the open scope and the scopes to return to.
+    std::vector<ir::Scope>     scopes_;
+    std::unordered_map<std::string, std::uint32_t,
+                        NodeKeyHash, std::equal_to<>> scope_index_;
+    std::uint32_t              cur_scope_ = 0;
+    std::vector<std::uint32_t> scope_stack_;
 
     /// The builder's graph, copyable only through `Graph::clone` so
     /// the builder's (private) copy constructor stays a default one:

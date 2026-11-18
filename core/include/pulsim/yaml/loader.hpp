@@ -54,6 +54,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "pulsim/ir/expr.hpp"
+#include "pulsim/yaml/emitter.hpp"
 
 #include <charconv>
 
@@ -65,6 +66,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -1014,6 +1016,21 @@ inline void load_device(
             require_string(dev, idx, type, "drain"),
             require_string(dev, idx, type, "source"),
             require_string(dev, idx, type, "gate"), p);
+    } else if (std::ranges::find(ir::kKindYaml, std::string_view{type}) !=
+               ir::kKindYaml.end()) {
+        // A registry kind without an authoring type of its own
+        // (shockley_diode, lauritzen_diode, nonlinear_capacitor, pmsm_mna,
+        // ...): the emitter's entry, `pins: [...]` and its stored fields
+        // (one schema table for both, `ir::kKindYaml` / `kKindFields`).
+        YAML::Node d = YAML::Clone(dev);
+        d.remove("type");
+        d["kind"] = type;
+        try {
+            ir::YamlIo::read_entry(b, d);
+        } catch (const std::invalid_argument& e) {
+            throw std::runtime_error(std::format("yaml::load: device {}: {}",
+                                                 device_label(dev, idx), e.what()));
+        }
     } else {
         throw std::runtime_error(
             "yaml::load: device " + device_label(dev, idx) +
@@ -1115,12 +1132,8 @@ inline void load_device_expr(builder::CircuitBuilder& b, const YAML::Node& dev,
             const auto text = kv.second.as<std::string>();
             const auto who = std::format("device \"{}\" field \"{}\"", name, key);
             const auto params = b.parameters();
-            const auto e = ir::Expr::compile(text, [&](std::string_view n)
-                    -> std::optional<std::uint32_t> {
-                for (std::size_t i = 0; i < params.size(); ++i) {
-                    if (params[i].name == n) return static_cast<std::uint32_t>(i);
-                }
-                return std::nullopt;
+            const auto e = ir::Expr::compile(text, [&](std::string_view n) {
+                return b.lookup_param(n);   // the open scope, then outward
             }, who);
             std::vector<Real> vals;
             for (const auto& q : params) vals.push_back(q.value);
@@ -1138,9 +1151,12 @@ inline void load_device_expr(builder::CircuitBuilder& b, const YAML::Node& dev,
                 "only a value field of the device's own branch; write a number here",
                 name, key));
         }
-        const auto hidden = std::format("{}:{}", name, key);
-        b.param_expr(hidden, text);
-        b.bind_param(std::format("{}.{}", name, key), hidden);
+        // Declared in the device's scope, under its local name there.
+        const auto prefix = b.scoped_name("");
+        const std::string_view local = name.starts_with(prefix) && b.current_scope() != 0
+            ? std::string_view{name}.substr(prefix.size()) : std::string_view{name};
+        const auto hidden = b.param_expr(std::format("{}:{}", local, key), text);
+        b.bind_param(std::format("{}.{}", name, key), hidden.name);
     }
 }
 
@@ -1217,6 +1233,144 @@ inline void warn_unknown_keys(
                 "for a typo or a mis-indented block", where, key,
                 accepted));
         }
+    }
+}
+
+/// Keys of authoring device entries whose value is a NODE name (group 8:
+/// renamed into a subsystem's scope). `control` names a branch. A key
+/// added to `load_device` that names a node belongs here; the subsystem
+/// test loads one device of every authoring type inside a scope and
+/// compares it with its hand-prefixed twin.
+inline constexpr std::string_view kNodeKeys[] = {
+    "from", "to", "anode", "cathode", "drain", "source", "gate", "collector",
+    "emitter", "in_pos", "in_neg", "out", "out_pos", "out_neg", "a_pos", "a_neg",
+    "p_from", "p_to", "s_from", "s_to", "p1_pos", "p1_neg", "p2_pos", "p2_neg",
+    "neutral_node", "omega_node",
+    "omega", "theta"};   // a registry-kind entry (pmsm_mna); its `pins` lists too
+
+/// One subsystem block's naming: its ports (local name -> the node it
+/// binds in the enclosing scope) on top of the builder's open scope.
+struct BlockNames {
+    builder::CircuitBuilder& b;
+    std::unordered_map<std::string, std::string> ports;
+
+    [[nodiscard]] std::string node(const std::string& local) const {
+        if (const auto it = ports.find(local); it != ports.end()) return it->second;
+        if (builder::CircuitBuilder::is_ground_name(local)) return local;
+        return b.scoped_name(local);
+    }
+    /// A copy of `dev` with its name, nodes and sensed branch in scope.
+    [[nodiscard]] YAML::Node device(const YAML::Node& dev) const {
+        if (!dev.IsMap()) return dev;
+        YAML::Node d = YAML::Clone(dev);
+        auto scalar = [](const YAML::Node& n) { return n && n.IsScalar(); };
+        if (scalar(d["name"])) d["name"] = b.scoped_name(d["name"].as<std::string>());
+        if (scalar(d["control"])) d["control"] = b.scoped_name(d["control"].as<std::string>());
+        for (const auto k : kNodeKeys) {
+            const std::string key{k};
+            if (scalar(d[key])) d[key] = node(d[key].as<std::string>());
+        }
+        for (const auto* list : {"windings", "secondaries"}) {
+            if (!d[list] || !d[list].IsSequence()) continue;
+            for (std::size_t i = 0; i < d[list].size(); ++i) {
+                YAML::Node w = d[list][i];
+                if (!w.IsMap()) continue;
+                for (const auto* k : {"from", "to", "s_from", "s_to"}) {
+                    if (scalar(w[k])) w[k] = node(w[k].as<std::string>());
+                }
+            }
+        }
+        auto pins = [&](YAML::Node list) {
+            if (!list || !list.IsSequence()) return;
+            for (std::size_t i = 0; i < list.size(); ++i) {
+                if (scalar(list[i])) list[i] = node(list[i].as<std::string>());
+            }
+        };
+        pins(d["pins"]);
+        if (d["phases"] && d["phases"].IsSequence()) {
+            for (std::size_t i = 0; i < d["phases"].size(); ++i) {
+                YAML::Node ph = d["phases"][i];
+                if (!ph.IsMap()) continue;
+                if (scalar(ph["name"])) ph["name"] = b.scoped_name(ph["name"].as<std::string>());
+                pins(ph["pins"]);
+            }
+        }
+        if (d["phase_nodes"] && d["phase_nodes"].IsSequence()) {
+            for (std::size_t i = 0; i < d["phase_nodes"].size(); ++i) {
+                if (scalar(d["phase_nodes"][i])) {
+                    d["phase_nodes"][i] = node(d["phase_nodes"][i].as<std::string>());
+                }
+            }
+        }
+        return d;
+    }
+};
+
+/// `circuit.subsystems`: [{name, kind?, ports?, parameters?, nodes?,
+/// devices?, subsystems?}]. Each block is a scope: its parameters are
+/// declared in it (expressions see them first, then the enclosing
+/// scopes), and every device and node name it writes is prefixed with
+/// its path, except its ports (bound to nodes of the enclosing block)
+/// and ground.
+inline void load_subsystems(builder::CircuitBuilder& b, const YAML::Node& list,
+                            const BlockNames& outer, std::vector<std::string>& warnings) {
+    if (!list.IsSequence()) {
+        throw std::runtime_error("yaml::load: 'subsystems' must be a list of blocks");
+    }
+    for (const auto& blk : list) {
+        if (!blk.IsMap() || !blk["name"] || !blk["name"].IsScalar()) {
+            throw std::runtime_error("yaml::load: each subsystem needs a 'name'");
+        }
+        const auto name = blk["name"].as<std::string>();
+        if (name.empty() || name.find('/') != std::string::npos) {
+            throw std::runtime_error(std::format(
+                "yaml::load: subsystem '{}': a block name is one non-empty path "
+                "segment (no '/'); nest blocks with 'subsystems'", name));
+        }
+        warn_unknown_keys(blk, {"name", "kind", "ports", "parameters", "nodes", "devices",
+                                "subsystems"},
+                          std::format("subsystem '{}':", b.scoped_name(name)), warnings);
+        BlockNames inner{b, {}};
+        if (const auto ps = blk["ports"]) {
+            if (!ps.IsMap()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: subsystem '{}': 'ports' must map a local name to "
+                    "a node of the enclosing block", name));
+            }
+            for (const auto& kv : ps) {
+                inner.ports.emplace(kv.first.as<std::string>(),
+                                    outer.node(kv.second.as<std::string>()));
+            }
+        }
+        const auto kind = blk["kind"] && blk["kind"].IsScalar()
+            ? blk["kind"].as<std::string>() : std::string{};
+        for (const auto& sc : b.scopes()) {   // a block is an instance: never merged
+            if (sc.path == b.scoped_name(name)) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: subsystem '{}' is listed twice", sc.path));
+            }
+        }
+        try {
+            (void)b.open_scope(name, kind);
+        } catch (const std::invalid_argument& e) {
+            throw std::runtime_error(std::format("yaml::load: subsystem: {}", e.what()));
+        }
+        if (blk["parameters"]) load_parameters(b, blk["parameters"]);
+        if (blk["nodes"] && blk["nodes"].IsSequence()) {
+            for (const auto& n : blk["nodes"]) {
+                if (n.IsScalar()) b.node(inner.node(n.as<std::string>()));
+            }
+        }
+        if (const auto devs = blk["devices"]) {
+            if (!devs.IsSequence()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: subsystem '{}': 'devices' must be a list", name));
+            }
+            std::size_t idx = 0;
+            for (const auto& dev : devs) load_device_expr(b, inner.device(dev), idx++);
+        }
+        if (blk["subsystems"]) load_subsystems(b, blk["subsystems"], inner, warnings);
+        b.close_scope();
     }
 }
 
@@ -1301,6 +1455,16 @@ namespace detail {
 
     LoadedCircuit loaded;
     loaded.source = source;
+    // The emitter's document (`Circuit.to_yaml()`): read by its inverse,
+    // so every circuit the emitter writes is a netlist this loader takes.
+    if (root["pulsim_circuit"]) {
+        try {
+            loaded.builder = ir::from_yaml(yaml_text).to_builder();
+        } catch (const std::invalid_argument& e) {
+            throw std::runtime_error(std::string{"yaml::load_string: "} + e.what());
+        }
+        return loaded;
+    }
     detail::warn_unknown_keys(root, {"circuit", "simulation"},
                               "top-level", loaded.warnings);
 
@@ -1321,7 +1485,7 @@ namespace detail {
             "'circuit:' — dedent the block. As written, t_end and dt "
             "would not be read and would load as 0.");
     }
-    detail::warn_unknown_keys(circuit, {"nodes", "devices", "parameters"},
+    detail::warn_unknown_keys(circuit, {"nodes", "devices", "parameters", "subsystems"},
                               "circuit:", loaded.warnings);
     if (circuit["parameters"]) {
         detail::load_parameters(loaded.builder, circuit["parameters"]);
@@ -1350,6 +1514,10 @@ namespace detail {
     for (const auto& dev : devices) {
         detail::load_device_expr(loaded.builder, dev, idx);
         ++idx;
+    }
+    if (circuit["subsystems"]) {
+        detail::load_subsystems(loaded.builder, circuit["subsystems"],
+                                detail::BlockNames{loaded.builder, {}}, loaded.warnings);
     }
 
     // Optional simulation block. Present-but-not-a-map (an empty
