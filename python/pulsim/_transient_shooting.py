@@ -71,7 +71,9 @@ class TransientMap:
         _refuse_graph_driven(builder)
         _check_circuit(builder, self.T, comps)
         opts = dict(options or {})
-        if getattr(opts.get("b_extra_fn"), "_closed_loop", None):
+        from ._pulsim import CxxChainBExtra  # type: ignore[import-not-found]
+        if getattr(opts.get("b_extra_fn"), "_closed_loop", None) \
+                or isinstance(opts.get("b_extra_fn"), CxxChainBExtra):
             raise _unsup("closed_loop", "options['b_extra_fn'] is a control "
                          "graph's driven-source overlay; the period runs run "
                          "no controller.")

@@ -237,3 +237,19 @@ def test_a_python_block_in_a_composed_tick_is_reported():
             setpoint=12.0, switch="Q", freq=10e3)
     r = p.simulate(b, 1e-3, dt=1e-6, closed_loops=[lp])
     assert "closed_loops" in r.step_loop_python_callbacks
+
+
+def test_a_built_circuit_keeps_its_c_blocks():
+    # Integration batch 10 review: the builder and its Circuit share the
+    # C-block graph, so a block added after build() would also have run in
+    # the circuit built before it. Refused by name; simulate() does not seal.
+    b = _rc()
+    _p_block(b)
+    p.simulate(b, 2 * TS, dt=1e-6)
+    _p_block(b, name="second")             # after a run: still allowed
+    c = b.build()
+    with pytest.raises(ValueError, match="already carried by a pulsim.Circuit"):
+        _p_block(b, name="third")
+    with pytest.raises(ValueError, match="already carried by a pulsim.Circuit"):
+        _p_block(c.to_builder(), name="fourth")
+    assert [d[0] for d in c.controls()] == ["CBLK", "second"]

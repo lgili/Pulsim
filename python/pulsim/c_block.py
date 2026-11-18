@@ -46,6 +46,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -376,17 +377,24 @@ def _compile_inline(code: str, lang: str, symbol: str, *,
         _check_owned(so_path)
         return so_path
 
-    src_path = cache / f"cblk_{key}{ext}"
+    # private names, then an atomic rename: a concurrent process never
+    # loads a half-written library
+    tag = f"{os.getpid()}_{threading.get_ident()}"
+    src_path = cache / f"cblk_{key}_{tag}{ext}"
+    tmp_so = cache / f"cblk_{key}_{tag}.so.tmp"
     src_path.write_text(src)
-    cmd = [compiler, *flags, str(src_path), "-o", str(so_path), *link]
+    cmd = [compiler, *flags, str(src_path), "-o", str(tmp_so), *link]
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(
             f"c_block: inline {lang} compile failed:\n"
             f"$ {' '.join(cmd)}\n{exc.stderr}") from None
+    finally:
+        src_path.unlink(missing_ok=True)
     if os.name == "posix":
-        os.chmod(so_path, 0o700)    # the linker's mode follows the umask
+        os.chmod(tmp_so, 0o700)     # the linker's mode follows the umask
+    os.replace(tmp_so, so_path)
     return so_path
 
 
@@ -514,6 +522,13 @@ def add_c_block(builder,
     # simulate() composes it with the other graphs above the dispatch.
     from .blockchain import MixedDomainBlockChain, Rate, _InputSource
     graph = _c_graph_of(builder)
+    if graph is not None and getattr(graph, "_sealed", False):
+        raise ValueError(
+            f"add_c_block({name!r}): this builder's C blocks are already "
+            "carried by a pulsim.Circuit from build() (or the builder came "
+            "from Circuit.to_builder()); the new block would also run in "
+            "that circuit. Add every C block before build(), or start from "
+            "a new builder.")
     if graph is None:
         graph = MixedDomainBlockChain(label_time=True)
     k0 = len(graph.blocks)

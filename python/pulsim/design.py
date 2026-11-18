@@ -721,6 +721,21 @@ class Evaluator:
         self.engine = engine
         self.samples_per_period = samples_per_period
         self.options = dict(options or {})
+        from ._pulsim import CxxChainBExtra  # type: ignore[import-not-found]
+        for k in ("closed_loops", "step_observer"):
+            if self.options.get(k) is not None:
+                raise unsupported(
+                    "design", "closed_loop",
+                    f"Evaluator: options[{k!r}] runs a controller; the "
+                    "evaluator's steady-state runs restart it per run and per "
+                    "design (its state carries over), so records would "
+                    "depend on evaluation order. Evaluate the open-loop plant "
+                    "at a fixed duty.")
+        if isinstance(self.options.get("b_extra_fn"), CxxChainBExtra):
+            raise unsupported(
+                "design", "closed_loop",
+                "Evaluator: options['b_extra_fn'] is a control graph's "
+                "driven-source overlay; the evaluator runs no controller.")
         self.loss_options = dict(loss_options or {})
         if gradients is not None and not isinstance(gradients, Mapping):
             gradients = {str(g): str(g) for g in gradients}
