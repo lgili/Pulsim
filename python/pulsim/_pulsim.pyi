@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class ConvergenceError(RuntimeError):
@@ -672,6 +672,10 @@ class CircuitBuilder:
         """
         Immutable snapshot of this builder (a pulsim.Circuit). The builder can keep being edited; the circuit does not change.
         """
+    def close_scope(self) -> None:
+        """
+        Return to the scope open before the last open_scope().
+        """
     def components(self) -> list[typing.Any]:
         """
         Enumerate every device in the circuit. Returns a list of dicts (kind, name, nodes, params, branch_id) in insertion order. Consumed by `pulsim.schematic`.
@@ -723,6 +727,10 @@ class CircuitBuilder:
         """
         Role hint for `node_id`. V0 returns 'ground' for the ground node and 'internal' for all others.
         """
+    def open_scope(self, path: str, kind: str = '') -> str:
+        """
+        Open scope `path` (relative to the open scope; returns its full path). Parameters declared until close_scope() belong to it and expressions look names up from it outward. Prefer `with builder.scope(path):`.
+        """
     def param(self, name: str, value: typing.Any, unit: str = '', lo: float | None = None, hi: float | None = None) -> Parameter:
         """
         Declare a named parameter and return it (a pulsim.Parameter); pass it to any add_* in place of a number. lo / hi bound its value. A str value is an expression over earlier parameters ("2*Lbase"), re-evaluated when they change.
@@ -738,6 +746,22 @@ class CircuitBuilder:
     def run_preflight(self, options: PreflightOptions = ...) -> PreflightReport:
         """
         Check the topology for nodes with no voltage reference and (by default) tie each offending subnet to ground through a high-value resistor. Returns a PreflightReport naming everything it found and inserted. `simulate()` runs this automatically; call it directly to inspect a circuit, or with PreflightOptions(auto_regularize=False) to look without touching.
+        """
+    def scope(self, path: str, kind: str = '') -> BuilderScope:
+        """
+        Context manager: `with builder.scope("leg_a", kind="HB"):` opens the scope (open_scope) and closes it on exit; `as` gives its full path. Parameters declared inside belong to it.
+        """
+    def scope_of(self, name: str) -> str:
+        """
+        As Circuit.scope_of().
+        """
+    def scoped_name(self, local: str) -> str:
+        """
+        `local` as named in the open scope: "leg_a/sm17/C".
+        """
+    def scopes(self) -> list[typing.Any]:
+        """
+        As Circuit.scopes().
         """
     def set_alias(self, human_name: str, node: str | None = None, branch: str | None = None) -> None:
         """
@@ -798,6 +822,11 @@ class CircuitBuilder:
     def update_voltage_source_V(self, name: str, new_V: float) -> None:
         """
         Update a DC voltage source's V value by component name. Pure-RHS update — no LU refactor needed; the next solve() picks up the change via b_constant.
+        """
+    @property
+    def current_scope(self) -> str:
+        """
+        Path of the open scope ("" = root).
         """
     @property
     def graph(self) -> Graph:
@@ -3323,6 +3352,14 @@ class Circuit:
         """
         The named parameters, in declaration order.
         """
+    def scope_of(self, name: str) -> str:
+        """
+        Path of the scope a device, node or parameter named `name` belongs to ("" = the root).
+        """
+    def scopes(self) -> list[typing.Any]:
+        """
+        The scope tree (subsystem instances), parents first: one dict per scope with path, name, kind (the subsystem definition, "" for a plain path segment) and parent (its path, "" = root).
+        """
     def state_var_names(self) -> list[str]:
         """
         As CircuitBuilder.state_var_names().
@@ -3377,6 +3414,14 @@ class Circuit:
         """
         Number of switching branches (the SwitchStateMask size).
         """
+class BuilderScope:
+    """
+    What CircuitBuilder.scope() returns: a context manager.
+    """
+    def __enter__(self) -> str:
+        ...
+    def __exit__(self, *args) -> bool:
+        ...
 def _branch_form_capabilities() -> dict[typing.Any, typing.Any]:
     """
     The branch form's engine column (add-branch-form-ideal-switch): {'Switch'|'Diode': {engine: bool}}; False refuses with UnsupportedError(feature='branch_form').
