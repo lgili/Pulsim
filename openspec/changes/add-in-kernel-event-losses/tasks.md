@@ -37,7 +37,7 @@
 - [ ] 6.2 Tutorial: PLECS XML → closed-loop T_j on a buck
 
 ## 7. Verification
-- [ ] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
+- [x] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
 
 ## 8. The exact steady-state route (period post-processing, no engine file)
 - [x] 8.1 The reading rule on the periodic orbit: every commutation of the steady period read from the period map's left and right limits (turn-on: `v` before, `i` after; turn-off the reverse); a diode's `E_off_table` in `switch_specs` is its recovery, read at each turn-off; the sampled `device_loss_summary` refuses a diode there by name
