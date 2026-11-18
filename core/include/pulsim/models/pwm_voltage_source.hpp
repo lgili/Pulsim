@@ -33,6 +33,7 @@
 #include "pulsim/topology/graph.hpp"
 
 #include <cmath>
+#include <limits>
 
 namespace pulsim::models {
 
@@ -68,6 +69,14 @@ struct PWMVoltageSource {
         const auto pos =
             pwm_phase::cycle_position(t, p.phase, T_period);
         return pwm_phase::reached(pos, p.duty) ? p.v_low : p.v_high;
+    }
+
+    /// The first edge strictly after t (period start or duty end, on
+    /// the same snapped grid as `value_at`), +∞ for a DC output.
+    [[nodiscard]] static Real next_corner_after(const Params& p, Real t) noexcept {
+        if (p.frequency <= Real{0}) return std::numeric_limits<Real>::infinity();
+        const Real thr[1] = {p.duty};
+        return pwm_phase::next_constant_crossing(t, p.phase, Real{1} / p.frequency, thr);
     }
 };
 

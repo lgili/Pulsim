@@ -125,8 +125,10 @@ def test_lcp_and_guard_fix_the_zero_threshold_boost(R):
     at R = 20 / 50 / 500 ohm); 'lcp' and the guarded default decide those events OFF."""
     ref, ev_settle, ev_lcp = BOOST[R]
     b, fn = _boost(R)
-    r_settle = _sim(b, 400 * T, fn, guard=False)
-    assert abs(_end(r_settle, "out") - ref) > 3e-2 and r_settle.n_events == ev_settle
+    # the settle alone kept D1 ON (> 3e-2 V off ref); judged, it refuses there (DECISIONS #26)
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim(b, 400 * T, fn, guard=False)
+    assert (ei.value.engine, ei.value.feature, ei.value.device.split()[0]) == ("dsed", "consistent_mode", "D1")
     r_lcp = _sim(b, 400 * T, fn, mode_selection="lcp")
     r_def = _sim(b, 400 * T, fn)
     assert _end(r_lcp, "out") == pytest.approx(ref, abs=2e-5)          # measured -1.5e-6 .. -1.24e-5
@@ -142,9 +144,12 @@ def test_guard_fixes_the_half_wave_rl_rectifier():
     repairs the start (and, depending on rounding, one more event) and every stored OFF sample is
     reverse-biased."""
     b = _half_wave_rl()
-    r_settle, r = _sim(b, 60e-3, guard=False), _sim(b, 60e-3)
+    # the settle alone read 1.06 V low; judged, it refuses at its first wrong event (#26)
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim(b, 60e-3, guard=False)
+    assert (ei.value.feature, ei.value.device.split()[0]) == ("consistent_mode", "D1")
+    r = _sim(b, 60e-3)
     ref = 3.180662149                                                   # trbdf2 rtol 1e-10
-    assert _tw_mean(r_settle, "out") == pytest.approx(ref - 1.060, abs=5e-3)
     assert _tw_mean(r, "out") == pytest.approx(ref, abs=1e-4)          # measured +2.3e-5
     # The t = 0 repair is the one the mean needs. A second one at 30.0999 ms (1 us before the
     # turn-off, gap 0.063 V) is rounding: the settle gets that event wrong on macOS arm64 and right
@@ -245,4 +250,164 @@ def test_guard_leaves_consistent_runs_bit_identical(fam, vth, t_end):
     assert np.array_equal(np.asarray(r_off.states), np.asarray(r_on.states))
     g = r_on.diagnostics["mode_guard"]
     assert g["repairs"] == 0 and g["checks"] == r_on.n_events + 1
-    assert "mode_guard" not in (getattr(r_off, "diagnostics", None) or {})
+    g_off = r_off.diagnostics["mode_guard"]                 # judged, nothing to refuse
+    assert (g_off["checks"], g_off["repairs"]) == (g["checks"], 0)
+
+
+def _floating_bridge(source):
+    """A four-diode bridge whose AC side floats (1 Mohm to ground) and whose DC bus is tied to it
+    by 1 Mohm and the g_off leaks only: the bus common mode is an island with a 1 uS pivot."""
+    b = p.CircuitBuilder()
+    if source == "sine":
+        b.add_sine_voltage_source("V", "s", "r", 0.0, 50.0, 50.0)
+    else:
+        b.add_sine_voltage_source("V", "a", "gnd", 0.0, 100.0, 50.0)
+        b.add_ideal_transformer("T1", "a", "gnd", "s", "r", 0.5)
+    b.add_resistor("Rr", "r", "gnd", 1e6)
+    for name, an, ca in (("D1", "s", "p"), ("D2", "n", "s"), ("D3", "r", "p"), ("D4", "n", "r")):
+        b.add_diode(name, an, ca, GON, GOFF)
+    b.add_capacitor("C", "p", "n", 100e-6)
+    b.add_resistor("R", "p", "n", 100.0)
+    b.add_resistor("Rn", "n", "r", 1e6)
+    return b, {"D1": ("s", "p"), "D2": ("n", "s"), "D3": ("r", "p"), "D4": ("n", "r")}
+
+
+@pytest.mark.parametrize("source", ["sine", "transformer"])
+@pytest.mark.parametrize("h_e_rel", [1e-7, 1e-9, 1e-10])
+def test_lcp_bridge_on_a_floating_source_is_not_decided_by_rounding(source, h_e_rel, monkeypatch):
+    """DECISIONS.md #21: 'lcp' ended at 11.726610 V with D2 and D3 never ON and D2 blocking
+    +49.86 V, and the answer flipped with H_E_REL (wrong at 1e-10, 1e-9, 1e-7). The port model's
+    history term C*v_C/h_e (1.6e6 A) left 2e-10 A of rounding on the island's 1 uS pivot: 2e-4 V
+    on D2's gap at its turn-on root, where h_e moves it 3e-5 V. Reference: pwl at dt = 1e-7,
+    31.876241232 V; the default (settle + guard) 31.876241228 V."""
+    monkeypatch.setattr(DD, "H_E_REL", h_e_rel)
+    b, pairs = _floating_bridge(source)
+    r = _sim(b, 0.04, mode_selection="lcp")
+    assert _end(r, "p-n") == pytest.approx(31.876241232, abs=2e-8)     # measured -4e-9
+    sw = np.asarray(r.switch_states).astype(bool)
+    for d, (a, c) in pairs.items():
+        on = sw[:, b.switch_index_of(d)]
+        v = np.asarray(r.v(a)) - np.asarray(r.v(c))
+        assert on.any(), d                                              # D2 and D3 never conducted
+        assert v[~on].max() < 1e-9, d                                   # D2 blocked +49.86 V
+    if h_e_rel == DD.H_E_REL == 1e-7:
+        r0 = _sim(b, 0.04)
+        assert np.array_equal(np.asarray(r.states), np.asarray(r0.states))
+
+
+def _bridge_bank(n, ls=0.2e-3):
+    """n three-phase diode bridges, each on its own 200 uF || 50 ohm bus behind 0.2 mH line
+    inductors, 100 V 50 Hz, the bridges 6 deg apart."""
+    b = p.CircuitBuilder()
+    for k in range(n):
+        for ph, ang in (("a", 0.0), ("b", -120.0), ("c", 120.0)):
+            b.add_sine_voltage_source(f"V{k}{ph}", f"s{k}{ph}", "gnd", 0.0, 100.0, 50.0,
+                                      np.deg2rad(ang + 6.0 * k))
+            b.add_inductor(f"L{k}{ph}", f"s{k}{ph}", f"x{k}{ph}", ls)
+            b.add_diode(f"Dt{k}{ph}", f"x{k}{ph}", f"p{k}", 1e3, 1e-9, 0.0)
+            b.add_diode(f"Db{k}{ph}", f"n{k}", f"x{k}{ph}", 1e3, 1e-9, 0.0)
+        b.add_capacitor(f"C{k}", f"p{k}", f"n{k}", 200e-6)
+        b.add_resistor(f"R{k}", f"p{k}", f"n{k}", 50.0)
+        b.add_resistor(f"Rg{k}", f"n{k}", "gnd", 1e6)
+    return b
+
+
+@pytest.mark.parametrize("mode", [None, "lcp"])
+def test_a_widened_pass_does_not_release_a_diode_before_its_own_turn_off(mode):
+    """DECISIONS #24. Two bridge banks over 20 ms (h_e = 2 ns): at a commutation the widened
+    pass (1e4*h_e = 20 us) saw a conducting diode's current reach zero inside the window, read
+    it as a contradiction, released the diode and cut it 11 us early, 0.128 V off pwl. The
+    widening is now capped at half the decided mode's next event: within 1e-3 V of pwl
+    extrapolated in dt (measured 3.3e-4 V), and the cap fires."""
+    t_end, n = 0.02, 2
+    tg = np.linspace(0.0, t_end, 2001)
+
+    def buses(r):
+        return [np.interp(tg, r.times, np.asarray(r.v(f"p{k}")) - np.asarray(r.v(f"n{k}")))
+                for k in range(n)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        a, b2 = (buses(p.simulate(_bridge_bank(n), t_end=t_end, engine="pwl", dt=dt))
+                 for dt in (5e-7, 2.5e-7))
+        kw = {} if mode is None else {"mode_selection": mode}
+        r = p.simulate(_bridge_bank(n), t_end=t_end, engine="dsed", **kw)
+    ref = [2 * y - x for x, y in zip(a, b2)]
+    dev = max(np.abs(v - e).max() for v, e in zip(buses(r), ref))
+    assert dev <= 1e-3, dev
+    d = r.diagnostics
+    sel = d["mode_selection"] if mode == "lcp" else d["mode_guard"]["lcp"]
+    assert sel["capped"] > 0
+
+
+@pytest.mark.parametrize("cap", [64, 1])
+def test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp(cap, monkeypatch):
+    """DECISIONS #25. Five bridges paralleled on one 2 mF || 5 ohm bus: at rest every diode
+    pair fights over the bus, and on macOS the settle raised "did not settle after 64
+    rounds" at t = 1.8e-26 s (on Linux / Windows the same fight settles: 0 caps, a
+    rounding outcome). With the guard on, such an event is decided by the LCP from the
+    held state. The engine's own cap at 1 round (the test hook) throws at any event
+    where a diode flips, so the give-up is forced on any platform; either way the result is within 1e-3 V of pwl extrapolated in dt
+    (measured 1.5e-4 V), and the forced cap is counted."""
+    monkeypatch.setattr(DD, "SETTLE_ROUND_CAP", cap)
+    t_end, n = 0.02, 5
+    tg = np.linspace(0.0, t_end, 2001)
+
+    def bank():
+        b = p.CircuitBuilder()
+        for k in range(n):
+            for ph, ang in (("a", 0.0), ("b", -120.0), ("c", 120.0)):
+                b.add_sine_voltage_source(f"V{k}{ph}", f"s{k}{ph}", "gnd", 0.0, 100.0, 50.0,
+                                          np.deg2rad(ang + 6.0 * k))
+                b.add_inductor(f"L{k}{ph}", f"s{k}{ph}", f"x{k}{ph}", 0.2e-3)
+                b.add_diode(f"Dt{k}{ph}", f"x{k}{ph}", "p", 1e3, 1e-9, 0.0)
+                b.add_diode(f"Db{k}{ph}", "n", f"x{k}{ph}", 1e3, 1e-9, 0.0)
+        b.add_capacitor("C", "p", "n", 2e-3)
+        b.add_resistor("R", "p", "n", 5.0)
+        b.add_resistor("Rg", "n", "gnd", 1e6)
+        return b
+
+    def bus(r):
+        return np.interp(tg, r.times, np.asarray(r.v("p")) - np.asarray(r.v("n")))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        a, b2 = (bus(p.simulate(bank(), t_end=t_end, engine="pwl", dt=dt)) for dt in (5e-7, 2.5e-7))
+        r = p.simulate(bank(), t_end=t_end, engine="dsed")
+    assert np.abs(bus(r) - (2 * b2 - a)).max() <= 1e-3
+    if cap == 1:
+        assert r.diagnostics["mode_guard"]["settle_caps"] > 0
+
+
+def _island_bridge(r_tie, c_bus):
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "s", "r", 0.0, 50.0, 50.0)
+    b.add_resistor("Rr", "r", "gnd", r_tie)
+    for name, an, ca in (("D1", "s", "p"), ("D2", "n", "s"), ("D3", "r", "p"), ("D4", "n", "r")):
+        b.add_diode(name, an, ca, GON, GOFF)
+    b.add_capacitor("C", "p", "n", c_bus)
+    b.add_resistor("R", "p", "n", 100.0)
+    b.add_resistor("Rn", "n", "r", r_tie)
+    return b
+
+
+@pytest.mark.parametrize("h_e_rel", [1e-10, 1e-5])
+def test_port_factor_cancellation_stays_below_the_tie_tolerance(h_e_rel, monkeypatch):
+    """DECISIONS #27. The factor G + C/h cancels on a floating island's pivot: the island gap
+    carries eps*C*|dv/dt|/G_tie of rounding, independent of h_e (the 1/h of the cancellation
+    and the h of the increment cancel). 2 mF on a 1 uS island at 1.6e4 V/s: 7.0e-9 V, under the
+    tie tolerance 1e-9*vscale = 5e-8 V, so no mode is decided by rounding at any h_e: 'lcp'
+    ends 6.1e-9 V from pwl at H_E_REL 1e-10 and 1e-5 alike. Where the bound exceeds the
+    tolerance the factor's pivot check refuses by name (below)."""
+    monkeypatch.setattr(DD, "H_E_REL", h_e_rel)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ref = p.simulate(_island_bridge(1e6, 2e-3), t_end=0.04, engine="pwl", dt=1e-7)
+    r = _sim(_island_bridge(1e6, 2e-3), 0.04, mode_selection="lcp")
+    assert _end(r, "p-n") == pytest.approx(_end(ref, "p-n"), abs=2e-8)
+
+
+def test_port_factor_beyond_the_bound_refuses_instead_of_rounding():
+    """The same bridge on 1 Tohm ties (bound 7e-3 V, 1.4e5 x the tie tolerance): the port
+    factor is numerically singular at the island's node and says so; no run returns a mode
+    chosen by rounding (DECISIONS #27, the sweep)."""
+    with pytest.raises(RuntimeError, match="numerically singular"):
+        _sim(_island_bridge(1e12, 2e-3), 0.04, mode_selection="lcp")

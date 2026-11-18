@@ -344,12 +344,25 @@ py::array_t<double> reconstruct_full_states(
         res.step_masks.size() == n
         && res.pre_event_index.size() == res.pre_event_states.size();
     std::size_t next_pre = 0;
+    bool pre = false;   // sample i is an event's LEFT limit
     auto state_of = [&](std::size_t i) -> const pulsim::Vector& {
+        pre = false;
         if (have_pre && next_pre < res.pre_event_index.size()
             && res.pre_event_index[next_pre] == i) {
+            pre = true;
             return res.pre_event_states[next_pre++];
         }
         return res.states[i];
+    };
+    // A left-limit sample reads its sources' left limit too: a source
+    // corner is an event, and an instant edge there (PWM, pulse) would
+    // otherwise pair the old mode with the new source value. Half the
+    // last step lies inside the piece that step covered. The final
+    // sample is the left limit of t_end too: a corner exactly at t_end
+    // never fires (the run ends), so its new piece is never integrated.
+    auto left_by = [&](std::size_t i) {
+        return (pre || i + 1 == n) && i > 0
+            ? Real{0.5} * (res.times[i] - res.times[i - 1]) : Real{0};
     };
     // Probe the width from the first sample.
     adapter.set_mask(masks[0]);
@@ -368,6 +381,15 @@ py::array_t<double> reconstruct_full_states(
         }
         double* row = ptr + static_cast<py::ssize_t>(i) * n_mna;
         if constexpr (requires {
+                          adapter.recover_full_into(
+                              Real{0}, state_of(i),
+                              Eigen::Map<pulsim::Vector>(row, n_mna), Real{0});
+                      }) {
+            const pulsim::Vector& xi = state_of(i);
+            adapter.recover_full_into(
+                res.times[i], xi,
+                Eigen::Map<pulsim::Vector>(row, n_mna), left_by(i));
+        } else if constexpr (requires {
                           adapter.recover_full_into(
                               Real{0}, state_of(i),
                               Eigen::Map<pulsim::Vector>(row, n_mna));
@@ -431,6 +453,28 @@ void reconstruct_right_limits(AdapterT& adapter, const ResultT& res,
                     const auto& xs = res.states[i];
                     fired = xp.size() != xs.size()
                             || (xp.array() != xs.array()).any();
+                    // A source corner leaves the reduced state alone but
+                    // moves the source-driven nodes: the sample reads the
+                    // sources' left limit (reconstruct_full_states), so
+                    // the right limit differs and is recorded too.
+                    if constexpr (requires {
+                                      adapter.recover_full_into(
+                                          Real{0}, xs,
+                                          Eigen::Map<pulsim::Vector>(nullptr, 0),
+                                          Real{0});
+                                  }) {
+                        if (!fired && i > 0
+                            && res.step_masks[i] == res.sample_masks[i]) {
+                            adapter.set_mask(res.sample_masks[i]);
+                            const pulsim::Vector r =
+                                adapter.recover_full(res.times[i], xs);
+                            pulsim::Vector l(r.size());
+                            adapter.recover_full_into(
+                                res.times[i], xs, l,
+                                Real{0.5} * (res.times[i] - res.times[i - 1]));
+                            fired = (l.array() != r.array()).any();
+                        }
+                    }
                 }
                 if (fired || !(res.step_masks[i] == res.sample_masks[i])) {
                     idx.push_back(i);
@@ -734,6 +778,7 @@ inline py::dict mode_shadow_dict(const pulsim::dsed::ModeShadowReport& r,
     d["leak_pins"] = r.leak_pins;
     d["pin_judgements"] = r.pin_judgements;
     d["unfixed"] = r.unfixed;
+    d["capped"] = r.capped;
     d["enumerations"] = r.enumerations;
     d["nonunique_modes"] = r.nonunique_modes;
     d["hysteresis_released"] = r.released;
@@ -1009,6 +1054,10 @@ void init_module(py::module_& m) {
             py::arg("builder"),
             py::arg("cache"),
             py::arg("b_extra_fn") = py::none())
+        .def("set_refuse_implicit", &NativeAdapter::set_refuse_implicit,
+             py::arg("on"),
+             "add-exact-propagator-strategy 13.2: refuse a segment with no "
+             "exact step (engine='exact' without allow_implicit_segments).")
         .def("set_mask", &NativeAdapter::set_mask,
             "Set the active mask. Subsequent A_matrix / b_vector / "
             "rhs queries resolve against this mask (cached lazily).")
@@ -1060,6 +1109,33 @@ void init_module(py::module_& m) {
             "(the builder's c0= / i0= / set_initial), and the largest capacitor-voltage "
             "adjustment the charge-conserving projection made (0 when the "
             "declared values are consistent).")
+        .def("reduced_state_from_full",
+            [](const NativeAdapter& ad, const Vector& x) {
+                // A full-MNA vector (a DC operating point) read the way the
+                // builder's c0= / i0= are: every capacitor's branch voltage,
+                // every inductor's current, projected onto the current
+                // mask's reduced state.
+                const auto& g = ad.graph();
+                const auto& pool = ad.pool();
+                if (x.size() != pool.state_size(g))
+                    throw std::invalid_argument("reduced_state_from_full: size mismatch");
+                using K = pulsim::pwl::DevicePool::StoredKind;
+                std::unordered_map<pulsim::Index, Real> ics;
+                auto v = [&](pulsim::Index n) { return n >= 0 ? x[n] : Real{0}; };
+                for (pulsim::Index bid = 0; bid < g.num_branches(); ++bid) {
+                    if (!pool.is_registered(bid)) continue;
+                    const auto k = pool.kind_of(bid);
+                    if (k == K::Capacitor)
+                        ics[bid] = v(g.branch(bid).from) - v(g.branch(bid).to);
+                    else if (k == K::Inductor)
+                        ics[bid] = x[pool.branch_var_id_for_inductor(bid, g)];
+                }
+                return ad.reduced_initial_state(ics);
+            },
+            py::arg("x_full"),
+            "The reduced state of the current mask from a full-MNA vector "
+            "(e.g. a DC operating point) and the largest capacitor-voltage "
+            "adjustment its projection needed (0 when consistent).")
         .def("_mode_select_at",
             [](const NativeAdapter& ad, const pulsim::topology::SwitchStateMask& mask,
                Real t, const Vector& x_full, Real h_e, Real tol) {
@@ -1084,9 +1160,13 @@ void init_module(py::module_& m) {
                 pulsim::events::ModeSelector sel;
                 sel.tol = tol;
                 const auto sc = ad.port_scale_full(x_full);
+                std::vector<pulsim::Size> sidx;
+                for (const auto& d : census.entries()) sidx.push_back(d.switch_idx);
                 const auto out = sel.select(ports, prev,
-                    [&](Real h, pulsim::DenseMatrix& Zh, Vector& uh) {
-                        ad.diode_port_problem_full(mask, t, x_full, h, nodes, Zh, uh);
+                    [&](Real h, const std::vector<char>& anchor, pulsim::DenseMatrix& Zh, Vector& uh) {
+                        auto m = mask;   // posed in the anchor mode (DECISIONS #30)
+                        for (std::size_t i = 0; i < sidx.size(); ++i) m.set(sidx[i], anchor[i] != 0);
+                        ad.diode_port_problem_full(m, t, x_full, h, nodes, Zh, uh);
                     }, h_e, sc);
                 py::dict d;
                 d["diodes"] = names;
@@ -1101,6 +1181,7 @@ void init_module(py::module_& m) {
                 d["leak_pins"] = out.leak_pins;
                 d["pin_judgements"] = out.pin_judgements;
                 d["unfixed"] = out.unfixed;
+                d["capped"] = out.capped;
                 d["released"] = out.released;
                 d["first_pass_ties"] = out.first_pass_ties;
                 d["tie_currents"] = out.tie_currents;
@@ -1135,7 +1216,9 @@ void init_module(py::module_& m) {
            bool event_log,
            Real mode_shadow_h_e,
            Real mode_lcp_h_e,
-           Real mode_guard_h_e) {
+           Real mode_guard_h_e,
+           bool mode_guard_refuse,
+           int settle_round_cap) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
@@ -1228,6 +1311,7 @@ void init_module(py::module_& m) {
                     std::move(sched_diodes));
             }
             sim.set_event_projection(enable_event_projection);
+            sim.set_settle_round_cap(settle_round_cap);
             std::vector<std::string> diode_names;
             if (mode_shadow_h_e > Real{0}) {
                 pulsim::pwl::DiodeEventState census(adapter.graph(), adapter.pool());
@@ -1241,7 +1325,7 @@ void init_module(py::module_& m) {
             if (any_diode && mode_lcp_h_e > Real{0}) {
                 sim.enable_mode_lcp(mode_lcp_h_e, adapter.passivity());
             } else if (any_diode && mode_guard_h_e > Real{0}) {
-                sim.enable_mode_guard(mode_guard_h_e, adapter.passivity());
+                sim.enable_mode_guard(mode_guard_h_e, adapter.passivity(), mode_guard_refuse);
             }
             if (any_diode && diode_names.empty()) {
                 pulsim::pwl::DiodeEventState census(adapter.graph(), adapter.pool());
@@ -1271,6 +1355,7 @@ void init_module(py::module_& m) {
                 gd["checks"] = g.checks;
                 gd["unchecked"] = g.unchecked;
                 gd["repairs"] = g.repairs;
+                gd["settle_caps"] = g.settle_caps;
                 gd["confirmed"] = g.confirmed;
                 gd["repair_times"] = g.repair_times;
                 gd["repair_diodes"] = g.repair_diodes;
@@ -1299,6 +1384,8 @@ void init_module(py::module_& m) {
         py::arg("mode_shadow_h_e") = Real{0},
         py::arg("mode_lcp_h_e") = Real{0},
         py::arg("mode_guard_h_e") = Real{0},
+        py::arg("mode_guard_refuse") = false,
+        py::arg("settle_round_cap") = 64,
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "

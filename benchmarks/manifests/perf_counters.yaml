@@ -149,7 +149,7 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 1
     dsed:
-      n_accept: 10
+      n_accept: 74   # was 10: 64 exact samples resolve the RC's fast mode after its 9 edges (add-exact-propagator-strategy DECISIONS, fast-mode samples)
       n_reject: 0
       n_events: 9
       n_rk45_steps: 0

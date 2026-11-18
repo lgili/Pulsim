@@ -102,7 +102,14 @@ def test_kernel_loop_equals_the_python_loop(name):
     sq = np.asarray(q._period["stats"])
     fin = np.isfinite(sq)
     assert (np.isfinite(sk) == fin).all()
-    assert np.abs(sk[fin] - sq[fin]).max() <= 1e-10 * max(
+    # An extremum attained at both ends of the periodic orbit may be
+    # reported at t0 by one loop and at t0 + T by the other (Linux CI:
+    # one extremum TIME differed by exactly T = 1e-5 s on the boost CCM
+    # case, every value agreeing): a time that differs by one period is
+    # the same instant of the orbit.
+    diff = np.abs(sk[fin] - sq[fin])
+    same_instant = np.abs(diff - T) <= 1e-9 * T
+    assert diff[~same_instant].max() <= 1e-10 * max(
         1.0, np.abs(sq[fin]).max())
     # every period ran with the GIL released, no Python callback
     c = k._ctx

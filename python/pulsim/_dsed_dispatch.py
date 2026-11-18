@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, cast
 
 from ._pulsim import (  # type: ignore[import-not-found]
+    ConvergenceError,
     NativeMultiMaskPwm,
     NativePwm2Switch,
     SwitchSchedule,
@@ -102,6 +103,10 @@ _VALID_INTEGRATORS = ("auto", "rk45", "bdf2")
 # them while engine='pwl' are enumerated inline in
 # _validate_engine_kwargs below — keeping the list local to its
 # usage site so it doesn't drift out of sync.)
+
+
+class _InconsistentInitialState(ValueError):
+    """A full-MNA initial_state that no reduced state reproduces."""
 
 
 def _validate_engine_kwargs(
@@ -311,7 +316,8 @@ def _resolve_dsed_options(
 # explanation + the escape hatch.
 _BRIDGE_FALLBACK_MESSAGE = (
     "pulsim.simulate(engine='dsed', builder=...): the C++ extractor "
-    "rejected this topology — most commonly because the circuit has "
+    "rejected this topology: {underlying}\n"
+    "Older causes of this refusal: the circuit has "
     "**floating capacitors** (caps between two non-ground nodes; the "
     "current LTI bridge supports caps-to-ground only — Phase 5.1b "
     "TODO in notes/DSED_BRIDGE_DESIGN.md), or because the circuit "
@@ -329,9 +335,7 @@ _BRIDGE_FALLBACK_MESSAGE = (
     "Resolved DSED options for this call:\n"
     "  rtol = {rtol}, atol = {atol}\n"
     "  dt_max = {dt_max}, integrator = {integrator!r}\n"
-    "  stiffness_threshold = {stiffness_threshold}\n"
-    "\n"
-    "Underlying C++ error: {underlying}"
+    "  stiffness_threshold = {stiffness_threshold}"
 )
 
 
@@ -524,6 +528,10 @@ def _result_from_native(native_res, t_start: float):
         from ._exact_route import segments_from_exact
         res.exact["segments"] = segments_from_exact(
             res.exact, native_res.get("switch_states"))
+        # 13.3, report only: would 'auto' route this run exact? (every
+        # segment exact; the default route does not read it)
+        res.exact["auto_would_route"] = bool(res.exact["segments"]) and all(
+            seg["exact"] for seg in res.exact["segments"])
     et = native_res.get("event_times")
     res.event_times = (None if et is None
                        else np.asarray(et) + float(t_start))
@@ -549,8 +557,14 @@ def _has_edge_oracle(sf) -> bool:
 # source) or the run length (see DECISIONS.md for the measured band).
 H_E_REL = 1e-7
 # Slice 2, task 4: the default-mode guard (judge each settled mode, re-decide a
-# violating one with the LCP). Module switch for A/B measurements only.
+# violating one with the LCP). Module switch for A/B measurements only. Off, the
+# settle still decides but is judged: a mode the guard would repair raises
+# UnsupportedError('dsed', 'consistent_mode') instead (DECISIONS #26).
 MODE_GUARD = True
+# Test hook: the settle's round cap (the engine's default, 64). A test lowers it
+# to reach the give-up deterministically: the cap is otherwise met only by the
+# rounding of a diode pair fighting at rest (macOS yes, Linux / Windows no).
+SETTLE_ROUND_CAP = 64
 
 
 def _shadow_h_e(builder: Any, switch_fn: Any, t_window: float) -> float:
@@ -586,6 +600,7 @@ def run_dsed_from_builder(
     progress: Any = False,
     builder_initial_state: Optional[Any] = None,
     mode_selection: Optional[str] = None,
+    allow_implicit_segments: bool = True,
 ):
     """Run a PED simulation from a :class:`pulsim.CircuitBuilder`.
 
@@ -786,9 +801,19 @@ def run_dsed_from_builder(
 
     # ---- Stage 3: initial state -------------------------------------
     n_state = adapter.n_state
+    full_x0 = None
+    ambiguous = False
     if opts.initial_state is not None:
         x0 = np.asarray(opts.initial_state, dtype=float)
-        if x0.shape != (n_state,):
+        n_mna = builder.pool.state_size(builder.graph)
+        if x0.shape == (n_mna,):
+            # a full-MNA vector (a DC operating point): projected onto the
+            # reduced state by the native adapter below, checked consistent.
+            # When the two sizes coincide the reading is ambiguous: it is
+            # accepted only where both readings give the same state.
+            full_x0, x0 = x0, np.zeros(n_state, dtype=float)
+            ambiguous = n_mna == n_state
+        elif x0.shape != (n_state,):
             raise ValueError(
                 f"simulate(engine='dsed'): initial_state has shape "
                 f"{x0.shape}, expected ({n_state},)."
@@ -826,12 +851,35 @@ def run_dsed_from_builder(
                    and run_bdf2_b11 is not None
                    and run_auto_b11 is not None)
 
+    adapter_rejected = False
     if bridge11_ok:
         try:
+            adapter_rejected = True
             native_adapter = NativeAdapterCls(
                 builder, cache,
                 b_extra_fn if b_extra_fn is not None else None)
+            adapter_rejected = False
+            # 13.2: engine='exact' refuses a segment with no exact step
+            native_adapter.set_refuse_implicit(not allow_implicit_segments)
             ic_adjustment = None
+            if full_x0 is not None:
+                native_adapter.set_mask(initial_mask)
+                x0, adj = native_adapter.reduced_state_from_full(full_x0)
+                x0 = np.asarray(x0, dtype=float)
+                nn = builder.graph.num_nodes
+                scale = max(1.0, float(np.abs(full_x0[:nn]).max(initial=0.0)))
+                if ambiguous and not np.allclose(x0, full_x0, rtol=0.0, atol=1e-12 * scale):
+                    raise _InconsistentInitialState(
+                        f"simulate(engine='dsed'): initial_state has {n_state} entries, "
+                        "both the reduced state size and the full-MNA size of this "
+                        "circuit, and the two readings differ; pass the reduced states "
+                        "through the builder's c0= / i0= / set_initial instead.")
+                if adj > 1e-9 * scale:
+                    raise _InconsistentInitialState(
+                        f"simulate(engine='dsed'): initial_state is a full-MNA vector "
+                        f"whose capacitor voltages are not consistent with one reduced "
+                        f"state of the starting mode (largest adjustment {adj:.3g} V); "
+                        f"pass a consistent vector or the {n_state} reduced states.")
             if builder_initial_state is not None:
                 native_adapter.set_mask(initial_mask)
                 x0, ic_adjustment = native_adapter.reduced_initial_state(
@@ -850,8 +898,9 @@ def run_dsed_from_builder(
                 h_e = _shadow_h_e(builder, sf, t_window)
                 if mode_selection == "lcp":
                     shadow_kw["mode_lcp_h_e"] = h_e
-                elif MODE_GUARD:    # default and shadow: the settle, guarded
+                else:    # default and shadow: the settle, guarded (or judged, refusing)
                     shadow_kw["mode_guard_h_e"] = h_e
+                    shadow_kw["mode_guard_refuse"] = not MODE_GUARD
                 if mode_selection == "shadow":
                     shadow_kw["mode_shadow_h_e"] = h_e
             if opts.integrator == "rk45":
@@ -860,7 +909,7 @@ def run_dsed_from_builder(
                     rtol=opts.rtol, atol=opts.atol,
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
                     store_every=opts.store_every, event_log=False,
-                    **shadow_kw)
+                    settle_round_cap=SETTLE_ROUND_CAP, **shadow_kw)
             elif opts.integrator == "bdf2":
                 native_res = run_bdf2_b11(
                     native_adapter, sf, x0, t_window,
@@ -877,9 +926,12 @@ def run_dsed_from_builder(
             res = _result_from_native(native_res, opts.t_start)
             res.initial_condition_adjustment = ic_adjustment
             return res
-        except UnsupportedError:
+        except (UnsupportedError, _InconsistentInitialState, ConvergenceError):
             # A refusal is an answer, not a reason to try the next
-            # bridge (which would run the circuit without the device).
+            # bridge (which would run the circuit without the device);
+            # so is a give-up of the run the native adapter accepted
+            # (the next bridge would re-run it without the refusal of
+            # implicit segments).
             raise
         except (RuntimeError, ValueError):
             # Bridge.11 native adapter rejected the circuit (e.g. nonlinear
@@ -891,16 +943,36 @@ def run_dsed_from_builder(
             # Bridge.11 path carries the auto-derived predicates, so
             # falling through would freeze the diode bits and
             # reintroduce the silent wrong answer. Re-raise instead.
-            if _n_diodes > 0:
+            #
+            # Nor once the native adapter accepted the circuit and the
+            # exact engine refuses implicit segments: the fallback would
+            # run it numerically (an untyped kernel error mid-run, e.g. a
+            # root finder that did not converge, would come back as a
+            # silent numeric run; integration batch 9 review).
+            if _n_diodes > 0 or (not adapter_rejected and not allow_implicit_segments
+                                 and opts.integrator != "bdf2"):
                 raise
-            pass
 
+    if full_x0 is not None and ambiguous:
+        x0 = full_x0          # the non-native bridges read it as reduced, as before
+    elif full_x0 is not None:
+        raise ValueError(
+            f"simulate(engine='dsed'): initial_state has shape {full_x0.shape}, "
+            f"expected ({n_state},); a full-MNA vector is accepted only on the "
+            "native adapter.")
     if mode_selection in ("shadow", "lcp"):
         raise unsupported(
             "dsed", "mode_selection", message=
             f"simulate(engine='dsed', mode_selection={mode_selection!r}): "
             "the native adapter rejected this circuit and the fallback "
             "path has no complementarity hook. Drop mode_selection.")
+
+    if not allow_implicit_segments and adapter_rejected and opts.integrator != "bdf2":
+        raise unsupported(
+            "dsed", "extraction", message=
+            "simulate(engine='exact'): the exact kernel's state extraction "
+            "rejected this circuit, so every segment would be numeric. Pass "
+            "allow_implicit_segments=True, or use engine='pwl' / 'trbdf2'.")
 
     if builder_initial_state is not None:
         raise unsupported(

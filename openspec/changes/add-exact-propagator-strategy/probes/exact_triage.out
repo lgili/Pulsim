@@ -1,0 +1,47 @@
+outcomes: {'refused': 34, 'agree': 72, 'unverified': 2}
+
+## extraction: static circuit (no reactive state): 10
+   diodes/back_to_back_diodes_sine.yaml refused (extractor)
+   diodes/diode_clamp_overvoltage.yaml refused (extractor)
+   linear/bridge_resistive_pure.yaml refused (extractor)
+   linear/current_divider_3way.yaml refused (extractor)
+   linear/voltage_divider_3stage.yaml refused (extractor)
+   magnetics/transformer_step_up.yaml refused (extractor)
+   switching/basic/vcswitch_resistor.yaml refused (extractor)
+   switching/multilevel/cascaded_h_bridge_5level.yaml refused (extractor)
+   switching/multilevel/mmc_4cell_chain.yaml refused (extractor)
+   thermal/electrothermal_resistor_self_heating.yaml refused (extractor)
+
+## extraction: coupled inductors: 7
+   magnetics/coupled_inductor_step.yaml refused (extractor)
+   magnetics/transformer_leakage.yaml refused (extractor)
+   switching/isolated/active_clamp_forward.yaml refused (extractor)
+   switching/isolated/dual_active_bridge.yaml refused (extractor)
+   switching/isolated/flyback_converter.yaml refused (extractor)
+   switching/isolated/forward_converter.yaml refused (extractor)
+   switching/isolated/synchronous_flyback.yaml refused (extractor)
+
+## refused: step_observer: 6
+   closed_loop/cl_boost_pi.yaml refused (step_observer)
+   closed_loop/cl_buck_aggressive_pi.yaml refused (step_observer)
+   closed_loop/cl_buck_pi.yaml refused (step_observer)
+   closed_loop/ll14_buck_closed_loop.yaml refused (step_observer)
+   closed_loop/ll15_boost_closed_loop.yaml refused (step_observer)
+   closed_loop/ll16_flyback_closed_loop.yaml refused (step_observer)
+
+## extraction: G_aa singular (capacitor / source loop or inductor cut-set): 6
+   magnetics/half_bridge_transformer_dc.yaml refused (extractor)
+   magnetics/inductor_chain_step.yaml refused (extractor)
+   motors/motor_induction_locked_rotor.yaml refused (extractor)
+   switching/inverter/half_bridge_inverter_lc.yaml refused (extractor)
+   switching/multilevel/npc_three_level_halfbridge.yaml refused (extractor)
+   switching/multilevel/t_type_3level_halfbridge.yaml refused (extractor)
+
+## Newton device refused by name (MosfetLevel1): 3
+   switching/basic/mosfet_nmos_dc.yaml refused (Newton device)
+   switching/buck/buck_mosfet_nonlinear.yaml refused (Newton device)
+   switching/buck/ll08_buck_mosfet.yaml refused (Newton device)
+
+## Newton device refused by name (ShockleyDiode): 2
+   switching/boost/ll12_pfc_boost_continuous.yaml refused (Newton device)
+   switching/isolated/ll11_llc_resonant_converter.yaml refused (Newton device)
