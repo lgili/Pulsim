@@ -4137,7 +4137,7 @@ void init_module(py::module_& m) {
     py::register_exception<pulsim::blockchain::ControlGraphBuildError>(
         m, "ControlGraphBuildError", PyExc_ValueError);
 
-    py::class_<ChainTick>(m, "CxxChainTick",
+    py::class_<ChainTick>(m, "CxxChainTick", py::dynamic_attr(),
         "A control-graph tick callback the variable-step engine calls in "
         "C++ (no Python call per tick).")
         .def("__call__", [](ChainTick& self, Real t, const Vector& x) {

@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Control graph: C blocks on trbdf2, resume, review fixes (task 9.3)
+
+* **Added** `engine="trbdf2"` runs C blocks (the state-time law: it
+  lands on the ticks); `auto` still routes them to `pwl`; `exact` /
+  `dsed` refuse them by name.
+* **Fixed** resuming (`resume_from=`) a run with C blocks restarted
+  their tick grid at the resumed start (the graph was rebuilt per run);
+  it is now built once per circuit layout and continues. Closed loops
+  and graphs already continued.
+* **Fixed** a reused closed loop reported cumulative
+  `control_tick_counts` ([40] on its second 2 ms run).
+* **Fixed** `export_c`: a `DelayBlock` that breaks a loop pushed its
+  input before the producer ran (one extra sample); it now pushes after
+  the pass like the kernel, from `initial_value`. `export_c` no longer
+  replaces the chain's running backend. The shim writes NaN when wired
+  or clocked unlike the export.
+* **Fixed** the C-block cache refused its own libraries under umask 002
+  (group-writable); new libraries are mode 0700, a symlinked entry is
+  refused.
+* **Fixed** `step_loop_python_callbacks` hid a `PythonBlock` inside a
+  composed C++ tick, and listed a graph's C++ `b_extra_fn` as Python.
+
 ### Control graph: C export, transforms on their class laws (group 8)
 
 * **Added** `pulsim.export_c(chain, builder, outputs)`: a rated graph

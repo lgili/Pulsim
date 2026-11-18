@@ -158,7 +158,9 @@ class CBlock:
         g = self._graph
         if g is None or g._cxx_chain is None or self._rate not in g._groups:
             return 0
-        return int(g._cxx_chain.tick_counts()[g._groups[self._rate]])
+        i = g._groups[self._rate]
+        f0 = getattr(g, "_fires0", None)
+        return int(g._cxx_chain.tick_counts()[i]) - (f0[i] if f0 else 0)
 
     def _add_to(self, cxx, in_refs, outs) -> None:
         from ._pulsim import ControlGraphBuildError, CxxInputRef  # type: ignore[import-not-found]
@@ -322,9 +324,10 @@ def _cache_dir() -> Path:
                     or Path.home() / ".cache")
     d = base / "pulsim" / "cblock"
     d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name == "posix" and d.lstat().st_uid == os.getuid() \
+            and not d.is_symlink():
+        os.chmod(d, 0o700)          # mkdir's mode is masked by the umask
     _check_owned(d)
-    if os.name == "posix":
-        os.chmod(d, 0o700)
     return d
 
 
@@ -333,7 +336,8 @@ def _check_owned(path: Path) -> None:
     if os.name != "posix":
         return
     st = path.lstat()
-    if st.st_uid != os.getuid() or st.st_mode & 0o022:
+    if st.st_uid != os.getuid() or st.st_mode & 0o022 \
+            or path.is_symlink():
         raise RuntimeError(
             f"c_block: refusing {path}: owned by uid {st.st_uid} with mode "
             f"{oct(st.st_mode & 0o777)}; the compile cache must belong to "
@@ -381,6 +385,8 @@ def _compile_inline(code: str, lang: str, symbol: str, *,
         raise RuntimeError(
             f"c_block: inline {lang} compile failed:\n"
             f"$ {' '.join(cmd)}\n{exc.stderr}") from None
+    if os.name == "posix":
+        os.chmod(so_path, 0o700)    # the linker's mode follows the umask
     return so_path
 
 
@@ -537,11 +543,19 @@ def _c_graph_observer(builder):
     graph = getattr(builder, "_c_graph", None)
     if graph is None or not graph.blocks:
         return None
-    obs = graph.make_step_observer(builder)
-    for spec in graph.blocks:
-        for ch, v in zip(spec.output, spec.block.outputs):
-            graph._cxx_chain.set_output(ch, float(v))
-    return obs
+    # Compiled once per circuit layout: the graph keeps its tick grid
+    # across runs, so a resume_from run continues it (a run that goes
+    # back in time restarts it, BlockChain.rearm_if_restarted).
+    key = (len(graph.blocks), int(builder.pool.state_size(builder.graph)))
+    cached = getattr(graph, "_c_obs", None)
+    if cached is None or cached[0] != key:
+        obs = graph.make_step_observer(builder)
+        for spec in graph.blocks:
+            for ch, v in zip(spec.output, spec.block.outputs):
+                graph._cxx_chain.set_output(ch, float(v))
+        graph._c_obs = cached = (key, obs)
+    graph._fires0 = list(graph._cxx_chain.tick_counts())   # n_fires per run
+    return cached[1]
 
 
 def wire_c_blocks_from_yaml(loaded, spec, *,

@@ -114,9 +114,10 @@ def test_unsupported_and_no_dt_asks_for_one():
 
 def test_trbdf2_refuses_where_auto_routes():
     """Naming the engine means you want to KNOW."""
-    with pytest.raises(ValueError, match="C block"):
-        p.simulate(_rc_unsupported(), t_end=1e-3, dt=1e-6,
-                    engine="trbdf2")
+    # (C blocks no longer qualify: trbdf2 runs them since task 9.3)
+    with pytest.raises(ValueError, match="store_every"):
+        p.simulate(_rc(), t_end=1e-3, dt=1e-6, engine="trbdf2",
+                   store_every=4)
 
 
 def test_no_device_kind_blocks_the_router():

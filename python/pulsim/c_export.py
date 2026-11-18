@@ -98,9 +98,18 @@ def export_c(chain, builder, outputs, *, prefix: str = "pulsim_graph"
             "the graph has no Rate: its blocks run on every solver step "
             "(continuous time), which has no sample time in C; give the "
             "chain a Rate")
-    chain.make_step_observer(builder)        # validates and orders
-    cxx = chain._cxx_chain
-    rates = sorted(chain._groups, key=chain._groups.get)
+    # build a private backend to validate and order; the chain keeps
+    # the one its observer (if any) runs
+    saved = (chain._cxx_chain, getattr(chain, "_groups", None),
+             getattr(chain, "_block_rates", None), chain._dt)
+    try:
+        chain.make_step_observer(builder)
+        cxx, groups, block_rates = (chain._cxx_chain, chain._groups,
+                                    chain._block_rates)
+    finally:
+        (chain._cxx_chain, chain._groups, chain._block_rates,
+         chain._dt) = saved
+    rates = sorted(groups, key=groups.get)
     for r in rates:
         if r._delay()[0] != 0:
             raise _refuse(
@@ -124,11 +133,12 @@ def export_c(chain, builder, outputs, *, prefix: str = "pulsim_graph"
     inputs: list = []
     state: list = []      # (C declaration, init statement)
     steps = {g: [] for g in range(len(rates))}
+    updates = {g: [] for g in range(len(rates))}
 
     for i in order:
         spec = chain.blocks[i]
         b, cls, ins = spec.block, type(spec.block).__name__, spec.inputs
-        g = gid[chain._block_rates[i]]
+        g = gid[block_rates[i]]
         period = _lit(rates[g].period)
         outs = list(spec.output) if isinstance(spec.output, (tuple, list)) \
             else [spec.output]
@@ -315,13 +325,15 @@ def export_c(chain, builder, outputs, *, prefix: str = "pulsim_graph"
             if n < 1:
                 raise _refuse(f"block '{spec.name}': DelayBlock needs "
                               "samples >= 1")
-            buf = list(b._buf) if len(b._buf) == n \
-                else [b.initial_value] * n
-            st("q", buf, n)
+            # the kernel starts from initial_value (not _buf) and pushes
+            # x after every block of the pass ran (two-phase, like
+            # make_delay_step): a delay that breaks a loop reads its
+            # producer's value of this tick
+            st("q", [b.initial_value] * n, n)
             state.append((f"int b{i}_h;", f"s->b{i}_h = 0;"))
-            code.append(
-                f"{{ const double x = {a('x')}; {o[0]} = {p}q[{p}h]; "
-                f"{p}q[{p}h] = x; {p}h = ({p}h + 1) % {n}; }}")
+            code.append(f"{o[0]} = {p}q[{p}h];")
+            updates[g].append(f"    {p}q[{p}h] = {a('x')}; "
+                              f"{p}h = ({p}h + 1) % {n};")
         else:
             raise _refuse(f"block '{spec.name}': no C rendering for {cls}")
         steps[g].append(f"    /* {spec.name}: {cls} */\n    "
@@ -367,6 +379,8 @@ def export_c(chain, builder, outputs, *, prefix: str = "pulsim_graph"
         body += [f"void {P}_step_rate{g}({P}_state* s, const double* in, "
                  "double t) {",
                  "    (void)in; (void)t;", *steps[g],
+                 *(["    /* delay pushes, after every block */"]
+                   + updates[g] if updates[g] else []),
                  f"    s->ticks[{g}] += 1;", "}", ""]
     if ng == 1:
         n_in, n_out = len(inputs), len(outputs)
@@ -382,8 +396,13 @@ def export_c(chain, builder, outputs, *, prefix: str = "pulsim_graph"
             "void pulsim_cblock_step(const double* in, int n_in, double* out,"
             " int n_out, double t, double dt, void** state) {",
             f"    {P}_state* s;",
-            "    (void)dt;",
-            f"    if (n_in != {n_in} || n_out != {n_out}) return;",
+            "    int k;",
+            "    /* wired or clocked unlike the export: NaN, not a silent 0 */",
+            f"    if (n_in != {n_in} || n_out != {n_out} || "
+            f"dt != {_lit(rates[0].period)}) {{",
+            "        for (k = 0; k < n_out; ++k) out[k] = NAN;",
+            "        return;",
+            "    }",
             "    if (*state == NULL) *state = pulsim_cblock_init(n_in, n_out);",
             f"    s = ({P}_state*)*state;",
             f"    {P}_step_rate0(s, in, t);",

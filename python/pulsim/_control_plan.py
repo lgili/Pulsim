@@ -9,7 +9,9 @@ dispatch, and both engines consume its plan.
 Tick rule: source j with period T_j fires at t_start + k*T_j for every
 integer k >= 0 with that instant < t_end, i.e. ceil(span / T_j) times,
 sources in registration order (closed loops in list order, then the
-user observer) when several are due at one instant.
+user observer) when several are due at one instant; on pwl the
+closed loops that are graphs (kernel helpers) run before the Python
+tick sources.
 """
 
 from __future__ import annotations
@@ -47,6 +49,7 @@ class ControlPlan:
     # The builder's C-block graph (add_c_block), last in every order.
     c_graph: Optional[TickFn] = None
     _sched: Optional["FixedStepTicks"] = None
+    _ticks0: dict = field(default_factory=dict)
 
     def merge_b_extra(self, user_fn):
         """The b_extra the engines see: the caller's ``b_extra_fn``, then
@@ -79,11 +82,14 @@ class ControlPlan:
         graphs = list(self.loop_graphs)
         if self.c_graph is not None:
             graphs.append(self.c_graph)
+        self._ticks0 = {}
         for obs in graphs + list(self.every_step):
             cxx = getattr(obs, "_cxx_chain", None)
             if cxx is not None and cxx.label_time:
                 cxx.set_solver_dt(float(dt))
                 cxx.set_horizon(float(t_end))
+                # a reused helper graph keeps counting: report this run's
+                self._ticks0[id(cxx)] = int(sum(cxx.tick_counts()[1:]))
         py_ticks = [(f, p) for (f, p), g in zip(self.ticks, self.tick_graph)
                     if g is None]
         self._sched = (FixedStepTicks(py_ticks, float(t_start), float(t_end),
@@ -99,8 +105,11 @@ class ControlPlan:
             return parts[0]          # one user chain: the chain fast path
         if all(getattr(o, "_cxx_chain", None) is not None for o in parts):
             from ._pulsim import compose_chain_observers  # type: ignore[import-not-found]
-            return compose_chain_observers(
+            tick = compose_chain_observers(
                 [(o._cxx_chain, o._chain_dt) for o in parts])
+            tick._n_python_blocks = sum(  # type: ignore[attr-defined]
+                getattr(o, "_n_python_blocks", 0) for o in parts)
+            return tick
         if len(parts) == 1:
             return parts[0]
 
@@ -123,12 +132,14 @@ class ControlPlan:
                 j += 1
             else:
                 cxx = g._cxx_chain
-                counts.append(int(sum(cxx.tick_counts()[1:])))
+                counts.append(int(sum(cxx.tick_counts()[1:]))
+                              - self._ticks0.get(id(cxx), 0))
                 jitter = max(jitter, float(cxx.tick_jitter_max))
         for obs in self.every_step:      # a helper graph passed as step_observer
             cxx = getattr(obs, "_cxx_chain", None)
             if cxx is not None and cxx.label_time:
-                counts.append(int(sum(cxx.tick_counts()[1:])))
+                counts.append(int(sum(cxx.tick_counts()[1:]))
+                              - self._ticks0.get(id(cxx), 0))
                 jitter = max(jitter, float(cxx.tick_jitter_max))
         if sched is not None:
             jitter = max(jitter, sched.jitter_max)

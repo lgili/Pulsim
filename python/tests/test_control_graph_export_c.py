@@ -7,6 +7,7 @@ PWM graph loaded back through add_c_block(lib=...) in a circuit."""
 from __future__ import annotations
 
 import ctypes
+import math
 import os
 import subprocess
 import sys
@@ -299,3 +300,63 @@ def test_cblock_cache_is_per_user_and_private(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "getuid", lambda: os.stat(f).st_uid + 1)
     with pytest.raises(RuntimeError, match="owned by uid"):
         _check_owned(f)
+
+
+def test_a_delay_that_breaks_a_loop_pushes_after_the_pass(tmp_path):
+    # y = u - 0.5 * delay(y): the delay's producer runs after it; the
+    # kernel pushes x after the whole pass (two-phase), so must the C.
+    def mk(rate):
+        ch = p.MixedDomainBlockChain(rate=rate)
+        ch.add("d", p.DelayBlock(samples=2, initial_value=0.25),
+               inputs=dict(x="channel:y"), output="z")
+        ch.add("g", p.Gain(k=0.5), inputs=dict(x="channel:z"), output="w")
+        ch.add("s", p.Subtract(), inputs=dict(a="channel:u", b="channel:w"),
+               output="y")
+        return ch
+    b = _builder()
+    ex = export_c(mk(p.Rate(T)), b, outputs=["y"])
+    lib = ctypes.CDLL(str(_build(tmp_path, ex, "dly")))
+    P = ex.prefix
+    getattr(lib, f"{P}_state_size").restype = ctypes.c_size_t
+    get = getattr(lib, f"{P}_get")
+    get.restype = ctypes.c_double
+    st = ctypes.create_string_buffer(getattr(lib, f"{P}_state_size")())
+    getattr(lib, f"{P}_init")(st)
+    k = mk(None)
+    obs = k.make_step_observer(b, dt=T)
+    vin = (ctypes.c_double * 1)()
+    for i in range(50):
+        k._cxx_chain.set_channel("u", float(i % 7))
+        vin[0] = float(i % 7)
+        obs(i * T, np.zeros(1))
+        getattr(lib, f"{P}_step_rate0")(st, vin, ctypes.c_double(i * T))
+        assert get(st, ex.signals.index("y")) == k.get("y")
+
+
+def test_export_leaves_the_chains_observer_alone():
+    b = _builder()
+    ch = p.MixedDomainBlockChain(rate=p.Rate(T))
+    ch.add("g", p.Gain(k=2.0), inputs=dict(x="a"), output="y")
+    obs = ch.make_step_observer(b)
+    cxx = ch._cxx_chain
+    export_c(ch, b, outputs=["y"])
+    assert ch._cxx_chain is cxx and obs._cxx_chain is cxx
+
+
+def test_the_shim_writes_nan_when_wired_or_clocked_unlike_the_export(tmp_path):
+    ch = p.MixedDomainBlockChain(rate=p.Rate(T))
+    ch.add("g", p.Gain(k=2.0), inputs=dict(x="a"), output="y")
+    lib = ctypes.CDLL(str(_build(tmp_path, export_c(ch, _builder(),
+                                                    outputs=["y"]), "nan")))
+    step = lib.pulsim_cblock_step
+    step.argtypes = [ctypes.POINTER(ctypes.c_double), ctypes.c_int,
+                     ctypes.POINTER(ctypes.c_double), ctypes.c_int,
+                     ctypes.c_double, ctypes.c_double,
+                     ctypes.POINTER(ctypes.c_void_p)]
+    inp = (ctypes.c_double * 1)(1.5)
+    out = (ctypes.c_double * 1)(0.0)
+    state = ctypes.c_void_p(None)
+    step(inp, 1, out, 1, 0.0, T, ctypes.byref(state))
+    assert out[0] == 3.0
+    step(inp, 1, out, 1, 0.0, 2 * T, ctypes.byref(state))
+    assert math.isnan(out[0])

@@ -117,6 +117,7 @@ def test_closed_loop_matches_the_python_pi_tick_by_tick():
                              switch="Q", freq=10e3)
     p.simulate(b, 3e-3, dt=1e-6, closed_loops=[lp])
     ref = _pi()
+    assert len(lp.duty_history) == len(lp.error_history) == 30
     for (t, d), (_t, e) in zip(lp.duty_history, lp.error_history):
         assert ref.update(setpoint=12.0, measured=12.0 - e, dt=1e-4) == d
 
@@ -198,3 +199,25 @@ def test_a_compiled_c_block_makes_no_python_call():
     _p_block(b2)
     r2 = p.simulate(b2, 11 * TS, dt=1e-6)
     assert np.asarray(r.states).tobytes() == np.asarray(r2.states).tobytes()
+
+
+def test_a_reused_loop_reports_this_runs_ticks():
+    # The helper graph is built once; its counters keep running across
+    # runs, control_tick_counts is per run (was [40] on the second).
+    b = _buck()
+    lp = p.bind_pi_to_switch(b, pi=_pi(), measured="out", setpoint=12.0,
+                             switch="Q", freq=10e3)
+    for _ in range(2):
+        r = p.simulate(b, 2e-3, dt=1e-6, closed_loops=[lp])
+        assert list(r.control_tick_counts) == [20]
+
+
+def test_a_python_block_in_a_composed_tick_is_reported():
+    b = _buck()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        lp = p.bind_pi_to_switch(
+            b, pi=_pi(), measured=lambda x, i=b.node_id_of("out"): x[i],
+            setpoint=12.0, switch="Q", freq=10e3)
+    r = p.simulate(b, 1e-3, dt=1e-6, closed_loops=[lp])
+    assert "closed_loops" in r.step_loop_python_callbacks

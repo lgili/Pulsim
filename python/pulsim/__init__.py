@@ -1786,7 +1786,8 @@ def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
     `SwitchSchedule` with an edge oracle (a combination that holds a
     Python callable has none). Any other non-None hook is Python.
     """
-    from ._pulsim import CxxChainPwmGate, CxxChainTick  # type: ignore[import-not-found]
+    from ._pulsim import (  # type: ignore[import-not-found]
+        CxxChainBExtra, CxxChainPwmGate, CxxChainTick)
     out = []
     for name, fn in hooks.items():
         if fn is None:
@@ -1796,8 +1797,11 @@ def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
                                 CxxChainPwmGate))
                 or (isinstance(fn, SwitchSchedule) and fn.has_edges)):
             continue
-        if name == "step_observer" and isinstance(fn, CxxChainTick):
+        if name == "step_observer" and isinstance(fn, CxxChainTick) \
+                and not getattr(fn, "_n_python_blocks", 0):
             continue          # control graphs composed in C++
+        if name == "b_extra_fn" and isinstance(fn, CxxChainBExtra):
+            continue          # a graph's driven sources, in C++
         if name == "closed_loops" and not any(
                 getattr(lp.step_observer, "_n_python_blocks", 1)
                 for lp in fn):
@@ -2626,6 +2630,12 @@ def simulate(
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
             switch_fn=switch_fn)
+        if engine == "trbdf2":
+            # Task 9.3: trbdf2 lands its steps on a C block's ticks
+            # (state-time law); only 'auto' keeps routing them to pwl,
+            # so no existing auto run changes engine.
+            _route_reasons = [r for r in _route_reasons
+                              if getattr(r, "feature", "") != "c_blocks"]
         if engine == "auto":
             # ROUTE, don't refuse: 'auto' means "pick the engine",
             # and a script written against the fixed-step API must

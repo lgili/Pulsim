@@ -308,6 +308,37 @@ Each entry: question → option taken → evidence → how to reverse.
   have it loaded.
 - **Reverse.** None wanted.
 
+## G21. C blocks on trbdf2; refused on the exact strategy (task 9.3)
+
+- **Taken.** `engine="trbdf2"` no longer refuses C blocks: the plan
+  already ticks the C-block graph on the variable-step engine, which
+  lands on the ticks, so the block runs the state-time law. `auto` keeps
+  routing circuits with C blocks to `pwl` (no auto run changes engine).
+  `exact` / `dsed` refuse by name (`c_blocks`; cells under both names).
+- **Evidence.** P loop of docs/control-graph.md: trbdf2 meets
+  `v[k]` (k = 1, 5, 10) within 1e-7 at rtol 1e-9; pwl at dt = 0.1 us
+  and trbdf2 agree within 1e-4 at 1.95 ms (`test_c_block_engines.py`).
+  What the exact strategy misses: a `b_extra` input and an observer.
+- **Reverse.** Re-add the blocker for `engine="trbdf2"`.
+
+## G22. Resume: graphs keep their ticks and states across runs
+
+- **Taken.** No snapshot field: a graph already keeps its block states
+  and tick counters across `simulate()` calls, and
+  `rearm_if_restarted` restarts the grid only when time goes back, so a
+  `resume_from` run continues it. The C-block graph is now compiled once
+  per circuit layout (it was rebuilt per run, which restarted its grid
+  at the resumed `t_start`); `control_tick_counts` / `n_fires` report
+  the last run. Resuming exactly on a tick instant is not exact on pwl
+  (label time samples `x(t - h)`, the resumed run has only `x(t)`).
+- **Evidence.** `test_control_graph_resume.py`: a closed loop resumed at
+  1.53 ms and a C block resumed at 0.73 ms reproduce the uninterrupted
+  duty history / tick counts exactly and the states within the
+  open-loop resume bound (1e-9 relative, the snapshot's own).
+- **Hook.** A graph used with a *different* builder or after `reset()`
+  has nothing to carry; a snapshot-borne control state needs the
+  `SolverSnapshot` field listed under the 6.1 hook below.
+
 ## Hooks for task groups 6–7 (not in this slice)
 
 - **6.1 graph state in the solver snapshot.** `SolverSnapshot`

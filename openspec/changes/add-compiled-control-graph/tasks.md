@@ -62,7 +62,7 @@ Closed forms used below.
 ## 9. Consolidation
 - [x] 9.1 (label-time groups keep every closed-loop number, DECISIONS G13–G16) `MixedDomainBlockChain`, `bind_pi_to_switch`, `bind_pi_to_duty_callable`, `add_c_block`, YAML chains build a `ControlGraph`; closures through the `PythonBlock` adapter with a deprecation warning; remove the two composition blocks in `simulate()`
 - [x] 9.2 (also on the consolidated paths: `bind_pi_to_switch(measured="out")` and a compiled C block make 0 Python calls on pwl and trbdf2; closed-loop buck 2188 → 204 ns/step) Measurement gate (counters): `n_block_evals = n_ticks × blocks in the group`; zero Python calls during a run of a graph with no `PythonBlock` (baseline from 1.3); for a 10 kHz controller on a dt = 1e-7 fixed run, block evaluations fall from one per step to one per tick (1000× fewer, by count)
-- [ ] 9.3 C blocks on `trbdf2` and on the exact strategy: same output as on the fixed engine within the engine tolerance (refused / open-loop today)
+- [x] 9.3 (trbdf2 runs them, the state-time law; the exact strategy refuses by name, DECISIONS G21) C blocks on `trbdf2` and on the exact strategy: same output as on the fixed engine within the engine tolerance (refused / open-loop today)
 
 ## 10. Docs and verification
 - [ ] 10.1 Control guide (rates, order, delay, continuous blocks, export), migration note for insertion-order chains, AI_GUIDE, CHANGELOG

@@ -233,6 +233,13 @@ contract) it is bit-identical to the kernel graph: every block kind over
 10⁴ ticks, and a PI + limiter + PWM graph in a circuit through
 `add_c_block`. Refused by name: `PythonBlock`, a `CBlock`, a graph with
 no `Rate` (continuous time) and a rate with a `compute_delay`.
+A multi-rate export splits the kernel's single pass into one function
+per rate: when several rates are due at one instant, call them in rate
+order (`step_rate0` first); that reproduces the kernel when no block
+reads, at a shared instant, a signal a later-called rate writes. The shim
+writes NaN to its outputs when it is wired (`n_in`, `n_out`) or clocked
+(`dt`) unlike the export; its state is static, so two `add_c_block`s of
+the same library share one instance.
 
 ```python
 ex = pulsim.export_c(chain, builder, outputs=["y"])
@@ -245,6 +252,24 @@ C blocks compile into a per-user cache, mode 0700
 (`~/Library/Caches/pulsim/cblock`, `~/.cache/pulsim/cblock` or
 `$XDG_CACHE_HOME/pulsim/cblock`, `%LOCALAPPDATA%\pulsim\cblock`); a
 cached library that another user owns or can write is refused.
+
+## Other engines and resume
+
+C blocks run on `trbdf2` (`engine="trbdf2"`; `auto` keeps routing them
+to `pwl`): the engine lands its steps on the ticks, so a block samples
+`v(kT)` and holds from `kT`, the state-time law (`v[10] =
+0.643545722992`, met within 1e-7 at rtol 1e-9). The exact strategy
+(`exact` / `dsed`) refuses them by name: it has no `b_extra` input.
+
+A graph keeps its tick counters and block states across `simulate()`
+calls on the same builder: a run that goes on from the previous `t_end`
+(`resume_from=`) continues the tick grid; a run that starts earlier
+restarts it. The C-block graph is compiled once per circuit layout.
+`control_tick_counts` and `CBlockHandle.n_fires` count the last run's
+ticks. Resume between ticks: a tick due exactly at the previous `t_end`
+is dropped there (the horizon) and runs at the resumed start on the
+snapshot state `x(t_end)`, where the uninterrupted `pwl` run used
+`x(t_end - h)` (label time).
 
 ## Not yet
 
