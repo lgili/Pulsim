@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Newton roundoff acceptance: a typed budget abort, and two review fixes
+
+* **Added** `pulsim.NewtonRoundoffBudgetExceeded`, a `SimulationAborted`
+  (same `partial` / `t_failed`) raised when more consecutive Newton
+  solves would be accepted at roundoff than the run's budget allows, and
+  `simulate(newton_roundoff_budget=...)` (pwl and trbdf2, default 130,
+  >= 1) to set it.
+* **Changed** `engine='trbdf2'`: a diode cascade that flips nothing
+  restarts the step from the committed state's signals, as the landing
+  already did: the fuzzed floating-bus bridge now takes 1231-1254 steps
+  and 7-10 diode events (1231-1454 and 7-17 without it). The strict
+  platform xfails XP-1 and XP-2 are removed. (A step accepted at its estimate's roundoff floor keeps
+  its estimate for the controller: clamping it to 1 made the SEPIC at
+  rtol 1e-8 take 662,366 steps instead of 27,529.)
+
 ### TR-BDF2: no diode decision made by round-off (Linux CI failures)
 
 * **Fixed** `engine='trbdf2'` decided diode bits from round-off on a
@@ -35,7 +50,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   g_off to go through; the trace recorded the L·g_off mode (3854 V on a
   24 V DCM buck, `implausible_voltage` in the design evaluator's trbdf2
   transient route). A turn-off is now bracketed until the voltage the
-  residual current puts across g_off is inside the run's tolerance. The
+  residual current puts across g_off is inside the run's tolerance (or
+  the bracket reaches h_min, dt_floor or 40 bisections). The
   evaluator's DCM buck orbit is 8.996246827 V against the pss orbit
   8.996247087 V (−2.6e-7 V). trbdf2 numbers that moved
   (`trbdf2_baseline.py`): buck_dcm steps 9457 → 7608, error 1.25e-5 →
@@ -267,8 +283,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   output error 2.0e-4 → 2.36e-4 V, rejects 240 → 101, steps 1351 → 1412.
 * **Changed** Newton roundoff acceptance (both transient engines). The
   row scale and the step cap now come from the solve's start state, not
-  from the iterate being checked. A growing ||dx|| is never accepted.
-  The state kept is the iterate whose residual was checked. A run of
+  from the iterate being checked. A solve whose ||dx|| grows is not
+  accepted: the largest of its last three ||dx|| may be at most twice the
+  largest of the three before (a round-off limit cycle repeats its
+  maxima; a diverging iterate does not). The state kept is the iterate whose residual was checked. A run of
   more than 130 accepted solves with no converged solve between them
   raises `SimulationAborted`; the message names the row and the
   counts. The worst honest run measured is 13. The warning text no

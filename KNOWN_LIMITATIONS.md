@@ -429,29 +429,6 @@ without line inductance runs (add-complementarity-mode-selection
 DECISIONS #20). `engine='pwl'` runs both (181.81 V / 200.01 V at
 `dt = 1 µs`); no reference was available to check them.
 
-### Cross-platform engine gaps on Linux (strict platform xfails)
-
-Two TR-BDF2 results differ on Linux (Eigen 3.4.0 / glibc libm; arm64 and
-x86-64 alike, `-ffp-contract=off`) from macOS (Eigen 5.0.1). The tests
-assert the property every platform must meet and carry
-`pytest.mark.xfail(strict=True, condition=sys.platform.startswith("linux"),
-reason="KNOWN_LIMITATIONS XP-n")`: CI stays green, the gap shows in the
-report, and the day the engine meets the property on Linux the strict
-xfail fails and must be removed. Reproduce with
-`scripts/ci_linux_repro.sh -- <test id>` (container `pulsim-ci147`).
-
-| Id | Test | macOS | Linux | Owner |
-|----|------|-------|-------|-------|
-| XP-1 | `test_trbdf2_error_control.py::test_doubled_tolerances_restore_the_previous_density` (diode bridge, DC bus floating on a 1 MΩ tie, rtol 2e-5 / atol 2e-8) | 1235 steps, 14 diode events, 3 forced accepts | Linux: 1398 steps, 122 diode events, 87 forced accepts (measured at 485ab770): chatter from t ≈ 4.4533 ms with every diode OFF; Windows: 1362 steps (CI at ed85a697) | TR-BDF2 track |
-| XP-2 | `test_saturable_transformer.py::test_engines_agree_below_saturation` (snubbed flyback, saturable core) | completes: 45,736 steps, 161 roundoff accepts | aborts at t = 0.34 ms, h at h_min, Newton 50 iterations still contracting (‖dx‖ 4.6e-7 → 1.7e-7 → 4.1e-8 V; 16.77160 V vs 16.77750 V at 0.339 ms) | TR-BDF2 track |
-
-XP-1 is not a Linux-only defect: on macOS the same bridge chatters at the
-neighbouring tolerances (rtol 1e-5: 1356 steps, 51 diode events, D4 held
-OFF against 4.72 V; rtol 4e-5: 56 events, 41 forced accepts, D4 by
-29.5 V, both with the missed-commutation warning). 2e-5 is clean on
-macOS by rounding luck. Workaround: `engine='pwl'` with a fixed `dt`, or
-tie the DC bus with a resistor well below 1 MΩ.
-
 ### Fixed-step controller ticks land on the `dt` grid
 
 On `pwl` a controller tick is delivered at the first grid point at or
@@ -568,7 +545,7 @@ start from the DC operating point, which `dsed` cannot take (refused).
 `engine='trbdf2'` on a diode bridge whose DC bus is referenced only by a
 1 MΩ tie still depends on rounding. Under a 1e-15 relative perturbation
 of the element values (20 runs) the run always finishes, but takes
-1231-1454 steps and 7-17 diode events, and the 30-40 ms bus average is
+1231-1254 steps and 7-10 diode events, and the 30-40 ms bus average is
 311.155 to 311.341 V (pwl at dt 1e-6 and 2.5e-7: 311.344 V). A few
 picosecond samples right after a turn-off at the source zero crossing
 show an OFF diode 0.6 V forward (the L·g_off ringing of the line

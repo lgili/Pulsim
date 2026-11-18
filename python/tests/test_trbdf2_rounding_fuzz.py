@@ -40,8 +40,8 @@ def test_floating_bus_bridge_finishes_under_rounding():
     rounding decides; the landing after it put the floating bus 83 V up
     (its common mode is round-off at a 3e-13 s step: 2C/h = 2.8e9 S
     against the 1e-6 S tie) and turned D4 back ON from that noise.
-    NOT yet independent of rounding: the event count (7-17), the step
-    count (1231-1454) and the bus level (outcomes up to 0.19 V apart)
+    NOT yet independent of rounding: the event count (7-10), the step
+    count (1231-1254) and the bus level (outcomes up to 0.19 V apart)
     still vary between these runs (KNOWN_LIMITATIONS); only the grind
     is pinned."""
     rng = np.random.default_rng(20261117)

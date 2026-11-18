@@ -464,7 +464,10 @@ The open questions of `design.md` had no answer and none was marked
    (this circuit is piecewise linear: no SDIRK restart). Option taken: a
    turn-off of a diode with g_off > 0 keeps bisecting until the voltage
    the residual current would put across g_off, |s|·g_on/g_off, is within
-   atol + rtol·max|x| (or the bracket reaches h_min). Measured: the
+   atol + rtol·max|x|, or the bracket reaches h_min, dt_floor or the 40
+   bisection cap. (With g_on/g_off = 1e12 that threshold is below the
+   solve's own round-off of s, so in practice the bracket ends at one of
+   the caps; a round-off floor on it is left open, reviewer 2026-11-17.) Measured: the
    Evaluator route is ok, v_c0 = 8.996246827288 V against the pss orbit
    8.99624708728943 V (error −2.60e-7 V, was 2.2e-5 before the
    regression); DCM buck to 0.64 ms max |v(sw)| 24 V, steps 1776 → 1542;
@@ -472,3 +475,23 @@ The open questions of `design.md` had no answer and none was marked
    at rtol 2e-6 / 1e-6 / default (was −1539 / 1460 / 1897 V), and its
    strict xfail is removed. To reverse: restore the break condition
    `(tb - ta) < max(h_min, 1e-4 h)` in the localisation loop.
+
+17. **Reviewer risks on the roundoff paths (2026-11-17).** (a) Clamp the
+   error to 1 on a roundoff-floor accept, so the controller does not
+   grow h from an estimate that passed only because its noise joined
+   the scale? Measured and rejected: the SEPIC at rtol 1e-8 took 662,366
+   accepted steps instead of 27,529 (same V_out, 17.315704 V); h could
+   not leave the floor. The estimate is kept. (b) The chatter-safe
+   cascade that flips nothing now restarts from the committed x
+   (`x_sig = x`), as the landing path whose cascade undid its flip
+   already did; a probe of a g_off-held node is round-off. Measured on
+   the 20 fuzzed bridge runs of item 15: steps 1231-1454 -> 1231-1254
+   (all 20 within 2 % of 1242), events 7-17 -> 7-10, 0 forced accepts;
+   the unperturbed rtol sweep, the SEPIC (17.315704 V) and the trbdf2
+   baseline rows are unchanged. (c) The run
+   budget of roundoff accepts is typed and settable:
+   `NewtonRoundoffBudgetExceeded` (a `SimulationAborted` with the
+   partial result) and `simulate(newton_roundoff_budget=)` (default 130,
+   ten times the worst honest run). To reverse (b): drop the
+   `x_sig = x;` in the no-flip branch; (c): drop the option and the
+   `roundoff_budget` flag of `SimulationAborted`.

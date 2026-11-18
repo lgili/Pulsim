@@ -149,7 +149,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/multilevel/t_type_3level_halfbridge.yaml | pwl | 0.02 | 0.0782 | V(out) | 0.000801 | 2.0% | 1.2e-13 | 6.1e-07 |
 | switching/multilevel/t_type_3level_halfbridge.yaml | pwl+restart | 0.02 | 0.0771 | V(out) | 1.37e-06 | 2.0% | 2e-07 | 1 |
 | switching/multilevel/t_type_3level_halfbridge.yaml | pwl+split | 0.02 | 0.0771 | V(out) | 1.37e-06 | 2.0% | 2e-07 | 1 |
-| three_phase/three_phase_diode_rectifier.yaml | pwl | 0.02 | 1.51 | V(out) | 1.52 | 8.0% | 0.071 | 1.4e+03 |
+| three_phase/three_phase_diode_rectifier.yaml | pwl | 0.02 | 1.51 | V(out) | 1.52 | 7.8% | 0.071 | 1.4e+03 |
 
 ### All cells (err_rms or outcome)
 

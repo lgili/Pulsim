@@ -180,6 +180,12 @@ struct TrBdf2Options {
     /// bisect handle (`false` = abort or reject at an exhausted budget,
     /// as before that change).
     bool newton_roundoff_acceptance = true;
+    /// Newton roundoff-acceptance run budget: the most consecutive
+    /// solves that may be accepted at roundoff with no converged solve
+    /// between them (add-newton-roundoff-acceptance DECISIONS 10d). One
+    /// more raises NewtonRoundoffBudgetExceeded, which no retry ladder
+    /// swallows. A test handle; 130 = 10x the worst honest run.
+    Size newton_roundoff_budget = Size{130};
     /// L-stable restart (maintainer decision 1 of the TR-BDF2 follow-up):
     /// the number of Alexander SDIRK(2,2) steps taken after a diode
     /// event and after the initial diode settle, instead of TR-BDF2
@@ -817,6 +823,7 @@ inline SimulationResult run_transient_trbdf2(
     // result at the end.
     pwl::NewtonRoundoffAcceptance newton_roundoff;
     newton_roundoff.enabled = opts.newton_roundoff_acceptance;
+    newton_roundoff.max_consecutive = opts.newton_roundoff_budget;
     Size ro_accepts = 0;
     Real ro_omega_max = 0;
     Index ro_row = kInvalidIndex;
@@ -1085,24 +1092,32 @@ inline SimulationResult run_transient_trbdf2(
     // probe is retaken 10x longer, up to span·1e-6, as a singular one is.
     auto decide_probe = [&](Vector& xp, const SwitchStateMask& m,
                             Real t0) -> bool {
-        if (!nl_effective) {
-            const Real dt_cap = span_ref * Real{1e-6};
-            while (proposes_flip(xp)) {
-                predicate_noise(xp, m, last_probe_dt);
-                const Real dt_next = last_probe_dt * Real{10};
-                if (!noise_holds(xp) || dt_next > dt_cap) break;
-                const Vector x_prev = xp;
-                const Real dt_prev = last_probe_dt;
-                if (!probe_solve(m, t0, dt_next, xp)) {
-                    xp = x_prev;  // a failed probe is never read
-                    last_probe_dt = dt_prev;
-                    last_probe_ok = true;
-                    break;
-                }
-                ++n_probe_noise_retakes;
-            }
+        if (nl_effective || !proposes_flip(xp)) {
+            return decide_diodes(xp, m, last_probe_dt);
         }
-        return decide_diodes(xp, m, last_probe_dt);
+        const Real dt_cap = span_ref * Real{1e-6};
+        for (;;) {
+            predicate_noise(xp, m, last_probe_dt);
+            const Real dt_next = last_probe_dt * Real{10};
+            if (!noise_holds(xp) || dt_next > dt_cap) break;
+            const Vector x_prev = xp;
+            const Real dt_prev = last_probe_dt;
+            if (!probe_solve(m, t0, dt_next, xp)) {
+                // Not reached on a linear factor; if it were, neither the
+                // failed state nor its b_stage may be read: keep the bits.
+                xp = x_prev;
+                last_probe_dt = dt_prev;
+                last_probe_ok = true;
+                ++n_noise_held;
+                return false;
+            }
+            ++n_probe_noise_retakes;
+            if (!proposes_flip(xp)) return false;
+        }
+        // pn_bound is fresh for (xp, m, last_probe_dt).
+        const bool flipped = diodes.update_from_state(xp, pn_bound);
+        if (proposes_flip(xp)) ++n_noise_held;
+        return flipped;
     };
 
     // Mask recorded with sample 0 (SimulationResult::
@@ -1154,18 +1169,27 @@ inline SimulationResult run_transient_trbdf2(
     if (has_diodes) {
         const Real h_probe = h_probe_floor;
         const Real t_gates = opts.t_start + Real{0.5} * h_min;
-        for (Size it = 0; it < opts.max_event_iterations; ++it) {
-            // A failed (Newton) probe leaves x_trial unwritten — unsized
-            // on this first call: keep the bits (it read null, SIGSEGV).
-            const SwitchStateMask m0 = mask_at(t_gates);
-            if (!probe_solve(m0, opts.t_start, h_probe, x_trial)) {
-                break;
+        // Outside the run's try: the budget abort is typed here too.
+        try {
+            for (Size it = 0; it < opts.max_event_iterations; ++it) {
+                // A failed (Newton) probe leaves x_trial unwritten —
+                // unsized on this first call: keep the bits (it read
+                // null, SIGSEGV).
+                const SwitchStateMask m0 = mask_at(t_gates);
+                if (!probe_solve(m0, opts.t_start, h_probe, x_trial)) {
+                    break;
+                }
+                const bool flipped =
+                    decide_probe(x_trial, m0, opts.t_start);
+                x_sig = x_trial;
+                if (!flipped) {
+                    break;
+                }
             }
-            const bool flipped = decide_probe(x_trial, m0, opts.t_start);
-            x_sig = x_trial;
-            if (!flipped) {
-                break;
-            }
+        } catch (const pwl::NewtonRoundoffBudgetExceeded& e) {
+            throw SimulationAborted(e.what(), SimulationResult{},
+                                    opts.t_start,
+                                    /*roundoff_budget=*/true);
         }
     }
 
@@ -2100,6 +2124,9 @@ inline SimulationResult run_transient_trbdf2(
                 }
                 const Real err_n = std::sqrt(e2 / static_cast<Real>(entries.size()));
                 if (err_n <= Real{1}) {
+                    // Not clamped to 1 (keep h): measured, the SEPIC at
+                    // rtol 1e-8 then took 662,366 steps instead of
+                    // 27,529 — h could never grow off the floor again.
                     err = err_n;
                     ++st.n_roundoff_floor_accepts;
                 }
@@ -2330,6 +2357,11 @@ inline SimulationResult run_transient_trbdf2(
                                 // Nothing flipped: no event, no restart.
                                 // Retake the step at the same h; the
                                 // chatter guard below bounds the retries.
+                                // The signal reference is the committed
+                                // x, not the last probe (as the landing
+                                // path below: a probe of a g_off-held
+                                // node is round-off).
+                                x_sig = x;
                                 // (Accepting it instead moved the SEPIC's
                                 // V_out by 7.5e-5 V; localising it inside
                                 // the step landed a V_th = 0 bridge diode
@@ -2795,6 +2827,13 @@ inline SimulationResult run_transient_trbdf2(
     } catch (const SimulationAborted&) {
         st.n_probe_newton_retries = n_probe_newton_retries;
         throw;
+    } catch (const pwl::NewtonRoundoffBudgetExceeded& e) {
+        st.n_probe_newton_retries = n_probe_newton_retries;
+        result.newton_roundoff_accepts = ro_accepts;
+        result.newton_roundoff_omega_max = ro_omega_max;
+        result.newton_roundoff_row = ro_row;
+        throw SimulationAborted(e.what(), std::move(result), t,
+                                /*roundoff_budget=*/true);
     } catch (const std::runtime_error& e) {
         st.n_probe_newton_retries = n_probe_newton_retries;
         result.newton_roundoff_accepts = ro_accepts;
