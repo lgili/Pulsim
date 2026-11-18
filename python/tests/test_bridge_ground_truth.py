@@ -66,3 +66,11 @@ def test_bus_average_is_the_exact_one_under_rounding_fuzz(form, rtol, bound):
     assert np.abs(errs).max() <= bound, errs
     # rounding moves the answer far less than the engine's own error
     assert np.ptp(errs) <= 1e-4, errs
+
+
+def test_the_exact_engine_matches_the_ground_truth():
+    # integration batch 11: -4.5e-10 V measured (0.0272 V low before the
+    # floating-island fix); 1e-6 V leaves room for platform rounding
+    r = p.simulate(_bridge(np.zeros(6), "conductance"), t_end=40e-3,
+                   engine="exact")
+    assert abs(_window_avg(r) - TRUTH) <= 1e-6
