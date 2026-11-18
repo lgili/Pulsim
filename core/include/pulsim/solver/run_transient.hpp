@@ -953,7 +953,8 @@ inline SimulationResult run_transient(
     events::ModeSelector mode_selector;
     events::PassivityClass mode_passivity;
     std::vector<std::string> mode_diode_names;
-    Vector mode_x0, mode_xj, mode_b_src;
+    Vector mode_x0, mode_xj, mode_u;
+    DenseMatrix mode_Z;
     std::vector<bool> mode_bits0, mode_bits;
     std::vector<char> mode_prev_on, mode_settled;
     if (has_diodes && (opts.mode_selection != 0 || opts.mode_guard)) {
@@ -975,6 +976,14 @@ inline SimulationResult run_transient(
                             "in the circuit: the diode port model is linear, a Newton "
                             "device's stamp moves with its operating point. Drop "
                             "mode_selection.", mname));
+        }
+        if (opts.mode_selection != 0 && max_iters == 0) {
+            throw UnsupportedError(
+                "pwl", "mode_selection", "", "",
+                std::format("engine 'pwl': mode_selection='{}' with "
+                            "max_event_iterations=0: the diode modes are frozen, "
+                            "nothing is decided. Drop mode_selection or allow event "
+                            "iterations.", mname));
         }
         if (!bf.empty() || nl_refresh_effective || max_iters == 0) {
             mode_ports.reset();
@@ -1047,30 +1056,26 @@ inline SimulationResult run_transient(
         const auto mask0 = combine_masks(gates, mode_mask_of(mode_prev_on), diode_owned);
         const Real h_site = for_dt <= Real{0} ? Real{1} : be ? for_dt * Real{0.5} : for_dt;
         const auto sc = mode_ports->scale(mode_x0);
-        bool have_src = false;
-        auto port_at = [&](Real h, DenseMatrix& Z, Vector& u) {
-            if (h == h_site || for_dt <= Real{0}) {
-                mode_ports->site(mask0, for_dt, bx, mode_x0, Z, u);
-                return;
+        // Every pass, the selector's tie widenings included, is posed on the
+        // site's own step (DECISIONS F2): the next site is one step away, and
+        // a 100·h / 1e4·h backward-Euler look-ahead with the sources frozen
+        // decided a floating bridge's ties on a trajectory that never happens.
+        bool have_site = false;
+        auto port_at = [&](Real, DenseMatrix& Z, Vector& u) {
+            if (!have_site) {
+                mode_ports->site(mask0, for_dt, bx, mode_Z, mode_u);
+                have_site = true;
             }
-            if (!have_src) {
-                // shortcut: the widening's sources are the site's rows less its
-                // rule's companion history (a restart stage 2 keeps its stage-1
-                // terms); ties only — upgrade if a widened tie is decided wrong.
-                if (be) history.compute_b_extra_backward_euler(for_dt * Real{0.5}, mode_b_src);
-                else history.compute_b_extra(for_dt, mode_b_src);
-                mode_b_src = bx - mode_b_src;
-                have_src = true;
-            }
-            mode_ports->widened(mask0, h, mode_b_src, mode_x0, Z, u);
+            Z = mode_Z;
+            u = mode_u;
         };
         auto judge = [&](const std::vector<char>& on) {
             cache.solve_at(combine_masks(gates, mode_mask_of(on), diode_owned),
                            for_dt, bx, mode_xj);
             return pwl::judge_mode(diodes, on, mode_xj, sc, mode_selector.tol);
         };
-        return mode_selector.select(mode_ports->ports(), mode_prev_on, port_at,
-                                    h_site, sc, judge);
+        return mode_selector.select(mode_ports->ports(), mode_prev_on, port_at, h_site,
+                                    sc, judge);
     };
     // 'lcp': the LCP decides the site; one solve under its mode. Returns
     // whether the mode changed from the start bits.
@@ -1102,6 +1107,10 @@ inline SimulationResult run_transient(
                                 const topology::SwitchStateMask& gates, Real for_dt,
                                 bool be, const Vector& bx, Size rounds, bool cycle) {
         auto& r = result.mode_report;
+        // A later stage entered with the previous stage's mask cycle never
+        // solves (run_event_iteration breaks before round 1): no settled
+        // mode to compare, and the cycle was counted at that stage.
+        if (last_solved_bits.size() != diodes.entries().size()) return;
         mode_count_site(r, kind);
         r.settle_rounds_total += rounds;
         if (cycle) ++r.mask_cycles;
@@ -1145,6 +1154,7 @@ inline SimulationResult run_transient(
     auto mode_guard_site = [&](Real at_t, const topology::SwitchStateMask& gates,
                                Real for_dt, bool be, const Vector& bx, auto&& solve) {
         auto& g = result.mode_guard;
+        if (last_solved_bits.size() != diodes.entries().size()) return false;   // no solve
         mode_settled.assign(last_solved_bits.begin(), last_solved_bits.end());
         const auto sc = mode_ports->scale(mode_x0);
         Real viol = 0;

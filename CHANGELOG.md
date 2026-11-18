@@ -6,6 +6,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Complementarity mode selection on the fixed engine (`pwl`)
+
+* **Added**: `mode_selection='shadow'` and `'lcp'` run on `engine='pwl'`
+  (they were refused by name). Every decision site — a trapezoidal step,
+  a restart stage, a split sub-step, the static step — poses the LCP of
+  its diode ports on its own discretisation (the cache's factor of the
+  site's mask and step). `'shadow'` leaves every number bit-identical (the cache counters move) and
+  reports disagreements in `result.diagnostics['mode_shadow']`; `'lcp'`
+  decides every site (settle rounds and mask cycles 0) and reports in
+  `result.diagnostics['mode_selection']`. `trbdf2` still refuses both.
+* **Added**: the default-mode guard on `pwl`: a settle that ends without a
+  fixed point (a mask cycle or an exhausted round budget) is judged by the
+  diode law and, when its mode violates it, re-decided by the LCP;
+  counters in `result.diagnostics['mode_guard']`. Default results change
+  only where the guard repaired: on the floating single-phase bridge
+  (V_f = 0) two steps per run, end value unchanged (DECISIONS F3).
+* **Fixed** (port model accuracy): a floating island's KCL sum (a bridge's
+  DC bus on a tie) is imposed exactly in the port problem; against a
+  double-double solve of the site's system the port voltages are within
+  1.1e-14 V for ties 1e4–1e9 Ω and sub-steps dt…dt/1000 (the plain solve
+  was off by up to 0.32 V, the increment form by up to 4.3e-2 V).
+* **Fixed** (wrong decisions under `'lcp'` on `pwl`): the selector's tie
+  passes at 100·h and 1e4·h were posed as a backward-Euler look-ahead of
+  up to 0.1 s with frozen sources, which turned a floating bridge's ties
+  ON (p − n = 0.85 V against 95.17 V). On `pwl` every pass now uses the
+  site's own step (DECISIONS F2); the bridge's `'lcp'` run equals the
+  settle to the last printed digit (95.171220741846 V).
+* **Added** (refusal): `mode_selection='shadow'`/`'lcp'` with
+  `max_event_iterations=0` on `pwl` raises `UnsupportedError` (the modes
+  are frozen there; before, the request was dropped in silence).
+
 ### Switch masks of the wrong width are refused
 
 * **Fixed** (silent wrong answer; **BREAKING** for invalid input only): a
