@@ -65,6 +65,7 @@
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/solver/trbdf2_transient.hpp"
 #include "pulsim/solver/unsupported.hpp"
+#include "pulsim/errors/convergence.hpp"
 #include "pulsim/sources/combined_switch_fn.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
 #include "pulsim/sources/dead_time_pwm_pair_fn.hpp"
@@ -193,6 +194,15 @@ void init_module(py::module_& m) {
                 inst.attr("partial") = py::cast(e.partial());
                 inst.attr("t_failed") = py::cast(e.t_failed());
                 PyErr_SetObject(aborted_exc.ptr(), inst.ptr());
+            } catch (const ConvergenceFailure& e) {
+                // The exact engine's give-up sites (settle | chatter |
+                // no_progress | max_steps | nan): typed, so no caller
+                // has to match message text.
+                py::object inst = convergence_exc(e.what());
+                inst.attr("kind") = e.kind_name();
+                inst.attr("t_failed") = e.time();
+                inst.attr("device") = e.device();
+                PyErr_SetObject(convergence_exc.ptr(), inst.ptr());
             }
         });
 

@@ -190,6 +190,87 @@ def test_dcm_runs_exactly_and_matches_pwl():
     assert np.asarray(rd.i("buck__L")).min() > -1e-3
 
 
+def _rectifier_bank(n_bridge, ls=0.2e-3):
+    """n three-phase diode bridges (100 V, 50 Hz, bridge k shifted 6k
+    degrees), each phase behind `ls`, each bridge into its own
+    200 uF || 50 ohm (probes/bank60_cost.py of
+    add-complementarity-mode-selection)."""
+    b = p.CircuitBuilder()
+    for k in range(n_bridge):
+        for ph, ang in (("a", 0.0), ("b", -120.0), ("c", 120.0)):
+            b.add_sine_voltage_source(f"V{k}{ph}", f"s{k}{ph}", "gnd", 0.0,
+                                      100.0, 50.0, np.deg2rad(ang + 6.0 * k))
+            b.add_inductor(f"L{k}{ph}", f"s{k}{ph}", f"x{k}{ph}", ls)
+            b.add_diode(f"Dt{k}{ph}", f"x{k}{ph}", f"p{k}", 1e3, 1e-9, 0.0)
+            b.add_diode(f"Db{k}{ph}", f"n{k}", f"x{k}{ph}", 1e3, 1e-9, 0.0)
+        b.add_capacitor(f"C{k}", f"p{k}", f"n{k}", 200e-6)
+        b.add_resistor(f"R{k}", f"p{k}", f"n{k}", 50.0)
+        b.add_resistor(f"Rg{k}", f"n{k}", "gnd", 1e6)
+    return b
+
+
+@pytest.mark.parametrize("mode", [None, "lcp"])
+def test_a_signal_returning_below_its_threshold_is_not_an_event(mode):
+    """Five bridges behind line inductors. From 3.67 ms to 5 ms the
+    bottom rail of each bridge moves from phase b to phase c carrying
+    only the 1 Mohm tie's 50 uA. The outgoing diode goes OFF, and the
+    projection's rounding in its line inductor (~1e-14 A through
+    g_off = 1 nS) leaves its signal at +2e-5 V, relaxing to its negative
+    value in L*g_off = 2e-13 s. The locator read that return as a
+    turn-ON crossing and re-decided the same mode until the chatter
+    guard threw ("Db2b is chattering at t = 4.333e-3 s"), default and
+    mode_selection='lcp' alike.
+
+    Reference: pwl, which is first order here (its end-value error
+    halves with dt: 1.1e-2, 5.4e-3, 2.7e-3 V at 1, 0.5, 0.25 us), so the
+    two finest runs are extrapolated; dsed is 3.4e-4 V from that."""
+    n, t_end = 5, 6e-3
+
+    def v_end(r):
+        return np.array([r.v(f"p{k}")[-1] - r.v(f"n{k}")[-1] for k in range(n)])
+
+    coarse = v_end(_run_pwl(_rectifier_bank(n), t_end, 5e-7))
+    fine = v_end(_run_pwl(_rectifier_bank(n), t_end, 2.5e-7))
+    ref = 2.0 * fine - coarse
+
+    kw = {"mode_selection": mode} if mode else {}
+    rd = _run_dsed(_rectifier_bank(n), t_end, **kw)
+    assert v_end(rd) == pytest.approx(ref, abs=2e-3)
+    # one event per commutation (15 measured), not a burst per diode
+    assert rd.n_events < 30
+
+
+@pytest.mark.parametrize("mode", [None, "lcp"])
+def test_a_signal_drifting_out_of_the_zero_band_is_still_an_event(mode):
+    """The one-sided rule above skips a start past the threshold only beyond the zero band
+    (1e-12 x the largest node voltage). A single-phase bridge whose DC bus floats on the g_off
+    leaks: at 5.103 ms the series pair D1/D4 turns off with i = 0, D4 goes OFF and D1 is left ON
+    at v_D = -1.4e-14 V. Its current then drifts negative at leak scale; a crossing from inside
+    the band is read both ways, so D1 goes OFF at 5.109 ms. Skipping every start past zero held
+    D1 ON at -1.9e-7 A until 10 ms and moved the bus common mode: mean v(p) 43.38 V against
+    47.62 V. Reference: pwl at 0.1 us, mean v(p) over the run within 6e-3 V."""
+    def bridge():
+        b = p.CircuitBuilder()
+        b.add_sine_voltage_source("Vs", "a", "gnd", 0.0, 100.0, 50.0)
+        for nm, an, ca in (("D1", "a", "p"), ("D3", "gnd", "p"), ("D2", "n", "a"), ("D4", "n", "gnd")):
+            b.add_diode(nm, an, ca, 1e3, 1e-9, 0.0)
+        b.add_capacitor("C", "p", "n", 1e-3)
+        b.add_resistor("R", "p", "n", 100.0)
+        return b
+
+    t_end = 0.012
+    kw = {"mode_selection": mode} if mode else {}
+    b = bridge()
+    r = _run_dsed(b, t_end, **kw)
+    on = np.asarray(r.switch_states)[:, b.switch_index_of("D1")].astype(bool)
+    i_d1 = 1e3 * (np.asarray(r.v("a")) - np.asarray(r.v("p")))
+    assert i_d1[on].min() > -1e-9                                  # was -1.9e-7 A
+    rp = _run_pwl(bridge(), t_end, 1e-7)
+    mean = np.trapezoid(np.asarray(r.v("p")), r.times) / t_end
+    mean_ref = np.trapezoid(np.asarray(rp.v("p")), rp.times) / t_end
+    assert mean == pytest.approx(mean_ref, abs=2e-2)               # was 4.2 V off
+
+
 def test_explicit_bdf2_with_diodes_is_refused():
     """Predicates live on the RK45 scheduler only. 'auto' routes
     there silently; an EXPLICIT bdf2 request must refuse rather than

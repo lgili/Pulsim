@@ -21,6 +21,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   1 thread 3239 -> 5025 evaluations/s, records bit for bit unchanged
   (512 designs). Threads still do not scale (DECISIONS 20).
 
+### Integration batch 9: the exact engine merged
+
+* **Added** the exact engine's give-ups (C++ `pulsim::ConvergenceFailure`:
+  settle, chatter, no_progress, max_steps, nan) reach Python as
+  `pulsim.ConvergenceError` with `kind`, `t_failed` and `device` (they
+  were bare `RuntimeError`s); a design evaluation records them as
+  `failed` by type.
+* **Fixed** a give-up of a run the native adapter had accepted fell
+  through to the Python-adapter bridge on a diode-free circuit, which
+  re-ran it without the refusal of implicit segments; it raises.
+* **Changed** the reference gate's dsed column: 39 agree / 16 disagree /
+  12 error / 40 refused -> 83 / 0 / 0 / 24 (`sepic`'s frozen `error`
+  dropped: it agrees, 1.5e-6); pwl / trbdf2 cells identical to the digit.
+
 ### Integration batch 8: control graph, optimisation slice 4 and circuit IR merged
 
 * **Fixed** (control graph review) `PIController`, `Limiter`,
@@ -609,6 +623,100 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `parallel=True` the points run on threads sharing the circuit;
   `backend="process"` is refused (a Circuit does not pickle).
 
+### `engine='exact'` accepts a full-MNA `initial_state` (a DC operating point)
+
+It is projected onto the starting mode's reduced state (capacitor voltages, inductor currents),
+as `c0=` / `i0=` are; an inconsistent vector raises ValueError. It raised a shape error before.
+
+### `engine='exact'`: diode modes on a floating DC bus no longer depend on rounding
+
+The complementarity selector imposes a floating island's KCL exactly in its port problem
+(an all-OFF bridge's bus, tied only through g_off or a >= 1 Mohm tie) and poses its widened
+passes in the candidate mode. Before, the selected mode at a series-pair turn-off changed with
+the platform (GitHub CI, Linux). Survey trajectories are bit-identical; the selection counters
+(`leak_pins`, `ties`) can change.
+
+### `engine='exact'`: current waveforms exact, event samples read their sources' left limit
+
+Sine, pulse and table current sources (`add_sine_current_source`,
+`add_pulse_current_source`, `add_pwl_current_source`) are stepped exactly
+on `engine='exact'` / `'dsed'`: a sine as an oscillator pair, a pulse or
+table as level + ramp with every corner a time event (they ran
+numerically, which 13.2's default would now refuse). A stored event
+sample is the left limit of the step that ended there; at a source
+corner it now reads the sources' left limit too (it paired the old diode
+mode with the new source level: a PWM edge into a diode read −0.50 A of
+reverse current). The reference harness gives the exact engine the
+netlist's `dt` as its output grid, as it gives pwl (its 10 µs default
+left two samples per 20 µs period for the strict gate to interpolate).
+
+### `engine='exact'` refuses a segment it cannot step exactly (breaking for `b_extra_fn` users)
+
+With `engine='exact'` (alias `'dsed'`) a segment whose mode has no exact
+step now raises `UnsupportedError('dsed', feature)` naming the rule:
+`'source'` for a user `b_extra_fn`, `'cost'` for a stiff, near-defective
+mode, `'extraction'` when the native extractor rejects the circuit. Pass
+`allow_implicit_segments=True` to integrate such segments numerically,
+as before. Ten diode bridges paralleled on one bus, which ground for
+minutes into "no meaningful progress", are now refused at their first
+segment. `integrator='bdf2'` is unaffected. The keyword is refused by name
+on `pwl`, `trbdf2` and `auto`. Reference runs are unchanged.
+
+### Fixed: a delayed single-shot pulse on `engine='exact'`
+
+A pulse source with `period=0` and a start time whose corners round
+below `t_start + e` held its old level for the step after the corner
+(a 300 ns, 10 V pulse from 1 ms into 1 kΩ / 1 nF peaked at 7.27 V
+instead of 2.59 V). The source now reads the new piece at its corner.
+The law is shared, so a `pwl` / `trbdf2` sample landing exactly on such
+a corner now reads the new piece too; the reference sets are
+bit-identical.
+
+### Exact-engine record: `auto_would_route`; floating-island bound recorded
+
+Every exact run now carries `result.exact['auto_would_route']`: `True`
+when every mask it visited was exact. Report only: `engine='auto'` still
+picks `pwl`. On the 25 loadable `examples/*.yaml`, 13 would route exact;
+7 hold a Newton device and 5 are rejected by the extractor
+(add-exact-propagator-strategy DECISIONS, group 13). The diode-mode
+port factor on an island tied to ground through a large resistor is
+bounded by ε·C·|dv/dt|/G_tie; beyond the tie tolerance the run fails
+with the singular-factor error naming the node, never a rounded mode
+decision (add-complementarity-mode-selection DECISIONS #27).
+
+### dsed give-up sites throw one typed C++ exception
+
+The event-driven engine's own failures (diode settle round cap, diode
+chatter, no progress, the 10M-step cap, a non-finite RK45 / BDF2 step)
+now throw `pulsim::ConvergenceFailure` (`core/include/pulsim/errors/
+convergence.hpp`) with `kind()` = settle | chatter | no_progress |
+max_steps | nan, `time()` and `device()` (the chattering diode). It
+derives from `std::runtime_error` and keeps every message, so Python
+still sees `RuntimeError` with the same text; a Python translator is not
+registered in this change.
+
+### dsed diode modes: no early release, no crash on a paralleled bus, no silent settle
+
+Three fixes to the diode-mode decision on `engine='dsed'`
+(add-complementarity-mode-selection DECISIONS #24–#26):
+
+- A widened selection step no longer reaches past the decided mode's own
+  next event. A conducting diode whose current reached zero inside the
+  `1e4·h_e` window was released and cut early: three-phase bridge banks
+  behind line inductors read 0.128 V off pwl; now 3.3e-4 V (2 bridges),
+  3.5e-4 V (5), 3.4e-4 V (10). New counter `capped`.
+- With the default guard, a settle that hits its 64-round cap is decided
+  by the LCP instead of raising: five bridges paralleled on one bus now
+  run (1.5e-4 V from pwl, as `'lcp'`). New counter
+  `diagnostics['mode_guard']['settle_caps']`.
+- The guard-off A/B switch (`pulsim._dsed_dispatch.MODE_GUARD = False`)
+  now refuses with `UnsupportedError('dsed', 'consistent_mode', <diode>)`
+  where the guard would repair, instead of returning the settle's wrong
+  mode (it did on 9 of 30 survey circuits; the other 21 are unchanged).
+
+Default runs are bit-identical on the reference sets (36/36 arrays, 90/90
+survey runs).
+
 ### Integration fixes (batch 6b: design optimisation, exact route)
 
 * **Fixed** `pulsim.design` returned `ok` for a run that `simulate`
@@ -1176,8 +1284,23 @@ with the reason (`'device'`, `'source'`, `'extraction'`, `'cost'`), the
 device and kind, the tier and `n_segments`. `pulsim.exact_route(builder,
 t_end, ...)` returns the same record, and classifies circuits the exact
 engine refuses (a Shockley diode → `'device'`; coupled inductors, an
-inductor cut-set or a capacitor loop → `'extraction'`; a PWM / pulse
-source → `'source'`). The route of `engine='auto'` does not change.
+inductor cut-set or a capacitor loop → `'extraction'`; a user
+`b_extra_fn` → `'source'`). The route of `engine='auto'` does not change.
+
+### `engine='exact'`: pulse and PWM sources are exact
+
+A pulse or PWM voltage source is level + ramp between corners; the exact
+engine now steps it in closed form (`e^{Ah}x + hφ₁(Ah)(b + c0) +
+h²φ₂(Ah)c1`) and lands every corner as a time event, so the diode modes
+are re-decided there. Before, every mask with such a source was tier 3
+and numeric. A 0 → 10 V ramp over 1 ms into 1 kΩ / 1 µF: 8.97e-8 V off
+the closed form with 0 exact steps → 2.7e-13 V with 5000 / 5000 exact
+and a sample at the 1 ms corner. A PWM source → R → diode → C that
+raised a chatter error at 50 µs now runs (4.999998216 V, pwl at dt =
+1e-8 the same). Pulse trains, a PWM-source buck and a corner on a gate
+edge match an exact affine propagation within 1e-10. `exact_route` no
+longer answers `'source'` for these sources. pwl and trbdf2 are
+bit-identical.
 
 ### Diode mode selection: passivity classes in the diagnostics
 
@@ -1192,8 +1315,41 @@ nothing refused) or `passive_reciprocal`. Numbers do not change. A diode
 bridge behind an ideal transformer (n = 0.5) runs on the dsed default at
 31.876241228 V against pwl 31.876241232 V. A rectifier fed by coupled
 inductors is still refused by the dsed extractor
-(`UnsupportedError('dsed', 'extraction')`). Known: `mode_selection='lcp'`
-is wrong on that bridge (11.73 V; KNOWN_LIMITATIONS).
+(`UnsupportedError('dsed', 'extraction')`). `mode_selection='lcp'` on
+that bridge: see the port-model fix below.
+
+### dsed `mode_selection='lcp'`: the port model no longer decides by rounding (fix)
+
+The diode-port problem of the LCP was solved in history form,
+`J·s = (C/h_e)·x(t⁻) − b`, which puts `C·v_C/h_e` (1.6e6 A for 100 µF at
+32 V and `h_e` = 2 ns) on both nodes of a capacitor. On a DC bus held
+only by 1 MΩ ties and `g_off` leaks its rounding (2e-10 A over a 1 µS
+pivot, 2e-4 V) exceeded the 3.1e-5 V a turn-on gap moves in `h_e`, so
+rounding chose the mode: a bridge behind an ideal transformer (or a
+floating sine source) ended at 11.726610 V under `'lcp'` with D2 and D3
+never conducting and D2 blocking +49.86 V. The problem is now solved for
+the increment, `J·δ = −(G·x(t⁻) + b(t + h_e))`. That bridge ends at
+31.876241228 V for `H_E_REL` = 1e-10 … 1e-4 (pwl at 0.1 µs:
+31.876241232 V), bit-identical to the default at the default `h_e`.
+All 90 runs of the mode-selection surveys and the 36 arrays of
+`bit_identity.py` (`pwl`, `trbdf2`, `dsed`) are bit-identical.
+
+### dsed: a diode signal returning to its admissible side is not an event (fix)
+
+Rectifier banks behind line inductance chattered on `engine='dsed'`
+("Db2b is chattering at t = 4.333e-3 s", five three-phase bridges behind
+0.2 mH): after a commutation the projection leaves ~3e-14 A of rounding
+in an inductor in series with an OFF diode, `g_off` turns it into
++2e-5 V of forward bias that relaxes in 2e-13 s, and the event locator
+read that return as a turn-ON crossing. A diode predicate now fires
+only when its signal leaves its admissible side; a start past the
+threshold by more than the zero band (1e-12 × the largest node voltage)
+that comes back is not an event, while a start inside the band is read
+both ways as before. Five- and ten-bridge banks on independent buses
+now run on the default and on `'lcp'`. Seven survey runs drop
+re-decision events (the single-phase bridges 78 → 59 and 80 → 39
+events; node voltages move by at most 1.9e-8 V and keep their distance
+to pwl); `pwl` and `trbdf2` are bit-identical.
 
 ### dsed: a diode predicate starting a step at exactly zero is located (fix)
 

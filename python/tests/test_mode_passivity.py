@@ -51,17 +51,13 @@ def test_bridge_behind_an_ideal_transformer_is_passive_nonreciprocal():
         vd = np.asarray(r.v(an)) - np.asarray(r.v(ca))
         assert on.any() and (1e3 * vd[on]).min() > -1e-9      # each diode conducts, never in reverse
         assert vd[~on].max() < 1e-9                             # and blocks only reverse voltage
-    # the class is a build-time property: 'lcp' reports the same. Up to 9 ms 'lcp' is right
-    # (35.2286954424 V, pwl 35.2286954469 V); after that it is DECISIONS #21's open defect (11.73 V
-    # on the slice's tree). Integration batch 6b: this tree's stored-sample guard names it --
-    # D2 OFF while forward-biased from t = 10.008 ms -- so the wrong number is no longer silent.
-    r_lcp = _run(_bridge_behind_ideal_transformer(), "dsed", t_end=0.009, mode_selection="lcp")
+    # the class is a build-time property: 'lcp' reports the same. Re-pinned at the merge of the
+    # increment-form port model (was: right to 9 ms, then DiodeModeInconsistentError naming D2 at
+    # 10.008 ms): the full 'lcp' run now lands on pwl, 31.876241228 V (more numbers:
+    # test_mode_lcp.py::test_lcp_bridge_on_a_floating_source_is_not_decided_by_rounding)
+    r_lcp = _run(_bridge_behind_ideal_transformer(), "dsed", mode_selection="lcp")
     assert r_lcp.diagnostics["mode_selection"]["passivity"] == cls
-    ref9 = _run(_bridge_behind_ideal_transformer(), "pwl", t_end=0.009)
-    assert _vpn(r_lcp)[-1] == pytest.approx(_vpn(ref9)[-1], abs=1e-7)
-    from pulsim._dsed_dispatch import DiodeModeInconsistentError
-    with pytest.raises(DiodeModeInconsistentError, match="'D2' is OFF while forward-biased"):
-        _run(_bridge_behind_ideal_transformer(), "dsed", mode_selection="lcp")
+    assert _vpn(r_lcp)[-1] == pytest.approx(_vpn(ref)[-1], abs=1e-7)
 
 
 def test_plain_rectifier_is_passive_reciprocal():

@@ -433,6 +433,7 @@ def test_dsed_user_b_extra_fn_callback():
     res = p.simulate(
         b, t_end=10e-3, engine='dsed', integrator='rk45',
         rtol=1e-7, atol=1e-10, b_extra_fn=b_extra,
+        allow_implicit_segments=True,   # a b_extra_fn is numeric (13.2)
     )
     final_vc = float(res.states_reduced[-1][0])
     # State magnitude should be ~7V (5V DC + 2V from b_extra_fn).

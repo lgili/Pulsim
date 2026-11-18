@@ -160,6 +160,50 @@ def step_start_states(result, states: np.ndarray,
     return st, mk
 
 
+def with_right_limits(result):
+    """A shallow copy of ``result`` whose trace shows each jump on both
+    sides: after every sample in ``result.right_limit_index`` a sample
+    at the next representable time, ``nextafter(t[k], +inf)``, holding
+    the right limit (state and switch row). The original result is
+    returned unchanged when it carries no right limits (pwl, trbdf2).
+
+    Why: a stored sample at an event is the LEFT limit, so linear
+    interpolation spread every jump as a ramp over the following step.
+    The added sample is not a made-up time: it is the exact trajectory
+    one ulp after the event, where the next step starts. Times stay
+    strictly increasing, so consumers that difference them keep
+    working. This is how the reference harness compares a jump side
+    for side (a variable-step reference stores the left limit at t and
+    the right limit one tiny step later)."""
+    import copy
+
+    idx = getattr(result, "right_limit_index", None)
+    rl = getattr(result, "right_limit_states", None)
+    if idx is None or rl is None or len(idx) == 0:
+        return result
+    idx = np.asarray(idx, dtype=np.int64)
+    t = np.asarray(result.times, dtype=float)
+    pos = idx + 1
+    out = copy.copy(result)
+    out.times = np.insert(t, pos, np.nextafter(t[idx], np.inf))
+    out.states = np.insert(np.asarray(result.states), pos,
+                           np.asarray(rl, dtype=float), axis=0)
+    sw = getattr(result, "switch_states", None)
+    rl_sw = getattr(result, "right_limit_switch_states", None)
+    if sw is not None and rl_sw is not None:
+        out.switch_states = np.insert(np.asarray(sw), pos,
+                                      np.asarray(rl_sw), axis=0)
+        unsolved = getattr(result, "switch_states_unsolved", None)
+        if unsolved is not None:
+            out.switch_states_unsolved = np.insert(
+                np.asarray(unsolved), pos, False)
+    out.right_limit_index = np.zeros(0, dtype=np.int64)
+    out.right_limit_states = np.zeros((0, out.states.shape[1]))
+    out.right_limit_switch_states = None if rl_sw is None else np.zeros(
+        (0, np.asarray(rl_sw).shape[1]), dtype=bool)
+    return out
+
+
 def pl_integral(times: np.ndarray, y: np.ndarray,
                 y_start: "np.ndarray | None" = None) -> float:
     """``∫ y dt`` over the run, each step ``(t[k-1], t[k]]`` integrated
