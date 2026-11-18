@@ -316,7 +316,8 @@ def _refuse_graph_driven(builder, analysis="periodic_steady_state"):
     """A control graph's ``drive_source`` adds a 0 V / 0 A source whose
     value only the graph's observer supplies: without it the source
     would sit at zero."""
-    driven = getattr(builder, "_graph_driven", None)
+    from ._circuit_ir import graph_driven_of
+    driven = graph_driven_of(builder)
     if driven:
         raise _unsup(
             "closed_loop",

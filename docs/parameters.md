@@ -76,6 +76,22 @@ argument. `add_nonlinear_capacitor` (an overloaded method) does not
 take a `Parameter` (`TypeError`); bind its field after adding it:
 `b.bind_param("C1.C0", "Cj")`.
 
+## Sweeping a circuit
+
+`pulsim.sweep(circuit, params={"Lbase": [...], "RL.R": [...]}, ...)`
+(and `monte_carlo(circuit, ...)`) derives every point with
+`with_params` / `with_value`. On the pwl engine, with no Python hook in
+the step loop, the points run in the kernel: native threads
+(`parallel=True`, `n_workers`), no GIL, one symbolic analysis per sweep
+and one topology preflight per structure. Point 0 runs through
+`simulate()` and every other point is finished by it, so warnings and
+`result.plan` / `result.circuit` are those of a direct call, and the
+results are bit-identical to `simulate(circuit.with_value(...))`.
+`result.backend == "kernel"`; `result.counters` reports
+`kernel_points`, `symbolic_analyses` and `preflights`. A Python
+`step_observer`, `b_extra_fn` or closed loop, another engine, or
+`backend="process"` keeps the per-point `simulate()` path.
+
 ## Deprecated: `update_*`
 
 `update_resistor_R`, `update_inductor_L`, `update_capacitor_C` and

@@ -212,7 +212,131 @@ is not a precondition; `simulate()` keeps its entry points and calls
   copies it).
 - **Reverse:** drop `share_symbolic` calls; caches analyse privately.
 
-## 13. Needs recorded by the optimisation slice 5 (Evaluator(circuit=...))
+## 13. The kernel path of a circuit sweep (task 5.2)
+
+- **Question:** the per-point work of `sweep(circuit, ...)` held the GIL
+  (8 threads: ladder 1.1×). Move it into the kernel how, without losing
+  what `simulate()` does around a run (refusals, warnings, result
+  attributes)?
+- **Measured cause:** not Python. `simulate()`'s own Python is ~0.03 ms
+  of a 1.96 ms ladder point; `with_value` (0.46 ms), `to_builder`
+  (0.23 ms) and `with_preflight` (0.14 ms) are C++ that ran with the
+  GIL held (BASELINE.md "Task 5.2").
+- **Option:** (1) those bindings release the GIL (helps every caller,
+  the Python path of the optimiser included); (2) `_run_pwl_points`
+  (ir_bindings.cpp): for a table of points (rows) over names
+  (parameters or `"device.field"`), each point is derived, regularised,
+  cloned, cached (sharing the symbolic plan) and run by `n_threads`
+  native threads with the GIL released for the whole batch. The run
+  recipe is not re-derived: point 0 runs through `simulate()` with a
+  context variable set, and `simulate()` records at its pwl run site
+  what it handed the kernel (options, dt, switch_fn, initial state,
+  start_from_dc_op, the refresh flag). Each kernel point is then
+  finished by `simulate()` with the result injected (a second context
+  variable): its warnings, `result.plan`, `result.circuit` and every
+  attribute come from the same code as a Python-path point. Two small
+  additive hunks in `simulate()`.
+- **Preflight once per structure:** `analyze_preflight` reads topology,
+  branch kinds and device kinds only (`pwl/preflight.hpp`), never a
+  value; `with_params` cannot change the structure (a parameter cannot
+  drive a branch-form `R_on` / `g_off`). So the base is regularised
+  once and every point is derived from the regularised base (ties are
+  appended after every device with the same names and resistance in
+  both orders: bit-identical). `with_value` CAN change the structure —
+  a branch-form `R_on` or `g_off` to or from 0 is part of
+  `structure_hash()` — and such a point (structure hash differs from
+  the base's) is derived from the unregularised base and regularised
+  by itself (`counters["preflights"]` counts it).
+- **Eligibility:** pwl engine (what point 0 actually ran), no Python in
+  the step loop (`step_loop_python_callbacks == ()`), no b_extra /
+  observer / should_continue / live stream / resume / MMC arms /
+  on_cache / progress, `enable_nonlinear_refresh` not False, backend
+  not `"process"`. Anything else keeps the Python path, unchanged. A
+  point that fails in the kernel is re-run through `simulate()`, which
+  raises or records it exactly as the Python path does.
+- **Thread safety (read):** nothing reachable from the base is written.
+  Derivations clone the lowered builder (`Graph::clone` reads the id
+  cache `make_data_` filled; no other `mutable` member, `static` or
+  `thread_local` in builder, graph, pool, IR or preflight headers); the
+  `SymbolicPlan` is mutex-guarded and written once per regime (point 0
+  fills it before the batch); each point's builder, cache and result
+  are its own. `adapt_switch_fn` hands threads a copy of a native
+  `SwitchSchedule` (const, no mutable state) or raw pointers to a native
+  PWM object the caller keeps alive; a Python callable never reaches
+  the batch (eligibility).
+- **Evidence:** `test_circuit_sweep.py`: Python `run_transient` calls =
+  1 for 12 points, symbolic analyses = 1, preflights = 1, every point
+  bit-identical (serial and 4 threads); a regularised circuit with a
+  capacitor IC (ties, plan, value hash equal); a structure change
+  (preflights = 2); a Python hook keeps the Python path; a failing
+  point records the same message. Speedups in BASELINE.md.
+- **Reverse:** drop `_run_circuit_points` in sweep.py (the circuit form
+  falls back to `_run_jobs` on threads); the GIL releases stay.
+
+## 14. Control declarations (group 3.2)
+
+- **Question:** C blocks (`add_c_block`) and control-graph-driven
+  sources (`ControlGraph.drive_source`) live as Python attributes of the
+  builder instance (`_c_blocks`, `_graph_driven`), which a Circuit
+  dropped: `build()` refused C blocks and `simulate(builder)` copied the
+  builder's `__dict__` onto the run. Model them in the IR?
+- **Option:** no model — an opaque `ir::ControlDecl {name, kind,
+  content_hash, handle}` stored by the builder (so every derivation and
+  `to_builder()` copies it) and appended by `Circuit::with_controls`
+  (shares the symbolic plan: a control never changes the matrix
+  structure). The handle is a Python object held by a shared pointer
+  whose deleter takes the GIL (a derived circuit can die on a sweep
+  worker). `name` and `kind` enter `structure_hash`, `content_hash` the
+  `value_hash`; a circuit without controls hashes as before. The
+  content hash is FNV-1a 64 of the block's name, ports and rate (pinned
+  in a test; `hash()` of a str differs per process); a C block's step
+  function is opaque, so two blocks differing only in code hash equal —
+  they are not serialisable either (group 4 refuses them by name).
+- **Why not delete `_c_blocks` / `_graph_driven` now:** they are set in
+  `c_block.py` and `blockchain.py`, which another branch is moving onto
+  the control graph. The patched `build()` converts both lists into
+  declarations, every reader (`simulate`, the trbdf2 / dsed blockers,
+  `sensitivity`, `periodic_steady_state`) reads them through
+  `c_blocks_of` / `graph_driven_of` (circuit or builder), and the
+  grep test `test_no_builder_side_state.py` allow-lists exactly those
+  two assignments. When the consolidation lands it registers
+  `ControlDecl`s directly and the allow-list goes.
+- **Initial conditions:** the IR's `InitialCondition` is per device (a
+  capacitor's voltage across it, an inductor's current through it);
+  the KVL-loop refusal stays where the integration put it — in
+  `initial_state()`, which `Circuit.initial_state()` and every run call —
+  so `build()` still accepts such a builder (an existing test pins
+  that; refusing at `build()` was tried and reverted).
+- **Reverse:** `build()` refuses C blocks again; delete `with_controls`.
+
+## 15. Review after group 3 (fresh-context reviewer), and what changed
+
+- **C-block state is per handle, shared by derived circuits.** A C
+  block keeps its tick counter and outputs in its handle
+  (`c_block.py`), so a second run of the same handle starts with the
+  counter of the first (the block never fires again): pre-existing for
+  `simulate(builder)` twice, newly reachable through a circuit sweep.
+  `sweep(circuit)` / `monte_carlo(circuit)` with C blocks are refused by
+  name (`UnsupportedError`, feature `c_blocks`); the per-run reset
+  belongs in `c_block.py` (another branch) — reported to the
+  coordinator.
+- **The recipe leaked into a kpi's simulate().** Point 0's recipe was
+  recorded while its `kpi_fn` ran, so a `simulate()` inside the kpi
+  overwrote dt / t_end for every kernel point. The context variables
+  are now set around the `simulate()` call only (test).
+- **`compute_dc_op(strategy="settle")` doubled every C block**: it still
+  copied the builder's `__dict__` onto a run that already carried the
+  blocks as controls. The copy is gone; the grep test now also flags
+  `builder.__dict__.update(...)` / `vars(builder)`.
+- **Missed reader:** `design.py`'s Evaluator reads
+  `getattr(builder, "_graph_driven")`, which a `Circuit` returned by
+  `build(design)` does not have. `design.py` belongs to another agent
+  this slice; it should call `_circuit_ir.graph_driven_of`. Reported.
+- Controls enter the structure stream behind a tag and a count; the
+  backend label is `"kernel"` only when a point ran in the kernel; a
+  thread that cannot be started leaves its points to the others.
+
+## 16. Needs recorded by the optimisation slice 5 (Evaluator(circuit=...))
 
 What the design evaluator needed from the IR and used instead
 (add-design-optimization-workflow DECISIONS 20):
@@ -228,3 +352,7 @@ What the design evaluator needed from the IR and used instead
 * Not needed: a GIL-free batch `with_params` or a cheaper clone --
   `with_value` costs 2.5 us and `to_builder` 1 us per design, against
   ~105 us of Python per evaluation.
+
+(Numbered 13 on the optimisation branch; renumbered at integration batch 10
+behind this branch's 13–15. Since 14 the graph-driven sources survive
+`build()` as ControlDecls.)

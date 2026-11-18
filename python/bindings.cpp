@@ -1080,6 +1080,7 @@ void init_module(py::module_& m) {
               "the string \"node\" or \"branch\".")
         .def("initial_state",
               &builder::CircuitBuilder::initial_state,
+              py::call_guard<py::gil_scoped_release>(),
               "Synthesise the flat initial-state vector from recorded\n"
               "ICs. Returns a numpy array of size num_nodes +\n"
               "num_state_branches with each IC slot populated and zero\n"
@@ -2198,7 +2199,7 @@ void init_module(py::module_& m) {
         .def("build_lazy",
               [](pwl::PwlStateSpaceCache& self, Real dt) {
                   self.build_lazy(dt);
-              }, py::arg("dt"),
+              }, py::arg("dt"), py::call_guard<py::gil_scoped_release>(),
               "Lazy build: store dt but defer per-mask "
               "factorisation to first access. A PWM converter "
               "visits only a handful of the 2^N switch states, "

@@ -811,7 +811,8 @@ if _HAS_SCOPE:
 # CircuitBuilder, define Cancelled exception, expose simulate-wrapped
 # analyses with `should_continue` cancellation.
 from . import _builder_ergonomics as _berg
-from ._circuit_ir import RunPlan, Tie
+from ._circuit_ir import KERNEL_RUN as _KERNEL_RUN, PWL_RECIPE as _PWL_RECIPE
+from ._circuit_ir import RunPlan, Tie, c_blocks_of as _c_blocks_of
 from ._circuit_ir import install as _install_parameters
 _berg.install(CircuitBuilder)
 _install_parameters(CircuitBuilder)  # after _berg: wraps its add_* too
@@ -2251,7 +2252,6 @@ def simulate(
     # a mutable CircuitBuilder, so the run gets a private clone of the
     # run's circuit below, after the preflight.
     _run_circuit = None
-    _caller_side_state = None
     _caller_builder = builder  # identity checks (MMC arms) name the caller's
     if isinstance(builder, Circuit):
         if mmc_arms:
@@ -2261,10 +2261,9 @@ def simulate(
                 "pulsim.Circuit")
         _run_circuit = builder
     elif isinstance(builder, CircuitBuilder):
+        # C blocks and graph-driven sources ride in the circuit
+        # (ControlDecls); the run reads them from its own builder.
         _run_circuit = builder._snapshot()
-        # Python-side tables (C blocks, Shockley parameters) until they
-        # live in the IR (group 3).
-        _caller_side_state = dict(builder.__dict__)
     if t_end is None:
         raise TypeError(
             "simulate(): missing required argument 't_end' (end time, s). "
@@ -2383,8 +2382,11 @@ def simulate(
         auto_regularize = True
     _preflight_report = None
     _ties = []
+    _kernel_run = _KERNEL_RUN.get()  # sweep(circuit, ...): already ran
     if auto_regularize:
-        if _run_circuit is not None:
+        if _kernel_run is not None:
+            _preflight_report, _ties = _kernel_run.preflight, _kernel_run.ties
+        elif _run_circuit is not None:
             _run_circuit, _preflight_report, _ties = (
                 _run_circuit.with_preflight(
                     PreflightOptions(auto_regularize=True)))
@@ -2404,9 +2406,8 @@ def simulate(
                 stacklevel=2)
     _run_plan = None
     if _run_circuit is not None:
-        builder = _run_circuit.to_builder()
-        if _caller_side_state:
-            builder.__dict__.update(_caller_side_state)
+        builder = (_kernel_run.builder if _kernel_run is not None
+                   else _run_circuit.to_builder())
         _run_plan = RunPlan(circuit=_run_circuit, ties=tuple(
             Tie(*t) for t in _ties), preflight=_preflight_report)
 
@@ -2514,7 +2515,7 @@ def simulate(
         _dsed_unsupported = {
             # C blocks drive the circuit through b_extra, which the
             # DSED engine does not consume.
-            "c_blocks": bool(getattr(builder, "_c_blocks", None)),
+            "c_blocks": bool(_c_blocks_of(builder)),
             "step_observer": step_observer is not None,
             "closed_loops": bool(closed_loops),
             "should_continue": should_continue is not None,
@@ -3280,10 +3281,17 @@ def simulate(
             kwargs["live_ring"] = live_ring
         if resume_from is not None:
             kwargs["resume_from"] = resume_from
+        if _PWL_RECIPE.get() is not None:  # sweep(circuit, ...) replays it
+            _PWL_RECIPE.get().update(
+                opts=opts, dt=dt, kwargs=dict(kwargs), mmc=bool(mmc_arms),
+                on_cache=on_cache is not None,
+                ic_from_builder=_ic_from_builder,
+                auto_regularize=bool(auto_regularize))
         try:
-            res = run_transient(
-                cache, builder.graph, builder.pool, opts, **kwargs,
-            )
+            res = (_kernel_run.result if _kernel_run is not None else
+                   run_transient(
+                       cache, builder.graph, builder.pool, opts, **kwargs,
+                   ))
         except SimulationAborted as _aborted:
             # The partial trace is a fresh pybind-owned object with
             # none of the side-table attributes simulate() attaches
@@ -3754,7 +3762,7 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
             "never fire and whatever it was closing (an "
             "electro-thermal loop, usually) would silently stay "
             "open"))
-    if getattr(builder, "_c_blocks", None):
+    if _c_blocks_of(builder):
         why.append(_blk("c_blocks", "C blocks sample on a fixed dt grid"))
     if live_stream is not None:
         why.append(_blk("live_stream", "live_stream needs the fixed-step kernel's "

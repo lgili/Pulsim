@@ -105,6 +105,9 @@ public:
         return d_->ics;
     }
     [[nodiscard]] std::span<const Alias> aliases() const noexcept { return d_->aliases; }
+    [[nodiscard]] std::span<const ControlDecl> controls() const noexcept {
+        return d_->lowered.controls();
+    }
     [[nodiscard]] std::span<const Parameter> parameters() const noexcept {
         return d_->lowered.parameters();
     }
@@ -148,6 +151,15 @@ public:
                                      Real value) const {
         auto b = d_->lowered.clone();
         b.set_value_("with_value", device_dot_field, value);
+        return Circuit{std::move(b), d_->plan};
+    }
+
+    /// The circuit with control declarations `decls` appended (C blocks,
+    /// graph-driven sources). Controls never change the matrix structure,
+    /// so the symbolic plan is shared; the receiver is unchanged.
+    [[nodiscard]] Circuit with_controls(std::span<const ControlDecl> decls) const {
+        auto b = d_->lowered.clone();
+        for (const auto& c : decls) b.add_control(c);
         return Circuit{std::move(b), d_->plan};
     }
 
@@ -358,6 +370,15 @@ private:
         }
         std::ranges::sort(d->ics, {}, [](const InitialCondition& ic) { return ic.device.v; });
         for (const auto& ic : d->ics) { v.word(ic.device.v); v.real(ic.value); }
+        // Hashed only when present: a circuit without controls keeps
+        // its hashes.
+        if (const auto& cs = d->lowered.controls(); !cs.empty()) {
+            s.word(0x636f6e74726f6cULL);  // "control", then the count
+            s.word(cs.size());
+            for (const auto& c : cs) {
+                s.str(c.name); s.str(c.kind); v.word(c.content_hash);
+            }
+        }
 
         using AK = builder::CircuitBuilder::AliasKind;
         for (const auto& [name, t] : d->lowered.aliases()) {

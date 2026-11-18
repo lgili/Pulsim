@@ -619,6 +619,10 @@ class CircuitBuilder:
         """
         Sum the b_extra contributions from all time-varying voltage sources (sine + PWM + pulse) at time `t`. Returns a full-MNA-sized vector. The pulsim.simulate engine='pwl' applies this automatically; engine='dsed' calls it via the CircuitBuilderAdapter to overlay AC / PWM source values per PED step.
         """
+    def controls(self) -> list[typing.Any]:
+        """
+        Control declarations carried by this builder (a builder made by Circuit.to_builder()), as Circuit.controls().
+        """
     def devices(self) -> list[DeviceInfo]:
         """
         Ordered list of DeviceInfo records for every named
@@ -3046,6 +3050,10 @@ class Circuit:
         """
         As CircuitBuilder.components().
         """
+    def controls(self) -> list[typing.Any]:
+        """
+        The control declarations the circuit carries, as (name, kind, content_hash, handle) tuples: C blocks (kind "c_block", handle = the CBlockHandle) and graph-driven sources ("graph_driven"). simulate(circuit) runs them.
+        """
     def devices(self) -> list[typing.Any]:
         """
         One dict per lowered branch, in insertion order: name, kind (capability-table name), pins (node indices, -1 = ground), fields ({name: value}, the names `with_value` takes) and params ({field: parameter name} for the fields a parameter drives).
@@ -3089,6 +3097,10 @@ class Circuit:
     def value_hash(self) -> int:
         """
         64-bit hash of the structure and every value (fields, couplings, initial conditions, aliases).
+        """
+    def with_controls(self, decls: list[typing.Any]) -> Circuit:
+        """
+        A new circuit with control declarations appended: a list of (name, kind, content_hash, handle). name and kind enter structure_hash, content_hash value_hash; the handle is passed through to the run. The receiver is unchanged.
         """
     def with_params(self, values: dict[typing.Any, typing.Any] = {}, **kwargs) -> Circuit:
         """
@@ -3159,6 +3171,10 @@ def _min_source_period(graph: Graph, pool: DevicePool) -> float:
 def _require_supported(graph: Graph, pool: DevicePool, engine: str) -> None:
     """
     Raise UnsupportedError for the first branch `engine` cannot simulate (the capability table's column).
+    """
+def _run_pwl_points(circuit: Circuit, names: collections.abc.Sequence[str], table: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], options: SimulationOptions, dt: float, switch_fn: typing.Any, start_from_dc_op: bool, enable_nonlinear_refresh: bool | None, initial_state: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"] | None, auto_regularize: bool, n_threads: int) -> tuple[typing.Any, ...]:
+    """
+    Internal (sweep(circuit, ...) kernel path, task 5.2): run the points of a parameter table (rows = points, columns = names: parameters, or "device.field") on the pwl engine, n_threads native threads, without the GIL. Returns ([(result, circuit, builder, own_preflight) or None per point], stats); None = re-run that point through simulate().
     """
 def _switch_census(graph: Graph, pool: DevicePool) -> tuple[int, int, list[int]]:
     """

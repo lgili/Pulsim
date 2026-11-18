@@ -106,7 +106,9 @@ class SweepResult:
     n_simulations: int = 0
     wall_time_s: float = 0.0
     failed: list = field(default_factory=list)  # (index, message) that raised
-    backend: str = "serial"  # what ran: "serial", "thread" or "process"
+    backend: str = "serial"  # "serial", "thread", "process" or "kernel"
+    # sweep(circuit, ...): kernel_points, symbolic_analyses, preflights
+    counters: dict = field(default_factory=dict)
 
     def to_dataframe(self):
         """Convert to a pandas DataFrame (one row per simulation)."""
@@ -284,6 +286,127 @@ class _CircuitPoints:
         return c
 
 
+# simulate() kwargs that put Python in the step loop or act per run: such
+# a sweep keeps the Python path.
+_PER_RUN_KWARGS = ("step_observer", "closed_loops", "b_extra_fn",
+                   "should_continue", "live_stream", "mmc_arms", "on_cache",
+                   "resume_from", "sensitivities")
+
+
+def _run_circuit_points(points, grid, kpi_fn, *, parallel, backend,
+                        n_workers, verbose, simulate_kwargs):
+    """``sweep(circuit, ...)`` / ``monte_carlo(circuit, ...)`` (task 5.2).
+
+    Point 0 runs through ``simulate`` and records what it handed the pwl
+    kernel; every other point is derived, regularised and run by
+    ``_run_pwl_points`` on native threads without the GIL, then finished
+    by ``simulate`` (its warnings and result attributes, no second run).
+    Anything the kernel path cannot replay — another engine, a Python
+    hook in the step loop, ``backend="process"`` — runs as before.
+    Returns ``(kpi_list, failed, backend_used, stats)``."""
+    from . import _circuit_ir as cir
+    from . import _pulsim
+    from . import simulate
+
+    kw = simulate_kwargs
+    n = len(grid)
+    stats = {"kernel_points": 0, "symbolic_analyses": 0, "preflights": 0}
+    args_iter = [(points, kpi_fn, p, kw) for p in grid]
+    if (n < 2 or (parallel and backend == "process")
+            or any(kw.get(k) is not None for k in _PER_RUN_KWARGS)
+            or kw.get("progress") or kw.get("enable_nonlinear_refresh") is False):
+        return (*_run_jobs(args_iter, parallel=parallel, backend=backend,
+                           n_workers=n_workers, verbose=verbose), stats)
+
+    kpi_list: list = [{} for _ in range(n)]
+    failed: list = []
+
+    def run_point(i, run=None, recipe=None):
+        """Point i through simulate (finishing ``run`` when given; filling
+        ``recipe``). Only this call sees the context variables — never a
+        simulate() the kpi_fn makes."""
+        tokens = [cir.KERNEL_RUN.set(run), cir.PWL_RECIPE.set(recipe)]
+        try:
+            return simulate(points(**grid[i]) if run is None else run.circuit,
+                            **kw)
+        finally:
+            cir.PWL_RECIPE.reset(tokens[1])
+            cir.KERNEL_RUN.reset(tokens[0])
+
+    def finish(i, run=None, recipe=None):
+        try:
+            res = run_point(i, run, recipe)
+        except _REFUSALS:
+            raise
+        except Exception as exc:  # noqa: BLE001 — recorded, as on threads
+            failed.append((i, str(exc)))
+            return None
+        try:
+            kpi_list[i] = kpi_fn(res, grid[i])
+        except _REFUSALS:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            failed.append((i, str(exc)))
+        return res
+
+    recipe: dict = {}
+    res0 = finish(0, recipe=recipe)
+    rk = recipe.get("kwargs", {})
+    native = (res0 is not None and recipe and not recipe["mmc"]
+              and not recipe["on_cache"]
+              and getattr(res0, "engine_used", None) == "pwl"
+              and tuple(getattr(res0, "step_loop_python_callbacks", ("?",))) == ()
+              and all(rk.get(k) is None for k in (
+                  "b_extra_fn", "step_observer", "should_continue",
+                  "live_ring", "resume_from")))
+    if not native:
+        rest, rest_failed, used = _run_jobs(
+            args_iter[1:], parallel=parallel, backend=backend,
+            n_workers=n_workers, verbose=verbose)
+        kpi_list[1:] = rest
+        failed += [(i + 1, m) for i, m in rest_failed]
+        return kpi_list, sorted(failed), used, stats
+
+    import os
+    nw = (n_workers if n_workers is not None
+          else max(1, (os.cpu_count() or 2) - 1)) if parallel else 1
+    names = list(grid[0])
+    table = np.array([[float(p[k]) for k in names] for p in grid[1:]],
+                     dtype=float).reshape(n - 1, len(names))
+    x0 = None if recipe["ic_from_builder"] else rk.get("initial_state")
+    runs, st = _pulsim._run_pwl_points(
+        points.circuit, names, table, recipe["opts"], float(recipe["dt"]),
+        rk["switch_fn"], bool(rk.get("start_from_dc_op", False)),
+        rk.get("enable_nonlinear_refresh"),
+        None if x0 is None else np.asarray(x0, dtype=float),
+        recipe["auto_regularize"], int(nw))
+    report, ties = st["report"], tuple(st["ties"])
+    stats.update(kernel_points=sum(r is not None for r in runs),
+                 symbolic_analyses=int(st["symbolic_analyses"]),
+                 preflights=int(st["preflights"]))
+    for i, r in enumerate(runs, 1):
+        if r is None:
+            finish(i)  # raises or records exactly as the Python path
+            continue
+        result, circuit, builder, own = r
+        rep, tz = (report, list(ties)) if own is None else (own[0], list(own[1]))
+        finish(i, cir.KernelRun(result, circuit, builder, rep, tz))
+    used = "kernel" if stats["kernel_points"] else "serial"
+    return kpi_list, sorted(failed), used, stats
+
+
+def _run_points(args_iter, grid, kpi_fn, parallel, backend, n_workers,
+                verbose, simulate_kwargs):
+    """``_run_jobs`` for a factory; the kernel path for a circuit."""
+    if isinstance(args_iter[0][0] if args_iter else None, _CircuitPoints):
+        return _run_circuit_points(
+            args_iter[0][0], grid, kpi_fn, parallel=parallel,
+            backend=backend, n_workers=n_workers, verbose=verbose,
+            simulate_kwargs=simulate_kwargs)
+    return (*_run_jobs(args_iter, parallel=parallel, backend=backend,
+                       n_workers=n_workers, verbose=verbose), {})
+
+
 def _circuit_form(builder_factory, parallel, backend, simulate_kwargs):
     """``(factory, backend)`` for a ``pulsim.Circuit`` first argument:
     its points run on threads, which share the circuit (it is immutable);
@@ -296,6 +419,19 @@ def _circuit_form(builder_factory, parallel, backend, simulate_kwargs):
             "backend='process' cannot carry a pulsim.Circuit (it does "
             "not pickle); use backend='thread' or 'auto' — the circuit "
             "is immutable and shared by the threads")
+    from ._circuit_ir import c_blocks_of
+    if c_blocks_of(builder_factory):
+        # A C block keeps its tick counter and outputs in its handle, which
+        # every derived circuit shares: point 2 would start from point 1's
+        # state (a frozen controller). A factory builds one per point.
+        from ._refusal import unsupported
+        names = ", ".join(str(h.name) for h in c_blocks_of(builder_factory))
+        raise unsupported(
+            "sweep", "c_blocks",
+            f"sweep(circuit) / monte_carlo(circuit): the circuit carries C "
+            f"blocks ({names}), whose state persists across runs, so the "
+            "points would share one controller. Pass a builder factory "
+            "that adds the blocks per point.")
     stateful = [k for k in ("step_observer", "closed_loops")
                 if simulate_kwargs.get(k) is not None]
     if getattr(simulate_kwargs.get("switch_fn"), "_closed_loop", None):
@@ -393,9 +529,9 @@ def sweep(builder_factory: Callable[..., Any],
             (builder_factory, kpi_fn, p_dict, simulate_kwargs))
 
     t0 = time.perf_counter()
-    kpi_list, failed, backend_used = _run_jobs(
-        args_iter, parallel=parallel, backend=backend,
-        n_workers=n_workers, verbose=verbose)
+    kpi_list, failed, backend_used, counters = _run_points(
+        args_iter, grid_params, kpi_fn, parallel, backend, n_workers,
+        verbose, simulate_kwargs)
 
     wall = time.perf_counter() - t0
     if verbose:
@@ -417,7 +553,7 @@ def sweep(builder_factory: Callable[..., Any],
     return SweepResult(
         params=params_arr, kpis=kpis_arr, shape=shape,
         n_simulations=n_runs, wall_time_s=wall, failed=failed,
-        backend=backend_used,
+        backend=backend_used, counters=counters,
     )
 
 
@@ -472,9 +608,9 @@ def monte_carlo(builder_factory: Callable[..., Any],
                    for s in samples]
 
     t0 = time.perf_counter()
-    kpi_list, failed, backend_used = _run_jobs(
-        args_iter, parallel=parallel, backend=backend,
-        n_workers=n_workers, verbose=verbose)
+    kpi_list, failed, backend_used, counters = _run_points(
+        args_iter, samples, kpi_fn, parallel, backend, n_workers,
+        verbose, simulate_kwargs)
 
     wall = time.perf_counter() - t0
     if verbose:
@@ -495,7 +631,7 @@ def monte_carlo(builder_factory: Callable[..., Any],
     return SweepResult(
         params=params_arr, kpis=kpis_arr, shape=(),
         n_simulations=n_samples, wall_time_s=wall, failed=failed,
-        backend=backend_used,
+        backend=backend_used, counters=counters,
     )
 
 

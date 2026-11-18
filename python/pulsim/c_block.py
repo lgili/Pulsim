@@ -541,6 +541,12 @@ def _c_graph_observer(builder):
     """The builder's C-block graph compiled for one run (None without C
     blocks): its observer, with the outputs each block holds."""
     graph = getattr(builder, "_c_graph", None)
+    if graph is None:
+        # A run's builder comes from Circuit.to_builder(): the blocks ride
+        # in its ControlDecls, each handle's block knows its graph.
+        from ._circuit_ir import c_blocks_of
+        graph = next((getattr(getattr(h, "block", None), "_graph", None)
+                      for h in c_blocks_of(builder)), None)
     if graph is None or not graph.blocks:
         return None
     # Compiled once per circuit layout: the graph keeps its tick grid
