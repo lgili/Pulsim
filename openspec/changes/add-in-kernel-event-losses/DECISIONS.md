@@ -112,6 +112,22 @@ still heats that node (test 2.6 needs a deposited, open-loop heat).
 construction (which also keys every design id); a change after the
 first batch raises `ValueError` naming `kpis=` / `constraints=`.
 
+## 12. Evaluator options: honoured or refused, never dropped (batch-11 #7)
+
+`Evaluator(options=)` was passed to `simulate` on the transient route
+and to the period runs on pss/pwl and pss/trbdf2, and silently dropped
+on pss/dsed (and by the kernel batch). Now: pss/dsed refuses any option
+by name (`refusal[1] == "options"`; the exact stepper has no step size
+or tolerance to honour), the kernel batch sends such an evaluator to
+the Python path (which refuses it), and every engine call of the
+evaluator turns simulate()'s "ignored by the ... engine" warning (rtol /
+atol / dt_init / integrator on pwl, integrator on trbdf2) into the same
+refusal. Rows tested: `test_evaluator_options_are_honoured_or_refused_
+on_every_route` (dsed: dt, rtol, discontinuity_restart; pwl transient
+and pss: dt honoured, rtol / atol refused; trbdf2 pss: rtol honoured,
+integrator refused on pss and transient). Unknown keywords were already
+a TypeError from simulate.
+
 ## Not done / known gaps
 
 Task 3.1-3.3 (variable-step hooks), 4.x (electrical feedback), 5.1

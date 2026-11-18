@@ -3220,6 +3220,7 @@ inline SimulationResult run_transient(
         throw;                       // already carries its payload
     }
     catch (const pwl::NewtonRoundoffBudgetExceeded& e) {
+        if (lt) lt->write(result);
         throw SimulationAborted(e.what(), std::move(result), t_reached,
                                 /*roundoff_budget=*/true);
     }

@@ -23,6 +23,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Fixed** an `Evaluator` whose `kpis=` or `constraints=` were changed
   after its first batch ran the cached kernel plan with the old ones;
   it is now refused by name.
+* **Fixed** `Evaluator(options=)` was silently dropped on the pss/dsed
+  route, and a keyword simulate() only warned it ignores (`rtol` on
+  `pwl`, `integrator` on `trbdf2`) was dropped on the others; both are
+  now refused by name (`refusal` feature `options`).
 
 ### Integration batch 11: circuit IR YAML, TR-BDF2 ideal switch, pwl complementarity, exact step 3, control graph G23, optimisation slice 6 merged
 

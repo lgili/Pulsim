@@ -28,6 +28,12 @@
 // the sum over a run is exact, a restart (BE/SDIRK) step is within one
 // step's heat.
 //
+// Hook for impulsive re-initialisation energy (feat/core-a-ideal-switch,
+// result.reinit_records as a named loss category): an engine that applies
+// a reinit inside an accepted step passes its energy to accept() and it
+// joins that device's `heat` before add_(queue_, ...), with its own ledger
+// field next to E_on / E_off. Not wired: that side is not on this branch.
+//
 // Engines without this hook refuse a circuit with loss ports by name
 // (`require_supported`, feature "device_losses").
 

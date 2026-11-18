@@ -617,6 +617,8 @@ def _plan_or_reason(ev):
         return "a thermal loop"
     if ev.gradients:
         return "gradients="
+    if ev.options:
+        return "options= (refused on this route, per design)"
     if not ev._spec_static:
         return "a design variable moves a value the observables read"
     from . import _pulsim as _k

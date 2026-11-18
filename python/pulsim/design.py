@@ -1571,6 +1571,17 @@ class Evaluator:
         if self.engine in ("pwl", "trbdf2"):
             return self._pss_transient(src, sf, T, counters)
         counters["route"] = "pss/dsed"
+        if self.options:
+            # the exact stepper takes no simulate keywords: dropping them
+            # would answer a question the caller did not ask
+            raise unsupported(
+                "design.evaluate", "options",
+                f"Evaluator: options {sorted(self.options)} on the pss/dsed "
+                "route: the exact stepper has no step size, tolerance or "
+                "other simulate keyword to honour them with (refused, never "
+                "dropped). Remove options=, or pick the transient route "
+                "(SteadySpec(method='transient')) or engine='pwl' / "
+                "'trbdf2'.")
         spec = self._spec(src)
         obs = spec if isinstance(spec, _pk.Spec) else None
 
@@ -2213,8 +2224,21 @@ def _engine(fn):
     """Run an engine call; a kernel non-convergence (a RuntimeError,
     ``SimulationAborted`` included) becomes ``failed``. Refusals
     (``UnsupportedError``, a ValueError) and cancellation pass."""
+    import warnings
     try:
-        return fn()
+        with warnings.catch_warnings():
+            # simulate() only WARNS that an engine ignores a keyword; an
+            # evaluator option is honoured or refused, never dropped
+            warnings.filterwarnings(
+                "error", message=r".*(ignored by the|are ignored here)",
+                category=UserWarning)
+            return fn()
+    except UserWarning as w:
+        if "ignored by the" not in str(w) and "ignored here" not in str(w):
+            raise
+        raise unsupported(
+            "design.evaluate", "options",
+            f"Evaluator options: {w} (refused, never dropped)") from w
     except (Cancelled, NotImplementedError, RecursionError):
         raise      # a stub, a refusal (_UnsupportedNotImplemented), a bug
     except RuntimeError as e:
