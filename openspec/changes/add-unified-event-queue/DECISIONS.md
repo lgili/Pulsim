@@ -101,3 +101,24 @@
 - Not done in 4.1: `add_tick` / `TickInfo{scheduled_t, k}` (the handlers
   still receive the step time, which on trbdf2 is the tick time); the
   fixed engine's ticks are still Python (`FixedStepTicks`).
+
+## 4. The control graph's PWM gate is a modulator with edges (towards group 6)
+
+- `ChainPwmGate::next_edge_after(t)` is the `pwm_phase` crossing of each
+  leg for the duty its sink holds now (the arithmetic of
+  `NativePwm2Switch`); valid until the graph's next tick. The engines
+  already re-ask an oracle after a tick (trbdf2: the queue's
+  `invalidate`; pwl: the observer call resets its edge cache), which is
+  the duty-register invalidation of D3 without a separate register type.
+  `CarrierPwm` / `DutyRegister` / `LatchPolicy` are not added: the gate
+  with its chain sink is that pair, with `Immediate` latching.
+- Results that change (documented, not bit-identical): closed loops on
+  trbdf2 (edges landed instead of bisected; the step is no longer capped
+  at twice the narrowest sampled pulse) — cl1/cl2/clmon of the golden
+  compare move by at most 6.4e-2 V on a switch node at one sample next to
+  an edge (sample instants differ by 7e-8 s), output 1e-9 relative;
+  pwl with `enable_substep_state_correction=True` now splits at the
+  loop's edges. Reference status: `cl_boost_pi` error -> agree on trbdf2
+  and pwl+split, disagree (0.058) on pwl / pwl+restart (it had no
+  reference before); `ll15_boost` trbdf2 3.9e-4 -> 1.24e-3 (tol 1e-3).
+  Freezes updated in `benchmarks/manifests/v2_triage.yaml`.

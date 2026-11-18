@@ -32,6 +32,7 @@
 #include "pulsim/topology/graph.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -940,6 +941,22 @@ struct ChainPwmGate {
             }
         }
         return mask;
+    }
+
+    /// First edge strictly after `t` for the duties the sinks see NOW
+    /// (add-unified-event-queue: a modulator reading a duty register).
+    /// Valid until the graph next ticks; an engine re-asks after every
+    /// tick (trbdf2's event queue, pwl's observer call). The same
+    /// `pwm_phase` arithmetic as the mask, so an edge may be a no-op
+    /// (a period start at duty 0), never a missed one.
+    [[nodiscard]] Real next_edge_after(Real t) const {
+        Real best = std::numeric_limits<Real>::infinity();
+        for (const auto& l : legs) {
+            const std::array<Real, 1> thr{chain->sink_value(l.slot)};
+            best = std::min(best, pwm_phase::next_constant_crossing(
+                                      t, l.phase, l.period, thr));
+        }
+        return best;
     }
 };
 
