@@ -101,6 +101,8 @@
 #include "pulsim/models/switched_diode.hpp"
 #include "pulsim/models/transformer.hpp"
 #include "pulsim/solver/result.hpp"
+#include "pulsim/solver/step/controllers.hpp"
+#include "pulsim/solver/step/integrators.hpp"
 #include "pulsim/solver/run_transient.hpp"   // combine_masks, SimulationAborted
 #include "pulsim/sources/pwm_b_extra.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
@@ -448,9 +450,12 @@ inline SimulationResult run_transient_trbdf2(
     const pwl::NonlinearRefreshFn& nl_refresh = {},
     /// v2.0 Phase 4 — resume from a previous run's `final_snapshot`
     /// (either engine's): x, the companion histories of every
-    /// dynamic device, and the diode bits. To the run's own
-    /// tolerance, not bit-exact: the step controller's state is not
-    /// in the snapshot, so the segment restarts from h_init.
+    /// dynamic device, and the diode bits. A TR-BDF2 snapshot also
+    /// carries the step controller's memory (`controller`), which the
+    /// segment continues from; without it (another engine's snapshot, a
+    /// pickle) the segment restarts from h_init. Exact in state, to the
+    /// run's own tolerance in trajectory (DECISIONS 8 of
+    /// refactor-unified-transient-stepper lists what is not carried).
     const SolverSnapshot* resume_from = nullptr,
     /// Multi-rate ticks: called as tick_fn(j, t, x) for source j of
     /// opts.observer_periods. Takes the place of observer_fn there.
@@ -909,7 +914,7 @@ inline SimulationResult run_transient_trbdf2(
         // solve's return value. Setting it here, at the one
         // choke point all trapezoidal solves pass through, is the
         // same fix run_transient applies to its `step_ctx`.
-        step_ctx = {dt, pwl::TrBdf2Stage::Trapezoidal};
+        step_ctx = step::Trapezoidal::stage(dt).ctx();
         history.compute_b_extra(dt, b_stage);
         accumulate_sources(t0 + dt, b_src);
         b_stage += b_src;
@@ -1280,8 +1285,20 @@ inline SimulationResult run_transient_trbdf2(
 
     Real t = opts.t_start;
     t_now = &t;
-    Real h = opts.h_init > Real{0} ? opts.h_init : h_max / Real{100};
+    // The step memory is one object (refactor-unified-transient-stepper
+    // 5.1): what a snapshot carries for an exact variable-step resume.
+    // The names below are references into it.
+    step::LteController lte_ctrl;
+    Real& h = lte_ctrl.h;
+    h = opts.h_init > Real{0} ? opts.h_init : h_max / Real{100};
     h = std::min(h, h_max);
+    // A TR-BDF2 snapshot carries its step memory: the resumed run
+    // proposes the step the stopped one would have (an explicit h_init
+    // still wins). Any other controller's state is ignored.
+    if (resume_from != nullptr && opts.h_init <= Real{0}
+        && resume_from->controller.kind == step::ControllerState::Kind::Lte) {
+        lte_ctrl.load(resume_from->controller);
+    }
     Size steps = 0;
     // Zero-time chatter guard: a boundary-riding diode may flip at
     // the SAME time point repeatedly (bits ping-pong, no time
@@ -1304,8 +1321,9 @@ inline SimulationResult run_transient_trbdf2(
     // quintupled the flyback's event count and biased its average
     // (measured) — the controller's own h is the right restart
     // there.
-    Real h_mem_gate[2] = {Real{0}, Real{0}};
-    int  pending_gate_slot = -1;
+    Real (&h_mem_gate)[2] = lte_ctrl.h_mem_gate;
+    Real end_cut_h = Real{0};   // the last proposal t_end cut short (0 = none)
+    int& pending_gate_slot = lte_ctrl.pending_gate_slot;
     // Gate-edge cache: an LTE-reject inside an edge-clamped step
     // re-enters with the SAME upcoming edge; re-bisecting it costs
     // ~30 switch_fn calls (Python round-trips in the common case).
@@ -1832,8 +1850,8 @@ inline SimulationResult run_transient_trbdf2(
     // accepted at about half). Like the post-gate-edge memory, the
     // controller's proposal after the last accepted restart step for
     // the same diode turning the same way starts the next one.
-    std::vector<Real> h_mem_diode;
-    Size diode_slot = Size(-1);
+    std::vector<Real>& h_mem_diode = lte_ctrl.h_mem_diode;
+    Size& diode_slot = lte_ctrl.diode_slot;
     auto restart_size_after_diode_event = [&](Size d) {
         if (!restart_ok() || n_sdirk_diode == 0) {
             diode_slot = Size(-1);   // no restart: remember no size for it
@@ -2065,6 +2083,9 @@ inline SimulationResult run_transient_trbdf2(
                     ? h_chatter : h_min,
                 h_cond);
             const Real t_stop = queue.next_of(events::Kind::EndOfRun);
+            // The proposal the end of the run cut short is what a resume
+            // continues from (the snapshot's controller block).
+            end_cut_h = t_stop - t < h ? h : Real{0};
             h = std::clamp(h, std::min(h_lo, t_stop - t),
                            std::min(h_max, t_stop - t));
             // The gates as the step starts (one switch_fn call), and
@@ -2286,7 +2307,8 @@ inline SimulationResult run_transient_trbdf2(
             }
 
             // ---- stage 1: TR over γh (or SDIRK stage 1, BE over γ_s h) ----
-            const Real hg = gamma * h;
+            const step::StageSpec stage0 = step::TrBdf2::stage(h, 0);
+            const Real hg = stage0.factor_dt;   // gamma * h
             const bool sdirk = (sdirk_left > 0 && restart_ok()) || reinit_step
                                || reinit_left > 0;
             // Where x_g sits in time (the crossing detector reads it).
@@ -2301,7 +2323,7 @@ inline SimulationResult run_transient_trbdf2(
             accumulate_sources(t + h_pt, b_src);
             b_stage += b_src;
             x_g = x;                 // Newton warm start
-            step_ctx = {hg, pwl::TrBdf2Stage::Trapezoidal};
+            step_ctx = stage0.ctx();
             // A step below the matrix's conditioning floor: 2C/h against
             // a node held only by g_off (a capacitor between two OFF
             // diodes) leaves a pivot below eps, and the factorization
@@ -2378,7 +2400,7 @@ inline SimulationResult run_transient_trbdf2(
                 // the matrix is still the one factored at gamma*h — the
                 // identity c1/h == 2/(gamma*h) is what allows that.
                 hs.capture_gamma(x_g);
-                step_ctx = {h, pwl::TrBdf2Stage::Bdf2Stage2};
+                step_ctx = step::TrBdf2::stage(h, 1).ctx();
                 x_1 = x_g;           // Newton warm start
                 stage_ok =
                     solve_dispatch(mask_step, hg, b_stage, x_1);
@@ -2491,14 +2513,8 @@ inline SimulationResult run_transient_trbdf2(
                     y_old = e.i_prev;
                     y_new = x_1[e.inductor_branch_var_id];
                 }
-                // Factor 2 (Bank et al.): without it the estimate was
-                // half the true local error (true/estimate 1.97 at
-                // h*lambda = -0.05, p10_lte.py), so rtol meant twice itself.
-                const Real lte =
-                    Real{2} * clte * h
-                    * (f_n / gamma
-                       - f_g / (gamma * (Real{1} - gamma))
-                       + f_1 / (Real{1} - gamma));
+                // The integrator's estimate (step::TrBdf2::lte, Bank et al.).
+                const Real lte = step::TrBdf2::lte(h, f_n, f_g, f_1);
                 const Real sc =
                     opts.atol
                     + opts.rtol
@@ -2626,10 +2642,7 @@ inline SimulationResult run_transient_trbdf2(
             }
             if (err > Real{1} && h > h_lo * Real{1.0001}) {
                 // reject: elementary controller, order-3 exponent
-                const Real fac = std::clamp(
-                    Real{0.9} * std::pow(err, sdirk ? Real{-0.5}
-                                                    : Real{-1.0 / 3.0}),
-                    Real{0.1}, Real{0.9});
+                const Real fac = step::LteController::reject_factor(err, sdirk);
                 h = std::max(h * fac, h_lo);
                 ++st.n_reject;
                 if (sdirk && sdirk_event && !reinit_step) {
@@ -3314,19 +3327,13 @@ inline SimulationResult run_transient_trbdf2(
                     // this edge PARITY (rising/falling alternate);
                     // first cycle keeps the controller's h.
                     const int slot =
-                        static_cast<int>(st.n_gate_events & 1U);
+                        static_cast<int>((st.n_gate_events + lte_ctrl.gate_parity) & 1U);
                     if (h_mem_gate[slot] > Real{0}) {
                         h = h_mem_gate[slot];
                     }
                     pending_gate_slot = slot;
                 } else {
-                    const Real e_used =
-                        std::max(err, Real{1e-4});
-                    const Real fac = std::clamp(
-                        Real{0.9}
-                            * std::pow(e_used, sdirk ? Real{-0.5}
-                                                     : Real{-1.0 / 3.0}),
-                        Real{0.2}, Real{5.0});
+                    const Real fac = step::LteController::accept_factor(err, sdirk);
                     const Real h_done = h;
                     h = h * fac;
                     if (sdirk && diode_slot != Size(-1)) {
@@ -3433,6 +3440,10 @@ inline SimulationResult run_transient_trbdf2(
             result.final_snapshot.tick_next_k.push_back(queue.next_k(j));
         }
     }
+    // A resume continues the edge parity and the uncut proposal.
+    lte_ctrl.gate_parity = (st.n_gate_events + lte_ctrl.gate_parity) & 1U;
+    if (end_cut_h > Real{0}) h = std::max(h, end_cut_h);
+    result.final_snapshot.controller = lte_ctrl.save();
     result.final_snapshot.valid = true;
     result.newton = newton_ws.take_counters();
     return result;

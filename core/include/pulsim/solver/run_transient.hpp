@@ -58,6 +58,8 @@
 #include "pulsim/events/step_hooks.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
+#include "pulsim/solver/step/controllers.hpp"
+#include "pulsim/solver/step/integrators.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
@@ -513,6 +515,8 @@ inline SimulationResult run_transient(
         t_origin = resume_snap->grid_origin;
         k_off = resume_snap->grid_step;
     }
+    // The grid point k of this run: t_origin + (k_off + k)·dt.
+    const step::FixedClock fixed_grid{t_origin, opts.dt};
 
     // The five stateful-device histories (Coss, Lauritzen, PMSM, IGBT
     // tail, saturable inductor), one object: every operation below visits
@@ -1482,12 +1486,10 @@ inline SimulationResult run_transient(
             if (should_continue && !should_continue()) {
                 break;
             }
-            const Real t = t_origin +
-                            static_cast<Real>(k_off + k) * opts.dt;
+            const Real t = fixed_grid.at(k_off + k);
             t_reached = t;
             k_reached = k;
-            const Real t_prev = t_origin +
-                                 static_cast<Real>(k_off + k - 1) * opts.dt;
+            const Real t_prev = fixed_grid.at(k_off + k - 1);
             // The heat the previous step queued, as this step's power.
             if (lt) lt->advance(opts.dt);
 
@@ -1735,10 +1737,8 @@ inline SimulationResult run_transient(
             // no rollback of its flux.)
             // A restart stage advances for_dt/2 (= γh) on the factor of
             // for_dt (= 2γh); the devices are told the interval and the rule.
-            step_ctx.h = backward_euler ? for_dt * Real{0.5} : for_dt;
-            step_ctx.stage = backward_euler
-                ? pwl::TrBdf2Stage::BackwardEuler
-                : pwl::TrBdf2Stage::Trapezoidal;
+            step_ctx = backward_euler ? step::BackwardEuler::on_factor(for_dt).ctx()
+                                      : step::Trapezoidal::stage(for_dt).ctx();
             iters = 0;
             flipped = false;
             // NOT reset: a mask cycle in ANY sub-step of a retry is a
@@ -2861,13 +2861,11 @@ inline SimulationResult run_transient(
                 "the thermal network.");
         }
         for (Size k = 0; k < n_steps; ++k) {
-            const Real t = t_origin +
-                            static_cast<Real>(k_off + k) * opts.dt;
+            const Real t = fixed_grid.at(k_off + k);
             t_reached = t;
             k_reached = k;
             const Real t_prev = k > 0
-                ? (t_origin +
-                    static_cast<Real>(k_off + k - 1) * opts.dt)
+                ? fixed_grid.at(k_off + k - 1)
                 : opts.t_start;
             // Sub-step bisection snapshot (Layer 5 V2.2). At
             // k=0 we don't have a prev step; just use the
