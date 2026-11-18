@@ -179,38 +179,6 @@ def test_a_threaded_circuit_sweep_refuses_a_shared_controller():
                 step_observer=loop.step_observer, verbose=False)
 
 
-@pytest.mark.parametrize("key", ["closed_loops", "step_observer"])
-def test_the_evaluator_refuses_a_controller_in_its_options(key):
-    b = _buck()
-    loop = _pi_loop(b)
-    val = [loop] if key == "closed_loops" else loop.step_observer
-    with pytest.raises(p.UnsupportedError, match=key) as e:
-        Evaluator(lambda d: _buck(), period=T, loads=("RL",), output="vout",
-                  options={key: val})
-    assert e.value.feature == "closed_loop"
-
-
-def test_shooting_refuses_a_chain_overlay_as_b_extra_fn():
-    # Integration batch 10 review: the check read a `_closed_loop` mark
-    # that nothing sets; a chain's overlay is recognised by type
-    b = _buck()
-    b.add_resistor("Rd", "drv", "gnd", 1e3)
-    ch = p.MixedDomainBlockChain()
-    ch.add("g", p.Gain(k=2.0), inputs=dict(x="vout"), output="y")
-    ch.drive_source(b, "y", ("v", "drv", "gnd"))
-    obs = ch.make_step_observer(b, dt=T / 100)
-    bex = obs._b_extra_fn                     # handed over as a plain option
-    sf = p.make_pwm_switch_fn(1 / T, 0.5, b.switch_index_of("S"),
-                              b.graph.num_switches)
-    b2 = _buck()
-    b2.add_resistor("Rd", "drv", "gnd", 1e3)
-    b2.add_voltage_source("drv_src", "drv", "gnd", 0.0)
-    with pytest.raises(p.UnsupportedError, match="driven-source overlay") as e:
-        p.periodic_steady_state(b2, period=T, switch_fn=sf, engine="pwl",
-                                dt=T / 100, options={"b_extra_fn": bex})
-    assert e.value.feature == "closed_loop"
-
-
 def test_a_combined_schedule_with_a_closed_loop_part_is_refused():
     # since G23 the loop's gate declares its edges, so a combination of it
     # has edges too: only the closed-loop mark the combination carries
@@ -242,6 +210,38 @@ def test_sensitivities_refuse_a_closed_loop_gate(combine):
     with pytest.raises(p.UnsupportedError) as e:
         simulate_sensitivities(b, 10 * T, sensitivities=["RL.R"],
                                switch_fn=sf)
+    assert e.value.feature == "closed_loop"
+
+
+@pytest.mark.parametrize("key", ["closed_loops", "step_observer"])
+def test_the_evaluator_refuses_a_controller_in_its_options(key):
+    b = _buck()
+    loop = _pi_loop(b)
+    val = [loop] if key == "closed_loops" else loop.step_observer
+    with pytest.raises(p.UnsupportedError, match=key) as e:
+        Evaluator(lambda d: _buck(), period=T, loads=("RL",), output="vout",
+                  options={key: val})
+    assert e.value.feature == "closed_loop"
+
+
+def test_shooting_refuses_a_chain_overlay_as_b_extra_fn():
+    # Integration batch 10 review: the check read a `_closed_loop` mark
+    # that nothing sets; a chain's overlay is recognised by type
+    b = _buck()
+    b.add_resistor("Rd", "drv", "gnd", 1e3)
+    ch = p.MixedDomainBlockChain()
+    ch.add("g", p.Gain(k=2.0), inputs=dict(x="vout"), output="y")
+    ch.drive_source(b, "y", ("v", "drv", "gnd"))
+    obs = ch.make_step_observer(b, dt=T / 100)
+    bex = obs._b_extra_fn                     # handed over as a plain option
+    sf = p.make_pwm_switch_fn(1 / T, 0.5, b.switch_index_of("S"),
+                              b.graph.num_switches)
+    b2 = _buck()
+    b2.add_resistor("Rd", "drv", "gnd", 1e3)
+    b2.add_voltage_source("drv_src", "drv", "gnd", 0.0)
+    with pytest.raises(p.UnsupportedError, match="driven-source overlay") as e:
+        p.periodic_steady_state(b2, period=T, switch_fn=sf, engine="pwl",
+                                dt=T / 100, options={"b_extra_fn": bex})
     assert e.value.feature == "closed_loop"
 
 

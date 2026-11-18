@@ -606,15 +606,16 @@ records its `disagree` / `error` cells as `known:` per configuration in
 `benchmarks/manifests/v2_triage.yaml` (counts in
 `benchmarks/REFERENCE_STATUS.md`). Each is an open finding, not a
 tolerance. One circuit has no valid reference and is `unverified` on
-every engine (`reference: suspect`): `ll16_flyback_closed_loop`, which is
-not a flyback (`Lsec` is not coupled, `V(vout)` = 0, so the PI
-integrates a constant error; every turn-off forces `I(Lleak) - I(Lm)`
-through `roff` = 1e7 Ω: `V(drain)` peaks at 7.4e8 V on trbdf2 and
-9.5e3 V on pwl, and trbdf2 rtol 1e-8 vs 1e-10 differ by 6.7e-3).
-(`sepic` carried a `reference: suspect` mark while its trbdf2 reference
-ground to `max_steps`; that grind is fixed and the reference gives pwl
-1.9e-3 and trbdf2 3.0e-5, both agree; dsed is a frozen `error`.
-`cuk_converter` carried it because its diode was reversed; see below.)
+every engine (`reference: suspect`): `ll16_flyback_closed_loop`, which
+is not a flyback (`Lsec` is not coupled, `V(vout)` = 0, so the PI
+integrates a constant error; every turn-off interrupts `I(Lm_core)`
+(604 A) into `roff` = 1e7 Ω: pwl `V(drain)` 9.5e3 V at dt, 3.7e4 V at
+dt/4, and trbdf2 fails Newton at `h_min` at 7-14 µs, so nothing
+converges). (`sepic` carried the mark while its trbdf2
+reference ground to `max_steps`; that grind is fixed and the reference
+gives pwl 1.9e-3 and trbdf2 3.0e-5, both agree; dsed is a frozen
+`error`. `cuk_converter` carried it because its diode was reversed; see
+below.)
 
 **`cuk_converter` runs in DCM: −17.5 V, not −12 V.** Until 2026-11 the
 file and its ngspice deck had `Drect` reversed (anode at ground), so with

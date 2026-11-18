@@ -292,14 +292,30 @@ def _schedule_edges(sf, t_lo, t_hi):
         t = e
 
 
+def _direct_source(obj):
+    """The one predicate for "follows a controller": a helper's
+    ``_closed_loop`` mark, a C++ schedule's ``follows_controller``
+    member, or a control graph's C++ gate / driven-source overlay."""
+    from ._pulsim import (  # type: ignore[import-not-found]
+        CxxChainBExtra, CxxChainPwmGate)
+    src = getattr(obj, "_closed_loop", None)
+    if isinstance(src, str):
+        return src
+    if getattr(obj, "follows_controller", False):
+        return "make_combined_switch_fn with a control-graph gate in it"
+    if isinstance(obj, CxxChainPwmGate):
+        return "a control graph's PWM gate"
+    if isinstance(obj, CxxChainBExtra):
+        return "a control graph's driven-source overlay (b_extra_fn)"
+    return None
+
+
 def _closed_loop_source(sf):
-    """Where ``sf``'s gate comes from when it follows a controller: its
-    own ``_closed_loop`` mark, or one on an object its code closes over
-    or reads as a global (a hand-written gate around ``duty_get`` of
+    """Where ``sf`` comes from when it follows a controller (see
+    `_direct_source`), or what its code closes over or reads as a global
+    (a hand-written gate around ``duty_get`` of
     ``bind_pi_to_duty_callable``, a lambda around ``loop.switch_fn``)."""
-    src = getattr(sf, "_closed_loop", None)
-    if not src and getattr(sf, "follows_controller", False):
-        src = "make_combined_switch_fn with a control-graph gate in it"
+    src = _direct_source(sf)
     if src or not callable(sf):
         return src
     import inspect
@@ -308,8 +324,8 @@ def _closed_loop_source(sf):
     except (TypeError, ValueError):
         return None
     for v in (*cv.nonlocals.values(), *cv.globals.values()):
-        src = getattr(v, "_closed_loop", None)
-        if isinstance(src, str):
+        src = _direct_source(v)
+        if src:
             return src
     return None
 

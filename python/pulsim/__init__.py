@@ -2500,7 +2500,8 @@ def simulate(
     # (controller_period without an observer, a bad period) hold on
     # every engine; dsed refuses closed_loops / step_observer itself.
     _plan = _compose_control(builder, closed_loops, step_observer,
-                             controller_period, switch_fn)
+                             controller_period, switch_fn,
+                             resume=resume_from is not None)
     # A control graph's driven sources reach every engine (above the
     # dispatch: add-compiled-control-graph).
     b_extra_fn = _plan.merge_b_extra(b_extra_fn)

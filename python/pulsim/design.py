@@ -807,7 +807,6 @@ class Evaluator:
         self.engine = engine
         self.samples_per_period = samples_per_period
         self.options = dict(options or {})
-        from ._pulsim import CxxChainBExtra  # type: ignore[import-not-found]
         for k in ("closed_loops", "step_observer"):
             if self.options.get(k) is not None:
                 raise unsupported(
@@ -817,7 +816,7 @@ class Evaluator:
                     "design (its state carries over), so records would "
                     "depend on evaluation order. Evaluate the open-loop plant "
                     "at a fixed duty.")
-        if isinstance(self.options.get("b_extra_fn"), CxxChainBExtra):
+        if _closed_loop_source(self.options.get("b_extra_fn")):
             raise unsupported(
                 "design", "closed_loop",
                 "Evaluator: options['b_extra_fn'] is a control graph's "

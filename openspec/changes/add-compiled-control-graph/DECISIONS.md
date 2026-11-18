@@ -340,6 +340,25 @@ Each entry: question → option taken → evidence → how to reverse.
 - **Hook.** A graph used with a *different* builder or after `reset()`
   has nothing to carry; a snapshot-borne control state needs the
   `SolverSnapshot` field listed under the 6.1 hook below.
+- **Revised (integration batch 10 review).** Carry-over by default made
+  a `Circuit` with a stateful C block answer differently on each run
+  (1.383 V, then 1.785 V). Question: what does a run start from?
+  Options: (a) carry over unless `resume_from` (before); (b) every run
+  without `resume_from` starts each block from its declared initial
+  state; (c) a snapshot of the block states, restored per run. Taken:
+  (b), in `_c_graph_observer` above the engine dispatch (so every
+  engine): native libraries re-run `term` then `init`
+  (`_load_native_step` `reinit`; an export's shim `init` resets its
+  static struct), Python steps get a deep copy of their initial state
+  dict, buffers, signals and the tick grid are cleared
+  (`BlockChain::reset`). (c) needs a state size from each library, which
+  the ABI does not give. Carry-over is explicit: `resume_from` only.
+  Chains and closed loops the caller passes (`step_observer=`,
+  `closed_loops=`) are the caller's objects, not the circuit's: they
+  keep the documented carry-over. Evidence: `test_control_graph_rerun.py`
+  (Python step, inline C, export_c library; pwl and trbdf2: two runs
+  byte-identical; a resumed run continues the block). Reverse: drop
+  the `fresh` reset in `_c_graph_observer`.
 
 ## G23. The loop gate declares its edges; the closed-loop cells diagnosed
 
@@ -454,6 +473,26 @@ Each entry: question → option taken → evidence → how to reverse.
   too (not `V(sw)` only); `cl_boost_pi` pwl+split before was not run;
   the probe solves its own DC start (2.3880597 A / 23.880597 V,
   600.558046 A / 11.160915 V, equal to the engines').
+
+## G25. One Park / PLL law; address wrappers; a libm-robust export test
+
+- **Question.** `blocks.hpp` kept a second Park / inverse Park / PLL
+  law (std::cos / std::sin; the PLL wrapped to [-pi, pi) and summed
+  `Ki * vq * dt`) beside `block_laws.h`, used by `add_park` / `add_pll`
+  and `CxxParkTransform` / `CxxPLL`; `block_laws.h` took `&cos`, whose
+  address is unspecified in C++.
+- **Taken.** The structs call `pl_park` / `pl_inverse_park` / `pl_pll`
+  (one law; the raw `add_pll` / `CxxPLL` angle is now in [0, 2pi), as
+  `pulsim.control.PLL`); the volatile pointers name `pl_cos_call` /
+  `pl_sin_call`, wrappers whose address is defined in C and C++.
+  Clarke and SVM keep their kernel variants (no libm call; G17).
+- **Export test.** The kernel's cos / sin / fmod are the extension's
+  libm, the export's are the C compiler's (MinGW against MSVC's UCRT on
+  Windows). Every signal outside Park / PLL is compared byte for byte;
+  the Park / PLL signals byte for byte when a probe compiled by the same
+  compiler gives Python's cos / sin / fmod on 10^4 inputs, else within
+  1e-10 of their scale. No skip.
+- **Reverse.** Restore the struct bodies (git) and `= cos` / `= sin`.
 
 ## Hooks for task groups 6–7 (not in this slice)
 

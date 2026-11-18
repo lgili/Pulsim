@@ -119,9 +119,11 @@ ch.tick_counts                                             # [200, 400]
   ticks at most once per step). `controller_period=` with a rated
   chain is a `ValueError`: the groups set the ticks.
 - A reused observer (a second `simulate()`) restarts its tick grid at
-  the new `t_start`; block state carries over unless you call
-  `chain.reset()`. With `resume_from=` the grid restarts at the resume
-  instant (graph state in the snapshot is task 6).
+  the new `t_start`; the state of a chain *you* pass carries over unless
+  you call `chain.reset()`. A circuit's C blocks do not carry over: every
+  run starts each block from its declared initial state (a `Circuit` is
+  immutable, so `simulate(c)` twice is bit-identical); only
+  `resume_from=` continues them (graph state in the snapshot is task 6).
 - `dt` passed to a block is its group's period.
 - Groups due at the same instant run in one pass of the schedule, so a
   fast group reading a slow group's signal sees that instant's value.
@@ -238,7 +240,7 @@ graph, the `pulsim_cblock_step` shim, so the file loads back through
 channel no block writes); the shim writes `outputs` to `out[]`. No
 `malloc`: the shim's state is static, so a circuit takes one block of a
 library (a second `add_c_block` of it on the same builder is refused);
-across circuits each `add_c_block` resets the shared state.
+its `init` runs again at the start of every run (G22).
 
 Compiled with `-ffp-contract=off` (MSVC's default `/fp:precise` does not
 contract) it is bit-identical to the kernel graph: every block kind over

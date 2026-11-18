@@ -40,6 +40,7 @@ Usage
 """
 from __future__ import annotations
 
+import copy
 import ctypes
 import hashlib
 import os
@@ -48,7 +49,6 @@ import subprocess
 import sys
 import threading
 import warnings
-import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
@@ -282,7 +282,6 @@ def _load_native_step(lib_path, symbol, n_in, n_out, *,
                 f"c_block: {lib_path!r} keeps one static state (export_c's "
                 "shim) and this circuit already has a block of it. Compile "
                 "the file again under another name for a second instance.")
-        static_taken.add(dll._handle)
 
     state_ptr = ctypes.c_void_p(None)
     if hasattr(dll, init_symbol):
@@ -305,6 +304,13 @@ def _load_native_step(lib_path, symbol, n_in, n_out, *,
             term_c(state_ptr)
             state_ptr.value = None
 
+    def reinit():
+        """Back to the library's initial state (a new run, G22)."""
+        teardown()
+        state_ptr.value = (init_c(int(n_in), int(n_out))
+                           if hasattr(dll, init_symbol) else None)
+
+    step._reinit = reinit    # type: ignore[attr-defined]
     step._dll = dll          # keep the library alive  # type: ignore[attr-defined]
     step._step_c = step_c    # type: ignore[attr-defined]
     step._state_ptr = state_ptr  # type: ignore[attr-defined]
@@ -424,12 +430,6 @@ def _compile_inline(code: str, lang: str, symbol: str, *,
     return so_path
 
 
-# Static-state libraries already backing a block, per builder: a guard while
-# the builder is being wired, not circuit content, so it is kept here and
-# not as a builder attribute (test_no_builder_side_state).
-_STATIC_LIBS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
-
-
 def add_c_block(builder,
                 inputs: Sequence,
                 outputs: Sequence,
@@ -518,9 +518,13 @@ def add_c_block(builder,
             extra_compile_args=extra_compile_args,
             extra_link_args=extra_link_args))
     if lib is not None:
+        from ._circuit_ir import c_blocks_of
+        # libraries this circuit's blocks already load, through the handles
+        loaded = {k._dll._handle for h in c_blocks_of(builder)
+                  if (k := getattr(getattr(h, "block", None), "_keep", None))
+                  is not None}
         fn, teardown = _load_native_step(
-            lib, symbol, n_in, n_out,
-            static_taken=_STATIC_LIBS.setdefault(builder, set()))
+            lib, symbol, n_in, n_out, static_taken=loaded)
     assert fn is not None
 
     if lib is None:
@@ -543,6 +547,7 @@ def add_c_block(builder,
         block._keep = fn          # the library and its state pointer
     else:
         block = CBlock(n_in, n_out, fn=fn, state=dict(state or {}), name=name)
+    block._state0 = copy.deepcopy(block.state)   # every run starts here (G22)
     handle = CBlockHandle(
         name=name, n_in=n_in, n_out=n_out, dt_block=float(dt),
         state=block.state, inputs=block.inputs, outputs=block.outputs,
@@ -597,15 +602,37 @@ def _c_graph_of(builder):
                  is not None), None)
 
 
-def _c_graph_observer(builder):
+def _reset_c_blocks(graph) -> None:
+    """Every block back to its declared initial state (G22): a Circuit is
+    immutable, so simulate(c) twice gives the same answer. Native
+    libraries re-run their init (term first); Python steps get a copy of
+    their initial state dict; the buffers and the graph's signals and
+    tick grid are cleared."""
+    for spec in graph.blocks:
+        b = spec.block
+        keep = getattr(b, "_keep", None)
+        if keep is not None:
+            keep._reinit()
+        else:
+            b.state.clear()
+            b.state.update(copy.deepcopy(getattr(b, "_state0", {})))
+        b.inputs[:] = 0.0
+        b.outputs[:] = 0.0
+    if graph._cxx_chain is not None:
+        graph._cxx_chain.reset()
+
+
+def _c_graph_observer(builder, fresh: bool = True):
     """The builder's C-block graph compiled for one run (None without C
-    blocks): its observer, with the outputs each block holds."""
+    blocks): its observer, with the outputs each block holds. A fresh
+    run (not resume_from) starts every block from its initial state."""
     graph = _c_graph_of(builder)
     if graph is None or not graph.blocks:
         return None
-    # Compiled once per circuit layout: the graph keeps its tick grid
-    # across runs, so a resume_from run continues it (a run that goes
-    # back in time restarts it, BlockChain.rearm_if_restarted).
+    if fresh and getattr(graph, "_c_obs", None) is not None:
+        _reset_c_blocks(graph)
+    # Compiled once per circuit layout; a resume_from run continues its
+    # tick grid and states, any other run restarts both (above).
     key = (len(graph.blocks), int(builder.pool.state_size(builder.graph)))
     cached = getattr(graph, "_c_obs", None)
     if cached is None or cached[0] != key:
