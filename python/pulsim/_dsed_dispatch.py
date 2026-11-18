@@ -572,6 +572,9 @@ MODE_GUARD = True
 # to reach the give-up deterministically: the cap is otherwise met only by the
 # rounding of a diode pair fighting at rest (macOS yes, Linux / Windows no).
 SETTLE_ROUND_CAP = 64
+# Relative threshold of the kernel's diode-law check (0 turns it off: tests that
+# isolate another refusal).
+DIODE_LAW_REL = 1e-3
 
 
 def _shadow_h_e(builder: Any, switch_fn: Any, t_window: float) -> float:
@@ -920,7 +923,7 @@ def run_dsed_from_builder(
                     rtol=opts.rtol, atol=opts.atol,
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
                     store_every=opts.store_every, event_log=False,
-                    settle_round_cap=SETTLE_ROUND_CAP, **shadow_kw)
+                    settle_round_cap=SETTLE_ROUND_CAP, diode_law_rel=DIODE_LAW_REL, **shadow_kw)
             elif opts.integrator == "bdf2":
                 native_res = run_bdf2_b11(
                     native_adapter, sf, x0, t_window,
@@ -1077,75 +1080,10 @@ __all__ = [
 ]
 
 
-class DiodeModeInconsistentError(RuntimeError):
-    """A dsed run whose settled diode modes break their own law."""
+# A stored sample whose diode mode breaks its own law: the kernel's end-of-run
+# check (PEDSimulator::check_diode_law_, every caller gets it), typed with
+# `.device` and `.t_failed`. Containment for the zero-band settle of slice 1
+# (a boost with V_th = 0 kept its diode ON through -1.07 A; a half-wave RL
+# rectifier conducted -0.85 A for half a period, silently).
+from ._pulsim import DiodeModeInconsistentError  # noqa: E402, F401  # type: ignore[import-not-found]
 
-
-def check_diode_modes(res, builder, rel: float = 1e-3) -> None:
-    """Raise if a stored sample has an ON PWL diode carrying reverse
-    current, or an OFF one forward-biased past its threshold, by more
-    than ``rel`` of that diode's peak current / voltage over the run.
-
-    Containment for the zero-band settle of add-exact-propagator-strategy
-    slice 1 (integration batch 4): a boost with ``V_th`` = 0 or 1e-3 kept
-    its diode ON through -1.07 A at R = 50 Ohm (V_out 0.16 V low), and a
-    half-wave RL rectifier conducted -0.85 A for half a period, silently.
-    Agreeing circuits (bridges, three-phase rectifier, buck DCM) show no
-    sample beyond 1e-3. The complementarity mode selection replaces this.
-    """
-    try:
-        S = _np.asarray(res.switch_states)
-        comps = [c for c in builder.components() if c.get("kind") == "diode"]
-    except Exception:  # noqa: BLE001 - no record, nothing to check
-        return
-    if S.ndim != 2 or not comps:
-        return
-    # The engine's zero band (scheduler.hpp zero_band_tol_), per sample: 1e-12 of the
-    # largest node voltage or diode drop. A diode inside it is undecidable by its value
-    # (the leak divider of an idle bridge puts 5e-15 V across an OFF diode at 100 V).
-    X, vnode = None, _np.zeros(S.shape[0])
-    # only the full MNA vector has node voltages (a reduced state holds L and C states)
-    if getattr(res, "has_full_states", False):
-        try:
-            nn = int(builder.graph.num_nodes)
-            X = _np.asarray(res.states)
-            if nn:
-                vnode = _np.abs(X[:, :nn]).max(axis=1)
-        except Exception:  # noqa: BLE001 - unreadable states: no band beyond the drops
-            X = None
-    drops = [max(abs(float(c["params"].get("V_th", 0.0))), abs(float(c["params"].get("V_f", 0.0))))
-             for c in comps]
-    band = 1e-12 * _np.maximum(vnode, max(drops))
-    for c in comps:
-        prm = c["params"]
-        k = builder.switch_index_of(c["name"])
-        if k >= S.shape[1]:
-            continue    # a schedule narrower than the circuit: no record
-        on = S[:, k].astype(bool)
-        i = _np.asarray(res.i(c["name"]), dtype=float)
-        thr = max(float(prm.get("V_th", 0.0)), float(prm.get("V_f", 0.0)))
-        g_off = float(prm.get("g_off", 1e-9))
-        if g_off > 0.0:
-            v_off = i / g_off
-        elif X is not None:   # no leak: the OFF voltage from the nodes (the current is 0 / 0)
-            a, kk = c["nodes"]
-            v_off = ((X[:, a] if a >= 0 else 0.0) - (X[:, kk] if kk >= 0 else 0.0)) * _np.ones(len(on))
-        else:
-            v_off = _np.zeros(len(on))   # no states: the OFF law cannot be read
-        i_pk = max(float(_np.abs(i).max()), 1e-12)
-        v_pk = max(float(_np.abs(v_off[~on]).max()) if (~on).any() else 0.0,
-                   thr, 1e-12)
-        bad_on = on & (i < -_np.maximum(rel * i_pk, band * float(prm.get("g_on", 0.0))))
-        bad_off = ~on & (v_off > thr + _np.maximum(rel * v_pk, band))
-        if bad_on.any() or bad_off.any():
-            k = int(_np.argmax(bad_on | bad_off))
-            what = (f"ON while carrying {i[k]:.4g} A" if bad_on[k] else
-                    f"OFF while forward-biased by {v_off[k]:.4g} V")
-            raise DiodeModeInconsistentError(
-                f"simulate(engine='dsed'): diode {c['name']!r} is {what} at "
-                f"t = {float(res.times[k]):.6g} s ({int(bad_on.sum() + bad_off.sum())} "
-                "samples break the diode law): the event settle chose a "
-                "wrong mode, and the run would be silently wrong. Give the "
-                "diode a small threshold band (V_th = 1e-2 V worked on the "
-                "measured boosts; 1e-3 V on some), or use engine='pwl' or "
-                "'trbdf2'. Known limitation of the exact-propagator slice.")

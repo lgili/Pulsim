@@ -187,6 +187,7 @@ public:
                     K(m, n) = island_dot(isl[static_cast<std::size_t>(m)],
                                          ws_[static_cast<std::size_t>(n)]);
             if (K.allFinite()) {
+                K_ = K;
                 joint_lu_.compute(K);
                 joint_ok_ = std::isfinite(joint_lu_.rcond()) && joint_lu_.rcond() > Real{0};
             }
@@ -208,9 +209,13 @@ public:
             Vector sig(static_cast<Index>(isl.size()));
             for (std::size_t m = 0; m < isl.size(); ++m) sig[static_cast<Index>(m)] = sigma(m);
             const Vector a = joint_lu_.solve(sig);
-            for (std::size_t m = 0; m < isl.size(); ++m) s -= ws_[m] * a[static_cast<Index>(m)];
-            fixes_ += isl.size();
-            return;
+            // rcond > 0 admits a K singular to round-off: a solve that does not
+            // reproduce σ takes the sequential correction instead
+            if (a.allFinite() && (K_ * a - sig).norm() <= Real{1e-8} * sig.norm()) {
+                for (std::size_t m = 0; m < isl.size(); ++m) s -= ws_[m] * a[static_cast<Index>(m)];
+                fixes_ += isl.size();
+                return;
+            }
         }
         for (std::size_t m = 0; m < isl.size(); ++m) {
             const Real sig = sigma(m);
@@ -228,6 +233,7 @@ private:
     std::vector<Vector> ws_;
     std::vector<Real> kap_;
     Eigen::PartialPivLU<DenseMatrix> joint_lu_;
+    DenseMatrix K_;
     bool joint_ok_ = false;
     Size fixes_ = 0;
 };

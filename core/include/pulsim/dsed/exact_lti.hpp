@@ -17,7 +17,11 @@
 // where a lossless network has a skew Ã and κ₂ measures physics, not
 // units:
 //
-//   tier 1  eigendecomposition, accepted when u·κ₂(Ṽ) ≤ 1e-10
+//   tier 1  eigendecomposition, accepted when u·κ₂(Ṽ) ≤ 1e-10 AND its
+//           first-order propagator error over the run horizon,
+//           ‖Ṽ(G∘Ṽ⁻¹R)Ṽ⁻¹‖_F, is ≤ 1e-10 or its row-wise backward
+//           error is ≤ 64 u (pair_quality); pairs that miss are
+//           refined (refine_pairs), then the balanced pairs tried
 //   tier 2  Padé [13/13] scaling and squaring of [[Ãh, b̃h],[0,0]]
 //           (Higham 2005, Eigen's MatrixFunctions), cached per h,
 //           accepted when u·‖Ã·h_max‖₁ ≤ 1e-10
@@ -51,6 +55,10 @@ namespace pulsim::dsed {
 inline constexpr Real kExactRoundoff = std::numeric_limits<Real>::epsilon();
 /// The accepted error level of tiers 1 and 2 (`u·κ`, `u·‖Ah‖₁`).
 inline constexpr Real kExactTierBound = Real{1e-10};
+/// Tier 1's alternative bar: a row-wise backward error within this many
+/// roundoffs of Ã's own rows (pair_quality). Good pairs measure 0.3–4.4 u,
+/// the leaking flyback pairs 2.8e11 u, a wrong balanced bridge pair 3.2e3 u.
+inline constexpr Real kExactBackwardBound = Real{64};
 
 /// The propagator of one mode.
 struct ExactLTI {
@@ -59,6 +67,10 @@ struct ExactLTI {
     Real kappa = std::numeric_limits<Real>::infinity();  // κ₂(Ṽ)
     Real norm_A1 = Real{0};    // ‖Ã‖₁ (energy coordinates)
     std::string reason;        // why not tier 1 (empty on tier 1)
+    Real defect = std::numeric_limits<Real>::quiet_NaN();    // pair_quality of the kept pairs:
+    Real backward = std::numeric_limits<Real>::quiet_NaN();  // first-order error, row-wise backward error / u
+    int refined = 0;           // refinement iterations the kept pairs took
+    bool balanced = false;     // the kept pairs are the balanced matrix's
 
     // Tier 1, physical coordinates: V = D⁻¹Ṽ, V⁻¹ = Ṽ⁻¹D, split into
     // real and imaginary parts so a step multiplies real vectors only.
@@ -127,8 +139,8 @@ inline std::string fmt_e(Real v) {
 /// entry: a g_off-limited winding current (a 4e14 /s row) put that error into
 /// the slow modes, and a flyback's output drifted to 1.3e-3 V where the exact
 /// solution of the same matrix is −9.2e-8 V. A balanced matrix is unchanged
-/// (S = I), so its propagator is bit-identical. make_exact_lti keeps the
-/// balanced eigenpairs only where their residual is the smaller one.
+/// (S = I), so its propagator is bit-identical. make_exact_lti tries the
+/// balanced eigenpairs only where the plain ones fail pair_quality.
 [[nodiscard]] inline Vector balance_in_place(DenseMatrix& M) {
     const auto n = M.rows();
     Vector s = Vector::Ones(n);
@@ -136,8 +148,12 @@ inline std::string fmt_e(Real v) {
     for (bool done = false; !done;) {
         done = true;
         for (Eigen::Index i = 0; i < n; ++i) {
-            const Real c0 = M.col(i).cwiseAbs().sum() - std::abs(M(i, i));
-            const Real r = M.row(i).cwiseAbs().sum() - std::abs(M(i, i));
+            // off-diagonal sums taken directly: sum − |M(i,i)| is cancellation
+            // noise when the couplings are below ε·|M(i,i)|
+            Real c0 = Real{0}, r = Real{0};
+            for (Eigen::Index j = 0; j < n; ++j) {
+                if (j != i) { c0 += std::abs(M(j, i)); r += std::abs(M(i, j)); }
+            }
             if (!(c0 > Real{0}) || !(r > Real{0}) || !std::isfinite(c0) || !std::isfinite(r)) continue;
             Real c = c0, f = Real{1};
             while (c < r / radix) { f *= radix; c *= radix * radix; }
@@ -161,27 +177,190 @@ inline std::string fmt_e(Real v) {
     return sv(n - 1) > Real{0} ? sv(0) / sv(n - 1) : std::numeric_limits<Real>::infinity();
 }
 
-/// max over the eigenpairs of ‖A·v − λ·v‖ / (‖v‖·max(|λ|, 1/h_max)): each
-/// pair's relative error on the time scale it acts on within a step.
-[[nodiscard]] inline Real eigen_residual(const DenseMatrix& A, const Eigen::MatrixXcd& V,
-                                         const Eigen::VectorXcd& lam, Real h_max) {
-    const Eigen::MatrixXcd R = A.cast<std::complex<Real>>() * V - V * lam.asDiagonal();
-    Real worst = Real{0};
-    for (Eigen::Index i = 0; i < V.cols(); ++i) {
-        const Real den = V.col(i).norm() * std::max(std::abs(lam[i]), Real{1} / h_max);
-        worst = std::max(worst, den > Real{0} ? R.col(i).norm() / den
-                                              : std::numeric_limits<Real>::infinity());
+/// How good a set of eigenpairs (Ṽ, Λ) of Ã is: they are exact for Ã + ΔA,
+/// ΔA = −R·Ṽ⁻¹, R = ÃṼ − ṼΛ.
+///  - `defect`: the first-order error of the propagator over `H` per unit of
+///    state (energy coordinates, Frobenius ≥ 2-norm), from the Fréchet
+///    derivative of the exponential in that basis (Daleckii–Krein):
+///      e^{(Ã+ΔA)H} − e^{ÃH} ≈ −Ṽ·(G ∘ E)·Ṽ⁻¹,   E = Ṽ⁻¹R,
+///      G_jk = (e^{λ_j H} − e^{λ_k H})/(λ_j − λ_k) = H·e^{λ_hi H}·φ₁((λ_lo − λ_hi)H)
+///    (λ_hi the one with the larger real part). A fast pair's large absolute
+///    residual is damped by its own G row; an eigenvalue error of a slow or
+///    conserved mode grows as H. It matched an mpmath exponential of the same
+///    matrix to three digits on the flyback and phase-shift bridge modes.
+///  - `backward`: max_i ‖ΔA_i‖/‖Ã_i‖, the row-wise backward error. Ã's rows
+///    are Schur complements carrying their own rounding u·‖Ã_i‖ (a row of
+///    ±1.4e14 entries fixes a near-conserved bridge mode only to ~0.03 /s:
+///    its eigenvalue in the stored matrix is +0.031), so no method resolves a
+///    mode better than that from this matrix; ≤ kExactBackwardBound·u is
+///    "exact for the data to its own rounding".
+/// R = Ã·Ṽ − Ṽ·Λ with every sum compensated (error-free products through
+/// fma, TwoSum accumulation), rounded once: a row of ±1e15 entries leaves
+/// u·1e15 of noise in a plain product, which drowns the residual of a slow
+/// pair and stalls refine_pairs at hundreds of u.
+[[nodiscard]] inline Eigen::MatrixXcd residual_compensated(const DenseMatrix& As,
+                                                           const Eigen::MatrixXcd& V,
+                                                           const Eigen::VectorXcd& lam) {
+    const auto n = V.rows();
+    const auto m = V.cols();
+    Eigen::MatrixXcd R(n, m);
+    // s + c += a·b, the product and the sum both error-free
+    const auto acc = [](Real& s, Real& c, Real a, Real b) {
+        const Real p = a * b;
+        const Real pe = std::fma(a, b, -p);
+        const Real t = s + p;
+        const Real bp = t - s;
+        c += (s - (t - bp)) + (p - bp) + pe;
+        s = t;
+    };
+    for (Eigen::Index k = 0; k < m; ++k) {
+        const Real lr = lam[k].real(), li = lam[k].imag();
+        for (Eigen::Index i = 0; i < n; ++i) {
+            Real sr = 0, cr = 0, si = 0, ci = 0;
+            for (Eigen::Index l = 0; l < n; ++l) {
+                const Real a = As(i, l);
+                if (a == Real{0}) continue;
+                acc(sr, cr, a, V(l, k).real());
+                acc(si, ci, a, V(l, k).imag());
+            }
+            const Real vr = V(i, k).real(), vi = V(i, k).imag();
+            acc(sr, cr, -vr, lr);   // − v·λ, (vr + i·vi)(lr + i·li)
+            acc(sr, cr, vi, li);
+            acc(si, ci, -vr, li);
+            acc(si, ci, -vi, lr);
+            R(i, k) = {sr + cr, si + ci};
+        }
     }
-    return worst;
+    return R;
+}
+
+struct PairQuality {
+    Real defect = std::numeric_limits<Real>::infinity();
+    Real backward = std::numeric_limits<Real>::infinity();
+    /// ≤ 1: tier 1 may use the pairs (either bar met).
+    [[nodiscard]] Real score() const;
+};
+[[nodiscard]] inline PairQuality pair_quality(const DenseMatrix& As, const Eigen::MatrixXcd& V,
+                                              const Eigen::VectorXcd& lam, Real H) {
+    const auto n = V.cols();
+    const Eigen::MatrixXcd W = V.fullPivLu().inverse();
+    const Eigen::MatrixXcd R = residual_compensated(As, V, lam);
+    Eigen::MatrixXcd E = W * R;
+    for (Eigen::Index j = 0; j < n; ++j) {
+        for (Eigen::Index k = 0; k < n; ++k) {
+            const bool jhi = lam[j].real() >= lam[k].real();
+            const std::complex<Real> hi = jhi ? lam[j] : lam[k];
+            const std::complex<Real> lo = jhi ? lam[k] : lam[j];
+            E(j, k) *= H * std::exp(hi * H) * phi1((lo - hi) * H);
+        }
+    }
+    PairQuality q;
+    const Real d = (V * E * W).norm();
+    if (std::isfinite(d)) q.defect = d;
+    const Eigen::MatrixXcd dA = R * W;
+    Real b = Real{0};
+    for (Eigen::Index i = 0; i < n; ++i) {
+        const Real ri = As.row(i).norm();
+        const Real ei = dA.row(i).norm();
+        if (ei > Real{0}) b = std::max(b, ri > Real{0} ? ei / ri : std::numeric_limits<Real>::infinity());
+    }
+    if (std::isfinite(b)) q.backward = b;
+    return q;
+}
+
+inline Real PairQuality::score() const {
+    return std::min(defect / kExactTierBound, backward / (kExactBackwardBound * kExactRoundoff));
+}
+
+/// One Newton step on every eigenpair from E = Ṽ⁻¹(ÃṼ − ṼΛ):
+/// λ_j += E_jj, v_k += Σ_{j≠k} E_jk/(λ_k − λ_j)·v_j between pairs whose gap
+/// is wide (|λ_k − λ_j| > 1e3·|E_jk|); pairs closer than that form a
+/// cluster whose block Λ_c + E_cc is diagonalised instead. Up to three steps while the defect is above
+/// `target`; a step is kept when it lowers the score, or the defect at an
+/// equal score (near a conserved mode the defect sits on the matrix's own
+/// rounding and wanders while the backward error falls).
+inline int refine_pairs(const DenseMatrix& As, Eigen::MatrixXcd& V, Eigen::VectorXcd& lam,
+                        Real H, PairQuality& q, Real target) {
+    const auto n = V.cols();
+    int used = 0;
+    for (int it = 0; it < 3 && q.defect > target; ++it) {
+        const Eigen::MatrixXcd W = V.fullPivLu().inverse();
+        const Eigen::MatrixXcd E = W * residual_compensated(As, V, lam);
+        // clusters: pairs too close for a Newton step (|gap| ≤ 1e3·|E_jk|)
+        std::vector<Eigen::Index> root(static_cast<std::size_t>(n));
+        for (Eigen::Index k = 0; k < n; ++k) root[static_cast<std::size_t>(k)] = k;
+        const auto find = [&](Eigen::Index a) {
+            while (root[static_cast<std::size_t>(a)] != a) a = root[static_cast<std::size_t>(a)];
+            return a;
+        };
+        const auto close = [&](Eigen::Index j, Eigen::Index k) {
+            const Real g = std::abs(lam[k] - lam[j]);
+            return g <= Real{1e3} * std::max(std::abs(E(j, k)), std::abs(E(k, j)));
+        };
+        for (Eigen::Index k = 0; k < n; ++k) {
+            for (Eigen::Index j = 0; j < k; ++j) {
+                if (close(j, k)) {
+                    const Eigen::Index a = find(j), c = find(k);
+                    if (a != c) root[static_cast<std::size_t>(std::max(a, c))] = std::min(a, c);
+                }
+            }
+        }
+        Eigen::MatrixXcd C = Eigen::MatrixXcd::Identity(n, n);
+        Eigen::VectorXcd l2 = lam;
+        for (Eigen::Index k = 0; k < n; ++k) {
+            l2[k] += E(k, k);
+            for (Eigen::Index j = 0; j < n; ++j) {
+                if (j != k && find(j) != find(k)) C(j, k) = E(j, k) / (lam[k] - lam[j]);
+            }
+        }
+        Eigen::MatrixXcd V2 = V * C;
+        // a cluster: Ã restricted to its columns is Λ_c + E_cc, not diagonal;
+        // diagonalise that small block (five identical rectifier bridges: a
+        // λ ≈ −100 cluster whose coupling, ignored, put 2.3e-6 per 6 ms into
+        // the propagator)
+        for (Eigen::Index r = 0; r < n; ++r) {
+            if (find(r) != r) continue;
+            std::vector<Eigen::Index> idx;
+            for (Eigen::Index k = 0; k < n; ++k) if (find(k) == r) idx.push_back(k);
+            if (idx.size() < 2) continue;
+            const auto m = static_cast<Eigen::Index>(idx.size());
+            Eigen::MatrixXcd M(m, m);
+            for (Eigen::Index a = 0; a < m; ++a)
+                for (Eigen::Index c = 0; c < m; ++c)
+                    M(a, c) = E(idx[a], idx[c]) + (a == c ? lam[idx[a]] : std::complex<Real>{0});
+            Eigen::ComplexEigenSolver<Eigen::MatrixXcd> ce(M);
+            // a defective block (a noise-split repeated eigenvalue) keeps its pairs
+            if (ce.info() != Eigen::Success || !(kappa2(ce.eigenvectors()) <= Real{1e4})) continue;
+            Eigen::MatrixXcd Vc(n, m);
+            for (Eigen::Index a = 0; a < m; ++a) Vc.col(a) = V2.col(idx[a]);
+            const Eigen::MatrixXcd Vr = Vc * ce.eigenvectors();
+            for (Eigen::Index a = 0; a < m; ++a) {
+                V2.col(idx[a]) = Vr.col(a);
+                l2[idx[a]] = ce.eigenvalues()[a];
+            }
+        }
+        V2.colwise().normalize();
+        const PairQuality q2 = pair_quality(As, V2, l2, H);
+        const bool better = q2.score() < q.score()
+                            || (q2.score() == q.score() && q2.defect < q.defect);
+        if (!better) break;
+        V = std::move(V2);
+        lam = std::move(l2);
+        q = q2;
+        ++used;
+    }
+    return used;
 }
 
 /// Build the propagator of ẋ = A·x + b. `scale` is D's diagonal (√m
 /// per state, empty for the identity); `h_max` is the longest step the
-/// caller will take, which tier 2's bound needs.
+/// caller will take, which tier 2's bound needs; `horizon` is the run's
+/// length, over which tier 1's propagator defect is stated (≥ h_max).
 [[nodiscard]] inline ExactLTI make_exact_lti(const DenseMatrix& A,
                                              const Vector& b,
                                              const Vector& scale = Vector{},
-                                             Real h_max = Real{1e-5}) {
+                                             Real h_max = Real{1e-5},
+                                             Real horizon = Real{0}) {
     ExactLTI out;
     const auto n = A.rows();
     if (n == 0) {
@@ -198,42 +377,57 @@ inline std::string fmt_e(Real v) {
     out.bs = out.d.cwiseProduct(b);
     out.norm_A1 = out.As.cwiseAbs().colwise().sum().maxCoeff();
 
-    // Both decompositions when balancing changes the matrix: balancing can also
-    // HURT (eigenvectors of the balanced matrix are accurate on its scale, and
-    // the scaling back, up to 4e6 on the phase-shift bridge, amplified their
-    // error: propagator 1.5e-3 off against 8.5e-9 unbalanced, V_out 24.33 V for
-    // 24.07 V). Keep the pair with the smaller error estimate κ₂·max(res, u):
-    // the residual on each pair's own time scale, amplified by the basis.
+    // add-exact-propagator-strategy D2 (review of slice 4): the pairs are
+    // judged by their own first-order propagator error over the horizon, not
+    // by κ₂ alone. Eigen's EigenSolver does not balance and its backward error
+    // is ε·‖Ã‖ in every entry: a g_off-limited winding row (4e14 /s) put that
+    // error into a slow mode (flyback output 1.3e-3 V for −9.2e-8 V), and a
+    // phase-shift bridge's conserved mode came out at λ = −0.0985 /s for
+    // 1.2e-13 (6.3e-4 per ms). Balancing helps some matrices and hurts others
+    // (the scaling back, up to 4e6, amplified the bridge's error). So: the plain
+    // pairs, refined while their defect is above kFine; the balanced pairs,
+    // refined, only when the plain ones miss both bars, and kept only when
+    // their score is under half the plain one's. A mode whose best pairs miss
+    // both bars gets no tier-1 step (typed in `reason`).
+    const Real H = std::max(h_max, horizon);
+    constexpr Real kFine = Real{1e-12};   // below this, keep the pairs as computed
     Eigen::EigenSolver<DenseMatrix> es(out.As);
     bool ok = es.info() == Eigen::Success;
     Eigen::MatrixXcd Vt;
+    PairQuality q;
     if (ok) {
         out.lambda = es.eigenvalues();
         Vt = es.eigenvectors();
-        out.kappa = kappa2(Vt);
+        q = pair_quality(out.As, Vt, out.lambda, H);
+        if (q.defect > kFine) {
+            out.refined = refine_pairs(out.As, Vt, out.lambda, H, q, kFine);
+        }
     }
-    DenseMatrix Ab = out.As;
-    const Vector sb = balance_in_place(Ab);
-    if ((sb.array() != Real{1}).any()) {
-        Eigen::EigenSolver<DenseMatrix> eb(Ab);
-        if (eb.info() == Eigen::Success) {
+    if (!ok || q.score() > Real{1}) {
+        DenseMatrix Ab = out.As;
+        const Vector sb = balance_in_place(Ab);
+        Eigen::EigenSolver<DenseMatrix> eb;
+        if ((sb.array() != Real{1}).any() && eb.compute(Ab).info() == Eigen::Success) {
             Eigen::MatrixXcd Vb = sb.cast<std::complex<Real>>().asDiagonal() * eb.eigenvectors();
-            Vb.colwise().normalize();   // κ₂ of unit columns, as without balancing
-            const Eigen::VectorXcd lb = eb.eigenvalues();
-            const Real kb = kappa2(Vb);
-            const auto est = [&](Real k, const Eigen::MatrixXcd& V, const Eigen::VectorXcd& l) {
-                return k * std::max(eigen_residual(out.As, V, l, h_max), kExactRoundoff);
-            };
-            if (!ok || est(kb, Vb, lb) < est(out.kappa, Vt, out.lambda)) {
+            Vb.colwise().normalize();
+            Eigen::VectorXcd lb = eb.eigenvalues();
+            PairQuality qb = pair_quality(out.As, Vb, lb, H);
+            const int rb = qb.defect > kFine ? refine_pairs(out.As, Vb, lb, H, qb, kFine) : 0;
+            if (!ok || qb.score() < Real{0.5} * q.score()) {
                 Vt = std::move(Vb);
-                out.lambda = lb;
-                out.kappa = kb;
+                out.lambda = std::move(lb);
+                q = qb;
+                out.refined = rb;
+                out.balanced = true;
                 ok = true;
             }
         }
     }
+    out.defect = q.defect;
+    out.backward = q.backward / kExactRoundoff;
+    if (ok) out.kappa = kappa2(Vt);   // unit columns (Eigen's, or normalised above)
     if (ok) {
-        if (kExactRoundoff * out.kappa <= kExactTierBound) {
+        if (kExactRoundoff * out.kappa <= kExactTierBound && q.score() <= Real{1}) {
             const Eigen::MatrixXcd Vt_inv = Vt.fullPivLu().inverse();
             const Eigen::MatrixXcd V = dinv.asDiagonal() * Vt;
             const Eigen::MatrixXcd V_inv = Vt_inv * out.d.asDiagonal();
@@ -250,8 +444,11 @@ inline std::string fmt_e(Real v) {
             out.zn_im.resize(n);
             return out;
         }
-        out.reason = "kappa2(V) = " + detail::fmt_e(out.kappa)
-                     + " > 1e-10/u (near-defective eigenbasis)";
+        out.reason = kExactRoundoff * out.kappa > kExactTierBound
+            ? "kappa2(V) = " + detail::fmt_e(out.kappa) + " > 1e-10/u (near-defective eigenbasis)"
+            : "propagator defect = " + detail::fmt_e(out.defect)
+                  + " > 1e-10 over the run horizon and backward error = "
+                  + detail::fmt_e(out.backward) + " u > 64 u (inaccurate eigenpairs)";
     } else {
         out.reason = "eigensolver failed";
     }

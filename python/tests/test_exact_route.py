@@ -235,15 +235,19 @@ def _paralleled_bridges(n):
 
 @pytest.mark.parametrize("mode", [None, "lcp"])
 def test_a_stiff_near_defective_mode_is_refused_as_cost(mode):
-    """Ten three-phase bridges paralleled on one bus: the mode at rest (all 30 diodes ON) has no
+    """Ten three-phase bridges paralleled on one bus: the mode at rest (all 30 diodes ON) had no
     exact step (kappa2(V) 2.3e6, ||A*h|| 1.5e6) and the numeric fallback made no progress past
-    1 us ("no meaningful progress"). engine='exact' now names it at its first segment
-    (add-complementarity-mode-selection DECISIONS #25)."""
+    1 us ("no meaningful progress"). engine='exact' names such a mode at its segment
+    (add-complementarity-mode-selection DECISIONS #25). Since the eigenpairs are refined and
+    judged by their propagator error (add-exact-propagator-strategy, review of slice 4), the
+    rest mode passes and a later mode of the run (ten identical bridges: clusters of repeated
+    eigenvalues) is the one refused, as inaccurate eigenpairs, still with no stiff fallback."""
     kw = {} if mode is None else {"mode_selection": mode}
     with pytest.raises(p.UnsupportedError) as ei:
         p.simulate(_paralleled_bridges(10), t_end=0.02, engine="exact", **kw)
     assert (ei.value.engine, ei.value.feature) == ("dsed", "cost")
-    assert "near-defective" in str(ei.value)
+    assert "near-defective" in str(ei.value) or "inaccurate eigenpairs" in str(ei.value)
+    assert "(stiff): no exact step" in str(ei.value)
 
 
 @pytest.mark.parametrize("engine", ["pwl", "trbdf2", "auto"])

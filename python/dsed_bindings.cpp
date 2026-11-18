@@ -757,6 +757,10 @@ py::dict exact_report_dict(const AdapterT& adapter,
         row["kappa"] = r.kappa;
         row["norm_Ah"] = r.norm_Ah;
         row["reason"] = r.reason;
+        row["defect"] = r.defect;
+        row["backward_error"] = r.backward;
+        row["refined"] = r.refined;
+        row["balanced"] = r.balanced;
         masks.append(row);
     }
     py::dict d;
@@ -833,6 +837,24 @@ inline py::dict mode_shadow_dict(const pulsim::dsed::ModeShadowReport& r,
 }
 
 void init_module(py::module_& m) {
+    // A stored sample broke the PWL diode law (PEDSimulator's end-of-run
+    // check): typed, with the diode and the first sample's time.
+    static py::object diode_law_exc = py::exception<void>(
+        m, "DiodeModeInconsistentError", PyExc_RuntimeError);
+    diode_law_exc.attr("device") = "";
+    diode_law_exc.attr("t_failed") = 0.0;
+    py::register_exception_translator([](std::exception_ptr pe) {
+        if (!pe) return;
+        try {
+            std::rethrow_exception(pe);
+        } catch (const pulsim::dsed::DiodeLawViolation& e) {
+            py::object inst = diode_law_exc(e.what());
+            inst.attr("device") = e.diode();
+            inst.attr("t_failed") = e.time();
+            PyErr_SetObject(diode_law_exc.ptr(), inst.ptr());
+        }
+    });
+
     // add-complementarity-mode-selection task 2: the dense Lemke solver,
     // for the oracle comparison against tests/oracles/lcp_reference.py.
     m.def("_lcp_lemke",
@@ -1133,6 +1155,10 @@ void init_module(py::module_& m) {
                 return self.A_matrix();
             },
             "Continuous-time A matrix for the active mask.")
+        .def("energy_scale",
+            [](const NativeAdapter& self) { return self.energy_scale(); },
+            "D's diagonal (sqrt of each state's C or L) for the active mask: "
+            "the energy coordinates the exact propagator's bounds are stated in.")
         .def("n_constraints", &NativeAdapter::n_constraints,
             "Rows of the dependent-state constraint K x = k on the active "
             "mask (a capacitor loop or an inductor cut-set; 0 otherwise).")
@@ -1283,7 +1309,7 @@ void init_module(py::module_& m) {
            Real mode_lcp_h_e,
            Real mode_guard_h_e,
            bool mode_guard_refuse,
-           int settle_round_cap) {
+           int settle_round_cap, Real diode_law_rel) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(dt_max));
@@ -1378,6 +1404,7 @@ void init_module(py::module_& m) {
             }
             sim.set_event_projection(enable_event_projection);
             sim.set_settle_round_cap(settle_round_cap);
+            sim.set_diode_law_check(diode_law_rel);
             std::vector<std::string> diode_names;
             if (mode_shadow_h_e > Real{0}) {
                 pulsim::pwl::DiodeEventState census(adapter.graph(), adapter.pool());
@@ -1453,6 +1480,7 @@ void init_module(py::module_& m) {
         py::arg("mode_guard_h_e") = Real{0},
         py::arg("mode_guard_refuse") = false,
         py::arg("settle_round_cap") = 64,
+        py::arg("diode_law_rel") = Real{1e-3},
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "

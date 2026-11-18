@@ -327,7 +327,7 @@ def test_consistent_initial_conditions_report_no_adjustment():
 
 
 # Integration batch 4: the zero-band settle can keep a diode in a mode its
-# law forbids; check_diode_modes turns that silent answer into a named error.
+# law forbids; the kernel's diode-law check turns that silent answer into a named error.
 def _boost(v_th, R):
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 12.0)

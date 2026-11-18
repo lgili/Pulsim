@@ -55,6 +55,7 @@
 #include <cstddef>
 #include <functional>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -262,6 +263,21 @@ struct SchedulerDiode {
     }
 };
 
+/// A stored sample breaks the PWL diode law: an ON diode carries reverse
+/// current, or an OFF one is forward-biased past its threshold, by more
+/// than `rel` of that diode's peak over the run (PEDSimulator::check_diode_law,
+/// run at the end of every simulate(); every caller gets it, Python maps it to DiodeModeInconsistentError).
+class DiodeLawViolation : public std::runtime_error {
+public:
+    DiodeLawViolation(std::string diode, Real t, const std::string& what)
+        : std::runtime_error(what), diode_(std::move(diode)), t_(t) {}
+    [[nodiscard]] const std::string& diode() const noexcept { return diode_; }
+    [[nodiscard]] Real time() const noexcept { return t_; }
+private:
+    std::string diode_;
+    Real t_;
+};
+
 /// Whether ``SwitchFn`` has a ``next_edge_after`` fast path.
 template <class SwitchFn>
 concept HasNextEdge = requires(const SwitchFn& fn, Real t) {
@@ -337,6 +353,9 @@ public:
         Real h = dt_init_;
         if constexpr (requires { system_.set_max_step(dt_max_); }) {
             system_.set_max_step(dt_max_);
+        }
+        if constexpr (requires { system_.set_horizon(t_end); }) {
+            system_.set_horizon(t_end);
         }
         MaskT mask = effective_mask_(switch_fn_(t));
         system_.set_mask(mask);
@@ -667,6 +686,11 @@ public:
                             step_mask,
                             step_fired ? &x_pre_event : nullptr);
         }
+        // Only a projected run claims consistent modes: a period map run without
+        // projection (periodic_steady_state, the orbit kernel) starts from Newton
+        // trial states and is judged by its own residual instead.
+        if constexpr (HasNodePairVoltage<System>)
+            if (enable_event_projection_) check_diode_law(result);
 
         const auto t1_wall = clock::now();
         result.cpu_time_seconds =
@@ -1365,6 +1389,7 @@ private:
         // doubler's D2, ON at −1.05e-8 V and −2.9e-8 V where the LCP put it (its tol_w
         // 1.2e-8 V), was flipped and chattered 32 times. The forward converter's
         // rectifier is off by 0.0137 V.
+        // (A reverse-current bound in its place failed both ways, DECISIONS #35.)
         Real scale = Real{1};
         if constexpr (requires { system_.port_scale_full(Vector{}); })
             scale = system_.port_scale_full(Vector{}).vscale;
@@ -1409,6 +1434,69 @@ private:
                 system_.reinit_to_constraint(t, held_tmp_);
         }
     }
+
+public:
+    /// Relative threshold of the end-of-run diode-law check (0: off).
+    void set_diode_law_check(Real rel) noexcept { law_rel_ = rel; }
+
+    /// Every stored sample against the PWL diode law under its own mask: ON
+    /// with i = g_on·(v − V_f) < −max(rel·i_pk, band·g_on), or OFF with
+    /// v > V_on + max(rel·v_pk, band), band = zero_band_tol_ of the sample
+    /// (the rule python's check_diode_modes applied, moved here so a C++
+    /// caller is covered too). Throws DiodeLawViolation naming the first.
+    void check_diode_law(const PEDResult<MaskT>& result)
+        requires HasNodePairVoltage<System> {
+        if (!has_diodes_ || !(law_rel_ > Real{0}) || diodes_.empty()) return;
+        const std::size_t n = result.times.size(), nd = diodes_.size();
+        std::vector<Real> v(n * nd), band(n);
+        std::vector<Real> ipk(nd, Real{1e-12}), vpk(nd, Real{0});
+        for (std::size_t k = 0; k < n; ++k) {
+            const MaskT& m = result.sample_masks[k];
+            if (!(system_.current_mask() == m)) system_.set_mask(m);
+            const Real t = result.times[k];
+            const Vector& x = result.states[k];
+            band[k] = zero_band_tol_(t, x);
+            for (std::size_t j = 0; j < nd; ++j) {
+                const auto& d = diodes_[j];
+                const Real vd = system_.node_pair_voltage(d.from, d.to, t, x);
+                v[k * nd + j] = vd;
+                const bool on = m.get(d.switch_idx);
+                const Real i = on ? d.g_on * (vd - d.V_f) : d.g_off * vd;
+                ipk[j] = std::max(ipk[j], std::abs(i));
+                if (!on) vpk[j] = std::max(vpk[j], std::abs(vd));
+            }
+        }
+        for (std::size_t j = 0; j < nd; ++j) {
+            const auto& d = diodes_[j];
+            const Real thr = std::max(d.V_th, d.V_f);
+            const Real vp = std::max({vpk[j], thr, Real{1e-12}});
+            std::size_t bad = 0, first = n;
+            for (std::size_t k = 0; k < n; ++k) {
+                const bool on = result.sample_masks[k].get(d.switch_idx);
+                const Real vd = v[k * nd + j];
+                const bool b = on
+                    ? d.g_on * (vd - d.V_f) < -std::max(law_rel_ * ipk[j], band[k] * d.g_on)
+                    : vd > thr + std::max(law_rel_ * vp, band[k]);
+                if (b) { ++bad; if (first == n) first = k; }
+            }
+            if (bad == 0) continue;
+            const bool on = result.sample_masks[first].get(d.switch_idx);
+            const Real vd = v[first * nd + j];
+            const std::string what = on
+                ? "ON while carrying " + sci_(d.g_on * (vd - d.V_f)) + " A"
+                : "OFF while forward-biased by " + sci_(vd) + " V";
+            throw DiodeLawViolation(
+                d.label, result.times[first],
+                "simulate(engine='dsed'): diode '" + d.label + "' is " + what + " at t = "
+                + sci_(result.times[first]) + " s (" + std::to_string(bad) + " samples break "
+                "the diode law): the event settle chose a wrong mode, and the run would be "
+                "silently wrong. Give the diode a small threshold band (V_th = 1e-2 V), or use "
+                "engine='pwl' or 'trbdf2'.");
+        }
+    }
+
+private:
+    Real law_rel_ = Real{1e-3};
 
     /// The zero band with a floor on the circuit's voltage scale (sources
     /// included): from rest every node is 0 V and zero_band_tol_ is 0, so a

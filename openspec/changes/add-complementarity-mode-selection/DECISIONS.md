@@ -824,6 +824,36 @@ choices it did not pin.
 
     → Reverse: each block is local to its function.
 
+35. **The diode-law check is in the kernel; the resettle band stays a voltage
+    band (2026-11-18).**
+    - `PEDSimulator::check_diode_law` runs at the end of every projected
+      `simulate()`. It applies the same rule that python's
+      `check_diode_modes` used, over every stored sample under its own mask.
+      It throws `DiodeLawViolation`, which Python maps to the typed
+      `DiodeModeInconsistentError` (`.device`, `.t_failed`).
+      `run_ped_native_builder(diode_law_rel=…)` sets the threshold; 0 turns
+      it off.
+    - Unprojected runs are not checked. A period map
+      (`periodic_steady_state`, the orbit kernel) starts from Newton trial
+      states and is judged by its own residual. Checked there, the
+      zero-band boost failed on one event sample (-0.57 A at 10 µs).
+    - The kernel check reaches callers the Python check never saw.
+    - A per-state reverse-current bound for ON diodes was tried twice and
+      failed both times:
+      - **The LCP's own tol_i.** Its tol_w·C_max/h_e term is about 5 A at
+        h_e = 2e-12 s on the 20 µs flyback. Under `mode_selection='lcp'` it
+        kept Drect ON through -1.3 A over 540 samples, and the check caught
+        it.
+      - **1e-6·iscale.** The doubler's D2 chattered 32 times again, and the
+        fuzz bridge1 went from 11 to 13 events.
+    - The band therefore stays 1e-6 of the circuit's voltage scale. For an
+      ON diode, current and voltage differ only by g_on, so a current
+      bound is the same rule with a different scale.
+    - The fuzz (12 configs × 21 runs) is unchanged: 0 errors and one mode
+      sequence per config. The doubler takes 19 events on both selections.
+
+    → Reverse: drop the `check_diode_law` call in `simulate()`.
+
 ## Slice 4: the fixed engine (2026-11-13 … 2026-11-17)
 
 Numbered F1, F2, … so they do not collide with #22–#33 of

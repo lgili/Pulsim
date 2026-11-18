@@ -172,6 +172,9 @@ public:
         if constexpr (requires { system_.set_max_step(dt_max_); }) {
             system_.set_max_step(dt_max_);
         }
+        if constexpr (requires { system_.set_horizon(t_end); }) {
+            system_.set_horizon(t_end);
+        }
         Real h_rk45 = dt_init_;
 
         MaskT mask = switch_fn_(t);

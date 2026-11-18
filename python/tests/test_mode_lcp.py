@@ -62,18 +62,17 @@ def _half_wave_rl():
 
 def _sim(b, t_end, fn=None, guard=True, **kw):
     """guard=False: the settle alone, with BOTH guards off (the kernel's
-    MODE_GUARD and the stored-sample check_diode_modes, which would name
+    MODE_GUARD and the stored-sample diode-law check, which would name
     the wrong mode instead of returning it)."""
     if fn is not None:
         kw["switch_fn"] = fn
-    check = DD.check_diode_modes
     DD.MODE_GUARD = guard
     if not guard:
-        DD.check_diode_modes = lambda *a, **k: None
+        DD.DIODE_LAW_REL = 0.0
     try:
         return p.simulate(b, t_end=t_end, engine="dsed", **kw)
     finally:
-        DD.MODE_GUARD, DD.check_diode_modes = True, check
+        DD.MODE_GUARD, DD.DIODE_LAW_REL = True, 1e-3
 
 
 def _end(r, node):
@@ -341,15 +340,18 @@ def test_a_widened_pass_does_not_release_a_diode_before_its_own_turn_off(mode):
 
 @pytest.mark.parametrize("cap", [64, 1])
 def test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp(cap, monkeypatch):
-    """DECISIONS #25. Five bridges paralleled on one 2 mF || 5 ohm bus: at rest every diode
-    pair fights over the bus, and on macOS the settle raised "did not settle after 64
-    rounds" at t = 1.8e-26 s (on Linux / Windows the same fight settles: 0 caps, a
-    rounding outcome). With the guard on, such an event is decided by the LCP from the
-    held state. The engine's own cap at 1 round (the test hook) throws at any event
-    where a diode flips, so the give-up is forced on any platform; either way the result is within 1e-3 V of pwl extrapolated in dt
-    (measured 1.5e-4 V), and the forced cap is counted."""
+    """DECISIONS #25. Bridges paralleled on one 2 mF || 5 ohm bus: at rest every diode
+    pair fights over the bus, and on macOS five of them made the settle raise "did not
+    settle after 64 rounds" at t = 1.8e-26 s (on Linux / Windows the same fight settles:
+    0 caps, a rounding outcome). With the guard on, such an event is decided by the LCP
+    from the held state. The engine's own cap at 1 round (the test hook) throws at any
+    event where a diode flips, so the give-up is forced on any platform; either way the
+    result is within 1e-3 V of pwl extrapolated in dt (measured 1.1e-4 V), and the forced
+    cap is counted. Four bridges since the propagator is judged by its error
+    (add-exact-propagator-strategy, review of slice 4): five reach a mode at 8.17 ms whose
+    eigenpairs carry a propagator defect of 5.2e-4 over the run, now a typed refusal."""
     monkeypatch.setattr(DD, "SETTLE_ROUND_CAP", cap)
-    t_end, n = 0.02, 5
+    t_end, n = 0.02, 4
     tg = np.linspace(0.0, t_end, 2001)
 
     def bank():

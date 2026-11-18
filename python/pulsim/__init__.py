@@ -2676,7 +2676,6 @@ def simulate(
             pass
         _auto_check_voltage_sanity(_dsed_res, builder,
                                     voltage_sanity_factor)
-        _dsed.check_diode_modes(_dsed_res, builder)
         # on_impulse on the exact engine (its dependent-state projections,
         # recorded after the run): 'error' refuses the run as pwl's kernel
         # does at the event, 'warn' warns.

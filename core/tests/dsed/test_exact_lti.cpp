@@ -501,6 +501,66 @@ TEST_CASE("Exact: a stiff winding row does not leak into the slow modes (balanci
     }
 }
 
+TEST_CASE("Exact: a near-conserved bridge mode is refined to the matrix's exponential",
+          "[v2][dsed][exact_lti]") {
+    // examples/phase_shift_full_bridge.yaml at phi = pi/2, the doc run's mode
+    // with LS_B and D_LS_B ON (adapter A and energy scale). Its slowest mode is
+    // conserved (mpmath: lambda = 1.2e-13); Eigen's pairs put it at -0.0985 /s
+    // and the balanced pairs at +0.0019 /s, a propagator 6.3e-4 / 1.3e-5 off per
+    // ms. The refined pairs are within 1e-10 of mpmath's expm of this matrix.
+    DenseMatrix A(5, 5);
+    A << -1000.0, 0.0, 0.0, 0.0, 10000.0,
+         0.0, -139198218262805.42, -278.39643652533255, 1102449888641419.0, -0.19713340198494406,
+         0.0, -139198218262805.45, -278.3964365253325, 1102449888641418.8, -0.197133401984944,
+         0.0, 275612472160354.72, 551.2249443201582, -2282850779510009.0, 0.4082055293627629,
+         -10000.0, 0.0, 0.0, 0.0, -9999999999999.994;
+    const Vector scale = (Vector(5) << 0.01, 0.001, 0.006324555320336759,
+                          0.0031622776601683794, 0.01).finished();
+    const Vector x0 = (Vector(5) << 44.721359549995796, 447.2135954999579, 70.71067811865476,
+                       141.4213562373095, 44.721359549995796).finished();   // unit energy
+    const Vector ref = (Vector(5) << 16.452068611610981, 7.5300583476036379e-10,
+                        -376.50291738055537, -2.2105071865475379e-24,
+                        -1.6452068613256197e-8).finished();
+    const auto e = make_exact_lti(A, Vector::Zero(5), scale, 1e-6, 1e-3);
+    REQUIRE(e.tier == 1);
+    REQUIRE_FALSE(e.balanced);
+    REQUIRE(e.refined >= 1);
+    REQUIRE(e.defect <= kExactTierBound);
+    Real lmin = std::numeric_limits<Real>::infinity();
+    for (Eigen::Index i = 0; i < e.lambda.size(); ++i) lmin = std::min(lmin, std::abs(e.lambda[i]));
+    REQUIRE(lmin < 1e-6);
+    Vector x = x0, out(5);
+    for (int k = 0; k < 1000; ++k) {
+        exact_advance_into(e, x, 1e-6, out);
+        x = out;
+    }
+    for (int i = 0; i < 5; ++i) REQUIRE(std::abs(x[i] - ref[i]) * scale[i] <= 1e-10);
+}
+
+TEST_CASE("Exact: pair_quality states the propagator error of a wrong eigenvalue",
+          "[v2][dsed][exact_lti]") {
+    // A = diag(0, -1). Pairs with the conserved eigenvalue at delta instead of 0
+    // propagate e^{delta H} for 1: the first-order defect is delta·H.
+    DenseMatrix A = DenseMatrix::Zero(2, 2);
+    A(1, 1) = -1.0;
+    const Eigen::MatrixXcd V = Eigen::MatrixXcd::Identity(2, 2);
+    Eigen::VectorXcd lam(2);
+    lam << std::complex<Real>{1e-3, 0}, std::complex<Real>{-1, 0};
+    const auto bad = pair_quality(A, V, lam, 2.0);
+    REQUIRE(bad.defect == Approx(2e-3).epsilon(0.01));
+    REQUIRE(bad.score() > 1.0);
+    lam[0] = 0.0;
+    const auto good = pair_quality(A, V, lam, 2.0);
+    REQUIRE(good.defect == 0.0);
+    REQUIRE(good.score() <= 1.0);
+    // a fast pair's error is damped: the same 1e-3 on lambda = -1e6 over H = 2
+    lam[0] = 0.0;
+    DenseMatrix F = DenseMatrix::Zero(2, 2);
+    F(1, 1) = -1e6;
+    lam[1] = std::complex<Real>{-1e6 + 1e-3, 0};
+    REQUIRE(pair_quality(F, V, lam, 2.0).defect < 1e-14);
+}
+
 TEST_CASE("Exact: balancing leaves a balanced matrix untouched",
           "[v2][dsed][exact_lti]") {
     DenseMatrix M(2, 2);

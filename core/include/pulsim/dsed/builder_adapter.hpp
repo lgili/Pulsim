@@ -431,6 +431,20 @@ public:
         }
     }
 
+    /// The run's length: tier 1's propagator_defect is stated over it
+    /// (an eigenvalue error of a conserved mode grows with it). The
+    /// scheduler sets t_end; changing it rebuilds the propagators lazily.
+    void set_horizon(Real T) {
+        if (T == horizon_) {
+            return;
+        }
+        horizon_ = T;
+        for (auto& [m, e] : mask_cache_) {
+            e.exact_built = false;
+            e.exact = ExactLTI{};
+        }
+    }
+
     /// Consistent reinitialisation onto the current mode's slow
     /// manifold (event_projection.hpp), through the cached tier-1
     /// basis when there is one (no eigendecomposition per event).
@@ -637,6 +651,10 @@ public:
         Real kappa;
         Real norm_Ah;
         std::string reason;
+        Real defect;
+        Real backward;
+        int refined;
+        bool balanced;
     };
     [[nodiscard]] std::vector<ExactReportRow> exact_report() const {
         std::vector<ExactReportRow> rows;
@@ -644,7 +662,8 @@ public:
             if (e.exact_built) {
                 rows.push_back({m, e.exact.tier, e.exact.kappa,
                                 e.exact.norm_A1 * h_max_,
-                                e.exact.reason});
+                                e.exact.reason, e.exact.defect, e.exact.backward,
+                                e.exact.refined, e.exact.balanced});
             }
         }
         return rows;
@@ -783,7 +802,7 @@ private:
         if (!has_dynamic_sources_) {
             entry.exact_b = entry.b_constant;
             entry.exact = make_exact_lti(entry.A, entry.exact_b,
-                                         energy_scale_(entry, 0), h_max_);
+                                         energy_scale_(entry, 0), h_max_, horizon_);
             ++n_eig_;
         } else if (!b_extra_fn_) {
             // sine pairs augmented (voltage or current); PWM / pulse /
@@ -794,7 +813,7 @@ private:
             } else {
                 entry.exact_b = entry.b_constant;
                 entry.exact = make_exact_lti(entry.A, entry.exact_b,
-                                             energy_scale_(entry, 0), h_max_);
+                                             energy_scale_(entry, 0), h_max_, horizon_);
             }
             ++n_eig_;
             const auto m = static_cast<Index>(pwl_sources_.size());
@@ -1041,7 +1060,7 @@ private:
             entry.b_constant + entry.b_projection * b_dc_mna;
 
         entry.exact = make_exact_lti(A_aug, b_aug,
-                                     energy_scale_(entry, 2 * k), h_max_);
+                                     energy_scale_(entry, 2 * k), h_max_, horizon_);
         entry.exact_b = std::move(b_aug);
         entry.aug_omegas = std::move(omegas);
     }
@@ -1402,6 +1421,8 @@ private:
     /// Memoised on (t, left_by): the locator and the judges read it once per
     /// diode at the same instant (boost_pfc: 443022 predicate evaluations,
     /// each walking the device pool). A user b_extra_fn is never memoised.
+    /// The reference is to ONE buffer: copy it before a second call (f(t1) −
+    /// f(t2) through two references reads 0).
     [[nodiscard]] const Vector& build_time_varying_b_extra_(Real t, Real left_by = Real{0}) const {
         if (bx_valid_ && t == bx_t_ && left_by == bx_left_) return bx_;
         Vector& b = bx_;
@@ -1499,6 +1520,7 @@ private:
     mutable std::unordered_map<MaskT, int> mode_ids_;
     mutable LTIEntry* current_entry_ = nullptr;
     Real h_max_ = Real{1e-5};
+    Real horizon_ = Real{0};
     mutable std::size_t n_eig_ = 0;
     mutable Vector aug_in_, aug_out_;
 };
