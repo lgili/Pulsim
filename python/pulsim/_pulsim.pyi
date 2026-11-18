@@ -2705,6 +2705,10 @@ class CxxChainPwmGate:
     """
     def __call__(self, t: float) -> SwitchStateMask:
         ...
+    def next_edge_after(self, t: float) -> float:
+        """
+        First gate edge strictly after t under the duties held now (period starts and OFF thresholds); stale after a tick.
+        """
 class CxxChainBExtra:
     """
     A control graph's driven-source b_extra_fn(t), with the instants its value may jump (next_jump_after), both in C++.

@@ -55,10 +55,11 @@ inline SwitchFnAdapter adapt_switch_fn(const pybind11::object& obj) {
         a.fn = [p](Real t) { return (*p)(t); };
         a.next_edge = [p](Real t) { return p->next_edge_after(t); };
     } else if (py::isinstance<pulsim::blockchain::ChainPwmGate>(obj)) {
-        // A control graph's PWM gate: C++, no edge oracle (its duty
-        // changes at the graph's ticks).
+        // A control graph's PWM gate: C++; its edges under the duties
+        // held now (engines re-query after every tick).
         auto* p = obj.cast<pulsim::blockchain::ChainPwmGate*>();
         a.fn = [p](Real t) { return (*p)(t); };
+        a.next_edge = [p](Real t) { return p->next_edge_after(t); };
     } else {
         a.fn = obj.cast<std::function<
             pulsim::topology::SwitchStateMask(Real)>>();

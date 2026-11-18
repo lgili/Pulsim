@@ -203,6 +203,16 @@ limitations); `discontinuity_restart=True` does not restart on them
 (1.06e-4 / 1.05e-5). Use a state-time chain with `drive_source` for an
 exact hold.
 
+**Gate edges.** The gate of `bind_pi_to_switch` (and any
+`make_pwm_gate`) declares its edges (`gate.next_edge_after(t)`: period
+starts and the OFF threshold under the duties held now). `trbdf2` lands
+on them; `pwl` splits at them with `discontinuity_restart=True,
+enable_substep_state_correction=True`. Without the split `pwl` samples
+the gate on its grid, so the duty moves in steps of `dt/T`. Closed-loop
+buck against an independent reference (max |v(kT) - ref| / span,
+`dt = T/20`): `pwl` 3.6e-2, with the split 1.4e-3, and 1.8e-5 for a
+state-time chain with the same gate; `trbdf2` default 4.2e-5.
+
 ### Migration: helpers and C blocks (2.1)
 
 | Before | Now |
@@ -274,5 +284,5 @@ snapshot state `x(t_end)`, where the uninterrupted `pwl` run used
 ## Not yet
 
 Continuous-rate blocks solved with the circuit, tick events on the
-unified event queue, modulators and comparator state events, and graph
+unified event queue, comparator state events, and graph
 state in the solver snapshot (tasks 6–7 of `add-compiled-control-graph`).

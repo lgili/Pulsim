@@ -16,19 +16,20 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 
 | configuration | agree | disagree | error | refused | unverified |
 |---|---:|---:|---:|---:|---:|
-| pwl | 81 | 24 | 2 | 0 | 1 |
-| pwl+restart | 87 | 18 | 2 | 0 | 1 |
-| pwl+split | 88 | 17 | 2 | 0 | 1 |
-| trbdf2 | 102 | 3 | 2 | 0 | 1 |
+| pwl | 80 | 25 | 1 | 0 | 2 |
+| pwl+restart | 86 | 19 | 1 | 0 | 2 |
+| pwl+split | 88 | 17 | 1 | 0 | 2 |
+| trbdf2 | 102 | 3 | 1 | 0 | 2 |
 | dsed | 39 | 16 | 12 | 40 | 1 |
 
 ### Fixed engine: restart rule and split (circuits where any of the three does not agree)
 
 | circuit | tol | pwl | pwl+restart | pwl+split |
 |---|---:|---:|---:|---:|
-| closed_loop/cl_boost_pi.yaml | 0.02 | error | error | error |
-| closed_loop/ll14_buck_closed_loop.yaml | 0.02 | 0.287 | 0.212 | 0.212 |
-| closed_loop/ll15_boost_closed_loop.yaml | 0.02 | 0.27 | 0.0654 | 0.0654 |
+| closed_loop/cl_boost_pi.yaml | 0.02 | 0.0582 | 0.0579 | 8.56e-05 |
+| closed_loop/ll14_buck_closed_loop.yaml | 0.02 | 0.29 | 0.213 | 0.178 |
+| closed_loop/ll15_boost_closed_loop.yaml | 0.02 | 0.3 | 0.0663 | 0.0484 |
+| closed_loop/ll16_flyback_closed_loop.yaml | 0.02 | unverified | unverified | unverified |
 | linear/current_source_rl_step.yaml | 0.001 | 0.00577 | 3.99e-05 | 3.99e-05 |
 | linear/rl_natural_response.yaml | 0.001 | 0.00577 | 3.98e-05 | 3.98e-05 |
 | magnetics/half_bridge_transformer_dc.yaml | 0.02 | 0.101 | 0.00113 | 0.00113 |
@@ -73,14 +74,16 @@ cell disagrees by edge timing; edge err above it: the states differ.
 
 | circuit | config | tol | err_rms | worst observable | edge err | excluded | timing (s) | timing (steps) |
 |---|---|---:|---:|---|---:|---:|---:|---:|
-| closed_loop/ll14_buck_closed_loop.yaml | pwl | 0.02 | 0.287 | V(sw) | undersampled | 11.7% | 4.9e-07 | 0.98 |
-| closed_loop/ll14_buck_closed_loop.yaml | pwl+restart | 0.02 | 0.212 | V(sw) | 0.156 | 10.0% | 9.9e-07 | 2 |
-| closed_loop/ll14_buck_closed_loop.yaml | pwl+split | 0.02 | 0.212 | V(sw) | 0.156 | 10.0% | 9.9e-07 | 2 |
-| closed_loop/ll14_buck_closed_loop.yaml | trbdf2 | 0.001 | 0.16 | V(sw) | undersampled | 15.2% | 1.9e-06 |  |
-| closed_loop/ll15_boost_closed_loop.yaml | pwl | 0.02 | 0.27 | V(sw) | undersampled | 20.0% | 2.5e-07 | 0.5 |
-| closed_loop/ll15_boost_closed_loop.yaml | pwl+restart | 0.02 | 0.0654 | V(sw) | undersampled | 20.0% | 7.5e-07 | 1.5 |
-| closed_loop/ll15_boost_closed_loop.yaml | pwl+split | 0.02 | 0.0654 | V(sw) | undersampled | 20.0% | 7.5e-07 | 1.5 |
-| closed_loop/ll16_flyback_closed_loop.yaml | trbdf2 | 0.001 | 0.149 | V(drain) | undersampled | 22.8% | 1.9e-07 |  |
+| closed_loop/cl_boost_pi.yaml | pwl | 0.02 | 0.0582 | V(out) | undersampled | 16.4% | 1.5e-06 | 2.9 |
+| closed_loop/cl_boost_pi.yaml | pwl+restart | 0.02 | 0.0579 | V(out) | undersampled | 12.2% | 1.6e-06 | 3.2 |
+| closed_loop/ll14_buck_closed_loop.yaml | pwl | 0.02 | 0.29 | V(sw) | undersampled | 11.7% | 4.9e-07 | 0.98 |
+| closed_loop/ll14_buck_closed_loop.yaml | pwl+restart | 0.02 | 0.213 | V(sw) | 0.157 | 10.0% | 9.9e-07 | 2 |
+| closed_loop/ll14_buck_closed_loop.yaml | pwl+split | 0.02 | 0.178 | V(sw) | 0.117 | 10.0% | 5e-07 | 1 |
+| closed_loop/ll14_buck_closed_loop.yaml | trbdf2 | 0.001 | 0.214 | V(sw) | undersampled | 21.5% | 4.2e-06 |  |
+| closed_loop/ll15_boost_closed_loop.yaml | pwl | 0.02 | 0.3 | V(sw) | undersampled | 20.0% | 2.5e-07 | 0.5 |
+| closed_loop/ll15_boost_closed_loop.yaml | pwl+restart | 0.02 | 0.0663 | V(sw) | undersampled | 20.0% | 7.5e-07 | 1.5 |
+| closed_loop/ll15_boost_closed_loop.yaml | pwl+split | 0.02 | 0.0484 | V(sw) | chatter | 5.0% | unmatched | unmatched |
+| closed_loop/ll15_boost_closed_loop.yaml | trbdf2 | 0.001 | 0.00124 | V(sw) | 0.00126 | 5.0% | 2e-07 |  |
 | linear/current_source_rl_step.yaml | pwl | 0.001 | 0.00577 | V(out) | 0.00577 | 0.0% |  |  |
 | linear/ll02_rc_pulse_charge.yaml | dsed | 0.001 | 0.00114 | V(in) | 4.06e-07 | 0.0% |  |  |
 | linear/ll03_rl_step.yaml | dsed | 0.001 | 0.00161 | V(in) | 0.000807 | 0.0% |  |  |
@@ -156,12 +159,12 @@ cell disagrees by edge timing; edge err above it: the states differ.
 
 | circuit | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
-| closed_loop/cl_boost_pi.yaml | error | error | error | error | refused |
-| closed_loop/cl_buck_aggressive_pi.yaml | 0.00662 | 0.00709 | 0.0071 | 7.93e-05 | refused |
-| closed_loop/cl_buck_pi.yaml | 0.0121 | 0.0123 | 0.0123 | 8.54e-05 | refused |
-| closed_loop/ll14_buck_closed_loop.yaml | 0.287 | 0.212 | 0.212 | 0.16 | refused |
-| closed_loop/ll15_boost_closed_loop.yaml | 0.27 | 0.0654 | 0.0654 | 0.000393 | refused |
-| closed_loop/ll16_flyback_closed_loop.yaml | 0.00742 | 0.00742 | 0.00742 | 0.149 | refused |
+| closed_loop/cl_boost_pi.yaml | 0.0582 | 0.0579 | 8.56e-05 | 6.86e-05 | refused |
+| closed_loop/cl_buck_aggressive_pi.yaml | 0.00662 | 0.00709 | 0.00404 | 8.12e-05 | refused |
+| closed_loop/cl_buck_pi.yaml | 0.0121 | 0.0123 | 0.00049 | 8.54e-05 | refused |
+| closed_loop/ll14_buck_closed_loop.yaml | 0.29 | 0.213 | 0.178 | 0.214 | refused |
+| closed_loop/ll15_boost_closed_loop.yaml | 0.3 | 0.0663 | 0.0484 | 0.00124 | refused |
+| closed_loop/ll16_flyback_closed_loop.yaml | unverified | unverified | unverified | unverified | refused |
 | diodes/back_to_back_diodes_sine.yaml | 1.14e-05 | 1.14e-05 | 1.14e-05 | 0 | refused |
 | diodes/diode_bridge_rectifier.yaml | 0.000216 | 0.000177 | 0.000173 | 3.22e-05 | 6.59e-06 |
 | diodes/diode_clamp_overvoltage.yaml | 0.00565 | 0.00565 | 0.00565 | 0 | refused |
@@ -486,3 +489,24 @@ peak switch current 1.3 mA). Moved cells: ll09 trbdf2 0.00132 ->
 2.6e-4 and trbdf2 0.00244 -> 3.5e-5 (agree), CHB pwl 0.0142 -> 0.0274
 (edge timing; edge error 1.4e-8), flying capacitor pwl 0.0657 ->
 0.0466 and dsed 0.249 -> 0.287, MMC pwl 0.0255 -> 0.0268. No ngspice deck exists for these five.
+
+**Closed loops: who is right (G23 of add-compiled-control-graph).**
+trbdf2. Against an independent reference outside pulsim (expm flow per
+PWL mode / Radau for the Shockley diode, the PI law re-typed, ticks at
+kT: `openspec/changes/add-compiled-control-graph/probes/closed_loop_reference.py`)
+trbdf2 rtol 1e-10 meets v(kT) within 1.1e-7 of span on the five
+non-suspect circuits and pwl converges to it at first order (label time).
+The loop's gate now declares its edges, so trbdf2 lands them (`cl_boost_pi`
+completes: its first 0.28 ns pulse had capped every later step) and
+pwl+split splits at them (cl_buck_pi 0.0123 -> 4.9e-4). ll14 / ll15
+stay `disagree` on V(sw) only: trbdf2 records no post-edge sample at a
+rising edge that is also a control tick (KNOWN_LIMITATIONS), so V(sw) of
+the reference does not converge with rtol; their states agree. ll15
+trbdf2 moved agree 3.9e-4 -> disagree 1.24e-3 for that reason. ll16 is
+`suspect` (not a flyback). Moved cells: cl_boost_pi error -> 0.0582 /
+0.0579 / 8.56e-5 / 6.86e-5; cl_buck_aggressive_pi pwl+split 0.0071 ->
+0.00404, trbdf2 7.93e-5 -> 8.12e-5; cl_buck_pi pwl+split 0.0123 ->
+4.9e-4; ll14 0.287 / 0.212 / 0.212 / 0.16 -> 0.29 / 0.213 / 0.178 /
+0.214; ll15 0.27 / 0.0654 / 0.0654 / 3.9e-4 -> 0.3 / 0.0663 / 0.0484 /
+0.00124 (pwl / pwl+restart / pwl+split / trbdf2). Plain pwl and
+pwl+restart moved only through the new reference.

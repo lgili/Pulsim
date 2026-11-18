@@ -3179,7 +3179,9 @@ void init_module(py::module_& m) {
                     cpp_fns.emplace_back(
                         fn.cast<sources::SwitchSchedule>());
                 } else if (py::isinstance<pulsim::blockchain::ChainPwmGate>(fn)) {
-                    cpp_fns.emplace_back(fn.cast<pulsim::blockchain::ChainPwmGate>());
+                    const auto g = fn.cast<pulsim::blockchain::ChainPwmGate>();
+                    cpp_fns.emplace_back(sources::SwitchSchedule{
+                        g, [g](Real t) { return g.next_edge_after(t); }});
                 } else {
                     cpp_fns.emplace_back(fn.cast<SwitchScheduleFn>());
                 }
@@ -4148,7 +4150,10 @@ void init_module(py::module_& m) {
         "A PWM switch_fn whose duty is a control-graph signal; every "
         "engine calls it in C++.")
         .def("__call__", [](const ChainPwmGate& self, Real t) { return self(t); },
-            py::arg("t"));
+            py::arg("t"))
+        .def("next_edge_after", &ChainPwmGate::next_edge_after, py::arg("t"),
+            "First gate edge strictly after t under the duties held now "
+            "(period starts and OFF thresholds); stale after a tick.");
 
     py::class_<ChainBExtra>(m, "CxxChainBExtra",
         "A control graph's driven-source b_extra_fn(t), with the instants "

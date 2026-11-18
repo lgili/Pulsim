@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Control graph: the closed-loop gate declares its edges (G23)
+
+* **Fixed** `trbdf2` ground `cl_boost_pi` to `max_steps` (5.59 ms of
+  30 ms): the loop's gate hid its edges, the engine learned them by
+  sampling, and the first 0.28 ns pulse capped every later step. The
+  gate (`CxxChainPwmGate.next_edge_after`) now declares them, also
+  through `make_combined_switch_fn`: `trbdf2` lands on them, `pwl` with
+  `discontinuity_restart=True, enable_substep_state_correction=True`
+  splits at them (closed-loop buck 4.5e-2 -> 1.4e-3 of the span against
+  an independent reference). Plain `pwl` and `pwl` + restart are
+  unchanged bit for bit; `trbdf2` closed-loop results move within its
+  tolerance.
+* **Changed** reference cells: `cl_boost_pi` has a reference;
+  `ll16_flyback_closed_loop` is `unverified` (not a flyback); `ll14` /
+  `ll15` disagree on `V(sw)` only, named in KNOWN_LIMITATIONS.
+
 ### Control graph: C blocks on trbdf2, resume, review fixes (task 9.3)
 
 * **Added** `engine="trbdf2"` runs C blocks (the state-time law: it

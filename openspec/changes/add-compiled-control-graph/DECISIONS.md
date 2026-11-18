@@ -339,6 +339,71 @@ Each entry: question → option taken → evidence → how to reverse.
   has nothing to carry; a snapshot-borne control state needs the
   `SolverSnapshot` field listed under the 6.1 hook below.
 
+## G23. The loop gate declares its edges; the closed-loop cells diagnosed
+
+- **Question.** Since G17 the six `closed_loop/*` circuits ran on
+  trbdf2 and three disagreed with it (frozen undiagnosed); `cl_boost_pi`
+  had no reference (trbdf2 hit `max_steps`). Which side is wrong?
+- **Independent reference.** `probes/closed_loop_reference.py`, outside
+  pulsim: expm flow per PWL mode (diode crossings by bisection on it) or
+  Radau rtol 1e-12 for the Shockley diode, the PI law re-typed, ticks at
+  `kT` on `x(kT)`. trbdf2 rtol 1e-10 meets it within 1.1e-7 of the span
+  at every tick on all five non-suspect circuits; pwl converges to it at
+  first order. trbdf2 is right; nothing in the control law is wrong.
+- **Taken.** (1) `CxxChainPwmGate.next_edge_after(t)`: period starts and
+  each leg's OFF threshold under the duties held now; the adapter hands it
+  to every engine and `make_combined_switch_fn` keeps it (both engines
+  re-query after a tick). trbdf2 lands the edges instead of learning them
+  by sampling, and pwl's event split splits at them. (2) `ll16`
+  `reference: suspect` (not a flyback; KNOWN_LIMITATIONS). (3) `ll14` /
+  `ll15` frozen `disagree` on `V(sw)` with a named engine limitation (no
+  post-edge sample at an edge that is also a tick). (4) Label time kept
+  (G13): it moves no number, and its cost is now measured below.
+- **Evidence** (max |v(kT) - ref| / span; before -> after):
+
+  | circuit | trbdf2 default | pwl+split | strict cells after |
+  |---|---|---|---|
+  | cl_buck_pi | 4.2e-5 -> 4.2e-5 | 4.5e-2 -> 1.4e-3 | agree (all) |
+  | cl_buck_aggressive_pi | 6.0e-5 -> 6.9e-5 | 2.9e-2 -> 1.9e-2 | agree (all; converges pointwise, no statistical measure needed) |
+  | cl_boost_pi | max_steps -> 5.7e-5 | 2.0e-1 (no reference) -> 4.2e-4 | trbdf2, pwl+split agree; pwl 0.058, pwl+restart 0.058 disagree (gate on the grid) |
+  | ll14 | 2.6e-6 -> 1.1e-5 | 4.0e-2 -> 3.0e-4 | all disagree on V(sw); states agree |
+  | ll15 | 1.7e-6 -> 3.9e-5 | 3.0e-2 -> 9.9e-6 | all disagree on V(sw); states agree |
+  | ll16 | — | — | unverified (suspect) |
+
+  `cl_boost_pi`'s grind: its PI starts at duty 0, the first pulse is
+  0.28 ns, and trbdf2's learned narrowest pulse capped every later step
+  at 0.56 ns (`probes/trbdf2_sticky_pulse_cap.py`: 519,746 accepted steps
+  in 0.3 ms with the edges hidden, 1,590 with them). `ll15` trbdf2 went
+  `agree` (3.9e-4) -> `disagree` (1.24e-3): before, reference and cell
+  both sampled the edges and the reference was already off by 7.8e-3
+  (rtol 1e-8 vs 1e-10); now both land them and the rising edge's missing
+  post-edge sample (`probes/trbdf2_tick_edge_sample.py`) sets the gap.
+  Only trbdf2 and pwl+split cells move; plain pwl and pwl+restart never
+  read the oracle (bit-identical).
+- **Modulator sink (task 6.2 slice).** The gate IS the sink: it reads the
+  duty register (what the channel's sinks see) and declares its edges,
+  so no new class. Order of the cl_buck_pi loop on pwl+split against the
+  reference, `dt = T/20 ... T/640`: the helper (label time) 1.39e-3,
+  6.87e-4, 3.41e-4, 1.70e-4, 8.49e-5, 4.24e-5 (order 1.00); a state-time
+  graph with the same gate 1.80e-5, 2.16e-5, 1.14e-5, 3.07e-6, 1.44e-6,
+  1.42e-6 (77x smaller at T/20, no clean order: the split takes an edge
+  within 1 % of `dt` of a grid point at the point, and a CCM variant
+  scatters the same way). Second order needs a state-time helper, a
+  number-changing switch for the release, not this slice.
+- **`engine='auto'` (measured, default unchanged).** The six circuits
+  through the harness: without `dt` auto takes trbdf2 (the helper's
+  observer carries its cadence) and gives exactly the trbdf2 cell; with
+  `dt` it takes pwl and gives the pwl cell. Twelve closed-loop
+  examples (`examples/scripts/run_*closed_loop*`, auto-tune, motor
+  drives): auto takes pwl and every claim holds; forced to trbdf2 the
+  eleven with a raw `step_observer` are refused (`run_buck_with_helper`
+  runs: 4.9844, claim holds) with a typed `UnsupportedError` (an observer with no
+  cadence). Routing them to trbdf2 needs `controller_period` on each
+  script first, a separate change.
+- **Reverse.** Drop `next_edge` for `ChainPwmGate` in
+  `python/switch_fn_adapter.hpp` and the `SwitchSchedule` wrap in
+  `make_combined_switch_fn`: trbdf2 and pwl+split sample the gate again.
+
 ## Hooks for task groups 6–7 (not in this slice)
 
 - **6.1 graph state in the solver snapshot.** `SolverSnapshot`
