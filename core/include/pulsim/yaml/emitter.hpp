@@ -361,6 +361,7 @@ namespace yaml_detail {
     if (const auto& cs = pool.transformer_couplings(); !cs.empty()) {
         o += "couplings:\n";
         for (const auto& cp : cs) {
+            where = "a coupling";
             o += "  - " + Map{}.add("primary", bname(cp.primary_branch_id, "a coupling"))
                 .add("secondary", bname(cp.secondary_branch_id, "a coupling"))
                 .add("L_p", num(cp.params.L_p)).add("L_s", num(cp.params.L_s))
@@ -375,6 +376,7 @@ namespace yaml_detail {
         std::ranges::sort(forms);
         o += "branch_form:\n";
         for (const auto& [_, bi] : forms) {
+            where = "a branch form";
             o += "  - " + Map{}.add("device", bname(bi, "branch form"))
                 .add("R_on", num(pool.branch_R_on(bi))).str() + "\n";
         }
@@ -406,6 +408,7 @@ namespace yaml_detail {
     if (const auto bs = b.param_bindings(); !bs.empty()) {
         o += "bindings:\n";
         for (const auto& bd : bs) {
+            where = "a binding";
             const auto kind = pool.kind_of(bd.branch);
             o += "  - " + Map{}.add("param", quote(b.parameters()[bd.param].name))
                 .add("field", quote(std::format("{}.{}", g.branch_name(bd.branch),
@@ -424,6 +427,7 @@ namespace yaml_detail {
     if (const auto as = c.aliases(); !as.empty()) {
         o += "aliases:\n";
         for (const auto& a : as) {
+            where = "an alias";
             o += "  - " + Map{}.add("name", quote(a.name))
                 .add(a.node ? "node" : "branch", quote(a.target)).str() + "\n";
         }
@@ -463,6 +467,7 @@ namespace yaml_detail {
     if (const auto cs = c.controls(); !cs.empty()) {
         o += "controls:\n";
         for (const auto& ct : cs) {
+            where = "a control";
             if (ct.handle) {
                 throw std::invalid_argument(std::format(
                     "to_yaml: control \"{}\" ({}) carries a Python callable, "

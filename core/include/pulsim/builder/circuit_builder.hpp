@@ -109,6 +109,8 @@ public:
                         std::optional<Real> lo = std::nullopt,
                         std::optional<Real> hi = std::nullopt) {
         const auto full = declare_name_(std::format("param(\"{}\")", name), name);
+        lo = param_bound_(name, "lo", lo);
+        hi = param_bound_(name, "hi", hi);
         ir::Parameter p{full, value, std::string{unit}, lo, hi, {}, cur_scope_};
         check_param_(p, value);
         params_.push_back(p);
@@ -126,6 +128,8 @@ public:
                              std::optional<Real> hi = std::nullopt) {
         const auto who = std::format("param(\"{}\")", name);
         const auto full = declare_name_(who, name);
+        lo = param_bound_(name, "lo", lo);
+        hi = param_bound_(name, "hi", hi);
         auto e = ir::Expr::compile(text, [&](std::string_view n) {
             // as YAML refuses it: an outer `Ron` is not read by an inner `Ron`
             if (n == name) {
@@ -2863,6 +2867,18 @@ private:
         }
         return i;
     }
+    // An infinite bound is no bound (stored as none, so a document never
+    // holds an infinity); a NaN bound is refused.
+    static std::optional<Real> param_bound_(std::string_view name, std::string_view which,
+                                            std::optional<Real> v) {
+        if (!v) return v;
+        if (std::isnan(*v)) {
+            throw std::invalid_argument(std::format(
+                "param(\"{}\"): {} must be a number or none (got nan)", name, which));
+        }
+        return std::isinf(*v) ? std::nullopt : v;
+    }
+
     static void check_param_(const ir::Parameter& p, Real value) {
         if (!std::isfinite(value) || (p.lo && value < *p.lo) ||
             (p.hi && value > *p.hi)) {

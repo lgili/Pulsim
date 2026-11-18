@@ -1207,13 +1207,13 @@ inline void load_nodes(builder::CircuitBuilder& b, const YAML::Node& ns,
             b.node(names.node(n.as<std::string>()));
             continue;
         }
-        if (!n.IsMap() || !n["name"] || !n["name"].IsScalar()) {
+        if (!n.IsMap() || n.size() != 2 || !n["name"] || !n["name"].IsScalar() ||
+            !n["domain"] || !n["domain"].IsScalar()) {
             throw std::runtime_error(
                 "yaml::load: a 'nodes' entry is a name or {name, domain}");
         }
         const auto name = n["name"].as<std::string>();
-        const auto dn = n["domain"] && n["domain"].IsScalar()
-            ? n["domain"].as<std::string>() : std::string{"electrical"};
+        const auto dn = n["domain"].as<std::string>();
         const auto d = ir::domain_from_name(dn);
         if (!d || *d == ir::Domain::Magnetic) {
             throw std::runtime_error(std::format(

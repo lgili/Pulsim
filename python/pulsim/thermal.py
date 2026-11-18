@@ -353,8 +353,6 @@ def add_cauer_thermal_network(builder,
     if n == 0:
         raise ValueError(
             "add_cauer_thermal_network: at least one stage required")
-    _thermal_nodes(builder, ambient_node, junction_node,
-                   *(f"{name_prefix}_stage_{k}" for k in range(n - 1)))
     builder.add_voltage_source(f"{name_prefix}_amb",
                                   ambient_node, "gnd",
                                   float(T_amb_C))
@@ -371,6 +369,9 @@ def add_cauer_thermal_network(builder,
                                   curr, ambient_node,
                                   float(s.C_th_J_per_K))
         prev = curr
+    # after the devices, so the node order (every index) is as before
+    _thermal_nodes(builder, ambient_node, junction_node,
+                   *(f"{name_prefix}_stage_{k}" for k in range(n - 1)))
 
 
 class ThermalLimitMonitor:
@@ -481,8 +482,6 @@ def add_foster_network(builder,
     n = len(stages)
     if n == 0:
         raise ValueError("at least one Foster stage required")
-    _thermal_nodes(builder, ambient_node, junction_node,
-                   *(f"{name_prefix}_stage_{k}" for k in range(n - 1)))
     # Ambient reference.
     builder.add_voltage_source(f"{name_prefix}_amb",
                                   ambient_node, "gnd", float(T_amb_C))
@@ -504,6 +503,9 @@ def add_foster_network(builder,
                                   curr, prev,
                                   float(s.C_th_J_per_K))
         prev = curr
+    # after the devices, so the node order (every index) is as before
+    _thermal_nodes(builder, ambient_node, junction_node,
+                   *(f"{name_prefix}_stage_{k}" for k in range(n - 1)))
 
 
 def make_thermal_observer(builder,

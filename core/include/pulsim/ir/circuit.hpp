@@ -173,26 +173,44 @@ public:
                 typed(g.branch_name(bi), pin_name_(kind, p), pins[p], Domain::Electrical, {});
             }
         }
-        for (std::size_t k = 0; k < n; ++k) if (dom[k] < 0) dom[k] = 0;
-        // Generic pins: the pins of one group share a domain.
+        // Generic pins: the two pins of a pair share a domain, which spreads
+        // along generic devices from a declared or typed node (a resistor
+        // from a thermal junction to a new case node makes the case thermal).
+        // Two decided domains meeting in one pair are refused; a group no
+        // declaration or typed pin reaches is electrical.
+        std::vector<std::size_t> up(n);
+        for (std::size_t k = 0; k < n; ++k) up[k] = k;
+        auto root = [&](std::size_t k) {
+            while (up[k] != k) k = up[k] = up[up[k]];
+            return k;
+        };
         for (Index bi = 0; bi < g.num_branches(); ++bi) {
             const auto kind = pool.kind_of(bi);
             if (electrical_only_(kind)) continue;
             const auto& br = g.branch(bi);
             pins.assign({br.from, br.to});
             extra_pins_(pool, bi, kind, pins);
-            for (std::size_t lo = 0; lo < pins.size(); lo += 2) {   // groups are pin pairs
-                const Index a = pins[lo], c = lo + 1 < pins.size() ? pins[lo + 1] : -1;
+            for (std::size_t lo = 0; lo + 1 < pins.size(); lo += 2) {   // groups are pin pairs
+                const Index a = pins[lo], c = pins[lo + 1];
                 if (a < 0 || c < 0) continue;
-                if (dom[static_cast<std::size_t>(a)] != dom[static_cast<std::size_t>(c)]) {
-                    const auto da = static_cast<Domain>(dom[static_cast<std::size_t>(a)]);
-                    const auto dc = static_cast<Domain>(dom[static_cast<std::size_t>(c)]);
+                const auto ra = root(static_cast<std::size_t>(a));
+                const auto rc = root(static_cast<std::size_t>(c));
+                if (ra == rc) continue;
+                if (dom[ra] >= 0 && dom[rc] >= 0 && dom[ra] != dom[rc]) {
                     refuse(g.branch_name(bi), pin_name_(kind, lo + 1), c,
-                           std::format("{}, as its pin {} on \"{}\"", domain_name(da),
+                           std::format("{}, as its pin {} on \"{}\"",
+                                       domain_name(static_cast<Domain>(dom[ra])),
                                        pin_name_(kind, lo), node_name(a)),
-                           domain_name(dc));
+                           std::format("{} ({})", domain_name(static_cast<Domain>(dom[rc])),
+                                       why[rc]));
                 }
+                up[rc] = ra;
+                if (dom[ra] < 0) { dom[ra] = dom[rc]; why[ra] = why[rc]; }
             }
+        }
+        for (std::size_t k = 0; k < n; ++k) {
+            const int d = dom[root(k)];
+            dom[k] = d < 0 ? 0 : d;
         }
         Domains out;
         out.domain.reserve(n);

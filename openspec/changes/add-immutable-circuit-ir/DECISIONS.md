@@ -586,18 +586,23 @@ behind this branch's 13–18. Since 14 the graph-driven sources survive
   `{name, domain}`) or implied by a typed pin (PMSM `omega` rad/s,
   `theta` rad); every other node is electrical. All domains stay in the
   one MNA system: the tag never reaches a stamp, so a tagged circuit and
-  its untagged twin give bit-identical samples (tested on pwl, trbdf2;
-  a DC machine with its shaft tagged likewise).
+  its untagged twin give bit-identical samples (tested on pwl and
+  trbdf2, and on a DC machine with its shaft tagged mechanical).
 - **Pin table, coarse on purpose.** Two classes, not a per-kind table:
   electrical-only kinds (switch, diode, MOSFET / IGBT level 1, the
   nonlinear diodes, saturable inductor, nonlinear capacitor, PMSM
   phases) and domain-generic kinds whose pins come in pairs
   (`from`/`to`, then each control pair), each pair within one domain. A
   VCVS sensing a temperature and driving an electrical node is legal by
-  construction. A violation is refused at `build()` naming device, pin
-  and node (`device "D1": pin from (electrical) is connected to node
-  "tj", which is thermal (declared)`). A device whose physics spans two
-  domains in one pair (none shipped) would need its own row.
+  construction. A domain spreads along generic pairs (union-find, in
+  branch order) from declared and typed nodes; a group nothing reaches
+  is electrical. Only two decided domains meeting in one pair are
+  refused, at `build()`, naming device, pin and node (`device "D1": pin
+  from (electrical) is connected to node "tj", which is thermal
+  (declared)`). Without the spreading, a user's case node behind a
+  helper's junction, a two-mass shaft behind a PMSM or a gearbox
+  transformer would be refused (final review). A device whose physics
+  spans two domains in one pair (none shipped) would need its own row.
 - **Preflight per domain:** `with_preflight` labels each finding with
   its subnet's domain; a floating thermal network reads
   `thermal-domain: ...` (`finding.domain`).
@@ -612,11 +617,23 @@ behind this branch's 13–18. Since 14 the graph-driven sources survive
   its pins (no code in the helper); `add_foster_network`,
   `add_cauer_thermal_network` and `add_shared_heatsink` declare their
   nodes thermal, only on a real `CircuitBuilder` (a subsystem proxy gets
-  names as before). Done here, not in separate PRs: each is a few lines
+  names as before), after their devices, so the node order (every
+  state index) is the untagged helper's (tested). Done here, not in
+  separate PRs: each is a few lines
   and the oracle (PMSM and electro-thermal suites unchanged) runs with
   the check.
-- **Evidence:** `test_circuit_domains.py` (11 tests) and the C++ `[ir]`
-  case; the full suite with the helpers tagging.
+- **Evidence:** `test_circuit_domains.py` and the C++ `[ir]` case; the
+  full suite with the helpers tagging.
+- **Final review fixes:** domain spreading (above); helpers tag after
+  their devices; an infinite parameter bound is stored as none (it made
+  `to_yaml` / pickle refuse a circuit); `min` / `max` keep the first
+  operand on a tie (Python's rule) so the signed zero of the exact fuzz
+  does not depend on the libm's `fmin`, and the exact fuzz compares
+  bits; every emitter section names its entry in a non-finite refusal;
+  a YAML `{name, domain}` node entry is strict. Left: an explicit
+  `node(n, "electrical")` is neither hashed nor written, so after a
+  round trip a later `node(n, "thermal")` is accepted where the original
+  builder refused it.
 - **Reverse:** delete `node(name, Domain)`, `resolve_domains_` and the
   YAML key; nothing else reads the tag.
 

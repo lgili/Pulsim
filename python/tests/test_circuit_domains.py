@@ -89,9 +89,43 @@ def test_a_cross_domain_connection_is_refused_by_name():
         b.build()
     b = _rc_thermal(True)
     b.add_voltage_source("Vx", "x", "gnd", 1.0)
+    b.add_diode("Dx", "x", "gnd", 1e3, 1e-9)         # x is electrical by the diode
     b.add_resistor("Rx", "x", "tj", 1.0)             # a pair across two domains
     with pytest.raises(ValueError, match=r'device "Rx": pin to .*"tj", which is thermal'):
         b.build()
+
+
+def test_a_domain_spreads_along_generic_devices():
+    # a user's case node behind a helper's junction is thermal, not refused
+    b = p.CircuitBuilder()
+    p.add_foster_network(b, [p.FosterStage(R_th_K_per_W=0.1, tau_s=1e-3)])
+    b.add_resistor("Rcs", "T_j", "T_case", 0.2)
+    b.add_capacitor("Ccs", "T_case", "gnd", 1e-2)
+    c = b.build()
+    assert (c.node_domain("T_case"), c.unit_of("T_case")) == ("thermal", "degC")
+    # a two-mass shaft behind a PMSM's speed node is mechanical
+    b = p.CircuitBuilder()
+    for i, n in enumerate(("ua", "ub", "uc")):
+        b.add_sine_voltage_source(f"V{i}", n, "gnd", 0.0, 12.0, 30.0, -2.094 * i)
+    b.add_pmsm_mna("M", "ua", "ub", "uc", "nn", "w", "th", R_s=0.5, L_d=2e-3,
+                   L_q=2e-3, psi_pm=0.05, pole_pairs=4, J=1e-3, B=1e-4)
+    b.add_inductor("Kshaft", "w", "w2", 1e-3)
+    b.add_capacitor("J2", "w2", "gnd", 1e-3)
+    assert b.build().node_domain("w2") == "mechanical"
+
+
+def test_a_tagged_dc_machine_shaft_changes_no_number():
+    def mk(tag):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "a", "gnd", 12.0)
+        b.add_dc_machine("DM", "a", "gnd", "w", R_a=1.0, L_a=1e-3, K=0.1, J=1e-3, B=1e-4)
+        if tag:
+            b.node("w", "mechanical")
+        return b.build()
+    c = mk(True)
+    assert c.node_domain("w") == "mechanical"
+    ra, rb = p.simulate(c, 1e-3, dt=1e-6), p.simulate(mk(False), 1e-3, dt=1e-6)
+    np.testing.assert_array_equal(np.asarray(ra.states), np.asarray(rb.states))
 
 
 def test_builder_refusals():
@@ -159,8 +193,21 @@ def test_thermal_helpers_tag_their_nodes():
                              p.FosterStage(R_th_K_per_W=0.2, tau_s=1e-2)])
     c = b.build()
     assert {c.node_domain(n) for n in ("T_j", "T_amb", "Th_stage_0")} == {"thermal"}
+    assert c.nodes == ["T_amb", "Th_stage_0", "T_j"]   # the order of the untagged helper
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         b.add_diode("D", "T_j", "gnd", 1e3, 1e-9)
     with pytest.raises(ValueError, match='node "T_j", which is thermal'):
         b.build()
+
+
+def test_an_infinite_parameter_bound_is_no_bound():
+    import pickle
+    b = p.CircuitBuilder()
+    q = b.param("x", 1.0, "", 0.0, float("inf"))
+    assert q.hi is None and q.lo == 0.0
+    b.add_resistor("R", "a", "gnd", q)
+    c = b.build()
+    assert pickle.loads(pickle.dumps(c)).value_hash() == c.value_hash()
+    with pytest.raises(ValueError, match="hi must be a number or none"):
+        b.param("y", 1.0, "", None, float("nan"))

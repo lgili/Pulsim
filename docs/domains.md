@@ -25,9 +25,11 @@ circuit:
   nodes: [a, {name: tj, domain: thermal}]
 ```
 
-- A node never declared is electrical, unless a typed pin implies its
-  domain: a PMSM's `omega_node` is mechanical (`rad/s`) and its
-  `theta_node` mechanical (`rad`).
+- A node never declared takes its domain from a typed pin (a PMSM's
+  `omega_node` is mechanical in `rad/s`, its `theta_node` mechanical in
+  `rad`) or from the nodes a domain-generic device joins it to: a
+  resistor from a thermal junction to a new case node makes the case
+  thermal. A node nothing reaches is electrical.
 - Ground is the reference of every domain and takes no tag.
 - `magnetic` is reserved (`add-permeance-magnetic-domain`) and refused.
 - A node declared twice with two domains is refused.
@@ -47,8 +49,8 @@ At `build()`, every device is checked against its nodes:
   or controlled source works in any domain. Its pins come in pairs
   (`from`/`to`, then each control pair), and the two pins of one pair
   must share a domain. A VCVS sensing a temperature and driving an
-  electrical node is legal; a resistor from a thermal node to an
-  electrical one is refused.
+  electrical node is legal; a resistor from a thermal node to a node a
+  diode or switch makes electrical is refused.
 
 The preflight labels each finding with the domain of its subnet. A
 floating thermal network (no path to ambient) reads
