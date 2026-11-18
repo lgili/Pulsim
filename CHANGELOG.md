@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration batch 13: device interface slice 2, IR node domains, TR-BDF2 tracks 7–8, exact engine 4, ideal switch 4, permeance domain merged
+
+* **Changed** the `SolverSnapshot` pickle is version 4 with 14 fields:
+  version 3's 13 (the controllers'-state marker) plus the fixed-step grid.
+  Version 3 (12 or 13 fields), the device-interface slice's own 13-field
+  version 4 and Pulsim 2.0 pickles load.
+* **Fixed** the IR's node domains did not know the permeance domain: every
+  winding / permeance node read `electrical, V`, a diode on a core node
+  built silently and `node(n, "magnetic")` was refused as reserved. Flux
+  nodes are now the magnetic domain (MMF, `A`); a winding still joins an
+  electrical and a magnetic pair; a semiconductor pin on a magnetic node
+  is refused by name; `node(n, "magnetic")` marks a flux node.
+* **Fixed** the induction machine's speed node read `electrical`; it is
+  mechanical (`rad/s`), as the PMSM's.
+
 ### Integration batch 12: unified device interface 1–3, in-kernel event losses, IR scopes, TR-BDF2 track 6, event queue, control graph 4, PWL IGBT / thyristor, exact engine session 6 merged
 
 * **Fixed** `periodic_steady_state` by shooting ran a thyristor / TRIAC
