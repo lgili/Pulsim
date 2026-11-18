@@ -51,7 +51,10 @@ def test_auto_takes_the_exact_stepper():
     t = np.asarray(res.times)
     v = np.asarray(res.v("sw"))
     m = (t > T + 1e-9) & (t < 1.5 * T - 1e-9)
-    exact = 100.0 - (100.0 - 0.01) * np.exp(-(t[m] - T) / TAU)
+    # the switch opens at the landed edge, 9.3e-15 s before T (the switch_fn's 1e-9 tolerance);
+    # the samples that resolve the 10 ns transient (task: fast-mode samples) see that offset
+    t_e = float(np.asarray(res.event_times)[np.argmin(np.abs(np.asarray(res.event_times) - T))])
+    exact = 100.0 - (100.0 - 0.01) * np.exp(-(t[m] - t_e) / TAU)
     assert np.abs(v[m] - exact).max() <= 1e-5          # was 96.07 V
     assert v.min() >= 0.0 and v.max() <= 100.001       # was -99.98 ... 196.08 V
     assert res.n_exact_steps > 0

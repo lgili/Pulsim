@@ -371,7 +371,9 @@ public:
             }
 
             // 1. Next gate-edge time (analytical fast path)
-            const Real t_gate = next_gate_edge_(t, t_end);
+            Real t_gate = next_gate_edge_(t, t_end);
+            // an edge a few ulps before t_end is t_end (scheduler_auto.hpp)
+            if (t_gate < t_end && near_time(t_gate, t_end)) t_gate = t_end;
             const Real t_target = std::min(t_gate, t_end);
             // a source corner is landed on exactly: a single-shot pulse
             // read one ulp early would keep its old piece for a step
@@ -382,9 +384,11 @@ public:
             if (h_use <= Real{0}) {
                 // Sitting exactly on a gate edge — fire it.
                 if (t_gate < t_end) {
+                    const MaskT before = system_.current_mask();
                     fire_event_(t_gate, "gate_edge", PredicateType::GateEdge,
                                   x, rk_state, result);
                     t = t_gate;
+                    plan_fast_samples_(t, at_corner || !(system_.current_mask() == before));
                 }
                 continue;
             }
@@ -414,8 +418,19 @@ public:
                     }
                 }
                 if (system_.has_exact_step()) {
-                    const Real h_ex =
-                        std::min(dt_max_, t_target - t);
+                    Real h_ex = std::min(dt_max_, t_target - t);
+                    while (fast_k_ < fast_t_.size()
+                           && (fast_t_[fast_k_] <= t || near_time(t, fast_t_[fast_k_]))) {
+                        ++fast_k_;
+                    }
+                    if (fast_k_ < fast_t_.size()) {
+                        h_ex = std::min(h_ex, fast_t_[fast_k_] - t);
+                    }
+                    // no sliver step short of the edge (scheduler_auto.hpp)
+                    if (h_ex < t_target - t && near_time(t + h_ex, t_target)) {
+                        h_ex = t_target - t;
+                    }
+                    const MaskT mask_before = system_.current_mask();
                     advance_(t, x, h_ex, x_new_);
 
                     std::optional<PredicateEvent> evt;
@@ -436,6 +451,7 @@ public:
                         fire_event_(t, evt->name, evt->type, x,
                                      rk_state, result,
                                      evt->aux_index);
+                        plan_fast_samples_(t, !(system_.current_mask() == mask_before));
                     } else {
                         t += h_ex;
                         x.swap(x_new_);
@@ -446,6 +462,8 @@ public:
                             fire_event_(t_gate, "gate_edge",
                                           PredicateType::GateEdge,
                                           x, rk_state, result);
+                            plan_fast_samples_(
+                                t, at_corner || !(system_.current_mask() == mask_before));
                         }
                     }
                     rk_state.invalidate();
@@ -945,6 +963,23 @@ private:
             system_.exact_advance_state_into(t, x, h, out);
         } else {
             out = system_.exact_advance_state(t, x, h);
+        }
+    }
+
+    /// After an event that changed the mode or a source's piece, the
+    /// exact path also stops at the instants that resolve the new mode's
+    /// fast transient (exact_fast_samples): a mode decaying in 14 ns read
+    /// through a 200 ns output step was drawn as one ramp, and the
+    /// harness's interpolated measure read it 3 % of the span off while
+    /// every sample was exact. Extra samples only; no state is touched.
+    void plan_fast_samples_(Real t_e, bool changed) {
+        if constexpr (requires { system_.exact_fast_samples(t_e, Real{}, fast_t_); }) {
+            if (!changed) return;   // a dropped same-mask edge keeps the plan
+            fast_k_ = 0;
+            fast_t_.clear();
+            if (system_.has_exact_step()) {
+                system_.exact_fast_samples(t_e, dt_max_, fast_t_);
+            }
         }
     }
 
@@ -1767,6 +1802,8 @@ private:
     // default so the demo systems and raw-LTI paths are untouched;
     // the builder runners enable it.
     bool enable_event_projection_ = false;
+    std::vector<Real> fast_t_;     // plan_fast_samples_
+    std::size_t fast_k_ = 0;
     Real dt_init_;
     Real dt_max_;
     std::size_t store_every_;

@@ -315,7 +315,8 @@ def _resolve_dsed_options(
 # explanation + the escape hatch.
 _BRIDGE_FALLBACK_MESSAGE = (
     "pulsim.simulate(engine='dsed', builder=...): the C++ extractor "
-    "rejected this topology — most commonly because the circuit has "
+    "rejected this topology: {underlying}\n"
+    "Older causes of this refusal: the circuit has "
     "**floating capacitors** (caps between two non-ground nodes; the "
     "current LTI bridge supports caps-to-ground only — Phase 5.1b "
     "TODO in notes/DSED_BRIDGE_DESIGN.md), or because the circuit "
@@ -333,9 +334,7 @@ _BRIDGE_FALLBACK_MESSAGE = (
     "Resolved DSED options for this call:\n"
     "  rtol = {rtol}, atol = {atol}\n"
     "  dt_max = {dt_max}, integrator = {integrator!r}\n"
-    "  stiffness_threshold = {stiffness_threshold}\n"
-    "\n"
-    "Underlying C++ error: {underlying}"
+    "  stiffness_threshold = {stiffness_threshold}"
 )
 
 

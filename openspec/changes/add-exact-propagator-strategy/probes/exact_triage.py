@@ -99,6 +99,12 @@ def cause(r):
             return f"Newton device refused by name ({r.get('kind') or r.get('device')})"
         if feat == "initial_state" or "initial_state" in msg and "full" in msg:
             return "DC start refused (non-zero consistent start)"
+        # the extractor's own reason leads the bridge refusal (it used to sit past the
+        # 600-character cut, behind the generic fallback text)
+        if "no reactive" in msg or "purely static" in msg:
+            return "extraction: static circuit (no reactive state)"
+        if "algebraic block" in msg:
+            return "extraction: G_aa singular (capacitor / source loop or inductor cut-set)"
         if "inductors form a cycle" in msg or "cut-set" in msg or "cutset" in msg:
             return "extraction: inductor loop / cut-set"
         if "capacitors form a cycle" in msg:

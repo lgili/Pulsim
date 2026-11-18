@@ -82,7 +82,7 @@ circuits:
   circuits/stress/stiff_rlc.yaml: {status: runs}
   circuits/stress/stiff_two_timescale_rc.yaml: {status: runs}
   # dsed: 0.0216 -> "did not settle" (exact slice) -> 0.0146 at the merge (harness dt); the residue reads a source-driven jump at its left limit on events.
-  circuits/switching/basic/chopper_with_rc_snubber.yaml: {status: runs, known: {dsed: disagree}, known_err: {dsed: 0.0146}}
+  circuits/switching/basic/chopper_with_rc_snubber.yaml: {status: runs}
   circuits/switching/basic/mosfet_nmos_dc.yaml: {status: runs}
   circuits/switching/basic/pwm_voltage_rc.yaml: {status: runs}
   circuits/switching/basic/pwm_voltage_rl_filter.yaml: {status: runs}
@@ -92,7 +92,7 @@ circuits:
   circuits/switching/boost/boost_pfc_open_loop.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree}, known_err: {pwl: 0.0304, pwl+restart: 0.0304}}
   circuits/switching/boost/boost_switching_complex.yaml: {status: runs}
   circuits/switching/boost/cascaded_boost_buck.yaml: {status: runs}
-  circuits/switching/boost/ll07_boost_vcswitch.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, dsed: disagree}, known_err: {pwl: 0.0984, pwl+restart: 0.0997, pwl+split: 0.0997, dsed: 0.126}}
+  circuits/switching/boost/ll07_boost_vcswitch.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0984, pwl+restart: 0.0997, pwl+split: 0.0997}}
   circuits/switching/boost/ll12_pfc_boost_continuous.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.083, pwl+restart: 0.0806, pwl+split: 0.0806}}
   circuits/switching/boost/synchronous_boost.yaml: {status: runs}
   circuits/switching/boost/textbook_erickson_boost_ccm.yaml: {status: runs}
@@ -106,9 +106,9 @@ circuits:
   circuits/switching/buck/buck_with_current_sense.yaml: {status: runs}
   circuits/switching/buck/cascaded_buck_buck.yaml: {status: runs}
   circuits/switching/buck/high_freq_gan_buck.yaml: {status: runs}
-  # dsed on the vcswitch circuits (ll06, ll07, ll09, ll10): refused until the DC start was projected (full-MNA initial_state);
-  # with a zero start ll06 already reads 0.083 against pwl dt/40 (263 vs 264 edges): a vcswitch defect the refusal hid, open.
-  circuits/switching/buck/ll06_buck_vcswitch.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, dsed: disagree}, known_err: {pwl: 0.0781, pwl+restart: 0.118, pwl+split: 0.0704, dsed: 0.0918}}
+  # dsed on the vcswitch circuits (ll06, ll07, ll09, ll10) agrees since the two-sided trace + fast-mode samples
+  # (add-exact-propagator-strategy DECISIONS, "Samples at a discontinuity"); the 0.05-0.13 was the trace, not the engine.
+  circuits/switching/buck/ll06_buck_vcswitch.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0781, pwl+restart: 0.118, pwl+split: 0.0704}}
   circuits/switching/buck/ll08_buck_mosfet.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, trbdf2: disagree}, known_err: {pwl: 0.227, pwl+restart: 0.0842, pwl+split: 0.0842, trbdf2: 0.00231}}  # was error: the roundoff acceptance lets it finish
   circuits/switching/buck/sync_buck_500khz.yaml: {status: runs}
   circuits/switching/buck/synchronous_buck.yaml: {status: runs}
@@ -125,10 +125,10 @@ circuits:
   circuits/switching/inverter/half_bridge_lc_filter.yaml: {status: runs}
   circuits/switching/inverter/lcc_resonant_inverter.yaml: {status: runs}
   # pwm phase read as a fraction of the period (batch 6b): trbdf2 0.00132 -> 4.3e-5, agrees.
-  circuits/switching/inverter/ll09_half_bridge_inverter_leg.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, dsed: disagree}, known_err: {pwl: 0.0707, pwl+restart: 0.0587, pwl+split: 0.0587, dsed: 0.0692}}
+  circuits/switching/inverter/ll09_half_bridge_inverter_leg.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0707, pwl+restart: 0.0587, pwl+split: 0.0587}}
   # pwm phase as a fraction (batch 6b): no shoot-through, so the DC start is non-zero and dsed
   # refuses it (as every circuit without uic); its 0.201 was the shoot-through circuit.
-  circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, dsed: disagree}, known_err: {pwl: 0.05, pwl+restart: 0.05, pwl+split: 0.05, dsed: 0.0465}}
+  circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.05, pwl+restart: 0.05, pwl+split: 0.05}}
   circuits/switching/isolated/active_clamp_forward.yaml: {status: runs}
   # pwm phase as a fraction (batch 6b): pwl 3.58 -> 2.6e-4, trbdf2 0.00244 -> 3.5e-5, both agree.
   circuits/switching/isolated/dual_active_bridge.yaml: {status: runs}
@@ -136,7 +136,7 @@ circuits:
   circuits/switching/isolated/forward_converter.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.707, pwl+restart: 0.092, pwl+split: 0.092}}
   # dsed disagree on the gate is interpolation of sparse exact samples across edges (pointwise < 5e-5
   # of span; 0.024 at dt/4 output).
-  circuits/switching/isolated/full_bridge_dc.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, dsed: disagree}, known_err: {pwl: 0.0828, pwl+restart: 0.0815, pwl+split: 0.0815, dsed: 0.0815}}
+  circuits/switching/isolated/full_bridge_dc.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0828, pwl+restart: 0.0815, pwl+split: 0.0815}}
   circuits/switching/isolated/ll11_llc_resonant_converter.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error, trbdf2: error}}
   circuits/switching/isolated/ll13_active_clamp_forward.yaml: {status: error, match: "no DC operating point", reason: "pwl: RuntimeError: compute_dc_operating_point: no DC operating point. The direct solve failed with: solve_with_newton: failed to converge after 5"}
   circuits/switching/isolated/synchronous_flyback.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.207}}
@@ -146,7 +146,7 @@ circuits:
   circuits/switching/multilevel/cascaded_h_bridge_5level.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0274, pwl+restart: 0.0269, pwl+split: 0.0269}}
   # dsed (runs since builder ICs are honoured): disagree on the gate as full_bridge_dc
   # (pointwise < 5e-5 of span; 0.0275 at dt/4 output).
-  circuits/switching/multilevel/flying_capacitor_3level.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, dsed: disagree}, known_err: {pwl: 0.0466, pwl+restart: 0.05, pwl+split: 0.05, dsed: 0.05}}
+  circuits/switching/multilevel/flying_capacitor_3level.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0466, pwl+restart: 0.05, pwl+split: 0.05}}
   circuits/switching/multilevel/mmc_4cell_chain.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0268, pwl+restart: 0.0264, pwl+split: 0.0264}}
   circuits/switching/multilevel/npc_three_level_halfbridge.yaml: {status: runs}
   circuits/switching/multilevel/t_type_3level_halfbridge.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0749, pwl+restart: 0.0738, pwl+split: 0.0738}}

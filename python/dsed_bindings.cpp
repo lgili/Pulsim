@@ -354,9 +354,12 @@ py::array_t<double> reconstruct_full_states(
     // A left-limit sample reads its sources' left limit too: a source
     // corner is an event, and an instant edge there (PWM, pulse) would
     // otherwise pair the old mode with the new source value. Half the
-    // last step lies inside the piece that step covered.
+    // last step lies inside the piece that step covered. The final
+    // sample is the left limit of t_end too: a corner exactly at t_end
+    // never fires (the run ends), so its new piece is never integrated.
     auto left_by = [&](std::size_t i) {
-        return pre && i > 0 ? Real{0.5} * (res.times[i] - res.times[i - 1]) : Real{0};
+        return (pre || i + 1 == n) && i > 0
+            ? Real{0.5} * (res.times[i] - res.times[i - 1]) : Real{0};
     };
     // Probe the width from the first sample.
     adapter.set_mask(masks[0]);
@@ -447,6 +450,28 @@ void reconstruct_right_limits(AdapterT& adapter, const ResultT& res,
                     const auto& xs = res.states[i];
                     fired = xp.size() != xs.size()
                             || (xp.array() != xs.array()).any();
+                    // A source corner leaves the reduced state alone but
+                    // moves the source-driven nodes: the sample reads the
+                    // sources' left limit (reconstruct_full_states), so
+                    // the right limit differs and is recorded too.
+                    if constexpr (requires {
+                                      adapter.recover_full_into(
+                                          Real{0}, xs,
+                                          Eigen::Map<pulsim::Vector>(nullptr, 0),
+                                          Real{0});
+                                  }) {
+                        if (!fired && i > 0
+                            && res.step_masks[i] == res.sample_masks[i]) {
+                            adapter.set_mask(res.sample_masks[i]);
+                            const pulsim::Vector r =
+                                adapter.recover_full(res.times[i], xs);
+                            pulsim::Vector l(r.size());
+                            adapter.recover_full_into(
+                                res.times[i], xs, l,
+                                Real{0.5} * (res.times[i] - res.times[i - 1]));
+                            fired = (l.array() != r.array()).any();
+                        }
+                    }
                 }
                 if (fired || !(res.step_masks[i] == res.sample_masks[i])) {
                     idx.push_back(i);

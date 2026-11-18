@@ -122,3 +122,52 @@ only. Not acted on: the inconsistency refusal is defensive — the circuits that
 (a capacitor across a source) are refused by the extractor first, so no test reaches it; inductor
 currents that are not states and algebraic node voltages are dropped by the projection, as for
 `c0=` / `i0=`.
+
+## Samples at a discontinuity, and the vcswitch cells (2026-11-17)
+
+The seven dsed disagreements of the strict gate (ll06 0.0918, ll07 0.126, ll09 0.0692, ll10
+0.0465, chopper_with_rc_snubber 0.0146, flying_capacitor_3level 0.050, full_bridge_dc 0.0815)
+had one class of cause, not seven: the exact engine's SAMPLES were exact (error at its own
+samples ≤ 1.8e-5 of the span on all seven) but the trace the strict measure interpolates was
+not the trajectory. Three mechanisms, measured by inserting each fix alone (`.scratch/vc/`):
+
+1. **Jumps drawn as ramps.** A stored sample at an event is the left limit; the right limit
+   lives in `right_limit_*`, which no interpolating consumer read. The harness drew each jump
+   as a ramp over the next output step, while the trbdf2 reference stores the left limit at
+   t_e and the right limit one tiny step later (8.8e-14 s after a 40 µs edge on ll06).
+2. **Missing or wrong right limits.** (a) A source corner leaves the reduced state alone, so
+   `reconstruct_right_limits` skipped it although the source-driven nodes jump (V(ctrl) on
+   every vcswitch cell); (b) the `integrator='auto'` scheduler (every circuit without diodes)
+   pushed its gate-edge samples with no pre-event state, so those samples read the sources'
+   RIGHT limit and recorded no right limit — "the right limit at some edges and the left at
+   others" of the chopper note; (c) a run ending on a corner stored the new level at t_end
+   (never integrated); (d) summed grid steps stopped 3 ulps short of an edge and a sliver
+   step followed, whose sample read the source's snapped new piece (20 slivers on ll10).
+3. **A fast mode read through the output step.** ll06's switch node rises with τ ≈ 14 ns
+   (68 µH against 2·1e-4 S of g_off) and ll09's load current collapses with τ ≈ 1 ns during
+   the dead time; the netlist's 200 / 250 ns grid drew each as one ramp (ll06 V(sw) 0.0296
+   with 1 and 2 fixed; ll09 I(Lload) 0.038).
+
+The vcswitch hypothesis (a control-node threshold crossing sampled on the output grid) is
+refuted: Pulsim has no voltage-controlled switch device. The v1 reader maps a vcswitch whose
+control node is a source waveform to a scheduled gate (`_on_windows`: the crossing of a PWM
+with zero rise time IS its edge, duty − dead_time) and refuses a circuit-driven control node
+as Unmapped; the engine lands those edges exactly as time events. "263 vs 264 edges" was the
+edge at t_end (stored right on pwl, left on dsed). No predicate was added, so no rounding fuzz
+applies; a native vcswitch with hysteresis is a device feature for another change.
+
+| Question | Option taken | Evidence | How to reverse |
+|---|---|---|---|
+| The convention for a sample at a discontinuity | The result grid stays strictly increasing; the stored sample at an event is the LEFT limit everywhere (gate edges and source corners on both schedulers, and the final sample when a corner lands on t_end); the RIGHT limit is recorded in `right_limit_*` whenever the full state jumps (state, mask, or a source); `pulsim._result_views.with_right_limits(result)` returns the two-sided trace with the right limit at `nextafter(t_e)`, and the harness's `traces()` reads every result through it. A repeated time was rejected: `np.interp` returns the later duplicate AT t_e while the reference's sample at t_e is its left limit, so the trapezoid on the interval before t_e would carry the whole jump² (≈ 0.02 of span on ll06, estimated from its trbdf2 spacing); `np.gradient` and every Δt divider would divide by zero. The ulp sample is an exact sample of the trajectory (the propagator over one ulp is the identity to rounding), not a moved one | Gate with the two-sided trace only (fix 1): chopper 0.0146 → 2.9e-5, full_bridge_dc 0.0815 → 2.7e-5, flying_capacitor_3level 0.050 → 3.7e-5, ll10 legs 0.040 → 1.1e-4, ll07 V(sw) 0.018 → 3.5e-5; V(ctrl) cells needed fix 2. pwl / trbdf2 results carry no right limits, so their cells are untouched; no sample of any trace is dropped | Drop the `with_right_limits` call in `differential_runner.traces` |
+| Resolving a mode faster than the output step | After an event that changes the mode or a source's piece, the exact path also stops at t_e + s·√2^k, s from max(1/(8ρ_max), 1e-5·dt_max) to min(30/ρ_min, dt_max), ρ the decay rates −Re λ > 8/dt_max of the new mode (`exact_fast_samples`); modes gone in less than 1e-5·dt_max add nothing (a DCM buck's 1e-13 s g_off modes). Extra exact samples only: no state, mask or event decision is touched | ll06 V(sw) 0.0296 → 1.7e-4 (11 298 samples, was 10 152); ll09 0.0692 → 1.7e-4 (15 587, was 12 022); closed form `test_a_fast_mode_after_an_event_is_sampled` (τ = 10 ns, dt 1 µs: interpolant within 5 % of i0 of the exponential, was a ramp 0.5·i0 off at mid-step) | Return early in `plan_fast_samples_` (both schedulers) |
+| Is a source corner without a state change an event sample? | Yes, on both schedulers: the `auto` scheduler now records the state before a fired gate edge (it never modifies x, so it is x) — the sample reads its sources' left limit and gets a right-limit row | `test_a_source_edge_is_two_sided` (dsed / exact): the 50 µs sample reads 10 V, the ulp sample 0 V, the capacitor continuous and at the closed form 10(1 − e⁻⁵) | Pass nullptr again in `scheduler_auto.hpp` |
+
+Cells moved (dsed, strict gate, old → new): chopper_with_rc_snubber 0.0146 → 2.9e-5,
+flying_capacitor_3level 0.050 → 3.7e-5, full_bridge_dc 0.0815 → 2.7e-5, ll06 0.0918 → 1.7e-4,
+ll07 0.126 → 1.8e-4, ll09 0.0692 → 1.7e-4, ll10 0.0465 → 1.3e-4; all seven freezes dropped.
+Totals 65 / 7 / 0 / 34 / 2 → 72 / 0 / 0 / 34 / 2. Against pwl at dt/40 the seven read
+0.003 … 0.020: that is pwl's own error — pwl against the same trbdf2 reference converges at
+half order in this measure (ll06 and full_bridge_dc alike: dt/10 0.031, dt/40 0.016, dt/160
+0.0079; its sample at an edge is the right limit and its trace ramps the jump over the previous
+step), while dsed sits at 1.7e-4 / 2.7e-5 at the netlist's dt. pwl and trbdf2 cells are
+unchanged (their results record no right limits; bit identity below).

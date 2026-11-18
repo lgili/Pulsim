@@ -382,6 +382,14 @@ public:
         return pulsim::dsed::exact_scan_step(current_entry_->exact);
     }
 
+    /// Output instants resolving the current mode's fast transient after
+    /// an event at t_e (exact_fast_samples).
+    void exact_fast_samples(Real t_e, Real h, std::vector<Real>& out) const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        pulsim::dsed::exact_fast_samples(current_entry_->exact, t_e, h, out);
+    }
+
     /// The tier-1 bound's longest step (D2); the scheduler sets its
     /// dt_max. Changing it rebuilds the propagators lazily.
     void set_max_step(Real h) {

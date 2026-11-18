@@ -333,6 +333,33 @@ inline void exact_advance_affine_into(const ExactLTI& e, const Vector& x, Real h
         : std::numeric_limits<Real>::infinity();
 }
 
+/// Instants after an event at which a mode too fast for the output step
+/// `h` is sampled: t_e + s·√2^k from s_lo = max(1/(8ρ_max), 1e-5·h) while
+/// below min(30/ρ_min, h), ρ the decay rates −Re λ > 8/h. Empty when no
+/// mode decays faster than 8/h, or when the slowest such mode is gone
+/// (30/ρ_min) before 1e-5·h. A linear interpolant through these exact
+/// samples is within a few per cent of the jump of the true exponential,
+/// where one step of h spread the whole transient as a ramp.
+inline void exact_fast_samples(const ExactLTI& e, Real t_e, Real h,
+                               std::vector<Real>& out) {
+    out.clear();
+    if (!e.valid || !(h > Real{0})) return;
+    Real r_lo = std::numeric_limits<Real>::infinity(), r_hi = Real{0};
+    for (Eigen::Index i = 0; i < e.lambda.size(); ++i) {
+        const Real r = -e.lambda[i].real();
+        if (r > Real{8} / h) {
+            r_lo = std::min(r_lo, r);
+            r_hi = std::max(r_hi, r);
+        }
+    }
+    if (r_hi == Real{0}) return;
+    const Real s_hi = std::min(Real{30} / r_lo, h);
+    for (Real s = std::max(Real{0.125} / r_hi, Real{1e-5} * h); s < s_hi;
+         s *= std::numbers::sqrt2_v<Real>) {
+        out.push_back(t_e + s);
+    }
+}
+
 /// Slow-manifold projection (event_projection.hpp) with the cached
 /// tier-1 basis: modes with Re λ < −fast_threshold go to their
 /// quasi-static value −w/λ. False when tier 1 is not available.
