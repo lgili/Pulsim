@@ -723,7 +723,8 @@ inline void load_device(
         // add-pwl-igbt-and-thyristor: V_ce0, reverse_blocking (default
         // False, True when V_ce0 > 0 — the builder's stage-1 default).
         require_only_keys(dev, idx, type, {"collector", "emitter", "R_on", "R_off",
-                                           "V_ce0", "reverse_blocking", "V_th"});
+                                           "V_ce0", "reverse_blocking", "V_th",
+                                           "losses"});   // load_losses, below
         const Real V_ce0 = real_or(dev, "V_ce0", Real{0});
         b.add_igbt(
             name,

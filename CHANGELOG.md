@@ -6,8 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Integration batch 12: unified device interface 1–3, in-kernel event losses, IR scopes, TR-BDF2 track 6, event queue, control graph 4 merged
+### Integration batch 12: unified device interface 1–3, in-kernel event losses, IR scopes, TR-BDF2 track 6, event queue, control graph 4, PWL IGBT / thyristor, exact engine session 6 merged
 
+* **Fixed** a YAML `igbt` with a `losses:` block was refused ("unknown
+  key 'losses'") once the IGBT's key list became strict; the key is
+  accepted again and the block reaches the loss tracker.
 * **Fixed** a `Circuit` with a loss port (`set_device_losses`) lost the
   port silently through `to_yaml`, `pickle` and
   `sweep(circuit, backend="process")` (the process sweep reported
