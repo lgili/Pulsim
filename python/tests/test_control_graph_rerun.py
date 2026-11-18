@@ -121,6 +121,26 @@ def test_resume_from_continues_the_block():
     assert xr[-1, j] == pytest.approx(xf[-1, j], rel=1e-9)
 
 
+
+@pytest.mark.xfail(strict=True, reason=(
+    "batch-11 review: a SolverSnapshot carries no C-block state; a resume "
+    "continues the blocks from the circuit's LAST run (KNOWN_LIMITATIONS, "
+    "control-graph track)"))
+def test_resume_from_an_older_snapshot_continues_that_runs_block():
+    b = _rc()
+    _py(b)
+    c = b.build()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        full = p.simulate(c, 2e-4, dt=DT, engine="pwl")
+        half = p.simulate(c, 1.05e-4, dt=DT, engine="pwl")
+        p.simulate(c, 1.5e-4, dt=DT, engine="pwl")        # another run between
+        rest = p.simulate(c, 2e-4, dt=DT, engine="pwl",
+                          resume_from=half.final_snapshot)
+    j = c.to_builder().node_id_of("c")
+    xf, xr = np.asarray(full.states), np.asarray(rest.states)
+    assert xr[-1, j] == pytest.approx(xf[-1, j], rel=1e-9)
+
 def test_two_circuits_sharing_an_exported_library_start_clean(tmp_path):
     # one static state behind both circuits: B's first run must not start
     # from A's last state (review of the merge: the first run was not reset)

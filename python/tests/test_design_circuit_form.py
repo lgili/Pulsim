@@ -229,9 +229,9 @@ def test_configuration_errors_name_the_problem():
     _, cir = _pair()
     with pytest.raises(KeyError, match="'C'"):
         cir.evaluate({k: v for k, v in CCM.items() if k != "C"})
-    # a Circuit does not pickle: refused by name (a factory function
-    # passed as circuit= reaches the workers, test_design_declarative)
-    with pytest.raises(p.UnsupportedError, match="circuit does not pickle"):
+    # the circuit pickles (IR group 4); the native schedule does not:
+    # refused by name before any worker starts
+    with pytest.raises(p.UnsupportedError, match="switch_fn does not pickle"):
         cir.evaluate_many(DESIGNS, workers=2, backend="process")
 
 

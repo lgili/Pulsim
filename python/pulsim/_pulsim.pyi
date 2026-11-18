@@ -1261,6 +1261,22 @@ class SimulationOptions:
     def max_newton_iterations(self, arg0: int) -> None:
         ...
     @property
+    def mode_guard(self) -> bool:
+        """
+        Fixed engine: re-decide with the LCP a settle that ends in a mode violating a diode's law.
+        """
+    @mode_guard.setter
+    def mode_guard(self, arg0: bool) -> None:
+        ...
+    @property
+    def mode_selection(self) -> int:
+        """
+        Fixed engine diode decision: 0 the settle (guarded by mode_guard), 1 'shadow', 2 'lcp' (add-complementarity-mode-selection).
+        """
+    @mode_selection.setter
+    def mode_selection(self, arg0: int) -> None:
+        ...
+    @property
     def newton_roundoff_budget(self) -> int:
         """
         Most consecutive Newton solves accepted at roundoff before NewtonRoundoffBudgetExceeded (default 130).
@@ -1619,6 +1635,11 @@ class SimulationResult:
         Inductors whose current a post-solve guard overwrote. Empty unless a guard was enabled AND fired.
         """
     @property
+    def mode_diagnostics(self) -> dict[typing.Any, typing.Any]:
+        """
+        add-complementarity-mode-selection on pwl: 'mode_shadow' / 'mode_selection' counters and the default guard's 'mode_guard' (simulate() copies them to res.diagnostics).
+        """
+    @property
     def n_restart_factorizations(self) -> int:
         """
         Factorisations made for the restart stages: one per mask at 2*gamma*dt (more only if the segment byte budget evicts), plus every refactor for a restart stage of another size (event-split sub-intervals, the stage-2 re-try). 0 with the rule off.
@@ -1696,6 +1717,10 @@ class SimulationResult:
     the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,
     ``"step_observer"``, ``"should_continue"``, ``"closed_loops"``);
     empty when the loop ran fully native."""
+    diagnostics: dict[str, typing.Any]
+    """Complementarity mode-selection counters of a ``pwl`` run
+    (``'mode_shadow'``, ``'mode_selection'``, ``'mode_guard'``): a copy of
+    ``mode_diagnostics``. Set by :func:`pulsim.simulate` on ``pwl``."""
     control_tick_counts: list[int]
     """Controller ticks per tick source, in registration order (closed
     loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by
@@ -3220,9 +3245,17 @@ def _cpp_ps_pwm_switching_function(m_ref: float, t: float, n_sm: int, f_carrier:
     """
     C++ hotpath: PS-PWM switching function — returns the integer count of SMs to insert at time `t` given the modulation reference `m_ref`. Equivalent to `ps_pwm_switching_function` in pulsim/mmc.py.
     """
+def _design_batch(base: Circuit, plan: dict[typing.Any, typing.Any], table: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], periods: collections.abc.Sequence[float], schedules: list[typing.Any], n_threads: int = 1) -> dict[typing.Any, typing.Any]:
+    """
+    pulsim.design's kernel batch: every design of `table` evaluated on the exact steady-state route with the GIL released (pulsim/dsed/design_batch.hpp). Internal.
+    """
 def _eval_expr(text: str, names: collections.abc.Sequence[str], values: collections.abc.Sequence[float], who: str = 'expression') -> float:
     """
     Evaluate a parameter expression (ir/expr.hpp) over names = values.
+    """
+def _junction_fixed_point(on_pts: collections.abc.Sequence[typing.Annotated[collections.abc.Sequence[float], "FixedSize(2)"]], off_pts: collections.abc.Sequence[typing.Annotated[collections.abc.Sequence[float], "FixedSize(2)"]], on: LossTable3D, off: LossTable3D, period: float, p_fixed: float, r_th: float, t_amb: float, cond: ConductionTable, q1: float = 0.0, q2: float = 0.0, i_max: float = 0.0) -> dict[typing.Any, typing.Any]:
+    """
+    Smallest T_j >= t_amb with T_j = t_amb + r_th P(T_j), P the device's loss on a fixed orbit: p_fixed + (sum E_on + sum E_off) / period over the commutation points (|v|, |i|), plus a conduction table's (a q1 + b q2) / period. Returns runaway, tj, p, residual, slope (r_th dP/dT), evaluations, e_on, e_off, p_cond_table.
     """
 def _lcp_enumerate(M: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], q: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> tuple[int, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]]:
     """
