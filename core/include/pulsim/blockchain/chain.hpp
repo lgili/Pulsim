@@ -30,6 +30,7 @@
 #include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
+#include "pulsim/topology/switch_state.hpp"
 
 #include <algorithm>
 #include <array>
