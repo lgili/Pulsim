@@ -38,14 +38,9 @@ namespace pulsim::pwl {
 /// The step every device stamp of the next solve integrates over: the
 /// interval `h` it advances and the rule (`stage`) of its time formula.
 /// Owned by the driver, set before every solve, read by reference.
-/// `increment_form`: the saturable inductor's flux residual in the
-/// closed-form increment form (TR-BDF2) or the direct form (fixed step);
-/// an engine constant, set by `build_device_refresh` (the drivers assign
-/// `{h, stage}` per solve).
 struct StepCtx {
     Real h = Real{0};
     TrBdf2Stage stage = TrBdf2Stage::Trapezoidal;
-    bool increment_form = false;
 };
 
 [[nodiscard]] inline CossStage coss_stage_of(TrBdf2Stage s) noexcept {
@@ -78,42 +73,50 @@ struct StepCtx {
 }
 
 // The Newton stamp of each stateful kind, reading the step ONLY from `c`.
+// `inc`: the engine's form of the saturable flux residual (closed-form
+// increment on TR-BDF2, direct on the fixed engine), a run constant.
 inline Real stamp_kind(NonlinearCapacitorHistory& k, const Vector& x,
-                       sparse::Matrix& J, Vector& f, const StepCtx& c) {
+                       sparse::Matrix& J, Vector& f, const StepCtx& c,
+                       [[maybe_unused]] bool inc) {
     return refresh_nonlinear_capacitors(x, J, f, k, c.h,
                                         coss_stage_of(c.stage),
                                         &k.q_gamma());
 }
 inline Real stamp_kind(LauritzenDiodeHistory& k, const Vector& x,
-                       sparse::Matrix& J, Vector& f, const StepCtx& c) {
+                       sparse::Matrix& J, Vector& f, const StepCtx& c,
+                       [[maybe_unused]] bool inc) {
     return refresh_lauritzen_diodes(x, J, f, k, c.h, c.stage);
 }
 inline Real stamp_kind(PmsmMnaHistory& k, const Vector& x,
-                       sparse::Matrix& J, Vector& f, const StepCtx& c) {
+                       sparse::Matrix& J, Vector& f, const StepCtx& c,
+                       [[maybe_unused]] bool inc) {
     return refresh_pmsm_mna(x, J, f, k, c.h, c.stage);
 }
 inline Real stamp_kind(IgbtTailHistory& k, const Vector& x,
-                       sparse::Matrix& J, Vector& f, const StepCtx& c) {
+                       sparse::Matrix& J, Vector& f, const StepCtx& c,
+                       [[maybe_unused]] bool inc) {
     return refresh_igbt_tails(x, J, f, k, c.h, c.stage);
 }
 inline Real stamp_kind(SaturableInductorHistory& k, const Vector& x,
-                       sparse::Matrix& J, Vector& f, const StepCtx& c) {
+                       sparse::Matrix& J, Vector& f, const StepCtx& c,
+                       [[maybe_unused]] bool inc) {
     Real m = Real{0};
     for (const auto& e : k.entries()) {
         m = std::max(m, stamp_saturable_inductor(e, x, J, f, c.h, c.stage,
-                                                 c.increment_form));
+                                                 inc));
     }
     return m;
 }
 
 namespace detail {
+template <class K>
+concept HasStamp = requires(K& k, const Vector& x, sparse::Matrix& J,
+                            Vector& f, const StepCtx& c, bool inc) {
+    { stamp_kind(k, x, J, f, c, inc) } -> std::same_as<Real>;
+};
 template <class List> struct AllStamp;
 template <class... Ks> struct AllStamp<device::TypeList<Ks...>> {
-    static constexpr bool value =
-        (requires(Ks& k, const Vector& x, sparse::Matrix& J, Vector& f,
-                  const StepCtx& c) {
-            { stamp_kind(k, x, J, f, c) } -> std::same_as<Real>;
-        } && ...);
+    static constexpr bool value = (HasStamp<Ks> && ...);
 };
 }  // namespace detail
 static_assert(detail::AllStamp<StatefulKinds>::value,
@@ -137,10 +140,11 @@ static_assert(detail::AllStamp<StatefulKinds>::value,
             sparse::zero_keep_pattern(J_nl);
             f_nl.setZero();
         }
-        StepCtx c = ctx;
-        c.increment_form = increment_form;
         hs.for_each([&](auto& k) {
-            if (!k.empty()) m = std::max(m, stamp_kind(k, x, J_nl, f_nl, c));
+            if (!k.empty()) {
+                m = std::max(m, stamp_kind(k, x, J_nl, f_nl, ctx,
+                                           increment_form));
+            }
         });
         return m;
     };

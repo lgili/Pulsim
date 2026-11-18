@@ -128,6 +128,10 @@ def _snapshot_like(base, history):
     # An unfinished discontinuity_restart window (the steps after an
     # edge just before the boundary) is part of the period map's state.
     s.restart_steps_left = int(getattr(base, "restart_steps_left", 0))
+    # A TR-BDF2 snapshot on a gate edge keeps its refusal by the fixed
+    # engine (the grid is not copied: the history differs, so it restarts).
+    s.post_edge_derivatives = bool(getattr(base, "post_edge_derivatives",
+                                           False))
     for attr, _w, _n in _STATEFUL_FIELDS:
         setattr(s, attr, [float(v) for v in getattr(base, attr, ())])
     s.valid = True

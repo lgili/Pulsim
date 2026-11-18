@@ -15,6 +15,7 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <stdexcept>
 #include <vector>
 
 using namespace pulsim;
@@ -262,6 +263,11 @@ TEST_CASE("the stateful-kind registry: one rollback vector carries every "
     REQUIRE(after.lambda_gamma == before.lambda_gamma);
     REQUIRE(after.i_gamma == before.i_gamma);
     REQUIRE(after.ja_state.n_sub == before.ja_state.n_sub);
+    // a rollback point of another size is refused, never read past its end
+    const pwl::StatefulHistories::Snapshot short_s(s.begin(), s.end() - 1);
+    REQUIRE_THROWS_AS(hs.restore(short_s), std::logic_error);
+    REQUIRE_THROWS_AS(hs.restore(pwl::StatefulHistories::Snapshot{}),
+                      std::logic_error);
     // and the snapshot layout is the kinds' own blocks
     pwl::HistoryState history(g, pool);
     const auto l = hs.layout(history);

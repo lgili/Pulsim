@@ -14,7 +14,9 @@
 // stamp order of the Newton refresh). The kinds' arithmetic is unchanged.
 //
 // The in-run rollback is ONE flat vector of reals: every real each kind
-// carries from step to step, stage scratch included (`for_each_state`), so
+// carries from step to step, its stage scratch included (`for_each_state`;
+// the Coss kind-level `q_gamma` is not: `capture_gamma` rewrites it before
+// every read), so
 // restoring it is bit-identical to restoring the entries. The snapshot of a
 // run (`save` / `load`) is the physical subset, `to_flat`, in the block
 // order of `device::kStateBlocks`.
@@ -124,7 +126,26 @@ public:
             }
         });
     }
+    /// Number of reals `snapshot_into` writes for this run.
+    [[nodiscard]] std::size_t reals_in_rollback() const {
+        std::size_t n = 0;
+        for_each([&n](const auto& k) {
+            using K = std::remove_cvref_t<decltype(k)>;
+            for (const auto& e : k.entries()) {
+                K::for_each_state(e, [&n](const auto&) { ++n; });
+            }
+        });
+        return n;
+    }
     void restore(const Snapshot& s) {
+        // Rare (a rejected step), so the size is checked every time: a
+        // stale or never-taken rollback point must not be read past its end.
+        if (s.size() != reals_in_rollback()) {
+            throw std::logic_error(
+                "StatefulHistories::restore: the rollback point holds "
+                + std::to_string(s.size()) + " reals, this run carries "
+                + std::to_string(reals_in_rollback()));
+        }
         std::size_t p = 0;
         for_each([&](auto& k) {
             using K = std::remove_cvref_t<decltype(k)>;

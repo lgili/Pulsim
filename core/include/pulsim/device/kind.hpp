@@ -43,8 +43,8 @@ template <class... Ks> struct TypeList {
 /// What one stateful Newton kind implements (the table in design.md,
 /// "How to add a device kind"). `for_each_state(entry, f)` visits every
 /// real the entry carries from step to step — the snapshot's reals AND the
-/// stage scratch — so the in-run rollback restores exactly what the step
-/// may have written.
+/// per-entry stage scratch — so the in-run rollback restores exactly what
+/// the step may have written.
 template <class K>
 concept StatefulKind =
     requires(K& k, const K& ck, typename K::Entry& e,

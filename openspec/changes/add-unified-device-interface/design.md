@@ -594,8 +594,10 @@ header, `pwl/<kind>_history.hpp`, with:
 | `entries()`, `mutable_entries()`, `empty()` | the instances (the rollback writes through `mutable_entries`) |
 | `kBlock`, `kFlatPerDevice`, `kStoredKind` | its `device::StateBlock` (the block's name is the refusal name), reals per instance in the snapshot, the kind-table row whose engine column applies |
 
-plus a stamp overload `stamp_kind(const History&, x, J_nl, f_nl, const
-StepCtx&)` in `pwl/device_refresh.hpp` that reads `h` and the stage ONLY
+plus a stamp overload `stamp_kind(History&, x, J_nl, f_nl, const
+StepCtx&, bool inc)` in `pwl/device_refresh.hpp` (`inc`: the engine's
+residual form, a run constant; non-const because some stamps write
+per-iteration scratch) that reads `h` and the stage ONLY
 from the `StepCtx` it is given (never a captured step: TR-BDF2 probe
 solves divided by zero that way). Then: append a `device::StateBlock`
 (at the END: older snapshots keep loading) with its row in

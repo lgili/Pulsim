@@ -24,8 +24,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Changed** (internal) the five stateful Newton kinds are one
   compile-time list (`pwl::StatefulKinds`, concept `device::StatefulKind`);
   the drivers, the Newton refresh, the in-run rollback and the snapshot
-  iterate it, and the rollback is one flat vector that includes the
-  TR-BDF2 stage scratch. `device/device.hpp` adds the `Device` contract
+  iterate it, and the rollback is one flat vector that includes each
+  device's TR-BDF2 stage scratch. `device/device.hpp` adds the `Device` contract
   (one law over the scalar, `Params<S>` for parameter sensitivities),
   unused by the engines yet. Results bit-identical.
 

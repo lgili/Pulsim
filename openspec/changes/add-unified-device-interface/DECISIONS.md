@@ -154,6 +154,11 @@
     `h_min` of the run's last `t`: the traced run replaced them at t_end − 1e-14 and then committed
     a 1e-14 sliver step, which is where the −22,881 A comes from), and the
     fixed engine refuses it by name, pointing at `engine='trbdf2'`.
+    Review (2026-11-18): the flag is not cleared by a committed step
+    after the refresh. Kept: a commit carries the post-edge slot forward
+    whatever its length (the trapezoid's q̇ = 2Δq/h − q̇_old), and the flag
+    needs the probe (1e-14–1e-13 s) to reach within `h_min` of the end,
+    so the edge was at t_end to within that probe.
 19. **Step 4, the `Device` contract** (`device/device.hpp`, unused by the
     engines): `Formula`, `StepCtx` (by value; the only source of `h`),
     `Out<S, R>`, `history_term`, `formula_a`, a dense `stamp_fq` /
