@@ -60,6 +60,9 @@ struct DutyRegister {
     Real latch_k = Real{0};  // carrier period index from which shadow holds
     bool pending = false;
 
+    /// `t` is the write's SCHEDULED instant (a tick handler passes
+    /// `TickInfo::scheduled_t`): an engine may land a tick slightly early,
+    /// and the landed time could fall in the previous carrier period.
     void write(Real v, Real t) {
         if (latch == LatchPolicy::Immediate) {
             value = v;
@@ -101,6 +104,24 @@ struct CarrierPwm {
     [[nodiscard]] Real resolution() const noexcept { return Real{0}; }
 
     [[nodiscard]] Real duty_at(Real t) const { return duty->read(t); }
+
+    /// Refuses what would silently misbehave: no register, T <= 0, a leg
+    /// on one bit, and an AtCarrierStart register latching on another
+    /// carrier (its latch would fall between this carrier's edges).
+    /// The register must outlive every schedule built from this source.
+    void check(const std::string& name) const {
+        const auto bad = [&](const char* why) {
+            throw std::invalid_argument("CarrierPwm '" + name + "': " + why);
+        };
+        if (duty == nullptr) bad("no DutyRegister");
+        if (!(T > Real{0})) bad("carrier period T must be > 0");
+        if (hs == ls) bad("hs and ls are the same switch bit");
+        if (duty->latch == LatchPolicy::AtCarrierStart
+            && (duty->T != T || duty->phase != phase)) {
+            bad("its AtCarrierStart DutyRegister latches on a different "
+                "carrier (T and phase must equal the modulator's)");
+        }
+    }
 
     void apply(Real t, topology::SwitchStateMask& m) const {
         const Real d = duty_at(t);
@@ -145,7 +166,12 @@ struct ScheduleGate {
     std::vector<Index> bits;
 
     [[nodiscard]] std::vector<Index> owned_bits() const { return bits; }
-    [[nodiscard]] Real resolution() const noexcept { return Real{0}; }
+    // No edge oracle: not exact, so the set states no edges either.
+    [[nodiscard]] Real resolution() const noexcept {
+        return sched.has_edges() ? Real{0}
+                                 : std::numeric_limits<Real>::infinity();
+    }
+    void check(const std::string&) const {}
     void apply(Real t, topology::SwitchStateMask& m) const {
         const auto s = sched(t);
         for (const Index b : bits) {
@@ -168,6 +194,7 @@ public:
     /// one another source owns, naming both sources.
     template <class G>
     void add(G gate, std::string name) {
+        gate.check(name);
         const auto bits = gate.owned_bits();
         const int id = static_cast<int>(names_.size());
         for (const Index b : bits) {
