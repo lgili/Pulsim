@@ -150,7 +150,8 @@ def test_stateful_stamps_and_a_loss_port_compose_on_pwl():
     assert np.asarray(r.v("tj"))[-1] == pytest.approx(28.557469446748136, rel=1e-9)
     assert r.heat_injected == pytest.approx(0.00392922192281983, rel=1e-9)
     # the loss port only heats the thermal node: the electrical trace is r0's
-    np.testing.assert_array_equal(out, np.asarray(r0.v("out")))
+    # (bit-equal on macOS and Linux; MSVC differs by 9.6e-15 relative)
+    np.testing.assert_allclose(out, np.asarray(r0.v("out")), rtol=1e-12, atol=0.0)
     lin = np.asarray(_end("pwl", True, coss=False).v("out"))[-1]
     assert abs(lin - out[-1]) > 1e3 * 1e-9 * abs(out[-1])
 
