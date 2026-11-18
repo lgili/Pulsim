@@ -118,6 +118,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pulsim::solver {
@@ -942,7 +943,12 @@ inline SimulationResult run_transient_trbdf2(
     // probe floor so the failure is paid once, not at every cascade.
     Real h_probe_learned = Real{0};
     // The learned step floor below which a step's factorization is
-    // singular (0 = none seen; see stage 1).
+    // singular, per step-start mode (the island it comes from exists in
+    // that mode only; see stage 1). h_cond: the current mode's (0 = none).
+    std::unordered_map<SwitchStateMask, Real> h_cond_by_mode;
+    constexpr Size kGrindSteps = 200'000;
+    Size grind_n0 = 0;
+    Real grind_t0 = opts.t_start;
     Real h_cond = Real{0};
     // Step and outcome of the last probe (the post-event refresh
     // reads the capacitor current back through this step).
@@ -1929,7 +1935,11 @@ inline SimulationResult run_transient_trbdf2(
         // closing a loop is released); the BE solves and the row read it.
         std::optional<SwitchStateMask> m_rec;
         if (sdirk_event) {
-            m_rec = mask_at(t);
+            // Pure overlay (no apply_gates: the event already applied them).
+            m_rec = has_diodes ? switch_fn(t).overlay(diodes.current_diode_mask(),
+                                                      diodes.diode_owned_bits())
+                               : switch_fn(t);
+            settle_mode(*m_rec);
             const Real dt_rec = std::max({h_min, Real{1e-4} * h,
                                           h_probe_learned});
             bool instant = be_solve(*m_rec, dt_rec, x_rec)
@@ -2068,6 +2078,21 @@ inline SimulationResult run_transient_trbdf2(
                 break;   // partial trace preserved
             }
             ++steps;
+            // A grind is refused early, by name: 200,000 accepted steps that
+            // advance less than 1e-4 of the span (the example flyback sat
+            // at 5e-14 s on its clamp node's L*g_off mode for 10 M steps).
+            if (st.n_accept >= grind_n0 + kGrindSteps) {
+                if (t - grind_t0 < Real{1e-4} * span) {
+                    throw std::runtime_error(std::format(
+                        "run_transient_trbdf2: the controller is grinding: "
+                        "{} accepted steps advanced only {:.3g} s, to t = {} "
+                        "(mean step {:.3g} s) — an unresolved fast mode",
+                        kGrindSteps, t - grind_t0, t,
+                        (t - grind_t0) / static_cast<Real>(kGrindSteps)));
+                }
+                grind_n0 = st.n_accept;
+                grind_t0 = t;
+            }
 
             // ---- controller tick: fire AT the scheduled instant,
             //      before this step's mask is sampled ----
@@ -2078,6 +2103,17 @@ inline SimulationResult run_transient_trbdf2(
             // walk h below h_chatter: under all-OFF bridge bits a 1 mH
             // line and g_off make a 1 ps mode whose kink the LTE reads
             // as error at any h, and h sat at h_min until max_steps.
+            // The gates as the step starts (one switch_fn call), and
+            // the step cap the narrowest pulse seen so far implies.
+            SwitchStateMask sw_now = switch_fn(t + Real{0.5} * h_min);
+            const SwitchStateMask mode_start = has_diodes
+                ? sw_now.overlay(diodes.current_diode_mask(),
+                                 diodes.diode_owned_bits())
+                : sw_now;
+            if (!h_cond_by_mode.empty()) {
+                const auto it = h_cond_by_mode.find(mode_start);
+                h_cond = it == h_cond_by_mode.end() ? Real{0} : it->second;
+            }
             const Real h_lo = std::max(
                 (t - chatter_exhaust_t <= Real{1e3} * h_chatter)
                     ? h_chatter : h_min,
@@ -2088,9 +2124,6 @@ inline SimulationResult run_transient_trbdf2(
             end_cut_h = t_stop - t < h ? h : Real{0};
             h = std::clamp(h, std::min(h_lo, t_stop - t),
                            std::min(h_max, t_stop - t));
-            // The gates as the step starts (one switch_fn call), and
-            // the step cap the narrowest pulse seen so far implies.
-            SwitchStateMask sw_now = switch_fn(t + Real{0.5} * h_min);
             learn_gate_period(sw_now, t);
             if (has_ticks && !(opts.h_max > Real{0})) {
                 h = std::min(h, std::max(gate_period_cap, h_lo));
@@ -2339,14 +2372,14 @@ inline SimulationResult run_transient_trbdf2(
                 if (!is_singular_error(e) || nl_effective) throw;
                 // A final sliver (an edge landed a few h_min before t_end)
                 // ends the run here, as the loop already does within h_min.
-                if (t + h >= opts.t_end && h <= Real{64} * h_min) {
+                if (t + h >= t_stop && h <= Real{64} * h_min) {
                     // the SDIRK stage swapped in derivative-free history:
                     // the run's final snapshot must hold the real one
                     if (sdirk) history.restore(hist_snap);
                     break;
                 }
                 const bool landing = h < h_ctrl * (Real{1} - Real{1e-12});
-                if (landing || Real{4} * h > std::min(h_max, opts.t_end - t)) {
+                if (landing || Real{4} * h > std::min(h_max, t_stop - t)) {
                     throw std::runtime_error(std::format(
                         "run_transient_trbdf2: at t = {} the step matrix is "
                         "numerically singular at h = {} s{}, and a longer step "
@@ -2410,7 +2443,8 @@ inline SimulationResult run_transient_trbdf2(
                 ++st.n_reject;
                 ++st.n_conditioning_rejects;
                 h_cond = Real{4} * h;
-                st.h_conditioning_floor = h_cond;
+                h_cond_by_mode[mode_start] = h_cond;
+                st.h_conditioning_floor = std::max(st.h_conditioning_floor, h_cond);
                 h = h_cond;
                 continue;
             }
@@ -2528,7 +2562,11 @@ inline SimulationResult run_transient_trbdf2(
             // L-stable stages damp is not error; raw, the estimate reads a
             // 1e-13 s L*g_off mode as error at any h. Linear circuits
             // only (a Newton circuit's factor is not kept).
-            if ((opts.filter_error_estimate || (sdirk && sdirk_event && !reinit_step))
+            // Also inside the window after the chatter guard gave up: there
+            // the raw estimate reads the L*g_off mode as error at any h (see
+            // h_lo), and every step sat at h_chatter as a forced accept.
+            if ((opts.filter_error_estimate || (sdirk && sdirk_event && !reinit_step)
+                 || t - chatter_exhaust_t <= Real{1e3} * h_chatter)
                 && !nl_effective
                 && !entries.empty()) {
                 filter_estimate(mask_step, hg, est_v);

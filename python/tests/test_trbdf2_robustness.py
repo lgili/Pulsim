@@ -537,3 +537,48 @@ def test_an_unresolvable_island_is_refused_by_name():
     # x or y: which island node shows the zero pivot follows the ordering
     assert "numerically singular" in msg and re.search(r"node [xy]\b", msg)
     assert "give it a DC path" in msg
+
+
+# ---------------------------------------------------------------------
+# Shipped examples: refused by name, or completed with a sane step count
+# ---------------------------------------------------------------------
+
+_EXAMPLES = __import__("pathlib").Path(__file__).resolve().parents[2] / "examples"
+
+
+def test_example_flyback_grind_is_refused_by_name():
+    """examples/flyback.yaml (doc gates): the switch node has no
+    capacitance, so with Q1, its body diode and D_cl all OFF the leakage
+    drives it through g_off alone (tau ~ 3e-14 s). Before: 10 M steps to
+    max_steps at t = 68 us. Now refused after one 200,000-step window
+    (0.40-0.80 M samples recorded, about 1-2 s), naming the nodes."""
+    lc = p.load_yaml_file(str(_EXAMPLES / "flyback.yaml"))
+    si, n = lc.builder.switch_index_of, len(lc.switch_names)
+    fn = p.make_pwm_switch_fn(frequency=100e3, duty=0.5,
+                              switch_idx=si("Q1"), num_switches=n)
+    with pytest.raises(p.SimulationAborted) as ei:
+        p.simulate(lc, engine="trbdf2", switch_fn=fn)
+    msg = str(ei.value)
+    assert "controller is grinding" in msg and "sw" in msg
+    assert "Coss" in msg and "engine='pwl'" in msg
+    assert len(ei.value.partial.times) < 1_100_000
+
+
+def test_example_psfb_completes_with_a_bounded_step_count():
+    """examples/phase_shift_full_bridge.yaml (phi = pi/2, 100 ns dead
+    time): each chatter break pinned h at h_chatter = 2e-12 s for 1000
+    forced accepts (3.65 M steps, 3.37 M forced). The estimate is now
+    filtered in that window: 147 k steps. Mean V_out over 1.0-1.2 ms
+    22.816 V against the exact-route truth 22.851 V."""
+    lc = p.load_yaml_file(str(_EXAMPLES / "phase_shift_full_bridge.yaml"))
+    si, n = lc.builder.switch_index_of, len(lc.switch_names)
+    fn = p.make_phase_shift_full_bridge_fn(
+        100e3, np.pi / 2, si("HS_A"), si("LS_A"), si("HS_B"), si("LS_B"),
+        n, 100e-9)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(lc, engine="trbdf2", switch_fn=fn)
+    assert r._trbdf2_stats["n_accept"] < 200_000
+    t = np.asarray(r.times)
+    v = np.asarray(r.v("vout")) - np.asarray(r.v("rect_neg"))
+    assert p.time_average(t, v, 1.0e-3, 1.2e-3) == pytest.approx(22.851, abs=0.2)

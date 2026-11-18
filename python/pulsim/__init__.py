@@ -3057,6 +3057,18 @@ def simulate(
                 _partial._trbdf2_stats = {}
             except AttributeError:  # pragma: no cover
                 pass
+            if "controller is grinding" in str(_aborted):
+                _nodes = _inductor_only_nodes(builder)
+                if _nodes:
+                    _aborted.args = (str(_aborted) + (
+                        f". Node(s) {', '.join(_nodes)} have no capacitance "
+                        "and no resistor: while every switch and diode on "
+                        "them is OFF, an inductor drives them through g_off "
+                        "alone (a mode of tau = L*g_off, femtoseconds), which "
+                        "this engine's error estimate reads as error at any "
+                        "step. Give the node a capacitance (a MOSFET's Coss, a "
+                        "snubber) or use engine='pwl' with a fixed dt."),
+                    ) + tuple(_aborted.args[1:])
             raise
         res._builder = builder
         res._preflight = _preflight_report
@@ -3960,6 +3972,27 @@ def _floating_subnets(builder) -> list:
             groups.setdefault(r, []).append(i)
     return sorted([g.node_name(i) or f"#{i}" for i in grp]
                   for grp in groups.values() if storage.intersection(grp))
+
+
+def _inductor_only_nodes(builder) -> list:
+    """Names of nodes whose only non-switch branches are inductors: while
+    every switch/diode on them is OFF, their voltage is set by g_off alone
+    (an L*g_off mode). Best effort: [] when the builder cannot be read."""
+    try:
+        g = builder.graph
+        comps = builder.components()
+    except AttributeError:  # pragma: no cover
+        return []
+    kinds: dict = {}
+    for c in comps:
+        k = str(c.get("kind", ""))
+        if k in ("switch", "diode") or k.endswith("switch"):
+            continue
+        for nd in c.get("nodes", ()):
+            if nd >= 0:
+                kinds.setdefault(nd, set()).add(k)
+    return [g.node_name(nd) or f"#{nd}" for nd, ks in sorted(kinds.items())
+            if ks == {"inductor"}]
 
 
 class _Blocker(str):
