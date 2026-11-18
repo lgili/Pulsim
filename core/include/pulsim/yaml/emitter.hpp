@@ -20,8 +20,8 @@
 // with `std::from_chars`, so `to_yaml` is a fixed point after one round.
 //
 // Not serialisable, and refused naming the device: a C block (its step
-// function is a Python callable) and an unnamed device another entry
-// must refer to.
+// function is a Python callable), an unnamed device another entry
+// must refer to, and a loss port (set_device_losses; not in the dialect).
 
 #include "pulsim/ir/circuit.hpp"
 #include "pulsim/models/charge_table.hpp"
@@ -451,6 +451,14 @@ namespace yaml_detail {
                 .add("rds_tc2", num(p.rds_tc2)).add("vt_tc", num(p.vt_tc));
             o += "  - " + mm.str() + "\n";
         }
+    }
+    // shortcut: refused, not written; the IR track adds loss ports to the
+    // dialect (and to value_hash). Silently dropping one lost its heat.
+    if (const auto& ls = pool.device_losses(); !ls.empty()) {
+        throw std::invalid_argument(std::format(
+            "to_yaml: device \"{}\" has a loss port (set_device_losses), "
+            "which this YAML dialect does not carry yet; build the circuit "
+            "without it to serialise or pickle it", ls.front().device));
     }
     if (const auto cs = c.controls(); !cs.empty()) {
         o += "controls:\n";

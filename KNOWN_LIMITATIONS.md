@@ -33,7 +33,11 @@ can pick it up without re-discovering the context.
 thermal node. `trbdf2`, `dsed`, `bdf1` and `auto` without `dt=` refuse a loss port by
 name until the unified event queue gives them one commutation hook. The
 event energy is not drawn from the circuit, `T_j` does not change the
-device, and a resumed run drops the heat of the step in flight. See
+device, and a resumed run drops the heat still pending at the split
+(pinned by `test_loss_port_seams.py`). A `Circuit` with a loss port
+cannot be written as YAML or pickled (refused by name, so
+`sweep(circuit, backend="process")` refuses too); `with_value` and
+thread sweeps carry the port, and `value_hash` does not cover it. See
 `docs/known-limitations.md` and `docs/losses-and-thermal.md`.
 
 ### Per-device loss reporting — sub-step transient resolution

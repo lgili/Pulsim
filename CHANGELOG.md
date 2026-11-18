@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration batch 12: unified device interface 1–3, in-kernel event losses, IR scopes, TR-BDF2 track 6, event queue merged
+
+* **Fixed** a `Circuit` with a loss port (`set_device_losses`) lost the
+  port silently through `to_yaml`, `pickle` and
+  `sweep(circuit, backend="process")` (the process sweep reported
+  0 J of heat where the run deposits 9 mJ). `to_yaml` now refuses it by
+  name; `with_value` and the thread / kernel sweep paths carry the port.
+  Writing loss ports into the YAML dialect (and into `value_hash`) is
+  left to the circuit-IR track.
+
 ### Optimisation slice 7: event losses inside the transient (`pwl`)
 
 * **Added** `CircuitBuilder.set_device_losses(device, junction= | Tj=,
