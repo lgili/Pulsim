@@ -279,6 +279,8 @@ def test_a_dev_state_without_its_layout_is_refused():
 
 def test_a_newer_pickle_version_is_refused_by_version():
     snap = SolverSnapshot.__new__(SolverSnapshot)
+    with pytest.raises(RuntimeError, match="pickle version 6"):
+        snap.__setstate__(("SolverSnapshot", 6, 0.0))
     with pytest.raises(RuntimeError, match="pickle version 5"):
         snap.__setstate__(("SolverSnapshot", 5, 0.0))
     with pytest.raises(RuntimeError, match="pickle version 3"):
@@ -288,11 +290,11 @@ def test_a_newer_pickle_version_is_refused_by_version():
 
 
 def test_a_version_3_pickle_loads_and_resumes_on_a_restarted_grid():
-    """Version 3 = version 4 without the grid field: it loads, and resumes
+    """Version 3 = version 5 without the grid field: it loads, and resumes
     exactly as the same snapshot without a grid."""
     snap = _pwl(4.2e-5).final_snapshot
     v4 = snap.__getstate__()
-    assert v4[1] == 4 and len(v4) == 14
+    assert v4[1] == 5 and len(v4) == 17
     old = SolverSnapshot.__new__(SolverSnapshot)
     old.__setstate__(("SolverSnapshot", 3) + tuple(v4[2:12]))
     assert np.isnan(old.grid_origin) and not old.post_edge_derivatives

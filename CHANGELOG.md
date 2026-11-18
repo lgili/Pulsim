@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration batch 14a: event queue 3, device interface 3, unified stepper 2, ideal switch 5, TR-BDF2 track 8 merged
+
+* **Changed** the `SolverSnapshot` pickle is version 5, one layout with
+  17 fields: the controllers'-state marker (12), the fixed-step grid
+  (13), the step controller's block or None (14) and the tick phase
+  (`tick_origin`, `tick_next_k`; 15-16). It replaces four version-4
+  layouts written on parallel branches; all of them (13, 14 and 15
+  fields; the two 15-field forms told apart by field 12, a bool or a
+  tuple), version 3 (12, 13 fields) and Pulsim 2.0 tuples still load.
+  A malformed tuple raises `RuntimeError("SolverSnapshot: malformed
+  pickle state ...")` instead of a pybind cast error.
+* **Fixed** a NaN duty on a carrier PWM (`make_carrier_pwm_fn`, the
+  control graph's PWM gate) turned the switch ON for the whole period
+  since the gate moved onto `CarrierPwm`; it holds the switch (both
+  switches of a leg) OFF again.
+
 ### Integration batch 13: device interface slice 2, IR node domains, TR-BDF2 tracks 7–8, exact engine 4, ideal switch 4, permeance domain merged
 
 * **Changed** the `SolverSnapshot` pickle is version 4 with 14 fields:

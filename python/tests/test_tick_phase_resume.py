@@ -96,7 +96,7 @@ def test_the_snapshot_carries_each_sources_origin_and_next_k(engine, kw):
                                rtol=0, atol=1e-12)
 
 
-def test_pickle_version_4_keeps_the_tick_phase_and_reads_version_3():
+def test_pickle_version_5_keeps_the_tick_phase_and_reads_version_3():
     b = _buck()
     first = p.simulate(b, T1, engine="trbdf2", step_observer=lambda t, x: None,
                        controller_period=1e-4, switch_fn=_sw(b))
@@ -105,13 +105,17 @@ def test_pickle_version_4_keeps_the_tick_phase_and_reads_version_3():
     assert list(back.tick_origin) == list(snap.tick_origin) == [0.0]
     assert list(back.tick_next_k) == list(snap.tick_next_k) == [6]
     state = snap.__getstate__()
-    assert state[0] == "SolverSnapshot" and state[1] == 4 and len(state) == 15
+    assert state[0] == "SolverSnapshot" and state[1] == 5 and len(state) == 17
     cls = type(snap)
     v3 = cls.__new__(cls)
     v3.__setstate__(("SolverSnapshot", 3) + tuple(state[2:13]))
     assert list(v3.tick_origin) == [] and v3.t == snap.t
     bad = cls.__new__(cls)
     with pytest.raises(RuntimeError, match="reads version 3"):
+        bad.__setstate__(("SolverSnapshot", 4) + tuple(state[2:16]))
+    # 13 fields read as version 4 with the grid at 12: a bool there is a
+    # malformed tuple, refused by name (not pybind's cast error)
+    with pytest.raises(RuntimeError, match="SolverSnapshot: malformed"):
         bad.__setstate__(("SolverSnapshot", 4) + tuple(state[2:13]))
 
 

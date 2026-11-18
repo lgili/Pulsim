@@ -162,3 +162,19 @@ def test_the_graph_gate_reads_a_register_kept_current_by_the_graph():
     assert gate(0.45 * T).get(0)
     with pytest.raises(ValueError, match="two legs"):
         cxx.make_pwm_gate(1, [("duty", 0, T, 0.0), ("duty", 0, T, 0.0)])
+
+
+def test_a_nan_duty_holds_the_switch_off():
+    """Batch 14a seam D: a NaN duty (a diverged controller) turned the
+    switch ON for the whole period after the move to CarrierPwm
+    (``!reached`` is true for NaN); before it stayed OFF. A leg holds both
+    switches OFF."""
+    duty = p.DutyRegister(float("nan"))
+    one = p.make_carrier_pwm_fn(T, duty, 0, 3)
+    leg = p.make_carrier_pwm_fn(T, duty, 0, 3, low_side=2, dead_time=1e-7)
+    for f in (0.0, 0.1, 0.5, 0.9, 0.999):
+        assert not one((3 + f) * T).get(0), f
+        m = leg((3 + f) * T)
+        assert not m.get(0) and not m.get(2), f
+    duty.write(0.5, 4 * T)        # a finite duty switches again
+    assert one(4.25 * T).get(0) and not one(4.75 * T).get(0)

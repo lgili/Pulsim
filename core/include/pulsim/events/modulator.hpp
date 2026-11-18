@@ -105,6 +105,13 @@ struct CarrierPwm {
 
     void apply(Real t, topology::SwitchStateMask& m) const {
         const Real d = duty_at(t);
+        if (std::isnan(d)) {
+            // A NaN duty (a diverged controller) holds the switch OFF, as the
+            // graph gate did before this move: `!reached` is true for NaN.
+            m.set(static_cast<Size>(hs), false);
+            if (ls >= 0) m.set(static_cast<Size>(ls), false);
+            return;
+        }
         const auto p = pwm_phase::cycle_position(t, phase, T);
         if (ls < 0) {
             m.set(static_cast<Size>(hs), !pwm_phase::reached(p, d));

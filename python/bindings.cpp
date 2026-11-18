@@ -4196,14 +4196,18 @@ void init_module(py::module_& m) {
         .def(py::pickle(
             [](const SolverSnapshot& s) {
                 // A tag first, so it never reads as the 2.0 tuples
-                // (which start with t). Version 4 = version 3 + the
-                // controllers'-state marker (field 12) + the grid and the
-                // edge flag (field 13). Read: v3 with 12 or 13 fields
-                // (13 = the marker), v4 with 13 (grid at 12, the
-                // device-interface branch) or 14 fields.
+                // (which start with t). Version 5 (batch 14a) is the one
+                // layout that carries every block, always written:
+                //   0 tag, 1 version, 2-10 as version 3, 11 legacy payload
+                //   or None, 12 the controllers'-state marker, 13 the grid
+                //   (origin, step, dt, post_edge_derivatives), 14 the step
+                //   controller (kind, values) or None, 15 tick_origin,
+                //   16 tick_next_k.
+                // Version 4 had four layouts on parallel branches (13, 14
+                // or 15 fields; field 12 a bool or a tuple); all still load.
                 const auto& L = s.legacy;
-                py::tuple out = py::make_tuple(
-                    std::string("SolverSnapshot"), 4, s.t, s.x, s.dev_state,
+                return py::make_tuple(
+                    std::string("SolverSnapshot"), 5, s.t, s.x, s.dev_state,
                     s.dev_layout, s.layout_signature, s.mask, s.stamped_mask,
                     s.restart_steps_left, s.valid,
                     s.is_legacy()
@@ -4212,38 +4216,63 @@ void init_module(py::module_& m) {
                               L.lauritzen_history, L.igbt_tail_history,
                               L.pmsm_history))
                         : py::object(py::none()),
-                    py::make_tuple(s.grid_origin, s.grid_step, s.grid_dt,
-                                   s.post_edge_derivatives),
                     // the controllers' state does not pickle: a resume
                     // from the copy refuses by name instead of
                     // continuing whatever the graphs hold
-                    static_cast<bool>(s.control_state));
-                // The controller block (DECISIONS #24) is a 15th field only
-                // when filled: an empty one keeps the 14-field version 4
-                // that earlier readers load.
-                if (s.controller.empty()) return out;
-                return py::tuple(out + py::make_tuple(py::make_tuple(
-                    static_cast<int>(s.controller.kind), s.controller.v)));
+                    static_cast<bool>(s.control_state),
+                    py::make_tuple(s.grid_origin, s.grid_step, s.grid_dt,
+                                   s.post_edge_derivatives),
+                    s.controller.empty()
+                        ? py::object(py::none())
+                        : py::object(py::make_tuple(
+                              static_cast<int>(s.controller.kind),
+                              s.controller.v)),
+                    s.tick_origin, s.tick_next_k);
             },
             [](py::tuple t) {
+              try {
                 SolverSnapshot s;
                 if (t.size() >= 2 && py::isinstance<py::str>(t[0])) {
                     const int ver = t[1].cast<int>();
+                    const std::size_t n = t.size();
                     if (t[0].cast<std::string>() != "SolverSnapshot"
-                        || !((ver == 3 && (t.size() == 12 || t.size() == 13))
-                             || (ver == 4 && t.size() >= 13 && t.size() <= 15))) {
+                        || !((ver == 3 && (n == 12 || n == 13))
+                             || (ver == 4 && n >= 13 && n <= 15)
+                             || (ver == 5 && n == 17))) {
                         throw std::runtime_error(
                             "SolverSnapshot: pickle version "
                             + std::to_string(ver) + " with "
-                            + std::to_string(t.size())
+                            + std::to_string(n)
                             + " fields; this Pulsim reads version 3 "
-                              "(12 or 13 fields) and 4 (13 to 15 fields)");
+                              "(12 or 13 fields), 4 (13 to 15) and 5 (17)");
                     }
-                    if (ver == 4) {
-                        auto G = t[t.size() - 1].cast<py::tuple>();
+                    // Where each block sits (npos = absent). Version 4's
+                    // variants differ in field 12: a bool there is the
+                    // marker (the PR's 14 fields: grid at 13; the event
+                    // queue's 15: the tick phase at 13-14), a tuple is the
+                    // grid (the device interface: marker at 13, controller
+                    // at 14).
+                    constexpr std::size_t npos = std::size_t(-1);
+                    std::size_t marker = npos, grid = npos, ctrl = npos,
+                                ticks = npos;
+                    if (ver == 3) {
+                        if (n == 13) marker = 12;
+                    } else if (ver == 5) {
+                        marker = 12; grid = 13; ctrl = 14; ticks = 15;
+                    } else if (n == 13) {
+                        grid = 12;
+                    } else if (py::isinstance<py::bool_>(t[12])) {
+                        marker = 12;
+                        if (n == 14) grid = 13; else ticks = 13;
+                    } else {
+                        grid = 12; marker = 13;
+                        if (n == 15) ctrl = 14;
+                    }
+                    if (grid != npos) {
+                        auto G = t[grid].cast<py::tuple>();
                         if (G.size() != 4) {
                             throw std::runtime_error(
-                                "SolverSnapshot: the version-4 grid field "
+                                "SolverSnapshot: the grid field "
                                 "has " + std::to_string(G.size())
                                 + " values, expected 4");
                         }
@@ -4251,6 +4280,29 @@ void init_module(py::module_& m) {
                         s.grid_step = G[1].cast<Size>();
                         s.grid_dt = G[2].cast<Real>();
                         s.post_edge_derivatives = G[3].cast<bool>();
+                    }
+                    if (ctrl != npos && !t[ctrl].is_none()) {
+                        auto C = t[ctrl].cast<py::tuple>();
+                        const int kind = C.size() == 2 ? C[0].cast<int>() : -1;
+                        if (kind < 1 || kind > 2) {
+                            throw std::runtime_error(
+                                "SolverSnapshot: the controller-state field "
+                                "must be (kind, values) with kind 1 (fixed) "
+                                "or 2 (LTE)");
+                        }
+                        s.controller.kind =
+                            static_cast<pulsim::step::ControllerState::Kind>(kind);
+                        s.controller.v = C[1].cast<std::vector<Real>>();
+                    }
+                    if (ticks != npos) {
+                        s.tick_origin = t[ticks].cast<std::vector<Real>>();
+                        s.tick_next_k =
+                            t[ticks + 1].cast<std::vector<std::uint64_t>>();
+                        if (s.tick_origin.size() != s.tick_next_k.size()) {
+                            throw std::runtime_error(
+                                "SolverSnapshot: tick_origin and tick_next_k "
+                                "differ in length");
+                        }
                     }
                     s.t = t[2].cast<Real>();
                     s.x = t[3].cast<Vector>();
@@ -4278,24 +4330,7 @@ void init_module(py::module_& m) {
                         g.igbt_tail_history = L[4].cast<std::vector<Real>>();
                         g.pmsm_history = L[5].cast<std::vector<Real>>();
                     }
-                    // the control-state marker: field 12 of a 13-field
-                    // version 3, field 13 of a 14-field version 4
-                    const std::size_t ci = ver == 3 ? 12 : 13;
-                    if (ver == 4 && t.size() == 15 && !t[14].is_none()) {
-                        // the step controller's block (DECISIONS #24)
-                        auto C = t[14].cast<py::tuple>();
-                        const int kind = C.size() == 2 ? C[0].cast<int>() : -1;
-                        if (kind < 1 || kind > 2) {
-                            throw std::runtime_error(
-                                "SolverSnapshot: the controller-state field "
-                                "must be (kind, values) with kind 1 (fixed) "
-                                "or 2 (LTE)");
-                        }
-                        s.controller.kind =
-                            static_cast<pulsim::step::ControllerState::Kind>(kind);
-                        s.controller.v = C[1].cast<std::vector<Real>>();
-                    }
-                    if (t.size() > ci && t[ci].cast<bool>()) {
+                    if (marker != npos && t[marker].cast<bool>()) {
                         // a marker the resume refuses by name (pulsim._control_state)
                         s.control_state = std::shared_ptr<void>(
                             new py::object(py::str("dropped by pickling")),
@@ -4340,6 +4375,12 @@ void init_module(py::module_& m) {
                             : t[11].cast<Size>();
                 }
                 return s;
+              } catch (const py::cast_error& e) {
+                // a malformed tuple: the named error, not pybind's cast message
+                throw std::runtime_error(
+                    std::string("SolverSnapshot: malformed pickle state (a "
+                                "field has the wrong type): ") + e.what());
+              }
             }));
 
     m.def("run_transient",
