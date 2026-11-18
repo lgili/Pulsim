@@ -52,7 +52,9 @@ reference of the same orbit to 2e-12 and 6e-11 relative, and the total
 loss to 8e-15 (`python/tests/test_design_evaluation.py`). The record also carries the
 design, a SHA-256 `design_id`, the per-device losses by category, the
 route and solver counters, and the provenance (version, extension
-hash, options digest).
+hash, options digest), and `counters["energy_residual"]` (2e-13 here)
+with `counters["p_table"]`, the datasheet losses outside that balance
+(observation; the guard fails a record above 1e-8).
 
 ## 2. Four statuses, never a default number
 
@@ -61,9 +63,13 @@ hash, options digest).
 | `ok` | steady period reached, every bound met | KPIs, violations all 0 |
 | `infeasible` | a bound exceeded, or a thermal runaway | KPIs and `violations[name]` in the KPI's unit (runaway: no KPIs) |
 | `refused` | `pulsim.UnsupportedError` anywhere | `refusal = (engine, feature, device, kind)`, no KPIs |
-| `failed` | an engine's non-convergence, `not_settled`, a non-finite KPI | `reason`, counters, no KPIs |
+| `failed` | an engine's non-convergence, `not_settled`, a non-finite KPI, `energy_balance` (P_in ≠ ΣP + dE/T beyond the route's tolerance) | `reason`, counters, no KPIs |
 
-Any other exception propagates: it is a bug, not a design outcome. Do
+Any other exception propagates: it is a bug, not a design outcome. One
+is raised on purpose: `pulsim.design.PeriodicityError`, when a plain
+`dsed` period started from a kernel orbit does not return to it (a
+defect of the period map, checked once per topology and event
+pattern, so it stops the whole batch rather than failing some records). Do
 not wrap `evaluate` in a broad `except`; that is how refusals became
 silent wrong answers in a GUI.
 
@@ -120,14 +126,30 @@ refused [1.e+30 1.e+30] [1.e+30]
   `T_j`; it stops when the estimated distance to the fixed point (not
   the last step) is below `tol`; the circuit is re-simulated only when
   `temperature_dependent=True` (then `build` reads `design["_T_j"]`).
+* `Evaluator(circuit=base, fields={"L": "L.L", "C": "C.C"},
+  schedule=lambda d: make_pwm_switch_fn(d["f_sw"], ...), ...)` instead
+  of `build=`: one immutable `pulsim.Circuit` (`builder.build()`)
+  shared by every evaluation and thread, a design being `with_params` /
+  `with_value` of it (targets: a `builder.param` name or
+  `"<component>.<field>"`). Same records as the factory form; no
+  rebuild, one symbolic analysis per batch, the state labels and KPI
+  observables resolved once (about 0.16 ms per buck design).
 * `ev.evaluate_many(designs, workers=8)` keeps the input order and gives
   the same records on 1 or 8 threads. On the `pss` route the period
-  runs and the KPI integrals are one kernel call with the GIL released
-  (`counters["kpi_path"] == "kernel"`, about 0.4 ms per buck design),
-  and so is the whole Newton loop (`counters["pss_loop"] == "kernel"`),
-  but building the circuit, the loss rows and the KPIs hold the GIL, so
-  threads still do not speed it up; `backend="process"` helps for large
-  batches of picklable evaluators.
+  runs, the KPI integrals and the whole Newton loop are one kernel call
+  with the GIL released (`counters["pss_loop"] == "kernel"`), but the
+  set-up, the loss rows, the KPIs and the record still hold the GIL
+  (about two thirds of an evaluation), so threads do not speed the buck
+  up; `backend="process"` does, on batches large enough to pay the
+  workers' start-up (DECISIONS 21).
+* For processes the evaluator must pickle. Name KPIs and bounds as data:
+  `kpis={"i_pk": Kpi.i_peak("L")}`, `Kpi.efficiency()`,
+  `Kpi.ripple("vout")`, `Kpi.mean("vout")`, `Kpi.i_rms("L")`,
+  `constraints=[Constraint.max("ripple_v", 0.05)]`; give the circuit form
+  a module-level factory, `circuit=functools.partial(build_circuit,
+  part)`, which each worker calls once. Lambdas still work on threads;
+  on processes the first part that does not pickle is refused by name
+  (`UnsupportedError`) before any worker starts.
 
 ## 4. Why derivative-free
 

@@ -65,6 +65,7 @@
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/solver/trbdf2_transient.hpp"
 #include "pulsim/solver/unsupported.hpp"
+#include "pulsim/errors/convergence.hpp"
 #include "pulsim/sources/combined_switch_fn.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
 #include "pulsim/sources/dead_time_pwm_pair_fn.hpp"
@@ -200,6 +201,15 @@ void init_module(py::module_& m) {
                 inst.attr("partial") = py::cast(e.partial());
                 inst.attr("t_failed") = py::cast(e.t_failed());
                 PyErr_SetObject(type.ptr(), inst.ptr());
+            } catch (const ConvergenceFailure& e) {
+                // The exact engine's give-up sites (settle | chatter |
+                // no_progress | max_steps | nan): typed, so no caller
+                // has to match message text.
+                py::object inst = convergence_exc(e.what());
+                inst.attr("kind") = e.kind_name();
+                inst.attr("t_failed") = e.time();
+                inst.attr("device") = e.device();
+                PyErr_SetObject(convergence_exc.ptr(), inst.ptr());
             }
         });
 
@@ -1070,6 +1080,7 @@ void init_module(py::module_& m) {
               "the string \"node\" or \"branch\".")
         .def("initial_state",
               &builder::CircuitBuilder::initial_state,
+              py::call_guard<py::gil_scoped_release>(),
               "Synthesise the flat initial-state vector from recorded\n"
               "ICs. Returns a numpy array of size num_nodes +\n"
               "num_state_branches with each IC slot populated and zero\n"
@@ -2188,7 +2199,7 @@ void init_module(py::module_& m) {
         .def("build_lazy",
               [](pwl::PwlStateSpaceCache& self, Real dt) {
                   self.build_lazy(dt);
-              }, py::arg("dt"),
+              }, py::arg("dt"), py::call_guard<py::gil_scoped_release>(),
               "Lazy build: store dt but defer per-mask "
               "factorisation to first access. A PWM converter "
               "visits only a handful of the 2^N switch states, "
@@ -3189,6 +3200,8 @@ void init_module(py::module_& m) {
                 } else if (py::isinstance<sources::SwitchSchedule>(fn)) {
                     cpp_fns.emplace_back(
                         fn.cast<sources::SwitchSchedule>());
+                } else if (py::isinstance<pulsim::blockchain::ChainPwmGate>(fn)) {
+                    cpp_fns.emplace_back(fn.cast<pulsim::blockchain::ChainPwmGate>());
                 } else {
                     cpp_fns.emplace_back(fn.cast<SwitchScheduleFn>());
                 }
@@ -3423,11 +3436,19 @@ void init_module(py::module_& m) {
            py::object b_extra_obj,
            bool start_from_dc_op,
            std::optional<bool> enable_nonlinear_refresh,
-           StepObserverFn step_observer,
+           py::object step_observer_obj,
            py::object initial_state,
            ShouldContinueFn should_continue,
            std::shared_ptr<streaming::LiveRing> live_ring,
            py::object resume_from_obj) {
+            // A composed control graph (CxxChainTick) runs in C++.
+            StepObserverFn step_observer;
+            if (py::isinstance<pulsim::blockchain::ChainTick>(step_observer_obj)) {
+                step_observer =
+                    step_observer_obj.cast<pulsim::blockchain::ChainTick&>().fn;
+            } else if (!step_observer_obj.is_none()) {
+                step_observer = step_observer_obj.cast<StepObserverFn>();
+            }
             // Bridge.13: native schedules run their mask in C++ (no
             // Python __call__); the detection is shared by every engine.
             auto adapted =
@@ -3523,7 +3544,7 @@ void init_module(py::module_& m) {
         py::arg("b_extra_fn") = py::none(),
         py::arg("start_from_dc_op") = false,
         py::arg("enable_nonlinear_refresh") = py::none(),
-        py::arg("step_observer") = StepObserverFn{},
+        py::arg("step_observer") = py::none(),
         py::arg("initial_state") = py::none(),
         py::arg("should_continue") = ShouldContinueFn{},
         py::arg("live_ring") = std::shared_ptr<streaming::LiveRing>{},
@@ -4138,12 +4159,18 @@ void init_module(py::module_& m) {
     py::register_exception<pulsim::blockchain::ControlGraphBuildError>(
         m, "ControlGraphBuildError", PyExc_ValueError);
 
-    py::class_<ChainTick>(m, "CxxChainTick",
+    py::class_<ChainTick>(m, "CxxChainTick", py::dynamic_attr(),
         "A control-graph tick callback the variable-step engine calls in "
         "C++ (no Python call per tick).")
         .def("__call__", [](ChainTick& self, Real t, const Vector& x) {
             self.fn(t, x);
         });
+
+    py::class_<ChainPwmGate>(m, "CxxChainPwmGate", py::dynamic_attr(),
+        "A PWM switch_fn whose duty is a control-graph signal; every "
+        "engine calls it in C++.")
+        .def("__call__", [](const ChainPwmGate& self, Real t) { return self(t); },
+            py::arg("t"));
 
     py::class_<ChainBExtra>(m, "CxxChainBExtra",
         "A control graph's driven-source b_extra_fn(t), with the instants "
@@ -4187,6 +4214,35 @@ void init_module(py::module_& m) {
             py::arg("name"), py::arg("row"), py::arg("gain"),
             "b_extra[row] += gain * (signal `name` after compute_delay).")
         .def("set_solver_dt", &BlockChain::set_solver_dt, py::arg("dt"))
+        .def("set_label_time", &BlockChain::set_label_time, py::arg("on"),
+            "Label-time mode: on the fixed engine a tick runs at the call's "
+            "label t_n with the state x_{n-1} (the closed-loop helpers' "
+            "protocol); see docs/control-graph.md.")
+        .def_property_readonly("label_time", &BlockChain::label_time)
+        .def("set_horizon", &BlockChain::set_horizon, py::arg("t_end"),
+            "Label-time mode: no tick at or after t_end on the fixed engine.")
+        .def("set_output", &BlockChain::set_output, py::arg("name"),
+            py::arg("value"),
+            "Set a signal and what its circuit sinks see before the first "
+            "tick (call after compile()).")
+        .def("make_pwm_gate",
+            [](BlockChain& self, Size num_switches,
+               const std::vector<std::tuple<std::string, Index, Real, Real>>& legs) {
+                ChainPwmGate g{&self, num_switches, {}};
+                for (const auto& [ch, idx, period, phase] : legs) {
+                    if (idx < 0 || static_cast<Size>(idx) >= num_switches ||
+                        !(period > Real{0})) {
+                        throw std::invalid_argument(
+                            "make_pwm_gate: switch index out of range or "
+                            "period <= 0");
+                    }
+                    g.legs.push_back({self.slot(ch), idx, period, phase});
+                }
+                return g;
+            }, py::arg("num_switches"), py::arg("legs"), py::keep_alive<0, 1>(),
+            "A switch_fn (C++, no GIL): for each (channel, switch_idx, "
+            "period, phase) the bit is ON while pulsim.control.pwm_on(t, "
+            "period, duty, phase) with duty = what the channel's sinks see.")
         .def("make_tick_observer", [](BlockChain& self) {
                 return ChainTick{&self, self.make_tick_observer()};
             }, py::keep_alive<0, 1>(),
@@ -4509,18 +4565,23 @@ void init_module(py::module_& m) {
         .def("add_python_block",
             [](BlockChain& self, py::function fn,
                std::vector<InputRef> inputs,
-               const std::vector<std::string>& outputs) {
+               const std::vector<std::string>& outputs, bool with_state) {
                 std::vector<InputRef> in;
                 for (auto& r : inputs) in.push_back(self.in(std::move(r)));
                 std::vector<Index> out;
                 for (const auto& o : outputs) out.push_back(self.out(o));
                 // Owned by the chain; the chain dies under the GIL.
                 auto f = std::make_shared<py::function>(std::move(fn));
-                auto step = [f, in, out](ChainContext& c) {
+                auto step = [f, in, out, with_state](ChainContext& c) {
                     py::gil_scoped_acquire gil;   // the kernel runs without it
-                    py::tuple args(in.size());
+                    const Size k0 = with_state ? 1 : 0;
+                    py::tuple args(in.size() + k0);
+                    if (with_state) {   // the state vector, as an observer gets it
+                        args[0] = c.x != nullptr ? py::cast(*c.x)
+                                                 : py::cast(Vector{});
+                    }
                     for (Size i = 0; i < in.size(); ++i) {
-                        args[i] = py::float_(resolve(in[i], c));
+                        args[k0 + i] = py::float_(resolve(in[i], c));
                     }
                     py::object r = (*f)(*args);
                     if (out.size() == 1) {
@@ -4541,8 +4602,45 @@ void init_module(py::module_& m) {
                 };
                 self.add(std::move(step), {});
             }, py::arg("fn"), py::arg("inputs"), py::arg("outputs"),
+                py::arg("with_state") = false,
             "A block that calls fn(*input_values) (Python, under the GIL) "
-            "once per evaluation; returns a float or one value per output.")
+            "once per evaluation; returns a float or one value per output. "
+            "with_state=True passes the state vector x first.")
+        .def("add_c_function_block",
+            [](BlockChain& self, std::uintptr_t step_addr,
+               std::uintptr_t state_addr, std::uintptr_t in_addr,
+               std::uintptr_t out_addr, std::vector<InputRef> inputs,
+               const std::vector<std::string>& outputs) {
+                // The C-block ABI (pulsim.CBLOCK_ABI), called in C++: the
+                // caller (add_c_block) keeps the library, the state pointer
+                // and the two double buffers alive with the handle.
+                using CStep = void (*)(const double*, int, double*, int,
+                                       double, double, void**);
+                auto* f = reinterpret_cast<CStep>(step_addr);
+                auto* st = reinterpret_cast<void**>(state_addr);
+                auto* inb = reinterpret_cast<double*>(in_addr);
+                auto* outb = reinterpret_cast<double*>(out_addr);
+                if (f == nullptr || st == nullptr ||
+                    (!inputs.empty() && inb == nullptr) ||
+                    (!outputs.empty() && outb == nullptr)) {
+                    throw std::invalid_argument("add_c_function_block: null pointer");
+                }
+                std::vector<InputRef> in;
+                for (auto& r : inputs) in.push_back(self.in(std::move(r)));
+                std::vector<Index> out;
+                for (const auto& o : outputs) out.push_back(self.out(o));
+                auto step = [f, st, inb, outb, in, out](ChainContext& c) {
+                    for (Size i = 0; i < in.size(); ++i) inb[i] = resolve(in[i], c);
+                    f(inb, static_cast<int>(in.size()), outb,
+                      static_cast<int>(out.size()), c.t, c.dt, st);
+                    for (Size i = 0; i < out.size(); ++i) c.put(out[i], outb[i]);
+                };
+                self.add(std::move(step), {});
+            }, py::arg("step_addr"), py::arg("state_addr"), py::arg("in_addr"),
+                py::arg("out_addr"), py::arg("inputs"), py::arg("outputs"),
+            "A compiled C block (pulsim.CBLOCK_ABI) evaluated in C++ (no GIL): "
+            "inputs are copied to in_addr, the step writes out_addr, whose "
+            "values become the outputs. Used by add_c_block.")
         .def("add_delay",
             [](BlockChain& self, long long samples, Real initial_value,
                 InputRef x, std::string out) {
@@ -4887,6 +4985,25 @@ void init_module(py::module_& m) {
             "Thermal I²t fuse. Integrates i²·dt; opens irreversibly "
             "when the integral exceeds i2t_threshold (A²·s). "
             "output_channel: 1.0 intact, 0.0 blown.");
+
+    // Several graphs' fixed-step observers composed in C++, in order (each
+    // chain must outlive the run): the kernel calls them without the GIL.
+    m.def("block_laws_source", [] {
+        return std::string(
+#include "block_laws_source.inc"
+        );
+    }, "The C99 law table (block_laws.h) the kernel graph calls; "
+       "pulsim.export_c copies it into the C it generates.");
+    m.def("compose_chain_observers",
+        [](const std::vector<std::pair<BlockChain*, Real>>& parts) {
+            std::vector<std::function<void(Real, const Vector&)>> fns;
+            for (const auto& [ch, dt] : parts) fns.push_back(ch->make_step_observer(dt));
+            return ChainTick{nullptr, [fns](Real t, const Vector& x) {
+                for (const auto& f : fns) f(t, x);
+            }};
+        }, py::arg("parts"),
+        "One CxxChainTick that runs each (chain, dt)'s step observer in "
+        "order; run_transient calls it in C++.");
 
     // Helper for make_chain_switch_fn — wires chain channels →
     // SwitchStateMask bits.

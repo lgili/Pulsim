@@ -15,20 +15,20 @@
 # test_benchmark_harness.py keeps every entry honest (a skip that starts
 # loading, or an error that starts running, fails the test).
 circuits:
-  circuits/closed_loop/cl_boost_pi.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error}}
-  circuits/closed_loop/cl_buck_aggressive_pi.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error}}
+  circuits/closed_loop/cl_boost_pi.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error, trbdf2: error}}  # since the helpers build graphs (task 9.1) trbdf2 runs the loop instead of refusing it, and grinds: max_steps at t = 5.6 ms of 30 ms; no converged reference
+  circuits/closed_loop/cl_buck_aggressive_pi.yaml: {status: runs}  # was error (no reference: trbdf2 refused the helper's observer); agrees since task 9.1
   circuits/closed_loop/cl_buck_hysteresis.yaml: {status: skipped, reason: "component type 'hysteresis'"}
   circuits/closed_loop/cl_buck_integrator.yaml: {status: skipped, reason: "component type 'integrator'"}
   circuits/closed_loop/cl_buck_limiter_chain.yaml: {status: skipped, reason: "component type 'limiter'"}
   circuits/closed_loop/cl_buck_lookup_duty.yaml: {status: skipped, reason: "component type 'lookup_table'"}
-  circuits/closed_loop/cl_buck_pi.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error}}
+  circuits/closed_loop/cl_buck_pi.yaml: {status: runs}  # was error (no reference: trbdf2 refused the helper's observer); agrees since task 9.1
   circuits/closed_loop/cl_buck_pi_with_gain.yaml: {status: skipped, reason: "component type 'gain'"}
   circuits/closed_loop/cl_buck_pid.yaml: {status: skipped, reason: "component type 'pid_controller'"}
   circuits/closed_loop/cl_buck_rate_limited_ref.yaml: {status: skipped, reason: "component type 'rate_limiter'"}
   circuits/closed_loop/cl_buck_sample_hold.yaml: {status: skipped, reason: "component type 'sample_hold'"}
-  circuits/closed_loop/ll14_buck_closed_loop.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error}}
-  circuits/closed_loop/ll15_boost_closed_loop.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error}}
-  circuits/closed_loop/ll16_flyback_closed_loop.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error}}  # the DC start is refused since 2026-11-13 (Vin-Lleak_prim-Lm_core is a source-inductor loop: it returned I(Lm_core) = 2.4e13 A); the v1 reader starts it from zero state. The circuit itself is not a flyback: Lm_core and Lsec are uncoupled, so I(Lm_core) ramps to 604 A (48 V x 2 ms / 160 uH) and the secondary is dead; pwl dt/2 vs dt/4 differ by 0.166, so still no converged reference
+  circuits/closed_loop/ll14_buck_closed_loop.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, trbdf2: disagree}, known_err: {pwl: 0.287, pwl+restart: 0.212, pwl+split: 0.212, trbdf2: 0.16}}  # was error (no reference) until task 9.1; default-tolerance trbdf2 also disagrees with the rtol=1e-8 reference: the loop is sensitive, not yet diagnosed
+  circuits/closed_loop/ll15_boost_closed_loop.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.27, pwl+restart: 0.0654, pwl+split: 0.0654}}  # was error (no reference) until task 9.1; not yet diagnosed
+  circuits/closed_loop/ll16_flyback_closed_loop.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error, trbdf2: error}}  # FROZEN WITHOUT DIAGNOSIS, under investigation (control graph 3). Integration batch 10: no converged reference on the combined tree (the trbdf2 reference run hits max_steps at 5.6 ms of 30 ms), so every cell is 'error' as before batch 10 (pwl) / refused (trbdf2). On the control-graph branch alone (older TR-BDF2) trbdf2 gave a reference, pwl agreed, default trbdf2 0.149. The pwl DC start is refused since 2026-11-13 (Vin-Lleak_prim-Lm_core is a source-inductor loop); Lm_core and Lsec are uncoupled, so the circuit is not a flyback
   circuits/diodes/back_to_back_diodes_sine.yaml: {status: runs}
   circuits/diodes/diode_bridge_rectifier.yaml: {status: runs}
   circuits/diodes/diode_clamp_overvoltage.yaml: {status: runs}
@@ -66,7 +66,9 @@ circuits:
   # between the capacitors (V(mid) jumps by Vdc/4); dsed starts consistent (V(vcc) = Vdc, both ic).
   # Open: from dsed's consistent state pwl does NOT converge on dsed (dt/10 0.0036, dt/40 0.0045,
   # dt/160 0.0076; V(out) 6.29 vs 6.32 V at 1.5 ms); the coupled-transformer rectifier is suspect.
-  circuits/magnetics/half_bridge_transformer_dc.yaml: {status: runs, known: {pwl: disagree, dsed: disagree}, known_err: {pwl: 0.151, dsed: 0.0348}}
+  # Integration batch 10: dsed AGREES with the reference on the combined tree (cause not isolated: the exact branch was measured without this tree's capacitor-IC handling, ed85a697 and the examples audit, which set how pwl and the trbdf2 reference start these split DC links);
+  # the branch's dsed freeze is dropped.
+  circuits/magnetics/half_bridge_transformer_dc.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.151}}
   circuits/magnetics/inductor_chain_step.yaml: {status: runs}
   circuits/magnetics/saturating_inductor_step.yaml: {status: skipped, reason: "saturable_inductor (v1 exponent law has no 2.0 equivalent)"}
   circuits/magnetics/transformer_leakage.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0041, pwl+restart: 0.00409, pwl+split: 0.00409}}
@@ -116,24 +118,25 @@ circuits:
   # (add-exact-propagator-strategy DECISIONS, "Samples at a discontinuity"); the 0.05-0.13 was the trace, not the engine.
   circuits/switching/buck/ll06_buck_vcswitch.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0781, pwl+restart: 0.118, pwl+split: 0.0704}}
   circuits/switching/buck/ll08_buck_mosfet.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.227, pwl+restart: 0.0842, pwl+split: 0.0842}}  # was error: the roundoff acceptance lets it finish; trbdf2 agrees (1.1e-4) since the post-event sample (update-trbdf2-post-event-restart DECISIONS 13)
-  circuits/switching/buck/sync_buck_500khz.yaml: {status: runs, known: {dsed: disagree}, known_err: {dsed: 0.00114}}
-  circuits/switching/buck/synchronous_buck.yaml: {status: runs, known: {dsed: disagree}, known_err: {dsed: 0.00122}}
-  circuits/switching/buck/textbook_erickson_buck_ccm.yaml: {status: runs, known: {dsed: error}}
+  circuits/switching/buck/sync_buck_500khz.yaml: {status: runs}
+  circuits/switching/buck/synchronous_buck.yaml: {status: runs}
+  circuits/switching/buck/textbook_erickson_buck_ccm.yaml: {status: runs}
   circuits/switching/buck/triple_sync_buck.yaml: {status: runs}
   circuits/switching/buck_boost/bidirectional_buck_boost.yaml: {status: runs}
   circuits/switching/buck_boost/buck_boost.yaml: {status: runs}
-  # dsed refused the builder ICs until the exact-propagator slice; now "no meaningful progress".
-  # Diode turned round 2026-11 (it was reversed): dsed "diode configuration did not settle" at 3.3e-4 s.
-  circuits/switching/buck_boost/cuk_converter.yaml: {status: runs, known: {dsed: error}}
-  # dsed refused the builder ICs until the exact-propagator slice; now "did not settle" at 2.35e-4 s.
-  circuits/switching/buck_boost/sepic.yaml: {status: runs, known: {dsed: error}}
+  # Diode turned round 2026-11 (it was reversed); dsed agrees (2.5e-6) on the exact engine (batch 9).
+  circuits/switching/buck_boost/cuk_converter.yaml: {status: runs}
+  # dsed: refused the builder ICs, then "did not settle" at 2.35e-4 s; agrees (1.5e-6) since the exact engine merge (batch 9).
+  circuits/switching/buck_boost/sepic.yaml: {status: runs}
   circuits/switching/inverter/half_bridge_inverter.yaml: {status: runs}
   # dsed: refused (G_aa singular: the split DC-link capacitors close a loop with the source) until
   # the general reduction (dependent states). The reference does not start from the netlist: pwl and
   # trbdf2 store V(vcc) = one capacitor's ic at t = 0 and the source then splits the missing volts
   # between the capacitors (V(mid) jumps by Vdc/4); dsed starts consistent (V(vcc) = Vdc, both ic).
   # pwl at dt/40 started from dsed's consistent t = 0 state agrees with dsed: 2.6e-5.
-  circuits/switching/inverter/half_bridge_inverter_lc.yaml: {status: runs, known: {dsed: disagree}, known_err: {dsed: 0.00369}}
+  # Integration batch 10: dsed AGREES with the reference on the combined tree (cause not isolated: the exact branch was measured without this tree's capacitor-IC handling, ed85a697 and the examples audit, which set how pwl and the trbdf2 reference start these split DC links);
+  # the branch's dsed freeze is dropped.
+  circuits/switching/inverter/half_bridge_inverter_lc.yaml: {status: runs}
   circuits/switching/inverter/half_bridge_lc_filter.yaml: {status: runs}
   circuits/switching/inverter/lcc_resonant_inverter.yaml: {status: runs}
   # pwm phase read as a fraction of the period (batch 6b): trbdf2 0.00132 -> 4.3e-5, agrees.
@@ -175,13 +178,17 @@ circuits:
   # trbdf2 store V(vcc) = one capacitor's ic at t = 0 and the source then splits the missing volts
   # between the capacitors (V(mid) jumps by Vdc/4); dsed starts consistent (V(vcc) = Vdc, both ic).
   # pwl at dt/40 started from dsed's consistent t = 0 state agrees with dsed: 8.0e-5.
-  circuits/switching/multilevel/npc_three_level_halfbridge.yaml: {status: runs, known: {dsed: disagree}, known_err: {dsed: 0.58}}
+  # Integration batch 10: dsed AGREES with the reference on the combined tree (cause not isolated: the exact branch was measured without this tree's capacitor-IC handling, ed85a697 and the examples audit, which set how pwl and the trbdf2 reference start these split DC links);
+  # the branch's dsed freeze is dropped.
+  circuits/switching/multilevel/npc_three_level_halfbridge.yaml: {status: runs}
   # dsed: refused (G_aa singular: the split DC-link capacitors close a loop with the source) until
   # the general reduction (dependent states). The reference does not start from the netlist: pwl and
   # trbdf2 store V(vcc) = one capacitor's ic at t = 0 and the source then splits the missing volts
   # between the capacitors (V(mid) jumps by Vdc/4); dsed starts consistent (V(vcc) = Vdc, both ic).
   # pwl started from dsed's consistent state converges on dsed at half order: dt/10 0.028, dt/40 0.014, dt/160 0.0071.
-  circuits/switching/multilevel/t_type_3level_halfbridge.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, dsed: disagree}, known_err: {pwl: 0.0749, pwl+restart: 0.0738, pwl+split: 0.0738, dsed: 0.00887}}
+  # Integration batch 10: dsed AGREES with the reference on the combined tree (cause not isolated: the exact branch was measured without this tree's capacitor-IC handling, ed85a697 and the examples audit, which set how pwl and the trbdf2 reference start these split DC links);
+  # the branch's dsed freeze is dropped.
+  circuits/switching/multilevel/t_type_3level_halfbridge.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0749, pwl+restart: 0.0738, pwl+split: 0.0738}}
   circuits/thermal/buck_electrothermal.yaml: {status: skipped, reason: "mosfet loss/thermal block"}
   circuits/thermal/electrothermal_resistor_self_heating.yaml: {status: runs}
   circuits/thermal/long_run_drift_buck.yaml: {status: runs}

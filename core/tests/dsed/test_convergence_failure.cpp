@@ -45,9 +45,11 @@ struct NoSwitch {
     [[nodiscard]] bool operator()(Real) const noexcept { return false; }
 };
 
-ConvergenceFailure run_toy(std::function<Real(Real, Real)> f, Real dt_max, Real t_end) {
+ConvergenceFailure run_toy(std::function<Real(Real, Real)> f, Real dt_max, Real t_end,
+                           std::size_t max_steps = 10'000'000) {
     ToySystem sys{std::move(f)};
     PEDSimulator sim{sys, NoSwitch{}, PIController{1e-6, 1e-9}, EventPredictor{}, Real{1e-9}, dt_max};
+    sim.set_max_steps(max_steps);
     Vector x0 = Vector::Zero(1);
     try {
         (void)sim.simulate(x0, t_end);
@@ -168,9 +170,11 @@ TEST_CASE("ConvergenceFailure: an integrator grinding on a 1e-12 s mode is kind 
 TEST_CASE("ConvergenceFailure: the step cap is kind max_steps",
           "[v2][dsed][convergence]") {
     // dt_max = 1 ns over 1 s: every 100k steps advance 1e-4 s (>= 100*dt_max,
-    // so no stall), and the 10M-step cap is reached at t ~ 1e-2 s.
-    const auto e = run_toy([](Real, Real) { return Real{0}; }, Real{1e-9}, Real{1.0});
+    // so no stall). The cap is the test hook's 50k (the 10M default took
+    // 120 s on the unoptimised coverage build): reached at t ~ 5e-5 s.
+    const auto e = run_toy([](Real, Real) { return Real{0}; }, Real{1e-9}, Real{1.0}, 50'000);
     REQUIRE(e.kind() == ConvergenceKind::MaxSteps);
+    REQUIRE((e.time() > 4.9e-5 && e.time() < 5.1e-5));
     REQUIRE(std::string{e.what()} == "PEDSimulator: exceeded max-step cap");
 }
 

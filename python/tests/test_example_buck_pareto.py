@@ -62,3 +62,15 @@ def test_nsga2_path_when_pymoo_is_installed(ex):
     records, front = ex.run_pymoo(n_gen=2, pop=8)
     assert len(records) >= 8 and front
     assert all(r.status == "ok" for r in front)
+
+
+def test_the_example_on_processes_gives_the_thread_records(ex, monkeypatch):
+    # a spawned worker imports the example by its module name
+    monkeypatch.syspath_prepend(str(EXAMPLE.parent))
+    designs = ex.latin_hypercube(16, seed=3)
+    thr = ex.evaluate_all(designs, workers=1)
+    prc = ex.evaluate_all(designs, workers=2, backend="process")
+    for a, b in zip(thr, prc, strict=True):
+        assert (a.status, a.kpis, a.losses, a.violations, a.counters,
+                a.design_id) == (b.status, b.kpis, b.losses, b.violations,
+                                 b.counters, b.design_id)

@@ -359,8 +359,7 @@ def _build(comps: List[dict], notes: List[str]):
         hi = min(value(pi.get("output_max", 1.0)), value(pwm.get("duty_max", 1.0)))
         ctrl = pulsim.PIController(Kp=value(pi.get("kp", 0.0)), Ki=value(pi.get("ki", 0.0)),
                                    output_min=lo, output_max=hi)
-        fb_id = b.node_id_of(fb)
-        loop = pulsim.bind_pi_to_switch(b, pi=ctrl, measured=lambda x, i=fb_id: x[i],
+        loop = pulsim.bind_pi_to_switch(b, pi=ctrl, measured=fb,
                                         setpoint=value(wref["value"]), switch=sw,
                                         freq=value(pwm["frequency"]))
         notes.append(f"{sw}: bind_pi_to_switch kp={ctrl.Kp} ki={ctrl.Ki} f={value(pwm['frequency']):g} "

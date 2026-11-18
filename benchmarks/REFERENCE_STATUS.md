@@ -16,10 +16,10 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 
 | configuration | agree | disagree | error | refused | unverified |
 |---|---:|---:|---:|---:|---:|
-| pwl | 79 | 23 | 7 | 0 | 0 |
-| pwl+restart | 85 | 17 | 7 | 0 | 0 |
-| pwl+split | 86 | 16 | 7 | 0 | 0 |
-| trbdf2 | 100 | 2 | 1 | 6 | 0 |
+| pwl | 81 | 25 | 3 | 0 | 0 |
+| pwl+restart | 87 | 19 | 3 | 0 | 0 |
+| pwl+split | 88 | 18 | 3 | 0 | 0 |
+| trbdf2 | 103 | 3 | 3 | 0 | 0 |
 | dsed | 96 | 1 | 0 | 12 | 0 |
 
 ### Fixed engine: restart rule and split (circuits where any of the three does not agree)
@@ -27,10 +27,8 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | circuit | tol | pwl | pwl+restart | pwl+split |
 |---|---:|---:|---:|---:|
 | closed_loop/cl_boost_pi.yaml | 0.02 | error | error | error |
-| closed_loop/cl_buck_aggressive_pi.yaml | 0.02 | error | error | error |
-| closed_loop/cl_buck_pi.yaml | 0.02 | error | error | error |
-| closed_loop/ll14_buck_closed_loop.yaml | 0.02 | error | error | error |
-| closed_loop/ll15_boost_closed_loop.yaml | 0.02 | error | error | error |
+| closed_loop/ll14_buck_closed_loop.yaml | 0.02 | 0.287 | 0.212 | 0.212 |
+| closed_loop/ll15_boost_closed_loop.yaml | 0.02 | 0.27 | 0.0654 | 0.0654 |
 | closed_loop/ll16_flyback_closed_loop.yaml | 0.02 | error | error | error |
 | linear/current_source_rl_step.yaml | 0.001 | 0.00577 | 3.99e-05 | 3.99e-05 |
 | linear/rl_natural_response.yaml | 0.001 | 0.00577 | 3.98e-05 | 3.98e-05 |
@@ -61,15 +59,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 
 | circuit | config | frozen | now | err_rms | why |
 |---|---|---|---|---:|---|
-| magnetics/half_bridge_transformer_dc.yaml | dsed | disagree (0.0348) | agree | 3.41e-06 | now agree: drop the freeze |
-| switching/buck/sync_buck_500khz.yaml | dsed | disagree (0.00114) | agree | 1.98e-06 | now agree: drop the freeze |
-| switching/buck/synchronous_buck.yaml | dsed | disagree (0.00122) | agree | 1.35e-06 | now agree: drop the freeze |
-| switching/buck/textbook_erickson_buck_ccm.yaml | dsed | error | agree | 4.29e-07 | now agree: drop the freeze |
-| switching/buck_boost/cuk_converter.yaml | dsed | error | agree | 2.5e-06 | now agree: drop the freeze |
-| switching/buck_boost/sepic.yaml | dsed | error | agree | 1.51e-06 | now agree: drop the freeze |
-| switching/inverter/half_bridge_inverter_lc.yaml | dsed | disagree (0.00369) | agree | 3.89e-06 | now agree: drop the freeze |
-| switching/multilevel/npc_three_level_halfbridge.yaml | dsed | disagree (0.58) | agree | 5.09e-06 | now agree: drop the freeze |
-| switching/multilevel/t_type_3level_halfbridge.yaml | dsed | disagree (0.00887) | agree | 4.24e-05 | now agree: drop the freeze |
+| (none) | | | | | |
 
 ### Edge diagnostic of every cell that disagrees on the gate
 
@@ -84,6 +74,13 @@ cell disagrees by edge timing; edge err above it: the states differ.
 
 | circuit | config | tol | err_rms | worst observable | edge err | excluded | timing (s) | timing (steps) |
 |---|---|---:|---:|---|---:|---:|---:|---:|
+| closed_loop/ll14_buck_closed_loop.yaml | pwl | 0.02 | 0.287 | V(sw) | undersampled | 11.7% | 4.9e-07 | 0.98 |
+| closed_loop/ll14_buck_closed_loop.yaml | pwl+restart | 0.02 | 0.212 | V(sw) | 0.156 | 10.0% | 9.9e-07 | 2 |
+| closed_loop/ll14_buck_closed_loop.yaml | pwl+split | 0.02 | 0.212 | V(sw) | 0.156 | 10.0% | 9.9e-07 | 2 |
+| closed_loop/ll14_buck_closed_loop.yaml | trbdf2 | 0.001 | 0.16 | V(sw) | undersampled | 15.2% | 1.9e-06 |  |
+| closed_loop/ll15_boost_closed_loop.yaml | pwl | 0.02 | 0.27 | V(sw) | undersampled | 20.0% | 2.5e-07 | 0.5 |
+| closed_loop/ll15_boost_closed_loop.yaml | pwl+restart | 0.02 | 0.0654 | V(sw) | undersampled | 20.0% | 7.5e-07 | 1.5 |
+| closed_loop/ll15_boost_closed_loop.yaml | pwl+split | 0.02 | 0.0654 | V(sw) | undersampled | 20.0% | 7.5e-07 | 1.5 |
 | linear/current_source_rl_step.yaml | pwl | 0.001 | 0.00577 | V(out) | 0.00577 | 0.0% |  |  |
 | linear/rl_natural_response.yaml | pwl | 0.001 | 0.00577 | V(node) | 0.00577 | 0.0% |  |  |
 | magnetics/half_bridge_transformer_dc.yaml | pwl | 0.02 | 0.101 | V(out) | chatter | 5.6% | 1.1e-05 | 1.1e+02 |
@@ -148,12 +145,12 @@ cell disagrees by edge timing; edge err above it: the states differ.
 
 | circuit | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
-| closed_loop/cl_boost_pi.yaml | error | error | error | refused | refused |
-| closed_loop/cl_buck_aggressive_pi.yaml | error | error | error | refused | refused |
-| closed_loop/cl_buck_pi.yaml | error | error | error | refused | refused |
-| closed_loop/ll14_buck_closed_loop.yaml | error | error | error | refused | refused |
-| closed_loop/ll15_boost_closed_loop.yaml | error | error | error | refused | refused |
-| closed_loop/ll16_flyback_closed_loop.yaml | error | error | error | refused | refused |
+| closed_loop/cl_boost_pi.yaml | error | error | error | error | refused |
+| closed_loop/cl_buck_aggressive_pi.yaml | 0.00662 | 0.00709 | 0.0071 | 7.93e-05 | refused |
+| closed_loop/cl_buck_pi.yaml | 0.0121 | 0.0123 | 0.0123 | 8.54e-05 | refused |
+| closed_loop/ll14_buck_closed_loop.yaml | 0.287 | 0.212 | 0.212 | 0.16 | refused |
+| closed_loop/ll15_boost_closed_loop.yaml | 0.27 | 0.0654 | 0.0654 | 0.000393 | refused |
+| closed_loop/ll16_flyback_closed_loop.yaml | error | error | error | error | refused |
 | diodes/back_to_back_diodes_sine.yaml | 1.14e-05 | 1.14e-05 | 1.14e-05 | 0 | 1.15e-05 |
 | diodes/diode_bridge_rectifier.yaml | 0.000216 | 0.000177 | 0.000173 | 3.22e-05 | 6.58e-06 |
 | diodes/diode_clamp_overvoltage.yaml | 0.00565 | 0.00565 | 0.00565 | 0 | 6.01e-12 |
@@ -292,6 +289,16 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | buck_dcm | 0.000538 | 5.32e-08 | 1.87e-08 | 5.63e-07 | 7.34e-10 |
 
 ## Notes
+
+**Closed-loop cells, integration batch 10 (2026-11-18): FROZEN WITHOUT
+DIAGNOSIS, under investigation (control graph 3).** Since the helpers build
+control graphs, trbdf2 runs the six `closed_loop/*` circuits and they have a
+reference for the first time. `cl_buck_pi` and `cl_buck_aggressive_pi` agree on
+every configuration. `ll14_buck` disagrees (pwl 0.287, restart/split 0.212,
+trbdf2 0.160) and `ll15_boost` disagrees on the fixed engine (pwl 0.270,
+restart/split 0.0654; trbdf2 agrees, 3.9e-4). `ll16_flyback` and `cl_boost_pi`
+have no converged reference (the trbdf2 reference run hits max_steps at
+5.6 ms of 30 ms): `error`. These freezes are NOT understood.
 
 **`cuk_converter` diode turned round, 2026-11-17.** The file and its ngspice
 deck had `Drect` reversed (anode at ground); with the anode at `mid` the

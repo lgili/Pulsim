@@ -118,3 +118,19 @@ def test_a_user_injection_on_a_constraint_is_refused(engine):
                    allow_implicit_segments=True)
     assert (ei.value.engine, ei.value.feature) == ("dsed", "extraction")
     assert "dependent states" in str(ei.value)
+# Integration batch 10: on_impulse holds on the exact engine (before, 'error'
+# and 'warn' were ignored there: dsed refused every dependent mode until
+# this branch, so it never recorded).
+@pytest.mark.parametrize("engine", ENGINES)
+def test_on_impulse_error_refuses_the_projection(engine):
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(_cap_loop(), 1e-4, engine=engine, dt=1e-6, on_impulse="error")
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "impulse")
+    assert "a capacitor loop" in str(ei.value) and "6e-06 C" in str(ei.value)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_on_impulse_warn_on_the_exact_engine(engine):
+    with pytest.warns(UserWarning, match="impulsive re-initialisation"):
+        r = p.simulate(_cap_loop(), 1e-4, engine=engine, dt=1e-6, on_impulse="warn")
+    assert len(r.reinit_records) == 1

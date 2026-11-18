@@ -190,6 +190,157 @@ Each entry: question → option taken → evidence → how to reverse.
   (`chain.hpp`), the PWM check in `_assign_groups`, the
   `controller_period` check in `compose_control`.
 
+## G13. Label time for the consolidated helpers (task 9.1)
+
+- **Question.** Moving `bind_pi_to_switch` / `add_c_block` onto the
+  graph's state-time ticks (G6) shifts every closed-loop result by one
+  step. Keep the old numbers or take the shift?
+- **Taken.** A chain-level `label_time` mode reproducing the old
+  scheduler exactly (`t >= due - 1e-9*dt`, `due < t_end - 1e-9*dt`,
+  `x_{n-1}` at label `t_n`); the helpers build label-time graphs. The
+  law is an advance of one step after tick 0 (docs/control-graph.md).
+- **Evidence.** `.scratch` probe of 93 arrays (one / two-rate / paired
+  loops, callable set-point, manual composition, duty callable,
+  non-multiple period, on pwl, pwl+restart and trbdf2): bit-identical
+  to 7b195243 except the final sample of C-block runs (G15). Test pins
+  `w_10` against the label closed form.
+- **Reverse.** Drop `label_time=True` in `_pi_loop_graph` /
+  `add_c_block`; every closed-loop number moves by O(dt).
+
+## G14. The helper's `pi` object is not updated
+
+- **Taken.** The kernel PI starts from `pi`'s state; the Python object
+  stays as passed. Histories are views of the graph's recordings.
+- **Evidence.** No test, example or library caller reads `pi` after a
+  run; writing it back would need a Python call per tick.
+- **Reverse.** A `PythonBlock(pi)` (kept for non-pulsim controllers).
+
+## G15. C blocks: one graph per builder, no tick at t_end
+
+- **Taken.** One graph per builder holds every `CBlock` (integration batch 10:
+  reached through the C-block handles, not a `builder._c_graph` attribute, so
+  a `Circuit` built from the builder carries it in its ControlDecls), each in the group
+  of its `dt`, compiled at each `simulate()` with the outputs the blocks
+  hold. Compiled steps are called through their C ABI in C++. The old
+  throttle also fired at `t_end` (11 fires where 10 are due); the graph
+  does not: the final sample of such a run changes (6.4e-4 V on the
+  probe's RC loop), nothing else.
+- **Reverse.** `set_horizon(inf)` for the C-block graph.
+
+## G16. Label-time graphs declare no jumps
+
+- **Taken.** `next_jump_after` = inf in label mode, as the helpers
+  declared none: `discontinuity_restart=True` results are unchanged.
+- **Evidence.** Declaring them changes every restart run that holds a
+  C block or a closed loop; the label hold starts at `t_{n-1}`, a grid
+  point, so it would be exact with the declaration.
+- **Reverse.** Return the served instants `tau - dt` in label mode.
+
+## G17. The helpers' observers carry their cadence: closed-loop reference cells run on trbdf2
+
+- **Question.** `benchmarks/tools/v1_reader.py` composes a
+  `bind_pi_to_switch` loop by hand (`step_observer=loop.step_observer`).
+  Before 9.1 that observer had no cadence and trbdf2 refused it, so the
+  six `closed_loop/*` reference circuits had no converged reference and
+  every cell was `error`.
+- **Taken.** The loop's observer is now a graph observer
+  (`_rate_ticks`), so trbdf2 runs it. New outcomes, frozen in
+  `v2_triage.yaml`: `cl_buck_pi`, `cl_buck_aggressive_pi`, `ll16` (pwl)
+  agree (0.0121, 0.0066, 0.0074); `ll14` disagrees (pwl 0.287,
+  restart/split 0.212, trbdf2 0.16), `ll15` (pwl 0.27, restart/split
+  0.0654), `ll16` trbdf2 0.149; `cl_boost_pi` trbdf2 grinds to
+  max_steps (5.6 ms of 30 ms), so it keeps no reference.
+- **Evidence.** The baseline run (7b195243) refused on trbdf2 with "a
+  step_observer with no cadence"; the circuits' results did not change,
+  they were never compared.
+- **Reverse.** Strip `_rate_ticks` from the helper observer (the refusal
+  returns). The disagreements are not diagnosed in this slice.
+
+## G18. Clarke, Park, SVM and PLL map to their Python classes
+
+- **Question.** The kernel `add_svm` / `add_clarke` / `add_park` /
+  `add_pll` are different expressions from the classes the chain maps:
+  Clarke `(2a - b - c)/3` against `(2/3)(a - b/2 - c/2)`, SVM with
+  `0.8660254037844386` and `1/v_dc` (and `v_dc <= 0` -> duty 0.5
+  against the class's `v_dc = 1`), PLL starting from `omega = 0` and
+  wrapping to `[-pi, pi)` against `2 pi f_nominal` and `[0, 2 pi)`.
+- **Taken.** Ported kinds `svm`, `clarke`, `inverse_clarke`, `park`,
+  `inverse_park`, `pll` on `block_laws.h` (G19), bit-identical on 10^4
+  random inputs each (`test_control_graph_blocks.py`); `PLL` accepts two
+  or three outputs (the third is `omega/(2 pi)`). The `add_*` C++ API
+  keeps its laws for C++ users.
+- **Evidence.** Closed-loop numbers change only for chains holding
+  these blocks: `run_foc_motor_drive.py` and `run_pmsm_foc.py` (both
+  still within their example claims), rounding-level for Clarke/Park/SVM
+  and from the first tick for a PLL (the old one started at 0 Hz).
+  Closed forms: balanced abc through Clarke-Park is constant dq within
+  1e-12; SVM duties (0.6875, 0.3125, 0.3125) at alpha = v_dc/4; the PLL
+  locks a 50 Hz unit vector from 60 Hz to 1e-3 Hz and 1e-3 rad in 1 s.
+- **Reverse.** Map the classes back to `add_svm` etc.
+
+## G19. One law table: block_laws.h for the kernel and the C export
+
+- **Taken.** `core/include/pulsim/blockchain/block_laws.h` (C99, no
+  allocation) holds one function per block kind; the kernel blocks call
+  it and `export_c` copies it verbatim (embedded in the extension by
+  CMake, `_pulsim.block_laws_source()`, in chunks below MSVC's 16 KiB
+  literal limit). Not routed through it: `DelayBlock` (a FIFO, no
+  arithmetic), `SignalDemux` (a copy).
+- **Export choices.** Constants as C99 hex floats (exact). The
+  single-rate shim keeps its state in a static struct (no `malloc`), so
+  one loaded library is one block instance. A non-finite `SignalMux`
+  selector holds the output in C (the kernel raises). Refused by name:
+  `PythonBlock` and the Python library blocks, every `CBlock` (a
+  compiled object has no source), a graph with no `Rate` (continuous
+  time), a rate with a `compute_delay` (a circuit-sink property).
+- **Evidence.** `test_control_graph_export_c.py`: 31 block kinds tick by
+  tick over 10^4 ticks and a PI + limiter + PWM graph through
+  `add_c_block(lib=...)` over 10^4 ticks, both byte-identical; compiled
+  with `-std=c99 -Wall -Wextra -Werror -pedantic -ffp-contract=off`.
+- **Reverse.** Drop the export; the kernel keeps the header.
+
+## G20. The C-block compile cache is per user
+
+- **Taken.** `~/Library/Caches/pulsim/cblock` (macOS),
+  `$XDG_CACHE_HOME` or `~/.cache` + `/pulsim/cblock` (Linux),
+  `%LOCALAPPDATA%\pulsim\cblock` (Windows), mode 0700; a cached
+  library another user owns, or that others can write, is refused.
+- **Evidence.** Before: `<tempdir>/pulsim_cblock_cache`, shared on a
+  multi-user host, so another user could plant `cblk_<hash>.so` and
+  have it loaded.
+- **Reverse.** None wanted.
+
+## G21. C blocks on trbdf2; refused on the exact strategy (task 9.3)
+
+- **Taken.** `engine="trbdf2"` no longer refuses C blocks: the plan
+  already ticks the C-block graph on the variable-step engine, which
+  lands on the ticks, so the block runs the state-time law. `auto` keeps
+  routing circuits with C blocks to `pwl` (no auto run changes engine).
+  `exact` / `dsed` refuse by name (`c_blocks`; cells under both names).
+- **Evidence.** P loop of docs/control-graph.md: trbdf2 meets
+  `v[k]` (k = 1, 5, 10) within 1e-7 at rtol 1e-9; pwl at dt = 0.1 us
+  and trbdf2 agree within 1e-4 at 1.95 ms (`test_c_block_engines.py`).
+  What the exact strategy misses: a `b_extra` input and an observer.
+- **Reverse.** Re-add the blocker for `engine="trbdf2"`.
+
+## G22. Resume: graphs keep their ticks and states across runs
+
+- **Taken.** No snapshot field: a graph already keeps its block states
+  and tick counters across `simulate()` calls, and
+  `rearm_if_restarted` restarts the grid only when time goes back, so a
+  `resume_from` run continues it. The C-block graph is now compiled once
+  per circuit layout (it was rebuilt per run, which restarted its grid
+  at the resumed `t_start`); `control_tick_counts` / `n_fires` report
+  the last run. Resuming exactly on a tick instant is not exact on pwl
+  (label time samples `x(t - h)`, the resumed run has only `x(t)`).
+- **Evidence.** `test_control_graph_resume.py`: a closed loop resumed at
+  1.53 ms and a C block resumed at 0.73 ms reproduce the uninterrupted
+  duty history / tick counts exactly and the states within the
+  open-loop resume bound (1e-9 relative, the snapshot's own).
+- **Hook.** A graph used with a *different* builder or after `reset()`
+  has nothing to carry; a snapshot-borne control state needs the
+  `SolverSnapshot` field listed under the 6.1 hook below.
+
 ## Hooks for task groups 6–7 (not in this slice)
 
 - **6.1 graph state in the solver snapshot.** `SolverSnapshot`

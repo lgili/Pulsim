@@ -36,7 +36,7 @@ All controllers are stateful — instantiate ONE per loop and call
 from __future__ import annotations
 
 import math
-from collections.abc import Callable  # noqa: F401 — used in string annotations
+from collections.abc import Callable, Sequence  # noqa: F401 — Callable: string annotations
 from dataclasses import dataclass, field
 
 
@@ -1245,23 +1245,91 @@ class ClosedLoop:
     period: float = 0.0
 
 
-# A step that lands a floating-point hair before k*T still takes tick k:
-# the old `t - last >= T` test skipped it and ticked one step late
-# (2978 updates instead of 3000 over 30 ms at dt = T/100).
-_TICK_TOL = 1e-9
+class _TickHistory(Sequence):
+    """``(t, value)`` per controller tick, read from the loop's control
+    graph recordings (a read-only sequence; ``np.asarray`` works)."""
+
+    def __init__(self, graph, channel: str) -> None:
+        self._graph, self._channel = graph, channel
+
+    def _items(self) -> list:
+        cxx = self._graph._cxx_chain
+        t = cxx.get_recording_times().tolist()
+        v = cxx.get_channel_history(self._channel).tolist()
+        return list(zip(t, v))
+
+    def __len__(self) -> int:
+        return len(self._graph._cxx_chain.get_recording_times())
+
+    def __getitem__(self, i):
+        return self._items()[i]
+
+    def __iter__(self):
+        return iter(self._items())
+
+    def __eq__(self, other) -> bool:
+        return list(self) == list(other)
+
+    def __repr__(self) -> str:
+        return repr(self._items())
 
 
-def _next_tick_index(t: float, t_start: float, T: float) -> int:
-    """Integer k of the first instant t_start + k*T strictly after ``t``
-    (an integer tick counter: no accumulated or stored float time)."""
-    return math.floor((t - t_start) / T + _TICK_TOL) + 1
+def _closure_warning(helper: str, what: str, instead: str) -> None:
+    import warnings
+    warnings.warn(
+        f"{helper}({what}=<callable>): a Python callable runs through the "
+        "pulsim.PythonBlock adapter, one Python call per controller tick. "
+        f"{instead}", DeprecationWarning, stacklevel=3)
+
+
+def _pi_loop_graph(builder, pi, measured, setpoint, T: float, helper: str):
+    """The control graph of a PI loop (label time, one group at T):
+    measured -> PI -> 'duty', with 'error' = setpoint - measured recorded
+    per tick. ``measured`` is a node name (kernel) or a callable on the
+    state vector (PythonBlock); ``setpoint`` a number or a callable on t;
+    ``pi`` a PIController / PIDController (kernel) or any object with
+    ``update(setpoint=, measured=, dt=)`` (PythonBlock)."""
+    from .blockchain import (MixedDomainBlockChain, PythonBlock, Rate,
+                             _InputSource)
+    g = MixedDomainBlockChain(rate=Rate(T), label_time=True)
+    if isinstance(measured, str):
+        meas = measured
+    else:
+        _closure_warning(helper, "measured",
+                         "Pass the node name instead (measured='vout').")
+        g.add("measured", PythonBlock(lambda x: float(measured(x))),
+              inputs=dict(x=_InputSource("state")), output="meas")
+        meas = "channel:meas"
+    if callable(setpoint):
+        _closure_warning(helper, "setpoint",
+                         "Build the reference in a MixedDomainBlockChain "
+                         "(LookupTable1D on 'time') for a kernel-only loop.")
+        g.add("setpoint", PythonBlock(lambda t: float(setpoint(t))),
+              inputs=dict(t="time"), output="sp")
+        sp = "channel:sp"
+    else:
+        sp = float(setpoint)
+    if type(pi).__name__ in ("PIController", "PIDController"):
+        ctrl = pi
+    else:
+        _closure_warning(helper, "pi",
+                         "Use pulsim.PIController / PIDController.")
+        ctrl = PythonBlock(pi)
+    g.add("pi", ctrl, inputs=dict(setpoint=sp, measured=meas, dt="dt"),
+          output="duty")
+    g.add("error", Subtract(), inputs=dict(a=sp, b=meas), output="error")
+    g.record_channel("duty")
+    g.record_channel("error")
+    obs = g.make_step_observer(builder)
+    g._cxx_chain.set_output("duty", 0.5)     # the duty before the first tick
+    return g, obs
 
 
 def bind_pi_to_switch(
     builder,
     *,
     pi: PIController,
-    measured: "Callable[[object], float]",
+    measured: "str | Callable[[object], float]",
     setpoint: "float | Callable[[float], float]",
     switch,
     freq: float,
@@ -1280,15 +1348,19 @@ def bind_pi_to_switch(
         ``switch`` (when given by name) and to size the
         ``SwitchStateMask``.
     pi
-        :class:`PIController` instance. Its ``update`` is called
-        once per PWM period.
+        :class:`PIController` (or :class:`PIDController`): the loop is a
+        control graph (``MixedDomainBlockChain(label_time=True)``) whose
+        kernel block starts from ``pi``'s state; ``pi`` itself is not
+        updated during the run (read ``loop.duty_history``). Any other
+        object with ``update(setpoint=, measured=, dt=)`` runs through a
+        ``PythonBlock`` (DeprecationWarning).
     measured
-        Callable ``state_vec -> float`` extracting the feedback
-        signal. Typical: ``lambda x: x[builder.node_id_of("vout")]``.
+        The feedback node's name (``"vout"``: read in the kernel, no
+        Python call), or a callable ``state_vec -> float`` (runs through
+        a ``PythonBlock``, one Python call per tick; DeprecationWarning).
     setpoint
-        Reference value passed to ``pi.update``. Accepts either a
-        constant ``float`` or a callable ``t -> float`` for time-
-        varying references (load-step setpoints, ramping commands).
+        A constant, or a callable ``t -> float`` for time-varying
+        references (``PythonBlock``; DeprecationWarning).
     switch
         Either a device name (resolved via
         ``builder.switch_index_of``) or an integer bit position.
@@ -1300,8 +1372,8 @@ def bind_pi_to_switch(
         ``loop.step_observer`` yourself every step throttles it to one
         update per ``T_PWM = 1 / freq``.
     t_start
-        Simulation start time, used to align the throttle's first
-        tick. Defaults to 0.
+        Ignored since 2.1: the graph's ticks align to the first instant
+        it sees (``simulate()``'s ``t_start``).
 
     Examples
     --------
@@ -1312,7 +1384,7 @@ def bind_pi_to_switch(
         loop = ps.control.bind_pi_to_switch(
             builder,
             pi=pi,
-            measured=lambda x: x[builder.node_id_of("vout")],
+            measured="vout",
             setpoint=5.0,
             switch="Q1",
             freq=10e3,
@@ -1321,11 +1393,6 @@ def bind_pi_to_switch(
                           switch_fn=loop.switch_fn,
                           step_observer=loop.step_observer)
     """
-    # Import lazily so `pulsim.control` doesn't depend on the C++
-    # binding at module-import time (test fixtures sometimes import
-    # control.py without the kernel).
-    from . import SwitchStateMask as _Mask
-
     if freq <= 0:
         raise ValueError(f"freq must be > 0 Hz; got {freq}")
 
@@ -1346,62 +1413,23 @@ def bind_pi_to_switch(
             f"num_switches={n_switches}"
         )
 
-    # Shared mutable state — lives in this closure. The factory hides
-    # the `[0.5]` / `[t_start - T_PWM]` lists callers used to write
-    # by hand.
-    duty_state = [0.5]
-    k_next = [0]  # integer index of the next tick; tick 0 at t_start
-    duty_history: "list[tuple[float, float]]" = []
-    error_history: "list[tuple[float, float]]" = []
-
-    def switch_fn(t: float):
-        mask = _Mask(n_switches)
-        if pwm_on(t, T_PWM, duty_state[0]):
-            mask.set(idx, True)
-        return mask
-
-    # Setpoint can be a constant (most common) or a callable
-    # `t -> float` for time-varying references (load steps,
-    # ramping commands).
-    _sp_is_callable = callable(setpoint)
-
-    def _tick(t: float, x) -> None:
-        """One controller update, UNCONDITIONALLY.
-
-        `step_observer` below throttles this for engines that call
-        an observer every step and need the loop itself to decide
-        when a period has elapsed. An engine that SCHEDULES the
-        cadence — `engine='auto'` lands a step boundary on every
-        k·T_ctrl — calls this instead, so the update count is the
-        schedule's and never depends on how close a step lands.
-        """
-        k_next[0] = _next_tick_index(t, t_start, T_PWM)
-        m = float(measured(x))
-        sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
-        error = sp - m
-        new_duty = pi.update(setpoint=sp, measured=m, dt=T_PWM)
-        duty_state[0] = float(new_duty)
-        duty_history.append((t, duty_state[0]))
-        error_history.append((t, error))
-
-    def step_observer(t: float, x) -> None:
-        # Throttle to the t_start + k*T_PWM schedule: prevents the loop
-        # from chasing PWM ripple, and keeps ticks on the carrier edges.
-        if t < t_start + k_next[0] * T_PWM - _TICK_TOL * T_PWM:
-            return
-        _tick(t, x)
-
-    # How a scheduling engine reaches past the throttle.
-    step_observer.tick = _tick  # type: ignore[attr-defined]
-
+    # A control graph (label time, one group at T_PWM): PI in the kernel,
+    # the gate pwm_on(t, T_PWM, duty) in C++. t_start: the graph ticks
+    # from the first instant it sees (simulate()'s t_start).
+    del t_start
+    graph, step_observer = _pi_loop_graph(builder, pi, measured, setpoint,
+                                          T_PWM, "bind_pi_to_switch")
+    switch_fn = graph._cxx_chain.make_pwm_gate(
+        n_switches, [("duty", idx, T_PWM, 0.0)])
     # Read by periodic_steady_state: a gate driven by controller state
     # is refused by name (the shooting state does not hold the PI).
     switch_fn._closed_loop = "bind_pi_to_switch"  # type: ignore[attr-defined]
+    switch_fn._graph = graph  # type: ignore[attr-defined]
     return ClosedLoop(
         switch_fn=switch_fn,
         step_observer=step_observer,
-        duty_history=duty_history,
-        error_history=error_history,
+        duty_history=_TickHistory(graph, "duty"),
+        error_history=_TickHistory(graph, "error"),
         period=T_PWM,
     )
 
@@ -1410,7 +1438,7 @@ def bind_pi_to_duty_callable(
     builder,
     *,
     pi: PIController,
-    measured: "Callable[[object], float]",
+    measured: "str | Callable[[object], float]",
     setpoint: "float | Callable[[float], float]",
     freq: float,
     t_start: float = 0.0,
@@ -1448,42 +1476,13 @@ def bind_pi_to_duty_callable(
         raise ValueError(f"freq must be > 0 Hz; got {freq}")
 
     T_PWM = 1.0 / float(freq)
-    duty_state = [0.5]
-    k_next = [0]
-    duty_history: "list[tuple[float, float]]" = []
+    del t_start
+    graph, step_observer = _pi_loop_graph(builder, pi, measured, setpoint,
+                                          T_PWM, "bind_pi_to_duty_callable")
+    cxx = graph._cxx_chain
 
     def duty_get() -> float:
-        return duty_state[0]
+        return cxx.sink_value("duty")
     duty_get._closed_loop = "bind_pi_to_duty_callable"  # type: ignore[attr-defined]
 
-    _sp_is_callable = callable(setpoint)
-
-    def _tick(t: float, x) -> None:
-        """One controller update, UNCONDITIONALLY.
-
-        `step_observer` below throttles this for engines that call
-        an observer every step and need the loop itself to decide
-        when a period has elapsed. An engine that SCHEDULES the
-        cadence — `engine='auto'` lands a step boundary on every
-        k·T_ctrl — calls this instead, so the update count is the
-        schedule's and never depends on how close a step lands.
-        """
-        k_next[0] = _next_tick_index(t, t_start, T_PWM)
-        sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
-        new_duty = pi.update(
-            setpoint=sp,
-            measured=float(measured(x)),
-            dt=T_PWM,
-        )
-        duty_state[0] = float(new_duty)
-        duty_history.append((t, duty_state[0]))
-
-    def step_observer(t: float, x) -> None:
-        if t < t_start + k_next[0] * T_PWM - _TICK_TOL * T_PWM:
-            return
-        _tick(t, x)
-
-    step_observer.tick = _tick  # type: ignore[attr-defined]
-    step_observer.period = T_PWM  # type: ignore[attr-defined]
-
-    return duty_get, step_observer, duty_history
+    return duty_get, step_observer, _TickHistory(graph, "duty")

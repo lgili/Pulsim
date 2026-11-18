@@ -160,3 +160,77 @@ def test_the_extrema_grid_brackets_a_fast_mode_peak():
     # a slow step adds nothing: the grid is the uniform one
     assert np.array_equal(_extrema_grid(0.0, 1e-5, 16, 1e5),
                           np.array([1e-5 * c / 16 for c in range(17)]))
+
+
+def _split_gate_event(monkeypatch, mid_of):
+    """Log the first gate edge as two events at the same instant, through
+    the mask ``mid_of()``."""
+    real = p._pulsim.run_ped_native_builder
+    seen = {}
+
+    def split(*a, **kw):
+        r = dict(real(*a, **kw))
+        log = list(r["event_log"])
+        i = next(j for j, e in enumerate(log)
+                 if int(e["predicate_type"]) == sens._GATE)
+        e = dict(log[i])
+        mid = mid_of()
+        seen["mid"] = str(mid)
+        seen["all"] = {str(x[k]) for x in log for k in ("old_mask",
+                                                         "new_mask")}
+        log[i:i + 1] = [dict(e, new_mask=mid), dict(e, old_mask=mid)]
+        r["event_log"] = log
+        return r
+
+    monkeypatch.setattr(p._pulsim, "run_ped_native_builder", split)
+    return seen
+
+
+def test_two_events_at_one_sample_go_through_their_middle_mask(monkeypatch):
+    # (a7) the mask between two events logged at one sample was in no
+    # interval, so the jump raised KeyError; a gate edge has no dtau for
+    # L.L, so the split edge must give the unsplit sensitivities exactly
+    b = _buck()
+    ref_r = p.simulate(b, 5 * T, engine="dsed", switch_fn=_pwm(b),
+                       sensitivities=["L.L"])
+
+    def all_on():
+        m = p.SwitchStateMask(b.graph.num_switches)
+        for i in range(b.graph.num_switches):
+            m.set(i, True)
+        return m
+
+    seen = _split_gate_event(monkeypatch, all_on)
+    r = p.simulate(b, 5 * T, engine="dsed", switch_fn=_pwm(b),
+                   sensitivities=["L.L"])
+    assert seen["mid"] not in seen["all"]          # a mask of no interval
+    assert np.array_equal(r.sens("vout", "L.L"), ref_r.sens("vout", "L.L"))
+
+
+def test_an_event_without_its_own_sample_is_refused_as_in_the_kernel():
+    # (b4) both sides attach an event to the first sample at or after it
+    # and refuse it unless it is at that sample
+    times = np.array([0.0, 1e-6, 2e-6])
+    ev = dict(t=0.5e-6, name="gate_edge", predicate_type=sens._GATE,
+              old_mask=None, new_mask=None)
+    with pytest.raises(RuntimeError, match="no sample of its own"):
+        sens._attach_events(times, [ev])
+    for t, k in ((1e-6, 1), (1e-6 * (1 + 1e-15), 1), (2e-6, 2), (0.0, 0)):
+        assert list(sens._attach_events(times, [dict(ev, t=t)])) == [k]
+    with pytest.raises(RuntimeError, match="no sample of its own"):
+        sens._attach_events(times, [dict(ev, t=3e-6)])
+
+
+def test_a_chain_of_ties_follows_the_kernels_running_rule():
+    """Review of slice 5 (b6): the kernel compares each candidate with the
+    running best, so 1, 1+8e-13, 1+1.6e-12 is ONE extremum, valued at the
+    largest and reported at the first instant (the old global rule
+    measured from the maximum and reported the second instant)."""
+    from pulsim.sensitivity import _running_extremum
+    ys = [1.0 + 1.6e-12, 1.0, 1.0 + 8e-13, 0.5]
+    ts = [3.0, 1.0, 2.0, 0.0]
+    i, j = _running_extremum(ys, ts, 1.0)
+    assert (i, j) == (0, 1)
+    # a valley: the smaller value, the earliest instant
+    i, j = _running_extremum([-1.0, -1.0 - 5e-13, 0.0], [5.0, 6.0, 0.0], -1.0)
+    assert (i, j) == (1, 0)

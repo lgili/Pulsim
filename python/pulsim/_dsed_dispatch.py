@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, cast
 
 from ._pulsim import (  # type: ignore[import-not-found]
+    ConvergenceError,
     NativeMultiMaskPwm,
     NativePwm2Switch,
     SwitchSchedule,
@@ -539,11 +540,12 @@ def _result_from_native(native_res, t_start: float):
     for key in ("mode_shadow", "mode_selection", "mode_guard"):
         if key in native_res:
             res.diagnostics[key] = native_res[key]
-    # dependent states: the impulsive re-initialisations at mode entry, with the
-    # fixed engine's ReinitRecord fields (lambda as lambda_)
+    # dependent states: the impulsive re-initialisations at mode entry,
+    # with the fixed engine's ReinitRecord fields (lambda as lambda_)
     from types import SimpleNamespace
     res.reinit_records = [
-        SimpleNamespace(**{("lambda_" if k == "lambda" else k): v for k, v in r.items()})
+        SimpleNamespace(**{("lambda_" if k == "lambda" else k): v
+                           for k, v in r.items()})
         for r in native_res.get("reinit_records", [])]
     return res
 
@@ -566,6 +568,10 @@ H_E_REL = 1e-7
 # settle still decides but is judged: a mode the guard would repair raises
 # UnsupportedError('dsed', 'consistent_mode') instead (DECISIONS #26).
 MODE_GUARD = True
+# Test hook: the settle's round cap (the engine's default, 64). A test lowers it
+# to reach the give-up deterministically: the cap is otherwise met only by the
+# rounding of a diode pair fighting at rest (macOS yes, Linux / Windows no).
+SETTLE_ROUND_CAP = 64
 
 
 def _shadow_h_e(builder: Any, switch_fn: Any, t_window: float) -> float:
@@ -910,7 +916,7 @@ def run_dsed_from_builder(
                     rtol=opts.rtol, atol=opts.atol,
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
                     store_every=opts.store_every, event_log=False,
-                    **shadow_kw)
+                    settle_round_cap=SETTLE_ROUND_CAP, **shadow_kw)
             elif opts.integrator == "bdf2":
                 native_res = run_bdf2_b11(
                     native_adapter, sf, x0, t_window,
@@ -927,9 +933,12 @@ def run_dsed_from_builder(
             res = _result_from_native(native_res, opts.t_start)
             res.initial_condition_adjustment = ic_adjustment
             return res
-        except (UnsupportedError, _InconsistentInitialState):
+        except (UnsupportedError, _InconsistentInitialState, ConvergenceError):
             # A refusal is an answer, not a reason to try the next
-            # bridge (which would run the circuit without the device).
+            # bridge (which would run the circuit without the device);
+            # so is a give-up of the run the native adapter accepted
+            # (the next bridge would re-run it without the refusal of
+            # implicit segments).
             raise
         except (RuntimeError, ValueError):
             # Bridge.11 native adapter rejected the circuit (e.g. nonlinear
@@ -941,9 +950,15 @@ def run_dsed_from_builder(
             # Bridge.11 path carries the auto-derived predicates, so
             # falling through would freeze the diode bits and
             # reintroduce the silent wrong answer. Re-raise instead.
-            if _n_diodes > 0:
+            #
+            # Nor once the native adapter accepted the circuit and the
+            # exact engine refuses implicit segments: the fallback would
+            # run it numerically (an untyped kernel error mid-run, e.g. a
+            # root finder that did not converge, would come back as a
+            # silent numeric run; integration batch 9 review).
+            if _n_diodes > 0 or (not adapter_rejected and not allow_implicit_segments
+                                 and opts.integrator != "bdf2"):
                 raise
-            pass
 
     if full_x0 is not None and ambiguous:
         x0 = full_x0          # the non-native bridges read it as reduced, as before
@@ -1083,7 +1098,10 @@ def check_diode_modes(res, builder, rel: float = 1e-3) -> None:
         return
     for c in comps:
         prm = c["params"]
-        on = S[:, builder.switch_index_of(c["name"])].astype(bool)
+        k = builder.switch_index_of(c["name"])
+        if k >= S.shape[1]:
+            continue    # a schedule narrower than the circuit: no record
+        on = S[:, k].astype(bool)
         i = _np.asarray(res.i(c["name"]), dtype=float)
         thr = max(float(prm.get("V_th", 0.0)), float(prm.get("V_f", 0.0)))
         v_off = i / float(prm.get("g_off", 1e-9))

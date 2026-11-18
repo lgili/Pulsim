@@ -38,12 +38,17 @@ from __future__ import annotations
 
 import math
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 import numpy as np
 
 from ._pulsim import ConvergenceError  # type: ignore[import-not-found]
+
+# The package, read at call time (tests replace its attributes); a
+# function-level `from . import X` costs importlib calls per evaluation.
+_pkg = sys.modules[__package__]
 
 __all__ = [
     "periodic_steady_state",
@@ -311,7 +316,8 @@ def _refuse_graph_driven(builder, analysis="periodic_steady_state"):
     """A control graph's ``drive_source`` adds a 0 V / 0 A source whose
     value only the graph's observer supplies: without it the source
     would sit at zero."""
-    driven = getattr(builder, "_graph_driven", None)
+    from ._circuit_ir import c_blocks_of, graph_driven_of
+    driven = graph_driven_of(builder)
     if driven:
         raise _unsup(
             "closed_loop",
@@ -319,6 +325,15 @@ def _refuse_graph_driven(builder, analysis="periodic_steady_state"):
             "(drive_source); the period runs run no controller, so they "
             "would sit at 0. Run simulate() to steady state.",
             device=driven[0], analysis=analysis)
+    blocks = [str(getattr(h, "name", h)) for h in c_blocks_of(builder)]
+    if blocks:
+        raise _unsup(
+            "closed_loop",
+            f"C block(s) {', '.join(blocks)} (add_c_block) drive output "
+            "sources; the period runs tick no block, so the sources would "
+            "hold the blocks' last outputs: an orbit under a frozen "
+            "controller. Run simulate() to steady state.",
+            device=blocks[0], analysis=analysis)
 
 
 def _refuse_closed_loop(sf, analysis="periodic_steady_state"):
@@ -342,9 +357,8 @@ def _refuse_closed_loop(sf, analysis="periodic_steady_state"):
 
 
 def _check_schedule(sf, T, analysis="periodic_steady_state"):
-    from . import SwitchSchedule
     _refuse_closed_loop(sf, analysis)
-    if isinstance(sf, SwitchSchedule) and not sf.has_edges:
+    if isinstance(sf, _pkg.SwitchSchedule) and not sf.has_edges:
         raise _unsup(
             "switch_fn", "the gate schedule cannot name its edges (a "
             "make_combined_switch_fn with a plain Python callable in "
@@ -470,6 +484,9 @@ def _not_t_periodic(kind, prm, T):
     return ""
 
 
+_LABELS: dict = {}   # (structure hash, section mask) -> (labels, devices)
+
+
 def _labels(builder, cache, mask, comps):
     _A, _b, rows, is_cap, _B = cache.compute_lti_state_space(mask)
     graph = builder.graph
@@ -516,10 +533,21 @@ class _Traj:
     native: Any = None        # the kernel's period dict
 
 
+def _from_circuit(builder):
+    """``(builder, circuit)``: a :class:`pulsim.Circuit` runs on its own
+    builder copy, its symbolic analysis shared with every circuit of its
+    structure (``with_params`` / ``with_value``); a builder as it is."""
+    if isinstance(builder, _pkg.Circuit):
+        return builder.to_builder(), builder
+    return builder, None
+
+
 class _Solver:
     def __init__(self, builder, period, switch_fn):
-        from . import PwlStateSpaceCache, SwitchStateMask
-        from . import _pulsim
+        PwlStateSpaceCache, SwitchStateMask = (_pkg.PwlStateSpaceCache,
+                                               _pkg.SwitchStateMask)
+        _pulsim = _pkg._pulsim
+        builder, circuit = _from_circuit(builder)
         self.builder = builder
         self.T = float(period)
         self.comps = list(builder.components())
@@ -540,6 +568,8 @@ class _Solver:
         self._SSM = SwitchStateMask
         self.n_sw = n_sw
         self.cache = PwlStateSpaceCache(builder.graph, builder.pool)
+        if circuit is not None:   # one symbolic analysis per structure
+            self.cache.share_symbolic(circuit)
         self.cache.build_lazy(self.T)
         self.ad = _pulsim._NativeCircuitBuilderAdapter(builder,
                                                        self.cache, None)
@@ -552,8 +582,19 @@ class _Solver:
         try:
             self.ad.set_mask(m0)
             n = self.ad.n_state
-            self.labels, self.label_devices = _labels(
-                builder, self.cache, m0, self.comps)
+            # names of the state rows: structural, so once per structure
+            # and section mask for a Circuit (an extraction otherwise)
+            key = (None if circuit is None
+                   else (circuit.structure_hash(), str(m0)))
+            hit = _LABELS.get(key) if key is not None else None
+            if hit is None:
+                hit = _labels(builder, self.cache, m0, self.comps)
+                if key is not None:
+                    if len(_LABELS) > 256:
+                        _LABELS.clear()
+                    _LABELS[key] = hit
+            self.labels = list(hit[0])     # copies: the cache is shared
+            self.label_devices = [list(d) for d in hit[1]]
         except (RuntimeError, NotImplementedError) as e:
             raise _unsup(
                 "state_space",
@@ -1078,7 +1119,9 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
     ----------
     builder
         The circuit (linear R, L, C, switches, PWL diodes, DC and sine
-        sources). Anything else is refused by name.
+        sources): a :class:`CircuitBuilder` or a :class:`pulsim.Circuit`
+        (its derivations by ``with_params`` share one symbolic analysis).
+        Anything else is refused by name.
     period
         ``T``. Every gate schedule and waveform source (sine, pulse
         and table current sources included) must be periodic in it

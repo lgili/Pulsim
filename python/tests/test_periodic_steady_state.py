@@ -539,3 +539,22 @@ def test_dependent_states_are_refused_by_name():
     with pytest.raises(p.UnsupportedError) as ei:
         p.periodic_steady_state(b, period=1e-3)
     assert (ei.value.engine, ei.value.feature) == ("periodic_steady_state", "dependent_states")
+@pytest.mark.parametrize("engine", ["exact", "pwl", "trbdf2"])
+def test_a_pwm_voltage_source_is_refused_by_name_on_every_engine(engine):
+    """A PWM source is exact on the dsed transient (its corners are time
+    events, integration batch 9), but the kernel period map takes DC
+    sources only (`dsed_period_map` would raise a plain ValueError) and
+    the shooting does not place the source's corners: refused by name,
+    before any period run, never a sampled fallback."""
+    b = p.CircuitBuilder()
+    b.add_pwm_voltage_source("Vg", "in", "gnd", 5.0, 0.0, 1 / T, 0.5)
+    b.add_resistor("R", "in", "a", 10.0)
+    b.add_diode("D", "a", "o", ref.GON, ref.GOFF)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    b.add_resistor("RL", "o", "gnd", 100.0)
+    kw = {} if engine == "exact" else {"dt": T / 200}
+    ok, why = p.periodic_steady_state_supported(b, T, engine=engine, **kw)
+    assert not ok and "'Vg'" in why
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.periodic_steady_state(b, period=T, engine=engine, **kw)
+    assert ei.value.device == "Vg"

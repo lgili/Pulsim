@@ -297,12 +297,11 @@ def test_shockley_parameters_follow_the_device_fields():
     assert shockley_params(b, "R") is None
 
 
-def test_build_refuses_c_blocks_and_simulate_of_the_builder_keeps_them():
+def _c_block_circuit(calls):
     b = p.CircuitBuilder()
     b.add_voltage_source("Vs", "a", "gnd", 1.0)
     b.add_resistor("R", "a", "o", 1.0)
     b.add_resistor("Ro", "o", "gnd", 1.0)
-    calls = []
 
     def step(t, dt, inp, out, state):
         calls.append(t)
@@ -311,12 +310,51 @@ def test_build_refuses_c_blocks_and_simulate_of_the_builder_keeps_them():
     b.add_resistor("Rc", "c", "gnd", 1.0)
     p.add_c_block(b, inputs=[("v", "o")], outputs=[("v", "c", "gnd")],
                   dt=1e-5, fn=step, name="ctl")
-    with pytest.raises(p.UnsupportedError, match=r"C blocks \(ctl\).*simulate the builder itself"):
-        b.build()
+    return b
+
+
+def test_a_circuit_carries_its_c_blocks():
+    """Group 3.2: build() keeps a builder's C blocks as ControlDecls;
+    simulate(circuit) runs them and equals simulate(builder)."""
+    calls_b, calls_c = [], []
+    b = _c_block_circuit(calls_b)
+    c = _c_block_circuit(calls_c).build()
+    (name, kind, h, handle), = c.controls()
+    assert (name, kind) == ("ctl", "c_block") and handle.name == "ctl"
+    plain = _c_block_circuit([])
+    del plain._c_blocks
+    assert plain.build().structure_hash() != c.structure_hash()
+    assert c.with_value("R.R", 2.0).controls()[0][3] is handle
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        p.simulate(b, 1e-4, dt=1e-6, engine="pwl")
-    assert calls  # the block ran
+        rb = p.simulate(b, 1e-4, dt=1e-6, engine="pwl")
+        rc = p.simulate(c, 1e-4, dt=1e-6, engine="pwl")
+    assert calls_b and calls_b == calls_c   # the block ran in both
+    np.testing.assert_array_equal(np.asarray(rb.states), np.asarray(rc.states))
+    assert rc.circuit.controls()[0][3] is handle
+
+
+def test_a_circuit_sweep_refuses_c_blocks_and_dc_settle_runs_each_once():
+    """The block's handle (tick counter, outputs) is shared by every
+    derived circuit, so a circuit sweep would hand point 2 point 1's
+    controller: refused by name. compute_dc_op(strategy='settle') used to
+    copy the builder's __dict__ onto a run that already carried the
+    blocks: each block then drove its source twice."""
+    c = _c_block_circuit([]).build()
+    with pytest.raises(p.UnsupportedError, match=r"C blocks \(ctl\)"):
+        p.sweep(c, params={"R.R": [1.0, 2.0]}, kpi_fn=lambda r, q: {},
+                verbose=False, t_end=1e-4, dt=1e-6)
+    from pulsim._circuit_ir import c_blocks_of
+    b = _c_block_circuit([])
+    assert len(c_blocks_of(b)) == 1
+    assert len(c_blocks_of(b.build().to_builder())) == 1
+
+
+def test_control_content_hash_is_stable():
+    """A pinned FNV-1a 64 value: hash() of a str differs per process."""
+    from pulsim._circuit_ir import _fnv64
+    assert _fnv64("") == 0xCBF29CE484222325
+    assert _fnv64("a") == 0xAF63DC4C8601EC8C
 
 
 def test_mmc_arms_need_the_builder():

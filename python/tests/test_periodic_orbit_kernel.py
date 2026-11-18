@@ -102,6 +102,9 @@ def test_kernel_loop_equals_the_python_loop(name):
     sq = np.asarray(q._period["stats"])
     fin = np.isfinite(sq)
     assert (np.isfinite(sk) == fin).all()
+    # an extremum attained at both ends of the orbit is reported at the
+    # earliest instant by both loops (the kernel's tie rule): Linux CI
+    # once saw t0 against t0 + T here
     assert np.abs(sk[fin] - sq[fin]).max() <= 1e-10 * max(
         1.0, np.abs(sq[fin]).max())
     # every period ran with the GIL released, no Python callback

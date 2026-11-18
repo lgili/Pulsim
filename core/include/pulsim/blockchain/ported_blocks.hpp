@@ -15,6 +15,7 @@
 #pragma once
 
 #include "pulsim/blockchain/block_adapters.hpp"
+#include "pulsim/blockchain/block_laws.h"
 #include "pulsim/blockchain/chain.hpp"
 
 #include <algorithm>
@@ -83,13 +84,11 @@ struct PyComparator {
     bool state = false;
     void reset() { state = false; }
     Real update(Real input_value) {
-        const Real half_band = Real{0.5} * hysteresis;
-        if (state) {
-            if (input_value < threshold - half_band) state = false;
-        } else {
-            if (input_value > threshold + half_band) state = true;
-        }
-        return state ? output_high : output_low;
+        Real st = state ? Real{1} : Real{0};
+        const Real y = pl_comparator(threshold, hysteresis, output_high,
+                                     output_low, &st, input_value);
+        state = st != Real{0};
+        return y;
     }
 };
 
@@ -98,13 +97,7 @@ struct PyRateLimiter {
     Real slew_up = 0, slew_down = 0, state = 0;
     void reset() { state = 0; }
     Real update(Real target, Real dt) {
-        Real delta = target - state;
-        const Real max_up = slew_up * dt;
-        const Real max_down = slew_down * dt;
-        if (delta > max_up) delta = max_up;
-        else if (delta < -max_down) delta = -max_down;
-        state += delta;
-        return state;
+        return pl_rate_limiter(slew_up, slew_down, &state, target, dt);
     }
 };
 
@@ -114,33 +107,22 @@ struct PySampleHold {
     Real last_t = -std::numeric_limits<Real>::infinity();
     void reset() { state = 0; last_t = -std::numeric_limits<Real>::infinity(); }
     Real update(Real input_value, Real t) {
-        if (t - last_t >= sample_period) { state = input_value; last_t = t; }
-        return state;
+        return pl_sample_hold(sample_period, &state, &last_t, input_value, t);
     }
 };
 
 /// `pulsim.control.TransferFunction` (history lists, newest first).
 struct PyTransferFunction {
     std::vector<Real> num, den;
-    std::deque<Real> xh, yh;
-    void reset() { xh.clear(); yh.clear(); }
+    std::vector<Real> xh, yh;   // newest first; capacity num / max(1, den)
+    int nx = 0, ny = 0;
+    void reset() { nx = 0; ny = 0; }
     Real update(Real x) {
-        xh.push_front(x);
-        if (xh.size() > num.size()) xh.resize(num.size());
-        Real num_part = 0;
-        for (Size i = 0; i < num.size(); ++i) {
-            const Real term = num[i] * (i < xh.size() ? xh[i] : Real{0});
-            num_part = num_part + term;
-        }
-        Real den_part = 0;
-        for (Size i = 0; i < den.size(); ++i) {
-            const Real term = den[i] * (i < yh.size() ? yh[i] : Real{0});
-            den_part = den_part + term;
-        }
-        const Real y = num_part - den_part;
-        yh.push_front(y);
-        if (yh.size() > den.size()) yh.resize(std::max<Size>(1, den.size()));
-        return y;
+        xh.resize(num.size());
+        yh.resize(std::max<Size>(1, den.size()));
+        return pl_transfer_function(num.data(), static_cast<int>(num.size()),
+                                    den.data(), static_cast<int>(den.size()),
+                                    xh.data(), &nx, yh.data(), &ny, x);
     }
 };
 
@@ -151,18 +133,8 @@ struct PyStateMachine {
     Real trigger_prev = 0;
     void reset() { state = 0; trigger_prev = 0; }
     Real update(Real trigger, Real set_, Real reset_) {
-        if (mode == 0) {
-            if (trigger_prev <= threshold && trigger > threshold) {
-                state = state == high_value ? low_value : high_value;
-            }
-            trigger_prev = trigger;
-        } else if (mode == 1) {
-            state = trigger > threshold ? high_value : low_value;
-        } else {
-            if (set_ > threshold) state = high_value;
-            else if (reset_ > threshold) state = low_value;
-        }
-        return state;
+        return pl_state_machine(mode, threshold, high_value, low_value, &state,
+                                &trigger_prev, trigger, set_, reset_);
     }
 };
 
@@ -170,8 +142,7 @@ struct PyStateMachine {
 struct PyOpAmp {
     Real gain = 1e5, rail_min = 0, rail_max = 0;
     Real update(Real in_pos, Real in_neg) const {
-        const Real u = gain * (in_pos - in_neg);
-        return py_exact::max(rail_min, py_exact::min(rail_max, u));
+        return pl_op_amp(gain, rail_min, rail_max, in_pos, in_neg);
     }
 };
 
@@ -179,17 +150,7 @@ struct PyOpAmp {
 struct PyLookupTable1D {
     std::vector<Real> xs, ys;
     Real update(Real x) const {
-        if (xs.empty()) return 0;
-        if (x <= xs.front()) return ys.front();
-        if (x >= xs.back()) return ys.back();
-        for (Size i = 0; i + 1 < xs.size(); ++i) {
-            if (xs[i] <= x && x < xs[i + 1]) {
-                const Real t = (x - xs[i]) / (xs[i + 1] - xs[i]);
-                const Real dy = t * (ys[i + 1] - ys[i]);
-                return ys[i] + dy;
-            }
-        }
-        return ys.back();
+        return pl_lookup_1d(xs.data(), ys.data(), static_cast<int>(xs.size()), x);
     }
 };
 
@@ -197,30 +158,14 @@ struct PyLookupTable1D {
 /// 6 sqrt 7 pow2.
 struct PyMathBlock {
     int op = 0;
-    Real update(Real a, Real b) const {
-        switch (op) {
-            case 0: return a + b;
-            case 1: return a - b;
-            case 2: return a * b;
-            case 3: return b != Real{0} ? a / b : Real{0};
-            case 4: return std::abs(a);
-            case 5: return -a;
-            case 6: return a >= Real{0} ? std::sqrt(a) : Real{0};
-            default: return a * a;
-        }
-    }
+    Real update(Real a, Real b) const { return pl_math(op, a, b); }
 };
 
 /// `pulsim.control.MovingAverageFilter` (an EMA, despite the name).
 struct PyEma {
     Real alpha = 0.9, state = 0;
     void reset() { state = 0; }
-    Real update(Real x) {
-        const Real a = alpha * state;
-        const Real b = (Real{1} - alpha) * x;
-        state = a + b;
-        return state;
-    }
+    Real update(Real x) { return pl_ema(alpha, &state, x); }
 };
 
 /// `pulsim.control.Differentiator`.
@@ -228,12 +173,7 @@ struct PyDifferentiator {
     Real alpha = 0.2, state = 0, prev_x = 0;
     void reset() { state = 0; prev_x = 0; }
     Real update(Real x, Real dt) {
-        const Real d_raw = dt > Real{0} ? (x - prev_x) / dt : Real{0};
-        const Real a = alpha * d_raw;
-        const Real b = (Real{1} - alpha) * state;
-        state = a + b;
-        prev_x = x;
-        return state;
+        return pl_differentiator(alpha, &state, &prev_x, x, dt);
     }
 };
 
@@ -245,12 +185,7 @@ struct PyIntegrator {
     Real output_max = std::numeric_limits<Real>::infinity();
     void reset() { state = 0; }
     Real update(Real x, Real dt) {
-        Real nw = state + gain * dt * x;
-        if (nw > output_max && x > Real{0}) nw = state;
-        else if (nw < output_min && x < Real{0}) nw = state;
-        nw = py_exact::max(output_min, py_exact::min(output_max, nw));
-        state = nw;
-        return nw;
+        return pl_integrator(gain, output_min, output_max, &state, x, dt);
     }
 };
 
@@ -262,25 +197,8 @@ struct PyPID {
     Real integ = 0, deriv = 0, prev_error = 0;
     void reset() { integ = 0; deriv = 0; prev_error = 0; }
     Real update(Real setpoint, Real measured, Real dt) {
-        const Real error = setpoint - measured;
-        Real new_int = integ + Ki * dt * Real{0.5} * (error + prev_error);
-        const Real d_raw = dt > Real{0} ? (error - prev_error) / dt : Real{0};
-        const Real da = alpha * d_raw;
-        const Real db = (Real{1} - alpha) * deriv;
-        const Real new_deriv = da + db;
-        Real u = Kp * error + new_int + Kd * new_deriv;
-        if (u > output_max && error > Real{0}) {
-            new_int = integ;
-            u = Kp * error + new_int + Kd * new_deriv;
-        } else if (u < output_min && error < Real{0}) {
-            new_int = integ;
-            u = Kp * error + new_int + Kd * new_deriv;
-        }
-        const Real u_clamped = py_exact::max(output_min, py_exact::min(output_max, u));
-        integ = new_int;
-        deriv = new_deriv;
-        prev_error = error;
-        return u_clamped;
+        return pl_pid(Kp, Ki, Kd, alpha, output_min, output_max, &integ,
+                      &deriv, &prev_error, setpoint, measured, dt);
     }
 };
 
@@ -289,13 +207,7 @@ struct PyLowPass {
     Real tau = 0, state = 0;
     void reset() { state = 0; }
     Real update(Real input_value, Real dt) {
-        if (tau <= 0) {
-            state = input_value;
-        } else {
-            const Real alpha = dt / (tau + dt);
-            state += alpha * (input_value - state);
-        }
-        return state;
+        return pl_low_pass(tau, &state, input_value, dt);
     }
 };
 
@@ -305,16 +217,15 @@ struct PyPwm {
     Real frequency = 0, phase = 0;
     void reset() {}
     Real update(Real duty, Real t) const {
-        const Real T = frequency > 0 ? Real{1} / frequency
-                                     : std::numeric_limits<Real>::infinity();
-        if (!std::isfinite(T) || T == 0) return 0;
-        const Real x = (t - phase) / T;
-        const Real tol = Real{64} * Real{2.220446049250313e-16} *
-                         py_exact::max(Real{1}, (std::abs(t) + std::abs(phase)) / T);
-        Real u = x - std::floor(x);
-        if (u >= Real{1} - tol) u = 0;
-        return u < duty - tol ? Real{1} : Real{0};
+        return pl_pwm(frequency, phase, duty, t);
     }
+};
+
+/// `pulsim.control.PLL` (angle in [0, 2*pi), Python's initial state).
+struct PyPll {
+    Real f_nominal = 60, Kp = 100, Ki = 1000;
+    Real theta = 0, omega = 0, integ = 0;
+    void reset() { theta = 0; omega = 2.0 * 3.141592653589793 * f_nominal; integ = 0; }
 };
 
 /// Block parameters by name (lists of reals; a scalar is a 1-list).
@@ -397,8 +308,13 @@ inline StepResetPair make_ported_step(BlockChain& chain, const std::string& kind
         auto b = std::make_shared<PyTransferFunction>();
         b->num = detail::list(p, "num");
         b->den = detail::list(p, "den");
-        for (Real v : detail::list(p, "x_hist")) b->xh.push_back(v);
-        for (Real v : detail::list(p, "y_hist")) b->yh.push_back(v);
+        b->xh = detail::list(p, "x_hist");
+        b->yh = detail::list(p, "y_hist");
+        b->nx = static_cast<int>(b->xh.size());
+        b->ny = static_cast<int>(b->yh.size());
+        // capacity before the first update (update() resizes to it)
+        b->xh.resize(std::max(b->xh.size(), b->num.size()));
+        b->yh.resize(std::max<Size>(b->yh.size(), std::max<Size>(1, b->den.size())));
         unary(b); r.reset = [b] { b->reset(); };
     } else if (kind == "state_machine") {
         auto b = std::make_shared<PyStateMachine>();
@@ -480,12 +396,9 @@ inline StepResetPair make_ported_step(BlockChain& chain, const std::string& kind
         auto w = detail::list(p, "weights");
         detail::arity(kind, ni, w.size(), no, 1);
         r.step = [w, in, o = out[0]](ChainContext& c) {
-            Real acc = 0;
-            for (Size i = 0; i < w.size(); ++i) {
-                const Real term = w[i] * resolve(in[i], c);
-                acc = acc + term;
-            }
-            c.put(o, acc);
+            std::vector<Real> x(in.size());
+            for (Size i = 0; i < in.size(); ++i) x[i] = resolve(in[i], c);
+            c.put(o, pl_sum(w.data(), x.data(), static_cast<int>(w.size())));
         };
         r.reset = [] {};
     } else if (kind == "signal_mux") {
@@ -500,11 +413,61 @@ inline StepResetPair make_ported_step(BlockChain& chain, const std::string& kind
             if (!std::isfinite(raw)) {   // Python's int() raises here
                 throw std::domain_error("signal_mux: selector is not finite");
             }
-            const Real sel = std::trunc(raw);
-            const Real idx = sel >= n - 1 ? n - 1 : (sel >= Real{0} ? sel : Real{0});
+            const int idx = pl_mux_index(static_cast<int>(n), raw);
             c.put(o, resolve(in[static_cast<Size>(idx) + 1], c));
         };
         r.reset = [] {};
+    } else if (kind == "svm") {
+        // pulsim.control.SpaceVectorModulator (the kernel add_svm is a
+        // different expression: (va + v_cm) * (1/v_dc) + 0.5).
+        detail::arity(kind, ni, 2, no, 3);
+        const Real v_dc = param(p, kind, "v_dc");
+        r.step = [v_dc, in, out](ChainContext& c) {
+            const Real va = resolve(in[0], c);
+            Real d[3];
+            pl_svm(v_dc, va, resolve(in[1], c), &d[0], &d[1], &d[2]);
+            for (Size i = 0; i < 3; ++i) c.put(out[i], d[i]);
+        };
+        r.reset = [] {};
+    } else if (kind == "clarke" || kind == "inverse_clarke" ||
+               kind == "park" || kind == "inverse_park") {
+        // pulsim.control.{,Inverse}ClarkeTransform / {,Inverse}ParkTransform
+        const bool clarke = kind == "clarke" || kind == "inverse_clarke";
+        const bool inv = kind == "inverse_clarke" || kind == "inverse_park";
+        detail::arity(kind, ni, 3, no, clarke ? 3 : 2);
+        r.step = [clarke, inv, in, out](ChainContext& c) {
+            const Real a = resolve(in[0], c);
+            const Real b = resolve(in[1], c);
+            const Real z = resolve(in[2], c);
+            Real y[3] = {0, 0, 0};
+            if (clarke && !inv) pl_clarke(a, b, z, &y[0], &y[1], &y[2]);
+            else if (clarke) pl_inverse_clarke(a, b, z, &y[0], &y[1], &y[2]);
+            else if (!inv) pl_park(a, b, z, &y[0], &y[1]);
+            else pl_inverse_park(a, b, z, &y[0], &y[1]);
+            for (Size i = 0; i < out.size(); ++i) c.put(out[i], y[i]);
+        };
+        r.reset = [] {};
+    } else if (kind == "pll") {
+        // pulsim.control.PLL: outputs (theta_hat, omega_hat[, freq]),
+        // freq = omega_hat / (2*pi) for the three-output form.
+        if (ni != 3 || (no != 2 && no != 3)) {
+            throw ControlGraphBuildError("pll: expects 3 inputs and 2 or 3 outputs");
+        }
+        auto b = std::make_shared<PyPll>();
+        b->f_nominal = param(p, kind, "f_nominal");
+        b->Kp = param(p, kind, "Kp"); b->Ki = param(p, kind, "Ki");
+        b->theta = param(p, kind, "theta_hat");
+        b->omega = param(p, kind, "omega_hat");
+        b->integ = param(p, kind, "integ");
+        r.step = [b, in, out](ChainContext& c) {
+            const Real va = resolve(in[0], c), vb = resolve(in[1], c);
+            pl_pll(b->f_nominal, b->Kp, b->Ki, &b->theta, &b->omega, &b->integ,
+                   va, vb, resolve(in[2], c));
+            c.put(out[0], b->theta);
+            c.put(out[1], b->omega);
+            if (out.size() == 3) c.put(out[2], b->omega / (2.0 * 3.141592653589793));
+        };
+        r.reset = [b] { b->reset(); };
     } else if (kind == "signal_demux") {
         detail::arity(kind, ni, 1, no, static_cast<Size>(param(p, kind, "n_outputs")));
         r.step = [x = in[0], out](ChainContext& c) {
