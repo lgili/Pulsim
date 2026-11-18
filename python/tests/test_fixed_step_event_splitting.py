@@ -280,10 +280,8 @@ def test_split_steps_agree_with_trbdf2_on_dcm():
                                   b.graph.num_switches, 0.0)
         return p.simulate(b, t_end=60 * TB, switch_fn=fn, **kw)
 
-    def mean(r):
-        t, v = np.asarray(r.times), np.asarray(r.v("vout"))
-        m = t >= 40 * TB - 1e-12
-        return np.trapezoid(v[m], t[m]) / (t[m][-1] - t[m][0])
+    def mean(r):   # exactly clipped at 40 TB (the trbdf2 grid need not hit it)
+        return p.time_average(r.times, r.v("vout"), t_from=40 * TB)
     ref = mean(run(engine="trbdf2"))
     assert mean(run(dt=TB / 200, engine="pwl", **SPLIT)) == pytest.approx(ref, rel=1e-4)
 

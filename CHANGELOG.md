@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### TR-BDF2: no step grind after a diode turn-off; ticks at edges; pulse cap
+
+- After a diode with `g_off > 0` turns off on a linear circuit, the next
+  step is one SDIRK(2,2) step with a filtered error estimate (C++
+  `sdirk_after_turn_off`, default on). The DCM buck (400 periods, rtol
+  1e-5): 7,608 -> 4,212 accepted steps, 2,606 -> 804 steps below 1e-11 s,
+  end-state error 1.17e-5 -> 1.28e-5. The post-event sample is a
+  backward-Euler solve when the jump is instant on its scale.
+- A controller tick due at a gate edge fires before the edge probe is
+  committed: a closed loop's rising edges get their post-edge sample
+  (0 -> 199 of 199).
+- An opaque `switch_fn`'s step cap follows the gate's recent pulses, not
+  the narrowest pulse of the run (cl_boost_pi start-up: 519,783 -> 58,514
+  steps in 0.3 ms).
+- `device_loss_summary` reads `unresolved` from the step that holds
+  `t_off + t_rr`.
+
 ### TR-BDF2: no diode turns off carrying reverse current
 
 - An ON conductance-form diode's crossing floor was 1e-8 of the node

@@ -18,10 +18,8 @@ import pulsim as p
 
 def _mean_tail(res, node, frac=0.5):
     t = np.asarray(res.times)
-    v = np.asarray(res.v(node))
     cut = t[0] + (t[-1] - t[0]) * frac
-    m = t > cut
-    return float(np.trapezoid(v[m], t[m]) / (t[m][-1] - t[m][0]))
+    return p.time_average(t, res.v(node), t_from=cut)   # exactly clipped
 
 
 def test_rc_analytic_and_tolerance_proportionality():
