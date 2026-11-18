@@ -357,11 +357,18 @@ Each entry: question → option taken → evidence → how to reverse.
     whose gap is zero within tol_w (V_f = 0 across a closed ideal switch,
     every inverter leg) is held OFF before Lemke: the sign of the loop's
     round-off residual no longer decides it (a negative ulp was a ray;
-    review finding). The default settle got the same floor: an OFF ideal diode
+    review finding). "Shorted" is |Z_jj|·iscale ≤ tol_w (scaled: an
+    unscaled 1e-12·max|H| let one g_off port call a bulk-capacitor
+    rectifier shorted). The default settle, the static path and the DC
+    seed got a floor of the same kind
+    (`DiodeEventState::update_from_state_floored`): an OFF ideal diode
     turns ON only past 1e-12·max(1, ‖x‖∞) (a positive ulp turned it ON
     and the leg was refused as `ideal_voltage_loop`); the half-bridge leg
     of `test_ideal_loop_release.py` runs under both selections, second
-    order against the RL square-wave response (1.57e-5 A at T/100). The
+    order against the RL square-wave response (1.57e-5 A at T/100). Not
+    shown by a test: that the leg's residual is nonzero on a given
+    platform (the C++ case injects ±1e-13 into the selector); a short
+    port's release has no counter. The
     judge reads the law voltage (`V_f + i_s` for an ON branch-form diode,
     so an ON ideal diode is judged on i_s; conductance entries: same
     bits). The default guard stays off on branch-form circuits (it would
@@ -453,17 +460,21 @@ Each entry: question → option taken → evidence → how to reverse.
 29. **Default-flip evidence (not the flip).** `benchmarks/tools/
     ideal_switch_flip_evidence.py` writes `benchmarks/IDEAL_SWITCH_FLIP_
     EVIDENCE.md`: 109 reference circuits × 5 configurations × {default,
-    branch, lcp, branch+lcp}. Branch form: same outcome on all 109 on
+    branch, lcp, branch+lcp}, graded the same way in both directions
+    (outcome rank, else err_rms beyond 1 %). Branch form here is finite
+    R_on = 1/g_on (no R_on = 0 port: the ideal cases are the unit tests):
+    same outcome on all 109 on
     pwl / pwl+restart / pwl+split; trbdf2 2 better, 106 same, 1 new error
     (`ll13_active_clamp_forward`, Newton fails at t = 0 with h at h_min:
     trbdf2-side); dsed refuses the branch form by name (54 newly refused,
-    task 8). `'lcp'` (34 circuits with a PWL diode): same outcome on all
-    it runs on pwl; 2 refused by design (a Newton device: the port model
+    task 8). `'lcp'` (36 circuits with a PWL diode): same outcome on the
+    34 it runs on pwl; 2 refused by design (a Newton device: the port model
     is linear); trbdf2 refused until hook 4.2; dsed 5 errors
     (`DiodeModeInconsistentError` on transformer / coupled-inductor
     circuits — dsed builds its ports with R_on = 1/g_on > 0, which this
     change does not touch, so dsed-side). Cost: branch / conductance
     median-of-7 ns/step 0.85 (inverter) / 1.46 (buck, loaded machine;
-    1.02 earlier) on pwl, 1.006 / 1.027 on trbdf2; `'lcp'` costs 4.4–6.9×
-    the default in wall time on pwl (one run per cell): two site solves
-    per step, the cost item before `'lcp'` can be a default.
+    1.02 earlier) on pwl, 1.006 / 1.027 on trbdf2; `'lcp'` costs 4.4–5.1×
+    the default in median wall time on pwl (`branch+lcp` 5.0–6.9×; one
+    run per cell, cells where both ran): two site solves per step, the
+    cost item before `'lcp'` can be a default.

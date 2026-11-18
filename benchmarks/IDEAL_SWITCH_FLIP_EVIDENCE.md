@@ -7,8 +7,11 @@ on the strict gate against the circuit's one reference (as
 the branch form with the same values (`R_on = 1/g_on`, same `g_off`, design D6);
 `lcp` = `mode_selection='lcp'` (only where a PWL diode exists; `n/a` otherwise);
 `branch+lcp` both. Comparison of each variant against `default` in the same
-configuration: `same` (same outcome, err_rms within 1 % or both agree), `better`,
-`worse`, `refused` / `error` (the default ran). MOSFET / IGBT helpers and
+configuration: `same` (same outcome and err_rms within 1 %), `better` / `worse`
+(outcome rank, else err_rms beyond 1 %), `refused` / `error` (the default ran).
+`agree` counts `unverified` (a suspect reference) too. The branch variant has
+finite R_on = 1/g_on (each netlist gives g_on): no R_on = 0 port appears
+here; the ideal (R_on = 0) cases are in the unit tests. MOSFET / IGBT helpers and
 Shockley diodes keep their own models (not switched by the variant).
 The wall ratio is variant / default over one run per cell (a noisy
 signal; the median-of-7 cost gate is

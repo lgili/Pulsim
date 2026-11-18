@@ -671,27 +671,6 @@ inline SimulationResult run_transient(
     bool has_ideal_diode = false;
     for (const auto& e : diodes.entries())
         has_ideal_diode = has_ideal_diode || pool.is_branch_form(e.branch_id);
-    // An OFF ideal diode (R_on = 0) turns ON only past a round-off floor:
-    // with V_f = 0 across a closed ideal switch (every inverter leg) its
-    // voltage is the loop's residual, and a positive ulp turned it ON into
-    // an undefined loop current (refused as ideal_voltage_loop).
-    std::vector<char> ideal_off_entry;
-    std::vector<Real> ideal_noise;
-    bool has_r0_diode = false;
-    for (const auto& e : diodes.entries()) {
-        const bool r0 = pool.is_branch_form(e.branch_id) && pool.branch_R_on(e.branch_id) == Real{0};
-        ideal_off_entry.push_back(r0 ? 1 : 0);
-        has_r0_diode = has_r0_diode || r0;
-    }
-    ideal_noise.assign(ideal_off_entry.size(), Real{-1});
-    auto update_diodes = [&](const Vector& xs) {
-        if (!has_r0_diode) return diodes.update_from_state(xs);
-        const Real floor = Real{1e-12} * std::max(Real{1}, xs.lpNorm<Eigen::Infinity>());
-        const auto es = diodes.entries();
-        for (std::size_t i = 0; i < es.size(); ++i)
-            ideal_noise[i] = (ideal_off_entry[i] && !es[i].is_on) ? floor : Real{-1};  // -1: plain rule
-        return diodes.update_from_state(xs, ideal_noise);
-    };
 
     // add-branch-form-ideal-switch D3: the per-mode structural pass, run
     // once per mode before its first solve (inactive, and free, without
@@ -1088,12 +1067,13 @@ inline SimulationResult run_transient(
         if (mode_failed(sel) && mode_Z.rows() == static_cast<Index>(mode_diode_names.size())) {
             // An ideal port shorted by a loop (Z_jj = 0) that the loop
             // forward-biases: refused by the name the settle's release uses.
-            const Real zs = std::max(Real{1}, mode_Z.cwiseAbs().maxCoeff());
-            const Real vs = mode_ports->scale(mode_x0).vscale;
+            // (the selector's own short test: |Z_jj|·iscale <= tol_w)
+            const auto sc = mode_ports->scale(mode_x0);
+            const Real tol_w = mode_selector.tol * sc.vscale;
             for (std::size_t j = 0; j < mode_diode_names.size(); ++j) {
                 const auto jj = static_cast<Index>(j);
-                if (!mode_ports->ideal(j) || std::abs(mode_Z(jj, jj)) > Real{1e-12} * zs ||
-                    !(mode_u[jj] - mode_ports->ports()[j].V_f > mode_selector.tol * vs)) {
+                if (!mode_ports->ideal(j) || std::abs(mode_Z(jj, jj)) * sc.iscale > tol_w ||
+                    !(mode_u[jj] - mode_ports->ports()[j].V_f > tol_w)) {
                     continue;
                 }
                 throw UnsupportedError(
@@ -2014,7 +1994,7 @@ inline SimulationResult run_transient(
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
-                flipped = !single && has_diodes && update_diodes(x);
+                flipped = !single && has_diodes && diodes.update_from_state_floored(x);
                 ++iters;
             } while (flipped && iters < max_iters);
             if (mode_site) {
@@ -3141,7 +3121,7 @@ inline SimulationResult run_transient(
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
                 flipped = has_diodes &&
-                          diodes.update_from_state(x);
+                          diodes.update_from_state_floored(x);
                 ++iters;
             } while (flipped && iters < max_iters);
             if (mode_site_s && opts.mode_selection != 2) {

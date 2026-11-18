@@ -576,7 +576,6 @@ private:
                                      int& pivots, int& released) {
         const auto k = static_cast<Eigen::Index>(ports.size());
         const Real tol_w0 = tol * sc.vscale;
-        const Real z_short = Real{1e-12} * std::max(Real{1}, H_.cwiseAbs().maxCoeff());
         held_.assign(ports.size(), 0);
         short_.assign(ports.size(), 0);
         for (Eigen::Index j = 0; j < k; ++j) {
@@ -584,12 +583,13 @@ private:
             const auto& p = ports[ju];
             // hysteresis holds a port that was OFF before the event (D8)
             held_[ju] = (fixed_[ju] || (!coord_[ju] && !(*prev_)[ju] && p.V_th > p.V_f)) ? 1 : 0;
-            // An ideal port shorted by a loop (Z_jj = 0) whose gap is zero
-            // within tol_w (V_f = 0 across a closed ideal switch): OFF, not
-            // decided by the sign of the loop's round-off residual (a
-            // negative ulp sent Lemke into its zero column, a ray).
+            // An ideal port shorted by a loop (Z_jj = 0: its current scale
+            // drops less than tol_w across it) whose gap is zero within
+            // tol_w (V_f = 0 across a closed ideal switch): OFF, not decided
+            // by the sign of the loop's round-off residual (a negative ulp
+            // sent Lemke into its zero column, a ray).
             if (!held_[ju] && p.R_on == Real{0} && !coord_[ju] &&
-                std::abs(H_(j, j)) <= z_short && q_[j] >= -tol_w0) {
+                std::abs(H_(j, j)) * sc.iscale <= tol_w0 && q_[j] >= -tol_w0) {
                 held_[ju] = short_[ju] = 1;
             }
         }

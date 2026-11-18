@@ -133,7 +133,7 @@ def _cmp(a, b):
     # within 1 % (or 1e-12) of each other: the same answer
     if abs(eb - ea) <= max(1e-2 * max(ea, eb), 1e-12):
         return "same"
-    return "better" if eb < ea else ("worse" if rb > 0 else "same (both agree)")
+    return "better" if eb < ea else "worse"     # graded the same way both directions
 
 
 def render(recs):
@@ -148,8 +148,11 @@ def render(recs):
          "the branch form with the same values (`R_on = 1/g_on`, same `g_off`, design D6);",
          "`lcp` = `mode_selection='lcp'` (only where a PWL diode exists; `n/a` otherwise);",
          "`branch+lcp` both. Comparison of each variant against `default` in the same",
-         "configuration: `same` (same outcome, err_rms within 1 % or both agree), `better`,",
-         "`worse`, `refused` / `error` (the default ran). MOSFET / IGBT helpers and",
+         "configuration: `same` (same outcome and err_rms within 1 %), `better` / `worse`",
+         "(outcome rank, else err_rms beyond 1 %), `refused` / `error` (the default ran).",
+         "`agree` counts `unverified` (a suspect reference) too. The branch variant has",
+         "finite R_on = 1/g_on (each netlist gives g_on): no R_on = 0 port appears",
+         "here; the ideal (R_on = 0) cases are in the unit tests. MOSFET / IGBT helpers and",
          "Shockley diodes keep their own models (not switched by the variant).",
          "The wall ratio is variant / default over one run per cell (a noisy",
          "signal; the median-of-7 cost gate is",
@@ -178,7 +181,8 @@ def render(recs):
                 cmp[key] += 1
                 if key in ("worse", "new"):
                     worse.append((r, d, c))
-                if d.get("wall_s") and r.get("wall_s") and r["outcome"] in ("agree", "disagree"):
+                if (d.get("wall_s") and r.get("wall_s") and r["outcome"] in ("agree", "disagree")
+                        and d["outcome"] in ("agree", "disagree", "unverified")):
                     ratios.append(r["wall_s"] / d["wall_s"])
             ratio = f"{statistics.median(ratios):.3f}" if ratios else ""
             if var == "default":
