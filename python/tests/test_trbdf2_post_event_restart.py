@@ -124,9 +124,10 @@ def test_dcm_no_step_below_1e_11(dcm):
     inst = np.sort(np.concatenate([edges, ev]))
     j = np.clip(np.searchsorted(inst, t[k]), 1, len(inst) - 1)
     dist = np.minimum(np.abs(inst[j] - t[k]), np.abs(inst[j - 1] - t[k]))
-    # 1e-13: the record after a turn-off lasts 1e-4 h >= 1e-12 s here, so
-    # a short step after it does not pass as "at the event".
-    assert dist.max(initial=0.0) < 1e-13   # every short interval is at an event
+    # 5e-13: well above the landing's h_min noise (4e-14) and below the
+    # record after a turn-off (>= 9.6e-11 s here), so a short step after
+    # the record does not pass as "at the event".
+    assert dist.max(initial=0.0) < 5e-13   # every short interval is at an event
     assert len(k) <= len(inst)
     assert dcm._trbdf2_stats["n_diode_events"] > NPER // 2   # the DCM turn-offs ran
 
@@ -258,3 +259,30 @@ def test_the_pulse_cap_follows_the_recent_pulses():
         1 / Tp, 1e-3, k, b.graph.num_switches))
     tr = np.asarray(ref.times)
     assert np.sum(t > 0.5e-3) <= 2 * np.sum(tr > 0.5e-3)
+
+
+def test_a_gate_that_gets_faster_loses_no_pulse():
+    """A 100 ns pulse every third period, then every period (pulse skipping
+    resuming). The rises prove periodic at 3T and the cap lifts between
+    them; the new pulses come where none is predicted, and only the gate
+    samples inside the lifted step can see them: they stay half a pulse
+    apart. Every edge, structurally."""
+    Tp, w = 1e-5, 1e-7
+    b = _tick_buck()
+    k = b.switch_index_of("S")
+
+    def fn(t):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        n = int(t // Tp)
+        m.set(k, bool(n >= 1 and t - n * Tp < w
+                      and (n % 3 == 0 or n * Tp >= 3e-4 - 1e-12)))
+        return m
+    r = p.simulate(b, 1e-3, engine="trbdf2", switch_fn=fn)
+    # From the second pulse on: a pulse before any is seen can be stepped
+    # over by any opaque-gate run (nothing to cap by yet).
+    want = sum(1 for n in range(4, 100) if n % 3 == 0 or n * Tp >= 3e-4 - 1e-12)
+    t = np.asarray(r.times)
+    s = np.asarray(r.switch_states)[:, k]
+    j = np.flatnonzero(s[1:] != s[:-1])
+    j = j[t[j] > 3.5 * Tp]
+    assert (int(np.sum(s[j + 1])), int(np.sum(~s[j + 1]))) == (want, want)

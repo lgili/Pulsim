@@ -1451,8 +1451,15 @@ inline SimulationResult run_transient_trbdf2(
     // at kT) is not capped until just before the predicted toggle: the
     // same run took 58,514 steps with the cap over the whole long phase.
     // Returns the step limit (infinite: none).
+    // The narrowest recent pulse of a bit whose cap was lifted: the gate
+    // samples inside a lifted step stay half of it apart (a gate that gets
+    // faster, a skipped pulse resuming, puts pulses where none is
+    // predicted: only the samples can see them).
+    Real gate_sample_w = std::numeric_limits<Real>::infinity();
+    std::vector<Real> gate_frac;
     auto gate_pulse_cap = [&](Real at_t) {
         Real lim = std::numeric_limits<Real>::infinity();
+        gate_sample_w = std::numeric_limits<Real>::infinity();
         for (const Size i : gate_bits) {
             const Real wh = gate_w_last[2 * i + 1];
             const Real wl = gate_w_last[2 * i];
@@ -1492,6 +1499,7 @@ inline SimulationResult run_transient_trbdf2(
             }
             lim = std::min(lim, any_reg ? std::max(Real{2} * w, reg)
                                         : Real{2} * w);
+            gate_sample_w = std::min(gate_sample_w, w);
         }
         return lim;
     };
@@ -1766,6 +1774,7 @@ inline SimulationResult run_transient_trbdf2(
         }
         if (tp >= opts.t_end - h_min
             || tp >= queue.next_of(events::Kind::ControlTick) - h_min) {
+            sdirk_event = false;   // no post-jump sample: no turn-off restart
             return;
         }
         result.times.push_back(tp);
@@ -1941,9 +1950,18 @@ inline SimulationResult run_transient_trbdf2(
             // was one of the samples).
             bool gates_flat = false;
             if (!landed_on_edge) {
+                // Samples per step: 4, or half the recent narrowest pulse
+                // apart in a lifted step (switch_fn calls only, no solves).
+                int n_gs = kGateSamples;
+                if (learn_gates && std::isfinite(gate_sample_w)
+                    && gate_sample_w > Real{0}) {
+                    n_gs = static_cast<int>(std::clamp(
+                        std::ceil(Real{2} * h / gate_sample_w),
+                        Real{kGateSamples}, Real{4096}));
+                }
                 if (learn_gates) {
                     const Real spacing =
-                        h / static_cast<Real>(kGateSamples);
+                        h / static_cast<Real>(n_gs);
                     gate_spacing_max =
                         std::max(gate_spacing_max, spacing);
                     for (const Size i : gate_bits) {
@@ -1959,13 +1977,13 @@ inline SimulationResult run_transient_trbdf2(
                 // that starts after the run has reached h_max.
                 gate_jitter += Real{0.6180339887498949};
                 gate_jitter -= std::floor(gate_jitter);
-                std::array<Real, kGateSamples + 1> frac{};
-                for (int k = 1; k <= kGateSamples; ++k) {
+                std::vector<Real>& frac = gate_frac;
+                frac.resize(static_cast<std::size_t>(n_gs) + 1);
+                for (int k = 1; k <= n_gs; ++k) {
                     frac[static_cast<std::size_t>(k - 1)] =
-                        static_cast<Real>(k)
-                        / static_cast<Real>(kGateSamples);
+                        static_cast<Real>(k) / static_cast<Real>(n_gs);
                 }
-                frac[kGateSamples] =
+                frac[static_cast<std::size_t>(n_gs)] =
                     std::clamp(gate_jitter, Real{0.01}, Real{0.99});
                 std::sort(frac.begin(), frac.end());
                 Real lo = t, hi = t + h;
@@ -2310,6 +2328,7 @@ inline SimulationResult run_transient_trbdf2(
                 h = std::max(h * Real{0.1}, h_min);
                 ++st.n_reject;
                 if (sdirk && sdirk_event && !reinit_step) {
+                    drop_superseded_event_sample(t);
                     sdirk_event = false;   // as an LTE reject below
                     sdirk_left = 0;
                 }
@@ -2337,6 +2356,9 @@ inline SimulationResult run_transient_trbdf2(
                 h = std::max(h * fac, h_lo);
                 ++st.n_reject;
                 if (sdirk && sdirk_event && !reinit_step) {
+                    // Its record claimed the jump instant: TR-BDF2 resolves
+                    // it now, so the record goes.
+                    drop_superseded_event_sample(t);
                     // The turn-off restart is one L-stable step over a mode
                     // its filtered estimate does not see; rejected, the mode
                     // is not stiff at this h (a flyback's coupled leakage
@@ -2647,7 +2669,7 @@ inline SimulationResult run_transient_trbdf2(
                     // cannot be bracketed further (it walked to h_min).
                     // The noise acceptance is capped by the spike it lets
                     // through: never above the circuit's own range max|x|.
-                    const Real v_range = x.cwiseAbs().maxCoeff();
+                    const Real v_range = x.head(graph.num_nodes()).cwiseAbs().maxCoeff();
                     auto spike_ok = [&](Real s_post) {
                         const Real spike = std::abs(s_post) * ce.g_on / ce.g_off;
                         return !turn_off || spike <= v_tol
