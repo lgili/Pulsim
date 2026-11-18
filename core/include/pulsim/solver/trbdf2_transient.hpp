@@ -381,6 +381,7 @@ inline SimulationResult run_transient_trbdf2(
             "run_transient_trbdf2: switch_fn is required (pass an "
             "all-open mask function for uncontrolled circuits)");
     }
+    refuse_device_losses(pool, "trbdf2");   // add-in-kernel-event-losses 3.1
 
     // ---- scope census ----
     // Nonlinear devices are fine: each stage becomes a Newton

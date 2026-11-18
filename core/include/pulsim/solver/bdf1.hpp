@@ -296,6 +296,7 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
     // DIFFERENT circuit. Which kinds it runs is the capability table's
     // `Bdf1` column (pwl/device_pool.hpp), not a list kept here.
     require_branch_form_supported(graph, pool, pwl::Engine::Bdf1);
+    refuse_device_losses(pool, "bdf1");
     if (const auto bad = find_unsupported(graph, pool, pwl::Engine::Bdf1)) {
         if (pwl::kind_caps(pool.kind_of(*bad)).cls
                 == pwl::SolveClass::PwlDiode) {

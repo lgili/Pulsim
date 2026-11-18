@@ -32,6 +32,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/solver/state_trajectory.hpp"
+#include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
 #include <algorithm>
@@ -315,6 +316,16 @@ struct SimulationResult {
     Size ideal_loop_releases = 0;
     /// add-branch-form-ideal-switch D4: impulsive re-initialisations.
     std::vector<ReinitRecord> reinit_records;
+
+    /// add-in-kernel-event-losses: one record per device with a loss
+    /// port (events, energy totals), in set_device_losses order. Empty
+    /// for a circuit without one.
+    std::vector<thermal::DeviceLossRecord> device_losses;
+    /// Heat (J) the run deposited into thermal nodes, and heat recorded
+    /// in its last step that the next step would have deposited.
+    /// injected + pending = every event plus every conduction energy.
+    Real heat_injected = 0;
+    Real heat_pending = 0;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or

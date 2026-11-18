@@ -591,7 +591,16 @@ def _pss_rtol():
 def plan_of(ev):
     """The evaluator's kernel plan, or a string naming why it has none
     (the batch then takes the Python path for every design)."""
+    from .design import _digest
     p = ev.__dict__.get("_kplan")
+    if p is not None and _digest(ev._config()) != ev._options_digest:
+        # the cached plan (and every design id) froze kpis=, constraints=
+        # and the other options when the evaluator was made
+        raise ValueError(
+            "Evaluator: kpis=, constraints= or another option changed after "
+            "the first batch; the kernel plan and the design ids were built "
+            "from the old ones. Make a new Evaluator instead of mutating "
+            "this one.")
     if p is None:
         p = _plan_or_reason(ev)
         ev._kplan = p

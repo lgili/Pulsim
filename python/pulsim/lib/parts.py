@@ -546,6 +546,63 @@ class Part:
         kw["T_j"] = T_j
         return builder.add_power_mosfet(name, drain, source, gate, **kw)
 
+    def attach_losses(self, builder, device: str, *, T_amb: float,
+                      heatsink_node: Optional[str] = None,
+                      allow_synthetic: bool = False,
+                      conduction: Optional[str] = None) -> str:
+        """Give ``device`` this part's loss tables and thermal chain, read
+        inside the run (add-in-kernel-event-losses; ``engine='pwl'``).
+
+        Builds the chain junction first (Foster: R // C per stage; Cauer:
+        C of each stage to the reference) from a junction node
+        ``f"Tj_{device}"`` to ``heatsink_node`` (a node of your thermal
+        network), or to a new ambient source at ``T_amb`` °C when none is
+        given, and calls ``builder.set_device_losses`` with ``E_on`` /
+        ``E_off`` (a diode part: its ``Erec`` as ``E_off``) and the
+        on-state table ``V_on`` unreduced. ``conduction`` defaults to
+        ``"table"`` when the part has an on-state table, else
+        ``"electrical"``. Returns the junction node's name. A synthetic
+        part is refused (:class:`ProvenanceError`) unless
+        ``allow_synthetic=True``."""
+        from .._pulsim import ConductionTable
+        if self.is_synthetic and not allow_synthetic:
+            raise ProvenanceError(
+                f"{self!r}.attach_losses(): {self.notice()} Pass "
+                "allow_synthetic=True to attach it anyway.")
+        chain = self.thermal()
+        junction = f"Tj_{device}"
+        ref = heatsink_node
+        if ref is None:
+            ref = f"Tamb_{device}"
+            builder.add_voltage_source(f"Th_{device}_amb", ref, "gnd",
+                                       float(T_amb))
+        n = len(chain.R)
+        prev = ref
+        for k in reversed(range(n)):        # from the reference to the junction
+            curr = junction if k == 0 else f"Th_{device}_n{k}"
+            r = float(chain.R[k])
+            c = (float(chain.second[k]) / r if chain.kind == "foster"
+                 else float(chain.second[k]))
+            builder.add_resistor(f"Th_{device}_R{k}", prev, curr, r)
+            builder.add_capacitor(f"Th_{device}_C{k}", curr,
+                                  prev if chain.kind == "foster" else ref, c)
+            prev = curr
+        diode = self.cls == "diode"
+        e_on = None if diode else self.loss_tables.get("Eon")
+        e_off = self.loss_tables.get("Erec" if diode else "Eoff")
+        v_on = None
+        if "v_on" in self.conduction:
+            i, tj, v = self.conduction["v_on"]
+            v_on = ConductionTable(np.asarray(i, float).tolist(),
+                                   np.asarray(tj, float).tolist(),
+                                   np.asarray(v, float).ravel().tolist())
+        if conduction is None:
+            conduction = "table" if v_on is not None else "electrical"
+        builder.set_device_losses(device, junction=junction, E_on=e_on,
+                                  E_off=e_off, V_on=v_on,
+                                  conduction=conduction)
+        return junction
+
     def acceptance_check(self, *, engine: str = "trbdf2") -> Dict[str, Any]:
         """Run the part's datasheet double-pulse condition and compare E_on
         and E_off with the datasheet values. Returns ``{"E_on", "E_off",

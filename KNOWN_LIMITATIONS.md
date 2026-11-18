@@ -26,6 +26,16 @@ can pick it up without re-discovering the context.
 
 ## Post-hoc analysis
 
+### Event losses inside the transient: fixed-step engine only
+
+`CircuitBuilder.set_device_losses` (add-in-kernel-event-losses) reads
+`E_on` / `E_off` / `V_on` tables inside the `pwl` time loop and heats a
+thermal node. `trbdf2`, `dsed`, `bdf1` and `auto` refuse a loss port by
+name until the unified event queue gives them one commutation hook. The
+event energy is not drawn from the circuit, `T_j` does not change the
+device, and a resumed run drops the heat of the step in flight. See
+`docs/known-limitations.md` and `docs/losses-and-thermal.md`.
+
 ### Per-device loss reporting — sub-step transient resolution
 
 `pulsim.device_loss_summary(builder, result)` walks every

@@ -500,6 +500,48 @@ void init_module(py::module_& m) {
         .def_property_readonly("i_axis", &thermal::ConductionTable::i_axis)
         .def_property_readonly("tj_axis", &thermal::ConductionTable::tj_axis)
         .def_property_readonly("v_on", &thermal::ConductionTable::v_on);
+    // ---- add-in-kernel-event-losses group 2: records, reading rule ------
+    py::class_<thermal::LossEvent>(m, "LossEvent",
+        "One commutation of a device with a loss port: t (start of the step "
+        "solved under the new state), turn_on, |v| and |i| read by the "
+        "reading rule, the junction temperature tj and the table energy e.")
+        .def_readonly("t", &thermal::LossEvent::t)
+        .def_readonly("turn_on", &thermal::LossEvent::turn_on)
+        .def_readonly("v", &thermal::LossEvent::v)
+        .def_readonly("i", &thermal::LossEvent::i)
+        .def_readonly("tj", &thermal::LossEvent::tj)
+        .def_readonly("e", &thermal::LossEvent::e);
+    py::class_<thermal::DeviceLossRecord>(m, "DeviceLossRecord",
+        "A device's loss record in a result (res.loss_events / "
+        "res.device_energy read it).")
+        .def_readonly("device", &thermal::DeviceLossRecord::device)
+        .def_readonly("node", &thermal::DeviceLossRecord::node)
+        .def_readonly("events", &thermal::DeviceLossRecord::events)
+        .def_readonly("E_on", &thermal::DeviceLossRecord::E_on)
+        .def_readonly("E_off", &thermal::DeviceLossRecord::E_off)
+        .def_readonly("E_cond_electrical",
+                      &thermal::DeviceLossRecord::E_cond_electrical)
+        .def_readonly("E_cond_table", &thermal::DeviceLossRecord::E_cond_table)
+        .def_readonly("n_on", &thermal::DeviceLossRecord::n_on)
+        .def_readonly("n_off", &thermal::DeviceLossRecord::n_off);
+    m.def("_commutation_points",
+        [](const std::vector<std::tuple<bool, Real, Real>>& seq) {
+            // One reading rule for the transient tracker and the periodic
+            // orbit (_period_kpis.commutations): thermal::commutation_point.
+            std::vector<std::pair<Real, Real>> on, off;
+            for (std::size_t k = 1; k < seq.size(); ++k) {
+                const auto& [c0, v0, i0] = seq[k - 1];
+                const auto& [c1, v1, i1] = seq[k];
+                if (c0 == c1) continue;
+                const auto pt = thermal::commutation_point(c1, v0, i0, v1, i1);
+                (c1 ? on : off).emplace_back(pt.v, pt.i);
+            }
+            return py::make_tuple(on, off);
+        },
+        py::arg("seq"),
+        "(on, off): the (|v|, |i|) of every turn-on and turn-off of an edge "
+        "sequence [(closed, v, i), ...] by the kernel's reading rule (turn-on: "
+        "v before, i after; turn-off: the reverse).");
 
     // ---- add-power-mosfet-datasheet-device: charge laws ----------------
     py::class_<models::ChargeTable>(m, "ChargeTable",
@@ -1249,6 +1291,45 @@ void init_module(py::module_& m) {
               "diode (source→drain). V_F is the body diode's "
               "CONDUCTION DROP (add_diode's V_f): v_SD = V_F + "
               "i/g_on_diode while on, and it turns on at V_F.")
+        .def("_set_device_losses",
+              [](builder::CircuitBuilder& b, const std::string& device,
+                 const std::string& junction, double tj,
+                 const std::string& heat_node,
+                 const thermal::LossTable3D* e_on,
+                 const thermal::LossTable3D* e_off,
+                 const thermal::ConductionTable* v_on,
+                 const std::string& conduction) {
+                  thermal::DeviceLossSpec s;
+                  s.device = device;
+                  s.junction = junction;
+                  s.tj = tj;
+                  s.heat_node = heat_node;
+                  if (e_on) s.e_on = std::make_shared<const thermal::LossTable3D>(*e_on);
+                  if (e_off) s.e_off = std::make_shared<const thermal::LossTable3D>(*e_off);
+                  if (v_on) s.v_on = std::make_shared<const thermal::ConductionTable>(*v_on);
+                  if (conduction == "table") {
+                      s.conduction = thermal::ConductionHeat::Table;
+                  } else if (conduction != "electrical") {
+                      throw std::invalid_argument(
+                          "set_device_losses(\"" + device + "\"): conduction "
+                          "must be 'electrical' or 'table', not '" +
+                          conduction + "'");
+                  }
+                  b.set_device_losses(std::move(s));
+              },
+              py::arg("device"), py::arg("junction"), py::arg("tj"),
+              py::arg("heat_node"), py::arg("e_on").none(true),
+              py::arg("e_off").none(true), py::arg("v_on").none(true),
+              py::arg("conduction"),
+              "Kernel half of CircuitBuilder.set_device_losses (tj = NaN "
+              "when not given, '' for an absent node name).")
+        .def("_device_loss_names",
+              [](const builder::CircuitBuilder& b) {
+                  std::vector<std::string> out;
+                  for (const auto& s : b.pool().device_losses()) out.push_back(s.device);
+                  return out;
+              },
+              "Devices with a loss port, in set_device_losses order.")
         .def("add_igbt",
               &builder::CircuitBuilder::add_igbt,
               py::arg("name"), py::arg("collector"),
@@ -2818,6 +2899,15 @@ void init_module(py::module_& m) {
             "Bytes held by the stamped-mask record.")
         .def_readonly("commutation_events",
                        &SimulationResult::commutation_events)
+        .def_readonly("_device_losses", &SimulationResult::device_losses,
+                       "add-in-kernel-event-losses: one DeviceLossRecord per "
+                       "loss port (read with loss_events / device_energy).")
+        .def_readonly("heat_injected", &SimulationResult::heat_injected,
+                       "J of heat the run deposited into thermal nodes.")
+        .def_readonly("heat_pending", &SimulationResult::heat_pending,
+                       "J of heat recorded in the last step and not yet "
+                       "deposited (the step that would carry it is past "
+                       "t_end).")
         .def_readonly("reinit_records",
                        &SimulationResult::reinit_records,
                        "Impulsive re-initialisations of dependent modes "

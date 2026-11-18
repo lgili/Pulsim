@@ -36,6 +36,7 @@ the last tabulated point.
 
 from __future__ import annotations
 
+import math
 import weakref
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
@@ -305,3 +306,105 @@ def resolve_tj(tj, times: np.ndarray) -> np.ndarray:
             "junction temperature, an array on the result's own time "
             "grid, or a callable t -> Tj.")
     return arr
+
+
+# ---- add-in-kernel-event-losses: the loss port and its records ---------
+
+def _kernel_table(obj, name, device):
+    """A kernel ``LossTable3D`` from a :class:`LossTable` (or one already)."""
+    if obj is None:
+        return None
+    from ._pulsim import LossTable3D
+    if isinstance(obj, LossTable3D):
+        return obj
+    if isinstance(obj, LossTable):
+        return obj._kernel()
+    raise TypeError(f"set_device_losses({device!r}): {name} must be a "
+                    f"pulsim.LossTable or LossTable3D, not "
+                    f"{type(obj).__name__}")
+
+
+def set_device_losses(self, device, *, junction=None, Tj=None,
+                      heat_node=None, E_on=None, E_off=None, V_on=None,
+                      conduction="electrical"):
+    """Give a PWL switch or diode a loss port read INSIDE the run
+    (add-in-kernel-event-losses; ``engine='pwl'``, other engines refuse
+    by name).
+
+    At each commutation the kernel reads the blocking voltage and the
+    commutated current by the reading rule (turn-on: ``v`` before,
+    ``i`` after; turn-off: the reverse), evaluates ``E_on`` / ``E_off``
+    (:class:`LossTable`, ``E(v, i, Tj)``; a diode's ``E_off`` is its
+    recovery) at the junction temperature, and deposits the energy as a
+    rectangular heat pulse over the next step. Conduction heat is the
+    device's own ``v·i`` (``conduction="electrical"``) or
+    ``V_on(|i|, Tj)·|i|`` from the on-state table ``V_on``
+    (:class:`pulsim.ConductionTable`, ``conduction="table"``).
+
+    Exactly one of ``junction`` (a thermal node of the circuit,
+    temperature in °C as its voltage: closed loop) or ``Tj`` (fixed °C:
+    open loop; heat into ``heat_node`` when given, else recorded only).
+    The node that takes the heat needs a capacitor on it. Read the
+    results with ``res.loss_events(device)`` and
+    ``res.device_energy(device)``.
+    """
+    j = "" if junction is None else str(junction)
+    tj = math.nan if Tj is None else float(Tj)
+    e_on = _kernel_table(E_on, "E_on", device)
+    e_off = _kernel_table(E_off, "E_off", device)
+    if junction is not None and Tj is None:
+        tables = [t for t in (e_on, e_off) if t is not None]
+        if tables and all(len(t.tj_axis) == 1 for t in tables) and (
+                V_on is None or len(V_on.tj_axis) == 1):
+            import warnings
+            warnings.warn(
+                f"set_device_losses({device!r}): every table has one "
+                "temperature knot, so the loss does not depend on T_j and "
+                "junction= does not close a loop", RuntimeWarning,
+                stacklevel=2)
+    self._set_device_losses(str(device), j, tj,
+                            "" if heat_node is None else str(heat_node),
+                            e_on, e_off, V_on, str(conduction))
+    return self
+
+
+def _record(self, device):
+    for r in self._device_losses:
+        if r.device == device:
+            return r
+    names = [r.device for r in self._device_losses]
+    raise KeyError(f"no loss port named {device!r} in this result "
+                   f"(devices with one: {names})")
+
+
+LOSS_EVENT_DTYPE = np.dtype([("t", "f8"), ("kind", "U3"), ("v", "f8"),
+                             ("i", "f8"), ("Tj", "f8"), ("E", "f8")])
+
+
+def loss_events(self, device):
+    """The commutations of ``device`` as a structured array with fields
+    ``t, kind ('on'|'off'), v, i, Tj, E`` (``set_device_losses``)."""
+    ev = _record(self, device).events
+    out = np.empty(len(ev), dtype=LOSS_EVENT_DTYPE)
+    for k, e in enumerate(ev):
+        out[k] = (e.t, "on" if e.turn_on else "off", e.v, e.i, e.tj, e.e)
+    return out
+
+
+def device_energy(self, device):
+    """``{"E_on", "E_off", "E_cond_electrical", "E_cond_table", "n_on",
+    "n_off"}`` of ``device`` (energies in J). ``E_cond_electrical`` is
+    the device's ``∫v·i`` (always), ``E_cond_table`` the on-state
+    table's (0 without one); the spec's ``conduction`` says which one
+    was deposited as heat."""
+    r = _record(self, device)
+    return {"E_on": r.E_on, "E_off": r.E_off,
+            "E_cond_electrical": r.E_cond_electrical,
+            "E_cond_table": r.E_cond_table,
+            "n_on": int(r.n_on), "n_off": int(r.n_off)}
+
+
+def install(builder_cls, result_cls):
+    builder_cls.set_device_losses = set_device_losses
+    result_cls.loss_events = loss_events
+    result_cls.device_energy = device_energy
