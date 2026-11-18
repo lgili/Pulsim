@@ -101,6 +101,7 @@
 #include "pulsim/models/switched_diode.hpp"
 #include "pulsim/models/transformer.hpp"
 #include "pulsim/solver/result.hpp"
+#include "pulsim/solver/step/integrators.hpp"
 #include "pulsim/solver/run_transient.hpp"   // combine_masks, SimulationAborted
 #include "pulsim/sources/pwm_b_extra.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
@@ -870,7 +871,7 @@ inline SimulationResult run_transient_trbdf2(
         // solve's return value. Setting it here, at the one
         // choke point all trapezoidal solves pass through, is the
         // same fix run_transient applies to its `step_ctx`.
-        step_ctx = {dt, pwl::TrBdf2Stage::Trapezoidal};
+        step_ctx = step::Trapezoidal::stage(dt).ctx();
         history.compute_b_extra(dt, b_stage);
         accumulate_sources(t0 + dt, b_src);
         b_stage += b_src;
@@ -2078,7 +2079,8 @@ inline SimulationResult run_transient_trbdf2(
             }
 
             // ---- stage 1: TR over γh (or SDIRK stage 1, BE over γ_s h) ----
-            const Real hg = gamma * h;
+            const step::StageSpec stage0 = step::TrBdf2::stage(h, 0);
+            const Real hg = stage0.factor_dt;   // gamma * h
             const bool sdirk = (sdirk_left > 0 && restart_ok()) || reinit_step
                                || reinit_left > 0;
             // Where x_g sits in time (the crossing detector reads it).
@@ -2093,7 +2095,7 @@ inline SimulationResult run_transient_trbdf2(
             accumulate_sources(t + h_pt, b_src);
             b_stage += b_src;
             x_g = x;                 // Newton warm start
-            step_ctx = {hg, pwl::TrBdf2Stage::Trapezoidal};
+            step_ctx = stage0.ctx();
             bool stage_ok =
                 solve_dispatch(mask_step, hg, b_stage, x_g);
             ++st.n_solves;
@@ -2138,7 +2140,7 @@ inline SimulationResult run_transient_trbdf2(
                 // the matrix is still the one factored at gamma*h — the
                 // identity c1/h == 2/(gamma*h) is what allows that.
                 hs.capture_gamma(x_g);
-                step_ctx = {h, pwl::TrBdf2Stage::Bdf2Stage2};
+                step_ctx = step::TrBdf2::stage(h, 1).ctx();
                 x_1 = x_g;           // Newton warm start
                 stage_ok =
                     solve_dispatch(mask_step, hg, b_stage, x_1);
