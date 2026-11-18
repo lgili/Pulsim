@@ -300,3 +300,42 @@ def test_a_version_3_pickle_loads_and_resumes_on_a_restarted_grid():
     a = _pwl(1e-4, resume_from=snap)
     b = _pwl(1e-4, resume_from=old)
     assert np.array_equal(np.asarray(a.states), np.asarray(b.states))
+
+
+@pytest.mark.parametrize("path", ["legacy", "interface"])
+def test_every_pickle_layout_resumes_the_stored_charge_kinds_on_both_paths(path):
+    """Every layout this Pulsim reads (2.0: 10/11/12 fields; version 3:
+    12/13; version 4: 13/14/15) loads a snapshot holding a Lauritzen
+    diode and an IGBT tail taken on either device path, and resumes on
+    that path exactly as the snapshot it came from (the layouts without a
+    grid as the same snapshot without one)."""
+    snap = _pwl(4.2e-5, device_path=path).final_snapshot
+    assert list(snap.lauritzen_history)[0] != 0.0     # charge really stored
+    assert list(snap.igbt_tail_history)[0] != 0.0
+    v4 = snap.__getstate__()
+    assert v4[1] == 4 and len(v4) == 14
+    old = (snap.t, list(snap.x), list(snap.history), list(snap.diode_on),
+           list(snap.saturable_history), list(snap.coss_history),
+           list(snap.lauritzen_history), list(snap.igbt_tail_history),
+           list(snap.pmsm_history), True, list(snap.stamped_mask),
+           int(snap.restart_steps_left))
+    with_grid = [v4[:13], v4, v4 + (None,)]
+    no_grid = [("SolverSnapshot", 3) + tuple(v4[2:12]),
+               ("SolverSnapshot", 3) + tuple(v4[2:12]) + (v4[13],),
+               old, old[:11], old[:10]]
+
+    def resume(s):
+        return np.asarray(_pwl(1e-4, resume_from=s, device_path=path).states)
+
+    def load(state):
+        s = SolverSnapshot.__new__(SolverSnapshot)
+        s.__setstate__(state)
+        return s
+
+    ref = resume(snap)
+    for state in with_grid:
+        assert np.array_equal(resume(load(state)), ref), len(state)
+    snap.grid_origin = float("nan")
+    ref = resume(snap)
+    for state in no_grid:
+        assert np.array_equal(resume(load(state)), ref), len(state)

@@ -438,3 +438,24 @@
     coverage test must accept `InductionMachineMna` through
     `PmsmMnaHistory` (its `kStoredKind` is `PmsmMna`). Speed: an AD width
     of 9–10 against a hand-derived stamp needs the per-call bench first.
+
+## Slice 5 — slice 4 verified (2026-11-18)
+
+35. **Slice 4's C++ tests, run; the missing ones added.** Full ctest on
+    e9805fb4 gave 935/936: the Lauritzen law test compared the paths in
+    ulps of the residual, a small difference of the stored-charge terms
+    (3 of 100 trials); 8419f471 states the tolerance in ulps of the carried
+    terms (q, q_γ, h·q̇) plus q/T_M (τ_tail) on the rate. It can still fail:
+    with the Lauritzen local row's 1/τ dropped and the tail's k·i_ss sign
+    flipped, both local-row tests fail (4754 of 10400 assertions). Added:
+    (a) `Params<Real>` bit-identical to the model's own `Params` for the four
+    static kinds (500 random points each, each instantiation out of line
+    through a volatile function pointer; same expression, same scalar type,
+    -ffp-contract=off) — memcmp; the AD value within 4 ulp; (b) the Lauritzen
+    + IGBT-tail chopper allocates O(1) per step on BOTH paths: 91 operator-new
+    at 1000 steps, 93 at 4000 (with 4x the gate edges) on each path — bounded
+    at +6, a per-step allocation would add ≥ 3000; (c) every pickle layout
+    (2.0 10/11/12 fields, v3 12/13, v4 13/14/15) resumes a Lauritzen +
+    IGBT-tail snapshot taken on either path exactly as the snapshot it came
+    from. Full ctest 937 (936 + the fixed bound), the law and perf targets on
+    Eigen 3.4.0 green.

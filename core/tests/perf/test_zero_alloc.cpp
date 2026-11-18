@@ -682,3 +682,56 @@ TEST_CASE("fixed engine: a tick instant within 1e-9*dt of t_end does not fire",
     CHECK(n == 4);
     CHECK(r.control_tick_counts[0] == 4);
 }
+
+TEST_CASE("stored-charge kinds (Lauritzen, IGBT tail): allocation count is "
+          "O(1) on both device paths",
+          "[v2][perf][zero_alloc][device_path]") {
+    // add-unified-device-interface: the two local-row laws (DECISIONS #28)
+    // run through `stamp_fq_local` on 'interface' and through their hand
+    // stamps on 'legacy'; neither may allocate per step. A gated chopper:
+    // the IGBT switches every 50 µs so the tail charge builds and decays and
+    // the Lauritzen diode freewheels, inside the counted window.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "vcc", "gnd", 15.0);   // one new node per call
+    b.add_inductor("L", "vcc", "c", 1e-4);
+    b.add_pulse_voltage_source("VG", "g", "gnd", 0.0, 15.0, 0.0, 2.5e-5, 5e-5);
+    b.add_igbt_level1("Q", "c", "gnd", "g", 1.5, 0.05, 5.0, 10.0, 0.01, false,
+                      1e-6, 0.3);
+    b.add_lauritzen_diode("DL", "c", "vcc");
+    b.add_resistor("R", "c", "vcc", 50.0);
+    PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(Real{1e-6});
+    const solver::SwitchScheduleFn switch_fn = [](Real) { return SwitchStateMask(0); };
+    for (const auto path : {device::DevicePath::Legacy, device::DevicePath::Interface}) {
+        INFO("device path " << static_cast<int>(path));
+        solver::SimulationOptions opts;
+        opts.t_start = 0.0;
+        opts.t_end = 1e-3;
+        opts.dt = 1e-6;
+        opts.resolution_diagnostics = false;
+        opts.device_path = path;
+        {
+            auto warm = solver::run_transient(cache, b.graph(), b.pool(), opts, switch_fn);
+            REQUIRE(warm.states.size() == 1001);
+        }
+        const std::size_t before = g_new_count.load();
+        auto res = solver::run_transient(cache, b.graph(), b.pool(), opts, switch_fn);
+        const std::size_t delta = g_new_count.load() - before;
+        REQUIRE(res.states.size() == 1001);
+        opts.t_end = 4e-3;
+        const std::size_t before4 = g_new_count.load();
+        auto res4 = solver::run_transient(cache, b.graph(), b.pool(), opts, switch_fn);
+        const std::size_t delta4 = g_new_count.load() - before4;
+        REQUIRE(res4.states.size() == 4001);
+        INFO("operator-new count: 1000 steps " << delta << ", 4000 steps " << delta4);
+        if (kCountsMeaningful) {
+            // 3000 more steps and 60 more gate edges: a per-step
+            // allocation would add >= 3000. Measured: 91 -> 93 on BOTH
+            // paths (the +2 is not the laws'; amortised growth of the run's
+            // per-event records over 4x the edges is the likely source).
+            CHECK(delta4 >= delta);
+            CHECK(delta4 <= delta + 6);
+            CHECK(delta < 128);
+        }
+    }
+}
