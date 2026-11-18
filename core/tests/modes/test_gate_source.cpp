@@ -95,6 +95,15 @@ TEST_CASE("a written duty moves the edges: immediate and at carrier start",
     CHECK(held.read(2 * T) == 0.2);
     DutyRegister bad{0.0, LatchPolicy::AtCarrierStart};
     CHECK_THROWS_AS(bad.write(0.5, 0.0), std::invalid_argument);
+    GateSet set(2);
+    DutyRegister other{0.3, LatchPolicy::AtCarrierStart, 2 * T};
+    CHECK_THROWS_AS(set.add(CarrierPwm{T, 0.0, &other, 0}, "x"),
+                    std::invalid_argument);   // latches on another carrier
+    CHECK_THROWS_AS(set.add(CarrierPwm{T, 0.0, nullptr, 0}, "x"),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(set.add(CarrierPwm{T, 0.0, &now, 1, 1}, "x"),
+                    std::invalid_argument);
+    CHECK(set.owner(0) == -1);
 }
 
 TEST_CASE("GateSet composes by index and refuses a doubly driven switch",
@@ -120,6 +129,10 @@ TEST_CASE("GateSet composes by index and refuses a doubly driven switch",
     CHECK(set.owner(3) == -1);
     const auto sched = set.to_schedule();
     REQUIRE(sched.has_edges());
+    GateSet opaque(1);   // a schedule without an edge oracle is not exact
+    opaque.add(ScheduleGate{pulsim::sources::SwitchSchedule{
+                   [](Real) { return SwitchStateMask(1); }}, {0}}, "op");
+    CHECK(!opaque.to_schedule().has_edges());
     for (int k = 0; k < 400; ++k) {
         const Real t = k * 1e-7;
         const auto m = sched(t);
