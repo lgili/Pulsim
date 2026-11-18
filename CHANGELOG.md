@@ -6,6 +6,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration batch 8: control graph, optimisation slice 4 and circuit IR merged
+
+* **Fixed** (control graph review) `PIController`, `Limiter`,
+  `PIDController`, `Integrator` and the space-vector modulator of the
+  kernel clamped with `std::clamp`: NaN passed through, -0.0 kept its
+  sign and `lo > hi` was undefined. They now compute Python's
+  `max(lo, min(hi, u))` operation for operation (NaN -> hi). A block with
+  `output_min > output_max` (`rail_min > rail_max` for `OpAmp`) is
+  refused at build time, naming the block (`ControlGraphBuildError`).
+* **Fixed** a `PythonBlock` returning the wrong number of values was
+  retried as a step failure and surfaced as `SimulationAborted`; it is a
+  `ValueError` from `simulate()`.
+* **Added** `PythonBlock.reset()` forwards to the wrapped object's
+  `reset` (`MixedDomainBlockChain.reset()` reaches it).
+* **Changed (BREAKING)** `CxxBlockChain.add_pwm_generator(phase=)` and
+  `CxxPwmGenerator.phase` read seconds, a delay, as
+  `PwmGenerator(phase=)` does (they read an advance in periods).
+  **Migration:** `add_pwm_generator(f, x, ...)` becomes
+  `add_pwm_generator(f, phase_fraction=x, ...)` (same numbers, bit for
+  bit) or `phase=-x / f`; `duty`, `t`, `output` are keyword-only.
+* **Fixed** (circuit IR x ideal switch) a branch-form switch or diode
+  kept its `R_on` beside the pool's `g_on`: `with_value("S.R_on", ...)`
+  changed a `g_on` the branch law does not read, and the diode's `R_on`
+  was unreachable. `with_value` / `set_value` / `get_value` now read and
+  write `R_on` and `g_off` of a branch-form element (0 allowed, as
+  `add_ideal_switch` allows it); `g_on` / `R_off` are refused by name; a
+  parameter cannot drive a branch-form `R_on` / `g_off` yet (refused by
+  name). The branch form is part of `structure_hash()` (with
+  `R_on == 0` / `g_off == 0`), its `R_on` of `value_hash()`; a
+  conductance-form circuit hashes as before.
+* **Fixed** (optimisation x control graph) a gate that follows a
+  controller (`bind_pi_to_switch`, `bind_pi_to_duty_callable`'s
+  `duty_get` in a hand-written gate, a control graph's
+  `make_pwm_switch_fn`) and a control graph's `drive_source` reached
+  `periodic_steady_state` (every engine) and the design `Evaluator`,
+  which run no controller: the result was the plant's orbit under a
+  frozen duty (or a source at 0). Refused by name
+  (`UnsupportedError`, `feature='closed_loop'`). `sweep(circuit,
+  parallel=True)` with a `step_observer` or a closed-loop gate is
+  refused (the threads would share one controller). The pwl shooting
+  refuses `options` that switch off the restart rule or event splitting.
+* CI: an `examples-guard` job runs the slow examples guard
+  (`PULSIM_RUN_EXAMPLES=1`) against the installed wheel; the guard's
+  subprocesses import the parent's pulsim.
+
 ### Periodic steady state on the fixed and TR-BDF2 engines
 
 * **Added** `periodic_steady_state(..., engine='pwl' | 'trbdf2', dt=,
