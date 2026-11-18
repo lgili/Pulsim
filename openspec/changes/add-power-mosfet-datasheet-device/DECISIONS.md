@@ -161,7 +161,8 @@ Each entry: question → option taken → why → how to reverse.
     mirror's extra ∂F/∂V_OV). L decays like e^{−κ(V_OV + |V_DS|/2)}, so the
     term is below one ulp of the current wherever the channel is well on
     or well off, and the V_DS ≥ 0 branch is untouched. Byte compare
-    against the cf1ddb84 build: every golden, stateful, engine and
+    against the cf1ddb84 build (and again after merging batch 12,
+    against a 7ff35556 build, same outcome): every golden, stateful, engine and
     power-MOSFET case IDENTICAL except one, `mosl1_trbdf2` (Level-1
     buck, gate ramp 100 ns), which ABORTED at t = 0 before (Newton stall
     at node sw, ||dx|| 8e-4) and now runs; it agrees with pwl at

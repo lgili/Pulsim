@@ -45,4 +45,5 @@
 - [ ] 6.2 `AI_GUIDE.md` (which datasheet number goes where; the step needed for an ESL resonance; π versus Bergeron), `docs/losses-and-thermal.md` (ESR and ladder loss rows), `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (single-pair line, no coupled cable, one ESR value, large-signal ceramic behaviour), `CHANGELOG.md` — PARTIAL: AI_GUIDE (signatures and one note), losses-and-thermal, both limitation pages, CHANGELOG; π-versus-Bergeron and ESL step guidance in the limitation pages only
 
 ## 7. Verification
-- [ ] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
+- [x] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
+  - 2026-11-18, after merging integration batch 12 (7ff35556): ctest 920/920; pytest 4976 passed, 107 skipped, 6 xfailed; reference 361 passed; ruff clean; openspec 78/78; stubs up to date. Ticked for this session's work; sections 5 and the AI_GUIDE part of 6.2 stay open (D12, D15).

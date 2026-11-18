@@ -60,7 +60,8 @@
 ## 8. Verification
 - [x] 8.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
   - 2026-11-13: ctest 757/757; pytest 2064 passed, 4 skipped, 8 xfailed; ruff clean; openspec 76/76; stubs up to date.
+- [x] 8.2 Re-verified 2026-11-18 after merging integration batch 12 (7ff35556): ctest 920/920; pytest 4976 passed, 107 skipped, 6 xfailed; `pytest -m reference` 361 passed; ruff clean; openspec 78/78; stubs up to date; `test_power_mosfet_ngspice.py` 10 passed against ngspice 45.2 locally; byte compare against a 7ff35556 build: every case identical except `mosl1_trbdf2` (aborted before, runs now; DECISIONS 19); the new C++ tests also built and passed against Eigen 3.4.0
 
 ## 9. Session 2026-11-18
 - [x] 9.1 Order across a gate-driven threshold crossing measured against an independent Radau solution (`probes/threshold_order.py`): second order on pwl and trbdf2 for linear and VDMOS C_gd; no engine change (DECISIONS.md 18); pinned by `test_gate_driven_threshold_crossing_is_second_order`
-- [x] 9.2 The Level-1 law's jump at V_DS = 0 (2·α(1−β)K·V_OV², 5.2 mA at V_GS = 3.2 V) removed in the third-quadrant branch; continuity and C¹ pinned in C++; both engines now run `probes/vds_zero_jump.py` (DECISIONS.md 19)
+- [x] 9.2 The Level-1 law's jump at V_DS = 0 (2·α(1−β)K·V_OV², 5.2 mA at V_GS = 3.2 V) removed in the third-quadrant branch; continuity and C¹ pinned in C++; both engines now run `probes/vds_zero_jump.py` and `test_current_through_a_partly_on_channel_crosses_zero` (DECISIONS.md 19)
