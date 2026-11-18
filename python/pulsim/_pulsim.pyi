@@ -3142,6 +3142,10 @@ def _require_supported(graph: Graph, pool: DevicePool, engine: str) -> None:
     """
     Raise UnsupportedError for the first branch `engine` cannot simulate (the capability table's column).
     """
+def _run_pwl_points(circuit: Circuit, names: collections.abc.Sequence[str], table: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], options: SimulationOptions, dt: float, switch_fn: typing.Any, start_from_dc_op: bool, enable_nonlinear_refresh: bool | None, initial_state: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"] | None, auto_regularize: bool, n_threads: int) -> tuple[typing.Any, ...]:
+    """
+    Internal (sweep(circuit, ...) kernel path, task 5.2): run the points of a parameter table (rows = points, columns = names: parameters, or "device.field") on the pwl engine, n_threads native threads, without the GIL. Returns ([(result, circuit, builder, own_preflight) or None per point], stats); None = re-run that point through simulate().
+    """
 def _switch_census(graph: Graph, pool: DevicePool) -> tuple[int, int, list[int]]:
     """
     Return (num_switches, num_diode_owned, controlled_switch_indices). Diode bits are solver-owned (overlaid over the user mask by combine_masks); only the controlled indices need a switch_fn/driver.

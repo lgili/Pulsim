@@ -806,6 +806,7 @@ if _HAS_SCOPE:
 # CircuitBuilder, define Cancelled exception, expose simulate-wrapped
 # analyses with `should_continue` cancellation.
 from . import _builder_ergonomics as _berg
+from ._circuit_ir import KERNEL_RUN as _KERNEL_RUN, PWL_RECIPE as _PWL_RECIPE
 from ._circuit_ir import RunPlan, Tie
 from ._circuit_ir import install as _install_parameters
 _berg.install(CircuitBuilder)
@@ -2342,8 +2343,11 @@ def simulate(
         auto_regularize = True
     _preflight_report = None
     _ties = []
+    _kernel_run = _KERNEL_RUN.get()  # sweep(circuit, ...): already ran
     if auto_regularize:
-        if _run_circuit is not None:
+        if _kernel_run is not None:
+            _preflight_report, _ties = _kernel_run.preflight, _kernel_run.ties
+        elif _run_circuit is not None:
             _run_circuit, _preflight_report, _ties = (
                 _run_circuit.with_preflight(
                     PreflightOptions(auto_regularize=True)))
@@ -2363,7 +2367,8 @@ def simulate(
                 stacklevel=2)
     _run_plan = None
     if _run_circuit is not None:
-        builder = _run_circuit.to_builder()
+        builder = (_kernel_run.builder if _kernel_run is not None
+                   else _run_circuit.to_builder())
         if _caller_side_state:
             builder.__dict__.update(_caller_side_state)
         _run_plan = RunPlan(circuit=_run_circuit, ties=tuple(
@@ -3268,10 +3273,17 @@ def simulate(
             kwargs["live_ring"] = live_ring
         if resume_from is not None:
             kwargs["resume_from"] = resume_from
+        if _PWL_RECIPE.get() is not None:  # sweep(circuit, ...) replays it
+            _PWL_RECIPE.get().update(
+                opts=opts, dt=dt, kwargs=dict(kwargs), mmc=bool(mmc_arms),
+                on_cache=on_cache is not None,
+                ic_from_builder=_ic_from_builder,
+                auto_regularize=bool(auto_regularize))
         try:
-            res = run_transient(
-                cache, builder.graph, builder.pool, opts, **kwargs,
-            )
+            res = (_kernel_run.result if _kernel_run is not None else
+                   run_transient(
+                       cache, builder.graph, builder.pool, opts, **kwargs,
+                   ))
         except SimulationAborted as _aborted:
             # The partial trace is a fresh pybind-owned object with
             # none of the side-table attributes simulate() attaches

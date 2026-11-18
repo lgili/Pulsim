@@ -211,3 +211,64 @@ is not a precondition; `simulate()` keeps its entry points and calls
   `SymbolicAnalysis` is read-only after `export_symbolic` (adoption
   copies it).
 - **Reverse:** drop `share_symbolic` calls; caches analyse privately.
+
+## 13. The kernel path of a circuit sweep (task 5.2)
+
+- **Question:** the per-point work of `sweep(circuit, ...)` held the GIL
+  (8 threads: ladder 1.1×). Move it into the kernel how, without losing
+  what `simulate()` does around a run (refusals, warnings, result
+  attributes)?
+- **Measured cause:** not Python. `simulate()`'s own Python is ~0.03 ms
+  of a 1.96 ms ladder point; `with_value` (0.46 ms), `to_builder`
+  (0.23 ms) and `with_preflight` (0.14 ms) are C++ that ran with the
+  GIL held (BASELINE.md "Task 5.2").
+- **Option:** (1) those bindings release the GIL (helps every caller,
+  the Python path of the optimiser included); (2) `_run_pwl_points`
+  (ir_bindings.cpp): for a table of points (rows) over names
+  (parameters or `"device.field"`), each point is derived, regularised,
+  cloned, cached (sharing the symbolic plan) and run by `n_threads`
+  native threads with the GIL released for the whole batch. The run
+  recipe is not re-derived: point 0 runs through `simulate()` with a
+  context variable set, and `simulate()` records at its pwl run site
+  what it handed the kernel (options, dt, switch_fn, initial state,
+  start_from_dc_op, the refresh flag). Each kernel point is then
+  finished by `simulate()` with the result injected (a second context
+  variable): its warnings, `result.plan`, `result.circuit` and every
+  attribute come from the same code as a Python-path point. Two small
+  additive hunks in `simulate()`.
+- **Preflight once per structure:** `analyze_preflight` reads topology,
+  branch kinds and device kinds only (`pwl/preflight.hpp`), never a
+  value; `with_params` cannot change the structure (a parameter cannot
+  drive a branch-form `R_on` / `g_off`). So the base is regularised
+  once and every point is derived from the regularised base (ties are
+  appended after every device with the same names and resistance in
+  both orders: bit-identical). `with_value` CAN change the structure —
+  a branch-form `R_on` or `g_off` to or from 0 is part of
+  `structure_hash()` — and such a point (structure hash differs from
+  the base's) is derived from the unregularised base and regularised
+  by itself (`counters["preflights"]` counts it).
+- **Eligibility:** pwl engine (what point 0 actually ran), no Python in
+  the step loop (`step_loop_python_callbacks == ()`), no b_extra /
+  observer / should_continue / live stream / resume / MMC arms /
+  on_cache / progress, `enable_nonlinear_refresh` not False, backend
+  not `"process"`. Anything else keeps the Python path, unchanged. A
+  point that fails in the kernel is re-run through `simulate()`, which
+  raises or records it exactly as the Python path does.
+- **Thread safety (read):** nothing reachable from the base is written.
+  Derivations clone the lowered builder (`Graph::clone` reads the id
+  cache `make_data_` filled; no other `mutable` member, `static` or
+  `thread_local` in builder, graph, pool, IR or preflight headers); the
+  `SymbolicPlan` is mutex-guarded and written once per regime (point 0
+  fills it before the batch); each point's builder, cache and result
+  are its own. `adapt_switch_fn` hands threads a copy of a native
+  `SwitchSchedule` (const, no mutable state) or raw pointers to a native
+  PWM object the caller keeps alive; a Python callable never reaches
+  the batch (eligibility).
+- **Evidence:** `test_circuit_sweep.py`: Python `run_transient` calls =
+  1 for 12 points, symbolic analyses = 1, preflights = 1, every point
+  bit-identical (serial and 4 threads); a regularised circuit with a
+  capacitor IC (ties, plan, value hash equal); a structure change
+  (preflights = 2); a Python hook keeps the Python path; a failing
+  point records the same message. Speedups in BASELINE.md.
+- **Reverse:** drop `_run_circuit_points` in sweep.py (the circuit form
+  falls back to `_run_jobs` on threads); the GIL releases stay.

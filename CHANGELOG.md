@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Circuit IR slice 2 (add-immutable-circuit-ir)
+
+* **Changed** `sweep(circuit, ...)` / `monte_carlo(circuit, ...)` run
+  their points in the kernel (task 5.2): point 0 goes through
+  `simulate()`; every other point is derived (`with_params` /
+  `with_value`), regularised, cloned and run by native threads without
+  the GIL, then finished by `simulate()` (its warnings and result
+  attributes; no second run). Results are bit-identical to
+  `simulate(circuit.with_value(...))` per point. The topology preflight
+  runs once per structure (it reads topology and kinds only); a point
+  whose `with_value` changes the structure (a branch-form `R_on` or
+  `g_off` to or from 0) is regularised by itself. Measured on the shared
+  machine, 100 points, 1 -> 8 threads: buck 35.7 -> 11.9 ms (3.0x),
+  n = 1502 ladder 122 -> 30 ms (4.1x; 1.1x before). A sweep with a
+  Python hook in the step loop, another engine, or `backend="process"`
+  keeps the Python path. `SweepResult.backend` is `"kernel"` and
+  `SweepResult.counters` holds `kernel_points`, `symbolic_analyses`,
+  `preflights`. **Migration:** code that asserted `backend == "thread"`
+  for a circuit sweep reads `"kernel"`.
+* **Changed** `Circuit.with_value` / `with_params` / `with_preflight` /
+  `with_ties` / `to_builder`, `PwlStateSpaceCache.build_lazy` and
+  `CircuitBuilder.initial_state` release the GIL.
+
 ### Integration batch 8: control graph, optimisation slice 4 and circuit IR merged
 
 * **Fixed** (control graph review) `PIController`, `Limiter`,

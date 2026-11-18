@@ -40,7 +40,7 @@ lands).
 
 ## 5. Sweeps over a circuit
 - [x] 5.1 `sweep(circuit, params=...)` and `monte_carlo(circuit, ...)` beside the `builder_factory` forms; the circuit is shared by the worker threads
-- [ ] 5.2 Oracle: results equal the factory form; `test_sweep_path_aware.py` green; an 8-job thread sweep scales as audit row 23 (within the noise of the shared machine)
+- [x] 5.2 Oracle: results equal the factory form; `test_sweep_path_aware.py` green; an 8-job thread sweep scales as audit row 23 (within the noise of the shared machine) — kernel path `_run_pwl_points` (DECISIONS 13): buck 3.0×, ladder 4.1× on 8 threads; counter tests in `test_circuit_sweep.py`
 
 ## 6. Named parameters and generic updates
 - [x] 6.1 `Parameter`, `builder.param(name, value, unit)`; `Value` overloads on every `add_*`

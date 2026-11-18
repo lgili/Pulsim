@@ -16,9 +16,16 @@
 #include "pulsim/ir/circuit.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
+#include "pulsim/solver/run_transient.hpp"
+#include "switch_fn_adapter.hpp"
 
+#include <atomic>
+#include <exception>
 #include <format>
+#include <optional>
 #include <string>
+#include <thread>
 
 namespace py = pybind11;
 
@@ -37,6 +44,147 @@ py::object* g_components = nullptr;  // leaked: outlives interpreter teardown
 
 py::object lowered_components(const Circuit& c) {
     return (*g_components)(py::cast(&c.lowered(), py::return_value_policy::reference));
+}
+
+// ---- Task 5.2: the kernel path of `sweep(circuit, ...)` -------------------
+//
+// One point = derive (`with_params` / `with_value`), regularise, clone,
+// cache, run: what `simulate(circuit.with_*(...), **kw)` does on the pwl
+// engine, here without the GIL. Nothing reachable from `base` is
+// written: derivations clone, the graph's id cache was filled at
+// construction, the shared `SymbolicPlan` is mutex-guarded; each point's
+// builder and cache are its own.
+using RowTable = Eigen::Matrix<pulsim::Real, Eigen::Dynamic, Eigen::Dynamic,
+                               Eigen::RowMajor>;
+
+Circuit derive_point(const Circuit& base, const std::vector<std::string>& names,
+                     const pulsim::Real* row) {
+    std::vector<std::pair<std::string_view, pulsim::Real>> ps;
+    for (std::size_t j = 0; j < names.size(); ++j) {
+        if (names[j].find('.') == std::string::npos) ps.emplace_back(names[j], row[j]);
+    }
+    Circuit c = ps.empty() ? base : base.with_params(ps);
+    for (std::size_t j = 0; j < names.size(); ++j) {
+        if (names[j].find('.') != std::string::npos) c = c.with_value(names[j], row[j]);
+    }
+    return c;
+}
+
+struct PointRun {
+    std::optional<Circuit> circuit;
+    std::optional<CircuitBuilder> builder;
+    std::optional<pulsim::solver::SimulationResult> result;
+    std::optional<pulsim::ir::Circuit::Regularized> own_preflight;  // structure changed
+};
+
+py::tuple run_pwl_points(const Circuit& base, const std::vector<std::string>& names,
+                         const RowTable& table,
+                         const pulsim::solver::SimulationOptions& opts,
+                         pulsim::Real dt, const py::object& switch_fn_obj,
+                         bool start_from_dc_op, std::optional<bool> enable_nl,
+                         std::optional<pulsim::Vector> initial_state,
+                         bool auto_regularize, int n_threads) {
+    if (table.cols() != static_cast<Eigen::Index>(names.size())) {
+        throw std::invalid_argument(std::format(
+            "_run_pwl_points: {} names but {} table columns", names.size(),
+            table.cols()));
+    }
+    auto sw = pulsim_bindings_common::adapt_switch_fn(switch_fn_obj);
+    const auto n = static_cast<std::size_t>(table.rows());
+    std::vector<PointRun> runs(n);
+    std::atomic<std::size_t> next{0};
+    std::atomic<std::uint64_t> analyses{0}, preflights{0};
+    std::optional<Circuit::Regularized> reg0;
+    {
+        py::gil_scoped_release rel;
+        // Regularise once per structure: the preflight reads topology and
+        // kinds only (pwl/preflight.hpp), so a point whose structure_hash
+        // equals the base's needs the base's ties, nothing else. A point
+        // derived from the regularised base equals, bit for bit, the
+        // regularised point: the ties are appended after every device in
+        // both, with the same names and resistance.
+        const pulsim::pwl::PreflightOptions pf{.auto_regularize = true};
+        if (auto_regularize) {
+            reg0 = base.with_preflight(pf);
+            preflights.fetch_add(1);
+        }
+        const Circuit& root = reg0 ? reg0->circuit : base;
+        auto work = [&] {
+            for (std::size_t i; (i = next.fetch_add(1)) < n;) {
+                auto& r = runs[i];
+                try {
+                    Circuit c = derive_point(root, names, table.row(i).data());
+                    if (reg0 && c.structure_hash() != root.structure_hash()) {
+                        // with_value on a branch-form R_on / g_off (to or
+                        // from 0) changes the structure: preflight again.
+                        r.own_preflight = derive_point(base, names, table.row(i).data())
+                                              .with_preflight(pf);
+                        preflights.fetch_add(1);
+                        c = r.own_preflight->circuit;
+                    }
+                    CircuitBuilder b = c.to_builder();
+                    pulsim::pwl::PwlStateSpaceCache cache(b.graph(), b.pool());
+                    cache.share_symbolic(c.symbolic_plan());
+                    cache.build_lazy(dt);
+                    pulsim::Vector x0;
+                    const pulsim::Vector* xp = nullptr;
+                    if (initial_state) {
+                        xp = &*initial_state;
+                    } else {  // simulate(): the builder's ICs when any is set
+                        x0 = b.initial_state();
+                        if ((x0.array() != 0.0).any()) xp = &x0;
+                    }
+                    // bindings.cpp transient_refresh() for None / True
+                    // (False is not sent here).
+                    const pulsim::pwl::NonlinearRefreshFn nl =
+                        (enable_nl.value_or(false) && b.pool().requires_static_refresh())
+                            ? pulsim::pwl::make_combined_diode_mosfet_refresh()
+                            : pulsim::pwl::NonlinearRefreshFn{};
+                    r.result = pulsim::solver::run_transient(
+                        cache, b.graph(), b.pool(), opts, sw.fn, {},
+                        start_from_dc_op, nl, {}, xp, {}, nullptr, {}, sw.next_edge);
+                    analyses.fetch_add(cache.metrics().symbolic_analyses);
+                    r.circuit = std::move(c);
+                    r.builder = std::move(b);
+                } catch (...) {
+                    // The caller re-runs this point through simulate(),
+                    // which raises or records exactly as the Python path.
+                    r = PointRun{};
+                }
+            }
+        };
+        const auto nt = static_cast<std::size_t>(std::max(1, n_threads));
+        std::vector<std::thread> pool;
+        for (std::size_t t = 1; t < std::min(nt, n); ++t) pool.emplace_back(work);
+        work();
+        for (auto& th : pool) th.join();
+    }
+    py::list out;
+    for (auto& r : runs) {
+        if (!r.result) { out.append(py::none()); continue; }
+        py::object own = py::none();
+        if (r.own_preflight) {
+            py::list ties;
+            for (const auto& t : r.own_preflight->ties) {
+                ties.append(py::make_tuple(t.name, t.node, t.resistance));
+            }
+            own = py::make_tuple(std::move(r.own_preflight->report), ties);
+        }
+        out.append(py::make_tuple(std::move(*r.result), std::move(*r.circuit),
+                                  std::move(*r.builder), own));
+    }
+    py::dict stats;
+    stats["symbolic_analyses"] = analyses.load();
+    stats["preflights"] = preflights.load();
+    py::list ties;  // the base's regularisation, shared by its structure
+    if (reg0) {
+        for (const auto& t : reg0->ties) {
+            ties.append(py::make_tuple(t.name, t.node, t.resistance));
+        }
+    }
+    stats["report"] = reg0 ? py::cast(std::move(reg0->report)) : py::none();
+    stats["ties"] = ties;
+    return py::make_tuple(out, stats);
 }
 
 }  // namespace
@@ -107,6 +255,7 @@ void init_module(py::module_& m) {
             }, "The named parameters, in declaration order.")
         .def("with_value", &Circuit::with_value,
              py::arg("device_dot_field"), py::arg("value"),
+             py::call_guard<py::gil_scoped_release>(),
              "A new circuit with one field set, e.g. with_value(\"R1.R\", "
              "2.0): equal, bit for bit, to rebuilding with that literal. "
              "Every field of every kind (see devices()); the receiver is "
@@ -127,6 +276,7 @@ void init_module(py::module_& m) {
                         vs.emplace_back(names[i++], v.cast<pulsim::Real>());
                     }
                 }
+                py::gil_scoped_release rel;  // threads of a sweep
                 return c.with_params(vs);
             }, py::arg("values") = py::dict(),
             "A new circuit with parameter values replaced: "
@@ -180,6 +330,7 @@ void init_module(py::module_& m) {
                                                  tup[1].cast<pulsim::Index>(),
                                                  tup[2].cast<pulsim::Real>()});
                 }
+                py::gil_scoped_release rel;
                 return c.with_ties(ts);
             }, py::arg("ties"),
             "The circuit with regularising ties added: a list of (name, "
@@ -187,7 +338,10 @@ void init_module(py::module_& m) {
             "reports them. The receiver is unchanged.")
         .def("with_preflight", [](const Circuit& c,
                                   const pulsim::pwl::PreflightOptions& o) {
-                auto r = c.with_preflight(o);
+                auto r = [&] {
+                    py::gil_scoped_release rel;
+                    return c.with_preflight(o);
+                }();
                 py::list ties;
                 for (const auto& t : r.ties) {
                     ties.append(py::make_tuple(t.name, t.node, t.resistance));
@@ -200,6 +354,7 @@ void init_module(py::module_& m) {
             "(this one when no tie was needed), the PreflightReport, and "
             "the inserted ties as (name, node index, resistance).")
         .def("to_builder", &Circuit::to_builder,
+             py::call_guard<py::gil_scoped_release>(),
              "A new, independent CircuitBuilder holding this circuit "
              "(the circuit is not affected by edits to it).")
         .def("__repr__", [](const Circuit& c) {
@@ -208,6 +363,18 @@ void init_module(py::module_& m) {
                     "{:016x}>", c.nodes().size(), c.devices().size(),
                     c.value_hash());
             });
+
+    m.def("_run_pwl_points", &run_pwl_points, py::arg("circuit"),
+          py::arg("names"), py::arg("table"), py::arg("options"),
+          py::arg("dt"), py::arg("switch_fn"), py::arg("start_from_dc_op"),
+          py::arg("enable_nonlinear_refresh"), py::arg("initial_state"),
+          py::arg("auto_regularize"), py::arg("n_threads"),
+          "Internal (sweep(circuit, ...) kernel path, task 5.2): run the "
+          "points of a parameter table (rows = points, columns = names: "
+          "parameters, or \"device.field\") on the pwl engine, n_threads "
+          "native threads, without the GIL. Returns ([(result, circuit, "
+          "builder, own_preflight) or None per point], stats); None = "
+          "re-run that point through simulate().");
 
     py::reinterpret_borrow<py::class_<pulsim::pwl::PwlStateSpaceCache>>(
         m.attr("PwlStateSpaceCache"))

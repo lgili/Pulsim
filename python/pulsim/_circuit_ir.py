@@ -10,6 +10,7 @@ import ast
 import inspect
 import re
 import warnings
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
@@ -32,6 +33,26 @@ class RunPlan:
     circuit: Any
     ties: tuple
     preflight: Any = None
+
+
+class KernelRun(NamedTuple):
+    """One point the kernel path of ``sweep(circuit, ...)`` already ran
+    (task 5.2): ``simulate`` finishes it (warnings, result attributes)
+    instead of running it again."""
+    result: Any
+    circuit: Any
+    builder: Any
+    preflight: Any
+    ties: list
+
+
+# simulate() reads these at its pwl run site. PWL_RECIPE: a dict the run
+# records what it handed the kernel into (sweep's template point).
+# KERNEL_RUN: a KernelRun to finish in place of the regularise / clone /
+# run steps. Context variables: one sweep's state never reaches another
+# thread's simulate().
+PWL_RECIPE: ContextVar = ContextVar("pulsim_pwl_recipe", default=None)
+KERNEL_RUN: ContextVar = ContextVar("pulsim_kernel_run", default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -228,4 +249,4 @@ def install(builder_cls) -> None:
             setattr(builder_cls, name, _deprecated_update(fn, name, field))
 
 
-__all__ = ["RunPlan", "Tie", "install"]
+__all__ = ["KERNEL_RUN", "KernelRun", "PWL_RECIPE", "RunPlan", "Tie", "install"]
