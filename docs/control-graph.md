@@ -119,9 +119,11 @@ ch.tick_counts                                             # [200, 400]
   ticks at most once per step). `controller_period=` with a rated
   chain is a `ValueError`: the groups set the ticks.
 - A reused observer (a second `simulate()`) restarts its tick grid at
-  the new `t_start`; block state carries over unless you call
-  `chain.reset()`. With `resume_from=` the grid restarts at the resume
-  instant (graph state in the snapshot is task 6).
+  the new `t_start`; the state of a chain *you* pass carries over unless
+  you call `chain.reset()`. A circuit's C blocks do not carry over: every
+  run starts each block from its declared initial state (a `Circuit` is
+  immutable, so `simulate(c)` twice is bit-identical); only
+  `resume_from=` continues them (graph state in the snapshot is task 6).
 - `dt` passed to a block is its group's period.
 - Groups due at the same instant run in one pass of the schedule, so a
   fast group reading a slow group's signal sees that instant's value.
@@ -220,7 +222,7 @@ state-time chain with the same gate; `trbdf2` default 4.2e-5.
 | `bind_pi_to_switch` / `bind_pi_to_duty_callable` ran Python closures: per step a tick scheduler, the composed observer, the gate and `pwm_on` (4044 Python calls for 10 ticks over 1 ms). | A control graph: the PI in the kernel, the gate in C++. `measured="vout"` (a node name) makes no Python call; a `measured` / `setpoint` callable runs through `PythonBlock` with a `DeprecationWarning` (3 calls per tick). Closed-loop buck, 20 ms at `dt` = 0.1 µs: 2188 → 204 ns/step. Every result bit-identical. |
 | `pi` (the `PIController` passed in) was updated in place. | The kernel block starts from `pi`'s state; `pi` is not updated. Read `loop.duty_history` / `error_history` (live views of the graph's recordings). |
 | `bind_pi_to_switch(t_start=)` aligned the throttle. | Ignored: ticks align to the run's `t_start`. |
-| `add_c_block`: a Python observer and `b_extra` per step (5014 calls / 1 ms); it also fired at `t_end` (11 fires where 10 are due), which changed the last sample of the run. | One graph per builder (`builder._c_graph`), one `CBlock` per block: `code=` / `lib=` run in C++ with no Python call (2041 → 168 ns/step), `fn=` through the adapter with a `DeprecationWarning`. No tick at `t_end`: only the run's final sample changes (t = `t_end` when the span is a multiple of the block `dt`). |
+| `add_c_block`: a Python observer and `b_extra` per step (5014 calls / 1 ms); it also fired at `t_end` (11 fires where 10 are due), which changed the last sample of the run. | One graph per builder (reached through its C-block handles, so a `Circuit` carries it in its ControlDecls), one `CBlock` per block: `code=` / `lib=` run in C++ with no Python call (2041 → 168 ns/step), `fn=` through the adapter with a `DeprecationWarning`. No tick at `t_end`: only the run's final sample changes (t = `t_end` when the span is a multiple of the block `dt`). |
 | `add_c_block` with a block `dt` below the solver step (no `sim_dt=`) ran every step with a wrong `dt`. | `ControlGraphBuildError` (pass `sim_dt=` to clamp, as before). |
 | `simulate()` composed closed loops and C blocks in two places below the engine dispatch (pwl only). | One composition above the dispatch (`ControlPlan.for_fixed_step` / `for_variable_step`). |
 | `SpaceVectorModulator`, the Clarke / Park transforms and `PLL` in a chain ran the kernel `add_svm` / `add_clarke` / `add_park` / `add_pll` laws: other roundings, `v_dc <= 0` gave duty 0.5, the PLL started at 0 Hz and wrapped to [-π, π); `PLL` needed three outputs. | Their classes' laws, bit-identical (G18): numbers change in FOC chains (rounding level; from the first tick for a PLL); `PLL` takes two or three outputs. |
@@ -238,7 +240,7 @@ graph, the `pulsim_cblock_step` shim, so the file loads back through
 channel no block writes); the shim writes `outputs` to `out[]`. No
 `malloc`: the shim's state is static, so a circuit takes one block of a
 library (a second `add_c_block` of it on the same builder is refused);
-across circuits each `add_c_block` resets the shared state.
+its `init` runs again at the start of every run (G22).
 
 Compiled with `-ffp-contract=off` (MSVC's default `/fp:precise` does not
 contract) it is bit-identical to the kernel graph: every block kind over

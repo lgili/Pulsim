@@ -437,20 +437,14 @@ def test_device_cell(kind, engine):
 
 @pytest.mark.parametrize("engine", ENGINES)
 def test_coupled_inductor_cell(engine):
-    # Circuit-level limit: refused on dsed (also a NotImplementedError,
-    # its legacy base) and on bdf1 (no mutual stamp: it read 9.38 V off
-    # an 18 V span, silently, before this change).
+    # Circuit-level limit: refused on bdf1 (no mutual stamp: it read 9.38 V
+    # off an 18 V span, silently, before this change). dsed extracts the full
+    # inductance matrix (add-exact-propagator-strategy, coupled inductors).
     if engine == "bdf1":
         with pytest.raises(p.UnsupportedError) as ei:
             _run(*_args(COUPLED), "bdf1")
         assert (ei.value.engine, ei.value.feature) == (
             "bdf1", "coupled_inductors")
-        return
-    if engine == "dsed":
-        with pytest.raises(p.UnsupportedError) as ei:
-            _run(*_args(COUPLED), "dsed")
-        assert isinstance(ei.value, NotImplementedError)
-        assert ei.value.engine == "dsed"
         return
     _check_cell("coupled", COUPLED, engine, True)
 
@@ -795,10 +789,12 @@ def test_mode_guard_diagnostics_only_on_dsed(engine):
         assert g is None
         return
     assert g["checks"] > 0 and g["repairs"] == 0 and g["repair_times"] == []
+    assert g["settle_caps"] == 0 and g["lcp"]["capped"] == 0     # DECISIONS #24, #25
     rec = {"class": "passive_reciprocal", "device": "", "kind": ""}
     assert g["passivity"] == rec        # task 5.1 class, dsed only
     r = _sim(engine, _half_wave(), mode_selection="lcp")
     assert r.diagnostics["mode_selection"]["lcp_count"] > 0
+    assert r.diagnostics["mode_selection"]["capped"] == 0
     assert r.diagnostics["mode_selection"]["passivity"] == rec
     assert "mode_guard" not in r.diagnostics
 
@@ -1226,6 +1222,7 @@ def test_exact_segments_only_on_the_exact_engine(engine):
     segs = ex["segments"]
     assert segs and all(s["exact"] and s["reason"] is None for s in segs)
     assert sum(s["n_segments"] for s in segs) >= 2      # the diode commutates
+    assert ex["auto_would_route"] is True               # 13.3 report-only field, same on both names
 
 
 # Integration batch 6b: 'exact' and 'dsed' are one engine on every device cell and the
@@ -1244,3 +1241,73 @@ def test_exact_and_dsed_are_bit_identical_on_every_cell(kind):
         assert a == b
         return
     assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1])
+
+
+# Integration batch 9: the exact engine's new cells (allow_implicit_segments, a static circuit,
+# a DC start) hold under both names, bit for bit; the keyword is refused by name elsewhere.
+def _divider():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 12.0)
+    b.add_resistor("R1", "a", "o", 2e3)
+    b.add_resistor("R2", "o", "gnd", 1e3)
+    return b
+
+
+def _rc_b_extra():
+    b = _rc()
+    zero = [0.0] * b.pool.state_size(b.graph)
+    return b, (lambda _t: zero)
+
+
+@pytest.mark.parametrize("cell", ["static", "dc_start", "allow_implicit_segments"])
+def test_exact_engine_cells_are_identical_under_both_names(cell):
+    out = {}
+    for eng in ("dsed", "exact"):
+        if cell == "static":
+            r = _sim(eng, _divider(), dt=1e-4)
+            assert np.abs(np.asarray(r.v("o")) - 4.0).max() < 1e-12      # 12 V * 1k / 3k
+        elif cell == "dc_start":
+            x = np.asarray(p.compute_dc_op(_rc()), float)
+            r = _sim(eng, initial_state=x, dt=1e-4)
+        else:
+            b, fn = _rc_b_extra()
+            with pytest.raises(p.UnsupportedError) as ei:
+                _sim(eng, b, b_extra_fn=fn)
+            assert (ei.value.engine, ei.value.feature) == ("dsed", "source")
+            b, fn = _rc_b_extra()
+            r = _sim(eng, b, b_extra_fn=fn, allow_implicit_segments=True)
+        out[eng] = (np.asarray(r.times), np.asarray(r.states))
+    assert np.array_equal(out["dsed"][0], out["exact"][0])
+    assert np.array_equal(out["dsed"][1], out["exact"][1])
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto"))
+def test_allow_implicit_segments_is_refused_off_the_exact_engine(engine):
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim(engine, allow_implicit_segments=True)
+    assert ei.value.feature == "allow_implicit_segments"
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "exact"))
+def test_reinit_records_only_on_the_exact_engine(engine):
+    # result.reinit_records (dependent states: the impulse at a mode entry) rides on the event
+    # integrator's runs only, the same on both names: two 1.5 uF capacitors at 8 V and 0 V tied
+    # by a 0 V source share 6 uC at t = 0
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "a", "gnd", 1.5e-6, 8.0)
+    b.add_capacitor("C2", "b", "gnd", 1.5e-6, 0.0)
+    b.add_voltage_source("V0", "a", "b", 0.0)
+    b.add_resistor("R", "a", "gnd", 1e3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 1e-4, engine=engine, dt=1e-6)
+    recs = getattr(r, "reinit_records", None)
+    if engine in ("pwl", "trbdf2"):
+        # the fixed engines' result has the field too (the branch-form ideal
+        # switch's records, add-branch-form-ideal-switch D4); they do not
+        # reduce dependent states, so nothing is recorded here
+        assert not recs
+        return
+    (rec,) = recs
+    assert (rec.kind, rec.sample) == ("capacitor_loop", 0)
+    assert rec.lambda_ == pytest.approx(6e-6, rel=1e-12)

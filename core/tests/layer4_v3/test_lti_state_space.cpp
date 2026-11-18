@@ -19,6 +19,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <catch2/catch_approx.hpp>
 #include <array>
 #include <algorithm>
@@ -153,9 +154,11 @@ TEST_CASE("compute_lti_state_space recovers buck CCM analytical (A, b)",
     }
 }
 
-TEST_CASE("compute_lti_state_space rejects a circuit without state vars",
+TEST_CASE("compute_lti_state_space gives a static circuit an empty state",
            "[bridge][lti]") {
-    // Pure resistive divider: no caps, no inductors → no state to evolve
+    // Pure resistive divider: no caps, no inductors → nothing to propagate;
+    // the recovery map is the algebraic solve (add-exact-propagator-strategy
+    // DECISIONS, static circuits): v(n2) = 5 · 100 / 200 = 2.5 V
     builder::CircuitBuilder b;
     b.add_voltage_source("V1", "n1", "gnd", Real{5});
     b.add_resistor("R1", "n1", "n2", Real{100});
@@ -165,9 +168,12 @@ TEST_CASE("compute_lti_state_space rejects a circuit without state vars",
     cache.build(Real{1e-6});
 
     SwitchStateMask m(0);   // no switches
-    REQUIRE_THROWS_AS(
-        cache.compute_lti_state_space(m),
-        std::runtime_error);
+    const auto lti = cache.compute_lti_state_space(m);
+    REQUIRE(lti.A.rows() == 0);
+    REQUIRE(lti.recover_from_state.cols() == 0);
+    REQUIRE(lti.recover_const.size() == lti.recover_from_b.rows());
+    const auto n2 = b.node_id_of("n2");
+    REQUIRE(std::abs(lti.recover_const(n2) - Real{2.5}) < Real{1e-12});
 }
 
 TEST_CASE("compute_lti_state_space handles a single floating capacitor "
@@ -433,13 +439,13 @@ TEST_CASE("compute_lti_state_space rejects 3-inductor triangle loop "
         std::runtime_error);
 }
 
-TEST_CASE("compute_lti_state_space rejects parallel capacitors",
+TEST_CASE("compute_lti_state_space extracts parallel capacitors with a constraint",
            "[bridge][lti][floating-cap]") {
-    // Two caps sharing both terminals = a cycle in the cap-edge graph.
-    // BFS can only include one as a tree edge; the other is detected
-    // and we throw a clear error pointing to the workaround
-    // (merge them into a single equivalent cap upstream).
-
+    // Two caps sharing both terminals = a cycle in the cap-edge graph: the
+    // general reduction keeps one state on the capacitor forest (C2 is
+    // recovered from it), so no constraint row is left: one RC of
+    // R1 + R2 = 20 Ω on C1 + C2 = 3 µF, energy weight C1 + C2 (before
+    // add-exact-propagator-strategy step 2b this mode was refused).
     builder::CircuitBuilder b;
     b.add_voltage_source("V1", "vin", "gnd", Real{5});
     b.add_resistor("R1",       "vin", "n1",  Real{10});
@@ -451,23 +457,20 @@ TEST_CASE("compute_lti_state_space rejects parallel capacitors",
     cache.build(Real{1e-6});
 
     SwitchStateMask m(0);
-    REQUIRE_THROWS_AS(
-        cache.compute_lti_state_space(m),
-        std::runtime_error);
+    const auto lti = cache.compute_lti_state_space(m);
+    REQUIRE(lti.A.rows() == 1);
+    CHECK(lti.constraint_K.rows() == 0);
+    CHECK(lti.A(0, 0) == Approx(-1.0 / (20.0 * 3e-6)).epsilon(1e-9));
+    CHECK(lti.energy_weight(0, 0) == Approx(3e-6).epsilon(1e-12));
 }
 
-TEST_CASE("compute_lti_state_space rejects magnetically coupled circuits",
-          "[bridge][lti][transformer][guard]") {
-    // Phase-1 audit finding MDYN-DEAD / F5: Step 7 applies a
-    // DIAGONAL inverse mass matrix (1/C per cap row, -1/L per
-    // inductor row). A transformer puts OFF-DIAGONAL -M terms
-    // between the two winding rows, which that scaling simply drops
-    // — so before this guard a flyback returned LTI poles computed
-    // as if the windings were uncoupled: plausible, wrong, silent,
-    // and consumed by the DSED bridge with no signal.
-    //
-    // The honest behaviour is to refuse, exactly as the inductor-
-    // cycle case already does.
+TEST_CASE("compute_lti_state_space extracts magnetically coupled circuits",
+          "[bridge][lti][transformer]") {
+    // Step 7 applies the full inductance matrix on the inductor rows
+    // (L_ii self, L_ij = M = k·sqrt(L_p·L_s)), not a diagonal −1/L:
+    //   Lmat · di/dt = −diag(Rp, Rs)·i + (Vin, 0).
+    // (Before add-exact-propagator-strategy, coupled windings were
+    // refused here, audit finding MDYN-DEAD / F5.)
     builder::CircuitBuilder b;
     b.add_voltage_source("Vin", "vin", "gnd", 12.0);
     b.add_resistor("Rp", "vin", "p1", 0.1);
@@ -479,18 +482,30 @@ TEST_CASE("compute_lti_state_space rejects magnetically coupled circuits",
     cache.build(Real{1e-6});
 
     SwitchStateMask m(0);
-    REQUIRE_THROWS_AS(cache.compute_lti_state_space(m),
-                       std::runtime_error);
-    try {
-        (void)cache.compute_lti_state_space(m);
-    } catch (const std::runtime_error& e) {
-        const std::string msg = e.what();
-        INFO("message: " << msg);
-        // Must name the cause AND the way forward, not just refuse.
-        REQUIRE(msg.find("coupled") != std::string::npos);
-        REQUIRE(msg.find("mutual") != std::string::npos);
-        REQUIRE(msg.find("engine='pwl'") != std::string::npos);
-    }
+    const auto lti = cache.compute_lti_state_space(m);
+    const Real M = 0.98 * std::sqrt(1e-3 * 4e-3);
+    DenseMatrix L(2, 2);
+    L << 1e-3, M, M, 4e-3;
+    DenseMatrix R = DenseMatrix::Zero(2, 2);
+    R(0, 0) = 0.1;
+    R(1, 1) = 10.0;
+    const DenseMatrix A_ref = -L.inverse() * R;
+    REQUIRE((lti.A - A_ref).norm() <= 1e-9 * A_ref.norm());
+    Vector f(2);
+    f << 12.0, 0.0;
+    const Vector b_ref = L.inverse() * f;
+    REQUIRE((lti.b_constant - b_ref).norm() <= 1e-9 * b_ref.norm());
+
+    // |k| = 1: the winding currents are not independent states.
+    builder::CircuitBuilder b1;
+    b1.add_voltage_source("Vin", "vin", "gnd", 12.0);
+    b1.add_resistor("Rp", "vin", "p1", 0.1);
+    b1.add_transformer("T1", "p1", "gnd", "s1", "gnd", 1e-3, 4e-3, 1.0);
+    b1.add_resistor("Rs", "s1", "gnd", 10.0);
+    PwlStateSpaceCache c1{b1.graph(), b1.pool()};
+    c1.build(Real{1e-6});
+    REQUIRE_THROWS_WITH(c1.compute_lti_state_space(m),
+                        Catch::Matchers::ContainsSubstring("positive definite"));
 
     // The same circuit must still simulate perfectly well on the
     // fixed-step PWL path the message points at — the guard is

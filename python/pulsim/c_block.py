@@ -40,12 +40,14 @@ Usage
 """
 from __future__ import annotations
 
+import copy
 import ctypes
 import hashlib
 import os
 import shutil
 import subprocess
 import sys
+import threading
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -113,7 +115,7 @@ class CBlockHandle:
     ``inputs``, ``outputs`` and ``state`` are updated in place each block
     step, so the caller can read them between / after simulation for
     diagnostics. ``block`` is the :class:`CBlock` in the builder's control
-    graph (``builder._c_graph``).
+    graph (one per builder, reached through its handles: _c_graph_of).
     """
     name: str
     n_in: int
@@ -281,7 +283,6 @@ def _load_native_step(lib_path, symbol, n_in, n_out, *,
                 f"c_block: {lib_path!r} keeps one static state (export_c's "
                 "shim) and this circuit already has a block of it. Compile "
                 "the file again under another name for a second instance.")
-        static_taken.add(dll._handle)
 
     state_ptr = ctypes.c_void_p(None)
     if hasattr(dll, init_symbol):
@@ -304,6 +305,13 @@ def _load_native_step(lib_path, symbol, n_in, n_out, *,
             term_c(state_ptr)
             state_ptr.value = None
 
+    def reinit():
+        """Back to the library's initial state (a new run, G22)."""
+        teardown()
+        state_ptr.value = (init_c(int(n_in), int(n_out))
+                           if hasattr(dll, init_symbol) else None)
+
+    step._reinit = reinit    # type: ignore[attr-defined]
     step._dll = dll          # keep the library alive  # type: ignore[attr-defined]
     step._step_c = step_c    # type: ignore[attr-defined]
     step._state_ptr = state_ptr  # type: ignore[attr-defined]
@@ -402,17 +410,24 @@ def _compile_inline(code: str, lang: str, symbol: str, *,
         _check_owned(so_path)
         return so_path
 
-    src_path = cache / f"cblk_{key}{ext}"
+    # private names, then an atomic rename: a concurrent process never
+    # loads a half-written library
+    tag = f"{os.getpid()}_{threading.get_ident()}"
+    src_path = cache / f"cblk_{key}_{tag}{ext}"
+    tmp_so = cache / f"cblk_{key}_{tag}.so.tmp"
     src_path.write_text(src)
-    cmd = [compiler, *flags, str(src_path), "-o", str(so_path), *link]
+    cmd = [compiler, *flags, str(src_path), "-o", str(tmp_so), *link]
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(
             f"c_block: inline {lang} compile failed:\n"
             f"$ {' '.join(cmd)}\n{exc.stderr}") from None
+    finally:
+        src_path.unlink(missing_ok=True)
     if os.name == "posix":
-        os.chmod(so_path, 0o700)    # the linker's mode follows the umask
+        os.chmod(tmp_so, 0o700)     # the linker's mode follows the umask
+    os.replace(tmp_so, so_path)
     return so_path
 
 
@@ -504,10 +519,13 @@ def add_c_block(builder,
             extra_compile_args=extra_compile_args,
             extra_link_args=extra_link_args))
     if lib is not None:
-        if not hasattr(builder, "_c_static_libs"):
-            builder._c_static_libs = set()
+        from ._circuit_ir import c_blocks_of
+        # libraries this circuit's blocks already load, through the handles
+        loaded = {k._dll._handle for h in c_blocks_of(builder)
+                  if (k := getattr(getattr(h, "block", None), "_keep", None))
+                  is not None}
         fn, teardown = _load_native_step(
-            lib, symbol, n_in, n_out, static_taken=builder._c_static_libs)
+            lib, symbol, n_in, n_out, static_taken=loaded)
     assert fn is not None
 
     if lib is None:
@@ -530,6 +548,7 @@ def add_c_block(builder,
         block._keep = fn          # the library and its state pointer
     else:
         block = CBlock(n_in, n_out, fn=fn, state=dict(state or {}), name=name)
+    block._state0 = copy.deepcopy(block.state)   # every run starts here (G22)
     handle = CBlockHandle(
         name=name, n_in=n_in, n_out=n_out, dt_block=float(dt),
         state=block.state, inputs=block.inputs, outputs=block.outputs,
@@ -543,7 +562,14 @@ def add_c_block(builder,
     # its own rate in label time (the C blocks' protocol before 2.1);
     # simulate() composes it with the other graphs above the dispatch.
     from .blockchain import MixedDomainBlockChain, Rate, _InputSource
-    graph = getattr(builder, "_c_graph", None)
+    graph = _c_graph_of(builder)
+    if graph is not None and getattr(graph, "_sealed", False):
+        raise ValueError(
+            f"add_c_block({name!r}): this builder's C blocks are already "
+            "carried by a pulsim.Circuit from build() (or the builder came "
+            "from Circuit.to_builder()); the new block would also run in "
+            "that circuit. Add every C block before build(), or start from "
+            "a new builder.")
     if graph is None:
         graph = MixedDomainBlockChain(label_time=True)
     k0 = len(graph.blocks)
@@ -556,7 +582,6 @@ def add_c_block(builder,
     for ch, w, src in zip(chans, outputs, src_names):
         graph._sinks.append((ch, w, src))
     try:
-        builder._c_graph = graph
         if not hasattr(builder, "_c_blocks"):
             builder._c_blocks = []
     except Exception:  # noqa: BLE001 — builder may forbid attrs
@@ -567,15 +592,48 @@ def add_c_block(builder,
     return handle
 
 
-def _c_graph_observer(builder):
+def _c_graph_of(builder):
+    """The one control graph holding a builder's or Circuit's C blocks,
+    through its handles (a builder's ``_c_blocks``, a Circuit's
+    ControlDecls: a run's builder from Circuit.to_builder() carries no
+    Python attribute); None without C blocks."""
+    from ._circuit_ir import c_blocks_of
+    return next((g for h in c_blocks_of(builder)
+                 if (g := getattr(getattr(h, "block", None), "_graph", None))
+                 is not None), None)
+
+
+def _reset_c_blocks(graph) -> None:
+    """Every block back to its declared initial state (G22): a Circuit is
+    immutable, so simulate(c) twice gives the same answer. Native
+    libraries re-run their init (term first); Python steps get a copy of
+    their initial state dict; the buffers and the graph's signals and
+    tick grid are cleared."""
+    for spec in graph.blocks:
+        b = spec.block
+        keep = getattr(b, "_keep", None)
+        if keep is not None:
+            keep._reinit()
+        else:
+            b.state.clear()
+            b.state.update(copy.deepcopy(getattr(b, "_state0", {})))
+        b.inputs[:] = 0.0
+        b.outputs[:] = 0.0
+    if graph._cxx_chain is not None:
+        graph._cxx_chain.reset()
+
+
+def _c_graph_observer(builder, fresh: bool = True):
     """The builder's C-block graph compiled for one run (None without C
-    blocks): its observer, with the outputs each block holds."""
-    graph = getattr(builder, "_c_graph", None)
+    blocks): its observer, with the outputs each block holds. A fresh
+    run (not resume_from) starts every block from its initial state."""
+    graph = _c_graph_of(builder)
     if graph is None or not graph.blocks:
         return None
-    # Compiled once per circuit layout: the graph keeps its tick grid
-    # across runs, so a resume_from run continues it (a run that goes
-    # back in time restarts it, BlockChain.rearm_if_restarted).
+    if fresh and getattr(graph, "_c_obs", None) is not None:
+        _reset_c_blocks(graph)
+    # Compiled once per circuit layout; a resume_from run continues its
+    # tick grid and states, any other run restarts both (above).
     key = (len(graph.blocks), int(builder.pool.state_size(builder.graph)))
     cached = getattr(graph, "_c_obs", None)
     if cached is None or cached[0] != key:

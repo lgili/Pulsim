@@ -79,7 +79,8 @@ def test_shockley_rectifier_is_not_exact_device():
     assert (row["device"], row["kind"]) == ("Dsh", "ShockleyDiode")
 
 
-def test_coupled_inductors_are_not_exact_extraction():
+def test_coupled_inductors_route_exact():
+    # the extraction takes the inductance matrix (add-exact-propagator-strategy, coupled inductors)
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "a", "gnd", 0.0, 100.0, 50.0)
     b.add_transformer("T", "a", "gnd", "s", "r", 10e-3, 2.5e-3, 0.99)
@@ -88,18 +89,21 @@ def test_coupled_inductors_are_not_exact_extraction():
     b.add_capacitor("C", "o", "r", 100e-6)
     b.add_resistor("R", "o", "r", 100.0)
     rep = p.exact_route(b, 0.02)
-    assert (rep["exact"], rep["reason"]) == (False, "extraction")
+    assert (rep["exact"], rep["reason"]) == (True, None)
 
 
-def test_inductor_cut_set_is_not_exact_extraction():
-    # the three-phase overlap family: a DC current source in series with the line inductors
-    # (an inductor cut-set) -- dsed refuses its extraction today, so it is not exact-eligible
-    rep = p.exact_route(B.FAMILIES["bridge3_overlap"].builder(0.0), 0.02)
-    assert (rep["exact"], rep["reason"]) == (False, "extraction")
+def test_inductor_cut_set_stops_on_the_diode_law():
+    # the three-phase overlap family: a DC current source in series with the line inductors.
+    # The extraction takes it now (dependent states), but the diode settle picks a mode its law
+    # forbids at 126 us (on mode_selection='lcp' too): a named error, never a route verdict.
+    from pulsim._dsed_dispatch import DiodeModeInconsistentError
+    with pytest.raises(DiodeModeInconsistentError, match="Dta"):
+        p.exact_route(B.FAMILIES["bridge3_overlap"].builder(0.0), 0.02)
 
 
-def test_floating_capacitor_loop_is_not_exact_extraction():
-    # C1 || C2 between two non-ground nodes: a capacitor loop the extractor cannot reduce
+def test_floating_capacitor_loop_routes_exact():
+    # C1 || C2 between two non-ground nodes: a capacitor loop, reduced by the general path
+    # (one capacitor a link); the run follows 10 (1 - exp(-t / 6 ms)) to 3e-14
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "a", "gnd", 10.0)
     b.add_resistor("R1", "a", "x", 1e3)
@@ -107,19 +111,24 @@ def test_floating_capacitor_loop_is_not_exact_extraction():
     b.add_capacitor("C2", "x", "y", 2e-6)
     b.add_resistor("R2", "y", "gnd", 1e3)
     rep = p.exact_route(b, 1e-3)
-    assert (rep["exact"], rep["reason"]) == (False, "extraction")
+    assert (rep["exact"], rep["reason"]) == (True, None)
 
 
-def test_pwm_voltage_source_is_not_exact_source():
+def test_pwm_voltage_source_routes_exact():
+    """Task 16.1: a PWM source is level + ramp between corners, each corner a time event, so its
+    masks are exact (it was refused as 'source' before) and the run takes only exact steps."""
     b = p.CircuitBuilder()
     b.add_pwm_voltage_source("Vg", "in", "gnd", 5.0, 0.0, 1e4, 0.5)
     b.add_resistor("R", "in", "a", 10.0)
     b.add_diode("D", "a", "o", GON, GOFF)
     b.add_capacitor("C", "o", "gnd", 1e-6)
     rep = p.exact_route(b, 3e-4)
-    assert (rep["exact"], rep["reason"]) == (False, "source")
-    (row,) = rep["segments"]
-    assert (row["device"], row["kind"]) == ("Vg", "PWMVoltageSource")
+    assert (rep["exact"], rep["reason"]) == (True, None)
+    assert all(row["exact"] for row in rep["segments"])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=3e-4, engine="exact")
+    assert r.n_exact_steps == len(r.times) - 1
 
 
 def test_segments_ride_on_the_result():
@@ -180,3 +189,91 @@ def test_a_run_without_a_tier_record_is_not_reported_exact():
         b.add_resistor("R", "a", "o", 1e3)
         b.add_capacitor("C", "o", "gnd", 1e-6)
         p.exact_route(b, 1e-3, integrator="bdf2")
+
+
+# ---------------------------------------------------------------------------------------------
+# Task 13.2: engine='exact' refuses a segment it cannot step exactly, unless allowed
+# ---------------------------------------------------------------------------------------------
+def _rc_with_b_extra():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 5.0)
+    b.add_resistor("R", "a", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    zero = [0.0] * b.pool.state_size(b.graph)
+    return b, (lambda _t: zero)
+
+
+@pytest.mark.parametrize("engine", ["exact", "dsed"])
+def test_a_b_extra_fn_segment_is_refused_by_rule_unless_allowed(engine):
+    b, fn = _rc_with_b_extra()
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(b, t_end=1e-3, engine=engine, b_extra_fn=fn)
+    assert (ei.value.engine, ei.value.feature, ei.value.device) == ("dsed", "source", "")
+    assert "allow_implicit_segments=True" in str(ei.value)
+    b, fn = _rc_with_b_extra()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=1e-3, engine=engine, b_extra_fn=fn, allow_implicit_segments=True)
+    assert r.n_exact_steps == 0 and r.n_rk45_steps + r.n_bdf2_steps > 0
+    assert np.asarray(r.v("o"))[-1] == pytest.approx(5.0 * (1 - np.exp(-1.0)), rel=1e-5)
+
+
+def _paralleled_bridges(n):
+    b = p.CircuitBuilder()
+    for k in range(n):
+        for ph, ang in (("a", 0.0), ("b", -120.0), ("c", 120.0)):
+            b.add_sine_voltage_source(f"V{k}{ph}", f"s{k}{ph}", "gnd", 0.0, 100.0, 50.0,
+                                      np.deg2rad(ang + 6.0 * k))
+            b.add_inductor(f"L{k}{ph}", f"s{k}{ph}", f"x{k}{ph}", 0.2e-3)
+            b.add_diode(f"Dt{k}{ph}", f"x{k}{ph}", "p", GON, GOFF, 0.0)
+            b.add_diode(f"Db{k}{ph}", "n", f"x{k}{ph}", GON, GOFF, 0.0)
+    b.add_capacitor("C", "p", "n", 2e-3)
+    b.add_resistor("R", "p", "n", 5.0)
+    b.add_resistor("Rg", "n", "gnd", 1e6)
+    return b
+
+
+@pytest.mark.parametrize("mode", [None, "lcp"])
+def test_a_stiff_near_defective_mode_is_refused_as_cost(mode):
+    """Ten three-phase bridges paralleled on one bus: the mode at rest (all 30 diodes ON) has no
+    exact step (kappa2(V) 2.3e6, ||A*h|| 1.5e6) and the numeric fallback made no progress past
+    1 us ("no meaningful progress"). engine='exact' now names it at its first segment
+    (add-complementarity-mode-selection DECISIONS #25)."""
+    kw = {} if mode is None else {"mode_selection": mode}
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(_paralleled_bridges(10), t_end=0.02, engine="exact", **kw)
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "cost")
+    assert "near-defective" in str(ei.value)
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2", "auto"])
+def test_allow_implicit_segments_refused_off_the_exact_engine(engine):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 5.0)
+    b.add_resistor("R", "a", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    kw = {"dt": 1e-5} if engine == "pwl" else {}
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(b, t_end=1e-4, engine=engine, allow_implicit_segments=True, **kw)
+    assert ei.value.feature == "allow_implicit_segments"
+
+
+def test_auto_would_route_is_reported_and_read_by_nothing():
+    """Task 13.3, report only: result.exact['auto_would_route'] is True when every segment is
+    exact (the buck), False with a numeric segment (a b_extra_fn, allowed); 'exact' and 'dsed'
+    agree, and engine='auto' still routes the buck to the fixed / TR-BDF2 engines."""
+    b, fn, t_end = _buck()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=t_end, engine="exact", switch_fn=fn)
+        b2, fn2, _ = _buck()
+        r2 = p.simulate(b2, t_end=t_end, engine="dsed", switch_fn=fn2)
+        b3, fn3, _ = _buck()
+        ra = p.simulate(b3, t_end=t_end, switch_fn=fn3)
+    assert r.exact["auto_would_route"] is True and r2.exact["auto_would_route"] is True
+    assert ra.engine_used != "dsed"
+    b, fx = _rc_with_b_extra()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=1e-3, engine="exact", b_extra_fn=fx, allow_implicit_segments=True)
+    assert r.exact["auto_would_route"] is False

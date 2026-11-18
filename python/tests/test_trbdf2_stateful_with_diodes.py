@@ -169,21 +169,12 @@ def test_switched_diode_turn_off_with_series_inductor_on_trbdf2(kind):
     assert _rel(dc_var, dc_ref) < 2e-2, (dc_var, dc_ref)
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="the femtosecond landing step after a diode "
-                          "turn-off: the event is localised correctly (the "
-                          "inductor current is 2 uA there) but the next step "
-                          "is 3e-14 s, and the companion conductance 2L/h "
-                          "turns those microamps into -1539 V on the internal "
-                          "node of a 20 V circuit. It decays over the ~39 "
-                          "femtosecond steps that follow, covering 4.4e-12 s "
-                          "of physical time in total, and the OUTPUT is "
-                          "untouched — but a reported kilovolt poisons any "
-                          "max()-based check (overvoltage margin, insulation). "
-                          "The fix is in the step controller: after landing an "
-                          "event, resume from a physical step size rather than "
-                          "the probe floor.")
 def test_no_kilovolt_artefact_on_the_internal_node():
+    """Was a strict xfail: a diode turn-off landed up to 1e-4 h past its
+    current zero left ~2 uA in the inductor with only g_off to go
+    through, and the femtosecond steps that followed recorded the
+    L*g_off mode (-1539 V). The turn-off is now bracketed until
+    i/g_off is inside the run's voltage tolerance (DECISIONS 16)."""
     # rtol 2e-6 / atol 2e-9: the density rtol 1e-6 had before
     # update-trbdf2-error-control doubled the estimate (1460 V here). At
     # 1e-6 the new step sequence happens to miss the spike (20 V), while

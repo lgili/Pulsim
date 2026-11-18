@@ -25,10 +25,10 @@ lands).
 - [x] 2.4 Docs: CHANGELOG migration note; `AI_GUIDE.md` preflight section
 
 ## 3. Python side state into the IR
-- [ ] 3.1 Initial conditions (`c0=`, `i0=`, `set_initial`) and aliases stored in the builder / IR; delete `_pulsim_ic`, `_pulsim_aliases`
-- [ ] 3.2 C-block declarations as `ControlDecl`; delete `_c_blocks`
-- [ ] 3.3 Shockley parameters as device fields; delete `_shockley_params`
-- [ ] 3.4 Oracle: `test_initial_conditions_across_engines.py`, the alias tests, the C-block tests, `res.i` of Shockley diodes unchanged; a grep-based test that no module sets a private attribute on a builder
+- [x] 3.1 Initial conditions (`c0=`, `i0=`, `set_initial`) and aliases stored in the builder / IR; delete `_pulsim_ic`, `_pulsim_aliases` — the C++ builder already stored both; the dead Python fallbacks are deleted
+- [x] 3.2 C-block declarations as `ControlDecl`; delete `_c_blocks` — `ControlDecl` carried by the builder / IR (C blocks and graph-driven sources); the two registrations in c_block.py / blockchain.py stay until the control-graph consolidation (DECISIONS 14)
+- [x] 3.3 Shockley parameters as device fields; delete `_shockley_params` (slice 1, DECISIONS 11)
+- [x] 3.4 Oracle: `test_initial_conditions_across_engines.py`, the alias tests, the C-block tests, `res.i` of Shockley diodes unchanged; a grep-based test that no module sets a private attribute on a builder
 
 ## 4. YAML round trip, clone, pickle, hashes
 - [ ] 4.1 Schema table shared by loader and emitter (generated from the device field tables when `add-unified-device-interface` section 12 has landed; otherwise kept in `yaml/schema.hpp`), covering every registry kind including `shockley_diode`, `lauritzen_diode`, `nonlinear_capacitor`, `pmsm_mna` and the flux-table inductor
@@ -40,7 +40,7 @@ lands).
 
 ## 5. Sweeps over a circuit
 - [x] 5.1 `sweep(circuit, params=...)` and `monte_carlo(circuit, ...)` beside the `builder_factory` forms; the circuit is shared by the worker threads
-- [ ] 5.2 Oracle: results equal the factory form; `test_sweep_path_aware.py` green; an 8-job thread sweep scales as audit row 23 (within the noise of the shared machine)
+- [x] 5.2 Oracle: results equal the factory form; `test_sweep_path_aware.py` green; an 8-job thread sweep scales as audit row 23 (within the noise of the shared machine) — kernel path `_run_pwl_points` (DECISIONS 13): buck 3.0×, ladder 4.1× on 8 threads; counter tests in `test_circuit_sweep.py`
 
 ## 6. Named parameters and generic updates
 - [x] 6.1 `Parameter`, `builder.param(name, value, unit)`; `Value` overloads on every `add_*`

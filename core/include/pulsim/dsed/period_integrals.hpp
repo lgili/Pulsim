@@ -283,6 +283,33 @@ template <class AdapterT, class MaskT>
            * e.d.head(n).asDiagonal();
 }
 
+/// Relative tie of two extremum values: within it the extremum is one
+/// value attained at several instants (the two ends of a periodic orbit
+/// agree to rounding), reported at the EARLIEST of them so the instant
+/// does not flip with the last bit. pulsim.sensitivity._EXTREMUM_TIE is
+/// the same rule; keep the two equal.
+inline constexpr Real kExtremumTie = Real{1e-12};
+/// How far (relative to max(|t|, t_end)) a logged event may sit before
+/// the first sample at or after it; same constant as sensitivity.py.
+inline constexpr Real kEventSampleTol = Real{1e-12};
+
+/// One candidate of a running peak (`is_peak`) or valley: a value beyond
+/// the tie replaces it; a tied value keeps the larger magnitude in the
+/// extremum's direction and the earlier instant.
+inline void extremum_candidate(Real& best, Real& t_best, Real y, Real t,
+                               bool is_peak) {
+    const bool tie = std::isfinite(best)
+        && std::abs(y - best) <= kExtremumTie
+                                     * std::max(std::abs(y), std::abs(best));
+    if (tie) {
+        if (is_peak ? y > best : y < best) best = y;
+        if (t < t_best) t_best = t;
+    } else if (is_peak ? y > best : y < best) {
+        best = y;
+        t_best = t;
+    }
+}
+
 /// Search grid of one step [0, h] for the stationary points of a sum
 /// of exponentials: K uniform cells plus h/2, h/4, ... down to about
 /// 1/(2 max|Re mu|), so a fast mode's extremum near the step start is
@@ -399,6 +426,14 @@ template <class AdapterT, class MaskT>
         while (ev < res.event_log.size()
                && res.event_log[ev].t <= tk + t_tol) {
             const auto& er = res.event_log[ev++];
+            // the jump is applied to this sample's left limit, so the event
+            // must be at it (the rule of sensitivity._attach_events)
+            if (tk - er.t > detail::kEventSampleTol
+                                * std::max(std::abs(er.t), res.times.back())) {
+                throw std::runtime_error(
+                    "period map: event '" + er.name + "' at t = "
+                    + std::to_string(er.t) + " has no sample of its own");
+            }
             const Vector& x = *left[k];
             const PeriodMode& eo = mode_of(er.old_mask);
             const PeriodMode& en = mode_of(er.new_mask);
@@ -533,8 +568,9 @@ template <class AdapterT, class MaskT>
             }
             auto& st = out.stats[static_cast<std::size_t>(j)];
             auto cand = [&](Real y, Real t) {
-                if (y > st.peak) { st.peak = y; st.t_peak = t; }
-                if (y < st.valley) { st.valley = y; st.t_valley = t; }
+                detail::extremum_candidate(st.peak, st.t_peak, y, t, true);
+                detail::extremum_candidate(st.valley, st.t_valley, y, t,
+                                           false);
             };
             cand(y0[j], tk);
             cand(y1[j], res.times[k + 1]);

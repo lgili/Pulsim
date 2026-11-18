@@ -176,7 +176,7 @@ class ControlPlan:
 
 
 def compose_control(builder, closed_loops, step_observer, controller_period,
-                    switch_fn) -> ControlPlan:
+                    switch_fn, resume: bool = False) -> ControlPlan:
     from ._pulsim import make_combined_switch_fn  # type: ignore[import-not-found]
 
     loops = list(closed_loops or [])
@@ -236,7 +236,7 @@ def compose_control(builder, closed_loops, step_observer, controller_period,
             plan.rate_delays = list(step_observer._rate_delays)
         plan.b_extra_fn = getattr(step_observer, "_b_extra_fn", None)
     from .c_block import _c_graph_observer
-    plan.c_graph = _c_graph_observer(builder)
+    plan.c_graph = _c_graph_observer(builder, fresh=not resume)
     for _fn, period in plan.ticks:
         if not (period > 0.0 and math.isfinite(period)):
             raise ValueError(

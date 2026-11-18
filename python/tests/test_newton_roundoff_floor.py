@@ -66,3 +66,27 @@ def test_a_run_that_converged_is_untouched():
     r, _ = _run(1e-8, 10e-3)
     assert r.newton_roundoff_accepts == 0
     assert r.newton_roundoff_omega_max == 0.0
+
+
+def test_the_run_budget_is_an_option_and_its_abort_is_typed():
+    """100 uH at dt = 1e-13 s accepts every step at roundoff. With the
+    budget at 2 the third consecutive acceptance raises the typed
+    NewtonRoundoffBudgetExceeded, a SimulationAborted carrying the
+    partial result; the default (130) is not reached in 50 steps."""
+    assert issubclass(p.NewtonRoundoffBudgetExceeded, p.SimulationAborted)
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_resistor("R", "in", "a", 10.0)
+    b.add_inductor("L1", "a", "m", 100e-6, 0.9)
+    b.add_inductor("L2", "m", "d", 100e-6, 0.9)
+    b.add_shockley_diode("D", "d", "gnd")
+    kw = dict(t_end=50e-13, dt=1e-13, engine="pwl", max_dt_halvings=0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert p.simulate(b, **kw).newton_roundoff_accepts > 2
+        with pytest.raises(p.NewtonRoundoffBudgetExceeded,
+                           match="3 consecutive") as ei:
+            p.simulate(b, newton_roundoff_budget=2, **kw)
+    assert ei.value.partial is not None
+    with pytest.raises(ValueError, match="newton_roundoff_budget"):
+        p.simulate(b, newton_roundoff_budget=0, **kw)

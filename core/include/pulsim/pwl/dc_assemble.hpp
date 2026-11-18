@@ -35,6 +35,7 @@
 #include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/segment.hpp"
+#include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
 #include "pulsim/stamping/branch_coord.hpp"
@@ -47,6 +48,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <format>
 #include <stdexcept>
@@ -427,6 +429,278 @@ struct DCStructuralDefect {
     return out;
 }
 
+/// A loop of branches whose DC voltage is fixed — ideal voltage sources
+/// (DC, PWM, sine and pulse, at `t_eval`), inductors, coupled windings
+/// and saturable inductors (all shorts at DC), and ideal-transformer
+/// windings once the other winding's voltage is fixed — whose voltages
+/// do not sum to zero has no finite DC solution: KVL around it is
+/// violated, and the solve returned the EMF over the inductors' 1e-12 Ω
+/// regularisation (48 V across two series inductors: 2.4e13 A,
+/// ll16_flyback_closed_loop, 2026-11-13). Found structurally: node
+/// potentials are propagated over the fixed-voltage branches (a
+/// weighted union-find); a branch whose two ends already have a fixed
+/// difference that disagrees with its own closes such a loop. A loop
+/// whose EMF is zero (a 0 V source at t_eval, inductors in parallel) has
+/// finite solutions and is not flagged. Controlled sources (VCVS, CCVS,
+/// gyrator) do not fix a voltage by themselves and are not followed.
+struct DCVoltageLoop {
+    bool present = false;
+    Real emf = Real{0};                 //!< the KVL mismatch around it [V]
+    std::vector<Index> branches;        //!< the loop, closing branch last
+};
+
+[[nodiscard]] inline DCVoltageLoop find_dc_voltage_loop(
+    const topology::Graph& graph, const DevicePool& pool,
+    Real t_eval = Real{0}) {
+    using SK = DevicePool::StoredKind;
+    const Index nn = graph.num_nodes();
+    const auto slot = [nn](Index n) { return n == kGround ? nn : n; };
+    std::vector<Index> parent(static_cast<Size>(nn) + 1);
+    std::vector<Real> pot(static_cast<Size>(nn) + 1, Real{0});  // v - v_root
+    for (Index i = 0; i <= nn; ++i) parent[static_cast<Size>(i)] = i;
+    const auto find = [&](Index x) {
+        // Two passes: locate the root, then compress with potentials.
+        Index r = x;
+        Real acc = Real{0};
+        while (parent[static_cast<Size>(r)] != r) {
+            acc += pot[static_cast<Size>(r)];
+            r = parent[static_cast<Size>(r)];
+        }
+        while (parent[static_cast<Size>(x)] != r) {
+            const Index next = parent[static_cast<Size>(x)];
+            const Real p = pot[static_cast<Size>(x)];
+            parent[static_cast<Size>(x)] = r;
+            pot[static_cast<Size>(x)] = acc;
+            acc -= p;
+            x = next;
+        }
+        return r;
+    };
+    // Spanning-forest adjacency, to name the loop.
+    std::vector<std::vector<std::pair<Index, Index>>> adj(
+        static_cast<Size>(nn) + 1);
+    // Branches on the spanning-forest path a -> b (slots), appended.
+    const auto tree_path = [&](Index a, Index b, std::vector<Index>& path) {
+        std::vector<Index> prev_node(static_cast<Size>(nn) + 1, Index{-2});
+        std::vector<Index> prev_br(static_cast<Size>(nn) + 1, Index{-1});
+        std::vector<Index> queue{a};
+        prev_node[static_cast<Size>(a)] = a;
+        for (Size q = 0; q < queue.size(); ++q) {
+            const Index u = queue[q];
+            if (u == b) break;
+            for (const auto& [v, e] : adj[static_cast<Size>(u)]) {
+                if (prev_node[static_cast<Size>(v)] == Index{-2}) {
+                    prev_node[static_cast<Size>(v)] = u;
+                    prev_br[static_cast<Size>(v)] = e;
+                    queue.push_back(v);
+                }
+            }
+        }
+        for (Index u = b; u != a && prev_node[static_cast<Size>(u)] != Index{-2};
+             u = prev_node[static_cast<Size>(u)]) {
+            path.push_back(prev_br[static_cast<Size>(u)]);
+        }
+    };
+    DCVoltageLoop out;
+    // v_a - v_b = d, through branch `br`. Returns false on a loop.
+    const auto add = [&](Index a, Index b, Real d, Index br) {
+        a = slot(a);
+        b = slot(b);
+        const Index ra = find(a), rb = find(b);
+        if (ra != rb) {
+            // v_ra = v_a - pot_a; v_rb = v_b - pot_b; v_ra - v_rb =
+            // d - pot_a + pot_b.
+            parent[static_cast<Size>(ra)] = rb;
+            pot[static_cast<Size>(ra)] =
+                d - pot[static_cast<Size>(a)] + pot[static_cast<Size>(b)];
+            adj[static_cast<Size>(a)].push_back({b, br});
+            adj[static_cast<Size>(b)].push_back({a, br});
+            return true;
+        }
+        const Real have = pot[static_cast<Size>(a)] - pot[static_cast<Size>(b)];
+        const Real mis = d - have;
+        if (std::abs(mis) <= Real{1e-9} * (Real{1} + std::abs(d)
+                                            + std::abs(have))) {
+            return true;
+        }
+        // Name the loop: the tree path a -> b, then the closing branch.
+        tree_path(a, b, out.branches);
+        out.branches.push_back(br);
+        out.present = true;
+        out.emf = mis;
+        return false;
+    };
+    struct Xfmr { Index br; Index pf, pt; Real n; bool p_done, s_done; };
+    std::vector<Xfmr> xfmrs;
+    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
+        if (!pool.is_registered(b_id)) continue;
+        const auto& br = graph.branch(b_id);
+        Real d = Real{0};
+        bool fixed = true;
+        switch (pool.kind_of(b_id)) {
+        case SK::Inductor:
+        case SK::SaturableInductor:
+            break;
+        case SK::VoltageSource:
+            d = pool.voltage_source_params(b_id).V;
+            break;
+        case SK::PWMVoltageSource:
+            d = models::PWMVoltageSource::value_at(
+                pool.pwm_voltage_source_params(b_id), t_eval);
+            break;
+        case SK::SineVoltageSource:
+            d = models::SineVoltageSource::value_at(
+                pool.sine_voltage_source_params(b_id), t_eval);
+            break;
+        case SK::PulseVoltageSource:
+            d = models::PulseVoltageSource::value_at(
+                pool.pulse_voltage_source_params(b_id), t_eval);
+            break;
+        case SK::IdealTransformer: {
+            const auto [pf, pt] = pool.ideal_transformer_primary_nodes(b_id);
+            xfmrs.push_back({b_id, pf, pt,
+                             pool.ideal_transformer_params(b_id).n,
+                             false, false});
+            fixed = false;
+            break;
+        }
+        default:
+            fixed = false;
+            break;
+        }
+        if (fixed && !add(br.from, br.to, d, b_id)) return out;
+    }
+    // v_s = n v_p: a winding whose two ends are already tied by fixed
+    // voltages fixes the other winding (a shorted secondary is a shorted
+    // primary). Repeat until nothing new is fixed. A loop through a
+    // transformer also names the path that fixed its other winding.
+    std::vector<std::pair<Index, std::pair<Index, Index>>> fixed_by;
+    const auto finish = [&]() {
+        for (Size k = 0; k < out.branches.size(); ++k) {
+            for (const auto& [xb, ends] : fixed_by) {
+                if (xb != out.branches[k]) continue;
+                std::vector<Index> extra;
+                tree_path(ends.first, ends.second, extra);
+                for (const Index e : extra) {
+                    if (std::find(out.branches.begin(), out.branches.end(), e)
+                        == out.branches.end()) {
+                        out.branches.push_back(e);
+                    }
+                }
+            }
+        }
+        return out;
+    };
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (auto& x : xfmrs) {
+            const auto& br = graph.branch(x.br);
+            const Index sf = slot(br.from), st = slot(br.to);
+            const Index pf = slot(x.pf), pt = slot(x.pt);
+            if (!x.p_done && find(sf) == find(st)) {
+                const Real vs = pot[static_cast<Size>(sf)]
+                                - pot[static_cast<Size>(st)];
+                x.p_done = x.s_done = true;
+                grew = true;
+                fixed_by.push_back({x.br, {sf, st}});
+                if (!add(x.pf, x.pt, vs / x.n, x.br)) return finish();
+            } else if (!x.s_done && find(pf) == find(pt)) {
+                const Real vp = pot[static_cast<Size>(pf)]
+                                - pot[static_cast<Size>(pt)];
+                x.p_done = x.s_done = true;
+                grew = true;
+                fixed_by.push_back({x.br, {pf, pt}});
+                if (!add(br.from, br.to, x.n * vp, x.br)) return finish();
+            }
+        }
+    }
+    return out;
+}
+
+/// Refuse a DC operating point that `find_dc_voltage_loop` shows has no
+/// finite solution, naming the loop's devices and what to do instead.
+inline void require_no_dc_voltage_loop(const topology::Graph& graph,
+                                       const DevicePool& pool, Real t_eval,
+                                       const std::string& engine) {
+    const auto loop = find_dc_voltage_loop(graph, pool, t_eval);
+    if (!loop.present) return;
+    std::string names;
+    Index device = loop.branches.front();
+    bool have_source = false;
+    for (const Index b : loop.branches) {
+        if (!names.empty()) names += ", ";
+        names += std::string{graph.branch_name(b)};
+        const auto k = pool.kind_of(b);
+        if (!have_source && k != DevicePool::StoredKind::Inductor
+            && k != DevicePool::StoredKind::SaturableInductor) {
+            device = b;
+            have_source = true;
+        }
+    }
+    throw UnsupportedError(
+        engine, "dc_operating_point", std::string{graph.branch_name(device)},
+        std::string{stored_kind_name(pool.kind_of(device))},
+        std::format(
+            "no DC operating point: {} form a loop of voltage sources and "
+            "inductors (an inductor is a short at DC) whose voltages do "
+            "not sum to zero ({:.6g} V around it), so its DC current is "
+            "infinite. Start the transient from zero state or from "
+            "explicit initial conditions instead of the DC operating "
+            "point, or add the winding resistance in series.",
+            names, loop.emf));
+}
+
+/// A DC "solution" that is not finite, or exceeds 1e10 times the
+/// largest independent source (volts or amperes, at least 1), is not a
+/// state: no physical circuit of the sizes this simulator takes produces
+/// it, and a structural defect the probes above missed does. Refused,
+/// naming the unknown.
+inline void require_sane_dc_state(const topology::Graph& graph,
+                                  const DevicePool& pool, const Vector& x,
+                                  Real t_eval, const char* who) {
+    using SK = DevicePool::StoredKind;
+    Real scale = Real{1};
+    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
+        if (!pool.is_registered(b_id)) continue;
+        Real v = Real{0};
+        switch (pool.kind_of(b_id)) {
+        case SK::VoltageSource: v = pool.voltage_source_params(b_id).V; break;
+        case SK::CurrentSource: v = pool.current_source_params(b_id).I; break;
+        case SK::PWMVoltageSource:
+            v = models::PWMVoltageSource::value_at(
+                pool.pwm_voltage_source_params(b_id), t_eval);
+            break;
+        case SK::SineVoltageSource:
+            v = models::SineVoltageSource::value_at(
+                pool.sine_voltage_source_params(b_id), t_eval);
+            break;
+        case SK::PulseVoltageSource:
+            v = models::PulseVoltageSource::value_at(
+                pool.pulse_voltage_source_params(b_id), t_eval);
+            break;
+        default: break;
+        }
+        scale = std::max(scale, std::abs(v));
+    }
+    Index worst = kInvalidIndex;
+    Real worst_v = Real{0};
+    for (Index k = 0; k < x.size(); ++k) {
+        if (!std::isfinite(x[k])) { worst = k; worst_v = x[k]; break; }
+        if (std::abs(x[k]) > std::abs(worst_v)) { worst = k; worst_v = x[k]; }
+    }
+    if (worst == kInvalidIndex
+        || (std::isfinite(worst_v) && std::abs(worst_v) <= Real{1e10} * scale)) {
+        return;
+    }
+    throw std::runtime_error(std::format(
+        "{}: no DC operating point — the solve returned {:.4g} for {}, "
+        "against a largest source of {:.4g}: not a state. The DC system "
+        "is ill-posed (a loop or cut set the structural checks did not "
+        "name); start the transient from zero state or from explicit "
+        "initial conditions instead.",
+        who, worst_v, row_label(graph, pool, worst), scale));
+}
+
 /// Solve the DC operating point of the LINEAR part of the circuit.
 ///
 /// `gmin` is the conductance floor (S) stamped from every non-ground
@@ -445,6 +719,7 @@ inline Vector compute_dc_op(const topology::Graph& graph,
                               const topology::SwitchStateMask& mask,
                               Real t_eval = Real{0},
                               Real gmin = kDefaultGmin) {
+    require_no_dc_voltage_loop(graph, pool, t_eval, "dc");
     sparse::Matrix J;
     Vector b;
     dc_assemble(graph, pool, mask, J, b, t_eval);
@@ -489,6 +764,7 @@ inline Vector compute_dc_op(const topology::Graph& graph,
     Vector x;
     Vector rhs = -b;   // J · x = -b solves f = J·x + b = 0
     solver->solve(rhs, x);
+    require_sane_dc_state(graph, pool, x, t_eval, "compute_dc_op");
     return x;
 }
 
@@ -527,6 +803,7 @@ inline Vector compute_dc_op_newton(
     if (!refresh) {
         return compute_dc_op(graph, pool, mask, t_eval, gmin);
     }
+    require_no_dc_voltage_loop(graph, pool, t_eval, "dc");
 
     // Structural check against the system Newton actually solves.
     // Doing it here rather than inheriting `compute_dc_op`'s

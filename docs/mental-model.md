@@ -56,6 +56,13 @@ run. Values change by derivation too: `c.with_value("RL.R", 8.0)` and
 `c.with_params(Lbase=2e-3)` return new circuits
 ([Parameters and value updates](parameters.md)).
 
+A circuit carries everything the builder recorded: initial conditions
+per device (`c.initial_conditions()`: a capacitor's voltage across it,
+an inductor's current through it; a loop of capacitor ICs that breaks
+KVL is refused when the state is synthesised, naming the capacitor),
+aliases (`c.aliases()`), and control declarations (`c.controls()`: C
+blocks and control-graph-driven sources, which `simulate(c)` runs).
+
 ## 1. Graph + DevicePool — the circuit description
 
 The `Graph` stores topology: each branch has a `from` node id, a `to` node id, and a `kind` enum:

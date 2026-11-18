@@ -346,3 +346,40 @@ TEST_CASE("SaturableInductor: a gapped core saturates at the current its "
     CHECK(t90 < 200e-6);
     CHECK(t90 > 20e-6);
 }
+
+TEST_CASE("SaturableInductor: flux_increment is accurate relative to "
+          "itself and monotone at picoampere spacing",
+          "[layer2][saturable_inductor][roundoff]") {
+    // The TR-BDF2 residual multiplies λ(i1) − λ(i0) by 2/h. As a
+    // difference of two fluxes it carries eps·|λ| (2/h·λ was 1.4e12 at a
+    // 1e-13 s landing on the CI transformer: 3e-4 V of noise against a
+    // 1e-9 V step tolerance). The closed-form increment must match the
+    // midpoint rule L(m)·Δi (its error, L''·Δi³/24, is 1e-23 relative
+    // here) to a few eps of ITSELF, and grow with i1.
+    SaturableInductor::Params p;
+    p.L_0 = 111.4e-6;
+    p.I_sat = 6.4;
+    p.L_residual = 2e-6;
+    for (const Real i0 : {0.0, 0.3, 5.9, 26.0, -26.0, -4.0}) {
+        Real prev = -INFINITY;
+        for (int k = -50; k <= 50; ++k) {
+            const Real i1 = i0 + k * 1e-12;
+            const Real d = SaturableInductor::flux_increment(i1, i0, p);
+            const Real di = i1 - i0;   // exact (Sterbenz)
+            const Real ref = L_at(p, Real{0.5} * (i0 + i1)) * di;
+            INFO("i0 = " << i0 << ", k = " << k);
+            CHECK(std::abs(d - ref) <= 8e-16 * std::abs(ref));
+            CHECK(d >= prev);   // monotone in i1 at 1 pA spacing
+            prev = d;
+        }
+    }
+    // Large increments, both signs, against the plain difference.
+    for (const Real i0 : {-30.0, -1.0, 0.0, 2.0, 30.0}) {
+        for (const Real i1 : {-40.0, -3.0, 0.5, 7.0, 40.0}) {
+            const Real d = SaturableInductor::flux_increment(i1, i0, p);
+            CHECK(d == Approx(SaturableInductor::flux(i1, p)
+                              - SaturableInductor::flux(i0, p))
+                           .epsilon(1e-12).margin(1e-18));
+        }
+    }
+}

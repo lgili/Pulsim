@@ -110,9 +110,9 @@ counters:
       n_event_iterations: 80
       n_commutations: 80
     trbdf2:
-      n_accept: 1335
-      n_reject: 244
-      n_solves: 3419
+      n_accept: 1263
+      n_reject: 180
+      n_solves: 3203
       n_newton_retries: 0
       n_gate_events: 80
       n_diode_events: 19
@@ -149,7 +149,7 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 1
     dsed:
-      n_accept: 10
+      n_accept: 74   # was 10: 64 exact samples resolve the RC's fast mode after its 9 edges (add-exact-propagator-strategy DECISIONS, fast-mode samples)
       n_reject: 0
       n_events: 9
       n_rk45_steps: 0
@@ -254,7 +254,7 @@ counters:
     trbdf2:
       n_accept: 1250
       n_reject: 79
-      n_solves: 3330
+      n_solves: 3549
       n_newton_retries: 0
       n_gate_events: 0
       n_diode_events: 96
@@ -282,9 +282,9 @@ counters:
       n_event_iterations: 80
       n_commutations: 80
     trbdf2:
-      n_accept: 1318
-      n_reject: 546
-      n_solves: 4125
+      n_accept: 1077
+      n_reject: 12
+      n_solves: 2575
       n_newton_retries: 0
       n_gate_events: 0
       n_diode_events: 79
@@ -316,8 +316,12 @@ counters:
       n_diode_events: 199
       n_chatter_breaks: 0
       n_forced_accepts: 3
-    dsed:
-      refused: NotImplementedError
+    dsed:   # was refused (coupled inductors; add-exact-propagator-strategy DECISIONS)
+      n_accept: 1500
+      n_reject: 0
+      n_events: 199
+      n_rk45_steps: 0
+      n_bdf2_steps: 0
   diode_bridge_rectifier:
     pwl:
       event_builds: 0
@@ -336,7 +340,7 @@ counters:
     trbdf2:
       n_accept: 1144
       n_reject: 20
-      n_solves: 2462
+      n_solves: 2522
       n_newton_retries: 0
       n_gate_events: 0
       n_diode_events: 19

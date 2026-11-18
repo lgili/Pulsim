@@ -355,12 +355,16 @@ remove).
 `engine='dsed'` steps a mask with constant sources exactly (tier 1
 eigen, tier 2 Padé; `result.exact["masks"]`). A mask that passes
 neither bound (tier 3: stiff and non-normal, e.g. a 1e12 Jordan block)
-runs on the old numeric path for that mask, recorded with its reason;
-the implicit hand-off and a strict refusal need the unified stepper
-(`add-exact-propagator-strategy` task 2.4). Masks with PWM / pulse
-voltage sources or a sine / pulse / table current source are numeric too
-(task 8; tier 3 in `result.exact`); sine voltage sources are exact
-(an augmented oscillator state). Capacitor loops (parallel
+is refused by name (`UnsupportedError('dsed', 'cost')`) unless
+`allow_implicit_segments=True`, which runs it on the old numeric path,
+recorded with its reason (task 13.2); the implicit strategy hand-off
+needs the unified stepper (task 2.4). Sine, PWM and pulse voltage
+sources and sine / pulse / table current sources are exact (corners are
+time events); a user `b_extra_fn` makes the mask numeric, refused as
+`'source'` unless allowed. `integrator='bdf2'` is numeric throughout and
+not refused. Without `dt` the exact engine samples every 10 µs plus its
+events: exact at those instants, but a waveform interpolated between
+them is not (pass `dt` for a finer output grid). Capacitor loops (parallel
 capacitors) are refused by the extractor, so the charge-conserving
 start for inconsistent `c0=` values is not reachable yet. Coupled
 inductors stay refused (task 7).
@@ -401,56 +405,42 @@ not seen, nor is a predicate at zero that leaves toward its event side
 off (`h_e = 0`) the read-ahead is `1e-6·h`, so a diode sliding on its
 threshold advances by that much per event until the chatter detector
 stops it. Current zero-crossing and custom predicates starting at zero
-are still skipped for the step. The guard repairs only the modes it
-judges inconsistent over `1e4·h_e`; a mode consistent that long and
-wrong later is not caught.
+are still skipped for the step. A diode predicate that starts a step
+past its threshold by more than the zero band (1e-12 × the largest node
+voltage) is not an event, whether it comes back or not (DECISIONS #23):
+such a start is a mode the decision at that instant (guard or LCP)
+should have set. With the guard off (a module switch for A/B runs) the
+settle is still judged and refuses where the guard would repair
+(DECISIONS #26). The guard repairs only the modes it judges
+inconsistent over `1e4·h_e`; a mode consistent that long and wrong
+later is not caught.
 
-### `mode_selection='lcp'` on a bridge whose DC bus floats on leak resistors
+### dsed: a diode island tied to ground through a huge resistor
 
-A four-diode bridge fed from a floating secondary (an ideal transformer,
-or a sine source between two non-ground nodes) whose DC bus is held only
-by 1 MΩ ties and the diodes' `g_off` runs wrong under `'lcp'`: two diodes
-never conduct and one blocks +49.86 V (11.73 V against 31.88 V). The
-result flips with the `h_e` ratio, and the default (settle + guard) is
-right (add-complementarity-mode-selection DECISIONS #21). `'lcp'` is
-opt-in; use the default there. On the integrated tree the
-ideal-transformer bridge (`test_mode_passivity`) is loud, not wrong: the stored-sample guard raises `DiodeModeInconsistentError`
-(D2 OFF while forward-biased by 0.063 V from t = 10.008 ms); up to 9 ms
-`'lcp'` matches pwl to 5e-9 V.
+On `engine='dsed'` a diode island whose only path to ground is R_tie
+(a floating DC bus) is decided through G + C/h; its rounding error on
+the island gap is about ε·C·|dv/dt|/G_tie. Where that exceeds the tie
+tolerance (1e-9 × the voltage scale) the run stops with RuntimeError
+"factorize failed (numerically singular)" naming the node, e.g. 1e12 Ω
+with 2 mF, and at 1e9 Ω only at some `h_e`. Use `pwl`, or a smaller
+R_tie (1 MΩ runs within 6.2e-9 V of pwl). The failure is a
+`RuntimeError`, not a typed `UnsupportedError`.
 
 ### Many-diode rectifiers with line inductance on dsed
 
-Ten three-phase bridges (60 diodes) behind 0.2 mH line inductors chatter
-at a natural commutation ("is chattering at t = 4.33 ms") from five
-bridges on, at `V_th = 0` and `1e-2`, in every mode; paralleled onto one
-DC bus they fail to settle at `t = 0` from five bridges on, and
-`trbdf2` aborts on them ("non-finite step … h_min"). The same bank
-without line inductance runs (add-complementarity-mode-selection
-DECISIONS #20). `engine='pwl'` runs both (181.81 V / 200.01 V at
-`dt = 1 µs`); no reference was available to check them.
-
-### Cross-platform engine gaps on Linux (strict platform xfails)
-
-Two TR-BDF2 results differ on Linux (Eigen 3.4.0 / glibc libm; arm64 and
-x86-64 alike, `-ffp-contract=off`) from macOS (Eigen 5.0.1). The tests
-assert the property every platform must meet and carry
-`pytest.mark.xfail(strict=True, condition=sys.platform.startswith("linux"),
-reason="KNOWN_LIMITATIONS XP-n")`: CI stays green, the gap shows in the
-report, and the day the engine meets the property on Linux the strict
-xfail fails and must be removed. Reproduce with
-`scripts/ci_linux_repro.sh -- <test id>` (container `pulsim-ci147`).
-
-| Id | Test | macOS | Linux | Owner |
-|----|------|-------|-------|-------|
-| XP-1 | `test_trbdf2_error_control.py::test_doubled_tolerances_restore_the_previous_density` (diode bridge, DC bus floating on a 1 MΩ tie, rtol 2e-5 / atol 2e-8) | 1235 steps, 14 diode events, 3 forced accepts | Linux: 1398 steps, 122 diode events, 87 forced accepts (measured at 485ab770): chatter from t ≈ 4.4533 ms with every diode OFF; Windows: 1362 steps (CI at ed85a697) | TR-BDF2 track |
-| XP-2 | `test_saturable_transformer.py::test_engines_agree_below_saturation` (snubbed flyback, saturable core) | completes: 45,736 steps, 161 roundoff accepts | aborts at t = 0.34 ms, h at h_min, Newton 50 iterations still contracting (‖dx‖ 4.6e-7 → 1.7e-7 → 4.1e-8 V; 16.77160 V vs 16.77750 V at 0.339 ms) | TR-BDF2 track |
-
-XP-1 is not a Linux-only defect: on macOS the same bridge chatters at the
-neighbouring tolerances (rtol 1e-5: 1356 steps, 51 diode events, D4 held
-OFF against 4.72 V; rtol 4e-5: 56 events, 41 forced accepts, D4 by
-29.5 V, both with the missed-commutation warning). 2e-5 is clean on
-macOS by rounding luck. Workaround: `engine='pwl'` with a fixed `dt`, or
-tie the DC bus with a resistor well below 1 MΩ.
+Ten three-phase bridges (60 diodes) behind 0.2 mH line inductors, each
+on its own DC bus, run on the dsed default and on `'lcp'` at `V_th = 0`
+(181.808127 V, pwl at `dt = 1 µs` 181.81 V); with the guard off the
+settle chatters ("is chattering at t = 7.39 ms"), and `'lcp'` at
+`V_th = 1e-2` chatters at `t = 0`. Paralleled onto one DC bus, five
+bridges run on the default and on `'lcp'` (1.5e-4 V from pwl; the
+default's settle hits its round cap at rest and the LCP decides those
+events); ten bridges do not: the mode at rest (all 30 diodes ON) has no
+exact step (tier 3, a near-defective eigenbasis) and the numeric
+fallback makes no progress past 1 µs. `trbdf2` aborts on them
+("non-finite step … h_min"). `engine='pwl'` runs both (183.28 V /
+200.01 V at `dt = 1 µs`) (add-complementarity-mode-selection DECISIONS
+#20, #23, #24, #25).
 
 ### Fixed-step controller ticks land on the `dt` grid
 
@@ -563,51 +553,63 @@ from control blocks other than PI → PWM (`hysteresis`, `integrator`,
 `limiter`, `lookup_table`, `gain`, `pid_controller`, `rate_limiter`,
 `sample_hold`), four PLL / dq circuits, a p-channel MOSFET, the v1
 saturable-inductor law, and a MOSFET with a loss/thermal block. Failing
-on `pwl` (3): `buck_igbt` (Newton does not converge),
-`ll05_diode_rectifier_filter` (no consistent DC diode configuration),
-`ll13_active_clamp_forward` (no DC operating point).
-`ll16_flyback_closed_loop` completes since the Newton roundoff
-acceptance, but its state is wrong from t = 0 (I(Lm_core) ≈ 2.4e13 A).
-The cause is the DC operating point it starts from: `compute_dc_op` on
-a voltage source across series inductors (ll16's Vin, Lleak, Lm)
-returns 2.4e13 A (the source over the inductors' DC regularisation)
-instead of refusing; reproducer
-`openspec/changes/add-newton-roundoff-acceptance/probes/ll16_dc_op.py`.
-Every Newton solve from there is at roundoff, and the run stays inside
-the acceptance's run budget (longest run 5, the budget 130).
+on `pwl` (2): `buck_igbt` (Newton does not converge),
+`ll05_diode_rectifier_filter` (no consistent DC diode configuration).
+`ll13_active_clamp_forward` and `ll16_flyback_closed_loop` have no DC
+operating point: Vin, Lleak_prim and Lm_core form a source-inductor
+loop. The DC solve refuses it by name (`UnsupportedError`, feature
+`dc_operating_point`) and the v1 reader starts both from zero state,
+with a warning. ll16 is not a flyback as written (Lm_core and Lsec are
+uncoupled): I(Lm_core) ramps to 604 A and the secondary is dead.
 The differential matrix (strict gate: every observable, every interval)
 records its `disagree` / `error` cells as `known:` per configuration in
 `benchmarks/manifests/v2_triage.yaml` (counts in
 `benchmarks/REFERENCE_STATUS.md`). Each is an open finding, not a
-tolerance. Two circuits have no valid reference and are `unverified`
-on every engine (`reference: suspect`): `cuk_converter`, and
-`ll16_flyback_closed_loop`, which is not a flyback (`Lsec` is not
-coupled, `V(vout)` = 0, so the PI integrates a constant error; every
-turn-off forces `I(Lleak) - I(Lm)` through `roff` = 1e7 Ω: `V(drain)`
-peaks at 7.4e8 V on trbdf2 and 9.5e3 V on pwl, and trbdf2 rtol 1e-8 vs
-1e-10 differ by 6.7e-3). (`sepic`
-carried the mark while its trbdf2 reference ground to `max_steps`. That
-grind is fixed, and the reference now gives pwl 1.9e-3 and trbdf2
-3.0e-5, both agree; dsed is a frozen `error`.)
+tolerance. One circuit has no valid reference and is `unverified` on
+every engine (`reference: suspect`): `ll16_flyback_closed_loop`, which
+is not a flyback (`Lsec` is not coupled, `V(vout)` = 0, so the PI
+integrates a constant error; every turn-off interrupts `I(Lm_core)`
+(604 A) into `roff` = 1e7 Ω: pwl `V(drain)` 9.5e3 V at dt, 3.7e4 V at
+dt/4, and trbdf2 fails Newton at `h_min` at 7-14 µs, so nothing
+converges). (`sepic` carried the mark while its trbdf2
+reference ground to `max_steps`; that grind is fixed and the reference
+gives pwl 1.9e-3 and trbdf2 3.0e-5, both agree; dsed is a frozen
+`error`. `cuk_converter` carried it because its diode was reversed; see
+below.)
 
-**`cuk_converter` is ill-posed as written; its reference is marked
-suspect.** `Drect` is reversed: the file (and its ngspice deck) put the
-anode at ground and the cathode at `mid`, so the diode conducts while S1
-is ON and blocks the freewheel path while S1 is OFF. With S1 and Drect
-both OFF, L1's current (through `Ccpl`) and L2's current meet at `mid`
-with only Drect's `g_off` = 1e-6 S between them: an inductor cut-set,
-so `mid` reaches 2.6e4-3.5e6 V. The trbdf2 rtol 1e-8 reference accepts
-3,163 steps at `h_min` above tolerance and ends V(out) at +11.92 V; pwl
-does not converge with dt (0.233 / 0.232 / 0.226). With the diode turned
-round (`nodes: [mid, 0]`) both engines agree (V(out) over 1.5-2 ms:
--17.4951 V trbdf2 rtol 1e-8, -17.4971 V pwl; `|mid|` <= 39.1 V), though
-that trbdf2 run forces 748,763 accepts, so it is not yet a clean reference.
-Reproducer (from `benchmarks/tools`): `v1_reader.load('../circuits/switching/buck_boost/cuk_converter.yaml').run('trbdf2', rtol=1e-8, atol=1e-12)`,
-then `max |v(mid)|` (3.55e6 V) and `result._trbdf2_stats['n_forced_accepts']` (3163). The manifest marks the reference `suspect`
-(every cell `unverified`); the netlist is kept as the v1 file wrote it.
+**`cuk_converter` runs in DCM: −17.5 V, not −12 V.** Until 2026-11 the
+file and its ngspice deck had `Drect` reversed (anode at ground), so with
+S1 and Drect both OFF the two inductor currents met at `mid` through
+`g_off` = 1e-6 S (`mid` at 2.6e4-3.5e6 V). The diode now has its anode at
+`mid`. The output is not the CCM value: D = 0.49 (dead time),
+K = 2·(L1‖L2)/(R·T) = 2·23.5 µH/(20 Ω·20 µs) = 0.1175 < (1−D)² = 0.26,
+so the converter is in DCM and V_out = −V_in·D/√K = −17.15 V in steady
+state (CCM would give −V_in·D/(1−D) = −11.5 V). The 2 ms run has not
+settled: V(out) over 1.5-2 ms is −17.4951 V (trbdf2 rtol 1e-8) and
+−17.4971 V (pwl). Every configuration agrees with the trbdf2 reference
+(pwl 8.5e-4, pwl+restart 7.8e-6, pwl+split 6.2e-6, trbdf2 9.3e-5); the
+reference takes 18,192 steps with 15 forced accepts. dsed is a frozen
+`error`: "diode configuration did not settle" at t = 3.3e-4 s.
 
 Circuits whose v1 file has no `uic: true`
 start from the DC operating point, which `dsed` cannot take (refused).
+
+### TR-BDF2 on a bridge whose DC side floats on a tie resistor
+
+`engine='trbdf2'` on a diode bridge whose DC bus is referenced only by a
+1 MΩ tie still depends on rounding. Under a 1e-15 relative perturbation
+of the element values (20 runs) the run always finishes, but takes
+1231-1254 steps and 7-10 diode events, and the 30-40 ms bus average is
+311.155 to 311.341 V (pwl at dt 1e-6 and 2.5e-7: 311.344 V). A few
+picosecond samples right after a turn-off at the source zero crossing
+show an OFF diode 0.6 V forward (the L·g_off ringing of the line
+inductor). The two
+diodes of a half-cycle turn off at the same current zero (a tie), and
+through the OFF interval the floating rail is set by nano-amp g_off
+leakage whose sign flips at the source's zero crossings. The bus
+differential (dp − dn) of the unperturbed run is within 9e-4 V of pwl;
+the common mode is not. A real bridge has a defined reference (Y
+capacitors, a grounded rail): give the model one.
 
 ### First stored sample of algebraic nodes
 

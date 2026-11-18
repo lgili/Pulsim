@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -77,6 +78,19 @@ struct Parameter {
 };
 
 struct ParamId { std::uint32_t v; };
+
+/// A control declaration (group 3): a block the circuit carries but the
+/// IR does not model — a C block (`kind == "c_block"`), a source driven
+/// by a control graph (`"graph_driven"`). Opaque: `handle` belongs to the
+/// binding that made it (a Python object for these two) and is passed
+/// through to the run; the IR hashes `name` and `kind` (structure) and
+/// `content_hash` (value), which the declaring side computes stably.
+struct ControlDecl {
+    std::string name;
+    std::string kind;
+    std::uint64_t content_hash = 0;
+    std::shared_ptr<const void> handle;
+};
 
 struct FieldSpec {
     std::string_view name;

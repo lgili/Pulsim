@@ -39,6 +39,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <type_traits>
 #include <vector>
 
 #include <Eigen/Dense>
@@ -277,6 +278,7 @@ struct ModeSelection {
     int leak_pins = 0;        // remaining ties ON because their current pins an island (D5)
     int pin_judgements = 0;   // events where the pins went to the judge (or its absence)
     int unfixed = 0;          // decided ports freed again in a widened pass (D5)
+    int capped = 0;           // widenings shortened to the candidate mode's next event
     int enumerations = 0;     // non-passive: Lemke ended at a ray, the 2^k modes enumerated (D3)
     int nonunique_modes = 0;  // enumerations that found several modes (fewest flips taken)
     std::vector<Real> tie_currents;   // |i| of each port tied at h_e (A)
@@ -354,11 +356,25 @@ public:
     /// the widest step alone also pins currents left by event location
     /// (pA at a series-pair turn-off, where the leak divider already
     /// centres the island and all-OFF is exact).
-    template <class PortFn, class JudgeFn = int (*)(const std::vector<char>&)>
+    ///
+    /// `horizon(mode, decided)` (optional; +∞ when unknown) is the time to
+    /// the first event of `mode` (ties OFF) on its exact trajectory, among
+    /// the `decided` ports: a widened step never reaches past half of it.
+    /// A decided port whose own current really reaches zero inside
+    /// 1e4·h_e is a future event of that mode, not an undecided port:
+    /// without the cap the widened pass read it as a contradiction,
+    /// released it and turned the diode OFF that much early (a
+    /// three-phase bank behind line inductors lost 11 µs of conduction,
+    /// 0.13 V; DECISIONS #24).
+    template <class PortFn, class JudgeFn = int (*)(const std::vector<char>&),
+              class HorizonFn = Real (*)(const std::vector<char>&, const std::vector<char>&)>
     ModeSelection select(const std::vector<DiodePort>& ports,
                          const std::vector<char>& prev_on, PortFn&& port_at,
                          Real h_e, const CircuitScale& sc,
-                         JudgeFn&& judge = [](const std::vector<char>&) { return -1; }) {
+                         JudgeFn&& judge = [](const std::vector<char>&) { return -1; },
+                         HorizonFn&& horizon = [](const std::vector<char>&, const std::vector<char>&) {
+                             return std::numeric_limits<Real>::infinity();
+                         }) {
         const auto k = static_cast<Eigen::Index>(ports.size());
         ModeSelection out;
         out.on.assign(ports.size(), 0);
@@ -367,16 +383,40 @@ public:
         pin_.assign(ports.size(), 0);
         enum_ = nonunique_ = 0;
         const Real factors[3] = {Real{1}, Real{100}, Real{1e4}};
+        Real h_prev = Real{0};
+        // DECISIONS #30: a widened pass is posed in the candidate mode
+        // (decided ports as decided, ties OFF) when the caller can pose
+        // one; pivoting the previous mode's port matrix onto it read an
+        // island's split through a block of condition ~R_island/R_on
+        // (5e11: ±0.5 V on a 1e-11 V pair of turn-offs).
+        constexpr bool kAnchored = std::is_invocable_v<PortFn&, Real, const std::vector<char>&,
+                                                       DenseMatrix&, Vector&>;
+        anchor_ = prev_on;
+        prev_ = &prev_on;   // valid during this call only (read by solve_with_hysteresis_)
         for (int pass = 0; pass < 3; ++pass) {
+            Real h = h_e * factors[pass];
             if (pass > 0) {
                 bool tie = false;
                 for (int s : st_) tie = tie || s < 0;
                 if (!tie) break;
+                std::vector<char> mode(ports.size()), decided(ports.size());
+                for (std::size_t j = 0; j < ports.size(); ++j) {
+                    mode[j] = st_[j] > 0 ? 1 : 0;
+                    decided[j] = st_[j] >= 0 ? 1 : 0;
+                }
+                if constexpr (kAnchored) anchor_ = mode;
+                const Real cap = Real{0.5} * horizon(mode, decided);
+                if (cap < h) {
+                    h = cap;
+                    ++out.capped;
+                }
+                if (!(h > h_prev)) break;   // nothing further to see before that event
                 ++out.widenings;
             }
-            const Real h = h_e * factors[pass];
-            port_at(h, Z_, u_);
-            hybrid_lcp(Z_, u_, ports, prev_on, H_, q_);
+            h_prev = h;
+            if constexpr (kAnchored) port_at(h, static_cast<const std::vector<char>&>(anchor_), Z_, u_);
+            else port_at(h, Z_, u_);
+            hybrid_lcp(Z_, u_, ports, anchor_, H_, q_);
             H_he_ = H_;
             q_he_ = q_;
             st_prev_ = st_;
@@ -387,7 +427,7 @@ public:
             // high-impedance island split a tiny gap differently at each
             // step): it is freed and the pass solved again (bounded by k).
             for (Eigen::Index round = 0; round <= k; ++round) {
-                coord_ = prev_on;
+                coord_ = anchor_;
                 fixed_.assign(ports.size(), 0);
                 if (pass > 0) {
                     for (std::size_t j = 0; j < ports.size(); ++j) {
@@ -397,7 +437,7 @@ public:
                     }
                     H_ = H_he_;
                     q_ = q_he_;
-                    if (!pivot_to_coords_(prev_on)) { status = LcpStatus::PivotCap; break; }
+                    if (!pivot_to_coords_(anchor_)) { status = LcpStatus::PivotCap; break; }
                 }
                 status = solve_with_hysteresis_(ports, sc, h, piv, out.released);
                 if (pass == 0 || (status != LcpStatus::Solution && status != LcpStatus::Trivial))
@@ -523,7 +563,8 @@ private:
         for (Eigen::Index j = 0; j < k; ++j) {
             const auto ju = static_cast<std::size_t>(j);
             const auto& p = ports[ju];
-            held_[ju] = (fixed_[ju] || (!coord_[ju] && p.V_th > p.V_f)) ? 1 : 0;
+            // hysteresis holds a port that was OFF before the event (D8)
+            held_[ju] = (fixed_[ju] || (!coord_[ju] && !(*prev_)[ju] && p.V_th > p.V_f)) ? 1 : 0;
         }
         // impedance scale: currents are compared in volts (prototype)
         const Real zs = sc.vscale / sc.iscale;
@@ -643,7 +684,8 @@ private:
     DenseMatrix Z_, H_, Hs_, H_he_;
     Vector u_, q_, qs_, zf_, wf_, zfull_, what_, i_, wg_, q_he_;
     std::vector<int> st_, cls_, st_prev_;
-    std::vector<char> held_, coord_, fixed_, pin_;
+    std::vector<char> held_, coord_, fixed_, pin_, anchor_;
+    const std::vector<char>* prev_ = nullptr;
     std::vector<Eigen::Index> free_, idx_, oth_;
     int enum_ = 0, nonunique_ = 0;
 };

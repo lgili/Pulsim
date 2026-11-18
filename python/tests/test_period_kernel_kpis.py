@@ -215,3 +215,73 @@ def test_an_inconsistent_kernel_edge_log_fails_the_design(monkeypatch, ex):
     rec = ex.evaluate_all(ex.latin_hypercube(1, seed=3), workers=1)[0]
     assert rec.status == "failed", rec
     assert "do not alternate" in rec.reason
+
+
+def _example_module():
+    spec = importlib.util.spec_from_file_location("_bp_fast", EXAMPLE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_scalar_table_switching_loss_is_the_general_one_bit_for_bit():
+    from pulsim.losses import _switch_switching_loss
+    bp = _example_module()
+    rng = np.random.default_rng(4)
+    for part in bp.PARTS.values():
+        spec = part.switch_spec(Tj=bp.T_J_MAX)
+        for n_edges in (0, 1, 2, 3, 9, 17):
+            st = bool(rng.integers(2))
+            seq = [(st, *rng.normal(0, 30, 2))]
+            for _ in range(n_edges):
+                v, i = rng.normal(0, 30, 2)
+                seq.append((st, v, i))          # left limit
+                st = not st
+                v, i = rng.normal(0, 30, 2)
+                seq.append((st, v, i))          # right limit
+            fast = pk._table_switching_loss(seq, spec)
+            cl = np.array([s[0] for s in seq], dtype=bool)
+            gen = _switch_switching_loss(
+                cl, np.zeros(cl.size), np.array([s[1] for s in seq]),
+                np.array([s[2] for s in seq]), spec)
+            for k, v in fast.items():
+                assert v == gen[k], (k, n_edges)
+    # other specs take the general path
+    assert pk._table_switching_loss([(True, 1.0, 1.0)], {
+        "E_on_ref": 1e-6, "V_ref": 1, "I_ref": 1}) is None
+    assert pk._table_switching_loss([(True, 1.0, 1.0)], dict(
+        spec, Tj=lambda t: 25.0)) is None
+    assert pk._table_switching_loss([(False, np.nan, 1.0), (True, 1.0, 1.0)],
+                                    spec) is None
+
+
+def test_the_buck_example_records_do_not_depend_on_the_scalar_path(
+        monkeypatch):
+    bp = _example_module()
+    ds = bp.latin_hypercube(16, 0)
+    fast = bp.evaluate_all(ds)
+    monkeypatch.setattr(pk, "_table_switching_loss", lambda *a: None)
+    slow = bp.evaluate_all(ds)
+    assert [(r.status, r.kpis, r.losses) for r in fast] == \
+        [(r.status, r.kpis, r.losses) for r in slow]
+
+
+def test_an_extremum_at_both_ends_of_the_orbit_is_reported_at_t0():
+    # CCM buck, PWM on at t = 0: the inductor current's valley is the
+    # section, attained at t = 0 and t = T (equal to rounding); the input
+    # node is constant, its peak attained everywhere. Both report the
+    # EARLIEST instant, in the kernel and in the Python closed forms (an
+    # orbit whose ends tie in the other order once gave t0 + T on Linux).
+    b, sf = buck(CCM)
+    spec = pk.spec_for(b, "vin", {})
+    r = p.periodic_steady_state(b, period=T, switch_fn=sf,
+                                sensitivities=["L.L"], _observables=spec)
+    st = np.asarray(r._period["stats"])
+    j_i, j_v = spec.idx[("i", "L")], spec.idx[("node", "vin")]
+    assert st[j_i, 5] == 0.0                        # valley time of i_L
+    assert st[j_v, 3] == 0.0 and st[j_v, 5] == 0.0  # constant node
+    kv = r.kpi("L", "valley")
+    assert kv.where == 0.0 and not kv.non_unique    # ends are one point
+    # the rule itself: a tie keeps the earlier instant whatever the order
+    from pulsim.sensitivity import _EXTREMUM_TIE
+    assert _EXTREMUM_TIE == 1e-12
