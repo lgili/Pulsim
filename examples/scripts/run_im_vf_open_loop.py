@@ -39,7 +39,6 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-import numpy as np
 
 import pulsim as p
 
@@ -136,13 +135,13 @@ def main():
         out = list(im_b_extra_motor(t))
         v_amp_now, f_now = vf(t)
         omega = 2.0 * math.pi * f_now
-        # The voltage-source row of the MNA enforces V_source = b[src_idx].
-        # We add the time-varying value here (overrides the 0 baked into
-        # add_voltage_source).
-        out[src_a_idx] += v_amp_now * math.sin(omega * t + 0.0)
-        out[src_b_idx] += v_amp_now * math.sin(
+        # The voltage-source row carries -V_source in b_extra (the
+        # convention of builder.compute_time_varying_b_extra), so the
+        # time-varying value is SUBTRACTED to produce +v at the terminal.
+        out[src_a_idx] -= v_amp_now * math.sin(omega * t + 0.0)
+        out[src_b_idx] -= v_amp_now * math.sin(
             omega * t - 2.0 * math.pi / 3.0)
-        out[src_c_idx] += v_amp_now * math.sin(
+        out[src_c_idx] -= v_amp_now * math.sin(
             omega * t + 2.0 * math.pi / 3.0)
         return out
 
@@ -163,7 +162,7 @@ def main():
     )
 
     omega_final = motor.mech.omega_rad_s
-    print(f"\n  Result:")
+    print("\n  Result:")
     print(f"    ω_final  = {omega_final:.2f} rad/s "
           f"({omega_final*60/(2*math.pi):.1f} rpm)")
     print(f"    %sync    = {omega_final/diag['omega_sync_rad_s']*100:.1f} %")

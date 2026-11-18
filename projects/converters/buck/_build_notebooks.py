@@ -624,8 +624,8 @@ def build_controller_notebook() -> list[dict[str, Any]]:
 
 > **Goal.** Use the plant $G_{vd}(s)$ derived in notebook 1 to design a
 > voltage-mode compensator, verify closed-loop stability and
-> performance with analytical step responses, then validate the same
-> controller in a Pulsim closed-loop simulation.
+> performance with analytical step responses, then check the same
+> controller on a switched closed-loop simulation (pure Python).
 
 **Prerequisites**
 
@@ -641,8 +641,8 @@ def build_controller_notebook() -> list[dict[str, Any]]:
    compensation oscillates.
 3. Design a **type-II** compensator (PI + high-frequency pole) that
    meets the specs.
-4. Verify the closed loop with both an analytical step and a Pulsim
-   time-domain simulation.
+4. Verify the closed loop with both an analytical step and a switched
+   time-domain simulation (pure-Python switched model, §7.1).
 """))
 
     cells.append(code(r"""
@@ -999,16 +999,12 @@ print("  duty = clamp(v_c / V_ramp, 0, 1)")
 """))
 
     cells.append(md(r"""
-## 7. Pulsim closed-loop validation
+## 7. Closed-loop validation on the switched waveform
 
-To close the loop in Pulsim we use a `PIDController` virtual block (or a
-custom signal block) sensing $v_o$ and emitting a duty signal into the
-PWM source. For brevity here we use the in-tree `PIController` — a
-type-II compensator boils down to a PI plus an HF pole, and the
-in-tree block is sufficient for a sanity check.
-
-If you don't have Pulsim built, this section will skip and the math
-above still stands.
+This notebook does **not** run the loop in Pulsim: §7.1 below closes it
+on a pure-Python switched model. The open-loop Pulsim cross-check of
+this converter (steady state, ripple, duty step) is
+[`00_buck_pulsim_validation.ipynb`](00_buck_pulsim_validation.ipynb).
 """))
 
     cells.append(md(r"""

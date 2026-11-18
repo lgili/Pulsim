@@ -167,6 +167,12 @@ struct SimulationOptions {
     /// coincides with the step end. Off = the engine before the rule,
     /// bit for bit.
     bool discontinuity_restart = false;
+    /// add-branch-form-ideal-switch D4: a dependent mode (an inductor
+    /// cut-set or a capacitor loop made by ideal elements) entered with
+    /// inconsistent states is re-initialised by the SDIRK x3 restart and
+    /// recorded in `SimulationResult::reinit_records`; true refuses the run
+    /// at the first such event instead (`on_impulse='error'`).
+    bool on_impulse_error = false;
 
     /// add-fixed-step-resolution-diagnostics: per-step normalised
     /// truncation estimate of the linear capacitors and inductors and a

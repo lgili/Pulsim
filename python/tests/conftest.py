@@ -50,14 +50,20 @@ def _ensure_pulsim_path() -> tuple[bool, str, str]:
     # Prefer local build tree only when native extension is actually present.
     if _build_tree_has_extension(build_path):
         _remove_path(build_path)
-        _remove_path(source_python_path)
+        _demote_path(source_python_path)
         sys.path.insert(0, build_path)
         return True, build_path, source_python_path
     _remove_path(build_path)
-    # When tests are executed from python/tests, pytest can prepend
-    # <repo>/python, which shadows the installed wheel package.
-    _remove_path(source_python_path)
+    _demote_path(source_python_path)
     return False, build_path, source_python_path
+
+
+def _demote_path(path: str) -> None:
+    """Keep <repo>/python importable (the ``tests`` package) but after the
+    installed pulsim: a spawned worker inherits sys.path and would import
+    the extension-less source pulsim first and die."""
+    _remove_path(path)
+    sys.path.append(path)
 
 
 def _ensure_benchmarks_path() -> None:
@@ -92,7 +98,7 @@ def _reload_pulsim_if_needed(
         # If local source/build trees are stale, fall back to installed package.
         if exc.name == "pulsim._pulsim":
             _remove_path(build_path)
-            _remove_path(source_python_path)
+            _demote_path(source_python_path)
             _clear_cached_pulsim_modules()
             importlib.invalidate_caches()
             importlib.import_module("pulsim")
@@ -141,3 +147,11 @@ def _pulsim_is_this_checkout():
     msg = pulsim_checkout_mismatch(sys.modules["pulsim"])
     if msg:
         pytest.fail(msg, pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def _source_tree_after_installed_pulsim():
+    # pytest prepends <repo>/python again whenever it imports a test module
+    # or package; a process-backend worker must not see it first
+    if not _is_within(sys.modules["pulsim"].__file__, _source_python_path):
+        _demote_path(_source_python_path)

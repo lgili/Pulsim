@@ -40,7 +40,7 @@ from validation_data import ALL_KPI, KpiSet  # noqa: E402
 from pfc_vsi_drive_pulsim_validation import (  # noqa: E402
     DriveSimResult, make_sim_params, simulate_drive,
 )
-from losses import LossBreakdown, compute_losses  # noqa: E402
+from losses import LossBreakdown, compute_losses, whole_line_cycles_start  # noqa: E402
 from bom import R508  # noqa: E402
 
 
@@ -77,34 +77,33 @@ def extract_kpis(result: DriveSimResult, losses: LossBreakdown,
     fe = result.frontend
     inv = result.inverter
 
-    n_fe_lo = int(len(fe.times) * settle_fraction)
+    n_fe_lo = whole_line_cycles_start(fe.times, result.sim_params.op.f_line,
+                                      settle_fraction)
     n_fe_hi = int(len(fe.times) * end_fraction)
     n_in_lo = int(len(inv.times) * 0.3)
     n_in_hi = int(len(inv.times) * 0.7)
 
     v_ac = fe.v_ac[n_fe_lo:n_fe_hi]
+    i_in = fe.i_in[n_fe_lo:n_fe_hi]
     v_link = fe.v_link[n_fe_lo:n_fe_hi]
     i_L002 = fe.i_L002[n_fe_lo:n_fe_hi]
     v_shunt_inv = inv.v_n_shunt_inv[n_in_lo:n_in_hi]
 
     i_R508_rms = _rms(v_shunt_inv) / float(R508.R)
 
-    # I_in from power balance (the L001 state is numerically unstable
-    # past ~30 ms — see ``_build_frontend`` docstring). Using P/V is
-    # robust to the open-loop boost not perfectly regulating V_link.
+    # Line-side KPIs from the simulated line current (i_L001), over
+    # whole line cycles.
     v_link_avg = _avg(v_link)
     v_ac_rms = _rms(v_ac)
-    R_eq = result.sim_params.V_link_target ** 2 / max(result.sim_params.op.P_in_target, 1.0)
-    P_in_meas = (v_link_avg ** 2 / R_eq) if R_eq > 0 else 0.0
-    PF_assumed = 0.95
-    I_in_rms = P_in_meas / max(v_ac_rms * PF_assumed, 1e-6)
+    I_in_rms = _rms(i_in)
+    P_in_meas = _avg(v_ac * i_in)
 
     return dict(
         V_in_rms=v_ac_rms,
         V_link_avg=v_link_avg,
         I_in_rms=I_in_rms,
         P_in=P_in_meas,
-        PF=PF_assumed,
+        PF=P_in_meas / max(v_ac_rms * I_in_rms, 1e-6),
         I_L002_rms=_rms(i_L002),
         I_F500_rms=i_R508_rms,
         I_R508_rms=i_R508_rms,
@@ -145,7 +144,7 @@ def print_op_table(op_id: str, op_label: str, rows: List[Dict]) -> None:
     print()
     print(f"=== {op_id}  ({op_label}) ===")
     print(f"  {'KPI':<22} {'Pulsim':>11} {'PSIM':>11} {'Δ':>11} {'%err':>8}")
-    print(f"  " + "-" * 70)
+    print("  " + "-" * 70)
     for r in rows:
         psim = r["psim"]
         if psim is None:

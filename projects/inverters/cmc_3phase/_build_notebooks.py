@@ -833,10 +833,11 @@ maior.
 
 ## Conclusão
 
-O modelo CMC do pulsim reproduz a teoria SVM da tese (Cap. 2)
-quantitativamente correto em todos os 3 pontos de operação testados.
-Os erros do L1 vs analítico ficam dentro das tolerâncias esperadas
-(carrier ripple no pico, RMS sem desvio significativo).
+O modelo L0 (médio) reproduz a predição analítica exatamente nos 3
+pontos. O L1 (chaveado) fica dentro de 5% no pico nos 3 casos e dentro
+de 2% no RMS nos casos B e C, mas **não** no caso A: lá o RMS do L1 fica
+2,5% abaixo da predição, fora da tolerância de 2% declarada acima
+(causa não investigada).
 
 A próxima fase do projeto pode focar em:
 

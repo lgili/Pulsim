@@ -99,8 +99,8 @@ print(f"f_sw = {params.f_sw/1e3:.0f} kHz")
 
 We cold-start the Pulsim simulation (no warm-state for transformer
 flux is straightforward to compute) and run for 1 ms. With the default
-coupling $k = 0.99$ the leakage is small and the analytical steady
-state should match within ~10%.
+coupling $k = 0.99$ the output lands about 8 % below the ideal
+$n D V_g/(1-D)$; the summary explains why.
 """))
 
     cells.append(code(r"""
@@ -109,7 +109,7 @@ t_sim, v_out = simulate_flyback(
 )
 
 tail = t_sim >= t_sim[-1] - 1e-4
-v_o_dc = float(v_out[tail].mean())
+v_o_dc = pulsim.time_average(t_sim, v_out, t_from=t_sim[-1] - 1e-4)
 ripple_pp = float(v_out[tail].max() - v_out[tail].min())
 
 print(f"Simulation: {len(t_sim)} samples over {t_sim[-1] * 1e3:.2f} ms")
@@ -138,19 +138,30 @@ plt.tight_layout()
 plt.show()
 """))
 
+    cells.append(code(r"""
+for k in (0.99, 0.999, 0.99999):
+    t_k, v_k = simulate_flyback(params, duty=params.D, t_end=1e-3, dt=2e-8,
+                                k_coupling=k)
+    v_k_dc = pulsim.time_average(t_k, v_k, t_from=t_k[-1] - 1e-4)
+    print(f"  k = {k:<8}: V_o = {v_k_dc:.4f} V  ({(v_k_dc / params.V_o - 1) * 100:+.2f} % vs n·D/(1-D)·V_g)")
+"""))
+
     cells.append(md(r"""
 ## Summary
 
-The Pulsim flyback settles below the ideal analytical $V_o$ by a few
-percent because:
+The Pulsim flyback settles about 8 % below the ideal analytical
+$V_o$, and almost all of that is the transformer **leakage**
+($k = 0.99$): the energy stored in the leakage inductance at turn-off
+is not transferred to the secondary, and the secondary current needs
+time to build through its own leakage. The sweep above shows the gap
+closing as $k \to 1$. The diode's $V_{th} = 0.7$ V is its turn-on
+threshold, not a forward drop (its on-state is 1 mΩ), and the 10 mΩ
+MOSFET costs a few mV.
 
-- The transformer model includes leakage ($k = 0.99$, so 1% magnetic
-  energy is not transferred).
-- The MOSFET has $R_{on} = 10$ mΩ and a body-diode $V_F = 0.7$ V.
-- The rectifier diode adds another $V_{th} = 0.7$ V drop, costing
-  $V_{th} / V_o \approx 6\%$ on a 12 V output.
-
-These are real losses present in any physical converter. For
+With no clamp or snubber, the leakage energy has nowhere to go at
+turn-off: the switch node rings above 10 kV through the MOSFET's
+1 GΩ off-resistance, and `simulate` warns about it. A real design
+needs an RCD clamp. For
 controller design, the small-signal model in
 [`01_flyback_modeling.ipynb`](01_flyback_modeling.ipynb) is built on
 the *ideal* topology; the Pulsim cross-check confirms the DC ratio is

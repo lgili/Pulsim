@@ -90,8 +90,12 @@ MODEL_DIFFERENCE = {"boost_50": 1, "boost_500": 1}
 # probe surface has no judge, so every pin stands. bridge3_cfilter: every turn-off; conductance-form
 # physics (the leak divider forward-biases an OFF diode by volts), the ideal reference has a gauge
 # instead. bridge1: series-pair turn-offs where event-location residuals (pA) look like pins; on dsed
-# the judge sends them OFF (test_mode_shadow.py: 0 LCP errors on the bridges).
-LEAK_PINS = {"bridge1_vf07": 2, "bridge1_vf0": 3, "bridge3_cfilter": 12}
+# the judge sends them OFF (test_mode_shadow.py: 0 LCP errors on the bridges). Whether a pA
+# residual crosses the pin threshold is last-bit rounding, so bridge1 is bounded, not pinned:
+# measured vf0 3 (macOS arm64) / 2 (CI x86-64), vf07 2 (macOS) / 3 (Linux arm64). The bridges'
+# waveforms are held to the reference by test_mode_lcp.py::test_lcp_bridges_match_trbdf2.
+LEAK_PINS = {"bridge3_cfilter": 12}
+LEAK_PIN_BOUND = {"bridge1_vf07": 3, "bridge1_vf0": 3}
 
 
 @pytest.mark.parametrize("name", list(B.FAMILIES))
@@ -118,7 +122,10 @@ def test_selected_mode_equals_the_prototype_mode_at_every_event(name):
     assert len(bad) == MODEL_DIFFERENCE.get(name, 0), bad
     if bad:
         assert bad == [0.0]
-    assert len(pins) == LEAK_PINS.get(name, 0), pins
+    if name in LEAK_PIN_BOUND:
+        assert 2 <= len(pins) <= LEAK_PIN_BOUND[name], pins
+    else:
+        assert len(pins) == LEAK_PINS.get(name, 0), pins
 
 
 def test_at_rest_zero_drop_diode_is_one_lcp_two_pivots_and_off():

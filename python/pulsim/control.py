@@ -961,19 +961,17 @@ def _interp_complex_at_freq(freqs, H, f_target):
     import numpy as _np
     freqs = _np.asarray(freqs, dtype=float)
     H = _np.asarray(H, dtype=complex)
+    # Unwrapped along the sweep, so a lag past -180° stays a lag.
+    ph = _np.degrees(_np.unwrap(_np.angle(H)))
     if f_target <= freqs[0]:
-        return abs(H[0]), _math.degrees(_np.angle(H[0]))
+        return abs(H[0]), float(ph[0])
     if f_target >= freqs[-1]:
-        return abs(H[-1]), _math.degrees(_np.angle(H[-1]))
+        return abs(H[-1]), float(ph[-1])
     # Bracket.
     idx = int(_np.searchsorted(freqs, f_target))
     f0, f1 = freqs[idx - 1], freqs[idx]
     mag0, mag1 = abs(H[idx - 1]), abs(H[idx])
-    ph0 = _math.degrees(_np.angle(H[idx - 1]))
-    ph1 = _math.degrees(_np.angle(H[idx]))
-    # Phase unwrap across the bracket: if jump > 180°, undo it.
-    if ph1 - ph0 >  180.0: ph1 -= 360.0
-    if ph1 - ph0 < -180.0: ph1 += 360.0
+    ph0, ph1 = ph[idx - 1], ph[idx]
     # Log-linear in freq, linear in dB / deg.
     log_f0 = _math.log10(f0)
     log_f1 = _math.log10(f1)
@@ -1038,8 +1036,11 @@ def tune_pi_from_bode(
     dict with keys:
         Kp, Ki                 — gains
         controller             — a `PIController` instance ready to use
-        achieved_pm_deg        — the phase margin the controller delivers
+        achieved_pm_deg        — phase margin of loop_gain(freqs, H, Kp, Ki)
+                                 at its LAST 0 dB crossing (a warning
+                                 says when that is not f_crossover)
         crossover_hz           — `f_crossover` echoed back
+        loop_crossovers_hz     — every 0 dB down-crossing of that loop
         plant_mag_at_crossover — |G(jω_c)|
         plant_phase_at_crossover_deg — ∠G(jω_c)
         warnings               — list[str] of design notes
@@ -1067,16 +1068,25 @@ def tune_pi_from_bode(
         # not exactly PM_target).
         # |L(jω_c)| = Kp·sqrt(1 + (Ki/(Kp·ω_c))²)·Mg
         # ∠L(jω_c) = arctan(-Ki/(Kp·ω_c)) + φ_g
-        wt = Ki / (Kp * omega_c)
-        pm_achieved = 180.0 + _math.degrees(
-            _math.atan(-wt) + _math.radians(phi_g)
-        )
     else:
         phi_pi_rad = _math.radians(phi_pi_deg)
         tau_i = -1.0 / (omega_c * _math.tan(phi_pi_rad))
         Kp = _math.cos(phi_pi_rad) / Mg
         Ki = Kp / tau_i
-        pm_achieved = phase_margin_deg  # by construction
+
+    # The margin is read off the loop these gains make over the whole
+    # sweep, not assumed at f_crossover: near a resonance |L| comes back
+    # above 1 and the LAST 0 dB crossing (the one that sets stability)
+    # is elsewhere. Buck Q = 3.4, f_c = 2 kHz: 60° asked, 6.0° delivered.
+    L = loop_gain(freqs, H, Kp, Ki)
+    pm_achieved = phase_margin_from_loop(freqs, L)
+    xings = _down_crossings_hz(freqs, L)
+    if len(xings) != 1 or abs(xings[0] / f_crossover - 1.0) > 0.05:
+        warnings.append(
+            f"The loop crosses 0 dB at {[round(x, 1) for x in xings]} Hz, "
+            f"not only at f_c={f_crossover:.1f} Hz; achieved_pm_deg "
+            f"({pm_achieved:.1f}°) is the margin at the last crossing."
+        )
 
     controller = PIController(
         Kp=Kp, Ki=Ki,
@@ -1089,6 +1099,7 @@ def tune_pi_from_bode(
         "controller": controller,
         "achieved_pm_deg": pm_achieved,
         "crossover_hz": f_crossover,
+        "loop_crossovers_hz": xings,
         "plant_mag_at_crossover": Mg,
         "plant_phase_at_crossover_deg": phi_g,
         "warnings": warnings,
@@ -1119,31 +1130,36 @@ def phase_margin_from_loop(freqs, L) -> float:
     determines how close the loop is to encircling −1.
     Returns +inf if |L| never crosses 1.
     """
-    import math as _math
     import numpy as _np
     freqs = _np.asarray(freqs, dtype=float)
     L = _np.asarray(L, dtype=complex)
-    mag = _np.abs(L)
-    # Find ALL down-crossings of |L| = 1, take the highest-freq one.
-    crossed = mag[:-1] >= 1.0
-    next_below = mag[1:] < 1.0
-    crossings = _np.where(crossed & next_below)[0]
-    if len(crossings) == 0:
+    crossings = _down_crossings(freqs, L)
+    if not crossings:
         return float("inf")
-    i = int(crossings[-1])    # last crossing
-    # Interpolate the crossing freq in log scale.
-    log_f0, log_f1 = _math.log10(freqs[i]), _math.log10(freqs[i + 1])
-    log_m0, log_m1 = _math.log10(mag[i]), _math.log10(mag[i + 1])
-    alpha = (0.0 - log_m0) / (log_m1 - log_m0)   # mag=1 → log_mag=0
-    log_fc = (1 - alpha) * log_f0 + alpha * log_f1
-    # Interpolate phase at f_c.
-    ph0 = _math.degrees(_np.angle(L[i]))
-    ph1 = _math.degrees(_np.angle(L[i + 1]))
-    if ph1 - ph0 >  180.0: ph1 -= 360.0
-    if ph1 - ph0 < -180.0: ph1 += 360.0
-    log_fc_lin = (log_fc - log_f0) / (log_f1 - log_f0)
-    phase_at_xover = (1 - log_fc_lin) * ph0 + log_fc_lin * ph1
-    return 180.0 + phase_at_xover
+    i, alpha = crossings[-1]    # last crossing
+    # Phase unwrapped along the sweep: a loop lagging 205° has a margin
+    # of -25°, which the wrapped angle (+155°) reported as +335°.
+    ph = _np.degrees(_np.unwrap(_np.angle(L)))
+    return 180.0 + (1 - alpha) * ph[i] + alpha * ph[i + 1]
+
+
+def _down_crossings(freqs, L):
+    """(i, alpha) of every |L| = 1 down-crossing between freqs[i] and
+    freqs[i+1]; alpha is the log-frequency fraction of the crossing."""
+    import numpy as _np
+    mag = _np.abs(_np.asarray(L, dtype=complex))
+    out = []
+    for i in _np.where((mag[:-1] >= 1.0) & (mag[1:] < 1.0))[0]:
+        lm0, lm1 = _np.log10(mag[i]), _np.log10(mag[i + 1])
+        out.append((int(i), float(-lm0 / (lm1 - lm0))))
+    return out
+
+
+def _down_crossings_hz(freqs, L):
+    import numpy as _np
+    lf = _np.log10(_np.asarray(freqs, dtype=float))
+    return [float(10 ** ((1 - a) * lf[i] + a * lf[i + 1]))
+            for i, a in _down_crossings(freqs, L)]
 
 
 def gain_margin_from_loop(freqs, L) -> float:
@@ -1218,6 +1234,18 @@ class ClosedLoop:
     #: point at or after it (exact when T_ctrl is a multiple of dt).
     #: That makes `pi.update(dt=T_PWM)` true rather than nominal.
     period: float = 0.0
+
+
+# A step that lands a floating-point hair before k*T still takes tick k:
+# the old `t - last >= T` test skipped it and ticked one step late
+# (2978 updates instead of 3000 over 30 ms at dt = T/100).
+_TICK_TOL = 1e-9
+
+
+def _next_tick_after(t: float, t_start: float, T: float) -> float:
+    """First instant of the t_start + k*T schedule strictly after ``t``."""
+    k = math.floor((t - t_start) / T + _TICK_TOL) + 1
+    return t_start + k * T
 
 
 def bind_pi_to_switch(
@@ -1313,7 +1341,7 @@ def bind_pi_to_switch(
     # the `[0.5]` / `[t_start - T_PWM]` lists callers used to write
     # by hand.
     duty_state = [0.5]
-    last_tick = [t_start - T_PWM]  # forces immediate first update
+    next_tick = [t_start]  # first update at t_start
     duty_history: "list[tuple[float, float]]" = []
     error_history: "list[tuple[float, float]]" = []
 
@@ -1335,12 +1363,10 @@ def bind_pi_to_switch(
         an observer every step and need the loop itself to decide
         when a period has elapsed. An engine that SCHEDULES the
         cadence — `engine='auto'` lands a step boundary on every
-        k·T_ctrl — must call this instead: the difference of two
-        exact multiples of T is a floating-point hair BELOW T, so
-        the throttle rejects a third of the scheduled ticks
-        (measured: 129 PI updates for 200 scheduled ticks).
+        k·T_ctrl — calls this instead, so the update count is the
+        schedule's and never depends on how close a step lands.
         """
-        last_tick[0] = t
+        next_tick[0] = _next_tick_after(t, t_start, T_PWM)
         m = float(measured(x))
         sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
         error = sp - m
@@ -1350,9 +1376,9 @@ def bind_pi_to_switch(
         error_history.append((t, error))
 
     def step_observer(t: float, x) -> None:
-        # Throttle: skip until at least one T_PWM has elapsed since
-        # the last update. Prevents the loop from chasing PWM ripple.
-        if t - last_tick[0] < T_PWM:
+        # Throttle to the t_start + k*T_PWM schedule: prevents the loop
+        # from chasing PWM ripple, and keeps ticks on the carrier edges.
+        if t < next_tick[0] - _TICK_TOL * T_PWM:
             return
         _tick(t, x)
 
@@ -1411,7 +1437,7 @@ def bind_pi_to_duty_callable(
 
     T_PWM = 1.0 / float(freq)
     duty_state = [0.5]
-    last_tick = [t_start - T_PWM]
+    next_tick = [t_start]
     duty_history: "list[tuple[float, float]]" = []
 
     def duty_get() -> float:
@@ -1426,12 +1452,10 @@ def bind_pi_to_duty_callable(
         an observer every step and need the loop itself to decide
         when a period has elapsed. An engine that SCHEDULES the
         cadence — `engine='auto'` lands a step boundary on every
-        k·T_ctrl — must call this instead: the difference of two
-        exact multiples of T is a floating-point hair BELOW T, so
-        the throttle rejects a third of the scheduled ticks
-        (measured: 129 PI updates for 200 scheduled ticks).
+        k·T_ctrl — calls this instead, so the update count is the
+        schedule's and never depends on how close a step lands.
         """
-        last_tick[0] = t
+        next_tick[0] = _next_tick_after(t, t_start, T_PWM)
         sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
         new_duty = pi.update(
             setpoint=sp,
@@ -1442,7 +1466,7 @@ def bind_pi_to_duty_callable(
         duty_history.append((t, duty_state[0]))
 
     def step_observer(t: float, x) -> None:
-        if t - last_tick[0] < T_PWM:
+        if t < next_tick[0] - _TICK_TOL * T_PWM:
             return
         _tick(t, x)
 

@@ -82,6 +82,7 @@ namespace detail {
 /// a junction capacitor absent: the transfer function of another circuit.
 inline void require_linear_for_sweep(const topology::Graph& graph,
                                       const pwl::DevicePool& pool) {
+    require_branch_form_supported(graph, pool, pwl::Engine::AcSweep);
     const auto bad = find_unsupported(graph, pool, pwl::Engine::AcSweep);
     if (!bad) return;
     const Index bid = *bad;

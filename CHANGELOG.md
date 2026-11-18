@@ -77,6 +77,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   warning: ll13 now runs (it failed before), ll16 no longer starts from
   2.4e13 A.
 
+### Process backend: a dead worker raises instead of hanging (integration batch 7)
+
+* **Fixed** `sweep(..., backend="process")` and
+  `Evaluator.evaluate_many(..., backend="process")` waited forever when a
+  worker died: under `spawn` (macOS, Windows) a job whose module the child
+  cannot import killed the worker while unpickling, and
+  `multiprocessing.Pool` never noticed (the CI python-tests jobs on macOS
+  and Windows hung for hours). The runner now uses a
+  `ProcessPoolExecutor`: the job is pickled in the parent (an unpicklable
+  job is refused by index before any worker starts, `TypeError`), loaded
+  inside the worker (an import failure comes back by name,
+  `RuntimeError`), and a worker that dies raises `RuntimeError` from
+  `BrokenProcessPool`.
+* CI runs pytest with `--timeout=900` (`pytest-timeout` joins the `dev`
+  extra).
+* **Fixed** `simulate()` read the builder's initial conditions inside a
+  broad `except`, so capacitor ICs that break KVL (refused by
+  `CircuitBuilder.initial_state()` since the examples audit) ran silently
+  from x0 = 0 on every engine; the `ValueError` now reaches the caller.
+  The dead Python fallback `initial_state` (positive-terminal placement)
+  is removed and the `add_capacitor` docstring says "voltage across it".
+
 ### Design evaluation: review fixes (integration batch 6c)
 
 * **Fixed** a gate edge taken at the next grid point under sub-step
@@ -315,6 +337,91 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   quantisation and the bus common mode (DECISIONS 11). The ripple test
   pins the engine's own peak-to-peak at 5e-3 again.
 
+### Fixed engine: restart/split checkpoint-review fixes
+
+* A restart stage-2 backward-Euler re-try that throws (now forced in a
+  test by a node singular exactly at its dt) keeps the SDIRK stage 2 as
+  before and now also warns (`UserWarning` naming
+  `stage2_retry_failures`); the three-phase rectifier then returns to the
+  pre-fallback 37.20 V bus peak, the number the warning protects.
+  `split_event_overflows` warns too.
+* `unlocated_gate_steps` no longer counts an opaque `switch_fn` edge that
+  falls on the grid point itself (it was taken where it is).
+* A `step_observer` that moves the declared `b_extra_fn` jumps is honoured
+  (the memo of the next jump is reset after it, as the gate oracle's was).
+* `n_restart_factorizations` counts every restart-stage refactor (split
+  sub-intervals, the stage-2 re-try). Results bit-identical; Newton
+  round-off counters still include solves a discarded re-try made.
+
+### Ideal switch in branch form (add-branch-form-ideal-switch)
+
+* **Added** (opt-in) the branch form of a switch and a diode:
+  `add_ideal_switch(name, a, b, R_on=0, g_off=0)`,
+  `add_diode(..., form='branch', R_on=0, g_off=0)`, YAML `form: branch`.
+  The switch current is an unknown (row `v − R_on·i = V_f` ON,
+  `−g_off·v + i = 0` OFF), so `R_on = 0` and `g_off = 0` are exact; the
+  sparsity pattern is the same for every mask (one symbolic analysis on a
+  16-mask bridge, residual ≤ 1e-12 with every `R_on = 0`). With
+  `R_on = 1e-3`, `g_off = 1e-9` it reproduces the conductance form within
+  1e-10 on a buck, a bridge rectifier and a three-phase inverter. An
+  ideal switch charges an RL to 9.99954600 A at 10 ms on `trbdf2`
+  (conductance form: 9.98955 A). `res.i` reads the solved current;
+  `components()` reports `R_on` and `branch_form`.
+* Runs on `pwl` (switch and diode) and `trbdf2` (switch); other engines
+  and the AC sweep refuse with `UnsupportedError(feature='branch_form')`.
+  A per-mode structural pass refuses, by name, a node bounded only by
+  open ideal elements (`floating_node`), a loop of closed ideal elements
+  and voltage sources (`ideal_voltage_loop`) and, until the
+  re-initialisation service, a mode with dependent states
+  (`dependent_states`); it runs once per mode
+  (`counters['mode_structure_checks']`) and never for the conductance
+  form. Every conductance-form result is bit-identical.
+* **BREAKING** (invalid values only) `add_switch`, `add_diode` and YAML
+  `switch` / `diode` refuse at build time a `g_on` that is not finite and
+  > 0, or a `g_off` that is not finite and >= 0; `add_mosfet`,
+  `add_mosfet_with_body_diode` and `add_igbt` refuse `R_on` / `R_off` the
+  same way, naming the device and the field (`ValueError`). Before, an
+  infinite `g_on` built and aborted mid-run "numerically singular", and a
+  negative value ran on a negative resistance. Every existing example
+  and test circuit still builds; no valid number changes.
+* **Added** re-initialisation of dependent modes on `pwl` under
+  `discontinuity_restart=True`: an ideal switch opening an inductor
+  cut-set or closing a capacitor loop is realised by the SDIRK×3 restart
+  and recorded in `res.reinit_records` (`t`, `kind`, `devices`, `states`,
+  `lambda` = the impulse, `dW` = the energy dissipated, `projection_gap`,
+  `sample` = the index of the pulse sample). Opening 9.9327 A at
+  `h = τ/20`: `i_L = 0` from the first step, node voltages 0 within 1e-9 V
+  from the second (was ±397 V ringing with `g_off = 1e-9`), `|Λ| = L·i`
+  within 1e-12, `dW` = 49.3291 mJ = ½·L·i² within 1e-9. Two capacitors
+  (8 V, 0 V) closed by `R_on = 0`: both at 4.0 V within 1e-12, 6 µC,
+  24 µJ. `simulate(on_impulse='record' | 'warn' | 'error')`; `'error'`
+  raises `UnsupportedError(feature='impulse')` naming the switch. Without
+  the restart rule a dependent mode is still refused by name; `trbdf2`
+  keeps its static refusal. A diode turning off at zero current makes no
+  record.
+* **Added** the ideal DCM buck on `pwl` (branch-form switch and diode,
+  restart + event split): `v_C` error −2.660e-6, −6.591e-7, −1.709e-7,
+  −4.354e-8 V at N = 50, 100, 200, 400 steps per period (prototype
+  −2.442e-6 … −4.345e-8), order 1.97, `i_L` exactly 0 while the diode is
+  off. An ON ideal diode that would close a loop with the source and a
+  closed switch is turned OFF and the mode re-formed
+  (`counters['ideal_loop_releases']`); a second release of the same diode
+  in one step is refused as `ideal_voltage_loop`.
+* **Fixed** (review of the above, all opt-in paths): an ideal diode
+  forward-biased by a loop of sources and closed ideal elements is
+  refused (`ideal_voltage_loop`) instead of breaching on every step with
+  the diode stuck OFF; a saturable inductor, nonlinear capacitor or PMSM
+  next to an ideal element is refused (`dependent_states`, naming it)
+  instead of escaping the structural pass; `engine='auto'` routes an
+  ideal-switch circuit to `pwl` (or asks for `dt`) instead of raising the
+  trbdf2 refusal; a capacitor loop closed through several ideal switches
+  records whichever one changed; a gate edge that forces a diode into a
+  dependent mode records it; the transformer primary no longer reads as
+  a floating node; the refusal and the record are decided on the
+  committed step (an ideal CCM buck runs without the restart rule);
+  `start_from_dc_op` checks the converged DC mode;
+  `device_loss_summary` warns when it leaves out an ideal element.
+
 ### Integration fixes (batch 6b: design optimisation, exact route)
 
 * **Fixed** `pulsim.design` returned `ok` for a run that `simulate`
@@ -353,6 +460,142 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   11.73 V (pwl 31.88 V) silently; here the stored-sample guard raises
   `DiodeModeInconsistentError` naming D2 at t = 10.008 ms. The test
   checks the class on a 9 ms run (matches pwl to 5e-9 V) and the raise.
+
+### Examples audit × integration merge (2026-11-13)
+
+* **Fixed** `examples/scripts/run_adversarial_sweep.py`, case "substep
+  correction ON": the kernel now refuses the event split without the
+  restart rule, so the case crashed; it sets both (10.931 V).
+
+### Examples audit, follow-up (2026-11-13)
+
+* **Fixed** (project model) the M3C L1 plant (`build_l1_plant`) built
+  R_load + L_out only, while its docstring, the PI/dq tuning, the DBPC,
+  `predict_i_out_peak` and Tab 16 all assume the 0.9 PF load R_load +
+  jω·L_load. At 100 A the converter then needed ±1.35 of its 4 kV
+  levels: DBPC delivered 86.5 A of fundamental at 12.3 % THD (PI/dq
+  99.5 A, 10.5 %), and notebook 05 differentiated the staircase current
+  with an inductance the plant did not have (V_ab "28.64 kV" against
+  15.56 kV). With L_load in the plant: V_ab fundamental 15.54 kV, DBPC
+  99.95 A at 2.87 % THD, PI/dq 99.78 A at 6.28 % (notebook 06).
+* **Fixed** (project model) the M3C capacitor bookkeeping (Eq 162) used
+  each period's START current; the voltage chosen for that period is
+  what moves it, so the ideal module sources delivered a net 156 kW at
+  Tab 16 (P_in 1.656 MW, P_out 1.812 MW) while the capacitors held
+  24 kV. It now uses the mean of the start and end currents
+  (P_in − P_out = −0.18 %).
+* **Fixed** (project model) the M3C PI/dq rotated currents sampled at
+  the start of a period with the angle of its centre, and the DBPC aimed
+  at i_ref(t_centre + T_s): both half a period (4.05° at 45 Hz) late.
+  PI/dq: +4.18° and i_q = 7.31 A for i_q_ref = 0 → −0.03°; DBPC +2.88° →
+  −0.90°. Notebook 08's precharge release moves 1.349 → 1.372 s.
+* **Fixed** `compute_dc_op(strategy="pseudo_trans")` diverged on a linear
+  divider (||F|| = 1.4e84): the continuation shift (1/dt)·I sat on the
+  voltage-source rows too, a negative resistance in the loop. It now sits
+  on the node rows only (`pwl/pseudo_transient.hpp`), and one Newton
+  step on the unshifted system polishes the point the continuation
+  stops at (it stopped 1e-4 V short): 8.3333 V.
+* **Fixed** `run_transient_adaptive` restarted every segment from the
+  state alone, re-inventing the companion history as zero at each
+  boundary: a 10 kHz buck on the fixed-step grid read 7.962 V against
+  8.043 V. Segments now resume from `final_snapshot` and match the fixed
+  run to 1e-6 V.
+* **Fixed** the induction-motor rotor flux (`make_induction_motor_observer`
+  and the C++ BlockChain adapter) was forward Euler: |ψ_r| 0.9432 /
+  0.9290 / 0.9220 Wb at dt = 50 / 25 / 12.5 µs. It is now integrated
+  exactly over each step with the current held: 0.9158 / 0.9155 /
+  0.9153 Wb.
+* **Fixed** `run_ac_sweep` counted settling in test cycles only, so a
+  high-frequency point could be read inside the plant's start-up: an LC
+  filter started from zero read −6.09 dB at 11 kHz against −26.65 dB.
+  Each point now continues the same run window by window until two
+  windows agree within `settle_rtol` (1 %), and warns when
+  `max_extra_windows` runs out.
+* **Fixed** (project model) `projects/inverters/pfc_vsi_drive` put a
+  470 µF capacitor (C011) on the rectified bus ahead of the boost. PSIM's
+  own KPIs rule it out (I_D001_rms 4.984 A ≈ I_L002_rms 4.948 A, line
+  PF 0.979 at OP 2.3); with it the simulated line PF was 0.62 and
+  I_L002_rms 3.67 A. Removed: I_in_rms 5.08 A (PSIM 5.06), I_L002_rms
+  5.02 A (4.95), PF 0.992 (0.979); OP 2.2 within 1 %. `losses.py` and
+  `run_validation.py` now use the simulated line current (they assumed
+  PF = 0.95), count all four bridge diodes (the bridge loss was half),
+  and average over whole line cycles. The cascade gains are re-derived
+  per OP (inner PI zero at ω_i/5 instead of at ω_i; outer loop including
+  the V_link low-pass and the load pole); `measure_loop_gain.py`
+  measures 637–692 Hz / 48–58° (inner) and 19.6–20.3 Hz / 55–63°
+  (outer), where the old gains gave 21–23° on the inner loop at 220 V.
+  P_total now reads +4.7 / +13.7 / +6.3 % against PSIM, but PSIM's
+  OP 2.3 terms sum to 60.2 W against its stated 41.79 W (README).
+* **Fixed** (project model) every 3-φ MMC builder in
+  `projects/inverters/mmc_3phase` (L0, L1, L2, both IGBT variants, the
+  closed loop) took the load-inductor state index inside the load loop,
+  before the phase-b/c and star nodes existed, so `i_a` read an arm
+  current: THD 81.7 % and a 13.0 A fundamental. Now THD 1.7 % and
+  26.06 A (V̂/|Z_AC| = 26.76 A). The notebooks' "L0 already has 81.6 %
+  THD, so the thesis is inconsistent" conclusion is withdrawn. The
+  arm-sum v_C ripple (185 V) is the arm energy balance with the
+  simulated 10 A 2f circulating current (first order: 178.4 V, with
+  Î and φ from Z_AC); no 2f current brings it below 172 V, so the thesis' ~50 V is not the arm
+  sum at these parameters. The closed-loop energy loop's v_C low-pass
+  started at 0 V and wound its integrator to a −2.6 A bias on i_d_ref
+  (i_d_pre −0.59 A for a 2 A reference); it now starts at the set-point.
+* **Fixed** `examples/half_bridge_pwm.yaml` returned the RL load to a
+  100 kΩ divider (i_L half peak-to-peak 1.2 mA instead of 0.62 A) and
+  had no freewheeling diodes for the dead time; it has a split capacitor
+  bus and anti-parallel diodes now (0.617 A, analytic 0.622 A; the
+  −0.02 A DC offset is the start transient's 47 µC on the bus midpoint).
+* **Fixed** `run_psfb_ja_loss_analysis.py` printed 75.09 / 165.4 /
+  24.43 W from the primary current (which carries the reflected load
+  current) on a core whose J-A B was 0.42 T against the circuit's
+  23 mT. It now uses the magnetising current on an ETD49 with N = 3 and
+  prints a loss only where the J-A B matches the circuit's: ferrite
+  18.05 W (B ratio 0.83); the other two sets are not the circuit's core.
+  `compute_bh_loop`'s negative loop area for `permalloy` is a known
+  limitation (`probes/ja_negative_loop_area.py`).
+* **Fixed** (notebook) `buck_converter_design` counted the diode
+  conduction loss as V_T0·I_avg only; with the 20 mΩ slope it is
+  V_T0·I_avg + R_d·I_rms² with V_T0 = V_F(1 A) − R_d·1 A = 3.115 W
+  (was 2.812 W), η 92.05 → 91.63 %.
+* **Documented** (not defects) the `b_extra` sign — it is an addend to the
+  residual F = J·x + b, so an entry e on a voltage source's row gives
+  v(+) − v(−) = V − e, and on a node row draws e out of the node — and
+  that `branch_var_id_for_*` returns `num_nodes + k`, which moves when a
+  node is added afterwards. Both pinned by tests.
+
+### Control helpers: report the loop they build (examples audit, 2026-11-13)
+
+* **Fixed** `tune_pi_from_bode` returned `achieved_pm_deg` "by
+  construction" (the target) without looking at the loop it built. On
+  the buck of `run_auto_tune_buck.py` (Q = 3.4) asked for 60° at 2 kHz,
+  |L| rises above 1 again at the LC peak and the last 0 dB crossing has
+  6.0° (37.9° on the measured Bode); the fallback branch printed 172.8°
+  for a loop with 23.6°. It now reads the margin off
+  `loop_gain(freqs, H, Kp, Ki)` at its last crossing, warns when the
+  loop crosses 0 dB anywhere but `f_crossover`, and returns
+  `loop_crossovers_hz`. The plant phase is unwrapped along the sweep.
+* **Fixed** `phase_margin_from_loop` read the wrapped angle: a loop
+  lagging 205° at crossover (unstable) reported +335° instead of −25°.
+* **Fixed** the self-throttle of `bind_pi_to_switch` /
+  `bind_pi_to_duty_callable` (`loop.step_observer` called every step)
+  skipped a tick whenever a step landed a floating-point hair before
+  k·T: 2978 PI updates instead of 3000 over 30 ms at dt = T/100, each
+  late one a step off the carrier edge. It now follows the
+  t_start + k·T schedule (3001 updates, k = 0..3000).
+* **Fixed** `add_foster_network` (and `add_shared_heatsink` given
+  `FosterStage` values) put every stage capacitor to ambient, which is
+  a Cauer ladder: 10 W into (0.05 K/W, 0.1 ms), (0.3, 5 ms), (0.8, 0.5 s)
+  read 0.016 / 0.159 / 2.79 K at 1 ms / 10 ms / 0.2 s against the
+  Foster 1.06 / 3.25 / 6.14 K. Each capacitor now sits across its own
+  R (1.057 / 3.252 / 6.137 K at `dt` = 10 µs). Thermal numbers from
+  `make_thermal_observer` runs move (e.g. `run_thermal_buck.py`).
+* **Fixed** `compute_temperature` heated sample 0 with `P[0]`, so the
+  trace led `t` by one step (1.90 K at t = 0 for 20 W into 1 K/W, 1 s,
+  `dt` = 0.1 s). Sample 0 is now the start; negligible on fine grids.
+* **Fixed** `CircuitBuilder.initial_state()` wrote a capacitor's `c0`
+  into its positive node alone: two series capacitors given 10 V each
+  started at 0 V and 10 V, in either build order. `c0` now sets
+  v(from) − v(to) for every capacitor (each group walked from ground);
+  a loop of `c0` values that breaks KVL raises `ValueError`.
 
 ### Integration fixes (batch 6a: complementarity mode selection merged)
 

@@ -141,12 +141,14 @@ circuit:
       to: n
       L: 5.0e-3
 
-    # Tie neutral to gnd via tiny resistor for a return path.
+    # Reference the floating star point loosely. A 1 mΩ tie to the
+    # bus negative put the legs' 150 V common mode across each 5 Ω
+    # phase: a 30 A DC offset on every phase current (AI_GUIDE trap 7).
     - type: resistor
       name: R_neutral
       from: n
       to: gnd
-      R: 1.0e-3
+      R: 1.0e6
 
 simulation:
   t_start: 0.0
