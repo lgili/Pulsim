@@ -749,7 +749,11 @@ def run_dsed_from_builder(
         default_mask = SwitchStateMask(n_sw)
         for i in range(n_sw):
             default_mask.set(i, True)
-        sf = lambda _t: default_mask  # noqa: E731
+        try:   # native and edge-free: no Python call per step (pwl's default too)
+            from . import _pulsim as _nat   # type: ignore[attr-defined]
+            sf = _nat.make_constant_switch_fn(default_mask)
+        except (ImportError, AttributeError):
+            sf = lambda _t: default_mask  # noqa: E731
 
     adapter = CircuitBuilderAdapter(
         builder=builder, cache=cache, switch_fn=sf,

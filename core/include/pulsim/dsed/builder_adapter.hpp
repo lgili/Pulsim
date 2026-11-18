@@ -179,7 +179,7 @@ public:
         if (!has_dynamic_sources_) {
             return current_entry_->b_constant;
         }
-        Vector b_extra = build_time_varying_b_extra_(t);
+        const Vector& b_extra = build_time_varying_b_extra_(t);
         return current_entry_->b_constant
                + current_entry_->b_projection * b_extra;
     }
@@ -192,7 +192,7 @@ public:
         } else {
             // Inline the b_vector logic to avoid building b_extra
             // twice if rhs() is called inside a tight RK45 stage.
-            Vector b_extra = build_time_varying_b_extra_(t);
+            const Vector& b_extra = build_time_varying_b_extra_(t);
             r += current_entry_->b_constant
                 + current_entry_->b_projection * b_extra;
         }
@@ -261,18 +261,16 @@ public:
                                            const Vector& x) const {
         ensure_current_resolved_();
         const LTIEntry& e = *current_entry_;
-        Vector b_extra;
-        if (has_dynamic_sources_) {
-            b_extra = build_time_varying_b_extra_(t);
-        }
+        const Vector* b_extra =
+            has_dynamic_sources_ ? &build_time_varying_b_extra_(t) : nullptr;
         auto node_v = [&](Index n) -> Real {
             if (n < 0) {
                 return Real{0};
             }
             Real v = e.recover_from_state.row(n).dot(x)
                      + e.recover_const[n];
-            if (has_dynamic_sources_) {
-                v += e.recover_from_b.row(n).dot(b_extra);
+            if (b_extra) {
+                v += e.recover_from_b.row(n).dot(*b_extra);
             }
             return v;
         };
@@ -1401,11 +1399,15 @@ private:
     /// `left_by` > 0: a source that jumps exactly at t reads its LEFT
     /// limit, value_at(t − left_by) (a stored event sample is the left
     /// limit of the step that ended there).
-    [[nodiscard]] Vector build_time_varying_b_extra_(Real t, Real left_by = Real{0}) const {
-        Vector b;
+    /// Memoised on (t, left_by): the locator and the judges read it once per
+    /// diode at the same instant (boost_pfc: 443022 predicate evaluations,
+    /// each walking the device pool). A user b_extra_fn is never memoised.
+    [[nodiscard]] const Vector& build_time_varying_b_extra_(Real t, Real left_by = Real{0}) const {
+        if (bx_valid_ && t == bx_t_ && left_by == bx_left_) return bx_;
+        Vector& b = bx_;
         sources::compute_pwm_b_extra(pool_, graph_, t, b, left_by);
         b += sources::compute_sine_b_extra(pool_, graph_, t);
-        Vector w;
+        Vector& w = bx_w_;
         sources::compute_pulse_b_extra(pool_, graph_, t, w, left_by);
         b += w;
         sources::compute_current_waveform_b_extra(pool_, graph_, t, w, left_by);
@@ -1413,8 +1415,14 @@ private:
         if (b_extra_fn_) {
             b += b_extra_fn_(t);
         }
+        bx_t_ = t;
+        bx_left_ = left_by;
+        bx_valid_ = !b_extra_fn_;
         return b;
     }
+    mutable Vector bx_, bx_w_;
+    mutable Real bx_t_ = Real{0}, bx_left_ = Real{0};
+    mutable bool bx_valid_ = false;
 
     /// Lazily resolve the per-mask LTI entry. Sets the hot pointer
     /// `current_entry_` so subsequent calls skip the map lookup.
