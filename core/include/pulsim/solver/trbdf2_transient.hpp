@@ -81,6 +81,7 @@
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
+#include "pulsim/pwl/mode_ports.hpp"
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/nonlinear_capacitor_history.hpp"
@@ -229,6 +230,11 @@ struct TrBdf2Options {
     /// raises UnsupportedError(feature='impulse') instead of being recorded
     /// (simulate(on_impulse='error')).
     bool on_impulse_error = false;
+    /// Diode mode selection at the zero-time cascades (add-complementarity-
+    /// mode-selection 4.2): 0 the settle, 1 'shadow' (the LCP beside it,
+    /// recorded only), 2 'lcp' (the LCP decides where the settle's answer
+    /// can differ from it).
+    int mode_selection = 0;
 };
 
 struct TrBdf2Stats {
@@ -1146,6 +1152,221 @@ inline SimulationResult run_transient_trbdf2(
         return flipped;
     };
 
+    // ---- complementarity mode selection at a zero-time cascade ----
+    // (add-complementarity-mode-selection 4.2 / 4b.3 on trbdf2; DECISIONS
+    // #36.) trbdf2 decides diode modes only at its zero-time cascades (the
+    // initial settle, a gate edge, a diode event, a landing): those are its
+    // sites. The site's system is the cascade's last probe, a trap step of
+    // last_probe_dt from the committed state under the gates of t_gates,
+    // whose b_extra (b_stage) does not depend on the mode; the LCP is posed
+    // from the mode the cascade started in (bits0).
+    //   'shadow': posed at every site beside the finished cascade; nothing
+    //             it computes is used (a different mode is recorded).
+    //   'lcp':    a settled cascade whose mode's crossing signals, on its
+    //             own probe, are clear of zero by kQuietBand of the circuit
+    //             scale is a nondegenerate solution of the site's LCP, which
+    //             is then unique for a passive network: kept (quiet). Else
+    //             (round budget hit, a signal inside the band: a tie, or a
+    //             breach of the law) the LCP decides and its mode is probed.
+    std::optional<pwl::PwlModePorts> mode_ports;
+    events::ModeSelector mode_selector;
+    events::PassivityClass mode_passivity;
+    std::vector<std::string> mode_diode_names;
+    ModeReport mode_rep;
+    Vector mode_bx, mode_xj, mode_u, mode_xq;
+    DenseMatrix mode_Z;
+    std::vector<char> mode_prev_on, mode_coords, mode_settled;
+    if (opts.mode_selection < 0 || opts.mode_selection > 2) {
+        throw std::invalid_argument(
+            "run_transient_trbdf2: mode_selection must be 0 (settle), 1 (shadow) or 2 (lcp)");
+    }
+    if (opts.mode_selection != 0) {
+        const char* mname = opts.mode_selection == 1 ? "shadow" : "lcp";
+        auto refuse = [&](const std::string& why) {
+            throw UnsupportedError(
+                "trbdf2", "mode_selection", "", "",
+                std::format("engine 'trbdf2': mode_selection='{}' {} Drop mode_selection.",
+                            mname, why));
+        };
+        if (!has_diodes)
+            refuse("decides PWL diodes and this circuit has none: nothing to select.");
+        if (nl_effective)
+            refuse("with a Newton device in the circuit: the diode port model is "
+                   "linear, a Newton device's stamp moves with its operating point.");
+        if (opts.max_event_iterations == 0)
+            refuse("with max_event_iterations=0: the diode modes are frozen, nothing "
+                   "is decided.");
+        for (const auto& e : diodes.entries()) {
+            if (e.gate == models::SwitchedDiode::Gate::None) continue;
+            // the port and judge_mode know no gate (pwl refuses the same)
+            throw UnsupportedError(
+                "trbdf2", "mode_selection", std::string(graph.branch_name(e.branch_id)),
+                "Diode",
+                std::format("engine 'trbdf2': mode_selection='{}' with the gated device "
+                            "'{}' (IGBT with reverse blocking, GTO, thyristor or TRIAC): "
+                            "the complementarity port knows no gate. Drop mode_selection.",
+                            mname, graph.branch_name(e.branch_id)));
+        }
+        mode_ports.emplace(cache, graph, pool, diodes);
+        mode_passivity = pwl::passivity_of(graph, pool);
+        mode_selector.passive = mode_passivity.passive();
+        for (const auto& e : diodes.entries())
+            mode_diode_names.push_back(pwl::branch_label(graph, e.branch_id));
+        mode_rep.mode = opts.mode_selection;
+        mode_rep.passivity = mode_passivity.name();
+        mode_rep.passivity_device = mode_passivity.device;
+        mode_rep.passivity_kind = mode_passivity.kind;
+    }
+    // The site's mask `base` (its gates) with diode bits `on` (no gated
+    // diode here: refused above). No switch_fn call: 'shadow' moves nothing.
+    SwitchStateMask mode_dm(static_cast<std::size_t>(graph.num_switches()));
+    auto mode_mask_at = [&](const SwitchStateMask& base, const std::vector<char>& on) {
+        const auto& es = diodes.entries();
+        for (std::size_t j = 0; j < es.size(); ++j) mode_dm.set(es[j].switch_idx, on[j] != 0);
+        return base.overlay(mode_dm, diodes.diode_owned_bits());
+    };
+    // Every diode's crossing signal on xs (solved under mask m with the
+    // diodes' current bits) clear of zero by kQuietBand of the circuit
+    // scale, the floating islands' KCL imposed first (pwl's quiet test).
+    auto mode_quiet = [&](const Vector& xs, const SwitchStateMask& m, Real dt,
+                          Real h_site, const Vector& x0) {
+        constexpr Real kQuietBand = Real{1e-8};
+        const Vector* xq = &xs;
+        if (mode_ports->has_islands(m)) {
+            mode_xq = xs;
+            mode_ports->correct(m, dt, mode_bx, mode_xq);
+            xq = &mode_xq;
+        }
+        const auto sc = mode_ports->scale(x0);
+        const Real band_v = kQuietBand * sc.vscale;
+        const Real band_i = kQuietBand * sc.iscale + band_v * sc.c_max / h_site;
+        for (const auto& e : diodes.entries()) {
+            const auto p = e.params();
+            const Real v = e.law_voltage(*xq, e.is_on);
+            if (e.is_on ? !(models::SwitchedDiode::branch_current(true, v, p) > band_i)
+                        : !(v - models::SwitchedDiode::turn_on_voltage(p) < -band_v)) {
+                return false;
+            }
+        }
+        return true;   // x_trial: the probe of the selected mode
+    };
+    auto mode_note = [&](const events::ModeSelection& s) {
+        auto& r = mode_rep;
+        ++r.lcp_events;
+        r.lcps += static_cast<Size>(s.lcps);
+        r.pivots_total += static_cast<Size>(s.pivots_total);
+        r.max_pivots_per_event = std::max(r.max_pivots_per_event, s.pivots_total);
+        r.ties += static_cast<Size>(s.ties);
+        r.widenings += static_cast<Size>(s.widenings);
+        r.capped += static_cast<Size>(s.capped);
+        r.leak_pins += static_cast<Size>(s.leak_pins);
+        r.pin_judgements += static_cast<Size>(s.pin_judgements);
+        r.unfixed += static_cast<Size>(s.unfixed);
+        r.enumerations += static_cast<Size>(s.enumerations);
+        r.nonunique_modes += static_cast<Size>(s.nonunique_modes);
+        r.released += static_cast<Size>(s.released);
+        r.shorted_held += static_cast<Size>(s.shorted_held);
+        r.shorted_released += static_cast<Size>(s.shorted_released);
+        r.port_solves = mode_ports->solves();
+        r.port_matrices = mode_ports->port_builds();
+    };
+    auto mode_str = [](const auto& on) {
+        std::string s;
+        for (const auto c : on) s += c ? '1' : '0';
+        return s;
+    };
+    // The site after a cascade at t0 (gates of t_gates) that started from
+    // bits0; `settled`: its last probe flipped nothing (x_trial is then the
+    // solve of the final bits); `h_site`: the step the next site is away.
+    // Returns true when 'lcp' re-probed (x_trial / m_site: its mode; the
+    // caller takes x_sig from it); `settled` is then true.
+    auto mode_site = [&](Real t0, Real t_gates, const std::vector<bool>& bits0,
+                         bool& settled, Real h_site, SwitchStateMask& m_site) -> bool {
+        // m_site: the cascade's last mask (its gates are the site's)
+        if (!mode_ports || !last_probe_ok) return false;
+        ++mode_rep.sites_restart;
+        const Real dt_site = last_probe_dt;
+        mode_bx = b_stage;      // the last probe's b_extra (mode-independent)
+        const auto bits_now = diodes.snapshot_on_bits();
+        mode_settled.assign(bits_now.begin(), bits_now.end());
+        if (opts.mode_selection == 2 && settled &&
+            mode_quiet(x_trial, mode_mask_at(m_site, mode_settled), dt_site, h_site, x)) {
+            ++mode_rep.quiet_sites;
+            return false;
+        }
+        mode_prev_on.assign(bits0.begin(), bits0.end());
+        events::ModeSelection sel;
+        auto pose = [&] {
+            return pwl::select_site(
+                mode_selector, *mode_ports, cache, diodes,
+                [&](const std::vector<char>& on) { return mode_mask_at(m_site, on); },
+                mode_prev_on, x, dt_site, h_site, mode_bx, mode_Z, mode_u, mode_xj,
+                mode_coords);
+        };
+        if (opts.mode_selection == 1) {
+            try {
+                sel = pose();
+                mode_note(sel);
+                if (sel.status != events::LcpStatus::Solution &&
+                    sel.status != events::LcpStatus::Trivial) {
+                    ++mode_rep.errors;
+                    mode_rep.last_error = std::string(events::to_string(sel.status));
+                } else if (sel.on != mode_settled) {
+                    {
+                        ModeDisagreement d;
+                        d.t = t0;
+                        d.site = "event";
+                        d.settle_mode = mode_str(mode_settled);
+                        d.lcp_mode = mode_str(sel.on);
+                        d.previous_mode = mode_str(mode_prev_on);
+                        d.pivots = sel.pivots_total;
+                        d.status = events::to_string(sel.status);
+                        const auto sc = mode_ports->scale(x);
+                        if (settled)
+                            d.settle_consistent = pwl::judge_mode(
+                                diodes, mode_settled, x_trial, sc, mode_selector.tol,
+                                &d.settle_violation);
+                        cache.solve_at(mode_mask_at(m_site, sel.on), dt_site, mode_bx,
+                                       mode_xj);
+                        d.lcp_consistent = pwl::judge_mode(
+                            diodes, sel.on, mode_xj, sc, mode_selector.tol,
+                            &d.lcp_violation);
+                        mode_rep.disagreements.push_back(std::move(d));
+                    }
+                }
+            } catch (const std::exception& e) {
+                ++mode_rep.errors;
+                mode_rep.last_error = e.what();
+            }
+            return false;
+        }
+        try {
+            sel = pose();
+        } catch (const std::runtime_error& e) {
+            // A candidate mode singular at the probe's femtoseconds (a node
+            // held only by OFF diodes; the probe ladder retried the
+            // cascade's own mode): the settle's answer stands, counted.
+            if (!is_singular_error(e)) throw;
+            ++mode_rep.errors;
+            mode_rep.last_error = e.what();
+            return false;
+        }
+        mode_note(sel);
+        events::raise_if_refused(sel, "trbdf2", t0, mode_diode_names, mode_passivity);
+        diodes.restore_on_bits(std::vector<bool>(sel.on.begin(), sel.on.end()));
+        m_site = mask_at(t_gates);
+        require_probe(probe_solve(m_site, t0, dt_site, x_trial),
+                      "a mode selection,", t0);
+        const auto now = diodes.snapshot_on_bits();
+        mode_settled.assign(now.begin(), now.end());
+        // a mode its own probe violates is not committed as settled (the
+        // gate-edge restart then re-probes instead of committing x_trial)
+        settled = pwl::judge_mode(diodes, mode_settled, x_trial, mode_ports->scale(x),
+                                  mode_selector.tol) == 1;
+        if (!settled) ++mode_rep.inconsistent;
+        return true;   // x_trial: the probe of the selected mode
+    };
+
     // Mask recorded with sample 0 (SimulationResult::
     // switch_state_bits): the bits the run STARTS from, taken before
     // the settle below re-decides them. A zero IC is consistent with
@@ -1204,11 +1425,15 @@ inline SimulationResult run_transient_trbdf2(
         const Real t_gates = opts.t_start + Real{0.5} * h_min;
         // Outside the run's try: the budget abort is typed here too.
         try {
+            const std::vector<bool> bits0 = diodes.snapshot_on_bits();
+            bool settled = false;
+            SwitchStateMask m_site = initial_mask;
             for (Size it = 0; it < opts.max_event_iterations; ++it) {
                 // A failed (Newton) probe leaves x_trial unwritten —
                 // unsized on this first call: keep the bits (it read
                 // null, SIGSEGV).
                 const SwitchStateMask m0 = mask_at(t_gates);
+                m_site = m0;
                 if (!probe_solve(m0, opts.t_start, h_probe, x_trial)) {
                     break;
                 }
@@ -1216,8 +1441,14 @@ inline SimulationResult run_transient_trbdf2(
                     decide_probe(x_trial, m0, opts.t_start);
                 x_sig = x_trial;
                 if (!flipped) {
+                    settled = true;
                     break;
                 }
+            }
+            if (mode_site(opts.t_start, t_gates, bits0, settled,
+                          opts.h_init > Real{0} ? opts.h_init : h_max / Real{100},
+                          m_site)) {
+                x_sig = x_trial;
             }
         } catch (const pwl::NewtonRoundoffBudgetExceeded& e) {
             throw SimulationAborted(e.what(), SimulationResult{},
@@ -2087,6 +2318,7 @@ inline SimulationResult run_transient_trbdf2(
                 // (see gates_decided): settle the diodes under the
                 // gates the step will use, as a landed edge does.
                 bool settled = false;
+                const std::vector<bool> bits0 = diodes.snapshot_on_bits();
                 for (Size it = 0; it < opts.max_event_iterations;
                      ++it) {
                     gates_decided = mask_at(t + Real{0.5} * h_min);
@@ -2100,6 +2332,10 @@ inline SimulationResult run_transient_trbdf2(
                         settled = true;
                         break;
                     }
+                }
+                if (mode_site(t, t + Real{0.5} * h_min, bits0, settled, h,
+                              gates_decided)) {
+                    x_sig = x_trial;
                 }
                 restart_after_gate_event(settled,
                                          t + Real{0.5} * h_min,
@@ -2809,7 +3045,9 @@ inline SimulationResult run_transient_trbdf2(
                             const std::vector<bool> bits0 =
                                 diodes.snapshot_on_bits();
                             const Vector x_sig0 = x_sig;
+                            bool settled = false;
                             for (const Real h_first : {h_probe_floor, dt_floor}) {
+                                settled = false;
                                 for (Size it2 = 0;
                                      it2 < opts.max_event_iterations;
                                      ++it2) {
@@ -2825,12 +3063,17 @@ inline SimulationResult run_transient_trbdf2(
                                         x_trial, gates_decided, t);
                                     x_sig = x_trial;
                                     if (!flipped) {
+                                        settled = true;
                                         break;
                                     }
                                 }
                                 if (diodes.snapshot_on_bits() != bits0) {
                                     break;
                                 }
+                            }
+                            if (mode_site(t, t, bits0, settled, h,
+                                          gates_decided)) {
+                                x_sig = x_trial;
                             }
                             if (diodes.snapshot_on_bits() != bits0) {
                                 result.commutation_events.push_back(
@@ -3111,6 +3354,7 @@ inline SimulationResult run_transient_trbdf2(
                         const Real h_zero =
                             std::max(h_probe_floor,
                                       dt_land * Real{1e-6});
+                        bool settled = false;
                         for (Size it2 = 0;
                              it2 < opts.max_event_iterations;
                              ++it2) {
@@ -3123,8 +3367,13 @@ inline SimulationResult run_transient_trbdf2(
                                 decide_probe(x_trial, gates_decided, t);
                             x_sig = x_trial;
                             if (!flipped2) {
+                                settled = true;
                                 break;
                             }
+                        }
+                        if (mode_site(t, t, bits_land, settled, h,
+                                      gates_decided)) {
+                            x_sig = x_trial;
                         }
                     }
                     // A cascade that undid the landing's flip decided
@@ -3292,6 +3541,7 @@ inline SimulationResult run_transient_trbdf2(
                         std::max(h_probe_floor, h * Real{1e-6});
                     bool settled = false;
                     if (has_diodes) {
+                        const std::vector<bool> bits0 = diodes.snapshot_on_bits();
                         for (Size it = 0;
                              it < opts.max_event_iterations;
                              ++it) {
@@ -3307,6 +3557,10 @@ inline SimulationResult run_transient_trbdf2(
                                 settled = true;
                                 break;
                             }
+                        }
+                        if (mode_site(t, t + h_probe, bits0, settled, h,
+                                      gates_decided)) {
+                            x_sig = x_trial;
                         }
                     }
                     restart_after_gate_event(settled, t + h_probe,
@@ -3391,6 +3645,7 @@ inline SimulationResult run_transient_trbdf2(
         st.n_probe_newton_retries = n_probe_newton_retries;
         result.mode_structure_checks = structure.checks_run();
         result.ideal_loop_releases = n_loop_releases;
+        result.mode_report = std::move(mode_rep);
         record_factor_traffic();
     } catch (const SimulationAborted&) {
         st.n_probe_newton_retries = n_probe_newton_retries;
