@@ -157,6 +157,10 @@ struct TrBdf2Options {
     /// times, through `tick_fn(j, t, x)`; sources due at one instant
     /// fire in index order. Non-empty overrides `observer_period`.
     std::vector<Real> observer_periods;
+    /// Per-source tick offset (add-unified-event-queue): source j ticks
+    /// at t_start + offset_j + k*T_j, ceil((span - offset_j)/T_j) times.
+    /// Empty = every offset 0; else as long as `observer_periods`.
+    std::vector<Real> observer_offsets;
     /// Newton settings, used only when the circuit has nonlinear
     /// devices. Same knobs and defaults as the fixed engine. The
     /// tolerances are absolute; loosening them is not a fix for an
@@ -1294,10 +1298,26 @@ inline SimulationResult run_transient_trbdf2(
     // The run's event queue (add-unified-event-queue): tick source j has
     // id j (registered first), then the gate-edge source (the analytic
     // oracle, or the edges the sampling below locates), then the end.
+    if (!opts.observer_offsets.empty()
+        && opts.observer_offsets.size() != opts.observer_periods.size()) {
+        throw std::invalid_argument(
+            "run_transient_trbdf2: observer_offsets must be empty or as "
+            "long as observer_periods");
+    }
+    for (const Real off : opts.observer_offsets) {
+        if (!(off >= Real{0}) || !std::isfinite(off)) {
+            throw std::invalid_argument(
+                "run_transient_trbdf2: every controller offset must be a "
+                "finite number of seconds >= 0");
+        }
+    }
     events::EventQueue queue;
     if (has_ticks) {
-        for (const Real T : t_ctrl) {
-            queue.add_periodic(events::Kind::ControlTick, events::Rate{T});
+        for (std::size_t j = 0; j < t_ctrl.size(); ++j) {
+            const Real off = multi_rate && !opts.observer_offsets.empty()
+                ? opts.observer_offsets[j] : Real{0};
+            queue.add_periodic(events::Kind::ControlTick,
+                               events::Rate{t_ctrl[j], off});
         }
     }
     const std::uint32_t edge_src = next_edge_fn

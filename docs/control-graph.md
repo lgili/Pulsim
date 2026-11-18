@@ -144,8 +144,9 @@ signals.
 | a time `0 < Td < period` | at the first instant ≥ tick + Td | `pwl` (refused on `trbdf2`) |
 | `"one_sample"` | at the next tick (a microcontroller writing the duty at the next carrier period) | all |
 
-A `Rate` with an `offset` is refused on `trbdf2` too: its tick scheduler
-lands steps at `t_start + k*T` only.
+A `Rate` with an `offset` ticks at `t_start + offset + k*T` on `pwl` and
+on `trbdf2` (the variable-step engine lands a step on each of those
+instants).
 
 ### Exact zero-order hold on `pwl`
 

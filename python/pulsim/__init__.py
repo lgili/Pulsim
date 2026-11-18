@@ -2858,6 +2858,7 @@ def simulate(
                 should_continue=should_continue,
                 observer_periods=[_p for _, _p in _plan.ticks],
                 observers=[_f for _f, _ in _plan.ticks],
+                observer_offsets=list(_plan.tick_offsets),
                 # None: the kernel stamps the Newton devices itself.
                 enable_nonlinear_refresh=enable_nonlinear_refresh,
                 max_newton_iterations=int(max_newton_iterations or 0),

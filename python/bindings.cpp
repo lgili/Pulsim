@@ -5074,7 +5074,8 @@ void init_module(py::module_& m) {
            py::object resume_from,
            std::vector<Real> observer_periods,
            std::vector<py::object> observers,
-           Size newton_roundoff_budget) {
+           Size newton_roundoff_budget,
+           std::vector<Real> observer_offsets) {
             solver::BExtraFn b_extra_fn;
             std::function<Real(Real)> unused_next_jump;  // trbdf2 lands its ticks
             resolve_b_extra(b_extra_obj, b_extra_fn, unused_next_jump);
@@ -5095,6 +5096,7 @@ void init_module(py::module_& m) {
                     "observer_periods must have the same length");
             }
             o.observer_periods = std::move(observer_periods);
+            o.observer_offsets = std::move(observer_offsets);
             if (max_newton_iterations > 0) {
                 o.max_newton_iterations = max_newton_iterations;
             }
@@ -5222,12 +5224,14 @@ void init_module(py::module_& m) {
         py::arg("observer_periods") = std::vector<Real>{},
         py::arg("observers") = std::vector<py::object>{},
         py::arg("newton_roundoff_budget") = Size{0},
+        py::arg("observer_offsets") = std::vector<Real>{},
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "
         "Illinois. Returns (SimulationResult, stats dict). "
-        "`observers[j]` ticks at t_start + k*observer_periods[j] "
-        "(ceil(span/T_j) times, index order when coincident); "
+        "`observers[j]` ticks at t_start + observer_offsets[j] + "
+        "k*observer_periods[j] (ceil((span - offset_j)/T_j) times, index "
+        "order when coincident; offsets default to 0); "
         "stats['control_tick_counts'] counts each.");
 
     m.def("run_transient_with_chain",

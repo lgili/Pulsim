@@ -31,6 +31,9 @@ class ControlPlan:
 
     switch_fn: Optional[Callable] = None
     ticks: List[Tuple[TickFn, float]] = field(default_factory=list)
+    # Per entry of `ticks` on a variable-step engine: the tick offset
+    # (empty = all 0).
+    tick_offsets: List[float] = field(default_factory=list)
     every_step: List[TickFn] = field(default_factory=list)
     # Every observer, for the post-run walk that looks for motor bundles.
     inner_observers: List[TickFn] = field(default_factory=list)
@@ -147,18 +150,13 @@ class ControlPlan:
 
     def for_variable_step(self, engine: str = "trbdf2") -> "ControlPlan":
         """The plan for an engine that lands steps on tick instants: the
-        graph runs on its group ticks instead of every step. Refused:
-        a rate offset or a compute_delay time (the kernel ticks at
-        t_start + k*T and lands no second event per tick yet)."""
+        graph runs on its group ticks instead of every step, each group
+        at t_start + offset + k*period (the kernel's event queue).
+        Refused: a compute_delay time (the kernel lands no second event
+        per tick yet)."""
         if not self.rate_ticks and self.c_graph is None:
             return self
         from ._refusal import unsupported
-        if any(o != 0.0 for o in self.rate_offsets):
-            raise unsupported(
-                engine, "control_rate_offset",
-                f"simulate(engine={engine!r}): a control-graph Rate with an "
-                "offset needs tick events at offset + k*period, which this "
-                "engine does not schedule yet; use engine='pwl' or offset=0.")
         if any(d == 1 for d in self.rate_delays):
             raise unsupported(
                 engine, "compute_delay",
@@ -166,9 +164,16 @@ class ControlPlan:
                 "second event per tick, which this engine does not schedule "
                 "yet; use engine='pwl', 0 or 'one_sample'.")
         c_ticks = list(getattr(self.c_graph, "_rate_ticks", []) or [])
+        c_offsets = list(getattr(self.c_graph, "_rate_offsets", []) or [])
+        rate_offsets = list(self.rate_offsets) or [0.0] * len(self.rate_ticks)
+        offsets = ([0.0] * len(self.ticks) + rate_offsets
+                   + (c_offsets or [0.0] * len(c_ticks)))
+        ticks = list(self.ticks) + list(self.rate_ticks) + c_ticks
+        assert len(offsets) == len(ticks), (len(offsets), len(ticks))
         return ControlPlan(
             switch_fn=self.switch_fn,
-            ticks=list(self.ticks) + list(self.rate_ticks) + c_ticks,
+            ticks=ticks,
+            tick_offsets=[float(o) for o in offsets],
             every_step=[o for o in self.every_step
                         if o is not self.rate_observer],
             inner_observers=self.inner_observers,

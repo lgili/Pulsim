@@ -400,6 +400,14 @@ public:
     }
 
     [[nodiscard]] bool has_rates() const noexcept { return groups_.size() > 1; }
+    /// Smallest offset of the rate groups (0 without any).
+    [[nodiscard]] Real min_group_offset() const noexcept {
+        Real m = std::numeric_limits<Real>::infinity();
+        for (Size gi = 1; gi < groups_.size(); ++gi) {
+            m = std::min(m, groups_[gi].offset);
+        }
+        return std::isfinite(m) ? m : Real{0};
+    }
     [[nodiscard]] Size n_groups() const noexcept { return groups_.size(); }
     [[nodiscard]] Real group_period(int g) const {
         return groups_.at(static_cast<Size>(g)).period;
@@ -471,7 +479,9 @@ public:
     /// tick and calls here with the state at the tick).
     void observe_tick(Real t, const Vector& x) {
         rearm_if_restarted(t);
-        if (n_calls_ == 0) t0_ = t;
+        // The first tick is the earliest group's tick 0, at t0 + its
+        // offset (the kernel schedules t0 + offset + k*period).
+        if (n_calls_ == 0) t0_ = t - min_group_offset();
         last_t_ = t;
         ++n_calls_;
         run_pass(t, &x, Real{0}, /*every_call=*/false, t);

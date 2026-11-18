@@ -498,6 +498,47 @@ TEST_CASE("TR-BDF2: controller sources at three rates tick at their "
     REQUIRE(ticks[2].first == 2);
 }
 
+TEST_CASE("TR-BDF2: a controller rate with an offset ticks at "
+          "t0 + offset + k*T", "[v2][trbdf2][control]") {
+    // add-unified-event-queue: per-source offsets on the event queue.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V1", "in", "gnd", 1.0);
+    b.add_resistor("R1", "in", "o", 1e3);
+    b.add_capacitor("C1", "o", "gnd", 1e-6);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    auto sf = [n_sw](Real) { return topology::SwitchStateMask(n_sw); };
+    solver::TrBdf2Options o;
+    o.t_start = 1e-3;
+    o.t_end = 11e-3;
+    o.observer_periods = {1e-3, 1e-3};
+    o.observer_offsets = {0.0, 0.25e-3};
+    solver::TrBdf2Stats st;
+    std::vector<std::pair<Size, Real>> ticks;
+    auto tick = [&](Size j, Real t, const Vector&) {
+        ticks.emplace_back(j, t);
+    };
+    solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st, {},
+        {}, {}, {}, nullptr, tick);
+    REQUIRE(st.ctrl_tick_counts == std::vector<Size>{10, 10});
+    std::vector<Size> k(2, 0);
+    for (const auto& [j, t] : ticks) {
+        const Real want = o.t_start + o.observer_offsets[j]
+            + static_cast<Real>(k[j]++) * o.observer_periods[j];
+        REQUIRE(std::abs(t - want) <= 1e-9 * o.observer_periods[j]);
+    }
+    o.observer_offsets = {0.0};
+    REQUIRE_THROWS_AS(solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st, {},
+        {}, {}, {}, nullptr, tick), std::invalid_argument);
+    o.observer_offsets = {0.0, -1e-4};
+    REQUIRE_THROWS_AS(solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st, {},
+        {}, {}, {}, nullptr, tick), std::invalid_argument);
+}
+
 TEST_CASE("TR-BDF2: a line-inductance bridge does not grind at one "
           "commutation", "[v2][trbdf2][robustness]") {
     // V_th = 0.7 bridge behind 0.1 ohm + 1 mH, 470 µF || 1 kOhm. With

@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Unified event queue (add-unified-event-queue, group 2 and the trbdf2 part of 4.1)
+
+* **Added** `core/include/pulsim/events/event_queue.hpp`: one queue of
+  time events per run (control ticks, gate edges, source breakpoints,
+  output samples, the end of the run). Periodic events are computed from
+  an integer counter, `(t0 + offset) + k*period`, never accumulated;
+  events at one instant come out in a fixed order (sample, tick, gate
+  edge, breakpoint, end; registration order inside a kind); nothing
+  allocates after `start`.
+* **Changed** the TR-BDF2 engine takes its controller ticks, its
+  gate-edge cache and its step clamp from the queue. Results are
+  byte-identical (34-case compare: the golden circuits, closed loops,
+  multi-rate ticks, opaque gates, pulse sources).
+* **Added** a control-graph `Rate` with an `offset` runs on `trbdf2`
+  (ticks at `t_start + offset + k*period`); it was refused
+  (`UnsupportedError`, feature `control_rate_offset`).
+  `run_transient_trbdf2(observer_offsets=...)`.
+
 ### Integration batch 10: control graph 2, optimisation slice 5, circuit IR 2, exact engine dependent states merged
 
 * **Fixed** a C block reached a run only through a Python attribute of

@@ -84,3 +84,20 @@
   loop on dsed). All 34 byte-identical (times, states, switch states,
   every TR-BDF2 counter, kernel counters) against the tree before the
   change (a50a2c77).
+
+## 3. Rate offsets on trbdf2 (part of task 4.1)
+
+- `TrBdf2Options::observer_offsets` (parallel to `observer_periods`,
+  empty = 0) registers `Rate{T_j, offset_j}` on the queue;
+  `ControlPlan.for_variable_step` passes the control graph's group
+  offsets (zeros for closed loops and observers), and the
+  `control_rate_offset` refusal is removed. A `compute_delay` time is
+  still refused (it needs a second event per tick).
+- The graph's tick handler learned `t0` from its first call; with an
+  offset that call is at `t0 + min offset`, so `observe_tick` now sets
+  `t0 = t − min_group_offset()` (exact at t_start = 0; at other starts it
+  can differ by an ulp, inside the graph's 1e-9·period tick tolerance;
+  tested at t_start = 3e-4 s).
+- Not done in 4.1: `add_tick` / `TickInfo{scheduled_t, k}` (the handlers
+  still receive the step time, which on trbdf2 is the tick time); the
+  fixed engine's ticks are still Python (`FixedStepTicks`).
