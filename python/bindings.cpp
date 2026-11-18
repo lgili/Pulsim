@@ -4966,6 +4966,12 @@ void init_module(py::module_& m) {
 
     // Several graphs' fixed-step observers composed in C++, in order (each
     // chain must outlive the run): the kernel calls them without the GIL.
+    m.def("block_laws_source", [] {
+        return std::string(
+#include "block_laws_source.inc"
+        );
+    }, "The C99 law table (block_laws.h) the kernel graph calls; "
+       "pulsim.export_c copies it into the C it generates.");
     m.def("compose_chain_observers",
         [](const std::vector<std::pair<BlockChain*, Real>>& parts) {
             std::vector<std::function<void(Real, const Vector&)>> fns;

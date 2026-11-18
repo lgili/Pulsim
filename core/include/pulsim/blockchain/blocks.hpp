@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include "pulsim/blockchain/block_laws.h"
 #include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 
@@ -61,7 +62,7 @@ struct Gain {
     void reset() noexcept {}
 
     [[nodiscard]] Real update(Real x) const noexcept {
-        return k * x;
+        return pl_gain(k, x);
     }
 };
 
@@ -70,7 +71,7 @@ struct Subtract {
     void reset() noexcept {}
 
     [[nodiscard]] Real update(Real a, Real b) const noexcept {
-        return a - b;
+        return pl_subtract(a, b);
     }
 };
 
@@ -137,23 +138,8 @@ struct PIController {
     }
 
     [[nodiscard]] Real update(Real setpoint, Real measured, Real dt) {
-        const Real err = setpoint - measured;
-        Real new_int = integral +
-                          Ki * dt * Real{0.5} * (err + prev_error);
-        Real u_unc = Kp * err + new_int;
-        // Anti-windup — freeze integrator if it would push deeper
-        // into the active saturation.
-        if (u_unc > output_max && err > Real{0}) {
-            new_int = integral;
-            u_unc = Kp * err + new_int;
-        } else if (u_unc < output_min && err < Real{0}) {
-            new_int = integral;
-            u_unc = Kp * err + new_int;
-        }
-        const Real u_clamp = py_exact::clamp(output_min, output_max, u_unc);
-        integral = new_int;
-        prev_error = err;
-        return u_clamp;
+        return pl_pi(Kp, Ki, output_min, output_max, &integral, &prev_error,
+                     setpoint, measured, dt);
     }
 };
 
@@ -303,7 +289,7 @@ struct Limiter {
     void reset() noexcept {}
 
     [[nodiscard]] Real update(Real x) const noexcept {
-        return py_exact::clamp(min_v, max_v, x);
+        return pl_limiter(min_v, max_v, x);
     }
 };
 

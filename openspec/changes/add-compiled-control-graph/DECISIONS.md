@@ -254,6 +254,60 @@ Each entry: question → option taken → evidence → how to reverse.
 - **Reverse.** Strip `_rate_ticks` from the helper observer (the refusal
   returns). The disagreements are not diagnosed in this slice.
 
+## G18. Clarke, Park, SVM and PLL map to their Python classes
+
+- **Question.** The kernel `add_svm` / `add_clarke` / `add_park` /
+  `add_pll` are different expressions from the classes the chain maps:
+  Clarke `(2a - b - c)/3` against `(2/3)(a - b/2 - c/2)`, SVM with
+  `0.8660254037844386` and `1/v_dc` (and `v_dc <= 0` -> duty 0.5
+  against the class's `v_dc = 1`), PLL starting from `omega = 0` and
+  wrapping to `[-pi, pi)` against `2 pi f_nominal` and `[0, 2 pi)`.
+- **Taken.** Ported kinds `svm`, `clarke`, `inverse_clarke`, `park`,
+  `inverse_park`, `pll` on `block_laws.h` (G19), bit-identical on 10^4
+  random inputs each (`test_control_graph_blocks.py`); `PLL` accepts two
+  or three outputs (the third is `omega/(2 pi)`). The `add_*` C++ API
+  keeps its laws for C++ users.
+- **Evidence.** Closed-loop numbers change only for chains holding
+  these blocks: `run_foc_motor_drive.py` and `run_pmsm_foc.py` (both
+  still within their example claims), rounding-level for Clarke/Park/SVM
+  and from the first tick for a PLL (the old one started at 0 Hz).
+  Closed forms: balanced abc through Clarke-Park is constant dq within
+  1e-12; SVM duties (0.6875, 0.3125, 0.3125) at alpha = v_dc/4; the PLL
+  locks a 50 Hz unit vector from 60 Hz to 1e-3 Hz and 1e-3 rad in 1 s.
+- **Reverse.** Map the classes back to `add_svm` etc.
+
+## G19. One law table: block_laws.h for the kernel and the C export
+
+- **Taken.** `core/include/pulsim/blockchain/block_laws.h` (C99, no
+  allocation) holds one function per block kind; the kernel blocks call
+  it and `export_c` copies it verbatim (embedded in the extension by
+  CMake, `_pulsim.block_laws_source()`, in chunks below MSVC's 16 KiB
+  literal limit). Not routed through it: `DelayBlock` (a FIFO, no
+  arithmetic), `SignalDemux` (a copy).
+- **Export choices.** Constants as C99 hex floats (exact). The
+  single-rate shim keeps its state in a static struct (no `malloc`), so
+  one loaded library is one block instance. A non-finite `SignalMux`
+  selector holds the output in C (the kernel raises). Refused by name:
+  `PythonBlock` and the Python library blocks, every `CBlock` (a
+  compiled object has no source), a graph with no `Rate` (continuous
+  time), a rate with a `compute_delay` (a circuit-sink property).
+- **Evidence.** `test_control_graph_export_c.py`: 31 block kinds tick by
+  tick over 10^4 ticks and a PI + limiter + PWM graph through
+  `add_c_block(lib=...)` over 10^4 ticks, both byte-identical; compiled
+  with `-std=c99 -Wall -Wextra -Werror -pedantic -ffp-contract=off`.
+- **Reverse.** Drop the export; the kernel keeps the header.
+
+## G20. The C-block compile cache is per user
+
+- **Taken.** `~/Library/Caches/pulsim/cblock` (macOS),
+  `$XDG_CACHE_HOME` or `~/.cache` + `/pulsim/cblock` (Linux),
+  `%LOCALAPPDATA%\pulsim\cblock` (Windows), mode 0700; a cached
+  library another user owns, or that others can write, is refused.
+- **Evidence.** Before: `<tempdir>/pulsim_cblock_cache`, shared on a
+  multi-user host, so another user could plant `cblk_<hash>.so` and
+  have it loaded.
+- **Reverse.** None wanted.
+
 ## Hooks for task groups 6–7 (not in this slice)
 
 - **6.1 graph state in the solver snapshot.** `SolverSnapshot`

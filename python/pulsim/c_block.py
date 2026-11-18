@@ -45,7 +45,7 @@ import hashlib
 import os
 import shutil
 import subprocess
-import tempfile
+import sys
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -307,6 +307,39 @@ def _find_compiler(lang: str):
     return None
 
 
+def _cache_dir() -> Path:
+    """Per-user compile cache, mode 0700: ~/Library/Caches/pulsim (macOS),
+    $XDG_CACHE_HOME or ~/.cache/pulsim (Linux), %LOCALAPPDATA%\\pulsim
+    (Windows). Before 2.1 it was a shared directory under the system
+    temp dir, where another user could plant a cblk_<hash>.so."""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA")
+                    or Path.home() / "AppData" / "Local")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Caches"
+    else:
+        base = Path(os.environ.get("XDG_CACHE_HOME")
+                    or Path.home() / ".cache")
+    d = base / "pulsim" / "cblock"
+    d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _check_owned(d)
+    if os.name == "posix":
+        os.chmod(d, 0o700)
+    return d
+
+
+def _check_owned(path: Path) -> None:
+    """Refuse a cache entry another user owns or can write (POSIX)."""
+    if os.name != "posix":
+        return
+    st = path.lstat()
+    if st.st_uid != os.getuid() or st.st_mode & 0o022:
+        raise RuntimeError(
+            f"c_block: refusing {path}: owned by uid {st.st_uid} with mode "
+            f"{oct(st.st_mode & 0o777)}; the compile cache must belong to "
+            "you and be writable only by you. Remove it.")
+
+
 def _compile_inline(code: str, lang: str, symbol: str, *,
                     include_dirs=None, extra_compile_args=None,
                     extra_link_args=None) -> Path:
@@ -333,10 +366,10 @@ def _compile_inline(code: str, lang: str, symbol: str, *,
     key = hashlib.sha256(
         "|".join([compiler, lang, symbol, src, *flags, *link]).encode()
     ).hexdigest()[:16]
-    cache = Path(tempfile.gettempdir()) / "pulsim_cblock_cache"
-    cache.mkdir(parents=True, exist_ok=True)
+    cache = _cache_dir()
     so_path = cache / f"cblk_{key}.so"
     if so_path.exists():
+        _check_owned(so_path)
         return so_path
 
     src_path = cache / f"cblk_{key}{ext}"

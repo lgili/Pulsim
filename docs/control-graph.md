@@ -50,9 +50,12 @@ Python class and are bit-identical to it (10⁴ random inputs each,
 `SignalMux`, `SignalDemux`, `LookupTable1D`, `MathBlock`,
 `MovingAverageFilter`, `Differentiator`, `PIDController`, `Sum`,
 `Integrator`, `FirstOrderLowPass`, `PwmGenerator`; and `PIController`,
-`Gain`, `Subtract`, `Limiter` (kernel blocks, same numbers). Not yet
-compared byte for byte: `SpaceVectorModulator`, the Clarke / Park
-transforms and the PLL.
+`Gain`, `Subtract`, `Limiter` (kernel blocks, same numbers);
+`SpaceVectorModulator`, `ClarkeTransform`, `InverseClarkeTransform`,
+`ParkTransform`, `InverseParkTransform` and `PLL` (two or three outputs:
+`theta_hat`, `omega_hat`, and `omega_hat / 2 pi`). Every law lives once,
+in `core/include/pulsim/blockchain/block_laws.h`, which the kernel calls
+and `export_c` copies.
 
 A block's initial state (`PIController(integrator_state=...)`,
 `Comparator(state=True)`, `FirstOrderLowPass(state=...)`, a
@@ -210,6 +213,38 @@ exact hold.
 | `add_c_block`: a Python observer and `b_extra` per step (5014 calls / 1 ms); it also fired at `t_end` (11 fires where 10 are due), which changed the last sample of the run. | One graph per builder (`builder._c_graph`), one `CBlock` per block: `code=` / `lib=` run in C++ with no Python call (2041 → 168 ns/step), `fn=` through the adapter with a `DeprecationWarning`. No tick at `t_end`: only the run's final sample changes (t = `t_end` when the span is a multiple of the block `dt`). |
 | `add_c_block` with a block `dt` below the solver step (no `sim_dt=`) ran every step with a wrong `dt`. | `ControlGraphBuildError` (pass `sim_dt=` to clamp, as before). |
 | `simulate()` composed closed loops and C blocks in two places below the engine dispatch (pwl only). | One composition above the dispatch (`ControlPlan.for_fixed_step` / `for_variable_step`). |
+| `SpaceVectorModulator`, the Clarke / Park transforms and `PLL` in a chain ran the kernel `add_svm` / `add_clarke` / `add_park` / `add_pll` laws: other roundings, `v_dc <= 0` gave duty 0.5, the PLL started at 0 Hz and wrapped to [-π, π); `PLL` needed three outputs. | Their classes' laws, bit-identical (G18): numbers change in FOC chains (rounding level; from the first tick for a PLL); `PLL` takes two or three outputs. |
+| A C block cache under the system temp dir, shared by all users. | A per-user cache, mode 0700; a foreign or group/world-writable cached library is refused. |
+
+## C export
+
+`pulsim.export_c(chain, builder, outputs=[...])` renders a rated graph to
+one C99 file (`CExport.source`; `.write(path)`): the law table, a state
+struct, `<prefix>_init`, one `<prefix>_step_rate<g>(s, in, t)` per rate,
+the rate table (`<prefix>_period`, `<prefix>_offset`), 64-bit tick
+counters (`<prefix>_ticks`, `<prefix>_next_tick`) and, for a single-rate
+graph, the `pulsim_cblock_step` shim, so the file loads back through
+`add_c_block(lib=...)`. `in[k]` is `CExport.inputs[k]` (a node, or a
+channel no block writes); the shim writes `outputs` to `out[]`. No
+`malloc`: the shim's state is static (one library, one instance).
+
+Compiled with `-ffp-contract=off` (MSVC's default `/fp:precise` does not
+contract) it is bit-identical to the kernel graph: every block kind over
+10⁴ ticks, and a PI + limiter + PWM graph in a circuit through
+`add_c_block`. Refused by name: `PythonBlock`, a `CBlock`, a graph with
+no `Rate` (continuous time) and a rate with a `compute_delay`.
+
+```python
+ex = pulsim.export_c(chain, builder, outputs=["y"])
+ex.write("ctl.c")   # cc -std=c99 -O2 -ffp-contract=off -shared -fPIC ctl.c -o ctl.so
+pulsim.add_c_block(b, inputs=[("v", "out")], outputs=[("v", "sw", "gnd")],
+                   dt=1e-6, lib="ctl.so")
+```
+
+C blocks compile into a per-user cache, mode 0700
+(`~/Library/Caches/pulsim/cblock`, `~/.cache/pulsim/cblock` or
+`$XDG_CACHE_HOME/pulsim/cblock`, `%LOCALAPPDATA%\pulsim\cblock`); a
+cached library that another user owns or can write is refused.
 
 ## Not yet
 

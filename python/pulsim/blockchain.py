@@ -161,6 +161,17 @@ class PythonBlock:
         return call
 
 
+# class -> (ported kind, input names in order, accepted output counts)
+_PORTED_TRANSFORMS = {
+    "SpaceVectorModulator": ("svm", ("v_alpha", "v_beta"), (3,)),
+    "ClarkeTransform": ("clarke", ("a", "b", "c"), (3,)),
+    "InverseClarkeTransform": ("inverse_clarke",
+                               ("alpha", "beta", "zero"), (3,)),
+    "ParkTransform": ("park", ("alpha", "beta", "theta"), (2,)),
+    "InverseParkTransform": ("inverse_park", ("d", "q", "theta"), (2,)),
+    "PLL": ("pll", ("v_alpha", "v_beta", "dt"), (2, 3)),
+}
+
 # pulsim blocks whose implementation is Python (PythonBlock adapter).
 _PY_LIBRARY = frozenset({"SlidingModeObserver", "FluxMRASObserver"})
 
@@ -583,54 +594,26 @@ class MixedDomainBlockChain:
                 add_ported("pwm", dict(frequency=block.frequency,
                                        phase=block.phase),
                            [ref("duty"), ref("t")])
-            elif cls_name == "SpaceVectorModulator":
-                if not isinstance(output, (tuple, list)) or len(output) != 3:
-                    raise ValueError("SVM output must be 3-tuple")
-                cxx_chain.add_svm(
-                    v_dc=float(block.v_dc),
-                    v_alpha=ref("v_alpha"), v_beta=ref("v_beta"),
-                    output_a=output[0], output_b=output[1],
-                    output_c=output[2])
-            elif cls_name == "ClarkeTransform":
-                if not isinstance(output, (tuple, list)) or len(output) != 3:
-                    raise ValueError("Clarke output must be 3-tuple")
-                cxx_chain.add_clarke(
-                    a=ref("a"), b=ref("b"), c=ref("c"),
-                    output_alpha=output[0], output_beta=output[1],
-                    output_zero=output[2])
-            elif cls_name == "InverseClarkeTransform":
-                if not isinstance(output, (tuple, list)) or len(output) != 3:
-                    raise ValueError("InverseClarke output must be 3-tuple")
-                zero_ref = ref("zero") if "zero" in inputs \
-                            else _k.CxxInputRef.const_value(0.0)
-                cxx_chain.add_inverse_clarke(
-                    alpha=ref("alpha"), beta=ref("beta"),
-                    zero=zero_ref,
-                    output_a=output[0], output_b=output[1],
-                    output_c=output[2])
-            elif cls_name == "ParkTransform":
-                if not isinstance(output, (tuple, list)) or len(output) != 2:
-                    raise ValueError("Park output must be 2-tuple")
-                cxx_chain.add_park(
-                    alpha=ref("alpha"), beta=ref("beta"),
-                    theta=ref("theta"),
-                    output_d=output[0], output_q=output[1])
-            elif cls_name == "InverseParkTransform":
-                if not isinstance(output, (tuple, list)) or len(output) != 2:
-                    raise ValueError("InverseParkTransform output must be 2-tuple")
-                cxx_chain.add_inverse_park(
-                    d=ref("d"), q=ref("q"), theta=ref("theta"),
-                    output_alpha=output[0], output_beta=output[1])
-            elif cls_name == "PLL":
-                if not isinstance(output, (tuple, list)) or len(output) != 3:
-                    raise ValueError("PLL output must be 3-tuple")
-                cxx_chain.add_pll(
-                    f_nominal=float(block.f_nominal),
-                    Kp=float(block.Kp), Ki=float(block.Ki),
-                    v_alpha=ref("v_alpha"), v_beta=ref("v_beta"),
-                    dt=ref("dt"),
-                    output_theta=output[0], output_omega=output[1],
-                    output_freq=output[2])
+            elif cls_name in _PORTED_TRANSFORMS:
+                # Python-exact (block_laws.h): the kernel add_svm /
+                # add_clarke / add_park / add_pll are different laws
+                # (DECISIONS G17).
+                kind, names, n_out = _PORTED_TRANSFORMS[cls_name]
+                if not isinstance(output, (tuple, list)) or \
+                        len(output) not in n_out:
+                    raise ValueError(
+                        f"{cls_name} output must be a "
+                        f"{' or '.join(map(str, n_out))}-tuple")
+                params = {}
+                if cls_name == "SpaceVectorModulator":
+                    params = dict(v_dc=block.v_dc)
+                elif cls_name == "PLL":
+                    params = dict(f_nominal=block.f_nominal, Kp=block.Kp,
+                                  Ki=block.Ki, theta_hat=block.theta_hat,
+                                  omega_hat=block.omega_hat,
+                                  integ=block._integ)
+                add_ported(kind, params, [
+                    ref(n_, 0.0 if n_ == "zero" else None) for n_ in names])
             elif cls_name == "DelayBlock":
                 cxx_chain.add_delay(
                     samples=int(block.samples),
@@ -719,7 +702,9 @@ class MixedDomainBlockChain:
                 groups[r] = cxx_chain.add_group(float(r.period),
                                                 float(r.offset), kind, td)
             cxx_chain.set_block_group(i, groups[r])
+            rate[i] = r
         self._groups = groups
+        self._block_rates = rate        # resolved, per block (export_c)
 
     def drive_source(self, builder, channel: str, wire) -> None:
         """Drive a controlled source from signal ``channel``: ``wire`` is

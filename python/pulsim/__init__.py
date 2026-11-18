@@ -369,6 +369,7 @@ from .losses import (
 # the circuit, running at its own sample time.
 from .c_block import (
     add_c_block, CBlockHandle, CBLOCK_ABI, wire_c_blocks_from_yaml)
+from .c_export import export_c, CExport
 # Records the true per-step switch mask at simulate-time so closed-loop
 # loss/thermal summaries don't re-evaluate a stateful switch_fn post-hoc.
 from ._result_views import SwitchMaskRecorder
@@ -783,6 +784,8 @@ __all__ = [
     "CBlockHandle",
     "CBLOCK_ABI",
     "wire_c_blocks_from_yaml",
+    "export_c",
+    "CExport",
     # Modular Multilevel Converter (Phase 20) helpers live as
     # top-level attributes for backward compatibility, but are
     # excluded from `__all__` so `from pulsim import *` and

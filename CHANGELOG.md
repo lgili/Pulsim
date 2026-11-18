@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Control graph: C export, transforms on their class laws (group 8)
+
+* **Added** `pulsim.export_c(chain, builder, outputs)`: a rated graph
+  as one C99 file (state struct, init, per-rate steps, rate table,
+  64-bit tick counters, and a `pulsim_cblock_step` shim for a
+  single-rate graph that loads through `add_c_block(lib=)`). Built from
+  the kernel's own law table (`block_laws.h`); compiled with
+  `-ffp-contract=off` it is bit-identical to the kernel graph (every
+  block kind, 10⁴ ticks). Refused by name: `PythonBlock`, `CBlock`, a
+  graph with no `Rate`, a rate with a `compute_delay`.
+* **Changed** `SpaceVectorModulator`, `ClarkeTransform`,
+  `InverseClarkeTransform`, `ParkTransform`, `InverseParkTransform` and
+  `PLL` in a chain run their class's law (bit-identical on 10⁴ inputs)
+  instead of the kernel `add_svm` / `add_clarke` / `add_park` /
+  `add_pll` laws (other roundings; the PLL started at 0 Hz and wrapped
+  to [-π, π)). FOC chains change at rounding level, PLL chains from the
+  first tick. `PLL` takes two or three outputs.
+* **Security** the C-block compile cache moved from the shared temp dir
+  to a per-user directory, mode 0700; a cached library that another
+  user owns or can write is refused.
+
 ### Control graph: helpers and C blocks consolidated (task 9.1)
 
 * **Changed** `bind_pi_to_switch`, `bind_pi_to_duty_callable` and
