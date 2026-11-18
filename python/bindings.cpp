@@ -5074,7 +5074,7 @@ void init_module(py::module_& m) {
            py::object resume_from,
            std::vector<Real> observer_periods,
            std::vector<py::object> observers,
-           Size newton_roundoff_budget) {
+           Size newton_roundoff_budget, bool on_impulse_error) {
             solver::BExtraFn b_extra_fn;
             std::function<Real(Real)> unused_next_jump;  // trbdf2 lands its ticks
             resolve_b_extra(b_extra_obj, b_extra_fn, unused_next_jump);
@@ -5109,6 +5109,7 @@ void init_module(py::module_& m) {
             if (newton_roundoff_budget > 0) {
                 o.newton_roundoff_budget = newton_roundoff_budget;
             }
+            o.on_impulse_error = on_impulse_error;
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "trbdf2");
             std::optional<Vector> x0;
@@ -5195,6 +5196,7 @@ void init_module(py::module_& m) {
             d["h_post_event_min"] = st.h_post_event_min;
             d["n_probe_newton_retries"] = st.n_probe_newton_retries;
             d["n_sdirk_steps"] = st.n_sdirk_steps;
+            d["n_reinit_steps"] = st.n_reinit_steps;
             d["n_filtered_estimates"] = st.n_filtered_estimates;
             d["n_roundoff_floor_accepts"] = st.n_roundoff_floor_accepts;
             d["n_noise_held_decisions"] = st.n_noise_held_decisions;
@@ -5222,6 +5224,7 @@ void init_module(py::module_& m) {
         py::arg("observer_periods") = std::vector<Real>{},
         py::arg("observers") = std::vector<py::object>{},
         py::arg("newton_roundoff_budget") = Size{0},
+        py::arg("on_impulse_error") = false,
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "

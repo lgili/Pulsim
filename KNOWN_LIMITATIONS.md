@@ -275,19 +275,31 @@ refuses them.
 
 `add_ideal_switch` / `add_diode(form='branch')` solve the switch current
 as an unknown, so `R_on = 0` and `g_off = 0` are representable. This
-slice runs the switch on `pwl` and `trbdf2` and the diode on `pwl`
+slice runs the switch and the diode on `pwl` and `trbdf2`
 (`docs/known-limitations.md`, branch-form table); other engines refuse
 with `feature='branch_form'`. A mode that makes a state dependent (an
 inductor opened by an ideal switch with `g_off = 0`, two capacitors
-paralleled through `R_on = 0`) runs on `pwl` only with
-`discontinuity_restart=True` (re-initialised and recorded in
-`res.reinit_records`); without the rule, and always on `trbdf2`, it is
-refused with `feature='dependent_states'`;
+paralleled through `R_on = 0`) runs on `pwl` with
+`discontinuity_restart=True` and on `trbdf2` (re-initialised by three
+SDIRK(2,2) steps and recorded in `res.reinit_records`, the same record
+on both); on `pwl` without the rule it is refused with
+`feature='dependent_states'`, as on `trbdf2` with a stateful device
+history (Coss, Lauritzen, IGBT tail, PMSM, saturable inductor). On
+`trbdf2` no diode crossing is located inside the re-initialisation step
+itself (a diode left on its forbidden side is re-decided at the next
+step's start; one that crosses and returns inside it is missed). The
+re-initialisation step's size is the controller's previous proposal,
+not error-controlled for the dependent states. The record takes
+`d = K·x(t+h)`, so on `trbdf2` (h is the controller's step, not the
+user's dt) Λ and ΔW also contain the source motion over that step when
+the cut-set or loop holds a time-varying source. Both engines project
+with a diagonal M (coupled windings in a cut-set are not handled). The
+round-off floor of the error estimate is off on SDIRK steps, so it does
+not apply to the three re-initialisation steps;
 an island bounded only by open ideal elements (OFF ideal diodes
 included: the gauge of D3 is not implemented) with `floating_node`; a
 loop of closed ideal elements and voltage sources with
-`ideal_voltage_loop`. On `trbdf2` the dependent-state check is static
-(any ideal element that could form one is refused up front).
+`ideal_voltage_loop`, with the same four fields on both engines.
 
 ### Fixed engine: first order after a discontinuity (by default)
 
@@ -555,20 +567,15 @@ start from the DC operating point, which `dsed` cannot take (refused).
 
 ### TR-BDF2 on a bridge whose DC side floats on a tie resistor
 
-`engine='trbdf2'` on a diode bridge whose DC bus is referenced only by a
-1 MΩ tie still depends on rounding. Under a 1e-15 relative perturbation
-of the element values (20 runs) the run always finishes, but takes
-1231-1254 steps and 7-10 diode events, and the 30-40 ms bus average is
-311.155 to 311.341 V (pwl at dt 1e-6 and 2.5e-7: 311.344 V). A few
-picosecond samples right after a turn-off at the source zero crossing
-show an OFF diode 0.6 V forward (the L·g_off ringing of the line
-inductor). The two
-diodes of a half-cycle turn off at the same current zero (a tie), and
-through the OFF interval the floating rail is set by nano-amp g_off
-leakage whose sign flips at the source's zero crossings. The bus
-differential (dp − dn) of the unperturbed run is within 9e-4 V of pwl;
-the common mode is not. A real bridge has a defined reference (Y
-capacitors, a grounded rail): give the model one.
+`engine='trbdf2'` follows the exact mode sequence of the 1 MΩ-tied
+floating-bus bridge (`benchmarks/BRIDGE_GROUND_TRUTH.md`). Its 30–40 ms
+bus average is 311.341410 V against the exact 311.343881 V at rtol 2e-5
+(the default step ceiling's O(h²) error; 1.9e-4 V at rtol 1e-7), and a
+1e-15 perturbation moves it by at most 9e-6 V. The number of diode
+events still varies under rounding (leakage-scale decisions at the
+zero-current turn-offs), without effect on the waveforms. Average a
+variable-step result over a window with its end points interpolated: the
+samples after 30 ms divided by 10 ms read 311.154 V here.
 
 ### First stored sample of algebraic nodes
 

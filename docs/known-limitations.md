@@ -71,10 +71,12 @@ The branch form of a switch or diode (`add_ideal_switch`,
 column; "no" raises `UnsupportedError(feature='branch_form')`. A mode
 whose ideal elements (`R_on = 0` or `g_off = 0`) make a state dependent
 (an inductor cut-set, a capacitor loop) runs on `pwl` with
-`discontinuity_restart=True` and is recorded in `res.reinit_records`
-(`on_impulse='error'` refuses it with `feature='impulse'`); without the
-rule, and on `trbdf2`, it is refused with
-`feature='dependent_states'`; a node bounded only by open ideal elements with
+`discontinuity_restart=True` and on `trbdf2` (always: three SDIRK(2,2)
+steps after the entry), and an impulsive entry is recorded in
+`res.reinit_records` (`on_impulse='error'` refuses it with
+`feature='impulse'`); on `pwl` without the rule, and on `trbdf2` with a
+Coss, Lauritzen, IGBT-tail, PMSM or saturable-inductor history, it is
+refused with `feature='dependent_states'`; a node bounded only by open ideal elements with
 `g_off = 0` is refused with `feature='floating_node'`, a loop of closed
 ideal elements and voltage sources with `feature='ideal_voltage_loop'`.
 
@@ -82,7 +84,7 @@ ideal elements and voltage sources with `feature='ideal_voltage_loop'`.
 | Form | pwl | trbdf2 | dsed | bdf1 | ac_sweep |
 |---|---|---|---|---|---|
 | Switch | yes | yes | no | no | no |
-| Diode | yes | no | no | no | no |
+| Diode | yes | yes | no | no | no |
 <!-- branch-form-capabilities:end -->
 
 Circuit-level limits, also raised as `UnsupportedError` (with `feature`

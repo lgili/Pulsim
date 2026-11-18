@@ -62,6 +62,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 #include "pulsim/pwl/branch_structure.hpp"
+#include "pulsim/pwl/reinit.hpp"
 
 #include <algorithm>
 #include <array>
@@ -715,22 +716,11 @@ inline SimulationResult run_transient(
     // mode; without the rule the trapezoid rings (+-397 V). Decided on the
     // COMMITTED mode: an event-iteration iterate may pass through one
     // (CCM buck: switch off, diode not yet on; review M6).
-    // False when the committed state is NOT in the cut-set `d` (sum s_j i_j
-    // = 0 without current sources): the step kept a solve whose mask names
-    // the cut-set but whose diode flip already undid it ("flip at the
-    // step's end" rule), so no impulse happened. Loops: always true.
+    // `in_dependent_mode` and the record live in pwl/reinit.hpp (shared
+    // with engine='trbdf2').
     auto in_dependent_mode = [&](const pwl::DependentStructure& d,
                                  const Vector& xs) {
-        if (d.kind != pwl::DependentStructure::Kind::CutSet || !d.sources.empty()) {
-            return true;
-        }
-        Real k = 0, scale = 0;
-        for (Size j = 0; j < d.states.size(); ++j) {
-            const Real i = xs[pool.branch_var_id_for_inductor(d.states[j], graph)];
-            k += static_cast<Real>(d.signs[j]) * i;
-            scale += std::abs(i);
-        }
-        return std::abs(k) <= Real{1e-9} * scale;
+        return pwl::in_dependent_mode(graph, pool, d, xs);
     };
     auto refuse_dependent = [&](const pwl::ModeStructure& ms,
                                 const topology::SwitchStateMask& m, Real at_t) {
@@ -763,16 +753,7 @@ inline SimulationResult run_transient(
                                                                 : "R_on"));
     };
     // D4 records: the last committed mask and each branch's mask bit.
-    topology::SwitchStateMask reinit_prev_mask{Size{0}};
-    bool reinit_prev_known = false;
-    std::vector<long> reinit_slot;
-    if (structure.active()) {
-        long s = 0;
-        for (Index b = 0; b < graph.num_branches(); ++b) {
-            const bool sw = graph.branch(b).kind == topology::BranchKind::Switch;
-            reinit_slot.push_back(sw ? s++ : -1L);
-        }
-    }
+    pwl::ReinitTracker reinit{graph, pool, structure.active()};
 
     // ---- DC operating-point pre-charge (Layer 5 V3) ------------------
     //
@@ -2573,114 +2554,11 @@ inline SimulationResult run_transient(
             if (structure.active()) {
                 const auto& now = structure.check(stamped_mask, true);
                 refuse_dependent(now, stamped_mask, t_prev);
-                bool gated_step = false;
-                if (reinit_prev_known) {
-                    for (Index el = 0; el < graph.num_branches(); ++el) {
-                        const long s = reinit_slot[static_cast<std::size_t>(el)];
-                        if (s < 0 || !pool.is_registered(el) ||
-                            pool.kind_of(el) == pwl::DevicePool::StoredKind::Diode) {
-                            continue;
-                        }
-                        gated_step = gated_step ||
-                            stamped_mask.get(static_cast<Size>(s)) !=
-                                reinit_prev_mask.get(static_cast<Size>(s));
-                    }
-                }
-                const pwl::ModeStructure* before = reinit_prev_known
-                    ? &structure.check(reinit_prev_mask, true) : nullptr;
-                for (const auto& d : now.dependent) {
-                    bool old = false;
-                    if (before != nullptr) {
-                        for (const auto& o : before->dependent) {
-                            old = old || (o.kind == d.kind &&
-                                          o.states == d.states &&
-                                          o.elements == d.elements);
-                        }
-                    }
-                    // A diode commutating on its own is consistent (it
-                    // crossed its threshold): only a step with a gated
-                    // change ANYWHERE (a gate can force a diode into the
-                    // mode: charge pump, review M3), or the start, records.
-                    // shortcut: a natural diode commutation in the same
-                    // step as an unrelated gate edge records its small
-                    // residual too; upgrade by locating the crossing.
-                    if (old || !(gated_step || !reinit_prev_known) ||
-                        !in_dependent_mode(d, x)) {
-                        continue;
-                    }
-                    const bool cut =
-                        d.kind == pwl::DependentStructure::Kind::CutSet;
-                    std::vector<Real> xa, xb, mm;
-                    Real kx0 = 0, kx1 = 0, inv_m = 0, scale = 0;
-                    for (Size j = 0; j < d.states.size(); ++j) {
-                        const Index b = d.states[j];
-                        Real a = 0, c = 0, m = 0;
-                        if (cut) {
-                            const Index v = pool.branch_var_id_for_inductor(b, graph);
-                            a = x_prev[v];
-                            c = x[v];
-                            m = pool.inductor_params(b).L;
-                        } else {
-                            const auto& br = graph.branch(b);
-                            a = stamping::read_node_voltage(x_prev, br.from) -
-                                stamping::read_node_voltage(x_prev, br.to);
-                            c = stamping::read_node_voltage(x, br.from) -
-                                stamping::read_node_voltage(x, br.to);
-                            m = pool.capacitor_params(b).C;
-                        }
-                        xa.push_back(a);
-                        xb.push_back(c);
-                        mm.push_back(m);
-                        scale += std::abs(a) + std::abs(c);
-                        kx0 += static_cast<Real>(d.signs[j]) * a;
-                        kx1 += static_cast<Real>(d.signs[j]) * c;
-                        inv_m += Real{1} / m;
-                    }
-                    // d = K x(t+h): the restart leaves the constraint exact.
-                    const Real r = kx0 - kx1;
-                    // Already consistent (start, resume, equal capacitors):
-                    // round-off is not an impulse (review M1).
-                    if (std::abs(r) <= Real{1e-12} * scale) continue;
-                    ReinitRecord rec;
-                    rec.t = t_prev;
-                    rec.kind = cut ? "cut_set" : "capacitor_loop";
-                    for (const Index el : d.elements) {
-                        rec.devices.emplace_back(graph.branch_name(el));
-                    }
-                    for (const Index b : d.states) {
-                        rec.states.emplace_back(graph.branch_name(b));
-                    }
-                    rec.lambda = r / inv_m;
-                    rec.dW = Real{0.5} * rec.lambda * r;
-                    for (Size j = 0; j < xa.size(); ++j) {
-                        const Real proj = xa[j] -
-                            static_cast<Real>(d.signs[j]) * rec.lambda / mm[j];
-                        rec.projection_gap = std::max(rec.projection_gap,
-                                                      std::abs(proj - xb[j]));
-                    }
-                    rec.sample = k % opts.store_every == 0
-                        ? static_cast<long>(result.times.size()) - 1 : -1L;
-                    if (opts.on_impulse_error) {
-                        std::string sts;
-                        for (const auto& s : rec.states) {
-                            sts += (sts.empty() ? "" : ", ") + s;
-                        }
-                        throw UnsupportedError(
-                            "pwl", "impulse", rec.devices.front(),
-                            std::string(pwl::stored_kind_name(
-                                pool.kind_of(d.elements.front()))),
-                            std::format(
-                                "on_impulse='error': at t = {} '{}' makes {} "
-                                "dependent ({}); re-initialising them moves "
-                                "{:.6g} {} and removes {:.6g} J.",
-                                t_prev, rec.devices.front(), sts,
-                                cut ? "an inductor cut-set" : "a capacitor loop",
-                                rec.lambda, cut ? "V*s" : "C", rec.dW));
-                    }
-                    result.reinit_records.push_back(std::move(rec));
-                }
-                reinit_prev_mask = stamped_mask;
-                reinit_prev_known = true;
+                reinit.record(structure, stamped_mask, x_prev, x, t_prev,
+                              k % opts.store_every == 0
+                                  ? static_cast<long>(result.times.size()) - 1
+                                  : -1L,
+                              opts.on_impulse_error, "pwl", result);
             }
         }
         if (diag && rd_steps > 0) {
