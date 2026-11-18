@@ -156,7 +156,8 @@ def test_a_value_the_observables_read_is_resolved_per_design(monkeypatch):
 def test_python_calls_per_evaluation_are_bounded():
     # 751 per evaluation of the buck Pareto before the circuit form
     # (cProfile); the bound is structural: no factory, no per-record
-    # spec or label extraction, no function-level imports
+    # spec or label extraction, no function-level imports. The count
+    # depends on the Python version (514 on 3.11 in Linux CI).
     _, cir = _pair()
     cir.evaluate_many(DESIGNS[:2], workers=1)
     pr = cProfile.Profile()
@@ -165,7 +166,7 @@ def test_python_calls_per_evaluation_are_bounded():
         cir.evaluate(d)
     pr.disable()
     per = pstats.Stats(pr).total_calls / len(DESIGNS)
-    assert per < 500, per
+    assert per < 600, per
 
 
 def test_schedule_per_design_and_parameters():

@@ -527,7 +527,10 @@ struct YamlIo {
         if (const auto ns = root["nodes"]) {
             for (const auto& n : ns) {
                 const auto name = text(n, "nodes", "nodes");
-                if (b.resolve_node_(name) != b.graph().num_nodes() - 1) {
+                // Sequenced: the operands of != have no evaluation order (MSVC
+                // read num_nodes() before resolve_node_ created the node).
+                const Index created = b.resolve_node_(name);
+                if (created != b.graph().num_nodes() - 1) {
                     fail("nodes", std::format("\"{}\" is listed twice or names ground", name));
                 }
             }
