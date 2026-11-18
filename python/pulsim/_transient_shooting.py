@@ -77,6 +77,14 @@ class TransientMap:
                          "the heat in flight at its end. Use one long "
                          "simulate(engine='pwl') run.")
         comps = list(builder.components())
+        for c in comps:
+            if (c.get("params") or {}).get("gate") == 2:   # Gate::Latching
+                # the latch is not in x: every period run starts it OFF,
+                # so a thyristor fired before t = 0 would be cut off
+                raise _unsup("gated_diode", f"the latching device "
+                             f"{c['name']!r} (thyristor / TRIAC): its latch "
+                             "is not part of the state each period run "
+                             "starts from. Use one long simulate() run.")
         from .periodic_steady_state import _refuse_graph_driven
         _refuse_graph_driven(builder)
         _check_circuit(builder, self.T, comps)

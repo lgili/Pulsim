@@ -433,7 +433,10 @@ seen.
 settle and refuses `'shadow'`/`'lcp'` by name (add-complementarity-mode-selection
 task 4.2). On `pwl` they are not posed for a circuit with a Newton device
 or a branch-form (ideal) diode (`'shadow'`/`'lcp'` refuse by name there;
-the guard is off), nor with `max_event_iterations = 0`. The pwl guard
+the guard is off), nor with `max_event_iterations = 0`. A circuit with a
+gated PWL device (IGBT with `reverse_blocking`, GTO, thyristor, TRIAC)
+refuses `'shadow'`/`'lcp'` and runs without the guard, for its plain
+diodes too (the port knows no gate; `diagnostics['mode_guard']`). The pwl guard
 judges only a settle that ended without a fixed point (a mask cycle or an
 exhausted round budget): a converged settle obeys the diode law by
 construction. The settle's own solve on a floating island (a bridge's DC

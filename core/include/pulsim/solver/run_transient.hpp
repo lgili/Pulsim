@@ -1688,7 +1688,6 @@ inline SimulationResult run_transient(
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
             loop_released.clear();
-            if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
             // add-complementarity-mode-selection: every non-single linear
             // site is a decision site of the selector.
             const bool mode_site = mode_ports.has_value() && !single &&
@@ -1884,6 +1883,9 @@ inline SimulationResult run_transient(
             Real committed_dt = opts.dt;
             bool step_retried = false;
             mask_cycle = false;    // per OUTER step, not per sub-step
+            // a gated device's record compares with the last OUTER step's
+            // stamp: restart stages and split sub-steps re-stamp in between
+            if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
 
             // ---- discontinuity restart (add-discontinuity-restart-rule)
             // Triggers: an unknown previous stamp, a mask that differs

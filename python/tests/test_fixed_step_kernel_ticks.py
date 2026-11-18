@@ -126,3 +126,30 @@ def test_a_run_resumed_between_ticks_ticks_on_the_original_grid(engine):
         assert len(resumed) == len(want)
         assert np.allclose(resumed, want, rtol=0, atol=1e-9 * dt)
     assert ticks(t_res, float("nan"))[0] == t_res          # the old grid
+
+
+def test_trbdf2_a_tick_just_below_the_split_is_the_resumed_runs_first():
+    """A tick within h_min below the split: the first run leaves it out
+    (fire_due_ticks stops at t_end - h_min), so the resumed run with the
+    original origin must take it (queue.start's t0_tol; batch-12 review)."""
+    T, dt, t_end = 1e-4, 1e-6, 1.9e-3
+
+    def ticks(t_start, t_stop, origin):
+        b = _rc()
+        seen = []
+        cache = p.PwlStateSpaceCache(b.graph, b.pool)
+        cache.build_lazy(dt)
+        p.run_transient_trbdf2(
+            cache, b.graph, b.pool, t_start=t_start, t_end=t_stop,
+            rtol=1e-6, atol=1e-9, h_init=dt, h_max=1e-5,
+            switch_fn=lambda t: p.SwitchStateMask(0),
+            observer_periods=[T], observers=[lambda t, x: seen.append(t)],
+            observer_origin=origin)
+        return seen
+
+    full = ticks(0.0, t_end, float("nan"))
+    t_split = math.nextafter(15 * T, 1.0)   # one ulp above the tick at 1.5 ms
+    first = ticks(0.0, t_split, float("nan"))
+    second = ticks(t_split, t_end, 0.0)
+    assert len(first) + len(second) == len(full) == 19
+    assert first[-1] < 15 * T - T / 2 and second[0] == t_split   # taken at the split

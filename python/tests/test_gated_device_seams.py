@@ -118,3 +118,41 @@ def test_auto_never_routes_a_gated_circuit_to_exact():
     r = _sim(b, 2e-3, "auto", sw)
     assert r.engine_used not in ("exact", "dsed")
     assert float(np.abs(np.asarray(r.i("T"))).max()) > 0.5   # control: it fired
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_pss_shooting_refuses_a_latching_device(engine):
+    # each period run starts from x alone: a latch fired before t = 0 would
+    # be cut off and the orbit would be another circuit's (batch-12 review)
+    b, sw = _half_wave_rl()
+    kw = {"dt": 1e-6} if engine == "pwl" else {}
+    with pytest.raises(p.UnsupportedError, match="'T'") as ei:
+        p.periodic_steady_state(b, period=T, switch_fn=sw, engine=engine, **kw)
+    assert ei.value.feature == "gated_diode"
+
+
+def test_gated_commutations_are_recorded_under_the_restart_rule():
+    # the record compares with the last OUTER step's stamp: the restart
+    # stages re-stamp in between and hid every IGBT turn-off (review)
+    def run(**kw):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("Vdc", "p", "gnd", 100.0)
+        b.add_igbt("Q", "p", "sw", 10e-3, 1e9, V_ce0=0.9, reverse_blocking=True)
+        b.add_diode("D", "gnd", "sw", 1e3, 1e-9, 0.0, 0.0)
+        b.add_resistor("Rl", "sw", "gnd", 10.0)
+        sw = p.make_pwm_switch_fn(10e3, 0.4, b.switch_index_of("Q"),
+                                  b.graph.num_switches)
+        r = _sim(b, 1e-3, "pwl", sw, **kw)
+        bid = b.graph.branch_index("Q") if hasattr(b.graph, "branch_index") \
+            else [c["branch_id"] for c in b.components() if c["name"] == "Q"][0]
+        # edges before the last period (the restart rule also records the
+        # one landing on t_end)
+        return [(round(e.t_estimated / 1e-6), e.new_state)
+                for e in r.commutation_events
+                if e.branch_id == bid and e.t_estimated < 9.5e-4]
+
+    plain = run()
+    assert len(plain) == 20   # control: both edges of 10 periods, at t_prev
+    # the restart rule takes each edge at its instant, one step later
+    assert run(discontinuity_restart=True) == [(k + 1 if k else 0, s)
+                                               for k, s in plain]

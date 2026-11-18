@@ -8,6 +8,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Integration batch 12: unified device interface 1–3, in-kernel event losses, IR scopes, TR-BDF2 track 6, event queue, control graph 4, PWL IGBT / thyristor, exact engine session 6 merged
 
+* **Fixed** `periodic_steady_state` by shooting ran a thyristor / TRIAC
+  with its latch OFF at every period start (the latch is not in the
+  state); it now refuses a latching device by name (`gated_diode`).
+* **Fixed** on `pwl` with `discontinuity_restart` (or an event split) a
+  gated device's commutations were missing from
+  `result.commutation_events`: the record compared with a stamp the
+  restart stages had already replaced.
+* **Fixed** a trbdf2 run resumed with `observer_origin` lost a tick that
+  fell within `h_min` below the split.
 * **Fixed** a YAML `igbt` with a `losses:` block was refused ("unknown
   key 'losses'") once the IGBT's key list became strict; the key is
   accepted again and the block reaches the loss tracker.
@@ -211,7 +220,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   default selection, and the switch cut the inductor current at every
   gate-off. A mode entered through an impulsive re-initialisation now
   goes to the complementarity selection.
-* **Fixed** a gated diode bridge from rest on `mode_selection='lcp'`.
+* **Fixed** a diode bridge behind a gated switch, started from rest, on
+  `mode_selection='lcp'`.
   It refused because D1 was OFF and forward-biased by 0.314 V.
 * **Fixed** the phase-shift full bridge. The diode-law check refused a
   5e-15 V forward bias at t = 0, which is inside the engine's own zero

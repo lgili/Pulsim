@@ -1328,7 +1328,9 @@ inline SimulationResult run_transient_trbdf2(
     const std::uint32_t bp_src =
         queue.add_function(events::Kind::SourceBreakpoint, breakpoint_oracle);
     queue.add_once(events::Kind::EndOfRun, opts.t_end);
-    queue.start(opts.t_start, opts.t_end);
+    // h_min: a tick the previous run left out at its t_end (fire_due_ticks
+    // stops at t_end - h_min) is a resumed run's first
+    queue.start(opts.t_start, opts.t_end, h_min);
     TrBdf2Stats local_stats;
     TrBdf2Stats& st = stats_out ? *stats_out : local_stats;
     st.ctrl_tick_counts.assign(t_ctrl.size(), 0);
