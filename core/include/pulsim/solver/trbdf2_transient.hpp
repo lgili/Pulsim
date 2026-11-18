@@ -2688,7 +2688,10 @@ inline SimulationResult run_transient_trbdf2(
                     // exact to O(bracket * di_C/dt).
                     const bool interp_land = turn_off && !nl_effective
                         && !spike_ok(sb_raw) && sa_raw != sb_raw
-                        && (sa_raw > Real{0}) != (sb_raw > Real{0});
+                        && (sa_raw > Real{0}) != (sb_raw > Real{0})
+                        // only a bracket at its floor: an abandoned or
+                        // exhausted refinement still lands with a solve
+                        && tb - ta <= Real{2} * dt_floor;
                     bool land_ok = true;
                     if (interp_land) {
                         const Real th = sa_raw / (sa_raw - sb_raw);
@@ -2696,7 +2699,10 @@ inline SimulationResult run_transient_trbdf2(
                         // Post-crossing side by a hair, as the solve lands.
                         const Real thp = std::min(Real{1}, th * (Real{1} + Real{1e-6}));
                         x_trial = x_ta + thp * (x_tb - x_ta);
-                        dt_land = std::max(t_lin - t, h_probe_floor);
+                        // Not below the probes' learned conditioning floor
+                        // (a singular solve there), never past the bracket.
+                        dt_land = std::max({t_lin - t, h_probe_floor,
+                                            std::min(h_probe_learned, tb - t)});
                     } else {
                         land_ok = trap_solve(mask_step, t, dt_land, x_trial);
                     }

@@ -15,8 +15,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A turn-off whose landing bracket reached its conditioning floor (the DCM
   buck: -9e-7 A left, `sw` at 446 V) lands on the secant root of the
   bracketing states. Worst reverse current at a turn-off: boost 0 A, DCM
-  buck -1.2e-16 A; new invariant test. trbdf2 numbers moved: pss buck DCM
-  gap 9.8e-9 -> 1.0e-8, boost 4.6e-9 -> 5.2e-9.
+  buck -1.2e-16 A; new invariant test. Only a bracket at its floor lands
+  this way; the landing step is not shorter than the probes' learned
+  conditioning floor.
+- A post-landing turn-off signal within the predicate's own round-off is
+  accepted (bisection could not bracket it further).
+- trbdf2 numbers moved: pss buck DCM gap 9.8e-9 -> 1.0e-8, boost
+  4.6e-9 -> 2.8e-9; `hard_switched_rc` reference ceiling 4.45e-6 ->
+  2.5e-6 (measured 2.2236e-6).
 
 ### Ideal switch on TR-BDF2: branch-form diode, structural pass, re-initialisation
 

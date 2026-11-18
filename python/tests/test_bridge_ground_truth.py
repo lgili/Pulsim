@@ -4,7 +4,8 @@ Truth: benchmarks/tools/bridge_ground_truth.py (mpmath, 50 digits;
 benchmarks/BRIDGE_GROUND_TRUTH.md): the 30-40 ms time-weighted average of
 dp - dn is 311.343881428885841697 V and the mode sequence is unique.
 
-trbdf2 follows the exact 11-event sequence; its error is the integration
+trbdf2 follows the exact mode sequence (the diode-event count varies 6-13
+under rounding: leakage-scale decisions; not asserted here); its error is the integration
 error at the default step ceiling (span/1000 = 4e-5 s), O(h^2): -2.47e-3 V
 at rtol 2e-5 (7.9e-6 of the bus, inside rtol*|v| = 6.2e-3 V per step),
 -1.8e-4 V with a 1e-5 s ceiling, -1.91e-4 V at rtol 1e-7. The 1e-15

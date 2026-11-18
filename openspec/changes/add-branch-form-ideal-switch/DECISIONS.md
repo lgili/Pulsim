@@ -249,7 +249,9 @@ Each entry: question → option taken → evidence → how to reverse.
 20. **trbdf2's periodic-source step ceiling stays at T/20 (step-ceiling
     study).** Question: would T/40 or T/80 buy accuracy? Evidence, the
     floating-bus bridge against its exact average (40 ms, both forms;
-    error / accepted steps):
+    error / accepted steps). The T/20, T/40, T/80 rows force `dt` = h_max;
+    on this 40 ms run the default is min(span/1000, T/20) = 4e-5 s, the
+    last row:
 
     | ceiling | rtol 1e-5 | rtol 2e-5 |
     |---|---|---|
