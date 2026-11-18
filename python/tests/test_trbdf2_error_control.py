@@ -180,9 +180,10 @@ def test_estimate_is_the_true_local_error():
     assert e5 < 6e-4
 
 
-@pytest.mark.xfail(strict=True, condition=sys.platform.startswith("linux"),
+@pytest.mark.xfail(strict=True, condition=sys.platform != "darwin",
                    reason="KNOWN_LIMITATIONS XP-1: chatter on the floating DC bus "
-                          "(122 diode events, 1398 steps on Linux)")
+                          "(1398 steps / 122 diode events on Linux, 1362 steps "
+                          "on Windows; clean on macOS only by rounding)")
 def test_doubled_tolerances_restore_the_previous_density():
     """Span-bound ceiling (no periodic source below span/1000): the
     floors must equal the old span fractions exactly, so rtol and atol

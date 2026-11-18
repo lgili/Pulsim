@@ -442,7 +442,7 @@ xfail fails and must be removed. Reproduce with
 
 | Id | Test | macOS | Linux | Owner |
 |----|------|-------|-------|-------|
-| XP-1 | `test_trbdf2_error_control.py::test_doubled_tolerances_restore_the_previous_density` (diode bridge, DC bus floating on a 1 MΩ tie, rtol 2e-5 / atol 2e-8) | 1235 steps, 14 diode events, 3 forced accepts | 1398 steps, 122 diode events, 87 forced accepts (measured at 485ab770): chatter from t ≈ 4.4533 ms with every diode OFF | TR-BDF2 track |
+| XP-1 | `test_trbdf2_error_control.py::test_doubled_tolerances_restore_the_previous_density` (diode bridge, DC bus floating on a 1 MΩ tie, rtol 2e-5 / atol 2e-8) | 1235 steps, 14 diode events, 3 forced accepts | Linux: 1398 steps, 122 diode events, 87 forced accepts (measured at 485ab770): chatter from t ≈ 4.4533 ms with every diode OFF; Windows: 1362 steps (CI at ed85a697) | TR-BDF2 track |
 | XP-2 | `test_saturable_transformer.py::test_engines_agree_below_saturation` (snubbed flyback, saturable core) | completes: 45,736 steps, 161 roundoff accepts | aborts at t = 0.34 ms, h at h_min, Newton 50 iterations still contracting (‖dx‖ 4.6e-7 → 1.7e-7 → 4.1e-8 V; 16.77160 V vs 16.77750 V at 0.339 ms) | TR-BDF2 track |
 
 XP-1 is not a Linux-only defect: on macOS the same bridge chatters at the
