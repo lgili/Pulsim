@@ -74,11 +74,16 @@ public:
                     .is_on      = false,
                     .var        = var,
                     .ideal      = var >= 0 && pool.branch_R_on(branch.id) == Real{0},
+                    .gate       = p.gate,
+                    .I_H        = p.I_H,
                 });
                 any_ideal_ = any_ideal_ || diodes_.back().ideal;
+                if (p.gate != models::SwitchedDiode::Gate::None) ++num_gated_;
             }
             ++switch_idx;
         }
+        owned_ = topology::SwitchStateMask(num_switches_);
+        for (const auto& d : diodes_) owned_.set(d.switch_idx, true);
     }
 
     [[nodiscard]] Size num_diodes() const noexcept {
@@ -107,6 +112,49 @@ public:
             mask.set(d.switch_idx, true);
         }
         return mask;
+    }
+
+    /// add-pwl-igbt-and-thyristor: read each gated device's gate bit from
+    /// the USER mask (its bit before the diode overlay) and open every
+    /// gate-held device whose gate is off (a hard turn-off at the edge).
+    /// Every decision after this call reads that gate.
+    void apply_gates(const topology::SwitchStateMask& user) {
+        if (num_gated_ == 0) return;
+        for (auto& d : diodes_) {
+            if (d.gate == models::SwitchedDiode::Gate::None) continue;
+            d.g = user.get(d.switch_idx);
+            if (d.gate == models::SwitchedDiode::Gate::Held && !d.g) {
+                d.is_on = false;
+            }
+        }
+    }
+
+    /// The mask the solver stamps: the user's mask with every diode bit
+    /// replaced by its conduction state (gates applied first).
+    [[nodiscard]] topology::SwitchStateMask
+    combine(const topology::SwitchStateMask& user) {
+        apply_gates(user);
+        return user.overlay(current_diode_mask(), owned_);
+    }
+
+    /// Bits a switch_fn drives: controlled switches and the gates of the
+    /// gated devices.
+    [[nodiscard]] topology::SwitchStateMask gated_bits() const {
+        topology::SwitchStateMask mask(num_switches_);
+        for (const auto& d : diodes_) {
+            if (d.gate != models::SwitchedDiode::Gate::None) {
+                mask.set(d.switch_idx, true);
+            }
+        }
+        return mask;
+    }
+    [[nodiscard]] Size num_gated() const noexcept { return num_gated_; }
+    /// The gate a gated device at switch index `idx` was last decided under.
+    [[nodiscard]] bool gate_of(Size idx) const noexcept {
+        for (const auto& d : diodes_) {
+            if (d.switch_idx == idx) return d.g;
+        }
+        return false;
     }
 
     /// Re-decide each diode's state based on the just-computed
@@ -182,6 +230,9 @@ public:
         bool  is_on;
         Index var = -1;   // branch-form current unknown, or -1
         bool  ideal = false;   // branch form with R_on = 0
+        models::SwitchedDiode::Gate gate = models::SwitchedDiode::Gate::None;
+        Real  I_H = Real{0};
+        bool  g = true;   // gate bit of the latest apply_gates
 
         /// The voltage the diode law reads for state `on`: v_a - v_k; for
         /// an ON branch-form diode V_f + i_s (see the constructor).
@@ -192,7 +243,8 @@ public:
         }
 
         [[nodiscard]] models::SwitchedDiode::Params params() const noexcept {
-            return {.g_on = g_on, .g_off = g_off, .V_th = V_th, .V_f = V_f};
+            return {.g_on = g_on, .g_off = g_off, .V_th = V_th, .V_f = V_f,
+                    .gate = gate, .I_H = I_H, .g = g};
         }
     };
 
@@ -254,7 +306,9 @@ public:
 private:
     Size num_switches_;
     bool any_ideal_ = false;
+    Size num_gated_ = 0;
     std::vector<DiodeEntry> diodes_;
+    topology::SwitchStateMask owned_{0};
 };
 
 }  // namespace pulsim::pwl

@@ -81,11 +81,22 @@
 
 #include <array>
 #include <cmath>
+#include <memory>
 #include <stdexcept>
+#include <vector>
 
 namespace pulsim::models {
 
 struct PmsmMna {
+    /// One term of the PM-flux series λ_pm,a(θ_e) = Σ ψ_h·cos(h·θ_e + φ_h)
+    /// (add-mna-native-machines group 3; phases b, c at θ_e ∓ 2π/3).
+    struct PmHarmonic {
+        Real h;     //!< harmonic order (positive integer)
+        Real psi;   //!< amplitude [Wb]
+        Real phi;   //!< phase [rad]
+    };
+    using Harmonics = std::shared_ptr<const std::vector<PmHarmonic>>;
+
     struct Params {
         Real R_s        = Real{0.5};    //!< stator resistance [Ω]
         Real L_d        = Real{2e-3};   //!< d-axis inductance [H]
@@ -98,6 +109,9 @@ struct PmsmMna {
         Real psi_pm     = Real{0.05};   //!< PM flux linkage [Wb]
         Real pole_pairs = Real{4};      //!< pp
         Real T_load     = Real{0};      //!< constant load torque [N·m]
+        /// Non-sinusoidal PM flux; null = ψ_pm·cos(θ_e) (psi_pm is then
+        /// the only PM parameter read).
+        Harmonics harmonics{};
     };
 
     static constexpr topology::BranchKind kind =
@@ -125,6 +139,20 @@ struct PmsmMna {
             p.pole_pairs != std::floor(p.pole_pairs)) {
             throw std::invalid_argument(
                 "PmsmMna: pole_pairs must be a positive integer");
+        }
+        if (p.harmonics) {
+            if (p.harmonics->empty()) {
+                throw std::invalid_argument(
+                    "PmsmMna: harmonics, when given, must not be empty");
+            }
+            for (const auto& t : *p.harmonics) {
+                if (!(t.h >= Real{1}) || t.h != std::floor(t.h) ||
+                    !std::isfinite(t.psi) || !std::isfinite(t.phi)) {
+                    throw std::invalid_argument(
+                        "PmsmMna: each harmonic needs an integer order "
+                        "h >= 1 and finite psi, phi");
+                }
+            }
         }
     }
 
@@ -229,6 +257,22 @@ struct PmsmMna {
     [[nodiscard]] static Vec3 lambda_pm(const Params& p, Real theta_e,
                                         int deriv) noexcept {
         Vec3 out{};
+        if (p.harmonics) {
+            // d/dθ of ψ·cos(h·a + φ): −h·ψ·sin(...), then −h²·ψ·cos(...).
+            // h = 1, φ = 0 evaluates the same expressions as below.
+            for (Size k = 0; k < 3; ++k) {
+                const Real a = theta_e + phase_offset(k);
+                Real acc = 0;
+                for (const auto& t : *p.harmonics) {
+                    const Real arg = t.h * a + t.phi;
+                    acc += deriv == 0 ? t.psi * std::cos(arg)
+                         : deriv == 1 ? -(t.h * t.psi) * std::sin(arg)
+                                      : -(t.h * t.h * t.psi) * std::cos(arg);
+                }
+                out[k] = acc;
+            }
+            return out;
+        }
         for (Size k = 0; k < 3; ++k) {
             const Real a = theta_e + phase_offset(k);
             out[k] = deriv == 0 ? p.psi_pm * std::cos(a)

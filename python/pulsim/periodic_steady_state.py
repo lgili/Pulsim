@@ -1012,6 +1012,14 @@ class _SourceInput:
 # Newton
 # ----------------------------------------------------------------------
 
+def _refuse_dependent_states(s, x):
+    """A singular I - M on a period through a constrained mode (a capacitor loop or an
+    inductor cut-set: K x = k gives a Floquet multiplier of exactly 1) is that mode, refused by
+    name (`_Solver.A` raises it) rather than reported as a non-isolated orbit."""
+    for mask in s.run(x).seg_masks:
+        s.A(mask)
+
+
 def _kernel_orbit(s, x, rtol, max_period_runs, n_relax, spec):
     """:func:`periodic_steady_state`'s Newton loop as one kernel call
     (``dsed_periodic_orbit``): the same iteration, counters and typed
@@ -1044,6 +1052,7 @@ def _kernel_orbit(s, x, rtol, max_period_runs, n_relax, spec):
             "Newton made no progress after three rounds of "
             f"{n_relax} relaxation periods. {tail}multipliers: {mu_last}.")
     if st == "singular":
+        _refuse_dependent_states(s, x)
         raise _conv(
             "I - M is singular: a Floquet multiplier equals 1, so "
             "the orbit is not isolated (a floating capacitor, an "
@@ -1269,6 +1278,7 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
                     np.linalg.solve(IM, G), traj.x0, scale, rtol) <= 1.0:
                 break
         if singular:
+            _refuse_dependent_states(s, traj.x0)
             raise _conv(
                 "I - M is singular: a Floquet multiplier equals 1, so "
                 "the orbit is not isolated (a floating capacitor, an "

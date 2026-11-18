@@ -34,6 +34,8 @@ observer mechanism — no kernel changes needed.
 
 from __future__ import annotations
 
+import warnings
+
 from typing import Callable
 
 
@@ -130,6 +132,13 @@ def make_thyristor_switch_fn(*,
         OTHER switches in the same circuit, compose via
         ``p.make_combined_switch_fn``.
     """
+    warnings.warn(
+        "make_thyristor_switch_fn is deprecated: its latch is a Python "
+        "closure updated once per step, and with i_holding = 0 it misses "
+        "an off-grid current zero and conducts the negative half-cycle. "
+        "Use CircuitBuilder.add_thyristor (the gate is its mask bit; "
+        "make_phase_control_fn fires a bridge).",
+        DeprecationWarning, stacklevel=2)
     # Lazy import to avoid circular dependency.
     import pulsim as _v2
 

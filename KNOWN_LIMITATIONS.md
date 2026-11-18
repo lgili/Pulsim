@@ -26,6 +26,21 @@ can pick it up without re-discovering the context.
 
 ## Post-hoc analysis
 
+### Event losses inside the transient: fixed-step engine only
+
+`CircuitBuilder.set_device_losses` (add-in-kernel-event-losses) reads
+`E_on` / `E_off` / `V_on` tables inside the `pwl` time loop and heats a
+thermal node. `trbdf2`, `dsed`, `bdf1` and `auto` without `dt=` refuse a loss port by
+name until the unified event queue gives them one commutation hook. `periodic_steady_state` by shooting (pwl / trbdf2)
+refuses one too: each period is a fresh run. The
+event energy is not drawn from the circuit, `T_j` does not change the
+device, and a resumed run drops the heat still pending at the split
+(pinned by `test_loss_port_seams.py`). A `Circuit` with a loss port
+cannot be written as YAML or pickled (refused by name, so
+`sweep(circuit, backend="process")` refuses too); `with_value` and
+thread sweeps carry the port, and `value_hash` does not cover it. See
+`docs/known-limitations.md` and `docs/losses-and-thermal.md`.
+
 ### Per-device loss reporting — sub-step transient resolution
 
 `pulsim.device_loss_summary(builder, result)` walks every
@@ -418,7 +433,10 @@ seen.
 settle and refuses `'shadow'`/`'lcp'` by name (add-complementarity-mode-selection
 task 4.2). On `pwl` they are not posed for a circuit with a Newton device
 or a branch-form (ideal) diode (`'shadow'`/`'lcp'` refuse by name there;
-the guard is off), nor with `max_event_iterations = 0`. The pwl guard
+the guard is off), nor with `max_event_iterations = 0`. A circuit with a
+gated PWL device (IGBT with `reverse_blocking`, GTO, thyristor, TRIAC)
+refuses `'shadow'`/`'lcp'` and runs without the guard, for its plain
+diodes too (the port knows no gate; `diagnostics['mode_guard']`). The pwl guard
 judges only a settle that ended without a fixed point (a mask cycle or an
 exhausted round budget): a converged settle obeys the diode law by
 construction. The settle's own solve on a floating island (a bridge's DC
@@ -667,14 +685,17 @@ consistent-initial-conditions solve.
 
 ---
 
-## Machines (`add-mna-native-machines`, step 1)
+## Machines (`add-mna-native-machines`)
 
-`b.add_dc_machine` is solved in the matrix; the PMSM (observer path),
-BLDC and induction-motor observers are not yet, and stay first order
-on `pwl`. Not done: `theta_node` (refused; integrate `ω` with `add_vccs` into a 1 F capacitor), the induction
-machine, BLDC harmonics, flux maps. None of the machine tests
-is a validation against a measured machine: they check analytic
-properties of the equations.
+`b.add_dc_machine`, `b.add_pmsm_mna` and `b.add_induction_machine_mna`
+are solved in the matrix on `pwl` and `trbdf2`; the PMSM, BLDC and
+induction-motor observers are not, and stay first order on `pwl`. The
+PMSM and the induction machine have no DC operating point and no AC-sweep
+stamp; `dsed` refuses them by name. Not done: flux maps (saturation), the
+DC operating point with held mechanics, deprecation of the PMSM / BLDC /
+induction observers. None of the machine tests is a validation against a
+measured machine: they check analytic properties of the equations and
+independent integrations of them.
 
 ---
 
@@ -705,8 +726,15 @@ or settles a mode its law forbids raises a named error
 (`DiodeModeInconsistentError` for the latter). For a band, build the device from `add_switch` and
 `add_diode(V_th=V_f + 1e-3, V_f=...)`. The composites keep a fixed
 1 mΩ diode slope (`g_on_diode` only on `add_mosfet_with_body_diode`).
-`add_igbt` is still a bidirectional switch with no knee and no diode;
-`add_igbt_level1` is the IGBT that blocks reverse current.
+`add_igbt(..., V_ce0=, reverse_blocking=True)` is the PWL IGBT with a
+knee that blocks reverse current (no diode: add one); `add_igbt` with
+`reverse_blocking` unset is still the bidirectional switch for this
+release (`FutureWarning`). The gated PWL devices (IGBT with reverse
+blocking, GTO, thyristor, TRIAC) run on `pwl` and `trbdf2` and are
+refused by name on `dsed` and `bdf1`. The deprecated Python thyristor
+closure `make_thyristor_switch_fn` with `i_holding = 0` turns off only
+if a sample lands within 1 pA of the current zero (60 Hz half-wave at
+dt = 10 µs: −2.140 V mean instead of 29.699 V); use `add_thyristor`.
 
 ## Open OpenSpec proposals as of v1.3.0
 

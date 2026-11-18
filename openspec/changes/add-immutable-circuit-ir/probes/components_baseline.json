@@ -28,8 +28,8 @@
   "sha": "95b9979507fadb55"
  },
  "benchmarks/circuits/closed_loop/ll16_flyback_closed_loop.yaml": {
-  "n": 9,
-  "sha": "68d266d529146ff8"
+  "n": 8,
+  "sha": "90d93e5f2c2f067d"
  },
  "benchmarks/circuits/diodes/back_to_back_diodes_sine.yaml": {
   "n": 4,

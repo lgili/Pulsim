@@ -108,17 +108,8 @@ public:
                         std::string_view unit = {},
                         std::optional<Real> lo = std::nullopt,
                         std::optional<Real> hi = std::nullopt) {
-        if (name.empty() || name.find('.') != std::string_view::npos) {
-            throw std::invalid_argument(std::format(
-                "param(\"{}\"): a parameter name must be non-empty and "
-                "contain no '.'", name));
-        }
-        if (find_param_(name) != kNoParam_) {
-            throw std::invalid_argument(std::format(
-                "param(\"{}\"): a parameter of that name already exists",
-                name));
-        }
-        ir::Parameter p{std::string{name}, value, std::string{unit}, lo, hi};
+        const auto full = declare_name_(std::format("param(\"{}\")", name), name);
+        ir::Parameter p{full, value, std::string{unit}, lo, hi, {}, cur_scope_};
         check_param_(p, value);
         params_.push_back(p);
         exprs_.emplace_back();
@@ -134,18 +125,15 @@ public:
                              std::optional<Real> lo = std::nullopt,
                              std::optional<Real> hi = std::nullopt) {
         const auto who = std::format("param(\"{}\")", name);
-        if (name.empty() || name.find('.') != std::string_view::npos) {
-            throw std::invalid_argument(std::format(
-                "{}: a parameter name must be non-empty and contain no '.'", who));
-        }
-        if (find_param_(name) != kNoParam_) {
-            throw std::invalid_argument(std::format(
-                "{}: a parameter of that name already exists", who));
-        }
-        auto e = ir::Expr::compile(text, [&](std::string_view n) -> std::optional<std::uint32_t> {
-            const auto i = find_param_(n);
-            if (i == kNoParam_) return std::nullopt;
-            return static_cast<std::uint32_t>(i);
+        const auto full = declare_name_(who, name);
+        auto e = ir::Expr::compile(text, [&](std::string_view n) {
+            // as YAML refuses it: an outer `Ron` is not read by an inner `Ron`
+            if (n == name) {
+                throw std::invalid_argument(std::format(
+                    "parameter \"{}\": its expression depends on itself ({} -> {})",
+                    full, name, name));
+            }
+            return lookup_param(n);
         }, who);
         std::vector<Real> vals;
         for (const auto& q : params_) vals.push_back(q.value);
@@ -154,7 +142,7 @@ public:
             throw std::invalid_argument(std::format(
                 "{}: expression \"{}\" evaluates to {}", who, text, v));
         }
-        ir::Parameter p{std::string{name}, v, std::string{unit}, lo, hi, std::string{text}};
+        ir::Parameter p{full, v, std::string{unit}, lo, hi, std::string{text}, cur_scope_};
         check_param_(p, v);
         params_.push_back(p);
         exprs_.push_back(std::move(e));
@@ -166,6 +154,101 @@ public:
     }
     [[nodiscard]] std::span<const ParamBinding> param_bindings() const noexcept {
         return bindings_;
+    }
+
+    // ---- add-immutable-circuit-ir group 8: scopes --------------------
+    /// Open scope `path` ('/'-separated, relative to the open scope),
+    /// creating its segments; `kind` names the subsystem definition it
+    /// instantiates. Parameters declared until `close_scope()` belong to
+    /// it, and expressions look names up from it outward (a name in an
+    /// inner scope shadows an outer one). Names of devices and nodes are
+    /// not rewritten here: a scope's members are the elements whose
+    /// flattened name starts with its path (`scope_of`), which is what
+    /// `define_subsystem` and the YAML `subsystems` produce. A path whose
+    /// last segment already instantiated a definition is refused.
+    std::uint32_t open_scope(std::string_view path, std::string_view kind = {}) {
+        auto bad = [&](std::string_view why) {
+            throw std::invalid_argument(std::format("scope(\"{}\"): {}", path, why));
+        };
+        if (path.empty() || path.front() == '/' || path.back() == '/' ||
+            path.find("//") != std::string_view::npos) {
+            bad("a scope path is one or more non-empty names separated by '/'");
+        }
+        std::uint32_t at = cur_scope_;
+        for (std::size_t pos = 0;;) {
+            const auto slash = path.find('/', pos);
+            const bool last = slash == std::string_view::npos;
+            const auto seg = path.substr(pos, last ? std::string_view::npos : slash - pos);
+            std::string full = at == 0 ? std::string{seg}
+                                       : std::format("{}/{}", scopes_[at - 1].path, seg);
+            auto it = scope_index_.find(full);
+            if (it == scope_index_.end()) {
+                scopes_.push_back(ir::Scope{std::string{seg}, at,
+                                            last ? std::string{kind} : std::string{}, full});
+                it = scope_index_.emplace(std::move(full),
+                                          static_cast<std::uint32_t>(scopes_.size())).first;
+            } else if (last && !kind.empty()) {
+                auto& sc = scopes_[it->second - 1];
+                if (!sc.kind.empty()) {
+                    bad(std::format("the path is already used by an instance of \"{}\"; "
+                                    "instance paths must be unique", sc.kind));
+                }
+                sc.kind = std::string{kind};
+            }
+            at = it->second;
+            if (last) break;
+            pos = slash + 1;
+        }
+        scope_stack_.push_back(cur_scope_);
+        cur_scope_ = at;
+        return at;
+    }
+
+    /// Return to the scope that was open before the last `open_scope`.
+    void close_scope() {
+        if (scope_stack_.empty()) {
+            throw std::logic_error("close_scope: no scope is open");
+        }
+        cur_scope_ = scope_stack_.back();
+        scope_stack_.pop_back();
+    }
+
+    [[nodiscard]] std::span<const ir::Scope> scopes() const noexcept { return scopes_; }
+    [[nodiscard]] std::uint32_t current_scope() const noexcept { return cur_scope_; }
+    /// Path of scope `id` ("" for the root).
+    [[nodiscard]] std::string_view scope_path(std::uint32_t id) const {
+        return id == 0 ? std::string_view{} : std::string_view{scopes_.at(id - 1).path};
+    }
+    /// `local` as named in the open scope: "leg_a/sm17/C".
+    [[nodiscard]] std::string scoped_name(std::string_view local) const {
+        return cur_scope_ == 0 ? std::string{local}
+                               : std::format("{}/{}", scopes_[cur_scope_ - 1].path, local);
+    }
+    /// "gnd" / "GND" / "0": ground, in every scope (never prefixed).
+    [[nodiscard]] static constexpr bool is_ground_name(std::string_view n) noexcept {
+        return is_ground_alias_(n);
+    }
+    /// The scope an element named `name` belongs to: the deepest scope
+    /// whose path followed by '/' prefixes it (0 = the root).
+    [[nodiscard]] std::uint32_t scope_of(std::string_view name) const {
+        for (auto pos = name.rfind('/'); pos != std::string_view::npos && pos > 0;
+             pos = name.rfind('/', pos - 1)) {
+            if (const auto it = scope_index_.find(name.substr(0, pos));
+                it != scope_index_.end()) {
+                return it->second;
+            }
+        }
+        return 0;
+    }
+    /// Parameter `name` as an expression in the open scope sees it: the
+    /// open scope first, then each enclosing scope, then the root.
+    [[nodiscard]] std::optional<std::uint32_t> lookup_param(std::string_view name) const {
+        for (std::uint32_t s = cur_scope_;; s = scopes_[s - 1].parent) {
+            const auto i = s == 0 ? find_param_(name)
+                                  : find_param_(std::format("{}/{}", scopes_[s - 1].path, name));
+            if (i != kNoParam_) return static_cast<std::uint32_t>(i);
+            if (s == 0) return std::nullopt;
+        }
     }
 
     /// Drive field `device_dot_field` by parameter `name`: the field
@@ -1098,7 +1181,8 @@ public:
         Real R_s, Real L_d, Real L_q, Real psi_pm, Real pole_pairs,
         Real J, Real B = Real{0}, Real T_load = Real{0},
         Real L_0 = Real{0},
-        Real omega0 = Real{0}, Real theta0 = Real{0}) {
+        Real omega0 = Real{0}, Real theta0 = Real{0},
+        const std::vector<std::array<Real, 3>>& harmonics = {}) {
         if (!(J > Real{0})) {
             throw std::invalid_argument(std::format(
                 "add_pmsm_mna(\"{}\"): J must be > 0 (got {}); it is the "
@@ -1109,12 +1193,23 @@ public:
             throw std::invalid_argument(std::format(
                 "add_pmsm_mna(\"{}\"): B must be >= 0 (got {}).", name, B));
         }
-        const models::PmsmMna::Params p{
+        models::PmsmMna::Params p{
             .R_s = R_s, .L_d = L_d, .L_q = L_q, .L_0 = L_0,
             .psi_pm = psi_pm, .pole_pairs = pole_pairs,
             .T_load = T_load,
         };
-        models::PmsmMna::validate(p);
+        if (!harmonics.empty()) {
+            std::vector<models::PmsmMna::PmHarmonic> hs;
+            for (const auto& t : harmonics) hs.push_back({t[0], t[1], t[2]});
+            p.harmonics = std::make_shared<
+                const std::vector<models::PmsmMna::PmHarmonic>>(std::move(hs));
+        }
+        try {
+            models::PmsmMna::validate(p);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::format(
+                "add_pmsm_mna(\"{}\"): {}", name, e.what()));
+        }
         const Index n_idx = resolve_node_(neutral);
         const std::array<std::string_view, 3> ph{phase_a, phase_b,
                                                  phase_c};
@@ -1138,6 +1233,74 @@ public:
         }
         add_capacitor(std::string{name} + "_theta", theta_node, "gnd",
                       Real{1}, theta0);
+        return *this;
+    }
+
+    /// Add an MNA-native squirrel-cage induction machine
+    /// (add-mna-native-machines group 2; `models/induction_machine_mna.hpp`).
+    ///
+    /// Three stator branches `name_a/_b/_c` from the phase nodes to
+    /// `neutral` (branch-current unknowns, constant stator inductance
+    /// in the stationary frame), two internal nodes `name_psi_ra`,
+    /// `name_psi_rb` whose voltages ARE the rotor flux linkage λ_rα,
+    /// λ_rβ [Wb] (1 F capacitors `name_Cra`, `name_Crb`), and the
+    /// torque into `omega_node` (mechanical speed [rad/s], capacitor J
+    /// `name_J`, resistor 1/B `name_B`). Rotor quantities referred to
+    /// the stator; amplitude-invariant Clarke.
+    ///
+    ///   R_s, L_ls, R_r, L_lr, L_m [Ω, H]   pole_pairs
+    ///   J [kg·m²]   B [N·m·s/rad]   T_load [N·m]   omega0 [rad/s]
+    CircuitBuilder& add_induction_machine_mna(
+        std::string_view name,
+        std::string_view phase_a, std::string_view phase_b,
+        std::string_view phase_c, std::string_view neutral,
+        std::string_view omega_node,
+        Real R_s, Real L_ls, Real R_r, Real L_lr, Real L_m,
+        Real pole_pairs, Real J, Real B = Real{0}, Real T_load = Real{0},
+        Real omega0 = Real{0}) {
+        if (!(J > Real{0})) {
+            throw std::invalid_argument(std::format(
+                "add_induction_machine_mna(\"{}\"): J must be > 0 (got {}); "
+                "it is the capacitor on the omega node.", name, J));
+        }
+        if (!(B >= Real{0})) {
+            throw std::invalid_argument(std::format(
+                "add_induction_machine_mna(\"{}\"): B must be >= 0 (got {}).",
+                name, B));
+        }
+        const models::InductionMachineMna::Params p{
+            .R_s = R_s, .L_ls = L_ls, .R_r = R_r, .L_lr = L_lr,
+            .L_m = L_m, .pole_pairs = pole_pairs, .T_load = T_load,
+        };
+        try {
+            models::InductionMachineMna::validate(p);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::format(
+                "add_induction_machine_mna(\"{}\"): {}", name, e.what()));
+        }
+        const Index n_idx = resolve_node_(neutral);
+        const std::array<std::string_view, 3> ph{phase_a, phase_b,
+                                                 phase_c};
+        std::array<Index, 3> ids{};
+        for (Size k = 0; k < 3; ++k) {
+            const std::string bname =
+                std::string{name} + "_" + "abc"[k];
+            ids[k] = add_branch_(bname, resolve_node_(ph[k]), n_idx,
+                                 topology::BranchKind::Nonlinear);
+        }
+        const std::string ra = std::string{name} + "_psi_ra";
+        const std::string rb = std::string{name} + "_psi_rb";
+        const Index om_idx = resolve_node_(omega_node);
+        const std::array<Index, 2> rn{resolve_node_(ra), resolve_node_(rb)};
+        pool_.add_induction_machine_mna(ids, om_idx, rn, p);
+        add_capacitor(std::string{name} + "_Cra", ra, "gnd", Real{1});
+        add_capacitor(std::string{name} + "_Crb", rb, "gnd", Real{1});
+        add_capacitor(std::string{name} + "_J", omega_node, "gnd", J,
+                      omega0);
+        if (B > Real{0}) {
+            add_resistor(std::string{name} + "_B", omega_node, "gnd",
+                         Real{1} / B);
+        }
         return *this;
     }
 
@@ -1733,18 +1896,149 @@ public:
     /// user wires `add_diode(...)` separately if needed.
     /// Defaults: R_on = 10 mΩ, R_off = 1 GΩ (typical for
     /// IGBT modules).
+    ///
+    /// add-pwl-igbt-and-thyristor: `reverse_blocking = true` makes it a
+    /// gated PWL diode (the mask bit is the gate): ON while the gate is
+    /// on and i = (v_CE − V_ce0)/R_on > 0, turned on at v_CE ≥ V_on
+    /// (= V_th, or max(V_th, V_ce0) when V_ce0 > 0); OFF is R_off. With
+    /// `reverse_blocking = false` (and so V_ce0 = 0) it is the plain
+    /// bidirectional switch, bit-identical to before.
     CircuitBuilder& add_igbt(
         std::string_view name, std::string_view collector,
         std::string_view emitter,
         Real R_on  = Real{10e-3},
-        Real R_off = Real{1e9}) {
+        Real R_off = Real{1e9},
+        Real V_ce0 = Real{0},
+        bool reverse_blocking = false,
+        Real V_th = Real{0}) {
         require_conductances_("add_igbt", name, Real{1} / R_on,
                               Real{1} / R_off, "R_on", "R_off", R_on, R_off);
-        return add_switch(std::move(name),
-                            std::move(collector),
-                            std::move(emitter),
-                            Real{1} / R_on,
-                            Real{1} / R_off);
+        if (!(V_ce0 >= Real{0}) || !std::isfinite(V_ce0)) {
+            throw std::invalid_argument(std::format(
+                "add_igbt(\"{}\"): V_ce0 = {} must be a finite number >= 0 V.",
+                name, V_ce0));
+        }
+        if (V_ce0 > Real{0} && !reverse_blocking) {
+            throw std::invalid_argument(std::format(
+                "add_igbt(\"{}\"): V_ce0 = {} V needs reverse_blocking=True: "
+                "a knee on a switch that conducts both ways would push "
+                "reverse current against the drop.", name, V_ce0));
+        }
+        require_finite_("add_igbt", name, "V_th", V_th);
+        if (!reverse_blocking) {
+            return add_switch(std::move(name),
+                                std::move(collector),
+                                std::move(emitter),
+                                Real{1} / R_on,
+                                Real{1} / R_off);
+        }
+        return add_gated_("add_igbt", name, collector, emitter, R_on, R_off,
+                          V_ce0, V_th, models::SwitchedDiode::Gate::Held,
+                          Real{0});
+    }
+
+    /// Thyristor (SCR), a latching gated PWL diode: turns on when its
+    /// gate bit is on and v_AK ≥ V_on, conducts i = (v − V_f)/R_on, stays
+    /// on while i > 0 with the gate on and while i > I_H once the gate is
+    /// off. Turn-off is the engine's current-crossing event.
+    CircuitBuilder& add_thyristor(
+        std::string_view name, std::string_view anode,
+        std::string_view cathode, Real R_on = Real{1e-3},
+        Real R_off = Real{1e9}, Real V_f = Real{0}, Real I_H = Real{0},
+        Real V_th = Real{0}) {
+        return add_gated_("add_thyristor", name, anode, cathode, R_on, R_off,
+                          V_f, V_th, models::SwitchedDiode::Gate::Latching,
+                          I_H);
+    }
+
+    /// GTO: a gate-held gated PWL diode (its mask bit is the gate-drive
+    /// state: on-drive conducts forward, off-drive turns it off).
+    CircuitBuilder& add_gto(
+        std::string_view name, std::string_view anode,
+        std::string_view cathode, Real R_on = Real{1e-3},
+        Real R_off = Real{1e9}, Real V_f = Real{0}, Real V_th = Real{0}) {
+        return add_gated_("add_gto", name, anode, cathode, R_on, R_off, V_f,
+                          V_th, models::SwitchedDiode::Gate::Held, Real{0});
+    }
+
+    /// TRIAC: two anti-parallel latching branches `<name>_fwd` (t1 → t2)
+    /// and `<name>_rev` (t2 → t1), one gate bit each
+    /// (`switch_indices_of(name)`).
+    CircuitBuilder& add_triac(
+        std::string_view name, std::string_view t1, std::string_view t2,
+        Real R_on = Real{1e-3}, Real R_off = Real{1e9}, Real V_f = Real{0},
+        Real I_H = Real{0}, Real V_th = Real{0}) {
+        const std::string n{name};
+        add_gated_("add_triac", n + "_fwd", t1, t2, R_on, R_off, V_f, V_th,
+                   models::SwitchedDiode::Gate::Latching, I_H);
+        return add_gated_("add_triac", n + "_rev", t2, t1, R_on, R_off, V_f,
+                          V_th, models::SwitchedDiode::Gate::Latching, I_H);
+    }
+
+    /// The mask indices of a device: one for a switch / diode, two
+    /// (`_fwd`, `_rev`) for a TRIAC.
+    [[nodiscard]] std::vector<Index>
+    switch_indices_of(std::string_view name) const {
+        const std::string n{name};
+        auto has = [&](const std::string& x) {
+            return branch_index_.find(x) != branch_index_.end();
+        };
+        if (!has(n) && has(n + "_fwd") && has(n + "_rev")) {
+            return {switch_index_of(n + "_fwd"), switch_index_of(n + "_rev")};
+        }
+        return {switch_index_of(name)};
+    }
+
+    /// add-in-kernel-event-losses 2.2: a loss port on a PWL switch or
+    /// diode (`add_switch`, `add_mosfet` and its `<name>_body`,
+    /// `add_igbt`, `add_diode`, their branch forms). Exactly one of
+    /// `junction` (a thermal node: tables read at its temperature, heat
+    /// deposited into it) and a finite `tj` (°C, fixed; heat deposited
+    /// into `heat_node` when one is named). Refuses, naming the device:
+    /// an unknown device, another kind, both or neither temperature
+    /// source, `heat_node` with `junction`, table conduction without a
+    /// `v_on` table. Node names are resolved when a run starts (the
+    /// thermal network may be added after this call).
+    void set_device_losses(thermal::DeviceLossSpec spec) {
+        const std::string& n = spec.device;
+        const auto hit = branch_index_.find(n);
+        if (hit == branch_index_.end()) {
+            throw std::invalid_argument(std::format(
+                "set_device_losses(\"{}\"): no device of that name", n));
+        }
+        using K = pwl::DevicePool::StoredKind;
+        const auto k = pool_.kind_of(hit->second);
+        if (k != K::Switch && k != K::Diode) {
+            throw std::invalid_argument(std::format(
+                "set_device_losses(\"{}\"): a {} has no loss port; it is "
+                "for PWL switches and diodes (add_switch, add_mosfet, "
+                "add_igbt, add_diode)", n, pwl::stored_kind_name(k)));
+        }
+        const bool has_j = !spec.junction.empty();
+        const bool has_t = !std::isnan(spec.tj);
+        if (has_j == has_t) {
+            throw std::invalid_argument(std::format(
+                "set_device_losses(\"{}\"): give exactly one of junction= "
+                "(a thermal node: closed loop) and Tj= (a fixed junction "
+                "temperature: open loop); {}", n,
+                has_j ? "both junction and Tj were given"
+                      : "neither junction nor Tj was given"));
+        }
+        if (has_t && !std::isfinite(spec.tj)) {
+            throw std::invalid_argument(std::format(
+                "set_device_losses(\"{}\"): Tj must be finite", n));
+        }
+        if (has_j && !spec.heat_node.empty()) {
+            throw std::invalid_argument(std::format(
+                "set_device_losses(\"{}\"): heat_node goes with Tj; with "
+                "junction the heat goes into the junction", n));
+        }
+        if (spec.conduction == thermal::ConductionHeat::Table && !spec.v_on) {
+            throw std::invalid_argument(std::format(
+                "set_device_losses(\"{}\"): conduction='table' needs a V_on "
+                "table", n));
+        }
+        pool_.set_device_losses(std::move(spec));
     }
 
     /// Layer 2 V2 — two-winding linear transformer.
@@ -2352,6 +2646,39 @@ public:
 
 private:
     /// The composite builders' body / freewheeling-diode drop.
+    CircuitBuilder& add_gated_(std::string_view fn, std::string_view name,
+                               std::string_view a, std::string_view k,
+                               Real R_on, Real R_off, Real V_f, Real V_th,
+                               models::SwitchedDiode::Gate gate, Real I_H) {
+        require_conductances_(fn, name, Real{1} / R_on, Real{1} / R_off,
+                              "R_on", "R_off", R_on, R_off);
+        if (!(V_f >= Real{0}) || !std::isfinite(V_f)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): the forward drop {} = {} must be a finite "
+                "number >= 0 V.", fn, name,
+                fn == "add_igbt" ? "V_ce0" : "V_f", V_f));
+        }
+        if (!(I_H >= Real{0}) || !std::isfinite(I_H)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): the holding current I_H = {} must be a finite "
+                "number >= 0 A.", fn, name, I_H));
+        }
+        if (!(V_th >= Real{0}) || !std::isfinite(V_th)) {
+            // V_th < 0 with V_f = 0 turns on at a reverse voltage and off
+            // at once: guaranteed chatter.
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): the turn-on threshold V_th = {} must be a "
+                "finite number >= 0 V.", fn, name, V_th));
+        }
+        const Index a_idx = resolve_node_(a);
+        const Index k_idx = resolve_node_(k);
+        const Index b_id = add_branch_(name, a_idx, k_idx,
+                                       topology::BranchKind::Switch);
+        pool_.add_gated_diode(b_id, Real{1} / R_on, Real{1} / R_off, V_th,
+                              V_f, gate, I_H);
+        return *this;
+    }
+
     static void require_diode_drop_(std::string_view fn,
                                     std::string_view name, Real V_F) {
         if (!(V_F >= Real{0}) || !std::isfinite(V_F)) {
@@ -2711,6 +3038,32 @@ private:
         });
     }
 
+    /// The stored (flattened) name of a parameter `local` declared in
+    /// the open scope; refuses an empty name, '.', a '/' inside a scope
+    /// and a name already declared there.
+    [[nodiscard]] std::string declare_name_(std::string_view who, std::string_view local) const {
+        if (local.empty() || local.find('.') != std::string_view::npos ||
+            (cur_scope_ != 0 && local.find('/') != std::string_view::npos)) {
+            throw std::invalid_argument(std::format(
+                "{}: a parameter name must be non-empty and contain no '.'{}", who,
+                cur_scope_ != 0 ? " (and, inside a scope, no '/')" : ""));
+        }
+        auto full = scoped_name(local);
+        if (full.find('.') != std::string::npos) {
+            throw std::invalid_argument(std::format(
+                "{}: scope \"{}\" contains a '.', so a parameter cannot be "
+                "declared in it (\"{}\" would read as device.field)", who,
+                scope_path(cur_scope_), full));
+        }
+        if (find_param_(full) != kNoParam_) {
+            throw std::invalid_argument(std::format(
+                "{}: a parameter of that name already exists{}", who,
+                cur_scope_ != 0 ? std::format(" in scope \"{}\"", scope_path(cur_scope_))
+                                : std::string{}));
+        }
+        return full;
+    }
+
     static constexpr std::size_t kNoParam_ = static_cast<std::size_t>(-1);
     [[nodiscard]] std::size_t find_param_(std::string_view name) const noexcept {
         for (std::size_t i = 0; i < params_.size(); ++i) {
@@ -2720,7 +3073,9 @@ private:
     }
     [[nodiscard]] std::size_t require_param_(std::string_view fn,
                                              std::string_view name) const {
-        const auto i = find_param_(name);
+        // lexical first (an open scope's own name, then outward), then the full name
+        const auto l = lookup_param(name);
+        const auto i = l ? std::size_t{*l} : find_param_(name);
         if (i == kNoParam_) {
             std::string names;
             for (const auto& p : params_) {
@@ -2747,6 +3102,13 @@ private:
     std::vector<ir::Parameter> params_;
     std::vector<ir::Expr>      exprs_;     // parallel to params_ (empty: literal)
     std::vector<ParamBinding>  bindings_;
+    // group 8: the scope tree (id i > 0 is scopes_[i - 1]), its index by
+    // path, the open scope and the scopes to return to.
+    std::vector<ir::Scope>     scopes_;
+    std::unordered_map<std::string, std::uint32_t,
+                        NodeKeyHash, std::equal_to<>> scope_index_;
+    std::uint32_t              cur_scope_ = 0;
+    std::vector<std::uint32_t> scope_stack_;
 
     /// The builder's graph, copyable only through `Graph::clone` so
     /// the builder's (private) copy constructor stays a default one:

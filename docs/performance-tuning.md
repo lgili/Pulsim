@@ -62,7 +62,6 @@ a keyword argument:
 ```python
 res = p.simulate(
     b, t_end=1e-3, dt=1e-6,
-    enable_nonlinear_refresh=True,
     enable_newton_line_search=True,
     discontinuity_restart=True,
     enable_substep_state_correction=True,
@@ -196,13 +195,13 @@ header-only and any allocation or branch happens inline. To measure:
   inaccuracy, but a `dt` that misses the entire ON portion of a
   PWM pulse will lose duty cycle. Sample at ≥ 20 points per
   switching period.
-- **Sat-inductor + nonlinear refresh.** Saturable magnetics need
-  `enable_nonlinear_refresh=True`. ``p.simulate(...)`` detects this
-  automatically; the explicit `run_transient` does not.
+- **Sat-inductor + nonlinear refresh.** Saturable magnetics are
+  stamped per Newton iteration by both transient engines; no flag is
+  needed (`enable_nonlinear_refresh` is deprecated).
 - **Smooth diode + Newton.** Hard-edge `IdealDiode` (PWL `g_on` /
   `g_off`) doesn't need Newton; the smooth-blend variant
-  (`IdealDiodeParams(blend_width=...)`) does. Enable
-  `enable_nonlinear_refresh` for the latter.
+  (`IdealDiodeParams(blend_width=...)`) does; the kernel stamps it
+  without a flag.
 
 ## Benchmarks
 

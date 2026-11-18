@@ -72,6 +72,8 @@ if(PULSIM_BUILD_TESTS)
     # without rebuilding the tree.
     add_executable(pulsim_core_mode_tests
         tests/modes/test_mode_selector.cpp
+        tests/modes/test_event_queue.cpp  # add-unified-event-queue
+        tests/modes/test_gate_source.cpp  # add-unified-event-queue
         tests/modes/test_pwl_mode_ports.cpp
     )
     target_link_libraries(pulsim_core_mode_tests
@@ -88,6 +90,7 @@ if(PULSIM_BUILD_TESTS)
     # (core/include/pulsim/thermal/loss_table.hpp), header-only.
     add_executable(pulsim_core_thermal_tests
         tests/thermal/test_loss_table.cpp
+        tests/thermal/test_device_losses.cpp
     )
     target_link_libraries(pulsim_core_thermal_tests
         PRIVATE
@@ -406,6 +409,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v2/test_integration_boost.cpp   # V2.1 fix
         tests/layer5_v2/test_commutation_events.cpp  # V2.2 substep
         tests/layer5_v2/test_switched_diode_forward_drop.cpp  # PSIM V_f
+        tests/layer5_v2/test_gated_diode.cpp  # IGBT / GTO / SCR law
     )
     target_link_libraries(pulsim_core_layer5_v2_tests
         PRIVATE
@@ -557,6 +561,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4_v3/test_diode_load_line.cpp
         tests/layer4_v3/test_lti_recovery.cpp
         tests/layer4_v3/test_lti_state_space.cpp   # Bridge.3 — DSED bridge
+        tests/layer4_v3/test_induction_machine_mna.cpp  # add-mna-native-machines
     )
     target_link_libraries(pulsim_core_layer4_v3_tests
         PRIVATE

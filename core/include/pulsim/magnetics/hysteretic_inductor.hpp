@@ -271,6 +271,7 @@ inline void add_hysteretic_inductor_to_chain(
         model->reset();
         *m_prev = Real{0};
     };
+    chain.capture(model, m_prev);
     chain.add(std::move(step), std::move(reset));
 }
 
