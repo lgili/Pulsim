@@ -56,6 +56,7 @@
 #include <cstdio>
 #include <numbers>
 #include <functional>
+#include <limits>
 #include <stdexcept>
 #include <cctype>
 #include <string>
@@ -1116,10 +1117,38 @@ public:
             ws.push_back(port_w_);
             kap.push_back(island_dot_(isl, port_w_));
         }
+        // Several islands: K(m, n) = g_m·w_n is the identity in exact arithmetic
+        // (disjoint islands); solved jointly as pwl/mode_ports.hpp does, where the
+        // sequential correction left 6.5e-9 V. Here the two-bus fixture measures
+        // the same either way (7.1e-10 V at a 1e7 Ω tie, [dsed_ports]).
+        bool joint = false;
+        Eigen::PartialPivLU<DenseMatrix> klu;
+        if (islands.size() > 1) {
+            const auto ni = static_cast<Index>(islands.size());
+            DenseMatrix K(ni, ni);
+            for (Index m = 0; m < ni; ++m)
+                for (Index n = 0; n < ni; ++n)
+                    K(m, n) = island_dot_(islands[static_cast<std::size_t>(m)],
+                                          ws[static_cast<std::size_t>(n)]);
+            if (K.allFinite()) {
+                klu.compute(K);
+                joint = std::isfinite(klu.rcond())
+                        && klu.rcond() > Real{1e3} * std::numeric_limits<Real>::epsilon();
+            }
+        }
         // J·s = f: σ = g·(base + s) − Σ_S f, with Σ_S f = src(island)
         auto fix = [&](Vector& s, const Vector* base, auto&& src) {
-            // islands are disjoint: g_m·w_n = Σ_{S_m} e_ref(n) = 0 for m ≠ n,
-            // so the sequential corrections do not interact (beyond rounding)
+            if (joint) {
+                Vector sig(static_cast<Index>(islands.size()));
+                for (std::size_t m = 0; m < islands.size(); ++m) {
+                    sig[static_cast<Index>(m)] = island_dot_(islands[m], s) - src(islands[m]);
+                    if (base) sig[static_cast<Index>(m)] += island_dot_(islands[m], *base);
+                }
+                const Vector a = klu.solve(sig);
+                for (std::size_t m = 0; m < islands.size(); ++m)
+                    s -= ws[m] * a[static_cast<Index>(m)];
+                return;
+            }
             for (std::size_t m = 0; m < islands.size(); ++m) {
                 Real sig = island_dot_(islands[m], s) - src(islands[m]);
                 if (base) sig += island_dot_(islands[m], *base);

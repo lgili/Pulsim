@@ -46,10 +46,15 @@ def test_bridge_behind_an_ideal_transformer_is_passive_nonreciprocal():
     assert _vpn(ref)[-1] == pytest.approx(31.8762412, abs=1e-6)
     assert _vpn(r)[-1] == pytest.approx(_vpn(ref)[-1], abs=1e-7)
     assert r.diagnostics["mode_guard"]["repairs"] == 2
+    # The engine's zero band at 100 V (1e-12 of the largest node voltage): inside it a diode is
+    # a tie. Since the guard repair of session 6 (complementarity DECISIONS #34), D2 is ON from
+    # the 20 ms repair carrying down to -6.4e-8 A (-6.4e-11 V, inside the band), while the bus
+    # agrees with pwl to 4e-12 V. The absolute -1e-9 A bound was below the engine's rounding.
+    band = 1e-12 * 100.0
     for name, an, ca in (("D1", "s", "p"), ("D2", "n", "s"), ("D3", "r", "p"), ("D4", "n", "r")):
         on = np.asarray(r.switch_states)[:, b.switch_index_of(name)].astype(bool)
         vd = np.asarray(r.v(an)) - np.asarray(r.v(ca))
-        assert on.any() and (1e3 * vd[on]).min() > -1e-9      # each diode conducts, never in reverse
+        assert on.any() and vd[on].min() > -band              # each diode conducts, never in reverse
         assert vd[~on].max() < 1e-9                             # and blocks only reverse voltage
     # the class is a build-time property: 'lcp' reports the same. Re-pinned at the merge of the
     # increment-form port model (was: right to 9 ms, then DiodeModeInconsistentError naming D2 at

@@ -56,6 +56,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <cstdio>
 #include <utility>
@@ -372,8 +373,9 @@ public:
 
             // 1. Next gate-edge time (analytical fast path)
             Real t_gate = next_gate_edge_(t, t_end);
-            // an edge a few ulps before t_end is t_end (scheduler_auto.hpp)
-            if (t_gate < t_end && near_time(t_gate, t_end)) t_gate = t_end;
+            // an edge a few ulps before t_end is t_end (scheduler_auto.hpp); ulps
+            // only: the 1e-12 s floor swallowed a 1 ps pulse ending a period run
+            if (t_gate < t_end && near_time(t_gate, t_end, Real{0})) t_gate = t_end;
             const Real t_target = std::min(t_gate, t_end);
             // a source corner is landed on exactly: a single-shot pulse
             // read one ulp early would keep its old piece for a step
@@ -1092,26 +1094,46 @@ private:
                 ++rep.lcp_events;
                 diode_bits_ = prev_bits;
                 mask = lcp_apply_(t, x, gates_prev, prev_bits, rec, rep);
+                const std::size_t mk = reinit_log_size_();
+                held_x_ = x;
                 project_(t, x);
+                resettle_projected_(t, x, mask, held_x_, mk);
                 return;
             }
             if (shadow_.enabled || guard_) shadow_x_ = x;
             reinit_mark_ = reinit_log_size_();
             settle_rounds_ = 0;
-            try {
-                settle_and_project_(t, x, mask);
-            } catch (const ConvergenceFailure& e) {
-                // the settle's round cap: with the guard on, the LCP decides (#25)
-                if (!guard_ || guard_refuses_ || e.kind() != ConvergenceKind::Settle) throw;
-                // the settle found no mode; the guard's arbiter decides from
-                // the held state (an LCP refusal there names the diode)
+            // the settle found no mode; the guard's arbiter decides from the
+            // held state (an LCP refusal there names the diode)
+            const auto arbitrate = [&] {
                 result.mode_guard.enabled = true;
                 ++result.mode_guard.settle_caps;
                 x = shadow_x_;
                 undo_reinit_records_();
                 diode_bits_ = prev_bits;
                 mask = lcp_apply_(t, x, gates_prev, prev_bits, rec, result.mode_guard.lcp);
+                const std::size_t mk = reinit_log_size_();
                 project_(t, x);
+                resettle_projected_(t, x, mask, shadow_x_, mk);
+            };
+            try {
+                settle_and_project_(t, x, mask);
+            } catch (const ConvergenceFailure& e) {
+                // the settle's round cap: with the guard on, the LCP decides (#25)
+                if (!guard_ || guard_refuses_ || e.kind() != ConvergenceKind::Settle) throw;
+                arbitrate();
+                return;
+            } catch (const std::runtime_error& e) {
+                // A settle round reached a mode the extraction cannot pose (a node
+                // left with no conductance at all): counted as a settle cap. A
+                // g_off = 0 freewheel behind a g_off = 0 series diode: the cut-set
+                // took the current to 0, the series diode then turned OFF and its
+                // node floated (G_aa singular); the LCP hands the current to D.
+                if (!guard_ || guard_refuses_
+                    || std::string_view{e.what()}.find("G_aa is singular")
+                           == std::string_view::npos)
+                    throw;
+                arbitrate();
                 return;
             }
             shadow_compare_(t, shadow_x_, gates_prev, prev_bits, result, &rec);
@@ -1189,9 +1211,39 @@ private:
         events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_);
         for (std::size_t j = 0; j < diodes_.size(); ++j)
             diode_bits_.set(diodes_[j].switch_idx, sel.on[j] != 0);
-        const MaskT m = gates_prev.overlay(diode_bits_, diode_owned_);
+        MaskT m = gates_prev.overlay(diode_bits_, diode_owned_);
         system_.set_mask(m);
+        release_band_ties_(t, x_held, m);
         return m;
+    }
+
+    /// A diode the LCP leaves OFF inside the zero band is a tie its
+    /// trajectory decides (D4, as the settle's zero_band_on_): ON when its
+    /// OFF-mode signal leaves the band upwards first. Gauss–Seidel, at most
+    /// one pass per diode. A gated bridge from rest (sine through D1, D4)
+    /// kept D1 OFF, its signal rising 3e4 V/s from exactly 0, while a pin
+    /// held D4 ON: the predicate starts on its event side and never fires.
+    void release_band_ties_(Real t, const Vector& x, MaskT& mask)
+        requires HasNodePairVoltage<System> {
+        // The band on the circuit's scale (sources included): from rest every node
+        // is 0 V and zero_band_tol_ is 0, so a rounding-level look-ahead (1e-20 V)
+        // turned a bridge diode ON (rounding fuzz: D2 of a tied bridge, 11 of 21).
+        const Real tol = tie_band_(t, x);
+        for (std::size_t pass = 0; pass < diodes_.size(); ++pass) {
+            bool flipped = false;
+            for (const auto& d : diodes_) {
+                if (diode_bits_.get(d.switch_idx)) continue;
+                const Real sig = models::SwitchedDiode::crossing_signal(
+                    false, system_.node_pair_voltage(d.from, d.to, t, x), d.params());
+                if (!(std::abs(sig) <= tol) || !zero_band_on_(t, x, d, mask, tol, false))
+                    continue;
+                diode_bits_.set(d.switch_idx, true);
+                mask = mask.overlay(diode_bits_, diode_owned_);
+                system_.set_mask(mask);
+                flipped = true;
+            }
+            if (!flipped) break;
+        }
     }
 
     /// The default-mode guard: the settled mode, judged on its own exact
@@ -1212,13 +1264,42 @@ private:
         const events::CircuitScale sc = system_.port_scale(t, x);
         Real worst = Real{0};
         int worst_j = -1;
-        const int c = judge_(cur, settled, t, x, sc, worst, &worst_j);
+        int c = judge_(cur, settled, t, x, sc, worst, &worst_j);
         system_.set_mask(cur);
+        if (c == 1) {
+            // The projection jumps over the mode's fast transient, so a law broken
+            // only inside it is invisible from x: judge again from the held state
+            // (constraint re-initialised, no slow projection). The forward converter
+            // kept its rectifier ON at gate-off: consistent at t+ and after the
+            // projection, which drained L_o (2.7 A) through 2 MΩ of g_off in 23 ps.
+            held_x_ = shadow_x_;
+            const std::size_t mk = reinit_log_size_();
+            if constexpr (requires { system_.reinit_to_constraint(t, held_x_); })
+                system_.reinit_to_constraint(t, held_x_);
+            truncate_reinit_log_(mk);
+            Real w2 = Real{0};
+            int j2 = -1;
+            const int c2 = judge_(cur, settled, t, held_x_, sc, w2, &j2);
+            system_.set_mask(cur);
+            if (c2 == 0) { c = 0; worst = w2; worst_j = j2; }
+            // An impulsive re-initialisation (a cut-set or capacitor loop entered
+            // from an inconsistent state) is where the value law cannot see a
+            // diode's bias: the constrained recovery assumes the constraint. The
+            // LCP's companion model sees the impulse; it confirms or repairs.
+            // (A freewheel diode with g_off = 0 stayed OFF and the inductor's
+            // current was cut, ΔW = ½·L·i², at every gate-off.)
+            else if (reinit_log_size_() > reinit_mark_) { c = 0; worst_j = -1; }
+        }
         if (c < 0) { ++g.unchecked; return; }
         ++g.checks;
         if (c != 0) return;
         const std::string who = worst_j >= 0
             ? diodes_[static_cast<std::size_t>(worst_j)].label : std::string{};
+        const std::string what = who.empty()
+            ? std::string{"the settled diode mode is entered through an impulsive "
+                          "re-initialisation"}
+            : "the settled diode mode violates the law of " + who
+                  + " on its own trajectory (by " + sci_(worst) + " V)";
         const MaskT bits_settled = diode_bits_;
         diode_bits_ = prev_bits;
         events::ModeSelection sel;
@@ -1230,8 +1311,7 @@ private:
                 "dsed", e.feature(),
                 e.feature() == "consistent_mode" && !who.empty() ? who : e.device(),
                 e.feature() == "consistent_mode" ? "Diode" : e.kind(),
-                "dsed at t = " + sci_(t) + " s: the settled diode mode violates the law of "
-                + who + " on its own trajectory (by " + sci_(worst) + " V), and the "
+                "dsed at t = " + sci_(t) + " s: " + what + ", and the "
                 "complementarity selection refuses there: " + e.what());
         }
         if (sel.on == settled) {
@@ -1244,8 +1324,7 @@ private:
         if (guard_refuses_) {
             throw UnsupportedError(
                 "dsed", "consistent_mode", who, "Diode",
-                "dsed at t = " + sci_(t) + " s: the settled diode mode violates the law of "
-                + who + " on its own trajectory (by " + sci_(worst) + " V) and the "
+                "dsed at t = " + sci_(t) + " s: " + what + " and the "
                 "complementarity selection decides otherwise; with the mode guard off "
                 "the settle's mode would be continued silently wrong. Leave the guard on "
                 "(the default) or pass mode_selection='lcp'.");
@@ -1258,9 +1337,85 @@ private:
             diode_bits_.set(diodes_[j].switch_idx, sel.on[j] != 0);
         mask = gates_prev.overlay(diode_bits_, diode_owned_);
         system_.set_mask(mask);
+        release_band_ties_(t, shadow_x_, mask);
         x = shadow_x_;
         undo_reinit_records_();
+        const std::size_t mk = reinit_log_size_();
         project_(t, x);
+        resettle_projected_(t, x, mask, shadow_x_, mk);
+    }
+
+    /// After the LCP's mode is projected: the projection jumps over the mode's
+    /// fast transient, and a diode whose bias the jump reverses beyond the band
+    /// is flipped by its value law, then projected again (at most four rounds;
+    /// a fifth flip refuses). Inside the LCP's band the LCP decides: the settle's
+    /// cascade here cycled 64 rounds on a bridge at rest (t = 0, a 1e-15
+    /// perturbation). The forward converter's repair (rectifier OFF at gate-off)
+    /// collapsed the open transformer's current, leaving the rectifier
+    /// forward-biased by the freewheel drop (0.0137 V) for the whole interval.
+    /// Records: those of the final mode alone, re-initialised once from
+    /// `x_held` (as settle_and_project_ does for a trial mode).
+    void resettle_projected_(Real t, Vector& x, MaskT& mask, const Vector& x_held,
+                             std::size_t mark)
+        requires HasNodePairVoltage<System> {
+        bool changed = false;
+        // An ON diode flips only on a violation on the circuit's scale (1e-6 of its sources and drops; a
+        // held node can sit at MV behind g_off): at a zero crossing the LCP's
+        // companion over h_e decides, not the value at the instant. A voltage
+        // doubler's D2, ON at −1.05e-8 V and −2.9e-8 V where the LCP put it (its tol_w
+        // 1.2e-8 V), was flipped and chattered 32 times. The forward converter's
+        // rectifier is off by 0.0137 V.
+        Real scale = Real{1};
+        if constexpr (requires { system_.port_scale_full(Vector{}); })
+            scale = system_.port_scale_full(Vector{}).vscale;
+        const Real tol_w = Real{1e-6} * scale;
+        for (int pass = 0; pass <= 4; ++pass) {
+            const Real band = tie_band_(t, x);
+            std::string flipped;
+            for (const auto& d : diodes_) {
+                const bool on = diode_bits_.get(d.switch_idx);
+                // An OFF diode past its threshold sits on its predicate's event side:
+                // no event will ever turn it ON, so only the rounding band protects it.
+                // A tied bridge (V_f = 0.7) left D1 OFF 3e-7 V above V_f, rising,
+                // and it stayed OFF while forward-biased by 1.1 V.
+                const Real tol = on ? std::max(band, tol_w) : band;
+                const Real v_d = system_.node_pair_voltage(d.from, d.to, t, x);
+                const auto prm = d.params();
+                const bool by_value = models::SwitchedDiode::decide(on, v_d, prm);
+                if (by_value == on
+                    || std::abs(models::SwitchedDiode::crossing_signal(on, v_d, prm)) <= tol)
+                    continue;
+                // confirmed on the OFF-mode trajectory, as the settle confirms a flip
+                if (zero_band_on_(t, x, d, mask, tol, by_value) == on) continue;
+                if (pass == 4) { flipped = d.label; break; }
+                diode_bits_.set(d.switch_idx, !on);
+                flipped = d.label;
+            }
+            if (flipped.empty()) break;
+            if (pass == 4)
+                throw UnsupportedError(
+                    "dsed", "consistent_mode", flipped, "Diode",
+                    "dsed at t = " + sci_(t) + " s: the selected diode mode, projected, "
+                    "still breaks the law of " + flipped + " after four re-settles");
+            changed = true;
+            mask = mask.overlay(diode_bits_, diode_owned_);
+            system_.set_mask(mask);
+            project_(t, x);
+        }
+        if (changed && reinit_tracked_() && reinit_log_size_() > mark) {
+            truncate_reinit_log_(mark);
+            held_tmp_ = x_held;
+            if constexpr (requires { system_.reinit_to_constraint(t, held_tmp_); })
+                system_.reinit_to_constraint(t, held_tmp_);
+        }
+    }
+
+    /// The zero band with a floor on the circuit's voltage scale (sources
+    /// included): from rest every node is 0 V and zero_band_tol_ is 0, so a
+    /// rounding-level signal (1e-20 V) counted as a decided one.
+    [[nodiscard]] Real tie_band_(Real t, const Vector& x) const
+        requires HasNodePairVoltage<System> {
+        return std::max(zero_band_tol_(t, x), Real{1e-12} * system_.port_scale(t, x).vscale);
     }
 
     void settle_and_project_(Real t, Vector& x, MaskT& mask) {
@@ -1914,6 +2069,8 @@ private:
     std::vector<events::DiodePort> shadow_ports_;
     std::vector<std::pair<Index, Index>> shadow_nodes_;
     Vector shadow_x_;
+    Vector held_x_;            // guard: the held state, constraint re-initialised
+    Vector held_tmp_;          // resettle: the held state's dry-run re-initialisation
     int settle_rounds_ = 0;
     int settle_round_cap_ = 64;
     std::size_t max_steps_ = 10'000'000;

@@ -20,7 +20,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | pwl+restart | 87 | 20 | 1 | 0 | 1 |
 | pwl+split | 89 | 18 | 1 | 0 | 1 |
 | trbdf2 | 103 | 4 | 1 | 0 | 1 |
-| dsed | 96 | 1 | 0 | 12 | 0 |
+| dsed | 97 | 0 | 0 | 12 | 0 |
 
 ### Fixed engine: restart rule and split (circuits where any of the three does not agree)
 
@@ -121,7 +121,6 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/isolated/forward_converter.yaml | pwl | 0.02 | 0.707 | V(out) | chatter | 6.2% | 9.9e-06 | 99 |
 | switching/isolated/forward_converter.yaml | pwl+restart | 0.02 | 0.092 | V(out) | 0.092 | 1.5% | 0.0018 | 1.8e+04 |
 | switching/isolated/forward_converter.yaml | pwl+split | 0.02 | 0.092 | V(out) | 0.092 | 1.5% | 0.0018 | 1.8e+04 |
-| switching/isolated/forward_converter.yaml | dsed | 0.001 | 0.648 | V(out) | 0.648 | 0.0% | unmatched |  |
 | switching/isolated/full_bridge_dc.yaml | pwl | 0.02 | 0.0828 | V(load_p) | 3.54e-06 | 4.0% | 1e-07 | 0.5 |
 | switching/isolated/full_bridge_dc.yaml | pwl+restart | 0.02 | 0.0815 | V(load_p) | 1.11e-08 | 3.9% | 2e-07 | 1 |
 | switching/isolated/full_bridge_dc.yaml | pwl+split | 0.02 | 0.0815 | V(load_p) | 1.11e-08 | 3.9% | 2e-07 | 1 |
@@ -208,7 +207,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/basic/snubber_rc.yaml | 0.000561 | 0.000561 | 0.000561 | 1.65e-07 | 1.73e-07 |
 | switching/basic/vcswitch_resistor.yaml | 0.0332 | 0.0682 | 0.0332 | 0 | 3.16e-06 |
 | switching/boost/boost_classic.yaml | 0.000313 | 1.04e-06 | 3.95e-07 | 9.53e-06 | 6.94e-07 |
-| switching/boost/boost_pfc_open_loop.yaml | 0.0304 | 0.0304 | 1.06e-05 | 1.72e-07 | 2.67e-07 |
+| switching/boost/boost_pfc_open_loop.yaml | 0.0304 | 0.0304 | 1.06e-05 | 1.72e-07 | 4.16e-07 |
 | switching/boost/boost_switching_complex.yaml | 0.00192 | 0.000334 | 3.15e-05 | 1.05e-05 | 2.99e-05 |
 | switching/boost/cascaded_boost_buck.yaml | 0.000399 | 3.98e-06 | 2.24e-06 | 5.95e-05 | 2.24e-06 |
 | switching/boost/ll07_boost_vcswitch.yaml | 0.0984 | 0.0997 | 0.0997 | 0.000117 | 0.000181 |
@@ -242,7 +241,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/isolated/active_clamp_forward.yaml | 0.00425 | 0.00375 | 0.00374 | 0.000117 | 1.24e-06 |
 | switching/isolated/dual_active_bridge.yaml | 0.000265 | 2.4e-06 | 2.4e-06 | 3.49e-05 | 1.86e-06 |
 | switching/isolated/flyback_converter.yaml | 0.949 | 0.11 | 0.11 | 4.29e-05 | 2.72e-06 |
-| switching/isolated/forward_converter.yaml | 0.707 | 0.092 | 0.092 | 2.17e-05 | 0.648 |
+| switching/isolated/forward_converter.yaml | 0.707 | 0.092 | 0.092 | 2.17e-05 | 1.12e-06 |
 | switching/isolated/full_bridge_dc.yaml | 0.0828 | 0.0815 | 0.0815 | 0.000141 | 2.66e-05 |
 | switching/isolated/ll11_llc_resonant_converter.yaml | error | error | error | error | refused |
 | switching/isolated/ll13_active_clamp_forward.yaml | 4.51 | 0.335 | 0.335 | 0.00133 | refused |

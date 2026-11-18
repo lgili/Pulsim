@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Exact engine session 6: wrong answers closed at their first diverging event
+
+* **Fixed** the forward converter on `dsed`/`exact`. It kept its
+  rectifier ON at gate-off and drained the output inductor through
+  g_off (err_rms 0.648 against the reference). The mode guard now also
+  judges from the held state, and a diode whose bias the projection
+  reverses is settled again. V_out matches trbdf2 to 2.8e-8.
+* **Fixed** a freewheel diode with `g_off = 0`. It stayed OFF on the
+  default selection, and the switch cut the inductor current at every
+  gate-off. A mode entered through an impulsive re-initialisation now
+  goes to the complementarity selection.
+* **Fixed** a gated diode bridge from rest on `mode_selection='lcp'`.
+  It refused because D1 was OFF and forward-biased by 0.314 V.
+* **Fixed** the phase-shift full bridge. The diode-law check refused a
+  5e-15 V forward bias at t = 0, which is inside the engine's own zero
+  band. A g_off = 0 diode's OFF voltage is now read from its nodes.
+* **Fixed** a gate edge within 1 ps of a run's end being moved onto the
+  end on `dsed`. The period map lost the edge and its switching loss:
+  0 W at D = 1 − 1e-7 against 2.70 W for the same pulse shifted. The
+  known limitation is removed.
+* **Changed** the dsed port model now corrects several floating islands
+  jointly. A single island is unchanged.
+
 ### Integration batch 11: circuit IR YAML, TR-BDF2 ideal switch, pwl complementarity, exact step 3, control graph G23, optimisation slice 6 merged
 
 * **Fixed** `make_combined_switch_fn` of a control-graph gate whose loop
