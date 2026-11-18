@@ -16,7 +16,9 @@
 // `C::uses_lte == false` the rollback copy, the error call and the retry
 // branch are not compiled (the fixed path stays today's loop).
 
+#include <cmath>
 #include <concepts>
+#include <limits>
 #include <cstdint>
 
 #include "pulsim/numeric/types.hpp"
@@ -35,14 +37,22 @@ concept Integrator = requires(Real h, int s) {
     { I::weight(s, s) } -> std::convertible_to<Real>;
 };
 
-/// The step the skeleton is taking: grid index, start, nominal end and
-/// size. For a fixed clock `t1` is the grid point `t0 + k·dt` (never
-/// `t0 + h`) and `h` the nominal dt; for a variable clock `t1 = t0 + h`.
+/// The step the skeleton is taking: grid index, start, end and size, and
+/// the limit the step may not pass (`t_lim`: the grid point for a fixed
+/// clock, `t_end` for a variable one). A step whose size reaches the
+/// limit ends ON it (`t1 = t_lim`, never `t0 + h`), so a fixed grid point
+/// stays `t0 + k·dt` and a run lands on `t_end` exactly.
 struct StepFrame {
     Size k = 0;
     Real t0 = Real{0};
     Real t1 = Real{0};
     Real h = Real{0};
+    Real t_lim = Real{0};
+    /// Sets the size; the end is the limit when the size reaches it.
+    void resize(Real h_new) noexcept {
+        h = h_new;
+        t1 = h_new < t_lim - t0 ? t0 + h_new : t_lim;
+    }
 };
 
 enum class Verdict : std::uint8_t { Accept, Retry, Abort };
@@ -54,37 +64,62 @@ struct Decision {
 enum class StepStatus : std::uint8_t { Accepted, Stopped, Done, Aborted };
 
 template <class C>
-concept StepController = requires(C& c, const C& cc, bool ok, Real err, Real h) {
+concept StepController = requires(C& c, const C& cc, bool ok, Real err, Real h,
+                                  const StepFrame& f) {
     { C::uses_lte } -> std::convertible_to<bool>;
     { cc.done() } -> std::convertible_to<bool>;
     { cc.frame() } -> std::same_as<StepFrame>;
     { c.on_result(ok, err, h) } -> std::same_as<Decision>;
-    { c.advance(h) };
+    { c.accepted(h) };   // the next proposal, from the step's full attempt
+    { c.advance(f) };    // the committed frame
 };
 
-/// The fixed engine's clock: steps k = k_begin .. n_steps − 1, the step k
-/// ending at grid point `clock.at(k)`; a failed step is the body's to
-/// handle (its retry ladder), never the clock's.
+/// A body whose event policy can cut a step short (`static constexpr bool
+/// localizes = true`) needs the rollback copy on any clock.
+template <class B>
+constexpr bool body_localizes() {
+    if constexpr (requires { B::localizes; }) return B::localizes;
+    return false;
+}
+
+/// The fixed engine's clock: steps k = 1 .. n_steps − 1, the step k ending
+/// at grid point `clock.at(k)`. A step the event policy cut short is
+/// committed and the rest of the same grid interval is taken next (k does
+/// not advance until the grid point is reached). A failed step is the
+/// body's to handle (its retry ladder), never the clock's: it aborts.
 struct FixedController {
     static constexpr bool uses_lte = false;
     FixedClock clock;
-    Size k = 1;
+    Size k = 1;   // ≥ 1: step k starts at clock.at(k − 1)
     Size n_steps = 0;
+    bool partial = false;   // inside grid interval k, at t_in
+    Real t_in = Real{0};
     [[nodiscard]] bool done() const noexcept { return k >= n_steps; }
     [[nodiscard]] StepFrame frame() const noexcept {
-        return {k, clock.at(k - 1), clock.at(k), clock.dt};
+        const Real t1 = clock.at(k);
+        if (partial) return {k, t_in, t1, t1 - t_in, t1};
+        return {k, clock.at(k - 1), t1, clock.dt, t1};
     }
     Decision on_result(bool ok, Real, Real h) const noexcept {
         return {ok ? Verdict::Accept : Verdict::Abort, h};
     }
-    void advance(Real) noexcept { ++k; }
+    void accepted(Real) const noexcept {}
+    void advance(const StepFrame& f) noexcept {
+        partial = f.t1 != f.t_lim;
+        if (partial) {
+            t_in = f.t1;
+        } else {
+            ++k;
+        }
+    }
 };
 
-/// A variable clock on the LTE controller's factor laws: t += h, the next
-/// proposal from the normalised error (≤ 1 accepts) and the integrator's
-/// exponent. The TR-BDF2 driver's special cases (gate-edge and diode
-/// memories, chatter guards, h_min refusals) stay in its body until that
-/// loop moves onto this skeleton.
+/// A variable clock on the LTE controller's factor laws: the next proposal
+/// from the normalised error (≤ 1 accepts) and the integrator's exponent;
+/// a failed solve or a non-finite error retries at h/4; a step below
+/// `h_min` aborts. The TR-BDF2 driver's special cases (gate-edge and
+/// diode memories, chatter guards) stay in its body until that loop moves
+/// onto this skeleton.
 template <class I>
 struct LteClock {
     static constexpr bool uses_lte = true;
@@ -92,31 +127,29 @@ struct LteClock {
     Real t = Real{0};
     Real t_end = Real{0};
     Real h_min = Real{0};
-    Real h_max = Real{0};
+    Real h_max = std::numeric_limits<Real>::infinity();
     Size n_accept = 0;
     Size n_reject = 0;
     [[nodiscard]] bool done() const noexcept { return !(t < t_end); }
     [[nodiscard]] StepFrame frame() const noexcept {
-        const Real h = ctrl.h < t_end - t ? ctrl.h : t_end - t;
-        return {n_accept, t, t + h, h};
+        StepFrame f{n_accept, t, t, Real{0}, t_end};
+        f.resize(ctrl.h);
+        return f;
     }
     Decision on_result(bool ok, Real err, Real h) noexcept {
-        if (!ok) {
+        if (!ok || !std::isfinite(err) || err > Real{1}) {
             ++n_reject;
-            const Real hn = h * Real{0.25};
-            return {hn < h_min ? Verdict::Abort : Verdict::Retry, hn};
-        }
-        if (err > Real{1}) {
-            ++n_reject;
-            const Real hn = h * LteController::reject_factor(err, I::err_exponent);
+            const Real hn = (ok && std::isfinite(err))
+                ? h * LteController::reject_factor(err, I::err_exponent)
+                : h * Real{0.25};
             return {hn < h_min ? Verdict::Abort : Verdict::Retry, hn};
         }
         const Real hn = h * LteController::accept_factor(err, I::err_exponent);
-        ctrl.h = hn < h_max ? hn : h_max;
-        return {Verdict::Accept, ctrl.h};
+        return {Verdict::Accept, hn < h_max ? hn : h_max};
     }
-    void advance(Real h) noexcept {
-        t = h < t_end - t ? t + h : t_end;   // the step clamped to the end lands on it
+    void accepted(Real h_next) noexcept { ctrl.h = h_next; }
+    void advance(const StepFrame& f) noexcept {
+        t = f.t1;
         ++n_accept;
     }
 };
@@ -132,52 +165,68 @@ bool run_stages(Body& body, const StepFrame& f) {
     return true;
 }
 
+/// Re-solves of one step (retries and event cuts) before it aborts.
+inline constexpr int kMaxResolves = 200;
+
 /// One step. Body requirements (all members):
 ///   bool poll();                          false = stop (cancellation)
 ///   void begin(const StepFrame&);         instant processing at f.t0
 ///   Real clamp(const StepFrame&, Real h); event landing (≤ h)
 ///   bool take(const StepFrame&);          the step's solves (default:
 ///                                         run_stages<I>); false = failed
-///   bool after_solve(StepFrame&);         event policy; false = f.h was
-///                                         truncated, re-solve
+///   bool after_solve(StepFrame&);         event policy; false = it cut the
+///                                         step (f.resize), re-solve
 ///   void commit(const StepFrame&);        device state + history
 ///   void on_step(const StepFrame&);       sampling and hooks
-/// and, when C::uses_lte: save() / restore() (rollback copy) and
-/// Real error(const StepFrame&) (normalised, ≤ 1 accepts).
+/// and, when C::uses_lte or the body localizes: save() / restore() (the
+/// rollback copy: restored before every re-solve and on an abort);
+/// when C::uses_lte: Real error(const StepFrame&) (normalised, ≤ 1
+/// accepts). The next proposal comes from the step's full attempt, not
+/// from a sliver an event cut it to.
 template <Integrator I, StepController C, class Body>
 StepStatus step_once(C& ctrl, Body& body) {
+    constexpr bool rollback = C::uses_lte || body_localizes<Body>();
     if (ctrl.done()) return StepStatus::Done;
     if (!body.poll()) return StepStatus::Stopped;
     StepFrame f = ctrl.frame();
     body.begin(f);
-    f.h = body.clamp(f, f.h);
-    if constexpr (C::uses_lte) f.t1 = f.t0 + f.h;
-    for (;;) {
-        if constexpr (C::uses_lte) body.save();
-        const bool ok = body.take(f);
-        Real err = Real{0};
-        if constexpr (C::uses_lte) {
-            if (ok) err = body.error(f);
+    if (const Real hc = body.clamp(f, f.h); hc < f.h) f.resize(hc);
+    if constexpr (rollback) body.save();
+    bool cut = false;
+    Real proposal = f.h;
+    for (int n = 0;; ++n) {
+        Decision d{Verdict::Abort, f.h};
+        if (n < kMaxResolves) {
+            const bool ok = body.take(f);
+            Real err = Real{0};
+            if constexpr (C::uses_lte) {
+                if (ok) err = body.error(f);
+            }
+            d = ctrl.on_result(ok, err, f.h);
         }
-        const Decision d = ctrl.on_result(ok, err, f.h);
-        if (d.verdict == Verdict::Abort) return StepStatus::Aborted;
+        if (d.verdict == Verdict::Abort) {
+            if constexpr (rollback) body.restore();
+            return StepStatus::Aborted;
+        }
         if constexpr (C::uses_lte) {
             if (d.verdict == Verdict::Retry) {
                 body.restore();
-                f.h = body.clamp(f, d.h);
-                f.t1 = f.t0 + f.h;
+                f.resize(body.clamp(f, d.h));
                 continue;
             }
         }
+        if (!cut) proposal = d.h;
         if (!body.after_solve(f)) {
-            if constexpr (C::uses_lte) body.restore();
+            cut = true;
+            if constexpr (rollback) body.restore();
             continue;
         }
         break;
     }
     body.commit(f);
     body.on_step(f);
-    ctrl.advance(f.h);
+    ctrl.accepted(proposal);
+    ctrl.advance(f);
     return StepStatus::Accepted;
 }
 

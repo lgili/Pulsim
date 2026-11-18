@@ -53,6 +53,7 @@ struct ToyBody {
     Real rtol = 1e-6, atol = 1e-9;
     Real event_t = -1;        // a state event the event policy localises
     bool fail_next_take = false;
+    bool nan_once = false;
     Size n_solves = 0, n_restore = 0, n_bad_ctx = 0;
 
     bool poll() { log.emplace_back("poll"); return true; }
@@ -104,6 +105,7 @@ struct ToyBody {
     V2 result() const { return y[I::n_stages - 1]; }
     Real error(const step::StepFrame& f) {
         log.emplace_back("error");
+        if (nan_once) { nan_once = false; return std::nan(""); }
         const V2 y1 = result();
         V2 e{};
         if constexpr (I::n_stages == 2 && I::err_exponent == Real{-0.5}) {
@@ -187,8 +189,10 @@ TEST_CASE("Stepper, fixed clock: a failed step aborts before any commit",
 TEST_CASE("Stepper, fixed clock: the grid point is t0 + k*dt, never accumulated",
           "[step][stepper]") {
     ToyBody<step::Trapezoidal> b;
-    const Real dt = 0.1;
-    step::FixedController c{{0.3, dt}, 1, 11};
+    // runtime operands on both sides (DECISIONS 9e)
+    volatile Real t0 = 0.3, dt = 0.1;
+    volatile Size k = 10;
+    step::FixedController c{{t0, dt}, 1, 11};
     Real t_last = 0;
     while (!c.done()) {
         const auto f = c.frame();
@@ -196,8 +200,7 @@ TEST_CASE("Stepper, fixed clock: the grid point is t0 + k*dt, never accumulated"
         CHECK(f.h == dt);
         REQUIRE(step::step_once<step::Trapezoidal>(c, b) == step::StepStatus::Accepted);
     }
-    const Size k = 10;
-    const Real grid = Real{0.3} + static_cast<Real>(k) * dt;
+    const Real grid = t0 + static_cast<Real>(k) * dt;
     CHECK(t_last == grid);
 }
 
@@ -224,6 +227,30 @@ TEST_CASE("Stepper, LTE clock: TR-BDF2 and SDIRK(2,2) reach t_end within toleran
     lte_run_checks<step::Sdirk22>();
 }
 
+TEST_CASE("Stepper, LTE clock: default h_max ends; a NaN error is retried, not accepted",
+          "[step][stepper]") {
+    ToyBody<step::TrBdf2> b;
+    b.nan_once = true;
+    step::LteClock<step::TrBdf2> c;
+    c.t_end = 1;
+    c.h_min = 1e-12;
+    c.ctrl.h = 1e-3;
+    REQUIRE(step::run<step::TrBdf2>(c, b) == step::StepStatus::Done);
+    CHECK(c.t == c.t_end);
+    CHECK(c.n_reject >= 1);
+    CHECK(std::isfinite(b.x[0]));
+
+    ToyBody<step::TrBdf2> z;   // a step below h_min aborts and rolls back
+    z.fail_next_take = true;
+    step::LteClock<step::TrBdf2> cz;
+    cz.t_end = 1;
+    cz.h_min = 0.5;
+    cz.ctrl.h = 1;
+    CHECK(step::step_once<step::TrBdf2>(cz, z) == step::StepStatus::Aborted);
+    CHECK(z.n_restore == 1);
+    CHECK(z.x == V2{1, 0});
+}
+
 TEST_CASE("Stepper, LTE clock: a rejected step is rolled back and re-solved",
           "[step][stepper]") {
     ToyBody<step::TrBdf2> b;
@@ -242,26 +269,43 @@ TEST_CASE("Stepper, LTE clock: a rejected step is rolled back and re-solved",
     CHECK(b.log.back() == "on_step");
 }
 
+namespace {
+struct LocalizingBody : ToyBody<step::Trapezoidal> {
+    static constexpr bool localizes = true;
+};
+}  // namespace
+
 TEST_CASE("Stepper: the event policy truncates the step to a located event",
           "[step][stepper]") {
     ToyBody<step::TrBdf2> b;
-    b.event_t = 0.0123;
-    step::LteClock<step::TrBdf2> c;
-    c.t_end = 0.05;
-    c.h_min = 1e-12;
-    c.h_max = 0.05;
-    c.ctrl.h = 0.02;
     b.rtol = 1;   // accept anything: only the event cuts the step
+    step::LteClock<step::TrBdf2> c;
+    c.t_end = 1;
+    c.h_min = 1e-12;
+    c.ctrl.h = 0.0009715043441930749;   // t0 != 0 for the cut step
     REQUIRE(step::step_once<step::TrBdf2>(c, b) == step::StepStatus::Accepted);
-    CHECK(c.t == b.event_t);
+    const Real t0 = c.t;
+    c.ctrl.h = 0.02;
+    b.event_t = t0 + 0.0123;
+    REQUIRE(step::step_once<step::TrBdf2>(c, b) == step::StepStatus::Accepted);
+    CHECK(c.t == b.event_t);   // lands on the event, not t0 + (e - t0)
     CHECK(b.n_restore == 1);
+    // the next proposal is the full attempt's (5 x 0.02), not the sliver's
+    CHECK(c.ctrl.h > 0.09);
 
-    ToyBody<step::Trapezoidal> bf;   // fixed clock: no rollback copy
+    // fixed clock: the cut sub-step is committed, then the rest of the
+    // grid interval; k advances only at the grid point
+    LocalizingBody bf;
     bf.event_t = 0.004;
     step::FixedController cf{{0, 0.01}, 1, 3};
     REQUIRE(step::step_once<step::Trapezoidal>(cf, bf) == step::StepStatus::Accepted);
-    CHECK(bf.n_restore == 0);
+    CHECK(bf.n_restore == 1);
+    CHECK(cf.k == 1);
+    CHECK(cf.t_in == 0.004);
+    REQUIRE(step::step_once<step::Trapezoidal>(cf, bf) == step::StepStatus::Accepted);
     CHECK(cf.k == 2);
+    const V2 ex = exact(0.01);
+    CHECK(std::hypot(bf.x[0] - ex[0], bf.x[1] - ex[1]) < 1e-4);
 }
 
 TEST_CASE("Dense output: the cubic Hermite is exact for a cubic", "[step]") {

@@ -145,20 +145,47 @@ says where the implementation departs from them or what it settled.
     accept / retry / abort → `after_solve` (the event policy: accept, or
     truncate the frame and re-solve) → `commit` → `on_step`. Controllers:
     `FixedController` (the grid `t0 + k·dt`; the frame's `t1` is the grid
-    point, never `t0 + h`; no rollback, no error call, no retry branch
-    compiled) and `LteClock<I>` (the factor laws with the integrator's
-    `err_exponent`). The body is a duck-typed set of members, not a
+    point, never `t0 + h`; a step the event policy cut short is committed
+    and the rest of the grid interval follows, `k` advancing only at the
+    grid point; no error call and no retry branch compiled, and the
+    rollback copy only when the body declares `localizes`) and
+    `LteClock<I>` (the factor laws with the integrator's `err_exponent`;
+    a failed solve or a non-finite error retries at h/4; below `h_min`
+    aborts, rolled back). A step lands on its limit (grid point, `t_end`)
+    or on the event time the body wrote, never on `t0 + h` recomputed;
+    the next proposal comes from the step's full attempt, not from the
+    sliver an event cut it to; a step re-solved 200 times aborts. The body is a duck-typed set of members, not a
     virtual interface (D1); the concepts `Integrator` and
     `StepController` are plain requires-expressions. Proven on a toy body
     (`core/tests/step/test_stepper.cpp`): orders 2 / 1 / 2 / 2 for
     trapezoidal, backward Euler, TR-BDF2 and SDIRK(2,2) on the fixed
     clock; both 2-stage methods under the LTE clock with a rejected first
-    step; the phase order; abort before commit; the event truncation.
+    step; a NaN error retried; the phase order; abort before commit; the
+    event truncation on both clocks (fixed: the remainder of the grid
+    interval is integrated). Reviewed (fresh reviewer, 2026-11-18): the
+    first version committed a cut fixed step and skipped the rest of the
+    grid interval, never ended with the default `h_max = 0`, accepted a
+    NaN error, took the next proposal from the event sliver, skipped the
+    restore on an abort and recomputed `t0 + h` instead of landing on
+    the event time; all fixed as above.
     Neither driver runs on it yet: the two loop bodies are under edit by
     three other tracks with large unmerged diffs (device interface −628
     lines of `run_transient.hpp`, ideal switch +256, TR-BDF2 track 8
     +271), so carving them into body members now would make every one of
     those merges a rewrite. They move after integration batch 13 lands.
+    Planned mapping of the fixed loop (`run_transient.hpp` dynamic path):
+    `poll` = the `should_continue` check; `begin` = step start through
+    `mask_pre` (observer, split events, V3 snapshots); `take` = the solve
+    state, the restart / split / event-iteration lambdas and the nominal
+    attempt with the halving ladder (the event split stays inside `take`:
+    it is pwl's sub-interval policy and continues from each event, while
+    the skeleton's cut re-solves from the step start); `after_solve` =
+    cycle handling and commutation records; `commit` = freeze guard,
+    deferred history commit, restart bookkeeping, loss tracker accept;
+    `on_step` = diagnostics, hooks, `store_every`, the structure record.
+    The per-step locals that cross those members are hoisted (reset at the
+    same program point) and the loop-scope lambdas defined once before the
+    loop, with their text unchanged so the other tracks' hunks still apply.
 
 11. **`steady_state(engine='trbdf2', dt=1e-7)` on the 24 V buck: not the
     step sequence; a derivative slot over a sliver step.** Reproducer:
@@ -168,15 +195,56 @@ says where the implementation departs from them or what it settled.
     smooth is history slot 3, the capacitor's `i_prev` (the trapezoidal
     derivative slot, `2C/h·Δv − i_prev`): the user's `switch_fn` puts the
     edge 1e-9·T before the period boundary, TR-BDF2 lands on it, and the
-    period ends with a 9.2e-15 s step (`h_post_event_min`; a 6.9e-14 s one
-    follows the mid-period edge), over which `2C/h` multiplies the
-    rounding of `v` by ~1e10. The slot's column entry scales as
-    1/probe (a fixed jump of ~5.8e-7 A, not a derivative), and one
+    period ends with a 9.2e-15 s step (`h_post_event_min` in
+    `_trbdf2_stats`; the 6.9e-14 s gap after the mid-period edge in
+    `np.diff(times)` may be an event record sample, not a step), over
+    which `2C/h` multiplies the rounding of `v` by ~1e10. The slot's
+    column entry scales as 1/probe (a fixed jump of ~5.8e-7 A in multiples
+    of one size, not a derivative). The size is ~60x below one ulp of
+    `v` times `2C/h`, so the exact path of the rounding is not pinned:
+    what is measured is a quantised, probe-independent jump in a slot the
+    map otherwise forgets (its own column entry is 0: the slot is
+    re-derived, not carried). Columns are usable only for probes 1e-4 to
+    1e-6 (at 1e-8 the physical columns pick up the noise too). One
     period from the linear-solve answer moves that slot by 4.9e-3 while
     the physical slots move 1e-7. With the edges exactly on the boundary
     a second defect shows: a run resumed AT an edge time misses that edge
     (slot 0 moves −24 V in the second period), the "resume at a gate
     edge" gap of the event queue's edge cache (DECISIONS 8). Owners: the
     TR-BDF2 track (a gate edge within rounding of `t_end`, or the history
-    commit after a sub-`h_min` post-edge step) and the event queue (edge
-    cache in the snapshot). Not fixed here: both change results.
+    commit after a sub-`h_min` post-edge step), the event queue (edge
+    cache in the snapshot), or, without an engine change, `steady_state`
+    itself (shoot on the physical slots only — capacitor `v_prev`,
+    inductor `i_prev` — and let the period re-derive the derivative
+    slots; the PSS owner). Not fixed here: each changes results.
+
+12. **Bit-identical TR-BDF2 resume (task 12): measured, the settle stays,
+    the rest waits for the loop.** Splits at a step time of the
+    continuous run whose first half ends with the continuous step
+    unchanged (no clamp effect, same state at the split; script in the
+    worktree's `.scratch/resume_exact.py`, buck / RLC / bridge of
+    `test_trbdf2_resume_controller.py` / an RLC with a sine source /
+    `test_bridge_ground_truth._bridge`):
+
+    | circuit | such splits | resumed run bit-identical |
+    |---|---|---|
+    | RLC + sine | 24 | 23 |
+    | diode bridge | 2 | 2 |
+    | buck, opaque `switch_fn` | 44 | 0 |
+    | closed loop (`bind_pi_to_switch`) | — | refused by name: "a control graph resumes between two of its ticks" (event queue's tick origin) |
+
+    The buck's first difference is the landing of the next gate edge
+    (`1.99999802e-07` vs `1.99999800e-07`: the edge is located from the
+    learned gate state, `gate_pulse_min` differs in the 14th digit) or a
+    noise-held diode decision (`n_noise_held_decisions` 1 vs 2) — the
+    gate-learning and hold state of DECISIONS 8, which are locals of the
+    loop. Tried and refuted: carrying `x_sig` in the controller block and
+    skipping the zero-time settle on a resume. It left every split above
+    unchanged and broke
+    `test_resume_just_before_a_gate_edge_matches_the_edge` (auto, 1 / 50 /
+    1000 ulp): the settle reads the gates where the first step will
+    (`t + h_min/2`), which the stopped run never did, so it is part of a
+    correct resume, not a re-decision to skip. Reverted. The block grows
+    when the loop's state is owned by the skeleton; the pickle carries it
+    when `feat/core-p3-device-interface` defines the block (not there at
+    385b4229).

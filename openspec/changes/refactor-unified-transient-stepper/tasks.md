@@ -32,6 +32,7 @@ at equal times or time-weighted measures, never sample means.
 
 ## 4. Integrators as stage tables
 - [ ] 4.1 `solver/step/integrators.hpp`: `Trapezoidal`, `BackwardEuler`, `TrBdf2` (`stage`, `lte` moved from `trbdf2_transient.hpp:1286-1375`)
+  - Done: the stage tables; `TrBdf2::lte` (the per-component estimate, called by the driver); `err_exponent`; `Sdirk22`; `hermite` dense output. Open: the driver's embedded SDIRK estimate (its γs = γ/2, DECISIONS 4) and the W⁻¹ filter
 - [ ] 4.2 Both drivers obtain their `StageSpec`s from the tables
 - [x] 4.3 Unit tests: both TR-BDF2 stages return the same `factor_dt`; `BackwardEuler::stage(h/2)` returns `factor_dt == h`; every stage's `h_elapsed` sums to `h` (as `t_off`: the last stage ends at `h`, DECISIONS 3; `core/tests/step/test_integrators.cpp`)
 - [ ] 4.4 Oracle: goldens; step-identical; counter gate equal
@@ -43,6 +44,7 @@ at equal times or time-weighted measures, never sample means.
 
 ## 6. The variable-step stepper
 - [ ] 6.1 `solver/step/stepper.hpp`: `Stepper<I, C>`; instantiate `Stepper<TrBdf2, Lte>`; hidden engine name `trbdf2-next`
+  - Skeleton done (`solver/step/stepper.hpp`, DECISIONS 10), proven on a toy body only; `Stepper<TrBdf2, Lte>` over the driver's loop and `trbdf2-next` not started
 - [ ] 6.2 Equality proof: `trbdf2-next` step-identical to `trbdf2` on every harness circuit and every suite circuit that runs on `trbdf2`; runner job added
 - [ ] 6.3 Zero-alloc test for the variable-step stepper (accepted, rejected and Newton-retried steps)
 - [ ] 6.4 Switch `engine='trbdf2'` and `engine='auto'` without `dt` to the stepper; keep `engine='trbdf2-legacy'`
@@ -91,6 +93,7 @@ at equal times or time-weighted measures, never sample means.
 
 ## 12. Controller state in the snapshot
 - [ ] 12.1 Optional `ControllerState` in the snapshot; pickle version bump with a reader for the previous version
+  - Resume measured on exact-boundary splits (DECISIONS 12): RLC 23/24, bridge 2/2, buck 0/44 (gate-learning and hold state are loop locals); closed loop refused by the event queue
   - C++ side done (`SolverSnapshot::controller`, written and read by the TR-BDF2 engine; DECISIONS 8); the pickle bump waits for the device-interface pickle v4
 - [ ] 12.2 Tests: a split variable-step run is bit-identical to the continuous one; a snapshot without controller state resumes to tolerance; a fixed-step snapshot resumes on the LTE controller and the reverse
 - [ ] 12.3 Docs: snapshot page
