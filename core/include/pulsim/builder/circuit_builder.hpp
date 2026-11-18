@@ -623,8 +623,11 @@ public:
         require_finite_("add_vccs", name, "gm", gm);
         const Index cp = resolve_node_(in_pos);
         const Index cn = resolve_node_(in_neg);
-        const Index b_id = add_branch_(name, resolve_node_(n_pos),
-                                       resolve_node_(n_neg),
+        // Sequenced: function arguments have no evaluation order, so GCC
+        // and MSVC numbered two new nodes the other way round from Clang.
+        const Index from = resolve_node_(n_pos);
+        const Index to = resolve_node_(n_neg);
+        const Index b_id = add_branch_(name, from, to,
                                        topology::BranchKind::Source);
         pool_.add_vccs(b_id, cp, cn, models::VCCS::Params{.gm = gm});
         return *this;
@@ -637,8 +640,11 @@ public:
                              std::string_view out_neg, Real rm) {
         require_finite_("add_ccvs", name, "rm", rm);
         const Index c = sensed_branch_("add_ccvs", name, control);
-        const Index b_id = add_branch_(name, resolve_node_(out_pos),
-                                       resolve_node_(out_neg),
+        // Sequenced: function arguments have no evaluation order, so GCC
+        // and MSVC numbered two new nodes the other way round from Clang.
+        const Index from = resolve_node_(out_pos);
+        const Index to = resolve_node_(out_neg);
+        const Index b_id = add_branch_(name, from, to,
                                        topology::BranchKind::Source);
         pool_.add_ccvs(b_id, c, models::CCVS::Params{.rm = rm});
         return *this;
@@ -650,8 +656,11 @@ public:
                              Real gain) {
         require_finite_("add_cccs", name, "gain", gain);
         const Index c = sensed_branch_("add_cccs", name, control);
-        const Index b_id = add_branch_(name, resolve_node_(n_pos),
-                                       resolve_node_(n_neg),
+        // Sequenced: function arguments have no evaluation order, so GCC
+        // and MSVC numbered two new nodes the other way round from Clang.
+        const Index from = resolve_node_(n_pos);
+        const Index to = resolve_node_(n_neg);
+        const Index b_id = add_branch_(name, from, to,
                                        topology::BranchKind::Source);
         pool_.add_cccs(b_id, c, models::CCCS::Params{.gain = gain});
         return *this;
@@ -667,8 +676,11 @@ public:
         require_finite_("add_gyrator", name, "g", g);
         const Index a = resolve_node_(p1_pos);
         const Index c = resolve_node_(p1_neg);
-        const Index b_id = add_branch_(name, resolve_node_(p2_pos),
-                                       resolve_node_(p2_neg),
+        // Sequenced: function arguments have no evaluation order, so GCC
+        // and MSVC numbered two new nodes the other way round from Clang.
+        const Index from = resolve_node_(p2_pos);
+        const Index to = resolve_node_(p2_neg);
+        const Index b_id = add_branch_(name, from, to,
                                        topology::BranchKind::Source);
         pool_.add_gyrator(b_id, a, c, models::Gyrator::Params{.g = g});
         return *this;
@@ -816,8 +828,11 @@ public:
                                    std::pair{"phase", phase}}) {
             require_finite_("add_sine_current_source", name, k, v);
         }
-        const Index b_id = add_branch_(name, resolve_node_(n_pos),
-                                       resolve_node_(n_neg),
+        // Sequenced: function arguments have no evaluation order, so GCC
+        // and MSVC numbered two new nodes the other way round from Clang.
+        const Index from = resolve_node_(n_pos);
+        const Index to = resolve_node_(n_neg);
+        const Index b_id = add_branch_(name, from, to,
                                        topology::BranchKind::Source);
         pool_.add_sine_current_source(
             b_id, models::SineCurrentSource::Params{
@@ -840,8 +855,11 @@ public:
               std::pair{"fall_time", fall_time}}) {
             require_finite_("add_pulse_current_source", name, k, v);
         }
-        const Index b_id = add_branch_(name, resolve_node_(n_pos),
-                                       resolve_node_(n_neg),
+        // Sequenced: function arguments have no evaluation order, so GCC
+        // and MSVC numbered two new nodes the other way round from Clang.
+        const Index from = resolve_node_(n_pos);
+        const Index to = resolve_node_(n_neg);
+        const Index b_id = add_branch_(name, from, to,
                                        topology::BranchKind::Source);
         pool_.add_pulse_current_source(
             b_id, models::PulseCurrentSource::Params{
@@ -862,8 +880,11 @@ public:
         models::PwlWaveform w{std::move(t), std::move(i), periodic};
         models::PwlWaveform::validate(
             w, std::format("add_pwl_current_source(\"{}\")", name));
-        const Index b_id = add_branch_(name, resolve_node_(n_pos),
-                                       resolve_node_(n_neg),
+        // Sequenced: function arguments have no evaluation order, so GCC
+        // and MSVC numbered two new nodes the other way round from Clang.
+        const Index from = resolve_node_(n_pos);
+        const Index to = resolve_node_(n_neg);
+        const Index b_id = add_branch_(name, from, to,
                                        topology::BranchKind::Source);
         pool_.add_pwl_current_source(
             b_id, models::PwlCurrentSource::Params{std::move(w)});
