@@ -915,6 +915,9 @@ inline SimulationResult run_transient(
     // only while x is still a seeded, unsolved sample 0) — what
     // final_snapshot.stamped_mask carries.
     bool stamped_known = false;
+    // add-pwl-igbt-and-thyristor: the stamped mask at the step start,
+    // so a gated device's commutation record follows its stamped state.
+    topology::SwitchStateMask gated_prev_stamp = stamped_mask;
 
     // Event-iteration cap. 0 disables iteration entirely
     // (matching Layer 5 V2 behaviour for regression testing).
@@ -1522,6 +1525,7 @@ inline SimulationResult run_transient(
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
             loop_released.clear();
+            if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
             do {
                 auto mask = gate_at(restart_rule ? gate_t : at_t);
                 if (has_diodes) {
@@ -2304,6 +2308,19 @@ inline SimulationResult run_transient(
                             })) {
                         continue;
                     }
+                    if (e.gate != models::SwitchedDiode::Gate::None) {
+                        // A gate decides, not v - V_on: record the stamped
+                        // state's change, effective from the step start.
+                        const bool now = stamped_mask.get(e.switch_idx);
+                        if (now != gated_prev_stamp.get(e.switch_idx)) {
+                            step_events.push_back(CommutationEvent{
+                                .t_estimated = t_prev,
+                                .branch_id   = e.branch_id,
+                                .new_state   = now,
+                            });
+                        }
+                        continue;
+                    }
                     const Real v_a_prev =
                         stamping::read_node_voltage(x_prev, e.from);
                     const Real v_k_prev =
@@ -2759,6 +2776,7 @@ inline SimulationResult run_transient(
             // restored on breach so x and the diode state agree
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
+            if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
             do {
                 auto mask = gate_at(gate_t);
                 if (has_diodes) {
@@ -2857,6 +2875,18 @@ inline SimulationResult run_transient(
             // Sub-step bisection on the static path too.
             if (has_diodes && k > 0) {
                 for (const auto& e : diodes.entries()) {
+                    if (e.gate != models::SwitchedDiode::Gate::None) {
+                        const bool now = stamped_mask.get(e.switch_idx);
+                        if (now != gated_prev_stamp.get(e.switch_idx)) {
+                            result.commutation_events.push_back(
+                                CommutationEvent{
+                                    .t_estimated = t_prev,
+                                    .branch_id   = e.branch_id,
+                                    .new_state   = now,
+                                });
+                        }
+                        continue;
+                    }
                     const Real v_a_prev =
                         stamping::read_node_voltage(x_prev, e.from);
                     const Real v_k_prev =

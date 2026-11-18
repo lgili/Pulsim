@@ -1,4 +1,4 @@
-"""Analytic reference set: 20 circuits with a closed-form (or exact
+"""Analytic reference set: 22 circuits with a closed-form (or exact
 piecewise-LTI) solution, one per entry of :data:`CASES`.
 
 Each :class:`Case` has ``build(k)`` -> ``(builder, switch_fn)`` where ``k``
@@ -240,6 +240,51 @@ def _pwl_diode(k):
     return b, None
 
 
+class _GateOn:
+    """The given switches' gates held on (a constant mask, no edges)."""
+
+    def __init__(self, n, on):
+        self.m = pulsim.SwitchStateMask(n)
+        for i in on:
+            self.m.set(i, True)
+
+    def __call__(self, _t):
+        return self.m
+
+    def next_edge_after(self, _t):
+        return math.inf
+
+
+def _igbt_knee(k):
+    b = _b()
+    b.add_current_source("I", "c", "gnd", 10.0)  # 10 A out of `c` into the IGBT
+    b.add_igbt("Q", "c", "gnd", 10e-3 * k, 1e9, V_ce0=1.0, reverse_blocking=True)
+    return b, _GateOn(b.graph.num_switches, [b.switch_index_of("Q")])
+
+
+# The gate edge is off the 1 us grid. pwl+restart samples every user gate at the
+# step start (design D4), so it fires one step late there: a disagree by design.
+_A_SCR = math.radians(60.0)
+
+
+def _scr_hw(k):
+    b = _b()
+    b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 1e3)
+    b.add_thyristor("T", "a", "k", 1e-2, 1e9, V_f=0.7)
+    b.add_resistor("R", "k", "gnd", 10.0 * k)
+    return b, pulsim.make_phase_control_fn(1e3, _A_SCR, 1e-4, [b.switch_index_of("T")],
+                                           b.graph.num_switches)
+
+
+def _scr_hw_exact(t):
+    th = np.mod(2 * np.pi * 1e3 * np.asarray(t), 2 * np.pi)
+    vin = 10.0 * np.sin(th)
+    # The engines store the left limit at the gate edge too; 1e-12 rad (1.6e-13 s)
+    # keeps that sample OFF whichever way the phase rounds.
+    on = (th > _A_SCR + 1e-12) & (th <= np.pi - math.asin(0.07))   # latched until i = 0
+    return np.where(on, (vin - 0.7) * 10.0 / (10.0 + 1e-2), vin * 10.0 / (10.0 + 1e9))
+
+
 def _hw_r(k):
     b = _b()
     b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
@@ -449,6 +494,11 @@ CASES = [
          abs_scale=1.2, exclude_t0=True, checks={"V": 1.2, "P": 12.0}),
     Case("halfwave_r", "half-wave rectifier, R load, V_f 0.7 V", _hw_r, _v("o"), _hw_r_exact,
          3e-3, 1e-6, NO_DSED, exclude_t0=True),
+    Case("igbt_knee", "PWL IGBT, 10 A forced, V_ce0 1 V, r_ce 10 mOhm", _igbt_knee, _v("c"),
+         lambda t: np.full_like(np.asarray(t, dtype=float), 1.0 + 10 * 10e-3), 1e-4, 1e-6, NO_DSED,
+         abs_scale=1.1, exclude_t0=True, checks={"V": 1.1, "P": 11.0}),
+    Case("scr_halfwave_r", "thyristor half-wave, R load, alpha 60 deg, V_f 0.7 V", _scr_hw,
+         _v("k"), _scr_hw_exact, 3e-3, 1e-6, NO_DSED, exclude_t0=True),
     Case("halfwave_rl", "half-wave rectifier, RL load", _hw_rl, _i("L"), _hw_rl_exact,
          3e-3, 1e-6, ALL),
     Case("hard_switched_rc", "hard-switched RC (p8_caploop)", _caploop, _v("sw"), _caploop_exact,

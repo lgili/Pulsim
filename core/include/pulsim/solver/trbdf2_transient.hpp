@@ -1622,7 +1622,12 @@ inline SimulationResult run_transient_trbdf2(
         result.event_iteration_count.push_back(0);
         // The bits the probe was solved under (a landing has already
         // reset gates_decided to its pre-commutation mask).
-        result.record_switch_state(mask_at(t));
+        // Pure overlay: a record must not re-apply the gates (combine
+        // sets g and opens a gate-held device).
+        result.record_switch_state(
+            has_diodes ? switch_fn(t).overlay(diodes.current_diode_mask(),
+                                              diodes.diode_owned_bits())
+                       : switch_fn(t));
         event_sample_t = tp;
     };
     Size sdirk_left = has_diodes ? opts.sdirk_after_settle : Size{0};

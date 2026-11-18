@@ -2368,7 +2368,13 @@ private:
                 "{}(\"{}\"): the holding current I_H = {} must be a finite "
                 "number >= 0 A.", fn, name, I_H));
         }
-        require_finite_(fn, name, "V_th", V_th);
+        if (!(V_th >= Real{0}) || !std::isfinite(V_th)) {
+            // V_th < 0 with V_f = 0 turns on at a reverse voltage and off
+            // at once: guaranteed chatter.
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): the turn-on threshold V_th = {} must be a "
+                "finite number >= 0 V.", fn, name, V_th));
+        }
         const Index a_idx = resolve_node_(a);
         const Index k_idx = resolve_node_(k);
         const Index b_id = add_branch_(name, a_idx, k_idx,

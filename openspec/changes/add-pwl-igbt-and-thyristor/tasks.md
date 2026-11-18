@@ -1,6 +1,6 @@
 ## 1. Law and stamp
-- [x] 1.1 `models/gated_diode.hpp`: `Params {g_on, g_off, V_f, V_th, I_H, mode, reverse_blocking}`; `turn_on_voltage`, `branch_current`, `decide(c, g, v)`, `crossing_signal(c, g, v)`; validation by name
-- [x] 1.2 C++ law tables: every `(mode, c, g)` row of the design table at `V_f ± ε`, `I_H ± ε`; `reverse_blocking=False`, `V_f = 0` gives `c = g`
+- [x] 1.1 (done in `models/switched_diode.hpp`: `Params::Gate {None, Held, Latching}`, `I_H`, gate bit `g`; reverse blocking is the diode itself, no field) `models/gated_diode.hpp`: `Params {g_on, g_off, V_f, V_th, I_H, mode, reverse_blocking}`; `turn_on_voltage`, `branch_current`, `decide(c, g, v)`, `crossing_signal(c, g, v)`; validation by name
+- [x] 1.2 (Held and Latching rows of `decide` / `crossing_signal` with the gate off; no `reverse_blocking=False` row: that IGBT is `add_switch`) C++ law tables: every `(mode, c, g)` row of the design table at `V_f ± ε`, `I_H ± ε`; `reverse_blocking=False`, `V_f = 0` gives `c = g`
 - [x] 1.3 Stamp through `stamp_switch_fixed(..., v_drop_on)`; C++ stamp-delta test (`J` unchanged between modes, `b` gains `∓g_on·V_f` only when `c = 1`)
 
 ## 2. Pool, mask and record
@@ -12,7 +12,7 @@
 - [x] 3.1 `CircuitBuilder::add_igbt(..., V_ce0, reverse_blocking, V_th)`; `FutureWarning` when `reverse_blocking` is left at its (stage-1) default
 - [x] 3.2 Test: +10 A, `V_ce0 = 0.9 V`, `R_on = 10 mΩ` → `v_CE = 1.000 V`, 10.0 W (DC op, `pwl`, `trbdf2`), 1e-9
 - [x] 3.3 Test: −100 V applied, gate on → `i = −1e-7 A`; gate off with +100 V → `i = +1e-7 A`
-- [x] 3.4 Test: `reverse_blocking=False`, `V_ce0 = 0` bit-identical to the pre-change `add_igbt` on a three-phase VSI (states, mask record, loss summary)
+- [x] 3.4 (tautological: `reverse_blocking=False` IS `add_switch`; ungated circuits WITH diodes are covered by the 45-checkpoint golden compare, ALL IDENTICAL) Test: `reverse_blocking=False`, `V_ce0 = 0` bit-identical to the pre-change `add_igbt` on a three-phase VSI (states, mask record, loss summary)
 - [x] 3.5 Test: hold at `V_ce0 ± ε` with the gate on, `min(i) ≥ −1e-9 A` on every engine
 - [x] 3.6 Preflight / abort message names the IGBT when an inductive current has no path
 
@@ -20,8 +20,8 @@
 - [x] 4.1 `pwl`: event iteration, sub-step watcher, seeding, DC operating point
 - [x] 4.2 `trbdf2`: crossing signal, held tolerance, forbidden-state check
 - [ ] 4.3 `dsed`: predicates and settle — NOT DONE: dsed refuses gated devices by name (`feature='gated_diode'`), DECISIONS 2
-- [x] 4.4 (pwl, trbdf2; dsed refuses) Per-site test: gate held off under forward bias → `|i| ≤ g_off·|v|` on `pwl`, `trbdf2`, `dsed`
-- [x] 4.5 (GateHeld / Latching cells × pwl, trbdf2, dsed, bdf1; the AC-sweep column is in the table but has no cell) Conformance rows (`add-engine-conformance-matrix`): `igbt[gated]`, `thyristor`, `gto`, `triac` × {pwl, trbdf2, dsed, DC, AC}
+- [ ] 4.4 (end to end on pwl and trbdf2 only — gate-off block with a 410 A control; dsed refuses; no per-site test of the sub-step watcher or trbdf2 boundary settle) Per-site test: gate held off under forward bias → `|i| ≤ g_off·|v|` on `pwl`, `trbdf2`, `dsed`
+- [ ] 4.5 (partial: GateHeld / Latching cells × pwl, trbdf2, dsed, bdf1, gate held on — no gate edge, no DC or AC cell) Conformance rows (`add-engine-conformance-matrix`): `igbt[gated]`, `thyristor`, `gto`, `triac` × {pwl, trbdf2, dsed, DC, AC}
 
 ## 5. Thyristor, GTO, TRIAC
 - [x] 5.1 `add_thyristor`, `add_gto`, `add_triac`; `switch_indices_of`
@@ -34,7 +34,7 @@
 - [x] 5.8 TRIAC: AC phase control on a resistive load, RMS load voltage `V_rms·sqrt(1 − α/π + sin(2α)/(2π))` = 69.68 V for 100 V peak, α = 30°, within 0.5 %
 
 ## 6. Python and YAML
-- [x] 6.1 `components()` exports the new parameters; `_diode_state` law extended to the gated modes; `res.i`, `device_loss_summary` (`V_ce0·I + R_on·I²` = 10.0 W at 10 A), `device_thermal_summary`
+- [x] 6.1 (`_diode_state`: only the OFF-under-forward-bias check is switched off for gated devices — task 2.2; `device_thermal_summary` not tested with a gated device) `components()` exports the new parameters; `_diode_state` law extended to the gated modes; `res.i`, `device_loss_summary` (`V_ce0·I + R_on·I²` = 10.0 W at 10 A), `device_thermal_summary`
 - [x] 6.2 Bindings, stubs
 - [x] 6.3 YAML: `igbt` keys `V_ce0`, `reverse_blocking`; types `thyristor`, `gto`, `triac`; strict validation naming the device
 - [x] 6.4 `make_thyristor_switch_fn` and `add_thyristor_to_chain` emit `DeprecationWarning` naming `add_thyristor`

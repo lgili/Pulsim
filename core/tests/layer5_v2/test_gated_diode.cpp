@@ -92,6 +92,9 @@ TEST_CASE("Gated devices: builder validation names the device", "[gated][builder
     CHECK_THROWS_WITH(b.add_thyristor("T1", "a", "k", 1e-3, 1e9, 0.0, -1.0),
                       Catch::Matchers::ContainsSubstring("T1") &&
                       Catch::Matchers::ContainsSubstring("I_H"));
+    CHECK_THROWS_WITH(b.add_gto("G1", "a", "k", 1e-3, 1e9, 0.0, -0.5),
+                      Catch::Matchers::ContainsSubstring("G1") &&
+                      Catch::Matchers::ContainsSubstring("V_th"));
     b.add_triac("X", "a", "k");
     const auto idx = b.switch_indices_of("X");
     REQUIRE(idx.size() == 2);

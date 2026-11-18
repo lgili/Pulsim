@@ -247,7 +247,7 @@ def test_latch_outlives_the_gate_pulse(engine):
     t, i = np.asarray(r.times), np.asarray(r.i("T"))
     t_fire = 30.0 / 360.0 * T
     on = t[i > 1e-3]
-    assert on.min() < t_fire + 5e-6
+    assert t_fire - 2e-6 < on.min() < t_fire + 5e-6   # the gate, not 0 deg, fired it
     assert on.max() > T / 2 + 1e-4   # conducted past the voltage zero
     # it stopped at a current zero and stayed off for the rest of the cycle
     after = (t > on.max() + 1e-5)
@@ -445,6 +445,23 @@ def test_yaml_types_and_igbt_keys(tmp_path):
                    " V_ce0: 1}\n")
     with pytest.raises(Exception, match="T9"):
         p.load_yaml_file(str(bad))
+    typo = tmp_path / "typo.yaml"
+    typo.write_text("circuit:\n  devices:\n"
+                    "    - {type: igbt, name: Q9, collector: a, emitter: k, Vce0: 1}\n")
+    with pytest.raises(Exception, match="Q9.*Vce0|Vce0.*Q9"):
+        p.load_yaml_file(str(typo))
+
+
+def test_pwl_commutation_records_follow_the_gate():
+    # Each gate fire and each current-zero turn-off is one record, at the
+    # step it takes effect (not the v - V_on crossing of an ungated diode).
+    b, sw = _half_wave(30.0, width=100e-6)
+    r = _sim(b, 2 * T, "pwl", sw, dt=1e-6)
+    bid = b.branch_id_of("T")
+    ev = [(e.new_state, e.t_estimated) for e in r.commutation_events if e.branch_id == bid]
+    assert [s for s, _ in ev] == [True, False, True, False]
+    t_fire = 30.0 / 360.0 * T
+    assert abs(ev[0][1] - t_fire) < 2e-6 and abs(ev[2][1] - (T + t_fire)) < 2e-6
 
 
 def test_python_closure_is_deprecated():
