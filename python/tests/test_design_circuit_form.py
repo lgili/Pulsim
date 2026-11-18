@@ -133,7 +133,7 @@ def test_the_exact_route_shares_labels_and_observables(monkeypatch):
     monkeypatch.setattr(pss, "_labels", lab)
     monkeypatch.setattr(pk, "spec_for", spec)
     fac, cir = _pair()
-    cir.evaluate_many(DESIGNS, workers=1)
+    cir.evaluate_many(DESIGNS, workers=1, backend="thread")
     assert n == {"labels": 1, "spec": 1}
     n.update(labels=0, spec=0)
     fac.evaluate_many(DESIGNS, workers=1)

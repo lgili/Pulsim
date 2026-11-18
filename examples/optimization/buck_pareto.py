@@ -40,7 +40,6 @@ of a 512-design run is an OBSERVATION of this model.
 from __future__ import annotations
 
 import functools
-import math
 import sys
 
 import numpy as np
@@ -129,38 +128,29 @@ def schedule(design):
     return p.make_dead_time_pwm_pair_fn(design["f_sw"], D, 0, 1, 2, 0.0)
 
 
-def _volume(per):
-    """Box volume (m^3) of the illustrative law; heatsink sized so the
-    hotter switch sits at 125 C."""
-    d, k, loss = per.design, per.kpis, per.losses
-    # default KPIs (closed forms on the kernel path): no waveform needed
-    v_l = K_L * (d["L"] * k["i_peak.L"] * k["i_rms.L"]) ** 0.75
-    v_c = K_C * d["C"] * k["v_out"] ** 2
-    r_sa = _r_th_sa(d, loss)
-    # finite at the smallest heatsink: the r_th_sa constraint flags it
-    v_hs = K_HS / max(r_sa, R_TH_SA_MIN)
-    return v_l + v_c + v_hs
+def kpis_of(part_name):
+    """The two design KPIs as formulas (``Kpi.formula``): declarative,
+    so they pickle and the kernel batch computes them with no Python
+    per design (DECISIONS 26).
 
-
-def _r_th_sa(design, losses):
-    """Largest sink-to-ambient resistance that keeps both switches at
-    or below 125 C on one sink: 85 K over the total semiconductor loss,
-    minus the hotter device's junction-to-case drop."""
-    part = PARTS[design["part"]]
-    p_q = {q: sum(losses.get(q, {}).values()) for q in ("Q1", "Q2")}
-    p_tot = sum(p_q.values())
-    r_jc = float(part.params["R_th_jc"])
-    if p_tot <= 0:
-        return math.inf
-    return (T_J_MAX - T_AMB - r_jc * max(p_q.values())) / p_tot
+    ``r_th_sa``: the largest sink-to-ambient resistance that keeps both
+    switches at or below 125 C on one sink -- 85 K over the total
+    semiconductor loss, minus the hotter device's junction-to-case drop.
+    ``volume``: box volume (m^3) of the illustrative law, heatsink sized
+    by ``r_th_sa`` (floored at ``R_TH_SA_MIN``: the ``r_th_sa``
+    constraint flags a design below it)."""
+    r_jc = float(PARTS[part_name].params["R_th_jc"])
+    return [
+        Kpi.formula("r_th_sa", f"({T_J_MAX!r} - {T_AMB!r} - {r_jc!r} * "
+                    "max(loss.Q1, loss.Q2)) / (loss.Q1 + loss.Q2)"),
+        Kpi.formula("volume", f"{K_L!r} * (L * i_peak.L * i_rms.L) ** 0.75"
+                    f" + {K_C!r} * C * v_out ** 2"
+                    f" + {K_HS!r} / max(r_th_sa, {R_TH_SA_MIN!r})"),
+    ]
 
 
 def switching_period(design):
     return 1.0 / design["f_sw"]
-
-
-def r_th_sa_kpi(per):
-    return _r_th_sa(per.design, per.losses)
 
 
 def make_evaluator(form="circuit"):
@@ -169,7 +159,9 @@ def make_evaluator(form="circuit"):
     ``'factory'``: ``build`` per design. Same records. Everything is a
     module-level function or a value (``Constraint``), so the evaluator
     pickles and ``evaluate_many(backend='process')`` runs it (each
-    worker builds the part's circuit once)."""
+    worker builds the part's circuit once). With the circuit form and
+    formula KPIs, ``evaluate_many`` runs the kernel batch: every design
+    in one GIL-free kernel call, on ``workers`` native threads."""
     t_switch_specs = {
         name: {"Q1": part.switch_spec(Tj=T_J_MAX)} for name, part in
         PARTS.items()}
@@ -184,7 +176,7 @@ def make_evaluator(form="circuit"):
     return {name: Evaluator(
         **source(name), period=switching_period, loads=("R_load",),
         output="vout",
-        kpis=[Kpi("volume", _volume), Kpi("r_th_sa", r_th_sa_kpi)],
+        kpis=kpis_of(name),
         constraints=[Constraint.max("ripple_v", RIPPLE_MAX),
                      Constraint.min("r_th_sa", R_TH_SA_MIN)],
         steady=SteadySpec(method="pss"),

@@ -41,6 +41,7 @@ from . import _period_kpis as _pk
 from ._pulsim import ConvergenceError  # type: ignore[import-not-found]
 from ._refusal import UnsupportedError, unsupported
 from .periodic_steady_state import _closed_loop_source
+from ._design_kernel import _psum
 
 # modules read at call time (tests replace their attributes): a
 # function-level import costs importlib calls in every evaluation
@@ -217,7 +218,8 @@ class Kpi:
     KPI is that default. ``Kpi.efficiency()``, ``Kpi.ripple(node)``
     (peak-to-peak, ``ripple_v.<node>``), ``Kpi.mean(node)``
     (time-weighted, ``v_avg.<node>``), ``Kpi.i_peak(inductor)``,
-    ``Kpi.i_rms(inductor)``, ``Kpi.ripple_i(inductor)``."""
+    ``Kpi.i_rms(inductor)``, ``Kpi.ripple_i(inductor)``,
+    ``Kpi.formula(name, expr)``."""
 
     name: str
     fn: Callable[["SteadyPeriod"], float]
@@ -247,6 +249,17 @@ class Kpi:
         return cls(f"ripple_i.{inductor}", _KpiSpec("ripple_i",
                                                      str(inductor)))
 
+    @classmethod
+    def formula(cls, name: str, expr: str) -> "Kpi":
+        """``name = expr``: arithmetic over KPI names computed before it
+        (``i_peak.L``, ``v_out``, earlier user KPIs), design variables
+        and ``loss.<device>`` (that device's total loss): numbers,
+        ``+ - * / **``, ``max``, ``min``, ``abs``, ``sqrt``, ``exp``,
+        ``log``, ``inf``. Declarative, so it pickles and the kernel batch
+        computes it (DECISIONS 26)."""
+        from ._design_kernel import Formula
+        return cls(str(name), _KpiSpec("formula", Formula(expr)))
+
 
 @dataclass(frozen=True)
 class _KpiSpec:
@@ -254,7 +267,7 @@ class _KpiSpec:
     evaluator; calling it on a :class:`SteadyPeriod` is an error)."""
 
     kind: str
-    target: Optional[str] = None
+    target: Any = None      # a node / device name, or a Formula
 
     def __call__(self, per):
         raise TypeError("a declarative Kpi is computed by the Evaluator")
@@ -739,6 +752,8 @@ class Evaluator:
         st["_spec_cache"] = {}
         st["periodicity_checks"] = {}
         st.pop("_prov", None)
+        st.pop("_kplan", None)      # kernel tables: rebuilt on demand
+        st.pop("last_batch", None)
         if self._circuit_factory is not None:
             st["circuit"] = None     # rebuilt by the factory in the worker
         return st
@@ -861,16 +876,54 @@ class Evaluator:
 
     def evaluate_many(self, designs: Sequence[Mapping[str, Any]], *,
                       workers: Optional[int] = None,
-                      backend: str = "thread") -> list:
-        """Records in input order (design D6), on the job runner of
-        :func:`pulsim.sweep` (``'thread'``: the kernel releases the
-        GIL; ``'process'`` for Python-heavy designs -- ``build`` and
-        the KPIs must then pickle). Design-specific outcomes never stop
-        the batch; it stops with the refusal when its first three
-        designs are ``refused`` with identical fields (the
-        configuration, not the design, is unsupported). Any other
-        exception propagates."""
+                      backend: Optional[str] = None) -> list:
+        """Records in input order (design D6). ``backend``:
+
+        * ``None`` (default): the kernel batch when the evaluator's plan
+          allows it (circuit form, exact steady-state route, declarative
+          KPIs and constraints: DECISIONS 26) -- every design in one
+          kernel call on ``workers`` native threads, no Python per
+          design; otherwise, and for a design the kernel does not
+          finish, the Python path, its record's ``counters['batch']``
+          naming why. ``self.last_batch`` counts both.
+        * ``'kernel'``: the same, refused (``ValueError`` naming the
+          reason) when the plan does not allow it.
+        * ``'thread'``: the Python path on the job runner of
+          :func:`pulsim.sweep` (the kernel releases the GIL).
+        * ``'process'``: Python-heavy designs -- ``build`` and the KPIs
+          must then pickle.
+
+        Design-specific outcomes never stop the batch; it stops with the
+        refusal when its first three designs are ``refused`` with
+        identical fields (the configuration, not the design, is
+        unsupported). Any other exception propagates."""
         from .sweep import _run_jobs
+        if backend not in (None, "kernel", "thread", "process"):
+            raise ValueError(f"backend must be None, 'kernel', 'thread' or "
+                             f"'process', got {backend!r}")
+        if backend in (None, "kernel"):
+            from . import _design_kernel as _dk
+            plan = _dk.plan_of(self)
+            if isinstance(plan, str):
+                if backend == "kernel":
+                    raise ValueError(f"evaluate_many(backend='kernel'): the "
+                                     f"evaluator has no kernel plan: {plan}")
+                recs = self.evaluate_many(designs, workers=workers,
+                                          backend="thread")
+                self.last_batch = _fz({"designs": len(recs), "kernel": 0,
+                                       "python": len(recs),
+                                       "python_reasons": {plan: len(recs)}})
+                return [dataclasses_replace(r, counters=_fz(
+                    {**r.counters, "batch": "python: " + plan}))
+                        for r in recs]
+            designs = [dict(d) for d in designs]
+            out = _dk.run(self, plan, designs[:3], 1)
+            self._refusal_rule(out)
+            if len(designs) > 3:
+                head = self.last_batch
+                out += _dk.run(self, plan, designs[3:], workers)
+                self.last_batch = _merge_batches(head, self.last_batch)
+            return out
         jobs = [(self, dict(d)) for d in designs]
         if backend == "process" and workers != 1 and len(jobs) > 3:
             # refused by name before the head runs or a worker starts
@@ -879,16 +932,7 @@ class Evaluator:
         out, _, _ = _run_jobs(head, parallel=False, backend="thread",
                               n_workers=1, verbose=False,
                               job=_evaluate_job, reraise=True)
-        refs = {r.refusal for r in out}
-        # 'consistent_mode' is found mid-run, at a state that depends on
-        # the design: it never condemns the configuration
-        if len(out) == 3 and all(r.status == "refused" for r in out) \
-                and len(refs) == 1 and out[0].refusal[1] != "consistent_mode":
-            e, f, d, k = out[0].refusal
-            raise unsupported(
-                e, f, "evaluate_many: the first three designs were refused "
-                "with identical fields, so the configuration is "
-                f"unsupported: {out[0].reason}", device=d, kind=k)
+        self._refusal_rule(out)
         rest = jobs[3:]
         if rest and backend == "process" and workers != 1:
             # chunks: the evaluator is pickled once per chunk, not per
@@ -909,6 +953,19 @@ class Evaluator:
                 reraise=True)
             out += more
         return out
+
+    @staticmethod
+    def _refusal_rule(out):
+        refs = {r.refusal for r in out}
+        # 'consistent_mode' is found mid-run, at a state that depends on
+        # the design: it never condemns the configuration
+        if len(out) == 3 and all(r.status == "refused" for r in out) \
+                and len(refs) == 1 and out[0].refusal[1] != "consistent_mode":
+            e, f, d, k = out[0].refusal
+            raise unsupported(
+                e, f, "evaluate_many: the first three designs were refused "
+                "with identical fields, so the configuration is "
+                f"unsupported: {out[0].reason}", device=d, kind=k)
 
     def _check_picklable(self, designs):
         """Refuse a process batch whose evaluator or designs do not
@@ -1024,7 +1081,7 @@ class Evaluator:
             losses = self._losses_at(losses, tj)
             new = {}
             for d, r in th.r_th.items():
-                t_hat = th.t_amb + float(r) * sum(losses[d].values())
+                t_hat = th.t_amb + float(r) * _psum(losses[d].values())
                 new[d] = tj[d] + omega * (t_hat - tj[d])
             inc = max(abs(new[d] - tj[d]) for d in tj)
             if not math.isfinite(inc):
@@ -1083,7 +1140,7 @@ class Evaluator:
             return out
         for d in th.r_th:
             cat = out.get(d) or {"conduction": 0.0}
-            p0 = sum(cat.values())
+            p0 = _psum(cat.values())
             p1 = float(th.loss_at(d, p0, tj[d]))
             out[d] = ({c: v * p1 / p0 for c, v in cat.items()} if p0 > 0
                       else {"conduction": p1})
@@ -1571,10 +1628,10 @@ class Evaluator:
         if uncovered:
             counters["losses_not_covered"] = ", ".join(uncovered)
         else:
-            p_loss = sum(sum(c.values()) for c in losses.values())
+            p_loss = _psum(_psum(c.values()) for c in losses.values())
             kpis["p_loss"] = p_loss
         if self.loads:
-            p_out = sum(float(rows[n]["P_avg"]) for n in self.loads)
+            p_out = _psum(float(rows[n]["P_avg"]) for n in self.loads)
             kpis["p_out"] = p_out
             # P_out / (P_out + losses): with a datasheet model or a
             # loss table the losses include what the resistor-pair
@@ -1624,7 +1681,8 @@ class Evaluator:
         user = []
         for k in self.kpis:
             if isinstance(k.fn, _KpiSpec):
-                kpis[k.name] = _declared(k, kpis, kp, run, a, z, b)
+                kpis[k.name] = _declared(k, kpis, kp, run, a, z, b,
+                                         design, losses)
             elif k.name in kpis:
                 raise ValueError(f"user KPI {k.name!r} has the name of a "
                                  "default KPI")
@@ -1642,11 +1700,15 @@ class Evaluator:
         return kpis
 
 
-def _declared(k, kpis, kp, run, a, z, b):
+def _declared(k, kpis, kp, run, a, z, b, design, losses):
     """The value of a declarative :class:`Kpi`: the default KPI it names,
-    or a node's peak-to-peak / time-weighted mean on the route's own
-    footing (closed form on the kernel route, samples otherwise)."""
+    a node's peak-to-peak / time-weighted mean on the route's own
+    footing (closed form on the kernel route, samples otherwise), or a
+    formula of those."""
     s = k.fn
+    if s.kind == "formula":
+        from ._design_kernel import formula_lookup
+        return s.target.evaluate(formula_lookup(kpis, design, losses))
     if s.kind in ("efficiency", "i_peak", "i_rms", "ripple_i"):
         name = s.kind if s.target is None else f"{s.kind}.{s.target}"
         if name not in kpis:
@@ -1669,6 +1731,25 @@ def _declared(k, kpis, kp, run, a, z, b):
         t, v = _with_right_limits(run, lambda st, col=col: st[:, col])
         return _p2p(t, v, a, z) if s.kind == "ripple_v" else _mean(t, v, a, z)
     raise ValueError(f"unknown declarative KPI kind {s.kind!r}")
+
+
+def dataclasses_replace(rec, **kw):
+    from dataclasses import replace
+    return replace(rec, **kw)
+
+
+def _merge_batches(a, b):
+    """Batch counters of two consecutive kernel runs, summed."""
+    out = dict(b)
+    for k in ("designs", "kernel", "python", "symbolic_analyses",
+              "python_calls_in_kernel", "periodicity_checks"):
+        out[k] = a.get(k, 0) + b.get(k, 0)
+    reasons = dict(a.get("python_reasons", {}))
+    for k, v in b.get("python_reasons", {}).items():
+        reasons[k] = reasons.get(k, 0) + v
+    out["python_reasons"] = reasons
+    out["wall_s"] = a.get("wall_s", 0.0) + b.get("wall_s", 0.0)
+    return _fz(out)
 
 
 def _as_builder(src):
@@ -1894,8 +1975,8 @@ def _stored_power_kernel(kp, comps):
         return float((kp.y_end if end else kp.y_start)[kp._j(key)])
 
     def vc(nodes, end):
-        return sum(sg * at(("node#", int(k)), end)
-                   for k, sg in zip(nodes, (1.0, -1.0)) if int(k) >= 0)
+        return _psum(sg * at(("node#", int(k)), end)
+                     for k, sg in zip(nodes, (1.0, -1.0)) if int(k) >= 0)
     e = 0.0
     for n, c in comps.items():
         if c["kind"] == "inductor":
@@ -1930,12 +2011,12 @@ def _energy_balance(comps, src, rows, losses, p_in, counters, p_stored,
             or any(c["kind"] == "voltage_source" and n not in src
                    for n, c in comps.items()):
         return
-    p_dis = sum(float(r["P_avg"]) for r in rows.values() if "P_avg" in r)
+    p_dis = _psum(float(r["P_avg"]) for r in rows.values() if "P_avg" in r)
     res = (p_in - p_dis - p_stored) / p_in
     counters["energy_residual"] = res
-    counters["p_table"] = sum(v for c in losses.values()
-                              for k, v in c.items()
-                              if k in ("switching", "recovery", "core"))
+    counters["p_table"] = _psum(v for c in losses.values()
+                                for k, v in c.items()
+                                if k in ("switching", "recovery", "core"))
     tol = _ENERGY_RTOL[route] * (max(1.0, (2000.0 / n_samples) ** 2)
                                  if route == "sampled" else 1.0)
     if not abs(res) <= tol:

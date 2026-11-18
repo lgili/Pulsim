@@ -33,5 +33,7 @@
 - [x] 7.5 Independent periodicity check of the exact route, once per topology and event pattern; a mismatch is `failed` (`test_design_periodicity.py`, DECISIONS 22)
 - [x] 7.6 Energy-balance guard on every record, tolerance by route from measured residuals; the record carries the residual and the table losses (`test_design_energy_balance.py`, DECISIONS 22)
 
+- [x] 7.7 Kernel batch evaluator: `evaluate_many` runs a circuit-form, declarative evaluator's designs in one GIL-free kernel call on native threads; records equal the Python path's; fallbacks and what the plan cannot express named in `counters['batch']` (`test_design_kernel_batch.py`, `test_design_batch.cpp`, DECISIONS 26)
+
 ## 8. Verification
 - [x] 8.1 ruff, pytest, `openspec validate --all --strict`

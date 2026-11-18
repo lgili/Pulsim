@@ -135,16 +135,17 @@ refused [1.e+30 1.e+30] [1.e+30]
   rebuild, one symbolic analysis per batch, the state labels and KPI
   observables resolved once (about 0.16 ms per buck design).
 * `ev.evaluate_many(designs, workers=8)` keeps the input order and gives
-  the same records on 1 or 8 threads. On the `pss` route the period
-  runs, the KPI integrals and the whole Newton loop are one kernel call
-  with the GIL released (`counters["pss_loop"] == "kernel"`), but the
-  set-up, the loss rows, the KPIs and the record still hold the GIL
-  (about two thirds of an evaluation), so threads do not speed the buck
-  up; `backend="process"` does, on batches large enough to pay the
-  workers' start-up (DECISIONS 21).
+  the same records on 1 or 8 threads. With the circuit form, the `pss`
+  route and declarative KPIs and bounds, it is the KERNEL BATCH: every
+  design -- derivation, orbit, integrals, losses, KPIs, constraints,
+  status -- in one kernel call on 8 native threads with the GIL
+  released; records equal `ev.evaluate(d)`'s bit for bit. Section 6
+  says which path runs when, with measured rates.
 * For processes the evaluator must pickle. Name KPIs and bounds as data:
   `kpis={"i_pk": Kpi.i_peak("L")}`, `Kpi.efficiency()`,
   `Kpi.ripple("vout")`, `Kpi.mean("vout")`, `Kpi.i_rms("L")`,
+  `Kpi.formula("vol", "3e-4 * (L * i_peak.L * i_rms.L) ** 0.75")`
+  (arithmetic over KPIs, design variables and `loss.<device>`),
   `constraints=[Constraint.max("ripple_v", 0.05)]`; give the circuit form
   a module-level factory, `circuit=functools.partial(build_circuit,
   part)`, which each worker calls once. Lambdas still work on threads;
@@ -179,3 +180,31 @@ observation of that model, not a design result. Pulsim's shipped parts
 are synthetic too (`pulsim.lib.part` refuses them unless
 `allow_synthetic=True`); for real numbers import the vendor's PLECS
 thermal file with `pulsim.lib.import_plecs_xml`.
+
+## 6. Which path runs when
+
+`evaluate_many(designs, workers=n, backend=None)` picks, per evaluator
+and then per design (`ev.last_batch` counts both; a Python-path record
+names its reason in `counters["batch"]`):
+
+| path | when | Python per design |
+|---|---|---|
+| kernel batch | circuit form, `SteadySpec("pss")` or `"auto"` on the exact engine, KPIs `Kpi.*` / `Kpi.formula`, constraints, switch loss tables at a numeric `Tj`, native schedule (`make_pwm_switch_fn` & co.) | none in the evaluation (the `period` / `schedule` factories are called once per design before it; the record is built after it) |
+| Python path, named | a callable KPI, the factory form, a thermal loop, `gradients=`, a variable that moves a value the observables read; or a design the kernel did not finish (orbit not converged, energy balance, non-finite KPI, a refusal), re-run so its `failed` / `refused` record is the Python path's | all of it |
+| `backend="thread"` | asked for | all of it; threads only overlap the GIL-free orbit |
+| `backend="process"` | asked for; the evaluator must pickle | all of it, in parallel workers (about 0.3 s start-up each) |
+
+Measured on the buck example's designs (4096, both parts, evaluator
+reused, best of 5 interleaved; a 10-core Mac with a load average of
+15-19 from other builds -- an OBSERVATION of that machine, not a
+guarantee):
+
+| evaluations/s | 1 | 2 | 4 | 8 workers |
+|---|---|---|---|---|
+| kernel batch (default) | 10022 | 15502 | 21621 | 25369 |
+| Python path, threads | 3597 | 2391 | 2286 | 2405 |
+
+The kernel call alone goes from 10246 to 49721 designs/s on 1 to 8
+threads; building the records in Python (about 20 us each) is what
+remains serial.
+

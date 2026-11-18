@@ -910,6 +910,88 @@ Recorded, not changed:
   once per chunk (its cache is emptied on pickling). Documented
   behaviour, unchanged.
 
+## 26. The kernel batch evaluator (slice 6, item 2)
+
+Question: threads did not scale (1371 / 1546 / 1615 evaluations/s on
+1 / 4 / 8 threads) because the per-design glue was Python. How does a
+whole design run without Python?
+
+Option taken: `evaluate_many` (default `backend=None`) hands the kernel
+(`_pulsim._design_batch`, `core/include/pulsim/dsed/design_batch.hpp`)
+the parameter table, one period and one native schedule per design and
+a thread count. Per design, on `std::thread`s with the GIL released:
+`with_params` / `with_value` of the shared base `Circuit`, builder,
+cache (sharing the base's symbolic plan), adapter, the schedule's
+periodicity test, `periodic_orbit_newton`, the stability test, the
+implausible-voltage scan, the switching energies from the loss tables
+at the period's edge limits, and a REGISTER PROGRAM for the rows,
+losses, KPIs, energy balance and violations. The program is written by
+`pulsim/_design_kernel.Plan` once per evaluator, operation for
+operation in the order of the Python path (`design._kpis`,
+`_period_kpis.loss_rows`, `_energy_balance`), so records are EQUAL to
+`evaluate()`'s -- every field but `wall_s`, counters included.
+
+* Fallback, not a second implementation of the outcomes: a design the
+  kernel cannot finish (orbit status other than converged, an unstable
+  multiplier, no closed-form integrals, an implausible voltage, an
+  energy balance or a non-finite KPI, any C++ exception -- a bound
+  check of `with_value` included) is returned with its reason and
+  re-run on the Python path, which owns the wording of every `failed`
+  and `refused` record; the record carries `counters['batch'] =
+  'python: kernel: <reason>'`. A design whose schedule is not native
+  (an opaque Python callable), a missing variable, a period or schedule
+  factory that raises: the Python path, named likewise. Statuses
+  therefore cannot differ between the paths; `ok` / `infeasible` and
+  every number are the program's.
+* What the plan cannot express sends the whole batch to the Python
+  path with the reason in every record's `counters['batch']` and in
+  `ev.last_batch['python_reasons']`: the factory form, a callable KPI,
+  a thermal loop (until item 3), `gradients=`, a design variable that
+  moves a value the observables read, loss options other than table
+  switch specs, a transient or stepped route. `backend='kernel'`
+  refuses instead (ValueError naming it); `'thread'` / `'process'` are
+  the Python path as before (their records carry no `batch` key).
+* `Kpi.formula(name, expr)`: arithmetic over KPIs, design variables and
+  `loss.<device>`, compiled once (`_design_kernel.Formula`) and run by
+  the same stack interpreter on both paths (IEEE division by zero; a
+  non-finite value is `failed`). The buck example's two callables are
+  now formulas; their records are the callables' bit for bit (512 of
+  512 per part checked).
+* Sums: CPython >= 3.12 `sum()` of floats is Neumaier-compensated,
+  3.10 / 3.11 a plain loop, so `sum()` in the record arithmetic made a
+  record depend on the Python version (and the kernel could not mirror
+  it). The record arithmetic now uses `design._psum` (CPython 3.12's
+  algorithm on every version, `SumN` in the kernel): records on 3.12+
+  unchanged, on 3.10 / 3.11 they may move by an ulp (and now equal
+  3.12+'s). `np.sum` of the switching energies (8 or more edges) is
+  numpy's pairwise sum, mirrored (`np_pairwise`, checked against numpy
+  2.4 on 5840 random vectors).
+* The periodicity check stays in Python, once per event pattern of the
+  batch (the first design of each pattern in input order: what the
+  sequential Python path checks) and for every design with an event at
+  the section; a mismatch raises out of `evaluate_many`.
+* Threads inside the kernel vs one GIL-released call per design from a
+  Python thread pool, measured on the buck Pareto designs (4096, both
+  parts, interleaved best of 5, evaluator reused, load average 15-19 on
+  10 cores from other agents' builds): kernel threads 10022 / 15502 /
+  21621 / 25369 evaluations/s on 1 / 2 / 4 / 8; per-design calls 6037 /
+  7991 / 7768 / 7631 (the per-call Python dominates); the Python thread
+  path 3597 / 2391 / 2286 / 2405. Kept: threads inside the kernel.
+  The kernel call alone runs 10246 -> 49721 designs/s on 1 -> 8 threads
+  (8192-design table); the remaining serial part is the record
+  materialisation in Python (about 18-23 us per design: `design_id`'s
+  digest 8 us, the record and its mappings), which is what limits the
+  8-thread total.
+* Not unified with circuit IR task 5.2 (`_run_pwl_points`,
+  feat/core-p3-circuit-ir a8ee6eb7, not merged here): both derive per
+  row and run on `std::thread`s with an atomic index; that one runs
+  the pwl transient for `sweep`, this one the exact orbit for the
+  evaluator. Unify the row derivation and the thread loop when both are
+  in one tree.
+
+Reverse: `evaluate_many(..., backend='thread')` is the old default;
+removing `_design_kernel.run` from `evaluate_many` restores it.
+
 ## Missing from the kernel (recorded, worked around in Python)
 
 Items 1 and 2 are done (add-parameter-sensitivities slice, 2026-11):

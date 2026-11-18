@@ -129,7 +129,7 @@ def test_the_process_backend_gives_the_thread_records(form):
                        output="vout", kpis=[Kpi.ripple("x")],
                        constraints=CONSTRAINTS, steady=SteadySpec("pss"))
     ds = DESIGNS + DESIGNS[:3]
-    thr = ev.evaluate_many(ds, workers=1)
+    thr = ev.evaluate_many(ds, workers=1, backend="thread")
     prc = ev.evaluate_many(ds, workers=2, backend="process")
     # ids are made in the workers: the spec hashes the same there
     assert prc == thr

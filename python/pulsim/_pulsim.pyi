@@ -3134,6 +3134,10 @@ def _cpp_ps_pwm_switching_function(m_ref: float, t: float, n_sm: int, f_carrier:
     """
     C++ hotpath: PS-PWM switching function — returns the integer count of SMs to insert at time `t` given the modulation reference `m_ref`. Equivalent to `ps_pwm_switching_function` in pulsim/mmc.py.
     """
+def _design_batch(base: Circuit, plan: dict[typing.Any, typing.Any], table: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], periods: collections.abc.Sequence[float], schedules: list[typing.Any], n_threads: int = 1) -> dict[typing.Any, typing.Any]:
+    """
+    pulsim.design's kernel batch: every design of `table` evaluated on the exact steady-state route with the GIL released (pulsim/dsed/design_batch.hpp). Internal.
+    """
 def _lcp_enumerate(M: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], q: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> tuple[int, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]]:
     """
     2^k enumeration (k <= 12): (number of solutions, z, w) with the fewest basic z.
