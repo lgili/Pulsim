@@ -71,6 +71,22 @@ def test_c_block_p_loop_runs_the_label_law(h, tol):
     assert blk.n_fires == 11            # ticks 0..10 (instants < t_end)
 
 
+@pytest.mark.parametrize("engine,kw", [("pwl", {"dt": 1e-6}), ("trbdf2", {})])
+def test_a_built_circuit_runs_its_c_blocks_bit_for_bit(engine, kw):
+    # Integration batch 10 (control graph x circuit IR): the run's builder
+    # is Circuit.to_builder(), which carries no Python attribute; the
+    # block's graph is found through the circuit's ControlDecls. Before
+    # the fix the circuit form ran without its C block (v stayed 0).
+    b1, b2 = _rc(), _rc()
+    h1, h2 = _p_block(b1), _p_block(b2)
+    r1 = p.simulate(b1, 11 * TS, engine=engine, **kw)
+    r2 = p.simulate(b2.build(), 11 * TS, engine=engine, **kw)
+    assert h1.n_fires == h2.n_fires == 11
+    assert np.array_equal(r1.times, r2.times)
+    assert np.array_equal(r1.states, r2.states)
+    assert np.asarray(r2.v("v"))[-1] > 0.6     # the block drove the RC
+
+
 def test_label_horizon_drops_the_tick_at_t_end():
     # Before: a C block also fired at t_end (11 fires where 10 are due).
     b = _rc()

@@ -1303,7 +1303,10 @@ def test_reinit_records_only_on_the_exact_engine(engine):
         r = p.simulate(b, 1e-4, engine=engine, dt=1e-6)
     recs = getattr(r, "reinit_records", None)
     if engine in ("pwl", "trbdf2"):
-        assert recs is None
+        # the fixed engines' result has the field too (the branch-form ideal
+        # switch's records, add-branch-form-ideal-switch D4); they do not
+        # reduce dependent states, so nothing is recorded here
+        assert not recs
         return
     (rec,) = recs
     assert (rec.kind, rec.sample) == ("capacitor_loop", 0)

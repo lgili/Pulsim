@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration batch 10: control graph 2, optimisation slice 5, circuit IR 2, exact engine dependent states merged
+
+* **Fixed** a C block reached a run only through a Python attribute of
+  the builder (`builder._c_graph`); since a run's builder is
+  `Circuit.to_builder()`, `simulate(builder.build())` (and, on the
+  combined tree, every run) would have dropped the block silently. The
+  block's graph is reached through its handles (a builder's C blocks or a
+  `Circuit`'s control declarations): `simulate(circuit)` equals
+  `simulate(builder)` bit for bit on pwl and trbdf2.
+* **Fixed** `periodic_steady_state` and the design evaluator shot a
+  circuit with a C block (`add_c_block`) as if its output sources were
+  constant (the period runs tick no block). Refused by name
+  (`closed_loop`) on every engine, builder and `Circuit` form, like
+  `drive_source`; the evaluator reads both through the circuit's control
+  declarations.
+* **Changed** the exact engine's result carries `reinit_records` through
+  the shared native-result helper (also the period map's results).
+
 ### Optimisation slice 6: the kernel batch evaluator, event losses on the orbit
 
 * **Fixed** the evaluator's periodicity check: when its own plain

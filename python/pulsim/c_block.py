@@ -113,7 +113,7 @@ class CBlockHandle:
     ``inputs``, ``outputs`` and ``state`` are updated in place each block
     step, so the caller can read them between / after simulation for
     diagnostics. ``block`` is the :class:`CBlock` in the builder's control
-    graph (``builder._c_graph``).
+    graph (one per builder, reached through its handles: _c_graph_of).
     """
     name: str
     n_in: int
@@ -513,7 +513,7 @@ def add_c_block(builder,
     # its own rate in label time (the C blocks' protocol before 2.1);
     # simulate() composes it with the other graphs above the dispatch.
     from .blockchain import MixedDomainBlockChain, Rate, _InputSource
-    graph = getattr(builder, "_c_graph", None)
+    graph = _c_graph_of(builder)
     if graph is None:
         graph = MixedDomainBlockChain(label_time=True)
     k0 = len(graph.blocks)
@@ -526,7 +526,6 @@ def add_c_block(builder,
     for ch, w, src in zip(chans, outputs, src_names):
         graph._sinks.append((ch, w, src))
     try:
-        builder._c_graph = graph
         if not hasattr(builder, "_c_blocks"):
             builder._c_blocks = []
     except Exception:  # noqa: BLE001 — builder may forbid attrs
@@ -537,16 +536,21 @@ def add_c_block(builder,
     return handle
 
 
+def _c_graph_of(builder):
+    """The one control graph holding a builder's or Circuit's C blocks,
+    through its handles (a builder's ``_c_blocks``, a Circuit's
+    ControlDecls: a run's builder from Circuit.to_builder() carries no
+    Python attribute); None without C blocks."""
+    from ._circuit_ir import c_blocks_of
+    return next((g for h in c_blocks_of(builder)
+                 if (g := getattr(getattr(h, "block", None), "_graph", None))
+                 is not None), None)
+
+
 def _c_graph_observer(builder):
     """The builder's C-block graph compiled for one run (None without C
     blocks): its observer, with the outputs each block holds."""
-    graph = getattr(builder, "_c_graph", None)
-    if graph is None:
-        # A run's builder comes from Circuit.to_builder(): the blocks ride
-        # in its ControlDecls, each handle's block knows its graph.
-        from ._circuit_ir import c_blocks_of
-        graph = next((getattr(getattr(h, "block", None), "_graph", None)
-                      for h in c_blocks_of(builder)), None)
+    graph = _c_graph_of(builder)
     if graph is None or not graph.blocks:
         return None
     # Compiled once per circuit layout: the graph keeps its tick grid

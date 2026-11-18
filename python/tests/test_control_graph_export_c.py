@@ -249,10 +249,9 @@ def test_export_refuses_by_name():
     ch = p.MixedDomainBlockChain(rate=p.Rate(T))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        p.add_c_block(b, inputs=[("v", "a")], outputs=[("v", "a", "gnd")],
-                      dt=T, fn=lambda t, dt, i, o, s: None)
-    blk = b._c_graph.blocks[0]
-    ch.add("cb", blk.block, inputs=dict(x="a"), output="y")
+        h = p.add_c_block(b, inputs=[("v", "a")], outputs=[("v", "a", "gnd")],
+                          dt=T, fn=lambda t, dt, i, o, s: None)
+    ch.add("cb", h.block, inputs=dict(x="a"), output="y")
     with pytest.raises(p.ControlGraphBuildError, match="'cb' is a C block"):
         export_c(ch, b, outputs=["y"])
     ch = p.MixedDomainBlockChain()

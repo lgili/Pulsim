@@ -5,6 +5,8 @@ controller), so it is refused by name on every engine and by the
 evaluator, instead of returning the plant's orbit under a frozen duty."""
 from __future__ import annotations
 
+import warnings
+
 import pytest
 
 import pulsim as p
@@ -101,18 +103,58 @@ def test_a_hand_written_gate_around_duty_get_is_refused(engine, kw):
         p.periodic_steady_state(b, period=T, switch_fn=sf, engine=engine, **kw)
 
 
-@pytest.mark.parametrize("engine,kw", ENGINES)
-def test_a_graph_driven_source_is_refused(engine, kw):
-    b = _buck()
+def _drive_source(b):
     b.add_resistor("Rd", "drv", "gnd", 1e3)
     ch = p.MixedDomainBlockChain()
     ch.add("g", p.Gain(k=2.0), inputs=dict(x="vout"), output="y")
     ch.drive_source(b, "y", ("v", "drv", "gnd"))
+
+
+def _c_block(b):
+    # a C block's output source holds the block's last output; the period
+    # runs never tick the block (integration batch 10: was not refused)
+    b.add_resistor("Rr", "ref", "gnd", 1e3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        p.add_c_block(b, inputs=[("v", "vout")], outputs=[("v", "ref", "gnd")],
+                      dt=T, fn=lambda t, dt, i, o, s: o.__setitem__(0, 0.5 * i[0]),
+                      name="vref")
+
+
+SOURCE_ROUTES = [(_drive_source, "drive_source"), (_c_block, "add_c_block")]
+
+
+@pytest.mark.parametrize("engine,kw", ENGINES)
+@pytest.mark.parametrize("form", ["builder", "circuit"])
+@pytest.mark.parametrize("route,name", SOURCE_ROUTES,
+                         ids=[n for _, n in SOURCE_ROUTES])
+def test_a_controller_driven_source_is_refused(route, name, form, engine, kw):
+    b = _buck()
+    route(b)
     sf = p.make_pwm_switch_fn(1 / T, 0.5, b.switch_index_of("S"),
                               b.graph.num_switches)
-    with pytest.raises(p.UnsupportedError, match="drive_source") as e:
-        p.periodic_steady_state(b, period=T, switch_fn=sf, engine=engine, **kw)
+    src = b.build() if form == "circuit" else b
+    with pytest.raises(p.UnsupportedError, match=name) as e:
+        p.periodic_steady_state(src, period=T, switch_fn=sf, engine=engine,
+                                **kw)
     assert e.value.feature == "closed_loop"
+
+
+@pytest.mark.parametrize("form", ["builder", "circuit"])
+@pytest.mark.parametrize("route,name", SOURCE_ROUTES,
+                         ids=[n for _, n in SOURCE_ROUTES])
+def test_the_evaluator_refuses_a_controller_driven_source(route, name, form):
+    def build(d):
+        b = _buck()
+        route(b)
+        sf = p.make_pwm_switch_fn(1 / T, 0.5, b.switch_index_of("S"),
+                                  b.graph.num_switches)
+        return (b.build() if form == "circuit" else b), sf
+    ev = Evaluator(build, period=T, loads=("RL",), output="vout",
+                   steady=SteadySpec(method="pss"))
+    rec = ev.evaluate({"x": 1.0})
+    assert rec.status == "refused"
+    assert name in rec.reason and "evaluator runs no controller" in rec.reason
 
 
 @pytest.mark.parametrize("k", ["discontinuity_restart",

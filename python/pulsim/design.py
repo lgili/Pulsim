@@ -986,9 +986,14 @@ class Evaluator:
         else:
             out = (out, None)
         src = _closed_loop_source(out[1])
-        driven = getattr(out[0], "_graph_driven", None)
+        # a builder's side lists or a Circuit's ControlDecls
+        from ._circuit_ir import c_blocks_of, graph_driven_of
+        driven = graph_driven_of(out[0])
+        blocks = [str(getattr(h, "name", h)) for h in c_blocks_of(out[0])]
         if driven and not src:
             src = f"a control graph's drive_source ({', '.join(driven)})"
+        if blocks and not src:
+            src = f"C block(s) of add_c_block ({', '.join(blocks)})"
         if src:
             # no step_observer reaches the evaluator's runs: the gate or
             # source would follow a controller that never updates

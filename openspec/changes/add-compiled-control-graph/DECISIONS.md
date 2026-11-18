@@ -217,7 +217,9 @@ Each entry: question → option taken → evidence → how to reverse.
 
 ## G15. C blocks: one graph per builder, no tick at t_end
 
-- **Taken.** `builder._c_graph` holds every `CBlock`, each in the group
+- **Taken.** One graph per builder holds every `CBlock` (integration batch 10:
+  reached through the C-block handles, not a `builder._c_graph` attribute, so
+  a `Circuit` built from the builder carries it in its ControlDecls), each in the group
   of its `dt`, compiled at each `simulate()` with the outputs the blocks
   hold. Compiled steps are called through their C ABI in C++. The old
   throttle also fired at `t_end` (11 fires where 10 are due); the graph

@@ -316,7 +316,7 @@ def _refuse_graph_driven(builder, analysis="periodic_steady_state"):
     """A control graph's ``drive_source`` adds a 0 V / 0 A source whose
     value only the graph's observer supplies: without it the source
     would sit at zero."""
-    from ._circuit_ir import graph_driven_of
+    from ._circuit_ir import c_blocks_of, graph_driven_of
     driven = graph_driven_of(builder)
     if driven:
         raise _unsup(
@@ -325,6 +325,15 @@ def _refuse_graph_driven(builder, analysis="periodic_steady_state"):
             "(drive_source); the period runs run no controller, so they "
             "would sit at 0. Run simulate() to steady state.",
             device=driven[0], analysis=analysis)
+    blocks = [str(getattr(h, "name", h)) for h in c_blocks_of(builder)]
+    if blocks:
+        raise _unsup(
+            "closed_loop",
+            f"C block(s) {', '.join(blocks)} (add_c_block) drive output "
+            "sources; the period runs tick no block, so the sources would "
+            "hold the blocks' last outputs: an orbit under a frozen "
+            "controller. Run simulate() to steady state.",
+            device=blocks[0], analysis=analysis)
 
 
 def _refuse_closed_loop(sf, analysis="periodic_steady_state"):
