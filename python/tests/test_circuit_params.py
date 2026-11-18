@@ -353,10 +353,22 @@ def test_a_circuit_sweep_with_c_blocks_runs_serially_only():
         p.sweep(c, params={"R.R": [1.0, 2.0]}, kpi_fn=lambda r, q: {},
                 verbose=False, t_end=1e-4, dt=1e-6, parallel=True)
     vals = [1.0, 2.0, 1.0]
+    b = p.CircuitBuilder()                    # an integrating block: a
+    b.add_voltage_source("Vs", "a", "gnd", 1.0)   # carried-over state shows
+    b.add_resistor("R", "a", "o", 1.0)
+    b.add_resistor("Ro", "o", "gnd", 1.0)
+    b.add_resistor("Rc", "c", "gnd", 1.0)
+
+    def integ(t, dt, inp, out, state):
+        state["acc"] += inp[0] * dt * 1e4
+        out[0] = state["acc"]
+    p.add_c_block(b, inputs=[("v", "o")], outputs=[("v", "c", "gnd")],
+                  dt=1e-5, fn=integ, state={"acc": 0.0}, name="ctl")
+    c = b.build()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         res = p.sweep(c, params={"R.R": vals},
-                      kpi_fn=lambda r, q: {"v": float(np.asarray(r.states)[-1].sum())},
+                      kpi_fn=lambda r, q: {"v": float(np.asarray(r.v("c"))[-1])},
                       verbose=False, t_end=1e-4, dt=1e-6)
     kpi = list(res.kpis["v"])
     assert kpi[0] == kpi[2] != kpi[1]         # point 3 = point 1: no carry-over

@@ -295,15 +295,16 @@ cell disagrees by edge timing; edge err above it: the states differ.
 
 ## Notes
 
-**Closed-loop cells, integration batch 10 (2026-11-18): FROZEN WITHOUT
-DIAGNOSIS, under investigation (control graph 3).** Since the helpers build
-control graphs, trbdf2 runs the six `closed_loop/*` circuits and they have a
-reference for the first time. `cl_buck_pi` and `cl_buck_aggressive_pi` agree on
-every configuration. `ll14_buck` disagrees (pwl 0.287, restart/split 0.212,
-trbdf2 0.160) and `ll15_boost` disagrees on the fixed engine (pwl 0.270,
-restart/split 0.0654; trbdf2 agrees, 3.9e-4). `ll16_flyback` and `cl_boost_pi`
-have no converged reference (the trbdf2 reference run hits max_steps at
-5.6 ms of 30 ms): `error`. These freezes are NOT understood.
+**Closed-loop cells, diagnosed by control graph 3 (G23, 2026-11-18).** The
+per-circuit causes are in `manifests/v2_triage.yaml`. `cl_buck_pi` and
+`cl_buck_aggressive_pi` agree on every configuration. `cl_boost_pi` now runs on
+trbdf2 (the gate declares its edges) and meets an independent expm reference;
+pwl / pwl+restart disagree by design (gate sampled on the grid, first order).
+`ll14_buck` and `ll15_boost` are worst on V(sw) in every cell: the trbdf2
+reference records no post-edge sample at rising edges that fall on a control
+tick (KNOWN_LIMITATIONS), so ll15 trbdf2 moved from agree (3.9e-4) to
+disagree (0.00124); their states agree. `ll16_flyback` is `unverified`: the
+circuit itself is wrong (the secondary is not coupled), not the engines.
 
 **`cuk_converter` diode turned round, 2026-11-17.** The file and its ngspice
 deck had `Drect` reversed (anode at ground); with the anode at `mid` the
