@@ -34,8 +34,8 @@ import metrics  # noqa: E402
 import v1_reader  # noqa: E402
 from analytic import BY_ID, CASES  # noqa: E402
 
-ANALYTIC = yaml.safe_load((BENCH / "manifests" / "analytic.yaml").read_text())["cases"]
-TRIAGE = yaml.safe_load((BENCH / "manifests" / "v2_triage.yaml").read_text())["circuits"]
+ANALYTIC = yaml.safe_load((BENCH / "manifests" / "analytic.yaml").read_text(encoding="utf-8"))["cases"]
+TRIAGE = yaml.safe_load((BENCH / "manifests" / "v2_triage.yaml").read_text(encoding="utf-8"))["circuits"]
 
 
 @pytest.fixture(autouse=True)
@@ -347,7 +347,7 @@ def test_forty_goldens():
 
 @pytest.mark.parametrize("name,run,names,newton", GOLDEN, ids=[g[0] for g in GOLDEN])
 def test_golden(name, run, names, newton):
-    golden = json.loads((goldens.GOLDEN_DIR / f"{name}.json").read_text())
+    golden = json.loads((goldens.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
     assert golden["rtol"] <= (goldens.RTOL_NEWTON if newton else goldens.RTOL_LINEAR)
     bad = goldens.compare(golden, goldens.snapshot(run(), names, newton))
     assert not bad, "\n".join(bad[:10])
@@ -355,7 +355,7 @@ def test_golden(name, run, names, newton):
 
 def test_golden_catches_one_part_per_million():
     c = BY_ID["rc_charge"]
-    golden = json.loads((goldens.GOLDEN_DIR / "analytic__rc_charge.json").read_text())
+    golden = json.loads((goldens.GOLDEN_DIR / "analytic__rc_charge.json").read_text(encoding="utf-8"))
     b, _ = c.build(1.0 + 1e-6)
     res = pulsim.simulate(b, c.t_end, c.dt, engine="pwl")
     bad = goldens.compare(golden, goldens.snapshot(res, b.state_var_names(), False))
@@ -364,7 +364,7 @@ def test_golden_catches_one_part_per_million():
 
 def test_golden_catches_a_changed_switching_sequence_before_values():
     name, run, names, newton = next(g for g in GOLDEN if g[0] == "buck_switching")
-    golden = json.loads((goldens.GOLDEN_DIR / f"{name}.json").read_text())
+    golden = json.loads((goldens.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
     res = run()
 
     class Shifted:  # the diode commutates one step earlier
@@ -379,7 +379,7 @@ def test_golden_catches_a_changed_switching_sequence_before_values():
 
 # ------------------------------------------------------------ counters ---
 
-FROZEN = yaml.safe_load((BENCH / "manifests" / "perf_counters.yaml").read_text())["counters"]
+FROZEN = yaml.safe_load((BENCH / "manifests" / "perf_counters.yaml").read_text(encoding="utf-8"))["counters"]
 
 
 @pytest.mark.parametrize("name", list(counters.CIRCUITS))
@@ -430,7 +430,7 @@ def test_runner_classifies_a_junction_capacitor_rc_on_dsed_as_not_agree():
 def test_runner_end_to_end_on_one_family(tmp_path):
     out = tmp_path / "results.json"
     rc = dr.main(["--circuits", "linear/rc_step.yaml", "--out", str(out)])
-    recs = json.loads(out.read_text())
+    recs = json.loads(out.read_text(encoding="utf-8"))
     assert rc == 0
     assert [(r["engine"], r["outcome"]) for r in recs] == [
         ("pwl", "agree"), ("trbdf2", "agree"), ("dsed", "agree")]
@@ -438,7 +438,7 @@ def test_runner_end_to_end_on_one_family(tmp_path):
 
 
 def test_benchmark_runner_imports_without_the_retired_backend():
-    src = (BENCH / "tools" / "benchmark_runner.py").read_text()
+    src = (BENCH / "tools" / "benchmark_runner.py").read_text(encoding="utf-8")
     assert "import pulsim_python_backend" not in src and "from pulsim_python_backend" not in src
     import benchmark_runner  # noqa: F401
 

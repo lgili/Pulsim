@@ -230,7 +230,7 @@ def _magnetic(diode_on_core=False, sat=False):
         b.add_permeance("Pc", "m1", "m2", 2.6e-6)
     b.add_air_gap("G", "m2", "gnd", 76e-6, 0.5e-3)
     if diode_on_core:
-        b.add_diode("D", "m1", "gnd")
+        b.add_diode("D", "m1", "gnd", 1e3, 1e-9)
     return b
 
 

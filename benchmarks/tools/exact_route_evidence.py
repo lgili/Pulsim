@@ -166,7 +166,7 @@ def _run(name, setting, engine, **kw):
 
 def _rc_pulse_truth(name, _setting):
     """Closed form of the RC step response through every pulse edge (both sides)."""
-    nl = yaml.safe_load(open(_ex_file(name)))["circuit"]["devices"]
+    nl = yaml.safe_load(open(_ex_file(name), encoding="utf-8"))["circuit"]["devices"]
     d = {x["name"]: x for x in nl}
     R, C, src = d["R1"]["R"], d["C1"]["C"], d["Vpulse"]
     lc = pulsim.load_yaml_file(_ex_file(name))
@@ -188,7 +188,7 @@ def _rc_pulse_truth(name, _setting):
 
 def _rc_ladder_truth(name, _setting):
     """Eigendecomposition of the RC ladder's symmetric (C^-1/2 G C^-1/2) matrix from the netlist."""
-    nl = yaml.safe_load(open(_ex_file(name)))["circuit"]["devices"]
+    nl = yaml.safe_load(open(_ex_file(name), encoding="utf-8"))["circuit"]["devices"]
     src = next(x for x in nl if x["type"] == "voltage_source")
     free = sorted({x[k] for x in nl for k in ("from", "to")} - {"gnd", src["from"]})
     ix = {n: i for i, n in enumerate(free)}
