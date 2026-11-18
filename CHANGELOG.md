@@ -43,6 +43,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Changed** the record arithmetic sums with CPython 3.12's compensated
   float sum on every Python version (`design._psum`): records on Python
   3.10 / 3.11 may move by one ulp and now equal 3.12+'s.
+* **Fixed** `p_in` (and time-weighted means) of the evaluator on the
+  fixed-step `pwl` engine's `pss` route: the sample at a gate edge held
+  the left limit and the integral ran straight across it, 1.0 % high on
+  a DCM buck at T/200 (first order). Each side of a gate edge is now
+  integrated separately: 1.5e-7 (second order). The efficiency never
+  read `p_in` and was right (8e-10).
 * **Fixed** the evaluator's periodicity check: when its own plain
   `simulate` period failed, the first design of its event pattern was
   recorded `failed` and later designs passed on another design's check;

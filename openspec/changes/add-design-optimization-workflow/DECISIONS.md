@@ -899,7 +899,7 @@ Recorded, not changed:
 * (b3, b4) The stepped tolerance 1e-1 cannot see a dropped loss row on a
   95 % efficient design (losses are 5 % of P_in), and the sampled
   1e-8 (2000/n)^2 rests on one circuit. Both are re-measured with the
-  `p_in` quadrature work (slice 6 item 4, §27).
+  `p_in` quadrature work (slice 6 item 4, §29).
 * (b5) `_schedule_fingerprint` reads 64 edges (32 periods of one PWM):
   a soft-start differing later shares a `design_id`. Nothing in pulsim
   caches records by it; a longer horizon costs native calls on every
@@ -1079,6 +1079,74 @@ thermal evaluator takes the Python path, `counters["batch"] ==
 To reverse: `ThermalSpec(mode="fixed_point")` restores the loop per
 evaluator; dropping the `"auto"` resolution in `_evaluate` restores it
 everywhere; the diode refusal in `device_loss_summary` is one block.
+
+## 29. `p_in` on the fixed-step engine and the stepped tolerance (slice 6, item 4)
+
+Question: why does `p_in` read about 1 % high on the DCM buck on
+`SteadySpec(method="pss")` with `engine="pwl"`, and is the efficiency
+wrong with it?
+
+Evidence (probe `probes/pin_quadrature.py`). The sampled source current
+equals the exact orbit's at every sample (six digits printed), and
+`p_out` is within 1.0e-7 at T/200. The efficiency is `p_out / (p_out +
+losses)` and never reads `p_in`: 8e-10 from the exact route. The error
+in `p_in` is first order: +9.99e-3 at T/200, +2.50e-3 at T/800, +6.24e-4
+at T/3200. In this run the sample AT a gate edge holds the LEFT limit,
+and the step after it ran on the new mask. Integrating straight across
+the edge charged half a step of the switch's peak current (1.22 A) to
+the step after it: 0.5 x 5e-8 x 1.22 x 24 / 1e-5 = 0.073 W, the excess
+measured. Verdict: quadrature across a discontinuity, mine (the
+evaluator's integral), not the restart and not an engine error.
+
+Fix: the schedule's gate edges reach the KPI integrals
+(`_gate_edges`, `_two_sided`). Where an edge sits at a sample that
+still holds the old gate bits and the next sample holds the new ones,
+the right limit is inserted at the edge. It is extrapolated from the two
+samples after it, or taken from one sample when the mask lasts a single
+step (a dead time). Measured: -1.47e-7 at T/200, -9.1e-9 at T/800,
+-3.1e-10 at T/3200 (O(h^2)). The residual is 4.5e-8 (was 9.9e-3); CCM
+buck 2.9e-10 (was 2.5e-4).
+
+Not applied:
+- When the edge sits at the sample AFTER the step (the transient route
+  here, by rounding of the sample time): that step took the new mask
+  at its end. That is the engine's first order at an edge, and the
+  trapezoid of the samples is that step's energy, so the balance closes
+  (1.0e-7). Inserting the left limit broke it (1 %). The route's
+  `p_out` is 0.87 % low at T/200 (0.083 % at T/800). This is the known
+  fixed-engine limitation, now listed under design evaluation with
+  `discontinuity_restart=True` (3.5e-6) and `pss` as workarounds.
+- When any gate edge of the window falls between samples (an SPWM
+  VSI). A partial correction unbalanced the dead-time pairs: VSI on
+  pss/pwl, -4.1e-4 -> -1.5e-3 against the exact `p_in`. The run is
+  left as it was.
+
+Stepped tolerance (b3, b4). Measured `energy_residual` after the fix:
+
+| route | buck CCM | buck DCM | boost CCM | boost DCM | VSI (no neutral path) |
+|---|---|---|---|---|---|
+| pss/pwl | -2.9e-10 | -4.5e-8 | -1.4e-9 | +1.7e-4 | -1.6e-3 |
+| transient/pwl | +5.0e-10 | +1.0e-7 | +4.5e-9 | not settled | +6.5e-7 |
+| transient/trbdf2 | -5.5e-7 | failed | failed | failed | -9.5e-5 |
+
+The stepped tolerance stays 1e-1. 1e-2 (six times the worst above) was
+tried and failed a legitimate record: a CCM buck on transient/pwl at
+dt = T/25 with `discontinuity_restart` and the sub-step state
+correction reads -3.9e-2 (`test_unlocated_gate_edges_are_failed_not_ok`,
+the run unchanged by the two-sided integration, measured with it off).
+The stepped engines are first order at gate edges, so their residual
+grows with dt; the table is at T/200 only. A fixed number below 1e-1
+would refuse coarse steps the user chose, not a defect. The sampled
+`1e-8 (2000/n)^2` is unchanged.
+
+The two-sided integration is applied to `p_in` only. Applied to the
+declared `mean` it broke the contract that a declared KPI equals the
+callable a user would write on the same record bit for bit
+(`test_on_a_sampled_route_the_specs_are_the_callables_bit_for_bit`,
+9.5905044 vs 9.5905045); `v_out` is a capacitor voltage, continuous at
+the edge, so it gains nothing (6e-9).
+
+To reverse: `edges=None` at the `p_in` call of `_with_right_limits`.
 
 ## Missing from the kernel (recorded, worked around in Python)
 

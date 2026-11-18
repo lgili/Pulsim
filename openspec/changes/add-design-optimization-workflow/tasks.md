@@ -34,6 +34,7 @@
 - [x] 7.6 Energy-balance guard on every record, tolerance by route from measured residuals; the record carries the residual and the table losses (`test_design_energy_balance.py`, DECISIONS 22)
 
 - [x] 7.7 Kernel batch evaluator: `evaluate_many` runs a circuit-form, declarative evaluator's designs in one GIL-free kernel call on native threads; records equal the Python path's; fallbacks and what the plan cannot express named in `counters['batch']` (`test_design_kernel_batch.py`, `test_design_batch.cpp`, DECISIONS 26)
+- [x] 7.8 `p_in` on the fixed-step `pss` route: each side of a gate edge integrated separately (1.0 % -> 1.5e-7 on a DCM buck at T/200); stepped energy tolerance re-measured and kept at 1e-1 (first order: -3.9e-2 at T/25) (`test_design_pin_quadrature.py`, `probes/pin_quadrature.py`, DECISIONS 29)
 
 ## 8. Verification
 - [x] 8.1 ruff, pytest, `openspec validate --all --strict`

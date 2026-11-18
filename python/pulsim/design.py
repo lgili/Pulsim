@@ -523,19 +523,93 @@ def _build_hash() -> str:
 # traces
 # ----------------------------------------------------------------------
 
-def _with_right_limits(res, y_of_states):
+def _with_right_limits(res, y_of_states, edges=None):
     """``(t, y)`` with each event's right limit inserted after its left
-    limit (repeated instant), so a jump is integrated as a jump."""
+    limit (repeated instant), so a jump is integrated as a jump.
+
+    ``edges`` (for integrals; the schedule's gate-edge instants): a
+    fixed-step ``pwl`` run records no right limit. Where the sample AT a
+    gate edge holds the left limit, integrating across it charged half a
+    step of the old value to the new mask's step (``p_in`` 1 % high on a
+    DCM buck at T/200, O(h), DECISIONS 29). Each side is integrated
+    separately: the right limit at the edge is extrapolated from the two
+    samples after it (exact for a quantity linear there; O(h^2))."""
     from ._result_views import states_as_array
     t = np.asarray(res.times, dtype=float)
     y = np.asarray(y_of_states(states_as_array(res)), dtype=float)
     idx = getattr(res, "right_limit_index", None)
     rl = getattr(res, "right_limit_states", None)
+    if edges is not None and (idx is None or len(idx) == 0):
+        ss = getattr(res, "switch_states", None)
+        ss = np.asarray([] if ss is None else ss, dtype=bool)
+        if ss.ndim == 2 and ss.shape[0] == t.size and ss.shape[1] > 0:
+            return _two_sided(t, y, ss, *edges)
     if idx is None or rl is None or len(idx) == 0:
         return t, y
     idx = np.asarray(idx, dtype=np.int64)
     yr = np.asarray(y_of_states(np.asarray(rl, dtype=float)), dtype=float)
     return np.insert(t, idx + 1, t[idx]), np.insert(y, idx + 1, yr)
+
+
+def _two_sided(t, y, ss, sf, edges):
+    """:func:`_with_right_limits` on a fixed-step run: where a gate edge
+    of ``sf`` falls AT sample j and sample j still holds the old gate
+    mask (the left limit) while j+1 holds the new one, the step after
+    t_j ran on the new mask; the right limit is inserted at t_j, from
+    samples j+1, j+2 (from j+1 alone when the mask lasts one step). Where the edge is at sample j+1 instead, the step
+    ending there was taken with the new mask at its end (the engine's
+    own first order at an edge, docs/known-limitations.md): the
+    trapezoid of the samples is that step's energy, and the balance
+    closes on it; left as it is."""
+    n_bits = ss.shape[1]
+
+    def bits(m):
+        return np.array([bool(m.get(i)) for i in range(n_bits)])
+    tol = 1e-12 * max(1.0, float(np.abs(t).max()))
+    h = float(np.min(np.diff(t))) if t.size > 1 else 0.0
+    ins_at, ins_t, ins_y = [], [], []
+    for e in edges:
+        j = int(np.searchsorted(t, e - tol))
+        before, after = bits(sf(e - 1e-6 * h)), bits(sf(e))
+        g = before != after
+        if not g.any():
+            continue                 # a schedule instant, no mask change
+        if not (j < t.size and abs(t[j] - e) <= tol):
+            # an edge between samples is first order in the engine and
+            # pairs with its neighbours' trapezoids (a dead time): one
+            # side corrected and not the other measured worse (VSI,
+            # 4e-4 -> 1.5e-3); no correction for the run
+            return t, y
+        if not (j + 2 < t.size and t[j + 2] > t[j + 1] > t[j]):
+            continue
+        if (ss[j][g] != before[g]).any() \
+                or (ss[j + 1][g] != after[g]).any():
+            continue
+        ins_at.append(j + 1)
+        ins_t.append(t[j])
+        # the new side's own samples: two give a line; one (a mask held
+        # for a single step, a dead time) gives its value
+        ins_y.append(y[j + 1] - (y[j + 2] - y[j + 1])
+                     * ((t[j + 1] - t[j]) / (t[j + 2] - t[j + 1]))
+                     if (ss[j + 1] == ss[j + 2]).all() else y[j + 1])
+    if not ins_at:
+        return t, y
+    return np.insert(t, ins_at, ins_t), np.insert(y, ins_at, ins_y)
+
+
+def _gate_edges(sf, a, z):
+    """``(sf, edge instants in [a, z])``, or None (an opaque callable,
+    or no edge)."""
+    nxt = getattr(sf, "next_edge_after", None)
+    if nxt is None or not callable(nxt):
+        return None
+    out, t = [], a - 1e-9 * (z - a)
+    for _ in range(1_000_000):
+        t = float(nxt(t))
+        if not (math.isfinite(t) and t <= z + 1e-12 * abs(z)):
+            break
+        out.append(t)
+    return (sf, out) if out else None
 
 
 def _node_col(builder, name):
@@ -1121,7 +1195,7 @@ class Evaluator:
         if th is None:
             rows, losses = self._loss_rows(b, run, a, z)
             kpis = self._kpis(b, run, a, z, design, did, rows, losses,
-                              counters)
+                              counters, sf)
             if self.gradients:
                 self._gradients(b, run, design, kpis, grads, counters)
             return kpis, losses, {}
@@ -1201,7 +1275,8 @@ class Evaluator:
         # the run is within th.tol of them)
         rows, losses = self._loss_rows(b, run, a, z, tj)
         losses = self._losses_at(losses, tj)
-        kpis = self._kpis(b, run, a, z, design, did, rows, losses, counters)
+        kpis = self._kpis(b, run, a, z, design, did, rows, losses, counters,
+                          sf)
         for d in tj:
             kpis[f"t_j.{d}"] = tj[d]
         return kpis, losses, tj
@@ -1742,8 +1817,13 @@ class Evaluator:
                 losses[n] = cat
         return rows, losses
 
-    def _kpis(self, b, run, a, z, design, did, rows, losses, counters):
+    def _kpis(self, b, run, a, z, design, did, rows, losses, counters,
+              sf=None):
         kp = run if isinstance(run, _pk.Period) else None
+        # a fixed-step run's gate edges: its integrals take each side
+        # separately (_with_right_limits)
+        gates = (_gate_edges(sf, a, z) if kp is None and getattr(
+            run, "engine_used", "") == "pwl" else None)
         comps = {c["name"]: c for c in b.components()}
         kpis: dict = {}
         src = self.sources
@@ -1782,7 +1862,8 @@ class Evaluator:
                 p_in -= float(c["params"]["V"]) * kp.mean(("i", n))
                 continue
             col = int(b.pool.branch_var_id_for_source(c["branch_id"], b.graph))
-            t, i = _with_right_limits(run, lambda st, col=col: st[:, col])
+            t, i = _with_right_limits(run, lambda st, col=col: st[:, col],
+                                      edges=gates)
             p_in -= float(c["params"]["V"]) * _mean(t, i, a, z)
         if p_in is not None:
             kpis["p_in"] = p_in
