@@ -84,9 +84,11 @@ def test_locked_rotor_current_matches_the_equivalent_circuit():
 
 
 def test_synchronous_speed_draws_magnetising_current_and_no_torque():
-    rms, torque, _ = _held(W_SYNC)
+    # The mean torque is the integration error (second order): 0.011 N·m
+    # at 50 µs, 2.8e-3 N·m at 25 µs, where the spec's 0.01 is met.
+    rms, torque, _ = _held(W_SYNC, dt=2.5e-5)
     assert rms == pytest.approx(I_SYNC, rel=5e-3)
-    assert abs(torque) < 2e-3 * T_S05     # measured 0.011 N·m at 50 µs
+    assert abs(torque) < 0.01
 
 
 def test_torque_and_current_at_slip_0_05():

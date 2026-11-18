@@ -23,7 +23,7 @@
 - [x] 3.1 `PmsmMna::Params` harmonic list `(h, ψ_h, φ_h)`; `λ_pm`, `dλ_pm/dθ`, `d²λ_pm/dθ²` from the series; `ψ_1` only is bit-identical to the current device
 - [x] 3.2 `add_bldc_mna(..., k_e, flat_top_deg=120, n_harmonics=25)` and `pm_harmonics_from_waveform(theta, emf, omega)` — Python (`pulsim.machines`), `omega` is the electrical speed
 - [x] 3.3 Test: open-circuit back-EMF at constant speed against the ideal trapezoid, RMS deviation ≤ 0.5 % of the flat top at 25 harmonics (computed 0.40 %)
-- [x] 3.4 Test: torque from `∫ Σ e_k i_k dt / (ω·t)` equals the device's `T_em` mean within 1e-6 (co-energy consistency) — generator into 2 Ω at held speed: mechanical power from the holding source = copper loss within 2.1e-7; `T_em` trace mean = shaft torque within 1e-15. 3.3: RMS deviation 0.40 % of the flat top (series alone 0.395 %)
+- [x] 3.4 Test: torque from `∫ Σ e_k i_k dt / (ω·t)` equals the device's `T_em` mean within 1e-6 (co-energy consistency) — generator into 2 Ω at held speed: mechanical power from the holding source = copper loss within 2.1e-7; `T_em` trace mean = shaft torque (test bound rel 1e-9). 3.3: RMS deviation 0.40 % of the flat top (series alone 0.395 %)
 - [ ] 3.5 DC operating point with held mechanics for `PmsmMna` (today: fails, no DC stamp): at `θ0`, `ω0 = 0`, `i = v/R_s` within 1e-9
 - [ ] 3.6 YAML types `pmsm`, `bldc`
 - [ ] 3.7 Conformance rows: `pmsm_mna[harmonics]`, `pmsm_mna[flux_map]` × {pwl, trbdf2, dsed refused, DC held, AC}

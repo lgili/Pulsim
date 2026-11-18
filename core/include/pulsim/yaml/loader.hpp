@@ -721,6 +721,19 @@ inline void load_device(
                 "(got '{}'); the observer is type: induction_motor",
                 name, m));
         }
+        if (type == "induction_machine") {
+            require_only_keys(dev, idx, type,
+                              {"model", "phase_nodes", "neutral_node",
+                               "omega_node", "R_s", "L_ls", "R_r", "L_lr",
+                               "L_m", "pole_pairs", "J", "B", "T_load",
+                               "omega0"});
+        } else {
+            require_only_keys(dev, idx, type,
+                              {"model", "phase_nodes", "neutral_node",
+                               "omega_node", "R_s", "L_s", "R_r", "L_r",
+                               "L_m", "pole_pairs", "J", "B", "T_load",
+                               "omega0"});
+        }
         if (!dev["phase_nodes"] || !dev["phase_nodes"].IsSequence() ||
             dev["phase_nodes"].size() != 3) {
             throw std::runtime_error(std::format(

@@ -675,6 +675,10 @@ private:
         const auto row = fields_of(kind);
         keys(n, who, {"kind", "name", "pins", "role", "control", "phases", "omega", "theta",
                       "rotor", "harmonics", "table", "ja", "law", "t", "i", "periodic"}, row);
+        if (n["harmonics"] && kind != K::PmsmMna) fail(who, "harmonics is a pmsm_mna key");
+        if (n["rotor"] && kind != K::InductionMachineMna) {
+            fail(who, "rotor is an induction_machine_mna key");
+        }
         ParamsVariant v = yaml_detail::make_params(static_cast<std::size_t>(kind));
         set_fields(v, n, who, row);
         auto& pool = b.pool_;

@@ -97,3 +97,9 @@ def test_induction_machine_observer_model_is_refused():
     with pytest.raises(Exception, match="induction_machine 'M': model must be 'mna'"):
         _yaml("    - {type: induction_machine, model: observer, name: M, "
               + _IM_KEYS + ", L_ls: 2.0e-3, L_lr: 2.0e-3}\n")
+
+
+def test_induction_machine_misspelled_key_is_refused():
+    with pytest.raises(Exception, match="T_Load"):
+        _yaml("    - {type: induction_machine, name: M, " + _IM_KEYS
+              + ", L_ls: 2.0e-3, L_lr: 2.0e-3, T_Load: 3}\n")

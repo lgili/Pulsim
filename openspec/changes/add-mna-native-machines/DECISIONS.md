@@ -63,6 +63,9 @@ Each entry: question → option taken → why → how to reverse.
 - Why: `θ = ∫ω dt` as a node voltage needs a VCCS, which the kernel
   does not have.
 - Reverse: implement with the VCCS when it exists.
+- Superseded (group 2 work): the kernel has a VCCS now; `theta_node`
+  is a unit VCCS `{name}.th` from the speed into a 1 F capacitor
+  `{name}.ct` (task 1.8 ticked, `test_dc_machine.py`).
 
 ## D6. Elements with a zero value
 
