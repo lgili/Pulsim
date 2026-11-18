@@ -469,3 +469,111 @@ What the design evaluator needed from the IR and used instead
 (Numbered 13 on the optimisation branch; renumbered at integration batch 10
 behind this branch's 13–18. Since 14 the graph-driven sources survive
 `build()` as ControlDecls; since 16 a `Circuit` pickles (its YAML text).)
+
+## 20. Scopes (group 8)
+
+- **Option:** a scope is a node of a tree the builder keeps
+  (`ir::Scope{name, parent, kind, path}`, `open_scope(path, kind)` /
+  `close_scope()`, Python `with b.scope(path, kind=...)`), and the
+  circuit carries it (`Circuit.scopes()`). `define_subsystem(...)
+  .instantiate` opens one per instance (`kind` = the definition's name);
+  YAML `circuit.subsystems` opens one per block. Parameters declared
+  while a scope is open belong to it (`Parameter::scope`) and are stored
+  under its path (`leg_a/sm17/Ron`).
+- **Membership is by name, not by tag.** A device or node belongs to
+  the deepest scope whose `path + "/"` prefixes its flattened name
+  (`scope_of`). The flattened names are the old prefix names (task 8.2:
+  unchanged), unique by construction, so this is total and
+  deterministic, and the builder needs no per-element scope column: the
+  lowered builder, every index and every stamp are those of the
+  hand-prefixed twin. A root element hand-named `leg_a/x` while a scope
+  `leg_a` exists is attributed to it — the same ambiguity the prefix
+  scheme always had.
+- **Names are still made by the proxy / the YAML block**, with the same
+  join (`path + "/" + local`) as `builder.scoped_name(local)`; the C++
+  builder does not rewrite names inside `add_*`. Doing it there would
+  apply the rule a second time to every composite that passes a name
+  it already resolved (power-MOSFET member names, sensed branches),
+  which the audit of `circuit_builder.hpp` could not rule out; task 11.1
+  deletes the proxy's string code a release later, when the device
+  interface migration owns the composites.
+- **Lookup is lexical, outward only.** An expression in scope S reads
+  `S/name`, then each enclosing scope, then the root: an inner name
+  shadows an outer one; an outer scope cannot read into an instance
+  (`a/b` is a division in the grammar). Consequences: a cycle across
+  scopes cannot be written (a parent never sees a child), and within
+  one scope the builder's declared-before rule (Python) or the block's
+  dependency order (YAML, a cycle refused naming its members) holds. A
+  child `Ron = "2*Ron"` reads itself and is refused as a cycle, in YAML
+  and in `builder.param` alike; write the outer value under another
+  name. `bind_param` / `set_param` look a name up the same way (the open
+  scope's own first, then outward, then the full name).
+- **One definition, N instances.** The Python `Subsystem` is the
+  definition (body + ports + defaults), each instance a scope whose
+  `kind` names it. The IR stores the instances, not the definition
+  (design D4: `to_yaml` writes nested instances; `kind` is kept so a
+  later change can factor them). A path whose last segment already
+  instantiated a definition is refused (`already used by an instance`);
+  a plain path segment can be re-entered.
+- **Hashes:** the tree (paths and kinds, in creation order) and each
+  scoped parameter's scope id enter `structure_hash` only when a circuit
+  has scopes: a circuit without scopes hashes as before (V-R-C pins
+  hold). A scoped circuit and its flattened twin have the same nodes,
+  devices, `components()` and results; they differ in `structure_hash`
+  (and so `value_hash`, which folds it in), in `scopes()`, and in
+  whatever parameters the scoped one declares.
+- **YAML (lowered dialect):** `scopes: [{path, kind}]` before
+  `parameters`, parents first; a scoped parameter carries `scope:`.
+  `from_yaml` refuses a scope listed twice or before its parent.
+- **Evidence:** `test_circuit_scopes.py` — a 100-cell arm (302
+  branches, two levels: `leg_a/sm{i}`) built through `define_subsystem`
+  with scoped parameters and shadowing decoys at the root equals its
+  hand-prefixed twin in `components()` and simulates bit for bit on
+  pwl, trbdf2 and dsed;
+  `with_params` addresses one instance or the arm; the tree survives
+  YAML and pickle; every authoring device type and every shipped
+  example wrapped in a YAML subsystem block renames every node and
+  device (none missed) and the examples simulate bit for bit.
+  `test_subsystems.py` unchanged. The twin test requires all three
+  engines to run (dsed: 21 samples, trbdf2: 1004, pwl: 201).
+- **Limits.** A YAML block's `control:` (CCVS / CCCS) names a branch of
+  the block: ports carry nodes, not branches, so a block cannot sense an
+  outer branch. A block name is one path segment (`a/b` is refused; nest
+  blocks). `with builder.scope(p)` composes with `instantiate` (the
+  instance lands at `p/<path>`); inside a body, a scope opened by hand
+  and left open refuses `instantiate` through the body's proxy.
+- **Reverse:** delete `open_scope` / `close_scope` / `scopes_` and the
+  `scopes:` key; the proxy's names never changed.
+
+## 21. Slice 2 leftovers and batch 11 review (#5, #8)
+
+- **One schema table.** `ir::kKindYaml` / `kKindFields` (compile-time
+  checked against `StoredKind`) serve the emitter and, through
+  `YamlIo::read_entry`, the authoring loader: a `type:` naming a
+  registry kind without an authoring reader (`shockley_diode`,
+  `lauritzen_diode`, `nonlinear_capacitor`, `pmsm_mna`) is read with the
+  emitter's entry. Test: every registry kind loads in a netlist.
+- **Bounds at load.** `from_yaml` applies the `kKindFields` bounds that
+  `with_value` applies, naming device and field. Not every `add_*`
+  applies them (`add_resistor` takes R < 0, `add_pwm_voltage_source`
+  takes duty > 1), so such a circuit writes a document `from_yaml`
+  refuses; a pickle (text this library wrote) reads with the bounds off.
+  Making every `add_*` enforce the table is the cleaner end state and a
+  behaviour change for users; not done here.
+- **No NaN / inf in a document** (batch 11 review #5). `to_yaml` refuses
+  a non-finite value naming the entry and the key; `from_yaml` refuses
+  `.nan`, `.inf`, `nan`, `inf`. The one legitimate infinity, an ideal
+  branch-form switch's `g_on = 1/R_on`, is no longer written: the reader
+  derives it from `branch_form.R_on` exactly as `add_ideal_switch` /
+  `add_diode_branch` do (same `value_hash`, tested).
+- **Numbers stay shortest-round-trip** (`std::to_chars`), not `%.17g`:
+  the same exact round trip (tested), shorter text a person would type.
+- **Lazy tables.** `nodes()`, `devices()`, hashes are filled once on
+  first use (`std::call_once`, into a local then moved, so a throw leaves
+  nothing half-filled); a derivation pays only its clone.
+- **Libm in tests** (batch 11 review #8). Random expressions of `+ - * /`,
+  unary minus, `abs`, `sqrt`, `min`, `max` are compared bit for bit
+  (IEEE-exact on every platform); every libm function (`exp log log10
+  sin cos tan atan sinh cosh tanh pow ^ atan2`) is compared on
+  bit-identical arguments to 4 ulp of the Python reference
+  (`LIBM_ULPS`), which covers glibc, macOS and MSVC.

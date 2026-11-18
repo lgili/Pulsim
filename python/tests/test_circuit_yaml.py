@@ -86,6 +86,74 @@ def test_every_registry_kind_has_a_yaml_entry():
     assert squash == {n.lower() for n in k.StoredKind.__members__}
 
 
+def test_every_registry_kind_loads_in_a_netlist():
+    """One schema table for the loader and the emitter: every kind the
+    emitter writes is a `type:` the authoring loader reads (its own
+    authoring reader, or the emitter's entry for a kind without one),
+    and the emitter's whole document is a netlist `load_yaml_string`
+    takes, with the same hash."""
+    import yaml
+    seen = set()
+    for build, *_ in ALL_CELLS.values():
+        c = build(True).build()
+        text = c.to_yaml()
+        assert p.load_yaml_string(text).builder.build().value_hash() == \
+            c.value_hash()
+        for d in yaml.safe_load(text)["devices"]:
+            seen.add(d["kind"])
+            d["type"] = d.pop("kind")
+            doc = yaml.safe_dump({"circuit": {"devices": [d]}})
+            try:
+                p.load_yaml_string(doc)
+            except Exception as e:  # noqa: BLE001 — authoring keys differ
+                assert "unknown type" not in str(e), (d["type"], e)
+    assert len(seen) == len(k.StoredKind.__members__)
+
+
+def test_from_yaml_applies_the_authoring_bounds():
+    head = 'pulsim_circuit: 1\nnodes: ["a"]\ndevices:\n  - '
+    for dev, match in (
+            ('{kind: resistor, name: "R1", pins: ["a", "gnd"], G: -1}',
+             "R1: G must be a finite number > 0"),
+            ('{kind: capacitor, name: "C1", pins: ["a", "gnd"], C: 0}',
+             "C1: C must be a finite number > 0"),
+            ('{kind: pwm_voltage_source, name: "P", pins: ["a", "gnd"], duty: 2}',
+             r"P: duty must be a number in \[0, 1\]")):
+        with pytest.raises(ValueError, match=match):
+            p.Circuit.from_yaml(head + dev + "\n")
+    # add_resistor takes R < 0 (with_value would not): a pickle, text this
+    # library wrote, still reads back; from_yaml of that text refuses it
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 1.0)
+    b.add_resistor("Rn", "a", "gnd", -5.0)
+    c = b.build()
+    assert pickle.loads(pickle.dumps(c)).value_hash() == c.value_hash()
+    with pytest.raises(ValueError, match="Rn: G must be a finite number > 0"):
+        p.Circuit.from_yaml(c.to_yaml())
+
+
+def test_a_non_finite_value_is_refused_at_emit_and_at_load():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 1.0)
+    b.add_resistor("R1", "a", "gnd", float("nan"))     # add_resistor checks nothing
+    c = b.build()
+    with pytest.raises(ValueError, match=r'to_yaml: device "R1": "G" is \.nan'):
+        c.to_yaml()
+    with pytest.raises(ValueError):
+        pickle.dumps(c)
+    head = 'pulsim_circuit: 1\nnodes: ["a"]\ndevices:\n  - '
+    for tok in (".nan", ".inf", "-.inf", "nan", "inf"):
+        with pytest.raises(ValueError, match=r'V: "V" must be a finite number|V: "V" is not a number'):
+            p.Circuit.from_yaml(head + '{kind: voltage_source, name: "V", pins: ["a", "gnd"], V: '
+                                + tok + "}\n")
+    q = p.CircuitBuilder()
+    q.param("k", 1.0)
+    q.add_resistor("R", "a", "gnd", 1.0)
+    y = q.build().to_yaml().replace("value: 1", "value: .inf")
+    with pytest.raises(ValueError, match=r'"value" (must be a finite number|is not a number)'):
+        p.Circuit.from_yaml(y)
+
+
 @pytest.mark.parametrize("path", EXAMPLES, ids=[q.name for q in EXAMPLES])
 def test_shipped_example_round_trips(path):
     lc = p.load_yaml_file(str(path))

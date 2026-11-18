@@ -156,10 +156,28 @@ inline constexpr std::array<std::string_view, 4> kRoles{
     return o + "]";
 }
 
+/// A non-finite number met while writing key `key` (to_yaml names the
+/// entry): NaN / inf cannot round-trip as a value of a circuit.
+struct NonFinite { std::string key, token; };
+
+/// The non-finite token in `v` (a number or a list of numbers), or "".
+[[nodiscard]] inline std::string_view non_finite_in(std::string_view v) noexcept {
+    if (v.empty() || v.front() == '"' || v.front() == '{' ||
+        v.find('"') != std::string_view::npos) return {};
+    for (const std::string_view t : {std::string_view{"-.inf"}, std::string_view{".inf"},
+                                     std::string_view{".nan"}}) {
+        if (v.find(t) != std::string_view::npos) return t;
+    }
+    return {};
+}
+
 /// A flow map built key by key; values are already YAML text.
 struct Map {
     std::string s;
     Map& add(std::string_view k, std::string v) {
+        if (const auto t = non_finite_in(v); !t.empty()) {
+            throw NonFinite{std::string{k}, std::string{t}};
+        }
         s += s.empty() ? "{" : ", ";
         s += k; s += ": "; s += v;
         return *this;
@@ -172,10 +190,12 @@ struct Map {
 }
 
 /// The non-derived rows of `row` whose value differs from the default.
-inline void put_fields(Map& m, const ParamsVariant& v, std::span<const FieldSpec> row) {
+/// `skip` names a field written elsewhere (a branch-form g_on = 1/R_on).
+inline void put_fields(Map& m, const ParamsVariant& v, std::span<const FieldSpec> row,
+                       std::string_view skip = {}) {
     const ParamsVariant d = make_params(v.index());
     for (const auto& f : row) {
-        if (f.derived) continue;
+        if (f.derived || (!skip.empty() && f.name == skip)) continue;
         const Real x = f.get(v);
         if (!same_bits(x, f.get(d))) m.add(f.name, num(x));
     }
@@ -222,9 +242,26 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
 
 }  // namespace yaml_detail
 
+namespace yaml_detail {
+[[nodiscard]] inline std::string to_yaml_body_(const Circuit& c, std::string& where);
+}  // namespace yaml_detail
+
 /// The circuit as YAML (see the file comment). Throws
-/// `std::invalid_argument` naming what cannot be written.
+/// `std::invalid_argument` naming what cannot be written, a NaN or an
+/// infinity among them (`to_yaml: device "R1": "G" is .nan ...`).
 [[nodiscard]] inline std::string to_yaml(const Circuit& c) {
+    std::string where = "the document";
+    try {
+        return yaml_detail::to_yaml_body_(c, where);
+    } catch (const yaml_detail::NonFinite& e) {
+        throw std::invalid_argument(std::format(
+            "to_yaml: {}: \"{}\" is {}; a non-finite value cannot be written "
+            "(set a finite one)", where, e.key, e.token));
+    }
+}
+
+[[nodiscard]] inline std::string yaml_detail::to_yaml_body_(const Circuit& c,
+                                                            std::string& where) {
     using namespace yaml_detail;
     const auto& g = c.graph();
     const auto& pool = c.pool();
@@ -252,6 +289,7 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
         const auto kind = pool.kind_of(bi);
         const auto& dev = devs[static_cast<std::size_t>(bi)];
         const auto& prm = pool.params_of(bi);
+        where = std::format("device \"{}\"", dev.name);
         Map e;
         e.add("kind", std::string{kKindYaml[static_cast<std::size_t>(kind)]});
         if (kind == K::PmsmMna) {
@@ -291,7 +329,8 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
         if (kind == K::CCCS || kind == K::CCVS) {
             e.add("control", bname(pool.control_branch(bi), dev.name));
         }
-        put_fields(e, prm, fields_of(kind));
+        // a branch-form g_on is 1/R_on (inf when ideal): branch_form carries R_on
+        put_fields(e, prm, fields_of(kind), pool.is_branch_form(bi) ? "g_on" : "");
         std::visit([&](const auto& p) {
             using P = std::decay_t<decltype(p)>;
             if constexpr (std::is_same_v<P, m::SaturableInductor::Params>) {
@@ -331,11 +370,22 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
                 .add("R_on", num(pool.branch_R_on(bi))).str() + "\n";
         }
     }
+    if (const auto sc = b.scopes(); !sc.empty()) {
+        o += "scopes:\n";   // parents before children (creation order)
+        for (const auto& x : sc) {
+            Map mm;
+            mm.add("path", quote(x.path));
+            if (!x.kind.empty()) mm.add("kind", quote(x.kind));
+            o += "  - " + mm.str() + "\n";
+        }
+    }
     if (const auto ps = b.parameters(); !ps.empty()) {
         o += "parameters:\n";
         for (const auto& p : ps) {
+            where = std::format("parameter \"{}\"", p.name);
             Map mm;
             mm.add("name", quote(p.name));
+            if (p.scope != 0) mm.add("scope", quote(b.scope_path(p.scope)));
             if (p.expr.empty()) mm.add("value", num(p.value));
             else mm.add("expr", quote(p.expr));
             if (!p.unit.empty()) mm.add("unit", quote(p.unit));
@@ -357,6 +407,7 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
     if (const auto ics = c.initial_conditions(); !ics.empty()) {
         o += "initial_conditions:\n";
         for (const auto& ic : ics) {
+            where = "an initial condition";
             o += "  - " + Map{}.add("device", bname(static_cast<Index>(ic.device.v), "an initial condition"))
                 .add("value", num(ic.value)).str() + "\n";
         }
@@ -376,6 +427,7 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
         o += "power_mosfets:\n";
         for (const Index ch : channels) {
             const auto& r = *b.power_mosfet_record(ch);
+            where = std::format("power MOSFET \"{}\"", g.branch_name(ch));
             const auto& p = r.params;
             std::string members = "[";
             for (std::size_t i = 0; i < r.sub_elements.size(); ++i) {
@@ -424,16 +476,18 @@ struct YamlIo {
         throw std::invalid_argument(std::format("from_yaml: {}: {}", who, what));
     }
 
+    static std::string num_text_(Real x) { return yaml_detail::num(x); }
+
     static Real real(const YAML::Node& n, std::string_view who, std::string_view key) {
         if (!n || !n.IsScalar()) fail(who, std::format("\"{}\" must be a number", key));
         const std::string& s = n.Scalar();
-        if (s == ".nan") return std::numeric_limits<Real>::quiet_NaN();
-        if (s == ".inf") return std::numeric_limits<Real>::infinity();
-        if (s == "-.inf") return -std::numeric_limits<Real>::infinity();
         Real x{};
         const auto r = std::from_chars(s.data(), s.data() + s.size(), x);
         if (r.ec != std::errc{} || r.ptr != s.data() + s.size()) {
             fail(who, std::format("\"{}\" is not a number: \"{}\"", key, s));
+        }
+        if (!std::isfinite(x)) {   // from_chars reads "nan" / "inf"; to_yaml never writes them
+            fail(who, std::format("\"{}\" must be a finite number, got \"{}\"", key, s));
         }
         return x;
     }
@@ -502,49 +556,11 @@ struct YamlIo {
         return p;
     }
 
-    static Circuit read(std::string_view text_in) {
-        const YAML::Node root = [&] {
-            try {
-                return YAML::Load(std::string{text_in});
-            } catch (const YAML::Exception& e) {
-                fail("document", e.what());
-            }
-        }();
-        if (!root.IsMap()) fail("document", "expected a mapping");
-        keys(root, "document", {"pulsim_circuit", "nodes", "devices", "couplings",
-                                "branch_form", "parameters", "bindings",
-                                "initial_conditions", "aliases", "power_mosfets",
-                                "controls"});
-        if (text(root["pulsim_circuit"], "document", "pulsim_circuit") != "1") {
-            fail("document", "pulsim_circuit must be 1");
-        }
-        for (const auto* k : {"nodes", "devices", "couplings", "branch_form", "parameters",
-                              "bindings", "initial_conditions", "aliases",
-                              "power_mosfets", "controls"}) {
-            if (root[k] && !root[k].IsSequence()) fail(k, "must be a list");
-        }
-        builder::CircuitBuilder b;
-        if (const auto ns = root["nodes"]) {
-            for (const auto& n : ns) {
-                const auto name = text(n, "nodes", "nodes");
-                if (b.resolve_node_(name) != b.graph().num_nodes() - 1) {
-                    fail("nodes", std::format("\"{}\" is listed twice or names ground", name));
-                }
-            }
-        }
-        const auto n_nodes = b.graph().num_nodes();
-        auto pin = [&](const YAML::Node& n, std::string_view who) {
-            const Index i = b.resolve_node_(text(n, who, "pins"));
-            if (b.graph().num_nodes() != n_nodes) {
-                fail(who, std::format("pin \"{}\" is not in nodes", n.Scalar()));
-            }
-            return i;
-        };
+    struct Pending { YAML::Node n; K kind; std::string name; std::vector<Index> branches; };
 
-        // Pass 1: every branch, so a sensed branch named later resolves.
-        struct Pending { YAML::Node n; K kind; std::string name; std::vector<Index> branches; };
-        std::vector<Pending> pend;
-        for (const auto& d : root["devices"]) {
+    /// Pass 1 of one device entry: its branches (names, pins, roles).
+    template <class Pin>
+    static Pending begin_entry_(builder::CircuitBuilder& b, const YAML::Node& d, Pin& pin) {
             if (!d.IsMap()) fail("a device", "expected a mapping");
             const auto ks = text(d["kind"], "a device", "kind");
             const auto it = std::ranges::find(kKindYaml, std::string_view{ks});
@@ -581,8 +597,91 @@ struct YamlIo {
                 p.branches.push_back(b.add_branch_(p.name, pin(pins[0], p.name),
                                                    pin(pins[1], p.name), role));
             }
-            pend.push_back(std::move(p));
+            return p;
+    }
+
+    static void check_bounds_(builder::CircuitBuilder& b, const Pending& pd) {
+        const Index bi = pd.branches.front();
+        const bool form = b.pool_.is_branch_form(bi);
+        for (const auto& f : fields_of(pd.kind)) {
+            if (f.derived || !pd.n[std::string{f.name}]) continue;
+            if (form && (f.name == "g_on" || f.name == "g_off")) continue;
+            const Real x = f.get(b.pool_.params_of(bi));
+            if (!within(f.bound, x)) {
+                fail(pd.name, std::format("{} must be {} (got {})", f.name,
+                                          bound_text(f.bound), num_text_(x)));
+            }
         }
+        if (form) {
+            Real g_off = 0;
+            std::visit([&](const auto& prm) {
+                if constexpr (requires { prm.g_off; }) g_off = prm.g_off;
+            }, b.pool_.params_of(bi));
+            try {
+                builder::CircuitBuilder::require_branch_values_(
+                    "from_yaml", pd.name, b.pool_.branch_R_on(bi), g_off);
+            } catch (const std::invalid_argument& e) {
+                fail(pd.name, e.what());
+            }
+        }
+    }
+
+    /// One entry of this dialect (`{kind, name, pins, <fields>}`) read into
+    /// `b` with its pins created by name: the authoring loader's reader
+    /// for a registry kind it has no authoring type for, so every kind
+    /// the emitter writes is a kind `yaml::load` reads (one table,
+    /// `kKindYaml` / `kKindFields`, checked at compile time).
+    static void read_entry(builder::CircuitBuilder& b, const YAML::Node& d) {
+        auto pin = [&](const YAML::Node& n, std::string_view who) {
+            return b.resolve_node_(text(n, who, "pins"));
+        };
+        const auto p = begin_entry_(b, d, pin);
+        add_device_(b, p.n, p.kind, p.name, p.branches, pin);
+        check_bounds_(b, p);
+    }
+
+    static Circuit read(std::string_view text_in, bool bounds = true) {
+        const YAML::Node root = [&] {
+            try {
+                return YAML::Load(std::string{text_in});
+            } catch (const YAML::Exception& e) {
+                fail("document", e.what());
+            }
+        }();
+        if (!root.IsMap()) fail("document", "expected a mapping");
+        keys(root, "document", {"pulsim_circuit", "nodes", "devices", "couplings",
+                                "branch_form", "scopes", "parameters", "bindings",
+                                "initial_conditions", "aliases", "power_mosfets",
+                                "controls"});
+        if (text(root["pulsim_circuit"], "document", "pulsim_circuit") != "1") {
+            fail("document", "pulsim_circuit must be 1");
+        }
+        for (const auto* k : {"nodes", "devices", "couplings", "branch_form", "scopes", "parameters",
+                              "bindings", "initial_conditions", "aliases",
+                              "power_mosfets", "controls"}) {
+            if (root[k] && !root[k].IsSequence()) fail(k, "must be a list");
+        }
+        builder::CircuitBuilder b;
+        if (const auto ns = root["nodes"]) {
+            for (const auto& n : ns) {
+                const auto name = text(n, "nodes", "nodes");
+                if (b.resolve_node_(name) != b.graph().num_nodes() - 1) {
+                    fail("nodes", std::format("\"{}\" is listed twice or names ground", name));
+                }
+            }
+        }
+        const auto n_nodes = b.graph().num_nodes();
+        auto pin = [&](const YAML::Node& n, std::string_view who) {
+            const Index i = b.resolve_node_(text(n, who, "pins"));
+            if (b.graph().num_nodes() != n_nodes) {
+                fail(who, std::format("pin \"{}\" is not in nodes", n.Scalar()));
+            }
+            return i;
+        };
+
+        // Pass 1: every branch, so a sensed branch named later resolves.
+        std::vector<Pending> pend;
+        for (const auto& d : root["devices"]) pend.push_back(begin_entry_(b, d, pin));
         // Pass 2: the pool, in branch order (its counters follow it).
         for (const auto& p : pend) add_device_(b, p.n, p.kind, p.name, p.branches, pin);
 
@@ -601,17 +700,49 @@ struct YamlIo {
             const auto bi = b.branch_id_of(nm);
             const auto fk = b.pool_.kind_of(bi);
             if (fk != K::Switch && fk != K::Diode) fail(nm, "branch form is for a switch or a diode");
-            b.pool_.set_branch_form(bi, real(f["R_on"], nm, "R_on"));
+            const Real R_on = real(f["R_on"], nm, "R_on");
+            b.pool_.set_branch_form(bi, R_on);
+            for (const auto& fs : fields_of(fk)) {   // g_on is not written: 1/R_on, as add_* sets it
+                if (fs.name == "g_on") fs.set(b.pool_.params_of_mut(bi), builder::CircuitBuilder::branch_g_on_(R_on));
+            }
+        }
+        // The authoring bounds (`ir::kKindFields`), as with_value applies
+        // them, on every value the document writes (an omitted value is
+        // the model's default). A branch-form switch or diode has its own
+        // rule (R_on, g_off >= 0; g_on = 1/R_on). Not every add_* checks
+        // them (add_resistor takes R < 0), so a pickle, whose text this
+        // library wrote, reads with bounds = false.
+        if (bounds) for (const auto& pd : pend) check_bounds_(b, pd);
+        for (const auto& x : root["scopes"]) {
+            keys(x, "a scope", {"path", "kind"});
+            const auto path = text(x["path"], "a scope", "path");
+            const auto kind = x["kind"] ? text(x["kind"], path, "kind") : std::string{};
+            const auto slash = path.rfind('/');
+            if (b.scope_index_.contains(path)) fail(path, "scope listed twice");
+            if (slash != std::string::npos && !b.scope_index_.contains(path.substr(0, slash))) {
+                fail(path, "a scope must follow its parent");
+            }
+            (void)b.open_scope(path, kind);   // creates exactly this scope
+            b.close_scope();
         }
         for (const auto& p : root["parameters"]) {
-            keys(p, "a parameter", {"name", "value", "expr", "unit", "lo", "hi"});
-            const auto nm = text(p["name"], "a parameter", "name");
+            keys(p, "a parameter", {"name", "scope", "value", "expr", "unit", "lo", "hi"});
+            auto nm = text(p["name"], "a parameter", "name");
             std::optional<Real> lo, hi;
             if (p["lo"]) lo = real(p["lo"], nm, "lo");
             if (p["hi"]) hi = real(p["hi"], nm, "hi");
             const auto unit = p["unit"] ? text(p["unit"], nm, "unit") : std::string{};
+            if (p["scope"]) {   // declared inside it: name = scope path + "/" + local
+                const auto sp = text(p["scope"], nm, "scope");
+                const auto it = b.scope_index_.find(sp);
+                if (it == b.scope_index_.end()) fail(nm, std::format("unknown scope \"{}\"", sp));
+                if (!nm.starts_with(sp + "/")) fail(nm, std::format("not a name in scope \"{}\"", sp));
+                nm = nm.substr(sp.size() + 1);
+                b.cur_scope_ = it->second;
+            }
             if (p["expr"]) b.param_expr(nm, text(p["expr"], nm, "expr"), unit, lo, hi);
             else b.param(nm, real(p["value"], nm, "value"), unit, lo, hi);
+            b.cur_scope_ = 0;
         }
         for (const auto& bd : root["bindings"]) {
             keys(bd, "a binding", {"param", "field"});
@@ -772,10 +903,11 @@ private:
 };
 
 /// Inverse of `to_yaml`. Throws `std::invalid_argument` naming the
-/// device and the key on a malformed document.
-[[nodiscard]] inline Circuit from_yaml(std::string_view text) {
+/// device and the key on a malformed document, or on a value outside
+/// its bound unless `bounds` is false (pickle: text this library wrote).
+[[nodiscard]] inline Circuit from_yaml(std::string_view text, bool bounds = true) {
     try {
-        return YamlIo::read(text);
+        return YamlIo::read(text, bounds);
     } catch (const YAML::Exception& e) {  // a shape the checks above missed
         throw std::invalid_argument(std::format("from_yaml: malformed document: {}", e.what()));
     } catch (const std::out_of_range& e) {  // branch_id_of: an unknown device name
