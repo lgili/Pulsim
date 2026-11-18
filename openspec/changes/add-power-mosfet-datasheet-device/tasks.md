@@ -4,8 +4,8 @@
 - [x] 1.3 C++ test: `Q(v)` strictly increasing at 1 pV spacing around 0 V, 1 V and 400 V
 - [x] 1.4 `vdmos_cgd` closed form with the stable `ln cosh`; C++ test against the ten ngspice points of `probes/cgd.cir` (1e-6) and `C = dQ/dv` (1e-9)
 - [x] 1.5 `NonlinearCapacitor::Params` law variant (`junction | table | vdmos_cgd`); history and refresh call `charge` / `capacitance` through it; every existing `NonlinearCapacitor` test bit-identical
-- [ ] 1.6 Charge-conservation test: 0 → 400 V → 0 ramp through 1 kΩ, ∮ i dt = 0 within 1e-9 relative on `pwl` and `trbdf2`, for each law
-  - Not ticked: implemented (`test_charge_is_conserved_over_a_closed_cycle`), but 1e-9 is not reachable: measured pwl 2.2e-8..8.9e-8 for all three laws (the 2.0 junction law included), trbdf2 6.6e-5..2.6e-4 (output-grid trapezoid vs TR-BDF2 quadrature); pinned 1e-6 / 2e-3. Owner to accept the tolerance (DECISIONS.md 17).
+- [x] 1.6 Charge-conservation test: 0 → 400 V → 0 ramp through 1 kΩ, ∮ i dt = 0 within 1e-9 relative on `pwl` and `trbdf2`, for each law
+  - 2026-11-18 (DECISIONS.md 20): `test_charge_is_conserved_to_1e9_under_the_engines_own_rule` measures the charge with a series linear capacitor (the engine's own quadrature) and counts the 1e-12 S placeholder that `pwl/assemble.hpp` puts on every NonlinearCapacitor node — that leak, not the corner steps, was the 2.2e-8. Measured pwl 7e-14..4e-12, trbdf2 8.7e-11..5.6e-10; bounds 1e-9 / 2e-9. The placeholder leak is recorded, not removed.
 
 ## 2. Composite device
 - [x] 2.1 `CircuitBuilder::add_power_mosfet` (internal nodes only when the element is non-zero; validation by name: `R_d ≥ 0`, `R_g ≥ 0`, `L_s ≥ 0`, `C_gs > 0`, the temperature factor `r(T) > 0`)
@@ -46,17 +46,21 @@
 
 ## 6. Documentation
 - [x] 6.1 `AI_GUIDE.md` (device choice table, the time-step trap), `docs/losses-and-thermal.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (non-goals), `CHANGELOG.md` (BREAKING importer default)
-- [ ] 6.2 Tutorial: datasheet → fitters → double pulse
-  - Not ticked: tutorial not written.
+- [x] 6.2 Tutorial: datasheet → fitters → double pulse
+  - `docs/tutorials/09-power-mosfet-datasheet.md` (synthetic curves, labelled so; executed by `test_doc_snippets.py`).
 
 ## 7. ngspice cross-validation
 - [x] 7.1 Decks in `benchmarks/spice/ngspice`: Level-1 output and transfer curves, Shockley curve; tolerance stated per region (the sigmoid blend differs from SPICE's hard region boundaries within a few `1/kappa`)
 - [x] 7.2 Deck: Coss junction law and `vdmos_cgd` capacitance sweeps (1e-6)
 - [x] 7.3 Deck: VDMOS double pulse, same card on both sides; record measured differences and set the gate from them
   - Measured (trbdf2): E_on +0.15 %, E_off +0.07 %, plateau +0.35 %, dv/dt_on −0.08 %, I_rr −0.01 %; di/dt −0.6 % / +1.2 %. Gates: 0.5 % energies, 1 % plateau and I_rr, 5 % di/dt. The design's 5 %/5 %/3 % targets were not used for tuning.
-- [ ] 7.4 Wire into the nightly job of `restore-reference-benchmark-harness`
-  - Not ticked: the nightly job belongs to `restore-reference-benchmark-harness`; the ngspice-side tests skip cleanly without ngspice on PATH.
+- [x] 7.4 Wire into the nightly job of `restore-reference-benchmark-harness`
+  - `.github/workflows/nightly-reference.yml` step "Power MOSFET ngspice decks" (pytest on `test_power_mosfet_ngspice.py`, which re-runs the decks when ngspice is on PATH; a failure opens / updates the nightly issue). Run locally with ngspice 45 (see 8.2); the nightly run itself not observed.
 
 ## 8. Verification
 - [x] 8.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
   - 2026-11-13: ctest 757/757; pytest 2064 passed, 4 skipped, 8 xfailed; ruff clean; openspec 76/76; stubs up to date.
+
+## 9. Session 2026-11-18
+- [x] 9.1 Order across a gate-driven threshold crossing measured against an independent Radau solution (`probes/threshold_order.py`): second order on pwl and trbdf2 for linear and VDMOS C_gd; no engine change (DECISIONS.md 18); pinned by `test_gate_driven_threshold_crossing_is_second_order`
+- [x] 9.2 The Level-1 law's jump at V_DS = 0 (2·α(1−β)K·V_OV², 5.2 mA at V_GS = 3.2 V) removed in the third-quadrant branch; continuity and C¹ pinned in C++; both engines now run `probes/vds_zero_jump.py` (DECISIONS.md 19)

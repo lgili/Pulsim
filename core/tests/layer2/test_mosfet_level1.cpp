@@ -142,6 +142,37 @@ TEST_CASE("MosfetLevel1 — Jacobian via AD returns finite partials",
     REQUIRE(partials[1] < 0);
 }
 
+TEST_CASE("MosfetLevel1 — continuous and C1 across V_DS = 0 at every gate drive",
+          "[v2][layer2_v13][mosfet_level1][unit]") {
+    // The β blend leaks forward(V_OV, 0) = α(1−β)·K·V_OV² at V_DS = 0;
+    // the plain terminal-swap mirror jumped by twice that (5.2 mA at
+    // V_GS = 3.2 V for these parameters) and both engines aborted at the
+    // zero crossing of a current through a partly-on channel
+    // (openspec/changes/add-power-mosfet-datasheet-device/probes/
+    // vds_zero_jump.py). Value and the three AD partials must now match
+    // on both sides of V_DS = 0.
+    MosfetLevel1::Params p{.K = 1.43, .V_T = 3.0, .lambda = 0.02, .kappa = 15.0};
+    for (int k = 0; k <= 120; ++k) {
+        const Real vgs = 1.0 + 0.05 * k;               // 1 .. 7 V
+        const Real e = 1e-9;
+        const ModelInputs<MosfetLevel1> lo{-e, 0.0, vgs}, hi{e, 0.0, vgs};
+        const auto [i_lo, d_lo] = evaluate_current_and_jacobian<MosfetLevel1>(lo, p);
+        const auto [i_hi, d_hi] = evaluate_current_and_jacobian<MosfetLevel1>(hi, p);
+        INFO("V_GS = " << vgs << " i(-e) = " << i_lo << " i(+e) = " << i_hi);
+        // |i(+e) - i(-e)| = 2e·∂I/∂V_DS (+ O(e²)); before the fix it was 2L.
+        const Real g = std::max(std::abs(d_hi[0]), Real{1e-12});
+        REQUIRE(std::abs(i_hi - i_lo) <= 2.0 * e * g * 1.01 + 1e-15);
+        for (int j = 0; j < 3; ++j) {
+            INFO("partial " << j << ": " << d_lo[j] << " vs " << d_hi[j]);
+            REQUIRE(std::abs(d_hi[j] - d_lo[j])
+                    <= 1e-6 * (std::abs(d_hi[j]) + 1e-9));
+        }
+    }
+    // V_DS >= 0 is the forward law, unchanged; fully on, the third quadrant
+    // is the plain mirror to the last bit (the added term is below one ulp).
+    REQUIRE(iD(p, 12.0, -0.5) == -iD(p, 12.5, 0.5));
+}
+
 TEST_CASE("MosfetLevel1 — V_GS sweep: monotonic I_D in saturation",
           "[v2][layer2_v13][mosfet_level1][unit]") {
     MosfetLevel1::Params p{

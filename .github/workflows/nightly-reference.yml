@@ -56,6 +56,17 @@ jobs:
           python benchmarks/tools/benchmark_ngspice.py --backend ngspice --quiet \
             --output-dir nightly/ngspice | tee nightly/ngspice.txt
 
+      - name: Power MOSFET ngspice decks
+        id: pm
+        continue-on-error: true
+        # add-power-mosfet-datasheet-device 7.4: re-runs the pm_*.cir decks
+        # in ngspice and checks them against the pinned numbers (these tests
+        # skip on runners without ngspice, i.e. every pull-request job).
+        run: |
+          mkdir -p nightly
+          set -o pipefail
+          python -m pytest -q -rs python/tests/test_power_mosfet_ngspice.py | tee nightly/power_mosfet_ngspice.txt
+
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -64,11 +75,11 @@ jobs:
           path: nightly/
 
       - name: Report outcome changes
-        if: steps.diff.outcome == 'failure'
+        if: steps.diff.outcome == 'failure' || steps.pm.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          body=$(grep -- '<-- NEW' nightly/differential.txt | head -100)
+          body=$(grep -- '<-- NEW' nightly/differential.txt | head -100; grep -E '^(FAILED|ERROR)' nightly/power_mosfet_ngspice.txt | head -20)
           title="Nightly reference: outcome changed"
           num=$(gh issue list --state open --search "\"$title\" in:title" --json number -q '.[0].number')
           if [ -n "$num" ]; then
