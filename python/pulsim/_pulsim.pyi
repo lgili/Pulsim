@@ -617,6 +617,10 @@ class CircuitBuilder:
         """
         Sum the b_extra contributions from all time-varying voltage sources (sine + PWM + pulse) at time `t`. Returns a full-MNA-sized vector. The pulsim.simulate engine='pwl' applies this automatically; engine='dsed' calls it via the CircuitBuilderAdapter to overlay AC / PWM source values per PED step.
         """
+    def controls(self) -> list[typing.Any]:
+        """
+        Control declarations carried by this builder (a builder made by Circuit.to_builder()), as Circuit.controls().
+        """
     def devices(self) -> list[DeviceInfo]:
         """
         Ordered list of DeviceInfo records for every named
@@ -3028,6 +3032,10 @@ class Circuit:
         """
         As CircuitBuilder.components().
         """
+    def controls(self) -> list[typing.Any]:
+        """
+        The control declarations the circuit carries, as (name, kind, content_hash, handle) tuples: C blocks (kind "c_block", handle = the CBlockHandle) and graph-driven sources ("graph_driven"). simulate(circuit) runs them.
+        """
     def devices(self) -> list[typing.Any]:
         """
         One dict per lowered branch, in insertion order: name, kind (capability-table name), pins (node indices, -1 = ground), fields ({name: value}, the names `with_value` takes) and params ({field: parameter name} for the fields a parameter drives).
@@ -3071,6 +3079,10 @@ class Circuit:
     def value_hash(self) -> int:
         """
         64-bit hash of the structure and every value (fields, couplings, initial conditions, aliases).
+        """
+    def with_controls(self, decls: list[typing.Any]) -> Circuit:
+        """
+        A new circuit with control declarations appended: a list of (name, kind, content_hash, handle). name and kind enter structure_hash, content_hash value_hash; the handle is passed through to the run. The receiver is unchanged.
         """
     def with_params(self, values: dict[typing.Any, typing.Any] = {}, **kwargs) -> Circuit:
         """

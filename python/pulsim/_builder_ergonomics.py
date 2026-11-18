@@ -13,26 +13,11 @@ Three GUI papercuts surfaced during PulsimGUI's migration to pulsim
    couldn't preempt ``compute_dc_op`` / ``run_ac_sweep`` /
    ``compute_temperature`` mid-call.
 
-This module patches :class:`pulsim.CircuitBuilder` with the
-following additions, all implemented Python-side (no C++ changes
-required because :class:`CircuitBuilder` was declared
-``py::dynamic_attr()`` so we can stash side-tables on each
-instance):
-
-- ``builder.set_initial(name, value)`` — record an IC on a capacitor
-  or inductor branch.
-- ``builder.add_capacitor_c0(name, from, to, C, c0)`` and
-  ``builder.add_inductor_i0(name, from, to, L, i0)`` — convenience
-  wrappers that bundle the `add_*` call with `set_initial`. We use
-  these names instead of overloading the existing methods because
-  the C++ bindings are positional-only and don't accept kwargs.
-- ``builder.set_alias(human_name, *, node=None, branch=None)`` and
-  ``builder.aliases()`` — round-trip-friendly human-name registry
-  consulted by ``SimulationResult.v / .i / .power`` before raising
-  :class:`pulsim.NameNotFoundError`.
-- ``builder.initial_state_vector()`` — synthesise the flat
-  initial-state ndarray from recorded ICs (zero elsewhere). Called
-  by :func:`pulsim.simulate` when ``initial_state=None``.
+Initial conditions (``set_initial``, ``c0=`` / ``i0=``) and aliases
+(``set_alias`` / ``aliases``) are stored by the C++ builder, so a
+:class:`pulsim.Circuit` carries them (add-immutable-circuit-ir group 3
+removed the Python side tables). This module keeps the alias resolver
+the result accessors consult and the retired-device guard.
 
 Cancellation: the existing ``simulate(should_continue=…)`` already
 preempts the transient solver. The other top-level analyses
@@ -47,7 +32,6 @@ the next call shouldn't fire.
 """
 from __future__ import annotations
 
-import warnings
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -99,145 +83,6 @@ class Cancelled(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
-# Side-table accessors. We can't subclass CircuitBuilder cleanly because
-# the constructor is pybind-bound, so we attach metadata as a dict on the
-# instance (dynamic_attr() makes this possible) and route lookups through
-# the patched methods.
-# ---------------------------------------------------------------------------
-def _ic_dict(builder) -> dict:
-    """Lazy `{device_name: value}` map for recorded ICs."""
-    d = getattr(builder, "_pulsim_ic", None)
-    if d is None:
-        d = {}
-        builder._pulsim_ic = d
-    return d
-
-
-def _alias_dict(builder) -> dict:
-    """Lazy `{human_name: (kind, canonical_name)}` map."""
-    d = getattr(builder, "_pulsim_aliases", None)
-    if d is None:
-        d = {}
-        builder._pulsim_aliases = d
-    return d
-
-
-# ---------------------------------------------------------------------------
-# IC helpers
-# ---------------------------------------------------------------------------
-def _set_initial(self, device_name: str, value: float) -> None:
-    """Record an initial condition for the named capacitor or
-    inductor. The value is consumed by :func:`pulsim.simulate` when
-    it synthesises the ``initial_state`` ndarray.
-
-    Raises
-    ------
-    KeyError
-        If ``device_name`` doesn't refer to a registered capacitor
-        or inductor branch (the only kinds with a state variable
-        the IC can target).
-    """
-    # Validate that the device exists and is a passive state-variable
-    # branch. The C++ pool tells us; we look it up by name.
-    try:
-        b_id = self.branch_id_of(device_name)
-    except IndexError as exc:
-        raise KeyError(
-            f"set_initial: no device named {device_name!r}"
-        ) from exc
-    has_inductor = self.pool.is_inductor(b_id) if hasattr(
-        self.pool, "is_inductor") else False
-    has_capacitor = self.pool.is_capacitor(b_id) if hasattr(
-        self.pool, "is_capacitor") else False
-    if not (has_inductor or has_capacitor):
-        # Falling back to a softer warning: pool may not have
-        # is_capacitor/is_inductor introspection yet; record the IC
-        # and let simulate() complain if it's nonsense.
-        warnings.warn(
-            f"set_initial({device_name!r}): cannot verify the device "
-            "is a capacitor or inductor (pool introspection missing) "
-            "— recording the IC anyway.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-    _ic_dict(self)[str(device_name)] = float(value)
-
-
-# ---------------------------------------------------------------------------
-# Alias helpers
-# ---------------------------------------------------------------------------
-def _set_alias(
-    self,
-    human_name: str,
-    *,
-    node: "str | None" = None,
-    branch: "str | None" = None,
-) -> None:
-    """Register a secondary name that resolves to the same canonical
-    electrical entity. Exactly one of ``node=`` or ``branch=`` must
-    be non-``None``.
-
-    Raises
-    ------
-    ValueError
-        - both ``node`` and ``branch`` provided
-        - neither provided
-        - empty string passed
-        - the human name collides with an existing canonical node /
-          branch name
-    """
-    if (node is None) == (branch is None):
-        raise ValueError(
-            "set_alias: pass exactly one of `node=` or `branch=`."
-        )
-    if not human_name:
-        raise ValueError("set_alias: human_name must be non-empty.")
-    if (node is not None and not node) or (
-        branch is not None and not branch):
-        raise ValueError(
-            "set_alias: node/branch target must be non-empty."
-        )
-
-    # Reject collisions with canonical names.
-    try:
-        self.node_id_of(human_name)
-        raise ValueError(
-            f"set_alias: {human_name!r} is already a canonical "
-            "node name."
-        )
-    except IndexError:
-        pass
-    try:
-        self.branch_id_of(human_name)
-        raise ValueError(
-            f"set_alias: {human_name!r} is already a canonical "
-            "branch / device name."
-        )
-    except IndexError:
-        pass
-
-    kind = "node" if node is not None else "branch"
-    target = node if node is not None else branch
-    _alias_dict(self)[str(human_name)] = (kind, str(target))
-
-
-def _aliases(self) -> dict:
-    """Return the registered ``{human_name: (kind, canonical_name)}``
-    map. Empty dict when no aliases were registered.
-    """
-    return dict(_alias_dict(self))
-
-
-def _resolve_alias(self, name: str) -> "tuple[str, str] | None":
-    """Best-effort resolver consulted by SimulationResult accessors
-    before raising NameNotFoundError. Returns
-    ``(kind, canonical_name)`` if ``name`` is a registered alias,
-    else ``None``.
-    """
-    return _alias_dict(self).get(name)
-
-
-# ---------------------------------------------------------------------------
 # Cancellation wrapper for analyses
 # ---------------------------------------------------------------------------
 def wrap_with_cancellation(fn, *, where: str):
@@ -281,27 +126,14 @@ def install(builder_cls) -> None:
     ``pulsim`` module-import time so every ``CircuitBuilder`` instance
     transparently gains the helpers.
 
-    pulsim 1.5+ exposes ``set_initial`` / ``initial_state`` /
-    ``set_alias`` / ``aliases`` directly from C++; this installer is
-    therefore mostly a no-op on a fresh build. We keep the Python
-    fallbacks (gated by ``hasattr``) for two reasons:
-
-    1. Test mocks that build a partial CircuitBuilder analog without
-       the C++ helpers (PulsimGUI's `pulsim_v0_compat.py` until it
-       picks up the C++ methods).
-    2. ``_resolve_alias`` — the Python wrapper consulted by
-       :meth:`SimulationResult.v` / `.i` / `.power`. Wraps the C++
-       ``aliases()`` dict in a uniform interface.
+    ``set_initial`` / ``initial_state`` / ``set_alias`` / ``aliases``
+    are C++ (the builder stores them, so a Circuit carries them;
+    add-immutable-circuit-ir group 3 deleted the Python side tables
+    ``_pulsim_ic`` / ``_pulsim_aliases``). ``_resolve_alias`` is the
+    wrapper :meth:`SimulationResult.v` / ``.i`` / ``.power`` consult.
     """
-    if not hasattr(builder_cls, "set_alias"):
-        builder_cls.set_alias = _set_alias        # type: ignore[attr-defined]
-    if not hasattr(builder_cls, "aliases"):
-        builder_cls.aliases   = _aliases          # type: ignore[attr-defined]
-    # _resolve_alias bridges to whatever the host implementation of
-    # `aliases()` returns — works for both C++ and Python sides.
+    # _resolve_alias bridges to the builder's (C++) `aliases()`.
     builder_cls._resolve_alias = _resolve_alias_native  # type: ignore[attr-defined]
-    if not hasattr(builder_cls, "set_initial"):
-        builder_cls.set_initial = _set_initial             # type: ignore[attr-defined]
     native = getattr(builder_cls, "add_nonlinear_diode", None)
     if native is not None and not getattr(native, "_retired", False):
         builder_cls.add_nonlinear_diode = _retired_nonlinear_diode(native)  # type: ignore[attr-defined]

@@ -1434,6 +1434,13 @@ public:
         return initial_conditions_;
     }
 
+    /// Control declarations the circuit carries (`ir::ControlDecl`),
+    /// in declaration order; `Circuit::with_controls` adds them.
+    [[nodiscard]] const std::vector<ir::ControlDecl>& controls() const noexcept {
+        return controls_;
+    }
+    void add_control(ir::ControlDecl d) { controls_.push_back(std::move(d)); }
+
     /// Add a binary switched diode (Layer 5 V2's
     /// `SwitchedDiode`). The branch uses
     /// `BranchKind::Switch` (the diode behaves as a switch
@@ -2681,6 +2688,8 @@ private:
     std::unordered_map<std::string, AliasTarget> aliases_;
     // add-power-mosfet-datasheet-device: channel branch id -> composite.
     std::unordered_map<Index, models::PowerMosfet::Record> power_mosfets_;
+    // add-immutable-circuit-ir group 3: opaque control declarations.
+    std::vector<ir::ControlDecl> controls_;
 };
 
 }  // namespace pulsim::builder

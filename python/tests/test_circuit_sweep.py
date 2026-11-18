@@ -245,6 +245,24 @@ def test_a_python_hook_keeps_the_python_path():
     assert r.backend == "serial" and r.counters["kernel_points"] == 0
 
 
+def test_a_kpi_that_simulates_does_not_change_the_replayed_run():
+    """Review finding: the recipe of point 0 was recorded while its kpi_fn
+    ran, so a simulate() inside the kpi overwrote dt / t_end for every
+    kernel point."""
+    kw = _kw()
+    c = factory().build()
+    values = [1e-4, 2e-4, 3e-4]
+
+    def kpi(res, params):
+        p.simulate(factory(), t_end=1e-6, dt=1e-8, engine="pwl")
+        return {"n": float(len(res.times))}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.sweep(c, params={"L.L": values}, kpi_fn=kpi, verbose=False, **kw)
+    assert r.backend == "kernel"
+    assert list(r.kpis["n"]) == [1001.0] * 3
+
+
 def test_a_failing_point_is_recorded_as_on_the_python_path():
     kw = _kw()
     with warnings.catch_warnings():

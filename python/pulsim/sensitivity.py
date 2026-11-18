@@ -526,7 +526,8 @@ def _check_circuit(builder, switch_fn, b_extra_fn):
         raise _unsup("b_extra_fn", "sensitivities: a b_extra_fn is an "
                      "opaque callback between the parameters and the "
                      "circuit; its derivative is unknown.")
-    if getattr(builder, "_c_blocks", None):
+    from ._circuit_ir import c_blocks_of
+    if c_blocks_of(builder):
         raise _unsup("c_blocks", "sensitivities: C blocks drive the "
                      "circuit through an opaque callback.")
     for c in builder.components():

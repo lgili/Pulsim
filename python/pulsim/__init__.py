@@ -807,7 +807,7 @@ if _HAS_SCOPE:
 # analyses with `should_continue` cancellation.
 from . import _builder_ergonomics as _berg
 from ._circuit_ir import KERNEL_RUN as _KERNEL_RUN, PWL_RECIPE as _PWL_RECIPE
-from ._circuit_ir import RunPlan, Tie
+from ._circuit_ir import RunPlan, Tie, c_blocks_of as _c_blocks_of
 from ._circuit_ir import install as _install_parameters
 _berg.install(CircuitBuilder)
 _install_parameters(CircuitBuilder)  # after _berg: wraps its add_* too
@@ -2219,7 +2219,6 @@ def simulate(
     # a mutable CircuitBuilder, so the run gets a private clone of the
     # run's circuit below, after the preflight.
     _run_circuit = None
-    _caller_side_state = None
     _caller_builder = builder  # identity checks (MMC arms) name the caller's
     if isinstance(builder, Circuit):
         if mmc_arms:
@@ -2229,10 +2228,9 @@ def simulate(
                 "pulsim.Circuit")
         _run_circuit = builder
     elif isinstance(builder, CircuitBuilder):
+        # C blocks and graph-driven sources ride in the circuit
+        # (ControlDecls); the run reads them from its own builder.
         _run_circuit = builder._snapshot()
-        # Python-side tables (C blocks, Shockley parameters) until they
-        # live in the IR (group 3).
-        _caller_side_state = dict(builder.__dict__)
     if t_end is None:
         raise TypeError(
             "simulate(): missing required argument 't_end' (end time, s). "
@@ -2369,8 +2367,6 @@ def simulate(
     if _run_circuit is not None:
         builder = (_kernel_run.builder if _kernel_run is not None
                    else _run_circuit.to_builder())
-        if _caller_side_state:
-            builder.__dict__.update(_caller_side_state)
         _run_plan = RunPlan(circuit=_run_circuit, ties=tuple(
             Tie(*t) for t in _ties), preflight=_preflight_report)
 
@@ -2478,7 +2474,7 @@ def simulate(
         _dsed_unsupported = {
             # C blocks drive the circuit through b_extra, which the
             # DSED engine does not consume.
-            "c_blocks": bool(getattr(builder, "_c_blocks", None)),
+            "c_blocks": bool(_c_blocks_of(builder)),
             "step_observer": step_observer is not None,
             "closed_loops": bool(closed_loops),
             "should_continue": should_continue is not None,
@@ -2904,7 +2900,7 @@ def simulate(
     # its b_extra injector (drives the controlled output sources) on top
     # of any user/closed-loop callbacks. PWL path only — outputs use
     # b_extra, which the DSED engine does not consume.
-    _c_blocks = list(getattr(builder, "_c_blocks", []) or [])
+    _c_blocks = _c_blocks_of(builder)
     if _c_blocks:
         _cb_obs = [cb.step_observer for cb in _c_blocks]
         _cb_bex = [cb.b_extra_fn for cb in _c_blocks]
@@ -3756,7 +3752,7 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
             "never fire and whatever it was closing (an "
             "electro-thermal loop, usually) would silently stay "
             "open"))
-    if getattr(builder, "_c_blocks", None):
+    if _c_blocks_of(builder):
         why.append(_blk("c_blocks", "C blocks sample on a fixed dt grid"))
     if live_stream is not None:
         why.append(_blk("live_stream", "live_stream needs the fixed-step kernel's "

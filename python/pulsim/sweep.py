@@ -321,20 +321,26 @@ def _run_circuit_points(points, grid, kpi_fn, *, parallel, backend,
     kpi_list: list = [{} for _ in range(n)]
     failed: list = []
 
-    def finish(i, run=None):
-        """Point i through simulate (finishing ``run`` when given)."""
-        token = cir.KERNEL_RUN.set(run) if run is not None else None
+    def run_point(i, run=None, recipe=None):
+        """Point i through simulate (finishing ``run`` when given; filling
+        ``recipe``). Only this call sees the context variables — never a
+        simulate() the kpi_fn makes."""
+        tokens = [cir.KERNEL_RUN.set(run), cir.PWL_RECIPE.set(recipe)]
         try:
-            res = simulate(points(**grid[i]), **kw) if run is None else \
-                simulate(run.circuit, **kw)
+            return simulate(points(**grid[i]) if run is None else run.circuit,
+                            **kw)
+        finally:
+            cir.PWL_RECIPE.reset(tokens[1])
+            cir.KERNEL_RUN.reset(tokens[0])
+
+    def finish(i, run=None, recipe=None):
+        try:
+            res = run_point(i, run, recipe)
         except _REFUSALS:
             raise
         except Exception as exc:  # noqa: BLE001 — recorded, as on threads
             failed.append((i, str(exc)))
             return None
-        finally:
-            if token is not None:
-                cir.KERNEL_RUN.reset(token)
         try:
             kpi_list[i] = kpi_fn(res, grid[i])
         except _REFUSALS:
@@ -344,11 +350,7 @@ def _run_circuit_points(points, grid, kpi_fn, *, parallel, backend,
         return res
 
     recipe: dict = {}
-    token = cir.PWL_RECIPE.set(recipe)
-    try:
-        res0 = finish(0)
-    finally:
-        cir.PWL_RECIPE.reset(token)
+    res0 = finish(0, recipe=recipe)
     rk = recipe.get("kwargs", {})
     native = (res0 is not None and recipe and not recipe["mmc"]
               and not recipe["on_cache"]
@@ -389,7 +391,8 @@ def _run_circuit_points(points, grid, kpi_fn, *, parallel, backend,
         result, circuit, builder, own = r
         rep, tz = (report, list(ties)) if own is None else (own[0], list(own[1]))
         finish(i, cir.KernelRun(result, circuit, builder, rep, tz))
-    return kpi_list, sorted(failed), "kernel", stats
+    used = "kernel" if stats["kernel_points"] else "serial"
+    return kpi_list, sorted(failed), used, stats
 
 
 def _run_points(args_iter, grid, kpi_fn, parallel, backend, n_workers,
@@ -416,6 +419,19 @@ def _circuit_form(builder_factory, parallel, backend, simulate_kwargs):
             "backend='process' cannot carry a pulsim.Circuit (it does "
             "not pickle); use backend='thread' or 'auto' — the circuit "
             "is immutable and shared by the threads")
+    from ._circuit_ir import c_blocks_of
+    if c_blocks_of(builder_factory):
+        # A C block keeps its tick counter and outputs in its handle, which
+        # every derived circuit shares: point 2 would start from point 1's
+        # state (a frozen controller). A factory builds one per point.
+        from ._refusal import unsupported
+        names = ", ".join(str(h.name) for h in c_blocks_of(builder_factory))
+        raise unsupported(
+            "sweep", "c_blocks",
+            f"sweep(circuit) / monte_carlo(circuit): the circuit carries C "
+            f"blocks ({names}), whose state persists across runs, so the "
+            "points would share one controller. Pass a builder factory "
+            "that adds the blocks per point.")
     stateful = [k for k in ("step_observer", "closed_loops")
                 if simulate_kwargs.get(k) is not None]
     if getattr(simulate_kwargs.get("switch_fn"), "_closed_loop", None):

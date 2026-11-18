@@ -286,10 +286,10 @@ def compute_dc_op(builder,
     # (add-immutable-circuit-ir): the caller's builder is not changed.
     from . import Circuit as _Circuit, CircuitBuilder as _CB
     if isinstance(builder, (_Circuit, _CB)):
+        # the snapshot carries the C blocks (ControlDecls)
         circuit = builder if isinstance(builder, _Circuit) else builder._snapshot()
-        side = None if isinstance(builder, _Circuit) else dict(builder.__dict__)
     else:  # a builder stand-in
-        circuit = side = None
+        circuit = None
     if auto_regularize is None:
         auto_regularize = True
     if auto_regularize:
@@ -310,8 +310,6 @@ def compute_dc_op(builder,
                 stacklevel=2)
     if circuit is not None:
         builder = circuit.to_builder()
-        if side:
-            builder.__dict__.update(side)
 
     if strategy == "settle":
         # "settle" is a transient, not a solve: it has no rung, no

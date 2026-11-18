@@ -25,6 +25,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `SweepResult.counters` holds `kernel_points`, `symbolic_analyses`,
   `preflights`. **Migration:** code that asserted `backend == "thread"`
   for a circuit sweep reads `"kernel"`.
+* **Changed** `builder.build()` no longer refuses a builder with C
+  blocks: they ride in the circuit as control declarations
+  (`Circuit.controls()`, `Circuit.with_controls()`), with the sources a
+  control graph drives (`drive_source`); `simulate(circuit)` runs the C
+  blocks and the periodic-steady-state refusal of graph-driven sources
+  holds for a circuit. `simulate(builder)` no longer copies the
+  builder's Python attributes onto the run (it reads the controls from
+  the circuit). `sweep(circuit)` / `monte_carlo(circuit)` refuse a
+  circuit with C blocks (a block's state lives in its shared handle, so
+  the points would share one controller; pass a factory).
+  Removed the Python fallbacks of
+  `set_initial`,
+  `set_alias` and `aliases` and their side tables `_pulsim_ic` /
+  `_pulsim_aliases` (the C++ builder has stored both since 1.5; a
+  Circuit carries them). **Migration:** a test double that relied on the
+  Python `set_initial` / `set_alias` fallbacks must implement them.
 * **Changed** `Circuit.with_value` / `with_params` / `with_preflight` /
   `with_ties` / `to_builder`, `PwlStateSpaceCache.build_lazy` and
   `CircuitBuilder.initial_state` release the GIL.

@@ -24,6 +24,7 @@
 #include <exception>
 #include <format>
 #include <optional>
+#include <span>
 #include <string>
 #include <thread>
 
@@ -44,6 +45,30 @@ py::object* g_components = nullptr;  // leaked: outlives interpreter teardown
 
 py::object lowered_components(const Circuit& c) {
     return (*g_components)(py::cast(&c.lowered(), py::return_value_policy::reference));
+}
+
+// ---- Group 3: control declarations carry a Python object ------------------
+std::shared_ptr<const void> py_handle(const py::object& obj) {
+    if (obj.is_none()) return {};
+    // The last reference may drop on a thread without the GIL (a derived
+    // circuit dying inside a sweep worker): take it to decref; leak at
+    // interpreter shutdown rather than touch a finalised interpreter.
+    return std::shared_ptr<const void>(new py::object(obj), [](const void* p) {
+        if (!Py_IsInitialized()) return;
+        py::gil_scoped_acquire gil;
+        delete static_cast<const py::object*>(p);
+    });
+}
+
+py::list controls_to_py(std::span<const pulsim::ir::ControlDecl> cs) {
+    py::list out;
+    for (const auto& c : cs) {
+        out.append(py::make_tuple(
+            c.name, c.kind, c.content_hash,
+            c.handle ? *static_cast<const py::object*>(c.handle.get())
+                     : py::object(py::none())));
+    }
+    return out;
 }
 
 // ---- Task 5.2: the kernel path of `sweep(circuit, ...)` -------------------
@@ -155,7 +180,9 @@ py::tuple run_pwl_points(const Circuit& base, const std::vector<std::string>& na
         };
         const auto nt = static_cast<std::size_t>(std::max(1, n_threads));
         std::vector<std::thread> pool;
-        for (std::size_t t = 1; t < std::min(nt, n); ++t) pool.emplace_back(work);
+        for (std::size_t t = 1; t < std::min(nt, n); ++t) {
+            try { pool.emplace_back(work); } catch (...) { break; }  // fewer threads
+        }
         work();
         for (auto& th : pool) th.join();
     }
@@ -353,6 +380,25 @@ void init_module(py::module_& m) {
             "it: returns (circuit, report, ties) — the circuit a run uses "
             "(this one when no tie was needed), the PreflightReport, and "
             "the inserted ties as (name, node index, resistance).")
+        .def("controls", [](const Circuit& c) { return controls_to_py(c.controls()); },
+             "The control declarations the circuit carries, as (name, "
+             "kind, content_hash, handle) tuples: C blocks (kind "
+             "\"c_block\", handle = the CBlockHandle) and graph-driven "
+             "sources (\"graph_driven\"). simulate(circuit) runs them.")
+        .def("with_controls", [](const Circuit& c, const py::list& decls) {
+                std::vector<pulsim::ir::ControlDecl> ds;
+                for (const auto& d : decls) {
+                    auto t = d.cast<py::tuple>();
+                    ds.push_back({t[0].cast<std::string>(), t[1].cast<std::string>(),
+                                  t[2].cast<std::uint64_t>(),
+                                  py_handle(py::reinterpret_borrow<py::object>(t[3]))});
+                }
+                return c.with_controls(ds);
+            }, py::arg("decls"),
+            "A new circuit with control declarations appended: a list of "
+            "(name, kind, content_hash, handle). name and kind enter "
+            "structure_hash, content_hash value_hash; the handle is "
+            "passed through to the run. The receiver is unchanged.")
         .def("to_builder", &Circuit::to_builder,
              py::call_guard<py::gil_scoped_release>(),
              "A new, independent CircuitBuilder holding this circuit "
@@ -415,6 +461,10 @@ void init_module(py::module_& m) {
         .def("set_param", &CircuitBuilder::set_param, py::arg("name"),
              py::arg("value"),
              "Re-value a parameter and every field bound to it, in place.")
+        .def("controls", [](const CircuitBuilder& b) {
+                return controls_to_py(b.controls());
+            }, "Control declarations carried by this builder (a builder "
+               "made by Circuit.to_builder()), as Circuit.controls().")
         .def("parameters", [](const CircuitBuilder& b) {
                 return std::vector<pulsim::ir::Parameter>(
                     b.parameters().begin(), b.parameters().end());
