@@ -1259,7 +1259,7 @@ public:
         sc.vscale = vs;
         // A resistor stiffer than every ON switching element (a 1 µΩ ground
         // link) does not set the current scale: vs·G = 4.8e7 A on a 48 V
-        // flyback let the judge and the LCP read 0.05 A of reverse current in
+        // flyback let the judge and the LCP read 7.7 mA of reverse current in
         // an ON clamp diode as rounding. The ON conductances bound what flows.
         if (gon_max > Real{0}) gmax = std::min(gmax, gon_max);
         sc.iscale = std::max(is, vs * gmax);

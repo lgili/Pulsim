@@ -138,7 +138,7 @@ inline std::string fmt_e(Real v) {
         for (Eigen::Index i = 0; i < n; ++i) {
             const Real c0 = M.col(i).cwiseAbs().sum() - std::abs(M(i, i));
             const Real r = M.row(i).cwiseAbs().sum() - std::abs(M(i, i));
-            if (!(c0 > Real{0}) || !(r > Real{0})) continue;
+            if (!(c0 > Real{0}) || !(r > Real{0}) || !std::isfinite(c0) || !std::isfinite(r)) continue;
             Real c = c0, f = Real{1};
             while (c < r / radix) { f *= radix; c *= radix * radix; }
             while (c > r * radix) { f /= radix; c /= radix * radix; }
@@ -151,6 +151,14 @@ inline std::string fmt_e(Real v) {
         }
     }
     return s;
+}
+
+/// κ₂ of a basis (∞ when singular).
+[[nodiscard]] inline Real kappa2(const Eigen::MatrixXcd& V) {
+    Eigen::JacobiSVD<Eigen::MatrixXcd> svd(V);
+    const auto& sv = svd.singularValues();
+    const auto n = sv.size();
+    return sv(n - 1) > Real{0} ? sv(0) / sv(n - 1) : std::numeric_limits<Real>::infinity();
 }
 
 /// max over the eigenpairs of ‖A·v − λ·v‖ / (‖v‖·max(|λ|, 1/h_max)): each
@@ -194,13 +202,16 @@ inline std::string fmt_e(Real v) {
     // HURT (eigenvectors of the balanced matrix are accurate on its scale, and
     // the scaling back, up to 4e6 on the phase-shift bridge, amplified their
     // error: propagator 1.5e-3 off against 8.5e-9 unbalanced, V_out 24.33 V for
-    // 24.07 V). Keep the one with the smaller residual on the mode's own scale.
+    // 24.07 V). Keep the pair with the smaller error estimate κ₂·max(res, u):
+    // the residual on each pair's own time scale, amplified by the basis.
     Eigen::EigenSolver<DenseMatrix> es(out.As);
     bool ok = es.info() == Eigen::Success;
+    Eigen::MatrixXcd Vt;
     if (ok) {
         out.lambda = es.eigenvalues();
+        Vt = es.eigenvectors();
+        out.kappa = kappa2(Vt);
     }
-    Eigen::MatrixXcd Vt = ok ? Eigen::MatrixXcd(es.eigenvectors()) : Eigen::MatrixXcd{};
     DenseMatrix Ab = out.As;
     const Vector sb = balance_in_place(Ab);
     if ((sb.array() != Real{1}).any()) {
@@ -209,20 +220,19 @@ inline std::string fmt_e(Real v) {
             Eigen::MatrixXcd Vb = sb.cast<std::complex<Real>>().asDiagonal() * eb.eigenvectors();
             Vb.colwise().normalize();   // κ₂ of unit columns, as without balancing
             const Eigen::VectorXcd lb = eb.eigenvalues();
-            if (!ok || eigen_residual(out.As, Vb, lb, h_max)
-                           < eigen_residual(out.As, Vt, out.lambda, h_max)) {
+            const Real kb = kappa2(Vb);
+            const auto est = [&](Real k, const Eigen::MatrixXcd& V, const Eigen::VectorXcd& l) {
+                return k * std::max(eigen_residual(out.As, V, l, h_max), kExactRoundoff);
+            };
+            if (!ok || est(kb, Vb, lb) < est(out.kappa, Vt, out.lambda)) {
                 Vt = std::move(Vb);
                 out.lambda = lb;
+                out.kappa = kb;
                 ok = true;
             }
         }
     }
     if (ok) {
-        Eigen::JacobiSVD<Eigen::MatrixXcd> svd(Vt);
-        const auto& sv = svd.singularValues();
-        out.kappa = sv(n - 1) > Real{0}
-            ? sv(0) / sv(n - 1)
-            : std::numeric_limits<Real>::infinity();
         if (kExactRoundoff * out.kappa <= kExactTierBound) {
             const Eigen::MatrixXcd Vt_inv = Vt.fullPivLu().inverse();
             const Eigen::MatrixXcd V = dinv.asDiagonal() * Vt;
