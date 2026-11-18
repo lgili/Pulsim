@@ -14,6 +14,7 @@
 
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/ir/circuit.hpp"
+#include "pulsim/ir/expr.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
@@ -218,6 +219,22 @@ py::tuple run_pwl_points(const Circuit& base, const std::vector<std::string>& na
 }  // namespace
 
 void init_module(py::module_& m) {
+    m.def("_eval_expr", [](const std::string& text, const std::vector<std::string>& names,
+                           const std::vector<pulsim::Real>& values, const std::string& who) {
+            if (names.size() != values.size()) {
+                throw std::invalid_argument("_eval_expr: names and values differ in length");
+            }
+            const auto e = pulsim::ir::Expr::compile(text,
+                [&](std::string_view n) -> std::optional<std::uint32_t> {
+                    for (std::size_t i = 0; i < names.size(); ++i) {
+                        if (names[i] == n) return static_cast<std::uint32_t>(i);
+                    }
+                    return std::nullopt;
+                }, who);
+            return e.eval(values);
+        }, py::arg("text"), py::arg("names"), py::arg("values"),
+        py::arg("who") = std::string{"expression"},
+        "Evaluate a parameter expression (ir/expr.hpp) over names = values.");
     g_components = new py::object(m.attr("CircuitBuilder").attr("components"));
     using pulsim::ir::Parameter;
     py::class_<Parameter>(m, "Parameter",
@@ -229,6 +246,8 @@ void init_module(py::module_& m) {
         .def_readonly("unit", &Parameter::unit)
         .def_readonly("lo", &Parameter::lo)
         .def_readonly("hi", &Parameter::hi)
+        .def_readonly("expr", &Parameter::expr,
+                      "The defining expression, or \"\" for a literal.")
         .def("__repr__", [](const Parameter& p) {
             return std::format("<pulsim.Parameter {} = {}{}{}>", p.name,
                                p.value, p.unit.empty() ? "" : " ", p.unit);
@@ -465,12 +484,21 @@ void init_module(py::module_& m) {
         .def("get_value", &CircuitBuilder::get_value,
              py::arg("device_dot_field"),
              "Value of one field, e.g. get_value(\"R1.R\").")
-        .def("param", &CircuitBuilder::param, py::arg("name"),
+        .def("param", [](CircuitBuilder& b, std::string_view name, const py::object& value,
+                         std::string_view unit, std::optional<pulsim::Real> lo,
+                         std::optional<pulsim::Real> hi) {
+                if (py::isinstance<py::str>(value)) {
+                    return b.param_expr(name, value.cast<std::string>(), unit, lo, hi);
+                }
+                return b.param(name, value.cast<pulsim::Real>(), unit, lo, hi);
+            }, py::arg("name"),
              py::arg("value"), py::arg("unit") = std::string{},
              py::arg("lo") = std::nullopt, py::arg("hi") = std::nullopt,
              "Declare a named parameter and return it (a "
              "pulsim.Parameter); pass it to any add_* in place of a "
-             "number. lo / hi bound its value.")
+             "number. lo / hi bound its value. A str value is an "
+             "expression over earlier parameters (\"2*Lbase\"), "
+             "re-evaluated when they change.")
         .def("bind_param", &CircuitBuilder::bind_param,
              py::arg("device_dot_field"), py::arg("name"),
              "Drive one field by a parameter: bind_param(\"L1.L\", "

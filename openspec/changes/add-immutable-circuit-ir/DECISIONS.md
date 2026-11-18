@@ -393,3 +393,54 @@ is not a precondition; `simulate()` keeps its entry points and calls
   `value_hash` 0x746D6010F3DC01E0 for the V-R-C cell (C++ and Python).
 - **Reverse:** when `add-unified-device-interface` lands generated field
   tables, `kKindYaml` and the reader's visitor come from them.
+
+## 17. Expressions are derived parameters (group 7)
+
+- **Option:** an expression defines a PARAMETER (`ir::Parameter::expr`,
+  compiled to a postfix `ir::Expr` kept beside it), never a field
+  directly. Fields keep binding to parameters exactly as in group 6; a
+  YAML or SPICE field expression becomes a derived parameter named
+  `<device>:<field>` bound to that field. One mechanism, one hash rule
+  (the text is structure), one round-trip path.
+- **No cycles by construction in the builder:** `param_expr` resolves
+  only parameters declared before it, so `set_param` re-evaluates the
+  derived parameters after the changed one in one forward pass. Files
+  (YAML `circuit.parameters`) may list them in any order: the loader
+  orders them (`ir::dependency_order`) and refuses a cycle naming it.
+- **Grammar without unit suffixes.** `10k` is refused inside an
+  expression (`bad number "10k" (no unit suffixes)`): a suffix grammar
+  differs between SPICE dialects and would make `1m` ambiguous (milli /
+  mega). SPICE plain values keep their suffixes; only `{...}` uses this
+  grammar.
+- **Evidence:** fuzz of 10^4 random expressions (all operators and
+  functions, domains kept real) against a Python reference: worst
+  relative error 0 (bound 1e-15) — the evaluator does the same IEEE
+  operations in the same order. A circuit with `2*Lbase*1.5` and
+  `Vin/4` simulates bit for bit like its literal twin.
+- **Reverse:** scopes (group 8) widen name lookup to the enclosing
+  scopes; the grammar and the program are unchanged.
+
+## 18. Final review (fresh-context reviewer, groups 4 and 7), and what changed
+
+- **with_params checked derived bounds on half-updated values** (D =
+  Ton / T moved with both was refused or not depending on dict order):
+  `CircuitBuilder::set_params` sets every literal, then evaluates and
+  checks once; `Circuit::with_params` calls it (signature unchanged).
+- **from_yaml UB on hostile integers** (`body: 1e300` cast to int):
+  integer keys are parsed as integers with a range.
+- **Untyped yaml-cpp exceptions / zombie-node access** on a map where a
+  list belongs, a scalar device, a phase that is not a map, a power
+  MOSFET without its diode records: shape checks, and any remaining
+  `YAML::Exception` or unknown-name `out_of_range` becomes
+  `invalid_argument` ("from_yaml: ..."). `branch_form` must name a
+  switch or a diode.
+- **The loader's number test** (from_chars) read `.inf` / `+5` as
+  expressions; it now asks yaml-cpp's own decode, so every value that
+  loaded as a number still does and creates no parameter.
+- **`pi`**: a parameter named `pi` now shadows the constant (it was the
+  other way round, and SPICE's scope disagreed with the builder).
+- **Deep parameter chains**: `dependency_order` is iterative (a 20 000
+  link chain loads); `_eval_expr` checks names / values lengths.
+- **Accepted, documented:** `spice_to_builder` declares top-level
+  `.param` lines as parameters (CHANGELOG migration note). `from_yaml`
+  takes field values as written (no authoring bounds; see 16).

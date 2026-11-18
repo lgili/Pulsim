@@ -41,6 +41,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `_pulsim_aliases` (the C++ builder has stored both since 1.5; a
   Circuit carries them). **Migration:** a test double that relied on the
   Python `set_initial` / `set_alias` fallbacks must implement them.
+* **Added** parameter expressions (`pulsim/ir/expr.hpp`):
+  `b.param("L2", "2*Lbase")` declares a parameter defined by an
+  expression over earlier ones, re-evaluated by `set_param` /
+  `with_params` (setting it directly is refused). Grammar: `+ - * / ^`,
+  parentheses, `pi`, 16 functions, no unit suffixes; errors name the
+  parameter or device, the field, the text and the column. YAML
+  netlists take `circuit.parameters` (any order; a cycle is refused by
+  name) and string-valued fields (`L: "2*Lbase"`, driven through a
+  derived parameter `L1:L`); `spice_to_builder` keeps top-level
+  `.param` lines as parameters and evaluates `{2*L}` (it raised
+  `KeyError`). `to_yaml` writes the expression text. Fuzz: 10^4 random
+  expressions agree with a Python reference to 1e-15 relative (worst
+  0); a circuit with expressions simulates bit for bit like the literal
+  circuit. A circuit without expressions hashes as before.
+  `Circuit.with_params({...})` / `CircuitBuilder.set_params` set every
+  literal first and check once, so the order of the names does not
+  matter. **Migration:** `spice_to_builder` now declares every
+  top-level `.param` as a builder parameter: a later
+  `b.param(name, ...)` of the same name is refused, and the imported
+  circuit's `parameters()`, `structure_hash` and `to_yaml` include them.
 * **Added** `Circuit.to_yaml()`, `Circuit.from_yaml(text)` (C++
   `pulsim/yaml/emitter.hpp`), `Circuit.clone()` and pickle (through the
   YAML). The text is the lowered circuit: one entry per registry kind

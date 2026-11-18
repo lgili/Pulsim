@@ -141,7 +141,7 @@ public:
     [[nodiscard]] Circuit with_params(
         std::span<const std::pair<std::string_view, Real>> values) const {
         auto b = d_->lowered.clone();
-        for (const auto& [name, v] : values) b.set_param(name, v);
+        b.set_params(values);
         return Circuit{std::move(b), d_->plan};
     }
 
@@ -368,6 +368,7 @@ private:
         const auto& params = d->lowered.parameters();
         for (const auto& p : params) {
             v.str(p.name); v.real(p.value); v.str(p.unit);
+            if (!p.expr.empty()) { s.word(0x65787072ULL); s.str(p.name); s.str(p.expr); }
             v.word(p.lo.has_value()); v.real(p.lo.value_or(0));
             v.word(p.hi.has_value()); v.real(p.hi.value_or(0));
         }

@@ -50,11 +50,11 @@ lands).
 - [x] 6.5 Docs: parameters page; CHANGELOG
 
 ## 7. Expressions
-- [ ] 7.1 `ir/expr.hpp`: recursive-descent parser to a postfix program; evaluator; dependency ordering; cycle, unknown-name and non-finite errors naming device, field and text
-- [ ] 7.2 YAML: `circuit.parameters`; string-valued fields as expressions; enumerated fields excluded through the schema table
-- [ ] 7.3 SPICE importer keeps `.param` as IR parameters; `{2*L}` evaluates
-- [ ] 7.4 Tests: fuzz against a Python reference evaluator (10⁴ random expressions, relative 1e-15); a circuit with expressions equals the literal circuit bit for bit; `to_yaml` writes the expression text, not its value
-- [ ] 7.5 Docs: expression grammar; YAML reference; SPICE import notes
+- [x] 7.1 `ir/expr.hpp`: recursive-descent parser to a postfix program; evaluator; dependency ordering; cycle, unknown-name and non-finite errors naming device, field and text
+- [x] 7.2 YAML: `circuit.parameters`; string-valued fields as expressions; enumerated fields excluded through the schema table
+- [x] 7.3 SPICE importer keeps `.param` as IR parameters; `{2*L}` evaluates
+- [x] 7.4 Tests: fuzz against a Python reference evaluator (10⁴ random expressions, relative 1e-15); a circuit with expressions equals the literal circuit bit for bit; `to_yaml` writes the expression text, not its value
+- [x] 7.5 Docs: expression grammar; YAML reference; SPICE import notes
 
 ## 8. Scopes
 - [ ] 8.1 `Scope` tree; `builder.scope(name, kind)`; scoped lookup of parameters

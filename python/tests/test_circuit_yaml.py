@@ -229,3 +229,28 @@ def test_a_circuit_sweeps_in_worker_processes():
     got = p.sweep(_rc_param(), parallel=True, backend="process", n_workers=2, **kw)
     assert got.backend == "process" and got.failed == []
     np.testing.assert_array_equal(got.kpis["v"], ref.kpis["v"])
+
+
+@pytest.mark.parametrize(("text", "match"), [
+    ("pulsim_circuit: 1\ndevices: {a: 1}\n", "devices: must be a list"),
+    ("pulsim_circuit: 1\ndevices: [3]\n", "a device: expected a mapping"),
+    ('pulsim_circuit: 1\nnodes: ["a"]\ndevices:\n'
+     '  - {kind: resistor, name: "R1", pins: ["a", "gnd"], G: 1}\n'
+     'branch_form:\n  - {device: "R1", R_on: 0}\n',
+     "R1: branch form is for a switch or a diode"),
+    ('pulsim_circuit: 1\ninitial_conditions:\n  - {device: "nope", value: 1}\n',
+     "from_yaml: "),
+])
+def test_hostile_documents_get_typed_errors(text, match):
+    with pytest.raises(ValueError, match=match):
+        p.Circuit.from_yaml(text)
+
+
+def test_hostile_power_mosfet_fields_are_refused():
+    c = VARIANT_CELLS["power_mosfet"][0][0](True).build()
+    y = c.to_yaml()
+    bad = re.sub(r"body: \d", "body: 1e300", y)
+    with pytest.raises(ValueError, match=r'"body" must be an integer in \[0, 2\]'):
+        p.Circuit.from_yaml(bad)
+    with pytest.raises(ValueError, match='needs "shockley"'):
+        p.Circuit.from_yaml(re.sub(r", shockley: \{[^}]*\}", "", y))

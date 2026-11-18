@@ -75,6 +75,7 @@ struct Parameter {
     std::string unit;
     std::optional<Real> lo;
     std::optional<Real> hi;
+    std::string expr{};   // group 7: defined by this expression (empty: a literal)
 };
 
 struct ParamId { std::uint32_t v; };

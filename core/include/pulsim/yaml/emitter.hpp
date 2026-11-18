@@ -335,7 +335,9 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
         o += "parameters:\n";
         for (const auto& p : ps) {
             Map mm;
-            mm.add("name", quote(p.name)).add("value", num(p.value));
+            mm.add("name", quote(p.name));
+            if (p.expr.empty()) mm.add("value", num(p.value));
+            else mm.add("expr", quote(p.expr));
             if (!p.unit.empty()) mm.add("unit", quote(p.unit));
             if (p.lo) mm.add("lo", num(*p.lo));
             if (p.hi) mm.add("hi", num(*p.hi));
@@ -435,6 +437,18 @@ struct YamlIo {
         }
         return x;
     }
+    /// An integer in [lo, hi] (a float cast to int is UB out of range).
+    static int integer(const YAML::Node& n, std::string_view who, std::string_view key,
+                       int lo, int hi) {
+        const std::string s = text(n, who, key);
+        int x = 0;
+        const auto r = std::from_chars(s.data(), s.data() + s.size(), x);
+        if (r.ec != std::errc{} || r.ptr != s.data() + s.size() || x < lo || x > hi) {
+            fail(who, std::format("\"{}\" must be an integer in [{}, {}], got \"{}\"",
+                                  key, lo, hi, s));
+        }
+        return x;
+    }
     static std::string text(const YAML::Node& n, std::string_view who, std::string_view key) {
         if (!n || !n.IsScalar()) fail(who, std::format("\"{}\" must be a string", key));
         return n.Scalar();
@@ -504,6 +518,11 @@ struct YamlIo {
         if (text(root["pulsim_circuit"], "document", "pulsim_circuit") != "1") {
             fail("document", "pulsim_circuit must be 1");
         }
+        for (const auto* k : {"nodes", "devices", "couplings", "branch_form", "parameters",
+                              "bindings", "initial_conditions", "aliases",
+                              "power_mosfets", "controls"}) {
+            if (root[k] && !root[k].IsSequence()) fail(k, "must be a list");
+        }
         builder::CircuitBuilder b;
         if (const auto ns = root["nodes"]) {
             for (const auto& n : ns) {
@@ -526,6 +545,7 @@ struct YamlIo {
         struct Pending { YAML::Node n; K kind; std::string name; std::vector<Index> branches; };
         std::vector<Pending> pend;
         for (const auto& d : root["devices"]) {
+            if (!d.IsMap()) fail("a device", "expected a mapping");
             const auto ks = text(d["kind"], "a device", "kind");
             const auto it = std::ranges::find(kKindYaml, std::string_view{ks});
             if (it == kKindYaml.end()) fail(ks, "unknown kind");
@@ -537,6 +557,7 @@ struct YamlIo {
                     ? text(ph[0]["name"], "pmsm_mna", "name") : "pmsm_mna";
                 if (!ph || !ph.IsSequence() || ph.size() != 3) fail(p.name, "needs three phases");
                 for (const auto& x : ph) {
+                    if (!x.IsMap()) fail(p.name, "each phase is {name, pins}");
                     const auto nm = text(x["name"], p.name, "name");
                     const auto pins = x["pins"];
                     if (!pins || !pins.IsSequence() || pins.size() != 2) fail(nm, "needs two pins");
@@ -577,16 +598,20 @@ struct YamlIo {
         for (const auto& f : root["branch_form"]) {
             keys(f, "branch_form", {"device", "R_on"});
             const auto nm = text(f["device"], "branch_form", "device");
-            b.pool_.set_branch_form(b.branch_id_of(nm), real(f["R_on"], nm, "R_on"));
+            const auto bi = b.branch_id_of(nm);
+            const auto fk = b.pool_.kind_of(bi);
+            if (fk != K::Switch && fk != K::Diode) fail(nm, "branch form is for a switch or a diode");
+            b.pool_.set_branch_form(bi, real(f["R_on"], nm, "R_on"));
         }
         for (const auto& p : root["parameters"]) {
-            keys(p, "a parameter", {"name", "value", "unit", "lo", "hi"});
+            keys(p, "a parameter", {"name", "value", "expr", "unit", "lo", "hi"});
             const auto nm = text(p["name"], "a parameter", "name");
             std::optional<Real> lo, hi;
             if (p["lo"]) lo = real(p["lo"], nm, "lo");
             if (p["hi"]) hi = real(p["hi"], nm, "hi");
-            b.param(nm, real(p["value"], nm, "value"),
-                    p["unit"] ? text(p["unit"], nm, "unit") : std::string{}, lo, hi);
+            const auto unit = p["unit"] ? text(p["unit"], nm, "unit") : std::string{};
+            if (p["expr"]) b.param_expr(nm, text(p["expr"], nm, "expr"), unit, lo, hi);
+            else b.param(nm, real(p["value"], nm, "value"), unit, lo, hi);
         }
         for (const auto& bd : root["bindings"]) {
             keys(bd, "a binding", {"param", "field"});
@@ -669,7 +694,7 @@ private:
                     q.ja.Ms = real(j["Ms"], who, "ja.Ms"); q.ja.a = real(j["a"], who, "ja.a");
                     q.ja.alpha = real(j["alpha"], who, "ja.alpha");
                     q.ja.c = real(j["c"], who, "ja.c"); q.ja.k = real(j["k"], who, "ja.k");
-                    q.substeps_min = static_cast<int>(real(j["substeps_min"], who, "ja.substeps_min"));
+                    q.substeps_min = integer(j["substeps_min"], who, "ja.substeps_min", 1, 1 << 20);
                     q.substep_frac = real(j["substep_frac"], who, "ja.substep_frac");
                     q.M0 = real(j["M0"], who, "ja.M0");
                     p.ja = std::make_shared<const m::JilesAthertonCore::Params>(q);
@@ -729,7 +754,8 @@ private:
         p.C_gd = cap(n["C_gd"], "C_gd");
         p.C_ds = cap(n["C_ds"], "C_ds");
         p.R_g = real(n["R_g"], w, "R_g"); p.L_s = real(n["L_s"], w, "L_s");
-        p.body = static_cast<m::PowerMosfet::BodyDiode>(static_cast<int>(real(n["body"], w, "body")));
+        p.body = static_cast<m::PowerMosfet::BodyDiode>(integer(n["body"], w, "body", 0, 2));
+        if (!n["shockley"] || !n["lauritzen"]) fail(w, "needs \"shockley\" and \"lauritzen\"");
         ParamsVariant sh{p.shockley};
         keys(n["shockley"], w, {}, fields_of(K::ShockleyDiode));
         set_fields(sh, n["shockley"], w, fields_of(K::ShockleyDiode));
@@ -747,6 +773,14 @@ private:
 
 /// Inverse of `to_yaml`. Throws `std::invalid_argument` naming the
 /// device and the key on a malformed document.
-[[nodiscard]] inline Circuit from_yaml(std::string_view text) { return YamlIo::read(text); }
+[[nodiscard]] inline Circuit from_yaml(std::string_view text) {
+    try {
+        return YamlIo::read(text);
+    } catch (const YAML::Exception& e) {  // a shape the checks above missed
+        throw std::invalid_argument(std::format("from_yaml: malformed document: {}", e.what()));
+    } catch (const std::out_of_range& e) {  // branch_id_of: an unknown device name
+        throw std::invalid_argument(std::format("from_yaml: {}", e.what()));
+    }
+}
 
 }  // namespace pulsim::ir
