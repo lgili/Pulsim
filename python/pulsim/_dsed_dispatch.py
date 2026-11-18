@@ -939,9 +939,15 @@ def run_dsed_from_builder(
             # Bridge.11 path carries the auto-derived predicates, so
             # falling through would freeze the diode bits and
             # reintroduce the silent wrong answer. Re-raise instead.
-            if _n_diodes > 0:
+            #
+            # Nor once the native adapter accepted the circuit and the
+            # exact engine refuses implicit segments: the fallback would
+            # run it numerically (an untyped kernel error mid-run, e.g. a
+            # root finder that did not converge, would come back as a
+            # silent numeric run; integration batch 9 review).
+            if _n_diodes > 0 or (not adapter_rejected and not allow_implicit_segments
+                                 and opts.integrator != "bdf2"):
                 raise
-            pass
 
     if full_x0 is not None and ambiguous:
         x0 = full_x0          # the non-native bridges read it as reduced, as before
