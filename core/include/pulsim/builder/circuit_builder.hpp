@@ -404,6 +404,39 @@ public:
         return resolve_node_(name);
     }
 
+    /// Look up or create node `name` and declare its domain (group 9):
+    /// `node("tj", ir::Domain::Thermal)`. A node never declared is
+    /// electrical unless a typed pin implies otherwise (a PMSM's speed
+    /// and angle pins are mechanical). Ground is the reference of every
+    /// domain and takes no tag; a second, different declaration and the
+    /// reserved magnetic domain are refused.
+    Index node(std::string_view name, ir::Domain d) {
+        if (d == ir::Domain::Magnetic) {
+            throw std::invalid_argument(std::format(
+                "node(\"{}\"): the magnetic domain is reserved "
+                "(add-permeance-magnetic-domain)", name));
+        }
+        if (is_ground_alias_(name)) {
+            throw std::invalid_argument(std::format(
+                "node(\"{}\"): ground is the reference of every domain and "
+                "takes no domain", name));
+        }
+        const Index i = resolve_node_(name);
+        const auto [it, fresh] = node_domains_.emplace(i, d);
+        if (!fresh && it->second != d) {
+            throw std::invalid_argument(std::format(
+                "node(\"{}\"): already declared {}, now {}", name,
+                ir::domain_name(it->second), ir::domain_name(d)));
+        }
+        return i;
+    }
+
+    /// The domains declared with `node(name, domain)` (node index ->
+    /// domain); nodes not listed were never declared.
+    [[nodiscard]] const std::unordered_map<Index, ir::Domain>& declared_domains() const noexcept {
+        return node_domains_;
+    }
+
     // -------- Add methods --------------------------------------------------
 
     CircuitBuilder& add_voltage_source(
@@ -2844,6 +2877,8 @@ private:
     std::vector<ir::Parameter> params_;
     std::vector<ir::Expr>      exprs_;     // parallel to params_ (empty: literal)
     std::vector<ParamBinding>  bindings_;
+    // group 9: domains declared with node(name, domain).
+    std::unordered_map<Index, ir::Domain> node_domains_;
     // group 8: the scope tree (id i > 0 is scopes_[i - 1]), its index by
     // path, the open scope and the scopes to return to.
     std::vector<ir::Scope>     scopes_;

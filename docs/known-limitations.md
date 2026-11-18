@@ -151,6 +151,13 @@ event where the signal jumps.
 | A device whose power no loss model covers (Lauritzen diode, level-1 MOSFET/IGBT, controlled sources) refuses the efficiency. | Buck with a Lauritzen diode: efficiency would read 0.99989 without the diode's 1.36 W of 28.4 W; it is `refused` (`feature="losses"`). | Evaluate without `loads=` for the other KPIs, or use the PWL diode / switch. |
 | `method="transient"` settles to the engine's own orbit. | DCM buck on `trbdf2`: estimated distance 1.4e-10, true error 2.2e-5 (the engine's accuracy). A PWM voltage source on `trbdf2` never settles to 1e-6 (period noise 2.7e-4). | `method="pss"` (exact stepper), or a switch with a schedule instead of a PWM source. |
 
+## Node domains
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| Result traces carry no unit. `Circuit.unit_of(node)` knows it (`degC` on a thermal node, `rad/s` / `rad` on a PMSM's speed / angle node); `SimulationResult` does not. | — | `circuit.unit_of(name)` when labelling a plot. |
+| Only declared tags and PMSM speed/angle pins set a domain. A DC machine's `omega_node`, the mechanical helpers and user-built mechanical networks stay electrical unless declared. | DC machine with `omega_node` declared mechanical: `node_domain` reads `mechanical`, samples bit-identical to the untagged run. | `builder.node(name, "mechanical")` before `build()`. |
+
 ## Devices
 
 | Limitation | Measured | Workaround |

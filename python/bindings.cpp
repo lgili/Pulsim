@@ -443,6 +443,9 @@ void init_module(py::module_& m) {
                        "reported the issue.")
         .def_readonly("detail", &pwl::PreflightFinding::detail,
                        "Human-facing explanation, naming the node.")
+        .def_readonly("domain", &pwl::PreflightFinding::domain,
+                       "Domain of the subnet (electrical, thermal, "
+                       "mechanical); set by Circuit.with_preflight.")
         .def("was_fixed", &pwl::PreflightFinding::was_fixed)
         .def("__repr__", [](const pwl::PreflightFinding& f) {
             return std::string("PreflightFinding(node=") +
@@ -601,7 +604,7 @@ void init_module(py::module_& m) {
         py::dynamic_attr())  // allow Python-side metadata
                               // (initial conditions, aliases)
         .def(py::init<>())
-        .def("node", &builder::CircuitBuilder::node,
+        .def("node", py::overload_cast<std::string_view>(&builder::CircuitBuilder::node),
               py::arg("name"),
               "Look up or create a node by name. "
               "\"gnd\" / \"GND\" / \"0\" alias to ground.")

@@ -340,6 +340,16 @@ void init_module(py::module_& m) {
              "The scope tree (subsystem instances), parents first: one dict "
              "per scope with path, name, kind (the subsystem definition, \"\" "
              "for a plain path segment) and parent (its path, \"\" = root).")
+        .def("node_domain", [](const Circuit& c, std::string_view n) {
+                return std::string{pulsim::ir::domain_name(c.node_info(n).domain)};
+            }, py::arg("name"),
+            "Domain of node `name`: declared, implied by a typed pin (a "
+            "PMSM's speed and angle are mechanical) or electrical.")
+        .def("unit_of", [](const Circuit& c, std::string_view n) {
+                return std::string{c.node_info(n).unit};
+            }, py::arg("name"),
+            "Across unit a probe on node `name` reports: V, degC (thermal), "
+            "rad/s or rad (a PMSM's speed / angle node).")
         .def("scope_of", [](const Circuit& c, std::string_view n) {
                 return std::string{c.lowered().scope_path(c.scope_of(n))};
             }, py::arg("name"),
@@ -552,6 +562,19 @@ void init_module(py::module_& m) {
                 return std::vector<pulsim::ir::Parameter>(
                     b.parameters().begin(), b.parameters().end());
             }, "The named parameters, in declaration order.")
+        .def("node", [](CircuitBuilder& b, std::string_view name, std::string_view domain) {
+                const auto d = pulsim::ir::domain_from_name(domain);
+                if (!d) {
+                    throw std::invalid_argument(std::format(
+                        "node(\"{}\"): unknown domain \"{}\" (electrical, thermal, "
+                        "mechanical)", name, domain));
+                }
+                return b.node(name, *d);
+            }, py::arg("name"), py::arg("domain"),
+            "Look up or create node `name` and declare its domain: "
+            "\"electrical\", \"thermal\" or \"mechanical\". A pin of another "
+            "domain connected to it is refused at build(), naming device, "
+            "pin and node.")
         .def("open_scope", [](CircuitBuilder& b, std::string_view path,
                               std::string_view kind) {
                 return b.scope_path(b.open_scope(path, kind));

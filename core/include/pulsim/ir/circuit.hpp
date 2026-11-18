@@ -44,14 +44,28 @@
 namespace pulsim::ir {
 
 struct NodeId   { std::uint32_t v; };
+
+/// What a pin of a device kind connects to (group 9).
+enum class PinRole : std::uint8_t {
+    Generic,      // any domain, the same as the other pins of its group
+    Electrical,   // an electrical node only
+    Speed,        // a mechanical node, across quantity rad/s (PMSM omega)
+    Angle,        // a mechanical node, across quantity rad (PMSM theta)
+};
 struct DeviceId { std::uint32_t v; };
 
 /// A field value: a literal, or a named parameter (`parameters()[id]`).
 /// Group 7 widens the parameter reference to an expression.
 using Value = std::variant<Real, ParamId>;
 
-/// A node of the lowered graph; `NodeId{i}` is unknown `i`.
-struct Node { std::string name; };
+/// A node of the lowered graph; `NodeId{i}` is unknown `i`. `domain`
+/// is declared or implied by a typed pin (electrical otherwise); `unit`
+/// is the across unit a probe on it reports.
+struct Node {
+    std::string name;
+    Domain domain = Domain::Electrical;
+    std::string_view unit = "V";
+};
 
 /// One value field of a device: its index in the kind's row of
 /// `kKindFields` and its value.
@@ -100,10 +114,116 @@ public:
         auto c = b.clone();
         c.cur_scope_ = 0;          // a scope left open is the author's state,
         c.scope_stack_.clear();    // not the circuit's
+        (void)resolve_domains_(c); // a cross-domain connection is refused here
         return Circuit{std::move(c)};
     }
 
+    /// The domain of every node (index = unknown), as `nodes()` reports
+    /// it, and the across unit of each. Throws `std::invalid_argument`
+    /// naming the device, the pin and the node of a connection across
+    /// domains.
+    struct Domains {
+        std::vector<Domain> domain;
+        std::vector<std::string_view> unit;
+    };
+    [[nodiscard]] static Domains resolve_domains_(const builder::CircuitBuilder& b) {
+        const auto& g = b.graph();
+        const auto& pool = b.pool();
+        const auto n = static_cast<std::size_t>(g.num_nodes());
+        std::vector<int> dom(n, -1);           // -1: not decided yet
+        std::vector<std::string_view> unit(n, std::string_view{});
+        std::vector<std::string> why(n);       // what decided it
+        for (const auto& [i, d] : b.declared_domains()) {
+            dom[static_cast<std::size_t>(i)] = static_cast<int>(d);
+            why[static_cast<std::size_t>(i)] = "declared";
+        }
+        auto node_name = [&](Index i) { return std::string{g.node(i).name}; };
+        auto refuse = [&](std::string_view dev, std::string_view pin, Index nd,
+                          std::string_view wants, std::string_view has) {
+            throw std::invalid_argument(std::format(
+                "device \"{}\": pin {} ({}) is connected to node \"{}\", which "
+                "is {}", dev, pin, wants, node_name(nd), has));
+        };
+        // Typed pins first: they imply a domain (and a unit).
+        auto typed = [&](std::string_view dev, std::string_view pin, Index nd,
+                         Domain d, std::string_view u) {
+            if (nd < 0) return;
+            const auto k = static_cast<std::size_t>(nd);
+            if (dom[k] >= 0 && dom[k] != static_cast<int>(d)) {
+                refuse(dev, pin, nd, domain_name(d),
+                       std::format("{} ({})", domain_name(static_cast<Domain>(dom[k])), why[k]));
+            }
+            dom[k] = static_cast<int>(d);
+            if (why[k].empty()) why[k] = std::format("pin {} of \"{}\"", pin, dev);
+            if (!u.empty()) unit[k] = u;
+        };
+        for (const auto& m : pool.pmsm_mna_machines()) {
+            const auto dev = g.branch_name(m.branch_id[0]);
+            typed(dev, "omega", m.omega_node, Domain::Mechanical, "rad/s");
+            typed(dev, "theta", m.theta_node, Domain::Mechanical, "rad");
+        }
+        std::vector<Index> pins;
+        for (Index bi = 0; bi < g.num_branches(); ++bi) {
+            const auto kind = pool.kind_of(bi);
+            if (!electrical_only_(kind)) continue;
+            const auto& br = g.branch(bi);
+            pins.assign({br.from, br.to});
+            extra_pins_(pool, bi, kind, pins);
+            for (std::size_t p = 0; p < pins.size(); ++p) {
+                typed(g.branch_name(bi), pin_name_(kind, p), pins[p], Domain::Electrical, {});
+            }
+        }
+        for (std::size_t k = 0; k < n; ++k) if (dom[k] < 0) dom[k] = 0;
+        // Generic pins: the pins of one group share a domain.
+        for (Index bi = 0; bi < g.num_branches(); ++bi) {
+            const auto kind = pool.kind_of(bi);
+            if (electrical_only_(kind)) continue;
+            const auto& br = g.branch(bi);
+            pins.assign({br.from, br.to});
+            extra_pins_(pool, bi, kind, pins);
+            for (std::size_t lo = 0; lo < pins.size(); lo += 2) {   // groups are pin pairs
+                const Index a = pins[lo], c = lo + 1 < pins.size() ? pins[lo + 1] : -1;
+                if (a < 0 || c < 0) continue;
+                if (dom[static_cast<std::size_t>(a)] != dom[static_cast<std::size_t>(c)]) {
+                    const auto da = static_cast<Domain>(dom[static_cast<std::size_t>(a)]);
+                    const auto dc = static_cast<Domain>(dom[static_cast<std::size_t>(c)]);
+                    refuse(g.branch_name(bi), pin_name_(kind, lo + 1), c,
+                           std::format("{}, as its pin {} on \"{}\"", domain_name(da),
+                                       pin_name_(kind, lo), node_name(a)),
+                           domain_name(dc));
+                }
+            }
+        }
+        Domains out;
+        out.domain.reserve(n);
+        out.unit.reserve(n);
+        for (std::size_t k = 0; k < n; ++k) {
+            const auto d = static_cast<Domain>(dom[k]);
+            out.domain.push_back(d);
+            out.unit.push_back(!unit[k].empty() ? unit[k] : default_unit(d));
+        }
+        return out;
+    }
+
+    /// The across unit of a domain (V, degC — the thermal helpers write
+    /// Celsius —, rad/s; a PMSM angle pin states rad).
+    [[nodiscard]] static constexpr std::string_view default_unit(Domain d) noexcept {
+        switch (d) {
+            case Domain::Electrical: return "V";
+            case Domain::Thermal:    return "degC";
+            case Domain::Mechanical: return "rad/s";
+            case Domain::Magnetic:   return "A";
+        }
+        return "V";
+    }
+
     [[nodiscard]] std::span<const Node> nodes() const { return tables_().nodes; }
+    /// Domain and across unit of node `name` (ground: electrical, V).
+    [[nodiscard]] const Node& node_info(std::string_view name) const {
+        static const Node kGround{"gnd", Domain::Electrical, "V"};
+        const Index i = d_->lowered.node_id_of(name);
+        return i < 0 ? kGround : tables_().nodes[static_cast<std::size_t>(i)];
+    }
     [[nodiscard]] std::span<const Device> devices() const { return tables_().devices; }
     [[nodiscard]] std::span<const InitialCondition> initial_conditions() const {
         return tables_().ics;
@@ -198,6 +318,19 @@ public:
     struct Regularized;
     [[nodiscard]] Regularized with_preflight(const pwl::PreflightOptions& opts) const;
 
+    /// Name the domain of each preflight finding (its subnet's nodes):
+    /// a floating thermal network is a thermal-domain finding.
+    void label_domains_(pwl::PreflightReport& r) const {
+        if (r.findings.empty()) return;
+        const auto& ns = nodes();
+        for (auto& f : r.findings) {
+            if (f.component.empty()) continue;
+            const auto d = ns[static_cast<std::size_t>(f.component.front())].domain;
+            f.domain = std::string{domain_name(d)};
+            if (d != Domain::Electrical) f.detail = std::format("{}-domain: {}", f.domain, f.detail);
+        }
+    }
+
     /// The symbolic plan every circuit of this structure shares
     /// (`with_params` / `with_value` derivations). A run's cache adopts
     /// it (`PwlStateSpaceCache::share_symbolic`); it is a cache of
@@ -263,6 +396,31 @@ private:
         void idx(Index i) noexcept { word(static_cast<std::uint64_t>(i)); }
     };
 
+    /// Kinds whose every pin is electrical (semiconductors, nonlinear
+    /// magnetics and charges, the PMSM's phases); the others are
+    /// domain-generic, pins grouped in pairs (from/to, then each control
+    /// pair), each pair within one domain.
+    [[nodiscard]] static constexpr bool electrical_only_(pwl::DevicePool::StoredKind k) noexcept {
+        using K = pwl::DevicePool::StoredKind;
+        switch (k) {
+            case K::Switch: case K::Diode: case K::NonlinearDiode:
+            case K::MosfetLevel1: case K::IgbtLevel1: case K::SaturableInductor:
+            case K::NonlinearCapacitor: case K::ShockleyDiode: case K::LauritzenDiode:
+            case K::PmsmMna:
+                return true;
+            default:
+                return false;
+        }
+    }
+    [[nodiscard]] static constexpr std::string_view pin_name_(pwl::DevicePool::StoredKind k,
+                                                              std::size_t p) noexcept {
+        using K = pwl::DevicePool::StoredKind;
+        if (k == K::MosfetLevel1) return std::array<std::string_view, 3>{"drain", "source", "gate"}[p];
+        if (k == K::IgbtLevel1) return std::array<std::string_view, 3>{"collector", "emitter", "gate"}[p];
+        if (p < 4) return std::array<std::string_view, 4>{"from", "to", "ctrl_p", "ctrl_n"}[p];
+        return "?";
+    }
+
     /// Control / gate nodes (or the sensed branch) the pool keeps beside
     /// a branch's from / to.
     static void extra_pins_(const pwl::DevicePool& pool, Index b,
@@ -303,12 +461,14 @@ private:
         auto* d = &out;
         const auto& g = dd.lowered.graph();
         const auto& pool = dd.lowered.pool();
+        const auto doms = resolve_domains_(dd.lowered);
 
         Hash s;  // structure
         s.idx(g.num_nodes());
         d->nodes.reserve(static_cast<std::size_t>(g.num_nodes()));
         for (Index i = 0; i < g.num_nodes(); ++i) {
-            d->nodes.push_back(Node{g.node(i).name});
+            const auto k = static_cast<std::size_t>(i);
+            d->nodes.push_back(Node{g.node(i).name, doms.domain[k], doms.unit[k]});
             s.str(g.node(i).name);
         }
         Hash v;  // values (structure folded in at the end)
@@ -401,6 +561,21 @@ private:
         }
         // Which fields a parameter drives is structure; parameter values
         // are values.
+        // Declared domains are structure, hashed only when one is not
+        // electrical (an untagged circuit keeps its hashes); implied ones
+        // follow from the kinds already hashed.
+        {
+            std::vector<std::pair<Index, ir::Domain>> tags;
+            for (const auto& [i, dm] : dd.lowered.declared_domains()) {
+                if (dm != Domain::Electrical) tags.emplace_back(i, dm);
+            }
+            if (!tags.empty()) {
+                std::ranges::sort(tags);
+                s.word(0x646f6d61696eULL);   // "domain", then the count
+                s.word(tags.size());
+                for (const auto& [i, dm] : tags) { s.idx(i); s.word(static_cast<std::uint64_t>(dm)); }
+            }
+        }
         // The scope tree is structure; hashed only when there is one, so
         // a circuit without scopes keeps its hashes.
         if (const auto sc = dd.lowered.scopes(); !sc.empty()) {
@@ -469,6 +644,7 @@ inline Circuit::Regularized Circuit::with_preflight(
     // Pure analysis first: the common, well-posed circuit costs no copy
     // and keeps its identity (and its shared symbolic plan).
     auto found = pwl::analyze_preflight(graph(), pool(), opts);
+    label_domains_(found);
     if (found.empty() || !opts.auto_regularize) {
         return {*this, std::move(found), {}};
     }
@@ -477,6 +653,7 @@ inline Circuit::Regularized Circuit::with_preflight(
     auto b = d_->lowered.clone();
     const Index before = b.graph().num_branches();
     auto report = b.run_preflight(opts);
+    label_domains_(report);
     std::vector<Tie> ties;
     for (Index i = before; i < b.graph().num_branches(); ++i) {
         const auto& br = b.graph().branch(i);

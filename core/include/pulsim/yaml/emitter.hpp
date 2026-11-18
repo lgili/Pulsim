@@ -280,8 +280,16 @@ namespace yaml_detail {
         return quote(n);
     };
 
+    // A node declared non-electrical is written {name, domain}.
+    auto node_entry = [&](Index i) {
+        const auto& dd = b.declared_domains();
+        const auto it = dd.find(i);
+        if (it == dd.end() || it->second == Domain::Electrical) return node(i);
+        return yaml_detail::Map{}.add("name", node(i))
+            .add("domain", std::string{domain_name(it->second)}).str();
+    };
     std::string o = "pulsim_circuit: 1\nnodes: [";
-    for (Index i = 0; i < g.num_nodes(); ++i) o += (i ? ", " : "") + node(i);
+    for (Index i = 0; i < g.num_nodes(); ++i) o += (i ? ", " : "") + node_entry(i);
     o += "]\ndevices:\n";
 
     const auto& machines = pool.pmsm_mna_machines();
@@ -664,12 +672,22 @@ struct YamlIo {
         builder::CircuitBuilder b;
         if (const auto ns = root["nodes"]) {
             for (const auto& n : ns) {
-                const auto name = text(n, "nodes", "nodes");
-                // Sequenced: the operands of != have no evaluation order (MSVC
-                // read num_nodes() before resolve_node_ created the node).
-                const Index created = b.resolve_node_(name);
+                const bool tagged = n.IsMap();
+                if (tagged) keys(n, "nodes", {"name", "domain"});
+                const auto name = text(tagged ? n["name"] : n, "nodes", "nodes");
+                const Index created = b.resolve_node_(name);   // sequenced (MSVC)
                 if (created != b.graph().num_nodes() - 1) {
                     fail("nodes", std::format("\"{}\" is listed twice or names ground", name));
+                }
+                if (tagged) {
+                    const auto dn = text(n["domain"], name, "domain");
+                    const auto d = domain_from_name(dn);
+                    if (!d) fail(name, std::format("unknown domain \"{}\"", dn));
+                    try {
+                        (void)b.node(name, *d);
+                    } catch (const std::invalid_argument& e) {
+                        fail(name, e.what());
+                    }
                 }
             }
         }
