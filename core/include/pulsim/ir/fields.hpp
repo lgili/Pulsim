@@ -79,6 +79,27 @@ struct Parameter {
     std::uint32_t scope = 0;  // group 8: the scope it was declared in (0 = root)
 };
 
+/// The physical domain of a node (group 9). All domains are solved in
+/// one MNA system; the tag drives the connection check, the preflight's
+/// per-domain findings and the unit a probe reports. `Magnetic` is
+/// reserved for add-permeance-magnetic-domain.
+enum class Domain : std::uint8_t { Electrical, Thermal, Mechanical, Magnetic };
+
+inline constexpr std::array<std::string_view, 4> kDomainNames{
+    "electrical", "thermal", "mechanical", "magnetic"};
+
+[[nodiscard]] constexpr std::string_view domain_name(Domain d) noexcept {
+    return kDomainNames[static_cast<std::size_t>(d)];
+}
+
+/// `"thermal"` -> Domain::Thermal; nullopt for an unknown name.
+[[nodiscard]] constexpr std::optional<Domain> domain_from_name(std::string_view n) noexcept {
+    for (std::size_t i = 0; i < kDomainNames.size(); ++i) {
+        if (kDomainNames[i] == n) return static_cast<Domain>(i);
+    }
+    return std::nullopt;
+}
+
 /// A scope (group 8): one instance of a subsystem, or a path segment
 /// above one. Id 0 is the root (implicit); scope `i > 0` is
 /// `scopes()[i - 1]`. Members are found by name: an element belongs to

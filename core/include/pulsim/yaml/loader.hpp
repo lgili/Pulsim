@@ -1413,6 +1413,37 @@ struct BlockNames {
 /// scopes), and every device and node name it writes is prefixed with
 /// its path, except its ports (bound to nodes of the enclosing block)
 /// and ground.
+/// `nodes:` entries: a name (electrical unless a pin implies otherwise)
+/// or `{name, domain}` with domain electrical / thermal / mechanical
+/// (group 9); an unknown domain is refused naming node and domain.
+inline void load_nodes(builder::CircuitBuilder& b, const YAML::Node& ns,
+                       const BlockNames& names) {
+    for (const auto& n : ns) {
+        if (n.IsScalar()) {
+            b.node(names.node(n.as<std::string>()));
+            continue;
+        }
+        if (!n.IsMap() || n.size() != 2 || !n["name"] || !n["name"].IsScalar() ||
+            !n["domain"] || !n["domain"].IsScalar()) {
+            throw std::runtime_error(
+                "yaml::load: a 'nodes' entry is a name or {name, domain}");
+        }
+        const auto name = n["name"].as<std::string>();
+        const auto dn = n["domain"].as<std::string>();
+        const auto d = ir::domain_from_name(dn);
+        if (!d || *d == ir::Domain::Magnetic) {
+            throw std::runtime_error(std::format(
+                "yaml::load: node '{}': unknown domain '{}' (electrical, thermal, "
+                "mechanical)", name, dn));
+        }
+        try {
+            b.node(names.node(name), *d);
+        } catch (const std::invalid_argument& e) {
+            throw std::runtime_error(std::format("yaml::load: {}", e.what()));
+        }
+    }
+}
+
 inline void load_subsystems(builder::CircuitBuilder& b, const YAML::Node& list,
                             const BlockNames& outer, std::vector<std::string>& warnings) {
     if (!list.IsSequence()) {
@@ -1457,11 +1488,7 @@ inline void load_subsystems(builder::CircuitBuilder& b, const YAML::Node& list,
             throw std::runtime_error(std::format("yaml::load: subsystem: {}", e.what()));
         }
         if (blk["parameters"]) load_parameters(b, blk["parameters"]);
-        if (blk["nodes"] && blk["nodes"].IsSequence()) {
-            for (const auto& n : blk["nodes"]) {
-                if (n.IsScalar()) b.node(inner.node(n.as<std::string>()));
-            }
-        }
+        if (blk["nodes"] && blk["nodes"].IsSequence()) load_nodes(b, blk["nodes"], inner);
         if (const auto devs = blk["devices"]) {
             if (!devs.IsSequence()) {
                 throw std::runtime_error(std::format(
@@ -1596,12 +1623,8 @@ namespace detail {
     // reference anyway, but exposing it gives the user
     // explicit control of insertion order).
     if (circuit["nodes"] && circuit["nodes"].IsSequence()) {
-        for (const auto& node_name : circuit["nodes"]) {
-            if (node_name.IsScalar()) {
-                loaded.builder.node(
-                    node_name.as<std::string>());
-            }
-        }
+        detail::load_nodes(loaded.builder, circuit["nodes"],
+                           detail::BlockNames{loaded.builder, {}});
     }
 
     const YAML::Node devices = circuit["devices"];

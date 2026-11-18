@@ -723,6 +723,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Circuit IR slice 3 (add-immutable-circuit-ir)
 
+* **Added** node domains (group 9). `builder.node(name, "thermal")`
+  (or `"mechanical"`; YAML `nodes: [{name: tj, domain: thermal}]`) tags
+  a node; a PMSM's speed and angle nodes are mechanical by their pins.
+  A domain spreads along domain-generic devices (resistor, capacitor,
+  source, ...): a case node behind a thermal junction is thermal.
+  `build()` refuses a semiconductor pin on a thermal or mechanical node,
+  and a generic pair joining two nodes of decided, different domains,
+  naming device, pin and node.
+  `Circuit.node_domain(n)` / `unit_of(n)` (V, degC, rad/s, rad); a
+  preflight finding names its domain (`finding.domain`). The thermal
+  helpers (`add_foster_network`, `add_cauer_thermal_network`,
+  `add_shared_heatsink`) tag their nodes. Results are unchanged bit for
+  bit; an untagged circuit hashes as before. Docs: `docs/domains.md`.
+  **Migration:** a circuit that wired a thermal helper's node (or a
+  PMSM's speed / angle node) to a semiconductor pin, or through a
+  generic device to a node a semiconductor makes electrical, is now
+  refused at `build()`.
+* **Changed** a parameter's infinite `lo` / `hi` is stored as no bound
+  (so the circuit writes and pickles); a NaN bound is refused. The
+  expression functions `min` / `max` return the first operand on a tie
+  (Python's rule; `fmin` left a signed zero to the libm).
 * **Added** scopes (group 8). A subsystem instance is a scope of the
   circuit: `Circuit.scopes()` lists the tree (`path`, `name`, `kind` =
   the `define_subsystem` definition, `parent`), `Circuit.scope_of(name)`

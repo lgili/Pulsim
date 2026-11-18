@@ -89,6 +89,7 @@ struct PreflightFinding {
     std::vector<Index> component;        ///< every node in the subnet
     Real inserted_resistance = Real{0};  ///< 0 when reporting only
     std::string detail;                  ///< human-facing sentence
+    std::string domain = "electrical";   ///< the subnet's domain (ir::Circuit labels it)
 
     [[nodiscard]] bool was_fixed() const noexcept {
         return inserted_resistance > Real{0};

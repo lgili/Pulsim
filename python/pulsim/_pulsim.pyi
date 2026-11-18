@@ -176,6 +176,11 @@ class PreflightFinding:
         Human-facing explanation, naming the node.
         """
     @property
+    def domain(self) -> str:
+        """
+        Domain of the subnet (electrical, thermal, mechanical); set by Circuit.with_preflight.
+        """
+    @property
     def inserted_resistance(self) -> float:
         """
         Ohms of the inserted tie; 0 when the pass only reported the issue.
@@ -740,9 +745,15 @@ class CircuitBuilder:
         """
         User-supplied component name for `branch_id`, set by the `add_*` call. Returns an empty string if the branch was never registered or had no name.
         """
+    @typing.overload
     def node(self, name: str) -> int:
         """
         Look up or create a node by name. "gnd" / "GND" / "0" alias to ground.
+        """
+    @typing.overload
+    def node(self, name: str, domain: str) -> int:
+        """
+        Look up or create node `name` and declare its domain: "electrical", "thermal" or "mechanical". A pin of another domain connected to it is refused at build(), naming device, pin and node.
         """
     def node_id_of(self, name: str) -> int:
         """
@@ -3451,6 +3462,10 @@ class Circuit:
         """
         As CircuitBuilder.initial_state().
         """
+    def node_domain(self, name: str) -> str:
+        """
+        Domain of node `name`: declared, implied by a typed pin (a PMSM's speed and angle are mechanical) or electrical.
+        """
     def node_id_of(self, name: str) -> int:
         """
         As CircuitBuilder.node_id_of().
@@ -3486,6 +3501,10 @@ class Circuit:
     def to_yaml(self) -> str:
         """
         The lowered circuit as YAML; `Circuit.from_yaml` reads it back with the same `value_hash`. Refuses a C block (a Python callable).
+        """
+    def unit_of(self, name: str) -> str:
+        """
+        Across unit a probe on node `name` reports: V, degC (thermal), rad/s or rad (a PMSM's speed / angle node).
         """
     def value_hash(self) -> int:
         """

@@ -175,6 +175,13 @@ event where the signal jumps.
 | `T_j` does not feed back into the device (`V_f`, `g_on` stay fixed). | Task 4.1 (optional) not done. | Re-run with `V_f` / `g_on` at the settled `T_j`. |
 | A resumed run (`resume_from=`) drops the heat of the step in flight, and a loss port is not part of the circuit's IR or content hash. | One step's heat at the resume point. | Run the thermal transient in one piece. |
 
+## Node domains
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| Result traces carry no unit. `Circuit.unit_of(node)` knows it (`degC` on a thermal node, `rad/s` / `rad` on a PMSM's speed / angle node); `SimulationResult` does not. | — | `circuit.unit_of(name)` when labelling a plot. |
+| Only declared tags and PMSM speed/angle pins set a domain. A DC machine's `omega_node`, the mechanical helpers and user-built mechanical networks stay electrical unless declared. | DC machine with `omega_node` declared mechanical: `node_domain` reads `mechanical`, samples bit-identical to the untagged run. | `builder.node(name, "mechanical")` before `build()`. |
+
 ## Devices
 
 | Limitation | Measured | Workaround |

@@ -109,6 +109,8 @@ public:
                         std::optional<Real> lo = std::nullopt,
                         std::optional<Real> hi = std::nullopt) {
         const auto full = declare_name_(std::format("param(\"{}\")", name), name);
+        lo = param_bound_(name, "lo", lo);
+        hi = param_bound_(name, "hi", hi);
         ir::Parameter p{full, value, std::string{unit}, lo, hi, {}, cur_scope_};
         check_param_(p, value);
         params_.push_back(p);
@@ -126,6 +128,8 @@ public:
                              std::optional<Real> hi = std::nullopt) {
         const auto who = std::format("param(\"{}\")", name);
         const auto full = declare_name_(who, name);
+        lo = param_bound_(name, "lo", lo);
+        hi = param_bound_(name, "hi", hi);
         auto e = ir::Expr::compile(text, [&](std::string_view n) {
             // as YAML refuses it: an outer `Ron` is not read by an inner `Ron`
             if (n == name) {
@@ -402,6 +406,39 @@ public:
     /// only happens on the first insertion of a given name.
     Index node(std::string_view name) {
         return resolve_node_(name);
+    }
+
+    /// Look up or create node `name` and declare its domain (group 9):
+    /// `node("tj", ir::Domain::Thermal)`. A node never declared is
+    /// electrical unless a typed pin implies otherwise (a PMSM's speed
+    /// and angle pins are mechanical). Ground is the reference of every
+    /// domain and takes no tag; a second, different declaration and the
+    /// reserved magnetic domain are refused.
+    Index node(std::string_view name, ir::Domain d) {
+        if (d == ir::Domain::Magnetic) {
+            throw std::invalid_argument(std::format(
+                "node(\"{}\"): the magnetic domain is reserved "
+                "(add-permeance-magnetic-domain)", name));
+        }
+        if (is_ground_alias_(name)) {
+            throw std::invalid_argument(std::format(
+                "node(\"{}\"): ground is the reference of every domain and "
+                "takes no domain", name));
+        }
+        const Index i = resolve_node_(name);
+        const auto [it, fresh] = node_domains_.emplace(i, d);
+        if (!fresh && it->second != d) {
+            throw std::invalid_argument(std::format(
+                "node(\"{}\"): already declared {}, now {}", name,
+                ir::domain_name(it->second), ir::domain_name(d)));
+        }
+        return i;
+    }
+
+    /// The domains declared with `node(name, domain)` (node index ->
+    /// domain); nodes not listed were never declared.
+    [[nodiscard]] const std::unordered_map<Index, ir::Domain>& declared_domains() const noexcept {
+        return node_domains_;
     }
 
     // -------- Add methods --------------------------------------------------
@@ -3074,6 +3111,18 @@ private:
         }
         return i;
     }
+    // An infinite bound is no bound (stored as none, so a document never
+    // holds an infinity); a NaN bound is refused.
+    static std::optional<Real> param_bound_(std::string_view name, std::string_view which,
+                                            std::optional<Real> v) {
+        if (!v) return v;
+        if (std::isnan(*v)) {
+            throw std::invalid_argument(std::format(
+                "param(\"{}\"): {} must be a number or none (got nan)", name, which));
+        }
+        return std::isinf(*v) ? std::nullopt : v;
+    }
+
     static void check_param_(const ir::Parameter& p, Real value) {
         if (!std::isfinite(value) || (p.lo && value < *p.lo) ||
             (p.hi && value > *p.hi)) {
@@ -3088,6 +3137,8 @@ private:
     std::vector<ir::Parameter> params_;
     std::vector<ir::Expr>      exprs_;     // parallel to params_ (empty: literal)
     std::vector<ParamBinding>  bindings_;
+    // group 9: domains declared with node(name, domain).
+    std::unordered_map<Index, ir::Domain> node_domains_;
     // group 8: the scope tree (id i > 0 is scopes_[i - 1]), its index by
     // path, the open scope and the scopes to return to.
     std::vector<ir::Scope>     scopes_;
