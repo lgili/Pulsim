@@ -226,23 +226,25 @@
     (`perf2.py`). The release flips the default and deletes the hand
     stamps (`benchmarks/DEVICE_PATH_EVIDENCE.md` and its deletion list).
 24. **The controller-state snapshot block.** `SolverSnapshot::controller`
-    (`solver::ControllerState`): `engine`, `version`, and named real
-    vectors (`names[i]` ↔ `values[i]`). Named fields so an engine adds one
-    without a format change; an EMPTY block means "restart the
-    controller", which is what every older snapshot (2.0, v3, v4 with 13
-    or 14 fields) means, so they all load and resume as before. Pickle
-    version 4 gains a 15th field `(engine, version, names, values)`,
-    written only when the block is filled, so an empty block keeps the
-    14-field version 4 that earlier readers load; 13- and 14-field
-    version-4 pickles (and a 15th field of `None`) still load. A filled
-    block needs an engine, a version >= 1 and one value list per name. Python:
-    `snapshot.controller_state` → `(engine, version, {field: values})` or
-    None. The TR-BDF2 schema (version 1) is in design.md, "Controller-
-    state block". NOT filled here: saving is a few lines at
-    `result.final_snapshot`, but restoring touches every controller
-    variable's initialisation in `trbdf2_transient.hpp` (owned by the
-    TR-BDF2 agent) and the unified stepper is replacing that loop; the
-    block is published for them.
+    is refactor-unified-transient-stepper's `step::ControllerState`
+    (`solver/step/controllers.hpp`, taken verbatim from
+    `feat/core-p3-stepper`): a `kind` (None / Fixed / Lte) and a flat
+    vector `v` in that controller's layout (Lte: `[h, h_mem_gate0,
+    h_mem_gate1, pending_gate_slot, diode_slot, gate_parity,
+    h_mem_diode...]`). An EMPTY block means "restart the controller",
+    which is what every older snapshot (2.0, v3, v4 with 13 or 14 fields)
+    means, so they all load and resume as before. Pickle version 4 gains
+    a 15th field `(kind, v)`, written only when the block is filled, so
+    an empty block keeps the 14-field version 4 that earlier readers
+    load; 13- and 14-field version-4 pickles (and a 15th field of `None`)
+    still load; a kind other than 1 or 2 is refused. Python:
+    `snapshot.controller_state` → `(kind, values)` or None. Filling it is
+    the stepper's (TR-BDF2 saves `LteController` at the end of every run);
+    this branch carries and pickles it. A first draft with named fields
+    (engine, version, names, values) was dropped to carry the stepper's
+    object exactly. Other blocks the coordinator named — per-rate-group
+    tick origins (event queue), the gated diode's gate bit (machines) —
+    are separate fields for their owners, not this one.
 25. **What the flip deletes (prepared, not done).** When the release makes
     `'interface'` the default (and every Newton kind is ported, 15.6), the
     hand stamps go: `make_combined_diode_mosfet_refresh` and the

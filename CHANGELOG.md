@@ -24,10 +24,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   derivatives by AD (∂f/∂p, ∂q/∂p); the table and Jiles–Atherton laws have
   none (`param_tangent`).
 * **Added** the step controller's snapshot block
-  (`SolverSnapshot.controller_state`; pickle version 4 gains a 15th field,
-  written only when the block is filled): empty today (a resume restarts
-  the controller, as before); version-4 pickles of 13 and 14 fields and
-  version 3 (12 and 13 fields) still load.
+  (`SolverSnapshot.controller_state` → `(kind, values)`, the unified
+  stepper's `step::ControllerState`; pickle version 4 gains a 15th field,
+  written only when the block is filled): empty until the stepper fills
+  it (a resume restarts the controller, as before); version-4 pickles of
+  13 and 14 fields and version 3 (12 and 13 fields) still load.
 
 ### Unified device interface, slice 2: one stateful-kind registry, exact resume
 

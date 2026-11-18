@@ -33,6 +33,7 @@
 #include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/solver/state_trajectory.hpp"
+#include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
@@ -186,40 +187,6 @@ struct InductorGuardAction {
     }
 };
 
-/// The step controller's state at a snapshot (add-unified-device-interface
-/// DECISIONS #24): what a variable-step engine needs, beyond `x` and the
-/// device state, to continue a run as if it had not stopped (last h, LTE
-/// history, edge memory, the learned gate cap). Named real vectors, so an
-/// engine adds a field without a format change; `version` is the schema
-/// of `engine`'s fields (the engine refuses a version it does not read,
-/// and treats an EMPTY block as "restart the controller", which is what
-/// every snapshot before this block means). The schema of
-/// `engine == "trbdf2"`, version 1, is in the change's design.md
-/// ("Controller-state block").
-struct ControllerState {
-    std::string engine;                 ///< "" = no controller state
-    std::uint32_t version = 0;
-    std::vector<std::string> names;     ///< field names, in fill order
-    std::vector<std::vector<Real>> values;
-    [[nodiscard]] bool empty() const noexcept { return engine.empty(); }
-    void clear() { engine.clear(); version = 0; names.clear(); values.clear(); }
-    /// The field, or nullptr when the snapshot does not carry it.
-    [[nodiscard]] const std::vector<Real>* find(const std::string& name) const {
-        for (std::size_t i = 0; i < names.size(); ++i) {
-            if (names[i] == name) return &values[i];
-        }
-        return nullptr;
-    }
-    /// Add or replace one field.
-    void set(const std::string& name, std::vector<Real> v) {
-        for (std::size_t i = 0; i < names.size(); ++i) {
-            if (names[i] == name) { values[i] = std::move(v); return; }
-        }
-        names.push_back(name);
-        values.push_back(std::move(v));
-    }
-};
-
 /// v2.0 Phase 4 — the COMPLETE state of a run at one instant.
 ///
 /// `initial_state=` restores only the MNA vector and then INVENTS
@@ -346,13 +313,16 @@ public:
     /// the step of a discontinuity and the next two as SDIRK(2,2)
     /// steps, so a run stopped inside that window resumes it. 0 = none.
     Size restart_steps_left = 0;
+    /// The step-size controller's state at `t`
+    /// (refactor-unified-transient-stepper task 12): the variable-step
+    /// engine's step memory. Empty (`Kind::None`) from the fixed engine,
+    /// an older snapshot or a pickle: the resumed controller then starts
+    /// from its initial step (exact in state, to tolerance in trajectory).
+    step::ControllerState controller;
     /// The controllers' state at `t` (control graphs, C blocks), owned
     /// by the language binding that ran them; the solver never reads it
     /// and a copy of the snapshot shares it.
     std::shared_ptr<void> control_state;
-    /// The step controller's state (empty: the resumed engine restarts
-    /// its controller, as before this block existed). DECISIONS #24.
-    ControllerState controller;
     /// True once populated by a run.
     bool valid = false;
 };

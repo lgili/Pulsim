@@ -2453,7 +2453,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, tuple[float, int, float, bool], bool, typing.Any]:
+    def __getstate__(self) -> tuple[typing.Any, ...]:
         ...
     def __init__(self) -> None:
         ...
@@ -2472,7 +2472,7 @@ class SolverSnapshot:
     @property
     def controller_state(self) -> typing.Any:
         """
-        The step controller's state, ``(engine, version, {field: values})``, or None: the resumed engine then restarts its controller (every snapshot before this block).
+        The step-size controller's state (step::ControllerState): ``(kind, values)`` with kind 1 = fixed, 2 = LTE (TR-BDF2; layout [h, h_mem_gate0, h_mem_gate1, pending_gate_slot, diode_slot, gate_parity, h_mem_diode...]), or None: the resumed engine then restarts its controller.
         """
     @property
     def coss_history(self) -> list[float]:

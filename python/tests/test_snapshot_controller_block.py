@@ -1,5 +1,7 @@
 """The step controller's snapshot block (add-unified-device-interface
-DECISIONS #24): pickle version 4 carries it as a 15th field, written only
+DECISIONS #24; the object is refactor-unified-transient-stepper's
+``step::ControllerState``: a kind and a flat vector in that controller's
+layout): pickle version 4 carries it as a 15th field, written only
 when the block is filled, so a snapshot without one stays the 14-field
 version 4 earlier readers load. 13- and 14-field version-4 pickles and
 version 3 (12 or 13 fields) still load, with an empty block, which means
@@ -46,22 +48,20 @@ def test_older_version_4_and_version_3_pickles_still_load():
 
 
 def test_a_filled_block_round_trips_as_a_15th_field():
-    state = _snap().__getstate__() + (
-        ("trbdf2", 1, ["h", "h_mem_gate"], [[2e-7], [1e-7, 3e-7]]),)
-    s = _load(state)
-    assert s.controller_state == ("trbdf2", 1,
-                                  {"h": [2e-7], "h_mem_gate": [1e-7, 3e-7]})
-    out = s.__getstate__()
-    assert len(out) == 15
+    # kind 2 = LTE: [h, h_mem_gate0, h_mem_gate1, pending_gate_slot,
+    # diode_slot, gate_parity, h_mem_diode...]
+    v = [2e-7, 1e-7, 3e-7, -1.0, -1.0, 1.0, 5e-8, 6e-8]
+    s = _load(_snap().__getstate__() + ((2, v),))
+    assert s.controller_state == (2, v)
+    assert len(s.__getstate__()) == 15
     back = pickle.loads(pickle.dumps(s))
-    assert back.controller_state == s.controller_state
+    assert back.controller_state == (2, v)
 
 
 @pytest.mark.parametrize("block", [
-    ("", 1, ["h"], [[1.0]]),          # no engine
-    ("trbdf2", 0, ["h"], [[1.0]]),    # version 0
-    ("trbdf2", 1, ["h", "x"], [[1.0]]),  # names and values differ
-    ("trbdf2", 1, ["h"]),             # three values
+    (0, [1.0]),          # kind None is not a filled block
+    (3, [1.0]),          # unknown kind
+    (2, [1.0], "x"),     # three values
 ])
 def test_a_malformed_block_is_refused(block):
     with pytest.raises(RuntimeError, match="controller-state field"):

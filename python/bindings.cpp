@@ -3910,16 +3910,14 @@ void init_module(py::module_& m) {
         .def_property_readonly("controller_state",
             [](const SolverSnapshot& s) -> py::object {
                 if (s.controller.empty()) return py::none();
-                py::dict f;
-                for (std::size_t i = 0; i < s.controller.names.size(); ++i) {
-                    f[py::str(s.controller.names[i])] = s.controller.values[i];
-                }
-                return py::make_tuple(s.controller.engine,
-                                      s.controller.version, f);
+                return py::make_tuple(static_cast<int>(s.controller.kind),
+                                      s.controller.v);
             },
-            "The step controller's state, ``(engine, version, {field: "
-            "values})``, or None: the resumed engine then restarts its "
-            "controller (every snapshot before this block).")
+            "The step-size controller's state (step::ControllerState): "
+            "``(kind, values)`` with kind 1 = fixed, 2 = LTE (TR-BDF2; "
+            "layout [h, h_mem_gate0, h_mem_gate1, pending_gate_slot, "
+            "diode_slot, gate_parity, h_mem_diode...]), or None: the "
+            "resumed engine then restarts its controller.")
         .def_readwrite("restart_steps_left",
             &SolverSnapshot::restart_steps_left,
             "discontinuity_restart: SDIRK restart steps still owed when "
@@ -3987,8 +3985,7 @@ void init_module(py::module_& m) {
                 // that earlier readers load.
                 if (s.controller.empty()) return out;
                 return py::tuple(out + py::make_tuple(py::make_tuple(
-                    s.controller.engine, s.controller.version,
-                    s.controller.names, s.controller.values)));
+                    static_cast<int>(s.controller.kind), s.controller.v)));
             },
             [](py::tuple t) {
                 SolverSnapshot s;
@@ -4049,25 +4046,16 @@ void init_module(py::module_& m) {
                     if (ver == 4 && t.size() == 15 && !t[14].is_none()) {
                         // the step controller's block (DECISIONS #24)
                         auto C = t[14].cast<py::tuple>();
-                        if (C.size() != 4) {
+                        const int kind = C.size() == 2 ? C[0].cast<int>() : -1;
+                        if (kind < 1 || kind > 2) {
                             throw std::runtime_error(
                                 "SolverSnapshot: the controller-state field "
-                                "has " + std::to_string(C.size())
-                                + " values, expected 4");
+                                "must be (kind, values) with kind 1 (fixed) "
+                                "or 2 (LTE)");
                         }
-                        s.controller.engine = C[0].cast<std::string>();
-                        s.controller.version = C[1].cast<std::uint32_t>();
-                        s.controller.names = C[2].cast<std::vector<std::string>>();
-                        s.controller.values =
-                            C[3].cast<std::vector<std::vector<Real>>>();
-                        if (s.controller.names.size() != s.controller.values.size()
-                            || s.controller.engine.empty()
-                            || s.controller.version == 0) {
-                            throw std::runtime_error(
-                                "SolverSnapshot: the controller-state field "
-                                "needs an engine, a version >= 1 and one "
-                                "value list per name");
-                        }
+                        s.controller.kind =
+                            static_cast<pulsim::step::ControllerState::Kind>(kind);
+                        s.controller.v = C[1].cast<std::vector<Real>>();
                     }
                     if (t.size() > ci && t[ci].cast<bool>()) {
                         // a marker the resume refuses by name (pulsim._control_state)
