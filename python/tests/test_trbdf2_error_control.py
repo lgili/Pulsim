@@ -200,9 +200,12 @@ def test_doubled_tolerances_restore_the_previous_density():
     res = p.simulate(b, t_end=40e-3, engine="trbdf2", rtol=2e-5, atol=2e-8)
     st = res._trbdf2_stats
     assert st["h_max_basis"] == 0
-    # 1242 -> 1199: the estimate is filtered in the window after a chatter
-    # break (DECISIONS #35 of add-branch-form-ideal-switch)
-    assert st["n_accept"] == pytest.approx(1199, rel=0.02)
+    # macOS 1242 -> 1199: the estimate is filtered in the window after a
+    # chatter break (DECISIONS #35 of add-branch-form-ideal-switch). Before
+    # that, 1242 on macOS, 1213 on Linux and 1211 on Windows CI: the
+    # floating-bus bridge's step sequence moves with rounding. A
+    # roundoff-sized floor ground this run to max_steps, orders away.
+    assert st["n_accept"] == pytest.approx(1199, rel=0.1)
     assert st["n_diode_events"] <= 30
 
 

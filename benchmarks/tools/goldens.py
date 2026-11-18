@@ -103,6 +103,16 @@ def compare(golden: dict, got: dict) -> list:
     rtol = golden["rtol"]
     scale = {n: max(1e-6, *(abs(cp["x"][n]) for cp in golden["checkpoints"]))
              for n in golden["checkpoints"][0]["x"]}
+    # A column far below its kind's largest ("V(...)", "I(...)") is round-off
+    # of that kind, not a signal: a machine's neutral reads 2e-10 V beside
+    # 141 V and differs by its own size between platforms. Such a column is
+    # held to 1e-4 of the kind's scale instead of its own.
+    kind = {}
+    for n, v in scale.items():
+        k = n.split("(", 1)[0] if "(" in n else n
+        kind[k] = max(kind.get(k, 0.0), v)
+    scale = {n: max(v, 1e-4 * kind[n.split("(", 1)[0] if "(" in n else n])
+             for n, v in scale.items()}
     bad = []
     for g, h in zip(golden["checkpoints"], got["checkpoints"]):
         for n, gv in g["x"].items():
