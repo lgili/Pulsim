@@ -725,3 +725,254 @@ Each entry: question → option taken → evidence → how to reverse.
     mV) are right; the LINE CURRENTS are wrong, 9.7-12.6 % RMS (peak 20.3
     A against 13.66 A): first order on the charging pulses, 0.7-0.9 % at
     dt = 2e-6. Not the gauge.
+
+## Ideal switch 4 (feat/core-a-ideal-switch, 2026-11-18)
+
+24. **Task 6.1: the LCP decides ideal diodes from their crossing signals
+    and replaces the structural loop release under `'lcp'`.** Question:
+    how does an ideal diode (R_on = 0) enter the port LCP, whose hybrid
+    coordinates put an ON port's row at 1/R_on? → Option taken: an ideal
+    port is always posed in OFF coordinates (`ModeSelector::coords_of_`:
+    z = i_s, ŵ = w = V_f − v), whatever its previous mode, and the site's
+    network is solved with it cut out (`PwlModePorts::ideal(j)`: the
+    site's mask has it OFF). The LCP then reads exactly the two crossing
+    signals of the element — the current it would carry and the gap it
+    would block. A port shorted by a loop of sources and closed ideal
+    elements has Z_jj = 0: OFF when the loop reverse-biases it (q_j > 0:
+    DECISIONS #12's release, found by the LCP, `ideal_loop_releases`
+    stays 0), no mode when it forward-biases it (refused as
+    `ideal_voltage_loop`, the settle's name). A branch-form diode with
+    R_on > 0 is now a port of its own R_on (was 0), kept in its mode;
+    conductance ports (dsed included) are unchanged. A shorted ideal port
+    whose gap is zero within tol_w (V_f = 0 across a closed ideal switch,
+    every inverter leg) is held OFF before Lemke: the sign of the loop's
+    round-off residual no longer decides it (a negative ulp was a ray;
+    review finding). "Shorted" is |Z_jj|·iscale ≤ tol_w (scaled: an
+    unscaled 1e-12·max|H| let one g_off port call a bulk-capacitor
+    rectifier shorted). The default settle, the static path and the DC
+    seed got a floor of the same kind
+    (`DiodeEventState::update_from_state_floored`): an OFF ideal diode
+    turns ON only past 1e-12·max(1, ‖x‖∞) (a positive ulp turned it ON
+    and the leg was refused as `ideal_voltage_loop`); the half-bridge leg
+    of `test_ideal_loop_release.py` runs under both selections, second
+    order against the RL square-wave response (1.57e-5 A at T/100). Not
+    shown by a test: that the leg's residual is nonzero on a given
+    platform (the C++ case injects ±1e-13 into the selector; the Python
+    leg no longer claims it). Held and released short ports are counted
+    (`mode_diagnostics` `shorted_held` / `shorted_released`, #33). The
+    judge reads the law voltage (`V_f + i_s` for an ON branch-form diode,
+    so an ON ideal diode is judged on i_s; conductance entries: same
+    bits). The default guard stays off on branch-form circuits (it would
+    change the numbers of a run that asked for nothing); `'shadow'` and
+    `'lcp'` run on them. Every R_on > 0 port, dsed included, is unchanged.
+    → Evidence (`python/tests/test_ideal_loop_release.py`, pwl, restart
+    + split, default and `'lcp'` the same switch states and waveforms
+    within 1e-9 relative): a capacitor clamp released when its force i_s
+    changes sign (sine current into C ‖ R ‖ ideal diode; 3.30e-4 →
+    8.26e-5 → 2.07e-5 V at T/500, T/1000, T/2000 against the closed
+    form); an inductor cut-set released when its force w changes sign
+    (half-wave RL rectifier, 5.34e-6 → 1.34e-6 → 3.35e-7 A, extinction
+    angle by root-finding); the CCM RL buck whose every turn-on closes
+    source + switch + ON diode (6.64e-9 → 1.67e-9 → 4.17e-10 A; the
+    settle releases 19 times in the measured run, the test asserts > 0;
+    the LCP none). Oracles unchanged under
+    `'lcp'`: ideal DCM buck −2.660e-6 / −6.591e-7 / −1.709e-7 /
+    −4.354e-8 V at N = 50…400, order 1.972, no record. Bridge against
+    the mpmath truth (311.343881428885841697 V, pwl + restart + split,
+    dt = 1 µs, measured by a scratch probe, not a committed test):
+    −3.733e-6 V for conductance and branch (R_on = 1e-3) forms, default
+    and `'lcp'` alike, all four OFF after the D1/D4 tie.
+    → Reverse: drop `coords_of_` (ideal ports refused again) and restore
+    the `branch_form_diode` refusal in `run_transient`.
+
+25. **Task 6.4 (last clause): the impulsive energy is a loss category
+    booked to a switch.** Question: to which device is a re-initialisation
+    dW booked, and where is it read? → Option taken: every `ReinitRecord`
+    carries `cause` (`pwl/reinit.hpp`, shared by pwl and trbdf2): the
+    gated element of the dependent structure whose bit changed on the
+    step, else any gated element that changed (a gate that forced a diode
+    into the mode), else the structure's first element. Python reads it in
+    `pulsim.losses.impulse_losses(builder, result, t_from, t_to)` and
+    `device_loss_summary` adds `E_impulse_total`, `n_impulses`,
+    `P_impulse_avg` to the entry of that switch or diode — only when the
+    run has records, so every other run keeps its keys. A record counts in
+    the window its step starts in (`t_from <= rec.t < t_to`). dsed records
+    (dicts) without `cause` fall back to the switch whose stored bit
+    changed at `rec.sample`. `thermal/device_losses.hpp` is untouched; the
+    reading rule there takes `E_impulse_total` from the summary. →
+    Evidence (`python/tests/test_impulse_losses.py`): the capacitor loop
+    books 24 µJ to `S` within 1e-9 relative on pwl and trbdf2, and
+    impulse + conduction equals the stored-energy drop within 1e-12; the
+    cut-set (10 V, 1 Ω, 1 mH) closes source = resistor + switch + impulse
+    to −2.57e-5 at τ/20 and −6.48e-6 at τ/40 on pwl (second order, taken
+    around the pulse step: across it the sample quadrature is first
+    order), −3.2e-7 on trbdf2. The pulse step itself is partitioned
+    exactly (#32): dW at its start, conduction at its end power. The cause is searched
+    among the structure's own elements (a gate first, then a diode),
+    never a switch toggling elsewhere on the step (review finding).
+    → Reverse: drop the field and the keys.
+
+26. **Shared island correction (`events/islands.hpp`).** Question: pwl and
+    dsed each carried a floating-island KCL correction; which is shared?
+    → Option taken: `find_islands(graph, pool, mask, weak_g)` and
+    `IslandCorrection` (joint LU when there are 2+ islands and the
+    estimate is regular, else sequential; σ = g·s − Σ_S f, optional
+    `base` term in dsed's expression order) live in one header, written
+    for dsed to share (dsed still runs its own `port_islands_of_`); pwl's
+    `PwlModePorts` uses it (its numbers bit-identical: survey and
+    `[pwl_ports]`). dsed (`dsed/*`) is not edited here: its switch to the
+    header is the dsed owner's (weak_g 1e-6 there, 1e-3 on pwl, as today).
+
+27. **Engine-neutral site driver for trbdf2 (complementarity 4.2).**
+    `pwl::select_site(selector, ports, cache, diodes, mask_of, prev_on,
+    x0, dt, h_site, b_extra, Z, u, xj, coords)` in `pwl/mode_ports.hpp`
+    is the whole decision of one site: run_transient now calls it, and
+    trbdf2's settle calls it with its own stage's (mask, dt, b_extra).
+    `trbdf2_transient.hpp` is not edited here (its owner's branch has
+    commits on it after this branch's base). The shared tests skip trbdf2
+    while it refuses `mode_selection` by name and run once the hook lands
+    (`test_lcp_agrees_with_the_default_settle_on_every_engine`); the cost
+    gate (`probes/measurement_gate.py`) runs over pwl and trbdf2.
+
+28. **Nits.** (a) A branch-form diode flip forced by a gate edge at the
+    step start is decided in the restart's first stage; it was stamped at
+    the step end (one dt late). It is now stamped at t_prev when the
+    step's gate bits changed at its start and the flip is already in the
+    first stage's bits of the attempt (reset per step and per halving retry)
+    (test: the RL buck's diode turn-ons at the gate-off edges within
+    1e-3·dt, with and without the split). Conductance diodes keep their
+    interpolated stamp (defaults unchanged). (b) The default guard's own
+    mask cycles and settle rounds now reach `mode_guard.lcp.mask_cycles`
+    / `settle_rounds_total` (were always 0; no test reaches a guard mask
+    cycle without a hook, so this is not tested).
+
+29. **Default-flip evidence (not the flip).** `benchmarks/tools/
+    ideal_switch_flip_evidence.py` writes `benchmarks/IDEAL_SWITCH_FLIP_
+    EVIDENCE.md`: 109 reference circuits × 5 configurations × {default,
+    branch, lcp, branch+lcp}, graded the same way in both directions
+    (outcome rank, else err_rms beyond 1 %). Branch form here is finite
+    R_on = 1/g_on (no R_on = 0 port: the ideal cases are the unit tests):
+    same outcome on all 109 on
+    pwl / pwl+restart / pwl+split; trbdf2 2 better, 106 same, 1 new error
+    (`ll13_active_clamp_forward`, Newton fails at t = 0 with h at h_min:
+    trbdf2-side); dsed refuses the branch form by name (54 newly refused,
+    task 8). `'lcp'` (36 circuits with a PWL diode): same outcome on the
+    34 it runs on pwl; 2 refused by design (a Newton device: the port model
+    is linear); trbdf2 refused until hook 4.2; dsed 5 errors
+    (`DiodeModeInconsistentError` on transformer / coupled-inductor
+    circuits — dsed builds its ports with R_on = 1/g_on > 0, which this
+    change does not touch, so dsed-side). Cost: branch / conductance
+    median-of-7 ns/step 0.85 (inverter) / 1.46 (buck, loaded machine;
+    1.02 earlier) on pwl, 1.006 / 1.027 on trbdf2; `'lcp'` costs 4.4–5.1×
+    the default in median wall time on pwl (`branch+lcp` 5.0–6.9×; one
+    run per cell, cells where both ran): two site solves per step, the
+    cost item before `'lcp'` can be a default.
+
+## Ideal switch 5 (feat/core-a-ideal-switch, 2026-11-18)
+
+30. **`'lcp'` poses the LCP only where its answer can differ from a known
+    one.** Question: `'lcp'` cost 4.4–5.6× the default on pwl (one LCP and
+    two solves per site); which sites need Lemke? → Option taken
+    (`run_transient` `mode_lcp_site`, `PwlModePorts`): (a) the start mode
+    is solved first (the step's own factor, no second solve); when every
+    diode's crossing signal on that solve (ON: its current; OFF: the gap to
+    V_on), after the floating islands' KCL, is clear of zero by 1e-8 of the
+    circuit scale (10× the selector's tie tolerance, with the selector's own
+    σ·C_max/h term), the start mode is a strictly complementary solution of
+    a passive LCP and the step is that solve (`quiet_sites`). (b) Else the
+    LCP's last answer from the same start mask (gates + diode bits; at most
+    256 kept) is solved and kept when it is clear of the band the same way
+    (`cached_sites`; not with ideal ports in the circuit, nor with a
+    hysteresis port, V_th > V_f, whose turn-on reads V_th on the START
+    solve: the cache broke `test_lcp_banded_dcm_buck_equals_the_default`
+    by 1.1e-2 before this exclusion). (c) Else Lemke
+    runs on the start solve's port voltages (u is not re-solved), and when
+    it keeps the start mode the start solve is the step. Port matrices and
+    island corrections are cached per (mask, dt) (`port_matrices`), the
+    branch part of the circuit scale once per run. `pwl::select_site` got an
+    additive trailing `x_site` argument (signature otherwise unchanged).
+    → Evidence: a temporary check that ran the full LCP at every (a)/(b)
+    site and threw on a different answer found 0 mismatches over
+    3,348,409 sites (3,115,780 quiet, 102,760 cached; 34 circuits × pwl /
+    restart / split × conductance / branch R_on = 1/g_on / ideal R_on = 0)
+    and the full pytest (4587 passed with the check on). `'lcp'` outputs
+    are byte-identical to the pre-change `'lcp'` on all 102 cells (times,
+    states, switch states). Cost (`probes/lcp_cost_gate.py`, median of 7
+    interleaved runs, wall of `simulate()` only): median ratio to the
+    default 5.64 / 4.67 / 4.93 → 1.058 / 1.087 / 1.088 on pwl / restart /
+    split (load average 12–15: a shared machine). Above 1.2: cells whose
+    diodes sit inside the selector's own tie band for long stretches
+    (npc_three_level 1519 of 3000 sites quiet: an ON diode carrying ~1e-7
+    of the current scale, below σ·C_max/h; boost_pfc 3176 LCP sites), where
+    the LCP is the decision, plus noise of the loaded machine on sub-ms
+    runs. → Reverse: drop (a)/(b) (Lemke at every site).
+
+31. **Smallest branch-form R_on.** Question: `R_on == 0` is compared
+    exactly; what does 1e-300 do? → Option taken: the builder refuses
+    0 < R_on < 1e-9 Ω by name (`CircuitBuilder::kBranchRonMin`,
+    `ValueError` naming the device and field): below it the port's ON row
+    (1/R_on) is past the round-off resolution of the network. R_on = 0 is
+    the ideal switch, 1e-9 Ω and up a resistor. → Evidence
+    (`test_ideal_loop_release.py`): 1e-300 and 1e-12 refused; 1e-6 runs as
+    a resistor to 1e-12 relative. → Reverse: drop the bound.
+
+32. **The pulse step is partitioned exactly.** Question: a
+    re-initialisation's dW and the conduction loss both touched the pulse
+    step (sample−1, sample]; conduction integrated the step's linear
+    interpolation from the pre-jump value, an O(h) excess. → Option taken:
+    `step_start_states` (`_result_views.py`) takes the right limit at the
+    start of a pulse step: the row before the record's sample is replaced
+    by the sample's own state and mask, so the step conducts its end power
+    only and dW is the jump. dsed records (dicts) are untouched. →
+    Evidence (`test_impulse_losses.py`): on the capacitor loop at
+    h = 1e-8 … 1e-5, E_impulse + E_total(S) equals the stored-energy drop
+    to 1e-12 relative; on the cut-set, R's E_total over the pulse step is
+    its end power × h to 1e-12. → Reverse: drop `_reinit_step_starts`.
+
+33. **Reviewer leftovers of slice 4.** (a) Every `ideal_voltage_loop`
+    message names the loop element by element in loop order
+    (`ModeStructure::loop_texts`, "D3 -> D2 -> D1 -> V1"); under `'lcp'` a
+    loop through several ideal ports (none shorted alone: the LCP ends on
+    a secondary ray) is found by closing every ideal port the posed network
+    does not reverse-bias, and refused by the same name (was
+    `consistent_mode`). (b) `shorted_held` / `shorted_released` count the
+    short ports held OFF before Lemke and released by it. (c) The leg test
+    asserts the hold is reached (`shorted_held > 0`, none released) and no
+    longer claims a platform residual. (d) Bridge truth on pwl
+    (`test_bridge_ground_truth.py`): restart + split, dt = 1 µs, both forms
+    × default / `'lcp'`: −3.733e-6 V, and the 11 exact commutations with
+    their change sets, each within 1.5 dt (the D1/D4 turn-on tie of event 6
+    may land on two adjacent steps under the default, one breach logged).
+
+
+34. **Ideal-twin flip evidence.** Question: what does the R_on = 0,
+    V_f = 0 twin of every reference circuit do, graded against a reference
+    regenerated for that circuit? → Option taken:
+    `ideal_switch_flip_evidence.py` variants `ideal` / `ideal+lcp`
+    (`ideal_form()`: every switch and diode branch form, R_on = 0, V_f = 0,
+    the netlist's g_off and V_th kept), graded against
+    `differential_runner.reference` run under the same substitution
+    (`not comparable` with the reason when it has none), refusals counted
+    by `UnsupportedError.feature`; section "The ideal switch" of
+    `benchmarks/IDEAL_SWITCH_FLIP_EVIDENCE.md`. → Evidence (109 circuits;
+    better / same / worse / refused / error / not comparable): pwl
+    9/70/16/8/2/4, restart 9/70/22/2/2/4, split 3/79/19/2/2/4, trbdf2
+    9/84/8/3/4/1; dsed refuses the branch form (task 8). Structural
+    refusals by name: `ideal_voltage_loop` 2 per pwl configuration and 3 on
+    trbdf2 (three-phase diode rectifier and boost PFC: two ideal diodes of
+    a stiff-source bridge both ON at a commutation close source-to-source;
+    full-bridge DC on trbdf2), `dependent_states` 6 on plain pwl only (a
+    capacitor through an ideal diode at t = 0: plain pwl has no
+    re-initialisation; restart runs them), `floating_node` and `impulse` 0.
+    Errors: no DC operating point for the ideal twins of
+    `ll15_boost_closed_loop` and `ll10_full_bridge_inverter_lc` (a source
+    across an inductor and closed ideal switches at DC: the DC solve
+    returns 1e13 A and refuses with a RuntimeError, not by feature name).
+    `worse` is mostly err_rms beyond 1 % against two different references
+    with the same outcome; outcome drops: `boost_switching_complex` on
+    restart / split (agree → disagree, 0.021) and `ll07_boost_vcswitch`
+    on trbdf2 (0.0068) — not traced here. No cell was traced to a
+    branch-form defect, so nothing was fixed under this item. Cost: median
+    wall ratio ideal / default 1.05–1.11 on pwl, 1.05 on trbdf2;
+    ideal+lcp 1.40–1.66 (loaded machine, one run per cell).
+    Migration audit for 9.1–9.3: `MIGRATION_AUDIT.md` (no default flipped).

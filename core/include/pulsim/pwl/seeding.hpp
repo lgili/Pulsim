@@ -39,7 +39,7 @@ namespace pulsim::pwl {
     const Vector& dc_x) {
     DiodeEventState d(graph, pool);
     d.reset();
-    d.update_from_state(dc_x);
+    d.update_from_state_floored(dc_x);
     return d;
 }
 

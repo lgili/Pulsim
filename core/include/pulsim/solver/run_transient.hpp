@@ -77,6 +77,7 @@
 #include <functional>
 #include <optional>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace pulsim::solver {
 
@@ -533,6 +534,7 @@ inline SimulationResult run_transient(
     pwl::BranchStructureChecker structure{graph, pool, "pwl"};
     // Ideal diodes turned OFF this step because they closed a stiff loop.
     std::vector<Index> loop_released;
+    std::string loop_last;   // the loops of the last release, in loop order
     std::vector<bool> loop_bits;
     // Returns true when it turned loop-closing ideal diodes OFF: the
     // caller re-forms the mask and checks again.
@@ -548,11 +550,14 @@ inline SimulationResult run_transient(
             // conducts). If the diode law turns it back ON within the
             // same step the loop forward-biases it: refuse.
             Index b = ms.loop_diodes.front();
+            std::string loop = ms.loop_texts.front();
             bool again = false;
-            for (const Index d : ms.loop_diodes) {
+            for (std::size_t m = 0; m < ms.loop_diodes.size(); ++m) {
+                const Index d = ms.loop_diodes[m];
                 if (std::find(loop_released.begin(), loop_released.end(), d) !=
                     loop_released.end()) {
                     b = d;
+                    loop = ms.loop_texts[m];
                     again = true;
                     break;
                 }
@@ -564,14 +569,17 @@ inline SimulationResult run_transient(
                     std::format(
                         "engine 'pwl': at t = {} the ideal diode '{}' (R_on = "
                         "0) closes a loop of voltage sources and closed ideal "
-                        "elements in mode {}{}: its current is undefined. Give "
-                        "it R_on > 0.",
-                        at_t, graph.branch_name(b), m.to_string(),
+                        "elements in mode {} (loop: {}){}: its current is undefined. "
+                        "Give it R_on > 0.",
+                        at_t, graph.branch_name(b), m.to_string(), loop,
                         again ? ", and the loop forward-biases it (turned OFF,"
                                 " it turned back ON)" : ""));
             }
             diodes.snapshot_on_bits_into(loop_bits);
             const auto ents = diodes.entries();
+            loop_last.clear();
+            for (std::size_t m = 0; m < ms.loop_texts.size(); ++m)
+                loop_last += (m ? "; " : "") + ms.loop_texts[m];
             for (const Index d : ms.loop_diodes) {
                 loop_released.push_back(d);
                 for (Size q = 0; q < ents.size(); ++q) {
@@ -731,6 +739,10 @@ inline SimulationResult run_transient(
     // run_restart): x1, its diode bits and the histories at x0.
     Vector rs_x1, rs_x2;
     std::vector<bool> rs_bits, rs_bits2, rs_bits_be, rs_solved2;
+    // The diode bits after stage 1 of a restart that starts at the step
+    // start: a branch-form flip already there was forced at t_prev.
+    std::vector<bool> rs_bits_first;
+    bool rs_first_valid = false;
     std::vector<Real> rs_hist;
     pwl::StatefulHistories::Snapshot rs_hs;
     std::vector<CommutationEvent> step_events;      // per-step event scratch
@@ -790,10 +802,10 @@ inline SimulationResult run_transient(
     events::ModeSelector mode_selector;
     events::PassivityClass mode_passivity;
     std::vector<std::string> mode_diode_names;
-    Vector mode_x0, mode_xj, mode_u;
+    Vector mode_x0, mode_xj, mode_u, mode_xs;
     DenseMatrix mode_Z;
     std::vector<bool> mode_bits0, mode_bits;
-    std::vector<char> mode_prev_on, mode_settled;
+    std::vector<char> mode_prev_on, mode_coords, mode_settled;
     // add-pwl-igbt-and-thyristor: the mode LCP and judge_mode know no gate
     // (they would turn a gate-off IGBT on), so gated circuits keep the settle.
     const bool has_gated = diodes.num_gated() > 0;
@@ -814,16 +826,11 @@ inline SimulationResult run_transient(
     }
     if (has_diodes && (opts.mode_selection != 0 || (opts.mode_guard && !has_gated))) {
         mode_ports.emplace(cache, graph, pool, diodes);
-        const std::string bf = mode_ports->branch_form_diode();
+        // A branch-form diode is a port of its own R_on (an ideal one is
+        // posed OFF: task 6.1). The default guard stays off on such circuits:
+        // it would change the numbers of a run that asked for nothing.
+        const bool bf = !mode_ports->branch_form_diode().empty() && opts.mode_selection == 0;
         const char* mname = opts.mode_selection == 1 ? "shadow" : "lcp";
-        if (opts.mode_selection != 0 && !bf.empty()) {
-            throw UnsupportedError(
-                "pwl", "mode_selection", bf, "Diode",
-                std::format("engine 'pwl': mode_selection='{}' with the branch-form "
-                            "diode '{}': its complementarity port is not wired on pwl "
-                            "yet (add-branch-form-ideal-switch task 6.1). Use "
-                            "form='conductance', or drop mode_selection.", mname, bf));
-        }
         if (opts.mode_selection != 0 && nl_refresh_effective) {
             throw UnsupportedError(
                 "pwl", "mode_selection", "", "",
@@ -840,7 +847,7 @@ inline SimulationResult run_transient(
                             "nothing is decided. Drop mode_selection or allow event "
                             "iterations.", mname));
         }
-        if (!bf.empty() || nl_refresh_effective || max_iters == 0) {
+        if (bf || nl_refresh_effective || max_iters == 0) {
             mode_ports.reset();
         } else {
             mode_passivity = pwl::passivity_of(graph, pool);
@@ -892,6 +899,8 @@ inline SimulationResult run_transient(
         r.enumerations += static_cast<Size>(s.enumerations);
         r.nonunique_modes += static_cast<Size>(s.nonunique_modes);
         r.released += static_cast<Size>(s.released);
+        r.shorted_held += static_cast<Size>(s.shorted_held);
+        r.shorted_released += static_cast<Size>(s.shorted_released);
     };
     auto mode_failed = [](const events::ModeSelection& s) {
         return s.status != events::LcpStatus::Solution &&
@@ -905,52 +914,231 @@ inline SimulationResult run_transient(
     // The LCP of the site J(gates + start bits, for_dt)·s = −(b_c + bx);
     // be: a restart stage (γ·h on the factor of 2γh); for_dt = 0: static.
     auto mode_select = [&](const topology::SwitchStateMask& gates, Real for_dt,
-                           bool be, const Vector& bx) {
+                           bool be, const Vector& bx, const Vector* x_site = nullptr) {
         const auto& es = diodes.entries();
         mode_prev_on.assign(es.size(), 0);
         for (std::size_t j = 0; j < es.size(); ++j) mode_prev_on[j] = mode_bits0[j] ? 1 : 0;
-        const auto mask0 = combine_masks(gates, mode_mask_of(mode_prev_on), diode_owned);
         const Real h_site = for_dt <= Real{0} ? Real{1} : be ? for_dt * Real{0.5} : for_dt;
-        const auto sc = mode_ports->scale(mode_x0);
         // Every pass, the selector's tie widenings included, is posed on the
         // site's own step (DECISIONS F2): the next site is one step away, and
         // a 100·h / 1e4·h backward-Euler look-ahead with the sources frozen
         // decided a floating bridge's ties on a trajectory that never happens.
-        bool have_site = false;
-        auto port_at = [&](Real, DenseMatrix& Z, Vector& u) {
-            if (!have_site) {
-                mode_ports->site(mask0, for_dt, bx, mode_Z, mode_u);
-                have_site = true;
+        // pwl::select_site is the engine-neutral driver trbdf2 calls too.
+        return pwl::select_site(
+            mode_selector, *mode_ports, cache, diodes,
+            [&](const std::vector<char>& on) {
+                return combine_masks(gates, mode_mask_of(on), diode_owned);
+            },
+            mode_prev_on, mode_x0, for_dt, h_site, bx, mode_Z, mode_u, mode_xj, mode_coords,
+            x_site);
+    };
+    // The quiet-site test of 'lcp' (DECISIONS #30): every diode's crossing
+    // signal on the start solve `xs` clear of zero by kQuietBand of the
+    // circuit scale — 1e3 times the selector's tie tolerance, far above the
+    // rounding the LCP's own reading of the same signals differs by.
+    topology::SwitchStateMask mode_last_gates;
+    bool mode_gates_known = false;
+    Vector mode_xq, mode_xc;
+    std::unordered_map<topology::SwitchStateMask, std::vector<bool>> mode_answers;
+    // a hysteresis port (V_th > V_f) turns ON only past V_th on the START solve,
+    // which a cached answer's own solve does not show: no answer cache then
+    const bool mode_hysteresis = mode_ports.has_value() &&
+        std::any_of(mode_ports->ports().begin(), mode_ports->ports().end(),
+                    [](const events::DiodePort& p) { return p.V_th > p.V_f; });
+    auto mode_quiet = [&](const std::vector<bool>& bits, const topology::SwitchStateMask& m,
+                          Real for_dt, Real h, const Vector& bx, const Vector& xs) {
+        constexpr Real kQuietBand = Real{1e-8};
+        const Vector* xq = &xs;
+        if (mode_ports->has_islands(m)) {
+            mode_xq = xs;
+            mode_ports->correct(m, for_dt, bx, mode_xq);
+            xq = &mode_xq;
+        }
+        const auto sc = mode_ports->scale(mode_x0);
+        const Real band_v = kQuietBand * sc.vscale;
+        const Real band_i = kQuietBand * sc.iscale + band_v * sc.c_max / h;
+        const auto& es = diodes.entries();
+        for (std::size_t j = 0; j < es.size(); ++j) {
+            const auto p = es[j].params();
+            const bool on = bits[j];
+            const Real v = es[j].law_voltage(*xq, on);
+            if (on ? !(models::SwitchedDiode::branch_current(true, v, p) > band_i)
+                   : !(v - models::SwitchedDiode::turn_on_voltage(p) < -band_v)) {
+                return false;
             }
-            Z = mode_Z;
-            u = mode_u;
-        };
-        auto judge = [&](const std::vector<char>& on) {
-            cache.solve_at(combine_masks(gates, mode_mask_of(on), diode_owned),
-                           for_dt, bx, mode_xj);
-            return pwl::judge_mode(diodes, on, mode_xj, sc, mode_selector.tol);
-        };
-        return mode_selector.select(mode_ports->ports(), mode_prev_on, port_at, h_site,
-                                    sc, judge);
+        }
+        return true;
     };
     // 'lcp': the LCP decides the site; one solve under its mode. Returns
-    // whether the mode changed from the start bits.
+    // whether the mode changed from the start bits (DECISIONS #30). The start
+    // mode is solved first (`x_start`: given by the caller, or solved here).
+    //   * quiet site — a step or static site with the gates of the previous
+    //     site, whose start solve gives every diode's crossing signal (ON:
+    //     the current; OFF: the gap to V_on) clear of zero by kQuietBand of
+    //     the circuit scale, after the floating islands' KCL: the LCP's answer
+    //     is the start mode (a nondegenerate solution of a passive LCP, which
+    //     Lemke finds with no pivot), so it is not posed and the start solve
+    //     is the step. Any other site (a gate edge, a restart stage after an
+    //     event or re-initialisation, a split sub-step, the first site, a
+    //     signal within the band) poses the LCP.
+    //   * the LCP reads the port voltages from that solve (no ideal diode ON
+    //     at the start: the LCP poses those cut out, another system) and,
+    //     when it keeps the start mode, the start solve is the step.
+    // Not on a static site whose nominal segment is not the cache's static
+    // factor (other bits than solve_at's).
     auto mode_lcp_site = [&](Real at_t, const char* kind,
                              const topology::SwitchStateMask& gates, Real for_dt,
-                             bool be, const Vector& bx, auto&& solve) {
+                             bool be, const Vector& bx, auto&& solve,
+                             const Vector* x_start = nullptr) {
         auto& r = result.mode_report;
         mode_count_site(r, kind);
-        const auto sel = mode_select(gates, for_dt, be, bx);
+        const auto start_mask = combine_masks(gates, diodes.current_diode_mask(), diode_owned);
+        const bool same_gates = mode_gates_known && gates == mode_last_gates;
+        mode_last_gates = gates;
+        mode_gates_known = true;
+        bool ideal_on = false;
+        for (std::size_t j = 0; j < mode_bits0.size(); ++j)
+            ideal_on = ideal_on || (mode_bits0[j] && mode_ports->ideal(j));
+        // An ideal diode ON at a gate edge may close a loop with the new
+        // gates (the CCM turn-on): its start mask is singular, and the LCP
+        // poses it cut out anyway. With the previous site's gates the start
+        // mask is the mask that site solved.
+        if ((for_dt <= Real{0} && cache.dt() != Real{0}) || (ideal_on && !same_gates)) {
+            x_start = nullptr;
+        } else if (!x_start) {
+            solve(start_mask, mode_xs);
+            x_start = &mode_xs;
+        }
+        const Real h_site = for_dt <= Real{0} ? Real{1} : be ? for_dt * Real{0.5} : for_dt;
+        // (a) the start mode, clear of the band: the LCP's answer
+        if (x_start && mode_quiet(mode_bits0, start_mask, for_dt, h_site, bx, *x_start)) {
+            x = *x_start;
+            stamped_mask = start_mask;
+            stamped_known = true;
+            last_solved_bits = mode_bits0;
+            ++r.quiet_sites;
+            return false;
+        }
+        // (b) the LCP's last answer from this start mask (the active-set cache),
+        // clear of the band on its own solve: the LCP's answer
+        if (x_start && !structure.active() && !mode_hysteresis) {
+            const auto it = mode_answers.find(start_mask);
+            if (it != mode_answers.end() && it->second != mode_bits0) {
+                diodes.restore_on_bits(it->second);
+                const auto cmask = combine_masks(gates, diodes.current_diode_mask(), diode_owned);
+                solve(cmask, mode_xc);
+                if (mode_quiet(it->second, cmask, for_dt, h_site, bx, mode_xc)) {
+                    x = mode_xc;
+                    mode_bits = it->second;
+                    stamped_mask = cmask;
+                    stamped_known = true;
+                    last_solved_bits = mode_bits;
+                    ++r.cached_sites;
+                    return true;
+                }
+                diodes.restore_on_bits(mode_bits0);
+            }
+        }
+        if (ideal_on) x_start = nullptr;
+        const auto sel = mode_select(gates, for_dt, be, bx, x_start);
         mode_note(r, sel);
         r.port_solves = mode_ports->solves();
+        r.port_matrices = mode_ports->port_builds();
+        if (mode_failed(sel) && mode_Z.rows() == static_cast<Index>(mode_diode_names.size())) {
+            // An ideal port shorted by a loop (Z_jj = 0) that the loop
+            // forward-biases: refused by the name the settle's release uses.
+            // (the selector's own short test: |Z_jj|·iscale <= tol_w)
+            const auto sc = mode_ports->scale(mode_x0);
+            const Real tol_w = mode_selector.tol * sc.vscale;
+            for (std::size_t j = 0; j < mode_diode_names.size(); ++j) {
+                const auto jj = static_cast<Index>(j);
+                if (!mode_ports->ideal(j) || std::abs(mode_Z(jj, jj)) * sc.iscale > tol_w ||
+                    !(mode_u[jj] - mode_ports->ports()[j].V_f > tol_w)) {
+                    continue;
+                }
+                // name the loop: the posed mask with this diode closed
+                std::string loop = mode_diode_names[j];
+                if (structure.active()) {
+                    std::vector<char> on_j = mode_coords;
+                    on_j[j] = 1;
+                    const auto& ms = structure.check(
+                        combine_masks(gates, mode_mask_of(on_j), diode_owned), for_dt > Real{0});
+                    const Index bj = diodes.entries()[j].branch_id;
+                    for (std::size_t m = 0; m < ms.loop_diodes.size(); ++m)
+                        if (ms.loop_diodes[m] == bj) loop = ms.loop_texts[m];
+                }
+                throw UnsupportedError(
+                    "pwl", "ideal_voltage_loop", mode_diode_names[j], "Diode",
+                    std::format("engine 'pwl': at t = {} the ideal diode {} (R_on = 0) "
+                                "closes a loop of voltage sources and closed ideal "
+                                "elements (loop: {}) that forward-biases it by {} V "
+                                "(mode_selection='lcp': no consistent mode): its "
+                                "current is undefined. Give it R_on > 0.",
+                                at_t, mode_diode_names[j], loop,
+                                mode_u[jj] - mode_ports->ports()[j].V_f));
+            }
+            // No single port shorted: a loop through several ideal ports (each
+            // posed open, none with Z_jj = 0) leaves the LCP a secondary ray.
+            // Close every ideal port the posed network does not reverse-bias;
+            // a loop among them is the refusal, named as the settle names it.
+            if (structure.active()) {
+                const auto sc = mode_ports->scale(mode_x0);
+                const Real tol_w = mode_selector.tol * sc.vscale;
+                std::vector<char> on_f = mode_coords;
+                for (std::size_t j = 0; j < mode_diode_names.size(); ++j) {
+                    const auto jj = static_cast<Index>(j);
+                    if (mode_ports->ideal(j) && mode_u[jj] - mode_ports->ports()[j].V_f > -tol_w)
+                        on_f[j] = 1;
+                }
+                const auto& ms = structure.check(
+                    combine_masks(gates, mode_mask_of(on_f), diode_owned), for_dt > Real{0});
+                if (!ms.loop_diodes.empty()) {
+                    const auto name = std::string(graph.branch_name(ms.loop_diodes.front()));
+                    throw UnsupportedError(
+                        "pwl", "ideal_voltage_loop", name, "Diode",
+                        std::format("engine 'pwl': at t = {} the ideal diode {} (R_on = 0) "
+                                    "closes a loop of voltage sources and closed ideal "
+                                    "elements (loop: {}) that no mode of its diodes can "
+                                    "carry (mode_selection='lcp': no consistent mode): its "
+                                    "current is undefined. Give it R_on > 0.",
+                                    at_t, name, ms.loop_texts.front()));
+                }
+            }
+        }
         events::raise_if_refused(sel, "pwl", at_t, mode_diode_names, mode_passivity);
         mode_bits.assign(sel.on.begin(), sel.on.end());
         diodes.restore_on_bits(mode_bits);
         const auto mask = combine_masks(gates, diodes.current_diode_mask(), diode_owned);
-        solve(mask, x);
+        if (structure.active()) {
+            // The LCP releases an ideal diode a loop reverse-biases (Z_jj = 0,
+            // q_j > 0) and finds no mode when the loop forward-biases it, so a
+            // loop diode left ON here is a defect, not a mode to release.
+            const auto& ms = structure.check(mask, for_dt > Real{0});
+            result.mode_structure_checks = structure.checks_run();
+            if (!ms.loop_diodes.empty()) {
+                throw UnsupportedError(
+                    "pwl", "ideal_voltage_loop",
+                    std::string(graph.branch_name(ms.loop_diodes.front())), "Diode",
+                    std::format("engine 'pwl': at t = {} mode_selection='lcp' left the "
+                                "ideal diode '{}' ON in a loop of voltage sources and "
+                                "closed ideal elements (mode {}, loop: {}): its current "
+                                "is undefined. Give it R_on > 0.",
+                                at_t, graph.branch_name(ms.loop_diodes.front()),
+                                mask.to_string(), ms.loop_texts.front()));
+            }
+        }
+        if (x_start && mask == start_mask) {
+            x = *x_start;                  // the start mode kept: its solve is the step
+        } else {
+            solve(mask, x);
+        }
         stamped_mask = mask;
         stamped_known = true;
         last_solved_bits = mode_bits;
+        if (x_start) {
+            if (mode_answers.size() >= 256) mode_answers.clear();
+            mode_answers[start_mask] = mode_bits;
+        }
         if (pwl::judge_mode(diodes, sel.on, x, mode_ports->scale(mode_x0),
                             mode_selector.tol) != 1) {
             ++r.inconsistent;
@@ -1003,6 +1191,7 @@ inline SimulationResult run_transient(
             r.last_error = e.what();
         }
         r.port_solves = mode_ports->solves();
+        r.port_matrices = mode_ports->port_builds();
     };
     // The default guard: the settled mode judged on its own solve; one that
     // violates a diode's law is replaced by the LCP's when that one is
@@ -1027,6 +1216,7 @@ inline SimulationResult run_transient(
         }
         mode_note(g.lcp, sel);
         g.lcp.port_solves = mode_ports->solves();
+        g.lcp.port_matrices = mode_ports->port_builds();
         if (mode_failed(sel)) { ++g.failed; return false; }
         if (sel.on == mode_settled) { ++g.confirmed; return false; }
         const auto mask = combine_masks(gates, mode_mask_of(sel.on), diode_owned);
@@ -1708,7 +1898,7 @@ inline SimulationResult run_transient(
                 }
                 const bool changed = mode_lcp_site(
                     at_t, mode_kind(for_dt, backward_euler), gates, for_dt,
-                    backward_euler, b_extra, solve);
+                    backward_euler, b_extra, solve, capture_first ? &x_first : nullptr);
                 // A changed mode re-arms the restart exactly as a settle
                 // flip does (callers read iters > 1).
                 iters = changed ? 2 : 1;
@@ -1741,10 +1931,10 @@ inline SimulationResult run_transient(
                         std::format(
                             "engine 'pwl': at t = {} the ideal diode '{}' (R_on "
                             "= 0) closes a loop of voltage sources and closed "
-                            "ideal elements that forward-biases it (turned OFF, "
-                            "it turned back ON): its current is undefined. Give "
-                            "it R_on > 0.",
-                            at_t, graph.branch_name(d)));
+                            "ideal elements (loop: {}) that forward-biases it "
+                            "(turned OFF, it turned back ON): its current is "
+                            "undefined. Give it R_on > 0.",
+                            at_t, graph.branch_name(d), loop_last));
                 }
                 // Phase-0 fix #9: a repeated mask within one step's
                 // event iteration is a CYCLE (mask A -> B -> A ...,
@@ -1836,8 +2026,7 @@ inline SimulationResult run_transient(
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
-                flipped = !single && has_diodes &&
-                          diodes.update_from_state(x);
+                flipped = !single && has_diodes && diodes.update_from_state_floored(x);
                 ++iters;
             } while (flipped && iters < max_iters);
             if (mode_site) {
@@ -1851,6 +2040,8 @@ inline SimulationResult run_transient(
                     ++result.mode_guard.checks;
                     const bool breach = flipped || (mask_cycle && !cycle_in);
                     if (breach) ++result.mode_guard.settle_caps;
+                    if (mask_cycle && !cycle_in) ++result.mode_guard.lcp.mask_cycles;
+                    result.mode_guard.lcp.settle_rounds_total += iters;
                     if (breach &&
                         mode_guard_site(at_t, gates, for_dt, backward_euler, b_extra,
                                         [&](const topology::SwitchStateMask& m, Vector& out) {
@@ -1897,6 +2088,13 @@ inline SimulationResult run_transient(
             // With the split a built-in source jump inside the step is an
             // event of its own; only one taken at t_prev (within snap
             // either side) restarts the step.
+            // a gate edge at the step start (stamps its forced flips there):
+            // the gate bits changed, the diode bits read as committed
+            const bool edge_restart =
+                restart_rule && stamped_known && has_ideal_diode &&
+                !(mask_pre == combine_masks(stamped_mask, diodes.current_diode_mask(),
+                                            diode_owned));
+            rs_first_valid = false;
             if (restart_rule &&
                 (!stamped_known || !(mask_pre == stamped_mask) ||
                  (has_jump_sources &&
@@ -1957,6 +2155,10 @@ inline SimulationResult run_transient(
                 if (has_diodes) {
                     rs_x1 = x;
                     diodes.snapshot_on_bits_into(rs_bits);
+                    if (!rs_first_valid) {   // the attempt's first stage: from t_prev
+                        rs_bits_first.assign(rs_bits.begin(), rs_bits.end());
+                        rs_first_valid = true;
+                    }
                     history.snapshot_into(rs_hist);
                     hs.snapshot_into(rs_hs);   // keeps the capacity
                 }
@@ -2278,6 +2480,7 @@ inline SimulationResult run_transient(
                     gate_t = gate_t0;
                     capture_first = false;
                     split_events.clear();
+                    rs_first_valid = false;
 
                     const Size n_sub = Size{1} << h;
                     const Real sub_dt =
@@ -2481,11 +2684,15 @@ inline SimulationResult run_transient(
                     }
                     if (has_ideal_diode && pool.is_branch_form(e.branch_id)) {
                         // shortcut: stamped at the step end, not interpolated;
-                        // the event split locates it when it is on.
+                        // the event split locates it when it is on. A flip a
+                        // gate edge forced in the restart's first stage is
+                        // stamped at the edge (t_prev).
                         if (static_cast<bool>(commut_on_prev[j]) != e.is_on) {
+                            const bool at_edge = edge_restart && rs_first_valid &&
+                                                 rs_bits_first[j] == e.is_on;
                             step_events.push_back(CommutationEvent{
-                                .t_estimated = t, .branch_id = e.branch_id,
-                                .new_state = e.is_on});
+                                .t_estimated = at_edge ? t_prev : t,
+                                .branch_id = e.branch_id, .new_state = e.is_on});
                         }
                         continue;
                     }
@@ -2910,7 +3117,7 @@ inline SimulationResult run_transient(
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
                 flipped = has_diodes &&
-                          diodes.update_from_state(x);
+                          diodes.update_from_state_floored(x);
                 ++iters;
             } while (flipped && iters < max_iters);
             if (mode_site_s && opts.mode_selection != 2) {

@@ -68,6 +68,11 @@ struct ReinitRecord {
     Real dW = 0;                     ///< energy removed [J], >= 0
     Real projection_gap = 0;         ///< max |x_proj - x(t+h)| over states
     long sample = -1;                ///< stored sample of the pulse, or -1
+    /// The switch the impulsive energy is booked to (task 6.4): the gated
+    /// element of the structure whose state changed on the step, else any
+    /// gated element that changed (a gate forcing a diode into the mode),
+    /// else the structure's first element. Empty: not attributed.
+    std::string cause;
 };
 
 /// add-complementarity-mode-selection on pwl: one decision site where the
@@ -96,10 +101,14 @@ struct ModeReport {
     Size ties = 0, widenings = 0, leak_pins = 0, pin_judgements = 0;
     Size capped = 0;               ///< tie passes shortened to the mode's next event (#24)
     Size unfixed = 0, enumerations = 0, nonunique_modes = 0, released = 0;
+    Size shorted_held = 0, shorted_released = 0;   ///< ideal ports shorted by a loop (#24)
     Size settle_rounds_total = 0;  ///< 'lcp': 0 (the settle never runs)
     Size mask_cycles = 0;          ///< 'lcp': 0
     Size inconsistent = 0;         ///< 'lcp': selected modes the site's solve violates (D6 step 4)
     Size port_solves = 0;
+    Size port_matrices = 0;        ///< port matrices Z built (one per (mask, dt); reused after)
+    Size quiet_sites = 0;          ///< 'lcp': sites whose start mode was kept (its solve reused)
+    Size cached_sites = 0;         ///< 'lcp': sites decided by the LCP's last answer from that start mask
     Size errors = 0;
     std::string last_error;
     std::string passivity, passivity_device, passivity_kind;
