@@ -1328,6 +1328,9 @@ def test_device_losses_cell(engine):
         return
     r = _sim(engine, b)
     assert r.device_energy("S")["E_cond_electrical"] > 0.0
+    # 'auto' with a step routes to pwl and honours the port
+    r = _sim("auto", b, dt=1e-6)
+    assert r.engine_used == "pwl" and r.device_energy("S")["n_on"] >= 0
 
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "exact"))

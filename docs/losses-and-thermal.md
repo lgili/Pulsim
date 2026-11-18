@@ -444,7 +444,14 @@ res.device_energy("Q1")        # E_on, E_off, E_cond_electrical, E_cond_table, n
   A diode's `E_off` is its recovery, read at each natural turn-off.
 * Deposition: the heat of a step is a rectangular power over the next
   step; the trapezoid rule's capacitor history passes half of it on, so
-  the network receives it over two steps (h/2 + h/2), exactly in sum.
+  the network receives it over two steps (h/2 + h/2), exactly in sum
+  while every step is trapezoidal (the default). A backward-Euler /
+  SDIRK step (`discontinuity_restart=True`, a commutation split) keeps no
+  capacitor current, so at each switch between step kinds up to half a
+  step's heat can be lost or delivered twice while `heat_injected`
+  counts the full amount. Measured on the 10 kHz chopper of the tests
+  (20 ms, 1200 restart steps): the network's energy matches
+  `heat_injected` within 4e-10 (2.7e-13 without restarts).
   Ten 1 mJ events into 0.01 J/K with no leak raise the junction
   1.000 K (1e-6). `res.heat_injected + res.heat_pending` equals the
   recorded event and conduction energy within 1e-12 (the last step's
@@ -454,7 +461,8 @@ res.device_energy("Q1")        # E_on, E_off, E_cond_electrical, E_cond_table, n
   (energy balance closes); `"table"` with `V_on(|i|, T_j)·|i|` over the
   on-state ends of the step, trapezoidal. Both are reported.
 * Refusals by name (`UnsupportedError` / `ValueError`, naming the
-  device): `trbdf2`, `dsed`, `bdf1` and `auto` refuse a circuit with a
+  device): `trbdf2`, `dsed`, `bdf1`, and `auto` when it does not route
+  to `pwl` (no `dt=`), refuse a circuit with a
   loss port; an unknown device, a device that is not a PWL switch or
   diode, both or neither of `junction` / `Tj`, `conduction="table"`
   without `V_on`, and a deposit node without a capacitor on it.

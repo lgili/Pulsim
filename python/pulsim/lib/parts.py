@@ -554,7 +554,7 @@ class Part:
         inside the run (add-in-kernel-event-losses; ``engine='pwl'``).
 
         Builds the chain junction first (Foster: R // C per stage; Cauer:
-        C of each stage to the reference) from a junction node
+        C of each stage to ground, starting at ``T_amb``) from a junction node
         ``f"Tj_{device}"`` to ``heatsink_node`` (a node of your thermal
         network), or to a new ambient source at ``T_amb`` °C when none is
         given, and calls ``builder.set_device_losses`` with ``E_on`` /
@@ -584,8 +584,13 @@ class Part:
             c = (float(chain.second[k]) / r if chain.kind == "foster"
                  else float(chain.second[k]))
             builder.add_resistor(f"Th_{device}_R{k}", prev, curr, r)
-            builder.add_capacitor(f"Th_{device}_C{k}", curr,
-                                  prev if chain.kind == "foster" else ref, c)
+            if chain.kind == "foster":
+                builder.add_capacitor(f"Th_{device}_C{k}", curr, prev, c)
+            else:
+                # a Cauer capacitance is to the thermal reference, not to a
+                # heatsink node that moves; it starts at T_amb
+                builder.add_capacitor(f"Th_{device}_C{k}", curr, "gnd", c,
+                                      float(T_amb))
             prev = curr
         diode = self.cls == "diode"
         e_on = None if diode else self.loss_tables.get("Eon")

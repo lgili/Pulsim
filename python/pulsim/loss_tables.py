@@ -350,6 +350,9 @@ def set_device_losses(self, device, *, junction=None, Tj=None,
     """
     j = "" if junction is None else str(junction)
     tj = math.nan if Tj is None else float(Tj)
+    if Tj is not None and not math.isfinite(tj):
+        raise ValueError(f"set_device_losses({device!r}): Tj must be a "
+                         f"finite temperature in °C, got {Tj!r}")
     e_on = _kernel_table(E_on, "E_on", device)
     e_off = _kernel_table(E_off, "E_off", device)
     if junction is not None and Tj is None:

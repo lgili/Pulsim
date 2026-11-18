@@ -430,3 +430,23 @@ def test_a_long_transient_settles_on_the_periodic_orbit_fixed_point():
     ev = res.loss_events("S")
     p_sw = ev[ev["t"] >= t[-1] - 10 * T]["E"].sum() / (10 * T)
     assert p_sw == pytest.approx(rec.losses["S"]["switching"], rel=1e-3)
+
+
+@pytest.mark.parametrize("restart,rtol", [(False, 1e-11), (True, 1e-8)])
+def test_energy_balance_of_switching_heat_with_and_without_restart(
+        restart, rtol):
+    """The heat the network received (C·ΔT + ∫(T - T_amb)/R dt) equals
+    heat_injected on a switching run; with the restart rule the BE/SDIRK
+    steps keep no capacitor current, so the two-step trapezoid deposit is
+    no longer exact at each switch of step kind. Measured: 2.7e-13
+    trapezoid only, 4.1e-10 with 1200 restart steps."""
+    b, fn = _chopper(1.0, 0.01)
+    tab = _table(1e-3, 2e-3)
+    b.set_device_losses("S1", junction="tj", E_on=tab, E_off=tab)
+    res = p.simulate(b, 0.02, dt=1e-6, switch_fn=fn,
+                     discontinuity_restart=restart)
+    assert (res.n_restart_steps > 0) == restart
+    t = np.asarray(res.times)
+    tj = np.asarray(res.v("tj"))
+    network = 0.01 * (tj[-1] - tj[1]) + np.trapezoid(tj[1:] - T_AMB, t[1:])
+    assert network == pytest.approx(res.heat_injected, rel=rtol)

@@ -155,7 +155,7 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| Only `engine="pwl"` reads loss tables inside the run; `trbdf2`, `dsed`, `bdf1` and `auto` refuse a circuit with a loss port by name (`UnsupportedError`, feature `device_losses`, the device). | Conformance cell `test_device_losses_cell`. The variable-step hook waits for the unified event queue (task 3.1). | `engine="pwl"`, or the post-hoc `device_loss_summary` / the periodic-orbit evaluator on the other engines. |
+| Only `engine="pwl"` reads loss tables inside the run; `trbdf2`, `dsed`, `bdf1` and `auto` without `dt=` (with `dt=` it routes to `pwl` and honours the port) refuse a circuit with a loss port by name (`UnsupportedError`, feature `device_losses`, the device). | Conformance cell `test_device_losses_cell`. The variable-step hook waits for the unified event queue (task 3.1). | `engine="pwl"`, or the post-hoc `device_loss_summary` / the periodic-orbit evaluator on the other engines. |
 | The event energy is not drawn from the circuit: the PWL switch is ideal, the table energy only heats the junction. | By design, as in PLECS and PSIM. | Model the transition (`add_power_mosfet`) when the electrical side must see it. |
 | `T_j` does not feed back into the device (`V_f`, `g_on` stay fixed). | Task 4.1 (optional) not done. | Re-run with `V_f` / `g_on` at the settled `T_j`. |
 | A resumed run (`resume_from=`) drops the heat of the step in flight, and a loss port is not part of the circuit's IR or content hash. | One step's heat at the resume point. | Run the thermal transient in one piece. |

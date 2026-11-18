@@ -108,9 +108,16 @@ still heats that node (test 2.6 needs a deposited, open-loop heat).
 
 ## 11. The Evaluator refuses kpis / constraints changed after a batch
 
-`plan_of` compares the evaluator's config digest with the one taken at
-construction (which also keys every design id); a change after the
-first batch raises `ValueError` naming `kpis=` / `constraints=`.
+`evaluate`, `evaluate_many` (every backend) and `plan_of` refuse a
+`kpis=` that was reassigned or a `constraints=` that changed since
+construction (`ValueError` naming them). Not a config digest: a
+schedule closure that records its calls changes its digest and is
+legitimate (the first attempt refused `test_schedule_per_design_and_
+parameters`), and a digest per `evaluate` broke the Python-call bound
+(912 against 500). An `Evaluator(circuit=...)` whose circuit carries a
+loss port is refused by name: `value_hash` (design ids, the process
+backend's cache) does not see loss ports, and the evaluator's losses
+come from `loss_options=`.
 
 ## 12. Evaluator options: honoured or refused, never dropped (batch-11 #7)
 
@@ -119,10 +126,12 @@ and to the period runs on pss/pwl and pss/trbdf2, and silently dropped
 on pss/dsed (and by the kernel batch). Now: pss/dsed refuses any option
 by name (`refusal[1] == "options"`; the exact stepper has no step size
 or tolerance to honour), the kernel batch sends such an evaluator to
-the Python path (which refuses it), and every engine call of the
-evaluator turns simulate()'s "ignored by the ... engine" warning (rtol /
-atol / dt_init / integrator on pwl, integrator on trbdf2) into the same
-refusal. Rows tested: `test_evaluator_options_are_honoured_or_refused_
+the Python path (which refuses it), and the keywords simulate() only
+warns an engine ignores (rtol / atol / dt_init / integrator /
+stiffness_threshold / h_bdf2 on pwl; the last three on trbdf2) are
+refused by an explicit list before the run (after it for `auto`, against
+`engine_used`). Not by turning the warning into an error: that edits the
+process-wide filter list, which `evaluate_many`'s threads would race. Rows tested: `test_evaluator_options_are_honoured_or_refused_
 on_every_route` (dsed: dt, rtol, discontinuity_restart; pwl transient
 and pss: dt honoured, rtol / atol refused; trbdf2 pss: rtol honoured,
 integrator refused on pss and transient). Unknown keywords were already

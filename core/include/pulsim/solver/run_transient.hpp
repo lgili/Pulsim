@@ -2956,9 +2956,10 @@ inline SimulationResult run_transient(
         if (lt) {
             throw UnsupportedError(
                 "pwl", "device_losses", pool.device_losses().front().device, "",
-                "device losses: the circuit has no capacitor or inductor (the "
-                "static path), so there is no step to deposit heat over and no "
-                "thermal node; add the thermal network.");
+                "device losses: the circuit has no capacitor or inductor, so "
+                "it runs on the static path, which reads no commutations (a "
+                "record-only port included); give it its dynamic devices or "
+                "the thermal network.");
         }
         for (Size k = 0; k < n_steps; ++k) {
             const Real t = opts.t_start +
