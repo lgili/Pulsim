@@ -744,7 +744,7 @@ behind TR-BDF2 tracks 6-8, which took 24-33.)
     reading rule there takes `E_impulse_total` from the summary. →
     Evidence (`python/tests/test_impulse_losses.py`): the capacitor loop
     books 24 µJ to `S` within 1e-9 relative on pwl and trbdf2, and
-    impulse + conduction equals the stored-energy drop within 1e-12; the
+    impulse + conduction equals the stored-energy drop within 1e-12 (measured; the test bound is 1e-10 since batch 13, a platform margin); the
     cut-set (10 V, 1 Ω, 1 mH) closes source = resistor + switch + impulse
     to −2.57e-5 at τ/20 and −6.48e-6 at τ/40 on pwl (second order, taken
     around the pulse step: across it the sample quadrature is first
@@ -770,8 +770,9 @@ behind TR-BDF2 tracks 6-8, which took 24-33.)
 37. **Engine-neutral site driver for trbdf2 (complementarity 4.2).**
     `pwl::select_site(selector, ports, cache, diodes, mask_of, prev_on,
     x0, dt, h_site, b_extra, Z, u, xj, coords)` in `pwl/mode_ports.hpp`
-    is the whole decision of one site: run_transient now calls it, and
-    trbdf2's settle calls it with its own stage's (mask, dt, b_extra).
+    is the whole decision of one site: run_transient now calls it;
+    trbdf2's settle is to call it with its own stage's (mask, dt, b_extra)
+    once the hook lands (not yet: batch 13 review).
     `trbdf2_transient.hpp` is not edited here (its owner's branch has
     commits on it after this branch's base). The shared tests skip trbdf2
     while it refuses `mode_selection` by name and run once the hook lands

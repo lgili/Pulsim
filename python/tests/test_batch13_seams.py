@@ -10,7 +10,7 @@ D: a branch-form ideal switch / diode with a loss port beside an IGBT, on
    pwl and trbdf2; mode_selection with a gated device refused by name;
    'shadow' bit-identical to the default.
 E: a permeance-form transformer in a switching converter with a loss port
-   and a C-block controller; YAML round trip; with_value on a permeance;
+   and a C block in the same circuit (it drives an RC node, not the gate); YAML round trip; with_value on a permeance;
    the exact engine on a linear magnetic circuit.
 """
 
@@ -166,9 +166,10 @@ def test_trbdf2_resume_matches_to_tolerance_or_is_refused_by_name(case):
         _, _, second = _run(factory, "trbdf2", t2, None, builder=b, kw=kw,
                             t_start=snap.t, resume_from=snap)
     except p.UnsupportedError as e:
-        # only the named between-ticks refusal is allowed
-        assert case in ("closed_loop", "c_block") and "tick" in str(e), str(e)
+        # t1 is between two ticks by construction: the named refusal
+        assert case in ("closed_loop", "c_block") and "between two" in str(e), str(e)
         return
+    assert case not in ("closed_loop", "c_block"), "a between-ticks resume ran"
     xs = np.asarray(second.states)[-1]
     xf = np.array([np.interp(second.times[-1], full.times, col)
                    for col in np.asarray(full.states).T])
@@ -244,10 +245,6 @@ def test_ideal_branch_switch_loss_port_and_igbt_on_pwl():
     assert np.asarray(r.v("tj"))[-1] > 25.0
     # 'shadow' only shadows the default: bit-identical (no gated device)
     np.testing.assert_array_equal(np.asarray(r_ns.states), np.asarray(r_sh.states))
-    # no double booking: an ideal switch with a table has no impulse here
-    # (no capacitor loop), so the heat is the table energy alone
-    s = {e["name"]: e for e in p.device_loss_summary(b, r)}
-    assert s["S"].get("E_impulse_total", 0.0) == 0.0
     # with the IGBT (a gated device) every mode_selection is refused by name
     with pytest.raises(p.UnsupportedError, match="gated device 'Q'"):
         with warnings.catch_warnings():
@@ -365,3 +362,32 @@ def test_a_linear_magnetic_circuit_on_the_exact_route():
         r = p.simulate(b, t_end, engine="exact")
     i = np.asarray(r.i("R"))[-1]
     assert i == pytest.approx(1.0 * (1 - math.exp(-t_end * 10.0 / L)), rel=1e-6)
+
+
+def test_impulse_energy_on_a_loss_port_device_is_warned_not_heat():
+    """Batch 13 review: a loss port heats its junction with the table
+    energies only; the 24 uJ an ideal switch's capacitor loop dissipates
+    (E_impulse_total) is not in heat_injected. Pinned with a warning (owner:
+    the in-kernel event-losses track) so wiring it shows up as a change."""
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "x", "gnd", 1e-6, 10.0)
+    b.add_capacitor("C2", "y", "gnd", 3e-6, 2.0)
+    b.add_ideal_switch("S", "x", "y", 0.0, 1e-9)
+    b.add_voltage_source("Vamb", "amb", "gnd", 25.0)
+    b.add_resistor("Rth", "tj", "amb", 2.0)
+    b.add_capacitor("Cth", "tj", "amb", 1e-3)
+    t = p.LossTable(v_axis=[10.0], i_axis=[1.0], tj_axis=[25.0],
+                    energy=np.full((1, 1, 1), 1e-5))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        b.set_device_losses("S", junction="tj", E_on=t, E_off=t)
+    m = p.SwitchStateMask(1)
+    m.set(0, True)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        r = p.simulate(b, t_end=5e-6 + 1e-10, dt=1e-7, discontinuity_restart=True,
+                       switch_fn=lambda t: m, auto_regularize=False)
+    imp = p.losses.impulse_losses(b, r)
+    assert imp["S"]["E_impulse_total"] == pytest.approx(24e-6, rel=1e-9)
+    assert any("does not carry its impulsive" in str(x.message) for x in w)
+    assert r.heat_injected < 24e-6     # the impulse is not in the heat

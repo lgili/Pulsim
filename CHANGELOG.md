@@ -20,6 +20,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is refused by name; `node(n, "magnetic")` marks a flux node.
 * **Fixed** the induction machine's speed node read `electrical`; it is
   mechanical (`rad/s`), as the PMSM's.
+* **Added** a warning when an impulsive re-initialisation is booked to a
+  device with a loss port: its energy (`E_impulse_total`) is not in
+  `heat_injected` or the junction temperature (known limitation; was
+  silent).
+* **Fixed** a trbdf2 run ended by a final sliver inside an SDIRK step left
+  the derivative-free stage history in its final snapshot.
 
 ### Integration batch 12: unified device interface 1–3, in-kernel event losses, IR scopes, TR-BDF2 track 6, event queue, control graph 4, PWL IGBT / thyristor, exact engine session 6 merged
 
