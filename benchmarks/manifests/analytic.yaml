@@ -114,8 +114,9 @@ cases:
     trbdf2:
       ceiling: 1.63e-06
       measured: 8.127e-07
-    dsed:
-      refused: NotImplementedError
+    dsed:  # was refused (coupled inductors); add-exact-propagator-strategy, coupled inductors
+      ceiling: 1.0e-06
+      measured: 1.322e-14
   ideal_transformer:
     pwl:
       ceiling: 1.0e-09

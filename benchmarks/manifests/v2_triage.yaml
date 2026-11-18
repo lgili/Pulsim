@@ -60,7 +60,13 @@ circuits:
   circuits/linear/voltage_divider_3stage.yaml: {status: runs}
   circuits/magnetics/core_loss_steinmetz_sine.yaml: {status: runs}
   circuits/magnetics/coupled_inductor_step.yaml: {status: runs}
-  circuits/magnetics/half_bridge_transformer_dc.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.151}}
+  # dsed: refused (G_aa singular: the split DC-link capacitors close a loop with the source) until
+  # the general reduction (dependent states). The reference does not start from the netlist: pwl and
+  # trbdf2 store V(vcc) = one capacitor's ic at t = 0 and the source then splits the missing volts
+  # between the capacitors (V(mid) jumps by Vdc/4); dsed starts consistent (V(vcc) = Vdc, both ic).
+  # Open: from dsed's consistent state pwl does NOT converge on dsed (dt/10 0.0036, dt/40 0.0045,
+  # dt/160 0.0076; V(out) 6.29 vs 6.32 V at 1.5 ms); the coupled-transformer rectifier is suspect.
+  circuits/magnetics/half_bridge_transformer_dc.yaml: {status: runs, known: {pwl: disagree, dsed: disagree}, known_err: {pwl: 0.151, dsed: 0.0348}}
   circuits/magnetics/inductor_chain_step.yaml: {status: runs}
   circuits/magnetics/saturating_inductor_step.yaml: {status: skipped, reason: "saturable_inductor (v1 exponent law has no 2.0 equivalent)"}
   circuits/magnetics/transformer_leakage.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0041, pwl+restart: 0.00409, pwl+split: 0.00409}}
@@ -121,7 +127,12 @@ circuits:
   # dsed: refused the builder ICs, then "did not settle" at 2.35e-4 s; agrees (1.5e-6) since the exact engine merge (batch 9).
   circuits/switching/buck_boost/sepic.yaml: {status: runs}
   circuits/switching/inverter/half_bridge_inverter.yaml: {status: runs}
-  circuits/switching/inverter/half_bridge_inverter_lc.yaml: {status: runs}
+  # dsed: refused (G_aa singular: the split DC-link capacitors close a loop with the source) until
+  # the general reduction (dependent states). The reference does not start from the netlist: pwl and
+  # trbdf2 store V(vcc) = one capacitor's ic at t = 0 and the source then splits the missing volts
+  # between the capacitors (V(mid) jumps by Vdc/4); dsed starts consistent (V(vcc) = Vdc, both ic).
+  # pwl at dt/40 started from dsed's consistent t = 0 state agrees with dsed: 2.6e-5.
+  circuits/switching/inverter/half_bridge_inverter_lc.yaml: {status: runs, known: {dsed: disagree}, known_err: {dsed: 0.00369}}
   circuits/switching/inverter/half_bridge_lc_filter.yaml: {status: runs}
   circuits/switching/inverter/lcc_resonant_inverter.yaml: {status: runs}
   # pwm phase read as a fraction of the period (batch 6b): trbdf2 0.00132 -> 4.3e-5, agrees.
@@ -133,7 +144,13 @@ circuits:
   # pwm phase as a fraction (batch 6b): pwl 3.58 -> 2.6e-4, trbdf2 0.00244 -> 3.5e-5, both agree.
   circuits/switching/isolated/dual_active_bridge.yaml: {status: runs}
   circuits/switching/isolated/flyback_converter.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.949, pwl+restart: 0.11, pwl+split: 0.11}}
-  circuits/switching/isolated/forward_converter.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.707, pwl+restart: 0.092, pwl+split: 0.092}}
+  # dsed: refused (coupled inductors) until the extractor took the inductance matrix; now a
+  # disagreement of the diode settle, not of the coupling: at every gate-off the settle picks
+  # (D_rect, D_fw) = (off, off) with a 1.1e5 V forward violation on D_fw at the held state, the
+  # slow-manifold projection then relaxes L_o's current through g_off and the guard, judging
+  # the projected trajectory, sees nothing (200 checks, 0 repairs); the shadow LCP picks D_fw ON
+  # (violation 0.014 V). mode_selection='lcp' stops at 48 us on D_rect's diode law. Open.
+  circuits/switching/isolated/forward_converter.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, dsed: disagree}, known_err: {pwl: 0.707, pwl+restart: 0.092, pwl+split: 0.092, dsed: 0.648}}
   # dsed disagree on the gate is interpolation of sparse exact samples across edges (pointwise < 5e-5
   # of span; 0.024 at dt/4 output).
   circuits/switching/isolated/full_bridge_dc.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0828, pwl+restart: 0.0815, pwl+split: 0.0815}}
@@ -152,8 +169,18 @@ circuits:
   # (pointwise < 5e-5 of span; 0.0275 at dt/4 output).
   circuits/switching/multilevel/flying_capacitor_3level.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0466, pwl+restart: 0.05, pwl+split: 0.05}}
   circuits/switching/multilevel/mmc_4cell_chain.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0268, pwl+restart: 0.0264, pwl+split: 0.0264}}
-  circuits/switching/multilevel/npc_three_level_halfbridge.yaml: {status: runs}
-  circuits/switching/multilevel/t_type_3level_halfbridge.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0749, pwl+restart: 0.0738, pwl+split: 0.0738}}
+  # dsed: refused (G_aa singular: the split DC-link capacitors close a loop with the source) until
+  # the general reduction (dependent states). The reference does not start from the netlist: pwl and
+  # trbdf2 store V(vcc) = one capacitor's ic at t = 0 and the source then splits the missing volts
+  # between the capacitors (V(mid) jumps by Vdc/4); dsed starts consistent (V(vcc) = Vdc, both ic).
+  # pwl at dt/40 started from dsed's consistent t = 0 state agrees with dsed: 8.0e-5.
+  circuits/switching/multilevel/npc_three_level_halfbridge.yaml: {status: runs, known: {dsed: disagree}, known_err: {dsed: 0.58}}
+  # dsed: refused (G_aa singular: the split DC-link capacitors close a loop with the source) until
+  # the general reduction (dependent states). The reference does not start from the netlist: pwl and
+  # trbdf2 store V(vcc) = one capacitor's ic at t = 0 and the source then splits the missing volts
+  # between the capacitors (V(mid) jumps by Vdc/4); dsed starts consistent (V(vcc) = Vdc, both ic).
+  # pwl started from dsed's consistent state converges on dsed at half order: dt/10 0.028, dt/40 0.014, dt/160 0.0071.
+  circuits/switching/multilevel/t_type_3level_halfbridge.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, dsed: disagree}, known_err: {pwl: 0.0749, pwl+restart: 0.0738, pwl+split: 0.0738, dsed: 0.00887}}
   circuits/thermal/buck_electrothermal.yaml: {status: skipped, reason: "mosfet loss/thermal block"}
   circuits/thermal/electrothermal_resistor_self_heating.yaml: {status: runs}
   circuits/thermal/long_run_drift_buck.yaml: {status: runs}

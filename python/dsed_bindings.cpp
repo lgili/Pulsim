@@ -60,6 +60,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -425,6 +426,40 @@ py::array_t<double> reconstruct_full_states(
 /// current read 0.0234 A against 0.0535 A. Integrating each step from
 /// the right limit of its start sample to the left limit of its end
 /// sample closes that charge exactly.
+/// Dependent states (add-exact-propagator-strategy DECISIONS): the
+/// impulsive re-initialisations of the run as `d["reinit_records"]`, a
+/// list of dicts with the fixed engine's ReinitRecord fields; `sample`
+/// is the stored sample at the record's time (its left limit), or -1.
+template <class AdapterT, class ResultT>
+void reinit_records_into(AdapterT& adapter, const ResultT& res, py::dict& d) {
+    py::list out;
+    if constexpr (requires { adapter.take_reinit_log(); }) {
+        for (const auto& r : adapter.take_reinit_log()) {
+            long sample = -1;
+            const auto it = std::lower_bound(res.times.begin(), res.times.end(),
+                                             r.t - 4 * std::numeric_limits<Real>::epsilon()
+                                                       * std::max(Real{1}, std::abs(r.t)));
+            if (it != res.times.end()
+                && std::abs(*it - r.t)
+                       <= 4 * std::numeric_limits<Real>::epsilon()
+                              * std::max(Real{1}, std::abs(r.t))) {
+                sample = static_cast<long>(it - res.times.begin());
+            }
+            py::dict rd;
+            rd["t"] = r.t;
+            rd["kind"] = r.kind;
+            rd["devices"] = r.devices;
+            rd["states"] = r.states;
+            rd["lambda"] = r.lambda;
+            rd["dW"] = r.dW;
+            rd["projection_gap"] = r.projection_gap;
+            rd["sample"] = sample;
+            out.append(std::move(rd));
+        }
+    }
+    d["reinit_records"] = std::move(out);
+}
+
 template <class AdapterT, class ResultT>
 void reconstruct_right_limits(AdapterT& adapter, const ResultT& res,
                               py::dict& d) {
@@ -1368,6 +1403,7 @@ void init_module(py::module_& m) {
             // trajectory reconstructed per recorded sample.
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
+            reinit_records_into(adapter, res, d);
             return d;
         },
         py::arg("adapter"),
@@ -1415,6 +1451,7 @@ void init_module(py::module_& m) {
             auto d = ped_result_to_dict(res, event_log);
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
+            reinit_records_into(adapter, res, d);
             return d;
         },
         py::arg("adapter"),
@@ -1455,6 +1492,7 @@ void init_module(py::module_& m) {
             d["exact"] = exact_report_dict(adapter, 0);
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
+            reinit_records_into(adapter, res, d);
             return d;
         },
         py::arg("adapter"),

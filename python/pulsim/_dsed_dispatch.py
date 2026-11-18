@@ -540,6 +540,13 @@ def _result_from_native(native_res, t_start: float):
     for key in ("mode_shadow", "mode_selection", "mode_guard"):
         if key in native_res:
             res.diagnostics[key] = native_res[key]
+    # dependent states: the impulsive re-initialisations at mode entry,
+    # with the fixed engine's ReinitRecord fields (lambda as lambda_)
+    from types import SimpleNamespace
+    res.reinit_records = [
+        SimpleNamespace(**{("lambda_" if k == "lambda" else k): v
+                           for k, v in r.items()})
+        for r in native_res.get("reinit_records", [])]
     return res
 
 

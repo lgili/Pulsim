@@ -41,6 +41,8 @@
 #include <expected>
 #include <format>
 #include <numeric>
+#include <array>
+#include <limits>
 #include <queue>
 #include <set>
 #include <stdexcept>
@@ -446,6 +448,20 @@ public:
         // Mass of each state (C of a cap, L of an inductor): the
         // energy-coordinate scale √m of dsed's exact propagator.
         std::vector<Real> state_mass;
+        // Dependent states (add-exact-propagator-strategy DECISIONS,
+        // dependent states): a mode whose G_aa is singular (a capacitor
+        // loop, an inductor cut-set) holds the states on K·x = k. The
+        // flow keeps a consistent state consistent; an inconsistent one
+        // is projected at mode entry, weighted by the energy matrix E
+        // (C on the capacitor block, L with its mutual terms on the
+        // inductor block). Empty (0 rows) when the mode has no
+        // constraint. `constraint_devices` names the algebraic rows that
+        // carry it, `state_labels` every state (for the impulse record).
+        DenseMatrix constraint_K;               // d × n_state
+        Vector constraint_k;                    // d
+        DenseMatrix energy_weight;              // n_state × n_state
+        std::vector<std::string> constraint_devices;
+        std::vector<std::string> state_labels;
     };
 
     /// Extract continuous-time `(A, b)` for the given switch mask.
@@ -509,6 +525,7 @@ public:
                                 G_split, C_split, b_a);
 
         const int n_mna = static_cast<int>(G_split.rows());
+        const Vector b_orig = b_a;    // the general reduction's input
 
         // v2.0 Phase 3 item 4 (audit E.4): the matrix STAYS SPARSE.
         // The old path densified the full MNA here and later fed a
@@ -635,6 +652,281 @@ public:
             }
         }
 
+        // -----------------------------------------------------------------
+        // The general (dense) reduction, taken only where the structural
+        // path above cannot reduce the mode: a capacitor loop (a capacitor
+        // closing a loop of capacitors or of capacitors and voltage
+        // sources), an inductor loop or cut-set (G_aa singular: a node or an
+        // island reached only through inductors / current sources),
+        // magnetically coupled inductors (a non-diagonal mass), or a circuit
+        // without reactive state. Every mode the structural path reduces is
+        // left to it (bit-identical). add-exact-propagator-strategy
+        // DECISIONS, reduced state per mode.
+        //
+        // States are those the structural path would choose: the
+        // capacitors of a spanning forest of the capacitor graph (same BFS,
+        // same orientation; a capacitor closing a loop is a link, not a
+        // state) by capacitor index, then every inductor. With
+        //   M̃ ẏ + G̃ y + ũ = 0,  M̃ = Tᵀ(C/2)T,  G̃ = TᵀGT,  ũ = Tᵀb,
+        // M̃ lives on the state rows only (M_ss: C of the tree plus the
+        // links, −L with the mutual terms). Index 1 (G_aa regular) is the
+        // Schur complement with the full M_ss. Index 2 (G_aa singular,
+        // left / right null spaces W / N of dimension d): the algebraic rows
+        // W impose K x = k on the states (K = Wᵀ G_as), and the null part of
+        // the algebraic unknowns, a = −G_aa⁺(G_as x + u_a) + N μ, is fixed
+        // by the hidden constraint K ẋ = 0. The flow ẋ = Π f keeps every
+        // consistent state consistent; K, k and the energy weight ride on
+        // the result for the projection at mode entry.
+        // -----------------------------------------------------------------
+        auto general = [&]() -> ContinuousLTI {
+            const int n = n_mna;
+            const int nc = static_cast<int>(caps.size());
+            const Index gnd = static_cast<Index>(n);
+            auto mi = [&](Index x) { return x == kGround ? gnd : x; };
+            std::vector<std::vector<std::pair<Index, int>>> adj(static_cast<Size>(n) + 1);
+            for (int k = 0; k < nc; ++k) {
+                adj[static_cast<Size>(mi(caps[k].from))].push_back({mi(caps[k].to), k});
+                adj[static_cast<Size>(mi(caps[k].to))].push_back({mi(caps[k].from), k});
+            }
+            std::vector<char> vis(static_cast<Size>(n) + 1, char{0});
+            std::vector<std::array<Index, 2>> tree;   // (pos, neg), BFS order
+            std::vector<Index> cap_pos(static_cast<Size>(nc), kInvalidIndex);
+            auto bfs = [&](Index root) {
+                std::queue<Index> q;
+                q.push(root);
+                vis[static_cast<Size>(root)] = 1;
+                while (!q.empty()) {
+                    const Index u = q.front();
+                    q.pop();
+                    for (auto [v, k] : adj[static_cast<Size>(u)]) {
+                        if (vis[static_cast<Size>(v)]) continue;
+                        vis[static_cast<Size>(v)] = 1;
+                        tree.push_back({v, u});
+                        cap_pos[static_cast<Size>(k)] = v;
+                        q.push(v);
+                    }
+                }
+            };
+            bfs(gnd);
+            for (Index i = 0; i < static_cast<Index>(n); ++i) {
+                if (!vis[static_cast<Size>(i)] && !adj[static_cast<Size>(i)].empty()) bfs(i);
+            }
+            DenseMatrix Tg = DenseMatrix::Identity(n, n);
+            for (auto it = tree.rbegin(); it != tree.rend(); ++it) {
+                if ((*it)[1] == gnd) continue;
+                Tg.col((*it)[1]) += Tg.col((*it)[0]);
+            }
+            std::vector<Index> srows;
+            std::vector<bool> scap;
+            std::vector<Real> smass;
+            for (int k = 0; k < nc; ++k) {
+                if (cap_pos[static_cast<Size>(k)] == kInvalidIndex) continue;   // a link
+                srows.push_back(cap_pos[static_cast<Size>(k)]);
+                scap.push_back(true);
+            }
+            for (const auto& l : inds) {
+                srows.push_back(l.branch_var);
+                scap.push_back(false);
+            }
+            const int ns = static_cast<int>(srows.size());
+            std::vector<int> spos(static_cast<Size>(n), -1);
+            for (int i = 0; i < ns; ++i) spos[static_cast<Size>(srows[static_cast<Size>(i)])] = i;
+            std::vector<Index> arows;
+            for (int r = 0; r < n; ++r) {
+                if (spos[static_cast<Size>(r)] < 0) arows.push_back(r);
+            }
+            const int na = static_cast<int>(arows.size());
+            const DenseMatrix Gt = Tg.transpose() * DenseMatrix(G_split) * Tg;
+            const DenseMatrix Mt = Tg.transpose() * (DenseMatrix(C_split) * Real{0.5}) * Tg;
+            auto sub = [](const DenseMatrix& X, const std::vector<Index>& r,
+                          const std::vector<Index>& c) {
+                DenseMatrix Y(static_cast<Index>(r.size()), static_cast<Index>(c.size()));
+                for (Size i = 0; i < r.size(); ++i)
+                    for (Size j = 0; j < c.size(); ++j) Y(static_cast<Index>(i), static_cast<Index>(j)) = X(r[i], c[j]);
+                return Y;
+            };
+            const DenseMatrix Gss = sub(Gt, srows, srows), Gsa = sub(Gt, srows, arows);
+            const DenseMatrix Gas = sub(Gt, arows, srows), Gaa = sub(Gt, arows, arows);
+            const DenseMatrix Mss = sub(Mt, srows, srows);
+            if (na > 0 && ns > 0) {      // (maxCoeff of an empty block is undefined)
+                const Real mmax = Mt.cwiseAbs().maxCoeff();
+                const Real off = std::max(sub(Mt, srows, arows).cwiseAbs().maxCoeff(),
+                                          sub(Mt, arows, arows).cwiseAbs().maxCoeff());
+                if (off > Real{1e-12} * mmax) {
+                    throw std::runtime_error(
+                        "compute_lti_state_space: a reactive element lies on a "
+                        "coordinate the capacitor forest does not carry (general "
+                        "reduction); use engine='pwl' or 'trbdf2'.");
+                }
+            }
+            // energy weight: C on the capacitor block, L (sign flipped) on
+            // the inductor block
+            DenseMatrix E = Mss;
+            for (int i = 0; i < ns; ++i) {
+                if (!scap[static_cast<Size>(i)]) {
+                    E.row(i) *= Real{-1};
+                }
+            }
+            for (int i = 0; i < ns; ++i) smass.push_back(std::abs(Mss(i, i)));
+            Eigen::FullPivLU<DenseMatrix> mlu(Mss);
+            if (ns > 0 && !mlu.isInvertible()) {
+                throw std::runtime_error(
+                    "compute_lti_state_space: the inductance / capacitance matrix "
+                    "of the states is singular (a coupling with |k| = 1?); use "
+                    "engine='pwl' or 'trbdf2'.");
+            }
+            // G_aa: rank-revealing. The structural path found it singular
+            // (its sparse LU failed, or the equilibrated block is past the
+            // same cut as below).
+            DenseMatrix P = DenseMatrix::Zero(na, na), W(na, 0), N(na, 0);
+            if (na > 0) {
+                // on the equilibrated block Gs = Dr·G_aa·Dc (rows, then columns,
+                // to a unit largest entry), the scale the structural path's rank
+                // check uses (cond₁ after its G_aa⁻¹): a cancellation pivot is
+                // ~eps there whatever the conductance scale
+                Vector dr(na), dc(na);
+                for (int i = 0; i < na; ++i) {
+                    const Real m = Gaa.row(i).cwiseAbs().maxCoeff();
+                    dr[i] = m > Real{0} ? Real{1} / m : Real{1};
+                }
+                const DenseMatrix Gr = dr.asDiagonal() * Gaa;
+                for (int j = 0; j < na; ++j) {
+                    const Real m = Gr.col(j).cwiseAbs().maxCoeff();
+                    dc[j] = m > Real{0} ? Real{1} / m : Real{1};
+                }
+                const DenseMatrix Gs = Gr * dc.asDiagonal();
+                Eigen::JacobiSVD<DenseMatrix> svd(Gs, Eigen::ComputeFullU | Eigen::ComputeFullV);
+                const Vector& sg = svd.singularValues();
+                const Real tol = sg.size() ? sg[0] * Real(std::max(na, 16))
+                                             * std::numeric_limits<Real>::epsilon() * Real{4}
+                                           : Real{0};
+                int rho = 0;
+                while (rho < na && sg[rho] > tol) ++rho;
+                const int d = na - rho;
+                // G_aa = Dr⁻¹·Gs·Dc⁻¹: generalized inverse Dc·Gs⁺·Dr, left null
+                // space Dr·U₀, right null space Dc·V₀
+                P = dc.asDiagonal()
+                    * (svd.matrixV().leftCols(rho)
+                       * sg.head(rho).cwiseInverse().asDiagonal()
+                       * svd.matrixU().leftCols(rho).transpose())
+                    * dr.asDiagonal();
+                W = dr.asDiagonal() * svd.matrixU().rightCols(d);
+                N = dc.asDiagonal() * svd.matrixV().rightCols(d);
+            }
+            const int d = static_cast<int>(W.cols());
+            // f(x, u) = Af·x + Fs·u_s + Fa·u_a
+            DenseMatrix Af(ns, ns), Fs(ns, ns), Fa(ns, na);
+            if (ns > 0) {
+                Af = mlu.solve(Gsa * P * Gas - Gss);
+                Fs = -mlu.inverse();
+                Fa = mlu.solve(Gsa * P);
+            }
+            DenseMatrix Rax = -P * Gas, Ras = DenseMatrix::Zero(na, ns), Raa = -P;
+            DenseMatrix K(d, ns);
+            Vector kc = Vector::Zero(d);
+            const Vector u_const = Tg.transpose() * b_orig;
+            Vector ua_const(na);
+            for (int i = 0; i < na; ++i) ua_const[i] = u_const[arows[static_cast<Size>(i)]];
+            if (d > 0) {
+                if (ns == 0) {
+                    throw std::runtime_error(
+                        "compute_lti_state_space: algebraic block G_aa is singular "
+                        "and the circuit has no state to carry the constraint.");
+                }
+                K = W.transpose() * Gas;
+                const DenseMatrix MinvGsaN = mlu.solve(Gsa * N);
+                const DenseMatrix H = K * MinvGsaN;
+                Eigen::FullPivLU<DenseMatrix> hlu(H);
+                if (!hlu.isInvertible()) {
+                    throw std::runtime_error(
+                        "compute_lti_state_space: algebraic block G_aa is singular "
+                        "beyond a capacitor loop / inductor cut-set (index > 2): "
+                        "circuit topology does not have a unique algebraic solution "
+                        "for this switch mask.");
+                }
+                const DenseMatrix G = hlu.solve(K);            // H⁻¹K (d × ns)
+                const DenseMatrix Pi = DenseMatrix::Identity(ns, ns) - MinvGsaN * G;
+                // a gains N·μ, μ = H⁻¹K·f
+                Rax += N * (G * Af);
+                Ras = N * (G * Fs);
+                Raa += N * (G * Fa);
+                Af = Pi * Af;
+                Fs = Pi * Fs;
+                Fa = Pi * Fa;
+                kc = -(W.transpose() * ua_const);
+                // a time-varying source on a constraint would drive the
+                // dependent state by its derivative: not modelled -> refuse
+                const DenseMatrix WTa = W.transpose() * sub(Tg.transpose(), arows, [&] {
+                    std::vector<Index> all(static_cast<Size>(n));
+                    std::iota(all.begin(), all.end(), Index{0});
+                    return all;
+                }());
+                using SK = DevicePool::StoredKind;
+                for (Index bid = 0; bid < graph_.num_branches(); ++bid) {
+                    if (!pool_.is_registered(bid)) continue;
+                    const auto k = pool_.kind_of(bid);
+                    Vector st = Vector::Zero(n);
+                    if (k == SK::PWMVoltageSource || k == SK::SineVoltageSource
+                        || k == SK::PulseVoltageSource) {
+                        st[pool_.branch_var_id_for_source(bid, graph_)] = Real{1};
+                    } else if (k == SK::SineCurrentSource || k == SK::PulseCurrentSource
+                               || k == SK::PwlCurrentSource) {
+                        const auto& br = graph_.branch(bid);
+                        if (br.from >= 0) st[br.from] = Real{1};
+                        if (br.to >= 0) st[br.to] = Real{-1};
+                    } else {
+                        continue;
+                    }
+                    if ((WTa * st).cwiseAbs().maxCoeff()
+                        > Real{1e-9} * std::max(Real{1}, WTa.cwiseAbs().maxCoeff())) {
+                        throw std::runtime_error(std::format(
+                            "compute_lti_state_space: the time-varying source {} sits "
+                            "in a capacitor loop / inductor cut-set: the dependent "
+                            "state follows the source's derivative, which the exact "
+                            "kernel does not model. Use engine='pwl' or 'trbdf2'.",
+                            row_label(graph_, pool_, pool_.is_registered(bid) && graph_.branch(bid).kind == topology::BranchKind::Source
+                                      && (k == SK::PWMVoltageSource || k == SK::SineVoltageSource || k == SK::PulseVoltageSource)
+                                      ? pool_.branch_var_id_for_source(bid, graph_) : Index{0})));
+                    }
+                }
+            }
+            // u = Tᵀ b: F_u (ns × n) and R_u (na × n) act on the whole u
+            DenseMatrix Fu = DenseMatrix::Zero(ns, n), Ru = DenseMatrix::Zero(na, n);
+            for (int i = 0; i < ns; ++i) {
+                Fu.col(srows[static_cast<Size>(i)]) = Fs.col(i);
+                Ru.col(srows[static_cast<Size>(i)]) = Ras.col(i);
+            }
+            for (int i = 0; i < na; ++i) {
+                Fu.col(arows[static_cast<Size>(i)]) = Fa.col(i);
+                Ru.col(arows[static_cast<Size>(i)]) = Raa.col(i);
+            }
+            DenseMatrix Bp = Fu * Tg.transpose();                 // ns × n
+            Vector b_red = Bp * b_orig;
+            DenseMatrix Y = DenseMatrix::Zero(n, ns);             // y_T from x
+            DenseMatrix Yb = DenseMatrix::Zero(n, n);             // y_T from u
+            for (int i = 0; i < ns; ++i) Y(srows[static_cast<Size>(i)], i) = Real{1};
+            for (int i = 0; i < na; ++i) {
+                Y.row(arows[static_cast<Size>(i)]) = Rax.row(i);
+                Yb.row(arows[static_cast<Size>(i)]) = Ru.row(i);
+            }
+            DenseMatrix rs = Tg * Y;
+            DenseMatrix rb = Tg * Yb * Tg.transpose();
+            Vector rc = rb * b_orig;
+            ContinuousLTI out{std::move(Af), std::move(b_red), std::move(srows), std::move(scap),
+                              std::move(Bp), std::move(rs), std::move(rc), std::move(rb),
+                              std::move(smass), {}, {}, {}, {}, {}};
+            out.constraint_K = std::move(K);
+            out.constraint_k = std::move(kc);
+            out.energy_weight = std::move(E);
+            for (const Index r : out.state_row_indices)
+                out.state_labels.push_back(row_label(graph_, pool_, r));
+            for (int i = 0; i < W.rows(); ++i)
+                if (d > 0 && W.row(i).cwiseAbs().maxCoeff() > Real{1e-9})
+                    out.constraint_devices.push_back(
+                        row_label(graph_, pool_, arows[static_cast<Size>(i)]));
+            return out;
+        };
+
         const int n_cap = static_cast<int>(caps.size());
         const int n_ind = static_cast<int>(inds.size());
         const int n_state = n_cap + n_ind;
@@ -663,7 +955,8 @@ public:
             Vector rec_const0 = -(Ginv * b_a);
             return ContinuousLTI{DenseMatrix(0, 0), Vector(0), {}, {},
                                  DenseMatrix(0, n_mna), DenseMatrix(n_mna, 0),
-                                 std::move(rec_const0), DenseMatrix(-Ginv), {}};
+                                 std::move(rec_const0), DenseMatrix(-Ginv), {},
+                                 {}, {}, {}, {}, {}};
         }
 
         // Declared OUTSIDE the n_cap > 0 block so it stays in scope
@@ -774,11 +1067,8 @@ public:
             // Any cap left unoriented = parallel-cap cycle. Defer.
             for (int k = 0; k < n_cap; ++k) {
                 if (caps[k].pos == kInvalidIndex) {
-                    throw std::runtime_error(
-                        "compute_lti_state_space: capacitors form a "
-                        "cycle (parallel caps share both terminals) — "
-                        "merge them into a single equivalent cap "
-                        "upstream. Phase 5.1b TODO.");
+                    // a capacitor loop: one cap is a link, not a state
+                    return general();
                 }
                 // The anchor (kGroundIdx OR a real MNA node) can be
                 // a `neg` value. The `pos` is always a real MNA row.
@@ -941,11 +1231,8 @@ public:
             auto solver = sparse::make_default_solver();
             if (!solver->analyze(Gaa_sp) ||
                 !solver->factorize(Gaa_sp)) {
-                throw std::runtime_error(
-                    "compute_lti_state_space: algebraic block "
-                    "G_aa is singular; circuit topology does "
-                    "not have a unique algebraic solution for "
-                    "this switch mask.");
+                // a capacitor loop / inductor cut-set: dependent states
+                return general();
             }
             // G_aa⁻¹·G_as, one sparse solve per state column.
             DenseMatrix Ginv_Gas(n_alg, n_state);
@@ -977,6 +1264,43 @@ public:
                     solver->solve(rhs, sol);
                     Ginv.col(j) = sol;
                     rhs[j] = Real{0};
+                }
+            }
+            // The rank decision, on the equilibrated block: a cancellation
+            // pivot (g − g·g/g of a series resistor closing an inductor
+            // cut-set) survives the sparse LU at rounding level and would
+            // return a 1/eps eigenvalue. cond₁(Dr·G_aa·Dc) past the general
+            // reduction's SVD cut sends the mode there, so the decision does
+            // not flip with the last bit of a resistor (DECISIONS, dependent
+            // states, rounding fuzz).
+            {
+                Vector dr = Vector::Zero(n_alg), dc = Vector::Zero(n_alg);
+                for (int k = 0; k < Gaa_sp.outerSize(); ++k)
+                    for (sparse::Matrix::InnerIterator it(Gaa_sp, k); it; ++it)
+                        dr[it.row()] = std::max(dr[it.row()], std::abs(it.value()));
+                for (int i = 0; i < n_alg; ++i)
+                    dr[i] = dr[i] > Real{0} ? Real{1} / dr[i] : Real{1};
+                for (int k = 0; k < Gaa_sp.outerSize(); ++k)
+                    for (sparse::Matrix::InnerIterator it(Gaa_sp, k); it; ++it)
+                        dc[it.col()] = std::max(dc[it.col()],
+                                                std::abs(it.value()) * dr[it.row()]);
+                for (int j = 0; j < n_alg; ++j)
+                    dc[j] = dc[j] > Real{0} ? Real{1} / dc[j] : Real{1};
+                Vector cs = Vector::Zero(n_alg);
+                for (int k = 0; k < Gaa_sp.outerSize(); ++k)
+                    for (sparse::Matrix::InnerIterator it(Gaa_sp, k); it; ++it)
+                        cs[it.col()] += std::abs(it.value()) * dr[it.row()] * dc[it.col()];
+                Real inv_norm = Real{0};
+                for (int j = 0; j < n_alg; ++j) {
+                    Real c = Real{0};
+                    for (int i = 0; i < n_alg; ++i)
+                        c += std::abs(Ginv(i, j)) / (dc[i] * dr[j]);
+                    inv_norm = std::max(inv_norm, c);
+                }
+                const Real cut = Real{1} / (Real{4} * Real(std::max(n_alg, 16))
+                                            * std::numeric_limits<Real>::epsilon());
+                if (!(cs.maxCoeff() * inv_norm <= cut)) {
+                    return general();
                 }
             }
             const DenseMatrix Gsa_Ginv = Gsa_sp * Ginv;
@@ -1043,26 +1367,33 @@ public:
         // would be a false positive whose message ("would silently
         // return dynamics computed as if the coupling were absent")
         // is itself untrue for that circuit.
-        Size coupled_pairs = 0;
+        // Coupled windings (k != 0): the inductor block of M_ss is the
+        // full inductance matrix Lmat (L_ii self, L_ij = M, the same
+        // −2L / −2M pair assemble.hpp stamps into C), applied as a
+        // solve −Lmat⁻¹ on the inductor rows. Without coupling the
+        // per-row scaling below is kept unchanged (bit identity).
+        DenseMatrix Lmat;
         for (const auto& tc : pool_.transformer_couplings()) {
-            if (models::TwoWindingTransformer::mutual_inductance(
-                    tc.params) != Real{0}) {
-                ++coupled_pairs;
+            const Real M = models::TwoWindingTransformer::
+                mutual_inductance(tc.params);
+            if (M == Real{0}) continue;      // k = 0: independent windings
+            const auto row_of = [&](Index branch_id) {
+                const Index bv =
+                    pool_.branch_var_id_for_inductor(branch_id, graph_);
+                for (int i = 0; i < n_ind; ++i)
+                    if (inds[i].branch_var == bv) return i;
+                throw std::runtime_error(
+                    "compute_lti_state_space: a coupled winding is not "
+                    "a linear inductor state.");
+            };
+            if (Lmat.size() == 0) {
+                Lmat = DenseMatrix::Zero(n_ind, n_ind);
+                for (int i = 0; i < n_ind; ++i) Lmat(i, i) = inds[i].L;
             }
-        }
-        if (coupled_pairs > 0) {
-            throw std::runtime_error(std::format(
-                "compute_lti_state_space: this circuit has {} "
-                "magnetically coupled inductor pair(s) (k != 0 on the "
-                "transformer / coupled-inductor API). The "
-                "continuous-time LTI extraction applies a DIAGONAL "
-                "inverse mass matrix, so it cannot represent the "
-                "mutual-inductance off-diagonal terms and would "
-                "silently return dynamics computed as if the coupling "
-                "were absent. Use the fixed-step PWL engine "
-                "(engine='pwl'), which stamps the mutual terms "
-                "exactly, for magnetically coupled circuits.",
-                coupled_pairs));
+            const int p = row_of(tc.primary_branch_id);
+            const int s = row_of(tc.secondary_branch_id);
+            Lmat(p, s) += M;
+            Lmat(s, p) += M;
         }
         // ---------------------------------------------------------
         DenseMatrix A = Schur_G;
@@ -1073,11 +1404,33 @@ public:
             b_reduced(i) *= inv;
             B.row(i) *= inv;
         }
-        for (int i = 0; i < n_ind; ++i) {
-            const Real inv = Real{-1} / inds[i].L;
-            A.row(n_cap + i) *= inv;
-            b_reduced(n_cap + i) *= inv;
-            B.row(n_cap + i) *= inv;
+        if (Lmat.size() == 0) {
+            for (int i = 0; i < n_ind; ++i) {
+                const Real inv = Real{-1} / inds[i].L;
+                A.row(n_cap + i) *= inv;
+                b_reduced(n_cap + i) *= inv;
+                B.row(n_cap + i) *= inv;
+            }
+        } else {
+            // Positive definite or refused: |k| = 1 makes Lmat singular
+            // (the winding currents are then not independent states).
+            Eigen::LLT<DenseMatrix> llt(Lmat);
+            const Real lmax = Lmat.diagonal().cwiseAbs().maxCoeff();
+            if (llt.info() != Eigen::Success
+                || llt.matrixL().toDenseMatrix().diagonal().minCoeff()
+                       <= Real{1e-6} * std::sqrt(lmax)) {
+                throw std::runtime_error(
+                    "compute_lti_state_space: the coupled-inductor "
+                    "matrix is not positive definite (|k| >= 1 on a "
+                    "transformer / coupled-inductor pair): the winding "
+                    "currents are not independent states.");
+            }
+            A.middleRows(n_cap, n_ind) =
+                -llt.solve(DenseMatrix(A.middleRows(n_cap, n_ind)));
+            b_reduced.segment(n_cap, n_ind) =
+                -llt.solve(Vector(b_reduced.segment(n_cap, n_ind)));
+            B.middleRows(n_cap, n_ind) =
+                -llt.solve(DenseMatrix(B.middleRows(n_cap, n_ind)));
         }
 
         return ContinuousLTI{
@@ -1095,6 +1448,7 @@ public:
                 for (const auto& i : inds) m.push_back(i.L);
                 return m;
             }(),
+            {}, {}, {}, {}, {},   // no constraint on a structural mode
         };
     }
 

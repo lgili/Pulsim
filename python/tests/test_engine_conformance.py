@@ -437,20 +437,14 @@ def test_device_cell(kind, engine):
 
 @pytest.mark.parametrize("engine", ENGINES)
 def test_coupled_inductor_cell(engine):
-    # Circuit-level limit: refused on dsed (also a NotImplementedError,
-    # its legacy base) and on bdf1 (no mutual stamp: it read 9.38 V off
-    # an 18 V span, silently, before this change).
+    # Circuit-level limit: refused on bdf1 (no mutual stamp: it read 9.38 V
+    # off an 18 V span, silently, before this change). dsed extracts the full
+    # inductance matrix (add-exact-propagator-strategy, coupled inductors).
     if engine == "bdf1":
         with pytest.raises(p.UnsupportedError) as ei:
             _run(*_args(COUPLED), "bdf1")
         assert (ei.value.engine, ei.value.feature) == (
             "bdf1", "coupled_inductors")
-        return
-    if engine == "dsed":
-        with pytest.raises(p.UnsupportedError) as ei:
-            _run(*_args(COUPLED), "dsed")
-        assert isinstance(ei.value, NotImplementedError)
-        assert ei.value.engine == "dsed"
         return
     _check_cell("coupled", COUPLED, engine, True)
 
@@ -1292,3 +1286,25 @@ def test_allow_implicit_segments_is_refused_off_the_exact_engine(engine):
     with pytest.raises(p.UnsupportedError) as ei:
         _sim(engine, allow_implicit_segments=True)
     assert ei.value.feature == "allow_implicit_segments"
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "exact"))
+def test_reinit_records_only_on_the_exact_engine(engine):
+    # result.reinit_records (dependent states: the impulse at a mode entry) rides on the event
+    # integrator's runs only, the same on both names: two 1.5 uF capacitors at 8 V and 0 V tied
+    # by a 0 V source share 6 uC at t = 0
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "a", "gnd", 1.5e-6, 8.0)
+    b.add_capacitor("C2", "b", "gnd", 1.5e-6, 0.0)
+    b.add_voltage_source("V0", "a", "b", 0.0)
+    b.add_resistor("R", "a", "gnd", 1e3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 1e-4, engine=engine, dt=1e-6)
+    recs = getattr(r, "reinit_records", None)
+    if engine in ("pwl", "trbdf2"):
+        assert recs is None
+        return
+    (rec,) = recs
+    assert (rec.kind, rec.sample) == ("capacitor_loop", 0)
+    assert rec.lambda_ == pytest.approx(6e-6, rel=1e-12)

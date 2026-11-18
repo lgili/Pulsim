@@ -316,8 +316,12 @@ counters:
       n_diode_events: 199
       n_chatter_breaks: 0
       n_forced_accepts: 3
-    dsed:
-      refused: NotImplementedError
+    dsed:   # was refused (coupled inductors; add-exact-propagator-strategy DECISIONS)
+      n_accept: 1500
+      n_reject: 0
+      n_events: 199
+      n_rk45_steps: 0
+      n_bdf2_steps: 0
   diode_bridge_rectifier:
     pwl:
       event_builds: 0
