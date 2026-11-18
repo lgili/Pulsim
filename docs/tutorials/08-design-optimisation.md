@@ -212,3 +212,27 @@ The kernel call alone goes from 10246 to 49721 designs/s on 1 to 8
 threads; building the records in Python (about 20 us each) is what
 remains serial.
 
+
+## 7. With gradients: a boost's L and C
+
+Section 4's staircase is the fixed engine's. On the exact route the
+orbit sensitivities give d(KPI)/d(value) without a finite difference
+(`Evaluator(gradients={"L": "L.L", "C": "C.C"})`, `record.grads`), and
+`pulsim.value_and_grad` turns a `values -> (cost, gradient)` function
+into what `scipy.optimize.minimize(jac=True)` takes.
+`examples/optimization/boost_gradient.py` sizes a 12 V → 24 V boost
+(100 kHz, ideal devices, 10 mΩ DCR) for 50 mV output ripple and 0.6 A
+inductor ripple at the smallest L and C:
+
+| path | when | result (OBSERVATION, the machine of section 6) |
+|---|---|---|
+| L-BFGS-B with exact gradients | scipy importable | L = 99.73 µH, C = 119.57 µF after 20 evaluations; ripple 50.06 mV, 0.600 A |
+| 8 × 8 log grid on the kernel batch | no scipy, or `--grid` | 64 of 64 in the kernel; best L = 125.85 µH, C = 153.70 µF; ripple 38.95 mV, 0.476 A |
+
+Tested (`python/tests/test_example_boost_gradient.py`): the gradient at
+the start equals a central difference within 1e-6; the optimiser
+lowers the cost and meets both ripple targets within 5 %; the grid runs
+entirely in the kernel and its records equal the Python path's. A
+record with gradients runs on the Python path (section 6). Observed:
+the grid's 64 evaluations stop 22 % from the targets, the 20 gradient
+steps within 0.2 %.

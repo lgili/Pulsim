@@ -8,6 +8,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Optimisation slice 6: the kernel batch evaluator, event losses on the orbit
 
+* **Added** `examples/optimization/boost_gradient.py`: a boost's L and C
+  sized with exact orbit-sensitivity gradients
+  (`value_and_grad` + `scipy.optimize.minimize(jac=True)`), falling back
+  to a grid on the kernel batch without scipy. Tested: gradient equals a
+  central difference within 1e-6, both ripple targets met within 5 %,
+  the grid all in the kernel and equal to the Python path. Tutorial 08
+  section 7.
 * **Added** the kernel batch evaluator: `Evaluator.evaluate_many` (new
   default `backend=None`) runs a circuit-form evaluator with declarative
   KPIs on the exact steady-state route as one kernel call
