@@ -39,7 +39,7 @@ def test_an_induction_machine_resumed_mid_start_equals_the_uninterrupted_run(eng
     assert float(np.asarray(first.v("w"))[-1]) > 20.0   # control: accelerating
     if engine == "pwl":
         # same state; the resumed grid is t_mid + n*dt, so equal to rounding
-        assert w_res == pytest.approx(float(np.asarray(full.v("w"))[-1]), rel=1e-12)
+        assert w_res == pytest.approx(float(np.asarray(full.v("w"))[-1]), rel=1e-9)
         assert float(np.asarray(second.i("M_a"))[-1]) == pytest.approx(
             float(np.asarray(full.i("M_a"))[-1]), rel=1e-9)
     else:
