@@ -83,3 +83,29 @@
     `max_newton_iterations`, `newton_roundoff_budget` are `None` by
     default; 0 is a value (the first two refuse it, as `to_trbdf2_options`
     and `to_simulation_options` do).
+
+12. **Batch-13 options get a row when they land, not before.** Adding a
+    `simulate()` keyword is one `kRunOptionTable` row (engines, unset
+    kind, default, why) plus, when the kernel reads it, one `RunOptions`
+    optional and a line in `to_simulation_options` / `to_trbdf2_options`;
+    `test_the_table_covers_every_simulate_parameter` fails until the row
+    exists. Planned: `device_path` ('legacy' = not requested; a new
+    `Unset` kind like `Legacy`), `mode_selection` gaining `kTrBdf2` (a
+    one-bit change), a monitor tick kind (an `add_tick` variant on the
+    facade), controller-state / tick-origin snapshot blocks (fields of
+    `SolverSnapshot`, which `Simulation::snapshot()` already returns
+    whole). No placeholder field is added now: a field nothing reads
+    would be the silent ignore this change removes.
+
+13. **simulate()'s fixed overhead is held by construction, not by timing.**
+    The shared Mac's load swings timings by +-50%, so the gate was checked
+    with a deterministic count of Python bytecodes executed per call
+    (`sys.settrace` opcode events, 6-branch buck): base 2308 (pwl, 20
+    steps) / 3033 (trbdf2), this change 2266 / 3026. To get there the
+    table check filters "not set" values in C (`itertools.compress`), the
+    options are filled in C++ (`_simulation_options_kw`,
+    `_trbdf2_options_kw`: no Python attribute writes), the option snapshot
+    is a literal (test-checked against the table) instead of `locals()`,
+    and five in-function `from . import` on the hot path became module
+    handles. The kernel time is unchanged (same drivers, same options;
+    goldens identical).

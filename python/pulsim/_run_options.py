@@ -11,6 +11,8 @@ values (`DEFAULTS`).
 
 from __future__ import annotations
 
+from itertools import compress, repeat
+from operator import is_not, truth
 from typing import Any, Mapping
 
 from . import _pulsim  # type: ignore[import-not-found]
@@ -51,10 +53,34 @@ def honoured(name: str, engine: str) -> bool:
     return engine in TABLE[name]["engines"]
 
 
+# Per engine, the rows it does not honour, in table order (simulate() asks
+# on every call: only these can be refused), split by how "not set" is
+# spelled: falsy rows (any falsy value) and the rest (None, or by kind).
+def _split(names):
+    falsy = tuple(n for n in names if TABLE[n]["unset"] == "falsy")
+    return falsy, tuple(n for n in names if TABLE[n]["unset"] != "falsy")
+
+
+_ANY_ROW = _split(tuple(n for n, r in TABLE.items() if r["unset"] != "always"))
+_NOT_HONOURED = {e: _split(tuple(
+    n for n, r in TABLE.items()
+    if e not in r["engines"] and r["unset"] != "always")) for e in _ENGINES}
+_ORDER = {n: k for k, n in enumerate(TABLE)}
+
+
 def refused(engine: str, values: Mapping[str, Any]) -> "list[str]":
     """The options of `values` that `engine` cannot honour, in table order."""
-    return [n for n in TABLE if n in values
-            and is_requested(n, values[n], engine) and not honoured(n, engine)]
+    falsy, other = _NOT_HONOURED.get(engine, _ANY_ROW)  # unknown: no row
+    # The "not set" filters run in C (simulate() asks on every call and
+    # nearly every value is unset); only the set ones reach is_requested.
+    get = values.get
+    out = list(compress(falsy, map(truth, map(get, falsy))))
+    out += [n for n in compress(other, map(is_not, map(get, other),
+                                           repeat(None)))
+            if is_requested(n, get(n), engine)]
+    if len(out) > 1:
+        out.sort(key=_ORDER.__getitem__)
+    return out
 
 
 def why(name: str) -> str:
@@ -75,70 +101,25 @@ def option_capabilities() -> "dict[str, dict[str, bool]]":
             for n, r in TABLE.items() if n != "c_blocks"}
 
 
-def run_options(*, engine: str, t_start: float, t_end: float, dt=None,
-                rtol=None, atol=None, dt_init=None, stiffness_threshold=None,
-                h_bdf2=None, enable_nonlinear_refresh=None,
-                max_newton_iterations=None, tol_newton_dx=None,
-                tol_newton_res=None, enable_newton_line_search=None,
-                enable_newton_lm=None, newton_roundoff_budget=None,
-                max_event_iterations=None, strict_event_iterations=False,
-                mode_selection=None, on_impulse="record", mode_guard=True,
-                control_tick="label",
-                max_dt_halvings=None, store_every=None, start_from_dc_op=False,
-                enable_substep_state_correction=None,
-                discontinuity_restart=None, resolution_diagnostics=None,
-                inductor_freeze_di_max=None, inductor_abs_clamp=None,
-                auto_regularize=True, voltage_sanity_factor=None):
+def run_options(*, engine: str, t_start: float, t_end: float, dt=None, **kw):
     """A kernel `RunOptions` from simulate()'s resolved keywords (None =
     not set; the kernel's `to_simulation_options` / `to_trbdf2_options`
-    apply `sim::Defaults`)."""
-    o = _pulsim.RunOptions(t_end=float(t_end), dt=None if dt is None
-                           else float(dt), engine=engine,
-                           t_start=float(t_start))
-    for name, v, cast in (
-            ("rtol", rtol, float), ("atol", atol, float),
-            ("dt_init", dt_init, float),
-            ("stiffness_threshold", stiffness_threshold, float),
-            ("h_bdf2", h_bdf2, float),
-            ("enable_nonlinear_refresh", enable_nonlinear_refresh, bool),
-            ("max_newton_iterations", max_newton_iterations, int),
-            ("tol_newton_dx", tol_newton_dx, float),
-            ("tol_newton_res", tol_newton_res, float),
-            ("enable_newton_line_search", enable_newton_line_search, bool),
-            ("enable_newton_lm", enable_newton_lm, bool),
-            ("newton_roundoff_budget", newton_roundoff_budget, int),
-            ("max_event_iterations", max_event_iterations, int),
-            ("max_dt_halvings", max_dt_halvings, int),
-            ("store_every", store_every, int),
-            ("enable_substep_state_correction",
-             enable_substep_state_correction, bool),
-            ("discontinuity_restart", discontinuity_restart, bool),
-            ("resolution_diagnostics", resolution_diagnostics, bool),
-            ("inductor_freeze_di_max", inductor_freeze_di_max, float),
-            ("inductor_abs_clamp", inductor_abs_clamp, float),
-            ("voltage_sanity_factor", voltage_sanity_factor, float)):
-        if v is not None:
-            setattr(o, name, cast(v))
-    o.strict_event_iterations = bool(strict_event_iterations)
-    o.mode_selection = mode_selection or "legacy"
-    o.on_impulse = on_impulse
-    o.mode_guard = bool(mode_guard)
-    o.control_tick = control_tick
-    o.start_from_dc_op = bool(start_from_dc_op)
-    o.auto_regularize = bool(auto_regularize)
-    return o
+    apply `sim::Defaults`; a negative count is an `OptionsError`)."""
+    return _pulsim._run_options_kw(t_end, dt, engine, t_start, **kw)
 
 
-def simulation_options(**kw):
+def simulation_options(*, engine: str, t_start: float, t_end: float,
+                       dt=None, **kw):
     """The fixed-step driver's `SimulationOptions`, resolved by the kernel
-    (`sim::to_simulation_options`) from `run_options(**kw)`."""
-    return _pulsim._to_simulation_options(run_options(**kw))
+    (`sim::to_simulation_options`) from the same keywords."""
+    return _pulsim._simulation_options_kw(t_end, dt, engine, t_start, **kw)
 
 
-def trbdf2_options(**kw) -> "dict[str, Any]":
+def trbdf2_options(*, engine: str, t_start: float, t_end: float, dt=None,
+                   **kw) -> "dict[str, Any]":
     """The variable-step driver's options, resolved by the kernel
-    (`sim::to_trbdf2_options`) from `run_options(**kw)`."""
-    return dict(_pulsim._to_trbdf2_options(run_options(**kw)))
+    (`sim::to_trbdf2_options`) from the same keywords."""
+    return dict(_pulsim._trbdf2_options_kw(t_end, dt, engine, t_start, **kw))
 
 
 def markdown_table() -> str:

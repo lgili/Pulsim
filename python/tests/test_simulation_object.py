@@ -57,6 +57,8 @@ def test_every_default_comes_from_one_table():
               "store_every", "newton_roundoff_budget"):
         assert sig[n].default is None, n
     assert p.SolverOptions().max_newton_iterations is None
+    assert sig["voltage_sanity_factor"].default is None
+    assert d["voltage_sanity_factor"] == 100.0
     # The YAML loader's `simulation:` block defaults.
     y = p.load_yaml_string("""
 circuit:
@@ -128,9 +130,29 @@ def test_zero_newton_iterations_is_deprecated_as_default():
     assert np.array_equal(np.asarray(ref.states), np.asarray(res.states))
 
 
+def test_zero_newton_iterations_still_defers_to_the_bundle():
+    # 7 iterations are too few for this buck (it needs about 20): the run
+    # aborts only if the bundle's value, not the default 50, is used.
+    bundle = p.SolverOptions(max_newton_iterations=7)
+    with pytest.warns(DeprecationWarning), pytest.raises(p.SimulationAborted):
+        p.simulate(_buck(), t_end=2e-5, dt=2e-7, switch_fn=_gate(),
+                   solver=bundle, max_newton_iterations=0)
+    p.simulate(_buck(), t_end=2e-5, dt=2e-7, switch_fn=_gate())  # 50 runs
+
+
+def test_a_negative_count_is_refused_by_name():
+    with pytest.raises(p.OptionsError) as e:
+        p.simulate(_rc(), t_end=1e-4, dt=1e-6, max_newton_iterations=-1)
+    assert e.value.option == "max_newton_iterations"
+
+
 def test_max_event_iterations_zero_is_refused_on_trbdf2():
     with pytest.raises(p.UnsupportedError, match="max_event_iterations"):
         p.simulate(_rc(), t_end=1e-4, engine="trbdf2", max_event_iterations=0)
+    o = p.RunOptions(t_end=1e-4)  # 'auto', no dt: trbdf2, refused up front
+    o.max_event_iterations = 0
+    with pytest.raises(p.UnsupportedError, match="max_event_iterations"):
+        p.Simulation(_rc().build(), o)
 
 
 def _buck():
@@ -195,9 +217,14 @@ def test_simulation_object_split_run_equals_continuous():
 def test_simulation_keeps_its_python_callables_alive():
     import gc
     dt = 2.0 ** -20
-    sim = p.Simulation(_rc().build(), p.RunOptions(t_end=20 * dt, dt=dt))
+    b = _rc()
+    b.add_switch("S1", "in", "h", 1e3, 1e-9)
+    b.add_switch("S2", "h", "gnd", 1e3, 1e-9)
+    b.add_resistor("Rh", "h", "gnd", 10.0)
+    sim = p.Simulation(b.build(), p.RunOptions(t_end=20 * dt, dt=dt))
     hits = []
-    sim.set_switch_fn(lambda t: p.SwitchStateMask(0))
+    # A native PWM is held by raw pointer: only keep_alive holds it.
+    sim.set_switch_fn(p.NativePwm2Switch(8 * dt, 0.5, 2))
     sim.add_tick(4 * dt, lambda t, x: hits.append(t))
     gc.collect()
     sim.run()
@@ -239,3 +266,34 @@ def test_ratchet_untyped_raises_and_broad_handlers_do_not_rise():
     # when a raise becomes typed or a handler is narrowed; never raise them.
     assert _count(r"raise ValueError") <= 526
     assert _count(r"except Exception|except:\s*$|except BaseException") <= 89
+
+
+def test_simulate_snapshots_every_refusable_option():
+    import ast
+    import pathlib
+    src = (pathlib.Path(p.__file__).resolve().parent / "__init__.py").read_text()
+    fn = next(n for n in ast.walk(ast.parse(src))
+              if isinstance(n, ast.FunctionDef) and n.name == "simulate")
+    snap = next(n.value for n in ast.walk(fn) if isinstance(n, ast.Assign)
+                and getattr(n.targets[0], "id", "") == "_opt_values")
+    dsed = next(c.args[1] for c in ast.walk(fn) if isinstance(c, ast.Call)
+                and getattr(c.func, "attr", "") == "refused"
+                and isinstance(c.args[0], ast.Constant)
+                and c.args[0].value == "dsed")
+    for lit in (snap, dsed):
+        pairs = [(k, v) for k, v in zip(lit.keys, lit.values) if k is not None]
+        assert all(isinstance(v, ast.Name) and v.id == k.value
+                   for k, v in pairs if k.value != "c_blocks")
+    refusable = {n for n, r in ro.TABLE.items()
+                 if n != "c_blocks" and r["unset"] != "always"}
+    # The snapshot: every row an MNA engine may refuse; the exact engine's
+    # branch adds the rows only it refuses (and c_blocks).
+    assert {k.value for k in snap.keys} == refusable - _dsed_only()
+    assert {k.value for k in dsed.keys if k is not None} == (
+        _dsed_only() | {"c_blocks"})
+
+
+def _dsed_only():
+    return {n for n, r in ro.TABLE.items() if n != "c_blocks"
+            and r["unset"] != "always" and {"pwl", "trbdf2"} <= set(r["engines"])
+            and "dsed" not in r["engines"]}

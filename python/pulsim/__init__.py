@@ -961,6 +961,11 @@ from ._refusal import unsupported as _unsupported  # noqa: E402
 from ._control_plan import compose_control as _compose_control  # noqa: E402
 from ._control_state import save_into as _save_control_state  # noqa: E402
 from ._pulsim import RunOptions  # type: ignore[import-not-found]  # noqa: E402
+from . import _run_options as _ro  # noqa: E402
+# Module handles for simulate()'s hot path (an in-function `from . import`
+# costs an import-machinery round trip on every call).
+from . import _pulsim as _pulsim_module  # type: ignore[import-not-found]  # noqa: E402
+from . import _dsed_dispatch as _dsed_dispatch_module  # noqa: E402
 from ._run_options import option_capabilities  # noqa: E402
 from ._simulation import Simulation  # noqa: E402
 
@@ -1834,6 +1839,18 @@ def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
     return tuple(out)
 
 
+def _zero_newton_iterations_is_none(n):
+    """simulate(max_newton_iterations=0): the deprecated "default" spelling."""
+    if n is not None and not isinstance(n, bool) and n == 0:
+        import warnings
+        warnings.warn(
+            "simulate(max_newton_iterations=0): 0 as 'the default' is "
+            "deprecated; pass None (the default, 50). From the next release "
+            "0 is refused.", DeprecationWarning, stacklevel=3)
+        return None
+    return n
+
+
 def _warn_impulses(res) -> None:
     """simulate(on_impulse='warn'): one warning naming the first of the
     run's impulsive re-initialisations (pwl or the exact engine)."""
@@ -2331,6 +2348,12 @@ def simulate(
     # identically. This runs BEFORE the engine dispatch so the merged
     # rtol/atol/dt_init/integrator values also flow into the DSED
     # path when the user authors via `solver=`.
+    # add-kernel-simulation-object: 0 was "not set" for this one keyword
+    # (every other uses None): deprecated for one release, then refused.
+    # Before the merge, so an explicit 0 still defers to the bundle.
+    if max_newton_iterations is not None:
+        max_newton_iterations = _zero_newton_iterations_is_none(
+            max_newton_iterations)
     if solver is not None:
         if enable_nonlinear_refresh is None:
             enable_nonlinear_refresh = solver.enable_nonlinear_refresh
@@ -2383,22 +2406,32 @@ def simulate(
             "(add-unified-device-interface). True is the default "
             "behaviour; False is refused on a circuit with Newton devices.",
             DeprecationWarning, stacklevel=2)
-    # add-kernel-simulation-object: 0 was "not set" for this one keyword
-    # (every other uses None): deprecated for one release, then refused.
-    if max_newton_iterations is not None and not isinstance(
-            max_newton_iterations, bool) and max_newton_iterations == 0:
-        import warnings
-        warnings.warn(
-            "simulate(max_newton_iterations=0): 0 as 'the default' is "
-            "deprecated; pass None (the default, 50). From the next release "
-            "0 is refused.", DeprecationWarning, stacklevel=2)
-        max_newton_iterations = None
+    # The bundle's 0 (SolverOptions(max_newton_iterations=0)), too.
+    if max_newton_iterations is not None:
+        max_newton_iterations = _zero_newton_iterations_is_none(
+            max_newton_iterations)
     # The option x engine table (sim::kRunOptionTable) judges every keyword
     # against the engine the run lands on: honoured, or refused by name.
-    from . import _run_options as _ro
-    _l = locals()
-    _opt_values = {n: _l[n] for n in _ro.TABLE if n in _l}
-    del _l
+    # The table's rows the MNA engines can refuse, as passed; a literal, not
+    # locals(): simulate() has ~150 locals and pays on every call. The rows
+    # only the exact engine refuses are read in its branch, below.
+    # test_simulation_object keeps both literals equal to the table.
+    _opt_values = {
+        "rtol": rtol, "atol": atol, "dt_init": dt_init,
+        "integrator": integrator, "stiffness_threshold": stiffness_threshold,
+        "h_bdf2": h_bdf2, "start_from_dc_op": start_from_dc_op,
+        "strict_event_iterations": strict_event_iterations,
+        "max_dt_halvings": max_dt_halvings, "store_every": store_every,
+        "enable_substep_state_correction": enable_substep_state_correction,
+        "discontinuity_restart": discontinuity_restart,
+        "resolution_diagnostics": resolution_diagnostics,
+        "inductor_freeze_di_max": inductor_freeze_di_max,
+        "inductor_abs_clamp": inductor_abs_clamp, "progress": progress,
+        "live_stream": live_stream, "mmc_arms": mmc_arms,
+        "on_cache": on_cache, "sensitivities": sensitivities,
+        "mode_selection": mode_selection,
+        "allow_implicit_segments": allow_implicit_segments,
+    }
 
     # ---- Validate first — fail fast on user mistakes (DSED side). ----
     # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
@@ -2415,7 +2448,7 @@ def simulate(
     if on_impulse not in ("record", "warn", "error"):
         raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
                          "'record', 'warn' or 'error'")
-    from . import _dsed_dispatch as _dsed
+    _dsed = _dsed_dispatch_module
     _dsed._validate_engine_kwargs(
         engine=engine,
         dt=dt,
@@ -2595,7 +2628,20 @@ def simulate(
         # the exact engine cannot honour, plus C blocks (they drive the
         # circuit through b_extra, which this engine does not consume).
         _offending = _ro.refused("dsed", {
-            **_opt_values, "c_blocks": bool(_c_blocks_of(builder))})
+            **_opt_values, "c_blocks": bool(_c_blocks_of(builder)),
+            "step_observer": step_observer,
+            "enable_nonlinear_refresh": enable_nonlinear_refresh,
+            "max_newton_iterations": max_newton_iterations,
+            "max_event_iterations": max_event_iterations,
+            "tol_newton_dx": tol_newton_dx,
+            "tol_newton_res": tol_newton_res,
+            "enable_newton_line_search": enable_newton_line_search,
+            "enable_newton_lm": enable_newton_lm,
+            "newton_roundoff_budget": newton_roundoff_budget,
+            "should_continue": should_continue,
+            "closed_loops": closed_loops,
+            "controller_period": controller_period,
+            "resume_from": resume_from, "control_tick": control_tick})
         if _offending:
             raise _unsupported(
                 "dsed", _offending[0],
@@ -2748,7 +2794,7 @@ def simulate(
             #                    variable-step path when it can
             # which makes the new engine opt-in by OMISSION.
             # A branch-form circuit trbdf2 refuses routes, not raises (review H4).
-            from . import _pulsim as _k  # type: ignore[import-not-found]
+            _k = _pulsim_module
             try:
                 _k._require_supported(builder.graph, builder.pool, "trbdf2")
             except UnsupportedError as e:
@@ -2855,7 +2901,7 @@ def simulate(
 
     if engine == "trbdf2":
         # The capability table by name (the branch form runs here).
-        from . import _pulsim as _k  # type: ignore[import-not-found]
+        _k = _pulsim_module
         _k._require_supported(builder.graph, builder.pool, "trbdf2")
         # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse
         #      MNA kernel. L-stable, LTE-controlled — no dt to
@@ -2894,8 +2940,9 @@ def simulate(
         # 0 V instead of 9.87).
         # The kernel resolves the options (sim::to_trbdf2_options): h_max
         # = dt or 0, h_init = dt_init or 0, rtol / atol from sim::Defaults.
-        _to = _ro.trbdf2_options(
-            engine="trbdf2", t_start=t_start, t_end=t_end, dt=dt,
+        # _ro.trbdf2_options without the wrapper frame (hot path).
+        _to = _pulsim_module._trbdf2_options_kw(
+            t_end, dt, "trbdf2", t_start,
             rtol=rtol, atol=atol, dt_init=dt_init or None,
             max_event_iterations=max_event_iterations,
             max_newton_iterations=max_newton_iterations,
@@ -3145,8 +3192,9 @@ def simulate(
         raise ValueError(
             f"simulate(max_dt_halvings={max_dt_halvings}): must "
             "be >= 0 (0 disables the retry)")
-    opts = _ro.simulation_options(
-        engine="pwl", t_start=t_start, t_end=t_end, dt=dt,
+    # _ro.simulation_options without the wrapper frame (hot path).
+    opts = _pulsim_module._simulation_options_kw(
+        t_end, dt, "pwl", t_start,
         store_every=store_every,
         max_newton_iterations=max_newton_iterations,
         max_event_iterations=max_event_iterations,
@@ -3476,10 +3524,11 @@ def simulate(
     # fatal is the last one who should be silently spared this.
     _volt = None
     try:
-        from . import _pulsim as _k  # type: ignore[import-not-found]
+        _k = _pulsim_module
         _volt = _k.find_implausible_voltage(
             builder.graph, builder.pool, res,
-            100.0 if voltage_sanity_factor is None
+            _ro.DEFAULTS["voltage_sanity_factor"]
+            if voltage_sanity_factor is None
             else float(voltage_sanity_factor))
     except Exception:  # pragma: no cover — never break a good run
         _volt = None
@@ -3837,18 +3886,18 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     # dropped a real blocker in silence. It is a plain check now.
     # The fixed-step-only keywords: the rows of the option x engine table
     # (sim::kRunOptionTable) that pwl honours and trbdf2 does not.
-    from . import _run_options as _ro
-    for n in _ro.refused("trbdf2", dict(
-            on_cache=on_cache, live_stream=live_stream, progress=progress,
-            start_from_dc_op=start_from_dc_op,
-            strict_event_iterations=strict_event_iterations,
-            max_dt_halvings=max_dt_halvings,
-            enable_substep_state_correction=enable_substep_state_correction,
-            discontinuity_restart=discontinuity_restart,
-            resolution_diagnostics=resolution_diagnostics,
-            store_every=store_every, mmc_arms=mmc_arms,
-            inductor_freeze_di_max=inductor_freeze_di_max,
-            inductor_abs_clamp=inductor_abs_clamp)):
+    for n in _ro.refused("trbdf2", {
+            "start_from_dc_op": start_from_dc_op,
+            "strict_event_iterations": strict_event_iterations,
+            "max_dt_halvings": max_dt_halvings, "store_every": store_every,
+            "enable_substep_state_correction":
+                enable_substep_state_correction,
+            "discontinuity_restart": discontinuity_restart,
+            "resolution_diagnostics": resolution_diagnostics,
+            "inductor_freeze_di_max": inductor_freeze_di_max,
+            "inductor_abs_clamp": inductor_abs_clamp, "progress": progress,
+            "live_stream": live_stream, "mmc_arms": mmc_arms,
+            "on_cache": on_cache}):
         why.append(_blk(n, _ro.why(n)))
     # A routing preference, not a capability: trbdf2 lands a C block's
     # ticks when asked by name (task 9.3), 'auto' keeps them on pwl.
@@ -3901,7 +3950,7 @@ def _auto_check_voltage_sanity(res, builder, factor):
     throughout) MORE likely, not less.
     """
     try:
-        from . import _pulsim as _k  # type: ignore[import-not-found]
+        _k = _pulsim_module
         f = 100.0 if factor is None else float(factor)
         if isinstance(res, _k.SimulationResult):
             volt = _k.find_implausible_voltage(builder.graph,

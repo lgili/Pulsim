@@ -11,11 +11,11 @@ import numpy
 import numpy.typing
 import typing
 __all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'OptionsError', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PulsimError', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'RunOptions', 'Simulation', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_option_defaults', 'run_option_table', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
-class _CxxCancelled(RuntimeError):
-    pass
 class PulsimError(Exception):
     pass
 class ConvergenceError(RuntimeError, PulsimError):
+    pass
+class _CxxCancelled(RuntimeError, PulsimError):
     pass
 class SimulationAborted(ConvergenceError):
     pass
@@ -3773,10 +3773,14 @@ def _require_supported(graph: Graph, pool: DevicePool, engine: str) -> None:
     """
     Raise UnsupportedError for the first branch `engine` cannot simulate (the capability table's column).
     """
+def _run_options_kw(t_end: float, dt: float | None, engine: str, t_start: float, **kwargs) -> RunOptions:
+    ...
 def _run_pwl_points(circuit: Circuit, names: collections.abc.Sequence[str], table: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], options: SimulationOptions, dt: float, switch_fn: typing.Any, start_from_dc_op: bool, enable_nonlinear_refresh: bool | None, initial_state: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"] | None, auto_regularize: bool, n_threads: int) -> tuple[typing.Any, ...]:
     """
     Internal (sweep(circuit, ...) kernel path, task 5.2): run the points of a parameter table (rows = points, columns = names: parameters, or "device.field") on the pwl engine, n_threads native threads, without the GIL. Returns ([(result, circuit, builder, own_preflight) or None per point], stats); None = re-run that point through simulate().
     """
+def _simulation_options_kw(t_end: float, dt: float | None, engine: str, t_start: float, **kwargs) -> SimulationOptions:
+    ...
 def _switch_census(graph: Graph, pool: DevicePool) -> tuple[int, int, list[int]]:
     """
     Return (num_switches, num_diode_owned, controlled_switch_indices). Diode bits are solver-owned (overlaid over the user mask by combine_masks); only the controlled indices need a switch_fn/driver.
@@ -3789,6 +3793,8 @@ def _to_trbdf2_options(options: RunOptions) -> dict[typing.Any, typing.Any]:
     """
     The variable-step driver's options resolved from a RunOptions, as a dict (sim::to_trbdf2_options).
     """
+def _trbdf2_options_kw(t_end: float, dt: float | None, engine: str, t_start: float, **kwargs) -> dict[typing.Any, typing.Any]:
+    ...
 def block_laws_source() -> str:
     """
     The C99 law table (block_laws.h) the kernel graph calls; pulsim.export_c copies it into the C it generates.

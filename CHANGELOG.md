@@ -29,6 +29,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `simulate()` bit for bit. `simulate()` resolves its fixed-step and
   TR-BDF2 options through the same kernel functions
   (`sim::to_simulation_options` / `to_trbdf2_options`).
+* **Changed** `result.engine_route_reason` for a fixed-step-only keyword
+  now quotes the table's reason (`pulsim.option_capabilities()` row) and
+  lists the keywords in table order.
 * **BREAKING** keywords the landing engine cannot honour now raise
   `UnsupportedError` instead of a `UserWarning` and being ignored:
   `rtol`, `atol`, `dt_init` on the fixed step (explicit `engine='pwl'`, or
@@ -47,7 +50,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `SolverOptions(max_newton_iterations=0)`) as "the default" is deprecated
   (`DeprecationWarning`; the run uses the default, 50); the signature
   default is `None`. Migration: pass `None` or omit it.
-* **BREAKING** `engine='trbdf2'` with `max_event_iterations=0` raises
+* **BREAKING** a negative `max_newton_iterations` (any engine) or
+  `max_event_iterations` (`trbdf2`) raises `pulsim.OptionsError` naming
+  it; the first used to fall back to the default in silence. Migration:
+  pass `None` for the default.
+* **BREAKING** `newton_roundoff_budget=0` on `trbdf2` is a zero budget (it
+  was replaced by 130, as on the raw binding). Migration: `None`.
+* **BREAKING** `engine='trbdf2'` — or `'auto'` without `dt`, which lands
+  there — with `max_event_iterations=0` raises
   `UnsupportedError` (it used to be replaced by 16 in silence); the
   variable step has no off switch for its event localisation. And
   `tol_newton_dx=0` / `tol_newton_res=0` are values on `trbdf2` as on

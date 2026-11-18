@@ -141,8 +141,6 @@ void init_module(py::module_& m) {
     // `pulsim.Cancelled` (defined in
     // `python/pulsim/_builder_ergonomics.py`) catches this and
     // re-raises with its own attribute layout.
-    static py::object cancelled_exc = py::register_exception<
-        analysis::Cancelled>(m, "_CxxCancelled", PyExc_RuntimeError);
 
     // v2.0 Phase 2: a transient that dies part-way brings the run
     // with it. `py::register_exception` can only carry a message, so
@@ -172,6 +170,10 @@ void init_module(py::module_& m) {
     };
     static py::object convergence_exc =
         pulsim_error_type("ConvergenceError", PyExc_RuntimeError);
+    // The kernel's Cancelled (`pulsim.Cancelled` catches and re-raises it
+    // with its own attributes); a PulsimError too.
+    static py::object cancelled_exc =
+        pulsim_error_type("_CxxCancelled", PyExc_RuntimeError);
     static py::object aborted_exc = py::exception<void>(
         m, "SimulationAborted", convergence_exc);
     // The run's Newton roundoff-acceptance budget ran out: a
@@ -235,6 +237,8 @@ void init_module(py::module_& m) {
                 inst.attr("device") = e.device();
                 inst.attr("kind") = e.kind();
                 PyErr_SetObject(unsupported_exc.ptr(), inst.ptr());
+            } catch (const analysis::Cancelled& e) {
+                PyErr_SetString(cancelled_exc.ptr(), e.what());
             } catch (const sim::OptionsError& e) {
                 py::object inst = options_exc(e.what());
                 inst.attr("option") = e.option();

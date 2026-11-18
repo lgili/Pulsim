@@ -157,6 +157,13 @@ public:
         refresh_ = transient_refresh(graph(), pool(),
                                      opts_.enable_nonlinear_refresh,
                                      pwl::engine_name(e));
+        // Value-dependent refusals (store_every = 0, max_event_iterations
+        // = 0 on trbdf2, ...) surface here, before anything runs.
+        if (e == Engine::FixedTrap) {
+            (void)to_simulation_options(opts_);
+        } else {
+            (void)to_trbdf2_options(opts_);
+        }
         t_cursor_ = opts_.t_start;
     }
 
@@ -200,7 +207,7 @@ public:
     [[nodiscard]] const RunOptions& options() const noexcept { return opts_; }
     /// The circuit the run solves (the caller's, plus any preflight ties).
     [[nodiscard]] const ir::Circuit& circuit() const noexcept { return circuit_; }
-    [[nodiscard]] const builder::CircuitBuilder& builder() const noexcept {
+    [[nodiscard]] const ::pulsim::builder::CircuitBuilder& builder() const noexcept {
         return *builder_;
     }
     [[nodiscard]] std::span<const Diagnostic> diagnostics() const noexcept {
@@ -292,6 +299,15 @@ public:
         snapshot_ = res.final_snapshot;
         t_cursor_ = t;
         check_voltage_(res);
+        if (opts_.on_impulse == OnImpulse::Warn && !res.reinit_records.empty()) {
+            const auto& r0 = res.reinit_records.front();
+            diags_.push_back({Severity::Warning, "impulse", std::format(
+                "{} impulsive re-initialisation(s); first at t = {} ({}, {} J "
+                "removed). See result.reinit_records.",
+                res.reinit_records.size(), r0.t, r0.kind, r0.dW),
+                r0.devices.empty() ? std::string{} : r0.devices.front(),
+                r0.t});
+        }
         return res;
     }
 
@@ -406,7 +422,7 @@ private:
 
     ir::Circuit circuit_;
     RunOptions opts_;
-    std::optional<builder::CircuitBuilder> builder_;
+    std::optional<::pulsim::builder::CircuitBuilder> builder_;
     RunPlan plan_;
     pwl::NonlinearRefreshFn refresh_;
     std::vector<Diagnostic> diags_;
