@@ -354,17 +354,20 @@ inline Real held_tolerance(const pwl::DiodeEventState& diodes,
     // from +0.37 to -0.71 mA was "riding the boundary", never landed, and
     // the diode turned off later carrying -0.7 mA (sw at -3.5e5 V, 9577
     // floor-accepted steps). Its noise is a leakage-scale current,
-    // g_off * (1 + |v|) (a bridge diode riding at -1.6e-7 A against
-    // 3.3e-7 A), read as voltage through 1/g_on, plus the difference's
-    // round-off; a DCM buck's 9e-7 A overshoot (446 V over g_off) is then
-    // a crossing.
+    // g_off * (1 + |v_D|) (a bridge diode riding at -1.6e-7 A against
+    // 3.3e-7 A), read as voltage through 1/g_on, plus the round-off of
+    // forming v_D from its node voltages; a DCM buck's 9e-7 A overshoot
+    // (446 V over g_off) is then a crossing. v_D, not the node voltages:
+    // a diode floating at 10 kV common mode had a floor of 2e-8 V, a
+    // 2e-5 A reverse current taken for noise.
     if (e.is_on && e.g_on > Real{0}) {
         constexpr Real eps = std::numeric_limits<Real>::epsilon();
-        const Real va = std::abs(stamping::read_node_voltage(x, e.from));
-        const Real vk = std::abs(stamping::read_node_voltage(x, e.to));
+        const Real va = stamping::read_node_voltage(x, e.from);
+        const Real vk = stamping::read_node_voltage(x, e.to);
         return e.g_off / e.g_on
-                   * (Real{1} + std::abs(e.V_th) + std::abs(e.V_f) + va + vk)
-               + Real{64} * eps * (va + vk);
+                   * (Real{1} + std::abs(e.V_th) + std::abs(e.V_f)
+                      + std::abs(va - vk))
+               + Real{64} * eps * (std::abs(va) + std::abs(vk));
     }
     return Real{1e-8}
            * (Real{1} + std::abs(e.V_th) + std::abs(e.V_f)
@@ -1520,12 +1523,15 @@ inline SimulationResult run_transient_trbdf2(
                 }
                 if (w > gate_pulse_floor && w < gate_pulse_min) {
                     gate_pulse_min = w;
-                    // 1 % margin: a pulse as wide as the spacing
-                    // cannot fit between two samples, and the widths
-                    // carry the bisection's h_min of noise.
-                    if (gate_spacing_open[i] > Real{1.01} * w) {
-                        ++st.n_gate_undersampled;
-                    }
+                }
+                // 1 % margin: a pulse as wide as the spacing cannot fit
+                // between two samples, and the widths carry the
+                // bisection's h_min of noise. Every pulse, not only a new
+                // minimum: the cap lapses on a quiet bit (burst mode), so
+                // a pulse after the pause can be undersampled again.
+                if (w > gate_pulse_floor
+                    && gate_spacing_open[i] > Real{1.01} * w) {
+                    ++st.n_gate_undersampled;
                 }
                 gate_spacing_open[i] = Real{0};
             }
@@ -1537,7 +1543,7 @@ inline SimulationResult run_transient_trbdf2(
     // The step cap: twice the narrowest RECENT pulse. Per bit, the last
     // high and low widths count while the bit keeps toggling (quiet for at
     // most twice its last period); a running minimum over the run held a
-    // closed loop's 0.28 ns start-up pulse as the cap for ever (519,746
+    // closed loop's 0.28 ns start-up pulse as the cap for ever (519,783
     // steps in 0.3 ms of cl_boost_pi with an opaque gate).
     auto gate_pulse_cap = [&](Real at_t) {
         Real cap = std::numeric_limits<Real>::infinity();
@@ -1746,6 +1752,7 @@ inline SimulationResult run_transient_trbdf2(
     Size diode_slot = Size(-1);
     auto restart_size_after_diode_event = [&](Size d) {
         if (!restart_ok() || n_sdirk_diode == 0) {
+            diode_slot = Size(-1);   // no restart: remember no size for it
             return;
         }
         const Size nd = diodes.entries().size();
@@ -1811,12 +1818,14 @@ inline SimulationResult run_transient_trbdf2(
     auto record_post_event = [&]() {
         if (!restart_ok() || n_sdirk_diode == 0 || !last_probe_ok
             || !x_sig.allFinite()) {
+            sdirk_event = false;   // the jump was not shown instant
             return;
         }
         Real tp = t + last_probe_dt;
         const Vector* xr = &x_sig;
         if (sdirk_event) {
-            const Real dt_rec = std::max(h_min, Real{1e-4} * h);
+            const Real dt_rec = std::max({h_min, Real{1e-4} * h,
+                                          h_probe_learned});
             bool instant = be_solve(dt_rec, x_rec)
                            && be_solve(Real{2} * dt_rec, x_rec2);
             for (Size i = 0; instant && i < entries.size(); ++i) {
@@ -2416,6 +2425,10 @@ inline SimulationResult run_transient_trbdf2(
                 || !x_1.allFinite()) {
                 h = std::max(h * Real{0.1}, h_min);
                 ++st.n_reject;
+                if (sdirk && sdirk_event && !reinit_step) {
+                    sdirk_event = false;   // as an LTE reject below
+                    sdirk_left = 0;
+                }
                 if (h <= h_min * Real{1.0001}) {
                     throw std::runtime_error(
                         "run_transient_trbdf2: non-finite step at "
@@ -2913,7 +2926,8 @@ inline SimulationResult run_transient_trbdf2(
                     } catch (const std::runtime_error& e) {
                         // An interpolated landing solved nothing at dt_land:
                         // its noise bound may need a singular factor. Take
-                        // it on the bracket end's factor, which was solved.
+                        // it at the bracket end's step instead, a longer
+                        // (better conditioned) companion.
                         const Real dt_tb = tb - (t - dt_land);   // t moved
                         if (!is_singular_error(e) || dt_tb <= dt_land) throw;
                         flipped = decide_diodes(x, mask_step, dt_tb);

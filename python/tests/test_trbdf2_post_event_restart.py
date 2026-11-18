@@ -124,7 +124,9 @@ def test_dcm_no_step_below_1e_11(dcm):
     inst = np.sort(np.concatenate([edges, ev]))
     j = np.clip(np.searchsorted(inst, t[k]), 1, len(inst) - 1)
     dist = np.minimum(np.abs(inst[j] - t[k]), np.abs(inst[j - 1] - t[k]))
-    assert dist.max(initial=0.0) < 1e-12   # every short interval is at an event
+    # 1e-13: the record after a turn-off lasts 1e-4 h >= 1e-12 s here, so
+    # a short step after it does not pass as "at the event".
+    assert dist.max(initial=0.0) < 1e-13   # every short interval is at an event
     assert len(k) <= len(inst)
     assert dcm._trbdf2_stats["n_diode_events"] > NPER // 2   # the DCM turn-offs ran
 
@@ -190,11 +192,11 @@ def _tick_buck():
     return b
 
 
-def _edges_sampled(r):
+def _edges_sampled(r, k_sw):
     """(rising with a post-edge sample within 1 ns, rising, falling with
-    one, falling)."""
+    one, falling) of switch column k_sw."""
     t = np.asarray(r.times)
-    s = np.asarray(r.switch_states)[:, 0]
+    s = np.asarray(r.switch_states)[:, k_sw]
     k = np.flatnonzero(s[1:] != s[:-1])
     near = (t[k + 1] - t[k]) < 1e-9
     up = s[k + 1]
@@ -216,7 +218,7 @@ def test_a_rising_edge_on_a_controller_tick_gets_its_post_edge_sample():
                                setpoint=5.0, switch="S", freq=1 / Tp)
     r = p.simulate(b, 2e-3, engine="trbdf2", switch_fn=loop.switch_fn,
                    step_observer=loop.step_observer, controller_period=Tp)
-    up_s, up, dn_s, dn = _edges_sampled(r)
+    up_s, up, dn_s, dn = _edges_sampled(r, b.switch_index_of("S"))
     assert up > 150 and dn > 150
     assert (up_s, dn_s) == (up, dn)
     assert r._trbdf2_stats["n_ctrl_ticks"] == 200
@@ -243,6 +245,6 @@ def test_the_pulse_cap_follows_the_recent_pulses():
     assert r._trbdf2_stats["gate_pulse_min"] < 2e-9
     t = np.asarray(r.times)
     assert np.diff(t[t > 0.5e-3]).max() > 1e-7      # 2e-9 before
-    up_s, up, dn_s, dn = _edges_sampled(r)
+    up_s, up, dn_s, dn = _edges_sampled(r, k)
     assert (up, dn) == (100, 100)                    # every edge landed
     assert r._trbdf2_stats["n_accept"] < 20_000

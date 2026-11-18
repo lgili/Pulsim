@@ -304,8 +304,10 @@ Each entry: question → option taken → evidence → how to reverse.
     → Taken: after a turn-off of a diode with g_off > 0 on a linear circuit
     without stateful devices, one SDIRK(2,2) step whose estimate is
     filtered (W^-1 est on the stage factor), C++ handle
-    `sdirk_after_turn_off` (default true). Turn-ons, Newton circuits and
-    ideal branch-form diodes are unchanged. Two consequences, fixed:
+    `sdirk_after_turn_off` (default true). It is taken when ANY g_off
+    diode of the event's cascade turned off (a bridge commutation, one on
+    and one off, takes it); a cascade of turn-ons only, Newton circuits
+    and ideal branch-form diodes are unchanged. Two consequences, fixed:
     (a) the post-event record (item 13 there) was the femtosecond probe,
     which has not moved the L*g_off mode: v_D = -0.52 V where the circuit
     is at -34.7 V a picosecond later, and the trace ramped across the
@@ -329,6 +331,14 @@ Each entry: question → option taken → evidence → how to reverse.
     test_dcm_no_step_below_1e_11 is now a plain test of the integration
     steps: every interval below 1e-11 s starts at an event instant (the
     edge probe, the post-event record) or in the first nanosecond.
+    The records themselves are not short: on the DCM buck the interval
+    starting at each of the 380 diode events is 9.6e-11 to 1.2e-10 s,
+    except the first event's 9.2e-13 s in the first nanosecond. A record
+    or SDIRK step that is skipped (probe failed, BE solve singular, jump
+    not instant, step rejected for any reason) leaves the plain TR-BDF2
+    restart. The undersampled-gate count now covers every closed pulse
+    narrower than its sampling, not only a new minimum (23b lets the cap
+    lapse on a quiet bit).
     Measured (rtol 1e-5 unless noted; error = max |iL|, |vC| at the end
     against expm):
 
@@ -382,4 +392,16 @@ Each entry: question → option taken → evidence → how to reverse.
     acceptance now also needs that voltage within the circuit's range
     max|x|. (c) The post-landing diode decision after an interpolated
     landing (no solve at dt_land) takes its noise bound on the bracket
-    end's factor if the dt_land factor is singular, instead of aborting.
+    end's step if the dt_land factor is singular, instead of aborting.
+
+25. **An ON diode's noise floor reads v_D, not its common mode** (batch 11
+    review, finding 4). The leakage-scale floor of item 18 was
+    g_off/g_on (1 + |V_th| + |V_f| + |v_a| + |v_k|): a diode floating at
+    10 kV had a floor of 2e-8 V, i.e. a 2e-5 A reverse current taken for
+    noise. → g_off/g_on (1 + |V_th| + |V_f| + |v_a - v_k|) plus the
+    round-off of forming v_D, 64 eps (|v_a| + |v_k|): 2.8e-10 V at 10 kV
+    (C++ test). Measured on the DCM buck floated at 10 kV (default and
+    1e-10 tolerances) the worst turn-off current was -7.3e-9 A / -1.8e-9 A
+    before the change, a few ulps of the node voltages through g_on, so no
+    trace there was wrong yet; the floor was only waiting for a slower
+    crossing. The common-mode-free runs are unchanged (golden, baseline).

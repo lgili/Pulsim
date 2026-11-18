@@ -271,7 +271,7 @@ Real tail_mean(const solver::SimulationResult& res, Index n, Real t0) {
     Real acc = 0.0;
     for (Size k = 1; k < res.times.size(); ++k) {
         const Real ta = res.times[k - 1], tb = res.times[k];
-        if (tb <= t0) { continue; }
+        if (tb <= t0 || tb <= ta) { continue; }   // zero-width: no area
         const Real va = res.states[k - 1][n], vb = res.states[k][n];
         const Real a0 = std::max(ta, t0);
         const Real v0 = va + (vb - va) * (a0 - ta) / (tb - ta);
@@ -730,4 +730,27 @@ TEST_CASE("TR-BDF2: one SDIRK step after a diode event, filter on or off",
     INFO("e(200us) = " << std::abs(v1 - v_ref) << ", e(100us) = "
          << std::abs(v2 - v_ref) << ", ratio " << ratio);
     REQUIRE(ratio > 3.5);
+}
+
+TEST_CASE("TR-BDF2: an ON diode's noise floor reads the voltage across it, "
+          "not its common mode", "[v2][trbdf2][robustness]") {
+    // g_off * (1 + |v|) with the NODE voltages put a diode floating at
+    // 10 kV at a 2e-8 V floor (2e-5 A through g_on = 1e3 taken for noise);
+    // with v_D it is the 0 V floor plus the round-off of forming v_D.
+    topology::Graph g;
+    const auto a = g.add_node("a");
+    const auto k = g.add_node("k");
+    g.add_branch(a, k, topology::BranchKind::Switch);
+    pwl::DevicePool pool;
+    pool.add_diode(0, /*g_on=*/1e3, /*g_off=*/1e-9, /*V_th=*/0.0);
+    pwl::DiodeEventState diodes(g, pool);
+    diodes.restore_on_bits({true});
+    Vector x0(2), xh(2);
+    x0 << 1e-3, 0.0;
+    xh << 1e4 + 1e-3, 1e4;
+    const Real tol0 = solver::detail_trbdf2::held_tolerance(diodes, 0, x0);
+    const Real tolh = solver::detail_trbdf2::held_tolerance(diodes, 0, xh);
+    REQUIRE(tol0 < 2e-12);
+    REQUIRE(tolh < 1e-9);    // 64 eps * 2e4 = 2.8e-10; it was 2e-8
+    REQUIRE(tolh > tol0);
 }

@@ -21,7 +21,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the narrowest pulse of the run (cl_boost_pi start-up: 519,783 -> 58,514
   steps in 0.3 ms).
 - `device_loss_summary` reads `unresolved` from the step that holds
-  `t_off + t_rr`.
+  `t_off + t_rr` (on a variable grid a long step there now flags the
+  turn-off; uniform grids are unchanged).
 
 ### TR-BDF2: no diode turns off carrying reverse current
 
