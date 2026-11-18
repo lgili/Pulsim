@@ -74,11 +74,10 @@ def _conv(msg: str) -> ValueError:
 
 
 def _unsup(feature: str, msg: str, *, device: str = "",
-           kind: str = "") -> ValueError:
+           kind: str = "", analysis: str = "periodic_steady_state") -> ValueError:
     """A capability refusal of this analysis (a ValueError subclass)."""
     from ._refusal import unsupported
-    return unsupported("periodic_steady_state", feature,
-                       "periodic_steady_state: " + msg,
+    return unsupported(analysis, feature, f"{analysis}: " + msg,
                        device=device, kind=kind)
 
 
@@ -288,8 +287,63 @@ def _schedule_edges(sf, t_lo, t_hi):
         t = e
 
 
-def _check_schedule(sf, T):
+def _closed_loop_source(sf):
+    """Where ``sf``'s gate comes from when it follows a controller: its
+    own ``_closed_loop`` mark, or one on an object its code closes over
+    or reads as a global (a hand-written gate around ``duty_get`` of
+    ``bind_pi_to_duty_callable``, a lambda around ``loop.switch_fn``)."""
+    src = getattr(sf, "_closed_loop", None)
+    if src or not callable(sf):
+        return src
+    import inspect
+    try:
+        cv = inspect.getclosurevars(sf)
+    except (TypeError, ValueError):
+        return None
+    for v in (*cv.nonlocals.values(), *cv.globals.values()):
+        src = getattr(v, "_closed_loop", None)
+        if isinstance(src, str):
+            return src
+    return None
+
+
+def _refuse_graph_driven(builder, analysis="periodic_steady_state"):
+    """A control graph's ``drive_source`` adds a 0 V / 0 A source whose
+    value only the graph's observer supplies: without it the source
+    would sit at zero."""
+    driven = getattr(builder, "_graph_driven", None)
+    if driven:
+        raise _unsup(
+            "closed_loop",
+            f"source(s) {', '.join(driven)} are driven by a control graph "
+            "(drive_source); the period runs run no controller, so they "
+            "would sit at 0. Run simulate() to steady state.",
+            device=driven[0], analysis=analysis)
+
+
+def _refuse_closed_loop(sf, analysis="periodic_steady_state"):
+    """A gate that reads a controller's output (``bind_pi_to_switch``, a
+    control graph's ``make_pwm_switch_fn``) is refused by name on every
+    engine: the shooting state is the circuit's true state, the
+    controller's is not in it, and the period runs call no observer, so
+    the orbit would be the plant's under a frozen duty. A hand-written
+    closure over controller state cannot be recognised: a gate the map
+    cannot name as closed-loop is taken as open-loop."""
+    src = _closed_loop_source(sf)
+    if src:
+        raise _unsup(
+            "closed_loop",
+            f"switch_fn comes from {src}: the gate follows a controller "
+            "whose state is not part of the section's true state, and the "
+            "period runs do not run the controller, so the result would "
+            "be an orbit of the plant under a frozen duty. Run simulate() "
+            "to steady state, or shoot the open-loop plant at a fixed "
+            "duty (make_pwm_switch_fn).", analysis=analysis)
+
+
+def _check_schedule(sf, T, analysis="periodic_steady_state"):
     from . import SwitchSchedule
+    _refuse_closed_loop(sf, analysis)
     if isinstance(sf, SwitchSchedule) and not sf.has_edges:
         raise _unsup(
             "switch_fn", "the gate schedule cannot name its edges (a "
@@ -469,6 +523,7 @@ class _Solver:
         self.builder = builder
         self.T = float(period)
         self.comps = list(builder.components())
+        _refuse_graph_driven(builder)
         _check_circuit(builder, self.T, self.comps)
         n_sw = builder.graph.num_switches
         _n, _nd, controlled = _pulsim._switch_census(builder.graph,

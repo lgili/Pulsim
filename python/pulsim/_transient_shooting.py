@@ -63,8 +63,14 @@ class TransientMap:
             raise _err(f"engine must be 'exact', 'dsed', 'pwl' or "
                        f"'trbdf2', got {engine!r}")
         comps = list(builder.components())
+        from .periodic_steady_state import _refuse_graph_driven
+        _refuse_graph_driven(builder)
         _check_circuit(builder, self.T, comps)
         opts = dict(options or {})
+        if getattr(opts.get("b_extra_fn"), "_closed_loop", None):
+            raise _unsup("closed_loop", "options['b_extra_fn'] is a control "
+                         "graph's driven-source overlay; the period runs run "
+                         "no controller.")
         for k in ("initial_state", "t_end", "engine", "switch_fn",
                   "resume_from", "closed_loops", "step_observer"):
             if k in opts:
@@ -81,6 +87,17 @@ class TransientMap:
                            "integer, so the section does not fall on the "
                            "grid.")
             self.n_grid = int(round(N))
+            for k in ("discontinuity_restart",
+                      "enable_substep_state_correction"):
+                if k in opts and not opts[k]:
+                    raise _unsup(k, f"options[{k!r}]=False: the fixed "
+                                 "engine's map needs the restart rule and "
+                                 "event splitting (a period then depends on "
+                                 "the true state alone); the orbit is the "
+                                 "one simulate(engine='pwl', dt=dt, "
+                                 "discontinuity_restart=True, "
+                                 "enable_substep_state_correction=True) "
+                                 "reaches.")
             opts.update(dt=float(dt), discontinuity_restart=True,
                         enable_substep_state_correction=True)
         else:
@@ -141,6 +158,8 @@ class TransientMap:
         self.n_jacobians = self.n_broyden = 0
 
     def _check_gate(self, sf, check_schedule, err):
+        from .periodic_steady_state import _refuse_closed_loop
+        _refuse_closed_loop(sf)
         T = self.T
         if sf is None:
             if self.engine == "pwl":

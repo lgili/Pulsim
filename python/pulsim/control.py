@@ -1394,6 +1394,9 @@ def bind_pi_to_switch(
     # How a scheduling engine reaches past the throttle.
     step_observer.tick = _tick  # type: ignore[attr-defined]
 
+    # Read by periodic_steady_state: a gate driven by controller state
+    # is refused by name (the shooting state does not hold the PI).
+    switch_fn._closed_loop = "bind_pi_to_switch"  # type: ignore[attr-defined]
     return ClosedLoop(
         switch_fn=switch_fn,
         step_observer=step_observer,
@@ -1451,6 +1454,7 @@ def bind_pi_to_duty_callable(
 
     def duty_get() -> float:
         return duty_state[0]
+    duty_get._closed_loop = "bind_pi_to_duty_callable"  # type: ignore[attr-defined]
 
     _sp_is_callable = callable(setpoint)
 

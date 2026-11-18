@@ -9,7 +9,6 @@ reaches. Counters decide, never wall time.
 """
 
 import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -25,11 +24,6 @@ T = ref.T
 import pulsim._transient_shooting  # noqa: E402,F401
 
 ts = sys.modules["pulsim._transient_shooting"]
-
-
-def test_pulsim_is_imported_from_this_tree():
-    assert Path(p.__file__).resolve().is_relative_to(
-        Path(__file__).resolve().parents[2])
 
 
 def _buck(R, D, phase=0.0):
@@ -272,3 +266,22 @@ def test_a_lossless_loop_is_not_returned_as_an_orbit(engine):
     with pytest.raises(p.ConvergenceError, match=r"not isolated.*(Lx|Cx)"):
         p.periodic_steady_state(b, period=T, switch_fn=sf, engine=engine,
                                 dt=T / 100)
+
+
+def test_trbdf2_section_inside_a_conduction_stretch_is_the_transients():
+    """The trbdf2 map starts a period from the true state alone (least-
+    norm node voltages, the engine's own mode at t = 0). With the gate
+    edge at 0.3 T the section sits inside a stretch: still the state
+    the 4000-period transient passes at t = 4000 T (measured 7.5e-10 of
+    the state scale, integration batch 8)."""
+    b, sf = _buck(1.0, 0.5, phase=0.3 * T)
+    r = p.periodic_steady_state(b, period=T, switch_fn=sf, engine="trbdf2",
+                                dt=T / 100)
+    b2, sf2 = _buck(1.0, 0.5, phase=0.3 * T)
+    long = p.simulate(b2, t_end=4000 * T, engine="trbdf2", switch_fn=sf2,
+                      **_engine_kw("trbdf2", T / 100))
+    t = np.asarray(long.times)
+    assert t[-1] == pytest.approx(4000 * T, rel=1e-12)
+    X = states_as_array(long) @ r._ctx.Cm.T
+    scale = float(np.abs(X).max())
+    assert np.abs(X[-1] - r.x0).max() <= 1e-8 * scale

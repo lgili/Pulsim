@@ -193,6 +193,15 @@ transient's, not the shooting's; at 40000 periods it is 4.5e-12 on
 `pwl`. `trbdf2` exhausts `max_steps` (10⁷) before 40000 periods, so its
 transient starts from the `pwl` orbit (5.1e-9 after 4000 periods).
 (Table measured with decision 20's steps.)
+Re-measured on the integration tree (batch 8, after the TR-BDF2 track and
+the control graph merged): every buck/boost CCM/DCM row above reproduces
+digit for digit, pwl and trbdf2 (v_out, orbit − transient, runs, max|μ|);
+the boost DCM rows were not re-run. A trbdf2 section inside a conduction
+stretch (gate edge at 0.3 T): 7.5e-10 (CCM buck, 12 runs) and 7.8e-9
+(DCM buck, 18 runs) from the transient at 4000 T. The pwl map refuses it
+(no edge at t = 0). The pwl map also refuses `options` that switch off
+the restart rule or event splitting, and every engine refuses a gate or
+a source that follows a controller (`feature='closed_loop'`).
 
 20. **The difference step and the marginal band are per engine.** A
    variable-step run moves by its tolerance when `x` moves (its step

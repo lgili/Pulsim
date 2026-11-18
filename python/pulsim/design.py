@@ -671,8 +671,24 @@ class Evaluator:
             if len(out) != 2:
                 raise ValueError("build(design) must return a builder or "
                                  "(builder, switch_fn)")
-            return out
-        return out, None
+        else:
+            out = (out, None)
+        from .periodic_steady_state import _closed_loop_source
+        src = _closed_loop_source(out[1])
+        driven = getattr(out[0], "_graph_driven", None)
+        if driven and not src:
+            src = f"a control graph's drive_source ({', '.join(driven)})"
+        if src:
+            # no step_observer reaches the evaluator's runs: the gate or
+            # source would follow a controller that never updates
+            from ._refusal import unsupported
+            raise unsupported(
+                "design", "closed_loop",
+                f"Evaluator: build(design) returned a circuit driven by "
+                f"{src}; the evaluator runs no controller, so it would hold "
+                "its initial value. Return an open-loop schedule "
+                "(make_pwm_switch_fn at the design's duty).")
+        return out
 
     def _evaluate(self, design, did, counters, grads=None):
         T = self._period_of(design)
