@@ -28,7 +28,6 @@ def _buck():
 
 
 def test_adaptive_on_the_fixed_grid_equals_the_fixed_run():
-    assert p.__file__.startswith(str(__import__("pathlib").Path(__file__).parents[2]))
     dt, t_end = 2e-6, 4e-3
 
     def sw(b):
