@@ -124,6 +124,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (ticks at `t_start + offset + k*period`); it was refused
   (`UnsupportedError`, feature `control_rate_offset`).
   `run_transient_trbdf2(observer_offsets=...)`.
+* **Added** tick grids keep their phase on resume: `events::Rate::origin`
+  (NaN = the run's t0), `run_transient(tick_origin=)` and
+  `run_transient_trbdf2(observer_origin=)` tick at `(origin + offset) + k*T`
+  from the first instant at or after `t_start`, so a run resumed between
+  ticks ticks where the uninterrupted one would.
 * **Changed** the fixed-step engine's Python tick sources (a closed loop
   with a period, a `step_observer` with `controller_period`) are scheduled
   by the kernel's event queue instead of a Python scheduler object in the

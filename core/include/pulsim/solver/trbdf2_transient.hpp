@@ -165,6 +165,11 @@ struct TrBdf2Options {
     /// at t_start + offset_j + k*T_j, ceil((span - offset_j)/T_j) times.
     /// Empty = every offset 0; else as long as `observer_periods`.
     std::vector<Real> observer_offsets;
+    /// The tick grid's origin (add-unified-event-queue): ticks at
+    /// (observer_origin + offset_j) + k*T_j, from the first one >= t_start.
+    /// NaN (default) = t_start. A resumed run passes the original run's
+    /// t_start so it ticks bit-exactly where the uninterrupted run would.
+    Real observer_origin = std::numeric_limits<Real>::quiet_NaN();
     /// Newton settings, used only when the circuit has nonlinear
     /// devices. Same knobs and defaults as the fixed engine. The
     /// tolerances are absolute; loosening them is not a fix for an
@@ -1279,7 +1284,8 @@ inline SimulationResult run_transient_trbdf2(
             const Real off = multi_rate && !opts.observer_offsets.empty()
                 ? opts.observer_offsets[j] : Real{0};
             queue.add_periodic(events::Kind::ControlTick,
-                               events::Rate{t_ctrl[j], off});
+                               events::Rate{t_ctrl[j], off,
+                                            opts.observer_origin});
         }
     }
     // First source corner strictly after `after` (+inf when none).

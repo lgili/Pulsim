@@ -249,3 +249,35 @@ the modulator is a gate source and nothing else uses it yet.
   (6.2) — the control graph's PWM gate (section 4) already gives the
   closed-loop rows their edges, and moving it onto `CarrierPwm` must keep
   a0ae6bb8's rows byte-identical; that is the next step, not this one.
+
+## 8. Published signatures (for the control-graph and event-losses agents)
+
+Stable as of this commit; all in `namespace pulsim::events`.
+
+| need | signature | header |
+|---|---|---|
+| tick registration (control graph 6.1) | `std::uint32_t EventQueue::add_periodic(Kind::ControlTick, Rate{period, offset, origin = NaN}, bool lands = true)`; engine entry: `run_transient(..., const TickPlan* ticks)` with `TickPlan{std::vector<Rate> rates; fn(std::uint32_t j, const TickInfo& {scheduled_t, k}, Real t, const Vector& x); before(Real t, const Vector& x)}`; trbdf2: `TrBdf2Options::observer_periods / observer_offsets / observer_origin` | `event_queue.hpp`, `run_transient.hpp`, `trbdf2_transient.hpp` |
+| modulator latch and dead time as queue events (control graph 6.2) | `CarrierPwm{T, phase, const DutyRegister* duty, Index hs, Index ls = -1, Real dead_time = 0}`, `DutyRegister{value, LatchPolicy::{Immediate, AtCarrierStart}, T, phase}::write(Real v, Real scheduled_t)`; `GateSet::add(gate, name)` then `GateSet::to_schedule()` gives the engines the edges (dead-time edges and the carrier start that latches a held duty are among them); after a write, `EventQueue::invalidate(edge_src)` (trbdf2) | `gate_source.hpp` |
+| commutation callback (event losses 3.1) | `StepHooks::on_commutation(std::function<void(const Commutation&)>)`, `Commutation{Real t; const SwitchStateMask& before, after; const Vector& x_before, x_after}`; `StepHooks::on_accept(fn(Real t_prev, Real t, const Vector& x, const SwitchStateMask& mask))`; engines: `run_transient(..., TickPlan*, StepHooks* hooks)`, `run_transient_trbdf2(..., StepHooks* hooks)` | `step_hooks.hpp` |
+
+**Tick phase on resume.** `Rate::origin` (NaN = the run's t0) puts a
+periodic source on the grid `(origin + offset) + k*period` and starts it at
+the first instant `>= t0 - t0_tol` (`EventQueue::start(t0, t_end,
+t0_tol)`; the fixed engine passes its take tolerance `1e-9*dt`, the same
+tolerance that left that tick out of the previous run's end). `TickInfo::k`
+is then the index on the original grid. Python: `run_transient(...,
+tick_origin=)` and `run_transient_trbdf2(..., observer_origin=)`. A run
+resumed at 1.53 ms with origin 0 ticks at 1.6, 1.7, 1.8 ms. On trbdf2 these
+are bit-equal to the uninterrupted run (tested). On the fixed engine the
+scheduled instants are bit-equal, and the step time is the first grid point
+of the resumed grid at or after each instant. NOT done: carrying the origin
+in `resume_from` snapshots and lifting `simulate()`'s trbdf2 resume
+refusal. That is the caller's wiring: pass the original `t_start` as the
+origin.
+
+**`control_tick="state"`** (control-graph branch, not yet on
+feat/core-integration). The kernel tick sources call `fn(j, info, t, x)`
+with the step's (t, x), which is the "label" mode. "state" mode samples at
+the state time; when that branch merges, it maps onto `TickPlan::fn`
+reading `info.scheduled_t` against `t`. Both modes must stay bit-identical
+to `FixedStepTicks`, so this needs a golden row each. Pending merge.

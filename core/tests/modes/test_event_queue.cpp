@@ -331,3 +331,38 @@ TEST_CASE("a one-ulp pulse at a period boundary keeps both edges in order",
     }
     CHECK(bad == 0);
 }
+
+TEST_CASE("a periodic source with an origin resumes on the original grid",
+          "[event_queue]") {
+    // Uninterrupted run from 0 vs a run resumed at an instant between two
+    // ticks (and at one exactly on a tick): same instants, same k.
+    const Real T = 1e-4;
+    auto ticks = [&](Real t0, Real t_end, Real origin) {
+        EventQueue q;
+        q.add_periodic(Kind::ControlTick, Rate{T, 0.0, origin});
+        q.start(t0, t_end);
+        std::vector<std::pair<Real, std::uint64_t>> out;
+        for (auto ev = q.take_due(kInf, 0.0); !ev.empty();
+             ev = q.take_due(kInf, 0.0)) {
+            for (const auto& e : ev) out.emplace_back(e.t, e.ordinal);
+        }
+        return out;
+    };
+    const auto full = ticks(0.0, 1.9e-3, std::numeric_limits<Real>::quiet_NaN());
+    REQUIRE(full.size() == 19);
+    for (const Real t_res : {1.53e-3, 16 * T, std::nextafter(16 * T, 0.0)}) {
+        const auto res = ticks(t_res, 1.9e-3, 0.0);
+        std::vector<std::pair<Real, std::uint64_t>> want;
+        for (const auto& e : full) {
+            if (e.first >= t_res) want.push_back(e);
+        }
+        INFO("resumed at " << t_res);
+        CHECK(res == want);              // bit-equal instants, same k
+    }
+    // Without the origin the resumed run ticks on its own grid.
+    CHECK(ticks(1.53e-3, 1.9e-3, std::numeric_limits<Real>::quiet_NaN())
+              .front().first == 1.53e-3);
+    EventQueue bad;
+    CHECK_THROWS_AS(bad.add_periodic(Kind::ControlTick, Rate{T, 0.0, kInf}),
+                    std::invalid_argument);
+}
