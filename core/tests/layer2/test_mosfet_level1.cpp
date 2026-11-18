@@ -155,17 +155,27 @@ TEST_CASE("MosfetLevel1 — continuous and C1 across V_DS = 0 at every gate driv
     for (int k = 0; k <= 120; ++k) {
         const Real vgs = 1.0 + 0.05 * k;               // 1 .. 7 V
         const Real e = 1e-9;
-        const ModelInputs<MosfetLevel1> lo{-e, 0.0, vgs}, hi{e, 0.0, vgs};
-        const auto [i_lo, d_lo] = evaluate_current_and_jacobian<MosfetLevel1>(lo, p);
-        const auto [i_hi, d_hi] = evaluate_current_and_jacobian<MosfetLevel1>(hi, p);
+        // C¹, not C²: the second derivative may differ on the two sides.
+        // So the step across 0 (−e → +e) is bounded by 2e × the larger
+        // one-sided slope (from ±e → ±3e), with margin. The old jump was 2L
+        // in the value and ~2κL in the partials, far above these bounds.
+        auto at = [&](Real x) {
+            return evaluate_current_and_jacobian<MosfetLevel1>(
+                ModelInputs<MosfetLevel1>{x, 0.0, vgs}, p);
+        };
+        const auto [i_m3, d_m3] = at(-3.0 * e);
+        const auto [i_lo, d_lo] = at(-e);
+        const auto [i_hi, d_hi] = at(e);
+        const auto [i_p3, d_p3] = at(3.0 * e);
         INFO("V_GS = " << vgs << " i(-e) = " << i_lo << " i(+e) = " << i_hi);
-        // |i(+e) - i(-e)| = 2e·∂I/∂V_DS (+ O(e²)); before the fix it was 2L.
-        const Real g = std::max(std::abs(d_hi[0]), Real{1e-12});
-        REQUIRE(std::abs(i_hi - i_lo) <= 2.0 * e * g * 1.01 + 1e-15);
+        const Real slope = std::max(std::abs(i_p3 - i_hi), std::abs(i_lo - i_m3));
+        REQUIRE(std::abs(i_hi - i_lo) <= 1.5 * slope + 1e-15);
         for (int j = 0; j < 3; ++j) {
             INFO("partial " << j << ": " << d_lo[j] << " vs " << d_hi[j]);
+            const Real curv = std::max(std::abs(d_p3[j] - d_hi[j]),
+                                       std::abs(d_lo[j] - d_m3[j]));
             REQUIRE(std::abs(d_hi[j] - d_lo[j])
-                    <= 1e-6 * (std::abs(d_hi[j]) + 1e-9));
+                    <= 1.5 * curv + 1e-4 * std::abs(d_hi[j]) + 1e-14);   // AD rounding ~1e-6 rel
         }
     }
     // V_DS >= 0 is the forward law, unchanged; fully on, the third quadrant
