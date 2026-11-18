@@ -535,10 +535,12 @@ class SimulationAborted : public std::runtime_error {
 public:
     SimulationAborted(const std::string& what,
                        SimulationResult partial,
-                       Real t_failed)
+                       Real t_failed,
+                       bool roundoff_budget = false)
         : std::runtime_error(what),
           partial_(std::move(partial)),
-          t_failed_(t_failed) {}
+          t_failed_(t_failed),
+          roundoff_budget_(roundoff_budget) {}
 
     /// Everything that WAS computed, up to but not including the
     /// step that failed.
@@ -549,9 +551,17 @@ public:
     /// The step time the solver could not reach.
     [[nodiscard]] Real t_failed() const noexcept { return t_failed_; }
 
+    /// The run's Newton roundoff-acceptance budget was exhausted
+    /// (pwl::NewtonRoundoffBudgetExceeded); Python raises
+    /// `pulsim.NewtonRoundoffBudgetExceeded`, a SimulationAborted.
+    [[nodiscard]] bool roundoff_budget() const noexcept {
+        return roundoff_budget_;
+    }
+
 private:
     SimulationResult partial_;
     Real t_failed_;
+    bool roundoff_budget_ = false;
 };
 
 }  // namespace pulsim::solver

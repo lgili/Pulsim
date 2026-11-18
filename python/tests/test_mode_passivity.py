@@ -51,17 +51,13 @@ def test_bridge_behind_an_ideal_transformer_is_passive_nonreciprocal():
         vd = np.asarray(r.v(an)) - np.asarray(r.v(ca))
         assert on.any() and (1e3 * vd[on]).min() > -1e-9      # each diode conducts, never in reverse
         assert vd[~on].max() < 1e-9                             # and blocks only reverse voltage
-    # the class is a build-time property: 'lcp' reports the same. Up to 9 ms 'lcp' is right
-    # (35.2286954424 V, pwl 35.2286954469 V); after that it is DECISIONS #21's open defect (11.73 V
-    # on the slice's tree). Integration batch 6b: this tree's stored-sample guard names it --
-    # D2 OFF while forward-biased from t = 10.008 ms -- so the wrong number is no longer silent.
-    r_lcp = _run(_bridge_behind_ideal_transformer(), "dsed", t_end=0.009, mode_selection="lcp")
+    # the class is a build-time property: 'lcp' reports the same. Re-pinned at the merge of the
+    # increment-form port model (was: right to 9 ms, then DiodeModeInconsistentError naming D2 at
+    # 10.008 ms): the full 'lcp' run now lands on pwl, 31.876241228 V (more numbers:
+    # test_mode_lcp.py::test_lcp_bridge_on_a_floating_source_is_not_decided_by_rounding)
+    r_lcp = _run(_bridge_behind_ideal_transformer(), "dsed", mode_selection="lcp")
     assert r_lcp.diagnostics["mode_selection"]["passivity"] == cls
-    ref9 = _run(_bridge_behind_ideal_transformer(), "pwl", t_end=0.009)
-    assert _vpn(r_lcp)[-1] == pytest.approx(_vpn(ref9)[-1], abs=1e-7)
-    from pulsim._dsed_dispatch import DiodeModeInconsistentError
-    with pytest.raises(DiodeModeInconsistentError, match="'D2' is OFF while forward-biased"):
-        _run(_bridge_behind_ideal_transformer(), "dsed", mode_selection="lcp")
+    assert _vpn(r_lcp)[-1] == pytest.approx(_vpn(ref)[-1], abs=1e-7)
 
 
 def test_plain_rectifier_is_passive_reciprocal():
@@ -75,10 +71,10 @@ def test_plain_rectifier_is_passive_reciprocal():
         "class": "passive_reciprocal", "device": "", "kind": ""}
 
 
-def test_rectifier_fed_by_coupled_inductors_is_refused_by_the_extractor():
-    # The coupled-inductor matrix is classified (PSD here, k = 0.99), but the dsed extraction has
-    # no inductance-matrix block yet (add-exact-propagator-strategy task 7): refused by name,
-    # before any mode is selected. pwl runs it.
+def test_rectifier_fed_by_coupled_inductors_is_passive_reciprocal():
+    # The coupled-inductor matrix is classified (PSD here, k = 0.99) and the dsed extraction takes
+    # it (add-exact-propagator-strategy, coupled inductors): the run is passive-reciprocal and
+    # follows pwl at a 1 us step (0.0007 V of a 50 V output measured).
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "a", "gnd", 0.0, 100.0, 50.0)
     b.add_transformer("T", "a", "gnd", "s", "r", 10e-3, 2.5e-3, 0.99)
@@ -86,8 +82,10 @@ def test_rectifier_fed_by_coupled_inductors_is_refused_by_the_extractor():
     b.add_diode("D1", "s", "o", 1e3, 1e-9)
     b.add_capacitor("C", "o", "r", 100e-6)
     b.add_resistor("R", "o", "r", 100.0)
-    with pytest.raises(p.UnsupportedError) as ei:
-        _run(b, "dsed")
-    assert (ei.value.engine, ei.value.feature) == ("dsed", "extraction")
-    r = _run(b, "pwl", dt=1e-6)
-    assert np.isfinite(np.asarray(r.v("o"))).all()
+    r = _run(b, "dsed")
+    assert r.diagnostics["mode_guard"]["passivity"]["class"] == "passive_reciprocal"
+    ref = _run(b, "pwl", dt=1e-6)
+    t = np.asarray(r.times)
+    v = np.asarray(r.v("o")) - np.asarray(r.v("r"))
+    v_ref = np.interp(t, np.asarray(ref.times), np.asarray(ref.v("o")) - np.asarray(ref.v("r")))
+    assert np.abs(v - v_ref).max() < 1e-3 * np.abs(v_ref).max()

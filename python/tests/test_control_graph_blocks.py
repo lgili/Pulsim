@@ -145,6 +145,134 @@ def test_ported_block_is_bit_identical_to_its_python_class(case):
     assert np.asarray(got).tobytes() == np.asarray(want).tobytes()
 
 
+# Multi-output blocks (task 5 / item 1): the kernel add_svm / add_clarke /
+# add_park / add_pll are different expressions (Clarke (2a-b-c)/3, SVM
+# with 0.866 and 1/v_dc, PLL wrapped to [-pi, pi) from omega = 0); the
+# Python classes now map to block_laws.h ports of their own code.
+TUPLE_CASES = {
+    "SpaceVectorModulator": (lambda: p.SpaceVectorModulator(v_dc=400.0),
+                             {"v_alpha": _u(-300, 300),
+                              "v_beta": _u(-300, 300)}, 3),
+    "SpaceVectorModulator_vdc0": (lambda: p.SpaceVectorModulator(v_dc=0.0),
+                                  {"v_alpha": _u(-1, 1),
+                                   "v_beta": _u(-1, 1)}, 3),
+    "ClarkeTransform": (lambda: p.ClarkeTransform(),
+                        {"a": _u(-10, 10), "b": _u(-10, 10),
+                         "c": _u(-10, 10)}, 3),
+    "InverseClarkeTransform": (lambda: p.InverseClarkeTransform(),
+                               {"alpha": _u(-10, 10), "beta": _u(-10, 10),
+                                "zero": _u(-1, 1)}, 3),
+    "ParkTransform": (lambda: p.ParkTransform(),
+                      {"alpha": _u(-10, 10), "beta": _u(-10, 10),
+                       "theta": _u(-20, 20)}, 2),
+    "InverseParkTransform": (lambda: p.InverseParkTransform(),
+                             {"d": _u(-10, 10), "q": _u(-10, 10),
+                              "theta": _u(-20, 20)}, 2),
+    "PLL": (lambda: p.PLL(f_nominal=50.0, Kp=80.0, Ki=900.0),
+            {"v_alpha": _u(-1, 1), "v_beta": _u(-1, 1),
+             "dt": lambda r: float(r.uniform(1e-6, 3.3e-4))}, 2),
+}
+
+
+@pytest.mark.parametrize("case", list(TUPLE_CASES))
+def test_multi_output_block_is_bit_identical_to_its_python_class(case):
+    make, samplers, n_out = TUPLE_CASES[case]
+    r = _rng(zlib.crc32(case.encode()))
+    seq = [{n: f(r) for n, f in samplers.items()} for _ in range(N)]
+    want = _python(make(), seq, tuple_out=True)
+    got = _kernel(make(), list(samplers), seq,
+                  outputs=tuple(f"y{i}" for i in range(n_out)))
+    assert np.asarray(got).tobytes() == np.asarray(want).tobytes()
+
+
+def test_inverse_clarke_zero_defaults_to_zero_and_pll_takes_3_outputs():
+    b = p.CircuitBuilder()
+    b.add_resistor("R", "a", "gnd", 1.0)
+    ch = p.MixedDomainBlockChain()
+    ch.add("ic", p.InverseClarkeTransform(), inputs=dict(alpha=1.0, beta=2.0),
+           output=("a", "b", "c"))
+    ch.add("pll", p.PLL(), inputs=dict(v_alpha=0.0, v_beta=1.0, dt=1e-4),
+           output=("th", "w", "f"))
+    obs = ch.make_step_observer(b, dt=1e-6)
+    obs(0.0, np.zeros(1))
+    want = p.InverseClarkeTransform().update(alpha=1.0, beta=2.0)
+    assert (ch.get("a"), ch.get("b"), ch.get("c")) == want
+    th, w = p.PLL().update(v_alpha=0.0, v_beta=1.0, dt=1e-4)
+    assert (ch.get("th"), ch.get("w")) == (th, w)
+    assert ch.get("f") == w / (2.0 * 3.141592653589793)
+
+
+def test_balanced_three_phase_through_clarke_park_is_constant_dq():
+    # a,b,c = A cos(wt + phi - 2pi k/3); Park at theta = wt gives
+    # d = A cos(phi), q = A sin(phi) (amplitude-invariant Clarke).
+    A, phi, w = 3.0, 0.4, 2 * np.pi * 50
+    b = p.CircuitBuilder()
+    b.add_resistor("R", "a", "gnd", 1.0)
+    ch = p.MixedDomainBlockChain()
+    ch.add("cl", p.ClarkeTransform(),
+           inputs=dict(a="channel:a", b="channel:b", c="channel:c"),
+           output=("al", "be", "z"))
+    ch.add("pk", p.ParkTransform(),
+           inputs=dict(alpha="channel:al", beta="channel:be",
+                       theta="channel:th"), output=("d", "q"))
+    obs = ch.make_step_observer(b, dt=1e-6)
+    cx = ch._cxx_chain
+    for t in np.linspace(0.0, 0.04, 401):
+        for k, n in enumerate("abc"):
+            cx.set_channel(n, A * np.cos(w * t + phi - 2 * np.pi * k / 3))
+        cx.set_channel("th", w * t)
+        obs(0.0, np.zeros(1))
+        assert abs(ch.get("d") - A * np.cos(phi)) < 1e-12
+        assert abs(ch.get("q") - A * np.sin(phi)) < 1e-12
+        assert abs(ch.get("z")) < 1e-13
+
+
+def test_svm_duties_closed_form():
+    # Min-max zero sequence: d_x = 0.5 + (u_x - (max+min)/2) / v_dc.
+    # alpha = m, beta = 0: u = (m, -m/2, -m/2), zero = m/4.
+    def run(va, vb, vdc):
+        b = p.CircuitBuilder()
+        b.add_resistor("R", "a", "gnd", 1.0)
+        ch = p.MixedDomainBlockChain()
+        ch.add("s", p.SpaceVectorModulator(v_dc=vdc),
+               inputs=dict(v_alpha=va, v_beta=vb), output=("da", "db", "dc"))
+        ch.make_step_observer(b, dt=1e-6)(0.0, np.zeros(1))
+        return ch.get("da"), ch.get("db"), ch.get("dc")
+    assert run(100.0, 0.0, 400.0) == (0.6875, 0.3125, 0.3125)
+    assert run(0.0, 0.0, 400.0) == (0.5, 0.5, 0.5)
+    assert run(1e4, 0.0, 400.0) == (1.0, 0.0, 0.0)          # clamped
+    # on the alpha axis d_a = 0.5 + (3/4) alpha / v_dc reaches 1 at
+    # alpha = 2 v_dc / 3 (the hexagon's vertex)
+    da, db, dc = run(800.0 / 3.0, 0.0, 400.0)
+    assert abs(da - 1.0) < 1e-15 and abs(db) < 1e-15 and abs(dc) < 1e-15
+
+
+def test_pll_locks_to_a_known_frequency():
+    # 50 Hz unit vector, PLL nominal 60 Hz, Kp = 100, Ki = 1000, T = 50 us:
+    # the q loop is s^2 + Kp s + Ki (zeta = 1.58, slow pole 10.4 /s, so
+    # 1 % settling ~ ln(100)/10.4 = 0.44 s); measured |f - 50| < 1e-3 Hz
+    # and |theta error| < 1e-3 rad after 1 s.
+    f, T = 50.0, 5e-5
+    b = p.CircuitBuilder()
+    b.add_resistor("R", "a", "gnd", 1.0)
+    ch = p.MixedDomainBlockChain()
+    ch.add("pll", p.PLL(), inputs=dict(v_alpha="channel:va",
+                                       v_beta="channel:vb", dt=T),
+           output=("th", "w", "f"))
+    obs = ch.make_step_observer(b, dt=1e-6)
+    cx = ch._cxx_chain
+    n = int(1.0 / T)
+    for k in range(n):
+        t = k * T
+        cx.set_channel("va", np.cos(2 * np.pi * f * t))
+        cx.set_channel("vb", np.sin(2 * np.pi * f * t))
+        obs(0.0, np.zeros(1))
+    t_next = n * T   # theta_hat is the estimate one step ahead
+    err = (ch.get("th") - 2 * np.pi * f * t_next + np.pi) % (2 * np.pi) - np.pi
+    assert abs(ch.get("f") - f) < 1e-3
+    assert abs(err) < 1e-3
+
+
 def test_sum_with_weights_and_a_tuple_of_inputs():
     r = _rng(3)
     seq = [{"a": r.uniform(-1, 1), "b": r.uniform(-1, 1),

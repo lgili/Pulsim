@@ -43,6 +43,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # were whole would be the silent wrong answer this API exists to
     # avoid, so the partial trace has to be asked for.
     SimulationAborted,
+    NewtonRoundoffBudgetExceeded,
     ConvergenceError,
     # add-engine-conformance-matrix: the typed refusal (a ValueError
     # carrying engine / feature / device / kind) and the kernel's
@@ -369,6 +370,7 @@ from .losses import (
 # the circuit, running at its own sample time.
 from .c_block import (
     add_c_block, CBlockHandle, CBLOCK_ABI, wire_c_blocks_from_yaml)
+from .c_export import export_c, CExport
 # Records the true per-step switch mask at simulate-time so closed-loop
 # loss/thermal summaries don't re-evaluate a stateful switch_fn post-hoc.
 from ._result_views import SwitchMaskRecorder
@@ -551,6 +553,7 @@ __all__ = [
     "Cancelled",
     "RetiredDeviceError",
     "SimulationAborted",
+    "NewtonRoundoffBudgetExceeded",
     "ConvergenceError",
     "periodic_steady_state_supported",
     "UnsupportedError",
@@ -783,6 +786,8 @@ __all__ = [
     "CBlockHandle",
     "CBLOCK_ABI",
     "wire_c_blocks_from_yaml",
+    "export_c",
+    "CExport",
     # Modular Multilevel Converter (Phase 20) helpers live as
     # top-level attributes for backward compatibility, but are
     # excluded from `__all__` so `from pulsim import *` and
@@ -942,7 +947,6 @@ def _yaml_retired_as_retired_error(native):
 load_yaml_string = _yaml_retired_as_retired_error(load_yaml_string)
 load_yaml_file = _yaml_retired_as_retired_error(load_yaml_file)
 from ._refusal import unsupported as _unsupported  # noqa: E402
-from ._control_plan import FixedStepTicks as _FixedStepTicks  # noqa: E402
 from ._control_plan import compose_control as _compose_control  # noqa: E402
 
 # add-mna-native-machines: CircuitBuilder.add_dc_machine (a linear
@@ -1785,16 +1789,44 @@ def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
     `SwitchSchedule` with an edge oracle (a combination that holds a
     Python callable has none). Any other non-None hook is Python.
     """
+    from ._pulsim import (  # type: ignore[import-not-found]
+        CxxChainBExtra, CxxChainPwmGate, CxxChainTick)
     out = []
     for name, fn in hooks.items():
         if fn is None:
             continue
         if name == "switch_fn" and (
-                isinstance(fn, (NativePwm2Switch, NativeMultiMaskPwm))
+                isinstance(fn, (NativePwm2Switch, NativeMultiMaskPwm,
+                                CxxChainPwmGate))
                 or (isinstance(fn, SwitchSchedule) and fn.has_edges)):
             continue
+        if name == "step_observer" and isinstance(fn, CxxChainTick) \
+                and not getattr(fn, "_n_python_blocks", 0):
+            continue          # control graphs composed in C++
+        if name == "b_extra_fn" and isinstance(fn, CxxChainBExtra):
+            continue          # a graph's driven sources, in C++
+        if name == "closed_loops" and not any(
+                getattr(lp.step_observer, "_n_python_blocks", 1)
+                for lp in fn):
+            continue          # control-graph loops with no PythonBlock
         out.append(name)
     return tuple(out)
+
+
+def _warn_impulses(res) -> None:
+    """simulate(on_impulse='warn'): one warning naming the first of the
+    run's impulsive re-initialisations (pwl or the exact engine)."""
+    recs = list(getattr(res, "reinit_records", None) or ())
+    if not recs:
+        return
+    import warnings
+    r0 = recs[0]
+    warnings.warn(
+        f"simulate(on_impulse='warn'): {len(recs)} "
+        f"impulsive re-initialisation(s); first at t = {r0.t:g}: "
+        f"{', '.join(r0.devices)} made {', '.join(r0.states)} dependent "
+        f"({r0.kind}, {r0.dW:.6g} J removed). See res.reinit_records.",
+        UserWarning, stacklevel=3)
 
 
 def _carry_jumps(fn, parts):
@@ -1912,6 +1944,7 @@ def simulate(
     tol_newton_res: Optional[float] = None,
     enable_newton_line_search: Optional[bool] = None,
     enable_newton_lm: Optional[bool] = None,
+    newton_roundoff_budget: Optional[int] = None,
     enable_substep_state_correction: Optional[bool] = None,
     discontinuity_restart: Optional[bool] = None,
     resolution_diagnostics: Optional[bool] = None,
@@ -1932,6 +1965,7 @@ def simulate(
     # --- forward parameter sensitivities (exact path only) ---
     sensitivities: "Optional[Sequence[str]]" = None,
     mode_selection: Optional[str] = None,
+    allow_implicit_segments: Optional[bool] = None,
 ) -> SimulationResult:
     """Build the cache and run a transient simulation.
 
@@ -2138,6 +2172,12 @@ def simulate(
         :class:`SolverOptions`). Cross-check on the other engine
         instead (``engine='pwl'`` with an explicit ``dt`` after a
         TR-BDF2 abort).
+    newton_roundoff_budget
+        ``pwl`` / ``trbdf2``: the most consecutive Newton solves that
+        may be accepted at roundoff with no converged solve between
+        them (default 130, ten times the worst honest run measured).
+        One more raises :class:`NewtonRoundoffBudgetExceeded`, a
+        :class:`SimulationAborted` with the partial result.
     sensitivities
         ``engine='dsed'`` only (every other engine refuses it):
         parameter names ``"<component>.<field>"`` (``R``, ``L``,
@@ -2160,6 +2200,15 @@ def simulate(
         solved beside it; disagreements in
         ``result.diagnostics['mode_shadow']``. ``'shadow'`` / ``'lcp'``
         on ``pwl`` / ``trbdf2`` raise :class:`UnsupportedError`.
+    allow_implicit_segments
+        ``engine='exact'`` (alias ``'dsed'``) only. A segment whose mode the
+        exact kernel cannot step (a user ``b_extra_fn``: ``feature='source'``;
+        a stiff, near-defective mode: ``'cost'``; a circuit its extractor
+        rejects: ``'extraction'``) raises :class:`UnsupportedError` naming the
+        rule, unless this is ``True`` (the segment is then integrated
+        numerically and recorded in ``result.exact['segments']``).
+        ``integrator='bdf2'`` (deprecated) is numeric throughout and is not
+        refused. On other engines passing it raises :class:`UnsupportedError`.
 
     resolution_diagnostics
         ``engine='pwl'`` only, default OFF (it costs 5-14 %): ``True``
@@ -2306,7 +2355,8 @@ def simulate(
     # column) until the default flip (DECISIONS #3).
     if engine == "exact":
         engine = "dsed"
-    # Every engine: those that refuse dependent modes never record.
+    # Every engine: pwl (branch form) and the exact engine (dependent
+    # states) record; trbdf2 refuses dependent modes and never records.
     if on_impulse not in ("record", "warn", "error"):
         raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
                          "'record', 'warn' or 'error'")
@@ -2325,6 +2375,14 @@ def simulate(
         raise ValueError(
             f"simulate(): mode_selection={mode_selection!r}; expected "
             "None, 'legacy', 'shadow' or 'lcp'.")
+    if newton_roundoff_budget is not None and (
+            isinstance(newton_roundoff_budget, bool)
+            or int(newton_roundoff_budget) != newton_roundoff_budget
+            or int(newton_roundoff_budget) < 1):
+        raise ValueError(
+            f"simulate(newton_roundoff_budget={newton_roundoff_budget}): "
+            "must be an integer >= 1 (consecutive Newton solves accepted at roundoff "
+            "before NewtonRoundoffBudgetExceeded; default 130).")
 
     # ---- Topology preflight (v2.0 Phase 2) --------------------------
     #
@@ -2488,6 +2546,8 @@ def simulate(
             # own step, so accepting this would promise a mechanism
             # that does not exist there.
             "max_dt_halvings": max_dt_halvings is not None,
+            # DSED runs no Newton roundoff acceptance.
+            "newton_roundoff_budget": newton_roundoff_budget is not None,
             # v2.0 Phase 1: output decimation is a fixed-grid
             # concept; the DSED engine emits variable-step samples,
             # so honouring `store_every` there would mean something
@@ -2561,6 +2621,7 @@ def simulate(
                 builder_initial_state=initial_state if _ic_from_builder else None,
                 progress=progress,
                 mode_selection=mode_selection,
+                allow_implicit_segments=bool(allow_implicit_segments),
             )
         try:
             _dsed_res._preflight = _preflight_report
@@ -2584,6 +2645,24 @@ def simulate(
         _auto_check_voltage_sanity(_dsed_res, builder,
                                     voltage_sanity_factor)
         _dsed.check_diode_modes(_dsed_res, builder)
+        # on_impulse on the exact engine (its dependent-state projections,
+        # recorded after the run): 'error' refuses the run as pwl's kernel
+        # does at the event, 'warn' warns.
+        _recs = list(getattr(_dsed_res, "reinit_records", None) or ())
+        if _recs and on_impulse == "error":
+            r0 = _recs[0]
+            cut = r0.kind == "cut_set"
+            dev = r0.devices[0] if r0.devices else ""
+            raise _unsupported(
+                "dsed", "impulse",
+                f"on_impulse='error': at t = {r0.t:g} '{dev}' makes "
+                f"{', '.join(r0.states)} dependent ("
+                f"{'an inductor cut-set' if cut else 'a capacitor loop'}); "
+                f"re-initialising them moves {r0.lambda_:.6g} "
+                f"{'V*s' if cut else 'C'} and removes {r0.dW:.6g} J.",
+                device=dev)
+        if on_impulse == "warn":
+            _warn_impulses(_dsed_res)
         return _dsed_res
 
     if resume_from is not None and t_start == 0.0:
@@ -2617,6 +2696,12 @@ def simulate(
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
             switch_fn=switch_fn)
+        if engine == "trbdf2":
+            # Task 9.3: trbdf2 lands its steps on a C block's ticks
+            # (state-time law); only 'auto' keeps routing them to pwl,
+            # so no existing auto run changes engine.
+            _route_reasons = [r for r in _route_reasons
+                              if getattr(r, "feature", "") != "c_blocks"]
         if engine == "auto":
             # ROUTE, don't refuse: 'auto' means "pick the engine",
             # and a script written against the fixed-step API must
@@ -2675,6 +2760,13 @@ def simulate(
                 "engine automatically, or engine='pwl' explicitly.")
 
     # engine is now 'trbdf2' or 'pwl' ('auto' never routes to dsed)
+    if allow_implicit_segments is not None:
+        raise _unsupported(
+            engine, "allow_implicit_segments",
+            f"simulate(engine={_engine_asked!r}, allow_implicit_segments="
+            f"{allow_implicit_segments!r}): the keyword governs the exact "
+            f"engine's numeric segments; this run lands on engine={engine!r}, "
+            "which has no exact segments. Use engine='exact', or drop it.")
     if mode_selection in ("shadow", "lcp"):
         raise _unsupported(
             engine, "mode_selection",
@@ -2774,6 +2866,7 @@ def simulate(
                 enable_newton_line_search=bool(
                     enable_newton_line_search),
                 enable_newton_lm=bool(enable_newton_lm),
+                newton_roundoff_budget=int(newton_roundoff_budget or 0),
             )
         except SimulationAborted as _aborted:
             try:
@@ -2871,62 +2964,14 @@ def simulate(
         )
     _ = rtol, atol, dt_init  # Reserved for the v1.6 RK path; recorded only.
 
-    # Controllers from the plan composed above the dispatch: the
-    # gates merged into one switch_fn, the periodic sources through
-    # the integer-k scheduler (tick 0 at t_start, none lost), then the
-    # every-step observers. Order: closed loops in list order, then
-    # the user observer. Before fix-control-tick-semantics the loops'
-    # own elapsed-time throttles lost ticks (198 of 200) and
-    # controller_period was ignored here.
+    # Controllers, closed-loop graphs and C blocks from the plan composed
+    # above the dispatch (_control_plan.compose_control; its b_extra was
+    # merged there too): the gates merged into one switch_fn, the graphs
+    # ticking themselves, Python tick sources through the integer-k
+    # scheduler, then the every-step observers.
     switch_fn = _plan.switch_fn
-    _tick_sched = None
-    if _plan.ticks:
-        _tick_sched = _FixedStepTicks(_plan.ticks, float(t_start),
-                                      float(t_end), float(dt))
-    _per_step = ([_tick_sched] if _tick_sched is not None else []) \
-        + list(_plan.every_step)
-    if _tick_sched is not None or len(_per_step) > 1:
-        def _composed_observer(t: float, x, _obs=tuple(_per_step)) -> None:
-            for obs in _obs:
-                obs(t, x)
-
-        # T2.2: the post-run _auto_attach_motor_traces walks these to
-        # find a MotorObserverBundle passed via step_observer=.
-        _composed_observer._inner_observers = _plan.inner_observers  # type: ignore[attr-defined]
-        step_observer = _composed_observer
-
-    # Custom-code blocks (C blocks) registered via add_c_block(): compose
-    # each block's throttled observer (reads inputs + runs user code) and
-    # its b_extra injector (drives the controlled output sources) on top
-    # of any user/closed-loop callbacks. PWL path only — outputs use
-    # b_extra, which the DSED engine does not consume.
-    _c_blocks = _c_blocks_of(builder)
-    if _c_blocks:
-        _cb_obs = [cb.step_observer for cb in _c_blocks]
-        _cb_bex = [cb.b_extra_fn for cb in _c_blocks]
-        _prior_obs = step_observer
-        _prior_bex = b_extra_fn
-
-        def _cblock_observer(t: float, x) -> None:
-            if _prior_obs is not None:
-                _prior_obs(t, x)
-            for _obs in _cb_obs:
-                _obs(t, x)
-
-        def _cblock_b_extra(t: float) -> list:
-            total: Optional[list] = (
-                list(_prior_bex(t)) if _prior_bex is not None else None)
-            for _fn in _cb_bex:
-                contrib = _fn(t)
-                if total is None:
-                    total = list(contrib)
-                else:
-                    for i, v in enumerate(contrib):
-                        total[i] += v
-            return total if total is not None else []
-
-        step_observer = _cblock_observer
-        b_extra_fn = _carry_jumps(_cblock_b_extra, [_prior_bex, *_cb_bex])
+    step_observer = _plan.for_fixed_step(float(t_start), float(t_end),
+                                         float(dt))
 
     # Build the PWL cache — LAZY by default (Phase-0 fix #7).
     # A PWM converter visits only a handful of the 2^N switch
@@ -3076,6 +3121,8 @@ def simulate(
         opts.enable_newton_line_search = enable_newton_line_search
     if enable_newton_lm is not None:
         opts.enable_newton_lm = enable_newton_lm
+    if newton_roundoff_budget is not None:
+        opts.newton_roundoff_budget = int(newton_roundoff_budget)
     if enable_substep_state_correction is not None:
         opts.enable_substep_state_correction = enable_substep_state_correction
     if discontinuity_restart is not None:
@@ -3364,10 +3411,8 @@ def simulate(
     try:
         # Per tick source, registration order; the largest lateness
         # of a tick on this grid (0 when every T_j is a multiple of dt).
-        res.control_tick_counts = (
-            list(_tick_sched.counts) if _tick_sched is not None else [])
-        res.control_tick_jitter_max = (
-            _tick_sched.jitter_max if _tick_sched is not None else 0.0)
+        res.control_tick_counts, res.control_tick_jitter_max = \
+            _plan.fixed_tick_counts()
     except AttributeError:  # pragma: no cover
         pass
     try:
@@ -3434,15 +3479,8 @@ def simulate(
     _warn_newton_roundoff(res, "simulate()")
     _warn_resolution(builder, res, dt)
     _warn_unlocated_edges(res)
-    if on_impulse == "warn" and list(getattr(res, "reinit_records", ())):
-        import warnings
-        r0 = res.reinit_records[0]
-        warnings.warn(
-            f"simulate(on_impulse='warn'): {len(res.reinit_records)} "
-            f"impulsive re-initialisation(s); first at t = {r0.t:g}: "
-            f"{', '.join(r0.devices)} made {', '.join(r0.states)} dependent "
-            f"({r0.kind}, {r0.dW:.6g} J removed). See res.reinit_records.",
-            UserWarning, stacklevel=2)
+    if on_impulse == "warn":
+        _warn_impulses(res)
 
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:

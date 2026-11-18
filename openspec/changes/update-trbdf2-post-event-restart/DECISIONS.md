@@ -318,3 +318,180 @@ The open questions of `design.md` had no answer and none was marked
    reference gained samples (ll08: 0.2274 → 0.2278, 0.0843 → 0.0842).
    To reverse: drop `record_post_event()` and
    `restart_size_after_diode_event()` at the two event sites.
+
+14. **A DC operating point that does not exist is refused, not returned
+   (2026-11-13).** Question: `compute_dc_op` on 48 V across 2 µH +
+   158 µH returned I(L1) = 2.4e13 A (the source over the inductors'
+   1e-12 Ω DC regularisation), and `ll16_flyback_closed_loop` ran from
+   it. Options: (a) a residual or magnitude test on the result; (b)
+   find the loop structurally and refuse before solving; (c) both.
+   (c) taken. The structural rule: node potentials are propagated over
+   the branches whose DC voltage is fixed — voltage sources (DC, PWM,
+   sine, pulse at `t_eval`), inductors, coupled windings and saturable
+   inductors (shorts at DC) — with a weighted union-find; a branch whose
+   ends already have a fixed difference that disagrees with its own
+   closes a loop with a nonzero EMF. An ideal-transformer winding is
+   fixed once the other winding's ends are tied (v_s = n·v_p),
+   repeated to a fixpoint, and the refusal then also names the path
+   that tied the other winding. A loop whose EMF is zero (inductors in
+   parallel, a pulse source at 0 V at `t_eval`) has finite solutions
+   and is not flagged; controlled sources (VCVS, CCVS, gyrator) are not
+   followed. The refusal is `UnsupportedError(engine, 'dc_operating_point',
+   <the source>, <its kind>)`, listing every device in the loop and the
+   two ways out (zero state or explicit initial conditions; winding
+   resistance). It runs at the top of `compute_dc_op`,
+   `compute_dc_op_newton`, `compute_dc_op_with_strategy` and
+   `compute_dc_operating_point` — before any rung or direct-failure
+   handler that catches `std::exception` and would re-wrap it. After
+   the solve, a state that is not finite or exceeds 1e10 × the largest
+   source (at least 1) is refused (`runtime_error`, naming the unknown).
+   Callers: `simulate(start_from_dc_op=True)` (pwl; engine `'pwl'` in
+   the refusal), `run_transient_bdf1(start_from_dc_op=True)`,
+   `pulsim.compute_dc_op` and the AC / MNA-sweep / adaptive wrappers
+   all let it through; the only fallback is the benchmark v1 reader's
+   DC start, which catches exactly this feature, warns, and starts from
+   zero state (as `uic`). Evidence: of the 111 benchmark circuits the
+   reader builds, two are refused — ll16 (it had started from 2.4e13 A)
+   and `ll13_active_clamp_forward` (it had failed with "no DC operating
+   point" after Newton did not converge). ll16 now runs from zero; its
+   cells stay `error` (pwl dt/2 vs dt/4 differ by 0.166: no converged
+   reference) and the circuit itself is not a flyback (Lm_core and Lsec
+   are uncoupled; I(Lm_core) ramps to 604 A = 48 V·2 ms/160 µH). ll13
+   runs and is frozen at its first measured cells (pwl 4.51,
+   pwl+restart / pwl+split 0.335, trbdf2 0.00133 — worst V(ctrl_main), a
+   PWM source edge). The 11 examples and projects that start from the
+   DC operating point (`start_from_dc_op=True` or `compute_dc_op`) all
+   still run. To reverse: drop the `require_no_dc_voltage_loop` /
+   `require_sane_dc_state` calls in `pwl/dc_assemble.hpp`,
+   `pwl/dc_strategy.hpp` and `pwl/dc_operating_point.hpp`.
+
+15. **Two Linux-only CI failures were decisions made by round-off
+   (2026-11-17).** CI at 485ab770 (Ubuntu, Eigen 3.4.0): the saturable
+   transformer aborted on trbdf2 at 0.34 ms ("Newton failed ... h already
+   at h_min") and the floating-bus bridge took 1398 steps / 122 diode
+   events instead of 1235 / 14. Not the Eigen version: built against
+   Eigen 3.4.0 headers on macOS, both runs are byte-identical to the
+   Eigen 5 build (bridge 1235 steps / 14 events / 3 forced; transformer
+   45,736 steps, 16.77750141895 V at 0.4 ms). What differs on Linux is the
+   last bit of libm / the compiler. A ROUNDING FUZZ (every element value
+   × (1 + u·1e-15), u uniform in ±1) reproduces both on macOS: the bridge
+   ground to `max_steps` in 9 of 20 runs, the transformer aborted at
+   h_min in 2 of 22 (0.350 and 0.370 ms).
+   (a) Bridge. D1 and D4 carry the same current and turn off together;
+   rounding decides which is detected first. The landing for the second
+   solved a 3.3e-13 s step on a bus held only by OFF diodes and the 1 MΩ
+   tie: 2C/h = 2.8e9 S against 1e-6 S, so the bus common mode is
+   round-off (eps·J⁻¹(|J||x| + |b|) ~ 2e2 V). It read dn = +83 V and
+   turned D4 back ON; D4 then rode its zero-current boundary and D2 / D4
+   flipped every 1e-13 s. Option taken: a diode flips only when its
+   crossing signal is past the threshold by more than that solve's own
+   round-off bound, eps·(|y_a − y_k| + |v_a| + |v_k|) with
+   y = J⁻¹(|J||x| + |b|) (item 12's construction). It applies to every
+   zero-time cascade and the landing, costs two solves on the existing
+   factor, and only when a flip is proposed; Newton circuits keep no
+   factor and decide as before. A held flip is re-tested at the next
+   step's end state (2C/h = 940 S at 1 µs). A PROBE whose flip is held
+   is retaken 10× longer, up to span·1e-6 like a singular probe
+   (`decide_probe`, stat `n_probe_noise_retakes`); with a cap of
+   span·1e-9 the floating-DC bridge with a choke
+   (`test_floating_bridge_with_choke_holds_no_diode`) could not decide
+   its simultaneous D1/D4 V_th crossing at 13.7 µs (a floating 470 µF
+   with g_off needs h ≥ 2e-8 s) and took a forced step. In the crossing
+   DETECTOR the bound counts only for a crossing whose both sides are
+   inside it: the far side (x_g or x_1) outside the bound, or the near
+   side outside it on the committed x (not the probe x_sig, whose common
+   mode may itself be round-off). Without the detector gate 5 of 8
+   fuzzed bridge runs ground; with a far-side-only gate a V_th = 0.7
+   bridge with a 1 mΩ floating input (`test_switch_state_record`) held a
+   turn-on 0.0485 V past threshold (bound ~0.05 V at h = 60 µs), decided
+   it one step late without localisation, and recorded a 493 A spike and
+   a forbidden-state sample. Without that
+   the gate made the `sepic` reference wrong: S1's turn-off at 9.8 µs was
+   probed at span·1e-12 = 2e-15 s, where 2C/h = 1e10 S against the
+   2e-6 S of two OFF devices makes the common mode undecidable
+   (eps·G/g ≈ 1); the rectifier was held OFF, the committed step drained
+   both inductors through g_off (τ = L·g_off = 4.7e-11 s), and the trbdf2
+   rtol 1e-8 reference ended at 17.3033 V instead of 17.3157 V (pwl dt/8
+   17.3149 V; every sepic cell `disagree` at 0.034). With the retake:
+   17.315704 V, trbdf2 cell 2.96e-5 (as before the gate).
+   Measured after, 20 fuzzed bridge runs: no grind, 0 forced accepts,
+   1231-1454 steps (15 of 20 within 2 % of 1242), 7-17 events. An rtol
+   sweep of the unperturbed bridge (1e-6 … 1e-4, atol = rtol·1e-3): 8-12
+   events, at most 1 forced accept (it was 14-56 events, 41 forced at
+   4e-5, D4 held OFF against 4.72 V at 1e-5). Committed samples with an
+   OFF diode forward-biased remain: 0.61-0.64 V at every rtol, on a few
+   picosecond samples of the L·g_off ringing right after a diode turns
+   off at the source's zero crossing (10 and 30 ms). NOT independent of
+   rounding: the event count, the step spread and the 30-40 ms bus
+   average (311.155, 311.247, 311.322 or 311.341 V; pwl dt 1e-6 and
+   2.5e-7: 311.344 V) still vary. The
+   remaining degree of freedom is physical in the PWL model: after the
+   D1/D4 pair turns off at its common current zero, which one is OFF
+   first is a tie, and through the OFF interval the floating dn is set
+   by nano-amp g_off leakage, whose sign flips at the source's zero
+   crossings (the events at 10.000 / 20.000 / 30.000 ms). Recorded in
+   KNOWN_LIMITATIONS; the brief's acceptance (identical event count,
+   step count within 2 %, no OFF diode forward-biased in a committed
+   sample) is not met.
+   (b) Transformer. The abort is right after a D1 turn-off landing
+   1.3e-13 s long: Newton at h_min, the flux row's b scale is
+   2/h·λ = 1.4e12, its residual at round-off and ||dx|| stalled at 2e-7 V
+   against the load-bearing 1e-9 V tolerance; roundoff acceptance
+   declined it as growing. Option taken: the TR-BDF2 residual of an atan
+   saturable inductor uses the flux INCREMENT in closed form,
+   atan a − atan b = atan((a − b)/(1 + ab)) (`flux_increment`), instead
+   of the difference of two fluxes; pwl keeps its form (bit-identical).
+   With it and (a)'s localisation fix (item 16), 20 of 20 fuzzed runs
+   finish to 1 ms: 109,946-109,967 steps (0.02 %), 99 events in every run,
+   V(vout) at 0.339 ms 16.7714502 ± 3e-8 V, at 1 ms 15.3948549 ± 1.5e-7 V
+   (rtol 1e-6). Attribution between the increment form
+   and the localisation change is not separated.
+   To reverse: drop the `noise` overload of
+   `DiodeEventState::update_from_state` and route `decide_diodes` /
+   `decide_probe` back to the ungated update; pass `increment_form=false`
+   from the saturable wrapper in `trbdf2_transient.hpp`.
+
+16. **The kilovolt after a diode turn-off was the landing, not the
+   post-event record (2026-11-17).** The design workflow's DCM buck on
+   trbdf2 (`Evaluator(..., engine='trbdf2', steady=SteadySpec(
+   method='transient'))`) failed `implausible_voltage`: node sw at
+   3854 V at 0.4855 ms. Trace: the turn-off of D1 was localised by
+   Illinois and landed at the bracket's post-crossing end once the
+   bracket was below 1e-4 h; the landing state held iL = −7.84 µA, and
+   with D1 OFF that current has only g_off: v = i/g_off, an L·g_off mode
+   (τ = 1e-13 s) that the next committed femtosecond steps traced
+   (3854, 3733, 3183 V …). The sample was not the post-event record
+   (this circuit is piecewise linear: no SDIRK restart). Option taken: a
+   turn-off of a diode with g_off > 0 keeps bisecting until the voltage
+   the residual current would put across g_off, |s|·g_on/g_off, is within
+   atol + rtol·max|x|, or the bracket reaches h_min, dt_floor or the 40
+   bisection cap. (With g_on/g_off = 1e12 that threshold is below the
+   solve's own round-off of s, so in practice the bracket ends at one of
+   the caps; a round-off floor on it is left open, reviewer 2026-11-17.) Measured: the
+   Evaluator route is ok, v_c0 = 8.996246827288 V against the pss orbit
+   8.99624708728943 V (error −2.60e-7 V, was 2.2e-5 before the
+   regression); DCM buck to 0.64 ms max |v(sw)| 24 V, steps 1776 → 1542;
+   the rectifier internal node of test_trbdf2_stateful_with_diodes 20.0 V
+   at rtol 2e-6 / 1e-6 / default (was −1539 / 1460 / 1897 V), and its
+   strict xfail is removed. To reverse: restore the break condition
+   `(tb - ta) < max(h_min, 1e-4 h)` in the localisation loop.
+
+17. **Reviewer risks on the roundoff paths (2026-11-17).** (a) Clamp the
+   error to 1 on a roundoff-floor accept, so the controller does not
+   grow h from an estimate that passed only because its noise joined
+   the scale? Measured and rejected: the SEPIC at rtol 1e-8 took 662,366
+   accepted steps instead of 27,529 (same V_out, 17.315704 V); h could
+   not leave the floor. The estimate is kept. (b) The chatter-safe
+   cascade that flips nothing now restarts from the committed x
+   (`x_sig = x`), as the landing path whose cascade undid its flip
+   already did; a probe of a g_off-held node is round-off. Measured on
+   the 20 fuzzed bridge runs of item 15: steps 1231-1454 -> 1231-1254
+   (all 20 within 2 % of 1242), events 7-17 -> 7-10, 0 forced accepts;
+   the unperturbed rtol sweep, the SEPIC (17.315704 V) and the trbdf2
+   baseline rows are unchanged. (c) The run
+   budget of roundoff accepts is typed and settable:
+   `NewtonRoundoffBudgetExceeded` (a `SimulationAborted` with the
+   partial result) and `simulate(newton_roundoff_budget=)` (default 130,
+   ten times the worst honest run). To reverse (b): drop the
+   `x_sig = x;` in the no-flip branch; (c): drop the option and the
+   `roundoff_budget` flag of `SimulationAborted`.

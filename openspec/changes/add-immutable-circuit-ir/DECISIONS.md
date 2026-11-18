@@ -444,3 +444,28 @@ is not a precondition; `simulate()` keeps its entry points and calls
 - **Accepted, documented:** `spice_to_builder` declares top-level
   `.param` lines as parameters (CHANGELOG migration note). `from_yaml`
   takes field values as written (no authoring bounds; see 16).
+
+## 19. Needs recorded by the optimisation slice 5 (Evaluator(circuit=...))
+
+What the design evaluator needed from the IR and used instead
+(add-design-optimization-workflow DECISIONS 20):
+
+* **A picklable `Circuit`** (task 4.3): `evaluate_many(backend='process')`
+  ships the evaluator to worker processes; the circuit form was refused
+  there by name and the factory form was the process path. Since the
+  merge of batch 10 into this branch a `Circuit` pickles, so the
+  circuit form runs on the process backend (test: equal to threads);
+  a part beside it that does not pickle (a SwitchSchedule as
+  `switch_fn`) is still refused by name.
+* **Builder side state in the IR** (task 3): `_graph_driven` (a control
+  graph's `drive_source`) is a Python attribute of the builder and does
+  not survive `build()`, so `simulate(circuit)`,
+  `periodic_steady_state(circuit)` and the evaluator cannot refuse a
+  graph-driven source given as a `Circuit`.
+* Not needed: a GIL-free batch `with_params` or a cheaper clone --
+  `with_value` costs 2.5 us and `to_builder` 1 us per design, against
+  ~105 us of Python per evaluation.
+
+(Numbered 13 on the optimisation branch; renumbered at integration batch 10
+behind this branch's 13–18. Since 14 the graph-driven sources survive
+`build()` as ControlDecls; since 16 a `Circuit` pickles (its YAML text).)

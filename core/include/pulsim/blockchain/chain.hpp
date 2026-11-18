@@ -27,6 +27,7 @@
 
 #include "pulsim/blockchain/blocks.hpp"
 #include "pulsim/numeric/dense.hpp"
+#include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -434,12 +435,36 @@ public:
                 if (!(solver_dt_ > Real{0})) solver_dt_ = t - t0_;
                 check_periods();
             }
-            tx = t - solver_dt_;
+            // Label time: the tick runs at the call's label t_n with the
+            // state x_{n-1} (the closed-loop helpers' protocol).
+            if (!label_time_) tx = t - solver_dt_;
         }
         last_t_ = t;
         ++n_calls_;
+        fixed_label_pass_ = label_time_;
         run_pass(tx, &x, dt_group0, /*every_call=*/group0_used_,
                  /*record_t=*/has_rates() ? tx : t);
+        fixed_label_pass_ = false;
+    }
+
+    /// Label-time mode (the protocol of the closed-loop helpers and C
+    /// blocks before they became graphs): on the fixed engine a tick due
+    /// at tau runs at the first call whose label t_n >= tau - 1e-9*dt,
+    /// with that call's state x_{n-1}, and its output drives step n
+    /// (from t_{n-1}). Ticks at or after the horizon are not delivered.
+    /// Declares no jumps (next_jump_after = inf), as the helpers did not.
+    void set_label_time(bool on) noexcept { label_time_ = on; }
+    [[nodiscard]] bool label_time() const noexcept { return label_time_; }
+    void set_horizon(Real t_end) noexcept { t_end_ = t_end; }
+
+    /// Set signal `name` and what its circuit sinks see before the first
+    /// tick (a rate group's published value). Call after compile().
+    void set_output(const std::string& name, Real value) {
+        const Index s = slot(name);
+        ctx_.put(s, value);
+        if (s >= 0 && static_cast<Size>(s) < pub_.size()) {
+            pub_[static_cast<Size>(s)] = value;
+        }
     }
 
     /// Exact protocol (the variable-step engine lands a step on every
@@ -483,6 +508,7 @@ public:
     /// (a trapezoidal step across a ZOH jump smears it: O(dt)).
     [[nodiscard]] Real next_jump_after(Real t) const {
         Real best = std::numeric_limits<Real>::infinity();
+        if (label_time_) return best;   // the helpers declared none
         const Real h = solver_dt_;
         for (Size gi = 1; gi < groups_.size(); ++gi) {
             const auto& g = groups_[gi];
@@ -706,7 +732,12 @@ private:
         for (Size gi = 1; gi < groups_.size(); ++gi) {
             auto& g = groups_[gi];
             tau[gi] = t0_ + g.offset + static_cast<Real>(g.k) * g.period;
-            if (tx >= tau[gi] - tick_tol(g)) {
+            // Label time on the fixed grid: the old scheduler's rule,
+            // t >= due - 1e-9*dt and due < t_end - 1e-9*dt.
+            const Real tol = fixed_label_pass_ ? Real{1e-9} * solver_dt_
+                                               : tick_tol(g);
+            if (fixed_label_pass_ && !(tau[gi] < t_end_ - tol)) continue;
+            if (tx >= tau[gi] - tol) {
                 due_[gi] = 1;
                 any = true;
                 g.jitter_max = std::max(g.jitter_max, tx - tau[gi]);
@@ -831,6 +862,9 @@ private:
     bool group0_used_ = true;
     Real t0_ = Real{0};
     Real solver_dt_ = Real{0};
+    bool label_time_ = false;
+    bool fixed_label_pass_ = false;
+    Real t_end_ = std::numeric_limits<Real>::infinity();
 };
 
 
@@ -874,5 +908,29 @@ make_chain_switch_fn(BlockChain& chain, Size num_switches,
         return mask;
     };
 }
+
+
+/// A PWM gate whose duty is a graph signal (what its sinks see): bit
+/// `idx` is ON while the carrier position u < duty - tol, the comparison
+/// of pulsim.control.pwm_on operation for operation (grid-exact snap of
+/// pwm_phase::cycle_position). Runs in C++, no GIL. The chain must
+/// outlive the gate.
+struct ChainPwmGate {
+    struct Leg { Index slot; Index idx; Real period; Real phase; };
+    BlockChain* chain = nullptr;
+    Size num_switches = 0;
+    std::vector<Leg> legs;
+
+    [[nodiscard]] topology::SwitchStateMask operator()(Real t) const {
+        topology::SwitchStateMask mask{num_switches};
+        for (const auto& l : legs) {
+            const auto p = pwm_phase::cycle_position(t, l.phase, l.period);
+            if (p.u < chain->sink_value(l.slot) - p.tol) {
+                mask.set(static_cast<Size>(l.idx), true);
+            }
+        }
+        return mask;
+    }
+};
 
 }  // namespace pulsim::blockchain

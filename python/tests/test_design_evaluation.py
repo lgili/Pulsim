@@ -508,8 +508,10 @@ def test_a_roundoff_budget_abort_is_a_convergence_error_and_failed(
     """TR-BDF2 track: 130 consecutive Newton roundoff accepts throw
     NewtonRoundoffBudgetExceeded, which both engines' outer catch turns
     into SimulationAborted (a ConvergenceError since batch 6c); the
-    evaluator maps it to failed. The budget is not reachable from Python
-    (max_consecutive is not exposed), so the abort is injected."""
+    evaluator maps it to failed (since 2026-11-17 as the subclass
+    NewtonRoundoffBudgetExceeded; `simulate(newton_roundoff_budget=)`
+    reaches it, test_newton_roundoff_floor.py). Here the abort is
+    injected."""
     assert issubclass(p.SimulationAborted, p.ConvergenceError)
     assert issubclass(p.ConvergenceError, RuntimeError)
     msg = ("solve_with_newton: 131 consecutive Newton solves ended at the "

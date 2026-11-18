@@ -255,10 +255,18 @@ def graph_driven_of(obj) -> list:
     return [d[0] for d in _controls(obj, "graph_driven")]
 
 
-def _build_with_controls(native):
+def _build_with_controls(native, seal=True):
     def build(self):
         c = native(self)
         decls = control_decls(self)
+        if seal:
+            # the C blocks' graph now belongs to a Circuit too: a block
+            # added later would also run in it (add_c_block refuses)
+            for d in (*decls, *(self.controls() if hasattr(self, "controls")
+                                else ())):
+                g = getattr(getattr(d[3], "block", None), "_graph", None)
+                if g is not None:
+                    g._sealed = True
         return c.with_controls(decls) if decls else c
 
     build.__doc__ = native.__doc__
@@ -271,7 +279,8 @@ def install(builder_cls) -> None:
     """Patch the ``add_*`` family (Parameter arguments), the four
     deprecated ``update_*`` methods and ``build`` (carries the C blocks
     and graph-driven sources as ControlDecls) onto ``builder_cls``.
-    ``_snapshot`` is the same ``build`` (simulate's name for it).
+    ``_snapshot`` is the same ``build`` without sealing the C-block
+    graph (simulate's run copy).
 
     ``scripts/generate_stubs.py`` sets ``PULSIM_STUBGEN_NATIVE``: the
     stub then shows the native signatures these wrappers forward to (a
@@ -282,7 +291,8 @@ def install(builder_cls) -> None:
     native = builder_cls.build
     if not getattr(native, "_carries_controls", False):
         builder_cls.build = _build_with_controls(native)
-        builder_cls._snapshot = builder_cls.build
+        # simulate()'s private run circuit: does not seal the graph
+        builder_cls._snapshot = _build_with_controls(native, seal=False)
     for name in dir(builder_cls):
         fn = getattr(builder_cls, name)
         # shortcut: an overloaded binding (add_nonlinear_capacitor) keeps

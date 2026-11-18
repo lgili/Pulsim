@@ -164,15 +164,19 @@ class LossTable:
         if not (np.isfinite(v).all() and np.isfinite(i).all()
                 and np.isfinite(tj).all()):
             return float(np.sum(self(v, i, tj)))
+        f = self._kernel()
+        return float(np.sum([f(a, b, c) for a, b, c in zip(
+            v.tolist(), i.tolist(), tj.tolist())]))
+
+    def _kernel(self):
+        """The kernel copy of this table, built once per table."""
         k = _KERNEL.get(id(self))
         if k is None or k[0]() is not self:
             key = id(self)
             k = (weakref.ref(self, lambda _r, key=key: _KERNEL.pop(key, None)),
                  self.to_kernel())
             _KERNEL[id(self)] = k
-        f = k[1]
-        return float(np.sum([f(a, b, c) for a, b, c in zip(
-            v.tolist(), i.tolist(), tj.tolist())]))
+        return k[1]
 
     def to_kernel(self):
         """The same table as a kernel `pulsim._pulsim.LossTable3D`

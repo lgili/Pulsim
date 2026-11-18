@@ -459,7 +459,7 @@ Each row was measured on this version. The fix column is what to write.
 | # | Wrong assumption | What actually happens | Do this instead |
 |---|---|---|---|
 | 1 | `V_th` of `add_diode` / `add_bridge_rectifier` is a forward drop | It is the turn-on threshold. On-state is `V_f + I/g_on`: 10 A into `g_on = 20 S` gives 0.500 V for `V_th = 0` and `0.7` alike, 1.200 V with `V_f = 0.7`. `add_three_phase_vsi(V_f=)` and the MOSFET/IGBT diode `V_F` ARE drops | Pass `V_f` (losses include `V_f*I`), or `b.add_shockley_diode`. Never also a `conduction_specs` `V_f0` |
-| 2 | `v.mean()` over a result is the average | The default grid is variable-step and clusters at events. Rectifier of 6.2: `.mean()` 4.575 V vs 6.330 V (-28 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
+| 2 | `v.mean()` over a result is the average | The default grid is variable-step and clusters at events. Rectifier of 6.2: `.mean()` 4.607 V vs 6.330 V (-27 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
 | 3 | `p.SwitchStateMask(1)` sets bit 0 | It is a mask of SIZE 1, all OFF | `m = p.SwitchStateMask(b.graph.num_switches); m.set(i, True)` |
 | 4 | MOSFET k is switch bit k | `add_mosfet` adds `<name>_body`, so bits interleave with diodes (below) | `b.switch_index_of(name)` |
 | 5 | Loosening `tol_newton_dx` / `tol_newton_res` fixes a Newton abort | Both are absolute on purpose. Snubbed flyback, `tol_newton_dx=1e-5, tol_newton_res=1e-4`: `auto` 3.53 V, fixed engine 15.31 V, silently | Keep the defaults; read the abort; run `engine='pwl'` with `dt`; fix gate edges, body diodes, initial state |
@@ -580,7 +580,7 @@ for r in (fixed, var):
 
 ```text
 pwl    time-weighted 6.331 V, sample mean 6.330 V
-trbdf2 time-weighted 6.330 V, sample mean 4.575 V
+trbdf2 time-weighted 6.330 V, sample mean 4.607 V
 ```
 
 The engines agree; the sample mean on the variable grid does not.

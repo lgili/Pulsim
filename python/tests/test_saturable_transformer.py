@@ -22,7 +22,6 @@ that saturates. Below the knee it is the coupled pair exactly (the
 C++ test pins that to 2.7e-7); these tests are the other half.
 """
 
-import sys
 
 import numpy as np
 import pytest
@@ -150,9 +149,6 @@ def test_inrush_when_energised_at_the_voltage_zero_crossing():
     assert first_sat > 3.0 * first_lin, (first_sat, first_lin)
 
 
-@pytest.mark.xfail(strict=True, condition=sys.platform.startswith("linux"),
-                   reason="KNOWN_LIMITATIONS XP-2: trbdf2 aborts at t = 0.34 ms "
-                          "(h_min) on Linux")
 def test_engines_agree_below_saturation():
     """On the variable-step engine, with the RC snubber the parity
     test in test_engine_auto.py uses: an ideal switch interrupting the

@@ -52,6 +52,7 @@
 #include <utility>
 #include <vector>
 
+#include "pulsim/errors/convergence.hpp"
 #include "pulsim/dsed/bdf2_integrator.hpp"
 #include "pulsim/dsed/event_predictor.hpp"
 #include "pulsim/dsed/rk45_dormand_prince.hpp"
@@ -87,7 +88,8 @@ struct PEDResultAuto {
     // v2.0 Phase 3 item 5 — see PEDResult::sample_masks.
     std::vector<MaskT> sample_masks;
     // See PEDResult::step_masks / pre_event_states. A gate event
-    // never modifies x on this scheduler, so pre_event_* stay empty.
+    // never modifies x on this scheduler; an exact step that fired one
+    // records x as its pre-event state (the sources' left limit).
     std::vector<MaskT> step_masks;
     std::vector<std::size_t> pre_event_index;
     std::vector<Vector> pre_event_states;
@@ -174,6 +176,7 @@ public:
 
         MaskT mask = switch_fn_(t);
         system_.set_mask(mask);
+        reinit_(t, x);
 
         // Pick integrator for the initial mode-segment.
         IntegratorChoice choice = detector_.select(
@@ -198,7 +201,7 @@ public:
 
         while (t < t_end) {
             if (result.n_accept + result.n_reject > kMaxSteps) {
-                throw std::runtime_error(
+                throw ConvergenceFailure(ConvergenceKind::MaxSteps, t, "",
                     "PEDSimulatorAuto: exceeded max-step cap");
             }
 
@@ -218,9 +221,21 @@ public:
             //    (which catches any discovered mask change).
             const Real t_gate_raw = switch_fn_.next_edge_after(t);
             constexpr Real kPollFractionOfDtMax = Real{0.1};
-            const Real t_gate = std::isfinite(t_gate_raw)
+            Real t_gate = std::isfinite(t_gate_raw)
                 ? std::min(t_gate_raw, t_end)
                 : std::min(t + dt_max_ * kPollFractionOfDtMax, t_end);
+            // A PWM / pulse source's corner is a time event too: no step
+            // straddles a change of the source's piece (D14).
+            bool at_corner = false;   // landed on exactly (see scheduler.hpp)
+            if constexpr (requires { system_.next_source_corner_after(t); }) {
+                const Real t_c = system_.next_source_corner_after(t);
+                at_corner = t_c < t_gate;
+                t_gate = std::min(t_gate, t_c);
+            }
+            // an edge a few ulps before t_end (its own rounding) is t_end:
+            // the run ends there, so it never fires and the last sample
+            // stays the left limit (no sliver step that reads the new piece)
+            if (t_gate < t_end && near_time(t_gate, t_end)) t_gate = t_end;
 
             // 2a. Exact stepper first. A mode with a closed-form
             //     propagator (LTI, supported sources, non-defective
@@ -233,35 +248,62 @@ public:
             //     as on the RK45 scheduler.
             if constexpr (HasExactStep<System>) {
                 const Real h_ex = std::min(dt_max_, t_gate - t);
+                if (h_ex > Real{0} && !system_.has_exact_step()) {
+                    // 13.2: engine='exact' refuses a numeric segment unless allowed
+                    if constexpr (requires { system_.refuse_implicit_step(t); }) {
+                        system_.refuse_implicit_step(t);
+                    }
+                }
                 if (h_ex > Real{0} && system_.has_exact_step()) {
+                    while (fast_k_ < fast_t_.size()
+                           && (fast_t_[fast_k_] <= t || near_time(t, fast_t_[fast_k_]))) {
+                        ++fast_k_;
+                    }
+                    Real h_ex_f = fast_k_ < fast_t_.size()
+                        ? std::min(h_ex, fast_t_[fast_k_] - t) : h_ex;
+                    // a grid step that would stop a few ulps short of the
+                    // edge (summed rounding) lands on it: no sliver step
+                    // whose sample reads the source's snapped new piece
+                    if (h_ex_f < t_gate - t && near_time(t + h_ex_f, t_gate)) {
+                        h_ex_f = t_gate - t;
+                    }
                     step_mask = system_.current_mask();
                     if constexpr (requires {
                                       system_.exact_advance_state_into(
                                           t, x, h_ex, x_ex_);
                                   }) {
-                        system_.exact_advance_state_into(t, x, h_ex, x_ex_);
+                        system_.exact_advance_state_into(t, x, h_ex_f, x_ex_);
                         x.swap(x_ex_);
                     } else {
-                        x = system_.exact_advance_state(t, x, h_ex);
+                        x = system_.exact_advance_state(t, x, h_ex_f);
                     }
-                    t += h_ex;
+                    t += h_ex_f;
                     rk_state.invalidate();
                     bdf2_state.invalidate();
                     ++result.n_accept;
                     ++result.n_exact_steps;
+                    bool fired = false;
                     if (t_gate < t_end && near_time(t, t_gate)) {
+                        if (at_corner) t = t_gate;
                         const IntegratorChoice prev_choice = choice;
+                        fired = true;
+                        x_pre_ = x;
                         fire_gate_event_(t_gate, x, rk_state, bdf2_state,
                                             prev_choice, result);
                         choice = detector_.select(
                             resolve_mode_id(system_, system_.current_mask()),
                             system_.A_matrix(), dt_max_);
                         h_rk45 = dt_init_;
+                        plan_fast_samples_(
+                            t, at_corner || !(system_.current_mask() == step_mask));
                     }
                     ++step_idx;
                     if (step_idx % store_every_ == 0) {
+                        // the pre-event state (x unless a dependent state
+                        // was projected): the sample reads its sources' left
+                        // limit and the right limit is recorded (scheduler.hpp)
                         ped_push_sample(result, t, x, system_.current_mask(),
-                                        step_mask, nullptr);
+                                        step_mask, fired ? &x_pre_ : nullptr);
                     }
                     continue;
                 }
@@ -334,7 +376,7 @@ public:
                     ++nan_streak_;
                     ++result.n_reject;
                     if (nan_streak_ >= kNanMaxStreakAuto) {
-                        throw std::runtime_error(
+                        throw ConvergenceFailure(ConvergenceKind::NaN, t, "",
                             std::string{"PEDSimulator (auto/RK45): step "}
                             + "produced NaN/Inf for "
                             + std::to_string(kNanMaxStreakAuto)
@@ -374,7 +416,7 @@ public:
                     if (!std::isfinite(x_new(i))) { finite_b = false; break; }
                 }
                 if (!finite_b) {
-                    throw std::runtime_error(
+                    throw ConvergenceFailure(ConvergenceKind::NaN, t, "",
                         std::string{"PEDSimulator (auto/BDF2): step "}
                         + "produced NaN/Inf at t="
                         + std::to_string(t)
@@ -398,6 +440,7 @@ public:
 
             // 4. Did we land on a gate edge?
             if (t_gate < t_end && near_time(t, t_gate)) {
+                if (at_corner) t = t_gate;
                 const IntegratorChoice prev_choice = choice;
                 fire_gate_event_(t_gate, x, rk_state, bdf2_state,
                                     prev_choice, result);
@@ -446,8 +489,32 @@ public:
     }
 
 private:
+    /// After a gate edge that changed the mode or a source corner, the
+    /// exact path also stops at the instants resolving the new mode's
+    /// fast transient (scheduler.hpp, plan_fast_samples_).
+    void plan_fast_samples_(Real t_e, bool changed) {
+        if constexpr (requires { system_.exact_fast_samples(t_e, Real{}, fast_t_); }) {
+            if (!changed) return;
+            fast_k_ = 0;
+            fast_t_.clear();
+            if (system_.has_exact_step()) {
+                system_.exact_fast_samples(t_e, dt_max_, fast_t_);
+            }
+        }
+    }
+
+    /// Dependent states: project onto the mode's constraint (DECISIONS,
+    /// dependent states).
+    void reinit_(Real t, Vector& x) {
+        if constexpr (requires { system_.reinit_to_constraint(t, x); }) {
+            system_.reinit_to_constraint(t, x);
+        } else {
+            (void)t; (void)x;
+        }
+    }
+
     void fire_gate_event_(Real t_event,
-                            Vector& /*x*/,
+                            Vector& x,
                             RK45State& rk_state,
                             BDF2State& bdf2_state,
                             IntegratorChoice segment_integrator,
@@ -457,6 +524,7 @@ private:
         if (new_mask == old_mask) return;   // spurious
 
         system_.set_mask(new_mask);
+        reinit_(t_event, x);
         // Discontinuous f → invalidate BOTH integrators' caches.
         rk_state.invalidate();
         bdf2_state.invalidate();
@@ -480,6 +548,9 @@ private:
     Real dt_init_;
     Real dt_max_;
     Vector x_ex_;   // exact-step workspace
+    std::vector<Real> fast_t_;   // plan_fast_samples_
+    std::size_t fast_k_ = 0;
+    Vector x_pre_;                 // the state before a gate event
     Real h_bdf2_;
     std::size_t store_every_;
     // T1.3 — consecutive RK45 NaN/Inf streak counter (BDF2 throws on
