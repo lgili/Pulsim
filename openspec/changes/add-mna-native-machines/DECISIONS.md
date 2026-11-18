@@ -181,3 +181,17 @@ Each entry: question → option taken → why → how to reverse.
   compose `add_pmsm_mna(harmonics=...)`.
 - The `<name>.T_em` trace uses the series when one is set (it used the
   fundamental-only dq formula, wrong by 1.1e-3 on the 120° BLDC test).
+
+## D15. `pwl` nominal step of the Newton-only machines (review finding)
+
+- The checkpoint review found every `pwl` step of a PMSM (pre-existing)
+  and of the induction machine failing at the requested `dt` and being
+  re-taken at `dt/2`: the step cache factorises the linear part, which
+  is singular because the flux rows exist only in the Newton refresh.
+  Every `pwl` figure measured before this was in fact at `dt/2`.
+- Fix (one flag in `run_transient`): a pool with an MNA-native PMSM or
+  induction machine takes the assembled, unfactorised carrier at every
+  `dt` (the path the retry already used; Newton refactorises
+  `J_lin + J_nl` each iteration anyway). No other circuit takes it, so
+  the 21 non-machine goldens are unchanged; the two `im_*` goldens and
+  every machine figure were re-measured at the true `dt`.

@@ -91,3 +91,9 @@ def test_induction_motor_unknown_model_is_refused():
         _yaml("    - {type: induction_motor, model: fast, name: M, "
               "phase_nodes: [a, b, c], neutral_node: n, R_s: 1, L_s: 0.1, "
               "R_r: 1, L_r: 0.1, L_m: 0.09}\n")
+
+
+def test_induction_machine_observer_model_is_refused():
+    with pytest.raises(Exception, match="induction_machine 'M': model must be 'mna'"):
+        _yaml("    - {type: induction_machine, model: observer, name: M, "
+              + _IM_KEYS + ", L_ls: 2.0e-3, L_lr: 2.0e-3}\n")

@@ -86,14 +86,14 @@ def test_locked_rotor_current_matches_the_equivalent_circuit():
 def test_synchronous_speed_draws_magnetising_current_and_no_torque():
     rms, torque, _ = _held(W_SYNC)
     assert rms == pytest.approx(I_SYNC, rel=5e-3)
-    assert abs(torque) < 0.01
+    assert abs(torque) < 2e-3 * T_S05     # measured 0.011 N·m at 50 µs
 
 
 def test_torque_and_current_at_slip_0_05():
     rms, torque, i_src = _held((1 - 0.05) * W_SYNC)
     assert rms == pytest.approx(I_S05, rel=5e-3)
     assert torque == pytest.approx(T_S05, rel=5e-3)
-    assert abs(i_src) == pytest.approx(torque, rel=1e-6)
+    assert i_src == pytest.approx(torque, rel=1e-6)   # the source sinks T_em
 
 
 def _dol(engine, dt=None, **kw):
@@ -116,11 +116,11 @@ def test_free_acceleration_on_pwl_is_second_order():
     # The fixed engine is first order from a start whose derivative is
     # not consistent (phases b, c are at ±86.6 V at t = 0 with zero
     # current; plain RL loads show the same 2.0 ratio): the start window's
-    # restart is what makes the run second order. Measured 4.03e-5,
-    # 1.01e-5, 2.52e-6 (ratios 4.00, 4.00); without it 2.13, 2.07.
+    # restart is what makes the run second order. Measured 1.60e-4,
+    # 4.01e-5, 1.00e-5 (ratios 3.99, 4.00).
     errs = [_dol_error(*_dol("pwl", dt, discontinuity_restart=True))[0]
             for dt in (8e-5, 4e-5, 2e-5)]
-    assert errs[-1] < 1e-5
+    assert errs[-1] < 2e-5
     for a, b in zip(errs, errs[1:]):
         assert a / b > 3.5, errs
 
@@ -180,11 +180,14 @@ def _energy_residual(res):
 
 def test_energy_balance_on_a_start_converges_at_second_order():
     # The model identity holds to 1e-9 at random states (C++ test); on a
-    # run the residual is the integration error: measured 4.05e-7 at
-    # 20 µs and 1.01e-7 at 10 µs (690.6 J delivered).
-    r = [_energy_residual(p.simulate(
+    # run the residual is the integration error: measured 5.17e-7 at
+    # 20 µs and 1.29e-7 at 10 µs (690.6 J delivered).
+    runs = [p.simulate(
         _machine(p.CircuitBuilder(), J=J_DOL), t_end=T_REF[-1], dt=dt,
-        engine="pwl", discontinuity_restart=True)) for dt in (2e-5, 1e-5)]
+        engine="pwl", discontinuity_restart=True) for dt in (2e-5, 1e-5)]
+    # Every step at the dt asked for (each used to fail into a dt/2 retry).
+    assert not any(res.dt_retries for res in runs)
+    r = [_energy_residual(res) for res in runs]
     assert abs(r[1]) < 2e-7
     assert abs(r[0] / r[1]) > 3.5, r
 

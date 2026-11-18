@@ -2,8 +2,11 @@
 
 Run once (needs SciPy); the numbers it prints are pinned in
 `python/tests/test_induction_machine_mna.py`. Nothing here imports
-pulsim: the same machine equations (design.md, stationary frame,
-amplitude-invariant Clarke) are integrated as a 5-state ODE in
+pulsim, but it transcribes the same design equations (design.md,
+stationary frame, amplitude-invariant Clarke) that the device implements,
+so it checks the discretisation and the circuit wiring, not the
+equations themselves (the equivalent-circuit limits check those). They are
+integrated as a 5-state ODE in
 (lambda_s_alpha, lambda_s_beta, lambda_r_alpha, lambda_r_beta, omega)
 by two different SciPy integrators at rtol 1e-12, and the two must
 agree; the steady-state numbers come from the per-phase equivalent

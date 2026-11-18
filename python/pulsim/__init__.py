@@ -3921,6 +3921,11 @@ def _attach_native_machine_traces(result, builder) -> None:
         traces = {}
         result._motor_traces = traces
     graph = builder.graph
+
+    def node(k):  # a node tied to ground has index -1: read zeros, not the last column
+        k = int(k)
+        return states[:, k] if k >= 0 else _np.zeros(len(states))
+
     for m in machines:
         bids = [int(b) for b in m["branch_ids"]]
         name = builder.name_of(bids[0])
@@ -3930,8 +3935,8 @@ def _attach_native_machine_traces(result, builder) -> None:
         psi = float(m["params"]["psi_pm"])
         L_d = float(m["params"]["L_d"])
         L_q = float(m["params"]["L_q"])
-        omega = states[:, int(m["omega_node"])]
-        theta = states[:, int(m["theta_node"])]
+        omega = node(m["omega_node"])
+        theta = node(m["theta_node"])
         cur = [states[:, int(pool.branch_var_id_for_inductor(b, graph))]
                for b in bids]
         i_a, i_b, i_c = cur
@@ -3970,10 +3975,10 @@ def _attach_native_machine_traces(result, builder) -> None:
             for b in bids)
         i_alpha = (2.0 * i_a - i_b - i_c) / 3.0
         i_beta = (i_b - i_c) / _np.sqrt(3.0)
-        psi_a = states[:, int(m["rotor_nodes"][0])]
-        psi_b = states[:, int(m["rotor_nodes"][1])]
+        psi_a = node(m["rotor_nodes"][0])
+        psi_b = node(m["rotor_nodes"][1])
         traces[f"{name}.t"] = times
-        traces[f"{name}.omega"] = states[:, int(m["omega_node"])]
+        traces[f"{name}.omega"] = node(m["omega_node"])
         traces[f"{name}.T_em"] = 1.5 * pr["pole_pairs"] * k_r * (
             psi_a * i_beta - psi_b * i_alpha)
         traces[f"{name}.psi_ra"] = psi_a

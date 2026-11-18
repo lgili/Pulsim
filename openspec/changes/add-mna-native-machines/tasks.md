@@ -15,7 +15,7 @@
 - [x] 2.2 C++ test: Jacobian against central differences at 100 random states (1e-7); power balance `Σ v_k i_k = R_s|i|² + R_r|i_r|² + dW/dt + T_em·ω` within 1e-9 — `core/tests/layer4_v3/test_induction_machine_mna.cpp`, all three stages
 - [x] 2.3 `add_induction_machine`, binding, stubs, YAML type `induction_machine`; `induction_motor` gains `model: mna | observer` — named `add_induction_machine_mna` (C++ builder + binding), YAML pinned equal to the builder
 - [x] 2.4 Tests with the declared test machine (0.5 Ω, 2 mH, 0.4 Ω, 2 mH, 60 mH, pp = 2; 100 V rms phase, 60 Hz), speed node held by a source: locked rotor 57.88 A rms; synchronous speed 4.277 A rms and |mean torque| ≤ 0.01 N·m; slip 0.05 → 16.12 N·m and 12.29 A rms; each within 0.5 %
-- [x] 2.5 Free acceleration against an independent SciPy integration (rtol 1e-10): 1e-4 on `trbdf2`; order ≥ 3.5 per halving on `pwl` — rtol 1e-12, Radau and DOP853 agree to 1e-11, numbers pinned (`_machine_reference/induction_reference.py`); `trbdf2` 1.6e-5 (rtol 1e-8); `pwl` ratios 4.00, 4.00 with `discontinuity_restart=True` (2.1 without: the engine's inconsistent start, same on a plain RL load)
+- [x] 2.5 Free acceleration against an independent SciPy integration (rtol 1e-10): 1e-4 on `trbdf2`; order ≥ 3.5 per halving on `pwl` — rtol 1e-12, Radau and DOP853 agree to 1e-11, numbers pinned (`_machine_reference/induction_reference.py`); `trbdf2` 1.6e-5 (rtol 1e-8; 3.4e-4 at the default rtol); `pwl` 1.60e-4, 4.01e-5, 1.00e-5 at 80/40/20 µs, ratios 3.99, 4.00 with `discontinuity_restart=True` (2.1 without: the engine's inconsistent start, same on a plain RL load)
 - [x] 2.6 Engine agreement `pwl` / `trbdf2` within 1e-3; inverter-fed case (PWL bridge + machine) — sine-fed start and a six-step bridge start (switches, edge oracle): 3.3e-4 of synchronous speed
 - [ ] 2.7 Conformance rows: `induction_machine` × {pwl, trbdf2, dsed refused, DC held, AC} — PARTIAL: pwl ok, trbdf2 ok, dsed / bdf1 / AC refused by name; DC held not done (DECISIONS D13)
 
@@ -23,7 +23,7 @@
 - [x] 3.1 `PmsmMna::Params` harmonic list `(h, ψ_h, φ_h)`; `λ_pm`, `dλ_pm/dθ`, `d²λ_pm/dθ²` from the series; `ψ_1` only is bit-identical to the current device
 - [x] 3.2 `add_bldc_mna(..., k_e, flat_top_deg=120, n_harmonics=25)` and `pm_harmonics_from_waveform(theta, emf, omega)` — Python (`pulsim.machines`), `omega` is the electrical speed
 - [x] 3.3 Test: open-circuit back-EMF at constant speed against the ideal trapezoid, RMS deviation ≤ 0.5 % of the flat top at 25 harmonics (computed 0.40 %)
-- [x] 3.4 Test: torque from `∫ Σ e_k i_k dt / (ω·t)` equals the device's `T_em` mean within 1e-6 (co-energy consistency) — generator into 2 Ω at held speed: mechanical power from the holding source = copper loss within 5.3e-8; `T_em` trace mean = shaft torque within 1e-15. 3.3: RMS deviation 0.40 % of the flat top (series alone 0.395 %)
+- [x] 3.4 Test: torque from `∫ Σ e_k i_k dt / (ω·t)` equals the device's `T_em` mean within 1e-6 (co-energy consistency) — generator into 2 Ω at held speed: mechanical power from the holding source = copper loss within 2.1e-7; `T_em` trace mean = shaft torque within 1e-15. 3.3: RMS deviation 0.40 % of the flat top (series alone 0.395 %)
 - [ ] 3.5 DC operating point with held mechanics for `PmsmMna` (today: fails, no DC stamp): at `θ0`, `ω0 = 0`, `i = v/R_s` within 1e-9
 - [ ] 3.6 YAML types `pmsm`, `bldc`
 - [ ] 3.7 Conformance rows: `pmsm_mna[harmonics]`, `pmsm_mna[flux_map]` × {pwl, trbdf2, dsed refused, DC held, AC}

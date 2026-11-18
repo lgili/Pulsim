@@ -712,6 +712,12 @@ inline void load_device(
         // `induction_machine` takes leakages (L_ls, L_lr); the legacy
         // `induction_motor` with `model: mna` keeps its self-inductance
         // keys (L_s, L_r) and is converted here.
+        if (const auto m = string_or(dev, "model", "mna"); m != "mna") {
+            throw std::runtime_error(std::format(
+                "yaml::load: induction_machine '{}': model must be 'mna' "
+                "(got '{}'); the observer is type: induction_motor",
+                name, m));
+        }
         if (!dev["phase_nodes"] || !dev["phase_nodes"].IsSequence() ||
             dev["phase_nodes"].size() != 3) {
             throw std::runtime_error(std::format(

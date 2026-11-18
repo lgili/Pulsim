@@ -8,8 +8,8 @@ already used by the `PMSM` and `BLDC` motors.
 ## MNA-native machine (`add_induction_machine_mna`)
 
 `b.add_induction_machine_mna(...)` solves the machine INSIDE the circuit
-matrix: no quantity is taken from the previous step, the run is second
-order on `pwl` and adaptive on `trbdf2`, and the machine is a device the
+matrix: no one-step lag, second order on `pwl` (a three-phase start
+needs `discontinuity_restart=True`, below) and adaptive on `trbdf2`, and the machine is a device the
 engine conformance matrix knows (`InductionMachineMna`; `dsed` and the AC
 sweep refuse it by name). The observer below stays for existing scripts.
 
@@ -40,16 +40,16 @@ voltages of the internal nodes `M_psi_ra`, `M_psi_rb` (1 F capacitors);
 which carries `J` (capacitor) and `1/B` (resistor). A load is any element
 on the speed node; a voltage source on it holds the speed.
 
-Verification (declared test machine 0.5 Ω, 2 mH, 0.4 Ω, 2 mH, 60 mH,
+Verification, `pwl` at `dt = 50 µs` for the held-speed rows (declared test machine 0.5 Ω, 2 mH, 0.4 Ω, 2 mH, 60 mH,
 pp = 2, 100 V rms, 60 Hz — not a real machine):
 
 | Check | Reference | Measured |
 |---|---|---|
-| Locked rotor, 57.88 A rms, 19.97 N·m | equivalent circuit | −3.7e-6, −2.2e-4 |
-| Synchronous speed, 4.277 A rms | equivalent circuit | −1.6e-5; mean torque 2.8e-3 N·m |
-| Slip 0.05, 12.29 A rms, 16.12 N·m | equivalent circuit | +1.1e-4, +1.1e-4 |
-| Free acceleration, speed at 5 instants | SciPy Radau/DOP853, rtol 1e-12 | `pwl` 2.5e-6 at 20 µs (order 4.00 per halving); `trbdf2` 1.6e-5 (rtol 1e-8) |
-| Energy `∫p_in = ∫copper + ∫T·ω + ΔW` | — | residual 1.0e-7 of 690 J at 10 µs (second order) |
+| Locked rotor, 57.88 A rms, 19.97 N·m | equivalent circuit | −2.0e-5, −2.7e-4 |
+| Synchronous speed, 4.277 A rms | equivalent circuit | −6.3e-5; mean torque 0.011 N·m |
+| Slip 0.05, 12.29 A rms, 16.12 N·m | equivalent circuit | +4.5e-4, +4.4e-4 |
+| Free acceleration, speed at 5 instants | SciPy Radau/DOP853, rtol 1e-12 | `pwl` 1.0e-5 at 20 µs (error ratio 4.00 per halving, `discontinuity_restart=True`); `trbdf2` 1.6e-5 at rtol 1e-8, 3.4e-4 at the default rtol |
+| Energy `∫p_in = ∫copper + ∫T·ω + ΔW` | — | residual 1.3e-7 of 690 J at 10 µs (second order) |
 
 On `pwl` the start of a three-phase run is first order unless
 `discontinuity_restart=True` (phases b and c are at ±86.6 V at `t = 0`

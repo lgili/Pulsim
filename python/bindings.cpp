@@ -930,7 +930,9 @@ void init_module(py::module_& m) {
               "psi_pm*cos(theta_e) by sum psi_h*cos(h*theta_e + phi_h) "
               "(phases b, c at theta_e -/+ 120 deg): a non-sinusoidal "
               "back-EMF with the torque from the same series; see "
-              "`CircuitBuilder.add_bldc_mna`.")
+              "`CircuitBuilder.add_bldc_mna`. The `<name>.i_d/i_q` "
+              "traces stay on the theta_e axis, so they are off the "
+              "PM-fundamental axis by phi_1 when phi_1 != 0.")
         .def("add_induction_machine_mna",
               &builder::CircuitBuilder::add_induction_machine_mna,
               py::arg("name"),

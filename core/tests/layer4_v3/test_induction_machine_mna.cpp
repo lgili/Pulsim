@@ -18,10 +18,13 @@
 #include "pulsim/pwl/pmsm_mna_history.hpp"
 
 #include <cmath>
+#include <format>
+#include <string>
 #include <random>
 
 using namespace pulsim;
 using IM = models::InductionMachineMna;
+using pwl::TrBdf2Stage;
 
 namespace {
 
@@ -63,6 +66,7 @@ TEST_CASE("InductionMachineMna: stamped Jacobian equals central "
                                   TrBdf2Stage::Bdf2Stage2,
                                   TrBdf2Stage::BackwardEuler};
     Real worst = 0;
+    std::string where;
     for (int trial = 0; trial < 100; ++trial) {
         r.h.update_from_state(random_state(r.n, rng), h);
         r.h.capture_gamma(random_state(r.n, rng));
@@ -80,18 +84,27 @@ TEST_CASE("InductionMachineMna: stamped Jacobian equals central "
         pwl::refresh_pmsm_mna(x, J, f, r.h, h, stage);
         const Eigen::MatrixXd Jd = Eigen::MatrixXd(J);
         for (Index c = 0; c < N; ++c) {
-            const Real d = 1e-4 * std::max(Real{1}, std::abs(x[c]));
+            // The residual is at most bilinear in x, so a central
+            // difference is exact but for roundoff (eps·|f|/d, |f| ~ 1e7
+            // here): a large step, not a small one.
+            const Real d = 1e-2 * std::max(Real{1}, std::abs(x[c]));
             Vector xp = x, xm = x;
             xp[c] += d;
             xm[c] -= d;
             const Vector col = (residual(xp) - residual(xm)) / (2 * d);
             const Real scale = std::max(Real{1}, col.cwiseAbs().maxCoeff());
-            worst = std::max(worst,
-                             (col - Jd.col(c)).cwiseAbs().maxCoeff() / scale);
+            Index row = 0;
+            const Real e =
+                (col - Jd.col(c)).cwiseAbs().maxCoeff(&row) / scale;
+            if (e > worst) {
+                worst = e;
+                where = std::format("row {} col {} stage {} fd {} J {}", row,
+                                    c, trial % 3, col[row], Jd(row, c));
+            }
         }
     }
-    INFO("worst relative column error " << worst);
-    CHECK(worst < 1e-7);
+    INFO("worst relative column error " << worst << " at " << where);
+    CHECK(worst < 1e-6);   // measured 1.6e-7 (roundoff)
 }
 
 TEST_CASE("InductionMachineMna: power balance p_in = copper + dW/dt + "

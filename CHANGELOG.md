@@ -14,10 +14,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   into the speed node), new kind `InductionMachineMna`, on `pwl` and
   `trbdf2`; `dsed` and the AC sweep refuse it by name. Checked against
   the equivalent circuit (locked rotor, synchronous speed, slip 0.05,
-  within 1.1e-4) and an independent SciPy integration of a direct-on-line
-  start (second order on `pwl`). YAML `type: induction_machine`;
+  within 4.5e-4 at 50 µs) and an independent SciPy integration of a
+  direct-on-line start (second order on `pwl` with
+  `discontinuity_restart=True`; `trbdf2` 1.6e-5 at rtol 1e-8). YAML `type: induction_machine`;
   `induction_motor` gains `model: mna | observer` (default `observer`).
   Traces `<name>.T_em/omega/psi_ra/psi_rb` on the result.
+* **Added** `add_pmsm_mna(harmonics=[(h, psi_h, phi_h), ...])`: a
+  non-sinusoidal PM flux, back-EMF and torque from the same series;
+  `CircuitBuilder.add_bldc_mna` (trapezoidal back-EMF, 0.40 % RMS from
+  the ideal trapezoid at 25 harmonics) and
+  `pulsim.machines.pm_harmonics_from_waveform` (fit a measured back-EMF).
+* **Fixed** on `pwl` every step of an `add_pmsm_mna` machine failed at
+  the requested `dt` (the cache cannot factorise the linear part, whose
+  flux rows exist only in the Newton refresh) and was re-taken at `dt/2`
+  with a warning. The step now runs at `dt`: results change (they are
+  those of the `dt` asked for), no `dt_retries`.
 * **Added** `add_dc_machine(theta_node=...)`: the shaft angle through a
   unit VCCS into a 1 F capacitor (was refused).
 * **Added** two analytic reference cases, `im_locked_rotor` and

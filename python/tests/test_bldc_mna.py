@@ -88,7 +88,7 @@ def test_generator_power_balance_at_held_speed():
     i2 = sum(np.asarray(res.i(f"M_{x}")) ** 2 for x in "abc")
     p_cu = (RS + R_L) * p.time_average(t, i2, t0, t1)
     assert p_mech > 1.0
-    assert p_mech == pytest.approx(p_cu, rel=1e-6)      # measured 5.3e-8
+    assert p_mech == pytest.approx(p_cu, rel=1e-6)      # measured 2.1e-7
     # T_em trace from the same series: its mean is the shaft torque.
     # The machine brakes: T_em is negative.
     assert -p.time_average(t, res.signal("M.T_em"), t0, t1) == pytest.approx(
@@ -107,6 +107,26 @@ def test_harmonics_from_a_waveform_recover_a_known_series():
         d = (got[int(h)][1] - phi + math.pi) % (2 * math.pi) - math.pi
         assert abs(d) < 1e-12
     assert all(got[h][0] < 1e-15 for h in (2, 4, 6, 7) if h in got)
+
+
+def test_simulated_back_emf_returns_the_series_it_was_built_from():
+    # The round trip through the engine: the open-circuit phase voltage,
+    # read back by the same fitting routine a user would run on a
+    # measured waveform, gives the trapezoid series back.
+    n = 2000
+    res = p.simulate(_bldc(p.CircuitBuilder()), t_end=3 * T_E, dt=T_E / n,
+                     engine="pwl")
+    t = np.asarray(res.times)
+    sel = slice(len(t) - n, len(t))   # last whole period, n uniform samples
+    e = (np.asarray(res.v("ua")) - np.asarray(res.v("nn")))[sel]
+    th_e = PP * np.asarray(res.v("th"))[sel]
+    got = pm_harmonics_from_waveform(th_e, e, PP * W_M, n_harmonics=7)
+    # Phasors: the series signs a term by psi < 0, the fit by phi = pi.
+    want = {int(h): psi * np.exp(1j * phi)
+            for h, psi, phi in trapezoid_harmonics(KE, PP)}
+    for h, psi, phi in got:
+        err = abs(psi * np.exp(1j * phi) - want.get(int(h), 0.0))
+        assert err < 3e-6 * want[1].real, (h, err)   # measured 6.8e-7
 
 
 def test_invalid_harmonic_is_refused_by_name():
