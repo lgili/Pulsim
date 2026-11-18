@@ -139,11 +139,19 @@ class PythonBlock:
     """
 
     def __init__(self, fn) -> None:
+        self._wrapped = fn
         upd = getattr(fn, "update", None)
         fn = upd if callable(upd) else fn
         if not callable(fn):
             raise TypeError(f"PythonBlock needs a callable; got {fn!r}")
         self.fn = fn
+
+    def reset(self, *args, **kwargs) -> None:
+        """Forward to the wrapped object's ``reset`` (a no-op when it
+        has none, e.g. a plain function)."""
+        r = getattr(self._wrapped, "reset", None)
+        if callable(r):
+            r(*args, **kwargs)
 
     def _call_with(self, names):
         fn = self.fn
@@ -386,6 +394,22 @@ class MixedDomainBlockChain:
                 if src.kind == "dt":
                     return _k.CxxInputRef.dt()
                 raise ValueError(f"unknown source kind {src.kind}")
+
+            def bounds(lo_attr, hi_attr):
+                # max(lo, min(hi, u)) with lo > hi returns lo for every u:
+                # a swapped pair, refused by name.
+                lo = float(getattr(block, lo_attr))
+                hi = float(getattr(block, hi_attr))
+                if lo > hi:
+                    raise ControlGraphBuildError(
+                        f"block '{spec.name}': {cls_name} {lo_attr}={lo!r} "
+                        f"> {hi_attr}={hi!r}")
+
+            if cls_name in ("PIController", "PIDController", "Integrator",
+                            "Limiter"):
+                bounds("output_min", "output_max")
+            elif cls_name == "OpAmp":
+                bounds("rail_min", "rail_max")
 
             def add_ported(kind, params, refs, _out=output):
                 cxx_chain.add_ported(
@@ -686,6 +710,8 @@ class MixedDomainBlockChain:
         # Rows are resolved when the graph is built: the state layout
         # moves while the circuit is still growing.
         self._sinks.append((channel, wire, name))
+        # read by periodic_steady_state / the Evaluator (no observer there)
+        builder._graph_driven = [*getattr(builder, "_graph_driven", []), name]
 
     @property
     def tick_counts(self) -> list:
@@ -748,6 +774,8 @@ class MixedDomainBlockChain:
             if chain_self._sink(channel) > threshold:
                 m.set(switch_idx, True)
             return m
+        # a gate driven by graph state: refused by periodic_steady_state
+        switch_fn._closed_loop = "MixedDomainBlockChain.make_pwm_switch_fn"  # type: ignore[attr-defined]
         return switch_fn
 
     def make_multi_pwm_switch_fn(self, channels,
@@ -801,6 +829,7 @@ class MixedDomainBlockChain:
                 if chain_self._sink(ch) > threshold:
                     m.set(idx, True)
             return m
+        switch_fn._closed_loop = "MixedDomainBlockChain.make_multi_pwm_switch_fn"  # type: ignore[attr-defined]
         return switch_fn
 
     def _sink(self, channel: str) -> float:

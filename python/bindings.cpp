@@ -4018,7 +4018,8 @@ void init_module(py::module_& m) {
         "C++ PWM generator (sawtooth comparator, 0/1 output).")
         .def(py::init<>())
         .def_readwrite("frequency", &PwmGenerator::frequency)
-        .def_readwrite("phase",     &PwmGenerator::phase)
+        .def_readwrite("phase",     &PwmGenerator::phase,
+                        "Seconds, a delay (an advance in periods before 2026-11).")
         .def("reset", &PwmGenerator::reset)
         .def("update", &PwmGenerator::update,
               py::arg("duty"), py::arg("t"));
@@ -4389,13 +4390,29 @@ void init_module(py::module_& m) {
             }, py::arg("window"), py::arg("x"), py::arg("output"))
         .def("add_pwm_generator",
             [](BlockChain& self, Real frequency, Real phase,
+                std::optional<Real> phase_fraction,
                 InputRef duty, InputRef t_ref, std::string out) {
                 auto blk = std::make_shared<PwmGenerator>();
                 blk->frequency = frequency; blk->phase = phase;
+                if (phase_fraction) {
+                    if (phase != Real{0}) {
+                        throw std::invalid_argument(
+                            "add_pwm_generator: give phase (seconds) or "
+                            "phase_fraction (of the period), not both");
+                    }
+                    // The old `phase` reading (an advance of f periods),
+                    // bit for bit: offset -(f * (1/frequency)).
+                    blk->phase = -(*phase_fraction * (Real{1} / frequency));
+                }
                 auto p = make_pwm_generator_step(self, blk, duty, t_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("frequency"), py::arg("phase") = 0.0,
-                py::arg("duty"), py::arg("t"), py::arg("output"))
+                py::kw_only(), py::arg("phase_fraction") = py::none(),
+                py::arg("duty"), py::arg("t"), py::arg("output"),
+            "PWM comparator. phase is in seconds, a delay, as "
+            "PwmGenerator(phase=); phase_fraction= is an advance in periods "
+            "(what phase= read before 2026-11: phase=x is now "
+            "phase_fraction=x, or phase=-x/frequency).")
         .def("add_svm",
             [](BlockChain& self, Real v_dc,
                 InputRef v_alpha, InputRef v_beta,
@@ -4501,7 +4518,10 @@ void init_module(py::module_& m) {
                     }
                     const auto v = r.cast<std::vector<Real>>();
                     if (v.size() != out.size()) {
-                        throw py::value_error(   // a run-time fault
+                        // std::invalid_argument crosses the kernel's run
+                        // loop as itself (ValueError), a py::value_error
+                        // became SimulationAborted.
+                        throw std::invalid_argument(
                             "PythonBlock returned " + std::to_string(v.size()) +
                             " values for " + std::to_string(out.size()) +
                             " outputs");

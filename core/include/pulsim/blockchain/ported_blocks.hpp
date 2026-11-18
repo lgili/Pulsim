@@ -75,10 +75,7 @@ inline StepResetPair make_delay_step(BlockChain& chain,
 // keep Python's argument order (min(a, b) returns b only if b < a).
 // =============================================================================
 
-namespace py_exact {
-[[nodiscard]] inline Real min(Real a, Real b) noexcept { return b < a ? b : a; }
-[[nodiscard]] inline Real max(Real a, Real b) noexcept { return b > a ? b : a; }
-}  // namespace py_exact
+// py_exact::min / max / clamp are in blocks.hpp (shared with PI, Limiter).
 
 /// `pulsim.control.Comparator` (Schmitt trigger).
 struct PyComparator {
