@@ -239,7 +239,9 @@ def test_a_monitor_tick_does_not_cap_an_open_loop_gate():
     logger ticking every 1e-4 s beside an open-loop 100 kHz buck saw 1,729
     -> 8,960 accepted steps when any tick enabled the cap (review); a rise
     on every tenth tick now gives a period of 1e-4 s, a cap of 5 us, above
-    the steps this run takes. Bound: +30 %."""
+    the steps this run takes. Bound: +30 %. Not covered, by design: a
+    monitor ticking at the PWM period (or a divisor of it) is not told
+    from a controller and does cap the gate at T/20 (DECISIONS #28)."""
     T = 1e-5
 
     def run(monitor):

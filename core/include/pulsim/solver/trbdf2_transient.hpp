@@ -1455,8 +1455,8 @@ inline SimulationResult run_transient_trbdf2(
     // Now a step samples switch_fn at h/4, h/2, 3h/4 and h (plus one
     // walking sample, below) and bisects
     // only the FIRST sub-interval whose end differs, and the step is
-    // capped at twice the narrowest pulse any gate bit has shown, so
-    // those samples stay half a pulse apart once a pulse is known.
+    // capped at kCapPulses narrowest pulses with ceil(2 h / w) samples, so
+    // the samples stay half a pulse apart once a pulse is known.
     constexpr int kGateSamples = 4;
     constexpr Real kCapPulses = 64;   // step cap in recent narrowest pulses
     const bool learn_gates = !next_edge_fn;
@@ -1591,7 +1591,7 @@ inline SimulationResult run_transient_trbdf2(
         }
         gate_rise_prev = sw;
     };
-    // The step cap: twice the narrowest RECENT pulse. Per bit, the last
+    // The step cap: kCapPulses x the narrowest RECENT pulse. Per bit, the last
     // high and low widths count while the bit keeps toggling (quiet for at
     // most twice its last period; a quiet bit keeps the run's narrowest
     // pulse as its cap); a running minimum over the run held a
@@ -1629,8 +1629,9 @@ inline SimulationResult run_transient_trbdf2(
             Real w = std::numeric_limits<Real>::infinity();
             if (wh > Real{0}) w = std::min(w, wh);
             if (wl > Real{0}) w = std::min(w, wl);
-            // A step may not hold a whole pulse. A pulse ends with a toggle
-            // in each direction once per period; when one direction is
+            // A pulse a step holds must show at a sample. A pulse ends
+            // with a toggle in each direction once per period; when one
+            // direction is
             // regular, a step that ends before its next predicted toggle
             // cannot hold a pulse that ends there, and any other toggle it
             // holds is seen at its end and located.
@@ -2975,8 +2976,8 @@ inline SimulationResult run_transient_trbdf2(
                         // Post-crossing side by a hair, as the solve lands.
                         // Not below the probes' learned conditioning floor
                         // (a singular solve there), never past the bracket.
-                        dt_land = std::max({t_lin - t, h_probe_floor,
-                                            std::min(h_probe_learned, tb - t)});
+                        dt_land = std::min(tb - t, std::max({t_lin - t,
+                            h_probe_floor, h_probe_learned}));
                         // The state where the landing is recorded: a floor
                         // that moved the time past t_lin moves the state
                         // along the bracket with it (it was stored at t_lin).
@@ -3312,6 +3313,10 @@ inline SimulationResult run_transient_trbdf2(
                         ++st.n_source_breakpoints;
                         h = std::max(h, h_pre_bp);
                         fire_due_ticks();   // as at a gate edge
+                        if (has_ticks) {
+                            learn_gate_period(
+                                switch_fn(t + Real{0.5} * h_min), t);
+                        }
                         const Real hp =
                             std::max(h_probe_floor, h_done * Real{1e-6});
                         restart_after_gate_event(false, t + hp, hp,

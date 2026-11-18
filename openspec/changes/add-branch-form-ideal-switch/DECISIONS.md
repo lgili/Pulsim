@@ -517,7 +517,14 @@ Each entry: question → option taken → evidence → how to reverse.
     starts the next step h_probe after the tick), the period must exceed 20
     pulse floors, and the cap does not go below the chatter floor. Monitor
     run 1,706 vs 1,729 without the monitor. Open-loop gates are therefore
-    unchanged (owner question: should they get p/20 too?).
+    unchanged (owner question: should they get p/20 too?), with one known
+    exception (final review): the engine cannot tell a monitor observer
+    from a controller, so a monitor ticking at the PWM period or a divisor
+    of it sees every rise at a tick and caps an open-loop gate at T/20
+    (~2.5x the CCM buck's <= 8 steps per period). Also by design and
+    untested: three equally spaced rises at ticks (a controller chattering
+    at its tick rate for two periods) set the run-wide cap for the rest
+    of the run; a resume relearns it from nothing.
     ll15 I(L) at 23 T minus converged, rtol 1e-4, 1e-5, 1e-6, 1e-7, 1e-8,
     1e-10: before 0.142, 0.066, 0.0155, 3.6e-3, 7.9e-4, 4.7e-5 A; after
     5.3e-3, 3.5e-3, 1.25e-3, 5.9e-4, 4.6e-4, 4.7e-5 A (the first three

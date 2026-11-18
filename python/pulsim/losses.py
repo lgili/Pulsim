@@ -847,12 +847,13 @@ def _diode_turn_offs(trace, times: np.ndarray,
     that carries the turn-off unless a sample follows it within ``t_rr``)
     is longer than ``t_rr``: the solver then says
     nothing about how ``v_D`` rose inside that step, and V_R (hence
-    E_rr) depends on the step size. The one exception is a FORCED
-    turn-off (another bit of the recorded mask flips on the same step,
-    ``other_flip[k]``, and ``I_F >= 0.1 · I_F_peak``) whose blocking
-    voltage is flat
-    after the step: there the voltage jumped at the turn-off and any
-    reading inside the step is the plateau. :func:`device_loss_summary`
+    E_rr) depends on the step size. The exception is a turn-off whose
+    blocking voltage is flat after the step, when it is FORCED (another
+    bit of the recorded mask flips on the same step, ``other_flip[k]``,
+    and ``I_F >= 0.1 · I_F_peak``: the voltage jumped at the turn-off and
+    any reading inside the step is the plateau) or ``controlled`` (an
+    error-controlled trace, trbdf2: its step after the turn-off record
+    would have shrunk on a ring; a fixed step can alias one). :func:`device_loss_summary`
     counts and warns about the unresolved ones.
 
     ``Q_F`` exists for the stretches that are not a
