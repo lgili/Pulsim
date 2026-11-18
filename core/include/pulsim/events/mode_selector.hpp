@@ -575,12 +575,23 @@ private:
                                      const CircuitScale& sc, Real h,
                                      int& pivots, int& released) {
         const auto k = static_cast<Eigen::Index>(ports.size());
+        const Real tol_w0 = tol * sc.vscale;
+        const Real z_short = Real{1e-12} * std::max(Real{1}, H_.cwiseAbs().maxCoeff());
         held_.assign(ports.size(), 0);
+        short_.assign(ports.size(), 0);
         for (Eigen::Index j = 0; j < k; ++j) {
             const auto ju = static_cast<std::size_t>(j);
             const auto& p = ports[ju];
             // hysteresis holds a port that was OFF before the event (D8)
             held_[ju] = (fixed_[ju] || (!coord_[ju] && !(*prev_)[ju] && p.V_th > p.V_f)) ? 1 : 0;
+            // An ideal port shorted by a loop (Z_jj = 0) whose gap is zero
+            // within tol_w (V_f = 0 across a closed ideal switch): OFF, not
+            // decided by the sign of the loop's round-off residual (a
+            // negative ulp sent Lemke into its zero column, a ray).
+            if (!held_[ju] && p.R_on == Real{0} && !coord_[ju] &&
+                std::abs(H_(j, j)) <= z_short && q_[j] >= -tol_w0) {
+                held_[ju] = short_[ju] = 1;
+            }
         }
         // impedance scale: currents are compared in volts (prototype)
         const Real zs = sc.vscale / sc.iscale;
@@ -640,6 +651,13 @@ private:
             for (Eigen::Index j = 0; j < k; ++j) {
                 const auto ju = static_cast<std::size_t>(j);
                 const auto& p = ports[ju];
+                // a shorted ideal port the others forward-bias: back to the LCP
+                if (short_[ju] && held_[ju] && wg_[j] < -tol_w0) {
+                    held_[ju] = short_[ju] = 0;
+                    release = true;
+                    continue;
+                }
+                if (short_[ju]) continue;
                 // held OFF by hysteresis: i = 0, v = V_f − w
                 if (held_[ju] && !fixed_[ju] && p.V_f - wg_[j] >= p.V_th) {
                     held_[ju] = 0;
@@ -700,7 +718,7 @@ private:
     DenseMatrix Z_, H_, Hs_, H_he_;
     Vector u_, q_, qs_, zf_, wf_, zfull_, what_, i_, wg_, q_he_;
     std::vector<int> st_, cls_, st_prev_;
-    std::vector<char> held_, coord_, fixed_, pin_, anchor_;
+    std::vector<char> held_, short_, coord_, fixed_, pin_, anchor_;
     const std::vector<char>* prev_ = nullptr;
     std::vector<Eigen::Index> free_, idx_, oth_;
     int enum_ = 0, nonunique_ = 0;

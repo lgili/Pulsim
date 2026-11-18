@@ -352,7 +352,16 @@ Each entry: question → option taken → evidence → how to reverse.
     DECISIONS #12's release, found by the LCP, `ideal_loop_releases`
     stays 0), no mode when it forward-biases it (refused as
     `ideal_voltage_loop`, the settle's name). A branch-form diode with
-    R_on > 0 is a port of its own R_on (was 0), kept in its mode. The
+    R_on > 0 is now a port of its own R_on (was 0), kept in its mode;
+    conductance ports (dsed included) are unchanged. A shorted ideal port
+    whose gap is zero within tol_w (V_f = 0 across a closed ideal switch,
+    every inverter leg) is held OFF before Lemke: the sign of the loop's
+    round-off residual no longer decides it (a negative ulp was a ray;
+    review finding). The default settle got the same floor: an OFF ideal diode
+    turns ON only past 1e-12·max(1, ‖x‖∞) (a positive ulp turned it ON
+    and the leg was refused as `ideal_voltage_loop`); the half-bridge leg
+    of `test_ideal_loop_release.py` runs under both selections, second
+    order against the RL square-wave response (1.57e-5 A at T/100). The
     judge reads the law voltage (`V_f + i_s` for an ON branch-form diode,
     so an ON ideal diode is judged on i_s; conductance entries: same
     bits). The default guard stays off on branch-form circuits (it would
@@ -367,12 +376,14 @@ Each entry: question → option taken → evidence → how to reverse.
     (half-wave RL rectifier, 5.34e-6 → 1.34e-6 → 3.35e-7 A, extinction
     angle by root-finding); the CCM RL buck whose every turn-on closes
     source + switch + ON diode (6.64e-9 → 1.67e-9 → 4.17e-10 A; the
-    settle releases 19 times, the LCP none). Oracles unchanged under
+    settle releases 19 times in the measured run, the test asserts > 0;
+    the LCP none). Oracles unchanged under
     `'lcp'`: ideal DCM buck −2.660e-6 / −6.591e-7 / −1.709e-7 /
     −4.354e-8 V at N = 50…400, order 1.972, no record. Bridge against
     the mpmath truth (311.343881428885841697 V, pwl + restart + split,
-    dt = 1 µs): −3.733e-6 V for conductance and branch (R_on = 1e-3)
-    forms, default and `'lcp'` alike, all four OFF after the D1/D4 tie.
+    dt = 1 µs, measured by a scratch probe, not a committed test):
+    −3.733e-6 V for conductance and branch (R_on = 1e-3) forms, default
+    and `'lcp'` alike, all four OFF after the D1/D4 tie.
     → Reverse: drop `coords_of_` (ideal ports refused again) and restore
     the `branch_form_diode` refusal in `run_transient`.
 
@@ -397,14 +408,21 @@ Each entry: question → option taken → evidence → how to reverse.
     cut-set (10 V, 1 Ω, 1 mH) closes source = resistor + switch + impulse
     to −2.57e-5 at τ/20 and −6.48e-6 at τ/40 on pwl (second order, taken
     around the pulse step: across it the sample quadrature is first
-    order), −3.2e-7 on trbdf2. → Reverse: drop the field and the keys.
+    order), −3.2e-7 on trbdf2. Limit: over a window that contains the
+    pulse step, `E_total` still integrates that step's linear
+    interpolation of R·i², an O(h) excess (≈ R·i²·h/2) on top of dW; the
+    balance closes at O(h²) only around the step. The cause is searched
+    among the structure's own elements (a gate first, then a diode),
+    never a switch toggling elsewhere on the step (review finding).
+    → Reverse: drop the field and the keys.
 
 26. **Shared island correction (`events/islands.hpp`).** Question: pwl and
     dsed each carried a floating-island KCL correction; which is shared?
     → Option taken: `find_islands(graph, pool, mask, weak_g)` and
     `IslandCorrection` (joint LU when there are 2+ islands and the
     estimate is regular, else sequential; σ = g·s − Σ_S f, optional
-    `base` term in dsed's expression order) live in one header; pwl's
+    `base` term in dsed's expression order) live in one header, written
+    for dsed to share (dsed still runs its own `port_islands_of_`); pwl's
     `PwlModePorts` uses it (its numbers bit-identical: survey and
     `[pwl_ports]`). dsed (`dsed/*`) is not edited here: its switch to the
     header is the dsed owner's (weak_g 1e-6 there, 1e-3 on pwl, as today).
@@ -422,10 +440,12 @@ Each entry: question → option taken → evidence → how to reverse.
 
 28. **Nits.** (a) A branch-form diode flip forced by a gate edge at the
     step start is decided in the restart's first stage; it was stamped at
-    the step end (one dt late). It is now stamped at t_prev when the step
-    restarts on a mask change and the flip is already in stage 1's bits
+    the step end (one dt late). It is now stamped at t_prev when the
+    step's gate bits changed at its start and the flip is already in the
+    first stage's bits of the attempt (reset per step and per halving retry)
     (test: the RL buck's diode turn-ons at the gate-off edges within
     1e-3·dt, with and without the split). Conductance diodes keep their
     interpolated stamp (defaults unchanged). (b) The default guard's own
     mask cycles and settle rounds now reach `mode_guard.lcp.mask_cycles`
-    / `settle_rounds_total` (were always 0).
+    / `settle_rounds_total` (were always 0; no test reaches a guard mask
+    cycle without a hook, so this is not tested).

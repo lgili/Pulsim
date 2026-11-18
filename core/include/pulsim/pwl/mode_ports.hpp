@@ -201,7 +201,7 @@ private:
         return it->second;
     }
 
-    /// The islands of `mask` (events/islands.hpp, shared with dsed): empty
+    /// The islands of `mask` (events/islands.hpp, written for dsed too): empty
     /// when the circuit holds a device kind the rule does not classify.
     const std::vector<events::Island>& islands_(const topology::SwitchStateMask& mask) {
         auto it = islands_cache_.find(mask);

@@ -8,7 +8,7 @@ elements shorts the port (Z_jj = 0): OFF when the loop reverse-biases it, no
 mode when it forward-biases it. A dependent structure held by the diode is
 released when its constraint force (i_s ON, w OFF) changes sign.
 
-Three closed forms, pwl with the SDIRK x3 restart and the event split, each run
+Four closed forms, pwl with the SDIRK x3 restart and the event split, each run
 under the default settle and under mode_selection='lcp':
 
 * clamp: 1 A, 1 kHz sine current into C || R || ideal diode. The diode holds
@@ -22,6 +22,10 @@ under the default settle and under mode_selection='lcp':
   and the ON diode form an ideal voltage loop that reverse-biases the diode:
   the default settle releases it structurally (counted), the LCP finds OFF
   directly (no structural release).
+* leg: a half-bridge of ideal switches with ideal antiparallel diodes at
+  V_f = 0 into R + L. Each diode sits across a closed switch at the loop's
+  round-off residual; it stays OFF (no refusal) and the load current is the
+  RL response to the +-V square wave.
 """
 import warnings
 
@@ -116,12 +120,43 @@ def _rl_buck(N, mode, periods=20):
     return r, i, ic
 
 
+def _leg(N, mode, periods=10):
+    # half-bridge leg, ideal switches with ideal antiparallel diodes at
+    # V_f = 0: each diode sits across a closed switch at the loop's round-off
+    # residual of either sign, and must stay OFF (the switches carry both
+    # directions); the load sees the +-V square wave
+    V, L, R, Tb = 200.0, 1e-3, 5.0, 1e-4
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vp", "p", "gnd", V)
+    b.add_voltage_source("Vn", "gnd", "n", V)
+    b.add_ideal_switch("S1", "p", "a", 0.0, 0.0)
+    b.add_ideal_switch("S2", "a", "n", 0.0, 0.0)
+    b.add_diode("D1", "a", "p", form="branch", R_on=0.0, g_off=0.0)
+    b.add_diode("D2", "n", "a", form="branch", R_on=0.0, g_off=0.0)
+    b.add_inductor("L", "a", "m", L, 0.0)
+    b.add_resistor("R", "m", "gnd", R)
+    ns = b.graph.num_switches
+    fn = p.make_combined_switch_fn(ns, [
+        p.make_pwm_switch_fn(1 / Tb, 0.5, b.switch_index_of("S1"), ns, 0.0),
+        p.make_pwm_switch_fn(1 / Tb, 0.5, b.switch_index_of("S2"), ns, Tb / 2)])
+    r = _sim(b, mode, t_end=periods * Tb, dt=Tb / N, switch_fn=fn)
+    t, i = np.asarray(r.times), np.asarray(r.i("L"))
+    tau, ic, i0 = L / R, np.empty_like(t), 0.0
+    for k in range(2 * periods):
+        a, v = k * Tb / 2, (V if k % 2 == 0 else -V)
+        m = (t >= a) & (t <= a + Tb / 2)
+        ic[m] = v / R + (i0 - v / R) * np.exp(-(t[m] - a) / tau)
+        i0 = v / R + (i0 - v / R) * np.exp(-Tb / 2 / tau)
+    return r, i, ic
+
+
 # measured max |error| at the coarser N (both selections give the same run);
 # the bound leaves a factor 1.5 for platform rounding
 CASES = {
     "clamp": (_clamp, 500, 3.30e-4),
     "cutset": (_cutset, 500, 5.34e-6),
     "rl_buck": (_rl_buck, 500, 6.64e-9),
+    "leg": (_leg, 100, 1.58e-5),
 }
 
 
@@ -145,7 +180,8 @@ def test_lcp_takes_the_same_modes_and_releases_the_loop_itself(runs):
     name, N, _, out = runs
     r0, y0, _ = out[(None, N)]
     r1, y1, _ = out[("lcp", N)]
-    assert np.array_equal(np.asarray(r0.switch_states), np.asarray(r1.switch_states))
+    # the waveforms carry the modes (no exact switch-state compare: a tie
+    # broken by round-off would flip it on another platform)
     assert np.abs(y1 - y0).max() <= 1e-9 * max(1.0, np.abs(y0).max())
     ms = r1.diagnostics["mode_selection"]
     assert ms["inconsistent"] == 0 and ms["errors"] == 0

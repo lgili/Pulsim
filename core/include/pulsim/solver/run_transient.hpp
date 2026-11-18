@@ -671,6 +671,27 @@ inline SimulationResult run_transient(
     bool has_ideal_diode = false;
     for (const auto& e : diodes.entries())
         has_ideal_diode = has_ideal_diode || pool.is_branch_form(e.branch_id);
+    // An OFF ideal diode (R_on = 0) turns ON only past a round-off floor:
+    // with V_f = 0 across a closed ideal switch (every inverter leg) its
+    // voltage is the loop's residual, and a positive ulp turned it ON into
+    // an undefined loop current (refused as ideal_voltage_loop).
+    std::vector<char> ideal_off_entry;
+    std::vector<Real> ideal_noise;
+    bool has_r0_diode = false;
+    for (const auto& e : diodes.entries()) {
+        const bool r0 = pool.is_branch_form(e.branch_id) && pool.branch_R_on(e.branch_id) == Real{0};
+        ideal_off_entry.push_back(r0 ? 1 : 0);
+        has_r0_diode = has_r0_diode || r0;
+    }
+    ideal_noise.assign(ideal_off_entry.size(), Real{-1});
+    auto update_diodes = [&](const Vector& xs) {
+        if (!has_r0_diode) return diodes.update_from_state(xs);
+        const Real floor = Real{1e-12} * std::max(Real{1}, xs.lpNorm<Eigen::Infinity>());
+        const auto es = diodes.entries();
+        for (std::size_t i = 0; i < es.size(); ++i)
+            ideal_noise[i] = (ideal_off_entry[i] && !es[i].is_on) ? floor : Real{-1};  // -1: plain rule
+        return diodes.update_from_state(xs, ideal_noise);
+    };
 
     // add-branch-form-ideal-switch D3: the per-mode structural pass, run
     // once per mode before its first solve (inactive, and free, without
@@ -1993,8 +2014,7 @@ inline SimulationResult run_transient(
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
-                flipped = !single && has_diodes &&
-                          diodes.update_from_state(x);
+                flipped = !single && has_diodes && update_diodes(x);
                 ++iters;
             } while (flipped && iters < max_iters);
             if (mode_site) {
@@ -2053,9 +2073,12 @@ inline SimulationResult run_transient(
             // With the split a built-in source jump inside the step is an
             // event of its own; only one taken at t_prev (within snap
             // either side) restarts the step.
-            // a gate edge at the step start (stamps its forced flips there)
+            // a gate edge at the step start (stamps its forced flips there):
+            // the gate bits changed, the diode bits read as committed
             const bool edge_restart =
-                restart_rule && stamped_known && !(mask_pre == stamped_mask);
+                restart_rule && stamped_known && has_ideal_diode &&
+                !(mask_pre == combine_masks(stamped_mask, diodes.current_diode_mask(),
+                                            diode_owned));
             rs_first_valid = false;
             if (restart_rule &&
                 (!stamped_known || !(mask_pre == stamped_mask) ||
@@ -2127,7 +2150,7 @@ inline SimulationResult run_transient(
                 if (has_diodes) {
                     rs_x1 = x;
                     diodes.snapshot_on_bits_into(rs_bits);
-                    if (t_from == t_prev) {
+                    if (!rs_first_valid) {   // the attempt's first stage: from t_prev
                         rs_bits_first.assign(rs_bits.begin(), rs_bits.end());
                         rs_first_valid = true;
                     }
@@ -2491,6 +2514,7 @@ inline SimulationResult run_transient(
                     gate_t = gate_t0;
                     capture_first = false;
                     split_events.clear();
+                    rs_first_valid = false;
 
                     const Size n_sub = Size{1} << h;
                     const Real sub_dt =

@@ -829,7 +829,7 @@ def test_lcp_agrees_with_the_default_settle_on_every_engine(engine):
     def avg(r):     # time-weighted, exactly clipped to [0, 2 ms]
         t, v = np.asarray(r.times), np.asarray(r.v("o"))
         return float(np.trapezoid(v, t)) / (t[-1] - t[0])
-    assert avg(r1) == pytest.approx(avg(r0), rel=1e-3)
+    assert avg(r1) == pytest.approx(avg(r0), rel=1e-6)    # pwl, dsed: 0.0 measured
 
 
 @pytest.mark.parametrize("engine", ("dsed", "exact"))

@@ -376,6 +376,15 @@ TEST_CASE("An ideal port is decided from its crossing signals in OFF coordinates
         // the same loop forward-biasing it: no consistent mode
         out = run(0.0, 1.0, prev);
         CHECK(out.status == LcpStatus::SecondaryRay);
+        // V_f = 0 across a closed ideal switch: the gap is the loop's
+        // round-off residual, of either sign; OFF both ways
+        for (const Real r : {1e-13, -1e-13}) {
+            for (const Real z : {0.0, 1e-15}) {
+                out = run(z, r, prev);
+                CHECK(out.status == LcpStatus::Trivial);
+                CHECK(out.on[0] == 0);
+            }
+        }
         // 10 V behind 5 ohm, V_f = 0.7: ON, i_s = 1.86 A, w = 0
         out = run(5.0, 10.0, prev, 0.7);
         CHECK(out.on[0] == 1);

@@ -204,20 +204,21 @@ public:
     }
 
 private:
-    /// The gated element of `d` whose bit changed since the last committed
-    /// mode, else any gated element that changed, else d's first element.
+    /// The element of `d` whose bit changed since the last committed mode,
+    /// a gated one first (the gate that entered the mode), else a diode of
+    /// `d` that changed, else d's first element. Only `d`'s own elements:
+    /// a switch toggling elsewhere on the same step is not the cause.
     [[nodiscard]] std::string cause_(const DependentStructure& d,
                                      const topology::SwitchStateMask& now) const {
-        auto changed = [&](Index el) {
+        auto changed = [&](Index el, bool gated) {
             const long s = slot_[static_cast<std::size_t>(el)];
             return known_ && s >= 0 && pool_.is_registered(el) &&
-                   pool_.kind_of(el) != DevicePool::StoredKind::Diode &&
+                   (pool_.kind_of(el) != DevicePool::StoredKind::Diode) == gated &&
                    now.get(static_cast<Size>(s)) != prev_.get(static_cast<Size>(s));
         };
-        for (const Index el : d.elements)
-            if (changed(el)) return std::string(graph_.branch_name(el));
-        for (Index el = 0; el < graph_.num_branches(); ++el)
-            if (changed(el)) return std::string(graph_.branch_name(el));
+        for (const bool gated : {true, false})
+            for (const Index el : d.elements)
+                if (changed(el, gated)) return std::string(graph_.branch_name(el));
         return d.elements.empty() ? std::string{}
                                   : std::string(graph_.branch_name(d.elements.front()));
     }
