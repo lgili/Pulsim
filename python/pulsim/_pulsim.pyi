@@ -662,9 +662,9 @@ class CircuitBuilder:
         """
         Role hint for `node_id`. V0 returns 'ground' for the ground node and 'internal' for all others.
         """
-    def param(self, name: str, value: float, unit: str = '', lo: float | None = None, hi: float | None = None) -> Parameter:
+    def param(self, name: str, value: typing.Any, unit: str = '', lo: float | None = None, hi: float | None = None) -> Parameter:
         """
-        Declare a named parameter and return it (a pulsim.Parameter); pass it to any add_* in place of a number. lo / hi bound its value.
+        Declare a named parameter and return it (a pulsim.Parameter); pass it to any add_* in place of a number. lo / hi bound its value. A str value is an expression over earlier parameters ("2*Lbase"), re-evaluated when they change.
         """
     def parameters(self) -> list[Parameter]:
         """
@@ -3047,6 +3047,11 @@ class Parameter:
     def __repr__(self) -> str:
         ...
     @property
+    def expr(self) -> str:
+        """
+        The defining expression, or "" for a literal.
+        """
+    @property
     def hi(self) -> float | None:
         ...
     @property
@@ -3065,7 +3070,16 @@ class Circuit:
     """
     Immutable circuit (add-immutable-circuit-ir). Built with `builder.build()`; a handle to shared, read-only data, cheap to copy and safe to share between threads. `simulate(circuit, ...)` runs it; the builder it came from can keep being edited.
     """
+    @staticmethod
+    def from_yaml(text: str) -> Circuit:
+        """
+        Inverse of `to_yaml`; errors name the device and the key.
+        """
+    def __getstate__(self) -> tuple[str]:
+        ...
     def __repr__(self) -> str:
+        ...
+    def __setstate__(self, arg0: tuple[typing.Any, ...]) -> None:
         ...
     def aliases(self) -> dict[typing.Any, typing.Any]:
         """
@@ -3074,6 +3088,10 @@ class Circuit:
     def branch_id_of(self, name: str) -> int:
         """
         As CircuitBuilder.branch_id_of().
+        """
+    def clone(self) -> Circuit:
+        """
+        Another handle to the same immutable data (no copy).
         """
     def components(self) -> typing.Any:
         """
@@ -3122,6 +3140,10 @@ class Circuit:
     def to_builder(self) -> CircuitBuilder:
         """
         A new, independent CircuitBuilder holding this circuit (the circuit is not affected by edits to it).
+        """
+    def to_yaml(self) -> str:
+        """
+        The lowered circuit as YAML; `Circuit.from_yaml` reads it back with the same `value_hash`. Refuses a C block (a Python callable).
         """
     def value_hash(self) -> int:
         """
@@ -3184,6 +3206,10 @@ def _cpp_mmc_arm_multilevel_step(v_C: float, m_ref: float, i_b: float, dt: float
 def _cpp_ps_pwm_switching_function(m_ref: float, t: float, n_sm: int, f_carrier: float, sm_type: str = 'half_bridge') -> int:
     """
     C++ hotpath: PS-PWM switching function — returns the integer count of SMs to insert at time `t` given the modulation reference `m_ref`. Equivalent to `ps_pwm_switching_function` in pulsim/mmc.py.
+    """
+def _eval_expr(text: str, names: collections.abc.Sequence[str], values: collections.abc.Sequence[float], who: str = 'expression') -> float:
+    """
+    Evaluate a parameter expression (ir/expr.hpp) over names = values.
     """
 def _lcp_enumerate(M: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], q: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> tuple[int, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]]:
     """

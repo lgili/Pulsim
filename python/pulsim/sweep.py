@@ -409,16 +409,12 @@ def _run_points(args_iter, grid, kpi_fn, parallel, backend, n_workers,
 
 def _circuit_form(builder_factory, parallel, backend, simulate_kwargs):
     """``(factory, backend)`` for a ``pulsim.Circuit`` first argument:
-    its points run on threads, which share the circuit (it is immutable);
-    a process pool cannot carry it."""
+    its points run on threads, which share the circuit (it is immutable),
+    or with ``backend="process"`` in workers that receive it through its
+    YAML pickle."""
     from . import Circuit
     if not isinstance(builder_factory, Circuit):
         return builder_factory, backend
-    if parallel and backend == "process":
-        raise ValueError(
-            "backend='process' cannot carry a pulsim.Circuit (it does "
-            "not pickle); use backend='thread' or 'auto' — the circuit "
-            "is immutable and shared by the threads")
     from ._circuit_ir import c_blocks_of
     if c_blocks_of(builder_factory):
         # A C block keeps its tick counter and outputs in its handle, which
@@ -443,7 +439,8 @@ def _circuit_form(builder_factory, parallel, backend, simulate_kwargs):
             "the points would share one controller's state on threads. "
             "Run parallel=False, or pass a builder factory that builds a "
             "fresh controller per point.")
-    return _CircuitPoints(builder_factory), "thread"
+    return _CircuitPoints(builder_factory), (
+        "process" if parallel and backend == "process" else "thread")
 
 
 def sweep(builder_factory: Callable[..., Any],
@@ -466,7 +463,8 @@ def sweep(builder_factory: Callable[..., Any],
         then ``circuit.with_params`` of its parameter names (and
         ``with_value`` of its ``"device.field"`` names). Its points
         share one symbolic analysis and run on threads when
-        ``parallel`` (``backend="process"`` is refused).
+        ``parallel`` (``backend="process"`` ships the circuit to each
+        worker as YAML; the points there do not share the analysis).
     params
         Dict mapping parameter names to value sequences. The sweep
         runs over the Cartesian product (every combination).

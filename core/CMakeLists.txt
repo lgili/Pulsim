@@ -466,6 +466,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_yaml_tests
         tests/yaml/test_main.cpp
         tests/yaml/test_yaml_loader.cpp
+        tests/yaml/test_circuit_yaml.cpp
     )
     target_link_libraries(pulsim_core_yaml_tests
         PRIVATE
