@@ -15,7 +15,9 @@
 // and has its own BDF2 commit; the saturable inductor takes no h) are
 // mapped here, once, from (h, TrBdf2Stage).
 
+#include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/igbt_tail_history.hpp"
 #include "pulsim/pwl/lauritzen_diode_history.hpp"
@@ -26,6 +28,9 @@
 #include "pulsim/solver/result.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <cstdint>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace pulsim::pwl {
@@ -116,21 +121,82 @@ public:
         sat.restore(s.sat);
     }
 
-    /// The run-snapshot fields (each history's own to_flat layout).
-    void to_snapshot(solver::SolverSnapshot& s) const {
-        s.saturable_history = sat.to_flat();
-        s.coss_history = coss.to_flat();
-        s.lauritzen_history = laur.to_flat();
-        s.igbt_tail_history = tail.to_flat();
-        s.pmsm_history = pmsm.to_flat();
+    /// The device-state layout of a run: `history` (the linear
+    /// companions) and these five.
+    [[nodiscard]] device::DeviceStateLayout layout(
+        const HistoryState& history) const {
+        using device::StateBlock;
+        device::DeviceStateLayout l;
+        auto put = [&l](StateBlock b, std::size_t n) {
+            l.count[static_cast<std::size_t>(b)] = static_cast<std::uint32_t>(n);
+        };
+        put(StateBlock::LinearCompanion, history.num_dynamic_branches());
+        put(StateBlock::SaturableInductor, sat.entries().size());
+        put(StateBlock::NonlinearCapacitor, coss.entries().size());
+        put(StateBlock::LauritzenDiode, laur.entries().size());
+        put(StateBlock::IgbtTail, tail.entries().size());
+        put(StateBlock::PmsmMna, pmsm.entries().size());
+        return l;
     }
-    /// Resume: each from_flat refuses a size mismatch by name.
-    void from_snapshot(const solver::SolverSnapshot& s) {
-        sat.from_flat(s.saturable_history);
-        coss.from_flat(s.coss_history);
-        laur.from_flat(s.lauritzen_history);
-        pmsm.from_flat(s.pmsm_history);
-        tail.from_flat(s.igbt_tail_history);
+
+    /// The whole device state into `s` (dev_state, dev_layout, signature).
+    void save(const HistoryState& history, solver::SolverSnapshot& s) const {
+        const auto l = layout(history);
+        s.dev_layout.assign(l.count.begin(), l.count.end());
+        s.layout_signature = l.signature();
+        // layout order (device::kStateBlocks); the first block's vector
+        // is reused, so a run end allocates as little as the 2.0 fields
+        s.dev_state = history.to_flat();
+        s.dev_state.reserve(l.size());
+        auto append = [&s](const std::vector<Real>& v) {
+            s.dev_state.insert(s.dev_state.end(), v.begin(), v.end());
+        };
+        append(sat.to_flat());
+        append(coss.to_flat());
+        append(laur.to_flat());
+        append(tail.to_flat());
+        append(pmsm.to_flat());
+        s.legacy = {};
+    }
+
+    /// Resume: refuses a layout that is not this circuit's, naming the
+    /// first block that differs; a legacy payload is converted field by
+    /// field, each history refusing a size mismatch by name.
+    void load(const solver::SolverSnapshot& s, HistoryState& history,
+              const char* engine) {
+        using device::StateBlock;
+        if (s.is_legacy() && !s.dev_state.empty()) {
+            // a hand-filled dev_state with no layout would be ignored
+            throw std::invalid_argument(
+                std::string(engine) + "(resume_from=...): the snapshot "
+                "has a dev_state of " + std::to_string(s.dev_state.size())
+                + " values but no dev_layout, so they cannot be placed. "
+                "Take dev_state and dev_layout from the same snapshot.");
+        }
+        if (!s.is_legacy()) {
+            const auto mine = layout(history);
+            const auto theirs = s.layout();
+            const std::string diff = mine.first_difference(theirs);
+            if (!diff.empty() || s.dev_layout.size() != device::kNumStateBlocks
+                || s.layout_signature != theirs.signature()
+                || s.dev_state.size() != theirs.size()) {
+                throw std::invalid_argument(
+                    std::string(engine) + "(resume_from=...): the snapshot "
+                    "belongs to a different circuit: "
+                    + (diff.empty()
+                           ? std::string("its device-state layout is corrupt "
+                                         "(signature or size)")
+                           : diff + " (this circuit, then the snapshot)")
+                    + ". Resuming from it would start the devices from "
+                      "wrong state.");
+            }
+        }
+        history.from_flat(s.view(StateBlock::LinearCompanion));
+        sat.from_flat(s.view(StateBlock::SaturableInductor));
+        coss.from_flat(s.view(StateBlock::NonlinearCapacitor));
+        laur.from_flat(s.view(StateBlock::LauritzenDiode));
+        pmsm.from_flat(s.view(StateBlock::PmsmMna));
+        tail.from_flat(s.view(StateBlock::IgbtTail));
     }
 };
 

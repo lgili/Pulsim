@@ -556,6 +556,14 @@ inline SimulationResult run_transient_trbdf2(
         x = *initial_state;
         history.seed_from_dc_op(x);
     }
+    // The five stateful-device histories as one object
+    // (add-unified-device-interface step 1); seeded from initial_state,
+    // then the snapshot, which WINS: it is the state. Each is committed
+    // only on ACCEPT under the rule its last solve stamped, so a
+    // rejected step never touches them and no rollback is needed.
+    pwl::StatefulHistories hs;
+    hs.init(graph, pool);
+    if (initial_state.has_value()) hs.seed_from_dc_op(x);
     if (resume_from != nullptr) {
         if (!resume_from->valid) {
             throw std::invalid_argument(
@@ -575,9 +583,10 @@ inline SimulationResult run_transient_trbdf2(
         }
         // Resume WINS over initial_state: the snapshot is the state.
         x = resume_from->x;
-        history.from_flat(resume_from->history);
-        if (!resume_from->diode_on.empty()) {
-            diodes.restore_on_bits(resume_from->diode_on);
+        // the device-state layout check comes before the mode bits
+        hs.load(*resume_from, history, "run_transient_trbdf2");
+        if (!resume_from->mask.empty()) {
+            diodes.restore_on_bits(resume_from->mask);
         }
     }
 
@@ -646,15 +655,6 @@ inline SimulationResult run_transient_trbdf2(
     // the pair — but the history term is not, and stamping the
     // trapezoidal one in a BDF2 stage would converge to the wrong
     // answer with every outward sign of health.
-    // The five stateful-device histories as one object
-    // (add-unified-device-interface step 1); seeded from initial_state,
-    // then the snapshot, which WINS: it is the state. Each is committed
-    // only on ACCEPT under the rule its last solve stamped, so a
-    // rejected step never touches them and no rollback is needed.
-    pwl::StatefulHistories hs;
-    hs.init(graph, pool);
-    if (initial_state.has_value()) hs.seed_from_dc_op(x);
-    if (resume_from != nullptr) hs.from_snapshot(*resume_from);
     // One step context for every stateful stamp (add-unified-device-
     // interface step 2): every solve, probe and landing sets it once, so
     // no stamp can read a step that this solve did not set.
@@ -2615,14 +2615,13 @@ inline SimulationResult run_transient_trbdf2(
     // a fixed-engine resume from it silently started at zero).
     result.final_snapshot.t = t;
     result.final_snapshot.x = x;
-    result.final_snapshot.history = history.to_flat();
-    result.final_snapshot.diode_on = diodes.num_diodes() > 0
+    result.final_snapshot.mask = diodes.num_diodes() > 0
         ? diodes.snapshot_on_bits() : std::vector<bool>{};
     // The mask x was solved under (the record's last row): diode_on
     // may already be post-edge (see initial_mask above).
     result.final_snapshot.stamped_mask =
         x_mask_known ? mask_bits(x_mask) : std::vector<bool>{};
-    hs.to_snapshot(result.final_snapshot);
+    hs.save(history, result.final_snapshot);
     result.final_snapshot.valid = true;
     result.newton = newton_ws.take_counters();
     return result;

@@ -400,7 +400,9 @@ TEST_CASE("run_transient with diodes: allocation count is O(1), "
     REQUIRE(res.states.size() == 1001);
     INFO("operator-new count for 1000-step diode run: " << delta);
     if (kCountsMeaningful) {
-        REQUIRE(delta < 16);   // measured: 8
+        // measured: 14 on a50a2c77, 15 with the snapshot's dev_layout
+        // (the same at 4000 steps: constant, not per step)
+        REQUIRE(delta < 16);
     }
 }
 

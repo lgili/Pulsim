@@ -413,8 +413,7 @@ inline SimulationResult run_transient(
                 std::to_string(state_size)
                 + " — it belongs to a different circuit.");
         }
-        x = resume_from->x;
-        history.from_flat(resume_from->history);
+        x = resume_from->x;   // device state: hs.load below
     }
 
     // The five stateful-device histories (Coss, Lauritzen, PMSM, IGBT
@@ -425,7 +424,7 @@ inline SimulationResult run_transient(
     pwl::StatefulHistories hs;
     hs.init(graph, pool);
     if (initial_state != nullptr) hs.seed_from_dc_op(x);
-    if (resume_snap != nullptr) hs.from_snapshot(*resume_snap);
+    if (resume_snap != nullptr) hs.load(*resume_snap, history, "run_transient");
 
     // The step every stateful stamp of the next solve integrates over:
     // set at the one point every solve passes through
@@ -449,10 +448,10 @@ inline SimulationResult run_transient(
 
     pwl::DiodeEventState diodes{graph, pool};
     diodes.reset();
-    if (resume_snap != nullptr && !resume_snap->diode_on.empty()) {
+    if (resume_snap != nullptr && !resume_snap->mask.empty()) {
         // The solver-owned conduction bits the snapshot promised to
         // carry (size-checked by name inside).
-        diodes.restore_on_bits(resume_snap->diode_on);
+        diodes.restore_on_bits(resume_snap->mask);
     }
     const auto diode_owned = diodes.diode_owned_bits();
     const bool has_diodes = diodes.num_diodes() > 0;
@@ -2667,9 +2666,8 @@ inline SimulationResult run_transient(
     // reproduce the run).
     result.final_snapshot.t = t_reached;
     result.final_snapshot.x = x;
-    result.final_snapshot.history = history.to_flat();
-    hs.to_snapshot(result.final_snapshot);
-    result.final_snapshot.diode_on =
+    hs.save(history, result.final_snapshot);
+    result.final_snapshot.mask =
         has_diodes ? diodes.snapshot_on_bits() : std::vector<bool>{};
     // The mask x was solved under (the record's last row when the
     // last step was stored), for a resume's row 0.

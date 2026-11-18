@@ -22,18 +22,18 @@ machine (`-j2`, `nice`).
 - [x] 2.1 `pwl::build_device_refresh(graph, pool, histories, StepCtx&)`: the static diode / MOSFET / IGBT stamps (kernel-built since `add-engine-conformance-matrix`) plus one typed pass per history, in one function; both drivers call it
 - [x] 2.2 Delete the two wrapper chains (RT:471-600, TB:588-697) in favour of 2.1; keep `nl_refresh` as a deprecated override that replaces the base stamps only
 - [x] 2.3 Remove whatever `make_combined_diode_mosfet_refresh()` call sites remain in `python/bindings.cpp` (four on this branch); `enable_nonlinear_refresh=` emits a `DeprecationWarning`
-- [x] 2.4 C++ tests: the Phase 0 clamp test (0.594 V with no callback) still passes; every pair of stateful kinds in one circuit keeps each kind's single-kind result
+- [x] 2.4 C++ tests: the Phase 0 clamp test (0.594 V with no callback) still passes; every pair of stateful kinds in one circuit keeps each kind's single-kind result — written as Python tests (`python/tests/test_stateful_kinds_pairwise.py`, 12 ordered pairs on pwl and on TR-BDF2); the clamp test is in the ctest suite
 - [x] 2.5 Oracle: goldens bit-identical; matrix unchanged
 - [x] 2.6 Docs: CHANGELOG deprecation note; `docs/internals` section on the refresh
 
 ## 3. Flat device-state vector and snapshot
-- [ ] 3.1 `device/device_state.hpp`: `DeviceState`, `DeviceStateLayout`, signature
-- [ ] 3.2 The five histories and `HistoryState` store into blocks of one `DeviceState`; their arithmetic is untouched; rollback is one copy into a preallocated twin
-- [ ] 3.3 `SolverSnapshot`: add `dev_state`, `mask`, `layout_signature`; the seven old fields become computed views; resume refuses a layout mismatch by block name
-- [ ] 3.4 Pickle version 3; reader for the 10- and 11-field tuples that converts at resume time
-- [ ] 3.5 Tests: resume pwl → trbdf2 and trbdf2 → pwl on a circuit with every stateful kind; a 2.0 pickle resumes; a snapshot of another circuit is refused by name
-- [ ] 3.6 Oracle: goldens bit-identical; `test_snapshot_resume.py`, `test_snapshot_resume_stateful.py` unchanged; zero-alloc tests green
-- [ ] 3.7 Docs: snapshot page, stubs, CHANGELOG
+- [x] 3.1 `device/device_state.hpp`: `DeviceState`, `DeviceStateLayout`, signature — the state is `SolverSnapshot::dev_state` + `DeviceStateLayout`; a separate `DeviceState` struct had no user and was dropped (DECISIONS #8)
+- [ ] 3.2 The five histories and `HistoryState` store into blocks of one `DeviceState`; their arithmetic is untouched; rollback is one copy into a preallocated twin — PARTIAL (DECISIONS #7): the snapshot is the flat device state; storage and the in-run rollback stay in the entries until each kind is ported (steps 5–7)
+- [x] 3.3 `SolverSnapshot`: add `dev_state`, `mask`, `layout_signature`; the seven old fields become computed views; resume refuses a layout mismatch by block name
+- [x] 3.4 Pickle version 3; reader for the 10- and 11-field tuples that converts at resume time
+- [x] 3.5 Tests: resume pwl → trbdf2 and trbdf2 → pwl on a circuit with every stateful kind; a 2.0 pickle resumes; a snapshot of another circuit is refused by name
+- [x] 3.6 Oracle: goldens bit-identical; `test_snapshot_resume.py`, `test_snapshot_resume_stateful.py` unchanged; zero-alloc tests green
+- [x] 3.7 Docs: snapshot page, stubs, CHANGELOG
 
 ## 4. The interface, unused
 - [ ] 4.1 `ad/ad_scalar.hpp`: `atan`, `atan2`, `pow`, `sin`, `cos`, `chain(x, value, dvalue_dx)`; unit tests against finite differences

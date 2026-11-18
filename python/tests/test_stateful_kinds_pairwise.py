@@ -64,10 +64,11 @@ def _probe(res, kind, node):
     return np.asarray(res.v(node))
 
 
-def _run(kinds, dt):
+def _run(kinds, dt, engine="pwl"):
     b = p.CircuitBuilder()
     nodes = {kind: KINDS[kind](b, "ab"[i]) for i, kind in enumerate(kinds)}
-    res = p.simulate(b, t_end=2000 * dt, dt=dt, engine="pwl")
+    kw = {"dt": dt} if engine == "pwl" else {"rtol": 1e-6}
+    res = p.simulate(b, t_end=2000 * dt, engine=engine, **kw)
     return res, nodes
 
 
@@ -86,18 +87,51 @@ def test_a_kind_beside_another_keeps_its_single_kind_result(a, b):
     ref = _probe(alone, a, n1[a])
     got = _probe(pair, a, n2[a])
     assert np.all(np.isfinite(got))
-    assert len(pair.dt_retries) == len(alone.dt_retries) == 0
-    # The two runs share time grid and step rule; only Newton's stopping
-    # point differs, so the waveform agrees to far better than 1e-6.
+    # Same time grid (a partner that forced retries would move the result
+    # by discretisation error, not by a lost stamp) ...
+    assert np.array_equal(np.asarray(pair.times), np.asarray(alone.times))
+    # ... so only Newton's stopping point differs, and the waveform agrees
+    # to far better than 1e-6 (a lost stamp moves it by O(1)).
     scale = max(np.abs(ref).max(), 1e-12)
     assert np.abs(got - ref).max() <= 1e-6 * scale, (a, b)
 
 
+def _time_weighted(res, y):
+    """Mean and RMS over the run, time-weighted (adaptive grid)."""
+    t = np.asarray(res.times)
+    span = t[-1] - t[0]
+    return (np.trapezoid(y, t) / span,
+            np.sqrt(np.trapezoid(y * y, t) / span))
+
+
+@pytest.mark.parametrize("a,b", PAIRS)
+def test_on_trbdf2_a_kind_beside_another_keeps_its_result(a, b):
+    """The TR-BDF2 refresh is the same kernel function. The partner's
+    events shift the adaptive grid, and a sample-by-sample compare then
+    measures the grid offset across a steep edge (0.35 V of 5 V on the
+    Lauritzen snap-off), so the time-weighted mean and RMS are compared:
+    a lost stamp moves them by O(1)."""
+    alone, n1 = _run([a], 1e-8, "trbdf2")
+    pair, n2 = _run([a, b], 1e-8, "trbdf2")
+    ref = _probe(alone, a, n1[a])
+    got = _probe(pair, a, n2[a])
+    assert np.all(np.isfinite(got))
+    scale = max(np.abs(ref).max(), 1e-12)
+    for r, g in zip(_time_weighted(alone, ref), _time_weighted(pair, got)):
+        assert abs(g - r) <= 1e-3 * scale, (a, b, r, g)
+
+
 def test_enable_nonlinear_refresh_is_deprecated_and_changes_nothing():
+    """On a STATIC Newton device (the chain the flag used to switch)."""
     b = p.CircuitBuilder()
-    _sat(b, "a")
-    plain = p.simulate(b, t_end=2e-6, dt=1e-8, engine="pwl")
+    b.add_sine_voltage_source("V", "a", "gnd", v_dc=0.0, v_amplitude=5.0,
+                              frequency=1e5, phase=0.0)
+    b.add_shockley_diode("D", "a", "o")
+    b.add_resistor("R", "o", "gnd", 10.0)
+    plain = p.simulate(b, t_end=2e-5, dt=1e-8, engine="pwl")
     with pytest.warns(DeprecationWarning, match="enable_nonlinear_refresh"):
-        forced = p.simulate(b, t_end=2e-6, dt=1e-8, engine="pwl",
+        forced = p.simulate(b, t_end=2e-5, dt=1e-8, engine="pwl",
                             enable_nonlinear_refresh=True)
     assert np.array_equal(np.asarray(plain.states), np.asarray(forced.states))
+    # and the diode really conducts: the half-wave reaches the load
+    assert np.asarray(plain.v("o")).max() > 3.0

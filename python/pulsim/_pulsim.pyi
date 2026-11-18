@@ -2178,7 +2178,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[bool], list[float], list[float], list[float], list[float], list[float], bool, list[bool], int]:
+    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any]:
         ...
     def __init__(self) -> None:
         ...
@@ -2188,39 +2188,82 @@ class SolverSnapshot:
         ...
     @property
     def coss_history(self) -> list[float]:
-        ...
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
     @coss_history.setter
-    def coss_history(self, arg0: collections.abc.Sequence[float]) -> None:
+    def coss_history(self, arg1: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def dev_layout(self) -> list[int]:
+        """
+        Instance count per block of ``dev_state``; empty for a 2.0-style payload.
+        """
+    @property
+    def dev_layout_names(self) -> list[str]:
+        """
+        The block names of ``dev_state``, in layout order.
+        """
+    @property
+    def dev_state(self) -> list[float]:
+        """
+        Every device state the run carries, one flat vector in the blocks named by ``dev_layout_names`` (linear companion history, then the stateful-device histories).
+        """
+    @dev_state.setter
+    def dev_state(self, arg0: collections.abc.Sequence[float]) -> None:
         ...
     @property
     def diode_on(self) -> list[bool]:
-        ...
+        """
+        Deprecated name of ``mask``.
+        """
     @diode_on.setter
-    def diode_on(self, arg0: collections.abc.Sequence[bool]) -> None:
+    def diode_on(self, arg1: collections.abc.Sequence[bool]) -> None:
         ...
     @property
     def history(self) -> list[float]:
-        ...
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
     @history.setter
-    def history(self, arg0: collections.abc.Sequence[float]) -> None:
+    def history(self, arg1: collections.abc.Sequence[float]) -> None:
         ...
     @property
     def igbt_tail_history(self) -> list[float]:
-        ...
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
     @igbt_tail_history.setter
-    def igbt_tail_history(self, arg0: collections.abc.Sequence[float]) -> None:
+    def igbt_tail_history(self, arg1: collections.abc.Sequence[float]) -> None:
         ...
     @property
     def lauritzen_history(self) -> list[float]:
-        ...
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
     @lauritzen_history.setter
-    def lauritzen_history(self, arg0: collections.abc.Sequence[float]) -> None:
+    def lauritzen_history(self, arg1: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def layout_signature(self) -> int:
+        """
+        Hash of the block names and counts; a resume refuses a snapshot whose layout is not the circuit's, naming the block.
+        """
+    @property
+    def mask(self) -> list[bool]:
+        """
+        The solver-owned mode bits the next step starts from (which switched diodes conduct).
+        """
+    @mask.setter
+    def mask(self, arg0: collections.abc.Sequence[bool]) -> None:
         ...
     @property
     def pmsm_history(self) -> list[float]:
-        ...
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
     @pmsm_history.setter
-    def pmsm_history(self, arg0: collections.abc.Sequence[float]) -> None:
+    def pmsm_history(self, arg1: collections.abc.Sequence[float]) -> None:
         ...
     @property
     def restart_pending(self) -> bool:
@@ -2237,9 +2280,11 @@ class SolverSnapshot:
         ...
     @property
     def saturable_history(self) -> list[float]:
-        ...
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
     @saturable_history.setter
-    def saturable_history(self, arg0: collections.abc.Sequence[float]) -> None:
+    def saturable_history(self, arg1: collections.abc.Sequence[float]) -> None:
         ...
     @property
     def stamped_mask(self) -> list[bool]:
