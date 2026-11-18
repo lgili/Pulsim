@@ -117,17 +117,6 @@ def _kw(make):
     return dict(switch_fn=lambda _t: p.SwitchStateMask(n)) if n else {}
 
 
-def _worst_relative(full, second, dt):
-    tf = np.asarray(full.times)
-    xf = np.asarray(full.states)[tf >= second.times[0] - 0.5 * dt]
-    xs = np.asarray(second.states)
-    n = min(len(xf), len(xs))
-    assert n > 1
-    err = float(np.abs(xf[:n] - xs[:n]).max())
-    scale = float(np.abs(xf[:n]).max())
-    return err / max(scale, 1e-30)
-
-
 @pytest.mark.parametrize("name,make,t_split,t_end,dt,field,width", CASES,
                          ids=[c[0] for c in CASES])
 def test_two_segment_resume_equals_continuous_run(name, make, t_split, t_end,
@@ -139,12 +128,17 @@ def test_two_segment_resume_equals_continuous_run(name, make, t_split, t_end,
     assert len(getattr(snap, field)) == width, (name, field)
     second = p.simulate(make(), t_end=t_end, dt=dt, engine="pwl",
                         resume_from=snap, **kw)
-    # The resumed run recomputes t = t_start + k*dt from a non-zero
-    # t_start, so a sine source's argument differs in its last bits
-    # (the same effect test_snapshot_resume.py documents for the
-    # linear case) — machine precision, not equality.
-    rel = _worst_relative(full, second, dt)
-    assert rel <= 1e-9, (name, rel)
+    # The resume continues the first run's time grid (the snapshot's
+    # grid_origin / grid_step), so every sample time, state and the final
+    # device state are the continuous run's bit for bit.
+    tf = np.asarray(full.times)
+    ts = np.asarray(second.times)
+    i0 = int(np.searchsorted(tf, ts[0]))
+    assert np.array_equal(tf[i0:], ts), name
+    assert np.array_equal(np.asarray(full.states)[i0:],
+                          np.asarray(second.states)), name
+    assert (list(full.final_snapshot.dev_state)
+            == list(second.final_snapshot.dev_state)), name
 
 
 def test_the_flux_a_resume_used_to_lose_is_carried():

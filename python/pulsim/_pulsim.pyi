@@ -2261,7 +2261,7 @@ class SolverSnapshot:
     @property
     def grid_origin(self) -> float:
         """
-        The fixed-step grid ``t`` sits on: t == grid_origin + grid_step * grid_dt exactly (NaN: none). A fixed-step resume with the same dt continues it, so its trace is the continuous run's bit for bit.
+        The fixed-step grid ``t`` sits on: t == grid_origin + grid_step * grid_dt to rounding (NaN: none). A fixed-step resume with the same dt continues it, so its trace is the continuous run's bit for bit.
         """
     @grid_origin.setter
     def grid_origin(self, arg0: float) -> None:

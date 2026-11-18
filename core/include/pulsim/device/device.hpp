@@ -110,7 +110,9 @@ concept Device =
     } &&
     std::is_standard_layout_v<typename D::template Params<Real>> &&
     std::is_trivially_copyable_v<typename D::template Params<Real>> &&
-    sizeof(typename D::template Params<Real>) == D::n_params * sizeof(Real) &&
+    (D::n_params == 0  // an empty struct still has size 1
+     || sizeof(typename D::template Params<Real>)
+            == D::n_params * sizeof(Real)) &&
     requires(const typename D::template Params<Real>& p,
              const std::array<Real, rows_v<D>>& x,
              Out<Real, rows_v<D>>& o,
@@ -124,7 +126,9 @@ concept Device =
     };
 
 /// Parameters over the AD scalar with slot `Offset + k` seeded for the
-/// k-th parameter (declaration order): the sensitivity solve's input.
+/// k-th parameter: the sensitivity solve's input. `k` counts `map`'s calls
+/// of `f`, so `map` must call it in declaration order (braced init does;
+/// a function call's argument order is unspecified).
 template <class D, std::size_t N, std::size_t Offset = 0>
 [[nodiscard]] typename D::template Params<ad::ADRealN<N>> seed_params(
     const typename D::template Params<Real>& p) {

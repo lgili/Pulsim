@@ -286,14 +286,16 @@ private:
         case device::StateBlock::NonlinearCapacitor: return legacy.coss_history;
         case device::StateBlock::LauritzenDiode: return legacy.lauritzen_history;
         case device::StateBlock::IgbtTail: return legacy.igbt_tail_history;
-        case device::StateBlock::PmsmMna: break;
+        case device::StateBlock::PmsmMna: return legacy.pmsm_history;
         }
-        return legacy.pmsm_history;
+        // A block appended after 2.0 has no named field: never alias one.
+        throw std::logic_error(
+            "SolverSnapshot: this device-state block has no 2.0 named field");
     }
 
 public:
     /// The fixed-step grid `t` sits on, t == grid_origin + grid_step ·
-    /// grid_dt exactly (NaN: none — a variable-step or hand-built
+    /// grid_dt to rounding (NaN: none — a variable-step or hand-built
     /// snapshot). A fixed-step resume with the same dt continues it, so
     /// the resumed trace is the continuous run's bit for bit.
     Real grid_origin = std::numeric_limits<Real>::quiet_NaN();

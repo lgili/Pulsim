@@ -71,6 +71,7 @@
 #include <array>
 #include <cstdint>
 #include <cmath>
+#include <limits>
 #include <format>
 #include <functional>
 #include <optional>
@@ -446,9 +447,16 @@ inline SimulationResult run_transient(
     Size k_off = 0;
     if (resume_snap != nullptr && std::isfinite(resume_snap->grid_origin)
         && resume_snap->grid_dt == opts.dt && resume_snap->t == opts.t_start
-        && resume_snap->grid_origin
-               + static_cast<Real>(resume_snap->grid_step) * opts.dt
-           == opts.t_start) {
+        // consistency only, to a few ulps: the check and the loop's
+        // t_k may round differently (FMA contraction); the loop's
+        // expression is the same in both runs, so t_k is exact anyway
+        && std::abs(resume_snap->grid_origin
+                    + static_cast<Real>(resume_snap->grid_step) * opts.dt
+                    - opts.t_start)
+               <= Real{8} * std::numeric_limits<Real>::epsilon()
+                      * (std::abs(resume_snap->grid_origin)
+                         + static_cast<Real>(resume_snap->grid_step)
+                               * opts.dt)) {
         t_origin = resume_snap->grid_origin;
         k_off = resume_snap->grid_step;
     }

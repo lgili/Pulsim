@@ -599,15 +599,41 @@ StepCtx&, bool inc)` in `pwl/device_refresh.hpp` (`inc`: the engine's
 residual form, a run constant; non-const because some stamps write
 per-iteration scratch) that reads `h` and the stage ONLY
 from the `StepCtx` it is given (never a captured step: TR-BDF2 probe
-solves divided by zero that way). Then: append a `device::StateBlock`
-(at the END: older snapshots keep loading) with its row in
-`device::kStateBlocks`, and append the class to `pwl::StatefulKinds`
-(`pwl/stateful_histories.hpp`). The concept `device::StatefulKind`
-(`device/kind.hpp`) checks the list at compile time; the drivers, the
-refresh, rollback and the snapshot iterate the list, so no file under
-`solver/` changes. Rows stay in conductance form (no `h` factor on a
-flux row). A conformance cell per variant goes in `VARIANT_CELLS`
-(`test_every_stateful_kind_has_a_conformance_cell` names a missing one).
+solves divided by zero that way). Rows stay in conductance form (no `h`
+factor on a flux row). Then, every one of these (the compiler catches
+only those marked *):
+
+1. `device/device_state.hpp`: append a `StateBlock` at the END, bump
+   `kNumStateBlocks`*, add its row (name, reals per instance) to
+   `kStateBlocks`*. Snapshots of the older builds keep loading: they are
+   signed over the blocks they have and the new block loads empty
+   (`DeviceStateLayout::signature(n_blocks)`, tested in
+   `test_device_interface.cpp`).
+2. `pwl/stateful_histories.hpp`: append the class to `StatefulKinds`*
+   (the checks of `device/kind.hpp`: concept, block width, each block
+   claimed once, Newton row of `kKindCaps`). The drivers, the refresh,
+   the rollback and `save` / `load` iterate the list: no driver under
+   `solver/` changes.
+3. `pwl/device_refresh.hpp`: the `stamp_kind` overload above*.
+4. `core/tests/layer5_v3/test_device_interface.cpp`: the two
+   `static_assert`s on the list size*.
+5. The 2.0 named views stop at the PMSM: `SolverSnapshot::set_view` /
+   `legacy_field_ref` (`solver/result.hpp`) throw for a newer block
+   instead of aliasing a field. Add a named view (and a `LegacyPayload`
+   field, `bindings.cpp` pickle and property) only if users need one.
+6. `python/pulsim/steady_state.py`: `_snapshot_like` copies the named
+   fields and refuses a snapshot carrying an unknown block by name
+   (`_COPIED_BLOCKS`); add the block there with its copy, or
+   `steady_state()` refuses the circuit.
+7. `python/bindings.cpp`: the `StoredKind` enum value and the `add_*`
+   builder method (as for every kind); `_stateful_kinds()` lists the new
+   block automatically.
+8. `python/tests/test_engine_conformance.py`: the kind's cell in `CELLS`
+   (all categories) and, for a stateful variant of an existing kind, a
+   `VARIANT_CELLS` entry named in `STATEFUL_CELLS`
+   (`test_every_stateful_kind_has_a_conformance_cell` names a missing
+   one). The cell's `on=False` control should be the same device without
+   the state, so presence proves the stateful stamp runs.
 
 **Rows only the Newton refresh stamps** (a branch current of a flux or
 machine kind) are empty in the cached linear matrix, and its factorisation
@@ -623,8 +649,9 @@ factorising, runs (DECISIONS #22).
 - **`refactor-unified-transient-stepper`.** One `StatefulHistories`
   (fold over `pwl::StatefulKinds`) with `commit(x, h, stage)`,
   `capture_gamma`, `extrapolate_previous`, `refresh_derivatives(x, h)`,
-  a one-vector rollback point (`snapshot_into` / `restore`, stage scratch
-  included) and one Newton refresh built by `build_device_refresh` that
+  a one-vector rollback point for the stateful kinds (`snapshot_into` /
+  `restore`, per-device stage scratch included; the linear companions'
+  `HistoryState` keeps its own rollback) and one Newton refresh built by `build_device_refresh` that
   reads the step from one `StepCtx` (`{h, stage}`, set before every
   solve). The snapshot is engine-independent (`x`, `dev_state` in named
   blocks, `mask`, `stamped_mask`) plus the fixed-step grid; the stepper
@@ -634,17 +661,27 @@ factorising, runs (DECISIONS #22).
   `pwl::StepCtx` + `TrBdf2Stage`).
 - **`add-probes-and-recorders` (generic pin currents).** Not yet: the
   stateful kinds still stamp by hand, so there is no per-kind `f` / `q`
-  to read currents from. What exists: the kinds are enumerable at compile
-  time (`StatefulKinds`) and at run time (`_stateful_kinds()`), each with
-  its entries (rows, params, state), so a recorder can visit them
-  without per-kind code in `solver/`. `Device::eval` (D7's
-  `i_k = f_k + a·q_k + r_k`) is the source once a kind is ported.
-- **`add-external-device-abi`.** The `Device` contract is the ABI shape:
-  `n_pins`, `n_internal`, `n_params`, `Params<S>` (standard layout, `S`
-  only), one `eval(p, x, out)` over the scalar, the integrator owning the
-  formula (`history_term`, `stamp_fq`). Not yet: an engine that stamps a
-  `Device` (the sparse `jac_slot` write and a `Device` list beside
-  `StatefulKinds`).
+  to read currents from, and the run's `StatefulHistories` is local to
+  each driver (a recorder needs a hook under `solver/` to visit it).
+  What exists: the kinds are enumerable at compile time
+  (`StatefulKinds`), and the snapshot's `dev_state` in named blocks is
+  readable after a run (`dev_layout_names`; `_stateful_kinds()` maps
+  block to kind). `Device::eval` (D7's `i_k = f_k + a·q_k + r_k`) is the
+  source once a kind is ported.
+- **`add-external-device-abi`.** The `Device` contract is a first cut of
+  the ABI shape: `n_pins`, `n_internal`, `n_params`, `Params<S>`
+  (standard layout, `S` only), one `eval(p, x, out)` over the scalar,
+  the integrator owning the formula (`history_term`, `stamp_fq`). Not
+  yet: an evaluation context (`t`, a per-instance `State` with
+  `accept`, D2), so time-dependent laws and the Jiles–Atherton core
+  cannot be written against it; an engine that stamps a `Device` (the
+  sparse `jac_slot` write and a `Device` list beside `StatefulKinds`).
 - **`add-parameter-sensitivities`.** `seed_params<D, N, Offset>` and the
   concept's third instantiation (AD parameters, Real unknowns) give
-  `∂f/∂p`, `∂q/∂p` from the same law; nothing integrates them yet.
+  `∂f/∂p`, `∂q/∂p` from the same law, for laws written in AD arithmetic.
+  Limits: `ad::chain(x, value, dvalue_dx)` carries `∂/∂x` only (its value
+  and tangent are Real), so a table or Jiles–Atherton law through it gets
+  `∂/∂p = 0` until `chain` gains a parameter-tangent overload; and
+  `seed_params` seeds in the order `Params::map` constructs the members,
+  which must be declaration order (braced init, as in the tests).
+  Nothing integrates the sensitivities yet.

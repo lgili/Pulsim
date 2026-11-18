@@ -130,7 +130,8 @@
     split run is bit-identical (states, times, final `dev_state`) split
     between edges and exactly on an on- and an off-edge. The snapshot
     carries `grid_origin`, `grid_step`, `grid_dt`; a fixed-step resume with
-    the same `dt` whose `t` is exactly `grid_origin + grid_step·dt`
+    the same `dt` whose `t` is `grid_origin + grid_step·dt` to a few ulps
+    (not exactly: the check and the loop may contract to FMA differently)
     computes `t_k = grid_origin + (grid_step + k)·dt`; otherwise (another
     `dt`, a TR-BDF2 or legacy snapshot) the grid starts at `t_start` as
     before. Pickle version 4 (version 3 + one field); version 3 and 2.0

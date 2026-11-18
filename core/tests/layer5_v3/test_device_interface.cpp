@@ -273,4 +273,19 @@ TEST_CASE("the stateful-kind registry: one rollback vector carries every "
     const auto l = hs.layout(history);
     REQUIRE(l.count[static_cast<std::size_t>(device::StateBlock::SaturableInductor)] == 1);
     REQUIRE(l.size() == 7);
+
+    // A snapshot from a build with one block fewer (a block appended
+    // since) still loads, the missing block empty; a wrong signature not.
+    solver::SolverSnapshot snap;
+    hs.save(history, snap);
+    const auto full = snap.dev_state;
+    snap.dev_layout.pop_back();   // pmsm_mna, empty in this circuit
+    snap.layout_signature = snap.layout().signature(snap.dev_layout.size());
+    REQUIRE(snap.layout_signature != snap.layout().signature());
+    hs.load(snap, history, "test");
+    solver::SolverSnapshot again;
+    hs.save(history, again);
+    REQUIRE(again.dev_state == full);
+    snap.layout_signature ^= 1U;
+    REQUIRE_THROWS_AS(hs.load(snap, history, "test"), std::invalid_argument);
 }

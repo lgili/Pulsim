@@ -113,15 +113,16 @@ public:
         for_each([&](auto& k) { k.refresh_derivatives(x_probe, h); });
     }
 
-    /// Into a preallocated rollback point (clear keeps the capacity, so
-    /// only the first call of a run allocates).
+    /// Into a preallocated rollback point (its size is the run's, so only
+    /// the first call of a run allocates).
     void snapshot_into(Snapshot& s) const {
-        s.clear();
-        for_each([&s](const auto& k) {
+        s.resize(reals_in_rollback());
+        std::size_t p = 0;
+        for_each([&](const auto& k) {
             using K = std::remove_cvref_t<decltype(k)>;
             for (const auto& e : k.entries()) {
-                K::for_each_state(e, [&s](const auto& v) {
-                    s.push_back(static_cast<Real>(v));
+                K::for_each_state(e, [&](const auto& v) {
+                    s[p++] = static_cast<Real>(v);
                 });
             }
         });
@@ -204,8 +205,10 @@ public:
             const auto mine = layout(history);
             const auto theirs = s.layout();
             const std::string diff = mine.first_difference(theirs);
-            if (!diff.empty() || s.dev_layout.size() != device::kNumStateBlocks
-                || s.layout_signature != theirs.signature()
+            // A snapshot from a build with fewer blocks (appended later)
+            // loads with the missing blocks empty.
+            if (!diff.empty() || s.dev_layout.size() > device::kNumStateBlocks
+                || s.layout_signature != theirs.signature(s.dev_layout.size())
                 || s.dev_state.size() != theirs.size()) {
                 throw std::invalid_argument(
                     std::string(engine) + "(resume_from=...): the snapshot "

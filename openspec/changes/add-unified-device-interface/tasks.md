@@ -28,7 +28,7 @@ machine (`-j2`, `nice`).
 
 ## 3. Flat device-state vector and snapshot
 - [x] 3.1 `device/device_state.hpp`: `DeviceState`, `DeviceStateLayout`, signature — the state is `SolverSnapshot::dev_state` + `DeviceStateLayout`; a separate `DeviceState` struct had no user and was dropped (DECISIONS #8)
-- [x] 3.2 The five histories and `HistoryState` store into blocks of one `DeviceState`; their arithmetic is untouched; rollback is one copy into a preallocated twin — DONE WITH A DEVIATION (DECISIONS #15): the in-run rollback of the stateful kinds is one flat vector carrying every real incl. the stage scratch (bit-identical); the live storage stays in each kind's entries, and `HistoryState` keeps its own rollback
+- [ ] 3.2 The five histories and `HistoryState` store into blocks of one `DeviceState`; their arithmetic is untouched; rollback is one copy into a preallocated twin — PARTIAL (DECISIONS #15): the in-run rollback of the stateful kinds is one flat vector carrying every real incl. the stage scratch (bit-identical); the live storage stays in each kind's entries, and `HistoryState` keeps its own rollback
 - [x] 3.3 `SolverSnapshot`: add `dev_state`, `mask`, `layout_signature`; the seven old fields become computed views; resume refuses a layout mismatch by block name
 - [x] 3.4 Pickle version 3; reader for the 10- and 11-field tuples that converts at resume time
 - [x] 3.5 Tests: resume pwl → trbdf2 and trbdf2 → pwl on a circuit with every stateful kind; a 2.0 pickle resumes; a snapshot of another circuit is refused by name
@@ -38,7 +38,7 @@ machine (`-j2`, `nice`).
 ## 4. The interface, unused
 - [x] 4.1 `ad/ad_scalar.hpp`: `atan`, `atan2`, `pow`, `sin`, `cos`, `chain(x, value, dvalue_dx)`; unit tests against finite differences (`core/tests/layer5_v3/test_device_interface.cpp`)
 - [ ] 4.2 `device/device.hpp`: `Device`, `ModeDevice`, `SelfCommutated`, `StaticDevice`, `Formula`, `StepCtx`, `Out`, the optional-member detectors — PARTIAL (DECISIONS #19): `Device` (with `Params<S>` for sensitivities), `Formula`, `StepCtx`, `Out`, `seed_params`; `device::StatefulKind` for the shipped stateful kinds (`device/kind.hpp`); not `ModeDevice` / `SelfCommutated` / `StaticDevice` nor the optional-member detectors
-- [x] 4.3 `device/stamp_fq.hpp` with `history_term` for the four formulas; unit tests: a linear capacitor and a linear inductor written as `Device` reproduce the companion stamps of `stamping/` entry by entry for trapezoidal, backward Euler and the BDF2 stage — in `device/device.hpp` (dense `stamp_fq`, `commit_fq`)
+- [x] 4.3 `device/stamp_fq.hpp` with `history_term` for the four formulas; unit tests: a linear capacitor and a linear inductor written as `Device` reproduce the companion stamps of `stamping/` entry by entry for trapezoidal, backward Euler and the BDF2 stage — in `device/device.hpp` (dense `stamp_fq`, `commit_fq`); `J` is compared with `stamping/`, `F` with the companion's hand formula
 - [ ] 4.4 `device/registry.hpp`: `TypeList`, `Builtin`, `DeviceSet`, `Instance`, `for_each_newton_kind`; `StoredKind` derived from the list with the existing values asserted — PARTIAL (DECISIONS #14): `device::TypeList` and the stateful-kind list `pwl::StatefulKinds` with its compile-time checks (concept, block widths, each block claimed once, Newton row of `kKindCaps`); `StoredKind` is not derived from a list
 - [ ] 4.5 `static_assert`: a kind is never in both the legacy refresh and the registry's Newton list
 - [ ] 4.6 Oracle: nothing uses it; goldens bit-identical; record the build time
