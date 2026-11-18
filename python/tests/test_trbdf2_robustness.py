@@ -473,3 +473,63 @@ def test_floating_bridge_with_choke_holds_no_diode():
     assert r._trbdf2_stats["n_forced_accepts"] == 0
     bus = float(r.v("dq")[-1] - r.v("dn")[-1])
     assert bus == pytest.approx(329.0959, abs=1e-3)
+
+
+# ---------------------------------------------------------------------
+# Conditioning floor: a capacitor between two OFF diodes
+# ---------------------------------------------------------------------
+
+def _buck_with_island(island, c_f=1e-6, g_off_island=1e-9, periods=20):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9)
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "vout", 100e-6)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", 20.0)
+    if island:
+        b.add_diode("Dx", "x", "gnd", 1e3, g_off_island)
+        b.add_diode("Dy", "gnd", "y", 1e3, g_off_island)
+        b.add_capacitor("Cf", "x", "y", c_f)
+    t0, n, k = 2e-6, b.graph.num_switches, b.switch_index_of("S")
+
+    def pwm(t):  # phase from t0: an edge falls on t_end (a final sliver)
+        m = p.SwitchStateMask(n)
+        ph = (t - t0) / T_SW
+        m.set(k, bool(t >= t0 - 1e-13
+                      and ph - np.floor(ph + 1e-9) < 0.3 - 1e-9))
+        return m
+    return b, pwm, t0 + periods * T_SW
+
+
+def test_tight_atol_stops_at_the_conditioning_floor():
+    """Before: at rtol 1e-10 / atol 1e-13 the controller chased the
+    L*g_off mode at t = 0 down to the island's conditioning floor and
+    aborted with "refactorize failed (numerically singular)". Now the
+    floor is learned (8.1e-13 s here) and the buck matches the run
+    without the island. The edge at t_end leaves a final sliver below
+    the floor; it ends the run instead of aborting."""
+    kw = dict(engine="trbdf2", rtol=1e-10, atol=1e-13)
+    b, pwm, t_end = _buck_with_island(True)
+    r = p.simulate(b, t_end=t_end, switch_fn=pwm, **kw)
+    b0, pwm0, _ = _buck_with_island(False)
+    r0 = p.simulate(b0, t_end=t_end, switch_fn=pwm0, **kw)
+    st = r._trbdf2_stats
+    assert st["n_conditioning_rejects"] >= 1
+    assert 0.0 < st["h_conditioning_floor"] < 1e-11
+    t, t0 = np.asarray(r.times), np.asarray(r0.times)
+    dv = np.interp(t, t0, np.asarray(r0.v("vout"))) - np.asarray(r.v("vout"))
+    assert np.abs(dv).max() < 5e-5          # 3.1e-6 V measured
+    assert 0.0 < t_end - t[-1] < 1e-12      # the 9.5e-15 s sliver
+
+
+def test_an_unresolvable_island_is_refused_by_name():
+    """C = 1 mF behind g_off = 1e-12: no step up to the ceiling factors.
+    Before: the probe ladder hit its cap and raised a bare RuntimeError.
+    Now a typed SimulationAborted names the node and the fix."""
+    b, pwm, t_end = _buck_with_island(True, c_f=1e-3, g_off_island=1e-12)
+    with pytest.raises(p.SimulationAborted) as ei:
+        p.simulate(b, t_end=t_end, engine="trbdf2", switch_fn=pwm)
+    msg = str(ei.value)
+    assert "numerically singular" in msg and "node y" in msg
+    assert "give it a DC path" in msg

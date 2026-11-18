@@ -202,3 +202,63 @@ def test_doubled_tolerances_restore_the_previous_density():
     assert st["h_max_basis"] == 0
     assert st["n_accept"] == pytest.approx(1242, rel=0.02)
     assert st["n_diode_events"] <= 30
+
+
+def test_a_periodic_gate_caps_the_step_like_a_pwm_source():
+    """ll15 (closed-loop boost, Shockley diode, 600 A start): with the
+    ceiling at span/1000 = 5 us, one 4 us step per 5 us period carried the
+    run, each at its local tolerance and all of one sign, so I(L) at 23 T
+    was 0.066 A off the converged run (rtol 1e-10). Once the gate's rises
+    prove periodic the step is capped at T/20 like a PWM source: 3.5e-3 A.
+    Bound 2e-2 A: 5.7x over the capped run, 3.3x under the old one."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]
+                           / "benchmarks" / "tools"))
+    pytest.importorskip("yaml")
+    import v1_reader
+
+    case = v1_reader.load(str(Path(__file__).resolve().parents[2]
+                              / "benchmarks/circuits/closed_loop/ll15_boost_closed_loop.yaml"))
+
+    def i_at_23T(t_end, **kw):
+        case.t_end = t_end   # 5 ms: span/1000 = 5 us is above T/20
+        r = case.run("trbdf2", **kw)
+        t = np.asarray(r.times)
+        k = int(np.argmin(np.abs(t - 23 * 5e-6)))
+        assert abs(t[k] - 23 * 5e-6) < 1e-12   # the tick instant is landed
+        return float(np.asarray(r.i("L_boost"))[k])
+
+    i_def = i_at_23T(5e-3)
+    i_ref = i_at_23T(1.2e-4, rtol=1e-10, atol=1e-14)
+    assert abs(i_def - i_ref) < 2e-2
+
+
+def test_a_monitor_tick_does_not_cap_an_open_loop_gate():
+    """The periodic-gate cap counts a rise only at a controller tick. A
+    logger ticking every 1e-4 s beside an open-loop 100 kHz buck saw 1,729
+    -> 8,960 accepted steps when any tick enabled the cap (review); a rise
+    on every tenth tick now gives a period of 1e-4 s, a cap of 5 us, above
+    the steps this run takes. Bound: +30 %. Not covered, by design: a
+    monitor ticking at the PWM period (or a divisor of it) is not told
+    from a controller and does cap the gate at T/20 (DECISIONS #28)."""
+    T = 1e-5
+
+    def run(monitor):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+        b.add_switch("S", "vin", "sw", 1e3, 1e-9)
+        b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+        b.add_inductor("L", "sw", "vout", 100e-6)
+        b.add_capacitor("C", "vout", "gnd", 100e-6)
+        b.add_resistor("RL", "vout", "gnd", 5.0)
+        n, k = b.graph.num_switches, b.switch_index_of("S")
+
+        def fn(t):
+            m = p.SwitchStateMask(n)
+            m.set(k, bool((t % T) < 0.4 * T))
+            return m
+        kw = dict(step_observer=lambda t, x: None, controller_period=1e-4) if monitor else {}
+        return p.simulate(b, 4e-3, engine="trbdf2", switch_fn=fn, **kw)._trbdf2_stats["n_accept"]
+
+    assert run(True) < 1.3 * run(False)

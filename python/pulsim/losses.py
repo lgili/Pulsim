@@ -801,6 +801,7 @@ def _diode_turn_offs(trace, times: np.ndarray,
                      t_rr: float = _DEFAULT_T_RR,
                      other_flip: "Optional[np.ndarray]" = None,
                      i_peak: "Optional[float]" = None,
+                     controlled: bool = False,
                      ) -> List[Dict[str, float]]:
     """Turn-off instants of one diode, read from its recorded
     conduction-state trace (``pulsim._diode_state``).
@@ -846,12 +847,13 @@ def _diode_turn_offs(trace, times: np.ndarray,
     that carries the turn-off unless a sample follows it within ``t_rr``)
     is longer than ``t_rr``: the solver then says
     nothing about how ``v_D`` rose inside that step, and V_R (hence
-    E_rr) depends on the step size. The one exception is a FORCED
-    turn-off (another bit of the recorded mask flips on the same step,
-    ``other_flip[k]``, and ``I_F >= 0.1 · I_F_peak``) whose blocking
-    voltage is flat
-    after the step: there the voltage jumped at the turn-off and any
-    reading inside the step is the plateau. :func:`device_loss_summary`
+    E_rr) depends on the step size. The exception is a turn-off whose
+    blocking voltage is flat after the step, when it is FORCED (another
+    bit of the recorded mask flips on the same step, ``other_flip[k]``,
+    and ``I_F >= 0.1 · I_F_peak``: the voltage jumped at the turn-off and
+    any reading inside the step is the plateau) or ``controlled`` (an
+    error-controlled trace, trbdf2: its step after the turn-off record
+    would have shrunk on a ring; a fixed step can alias one). :func:`device_loss_summary`
     counts and warns about the unresolved ones.
 
     ``Q_F`` exists for the stretches that are not a
@@ -933,13 +935,16 @@ def _diode_turn_offs(trace, times: np.ndarray,
         # The step that holds t_eval: a short sample right after the
         # turn-off (trbdf2's post-event record) does not resolve a long
         # step that follows it, unless that step is flat (the sample before
-        # it already holds the post-jump plateau). shortcut: at a natural
-        # turn-off a ring across that long step with equal ends (the aliased
-        # "plateau" above) passes as flat; before the record existed the
-        # short step alone passed it, so this is no wider than it was.
-        # Upgrade: test the long step against the ring period.
+        # it already holds the post-jump plateau). A fixed step can alias a
+        # ring into equal ends (the "plateau" above): there only a forced
+        # turn-off passes. On trbdf2 (`controlled`) the step passed a local
+        # error test. shortcut: that test is weak exactly here (after a
+        # turn-off record on a linear circuit the step is the L-stable SDIRK
+        # step with a filtered estimate, which damps a ring much faster than
+        # the step instead of reporting it); upgrade: compare the step with
+        # the ring period of the post-turn-off mode.
         k_e = min(max(int(np.searchsorted(t, t_eval)), k), max(end - 1, k))
-        flat_after = k_e > k and abs(float(v[k_e] - v[k_e - 1])) <= (
+        flat_after = (controlled or forced) and k_e > k and abs(float(v[k_e] - v[k_e - 1])) <= (
             _RR_FLAT_RTOL * max(abs(float(v[k_e])), abs(float(v[k_e - 1])))
             + flat_atol)
         unresolved = (float(t[k_e] - t[k_e - 1]) > t_rr * (1.0 + 1e-9)
@@ -2187,7 +2192,8 @@ def device_loss_summary(
                 t_rr = _recovery_time(d_spec, name)
                 offs = _diode_turn_offs(
                     d_trace, times, t_rr=t_rr, other_flip=d_flip,
-                    i_peak=None if win.whole else entry["i_peak"])
+                    i_peak=None if win.whole else entry["i_peak"],
+                    controlled=getattr(result, "engine_used", None) == "trbdf2")
                 if not win.whole:
                     offs = [ev for ev in offs
                             if win.a <= ev["t_off"] < win.b]

@@ -12,6 +12,8 @@ Counters, not wall time: accepted steps, solves and the first step
 after each edge.
 """
 
+import warnings
+
 import numpy as np
 import pytest
 from scipy.linalg import expm
@@ -232,19 +234,22 @@ def test_the_pulse_cap_follows_the_recent_pulses():
     follows each gate bit's last pulses, lifted between predicted toggles of
     a periodic direction; the quiet gap before the 10 ns PWM pulses keeps the
     run's minimum, so none of them is stepped over (the cap that lapsed
-    there missed 4 of 99). The
-    1 ns pulse sits where the start-up steps are short enough to see it
-    (gate_pulse_min proves it was seen)."""
+    there missed 4 of 99). The 1 ns pulse rises on a source breakpoint (a
+    step always ends there, whatever the start-up steps), so its rise is a
+    step start and its fall is located: gate_pulse_min proves it was seen."""
     Tp = 1e-5
     b = _tick_buck()
     k = b.switch_index_of("S")
+    b.add_pulse_voltage_source("Vmark", "mark", "gnd", 0.0, 1.0, 1e-8, 1.0)
+    b.add_resistor("Rmark", "mark", "gnd", 1e3)
 
     def fn(t):
         m = p.SwitchStateMask(b.graph.num_switches)
         on = (1e-8 <= t < 1.1e-8) or (t >= 1e-5 and (t % Tp) < 1e-3 * Tp)
         m.set(k, bool(on))
         return m
-    with pytest.warns(UserWarning, match="narrower than the spacing"):
+    with warnings.catch_warnings():   # undersampling depends on the start-up steps
+        warnings.filterwarnings("ignore", message=".*narrower than the spacing")
         r = p.simulate(b, 1e-3, engine="trbdf2", switch_fn=fn)
     assert r._trbdf2_stats["gate_pulse_min"] < 2e-9
     t = np.asarray(r.times)
@@ -286,3 +291,85 @@ def test_a_gate_that_gets_faster_loses_no_pulse():
     j = np.flatnonzero(s[1:] != s[:-1])
     j = j[t[j] > 3.5 * Tp]
     assert (int(np.sum(s[j + 1])), int(np.sum(~s[j + 1]))) == (want, want)
+
+
+def test_a_learned_probe_floor_leaves_the_turn_offs_unchanged():
+    """A capacitor held only by two OFF diodes (1e-9 S against 2C/h) has an
+    exactly zero pivot at a femtosecond probe, so the run learns a probe
+    floor (> 0), and the buck's DCM turn-offs land with that floor in force.
+    The island is decoupled: the buck must read what it reads without it.
+    No reachable run has the floor move a secant landing past its root
+    (n_interp_floor_landings stays 0 here; a floor large enough aborts in a
+    step solve first, DECISIONS #31), so that branch is not asserted."""
+    def run(island):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("Vin", "vin", "gnd", VIN)
+        b.add_switch("S", "vin", "sw", GON, GOFF)
+        b.add_diode("D1", "gnd", "sw", GON, GOFF)
+        b.add_inductor("L", "sw", "vout", L)
+        b.add_capacitor("C", "vout", "gnd", C)
+        b.add_resistor("RL", "vout", "gnd", 20.0)
+        if island:
+            b.add_diode("Dx", "x", "gnd", GON, 1e-9)
+            b.add_diode("Dy", "gnd", "y", GON, 1e-9)
+            b.add_capacitor("Cf", "x", "y", 1e-6)
+        n, k = b.graph.num_switches, b.switch_index_of("S")
+
+        def fn(t):
+            m = p.SwitchStateMask(n)
+            ph = (t - T0) / T
+            m.set(k, bool(t >= T0 - 1e-13 and ph - np.floor(ph + 1e-9) < 0.3 - 1e-9))
+            return m
+        r = p.simulate(b, t_end=T0 + 100 * T, engine="trbdf2", switch_fn=fn)
+        t = np.asarray(r.times)
+        s = np.asarray(r.switch_states)[:, b.switch_index_of("D1")]
+        off = t[:-1][s[:-1] & ~s[1:]]   # the last ON sample: the landing
+        return r, off[off > 5e-6]       # past the start-up settle
+
+    r0, off0 = run(False)
+    r1, off1 = run(True)
+    st = r1._trbdf2_stats
+    assert st["probe_floor_used"] > 0
+    assert len(off0) == len(off1) == 100
+    # Both land to the localisation resolution max(h_min, 1e-4 h), which
+    # differs with the step sequence: measured 5.0e-10 s.
+    assert np.abs(off1 - off0).max() < 2.5e-9
+    v0 = np.interp(np.asarray(r1.times), np.asarray(r0.times), np.asarray(r0.v("vout")))
+    # Measured 6.0e-5 V (the two step sequences' own error), 40x under.
+    assert np.abs(np.asarray(r1.v("vout")) - v0).max() < 1e-4 * VIN
+
+
+def test_learning_a_periodic_opaque_gate_is_cheap():
+    """cl_boost_pi's loop behind an opaque lambda: the PI starts from duty 0,
+    so the first pulses are 0.28 ns and 0.585 ns before three rises prove
+    the gate periodic. At a cap of 2 w those two periods took 26,490 steps
+    (28,049 in 0.3 ms); at 64 w with the gate sampled every w/2 they take
+    866 (2,357 in all, 1,594 with the edges declared). Same edges."""
+    def loop_run(opaque):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("Vin", "vin", "gnd", 5.0)
+        b.add_resistor("R_dcr", "vin", "n_l", 0.1)
+        b.add_inductor("L1", "n_l", "sw", 47e-6)
+        b.add_switch("SL", "sw", "gnd", 100.0, 1e-6)
+        b.add_diode("D", "sw", "out", 100.0, 1e-6)
+        b.add_capacitor("C", "out", "gnd", 470e-6, 10.0)
+        b.add_resistor("R", "out", "gnd", 40.0)
+        pi = p.PIController(Kp=0.005, Ki=50.0, output_min=0.0, output_max=0.9)
+        loop = p.bind_pi_to_switch(b, pi=pi, measured="out", setpoint=10.0,
+                                   switch="SL", freq=100e3)
+        gate = loop.switch_fn
+        with warnings.catch_warnings():   # the 0.28 ns start-up pulse
+            warnings.filterwarnings("ignore", message=".*narrower than the spacing")
+            r = p.simulate(b, 3e-4, engine="trbdf2",
+                           switch_fn=(lambda t: gate(t)) if opaque else gate,
+                           step_observer=loop.step_observer)
+        s = np.asarray(r.switch_states)[:, b.switch_index_of("SL")]
+        tt = np.asarray(r.times)[1:]
+        t = (tt > 2.5e-5) & (tt < 3e-4 - 5e-6)   # past the start-up pulses, not t_end
+        return (r, int(np.sum(t & s[1:] & ~s[:-1])),
+                int(np.sum(t & ~s[1:] & s[:-1])))
+
+    r, up, dn = loop_run(True)
+    _, up_e, dn_e = loop_run(False)
+    assert (up, dn) == (up_e, dn_e)
+    assert r._trbdf2_stats["n_accept"] < 3_500     # measured 2,357

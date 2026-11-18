@@ -1627,6 +1627,22 @@ public:
         return event_entries_.size();
     }
 
+    /// The matrix and constant vector behind the resident `solve_at`
+    /// factor of (mask, dt), or nullptr when none is resident at that dt.
+    /// Values equal `SegmentAssembler::assemble(mask, dt)`: TR-BDF2's
+    /// round-off bounds read |J| here instead of re-assembling.
+    [[nodiscard]] const sparse::Matrix* resident_event_matrix(
+        const topology::SwitchStateMask& mask, Real dt,
+        const Vector** b_constant) const noexcept {
+        const auto it = event_entries_.find(mask);
+        if (dt == dt_ || it == event_entries_.end()
+            || it->second.current_dt != dt) {
+            return nullptr;
+        }
+        *b_constant = &it->second.b_constant;
+        return &it->second.J;
+    }
+
     /// Number of DISTINCT dt values currently loaded across the
     /// event-solver entries. (v2.0 Phase 1: an entry holds ONE
     /// factor at its most recent dt — dt values are no longer
