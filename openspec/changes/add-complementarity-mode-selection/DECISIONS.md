@@ -262,3 +262,32 @@ choices it did not pin.
     turn-on event on a bus whose common mode is set by 1 MΩ and g_off
     leaks. The default (settle + guard) is right on all six. Recorded in
     KNOWN_LIMITATIONS; 'lcp' stays opt-in.
+
+## Slice 4: the fixed engine (2026-11-13)
+
+22. **The pwl port model is the site's own system, in increment form.**
+    Question: at which discretisation does a `pwl` decision site pose
+    its LCP? → Option taken: pass 0 is the site's own linear system
+    `J(mask₀, dt)·s = −(b_c + b_extra)` — the trapezoidal step at `dt`,
+    a restart stage on the factor of `2γh` with its backward-Euler
+    history, a split sub-step at `dt₂`, the static step at `dt = 0` —
+    through the cache's factor of the settle's first mask
+    (`cache.solve_at(mask₀, dt, …)`, already built by that solve), so
+    the LCP and the settle answer the same discrete question and the
+    settle's fixed point is one of the LCP's solutions. Increment form
+    from the step-start state: `J·δ = −(b_c + b_extra + J·x₀)`,
+    `u = v(x₀) + v(δ)` (`pwl/mode_ports.hpp`); the dsed lesson. The
+    selector's tie widenings (100·h, 1e4·h, h = the site's interval)
+    are backward Euler from `x₀` with the site's source rows (its
+    `b_extra` less its rule's companion history),
+    `J = G + C/(2h)`, `J·δ = −(b_c + b_src + G·x₀)`, on a dense LU of
+    their own: the cache's event table keeps one entry per mask and
+    refactors on a dt change, so widening through it would refactor the
+    engine's own restart factor (counters moved, numbers not). The
+    judge is the engine's own law on the site's solve under the
+    candidate (ON `i ≥ −tol·iscale`, OFF `v − V_on ≤ tol·vscale`,
+    `V_on = turn_on_voltage`). → Evidence: Catch2 "pwl port model: u
+    and Z reproduce the cache's own site solve" (dt, dt/2, dt/1000;
+    floating bus on a 1 MΩ tie) and "the widened pass is backward Euler
+    from x0". → Reverse: `PwlModePorts::site` back to the dsed history
+    form (`rhs = −(C/dt)·x₀ + …`).

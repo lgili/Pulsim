@@ -87,18 +87,19 @@ def test_shadow_counters_and_keys():
     assert ms["port_model_problems"] >= ms["lcp_count"] > 0
 
 
-@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto"))
-def test_shadow_refused_by_name_off_dsed(engine):
+@pytest.mark.parametrize("engine", ("trbdf2", "auto"))
+def test_shadow_refused_by_name_on_trbdf2(engine):
+    """pwl runs the shadow since slice 4 (test_mode_pwl.py); trbdf2 has no hook yet."""
     b = B.FAMILIES["bridge1_vf07"].builder(0.0)
     kw = {"dt": 1e-6} if engine == "pwl" else {}
     with pytest.raises(p.UnsupportedError) as ei:
         p.simulate(b, t_end=1e-3, engine=engine, mode_selection="shadow", **kw)
-    assert ei.value.feature == "mode_selection" and ei.value.engine in ("pwl", "trbdf2")
+    assert ei.value.feature == "mode_selection" and ei.value.engine == "trbdf2"
 
 
-@pytest.mark.parametrize("engine", ("pwl", "trbdf2"))
-def test_lcp_refused_by_name_off_dsed(engine):
-    """Slice 2 opened 'lcp' on dsed only (task 6.1); the other engines have no event hook yet."""
+@pytest.mark.parametrize("engine", ("trbdf2",))
+def test_lcp_refused_by_name_on_trbdf2(engine):
+    """'lcp' runs on dsed (task 6.1) and pwl (6.3); trbdf2 has no event hook yet."""
     b = B.FAMILIES["bridge1_vf07"].builder(0.0)
     with pytest.raises(p.UnsupportedError) as ei:
         p.simulate(b, t_end=1e-3, engine=engine, mode_selection="lcp", **({"dt": 1e-6} if engine == "pwl" else {}))

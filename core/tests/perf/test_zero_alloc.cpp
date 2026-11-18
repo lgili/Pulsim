@@ -399,8 +399,18 @@ TEST_CASE("run_transient with diodes: allocation count is O(1), "
     const std::size_t delta = g_new_count.load() - before;
     REQUIRE(res.states.size() == 1001);
     INFO("operator-new count for 1000-step diode run: " << delta);
+    // The same run at 4000 steps: O(1) means the count does not move.
+    opts.t_end = 4e-3;
+    const std::size_t before4 = g_new_count.load();
+    auto res4 = solver::run_transient(cache, g, pool, opts, switch_fn);
+    const std::size_t delta4 = g_new_count.load() - before4;
+    REQUIRE(res4.states.size() == 4001);
+    INFO("operator-new count for 4000-step diode run: " << delta4);
     if (kCountsMeaningful) {
-        REQUIRE(delta < 16);   // measured: 8
+        REQUIRE(delta4 == delta);
+        // measured: 8; 18 with the pwl mode guard's per-run set-up (its
+        // port model, diode names, passivity record), 18 at 4000 steps too
+        REQUIRE(delta < 32);
     }
 }
 

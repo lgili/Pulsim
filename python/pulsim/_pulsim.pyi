@@ -1175,6 +1175,22 @@ class SimulationOptions:
     def max_newton_iterations(self, arg0: int) -> None:
         ...
     @property
+    def mode_guard(self) -> bool:
+        """
+        Fixed engine: re-decide with the LCP a settle that ends in a mode violating a diode's law.
+        """
+    @mode_guard.setter
+    def mode_guard(self, arg0: bool) -> None:
+        ...
+    @property
+    def mode_selection(self) -> int:
+        """
+        Fixed engine diode decision: 0 the settle (guarded by mode_guard), 1 'shadow', 2 'lcp' (add-complementarity-mode-selection).
+        """
+    @mode_selection.setter
+    def mode_selection(self, arg0: int) -> None:
+        ...
+    @property
     def on_impulse_error(self) -> bool:
         """
         add-branch-form-ideal-switch: refuse the run at the first impulsive re-initialisation (simulate(on_impulse='error')) instead of recording it.
@@ -1525,6 +1541,11 @@ class SimulationResult:
         Inductors whose current a post-solve guard overwrote. Empty unless a guard was enabled AND fired.
         """
     @property
+    def mode_diagnostics(self) -> dict[typing.Any, typing.Any]:
+        """
+        add-complementarity-mode-selection on pwl: 'mode_shadow' / 'mode_selection' counters and the default guard's 'mode_guard' (simulate() copies them to res.diagnostics).
+        """
+    @property
     def n_restart_factorizations(self) -> int:
         """
         Factorisations made for the restart stages: one per mask at 2*gamma*dt (more only if the segment byte budget evicts), plus every refactor for a restart stage of another size (event-split sub-intervals, the stage-2 re-try). 0 with the rule off.
@@ -1602,6 +1623,10 @@ class SimulationResult:
     the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,
     ``"step_observer"``, ``"should_continue"``, ``"closed_loops"``);
     empty when the loop ran fully native."""
+    diagnostics: dict[str, typing.Any]
+    """Complementarity mode-selection counters of a ``pwl`` run
+    (``'mode_shadow'``, ``'mode_selection'``, ``'mode_guard'``): a copy of
+    ``mode_diagnostics``. Set by :func:`pulsim.simulate` on ``pwl``."""
     control_tick_counts: list[int]
     """Controller ticks per tick source, in registration order (closed
     loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by

@@ -1830,6 +1830,12 @@ def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
     return lc.builder, t_end, dt, t_start, store_every
 
 
+# add-complementarity-mode-selection task 4b.3: the fixed engine's default
+# guard (a settle ending in a mode that violates a diode's law is re-decided by
+# the LCP). Module switch for A/B measurements only, as _dsed_dispatch.MODE_GUARD.
+_PWL_MODE_GUARD = True
+
+
 def simulate(
     builder: "CircuitBuilder | LoadedCircuit",
     t_end: Optional[float] = None,
@@ -2086,12 +2092,14 @@ def simulate(
         each settled mode on its own exact trajectory and re-decides an
         event whose mode violates a diode's law with the complementarity
         problem (LCP) — counted in ``result.diagnostics['mode_guard']``.
-        ``'lcp'`` (``engine='dsed'``): the LCP decides every event,
-        counters in ``result.diagnostics['mode_selection']``.
-        ``'shadow'`` (``engine='dsed'``): the default run, plus the LCP
+        On ``engine='pwl'`` the same guard runs after every settle that
+        ends without a consistent mode (a mask cycle or an exhausted
+        budget). ``'lcp'`` (``pwl`` / ``dsed``): the LCP decides every
+        event, counters in ``result.diagnostics['mode_selection']``.
+        ``'shadow'`` (``pwl`` / ``dsed``): the default run, plus the LCP
         solved beside it; disagreements in
-        ``result.diagnostics['mode_shadow']``. ``'shadow'`` / ``'lcp'``
-        on ``pwl`` / ``trbdf2`` raise :class:`UnsupportedError`.
+        ``result.diagnostics['mode_shadow']``. ``'shadow'`` / ``'lcp'`` on
+        ``trbdf2`` raise :class:`UnsupportedError`.
 
     resolution_diagnostics
         ``engine='pwl'`` only, default OFF (it costs 5-14 %): ``True``
@@ -2543,14 +2551,14 @@ def simulate(
                 "engine automatically, or engine='pwl' explicitly.")
 
     # engine is now 'trbdf2' or 'pwl' ('auto' never routes to dsed)
-    if mode_selection in ("shadow", "lcp"):
+    if mode_selection in ("shadow", "lcp") and engine == "trbdf2":
         raise _unsupported(
             engine, "mode_selection",
             f"simulate(engine={_engine_asked!r}, mode_selection="
-            f"{mode_selection!r}): the complementarity selection is "
-            f"implemented on engine='dsed' only; this run lands on "
-            f"engine={engine!r}, whose settle has no hook yet. Use "
-            "engine='dsed', or drop mode_selection.")
+            f"{mode_selection!r}): the complementarity selection runs on "
+            "engine='pwl' and engine='dsed'; this run lands on "
+            "engine='trbdf2', whose settle has no hook yet. Use "
+            "engine='pwl' or 'dsed', or drop mode_selection.")
 
     if engine == "trbdf2":
         # add-branch-form-ideal-switch: a branch-form diode is refused
@@ -2941,6 +2949,8 @@ def simulate(
     if discontinuity_restart is not None:
         opts.discontinuity_restart = bool(discontinuity_restart)
     opts.on_impulse_error = on_impulse == "error"
+    opts.mode_selection = {"shadow": 1, "lcp": 2}.get(mode_selection, 0)
+    opts.mode_guard = _PWL_MODE_GUARD
     if resolution_diagnostics is not None:
         opts.resolution_diagnostics = bool(resolution_diagnostics)
     if inductor_freeze_di_max is not None and inductor_freeze_di_max > 0:
@@ -3202,6 +3212,7 @@ def simulate(
         # router that cannot be interrogated is a router that
         # surprises people.
         res.engine_used = "pwl"
+        res.diagnostics = dict(res.mode_diagnostics)
         res.engine_route_reason = (
             "; ".join(_route_reasons) if _route_reasons else None)
         res.step_loop_python_callbacks = _step_loop_python_callbacks(
