@@ -2480,6 +2480,9 @@ void init_module(py::module_& m) {
                         "before NewtonRoundoffBudgetExceeded (default 130).")
         .def_readwrite("enable_substep_state_correction",
                         &SimulationOptions::enable_substep_state_correction)
+        .def_readwrite("split_snap", &SimulationOptions::split_snap,
+                        "Split events within split_snap*dt of a step "
+                        "boundary are taken at it (default 0.01).")
         .def_readwrite("resolution_diagnostics",
                         &SimulationOptions::resolution_diagnostics,
                         "Record SimulationResult.resolution (truncation "
@@ -3408,6 +3411,12 @@ void init_module(py::module_& m) {
                         g, [g](Real t) { return g.next_edge_after(t); }};
                     s.follows_controller = true;
                     cpp_fns.emplace_back(std::move(s));
+                } else if (py::isinstance<pulsim::blockchain::ChainSignalGate>(fn)) {
+                    const auto g = fn.cast<pulsim::blockchain::ChainSignalGate>();
+                    sources::SwitchSchedule s{
+                        g, [g](Real t) { return g.next_edge_after(t); }};
+                    s.follows_controller = true;
+                    cpp_fns.emplace_back(std::move(s));
                 } else {
                     cpp_fns.emplace_back(fn.cast<SwitchScheduleFn>());
                 }
@@ -3649,6 +3658,23 @@ void init_module(py::module_& m) {
             "discontinuity_restart: SDIRK restart steps still owed when "
             "the run ended (the rule takes a discontinuity's step and the "
             "next two); a resumed run takes them first. 0 = none.")
+        .def_property("_control_state",
+            [](const SolverSnapshot& s) -> py::object {
+                if (!s.control_state) return py::none();
+                return *static_cast<py::object*>(s.control_state.get());
+            },
+            [](SolverSnapshot& s, py::object v) {
+                if (v.is_none()) { s.control_state.reset(); return; }
+                // freed wherever the last copy dies: take the GIL there
+                s.control_state = std::shared_ptr<void>(
+                    new py::object(std::move(v)), [](void* p) {
+                        if (!Py_IsInitialized()) return;   // leaked at exit
+                        py::gil_scoped_acquire gil;
+                        delete static_cast<py::object*>(p);
+                    });
+            },
+            "The controllers' state at t (pulsim internal; set by "
+            "simulate(), read by resume_from).")
         .def_property_readonly("restart_pending",
             [](const SolverSnapshot& s) { return s.restart_steps_left > 0; },
             "True when restart_steps_left > 0.")
@@ -3681,19 +3707,24 @@ void init_module(py::module_& m) {
                               L.history, L.saturable_history, L.coss_history,
                               L.lauritzen_history, L.igbt_tail_history,
                               L.pmsm_history))
-                        : py::object(py::none()));
+                        : py::object(py::none()),
+                    // the controllers' state does not pickle: a resume
+                    // from the copy refuses by name instead of
+                    // continuing whatever the graphs hold
+                    static_cast<bool>(s.control_state));
             },
             [](py::tuple t) {
                 SolverSnapshot s;
                 if (t.size() >= 2 && py::isinstance<py::str>(t[0])) {
                     if (t[0].cast<std::string>() != "SolverSnapshot"
-                        || t[1].cast<int>() != 3 || t.size() != 12) {
+                        || t[1].cast<int>() != 3
+                        || (t.size() != 12 && t.size() != 13)) {
                         throw std::runtime_error(
                             "SolverSnapshot: pickle version "
                             + std::to_string(t[1].cast<int>()) + " with "
                             + std::to_string(t.size())
                             + " fields; this Pulsim reads version 3 "
-                              "(12 fields)");
+                              "(12 or 13 fields)");
                     }
                     s.t = t[2].cast<Real>();
                     s.x = t[3].cast<Vector>();
@@ -3720,6 +3751,16 @@ void init_module(py::module_& m) {
                         g.lauritzen_history = L[3].cast<std::vector<Real>>();
                         g.igbt_tail_history = L[4].cast<std::vector<Real>>();
                         g.pmsm_history = L[5].cast<std::vector<Real>>();
+                    }
+                    if (t.size() == 13 && t[12].cast<bool>()) {
+                        // a marker the resume refuses by name (pulsim._control_state)
+                        s.control_state = std::shared_ptr<void>(
+                            new py::object(py::str("dropped by pickling")),
+                            [](void* p) {
+                                if (!Py_IsInitialized()) return;
+                                py::gil_scoped_acquire gil;
+                                delete static_cast<py::object*>(p);
+                            });
                     }
                     return s;
                 }
@@ -3749,7 +3790,7 @@ void init_module(py::module_& m) {
                 if (t.size() >= 11) {
                     s.stamped_mask = t[10].cast<std::vector<bool>>();
                 }
-                if (t.size() == 12) {
+                if (t.size() >= 12) {
                     s.restart_steps_left =
                         py::isinstance<py::bool_>(t[11])
                             ? (t[11].cast<bool>() ? Size{3} : Size{0})
@@ -4537,6 +4578,16 @@ void init_module(py::module_& m) {
             "First gate edge strictly after t under the duties held now "
             "(period starts and OFF thresholds); stale after a tick.");
 
+    py::class_<ChainSignalGate>(m, "CxxChainSignalGate", py::dynamic_attr(),
+        "A discrete gate: a switch is ON while its control-graph signal "
+        "exceeds 0.5; its edges are the graph's publication instants. "
+        "Every engine calls it in C++.")
+        .def("__call__", [](const ChainSignalGate& self, Real t) { return self(t); },
+            py::arg("t"))
+        .def("next_edge_after", &ChainSignalGate::next_edge_after, py::arg("t"),
+            "First instant strictly after t at which the gate may switch "
+            "(a publication of the graph; inf for a label-time graph).");
+
     py::class_<ChainBExtra>(m, "CxxChainBExtra",
         "A control graph's driven-source b_extra_fn(t), with the instants "
         "its value may jump (next_jump_after), both in C++.")
@@ -4545,6 +4596,11 @@ void init_module(py::module_& m) {
             return self.chain->next_jump_after(t);
         });
 
+    py::class_<BlockChain::State>(m, "CxxBlockChainState",
+        "A copy of everything a run changes in one control graph (block "
+        "states, signals, tick grid, recordings); restorable only into "
+        "the graph that saved it. Opaque; does not pickle.");
+
     py::class_<BlockChain>(m, "CxxBlockChain",
         "C++ block chain executor. Build via add_<block>(...) "
         "methods, bind nodes, then pass make_step_observer(dt) to "
@@ -4552,6 +4608,18 @@ void init_module(py::module_& m) {
         .def(py::init<>())
         .def("size", &BlockChain::size)
         .def("reset", &BlockChain::reset)
+        .def("save_state", &BlockChain::save_state,
+            "A copy of the graph's run state (snapshot / resume).")
+        .def("restore_state", &BlockChain::restore_state, py::arg("state"),
+            "Put back a state saved from this graph.")
+        .def("next_due_per_group", &BlockChain::next_due_per_group,
+            "Each rate group's next tick instant (group 1, 2, ...).")
+        .def("next_due", &BlockChain::next_due,
+            "Instant of the next tick on the graph's own grid (inf: none).")
+        .def_property_readonly("n_calls", &BlockChain::n_calls,
+            "Observer calls since the last restart of the tick grid.")
+        .def("uncaptured_blocks", &BlockChain::uncaptured_blocks,
+            "Blocks holding state that save_state() does not copy.")
         .def("name_last", &BlockChain::name_last, py::arg("name"),
             py::arg("kind") = std::string{},
             "Name (and kind) of the most recently added block.")
@@ -4608,6 +4676,21 @@ void init_module(py::module_& m) {
             "A switch_fn (C++, no GIL): for each (channel, switch_idx, "
             "period, phase) the bit is ON while pulsim.control.pwm_on(t, "
             "period, duty, phase) with duty = what the channel's sinks see.")
+        .def("make_signal_gate",
+            [](BlockChain& self, Size num_switches,
+               const std::vector<std::pair<std::string, Index>>& mapping) {
+                ChainSignalGate g{&self, num_switches, {}};
+                for (const auto& [ch, idx] : mapping) {
+                    if (idx < 0 || static_cast<Size>(idx) >= num_switches) {
+                        throw std::invalid_argument(
+                            "make_signal_gate: switch index out of range");
+                    }
+                    g.pairs.emplace_back(self.slot(ch), idx);
+                }
+                return g;
+            }, py::arg("num_switches"), py::arg("mapping"), py::keep_alive<0, 1>(),
+            "A discrete gate (C++, no GIL): for each (channel, switch_idx) "
+            "the bit is ON while what the channel's sinks see is > 0.5.")
         .def("make_tick_observer", [](BlockChain& self) {
                 return ChainTick{&self, self.make_tick_observer()};
             }, py::keep_alive<0, 1>(),

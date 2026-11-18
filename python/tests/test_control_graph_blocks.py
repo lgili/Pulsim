@@ -185,6 +185,25 @@ def test_multi_output_block_is_bit_identical_to_its_python_class(case):
     assert np.asarray(got).tobytes() == np.asarray(want).tobytes()
 
 
+@pytest.mark.parametrize("vdc", [400.0, 0.0, -5.0])
+def test_raw_kernel_clarke_and_svm_are_the_one_law(vdc):
+    # G29: the kernel structs (CxxClarkeTransform / CxxSpaceVectorModulator,
+    # add_clarke / add_svm) call block_laws.h, so they
+    # equal the Python classes bit for bit (before: (2a-b-c)/3, 0.866..,
+    # 1/v_dc and duty 0.5 at v_dc <= 0)
+    from pulsim import _pulsim as _p
+    r = _rng(zlib.crc32(b"raw-clarke-svm"))
+    ck, svm = _p.CxxClarkeTransform(), _p.CxxSpaceVectorModulator()
+    svm.v_dc = vdc
+    cp, sp = p.ClarkeTransform(), p.SpaceVectorModulator(v_dc=vdc)
+    got, want = [], []
+    for _ in range(N):
+        a, b, c, va, vb = (float(r.uniform(-300, 300)) for _ in range(5))
+        got += [*ck.update(a, b, c), *svm.update(va, vb)]
+        want += [*cp.update(a=a, b=b, c=c), *sp.update(v_alpha=va, v_beta=vb)]
+    assert np.asarray(got).tobytes() == np.asarray(want).tobytes()
+
+
 def test_inverse_clarke_zero_defaults_to_zero_and_pll_takes_3_outputs():
     b = p.CircuitBuilder()
     b.add_resistor("R", "a", "gnd", 1.0)

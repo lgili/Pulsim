@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <stdexcept>
 #include <vector>
@@ -296,6 +297,10 @@ public:
     /// the step of a discontinuity and the next two as SDIRK(2,2)
     /// steps, so a run stopped inside that window resumes it. 0 = none.
     Size restart_steps_left = 0;
+    /// The controllers' state at `t` (control graphs, C blocks), owned
+    /// by the language binding that ran them; the solver never reads it
+    /// and a copy of the snapshot shares it.
+    std::shared_ptr<void> control_state;
     /// True once populated by a run.
     bool valid = false;
 };

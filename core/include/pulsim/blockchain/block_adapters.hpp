@@ -49,6 +49,7 @@ inline StepResetPair make_gain_step(BlockChain& chain, std::shared_ptr<Gain> blk
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update(resolve(x, ctx)));
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -61,6 +62,7 @@ inline StepResetPair make_subtract_step(BlockChain& chain, std::shared_ptr<Subtr
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update(resolve(a, ctx), resolve(b, ctx)));
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -74,6 +76,7 @@ inline StepResetPair make_sum_step(BlockChain& chain, std::shared_ptr<Sum> blk,
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update( resolve(a, ctx), resolve(b, ctx), resolve(c, ctx)));
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -86,6 +89,7 @@ inline StepResetPair make_math_block_step(BlockChain& chain, std::shared_ptr<Mat
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update(resolve(a, ctx), resolve(b, ctx)));
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -107,6 +111,7 @@ inline StepResetPair make_pi_controller_step(BlockChain& chain,
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update( resolve(setpoint, ctx), resolve(measured, ctx), resolve(dt_ref, ctx)));
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -123,6 +128,7 @@ inline StepResetPair make_pid_controller_step(BlockChain& chain,
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update( resolve(setpoint, ctx), resolve(measured, ctx), resolve(dt_ref, ctx)));
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -138,6 +144,7 @@ inline StepResetPair make_first_order_lpf_step(BlockChain& chain,
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update( resolve(input_value, ctx), resolve(dt_ref, ctx)));
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -152,6 +159,7 @@ inline StepResetPair make_integrator_step(BlockChain& chain,
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update( resolve(x, ctx), resolve(dt_ref, ctx)));
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -166,6 +174,7 @@ inline StepResetPair make_differentiator_step(BlockChain& chain,
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update( resolve(x, ctx), resolve(dt_ref, ctx)));
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -178,6 +187,7 @@ inline StepResetPair make_limiter_step(BlockChain& chain, std::shared_ptr<Limite
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update(resolve(x, ctx)));
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -192,6 +202,7 @@ inline StepResetPair make_moving_average_step(BlockChain& chain,
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update(resolve(x, ctx)));
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -211,6 +222,7 @@ inline StepResetPair make_pwm_generator_step(BlockChain& chain,
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update( resolve(duty, ctx), resolve(t_ref, ctx)));
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -232,6 +244,7 @@ inline StepResetPair make_svm_step(BlockChain& chain, std::shared_ptr<SpaceVecto
         ctx.put(db_channel, o.db);
         ctx.put(dc_channel, o.dc);
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -258,6 +271,7 @@ inline StepResetPair make_clarke_step(BlockChain& chain, std::shared_ptr<ClarkeT
         ctx.put(beta_channel, o.beta);
         ctx.put(zero_channel, o.zero);
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -278,6 +292,7 @@ inline StepResetPair make_inverse_clarke_step(BlockChain& chain,
         ctx.put(b_channel, o.b);
         ctx.put(c_channel, o.c);
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -297,6 +312,7 @@ inline StepResetPair make_park_step(BlockChain& chain, std::shared_ptr<ParkTrans
         ctx.put(d_channel, o.d);
         ctx.put(q_channel, o.q);
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -315,6 +331,7 @@ inline StepResetPair make_inverse_park_step(BlockChain& chain,
         ctx.put(alpha_channel, o.alpha);
         ctx.put(beta_channel, o.beta);
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
@@ -343,6 +360,7 @@ inline StepResetPair make_pll_step(BlockChain& chain, std::shared_ptr<PLL> blk,
         ctx.put(omega_channel, o.omega);
         ctx.put(freq_channel, o.freq);
     };
+    chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
     return {std::move(step), std::move(reset)};
 }
