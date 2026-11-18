@@ -6,6 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Realistic passives and the datasheet MOSFET: open tasks (2026-11-18)
+
+* **Added** `pulsim.passives.fit_mlcc_dc_bias(v_bias, c_ratio, C_nominal,
+  *, tol=0.01)`: an MLCC's datasheet DC-bias curve integrated into an odd
+  `ChargeTable` (knots added until `C(v)` reproduces every input point
+  within `tol`), returned with its residual. A fit reproduces its own
+  data; it is not a validation. On the engines (C0/(1+(v/V1)^2), 10 µF,
+  V1 = 10 V): a 10 mV ripple on a 20 V bias sees 1.9999996 µF against C(20 V) = 2 µF; the charge
+  moved over a ±20 V cycle balances to 1.6e-15 (pwl) / 2.5e-15 (trbdf2) of Q(20 V) on pwl and
+  trbdf2, measured with a series linear "charge meter" capacitor (the
+  engine's own quadrature); pwl and trbdf2 agree to 1.6e-6 V on 20 V.
+* **Added** YAML `nonlinear_capacitor` (`law:` the power-MOSFET charge-law
+  map, or `dc_bias: {v, C}` mirrored into an odd table) and `rac:` ladder
+  cells on `inductor` (`{R_dc, L_hf, R: [...], L: [...]}`, the elements
+  `add_inductor(rac=)` builds, pinned by comparing `components()`); an
+  `(f, R_ac)` curve is refused by name (fitting needs Python).
+* **Added** conformance cells for `capacitor[esr/esl]`,
+  `inductor[esr/c_par/rac]`, `transmission_line[pi]` (every engine and the
+  AC sweep) and `nonlinear_capacitor[odd table]` (pwl / trbdf2; refused by
+  name on dsed, bdf1 and the AC sweep).
+* **Added** tutorial 09 (datasheet curves → fitters → double pulse, on
+  synthetic curves) and the ngspice power-MOSFET decks in the nightly
+  reference job.
+* **Fixed** the Level-1 MOSFET law jumped by `2·α(1−β)·K·V_OV²` across
+  V_DS = 0 (5.2 mA at V_GS = 3.2 V for K = 1.43, κ = 15): a current
+  through a partly-on channel had no solution at its zero crossing and
+  both engines aborted. The third-quadrant branch now adds
+  `2·forward(V_OV − V_DS/2, 0)`, continuous and C¹ at V_DS = 0; the
+  V_DS ≥ 0 branch is unchanged and every pinned result is byte-identical,
+  except a Level-1 buck on trbdf2 that aborted at t = 0 and now runs.
+* **Measured** no first-order defect at a gate-driven threshold crossing:
+  against a Radau reference, pwl is second order (2.00 per halving on
+  the VDMOS C_gd case; pre-asymptotic at the sat/triode blend on the
+  linear one until dt resolves it) and trbdf2 1.6–2.2 against its step
+  count. Charge conservation of the three charge laws (task 1.6) is met
+  at 1e-9 once the 1e-12 S placeholder that `pwl` stamps on every
+  nonlinear-capacitor node is counted; that leak is recorded, not
+  removed.
+
 ### Integration batch 11: circuit IR YAML, TR-BDF2 ideal switch, pwl complementarity, exact step 3, control graph G23, optimisation slice 6 merged
 
 * **Fixed** `make_combined_switch_fn` of a control-graph gate whose loop

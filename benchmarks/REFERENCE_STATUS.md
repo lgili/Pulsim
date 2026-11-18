@@ -258,19 +258,20 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | three_phase/three_phase_balanced_rl_load.yaml | 1.82e-06 | 1.83e-06 | 1.83e-06 | 4.22e-05 | 6.01e-07 |
 | three_phase/three_phase_diode_rectifier.yaml | 1.51 | 0.00632 | 0.00631 | 5.51e-05 | 0.00034 |
 
-## Analytic set (20 cases; agree = within the frozen ceiling, 1e-3 when none)
+## Analytic set (21 cases; agree = within the frozen ceiling, 1e-3 when none)
 
 | configuration | agree | disagree | error | refused | unverified |
 |---|---:|---:|---:|---:|---:|
-| pwl | 19 | 1 | 0 | 0 | 0 |
-| pwl+restart | 20 | 0 | 0 | 0 | 0 |
-| pwl+split | 20 | 0 | 0 | 0 | 0 |
-| trbdf2 | 20 | 0 | 0 | 0 | 0 |
-| dsed | 19 | 0 | 0 | 1 | 0 |
+| pwl | 20 | 1 | 0 | 0 | 0 |
+| pwl+restart | 21 | 0 | 0 | 0 | 0 |
+| pwl+split | 21 | 0 | 0 | 0 | 0 |
+| trbdf2 | 21 | 0 | 0 | 0 | 0 |
+| dsed | 20 | 0 | 0 | 1 | 0 |
 
 | case | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
 | rc_charge | 0.00159 | 1.84e-06 | 1.84e-06 | 2.26e-07 | 1.55e-14 |
+| rc_esr_charge | 0.000144 | 1.35e-08 | 1.35e-08 | 1.63e-07 | 4.19e-14 |
 | rc_discharge | 0.00159 | 1.84e-06 | 1.84e-06 | 6.6e-07 | 1.18e-14 |
 | rl_step | 0.00112 | 1.3e-06 | 1.3e-06 | 6.25e-07 | 1.9e-15 |
 | rlc_underdamped | 0.000613 | 1.42e-05 | 1.42e-05 | 5.78e-05 | 5.1e-15 |

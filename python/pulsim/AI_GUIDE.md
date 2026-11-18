@@ -62,9 +62,9 @@ That union is pybind11's `float`, as in the stub.
 - **Piecewise-linear switching.** `add_switch`, `add_mosfet`, `add_igbt`
   and `add_diode` are two-state branches: conductance `g_on` (or
   `1/R_on`) on, `g_off` off; `add_diode(V_f=)` adds a series drop
-  while on. Each one owns a bit in the switch-state mask. Controlled
-  switches follow `switch_fn(t) -> SwitchStateMask`; diodes commutate
-  on their own. Smooth devices (`add_shockley_diode`, `add_mosfet_level1`,
+  while on. Each owns a switch-mask bit. Controlled switches follow
+  `switch_fn(t) -> SwitchStateMask`; diodes self-commutate. Smooth
+  devices (`add_shockley_diode`, `add_mosfet_level1`,
   `add_power_mosfet`, saturable magnetics) are solved with Newton;
   `add_nonlinear_diode` is retired. Gate transients:
   `p.double_pulse_test`, trbdf2 or `dt` <= 0.2 ns.
@@ -447,8 +447,8 @@ sample INDEX; at a time, use `np.interp(t, res.times, res.v(name))`.
 A ground name gives zeros. `phase` of the two PWM helpers and `carrier_phase`
 are time shifts in SECONDS (`t - phase`); `modulation_phase` and the
 `phase` of `add_sine_voltage_source` are radians.
-`add_capacitor(c0=, esr=, esl=)` / `add_inductor(i0=, esr=, c_par=)`
-set initial conditions and series parasitics.
+`add_capacitor(c0=, esr=, esl=)` / `add_inductor(i0=, esr=, c_par=, rac=)`
+set ICs and parasitics; MLCC bias: `passives.fit_mlcc_dc_bias`.
 Other `simulate` keywords: `switch_fn`, `t_start`, `store_every`,
 `auto_regularize`, `progress`.
 

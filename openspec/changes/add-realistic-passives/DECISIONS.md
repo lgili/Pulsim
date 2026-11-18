@@ -108,3 +108,79 @@ Each entry: question → option taken → why → how to reverse.
 - `c_par` resonance (task 1.6): 5.033 MHz is the rounded value (1e-3);
   the peak of the AC sweep equals `1/(2π√(LC))` to 1e-6 (with
   `esr = 0.1 Ω` so the peak is finite).
+
+## D12. Bergeron line (section 5) stays deferred to the device interface
+
+- Question (2026-11-18 session): implement section 5 now in today's
+  drivers, or after `add-unified-device-interface` lands?
+- Option: deferred; `model="bergeron"` keeps refusing by name.
+- Why: the line is a stateful kind (a ring buffer of both ends, commit
+  per accepted step, rollback on a retried step, snapshot block, a
+  step cap and stage-time lookup on `trbdf2`). In today's tree a
+  stateful kind is wired by hand into `run_transient.hpp` (20 sites for
+  the IGBT tail history) and `trbdf2_transient.hpp` (10), plus the
+  snapshot struct, the pool, the bindings and the dsed refusals; the
+  device-interface branch (`feat/core-p3-device-interface`, slice 2,
+  "How to add a device kind") replaces exactly those sites with one
+  `StatefulKinds` list, and is being merged in batch 12. Wiring the line
+  into the old sites now would conflict with that merge and be ported
+  again right after. Unlike the Newton kinds the line also needs a
+  linear history source in `b` (constant `1/Z0` in the cached matrix),
+  which the interface's kind categories do not describe yet.
+- Reverse: implement section 5 as a stateful kind on the interface
+  (`pwl/transmission_line_history.hpp`, a `StateBlock`, an entry in
+  `StatefulKinds`, the `b`-source hook); tasks 5.1–5.10 unchanged.
+
+## D13. YAML `rac:` reads ladder cells only
+
+- Option: `rac: {R_dc, L_hf, R: [...], L: [...]}` is expanded by the C++
+  loader exactly as `add_inductor(rac=)` (same names, `components()`
+  equal); `L_hf + ΣL` must equal `L` to 1e-9, cells > 0, `esr` and `rac`
+  exclusive (as in Python). An `(f, R_ac)` table is refused by name.
+- Why: fitting is a non-negative least squares in Python
+  (`fit_rac_ladder`); the loader is C++. Write the fitted cells.
+- Reverse: a Python pre-pass over the YAML that fits and rewrites `rac:`.
+
+## D14. Charge conservation measured with a charge meter
+
+- Question: task 4.4 asks for zero net charge over a ±20 V cycle to 1e-9;
+  the output-grid trapezoid is not the engine's quadrature (trbdf2) and
+  the 1e-12 S placeholder that `pwl/assemble.hpp` stamps on every
+  NonlinearCapacitor node leaks (add-power-mosfet-datasheet-device
+  DECISIONS 20).
+- Option: the law in series with a 10 µF linear capacitor, no bleeder
+  (`auto_regularize=False`); both are stamped in charge form by the same
+  rule and carry the same current, so the meter's C·Δv is the law's
+  charge under the engine's own rule; the placeholder leak at the meter
+  node (1e-12 S × ∫v dt) is added to the balance. Measured 1.6e-15 (pwl)
+  and 2.5e-15 (trbdf2) of Q(20 V).
+- Reverse: remove the placeholder from the assembly (changes every
+  result with a nonlinear capacitor) and drop the leak term.
+
+## D15. Session 2026-11-18 scope
+
+- Done: 3.2 (cells), 4.2, 4.4, 4.5, 6.1. Not done: section 5 (D12),
+  6.2's AI_GUIDE part (the guide is at its 32 KiB limit: it gained the
+  `rac=` keyword and a pointer to `fit_mlcc_dc_bias`; the ESL step and
+  π-versus-Bergeron guidance are in `docs/known-limitations.md` only).
+- No frequency-dependent ESR, dielectric absorption, core loss or
+  temperature dependence: non-goals of this change (design.md), not open
+  tasks.
+
+## D16. A STRICT analytic case for the ESR expansion
+
+- Question: the realistic-passive tests compare against closed forms
+  inside `test_passives.py`; the reference harness had no passive with
+  a parasitic.
+- Option: `rc_esr_charge` in `benchmarks/analytic` (10 V through 1 kΩ
+  into 1 µF with `esr=250 Ω`, observed at the capacitor terminal:
+  `v = 10(1 − 0.8·e^{−t/1.25 ms})`); `k` scales the ESR, so the 1 %
+  non-vacuity check bites on the parasitic itself. The terminal voltage
+  jumps at t = 0 (an algebraic observable), so `exclude_t0`. Ceilings
+  at twice the measured error (pwl at dt = 1 µs: at 10 µs its first-order
+  start error, 1.4e-3, hid a 1 % ESR change), and a pwl golden added.
+  The manifest block was inserted by hand from `freeze_analytic.py`'s
+  printed numbers: its `--write` also rewrites the dsed entries of the
+  static and coupled cases as "ran although refused" (the case table and
+  the manifest disagree there; not this change's to settle).
+- Reverse: delete the case, its manifest entry and golden; count back to 20.

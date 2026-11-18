@@ -1,4 +1,4 @@
-"""Analytic reference set: 20 circuits with a closed-form (or exact
+"""Analytic reference set: 21 circuits with a closed-form (or exact
 piecewise-LTI) solution, one per entry of :data:`CASES`.
 
 Each :class:`Case` has ``build(k)`` -> ``(builder, switch_fn)`` where ``k``
@@ -72,6 +72,14 @@ def _rc(k):
     b.add_voltage_source("V", "in", "gnd", 10.0)
     b.add_resistor("R", "in", "o", 1e3 * k)
     b.add_capacitor("C", "o", "gnd", 1e-6)
+    return b, None
+
+
+def _rc_esr(k):
+    b = _b()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_resistor("R", "in", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 1e-6, esr=250.0 * k)   # observed at the terminal, ESR included
     return b, None
 
 
@@ -408,6 +416,10 @@ def _buck_exact(R, D, t_end):
 CASES = [
     Case("rc_charge", "RC charge, 10 V, 1 kOhm, 1 uF", _rc, _v("o"),
          lambda t: 10 * (1 - np.exp(-np.asarray(t) / 1e-3)), 5e-3, 1e-5, ALL),
+    Case("rc_esr_charge", "RC charge through a 250 Ohm capacitor ESR (add-realistic-passives)",
+         _rc_esr, _v("o"),
+         lambda t: 10 * (1 - 0.8 * np.exp(-np.asarray(t) / 1.25e-3)), 5e-3, 1e-6, ALL,
+         exclude_t0=True),
     Case("rc_discharge", "RC discharge from 5 V", _rc_dis, _v("o"),
          lambda t: 5 * np.exp(-np.asarray(t) / 1e-3), 5e-3, 1e-5, ALL),
     Case("rl_step", "RL step, 10 V, 10 Ohm, 1 mH", _rl, _i("L"),

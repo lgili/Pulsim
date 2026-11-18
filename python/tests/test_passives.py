@@ -382,6 +382,98 @@ def test_odd_charge_table_refuses_a_table_not_starting_at_zero():
         odd_charge_table([1.0, 2.0], [1e-6, 2e-6], [1e-6, 1e-6])
 
 
+def test_fit_mlcc_dc_bias_reproduces_its_curve_and_is_odd():
+    # Task 4.2. A declared example curve (not a part): C/C_nom = 1/(1+(v/V1)^2).
+    from pulsim.passives import fit_mlcc_dc_bias
+
+    v = np.array([0.0, 2.0, 5.0, 8.0, 10.0, 15.0, 20.0, 30.0, 40.0])
+    ratio = 1.0 / (1.0 + (v / 10.0) ** 2)
+    fit = fit_mlcc_dc_bias(v, ratio, 10e-6, tol=1e-3)
+    assert fit.residual <= 1e-3
+    t = fit.table
+    for x in v:
+        assert t.capacitance(float(x)) == pytest.approx(10e-6 / (1 + (x / 10) ** 2), rel=1e-3)
+        assert t.charge(-float(x)) == pytest.approx(-t.charge(float(x)), rel=1e-14, abs=1e-30)
+    assert t.charge(20.0) == pytest.approx(110.71e-6, rel=2e-3)   # coarse 9-point curve
+    with pytest.raises(ValueError, match="C_nominal"):
+        fit_mlcc_dc_bias(v, ratio, 0.0)
+    with pytest.raises(ValueError, match="c_ratio"):
+        fit_mlcc_dc_bias(v, -ratio, 1e-6)
+    with pytest.raises(ValueError, match="v_bias"):
+        fit_mlcc_dc_bias(v[::-1], ratio, 1e-6)
+
+
+def _mlcc_rc(drive):
+    b = p.CircuitBuilder()
+    drive(b)
+    b.add_resistor("R", "s", "c", 1.0)
+    b.add_nonlinear_capacitor("C", "c", "gnd", p.ChargeLaw.table(_mlcc_table()))
+    return b
+
+
+def test_mlcc_small_signal_ripple_sees_the_biased_capacitance():
+    # Task 4.4: 10 mV, 1 kHz ripple on a 20 V bias. The charge the resistor
+    # delivers against the capacitor voltage has slope C(20 V) = 2.000 µF.
+    f = 1e3
+    b = _mlcc_rc(lambda b: b.add_sine_voltage_source("Vs", "s", "gnd", 20.0, 0.01, f))
+    x0 = np.array(b.initial_state(), dtype=float).ravel()
+    names = b.state_var_names()
+    for n in ("V(s)", "V(c)"):
+        x0[names.index(n)] = 20.0
+    r = p.simulate(b, t_end=2 / f, engine="pwl", dt=1 / (2000 * f), initial_state=x0)
+    t = np.asarray(r.times)
+    vs, vc = np.asarray(r.v("s")), np.asarray(r.v("c"))
+    q = np.concatenate(([0.0], np.cumsum(0.5 * (vs - vc)[1:] + 0.5 * (vs - vc)[:-1]) * np.diff(t)))
+    keep = t >= 1 / f
+    slope = np.polyfit(vc[keep], q[keep], 1)[0]
+    assert slope == pytest.approx(2.000e-6, rel=1e-3)
+    assert slope == pytest.approx(_mlcc_table().capacitance(20.0), rel=1e-4)
+
+
+def _charge_meter(engine, law, v_amp, f, **kw):
+    """A sine of amplitude v_amp through 1 Ω into the law in series with a
+    10 µF linear capacitor (a charge meter). Both capacitors are stamped in
+    charge form by the same rule and carry the same current at every solve,
+    so the charge the law moved equals the meter's C·Δv under the engine's
+    own quadrature, plus what the 1e-12 S placeholder of pwl/assemble.hpp on
+    the law's node leaks. No bleeder on the meter node (it would leak)."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vs", "s", "gnd", 0.0, v_amp, f)
+    b.add_resistor("R", "s", "c", 1.0)
+    b.add_nonlinear_capacitor("C", "c", "m", law)
+    b.add_capacitor("Cm", "m", "gnd", 10e-6)
+    x0 = np.zeros(len(b.state_var_names()))
+    r = p.simulate(b, t_end=1 / f, engine=engine, initial_state=x0,
+                   auto_regularize=False, **kw)
+    t, vc, vm = np.asarray(r.times), np.asarray(r.v("c")), np.asarray(r.v("m"))
+    q_law = law.charge(float(vc[-1] - vm[-1])) - law.charge(float(vc[0] - vm[0]))
+    q_meter = 10e-6 * float(vm[-1] - vm[0]) + 1e-12 * float(np.trapezoid(vm, t))
+    return q_law, q_meter, t, vc - vm
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_mlcc_charge_is_conserved_over_a_pm20_v_cycle(engine):
+    # Task 4.4: zero net charge over a ±20 V cycle, to 1e-9 of the charge
+    # moved (Q(20 V) = 110.7 µC), checked under the engine's own rule.
+    law = p.ChargeLaw.table(_mlcc_table())
+    kw = dict(dt=1e-6) if engine == "pwl" else {}
+    q_law, q_meter, _, v = _charge_meter(engine, law, 32.0, 1e3, **kw)
+    moved = law.charge(20.0)
+    assert 19.5 < np.max(v) and np.min(v) < -19.5
+    assert abs(q_law - q_meter) < 1e-9 * moved
+
+
+def test_mlcc_pwl_agrees_with_trbdf2():
+    # Task 4.4: the same ±20 V cycle on both engines, 1e-6 of the swing.
+    law = p.ChargeLaw.table(_mlcc_table())
+    _, _, tp, vp = _charge_meter("pwl", law, 32.0, 1e3, dt=2.5e-8)
+    _, _, tt, vt = _charge_meter("trbdf2", law, 32.0, 1e3, rtol=1e-10, atol=1e-12)
+    # at trbdf2's own samples (interpolating its sparser output adds 3e-5 V);
+    # measured 1.6e-6 V, the pwl O(dt²) error
+    err = np.max(np.abs(np.interp(tt, tp, vp) - vt))
+    assert err < 1e-6 * 20.0
+
+
 def test_coupling_a_laddered_winding_is_refused():
     # It used to couple the ladder's main inductor L_hf alone, silently.
     f = np.logspace(3, 6, 20)
