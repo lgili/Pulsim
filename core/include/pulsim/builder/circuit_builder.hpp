@@ -38,6 +38,7 @@
 #include "pulsim/models/resistor.hpp"
 #include "pulsim/models/transformer.hpp"
 #include "pulsim/models/voltage_source.hpp"
+#include "pulsim/ir/expr.hpp"
 #include "pulsim/ir/fields.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -58,7 +59,7 @@
 #include <utility>
 #include <vector>
 
-namespace pulsim::ir { class Circuit; }
+namespace pulsim::ir { class Circuit; struct YamlIo; }
 
 namespace pulsim::builder {
 
@@ -120,6 +121,43 @@ public:
         ir::Parameter p{std::string{name}, value, std::string{unit}, lo, hi};
         check_param_(p, value);
         params_.push_back(p);
+        exprs_.emplace_back();
+        return p;
+    }
+
+    /// A parameter defined by an expression over the parameters declared
+    /// before it (`ir/expr.hpp`): `param_expr("L2", "2*Lbase")`. It
+    /// re-evaluates whenever one of its inputs is set; it cannot be set
+    /// itself.
+    ir::Parameter param_expr(std::string_view name, std::string_view text,
+                             std::string_view unit = {},
+                             std::optional<Real> lo = std::nullopt,
+                             std::optional<Real> hi = std::nullopt) {
+        const auto who = std::format("param(\"{}\")", name);
+        if (name.empty() || name.find('.') != std::string_view::npos) {
+            throw std::invalid_argument(std::format(
+                "{}: a parameter name must be non-empty and contain no '.'", who));
+        }
+        if (find_param_(name) != kNoParam_) {
+            throw std::invalid_argument(std::format(
+                "{}: a parameter of that name already exists", who));
+        }
+        auto e = ir::Expr::compile(text, [&](std::string_view n) -> std::optional<std::uint32_t> {
+            const auto i = find_param_(n);
+            if (i == kNoParam_) return std::nullopt;
+            return static_cast<std::uint32_t>(i);
+        }, who);
+        std::vector<Real> vals;
+        for (const auto& q : params_) vals.push_back(q.value);
+        const Real v = e.eval(vals);
+        if (!std::isfinite(v)) {
+            throw std::invalid_argument(std::format(
+                "{}: expression \"{}\" evaluates to {}", who, text, v));
+        }
+        ir::Parameter p{std::string{name}, v, std::string{unit}, lo, hi, std::string{text}};
+        check_param_(p, v);
+        params_.push_back(p);
+        exprs_.push_back(std::move(e));
         return p;
     }
 
@@ -166,22 +204,63 @@ public:
     /// (the parameter's and each driven field's) are checked before
     /// anything changes.
     void set_param(std::string_view name, Real value) {
-        const auto pi = require_param_("set_param", name);
-        check_param_(params_[pi], value);
+        const std::pair<std::string_view, Real> one{name, value};
+        set_params(std::span{&one, 1});
+    }
+
+    /// `set_param` for several parameters at once: every literal is set
+    /// first, then the expressions are evaluated and every bound checked
+    /// once, so the order of `values` does not matter (D = Ton / T moved
+    /// with both). All, or nothing.
+    void set_params(std::span<const std::pair<std::string_view, Real>> values) {
+        if (values.empty()) return;
+        std::vector<Real> vals;
+        for (const auto& q : params_) vals.push_back(q.value);
+        std::vector<char> moved(params_.size(), 0);
+        std::size_t first = params_.size();
+        for (const auto& [name, value] : values) {
+            const auto pi = require_param_("set_param", name);
+            if (!params_[pi].expr.empty()) {
+                throw std::invalid_argument(std::format(
+                    "set_param: \"{}\" is defined by the expression \"{}\"; set "
+                    "the parameters it reads", name, params_[pi].expr));
+            }
+            check_param_(params_[pi], value);
+            vals[pi] = value;
+            moved[pi] = 1;
+            first = std::min(first, pi);
+        }
+        const auto name = values.front().first;
+        const auto value = values.front().second;
+        // Expressions read only parameters declared before them: one
+        // forward pass re-evaluates them all.
+        for (std::size_t j = first + 1; j < params_.size(); ++j) {
+            if (params_[j].expr.empty()) continue;
+            const Real x = exprs_[j].eval(vals);
+            if (!std::isfinite(x)) {
+                throw std::invalid_argument(std::format(
+                    "parameter \"{}\" = {}: \"{}\" = {} evaluates to {}", name,
+                    value, params_[j].name, params_[j].expr, x));
+            }
+            check_param_(params_[j], x);
+            vals[j] = x;
+            moved[j] = 1;
+        }
         for (const auto& bd : bindings_) {
-            if (bd.param != pi) continue;
+            if (!moved[bd.param]) continue;
             const auto& spec = ir::fields_of(pool_.kind_of(bd.branch))[bd.field];
-            if (!ir::within(spec.bound, value)) {
+            if (!ir::within(spec.bound, vals[bd.param])) {
                 throw std::invalid_argument(std::format(
                     "parameter \"{}\" = {}: field {} of device \"{}\" must "
-                    "be {}", name, value, spec.name,
+                    "be {}", params_[bd.param].name, vals[bd.param], spec.name,
                     graph_.branch_name(bd.branch), ir::bound_text(spec.bound)));
             }
         }
         // Every driven device checked on a copy first (all, or nothing).
         std::vector<std::pair<Index, pwl::DevicePool::ParamsVariant>> next;
         for (const auto& bd : bindings_) {
-            if (bd.param != pi) continue;
+            if (!moved[bd.param]) continue;
+            const Real value = vals[bd.param];
             auto it = std::find_if(next.begin(), next.end(),
                 [&](const auto& x) { return x.first == bd.branch; });
             if (it == next.end()) {
@@ -194,11 +273,12 @@ public:
                 ir::check_device(it->second, spec.name);
             } catch (const std::invalid_argument& e) {
                 throw std::invalid_argument(std::format(
-                    "parameter \"{}\" = {}: device \"{}\": {}", name,
-                    value, graph_.branch_name(bd.branch), e.what()));
+                    "parameter \"{}\" = {}: device \"{}\": {}",
+                    params_[bd.param].name, value, graph_.branch_name(bd.branch),
+                    e.what()));
             }
         }
-        params_[pi].value = value;
+        for (std::size_t j = 0; j < params_.size(); ++j) params_[j].value = vals[j];
         for (auto& [b, params] : next) {
             pool_.params_of_mut(b) = std::move(params);
             pool_.sync_derived_values(b);
@@ -1434,6 +1514,13 @@ public:
         return initial_conditions_;
     }
 
+    /// Control declarations the circuit carries (`ir::ControlDecl`),
+    /// in declaration order; `Circuit::with_controls` adds them.
+    [[nodiscard]] const std::vector<ir::ControlDecl>& controls() const noexcept {
+        return controls_;
+    }
+    void add_control(ir::ControlDecl d) { controls_.push_back(std::move(d)); }
+
     /// Add a binary switched diode (Layer 5 V2's
     /// `SwitchedDiode`). The branch uses
     /// `BranchKind::Switch` (the diode behaves as a switch
@@ -2518,6 +2605,7 @@ private:
     CircuitBuilder& operator=(const CircuitBuilder&) = default;
 
     friend class ir::Circuit;  // with_value: set_value_ with its own name
+    friend struct ir::YamlIo;  // from_yaml replays branches and the pool
 
     struct FieldRef_ {
         Index branch;
@@ -2695,6 +2783,7 @@ private:
     }
 
     std::vector<ir::Parameter> params_;
+    std::vector<ir::Expr>      exprs_;     // parallel to params_ (empty: literal)
     std::vector<ParamBinding>  bindings_;
 
     /// The builder's graph, copyable only through `Graph::clone` so
@@ -2733,6 +2822,8 @@ private:
     std::unordered_map<std::string, AliasTarget> aliases_;
     // add-power-mosfet-datasheet-device: channel branch id -> composite.
     std::unordered_map<Index, models::PowerMosfet::Record> power_mosfets_;
+    // add-immutable-circuit-ir group 3: opaque control declarations.
+    std::vector<ir::ControlDecl> controls_;
 };
 
 }  // namespace pulsim::builder

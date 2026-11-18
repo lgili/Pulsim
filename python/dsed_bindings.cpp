@@ -64,6 +64,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -289,6 +290,10 @@ public:
 
     void set_poll(Real poll) noexcept { search_.set_poll(poll); }
 
+    /// Whether next_edge_after names real edges (the selector's probe
+    /// horizon); the EdgeSearch fallback returns poll boundaries.
+    [[nodiscard]] bool has_edge_oracle() const noexcept { return has_nea_; }
+
 private:
     py::object fn_;
     py::object nea_attr_;
@@ -429,6 +434,40 @@ py::array_t<double> reconstruct_full_states(
 /// current read 0.0234 A against 0.0535 A. Integrating each step from
 /// the right limit of its start sample to the left limit of its end
 /// sample closes that charge exactly.
+/// Dependent states (add-exact-propagator-strategy DECISIONS): the
+/// impulsive re-initialisations of the run as `d["reinit_records"]`, a
+/// list of dicts with the fixed engine's ReinitRecord fields; `sample`
+/// is the stored sample at the record's time (its left limit), or -1.
+template <class AdapterT, class ResultT>
+void reinit_records_into(AdapterT& adapter, const ResultT& res, py::dict& d) {
+    py::list out;
+    if constexpr (requires { adapter.take_reinit_log(); }) {
+        for (const auto& r : adapter.take_reinit_log()) {
+            long sample = -1;
+            const auto it = std::lower_bound(res.times.begin(), res.times.end(),
+                                             r.t - 4 * std::numeric_limits<Real>::epsilon()
+                                                       * std::max(Real{1}, std::abs(r.t)));
+            if (it != res.times.end()
+                && std::abs(*it - r.t)
+                       <= 4 * std::numeric_limits<Real>::epsilon()
+                              * std::max(Real{1}, std::abs(r.t))) {
+                sample = static_cast<long>(it - res.times.begin());
+            }
+            py::dict rd;
+            rd["t"] = r.t;
+            rd["kind"] = r.kind;
+            rd["devices"] = r.devices;
+            rd["states"] = r.states;
+            rd["lambda"] = r.lambda;
+            rd["dW"] = r.dW;
+            rd["projection_gap"] = r.projection_gap;
+            rd["sample"] = sample;
+            out.append(std::move(rd));
+        }
+    }
+    d["reinit_records"] = std::move(out);
+}
+
 template <class AdapterT, class ResultT>
 void reconstruct_right_limits(AdapterT& adapter, const ResultT& res,
                               py::dict& d) {
@@ -996,12 +1035,21 @@ void init_module(py::module_& m) {
         }
 
         [[nodiscard]] SSM operator()(Real t) const {
-            if (is_native_) return native_.fn(t);
-            // Generic Python fallback (Bridge.11 path).
-            py::gil_scoped_acquire gil;
-            if (n_python_calls) ++*n_python_calls;
-            return fn_(t).cast<SSM>();
+            SSM m = [&] {
+                if (is_native_) return native_.fn(t);
+                // Generic Python fallback (Bridge.11 path).
+                py::gil_scoped_acquire gil;
+                if (n_python_calls) ++*n_python_calls;
+                return fn_(t).cast<SSM>();
+            }();
+            if (check_width_) {
+                pulsim::topology::require_mask_width(m, width_);
+            }
+            return m;
         }
+
+        /// The circuit's switch count; a mask of another width is refused.
+        void set_width(pulsim::Size n) noexcept { width_ = n; check_width_ = true; }
 
         [[nodiscard]] Real next_edge_after(Real t) const {
             if (is_native_ && native_.next_edge) return native_.next_edge(t);
@@ -1020,12 +1068,21 @@ void init_module(py::module_& m) {
         // dsed_period_map: Python calls of this schedule (owned by the
         // caller's frame; null elsewhere).
         std::size_t* n_python_calls = nullptr;
+
+        /// Whether next_edge_after names real edges (the selector's probe
+        /// horizon); the EdgeSearch fallback returns poll boundaries.
+        [[nodiscard]] bool has_edge_oracle() const noexcept {
+            return (is_native_ && native_.next_edge) || has_nea_;
+        }
+
         py::object fn_;
         pulsim_bindings_common::SwitchFnAdapter native_;
         bool       is_native_ = false;
         py::object nea_attr_;
         bool       has_nea_ = false;
         EdgeSearch<SSM> search_;
+        bool check_width_ = false;
+        pulsim::Size width_ = 0;
     };
 
     py::class_<NativeAdapter>(m, "_NativeCircuitBuilderAdapter",
@@ -1075,6 +1132,9 @@ void init_module(py::module_& m) {
                 return self.A_matrix();
             },
             "Continuous-time A matrix for the active mask.")
+        .def("n_constraints", &NativeAdapter::n_constraints,
+            "Rows of the dependent-state constraint K x = k on the active "
+            "mask (a capacitor loop or an inductor cut-set; 0 otherwise).")
         .def("b_vector",
             &NativeAdapter::b_vector,
             py::arg("t"),
@@ -1221,8 +1281,10 @@ void init_module(py::module_& m) {
            Real mode_shadow_h_e,
            Real mode_lcp_h_e,
            Real mode_guard_h_e,
-           bool mode_guard_refuse) {
+           bool mode_guard_refuse,
+           int settle_round_cap) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
             EventPredictor pred;
@@ -1314,6 +1376,7 @@ void init_module(py::module_& m) {
                     std::move(sched_diodes));
             }
             sim.set_event_projection(enable_event_projection);
+            sim.set_settle_round_cap(settle_round_cap);
             std::vector<std::string> diode_names;
             if (mode_shadow_h_e > Real{0}) {
                 pulsim::pwl::DiodeEventState census(adapter.graph(), adapter.pool());
@@ -1370,6 +1433,7 @@ void init_module(py::module_& m) {
             // trajectory reconstructed per recorded sample.
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
+            reinit_records_into(adapter, res, d);
             return d;
         },
         py::arg("adapter"),
@@ -1387,6 +1451,7 @@ void init_module(py::module_& m) {
         py::arg("mode_lcp_h_e") = Real{0},
         py::arg("mode_guard_h_e") = Real{0},
         py::arg("mode_guard_refuse") = false,
+        py::arg("settle_round_cap") = 64,
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "
@@ -1407,6 +1472,7 @@ void init_module(py::module_& m) {
            std::size_t store_every,
            bool event_log) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(h_fixed));
             PEDSimulatorBDF2<NativeAdapter, PySwitchFnSSM> sim(
                 adapter, std::move(sf), h_fixed, store_every);
@@ -1416,6 +1482,7 @@ void init_module(py::module_& m) {
             auto d = ped_result_to_dict(res, event_log);
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
+            reinit_records_into(adapter, res, d);
             return d;
         },
         py::arg("adapter"),
@@ -1442,6 +1509,7 @@ void init_module(py::module_& m) {
            std::size_t store_every,
            bool event_log) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
             StiffnessDetector det(stiffness_threshold);
@@ -1456,6 +1524,7 @@ void init_module(py::module_& m) {
             d["exact"] = exact_report_dict(adapter, 0);
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
+            reinit_records_into(adapter, res, d);
             return d;
         },
         py::arg("adapter"),
@@ -1605,6 +1674,7 @@ void init_module(py::module_& m) {
             const auto obs = parse_observables(observables, pairs);
             std::size_t n_python_calls = 0;
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(period));
             sf.n_python_calls = &n_python_calls;
             PeriodMapResult<SSM> r;
@@ -1651,6 +1721,7 @@ void init_module(py::module_& m) {
             const Pairs no_pairs;
             std::size_t n_python_calls = 0;
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(period));
             sf.n_python_calls = &n_python_calls;
             pulsim::dsed::OrbitOptions opt;

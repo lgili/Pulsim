@@ -38,6 +38,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
+#include "pulsim/solver/unsupported.hpp"
 #include "pulsim/pwl/row_names.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
@@ -190,6 +191,19 @@ template <class AdapterT, class MaskT>
     AdapterT& ad, const MaskT& mask,
     const std::vector<PeriodObservable>& obs) {
     ad.set_mask(mask);
+    if constexpr (requires { ad.n_constraints(); }) {
+        // K x = k: the map has no Jacobian of the mode-entry projection and
+        // the constraint is a Floquet multiplier of exactly 1 (the Python
+        // map refuses it in _ExactPeriod.A; the kernel map must too)
+        if (ad.n_constraints() > 0) {
+            throw UnsupportedError(
+                "periodic_steady_state", "dependent_states", "", "",
+                "periodic_steady_state: a mode of the period has dependent "
+                "states (a capacitor loop or an inductor cut-set); its "
+                "monodromy is not derived. Add a series resistance, or use "
+                "simulate().");
+        }
+    }
     PeriodMode e;
     e.A = ad.A_matrix();
     e.n = e.A.rows();

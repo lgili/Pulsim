@@ -1,0 +1,8 @@
+pulsim from /Users/lgili/pulsim_wt/phase0/python/pulsim/__init__.py
+inverter  pwl     conductance  ns/step      1791  (median of 7, spread 0.0069-0.0090 s)  {'unknowns': 12, 'steps': 4000, 'event_rounds': 251, 'switch_fn_calls': 4000, 'segment_searches': 492, 'rollback_snapshots': 4000}
+inverter  pwl     branch       ns/step      1922  (median of 7, spread 0.0074-0.0139 s)  {'unknowns': 24, 'steps': 4000, 'event_rounds': 251, 'switch_fn_calls': 4000, 'segment_searches': 492, 'rollback_snapshots': 4000}
+inverter  pwl     branch / conductance = 1.073
+buck      pwl     conductance  ns/step       668  (median of 7, spread 0.0102-0.0236 s)  {'unknowns': 5, 'steps': 20000, 'event_rounds': 399, 'switch_fn_calls': 20000, 'segment_searches': 799, 'rollback_snapshots': 20000}
+buck      pwl     branch       ns/step       680  (median of 7, spread 0.0107-0.0197 s)  {'unknowns': 7, 'steps': 20000, 'event_rounds': 399, 'switch_fn_calls': 20000, 'segment_searches': 799, 'rollback_snapshots': 20000}
+buck      pwl     branch / conductance = 1.018
+7.3 gate (12-switch inverter, pwl): 1.073 <= 1.5 -> flip allowed

@@ -111,6 +111,13 @@ struct SimulationOptions {
     /// line search when both are enabled.
     bool enable_newton_lm = false;
 
+    /// Newton roundoff-acceptance run budget: the most consecutive
+    /// solves that may be accepted at roundoff with no converged solve
+    /// between them (add-newton-roundoff-acceptance DECISIONS 10d). One
+    /// more raises NewtonRoundoffBudgetExceeded, which no retry ladder
+    /// swallows. A test handle; 130 = 10x the worst honest run.
+    Size newton_roundoff_budget = Size{130};
+
     /// v2.0 Phase 2 (B.4) — local time-step reduction on a failed
     /// step.
     ///
@@ -173,6 +180,17 @@ struct SimulationOptions {
     /// recorded in `SimulationResult::reinit_records`; true refuses the run
     /// at the first such event instead (`on_impulse='error'`).
     bool on_impulse_error = false;
+    /// add-complementarity-mode-selection on the fixed engine: how PWL
+    /// diodes are decided at each site (step, restart stage, split
+    /// sub-step, static step). 0: the settle loop; 1 'shadow': the settle,
+    /// and the LCP of the site's diode ports beside it (numbers unchanged,
+    /// disagreements in SimulationResult::mode_report); 2 'lcp': the LCP
+    /// decides, the settle does not run.
+    int mode_selection = 0;
+    /// Default-mode guard (task 4b.3): a settle that ends in a mode that
+    /// violates a diode's own law (a mask cycle or an exhausted budget) is
+    /// re-decided by the LCP. Off: the breach is kept as before.
+    bool mode_guard = true;
 
     /// add-fixed-step-resolution-diagnostics: per-step normalised
     /// truncation estimate of the linear capacitors and inductors and a

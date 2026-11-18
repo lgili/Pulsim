@@ -261,8 +261,9 @@ def test_refusals_name_the_mechanism():
     b = fresh()
     p.add_c_block(b, inputs=[], outputs=[("i", "n1", "gnd")],
                   dt=1e-4, fn=_tick)
-    with pytest.raises(ValueError, match="C block"):
-        p.simulate(b, t_end=1e-3, engine="trbdf2")
+    # trbdf2 runs C blocks since task 9.3 (it lands on their ticks);
+    # auto still routes them to the fixed step, which needs a dt
+    assert p.simulate(b, t_end=1e-3, engine="trbdf2").engine_used == "trbdf2"
     with pytest.raises(ValueError, match="pass dt="):
         p.simulate(b, t_end=1e-3, engine="auto")
 

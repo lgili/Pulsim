@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include "pulsim/blockchain/block_laws.h"
 #include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 
@@ -61,7 +62,7 @@ struct Gain {
     void reset() noexcept {}
 
     [[nodiscard]] Real update(Real x) const noexcept {
-        return k * x;
+        return pl_gain(k, x);
     }
 };
 
@@ -70,7 +71,7 @@ struct Subtract {
     void reset() noexcept {}
 
     [[nodiscard]] Real update(Real a, Real b) const noexcept {
-        return a - b;
+        return pl_subtract(a, b);
     }
 };
 
@@ -137,23 +138,8 @@ struct PIController {
     }
 
     [[nodiscard]] Real update(Real setpoint, Real measured, Real dt) {
-        const Real err = setpoint - measured;
-        Real new_int = integral +
-                          Ki * dt * Real{0.5} * (err + prev_error);
-        Real u_unc = Kp * err + new_int;
-        // Anti-windup — freeze integrator if it would push deeper
-        // into the active saturation.
-        if (u_unc > output_max && err > Real{0}) {
-            new_int = integral;
-            u_unc = Kp * err + new_int;
-        } else if (u_unc < output_min && err < Real{0}) {
-            new_int = integral;
-            u_unc = Kp * err + new_int;
-        }
-        const Real u_clamp = py_exact::clamp(output_min, output_max, u_unc);
-        integral = new_int;
-        prev_error = err;
-        return u_clamp;
+        return pl_pi(Kp, Ki, output_min, output_max, &integral, &prev_error,
+                     setpoint, measured, dt);
     }
 };
 
@@ -303,7 +289,7 @@ struct Limiter {
     void reset() noexcept {}
 
     [[nodiscard]] Real update(Real x) const noexcept {
-        return py_exact::clamp(min_v, max_v, x);
+        return pl_limiter(min_v, max_v, x);
     }
 };
 
@@ -406,11 +392,8 @@ struct ParkTransform {
 
     [[nodiscard]] Out update(Real alpha, Real beta,
                                 Real theta) const noexcept {
-        const Real ct = std::cos(theta);
-        const Real st = std::sin(theta);
         Out o;
-        o.d =  ct * alpha + st * beta;
-        o.q = -st * alpha + ct * beta;
+        pl_park(alpha, beta, theta, &o.d, &o.q);   // the one law
         return o;
     }
 };
@@ -423,11 +406,8 @@ struct InverseParkTransform {
 
     [[nodiscard]] Out update(Real d, Real q,
                                 Real theta) const noexcept {
-        const Real ct = std::cos(theta);
-        const Real st = std::sin(theta);
         Out o;
-        o.alpha = ct * d - st * q;
-        o.beta  = st * d + ct * q;
+        pl_inverse_park(d, q, theta, &o.alpha, &o.beta);   // the one law
         return o;
     }
 };
@@ -436,7 +416,9 @@ struct InverseParkTransform {
 // 5. Synchronisation
 // =============================================================================
 
-/// Phase-locked loop on αβ — cross-product phase detector + PI on q.
+/// Phase-locked loop on αβ — cross-product phase detector + PI on q;
+/// the law of `pulsim.control.PLL` (block_laws.h pl_pll): angle in
+/// [0, 2π). Before 2.1 a second law wrapped it to [-π, π).
 struct PLL {
     Real f_nominal = Real{50};
     Real Kp = Real{50};
@@ -455,23 +437,9 @@ struct PLL {
     struct Out { Real theta, omega, freq; };
 
     [[nodiscard]] Out update(Real v_alpha, Real v_beta, Real dt) {
-        // Project (v_alpha, v_beta) onto the rotating frame at θ; q
-        // component is the phase error.
-        const Real ct = std::cos(theta);
-        const Real st = std::sin(theta);
-        const Real vq = -st * v_alpha + ct * v_beta;
-        // Loop filter (PI) on the q-component (proxy for phase error).
-        integral += Ki * vq * dt;
-        const Real omega_nom = Real{2} * Real{3.141592653589793238462643}
-                                  * f_nominal;
-        omega = omega_nom + Kp * vq + integral;
-        theta += omega * dt;
-        // Wrap to [-π, π).
-        const Real two_pi = Real{2} *
-                              Real{3.141592653589793238462643};
-        while (theta >  Real{3.141592653589793238462643}) theta -= two_pi;
-        while (theta < -Real{3.141592653589793238462643}) theta += two_pi;
-        return Out{theta, omega, omega / two_pi};
+        pl_pll(f_nominal, Kp, Ki, &theta, &omega, &integral, v_alpha,
+               v_beta, dt);   // the one law
+        return Out{theta, omega, omega / (Real{2} * Real{3.141592653589793})};
     }
 };
 

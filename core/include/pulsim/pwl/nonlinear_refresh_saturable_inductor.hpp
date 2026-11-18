@@ -76,7 +76,8 @@ inline Real stamp_saturable_inductor(
     sparse::Matrix& J_nl,
     Vector& f_nl,
     Real h,
-    TrBdf2Stage stage) {
+    TrBdf2Stage stage,
+    bool increment_form = false) {
     const Real v_from = stamping::read_node_voltage(x, e.from);
     const Real v_to   = stamping::read_node_voltage(x, e.to);
     const Real i_L_new = x[e.branch_var_id];
@@ -102,7 +103,27 @@ inline Real stamp_saturable_inductor(
         bdf2 ? (kc.c2 * e.lambda_gamma + kc.c3 * e.lambda_old) / h
              : (be ? Real{0} : -e.V_L_old) - d_coef * e.lambda_old;
 
-    const Real R_row = (v_from - v_to) - d_coef * lambda_new - hist;
+    // engine='trbdf2' asks for the increment form: the same residual
+    // with λ_new − λ_n (and λ_γ − λ_n) taken in closed form, so its
+    // round-off scales with the increment, not with 2/h·λ (see
+    // SaturableInductor::flux_increment). The fixed engine keeps the
+    // flux-difference form it was validated with.
+    const bool incr = increment_form && !e.params.ja && !e.params.table;
+    const Real R_row = !incr
+        ? (v_from - v_to) - d_coef * lambda_new - hist
+        : bdf2
+            ? (v_from - v_to)
+                  - (kc.c1 * models::SaturableInductor::flux_increment(
+                                 i_L_new, e.i_L_old, e.params)
+                     + kc.c2 * models::SaturableInductor::flux_increment(
+                                   e.i_gamma, e.i_L_old, e.params)) / h
+        : be
+            ? (v_from - v_to)
+                  - models::SaturableInductor::flux_increment(
+                        i_L_new, e.i_L_old, e.params) / h
+            : (v_from - v_to) + e.V_L_old
+                  - d_coef * models::SaturableInductor::flux_increment(
+                                 i_L_new, e.i_L_old, e.params);
 
     const bool from_active = stamping::node_is_active(e.from);
     const bool to_active   = stamping::node_is_active(e.to);

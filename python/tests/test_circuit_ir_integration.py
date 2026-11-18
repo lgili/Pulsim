@@ -185,3 +185,36 @@ def test_a_control_graph_rides_along_as_the_step_observer():
     assert ch1.tick_counts == ch2.tick_counts == [20]
     assert np.asarray(r2.v("drv"))[-1] > 1.0
 
+
+
+# ---- group 3.1: initial conditions per device, KVL, graph-driven sources ---
+def test_initial_conditions_are_per_device():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 1.0)
+    b.add_resistor("R", "a", "x", 1.0)
+    b.add_capacitor("C1", "x", "y", 1e-6)
+    b.add_capacitor("C2", "y", "gnd", 1e-6)
+    b.add_inductor("L", "x", "gnd", 1e-3)
+    b.set_initial("C1", 3.0)       # the voltage ACROSS C1
+    b.set_initial("C2", 2.0)
+    b.set_initial("L", 0.5)        # the current THROUGH L
+    c = b.build()
+    assert c.initial_conditions() == {"C1": 3.0, "C2": 2.0, "L": 0.5}
+    x0 = np.asarray(c.initial_state())
+    assert x0[c.node_id_of("x")] - x0[c.node_id_of("y")] == 3.0
+    assert x0[c.node_id_of("y")] == 2.0
+    assert x0[c.state_var_names().index("I(L)")] == 0.5
+
+
+def test_graph_driven_sources_ride_in_the_circuit():
+    from pulsim._circuit_ir import graph_driven_of
+    from pulsim.periodic_steady_state import _refuse_graph_driven
+    b = p.CircuitBuilder()
+    b.add_voltage_source("graph_u_0", "a", "gnd", 0.0)
+    b.add_resistor("R", "a", "gnd", 1.0)
+    b._graph_driven = ["graph_u_0"]    # what blockchain.drive_source records
+    c = b.build()
+    assert graph_driven_of(c) == ["graph_u_0"]
+    assert graph_driven_of(c.to_builder()) == ["graph_u_0"]
+    with pytest.raises(p.UnsupportedError, match="graph_u_0"):
+        _refuse_graph_driven(c)

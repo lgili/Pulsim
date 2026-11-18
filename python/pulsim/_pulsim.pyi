@@ -10,12 +10,14 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxChainBExtra', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class ConvergenceError(RuntimeError):
     pass
 class SimulationAborted(ConvergenceError):
+    pass
+class NewtonRoundoffBudgetExceeded(SimulationAborted):
     pass
 class UnsupportedError(ValueError):
     device: typing.ClassVar[str] = ''
@@ -272,59 +274,6 @@ class ConductionTable:
     @property
     def v_on(self) -> list[float]:
         ...
-class LossEvent:
-    """
-    One commutation of a device with a loss port: t (start of the step solved under the new state), turn_on, |v| and |i| read by the reading rule, the junction temperature tj and the table energy e.
-    """
-    @property
-    def e(self) -> float:
-        ...
-    @property
-    def i(self) -> float:
-        ...
-    @property
-    def t(self) -> float:
-        ...
-    @property
-    def tj(self) -> float:
-        ...
-    @property
-    def turn_on(self) -> bool:
-        ...
-    @property
-    def v(self) -> float:
-        ...
-class DeviceLossRecord:
-    """
-    A device's loss record in a result (res.loss_events / res.device_energy read it).
-    """
-    @property
-    def E_cond_electrical(self) -> float:
-        ...
-    @property
-    def E_cond_table(self) -> float:
-        ...
-    @property
-    def E_off(self) -> float:
-        ...
-    @property
-    def E_on(self) -> float:
-        ...
-    @property
-    def device(self) -> str:
-        ...
-    @property
-    def events(self) -> list[LossEvent]:
-        ...
-    @property
-    def n_off(self) -> int:
-        ...
-    @property
-    def n_on(self) -> int:
-        ...
-    @property
-    def node(self) -> str:
-        ...
 class ChargeTable:
     """
     Monotone charge law Q(v) for a nonlinear capacitor: knots (v, Q, C), cubic Hermite with C as exact tangents, so C(v) is the exact derivative of Q(v). Not odd; linear tails at the end-knot slopes; one knot must sit at v = 0 with Q = 0. Fritsch-Carlson monotonicity is checked and a violating tangent clamped.
@@ -398,14 +347,6 @@ class CircuitBuilder:
     """
     def __init__(self) -> None:
         ...
-    def _device_loss_names(self) -> list[str]:
-        """
-        Devices with a loss port, in set_device_losses order.
-        """
-    def _set_device_losses(self, device: str, junction: str, tj: float, heat_node: str, e_on: LossTable3D, e_off: LossTable3D, v_on: ConductionTable, conduction: str) -> None:
-        """
-        Kernel half of CircuitBuilder.set_device_losses (tj = NaN when not given, '' for an absent node name).
-        """
     def add_capacitor(self, name: str, n_pos: str, n_neg: str, C_farads: float, c0: float | None = None, *, esr: float = 0.0, esl: float = 0.0) -> 'CircuitBuilder':
         """
         add_capacitor(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: str, n_neg: str, C_farads: float, c0: float | None = None) -> pulsim._pulsim.CircuitBuilder
@@ -678,6 +619,10 @@ class CircuitBuilder:
         """
         Sum the b_extra contributions from all time-varying voltage sources (sine + PWM + pulse) at time `t`. Returns a full-MNA-sized vector. The pulsim.simulate engine='pwl' applies this automatically; engine='dsed' calls it via the CircuitBuilderAdapter to overlay AC / PWM source values per PED step.
         """
+    def controls(self) -> list[typing.Any]:
+        """
+        Control declarations carried by this builder (a builder made by Circuit.to_builder()), as Circuit.controls().
+        """
     def devices(self) -> list[DeviceInfo]:
         """
         Ordered list of DeviceInfo records for every named
@@ -717,9 +662,9 @@ class CircuitBuilder:
         """
         Role hint for `node_id`. V0 returns 'ground' for the ground node and 'internal' for all others.
         """
-    def param(self, name: str, value: float, unit: str = '', lo: float | None = None, hi: float | None = None) -> Parameter:
+    def param(self, name: str, value: typing.Any, unit: str = '', lo: float | None = None, hi: float | None = None) -> Parameter:
         """
-        Declare a named parameter and return it (a pulsim.Parameter); pass it to any add_* in place of a number. lo / hi bound its value.
+        Declare a named parameter and return it (a pulsim.Parameter); pass it to any add_* in place of a number. lo / hi bound its value. A str value is an expression over earlier parameters ("2*Lbase"), re-evaluated when they change.
         """
     def parameters(self) -> list[Parameter]:
         """
@@ -821,30 +766,6 @@ class CircuitBuilder:
         ...
     def _snapshot(self) -> Circuit:
         """``build()`` without the side-state check (``simulate`` keeps the builder's Python side state beside it)."""
-    def set_device_losses(self, device: str, *, junction: str | None = None, Tj: float | None = None, heat_node: str | None = None, E_on: typing.Any = None, E_off: typing.Any = None, V_on: typing.Any = None, conduction: str = "electrical") -> CircuitBuilder:
-        """
-        Give a PWL switch or diode a loss port read INSIDE the run
-        (add-in-kernel-event-losses; ``engine='pwl'``, other engines refuse
-        by name).
-
-        At each commutation the kernel reads the blocking voltage and the
-        commutated current by the reading rule (turn-on: ``v`` before,
-        ``i`` after; turn-off: the reverse), evaluates ``E_on`` / ``E_off``
-        (:class:`LossTable`, ``E(v, i, Tj)``; a diode's ``E_off`` is its
-        recovery) at the junction temperature, and deposits the energy as a
-        rectangular heat pulse over the next step. Conduction heat is the
-        device's own ``v·i`` (``conduction="electrical"``) or
-        ``V_on(|i|, Tj)·|i|`` from the on-state table ``V_on``
-        (:class:`pulsim.ConductionTable`, ``conduction="table"``).
-
-        Exactly one of ``junction`` (a thermal node of the circuit,
-        temperature in °C as its voltage: closed loop) or ``Tj`` (fixed °C:
-        open loop; heat into ``heat_node`` when given, else recorded only).
-        The node that takes the heat needs a capacitor on it. Read the
-        results with ``res.loss_events(device)`` and
-        ``res.device_energy(device)``.
-        """
-        ...
 class BranchKind:
     """
     Topological category of a branch. Layer 4 enumerates over `Switch`-kind branches; the rest are unconditional.
@@ -1340,6 +1261,30 @@ class SimulationOptions:
     def max_newton_iterations(self, arg0: int) -> None:
         ...
     @property
+    def mode_guard(self) -> bool:
+        """
+        Fixed engine: re-decide with the LCP a settle that ends in a mode violating a diode's law.
+        """
+    @mode_guard.setter
+    def mode_guard(self, arg0: bool) -> None:
+        ...
+    @property
+    def mode_selection(self) -> int:
+        """
+        Fixed engine diode decision: 0 the settle (guarded by mode_guard), 1 'shadow', 2 'lcp' (add-complementarity-mode-selection).
+        """
+    @mode_selection.setter
+    def mode_selection(self, arg0: int) -> None:
+        ...
+    @property
+    def newton_roundoff_budget(self) -> int:
+        """
+        Most consecutive Newton solves accepted at roundoff before NewtonRoundoffBudgetExceeded (default 130).
+        """
+    @newton_roundoff_budget.setter
+    def newton_roundoff_budget(self, arg0: int) -> None:
+        ...
+    @property
     def on_impulse_error(self) -> bool:
         """
         add-branch-form-ideal-switch: refuse the run at the first impulsive re-initialisation (simulate(on_impulse='error')) instead of recording it.
@@ -1661,11 +1606,6 @@ class SimulationResult:
     def num_steps(self) -> int:
         ...
     @property
-    def _device_losses(self) -> list[DeviceLossRecord]:
-        """
-        add-in-kernel-event-losses: one DeviceLossRecord per loss port (read with loss_events / device_energy).
-        """
-    @property
     def commutation_events(self) -> list[CommutationEvent]:
         ...
     @property
@@ -1690,19 +1630,14 @@ class SimulationResult:
         Complete state at the end of the run. Pass it to simulate(resume_from=...) to continue EXACTLY where this left off.
         """
     @property
-    def heat_injected(self) -> float:
-        """
-        J of heat the run deposited into thermal nodes.
-        """
-    @property
-    def heat_pending(self) -> float:
-        """
-        J of heat recorded in the last step and not yet deposited (the step that would carry it is past t_end).
-        """
-    @property
     def inductor_guard_actions(self) -> list[InductorGuardAction]:
         """
         Inductors whose current a post-solve guard overwrote. Empty unless a guard was enabled AND fired.
+        """
+    @property
+    def mode_diagnostics(self) -> dict[typing.Any, typing.Any]:
+        """
+        add-complementarity-mode-selection on pwl: 'mode_shadow' / 'mode_selection' counters and the default guard's 'mode_guard' (simulate() copies them to res.diagnostics).
         """
     @property
     def n_restart_factorizations(self) -> int:
@@ -1782,6 +1717,10 @@ class SimulationResult:
     the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,
     ``"step_observer"``, ``"should_continue"``, ``"closed_loops"``);
     empty when the loop ran fully native."""
+    diagnostics: dict[str, typing.Any]
+    """Complementarity mode-selection counters of a ``pwl`` run
+    (``'mode_shadow'``, ``'mode_selection'``, ``'mode_guard'``): a copy of
+    ``mode_diagnostics``. Set by :func:`pulsim.simulate` on ``pwl``."""
     control_tick_counts: list[int]
     """Controller ticks per tick source, in registration order (closed
     loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by
@@ -2010,21 +1949,6 @@ class SimulationResult:
             reference attached).
         """
         ...
-    def loss_events(self, device: str) -> numpy.ndarray[typing.Any, typing.Any]:
-        """
-        The commutations of ``device`` as a structured array with fields
-        ``t, kind ('on'|'off'), v, i, Tj, E`` (``set_device_losses``).
-        """
-        ...
-    def device_energy(self, device: str) -> dict[str, float]:
-        """
-        ``{"E_on", "E_off", "E_cond_electrical", "E_cond_table", "n_on",
-        "n_off"}`` of ``device`` (energies in J). ``E_cond_electrical`` is
-        the device's ``∫v·i`` (always), ``E_cond_table`` the on-state
-        table's (0 without one); the spec's ``conduction`` says which one
-        was deposited as heat.
-        """
-        ...
     def plot(self, *signals: str, save: str | None = None, show: bool | None = None, **kwargs: typing.Any) -> typing.Any:
         """
         Plot one or more signals from this simulation result.
@@ -2185,6 +2109,11 @@ class SwitchSchedule:
     def next_edge_after(self, t: float) -> float:
         """
         First gate-edge time strictly greater than `t`; inf when the schedule does not know it (a combination with a plain Python callable). An edge may be a no-op (same mask on both sides), never a missed one.
+        """
+    @property
+    def follows_controller(self) -> bool:
+        """
+        True when a part is a control graph's PWM gate (a closed loop): its edges are those of the duty held now, so shooting and sensitivities refuse it.
         """
     @property
     def has_edges(self) -> bool:
@@ -2814,6 +2743,16 @@ class CxxChainTick:
     """
     def __call__(self, arg0: float, arg1: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> None:
         ...
+class CxxChainPwmGate:
+    """
+    A PWM switch_fn whose duty is a control-graph signal; every engine calls it in C++.
+    """
+    def __call__(self, t: float) -> SwitchStateMask:
+        ...
+    def next_edge_after(self, t: float) -> float:
+        """
+        First gate edge strictly after t under the duties held now (period starts and OFF thresholds); stale after a tick.
+        """
 class CxxChainBExtra:
     """
     A control graph's driven-source b_extra_fn(t), with the instants its value may jump (next_jump_after), both in C++.
@@ -2830,6 +2769,10 @@ class CxxBlockChain:
         ...
     def add_bldc(self, J: float, B: float, T_load: float, R_s: float, L_s: float, psi_pm: float, pole_pairs: int, phase_inductor_idx: typing.Annotated[collections.abc.Sequence[int], "FixedSize(3)"], bemf_source_idx: typing.Annotated[collections.abc.Sequence[int], "FixedSize(3)"], omega_channel: str, theta_channel: str) -> None:
         ...
+    def add_c_function_block(self, step_addr: int, state_addr: int, in_addr: int, out_addr: int, inputs: collections.abc.Sequence[CxxInputRef], outputs: collections.abc.Sequence[str]) -> None:
+        """
+        A compiled C block (pulsim.CBLOCK_ABI) evaluated in C++ (no GIL): inputs are copied to in_addr, the step writes out_addr, whose values become the outputs. Used by add_c_block.
+        """
     def add_clarke(self, a: CxxInputRef, b: CxxInputRef, c: CxxInputRef, output_alpha: str, output_beta: str, output_zero: str) -> None:
         ...
     def add_dc_motor(self, J: float, B: float, T_load: float, R_a: float, L_a: float, Ke: float, Kt: float, armature_branch_var_idx: int, bemf_source_idx: int, omega_channel: str, theta_channel: str) -> None:
@@ -2894,9 +2837,9 @@ class CxxBlockChain:
         """
         PWM comparator. phase is in seconds, a delay, as PwmGenerator(phase=); phase_fraction= is an advance in periods (what phase= read before 2026-11: phase=x is now phase_fraction=x, or phase=-x/frequency).
         """
-    def add_python_block(self, fn: collections.abc.Callable, inputs: collections.abc.Sequence[CxxInputRef], outputs: collections.abc.Sequence[str]) -> None:
+    def add_python_block(self, fn: collections.abc.Callable, inputs: collections.abc.Sequence[CxxInputRef], outputs: collections.abc.Sequence[str], with_state: bool = False) -> None:
         """
-        A block that calls fn(*input_values) (Python, under the GIL) once per evaluation; returns a float or one value per output.
+        A block that calls fn(*input_values) (Python, under the GIL) once per evaluation; returns a float or one value per output. with_state=True passes the state vector x first.
         """
     def add_resistive_power_injection(self, R_ohm: float, i_ref: CxxInputRef, junction_node_idx: int, power_channel: str = '') -> None:
         """
@@ -2952,6 +2895,10 @@ class CxxBlockChain:
         """
         Return a b_extra_fn(t) callable for run_transient. Use together with make_step_observer when the chain has motor blocks that inject back-EMF / current values per step.
         """
+    def make_pwm_gate(self, num_switches: int, legs: collections.abc.Sequence[tuple[str, int, float, float]]) -> CxxChainPwmGate:
+        """
+        A switch_fn (C++, no GIL): for each (channel, switch_idx, period, phase) the bit is ON while pulsim.control.pwm_on(t, period, duty, phase) with duty = what the channel's sinks see.
+        """
     def make_sink_b_extra_fn(self, state_size: int) -> CxxChainBExtra:
         """
         Return the driven-source b_extra_fn(t) with next_jump_after(t) (the instants the published values may change).
@@ -2990,6 +2937,18 @@ class CxxBlockChain:
         ...
     def set_channel(self, name: str, value: float) -> None:
         ...
+    def set_horizon(self, t_end: float) -> None:
+        """
+        Label-time mode: no tick at or after t_end on the fixed engine.
+        """
+    def set_label_time(self, on: bool) -> None:
+        """
+        Label-time mode: on the fixed engine a tick runs at the call's label t_n with the state x_{n-1} (the closed-loop helpers' protocol); see docs/control-graph.md.
+        """
+    def set_output(self, name: str, value: float) -> None:
+        """
+        Set a signal and what its circuit sinks see before the first tick (call after compile()).
+        """
     def set_solver_dt(self, dt: float) -> None:
         ...
     def sink_value(self, name: str) -> float:
@@ -3004,6 +2963,9 @@ class CxxBlockChain:
         """
     @property
     def has_rates(self) -> bool:
+        ...
+    @property
+    def label_time(self) -> bool:
         ...
     @property
     def n_block_evals(self) -> int:
@@ -3073,6 +3035,10 @@ class _NativeCircuitBuilderAdapter:
         """
         Return the currently-active mask.
         """
+    def n_constraints(self) -> int:
+        """
+        Rows of the dependent-state constraint K x = k on the active mask (a capacitor loop or an inductor cut-set; 0 otherwise).
+        """
     def node_pair_voltage(self, from_node: int, to_node: int, t: float, x: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> float:
         """
         v(from_node) − v(to_node) recovered from the reduced state `x` under the active mask (−1 is ground). The quantity a PWL diode predicate evaluates; affine in `x`, so its gradient is the predicate's recovery row (used by pulsim.periodic_steady_state for saltation).
@@ -3119,6 +3085,11 @@ class Parameter:
     def __repr__(self) -> str:
         ...
     @property
+    def expr(self) -> str:
+        """
+        The defining expression, or "" for a literal.
+        """
+    @property
     def hi(self) -> float | None:
         ...
     @property
@@ -3137,7 +3108,16 @@ class Circuit:
     """
     Immutable circuit (add-immutable-circuit-ir). Built with `builder.build()`; a handle to shared, read-only data, cheap to copy and safe to share between threads. `simulate(circuit, ...)` runs it; the builder it came from can keep being edited.
     """
+    @staticmethod
+    def from_yaml(text: str) -> Circuit:
+        """
+        Inverse of `to_yaml`; errors name the device and the key.
+        """
+    def __getstate__(self) -> tuple[str]:
+        ...
     def __repr__(self) -> str:
+        ...
+    def __setstate__(self, arg0: tuple[typing.Any, ...]) -> None:
         ...
     def aliases(self) -> dict[typing.Any, typing.Any]:
         """
@@ -3147,9 +3127,17 @@ class Circuit:
         """
         As CircuitBuilder.branch_id_of().
         """
+    def clone(self) -> Circuit:
+        """
+        Another handle to the same immutable data (no copy).
+        """
     def components(self) -> typing.Any:
         """
         As CircuitBuilder.components().
+        """
+    def controls(self) -> list[typing.Any]:
+        """
+        The control declarations the circuit carries, as (name, kind, content_hash, handle) tuples: C blocks (kind "c_block", handle = the CBlockHandle) and graph-driven sources ("graph_driven"). simulate(circuit) runs them.
         """
     def devices(self) -> list[typing.Any]:
         """
@@ -3191,9 +3179,17 @@ class Circuit:
         """
         A new, independent CircuitBuilder holding this circuit (the circuit is not affected by edits to it).
         """
+    def to_yaml(self) -> str:
+        """
+        The lowered circuit as YAML; `Circuit.from_yaml` reads it back with the same `value_hash`. Refuses a C block (a Python callable).
+        """
     def value_hash(self) -> int:
         """
         64-bit hash of the structure and every value (fields, couplings, initial conditions, aliases).
+        """
+    def with_controls(self, decls: list[typing.Any]) -> Circuit:
+        """
+        A new circuit with control declarations appended: a list of (name, kind, content_hash, handle). name and kind enter structure_hash, content_hash value_hash; the handle is passed through to the run. The receiver is unchanged.
         """
     def with_params(self, values: dict[typing.Any, typing.Any] = {}, **kwargs) -> Circuit:
         """
@@ -3225,10 +3221,6 @@ def _branch_form_capabilities() -> dict[typing.Any, typing.Any]:
     """
     The branch form's engine column (add-branch-form-ideal-switch): {'Switch'|'Diode': {engine: bool}}; False refuses with UnsupportedError(feature='branch_form').
     """
-def _commutation_points(seq: collections.abc.Sequence[tuple[bool, float, float]]) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
-    """
-    (on, off): the (|v|, |i|) of every turn-on and turn-off of an edge sequence [(closed, v, i), ...] by the kernel's reading rule (turn-on: v before, i after; turn-off: the reverse).
-    """
 def _cpp_ipd_switching_function(m_ref: float, t: float, n_sm: int, f_carrier: float, sm_type: str = 'half_bridge') -> int:
     """
     C++ hotpath: IPD (In-Phase Disposition) switching function. All N carriers share the same phase but sit at stacked DC offsets, so the output only switches between two adjacent levels per step. Cleaner spectrum than PS-PWM at small N.
@@ -3257,6 +3249,10 @@ def _design_batch(base: Circuit, plan: dict[typing.Any, typing.Any], table: typi
     """
     pulsim.design's kernel batch: every design of `table` evaluated on the exact steady-state route with the GIL released (pulsim/dsed/design_batch.hpp). Internal.
     """
+def _eval_expr(text: str, names: collections.abc.Sequence[str], values: collections.abc.Sequence[float], who: str = 'expression') -> float:
+    """
+    Evaluate a parameter expression (ir/expr.hpp) over names = values.
+    """
 def _junction_fixed_point(on_pts: collections.abc.Sequence[typing.Annotated[collections.abc.Sequence[float], "FixedSize(2)"]], off_pts: collections.abc.Sequence[typing.Annotated[collections.abc.Sequence[float], "FixedSize(2)"]], on: LossTable3D, off: LossTable3D, period: float, p_fixed: float, r_th: float, t_amb: float, cond: ConductionTable, q1: float = 0.0, q2: float = 0.0, i_max: float = 0.0) -> dict[typing.Any, typing.Any]:
     """
     Smallest T_j >= t_amb with T_j = t_amb + r_th P(T_j), P the device's loss on a fixed orbit: p_fixed + (sum E_on + sum E_off) / period over the commutation points (|v|, |i|), plus a conduction table's (a q1 + b q2) / period. Returns runaway, tj, p, residual, slope (r_th dP/dT), evaluations, e_on, e_off, p_cond_table.
@@ -3277,9 +3273,21 @@ def _require_supported(graph: Graph, pool: DevicePool, engine: str) -> None:
     """
     Raise UnsupportedError for the first branch `engine` cannot simulate (the capability table's column).
     """
+def _run_pwl_points(circuit: Circuit, names: collections.abc.Sequence[str], table: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], options: SimulationOptions, dt: float, switch_fn: typing.Any, start_from_dc_op: bool, enable_nonlinear_refresh: bool | None, initial_state: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"] | None, auto_regularize: bool, n_threads: int) -> tuple[typing.Any, ...]:
+    """
+    Internal (sweep(circuit, ...) kernel path, task 5.2): run the points of a parameter table (rows = points, columns = names: parameters, or "device.field") on the pwl engine, n_threads native threads, without the GIL. Returns ([(result, circuit, builder, own_preflight) or None per point], stats); None = re-run that point through simulate().
+    """
 def _switch_census(graph: Graph, pool: DevicePool) -> tuple[int, int, list[int]]:
     """
     Return (num_switches, num_diode_owned, controlled_switch_indices). Diode bits are solver-owned (overlaid over the user mask by combine_masks); only the controlled indices need a switch_fn/driver.
+    """
+def block_laws_source() -> str:
+    """
+    The C99 law table (block_laws.h) the kernel graph calls; pulsim.export_c copies it into the C it generates.
+    """
+def compose_chain_observers(parts: collections.abc.Sequence[tuple[CxxBlockChain, float]]) -> CxxChainTick:
+    """
+    One CxxChainTick that runs each (chain, dt)'s step observer in order; run_transient calls it in C++.
     """
 def compute_dc_op(graph: Graph, pool: DevicePool, mask: SwitchStateMask, t_eval: float = 0.0, gmin: float = 1e-12) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
     """
@@ -3403,11 +3411,11 @@ def run_ped_native(system: typing.Any, switch_fn: typing.Any, x0: typing.Annotat
     """
     Native PEDSimulator (DOPRI5 + adaptive PI + event scan) running the C++ scheduler inner loop. `system` and `switch_fn` are still invoked via Python callbacks per step (GIL overhead), but the scheduler control flow runs natively. Returns a dict with times, states, n_accept, n_reject, n_events, cpu_time_seconds, event_log.
     """
-def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, store_every: int = 1, enable_event_projection: bool = True, event_log: bool = True, mode_shadow_h_e: float = 0.0, mode_lcp_h_e: float = 0.0, mode_guard_h_e: float = 0.0, mode_guard_refuse: bool = False) -> dict[typing.Any, typing.Any]:
+def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, store_every: int = 1, enable_event_projection: bool = True, event_log: bool = True, mode_shadow_h_e: float = 0.0, mode_lcp_h_e: float = 0.0, mode_guard_h_e: float = 0.0, mode_guard_refuse: bool = False, settle_round_cap: int = 64) -> dict[typing.Any, typing.Any]:
     """
     Bridge.11 — native PEDSimulator (DOPRI5) over a NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all execute in C++ without GIL roundtrips; the only Python callback is `switch_fn` at gate edges (rare). v2.0 Phase 3: PWL diodes are commutated by auto-derived event predicates on the reconstructed branch voltage, and every event projects the state onto the new mode's slow manifold (consistent reinitialization; pass enable_event_projection=False for the raw pre-projection behaviour).
     """
-def run_transient(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: typing.Any, b_extra_fn: typing.Any = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, step_observer: collections.abc.Callable[[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]], None] | None = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None) -> SimulationResult:
+def run_transient(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: typing.Any, b_extra_fn: typing.Any = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, step_observer: typing.Any = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None) -> SimulationResult:
     """
     Run a fixed-dt transient simulation. switch_fn(t) → SwitchStateMask; b_extra_fn(t) → Vector adds to b_constant at each step. `step_observer(t, x)` (optional) is a void callback fired at the start of every step BEFORE switch_fn/b_extra_fn evaluate — use it to update Python-side controller state (PI, comparator, etc.) so the next switch_fn call reads the new duty. A `b_extra_fn` may declare its jump instants with a `next_jump_after(t)` attribute (first jump strictly after t, inf when none): with discontinuity_restart they restart the step and are read at their left limit; an undeclared jump is not restarted. `enable_nonlinear_refresh`: None (default) lets the kernel stamp the Newton devices (smooth / Shockley diode, MOSFET, IGBT) when the circuit has any; True forces the chain; False with such devices raises UnsupportedError.
     """
@@ -3415,7 +3423,7 @@ def run_transient_bdf1(builder: CircuitBuilder, opts: SimulationOptions, switch_
     """
     BDF1 (implicit Euler) transient simulation. Use when the trapezoidal path rings on stiff problems — BDF1 is L-stable (adds artificial damping that kills numerical oscillation). Slower than trap because it assembles + factors per step; intended for ROBUSTNESS over speed.
     """
-def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int = 0, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int = 0, tol_newton_dx: float = 0.0, tol_newton_res: float = 0.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = []) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
+def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int = 0, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int = 0, tol_newton_dx: float = 0.0, tol_newton_res: float = 0.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = [], newton_roundoff_budget: int = 0, on_impulse_error: bool = False) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
     """
     Variable-step TR-BDF2 transient (engine='auto'): L-stable, 2nd order, LTE-controlled step, gate edges landed by bisection, diode crossings localized by Illinois. Returns (SimulationResult, stats dict). `observers[j]` ticks at t_start + k*observer_periods[j] (ceil(span/T_j) times, index order when coincident); stats['control_tick_counts'] counts each.
     """

@@ -57,6 +57,8 @@
 #include <numbers>
 #include <functional>
 #include <stdexcept>
+#include <cctype>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -112,6 +114,26 @@ public:
         // piecewise-linear source (b_projection of its −1 stamp); the
         // source enters each step as level + ramp (exact_advance_affine).
         DenseMatrix pwl_cols;
+        // dependent states (ContinuousLTI::constraint_K): K·x = k
+        DenseMatrix constraint_K;
+        Vector constraint_k;
+        DenseMatrix energy_weight;
+        std::vector<std::string> constraint_devices;
+        std::vector<std::string> state_labels;
+    };
+
+    /// One impulsive re-initialisation at a mode entry (dependent
+    /// states): the fields of the fixed engine's ReinitRecord
+    /// (add-branch-form-ideal-switch D4); `sample` is filled by the
+    /// bindings from the stored samples.
+    struct ReinitRecord {
+        Real t = 0;
+        std::string kind;                   // "cut_set" | "capacitor_loop"
+        std::vector<std::string> devices;   // rows that carry the constraint
+        std::vector<std::string> states;    // the dependent states
+        Real lambda = 0;                    // V*s (cut-set) or C (loop), signed
+        Real dW = 0;                        // energy removed [J], >= 0
+        Real projection_gap = 0;            // max |K x+ - k| after the projection
     };
 
     /// @param graph        Circuit's topology graph (non-owning ref).
@@ -142,6 +164,12 @@ public:
     [[nodiscard]] const DenseMatrix& A_matrix() const {
         ensure_current_resolved_();
         return current_entry_->A;
+    }
+
+    /// Rows of K·x = k on the active mask (0 on every structural mode).
+    [[nodiscard]] Index n_constraints() const {
+        ensure_current_resolved_();
+        return current_entry_->constraint_K.rows();
     }
 
     [[nodiscard]] Vector b_vector(Real t) const {
@@ -416,6 +444,76 @@ public:
         }
         x = project_onto_slow_manifold(e.A, b_vector(t), x,
                                        fast_threshold);
+    }
+
+    /// Dependent states: project x onto the current mode's constraint
+    /// K·x = k, weighted by the energy matrix E (C / L):
+    ///   x⁺ = x − E⁻¹Kᵀλ,  λ = (K E⁻¹ Kᵀ)⁻¹ (K x − k),
+    /// the closest consistent state in energy, which conserves the
+    /// charge of a capacitor loop and the flux of an inductor cut-set;
+    /// ΔW = ½ (Kx − k)ᵀ λ leaves the circuit. One record per direction
+    /// of S = K E⁻¹ Kᵀ (its eigenvectors) whose residual is above
+    /// round-off, each row scaled to a unit largest coefficient with its
+    /// first state positive (λ in C or V·s). No-op without a constraint.
+    void reinit_to_constraint(Real t, Vector& x) {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        const auto d = e.constraint_K.rows();
+        if (d == 0 || x.size() != e.constraint_K.cols()) {
+            return;
+        }
+        const DenseMatrix& K = e.constraint_K;
+        const Eigen::LLT<DenseMatrix> el(e.energy_weight);
+        const DenseMatrix EiKt = el.solve(K.transpose());
+        const Eigen::SelfAdjointEigenSolver<DenseMatrix> es(K * EiKt);
+        const DenseMatrix& Q = es.eigenvectors();
+        const Vector r = Q.transpose() * (K * x - e.constraint_k);
+        const Vector kq = Q.transpose() * e.constraint_k;
+        const DenseMatrix Kq = Q.transpose() * K;
+        const Vector x0 = x;
+        std::vector<ReinitRecord> recs;
+        for (Index j = 0; j < d; ++j) {
+            const Real lam = r[j] / es.eigenvalues()[j];
+            x.noalias() -= EiKt * Q.col(j) * lam;
+            const Real scale = Kq.row(j).cwiseAbs().maxCoeff();
+            const Real tol = Real{1e-9}
+                * (Kq.row(j).cwiseAbs().dot(x0.cwiseAbs()) + std::abs(kq[j]));
+            if (!(std::abs(r[j]) > tol) || scale == Real{0}) {
+                continue;
+            }
+            ReinitRecord rec;
+            rec.t = t;
+            Real sign = Real{0};
+            bool caps = false, inds = false;
+            for (Index i = 0; i < K.cols(); ++i) {
+                if (std::abs(Kq(j, i)) <= Real{1e-9} * scale) continue;
+                if (sign == Real{0}) sign = Kq(j, i) > 0 ? Real{1} : Real{-1};
+                (e.state_is_cap[static_cast<Size>(i)] ? caps : inds) = true;
+                if (static_cast<Size>(i) < e.state_labels.size())
+                    rec.states.push_back(e.state_labels[static_cast<Size>(i)]);
+            }
+            rec.kind = caps && !inds ? "capacitor_loop"
+                     : inds && !caps ? "cut_set" : "mixed";
+            rec.devices = e.constraint_devices;
+            rec.lambda = sign * scale * lam;
+            rec.dW = Real{0.5} * r[j] * lam;
+            recs.push_back(std::move(rec));
+        }
+        const Real gap = (K * x - e.constraint_k).cwiseAbs().maxCoeff();
+        for (auto& rec : recs) {
+            rec.projection_gap = gap;
+            reinit_log_.push_back(std::move(rec));
+        }
+    }
+
+    /// Records so far, and dropping those of a projection the scheduler
+    /// undid (it restored the pre-event state and projects again).
+    [[nodiscard]] std::size_t reinit_log_size() const noexcept { return reinit_log_.size(); }
+    void truncate_reinit_log(std::size_t n) { if (n < reinit_log_.size()) reinit_log_.resize(n); }
+
+    /// The run's records, handed over (the log starts empty again).
+    [[nodiscard]] std::vector<ReinitRecord> take_reinit_log() {
+        return std::exchange(reinit_log_, {});
     }
 
     /// D5 — builder initial conditions (`c0=` / `i0=` / set_initial,
@@ -995,7 +1093,7 @@ public:
             rhs += build_time_varying_b_extra_(t + h);
         }
         Vector& sol = port_sol_;
-        cache_.solve_at(mask, dt, rhs, sol);
+        port_solve_(mask, dt, rhs, sol);
         // Floating islands (DECISIONS #30): the factor rounds the island's
         // common mode to ε·(internal current)/G_tie, about tol_w on a bridge
         // with every diode OFF, so rounding picked modes. Each island's KCL
@@ -1006,7 +1104,7 @@ public:
         for (const auto& isl : islands) {
             rhs = -b_c;
             rhs[isl.ref] -= Real{1};          // J·w = e_ref
-            cache_.solve_at(mask, dt, rhs, port_w_);
+            port_solve_(mask, dt, rhs, port_w_);
             ws.push_back(port_w_);
             kap.push_back(island_dot_(isl, port_w_));
         }
@@ -1040,7 +1138,7 @@ public:
             const auto [a, c] = ports[static_cast<std::size_t>(j)];
             if (a >= 0) rhs[a] += Real{1};
             if (c >= 0) rhs[c] -= Real{1};
-            cache_.solve_at(mask, dt, rhs, sol);
+            port_solve_(mask, dt, rhs, sol);
             fix(sol, nullptr, [&](const PortIsland& isl) {   // Σ_S(−E_j)
                 return Real((c >= 0 && isl.in[static_cast<Size>(c)]) ? 1 : 0)
                      - Real((a >= 0 && isl.in[static_cast<Size>(a)]) ? 1 : 0);
@@ -1245,6 +1343,45 @@ private:
     mutable std::unordered_map<MaskT, std::vector<PortIsland>> port_islands_;
     mutable Vector port_w_;
 
+    /// `solve_at` of the port problem. Its factor numerically singular on a
+    /// floating island is the bound of DECISIONS #27 exceeded (the
+    /// cancellation on the island's pivot is above the tie tolerance): the
+    /// typed refusal, naming the island node the factor's diagnosis names
+    /// (else the first island's reference node). Any other failure passes.
+    void port_solve_(const MaskT& mask, Real dt, const Vector& rhs, Vector& out) const {
+        try {
+            cache_.solve_at(mask, dt, rhs, out);
+        } catch (const std::runtime_error& e) {
+            const std::string msg = e.what();
+            const auto& islands = port_islands_of_(mask);
+            if (islands.empty() || msg.find("numerically singular") == std::string::npos) throw;
+            std::string node;
+            for (const auto& isl : islands) {
+                for (Size i = 0; i < isl.in.size(); ++i) {
+                    if (!isl.in[i]) continue;
+                    const std::string& nm = graph_.node(static_cast<Index>(i)).name;
+                    if (nm.empty()) continue;
+                    // whole name only: island node "n" must not match "node n1"
+                    const auto at = msg.find("node " + nm);
+                    const auto end = at + 5 + nm.size();
+                    if (at != std::string::npos
+                        && (end == msg.size() || !(std::isalnum(static_cast<unsigned char>(msg[end]))
+                                                   || msg[end] == '_')))
+                        node = nm;
+                }
+            }
+            if (node.empty()) node = graph_.node(islands.front().ref).name;
+            throw UnsupportedError(
+                "dsed", "floating_island", node, "Node",
+                "dsed: the diode port problem's factor is numerically singular on the "
+                "floating island at node " + node + ": its tie to ground is too weak for "
+                "the cancellation on the island's pivot to stay under the selector's tie "
+                "tolerance (add-complementarity-mode-selection DECISIONS #27). Tie the "
+                "island to ground with a smaller resistance, or use engine='pwl' or "
+                "'trbdf2'. Factor: " + msg);
+        }
+    }
+
     /// The islands of `mask` (empty when the circuit has a device the
     /// rule below does not classify, or none floats).
     const std::vector<PortIsland>& port_islands_of_(const MaskT& mask) const {
@@ -1385,6 +1522,16 @@ private:
         auto it = mask_cache_.find(current_mask_);
         if (it == mask_cache_.end()) {
             auto lti = cache_.compute_lti_state_space(current_mask_);
+            if (b_extra_fn_ && lti.constraint_K.rows() > 0) {
+                // the flow keeps K·x' = 0, so a user injection on a
+                // constraint row would break K·x = k unseen (no closed form)
+                throw UnsupportedError(
+                    "dsed", "extraction", "", "",
+                    "dsed: this mode has dependent states (a capacitor loop or an "
+                    "inductor cut-set) and the run has a user b_extra_fn, whose "
+                    "injection on the constraint has no closed form. Add a series "
+                    "resistance, or use engine='pwl' or 'trbdf2'.");
+            }
             LTIEntry entry{
                 std::move(lti.A),
                 std::move(lti.b_constant),
@@ -1396,6 +1543,11 @@ private:
                 std::move(lti.recover_from_b),
             };
             entry.state_mass = std::move(lti.state_mass);
+            entry.constraint_K = std::move(lti.constraint_K);
+            entry.constraint_k = std::move(lti.constraint_k);
+            entry.energy_weight = std::move(lti.energy_weight);
+            entry.constraint_devices = std::move(lti.constraint_devices);
+            entry.state_labels = std::move(lti.state_labels);
             // The exact stepper's eigendecomposition is built
             // LAZILY, on the first exact_advance_state call —
             // measured at N = 400 states it is 252 ms of the
@@ -1415,6 +1567,7 @@ private:
     const topology::Graph&    graph_;
     const pwl::DevicePool&    pool_;
     pwl::PwlStateSpaceCache&  cache_;
+    std::vector<ReinitRecord> reinit_log_;
     std::function<Vector(Real)> b_extra_fn_;
     bool refuse_implicit_ = false;     // 13.2: refuse a tier-3 segment
     bool                       has_dynamic_sources_;

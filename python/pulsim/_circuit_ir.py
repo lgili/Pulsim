@@ -10,6 +10,7 @@ import ast
 import inspect
 import re
 import warnings
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
@@ -32,6 +33,26 @@ class RunPlan:
     circuit: Any
     ties: tuple
     preflight: Any = None
+
+
+class KernelRun(NamedTuple):
+    """One point the kernel path of ``sweep(circuit, ...)`` already ran
+    (task 5.2): ``simulate`` finishes it (warnings, result attributes)
+    instead of running it again."""
+    result: Any
+    circuit: Any
+    builder: Any
+    preflight: Any
+    ties: list
+
+
+# simulate() reads these at its pwl run site. PWL_RECIPE: a dict the run
+# records what it handed the kernel into (sweep's template point).
+# KERNEL_RUN: a KernelRun to finish in place of the regularise / clone /
+# run steps. Context variables: one sweep's state never reaches another
+# thread's simulate().
+PWL_RECIPE: ContextVar = ContextVar("pulsim_pwl_recipe", default=None)
+KERNEL_RUN: ContextVar = ContextVar("pulsim_kernel_run", default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -178,30 +199,88 @@ def _deprecated_update(native, method: str, field: str):
     return update
 
 
-def _checked_build(native):
+# ---------------------------------------------------------------------------
+# Group 3: control declarations. c_block.py (`_c_blocks`) and
+# blockchain.drive_source (`_graph_driven`) still register on the builder
+# instance (another branch moves them onto the control graph); build()
+# turns both into ControlDecls, so a Circuit carries them and simulate()
+# reads them from the circuit, never from a builder attribute.
+# ---------------------------------------------------------------------------
+def _fnv64(text: str) -> int:
+    """FNV-1a 64 of ``text`` (UTF-8): the same on every platform, unlike
+    ``hash()``."""
+    h = 0xCBF29CE484222325
+    for byte in text.encode("utf-8"):
+        h = ((h ^ byte) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
+def control_decls(builder) -> list:
+    """The ``(name, kind, content_hash, handle)`` declarations of the side
+    lists a builder instance still carries. A C block's step function and
+    its wiring are opaque: its content hash covers its name, its input and
+    output COUNTS and its rate only."""
+    out = []
+    for i, h in enumerate(getattr(builder, "_c_blocks", None) or ()):
+        # A duck-typed block may lack these; the engines' refusals must
+        # still see it, so missing fields hash as absent, not raise.
+        name = str(getattr(h, "name", f"c_block{i}"))
+        dt = getattr(h, "dt_block", None)
+        out.append((name, "c_block", _fnv64(
+            f"c_block|{name}|{getattr(h, 'n_in', None)}|"
+            f"{getattr(h, 'n_out', None)}|"
+            f"{None if dt is None else repr(float(dt))}"), h))
+    for name in getattr(builder, "_graph_driven", None) or ():
+        out.append((str(name), "graph_driven",
+                    _fnv64(f"graph_driven|{name}"), None))
+    return out
+
+
+def _controls(obj, kind) -> list:
+    """Declarations of ``kind`` on a Circuit or a builder (its C++
+    controls, then a builder's not-yet-built side lists)."""
+    found = [d for d in (obj.controls() if hasattr(obj, "controls") else ())
+             if d[1] == kind]
+    found += [d for d in control_decls(obj) if d[1] == kind]
+    return found
+
+
+def c_blocks_of(obj) -> list:
+    """The CBlockHandles a Circuit or builder carries."""
+    return [d[3] for d in _controls(obj, "c_block")]
+
+
+def graph_driven_of(obj) -> list:
+    """Names of the sources a control graph drives (drive_source)."""
+    return [d[0] for d in _controls(obj, "graph_driven")]
+
+
+def _build_with_controls(native, seal=True):
     def build(self):
-        blocks = getattr(self, "_c_blocks", None)
-        if blocks:
-            from . import UnsupportedError
-            names = ", ".join(str(getattr(h, "name", h)) for h in blocks)
-            raise UnsupportedError(
-                f"build(): this builder carries C blocks ({names}) that a "
-                "pulsim.Circuit does not hold yet (add-immutable-circuit-ir "
-                "group 3); simulate the builder itself")
-        return native(self)
+        c = native(self)
+        decls = control_decls(self)
+        if seal:
+            # the C blocks' graph now belongs to a Circuit too: a block
+            # added later would also run in it (add_c_block refuses)
+            for d in (*decls, *(self.controls() if hasattr(self, "controls")
+                                else ())):
+                g = getattr(getattr(d[3], "block", None), "_graph", None)
+                if g is not None:
+                    g._sealed = True
+        return c.with_controls(decls) if decls else c
 
     build.__doc__ = native.__doc__
     build.__qualname__ = "CircuitBuilder.build"
-    build._checks_side_state = True  # type: ignore[attr-defined]
+    build._carries_controls = True  # type: ignore[attr-defined]
     return build
 
 
 def install(builder_cls) -> None:
     """Patch the ``add_*`` family (Parameter arguments), the four
-    deprecated ``update_*`` methods and ``build`` (refuses what a
-    Circuit cannot hold yet) onto ``builder_cls``. ``_snapshot`` is the
-    unchecked ``build``: ``simulate`` keeps the caller's Python side
-    state beside it.
+    deprecated ``update_*`` methods and ``build`` (carries the C blocks
+    and graph-driven sources as ControlDecls) onto ``builder_cls``.
+    ``_snapshot`` is the same ``build`` without sealing the C-block
+    graph (simulate's run copy).
 
     ``scripts/generate_stubs.py`` sets ``PULSIM_STUBGEN_NATIVE``: the
     stub then shows the native signatures these wrappers forward to (a
@@ -210,9 +289,10 @@ def install(builder_cls) -> None:
     if os.environ.get("PULSIM_STUBGEN_NATIVE"):
         return
     native = builder_cls.build
-    if not getattr(native, "_checks_side_state", False):
-        builder_cls._snapshot = native
-        builder_cls.build = _checked_build(native)
+    if not getattr(native, "_carries_controls", False):
+        builder_cls.build = _build_with_controls(native)
+        # simulate()'s private run circuit: does not seal the graph
+        builder_cls._snapshot = _build_with_controls(native, seal=False)
     for name in dir(builder_cls):
         fn = getattr(builder_cls, name)
         # shortcut: an overloaded binding (add_nonlinear_capacitor) keeps
@@ -228,4 +308,5 @@ def install(builder_cls) -> None:
             setattr(builder_cls, name, _deprecated_update(fn, name, field))
 
 
-__all__ = ["RunPlan", "Tie", "install"]
+__all__ = ["KERNEL_RUN", "KernelRun", "PWL_RECIPE", "RunPlan", "Tie",
+           "c_blocks_of", "control_decls", "graph_driven_of", "install"]

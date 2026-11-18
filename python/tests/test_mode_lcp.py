@@ -339,12 +339,16 @@ def test_a_widened_pass_does_not_release_a_diode_before_its_own_turn_off(mode):
     assert sel["capped"] > 0
 
 
-def test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp():
+@pytest.mark.parametrize("cap", [64, 1])
+def test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp(cap, monkeypatch):
     """DECISIONS #25. Five bridges paralleled on one 2 mF || 5 ohm bus: at rest every diode
-    pair fights over the bus, and the settle raised "did not settle after 64 rounds" at
-    t = 1.8e-26 s. With the guard on, such an event is decided by the LCP from the held
-    state: the default runs as 'lcp' does, within 1e-3 V of pwl extrapolated in dt (measured
-    1.5e-4 V), and the guard counts the capped settles."""
+    pair fights over the bus, and on macOS the settle raised "did not settle after 64
+    rounds" at t = 1.8e-26 s (on Linux / Windows the same fight settles: 0 caps, a
+    rounding outcome). With the guard on, such an event is decided by the LCP from the
+    held state. The engine's own cap at 1 round (the test hook) throws at any event
+    where a diode flips, so the give-up is forced on any platform; either way the result is within 1e-3 V of pwl extrapolated in dt
+    (measured 1.5e-4 V), and the forced cap is counted."""
+    monkeypatch.setattr(DD, "SETTLE_ROUND_CAP", cap)
     t_end, n = 0.02, 5
     tg = np.linspace(0.0, t_end, 2001)
 
@@ -369,7 +373,8 @@ def test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp():
         a, b2 = (bus(p.simulate(bank(), t_end=t_end, engine="pwl", dt=dt)) for dt in (5e-7, 2.5e-7))
         r = p.simulate(bank(), t_end=t_end, engine="dsed")
     assert np.abs(bus(r) - (2 * b2 - a)).max() <= 1e-3
-    assert r.diagnostics["mode_guard"]["settle_caps"] > 0
+    if cap == 1:
+        assert r.diagnostics["mode_guard"]["settle_caps"] > 0
 
 
 def _island_bridge(r_tie, c_bus):
@@ -400,9 +405,14 @@ def test_port_factor_cancellation_stays_below_the_tie_tolerance(h_e_rel, monkeyp
     assert _end(r, "p-n") == pytest.approx(_end(ref, "p-n"), abs=2e-8)
 
 
-def test_port_factor_beyond_the_bound_refuses_instead_of_rounding():
+@pytest.mark.parametrize("engine", ["dsed", "exact"])
+def test_port_factor_beyond_the_bound_refuses_instead_of_rounding(engine):
     """The same bridge on 1 Tohm ties (bound 7e-3 V, 1.4e5 x the tie tolerance): the port
-    factor is numerically singular at the island's node and says so; no run returns a mode
-    chosen by rounding (DECISIONS #27, the sweep)."""
-    with pytest.raises(RuntimeError, match="numerically singular"):
-        _sim(_island_bridge(1e12, 2e-3), 0.04, mode_selection="lcp")
+    factor is numerically singular at the island's node and the run stops with the typed
+    refusal naming that node; no run returns a mode chosen by rounding (DECISIONS #27, the
+    sweep). 'exact' and 'dsed' refuse alike."""
+    with pytest.raises(p.UnsupportedError, match="numerically singular") as ei:
+        p.simulate(_island_bridge(1e12, 2e-3), t_end=0.04, engine=engine, mode_selection="lcp")
+    e = ei.value
+    assert (e.engine, e.feature, e.kind) == ("dsed", "floating_island", "Node")
+    assert e.device in {"s", "r", "p", "n"}

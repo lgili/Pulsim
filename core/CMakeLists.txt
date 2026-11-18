@@ -72,6 +72,7 @@ if(PULSIM_BUILD_TESTS)
     # without rebuilding the tree.
     add_executable(pulsim_core_mode_tests
         tests/modes/test_mode_selector.cpp
+        tests/modes/test_pwl_mode_ports.cpp
     )
     target_link_libraries(pulsim_core_mode_tests
         PRIVATE
@@ -469,6 +470,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_yaml_tests
         tests/yaml/test_main.cpp
         tests/yaml/test_yaml_loader.cpp
+        tests/yaml/test_circuit_yaml.cpp
     )
     target_link_libraries(pulsim_core_yaml_tests
         PRIVATE

@@ -40,7 +40,8 @@ def base_circuit():
 
 
 def schedule(d):
-    return p.make_pwm_switch_fn(1 / T, 0.4, 0, 1)
+    # S is bit 0 of two (the diode D1 is bit 1): a width-1 mask is refused
+    return p.make_pwm_switch_fn(1 / T, 0.4, 0, 2)
 
 
 def ripple_x(per):
@@ -157,10 +158,11 @@ def test_unpicklable_parts_are_refused_by_name_before_a_worker_starts(
     cases = [
         (_ev([Kpi("vx", lambda per: 0.0)]), "kpis['vx']"),
         (Evaluator(buck, period=lambda d: T, loads=("RL",)), "period"),
+        # a Circuit pickles since the IR's group 4 (integration batch 11):
+        # with a module-level schedule= it reaches the workers; a native
+        # SwitchSchedule still does not pickle
         (Evaluator(circuit=base_circuit(), fields={"L": "L.L"},
-                   schedule=schedule, period=T), "circuit"),
-        (Evaluator(circuit=base_circuit(), fields={"L": "L.L"},
-                   switch_fn=schedule({}), period=T), "circuit"),
+                   switch_fn=schedule({}), period=T), "switch_fn"),
     ]
     for ev, name in cases:
         with pytest.raises(p.UnsupportedError) as ei:

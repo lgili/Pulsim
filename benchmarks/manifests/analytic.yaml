@@ -114,8 +114,9 @@ cases:
     trbdf2:
       ceiling: 1.63e-06
       measured: 8.127e-07
-    dsed:
-      refused: NotImplementedError
+    dsed:  # was refused (coupled inductors); add-exact-propagator-strategy, coupled inductors
+      ceiling: 1.0e-06
+      measured: 1.322e-14
   ideal_transformer:
     pwl:
       ceiling: 1.0e-09
@@ -186,10 +187,11 @@ cases:
         % of span); review P5 resolution diagnostics
       measured: 0.01005
     trbdf2:
-      ceiling: 4.45e-06
+      ceiling: 2.5e-06
       measured: 2.224e-06
       reason: 'update-trbdf2-error-control (estimate x2, landed pulse corners): 1.098e-06 -> 2.224e-06
-        at rtol 1e-6 (integration batch 5, reported; pre-merge ceiling 2.2e-06)'
+        at rtol 1e-6 (integration batch 5, reported; pre-merge ceiling 2.2e-06). Ceiling 4.45e-06
+        -> 2.5e-06 (TR-BDF2 track step 3: 2.2236e-06 after the turn-off fixes, 12 % margin)'
     dsed:
       ceiling: 1.0e-06
       measured: 1.071e-13

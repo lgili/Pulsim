@@ -269,10 +269,10 @@ P_rr = 0.988 W, 500 turn-offs (10 uJ * 100 kHz = 1 W at V_R = 24 V)
 
 ### 3.5 YAML netlist
 
-`p.load_yaml_*` return a `LoadedCircuit` (`.builder`, `.options`,
-`.switch_names`). `simulation:` must be top-level (nested: refused);
-`p.simulate(lc)` takes t_end/dt from it. The gate drive is not in the
-YAML: pass a `switch_fn`.
+`p.load_yaml_*` return a `LoadedCircuit` (`.builder`, `.options`).
+`simulation:` is top-level; `p.simulate(lc)` takes t_end/dt from it.
+No gate drive in YAML: pass a `switch_fn`.
+`c.to_yaml()` / `p.Circuit.from_yaml(t)`: exact round trip (pickle).
 
 ```python
 lc = p.load_yaml_string("""
@@ -296,8 +296,7 @@ v_out(end) = 9.933 V
 ### 3.6 Parameter sweep
 
 `p.sweep` calls a builder factory per point (Cartesian product of
-`params`), forwards `**simulate_kwargs` to every run, and calls
-`kpi_fn(res, params)`.
+`params`), forwards `**simulate_kwargs`, calls `kpi_fn(res, params)`.
 
 ```python
 def make_buck(R_load):
@@ -460,7 +459,7 @@ Each row was measured on this version. The fix column is what to write.
 | # | Wrong assumption | What actually happens | Do this instead |
 |---|---|---|---|
 | 1 | `V_th` of `add_diode` / `add_bridge_rectifier` is a forward drop | It is the turn-on threshold. On-state is `V_f + I/g_on`: 10 A into `g_on = 20 S` gives 0.500 V for `V_th = 0` and `0.7` alike, 1.200 V with `V_f = 0.7`. `add_three_phase_vsi(V_f=)` and the MOSFET/IGBT diode `V_F` ARE drops | Pass `V_f` (losses include `V_f*I`), or `b.add_shockley_diode`. Never also a `conduction_specs` `V_f0` |
-| 2 | `v.mean()` over a result is the average | The default grid is variable-step and clusters at events. Rectifier of 6.2: `.mean()` 4.575 V vs 6.330 V (-28 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
+| 2 | `v.mean()` over a result is the average | The default grid is variable-step and clusters at events. Rectifier of 6.2: `.mean()` 4.607 V vs 6.330 V (-27 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
 | 3 | `p.SwitchStateMask(1)` sets bit 0 | It is a mask of SIZE 1, all OFF | `m = p.SwitchStateMask(b.graph.num_switches); m.set(i, True)` |
 | 4 | MOSFET k is switch bit k | `add_mosfet` adds `<name>_body`, so bits interleave with diodes (below) | `b.switch_index_of(name)` |
 | 5 | Loosening `tol_newton_dx` / `tol_newton_res` fixes a Newton abort | Both are absolute on purpose. Snubbed flyback, `tol_newton_dx=1e-5, tol_newton_res=1e-4`: `auto` 3.53 V, fixed engine 15.31 V, silently | Keep the defaults; read the abort; run `engine='pwl'` with `dt`; fix gate edges, body diodes, initial state |
@@ -581,7 +580,7 @@ for r in (fixed, var):
 
 ```text
 pwl    time-weighted 6.331 V, sample mean 6.330 V
-trbdf2 time-weighted 6.330 V, sample mean 4.575 V
+trbdf2 time-weighted 6.330 V, sample mean 4.607 V
 ```
 
 The engines agree; the sample mean on the variable grid does not.

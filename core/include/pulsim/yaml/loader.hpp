@@ -53,6 +53,10 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "pulsim/ir/expr.hpp"
+
+#include <charconv>
+
 #include <cmath>
 #include <format>
 #include <fstream>
@@ -1032,6 +1036,114 @@ inline void load_device(
 
 /// Keys `load_simulation_options` reads. Anything else in the block
 /// is reported (not fatal) — see `collect_unknown_simulation_keys`.
+/// A number as the loader has always read it (yaml-cpp's own decode:
+/// `.inf`, `+5`, `1e-3`), as opposed to an expression.
+[[nodiscard]] inline bool is_number_node(const YAML::Node& n) {
+    Real x{};
+    return YAML::convert<Real>::decode(n, x);
+}
+
+/// `circuit.parameters`: [{name, value, unit?, lo?, hi?}], where a
+/// string value is an expression over the other parameters (any order;
+/// a cycle is refused naming it).
+inline void load_parameters(builder::CircuitBuilder& b, const YAML::Node& ps) {
+    if (!ps.IsSequence()) {
+        throw std::runtime_error("yaml::load: 'circuit.parameters' must be a list "
+                                 "of {name, value, unit}");
+    }
+    std::vector<std::string> names;
+    std::vector<YAML::Node> nodes;
+    for (const auto& p : ps) {
+        if (!p.IsMap() || !p["name"] || !p["value"] || !p["value"].IsScalar()) {
+            throw std::runtime_error("yaml::load: each 'circuit.parameters' entry needs "
+                                     "a name and a scalar value");
+        }
+        for (const auto& kv : p) {
+            const auto k = kv.first.as<std::string>();
+            if (k != "name" && k != "value" && k != "unit" && k != "lo" && k != "hi") {
+                throw std::runtime_error(std::format(
+                    "yaml::load: parameter '{}': unknown key '{}' (name, value, unit, "
+                    "lo, hi)", p["name"].as<std::string>(), k));
+            }
+        }
+        names.push_back(p["name"].as<std::string>());
+        nodes.push_back(p);
+    }
+    std::vector<std::vector<std::size_t>> deps(names.size());
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        const auto v = nodes[i]["value"].as<std::string>();
+        if (is_number_node(nodes[i]["value"])) continue;
+        for (const auto& n : ir::Expr::names_in(v, std::format("param(\"{}\")", names[i]))) {
+            const auto it = std::find(names.begin(), names.end(), n);
+            if (it != names.end()) deps[i].push_back(static_cast<std::size_t>(it - names.begin()));
+        }
+    }
+    for (const auto i : ir::dependency_order(names, deps)) {
+        const auto& p = nodes[i];
+        const auto v = p["value"].as<std::string>();
+        const auto unit = p["unit"] ? p["unit"].as<std::string>() : std::string{};
+        std::optional<Real> lo, hi;
+        if (p["lo"]) lo = p["lo"].as<Real>();
+        if (p["hi"]) hi = p["hi"].as<Real>();
+        if (is_number_node(p["value"])) b.param(names[i], p["value"].as<Real>(), unit, lo, hi);
+        else b.param_expr(names[i], v, unit, lo, hi);
+    }
+}
+
+/// `load_device`, where a field key may hold an expression string: the
+/// device is built with its value, then the field is driven by a derived
+/// parameter "<device>:<field>", so `with_params` re-evaluates it.
+/// Enumerated keys (law, model, form, ...) are not fields and are never
+/// read as expressions.
+inline void load_device_expr(builder::CircuitBuilder& b, const YAML::Node& dev,
+                             std::size_t idx) {
+    auto is_field = [](std::string_view key) {
+        for (const auto& row : ir::kKindFields) {
+            for (const auto& f : row) if (f.named(key)) return true;
+        }
+        return false;
+    };
+    std::vector<std::pair<std::string, std::string>> exprs;
+    YAML::Node d = dev.IsMap() ? YAML::Clone(dev) : dev;
+    const std::string name = dev.IsMap() && dev["name"] && dev["name"].IsScalar()
+        ? dev["name"].as<std::string>() : std::format("#{}", idx);
+    if (dev.IsMap()) {
+        for (const auto& kv : dev) {
+            const auto key = kv.first.as<std::string>();
+            if (!kv.second.IsScalar() || !is_field(key)) continue;
+            if (is_number_node(kv.second)) continue;
+            const auto text = kv.second.as<std::string>();
+            const auto who = std::format("device \"{}\" field \"{}\"", name, key);
+            const auto params = b.parameters();
+            const auto e = ir::Expr::compile(text, [&](std::string_view n)
+                    -> std::optional<std::uint32_t> {
+                for (std::size_t i = 0; i < params.size(); ++i) {
+                    if (params[i].name == n) return static_cast<std::uint32_t>(i);
+                }
+                return std::nullopt;
+            }, who);
+            std::vector<Real> vals;
+            for (const auto& q : params) vals.push_back(q.value);
+            d[key] = e.eval(vals);
+            exprs.emplace_back(key, text);
+        }
+    }
+    load_device(b, d, idx);
+    for (const auto& [key, text] : exprs) {
+        Index br = -1;
+        try { br = b.branch_id_of(name); } catch (const std::exception&) {}
+        if (br < 0 || ir::find_field(b.pool().kind_of(br), key) == nullptr) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device \"{}\" field \"{}\": an expression can drive "
+                "only a value field of the device's own branch; write a number here",
+                name, key));
+        }
+        const auto hidden = std::format("{}:{}", name, key);
+        b.param_expr(hidden, text);
+        b.bind_param(std::format("{}.{}", name, key), hidden);
+    }
+}
+
 inline constexpr std::string_view kSimulationKeys[] = {
     "t_start", "t_end", "dt", "store_every",
     "enable_newton_line_search", "enable_newton_lm",
@@ -1209,8 +1321,11 @@ namespace detail {
             "'circuit:' — dedent the block. As written, t_end and dt "
             "would not be read and would load as 0.");
     }
-    detail::warn_unknown_keys(circuit, {"nodes", "devices"},
+    detail::warn_unknown_keys(circuit, {"nodes", "devices", "parameters"},
                               "circuit:", loaded.warnings);
+    if (circuit["parameters"]) {
+        detail::load_parameters(loaded.builder, circuit["parameters"]);
+    }
 
     // Optional: pre-declare nodes (auto-created on device
     // reference anyway, but exposing it gives the user
@@ -1233,7 +1348,7 @@ namespace detail {
 
     std::size_t idx = 0;
     for (const auto& dev : devices) {
-        detail::load_device(loaded.builder, dev, idx);
+        detail::load_device_expr(loaded.builder, dev, idx);
         ++idx;
     }
 

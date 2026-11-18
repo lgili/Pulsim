@@ -820,6 +820,23 @@ class Evaluator:
             if switch_fn is not None and schedule is not None:
                 raise TypeError("Evaluator: give switch_fn= (fixed) or "
                                 "schedule= (per design), not both")
+            src = _closed_loop_source(switch_fn)
+            from ._circuit_ir import c_blocks_of, graph_driven_of
+            if not src and graph_driven_of(circuit):
+                src = ("a control graph's drive_source ("
+                       f"{', '.join(graph_driven_of(circuit))})")
+            if not src and c_blocks_of(circuit):
+                src = "C block(s) of add_c_block ({})".format(", ".join(
+                    str(getattr(h, "name", h)) for h in c_blocks_of(circuit)))
+            if src:
+                # here, not per design: the kernel batch never calls _build
+                # (and before the options digest, which cannot read a gate)
+                raise unsupported(
+                    "design", "closed_loop",
+                    f"Evaluator(circuit=...): driven by {src}; "
+                    "the evaluator runs no controller, so it would hold its "
+                    "initial value. Give an open-loop schedule "
+                    "(make_pwm_switch_fn at the design's duty).")
             if thermal is not None and thermal.temperature_dependent:
                 raise ValueError(
                     "Evaluator(circuit=...): ThermalSpec.temperature_"
@@ -866,6 +883,20 @@ class Evaluator:
         self.engine = engine
         self.samples_per_period = samples_per_period
         self.options = dict(options or {})
+        for k in ("closed_loops", "step_observer"):
+            if self.options.get(k) is not None:
+                raise unsupported(
+                    "design", "closed_loop",
+                    f"Evaluator: options[{k!r}] runs a controller; the "
+                    "evaluator's steady-state runs restart it per run and per "
+                    "design (its state carries over), so records would "
+                    "depend on evaluation order. Evaluate the open-loop plant "
+                    "at a fixed duty.")
+        if _closed_loop_source(self.options.get("b_extra_fn")):
+            raise unsupported(
+                "design", "closed_loop",
+                "Evaluator: options['b_extra_fn'] is a control graph's "
+                "driven-source overlay; the evaluator runs no controller.")
         self.loss_options = dict(loss_options or {})
         if gradients is not None and not isinstance(gradients, Mapping):
             gradients = {str(g): str(g) for g in gradients}
@@ -1175,9 +1206,14 @@ class Evaluator:
         else:
             out = (out, None)
         src = _closed_loop_source(out[1])
-        driven = getattr(out[0], "_graph_driven", None)
+        # a builder's side lists or a Circuit's ControlDecls
+        from ._circuit_ir import c_blocks_of, graph_driven_of
+        driven = graph_driven_of(out[0])
+        blocks = [str(getattr(h, "name", h)) for h in c_blocks_of(out[0])]
         if driven and not src:
             src = f"a control graph's drive_source ({', '.join(driven)})"
+        if blocks and not src:
+            src = f"C block(s) of add_c_block ({', '.join(blocks)})"
         if src:
             # no step_observer reaches the evaluator's runs: the gate or
             # source would follow a controller that never updates

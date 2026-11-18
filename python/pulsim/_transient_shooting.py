@@ -71,7 +71,8 @@ class TransientMap:
         _refuse_graph_driven(builder)
         _check_circuit(builder, self.T, comps)
         opts = dict(options or {})
-        if getattr(opts.get("b_extra_fn"), "_closed_loop", None):
+        from .periodic_steady_state import _closed_loop_source
+        if _closed_loop_source(opts.get("b_extra_fn")):
             raise _unsup("closed_loop", "options['b_extra_fn'] is a control "
                          "graph's driven-source overlay; the period runs run "
                          "no controller.")

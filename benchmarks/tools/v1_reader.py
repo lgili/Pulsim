@@ -25,6 +25,7 @@ Semantics copied from the v1 kernel (git 990995e4, core/src/v1/):
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -101,7 +102,18 @@ class BenchCase:
         the zero start every engine already takes); dsed projects a full
         state vector onto its reduced state (refusing an inconsistent one)."""
         names = b.state_var_names()
-        op = pulsim.compute_dc_op(b, mask=switch_fn(self.t_start) if switch_fn else None)
+        try:
+            op = pulsim.compute_dc_op(
+                b, mask=switch_fn(self.t_start) if switch_fn else None)
+        except pulsim.UnsupportedError as e:
+            # No DC operating point exists (a source-inductor loop). The
+            # documented fallback, said out loud: start from zero, as
+            # uic does. Every other refusal propagates.
+            if e.feature != "dc_operating_point":
+                raise
+            warnings.warn(f"{self.id}: {e}; starting from zero state",
+                          stacklevel=2)
+            return None
         idx = {n: i for i, n in enumerate(names)}
 
         def v(n):
@@ -347,8 +359,7 @@ def _build(comps: List[dict], notes: List[str]):
         hi = min(value(pi.get("output_max", 1.0)), value(pwm.get("duty_max", 1.0)))
         ctrl = pulsim.PIController(Kp=value(pi.get("kp", 0.0)), Ki=value(pi.get("ki", 0.0)),
                                    output_min=lo, output_max=hi)
-        fb_id = b.node_id_of(fb)
-        loop = pulsim.bind_pi_to_switch(b, pi=ctrl, measured=lambda x, i=fb_id: x[i],
+        loop = pulsim.bind_pi_to_switch(b, pi=ctrl, measured=fb,
                                         setpoint=value(wref["value"]), switch=sw,
                                         freq=value(pwm["frequency"]))
         notes.append(f"{sw}: bind_pi_to_switch kp={ctrl.Kp} ki={ctrl.Ki} f={value(pwm['frequency']):g} "

@@ -43,6 +43,10 @@ class SimulationResult:
     the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,
     ``"step_observer"``, ``"should_continue"``, ``"closed_loops"``);
     empty when the loop ran fully native."""
+    diagnostics: dict[str, typing.Any]
+    """Complementarity mode-selection counters of a ``pwl`` run
+    (``'mode_shadow'``, ``'mode_selection'``, ``'mode_guard'``): a copy of
+    ``mode_diagnostics``. Set by :func:`pulsim.simulate` on ``pwl``."""
     control_tick_counts: list[int]
     """Controller ticks per tick source, in registration order (closed
     loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by

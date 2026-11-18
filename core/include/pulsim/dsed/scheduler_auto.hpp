@@ -176,6 +176,7 @@ public:
 
         MaskT mask = switch_fn_(t);
         system_.set_mask(mask);
+        reinit_(t, x);
 
         // Pick integrator for the initial mode-segment.
         IntegratorChoice choice = detector_.select(
@@ -286,6 +287,7 @@ public:
                         if (at_corner) t = t_gate;
                         const IntegratorChoice prev_choice = choice;
                         fired = true;
+                        x_pre_ = x;
                         fire_gate_event_(t_gate, x, rk_state, bdf2_state,
                                             prev_choice, result);
                         choice = detector_.select(
@@ -297,11 +299,11 @@ public:
                     }
                     ++step_idx;
                     if (step_idx % store_every_ == 0) {
-                        // a gate event leaves x alone: the pre-event state
-                        // is x, so the sample reads its sources' left limit
-                        // and the right limit is recorded (scheduler.hpp)
+                        // the pre-event state (x unless a dependent state
+                        // was projected): the sample reads its sources' left
+                        // limit and the right limit is recorded (scheduler.hpp)
                         ped_push_sample(result, t, x, system_.current_mask(),
-                                        step_mask, fired ? &x : nullptr);
+                                        step_mask, fired ? &x_pre_ : nullptr);
                     }
                     continue;
                 }
@@ -437,9 +439,12 @@ public:
             ++result.n_accept;
 
             // 4. Did we land on a gate edge?
+            bool fired = false;
             if (t_gate < t_end && near_time(t, t_gate)) {
                 if (at_corner) t = t_gate;
                 const IntegratorChoice prev_choice = choice;
+                fired = true;
+                x_pre_ = x;   // the left limit, recorded only if the edge projects a dependent state
                 fire_gate_event_(t_gate, x, rk_state, bdf2_state,
                                     prev_choice, result);
                 // Re-query stiffness for the new mode
@@ -459,7 +464,7 @@ public:
             ++step_idx;
             if (step_idx % store_every_ == 0) {
                 ped_push_sample(result, t, x, system_.current_mask(),
-                                step_mask, nullptr);
+                                step_mask, fired && x_pre_ != x ? &x_pre_ : nullptr);
             }
         }
 
@@ -501,8 +506,18 @@ private:
         }
     }
 
+    /// Dependent states: project onto the mode's constraint (DECISIONS,
+    /// dependent states).
+    void reinit_(Real t, Vector& x) {
+        if constexpr (requires { system_.reinit_to_constraint(t, x); }) {
+            system_.reinit_to_constraint(t, x);
+        } else {
+            (void)t; (void)x;
+        }
+    }
+
     void fire_gate_event_(Real t_event,
-                            Vector& /*x*/,
+                            Vector& x,
                             RK45State& rk_state,
                             BDF2State& bdf2_state,
                             IntegratorChoice segment_integrator,
@@ -512,6 +527,7 @@ private:
         if (new_mask == old_mask) return;   // spurious
 
         system_.set_mask(new_mask);
+        reinit_(t_event, x);
         // Discontinuous f → invalidate BOTH integrators' caches.
         rk_state.invalidate();
         bdf2_state.invalidate();
@@ -537,6 +553,7 @@ private:
     Vector x_ex_;   // exact-step workspace
     std::vector<Real> fast_t_;   // plan_fast_samples_
     std::size_t fast_k_ = 0;
+    Vector x_pre_;                 // the state before a gate event
     Real h_bdf2_;
     std::size_t store_every_;
     // T1.3 — consecutive RK45 NaN/Inf streak counter (BDF2 throws on

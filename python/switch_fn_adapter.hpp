@@ -13,6 +13,7 @@
 
 #include <functional>
 
+#include "pulsim/blockchain/chain.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/sources/native_pwm_switch_fn.hpp"
 #include "pulsim/sources/switch_schedule.hpp"
@@ -53,10 +54,29 @@ inline SwitchFnAdapter adapt_switch_fn(const pybind11::object& obj) {
         auto* p = obj.cast<NativeMultiMaskPwm*>();
         a.fn = [p](Real t) { return (*p)(t); };
         a.next_edge = [p](Real t) { return p->next_edge_after(t); };
+    } else if (py::isinstance<pulsim::blockchain::ChainPwmGate>(obj)) {
+        // A control graph's PWM gate: C++; its edges under the duties
+        // held now (trbdf2 re-queries after a tick, pwl after every
+        // observer call).
+        auto* p = obj.cast<pulsim::blockchain::ChainPwmGate*>();
+        a.fn = [p](Real t) { return (*p)(t); };
+        a.next_edge = [p](Real t) { return p->next_edge_after(t); };
     } else {
         a.fn = obj.cast<std::function<
             pulsim::topology::SwitchStateMask(Real)>>();
     }
+    return a;
+}
+
+/// Same, refusing every mask whose width is not `num_switches`.
+inline SwitchFnAdapter adapt_switch_fn(const pybind11::object& obj,
+                                       pulsim::Size num_switches) {
+    SwitchFnAdapter a = adapt_switch_fn(obj);
+    a.fn = [fn = std::move(a.fn), num_switches](pulsim::Real t) {
+        auto m = fn(t);
+        pulsim::topology::require_mask_width(m, num_switches);
+        return m;
+    };
     return a;
 }
 

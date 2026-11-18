@@ -292,12 +292,30 @@ def _schedule_edges(sf, t_lo, t_hi):
         t = e
 
 
+def _direct_source(obj):
+    """The one predicate for "follows a controller": a helper's
+    ``_closed_loop`` mark, a C++ schedule's ``follows_controller``
+    member, or a control graph's C++ gate / driven-source overlay."""
+    from ._pulsim import (  # type: ignore[import-not-found]
+        CxxChainBExtra, CxxChainPwmGate)
+    src = getattr(obj, "_closed_loop", None)
+    if isinstance(src, str):
+        return src
+    if getattr(obj, "follows_controller", False) is True:
+        return "make_combined_switch_fn with a control-graph gate in it"
+    if isinstance(obj, CxxChainPwmGate):
+        return "a control graph's PWM gate"
+    if isinstance(obj, CxxChainBExtra):
+        return "a control graph's driven-source overlay (b_extra_fn)"
+    return None
+
+
 def _closed_loop_source(sf):
-    """Where ``sf``'s gate comes from when it follows a controller: its
-    own ``_closed_loop`` mark, or one on an object its code closes over
-    or reads as a global (a hand-written gate around ``duty_get`` of
+    """Where ``sf`` comes from when it follows a controller (see
+    `_direct_source`), or what its code closes over or reads as a global
+    (a hand-written gate around ``duty_get`` of
     ``bind_pi_to_duty_callable``, a lambda around ``loop.switch_fn``)."""
-    src = getattr(sf, "_closed_loop", None)
+    src = _direct_source(sf)
     if src or not callable(sf):
         return src
     import inspect
@@ -306,8 +324,8 @@ def _closed_loop_source(sf):
     except (TypeError, ValueError):
         return None
     for v in (*cv.nonlocals.values(), *cv.globals.values()):
-        src = getattr(v, "_closed_loop", None)
-        if isinstance(src, str):
+        src = _direct_source(v)
+        if src:
             return src
     return None
 
@@ -316,7 +334,8 @@ def _refuse_graph_driven(builder, analysis="periodic_steady_state"):
     """A control graph's ``drive_source`` adds a 0 V / 0 A source whose
     value only the graph's observer supplies: without it the source
     would sit at zero."""
-    driven = getattr(builder, "_graph_driven", None)
+    from ._circuit_ir import c_blocks_of, graph_driven_of
+    driven = graph_driven_of(builder)
     if driven:
         raise _unsup(
             "closed_loop",
@@ -324,6 +343,15 @@ def _refuse_graph_driven(builder, analysis="periodic_steady_state"):
             "(drive_source); the period runs run no controller, so they "
             "would sit at 0. Run simulate() to steady state.",
             device=driven[0], analysis=analysis)
+    blocks = [str(getattr(h, "name", h)) for h in c_blocks_of(builder)]
+    if blocks:
+        raise _unsup(
+            "closed_loop",
+            f"C block(s) {', '.join(blocks)} (add_c_block) drive output "
+            "sources; the period runs tick no block, so the sources would "
+            "hold the blocks' last outputs: an orbit under a frozen "
+            "controller. Run simulate() to steady state.",
+            device=blocks[0], analysis=analysis)
 
 
 def _refuse_closed_loop(sf, analysis="periodic_steady_state"):
@@ -616,6 +644,14 @@ class _Solver:
         a = self._A.get(key)
         if a is None:
             self.ad.set_mask(mask)
+            if self.ad.n_constraints():
+                # the period map has no Jacobian of the mode-entry projection,
+                # and K x = k gives a Floquet multiplier of exactly 1
+                raise _unsup(
+                    "dependent_states",
+                    "a mode of the period has dependent states (a capacitor "
+                    "loop or an inductor cut-set); its monodromy is not "
+                    "derived. Add a series resistance, or use simulate().")
             a = np.asarray(self.ad.A_matrix(), dtype=float)
             self._A[key] = a
         return a

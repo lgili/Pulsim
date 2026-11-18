@@ -120,7 +120,8 @@ def test_uncoupled_transformer_is_not_rejected_by_the_lti_guard():
     np.testing.assert_allclose(A[1, 1], -10.0 / 4e-3, rtol=1e-9)
     assert np.isfinite(b_const).all()
 
-    # ...while a genuinely coupled pair IS refused.
+    # ...and a genuinely coupled pair is extracted with its full inductance matrix:
+    #   Lmat · di/dt = -diag(Rp, Rs) · i + (Vin, 0),  Lmat = [[L_p, M], [M, L_s]]
     b2 = pulsim.CircuitBuilder()
     b2.add_voltage_source("Vin", "vin", "gnd", 12.0)
     b2.add_resistor("Rp", "vin", "p1", 0.1)
@@ -128,5 +129,8 @@ def test_uncoupled_transformer_is_not_rejected_by_the_lti_guard():
     b2.add_resistor("Rs", "s1", "gnd", 10.0)
     c2 = pulsim.PwlStateSpaceCache(b2.graph, b2.pool)
     c2.build_lazy(1e-6)
-    with pytest.raises(RuntimeError, match="magnetically coupled"):
-        c2.compute_lti_state_space(pulsim.SwitchStateMask(0))
+    A2, b2_const, _r, _c, _p = c2.compute_lti_state_space(pulsim.SwitchStateMask(0))
+    M = 0.98 * np.sqrt(1e-3 * 4e-3)
+    Linv = np.linalg.inv(np.array([[1e-3, M], [M, 4e-3]]))
+    np.testing.assert_allclose(A2, -Linv @ np.diag([0.1, 10.0]), rtol=1e-9)
+    np.testing.assert_allclose(b2_const, Linv @ np.array([12.0, 0.0]), rtol=1e-9)
