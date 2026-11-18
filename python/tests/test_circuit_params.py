@@ -75,6 +75,13 @@ KINDS = {
         b.add_sine_voltage_source("Vc", "pc", "gnd", 0.0, 10.0, 50.0, 2.0943951023931953),
         b.add_pmsm_mna("X", "pa", "pb", "pc", "n", "om", "th", v, 2e-3, 2e-3, 0.05, 4.0, 1e-3),
         b.add_resistor("Rn", "n", "gnd", 1e6))),
+    "InductionMachineMna": ("X_a.R_r", 0.4, 0.8, lambda b, v: (
+        b.add_sine_voltage_source("Va", "pa", "gnd", 0.0, 10.0, 50.0),
+        b.add_sine_voltage_source("Vb", "pb", "gnd", 0.0, 10.0, 50.0, -2.0943951023931953),
+        b.add_sine_voltage_source("Vc", "pc", "gnd", 0.0, 10.0, 50.0, 2.0943951023931953),
+        b.add_induction_machine_mna("X", "pa", "pb", "pc", "n", "om", 0.5, 2e-3, v,
+                                    2e-3, 60e-3, 2.0, 1e-3),
+        b.add_resistor("Rn", "n", "gnd", 1e6))),
     "IdealTransformer": ("X.n", 2.0, 3.0, lambda b, v: (
         _src(b), b.add_resistor("Rp", "a", "p", 1.0),
         b.add_ideal_transformer("X", "p", "gnd", "s", "gnd", v), b.add_resistor("R", "s", "gnd", 10.0))),

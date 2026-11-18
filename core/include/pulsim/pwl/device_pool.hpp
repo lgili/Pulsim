@@ -25,6 +25,7 @@
 #include "pulsim/models/nonlinear_capacitor.hpp"
 #include "pulsim/models/lauritzen_diode.hpp"
 #include "pulsim/models/pmsm_mna.hpp"
+#include "pulsim/models/induction_machine_mna.hpp"
 #include "pulsim/models/shockley_diode.hpp"
 #include "pulsim/models/saturable_inductor.hpp"
 #include "pulsim/models/resistor.hpp"
@@ -128,6 +129,8 @@ public:
         SineCurrentSource  = 24, // overlaid on the node rows
         PulseCurrentSource = 25, // overlaid on the node rows
         PwlCurrentSource   = 26, // overlaid on the node rows
+        // add-mna-native-machines group 2 (stator branches of the machine)
+        InductionMachineMna = 27,
     };
 
     struct SwitchParams {
@@ -256,6 +259,35 @@ public:
     [[nodiscard]] const std::vector<PmsmMnaMachine>&
     pmsm_mna_machines() const noexcept {
         return pmsm_mna_machines_;
+    }
+
+    /// One MNA-native induction machine: three stator branches
+    /// (a, b, c → neutral), the speed node and the two rotor-flux
+    /// nodes (λ_rα, λ_rβ as node voltages, 1 F each). The stamp is
+    /// in `refresh_pmsm_mna`, the state in `PmsmMnaHistory` (one
+    /// machine history for both families).
+    struct InductionMachine {
+        std::array<Index, 3> branch_id{};
+        Index omega_node = -1;
+        std::array<Index, 2> rotor_node{-1, -1};
+        models::InductionMachineMna::Params params;
+    };
+    void add_induction_machine_mna(const std::array<Index, 3>& branch_ids,
+                                   Index omega_node,
+                                   const std::array<Index, 2>& rotor_nodes,
+                                   models::InductionMachineMna::Params p) {
+        models::InductionMachineMna::validate(p);
+        for (const Index b : branch_ids) {
+            entries_[b] = Entry{p};
+            inductor_branch_var_id_[b] =
+                static_cast<Index>(num_inductors_++);
+        }
+        induction_machines_.push_back(
+            InductionMachine{branch_ids, omega_node, rotor_nodes, p});
+    }
+    [[nodiscard]] const std::vector<InductionMachine>&
+    induction_machines() const noexcept {
+        return induction_machines_;
     }
 
     [[nodiscard]] const models::PmsmMna::Params&
@@ -1170,7 +1202,8 @@ private:
                                 models::Gyrator::Params,
                                 models::SineCurrentSource::Params,
                                 models::PulseCurrentSource::Params,
-                                models::PwlCurrentSource::Params>;
+                                models::PwlCurrentSource::Params,
+                                models::InductionMachineMna::Params>;
 
 public:
     /// Number of device kinds; `kKindCaps` must have this many rows.
@@ -1202,6 +1235,16 @@ public:
                 for (const Index b : mach.branch_id) entries_[b] = Entry{p};
             }
         }
+        if (const auto* im =
+                std::get_if<models::InductionMachineMna::Params>(&e)) {
+            const auto p = *im;
+            for (auto& mach : induction_machines_) {
+                if (std::find(mach.branch_id.begin(), mach.branch_id.end(),
+                              branch_id) == mach.branch_id.end()) continue;
+                mach.params = p;
+                for (const Index b : mach.branch_id) entries_[b] = Entry{p};
+            }
+        }
         if (const auto* ind = std::get_if<models::Inductor::Params>(&e)) {
             for (auto& c : transformer_couplings_) {
                 if (c.primary_branch_id == branch_id) c.params.L_p = ind->L;
@@ -1221,8 +1264,8 @@ private:
     static constexpr bool kind_maps_to_ = std::is_same_v<
         std::variant_alternative_t<static_cast<std::size_t>(K), Entry>, P>;
 
-    static_assert(std::variant_size_v<Entry> == 27,
-        "StoredKind has 27 values; Entry must list 27 alternatives in the "
+    static_assert(std::variant_size_v<Entry> == 28,
+        "StoredKind has 28 values; Entry must list 28 alternatives in the "
         "same order — update both together.");
     static_assert(kind_maps_to_<StoredKind::Resistor,           models::Resistor::Params>);
     static_assert(kind_maps_to_<StoredKind::VoltageSource,      models::VoltageSource::Params>);
@@ -1251,6 +1294,7 @@ private:
     static_assert(kind_maps_to_<StoredKind::SineCurrentSource,  models::SineCurrentSource::Params>);
     static_assert(kind_maps_to_<StoredKind::PulseCurrentSource, models::PulseCurrentSource::Params>);
     static_assert(kind_maps_to_<StoredKind::PwlCurrentSource,   models::PwlCurrentSource::Params>);
+    static_assert(kind_maps_to_<StoredKind::InductionMachineMna, models::InductionMachineMna::Params>);
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -1356,6 +1400,7 @@ private:
     std::vector<Index> nonlinear_capacitor_branches_;
     std::vector<Index> lauritzen_diode_branches_;
     std::vector<PmsmMnaMachine> pmsm_mna_machines_;
+    std::vector<InductionMachine> induction_machines_;
     std::vector<Index> igbt_level1_branches_;
 
     // Layer 2 V2: transformer coupling registry. Each entry
@@ -1405,6 +1450,9 @@ inline constexpr auto kKindCaps = std::to_array<KindCaps>({
     {"SineCurrentSource",  SolveClass::Source,         kAllEngines},
     {"PulseCurrentSource", SolveClass::Source,         kAllEngines},
     {"PwlCurrentSource",   SolveClass::Source,         kAllEngines},
+    // Speed-dependent (bilinear ω·λ_r): not LTI between events, so no
+    // exact propagator; no small-signal stamp in the AC sweep yet.
+    {"InductionMachineMna", SolveClass::NewtonStateful, kNewtonEngines},
 });
 /// add-branch-form-ideal-switch D7 / task 4.3: the BRANCH form of the
 /// Switch and Diode kinds (a form, not a kind: one row each, by the

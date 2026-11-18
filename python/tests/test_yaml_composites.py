@@ -57,3 +57,37 @@ def test_dc_machine_speed_node_needs_no_bleeder():
         warnings.simplefilter("error")
         x = p.compute_dc_op(b, gmin=0.0)
     assert x[b.node_id_of("w")] == pytest.approx(90.0, rel=1e-9)
+
+
+_IM_KEYS = ("phase_nodes: [ua, ub, uc], neutral_node: nn, omega_node: w, "
+            "R_s: 0.5, R_r: 0.4, L_m: 0.06, pole_pairs: 2, J: 0.01, B: 0.001")
+
+
+def _im_builder():
+    b = p.CircuitBuilder()
+    b.add_induction_machine_mna("M", "ua", "ub", "uc", "nn", "w", R_s=0.5,
+                                L_ls=2e-3, R_r=0.4, L_lr=2e-3, L_m=0.06,
+                                pole_pairs=2, J=0.01, B=0.001)
+    return b
+
+
+def test_induction_machine_yaml_is_the_builder_device():
+    y = _yaml("    - {type: induction_machine, name: M, " + _IM_KEYS
+              + ", L_ls: 2.0e-3, L_lr: 2.0e-3}\n")
+    assert _components(y) == _components(_im_builder())
+    assert y.pool.induction_machines() == _im_builder().pool.induction_machines()
+
+
+def test_induction_motor_model_mna_converts_self_inductances():
+    y = _yaml("    - {type: induction_motor, model: mna, name: M, " + _IM_KEYS
+              + ", L_s: 0.062, L_r: 0.062}\n")
+    got = y.pool.induction_machines()[0]["params"]
+    want = _im_builder().pool.induction_machines()[0]["params"]
+    assert got == pytest.approx(want, rel=1e-12)
+
+
+def test_induction_motor_unknown_model_is_refused():
+    with pytest.raises(Exception, match="model must be 'observer' or 'mna'"):
+        _yaml("    - {type: induction_motor, model: fast, name: M, "
+              "phase_nodes: [a, b, c], neutral_node: n, R_s: 1, L_s: 0.1, "
+              "R_r: 1, L_r: 0.1, L_m: 0.09}\n")

@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Native machines: induction machine, PMSM harmonics / BLDC (add-mna-native-machines)
+
+* **Added** `CircuitBuilder.add_induction_machine_mna`: a squirrel-cage
+  induction machine solved in the circuit matrix (stationary frame,
+  constant stator inductance, rotor flux as two internal nodes, torque
+  into the speed node), new kind `InductionMachineMna`, on `pwl` and
+  `trbdf2`; `dsed` and the AC sweep refuse it by name. Checked against
+  the equivalent circuit (locked rotor, synchronous speed, slip 0.05,
+  within 1.1e-4) and an independent SciPy integration of a direct-on-line
+  start (second order on `pwl`). YAML `type: induction_machine`;
+  `induction_motor` gains `model: mna | observer` (default `observer`).
+  Traces `<name>.T_em/omega/psi_ra/psi_rb` on the result.
+* **Added** `add_dc_machine(theta_node=...)`: the shaft angle through a
+  unit VCCS into a 1 F capacitor (was refused).
+* **Added** two analytic reference cases, `im_locked_rotor` and
+  `im_free_acceleration` (`dsed` refused).
+
 ### Integration batch 10: control graph 2, optimisation slice 5, circuit IR 2, exact engine dependent states merged
 
 * **Fixed** a C block reached a run only through a Python attribute of

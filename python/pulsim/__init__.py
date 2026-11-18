@@ -3898,7 +3898,8 @@ def _attach_native_machine_traces(result, builder) -> None:
     """Traces for `add_pmsm_mna` machines: `<name>.t/omega/theta/T_em/
     i_d/i_q`, with i_d/i_q by the FOC chain's amplitude-invariant
     Clarke–Park (d on the PM flux, q leading) and T_em from the same
-    co-energy law the stamp uses."""
+    co-energy law the stamp uses. `add_induction_machine_mna` machines
+    get `<name>.t/omega/T_em/psi_ra/psi_rb`."""
     import numpy as _np
     if builder is None:
         return
@@ -3907,7 +3908,9 @@ def _attach_native_machine_traces(result, builder) -> None:
     if machines is None:
         return
     machines = machines()
-    if not machines:
+    inductions = pool.induction_machines() if hasattr(
+        pool, "induction_machines") else []
+    if not machines and not inductions:
         return
     states = _np.asarray(result.states, dtype=float)
     times = _np.asarray(result.times, dtype=float)
@@ -3942,12 +3945,39 @@ def _attach_native_machine_traces(result, builder) -> None:
         i_q = -i_alpha * sn + i_beta * c
         # dq torque, identical to the abc co-energy expression.
         t_em = 1.5 * pp * (psi * i_q + (L_d - L_q) * i_d * i_q)
+        harm = m["params"].get("harmonics") or []
+        if harm:
+            # PM part from the series: pp·Σ_k dλ_pm,k/dθ_e·i_k (phases b, c
+            # at θ_e ∓ 2π/3), plus the same reluctance term.
+            t_em = 1.5 * pp * (L_d - L_q) * i_d * i_q
+            for k, i_k in enumerate(cur):
+                a = th_e + (0.0, -2.0 * _np.pi / 3.0, 2.0 * _np.pi / 3.0)[k]
+                dl = sum(-h * ps * _np.sin(h * a + ph) for h, ps, ph in harm)
+                t_em = t_em + pp * dl * i_k
         traces[f"{name}.t"] = times
         traces[f"{name}.omega"] = omega
         traces[f"{name}.theta"] = theta
         traces[f"{name}.T_em"] = t_em
         traces[f"{name}.i_d"] = i_d
         traces[f"{name}.i_q"] = i_q
+    for m in inductions:
+        bids = [int(b) for b in m["branch_ids"]]
+        name = builder.name_of(bids[0])[:-2]
+        pr = m["params"]
+        k_r = pr["L_m"] / (pr["L_lr"] + pr["L_m"])
+        i_a, i_b, i_c = (
+            states[:, int(pool.branch_var_id_for_inductor(b, graph))]
+            for b in bids)
+        i_alpha = (2.0 * i_a - i_b - i_c) / 3.0
+        i_beta = (i_b - i_c) / _np.sqrt(3.0)
+        psi_a = states[:, int(m["rotor_nodes"][0])]
+        psi_b = states[:, int(m["rotor_nodes"][1])]
+        traces[f"{name}.t"] = times
+        traces[f"{name}.omega"] = states[:, int(m["omega_node"])]
+        traces[f"{name}.T_em"] = 1.5 * pr["pole_pairs"] * k_r * (
+            psi_a * i_beta - psi_b * i_alpha)
+        traces[f"{name}.psi_ra"] = psi_a
+        traces[f"{name}.psi_rb"] = psi_b
 
 
 def _auto_attach_motor_traces(

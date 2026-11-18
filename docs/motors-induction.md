@@ -5,7 +5,63 @@ the v1.5 Phase 2 physics-parity release. The model is a 5th-order dq
 stationary-frame representation that plugs into the same observer pattern
 already used by the `PMSM` and `BLDC` motors.
 
-## Quick start
+## MNA-native machine (`add_induction_machine_mna`)
+
+`b.add_induction_machine_mna(...)` solves the machine INSIDE the circuit
+matrix: no quantity is taken from the previous step, the run is second
+order on `pwl` and adaptive on `trbdf2`, and the machine is a device the
+engine conformance matrix knows (`InductionMachineMna`; `dsed` and the AC
+sweep refuse it by name). The observer below stays for existing scripts.
+
+```python
+import math
+import pulsim as p
+
+b = p.CircuitBuilder()
+for k, n in enumerate(("ua", "ub", "uc")):
+    b.add_sine_voltage_source(f"V{n}", n, "gnd", 0.0, 100 * math.sqrt(2),
+                              60.0, -2 * math.pi / 3 * k)
+b.add_induction_machine_mna("M", "ua", "ub", "uc", "nn", "w",
+                            R_s=0.5, L_ls=2e-3, R_r=0.4, L_lr=2e-3,
+                            L_m=60e-3, pole_pairs=2, J=0.01)
+res = p.simulate(b, t_end=0.2, dt=2e-5, engine="pwl",
+                 discontinuity_restart=True)
+speed = res.v("w")               # mechanical speed [rad/s]
+i_a = res.i("M_a")               # stator phase current [A]
+torque = res.signal("M.T_em")    # [N·m]
+```
+
+Model: stationary αβ0 frame, amplitude-invariant Clarke, rotor referred
+to the stator, rotor currents eliminated. Stator branches `M_a/_b/_c`
+(phase → neutral) carry `λ_abc = L·i + M·λ_r` with a CONSTANT `L` (σL_s in
+αβ, L_ls in the zero sequence); the rotor flux `λ_rα`, `λ_rβ` [Wb] are the
+voltages of the internal nodes `M_psi_ra`, `M_psi_rb` (1 F capacitors);
+`T_em = 1.5·pp·(L_m/L_r)·(λ_rα·i_sβ − λ_rβ·i_sα)` enters the speed node,
+which carries `J` (capacitor) and `1/B` (resistor). A load is any element
+on the speed node; a voltage source on it holds the speed.
+
+Verification (declared test machine 0.5 Ω, 2 mH, 0.4 Ω, 2 mH, 60 mH,
+pp = 2, 100 V rms, 60 Hz — not a real machine):
+
+| Check | Reference | Measured |
+|---|---|---|
+| Locked rotor, 57.88 A rms, 19.97 N·m | equivalent circuit | −3.7e-6, −2.2e-4 |
+| Synchronous speed, 4.277 A rms | equivalent circuit | −1.6e-5; mean torque 2.8e-3 N·m |
+| Slip 0.05, 12.29 A rms, 16.12 N·m | equivalent circuit | +1.1e-4, +1.1e-4 |
+| Free acceleration, speed at 5 instants | SciPy Radau/DOP853, rtol 1e-12 | `pwl` 2.5e-6 at 20 µs (order 4.00 per halving); `trbdf2` 1.6e-5 (rtol 1e-8) |
+| Energy `∫p_in = ∫copper + ∫T·ω + ΔW` | — | residual 1.0e-7 of 690 J at 10 µs (second order) |
+
+On `pwl` the start of a three-phase run is first order unless
+`discontinuity_restart=True` (phases b and c are at ±86.6 V at `t = 0`
+with zero current; a plain RL load shows the same).
+
+YAML: `type: induction_machine` (keys `phase_nodes`, `neutral_node`,
+`omega_node`, `R_s`, `L_ls`, `R_r`, `L_lr`, `L_m`, `pole_pairs`, `J`,
+optional `B`, `T_load`, `omega0`), or the legacy `type: induction_motor`
+with `model: mna` (it keeps `L_s`, `L_r` and needs `omega_node`,
+`pole_pairs`, `J`). The default `model` is still `observer`.
+
+## Quick start (observer)
 
 ```python
 import pulsim as p
@@ -108,8 +164,7 @@ rated torque, rated current, and per-phase impedance for sanity checks.
 ## See also
 
 - [Tutorial 07 — DC Machine](tutorials/07-dc-machine.md): the MNA-native
-  DC machine; the native induction machine is planned in
-  `openspec/changes/add-mna-native-machines/`.
+  DC machine.
 
 - [Motors — Sensorless Observers](motors-sensorless.md)
 - `python/pulsim/motors.py` — source.

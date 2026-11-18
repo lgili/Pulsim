@@ -1,4 +1,4 @@
-"""Analytic reference set: 20 circuits with a closed-form (or exact
+"""Analytic reference set: 22 circuits with a closed-form (or exact
 piecewise-LTI) solution, one per entry of :data:`CASES`.
 
 Each :class:`Case` has ``build(k)`` -> ``(builder, switch_fn)`` where ``k``
@@ -403,6 +403,63 @@ def _buck_exact(R, D, t_end):
     return f
 
 
+# ------------------------------------- induction machine (add-mna-native-machines) --
+# Declared test machine (design.md): 0.5 Ohm, 2 mH, 0.4 Ohm, 2 mH, 60 mH,
+# pp = 2, 100 V rms per phase at 60 Hz. The reference integrates the same
+# equations as a 5-state ODE (stationary frame, amplitude-invariant
+# Clarke) with SciPy Radau at rtol 1e-12; it never runs pulsim.
+
+_IM = dict(R_s=0.5, L_ls=2e-3, R_r=0.4, L_lr=2e-3, L_m=60e-3, pole_pairs=2)
+_IM_VP, _IM_W = 100.0 * math.sqrt(2.0), 2 * math.pi * 60.0
+
+
+def _im(held, J=0.01):
+    def build(k):
+        b = _b()
+        for i, node in enumerate(("ua", "ub", "uc")):
+            b.add_sine_voltage_source(f"V{i}", node, "gnd", 0.0, _IM_VP,
+                                      60.0, -2 * math.pi / 3 * i)
+        b.add_induction_machine_mna("M", "ua", "ub", "uc", "nn", "w",
+                                    **dict(_IM, R_r=_IM["R_r"] * k), J=J)
+        if held is not None:
+            b.add_voltage_source("Vw", "w", "gnd", held)
+        return b, None
+    return build
+
+
+def _im_exact(held, out, J=0.01):
+    from scipy.integrate import solve_ivp
+
+    p = _IM
+    lr = p["L_lr"] + p["L_m"]
+    sls = p["L_ls"] + p["L_m"] * p["L_lr"] / lr
+    kr, tr = p["L_m"] / lr, lr / p["R_r"]
+    pp = p["pole_pairs"]
+
+    def rhs(t, x):
+        lsa, lsb, lra, lrb, om = x
+        if held is not None:
+            om = held
+        isa, isb = (lsa - kr * lra) / sls, (lsb - kr * lrb) / sls
+        va = _IM_VP * math.sin(_IM_W * t)
+        vb = -_IM_VP * math.cos(_IM_W * t)
+        torque = 1.5 * pp * kr * (lra * isb - lrb * isa)
+        return [va - p["R_s"] * isa, vb - p["R_s"] * isb,
+                -lra / tr + p["L_m"] / tr * isa - pp * om * lrb,
+                -lrb / tr + p["L_m"] / tr * isb + pp * om * lra,
+                0.0 if held is not None else torque / J]
+
+    def f(t):
+        t = np.atleast_1d(np.asarray(t, dtype=float))
+        ts = np.unique(t)
+        sol = solve_ivp(rhs, (0.0, float(ts[-1])), [0.0] * 5, method="Radau",
+                        rtol=1e-12, atol=1e-13, t_eval=ts, max_step=1e-4)
+        lsa, _lsb, lra, _lrb, om = sol.y
+        y = om if out == "w" else (lsa - kr * lra) / sls   # i_a = i_alpha
+        return np.interp(t, ts, y)
+    return f
+
+
 # ------------------------------------------------------------- the table ---
 
 CASES = [
@@ -457,6 +514,10 @@ CASES = [
          _buck_exact(1.0, 0.5, 40 * _TB), 40 * _TB, _TB / 200, ALL),
     Case("buck_dcm", "buck DCM, R 50 Ohm, D 0.3, from rest", _buck(50.0, 0.3), _v("vout"),
          _buck_exact(50.0, 0.3, 40 * _TB), 40 * _TB, _TB / 200, ALL),
+    Case("im_locked_rotor", "induction machine, speed held at 0, i_a from rest",
+         _im(0.0), _i("M_a"), _im_exact(0.0, "i_a"), 0.1, 2e-5, NO_DSED),
+    Case("im_free_acceleration", "induction machine, direct-on-line start, speed",
+         _im(None), _v("w"), _im_exact(None, "w"), 0.2, 2e-5, NO_DSED),
 ]
 
 BY_ID = {c.id: c for c in CASES}

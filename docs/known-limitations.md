@@ -58,6 +58,7 @@ unless called with `allow_non_passive=True`.
 | SineCurrentSource | Source | yes | yes | yes | yes | yes |
 | PulseCurrentSource | Source | yes | yes | yes | yes | yes |
 | PwlCurrentSource | Source | yes | yes | yes | yes | yes |
+| InductionMachineMna | NewtonStateful | yes | yes | no | no | no |
 <!-- engine-capabilities:end -->
 
 The charge laws `ChargeLaw.table` / `.vdmos_cgd` are the
@@ -192,8 +193,8 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **Only the DC machine is solved in the matrix.** `b.add_dc_machine` is MNA-native; the PMSM observer, BLDC and induction motor are still explicit observers on `pwl` only (forward Euler; the induction motor's rotor flux is integrated exactly over each step since 2026-11, but its EMF still reaches the circuit one step late) (`b.add_pmsm_mna` is native). No machine model is validated against measurements: the tests check analytic limits of the equations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). | Use `b.add_dc_machine`; halve `dt` to check an observer run. |
-| No angle node on `add_dc_machine` (`theta_node` raises `UnsupportedError`); no `components()` entry for the machine as a whole (its sub-elements are listed). | — | Integrate `res.v(omega_node)`, or build the angle: `add_vccs` from the speed node into a 1 F capacitor. |
+| **Native machines: DC machine, PMSM and induction machine are solved in the matrix; the observers are not.** `b.add_dc_machine`, `b.add_pmsm_mna`, `b.add_induction_machine_mna` are MNA-native on `pwl` and `trbdf2`; `p.add_pmsm`, `p.add_bldc`, `p.add_induction_motor` are explicit observers on `pwl` only (first order). The PMSM and induction machine have no DC operating point (the DC assembly stamps Newton devices open, so the preflight ties their neutral, rotor-flux and speed nodes to ground through 1 GΩ) and no AC-sweep stamp; `dsed` refuses them (speed-dependent, not LTI between events). No machine model is validated against measurements: the tests check analytic limits of the equations and independent ODE integrations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). Induction machine free acceleration: 2.5e-6 of synchronous speed at 20 µs on `pwl`. | Use the native machines; halve `dt` to check an observer run. On `pwl` pass `discontinuity_restart=True` for a three-phase start (first order otherwise). |
+| No `components()` entry for a composite machine as a whole (its sub-elements are listed). | — | — |
 
 ## Passives
 

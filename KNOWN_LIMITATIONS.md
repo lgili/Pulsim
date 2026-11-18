@@ -580,14 +580,17 @@ consistent-initial-conditions solve.
 
 ---
 
-## Machines (`add-mna-native-machines`, step 1)
+## Machines (`add-mna-native-machines`)
 
-`b.add_dc_machine` is solved in the matrix; the PMSM (observer path),
-BLDC and induction-motor observers are not yet, and stay first order
-on `pwl`. Not done: `theta_node` (refused; integrate `ω` with `add_vccs` into a 1 F capacitor), the induction
-machine, BLDC harmonics, flux maps. None of the machine tests
-is a validation against a measured machine: they check analytic
-properties of the equations.
+`b.add_dc_machine`, `b.add_pmsm_mna` and `b.add_induction_machine_mna`
+are solved in the matrix on `pwl` and `trbdf2`; the PMSM, BLDC and
+induction-motor observers are not, and stay first order on `pwl`. The
+PMSM and the induction machine have no DC operating point and no AC-sweep
+stamp; `dsed` refuses them by name. Not done: flux maps (saturation), the
+DC operating point with held mechanics, deprecation of the PMSM / BLDC /
+induction observers. None of the machine tests is a validation against a
+measured machine: they check analytic properties of the equations and
+independent integrations of them.
 
 ---
 

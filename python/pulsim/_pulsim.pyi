@@ -347,6 +347,15 @@ class CircuitBuilder:
     """
     def __init__(self) -> None:
         ...
+    def add_bldc_mna(self, name: str, phase_a: str, phase_b: str, phase_c: str, neutral: str, omega_node: str, theta_node: str, *, R_s: float, L_s: float, k_e: float, pole_pairs: int, J: float, B: float = 0.0, T_load: float = 0.0, flat_top_deg: float = 120.0, n_harmonics: int = 25, omega0: float = 0.0, theta0: float = 0.0) -> 'CircuitBuilder':
+        """
+        Add an MNA-native BLDC: ``add_pmsm_mna`` (round rotor,
+        ``L_d = L_q = L_s``) with the PM flux of a trapezoidal back-EMF
+        (:func:`trapezoid_harmonics`). Back-EMF and torque come from the
+        same series and its exact derivatives, so the torque is consistent
+        with the back-EMF (co-energy). ``k_e`` [V·s/rad]: phase back-EMF on
+        the flat top per unit mechanical speed.
+        """
     def add_capacitor(self, name: str, n_pos: str, n_neg: str, C_farads: float, c0: float | None = None, *, esr: float = 0.0, esl: float = 0.0) -> 'CircuitBuilder':
         """
         add_capacitor(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: str, n_neg: str, C_farads: float, c0: float | None = None) -> pulsim._pulsim.CircuitBuilder
@@ -388,9 +397,9 @@ class CircuitBuilder:
         units they are the same constant, so a call with ``Kt != Ke`` is
         refused (the coupling would not conserve power).
 
-        ``theta_node`` is not built yet and raises ``UnsupportedError``
-        (feature ``"theta_node"``); the message shows how to integrate the
-        speed with ``add_vccs`` into a 1 F capacitor.
+        ``theta_node`` (optional) gets the shaft angle [rad]: a unit VCCS
+        ``{name}.th`` from the speed node into a 1 F capacitor ``{name}.ct``,
+        so ``v(theta_node) = ∫ω dt`` (starting at 0).
         """
     def add_diode(self, name: str, anode: str, cathode: str, g_on: float | None = None, g_off: float | None = None, V_th: float = 0.0, V_f: float = 0.0, *, form: str = 'conductance', R_on: float | None = None) -> CircuitBuilder:
         """
@@ -423,6 +432,10 @@ class CircuitBuilder:
     def add_igbt_level1(self, name: str, collector: str, emitter: str, gate: str, V_CE_sat: float = 1.5, R_CE_sat: float = 0.05, V_T: float = 5.0, kappa: float = 10.0, v_knee: float = 0.01, with_fwd: bool = False, tau_tail: float = 0.0, k_tail: float = 0.0, V_F: float = 0.7) -> CircuitBuilder:
         """
         Add a 3-terminal IGBT Level 1 (linear-conduction model with cutoff sigmoid). Collector-emitter is a Nonlinear branch; gate is an ideal voltage reference (no gate current). On-state I_C = (V_CE-V_CE_sat) / R_CE_sat, clamped to I_C >= 0 with a knee of width `v_knee` — an IGBT is a minority-carrier device and cannot conduct in reverse. Pass `with_fwd=True` for the co-packaged anti-parallel freewheeling diode, which an inductive load needs: without it there is no path for the freewheeling current and the solve fails. `V_F` is that diode's CONDUCTION DROP (v = V_F + i/1e3 S while on; it turns on at V_F). Use `run_transient(..., enable_nonlinear_refresh=True)` to stamp the device per Newton iteration. `tau_tail`/`k_tail` add the TURN-OFF TAIL: when the gate falls below threshold the MOS channel cuts off in nanoseconds, but the carriers stored in the n- drift region can only recombine, and that tail is 40-70% of an IGBT's turn-off energy. `k_tail` is the fraction of on-state current still flowing just after cutoff and `tau_tail` its decay constant (0.1-10 us) — both read straight off a datasheet turn-off waveform, and they must be given together. They default to OFF, unlike the MOSFET's body diode, because NPT/PT/trench/field-stop parts differ by orders of magnitude, so any default would put a fabricated number in your loss report. The DC curve is unchanged either way.
+        """
+    def add_induction_machine_mna(self, name: str, phase_a: str, phase_b: str, phase_c: str, neutral: str, omega_node: str, R_s: float, L_ls: float, R_r: float, L_lr: float, L_m: float, pole_pairs: float, J: float, B: float = 0.0, T_load: float = 0.0, omega0: float = 0.0) -> CircuitBuilder:
+        """
+        Add an MNA-NATIVE squirrel-cage induction machine: three stator branches `<name>_a/_b/_c` (phase -> neutral) with a constant stationary-frame inductance, the rotor flux linkage as the voltages of two internal nodes `<name>_psi_ra`, `<name>_psi_rb` [Wb] (1 F capacitors), and the torque 1.5*pp*(L_m/L_r)*(psi_ra*i_sb - psi_rb*i_sa) into `omega_node` (mechanical speed [rad/s], capacitor J, resistor 1/B). Rotor quantities referred to the stator, amplitude-invariant Clarke. Solved by Newton on pwl and trbdf2; dsed and the AC sweep refuse it by name. Read speed with res.v(omega_node), phase currents with res.i('<name>_a').
         """
     def add_inductor(self, name: str, n_pos: str, n_neg: str, L_henries: float, i0: float | None = None, *, esr: float = 0.0, c_par: float = 0.0, rac = None) -> 'CircuitBuilder':
         """
@@ -485,9 +498,9 @@ class CircuitBuilder:
         """
         Add an ideal op-amp (single-ended output to gnd, high gain). Combine with negative feedback to enforce V_in_pos ≈ V_in_neg.
         """
-    def add_pmsm_mna(self, name: str, phase_a: str, phase_b: str, phase_c: str, neutral: str, omega_node: str, theta_node: str, R_s: float, L_d: float, L_q: float, psi_pm: float, pole_pairs: float, J: float, B: float = 0.0, T_load: float = 0.0, L_0: float = 0.0, omega0: float = 0.0, theta0: float = 0.0) -> CircuitBuilder:
+    def add_pmsm_mna(self, name: str, phase_a: str, phase_b: str, phase_c: str, neutral: str, omega_node: str, theta_node: str, R_s: float, L_d: float, L_q: float, psi_pm: float, pole_pairs: float, J: float, B: float = 0.0, T_load: float = 0.0, L_0: float = 0.0, omega0: float = 0.0, theta0: float = 0.0, harmonics: collections.abc.Sequence[typing.Annotated[collections.abc.Sequence[float], "FixedSize(3)"]] = []) -> CircuitBuilder:
         """
-        Add an MNA-NATIVE PMSM (audit C.3): three stator branches `<name>_a/_b/_c` (phase -> neutral) stamped per Newton iteration with the FULL theta-dependent inductance matrix L(theta) = T^-1 diag(L_d, L_q, L_0) T and the PM flux, so an IPM's d/q dynamics are exact and there is no one-step lag; mechanics are NODES (`omega_node` carries a capacitor J and a resistor 1/B, `theta_node` a 1 F capacitor fed by omega), so they get the same trapezoidal companion in the same solve. T_em comes from the co-energy of the same L(theta) — the reluctance torque appears because L(theta) is in the matrix. A speed-dependent load is just another element on `omega_node`. Read speed with res.v(omega_node), angle with res.v(theta_node), phase currents with res.i('<name>_a'). Compare with the observer-based `add_pmsm` + `make_pmsm_observer`, which uses one average L (tau_d +100 %, tau_q -33 % on a 1/3 mH IPM) and a first-order lag (-0.37 % of speed at dt=5e-5).
+        Add an MNA-NATIVE PMSM (audit C.3): three stator branches `<name>_a/_b/_c` (phase -> neutral) stamped per Newton iteration with the FULL theta-dependent inductance matrix L(theta) = T^-1 diag(L_d, L_q, L_0) T and the PM flux, so an IPM's d/q dynamics are exact and there is no one-step lag; mechanics are NODES (`omega_node` carries a capacitor J and a resistor 1/B, `theta_node` a 1 F capacitor fed by omega), so they get the same trapezoidal companion in the same solve. T_em comes from the co-energy of the same L(theta) — the reluctance torque appears because L(theta) is in the matrix. A speed-dependent load is just another element on `omega_node`. Read speed with res.v(omega_node), angle with res.v(theta_node), phase currents with res.i('<name>_a'). Compare with the observer-based `add_pmsm` + `make_pmsm_observer`, which uses one average L (tau_d +100 %, tau_q -33 % on a 1/3 mH IPM) and a first-order lag (-0.37 % of speed at dt=5e-5). `harmonics=[(h, psi_h, phi_h), ...]` replaces the PM flux psi_pm*cos(theta_e) by sum psi_h*cos(h*theta_e + phi_h) (phases b, c at theta_e -/+ 120 deg): a non-sinusoidal back-EMF with the torque from the same series; see `CircuitBuilder.add_bldc_mna`.
         """
     def add_power_mosfet(self, name: str, drain: str, source: str, gate: str, *, K: float, V_T: float, lambda_: float = 0.0, kappa: float = 15.0, R_d: float = 0.0, C_gs: float, C_gd: typing.Any, C_ds: typing.Any, R_g: float = 0.0, L_s: float = 0.0, body_diode: typing.Any = None, T_j: float = 25.0, rds_tc1: float = 0.0, rds_tc2: float = 0.0, vt_tc: float = 0.0) -> CircuitBuilder:
         """
@@ -879,6 +892,10 @@ class DevicePool:
         """
         True when this branch is an IGBT with a turn-off tail (tau_tail and k_tail both set). The engine router uses it to decide whether TR-BDF2 has to refuse the circuit.
         """
+    def induction_machines(self) -> list[typing.Any]:
+        """
+        MNA-native induction machines on this pool, one dict per machine: branch_ids (a, b, c), omega_node, rotor_nodes (state-vector indices of psi_ra, psi_rb) and params.
+        """
     def kind_of(self, branch_id: int) -> StoredKind:
         """
         Return the StoredKind enum for `branch_id`. Used by the v1.4.0 parametric refactor pipeline to pick the right update_* mutator from a string-based component name lookup.
@@ -958,6 +975,8 @@ class StoredKind:
       PulseCurrentSource
 
       PwlCurrentSource
+
+      InductionMachineMna
     """
     CCCS: typing.ClassVar[StoredKind]
     CCVS: typing.ClassVar[StoredKind]
@@ -967,6 +986,7 @@ class StoredKind:
     Gyrator: typing.ClassVar[StoredKind]
     IdealTransformer: typing.ClassVar[StoredKind]
     IgbtLevel1: typing.ClassVar[StoredKind]
+    InductionMachineMna: typing.ClassVar[StoredKind]
     Inductor: typing.ClassVar[StoredKind]
     LauritzenDiode: typing.ClassVar[StoredKind]
     MosfetLevel1: typing.ClassVar[StoredKind]

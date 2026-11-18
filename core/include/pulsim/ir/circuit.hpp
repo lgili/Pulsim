@@ -330,6 +330,12 @@ private:
                 } else if constexpr (std::is_same_v<P, models::NonlinearCapacitor::Params>) {
                     v.word(static_cast<std::uint64_t>(p.law));
                     v.word(reinterpret_cast<std::uintptr_t>(p.table.get()));
+                } else if constexpr (std::is_same_v<P, models::PmsmMna::Params>) {
+                    if (p.harmonics) {
+                        for (const auto& t : *p.harmonics) {
+                            v.real(t.h); v.real(t.psi); v.real(t.phi);
+                        }
+                    }
                 }
             }, params);
             d->devices.push_back(std::move(dev));
@@ -344,6 +350,11 @@ private:
         for (const auto& m : pool.pmsm_mna_machines()) {
             s.idx(m.omega_node);
             s.idx(m.theta_node);
+        }
+        for (const auto& m : pool.induction_machines()) {
+            s.idx(m.omega_node);
+            s.idx(m.rotor_node[0]);
+            s.idx(m.rotor_node[1]);
         }
         // Which fields a parameter drives is structure; parameter values
         // are values.

@@ -216,3 +216,21 @@ cases:
     dsed:
       ceiling: 1.0e-06
       measured: 7.338e-10
+  im_locked_rotor:
+    pwl:
+      ceiling: 6.74e-07
+      measured: 3.371e-07
+    trbdf2:
+      ceiling: 1.65e-05
+      measured: 8.225e-06
+    dsed:
+      refused: UnsupportedError
+  im_free_acceleration:
+    pwl:
+      ceiling: 9.42e-05
+      measured: 4.711e-05
+    trbdf2:
+      ceiling: 8.49e-05
+      measured: 4.247e-05
+    dsed:
+      refused: UnsupportedError

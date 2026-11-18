@@ -63,6 +63,119 @@
 
 namespace pulsim::pwl {
 
+namespace detail {
+
+/// Induction-machine entry (add-mna-native-machines group 2).
+///
+/// Stator row k: the PMSM's flux row with λ_k = Σ_j L_kj i_j + Σ_r M_kr λ_r
+/// (L, M constant), so ∂R_k/∂i_j = −R_s δ_kj − d·L_kj and
+/// ∂R_k/∂λ_r = −d·M_kr; the history term is the PMSM's.
+///
+/// Rotor-flux node n (1 F capacitor added by the builder; the engine
+/// integrates C·dλ/dt): injected current g = dλ_r/dt's right-hand side,
+///   g_α = −λ_α/τ_r + (L_m/τ_r)·i_sα − ω_e·λ_β
+///   g_β = −λ_β/τ_r + (L_m/τ_r)·i_sβ + ω_e·λ_α,   ω_e = pp·ω
+/// residual f −= g. Speed node: f −= T_em − T_load. Stage-independent
+/// (algebraic) like the PMSM's mechanical couplings.
+inline Real refresh_induction_entry_(
+    const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
+    const PmsmMnaHistory::Entry& e, Real d_coef, bool bdf2, bool be,
+    Real h) {
+    using IM = models::InductionMachineMna;
+    const auto& p = e.im;
+    const auto kc = trbdf2_coeffs();
+    const auto sm = IM::stator(p);
+    const auto dv = IM::derived(p);
+    const auto C = IM::clarke();
+    std::array<Real, 3> i{}, v{};
+    const Real v_n = stamping::read_node_voltage(x, e.neutral);
+    for (Size k = 0; k < 3; ++k) {
+        i[k] = x[e.cur_row[k]];
+        v[k] = stamping::read_node_voltage(x, e.phase_node[k]) - v_n;
+    }
+    const std::array<Real, 2> lr{
+        stamping::read_node_voltage(x, e.rotor_node[0]),
+        stamping::read_node_voltage(x, e.rotor_node[1])};
+    const bool n_act = stamping::node_is_active(e.neutral);
+    const bool om_act = stamping::node_is_active(e.omega_node);
+    const std::array<bool, 2> r_act{
+        stamping::node_is_active(e.rotor_node[0]),
+        stamping::node_is_active(e.rotor_node[1])};
+    const auto lam = IM::lambda_s(p, i, lr);
+    Real max_i = Real{0};
+
+    // ---- stator rows (conductance form, as the PMSM's) ----------
+    for (Size k = 0; k < 3; ++k) {
+        const Real hist =
+            bdf2 ? (kc.c2 * e.lambda_gamma[k] + kc.c3 * e.lambda_old[k]) / h
+                 : (be ? Real{0} : -e.dlam_old[k])
+                       - d_coef * e.lambda_old[k];
+        const Real R_row = (v[k] - p.R_s * i[k]) - d_coef * lam[k] - hist;
+        const Index row = e.cur_row[k];
+        const bool ph_act = stamping::node_is_active(e.phase_node[k]);
+        f_nl[row] += R_row;
+        if (ph_act) J_nl.coeffRef(row, e.phase_node[k]) += Real{1};
+        if (n_act)  J_nl.coeffRef(row, e.neutral) -= Real{1};
+        for (Size j = 0; j < 3; ++j) {
+            Real d = -d_coef * sm.L[k][j];
+            if (j == k) d -= p.R_s;
+            J_nl.coeffRef(row, e.cur_row[j]) += d;
+        }
+        for (Size r = 0; r < 2; ++r) {
+            if (r_act[r]) {
+                J_nl.coeffRef(row, e.rotor_node[r]) += -d_coef * sm.M[k][r];
+            }
+        }
+        if (ph_act) {
+            f_nl[e.phase_node[k]] += i[k];
+            J_nl.coeffRef(e.phase_node[k], row) += Real{1};
+        }
+        if (n_act) {
+            f_nl[e.neutral] -= i[k];
+            J_nl.coeffRef(e.neutral, row) -= Real{1};
+        }
+        max_i = std::max(max_i, std::abs(i[k]));
+    }
+
+    // ---- rotor-flux nodes ---------------------------------------
+    const Real omega =
+        om_act ? stamping::read_node_voltage(x, e.omega_node) : Real{0};
+    const auto g = IM::rotor_rhs(p, i, lr, omega);
+    const Real pp = p.pole_pairs, we = pp * omega;
+    // ∂g_n/∂λ_m, ∂g_n/∂ω
+    const Real dg_dl[2][2] = {{-dv.inv_tau_r, -we}, {we, -dv.inv_tau_r}};
+    const Real dg_dw[2] = {-pp * lr[1], pp * lr[0]};
+    for (Size n = 0; n < 2; ++n) {
+        if (!r_act[n]) continue;
+        const Index rn = e.rotor_node[n];
+        f_nl[rn] -= g[n];
+        for (Size m = 0; m < 2; ++m) {
+            if (r_act[m]) J_nl.coeffRef(rn, e.rotor_node[m]) -= dg_dl[n][m];
+        }
+        for (Size j = 0; j < 3; ++j) {
+            J_nl.coeffRef(rn, e.cur_row[j]) -= dv.Lm_over_tau_r * C[n][j];
+        }
+        if (om_act) J_nl.coeffRef(rn, e.omega_node) -= dg_dw[n];
+    }
+
+    // ---- torque into the speed node -----------------------------
+    if (om_act) {
+        const Real kt = Real{1.5} * pp * dv.k_r;
+        const auto is = IM::i_ab(i);
+        const Real T = kt * (lr[0] * is[1] - lr[1] * is[0]);
+        f_nl[e.omega_node] -= (T - p.T_load);
+        for (Size j = 0; j < 3; ++j) {
+            J_nl.coeffRef(e.omega_node, e.cur_row[j])
+                -= kt * (lr[0] * C[1][j] - lr[1] * C[0][j]);
+        }
+        if (r_act[0]) J_nl.coeffRef(e.omega_node, e.rotor_node[0]) -= kt * is[1];
+        if (r_act[1]) J_nl.coeffRef(e.omega_node, e.rotor_node[1]) += kt * is[0];
+    }
+    return max_i;
+}
+
+}  // namespace detail
+
 /// Stamp every MNA-native PMSM. Returns the largest |i_phase|
 /// stamped, for the Newton residual indicator.
 inline Real refresh_pmsm_mna(
@@ -85,6 +198,11 @@ inline Real refresh_pmsm_mna(
     const bool be = (stage == TrBdf2Stage::BackwardEuler);
     const Real d_coef = bdf2 ? kc.c1 / h : be ? Real{1} / h : Real{2} / h;
     for (const auto& e : history.entries()) {
+        if (e.induction) {
+            max_i = std::max(max_i, detail::refresh_induction_entry_(
+                                        x, J_nl, f_nl, e, d_coef, bdf2, be, h));
+            continue;
+        }
         const auto& p = e.params;
         const Real theta_e = PmsmMnaHistory::theta_e_of(e, x);
         const auto ind = models::PmsmMna::inductance(p, theta_e);

@@ -249,8 +249,8 @@ def _err(case, engine, k=1.0):
                            abs_scale=case.abs_scale, exclude_t0=case.exclude_t0)
 
 
-def test_there_are_twenty_analytic_cases_and_each_has_a_manifest_entry():
-    assert len(CASES) == 20
+def test_there_are_twenty_two_analytic_cases_and_each_has_a_manifest_entry():
+    assert len(CASES) == 22
     assert set(ANALYTIC) == {c.id for c in CASES}
 
 
