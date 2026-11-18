@@ -23,9 +23,12 @@ under the default settle and under mode_selection='lcp':
   the default settle releases it structurally (counted), the LCP finds OFF
   directly (no structural release).
 * leg: a half-bridge of ideal switches with ideal antiparallel diodes at
-  V_f = 0 into R + L. Each diode sits across a closed switch at the loop's
-  round-off residual; it stays OFF (no refusal) and the load current is the
-  RL response to the +-V square wave.
+  V_f = 0 into R + L. Each diode sits across a closed switch, shorted (its
+  gap is the loop's residual, zero or a few ulps); it stays OFF (no refusal)
+  and the load current is the RL response to the +-V square wave. Under
+  'lcp' the shorted ports are held OFF before Lemke (counted: shorted_held);
+  that the hold is independent of the residual's SIGN is shown by the C++
+  selector case, which injects +-1e-13 (this run cannot choose the sign).
 """
 import warnings
 
@@ -122,9 +125,8 @@ def _rl_buck(N, mode, periods=20):
 
 def _leg(N, mode, periods=10):
     # half-bridge leg, ideal switches with ideal antiparallel diodes at
-    # V_f = 0: each diode sits across a closed switch at the loop's round-off
-    # residual of either sign, and must stay OFF (the switches carry both
-    # directions); the load sees the +-V square wave
+    # V_f = 0: each diode sits across a closed switch, shorted, and must stay
+    # OFF (the switches carry both directions); the load sees the +-V square wave
     V, L, R, Tb = 200.0, 1e-3, 5.0, 1e-4
     b = p.CircuitBuilder()
     b.add_voltage_source("Vp", "p", "gnd", V)
@@ -190,6 +192,10 @@ def test_lcp_takes_the_same_modes_and_releases_the_loop_itself(runs):
     if name == "rl_buck":
         assert r0.counters["ideal_loop_releases"] > 0      # the settle's structural release
         assert r1.counters["ideal_loop_releases"] == 0     # the LCP decided OFF itself
+    if name == "leg":
+        # every gate edge poses the LCP with a diode across the closed switch:
+        # shorted (Z_jj = 0 structurally), held OFF, never released
+        assert ms["shorted_held"] > 0 and ms["shorted_released"] == 0
 
 
 @pytest.mark.parametrize("split", [False, True])
@@ -225,3 +231,43 @@ def test_a_loop_that_forward_biases_an_ideal_diode_is_refused_by_name(mode):
     with pytest.raises(p.UnsupportedError) as e:
         _sim(b, mode, t_end=1e-5, dt=1e-6)
     assert e.value.feature == "ideal_voltage_loop" and e.value.device.startswith("D")
+
+
+def _loop_order(msg):
+    """The element names of the message's '(loop: a -> b -> ...)'."""
+    return msg.split("loop: ", 1)[1].split(")", 1)[0].split(" -> ")
+
+
+@pytest.mark.parametrize("mode", [None, "lcp"])
+def test_a_loop_of_several_ideal_diodes_is_named_element_by_element(mode):
+    # V1 -> D1 -> D2 -> D3 -> back: no ideal port is shorted on its own (the
+    # LCP poses each open), so the refusal must find the loop through all three
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V1", "a", "gnd", 10.0)
+    b.add_diode("D1", "a", "b", form="branch", R_on=0.0, g_off=1e-9)
+    b.add_diode("D2", "b", "c", form="branch", R_on=0.0, g_off=1e-9)
+    b.add_diode("D3", "c", "gnd", form="branch", R_on=0.0, g_off=1e-9)
+    b.add_resistor("R0", "b", "gnd", 10.0)
+    with pytest.raises(p.UnsupportedError) as e:
+        _sim(b, mode, t_end=1e-4, dt=1e-5)
+    assert e.value.feature == "ideal_voltage_loop"
+    loop = _loop_order(str(e.value))
+    ring = ["V1", "D1", "D2", "D3"]
+    rots = [ring[k:] + ring[:k] for k in range(4)]
+    assert loop in rots + [r[::-1] for r in rots], loop
+
+
+@pytest.mark.parametrize("R_on", [1e-300, 1e-12])
+def test_an_r_on_below_the_port_resolution_is_refused_by_name(R_on):
+    b = p.CircuitBuilder()
+    with pytest.raises(ValueError, match=r'add_diode\("D"\): R_on = .* below 1e-09'):
+        b.add_diode("D", "a", "k", form="branch", R_on=R_on, g_off=1e-9)
+
+
+def test_a_micro_ohm_r_on_runs_as_a_resistor():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 1.0)
+    b.add_diode("D", "a", "k", form="branch", R_on=1e-6, g_off=1e-9)
+    b.add_resistor("R", "k", "gnd", 1.0)
+    r = _sim(b, None, t_end=1e-5, dt=1e-6)
+    assert np.asarray(r.v("k"))[-1] == pytest.approx(1.0 / (1.0 + 1e-6), rel=1e-12)

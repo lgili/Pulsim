@@ -74,3 +74,48 @@ def test_the_exact_engine_matches_the_ground_truth():
     r = p.simulate(_bridge(np.zeros(6), "conductance"), t_end=40e-3,
                    engine="exact")
     assert abs(_window_avg(r) - TRUTH) <= 1e-6
+
+
+# BRIDGE_GROUND_TRUTH.md, "Events (exact, 50 digits)": the 11 commutations
+EVENTS = [(0.004453708135472069740740, "D1-D4-"), (0.010005784513217728980424, "D3+"),
+          (0.013234043039166346336001, "D2+"), (0.016037029154868641651128, "D2-"),
+          (0.019993816884401272433491, "D3-"), (0.023578074673711604264767, "D1+D4+"),
+          (0.026164880107693963425638, "D1-D4-"), (0.030006040329416432127840, "D3+"),
+          (0.033448621701173689951408, "D2+"), (0.036121739554460249850922, "D2-"),
+          (0.039993904164045823079728, "D3-")]
+
+
+def _commutations(b, r, dt):
+    """[(t, 'D1-D4-'), ...]: the diode changes of the stored switch states, after the
+    t = 0 start-up; changes 1.5 dt apart or less are one commutation (the D1/D4 tie,
+    which float64 resolves only 1e-8 s after it, may land on two adjacent steps)."""
+    t = np.asarray(r.times)
+    s = np.asarray(r.switch_states)[:, [b.switch_index_of(f"D{j}") for j in range(1, 5)]]
+    out = []
+    for k in np.nonzero((s[1:] != s[:-1]).any(axis=1))[0] + 1:
+        if t[k] <= 10 * dt:
+            continue
+        ch = {f"D{j + 1}{'+' if s[k, j] else '-'}" for j in range(4) if s[k, j] != s[k - 1, j]}
+        if out and t[k] - out[-1][2] <= 1.5 * dt:
+            out[-1][1].update(ch)
+            out[-1][2] = t[k]
+        else:
+            out.append([t[k], ch, t[k]])
+    return [(t0, "".join(sorted(ch, key=lambda c: c[1]))) for t0, ch, _ in out]
+
+
+@pytest.mark.parametrize("form", ["branch", "conductance"])
+@pytest.mark.parametrize("mode", [None, "lcp"])
+def test_pwl_finds_the_exact_bus_and_the_eleven_commutations(form, mode):
+    # pwl, restart + split, dt = 1 us: -3.733e-6 V measured for both forms and
+    # both selections; every commutation lands within a step of the exact one
+    dt = 1e-6
+    b = _bridge(np.zeros(6), form)
+    extra = {"mode_selection": mode} if mode else {}
+    r = p.simulate(b, t_end=40e-3, dt=dt, engine="pwl", discontinuity_restart=True,
+                   enable_substep_state_correction=True, **extra)
+    assert abs(_window_avg(r) - TRUTH) <= 1e-5
+    got = _commutations(b, r, dt)
+    assert [c for _, c in got] == [c for _, c in EVENTS], got
+    for (tg, c), (te, _) in zip(got, EVENTS):
+        assert abs(tg - te) <= 1.5 * dt, (c, tg, te)

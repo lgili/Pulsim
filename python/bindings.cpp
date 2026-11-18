@@ -2731,10 +2731,15 @@ void init_module(py::module_& m) {
                     d["enumerations"] = m.enumerations;
                     d["nonunique_modes"] = m.nonunique_modes;
                     d["hysteresis_released"] = m.released;
+                    d["shorted_held"] = m.shorted_held;
+                    d["shorted_released"] = m.shorted_released;
                     d["settle_rounds_total"] = m.settle_rounds_total;
                     d["mask_cycles"] = m.mask_cycles;
                     d["inconsistent"] = m.inconsistent;
                     d["port_solves"] = m.port_solves;
+                    d["port_matrices"] = m.port_matrices;
+                    d["quiet_sites"] = m.quiet_sites;
+                    d["cached_sites"] = m.cached_sites;
                     d["port_model_problems"] = m.lcps;
                     d["errors"] = m.errors;
                     d["last_error"] = m.last_error;

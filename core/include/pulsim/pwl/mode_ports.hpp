@@ -53,6 +53,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <optional>
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -69,6 +70,7 @@ public:
     /// bleeders, the builder's 1 GΩ regularisers): DECISIONS F1.
     static constexpr Real kWeakResistor = Real{1e-3};
 
+    PwlModePorts(const PwlModePorts&) = delete;  // last_isl_ points into its own map
     PwlModePorts(const PwlStateSpaceCache& cache, const topology::Graph& graph,
                  const DevicePool& pool, const DiodeEventState& diodes)
         : cache_{cache}, graph_{graph}, pool_{pool} {
@@ -98,38 +100,57 @@ public:
     }
     [[nodiscard]] Size solves() const noexcept { return solves_; }
     /// Islands corrected so far (one per island and port problem).
-    [[nodiscard]] Size island_corrections() const noexcept { return corr_.fixes(); }
+    [[nodiscard]] Size island_corrections() const noexcept { return fixes_; }
 
     /// Pass 0: the k-port of the site's own system J(mask, dt)·s =
     /// −(b_c + b_extra) — the cache's direct solve of that (mask, dt), then
     /// each floating island's KCL imposed exactly. dt = 0: static.
+    /// Z and the island correction depend on (mask, dt) only (unit
+    /// right-hand sides): built once per pair and kept (DECISIONS #30), so a
+    /// site costs the one solve for u — none when `x_site` is the engine's
+    /// own solve of J(mask, dt)·s = −(b_c + b_extra), the same bits.
     void site(const topology::SwitchStateMask& mask, Real dt,
-              const Vector& b_extra, DenseMatrix& Z, Vector& u) {
+              const Vector& b_extra, DenseMatrix& Z, Vector& u,
+              const Vector* x_site = nullptr) {
         const auto& isl = islands_(mask);
         const Vector& b_c = bconst_(mask);
-        cache_.solve_at(mask, dt, b_extra, sol_);
-        corr_.prepare(isl, [&](Index ref, Vector& w) {
-            rhs_ = -b_c;
-            rhs_[ref] -= Real{1};          // J·w = e_ref (the cache adds b_c)
-            cache_.solve_at(mask, dt, rhs_, w);
-        });
+        SiteEntry& e = entry_(mask, dt, isl, b_c);
+        if (x_site) {
+            sol_ = *x_site;
+        } else {
+            cache_.solve_at(mask, dt, b_extra, sol_);
+            ++solves_;
+        }
         // Σ_S f, f = −(b_c + b_extra): the exact sum of the given rows.
-        corr_.fix(isl, sol_, [&](const events::Island& s) {
+        const Size f0 = e.corr.fixes();
+        e.corr.fix(isl, sol_, [&](const events::Island& s) {
             return -events::island_exact_sum(s, b_c, &b_extra);
         });
+        fixes_ += e.corr.fixes() - f0;
         ports_of_(sol_, u);
-        Z.resize(static_cast<Index>(nodes_.size()),
-                 static_cast<Index>(nodes_.size()));
-        for (std::size_t j = 0; j < nodes_.size(); ++j) {
-            unit_rhs_(b_c, j, rhs_);   // J·s = −E_j
-            cache_.solve_at(mask, dt, rhs_, sol_);
-            corr_.fix(isl, sol_, [&](const events::Island& s) {
-                return events::island_unit_sum(s, nodes_[j].first, nodes_[j].second);
-            });
-            column_(sol_, j, Z);
-        }
-        solves_ += nodes_.size() + 1 + isl.size();
+        Z = e.Z;
     }
+    /// `mask` holds a floating island (its KCL is imposed on every solve).
+    [[nodiscard]] bool has_islands(const topology::SwitchStateMask& mask) {
+        return !islands_(mask).empty();
+    }
+    /// Impose the islands' KCL on `s`, a solve of J(mask, dt)·s = −(b_c + b_extra),
+    /// as `site` does on its u (the same correction: the same bits).
+    void correct(const topology::SwitchStateMask& mask, Real dt, const Vector& b_extra,
+                 Vector& s) {
+        const auto& isl = islands_(mask);
+        if (isl.empty()) return;
+        const Vector& b_c = bconst_(mask);
+        SiteEntry& e = entry_(mask, dt, isl, b_c);
+        const Size f0 = e.corr.fixes();
+        e.corr.fix(isl, s, [&](const events::Island& is) {
+            return -events::island_exact_sum(is, b_c, &b_extra);
+        });
+        fixes_ += e.corr.fixes() - f0;
+    }
+    /// Port matrices built (one per (mask, dt) seen) and reused.
+    [[nodiscard]] Size port_builds() const noexcept { return port_builds_; }
+    [[nodiscard]] Size port_reuses() const noexcept { return port_reuses_; }
 
     /// Circuit scales of the LCP tolerances (design D4), as the dsed
     /// adapter's `port_scale_full`: vscale = largest node voltage / source /
@@ -137,57 +158,115 @@ public:
     /// vscale·G of a resistor; c_max = largest capacitance.
     [[nodiscard]] events::CircuitScale scale(const Vector& x) const {
         const Index nn = graph_.num_nodes();
-        events::CircuitScale sc;
-        Real vs = Real{1}, is = Real{1e-12}, gmax = Real{0};
+        Real vs = Real{1}, is = Real{1e-12};
         for (Index i = 0; i < static_cast<Index>(x.size()); ++i) {
             if (i < nn) vs = std::max(vs, std::abs(x[i]));
             else is = std::max(is, std::abs(x[i]));
         }
+        // the branch part depends on the run's fixed parameters only: once per run
+        // (a per-site walk of every branch was the largest cost of a quiet site)
+        if (!scale_fixed_) scale_fixed_ = scale_of_branches_();
+        const auto& f = *scale_fixed_;
+        events::CircuitScale sc;
+        sc.c_max = f.c_max;
+        sc.vscale = std::max(vs, f.vs);
+        sc.iscale = std::max(std::max(is, f.is), sc.vscale * f.gmax);
+        return sc;
+    }
+
+private:
+    struct FixedScale { Real vs = 0, is = 0, gmax = 0, c_max = 0; };
+    mutable std::optional<FixedScale> scale_fixed_;
+    [[nodiscard]] FixedScale scale_of_branches_() const {
+        FixedScale f;
         using K = DevicePool::StoredKind;
         for (Index b = 0; b < graph_.num_branches(); ++b) {
             if (!pool_.is_registered(b)) continue;
             switch (pool_.kind_of(b)) {
             case K::VoltageSource:
-                vs = std::max(vs, std::abs(pool_.voltage_source_params(b).V));
+                f.vs = std::max(f.vs, std::abs(pool_.voltage_source_params(b).V));
                 break;
             case K::SineVoltageSource: {
                 const auto& p = pool_.sine_voltage_source_params(b);
-                vs = std::max(vs, std::abs(p.v_dc) + std::abs(p.v_amplitude));
+                f.vs = std::max(f.vs, std::abs(p.v_dc) + std::abs(p.v_amplitude));
                 break;
             }
             case K::PWMVoltageSource: {
                 const auto& p = pool_.pwm_voltage_source_params(b);
-                vs = std::max({vs, std::abs(p.v_high), std::abs(p.v_low)});
+                f.vs = std::max({f.vs, std::abs(p.v_high), std::abs(p.v_low)});
                 break;
             }
             case K::Diode: {
                 const auto& p = pool_.diode_params(b);
-                vs = std::max({vs, std::abs(p.V_f), std::abs(p.V_th)});
+                f.vs = std::max({f.vs, std::abs(p.V_f), std::abs(p.V_th)});
                 break;
             }
             case K::CurrentSource:
-                is = std::max(is, std::abs(pool_.current_source_params(b).I));
+                f.is = std::max(f.is, std::abs(pool_.current_source_params(b).I));
                 break;
             case K::Resistor:
-                gmax = std::max(gmax, std::abs(pool_.resistor_params(b).G));
+                f.gmax = std::max(f.gmax, std::abs(pool_.resistor_params(b).G));
                 break;
             case K::Capacitor:
-                sc.c_max = std::max(sc.c_max, pool_.capacitor_params(b).C);
+                f.c_max = std::max(f.c_max, pool_.capacitor_params(b).C);
                 break;
             default:
                 break;
             }
         }
-        sc.vscale = vs;
-        sc.iscale = std::max(is, vs * gmax);
-        return sc;
+        return f;
     }
+
+public:
 
 private:
     /// Per-mask memo bound: a long run on many diodes visits many masks;
     /// past this many the memo starts over (only b_c and the island lists
     /// are kept, both cheap to rebuild).
     static constexpr std::size_t kMemoMasks = 256;
+
+    /// The (mask, dt)-only part of a site: the port matrix and the island
+    /// correction (w = J⁻¹e_ref per island). A run's stamps per mask are
+    /// fixed (as for b_c above: Newton devices never reach a site).
+    struct SiteEntry {
+        Real dt;
+        DenseMatrix Z;
+        events::IslandCorrection corr;
+    };
+
+    SiteEntry& entry_(const topology::SwitchStateMask& mask, Real dt,
+                      const std::vector<events::Island>& isl, const Vector& b_c) {
+        auto it = site_cache_.find(mask);
+        if (it != site_cache_.end()) {
+            for (auto& e : it->second) {
+                if (e.dt == dt) { ++port_reuses_; return e; }
+            }
+            // a split's sub-step dt is new at every event: keep the list short
+            if (it->second.size() >= 4) it->second.erase(it->second.begin());
+        } else {
+            if (site_cache_.size() >= kMemoMasks) site_cache_.clear();
+            it = site_cache_.emplace(mask, std::vector<SiteEntry>{}).first;
+        }
+        SiteEntry& e = it->second.emplace_back(SiteEntry{dt, {}, {}});
+        e.corr.prepare(isl, [&](Index ref, Vector& w) {
+            rhs_ = -b_c;
+            rhs_[ref] -= Real{1};          // J·w = e_ref (the cache adds b_c)
+            cache_.solve_at(mask, dt, rhs_, w);
+        });
+        const auto k = static_cast<Index>(nodes_.size());
+        e.Z.resize(k, k);
+        for (std::size_t j = 0; j < nodes_.size(); ++j) {
+            unit_rhs_(b_c, j, rhs_);   // J·s = −E_j
+            cache_.solve_at(mask, dt, rhs_, col_);
+            e.corr.fix(isl, col_, [&](const events::Island& s) {
+                return events::island_unit_sum(s, nodes_[j].first, nodes_[j].second);
+            });
+            column_(col_, j, e.Z);
+        }
+        solves_ += nodes_.size() + isl.size();
+        ++port_builds_;
+        return e;
+    }
 
     const Vector& bconst_(const topology::SwitchStateMask& mask) {
         auto it = bconst_cache_.find(mask);
@@ -203,13 +282,20 @@ private:
 
     /// The islands of `mask` (events/islands.hpp, written for dsed too): empty
     /// when the circuit holds a device kind the rule does not classify.
+    const std::pair<const topology::SwitchStateMask, std::vector<events::Island>>* last_isl_ =
+        nullptr;
     const std::vector<events::Island>& islands_(const topology::SwitchStateMask& mask) {
+        // the last mask asked: a quiet run asks the same mask every step (no hash)
+        if (last_isl_ && last_isl_->first == mask) return last_isl_->second;
         auto it = islands_cache_.find(mask);
-        if (it != islands_cache_.end()) return it->second;
-        if (islands_cache_.size() >= kMemoMasks) islands_cache_.clear();
-        return islands_cache_
-            .emplace(mask, events::find_islands(graph_, pool_, mask, kWeakResistor))
-            .first->second;
+        if (it == islands_cache_.end()) {
+            if (islands_cache_.size() >= kMemoMasks) islands_cache_.clear();
+            it = islands_cache_
+                     .emplace(mask, events::find_islands(graph_, pool_, mask, kWeakResistor))
+                     .first;
+        }
+        last_isl_ = &*it;  // unordered_map nodes are stable until the clear above
+        return it->second;
     }
 
     [[nodiscard]] Real vp_(const Vector& s, std::size_t j) const {
@@ -245,9 +331,9 @@ private:
     std::string branch_form_;
     std::unordered_map<topology::SwitchStateMask, Vector> bconst_cache_;
     std::unordered_map<topology::SwitchStateMask, std::vector<events::Island>> islands_cache_;
-    events::IslandCorrection corr_;
-    Vector rhs_, sol_;
-    Size solves_ = 0;
+    std::unordered_map<topology::SwitchStateMask, std::vector<SiteEntry>> site_cache_;
+    Vector rhs_, sol_, col_;
+    Size solves_ = 0, fixes_ = 0, port_builds_ = 0, port_reuses_ = 0;
 };
 
 /// Structural passivity at the diode ports (design D3), the dsed adapter's
@@ -329,21 +415,28 @@ inline int judge_mode(const DiodeEventState& diodes, const std::vector<char>& on
 /// (Z, u) (DECISIONS F2); an ideal diode is cut out of it (OFF coordinates);
 /// the judge reads the engine's own solve of each candidate.
 /// `Z`, `u`, `xj`, `coords`: caller scratch (no allocation once sized).
+/// `x_site` (optional, added for pwl's cost: DECISIONS #30): the caller's
+/// own solve of the site's system under the start mask, given only when no
+/// ideal diode is ON in `prev_on` (the start mask is then the posed one);
+/// the port voltages are read from it instead of solving again.
 template <class MaskOf>
 [[nodiscard]] events::ModeSelection select_site(
     events::ModeSelector& sel, PwlModePorts& ports, const PwlStateSpaceCache& cache,
     const DiodeEventState& diodes, MaskOf&& mask_of, const std::vector<char>& prev_on,
     const Vector& x0, Real for_dt, Real h_site, const Vector& b_extra,
-    DenseMatrix& Z, Vector& u, Vector& xj, std::vector<char>& coords) {
+    DenseMatrix& Z, Vector& u, Vector& xj, std::vector<char>& coords,
+    const Vector* x_site = nullptr) {
     coords.assign(prev_on.size(), 0);
-    for (std::size_t j = 0; j < prev_on.size(); ++j)
+    for (std::size_t j = 0; j < prev_on.size(); ++j) {
         coords[j] = ports.ideal(j) ? 0 : prev_on[j];
+        if (coords[j] != prev_on[j]) x_site = nullptr;   // posed mask != start mask
+    }
     const auto mask0 = mask_of(coords);
     const auto sc = ports.scale(x0);
     bool have_site = false;
     auto port_at = [&](Real, DenseMatrix& Zp, Vector& up) {
         if (!have_site) {
-            ports.site(mask0, for_dt, b_extra, Z, u);
+            ports.site(mask0, for_dt, b_extra, Z, u, x_site);
             have_site = true;
         }
         Zp = Z;
