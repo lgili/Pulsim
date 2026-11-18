@@ -87,6 +87,10 @@ replaces: the trbdf2 line becomes `advance(h)` at each attempt start,
 `inject` in `accumulate_sources`, `accept` at the accepted and landing
 pushes; the dsed one `accept` at each event. `run_transient_adaptive`
 refuses too: it resumes in segments and would drop the heat in flight.
+The shooting route of `periodic_steady_state` (pwl / trbdf2) refuses
+for the same reason (integration batch 12 review): each period is a
+fresh run from a seeded state, which drops the turn-on at the period
+start and the last step's heat.
 
 ## 9. One reading rule on both routes; the transient settles on the orbit
 

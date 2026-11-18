@@ -3605,12 +3605,13 @@ def simulate(
 
 def _off_tick_grid(cxx, t_start: float) -> bool:
     """A resumed graph whose rate groups do not all tick on t_start +
-    k*period (what trbdf2 schedules): some group would leave its grid."""
+    offset + k*period (what trbdf2's event queue schedules): some group
+    would leave its grid."""
     if not cxx.n_calls:
         return False
     for gi, due in enumerate(cxx.next_due_per_group(), start=1):
         period = float(cxx.group_period(gi))
-        q = (float(due) - t_start) / period
+        q = (float(due) - t_start - float(cxx.group_offset(gi))) / period
         if abs(q - round(q)) > 1e-9 * max(1.0, abs(q)):
             return True
     return False

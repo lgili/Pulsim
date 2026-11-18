@@ -4640,6 +4640,7 @@ void init_module(py::module_& m) {
             py::arg("block"), py::arg("group"))
         .def_property_readonly("has_rates", &BlockChain::has_rates)
         .def("group_period", &BlockChain::group_period, py::arg("group"))
+        .def("group_offset", &BlockChain::group_offset, py::arg("group"))
         .def("tick_counts", &BlockChain::tick_counts,
             "Ticks per group (index 0: evaluations of the every-call group).")
         .def_property_readonly("tick_jitter_max", &BlockChain::tick_jitter_max)

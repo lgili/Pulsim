@@ -183,3 +183,100 @@ def test_a_circuit_and_a_snapshot_reach_process_workers():
     assert not thr.failed and not prc.failed and prc.backend == "process"
     assert list(prc.kpis["v"]) == list(thr.kpis["v"])
     assert list(prc.kpis["t0"]) == pytest.approx([2.5e-4, 2.5e-4], abs=1e-12)
+
+
+# ---- seam D: controller state + the flat device-state snapshot ----------------
+def _sat_buck():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "in", "gnd", 24.0)
+    b.add_switch("Q", "in", "sw", 1e2, 1e-9)
+    b.add_diode("D", "gnd", "sw", 1e2, 1e-9)
+    b.add_nonlinear_capacitor("Coss", "in", "sw", 1e-9, 25.0, 0.5)
+    b.add_saturable_inductor("L", "sw", "out", 1e-3, 6.0, 1e-4)
+    b.add_capacitor("C", "out", "gnd", 47e-6)
+    b.add_resistor("R", "out", "gnd", 10.0)
+    loop = p.bind_pi_to_switch(
+        b, pi=p.PIController(Kp=0.02, Ki=20.0, output_min=0.05, output_max=0.95),
+        measured="out", setpoint=12.0, switch="Q", freq=10e3)
+    return b, loop
+
+
+def test_closed_loop_with_stateful_devices_resumes_and_its_pickle_is_refused():
+    """The control graph's resume state and the device interface's flat
+    device-state vector (pickle version 3) in one snapshot."""
+    t1, t2, dt = 1.53e-3, 3e-3, 1e-6
+    bf, lf = _sat_buck()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        full = p.simulate(bf, t2, dt=dt, closed_loops=[lf])
+        b, lp = _sat_buck()
+        first = p.simulate(b, t1, dt=dt, closed_loops=[lp])
+        snap = first.final_snapshot
+        assert len(snap.dev_state) > 0 and snap._control_state is not None
+        second = p.simulate(b, t2, dt=dt, closed_loops=[lp], resume_from=snap)
+    assert [d for _, d in lp.duty_history] == [d for _, d in lf.duty_history]
+    tf = np.asarray(full.times)
+    xf = np.asarray(full.states)[tf >= second.times[0] - 0.5 * dt]
+    xs = np.asarray(second.states)
+    n = min(len(xf), len(xs))
+    assert np.abs(xf[:n] - xs[:n]).max() <= 1e-9 * np.abs(xf).max()
+    copy = pickle.loads(pickle.dumps(snap))
+    assert list(copy.dev_state) == list(snap.dev_state)
+    with pytest.raises(p.UnsupportedError, match="was pickled"):
+        p.simulate(b, t2, dt=dt, closed_loops=[lp], resume_from=copy)
+
+
+def test_a_twelve_field_version_3_pickle_still_loads():
+    """The device-interface branch wrote version 3 with 12 fields; the
+    control graph's marker made it 13. Both load; the marker refuses."""
+    b, _ = _sat_buck()
+    snap = p.simulate(b, 2e-4, dt=1e-6, switch_fn=lambda t, n=b.graph.num_switches: p.SwitchStateMask(n)
+                      ).final_snapshot
+    st = snap.__getstate__()
+    assert st[:2] == ("SolverSnapshot", 3) and len(st) == 13 and st[12] is False
+    old = type(snap).__new__(type(snap))
+    old.__setstate__(st[:12])
+    assert list(old.dev_state) == list(snap.dev_state)
+    assert old._control_state is None
+
+
+# ---- seam G: an offset rate group resumed on trbdf2 (event queue x G26) -------
+def _offset_chain_run(t1):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 12.0)
+    b.add_resistor("R", "in", "out", 10.0)
+    b.add_capacitor("C", "out", "gnd", 1e-6)
+    ch = p.MixedDomainBlockChain(rate=p.Rate(1e-4, offset=3e-5))
+    ch.add("g", p.Gain(k=1.0), inputs=dict(x="out"), output="u")
+    obs = ch.make_step_observer(b)
+    ch._cxx_chain.record_channel("u")
+    first = p.simulate(b, t1, engine="trbdf2", step_observer=obs)
+    return b, ch, obs, first
+
+
+def test_trbdf2_resume_of_an_offset_group_checks_the_offset_grid():
+    """Ticks at 30 us + k*100 us. The queue resumes them at t_start +
+    offset + k*T: from 1.5 ms (on the grid, next tick 1.53 ms) it lands
+    them; from 1.53 ms (a tick instant, but 30 us past the grid origin)
+    they would fall at 1.56, 1.66 ms, so it is refused by name."""
+    b, ch, obs, first = _offset_chain_run(1.5e-3)
+    p.simulate(b, 2e-3, engine="trbdf2", step_observer=obs,
+               resume_from=first.final_snapshot)
+    t = np.asarray(ch._cxx_chain.get_recording_times())
+    np.testing.assert_allclose(t, 3e-5 + np.arange(len(t)) * 1e-4, atol=1e-12)
+    assert len(t) == 20
+    b, ch, obs, first = _offset_chain_run(1.53e-3)
+    with pytest.raises(p.UnsupportedError, match="between two"):
+        p.simulate(b, 2e-3, engine="trbdf2", step_observer=obs,
+                   resume_from=first.final_snapshot)
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2"))
+def test_periodic_steady_state_by_shooting_refuses_a_loss_port(engine):
+    """Each period of the transient map is a fresh run: it would drop the
+    turn-on at the period start and the heat in flight at its end."""
+    kw = {"dt": 1e-6} if engine == "pwl" else {}
+    with pytest.raises(p.UnsupportedError, match="loss port of 'S1'") as ei:
+        p.periodic_steady_state(_builder(), period=1 / FSW, switch_fn=_fn(),
+                                engine=engine, **kw)
+    assert ei.value.feature == "device_losses"

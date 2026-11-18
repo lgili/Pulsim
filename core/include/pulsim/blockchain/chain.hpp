@@ -502,6 +502,9 @@ public:
     [[nodiscard]] Real group_period(int g) const {
         return groups_.at(static_cast<Size>(g)).period;
     }
+    [[nodiscard]] Real group_offset(int g) const {
+        return groups_.at(static_cast<Size>(g)).offset;
+    }
     /// Ticks delivered per group (index 0: evaluations of group 0).
     [[nodiscard]] std::vector<std::uint64_t> tick_counts() const {
         std::vector<std::uint64_t> c;

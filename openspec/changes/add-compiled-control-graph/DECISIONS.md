@@ -534,7 +534,9 @@ Each entry: question → option taken → evidence → how to reverse.
   to refuse). Refused by name: an opaque
   native block (no pair), an object whose state does not deep-copy, a
   pickled snapshot of a run with controllers (the state does not
-  pickle; field 13 marks it), a snapshot of other controllers.
+  pickle; the last field of the pickle tuple marks it — field 13 of
+  the version-3 tuple since integration batch 12), a snapshot of other
+  controllers.
 - **trbdf2 resume.** The kernel ticks observers at `t_start + k*T`; a
   graph resumed between two ticks would tick off its grid (1.63, 1.73
   ms instead of 1.6, 1.7 ms; duty up to 0.9 % off). Refused on trbdf2
