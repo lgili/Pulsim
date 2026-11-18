@@ -358,7 +358,7 @@ def _run_circuit_points(points, grid, kpi_fn, *, parallel, backend,
               and tuple(getattr(res0, "step_loop_python_callbacks", ("?",))) == ()
               and all(rk.get(k) is None for k in (
                   "b_extra_fn", "step_observer", "should_continue",
-                  "live_ring", "resume_from")))
+                  "live_ring", "resume_from", "tick_fns")))
     if not native:
         rest, rest_failed, used = _run_jobs(
             args_iter[1:], parallel=parallel, backend=backend,

@@ -77,6 +77,7 @@
 // no refusals left.
 
 #include "pulsim/events/event_queue.hpp"
+#include "pulsim/events/step_hooks.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
@@ -416,7 +417,9 @@ inline SimulationResult run_transient_trbdf2(
     const SolverSnapshot* resume_from = nullptr,
     /// Multi-rate ticks: called as tick_fn(j, t, x) for source j of
     /// opts.observer_periods. Takes the place of observer_fn there.
-    const std::function<void(Size, Real, const Vector&)>& tick_fn = {}) {
+    const std::function<void(Size, Real, const Vector&)>& tick_fn = {},
+    /// Accepted-step / commutation listeners (events/step_hooks.hpp).
+    events::StepHooks* hooks = nullptr) {
     using topology::SwitchStateMask;
 
     if (!(opts.t_end > opts.t_start)) {
@@ -1304,6 +1307,7 @@ inline SimulationResult run_transient_trbdf2(
     result.states.push_back(x);
     result.event_iteration_count.push_back(0);
     result.record_switch_state(initial_mask, !initial_seeded);
+    if (hooks) hooks->start(x, initial_mask);
 
     // Coupling-aware inductor di/dt for the LTE (a coupled winding's
     // v = L·di/dt + M·di_other/dt, so f ≠ v/L there). Resolved once.
@@ -1419,20 +1423,9 @@ inline SimulationResult run_transient_trbdf2(
                                events::Rate{t_ctrl[j], off});
         }
     }
-    const std::uint32_t edge_src = next_edge_fn
-        ? queue.add_function(events::Kind::GateEdge, next_edge_fn)
-        : queue.add_located(events::Kind::GateEdge);
-    queue.add_once(events::Kind::EndOfRun, opts.t_end);
-    queue.start(opts.t_start, opts.t_end);
-    TrBdf2Stats local_stats;
-    TrBdf2Stats& st = stats_out ? *stats_out : local_stats;
-    st.ctrl_tick_counts.assign(t_ctrl.size(), 0);
-    st.h_max_basis = opts.h_max > Real{0} ? Size{2}
-        : (h_default < span / Real{1000} ? Size{1} : Size{0});
-    // Earliest source corner strictly after t (+inf when none).
-    auto next_breakpoint_after = [&](Real at_t) {
+    // First source corner strictly after `after` (+inf when none).
+    auto breakpoint_oracle = [&](Real after) {
         Real best = std::numeric_limits<Real>::infinity();
-        const Real after = at_t + Real{0.5} * h_min;
         for (const auto& c : corners) {
             Real k0 = Real{0};
             if (c.period > Real{0} && after > c.t0) {
@@ -1461,6 +1454,29 @@ inline SimulationResult run_transient_trbdf2(
                 sources::next_current_waveform_breakpoint(pool, graph, after));
         }
         return best;
+    };
+    const std::uint32_t edge_src = next_edge_fn
+        ? queue.add_function(events::Kind::GateEdge, next_edge_fn)
+        : queue.add_located(events::Kind::GateEdge);
+    // Source breakpoints (task 7.1): the pulse / PWM sources' corners and
+    // the waveform current sources' knots.
+    const std::uint32_t bp_src =
+        queue.add_function(events::Kind::SourceBreakpoint, breakpoint_oracle);
+    queue.add_once(events::Kind::EndOfRun, opts.t_end);
+    queue.start(opts.t_start, opts.t_end);
+    TrBdf2Stats local_stats;
+    TrBdf2Stats& st = stats_out ? *stats_out : local_stats;
+    st.ctrl_tick_counts.assign(t_ctrl.size(), 0);
+    st.h_max_basis = opts.h_max > Real{0} ? Size{2}
+        : (h_default < span / Real{1000} ? Size{1} : Size{0});
+    // Earliest source corner strictly after t (+inf when none).
+    // Earliest source breakpoint strictly after t + h_min/2, through the
+    // queue's breakpoint source (asked again only once it is passed).
+    auto next_breakpoint_after = [&](Real at_t) {
+        const Real bp = queue.next_after(bp_src, at_t + Real{0.5} * h_min);
+        // "none" is not cached: the old per-step query asked again.
+        if (!std::isfinite(bp)) queue.invalidate(bp_src);
+        return bp;
     };
 
     // ---- opaque switch_fn: sample densely, learn the pulse width ----
@@ -1677,12 +1693,14 @@ inline SimulationResult run_transient_trbdf2(
         }
         x = x_trial;
         x_sig = x;
+        const Real t_hook0 = t;
         t += dtp;
         drop_superseded_event_sample(t);
         result.times.push_back(t);
         result.states.push_back(x);
         result.event_iteration_count.push_back(0);
         result.record_switch_state(m_probe);
+        if (hooks) hooks->accepted(t_hook0, t, x, m_probe);
         if (structure.active()) reinit.note(m_probe);
         x_mask = m_probe;
         x_mask_known = true;
@@ -1813,7 +1831,8 @@ inline SimulationResult run_transient_trbdf2(
     };
 
     try {
-        while (t < opts.t_end - h_min && steps < opts.max_steps) {
+        while (t < queue.next_of(events::Kind::EndOfRun) - h_min
+               && steps < opts.max_steps) {
             if (should_continue && !should_continue()) {
                 break;   // partial trace preserved
             }
@@ -2783,6 +2802,7 @@ inline SimulationResult run_transient_trbdf2(
                     }
                     x = x_trial;
                     x_sig = x;
+                    const Real t_hook0 = t;
                     t += dt_land;
                     drop_superseded_event_sample(t);
                     const std::vector<bool> bits_land =
@@ -2842,6 +2862,7 @@ inline SimulationResult run_transient_trbdf2(
                     // current the solver carried, with no phantom
                     // g_on·(v − V_f) from the post-flip bits.
                     result.record_switch_state(mask_step);
+                    if (hooks) hooks->accepted(t_hook0, t, x, mask_step);
                     if (structure.active()) reinit.note(mask_step);
                     x_mask = mask_step;
                     x_mask_known = true;
@@ -2927,6 +2948,7 @@ inline SimulationResult run_transient_trbdf2(
                 result.event_iteration_count.push_back(0);
                 // Both TR-BDF2 stages solved under mask_step.
                 result.record_switch_state(mask_step);
+                if (hooks) hooks->accepted(t_pre, t, x, mask_step);
                 if (structure.active()) {
                     // D4 record (pwl/reinit.hpp, the fixed engine's code):
                     // the explicit projection from the step's start state.

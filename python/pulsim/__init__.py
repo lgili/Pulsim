@@ -3071,9 +3071,15 @@ def simulate(
         _mmc_obs, _mmc_b, _mmc_finalize = make_mmc_thevenin_driver(
             mmc_arms, _caller_builder, cache, dt,
             builder.pool.state_size(builder.graph))
-        step_observer, b_extra_fn = _compose_step_hooks(
-            step_observer, b_extra_fn, _mmc_obs, _mmc_b,
-            builder.pool.state_size(builder.graph), "mmc_arms")
+        # With kernel ticks the drivers run before the ticks, as before.
+        if _plan._kernel_ticks:
+            _plan.tick_before, b_extra_fn = _compose_step_hooks(
+                _plan.tick_before, b_extra_fn, _mmc_obs, _mmc_b,
+                builder.pool.state_size(builder.graph), "mmc_arms")
+        else:
+            step_observer, b_extra_fn = _compose_step_hooks(
+                step_observer, b_extra_fn, _mmc_obs, _mmc_b,
+                builder.pool.state_size(builder.graph), "mmc_arms")
 
     # v2.0 Phase 4 C.2 — hand the caller the cache the run will use,
     # so a hook can refactor parameters mid-run (the bidirectional
@@ -3091,9 +3097,14 @@ def simulate(
                     "simulate(on_cache=...): the hook must return "
                     "(step_observer, b_extra_fn) or None, got "
                     f"{type(_hooked).__name__}") from None
-            step_observer, b_extra_fn = _compose_step_hooks(
-                step_observer, b_extra_fn, _hk_obs, _hk_b,
-                builder.pool.state_size(builder.graph), "on_cache")
+            if _plan._kernel_ticks:
+                _plan.tick_before, b_extra_fn = _compose_step_hooks(
+                    _plan.tick_before, b_extra_fn, _hk_obs, _hk_b,
+                    builder.pool.state_size(builder.graph), "on_cache")
+            else:
+                step_observer, b_extra_fn = _compose_step_hooks(
+                    step_observer, b_extra_fn, _hk_obs, _hk_b,
+                    builder.pool.state_size(builder.graph), "on_cache")
 
     # Construct options.
     opts = SimulationOptions(t_start=t_start, t_end=t_end, dt=dt)
@@ -3284,8 +3295,10 @@ def simulate(
     # use `run_transient_with_chain` which invokes the C++ chain
     # directly each step — skipping the pybind11 std::function
     # wrap. Saves ~10-30 % wall time on chains > 5 blocks.
+    # (Not with kernel tick sources: the chain entry point takes none.)
     cxx_chain = getattr(step_observer, "_cxx_chain", None) \
-                  if step_observer is not None else None
+        if step_observer is not None and not _plan.fixed_tick_kwargs() \
+        else None
     if cxx_chain is not None:
         from . import _pulsim as _k  # type: ignore[import-not-found]
         chain_dt = getattr(step_observer, "_chain_dt", dt)
@@ -3330,6 +3343,8 @@ def simulate(
             kwargs["live_ring"] = live_ring
         if resume_from is not None:
             kwargs["resume_from"] = resume_from
+        # Python tick sources: scheduled by the kernel's event queue.
+        kwargs.update(_plan.fixed_tick_kwargs())
         if _PWL_RECIPE.get() is not None:  # sweep(circuit, ...) replays it
             _PWL_RECIPE.get().update(
                 opts=opts, dt=dt, kwargs=dict(kwargs), mmc=bool(mmc_arms),
@@ -3417,8 +3432,11 @@ def simulate(
             "; ".join(_route_reasons) if _route_reasons else None)
         res.step_loop_python_callbacks = _step_loop_python_callbacks(
             switch_fn=switch_fn, b_extra_fn=b_extra_fn,
-            # the chain fast path runs the observer's C++ chain
-            step_observer=None if cxx_chain is not None else step_observer,
+            # the chain fast path runs the observer's C++ chain; the
+            # kernel's Python tick sources are step-loop observers too
+            step_observer=(_plan.fixed_tick_kwargs().get("tick_fns")
+                           or (None if cxx_chain is not None
+                               else step_observer)),
             should_continue=should_continue,
             closed_loops=_closed_loops_user or None)
     except AttributeError:  # pragma: no cover
@@ -3427,7 +3445,7 @@ def simulate(
         # Per tick source, registration order; the largest lateness
         # of a tick on this grid (0 when every T_j is a multiple of dt).
         res.control_tick_counts, res.control_tick_jitter_max = \
-            _plan.fixed_tick_counts()
+            _plan.fixed_tick_counts(res)
     except AttributeError:  # pragma: no cover
         pass
     try:

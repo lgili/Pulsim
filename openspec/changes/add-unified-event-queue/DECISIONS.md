@@ -41,11 +41,13 @@
   10 000 steps with two tick rates, a six-edge gate oracle invalidated
   every 97 steps, zero `operator new`). The engine builds its queue per
   run (setup); the test covers the queue, not the engine's loop.
-- **Bit-equality across compilers** is not claimed: `(t0 + offset) +
-  k·period` may be contracted to an FMA by one compiler and not another
-  (one ulp). Within one binary every engine computes the same expression;
-  the unit tests compare against the queue's own `periodic_time` exactly
-  and against an independent product to 1e-12 of a period.
+- **Bit-equality across compilers**: `(t0 + offset) + k*period` is two
+  roundings; the tree is built with `-ffp-contract=off` (CMakeLists.txt)
+  and MSVC's /fp:precise does not contract, so no compiler fuses it into an
+  FMA and every engine, platform and the old Python scheduler compute the
+  same double (see 5). The unit tests compare against the queue's own
+  `periodic_time` exactly and against an independent product to 1e-12 of a
+  period.
 - `invalidate(id)` leaves periodic and one-shot sources alone (their
   events depend on no register), like `invalidate(Kind)`. An oracle that
   answers a time not after its own event is asked again by the next
@@ -127,3 +129,123 @@ post-edge sample when a rising edge falls on a control tick (the reference
 and the cell then differ on V(sw) between samples), plus a sticky
 narrowest-pulse cap. Both are fixed in `trbdf2_transient.hpp` by the
 TR-BDF2 track, not here; no step cap from the modulator's period is added.
+
+## 5. The fixed engine's ticks on the queue (group 5), step hooks, breakpoints
+
+- **Ticks.** `run_transient(..., const events::TickPlan* ticks, events::StepHooks* hooks)`:
+  the kernel registers one periodic `ControlTick` source per Python tick source
+  and runs `take_due(t, 1e-9*dt)` at every observer call (the priming call at
+  `t_start` included), BEFORE the observer. The queue is started with
+  `t_end - 1e-9*dt` as its end, which is the old Python rule
+  (`due < t_end - tol`) written once. `_control_plan.FixedStepTicks` is
+  deleted; `ControlPlan.fixed_tick_kwargs()` passes `tick_periods` /
+  `tick_fns`; counts and lateness come back as
+  `SimulationResult.kernel_tick_counts` / `kernel_tick_jitter_max` and are
+  copied into `control_tick_counts` / `control_tick_jitter_max` as before.
+- **Tick instants are the same doubles.** The Python scheduler computed
+  `t0 + k*T` (two roundings, no FMA); the queue computes
+  `(t0 + 0.0) + k*T` and the whole tree is built with `-ffp-contract=off`
+  (CMakeLists.txt; MSVC /fp:precise does not contract), so the instant is
+  the same double, not merely a correctly rounded neighbour. (This also
+  corrects DECISIONS 1's "may be contracted to an FMA": not with this
+  build.) Drift: event k is computed from k directly, so the error is one
+  rounding of `k*T` plus one of the sum at any k; over 1e9 periods the
+  relative error stays ~2 ulp of t_k, with no accumulation.
+- **Order kept.** Before, the fixed engine's observer ran, per step: the
+  internal drivers simulate() puts in front (MMC arms, `on_cache` hooks),
+  the closed-loop graphs (label time), the Python tick sources, the
+  every-step observers, the C blocks. The kernel keeps that order: what ran
+  before the ticks is `TickPlan::before` (`run_transient(tick_before=)`),
+  what ran after is the observer. (A first version ran the ticks before
+  the whole observer; the review found it moved MMC and `on_cache` runs.)
+  Graph-plus-Python-tick runs now compose the graphs into one C++ observer
+  instead of a Python loop over them; covered by the golden cases
+  clmon_pwl / clmon_split.
+- **Speed.** Python ticks used to put a Python object (`FixedStepTicks`) in
+  the observer, so every step crossed into Python even when no tick was due;
+  now Python is entered only at a tick, and a run whose other observers are
+  all C++ graphs takes the composed C++ observer.
+- **Mask reuse between oracle edges (5.1, second half) is not done.** Reusing
+  the mask of `switch_fn(t_last)` until the oracle's next edge is bit-identical
+  only if the oracle and the mask function agree to the last bit at an edge
+  that falls on a grid point (a 100 kHz PWM at dt = 1e-7 puts every edge on
+  the grid). `NativePwm2Switch` shares `pwm_phase` between both, a Python
+  `next_edge_after` need not; the gate memo already makes one call per
+  distinct time. Left for the unified stepper, which may change sequences.
+- **Event splitting reads the same oracle** (`next_edge_fn` with its
+  passed/invalidated cache); moving that cache into a queue source is a
+  rename with identical semantics and was not needed for the gate.
+- **Step hooks** (`events/step_hooks.hpp`, the commutation callback the
+  in-kernel event losses hook on, its task 3.1): `on_accept(t_prev, t, x,
+  mask)` once per accepted step and `on_commutation({t, before, after,
+  x_before, x_after})` when the solved mask changes between two accepted
+  steps. Wired in pwl (dynamic and static paths) and trbdf2 (the three
+  accept sites: normal step, post-edge commit, diode landing; the
+  post-event probe sample, which trbdf2 may drop later, is not an accepted
+  step). dsed is not wired. No listener: one branch per step, results
+  unchanged. Zero allocation after `start` (tested on pwl).
+- **Source breakpoints and the run end on trbdf2's queue (7.1, trbdf2 part).**
+  The corner table is a `SourceBreakpoint` function source asked at
+  `t + h_min/2`, refreshed only when passed; the loop end reads the
+  `EndOfRun` event. Every corner table holds offset 0, so a cached corner
+  P > q implies q sits in the same period as when P was found and a fresh
+  query returns P (review). "No corner" (+inf) is not cached: a single-
+  offset table (PWM source at duty 0 or 1) with a user h_min below
+  ulp(t) can answer +inf once from the floor index, and the old per-step
+  query recovered on the next step.
+
+## 6. A short pulse at a period boundary (the exact engine's dropped pair)
+
+- The exact engine lost both edges of a PWM at D = 1 − 1e-7 (a 1e-12 s
+  pulse at the period end) and gave 0 W. Its scheduler asks
+  `next_edge_after(t)` and skips an answer that is `near_time` of the edge
+  it just fired (`dsed/scheduler.hpp` `next_time_event_` / the `past`
+  lambda): two distinct edges closer than its time tolerance are taken for
+  one.
+- The queue consumes events by identity, not by time: a function source
+  holds ONE pending edge; `take_due` takes it and refills from
+  `next(ev.t)`, strictly after the edge just taken, however close. An
+  engine that calls `take_due(t, tol)` until it returns nothing gets both
+  edges of the pulse, in order, each with its own `ev.t`; a tolerance wider
+  than the pulse still yields two events. Tested in
+  `core/tests/modes/test_event_queue.cpp` with the real `NativePwm2Switch`
+  at D = 1 − 1e-7 (tolerances 0, 1e-15, 1e-11) and with a one-ulp pulse at
+  1000 period boundaries; both exact (integer / nextafter arithmetic).
+- `scheduler.hpp` is owned by the exact-engine agent and is being changed
+  there; it is NOT edited here. What its consumption site needs: register
+  the switch function's oracle (`next_edge_after`) and the source corners
+  (`next_source_corner_after`) as `add_function(Kind::GateEdge, …)` /
+  `add_function(Kind::SourceBreakpoint, …)` on one `EventQueue`; replace
+  `next_gate_edge_(t)` by `queue.next_landing()` after
+  `queue.next_after(id, t)` on each source; at a landed edge call
+  `take_due(t_gate, eps)` in a loop and fire each event at `ev.t` in the
+  order returned (Kind, then registration); drop the `near_time(r,
+  last_time_event_t_)` skip, which identity consumption makes unnecessary;
+  `invalidate(GateEdge)` after a control tick. Opaque Python gates keep
+  their poll until the shared `SampledGate` adapter (group 3) exists.
+
+## 7. Gate sources and the carrier modulator (tasks 2.2, part of 6.1)
+
+`core/include/pulsim/events/gate_source.hpp` holds both, one header
+instead of the `gate_source.hpp` + `modulator.hpp` pair the tasks name:
+the modulator is a gate source and nothing else uses it yet.
+
+- A source states `owned_bits`, `resolution` (0 = exact edges), `apply`
+  (writes only its bits) and `next_edge`. `GateSet` composes BY INDEX: a
+  bit outside the circuit, or one already owned, is refused naming the bit
+  and both sources; an unowned bit stays OFF. `to_schedule()` gives the
+  engines a `SwitchSchedule`, with edges only when every source is exact,
+  so the engines need no new entry point.
+- `CarrierPwm` reuses `pwm_phase` and `make_*_fn`'s thresholds, so for a
+  constant duty its masks and edges equal `make_pwm_switch_fn` /
+  `make_dead_time_pwm_pair_fn` bit for bit (tested on grid points, edges
+  and their one-ulp neighbours).
+- `DutyRegister::AtCarrierStart` latches by carrier PERIOD INDEX (with the
+  carrier's own snap), not by comparing t with the period-start time, so
+  the register and the modulator never disagree about which period an
+  instant within the snap tolerance belongs to. The period start is always
+  one of `next_constant_crossing`'s candidates, so a latch is never missed.
+- Not done: `EdgeList`, the Python bindings, and wiring `bind_pi_to_switch`
+  (6.2) — the control graph's PWM gate (section 4) already gives the
+  closed-loop rows their edges, and moving it onto `CarrierPwm` must keep
+  a0ae6bb8's rows byte-identical; that is the next step, not this one.

@@ -15,6 +15,8 @@
 #include "pulsim/solver/trbdf2_transient.hpp"
 
 #include <cmath>
+#include <limits>
+#include <vector>
 
 using namespace pulsim;
 using Catch::Approx;
@@ -774,4 +776,67 @@ TEST_CASE("TR-BDF2: one SDIRK step after a diode event, filter on or off",
     INFO("e(200us) = " << std::abs(v1 - v_ref) << ", e(100us) = "
          << std::abs(v2 - v_ref) << ", ratio " << ratio);
     REQUIRE(ratio > 3.5);
+}
+
+TEST_CASE("TR-BDF2: step hooks see every landed gate edge as a commutation",
+          "[v2][trbdf2][event_queue]") {
+    // add-unified-event-queue: the commutation callback the in-kernel
+    // event losses hook on. A PWM-driven RC: every edge the engine lands
+    // is one mask change between two accepted steps, reported at the
+    // edge with the state before (solved under the old mask) and after.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "in", "gnd", 5.0);
+    b.add_switch("S", "in", "n1", 1e3, 1e-9);
+    b.add_resistor("R", "n1", "n2", 1e3);
+    b.add_capacitor("C", "n2", "gnd", 1e-6);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(1e-6);
+    const Size n_sw = b.graph().num_switches();
+    const Real T = 1e-4, D = 0.3;
+    auto edge = [&](Real t) {   // first edge strictly after t
+        const Real k = std::floor(t / T);
+        for (Real kk = k; kk <= k + 2; kk += 1) {
+            if (kk * T > t) return kk * T;
+            if (kk * T + D * T > t) return kk * T + D * T;
+        }
+        return std::numeric_limits<Real>::infinity();
+    };
+    auto sf = [&](Real t) {
+        topology::SwitchStateMask m(n_sw);
+        const Real k = std::floor(t / T);
+        m.set(0, t >= k * T && t < k * T + D * T);
+        return m;
+    };
+    solver::TrBdf2Options o;
+    o.t_end = 1.05e-3;
+    solver::TrBdf2Stats st;
+    events::StepHooks hooks;
+    std::vector<Real> t_com;
+    std::size_t n_acc = 0, bad = 0;
+    Real t_last = 0.0;
+    hooks.on_accept([&](Real t0, Real t1, const Vector&,
+                        const topology::SwitchStateMask&) {
+        ++n_acc;
+        bad += !(t1 > t0) || t0 < t_last;
+        t_last = t1;
+    });
+    hooks.on_commutation([&](const events::Commutation& c) {
+        t_com.push_back(c.t);
+        bad += c.before == c.after || c.x_before.size() != c.x_after.size();
+    });
+    const auto res = solver::run_transient_trbdf2(
+        cache, b.graph(), b.pool(), o, sf, {}, std::nullopt, &st, edge,
+        {}, {}, {}, nullptr, {}, &hooks);
+    CHECK(bad == 0);
+    CHECK(n_acc > 0);
+    // Edges in (0, t_end): 0.3T, T, 1.3T, ..., 10T, 10.3T = 21; the one
+    // at 0 is the initial mask.
+    CHECK(st.n_gate_events == 21);
+    REQUIRE(t_com.size() == st.n_gate_events);
+    for (std::size_t i = 0; i < t_com.size(); ++i) {
+        const Real ref = (i % 2 == 0) ? (i / 2) * T + D * T : (i / 2 + 1) * T;
+        CHECK(std::abs(t_com[i] - ref) < 1e-12);
+    }
+    CHECK(hooks.commutations() == t_com.size());
+    (void)res;
 }

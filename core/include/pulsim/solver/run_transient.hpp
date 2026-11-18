@@ -51,6 +51,8 @@
 #include "pulsim/pwl/nonlinear_refresh_nonlinear_capacitor.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/saturable_inductor_history.hpp"
+#include "pulsim/events/event_queue.hpp"
+#include "pulsim/events/step_hooks.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/unsupported.hpp"
@@ -299,7 +301,7 @@ inline SimulationResult run_transient(
     const BExtraFn& b_extra_fn = {},
     bool start_from_dc_op = false,
     const pwl::NonlinearRefreshFn& nl_refresh = {},
-    const StepObserverFn& step_observer = {},
+    const StepObserverFn& step_observer_in = {},
     const Vector* initial_state = nullptr,
     const ShouldContinueFn& should_continue = {},
     /// v2.0 Phase 4 — resume EXACTLY from a previous run's
@@ -317,7 +319,15 @@ inline SimulationResult run_transient(
     /// edges (`SwitchSchedule::next_edge_after`): the first edge
     /// strictly after t, +inf when none. Empty: the gate edges of an
     /// opaque switch_fn are not located (start-of-step sampling).
-    const std::function<Real(Real)>& next_edge_fn = {}) {
+    const std::function<Real(Real)>& next_edge_fn = {},
+    /// add-unified-event-queue group 5 — control ticks scheduled by the
+    /// kernel's event queue: tick k of source j is delivered at the first
+    /// grid point t_n >= t_start + offset_j + k*T_j (to 1e-9*dt), for the
+    /// instants < t_end - 1e-9*dt, after `ticks->before` and before
+    /// `step_observer` at that step.
+    const events::TickPlan* ticks = nullptr,
+    /// Accepted-step / commutation listeners (events/step_hooks.hpp).
+    events::StepHooks* hooks = nullptr) {
 
     // ---- Input validation ---------------------------------------------
     if (!opts.valid()) {
@@ -376,6 +386,41 @@ inline SimulationResult run_transient(
     // DECIMATED sample count (opts.store_every).
     result.reserve(opts.expected_sample_count(),
                     static_cast<Index>(state_size));
+
+    // ---- add-unified-event-queue group 5: control ticks on the queue --
+    // The ticks run at the start of a step, before the caller's observer,
+    // wherever the observer runs (the priming call at t_start included).
+    // The rule of the scheduler this replaces (_control_plan.py
+    // FixedStepTicks): integer k, due when t >= t_k - 1e-9*dt, instants
+    // t_k < t_end - 1e-9*dt, one tick per source per step.
+    events::EventQueue tick_queue;
+    const Real tick_tol = Real{1e-9} * opts.dt;
+    const bool has_ticks = ticks != nullptr && !ticks->rates.empty();
+    if (has_ticks) {
+        if (!ticks->fn) {
+            throw std::invalid_argument(
+                "run_transient: a TickPlan with rates needs fn");
+        }
+        for (const auto& r : ticks->rates) {
+            tick_queue.add_periodic(events::Kind::ControlTick, r);
+        }
+        tick_queue.start(opts.t_start, opts.t_end - tick_tol);
+        result.control_tick_counts.assign(ticks->rates.size(), 0);
+    }
+    const StepObserverFn step_observer = !has_ticks ? StepObserverFn{} :
+        StepObserverFn([&](Real t, const Vector& xs) {
+            if (ticks->before) ticks->before(t, xs);
+            for (const auto& ev : tick_queue.take_due(
+                     t, tick_tol,
+                     events::kind_bit(events::Kind::ControlTick))) {
+                ++result.control_tick_counts[ev.source];
+                result.control_tick_jitter_max =
+                    std::max(result.control_tick_jitter_max, t - ev.t);
+                ticks->fn(ev.source, events::TickInfo{ev.t, ev.ordinal}, t,
+                          xs);
+            }
+            if (step_observer_in) step_observer_in(t, xs);
+        });
     result.begin_switch_state_record(
         static_cast<Size>(graph.num_switches()),
         opts.expected_sample_count());
@@ -1447,9 +1492,10 @@ inline SimulationResult run_transient(
         // Prime the observer with the initial condition so a
         // discrete-time PI / sampler / lookup-table sees the
         // true starting state at t_start.
-        if (step_observer) {
-            step_observer(opts.t_start, x);
+        if (step_observer || step_observer_in) {
+            (has_ticks ? step_observer : step_observer_in)(opts.t_start, x);
         }
+        if (hooks) hooks->start(x, stamped_mask);
 
         // ---- discontinuity restart (add-discontinuity-restart-rule) --
         // The next step restarts: the first step of a run that does
@@ -1562,8 +1608,8 @@ inline SimulationResult run_transient(
             // observer keeps its (t_k, x_{k-1}) label, whose move to
             // t_{k-1} belongs to fix-control-tick-semantics.
             Real gate_t = restart_rule ? t_prev : t;
-            if (step_observer) {
-                step_observer(t, x_prev);
+            if (step_observer || step_observer_in) {
+                (has_ticks ? step_observer : step_observer_in)(t, x_prev);
                 // An observer (or a control tick) may mutate the
                 // schedule: its oracle answer is stale (review M3).
                 edge_from = std::numeric_limits<Real>::infinity();
@@ -2898,6 +2944,7 @@ inline SimulationResult run_transient(
             // Decimated recording (v2.0 Phase 1): uniform grid at
             // m·dt. Sample 0 (the IC, k = 0) is always recorded
             // above, keeping the parallel arrays aligned.
+            if (hooks) hooks->accepted(t_prev, t, x, stamped_mask);
             if (k % opts.store_every == 0) {
                 result.times.push_back(t);
                 result.states.push_back(x);
@@ -2961,8 +3008,8 @@ inline SimulationResult run_transient(
 
             // State-aware observer fires before switch_fn(t) so
             // discrete-time controllers can update.
-            if (step_observer) {
-                step_observer(t, x_prev);
+            if (step_observer || step_observer_in) {
+                (has_ticks ? step_observer : step_observer_in)(t, x_prev);
             }
             gate_memo_n = 0;
 
@@ -3180,6 +3227,14 @@ inline SimulationResult run_transient(
                 }
             }
 
+            // The static path's first solve (k = 0) is the start state.
+            if (hooks) {
+                if (k == 0) {
+                    hooks->start(x, stamped_mask);
+                } else {
+                    hooks->accepted(t_prev, t, x, stamped_mask);
+                }
+            }
             if (k % opts.store_every == 0) {
                 result.times.push_back(t);
                 result.states.push_back(x);
