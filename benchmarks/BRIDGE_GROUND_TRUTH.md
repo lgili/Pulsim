@@ -36,8 +36,8 @@ One run takes 4 s.
 - The model is well posed. With V_th = V_f = 0 the diode's i(v) law is
   continuous and strictly monotone, so the network is a Lipschitz ODE in
   (iL, vC), and its solution is unique.
-- **pwl is right** to every digit it prints. dsed/exact and trbdf2 are
-  wrong by 0.027 V and 0.19 V. Their errors are engine errors, not an
+- **pwl is right** to every digit it prints. dsed/exact is wrong by 0.027 V; trbdf2
+  by 2.5e-3 V (its step-ceiling error at rtol 2e-5). Their errors are engine errors, not an
   ambiguity in the model.
 
 | Engine (reported in DECISIONS #19) | 30–40 ms bus average [V] | Error vs truth [V] | Relative |
@@ -45,8 +45,12 @@ One run takes 4 s.
 | exact (this script) | 311.3438814289 | 0 | 0 |
 | pwl, dt 1e-6 and 2.5e-7 | 311.343881 | −4.3e-7 (below its last printed digit) | 1.4e-9 |
 | dsed / exact | 311.316685 | −0.027196 | −8.7e-5 |
-| trbdf2, conductance form, "good" runs | 311.341 | −0.0029 | −9.3e-6 |
-| trbdf2, branch form (every run) and conductance form, "bad" runs | 311.154 | −0.190 | −6.1e-4 |
+| trbdf2, both forms, rtol 2e-5, window clipped at 30 ms (every fuzz run) | 311.341410 | −2.47e-3 | −7.9e-6 |
+| trbdf2, both forms, rtol 1e-7 | 311.343690 | −1.91e-4 | −6.1e-7 |
+
+The trbdf2 "311.154 V" first reported was the average of the samples
+t ≥ 30 ms over 10 ms: its first sample is at 30.006 ms (a metric error,
+not the engine; DECISIONS #19).
 
 ## Events (exact, 50 digits)
 
@@ -115,9 +119,8 @@ only g_off·v².
   brentq and chooses the post-event mode by a finite nudge rather than by
   Taylor signs.
 - The bus average is a smooth, linear function of the element values:
-  dV/dp·p ≈ 300 V. A 1e-15 change moves it by 3e-13 V, not by 0.19 V.
-  There is no bifurcation, so the engines' 0.19 V spread is not in the
-  model.
+  dV/dp·p ≈ 300 V. A 1e-15 change moves it by 3e-13 V. There is no
+  bifurcation (trbdf2's 0.19 V spread was a metric error, see above).
 - **Start-up artifact.** At t = 0 the state is all zero and every diode
   voltage is exactly 0. At 30 and 60 digits (and in some perturbed runs),
   the Taylor mode test admits a few extra flips before t = 1.5e-17 s
@@ -128,11 +131,12 @@ only g_off·v².
 
 ## Not computed
 
-- Why dsed lands on 311.3167 V and trbdf2 on 311.154 V. No engine was
-  run here (no build was allowed). The float64 resolution delays above
-  are a measured candidate mechanism, not a demonstrated one.
+- Why dsed lands on 311.3167 V. No engine was run here (no build was
+  allowed). trbdf2 was measured afterwards on the TR-BDF2 track: the
+  exact event sequence, 311.341410 V at rtol 2e-5 (DECISIONS #19 of
+  add-branch-form-ideal-switch).
 - Where the pwl run's D1/D4 chatter at 4.66 ms comes from. The exact
   turn-off is at 4.4537 ms.
 - The branch form (R_on = 1e-3 Ω) gives g_on = 1/R_on = 1e3 S, so its
-  model is identical. Its 311.154 V is an engine result, and the same
-  truth applies.
+  model is identical, and the same truth applies (measured: the same
+  311.341410 V as the conductance form).

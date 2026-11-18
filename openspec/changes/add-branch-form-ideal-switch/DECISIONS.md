@@ -224,34 +224,24 @@ Each entry: question → option taken → evidence → how to reverse.
     tolerance scales with its current. → Reverse: each is one condition in
     trbdf2_transient.hpp marked "review M1/M3/L1/L5".
 
-19. **Bridge on a 1 MOhm-tied floating bus: island rounding, not a resonance
-    (step 2 verdict; fix not shipped).** The bus nodes have no capacitance
-    to ground, so there is no L*g_off resonance: the line inductor and
-    g_off are first order (tau = L*g_off = 1 ps). The common mode is set by
-    uA of leakage, while the right-hand side carries 2C/h * v on both bus
-    nodes; their rounding, eps * (2C/h) * v / G_tie, is 6e-5 V at h = 1 us
-    and volts at a probe. Measured (20 runs, 1e-15 perturbations, rtol 2e-5,
-    40 ms): branch form 8-12 diode events, 3-6 chatter breaks, bus average
-    311.154723-311.154765 V; after the first turn-off the common mode reads
-    -0.94 V in some runs where the island's KCL by hand gives -0.0305 V.
-    Tried: imposing the island's KCL sum exactly after each linear solve
-    (DSED #30's rule; islands per mask, ties <= 10 uS and inductors as
-    boundaries; .scratch patch). Branch form: events + chatter = 13 in
-    every run but split 8/9, bus average spread 1.5e-7 V; the turn-on at
-    23.58 ms identical. What remains is D3's zero-current turn-off at
-    1e-12 A: the OFF probe finds the island's common mode 1e-4 V forward of
-    ac1, the cascade ping-pongs until the chatter guard's fallback takes a
-    5 ns step with D4 ON. Conductance form: 7 of 20 runs still end at
-    311.34 V. The same patch moved the pinned bridge loss test by 7e-5
-    relative and turned trbdf2 on ll10_full_bridge_inverter_lc from agree
-    to disagree (0.0051). → Not shipped: it does not reach an identical
-    event count and moves references it does not explain. → Upgrade path:
-    land the island correction together with a judged decision at
-    zero-current turn-offs (the mode selector's complementarity), and
-    re-pin the bridge tests from a reference, not from the engine.
-    The reference is not settled either (unperturbed, 30-40 ms bus
-    average): pwl 311.343881 V at dt 1e-6 and 2.5e-7 (with or without the
-    restart rule; it chatters D1/D4 every dt at 4.66 ms with the source
-    8 V below the bus), dsed / exact 311.316685 V, trbdf2 311.154 V
-    (branch form, every run) or 311.154 / 311.341 V (conductance form).
-    The bridge is not graded until a reference is settled.
+19. **Bridge on a 1 MOhm-tied floating bus: trbdf2 was right, the metric
+    was wrong (step 2; corrected against the exact reference).** The exact
+    30-40 ms bus average is 311.343881428885841697 V
+    (benchmarks/tools/bridge_ground_truth.py, mpmath; unique mode sequence
+    of 11 events). trbdf2 follows that sequence (D2's turn-on lands at
+    13.234077 ms, exact 13.234043 ms). The "311.154 V, -0.19 V" read here
+    before came from averaging the samples t >= 30 ms over 10 ms without
+    clipping the window: trbdf2's first sample is at 30.006 ms, so 6 us of
+    ~311 V were dropped (311.154 V branch, 311.155 or 311.341 V conductance
+    by where that sample fell). Clipped: 311.341410 V, -2.47e-3 V in both
+    forms, the integration error at the default ceiling (span/1000 =
+    4e-5 s), O(h^2): -1.8e-4 V with a 1e-5 s ceiling, -7.3e-6 V with 2e-6 s,
+    -1.91e-4 V at rtol 1e-7 (within rtol*|v| = 6.2e-3 V per step at
+    rtol 2e-5). Over 20 runs with 1e-15 perturbations the average moves by
+    <= 9e-6 V (rtol 2e-5) and <= 3e-6 V (rtol 1e-7) in both forms, while
+    the diode-event count varies (6-13): leakage-scale decisions at the
+    zero-current turn-offs (D3 at 1e-12 A), with no effect on the answer.
+    The island KCL correction tried before (eps * 2C/h * v / G_tie on the
+    common mode) is not needed and was not shipped. → Pinned:
+    test_bridge_ground_truth.py (within 1e-3 V at rtol 1e-7, 3e-3 V at
+    2e-5, rounding spread <= 1e-4 V). → Reverse: none (no engine change).

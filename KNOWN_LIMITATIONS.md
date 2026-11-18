@@ -567,26 +567,15 @@ start from the DC operating point, which `dsed` cannot take (refused).
 
 ### TR-BDF2 on a bridge whose DC side floats on a tie resistor
 
-`engine='trbdf2'` on a diode bridge whose DC bus is referenced only by a
-1 MΩ tie still depends on rounding. Under a 1e-15 relative perturbation
-of the element values (20 runs) the run always finishes, but takes
-1231-1254 steps and 7-10 diode events, and the 30-40 ms bus average is
-311.155 to 311.341 V (pwl at dt 1e-6 and 2.5e-7: 311.344 V). A few
-picosecond samples right after a turn-off at the source zero crossing
-show an OFF diode 0.6 V forward (the L·g_off ringing of the line
-inductor). The two
-diodes of a half-cycle turn off at the same current zero (a tie), and
-through the OFF interval the floating rail is set by nano-amp g_off
-leakage whose sign flips at the source's zero crossings. The bus
-differential (dp − dn) of the unperturbed run is within 9e-4 V of pwl;
-the common mode is not. The branch-form bridge (`form='branch'`) takes
-8-12 diode events over the same 20 runs and its bus average is
-311.1547 V in every run. The engines do not agree on the answer either:
-dsed / exact give 311.3167 V and pwl 311.3439 V (it chatters the series
-pair every dt at 4.66 ms); the round-off of the floating rail's common
-mode is the mechanism (`DECISIONS #19` of add-branch-form-ideal-switch).
-A real bridge has a defined reference (Y capacitors, a grounded rail):
-give the model one.
+`engine='trbdf2'` follows the exact mode sequence of the 1 MΩ-tied
+floating-bus bridge (`benchmarks/BRIDGE_GROUND_TRUTH.md`). Its 30–40 ms
+bus average is 311.341410 V against the exact 311.343881 V at rtol 2e-5
+(the default step ceiling's O(h²) error; 1.9e-4 V at rtol 1e-7), and a
+1e-15 perturbation moves it by at most 9e-6 V. The number of diode
+events still varies under rounding (leakage-scale decisions at the
+zero-current turn-offs), without effect on the waveforms. Average a
+variable-step result over a window with its end points interpolated: the
+samples after 30 ms divided by 10 ms read 311.154 V here.
 
 ### First stored sample of algebraic nodes
 
