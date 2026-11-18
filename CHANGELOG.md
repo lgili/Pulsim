@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Unified device interface, slice 3: the dual device path
+
+* **Added** `simulate(..., device_path='interface')` (and
+  `compute_dc_op(..., device_path=)`, kernel `SimulationOptions.device_path`
+  / `DevicePath`): every Newton kind runs through ONE law on the device
+  interface (`device/laws.hpp`) instead of its hand-written stamp. The
+  default stays `'legacy'`, bit-identical. Ported: smooth / Shockley
+  diode, MOSFET and IGBT level 1 (steady state), the nonlinear capacitor
+  (junction, VDMOS C_gd, table) and the saturable inductor (atan, table,
+  Jiles–Atherton) on `pwl`, `trbdf2` and the DC operating point; agreement
+  with `'legacy'` within 1e-12 of scale on the fixed-step engine. On a
+  transient engine a circuit with a kind not ported yet (Lauritzen diode,
+  IGBT tail, MNA PMSM, induction machine) refuses `'interface'` by name
+  (the DC operating point stamps only the static kinds, all ported);
+  `engine='dsed'` refuses it. The closed-form laws give parameter
+  derivatives by AD (∂f/∂p, ∂q/∂p); the table and Jiles–Atherton laws have
+  none (`param_tangent`).
+* **Added** the step controller's snapshot block
+  (`SolverSnapshot.controller_state`; pickle version 4 gains a 15th field,
+  written only when the block is filled): empty today (a resume restarts
+  the controller, as before); version-4 pickles of 13 and 14 fields and
+  version 3 (12 and 13 fields) still load.
+
 ### Unified device interface, slice 2: one stateful-kind registry, exact resume
 
 * **Fixed** a fixed-step run split by `resume_from=` was not the continuous

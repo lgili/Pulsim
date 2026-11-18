@@ -521,6 +521,7 @@ inline SimulationResult run_transient(
     // resume WINS over a builder-IC seed: the snapshot is the state.
     pwl::StatefulHistories hs;
     hs.init(graph, pool);
+    hs.set_path(opts.device_path, graph, pool, "run_transient");
     if (initial_state != nullptr) hs.seed_from_dc_op(x);
     if (resume_snap != nullptr) hs.load(*resume_snap, history, "run_transient");
 
@@ -539,7 +540,7 @@ inline SimulationResult run_transient(
     // run_event_iteration sets before every solve. `nl_refresh` is a
     // deprecated override of the static stamps only.
     const pwl::NonlinearRefreshFn nl_static =
-        pwl::static_device_refresh(pool, nl_refresh);
+        pwl::static_device_refresh(pool, nl_refresh, opts.device_path);
     const pwl::NonlinearRefreshFn nl_refresh_effective =
         pwl::build_device_refresh(nl_static, hs, step_ctx,
                                   /*sat_increment_form=*/false);

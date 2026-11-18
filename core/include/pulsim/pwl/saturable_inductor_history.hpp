@@ -191,19 +191,26 @@ public:
         for (auto& e : entries_) {
             e.i_gamma = x_gamma[e.branch_var_id];
             if (e.params.ja) {
-                const auto ev = models::JilesAthertonCore::evaluate(
-                    *e.params.ja, e.ja_state, x_gamma[e.branch_var_id]);
-                e.lambda_gamma = ev.lambda;
-                e.ja_gamma.H = ev.H;
-                e.ja_gamma.M = ev.M;
-                e.ja_gamma.n_sub = e.ja_state.n_sub;
-                // The step's direction stays in force through both
-                // stages (it is per STEP, not per stage).
-                e.ja_gamma.delta_hint = e.ja_state.delta_hint;
+                capture_ja(e);
             } else {
                 e.lambda_gamma = lambda_at(e, x_gamma);
             }
         }
+    }
+
+    /// The hysteretic law's stage capture at `e.i_gamma` (λ_γ and the
+    /// (H_γ, M_γ) base of the BDF2 stage, from ONE evaluation). Shared by
+    /// both device paths.
+    static void capture_ja(Entry& e) {
+        const auto ev = models::JilesAthertonCore::evaluate(
+            *e.params.ja, e.ja_state, e.i_gamma);
+        e.lambda_gamma = ev.lambda;
+        e.ja_gamma.H = ev.H;
+        e.ja_gamma.M = ev.M;
+        e.ja_gamma.n_sub = e.ja_state.n_sub;
+        // The step's direction stays in force through both
+        // stages (it is per STEP, not per stage).
+        e.ja_gamma.delta_hint = e.ja_state.delta_hint;
     }
 
     /// Read the freshly-converged `x` and stash the new
@@ -224,35 +231,43 @@ public:
             // (H, M) reached at the converged current becomes the
             // next step's start.
             if (e.params.ja) {
-                // Commit from the SAME base the converged residual
-                // used — (H_n, M_n) after a trapezoidal solve,
-                // (H_γ, M_γ) after a BDF2 stage — or the committed
-                // λ would not be the λ the circuit was solved with.
-                const auto& base = ja_base(e, stage);
-                const auto ev = models::JilesAthertonCore::evaluate(
-                    *e.params.ja, base, e.i_L_old);
-                // The coming step's sub-step count comes from THIS
-                // step's whole field excursion (twice it, for
-                // headroom): fixed for the step so every evaluation
-                // inside it is one smooth function of the trial
-                // current.
-                const Real span = Real{2} * std::abs(ev.H - e.ja_state.H);
-                // Next step's direction = this step's actual leg (a
-                // zero leg keeps the current direction).
-                const Real leg = ev.H - e.ja_state.H;
-                e.ja_state.delta_hint =
-                    leg > Real{0} ? Real{1}
-                    : leg < Real{0} ? Real{-1} : e.ja_state.delta_hint;
-                e.ja_state.n_sub =
-                    models::JilesAthertonCore::substeps_for(*e.params.ja, span);
-                e.ja_state.H = ev.H;
-                e.ja_state.M = ev.M;
-                e.lambda_old = ev.lambda;
+                accept_ja(e, stage);
             } else {
                 e.lambda_old =
                     models::SaturableInductor::flux(e.i_L_old, e.params);
             }
         }
+    }
+
+    /// The hysteretic law's accept (D2's `State::accept`): advance
+    /// (H, M), the branch direction and the sub-step count to the
+    /// converged `e.i_L_old`, and commit λ from the same evaluation.
+    /// Shared by both device paths.
+    static void accept_ja(Entry& e, TrBdf2Stage stage) {
+            // Commit from the SAME base the converged residual
+            // used — (H_n, M_n) after a trapezoidal solve,
+            // (H_γ, M_γ) after a BDF2 stage — or the committed
+            // λ would not be the λ the circuit was solved with.
+            const auto& base = ja_base(e, stage);
+            const auto ev = models::JilesAthertonCore::evaluate(
+                *e.params.ja, base, e.i_L_old);
+            // The coming step's sub-step count comes from THIS
+            // step's whole field excursion (twice it, for
+            // headroom): fixed for the step so every evaluation
+            // inside it is one smooth function of the trial
+            // current.
+            const Real span = Real{2} * std::abs(ev.H - e.ja_state.H);
+            // Next step's direction = this step's actual leg (a
+            // zero leg keeps the current direction).
+            const Real leg = ev.H - e.ja_state.H;
+            e.ja_state.delta_hint =
+                leg > Real{0} ? Real{1}
+                : leg < Real{0} ? Real{-1} : e.ja_state.delta_hint;
+            e.ja_state.n_sub =
+                models::JilesAthertonCore::substeps_for(*e.params.ja, span);
+            e.ja_state.H = ev.H;
+            e.ja_state.M = ev.M;
+            e.lambda_old = ev.lambda;
     }
 
     /// TR-BDF2 post-event refresh: the stored voltage becomes the

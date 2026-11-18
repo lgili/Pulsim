@@ -292,7 +292,7 @@ def test_a_version_3_pickle_loads_and_resumes_on_a_restarted_grid():
     exactly as the same snapshot without a grid."""
     snap = _pwl(4.2e-5).final_snapshot
     v4 = snap.__getstate__()
-    assert v4[1] == 4 and len(v4) == 13
+    assert v4[1] == 4 and len(v4) == 14
     old = SolverSnapshot.__new__(SolverSnapshot)
     old.__setstate__(("SolverSnapshot", 3) + tuple(v4[2:12]))
     assert np.isnan(old.grid_origin) and not old.post_edge_derivatives

@@ -68,6 +68,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # Cache + simulation.
     PwlStateSpaceCache,
     SimulationOptions,
+    DevicePath,
     SimulationResult,
     CommutationEvent,
     PreflightFinding,
@@ -521,6 +522,7 @@ __all__ = [
     "thermal_voltage",
     "PwlStateSpaceCache",
     "SimulationOptions",
+    "DevicePath",
     "SimulationResult",
     "CommutationEvent",
     "PreflightFinding",
@@ -1963,6 +1965,7 @@ def simulate(
     discontinuity_restart: Optional[bool] = None,
     resolution_diagnostics: Optional[bool] = None,
     on_impulse: str = "record",
+    device_path: str = "legacy",
     inductor_freeze_di_max: Optional[float] = None,
     inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
@@ -2385,6 +2388,12 @@ def simulate(
     if on_impulse not in ("record", "warn", "error"):
         raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
                          "'record', 'warn' or 'error'")
+    # add-unified-device-interface (dual path): which code stamps the
+    # Newton kinds; 'interface' refuses an unported kind by name.
+    if device_path not in ("legacy", "interface"):
+        raise ValueError(f"simulate(device_path={device_path!r}): expected "
+                         "'legacy' or 'interface'")
+    _device_path = getattr(DevicePath, device_path.capitalize())
     from . import _dsed_dispatch as _dsed
     _dsed._validate_engine_kwargs(
         engine=engine,
@@ -2562,6 +2571,8 @@ def simulate(
         # followed by an open-loop run until add-engine-conformance-
         # matrix; they change the physics, so they refuse too.
         _dsed_unsupported = {
+            # the exact engine stamps its own devices
+            "device_path": device_path != "legacy",
             # C blocks drive the circuit through b_extra, which the
             # DSED engine does not consume.
             "c_blocks": bool(_c_blocks_of(builder)),
@@ -2911,6 +2922,7 @@ def simulate(
                 enable_newton_lm=bool(enable_newton_lm),
                 newton_roundoff_budget=int(newton_roundoff_budget or 0),
                 on_impulse_error=on_impulse == "error",
+                device_path=_device_path,
             )
         except SimulationAborted as _aborted:
             try:
@@ -3189,6 +3201,7 @@ def simulate(
     if discontinuity_restart is not None:
         opts.discontinuity_restart = bool(discontinuity_restart)
     opts.on_impulse_error = on_impulse == "error"
+    opts.device_path = _device_path
     opts.mode_selection = {"shadow": 1, "lcp": 2}.get(mode_selection, 0)
     opts.mode_guard = _PWL_MODE_GUARD
     if resolution_diagnostics is not None:

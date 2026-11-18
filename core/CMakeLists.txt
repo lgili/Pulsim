@@ -432,6 +432,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v3/test_main.cpp
         tests/layer5_v3/test_snapshot_restore.cpp
         tests/layer5_v3/test_device_interface.cpp
+        tests/layer5_v3/test_device_laws.cpp
         tests/layer5_v3/test_substep_correction.cpp
         tests/layer5_v3/test_resolution_diagnostics.cpp
     )

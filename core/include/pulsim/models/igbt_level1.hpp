@@ -154,9 +154,11 @@ struct IgbtLevel1 {
     /// when nothing is changing. The tail stamp drives its charge
     /// state from this, so the two can never disagree about the
     /// DC curve.
-    template <numeric::FloatingPoint S>
+    // `P`: the parameter struct, or a law's `Params<S>` with the same
+    // member names (device/laws.hpp), so ∂i/∂p comes from this body too.
+    template <numeric::FloatingPoint S, class P = Params>
     [[nodiscard]] static S steady_state_current(
-        const S* v, const Params& p) noexcept {
+        const S* v, const P& p) noexcept {
         using std::exp;
         // Branch voltages.
         const S V_GE = v[2] - v[1];
@@ -186,9 +188,9 @@ struct IgbtLevel1 {
     /// carries the stored charge; this stays the law for every
     /// IGBT without one, and is what that stamp reduces to when
     /// the charge is in equilibrium.
-    template <numeric::FloatingPoint S>
+    template <numeric::FloatingPoint S, class P = Params>
     [[nodiscard]] static S current(
-        const S* v, const Params& p) noexcept {
+        const S* v, const P& p) noexcept {
         return steady_state_current<S>(v, p);
     }
 

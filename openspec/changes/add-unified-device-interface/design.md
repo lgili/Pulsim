@@ -685,3 +685,42 @@ factorising, runs (DECISIONS #22).
   `seed_params` seeds in the order `Params::map` constructs the members,
   which must be declaration order (braced init, as in the tests).
   Nothing integrates the sensitivities yet.
+
+## Controller-state block (slice 3, 2026-11-18)
+
+For `refactor-unified-transient-stepper` and the TR-BDF2 owner
+(DECISIONS #24). `SolverSnapshot::controller` is a `solver::ControllerState`
+(`solver/result.hpp`): `engine` ("" = none), `version`, `names[i]` ↔
+`values[i]` (`std::vector<Real>` each; `find(name)`, `set(name, v)`).
+Pickled as the 15th field of a version-4 pickle, only when filled (an
+empty block writes the 14-field version 4); older pickles load with
+an empty block, and an engine resuming from an empty block restarts its
+controller exactly as today. Booleans and integers are stored as reals
+(exact up to 2^53); masks as one real per bit.
+
+What a TR-BDF2 → TR-BDF2 resume must save so the continued run takes the
+same accepted steps (`engine = "trbdf2"`, `version = 1`; names are the
+`trbdf2_transient.hpp` variables of 2026-11-18):
+
+| field | size | meaning |
+|---|---|---|
+| `h` | 1 | the step the controller proposes next (`h` at the loop top) |
+| `err_prev` | 0 or 1 | the LTE controller's memory, if it has one (PI / step-ratio history) |
+| `h_mem_gate` | 2 | post-gate-edge restart h per edge parity |
+| `pending_gate_slot` | 1 | −1 or the parity of a pending gate restart |
+| `gate_prev` | n_sw | the gate mask last sampled (bits as 0/1) |
+| `gate_last_toggle` | n_sw | per bit, last toggle time |
+| `gate_w_last` | 2·n_sw | per bit, last closed high / low pulse width |
+| `gate_dir_t` | 6·n_sw | per bit, the last three toggle times per direction |
+| `gate_toggled` | n_sw | per bit, toggled at least once |
+| `gate_pulse_min` | 1 | narrowest pulse of the run (+inf: none) |
+| `gate_spacing_max` | 1 | widest sampling spacing used |
+| `gate_spacing_since` | n_sw | per bit, widest spacing since its previous toggle |
+| `chatter` | 5 | `chatter_t`, `chatter_n`, `chatter_short_t`, `chatter_x1_t`, `chatter_exhaust_t` |
+| `restart` | k | SDIRK restart owed / post-event state not already in `restart_steps_left` |
+
+Anything else the controller carries step to step (a cached next gate
+edge, the event queue's next tick) is either recomputed from `t` and the
+schedule or must be added here with a version bump. A resume checks
+`engine` and `version` and refuses another engine's or a newer version's
+block by name; it never half-applies one.

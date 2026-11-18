@@ -1463,3 +1463,90 @@ def test_gated_doc_block_equals_the_kernel_table():
         cells = [c.strip() for c in ln.strip("|").split("|")]
         doc_table[cells[0]] = {c: v == "yes" for c, v in zip(cols, cells[1:])}
     assert doc_table == k._gated_capabilities()
+
+
+# ---- the device path (add-unified-device-interface DECISIONS #23) --------
+# Generated from the registry: every Newton kind (and Newton variant) cell,
+# on every Newton engine, either runs on device_path='interface' and agrees
+# with the hand stamps, or refuses by name; which one is the kernel's
+# registry (`_device_path_ported`), so a ported kind without a passing cell
+# and a refusal the registry does not predict both fail.
+_NEWTON_PORTED, _BLOCKS_PORTED = k._device_path_ported()
+_BLOCK_OF = {cell: blk for blk, cell in STATEFUL_CELLS.items()}
+_PATH_CELLS = {n: c for n, c in CELLS.items() if n in _NEWTON_PORTED}
+_PATH_CELLS.update({n: v[0] for n, v in VARIANT_CELLS.items()
+                    if n.split("[")[0] in _NEWTON_PORTED})
+
+
+def _sat_law(add):
+    """The saturable inductor under another law, driven by a sine so the
+    current reverses (the hysteretic core runs both branches)."""
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 5e3, 0.0)
+        b.add_resistor("R1", "in", "o", 10.0)
+        b.add_resistor("R2", "o", "gnd", 1e3)
+        if on:
+            add(b)
+        return b
+    return build
+
+
+# Path-only cells: the table and Jiles-Atherton inductor laws (the device
+# path's adapters choose the law per instance; the engine cells above run
+# the atan law only).
+_PATH_CELLS.update({
+    "SaturableInductor[table]": (_sat_law(lambda b: b.add_saturable_inductor_table(
+        "Ld", "o", "gnd", [0.0, 0.2, 0.5, 1.0, 2.0],
+        [0.0, 2e-4, 4e-4, 5e-4, 6e-4])), "o", "Ld", 4e-4, 5e-8, False),
+    "SaturableInductor[ja]": (_sat_law(lambda b: b.add_hysteretic_core_inductor(
+        "Ld", "o", "gnd", 100.0, 1e-4, 0.1, 0.0, 4.0e5, 50.0, 5e-5, 0.2,
+        30.0)), "o", "Ld", 4e-4, 5e-8, False),
+})
+_BLOCK_OF.update({"SaturableInductor[table]": "saturable_inductor",
+                  "SaturableInductor[ja]": "saturable_inductor"})
+
+
+def _run_path(cell, engine, path):
+    build, node, _dev, t_end, dt, sw = cell
+    b = build(True)
+    kw = dict(dt=dt) if engine == "pwl" else {}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end, engine=engine, switch_fn=_switch_fn(b, sw),
+                       device_path=path, **kw)
+    return np.asarray(r.times, float), np.asarray(r.v(node), float)
+
+
+def test_every_newton_kind_has_a_device_path_cell():
+    assert set(_NEWTON_PORTED) <= set(_PATH_CELLS)
+    assert set(_BLOCKS_PORTED) == set(STATEFUL_CELLS)
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+@pytest.mark.parametrize("name", sorted(_PATH_CELLS))
+def test_device_path_cell(name, engine):
+    cell = _PATH_CELLS[name]
+    base = name.split("[")[0]
+    block = _BLOCK_OF.get(name)
+    ported = _NEWTON_PORTED[base] and _BLOCKS_PORTED.get(block, True)
+    try:
+        ta, va = _run_path(cell, engine, "legacy")
+    except p.UnsupportedError:
+        pytest.skip(f"{name} is not on {engine} (kind table)")
+    try:
+        ti, vi = _run_path(cell, engine, "interface")
+    except ValueError as e:
+        assert not ported, f"{name} on {engine}: refused but ported: {e}"
+        assert "not on the device interface yet" in str(e)
+        assert base in str(e) or (block is not None and block in str(e)), e
+        return
+    assert ported, f"{name} on {engine}: ran on 'interface' but not ported"
+    span = float(np.max(va) - np.min(va)) or float(np.max(np.abs(va))) or 1.0
+    if engine == "pwl":
+        assert np.array_equal(ta, ti)
+        err = float(np.max(np.abs(vi - va)))
+        assert err <= 1e-12 * span, f"{name}: {err:.3g} vs span {span:.3g}"
+    else:
+        err = float(np.max(np.abs(np.interp(ta, ti, vi) - va)))
+        assert err <= TOL * span, f"{name}: {err:.3g} vs span {span:.3g}"

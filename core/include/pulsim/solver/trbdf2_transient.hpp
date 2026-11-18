@@ -121,6 +121,8 @@
 namespace pulsim::solver {
 
 struct TrBdf2Options {
+    /// add-unified-device-interface DECISIONS #23 (see SimulationOptions).
+    device::DevicePath device_path = device::DevicePath::Legacy;
     Real t_start = Real{0};
     Real t_end   = Real{0};
     Real rtol    = Real{1e-4};
@@ -462,7 +464,7 @@ inline SimulationResult run_transient_trbdf2(
     // standard one, so the stages never solve the linear skeleton.
     // The stateful kinds bring their own wrappers below.
     const pwl::NonlinearRefreshFn nl_static =
-        pwl::static_device_refresh(pool, nl_refresh);
+        pwl::static_device_refresh(pool, nl_refresh, opts.device_path);
 
     const Real span  = opts.t_end - opts.t_start;
     // Default step ceiling. span/1000 alone is a TRAP on a long
@@ -628,6 +630,7 @@ inline SimulationResult run_transient_trbdf2(
     // rejected step never touches them and no rollback is needed.
     pwl::StatefulHistories hs;
     hs.init(graph, pool);
+    hs.set_path(opts.device_path, graph, pool, "run_transient_trbdf2");
     if (initial_state.has_value()) hs.seed_from_dc_op(x);
     if (resume_from != nullptr) {
         if (!resume_from->valid) {

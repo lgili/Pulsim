@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePath', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class ConvergenceError(RuntimeError):
@@ -1330,6 +1330,45 @@ class PwlStateSpaceCache:
         """
         Share symbolic analyses with every cache of a circuit of this structure (with_params / with_value derivations): one analysis per sweep. Call before the first build; results are bit-identical.
         """
+class DevicePath:
+    """
+    Which code stamps the Newton kinds (add-unified-device-interface): Legacy = the hand stamps (default), Interface = every kind's law on the device interface.
+
+    Members:
+
+      Legacy
+
+      Interface
+    """
+    Interface: typing.ClassVar[DevicePath]
+    Legacy: typing.ClassVar[DevicePath]
+    __members__: typing.ClassVar[dict[str, DevicePath]]
+    def __eq__(self, other: object) -> bool:
+        ...
+    def __getstate__(self) -> int:
+        ...
+    def __hash__(self) -> int:
+        ...
+    def __index__(self) -> int:
+        ...
+    def __init__(self, value: int) -> None:
+        ...
+    def __int__(self) -> int:
+        ...
+    def __ne__(self, other: object) -> bool:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def __setstate__(self, state: int) -> None:
+        ...
+    def __str__(self) -> str:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def value(self) -> int:
+        ...
 class SimulationOptions:
     """
     Inputs to run_transient: time window + dt + Newton / event-iteration knobs.
@@ -1357,6 +1396,14 @@ class SimulationOptions:
         ...
     @atol.setter
     def atol(self, arg0: float) -> None:
+        ...
+    @property
+    def device_path(self) -> DevicePath:
+        """
+        Which code stamps the Newton kinds: DevicePath.Legacy (the hand stamps, default) or DevicePath.Interface (each kind's law on the device interface; refuses an unported kind by name).
+        """
+    @device_path.setter
+    def device_path(self, arg0: DevicePath) -> None:
         ...
     @property
     def discontinuity_restart(self) -> bool:
@@ -2406,7 +2453,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, bool]:
+    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, tuple[float, int, float, bool], bool, typing.Any]:
         ...
     def __init__(self) -> None:
         ...
@@ -2422,6 +2469,11 @@ class SolverSnapshot:
     @_control_state.setter
     def _control_state(self, arg1: typing.Any) -> None:
         ...
+    @property
+    def controller_state(self) -> typing.Any:
+        """
+        The step controller's state, ``(engine, version, {field: values})``, or None: the resumed engine then restarts its controller (every snapshot before this block).
+        """
     @property
     def coss_history(self) -> list[float]:
         """
@@ -2455,6 +2507,30 @@ class SolverSnapshot:
         """
     @diode_on.setter
     def diode_on(self, arg1: collections.abc.Sequence[bool]) -> None:
+        ...
+    @property
+    def grid_dt(self) -> float:
+        """
+        Step of the fixed-step grid (see ``grid_origin``); NaN: none.
+        """
+    @grid_dt.setter
+    def grid_dt(self, arg0: float) -> None:
+        ...
+    @property
+    def grid_origin(self) -> float:
+        """
+        The fixed-step grid ``t`` sits on: t == grid_origin + grid_step * grid_dt to rounding (NaN: none). A fixed-step resume with the same dt continues it, so its trace is the continuous run's bit for bit.
+        """
+    @grid_origin.setter
+    def grid_origin(self, arg0: float) -> None:
+        ...
+    @property
+    def grid_step(self) -> int:
+        """
+        Index of ``t`` on the fixed-step grid (see ``grid_origin``).
+        """
+    @grid_step.setter
+    def grid_step(self, arg0: int) -> None:
         ...
     @property
     def history(self) -> list[float]:
@@ -2500,6 +2576,14 @@ class SolverSnapshot:
         """
     @pmsm_history.setter
     def pmsm_history(self, arg1: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def post_edge_derivatives(self) -> bool:
+        """
+        True when a variable-step run ended exactly on a gate edge after refreshing the device derivatives for the post-edge circuit (``x`` is the pre-edge solve). engine='pwl' refuses to resume from it; engine='trbdf2' resumes.
+        """
+    @post_edge_derivatives.setter
+    def post_edge_derivatives(self, arg0: bool) -> None:
         ...
     @property
     def restart_pending(self) -> bool:
@@ -3565,6 +3649,10 @@ def _design_batch(base: Circuit, plan: dict[typing.Any, typing.Any], table: typi
     """
     pulsim.design's kernel batch: every design of `table` evaluated on the exact steady-state route with the GIL released (pulsim/dsed/design_batch.hpp). Internal.
     """
+def _device_path_ported() -> tuple[dict[typing.Any, typing.Any], dict[typing.Any, typing.Any]]:
+    """
+    ({Newton kind: ported}, {stateful block: ported}): the kinds simulate(device_path='interface') runs; the others refuse it by name.
+    """
 def _eval_expr(text: str, names: collections.abc.Sequence[str], values: collections.abc.Sequence[float], who: str = 'expression') -> float:
     """
     Evaluate a parameter expression (ir/expr.hpp) over names = values.
@@ -3597,6 +3685,10 @@ def _run_pwl_points(circuit: Circuit, names: collections.abc.Sequence[str], tabl
     """
     Internal (sweep(circuit, ...) kernel path, task 5.2): run the points of a parameter table (rows = points, columns = names: parameters, or "device.field") on the pwl engine, n_threads native threads, without the GIL. Returns ([(result, circuit, builder, own_preflight) or None per point], stats); None = re-run that point through simulate().
     """
+def _stateful_kinds() -> dict[typing.Any, typing.Any]:
+    """
+    The kernel's stateful Newton kinds (pwl::StatefulKinds), in fold order: {state block name: StoredKind name of the kind-table row it runs under}.
+    """
 def _switch_census(graph: Graph, pool: DevicePool) -> tuple[int, int, list[int]]:
     """
     Return (num_switches, num_diode_owned, controlled_switch_indices). Diode bits are solver-owned (overlaid over the user mask by combine_masks); only the controlled indices need a switch_fn/driver.
@@ -3614,7 +3706,7 @@ def compute_dc_op(graph: Graph, pool: DevicePool, mask: SwitchStateMask, t_eval:
     Raw single-shot LINEAR DC solve. Nonlinear devices (smooth diode / MOSFET / IGBT) are stamped as OPEN CIRCUITS and PWL diode states are taken from `mask` as given — so on a circuit with any of those this answers a different question. Use compute_dc_operating_point(...) unless you specifically want the linear system.
     `gmin` is the conductance floor to ground (S); 0 disables it.
     """
-def compute_dc_op_with_strategy(graph: Graph, pool: DevicePool, mask: SwitchStateMask, strategy: DCStrategy = DCStrategy.Auto, t_eval: float = 0.0, pt_dt_init: float = 1.0, pt_dt_max: float = 10000000000.0, pt_max_iters: int = 500, pt_tol_res: float = 1e-07, ss_n_steps: int = 10, should_continue: collections.abc.Callable[[], bool] | None = None, enable_nonlinear_refresh: bool | None = None, gmin: float = 1e-12, gmin_start: float = 0.01, gmin_steps: int = 10) -> tuple[typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], DCSolveReport]:
+def compute_dc_op_with_strategy(graph: Graph, pool: DevicePool, mask: SwitchStateMask, strategy: DCStrategy = DCStrategy.Auto, t_eval: float = 0.0, pt_dt_init: float = 1.0, pt_dt_max: float = 10000000000.0, pt_max_iters: int = 500, pt_tol_res: float = 1e-07, ss_n_steps: int = 10, should_continue: collections.abc.Callable[[], bool] | None = None, enable_nonlinear_refresh: bool | None = None, gmin: float = 1e-12, gmin_start: float = 0.01, gmin_steps: int = 10, device_path: DevicePath = DevicePath.Legacy) -> tuple[typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], DCSolveReport]:
     """
     Compute the DC operating point with strategy selection. Returns `(x, DCSolveReport)`.
     `enable_nonlinear_refresh=None` (the default) stamps the smooth diode / MOSFET / IGBT chain when the pool contains any; pass False to deliberately solve them as open circuits.
@@ -3622,7 +3714,7 @@ def compute_dc_op_with_strategy(graph: Graph, pool: DevicePool, mask: SwitchStat
     strategies in Auto mode; raises pulsim.Cancelled when it
     returns False.
     """
-def compute_dc_operating_point(graph: Graph, pool: DevicePool, mask: SwitchStateMask, strategy: DCStrategy = DCStrategy.Auto, t_eval: float = 0.0, enable_nonlinear_refresh: bool | None = None, max_event_iterations: int = 16, max_newton_iters: int = 50, tol_dx: float = 1e-09, tol_res: float = 1e-09, enable_cascade: bool = True, gmin: float = 1e-12, gmin_start: float = 0.01, gmin_steps: int = 10, ss_n_steps: int = 10, pt_tol_res: float = 1e-07, pt_max_iters: int = 500, should_continue: collections.abc.Callable[[], bool] | None = None) -> DCOperatingPoint:
+def compute_dc_operating_point(graph: Graph, pool: DevicePool, mask: SwitchStateMask, strategy: DCStrategy = DCStrategy.Auto, t_eval: float = 0.0, enable_nonlinear_refresh: bool | None = None, max_event_iterations: int = 16, max_newton_iters: int = 50, tol_dx: float = 1e-09, tol_res: float = 1e-09, enable_cascade: bool = True, gmin: float = 1e-12, gmin_start: float = 0.01, gmin_steps: int = 10, ss_n_steps: int = 10, pt_tol_res: float = 1e-07, pt_max_iters: int = 500, should_continue: collections.abc.Callable[[], bool] | None = None, device_path: DevicePath = DevicePath.Legacy) -> DCOperatingPoint:
     """
     THE DC operating point: nonlinear devices stamped, PWL diode states iterated to consistency, and the DC cascade walked if the direct solve fails. Returns a `DCOperatingPoint`.
     This is what `simulate(start_from_dc_op=True)` uses internally; prefer it over `compute_dc_op`, which is the raw linear primitive and treats every nonlinear device as an open circuit.
@@ -3747,7 +3839,7 @@ def run_transient_bdf1(builder: CircuitBuilder, opts: SimulationOptions, switch_
     """
     BDF1 (implicit Euler) transient simulation. Use when the trapezoidal path rings on stiff problems — BDF1 is L-stable (adds artificial damping that kills numerical oscillation). Slower than trap because it assembles + factors per step; intended for ROBUSTNESS over speed.
     """
-def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int = 0, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int = 0, tol_newton_dx: float = 0.0, tol_newton_res: float = 0.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = [], newton_roundoff_budget: int = 0, on_impulse_error: bool = False, observer_offsets: collections.abc.Sequence[float] = [], observer_origin: float = ...) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
+def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int = 0, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int = 0, tol_newton_dx: float = 0.0, tol_newton_res: float = 0.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = [], newton_roundoff_budget: int = 0, on_impulse_error: bool = False, observer_offsets: collections.abc.Sequence[float] = [], observer_origin: float = ..., device_path: DevicePath = DevicePath.Legacy) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
     """
     Variable-step TR-BDF2 transient (engine='auto'): L-stable, 2nd order, LTE-controlled step, gate edges landed by bisection, diode crossings localized by Illinois. Returns (SimulationResult, stats dict). `observers[j]` ticks at t_start + observer_offsets[j] + k*observer_periods[j] (ceil((span - offset_j)/T_j) times, index order when coincident; offsets default to 0); observer_origin (NaN = t_start) moves the grid's origin, so a resumed run ticks where the uninterrupted one would; stats['control_tick_counts'] counts each.
     """

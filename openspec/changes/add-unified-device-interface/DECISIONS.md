@@ -204,3 +204,81 @@
     taken at dt instead of as two dt/2 steps), so it belongs to the
     machines agent's rewrite (told), and the rule is in the "How to add a
     device kind" section.
+
+## Slice 3 — the dual path (2026-11-18)
+
+23. **Dual path (orchestrator's decision, not re-opened).** Porting a
+    kind's law onto `Device` reassociates its arithmetic, which the
+    bit-identity gate (#16) forbids on the DEFAULT path only. So the hand
+    stamps stay the default (`device::DevicePath::Legacy`, bit-identical)
+    and every ported kind ALSO runs through its law on the `Device`
+    contract behind one explicit option: kernel `SimulationOptions::
+    device_path`, `TrBdf2Options::device_path`, the DC operating point's
+    `dc_device_refresh(pool, enable, path)`; Python `simulate(...,
+    device_path='interface')` (default `'legacy'`). A run is all-legacy
+    or all-interface: a circuit holding a Newton kind not yet ported
+    refuses `'interface'` by name, listing the unported kinds. Gate
+    between the paths: trajectories within 1e-12 of scale on the fixed
+    engine at a fixed dt; Jacobian entries a few ulp apart at random
+    states; strict reference cells equal in outcome and in error to 3
+    significant digits; TR-BDF2 at an rtol-proportional tolerance (its
+    accepted step sequence may differ by rounding). Speed within 3 %
+    (`perf2.py`). The release flips the default and deletes the hand
+    stamps (`benchmarks/DEVICE_PATH_EVIDENCE.md` and its deletion list).
+24. **The controller-state snapshot block.** `SolverSnapshot::controller`
+    (`solver::ControllerState`): `engine`, `version`, and named real
+    vectors (`names[i]` ↔ `values[i]`). Named fields so an engine adds one
+    without a format change; an EMPTY block means "restart the
+    controller", which is what every older snapshot (2.0, v3, v4 with 13
+    or 14 fields) means, so they all load and resume as before. Pickle
+    version 4 gains a 15th field `(engine, version, names, values)`,
+    written only when the block is filled, so an empty block keeps the
+    14-field version 4 that earlier readers load; 13- and 14-field
+    version-4 pickles (and a 15th field of `None`) still load. A filled
+    block needs an engine, a version >= 1 and one value list per name. Python:
+    `snapshot.controller_state` → `(engine, version, {field: values})` or
+    None. The TR-BDF2 schema (version 1) is in design.md, "Controller-
+    state block". NOT filled here: saving is a few lines at
+    `result.final_snapshot`, but restoring touches every controller
+    variable's initialisation in `trbdf2_transient.hpp` (owned by the
+    TR-BDF2 agent) and the unified stepper is replacing that loop; the
+    block is published for them.
+25. **What the flip deletes (prepared, not done).** When the release makes
+    `'interface'` the default (and every Newton kind is ported, 15.6), the
+    hand stamps go: `make_combined_diode_mosfet_refresh` and the
+    `stamp_nonlinear_branches` helper (`pwl/nonlinear_refresh_device.hpp`,
+    `nonlinear_refresh_mosfet_level1.hpp`, `nonlinear_refresh_diode.hpp`);
+    `refresh_nonlinear_capacitors` (`nonlinear_refresh_nonlinear_capacitor.hpp`);
+    `stamp_saturable_inductor` / `refresh_saturable_inductors`
+    (`nonlinear_refresh_saturable_inductor.hpp`); `refresh_lauritzen_diodes`,
+    `refresh_igbt_tails`, `refresh_pmsm_mna` once their kinds are ported;
+    the `stamp_kind` overloads and the legacy branch of
+    `build_device_refresh` (`pwl/device_refresh.hpp`); the per-kind
+    `commit` / `capture_gamma` arithmetic of the histories
+    (`NonlinearCapacitorHistory::update_from_state`, `commit_bdf2_stage2`,
+    the non-hysteretic part of `SaturableInductorHistory::update_from_state`),
+    keeping `seed_from_dc_op`, `extrapolate_previous`,
+    `refresh_derivatives` (which move onto the laws then) and the
+    Jiles–Atherton `accept_ja` / `capture_ja`; the Real-only duplicates
+    `models::NonlinearCapacitor::charge` / `capacitance` and
+    `models::SaturableInductor::flux` / `inductance` (the laws are the one
+    body; the model functions become calls of it); `DevicePath` stays one
+    release as an accepted no-op. Evidence: `benchmarks/DEVICE_PATH_EVIDENCE.md`.
+26. **What the interface path does NOT route through the law yet.** The
+    restart helpers of the ported kinds — `seed_from_dc_op`,
+    `extrapolate_previous` (SDIRK pseudo-history), `refresh_derivatives`
+    (TR-BDF2 post-edge slots) — keep the history's arithmetic, which
+    evaluates the same model functions as the law's Real value. Moving them
+    is part of the flip (#25). The live storage stays in each history's
+    entries, which the flat device-state vector already serialises
+    (rollback and snapshot); the law reads and writes it through the
+    adapters (`pwl/interface_stamps.hpp`). The Coss's junction law below its
+    floor (v/V0 < v_floor) has charge flat in v: the law's Jacobian there is
+    0, the hand stamp's is C(floor) — the hand Jacobian is not the
+    derivative of its own residual. Newton converges to the same root; no
+    gate circuit reaches the floor. The 1e-12 fixed-step gate holds while
+    both paths take the same Newton iterations (measured 1.8e-13 and
+    1.8e-14 of scale on macOS); a path that stops one iteration apart
+    differs by up to the Newton tolerance (~1e-10 of a 12 V scale), so a
+    platform failure of that gate is a stopping difference, not a law
+    difference — check the iteration counts first.
