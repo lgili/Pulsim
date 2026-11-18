@@ -80,7 +80,11 @@ state is `V_f + i/g_on`, so a diode carrying 48 A at `g_on = 1e3`
 sits at `V_f` + 48 mV — inside `V_f < v_D < V_th`, where the voltage
 alone cannot say whether it conducts. Its loss is `V_f·i + i²/g_on`, so
 `P_avg` already contains the drop: a `conduction_specs` `V_f0` for the
-same diode is a separate estimate, not an addition. `switch_fn=` is only needed for a result built
+same diode is a separate estimate, not an addition. The gated PWL
+devices (`add_igbt(reverse_blocking=True)`, `add_gto`, `add_thyristor`,
+`add_triac`) are diode rows with the same law: an IGBT's conduction loss
+is `V_ce0·I_avg + R_on·I_rms²` (10 A DC at `V_ce0 = 0.9 V`,
+`R_on = 10 mΩ`: 10.0 W; the bidirectional switch read 1.0 W). `switch_fn=` is only needed for a result built
 without the record (it is then re-evaluated, with a warning). Duties are
 time-weighted per step, so a variable-step grid does not bias them.
 

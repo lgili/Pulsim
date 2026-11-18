@@ -1816,18 +1816,97 @@ public:
     /// user wires `add_diode(...)` separately if needed.
     /// Defaults: R_on = 10 mΩ, R_off = 1 GΩ (typical for
     /// IGBT modules).
+    ///
+    /// add-pwl-igbt-and-thyristor: `reverse_blocking = true` makes it a
+    /// gated PWL diode (the mask bit is the gate): ON while the gate is
+    /// on and i = (v_CE − V_ce0)/R_on > 0, turned on at v_CE ≥ V_on
+    /// (= V_th, or max(V_th, V_ce0) when V_ce0 > 0); OFF is R_off. With
+    /// `reverse_blocking = false` (and so V_ce0 = 0) it is the plain
+    /// bidirectional switch, bit-identical to before.
     CircuitBuilder& add_igbt(
         std::string_view name, std::string_view collector,
         std::string_view emitter,
         Real R_on  = Real{10e-3},
-        Real R_off = Real{1e9}) {
+        Real R_off = Real{1e9},
+        Real V_ce0 = Real{0},
+        bool reverse_blocking = false,
+        Real V_th = Real{0}) {
         require_conductances_("add_igbt", name, Real{1} / R_on,
                               Real{1} / R_off, "R_on", "R_off", R_on, R_off);
-        return add_switch(std::move(name),
-                            std::move(collector),
-                            std::move(emitter),
-                            Real{1} / R_on,
-                            Real{1} / R_off);
+        if (!(V_ce0 >= Real{0}) || !std::isfinite(V_ce0)) {
+            throw std::invalid_argument(std::format(
+                "add_igbt(\"{}\"): V_ce0 = {} must be a finite number >= 0 V.",
+                name, V_ce0));
+        }
+        if (V_ce0 > Real{0} && !reverse_blocking) {
+            throw std::invalid_argument(std::format(
+                "add_igbt(\"{}\"): V_ce0 = {} V needs reverse_blocking=True: "
+                "a knee on a switch that conducts both ways would push "
+                "reverse current against the drop.", name, V_ce0));
+        }
+        require_finite_("add_igbt", name, "V_th", V_th);
+        if (!reverse_blocking) {
+            return add_switch(std::move(name),
+                                std::move(collector),
+                                std::move(emitter),
+                                Real{1} / R_on,
+                                Real{1} / R_off);
+        }
+        return add_gated_("add_igbt", name, collector, emitter, R_on, R_off,
+                          V_ce0, V_th, models::SwitchedDiode::Gate::Held,
+                          Real{0});
+    }
+
+    /// Thyristor (SCR), a latching gated PWL diode: turns on when its
+    /// gate bit is on and v_AK ≥ V_on, conducts i = (v − V_f)/R_on, stays
+    /// on while i > 0 with the gate on and while i > I_H once the gate is
+    /// off. Turn-off is the engine's current-crossing event.
+    CircuitBuilder& add_thyristor(
+        std::string_view name, std::string_view anode,
+        std::string_view cathode, Real R_on = Real{1e-3},
+        Real R_off = Real{1e9}, Real V_f = Real{0}, Real I_H = Real{0},
+        Real V_th = Real{0}) {
+        return add_gated_("add_thyristor", name, anode, cathode, R_on, R_off,
+                          V_f, V_th, models::SwitchedDiode::Gate::Latching,
+                          I_H);
+    }
+
+    /// GTO: a gate-held gated PWL diode (its mask bit is the gate-drive
+    /// state: on-drive conducts forward, off-drive turns it off).
+    CircuitBuilder& add_gto(
+        std::string_view name, std::string_view anode,
+        std::string_view cathode, Real R_on = Real{1e-3},
+        Real R_off = Real{1e9}, Real V_f = Real{0}, Real V_th = Real{0}) {
+        return add_gated_("add_gto", name, anode, cathode, R_on, R_off, V_f,
+                          V_th, models::SwitchedDiode::Gate::Held, Real{0});
+    }
+
+    /// TRIAC: two anti-parallel latching branches `<name>_fwd` (t1 → t2)
+    /// and `<name>_rev` (t2 → t1), one gate bit each
+    /// (`switch_indices_of(name)`).
+    CircuitBuilder& add_triac(
+        std::string_view name, std::string_view t1, std::string_view t2,
+        Real R_on = Real{1e-3}, Real R_off = Real{1e9}, Real V_f = Real{0},
+        Real I_H = Real{0}, Real V_th = Real{0}) {
+        const std::string n{name};
+        add_gated_("add_triac", n + "_fwd", t1, t2, R_on, R_off, V_f, V_th,
+                   models::SwitchedDiode::Gate::Latching, I_H);
+        return add_gated_("add_triac", n + "_rev", t2, t1, R_on, R_off, V_f,
+                          V_th, models::SwitchedDiode::Gate::Latching, I_H);
+    }
+
+    /// The mask indices of a device: one for a switch / diode, two
+    /// (`_fwd`, `_rev`) for a TRIAC.
+    [[nodiscard]] std::vector<Index>
+    switch_indices_of(std::string_view name) const {
+        const std::string n{name};
+        auto has = [&](const std::string& x) {
+            return branch_index_.find(x) != branch_index_.end();
+        };
+        if (!has(n) && has(n + "_fwd") && has(n + "_rev")) {
+            return {switch_index_of(n + "_fwd"), switch_index_of(n + "_rev")};
+        }
+        return {switch_index_of(name)};
     }
 
     /// add-in-kernel-event-losses 2.2: a loss port on a PWL switch or
@@ -2487,6 +2566,39 @@ public:
 
 private:
     /// The composite builders' body / freewheeling-diode drop.
+    CircuitBuilder& add_gated_(std::string_view fn, std::string_view name,
+                               std::string_view a, std::string_view k,
+                               Real R_on, Real R_off, Real V_f, Real V_th,
+                               models::SwitchedDiode::Gate gate, Real I_H) {
+        require_conductances_(fn, name, Real{1} / R_on, Real{1} / R_off,
+                              "R_on", "R_off", R_on, R_off);
+        if (!(V_f >= Real{0}) || !std::isfinite(V_f)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): the forward drop {} = {} must be a finite "
+                "number >= 0 V.", fn, name,
+                fn == "add_igbt" ? "V_ce0" : "V_f", V_f));
+        }
+        if (!(I_H >= Real{0}) || !std::isfinite(I_H)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): the holding current I_H = {} must be a finite "
+                "number >= 0 A.", fn, name, I_H));
+        }
+        if (!(V_th >= Real{0}) || !std::isfinite(V_th)) {
+            // V_th < 0 with V_f = 0 turns on at a reverse voltage and off
+            // at once: guaranteed chatter.
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): the turn-on threshold V_th = {} must be a "
+                "finite number >= 0 V.", fn, name, V_th));
+        }
+        const Index a_idx = resolve_node_(a);
+        const Index k_idx = resolve_node_(k);
+        const Index b_id = add_branch_(name, a_idx, k_idx,
+                                       topology::BranchKind::Switch);
+        pool_.add_gated_diode(b_id, Real{1} / R_on, Real{1} / R_off, V_th,
+                              V_f, gate, I_H);
+        return *this;
+    }
+
     static void require_diode_drop_(std::string_view fn,
                                     std::string_view name, Real V_F) {
         if (!(V_F >= Real{0}) || !std::isfinite(V_F)) {

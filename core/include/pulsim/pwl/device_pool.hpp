@@ -187,6 +187,20 @@ public:
         diode_branches_.push_back(branch_id);
     }
 
+    /// add-pwl-igbt-and-thyristor: a SwitchedDiode whose conduction also
+    /// needs the gate bit of the user's mask at its switch index (IGBT /
+    /// GTO: `Held`; thyristor: `Latching`, holding current `I_H`).
+    void add_gated_diode(Index branch_id, Real g_on, Real g_off, Real V_th,
+                         Real V_f, models::SwitchedDiode::Gate gate,
+                         Real I_H = Real{0}) {
+        add_diode(branch_id, g_on, g_off, V_th, V_f);
+        auto& p = std::get<models::SwitchedDiode::Params>(entries_[branch_id]);
+        p.gate = gate;
+        p.I_H = I_H;
+        ++num_gated_;
+    }
+    [[nodiscard]] Size num_gated_diodes() const noexcept { return num_gated_; }
+
     /// Register a smooth-blend nonlinear diode (the Shockley-
     /// flavoured `models::IdealDiode`). The branch MUST have been
     /// added with `BranchKind::Nonlinear`. Layer 4 V3's Newton
@@ -1349,6 +1363,7 @@ private:
     // DiodeEventState iterates this list to build per-diode
     // tracking entries.
     std::vector<Index> diode_branches_;
+    Size num_gated_ = 0;   // gated SwitchedDiodes among them
 
     // Layer 2 V13: MOSFET Level 1 — extra storage for the
     // gate node id per drain→source branch. The branch
@@ -1445,6 +1460,25 @@ inline constexpr auto kBranchFormCaps = std::to_array<FormCaps>({
     {"Diode", DevicePool::StoredKind::Diode,
      static_cast<std::uint8_t>(engine_bit(Engine::FixedTrap) |
                                engine_bit(Engine::TrBdf2))},
+});
+
+/// add-pwl-igbt-and-thyristor: the GATED forms of the Diode kind (IGBT /
+/// GTO hold the gate, thyristor / TRIAC latch). bdf1 has no diode
+/// iteration; the AC sweep is linear at the supplied mask.
+struct GatedCaps {
+    std::string_view name;      // "GateHeld" / "Latching"
+    models::SwitchedDiode::Gate gate;
+    std::uint8_t engines;
+    [[nodiscard]] constexpr bool supports(Engine e) const noexcept {
+        return (engines & engine_bit(e)) != 0;
+    }
+};
+inline constexpr std::uint8_t kGatedEngines = static_cast<std::uint8_t>(
+    engine_bit(Engine::FixedTrap) | engine_bit(Engine::TrBdf2) |
+    engine_bit(Engine::AcSweep));
+inline constexpr auto kGatedCaps = std::to_array<GatedCaps>({
+    {"GateHeld", models::SwitchedDiode::Gate::Held, kGatedEngines},
+    {"Latching", models::SwitchedDiode::Gate::Latching, kGatedEngines},
 });
 
 static_assert(kKindCaps.size() == DevicePool::kNumKinds,

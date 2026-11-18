@@ -334,6 +334,13 @@ namespace yaml_detail {
         put_fields(e, prm, fields_of(kind), pool.is_branch_form(bi) ? "g_on" : "");
         std::visit([&](const auto& p) {
             using P = std::decay_t<decltype(p)>;
+            if constexpr (std::is_same_v<P, m::SwitchedDiode::Params>) {
+                // add-pwl-igbt-and-thyristor: a gated device keeps its gate
+                if (p.gate != m::SwitchedDiode::Gate::None) {
+                    e.add("gate", std::to_string(static_cast<int>(p.gate)));
+                    if (p.I_H != Real{0}) e.add("I_H", num(p.I_H));
+                }
+            }
             if constexpr (std::is_same_v<P, m::SaturableInductor::Params>) {
                 if (p.table) e.add("table", flux_table(*p.table));
                 if (p.ja) e.add("ja", ja_core(*p.ja));
@@ -804,7 +811,7 @@ private:
         namespace m = ::pulsim::models;
         const auto row = fields_of(kind);
         keys(n, who, {"kind", "name", "pins", "role", "control", "phases", "omega", "theta",
-                      "table", "ja", "law", "t", "i", "periodic"}, row);
+                      "table", "ja", "law", "t", "i", "periodic", "gate", "I_H"}, row);
         ParamsVariant v = yaml_detail::make_params(static_cast<std::size_t>(kind));
         set_fields(v, n, who, row);
         auto& pool = b.pool_;
@@ -819,7 +826,15 @@ private:
             else if constexpr (std::is_same_v<P, pwl::DevicePool::SwitchParams>) pool.add_switch(bi, p.g_on, p.g_off);
             else if constexpr (std::is_same_v<P, m::Capacitor::Params>) pool.add_capacitor(bi, p);
             else if constexpr (std::is_same_v<P, m::Inductor::Params>) pool.add_inductor(bi, p);
-            else if constexpr (std::is_same_v<P, m::SwitchedDiode::Params>) pool.add_diode(bi, p.g_on, p.g_off, p.V_th, p.V_f);
+            else if constexpr (std::is_same_v<P, m::SwitchedDiode::Params>) {
+                const int gate = n["gate"] ? integer(n["gate"], who, "gate", 1, 2) : 0;
+                const Real I_H = n["I_H"] ? real(n["I_H"], who, "I_H") : Real{0};
+                if (gate == 0 && n["I_H"]) fail(who, "I_H without a gate");
+                if (!(I_H >= Real{0}) || !std::isfinite(I_H)) fail(who, "I_H must be a finite number >= 0");
+                if (gate == 0) pool.add_diode(bi, p.g_on, p.g_off, p.V_th, p.V_f);
+                else pool.add_gated_diode(bi, p.g_on, p.g_off, p.V_th, p.V_f,
+                                          static_cast<m::SwitchedDiode::Gate>(gate), I_H);
+            }
             else if constexpr (std::is_same_v<P, m::IdealDiode::Params>) pool.add_nonlinear_diode(bi, p);
             else if constexpr (std::is_same_v<P, m::CurrentSource::Params>) pool.add_current_source(bi, p);
             else if constexpr (std::is_same_v<P, m::PWMVoltageSource::Params>) pool.add_pwm_voltage_source(bi, p);

@@ -75,6 +75,7 @@
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/sources/pwm_b_extra.hpp"
 #include "pulsim/sources/pwm_switch_fn.hpp"
+#include "pulsim/sources/phase_control_fn.hpp"
 #include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/sources/spwm_pair_fn.hpp"
 #include "pulsim/sources/switch_schedule.hpp"
@@ -268,6 +269,22 @@ void init_module(py::module_& m) {
         "The branch form's engine column (add-branch-form-ideal-switch): "
         "{'Switch'|'Diode': {engine: bool}}; False refuses with "
         "UnsupportedError(feature='branch_form').");
+    m.def("_gated_capabilities",
+        []() {
+            py::dict out;
+            for (const auto& row : pwl::kGatedCaps) {
+                py::dict d;
+                for (std::size_t e = 0; e < pwl::kEngineNames.size(); ++e) {
+                    d[py::str(std::string(pwl::kEngineNames[e]))] =
+                        row.supports(static_cast<pwl::Engine>(e));
+                }
+                out[py::str(std::string(row.name))] = d;
+            }
+            return out;
+        },
+        "The gated PWL devices' engine column (add-pwl-igbt-and-"
+        "thyristor): {'GateHeld'|'Latching': {engine: bool}}; False "
+        "refuses with UnsupportedError(feature='gated_diode').");
     m.def("_require_supported",
         [](const topology::Graph& graph, const pwl::DevicePool& pool,
            const std::string& engine_in) {
@@ -1349,16 +1366,87 @@ void init_module(py::module_& m) {
               },
               "Devices with a loss port, in set_device_losses order.")
         .def("add_igbt",
-              &builder::CircuitBuilder::add_igbt,
+              [](builder::CircuitBuilder& self, std::string_view name,
+                 std::string_view collector, std::string_view emitter,
+                 double R_on, double R_off, double V_ce0,
+                 std::optional<bool> reverse_blocking,
+                 double V_th) -> builder::CircuitBuilder& {
+                  // add-pwl-igbt-and-thyristor stage 1: the default stays
+                  // the bidirectional switch for one release, with a
+                  // warning (a knee implies reverse blocking).
+                  if (!reverse_blocking && V_ce0 == 0.0) {
+                      if (PyErr_WarnEx(PyExc_FutureWarning, std::format(
+                              "add_igbt(\"{}\"): reverse_blocking is not "
+                              "given; it defaults to False (a switch that "
+                              "conducts both ways) in this release and to "
+                              "True in the next. Pass reverse_blocking=True "
+                              "(the IGBT) or False (the old device).",
+                              name).c_str(), 1) != 0) {
+                          throw py::error_already_set();
+                      }
+                  }
+                  return self.add_igbt(name, collector, emitter, R_on, R_off,
+                                       V_ce0,
+                                       reverse_blocking.value_or(V_ce0 > 0.0),
+                                       V_th);
+              },
               py::arg("name"), py::arg("collector"),
               py::arg("emitter"),
               py::arg("R_on") = 10e-3,
               py::arg("R_off") = 1e9,
+              py::kw_only(),
+              py::arg("V_ce0") = 0.0,
+              py::arg("reverse_blocking") = py::none(),
+              py::arg("V_th") = 0.0,
               py::return_value_policy::reference,
-              "Add an IGBT as a controlled switch "
-              "(collector → emitter). Defaults: "
-              "R_on=10mΩ, R_off=1GΩ. No anti-parallel "
-              "diode by default.")
+              "Add a PWL IGBT (collector → emitter), its mask bit the "
+              "gate. reverse_blocking=True: ON while the gate is on and "
+              "i = (v_CE - V_ce0)/R_on > 0, turned on at v_CE >= "
+              "max(V_th, V_ce0); conduction power V_ce0*i + R_on*i^2. "
+              "reverse_blocking=False: a switch that conducts both ways "
+              "(V_ce0 must be 0). Not given: False with a FutureWarning "
+              "(True when V_ce0 > 0). V_ce0, R_on: a straight line "
+              "through two points of the datasheet V_CE(I_C) curve. No "
+              "anti-parallel diode: add_diode(..., V_f=...) separately.")
+        .def("add_thyristor",
+              &builder::CircuitBuilder::add_thyristor,
+              py::arg("name"), py::arg("anode"), py::arg("cathode"),
+              py::arg("R_on") = 1e-3, py::arg("R_off") = 1e9,
+              py::kw_only(),
+              py::arg("V_f") = 0.0, py::arg("I_H") = 0.0,
+              py::arg("V_th") = 0.0,
+              py::return_value_policy::reference,
+              "Add a PWL thyristor (SCR), its mask bit the gate: fires "
+              "when the gate is on and v_AK >= max(V_th, V_f), conducts "
+              "i = (v - V_f)/R_on, stays on while i > 0 (gate on) or "
+              "i > I_H (gate off). Turn-off is the engine's current-"
+              "crossing event. V_f, R_on, I_H: datasheet V_T0, r_T, I_H.")
+        .def("add_gto",
+              &builder::CircuitBuilder::add_gto,
+              py::arg("name"), py::arg("anode"), py::arg("cathode"),
+              py::arg("R_on") = 1e-3, py::arg("R_off") = 1e9,
+              py::kw_only(),
+              py::arg("V_f") = 0.0, py::arg("V_th") = 0.0,
+              py::return_value_policy::reference,
+              "Add a PWL GTO: conducts i = (v - V_f)/R_on > 0 while its "
+              "mask bit (the gate-drive state) is on; the bit off turns "
+              "it off whatever the current.")
+        .def("add_triac",
+              &builder::CircuitBuilder::add_triac,
+              py::arg("name"), py::arg("t1"), py::arg("t2"),
+              py::arg("R_on") = 1e-3, py::arg("R_off") = 1e9,
+              py::kw_only(),
+              py::arg("V_f") = 0.0, py::arg("I_H") = 0.0,
+              py::arg("V_th") = 0.0,
+              py::return_value_policy::reference,
+              "Add a PWL TRIAC: two anti-parallel thyristors "
+              "`<name>_fwd` (t1 -> t2) and `<name>_rev` (t2 -> t1), one "
+              "gate bit each: switch_indices_of(name).")
+        .def("switch_indices_of",
+              &builder::CircuitBuilder::switch_indices_of,
+              py::arg("name"),
+              "Mask bit positions of a device: [i] for a switch or "
+              "diode, [i_fwd, i_rev] for a TRIAC.")
         .def("add_transformer",
               &builder::CircuitBuilder::add_transformer,
               py::arg("name"),
@@ -1566,6 +1654,12 @@ void init_module(py::module_& m) {
                               params["g_off"] = p.g_off;
                               params["V_th"]  = p.V_th;
                               params["V_f"]   = p.V_f;
+                              if (p.gate != models::SwitchedDiode::Gate::None) {
+                                  params["gate"] =
+                                      p.gate == models::SwitchedDiode::Gate::Held
+                                          ? 1 : 2;
+                                  params["I_H"] = p.I_H;
+                              }
                               if (pool.is_branch_form(bid)) {
                                   params["R_on"] = pool.branch_R_on(bid);
                                   params["branch_form"] = 1;
@@ -2207,10 +2301,11 @@ void init_module(py::module_& m) {
           [](const topology::Graph& graph, const pwl::DevicePool& pool) {
               pwl::DiodeEventState diodes(graph, pool);
               const auto owned = diodes.diode_owned_bits();
+              const auto gated = diodes.gated_bits();
               const auto n_sw = graph.num_switches();
               std::vector<Size> controlled;
               for (Size i = 0; i < n_sw; ++i) {
-                  if (!owned.get(i)) controlled.push_back(i);
+                  if (!owned.get(i) || gated.get(i)) controlled.push_back(i);
               }
               return py::make_tuple(n_sw, diodes.num_diodes(),
                                      controlled);
@@ -3325,6 +3420,18 @@ void init_module(py::module_& m) {
         "at that point, so an on-time of a whole number of "
         "steps is exactly that many steps in every period. "
         "Usable as `switch_fn=` in simulate / run_transient.");
+
+    m.def("make_phase_control_fn",
+        &sources::make_phase_control_fn,
+        py::arg("frequency"), py::arg("alpha"), py::arg("width"),
+        py::arg("switch_indices"), py::arg("num_switches"),
+        py::arg("phase") = 0.0,
+        "Firing schedule of a p-pulse line-commutated converter "
+        "(p = len(switch_indices)): gate k is ON for `width` seconds "
+        "from (phase + alpha + k*2*pi/p) / (2*pi*frequency), every line "
+        "period. alpha, phase in radians; phase puts gate 0's natural "
+        "commutation instant (alpha = 0) on the line. A SwitchSchedule "
+        "(edges known to every engine).");
 
     m.def("make_constant_switch_fn",
         [](const topology::SwitchStateMask& mask) {
@@ -5411,6 +5518,14 @@ void init_module(py::module_& m) {
         .def("add_thyristor",
             [](BlockChain& self, InputRef gate_ref, InputRef current_ref,
                 std::string output_channel, Real i_holding) {
+                if (PyErr_WarnEx(PyExc_DeprecationWarning,
+                        "BlockChain.add_thyristor (add_thyristor_to_chain) is "
+                        "deprecated: a latch updated once per step with a "
+                        "sampled |i| < i_holding test. Use "
+                        "CircuitBuilder.add_thyristor, whose latch the "
+                        "engines decide at the current zero.", 1) != 0) {
+                    throw py::error_already_set();
+                }
                 pulsim::switchgear::add_thyristor_to_chain(
                     self, gate_ref, current_ref,
                     std::move(output_channel), i_holding);

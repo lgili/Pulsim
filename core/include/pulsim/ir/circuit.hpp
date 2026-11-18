@@ -377,6 +377,13 @@ private:
                                              j->substep_frac, j->M0}) v.real(x);
                         v.word(static_cast<std::uint64_t>(j->substeps_min));
                     }
+                } else if constexpr (std::is_same_v<P, models::SwitchedDiode::Params>) {
+                    // A gated diode's mode is structure, I_H a value;
+                    // an ungated diode hashes as before.
+                    if (p.gate != models::SwitchedDiode::Gate::None) {
+                        s.word(0x6761746564ULL + static_cast<std::uint64_t>(p.gate));
+                        v.real(p.I_H);
+                    }
                 } else if constexpr (std::is_same_v<P, models::NonlinearCapacitor::Params>) {
                     v.word(static_cast<std::uint64_t>(p.law));
                     v.word(p.table ? 1u : 0u);

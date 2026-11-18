@@ -258,15 +258,15 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | three_phase/three_phase_balanced_rl_load.yaml | 1.82e-06 | 1.83e-06 | 1.83e-06 | 4.22e-05 | 6.01e-07 |
 | three_phase/three_phase_diode_rectifier.yaml | 1.51 | 0.00632 | 0.00631 | 5.51e-05 | 0.00034 |
 
-## Analytic set (20 cases; agree = within the frozen ceiling, 1e-3 when none)
+## Analytic set (22 cases; agree = within the frozen ceiling, 1e-3 when none)
 
 | configuration | agree | disagree | error | refused | unverified |
 |---|---:|---:|---:|---:|---:|
-| pwl | 19 | 1 | 0 | 0 | 0 |
-| pwl+restart | 20 | 0 | 0 | 0 | 0 |
-| pwl+split | 20 | 0 | 0 | 0 | 0 |
-| trbdf2 | 20 | 0 | 0 | 0 | 0 |
-| dsed | 19 | 0 | 0 | 1 | 0 |
+| pwl | 21 | 1 | 0 | 0 | 0 |
+| pwl+restart | 21 | 1 | 0 | 0 | 0 |
+| pwl+split | 22 | 0 | 0 | 0 | 0 |
+| trbdf2 | 22 | 0 | 0 | 0 | 0 |
+| dsed | 19 | 0 | 0 | 3 | 0 |
 
 | case | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
@@ -286,6 +286,8 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | shockley_op | 6.67e-13 | 6.67e-13 | 6.67e-13 | 6.67e-13 | refused |
 | pwl_diode_drop | 0 | 0 | 0 | 0 | 1.85e-16 |
 | halfwave_r | 5.38e-09 | 5.38e-09 | 5.38e-09 | 2.59e-08 | 5.38e-09 |
+| igbt_knee | 0 | 0 | 0 | 0 | refused |
+| scr_halfwave_r | 1.46e-16 | 0.0271 ✗ | 1.47e-16 | 2.71e-11 | refused |
 | halfwave_rl | 9.65e-06 | 1.44e-06 | 1.44e-06 | 3.76e-06 | 5.69e-09 |
 | hard_switched_rc | 0.01 ✗ | 4.92e-05 | 4.92e-05 | 2.22e-06 | 7.58e-14 |
 | buck_ccm | 0.000256 | 1.23e-08 | 1.23e-08 | 3.37e-07 | 3.84e-15 |

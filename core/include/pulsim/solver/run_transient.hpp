@@ -670,8 +670,7 @@ inline SimulationResult run_transient(
         // start mask (diodes OFF) can be a false floating island (review
         // L2). On a failed solve the start mask's check names the cause.
         const auto dc_start_mask = has_diodes
-            ? combine_masks(switch_fn(opts.t_start),
-                            diodes.current_diode_mask(), diode_owned)
+            ? diodes.combine(switch_fn(opts.t_start))
             : switch_fn(opts.t_start);
         auto dc = [&] {
             try {
@@ -760,6 +759,9 @@ inline SimulationResult run_transient(
     // only while x is still a seeded, unsolved sample 0) — what
     // final_snapshot.stamped_mask carries.
     bool stamped_known = false;
+    // add-pwl-igbt-and-thyristor: the stamped mask at the step start,
+    // so a gated device's commutation record follows its stamped state.
+    topology::SwitchStateMask gated_prev_stamp = stamped_mask;
 
     // Event-iteration cap. 0 disables iteration entirely
     // (matching Layer 5 V2 behaviour for regression testing).
@@ -790,7 +792,25 @@ inline SimulationResult run_transient(
     DenseMatrix mode_Z;
     std::vector<bool> mode_bits0, mode_bits;
     std::vector<char> mode_prev_on, mode_settled;
-    if (has_diodes && (opts.mode_selection != 0 || opts.mode_guard)) {
+    // add-pwl-igbt-and-thyristor: the mode LCP and judge_mode know no gate
+    // (they would turn a gate-off IGBT on), so gated circuits keep the settle.
+    const bool has_gated = diodes.num_gated() > 0;
+    if (opts.mode_selection != 0 && has_gated) {
+        std::string gated_name;
+        for (const auto& e : diodes.entries()) {
+            if (e.gate != models::SwitchedDiode::Gate::None) {
+                gated_name = std::string(graph.branch_name(e.branch_id));
+                break;
+            }
+        }
+        throw UnsupportedError(
+            "pwl", "mode_selection", gated_name, "Diode",
+            std::format("engine 'pwl': mode_selection with the gated device '{}' "
+                        "(IGBT with reverse blocking, GTO, thyristor or TRIAC): the "
+                        "complementarity port knows no gate. Drop mode_selection.",
+                        gated_name));
+    }
+    if (has_diodes && (opts.mode_selection != 0 || (opts.mode_guard && !has_gated))) {
         mode_ports.emplace(cache, graph, pool, diodes);
         const std::string bf = mode_ports->branch_form_diode();
         const char* mname = opts.mode_selection == 1 ? "shadow" : "lcp";
@@ -1286,9 +1306,7 @@ inline SimulationResult run_transient(
             const bool seeded =
                 initial_state != nullptr || resume_snap != nullptr;
             stamped_mask = has_diodes
-                    ? combine_masks(switch_fn(opts.t_start),
-                                    diodes.current_diode_mask(),
-                                    diode_owned)
+                    ? diodes.combine(switch_fn(opts.t_start))
                     : switch_fn(opts.t_start);
             stamped_known = !seeded;
             result.record_switch_state(stamped_mask,
@@ -1558,9 +1576,7 @@ inline SimulationResult run_transient(
                 ++result.split_event_overflows;
             }
             if (has_diodes) {
-                mask_pre = combine_masks(
-                    mask_pre, diodes.current_diode_mask(),
-                    diode_owned);
+                mask_pre = diodes.combine(mask_pre);
             }
 
             // Accumulate b_extra into the reused buffer (audit #6), in the
@@ -1664,6 +1680,7 @@ inline SimulationResult run_transient(
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
             loop_released.clear();
+            if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
             // add-complementarity-mode-selection: every non-single linear
             // site is a decision site of the selector.
             const bool mode_site = mode_ports.has_value() && !single &&
@@ -1694,17 +1711,12 @@ inline SimulationResult run_transient(
             do {
                 auto mask = gate_at(restart_rule ? gate_t : at_t);
                 if (has_diodes) {
-                    const auto diode_mask =
-                        diodes.current_diode_mask();
-                    mask = combine_masks(mask, diode_mask,
-                                          diode_owned);
+                    mask = diodes.combine(mask);
                 }
                 bool released = false;
                 while (structure.active() && check_mode(mask, true, at_t)) {
                     released = true;
-                    mask = combine_masks(gate_at(restart_rule ? gate_t : at_t),
-                                         diodes.current_diode_mask(),
-                                         diode_owned);
+                    mask = diodes.combine(gate_at(restart_rule ? gate_t : at_t));
                 }
                 // A release back onto a mask already solved this step is the
                 // loop forward-biasing the diode: refuse rather than let the
@@ -2444,6 +2456,19 @@ inline SimulationResult run_transient(
                             })) {
                         continue;
                     }
+                    if (e.gate != models::SwitchedDiode::Gate::None) {
+                        // A gate decides, not v - V_on: record the stamped
+                        // state's change, effective from the step start.
+                        const bool now = stamped_mask.get(e.switch_idx);
+                        if (now != gated_prev_stamp.get(e.switch_idx)) {
+                            step_events.push_back(CommutationEvent{
+                                .t_estimated = t_prev,
+                                .branch_id   = e.branch_id,
+                                .new_state   = now,
+                            });
+                        }
+                        continue;
+                    }
                     if (has_ideal_diode && pool.is_branch_form(e.branch_id)) {
                         // shortcut: stamped at the step end, not interpolated;
                         // the event split locates it when it is on.
@@ -2817,6 +2842,7 @@ inline SimulationResult run_transient(
             // restored on breach so x and the diode state agree
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
+            if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
             const bool mode_site_s = mode_ports.has_value() && !nl_refresh_effective;
             auto solve_s = [&](const topology::SwitchStateMask& m, Vector& out) {
                 cache.solve_segment(nominal_segment(m), b_extra_user, out);
@@ -2830,10 +2856,7 @@ inline SimulationResult run_transient(
             do {
                 auto mask = gate_at(gate_t);
                 if (has_diodes) {
-                    const auto diode_mask =
-                        diodes.current_diode_mask();
-                    mask = combine_masks(mask, diode_mask,
-                                          diode_owned);
+                    mask = diodes.combine(mask);
                 }
                 // Phase-0 fix #9: a repeated mask within one step's
                 // event iteration is a CYCLE (mask A -> B -> A ...,
@@ -2945,6 +2968,18 @@ inline SimulationResult run_transient(
             if (has_diodes && k > 0) {
                 for (std::size_t j = 0; j < diodes.entries().size(); ++j) {
                     const auto& e = diodes.entries()[j];
+                    if (e.gate != models::SwitchedDiode::Gate::None) {
+                        const bool now = stamped_mask.get(e.switch_idx);
+                        if (now != gated_prev_stamp.get(e.switch_idx)) {
+                            result.commutation_events.push_back(
+                                CommutationEvent{
+                                    .t_estimated = t_prev,
+                                    .branch_id   = e.branch_id,
+                                    .new_state   = now,
+                                });
+                        }
+                        continue;
+                    }
                     if (has_ideal_diode && pool.is_branch_form(e.branch_id)) {
                         // at s = 0 while ON: the crossing test never fires
                         if (static_cast<bool>(commut_on_prev[j]) != e.is_on) {

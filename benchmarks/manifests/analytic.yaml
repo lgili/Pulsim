@@ -166,6 +166,24 @@ cases:
     dsed:  # was refused (static circuit); add-exact-propagator-strategy, static circuits
       ceiling: 1.0e-06
       measured: 5.383e-09
+  igbt_knee:
+    pwl:
+      ceiling: 1.0e-09
+      measured: 0.0
+    trbdf2:
+      ceiling: 1.0e-09
+      measured: 0.0
+    dsed:  # a gated device: dsed refuses it by name (add-pwl-igbt-and-thyristor)
+      refused: UnsupportedError
+  scr_halfwave_r:
+    pwl:
+      ceiling: 1.0e-09
+      measured: 1.455e-16
+    trbdf2:
+      ceiling: 1.0e-09
+      measured: 3.663e-11
+    dsed:  # a gated device: dsed refuses it by name (add-pwl-igbt-and-thyristor)
+      refused: UnsupportedError
   halfwave_rl:
     pwl:
       ceiling: 1.93e-05

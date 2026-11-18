@@ -104,11 +104,38 @@ inline void refuse_device_losses(const pwl::DevicePool& pool,
             "device_loss_summary.", engine, s.device));
 }
 
+/// add-pwl-igbt-and-thyristor: the first gated device (IGBT with reverse
+/// blocking, GTO, thyristor, TRIAC) engine `e` does not run refuses as
+/// `UnsupportedError(engine, 'gated_diode', device, 'Diode')`.
+inline void require_gated_supported(const topology::Graph& graph,
+                                    const pwl::DevicePool& pool,
+                                    pwl::Engine e) {
+    if (pool.num_gated_diodes() == 0) return;
+    for (Index b = 0; b < graph.num_branches(); ++b) {
+        if (!pool.is_registered(b)
+            || pool.kind_of(b) != pwl::DevicePool::StoredKind::Diode) continue;
+        const auto gate = pool.diode_params(b).gate;
+        for (const auto& row : pwl::kGatedCaps) {
+            if (row.gate != gate || row.supports(e)) continue;
+            throw UnsupportedError(
+                std::string(pwl::engine_name(e)), "gated_diode",
+                std::string(graph.branch_name(b)), "Diode",
+                std::format(
+                    "engine '{}' cannot simulate '{}', a gated PWL device "
+                    "({}: IGBT with reverse blocking, GTO, thyristor or "
+                    "TRIAC): it would run a different circuit. Use "
+                    "engine='pwl' or engine='trbdf2'.",
+                    pwl::engine_name(e), graph.branch_name(b), row.name));
+        }
+    }
+}
+
 /// Throw `UnsupportedError` for the first branch engine `e` cannot run.
 inline void require_supported(const topology::Graph& graph,
                               const pwl::DevicePool& pool, pwl::Engine e) {
     require_branch_form_supported(graph, pool, e);
     if (e != pwl::Engine::FixedTrap) refuse_device_losses(pool, pwl::engine_name(e));
+    require_gated_supported(graph, pool, e);
     const auto b = find_unsupported(graph, pool, e);
     if (!b) return;
     const auto kind = pwl::stored_kind_name(pool.kind_of(*b));

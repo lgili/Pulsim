@@ -1363,3 +1363,44 @@ def test_reinit_records_on_every_engine(engine):
     (rec,) = recs
     assert (rec.kind, rec.sample) == ("capacitor_loop", 0)
     assert rec.lambda_ == pytest.approx(6e-6, rel=1e-12)
+
+
+# ---------------------------------------------------------------------
+# The gated forms of the Diode kind (add-pwl-igbt-and-thyristor 4.5):
+# IGBT / GTO (gate held) and thyristor / TRIAC (latching), gate on, each
+# clamping the sine like a diode with a drop; their own engine column.
+# ---------------------------------------------------------------------
+GATED_CELLS = {
+    "GateHeld": (_clamp(lambda b: b.add_igbt("Qd", "o", "gnd", 1e-3, 1e9,
+                                             V_ce0=0.7, reverse_blocking=True,
+                                             V_th=0.701)),
+                 "o", "Qd", 2e-3, 2e-7, True),
+    "Latching": (_clamp(lambda b: b.add_thyristor("Td", "o", "gnd", 1e-3, 1e9,
+                                                  V_f=0.7, V_th=0.701)),
+                 "o", "Td", 2e-3, 2e-7, True),
+}
+
+
+def test_gated_rows_cover_both_modes():
+    assert set(k._gated_capabilities()) == set(GATED_CELLS)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("mode", list(GATED_CELLS))
+def test_gated_cell(mode, engine):
+    _check_cell(mode + "[gated]", GATED_CELLS[mode], engine,
+                k._gated_capabilities()[mode][engine])
+
+
+def test_gated_doc_block_equals_the_kernel_table():
+    import pathlib
+    doc = (pathlib.Path(__file__).resolve().parents[2] / "docs"
+           / "known-limitations.md").read_text(encoding="utf-8")
+    block = doc.split("<!-- gated-capabilities:begin -->")[1].split(
+        "<!-- gated-capabilities:end -->")[0]
+    cols = ("pwl", "trbdf2", "dsed", "bdf1", "ac_sweep")
+    doc_table = {}
+    for ln in block.strip().splitlines()[2:]:
+        cells = [c.strip() for c in ln.strip("|").split("|")]
+        doc_table[cells[0]] = {c: v == "yes" for c, v in zip(cols, cells[1:])}
+    assert doc_table == k._gated_capabilities()

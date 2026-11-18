@@ -407,7 +407,7 @@ b.add_diode(name, anode, cathode, g_on=None, g_off=None, V_th=0.0, V_f=0.0, ...)
 b.add_shockley_diode(name, anode, cathode, I_S=1e-12, n=1.0, V_T=0.025852, G_min=1e-12, BV=0.0)
 b.add_switch(name, n_pos, n_neg, g_on, g_off)
 b.add_mosfet(name, drain, source, R_on=0.001, R_off=1000000000.0, body_diode=True, V_F=0.7)
-b.add_igbt(name, collector, emitter, R_on=0.01, R_off=1000000000.0)
+b.add_igbt(name, collector, emitter, R_on=0.01, R_off=1000000000.0, ...)
 b.add_transformer(name, p_from, p_to, s_from, s_to, L_p, L_s, k=1.0)
 b.node_id_of(name)
 b.switch_index_of(name)
@@ -636,7 +636,7 @@ names but change results:
 | `YamlParser(...).load(path)` | `p.load_yaml_file(path)` / `p.load_yaml_string(text)` |
 | `simulate` implied the fixed-step engine | `engine='auto'`: `dt` gives a fixed step; no `dt` usually gives TR-BDF2 |
 | `add_mosfet` was one switch bit | it is two (`<name>_body`); use `b.switch_index_of` |
-| an IGBT conducted in reverse | `b.add_igbt_level1` blocks it (`with_fwd=True` adds the freewheel diode). The PWL `b.add_igbt` is still a bidirectional switch: gated on, -10 A gives -0.1 V |
+| an IGBT conducted in reverse | `b.add_igbt(..., V_ce0=0.9, reverse_blocking=True)` blocks it; unset it is the old two-way switch (FutureWarning). SCR: `b.add_thyristor` |
 | `add_three_phase_vsi` built six bare switches | it adds six freewheel diodes (`with_freewheel_diodes=True`) |
 | `p.add_hysteretic_inductor` + `p.make_hysteretic_inductor_observer` | the inductor is solved inside Newton; drop the observer, whose factory now raises |
 | `p.add_pmsm` (observer, one average L) | still there; `b.add_pmsm_mna` stamps the machine with full saliency |

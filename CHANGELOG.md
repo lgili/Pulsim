@@ -171,6 +171,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * A run holding an export_c library's static state refuses a concurrent
   run of it on another thread.
 
+### PWL IGBT with a knee, kernel thyristor, GTO, TRIAC (add-pwl-igbt-and-thyristor)
+
+* **Added** `add_igbt(..., V_ce0=, reverse_blocking=, V_th=)`: with
+  `reverse_blocking=True` the IGBT conducts `(v_CE − V_ce0)/R_on` only
+  forward with the gate on; `device_loss_summary` reads
+  `V_ce0·I + R_on·I²` (10.0 W at 10 A, 0.9 V, 10 mΩ, where the switch
+  read 1.0 W). **Staged BREAKING**: `reverse_blocking` unset stays
+  `False` (the old bidirectional switch, bit-identical) with a
+  `FutureWarning` in this release and becomes `True` in the next.
+* **Added** `add_thyristor`, `add_gto`, `add_triac` (`switch_indices_of`)
+  and `make_phase_control_fn`; YAML types `thyristor`, `gto`, `triac` and
+  the `igbt` keys `V_ce0`, `reverse_blocking`, `V_th`. The latch is a
+  kernel device state, turned off at the current zero (or `I_H` once the
+  gate is off) by each engine's crossing machinery, on `pwl` and
+  `trbdf2`; `dsed` and `bdf1` refuse by name (`feature='gated_diode'`).
+  Six-pulse bridge, 400 V, 20 A: 540.15 / 467.78 / 270.06 V at
+  α = 0 / 30 / 60° (analytic 540.19 / 467.82 / 270.10), 460.59 V with
+  1 mH overlap (460.62).
+* **Deprecated** `make_thyristor_switch_fn` and `BlockChain.add_thyristor`
+  (`DeprecationWarning` naming `add_thyristor`).
+
 ### Integration batch 11: circuit IR YAML, TR-BDF2 ideal switch, pwl complementarity, exact step 3, control graph G23, optimisation slice 6 merged
 
 * **Fixed** `make_combined_switch_fn` of a control-graph gate whose loop

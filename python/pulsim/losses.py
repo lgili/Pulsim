@@ -1893,6 +1893,17 @@ def device_loss_summary(
                 "diode_specs.")
     cond_by_bid, cond_by_name = _build_spec_lookup(
         conduction_specs, "conduction_specs")
+    # A gated PWL device (IGBT with reverse blocking, GTO, thyristor) is a
+    # diode row: its switching energies would be dropped in silence.
+    for c in comps_by_bid.values():
+        if "gate" in (c.get("params") or {}) and (
+                int(c["branch_id"]) in switch_by_bid
+                or str(c.get("name")) in switch_by_name):
+            raise ValueError(
+                f"switch_specs: {c.get('name')!r} is a gated PWL device "
+                "(IGBT with reverse_blocking, GTO, thyristor); its switching "
+                "energies are not modelled by device_loss_summary yet. Drop "
+                "the entry, or use reverse_blocking=False for the IGBT.")
 
     # The kernel's per-sample record of the stamped mask (None for a
     # result that carries none) and each switch-kind branch's bit.
