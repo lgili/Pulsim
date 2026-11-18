@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, cast
 
 from ._pulsim import (  # type: ignore[import-not-found]
+    ConvergenceError,
     NativeMultiMaskPwm,
     NativePwm2Switch,
     SwitchSchedule,
@@ -921,9 +922,12 @@ def run_dsed_from_builder(
             res = _result_from_native(native_res, opts.t_start)
             res.initial_condition_adjustment = ic_adjustment
             return res
-        except (UnsupportedError, _InconsistentInitialState):
+        except (UnsupportedError, _InconsistentInitialState, ConvergenceError):
             # A refusal is an answer, not a reason to try the next
-            # bridge (which would run the circuit without the device).
+            # bridge (which would run the circuit without the device);
+            # so is a give-up of the run the native adapter accepted
+            # (the next bridge would re-run it without the refusal of
+            # implicit segments).
             raise
         except (RuntimeError, ValueError):
             # Bridge.11 native adapter rejected the circuit (e.g. nonlinear

@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration batch 9: the exact engine merged
+
+* **Added** the exact engine's give-ups (C++ `pulsim::ConvergenceFailure`:
+  settle, chatter, no_progress, max_steps, nan) reach Python as
+  `pulsim.ConvergenceError` with `kind`, `t_failed` and `device` (they
+  were bare `RuntimeError`s); a design evaluation records them as
+  `failed` by type.
+* **Fixed** a give-up of a run the native adapter had accepted fell
+  through to the Python-adapter bridge on a diode-free circuit, which
+  re-ran it without the refusal of implicit segments; it raises.
+* **Changed** the reference gate's dsed column: 39 agree / 16 disagree /
+  12 error / 40 refused -> 83 / 0 / 0 / 24 (`sepic`'s frozen `error`
+  dropped: it agrees, 1.5e-6); pwl / trbdf2 cells identical to the digit.
+
 ### Integration batch 8: control graph, optimisation slice 4 and circuit IR merged
 
 * **Fixed** (control graph review) `PIController`, `Limiter`,

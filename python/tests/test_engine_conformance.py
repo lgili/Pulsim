@@ -1246,3 +1246,48 @@ def test_exact_and_dsed_are_bit_identical_on_every_cell(kind):
         assert a == b
         return
     assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1])
+
+
+# Integration batch 9: the exact engine's new cells (allow_implicit_segments, a static circuit,
+# a DC start) hold under both names, bit for bit; the keyword is refused by name elsewhere.
+def _divider():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 12.0)
+    b.add_resistor("R1", "a", "o", 2e3)
+    b.add_resistor("R2", "o", "gnd", 1e3)
+    return b
+
+
+def _rc_b_extra():
+    b = _rc()
+    zero = [0.0] * b.pool.state_size(b.graph)
+    return b, (lambda _t: zero)
+
+
+@pytest.mark.parametrize("cell", ["static", "dc_start", "allow_implicit_segments"])
+def test_exact_engine_cells_are_identical_under_both_names(cell):
+    out = {}
+    for eng in ("dsed", "exact"):
+        if cell == "static":
+            r = _sim(eng, _divider(), dt=1e-4)
+            assert np.abs(np.asarray(r.v("o")) - 4.0).max() < 1e-12      # 12 V * 1k / 3k
+        elif cell == "dc_start":
+            x = np.asarray(p.compute_dc_op(_rc()), float)
+            r = _sim(eng, initial_state=x, dt=1e-4)
+        else:
+            b, fn = _rc_b_extra()
+            with pytest.raises(p.UnsupportedError) as ei:
+                _sim(eng, b, b_extra_fn=fn)
+            assert (ei.value.engine, ei.value.feature) == ("dsed", "source")
+            b, fn = _rc_b_extra()
+            r = _sim(eng, b, b_extra_fn=fn, allow_implicit_segments=True)
+        out[eng] = (np.asarray(r.times), np.asarray(r.states))
+    assert np.array_equal(out["dsed"][0], out["exact"][0])
+    assert np.array_equal(out["dsed"][1], out["exact"][1])
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto"))
+def test_allow_implicit_segments_is_refused_off_the_exact_engine(engine):
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim(engine, allow_implicit_segments=True)
+    assert ei.value.feature == "allow_implicit_segments"
