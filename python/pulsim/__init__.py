@@ -43,6 +43,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # were whole would be the silent wrong answer this API exists to
     # avoid, so the partial trace has to be asked for.
     SimulationAborted,
+    NewtonRoundoffBudgetExceeded,
     ConvergenceError,
     # add-engine-conformance-matrix: the typed refusal (a ValueError
     # carrying engine / feature / device / kind) and the kernel's
@@ -551,6 +552,7 @@ __all__ = [
     "Cancelled",
     "RetiredDeviceError",
     "SimulationAborted",
+    "NewtonRoundoffBudgetExceeded",
     "ConvergenceError",
     "periodic_steady_state_supported",
     "UnsupportedError",
@@ -1911,6 +1913,7 @@ def simulate(
     tol_newton_res: Optional[float] = None,
     enable_newton_line_search: Optional[bool] = None,
     enable_newton_lm: Optional[bool] = None,
+    newton_roundoff_budget: Optional[int] = None,
     enable_substep_state_correction: Optional[bool] = None,
     discontinuity_restart: Optional[bool] = None,
     resolution_diagnostics: Optional[bool] = None,
@@ -2138,6 +2141,12 @@ def simulate(
         :class:`SolverOptions`). Cross-check on the other engine
         instead (``engine='pwl'`` with an explicit ``dt`` after a
         TR-BDF2 abort).
+    newton_roundoff_budget
+        ``pwl`` / ``trbdf2``: the most consecutive Newton solves that
+        may be accepted at roundoff with no converged solve between
+        them (default 130, ten times the worst honest run measured).
+        One more raises :class:`NewtonRoundoffBudgetExceeded`, a
+        :class:`SimulationAborted` with the partial result.
     sensitivities
         ``engine='dsed'`` only (every other engine refuses it):
         parameter names ``"<component>.<field>"`` (``R``, ``L``,
@@ -2336,6 +2345,14 @@ def simulate(
         raise ValueError(
             f"simulate(): mode_selection={mode_selection!r}; expected "
             "None, 'legacy', 'shadow' or 'lcp'.")
+    if newton_roundoff_budget is not None and (
+            isinstance(newton_roundoff_budget, bool)
+            or int(newton_roundoff_budget) != newton_roundoff_budget
+            or int(newton_roundoff_budget) < 1):
+        raise ValueError(
+            f"simulate(newton_roundoff_budget={newton_roundoff_budget}): "
+            "must be an integer >= 1 (consecutive Newton solves accepted at roundoff "
+            "before NewtonRoundoffBudgetExceeded; default 130).")
 
     # ---- Topology preflight (v2.0 Phase 2) --------------------------
     #
@@ -2497,6 +2514,8 @@ def simulate(
             # own step, so accepting this would promise a mechanism
             # that does not exist there.
             "max_dt_halvings": max_dt_halvings is not None,
+            # DSED runs no Newton roundoff acceptance.
+            "newton_roundoff_budget": newton_roundoff_budget is not None,
             # v2.0 Phase 1: output decimation is a fixed-grid
             # concept; the DSED engine emits variable-step samples,
             # so honouring `store_every` there would mean something
@@ -2791,6 +2810,7 @@ def simulate(
                 enable_newton_line_search=bool(
                     enable_newton_line_search),
                 enable_newton_lm=bool(enable_newton_lm),
+                newton_roundoff_budget=int(newton_roundoff_budget or 0),
             )
         except SimulationAborted as _aborted:
             try:
@@ -3093,6 +3113,8 @@ def simulate(
         opts.enable_newton_line_search = enable_newton_line_search
     if enable_newton_lm is not None:
         opts.enable_newton_lm = enable_newton_lm
+    if newton_roundoff_budget is not None:
+        opts.newton_roundoff_budget = int(newton_roundoff_budget)
     if enable_substep_state_correction is not None:
         opts.enable_substep_state_correction = enable_substep_state_correction
     if discontinuity_restart is not None:

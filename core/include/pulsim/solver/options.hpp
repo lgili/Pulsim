@@ -111,6 +111,13 @@ struct SimulationOptions {
     /// line search when both are enabled.
     bool enable_newton_lm = false;
 
+    /// Newton roundoff-acceptance run budget: the most consecutive
+    /// solves that may be accepted at roundoff with no converged solve
+    /// between them (add-newton-roundoff-acceptance DECISIONS 10d). One
+    /// more raises NewtonRoundoffBudgetExceeded, which no retry ladder
+    /// swallows. A test handle; 130 = 10x the worst honest run.
+    Size newton_roundoff_budget = Size{130};
+
     /// v2.0 Phase 2 (B.4) — local time-step reduction on a failed
     /// step.
     ///

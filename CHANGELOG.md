@@ -27,6 +27,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   of pwl extrapolated in dt, as at 64; the step-cap test uses
   `set_max_steps(50000)` (it ran 10M steps, 120 s timeout on the coverage
   build).
+* **Merged** the TR-BDF2 track (3aeb4c68): the DC operating point's
+  refusal of a source-inductor loop reaches the circuit IR
+  (`compute_dc_op(circuit)`), a design evaluation (a `refused` record
+  with the four fields) and the control graph's C++ chain path of
+  `simulate(start_from_dc_op=True)` (tests). The strict platform xfails
+  XP-1 / XP-2 are gone with the track's fixes; Linux and Windows CI must
+  confirm them.
 
 ### Integration batch 8: control graph, optimisation slice 4 and circuit IR merged
 
@@ -215,6 +222,93 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Changed** signals are integer slots in the kernel chain (no string
   hashing per step); `CxxBlockChain` gains `schedule()`, `reorders()`,
   `n_evals`, `n_block_evals`.
+
+### Newton roundoff acceptance: a typed budget abort, and two review fixes
+
+* **Added** `pulsim.NewtonRoundoffBudgetExceeded`, a `SimulationAborted`
+  (same `partial` / `t_failed`) raised when more consecutive Newton
+  solves would be accepted at roundoff than the run's budget allows, and
+  `simulate(newton_roundoff_budget=...)` (pwl and trbdf2, default 130,
+  >= 1) to set it.
+* **Changed** `engine='trbdf2'`: a diode cascade that flips nothing
+  restarts the step from the committed state's signals, as the landing
+  already did: the fuzzed floating-bus bridge now takes 1231-1254 steps
+  and 7-10 diode events (1231-1454 and 7-17 without it). The strict
+  platform xfails XP-1 and XP-2 are removed. (A step accepted at its estimate's roundoff floor keeps
+  its estimate for the controller: clamping it to 1 made the SEPIC at
+  rtol 1e-8 take 662,366 steps instead of 27,529.)
+
+### TR-BDF2: no diode decision made by round-off (Linux CI failures)
+
+* **Fixed** `engine='trbdf2'` decided diode bits from round-off on a
+  subnet held only by OFF conductances. At a tiny probe or landing step
+  (2C/h = 2.8e9 S against a 1 MΩ tie) such a subnet's common mode is
+  noise; a landing read a floating bridge bus 83 V up and turned the OFF
+  return diode back ON. A diode now flips only when its signal is past
+  the threshold by more than that solve's own round-off bound; a probe
+  that cannot decide is retaken 10x longer (up to span·1e-6). Under a
+  1e-15 rounding fuzz the bridge of `test_doubled_tolerances_restore_the_previous_density`
+  ground to `max_steps` in 9 of 20 runs (Linux CI: 122 events instead of
+  14); now 0 of 20, 0 forced accepts, 7-17 events, 1231-1454 steps; an
+  rtol sweep 1e-6 … 1e-4 gives 8-12 events (14-56 before). The
+  event count and the floating bus level still depend on rounding
+  (KNOWN_LIMITATIONS). New stats `n_noise_held_decisions`,
+  `n_probe_noise_retakes`.
+* **Fixed** the saturable inductor's TR-BDF2 residual took the flux
+  increment as a difference of two fluxes: 2/h·λ (1.4e12 at a 1e-13 s
+  step) put its round-off above the 1e-9 V Newton step tolerance, and the
+  run aborted at `h_min` when the last bit fell the wrong way
+  (`test_engines_agree_below_saturation` on Linux; 2 of 22 fuzzed runs
+  on macOS). The atan law's increment is now taken in closed form; 20 of
+  20 fuzzed runs finish with step counts within 0.02 %. `engine='pwl'`
+  is unchanged.
+* **Fixed** a diode turn-off landed past its current zero (by up to
+  1e-4 of the step) left the overshoot current in the inductor with only
+  g_off to go through; the trace recorded the L·g_off mode (3854 V on a
+  24 V DCM buck, `implausible_voltage` in the design evaluator's trbdf2
+  transient route). A turn-off is now bracketed until the voltage the
+  residual current puts across g_off is inside the run's tolerance (or
+  the bracket reaches h_min, dt_floor or 40 bisections). The
+  evaluator's DCM buck orbit is 8.996246827 V against the pss orbit
+  8.996247087 V (−2.6e-7 V). trbdf2 numbers that moved
+  (`trbdf2_baseline.py`): buck_dcm steps 9457 → 7608, error 1.25e-5 →
+  1.17e-5; boost steps 1482 → 1458; MOSFET half bridge error 5.44e-5 →
+  5.08e-5; floating-bus bridge time-averaged v(dp) error 0.027 → 0.054 V,
+  all of it in the 1 MΩ-tied common mode (dp − dn within 9e-4 V of pwl).
+
+### Benchmarks: the Cuk converter's diode turned round
+
+* **Fixed** `benchmarks/circuits/switching/buck_boost/cuk_converter.yaml`
+  and its ngspice deck had the output diode reversed (anode at ground),
+  so with the switch and the diode both off the two inductor currents met
+  at `mid` through `g_off` (2.6e4-3.5e6 V). The anode is now at `mid`, the
+  `reference: suspect` mark is removed and the circuit is graded again:
+  pwl 8.5e-4, pwl+restart 7.8e-6, pwl+split 6.2e-6, trbdf2 9.3e-5, all
+  agree; dsed is a frozen `error` ("diode configuration did not settle"
+  at 3.3e-4 s). The output is about −17.5 V, not the −12 V the file's
+  comment promised: the design runs in DCM (K = 2·(L1‖L2)/(R·T) = 0.1175
+  < (1−D)² = 0.26, V_out = −V_in·D/√K = −17.15 V; CCM would be −11.5 V).
+  The pwl golden `benchmarks/goldens/pwl/cuk_converter.json` is
+  regenerated.
+
+### DC operating point: refuse a loop that has no solution
+
+* **Fixed** `compute_dc_op`, `compute_dc_operating_point`,
+  `simulate(start_from_dc_op=True)` and `run_transient_bdf1(start_from_dc_op=True)`
+  returned a state for a voltage source across series inductors (48 V
+  across 2 µH + 158 µH: I = 2.4e13 A, the source over the inductors'
+  DC regularisation). A loop of voltage sources, inductors, coupled
+  windings and ideal-transformer windings whose voltages do not sum to
+  zero is now found before the solve and refused:
+  `pulsim.UnsupportedError` with `feature == "dc_operating_point"`,
+  naming every device in the loop. A DC state that is not finite or
+  exceeds 1e10 × the largest source is refused too. **Breaking** for
+  code that used such a state; start those circuits from zero state or
+  explicit initial conditions, or add the winding resistance. The
+  benchmark reader starts `ll13_active_clamp_forward` and
+  `ll16_flyback_closed_loop` (both such loops) from zero state with a
+  warning: ll13 now runs (it failed before), ll16 no longer starts from
+  2.4e13 A.
 
 ### Process backend: a dead worker raises instead of hanging (integration batch 7)
 
@@ -406,8 +500,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   output error 2.0e-4 → 2.36e-4 V, rejects 240 → 101, steps 1351 → 1412.
 * **Changed** Newton roundoff acceptance (both transient engines). The
   row scale and the step cap now come from the solve's start state, not
-  from the iterate being checked. A growing ||dx|| is never accepted.
-  The state kept is the iterate whose residual was checked. A run of
+  from the iterate being checked. A solve whose ||dx|| grows is not
+  accepted: the largest of its last three ||dx|| may be at most twice the
+  largest of the three before (a round-off limit cycle repeats its
+  maxima; a diverging iterate does not). The state kept is the iterate whose residual was checked. A run of
   more than 130 accepted solves with no converged solve between them
   raises `SimulationAborted`; the message names the row and the
   counts. The worst honest run measured is 13. The warning text no

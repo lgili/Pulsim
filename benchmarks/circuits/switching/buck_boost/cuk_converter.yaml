@@ -13,11 +13,15 @@ benchmark:
       #         switch (low-side): A → 0
       #         C_coupling (energy transfer): A → B
       #         L2: B → out
-      #         diode: 0 → B (anode at 0, cathode at B)
+      #         diode: B → 0 (anode at B, cathode at 0; it carries
+      #           i_L1 + i_L2 while the switch is off)
       #         C_out + R_load on out (out is NEGATIVE)
-      # duty=0.5 → V_out = −V_in · duty/(1−duty) = −12 V.
-      # Cuk uniquely stores energy in C_coupling (not the inductors)
-      # which gives continuous input AND output currents.
+      # Duty: 0.5 minus the 200 ns dead time = 0.49. In CCM V_out would
+      # be −V_in·D/(1−D) = −11.5 V, but this design runs in DCM:
+      # K = 2·(L1‖L2)/(R·T) = 2·23.5 µH/(20 Ω·20 µs) = 0.1175 is below
+      # K_crit = (1−D)² = 0.26, so V_out = −V_in·D/√K = −17.15 V. The
+      # run ends before steady state: −17.4 V over 1.5–2 ms, settling to
+      # −17.06 V (pwl, 8–20 ms; g_on and g_off losses).
       max_error: 1.0e+1
       steady_state_max_error: 8.0e-1
 simulation:
@@ -81,11 +85,12 @@ components:
     nodes: [mid, out]
     value: 47e-6
     ic: 0.0
-  # Freewheel diode: 0 → mid (mid swings negative when SW is on,
-  # so diode forward-conducts during the SW-ON half of the cycle)
+  # Output diode: anode at mid, cathode at ground. With the switch on,
+  # mid sits at −V_Ccpl (diode reverse-biased); with it off, i_L1 +
+  # i_L2 flows through it (the file had it reversed until 2026-11).
   - type: diode
     name: Drect
-    nodes: [0, mid]
+    nodes: [mid, 0]
     g_on: 200.0
     g_off: 1e-6
   - type: capacitor

@@ -179,6 +179,11 @@ void init_module(py::module_& m) {
         m, "ConvergenceError", PyExc_RuntimeError);
     static py::object aborted_exc = py::exception<void>(
         m, "SimulationAborted", convergence_exc);
+    // The run's Newton roundoff-acceptance budget ran out: a
+    // SimulationAborted (same payload), typed so callers need not parse
+    // the message.
+    static py::object budget_exc = py::exception<void>(
+        m, "NewtonRoundoffBudgetExceeded", aborted_exc.ptr());
     py::register_exception_translator(
         [](std::exception_ptr pe) {
             if (!pe) {
@@ -187,13 +192,15 @@ void init_module(py::module_& m) {
             try {
                 std::rethrow_exception(pe);
             } catch (const solver::SimulationAborted& e) {
-                py::object inst = aborted_exc(e.what());
+                py::object& type =
+                    e.roundoff_budget() ? budget_exc : aborted_exc;
+                py::object inst = type(e.what());
                 // `partial` is a COPY: the C++ exception is destroyed
                 // as the translator returns, so a reference would
                 // dangle the moment the caller touched it.
                 inst.attr("partial") = py::cast(e.partial());
                 inst.attr("t_failed") = py::cast(e.t_failed());
-                PyErr_SetObject(aborted_exc.ptr(), inst.ptr());
+                PyErr_SetObject(type.ptr(), inst.ptr());
             } catch (const ConvergenceFailure& e) {
                 // The exact engine's give-up sites (settle | chatter |
                 // no_progress | max_steps | nan): typed, so no caller
@@ -2375,6 +2382,10 @@ void init_module(py::module_& m) {
                         &SimulationOptions::enable_newton_line_search)
         .def_readwrite("enable_newton_lm",
                         &SimulationOptions::enable_newton_lm)
+        .def_readwrite("newton_roundoff_budget",
+                        &SimulationOptions::newton_roundoff_budget,
+                        "Most consecutive Newton solves accepted at roundoff "
+                        "before NewtonRoundoffBudgetExceeded (default 130).")
         .def_readwrite("enable_substep_state_correction",
                         &SimulationOptions::enable_substep_state_correction)
         .def_readwrite("resolution_diagnostics",
@@ -4955,7 +4966,8 @@ void init_module(py::module_& m) {
            bool enable_newton_line_search, bool enable_newton_lm,
            py::object resume_from,
            std::vector<Real> observer_periods,
-           std::vector<py::object> observers) {
+           std::vector<py::object> observers,
+           Size newton_roundoff_budget) {
             solver::BExtraFn b_extra_fn;
             std::function<Real(Real)> unused_next_jump;  // trbdf2 lands its ticks
             resolve_b_extra(b_extra_obj, b_extra_fn, unused_next_jump);
@@ -4987,6 +4999,9 @@ void init_module(py::module_& m) {
             }
             o.enable_newton_line_search = enable_newton_line_search;
             o.enable_newton_lm = enable_newton_lm;
+            if (newton_roundoff_budget > 0) {
+                o.newton_roundoff_budget = newton_roundoff_budget;
+            }
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "trbdf2");
             std::optional<Vector> x0;
@@ -5075,6 +5090,8 @@ void init_module(py::module_& m) {
             d["n_sdirk_steps"] = st.n_sdirk_steps;
             d["n_filtered_estimates"] = st.n_filtered_estimates;
             d["n_roundoff_floor_accepts"] = st.n_roundoff_floor_accepts;
+            d["n_noise_held_decisions"] = st.n_noise_held_decisions;
+            d["n_probe_noise_retakes"] = st.n_probe_noise_retakes;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
@@ -5097,6 +5114,7 @@ void init_module(py::module_& m) {
         py::arg("resume_from") = py::none(),
         py::arg("observer_periods") = std::vector<Real>{},
         py::arg("observers") = std::vector<py::object>{},
+        py::arg("newton_roundoff_budget") = Size{0},
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "

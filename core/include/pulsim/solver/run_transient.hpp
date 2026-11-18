@@ -827,7 +827,7 @@ inline SimulationResult run_transient(
                 return pwl::compute_dc_operating_point(
                     graph, pool, switch_fn(opts.t_start), nl_static,
                     dc_opts, has_diodes ? &diodes : nullptr,
-                    "run_transient(start_from_dc_op)");
+                    "run_transient(start_from_dc_op)", "pwl");
             } catch (const std::runtime_error&) {
                 if (structure.active()) {
                     (void)check_mode(dc_start_mask, false, opts.t_start);
@@ -1219,6 +1219,7 @@ inline SimulationResult run_transient(
 
         pwl::NewtonRoundoffAcceptance newton_roundoff_run;
         newton_roundoff_run.enabled = true;
+        newton_roundoff_run.max_consecutive = opts.newton_roundoff_budget;
 
         // ---- add-fixed-step-resolution-diagnostics (read-only) ----
         // Truncation: e = (h/12)|f_{k+1} − 2f_k + f_{k−1}| per linear
@@ -2916,6 +2917,10 @@ inline SimulationResult run_transient(
     }
     catch (const SimulationAborted&) {
         throw;                       // already carries its payload
+    }
+    catch (const pwl::NewtonRoundoffBudgetExceeded& e) {
+        throw SimulationAborted(e.what(), std::move(result), t_reached,
+                                /*roundoff_budget=*/true);
     }
     catch (const std::runtime_error& e) {
         // Narrow on purpose — see the note at the dt-retry above.

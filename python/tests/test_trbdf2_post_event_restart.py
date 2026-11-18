@@ -104,7 +104,8 @@ def test_ccm_error_not_above_twice_the_previous(ccm):
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "not met: 4,325 accepted steps below 1e-11 s (smallest 4e-15 s) are "
+    "not met: 2,607 accepted steps below 1e-11 s (smallest 6.6e-15 s; "
+    "4,325 and 4e-15 s before the 2026-11-17 turn-off landing fix) are "
     "the stiff L*g_off mode after a turn-off with residual current "
     "(tau ~ 2e-13 s), which the raw estimate reads as error, and the "
     "committed gate-edge probe steps; the roundoff floor does not fire "

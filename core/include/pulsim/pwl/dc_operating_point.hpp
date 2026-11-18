@@ -119,7 +119,11 @@ struct DCOperatingPoint {
     const NonlinearRefreshFn& refresh = {},
     const DCOperatingPointOptions& opts = {},
     DiodeEventState* diodes = nullptr,
-    const char* who = "compute_dc_operating_point") {
+    const char* who = "compute_dc_operating_point",
+    const char* engine = "dc") {
+    // Before the direct solve: its failure handler walks the cascade and
+    // re-wraps every error as "no DC operating point".
+    require_no_dc_voltage_loop(graph, pool, opts.t_eval, engine);
 
     const bool has_diodes =
         diodes != nullptr && diodes->num_diodes() > 0;
@@ -227,6 +231,7 @@ struct DCOperatingPoint {
     } while (flipped && iters < max_rounds);
 
     out.event_iterations = iters;
+    require_sane_dc_state(graph, pool, out.x, opts.t_eval, who);
     if (flipped) {
         throw std::runtime_error(std::format(
             "{}: the PWL diode states never settled — {} rounds of "
