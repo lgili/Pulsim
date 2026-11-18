@@ -63,6 +63,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Fixed** warnings of `bind_pi_to_switch` / `bind_pi_to_duty_callable`
   (callables), the `add_c_block` `sim_dt` clamp and the closed-loop
   period check now point at the caller's line.
+
 ### Integration batch 10: control graph 2, optimisation slice 5, circuit IR 2, exact engine dependent states merged
 
 * **Fixed** a C block reached a run only through a Python attribute of
@@ -306,32 +307,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `simulate(start_from_dc_op=True)` (tests). The strict platform xfails
   XP-1 / XP-2 are gone with the track's fixes; Linux and Windows CI must
   confirm them.
-
-### Control graph: the closed-loop gate declares its edges (G23)
-
-* **Fixed** `trbdf2` ground `cl_boost_pi` to `max_steps` (5.59 ms of
-  30 ms): the loop's gate hid its edges, the engine learned them by
-  sampling, and the first 0.28 ns pulse capped every later step. The
-  gate (`CxxChainPwmGate.next_edge_after`) now declares them, also
-  through `make_combined_switch_fn`: `trbdf2` lands on them, `pwl` with
-  `discontinuity_restart=True, enable_substep_state_correction=True`
-  splits at them (closed-loop buck 4.5e-2 -> 1.4e-3 of the span against
-  an independent reference). Plain `pwl` and `pwl` + restart are
-  unchanged bit for bit; `trbdf2` closed-loop results stay within 7e-5 of
-  the span of that reference (the `ll15` trbdf2 cell, measured against
-  trbdf2 itself, moved agree -> disagree: see KNOWN_LIMITATIONS).
-* **Changed** reference cells: `cl_boost_pi` has a reference;
-  `ll16_flyback_closed_loop` is `unverified` (not a flyback); `ll14` /
-  `ll15` disagree (trbdf2 and pwl+split on `V(sw)` only), named in
-  KNOWN_LIMITATIONS.
-* **Changed** `add_c_block(lib=...)` refuses a second block of a library
-  exported by `export_c` on the same circuit (its state is one static
-  struct, stepped twice per tick). The C-block cache also checks its
-  `pulsim/` parent, and on Windows must sit inside `%USERPROFILE%`.
-* **Fixed** warnings of `bind_pi_to_switch` / `bind_pi_to_duty_callable`
-  (callables), the `add_c_block` `sim_dt` clamp and the closed-loop
-  period check now point at the caller's line.
-
 
 ### Control graph: C blocks on trbdf2, resume, review fixes (task 9.3)
 
