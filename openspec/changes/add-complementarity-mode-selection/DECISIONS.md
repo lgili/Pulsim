@@ -747,3 +747,18 @@ F3. **What the shadow found on pwl, and what the guard repairs.**
     the cache counters: its judge solves candidate masks through the
     cache (event entries, restart factorizations, segment searches
     move). → Reverse: `_PWL_MODE_GUARD = False`.
+
+F4. **Guard counters on pwl follow dsed's names; a site judges only its
+    own breach (2026-11-18, merge of #24/#25 and the final review).**
+    `mode_guard['settle_caps']` counts the settles the guard judged (round
+    budget hit, or a mask cycle found at this site), `mode_guard['lcp']`
+    nests the guard's LCP counters (the flat keys stay), `capped` counts
+    tie passes shortened to the mode's next event. The outer step's
+    `mask_cycle` survives its sub-steps and restart stages on purpose
+    (one breach per outer step); the guard read it as the site's own,
+    so a later sub-step re-counted it and, on repairing its own breach,
+    cleared the earlier unrepaired one from `event_iteration_breaches`.
+    Each site now remembers the cycle it was entered with and restores
+    it after a repair. The 54-run shadow survey is unchanged (every
+    value column identical; only wall times moved). → Reverse: the
+    `cycle_in` lines in `run_transient.hpp`.

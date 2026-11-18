@@ -1798,6 +1798,8 @@ inline SimulationResult run_transient(
             auto run_event_iteration = [&](Real at_t, Real for_dt,
                                            bool backward_euler = false,
                                            bool single = false) {
+            // an earlier stage's cycle of this outer step: not this site's breach
+            const bool cycle_in = mask_cycle;
             // Phase 4 C.1 — EVERY solve tells the nonlinear
             // refresh which step it is taking. This is the single
             // point all of them pass through, including the
@@ -1994,14 +1996,15 @@ inline SimulationResult run_transient(
                 }
                 if (result.mode_guard.enabled) {
                     ++result.mode_guard.checks;
-                    if (flipped || mask_cycle) ++result.mode_guard.settle_caps;
-                    if ((flipped || mask_cycle) &&
+                    const bool breach = flipped || (mask_cycle && !cycle_in);
+                    if (breach) ++result.mode_guard.settle_caps;
+                    if (breach &&
                         mode_guard_site(at_t, gates, for_dt, backward_euler, b_extra,
                                         [&](const topology::SwitchStateMask& m, Vector& out) {
                                             mode_solve(m, for_dt, backward_euler, out);
                                         })) {
                         flipped = false;
-                        mask_cycle = false;
+                        mask_cycle = cycle_in;   // an earlier stage's breach stays recorded
                     }
                 }
             }
@@ -3071,6 +3074,11 @@ inline SimulationResult run_transient(
             // current x as a degenerate snapshot — the
             // sign-change check will exclude it from events.
             x_prev = x;
+            if (has_ideal_diode) {
+                const auto& es0 = diodes.entries();
+                commut_on_prev.resize(es0.size());
+                for (std::size_t j = 0; j < es0.size(); ++j) commut_on_prev[j] = es0[j].is_on;
+            }
 
             // State-aware observer fires before switch_fn(t) so
             // discrete-time controllers can update.
@@ -3254,7 +3262,17 @@ inline SimulationResult run_transient(
 
             // Sub-step bisection on the static path too.
             if (has_diodes && k > 0) {
-                for (const auto& e : diodes.entries()) {
+                for (std::size_t j = 0; j < diodes.entries().size(); ++j) {
+                    const auto& e = diodes.entries()[j];
+                    if (has_ideal_diode && pool.is_branch_form(e.branch_id)) {
+                        // at s = 0 while ON: the crossing test never fires
+                        if (static_cast<bool>(commut_on_prev[j]) != e.is_on) {
+                            result.commutation_events.push_back(CommutationEvent{
+                                .t_estimated = t, .branch_id = e.branch_id,
+                                .new_state = e.is_on});
+                        }
+                        continue;
+                    }
                     const Real v_a_prev =
                         stamping::read_node_voltage(x_prev, e.from);
                     const Real v_k_prev =

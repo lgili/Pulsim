@@ -321,8 +321,7 @@ private:
     /// Σ_S f = src(island).
     template <class Src>
     void fix_(const std::vector<Island>& isl, Vector& s, Src&& src) {
-        if (isl.size() > 1) {
-            if (!joint_ok_) return;
+        if (isl.size() > 1 && joint_ok_) {   // else: one after another, as dsed (#30)
             Vector sig(static_cast<Index>(isl.size()));
             for (std::size_t m = 0; m < isl.size(); ++m)
                 sig[static_cast<Index>(m)] = dot_(isl[m], s) - src(isl[m]);

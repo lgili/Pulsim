@@ -22,7 +22,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `result.commutation_events` records an ideal diode's turn-on and
   turn-off on `pwl` (it sat exactly at `V_on` while ON, so the
   voltage-crossing record never saw it turn off; time = the step end
-  unless the event split located it).
+  unless the event split located it), on the static (dt = 0) path too.
+  `DiodeStateTrace.conducting` reads that current (it was False on every
+  ON step: `inf·0` is NaN). An ideal element without a recorded mask, or
+  named in `conduction_specs` / `diode_specs`, now warns instead of
+  silently dropping its duty, switching energy or spec.
+* **Measured** (group 7): branch against conductance form on `pwl`,
+  12-switch three-phase inverter 1.073× ns/step, buck 1.018× — inside
+  the 1.5× gate for making the branch form the default; the switch of
+  the default is not made here, and trbdf2 still refuses the form.
 
 ### Complementarity mode selection on the fixed engine (`pwl`)
 
@@ -54,6 +62,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Added** (refusal): `mode_selection='shadow'`/`'lcp'` with
   `max_event_iterations=0` on `pwl` raises `UnsupportedError` (the modes
   are frozen there; before, the request was dropped in silence).
+* **Added**: `diagnostics['mode_guard']` on `pwl` carries `settle_caps`
+  (settles that ended on the round budget or a mask cycle and were
+  judged), a nested `lcp` dict as on dsed, and the LCP report's
+  `capped`. A sub-step's guard repair no longer clears an earlier
+  stage's unrepaired mask cycle from `event_iteration_breaches`.
 
 ### Switch masks of the wrong width are refused
 

@@ -36,6 +36,7 @@ def test_forced_ten_amps_through_an_ideal_diode_drops_v_f_and_dissipates_v_f_i()
     tr = _diode_state.diode_state_traces(b, r)
     (t,) = tr.values()
     assert np.all(np.isfinite(t.current)) and t.current[-1] == pytest.approx(10.0, abs=1e-9)
+    assert t.conducting[1:].all()            # i_branch, not g_on·(v − V_f) = inf·0
 
 
 def _ideal_buck(g_off=1e-12):
@@ -79,3 +80,29 @@ def test_commutation_events_include_the_ideal_diode_turn_off():
     assert len(ons) == 10 and len(offs) == 9           # ON at each gate-off, OFF at each gate-on
     for e in offs:                                      # at the gate's turn-on, inside one step
         assert (e.t_estimated % T) < T / 100 + 1e-15 or T - (e.t_estimated % T) < 1e-15
+
+
+def test_static_path_records_the_ideal_diode_flips():
+    """No L or C: the fixed engine runs its static (dt = 0) path. An ideal diode sits at
+    v = V_th while ON, so the voltage-crossing test never fires; the record reads its state."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "a", "gnd", v_dc=0.0, v_amplitude=10.0, frequency=1e3, phase=0.3)
+    b.add_diode("D", "a", "k", form="branch", R_on=0.0, g_off=1e-9)
+    b.add_resistor("R", "k", "gnd", 10.0)
+    r = p.simulate(b, t_end=3e-3, dt=1e-6, engine="pwl",
+                   switch_fn=lambda t: p.SwitchStateMask(b.graph.num_switches))
+    bid = next(c["branch_id"] for c in b.components() if c.get("name") == "D")
+    ev = [e for e in r.commutation_events if e.branch_id == bid]
+    # The first step turns it ON (the start stamp is OFF); sin(2π·1e3·t + 0.3) then crosses
+    # zero at 0.45225 + 0.5·k ms. Stamped at the end of the step that flipped (shortcut).
+    assert [e.new_state for e in ev] == [True, False, True, False, True, False, True]
+    assert ev[0].t_estimated == pytest.approx(1e-6, abs=1e-15)
+    for k, e in enumerate(ev[1:]):
+        lag = e.t_estimated - (0.45225e-3 + 0.5e-3 * k)
+        assert 0.0 < lag <= 1e-6 + 1e-12
+
+
+def test_ideal_element_specs_that_cannot_apply_warn():
+    b, r = _forced()
+    with pytest.warns(RuntimeWarning, match="conduction_specs for ideal"):
+        p.device_loss_summary(b, r, conduction_specs={"D": {"V_f": 0.7}})

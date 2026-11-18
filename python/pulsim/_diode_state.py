@@ -171,12 +171,18 @@ class DiodeStateTrace:
             return closed.copy()
         i_pk = float(np.max(np.abs(self.current)))
         thr = max(1e-12, 1e-6 * i_pk)
-        i_fwd = self.g_on * (np.asarray(self.v, dtype=float) - self.V_f)
+        if self.i_branch is not None:
+            # ideal (R_on = 0) branch form: g_on = inf, v = V_f when ON
+            # (inf·0 = NaN); the solved current is the forward current.
+            i_fwd = np.asarray(self.current, dtype=float)
+            fwd_start = np.asarray(self.current_start, dtype=float) > thr
+        else:
+            i_fwd = self.g_on * (np.asarray(self.v, dtype=float) - self.V_f)
+            # A step's start is the right limit of the sample before it
+            # (v_start; the sample itself except at a DSED event).
+            fwd_start = self.g_on * (np.asarray(self.v_start, dtype=float)
+                                     - self.V_f) > thr
         fwd = i_fwd > thr
-        # A step's start is the right limit of the sample before it
-        # (v_start; the sample itself except at a DSED event).
-        fwd_start = self.g_on * (np.asarray(self.v_start, dtype=float)
-                                 - self.V_f) > thr
         either = fwd.copy()
         either[1:] |= fwd_start[:-1]
         stamp = closed.copy()
