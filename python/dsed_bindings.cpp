@@ -1674,6 +1674,7 @@ void init_module(py::module_& m) {
             const auto obs = parse_observables(observables, pairs);
             std::size_t n_python_calls = 0;
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(period));
             sf.n_python_calls = &n_python_calls;
             PeriodMapResult<SSM> r;
@@ -1720,6 +1721,7 @@ void init_module(py::module_& m) {
             const Pairs no_pairs;
             std::size_t n_python_calls = 0;
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(period));
             sf.n_python_calls = &n_python_calls;
             pulsim::dsed::OrbitOptions opt;

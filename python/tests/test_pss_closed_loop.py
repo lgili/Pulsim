@@ -243,3 +243,75 @@ def test_sensitivities_refuse_a_closed_loop_gate(combine):
         simulate_sensitivities(b, 10 * T, sensitivities=["RL.R"],
                                switch_fn=sf)
     assert e.value.feature == "closed_loop"
+
+
+# Integration batch 11 seams. A combination of a temporary loop's gate
+# segfaulted on its first call (the gate reads its chain through a pointer
+# and nothing kept it alive); Evaluator(circuit=..., switch_fn=<gate>) died
+# in its options digest with a TypeError, or in that segfault, instead of
+# refusing the controller by name.
+def test_a_combination_keeps_a_temporary_loops_gate_alive():
+    import gc
+    b = _buck()
+    sf = p.make_combined_switch_fn(b.graph.num_switches,
+                                   [_pi_loop(b).switch_fn])
+    gc.collect()
+    assert sf(0.0).get(b.switch_index_of("S"))
+    assert sf.next_edge_after(0.0) == pytest.approx(0.5 * T)
+
+
+@pytest.mark.parametrize("gate", [
+    lambda b: _pi_loop(b).switch_fn,
+    lambda b: p.make_combined_switch_fn(b.graph.num_switches,
+                                        [_pi_loop(b).switch_fn]),
+    _graph_gate], ids=["gate", "combined", "graph_pwm_switch_fn"])
+def test_the_circuit_form_evaluator_refuses_a_closed_loop_switch_fn(gate):
+    b = _buck()
+    with pytest.raises(p.UnsupportedError) as e:
+        Evaluator(circuit=_buck().build(), fields={"L": "L.L"},
+                  switch_fn=gate(b), period=T, loads=("RL",), output="vout",
+                  steady=SteadySpec(method="pss"))
+    assert e.value.feature == "closed_loop"
+
+
+def _c_block(b):
+    p.add_c_block(b, inputs=[("v", "vout")], outputs=[("v", "vref", "gnd")],
+                  dt=T, fn=lambda t, dt, i, o, s: o.__setitem__(0, 1.0))
+    b.add_resistor("Rr", "vref", "gnd", 1e3)
+
+
+def _drive_source(b):
+    ch = p.MixedDomainBlockChain()
+    ch.add("g", p.Gain(k=2.0), inputs=dict(x="vout"), output="y")
+    ch.drive_source(b, "y", ("v", "drv", "gnd"))
+    b.add_resistor("Rd", "drv", "gnd", 1e3)
+
+
+@pytest.mark.parametrize("add", [_c_block, _drive_source])
+def test_the_circuit_form_evaluator_refuses_controlled_sources(add):
+    # the kernel batch never builds per design: before, it ran the circuit
+    # without its blocks and only the periodicity check raised
+    b = _buck()
+    add(b)
+    sf = p.make_pwm_switch_fn(1 / T, 0.5, b.switch_index_of("S"),
+                              b.graph.num_switches)
+    with pytest.raises(p.UnsupportedError) as e:
+        Evaluator(circuit=b.build(), fields={"L": "L.L"}, switch_fn=sf,
+                  period=T, loads=("RL",), output="vout",
+                  steady=SteadySpec(method="pss"))
+    assert e.value.feature == "closed_loop"
+
+
+def test_a_per_design_schedule_that_follows_a_controller_is_refused():
+    # schedule= is called per design; the kernel batch took any native
+    # schedule with edges, a closed-loop combination included
+    b = _buck()
+    lp = _pi_loop(b)
+    ev = Evaluator(circuit=_buck().build(), fields={"L": "L.L"},
+                   schedule=lambda d: p.make_combined_switch_fn(
+                       b.graph.num_switches, [lp.switch_fn]),
+                   period=T, loads=("RL",), output="vout",
+                   steady=SteadySpec(method="pss"))
+    recs = ev.evaluate_many([{"L": 100e-6}, {"L": 120e-6}], workers=2)
+    assert ev.last_batch["kernel"] == 0
+    assert all(r.status == "refused" for r in recs)

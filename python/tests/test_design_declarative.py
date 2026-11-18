@@ -40,7 +40,8 @@ def base_circuit():
 
 
 def schedule(d):
-    return p.make_pwm_switch_fn(1 / T, 0.4, 0, 1)
+    # S is bit 0 of two (the diode D1 is bit 1): a width-1 mask is refused
+    return p.make_pwm_switch_fn(1 / T, 0.4, 0, 2)
 
 
 def ripple_x(per):

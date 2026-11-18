@@ -3323,6 +3323,10 @@ void init_module(py::module_& m) {
                 num_switches, std::move(cpp_fns));
         },
         py::arg("num_switches"), py::arg("fns"),
+        // a ChainPwmGate is copied by value but reads its chain through a
+        // pointer: the parts must outlive the combination (a temporary
+        // loop's gate segfaulted on the first call)
+        py::keep_alive<0, 2>(),
         "Compose multiple switch_fn callbacks into a single "
         "SwitchSchedule whose mask is the bitwise OR of all "
         "sub-masks. Useful for combining e.g. a primary-"

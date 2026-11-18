@@ -33,10 +33,6 @@ def _wide(t):
     return p.SwitchStateMask(3)
 
 
-def test_runs_from_this_worktree():
-    assert "pulsim_wt/phase0" in p.__file__
-
-
 @pytest.mark.parametrize("engine", ["pwl", "trbdf2", "dsed"])
 @pytest.mark.parametrize("fn", [_short, _wide])
 def test_simulate_refuses_a_mask_of_the_wrong_width(engine, fn):
@@ -82,3 +78,24 @@ def test_set_and_get_past_the_width_raise():
         m.get(1)
     m.set(0, True)
     assert m.get(0)
+
+
+# Integration batch 11: the kernel period map (periodic_steady_state on the
+# exact engine) and the design batch took a 1-bit schedule on a 2-bit
+# circuit; only the evaluator's independent plain-run check raised.
+def test_the_kernel_period_map_refuses_a_mask_of_the_wrong_width():
+    b = _buck()
+    sched = p.make_pwm_switch_fn(1e5, 0.3, 0, 1, 0.0)    # 1-bit masks
+    with pytest.raises(ValueError, match="width 1; this circuit has 2"):
+        p.periodic_steady_state(b, period=1e-5, switch_fn=sched, engine="exact")
+
+
+def test_the_design_batch_leaves_a_mask_of_the_wrong_width_to_python():
+    from pulsim.design import Evaluator, SteadySpec
+    b = _buck()
+    ev = Evaluator(circuit=b.build(), fields={"L": "L.L"},
+                   switch_fn=p.make_pwm_switch_fn(1e5, 0.3, 0, 1, 0.0),
+                   period=1e-5, loads=("R",), output="vout",
+                   steady=SteadySpec(method="pss"))
+    with pytest.raises(ValueError, match="width 1; this circuit has 2"):
+        ev.evaluate_many([{"L": 100e-6}, {"L": 120e-6}], workers=2)

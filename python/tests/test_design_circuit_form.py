@@ -182,7 +182,8 @@ def test_schedule_per_design_and_parameters():
 
     def schedule(d):
         calls.append(d["D"])
-        return p.make_pwm_switch_fn(1 / T, d["D"], 0, 1)
+        return p.make_pwm_switch_fn(1 / T, d["D"], b.switch_index_of("S"),
+                                    b.graph.num_switches)
     ev = Evaluator(circuit=b.build(), fields={"L": "Lbase"},
                    schedule=schedule, period=T, loads=("RL",),
                    output="vout", steady=SteadySpec(method="pss"))

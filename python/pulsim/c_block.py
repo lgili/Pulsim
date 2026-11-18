@@ -424,6 +424,12 @@ def _compile_inline(code: str, lang: str, symbol: str, *,
     return so_path
 
 
+# Static-state libraries already backing a block, per builder: a guard while
+# the builder is being wired, not circuit content, so it is kept here and
+# not as a builder attribute (test_no_builder_side_state).
+_STATIC_LIBS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
 def add_c_block(builder,
                 inputs: Sequence,
                 outputs: Sequence,
@@ -512,10 +518,9 @@ def add_c_block(builder,
             extra_compile_args=extra_compile_args,
             extra_link_args=extra_link_args))
     if lib is not None:
-        if not hasattr(builder, "_c_static_libs"):
-            builder._c_static_libs = set()
         fn, teardown = _load_native_step(
-            lib, symbol, n_in, n_out, static_taken=builder._c_static_libs)
+            lib, symbol, n_in, n_out,
+            static_taken=_STATIC_LIBS.setdefault(builder, set()))
     assert fn is not None
 
     if lib is None:

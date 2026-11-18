@@ -744,6 +744,23 @@ class Evaluator:
             if switch_fn is not None and schedule is not None:
                 raise TypeError("Evaluator: give switch_fn= (fixed) or "
                                 "schedule= (per design), not both")
+            src = _closed_loop_source(switch_fn)
+            from ._circuit_ir import c_blocks_of, graph_driven_of
+            if not src and graph_driven_of(circuit):
+                src = ("a control graph's drive_source ("
+                       f"{', '.join(graph_driven_of(circuit))})")
+            if not src and c_blocks_of(circuit):
+                src = "C block(s) of add_c_block ({})".format(", ".join(
+                    str(getattr(h, "name", h)) for h in c_blocks_of(circuit)))
+            if src:
+                # here, not per design: the kernel batch never calls _build
+                # (and before the options digest, which cannot read a gate)
+                raise unsupported(
+                    "design", "closed_loop",
+                    f"Evaluator(circuit=...): driven by {src}; "
+                    "the evaluator runs no controller, so it would hold its "
+                    "initial value. Give an open-loop schedule "
+                    "(make_pwm_switch_fn at the design's duty).")
             if thermal is not None and thermal.temperature_dependent:
                 raise ValueError(
                     "Evaluator(circuit=...): ThermalSpec.temperature_"

@@ -629,6 +629,7 @@ def _native(sf):
     return (isinstance(sf, (_k.SwitchSchedule, _k.NativePwm2Switch,
                             _k.NativeMultiMaskPwm))
             and getattr(sf, "_closed_loop", None) is None
+            and not getattr(sf, "follows_controller", False)
             and (not isinstance(sf, _k.SwitchSchedule) or sf.has_edges))
 
 

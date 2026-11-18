@@ -359,7 +359,12 @@ DesignOut evaluate_design(const ir::Circuit& base, const Plan& plan,
         if (!detail::schedule_is_periodic(sf, T)) {
             throw Fallback{"the schedule is not periodic in T"};
         }
-        ad.set_mask(sf(0.0));
+        const auto m0 = sf(0.0);
+        if (m0.size() != b.graph().num_switches()) {
+            // the Python path refuses it by name (require_mask_width)
+            throw Fallback{"a switch mask of another width than the circuit's"};
+        }
+        ad.set_mask(m0);
         const int n = ad.n_state();
         if (n == 0) throw Fallback{"no state"};
         Real h_e = 0;

@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration batch 11: circuit IR YAML, TR-BDF2 ideal switch, pwl complementarity, exact step 3, control graph G23, optimisation slice 6 merged
+
+* **Fixed** `make_combined_switch_fn` of a control-graph gate whose loop
+  object was dropped (`[_pi_loop(b).switch_fn]`) segfaulted on its first
+  call: the gate reads its chain through a pointer. The combination now
+  keeps its parts alive.
+* **Fixed** `Evaluator(circuit=..., switch_fn=<a controller's gate>)` died
+  in its options digest (TypeError, or the segfault above), and a
+  circuit-form evaluator whose circuit carries C blocks or graph-driven
+  sources ran them in the kernel batch WITHOUT the controller (only the
+  independent periodicity check raised). Both are refused by name
+  (`closed_loop`) at construction; a per-design `schedule=` that follows
+  a controller goes to the Python path, which refuses it.
+* **Fixed** the kernel period map / periodic orbit (`periodic_steady_state`
+  on the exact engine) and the kernel design batch accepted a switch
+  mask narrower than the circuit's switch bits; the map now refuses it
+  like every transient engine, and the batch leaves it to the Python
+  path, which refuses it.
+* **Fixed** the kernel period map / orbit shot a period with a dependent-state
+  mode (a capacitor loop, an inductor cut-set) and failed with "I - M is
+  singular"; it refuses it by name (`dependent_states`) like the Python
+  map (`test_dependent_states_are_refused_by_name`).
+* **Changed** `add_c_block`'s one-static-library-per-builder guard is kept
+  in a weak map instead of a builder attribute (the IR's no-side-state
+  rule).
+
 ### Integration batch 10: control graph 2, optimisation slice 5, circuit IR 2, exact engine dependent states merged
 
 * **Fixed** a C block reached a run only through a Python attribute of
