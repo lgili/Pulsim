@@ -233,3 +233,40 @@ TEST_CASE("Period map: the extrema grid brackets a fast mode's peak",
     REQUIRE(b[0].first < 9.2e-8);
     REQUIRE(b[0].second > 9.2e-8);
 }
+
+TEST_CASE("Period map: an event without its own sample is refused",
+          "[v2][dsed][period_integrals]") {
+    // (b4) the jump is applied to the left limit of the first sample at or
+    // after the event, so the event must sit at that sample (as in
+    // sensitivity._attach_events); a log entry moved between two samples
+    // used to be attached silently to the later one
+    const Real V = 10.0, R = 100.0, C = 1e-6, T = 4e-4, D = 0.3;
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V1", "in", "gnd", V);
+    b.add_switch("S", "in", "a", 1e3, 1e-6);
+    b.add_resistor("R1", "a", "n1", R);
+    b.add_capacitor("C1", "n1", "gnd", C);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    dsed::NativeCircuitBuilderAdapter<> ad{b.graph(), b.pool(), cache};
+    const Gate g{T, D, 1};
+    dsed::EventPredictor pred;
+    auto diodes = dsed::add_diode_predicates(ad, pred);
+    dsed::PEDSimulator<decltype(ad), Gate> sim(
+        ad, g, dsed::PIController(1e-11, 1e-14), std::move(pred), T * 1e-6,
+        T, 1);
+    sim.set_event_projection(false);
+    Vector x0(1);
+    x0 << 1.5;
+    auto res = sim.simulate(x0, T);
+    const std::vector<dsed::PeriodObservable> obs{node(b.node_id_of("n1"))};
+    REQUIRE(res.event_log.size() >= 1);
+    REQUIRE_NOTHROW(dsed::period_map_from_run(ad, res, diodes, obs, {}, true));
+    // the sample just before the logged edge, and a point between the two
+    std::size_t k = 1;
+    while (k < res.times.size() && res.times[k] < res.event_log[0].t) ++k;
+    REQUIRE(k < res.times.size());
+    res.event_log[0].t = 0.5 * (res.times[k - 1] + res.times[k]);
+    REQUIRE_THROWS_WITH(
+        dsed::period_map_from_run(ad, res, diodes, obs, {}, true),
+        Catch::Matchers::ContainsSubstring("has no sample of its own"));
+}

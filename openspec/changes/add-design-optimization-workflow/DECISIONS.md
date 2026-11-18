@@ -569,6 +569,347 @@ batches (item 2 of this slice).
 is then `None` and the Python loop runs); `LossTable.total` falls back by
 deleting its body to `np.sum(self(...))`.
 
+## 20. The circuit form (slice 5, task 7.2) and what still holds the GIL
+
+Question: how does a design reach the immutable circuit IR? → (1)
+`Evaluator(circuit=base, fields={variable: target})`, the target a
+named parameter (`with_params`) or `"<component>.<field>"`
+(`with_value`, the sensitivities' naming); the gate schedule fixed
+(`switch_fn=`) or per design (`schedule(design)`); design keys outside
+`fields` (a frequency, a part) are read by `period` / `schedule` / the
+KPIs only. `build=` keeps working unchanged; exactly one of the two.
+The circuit form refuses `ThermalSpec(temperature_dependent=True)`
+(no `_T_j` input) and `backend='process'` (a `Circuit` does not
+pickle) by name. (2) `periodic_steady_state` and the pwl/trbdf2
+shooting take a `Circuit` like `simulate` does: the period runs share
+its symbolic plan. (3) What is resolved once instead of per record:
+the kernel observables (`spec_for`), on the circuit form, when no
+variable moves a value they read (whitelist: inductor, capacitor,
+resistor; any other kind is re-resolved per design, tested with
+`Vin.V`); the state labels of the exact stepper per (structure hash,
+section mask) for any `Circuit` (they were one full state-space
+extraction per evaluation, 10.7 us); the options digest per evaluator
+(the base circuit by `value_hash()`, the design by its variables:
+flat designs are canonicalised inline, same ids as before, asserted on
+51 designs). (4) The switching-table losses of the kernel route are
+read in scalars (`_period_kpis._table_switching_loss`): the same edge
+limits, each point by the kernel table, summed as numpy sums them
+(a plain loop below 8 terms, `np.sum` above) -- bit for bit equal to
+`_switch_switching_loss` (random sequences of 0..17 edges, and the
+example's records with the path disabled); any other spec takes the
+general path. (5) Hot-path function-level imports replaced by module
+attributes read at call time (tests still replace them).
+→ Reverse: drop `circuit=` from `Evaluator.__init__` (the factory form
+is untouched); `_LABELS` and the spec cache are plain dicts to delete.
+
+Counters (asserted, `test_design_circuit_form.py`): records of the
+circuit form equal the factory form's in every field but the id
+(dsed pss, exact transient, pwl pss, pwl transient, trbdf2 transient);
+a pwl batch of 6 designs on 3 threads makes 1 symbolic analysis on the
+circuit form and >= 6 on the factory form; the exact stepper makes no
+symbolic analysis at all (dense per-mask extraction), and there the
+labels and the observables are computed once per batch (6 per 6
+designs before); 8 threads give the 1-thread records and leave the
+base's `value_hash` unchanged; < 500 Python calls per evaluation.
+
+Evidence (buck Pareto, `examples/optimization/buck_pareto.py`, 512
+designs: 376 ok / 136 infeasible, every record bit for bit equal to
+7b195243's on both forms):
+
+| | Python calls / evaluation (cProfile) | wall / evaluation | kernel share |
+|---|---|---|---|
+| 7b195243 (factory) | 751 | ~440 us | 20 % |
+| factory form now | 521 | | 24 % |
+| circuit form now | 378 | 164 us | 36 % (59 us) |
+
+Per evaluation, circuit form (wall, nested phases, best of 5): kernel
+orbit 59 us; solver set-up 24 (schedule periodicity check 6, circuit
+check 2, `to_builder` 1, cache + adapter 1.3, census, the rest glue);
+loss rows 15; KPIs 15; build 8 (two `with_value` 5); design id 8;
+implausible-voltage check 5; result object 5; the record ~15.
+
+Throughput (`evaluate_many`, 128 SYN-A designs, interleaved best of 5,
+one process per tree; load average 9-12 from other agents' builds on
+10 cores, observation, not asserted):
+
+| | 1 thread | 4 threads | 8 threads |
+|---|---|---|---|
+| 7b195243 (factory) | 3239 evals/s | 2856 | 3150 |
+| factory form now | 3927 | 3802 | 4191 |
+| circuit form now | 5025 | 4865 | 4879 |
+
+THREADS STILL DO NOT SCALE: 8 threads are not faster than 1. What holds
+the GIL is everything but the one `dsed_periodic_orbit` call: about
+105 us of Python per evaluation against 59 us of kernel (Amdahl ceiling
+1.6x before any GIL hand-off cost), spread over the phases above with
+no single item above 25 us. What would make the thread backend scale:
+a batch kernel call (all designs' Newton loops on a C++ pool in one
+GIL-free call) lifts the ceiling to ~1.4x only, because the Python
+set-up and post-processing stay serial; the process backend has no
+shared GIL and is item 2 of this slice (the declarative KPIs make the
+example picklable; the circuit form needs a picklable `Circuit`).
+
+Needed from the IR (recorded in its DECISIONS): a picklable `Circuit`
+(group 4.3) for the process backend; the Python side state of a builder
+(`_graph_driven`) is lost by `build()`, so a control graph's driven
+source cannot be refused on the circuit form (group 3).
+
+### 20a. A tied extremum is reported at its earliest instant
+
+CI (Linux, 7b195243) failed `test_kernel_loop_equals_the_python_loop
+[boost CCM]`: one extremum time differed by exactly T. On a periodic
+orbit x(0) = x(T), so an extremum attained at an orbit end is attained
+at both ends, and the kernel and the Python closed forms picked
+different ends after a last-bit difference in the value. The rule, now
+identical in `dsed/period_integrals.hpp` (`detail::extremum_candidate`,
+`kExtremumTie`) and `sensitivity._extrema` (`_EXTREMUM_TIE`): two
+candidates whose values agree within 1e-12 relative are one extremum;
+the larger (smaller) value is kept and the EARLIEST time is reported.
+The test's one-period exception is removed; a new test pins a both-ends
+extremum (the CCM buck's inductor valley, a constant node) at t = 0.
+
+An extremum tied at the two orbit ends is NOT flagged `non_unique`
+(the coordinator suggested it should be): the two ends are one point of
+the orbit, and their parameter derivatives are equal there, because
+dx(T)/dp = M dx0/dp + dP/dp = dx0/dp at the fixed point. The gradient is
+therefore well defined; `non_unique` stays reserved for two distinct
+interior instants. Other sites checked: `design._extreme` returns values
+only, records carry no peak times, the near-miss scan reports no times.
+
+Review items a7 and b4 (§18), fixed with it: the sensitivity context
+now builds a mode for every mask an event log names, so two events at
+one sample go through the mask between them (a test splits a gate edge
+in two and gets the unsplit sensitivities bit for bit; KeyError
+before). Both sides attach an event to the first sample at or after it
+(within 4 ulp) and refuse it, "has no sample of its own", when that
+sample is more than 1e-12·max(|t|, t_end) later
+(`sensitivity._attach_events`, `detail::kEventSampleTol`): the jump is
+applied to that sample's left limit, so a later sample would be a wrong
+number. The engine stores a sample at every event, so no run in the
+suite reaches the refusal; the tests move a logged event by hand.
+
+## 21. Declarative KPIs and the process backend (slice 5, item 2)
+
+* `Kpi.efficiency()`, `Kpi.ripple(node)`, `Kpi.mean(node)`,
+  `Kpi.i_peak(L)`, `Kpi.i_rms(L)`, `Kpi.ripple_i(L)` are frozen
+  dataclasses (`_KpiSpec(kind, target)`): they pickle, hash and compare
+  by value, and the options digest (hence `design_id`) covers them by
+  value, the same in every process. `Constraint.max/min/between` are
+  the bounds as data. Callables are still accepted (threads).
+* What they compute: a name the evaluator already computes (the
+  default KPI) is that default, bit for bit; a node's ripple / mean is
+  the kernel's closed-form extrema / integral on the kernel route and
+  `_p2p` / `_mean` on the right-limit samples otherwise -- on the
+  sampled route bit for bit what the equivalent callable on
+  `SteadyPeriod` gives, on the kernel route the closed form (the
+  callable reads samples: ripple within 1e-5, mean within 1e-9,
+  O(h^2) of the trapezoid; tested). A node they name is resolved with
+  the kernel observables, so an unknown node is a `KeyError` naming it.
+* `backend='process'`: before the first design runs, every part is
+  pickled in turn and the first that fails is refused,
+  `UnsupportedError(device=<part>)` (`circuit`, `build`, `schedule`,
+  `kpis['name']`, `designs[i]`, ...), with no worker started. Jobs are
+  chunks (4 per worker), the evaluator pickled once per chunk. The
+  circuit form pickles through a factory: `circuit=` a zero-argument
+  module-level callable (`functools.partial(build_circuit, part)`);
+  each worker calls it once (cached by value hash) and refuses a
+  factory whose circuit hashes differently from the parent's ("must be
+  deterministic"). A built `Circuit` does not pickle (IR needs, §20).
+* The buck example uses only module-level functions and `Constraint`s;
+  `--process` runs its Latin hypercube on processes, records bit for
+  bit those of the thread backend and of 7b195243 (512 designs, 376 ok
+  / 136 infeasible, the same 4-design front).
+
+## 22. Independent periodicity check and energy balance (slice 5, items 3, 4)
+
+Periodicity (review c1). On the kernel route the verification period
+is the shooting map itself, so it cannot catch a defect of that map.
+The evaluator now runs one plain `simulate(engine='dsed', dt=T)` period
+from `x*` -- another entry point (dispatch, adapter construction,
+event projection on) -- and requires it to return within 1e-8 relative
+(an order above the shooting's own 1e-9 stop). Measured: 2.2e-16 (CCM
+buck), 6.9e-17 (DCM buck), 2.0e-16 (boost), 4.0e-16 (buck Pareto, both
+parts). Cost: 200-390 us per check against 90-310 us per whole
+evaluation (load 10, observation), i.e. one to two evaluations, so it
+runs ONCE per (topology, orbit event-name pattern) per evaluator and
+process, logged in `Evaluator.periodicity_checks`, never in a record:
+record counters must not depend on batch order or backend (they are
+compared bit for bit across 1/8 threads and processes). A mismatch
+raises `pulsim.design.PeriodicityError` out of `evaluate` /
+`evaluate_many` (review §24, item 1: failing the records made them
+depend on which design was checked first). The deviation is relative
+per state, its denominator floored at 1e-12 of the largest state. The
+Python-loop route (no kernel map) already verifies with `simulate`; the
+`pwl` / `trbdf2` routes' map IS that engine's transient, so the check
+does not apply there. The first check found a crash: a schedule
+narrower than the circuit's switch count (`make_pwm_switch_fn(.., 0,
+1)` on a switch + diode buck) made `simulate(engine='dsed')` raise
+`IndexError` in `check_diode_modes`, where shooting accepted it; the
+containment check now skips a diode the record has no column for (its
+"no record, nothing to check" rule).
+
+Energy balance. On every record with KPIs and `loads=`: `res = (P_in -
+sum P_avg - dE/T) / P_in` from the same integrals as the KPIs (sources'
+delivered power, every device's dissipated `P_avg`, loads included;
+`dE/T` of L and C between the window ends; on a kernel period from the
+period's own `y_start` / `y_end`, review §24 item 4). The
+record carries `counters['energy_residual']` and `counters['p_table']`
+(switching, recovery and core losses from tables / datasheets: outside
+the circuit's balance, so never in `res`). Not formed when a source of
+power is not measured (a voltage source outside `sources=`, a current
+or controlled source). Measured |res|:
+
+| circuit | pss/dsed | transient/dsed | pss/pwl T/200 | transient/pwl | transient/trbdf2 |
+|---|---|---|---|---|---|
+| buck CCM | 2.1e-13 | 3.7e-12 | 2.5e-4 | 5.0e-10 | 5.5e-7 |
+| buck DCM | 3.9e-12 (1.0e-11 without dE/T) | 1.3e-9 (4.8e-6 without dE/T) | 9.9e-3 | 1.0e-7 | failed (implausible V) |
+| boost CCM | 6.5e-13 | 1.0e-10 | 2.1e-9 | 4.5e-9 | failed |
+| boost DCM | 8.4e-14 | not settled | 1.7e-4 | not settled | failed |
+| 3-phase VSI (SPWM, dt 1 us) | refused | refused | 1.6e-3 | 6.5e-7 | 9.5e-5 |
+| buck Pareto, 512 designs | <= 1.2e-13 | | | | |
+| pwl T/25, sub-step correction (test) | | | | 3.9e-2 | |
+
+Tolerance by route, an order above the worst measured: 1e-8 on the
+kernel period (`exact`); 1e-8 (2000/n)^2 on a sampled `dsed` run with
+n samples per period (`sampled`: the rows integrate products of
+per-step lines, O(1/n^2); DCM buck 1.3e-9 / 1.3e-7 / 2.1e-6 at n =
+2000 / 200 / 50); 1e-1 on the time-stepping engines (`stepped`). A violation is `failed`,
+`'energy_balance: ...'` with both powers and the residual; a test
+scales one load's `P_avg` by 1 + 1e-6 and the record fails.
+
+What the stepped tolerance lets through: the `pss/pwl` route's `P_in`
+is off. DCM buck at T/200: `P_out` 7.31746 W equals the exact orbit's
+7.31746 W, but `P_in` reads 7.394 W against the exact 7.321 W (+1 %,
+res 9.9e-3; at T/1000 2.0e-3), while the long `pwl` transient at T/200
+balances to 1e-7 (its own `P_out` is 0.9 % low, the engine's
+discretisation). So the restart run of the `pss/pwl` window measures
+the source current wrongly by ~1 %; `efficiency` does not read `P_in`
+(P_out / (P_out + losses)) and is unaffected. Recorded, not fixed here:
+the window run is `TransientMap.simulate` from the full state, the
+fixed engine's first-order restart is the first suspect.
+
+## 23. Saltation for comparator-driven gates: not done, the hook it needs
+
+`add-periodic-steady-state-shooting` 6.1/6.3 (peak-current-mode buck,
+multipliers -1.267293 and 0.998949) needs a gate that turns off when a
+state crosses a threshold (`i_L = I_ref`) and on at the clock. The
+period runs (`period_run` in `python/dsed_bindings.cpp`) arm only the
+diode predicates, and the scheduler tells a schedule about a state
+event only through `register_zcd_transition(Real t)` (concept
+`HasZcdRegister`), called for every `CurrentZC`, `DiodeOn` and
+`DiodeOff` firing alike. A comparator gate latched there would also
+latch on the freewheel diode's own events, so it cannot be written
+without knowing WHICH predicate fired. Hook needed in
+`core/include/pulsim/dsed/scheduler.hpp` (not editable in this slice),
+`PEDSimulator::fire_event_`: call, when the schedule offers it,
+`switch_fn_.register_event(Real t, const std::string& name,
+PredicateType type, int pred_index)` before re-sampling the mask (a new
+concept `HasEventRegister`, the ZCD call kept). With it, the kernel
+side is additive: a native `ComparatorGate` schedule (clock edges in
+`next_edge_after`, latched off by its own predicate), its predicate
+`g = w.x - I_ref` added next to the diode predicates in a new
+`period_run` overload, and in `period_map_from_run` the saltation `S =
+I + (f+ - f-) w^T / (w . f-)` for that event (today only diode events
+get one; no other state event reaches the period runs, so nothing is
+silently missing now). The probe `probes/peak_current_mode.py` is the
+oracle. Not started: this slice ran out of time after items 1-4.
+
+## 24. Fresh-context review of slice 5 (items 1-4) and what changed
+
+Reviewer (opus, read-only) on 18c62e86, 00c7df92 and the tie-rule diff.
+Acted on (one commit, tests shown failing before where a test exists):
+
+* (1, bug) The periodicity result was cached per (topology, pattern)
+  and decided the records of later designs, so records depended on
+  batch order and backend (each process chunk starts with an empty
+  cache). A mismatch now raises `pulsim.design.PeriodicityError` (a
+  plain `Exception`, so no engine wrapper turns it into `failed`) out of
+  `evaluate` / `evaluate_many`: a defect of the map stops the batch, and
+  no record depends on which design was checked. A passing check is a
+  sample of the map, not a per-design guarantee (documented).
+* (2, bug) A native `SwitchSchedule` canonicalised to its type name, so
+  `Evaluator(circuit=c, switch_fn=make_pwm_switch_fn(f, 0.4, ..))` and
+  the same at 0.5 shared every `design_id`. An object with
+  `next_edge_after` is now digested by its behaviour: the mask at 0 and
+  after each of its first 64 edges (`_schedule_fingerprint`; shortcut:
+  schedules equal on those edges and different later share it).
+  The buck example's ids are unchanged (its schedule is a function).
+* (3, risk) On a sampled `dsed` window the rows integrate products of
+  per-step lines, which is O(1/n^2) away from the exact stored energy:
+  DCM buck 1.3e-9 (n = 2000 samples per period), 1.3e-7 (200), 2.1e-6
+  (50); at 200 a correct record failed. Route `sampled` now has
+  tolerance 1e-8 (2000/n)^2; the kernel period keeps 1e-8.
+* (4, risk) The kernel route took dE/T = 0, but the shooting stops at a
+  scaled residual: dE/T now comes from the period's own start and end
+  values (inductor currents, node voltages; DCM buck residual 1.0e-11
+  -> 3.9e-12).
+* (5, risk) The periodicity deviation had no floor: a state sitting at
+  zero (a DCM inductor current at the section) divided rounding noise
+  by ~0. The denominator is floored at 1e-12 of the largest.
+
+Recorded, not changed:
+* (6) The tie rule is relative only (1e-12): an extremum of 0 against
+  1e-20 noise is not a tie and may still flip with the last bit, and a
+  chain of three values each within 1e-12 of the next is resolved by
+  the kernel's running rule and Python's best-then-earliest rule
+  differently. The CI case (equal to rounding at a nonzero value) is
+  covered; an absolute floor needs the observable's span, which the
+  kernel's streaming search does not have before the end.
+* (7, nit) A non-deterministic circuit factory is refused in the worker
+  (at unpickling), not before the workers start: one process cannot
+  see it.
+
+Process backend, buck example SYN-A, interleaved best of 5, load 6-9
+from other builds (observation, not asserted): 4096 designs, circuit
+form 6484 / 9801 / 9692 evaluations/s on 1 / 4 / 8 workers (factory
+form 5177 / 8648 / 8868); about 16k designs (32768-point hypercube,
+SYN-A half) with a ctest build beside it, load 8-9: processes 2588 /
+3153 / 2798, threads 1371 / 1546 / 1615 on the same machine state.
+Processes give about 2x the threads under load; worker start-up (spawn, import pulsim,
+unpickle, build the base) is about 0.3 s per worker, so a batch needs
+thousands of designs before processes pay.
+
+## 25. Second fresh-context review of slice 5 (00c7df92, 02b76db6, 33d3eafb)
+
+Reviewer (opus, medium, read-only). Acted on:
+
+* (b1, bug) The periodicity check's own `simulate` ran inside `_engine`,
+  so when it raised, the first design of its pattern became a `failed`
+  record (with a reason that was the check's, not the design's) and
+  nothing was cached; the next design checked again and, if that
+  passed, every later design was `ok`. Status depended on batch order.
+  A check that the engine cannot run now raises `PeriodicityError` (the
+  map ran that period from x*, the engine does not): raised for every
+  design of the pattern, cached by nobody. Test shown failing before.
+* (b2, risk) A cache hit skips the check, and the key (topology + event
+  names) does not see event times. A design with an event within
+  1e-9 T of the section (0 or T), where the map's attach rule (first
+  sample at or after, 4 ulp) and the engine's can differ, is now always
+  checked and never cached. Option kept rejected: event times binned
+  into the key (one check per design: 1-2 evaluations each, DECISIONS
+  22). Reverse: drop `at_section` in `_check_periodic`.
+* (b6) Python's tie rule now IS the kernel's running rule
+  (`sensitivity._running_extremum`, candidates in time order): a chain
+  1, 1+8e-13, 1+1.6e-12 is one extremum reported at the first instant
+  on both (it was the second in Python). §24 item 6's chain case is
+  closed; the absolute floor near zero is still not there (unchanged
+  reason: the streaming kernel search has no span).
+
+Recorded, not changed:
+* (b3, b4) The stepped tolerance 1e-1 cannot see a dropped loss row on a
+  95 % efficient design (losses are 5 % of P_in), and the sampled
+  1e-8 (2000/n)^2 rests on one circuit. Both are re-measured with the
+  `p_in` quadrature work (slice 6 item 4, §27).
+* (b5) `_schedule_fingerprint` reads 64 edges (32 periods of one PWM):
+  a soft-start differing later shares a `design_id`. Nothing in pulsim
+  caches records by it; a longer horizon costs native calls on every
+  `design_id`. Accepted, documented in the function.
+* (b7, b8, b9, nits) The kernel-route `Kpi.ripple` / `Kpi.mean` are the
+  closed forms (a sampled callable differs by up to 1e-5 on ripple);
+  `Kpi.i_peak` is a magnitude; the process backend checks each pattern
+  once per chunk (its cache is emptied on pickling). Documented
+  behaviour, unchanged.
+
 ## Missing from the kernel (recorded, worked around in Python)
 
 Items 1 and 2 are done (add-parameter-sensitivities slice, 2026-11):

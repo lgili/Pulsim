@@ -6,6 +6,64 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Optimisation slice 6: the kernel batch evaluator, event losses on the orbit
+
+* **Fixed** the evaluator's periodicity check: when its own plain
+  `simulate` period failed, the first design of its event pattern was
+  recorded `failed` and later designs passed on another design's check;
+  it now raises `PeriodicityError` for every design of the pattern. A
+  design with an event within 1e-9 T of the section is always checked.
+* **Fixed** `sensitivity`'s extremum tie rule now runs the kernel's
+  running rule over candidates in time order (a chain of ties gave a
+  different instant in Python and in the kernel).
+
+### Optimisation slice 5: the evaluator on the circuit IR
+
+* **Added** `pulsim.design.Evaluator(circuit=..., fields=..., switch_fn=
+  | schedule=...)`: designs as `with_params` / `with_value` of one shared
+  immutable `pulsim.Circuit`, no rebuild; records equal the `build=`
+  form's. `periodic_steady_state` (all engines) accepts a `Circuit`;
+  its period runs share the circuit's symbolic plan. The buck Pareto
+  example uses it (`make_evaluator(form="circuit")`, default).
+* **Changed** per evaluation: the exact stepper's state labels are
+  cached per structure, the KPI observables per evaluator, switching
+  tables are read in scalars (bit for bit), no function-level imports:
+  buck Pareto 751 -> 378 Python calls and ~440 -> 164 us per design,
+  1 thread 3239 -> 5025 evaluations/s, records bit for bit unchanged
+  (512 designs). Threads still do not scale (DECISIONS 20).
+* **Added** declarative, picklable KPIs and bounds: `Kpi.efficiency()`,
+  `Kpi.ripple(node)`, `Kpi.mean(node)`, `Kpi.i_peak(L)`, `Kpi.i_rms(L)`,
+  `Kpi.ripple_i(L)`, `Constraint.max/min/between`; `circuit=` also takes
+  a zero-argument factory. `evaluate_many(backend='process')` refuses
+  the first part that does not pickle by name before any worker starts
+  and sends chunks; the buck example runs on processes (`--process`)
+  with the same 512 records (DECISIONS 21).
+* **Added** an independent periodicity check on the exact route (one
+  plain `simulate(engine='dsed')` period from `x*`, once per topology
+  and event pattern, `Evaluator.periodicity_checks`; a mismatch raises
+  `pulsim.design.PeriodicityError`) and an energy-balance guard on every
+  record: `counters['energy_residual']` (P_in − ΣP − dE/T over P_in;
+  1e-8 on the kernel period, 1e-8·(2000/n)² on a run sampled n times per
+  period, 1e-1 on the stepped engines, else
+  `failed`, `'energy_balance'`) and `counters['p_table']` (DECISIONS
+  22). It shows the `pss/pwl` route's `p_in` 1 % high on a DCM buck.
+* **Fixed** (review) a native `SwitchSchedule` passed as `switch_fn=`
+  was digested by its type name, so two duty cycles shared every
+  `design_id`; it is now digested by its mask at its first 64 edges
+  (DECISIONS 24).
+* **Fixed** `simulate(engine='dsed')` raised `IndexError` for a schedule
+  narrower than the circuit's switch count (diode mode check).
+* **Fixed** an extremum attained at both ends of a periodic orbit was
+  reported at t0 or at t0 + T depending on a last-bit difference, so the
+  kernel and Python Newton loops disagreed by exactly T on Linux. Both
+  now report the earliest instant of values tied within 1e-12 relative
+  (DECISIONS 20a).
+* **Fixed** (review a7) two events logged at one sample raised
+  `KeyError` in the exact-path sensitivities (the mask between them had
+  no mode); (review b4) the period map attached an event lying between
+  two samples to the later one, where the sensitivity path raised: both
+  now refuse it, "has no sample of its own".
+
 ### Integration batch 9: the exact engine merged
 
 * **Added** the exact engine's give-ups (C++ `pulsim::ConvergenceFailure`:
