@@ -484,9 +484,10 @@ The gate of `bind_pi_to_switch` declares its edges (G23).
   whose length follows rtol: the states converge, `V(sw)` does not
   (`ll14` rtol 1e-8 vs 1e-10: 0.06). Reproducer
   `probes/trbdf2_tick_edge_sample.py` (closed loop 0/199 rising edges
-  with a post-edge sample, open loop 199/199). `ll14` / `ll15` are frozen
-  `disagree` on `V(sw)` until the engine fires the tick before the
-  commit.
+  with a post-edge sample, open loop 199/199). `ll14` / `ll15` trbdf2 and
+  pwl+split are frozen `disagree` on `V(sw)` until the engine fires the
+  tick before the commit; pwl and pwl+restart also miss the states (gate
+  sampled on the grid, duty in steps of dt/T: `ll14` I(L1) 0.13).
 - **`trbdf2`: the learned narrowest pulse never relaxes**
   (same file, `learn_gate_toggles`: `gate_pulse_min` is a running
   minimum and caps every later step at twice it). A `switch_fn` with no

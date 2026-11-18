@@ -90,8 +90,9 @@ def test_trbdf2_lands_every_edge_at_the_commanded_duty():
                    step_observer=loop.step_observer)
     duty = np.asarray(list(loop.duty_history))[:, 1]
     assert np.all((duty > 0.0) & (duty < 1.0))
-    # two analytic edges per period, each landed
-    assert r._trbdf2_stats["n_gate_events"] == 2 * len(duty)
+    # two analytic edges per period, each landed (+-1: whether the edge at
+    # t_end is counted depends on the last step)
+    assert abs(r._trbdf2_stats["n_gate_events"] - 2 * len(duty)) <= 1
     t = np.asarray(r.times)
     on = np.asarray(r.switch_states)[:, 0]
     fall = t[1:][on[:-1] & ~on[1:]]        # first OFF sample after each pulse

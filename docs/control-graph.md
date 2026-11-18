@@ -236,7 +236,9 @@ counters (`<prefix>_ticks`, `<prefix>_next_tick`) and, for a single-rate
 graph, the `pulsim_cblock_step` shim, so the file loads back through
 `add_c_block(lib=...)`. `in[k]` is `CExport.inputs[k]` (a node, or a
 channel no block writes); the shim writes `outputs` to `out[]`. No
-`malloc`: the shim's state is static (one library, one instance).
+`malloc`: the shim's state is static, so a circuit takes one block of a
+library (a second `add_c_block` of it on the same builder is refused);
+across circuits each `add_c_block` resets the shared state.
 
 Compiled with `-ffp-contract=off` (MSVC's default `/fp:precise` does not
 contract) it is bit-identical to the kernel graph: every block kind over
@@ -248,8 +250,9 @@ per rate: when several rates are due at one instant, call them in rate
 order (`step_rate0` first); that reproduces the kernel when no block
 reads, at a shared instant, a signal a later-called rate writes. The shim
 writes NaN to its outputs when it is wired (`n_in`, `n_out`) or clocked
-(`dt`) unlike the export; its state is static, so two `add_c_block`s of
-the same library share one instance.
+(`dt`) unlike the export. For a second instance, compile the file again
+under another name, or export it with another `prefix` and drive
+`<prefix>_init` / `<prefix>_step_rate0` on your own state.
 
 ```python
 ex = pulsim.export_c(chain, builder, outputs=["y"])
@@ -261,7 +264,11 @@ pulsim.add_c_block(b, inputs=[("v", "out")], outputs=[("v", "sw", "gnd")],
 C blocks compile into a per-user cache, mode 0700
 (`~/Library/Caches/pulsim/cblock`, `~/.cache/pulsim/cblock` or
 `$XDG_CACHE_HOME/pulsim/cblock`, `%LOCALAPPDATA%\pulsim\cblock`); a
-cached library that another user owns or can write is refused.
+cached library that another user owns or can write is refused, and so is
+a `pulsim` or `cblock` directory that is not both yours and private. Windows
+has no POSIX owner or mode: there the cache must sit inside
+`%USERPROFILE%` (whose ACL is the user's), and a `LOCALAPPDATA` outside
+it is refused.
 
 ## Other engines and resume
 

@@ -3083,7 +3083,14 @@ void init_module(py::module_& m) {
               "False when the schedule cannot name its edges (a "
               "make_combined_switch_fn with a plain Python callable "
               "in it); the variable-step engines then search for "
-              "them by sampling.");
+              "them by sampling.")
+        .def_property_readonly("follows_controller",
+              [](const sources::SwitchSchedule& s) {
+                  return s.follows_controller;
+              },
+              "True when a part is a control graph's PWM gate (a "
+              "closed loop): its edges are those of the duty held "
+              "now, so shooting and sensitivities refuse it.");
 
     m.def("make_pwm_switch_fn",
         &sources::make_pwm_switch_fn,
@@ -3180,8 +3187,10 @@ void init_module(py::module_& m) {
                         fn.cast<sources::SwitchSchedule>());
                 } else if (py::isinstance<pulsim::blockchain::ChainPwmGate>(fn)) {
                     const auto g = fn.cast<pulsim::blockchain::ChainPwmGate>();
-                    cpp_fns.emplace_back(sources::SwitchSchedule{
-                        g, [g](Real t) { return g.next_edge_after(t); }});
+                    sources::SwitchSchedule s{
+                        g, [g](Real t) { return g.next_edge_after(t); }};
+                    s.follows_controller = true;
+                    cpp_fns.emplace_back(std::move(s));
                 } else {
                     cpp_fns.emplace_back(fn.cast<SwitchScheduleFn>());
                 }

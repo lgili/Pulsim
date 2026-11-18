@@ -352,22 +352,25 @@ Each entry: question → option taken → evidence → how to reverse.
   first order. trbdf2 is right; nothing in the control law is wrong.
 - **Taken.** (1) `CxxChainPwmGate.next_edge_after(t)`: period starts and
   each leg's OFF threshold under the duties held now; the adapter hands it
-  to every engine and `make_combined_switch_fn` keeps it (both engines
-  re-query after a tick). trbdf2 lands the edges instead of learning them
-  by sampling, and pwl's event split splits at them. (2) `ll16`
+  to every engine and `make_combined_switch_fn` keeps it (trbdf2
+  invalidates its edge cache at a tick; pwl drops it after every
+  observer call, which a loop's tick is). trbdf2 lands the edges
+  instead of learning them by sampling, and pwl's event split splits at them. (2) `ll16`
   `reference: suspect` (not a flyback; KNOWN_LIMITATIONS). (3) `ll14` /
-  `ll15` frozen `disagree` on `V(sw)` with a named engine limitation (no
+  `ll15` frozen `disagree` (trbdf2 / pwl+split on `V(sw)`) with a named engine limitation (no
   post-edge sample at an edge that is also a tick). (4) Label time kept
   (G13): it moves no number, and its cost is now measured below.
-- **Evidence** (max |v(kT) - ref| / span; before -> after):
+- **Evidence** (max |v(kT) - ref| / span; before -> after; the V(sw) /
+  state figures in the last column are cells against trbdf2 rtol 1e-8,
+  the harness reference, not against the independent one):
 
   | circuit | trbdf2 default | pwl+split | strict cells after |
   |---|---|---|---|
   | cl_buck_pi | 4.2e-5 -> 4.2e-5 | 4.5e-2 -> 1.4e-3 | agree (all) |
   | cl_buck_aggressive_pi | 6.0e-5 -> 6.9e-5 | 2.9e-2 -> 1.9e-2 | agree (all; converges pointwise, no statistical measure needed) |
-  | cl_boost_pi | max_steps -> 5.7e-5 | 2.0e-1 (no reference) -> 4.2e-4 | trbdf2, pwl+split agree; pwl 0.058, pwl+restart 0.058 disagree (gate on the grid) |
-  | ll14 | 2.6e-6 -> 1.1e-5 | 4.0e-2 -> 3.0e-4 | all disagree on V(sw); states agree |
-  | ll15 | 1.7e-6 -> 3.9e-5 | 3.0e-2 -> 9.9e-6 | all disagree on V(sw); states agree |
+  | cl_boost_pi | max_steps -> 5.7e-5 | not run (plain pwl 2.0e-1) -> 4.2e-4 | trbdf2, pwl+split agree; pwl 0.058, pwl+restart 0.058 disagree (gate on the grid) |
+  | ll14 | 2.6e-6 -> 1.1e-5 | 4.0e-2 -> 3.0e-4 | all disagree; trbdf2, pwl+split on V(sw) only (states 2.6e-5 / 1.4e-3); pwl, pwl+restart I(L1) 0.13 too |
+  | ll15 | 1.7e-6 -> 3.9e-5 | 3.0e-2 -> 9.9e-6 | all disagree; trbdf2, pwl+split on V(sw) only; pwl states 6.6e-3 |
   | ll16 | — | — | unverified (suspect) |
 
   `cl_boost_pi`'s grind: its PI starts at duty 0, the first pulse is
@@ -403,6 +406,52 @@ Each entry: question → option taken → evidence → how to reverse.
 - **Reverse.** Drop `next_edge` for `ChainPwmGate` in
   `python/switch_fn_adapter.hpp` and the `SwitchSchedule` wrap in
   `make_combined_switch_fn`: trbdf2 and pwl+split sample the gate again.
+
+## G24. Reviewer leftovers: cache parents, Windows, stacklevels, one instance
+
+- **Cache parents.** `_cache_dir` tightens and checks `pulsim/` as well
+  as `pulsim/cblock/`: a group-writable or foreign `pulsim/` let another
+  user swap `cblock/` for theirs (a symlinked `pulsim/` is refused too,
+  as `cblock/` already was). `~/Library/Caches` and `~/.cache` belong
+  to the profile and are left alone.
+- **Windows.** No POSIX owner or mode, and a real ACL check needs
+  pywin32 or a page of ctypes. Taken: the cache must sit inside
+  `%USERPROFILE%` (per-user ACL by default); a `LOCALAPPDATA` pointing
+  elsewhere is refused by name. Reverse: an ACL check that admits a
+  private directory outside the profile.
+- **Stacklevels.** Measured where each warning pointed: the helpers'
+  closure warnings pointed into `control.py` (3 -> 4), the `sim_dt`
+  clamp into `c_block.py` (none -> 2), and the fixed-period warning one
+  frame above the user for a closed loop (`_check_fixed_periods` now
+  takes the level: 4 from `for_fixed_step`, 5 from `FixedStepTicks`).
+  A test pins each to the caller's file.
+- **Multi-rate call order.** Tested both ways: due together,
+  `step_rate0` then `step_rate1` reproduce the kernel bit for bit when
+  the slow rate reads the fast one, and differ when the fast reads the
+  slow (the documented limit), so the doc's rule is now pinned.
+- **One static state.** The shim exports `pulsim_cblock_static_state`
+  (`extern const int`, so a C++ compile keeps it); a second
+  `add_c_block` of a library carrying it on the same builder is refused
+  (one state stepped twice per tick). Across builders it is allowed: a
+  result keeps its builder, so refusing while an earlier handle lives
+  broke `[simulate(make(k)) for k in ...]` sweeps (review); each
+  `add_c_block`'s `init` resets the shared state, as before. Libraries
+  with their own state from `init` are unaffected. Reverse: emit a
+  heap-allocating shim, which the no-`malloc` rule excludes today.
+
+- **Review of G23 (fresh reader).** Since the loop's gate declares its
+  edges, `make_combined_switch_fn` of it has edges, and shooting and
+  sensitivities, which refused it only as edgeless, accepted it with a
+  frozen duty. Taken: a C++ member `SwitchSchedule.follows_controller`
+  (read-only in Python), set on the wrapped loop gate and propagated by
+  every combination, so `make_combined_switch_fn` keeps its
+  `SwitchSchedule` return type (a Python attribute on a `py::object`
+  return lost it); sensitivities refuse a closed-loop gate by name like
+  shooting, and `sweep(parallel=True)` reads the member too.
+  Also corrected: `ll14` / `ll15` pwl and pwl+restart miss the states
+  too (not `V(sw)` only); `cl_boost_pi` pwl+split before was not run;
+  the probe solves its own DC start (2.3880597 A / 23.880597 V,
+  600.558046 A / 11.160915 V, equal to the engines').
 
 ## Hooks for task groups 6–7 (not in this slice)
 

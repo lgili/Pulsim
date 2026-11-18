@@ -935,7 +935,8 @@ struct ChainPwmGate {
 
     /// First gate edge strictly after `t` under the duties held now: each
     /// leg's period start and its OFF threshold. A tick that moves a duty
-    /// makes the answer stale; both engines re-query after every tick.
+    /// makes the answer stale: trbdf2 re-queries after a tick, pwl after
+    /// every observer call (a loop ticks through its observer).
     [[nodiscard]] Real next_edge_after(Real t) const {
         Real best = std::numeric_limits<Real>::infinity();
         for (const auto& l : legs) {

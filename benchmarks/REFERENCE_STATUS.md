@@ -499,9 +499,10 @@ non-suspect circuits and pwl converges to it at first order (label time).
 The loop's gate now declares its edges, so trbdf2 lands them (`cl_boost_pi`
 completes: its first 0.28 ns pulse had capped every later step) and
 pwl+split splits at them (cl_buck_pi 0.0123 -> 4.9e-4). ll14 / ll15
-stay `disagree` on V(sw) only: trbdf2 records no post-edge sample at a
-rising edge that is also a control tick (KNOWN_LIMITATIONS), so V(sw) of
-the reference does not converge with rtol; their states agree. ll15
+stay `disagree`: trbdf2 records no post-edge sample at a rising edge that
+is also a control tick (KNOWN_LIMITATIONS), so V(sw) of the reference does
+not converge with rtol; on trbdf2 and pwl+split only V(sw) is off, pwl and
+pwl+restart also miss the states (gate on the grid, ll14 I(L1) 0.13). ll15
 trbdf2 moved agree 3.9e-4 -> disagree 1.24e-3 for that reason. ll16 is
 `suspect` (not a flyback). Moved cells: cl_boost_pi error -> 0.0582 /
 0.0579 / 8.56e-5 / 6.86e-5; cl_buck_aggressive_pi pwl+split 0.0071 ->

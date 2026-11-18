@@ -245,7 +245,7 @@ def compose_control(builder, closed_loops, step_observer, controller_period,
     return plan
 
 
-def _check_fixed_periods(periods, dt: float) -> None:
+def _check_fixed_periods(periods, dt: float, stacklevel: int = 4) -> None:
     """A period below dt is refused (two ticks in one step); a period
     that is not a multiple of dt warns (ticks late by less than dt)."""
     for period in periods:
@@ -263,7 +263,7 @@ def _check_fixed_periods(periods, dt: float) -> None:
             "delivered at the first step at or after its instant, "
             f"late by less than dt (result.control_tick_jitter_max "
             "records the largest lateness). Pick dt = T/n to remove it.",
-            stacklevel=5)
+            stacklevel=stacklevel)
 
 
 class FixedStepTicks:
@@ -283,7 +283,7 @@ class FixedStepTicks:
         self._k = [0] * len(ticks)
         self.counts = [0] * len(ticks)
         self.jitter_max = 0.0
-        _check_fixed_periods(self._periods, self._dt)
+        _check_fixed_periods(self._periods, self._dt, stacklevel=5)
 
     def __call__(self, t: float, x) -> None:
         tol = 1e-9 * self._dt

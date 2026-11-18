@@ -293,6 +293,8 @@ def _closed_loop_source(sf):
     or reads as a global (a hand-written gate around ``duty_get`` of
     ``bind_pi_to_duty_callable``, a lambda around ``loop.switch_fn``)."""
     src = getattr(sf, "_closed_loop", None)
+    if not src and getattr(sf, "follows_controller", False):
+        src = "make_combined_switch_fn with a control-graph gate in it"
     if src or not callable(sf):
         return src
     import inspect

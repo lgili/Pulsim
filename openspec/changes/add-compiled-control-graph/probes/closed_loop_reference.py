@@ -6,7 +6,8 @@ leaving direction), a Shockley diode by Radau (rtol 1e-12) with the switch
 node solved by brentq; the PI law re-typed from pulsim.PIController; ticks
 at kT on x(kT) (state time), the duty held from kT, gate ON for
 (t - kT)/T < d. A v1 file without `uic` starts from the engines' DC
-operating point (iL = vin/R_on (+ I_D), checked by hand). Compares v(out)
+operating point, solved here (fsolve on the ON mode; the engines' start is
+printed as a cross-check). Compares v(out)
 and the duty at every tick for each engine configuration.
 `OPAQUE(before)` hides the gate's edges (the engines before G23).
 
@@ -17,10 +18,13 @@ Measured 2026-11-18 (macOS arm64), max |v(kT) - ref| / span:
   circuit                 trbdf2 1e-10  1e-8    default  pwl     pwl+split (before)  dt/16 split
   cl_buck_pi              1.7e-8        3.6e-7  4.2e-5   3.6e-2  1.4e-3 (4.5e-2)     8.5e-5
   cl_buck_aggressive_pi   3.0e-8        6.4e-7  6.9e-5   1.4e-2  1.9e-2 (2.9e-2)     1.2e-3
-  cl_boost_pi             1.1e-7        9.8e-7  5.7e-5   2.0e-1  4.2e-4 (max_steps)  2.4e-5
+  cl_boost_pi             1.1e-7        9.8e-7  5.7e-5   2.0e-1  4.2e-4 (not run)    2.4e-5
   ll14_buck_closed_loop   5.0e-8        1.6e-7  1.1e-5   4.1e-2  3.0e-4 (4.0e-2)     1.8e-5
   ll15_boost_closed_loop  2.9e-8        5.0e-7  3.9e-5   3.0e-2  9.9e-6 (3.0e-2)     6.8e-7
 pwl converges at first order (label time: the helper samples x(kT - dt)).
+cl_boost_pi before: trbdf2 hit max_steps; OPAQUE pwl+split is skipped (a
+Python gate x 1e7 steps). Only v(out) and the duty are compared here; the
+V(sw) / I(L) figures in G23 are engine vs trbdf2 rtol 1e-10.
 """
 import math
 import sys
@@ -206,10 +210,17 @@ def main():
     root = Path(__file__).resolve().parents[4] / "benchmarks" / "circuits" / "closed_loop"
     case = v1_reader.load(root / f"{name}.yaml")
     meas = v1_reader._node([c for c in case._components if c["type"] == "pi_controller"][0]["nodes"][1])
-    if not case.uic:   # the v1 file starts from the DC operating point: the engines' x0
+    if not case.uic:   # the v1 file starts from the DC operating point
+        # solved here (switch ON, the mask at t = 0; Shockley diode), and
+        # only cross-checked against the engines' start
+        from scipy.optimize import fsolve
+        x0 = fsolve(lambda x: rhs(p, True, False)(0.0, x), [p["vin"] / p["R"], p["vin"]],
+                    xtol=1e-14)
         r0 = case.run("pwl")
         ind = [c["name"] for c in case._components if c["type"] == "inductor"][0]
-        p["iL0"], p["vC0"] = float(r0.i(ind)[0]), float(r0.v(meas)[0])
+        eng = (float(r0.i(ind)[0]), float(r0.v(meas)[0]))
+        print(f"DC start: iL {x0[0]:.9g} vC {x0[1]:.9g} (engines {eng[0]:.9g} {eng[1]:.9g})")
+        p["iL0"], p["vC0"] = float(x0[0]), float(x0[1])
     t0 = time.time()
     ref = run(p, case.t_end)
     print(f"reference: {len(ref)} ticks in {time.time() - t0:.1f} s")
