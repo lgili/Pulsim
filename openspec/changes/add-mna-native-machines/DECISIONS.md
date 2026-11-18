@@ -63,6 +63,9 @@ Each entry: question → option taken → why → how to reverse.
 - Why: `θ = ∫ω dt` as a node voltage needs a VCCS, which the kernel
   does not have.
 - Reverse: implement with the VCCS when it exists.
+- Superseded (group 2 work): the kernel has a VCCS now; `theta_node`
+  is a unit VCCS `{name}.th` from the speed into a 1 F capacitor
+  `{name}.ct` (task 1.8 ticked, `test_dc_machine.py`).
 
 ## D6. Elements with a zero value
 
@@ -111,3 +114,87 @@ Each entry: question → option taken → why → how to reverse.
   (20006 points) with a speed error of 1.8e-7 against the exact
   solution. Pinned by `test_dsed_runs_the_composite`.
 - Consequence: the conformance row is `dc_machine × dsed = ok`.
+
+## D11. Induction machine: state choice and where it lives (group 2)
+
+- Question: the design waits for `add-unified-device-interface` before
+  any stateful machine (cost of a new history in the wrapper chain).
+  That interface is being built on another branch at the same time.
+- Option: the induction machine REUSES the PMSM's plumbing. Its stator
+  rows are the PMSM's flux rows (`pwl/pmsm_mna_history.hpp`,
+  `pwl/nonlinear_refresh_pmsm_mna.hpp`) with `λ_abc = L·i + M·λ_r`,
+  where `L` and `M` are CONSTANT (stationary frame), and an entry flag
+  `induction` selects the law. The rotor flux `λ_rα`, `λ_rβ` are the
+  voltages of two internal nodes `{name}_psi_ra`, `{name}_psi_rb`, each
+  with a 1 F capacitor the builder adds — the same trick as the PMSM's
+  angle node — so the engine integrates them with its own companion
+  (trapezoidal, BDF2 in the TR-BDF2 second stage) and the stamp only
+  injects the right-hand side of `dλ_r/dt`. No engine file changed:
+  every commit / snapshot / restart / stage path is the PMSM's.
+- New kind `StoredKind::InductionMachineMna` (= 27) for the stator
+  branches, so the capability table, the conformance matrix, the IR
+  field table and refusals name it.
+- Why: zero new sites in `run_transient.hpp` / `trbdf2_transient.hpp`
+  (both being refactored by other agents), and the integration scheme
+  of every state is the engine's own, so the method is the engine's
+  method on the whole ODE (a linear change of state variables commutes
+  with the trapezoidal rule and with BDF2).
+- Reverse: when the unified device interface lands, move
+  `detail::refresh_induction_entry_` behind it; the stamp is self
+  contained.
+
+## D12. Engines for the induction machine
+
+- `pwl`, `trbdf2`: Newton (bilinear terms `ω·λ_r`, `λ_r × i_s`).
+- `dsed`: refused by name (`kKindCaps` row `kNewtonEngines`). The
+  machine is not LTI between events (its matrix depends on `ω`) and the
+  proposal defines no implicit-segment route for it.
+- AC sweep: refused by name (same row). A small-signal stamp around an
+  operating point is not in this change.
+- DC operating point: see D13.
+
+## D13. DC operating point with machines (tasks 2.7 "DC held", 3.5)
+
+- Not done in this pass. The DC assembly stamps every Newton device
+  except the saturable inductor OPEN, so a PMSM or induction machine has
+  no electrical rows at DC; the preflight then ties the neutral, the
+  rotor-flux nodes and the speed / angle nodes to ground through 1 GΩ
+  (a leak of 1e-9 S beside the rotor's 1/τ_r = 6.45 S; a friction of
+  1e-9 N·m·s/rad on the speed node). Same as the PMSM before this change.
+- The hold needs a DC-stage branch of the machine stamp (`dλ/dt = 0`,
+  mechanical rows replaced by `v = IC`) passed through the DC refresh;
+  that is a change to the DC driver, left for after the unified device
+  interface lands (which owns the refresh signature).
+
+## D14. PM-flux harmonics representation (group 3)
+
+- `PmsmMna::Params::harmonics` is a shared pointer to an immutable list
+  of `(h, ψ_h, φ_h)` (null = the old `ψ_pm·cos θ_e`). A pointer keeps the
+  parameter struct cheap to copy through the IR and keeps every existing
+  `Params{...}` designated initialiser valid; the IR value hash includes
+  the terms.
+- With harmonics set, `psi_pm` is not read by the law: a
+  `with_value("…psi_pm")` is refused by name (`check_device`) instead of
+  being silently ignored. `add_bldc_mna` stores ψ_1 in `psi_pm` for
+  reporting only.
+- `h = 1, φ = 0` evaluates the same floating-point expressions as the
+  plain law: a run is bit-identical (`test_bldc_mna.py`).
+- `add_bldc_mna`, `trapezoid_harmonics` and `pm_harmonics_from_waveform`
+  are Python (`pulsim.machines`), like `add_dc_machine` (D1): they only
+  compose `add_pmsm_mna(harmonics=...)`.
+- The `<name>.T_em` trace uses the series when one is set (it used the
+  fundamental-only dq formula, wrong by 1.1e-3 on the 120° BLDC test).
+
+## D15. `pwl` nominal step of the Newton-only machines (review finding)
+
+- The checkpoint review found every `pwl` step of a PMSM (pre-existing)
+  and of the induction machine failing at the requested `dt` and being
+  re-taken at `dt/2`: the step cache factorises the linear part, which
+  is singular because the flux rows exist only in the Newton refresh.
+  Every `pwl` figure measured before this was in fact at `dt/2`.
+- Fix (one flag in `run_transient`): a pool with an MNA-native PMSM or
+  induction machine takes the assembled, unfactorised carrier at every
+  `dt` (the path the retry already used; Newton refactorises
+  `J_lin + J_nl` each iteration anyway). No other circuit takes it, so
+  the 21 non-machine goldens are unchanged; the two `im_*` goldens and
+  every machine figure were re-measured at the true `dt`.

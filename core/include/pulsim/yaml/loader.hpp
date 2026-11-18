@@ -54,9 +54,10 @@
 #include <yaml-cpp/yaml.h>
 
 #include "pulsim/ir/expr.hpp"
+#include "pulsim/yaml/emitter.hpp"
 
+#include <array>
 #include <charconv>
-
 #include <cmath>
 #include <format>
 #include <fstream>
@@ -65,6 +66,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -295,6 +297,120 @@ inline void strict_keys(const YAML::Node& dev, std::size_t idx, const YAML::Node
 }
 
 /// Parse a single device entry; dispatches by `type`.
+/// add-in-kernel-event-losses 3.5: a `losses:` block on a switch-class
+/// device. Strict keys; tables as nested lists:
+///   e_on / e_off: {v: [...], i: [...], tj: [...], energy: [[[...]]]}
+///   v_on:         {i: [...], tj: [...], v: [[...]]}
+inline void load_losses(builder::CircuitBuilder& b, const YAML::Node& dev,
+                        std::size_t idx, const std::string& type,
+                        const std::string& name) {
+    const std::string who = device_label(dev, idx, type);
+    if (type != "switch" && type != "diode" && type != "mosfet" &&
+        type != "mosfet_with_body_diode" && type != "igbt") {
+        throw std::runtime_error(std::format(
+            "yaml::load: device {}: a losses: block is for switch, diode, "
+            "mosfet, mosfet_with_body_diode and igbt", who));
+    }
+    const YAML::Node l = dev["losses"];
+    if (!l.IsMap()) {
+        throw std::runtime_error(std::format(
+            "yaml::load: device {}: losses: must be a mapping", who));
+    }
+    for (const auto& kv : l) {
+        const std::string key = kv.first.as<std::string>();
+        if (key != "junction" && key != "Tj" && key != "heat_node" &&
+            key != "e_on" && key != "e_off" && key != "v_on" &&
+            key != "conduction") {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: unknown key '{}' in losses (accepted: "
+                "junction, Tj, heat_node, e_on, e_off, v_on, conduction)",
+                who, key));
+        }
+    }
+    // a table's own keys are strict too: a misspelt axis is not "absent"
+    auto keys = [&](const YAML::Node& t, const char* table,
+                    std::initializer_list<std::string_view> ok) {
+        if (!t.IsMap()) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: losses.{} must be a mapping", who,
+                table));
+        }
+        for (const auto& kv : t) {
+            const std::string k = kv.first.as<std::string>();
+            if (std::find(ok.begin(), ok.end(), k) == ok.end()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: device {}: unknown key '{}' in losses.{}",
+                    who, k, table));
+            }
+        }
+    };
+    auto list = [&](const YAML::Node& t, const char* table, const char* f) {
+        if (!t[f] || !t[f].IsSequence()) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: losses.{} needs '{}' as a list", who,
+                table, f));
+        }
+        return t[f];
+    };
+    auto flat = [](const YAML::Node& n, std::vector<Real>& out, auto& self) -> void {
+        if (n.IsSequence()) {
+            for (const auto& c : n) self(c, out, self);
+        } else {
+            out.push_back(n.as<Real>());
+        }
+    };
+    auto e_table = [&](const char* key) -> std::shared_ptr<const thermal::LossTable3D> {
+        if (!l[key]) return nullptr;
+        const YAML::Node t = l[key];
+        keys(t, key, {"v", "i", "tj", "energy"});
+        std::vector<Real> e;
+        flat(list(t, key, "energy"), e, flat);
+        try {
+            return std::make_shared<const thermal::LossTable3D>(
+                list(t, key, "v").as<std::vector<Real>>(),
+                list(t, key, "i").as<std::vector<Real>>(),
+                list(t, key, "tj").as<std::vector<Real>>(), std::move(e));
+        } catch (const std::invalid_argument& ex) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: losses.{}: {}", who, key, ex.what()));
+        }
+    };
+    thermal::DeviceLossSpec s;
+    s.device = name;
+    s.junction = string_or(l, "junction", "");
+    s.heat_node = string_or(l, "heat_node", "");
+    s.tj = l["Tj"] ? l["Tj"].as<Real>() : std::nan("");
+    s.e_on = e_table("e_on");
+    s.e_off = e_table("e_off");
+    if (l["v_on"]) {
+        const YAML::Node t = l["v_on"];
+        keys(t, "v_on", {"i", "tj", "v"});
+        std::vector<Real> v;
+        flat(list(t, "v_on", "v"), v, flat);
+        try {
+            s.v_on = std::make_shared<const thermal::ConductionTable>(
+                list(t, "v_on", "i").as<std::vector<Real>>(),
+                list(t, "v_on", "tj").as<std::vector<Real>>(), std::move(v));
+        } catch (const std::invalid_argument& ex) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: losses.v_on: {}", who, ex.what()));
+        }
+    }
+    const std::string cond = string_or(l, "conduction", "electrical");
+    if (cond != "electrical" && cond != "table") {
+        throw std::runtime_error(std::format(
+            "yaml::load: device {}: losses.conduction must be electrical or "
+            "table, not '{}'", who, cond));
+    }
+    s.conduction = cond == "table" ? thermal::ConductionHeat::Table
+                                   : thermal::ConductionHeat::Electrical;
+    try {
+        b.set_device_losses(std::move(s));
+    } catch (const std::invalid_argument& ex) {
+        throw std::runtime_error(std::format("yaml::load: {}", ex.what()));
+    }
+}
+
 inline void load_device(
     builder::CircuitBuilder& b, const YAML::Node& dev,
     std::size_t idx) {
@@ -701,12 +817,49 @@ inline void load_device(
             real_or(dev, "g_on_diode",   Real{1e3}),
             real_or(dev, "g_off_diode",  Real{1e-9}));
     } else if (type == "igbt") {
+        // add-pwl-igbt-and-thyristor: V_ce0, reverse_blocking (default
+        // False, True when V_ce0 > 0 — the builder's stage-1 default).
+        require_only_keys(dev, idx, type, {"collector", "emitter", "R_on", "R_off",
+                                           "V_ce0", "reverse_blocking", "V_th",
+                                           "losses"});   // load_losses, below
+        const Real V_ce0 = real_or(dev, "V_ce0", Real{0});
         b.add_igbt(
             name,
             require_string(dev, idx, type, "collector"),
             require_string(dev, idx, type, "emitter"),
             real_or(dev, "R_on",  Real{10e-3}),
-            real_or(dev, "R_off", Real{1e9}));
+            real_or(dev, "R_off", Real{1e9}),
+            V_ce0,
+            bool_or(dev, "reverse_blocking", V_ce0 > Real{0}),
+            real_or(dev, "V_th", Real{0}));
+    } else if (type == "thyristor" || type == "gto" || type == "triac") {
+        const bool tri = type == "triac";
+        const bool gto = type == "gto";
+        if (gto) {
+            require_only_keys(dev, idx, type,
+                              {"anode", "cathode", "R_on", "R_off", "V_f", "V_th"});
+        } else if (tri) {
+            require_only_keys(dev, idx, type,
+                              {"t1", "t2", "R_on", "R_off", "V_f", "I_H", "V_th"});
+        } else {
+            require_only_keys(dev, idx, type, {"anode", "cathode", "R_on",
+                                               "R_off", "V_f", "I_H", "V_th"});
+        }
+        const std::string a = require_string(dev, idx, type, tri ? "t1" : "anode");
+        const std::string k = require_string(dev, idx, type, tri ? "t2" : "cathode");
+        const Real R_on = real_or(dev, "R_on", Real{1e-3});
+        const Real R_off = real_or(dev, "R_off", Real{1e9});
+        const Real V_f = real_or(dev, "V_f", Real{0});
+        const Real V_th = real_or(dev, "V_th", Real{0});
+        if (gto) {
+            b.add_gto(name, a, k, R_on, R_off, V_f, V_th);
+        } else if (tri) {
+            b.add_triac(name, a, k, R_on, R_off, V_f,
+                        real_or(dev, "I_H", Real{0}), V_th);
+        } else {
+            b.add_thyristor(name, a, k, R_on, R_off, V_f,
+                            real_or(dev, "I_H", Real{0}), V_th);
+        }
     } else if (type == "transformer") {
         b.add_transformer(
             name,
@@ -805,7 +958,71 @@ inline void load_device(
             require_string(dev, idx, type, "s_from"),
             require_string(dev, idx, type, "s_to"),
             require_real(dev, idx, type, "n"));
+    } else if (type == "induction_machine" ||
+               (type == "induction_motor" &&
+                string_or(dev, "model", "observer") == "mna")) {
+        // add-mna-native-machines: CircuitBuilder::add_induction_machine_mna.
+        // `induction_machine` takes leakages (L_ls, L_lr); the legacy
+        // `induction_motor` with `model: mna` keeps its self-inductance
+        // keys (L_s, L_r) and is converted here.
+        if (const auto m = string_or(dev, "model", "mna"); m != "mna") {
+            throw std::runtime_error(std::format(
+                "yaml::load: induction_machine '{}': model must be 'mna' "
+                "(got '{}'); the observer is type: induction_motor",
+                name, m));
+        }
+        if (type == "induction_machine") {
+            require_only_keys(dev, idx, type,
+                              {"model", "phase_nodes", "neutral_node",
+                               "omega_node", "R_s", "L_ls", "R_r", "L_lr",
+                               "L_m", "pole_pairs", "J", "B", "T_load",
+                               "omega0"});
+        } else {
+            require_only_keys(dev, idx, type,
+                              {"model", "phase_nodes", "neutral_node",
+                               "omega_node", "R_s", "L_s", "R_r", "L_r",
+                               "L_m", "pole_pairs", "J", "B", "T_load",
+                               "omega0"});
+        }
+        if (!dev["phase_nodes"] || !dev["phase_nodes"].IsSequence() ||
+            dev["phase_nodes"].size() != 3) {
+            throw std::runtime_error(std::format(
+                "yaml::load: {} '{}' requires phase_nodes: [a, b, c] "
+                "(sequence of 3 strings)", type, name));
+        }
+        std::array<std::string, 3> ph;
+        for (std::size_t k = 0; k < 3; ++k) {
+            if (!dev["phase_nodes"][k].IsScalar()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: {} '{}' phase_nodes[{}] must be a scalar "
+                    "node name", type, name, k));
+            }
+            ph[k] = dev["phase_nodes"][k].as<std::string>();
+        }
+        const Real L_m = require_real(dev, idx, type, "L_m");
+        const bool legacy = type == "induction_motor";
+        const Real L_ls = legacy ? require_real(dev, idx, type, "L_s") - L_m
+                                 : require_real(dev, idx, type, "L_ls");
+        const Real L_lr = legacy ? require_real(dev, idx, type, "L_r") - L_m
+                                 : require_real(dev, idx, type, "L_lr");
+        b.add_induction_machine_mna(
+            name, ph[0], ph[1], ph[2],
+            require_string(dev, idx, type, "neutral_node"),
+            require_string(dev, idx, type, "omega_node"),
+            require_real(dev, idx, type, "R_s"), L_ls,
+            require_real(dev, idx, type, "R_r"), L_lr, L_m,
+            require_real(dev, idx, type, "pole_pairs"),
+            require_real(dev, idx, type, "J"),
+            nonneg_or_zero(dev, type, name, "B"),
+            real_or(dev, "T_load", Real{0}),
+            real_or(dev, "omega0", Real{0}));
     } else if (type == "induction_motor") {
+        if (const auto m = string_or(dev, "model", "observer");
+            m != "observer") {
+            throw std::runtime_error(std::format(
+                "yaml::load: induction_motor '{}': model must be 'observer' "
+                "or 'mna' (got '{}')", name, m));
+        }
         // Phase 2.1 composite device — the YAML defines the TOPOLOGY
         // (3× per-phase Rs + σ·Ls + dummy V source). The user wires
         // the BlockChain (`chain.add_induction_motor(...)`) in Python
@@ -953,8 +1170,10 @@ inline void load_device(
             require_string(dev, idx, type, "drain"),
             require_string(dev, idx, type, "source"),
             require_string(dev, idx, type, "gate"), p);
-    } else if (type == "nonlinear_capacitor") {
-        // add-realistic-passives 4.5: a charge-law capacitor. `law:` is
+    } else if (type == "nonlinear_capacitor" && !dev["pins"]) {
+        // add-realistic-passives 4.5: a charge-law capacitor (the
+        // authoring form, from/to; the IR emitter's `pins:` entry takes
+        // the registry branch below). `law:` is
         // the power_mosfet capacitance map; `dc_bias: {v, C}` (v >= 0,
         // the first at 0) is an MLCC's small-signal C(v_bias) curve,
         // integrated into an ODD charge table (C taken even in v).
@@ -1000,6 +1219,21 @@ inline void load_device(
             name,
             require_string(dev, idx, type, "from"),
             require_string(dev, idx, type, "to"), law);
+    } else if (std::ranges::find(ir::kKindYaml, std::string_view{type}) !=
+               ir::kKindYaml.end()) {
+        // A registry kind without an authoring type of its own
+        // (shockley_diode, lauritzen_diode, nonlinear_capacitor, pmsm_mna,
+        // ...): the emitter's entry, `pins: [...]` and its stored fields
+        // (one schema table for both, `ir::kKindYaml` / `kKindFields`).
+        YAML::Node d = YAML::Clone(dev);
+        d.remove("type");
+        d["kind"] = type;
+        try {
+            ir::YamlIo::read_entry(b, d);
+        } catch (const std::invalid_argument& e) {
+            throw std::runtime_error(std::format("yaml::load: device {}: {}",
+                                                 device_label(dev, idx), e.what()));
+        }
     } else {
         throw std::runtime_error(
             "yaml::load: device " + device_label(dev, idx) +
@@ -1010,13 +1244,14 @@ inline void load_device(
             "inductor, saturable_inductor, hysteretic_inductor, "
             "diode, nonlinear_diode (retired; needs allow_non_passive), switch, "
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
-            "power_mosfet, igbt, igbt_level1, vcvs, vccs, ccvs, cccs, gyrator, "
+            "power_mosfet, igbt, igbt_level1, thyristor, gto, triac, vcvs, vccs, ccvs, cccs, gyrator, "
             "sine_current_source, pulse_current_source, "
             "pwl_current_source, op_amp_ideal, "
             "gapped_core_inductor, transformer, multi_winding_transformer, "
             "ideal_transformer, saturable_transformer, induction_motor, "
-            "dc_machine");
+            "induction_machine, dc_machine");
     }
+    if (dev["losses"]) load_losses(b, dev, idx, type, name);
 }
 
 /// Keys `load_simulation_options` reads. Anything else in the block
@@ -1100,12 +1335,8 @@ inline void load_device_expr(builder::CircuitBuilder& b, const YAML::Node& dev,
             const auto text = kv.second.as<std::string>();
             const auto who = std::format("device \"{}\" field \"{}\"", name, key);
             const auto params = b.parameters();
-            const auto e = ir::Expr::compile(text, [&](std::string_view n)
-                    -> std::optional<std::uint32_t> {
-                for (std::size_t i = 0; i < params.size(); ++i) {
-                    if (params[i].name == n) return static_cast<std::uint32_t>(i);
-                }
-                return std::nullopt;
+            const auto e = ir::Expr::compile(text, [&](std::string_view n) {
+                return b.lookup_param(n);   // the open scope, then outward
             }, who);
             std::vector<Real> vals;
             for (const auto& q : params) vals.push_back(q.value);
@@ -1123,9 +1354,12 @@ inline void load_device_expr(builder::CircuitBuilder& b, const YAML::Node& dev,
                 "only a value field of the device's own branch; write a number here",
                 name, key));
         }
-        const auto hidden = std::format("{}:{}", name, key);
-        b.param_expr(hidden, text);
-        b.bind_param(std::format("{}.{}", name, key), hidden);
+        // Declared in the device's scope, under its local name there.
+        const auto prefix = b.scoped_name("");
+        const std::string_view local = name.starts_with(prefix) && b.current_scope() != 0
+            ? std::string_view{name}.substr(prefix.size()) : std::string_view{name};
+        const auto hidden = b.param_expr(std::format("{}:{}", local, key), text);
+        b.bind_param(std::format("{}.{}", name, key), hidden.name);
     }
 }
 
@@ -1202,6 +1436,144 @@ inline void warn_unknown_keys(
                 "for a typo or a mis-indented block", where, key,
                 accepted));
         }
+    }
+}
+
+/// Keys of authoring device entries whose value is a NODE name (group 8:
+/// renamed into a subsystem's scope). `control` names a branch. A key
+/// added to `load_device` that names a node belongs here; the subsystem
+/// test loads one device of every authoring type inside a scope and
+/// compares it with its hand-prefixed twin.
+inline constexpr std::string_view kNodeKeys[] = {
+    "from", "to", "anode", "cathode", "drain", "source", "gate", "collector",
+    "emitter", "in_pos", "in_neg", "out", "out_pos", "out_neg", "a_pos", "a_neg",
+    "p_from", "p_to", "s_from", "s_to", "p1_pos", "p1_neg", "p2_pos", "p2_neg",
+    "neutral_node", "omega_node",
+    "omega", "theta"};   // a registry-kind entry (pmsm_mna); its `pins` lists too
+
+/// One subsystem block's naming: its ports (local name -> the node it
+/// binds in the enclosing scope) on top of the builder's open scope.
+struct BlockNames {
+    builder::CircuitBuilder& b;
+    std::unordered_map<std::string, std::string> ports;
+
+    [[nodiscard]] std::string node(const std::string& local) const {
+        if (const auto it = ports.find(local); it != ports.end()) return it->second;
+        if (builder::CircuitBuilder::is_ground_name(local)) return local;
+        return b.scoped_name(local);
+    }
+    /// A copy of `dev` with its name, nodes and sensed branch in scope.
+    [[nodiscard]] YAML::Node device(const YAML::Node& dev) const {
+        if (!dev.IsMap()) return dev;
+        YAML::Node d = YAML::Clone(dev);
+        auto scalar = [](const YAML::Node& n) { return n && n.IsScalar(); };
+        if (scalar(d["name"])) d["name"] = b.scoped_name(d["name"].as<std::string>());
+        if (scalar(d["control"])) d["control"] = b.scoped_name(d["control"].as<std::string>());
+        for (const auto k : kNodeKeys) {
+            const std::string key{k};
+            if (scalar(d[key])) d[key] = node(d[key].as<std::string>());
+        }
+        for (const auto* list : {"windings", "secondaries"}) {
+            if (!d[list] || !d[list].IsSequence()) continue;
+            for (std::size_t i = 0; i < d[list].size(); ++i) {
+                YAML::Node w = d[list][i];
+                if (!w.IsMap()) continue;
+                for (const auto* k : {"from", "to", "s_from", "s_to"}) {
+                    if (scalar(w[k])) w[k] = node(w[k].as<std::string>());
+                }
+            }
+        }
+        auto pins = [&](YAML::Node list) {
+            if (!list || !list.IsSequence()) return;
+            for (std::size_t i = 0; i < list.size(); ++i) {
+                if (scalar(list[i])) list[i] = node(list[i].as<std::string>());
+            }
+        };
+        pins(d["pins"]);
+        if (d["phases"] && d["phases"].IsSequence()) {
+            for (std::size_t i = 0; i < d["phases"].size(); ++i) {
+                YAML::Node ph = d["phases"][i];
+                if (!ph.IsMap()) continue;
+                if (scalar(ph["name"])) ph["name"] = b.scoped_name(ph["name"].as<std::string>());
+                pins(ph["pins"]);
+            }
+        }
+        if (d["phase_nodes"] && d["phase_nodes"].IsSequence()) {
+            for (std::size_t i = 0; i < d["phase_nodes"].size(); ++i) {
+                if (scalar(d["phase_nodes"][i])) {
+                    d["phase_nodes"][i] = node(d["phase_nodes"][i].as<std::string>());
+                }
+            }
+        }
+        return d;
+    }
+};
+
+/// `circuit.subsystems`: [{name, kind?, ports?, parameters?, nodes?,
+/// devices?, subsystems?}]. Each block is a scope: its parameters are
+/// declared in it (expressions see them first, then the enclosing
+/// scopes), and every device and node name it writes is prefixed with
+/// its path, except its ports (bound to nodes of the enclosing block)
+/// and ground.
+inline void load_subsystems(builder::CircuitBuilder& b, const YAML::Node& list,
+                            const BlockNames& outer, std::vector<std::string>& warnings) {
+    if (!list.IsSequence()) {
+        throw std::runtime_error("yaml::load: 'subsystems' must be a list of blocks");
+    }
+    for (const auto& blk : list) {
+        if (!blk.IsMap() || !blk["name"] || !blk["name"].IsScalar()) {
+            throw std::runtime_error("yaml::load: each subsystem needs a 'name'");
+        }
+        const auto name = blk["name"].as<std::string>();
+        if (name.empty() || name.find('/') != std::string::npos) {
+            throw std::runtime_error(std::format(
+                "yaml::load: subsystem '{}': a block name is one non-empty path "
+                "segment (no '/'); nest blocks with 'subsystems'", name));
+        }
+        warn_unknown_keys(blk, {"name", "kind", "ports", "parameters", "nodes", "devices",
+                                "subsystems"},
+                          std::format("subsystem '{}':", b.scoped_name(name)), warnings);
+        BlockNames inner{b, {}};
+        if (const auto ps = blk["ports"]) {
+            if (!ps.IsMap()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: subsystem '{}': 'ports' must map a local name to "
+                    "a node of the enclosing block", name));
+            }
+            for (const auto& kv : ps) {
+                inner.ports.emplace(kv.first.as<std::string>(),
+                                    outer.node(kv.second.as<std::string>()));
+            }
+        }
+        const auto kind = blk["kind"] && blk["kind"].IsScalar()
+            ? blk["kind"].as<std::string>() : std::string{};
+        for (const auto& sc : b.scopes()) {   // a block is an instance: never merged
+            if (sc.path == b.scoped_name(name)) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: subsystem '{}' is listed twice", sc.path));
+            }
+        }
+        try {
+            (void)b.open_scope(name, kind);
+        } catch (const std::invalid_argument& e) {
+            throw std::runtime_error(std::format("yaml::load: subsystem: {}", e.what()));
+        }
+        if (blk["parameters"]) load_parameters(b, blk["parameters"]);
+        if (blk["nodes"] && blk["nodes"].IsSequence()) {
+            for (const auto& n : blk["nodes"]) {
+                if (n.IsScalar()) b.node(inner.node(n.as<std::string>()));
+            }
+        }
+        if (const auto devs = blk["devices"]) {
+            if (!devs.IsSequence()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: subsystem '{}': 'devices' must be a list", name));
+            }
+            std::size_t idx = 0;
+            for (const auto& dev : devs) load_device_expr(b, inner.device(dev), idx++);
+        }
+        if (blk["subsystems"]) load_subsystems(b, blk["subsystems"], inner, warnings);
+        b.close_scope();
     }
 }
 
@@ -1286,6 +1658,16 @@ namespace detail {
 
     LoadedCircuit loaded;
     loaded.source = source;
+    // The emitter's document (`Circuit.to_yaml()`): read by its inverse,
+    // so every circuit the emitter writes is a netlist this loader takes.
+    if (root["pulsim_circuit"]) {
+        try {
+            loaded.builder = ir::from_yaml(yaml_text).to_builder();
+        } catch (const std::invalid_argument& e) {
+            throw std::runtime_error(std::string{"yaml::load_string: "} + e.what());
+        }
+        return loaded;
+    }
     detail::warn_unknown_keys(root, {"circuit", "simulation"},
                               "top-level", loaded.warnings);
 
@@ -1306,7 +1688,7 @@ namespace detail {
             "'circuit:' — dedent the block. As written, t_end and dt "
             "would not be read and would load as 0.");
     }
-    detail::warn_unknown_keys(circuit, {"nodes", "devices", "parameters"},
+    detail::warn_unknown_keys(circuit, {"nodes", "devices", "parameters", "subsystems"},
                               "circuit:", loaded.warnings);
     if (circuit["parameters"]) {
         detail::load_parameters(loaded.builder, circuit["parameters"]);
@@ -1335,6 +1717,10 @@ namespace detail {
     for (const auto& dev : devices) {
         detail::load_device_expr(loaded.builder, dev, idx);
         ++idx;
+    }
+    if (circuit["subsystems"]) {
+        detail::load_subsystems(loaded.builder, circuit["subsystems"],
+                                detail::BlockNames{loaded.builder, {}}, loaded.warnings);
     }
 
     // Optional simulation block. Present-but-not-a-map (an empty

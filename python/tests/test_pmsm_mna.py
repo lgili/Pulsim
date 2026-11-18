@@ -283,3 +283,20 @@ def test_it_no_longer_blocks_the_trbdf2_router():
         mmc_arms=None, enable_substep_state_correction=None,
         inductor_freeze_di_max=None, inductor_abs_clamp=None)
     assert not any("PMSM" in w for w in why), why
+
+
+@pytest.mark.parametrize("dt", [1e-6, 1e-7, 2e-8])
+def test_fixed_step_run_takes_no_dt_retry(dt):
+    # Every pwl step used to fail at the requested dt (the step cache
+    # cannot factorise the linear part: the flux rows exist only in the
+    # Newton refresh) and was re-taken at dt/2 (DECISIONS D15).
+    b = p.CircuitBuilder()
+    for k, n in enumerate(("ua", "ub", "uc")):
+        b.add_sine_voltage_source(f"V{n}", n, "gnd", 0.0, 12.0, 30.0,
+                                  -2 * math.pi / 3 * k)
+    b.add_pmsm_mna("M", "ua", "ub", "uc", "nn", "w", "th", R_s=0.5,
+                   L_d=1e-3, L_q=3e-3, psi_pm=0.05, pole_pairs=4, J=1e-3,
+                   B=1e-4)
+    res = p.simulate(b, t_end=2000 * dt, dt=dt, engine="pwl")
+    assert len(res.times) == 2001
+    assert not res.dt_retries

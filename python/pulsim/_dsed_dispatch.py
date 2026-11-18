@@ -1096,6 +1096,22 @@ def check_diode_modes(res, builder, rel: float = 1e-3) -> None:
         return
     if S.ndim != 2 or not comps:
         return
+    # The engine's zero band (scheduler.hpp zero_band_tol_), per sample: 1e-12 of the
+    # largest node voltage or diode drop. A diode inside it is undecidable by its value
+    # (the leak divider of an idle bridge puts 5e-15 V across an OFF diode at 100 V).
+    X, vnode = None, _np.zeros(S.shape[0])
+    # only the full MNA vector has node voltages (a reduced state holds L and C states)
+    if getattr(res, "has_full_states", False):
+        try:
+            nn = int(builder.graph.num_nodes)
+            X = _np.asarray(res.states)
+            if nn:
+                vnode = _np.abs(X[:, :nn]).max(axis=1)
+        except Exception:  # noqa: BLE001 - unreadable states: no band beyond the drops
+            X = None
+    drops = [max(abs(float(c["params"].get("V_th", 0.0))), abs(float(c["params"].get("V_f", 0.0))))
+             for c in comps]
+    band = 1e-12 * _np.maximum(vnode, max(drops))
     for c in comps:
         prm = c["params"]
         k = builder.switch_index_of(c["name"])
@@ -1104,12 +1120,19 @@ def check_diode_modes(res, builder, rel: float = 1e-3) -> None:
         on = S[:, k].astype(bool)
         i = _np.asarray(res.i(c["name"]), dtype=float)
         thr = max(float(prm.get("V_th", 0.0)), float(prm.get("V_f", 0.0)))
-        v_off = i / float(prm.get("g_off", 1e-9))
+        g_off = float(prm.get("g_off", 1e-9))
+        if g_off > 0.0:
+            v_off = i / g_off
+        elif X is not None:   # no leak: the OFF voltage from the nodes (the current is 0 / 0)
+            a, kk = c["nodes"]
+            v_off = ((X[:, a] if a >= 0 else 0.0) - (X[:, kk] if kk >= 0 else 0.0)) * _np.ones(len(on))
+        else:
+            v_off = _np.zeros(len(on))   # no states: the OFF law cannot be read
         i_pk = max(float(_np.abs(i).max()), 1e-12)
         v_pk = max(float(_np.abs(v_off[~on]).max()) if (~on).any() else 0.0,
                    thr, 1e-12)
-        bad_on = on & (i < -rel * i_pk)
-        bad_off = ~on & (v_off > thr + rel * v_pk)
+        bad_on = on & (i < -_np.maximum(rel * i_pk, band * float(prm.get("g_on", 0.0))))
+        bad_off = ~on & (v_off > thr + _np.maximum(rel * v_pk, band))
         if bad_on.any() or bad_off.any():
             k = int(_np.argmax(bad_on | bad_off))
             what = (f"ON while carrying {i[k]:.4g} A" if bad_on[k] else

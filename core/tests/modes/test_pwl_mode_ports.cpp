@@ -9,6 +9,7 @@
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
 #include "pulsim/pwl/mode_ports.hpp"
+#include "pulsim/dsed/builder_adapter.hpp"
 
 #include <Eigen/Dense>
 
@@ -330,4 +331,52 @@ TEST_CASE("pwl judge: the engine's own diode law with circuit-scale tolerance",
     x[d1.from] = -0.5;
     REQUIRE(pwl::judge_mode(diodes, {1, 0}, x, sc, 1e-9) == 0);
     REQUIRE(pwl::judge_mode(diodes, {0, 0}, x, sc, 1e-9) == 1);
+}
+
+// The dsed adapter's port model (diode_port_problem_full: the cache's factor at
+// dt = 2h, J = G + C/(2h) with the assembler's C, J·δ = −(b_c + G·x), u = v(x) +
+// v(δ)) on the same two islands, against the double-double solve of that system.
+// Measured: 7.1e-10 V (tie 1e7) and 4.6e-8 V (tie 1e9) for h = 1e-5 … 1e-9, the
+// same with the islands corrected jointly or one after another. Not asserted: a
+// 1e5 Ω tie is not an island on dsed (its weak threshold is 1e-6 S, pwl's 1e-3 S)
+// and its common mode is the factor's rounding, up to 5.9e-4 V at h = 1e-9.
+TEST_CASE("dsed port model: two islands joined by a weak edge, against a double-double solve",
+          "[modes][dsed_ports]") {
+    for (const Real r_tie : {1e7, 1e9}) {
+        const Real bound = r_tie < 1e8 ? 1e-8 : 5e-7;   // 14x and 11x the measured error
+        auto b = two_buses(r_tie);
+        const auto& g = b.graph();
+        auto& pool = b.pool();
+        pwl::PwlStateSpaceCache cache(g, pool);
+        dsed::NativeCircuitBuilderAdapter<> ad{g, pool, cache};
+        const topology::SwitchStateMask mask(g.num_switches());   // all OFF: two islands
+        ad.set_mask(mask);
+        pwl::DiodeEventState diodes(g, pool);
+        std::vector<std::pair<Index, Index>> ports;
+        for (const auto& e : diodes.entries()) ports.emplace_back(e.from, e.to);
+        REQUIRE(ports.size() == 4);
+        const auto n = static_cast<Index>(pool.state_size(g));
+        const Vector xf = Vector::LinSpaced(n, 3.0, 97.0);
+        sparse::Matrix G, C;
+        Vector bc;
+        pwl::assemble_segment_split(g, pool, mask, G, C, bc);
+        const Vector Gx = G * xf;
+        for (const Real h : {Real{1e-5}, Real{1e-7}, Real{1e-9}}) {
+            DenseMatrix Z;
+            Vector u;
+            ad.diode_port_problem_full(mask, 0.0, xf, h, ports, Z, u);
+            const auto A = dd_matrix(g, pool, mask, Real{2} * h);
+            std::vector<DD> rhs(static_cast<std::size_t>(n));
+            for (Index i = 0; i < n; ++i)
+                rhs[static_cast<std::size_t>(i)] = -(dd(bc[i]) + dd(Gx[i]));
+            const auto d = dd_solve(A, rhs);
+            for (std::size_t j = 0; j < ports.size(); ++j) {
+                const auto [a, c] = ports[j];
+                const DD ref = dd(vp(xf, a, c)) + dd_vp(d, a, c);
+                const Real err = std::abs((dd(u[static_cast<Index>(j)]) - ref).hi);
+                INFO("tie=" << r_tie << " h=" << h << " j=" << j << " err=" << err);
+                CHECK(err <= bound);
+            }
+        }
+    }
 }

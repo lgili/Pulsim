@@ -76,6 +76,7 @@ inline void add_thyristor_to_chain(
         ctx.put(output_channel, state->latched_on ? Real{1} : Real{0});
     };
     auto reset = [state]() { state->reset(); };
+    chain.capture(state);
     chain.add(std::move(step), std::move(reset));
 }
 
@@ -126,6 +127,7 @@ inline void add_fuse_to_chain(
         ctx.put(output_channel, state->blown ? Real{0} : Real{1});
     };
     auto reset = [state]() { state->reset(); };
+    chain.capture(state);
     chain.add(std::move(step), std::move(reset));
 }
 

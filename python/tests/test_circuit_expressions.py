@@ -1,7 +1,8 @@
 """add-immutable-circuit-ir group 7: parameter expressions.
 
 The C++ evaluator (``ir/expr.hpp``) against a Python reference on 10^4
-random expressions; a circuit written with expressions against the same
+random expressions of exact operations (bit for bit) and 10^4 libm calls
+(within LIBM_ULPS ulp); a circuit written with expressions against the same
 circuit written with the evaluated literals (bit for bit); errors name
 the parameter or device, the field and the text; ``to_yaml`` writes the
 text, not the value.
@@ -19,16 +20,23 @@ import pulsim as p
 from pulsim import _pulsim as k
 
 NAMES = ("a", "b", "c", "Lbase", "x_1")
-UNARY = {"abs": abs, "sqrt": math.sqrt, "exp": math.exp, "log": math.log,
-         "log10": math.log10, "sin": math.sin, "cos": math.cos,
-         "tan": math.tan, "atan": math.atan, "sinh": math.sinh,
-         "cosh": math.cosh, "tanh": math.tanh}
-BINARY = {"min": min, "max": max, "pow": math.pow, "atan2": math.atan2}
+# IEEE-exact operations: the C++ evaluator and Python round each the same
+# way on every platform, so these are compared bit for bit.
+EXACT_UNARY = {"abs": abs, "sqrt": math.sqrt}
+EXACT_BINARY = {"min": min, "max": max}
+# libm functions: glibc, macOS and MSVC differ in the last ulp or two, so
+# these are compared to LIBM_ULPS ulp of the reference, on arguments the
+# exact generator makes (so the argument itself is bit-identical).
+LIBM = {"exp": math.exp, "log": math.log, "log10": math.log10,
+        "sin": math.sin, "cos": math.cos, "tan": math.tan,
+        "atan": math.atan, "sinh": math.sinh, "cosh": math.cosh,
+        "tanh": math.tanh}
+LIBM_ULPS = 4
 
 
 def _gen(rng, env, depth):
-    """A random expression as (text, value); every sub-value is finite and
-    every function stays in its real domain."""
+    """A random expression of exact operations as (text, value); every
+    sub-value is finite."""
     if depth == 0 or rng.random() < 0.25:
         if rng.random() < 0.5:
             n = rng.choice(NAMES)
@@ -37,49 +45,71 @@ def _gen(rng, env, depth):
                         float(rng.randint(0, 9)), rng.uniform(1e-6, 1e-3)))
         return repr(x), x
     r = rng.random()
-    if r < 0.45:
+    if r < 0.6:
         op = rng.choice("+-*/")
         (ta, a), (tb, b) = _gen(rng, env, depth - 1), _gen(rng, env, depth - 1)
         if op == "/" and b == 0.0:
             return ta, a
         v = {"+": a + b, "-": a - b, "*": a * b, "/": a / b if b else 0}[op]
         return f"({ta} {op} {tb})", v
-    if r < 0.55:
+    if r < 0.7:
         ta, a = _gen(rng, env, depth - 1)
         return f"-{ta}" if not ta.startswith("-") else f"-({ta})", -a
-    if r < 0.65:
-        ta, a = _gen(rng, env, depth - 1)
-        e = rng.choice((2.0, 0.5, 3.0, -1.0))
-        a = abs(a) + 0.5
-        return f"(abs({ta}) + 0.5)^{e!r}", a ** e
     if r < 0.85:
-        f = rng.choice(list(UNARY))
+        f = rng.choice(list(EXACT_UNARY))
         ta, a = _gen(rng, env, depth - 1)
-        if f in ("sqrt", "log", "log10"):
-            return f"{f}(abs({ta}) + 1)", UNARY[f](abs(a) + 1)
-        if f in ("exp", "sinh", "cosh"):
-            return f"{f}(tanh({ta}))", UNARY[f](math.tanh(a))
-        return f"{f}({ta})", UNARY[f](a)
-    f = rng.choice(list(BINARY))
+        if f == "sqrt":
+            return f"sqrt(abs({ta}) + 1)", math.sqrt(abs(a) + 1)
+        return f"{f}({ta})", EXACT_UNARY[f](a)
+    f = rng.choice(list(EXACT_BINARY))
     (ta, a), (tb, b) = _gen(rng, env, depth - 1), _gen(rng, env, depth - 1)
-    if f == "pow":
-        return f"pow(abs({ta}) + 1, tanh({tb}))", math.pow(abs(a) + 1, math.tanh(b))
-    return f"{f}({ta}, {tb})", BINARY[f](a, b)
+    return f"{f}({ta}, {tb})", EXACT_BINARY[f](a, b)
 
 
-def test_fuzz_against_a_python_reference():
+def _env(rng):
+    return {n: rng.uniform(-5, 5) for n in NAMES}
+
+
+def test_fuzz_exact_operations_bit_for_bit():
     rng = random.Random(20261118)
-    worst = 0.0
     for _ in range(10_000):
-        env = {n: rng.uniform(-5, 5) for n in NAMES}
+        env = _env(rng)
         text, want = _gen(rng, env, rng.randint(1, 6))
         if not math.isfinite(want):
             continue
         got = k._eval_expr(text, list(env), list(env.values()))
-        err = abs(got - want) / max(abs(want), 1e-300)
-        worst = max(worst, err if want else abs(got))
-        assert err <= 1e-15 or abs(got - want) <= 1e-300, (text, got, want)
-    assert worst <= 1e-15
+        assert got == want, (text, got, want)
+
+
+def _libm_case(rng, env):
+    """One libm call (or ^, which is pow) on exact arguments, kept in the
+    function's real domain and away from overflow."""
+    (ta, a), (tb, b) = _gen(rng, env, 2), _gen(rng, env, 2)
+    f = rng.choice([*LIBM, "pow", "^", "atan2"])
+    if f in ("log", "log10"):
+        return f"{f}(abs({ta}) + 1)", LIBM[f](abs(a) + 1)
+    if f in ("exp", "sinh", "cosh"):
+        return f"{f}({ta} / (abs({ta}) + 1))", LIBM[f](a / (abs(a) + 1))
+    if f in LIBM:
+        return f"{f}({ta})", LIBM[f](a)
+    if f == "pow":
+        return f"pow(abs({ta}) + 1, {tb} / (abs({tb}) + 1))", \
+            math.pow(abs(a) + 1, b / (abs(b) + 1))
+    if f == "^":
+        e = rng.choice((2.0, 0.5, 3.0, -1.0))
+        return f"(abs({ta}) + 0.5)^{e!r}", math.pow(abs(a) + 0.5, e)
+    return f"atan2({ta}, {tb})", math.atan2(a, b)
+
+
+def test_fuzz_libm_functions_within_a_few_ulp():
+    rng = random.Random(20261119)
+    for _ in range(10_000):
+        env = _env(rng)
+        text, want = _libm_case(rng, env)
+        if not math.isfinite(want):
+            continue
+        got = k._eval_expr(text, list(env), list(env.values()))
+        assert abs(got - want) <= LIBM_ULPS * math.ulp(want), (text, got, want)
 
 
 @pytest.mark.parametrize(("text", "match"), [

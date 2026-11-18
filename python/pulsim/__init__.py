@@ -86,6 +86,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     load_yaml_file,
     # Source helpers (Layer 2 V5+).
     make_pwm_switch_fn,
+    make_phase_control_fn,
     make_constant_switch_fn,
     make_dead_time_pwm_pair_fn,
     make_spwm_pair_fn,
@@ -535,6 +536,7 @@ __all__ = [
     "NativeMultiMaskPwm",
     "wire_chain_from_yaml",
     "make_pwm_switch_fn",
+    "make_phase_control_fn",
     "make_constant_switch_fn",
     "make_dead_time_pwm_pair_fn",
     "make_spwm_pair_fn",
@@ -948,6 +950,7 @@ load_yaml_string = _yaml_retired_as_retired_error(load_yaml_string)
 load_yaml_file = _yaml_retired_as_retired_error(load_yaml_file)
 from ._refusal import unsupported as _unsupported  # noqa: E402
 from ._control_plan import compose_control as _compose_control  # noqa: E402
+from ._control_state import save_into as _save_control_state  # noqa: E402
 
 # add-mna-native-machines: CircuitBuilder.add_dc_machine (a linear
 # composite of existing kernel elements, solved inside the matrix).
@@ -1658,6 +1661,11 @@ def _result_plot(self, *signals, save=None, show=None, **kwargs):
 
 
 SimulationResult.plot = _result_plot  # type: ignore[attr-defined]
+
+# add-in-kernel-event-losses: CircuitBuilder.set_device_losses,
+# SimulationResult.loss_events / device_energy.
+from . import loss_tables as _loss_tables  # noqa: E402
+_loss_tables.install(CircuitBuilder, SimulationResult)
 # add-immutable-circuit-ir: the circuit that ran and what the run did to it.
 for _cls in (SimulationResult, _PEDRes):
     _cls.plan = property(  # type: ignore[attr-defined]
@@ -1966,6 +1974,7 @@ def simulate(
     on_cache=None,
     controller_period: Optional[float] = None,
     resume_from=None,
+    control_tick: str = "label",
     # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
     solver: Optional["SolverOptions"] = None,
     # --- forward parameter sensitivities (exact path only) ---
@@ -2353,6 +2362,14 @@ def simulate(
         if dt_init is None:
             dt_init = solver.dt_init
 
+    if enable_nonlinear_refresh is not None:
+        import warnings
+        warnings.warn(
+            "simulate(enable_nonlinear_refresh=...) is deprecated and will "
+            "be removed: the kernel stamps every Newton device itself "
+            "(add-unified-device-interface). True is the default "
+            "behaviour; False is refused on a circuit with Newton devices.",
+            DeprecationWarning, stacklevel=2)
     # ---- Validate first — fail fast on user mistakes (DSED side). ----
     # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
     # (rtol/atol/dt_init/integrator/stiffness_threshold/h_bdf2). For
@@ -2499,9 +2516,15 @@ def simulate(
     # (fix-control-tick-semantics). Above the dispatch so its refusals
     # (controller_period without an observer, a bad period) hold on
     # every engine; dsed refuses closed_loops / step_observer itself.
+    if control_tick not in ("label", "state"):
+        raise ValueError(
+            f"simulate(control_tick={control_tick!r}): use 'label' (the "
+            "default) or 'state'")
     _plan = _compose_control(builder, closed_loops, step_observer,
                              controller_period, switch_fn,
-                             resume=resume_from is not None)
+                             resume=resume_from is not None,
+                             snapshot=resume_from,
+                             control_tick=control_tick)
     # A control graph's driven sources reach every engine (above the
     # dispatch: add-compiled-control-graph).
     b_extra_fn = _plan.merge_b_extra(b_extra_fn)
@@ -2705,6 +2728,17 @@ def simulate(
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
             switch_fn=switch_fn)
+        if resume_from is not None and any(
+                _off_tick_grid(_g._cxx_chain, t_start) for _g in _plan.graphs):
+            # trbdf2 ticks at t_start + k*T: a graph resumed between two
+            # of its ticks would tick off its own grid (G26)
+            _rb = _Blocker(
+                "resume_from: a control graph resumes between two of its "
+                "ticks and the variable-step engine schedules ticks at "
+                "t_start + k*T (off the graph's grid); resume on a tick "
+                "instant, or use engine='pwl'")
+            _rb.feature = "resume_from"
+            _route_reasons = [*_route_reasons, _rb]
         if engine == "trbdf2":
             # Task 9.3: trbdf2 lands its steps on a C block's ticks
             # (state-time law); only 'auto' keeps routing them to pwl,
@@ -2866,6 +2900,7 @@ def simulate(
                 should_continue=should_continue,
                 observer_periods=[_p for _, _p in _plan.ticks],
                 observers=[_f for _f, _ in _plan.ticks],
+                observer_offsets=list(_plan.tick_offsets),
                 # None: the kernel stamps the Newton devices itself.
                 enable_nonlinear_refresh=enable_nonlinear_refresh,
                 max_newton_iterations=int(max_newton_iterations or 0),
@@ -2917,6 +2952,7 @@ def simulate(
         _trbdf2_warn_stats(res, builder, _stats, _engine_asked)
         if on_impulse == "warn":
             _warn_impulses(res)
+        _save_control_state(_plan.graphs, res)
         return res
 
     # ---- engine='pwl' from here on ----
@@ -3070,9 +3106,15 @@ def simulate(
         _mmc_obs, _mmc_b, _mmc_finalize = make_mmc_thevenin_driver(
             mmc_arms, _caller_builder, cache, dt,
             builder.pool.state_size(builder.graph))
-        step_observer, b_extra_fn = _compose_step_hooks(
-            step_observer, b_extra_fn, _mmc_obs, _mmc_b,
-            builder.pool.state_size(builder.graph), "mmc_arms")
+        # With kernel ticks the drivers run before the ticks, as before.
+        if _plan._kernel_ticks:
+            _plan.tick_before, b_extra_fn = _compose_step_hooks(
+                _plan.tick_before, b_extra_fn, _mmc_obs, _mmc_b,
+                builder.pool.state_size(builder.graph), "mmc_arms")
+        else:
+            step_observer, b_extra_fn = _compose_step_hooks(
+                step_observer, b_extra_fn, _mmc_obs, _mmc_b,
+                builder.pool.state_size(builder.graph), "mmc_arms")
 
     # v2.0 Phase 4 C.2 — hand the caller the cache the run will use,
     # so a hook can refactor parameters mid-run (the bidirectional
@@ -3090,9 +3132,14 @@ def simulate(
                     "simulate(on_cache=...): the hook must return "
                     "(step_observer, b_extra_fn) or None, got "
                     f"{type(_hooked).__name__}") from None
-            step_observer, b_extra_fn = _compose_step_hooks(
-                step_observer, b_extra_fn, _hk_obs, _hk_b,
-                builder.pool.state_size(builder.graph), "on_cache")
+            if _plan._kernel_ticks:
+                _plan.tick_before, b_extra_fn = _compose_step_hooks(
+                    _plan.tick_before, b_extra_fn, _hk_obs, _hk_b,
+                    builder.pool.state_size(builder.graph), "on_cache")
+            else:
+                step_observer, b_extra_fn = _compose_step_hooks(
+                    step_observer, b_extra_fn, _hk_obs, _hk_b,
+                    builder.pool.state_size(builder.graph), "on_cache")
 
     # Construct options.
     opts = SimulationOptions(t_start=t_start, t_end=t_end, dt=dt)
@@ -3136,6 +3183,9 @@ def simulate(
         opts.newton_roundoff_budget = int(newton_roundoff_budget)
     if enable_substep_state_correction is not None:
         opts.enable_substep_state_correction = enable_substep_state_correction
+    if control_tick == "state":
+        # G30: a split edge is moved by at most 1e-6 dt (0.01 dt before)
+        opts.split_snap = 1e-6
     if discontinuity_restart is not None:
         opts.discontinuity_restart = bool(discontinuity_restart)
     opts.on_impulse_error = on_impulse == "error"
@@ -3283,8 +3333,10 @@ def simulate(
     # use `run_transient_with_chain` which invokes the C++ chain
     # directly each step — skipping the pybind11 std::function
     # wrap. Saves ~10-30 % wall time on chains > 5 blocks.
+    # (Not with kernel tick sources: the chain entry point takes none.)
     cxx_chain = getattr(step_observer, "_cxx_chain", None) \
-                  if step_observer is not None else None
+        if step_observer is not None and not _plan.fixed_tick_kwargs() \
+        else None
     if cxx_chain is not None:
         from . import _pulsim as _k  # type: ignore[import-not-found]
         chain_dt = getattr(step_observer, "_chain_dt", dt)
@@ -3329,6 +3381,8 @@ def simulate(
             kwargs["live_ring"] = live_ring
         if resume_from is not None:
             kwargs["resume_from"] = resume_from
+        # Python tick sources: scheduled by the kernel's event queue.
+        kwargs.update(_plan.fixed_tick_kwargs())
         if _PWL_RECIPE.get() is not None:  # sweep(circuit, ...) replays it
             _PWL_RECIPE.get().update(
                 opts=opts, dt=dt, kwargs=dict(kwargs), mmc=bool(mmc_arms),
@@ -3416,8 +3470,11 @@ def simulate(
             "; ".join(_route_reasons) if _route_reasons else None)
         res.step_loop_python_callbacks = _step_loop_python_callbacks(
             switch_fn=switch_fn, b_extra_fn=b_extra_fn,
-            # the chain fast path runs the observer's C++ chain
-            step_observer=None if cxx_chain is not None else step_observer,
+            # the chain fast path runs the observer's C++ chain; the
+            # kernel's Python tick sources are step-loop observers too
+            step_observer=(_plan.fixed_tick_kwargs().get("tick_fns")
+                           or (None if cxx_chain is not None
+                               else step_observer)),
             should_continue=should_continue,
             closed_loops=_closed_loops_user or None)
     except AttributeError:  # pragma: no cover
@@ -3426,7 +3483,7 @@ def simulate(
         # Per tick source, registration order; the largest lateness
         # of a tick on this grid (0 when every T_j is a multiple of dt).
         res.control_tick_counts, res.control_tick_jitter_max = \
-            _plan.fixed_tick_counts()
+            _plan.fixed_tick_counts(res)
     except AttributeError:  # pragma: no cover
         pass
     try:
@@ -3544,7 +3601,22 @@ def simulate(
     # the trace it was solved against.
     if _mmc_finalize is not None and len(res.states) > 0:
         _mmc_finalize(res.times[-1], res.states[-1])
+    _save_control_state(_plan.graphs, res)
     return res
+
+
+def _off_tick_grid(cxx, t_start: float) -> bool:
+    """A resumed graph whose rate groups do not all tick on t_start +
+    offset + k*period (what trbdf2's event queue schedules): some group
+    would leave its grid."""
+    if not cxx.n_calls:
+        return False
+    for gi, due in enumerate(cxx.next_due_per_group(), start=1):
+        period = float(cxx.group_period(gi))
+        q = (float(due) - t_start - float(cxx.group_offset(gi))) / period
+        if abs(q - round(q)) > 1e-9 * max(1.0, abs(q)):
+            return True
+    return False
 
 
 def _warn_newton_roundoff(res, eng) -> None:
@@ -3613,7 +3685,7 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
     # sampling used while it was open (or before that bit's first
     # edge): it was found by luck, so pulses that narrow may have been
     # stepped over before its width was known (the step is capped at
-    # twice the narrowest pulse from then on). A one-shot pulse that
+    # twice the gate's recent pulses while it keeps toggling). A one-shot pulse that
     # no sample hit is not counted: nothing saw it.
     if stats.get("n_gate_undersampled", 0) > 0:
         w = float(stats.get("gate_pulse_min", 0.0))
@@ -3912,7 +3984,8 @@ def _attach_native_machine_traces(result, builder) -> None:
     """Traces for `add_pmsm_mna` machines: `<name>.t/omega/theta/T_em/
     i_d/i_q`, with i_d/i_q by the FOC chain's amplitude-invariant
     Clarke–Park (d on the PM flux, q leading) and T_em from the same
-    co-energy law the stamp uses."""
+    co-energy law the stamp uses. `add_induction_machine_mna` machines
+    get `<name>.t/omega/T_em/psi_ra/psi_rb`."""
     import numpy as _np
     if builder is None:
         return
@@ -3921,7 +3994,9 @@ def _attach_native_machine_traces(result, builder) -> None:
     if machines is None:
         return
     machines = machines()
-    if not machines:
+    inductions = pool.induction_machines() if hasattr(
+        pool, "induction_machines") else []
+    if not machines and not inductions:
         return
     states = _np.asarray(result.states, dtype=float)
     times = _np.asarray(result.times, dtype=float)
@@ -3932,6 +4007,11 @@ def _attach_native_machine_traces(result, builder) -> None:
         traces = {}
         result._motor_traces = traces
     graph = builder.graph
+
+    def node(k):  # a node tied to ground has index -1: read zeros, not the last column
+        k = int(k)
+        return states[:, k] if k >= 0 else _np.zeros(len(states))
+
     for m in machines:
         bids = [int(b) for b in m["branch_ids"]]
         name = builder.name_of(bids[0])
@@ -3941,8 +4021,8 @@ def _attach_native_machine_traces(result, builder) -> None:
         psi = float(m["params"]["psi_pm"])
         L_d = float(m["params"]["L_d"])
         L_q = float(m["params"]["L_q"])
-        omega = states[:, int(m["omega_node"])]
-        theta = states[:, int(m["theta_node"])]
+        omega = node(m["omega_node"])
+        theta = node(m["theta_node"])
         cur = [states[:, int(pool.branch_var_id_for_inductor(b, graph))]
                for b in bids]
         i_a, i_b, i_c = cur
@@ -3956,12 +4036,39 @@ def _attach_native_machine_traces(result, builder) -> None:
         i_q = -i_alpha * sn + i_beta * c
         # dq torque, identical to the abc co-energy expression.
         t_em = 1.5 * pp * (psi * i_q + (L_d - L_q) * i_d * i_q)
+        harm = m["params"].get("harmonics") or []
+        if harm:
+            # PM part from the series: pp·Σ_k dλ_pm,k/dθ_e·i_k (phases b, c
+            # at θ_e ∓ 2π/3), plus the same reluctance term.
+            t_em = 1.5 * pp * (L_d - L_q) * i_d * i_q
+            for k, i_k in enumerate(cur):
+                a = th_e + (0.0, -2.0 * _np.pi / 3.0, 2.0 * _np.pi / 3.0)[k]
+                dl = sum(-h * ps * _np.sin(h * a + ph) for h, ps, ph in harm)
+                t_em = t_em + pp * dl * i_k
         traces[f"{name}.t"] = times
         traces[f"{name}.omega"] = omega
         traces[f"{name}.theta"] = theta
         traces[f"{name}.T_em"] = t_em
         traces[f"{name}.i_d"] = i_d
         traces[f"{name}.i_q"] = i_q
+    for m in inductions:
+        bids = [int(b) for b in m["branch_ids"]]
+        name = builder.name_of(bids[0])[:-2]
+        pr = m["params"]
+        k_r = pr["L_m"] / (pr["L_lr"] + pr["L_m"])
+        i_a, i_b, i_c = (
+            states[:, int(pool.branch_var_id_for_inductor(b, graph))]
+            for b in bids)
+        i_alpha = (2.0 * i_a - i_b - i_c) / 3.0
+        i_beta = (i_b - i_c) / _np.sqrt(3.0)
+        psi_a = node(m["rotor_nodes"][0])
+        psi_b = node(m["rotor_nodes"][1])
+        traces[f"{name}.t"] = times
+        traces[f"{name}.omega"] = node(m["omega_node"])
+        traces[f"{name}.T_em"] = 1.5 * pr["pole_pairs"] * k_r * (
+            psi_a * i_beta - psi_b * i_alpha)
+        traces[f"{name}.psi_ra"] = psi_a
+        traces[f"{name}.psi_rb"] = psi_b
 
 
 def _auto_attach_motor_traces(

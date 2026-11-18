@@ -38,3 +38,26 @@ def test_a_unity_coupling_is_refused(engine):
     # |k| = 1: the inductance matrix is singular, the winding currents are not independent
     with pytest.raises(p.UnsupportedError):
         p.simulate(_rectifier(k=1.0), 1e-4, engine=engine, dt=1e-6)
+
+
+def _open_secondary(k):
+    # the secondary winding is open (an inductor cut-set): the dependent-state reduction
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 1.0)
+    b.add_resistor("Rp", "in", "p1", 1.0)
+    b.add_transformer("T", "p1", "gnd", "s1", "gnd", 1e-3, 1e-3, k)
+    b.add_resistor("Rs", "s1", "x", 1.0)
+    return b
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_unity_coupling_on_a_cut_set_is_refused_by_name(engine):
+    # the general path takes the same positive-definite criterion as the structural one
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(_open_secondary(1.0), 1e-4, engine=engine, dt=1e-6)
+    assert "not positive definite" in str(ei.value)
+    r = p.simulate(_open_secondary(0.9), 1e-4, engine=engine, dt=1e-6)
+    # the open secondary carries no current; the primary charges as an RL of L = 1 mH
+    t = np.asarray(r.times)
+    i_p = np.asarray(r.v("in")) - np.asarray(r.v("p1"))      # through Rp = 1 ohm
+    np.testing.assert_allclose(i_p, 1.0 - np.exp(-t / 1e-3), rtol=1e-6, atol=1e-9)

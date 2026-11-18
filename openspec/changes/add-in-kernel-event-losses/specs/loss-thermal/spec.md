@@ -28,7 +28,8 @@ A PWL switching device SHALL accept a loss specification (switch,
 MOSFET switch, IGBT, PWL diode, and body or freewheel diode) with
 optional `E_on`, `E_off` and `V_on` tables and exactly one temperature
 source: `junction`, a thermal node of the circuit, or `Tj`, a fixed
-temperature in °C. The specification SHALL be available through the
+temperature in °C (with `Tj`, an optional `heat_node` receives the heat;
+without one the energies are recorded only). The specification SHALL be available through the
 builder, Python and a YAML `losses:` block. A specification that names
 an unknown device or an unsupported device kind, gives both or neither
 temperature source, or selects table conduction without a `V_on` table

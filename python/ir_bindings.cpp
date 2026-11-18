@@ -62,6 +62,26 @@ std::shared_ptr<const void> py_handle(const py::object& obj) {
     });
 }
 
+/// `with builder.scope(path, kind):`.
+struct BuilderScope {
+    CircuitBuilder* b;
+    std::string path;
+    std::string kind;
+};
+
+py::list scopes_to_py(std::span<const pulsim::ir::Scope> sc) {
+    py::list out;
+    for (const auto& x : sc) {
+        py::dict e;
+        e["path"] = x.path;
+        e["name"] = x.name;
+        e["kind"] = x.kind;
+        e["parent"] = x.parent == 0 ? std::string{} : sc[x.parent - 1].path;
+        out.append(e);
+    }
+    return out;
+}
+
 py::list controls_to_py(std::span<const pulsim::ir::ControlDecl> cs) {
     py::list out;
     for (const auto& c : cs) {
@@ -108,7 +128,7 @@ py::tuple run_pwl_points(const Circuit& base, const std::vector<std::string>& na
                          const RowTable& table,
                          const pulsim::solver::SimulationOptions& opts,
                          pulsim::Real dt, const py::object& switch_fn_obj,
-                         bool start_from_dc_op, std::optional<bool> enable_nl,
+                         bool start_from_dc_op, std::optional<bool> /*enable_nl*/,
                          std::optional<pulsim::Vector> initial_state,
                          bool auto_regularize, int n_threads) {
     if (table.cols() != static_cast<Eigen::Index>(names.size())) {
@@ -161,12 +181,9 @@ py::tuple run_pwl_points(const Circuit& base, const std::vector<std::string>& na
                         x0 = b.initial_state();
                         if ((x0.array() != 0.0).any()) xp = &x0;
                     }
-                    // bindings.cpp transient_refresh() for None / True
+                    // None / True: the kernel builds the Newton stamps
                     // (False is not sent here).
-                    const pulsim::pwl::NonlinearRefreshFn nl =
-                        (enable_nl.value_or(false) && b.pool().requires_static_refresh())
-                            ? pulsim::pwl::make_combined_diode_mosfet_refresh()
-                            : pulsim::pwl::NonlinearRefreshFn{};
+                    const pulsim::pwl::NonlinearRefreshFn nl{};
                     r.result = pulsim::solver::run_transient(
                         cache, b.graph(), b.pool(), opts, sw.fn, {},
                         start_from_dc_op, nl, {}, xp, {}, nullptr, {}, sw.next_edge);
@@ -277,7 +294,7 @@ void init_module(py::module_& m) {
             [](const Circuit& c) { return py::make_tuple(pulsim::ir::to_yaml(c)); },
             [](const py::tuple& t) {
                 if (t.size() != 1) throw std::runtime_error("Circuit: bad pickle state");
-                return pulsim::ir::from_yaml(t[0].cast<std::string>());
+                return pulsim::ir::from_yaml(t[0].cast<std::string>(), /*bounds=*/false);
             }))
         .def_property_readonly("nodes", [](const Circuit& c) {
                 py::list out;
@@ -316,6 +333,15 @@ void init_module(py::module_& m) {
                 return std::vector<pulsim::ir::Parameter>(
                     c.parameters().begin(), c.parameters().end());
             }, "The named parameters, in declaration order.")
+        .def("scopes", [](const Circuit& c) { return scopes_to_py(c.scopes()); },
+             "The scope tree (subsystem instances), parents first: one dict "
+             "per scope with path, name, kind (the subsystem definition, \"\" "
+             "for a plain path segment) and parent (its path, \"\" = root).")
+        .def("scope_of", [](const Circuit& c, std::string_view n) {
+                return std::string{c.lowered().scope_path(c.scope_of(n))};
+            }, py::arg("name"),
+            "Path of the scope a device, node or parameter named `name` "
+            "belongs to (\"\" = the root).")
         .def("with_value", &Circuit::with_value,
              py::arg("device_dot_field"), py::arg("value"),
              py::call_guard<py::gil_scoped_release>(),
@@ -469,6 +495,15 @@ void init_module(py::module_& m) {
             "analysis per sweep. Call before the first build; results "
             "are bit-identical.");
 
+    py::class_<BuilderScope>(m, "BuilderScope",
+        "What CircuitBuilder.scope() returns: a context manager.")
+        .def("__enter__", [](BuilderScope& s) {
+                return std::string{s.b->scope_path(s.b->open_scope(s.path, s.kind))};
+            })
+        .def("__exit__", [](BuilderScope& s, const py::args&) {
+                s.b->close_scope();
+                return false;
+            });
     auto builder = py::reinterpret_borrow<py::class_<CircuitBuilder>>(
         m.attr("CircuitBuilder"));
     builder
@@ -513,7 +548,34 @@ void init_module(py::module_& m) {
         .def("parameters", [](const CircuitBuilder& b) {
                 return std::vector<pulsim::ir::Parameter>(
                     b.parameters().begin(), b.parameters().end());
-            }, "The named parameters, in declaration order.");
+            }, "The named parameters, in declaration order.")
+        .def("open_scope", [](CircuitBuilder& b, std::string_view path,
+                              std::string_view kind) {
+                return b.scope_path(b.open_scope(path, kind));
+            }, py::arg("path"), py::arg("kind") = std::string{},
+            "Open scope `path` (relative to the open scope; returns its full "
+            "path). Parameters declared until close_scope() belong to it and "
+            "expressions look names up from it outward. Prefer "
+            "`with builder.scope(path):`.")
+        .def("scope", [](CircuitBuilder& b, std::string path, std::string kind) {
+                return BuilderScope{&b, std::move(path), std::move(kind)};
+            }, py::arg("path"), py::arg("kind") = std::string{},
+            py::keep_alive<0, 1>(),
+            "Context manager: `with builder.scope(\"leg_a\", kind=\"HB\"):` "
+            "opens the scope (open_scope) and closes it on exit; `as` gives "
+            "its full path. Parameters declared inside belong to it.")
+        .def("close_scope", &CircuitBuilder::close_scope,
+             "Return to the scope open before the last open_scope().")
+        .def("scopes", [](const CircuitBuilder& b) { return scopes_to_py(b.scopes()); },
+             "As Circuit.scopes().")
+        .def_property_readonly("current_scope", [](const CircuitBuilder& b) {
+                return std::string{b.scope_path(b.current_scope())};
+            }, "Path of the open scope (\"\" = root).")
+        .def("scoped_name", &CircuitBuilder::scoped_name, py::arg("local"),
+             "`local` as named in the open scope: \"leg_a/sm17/C\".")
+        .def("scope_of", [](const CircuitBuilder& b, std::string_view n) {
+                return std::string{b.scope_path(b.scope_of(n))};
+            }, py::arg("name"), "As Circuit.scope_of().");
 }
 
 }  // namespace pulsim_ir_bindings
