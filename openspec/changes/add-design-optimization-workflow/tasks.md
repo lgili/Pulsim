@@ -36,6 +36,7 @@
 - [x] 7.7 Kernel batch evaluator: `evaluate_many` runs a circuit-form, declarative evaluator's designs in one GIL-free kernel call on native threads; records equal the Python path's; fallbacks and what the plan cannot express named in `counters['batch']` (`test_design_kernel_batch.py`, `test_design_batch.cpp`, DECISIONS 26)
 - [x] 7.8 `p_in` on the fixed-step `pss` route: each side of a gate edge integrated separately (1.0 % -> 1.5e-7 on a DCM buck at T/200); stepped energy tolerance re-measured and kept at 1e-1 (first order: -3.9e-2 at T/25) (`test_design_pin_quadrature.py`, `probes/pin_quadrature.py`, DECISIONS 29)
 - [x] 7.9 Second worked example with gradients: `examples/optimization/boost_gradient.py` (`value_and_grad` + `scipy.optimize.minimize(jac=True)`, else a grid on the kernel batch); gradient = central difference within 1e-6, targets met within 5 % (`test_example_boost_gradient.py`, tutorial 08 section 7)
+- [x] 7.10 The event hook for comparator-gate saltation as a measured patch (`probes/saltation_hook.patch`, `probes/saltation_hook_check.cpp`: bit-identical, every event named; `test_saltation_hook_patch.py`, DECISIONS 30); landing it and the comparator gate remain
 
 ## 8. Verification
 - [x] 8.1 ruff, pytest, `openspec validate --all --strict`

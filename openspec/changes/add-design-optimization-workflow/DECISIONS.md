@@ -1148,6 +1148,42 @@ the edge, so it gains nothing (6e-9).
 
 To reverse: `edges=None` at the `p_in` call of `_with_right_limits`.
 
+## 30. The saltation hook (§23), written and measured, not landed (slice 6, item 6)
+
+Question: land the event hook comparator-gate saltation needs, with
+`scheduler.hpp` not editable in this slice? Option taken: the patch as a
+probe file, checked by one compile against a patched copy of the header
+(no tree edited, no second build tree).
+
+* `probes/saltation_hook.patch` (two hunks, 13 lines): a concept
+  `HasEventRegister` (`register_event(Real t, const std::string& name,
+  PredicateType type, int pred_index) -> void`) and, in
+  `PEDSimulator::fire_event_` after the ZCD notification and before the
+  mask is re-sampled, `if constexpr (HasEventRegister<SwitchFn>)
+  switch_fn_.register_event(t_event, name, ptype, aux_index);`. The
+  ZCD call is kept.
+* `probes/saltation_hook_check.cpp` (Eigen 3.4.0, `-O2`): the DCM buck of
+  `test_diode_events.cpp` over 20 periods, plain schedule vs the same
+  schedule plus a recording `register_event`. Patched: trajectory
+  bit-identical (108 samples, `==` on every state), 59 hook calls, all 20
+  logged state events seen in order by name and type, exit 0. Unpatched:
+  bit-identical, 0 calls, exit 1. Every schedule in the tree lacks
+  `register_event`, so the `if constexpr` compiles away and simulate()
+  is bit-identical by construction.
+* `python/tests/test_saltation_hook_patch.py` keeps the patch's context
+  lines present in the header (or, once landed, the call there).
+
+What remains of `add-periodic-steady-state-shooting` 6.1/6.3 after the
+hook lands, all additive: a native `ComparatorGate` schedule (clock edges
+in `next_edge_after`, latched off in `register_event` by its own
+predicate), its predicate `w.x - I_ref` in a `period_run` overload, and
+the saltation `S = I + (f+ - f-) w^T / (w . f-)` in
+`period_map_from_run` for that event; the oracle is
+`probes/peak_current_mode.py`. Not started here (the hysteresis-band
+diodes and reset maps of 6.1 need the same per-event identity).
+
+To reverse: delete the three files; nothing else references them.
+
 ## Missing from the kernel (recorded, worked around in Python)
 
 Items 1 and 2 are done (add-parameter-sensitivities slice, 2026-11):
