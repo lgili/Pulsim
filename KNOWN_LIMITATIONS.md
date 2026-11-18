@@ -524,6 +524,14 @@ The gate of `bind_pi_to_switch` declares its edges (G23).
   edge oracle that shows one 0.28 ns pulse is stepped at 0.56 ns for the
   rest of the run (`cl_boost_pi` hit `max_steps` at 5.59 ms of 30 ms
   before G23). Reproducer `probes/trbdf2_sticky_pulse_cap.py`.
+- **`resume_from` and C blocks: the snapshot carries no block state.**
+  Every run without `resume_from` restarts each C block (G22); a resumed
+  run continues whatever state the blocks hold, which is the state at the
+  end of the circuit's LAST run, not at the snapshot. `half = simulate(c,
+  t1)`, any other `simulate(c, ...)`, then `simulate(c,
+  resume_from=half.final_snapshot)` resumes the circuit from `half` and
+  the controller from the other run (found by the batch-11 review, not
+  yet reproduced in a test). Resume only from the run just made.
 
 ### TR-BDF2 still refactors on every new step size
 

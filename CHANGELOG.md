@@ -243,8 +243,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * Ideal DCM buck (`R_on = 0`, `g_off = 0`) on `trbdf2` at rtol 1e-9: orbit
   error 9.3e-8 V over 100 periods (task 6.3, bound 1e-6); smallest committed
   step away from the gate-edge probes 1.56e-10 s against 1.11e-14 s for the
-  conductance form (task 7.2), rejects 210 against 1108. Default-option
-  results of conductance-form circuits are bit-identical.
+  conductance form (task 7.2), rejects 210 against 1108. This change alone
+  left default-option conductance-form results bit-identical; the turn-off
+  fix below moves some of them.
 
 ### Ideal (branch-form) elements: losses, state traces, turn-off records
 
