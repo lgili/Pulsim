@@ -10,7 +10,6 @@ and the same typed outcomes. Counters, never wall time.
 """
 
 import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -22,12 +21,6 @@ from . import _pss_reference as ref
 
 T = ref.T
 pss_mod = sys.modules["pulsim.periodic_steady_state"]
-
-
-def test_pulsim_is_imported_from_this_tree():
-    root = Path(__file__).resolve().parents[2]
-    assert Path(p.__file__).resolve().is_relative_to(root)
-    assert Path(p._pulsim.__file__).resolve().is_relative_to(root)
 
 
 def _buck(R, D):

@@ -26,11 +26,6 @@ _RUNNERS = {"run_transient", "run_transient_with_chain",
             "run_transient_trbdf2"}
 
 
-def test_pulsim_is_this_worktree():
-    # A stale wheel would make every number below meaningless.
-    assert "site-packages" not in p.__file__
-
-
 class PyCallsDuringRun:
     """Counts Python function calls made while a kernel runner (a C
     function) is on the stack: the callbacks the run pays for."""

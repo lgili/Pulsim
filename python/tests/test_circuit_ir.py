@@ -29,10 +29,6 @@ CIRCUITS = sweep_probe.circuits()
 RECORD = json.loads((PROBES / "components_baseline.json").read_text())
 
 
-def test_runs_this_worktree():
-    assert Path(p.__file__).resolve().is_relative_to(ROOT / "python")
-
-
 def test_every_circuit_is_recorded():
     # Task 0.2's record: a circuit added to examples/ or benchmarks/ must
     # be added to the record (re-run `sweep_probe.py components`).

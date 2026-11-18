@@ -30,6 +30,8 @@ from pathlib import Path
 
 import pytest
 
+import pulsim
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = ROOT / "examples" / "scripts"
 RUN_SLOW = os.environ.get("PULSIM_RUN_EXAMPLES", "0") == "1"
@@ -309,10 +311,16 @@ def _check(text, checks, where):
         assert lo <= vals[0] <= hi, f"{where}: {regex!r} -> {vals[0]} not in [{lo}, {hi}]"
 
 
+# The pulsim under test (an installed wheel in CI, the tree locally) goes
+# first: <repo>/python first would import the extension-less source package
+# under a wheel install.
+_PULSIM_PARENT = str(Path(pulsim.__file__).resolve().parents[1])
+
+
 def _env():
     env = dict(os.environ, MPLBACKEND="Agg", PYTHONUNBUFFERED="1")
     env["PYTHONPATH"] = os.pathsep.join(
-        [str(ROOT / "python"), env.get("PYTHONPATH", "")])
+        [_PULSIM_PARENT, env.get("PYTHONPATH", "")])
     return env
 
 
@@ -334,7 +342,8 @@ def test_table_names_existing_examples():
 def test_script_claims(name, tmp_path):
     probe = subprocess.run([sys.executable, "-c", "import pulsim; print(pulsim.__file__)"],
                            env=_env(), cwd=tmp_path, capture_output=True, text=True)
-    assert probe.stdout.strip().startswith(str(ROOT)), probe.stdout
+    assert Path(probe.stdout.strip()).resolve() == \
+        Path(pulsim.__file__).resolve(), probe.stdout
     r = subprocess.run([sys.executable, str(SCRIPTS_DIR / name)], env=_env(),
                        cwd=tmp_path, capture_output=True, text=True, timeout=1800)
     assert r.returncode == 0, r.stderr[-3000:]
@@ -369,14 +378,13 @@ def test_stored_notebook_outputs_are_current(nb_path):
 @pytest.mark.parametrize("nb_path", sorted(NOTEBOOKS))
 @pytest.mark.examples
 @pytest.mark.skipif(not RUN_SLOW, reason="set PULSIM_RUN_EXAMPLES=1")
-def test_notebook_claims(nb_path):
+def test_notebook_claims(nb_path, monkeypatch):
     nbformat = pytest.importorskip("nbformat")
     nbclient = pytest.importorskip("nbclient")
     path = ROOT / nb_path
     nb = nbformat.read(path, as_version=4)
-    os.environ.update(MPLBACKEND="Agg",
-                      PYTHONPATH=os.pathsep.join([str(ROOT / "python"),
-                                                  os.environ.get("PYTHONPATH", "")]))
+    for k, v in _env().items():
+        monkeypatch.setenv(k, v)
     nbclient.NotebookClient(nb, timeout=1800, kernel_name="python3",
                             resources={"metadata": {"path": str(path.parent)}}).execute()
     _check(_outputs_text(nb), NOTEBOOKS[nb_path], nb_path)
