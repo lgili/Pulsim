@@ -48,10 +48,16 @@ struct StepFrame {
     Real t1 = Real{0};
     Real h = Real{0};
     Real t_lim = Real{0};
-    /// Sets the size; the end is the limit when the size reaches it.
+    /// Sets the size; a size that reaches the limit becomes `t_lim − t0`
+    /// and the step ends on the limit.
     void resize(Real h_new) noexcept {
-        h = h_new;
-        t1 = h_new < t_lim - t0 ? t0 + h_new : t_lim;
+        if (h_new < t_lim - t0) {
+            h = h_new;
+            t1 = t0 + h_new;
+        } else {
+            h = t_lim - t0;
+            t1 = t_lim;
+        }
     }
 };
 
