@@ -209,6 +209,10 @@ struct TrBdf2Options {
     /// only). C++-only, off: it lets the bridge rectifier take steps that
     /// chatter a diode 4334 times in 2 ms (DECISIONS item 10).
     bool filter_error_estimate = false;
+    /// One SDIRK(2,2) step, its estimate filtered, after a turn-off of a
+    /// diode with g_off > 0 on a linear circuit (add-branch-form-ideal-switch
+    /// DECISIONS 24). C++-only; false restores the previous run.
+    bool sdirk_after_turn_off = true;
     /// add-branch-form-ideal-switch D4: an impulsive re-initialisation
     /// raises UnsupportedError(feature='impulse') instead of being recorded
     /// (simulate(on_impulse='error')).
@@ -352,17 +356,20 @@ inline Real held_tolerance(const pwl::DiodeEventState& diodes,
     // from +0.37 to -0.71 mA was "riding the boundary", never landed, and
     // the diode turned off later carrying -0.7 mA (sw at -3.5e5 V, 9577
     // floor-accepted steps). Its noise is a leakage-scale current,
-    // g_off * (1 + |v|) (a bridge diode riding at -1.6e-7 A against
-    // 3.3e-7 A), read as voltage through 1/g_on, plus the difference's
-    // round-off; a DCM buck's 9e-7 A overshoot (446 V over g_off) is then
-    // a crossing.
+    // g_off * (1 + |v_D|) (a bridge diode riding at -1.6e-7 A against
+    // 3.3e-7 A), read as voltage through 1/g_on, plus the round-off of
+    // forming v_D from its node voltages; a DCM buck's 9e-7 A overshoot
+    // (446 V over g_off) is then a crossing. v_D, not the node voltages:
+    // a diode floating at 10 kV common mode had a floor of 2e-8 V, a
+    // 2e-5 A reverse current taken for noise.
     if (e.is_on && e.g_on > Real{0}) {
         constexpr Real eps = std::numeric_limits<Real>::epsilon();
-        const Real va = std::abs(stamping::read_node_voltage(x, e.from));
-        const Real vk = std::abs(stamping::read_node_voltage(x, e.to));
+        const Real va = stamping::read_node_voltage(x, e.from);
+        const Real vk = stamping::read_node_voltage(x, e.to);
         return e.g_off / e.g_on
-                   * (Real{1} + std::abs(e.V_th) + std::abs(e.V_f) + va + vk)
-               + Real{64} * eps * (va + vk);
+                   * (Real{1} + std::abs(e.V_th) + std::abs(e.V_f)
+                      + std::abs(va - vk))
+               + Real{64} * eps * (std::abs(va) + std::abs(vk));
     }
     return Real{1e-8}
            * (Real{1} + std::abs(e.V_th) + std::abs(e.V_f)
@@ -1299,6 +1306,11 @@ inline SimulationResult run_transient_trbdf2(
     const bool learn_gates = !next_edge_fn;
     const Size n_sw_total = static_cast<Size>(graph.num_switches());
     std::vector<Real> gate_last_toggle(n_sw_total, Real{0});
+    // The last closed high / low pulse width of each gate bit (0 = none).
+    std::vector<Real> gate_w_last(2 * n_sw_total, Real{0});
+    // The last three toggle times of each bit per direction (fall, rise).
+    std::vector<Real> gate_dir_t(6 * n_sw_total,
+                                 -std::numeric_limits<Real>::infinity());
     std::vector<bool> gate_toggled(n_sw_total, false);
     SwitchStateMask gate_prev = switch_fn(opts.t_start
                                           + Real{0.5} * h_min);
@@ -1357,21 +1369,85 @@ inline SimulationResult run_transient_trbdf2(
             }
             if (gate_toggled[i]) {
                 const Real w = at_t - gate_last_toggle[i];
+                if (w > gate_pulse_floor) {
+                    gate_w_last[2 * i + (gate_prev.get(i) ? 1 : 0)] = w;
+                }
                 if (w > gate_pulse_floor && w < gate_pulse_min) {
                     gate_pulse_min = w;
-                    // 1 % margin: a pulse as wide as the spacing
-                    // cannot fit between two samples, and the widths
-                    // carry the bisection's h_min of noise.
-                    if (gate_spacing_open[i] > Real{1.01} * w) {
-                        ++st.n_gate_undersampled;
-                    }
+                }
+                // 1 % margin: a pulse as wide as the spacing cannot fit
+                // between two samples, and the widths carry the
+                // bisection's h_min of noise. Every pulse, not only a new
+                // minimum: the cap lapses on a quiet bit (burst mode), so
+                // a pulse after the pause can be undersampled again.
+                if (w > gate_pulse_floor
+                    && gate_spacing_open[i] > Real{1.01} * w) {
+                    ++st.n_gate_undersampled;
                 }
                 gate_spacing_open[i] = Real{0};
             }
             gate_toggled[i] = true;
             gate_last_toggle[i] = at_t;
+            Real* dt3 = &gate_dir_t[6 * i + (sw.get(i) ? 3 : 0)];
+            dt3[0] = dt3[1];
+            dt3[1] = dt3[2];
+            dt3[2] = at_t;
         }
         gate_prev = sw;
+    };
+    // The step cap: twice the narrowest RECENT pulse. Per bit, the last
+    // high and low widths count while the bit keeps toggling (quiet for at
+    // most twice its last period; a quiet bit keeps the run's narrowest
+    // pulse as its cap); a running minimum over the run held a
+    // closed loop's 0.28 ns start-up pulse as the cap for ever (519,783
+    // steps in 0.3 ms of cl_boost_pi with an opaque gate). A phase whose
+    // ending toggle comes at a regular period (a trailing-edge PWM's rise
+    // at kT) is not capped until just before the predicted toggle: the
+    // same run took 58,514 steps with the cap over the whole long phase.
+    // Returns the step limit (infinite: none).
+    auto gate_pulse_cap = [&](Real at_t) {
+        Real lim = std::numeric_limits<Real>::infinity();
+        for (const Size i : gate_bits) {
+            const Real wh = gate_w_last[2 * i + 1];
+            const Real wl = gate_w_last[2 * i];
+            if (!gate_toggled[i] || (wh <= Real{0} && wl <= Real{0})) {
+                continue;
+            }
+            if (at_t - gate_last_toggle[i] > Real{2} * (wh + wl)) {
+                // Quiet: the narrowest pulse of the run, as before. Pulses
+                // resuming after a pause (burst mode, a soft-start pulse
+                // then PWM) were stepped over with the cap lapsed: 4 of 99
+                // 10 ns pulses, every 1 ns one.
+                if (std::isfinite(gate_pulse_min)) {
+                    lim = std::min(lim, Real{2} * gate_pulse_min);
+                }
+                continue;
+            }
+            Real w = std::numeric_limits<Real>::infinity();
+            if (wh > Real{0}) w = std::min(w, wh);
+            if (wl > Real{0}) w = std::min(w, wl);
+            // A step may not hold a whole pulse. A pulse ends with a toggle
+            // in each direction once per period; when one direction is
+            // regular, a step that ends before its next predicted toggle
+            // cannot hold a pulse that ends there, and any other toggle it
+            // holds is seen at its end and located.
+            Real reg = std::numeric_limits<Real>::infinity();
+            bool any_reg = false;
+            for (const Size dir : {Size{0}, Size{3}}) {
+                const Real* d3 = &gate_dir_t[6 * i + dir];
+                const Real p1 = d3[2] - d3[1], p0 = d3[1] - d3[0];
+                if (!std::isfinite(p0) || p1 <= Real{0}
+                    || std::abs(p1 - p0) > Real{1e-6} * p1 + Real{4} * h_min) {
+                    continue;
+                }
+                any_reg = true;
+                const Real margin = Real{2} * w + Real{1e-3} * p1;
+                reg = std::min(reg, d3[2] + p1 - margin - at_t);
+            }
+            lim = std::min(lim, any_reg ? std::max(Real{2} * w, reg)
+                                        : Real{2} * w);
+        }
+        return lim;
     };
     // Diode bits found held in a forbidden state at a step's start
     // (see the crossing detector).
@@ -1499,6 +1575,32 @@ inline SimulationResult run_transient_trbdf2(
                                 && !has_pmsm && !has_sat;
     const bool sdirk_ok = sdirk_possible
                           && (opts.sdirk_on_linear_circuits || nl_effective);
+    // ---- the SDIRK restart after a diode turn-off on a linear circuit ----
+    // A diode with g_off > 0 that turns off leaves the inductor it carried
+    // on a g_off path: an L*g_off mode (tau ~ 2e-13 s on the DCM buck) the
+    // raw TR-BDF2 estimate reads as error at any h, so each turn-off was
+    // followed by a reject cascade down to ~1e-12 s and four or five steps
+    // back up (1,806 steps below 1e-11 s in 400 periods). One SDIRK(2,2)
+    // step damps it (L-stable, stiffly accurate); its embedded estimate
+    // h(1-gs)(k1-k2) still reads the damped jump (k1 = jump/(gs h), constant
+    // in h), so on that step the estimate is filtered, W^-1 est with the
+    // stage factor W (Hosea-Shampine). Measured on the DCM buck: 7,608 ->
+    // 4,212 accepted steps, 4,306 -> 2,753 rejects, no step below 1e-11 s
+    // away from the event records (add-branch-form-ideal-switch DECISIONS 24).
+    const bool sdirk_off_lin = opts.sdirk_after_turn_off && sdirk_possible
+                               && !nl_effective && !sdirk_ok;
+    bool sdirk_event = false;   // the pending restart came from such an event
+    auto restart_ok = [&]() { return sdirk_ok || sdirk_event; };
+    // A diode with g_off > 0 turned off (an ideal branch-form diode leaves
+    // no L*g_off mode; its entries re-initialise by D4).
+    auto turned_off = [&](const std::vector<bool>& before) {
+        const std::vector<bool> now = diodes.snapshot_on_bits();
+        const auto ents = diodes.entries();
+        for (std::size_t i = 0; i < before.size() && i < now.size(); ++i) {
+            if (before[i] && !now[i] && ents[i].g_off > Real{0}) return true;
+        }
+        return false;
+    };
     // D4 (add-branch-form-ideal-switch): a step that enters a mode with
     // dependent states (an inductor cut-set opened, a capacitor loop closed
     // by ideal elements) through a gated change, or at the start, and the
@@ -1520,7 +1622,8 @@ inline SimulationResult run_transient_trbdf2(
     std::vector<Real> h_mem_diode;
     Size diode_slot = Size(-1);
     auto restart_size_after_diode_event = [&](Size d) {
-        if (!sdirk_ok || n_sdirk_diode == 0) {
+        if (!restart_ok() || n_sdirk_diode == 0) {
+            diode_slot = Size(-1);   // no restart: remember no size for it
             return;
         }
         const Size nd = diodes.entries().size();
@@ -1544,18 +1647,81 @@ inline SimulationResult run_transient_trbdf2(
     // under the post-event bits from the committed state, last_probe_dt
     // long: record it (not committed — the step still starts from x), so
     // the trace shows the jump where it happens.
+    //
+    // After a turn-off on a linear circuit the probe (femtoseconds) has not
+    // moved the L*g_off mode (tau ~ 2e-13 s) the jump goes through: it read
+    // v_D = -0.52 V where the circuit is at -34.7 V a picosecond later, and
+    // the record then ramped across the 0.87 us restart step (a DCM boost's
+    // recovery energy 9.9e-4 -> 2.4e-4 J). There the sample is a backward
+    // Euler solve over dt_rec = max(h_min, 1e-4 h), the localisation's
+    // conditioning floor: L-stable, it lands on the post-jump state.
+    // The restart is kept only when that jump is instantaneous on the
+    // trace: every state (inductor current, capacitor voltage) of the BE
+    // solves over dt_rec and 2 dt_rec agrees within the step tolerance.
+    // A slower mode is a transient the trace must show (a half-wave RL
+    // rectifier: 31 mA decaying with tau = 1e-9 s through g_off = 1e-6 S;
+    // skipped, its V(out) cell went 1.58e-5 -> 1.67e-4): TR-BDF2 steps.
+    std::vector<pwl::HistoryEntry> hist_rec, hist_rec0;
+    Vector b_rec, b_rec_src, x_rec, x_rec2;
+    auto be_solve = [&](Real dt, Vector& out) {
+        history.snapshot_into(hist_rec0);
+        hist_rec = hist_rec0;
+        for (auto& e : hist_rec) {   // backward Euler: no derivative slot
+            if (e.kind == pwl::DevicePool::StoredKind::Capacitor) {
+                e.i_prev = Real{0};
+            } else {
+                e.v_prev = Real{0};
+            }
+        }
+        history.restore(hist_rec);
+        history.compute_b_extra(Real{2} * dt, b_rec);
+        history.restore(hist_rec0);
+        accumulate_sources(t + dt, b_rec_src);
+        b_rec += b_rec_src;
+        out = x;
+        try {
+            return solve_dispatch(mask_at(t), Real{2} * dt, b_rec, out)
+                && out.allFinite();
+        } catch (const std::runtime_error&) {
+            return false;   // no record rather than a wrong one
+        }
+    };
     auto record_post_event = [&]() {
-        if (!sdirk_ok || n_sdirk_diode == 0 || !last_probe_ok
+        if (!restart_ok() || n_sdirk_diode == 0 || !last_probe_ok
             || !x_sig.allFinite()) {
+            sdirk_event = false;   // the jump was not shown instant
             return;
         }
-        const Real tp = t + last_probe_dt;
+        Real tp = t + last_probe_dt;
+        const Vector* xr = &x_sig;
+        if (sdirk_event) {
+            const Real dt_rec = std::max({h_min, Real{1e-4} * h,
+                                          h_probe_learned});
+            bool instant = be_solve(dt_rec, x_rec)
+                           && be_solve(Real{2} * dt_rec, x_rec2);
+            for (Size i = 0; instant && i < entries.size(); ++i) {
+                const auto& e = entries[i];
+                const bool cap = e.kind == pwl::DevicePool::StoredKind::Capacitor;
+                const Real ya = cap ? entry_v(e, x_rec)
+                                    : x_rec[e.inductor_branch_var_id];
+                const Real yb = cap ? entry_v(e, x_rec2)
+                                    : x_rec2[e.inductor_branch_var_id];
+                instant = std::abs(ya - yb) <= opts.atol
+                    + opts.rtol * std::max(std::abs(ya), std::abs(yb));
+            }
+            if (!instant) {
+                sdirk_event = false;   // TR-BDF2 steps, no record
+                return;
+            }
+            tp = t + dt_rec;
+            xr = &x_rec;
+        }
         if (tp >= opts.t_end - h_min
             || (has_ticks && tp >= t_next_tick - h_min)) {
             return;
         }
         result.times.push_back(tp);
-        result.states.push_back(x_sig);
+        result.states.push_back(*xr);
         result.event_iteration_count.push_back(0);
         // The bits the probe was solved under (a landing has already
         // reset gates_decided to its pre-commutation mask).
@@ -1611,6 +1777,37 @@ inline SimulationResult run_transient_trbdf2(
         }
     };
 
+    // ---- controller tick: every due source, in source order ----
+    auto fire_due_ticks = [&]() {
+        // None at t_end: no step follows (the run's tick count is ceil).
+        if (!has_ticks || t < t_next_tick - h_min
+            || t >= opts.t_end - h_min) {
+            return;
+        }
+        for (std::size_t j = 0; j < t_ctrl.size(); ++j) {
+            if (t < t_next_src[j] - h_min) {
+                continue;
+            }
+            if (multi_rate) {
+                tick_fn(j, t, x);
+            } else {
+                observer_fn(t, x);
+            }
+            ++st.n_ctrl_ticks;
+            ++st.ctrl_tick_counts[j];
+            ++tick_k[j];
+            t_next_src[j] = opts.t_start
+                + static_cast<Real>(tick_k[j]) * t_ctrl[j];
+        }
+        t_next_tick = *std::min_element(t_next_src.begin(),
+                                        t_next_src.end());
+        // A controller just moved its duty, so switch_fn has a DIFFERENT
+        // shape from here on and any bisected edge time is stale.
+        // Closed-loop runs missed a quarter of their PWM edges (307 of 400
+        // over 200 periods) before this.
+        edge_cache_valid = false;
+    };
+
     try {
         while (t < opts.t_end - h_min && steps < opts.max_steps) {
             if (should_continue && !should_continue()) {
@@ -1620,32 +1817,7 @@ inline SimulationResult run_transient_trbdf2(
 
             // ---- controller tick: fire AT the scheduled instant,
             //      before this step's mask is sampled ----
-            if (has_ticks && t >= t_next_tick - h_min) {
-                // Every due source, in source order.
-                for (std::size_t j = 0; j < t_ctrl.size(); ++j) {
-                    if (t < t_next_src[j] - h_min) {
-                        continue;
-                    }
-                    if (multi_rate) {
-                        tick_fn(j, t, x);
-                    } else {
-                        observer_fn(t, x);
-                    }
-                    ++st.n_ctrl_ticks;
-                    ++st.ctrl_tick_counts[j];
-                    ++tick_k[j];
-                    t_next_src[j] = opts.t_start
-                        + static_cast<Real>(tick_k[j]) * t_ctrl[j];
-                }
-                t_next_tick = *std::min_element(t_next_src.begin(),
-                                                t_next_src.end());
-                // A controller just moved its duty, so switch_fn
-                // has a DIFFERENT shape from here on and any
-                // bisected edge time is stale. Closed-loop runs
-                // missed a quarter of their PWM edges (307 of 400
-                // over 200 periods) before this.
-                edge_cache_valid = false;
-            }
+            fire_due_ticks();
 
             // Shortly after the chatter guard gave up, the LTE may not
             // walk h below h_chatter: under all-OFF bridge bits a 1 mH
@@ -1661,9 +1833,9 @@ inline SimulationResult run_transient_trbdf2(
             SwitchStateMask sw_now = switch_fn(t + Real{0.5} * h_min);
             if (learn_gates) {
                 learn_gate_toggles(sw_now, t);
-                if (std::isfinite(gate_pulse_min)) {
-                    h = std::min(h, std::max(Real{2} * gate_pulse_min,
-                                             h_min));
+                const Real cap = gate_pulse_cap(t);
+                if (std::isfinite(cap)) {
+                    h = std::min(h, std::max(cap, h_min));
                 }
             }
             if (has_diodes && gates_differ(sw_now, gates_decided)) {
@@ -1827,7 +1999,7 @@ inline SimulationResult run_transient_trbdf2(
 
             // ---- stage 1: TR over γh (or SDIRK stage 1, BE over γ_s h) ----
             const Real hg = gamma * h;
-            const bool sdirk = (sdirk_left > 0 && sdirk_ok) || reinit_step
+            const bool sdirk = (sdirk_left > 0 && restart_ok()) || reinit_step
                                || reinit_left > 0;
             // Where x_g sits in time (the crossing detector reads it).
             const Real h_pt = sdirk ? gs * h : hg;
@@ -2012,7 +2184,8 @@ inline SimulationResult run_transient_trbdf2(
             // L-stable stages damp is not error; raw, the estimate reads a
             // 1e-13 s L*g_off mode as error at any h. Linear circuits
             // only (a Newton circuit's factor is not kept).
-            if (opts.filter_error_estimate && !nl_effective
+            if ((opts.filter_error_estimate || (sdirk && sdirk_event && !reinit_step))
+                && !nl_effective
                 && !entries.empty()) {
                 filter_estimate(mask_step, hg, est_v);
                 ++st.n_filtered_estimates;
@@ -2096,6 +2269,10 @@ inline SimulationResult run_transient_trbdf2(
                 || !x_1.allFinite()) {
                 h = std::max(h * Real{0.1}, h_min);
                 ++st.n_reject;
+                if (sdirk && sdirk_event && !reinit_step) {
+                    sdirk_event = false;   // as an LTE reject below
+                    sdirk_left = 0;
+                }
                 if (h <= h_min * Real{1.0001}) {
                     throw std::runtime_error(
                         "run_transient_trbdf2: non-finite step at "
@@ -2119,6 +2296,14 @@ inline SimulationResult run_transient_trbdf2(
                     Real{0.1}, Real{0.9});
                 h = std::max(h * fac, h_lo);
                 ++st.n_reject;
+                if (sdirk && sdirk_event && !reinit_step) {
+                    // The turn-off restart is one L-stable step over a mode
+                    // its filtered estimate does not see; rejected, the mode
+                    // is not stiff at this h (a flyback's coupled leakage
+                    // at 1e-14 s took 100 forced accepts): TR-BDF2 steps.
+                    sdirk_event = false;
+                    sdirk_left = 0;
+                }
                 continue;
             }
 
@@ -2283,6 +2468,7 @@ inline SimulationResult run_transient_trbdf2(
                             // times, then guessed the bits from its end.
                             const std::vector<bool> bits0 =
                                 diodes.snapshot_on_bits();
+                            const Vector x_sig0 = x_sig;
                             for (const Real h_first : {h_probe_floor, dt_floor}) {
                                 for (Size it2 = 0;
                                      it2 < opts.max_event_iterations;
@@ -2314,6 +2500,8 @@ inline SimulationResult run_transient_trbdf2(
                                      diodes.entries()[cross_idx]
                                          .is_on});
                                 ++st.n_diode_events;
+                                sdirk_event = sdirk_off_lin
+                                    && turned_off(bits0);
                                 sdirk_left = n_sdirk_diode;
                                 record_post_event();
                                 restart_size_after_diode_event(cross_idx);
@@ -2322,11 +2510,15 @@ inline SimulationResult run_transient_trbdf2(
                                 // Nothing flipped: no event, no restart.
                                 // Retake the step at the same h; the
                                 // chatter guard below bounds the retries.
-                                // The signal reference is the committed
-                                // x, not the last probe (as the landing
-                                // path below: a probe of a g_off-held
-                                // node is round-off).
-                                x_sig = x;
+                                // The bits did not change, so neither does
+                                // the state they were decided on: x_sig as
+                                // before these probes (a probe of a
+                                // g_off-held node is round-off). That is x
+                                // unless an earlier cascade at this t (a
+                                // gate edge) decided the bits on its probe;
+                                // x itself was solved under the bits before
+                                // that cascade (see x_sig above).
+                                x_sig = x_sig0;
                                 // (Accepting it instead moved the SEPIC's
                                 // V_out by 7.5e-5 V; localising it inside
                                 // the step landed a V_th = 0 bridge diode
@@ -2413,10 +2605,14 @@ inline SimulationResult run_transient_trbdf2(
                         opts.atol + opts.rtol * x.cwiseAbs().maxCoeff();
                     // Round-off floor: a signal within the solve's own noise
                     // cannot be bracketed further (it walked to h_min).
+                    // The noise acceptance is capped by the spike it lets
+                    // through: never above the circuit's own range max|x|.
+                    const Real v_range = x.cwiseAbs().maxCoeff();
                     auto spike_ok = [&](Real s_post) {
-                        return !turn_off
-                            || std::abs(s_post) * ce.g_on / ce.g_off <= v_tol
-                            || std::abs(s_post) <= noise_at(cross_idx);
+                        const Real spike = std::abs(s_post) * ce.g_on / ce.g_off;
+                        return !turn_off || spike <= v_tol
+                            || (std::abs(s_post) <= noise_at(cross_idx)
+                                && spike <= v_range);
                     };
                     Real sb_raw = sb;   // the unhalved signal at tb
                     Real sa_raw = sa;
@@ -2550,8 +2746,18 @@ inline SimulationResult run_transient_trbdf2(
                     drop_superseded_event_sample(t);
                     const std::vector<bool> bits_land =
                         diodes.snapshot_on_bits();
-                    const bool flipped =
-                        decide_diodes(x, mask_step, dt_land);
+                    bool flipped = false;
+                    try {
+                        flipped = decide_diodes(x, mask_step, dt_land);
+                    } catch (const std::runtime_error& e) {
+                        // An interpolated landing solved nothing at dt_land:
+                        // its noise bound may need a singular factor. Take
+                        // it at the bracket end's step instead, a longer
+                        // (better conditioned) companion.
+                        const Real dt_tb = tb - (t - dt_land);   // t moved
+                        if (!is_singular_error(e) || dt_tb <= dt_land) throw;
+                        flipped = decide_diodes(x, mask_step, dt_tb);
+                    }
                     // Zero-time cascade at t (fixed point over the
                     // remaining diodes, tiny-dt trap pins state).
                     if (flipped) {
@@ -2611,6 +2817,8 @@ inline SimulationResult run_transient_trbdf2(
                     gates_decided = mask_step;
                     if (net_flip) {
                         ++st.n_diode_events;
+                        sdirk_event = sdirk_off_lin
+                            && turned_off(bits_land);
                         sdirk_left = n_sdirk_diode;
                         record_post_event();
                         restart_size_after_diode_event(cross_idx);
@@ -2644,6 +2852,7 @@ inline SimulationResult run_transient_trbdf2(
                     history.restore(hist_s2);
                     history.update_from_state(x_1, hg);
                     if (sdirk_left > 0) --sdirk_left;
+                    if (sdirk_left == 0) sdirk_event = false;
                     if (reinit_step) {
                         reinit_left = kReinitSteps - 1;
                         ++st.n_reinit_steps;
@@ -2705,6 +2914,14 @@ inline SimulationResult run_transient_trbdf2(
                 }
                 if (landed_on_edge) {
                     ++st.n_gate_events;
+                    // A tick due at the edge fires first (with x at t, as it
+                    // would at the next step's start): its duty sets the
+                    // post-edge mask, and the edge probe can then be
+                    // committed. A closed loop's period start is a tick, and
+                    // the commit's tick guard below recorded no post-edge
+                    // sample at 199 of 199 rising edges (V(sw) ramped across
+                    // the first post-edge step: ll14 / ll15).
+                    fire_due_ticks();
                     // Zero-time diode cascade AT the edge, BEFORE
                     // any real step under the new mask. Without
                     // this, a gate opening an inductor's only path
@@ -2768,6 +2985,7 @@ inline SimulationResult run_transient_trbdf2(
                         // remainder set the next step.
                         ++st.n_source_breakpoints;
                         h = std::max(h, h_pre_bp);
+                        fire_due_ticks();   // as at a gate edge
                         const Real hp =
                             std::max(h_probe_floor, h_done * Real{1e-6});
                         restart_after_gate_event(false, t + hp, hp,

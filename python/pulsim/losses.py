@@ -842,8 +842,9 @@ def _diode_turn_offs(trace, times: np.ndarray,
     steps through the g_off transient, where single samples read
     thousands of volts; those steps carry no time weight here.
 
-    ``unresolved`` is set when the step that carries the turn-off,
-    ``t[k] − t[k−1]``, is longer than ``t_rr``: the solver then says
+    ``unresolved`` is set when the step that holds ``t_eval`` (the one
+    that carries the turn-off unless a sample follows it within ``t_rr``)
+    is longer than ``t_rr``: the solver then says
     nothing about how ``v_D`` rose inside that step, and V_R (hence
     E_rr) depends on the step size. The one exception is a FORCED
     turn-off (another bit of the recorded mask flips on the same step,
@@ -929,7 +930,17 @@ def _diode_turn_offs(trace, times: np.ndarray,
             forced = forced and bool(other_flip[k])
         # (1e-9 relative slack: dt = T/100 must not miss t_rr = T/100
         # by a rounding error of the stored times.)
-        unresolved = (float(t[k] - t[k - 1]) > t_rr * (1.0 + 1e-9)
+        # The step that holds t_eval: a short sample right after the
+        # turn-off (trbdf2's post-event record) does not resolve a long
+        # step that follows it, unless that step is flat (the sample before
+        # it already holds the post-jump plateau: v_D is the same at both
+        # ends, so where t_eval falls inside it does not matter).
+        k_e = min(max(int(np.searchsorted(t, t_eval)), k), max(end - 1, k))
+        flat_after = k_e > k and abs(float(v[k_e] - v[k_e - 1])) <= (
+            _RR_FLAT_RTOL * max(abs(float(v[k_e])), abs(float(v[k_e - 1])))
+            + flat_atol)
+        unresolved = (float(t[k_e] - t[k_e - 1]) > t_rr * (1.0 + 1e-9)
+                      and not flat_after
                       and not (forced and bool(flat)))
         out.append({"t": float(t[k]), "t_off": t_off, "V_R": float(V_R),
                     "I_F": I_F, "forced": bool(forced),

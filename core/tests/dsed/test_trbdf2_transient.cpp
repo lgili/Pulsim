@@ -263,17 +263,21 @@ TEST_CASE("TR-BDF2: nonlinear devices are stamped without a callback",
 // -----------------------------------------------------------------------------
 
 namespace {
-/// Time-weighted mean of node `n` over [t0, t_end] (trapezoid on the
-/// variable grid — a sample mean is biased there).
+/// Time-weighted mean of node `n` over exactly [t0, t_end] (trapezoid on
+/// the variable grid, the window start interpolated: starting at the first
+/// sample past t0 is an O(h) metric error that alone read 1.95 for a
+/// second-order ratio of 4.09).
 Real tail_mean(const solver::SimulationResult& res, Index n, Real t0) {
-    Real acc = 0.0, span = 0.0;
+    Real acc = 0.0;
     for (Size k = 1; k < res.times.size(); ++k) {
-        if (res.times[k - 1] < t0) { continue; }
-        const Real dt = res.times[k] - res.times[k - 1];
-        acc += 0.5 * dt * (res.states[k - 1][n] + res.states[k][n]);
-        span += dt;
+        const Real ta = res.times[k - 1], tb = res.times[k];
+        if (tb <= t0 || tb <= ta) { continue; }   // zero-width: no area
+        const Real va = res.states[k - 1][n], vb = res.states[k][n];
+        const Real a0 = std::max(ta, t0);
+        const Real v0 = va + (vb - va) * (a0 - ta) / (tb - ta);
+        acc += 0.5 * (tb - a0) * (v0 + vb);
     }
-    return acc / span;
+    return acc / (res.times.back() - t0);
 }
 }  // namespace
 
@@ -650,7 +654,7 @@ TEST_CASE("TR-BDF2: one SDIRK step after a diode event, filter on or off",
           "[v2][trbdf2]") {
     // Half-wave RL rectifier: linear, so the filtered estimate applies.
     // The variants must agree on the output; the counters prove each
-    // path ran (one SDIRK step per diode event, filter off by default).
+    // path ran (one SDIRK step per diode event).
     builder::CircuitBuilder b;
     b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, 10.0, 50.0, 0.0);
     b.add_diode("D", "ac", "a", 1e3, 1e-9, 0.7);
@@ -684,23 +688,27 @@ TEST_CASE("TR-BDF2: one SDIRK step after a diode event, filter on or off",
     REQUIRE(v_def > 1.0);
     REQUIRE(v_def == Approx(v_off).epsilon(1e-3));
     REQUIRE(v_filt == Approx(v_off).epsilon(1e-3));
-    // Default: a piecewise-linear circuit takes no SDIRK step.
+    // Default (add-branch-form-ideal-switch DECISIONS 24): a piecewise-linear
+    // circuit takes the SDIRK step after a diode turn-off, its estimate
+    // filtered, and none after a turn-on.
     solver::TrBdf2Options o;
     o.t_end = 60e-3;
     solver::TrBdf2Stats s_lin;
     (void)solver::run_transient_trbdf2(
         cache, b.graph(), b.pool(), o,
         [&](Real) { return all_open(n_sw); }, {}, std::nullopt, &s_lin);
-    REQUIRE(s_lin.n_sdirk_steps == 0);
+    REQUIRE(s_lin.n_sdirk_steps > 0);
+    REQUIRE(s_lin.n_sdirk_steps < s_lin.n_diode_events);
+    REQUIRE(s_lin.n_filtered_estimates >= s_lin.n_sdirk_steps);
 
     // Order: every step after the first diode event an SDIRK(2,2) step,
     // the controller switched off (rtol 1) so every step IS the ceiling
     // (306 accepts at 200 us over 60 ms). Halving the ceiling divides the
     // error against a 12.5 us run by 4.09 (measured; 4.07, 4.04, 4.0 down
     // to 25 us): second order. Plain TR-BDF2 on the same grid gives 2.28,
-    // the first-order edge restart. The window is interpolated at 20 ms:
-    // tail_mean starts at the first sample past it, an O(h) metric error
-    // that alone measured 1.95.
+    // the first-order edge restart. The window is interpolated at 20 ms
+    // (tail_mean): starting at the first sample past it is an O(h) metric
+    // error that alone measured 1.95.
     auto run_h = [&](Real h_max, solver::TrBdf2Stats& st) {
         solver::TrBdf2Options oh;
         oh.t_end = 60e-3;
@@ -712,18 +720,7 @@ TEST_CASE("TR-BDF2: one SDIRK step after a diode event, filter on or off",
         const auto res = solver::run_transient_trbdf2(
             cache, b.graph(), b.pool(), oh,
             [&](Real) { return all_open(n_sw); }, {}, std::nullopt, &st);
-        const Index n = b.node_id_of("out");
-        const Real t0 = 20e-3;
-        Real acc = 0.0;
-        for (Size k = 1; k < res.times.size(); ++k) {
-            const Real ta = res.times[k - 1], tb = res.times[k];
-            if (tb <= t0) { continue; }
-            const Real va = res.states[k - 1][n], vb = res.states[k][n];
-            const Real a0 = std::max(ta, t0);
-            const Real v0 = va + (vb - va) * (a0 - ta) / (tb - ta);
-            acc += 0.5 * (tb - a0) * (v0 + vb);
-        }
-        return acc / (res.times.back() - t0);
+        return tail_mean(res, b.node_id_of("out"), 20e-3);
     };
     solver::TrBdf2Stats s1, s2, s_ref;
     const Real v1 = run_h(200e-6, s1);
@@ -734,4 +731,27 @@ TEST_CASE("TR-BDF2: one SDIRK step after a diode event, filter on or off",
     INFO("e(200us) = " << std::abs(v1 - v_ref) << ", e(100us) = "
          << std::abs(v2 - v_ref) << ", ratio " << ratio);
     REQUIRE(ratio > 3.5);
+}
+
+TEST_CASE("TR-BDF2: an ON diode's noise floor reads the voltage across it, "
+          "not its common mode", "[v2][trbdf2][robustness]") {
+    // g_off * (1 + |v|) with the NODE voltages put a diode floating at
+    // 10 kV at a 2e-8 V floor (2e-5 A through g_on = 1e3 taken for noise);
+    // with v_D it is the 0 V floor plus the round-off of forming v_D.
+    topology::Graph g;
+    const auto a = g.add_node("a");
+    const auto k = g.add_node("k");
+    g.add_branch(a, k, topology::BranchKind::Switch);
+    pwl::DevicePool pool;
+    pool.add_diode(0, /*g_on=*/1e3, /*g_off=*/1e-9, /*V_th=*/0.0);
+    pwl::DiodeEventState diodes(g, pool);
+    diodes.restore_on_bits({true});
+    Vector x0(2), xh(2);
+    x0 << 1e-3, 0.0;
+    xh << 1e4 + 1e-3, 1e4;
+    const Real tol0 = solver::detail_trbdf2::held_tolerance(diodes, 0, x0);
+    const Real tolh = solver::detail_trbdf2::held_tolerance(diodes, 0, xh);
+    REQUIRE(tol0 < 2e-12);
+    REQUIRE(tolh < 1e-9);    // 64 eps * 2e4 = 2.8e-10; it was 2e-8
+    REQUIRE(tolh > tol0);
 }

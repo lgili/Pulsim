@@ -28,6 +28,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `pwl`, `integrator` on `trbdf2`) was dropped on the others; both are
   now refused by name (`refusal` feature `options`).
 
+### TR-BDF2: no step grind after a diode turn-off; ticks at edges; pulse cap
+
+- After a diode with `g_off > 0` turns off on a linear circuit, the next
+  step is one SDIRK(2,2) step with a filtered error estimate (C++
+  `sdirk_after_turn_off`, default on). The DCM buck (400 periods, rtol
+  1e-5): 7,608 -> 4,212 accepted steps, 2,606 -> 804 steps below 1e-11 s,
+  end-state error 1.17e-5 -> 1.28e-5. The post-event sample is a
+  backward-Euler solve when the jump is instant on its scale.
+- A controller tick due at a gate edge fires before the edge probe is
+  committed: a closed loop's rising edges get their post-edge sample
+  (0 -> 199 of 199).
+- An opaque `switch_fn`'s step cap follows the gate's recent pulses, not
+  the narrowest pulse of the run, and lifts between predicted toggles of a
+  periodic gate (cl_boost_pi start-up: 519,783 -> 28,049 steps in 0.3 ms;
+  1,594 with declared edges, the same per period once the gate is learned).
+- An ON diode's turn-off noise floor reads the voltage across it, not its
+  common mode.
+- `device_loss_summary` reads `unresolved` from the step that holds
+  `t_off + t_rr` (on a variable grid a long step there now flags the
+  turn-off; uniform grids are unchanged).
+
 ### Integration batch 11: circuit IR YAML, TR-BDF2 ideal switch, pwl complementarity, exact step 3, control graph G23, optimisation slice 6 merged
 
 * **Fixed** `make_combined_switch_fn` of a control-graph gate whose loop

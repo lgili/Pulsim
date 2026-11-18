@@ -336,3 +336,145 @@ Each entry: question → option taken → evidence → how to reverse.
     against 1.11e-14 s conductance, so the branch form's smallest step
     is not the smaller one).
     → Reverse: none needed (measurement only).
+
+## TR-BDF2 track 6 (feat/core-p2-trbdf2)
+
+24. **The DCM grind: one filtered SDIRK step after a turn-off (linear
+    circuits).** Question: 1,806 accepted steps below 1e-11 s on the DCM
+    buck (400 periods) followed each diode turn-off. Cause, from the trace:
+    the step after the turn-off was retried at the pre-event h (2.8e-8 s)
+    and rejected down to ~8e-13 s, then grew back in four or five steps;
+    the raw TR-BDF2 estimate read the L*g_off mode (tau ~ 2e-13 s, the
+    residual 2.4e-8 A meeting g_off = 1e-9 S) as error at any h. Why the
+    existing SDIRK restart did not help: on a piecewise-linear circuit it
+    is off (item 9 of update-trbdf2-post-event-restart); forced on, it
+    damps the mode in one step, but its embedded estimate h(1-gs)(k1-k2)
+    reads the damped jump itself (k1 = jump/(gs h): constant in h) and
+    rejects it the same way (DCM 7,608 -> 7,683 steps). Options measured
+    (probes/trbdf2_baseline.py, accepted / rejects on the DCM buck):
+    filter alone on every step 7,270 / 15,088; SDIRK + filter on every
+    step and SDIRK after every diode event 3,301 / 862, but 18 tests moved
+    (recovery energies -12 %, flyback 790 forced accepts, a fuzzed bridge
+    run 0.095 V off); SDIRK + filter on the SDIRK step only 4,212 / 2,753.
+    → Taken: after a turn-off of a diode with g_off > 0 on a linear circuit
+    without stateful devices, one SDIRK(2,2) step whose estimate is
+    filtered (W^-1 est on the stage factor), C++ handle
+    `sdirk_after_turn_off` (default true). It is taken when ANY g_off
+    diode of the event's cascade turned off (a bridge commutation, one on
+    and one off, takes it); a cascade of turn-ons only, Newton circuits
+    and ideal branch-form diodes are unchanged. Two consequences, fixed:
+    (a) the post-event record (item 13 there) was the femtosecond probe,
+    which has not moved the L*g_off mode: v_D = -0.52 V where the circuit
+    is at -34.7 V a picosecond later, and the trace ramped across the
+    0.87 us restart step (DCM boost recovery energy 9.9e-4 -> 2.4e-4 J);
+    after such a turn-off the record is a backward-Euler solve over
+    dt = max(h_min, 1e-4 h) from the committed state (L-stable: it lands
+    on the post-jump state). The jump must be instant on that scale: if
+    BE over dt and over 2 dt disagree on any capacitor voltage or inductor
+    current beyond atol + rtol |x|, the mode is a real transient
+    (half-wave RL: tau ~ 1e-9 s, 31 mA), and the step is the plain
+    TR-BDF2 restart of before with no record (skipping that transient
+    moved its reference cell 1.58e-5 -> 1.67e-4). (b) `device_loss_summary` flagged a turn-off
+    unresolved from the step that carries it; a short record sample then
+    hid a long step after it, so the flag now reads the step that holds
+    t_off + t_rr, unless that step is flat (the plateau was already
+    reached). A turn-off SDIRK step that is rejected falls back to
+    TR-BDF2 steps (the flyback's coupled leakage at 1e-14 s: 100 forced
+    accepts with the SDIRK step kept, 0 with the fallback; HEAD 0). The
+    committed gate-edge probes stay (item 7 there): with `commit=false`
+    10 loss / charge / recovery tests fail. The strict xfail
+    test_dcm_no_step_below_1e_11 is now a plain test of the integration
+    steps: every interval below 1e-11 s starts at an event instant (the
+    edge probe, the post-event record) or in the first nanosecond.
+    The records themselves are not short: on the DCM buck the interval
+    starting at each of the 380 diode events is 9.6e-11 to 1.2e-10 s,
+    except the first event's 9.2e-13 s in the first nanosecond. A record
+    or SDIRK step that is skipped (probe failed, BE solve singular, jump
+    not instant, step rejected for any reason) leaves the plain TR-BDF2
+    restart. The undersampled-gate count now covers every closed pulse
+    narrower than its sampling, not only a new minimum (25b lets the cap
+    lapse on a quiet bit).
+    Measured (rtol 1e-5 unless noted; error = max |iL|, |vC| at the end
+    against expm):
+
+    | run | before | after |
+    |---|---|---|
+    | DCM buck accepted / rejects / err | 7,608 / 4,306 / 1.17e-5 | 4,212 / 2,753 / 1.28e-5 |
+    | DCM buck rtol 2e-5, 5e-6, 1e-6, 1e-7 err | 1.67e-5, 6.33e-6, 4.36e-7, 5.92e-7 | 1.52e-5, 6.48e-6, 4.52e-7, 5.92e-7 |
+    | same, accepted steps | 6,913, 8,185, 10,857, 18,398 | 3,127, 5,292, 8,208, 18,398 |
+    | DCM buck steps below 1e-11 s | 2,606 | 804 (800 edge probes, 4 in the first ns) |
+    | DCM buck pss orbit v_C0 (exact 8.99624708729) | 8.9962470170 | 8.9962470170 |
+    | boost accepted / rejects | 1,459 / 218 | 1,283 / 109 |
+    | 325 V bridge accepted / rejects | 1,306 / 105 | 1,284 / 88 |
+    | buck CCM rtol 1e-4 accepted | 1,620 | 1,617 |
+
+    At equal rtol the DCM error moves by -9 % to +10 %; at 1e-7 the jump
+    is not instant on the record scale and the run is the old one. At
+    equal work it is lower (5,292 steps: 6.5e-6 against 1.67e-5 at
+    6,913). Errors of every other baseline row, both pwl rows and dsed are
+    identical. Rounding fuzz (20 runs, 1e-15 perturbations): DCM v_end
+    spread 4.7e-8, 4,212 accepted and 800 sub-1e-11 intervals in every run.
+    → Reverse: `sdirk_after_turn_off = false`.
+
+25. **A tick at a gate edge fires before the edge probe is committed, and
+    the pulse cap follows the recent pulses.** (a) `restart_after_gate_event`
+    refused the commit when a tick was due within the probe, and a closed
+    loop's period start is a tick: no post-edge sample at 0 of 199 rising
+    edges (probes/trbdf2_tick_edge_sample.py of add-compiled-control-graph);
+    V(sw) ramped across the first post-edge step (ll14 / ll15). → The due
+    ticks fire at the edge, with x at t (what they read at the next step's
+    start before), then the cascade decides under the post-tick gates and
+    the probe is committed: 199 / 199. The same at a source breakpoint.
+    (b) The step cap of an opaque switch_fn was twice the narrowest pulse
+    of the run (a running minimum): cl_boost_pi's 0.28 ns start-up pulse
+    capped every later step (519,783 accepted in 0.3 ms). → Per gate bit,
+    the last high and low widths, counted while the bit keeps toggling;
+    when one toggle direction is periodic (three toggles a constant period
+    apart, 1e-6 relative), a step may run to just before its next
+    predicted toggle (margin 2 w + 1e-3 period): every pulse ends or starts
+    on a periodic toggle, so no step can hold a whole pulse, and a toggle
+    it does hold is seen at its end and located. A quiet bit keeps the
+    run's narrowest pulse as its cap (a cap that lapsed missed 4 of 99
+    10 ns pulses after a pause, and every 1 ns one). cl_boost_pi, 0.3 ms:
+    28,049 accepted (26,947 in the first 0.1 ms, before the three periods
+    prove the rises regular; 580 per 0.1 ms after, against 558 with the
+    edges declared: 1,594 in all); 29 / 30 edges in both runs. The
+    run-wide minimum is still reported (`gate_pulse_min`) and still drives
+    the undersampling warning. → Reverse: the cap from gate_pulse_min.
+    Reference cells after the merge of integration batch 11 (the
+    reference is trbdf2 at rtol 1e-8): ll14 0.214 -> 0.00106, ll15
+    0.00124 -> 0.00123, both still above their 1e-3 tolerance; edge
+    timing 4.2e-6 -> 4.7e-11 s and 2e-7 -> 3.4e-12 s. What is left is not
+    the sampling: ll14's is the default tolerance's duty error, 4.9e-6
+    against the independent closed-loop reference (rtol 1e-8: 7.4e-8),
+    which moves each edge 4.9e-11 s on a 24.9 V V(sw) jump; ll15's is one
+    current zero 8 ns late at 1.1857e-4 s, because the inrush through the
+    Shockley diode leaves I(L) at 27.394 A against 27.328 A converged
+    (2.4e-3 at rtol 1e-5, 5.6e-4 at 1e-6): a global-error question of
+    the Newton path, not of ticks or caps.
+
+26. **Reviewer leftovers of step 3.** (a) The no-flip branch of the
+    chatter-safe cascade reset x_sig to the committed x. When an earlier
+    cascade at the same t (a gate edge) had decided the bits on its probe,
+    x was solved under the bits before that cascade (the stale reference
+    item 21(e)). Nothing flipped, so the state the bits were decided on
+    did not change: x_sig is restored to its value before the probes. It
+    equals x whenever no earlier cascade ran at t, so the runs of item
+    17(b) are unchanged. (b) spike_ok accepted a post-landing signal inside
+    its round-off bound whatever voltage it implied across g_off; the noise
+    acceptance now also needs that voltage within the circuit's range
+    max|x|. (c) The post-landing diode decision after an interpolated
+    landing (no solve at dt_land) takes its noise bound on the bracket
+    end's step if the dt_land factor is singular, instead of aborting.
+
+27. **An ON diode's noise floor reads v_D, not its common mode** (batch 11
+    review, finding 4). The leakage-scale floor of item 18 was
+    g_off/g_on (1 + |V_th| + |V_f| + |v_a| + |v_k|): a diode floating at
+    10 kV had a floor of 2e-8 V, i.e. a 2e-5 A reverse current taken for
+    noise. → g_off/g_on (1 + |V_th| + |V_f| + |v_a - v_k|) plus the
+    round-off of forming v_D, 64 eps (|v_a| + |v_k|): 2.8e-10 V at 10 kV
+    (C++ test). Measured on the DCM buck floated at 10 kV (default and
+    1e-10 tolerances) the worst turn-off current was -7.3e-9 A / -1.8e-9 A
+    before the change, a few ulps of the node voltages through g_on, so no
+    trace there was wrong yet; the floor was only waiting for a slower
+    crossing. The common-mode-free runs are unchanged (golden, baseline).

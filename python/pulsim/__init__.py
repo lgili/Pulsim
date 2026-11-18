@@ -3626,7 +3626,7 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
     # sampling used while it was open (or before that bit's first
     # edge): it was found by luck, so pulses that narrow may have been
     # stepped over before its width was known (the step is capped at
-    # twice the narrowest pulse from then on). A one-shot pulse that
+    # twice the gate's recent pulses while it keeps toggling). A one-shot pulse that
     # no sample hit is not counted: nothing saw it.
     if stats.get("n_gate_undersampled", 0) > 0:
         w = float(stats.get("gate_pulse_min", 0.0))
