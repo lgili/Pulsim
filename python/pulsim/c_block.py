@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
-import math
 import os
 import shutil
 import subprocess
@@ -55,7 +54,7 @@ from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
 
-__all__ = ["CBlockHandle", "add_c_block", "wire_c_blocks_from_yaml",
+__all__ = ["CBlock", "CBlockHandle", "add_c_block", "wire_c_blocks_from_yaml",
            "CBLOCK_ABI"]
 
 _YAML_FIELDS = {"name", "lang", "code", "lib", "symbol", "include_dirs",
@@ -111,8 +110,10 @@ _I_KINDS = ("i", "I", "current")
 class CBlockHandle:
     """Live handle for an added C block (returned by :func:`add_c_block`).
 
-    ``outputs`` and ``state`` are updated in place each block step, so the
-    caller can read them between / after simulation for diagnostics.
+    ``inputs``, ``outputs`` and ``state`` are updated in place each block
+    step, so the caller can read them between / after simulation for
+    diagnostics. ``block`` is the :class:`CBlock` in the builder's control
+    graph (``builder._c_graph``).
     """
     name: str
     n_in: int
@@ -121,10 +122,74 @@ class CBlockHandle:
     state: dict
     inputs: np.ndarray            # last sampled inputs
     outputs: np.ndarray           # last computed outputs (held, ZOH)
-    step_observer: Callable[[float, Any], None]
-    b_extra_fn: Callable[[float], list]
-    n_fires: int = 0
     teardown: Optional[Callable[[], None]] = None
+    block: Any = None
+
+    @property
+    def n_fires(self) -> int:
+        """Block steps in the last run (its rate group's ticks)."""
+        return self.block._n_ticks() if self.block is not None else 0
+
+
+class CBlock:
+    """A C block as a control-graph block (``MixedDomainBlockChain``):
+    ``n_in`` inputs, ``n_out`` outputs, one step per tick of its rate.
+
+    Exactly one source: ``native=(step_addr, state_addr)``, the address of
+    a compiled ``pulsim_cblock_step`` (:data:`CBLOCK_ABI`) and of its
+    ``void*`` state, run in C++ with no Python call; or ``fn``, a Python
+    ``fn(t, dt, inp, out, state)`` run through the PythonBlock adapter
+    (one Python call per tick). ``inputs`` / ``outputs`` are the block's
+    double buffers, updated in place at every step.
+    """
+
+    def __init__(self, n_in: int, n_out: int, *, fn=None, native=None,
+                 state: Optional[dict] = None, name: str = "CBLK") -> None:
+        self.name = name
+        self.n_in, self.n_out = int(n_in), int(n_out)
+        self.fn, self.native = fn, native
+        self.state = state if state is not None else {}
+        self.inputs = np.zeros(self.n_in, dtype=float)
+        self.outputs = np.zeros(self.n_out, dtype=float)
+        self._graph = None        # the MixedDomainBlockChain holding it
+        self._rate = None
+
+    def _n_ticks(self) -> int:
+        g = self._graph
+        if g is None or g._cxx_chain is None or self._rate not in g._groups:
+            return 0
+        return int(g._cxx_chain.tick_counts()[g._groups[self._rate]])
+
+    def _add_to(self, cxx, in_refs, outs) -> None:
+        from ._pulsim import ControlGraphBuildError, CxxInputRef  # type: ignore[import-not-found]
+        if self.native is not None:
+            step_addr, state_addr = self.native
+            cxx.add_c_function_block(
+                int(step_addr), int(state_addr), int(self.inputs.ctypes.data),
+                int(self.outputs.ctypes.data), in_refs, outs)
+            return
+        if self.fn is None:
+            raise ControlGraphBuildError(
+                f"control graph: CBlock '{self.name}' has no source (pass "
+                "fn=, or a compiled step through add_c_block(code=/lib=))")
+        fn, inp, out, state = self.fn, self.inputs, self.outputs, self.state
+        n_out, name = self.n_out, self.name
+
+        def py_step(t, dt, *vals):
+            for k, v in enumerate(vals):
+                inp[k] = v
+            ret = fn(t, dt, inp, out, state)
+            if ret is not None:
+                ret_arr = np.asarray(ret, dtype=float).ravel()
+                if ret_arr.size != n_out:
+                    raise ValueError(
+                        f"c_block {name!r}: step fn returned {ret_arr.size} "
+                        f"values but the block has {n_out} outputs")
+                out[:] = ret_arr
+            return out[0] if n_out == 1 else tuple(out)
+
+        cxx.add_python_block(
+            py_step, [CxxInputRef.time(), CxxInputRef.dt(), *in_refs], outs)
 
 
 def _resolve_input(builder, wire) -> int:
@@ -226,6 +291,8 @@ def _load_native_step(lib_path, symbol, n_in, n_out, *,
             state_ptr.value = None
 
     step._dll = dll          # keep the library alive  # type: ignore[attr-defined]
+    step._step_c = step_c    # type: ignore[attr-defined]
+    step._state_ptr = state_ptr  # type: ignore[attr-defined]
     return step, teardown
 
 
@@ -374,76 +441,74 @@ def add_c_block(builder,
         fn, teardown = _load_native_step(lib, symbol, n_in, n_out)
     assert fn is not None
 
+    if lib is None:
+        warnings.warn(
+            f"add_c_block({name!r}, fn=...): a Python step runs through the "
+            "PythonBlock adapter, one Python call per block step. Pass "
+            "code= (inline C) or lib= (a compiled library) for a step the "
+            "kernel runs without Python.", DeprecationWarning, stacklevel=2)
+
     in_locs = [_resolve_input(builder, w) for w in inputs]
-    injectors = [_add_output_source(builder, w, f"{name}_out{k}")
-                 for k, w in enumerate(outputs)]
-    # state_size must be read AFTER the output sources are added.
-    state_size = int(builder.pool.state_size(builder.graph))
+    src_names = [f"{name}_out{k}" for k in range(n_out)]
+    for k, w in enumerate(outputs):
+        _add_output_source(builder, w, src_names[k])
 
-    user_state: dict = dict(state) if state else {}
-    inp_buf = np.zeros(n_in, dtype=float)
-    out_buf = np.zeros(n_out, dtype=float)
-    fire = {"t0": None, "k": 0, "n": 0}
-
-    def step_observer(t: float, x) -> None:
-        # Integer tick counter: tick k is due at t0 + k*dt (t0 = the
-        # first call); outputs are held (ZOH) in between.
-        if fire["t0"] is None:
-            fire["t0"] = float(t)
-        if t < fire["t0"] + fire["k"] * dt - 1e-9 * dt:
-            return
-        for k, loc in enumerate(in_locs):
-            inp_buf[k] = float(x[loc])
-        ret = fn(float(t), float(dt), inp_buf, out_buf, user_state)
-        if ret is not None:
-            ret_arr = np.asarray(ret, dtype=float).ravel()
-            if ret_arr.size != n_out:
-                raise ValueError(
-                    f"c_block {name!r}: step fn returned {ret_arr.size} "
-                    f"values but the block has {n_out} outputs")
-            out_buf[:] = ret_arr
-        fire["k"] = math.floor((t - fire["t0"]) / dt + 1e-9) + 1
-        fire["n"] += 1
-
-    def b_extra_fn(t: float) -> list:
-        vec = [0.0] * state_size
-        for k, inj in enumerate(injectors):
-            val = float(out_buf[k])
-            if inj[0] == "v":                       # voltage source: aug row
-                vec[inj[1]] += _V_SRC_SIGN * val
-            else:                                    # current source: node rows
-                r_pos, r_neg = inj[1], inj[2]
-                if 0 <= r_pos < state_size:
-                    vec[r_pos] += _I_SRC_SIGN * val
-                if 0 <= r_neg < state_size:
-                    vec[r_neg] -= _I_SRC_SIGN * val
-        return vec
-
+    if lib is not None:
+        native = (ctypes.cast(fn._step_c, ctypes.c_void_p).value,  # type: ignore[attr-defined]
+                  ctypes.addressof(fn._state_ptr))                 # type: ignore[attr-defined]
+        block = CBlock(n_in, n_out, native=native, state=dict(state or {}),
+                       name=name)
+        block._keep = fn          # the library and its state pointer
+    else:
+        block = CBlock(n_in, n_out, fn=fn, state=dict(state or {}), name=name)
     handle = CBlockHandle(
         name=name, n_in=n_in, n_out=n_out, dt_block=float(dt),
-        state=user_state, inputs=inp_buf, outputs=out_buf,
-        step_observer=step_observer, b_extra_fn=b_extra_fn,
-        teardown=teardown)
+        state=block.state, inputs=block.inputs, outputs=block.outputs,
+        teardown=teardown, block=block)
 
     # Free native block state (term) when the handle is garbage-collected.
     if teardown is not None:
         weakref.finalize(handle, teardown)
 
-    # Keep n_fires in sync for diagnostics.
-    def _wrapped_observer(t, x, _orig=step_observer):
-        _orig(t, x)
-        handle.n_fires = fire["n"]
-    handle.step_observer = _wrapped_observer
-
-    if not hasattr(builder, "_c_blocks"):
-        try:
+    # One control graph per builder holds its C blocks, each ticking at
+    # its own rate in label time (the C blocks' protocol before 2.1);
+    # simulate() composes it with the other graphs above the dispatch.
+    from .blockchain import MixedDomainBlockChain, Rate, _InputSource
+    graph = getattr(builder, "_c_graph", None)
+    if graph is None:
+        graph = MixedDomainBlockChain(label_time=True)
+    k0 = len(graph.blocks)
+    chans = tuple(f"cblock{k0}_out{k}" for k in range(n_out))
+    block._graph, block._rate = graph, Rate(float(dt))
+    graph.add(f"{name}#{k0}", block,
+              inputs={f"in{k}": _InputSource("index", loc)
+                      for k, loc in enumerate(in_locs)},
+              output=chans, rate=block._rate)
+    for ch, w, src in zip(chans, outputs, src_names):
+        graph._sinks.append((ch, w, src))
+    try:
+        builder._c_graph = graph
+        if not hasattr(builder, "_c_blocks"):
             builder._c_blocks = []
-        except Exception:  # noqa: BLE001 — builder may forbid attrs
-            raise RuntimeError(
-                "add_c_block: this builder does not accept dynamic "
-                "attributes; cannot register the block.")
+    except Exception:  # noqa: BLE001 — builder may forbid attrs
+        raise RuntimeError(
+            "add_c_block: this builder does not accept dynamic "
+            "attributes; cannot register the block.")
     builder._c_blocks.append(handle)
     return handle
+
+
+def _c_graph_observer(builder):
+    """The builder's C-block graph compiled for one run (None without C
+    blocks): its observer, with the outputs each block holds."""
+    graph = getattr(builder, "_c_graph", None)
+    if graph is None or not graph.blocks:
+        return None
+    obs = graph.make_step_observer(builder)
+    for spec in graph.blocks:
+        for ch, v in zip(spec.output, spec.block.outputs):
+            graph._cxx_chain.set_output(ch, float(v))
+    return obs
 
 
 def wire_c_blocks_from_yaml(loaded, spec, *,

@@ -29,7 +29,7 @@ b.add_resistor("R_L", "vout", "gnd", 8.0)
 pi = p.PIController(Kp=0.08, Ki=40.0, output_min=0.05, output_max=0.95)
 loop = p.bind_pi_to_switch(
     b, pi=pi,
-    measured=lambda x: x[b.node_id_of("vout")],
+    measured="vout",
     setpoint=5.0,
     switch="Q1",
     freq=10e3,

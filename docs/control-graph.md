@@ -161,6 +161,56 @@ on each tick and the hold is exact:
 | `trbdf2`, `rtol=1e-10` | 7.8e-9 |
 | `trbdf2`, `rtol=1e-12` | 3.7e-10 |
 
+## Label time: the closed-loop helpers and C blocks
+
+`bind_pi_to_switch`, `bind_pi_to_duty_callable` and `add_c_block` build
+control graphs (`MixedDomainBlockChain(label_time=True)`, one rate group
+per loop / block). `simulate()` composes every graph, closed loop and C
+block in one place above the engine dispatch (`_control_plan.py`); with
+no `PythonBlock` in them the kernel runs them with no Python call (the
+gate of `bind_pi_to_switch` is a C++ `CxxChainPwmGate`).
+
+**The law.** The fixed engine calls an observer with `(t_n, x_{n-1})`
+before step n (from `t_{n-1}` to `t_n`). A label-time group due at
+`tau = t_start + k*T` runs at the first call whose **label** `t_n >=
+tau - 1e-9*dt` (and `tau < t_end - 1e-9*dt`), reads `x_{n-1}`, and its
+output drives step n. So tick 0 runs at `t_start` on `x0`, and tick
+`k >= 1` samples `x(kT - dt)` and holds its output from `kT - dt`: the
+whole grid after tick 0 is **one solver step early** (an advance, not a
+delay; the first hold lasts `T - dt`). This is the protocol the helpers
+had before 2.1; it is kept so every closed-loop number is unchanged. A
+chain with ordinary `Rate`s (state time, G6) samples `x(kT)` instead.
+On `trbdf2` both modes tick on the exact instants.
+
+Closed form, P loop on the RC of the table above (`K_p = 2`, set-point
+1 V, `T = 100 µs`), label time at step `h`: `w_0 = 0`,
+`w_{k+1} = a_k w_k + (1 - a_k)·2(1 - w_k)`, `a_0 = e^{-(T-h)/τ}`,
+`a_k = e^{-T/τ}`, `w_k = v(kT - h)`. `w_10 = 0.643457839998` at
+`h = 1 µs`, `0.643536938647` at `h = 0.1 µs`; `h → 0` gives the state-time
+`v[10] = 0.643545722992` (`one_sample`: 0.659695654069).
+
+| C-block P loop on `pwl`, `w_10` | error |
+|---|---|
+| `dt` = 1 µs | 6.17e-5 |
+| `dt` = 0.1 µs | 6.14e-6 |
+
+First order: a label-time graph declares no jumps (as the helpers did
+not), so the trapezoidal step averages each held jump (known
+limitations); `discontinuity_restart=True` does not restart on them
+(1.06e-4 / 1.05e-5). Use a state-time chain with `drive_source` for an
+exact hold.
+
+### Migration: helpers and C blocks (2.1)
+
+| Before | Now |
+|---|---|
+| `bind_pi_to_switch` / `bind_pi_to_duty_callable` ran Python closures: per step a tick scheduler, the composed observer, the gate and `pwm_on` (4044 Python calls for 10 ticks over 1 ms). | A control graph: the PI in the kernel, the gate in C++. `measured="vout"` (a node name) makes no Python call; a `measured` / `setpoint` callable runs through `PythonBlock` with a `DeprecationWarning` (3 calls per tick). Closed-loop buck, 20 ms at `dt` = 0.1 µs: 2188 → 204 ns/step. Every result bit-identical. |
+| `pi` (the `PIController` passed in) was updated in place. | The kernel block starts from `pi`'s state; `pi` is not updated. Read `loop.duty_history` / `error_history` (live views of the graph's recordings). |
+| `bind_pi_to_switch(t_start=)` aligned the throttle. | Ignored: ticks align to the run's `t_start`. |
+| `add_c_block`: a Python observer and `b_extra` per step (5014 calls / 1 ms); it also fired at `t_end` (11 fires where 10 are due), which changed the last sample of the run. | One graph per builder (`builder._c_graph`), one `CBlock` per block: `code=` / `lib=` run in C++ with no Python call (2041 → 168 ns/step), `fn=` through the adapter with a `DeprecationWarning`. No tick at `t_end`: only the run's final sample changes (t = `t_end` when the span is a multiple of the block `dt`). |
+| `add_c_block` with a block `dt` below the solver step (no `sim_dt=`) ran every step with a wrong `dt`. | `ControlGraphBuildError` (pass `sim_dt=` to clamp, as before). |
+| `simulate()` composed closed loops and C blocks in two places below the engine dispatch (pwl only). | One composition above the dispatch (`ControlPlan.for_fixed_step` / `for_variable_step`). |
+
 ## Not yet
 
 Continuous-rate blocks solved with the circuit, tick events on the

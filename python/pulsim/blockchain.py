@@ -220,11 +220,16 @@ class BlockSpec:
 class MixedDomainBlockChain:
     """Topologically-evaluated list of mixed-domain blocks."""
 
-    def __init__(self, rate: "Rate | None" = None) -> None:
+    def __init__(self, rate: "Rate | None" = None, *,
+                 label_time: bool = False) -> None:
         # Default rate of the blocks that declare none (a stateless
         # block inherits its inputs' rate first). No rate anywhere: the
         # chain runs on every solver step with make_step_observer's dt.
         self.rate = rate
+        # Label time (docs/control-graph.md): on pwl a tick runs at the
+        # call's label t_n with the state x_{n-1}, the protocol of the
+        # closed-loop helpers and C blocks, which build such graphs.
+        self.label_time = bool(label_time)
         self._sinks: list = []
         self.blocks: list[BlockSpec] = []
         # node-name → state-vector index (populated by bind()).
@@ -319,6 +324,12 @@ class MixedDomainBlockChain:
         self._cxx_chain = None
         self._cxx_chain = self._compile_to_cxx(builder)
         # Use the C++ chain's step_observer.
+        if self.label_time:
+            if not has_rate:
+                raise ValueError(
+                    "MixedDomainBlockChain(label_time=True) needs a Rate: "
+                    "label time says when a rate group ticks")
+            self._cxx_chain.set_label_time(True)
         cxx_observer = self._cxx_chain.make_step_observer(dt)
         # Tag the returned observer so simulate() knows it
         # can use run_transient_with_chain() (the kernel
@@ -326,6 +337,11 @@ class MixedDomainBlockChain:
         def observer(t, x):
             cxx_observer(t, x)
         observer._cxx_chain = self._cxx_chain  # type: ignore[attr-defined]
+        # Blocks that call Python per evaluation (the counter gate).
+        observer._n_python_blocks = sum(  # type: ignore[attr-defined]
+            type(sp.block).__name__ in ("PythonBlock", *_PY_LIBRARY)
+            or (type(sp.block).__name__ == "CBlock" and sp.block.native is None)
+            for sp in self.blocks)
         observer._chain_dt = float(dt)  # type: ignore[attr-defined]
         cxx = self._cxx_chain
         if cxx.has_rates:
@@ -389,6 +405,8 @@ class MixedDomainBlockChain:
                 if src.kind == "node":
                     idx = int(builder.node_id_of(str(src.value)))
                     return _k.CxxInputRef.node_idx(idx)
+                if src.kind == "index":     # a state-vector index
+                    return _k.CxxInputRef.node_idx(int(src.value))
                 if src.kind == "time":
                     return _k.CxxInputRef.time()
                 if src.kind == "dt":
@@ -544,9 +562,21 @@ class MixedDomainBlockChain:
                 # wrapped explicitly.
                 pyb = block if cls_name == "PythonBlock" else PythonBlock(block)
                 names = list(inputs)
+                # An input of kind "state" (the closed-loop helpers'
+                # `measured(x)`) is the state vector, passed first.
+                st = [n for n in names if inputs[n].kind == "state"]
+                if st and (len(st) > 1 or names[0] != st[0]):
+                    raise ControlGraphBuildError(
+                        f"block '{spec.name}': the state input must be the "
+                        "first and only one")
                 cxx_chain.add_python_block(
-                    pyb._call_with(names), [ref(n) for n in names],
-                    _outs(output))
+                    pyb._call_with(names), [ref(n) for n in names[len(st):]],
+                    _outs(output), with_state=bool(st))
+            elif cls_name == "CBlock":
+                # A C block (pulsim.add_c_block): compiled code in C++,
+                # a Python step through the PythonBlock-style adapter.
+                block._add_to(cxx_chain, [ref(n) for n in inputs],
+                              _outs(output))
             elif cls_name == "PwmGenerator":
                 # Python-exact: the kernel PwmGenerator reads phase as a
                 # fraction of the period, the class as seconds.

@@ -16,10 +16,10 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 
 | configuration | agree | disagree | error | refused | unverified |
 |---|---:|---:|---:|---:|---:|
-| pwl | 78 | 22 | 7 | 0 | 1 |
-| pwl+restart | 84 | 16 | 7 | 0 | 1 |
-| pwl+split | 85 | 15 | 7 | 0 | 1 |
-| trbdf2 | 99 | 1 | 1 | 6 | 1 |
+| pwl | 81 | 24 | 2 | 0 | 1 |
+| pwl+restart | 87 | 18 | 2 | 0 | 1 |
+| pwl+split | 88 | 17 | 2 | 0 | 1 |
+| trbdf2 | 102 | 3 | 2 | 0 | 1 |
 | dsed | 39 | 16 | 12 | 40 | 1 |
 
 ### Fixed engine: restart rule and split (circuits where any of the three does not agree)
@@ -27,11 +27,8 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | circuit | tol | pwl | pwl+restart | pwl+split |
 |---|---:|---:|---:|---:|
 | closed_loop/cl_boost_pi.yaml | 0.02 | error | error | error |
-| closed_loop/cl_buck_aggressive_pi.yaml | 0.02 | error | error | error |
-| closed_loop/cl_buck_pi.yaml | 0.02 | error | error | error |
-| closed_loop/ll14_buck_closed_loop.yaml | 0.02 | error | error | error |
-| closed_loop/ll15_boost_closed_loop.yaml | 0.02 | error | error | error |
-| closed_loop/ll16_flyback_closed_loop.yaml | 0.02 | error | error | error |
+| closed_loop/ll14_buck_closed_loop.yaml | 0.02 | 0.287 | 0.212 | 0.212 |
+| closed_loop/ll15_boost_closed_loop.yaml | 0.02 | 0.27 | 0.0654 | 0.0654 |
 | linear/current_source_rl_step.yaml | 0.001 | 0.00577 | 3.99e-05 | 3.99e-05 |
 | linear/rl_natural_response.yaml | 0.001 | 0.00577 | 3.98e-05 | 3.98e-05 |
 | magnetics/half_bridge_transformer_dc.yaml | 0.02 | 0.101 | 0.00113 | 0.00113 |
@@ -76,6 +73,14 @@ cell disagrees by edge timing; edge err above it: the states differ.
 
 | circuit | config | tol | err_rms | worst observable | edge err | excluded | timing (s) | timing (steps) |
 |---|---|---:|---:|---|---:|---:|---:|---:|
+| closed_loop/ll14_buck_closed_loop.yaml | pwl | 0.02 | 0.287 | V(sw) | undersampled | 11.7% | 4.9e-07 | 0.98 |
+| closed_loop/ll14_buck_closed_loop.yaml | pwl+restart | 0.02 | 0.212 | V(sw) | 0.156 | 10.0% | 9.9e-07 | 2 |
+| closed_loop/ll14_buck_closed_loop.yaml | pwl+split | 0.02 | 0.212 | V(sw) | 0.156 | 10.0% | 9.9e-07 | 2 |
+| closed_loop/ll14_buck_closed_loop.yaml | trbdf2 | 0.001 | 0.16 | V(sw) | undersampled | 15.2% | 1.9e-06 |  |
+| closed_loop/ll15_boost_closed_loop.yaml | pwl | 0.02 | 0.27 | V(sw) | undersampled | 20.0% | 2.5e-07 | 0.5 |
+| closed_loop/ll15_boost_closed_loop.yaml | pwl+restart | 0.02 | 0.0654 | V(sw) | undersampled | 20.0% | 7.5e-07 | 1.5 |
+| closed_loop/ll15_boost_closed_loop.yaml | pwl+split | 0.02 | 0.0654 | V(sw) | undersampled | 20.0% | 7.5e-07 | 1.5 |
+| closed_loop/ll16_flyback_closed_loop.yaml | trbdf2 | 0.001 | 0.149 | V(drain) | undersampled | 22.8% | 1.9e-07 |  |
 | linear/current_source_rl_step.yaml | pwl | 0.001 | 0.00577 | V(out) | 0.00577 | 0.0% |  |  |
 | linear/ll02_rc_pulse_charge.yaml | dsed | 0.001 | 0.00114 | V(in) | 4.06e-07 | 0.0% |  |  |
 | linear/ll03_rl_step.yaml | dsed | 0.001 | 0.00161 | V(in) | 0.000807 | 0.0% |  |  |
@@ -151,12 +156,12 @@ cell disagrees by edge timing; edge err above it: the states differ.
 
 | circuit | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
-| closed_loop/cl_boost_pi.yaml | error | error | error | refused | refused |
-| closed_loop/cl_buck_aggressive_pi.yaml | error | error | error | refused | refused |
-| closed_loop/cl_buck_pi.yaml | error | error | error | refused | refused |
-| closed_loop/ll14_buck_closed_loop.yaml | error | error | error | refused | refused |
-| closed_loop/ll15_boost_closed_loop.yaml | error | error | error | refused | refused |
-| closed_loop/ll16_flyback_closed_loop.yaml | error | error | error | refused | refused |
+| closed_loop/cl_boost_pi.yaml | error | error | error | error | refused |
+| closed_loop/cl_buck_aggressive_pi.yaml | 0.00662 | 0.00709 | 0.0071 | 7.93e-05 | refused |
+| closed_loop/cl_buck_pi.yaml | 0.0121 | 0.0123 | 0.0123 | 8.54e-05 | refused |
+| closed_loop/ll14_buck_closed_loop.yaml | 0.287 | 0.212 | 0.212 | 0.16 | refused |
+| closed_loop/ll15_boost_closed_loop.yaml | 0.27 | 0.0654 | 0.0654 | 0.000393 | refused |
+| closed_loop/ll16_flyback_closed_loop.yaml | 0.00742 | 0.00742 | 0.00742 | 0.149 | refused |
 | diodes/back_to_back_diodes_sine.yaml | 1.14e-05 | 1.14e-05 | 1.14e-05 | 0 | refused |
 | diodes/diode_bridge_rectifier.yaml | 0.000216 | 0.000177 | 0.000173 | 3.22e-05 | 6.59e-06 |
 | diodes/diode_clamp_overvoltage.yaml | 0.00565 | 0.00565 | 0.00565 | 0 | refused |

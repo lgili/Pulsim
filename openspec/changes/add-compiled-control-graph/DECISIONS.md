@@ -190,6 +190,70 @@ Each entry: question → option taken → evidence → how to reverse.
   (`chain.hpp`), the PWM check in `_assign_groups`, the
   `controller_period` check in `compose_control`.
 
+## G13. Label time for the consolidated helpers (task 9.1)
+
+- **Question.** Moving `bind_pi_to_switch` / `add_c_block` onto the
+  graph's state-time ticks (G6) shifts every closed-loop result by one
+  step. Keep the old numbers or take the shift?
+- **Taken.** A chain-level `label_time` mode reproducing the old
+  scheduler exactly (`t >= due - 1e-9*dt`, `due < t_end - 1e-9*dt`,
+  `x_{n-1}` at label `t_n`); the helpers build label-time graphs. The
+  law is an advance of one step after tick 0 (docs/control-graph.md).
+- **Evidence.** `.scratch` probe of 93 arrays (one / two-rate / paired
+  loops, callable set-point, manual composition, duty callable,
+  non-multiple period, on pwl, pwl+restart and trbdf2): bit-identical
+  to 7b195243 except the final sample of C-block runs (G15). Test pins
+  `w_10` against the label closed form.
+- **Reverse.** Drop `label_time=True` in `_pi_loop_graph` /
+  `add_c_block`; every closed-loop number moves by O(dt).
+
+## G14. The helper's `pi` object is not updated
+
+- **Taken.** The kernel PI starts from `pi`'s state; the Python object
+  stays as passed. Histories are views of the graph's recordings.
+- **Evidence.** No test, example or library caller reads `pi` after a
+  run; writing it back would need a Python call per tick.
+- **Reverse.** A `PythonBlock(pi)` (kept for non-pulsim controllers).
+
+## G15. C blocks: one graph per builder, no tick at t_end
+
+- **Taken.** `builder._c_graph` holds every `CBlock`, each in the group
+  of its `dt`, compiled at each `simulate()` with the outputs the blocks
+  hold. Compiled steps are called through their C ABI in C++. The old
+  throttle also fired at `t_end` (11 fires where 10 are due); the graph
+  does not: the final sample of such a run changes (6.4e-4 V on the
+  probe's RC loop), nothing else.
+- **Reverse.** `set_horizon(inf)` for the C-block graph.
+
+## G16. Label-time graphs declare no jumps
+
+- **Taken.** `next_jump_after` = inf in label mode, as the helpers
+  declared none: `discontinuity_restart=True` results are unchanged.
+- **Evidence.** Declaring them changes every restart run that holds a
+  C block or a closed loop; the label hold starts at `t_{n-1}`, a grid
+  point, so it would be exact with the declaration.
+- **Reverse.** Return the served instants `tau - dt` in label mode.
+
+## G17. The helpers' observers carry their cadence: closed-loop reference cells run on trbdf2
+
+- **Question.** `benchmarks/tools/v1_reader.py` composes a
+  `bind_pi_to_switch` loop by hand (`step_observer=loop.step_observer`).
+  Before 9.1 that observer had no cadence and trbdf2 refused it, so the
+  six `closed_loop/*` reference circuits had no converged reference and
+  every cell was `error`.
+- **Taken.** The loop's observer is now a graph observer
+  (`_rate_ticks`), so trbdf2 runs it. New outcomes, frozen in
+  `v2_triage.yaml`: `cl_buck_pi`, `cl_buck_aggressive_pi`, `ll16` (pwl)
+  agree (0.0121, 0.0066, 0.0074); `ll14` disagrees (pwl 0.287,
+  restart/split 0.212, trbdf2 0.16), `ll15` (pwl 0.27, restart/split
+  0.0654), `ll16` trbdf2 0.149; `cl_boost_pi` trbdf2 grinds to
+  max_steps (5.6 ms of 30 ms), so it keeps no reference.
+- **Evidence.** The baseline run (7b195243) refused on trbdf2 with "a
+  step_observer with no cadence"; the circuits' results did not change,
+  they were never compared.
+- **Reverse.** Strip `_rate_ticks` from the helper observer (the refusal
+  returns). The disagreements are not diagnosed in this slice.
+
 ## Hooks for task groups 6–7 (not in this slice)
 
 - **6.1 graph state in the solver snapshot.** `SolverSnapshot`

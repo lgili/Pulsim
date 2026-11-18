@@ -200,10 +200,12 @@ def test_python_calls_per_run_of_a_closed_loop():
     with PyCallsDuringRun() as c, warnings.catch_warnings():
         warnings.simplefilter("ignore")
         p.simulate(b, 1e-3, dt=1e-6, engine="pwl", closed_loops=[lp])
-    # Per step: the fixed-step tick scheduler, the composed observer, the
-    # gate function and pwm_on; per tick: `.tick`, `measured`, PI.update.
-    # (The same loop on trbdf2 for 1 ms: 13710 calls, gate re-evaluations.)
-    assert c.n == 4044
+    # Before the consolidation (9.1): 4044 calls, per step the fixed-step
+    # tick scheduler, the composed observer, the gate and pwm_on; per tick
+    # `.tick`, `measured`, PI.update. Now the loop is a control graph with
+    # a C++ gate: per tick only the `measured` lambda (PythonBlock adapter,
+    # the helper's float() wrapper, the lambda). measured='out': 0.
+    assert c.n == 3 * 10
     assert len(lp.duty_history) == 10
 
 
@@ -218,7 +220,8 @@ def test_python_calls_per_run_of_a_c_block():
                       outputs=[("v", "o2", "gnd")], dt=1e-4, fn=step)
     with PyCallsDuringRun() as c:
         p.simulate(b, 1e-3, dt=1e-6, engine="pwl")
-    # Per step: the block's observer, its b_extra injector and helpers.
-    assert c.n == 5014
-    # Its own throttle fires at t_end too: 11 fires where 10 ticks are due.
-    assert h.n_fires == 11
+    # Before 9.1: 5014 calls (per step the block's observer, its b_extra
+    # injector and helpers) and 11 fires (its throttle also fired at t_end).
+    # Now a graph block: per tick the adapter and the step fn; 10 ticks.
+    assert c.n == 2 * 10
+    assert h.n_fires == 10

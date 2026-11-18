@@ -941,7 +941,6 @@ def _yaml_retired_as_retired_error(native):
 load_yaml_string = _yaml_retired_as_retired_error(load_yaml_string)
 load_yaml_file = _yaml_retired_as_retired_error(load_yaml_file)
 from ._refusal import unsupported as _unsupported  # noqa: E402
-from ._control_plan import FixedStepTicks as _FixedStepTicks  # noqa: E402
 from ._control_plan import compose_control as _compose_control  # noqa: E402
 
 # add-mna-native-machines: CircuitBuilder.add_dc_machine (a linear
@@ -1784,14 +1783,22 @@ def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
     `SwitchSchedule` with an edge oracle (a combination that holds a
     Python callable has none). Any other non-None hook is Python.
     """
+    from ._pulsim import CxxChainPwmGate, CxxChainTick  # type: ignore[import-not-found]
     out = []
     for name, fn in hooks.items():
         if fn is None:
             continue
         if name == "switch_fn" and (
-                isinstance(fn, (NativePwm2Switch, NativeMultiMaskPwm))
+                isinstance(fn, (NativePwm2Switch, NativeMultiMaskPwm,
+                                CxxChainPwmGate))
                 or (isinstance(fn, SwitchSchedule) and fn.has_edges)):
             continue
+        if name == "step_observer" and isinstance(fn, CxxChainTick):
+            continue          # control graphs composed in C++
+        if name == "closed_loops" and not any(
+                getattr(lp.step_observer, "_n_python_blocks", 1)
+                for lp in fn):
+            continue          # control-graph loops with no PythonBlock
         out.append(name)
     return tuple(out)
 
@@ -2870,62 +2877,14 @@ def simulate(
         )
     _ = rtol, atol, dt_init  # Reserved for the v1.6 RK path; recorded only.
 
-    # Controllers from the plan composed above the dispatch: the
-    # gates merged into one switch_fn, the periodic sources through
-    # the integer-k scheduler (tick 0 at t_start, none lost), then the
-    # every-step observers. Order: closed loops in list order, then
-    # the user observer. Before fix-control-tick-semantics the loops'
-    # own elapsed-time throttles lost ticks (198 of 200) and
-    # controller_period was ignored here.
+    # Controllers, closed-loop graphs and C blocks from the plan composed
+    # above the dispatch (_control_plan.compose_control; its b_extra was
+    # merged there too): the gates merged into one switch_fn, the graphs
+    # ticking themselves, Python tick sources through the integer-k
+    # scheduler, then the every-step observers.
     switch_fn = _plan.switch_fn
-    _tick_sched = None
-    if _plan.ticks:
-        _tick_sched = _FixedStepTicks(_plan.ticks, float(t_start),
-                                      float(t_end), float(dt))
-    _per_step = ([_tick_sched] if _tick_sched is not None else []) \
-        + list(_plan.every_step)
-    if _tick_sched is not None or len(_per_step) > 1:
-        def _composed_observer(t: float, x, _obs=tuple(_per_step)) -> None:
-            for obs in _obs:
-                obs(t, x)
-
-        # T2.2: the post-run _auto_attach_motor_traces walks these to
-        # find a MotorObserverBundle passed via step_observer=.
-        _composed_observer._inner_observers = _plan.inner_observers  # type: ignore[attr-defined]
-        step_observer = _composed_observer
-
-    # Custom-code blocks (C blocks) registered via add_c_block(): compose
-    # each block's throttled observer (reads inputs + runs user code) and
-    # its b_extra injector (drives the controlled output sources) on top
-    # of any user/closed-loop callbacks. PWL path only — outputs use
-    # b_extra, which the DSED engine does not consume.
-    _c_blocks = list(getattr(builder, "_c_blocks", []) or [])
-    if _c_blocks:
-        _cb_obs = [cb.step_observer for cb in _c_blocks]
-        _cb_bex = [cb.b_extra_fn for cb in _c_blocks]
-        _prior_obs = step_observer
-        _prior_bex = b_extra_fn
-
-        def _cblock_observer(t: float, x) -> None:
-            if _prior_obs is not None:
-                _prior_obs(t, x)
-            for _obs in _cb_obs:
-                _obs(t, x)
-
-        def _cblock_b_extra(t: float) -> list:
-            total: Optional[list] = (
-                list(_prior_bex(t)) if _prior_bex is not None else None)
-            for _fn in _cb_bex:
-                contrib = _fn(t)
-                if total is None:
-                    total = list(contrib)
-                else:
-                    for i, v in enumerate(contrib):
-                        total[i] += v
-            return total if total is not None else []
-
-        step_observer = _cblock_observer
-        b_extra_fn = _carry_jumps(_cblock_b_extra, [_prior_bex, *_cb_bex])
+    step_observer = _plan.for_fixed_step(float(t_start), float(t_end),
+                                         float(dt))
 
     # Build the PWL cache — LAZY by default (Phase-0 fix #7).
     # A PWM converter visits only a handful of the 2^N switch
@@ -3356,10 +3315,8 @@ def simulate(
     try:
         # Per tick source, registration order; the largest lateness
         # of a tick on this grid (0 when every T_j is a multiple of dt).
-        res.control_tick_counts = (
-            list(_tick_sched.counts) if _tick_sched is not None else [])
-        res.control_tick_jitter_max = (
-            _tick_sched.jitter_max if _tick_sched is not None else 0.0)
+        res.control_tick_counts, res.control_tick_jitter_max = \
+            _plan.fixed_tick_counts()
     except AttributeError:  # pragma: no cover
         pass
     try:
