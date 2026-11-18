@@ -1334,10 +1334,11 @@ def test_device_losses_cell(engine):
 
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "exact"))
-def test_reinit_records_only_on_the_exact_engine(engine):
-    # result.reinit_records (dependent states: the impulse at a mode entry) rides on the event
-    # integrator's runs only, the same on both names: two 1.5 uF capacitors at 8 V and 0 V tied
-    # by a 0 V source share 6 uC at t = 0
+def test_reinit_records_on_every_engine(engine):
+    # result.reinit_records (the impulse at a mode entry) is on every engine since the fixed
+    # engine's D4 records (feat/core-a-ideal-switch): two 1.5 uF capacitors at 8 V and 0 V tied
+    # by a 0 V source share 6 uC at t = 0. The exact engine records that start, the same on both
+    # names; pwl / trbdf2 record none at t = 0 (measured: their records are at switching events)
     b = p.CircuitBuilder()
     b.add_capacitor("C1", "a", "gnd", 1.5e-6, 8.0)
     b.add_capacitor("C2", "b", "gnd", 1.5e-6, 0.0)

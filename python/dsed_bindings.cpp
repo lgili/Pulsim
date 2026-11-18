@@ -1065,16 +1065,15 @@ void init_module(py::module_& m) {
 
         void set_poll(Real poll) noexcept { search_.set_poll(poll); }
 
-        // dsed_period_map: Python calls of this schedule (owned by the
-        // caller's frame; null elsewhere).
-        std::size_t* n_python_calls = nullptr;
-
         /// Whether next_edge_after names real edges (the selector's probe
         /// horizon); the EdgeSearch fallback returns poll boundaries.
         [[nodiscard]] bool has_edge_oracle() const noexcept {
             return (is_native_ && native_.next_edge) || has_nea_;
         }
 
+        // dsed_period_map: Python calls of this schedule (owned by the
+        // caller's frame; null elsewhere).
+        std::size_t* n_python_calls = nullptr;
         py::object fn_;
         pulsim_bindings_common::SwitchFnAdapter native_;
         bool       is_native_ = false;

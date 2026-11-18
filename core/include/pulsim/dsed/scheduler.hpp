@@ -1028,6 +1028,12 @@ private:
         if constexpr (requires { system_.reinit_log_size(); }) return system_.reinit_log_size();
         return 0;
     }
+    [[nodiscard]] bool reinit_tracked_() const {
+        return requires { system_.truncate_reinit_log(std::size_t{0}); };
+    }
+    void truncate_reinit_log_(std::size_t n) {
+        if constexpr (requires { system_.truncate_reinit_log(n); }) system_.truncate_reinit_log(n);
+    }
     void undo_reinit_records_() {
         if constexpr (requires { system_.truncate_reinit_log(reinit_mark_); })
             system_.truncate_reinit_log(reinit_mark_);
@@ -1260,15 +1266,28 @@ private:
     void settle_and_project_(Real t, Vector& x, MaskT& mask) {
         if constexpr (HasNodePairVoltage<System>) {
             if (has_diodes_) {
+                const std::size_t mark = reinit_log_size_();
+                const bool track = reinit_tracked_();
+                if (track) settle_x0_ = x;
                 mask = settle_diode_cascade_(t, x);
                 project_(t, x);
+                bool changed = false;
                 for (int pass = 0; pass < 4; ++pass) {
                     const MaskT m2 = settle_diode_cascade_(t, x);
                     if (m2 == mask) {
                         break;
                     }
                     mask = m2;
+                    changed = true;
                     project_(t, x);
+                }
+                if (track && changed && reinit_log_size_() > mark) {
+                    // a trial mode's projection left records behind: the result
+                    // keeps those of the settled mode alone, from the pre-event
+                    // state (the iterated state itself is unchanged)
+                    truncate_reinit_log_(mark);
+                    if constexpr (requires { system_.reinit_to_constraint(t, settle_x0_); })
+                        system_.reinit_to_constraint(t, settle_x0_);
                 }
                 return;
             }
@@ -1874,6 +1893,7 @@ private:
     bool enable_event_projection_ = false;
     Real probe_t_end_ = std::numeric_limits<Real>::infinity();   // next_time_event_
     std::size_t reinit_mark_ = 0;   // reinit_log_size_() before the settle
+    Vector settle_x0_;   // settle_and_project_: the pre-event state (its records)
     Real last_time_event_t_ = std::numeric_limits<Real>::quiet_NaN();   // last gate edge / corner fired
     std::vector<Real> fast_t_;     // plan_fast_samples_
     std::size_t fast_k_ = 0;
