@@ -2878,7 +2878,10 @@ void init_module(py::module_& m) {
         .def_readonly("lambda_", &ReinitRecord::lambda)
         .def_readonly("dW", &ReinitRecord::dW)
         .def_readonly("projection_gap", &ReinitRecord::projection_gap)
-        .def_readonly("sample", &ReinitRecord::sample);
+        .def_readonly("sample", &ReinitRecord::sample)
+        .def_readonly("cause", &ReinitRecord::cause,
+                      "The switch the impulsive energy dW is booked to "
+                      "(pulsim.losses.impulse_losses).");
 
     py::class_<CommutationEvent>(m, "CommutationEvent",
         "Sub-step commutation timing event (V2.2 + V3).")

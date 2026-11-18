@@ -826,6 +826,27 @@ def test_mode_guard_diagnostics_on_pwl_and_dsed(engine):
     assert "mode_guard" not in r.diagnostics
 
 
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
+def test_lcp_agrees_with_the_default_settle_on_every_engine(engine):
+    # add-complementarity-mode-selection 6.3: one cell per engine. trbdf2
+    # skips while its settle refuses by name (hook 4.2: it calls
+    # pwl::select_site at its settle site); the cell runs once it lands.
+    r0 = _sim(engine, _half_wave())
+    try:
+        r1 = _sim(engine, _half_wave(), mode_selection="lcp")
+    except p.UnsupportedError as e:
+        if (e.engine, e.feature) == ("trbdf2", "mode_selection"):
+            pytest.skip("trbdf2 settle hook (task 4.2) not landed")
+        raise
+    ms = r1.diagnostics["mode_selection"]
+    assert ms["errors"] == 0 and ms["capped"] == 0 and ms.get("inconsistent", 0) == 0
+
+    def avg(r):     # time-weighted, exactly clipped to [0, 2 ms]
+        t, v = np.asarray(r.times), np.asarray(r.v("o"))
+        return float(np.trapezoid(v, t)) / (t[-1] - t[0])
+    assert avg(r1) == pytest.approx(avg(r0), rel=1e-6)    # pwl, dsed: 0.0 measured
+
+
 @pytest.mark.parametrize("engine", ("dsed", "exact"))
 def test_c_blocks_refused(engine):
     # trbdf2 runs C blocks since task 9.3 (test_c_block_engines.py)
