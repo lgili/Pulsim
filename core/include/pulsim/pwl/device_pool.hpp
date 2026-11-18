@@ -25,6 +25,7 @@
 #include "pulsim/models/nonlinear_capacitor.hpp"
 #include "pulsim/models/lauritzen_diode.hpp"
 #include "pulsim/models/pmsm_mna.hpp"
+#include "pulsim/models/induction_machine_mna.hpp"
 #include "pulsim/models/shockley_diode.hpp"
 #include "pulsim/models/saturable_inductor.hpp"
 #include "pulsim/models/resistor.hpp"
@@ -39,6 +40,7 @@
 #include "pulsim/models/voltage_source.hpp"
 #include "pulsim/numeric/dictionary.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/topology/graph.hpp"
 
 #include <algorithm>
@@ -128,6 +130,8 @@ public:
         SineCurrentSource  = 24, // overlaid on the node rows
         PulseCurrentSource = 25, // overlaid on the node rows
         PwlCurrentSource   = 26, // overlaid on the node rows
+        // add-mna-native-machines group 2 (stator branches of the machine)
+        InductionMachineMna = 27,
     };
 
     struct SwitchParams {
@@ -185,6 +189,20 @@ public:
             .g_on = g_on, .g_off = g_off, .V_th = V_th, .V_f = V_f}};
         diode_branches_.push_back(branch_id);
     }
+
+    /// add-pwl-igbt-and-thyristor: a SwitchedDiode whose conduction also
+    /// needs the gate bit of the user's mask at its switch index (IGBT /
+    /// GTO: `Held`; thyristor: `Latching`, holding current `I_H`).
+    void add_gated_diode(Index branch_id, Real g_on, Real g_off, Real V_th,
+                         Real V_f, models::SwitchedDiode::Gate gate,
+                         Real I_H = Real{0}) {
+        add_diode(branch_id, g_on, g_off, V_th, V_f);
+        auto& p = std::get<models::SwitchedDiode::Params>(entries_[branch_id]);
+        p.gate = gate;
+        p.I_H = I_H;
+        ++num_gated_;
+    }
+    [[nodiscard]] Size num_gated_diodes() const noexcept { return num_gated_; }
 
     /// Register a smooth-blend nonlinear diode (the Shockley-
     /// flavoured `models::IdealDiode`). The branch MUST have been
@@ -256,6 +274,35 @@ public:
     [[nodiscard]] const std::vector<PmsmMnaMachine>&
     pmsm_mna_machines() const noexcept {
         return pmsm_mna_machines_;
+    }
+
+    /// One MNA-native induction machine: three stator branches
+    /// (a, b, c → neutral), the speed node and the two rotor-flux
+    /// nodes (λ_rα, λ_rβ as node voltages, 1 F each). The stamp is
+    /// in `refresh_pmsm_mna`, the state in `PmsmMnaHistory` (one
+    /// machine history for both families).
+    struct InductionMachine {
+        std::array<Index, 3> branch_id{};
+        Index omega_node = -1;
+        std::array<Index, 2> rotor_node{-1, -1};
+        models::InductionMachineMna::Params params;
+    };
+    void add_induction_machine_mna(const std::array<Index, 3>& branch_ids,
+                                   Index omega_node,
+                                   const std::array<Index, 2>& rotor_nodes,
+                                   models::InductionMachineMna::Params p) {
+        models::InductionMachineMna::validate(p);
+        for (const Index b : branch_ids) {
+            entries_[b] = Entry{p};
+            inductor_branch_var_id_[b] =
+                static_cast<Index>(num_inductors_++);
+        }
+        induction_machines_.push_back(
+            InductionMachine{branch_ids, omega_node, rotor_nodes, p});
+    }
+    [[nodiscard]] const std::vector<InductionMachine>&
+    induction_machines() const noexcept {
+        return induction_machines_;
     }
 
     [[nodiscard]] const models::PmsmMna::Params&
@@ -942,6 +989,23 @@ public:
         }
     }
 
+    // add-in-kernel-event-losses: loss ports (CircuitBuilder::
+    // set_device_losses validates them; a run resolves the names).
+    /// Add or replace the loss port of `spec.device`.
+    void set_device_losses(thermal::DeviceLossSpec spec) {
+        for (auto& s : device_losses_) {
+            if (s.device == spec.device) {
+                s = std::move(spec);
+                return;
+            }
+        }
+        device_losses_.push_back(std::move(spec));
+    }
+    [[nodiscard]] const std::vector<thermal::DeviceLossSpec>&
+    device_losses() const noexcept {
+        return device_losses_;
+    }
+
     [[nodiscard]] bool is_branch_form(Index branch_id) const noexcept {
         return branch_form_.contains(branch_id);
     }
@@ -1170,7 +1234,8 @@ private:
                                 models::Gyrator::Params,
                                 models::SineCurrentSource::Params,
                                 models::PulseCurrentSource::Params,
-                                models::PwlCurrentSource::Params>;
+                                models::PwlCurrentSource::Params,
+                                models::InductionMachineMna::Params>;
 
 public:
     /// Number of device kinds; `kKindCaps` must have this many rows.
@@ -1202,6 +1267,16 @@ public:
                 for (const Index b : mach.branch_id) entries_[b] = Entry{p};
             }
         }
+        if (const auto* im =
+                std::get_if<models::InductionMachineMna::Params>(&e)) {
+            const auto p = *im;
+            for (auto& mach : induction_machines_) {
+                if (std::find(mach.branch_id.begin(), mach.branch_id.end(),
+                              branch_id) == mach.branch_id.end()) continue;
+                mach.params = p;
+                for (const Index b : mach.branch_id) entries_[b] = Entry{p};
+            }
+        }
         if (const auto* ind = std::get_if<models::Inductor::Params>(&e)) {
             for (auto& c : transformer_couplings_) {
                 if (c.primary_branch_id == branch_id) c.params.L_p = ind->L;
@@ -1221,8 +1296,8 @@ private:
     static constexpr bool kind_maps_to_ = std::is_same_v<
         std::variant_alternative_t<static_cast<std::size_t>(K), Entry>, P>;
 
-    static_assert(std::variant_size_v<Entry> == 27,
-        "StoredKind has 27 values; Entry must list 27 alternatives in the "
+    static_assert(std::variant_size_v<Entry> == 28,
+        "StoredKind has 28 values; Entry must list 28 alternatives in the "
         "same order — update both together.");
     static_assert(kind_maps_to_<StoredKind::Resistor,           models::Resistor::Params>);
     static_assert(kind_maps_to_<StoredKind::VoltageSource,      models::VoltageSource::Params>);
@@ -1251,6 +1326,7 @@ private:
     static_assert(kind_maps_to_<StoredKind::SineCurrentSource,  models::SineCurrentSource::Params>);
     static_assert(kind_maps_to_<StoredKind::PulseCurrentSource, models::PulseCurrentSource::Params>);
     static_assert(kind_maps_to_<StoredKind::PwlCurrentSource,   models::PwlCurrentSource::Params>);
+    static_assert(kind_maps_to_<StoredKind::InductionMachineMna, models::InductionMachineMna::Params>);
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -1325,11 +1401,13 @@ private:
     };
     numeric::Dictionary<Index, BranchForm> branch_form_;
     Size num_branch_switches_ = 0;
+    std::vector<thermal::DeviceLossSpec> device_losses_;
 
     // Diode branches in insertion order. Layer 5 V2's
     // DiodeEventState iterates this list to build per-diode
     // tracking entries.
     std::vector<Index> diode_branches_;
+    Size num_gated_ = 0;   // gated SwitchedDiodes among them
 
     // Layer 2 V13: MOSFET Level 1 — extra storage for the
     // gate node id per drain→source branch. The branch
@@ -1356,6 +1434,7 @@ private:
     std::vector<Index> nonlinear_capacitor_branches_;
     std::vector<Index> lauritzen_diode_branches_;
     std::vector<PmsmMnaMachine> pmsm_mna_machines_;
+    std::vector<InductionMachine> induction_machines_;
     std::vector<Index> igbt_level1_branches_;
 
     // Layer 2 V2: transformer coupling registry. Each entry
@@ -1405,6 +1484,9 @@ inline constexpr auto kKindCaps = std::to_array<KindCaps>({
     {"SineCurrentSource",  SolveClass::Source,         kAllEngines},
     {"PulseCurrentSource", SolveClass::Source,         kAllEngines},
     {"PwlCurrentSource",   SolveClass::Source,         kAllEngines},
+    // Speed-dependent (bilinear ω·λ_r): not LTI between events, so no
+    // exact propagator; no small-signal stamp in the AC sweep yet.
+    {"InductionMachineMna", SolveClass::NewtonStateful, kNewtonEngines},
 });
 /// add-branch-form-ideal-switch D7 / task 4.3: the BRANCH form of the
 /// Switch and Diode kinds (a form, not a kind: one row each, by the
@@ -1426,6 +1508,25 @@ inline constexpr auto kBranchFormCaps = std::to_array<FormCaps>({
     {"Diode", DevicePool::StoredKind::Diode,
      static_cast<std::uint8_t>(engine_bit(Engine::FixedTrap) |
                                engine_bit(Engine::TrBdf2))},
+});
+
+/// add-pwl-igbt-and-thyristor: the GATED forms of the Diode kind (IGBT /
+/// GTO hold the gate, thyristor / TRIAC latch). bdf1 has no diode
+/// iteration; the AC sweep is linear at the supplied mask.
+struct GatedCaps {
+    std::string_view name;      // "GateHeld" / "Latching"
+    models::SwitchedDiode::Gate gate;
+    std::uint8_t engines;
+    [[nodiscard]] constexpr bool supports(Engine e) const noexcept {
+        return (engines & engine_bit(e)) != 0;
+    }
+};
+inline constexpr std::uint8_t kGatedEngines = static_cast<std::uint8_t>(
+    engine_bit(Engine::FixedTrap) | engine_bit(Engine::TrBdf2) |
+    engine_bit(Engine::AcSweep));
+inline constexpr auto kGatedCaps = std::to_array<GatedCaps>({
+    {"GateHeld", models::SwitchedDiode::Gate::Held, kGatedEngines},
+    {"Latching", models::SwitchedDiode::Gate::Latching, kGatedEngines},
 });
 
 static_assert(kKindCaps.size() == DevicePool::kNumKinds,

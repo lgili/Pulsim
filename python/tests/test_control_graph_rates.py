@@ -207,16 +207,31 @@ def test_offset_on_the_fixed_engine():
     np.testing.assert_allclose(t, 5e-5 + np.arange(10) * 1e-4, atol=1e-12)
 
 
-def test_offset_and_delay_time_are_refused_on_trbdf2():
-    for rate, feature in ((p.Rate(1e-4, offset=5e-5), "control_rate_offset"),
-                          (p.Rate(1e-4, compute_delay=2e-5), "compute_delay")):
-        b = _rc()
-        ch = p.MixedDomainBlockChain(rate=rate)
-        ch.add("g", p.Gain(k=1.0), inputs=dict(x="out"), output="u")
-        with pytest.raises(p.UnsupportedError) as e:
-            p.simulate(b, 1e-3, engine="trbdf2",
-                       step_observer=ch.make_step_observer(b))
-        assert e.value.feature == feature
+def test_delay_time_is_refused_on_trbdf2():
+    b = _rc()
+    ch = p.MixedDomainBlockChain(rate=p.Rate(1e-4, compute_delay=2e-5))
+    ch.add("g", p.Gain(k=1.0), inputs=dict(x="out"), output="u")
+    with pytest.raises(p.UnsupportedError) as e:
+        p.simulate(b, 1e-3, engine="trbdf2",
+                   step_observer=ch.make_step_observer(b))
+    assert e.value.feature == "compute_delay"
+
+
+@pytest.mark.parametrize("t_start", (0.0, 3e-4))
+def test_offset_on_trbdf2(t_start):
+    # add-unified-event-queue: the kernel's event queue ticks a group at
+    # t_start + offset + k*period (was refused, control_rate_offset).
+    b = _rc()
+    ch = p.MixedDomainBlockChain(rate=p.Rate(1e-4, offset=5e-5))
+    ch.add("g", p.Gain(k=1.0), inputs=dict(x="out"), output="u")
+    obs = ch.make_step_observer(b)
+    ch._cxx_chain.record_channel("u")
+    p.simulate(b, t_start + 1e-3, engine="trbdf2", t_start=t_start,
+               step_observer=obs)
+    t = np.asarray(ch._cxx_chain.get_recording_times())
+    np.testing.assert_allclose(t, t_start + 5e-5 + np.arange(10) * 1e-4,
+                               atol=1e-12)
+    assert ch.tick_counts == [10]
 
 
 def test_compute_delay_time_on_the_fixed_engine():
@@ -280,3 +295,18 @@ def test_the_chain_fast_path_passes_a_declared_b_extra_jump():
     t = np.asarray(r.times)
     exact = np.where(t >= tau, 1.0 - np.exp(-(t - tau) / 1e-3), 0.0)
     assert np.max(np.abs(np.asarray(r.v("v")) - exact)) < 1e-7
+
+
+def test_two_offset_groups_on_trbdf2():
+    # Two groups with different offsets and periods, t_start != 0: the
+    # graph's t0 is its first tick minus the smallest offset.
+    b = _rc()
+    ch = p.MixedDomainBlockChain()
+    ch.add("g", p.Gain(k=1.0), inputs=dict(x="out"), output="u",
+           rate=p.Rate(1e-4, offset=2e-5))
+    ch.add("h", p.Gain(k=2.0), inputs=dict(x="out"), output="w",
+           rate=p.Rate(3e-4, offset=7e-5))
+    obs = ch.make_step_observer(b)
+    t0 = 2.5e-4
+    p.simulate(b, t0 + 1.2e-3, engine="trbdf2", t_start=t0, step_observer=obs)
+    assert ch.tick_counts == [12, 4]

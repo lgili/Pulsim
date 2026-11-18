@@ -34,9 +34,15 @@ real names in the graph, so ``res.v("leg_a/sm17/m")``,
 ``res.i("leg_a/sm17/C")`` and every named diagnostic already speak
 the path — nothing downstream had to learn about hierarchy.
 
-**Flattened at instantiate time. The kernel is untouched**: this
-module only rewrites the strings on their way into the ordinary
-builder.
+**Flattened at instantiate time**: the devices are ordinary devices
+of the builder, with the names above. Each instance also opens a SCOPE
+in the builder (add-immutable-circuit-ir group 8): the circuit records
+the tree (``Circuit.scopes()``, each scope's ``kind`` = the definition
+it instantiates), and a parameter declared in a body (``s.param("Ron",
+s.p.r_on)``) belongs to its instance — expressions look names up from
+the instance outward, and ``with_params({"leg_a/sm17/Ron": ...})``
+re-values one instance. The scope's path is exactly the name prefix,
+so every name below is unchanged.
 """
 
 from __future__ import annotations
@@ -288,12 +294,37 @@ class Subsystem:
             real_builder = builder._b
             ports = {k: builder.net(v) for k, v in ports.items()}
         else:
-            full_path = path
+            # under `with builder.scope(...)` the path is relative to it
+            cur = getattr(builder, "current_scope", "") or ""
+            full_path = f"{cur}{SEP}{path}" if cur else path
             real_builder = builder
 
         scoped = ScopedBuilder(real_builder, full_path, ports,
                                 params)
-        self._body(scoped)
+        opener = getattr(real_builder, "open_scope", None)
+        if opener is None:   # not a pulsim CircuitBuilder: names only
+            self._body(scoped)
+        else:
+            # The builder's open scope is the enclosing instance while
+            # its body runs, so `path` is relative to it.
+            if isinstance(builder, ScopedBuilder):
+                cur = real_builder.current_scope
+                if cur.startswith(builder.path + SEP):
+                    raise ValueError(
+                        f"instantiate({self.name!r} at {path!r}): scope "
+                        f"{cur!r}, opened inside the body of {builder.path!r}, "
+                        "is still open; a body's proxy instantiates at the "
+                        "body's own level")
+                if cur != builder.path:
+                    raise ValueError(
+                        f"instantiate({self.name!r} at {full_path!r}): the "
+                        "enclosing instance's body has returned; instantiate "
+                        "nested subsystems inside it")
+            opener(path, self.name)
+            try:
+                self._body(scoped)
+            finally:
+                real_builder.close_scope()
         inst = SubsystemInstance(path=full_path, subsystem=self,
                                   ports=ports, params=params,
                                   devices=list(scoped.emitted))

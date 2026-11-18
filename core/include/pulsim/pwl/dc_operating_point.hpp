@@ -127,9 +127,6 @@ struct DCOperatingPoint {
 
     const bool has_diodes =
         diodes != nullptr && diodes->num_diodes() > 0;
-    const topology::SwitchStateMask diode_owned =
-        has_diodes ? diodes->diode_owned_bits()
-                    : topology::SwitchStateMask(0);
 
     DCOperatingPoint out;
     out.mask = user_mask;
@@ -159,8 +156,7 @@ struct DCOperatingPoint {
                                       static_cast<long>(iters));
         topology::SwitchStateMask mask = user_mask;
         if (has_diodes) {
-            mask = mask.overlay(diodes->current_diode_mask(),
-                                 diode_owned);
+            mask = diodes->combine(mask);
         }
         out.mask = mask;
 

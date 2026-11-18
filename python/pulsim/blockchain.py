@@ -348,6 +348,7 @@ class MixedDomainBlockChain:
         def observer(t, x):
             cxx_observer(t, x)
         observer._cxx_chain = self._cxx_chain  # type: ignore[attr-defined]
+        observer._graph = self  # its Python-held block state (G26)  # type: ignore[attr-defined]
         # Blocks that call Python per evaluation (the counter gate).
         observer._n_python_blocks = sum(  # type: ignore[attr-defined]
             type(sp.block).__name__ in ("PythonBlock", *_PY_LIBRARY)
@@ -595,9 +596,9 @@ class MixedDomainBlockChain:
                                        phase=block.phase),
                            [ref("duty"), ref("t")])
             elif cls_name in _PORTED_TRANSFORMS:
-                # Python-exact (block_laws.h): the kernel add_svm /
-                # add_clarke are different laws (G17); add_park / add_pll
-                # share these since G25, with the kernel's own signatures.
+                # Python-exact (block_laws.h): the kernel add_park /
+                # add_pll (G25) and add_svm / add_clarke (G29) share these
+                # laws, with the kernel's own signatures.
                 kind, names, n_out = _PORTED_TRANSFORMS[cls_name]
                 if not isinstance(output, (tuple, list)) or \
                         len(output) not in n_out:
@@ -705,6 +706,31 @@ class MixedDomainBlockChain:
             rate[i] = r
         self._groups = groups
         self._block_rates = rate        # resolved, per block (export_c)
+
+    def gate(self, builder, mapping: dict):
+        """A discrete gate (call after ``make_step_observer``): switch
+        ``mapping[channel]`` (a name or a bit index) is ON while the
+        signal is > 0.5. Its edges are the graph's publication instants
+        (ticks, after compute_delay), which every engine lands; pass it as
+        ``switch_fn`` (or inside ``make_combined_switch_fn``)."""
+        if self._cxx_chain is None:
+            raise ValueError("gate(): build the graph first "
+                             "(make_step_observer)")
+        outs = set()
+        for spec in self.blocks:
+            o = spec.output
+            outs.update(o if isinstance(o, (tuple, list)) else (o,))
+        unknown = [ch for ch in mapping if ch not in outs]
+        if unknown:
+            raise ValueError(f"gate(): no block writes channel(s) {unknown}")
+        n = int(builder.graph.num_switches)
+        pairs = [(str(ch), int(builder.switch_index_of(sw))
+                  if isinstance(sw, str) else int(sw))
+                 for ch, sw in mapping.items()]
+        g = self._cxx_chain.make_signal_gate(n, pairs)
+        g._closed_loop = "MixedDomainBlockChain.gate"  # shooting refuses it
+        g._graph = self
+        return g
 
     def drive_source(self, builder, channel: str, wire) -> None:
         """Drive a controlled source from signal ``channel``: ``wire`` is

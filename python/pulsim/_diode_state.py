@@ -370,6 +370,14 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
         else:
             reason = why if rec is None else (
                 "its mask bit could not be resolved from the builder")
+            if "gate" in prm:
+                # The replay knows no gate: a gated-off IGBT blocking
+                # 400 V would read as conducting kiloamperes.
+                raise ValueError(
+                    f"{name!r} is a gated PWL device and the result carries "
+                    f"no record of the stamped mask ({reason}); its "
+                    "conduction state cannot be replayed from voltages. "
+                    + _views.record_advice(result))
             closed = _replay_kernel_rule(v, V_th, V_f)
             tr = DiodeStateTrace(branch_id=bid, name=name, g_on=g_on,
                                  g_off=g_off, V_th=V_th, v=v,
@@ -399,7 +407,12 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
             i_env = float(i_abs[rest].max()) if rest.any() else 0.0
             exempt = unsolved | (landing & np.where(closed, i_abs <= i_env,
                                                     v <= v_env))
+            # A gated device (IGBT, GTO, thyristor) blocks forward
+            # voltage while its gate is off: OFF under forward bias is
+            # its law, not a missed turn-on.
             off_fwd = ~exempt & ~closed & (v - V_on > 1e-3) & (v > 1e-3)
+            if "gate" in prm:
+                off_fwd[:] = False
             on_rev = ~exempt & closed & (v - V_f < -1e-3)
             viol = off_fwd | on_rev
             if viol.any():

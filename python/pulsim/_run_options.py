@@ -39,6 +39,8 @@ def is_requested(name: str, value: Any, engine: str = "") -> bool:
         return int(value) != 0
     if kind == "legacy":
         return value != "legacy"
+    if kind == "label":
+        return value != "label"
     if kind == "integrator":
         # The fixed engine's own integrator names ask nothing of it.
         return not (engine == "pwl" and value in ("kernel", "default"))
@@ -81,6 +83,7 @@ def run_options(*, engine: str, t_start: float, t_end: float, dt=None,
                 enable_newton_lm=None, newton_roundoff_budget=None,
                 max_event_iterations=None, strict_event_iterations=False,
                 mode_selection=None, on_impulse="record", mode_guard=True,
+                control_tick="label",
                 max_dt_halvings=None, store_every=None, start_from_dc_op=False,
                 enable_substep_state_correction=None,
                 discontinuity_restart=None, resolution_diagnostics=None,
@@ -120,6 +123,7 @@ def run_options(*, engine: str, t_start: float, t_end: float, dt=None,
     o.mode_selection = mode_selection or "legacy"
     o.on_impulse = on_impulse
     o.mode_guard = bool(mode_guard)
+    o.control_tick = control_tick
     o.start_from_dc_op = bool(start_from_dc_op)
     o.auto_regularize = bool(auto_regularize)
     return o

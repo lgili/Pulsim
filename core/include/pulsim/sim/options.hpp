@@ -53,6 +53,7 @@ enum class Unset : std::uint8_t {
     NoneOrZero,  // max_dt_halvings: 0 asks for no retry, which no engine lacks
     Legacy,      // mode_selection: None / 'legacy' is every engine's settle
     Integrator,  // None; on pwl also 'kernel' / 'default' (its own integrator)
+    Label,       // control_tick: None / 'label' is every engine's tick time
 };
 
 struct OptionSpec {
@@ -70,7 +71,7 @@ struct OptionSpec {
 /// the order refusals are listed in). Python reads it through
 /// `pulsim._pulsim.run_option_table()`; a test asserts its names equal
 /// simulate()'s parameters.
-inline constexpr std::array<OptionSpec, 47> kRunOptionTable{{
+inline constexpr std::array<OptionSpec, 48> kRunOptionTable{{
     {"engine", kEvery, Unset::Always, "'auto'", ""},
     {"rtol", kTrBdf2 | kExact, Unset::None, "1e-5 (trbdf2), 1e-6 (exact)",
      "rtol bounds a variable step's error estimate; a fixed step has none"},
@@ -160,6 +161,9 @@ inline constexpr std::array<OptionSpec, 47> kRunOptionTable{{
      "mode_selection='shadow' / 'lcp' needs a settle hook this engine lacks"},
     {"allow_implicit_segments", kExact, Unset::None, "None",
      "allow_implicit_segments governs the exact engine's numeric segments"},
+    {"control_tick", kPwl | kTrBdf2, Unset::Label, "'label'",
+     "control_tick='state' changes when a controller reads the state; the "
+     "exact engine runs no controller"},
     // simulate()'s signature also has `dt` and `t_end` (every engine; the
     // run window) — rows so the table covers every parameter.
     {"t_end", kEvery, Unset::Always, "required", ""},
@@ -199,6 +203,9 @@ struct Defaults {
     static constexpr Size max_dt_halvings = 6;
     static constexpr Size store_every = 1;
     static constexpr Real voltage_sanity_factor = 100.0;
+    /// control_tick='state': a split edge moves by at most this many dt
+    /// (G30; the driver's own default is 0.01).
+    static constexpr Real split_snap_state = 1e-6;
 };
 
 enum class EngineChoice : std::uint8_t { Auto, Pwl, TrBdf2, Exact };
@@ -234,6 +241,9 @@ struct RunOptions {
     OnImpulse on_impulse = OnImpulse::Record;
     /// A/B switch of the fixed engine's mode guard (not a user option).
     bool mode_guard = true;
+    /// control_tick='state' (G30): controllers read the state at their
+    /// instant; the fixed engine then snaps split edges by 1e-6 dt.
+    bool control_tick_state = false;
 
     // Fixed step (pwl).
     std::optional<Size> max_dt_halvings;
@@ -289,6 +299,7 @@ requested_options(const RunOptions& o) {
     on(o.inductor_freeze_di_max.has_value(), "inductor_freeze_di_max");
     on(o.inductor_abs_clamp.has_value(), "inductor_abs_clamp");
     on(o.mode_selection != ModeSelection::Legacy, "mode_selection");
+    on(o.control_tick_state, "control_tick");
     // Keep table order (the order refusals are listed in).
     std::vector<std::string_view> ordered;
     for (const auto& spec : kRunOptionTable) {
@@ -350,6 +361,7 @@ to_simulation_options(const RunOptions& o) {
     if (o.enable_substep_state_correction) {
         s.enable_substep_state_correction = *o.enable_substep_state_correction;
     }
+    if (o.control_tick_state) s.split_snap = Defaults::split_snap_state;
     if (o.discontinuity_restart) s.discontinuity_restart = *o.discontinuity_restart;
     s.on_impulse_error = o.on_impulse == OnImpulse::Error;
     s.mode_selection = static_cast<int>(o.mode_selection);

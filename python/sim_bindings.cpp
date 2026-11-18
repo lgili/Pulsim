@@ -46,6 +46,7 @@ const char* unset_name(sim::Unset u) {
         case sim::Unset::NoneOrZero: return "none_or_zero";
         case sim::Unset::Legacy: return "legacy";
         case sim::Unset::Integrator: return "integrator";
+        case sim::Unset::Label: return "label";
     }
     return "?";
 }
@@ -145,6 +146,7 @@ void init_module(py::module_& m) {
             d["max_dt_halvings"] = D::max_dt_halvings;
             d["store_every"] = D::store_every;
             d["voltage_sanity_factor"] = D::voltage_sanity_factor;
+            d["split_snap_state"] = D::split_snap_state;
             return d;
         },
         "THE default values of a run (sim::Defaults).");
@@ -226,6 +228,14 @@ void init_module(py::module_& m) {
                      {"error", sim::OnImpulse::Error}}, "on_impulse");
             })
         .def_readwrite("mode_guard", &RunOptions::mode_guard)
+        .def_property("control_tick",
+            [](const RunOptions& o) {
+                return std::string(o.control_tick_state ? "state" : "label");
+            },
+            [](RunOptions& o, const std::string& v) {
+                o.control_tick_state = parse_enum<bool>(v,
+                    {{"label", false}, {"state", true}}, "control_tick");
+            })
         .def_readwrite("max_dt_halvings", &RunOptions::max_dt_halvings)
         .def_readwrite("store_every", &RunOptions::store_every)
         .def_readwrite("start_from_dc_op", &RunOptions::start_from_dc_op)

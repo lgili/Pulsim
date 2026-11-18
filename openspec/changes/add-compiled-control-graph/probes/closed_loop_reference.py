@@ -21,6 +21,7 @@ Measured 2026-11-18 (macOS arm64), max |v(kT) - ref| / span:
   cl_boost_pi             1.1e-7        9.8e-7  5.7e-5   2.0e-1  4.2e-4 (not run)    2.4e-5
   ll14_buck_closed_loop   5.0e-8        1.6e-7  1.1e-5   4.1e-2  3.0e-4 (4.0e-2)     1.8e-5
   ll15_boost_closed_loop  2.9e-8        5.0e-7  3.9e-5   3.0e-2  9.9e-6 (3.0e-2)     6.8e-7
+  ll16_flyback (coupled)  9.5e-8        8.2e-7  3.0e-5   2.5e-2  2.9e-4 (2.6e-2)     1.8e-5
 pwl converges at first order (label time: the helper samples x(kT - dt)).
 cl_boost_pi before: trbdf2 hit max_steps; OPAQUE pwl+split is skipped (a
 Python gate x 1e7 steps). Only v(out) and the duty are compared here; the
@@ -91,6 +92,15 @@ def node_v(p, on, iL, dstate):
 def rhs(p, on, dstate):
     def f(t, x):
         iL, vC = x
+        if p["topo"] == "flyback":
+            # Lm from vin to drain across an ideal Np:Ns = nt transformer
+            # (secondary dot reversed), switch drain-0, Shockley diode
+            # sec -> out: KCL at drain iL - i_d/nt = Gs*vd
+            Gs, nt = (p["gon"] if on else p["goff"]), p["nt"]
+            idio = lambda vd: shockley(p, -(p["vin"] - vd) / nt - vC)
+            vd = root(lambda vd: iL - idio(vd) / nt - Gs * vd,
+                      -3.0, p["vin"] + nt * (abs(vC) + 3.0))
+            return [(p["vin"] - vd) / p["L"], (idio(vd) - vC / p["R"]) / p["C"]]
         if p["topo"] == "buck":
             v = node_v(p, on, iL, dstate)
             return [(v - iL * p["rL"] - vC) / p["L"], (iL - vC / p["R"]) / p["C"]]
@@ -195,6 +205,9 @@ P = {
     "ll15_boost_closed_loop": dict(topo="boost", diode="shockley", Is=1e-12, n=1.2, vin=12., gon=50.,
                                    goff=1e-7, rL=0., L=50e-6, C=100e-6, R=20., T=5e-6, kp=0.005, ki=10.,
                                    lo=0.05, hi=0.85, sp=24.),
+    "ll16_flyback_closed_loop": dict(topo="flyback", diode="shockley", Is=1e-12, n=1.2, nt=4.,
+                                     vin=48., gon=20., goff=1e-7, L=160e-6, C=470e-6, R=5.,
+                                     T=1 / 150e3, kp=0.01, ki=20., lo=0.02, hi=0.5, sp=12.),
     "cl_boost_pi": dict(topo="boost", diode="pwl", vin=5., gon=100., goff=1e-6, gd_on=100., gd_off=1e-6,
                         rL=0.1, L=47e-6, C=470e-6, R=40., T=1e-5, kp=0.005, ki=50., lo=0., hi=0.9, sp=10.,
                         vC0=10.),

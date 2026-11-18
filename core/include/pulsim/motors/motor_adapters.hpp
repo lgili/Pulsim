@@ -87,6 +87,7 @@ inline void add_dc_motor_to_chain(
         (void)L_a_H;
     };
     auto reset = [mech]() { mech->reset(); };
+    chain.capture(mech);
     chain.add(std::move(step), std::move(reset));
 }
 
@@ -295,6 +296,7 @@ inline void add_induction_motor_to_chain(
         (*psi)[0] = Real{0};
         (*psi)[1] = Real{0};
     };
+    chain.capture(mech, psi);
     chain.add(std::move(step), std::move(reset));
 }
 
@@ -371,6 +373,7 @@ inline void add_three_phase_motor_to_chain(
         (void)R_s_ohm; (void)L_s_H;  // captured for diagnostics
     };
     auto reset = [mech]() { mech->reset(); };
+    chain.capture(mech);
     chain.add(std::move(step), std::move(reset));
 }
 

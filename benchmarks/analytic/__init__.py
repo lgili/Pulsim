@@ -1,4 +1,4 @@
-"""Analytic reference set: 20 circuits with a closed-form (or exact
+"""Analytic reference set: 22 circuits with a closed-form (or exact
 piecewise-LTI) solution, one per entry of :data:`CASES`.
 
 Each :class:`Case` has ``build(k)`` -> ``(builder, switch_fn)`` where ``k``
@@ -240,6 +240,51 @@ def _pwl_diode(k):
     return b, None
 
 
+class _GateOn:
+    """The given switches' gates held on (a constant mask, no edges)."""
+
+    def __init__(self, n, on):
+        self.m = pulsim.SwitchStateMask(n)
+        for i in on:
+            self.m.set(i, True)
+
+    def __call__(self, _t):
+        return self.m
+
+    def next_edge_after(self, _t):
+        return math.inf
+
+
+def _igbt_knee(k):
+    b = _b()
+    b.add_current_source("I", "c", "gnd", 10.0)  # 10 A out of `c` into the IGBT
+    b.add_igbt("Q", "c", "gnd", 10e-3 * k, 1e9, V_ce0=1.0, reverse_blocking=True)
+    return b, _GateOn(b.graph.num_switches, [b.switch_index_of("Q")])
+
+
+# The gate edge is off the 1 us grid. pwl+restart samples every user gate at the
+# step start (design D4), so it fires one step late there: a disagree by design.
+_A_SCR = math.radians(60.0)
+
+
+def _scr_hw(k):
+    b = _b()
+    b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 1e3)
+    b.add_thyristor("T", "a", "k", 1e-2, 1e9, V_f=0.7)
+    b.add_resistor("R", "k", "gnd", 10.0 * k)
+    return b, pulsim.make_phase_control_fn(1e3, _A_SCR, 1e-4, [b.switch_index_of("T")],
+                                           b.graph.num_switches)
+
+
+def _scr_hw_exact(t):
+    th = np.mod(2 * np.pi * 1e3 * np.asarray(t), 2 * np.pi)
+    vin = 10.0 * np.sin(th)
+    # The engines store the left limit at the gate edge too; 1e-12 rad (1.6e-13 s)
+    # keeps that sample OFF whichever way the phase rounds.
+    on = (th > _A_SCR + 1e-12) & (th <= np.pi - math.asin(0.07))   # latched until i = 0
+    return np.where(on, (vin - 0.7) * 10.0 / (10.0 + 1e-2), vin * 10.0 / (10.0 + 1e9))
+
+
 def _hw_r(k):
     b = _b()
     b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
@@ -403,6 +448,63 @@ def _buck_exact(R, D, t_end):
     return f
 
 
+# ------------------------------------- induction machine (add-mna-native-machines) --
+# Declared test machine (design.md): 0.5 Ohm, 2 mH, 0.4 Ohm, 2 mH, 60 mH,
+# pp = 2, 100 V rms per phase at 60 Hz. The reference integrates the same
+# equations as a 5-state ODE (stationary frame, amplitude-invariant
+# Clarke) with SciPy Radau at rtol 1e-12; it never runs pulsim.
+
+_IM = dict(R_s=0.5, L_ls=2e-3, R_r=0.4, L_lr=2e-3, L_m=60e-3, pole_pairs=2)
+_IM_VP, _IM_W = 100.0 * math.sqrt(2.0), 2 * math.pi * 60.0
+
+
+def _im(held, J=0.01):
+    def build(k):
+        b = _b()
+        for i, node in enumerate(("ua", "ub", "uc")):
+            b.add_sine_voltage_source(f"V{i}", node, "gnd", 0.0, _IM_VP,
+                                      60.0, -2 * math.pi / 3 * i)
+        b.add_induction_machine_mna("M", "ua", "ub", "uc", "nn", "w",
+                                    **dict(_IM, R_r=_IM["R_r"] * k), J=J)
+        if held is not None:
+            b.add_voltage_source("Vw", "w", "gnd", held)
+        return b, None
+    return build
+
+
+def _im_exact(held, out, J=0.01):
+    from scipy.integrate import solve_ivp
+
+    p = _IM
+    lr = p["L_lr"] + p["L_m"]
+    sls = p["L_ls"] + p["L_m"] * p["L_lr"] / lr
+    kr, tr = p["L_m"] / lr, lr / p["R_r"]
+    pp = p["pole_pairs"]
+
+    def rhs(t, x):
+        lsa, lsb, lra, lrb, om = x
+        if held is not None:
+            om = held
+        isa, isb = (lsa - kr * lra) / sls, (lsb - kr * lrb) / sls
+        va = _IM_VP * math.sin(_IM_W * t)
+        vb = -_IM_VP * math.cos(_IM_W * t)
+        torque = 1.5 * pp * kr * (lra * isb - lrb * isa)
+        return [va - p["R_s"] * isa, vb - p["R_s"] * isb,
+                -lra / tr + p["L_m"] / tr * isa - pp * om * lrb,
+                -lrb / tr + p["L_m"] / tr * isb + pp * om * lra,
+                0.0 if held is not None else torque / J]
+
+    def f(t):
+        t = np.atleast_1d(np.asarray(t, dtype=float))
+        ts = np.unique(t)
+        sol = solve_ivp(rhs, (0.0, float(ts[-1])), [0.0] * 5, method="Radau",
+                        rtol=1e-12, atol=1e-13, t_eval=ts, max_step=1e-4)
+        lsa, _lsb, lra, _lrb, om = sol.y
+        y = om if out == "w" else (lsa - kr * lra) / sls   # i_a = i_alpha
+        return np.interp(t, ts, y)
+    return f
+
+
 # ------------------------------------------------------------- the table ---
 
 CASES = [
@@ -449,6 +551,11 @@ CASES = [
          abs_scale=1.2, exclude_t0=True, checks={"V": 1.2, "P": 12.0}),
     Case("halfwave_r", "half-wave rectifier, R load, V_f 0.7 V", _hw_r, _v("o"), _hw_r_exact,
          3e-3, 1e-6, NO_DSED, exclude_t0=True),
+    Case("igbt_knee", "PWL IGBT, 10 A forced, V_ce0 1 V, r_ce 10 mOhm", _igbt_knee, _v("c"),
+         lambda t: np.full_like(np.asarray(t, dtype=float), 1.0 + 10 * 10e-3), 1e-4, 1e-6, NO_DSED,
+         abs_scale=1.1, exclude_t0=True, checks={"V": 1.1, "P": 11.0}),
+    Case("scr_halfwave_r", "thyristor half-wave, R load, alpha 60 deg, V_f 0.7 V", _scr_hw,
+         _v("k"), _scr_hw_exact, 3e-3, 1e-6, NO_DSED, exclude_t0=True),
     Case("halfwave_rl", "half-wave rectifier, RL load", _hw_rl, _i("L"), _hw_rl_exact,
          3e-3, 1e-6, ALL),
     Case("hard_switched_rc", "hard-switched RC (p8_caploop)", _caploop, _v("sw"), _caploop_exact,
@@ -457,6 +564,10 @@ CASES = [
          _buck_exact(1.0, 0.5, 40 * _TB), 40 * _TB, _TB / 200, ALL),
     Case("buck_dcm", "buck DCM, R 50 Ohm, D 0.3, from rest", _buck(50.0, 0.3), _v("vout"),
          _buck_exact(50.0, 0.3, 40 * _TB), 40 * _TB, _TB / 200, ALL),
+    Case("im_locked_rotor", "induction machine, speed held at 0, i_a from rest",
+         _im(0.0), _i("M_a"), _im_exact(0.0, "i_a"), 0.1, 2e-5, NO_DSED),
+    Case("im_free_acceleration", "induction machine, direct-on-line start, speed",
+         _im(None), _v("w"), _im_exact(None, "w"), 0.2, 2e-5, NO_DSED),
 ]
 
 BY_ID = {c.id: c for c in CASES}

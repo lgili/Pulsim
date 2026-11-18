@@ -249,8 +249,10 @@ def _err(case, engine, k=1.0):
                            abs_scale=case.abs_scale, exclude_t0=case.exclude_t0)
 
 
-def test_there_are_twenty_analytic_cases_and_each_has_a_manifest_entry():
-    assert len(CASES) == 20
+def test_there_are_twenty_four_analytic_cases_and_each_has_a_manifest_entry():
+    # 20 + igbt_knee, scr_halfwave_r (IGBT track) + im_locked_rotor,
+    # im_free_acceleration (machines track)
+    assert len(CASES) == 24
     assert set(ANALYTIC) == {c.id for c in CASES}
 
 
@@ -267,6 +269,9 @@ def test_closed_form_self_checks():
     r = BY_ID["pwl_diode_drop"].run("pwl")
     assert r.v("a")[-1] == pytest.approx(1.2, abs=1e-12)
     assert r.v("a")[-1] * 10.0 == pytest.approx(12.0, abs=1e-10)        # P = V I
+    assert BY_ID["igbt_knee"].checks == {"V": pytest.approx(1.1, abs=1e-12), "P": 11.0}
+    r = BY_ID["igbt_knee"].run("pwl")
+    assert r.v("c")[-1] == pytest.approx(1.1, abs=1e-12)               # V_ce0 + r_ce I
 
 
 def _cells():

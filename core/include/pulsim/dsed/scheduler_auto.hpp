@@ -234,8 +234,9 @@ public:
             }
             // an edge a few ulps before t_end (its own rounding) is t_end:
             // the run ends there, so it never fires and the last sample
-            // stays the left limit (no sliver step that reads the new piece)
-            if (t_gate < t_end && near_time(t_gate, t_end)) t_gate = t_end;
+            // stays the left limit (no sliver step that reads the new piece).
+            // Ulps only: a 1e-12 s floor swallowed a 1 ps pulse ending a run.
+            if (t_gate < t_end && near_time(t_gate, t_end, Real{0})) t_gate = t_end;
 
             // 2a. Exact stepper first. A mode with a closed-form
             //     propagator (LTI, supported sources, non-defective

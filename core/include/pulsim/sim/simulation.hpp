@@ -19,7 +19,6 @@
 #include "pulsim/ir/circuit.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
-#include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/sim/options.hpp"
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/solver/trbdf2_transient.hpp"
@@ -56,20 +55,15 @@ struct RunPlan {
     std::vector<std::string> undriven;  // controlled switches nothing drives
 };
 
-/// The static Newton chain of a transient driver. `nullopt`: the driver
-/// stamps the Newton devices itself when the pool has any; `true` forces
-/// the chain; `false` on a circuit with a static Newton device is refused
-/// (it would simulate it as an open circuit). The bindings call this too.
+/// The static Newton chain of a transient driver. `nullopt` / `true`: the
+/// driver stamps the Newton devices itself (pwl::static_device_refresh);
+/// `false` on a circuit with a static Newton device is refused (it would
+/// simulate it as an open circuit). The bindings call this too.
 [[nodiscard]] inline pwl::NonlinearRefreshFn transient_refresh(
     const topology::Graph& graph, const pwl::DevicePool& pool,
     std::optional<bool> enable, std::string_view engine) {
     using pwl::SolveClass;
-    if (!enable.has_value()) return {};
-    if (*enable) {
-        return pool.requires_static_refresh()
-                   ? pwl::make_combined_diode_mosfet_refresh()
-                   : pwl::NonlinearRefreshFn{};
-    }
+    if (!enable.has_value() || *enable) return {};
     for (Index b = 0; b < graph.num_branches(); ++b) {
         if (!pool.is_registered(b)
             || pwl::kind_caps(pool.kind_of(b)).cls != SolveClass::NewtonStatic) {

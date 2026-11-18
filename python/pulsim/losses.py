@@ -842,8 +842,9 @@ def _diode_turn_offs(trace, times: np.ndarray,
     steps through the g_off transient, where single samples read
     thousands of volts; those steps carry no time weight here.
 
-    ``unresolved`` is set when the step that carries the turn-off,
-    ``t[k] − t[k−1]``, is longer than ``t_rr``: the solver then says
+    ``unresolved`` is set when the step that holds ``t_eval`` (the one
+    that carries the turn-off unless a sample follows it within ``t_rr``)
+    is longer than ``t_rr``: the solver then says
     nothing about how ``v_D`` rose inside that step, and V_R (hence
     E_rr) depends on the step size. The one exception is a FORCED
     turn-off (another bit of the recorded mask flips on the same step,
@@ -929,7 +930,20 @@ def _diode_turn_offs(trace, times: np.ndarray,
             forced = forced and bool(other_flip[k])
         # (1e-9 relative slack: dt = T/100 must not miss t_rr = T/100
         # by a rounding error of the stored times.)
-        unresolved = (float(t[k] - t[k - 1]) > t_rr * (1.0 + 1e-9)
+        # The step that holds t_eval: a short sample right after the
+        # turn-off (trbdf2's post-event record) does not resolve a long
+        # step that follows it, unless that step is flat (the sample before
+        # it already holds the post-jump plateau). shortcut: at a natural
+        # turn-off a ring across that long step with equal ends (the aliased
+        # "plateau" above) passes as flat; before the record existed the
+        # short step alone passed it, so this is no wider than it was.
+        # Upgrade: test the long step against the ring period.
+        k_e = min(max(int(np.searchsorted(t, t_eval)), k), max(end - 1, k))
+        flat_after = k_e > k and abs(float(v[k_e] - v[k_e - 1])) <= (
+            _RR_FLAT_RTOL * max(abs(float(v[k_e])), abs(float(v[k_e - 1])))
+            + flat_atol)
+        unresolved = (float(t[k_e] - t[k_e - 1]) > t_rr * (1.0 + 1e-9)
+                      and not flat_after
                       and not (forced and bool(flat)))
         out.append({"t": float(t[k]), "t_off": t_off, "V_R": float(V_R),
                     "I_F": I_F, "forced": bool(forced),
@@ -1879,6 +1893,17 @@ def device_loss_summary(
                 "diode_specs.")
     cond_by_bid, cond_by_name = _build_spec_lookup(
         conduction_specs, "conduction_specs")
+    # A gated PWL device (IGBT with reverse blocking, GTO, thyristor) is a
+    # diode row: its switching energies would be dropped in silence.
+    for c in comps_by_bid.values():
+        if "gate" in (c.get("params") or {}) and (
+                int(c["branch_id"]) in switch_by_bid
+                or str(c.get("name")) in switch_by_name):
+            raise ValueError(
+                f"switch_specs: {c.get('name')!r} is a gated PWL device "
+                "(IGBT with reverse_blocking, GTO, thyristor); its switching "
+                "energies are not modelled by device_loss_summary yet. Drop "
+                "the entry, or use reverse_blocking=False for the IGBT.")
 
     # The kernel's per-sample record of the stamped mask (None for a
     # result that carries none) and each switch-kind branch's bit.

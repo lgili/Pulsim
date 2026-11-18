@@ -146,8 +146,9 @@ signals.
 | a time `0 < Td < period` | at the first instant ≥ tick + Td | `pwl` (refused on `trbdf2`) |
 | `"one_sample"` | at the next tick (a microcontroller writing the duty at the next carrier period) | all |
 
-A `Rate` with an `offset` is refused on `trbdf2` too: its tick scheduler
-lands steps at `t_start + k*T` only.
+A `Rate` with an `offset` ticks at `t_start + offset + k*T` on `pwl` and
+on `trbdf2` (the variable-step engine lands a step on each of those
+instants).
 
 ### Exact zero-order hold on `pwl`
 
@@ -186,6 +187,13 @@ delay; the first hold lasts `T - dt`). This is the protocol the helpers
 had before 2.1; it is kept so every closed-loop number is unchanged. A
 chain with ordinary `Rate`s (state time, G6) samples `x(kT)` instead.
 On `trbdf2` both modes tick on the exact instants.
+
+`simulate(control_tick="state")` (off by default) runs these graphs in
+state time for that run: tick k samples `x(kT)` and holds from `kT`. It
+also narrows the event split's snap from `0.01*dt` to `1e-6*dt`
+(`SimulationOptions.split_snap`), so with
+`discontinuity_restart=True, enable_substep_state_correction=True` a
+PWM edge is no longer moved by up to `dt/100` (DECISIONS G30).
 
 Closed form, P loop on the RC of the table above (`K_p = 2`, set-point
 1 V, `T = 100 µs`), label time at step `h`: `w_0 = 0`,

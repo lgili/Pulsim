@@ -155,7 +155,7 @@ Available blocks: `PIController`, `PIDController`, `Comparator`,
 | `pulsim.Preset` / `AdvancedOptions` global presets | replaced by explicit `SimulationOptions` knobs |
 | `compressor_load` + R600a/R134a refrigerants | not on 1.0 |
 | MMC arm templates | not on 1.0 (single-arm helper deferred) |
-| `RobustnessProfile` retry-loop | not on 1.0 (use `enable_nonlinear_refresh=True` + DC-OP strategies) |
+| `RobustnessProfile` retry-loop | not on 1.0 (use DC-OP strategies) |
 | Single-phase induction motor (PSC) | not on 1.0 (DC motor, BLDC, PMSM, three-phase induction are) |
 
 If you need any of these on 1.0, pin pulsim `0.10.x` or open an
