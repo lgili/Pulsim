@@ -310,6 +310,9 @@ struct TrBdf2Stats {
     /// Probe solves retaken at 100x the step because Newton did not
     /// converge (see `probe_solve`).
     Size n_probe_newton_retries = 0;
+    /// Newton solves before the first accepted step that failed from the
+    /// start state and converged from the step's linear solve.
+    Size n_newton_start_retries = 0;
     /// Accepted SDIRK(2,2) restart steps (see TrBdf2Options).
     Size n_sdirk_steps = 0;
     /// Of those, the re-initialisation steps after entering a mode with
@@ -774,6 +777,11 @@ inline SimulationResult run_transient_trbdf2(
     Size ro_accepts = 0;
     Real ro_omega_max = 0;
     Index ro_row = kInvalidIndex;
+    // Until the first accepted step a failed Newton solve is retried once
+    // from the step's linear solve (solve_dispatch).
+    bool newton_at_start = true;
+    Vector nl_start_x;
+    Size n_newton_start_retries = 0;
     pwl::PwlSegment nl_seg;
     // One stamp-slot template for every assembly the engine does itself
     // (Newton carrier, round-off bounds): values bit-equal to
@@ -825,7 +833,50 @@ inline SimulationResult run_transient_trbdf2(
             throw;   // a run budget: never retried at a smaller h
         } catch (const std::runtime_error& e) {
             newton_last_error = e.what();
-            return false;
+            if (!newton_at_start) return false;
+            // From the run's start state the round-off acceptance measures
+            // each row against the magnitudes it sums AT THAT STATE: a zero
+            // start has none of the 2C/h·v terms whose round-off the
+            // residual is (48 V behind 1 µF at h_min: 4.8e-6 A against a
+            // scale of 48), so a solve converged in dx to 7e-16 V was
+            // refused at every h. Retried once from the step's linear solve
+            // (the nonlinear laws left out): a start whose terms are the
+            // residual's. That start can still be far off (a diode law at
+            // 48 V scales its row to 1e9 A), so a round-off acceptance from
+            // it is re-measured by one more solve from the converged state.
+            const std::string first_error = newton_last_error;
+            try {
+                cache.solve_at(m, dt_use, b_ex, nl_start_x);
+                if (!nl_start_x.allFinite()) return false;
+                out_x = pwl::solve_with_newton_b_extra(
+                    nl_seg, nl_effective, graph, pool, nl_start_x, b_ex,
+                    opts.max_newton_iterations, opts.tol_newton_dx,
+                    opts.tol_newton_res, opts.enable_newton_line_search,
+                    opts.enable_newton_lm, &newton_ws, &newton_roundoff);
+                if (newton_roundoff.accepted) {
+                    nl_start_x = out_x;
+                    out_x = pwl::solve_with_newton_b_extra(
+                        nl_seg, nl_effective, graph, pool, nl_start_x, b_ex,
+                        opts.max_newton_iterations, opts.tol_newton_dx,
+                        opts.tol_newton_res, opts.enable_newton_line_search,
+                        opts.enable_newton_lm, &newton_ws, &newton_roundoff);
+                }
+            } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                throw;
+            } catch (const std::runtime_error& e2) {
+                newton_last_error =
+                    first_error + "; retried from the linear solve: " + e2.what();
+                return false;
+            }
+            newton_last_error = first_error;
+            ++n_newton_start_retries;
+            if (newton_roundoff.accepted) {
+                ++ro_accepts;
+                if (newton_roundoff.omega >= ro_omega_max) {
+                    ro_omega_max = newton_roundoff.omega;
+                    ro_row = newton_roundoff.row;
+                }
+            }
         }
         return true;
     };
@@ -1128,11 +1179,13 @@ inline SimulationResult run_transient_trbdf2(
             const Real dt_next = last_probe_dt * Real{10};
             if (!noise_holds(xp) || dt_next > dt_cap) break;
             const Vector x_prev = xp;
+            const Vector b_prev = b_stage;   // mode_site reads the probe's
             const Real dt_prev = last_probe_dt;
             if (!probe_solve(m, t0, dt_next, xp)) {
                 // Not reached on a linear factor; if it were, neither the
                 // failed state nor its b_stage may be read: keep the bits.
                 xp = x_prev;
+                b_stage = b_prev;
                 last_probe_dt = dt_prev;
                 last_probe_ok = true;
                 ++n_noise_held;
@@ -2480,6 +2533,26 @@ inline SimulationResult run_transient_trbdf2(
                 }
             }
 
+            // ---- no final sliver ----
+            // An edge within 64 h_min of the run's end is left to the next
+            // run (its first step reads the gates at t_start + h_min/2 and
+            // settles there): landing it left a 9.3e-15 s last step whose
+            // slots were round-off / h, and steady_state found no orbit. The
+            // step runs to t_end under the pre-edge gates. Not with a
+            // stateful device history: the next run's step-boundary settle
+            // does not commit its probe, and a buck's Coss resumed that way
+            // read i(D1) 474x off the continuous run (the landed edge's
+            // committed probe, flagged post_edge_derivatives, resumes right).
+            // Nor past a source corner or a controller tick inside the gap.
+            if (landed_on_edge && !hs.any() && t + h < t_stop
+                && t_stop - (t + h) <= Real{64} * h_min
+                && (!landed_on_bp || bp_t >= t_stop)
+                && !(t_next_tick > t && t_next_tick < t_stop - h_min)) {
+                h = t_stop - t;
+                landed_on_edge = false;
+                gates_flat = true;
+            }
+
             // Step mask: sampled at the midpoint — piecewise-
             // constant gates are constant over (t, t+h) by the
             // clamp above, so the midpoint is unambiguous. When the
@@ -3398,6 +3471,9 @@ inline SimulationResult run_transient_trbdf2(
                              diodes.entries()[cross_idx].branch_id,
                              diodes.entries()[cross_idx].is_on});
                     }
+                    newton_at_start = false;   // a committed step
+                    // a post-event record ahead of this landing goes
+                    drop_superseded_event_sample(t);
                     result.times.push_back(t);
                     result.states.push_back(x);
                     result.event_iteration_count.push_back(0);
@@ -3474,6 +3550,12 @@ inline SimulationResult run_transient_trbdf2(
                 x = x_1;
                 x_sig = x;
                 t += h;
+                newton_at_start = false;
+                // the slots are this step's own, not a refresh-only probe's;
+                // a sliver step after a landed edge keeps the flag (its
+                // slots still carry the edge's derivatives, see above)
+                if (h > Real{64} * h_min)
+                    slots_only_t = std::numeric_limits<Real>::quiet_NaN();
                 drop_superseded_event_sample(t);
                 result.times.push_back(t);
                 result.states.push_back(x);
@@ -3645,6 +3727,7 @@ inline SimulationResult run_transient_trbdf2(
         st.n_noise_held_decisions = n_noise_held;
         st.n_probe_noise_retakes = n_probe_noise_retakes;
         st.n_probe_newton_retries = n_probe_newton_retries;
+        st.n_newton_start_retries = n_newton_start_retries;
         result.mode_structure_checks = structure.checks_run();
         result.ideal_loop_releases = n_loop_releases;
         result.mode_report = std::move(mode_rep);
