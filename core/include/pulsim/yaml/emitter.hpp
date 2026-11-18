@@ -60,7 +60,7 @@ inline constexpr std::array<std::string_view, pwl::DevicePool::kNumKinds> kKindY
     "igbt_level1", "vcvs", "saturable_inductor", "nonlinear_capacitor",
     "shockley_diode", "lauritzen_diode", "pmsm_mna", "ideal_transformer",
     "vccs", "cccs", "ccvs", "gyrator", "sine_current_source",
-    "pulse_current_source", "pwl_current_source"};
+    "pulse_current_source", "pwl_current_source", "induction_machine_mna"};
 
 namespace yaml_detail {
 
@@ -102,6 +102,7 @@ namespace m = ::pulsim::models;
         case K::NonlinearDiode: case K::MosfetLevel1: case K::IgbtLevel1:
         case K::SaturableInductor: case K::NonlinearCapacitor:
         case K::ShockleyDiode: case K::LauritzenDiode: case K::PmsmMna:
+        case K::InductionMachineMna:
             return BK::Nonlinear;
         default:
             return BK::Source;
@@ -248,6 +249,7 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
     o += "]\ndevices:\n";
 
     const auto& machines = pool.pmsm_mna_machines();
+    const auto& inductions = pool.induction_machines();
     const auto devs = c.devices();
     for (Index bi = 0; bi < g.num_branches(); ++bi) {
         const auto kind = pool.kind_of(bi);
@@ -255,27 +257,41 @@ inline constexpr std::array<std::string_view, 3> kLaws{"junction", "table", "vdm
         const auto& prm = pool.params_of(bi);
         Map e;
         e.add("kind", std::string{kKindYaml[static_cast<std::size_t>(kind)]});
-        if (kind == K::PmsmMna) {
-            const auto mach = std::ranges::find_if(machines, [&](const auto& mc) {
+        if (kind == K::PmsmMna || kind == K::InductionMachineMna) {
+            auto owns = [&](const auto& mc) {
                 return std::ranges::find(mc.branch_id, bi) != mc.branch_id.end();
-            });
-            if (mach->branch_id[0] != bi) continue;  // written with phase a
+            };
+            const auto pm = std::ranges::find_if(machines, owns);
+            const auto im = std::ranges::find_if(inductions, owns);
+            const auto& ids = kind == K::PmsmMna ? pm->branch_id : im->branch_id;
+            if (ids[0] != bi) continue;  // written with phase a
             for (std::size_t ph = 1; ph < 3; ++ph) {
-                if (mach->branch_id[ph] != bi + static_cast<Index>(ph)) {
+                if (ids[ph] != bi + static_cast<Index>(ph)) {
                     throw std::invalid_argument(std::format(
-                        "to_yaml: PMSM \"{}\": its phase branches are not "
+                        "to_yaml: machine \"{}\": its phase branches are not "
                         "consecutive", dev.name));
                 }
             }
             std::string phases = "[";
             for (std::size_t ph = 0; ph < 3; ++ph) {
-                const auto& br = g.branch(mach->branch_id[ph]);
+                const auto& br = g.branch(ids[ph]);
                 phases += (ph ? ", " : "") + Map{}
-                    .add("name", quote(g.branch_name(mach->branch_id[ph])))
+                    .add("name", quote(g.branch_name(ids[ph])))
                     .add("pins", "[" + node(br.from) + ", " + node(br.to) + "]").str();
             }
             e.add("phases", phases + "]");
-            e.add("omega", node(mach->omega_node)).add("theta", node(mach->theta_node));
+            if (kind == K::PmsmMna) {
+                e.add("omega", node(pm->omega_node)).add("theta", node(pm->theta_node));
+                if (const auto& hs = pm->params.harmonics) {
+                    std::vector<Real> flat;  // h, psi, phi per term
+                    for (const auto& t : *hs) flat.insert(flat.end(), {t.h, t.psi, t.phi});
+                    e.add("harmonics", nums(flat));
+                }
+            } else {
+                e.add("omega", node(im->omega_node))
+                    .add("rotor", "[" + node(im->rotor_node[0]) + ", " +
+                                  node(im->rotor_node[1]) + "]");
+            }
             put_fields(e, prm, fields_of(kind));
             o += "  - " + e.str() + "\n";
             continue;
@@ -554,10 +570,10 @@ struct YamlIo {
             if (it == kKindYaml.end()) fail(ks, "unknown kind");
             const auto kind = static_cast<K>(it - kKindYaml.begin());
             Pending p{d, kind, {}, {}};
-            if (kind == K::PmsmMna) {
+            if (kind == K::PmsmMna || kind == K::InductionMachineMna) {
                 const auto ph = d["phases"];
                 p.name = ph && ph.IsSequence() && ph.size() == 3
-                    ? text(ph[0]["name"], "pmsm_mna", "name") : "pmsm_mna";
+                    ? text(ph[0]["name"], ks, "name") : ks;
                 if (!ph || !ph.IsSequence() || ph.size() != 3) fail(p.name, "needs three phases");
                 for (const auto& x : ph) {
                     if (!x.IsMap()) fail(p.name, "each phase is {name, pins}");
@@ -658,7 +674,7 @@ private:
         namespace m = ::pulsim::models;
         const auto row = fields_of(kind);
         keys(n, who, {"kind", "name", "pins", "role", "control", "phases", "omega", "theta",
-                      "table", "ja", "law", "t", "i", "periodic"}, row);
+                      "rotor", "harmonics", "table", "ja", "law", "t", "i", "periodic"}, row);
         ParamsVariant v = yaml_detail::make_params(static_cast<std::size_t>(kind));
         set_fields(v, n, who, row);
         auto& pool = b.pool_;
@@ -708,8 +724,25 @@ private:
             } else if constexpr (std::is_same_v<P, m::ShockleyDiode::Params>) pool.add_shockley_diode(bi, p);
             else if constexpr (std::is_same_v<P, m::LauritzenDiode::Params>) pool.add_lauritzen_diode(bi, p);
             else if constexpr (std::is_same_v<P, m::PmsmMna::Params>) {
+                if (const auto hn = n["harmonics"]) {
+                    const auto flat = reals(hn, who, "harmonics");
+                    if (flat.size() % 3 != 0) fail(who, "harmonics is a flat list of (h, psi, phi)");
+                    std::vector<m::PmsmMna::PmHarmonic> hs;
+                    for (std::size_t k = 0; k < flat.size(); k += 3) {
+                        hs.push_back({flat[k], flat[k + 1], flat[k + 2]});
+                    }
+                    p.harmonics = std::make_shared<const std::vector<m::PmsmMna::PmHarmonic>>(
+                        std::move(hs));
+                }
                 pool.add_pmsm_mna({br[0], br[1], br[2]}, pin(n["omega"], who),
                                   pin(n["theta"], who), p);
+            } else if constexpr (std::is_same_v<P, m::InductionMachineMna::Params>) {
+                const auto rn = n["rotor"];
+                if (!rn || !rn.IsSequence() || rn.size() != 2) fail(who, "rotor needs two nodes");
+                const Index ra = pin(rn[0], who);
+                const Index rb = pin(rn[1], who);
+                pool.add_induction_machine_mna({br[0], br[1], br[2]}, pin(n["omega"], who),
+                                               {ra, rb}, p);
             } else if constexpr (std::is_same_v<P, m::IdealTransformer::Params>) pool.add_ideal_transformer(bi, xpin(2), xpin(3), p);
             else if constexpr (std::is_same_v<P, m::VCCS::Params>) pool.add_vccs(bi, xpin(2), xpin(3), p);
             else if constexpr (std::is_same_v<P, m::CCCS::Params>) pool.add_cccs(bi, b.branch_id_of(text(n["control"], who, "control")), p);

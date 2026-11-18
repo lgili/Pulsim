@@ -254,3 +254,15 @@ def test_hostile_power_mosfet_fields_are_refused():
         p.Circuit.from_yaml(bad)
     with pytest.raises(ValueError, match='needs "shockley"'):
         p.Circuit.from_yaml(re.sub(r", shockley: \{[^}]*\}", "", y))
+
+
+def test_pmsm_harmonics_round_trip():
+    # The PM-flux series is not a scalar field: written as a flat list.
+    b = p.CircuitBuilder()
+    for i, n in enumerate(("ua", "ub", "uc")):
+        b.add_sine_voltage_source(f"V{n}", n, "gnd", 0.0, 12.0, 30.0, -2.0944 * i)
+    b.add_bldc_mna("M", "ua", "ub", "uc", "nn", "w", "th", R_s=0.3, L_s=1e-3,
+                   k_e=0.05, pole_pairs=4, J=1e-4, n_harmonics=7)
+    c = b.build()
+    assert "harmonics: [" in c.to_yaml()
+    _same_run(c, _round(c), t_end=50 * 5e-5, dt=5e-5, engine="pwl")
