@@ -244,6 +244,9 @@ public:
         }
         snapshot_ = s;
         t_cursor_ = at_snapshot_time ? s.t : opts_.t_start;
+        // simulate(resume_from=, start_from_dc_op=True) hands the driver
+        // both, as it always has; a plain restore continues the snapshot.
+        dc_with_resume_ = !at_snapshot_time;
     }
 
     /// The run's PWL cache, built on first use and kept across run calls
@@ -297,8 +300,8 @@ public:
         // a continuation keeps the original run's grid.
         const Real origin = t_cursor_ == opts_.t_start
                 ? std::numeric_limits<Real>::quiet_NaN() : opts_.t_start;
-        const bool dc_op = opts_.start_from_dc_op && !ran_;
-        ran_ = true;
+        const bool dc_op = opts_.start_from_dc_op && !ran_
+                && (resume == nullptr || dc_with_resume_);
         solver::SimulationResult res;
         if (plan_.engine == Engine::FixedTrap) {
             auto so = to_simulation_options(opts_);
@@ -348,6 +351,7 @@ public:
                     b_extra_, x0o, &stats_, next_edge_, cancel_, {}, refresh_,
                     resume, tick_fn);
         }
+        ran_ = true;  // only a completed call: a retry after a throw starts over
         snapshot_ = res.final_snapshot;
         t_cursor_ = t;
         check_voltage_(res);
@@ -495,6 +499,7 @@ private:
     std::shared_ptr<streaming::LiveRing> live_ring_;
     std::optional<pwl::PwlStateSpaceCache> cache_;
     bool ran_ = false;
+    bool dc_with_resume_ = false;
 };
 
 }  // namespace pulsim::sim

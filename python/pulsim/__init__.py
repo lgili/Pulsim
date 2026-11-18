@@ -1940,7 +1940,8 @@ def _new_pwl_cache(builder, circuit, dt):
 
 def _run_on_simulation(circuit, run_opts, kw):
     """One pwl run through the kernel object, with simulate()'s resolved
-    driver keywords (`kw`, as `run_transient` takes them)."""
+    driver keywords (`kw`, as `run_transient` takes them). Returns
+    ``(result, builder)``."""
     sim = Simulation(circuit, run_opts, True)
     sim.set_switch_fn(kw["switch_fn"])
     get = kw.get
@@ -1961,7 +1962,9 @@ def _run_on_simulation(circuit, run_opts, kw):
             sim.add_tick(period, fn)
     if get("tick_before") is not None:
         sim.set_tick_before(kw["tick_before"])
-    return _pulsim_module._run_simulation(sim)  # simulate() attaches handles
+    # simulate() attaches the handles; the result reads the builder whose
+    # pool the run stamped device state into.
+    return _pulsim_module._run_simulation(sim), sim.builder
 
 
 def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
@@ -3019,10 +3022,12 @@ def simulate(
                 if resume_from is not None:
                     _sim.restore(resume_from, False)  # simulate()'s t_start wins
                 for (_f, _p), _o in zip(_plan.ticks, _plan.tick_offsets
-                                        or [0.0] * len(_plan.ticks)):
+                                        or [0.0] * len(_plan.ticks),
+                                        strict=True):
                     _sim.add_tick(_p, _f, _o)
                 res = _pulsim_module._run_simulation(_sim)
                 _stats = _sim.trbdf2_stats
+                builder = _sim.builder  # the pool the run stamped state into
             else:
                 _to = _pulsim_module._to_trbdf2_options(_tro)
                 _h_max = _to["h_max"]
@@ -3483,7 +3488,8 @@ def simulate(
             if _kernel_run is not None:
                 res = _kernel_run.result
             elif _via_sim:
-                res = _run_on_simulation(_run_circuit, _run_opts, kwargs)
+                res, builder = _run_on_simulation(_run_circuit, _run_opts,
+                                                  kwargs)
             else:
                 res = run_transient(
                     cache, builder.graph, builder.pool, opts, **kwargs)
