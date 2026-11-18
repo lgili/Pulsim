@@ -49,6 +49,9 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # device-kind capability table it is raised from.
     UnsupportedError,
     engine_capabilities,
+    # add-compiled-control-graph: algebraic loop / two writers / unknown
+    # block kind, raised when a control graph is built.
+    ControlGraphBuildError,
     # Builder API (Layer 6).
     CircuitBuilder,
     # Topology / device handles (opaque — produced by the
@@ -168,6 +171,8 @@ from .plot import (
 from .blockchain import (
     MixedDomainBlockChain,
     BlockSpec,
+    PythonBlock,
+    Rate,
     parse_block_chain,
 )
 from .dc_strategy import (
@@ -545,6 +550,7 @@ __all__ = [
     "ConvergenceError",
     "periodic_steady_state_supported",
     "UnsupportedError",
+    "ControlGraphBuildError",
     "value_and_grad",
     "KpiValue",
     "SensitivityResult",
@@ -605,6 +611,8 @@ __all__ = [
     "MixedDomainBlockChain",
     "BlockSpec",
     "parse_block_chain",
+    "PythonBlock",
+    "Rate",
     # DC operating-point strategies (v1 parity Phase A.2).
     "compute_dc_op",
     "PseudoTransientConfig",
@@ -2376,6 +2384,9 @@ def simulate(
     # every engine; dsed refuses closed_loops / step_observer itself.
     _plan = _compose_control(builder, closed_loops, step_observer,
                              controller_period, switch_fn)
+    # A control graph's driven sources reach every engine (above the
+    # dispatch: add-compiled-control-graph).
+    b_extra_fn = _plan.merge_b_extra(b_extra_fn)
 
     # ---- Parameter sensitivities: the exact path only. Above the
     # dispatch (three early returns below), so every engine refuses or
@@ -2649,6 +2660,8 @@ def simulate(
         # t_start + k*T_j, landed like a gate edge; `.tick` (the
         # loop's unthrottled update) is what the plan holds. An
         # every-step observer has no grid to ride here.
+        # A control graph with rates runs on its group ticks here.
+        _plan = _plan.for_variable_step()
         if _plan.every_step:
             raise _unsupported(
                 "trbdf2", "step_observer",
@@ -3711,7 +3724,8 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     # to ride (the same split `_compose_control` makes: a source with
     # no period runs every step, which only the fixed engine has).
     if step_observer is not None and controller_period is None \
-            and getattr(step_observer, "period", None) is None:
+            and getattr(step_observer, "period", None) is None \
+            and not getattr(step_observer, "_rate_ticks", None):
         why.append(_blk("step_observer",
             "a step_observer with no cadence (pass "
             "controller_period=<T_ctrl>, or use a ClosedLoop, "

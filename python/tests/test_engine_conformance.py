@@ -1079,6 +1079,48 @@ def test_branch_form_matrix_equals_the_docs():
         doc_table[cells[0]] = {c: v == "yes" for c, v in zip(cols, cells[1:])}
     assert doc_table == k._branch_form_capabilities()
 
+# ---------------------------------------------------------------------
+# add-compiled-control-graph task 4: a control-graph Rate on each engine
+# ---------------------------------------------------------------------
+
+def _rated_chain(b, rate):
+    ch = p.MixedDomainBlockChain(rate=rate)
+    ch.add("g", p.Gain(k=0.5), inputs=dict(x="o"), output="y")
+    return ch
+
+
+@pytest.mark.parametrize("rate,feature", [
+    (dict(period=1e-4, offset=2e-5), "control_rate_offset"),
+    (dict(period=1e-4, compute_delay=2e-5), "compute_delay"),
+])
+def test_control_rate_offset_and_delay_time_refused_on_trbdf2(rate, feature):
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(**rate))
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim("trbdf2", b, step_observer=ch.make_step_observer(b))
+    assert (ei.value.engine, ei.value.feature) == ("trbdf2", feature)
+
+
+@pytest.mark.parametrize("rate", [
+    dict(period=1e-4, offset=2e-5), dict(period=1e-4, compute_delay=2e-5),
+    dict(period=1e-4, compute_delay="one_sample"),
+])
+def test_control_rate_keywords_honoured_on_pwl(rate):
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(**rate))
+    _sim("pwl", b, step_observer=ch.make_step_observer(b))
+    assert ch.tick_counts == [20]     # ceil((2e-3 - offset) / 1e-4)
+
+
+@pytest.mark.parametrize("engine", ("dsed", "exact"))
+def test_control_rate_refused_on_dsed(engine):
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(1e-4))
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim(engine, b, step_observer=ch.make_step_observer(b))
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "step_observer")
+
+
 # add-exact-propagator-strategy group 13: engine='exact' is the canonical name of the event-driven
 # exact engine, 'dsed' its alias. Every keyword cell of 'dsed' holds under 'exact', and the
 # refusal keeps naming 'dsed' (the capability-table column; DECISIONS, group 13 slice).

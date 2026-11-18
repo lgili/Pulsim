@@ -101,7 +101,7 @@ def main():
         def update(self, t):
             return self.motor.mech.theta_rad * self.pp
 
-    chain.add("theta", RotorAngleFromMotor(motor, PP),
+    chain.add("theta", p.PythonBlock(RotorAngleFromMotor(motor, PP)),
                 inputs=dict(t="time"), output="theta_elec")
 
     # i_a, i_b, i_c → derived from inductor branch currents (already
@@ -147,17 +147,14 @@ def main():
     chain.add("pwm_c", p.PwmGenerator(frequency=F_PWM),
                 inputs=dict(duty="channel:d_c", t="time"),
                 output="gc_hs")
-    class Comp:
-        def reset(self): pass
-        def update(self, x): return 1.0 - x
-    chain.add("ls_a", Comp(), inputs=dict(x="channel:ga_hs"),
-                output="ga_ls")
-    chain.add("ls_b", Comp(), inputs=dict(x="channel:gb_hs"),
-                output="gb_ls")
-    chain.add("ls_c", Comp(), inputs=dict(x="channel:gc_hs"),
-                output="gc_ls")
+    # Low side = 1 - high side (1.0 + (-1)*x is 1.0 - x exactly).
+    for ph in "abc":
+        chain.add(f"ls_{ph}", p.Sum(weights=(1.0, -1.0)),
+                  inputs=dict(inputs=(1.0, f"channel:g{ph}_hs")),
+                  output=f"g{ph}_ls")
 
-    chain.bind(b); chain._dt = DT
+    chain_obs = chain.make_step_observer(b, dt=DT)
+    set_channel = chain._cxx_chain.set_channel
 
     # --- PMSM observer (mechanical update + back-EMF injection) ---------
     motor_obs, motor_b_extra = p.make_pmsm_observer(b, motor, dt=DT)
@@ -172,13 +169,13 @@ def main():
 
     def combined_observer(t, x):
         # Read phase currents and stash on chain channels.
-        chain.channels["i_a"] = float(x[i_a_idx])
-        chain.channels["i_b"] = float(x[i_b_idx])
-        chain.channels["i_c"] = float(x[i_c_idx])
+        set_channel("i_a", float(x[i_a_idx]))
+        set_channel("i_b", float(x[i_b_idx]))
+        set_channel("i_c", float(x[i_c_idx]))
         # Run the motor's mechanical/back-EMF update.
         motor_obs(t, x)
         # Then evaluate the chain (uses fresh i_a/b/c + new θ_elec).
-        chain.update(t, x)
+        chain_obs(t, x)
 
     # Switch order in builder: each phase adds HS, D_HS, LS, D_LS
     # → 4 switches per phase × 3 phases = 12 switches.

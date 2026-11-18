@@ -251,4 +251,5 @@ def wire_chain_from_yaml(loaded, chain_spec):
                 f"chain block #{i} has unknown type {block_type!r}; "
                 f"supported: {sorted(_BLOCK_HANDLERS)}")
         handler(chain, loaded.builder, block)
+    chain.compile()   # an algebraic loop / two writers fail here, typed
     return chain

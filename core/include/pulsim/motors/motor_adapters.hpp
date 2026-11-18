@@ -67,8 +67,8 @@ inline void add_dc_motor_to_chain(
     auto step = [mech, Ke_V_s_per_rad, Kt_Nm_per_A,
                     R_a_ohm, L_a_H,
                     armature_branch_var_idx, bemf_source_idx,
-                    omega_channel = std::move(omega_channel),
-                    theta_channel = std::move(theta_channel)]
+                    omega_channel = chain.out(omega_channel),
+                    theta_channel = chain.out(theta_channel)]
                    (ChainContext& ctx) {
         const Real i_a = (ctx.x && armature_branch_var_idx >= 0 &&
                             armature_branch_var_idx <
@@ -77,8 +77,8 @@ inline void add_dc_motor_to_chain(
                           : Real{0};
         const Real T_em = Kt_Nm_per_A * i_a;
         mech->integrate(ctx.t, T_em, ctx.dt);
-        ctx.channels[omega_channel] = mech->omega_rad_s;
-        ctx.channels[theta_channel] = mech->theta_rad;
+        ctx.put(omega_channel, mech->omega_rad_s);
+        ctx.put(theta_channel, mech->theta_rad);
         const Real V_bemf = Ke_V_s_per_rad * mech->omega_rad_s;
         if (ctx.b_extra) {
             (*ctx.b_extra)[bemf_source_idx] = -V_bemf;
@@ -183,12 +183,12 @@ inline void add_induction_motor_to_chain(
                     pole_pairs,
                     R_s_ohm, L_s_H,
                     phase_inductor_idx, bemf_source_idx,
-                    omega_channel   = std::move(omega_channel),
-                    theta_channel   = std::move(theta_channel),
-                    psi_alpha_channel = std::move(psi_alpha_channel),
-                    psi_beta_channel  = std::move(psi_beta_channel),
-                    torque_channel    = std::move(torque_channel),
-                    slip_channel      = std::move(slip_channel)]
+                    omega_channel   = chain.out(omega_channel),
+                    theta_channel   = chain.out(theta_channel),
+                    psi_alpha_channel = chain.out(psi_alpha_channel),
+                    psi_beta_channel  = chain.out(psi_beta_channel),
+                    torque_channel    = chain.out(torque_channel),
+                    slip_channel      = chain.out(slip_channel)]
                    (ChainContext& ctx) {
         if (!ctx.x) return;
         const Index n_state = static_cast<Index>(ctx.x->size());
@@ -253,18 +253,18 @@ inline void add_induction_motor_to_chain(
         mech->integrate(ctx.t, T_em, ctx.dt);
 
         // Diagnostic channels (omitted when the user passes "").
-        ctx.channels[omega_channel] = mech->omega_rad_s;
-        ctx.channels[theta_channel] = mech->theta_rad;
-        if (!psi_alpha_channel.empty()) {
-            ctx.channels[psi_alpha_channel] = (*psi)[0];
+        ctx.put(omega_channel, mech->omega_rad_s);
+        ctx.put(theta_channel, mech->theta_rad);
+        if (psi_alpha_channel >= 0) {
+            ctx.put(psi_alpha_channel, (*psi)[0]);
         }
-        if (!psi_beta_channel.empty()) {
-            ctx.channels[psi_beta_channel] = (*psi)[1];
+        if (psi_beta_channel >= 0) {
+            ctx.put(psi_beta_channel, (*psi)[1]);
         }
-        if (!torque_channel.empty()) {
-            ctx.channels[torque_channel] = T_em;
+        if (torque_channel >= 0) {
+            ctx.put(torque_channel, T_em);
         }
-        if (!slip_channel.empty()) {
+        if (slip_channel >= 0) {
             // Slip fraction = (ω_psi − ω_m_elec) / ω_psi, clamped
             // to [-1, 1] for usability when ω_psi ≈ 0.
             const Real psi_mag = std::sqrt(
@@ -277,8 +277,7 @@ inline void add_induction_motor_to_chain(
                 slip = (omega_psi - omega_e) /
                        std::max(std::abs(omega_psi), Real{1e-9});
             }
-            ctx.channels[slip_channel] =
-                std::clamp(slip, Real{-1}, Real{1});
+            ctx.put(slip_channel, std::clamp(slip, Real{-1}, Real{1}));
         }
 
         // Back-EMF injection — same sign convention as the PMSM
@@ -323,8 +322,8 @@ inline void add_three_phase_motor_to_chain(
     auto step = [mech, psi_pm_Wb, pole_pairs, bemf_kind,
                     R_s_ohm, L_s_H,
                     phase_inductor_idx, bemf_source_idx,
-                    omega_channel = std::move(omega_channel),
-                    theta_channel = std::move(theta_channel)]
+                    omega_channel = chain.out(omega_channel),
+                    theta_channel = chain.out(theta_channel)]
                    (ChainContext& ctx) {
         if (!ctx.x) return;
         const Index n_state = static_cast<Index>(ctx.x->size());
@@ -361,8 +360,8 @@ inline void add_three_phase_motor_to_chain(
         }
         mech->integrate(ctx.t, T_em, ctx.dt);
 
-        ctx.channels[omega_channel] = mech->omega_rad_s;
-        ctx.channels[theta_channel] = mech->theta_rad;
+        ctx.put(omega_channel, mech->omega_rad_s);
+        ctx.put(theta_channel, mech->theta_rad);
 
         if (ctx.b_extra) {
             (*ctx.b_extra)[bemf_source_idx[0]] = -e_a;

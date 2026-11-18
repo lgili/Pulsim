@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ConvergenceError', 'CxxBlockChain', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxChainBExtra', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class ConvergenceError(RuntimeError):
@@ -352,8 +352,7 @@ class CircuitBuilder:
         Add a linear capacitor. C in farads.
         Optional `c0` records an initial voltage (V) on the
         capacitor — consumed by `simulate(initial_state=None)`
-        as the voltage across it, v(n_pos) - v(n_neg); a loop of
-        c0 values that breaks KVL raises ValueError.
+        to seed the cap's positive-terminal node.
 
         Optional keyword parasitics (openspec add-realistic-passives): esr [Ω] and esl [H] in series, expanded into {name}.esr and {name}.esl with internal nodes; zero adds nothing. c0 is the voltage of the ideal capacitor {name}.
         """
@@ -390,7 +389,7 @@ class CircuitBuilder:
         (feature ``"theta_node"``); the message shows how to integrate the
         speed with ``add_vccs`` into a 1 F capacitor.
         """
-    def add_diode(self, name: str, anode: str, cathode: str, g_on: float | None = None, g_off: float | None = None, V_th: float = 0.0, V_f: float = 0.0, *, form: str = 'conductance', R_on: float | None = None) -> CircuitBuilder:
+    def add_diode(self, name: str, anode: str, cathode: str, g_on: float, g_off: float, V_th: float = 0.0, V_f: float = 0.0) -> CircuitBuilder:
         """
         Add a binary switched diode (V2's SwitchedDiode). g_on/g_off in siemens. V_f: forward drop while ON (PSIM's diode voltage drop), in volts: v = V_f + i/g_on; must be finite and >= 0. V_th: turn-on threshold in volts, effectively max(V_th, V_f) when V_f > 0; V_th > V_f is a hysteresis band. OFF is plain g_off.
         """
@@ -405,10 +404,6 @@ class CircuitBuilder:
     def add_hysteretic_core_inductor(self, name: str, from_node: str, to_node: str, N: float, Ae: float, le: float, lg: float, Ms: float, a: float, alpha: float, c: float, k: float, substeps_min: int = 8, M0: float = 0.0) -> CircuitBuilder:
         """
         Jiles-Atherton hysteretic core INSIDE the Newton loop: N turns on a core (Ae [m^2], le [m], TOTAL gap lg [m]) of a material (Ms, a, alpha, c, k). The magnetisation is solved at the same time level as the current with its exact tangent in the Jacobian -- no dummy source, no observer, no one-step lag. i(name) is the winding current; replay the B-H trajectory from it with pulsim.compute_bh_loop.
-        """
-    def add_ideal_switch(self, name: str, n_pos: str, n_neg: str, R_on: float = 0.0, g_off: float = 0.0) -> CircuitBuilder:
-        """
-        Add a controlled switch in BRANCH form (its own current unknown): R_on >= 0 in series when closed (0 = ideal), g_off >= 0 in parallel when open (0 = ideal). Engines and refusals: the capability table (add-branch-form-ideal-switch).
         """
     def add_ideal_transformer(self, name: str, p_from: str, p_to: str, s_from: str, s_to: str, n: float) -> CircuitBuilder:
         """
@@ -825,10 +820,6 @@ class DevicePool:
         """
         Resolve the state-vector index for a voltage-source branch's i_source unknown (also works for PWM/Sine/Pulse/VCVS sources, since they share the same branch-var numbering).
         """
-    def branch_var_id_for_switch(self, branch_id: int, graph: Graph) -> int:
-        """
-        State-vector index of a branch-form switch or diode's current unknown i_s, or -1 for the conductance form (add-branch-form-ideal-switch).
-        """
     def control_column(self, branch_id: int, graph: Graph) -> int:
         """
         State-vector column of the current a CCCS / CCVS senses.
@@ -1223,14 +1214,6 @@ class SimulationOptions:
     def max_newton_iterations(self, arg0: int) -> None:
         ...
     @property
-    def on_impulse_error(self) -> bool:
-        """
-        add-branch-form-ideal-switch: refuse the run at the first impulsive re-initialisation (simulate(on_impulse='error')) instead of recording it.
-        """
-    @on_impulse_error.setter
-    def on_impulse_error(self, arg0: bool) -> None:
-        ...
-    @property
     def resolution_diagnostics(self) -> bool:
         """
         Record SimulationResult.resolution (truncation estimate + ringing detector) on the pwl engine. Read-only: states are bit-identical either way.
@@ -1428,34 +1411,6 @@ class EventIterationBreach:
     @property
     def t(self) -> float:
         ...
-class ReinitRecord:
-    """
-    One impulsive re-initialisation (add-branch-form-ideal-switch D4): kind 'cut_set' (lambda = flux, V*s) or 'capacitor_loop' (lambda = charge, C); dW the energy removed [J]; sample the stored sample of the step that carried the pulse (-1: not stored).
-    """
-    @property
-    def dW(self) -> float:
-        ...
-    @property
-    def devices(self) -> list[str]:
-        ...
-    @property
-    def kind(self) -> str:
-        ...
-    @property
-    def lambda_(self) -> float:
-        ...
-    @property
-    def projection_gap(self) -> float:
-        ...
-    @property
-    def sample(self) -> int:
-        ...
-    @property
-    def states(self) -> list[str]:
-        ...
-    @property
-    def t(self) -> float:
-        ...
 class CommutationEvent:
     """
     Sub-step commutation timing event (V2.2 + V3).
@@ -1575,7 +1530,7 @@ class SimulationResult:
     @property
     def n_restart_factorizations(self) -> int:
         """
-        Factorisations made for the restart stages: one per mask at 2*gamma*dt (more only if the segment byte budget evicts), plus every refactor for a restart stage of another size (event-split sub-intervals, the stage-2 re-try). 0 with the rule off.
+        Factorisations made for the restart stages: one per mask at 2*gamma*dt (more only if the segment byte budget evicts). 0 with the rule off.
         """
     @property
     def n_restart_steps(self) -> int:
@@ -1603,11 +1558,6 @@ class SimulationResult:
     @property
     def newton_roundoff_row(self) -> int:
         ...
-    @property
-    def reinit_records(self) -> list[ReinitRecord]:
-        """
-        Impulsive re-initialisations of dependent modes (add-branch-form-ideal-switch D4).
-        """
     @property
     def resolution(self) -> typing.Any:
         """
@@ -2645,6 +2595,22 @@ class CxxInputRef:
     @staticmethod
     def time() -> CxxInputRef:
         ...
+class ControlGraphBuildError(ValueError):
+    pass
+class CxxChainTick:
+    """
+    A control-graph tick callback the variable-step engine calls in C++ (no Python call per tick).
+    """
+    def __call__(self, arg0: float, arg1: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> None:
+        ...
+class CxxChainBExtra:
+    """
+    A control graph's driven-source b_extra_fn(t), with the instants its value may jump (next_jump_after), both in C++.
+    """
+    def __call__(self, arg0: float) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
+        ...
+    def next_jump_after(self, arg0: float) -> float:
+        ...
 class CxxBlockChain:
     """
     C++ block chain executor. Build via add_<block>(...) methods, bind nodes, then pass make_step_observer(dt) to simulate().
@@ -2657,6 +2623,10 @@ class CxxBlockChain:
         ...
     def add_dc_motor(self, J: float, B: float, T_load: float, R_a: float, L_a: float, Ke: float, Kt: float, armature_branch_var_idx: int, bemf_source_idx: int, omega_channel: str, theta_channel: str) -> None:
         ...
+    def add_delay(self, samples: int, initial_value: float, x: CxxInputRef, output: str) -> None:
+        """
+        y[k] = x[k - samples]; not direct feedthrough, so it breaks an algebraic loop.
+        """
     def add_differentiator(self, filter_alpha: float, x: CxxInputRef, dt: CxxInputRef, output: str) -> None:
         ...
     def add_first_order_lpf(self, tau: float, input_value: CxxInputRef, dt: CxxInputRef, output: str) -> None:
@@ -2671,6 +2641,10 @@ class CxxBlockChain:
         """
     def add_gain(self, k: float, x: CxxInputRef, output: str) -> None:
         ...
+    def add_group(self, period: float, offset: float = 0.0, delay_kind: int = 0, delay_time: float = 0.0) -> int:
+        """
+        Add a Discrete{period, offset} rate group (delay_kind 0 = zero, 1 = a time, 2 = one sample); returns its id (>= 1).
+        """
     def add_hysteretic_inductor(self, Ms: float, a: float, alpha: float, c: float, k: float, N_turns: int, l_m: float, A_core: float, inductor_branch_var_idx: int, bemf_source_idx: int, M_channel: str = '', B_channel: str = '', H_channel: str = '', vm_channel: str = '') -> None:
         """
         Jiles-Atherton hysteretic-inductor block (Phase 2.2). The user must have added L_0 air-core + dummy V source via `pulsim.add_hysteretic_inductor` and resolved the branch-var indices. Writes v_M = +N·A·μ₀·dM/dt into the dummy source's residual row. Sign matches the Python observer's v1.5+ convention.
@@ -2693,7 +2667,7 @@ class CxxBlockChain:
         ...
     def add_park(self, alpha: CxxInputRef, beta: CxxInputRef, theta: CxxInputRef, output_d: str, output_q: str) -> None:
         ...
-    def add_pi_controller(self, Kp: float, Ki: float, output_min: float, output_max: float, setpoint: CxxInputRef, measured: CxxInputRef, dt: CxxInputRef, output: str) -> None:
+    def add_pi_controller(self, Kp: float, Ki: float, output_min: float, output_max: float, setpoint: CxxInputRef, measured: CxxInputRef, dt: CxxInputRef, output: str, integrator_state: float = 0.0, prev_error: float = 0.0) -> None:
         ...
     def add_pid_controller(self, Kp: float, Ki: float, Kd: float, tau_d: float, output_min: float, output_max: float, setpoint: CxxInputRef, measured: CxxInputRef, dt: CxxInputRef, output: str) -> None:
         ...
@@ -2701,8 +2675,16 @@ class CxxBlockChain:
         ...
     def add_pmsm(self, J: float, B: float, T_load: float, R_s: float, L_s: float, psi_pm: float, pole_pairs: int, phase_inductor_idx: typing.Annotated[collections.abc.Sequence[int], "FixedSize(3)"], bemf_source_idx: typing.Annotated[collections.abc.Sequence[int], "FixedSize(3)"], omega_channel: str, theta_channel: str) -> None:
         ...
+    def add_ported(self, kind: str, params: collections.abc.Mapping[str, collections.abc.Sequence[float]], inputs: collections.abc.Sequence[CxxInputRef], outputs: collections.abc.Sequence[str]) -> None:
+        """
+        A block ported from pulsim.control, Python-exact (kinds: comparator, rate_limiter, sample_hold, transfer_function, state_machine, op_amp, lookup_table_1d, math, ema, differentiator, pid, sum, signal_mux, signal_demux).
+        """
     def add_pwm_generator(self, frequency: float, phase: float = 0.0, *, duty: CxxInputRef, t: CxxInputRef, output: str) -> None:
         ...
+    def add_python_block(self, fn: collections.abc.Callable, inputs: collections.abc.Sequence[CxxInputRef], outputs: collections.abc.Sequence[str]) -> None:
+        """
+        A block that calls fn(*input_values) (Python, under the GIL) once per evaluation; returns a float or one value per output.
+        """
     def add_resistive_power_injection(self, R_ohm: float, i_ref: CxxInputRef, junction_node_idx: int, power_channel: str = '') -> None:
         """
         Convenience: P = R·I² with single current input. Typical use is a MOSFET conduction loss (R = R_DS_ON, i = inductor branch current).
@@ -2710,6 +2692,10 @@ class CxxBlockChain:
     def add_sliding_mode_observer(self, Rs: float, Ls: float, K_sl: float = 50.0, omega_lpf: float = 3141.592653589793, Kp_pll: float = 200.0, Ki_pll: float = 10000.0, f_init_hz: float = 50.0, epsilon: float = 0.5, low_speed_threshold: float = 0.05, *, v_alpha_channel: str, v_beta_channel: str, i_alpha_channel: str, i_beta_channel: str, theta_hat_channel: str, omega_hat_channel: str, e_alpha_hat_channel: str = '', e_beta_hat_channel: str = '', low_speed_flag_channel: str = '') -> None:
         """
         PMSM Sliding-Mode Observer (Phase 2.3 C++ port). Reads (v_alpha, v_beta, i_alpha, i_beta) channels and writes (theta_hat, omega_hat, optional e_alpha/beta_hat + low_speed_flag).
+        """
+    def add_source_sink(self, name: str, row: int, gain: float) -> None:
+        """
+        b_extra[row] += gain * (signal `name` after compute_delay).
         """
     def add_subtract(self, a: CxxInputRef, b: CxxInputRef, output: str) -> None:
         ...
@@ -2727,11 +2713,15 @@ class CxxBlockChain:
         """
     def bind_nodes(self, node_id_of: collections.abc.Callable[[str], int]) -> None:
         """
-        Resolve every InputRef::Node by calling node_id_of(name).
+        Resolve InputRef::Node inputs given by name, by calling node_id_of(name), for the blocks added AFTER this call.
         """
     def clear_recordings(self) -> None:
         """
         Clear all recorded histories (keeps the registered names). Call between simulations to get a fresh trace.
+        """
+    def compile(self) -> None:
+        """
+        Order the blocks (direct-feedthrough topological order, ties by insertion); raises ControlGraphBuildError on an algebraic loop.
         """
     def get_channel(self, name: str) -> float:
         ...
@@ -2743,27 +2733,73 @@ class CxxBlockChain:
         """
         Return the parallel time vector — one entry per recorded step. Same length as each channel history.
         """
+    def group_period(self, group: int) -> float:
+        ...
     def make_b_extra_fn(self, state_size: int) -> collections.abc.Callable[[float], typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]]:
         """
         Return a b_extra_fn(t) callable for run_transient. Use together with make_step_observer when the chain has motor blocks that inject back-EMF / current values per step.
+        """
+    def make_sink_b_extra_fn(self, state_size: int) -> CxxChainBExtra:
+        """
+        Return the driven-source b_extra_fn(t) with next_jump_after(t) (the instants the published values may change).
         """
     def make_step_observer(self, dt: float) -> collections.abc.Callable[[float, typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]], None]:
         """
         Return a step_observer(t, x) callable that the kernel uses to invoke the chain each step.
         """
+    def make_tick_observer(self) -> CxxChainTick:
+        """
+        Tick callback for the variable-step engine (exact protocol).
+        """
+    def name_last(self, name: str, kind: str = '') -> None:
+        """
+        Name (and kind) of the most recently added block.
+        """
     def record_channel(self, name: str, reserve_n: int = 0) -> None:
         """
         Register a channel name for per-step logging. After simulate() returns, fetch the trace via get_channel_history(name).
         """
+    def reorders(self) -> list[str]:
+        """
+        Pairs whose evaluation order differs from insertion order.
+        """
     def reset(self) -> None:
         ...
+    def schedule(self) -> list[str]:
+        """
+        Block names in evaluation order.
+        """
     def set_b_extra(self, idx: int, value: float) -> None:
         """
         Diagnostic — directly set a b_extra entry. Most users should add motor blocks instead.
         """
+    def set_block_group(self, block: int, group: int) -> None:
+        ...
     def set_channel(self, name: str, value: float) -> None:
         ...
+    def set_solver_dt(self, dt: float) -> None:
+        ...
+    def sink_value(self, name: str) -> float:
+        """
+        What a circuit sink (switch mask, driven source) sees: a rate group's output after its compute_delay.
+        """
     def size(self) -> int:
+        ...
+    def tick_counts(self) -> list[int]:
+        """
+        Ticks per group (index 0: evaluations of the every-call group).
+        """
+    @property
+    def has_rates(self) -> bool:
+        ...
+    @property
+    def n_block_evals(self) -> int:
+        ...
+    @property
+    def n_evals(self) -> int:
+        ...
+    @property
+    def tick_jitter_max(self) -> float:
         ...
 class _MmcSubmoduleType:
     """
@@ -2855,10 +2891,6 @@ class _NativeCircuitBuilderAdapter:
         """
         Number of distinct masks resolved (and thus cached) so far. Useful for tests + diagnostics.
         """
-def _branch_form_capabilities() -> dict[typing.Any, typing.Any]:
-    """
-    The branch form's engine column (add-branch-form-ideal-switch): {'Switch'|'Diode': {engine: bool}}; False refuses with UnsupportedError(feature='branch_form').
-    """
 def _cpp_ipd_switching_function(m_ref: float, t: float, n_sm: int, f_carrier: float, sm_type: str = 'half_bridge') -> int:
     """
     C++ hotpath: IPD (In-Phase Disposition) switching function. All N carriers share the same phase but sit at stacked DC offsets, so the output only switches between two adjacent levels per step. Cleaner spectrum than PS-PWM at small N.
@@ -2961,7 +2993,7 @@ def load_yaml_string(yaml_text: str) -> LoadedCircuit:
     """
 def make_chain_switch_fn(chain: CxxBlockChain, num_switches: int, mapping: collections.abc.Sequence[tuple[str, int]]) -> collections.abc.Callable[[float], SwitchStateMask]:
     """
-    Build a switch_fn(t) that sets bit `idx` ON when `chain.channels[channel_name] > 0.5`. `mapping` is a list of (channel_name, switch_idx) pairs.
+    Build a switch_fn(t) that sets bit `idx` ON when `chain.sink_value(channel_name) > 0.5`. `mapping` is a list of (channel_name, switch_idx) pairs.
     """
 def make_combined_switch_fn(num_switches: int, fns: collections.abc.Sequence[typing.Any]) -> SwitchSchedule:
     """
@@ -3033,11 +3065,11 @@ def run_transient_bdf1(builder: CircuitBuilder, opts: SimulationOptions, switch_
     """
     BDF1 (implicit Euler) transient simulation. Use when the trapezoidal path rings on stiff problems — BDF1 is L-stable (adds artificial damping that kills numerical oscillation). Slower than trap because it assembles + factors per step; intended for ROBUSTNESS over speed.
     """
-def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: collections.abc.Callable[[float], typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]] | None = None, initial_state: typing.Any = None, max_event_iterations: int = 0, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int = 0, tol_newton_dx: float = 0.0, tol_newton_res: float = 0.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = []) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
+def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int = 0, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int = 0, tol_newton_dx: float = 0.0, tol_newton_res: float = 0.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = []) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
     """
     Variable-step TR-BDF2 transient (engine='auto'): L-stable, 2nd order, LTE-controlled step, gate edges landed by bisection, diode crossings localized by Illinois. Returns (SimulationResult, stats dict). `observers[j]` ticks at t_start + k*observer_periods[j] (ceil(span/T_j) times, index order when coincident); stats['control_tick_counts'] counts each.
     """
-def run_transient_with_chain(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: collections.abc.Callable[[float], SwitchStateMask], chain: CxxBlockChain, chain_dt: float, b_extra_fn: collections.abc.Callable[[float], typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]] | None = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None) -> SimulationResult:
+def run_transient_with_chain(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: typing.Any, chain: CxxBlockChain, chain_dt: float, b_extra_fn: typing.Any = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None) -> SimulationResult:
     """
     Run transient with a BlockChain as the per-step observer. The chain's step is invoked directly in C++ each step — no Python interpreter cost per step. Equivalent to `run_transient(..., step_observer=chain.make_step_observer(dt))` but ~10x faster on chains with > 5 blocks.
     """

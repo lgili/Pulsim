@@ -70,9 +70,9 @@ def build_plant() -> p.CircuitBuilder:
 
 
 class SetpointBlock:
-    """Tiny step-setpoint custom block — illustrates that the chain
-    accepts any class with `update(...) -> float` (not just stdlib
-    blocks)."""
+    """Tiny step-setpoint custom block — any class with
+    `update(...) -> float` runs in the chain through `p.PythonBlock`
+    (one Python call per evaluation)."""
 
     def __init__(self, v_pre: float, v_post: float, t_step: float):
         self.v_pre = v_pre
@@ -94,7 +94,8 @@ def main() -> None:
     # Build the chain.
     # -------------------------------------------------------------------------
     chain = p.MixedDomainBlockChain()
-    chain.add("setpoint", SetpointBlock(V_REF, V_REF + 2.0, T_STEP),
+    chain.add("setpoint", p.PythonBlock(SetpointBlock(V_REF, V_REF + 2.0,
+                                                     T_STEP)),
                 inputs=dict(t="time"),
                 output="sp")
     chain.add("lpf", p.FirstOrderLowPass(tau=TAU_LPF),
