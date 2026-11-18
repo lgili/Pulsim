@@ -91,6 +91,7 @@ at equal times or time-weighted measures, never sample means.
 
 ## 12. Controller state in the snapshot
 - [ ] 12.1 Optional `ControllerState` in the snapshot; pickle version bump with a reader for the previous version
+  - C++ side done (`SolverSnapshot::controller`, written and read by the TR-BDF2 engine; DECISIONS 8); the pickle bump waits for the device-interface pickle v4
 - [ ] 12.2 Tests: a split variable-step run is bit-identical to the continuous one; a snapshot without controller state resumes to tolerance; a fixed-step snapshot resumes on the LTE controller and the reverse
 - [ ] 12.3 Docs: snapshot page
 

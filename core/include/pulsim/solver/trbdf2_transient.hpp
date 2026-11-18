@@ -427,9 +427,12 @@ inline SimulationResult run_transient_trbdf2(
     const pwl::NonlinearRefreshFn& nl_refresh = {},
     /// v2.0 Phase 4 — resume from a previous run's `final_snapshot`
     /// (either engine's): x, the companion histories of every
-    /// dynamic device, and the diode bits. To the run's own
-    /// tolerance, not bit-exact: the step controller's state is not
-    /// in the snapshot, so the segment restarts from h_init.
+    /// dynamic device, and the diode bits. A TR-BDF2 snapshot also
+    /// carries the step controller's memory (`controller`), which the
+    /// segment continues from; without it (another engine's snapshot, a
+    /// pickle) the segment restarts from h_init. Exact in state, to the
+    /// run's own tolerance in trajectory (DECISIONS 8 of
+    /// refactor-unified-transient-stepper lists what is not carried).
     const SolverSnapshot* resume_from = nullptr,
     /// Multi-rate ticks: called as tick_fn(j, t, x) for source j of
     /// opts.observer_periods. Takes the place of observer_fn there.
@@ -1221,6 +1224,13 @@ inline SimulationResult run_transient_trbdf2(
     Real& h = lte_ctrl.h;
     h = opts.h_init > Real{0} ? opts.h_init : h_max / Real{100};
     h = std::min(h, h_max);
+    // A TR-BDF2 snapshot carries its step memory: the resumed run
+    // proposes the step the stopped one would have (an explicit h_init
+    // still wins). Any other controller's state is ignored.
+    if (resume_from != nullptr && opts.h_init <= Real{0}
+        && resume_from->controller.kind == step::ControllerState::Kind::Lte) {
+        lte_ctrl.load(resume_from->controller);
+    }
     Size steps = 0;
     // Zero-time chatter guard: a boundary-riding diode may flip at
     // the SAME time point repeatedly (bits ping-pong, no time
@@ -1244,6 +1254,7 @@ inline SimulationResult run_transient_trbdf2(
     // (measured) — the controller's own h is the right restart
     // there.
     Real (&h_mem_gate)[2] = lte_ctrl.h_mem_gate;
+    Real end_cut_h = Real{0};   // the last proposal t_end cut short (0 = none)
     int& pending_gate_slot = lte_ctrl.pending_gate_slot;
     // Gate-edge cache: an LTE-reject inside an edge-clamped step
     // re-enters with the SAME upcoming edge; re-bisecting it costs
@@ -1912,6 +1923,9 @@ inline SimulationResult run_transient_trbdf2(
                 (t - chatter_exhaust_t <= Real{1e3} * h_chatter)
                     ? h_chatter : h_min;
             const Real t_stop = queue.next_of(events::Kind::EndOfRun);
+            // The proposal the end of the run cut short is what a resume
+            // continues from (the snapshot's controller block).
+            end_cut_h = t_stop - t < h ? h : Real{0};
             h = std::clamp(h, std::min(h_lo, t_stop - t),
                            std::min(h_max, t_stop - t));
             // The gates as the step starts (one switch_fn call), and
@@ -3052,7 +3066,7 @@ inline SimulationResult run_transient_trbdf2(
                     // this edge PARITY (rising/falling alternate);
                     // first cycle keeps the controller's h.
                     const int slot =
-                        static_cast<int>(st.n_gate_events & 1U);
+                        static_cast<int>((st.n_gate_events + lte_ctrl.gate_parity) & 1U);
                     if (h_mem_gate[slot] > Real{0}) {
                         h = h_mem_gate[slot];
                     }
@@ -3151,6 +3165,10 @@ inline SimulationResult run_transient_trbdf2(
     result.final_snapshot.stamped_mask =
         x_mask_known ? mask_bits(x_mask) : std::vector<bool>{};
     hs.save(history, result.final_snapshot);
+    // A resume continues the edge parity and the uncut proposal.
+    lte_ctrl.gate_parity = (st.n_gate_events + lte_ctrl.gate_parity) & 1U;
+    if (end_cut_h > Real{0}) h = std::max(h, end_cut_h);
+    result.final_snapshot.controller = lte_ctrl.save();
     result.final_snapshot.valid = true;
     result.newton = newton_ws.take_counters();
     return result;

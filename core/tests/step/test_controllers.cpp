@@ -3,7 +3,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <limits>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 #include "pulsim/solver/step/controllers.hpp"
 
@@ -20,6 +23,7 @@ TEST_CASE("LteController: save/load round-trips every slot bit-exactly",
     c.pending_gate_slot = 1;
     c.h_mem_diode = {0.0, 2.5e-8, 1.0 / 7.0, 0.0};
     c.diode_slot = 2;
+    c.gate_parity = 1;
     const step::ControllerState s = c.save();
     CHECK(s.kind == step::ControllerState::Kind::Lte);
 
@@ -31,8 +35,10 @@ TEST_CASE("LteController: save/load round-trips every slot bit-exactly",
     CHECK(d.pending_gate_slot == 1);
     CHECK(d.h_mem_diode == c.h_mem_diode);
     CHECK(d.diode_slot == 2);
+    CHECK(d.gate_parity == 1);
 
     step::LteController none;   // the "no slot" sentinels survive too
+    none.h = 1e-6;
     step::LteController e;
     e.diode_slot = 7;
     e.pending_gate_slot = 0;
@@ -49,6 +55,21 @@ TEST_CASE("LteController: refuses a state it did not write", "[step]") {
     s.v = {0.0, 0.0, 0.0, 0.0, 0.0};
     CHECK_THROWS_AS(c.load(s), std::invalid_argument);
     CHECK_THROWS_AS(c.load(step::ControllerState{}), std::invalid_argument);
+    // slots out of range, a NaN: refused, and nothing is changed
+    step::LteController ok;
+    ok.h = 1e-6;
+    ok.h_mem_diode = {0.0, 0.0};
+    const auto good = ok.save();
+    for (const auto& [i, v] : std::vector<std::pair<std::size_t, Real>>{
+             {3, 2.0}, {4, 2.0}, {4, 0.5}, {5, 3.0}, {0, 0.0},
+             {1, std::numeric_limits<Real>::quiet_NaN()}}) {
+        auto b = good;
+        b.v[i] = v;
+        c.h = 7.0;
+        CHECK_THROWS_AS(c.load(b), std::invalid_argument);
+        CHECK(c.h == 7.0);
+    }
+    CHECK_NOTHROW(c.load(good));
 }
 
 TEST_CASE("LteController: factor laws", "[step]") {
@@ -63,7 +84,12 @@ TEST_CASE("LteController: factor laws", "[step]") {
 }
 
 TEST_CASE("FixedClock: grid times from an integer counter", "[step]") {
-    const step::FixedClock c{1e-3, 1e-7};
-    CHECK(c.at(0) == 1e-3);
-    CHECK(c.at(10) == 1e-3 + static_cast<Real>(10) * 1e-7);
+    // runtime operands on both sides: a folded constant could contract
+    // differently from the runtime expression
+    volatile Real t0 = 1e-3, dt = 1e-7;
+    volatile pulsim::Size k = 10;
+    const step::FixedClock c{t0, dt};
+    const Real expect = t0 + static_cast<Real>(k) * dt;
+    CHECK(c.at(0) == t0);
+    CHECK(c.at(k) == expect);
 }

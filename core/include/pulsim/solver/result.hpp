@@ -33,6 +33,7 @@
 #include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/solver/state_trajectory.hpp"
+#include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
@@ -297,6 +298,12 @@ public:
     /// the step of a discontinuity and the next two as SDIRK(2,2)
     /// steps, so a run stopped inside that window resumes it. 0 = none.
     Size restart_steps_left = 0;
+    /// The step-size controller's state at `t`
+    /// (refactor-unified-transient-stepper task 12): the variable-step
+    /// engine's step memory. Empty (`Kind::None`) from the fixed engine,
+    /// an older snapshot or a pickle: the resumed controller then starts
+    /// from its initial step (exact in state, to tolerance in trajectory).
+    step::ControllerState controller;
     /// The controllers' state at `t` (control graphs, C blocks), owned
     /// by the language binding that ran them; the solver never reads it
     /// and a copy of the snapshot shares it.
