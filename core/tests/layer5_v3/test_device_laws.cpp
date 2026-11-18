@@ -20,6 +20,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -407,8 +408,9 @@ TEST_CASE("below its floor the junction Coss keeps C(floor) on both paths",
 namespace {
 // A stored-charge kind (one local row) against its hand stamp: F, J, the
 // commit and the stage capture, every stage, random states.
-template <class H, class Hand, class Mk>
-void check_local_kind(Mk&& make, Hand&& hand, std::uint64_t seed, Real vlo, Real vhi) {
+template <class H, class Hand, class Mk, class Tc>
+void check_local_kind(Mk&& make, Hand&& hand, Tc&& time_const, std::uint64_t seed, Real vlo,
+                      Real vhi) {
     Lcg rng{seed};
     for (int t = 0; t < 100; ++t) {
         H hist;
@@ -425,7 +427,15 @@ void check_local_kind(Mk&& make, Hand&& hand, std::uint64_t seed, Real vlo, Real
             Vector fh = Vector::Zero(n), fi = Vector::Zero(n);
             hand(x, Jh, fh, hl, h, st);
             pwl::iface::stamp(hi, x, Ji, fi, h, st, false);
-            Real fs = 0, js = 0;
+            // Both paths solve q = K0 + K1·g(v): terms of the size of the
+            // carried charges and of h·q̇ (K0's), and F = q/τ − … cancels
+            // against them, so ulps are of THOSE terms, not of the result.
+            const auto& e0 = hist.entries()[0];
+            const Real qterm = std::max({std::abs(pwl::iface::q_of(e0)),
+                                         std::abs(pwl::iface::qg_of(e0)),
+                                         h * std::abs(e0.f_prev), Real{1e-300}});
+            const Real tc = time_const(e0);
+            Real fs = qterm / tc, js = 0;
             for (Index r = 0; r < Index(n); ++r) {
                 fs = std::max(fs, std::abs(fh[r]));
                 for (Index c = 0; c < Index(n); ++c) js = std::max(js, std::abs(dense(Jh, r, c)));
@@ -451,14 +461,14 @@ void check_local_kind(Mk&& make, Hand&& hand, std::uint64_t seed, Real vlo, Real
             pwl::iface::commit(hi, x, h, st);
             const auto& el = hl.entries()[0];
             const auto& ei = hi.entries()[0];
-            const Real qs = std::max({std::abs(pwl::iface::q_of(el)),
-                                      std::abs(pwl::iface::qg_of(el)), Real{1e-300}});
+            const Real qs = std::max({qterm, std::abs(pwl::iface::q_of(el)),
+                                      std::abs(pwl::iface::qg_of(el)), fs * tc});
             CHECK(close(pwl::iface::qg_of(ei), pwl::iface::qg_of(el), qs, 64));
             CHECK(close(pwl::iface::q_of(ei), pwl::iface::q_of(el), qs, 64));
             // q̇: the hand BDF2 commit takes the formula value, the law −f;
             // they differ by the solved local row's residual (rounding of
-            // terms of size a·q).
-            CHECK(close(ei.f_prev, el.f_prev, std::max(std::abs(el.f_prev), qs / h), 64));
+            // terms of size a·q, and of q/τ in the rate itself).
+            CHECK(close(ei.f_prev, el.f_prev, std::max({std::abs(el.f_prev), qs / h, qs / tc}), 64));
         }
     }
 }
@@ -480,7 +490,7 @@ TEST_CASE("the Lauritzen law (local q_M row) stamps, commits and captures as the
         },
         [](const Vector& x, sparse::Matrix& J, Vector& f, auto& hst, Real h,
            pwl::TrBdf2Stage st) { pwl::refresh_lauritzen_diodes(x, J, f, hst, h, st); },
-        21, -0.3, 0.45);
+        [](const auto& e) { return e.params.T_M; }, 21, -0.3, 0.45);
     const L::LauritzenDiode::Params<Real> lp =
         L::LauritzenDiode::from(models::LauritzenDiode::Params{});
     check_param_tangent<L::LauritzenDiode>({}, lp, {0.62, 0.0, 3e-8});
@@ -504,7 +514,7 @@ TEST_CASE("the IGBT tail law (local Q row) stamps, commits and captures as the "
         },
         [](const Vector& x, sparse::Matrix& J, Vector& f, auto& hst, Real h,
            pwl::TrBdf2Stage st) { pwl::refresh_igbt_tails(x, J, f, hst, h, st); },
-        22, -1.0, 15.0);
+        [](const auto& e) { return e.params.tau_tail; }, 22, -1.0, 15.0);
     models::IgbtLevel1::Params ip{};
     ip.tau_tail = 1e-6;
     ip.k_tail = 0.4;
@@ -575,4 +585,50 @@ TEST_CASE("step 9: pin currents, power and outputs read from the laws",
         }
     });
     CHECK(seen == 3);
+}
+
+namespace {
+// The model body instantiated with the model's own `Params` (the legacy
+// path's) and with the law's `Params<Real>` (the interface path's): the
+// same expression over the same scalar type, so the results must be the
+// same double. Each is called out of line through a volatile function
+// pointer so no call site is constant-folded or contracted differently
+// from the other (that, not the parameter struct, would be the only way
+// for two instantiations of one expression to round apart).
+template <class Model, class P>
+Real current_of(const Real* v, const P& p) { return Model::template current<Real>(v, p); }
+
+template <class Model, class Law, std::size_t NT>
+void check_params_real_bit_identical(const typename Model::Params& mp, Real lo, Real hi,
+                                     std::uint64_t seed) {
+    using LP = typename Law::template Params<Real>;
+    Real (*volatile f_model)(const Real*, const typename Model::Params&) =
+        &current_of<Model, typename Model::Params>;
+    Real (*volatile f_law)(const Real*, const LP&) = &current_of<Model, LP>;
+    const LP lp = Law::from(mp);
+    Lcg rng{seed};
+    for (int t = 0; t < 500; ++t) {
+        std::array<Real, NT> v{};
+        for (auto& e : v) e = rng(lo, hi);
+        const Real a = f_model(v.data(), mp);
+        const Real b = f_law(v.data(), lp);
+        INFO("trial " << t << " model " << a << " law " << b);
+        CHECK(std::memcmp(&a, &b, sizeof(Real)) == 0);
+        // The AD instantiation's value is the same law to rounding.
+        const auto pa = device::seed_params<Law, Law::n_params>(lp);
+        device::Out<ad::ADRealN<Law::n_params>, NT> o;
+        Law::eval(pa, v, o);
+        CHECK(close(o.f[0].value(), a, a, 4));
+    }
+}
+}  // namespace
+
+TEST_CASE("Params<Real> is bit-identical to the model's own Params (legacy body)",
+          "[device][laws]") {
+    models::ShockleyDiode::Params sd;
+    sd.BV = 5.0;
+    check_params_real_bit_identical<models::ShockleyDiode, L::ShockleyDiode, 2>(sd, -6.0, 1.0, 31);
+    check_params_real_bit_identical<models::IdealDiode, L::IdealDiode, 2>({}, -3.0, 1.5, 32);
+    check_params_real_bit_identical<models::MosfetLevel1, L::MosfetLevel1, 3>({}, -8.0, 12.0, 33);
+    check_params_real_bit_identical<models::IgbtLevel1, L::IgbtLevel1, 3>({}, -2.0, 16.0, 34);
 }
