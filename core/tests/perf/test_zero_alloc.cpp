@@ -409,7 +409,8 @@ TEST_CASE("run_transient with diodes: allocation count is O(1), "
     if (kCountsMeaningful) {
         REQUIRE(delta4 == delta);
         // measured: 8; 18 with the pwl mode guard's per-run set-up (its
-        // port model, diode names, passivity record), 18 at 4000 steps too
+        // port model, diode names, passivity record), 18 at 4000 steps too;
+        // +1 with the snapshot's dev_layout (device interface)
         REQUIRE(delta < 32);
     }
 }

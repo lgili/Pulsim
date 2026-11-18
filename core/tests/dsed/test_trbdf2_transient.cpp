@@ -569,7 +569,8 @@ TEST_CASE("TR-BDF2: derivative slots are refreshed after a gate edge",
                 cache, b.graph(), b.pool(), o, sf, {}, std::nullopt,
                 &st);
             REQUIRE(st.n_gate_events == 1);
-            const auto& hist = res.final_snapshot.history;
+            const auto hist = res.final_snapshot.view(
+                device::StateBlock::LinearCompanion);
             REQUIRE(hist.size() == 2);
             const Real v_prev = hist[0], i_prev = hist[1];
             if (inductor) {

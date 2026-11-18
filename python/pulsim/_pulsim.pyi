@@ -422,7 +422,7 @@ class CircuitBuilder:
         """
     def add_igbt_level1(self, name: str, collector: str, emitter: str, gate: str, V_CE_sat: float = 1.5, R_CE_sat: float = 0.05, V_T: float = 5.0, kappa: float = 10.0, v_knee: float = 0.01, with_fwd: bool = False, tau_tail: float = 0.0, k_tail: float = 0.0, V_F: float = 0.7) -> CircuitBuilder:
         """
-        Add a 3-terminal IGBT Level 1 (linear-conduction model with cutoff sigmoid). Collector-emitter is a Nonlinear branch; gate is an ideal voltage reference (no gate current). On-state I_C = (V_CE-V_CE_sat) / R_CE_sat, clamped to I_C >= 0 with a knee of width `v_knee` — an IGBT is a minority-carrier device and cannot conduct in reverse. Pass `with_fwd=True` for the co-packaged anti-parallel freewheeling diode, which an inductive load needs: without it there is no path for the freewheeling current and the solve fails. `V_F` is that diode's CONDUCTION DROP (v = V_F + i/1e3 S while on; it turns on at V_F). Use `run_transient(..., enable_nonlinear_refresh=True)` to stamp the device per Newton iteration. `tau_tail`/`k_tail` add the TURN-OFF TAIL: when the gate falls below threshold the MOS channel cuts off in nanoseconds, but the carriers stored in the n- drift region can only recombine, and that tail is 40-70% of an IGBT's turn-off energy. `k_tail` is the fraction of on-state current still flowing just after cutoff and `tau_tail` its decay constant (0.1-10 us) — both read straight off a datasheet turn-off waveform, and they must be given together. They default to OFF, unlike the MOSFET's body diode, because NPT/PT/trench/field-stop parts differ by orders of magnitude, so any default would put a fabricated number in your loss report. The DC curve is unchanged either way.
+        Add a 3-terminal IGBT Level 1 (linear-conduction model with cutoff sigmoid). Collector-emitter is a Nonlinear branch; gate is an ideal voltage reference (no gate current). On-state I_C = (V_CE-V_CE_sat) / R_CE_sat, clamped to I_C >= 0 with a knee of width `v_knee` — an IGBT is a minority-carrier device and cannot conduct in reverse. Pass `with_fwd=True` for the co-packaged anti-parallel freewheeling diode, which an inductive load needs: without it there is no path for the freewheeling current and the solve fails. `V_F` is that diode's CONDUCTION DROP (v = V_F + i/1e3 S while on; it turns on at V_F). The transient engines stamp the device per Newton iteration. `tau_tail`/`k_tail` add the TURN-OFF TAIL: when the gate falls below threshold the MOS channel cuts off in nanoseconds, but the carriers stored in the n- drift region can only recombine, and that tail is 40-70% of an IGBT's turn-off energy. `k_tail` is the fraction of on-state current still flowing just after cutoff and `tau_tail` its decay constant (0.1-10 us) — both read straight off a datasheet turn-off waveform, and they must be given together. They default to OFF, unlike the MOSFET's body diode, because NPT/PT/trench/field-stop parts differ by orders of magnitude, so any default would put a fabricated number in your loss report. The DC curve is unchanged either way.
         """
     def add_inductor(self, name: str, n_pos: str, n_neg: str, L_henries: float, i0: float | None = None, *, esr: float = 0.0, c_par: float = 0.0, rac = None) -> 'CircuitBuilder':
         """
@@ -453,7 +453,7 @@ class CircuitBuilder:
         """
     def add_mosfet_level1(self, name: str, drain: str, source: str, gate: str, K: float, V_T: float, lambda_: float = 0.02, kappa: float = 15.0, with_body_diode: bool = True, V_F: float = 0.7) -> CircuitBuilder:
         """
-        Add a 3-terminal SH1 MOSFET (Shichman-Hodges Level 1). Cutoff/triode/saturation regions blended via sigmoid for C¹-smooth Newton convergence. K [A/V²], V_T [V], lambda_ [1/V] channel-length modulation, kappa [1/V] sigmoid sharpness. Drain → source is a Nonlinear branch; gate is a node reference (no gate current — ideal gate). The intrinsic anti-parallel body diode (source→drain, named `<name>_body`) is added BY DEFAULT — it is what carries the current when the gate is off and an inductive load would otherwise have no path. Set `with_body_diode=False` for an eGaN HEMT, which has no p-n body diode. `V_F` is the body diode's CONDUCTION DROP (v_SD = V_F + i/1e3 S while on; it turns on at V_F). Call `run_transient` with `enable_nonlinear_refresh=True` so the Newton loop stamps the MOSFET each iteration.
+        Add a 3-terminal SH1 MOSFET (Shichman-Hodges Level 1). Cutoff/triode/saturation regions blended via sigmoid for C¹-smooth Newton convergence. K [A/V²], V_T [V], lambda_ [1/V] channel-length modulation, kappa [1/V] sigmoid sharpness. Drain → source is a Nonlinear branch; gate is a node reference (no gate current — ideal gate). The intrinsic anti-parallel body diode (source→drain, named `<name>_body`) is added BY DEFAULT — it is what carries the current when the gate is off and an inductive load would otherwise have no path. Set `with_body_diode=False` for an eGaN HEMT, which has no p-n body diode. `V_F` is the body diode's CONDUCTION DROP (v_SD = V_F + i/1e3 S while on; it turns on at V_F). The transient engines stamp the MOSFET each Newton iteration.
         """
     def add_mosfet_with_body_diode(self, name: str, drain: str, source: str, R_on: float = 0.001, R_off: float = 1000000000.0, V_F: float = 0.7, g_on_diode: float = 1000.0, g_off_diode: float = 1e-09) -> CircuitBuilder:
         """
@@ -2208,7 +2208,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[bool], list[float], list[float], list[float], list[float], list[float], bool, list[bool], int]:
+    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any]:
         ...
     def __init__(self) -> None:
         ...
@@ -2218,39 +2218,82 @@ class SolverSnapshot:
         ...
     @property
     def coss_history(self) -> list[float]:
-        ...
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
     @coss_history.setter
-    def coss_history(self, arg0: collections.abc.Sequence[float]) -> None:
+    def coss_history(self, arg1: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def dev_layout(self) -> list[int]:
+        """
+        Instance count per block of ``dev_state``; empty for a 2.0-style payload.
+        """
+    @property
+    def dev_layout_names(self) -> list[str]:
+        """
+        The block names of ``dev_state``, in layout order.
+        """
+    @property
+    def dev_state(self) -> list[float]:
+        """
+        Every device state the run carries, one flat vector in the blocks named by ``dev_layout_names`` (linear companion history, then the stateful-device histories).
+        """
+    @dev_state.setter
+    def dev_state(self, arg0: collections.abc.Sequence[float]) -> None:
         ...
     @property
     def diode_on(self) -> list[bool]:
-        ...
+        """
+        Deprecated name of ``mask``.
+        """
     @diode_on.setter
-    def diode_on(self, arg0: collections.abc.Sequence[bool]) -> None:
+    def diode_on(self, arg1: collections.abc.Sequence[bool]) -> None:
         ...
     @property
     def history(self) -> list[float]:
-        ...
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
     @history.setter
-    def history(self, arg0: collections.abc.Sequence[float]) -> None:
+    def history(self, arg1: collections.abc.Sequence[float]) -> None:
         ...
     @property
     def igbt_tail_history(self) -> list[float]:
-        ...
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
     @igbt_tail_history.setter
-    def igbt_tail_history(self, arg0: collections.abc.Sequence[float]) -> None:
+    def igbt_tail_history(self, arg1: collections.abc.Sequence[float]) -> None:
         ...
     @property
     def lauritzen_history(self) -> list[float]:
-        ...
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
     @lauritzen_history.setter
-    def lauritzen_history(self, arg0: collections.abc.Sequence[float]) -> None:
+    def lauritzen_history(self, arg1: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def layout_signature(self) -> int:
+        """
+        Hash of the block names and counts; a resume refuses a snapshot whose layout is not the circuit's, naming the block.
+        """
+    @property
+    def mask(self) -> list[bool]:
+        """
+        The solver-owned mode bits the next step starts from (which switched diodes conduct).
+        """
+    @mask.setter
+    def mask(self, arg0: collections.abc.Sequence[bool]) -> None:
         ...
     @property
     def pmsm_history(self) -> list[float]:
-        ...
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
     @pmsm_history.setter
-    def pmsm_history(self, arg0: collections.abc.Sequence[float]) -> None:
+    def pmsm_history(self, arg1: collections.abc.Sequence[float]) -> None:
         ...
     @property
     def restart_pending(self) -> bool:
@@ -2267,9 +2310,11 @@ class SolverSnapshot:
         ...
     @property
     def saturable_history(self) -> list[float]:
-        ...
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
     @saturable_history.setter
-    def saturable_history(self, arg0: collections.abc.Sequence[float]) -> None:
+    def saturable_history(self, arg1: collections.abc.Sequence[float]) -> None:
         ...
     @property
     def stamped_mask(self) -> list[bool]:
@@ -3417,7 +3462,7 @@ def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typ
     """
 def run_transient(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: typing.Any, b_extra_fn: typing.Any = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, step_observer: typing.Any = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None) -> SimulationResult:
     """
-    Run a fixed-dt transient simulation. switch_fn(t) → SwitchStateMask; b_extra_fn(t) → Vector adds to b_constant at each step. `step_observer(t, x)` (optional) is a void callback fired at the start of every step BEFORE switch_fn/b_extra_fn evaluate — use it to update Python-side controller state (PI, comparator, etc.) so the next switch_fn call reads the new duty. A `b_extra_fn` may declare its jump instants with a `next_jump_after(t)` attribute (first jump strictly after t, inf when none): with discontinuity_restart they restart the step and are read at their left limit; an undeclared jump is not restarted. `enable_nonlinear_refresh`: None (default) lets the kernel stamp the Newton devices (smooth / Shockley diode, MOSFET, IGBT) when the circuit has any; True forces the chain; False with such devices raises UnsupportedError.
+    Run a fixed-dt transient simulation. switch_fn(t) → SwitchStateMask; b_extra_fn(t) → Vector adds to b_constant at each step. `step_observer(t, x)` (optional) is a void callback fired at the start of every step BEFORE switch_fn/b_extra_fn evaluate — use it to update Python-side controller state (PI, comparator, etc.) so the next switch_fn call reads the new duty. A `b_extra_fn` may declare its jump instants with a `next_jump_after(t)` attribute (first jump strictly after t, inf when none): with discontinuity_restart they restart the step and are read at their left limit; an undeclared jump is not restarted. `enable_nonlinear_refresh`: None (default) lets the kernel stamp the Newton devices (smooth / Shockley diode, MOSFET, IGBT) when the circuit has any; True is the same (deprecated); False with such devices raises UnsupportedError.
     """
 def run_transient_bdf1(builder: CircuitBuilder, opts: SimulationOptions, switch_fn: collections.abc.Callable[[float], SwitchStateMask], b_extra_fn: collections.abc.Callable[[float], typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]] | None = None, start_from_dc_op: bool = False, step_observer: collections.abc.Callable[[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]], None] | None = None) -> SimulationResult:
     """

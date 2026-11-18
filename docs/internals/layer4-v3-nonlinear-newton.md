@@ -121,3 +121,26 @@ state changes rarely, this is a significant net win.
 | **Total** | **233** | **3197** |
 
 v1 regression: 304 / 4214, all green.
+
+## The kernel-built refresh (add-unified-device-interface, 2.1)
+
+Both transient drivers get their Newton refresh from one function,
+`pwl::build_device_refresh` (`pwl/device_refresh.hpp`):
+
+1. the static stamps — `pwl::static_device_refresh(pool, override)`:
+   the standard diode / MOSFET / IGBT chain when the pool has a static
+   Newton device, or the caller's `nl_refresh` (deprecated override of
+   the static stamps only);
+2. one pass per stateful history, in the fixed order of
+   `pwl::StatefulHistories` (Coss, Lauritzen diode, MNA PMSM, IGBT tail,
+   saturable inductor).
+
+Every stateful stamp reads one `pwl::StepCtx {h, stage}` that the
+driver sets before each solve; no stamp captures a step of its own.
+It replaces two hand-written chains of five `std::function` wrappers,
+each of which had to capture the previous one: one that captured the raw
+callback deleted every stamp before it (a disconnected saturable
+inductor took an IGBT's turn-off energy from 16.87 mJ to 0.045 mJ), and
+TR-BDF2 probe solves that set one of its two step copies and not the
+other divided by zero. `python/tests/test_stateful_kinds_pairwise.py`
+runs every pair of stateful kinds side by side.

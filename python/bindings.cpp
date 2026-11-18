@@ -112,23 +112,18 @@ inline void resolve_b_extra(const py::object& obj,
     }
 }
 
-/// The static Newton chain for a transient driver. `None` lets the kernel
-/// decide (it builds the standard chain when the pool needs one); `True`
-/// forces it; `False` on a circuit with static Newton devices is refused,
-/// because it means "simulate them as open circuits".
+/// The static Newton chain for a transient driver. The kernel always
+/// builds it when the pool needs one, so `None` and `True` are the same
+/// (deprecated); `False` on a circuit with static Newton devices is
+/// refused, because it means "simulate them as open circuits".
 inline pulsim::pwl::NonlinearRefreshFn transient_refresh(
     const pulsim::topology::Graph& graph,
     const pulsim::pwl::DevicePool& pool, std::optional<bool> enable,
     const char* engine) {
     using pulsim::pwl::SolveClass;
     if (!enable.has_value()) return {};
-    if (*enable) {
-        // The chain stamps only static Newton devices; on a circuit with
-        // none it would only reroute a linear solve through Newton.
-        return pool.requires_static_refresh()
-                   ? pulsim::pwl::make_combined_diode_mosfet_refresh()
-                   : pulsim::pwl::NonlinearRefreshFn{};
-    }
+    // True: what the kernel builds by itself (pwl::static_device_refresh).
+    if (*enable) return {};
     for (pulsim::Index b = 0; b < graph.num_branches(); ++b) {
         if (!pool.is_registered(b)
             || pulsim::pwl::kind_caps(pool.kind_of(b)).cls
@@ -971,9 +966,8 @@ void init_module(py::module_& m) {
               "load needs: without it there is no path for the "
               "freewheeling current and the solve fails. `V_F` is "
               "that diode's CONDUCTION DROP (v = V_F + i/1e3 S "
-              "while on; it turns on at V_F). Use "
-              "`run_transient(..., enable_nonlinear_refresh="
-              "True)` to stamp the device per Newton iteration. "
+              "while on; it turns on at V_F). The transient "
+              "engines stamp the device per Newton iteration. "
               "`tau_tail`/`k_tail` add the TURN-OFF TAIL: when the "
               "gate falls below threshold the MOS channel cuts off "
               "in nanoseconds, but the carriers stored in the n- "
@@ -1014,10 +1008,8 @@ void init_module(py::module_& m) {
               "Set `with_body_diode=False` for an eGaN HEMT, "
               "which has no p-n body diode. `V_F` is the body "
               "diode's CONDUCTION DROP (v_SD = V_F + i/1e3 S while "
-              "on; it turns on at V_F). Call "
-              "`run_transient` with "
-              "`enable_nonlinear_refresh=True` so the Newton "
-              "loop stamps the MOSFET each iteration.")
+              "on; it turns on at V_F). The transient engines "
+              "stamp the MOSFET each Newton iteration.")
         .def("run_preflight",
               [](builder::CircuitBuilder& self,
                   const pwl::PreflightOptions& opts) {
@@ -3463,8 +3455,30 @@ void init_module(py::module_& m) {
         .def(py::init<>())
         .def_readwrite("t", &SolverSnapshot::t)
         .def_readwrite("x", &SolverSnapshot::x)
-        .def_readwrite("history", &SolverSnapshot::history)
-        .def_readwrite("diode_on", &SolverSnapshot::diode_on)
+        .def_readwrite("dev_state", &SolverSnapshot::dev_state,
+            "Every device state the run carries, one flat vector in the "
+            "blocks named by ``dev_layout_names`` (linear companion history, "
+            "then the stateful-device histories).")
+        .def_readonly("dev_layout", &SolverSnapshot::dev_layout,
+            "Instance count per block of ``dev_state``; empty for a 2.0-style "
+            "payload.")
+        .def_readonly("layout_signature", &SolverSnapshot::layout_signature,
+            "Hash of the block names and counts; a resume refuses a "
+            "snapshot whose layout is not the circuit's, naming the block.")
+        .def_property_readonly("dev_layout_names",
+            [](const SolverSnapshot&) {
+                std::vector<std::string> n;
+                for (const auto& b : device::kStateBlocks) n.emplace_back(b.name);
+                return n;
+            },
+            "The block names of ``dev_state``, in layout order.")
+        .def_readwrite("mask", &SolverSnapshot::mask,
+            "The solver-owned mode bits the next step starts from (which "
+            "switched diodes conduct).")
+        .def_property("diode_on",
+            [](const SolverSnapshot& s) { return s.mask; },
+            [](SolverSnapshot& s, std::vector<bool> v) { s.mask = std::move(v); },
+            "Deprecated name of ``mask``.")
         .def_readwrite("stamped_mask", &SolverSnapshot::stamped_mask,
             "The switch / diode mask stamped for the solve that "
             "produced ``x`` (one bool per SwitchStateMask bit): the "
@@ -3475,11 +3489,60 @@ void init_module(py::module_& m) {
             "then re-decides the diodes. Empty when unknown (a "
             "hand-built or older snapshot); row 0 is then flagged in "
             "``switch_states_unsolved``.")
-        .def_readwrite("saturable_history", &SolverSnapshot::saturable_history)
-        .def_readwrite("coss_history", &SolverSnapshot::coss_history)
-        .def_readwrite("lauritzen_history", &SolverSnapshot::lauritzen_history)
-        .def_readwrite("igbt_tail_history", &SolverSnapshot::igbt_tail_history)
-        .def_readwrite("pmsm_history", &SolverSnapshot::pmsm_history)
+        .def_property("history",
+            [](const SolverSnapshot& s) {
+                return s.view(device::StateBlock::LinearCompanion);
+            },
+            [](SolverSnapshot& s, std::vector<Real> v) {
+                s.set_view(device::StateBlock::LinearCompanion, std::move(v));
+            },
+            "Deprecated view of one block of ``dev_state`` (the 2.0 field). "
+            "Writing it turns the snapshot into a 2.0-style payload.")
+        .def_property("saturable_history",
+            [](const SolverSnapshot& s) {
+                return s.view(device::StateBlock::SaturableInductor);
+            },
+            [](SolverSnapshot& s, std::vector<Real> v) {
+                s.set_view(device::StateBlock::SaturableInductor, std::move(v));
+            },
+            "Deprecated view of one block of ``dev_state`` (the 2.0 field). "
+            "Writing it turns the snapshot into a 2.0-style payload.")
+        .def_property("coss_history",
+            [](const SolverSnapshot& s) {
+                return s.view(device::StateBlock::NonlinearCapacitor);
+            },
+            [](SolverSnapshot& s, std::vector<Real> v) {
+                s.set_view(device::StateBlock::NonlinearCapacitor, std::move(v));
+            },
+            "Deprecated view of one block of ``dev_state`` (the 2.0 field). "
+            "Writing it turns the snapshot into a 2.0-style payload.")
+        .def_property("lauritzen_history",
+            [](const SolverSnapshot& s) {
+                return s.view(device::StateBlock::LauritzenDiode);
+            },
+            [](SolverSnapshot& s, std::vector<Real> v) {
+                s.set_view(device::StateBlock::LauritzenDiode, std::move(v));
+            },
+            "Deprecated view of one block of ``dev_state`` (the 2.0 field). "
+            "Writing it turns the snapshot into a 2.0-style payload.")
+        .def_property("igbt_tail_history",
+            [](const SolverSnapshot& s) {
+                return s.view(device::StateBlock::IgbtTail);
+            },
+            [](SolverSnapshot& s, std::vector<Real> v) {
+                s.set_view(device::StateBlock::IgbtTail, std::move(v));
+            },
+            "Deprecated view of one block of ``dev_state`` (the 2.0 field). "
+            "Writing it turns the snapshot into a 2.0-style payload.")
+        .def_property("pmsm_history",
+            [](const SolverSnapshot& s) {
+                return s.view(device::StateBlock::PmsmMna);
+            },
+            [](SolverSnapshot& s, std::vector<Real> v) {
+                s.set_view(device::StateBlock::PmsmMna, std::move(v));
+            },
+            "Deprecated view of one block of ``dev_state`` (the 2.0 field). "
+            "Writing it turns the snapshot into a 2.0-style payload.")
         .def_readwrite("valid", &SolverSnapshot::valid)
         .def_readwrite("restart_steps_left",
             &SolverSnapshot::restart_steps_left,
@@ -3491,51 +3554,97 @@ void init_module(py::module_& m) {
             "True when restart_steps_left > 0.")
         .def("__repr__", [](const SolverSnapshot& s) {
             std::string r = "<SolverSnapshot t=" + std::to_string(s.t)
-                   + " n=" + std::to_string(s.x.size())
-                   + " history=" + std::to_string(s.history.size());
-            if (!s.saturable_history.empty())
-                r += " saturable=" + std::to_string(s.saturable_history.size());
-            if (!s.coss_history.empty())
-                r += " coss=" + std::to_string(s.coss_history.size());
-            if (!s.lauritzen_history.empty())
-                r += " lauritzen=" + std::to_string(s.lauritzen_history.size());
-            if (!s.igbt_tail_history.empty())
-                r += " igbt_tail=" + std::to_string(s.igbt_tail_history.size());
-            if (!s.pmsm_history.empty())
-                r += " pmsm=" + std::to_string(s.pmsm_history.size());
+                   + " n=" + std::to_string(s.x.size());
+            if (s.is_legacy()) {
+                r += " legacy";
+            } else {
+                for (std::size_t b = 0; b < device::kNumStateBlocks; ++b) {
+                    if (s.dev_layout[b] > 0) {
+                        r += " " + std::string(device::kStateBlocks[b].name)
+                             + "=" + std::to_string(s.dev_layout[b]);
+                    }
+                }
+            }
             return r + (s.valid ? " valid>" : " EMPTY>");
         })
         .def(py::pickle(
             [](const SolverSnapshot& s) {
+                // Version 3: a tag first, so it never reads as the 2.0
+                // tuples (which start with t).
+                const auto& L = s.legacy;
                 return py::make_tuple(
-                    s.t, s.x, s.history, s.diode_on,
-                    s.saturable_history, s.coss_history,
-                    s.lauritzen_history, s.igbt_tail_history,
-                    s.pmsm_history, s.valid, s.stamped_mask,
-                    s.restart_steps_left);
+                    std::string("SolverSnapshot"), 3, s.t, s.x, s.dev_state,
+                    s.dev_layout, s.layout_signature, s.mask, s.stamped_mask,
+                    s.restart_steps_left, s.valid,
+                    s.is_legacy()
+                        ? py::object(py::make_tuple(
+                              L.history, L.saturable_history, L.coss_history,
+                              L.lauritzen_history, L.igbt_tail_history,
+                              L.pmsm_history))
+                        : py::object(py::none()));
             },
             [](py::tuple t) {
-                // 10 fields: pickled before `stamped_mask` existed;
-                // it loads with the mask unknown. 11: before the
-                // restart state (loads 0). Field 12 was a bool
-                // `restart_pending` (the BE-pair rule: one step owed)
-                // before it became the SDIRK step count.
+                SolverSnapshot s;
+                if (t.size() >= 2 && py::isinstance<py::str>(t[0])) {
+                    if (t[0].cast<std::string>() != "SolverSnapshot"
+                        || t[1].cast<int>() != 3 || t.size() != 12) {
+                        throw std::runtime_error(
+                            "SolverSnapshot: pickle version "
+                            + std::to_string(t[1].cast<int>()) + " with "
+                            + std::to_string(t.size())
+                            + " fields; this Pulsim reads version 3 "
+                              "(12 fields)");
+                    }
+                    s.t = t[2].cast<Real>();
+                    s.x = t[3].cast<Vector>();
+                    s.dev_state = t[4].cast<std::vector<Real>>();
+                    s.dev_layout = t[5].cast<std::vector<std::uint32_t>>();
+                    s.layout_signature = t[6].cast<std::uint64_t>();
+                    s.mask = t[7].cast<std::vector<bool>>();
+                    s.stamped_mask = t[8].cast<std::vector<bool>>();
+                    s.restart_steps_left = t[9].cast<Size>();
+                    s.valid = t[10].cast<bool>();
+                    if (!t[11].is_none()) {
+                        auto L = t[11].cast<py::tuple>();
+                        if (L.size() != 6) {
+                            throw std::runtime_error(
+                                "SolverSnapshot: the version-3 legacy "
+                                "payload has "
+                                + std::to_string(L.size())
+                                + " fields, expected 6");
+                        }
+                        auto& g = s.legacy;
+                        g.history = L[0].cast<std::vector<Real>>();
+                        g.saturable_history = L[1].cast<std::vector<Real>>();
+                        g.coss_history = L[2].cast<std::vector<Real>>();
+                        g.lauritzen_history = L[3].cast<std::vector<Real>>();
+                        g.igbt_tail_history = L[4].cast<std::vector<Real>>();
+                        g.pmsm_history = L[5].cast<std::vector<Real>>();
+                    }
+                    return s;
+                }
+                // Pulsim 2.0 (versions 1 and 2): 10 fields, 11 with
+                // `stamped_mask`, 12 with the restart state (a bool
+                // `restart_pending` before it became the SDIRK step
+                // count). Loaded as a legacy payload: only the circuit
+                // knows its layout, so a resume converts it.
                 if (t.size() < 10 || t.size() > 12) {
                     throw std::runtime_error(
                         "SolverSnapshot: pickled state has "
                         + std::to_string(t.size())
-                        + " fields, expected 10, 11 or 12");
+                        + " fields, expected a version-3 tuple or the 10, "
+                          "11 or 12 fields of Pulsim 2.0");
                 }
-                SolverSnapshot s;
                 s.t = t[0].cast<Real>();
                 s.x = t[1].cast<Vector>();
-                s.history = t[2].cast<std::vector<Real>>();
-                s.diode_on = t[3].cast<std::vector<bool>>();
-                s.saturable_history = t[4].cast<std::vector<Real>>();
-                s.coss_history = t[5].cast<std::vector<Real>>();
-                s.lauritzen_history = t[6].cast<std::vector<Real>>();
-                s.igbt_tail_history = t[7].cast<std::vector<Real>>();
-                s.pmsm_history = t[8].cast<std::vector<Real>>();
+                auto& g = s.legacy;
+                g.history = t[2].cast<std::vector<Real>>();
+                s.mask = t[3].cast<std::vector<bool>>();
+                g.saturable_history = t[4].cast<std::vector<Real>>();
+                g.coss_history = t[5].cast<std::vector<Real>>();
+                g.lauritzen_history = t[6].cast<std::vector<Real>>();
+                g.igbt_tail_history = t[7].cast<std::vector<Real>>();
+                g.pmsm_history = t[8].cast<std::vector<Real>>();
                 s.valid = t[9].cast<bool>();
                 if (t.size() >= 11) {
                     s.stamped_mask = t[10].cast<std::vector<bool>>();
@@ -3686,8 +3795,9 @@ void init_module(py::module_& m) {
         "`enable_nonlinear_refresh`: "
         "None (default) lets the kernel stamp the Newton "
         "devices (smooth / Shockley diode, MOSFET, IGBT) "
-        "when the circuit has any; True forces the chain; "
-        "False with such devices raises UnsupportedError.");
+        "when the circuit has any; True is the same "
+        "(deprecated); False with such devices raises "
+        "UnsupportedError.");
 
     // ---- DC operating-point strategies (Phase A.2) -----------------------
     //

@@ -30,6 +30,7 @@
 // high-fidelity run no longer has to hold every sample.
 
 #include "pulsim/numeric/dense.hpp"
+#include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/solver/state_trajectory.hpp"
 #include "pulsim/topology/switch_state.hpp"
@@ -198,12 +199,25 @@ struct SolverSnapshot {
     Real t = Real{0};
     /// MNA unknowns at `t`.
     Vector x;
-    /// Trapezoidal companion history: 2 reals (v_prev, i_prev)
-    /// per dynamic device, in HistoryState::entries() order.
-    std::vector<Real> history;
-    /// Which switched diodes were conducting. Solver-owned bits
-    /// that a mask alone cannot reconstruct.
-    std::vector<bool> diode_on;
+    /// Every device state the run carries (add-unified-device-interface
+    /// step 3): one flat vector in the blocks of
+    /// `device::kStateBlocks` — the linear companion history, then the
+    /// five stateful-device histories, each in its own to_flat() layout.
+    /// Before the stateful histories were carried, a resume restored x
+    /// and the linear companions while every stateful device restarted
+    /// from its init value — measured: a saturable inductor lost 8 mWb of
+    /// flux at the seam, a Coss went from 109.85 V to 0.28 V, an IGBT
+    /// tail of 17.7 A vanished. No error was raised.
+    std::vector<Real> dev_state;
+    /// Instance count per block of `dev_state` (empty: the snapshot is a
+    /// legacy payload, see `legacy`).
+    std::vector<std::uint32_t> dev_layout;
+    /// `device::DeviceStateLayout::signature()` of `dev_layout`.
+    std::uint64_t layout_signature = 0;
+    /// The solver-owned mode bits the next step starts from (which
+    /// switched diodes conduct): bits that `switch_fn(t)` cannot
+    /// reconstruct. Formerly `diode_on`.
+    std::vector<bool> mask;
     /// The switch / diode mask STAMPED for the solve that produced
     /// `x` — one bit per switch-kind branch, in SwitchStateMask
     /// order: the record's last row
@@ -218,31 +232,65 @@ struct SolverSnapshot {
     /// (a hand-built or older snapshot), and that row is then flagged
     /// unsolved.
     std::vector<bool> stamped_mask;
-    /// The five stateful-device histories, each in its own
-    /// to_flat() layout; empty when the circuit has none. Before
-    /// they were carried, a resume restored x and the linear
-    /// companions while every stateful device restarted from its
-    /// init value and the first Newton step reconciled the two by
-    /// jumping — measured: a saturable inductor lost 8 mWb of flux
-    /// at the seam (171.85 A continuous vs 27.14 A resumed), a Coss
-    /// went from 109.85 V to 0.28 V on the first resumed step, an
-    /// IGBT tail of 17.7 A vanished. No error was raised. Each
-    /// history's from_flat() refuses a size mismatch by name.
-    ///
-    /// 7 per device: lambda_old, i_L_old, V_L_old, then the JA
-    /// hysteresis state H, M, branch direction, sub-step count
-    /// (zeros for the stateless laws). Covers the saturable,
-    /// gapped-core and hysteretic-core inductors and the saturable
-    /// transformer's magnetising branch — they share one history.
-    std::vector<Real> saturable_history;
-    /// 3 per device: v_prev, q_prev, i_prev (charge-based Coss).
-    std::vector<Real> coss_history;
-    /// 2 per device: q_M_prev, f_prev (Lauritzen stored charge).
-    std::vector<Real> lauritzen_history;
-    /// 2 per device: q_prev, f_prev (IGBT turn-off tail charge).
-    std::vector<Real> igbt_tail_history;
-    /// 9 per machine: lambda_abc, i_abc, v_abc (MNA PMSM).
-    std::vector<Real> pmsm_history;
+    /// The named per-history fields of Pulsim 2.0 (`history`,
+    /// `saturable_history`, …), used only when `dev_layout` is empty: a
+    /// snapshot unpickled from 2.0, built by hand, or one whose named view
+    /// was written. A resume converts them field by field, each history
+    /// refusing a size mismatch by name. Removed with the views.
+    struct LegacyPayload {
+        std::vector<Real> history, saturable_history, coss_history,
+            lauritzen_history, igbt_tail_history, pmsm_history;
+    } legacy;
+
+    [[nodiscard]] bool is_legacy() const noexcept { return dev_layout.empty(); }
+    [[nodiscard]] device::DeviceStateLayout layout() const {
+        device::DeviceStateLayout l;
+        for (std::size_t b = 0; b < device::kNumStateBlocks && b < dev_layout.size(); ++b) {
+            l.count[b] = dev_layout[b];
+        }
+        return l;
+    }
+    /// One block, as the 2.0 named field held it.
+    [[nodiscard]] std::vector<Real> view(device::StateBlock blk) const {
+        if (is_legacy()) return legacy_field(blk);
+        const auto l = layout();
+        const auto off = static_cast<std::ptrdiff_t>(l.offset(blk));
+        const auto n = static_cast<std::ptrdiff_t>(l.block_size(blk));
+        if (static_cast<std::ptrdiff_t>(dev_state.size()) < off + n) return {};
+        return {dev_state.begin() + off, dev_state.begin() + off + n};
+    }
+    /// Write one block through its 2.0 name: the snapshot becomes a
+    /// legacy payload holding every block's current value.
+    void set_view(device::StateBlock blk, std::vector<Real> v) {
+        if (!is_legacy()) {
+            for (std::size_t b = 0; b < device::kNumStateBlocks; ++b) {
+                const auto k = static_cast<device::StateBlock>(b);
+                legacy_field_ref(k) = view(k);
+            }
+            dev_state.clear();
+            dev_layout.clear();
+            layout_signature = 0;
+        }
+        legacy_field_ref(blk) = std::move(v);
+    }
+
+private:
+    [[nodiscard]] const std::vector<Real>& legacy_field(device::StateBlock b) const {
+        return const_cast<SolverSnapshot*>(this)->legacy_field_ref(b);
+    }
+    std::vector<Real>& legacy_field_ref(device::StateBlock b) {
+        switch (b) {
+        case device::StateBlock::LinearCompanion: return legacy.history;
+        case device::StateBlock::SaturableInductor: return legacy.saturable_history;
+        case device::StateBlock::NonlinearCapacitor: return legacy.coss_history;
+        case device::StateBlock::LauritzenDiode: return legacy.lauritzen_history;
+        case device::StateBlock::IgbtTail: return legacy.igbt_tail_history;
+        case device::StateBlock::PmsmMna: break;
+        }
+        return legacy.pmsm_history;
+    }
+
+public:
     /// Restart steps still owed (discontinuity_restart): the rule takes
     /// the step of a discontinuity and the next two as SDIRK(2,2)
     /// steps, so a run stopped inside that window resumes it. 0 = none.

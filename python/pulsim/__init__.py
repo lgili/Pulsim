@@ -2353,6 +2353,14 @@ def simulate(
         if dt_init is None:
             dt_init = solver.dt_init
 
+    if enable_nonlinear_refresh is not None:
+        import warnings
+        warnings.warn(
+            "simulate(enable_nonlinear_refresh=...) is deprecated and will "
+            "be removed: the kernel stamps every Newton device itself "
+            "(add-unified-device-interface). True is the default "
+            "behaviour; False is refused on a circuit with Newton devices.",
+            DeprecationWarning, stacklevel=2)
     # ---- Validate first — fail fast on user mistakes (DSED side). ----
     # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
     # (rtol/atol/dt_init/integrator/stiffness_threshold/h_bdf2). For

@@ -76,6 +76,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (callables), the `add_c_block` `sim_dt` clamp and the closed-loop
   period check now point at the caller's line.
 
+### Unified device interface, steps 1–3: one history fold, one kernel-built refresh, one device-state vector
+
+* **Changed** (internal) the five stateful-device histories (Coss,
+  Lauritzen diode, MNA PMSM, IGBT tail, saturable inductor) are one
+  object in both transient drivers, and the Newton refresh is one
+  kernel function reading one step context, instead of two chains of
+  five wrappers. Results are bit-identical (golden and stateful-device
+  byte compares), except on TR-BDF2 where a PMSM and an IGBT tail share
+  a terminal: their stamps now add in the other order (reassociation,
+  at most 1 ulp per Jacobian entry; no tested circuit has both).
+* **Deprecated** `simulate(enable_nonlinear_refresh=...)` (and
+  `SolverConfig.enable_nonlinear_refresh`): the kernel stamps every
+  Newton device itself. `True` is what the kernel does by default;
+  `False` on a circuit with Newton devices is still refused by name.
+  Emits a `DeprecationWarning`; removed in a later release.
+* **Changed (snapshot format)** `SolverSnapshot` holds every device
+  state as one flat vector, `dev_state`, with its layout (`dev_layout`,
+  `dev_layout_names`, `layout_signature`) and the solver-owned mode bits
+  as `mask`. A resume refuses a snapshot whose layout is not the
+  circuit's, naming the first block that differs (before, a circuit with
+  the same number of unknowns but other device kinds failed inside one
+  history's size check; it is now refused by block name). A snapshot
+  without a layout (a 2.0 pickle, a hand-built one, or one whose named
+  field was written) is still checked per history, by size. Pickle version 3; Pulsim 2.0
+  pickles (10, 11 or 12 fields) still load and resume identically.
+* **Soft-deprecated** (no warning yet) the named snapshot fields `history`,
+  `saturable_history`, `coss_history`, `lauritzen_history`,
+  `igbt_tail_history`, `pmsm_history` and `diode_on`: views of
+  `dev_state` / `mask` for one release. Writing one turns the snapshot
+  into a 2.0-style payload (as `steady_state` does).
+
 ### Integration batch 10: control graph 2, optimisation slice 5, circuit IR 2, exact engine dependent states merged
 
 * **Fixed** a C block reached a run only through a Python attribute of

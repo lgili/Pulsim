@@ -108,7 +108,7 @@ py::tuple run_pwl_points(const Circuit& base, const std::vector<std::string>& na
                          const RowTable& table,
                          const pulsim::solver::SimulationOptions& opts,
                          pulsim::Real dt, const py::object& switch_fn_obj,
-                         bool start_from_dc_op, std::optional<bool> enable_nl,
+                         bool start_from_dc_op, std::optional<bool> /*enable_nl*/,
                          std::optional<pulsim::Vector> initial_state,
                          bool auto_regularize, int n_threads) {
     if (table.cols() != static_cast<Eigen::Index>(names.size())) {
@@ -161,12 +161,9 @@ py::tuple run_pwl_points(const Circuit& base, const std::vector<std::string>& na
                         x0 = b.initial_state();
                         if ((x0.array() != 0.0).any()) xp = &x0;
                     }
-                    // bindings.cpp transient_refresh() for None / True
+                    // None / True: the kernel builds the Newton stamps
                     // (False is not sent here).
-                    const pulsim::pwl::NonlinearRefreshFn nl =
-                        (enable_nl.value_or(false) && b.pool().requires_static_refresh())
-                            ? pulsim::pwl::make_combined_diode_mosfet_refresh()
-                            : pulsim::pwl::NonlinearRefreshFn{};
+                    const pulsim::pwl::NonlinearRefreshFn nl{};
                     r.result = pulsim::solver::run_transient(
                         cache, b.graph(), b.pool(), opts, sw.fn, {},
                         start_from_dc_op, nl, {}, xp, {}, nullptr, {}, sw.next_edge);
