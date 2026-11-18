@@ -301,7 +301,7 @@ components_without_ground(
 /// component holding a magnetic node) that does not reach ground. The
 /// usual repair, a 1 GΩ tie, would be a magnetic resistance: a spurious
 /// loss and a trapped flux that decays. Throws `std::invalid_argument`
-/// naming one node of the island.
+/// naming the lowest-index flux node of the islands.
 inline void require_magnetic_reference(const topology::Graph& graph,
                                        const DevicePool& pool) {
     if (pool.flux_nodes().empty()) return;
@@ -314,16 +314,21 @@ inline void require_magnetic_reference(const topology::Graph& graph,
     }
     const auto isolated = detail::components_without_ground(
         graph, [](const topology::Branch&) { return true; }, primary_ties);
+    // Name the lowest-index flux node: the order of a component's nodes (and
+    // of the components) is the traversal's and differed between platforms.
+    Index named = -1;
     for (const auto& comp : isolated) {
         for (const Index n : comp) {
-            if (!pool.is_flux_node(n)) continue;
-            throw std::invalid_argument(std::format(
-                "the magnetic network containing {} has no node tied to the "
-                "reference: connect one of its nodes to gnd (a winding does "
-                "not connect the electrical and magnetic sides galvanically). "
-                "Pulsim does not insert a tie resistor on a magnetic node: it "
-                "would be a spurious magnetic loss.", node_label(graph, n)));
+            if (pool.is_flux_node(n) && (named < 0 || n < named)) named = n;
         }
+    }
+    if (named >= 0) {
+        throw std::invalid_argument(std::format(
+            "the magnetic network containing {} has no node tied to the "
+            "reference: connect one of its nodes to gnd (a winding does "
+            "not connect the electrical and magnetic sides galvanically). "
+            "Pulsim does not insert a tie resistor on a magnetic node: it "
+            "would be a spurious magnetic loss.", node_label(graph, named)));
     }
 }
 
