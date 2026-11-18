@@ -10,20 +10,24 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'OptionsError', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PulsimError', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'RunOptions', 'Simulation', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_option_defaults', 'run_option_table', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
-class ConvergenceError(RuntimeError):
+class PulsimError(Exception):
+    pass
+class ConvergenceError(RuntimeError, PulsimError):
     pass
 class SimulationAborted(ConvergenceError):
     pass
 class NewtonRoundoffBudgetExceeded(SimulationAborted):
     pass
-class UnsupportedError(ValueError):
+class UnsupportedError(ValueError, PulsimError):
     device: typing.ClassVar[str] = ''
     engine: typing.ClassVar[str] = ''
     feature: typing.ClassVar[str] = ''
     kind: typing.ClassVar[str] = ''
+class OptionsError(ValueError, PulsimError):
+    option: typing.ClassVar[str] = ''
 class SwitchStateMask:
     """
     Bit-vector identifying the on/off state of every switching branch. Construct with the total number of switches the cache enumerates (use `graph.num_switches`); then call `.set(i, True)` to flip individual bits.
@@ -3529,6 +3533,182 @@ class BuilderScope:
         ...
     def __exit__(self, *args) -> bool:
         ...
+class RunOptions:
+    """
+    Run options of sim::Simulation: one field per simulate() keyword the kernel reads. None = not set (the default of sim::Defaults for the engine that runs); never a sentinel value.
+    """
+    auto_regularize: bool
+    control_tick: str
+    discontinuity_restart: bool | None
+    enable_newton_line_search: bool | None
+    enable_newton_lm: bool | None
+    enable_nonlinear_refresh: bool | None
+    enable_substep_state_correction: bool | None
+    engine: str
+    mode_guard: bool
+    mode_selection: str
+    on_impulse: str
+    resolution_diagnostics: bool | None
+    start_from_dc_op: bool
+    strict_event_iterations: bool
+    def __init__(self, t_end: float = 0.0, dt: float | None = None, engine: str = 'auto', t_start: float = 0.0) -> None:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def requested(self) -> list[str]:
+        """
+        The table rows these options request, in table order.
+        """
+    @property
+    def atol(self) -> float | None:
+        ...
+    @atol.setter
+    def atol(self, arg0: float | None) -> None:
+        ...
+    @property
+    def dt(self) -> float | None:
+        ...
+    @dt.setter
+    def dt(self, arg0: float | None) -> None:
+        ...
+    @property
+    def dt_init(self) -> float | None:
+        ...
+    @dt_init.setter
+    def dt_init(self, arg0: float | None) -> None:
+        ...
+    @property
+    def h_bdf2(self) -> float | None:
+        ...
+    @h_bdf2.setter
+    def h_bdf2(self, arg0: float | None) -> None:
+        ...
+    @property
+    def inductor_abs_clamp(self) -> float | None:
+        ...
+    @inductor_abs_clamp.setter
+    def inductor_abs_clamp(self, arg0: float | None) -> None:
+        ...
+    @property
+    def inductor_freeze_di_max(self) -> float | None:
+        ...
+    @inductor_freeze_di_max.setter
+    def inductor_freeze_di_max(self, arg0: float | None) -> None:
+        ...
+    @property
+    def max_dt_halvings(self) -> int | None:
+        ...
+    @max_dt_halvings.setter
+    def max_dt_halvings(self, arg0: int | None) -> None:
+        ...
+    @property
+    def max_event_iterations(self) -> int | None:
+        ...
+    @max_event_iterations.setter
+    def max_event_iterations(self, arg0: int | None) -> None:
+        ...
+    @property
+    def max_newton_iterations(self) -> int | None:
+        ...
+    @max_newton_iterations.setter
+    def max_newton_iterations(self, arg0: int | None) -> None:
+        ...
+    @property
+    def newton_roundoff_budget(self) -> int | None:
+        ...
+    @newton_roundoff_budget.setter
+    def newton_roundoff_budget(self, arg0: int | None) -> None:
+        ...
+    @property
+    def rtol(self) -> float | None:
+        ...
+    @rtol.setter
+    def rtol(self, arg0: float | None) -> None:
+        ...
+    @property
+    def stiffness_threshold(self) -> float | None:
+        ...
+    @stiffness_threshold.setter
+    def stiffness_threshold(self, arg0: float | None) -> None:
+        ...
+    @property
+    def store_every(self) -> int | None:
+        ...
+    @store_every.setter
+    def store_every(self, arg0: int | None) -> None:
+        ...
+    @property
+    def t_end(self) -> float:
+        ...
+    @t_end.setter
+    def t_end(self, arg0: float) -> None:
+        ...
+    @property
+    def t_start(self) -> float:
+        ...
+    @t_start.setter
+    def t_start(self, arg0: float) -> None:
+        ...
+    @property
+    def tol_newton_dx(self) -> float | None:
+        ...
+    @tol_newton_dx.setter
+    def tol_newton_dx(self, arg0: float | None) -> None:
+        ...
+    @property
+    def tol_newton_res(self) -> float | None:
+        ...
+    @tol_newton_res.setter
+    def tol_newton_res(self, arg0: float | None) -> None:
+        ...
+    @property
+    def voltage_sanity_factor(self) -> float | None:
+        ...
+    @voltage_sanity_factor.setter
+    def voltage_sanity_factor(self, arg0: float | None) -> None:
+        ...
+class Simulation:
+    """
+    The kernel object that is a simulation: Simulation(circuit, options) plans the run (preflight on a private copy, routing, the option x engine refusals, the device capability check, the Newton stamps); attach gate sources, ticks and source terms; run() or run_until(t) + snapshot() / restore(). Engines 'pwl' and 'trbdf2'; the exact engine is refused (pulsim.simulate composes it). C blocks / graph-driven sources are refused (simulate composes them).
+    """
+    def __init__(self, circuit: Circuit, options: RunOptions) -> None:
+        ...
+    def add_tick(self, period: float, fn: typing.Any) -> None:
+        ...
+    def restore(self, snapshot: SolverSnapshot) -> None:
+        ...
+    def run(self) -> SimulationResult:
+        ...
+    def run_until(self, t: float) -> SimulationResult:
+        ...
+    def set_cancel(self, should_continue: typing.Any) -> None:
+        ...
+    def set_initial_state(self, x: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> None:
+        ...
+    def set_source_term(self, b_extra_fn: typing.Any) -> None:
+        ...
+    def set_step_observer(self, step_observer: typing.Any) -> None:
+        ...
+    def set_switch_fn(self, switch_fn: typing.Any) -> None:
+        """
+        The gate source: t -> SwitchStateMask (a native schedule runs in C++). Kept alive by the Simulation.
+        """
+    def snapshot(self) -> SolverSnapshot:
+        ...
+    @property
+    def circuit(self) -> Circuit:
+        """
+        The circuit the run solves: the caller's plus any preflight ties (the caller's circuit is never changed).
+        """
+    @property
+    def diagnostics(self) -> list[typing.Any]:
+        ...
+    @property
+    def plan(self) -> dict[typing.Any, typing.Any]:
+        ...
+    @property
+    def trbdf2_stats(self) -> dict[typing.Any, typing.Any]:
+        ...
 def _branch_form_capabilities() -> dict[typing.Any, typing.Any]:
     """
     The branch form's engine column (add-branch-form-ideal-switch): {'Switch'|'Diode': {engine: bool}}; False refuses with UnsupportedError(feature='branch_form').
@@ -3600,6 +3780,14 @@ def _run_pwl_points(circuit: Circuit, names: collections.abc.Sequence[str], tabl
 def _switch_census(graph: Graph, pool: DevicePool) -> tuple[int, int, list[int]]:
     """
     Return (num_switches, num_diode_owned, controlled_switch_indices). Diode bits are solver-owned (overlaid over the user mask by combine_masks); only the controlled indices need a switch_fn/driver.
+    """
+def _to_simulation_options(options: RunOptions) -> SimulationOptions:
+    """
+    The fixed-step driver's SimulationOptions resolved from a RunOptions (sim::to_simulation_options).
+    """
+def _to_trbdf2_options(options: RunOptions) -> dict[typing.Any, typing.Any]:
+    """
+    The variable-step driver's options resolved from a RunOptions, as a dict (sim::to_trbdf2_options).
     """
 def block_laws_source() -> str:
     """
@@ -3731,6 +3919,14 @@ def run_mna_sweep_kernel(graph: Graph, pool: DevicePool, mask: SwitchStateMask, 
     Optional `should_continue` is invoked between frequency
     points; raises pulsim.Cancelled when it returns False.
     """
+def run_option_defaults() -> dict[typing.Any, typing.Any]:
+    """
+    THE default values of a run (sim::Defaults).
+    """
+def run_option_table() -> list[typing.Any]:
+    """
+    The option x engine table (sim::kRunOptionTable): one row per simulate() keyword, the engines that honour it, which value means 'not requested', its documented default and the mechanism the other engines lack. pulsim.option_capabilities() is the public view.
+    """
 def run_ped_native(system: typing.Any, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, store_every: int = 1) -> dict[typing.Any, typing.Any]:
     """
     Native PEDSimulator (DOPRI5 + adaptive PI + event scan) running the C++ scheduler inner loop. `system` and `switch_fn` are still invoked via Python callbacks per step (GIL overhead), but the scheduler control flow runs natively. Returns a dict with times, states, n_accept, n_reject, n_events, cpu_time_seconds, event_log.
@@ -3747,7 +3943,7 @@ def run_transient_bdf1(builder: CircuitBuilder, opts: SimulationOptions, switch_
     """
     BDF1 (implicit Euler) transient simulation. Use when the trapezoidal path rings on stiff problems — BDF1 is L-stable (adds artificial damping that kills numerical oscillation). Slower than trap because it assembles + factors per step; intended for ROBUSTNESS over speed.
     """
-def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int = 0, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int = 0, tol_newton_dx: float = 0.0, tol_newton_res: float = 0.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = [], newton_roundoff_budget: int = 0, on_impulse_error: bool = False, observer_offsets: collections.abc.Sequence[float] = [], observer_origin: float = ...) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
+def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int | None = None, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int | None = None, tol_newton_dx: float = -1.0, tol_newton_res: float = -1.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = [], newton_roundoff_budget: int | None = None, on_impulse_error: bool = False, observer_offsets: collections.abc.Sequence[float] = [], observer_origin: float = ...) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
     """
     Variable-step TR-BDF2 transient (engine='auto'): L-stable, 2nd order, LTE-controlled step, gate edges landed by bisection, diode crossings localized by Illinois. Returns (SimulationResult, stats dict). `observers[j]` ticks at t_start + observer_offsets[j] + k*observer_periods[j] (ceil((span - offset_j)/T_j) times, index order when coincident; offsets default to 0); observer_origin (NaN = t_start) moves the grid's origin, so a resumed run ticks where the uninterrupted one would; stats['control_tick_counts'] counts each.
     """

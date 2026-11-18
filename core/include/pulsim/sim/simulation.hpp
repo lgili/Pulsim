@@ -240,7 +240,7 @@ public:
             snapshot_.valid ? &snapshot_ : nullptr;
         const Vector* x0 = (resume == nullptr && x0_) ? &*x0_ : nullptr;
         const auto& g = graph();
-        const auto& p = pool();
+        auto& p = builder_->pool();  // the cache stamps device state into it
         if (!switch_fn_ && plan_.asked == EngineChoice::Auto
             && plan_.engine == Engine::TrBdf2
             && !controlled_switches(g, p).empty()) {

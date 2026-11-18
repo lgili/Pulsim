@@ -1486,7 +1486,7 @@ inline void load_simulation_options(
     // trace (the loader accepts unknown keys, so an unparsed option
     // would just vanish — the exact silent-drop pattern Phase 0
     // eliminated elsewhere).
-    opts.store_every = size_or(sim, "store_every", Size{1});
+    opts.store_every = size_or(sim, "store_every", pulsim::sim::Defaults::store_every);
     if (opts.store_every == 0) {
         throw std::invalid_argument(
             "simulation.store_every must be >= 1 "
@@ -1500,18 +1500,20 @@ inline void load_simulation_options(
         bool_or(sim, "enable_substep_state_correction",
                  false);
     opts.max_event_iterations =
-        size_or(sim, "max_event_iterations", Size{16});
+        size_or(sim, "max_event_iterations",
+                pulsim::sim::Defaults::max_event_iterations);
     opts.max_newton_iterations =
-        size_or(sim, "max_newton_iterations", Size{50});
+        size_or(sim, "max_newton_iterations",
+                pulsim::sim::Defaults::max_newton_iterations);
     opts.tol_newton_dx =
-        real_or(sim, "tol_newton_dx", Real{1e-9});
+        real_or(sim, "tol_newton_dx", pulsim::sim::Defaults::tol_newton_dx);
     opts.tol_newton_res =
-        real_or(sim, "tol_newton_res", Real{1e-9});
+        real_or(sim, "tol_newton_res", pulsim::sim::Defaults::tol_newton_res);
     // Phase 2.4 adaptive RK selector (schema v1.5, wiring v1.6).
     opts.integrator =
         string_or(sim, "integrator", std::string{"kernel"});
-    opts.rtol    = real_or(sim, "rtol",    Real{1e-5});
-    opts.atol    = real_or(sim, "atol",    Real{1e-8});
+    opts.rtol    = real_or(sim, "rtol",    pulsim::sim::Defaults::rtol_variable);
+    opts.atol    = real_or(sim, "atol",    pulsim::sim::Defaults::atol_variable);
     opts.dt_init = real_or(sim, "dt_init", Real{0});
 }
 

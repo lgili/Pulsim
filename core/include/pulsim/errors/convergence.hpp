@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/sim/error.hpp"
 
 namespace pulsim {
 
@@ -31,7 +32,7 @@ enum class ConvergenceKind { Settle, Chatter, NoProgress, MaxSteps, NaN };
     return "unknown";
 }
 
-class ConvergenceFailure : public std::runtime_error {
+class ConvergenceFailure : public std::runtime_error, public PulsimError {
 public:
     ConvergenceFailure(ConvergenceKind kind, Real time, std::string device,
                        const std::string& message)

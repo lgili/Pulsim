@@ -57,6 +57,17 @@ def test_every_default_comes_from_one_table():
               "store_every", "newton_roundoff_budget"):
         assert sig[n].default is None, n
     assert p.SolverOptions().max_newton_iterations is None
+    # The YAML loader's `simulation:` block defaults.
+    y = p.load_yaml_string("""
+circuit:
+  devices:
+    - {type: resistor, name: R, from: a, to: gnd, R: 1.0}
+simulation: {t_end: 1.0e-4, dt: 1.0e-6}
+""").options
+    assert (y.max_newton_iterations, y.max_event_iterations,
+            y.tol_newton_dx, y.tol_newton_res, y.store_every) == (
+        d["max_newton_iterations"], d["max_event_iterations"],
+        d["tol_newton_dx"], d["tol_newton_res"], d["store_every"])
 
 
 # A value per keyword that asks its engine for something.
@@ -74,7 +85,7 @@ _ASK = {
     "inductor_abs_clamp": 1e3, "progress": True,
     "should_continue": lambda: True, "on_cache": lambda cache: None,
     "sensitivities": ["R.R"], "mode_selection": "lcp",
-    "allow_implicit_segments": True,
+    "allow_implicit_segments": True, "control_tick": "state",
 }
 # Cells exercised elsewhere (they need a controller, a stream, an MMC arm or
 # a snapshot to be built): test_closed_loop*, test_live*, test_mmc*,
@@ -176,6 +187,9 @@ def test_simulation_object_split_run_equals_continuous():
     b.restore(a.snapshot())
     second = np.asarray(b.run().states)
     assert np.array_equal(np.vstack([first, second[1:]]), full)
+    # The same object continues where it stopped.
+    rest = np.asarray(a.run().states)
+    assert np.array_equal(np.vstack([first, rest[1:]]), full)
 
 
 def test_simulation_keeps_its_python_callables_alive():
@@ -188,3 +202,40 @@ def test_simulation_keeps_its_python_callables_alive():
     gc.collect()
     sim.run()
     assert hits == [k * 4 * dt for k in range(5)]
+
+
+def test_the_docs_page_is_the_option_table():
+    import pathlib
+    doc = (pathlib.Path(__file__).resolve().parents[2] / "docs"
+           / "known-limitations.md").read_text()
+    block = doc.split("<!-- option-capabilities:begin -->\n")[1].split(
+        "<!-- option-capabilities:end -->")[0]
+    assert block.strip() == ro.markdown_table()
+
+
+def test_every_pulsim_error_is_a_pulsim_error_and_keeps_its_std_base():
+    for cls, base in ((p.UnsupportedError, ValueError),
+                      (p.OptionsError, ValueError),
+                      (p.ConvergenceError, RuntimeError),
+                      (p.SimulationAborted, RuntimeError),
+                      (p.Cancelled, RuntimeError),
+                      (p.NameNotFoundError, KeyError)):
+        assert issubclass(cls, p.PulsimError) and issubclass(cls, base), cls
+    with pytest.raises(p.OptionsError) as e:  # pwl needs a step
+        p.Simulation(_rc().build(), p.RunOptions(t_end=1e-4, engine="pwl"))
+    assert e.value.option == "dt"
+
+
+def _count(pattern):
+    import pathlib
+    import re
+    pkg = pathlib.Path(p.__file__).resolve().parent
+    rx = re.compile(pattern, re.M)
+    return sum(len(rx.findall(f.read_text())) for f in pkg.rglob("*.py"))
+
+
+def test_ratchet_untyped_raises_and_broad_handlers_do_not_rise():
+    # Counts on 2026-11-18 (add-kernel-simulation-object 1.3). Lower them
+    # when a raise becomes typed or a handler is narrowed; never raise them.
+    assert _count(r"raise ValueError") <= 526
+    assert _count(r"except Exception|except:\s*$|except BaseException") <= 89

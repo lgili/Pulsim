@@ -3,14 +3,18 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/builder/circuit_builder.hpp"
+#include "pulsim/errors/convergence.hpp"
 #include "pulsim/ir/circuit.hpp"
 #include "pulsim/sim/options.hpp"
 #include "pulsim/sim/simulation.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <set>
 #include <string>
+#include <type_traits>
 
 using namespace pulsim;
 
@@ -189,4 +193,25 @@ TEST_CASE("the caller's circuit is never changed by the preflight",
     sim::Simulation s{circuit, o};
     REQUIRE(circuit.devices().size() == n0);
     REQUIRE(s.circuit().devices().size() == n0 + s.plan().ties.size());
+}
+
+TEST_CASE("every pulsim error is a PulsimError and keeps its std base",
+          "[sim][errors]") {
+    const auto circuit = ir::Circuit::from_builder(shockley_buck());
+    sim::RunOptions o;
+    o.t_end = 1e-4;
+    o.engine = sim::EngineChoice::Pwl;  // no dt
+    try {
+        sim::Simulation s{circuit, o};
+        FAIL("no refusal");
+    } catch (const PulsimError& e) {
+        REQUIRE(dynamic_cast<const std::invalid_argument*>(&e) != nullptr);
+        REQUIRE(std::string(e.message()).find("dt") != std::string::npos);
+    }
+    o.engine = sim::EngineChoice::Exact;
+    REQUIRE_THROWS_AS((sim::Simulation{circuit, o}), PulsimError);
+    STATIC_REQUIRE(std::is_base_of_v<PulsimError, solver::SimulationAborted>);
+    STATIC_REQUIRE(std::is_base_of_v<PulsimError, ConvergenceFailure>);
+    STATIC_REQUIRE(std::is_base_of_v<PulsimError, analysis::Cancelled>);
+    STATIC_REQUIRE(std::is_base_of_v<std::runtime_error, analysis::Cancelled>);
 }

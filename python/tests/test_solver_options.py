@@ -50,7 +50,7 @@ def test_solver_options_defaults_match_legacy_kwarg_defaults() -> None:
 
     # Mirror the documented simulate() defaults.
     assert opts.enable_nonlinear_refresh is None
-    assert opts.max_newton_iterations == 0
+    assert opts.max_newton_iterations is None
     assert opts.tol_newton_dx is None
     assert opts.tol_newton_res is None
     assert opts.enable_newton_line_search is None
@@ -213,8 +213,15 @@ def test_bundle_does_not_leak_pwl_defaults_into_dsed() -> None:
 
     # Previously: ValueError "dt_init must be positive, got 0.0".
     res = p.simulate(b, t_end=1e-4, engine="dsed",
-                     solver=p.SolverOptions(max_newton_iterations=100))
+                     solver=p.SolverOptions(store_every=1))
     assert res.num_steps() > 0
+    # A Newton knob in the bundle is refused by name on the exact engine,
+    # which runs no Newton solve (add-kernel-simulation-object; it used to
+    # be ignored).
+    with pytest.raises(p.UnsupportedError) as e:
+        p.simulate(b, t_end=1e-4, engine="dsed",
+                   solver=p.SolverOptions(max_newton_iterations=100))
+    assert e.value.feature == "max_newton_iterations"
 
 
 def test_bundle_run_emits_no_bogus_ignored_kwarg_warning() -> None:

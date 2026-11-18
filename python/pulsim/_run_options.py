@@ -139,3 +139,17 @@ def trbdf2_options(**kw) -> "dict[str, Any]":
     """The variable-step driver's options, resolved by the kernel
     (`sim::to_trbdf2_options`) from `run_options(**kw)`."""
     return dict(_pulsim._to_trbdf2_options(run_options(**kw)))
+
+
+def markdown_table() -> str:
+    """The option x engine table as the Markdown block of
+    docs/known-limitations.md (a test keeps the page equal to it)."""
+    rows = ["| Keyword | pwl | trbdf2 | exact (dsed) | default |",
+            "|---|---|---|---|---|"]
+    for n, r in TABLE.items():
+        if n == "c_blocks":
+            continue
+        cells = " | ".join("yes" if e in r["engines"] else "refused"
+                           for e in _ENGINES)
+        rows.append(f"| `{n}` | {cells} | {r['default']} |")
+    return "\n".join(rows)

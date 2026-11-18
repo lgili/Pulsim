@@ -6,6 +6,72 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Kernel simulation object: one option x engine table, one defaults table, `pulsim.Simulation`
+
+* **Added** `pulsim.option_capabilities()`: the option x engine table
+  (`sim::kRunOptionTable`, `core/include/pulsim/sim/options.hpp`), one row
+  per `simulate()` keyword with the engines that honour it. `simulate()`
+  judges every keyword against the engine the run lands on from this one
+  declaration: honoured, or refused with `UnsupportedError(engine,
+  feature=<keyword>)`. Nothing is accepted and ignored any more.
+* **Added** `sim::Defaults` (`core/include/pulsim/sim/defaults.hpp`): every
+  default of a run in one place. `SimulationOptions`, `TrBdf2Options`, the
+  kernel resolution of `RunOptions`, the exact engine's dispatcher and
+  `simulate()` read it (`pulsim._pulsim.run_option_defaults()`).
+* **Added** `sim::RunOptions` / `sim::Simulation`
+  (`core/include/pulsim/sim/simulation.hpp`) and their bindings
+  `pulsim.RunOptions` / `pulsim.Simulation(circuit, options)`: a run
+  planned by the kernel (preflight on a private copy, routing with
+  reasons, the option and device refusals, the Newton stamps, the cache,
+  the voltage-sanity check as a diagnostic) with `run()`, `run_until(t)`,
+  `snapshot()` / `restore()`, `set_switch_fn`, `add_tick`,
+  `set_source_term`. Engines `'pwl'` and `'trbdf2'`; results equal
+  `simulate()` bit for bit. `simulate()` resolves its fixed-step and
+  TR-BDF2 options through the same kernel functions
+  (`sim::to_simulation_options` / `to_trbdf2_options`).
+* **BREAKING** keywords the landing engine cannot honour now raise
+  `UnsupportedError` instead of a `UserWarning` and being ignored:
+  `rtol`, `atol`, `dt_init` on the fixed step (explicit `engine='pwl'`, or
+  `'auto'` with a `dt`); `integrator`, `stiffness_threshold`, `h_bdf2` on
+  `'pwl'` / `'trbdf2'` / `'auto'` (`integrator='kernel'` / `'default'` on
+  `'pwl'` is still accepted). Migration: drop the keyword, or drop `dt`
+  to let `'auto'` take the variable step that honours it.
+* **BREAKING** the exact engine (`engine='exact'` / `'dsed'`) refuses the
+  Newton and event keywords it never read: `enable_nonlinear_refresh`,
+  `max_newton_iterations`, `tol_newton_dx`, `tol_newton_res`,
+  `enable_newton_line_search=True`, `enable_newton_lm=True`,
+  `max_event_iterations`, and `control_tick='state'`. Migration: drop them
+  (they had no effect there). `max_dt_halvings=0` is now accepted on it
+  (no retry exists to disable).
+* **BREAKING** `max_newton_iterations=0` (and
+  `SolverOptions(max_newton_iterations=0)`) as "the default" is deprecated
+  (`DeprecationWarning`; the run uses the default, 50); the signature
+  default is `None`. Migration: pass `None` or omit it.
+* **BREAKING** `engine='trbdf2'` with `max_event_iterations=0` raises
+  `UnsupportedError` (it used to be replaced by 16 in silence); the
+  variable step has no off switch for its event localisation. And
+  `tol_newton_dx=0` / `tol_newton_res=0` are values on `trbdf2` as on
+  `pwl`. The raw `run_transient_trbdf2` binding follows the table:
+  `max_event_iterations`, `max_newton_iterations` and
+  `newton_roundoff_budget` default to `None` (= `sim::Defaults`) and `0` is
+  a value (refused for the first two, a zero budget for the third);
+  `tol_newton_dx` / `tol_newton_res` default to -1 (= the kernel's) and 0
+  is a value. Migration: pass `None` (or omit) where you passed 0 for
+  "default".
+* **Added** `pulsim.PulsimError`, the base of every pulsim error
+  (`UnsupportedError`, `ConvergenceError` / `SimulationAborted`,
+  `Cancelled`, `NameNotFoundError`, and the new `pulsim.OptionsError`, a
+  `ValueError` carrying `option`, raised for a `RunOptions` value no
+  engine takes). Each keeps its standard base, so existing `except
+  ValueError` / `RuntimeError` / `KeyError` still catch them. In C++,
+  `pulsim::PulsimError` (`sim/error.hpp`) is the same mix-in on
+  `UnsupportedError`, `sim::OptionsError`, `solver::SimulationAborted`,
+  `ConvergenceFailure` and `analysis::Cancelled`.
+* **BREAKING** (C++) `solver::TrBdf2Options` defaults `rtol` / `atol` are
+  `sim::Defaults::rtol_variable` / `atol_variable` = 1e-5 / 1e-8, the
+  values `simulate()` always used (they were 1e-4 / 1e-6). Migration: set
+  them explicitly for the old step density.
+
 ### Integration batch 12: unified device interface 1–3, in-kernel event losses, IR scopes, TR-BDF2 track 6, event queue, control graph 4, PWL IGBT / thyristor, exact engine session 6 merged
 
 * **Fixed** `periodic_steady_state` by shooting ran a thyristor / TRIAC

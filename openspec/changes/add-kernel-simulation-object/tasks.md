@@ -17,6 +17,7 @@ unchanged.
 - [ ] 1.1 `test_plan_resolves_every_kwarg`: `set(plan.resolved_from) == set(signature(simulate).parameters) − {"builder"}` (xfail until 2.x lands)
 - [ ] 1.2 `test_engine_branches_read_only_the_plan`: `ast` check on `_run_pwl`, `_run_trbdf2`, `_run_dsed` (xfail until 7)
 - [ ] 1.3 Ratchets: `raise ValueError` and broad-handler counts in `python/pulsim` may not rise; no broad handler without re-raise around a kernel call on the `simulate()` call path (one level deep)
+  - Done: the two count ratchets (`test_simulation_object.py`). Open: the one-level-deep broad-handler check.
 - [ ] 1.4 `test_cross_cutting_on_every_engine`: builder ICs, `resume_from` validation, preflight ties, undriven-switch behaviour and voltage sanity asserted per engine against today's behaviour
 
 ## 2. Stage A — plan the options
@@ -50,23 +51,27 @@ unchanged.
 
 ## 8. Stage B — typed errors and diagnostics in Python
 - [ ] 8.1 `python/pulsim/errors.py`: `PulsimError`, `NetlistError`, `OptionsError`, `ConvergenceError`, `SingularError`; the Phase 0 `UnsupportedError`, `SimulationAborted`, `Cancelled` and `NameNotFoundError` re-based under `PulsimError`; exported from `pulsim`
+  - Done: `PulsimError`, `OptionsError`; `UnsupportedError`, `ConvergenceError` / `SimulationAborted`, `Cancelled`, `NameNotFoundError` re-based; exported. Open: `NetlistError`, `SingularError`, `errors.py` (DECISIONS 10).
 - [ ] 8.2 Convert every raise reachable from `simulate()`; replace the 13 broad handlers in `__init__.py` by typed catches or remove them
 - [ ] 8.3 `result.diagnostics`; `_emit_diagnostics`; route the 14 `warnings.warn` sites in `__init__.py` through it
 - [ ] 8.4 Oracle: suite green without editing any `pytest.raises` / `pytest.warns`; ratchets hold; a test per class asserts `feature`, `engine`, `device` on `UnsupportedError`
 - [ ] 8.5 Docs: error reference page; `AI_GUIDE.md` error section; stubs; CHANGELOG; note for PulsimGUI (`BackendRefusal` can catch `PulsimError`)
 
 ## 9. Stage B — options and errors in the kernel
-- [ ] 9.1 `core/include/pulsim/sim/options.hpp`: `RunOptions` and its parts; one defaults table; `to_simulation_options`, `to_trbdf2_options`
+- [x] 9.1 `core/include/pulsim/sim/options.hpp`: `RunOptions` and its parts; one defaults table; `to_simulation_options`, `to_trbdf2_options`
 - [ ] 9.2 `core/include/pulsim/sim/error.hpp` (the `PulsimError` mix-in; each class keeps its `std` base; `solver/unsupported.hpp` of Phase 0 gains the mix-in), `diagnostic.hpp`; pybind translators to the Python classes of 8.1
+  - Done: `sim/error.hpp` `PulsimError` mix-in on `UnsupportedError`, `sim::OptionsError`, `SimulationAborted`, `ConvergenceFailure`, `Cancelled`; translators to `pulsim.PulsimError` subclasses. Open: `diagnostic.hpp` (the facade's `sim::Diagnostic` lives in `simulation.hpp`), `NetlistError` / `SingularError` (DECISIONS 10).
 - [ ] 9.3 Remove the sentinels (`max_newton_iterations=0` warns for one release) and the four recorded-only fields of `SimulationOptions` (**BREAKING**)
-- [ ] 9.4 Raw TR-BDF2 binding defaults follow the table (**BREAKING**); CHANGELOG migration note
-- [ ] 9.5 Oracle: goldens bit-identical through `simulate()`; a test asserts every default in the Python signature, the YAML loader and the kernel comes from the one table
+  - Done: no sentinel in `RunOptions`, `simulate()` (`max_newton_iterations=0` warns) or the raw TR-BDF2 binding. Open: the four recorded-only `SimulationOptions` fields (the YAML loader stores them there; they need a home on `LoadedCircuit` first).
+- [x] 9.4 Raw TR-BDF2 binding defaults follow the table (**BREAKING**); CHANGELOG migration note
+- [x] 9.5 Oracle: goldens bit-identical through `simulate()`; a test asserts every default in the Python signature, the YAML loader and the kernel comes from the one table
 
 ## 10. Stage B — the Simulation facade
-- [ ] 10.1 `core/include/pulsim/sim/simulation.hpp`: `Circuit` view, `RunPlan`, `Simulation` (constructor plans; `run`, `run_until`, `snapshot`, `restore`, `diagnostics`, attachments)
-- [ ] 10.2 The facade builds the device stamps, the cache and the default mask policy and calls the existing drivers
+- [x] 10.1 `core/include/pulsim/sim/simulation.hpp`: `Circuit` view, `RunPlan`, `Simulation` (constructor plans; `run`, `run_until`, `snapshot`, `restore`, `diagnostics`, attachments)
+- [x] 10.2 The facade builds the device stamps, the cache and the default mask policy and calls the existing drivers
 - [ ] 10.3 C++ tests (no Python): buck with a Shockley diode matches the Python result bit for bit; an unsupported device on `ExactStep` throws `UnsupportedError` naming device and engine; `run_until` + `snapshot` + `restore` reproduces a continuous fixed-step run exactly
-- [ ] 10.4 Binding `pulsim.Simulation`, `pulsim.RunOptions`; stubs
+  - Done: the Shockley buck bit-for-bit test and the split-run test. Open: the `ExactStep` device refusal (the facade refuses the exact engine as a whole, DECISIONS 7; no device kind is refused by pwl or trbdf2).
+- [x] 10.4 Binding `pulsim.Simulation`, `pulsim.RunOptions`; stubs
 - [ ] 10.5 Oracle: the conformance matrix run through `Simulation` equals the matrix run through `simulate()`; zero-alloc tests green
 
 ## 11. Stage B — simulate() on the facade

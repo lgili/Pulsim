@@ -49,6 +49,10 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # carrying engine / feature / device / kind) and the kernel's
     # device-kind capability table it is raised from.
     UnsupportedError,
+    # add-kernel-simulation-object: the base of every pulsim error, and
+    # the refusal of a RunOptions value (a ValueError carrying `option`).
+    PulsimError,
+    OptionsError,
     engine_capabilities,
     # add-compiled-control-graph: algebraic loop / two writers / unknown
     # block kind, raised when a control graph is built.
@@ -559,6 +563,8 @@ __all__ = [
     "ConvergenceError",
     "periodic_steady_state_supported",
     "UnsupportedError",
+    "PulsimError",
+    "OptionsError",
     "ControlGraphBuildError",
     "value_and_grad",
     "KpiValue",
@@ -970,7 +976,7 @@ _passives.install(CircuitBuilder)
 
 
 
-class NameNotFoundError(KeyError):
+class NameNotFoundError(KeyError, PulsimError):
     """Raised by :meth:`SimulationResult.v` / `.i` / `.power` and the
     :class:`CircuitBuilder` lookup helpers when a requested name
     isn't registered. Carries ``name``, ``kind`` (one of
@@ -2378,7 +2384,7 @@ def simulate(
             "behaviour; False is refused on a circuit with Newton devices.",
             DeprecationWarning, stacklevel=2)
     # add-kernel-simulation-object: 0 was "not set" for this one keyword
-    # (every other uses None); it is a value now, and refused below 1.
+    # (every other uses None): deprecated for one release, then refused.
     if max_newton_iterations is not None and not isinstance(
             max_newton_iterations, bool) and max_newton_iterations == 0:
         import warnings
