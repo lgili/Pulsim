@@ -948,9 +948,8 @@ void init_module(py::module_& m) {
               "load needs: without it there is no path for the "
               "freewheeling current and the solve fails. `V_F` is "
               "that diode's CONDUCTION DROP (v = V_F + i/1e3 S "
-              "while on; it turns on at V_F). Use "
-              "`run_transient(..., enable_nonlinear_refresh="
-              "True)` to stamp the device per Newton iteration. "
+              "while on; it turns on at V_F). The transient "
+              "engines stamp the device per Newton iteration. "
               "`tau_tail`/`k_tail` add the TURN-OFF TAIL: when the "
               "gate falls below threshold the MOS channel cuts off "
               "in nanoseconds, but the carriers stored in the n- "
@@ -991,10 +990,8 @@ void init_module(py::module_& m) {
               "Set `with_body_diode=False` for an eGaN HEMT, "
               "which has no p-n body diode. `V_F` is the body "
               "diode's CONDUCTION DROP (v_SD = V_F + i/1e3 S while "
-              "on; it turns on at V_F). Call "
-              "`run_transient` with "
-              "`enable_nonlinear_refresh=True` so the Newton "
-              "loop stamps the MOSFET each iteration.")
+              "on; it turns on at V_F). The transient engines "
+              "stamp the MOSFET each Newton iteration.")
         .def("run_preflight",
               [](builder::CircuitBuilder& self,
                   const pwl::PreflightOptions& opts) {
@@ -3467,7 +3464,8 @@ void init_module(py::module_& m) {
             [](py::tuple t) {
                 SolverSnapshot s;
                 if (t.size() >= 2 && py::isinstance<py::str>(t[0])) {
-                    if (t[1].cast<int>() != 3 || t.size() != 12) {
+                    if (t[0].cast<std::string>() != "SolverSnapshot"
+                        || t[1].cast<int>() != 3 || t.size() != 12) {
                         throw std::runtime_error(
                             "SolverSnapshot: pickle version "
                             + std::to_string(t[1].cast<int>()) + " with "
@@ -3486,6 +3484,13 @@ void init_module(py::module_& m) {
                     s.valid = t[10].cast<bool>();
                     if (!t[11].is_none()) {
                         auto L = t[11].cast<py::tuple>();
+                        if (L.size() != 6) {
+                            throw std::runtime_error(
+                                "SolverSnapshot: the version-3 legacy "
+                                "payload has "
+                                + std::to_string(L.size())
+                                + " fields, expected 6");
+                        }
                         auto& g = s.legacy;
                         g.history = L[0].cast<std::vector<Real>>();
                         g.saturable_history = L[1].cast<std::vector<Real>>();
@@ -3668,8 +3673,9 @@ void init_module(py::module_& m) {
         "`enable_nonlinear_refresh`: "
         "None (default) lets the kernel stamp the Newton "
         "devices (smooth / Shockley diode, MOSFET, IGBT) "
-        "when the circuit has any; True forces the chain; "
-        "False with such devices raises UnsupportedError.");
+        "when the circuit has any; True is the same "
+        "(deprecated); False with such devices raises "
+        "UnsupportedError.");
 
     // ---- DC operating-point strategies (Phase A.2) -----------------------
     //

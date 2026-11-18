@@ -73,14 +73,15 @@ def test_the_snapshot_holds_every_block_in_one_vector():
     joined = (list(snap.history) + list(snap.saturable_history)
               + list(snap.coss_history) + list(snap.lauritzen_history)
               + list(snap.igbt_tail_history) + list(snap.pmsm_history))
-    assert joined == list(snap.dev_state)
+    assert joined == list(snap.dev_state)      # (order: next test)
 
 
 @pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
 def test_each_block_holds_its_device_s_state_at_the_end(engine):
     """Checked against the run's own waveforms, not against the snapshot:
     the saturable block is (λ, i, v, ...) of L, the Coss block (v, q, i)
-    of Cj, and the IGBT carries tail charge after its turn-off."""
+    of Cj, the Lauritzen block (q_M, f) of DL, and the IGBT carries tail
+    charge after its turn-off."""
     res = {"pwl": _pwl, "trbdf2": _trbdf2}[engine](4.27e-5)
     snap = res.final_snapshot
     sat = list(snap.saturable_history)
@@ -92,6 +93,10 @@ def test_each_block_holds_its_device_s_state_at_the_end(engine):
     v_cj = np.asarray(res.v("vin"))[-1] - np.asarray(res.v("sw"))[-1]
     assert coss[0] == pytest.approx(v_cj, rel=1e-9, abs=1e-12)
     assert list(snap.igbt_tail_history)[0] > 0.0      # stored tail charge
+    # Lauritzen q_M ~ tau * i_D near steady conduction (tau = 1e-7 s):
+    # tells its block from the IGBT tail's, which is 2 wide as well
+    q_m = list(snap.lauritzen_history)[0]
+    assert q_m == pytest.approx(1e-7 * np.asarray(res.i("RL"))[-1], rel=2e-2)
     assert np.array_equal(np.asarray(snap.x), np.asarray(res.states)[-1])
 
 
@@ -209,3 +214,5 @@ def test_a_newer_pickle_version_is_refused_by_version():
     snap = SolverSnapshot.__new__(SolverSnapshot)
     with pytest.raises(RuntimeError, match="pickle version 4"):
         snap.__setstate__(("SolverSnapshot", 4, 0.0))
+    with pytest.raises(RuntimeError, match="pickle version 3"):
+        snap.__setstate__(("Other", 3) + (0,) * 10)

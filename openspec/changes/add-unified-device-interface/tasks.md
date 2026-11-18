@@ -21,7 +21,7 @@ machine (`-j2`, `nice`).
 ## 2. Kernel-built refresh
 - [x] 2.1 `pwl::build_device_refresh(graph, pool, histories, StepCtx&)`: the static diode / MOSFET / IGBT stamps (kernel-built since `add-engine-conformance-matrix`) plus one typed pass per history, in one function; both drivers call it
 - [x] 2.2 Delete the two wrapper chains (RT:471-600, TB:588-697) in favour of 2.1; keep `nl_refresh` as a deprecated override that replaces the base stamps only
-- [x] 2.3 Remove whatever `make_combined_diode_mosfet_refresh()` call sites remain in `python/bindings.cpp` (four on this branch); `enable_nonlinear_refresh=` emits a `DeprecationWarning`
+- [x] 2.3 Remove whatever `make_combined_diode_mosfet_refresh()` call sites remain in `python/bindings.cpp` (four on this branch); `enable_nonlinear_refresh=` emits a `DeprecationWarning` — the transient call sites are gone; the DC-only `resolve_refresh` (`compute_dc_op_with_strategy`) still calls it, out of this step's scope
 - [x] 2.4 C++ tests: the Phase 0 clamp test (0.594 V with no callback) still passes; every pair of stateful kinds in one circuit keeps each kind's single-kind result — written as Python tests (`python/tests/test_stateful_kinds_pairwise.py`, 12 ordered pairs on pwl and on TR-BDF2); the clamp test is in the ctest suite
 - [x] 2.5 Oracle: goldens bit-identical; matrix unchanged
 - [x] 2.6 Docs: CHANGELOG deprecation note; `docs/internals` section on the refresh

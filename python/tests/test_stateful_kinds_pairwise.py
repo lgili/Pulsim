@@ -122,7 +122,8 @@ def test_on_trbdf2_a_kind_beside_another_keeps_its_result(a, b):
 
 
 def test_enable_nonlinear_refresh_is_deprecated_and_changes_nothing():
-    """On a STATIC Newton device (the chain the flag used to switch)."""
+    """On a STATIC Newton device. None and True were the same before this
+    change too; what is new is the warning."""
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "a", "gnd", v_dc=0.0, v_amplitude=5.0,
                               frequency=1e5, phase=0.0)

@@ -523,7 +523,8 @@ direction and sub-step count), `coss_history` (3), `lauritzen_history`
   by name.
 * An invalid snapshot, or one whose device layout does not match the
   circuit, is refused by name (the first block that differs) rather
-  than resumed from zero. Builder
+  than resumed from zero. A snapshot without a layout (2.0 pickle,
+  hand-built, or a named field written) is checked per history by size. Builder
   initial conditions (`i0=`, `c0=`) are not applied when resuming: the
   snapshot is the state.
 

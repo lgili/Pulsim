@@ -27,7 +27,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   as `mask`. A resume refuses a snapshot whose layout is not the
   circuit's, naming the first block that differs (before, a circuit with
   the same number of unknowns but other device kinds failed inside one
-  history's size check; it is now refused by block name). Pickle version 3; Pulsim 2.0
+  history's size check; it is now refused by block name). A snapshot
+  without a layout (a 2.0 pickle, a hand-built one, or one whose named
+  field was written) is still checked per history, by size. Pickle version 3; Pulsim 2.0
   pickles (10, 11 or 12 fields) still load and resume identically.
 * **Soft-deprecated** (no warning yet) the named snapshot fields `history`,
   `saturable_history`, `coss_history`, `lauritzen_history`,
