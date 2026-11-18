@@ -1926,6 +1926,36 @@ def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
 _PWL_MODE_GUARD = True
 
 
+def _mode_auto_record(chosen, reason, warn=False):
+    """mode_selection='auto' resolved: (mode for the run, the record kept
+    in ``result.diagnostics['mode_selection_auto']``). ``warn``: the reason
+    is a keyword the caller passed, so the fallback is said out loud."""
+    if warn:
+        import warnings
+        warnings.warn(
+            f"simulate(mode_selection='auto'): the complementarity selection "
+            f"does not apply ({reason}); this run uses the legacy settle.",
+            UserWarning, stacklevel=4)
+    return chosen, {"requested": "auto",
+                    "chosen": "lcp" if chosen == "lcp" else "legacy",
+                    "reason": reason}
+
+
+def _resolve_mode_auto(builder, engine, max_event_iterations):
+    """'auto' on engine 'pwl' / 'trbdf2': 'lcp' wherever it applies, the
+    settle (None) where 'lcp' would refuse; the reason recorded."""
+    from . import _pulsim as _k  # type: ignore[import-not-found]
+    if engine == "trbdf2":
+        return _mode_auto_record(None, "engine 'trbdf2' (no hook yet)")
+    reason, device = _k._lcp_circuit_refusal(builder.graph, builder.pool)
+    if reason:
+        return _mode_auto_record(
+            None, f"{reason} ({device})" if device else reason)
+    if max_event_iterations is not None and int(max_event_iterations) == 0:
+        return _mode_auto_record(None, "max_event_iterations=0", warn=True)
+    return _mode_auto_record("lcp", None)
+
+
 def simulate(
     builder: "CircuitBuilder | Circuit | LoadedCircuit",
     t_end: Optional[float] = None,
@@ -2217,6 +2247,13 @@ def simulate(
         solved beside it; disagreements in
         ``result.diagnostics['mode_shadow']``. ``'shadow'`` / ``'lcp'`` on
         ``trbdf2`` raise :class:`UnsupportedError`.
+        ``'auto'``: ``'lcp'`` wherever it applies, the legacy settle where
+        ``'lcp'`` would refuse (no PWL diode, a gated device, a Newton
+        device, ``engine='trbdf2'``, ``sensitivities=``,
+        ``max_event_iterations=0``); the choice and its reason in
+        ``result.diagnostics['mode_selection_auto']``, with a warning for
+        ``max_event_iterations=0`` only. A failure of the LCP during
+        the run is not caught (it raises as under ``'lcp'``).
     allow_implicit_segments
         ``engine='exact'`` (alias ``'dsed'``) only. A segment whose mode the
         exact kernel cannot step (a user ``b_extra_fn``: ``feature='source'``;
@@ -2396,10 +2433,13 @@ def simulate(
         stiffness_threshold=stiffness_threshold,
         h_bdf2=h_bdf2,
     )
-    if mode_selection not in (None, "legacy", "shadow", "lcp"):
+    if mode_selection not in (None, "legacy", "shadow", "lcp", "auto"):
         raise ValueError(
             f"simulate(): mode_selection={mode_selection!r}; expected "
-            "None, 'legacy', 'shadow' or 'lcp'.")
+            "None, 'legacy', 'shadow', 'lcp' or 'auto'.")
+    _mode_auto = None
+    if mode_selection == "auto" and sensitivities is not None:
+        mode_selection, _mode_auto = _mode_auto_record(None, "sensitivities")
     if newton_roundoff_budget is not None and (
             isinstance(newton_roundoff_budget, bool)
             or int(newton_roundoff_budget) != newton_roundoff_budget
@@ -2633,6 +2673,15 @@ def simulate(
                 initial_state=None if _ic_from_builder else initial_state,
                 ic_from_builder=_ic_from_builder, dt_init=dt_init,
                 b_extra_fn=b_extra_fn, integrator=integrator)
+            if _mode_auto is not None:
+                _diag = getattr(_dsed_res, "diagnostics", None)
+                if isinstance(_diag, dict):
+                    _diag["mode_selection_auto"] = _mode_auto
+                else:
+                    try:
+                        _dsed_res.diagnostics = {"mode_selection_auto": _mode_auto}
+                    except AttributeError:
+                        pass  # a result without diagnostics: the record has nowhere to go
         else:
             _dsed_res = _dsed.run_dsed_from_builder(
                 builder=builder,
@@ -2810,6 +2859,9 @@ def simulate(
             f"{allow_implicit_segments!r}): the keyword governs the exact "
             f"engine's numeric segments; this run lands on engine={engine!r}, "
             "which has no exact segments. Use engine='exact', or drop it.")
+    if mode_selection == "auto":
+        mode_selection, _mode_auto = _resolve_mode_auto(
+            builder, engine, max_event_iterations)
     if mode_selection in ("shadow", "lcp") and engine == "trbdf2":
         raise _unsupported(
             engine, "mode_selection",
@@ -2935,6 +2987,9 @@ def simulate(
         res.control_tick_jitter_max = 0.0
         res.engine_used = "trbdf2"
         res.engine_route_reason = None
+        if _mode_auto is not None:
+            res.diagnostics = {**(getattr(res, "diagnostics", None) or {}),
+                               "mode_selection_auto": _mode_auto}
         res.step_loop_python_callbacks = _step_loop_python_callbacks(
             switch_fn=switch_fn, b_extra_fn=b_extra_fn,
             # the loops' ticks are reported under closed_loops
@@ -3466,6 +3521,8 @@ def simulate(
         # surprises people.
         res.engine_used = "pwl"
         res.diagnostics = dict(res.mode_diagnostics)
+        if _mode_auto is not None:
+            res.diagnostics["mode_selection_auto"] = _mode_auto
         res.engine_route_reason = (
             "; ".join(_route_reasons) if _route_reasons else None)
         res.step_loop_python_callbacks = _step_loop_python_callbacks(

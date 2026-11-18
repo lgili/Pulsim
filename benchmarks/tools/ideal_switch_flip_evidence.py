@@ -11,6 +11,8 @@ variants of each cell:
 * ``lcp``      ``mode_selection='lcp'`` (only on a circuit with a PWL diode:
   without one the default selection has nothing to decide);
 * ``branch+lcp`` both;
+* ``auto``     ``mode_selection='auto'`` (every circuit: ``'lcp'`` where it
+  applies, the settle where ``'lcp'`` refuses);
 * ``ideal``    every ``add_switch`` / ``add_diode`` an IDEAL branch-form element:
   ``R_on = 0`` and ``V_f = 0`` (the netlist's ``g_off`` and ``V_th`` kept).
   That is another circuit, so its cells are graded against a reference
@@ -51,7 +53,7 @@ import pulsim  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "IDEAL_SWITCH_FLIP_EVIDENCE.md"
-VARIANTS = ("default", "branch", "lcp", "branch+lcp", "ideal", "ideal+lcp")
+VARIANTS = ("default", "branch", "lcp", "branch+lcp", "auto", "ideal", "ideal+lcp")
 # the structural refusals of an ideal circuit, by name (UnsupportedError.feature)
 STRUCTURAL = ("ideal_voltage_loop", "floating_node", "dependent_states", "impulse")
 RANK = {"agree": 0, "unverified": 0, "disagree": 1, "refused": 2, "error": 3,
@@ -159,7 +161,8 @@ def run(patterns, want=VARIANTS):
                     rec.update(outcome="n/a", message="no PWL diode: nothing to select")
                     out.append(rec)
                     continue
-                k = dict(kw, **({"mode_selection": "lcp"} if "lcp" in var else {}))
+                ms = "lcp" if "lcp" in var else "auto" if var == "auto" else None
+                k = dict(kw, **({"mode_selection": ms} if ms else {}))
                 ctx = (branch_form() if var.startswith("branch") else
                        ideal_form() if var.startswith("ideal") else contextlib.nullcontext())
                 rf, rfn = (iref, iref_name) if var.startswith("ideal") else (ref, ref_name)
@@ -212,7 +215,7 @@ def render(recs):
          "`REFERENCE_STATUS.md`). Variants: `branch` = every `add_switch` / `add_diode` in",
          "the branch form with the same values (`R_on = 1/g_on`, same `g_off`, design D6);",
          "`lcp` = `mode_selection='lcp'` (only where a PWL diode exists; `n/a` otherwise);",
-         "`branch+lcp` both. Comparison of each variant against `default` in the same",
+         "`branch+lcp` both; `auto` = `mode_selection='auto'` (every circuit). Comparison of each variant against `default` in the same",
          "configuration: `same` (same outcome and err_rms within 1 %), `better` / `worse`",
          "(outcome rank, else err_rms beyond 1 %), `refused` / `error` (the default ran).",
          "`agree` counts `unverified` (a suspect reference) too. The branch variant has",

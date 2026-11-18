@@ -184,6 +184,10 @@ def test_a_decimated_pulse_interval_moves_no_row():
     from pulsim._result_views import _reinit_step_starts
     _, r = _caploop_closing(1e-6, store_every=4)
     assert r.reinit_records
+    t = np.asarray(r.times)
+    # the case under test: a stored pulse sample whose interval spans earlier steps
+    assert any(0 < rec.sample < t.size and t[rec.sample - 1] < rec.t - 0.5e-6
+               for rec in r.reinit_records)
     x = np.asarray(r.states)
     st, _ = _reinit_step_starts(r, x, None)
     assert st is x

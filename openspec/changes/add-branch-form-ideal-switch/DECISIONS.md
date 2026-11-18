@@ -339,7 +339,7 @@ Each entry: question → option taken → evidence → how to reverse.
 
 ## TR-BDF2 track 6 (feat/core-p2-trbdf2)
 
-24. **The DCM grind: one filtered SDIRK step after a turn-off (linear
+35. **The DCM grind: one filtered SDIRK step after a turn-off (linear
     circuits).** Question: 1,806 accepted steps below 1e-11 s on the DCM
     buck (400 periods) followed each diode turn-off. Cause, from the trace:
     the step after the turn-off was retried at the pre-event h (2.8e-8 s)
@@ -418,7 +418,7 @@ Each entry: question → option taken → evidence → how to reverse.
     spread 4.7e-8, 4,212 accepted and 800 sub-1e-11 intervals in every run.
     → Reverse: `sdirk_after_turn_off = false`.
 
-25. **A tick at a gate edge fires before the edge probe is committed, and
+36. **A tick at a gate edge fires before the edge probe is committed, and
     the pulse cap follows the recent pulses.** (a) `restart_after_gate_event`
     refused the commit when a tick was due within the probe, and a closed
     loop's period start is a tick: no post-edge sample at 0 of 199 rising
@@ -460,7 +460,7 @@ Each entry: question → option taken → evidence → how to reverse.
     (2.4e-3 at rtol 1e-5, 5.6e-4 at 1e-6): a global-error question of
     the Newton path, not of ticks or caps.
 
-26. **Reviewer leftovers of step 3.** (a) The no-flip branch of the
+37. **Reviewer leftovers of step 3.** (a) The no-flip branch of the
     chatter-safe cascade reset x_sig to the committed x. When an earlier
     cascade at the same t (a gate edge) had decided the bits on its probe,
     x was solved under the bits before that cascade (the stale reference
@@ -474,7 +474,7 @@ Each entry: question → option taken → evidence → how to reverse.
     landing (no solve at dt_land) takes its noise bound on the bracket
     end's step if the dt_land factor is singular, instead of aborting.
 
-27. **An ON diode's noise floor reads v_D, not its common mode** (batch 11
+38. **An ON diode's noise floor reads v_D, not its common mode** (batch 11
     review, finding 4). The leakage-scale floor of item 18 was
     g_off/g_on (1 + |V_th| + |V_f| + |v_a| + |v_k|): a diode floating at
     10 kV had a floor of 2e-8 V, i.e. a 2e-5 A reverse current taken for
@@ -486,8 +486,10 @@ Each entry: question → option taken → evidence → how to reverse.
     trace there was wrong yet; the floor was only waiting for a slower
     crossing. The common-mode-free runs are unchanged (golden, baseline).
 
-<!-- The TR-BDF2 track and this branch both numbered #24-#27 in parallel; the
-     sections name their branch, and this branch's references are #24-#34 below. -->
+<!-- The TR-BDF2 track and this branch both numbered #24-#27 in parallel. The
+     TR-BDF2 track 6 entries above are renumbered #35-#38 (ideal switch 6; nothing
+     outside this file cited them); #24-#34 below keep their numbers (code cites
+     them), and later entries continue from #39. -->
 
 ## Ideal switch 4 (feat/core-a-ideal-switch, 2026-11-18)
 
@@ -748,3 +750,68 @@ Each entry: question → option taken → evidence → how to reverse.
     wall ratio ideal / default 1.05–1.11 on pwl, 1.05 on trbdf2;
     ideal+lcp 1.40–1.66 (loaded machine, one run per cell).
     Migration audit for 9.1–9.3: `MIGRATION_AUDIT.md` (no default flipped).
+
+## Ideal switch 6 (feat/core-a-ideal-switch, 2026-11-18)
+
+39. **Design D6 against the code: `form=` on every creator, no new
+    numeric defaults.** Question: D6 row 1 assumed `add_switch(name, a, b)`
+    defaults `g_on = 1e3`, `g_off = 1e-9`; they are required (migration
+    audit F2), so a flip has no "default conductances" to convert, and
+    nobody could pin today's numbers through a helper (F3). Decision:
+    `form='conductance' | 'branch'` (default `'conductance'`, bit-identical)
+    on `add_switch`, `add_mosfet`, `add_mosfet_with_body_diode`, `add_igbt`,
+    `add_mosfet_level1`, `add_igbt_level1` (body / freewheel diode),
+    `add_bridge_rectifier`, `add_three_phase_vsi`, `add_buck`, `add_boost`,
+    `add_flyback` and YAML `form:` on the matching types. The conductance
+    form keeps `g_on`/`g_off` required; the branch form reads `R_on` (else
+    `1/g_on`, else 0 = ideal) and `g_off` (else 0) — so after the flip a
+    call that gives `g_on` maps to `R_on = 1/g_on` (D6 row 2) and a call
+    that gives nothing is the ideal element. A helper's resistance
+    parameters map as written (`R_on`, `g_off = 1/R_off`, body diode
+    `R_on = 1/g_on_diode`; `g_on = inf` is the ideal element). Gated
+    devices (reverse-blocking IGBT, thyristor, GTO, TRIAC) have no branch
+    form (`kBranchFormCaps`): `add_igbt(form='branch', reverse_blocking=True)`
+    is refused by name and the others take no `form=`. The C++ builder
+    helpers take `form` as a trailing parameter; `add_switch`/`add_diode`
+    themselves stay conductance in C++ (`add_ideal_switch` /
+    `add_diode_branch` are the C++ branch spellings). The circuit IR needs
+    nothing: it hashes the pool's branch form per branch (test added for
+    a switch and a MOSFET). `add_three_phase_vsi(R_on=0)` (and `R_d=0`,
+    `R_off<=0`) silently became 1 mOhm / 1 nS: now refused under the
+    conductance form, passed through under the branch form (BREAKING,
+    CHANGELOG). → Reverse: drop the keyword (no caller outside the
+    tests uses it yet).
+
+40. **Passivity gate of the 'lcp' fast paths (review of slice 5): not
+    fixed here, needs a loop edit.** The cached and quiet-with-ideal-ON
+    paths are Lemke's answer only on a positive semidefinite port matrix;
+    `passivity_of` names VCVS and negative R/C/L but reads VCCS / CCCS /
+    CCVS and a non-PSD inductor coupling as passive. Widening
+    `passivity_of` was tried and reverted: run_transient copies the same
+    flag into `ModeSelector::passive`, which also decides the D3
+    enumeration of the DEFAULT guard (`mode_selector.hpp:626`), so the
+    default would change on those circuits. The edit: run_transient keeps
+    two flags — the narrow class for the selector, the wide one (the four
+    kinds plus an eigenvalue test of one inductance matrix over every
+    coupled winding) for the fast paths at `run_transient.hpp:1015/1026`.
+    Also corrected: "passive ⇒ one LCP solution" is false — a PSD matrix
+    gives a unique *strictly complementary* solution, not a unique
+    solution (parallel ideal diodes, Z_jj = 0 have several); the comment
+    at `run_transient.hpp:~980` says otherwise. The reviewer's two loop
+    findings (the multi-port loop search runs on a non-passive
+    enumeration that found no mode; it can name a loop for ports at zero
+    bias) need loop edits too: migration audit 6b.
+
+41. **DC operating point with a closed ideal switch in a voltage loop.**
+    The ideal twins of ll10 / ll15 failed with a bare `RuntimeError` after
+    a solve of 1.2e13 A: their switch is closed at t = 0 in a loop of the
+    source and inductors (shorts at DC), which has no DC solution (its
+    conductance twin "solved" it at 24 kA through 1 mOhm). The structural
+    loop check now takes the starting mask and treats a closed branch-form
+    switch with R_on = 0 as a 0 V branch: refused by name
+    (`feature='ideal_voltage_loop'`, the loop listed). Diodes are left out
+    on purpose: their DC bit is a trial of the diode iteration, which turns
+    a reverse-biased ideal diode in such a loop OFF; flagging it would
+    refuse a solvable point. Without such a loop the DC system with branch
+    unknowns is solved as before. → Reverse: the `mask` argument of
+    `find_dc_voltage_loop`.

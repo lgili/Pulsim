@@ -235,3 +235,100 @@ circuits on pwl. They need a re-run, not a rewrite **(inferred)**.
    not decided in D6. D7 says the AC sweep supports the branch form, but
    `mna_sweep.hpp:85` refuses it; whether the Python `run_ac_sweep` reaches that
    code was not checked.
+
+## 6. Status after ideal switch 6 (2026-11-18, no default flipped)
+
+| Item | Status | Where |
+|---|---|---|
+| F3 / risk 3: no `form=` on switches and helpers | **Closed.** `form=` on `add_switch`, `add_mosfet`, `add_mosfet_with_body_diode`, `add_igbt`, `add_mosfet_level1`, `add_igbt_level1`, `add_bridge_rectifier`, `add_three_phase_vsi`, `add_buck`, `add_boost`, `add_flyback`, and the matching YAML types. Default `'conductance'` unchanged. A gated diode (`add_igbt(reverse_blocking=True)`) has no branch form and is refused by name. | DECISIONS #39; `python/tests/test_form_keyword.py` |
+| Risk 4 (second half): VSI `R_on = 0` became 1 mOhm | **Closed (BREAKING).** Conductance refuses `R_on <= 0` / `R_d <= 0` by name; `form='branch'` takes the ideal value. | CHANGELOG |
+| F2: D6 assumes `g_on`/`g_off` defaults | **Resolved in D6.** Conductance keeps them required; `add_switch(..., form='branch')` with no values is the ideal element; with values, `R_on = 1/g_on`. | DECISIONS #39 |
+| F5 / risk 2: a literal `'lcp'` default raises | **Mitigated, not flipped.** `mode_selection='auto'`: `'lcp'` where it applies, the settle with a recorded reason where `'lcp'` would refuse (`diagnostics['mode_selection_auto']`). Bit-identical to `'lcp'` where `'lcp'` runs. A mid-run `'lcp'` failure is not caught (needs a loop edit). | complementarity DECISIONS F5; `python/tests/test_mode_auto.py` |
+| Ideal DC point of ll10 / ll15 | **Refused by name** (`feature = "ideal_voltage_loop"`): a closed `R_on = 0` switch closes a loop of fixed voltages with a nonzero sum (-12 V, -220 V). The circuit has no DC solution; this is not a solver gap. | DECISIONS #41 |
+| Risk 1 (dsed refuses the branch form) | Open (task 8). | |
+| Risk 4 (first half: thermal summary skips ideal elements) | Open. | `thermal.py:866`, `:908` |
+
+### 6a. The "worse" ideal-twin cells, classified
+
+101 cells were `worse` under `ideal` / `ideal+lcp` in the slice-5 evidence.
+Each was re-run with two references: R1 = trbdf2 rtol 1e-8 (the harness one),
+R2 = pwl dt/16 with `discontinuity_restart`. Rule: `e(R2, R1) > tol/2` →
+**reference**; else the cell's error falls with dt (`e(dt/4) <= max(e(dt)/2.5, tol/4)`)
+→ **circuit** (a sharper circuit, first-order at its edges); else **engine**.
+Probes: `probes/worse_cells.py` (the 101 cells from the slice-5 evidence
+JSON, `.out`), `probes/classify_worse_cells.py` (the 27 cells that are not
+agree → agree, `.out`), `probes/ron_limit_probe.py` (the R_on → 0 limit).
+The 74 agree → agree cells are counted as circuit by their err ratio.
+
+| configuration | variant | circuit | reference | engine |
+|---|---|---:|---:|---:|
+| pwl | ideal | 13 | 3 | 0 |
+| pwl | ideal+lcp | 7 | 1 | 0 |
+| pwl+restart | ideal | 18 | 4 | 0 |
+| pwl+restart | ideal+lcp | 13 | 2 | 0 |
+| pwl+split | ideal | 15 | 4 | 0 |
+| pwl+split | ideal+lcp | 10 | 2 | 0 |
+| trbdf2 | ideal | 7 | 0 | 1 (TR-BDF2 track) |
+| dsed | ideal | 1 (ll15, now refused by name) | 0 | 0 |
+| **total** | | **84** | **16** | **1** |
+
+- 74 of the 101 stay `agree`; they are `worse` only by the 1 % err rule
+  (median err ratio 1.057).
+- `boost_switching_complex` (restart / split, err 0.021 vs tol 0.02):
+  reference/metric. `compare(R2, R1) = 0.030` but `compare(R1, R2) = 0.0023`
+  (the metric interpolates the edges of the side under test). The R_on → 0
+  limit (trbdf2, R_on = 1e-5) is within 8e-4 of both references.
+- `ll07_boost_vcswitch`: reference. trbdf2-ideal is 13 % from the R_on → 0
+  limit; pwl-ideal is within 2.9 %. The one **engine** cell is trbdf2-ideal on
+  this circuit (dependent states at an ideal edge): TR-BDF2 track.
+- `flyback_converter`, `flying_capacitor_3level`, `t_type`: reference
+  (`e_ref` 0.038 / 0.0127 / 0.025 > tol/2; the default already disagrees).
+- `synchronous_flyback`, `mmc`: circuit (first-order convergence
+  0.209 → 0.128, 0.027 → 0.0137, as the default).
+- No pwl engine defect was found.
+
+### 6b. Loop edits needed (not made: `run_transient.hpp` / `trbdf2_transient.hpp` are frozen in this slice)
+
+| # | File:line | Edit |
+|---|---|---|
+| L1 | `run_transient.hpp:~1086` | Gate the multi-port loop search on `mode_selector.passive` (it runs on a non-passive enumeration with 0 modes). |
+| L2 | `run_transient.hpp:~1090-1094` | Throw only when the loop's net voltage exceeds `tol_w`; at zero bias the search can mis-name ports. |
+| L3 | `run_transient.hpp:~980-984` | Comment: passivity (PSD) gives a unique *strictly complementary* solution, not a unique solution (DECISIONS #40). |
+| L4 | `mode_lcp_site` (run_transient) | `'auto'` per-site fallback: on a mid-run Lemke failure, settle that site and record it, instead of raising. |
+| L5 | `ReinitRecord` (`result.hpp`) + the pulse step in run_transient | Record the pulse step's start (or post-jump) state, so the energy partition is exact under `store_every > 1` and across a diode split. Post-processing cannot recover it: the record has no pre/post state. |
+| L7 | `run_transient.hpp:~853` | Two passivity flags: the narrow class for `ModeSelector::passive` (it also decides the DEFAULT guard's D3 enumeration), a wide one (VCCS / CCCS / CCVS, non-PSD coupled inductors) for the `'lcp'` fast paths at `:1015` / `:1026`. Widening `passivity_of` alone changes the default (tried, reverted; DECISIONS #40). |
+| L6 | `trbdf2_transient.hpp` | Set `ModeSelector::passive` (TR-BDF2 track); document that `drop_superseded_event_sample` can skip a row. |
+
+### 6c. Before the flip (ordered)
+
+1. Task 8: the branch form on dsed / exact (risk 1; 54 of 109 circuits).
+2. Loop edits L7 (passivity of the fast paths), L1, L2, L4 (the `'auto'`
+   mid-run fallback), then L5.
+3. `'lcp'` cost in the tie band: `correct()` no longer builds the port
+   matrix (F6); a Lemke warm start and a reuse of Z's factorization remain
+   (branch+lcp median wall ratio ~7× in the evidence; target <= 1.2×).
+4. TR-BDF2 hook 4.2 (`'lcp'` on trbdf2) and the ll07 trbdf2-ideal defect.
+5. Thermal summary: report ideal elements or warn (risk 4).
+6. Re-baseline the reference set with references that converge on ideal
+   circuits (the 16 reference cells), and a symmetric edge metric.
+7. Then 9.1-9.3 of both proposals.
+
+### 6d. `mode_selection='auto'` on the reference set (109 circuits)
+
+`ideal_switch_flip_evidence.py --variants default,auto` on this tree
+(2026-11-18). `auto` against `default`, same configuration:
+
+| configuration | agree | disagree | error | refused | better | same | worse | newly refused / error |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| pwl | 81 | 27 | 1 | 0 | 0 | 109 | 0 | 0 |
+| pwl+restart | 87 | 21 | 1 | 0 | 0 | 109 | 0 | 0 |
+| pwl+split | 89 | 19 | 1 | 0 | 0 | 109 | 0 | 0 |
+| trbdf2 | 103 | 5 | 1 | 0 | 0 | 109 | 0 | 0 |
+| dsed | 97 | 0 | 0 | 12 | 1 | 108 | 0 | 0 |
+
+No cell worse, none newly refused. The dsed `better` is
+`flyback_converter` (err 2.72e-6 → 2.69e-6, both agree: the 1 % rule). `benchmarks/IDEAL_SWITCH_FLIP_EVIDENCE.md`
+is not regenerated here: its other variants were measured before the
+TR-BDF2 track merged (its `default` rows moved since: ll16 now runs on
+pwl and trbdf2), so a merged table would mix two trees. Regenerate all
+variants in one run before the flip.

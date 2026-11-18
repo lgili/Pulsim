@@ -59,7 +59,7 @@ Reference values (all from `probes/lcp_cases.out` unless stated).
 - [ ] 4b.3 Same guard on pwl / trbdf2 (needs the 4.2 hooks) Slice 4: pwl done — breach-only (a converged settle is consistent with its own solve); repairs on the floating V_f = 0 bridge only, end value unchanged (DECISIONS F3); consistent runs bit-identical. TR-BDF2 remains. Slice 5: the guard's own mask cycles and rounds reach `mode_guard.lcp`
 
 ## 9. Default flip (in the single number-changing release)
-- [ ] 9.1 Default `mode_selection='lcp'` on every engine; `'legacy'` warns
+- [ ] 9.1 Default `mode_selection='lcp'` on every engine; `'legacy'` warns Slice 6: the value to flip to is `mode_selection='auto'` ('lcp' where it applies, the settle with a recorded reason elsewhere; DECISIONS F5), not the default yet
 - [ ] 9.2 Re-baseline through the reference harness; every changed number listed in the CHANGELOG with its cause
 - [ ] 9.3 One release later: delete the settle loops, caps and chatter guards; `'legacy'` refused
 

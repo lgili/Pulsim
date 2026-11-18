@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Ideal switch 6: `form=` on every switch / diode creator, `mode_selection='auto'` (no default flipped)
+
+* **Added** `form='conductance' | 'branch'` (default `'conductance'`,
+  unchanged numbers) on `add_switch`, `add_mosfet`,
+  `add_mosfet_with_body_diode`, `add_igbt` (not with
+  `reverse_blocking=True`: a gated diode has no branch form),
+  `add_mosfet_level1` / `add_igbt_level1` (their body / freewheel diode),
+  `add_bridge_rectifier`, `add_three_phase_vsi`, `add_buck`, `add_boost`,
+  `add_flyback`, and as `form:` on the YAML types `mosfet`,
+  `mosfet_with_body_diode`, `igbt`, `mosfet_level1`, `igbt_level1`.
+  `add_switch(form='branch')` takes `R_on` (default 0, the ideal switch;
+  a given `g_on` means `R_on = 1/g_on`) and `g_off` (default 0): the same
+  element as `add_ideal_switch`. A misspelt form is refused by name.
+* **BREAKING** `add_three_phase_vsi(R_on=0)` (or `R_d=0`) used to become
+  1 mOhm silently; it now raises (the conductance form needs a positive
+  resistance) unless `form='branch'`, where 0 is the ideal element.
+  `R_off <= 0` (which silently became 1 nS) is refused too.
+* **Added** `simulate(mode_selection='auto')`: `'lcp'` wherever it
+  applies, the legacy settle where `'lcp'` would refuse (no PWL diode, a
+  gated device, a Newton device, `engine='trbdf2'`, `sensitivities=`,
+  `max_event_iterations=0`); the choice and reason in
+  `result.diagnostics['mode_selection_auto']`, a warning only for
+  `max_event_iterations=0`. A failure of `'lcp'` during the run is not
+  caught. Not the default.
+* **Changed** the DC operating point of a circuit whose ideal
+  (`R_on = 0`) switch is closed at the start in a loop of voltage sources
+  and inductors is refused by name (`UnsupportedError`,
+  `feature='ideal_voltage_loop'`, the loop listed); it was a bare
+  `RuntimeError` after a solve of 1e13 A.
+
 ### Integration batch 12: unified device interface 1–3, in-kernel event losses, IR scopes, TR-BDF2 track 6, event queue, control graph 4, PWL IGBT / thyristor, exact engine session 6 merged
 
 * **Fixed** `periodic_steady_state` by shooting ran a thyristor / TRIAC

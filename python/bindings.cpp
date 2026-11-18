@@ -60,6 +60,7 @@
 #include "pulsim/solver/voltage_sanity.hpp"
 #include "pulsim/mmc/thevenin_arm.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/mode_ports.hpp"
 #include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
@@ -285,6 +286,14 @@ void init_module(py::module_& m) {
         "The gated PWL devices' engine column (add-pwl-igbt-and-"
         "thyristor): {'GateHeld'|'Latching': {engine: bool}}; False "
         "refuses with UnsupportedError(feature='gated_diode').");
+    m.def("_lcp_circuit_refusal",
+        [](const topology::Graph& graph, const pwl::DevicePool& pool) {
+            const auto r = pwl::lcp_circuit_refusal(graph, pool);
+            return py::make_tuple(r.reason, r.device);
+        },
+        "(reason, device): why mode_selection='lcp' refuses this circuit on "
+        "pwl — '' (it applies), 'no_diodes', 'gated', 'newton'. Read by "
+        "mode_selection='auto'.");
     m.def("_require_supported",
         [](const topology::Graph& graph, const pwl::DevicePool& pool,
            const std::string& engine_in) {
@@ -1043,6 +1052,7 @@ void init_module(py::module_& m) {
               py::arg("tau_tail") = 0.0,
               py::arg("k_tail")   = 0.0,
               py::arg("V_F")      = 0.7,
+              py::kw_only(), py::arg("form") = "conductance",
               py::return_value_policy::reference,
               "Add a 3-terminal IGBT Level 1 (linear-"
               "conduction model with cutoff sigmoid). "
@@ -1083,6 +1093,7 @@ void init_module(py::module_& m) {
               py::arg("kappa")   = 15.0,
               py::arg("with_body_diode") = true,
               py::arg("V_F") = 0.7,
+              py::kw_only(), py::arg("form") = "conductance",
               py::return_value_policy::reference,
               "Add a 3-terminal SH1 MOSFET (Shichman-Hodges "
               "Level 1). Cutoff/triode/saturation regions "
@@ -1311,13 +1322,45 @@ void init_module(py::module_& m) {
               "g_off >= 0 in parallel when open (0 = ideal). Engines and "
               "refusals: the capability table (add-branch-form-ideal-switch).")
         .def("add_switch",
-              &builder::CircuitBuilder::add_switch,
+              [](builder::CircuitBuilder& self, std::string_view name,
+                 std::string_view n_pos, std::string_view n_neg,
+                 std::optional<double> g_on, std::optional<double> g_off,
+                 std::string_view form,
+                 std::optional<double> R_on) -> builder::CircuitBuilder& {
+                  // add-branch-form-ideal-switch D6: as add_diode — the
+                  // branch form takes R_on (else 1/g_on, else 0) and g_off
+                  // (else 0); the conductance form needs g_on and g_off.
+                  if (form == "branch") {
+                      const double r = R_on ? *R_on
+                                     : g_on ? 1.0 / *g_on : 0.0;
+                      return self.add_ideal_switch(name, n_pos, n_neg, r,
+                                                   g_off.value_or(0.0));
+                  }
+                  if (form != "conductance") {
+                      throw py::value_error(std::format(
+                          "add_switch(\"{}\"): form='{}'; expected "
+                          "'conductance' or 'branch'.", name, form));
+                  }
+                  if (!g_on || !g_off || R_on) {
+                      throw py::value_error(std::format(
+                          "add_switch(\"{}\"): the conductance form takes g_on "
+                          "and g_off (R_on is the branch form's: "
+                          "form='branch').", name));
+                  }
+                  return self.add_switch(name, n_pos, n_neg, *g_on, *g_off);
+              },
               py::arg("name"), py::arg("n_pos"),
-              py::arg("n_neg"), py::arg("g_on"),
-              py::arg("g_off"),
+              py::arg("n_neg"), py::arg("g_on") = py::none(),
+              py::arg("g_off") = py::none(), py::kw_only(),
+              py::arg("form") = "conductance",
+              py::arg("R_on") = py::none(),
               py::return_value_policy::reference,
-              "Add a controlled switch (driven by switch_fn "
-              "at simulation time).")
+              "Add a controlled switch (driven by switch_fn at simulation "
+              "time). form='conductance' (default): g_on/g_off in siemens, "
+              "both required. form='branch': its own current unknown, "
+              "R_on >= 0 in series when closed (default 0 = ideal; a given "
+              "g_on means R_on = 1/g_on), g_off >= 0 when open (default 0) "
+              "— the same element as add_ideal_switch.")
         // ---- Layer 2 V1: power-device helpers ----
         .def("add_mosfet",
               &builder::CircuitBuilder::add_mosfet,
@@ -1327,6 +1370,7 @@ void init_module(py::module_& m) {
               py::arg("R_off") = 1e9,
               py::arg("body_diode") = true,
               py::arg("V_F") = 0.7,
+              py::kw_only(), py::arg("form") = "conductance",
               py::return_value_policy::reference,
               "Add an n-channel power MOSFET: a controlled "
               "switch (drain → source) PLUS its intrinsic "
@@ -1351,6 +1395,7 @@ void init_module(py::module_& m) {
               py::arg("V_F") = 0.7,
               py::arg("g_on_diode") = 1e3,
               py::arg("g_off_diode") = 1e-9,
+              py::kw_only(), py::arg("form") = "conductance",
               py::return_value_policy::reference,
               "Add an n-channel power MOSFET WITH "
               "intrinsic anti-parallel body diode. Adds "
@@ -1402,7 +1447,7 @@ void init_module(py::module_& m) {
                  std::string_view collector, std::string_view emitter,
                  double R_on, double R_off, double V_ce0,
                  std::optional<bool> reverse_blocking,
-                 double V_th) -> builder::CircuitBuilder& {
+                 double V_th, std::string_view form) -> builder::CircuitBuilder& {
                   // add-pwl-igbt-and-thyristor stage 1: the default stays
                   // the bidirectional switch for one release, with a
                   // warning (a knee implies reverse blocking).
@@ -1420,7 +1465,7 @@ void init_module(py::module_& m) {
                   return self.add_igbt(name, collector, emitter, R_on, R_off,
                                        V_ce0,
                                        reverse_blocking.value_or(V_ce0 > 0.0),
-                                       V_th);
+                                       V_th, form);
               },
               py::arg("name"), py::arg("collector"),
               py::arg("emitter"),
@@ -1430,6 +1475,7 @@ void init_module(py::module_& m) {
               py::arg("V_ce0") = 0.0,
               py::arg("reverse_blocking") = py::none(),
               py::arg("V_th") = 0.0,
+              py::arg("form") = "conductance",
               py::return_value_policy::reference,
               "Add a PWL IGBT (collector → emitter), its mask bit the "
               "gate. reverse_blocking=True: ON while the gate is on and "

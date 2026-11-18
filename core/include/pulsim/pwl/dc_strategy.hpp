@@ -542,7 +542,7 @@ namespace detail {
     const GminConfig& gmin_cfg = {},
     DCSolveReport* report = nullptr) {
     // Before any rung: each catches std::exception to try the next.
-    require_no_dc_voltage_loop(graph, pool, t_eval, "dc");
+    require_no_dc_voltage_loop(graph, pool, t_eval, "dc", &mask);
 
     auto stamp_report = [&](DCStrategy s, Size rungs, Real gmin) {
         if (report != nullptr) {
