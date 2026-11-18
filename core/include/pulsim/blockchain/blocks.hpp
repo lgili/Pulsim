@@ -38,6 +38,18 @@
 
 namespace pulsim::blockchain {
 
+// Python's min / max keep their argument order (min(a, b) returns b only
+// if b < a), so `py_exact::clamp(lo, hi, u)` is `max(lo, min(hi, u))` bit
+// for bit: NaN -> hi, -0.0 as Python keeps it, lo > hi defined (the
+// standard clamp is undefined there and passes NaN through).
+namespace py_exact {
+[[nodiscard]] inline Real min(Real a, Real b) noexcept { return b < a ? b : a; }
+[[nodiscard]] inline Real max(Real a, Real b) noexcept { return b > a ? b : a; }
+[[nodiscard]] inline Real clamp(Real lo, Real hi, Real u) noexcept {
+    return max(lo, min(hi, u));
+}
+}  // namespace py_exact
+
 // =============================================================================
 // 1. Math blocks
 // =============================================================================
@@ -138,7 +150,7 @@ struct PIController {
             new_int = integral;
             u_unc = Kp * err + new_int;
         }
-        const Real u_clamp = std::clamp(u_unc, output_min, output_max);
+        const Real u_clamp = py_exact::clamp(output_min, output_max, u_unc);
         integral = new_int;
         prev_error = err;
         return u_clamp;
@@ -184,7 +196,7 @@ struct PIDController {
         prev_meas = measured;
         first = false;
         const Real u_unsat = Kp * err + i_trial - Kd * d_raw;
-        const Real u_sat = std::clamp(u_unsat, output_min, output_max);
+        const Real u_sat = py_exact::clamp(output_min, output_max, u_unsat);
         if (u_unsat == u_sat || (u_unsat - u_sat) * err <= Real{0}) {
             integral = i_trial;
         }
@@ -201,7 +213,9 @@ struct FirstOrderLowPass {
     void reset() noexcept { y = Real{0}; }
 
     [[nodiscard]] Real update(Real input_value, Real dt) {
-        if (dt <= Real{0} || tau <= Real{0}) {
+        // As pulsim.control.FirstOrderLowPass: dt = 0 holds (alpha 0);
+        // it used to pass the input through.
+        if (tau <= Real{0}) {
             y = input_value;
             return y;
         }
@@ -246,7 +260,7 @@ struct Integrator {
 
     [[nodiscard]] Real update(Real x, Real dt) {
         const Real y_trial = y + gain * x * dt;
-        y = std::clamp(y_trial, output_min, output_max);
+        y = py_exact::clamp(output_min, output_max, y_trial);
         return y;
     }
 };
@@ -289,7 +303,7 @@ struct Limiter {
     void reset() noexcept {}
 
     [[nodiscard]] Real update(Real x) const noexcept {
-        return std::clamp(x, min_v, max_v);
+        return py_exact::clamp(min_v, max_v, x);
     }
 };
 
@@ -300,7 +314,7 @@ struct Limiter {
 /// PWM generator — sawtooth + duty comparator, output 0 / 1.
 struct PwmGenerator {
     Real frequency = Real{100e3};
-    Real phase = Real{0};
+    Real phase = Real{0};   // seconds, delay (was a fraction of the period, advance)
 
     void reset() noexcept {}
 
@@ -310,11 +324,9 @@ struct PwmGenerator {
             return (Real{0} < duty) ? Real{1} : Real{0};
         }
         const Real period = Real{1} / frequency;
-        // `phase` is a fraction of the period here; the period
-        // starts at t = -phase * period. Grid-exact edges (see
-        // pwm_phase.hpp).
-        const auto pos = pwm_phase::cycle_position(
-            t, -phase * period, period);
+        // `phase` in seconds with the sign of `pulsim.control.PwmGenerator`:
+        // a period starts at t = +phase. Grid-exact edges (pwm_phase.hpp).
+        const auto pos = pwm_phase::cycle_position(t, phase, period);
         return pwm_phase::reached(pos, duty) ? Real{0} : Real{1};
     }
 };
@@ -341,12 +353,12 @@ struct SpaceVectorModulator {
         const Real v_cm = -(v_max + v_min) * Real{0.5};
         const Real inv_dc = (v_dc > Real{0}) ? Real{1} / v_dc : Real{0};
         DutyTriple d;
-        d.da = std::clamp((va_ref + v_cm) * inv_dc + Real{0.5},
-                            Real{0}, Real{1});
-        d.db = std::clamp((vb_ref + v_cm) * inv_dc + Real{0.5},
-                            Real{0}, Real{1});
-        d.dc = std::clamp((vc_ref + v_cm) * inv_dc + Real{0.5},
-                            Real{0}, Real{1});
+        d.da = py_exact::clamp(Real{0}, Real{1},
+                            (va_ref + v_cm) * inv_dc + Real{0.5});
+        d.db = py_exact::clamp(Real{0}, Real{1},
+                            (vb_ref + v_cm) * inv_dc + Real{0.5});
+        d.dc = py_exact::clamp(Real{0}, Real{1},
+                            (vc_ref + v_cm) * inv_dc + Real{0.5});
         return d;
     }
 };

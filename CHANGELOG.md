@@ -93,6 +93,194 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   warning: ll13 now runs (it failed before), ll16 no longer starts from
   2.4e13 A.
 
+### Integration batch 8: control graph, optimisation slice 4 and circuit IR merged
+
+* **Fixed** (control graph review) `PIController`, `Limiter`,
+  `PIDController`, `Integrator` and the space-vector modulator of the
+  kernel clamped with `std::clamp`: NaN passed through, -0.0 kept its
+  sign and `lo > hi` was undefined. They now compute Python's
+  `max(lo, min(hi, u))` operation for operation (NaN -> hi). A block with
+  `output_min > output_max` (`rail_min > rail_max` for `OpAmp`) is
+  refused at build time, naming the block (`ControlGraphBuildError`).
+* **Fixed** a `PythonBlock` returning the wrong number of values was
+  retried as a step failure and surfaced as `SimulationAborted`; it is a
+  `ValueError` from `simulate()`.
+* **Added** `PythonBlock.reset()` forwards to the wrapped object's
+  `reset` (`MixedDomainBlockChain.reset()` reaches it).
+* **Changed (BREAKING)** `CxxBlockChain.add_pwm_generator(phase=)` and
+  `CxxPwmGenerator.phase` read seconds, a delay, as
+  `PwmGenerator(phase=)` does (they read an advance in periods).
+  **Migration:** `add_pwm_generator(f, x, ...)` becomes
+  `add_pwm_generator(f, phase_fraction=x, ...)` (same numbers, bit for
+  bit) or `phase=-x / f`; `duty`, `t`, `output` are keyword-only.
+* **Fixed** (circuit IR x ideal switch) a branch-form switch or diode
+  kept its `R_on` beside the pool's `g_on`: `with_value("S.R_on", ...)`
+  changed a `g_on` the branch law does not read, and the diode's `R_on`
+  was unreachable. `with_value` / `set_value` / `get_value` now read and
+  write `R_on` and `g_off` of a branch-form element (0 allowed, as
+  `add_ideal_switch` allows it); `g_on` / `R_off` are refused by name; a
+  parameter cannot drive a branch-form `R_on` / `g_off` yet (refused by
+  name). The branch form is part of `structure_hash()` (with
+  `R_on == 0` / `g_off == 0`), its `R_on` of `value_hash()`; a
+  conductance-form circuit hashes as before.
+* **Fixed** (optimisation x control graph) a gate that follows a
+  controller (`bind_pi_to_switch`, `bind_pi_to_duty_callable`'s
+  `duty_get` in a hand-written gate, a control graph's
+  `make_pwm_switch_fn`) and a control graph's `drive_source` reached
+  `periodic_steady_state` (every engine) and the design `Evaluator`,
+  which run no controller: the result was the plant's orbit under a
+  frozen duty (or a source at 0). Refused by name
+  (`UnsupportedError`, `feature='closed_loop'`). `sweep(circuit,
+  parallel=True)` with a `step_observer` or a closed-loop gate is
+  refused (the threads would share one controller). The pwl shooting
+  refuses `options` that switch off the restart rule or event splitting.
+* CI: an `examples-guard` job runs the slow examples guard
+  (`PULSIM_RUN_EXAMPLES=1`) against the installed wheel; the guard's
+  subprocesses import the parent's pulsim.
+
+### Periodic steady state on the fixed and TR-BDF2 engines
+
+* **Added** `periodic_steady_state(..., engine='pwl' | 'trbdf2', dt=,
+  options=)`: Newton shooting on the true state (capacitor voltages,
+  inductor currents) with that engine's own period runs (the fixed
+  engine with `discontinuity_restart` and event splitting, so a period
+  starts from the true state alone), `M` by finite differences with
+  Broyden updates. The orbit is the one the engine's own transient
+  reaches: 1.2e-11 (`pwl`) and 2.6e-9 (`trbdf2`) of the state scale
+  from a 4000-period transient on the DCM buck; 12 period runs from zero
+  on `pwl`. `result.full_state` is the engine's MNA vector at the
+  section. `pwl` needs a gate edge at `t = 0`, `trbdf2` an edge oracle;
+  nonlinear devices and `sensitivities=` are refused by name.
+  `periodic_steady_state_supported(..., engine=)` answers per engine.
+* **Changed** `run_periodic_shooting` and `run_harmonic_balance` are
+  deprecated delegates (`DeprecationWarning`): the DCM buck now reads
+  8.996246 V instead of 8.8998 V (−1.07 %); `b_extra_fn` and
+  `step_observer` are refused by name; a non-convergence returns
+  `converged=False` with an all-NaN `x_steady_state` and the reason in
+  `message`, not the last iterate.
+* **Changed** `Evaluator(engine='pwl' | 'trbdf2',
+  steady=SteadySpec('pss'))` is accepted (it raised `ValueError`):
+  `counters["route"] == "pss/pwl"`; `method='auto'` is unchanged.
+
+### The Newton shooting loop in the kernel
+
+* **Added** `pulsim._pulsim.dsed_periodic_orbit` (header
+  `core/include/pulsim/dsed/periodic_orbit.hpp`): the whole Newton
+  shooting of `periodic_steady_state` (scaled-norm residual, Armijo
+  backtracking, relaxation rounds, stop on the Newton step, period-run
+  budget, singular `I − M`, multipliers on the unit circle, the
+  verification period with the caller's integrals) in one call with the
+  GIL released. Every non-converged outcome is a status the wrapper
+  turns into the same `ConvergenceError` as before; a NaN period is
+  never accepted.
+* **Changed** `periodic_steady_state` runs on it for DC sources (a sine
+  `b(t)` keeps the Python loop). Same orbit (within 2e-14 of the state
+  scale), same period-run, step and iteration counts on the CCM/DCM
+  buck and the CCM/DCM boost; `counters["pss_loop"]` and
+  `counters["pss_iterations"]` name the route in an evaluation record.
+  An exception raised by a Python gate schedule inside a period run now
+  propagates as itself instead of becoming "a period run failed".
+* **Changed** the evaluator's per-evaluation Python: a datasheet loss
+  table's energies are read by its kernel copy (`LossTable.total`, bit
+  for bit `np.sum(table(v, i, tj))`), the provenance mapping is built
+  once per evaluator and records freeze scalars without an `abc`
+  check. Buck Pareto (64 designs, interleaved best of 5): 1354 → 2167
+  evaluations/s on one thread; threads still do not scale (see
+  DECISIONS 19 of add-design-optimization-workflow).
+
+### Compiled control graph, part 3: blocks (add-compiled-control-graph, 2026-11-13)
+
+* **Removed (BREAKING)** the Python evaluator of `MixedDomainBlockChain`
+  and its silent fallback: a block with no kernel implementation is a
+  `ControlGraphBuildError` naming `pulsim.PythonBlock(fn)` (new: runs a
+  callable in the graph, one Python call per evaluation);
+  `make_step_observer(use_kernel=False)` raises `DeprecationWarning`;
+  `MixedDomainBlockChain.update()` is gone.
+* **Added** kernel ports, bit-identical to their Python classes on 10^4
+  random inputs each: `Comparator`, `RateLimiter`, `SampleHold`,
+  `TransferFunction`, `StateMachine`, `OpAmp`, `SignalMux`,
+  `SignalDemux`, `LookupTable1D`, `MathBlock`, `MovingAverageFilter`,
+  `Differentiator`, `PIDController`, `Integrator`, `Sum`,
+  `FirstOrderLowPass`, `PwmGenerator`, `DelayBlock`. N-input blocks take
+  a tuple of sources (`inputs=dict(inputs=("channel:a", "vout"))`).
+* **Fixed (numbers change)** silent mapping defects of the kernel chain:
+  `PIDController` ran a different law (derivative on the measurement,
+  `tau_d = 0`); `Integrator` had no anti-windup hold (9559 of 10^4
+  inputs differed, up to 2.3e-2); `Sum` ignored its `weights` and a `c`
+  input; `FirstOrderLowPass` passed the input through at `dt = 0`; a
+  block's initial state (`integrator_state=`, `state=`) was ignored;
+  `PwmGenerator(phase=)` was read as a fraction of the period with the
+  opposite sign (the class: seconds), and `frequency <= 0` gave
+  `duty > 0` instead of 0; `record_channel` before `make_step_observer`
+  recorded nothing.
+* **Changed** `pulsim.control.Sum` and `TransferFunction` sum left to
+  right: the builtin `sum()` is compensated since Python 3.12, so the
+  classes gave a different last bit on 3.10/3.11 than on 3.12/3.13.
+* **Fixed** rate groups: `make_pwm_switch_fn` gates honour
+  `compute_delay`; a reused observer restarts its tick grid (it never
+  ticked again); a period below the fixed step and a `PwmGenerator`
+  inheriting a controller rate are `ControlGraphBuildError`s;
+  `controller_period=` with a rated chain is a `ValueError`; a driven
+  source's `b_extra` runs in C++ on `pwl` and `trbdf2` (it went through
+  a Python wrapper per call).
+* **Changed** the converter design notebooks drop `use_kernel=False`;
+  the FOC / motor examples and `wire_pmsm_foc` run their custom blocks
+  as kernel `Sum`s or `PythonBlock`s. Migration table in
+  [docs/control-graph.md](docs/control-graph.md).
+
+### Compiled control graph, part 2: rates (add-compiled-control-graph, 2026-11-13)
+
+* **Added** `pulsim.Rate(period, offset=0, compute_delay=0)` on a
+  `MixedDomainBlockChain` (`rate=` on the chain or per block) and
+  `drive_source(builder, signal, ("v", name, node))`. Each rate group
+  ticks at `t_start + offset + k*period` with an integer counter, on
+  `pwl` (at the tick's own state, `x(tau)`) and `trbdf2` (a landed step
+  per tick, called in C++); a stateless block inherits the fastest rate
+  feeding it, a stateful one without a rate is a build error.
+  `chain.tick_counts`; see [docs/control-graph.md](docs/control-graph.md).
+* **Added** `compute_delay`: `0`, a time (pwl), or `"one_sample"`.
+  A rate `offset` and a delay time are refused on `trbdf2`
+  (`UnsupportedError`, features `control_rate_offset`, `compute_delay`).
+* **Added** a driven source declares its tick instants
+  (`next_jump_after`): with `discontinuity_restart=True` the fixed
+  engine holds it exactly (discrete P loop `v[10]` error 6.1e-5 →
+  7.2e-9 at dt = 1 µs).
+* **Changed** the float time throttles of `control.py`'s duty observer
+  and `add_c_block` are integer tick counters (same ticks: the 3001
+  updates over 30 ms of `test_control_loop_truth.py` are unchanged).
+* **Fixed** `run_transient_with_chain` (the `pwl` path of every chain
+  observer) dropped a `b_extra_fn`'s `next_jump_after` and a native
+  schedule's edges, so `discontinuity_restart` never saw a declared
+  jump there (a 0→1 V step into an RC: 5.0e-4 → 2.5e-8 at dt = 1 µs).
+* **Fixed** (review) an empty channel name read and wrote slot -1 out of
+  bounds; a nameless node index -1 (ground) was refused; a failed block
+  add left its reads behind for the next block; `DelayBlock(samples<1)`
+  is a typed `ControlGraphBuildError` (a negative count was a
+  `TypeError` swallowed by the fallback); a YAML chain is compiled when
+  wired.
+
+### Compiled control graph, part 1 (add-compiled-control-graph, 2026-11-13)
+
+* **Changed (BREAKING where a chain relied on it)** a
+  `MixedDomainBlockChain` / `CxxBlockChain` no longer runs its blocks in
+  insertion order: they run in the topological order of the
+  direct-feedthrough graph (ties by insertion), so a block inserted
+  before the block that feeds it no longer reads last step's value (or
+  0 on the first step). The build warns once with every such pair; a
+  `DelayBlock` keeps a delay explicitly. Chains already in order are
+  bit-identical.
+* **Added** `pulsim.ControlGraphBuildError` (a `ValueError`): an
+  algebraic loop (named by its blocks), a block reading its own output,
+  a signal written by two blocks.
+* **Added** `DelayBlock` in the kernel chain (two-phase: it breaks a
+  loop).
+* **Fixed** a `Gain` reading a node and any `Limiter` made the C++ chain
+  build fail and the whole chain ran on the Python evaluator behind a
+  warning; both compile now (same numbers).
+* **Changed** signals are integer slots in the kernel chain (no string
+  hashing per step); `CxxBlockChain` gains `schedule()`, `reorders()`,
+  `n_evals`, `n_block_evals`.
+
 ### Process backend: a dead worker raises instead of hanging (integration batch 7)
 
 * **Fixed** `sweep(..., backend="process")` and
@@ -439,6 +627,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   committed step (an ideal CCM buck runs without the restart rule);
   `start_from_dc_op` checks the converged DC mode;
   `device_loss_summary` warns when it leaves out an ideal element.
+
+### Immutable circuit IR (add-immutable-circuit-ir, first slice)
+
+* **Added** `pulsim.Circuit`: `builder.build()` returns an immutable
+  snapshot — one shared pointer to read-only data, safe to share between
+  threads — whose lowered form is the builder's own graph and pool in
+  insertion order. `simulate(circuit, ...)` runs it bit-identically to
+  `simulate(builder, ...)` on `pwl`, `trbdf2` and `dsed`. Queries:
+  `devices()` (per branch: name, kind, pins, value fields), `nodes`,
+  `components()`, `initial_state()`, `state_var_names()`,
+  `switch_index_of()`, `structure_hash()`, `value_hash()`,
+  `to_builder()` (an independent mutable copy).
+* **Added** `builder.set_value("R1.R", 2.0)` / `get_value(...)`: every
+  value field of every device kind by name (the table is
+  `core/include/pulsim/ir/fields.hpp`); out-of-bound values and unknown
+  names raise `ValueError` naming the device and the field.
+* **BREAKING** `simulate()` and `compute_dc_op()` no longer change the
+  caller's builder. The topology preflight regularises the run's own
+  copy: its ties (1 GOhm per floating subnet) are in
+  `result.plan.ties`, the circuit that ran is `result.circuit`, and
+  the warning now says your builder is unchanged. Results are
+  bit-identical to before. **Migration:** code that relied on the ties
+  persisting (a second `simulate(..., auto_regularize=False)` on the
+  same builder, or reading `R_auto_iso_*` from it) gets the original
+  singular-matrix error; keep `auto_regularize=True`, add the tie
+  yourself, or run `result.circuit` / `circuit.with_ties(...)`.
+  `Circuit.with_preflight(options)` returns `(circuit, report, ties)`
+  without running.
+* **Added** named parameters and generic value updates
+  (docs/parameters.md): `p = builder.param("Lbase", 1e-3, "H", lo=,
+  hi=)` passed to any `add_*` in place of a number drives that field;
+  `circuit.with_params(Lbase=2e-3)` and `circuit.with_value("RL.R",
+  8.0)` return new circuits equal, bit for bit, to rebuilding (one
+  field of every device kind is tested), and leave the receiver
+  unchanged. Errors name the parameter, the device and the field.
+  Field updates are checked as `add_*` checks the device (cross-field
+  rules, fields the device's law does not read).
+* **Deprecated** `update_resistor_R`, `update_inductor_L`,
+  `update_capacitor_C`, `update_voltage_source_V`
+  (`DeprecationWarning`): use `circuit.with_value("R1.R", v)` or, in
+  place, `builder.set_value("R1.R", v)` — which also checks the bound.
+* **Changed** `builder.build()` refuses a builder carrying C blocks
+  (`UnsupportedError`; a Circuit cannot hold them yet — simulate the
+  builder); `simulate(circuit, mmc_arms=...)` asks for the builder.
+  Shockley loss/thermal parameters are read from the device's fields,
+  so `set_value("D1.I_S", ...)` reaches them.
+* **Added** `pulsim.sweep(circuit, params=...)` and
+  `pulsim.monte_carlo(circuit, distributions=...)`: a `pulsim.Circuit`
+  in place of the builder factory. Parameter names go through
+  `with_params`, `"device.field"` names through `with_value`; the
+  points share the circuit's symbolic analysis (one per sweep, where
+  the factory form does one per point: the 100-point ladder sweep runs
+  in 168 ms against 497 ms) and the results are bit-identical. With
+  `parallel=True` the points run on threads sharing the circuit;
+  `backend="process"` is refused (a Circuit does not pickle).
 
 ### Integration fixes (batch 6b: design optimisation, exact route)
 

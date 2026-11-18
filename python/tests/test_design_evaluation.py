@@ -249,6 +249,7 @@ def test_kernel_runtime_error_is_failed_and_other_errors_propagate(
         raise RuntimeError("did not settle after 64 rounds")
     monkeypatch.setattr(p, "simulate", aborted)
     monkeypatch.setattr(p._pulsim, "dsed_period_map", aborted)   # pss route
+    monkeypatch.setattr(p._pulsim, "dsed_periodic_orbit", aborted)
     rec = _ev().evaluate(CCM)
     assert rec.status == "failed"
     assert "did not settle" in rec.reason
@@ -257,6 +258,7 @@ def test_kernel_runtime_error_is_failed_and_other_errors_propagate(
         raise TypeError("a bug, not a design outcome")
     monkeypatch.setattr(p, "simulate", bug)
     monkeypatch.setattr(p._pulsim, "dsed_period_map", bug)
+    monkeypatch.setattr(p._pulsim, "dsed_periodic_orbit", bug)
     with pytest.raises(TypeError, match="a bug"):
         _ev().evaluate(CCM)
 
@@ -267,6 +269,7 @@ def test_not_implemented_and_recursion_errors_propagate(monkeypatch):
             raise exc("a stub or a bug")
         monkeypatch.setattr(p, "simulate", stub)
         monkeypatch.setattr(p._pulsim, "dsed_period_map", stub)
+        monkeypatch.setattr(p._pulsim, "dsed_periodic_orbit", stub)
         with pytest.raises(exc):
             _ev().evaluate(CCM)
 
@@ -327,8 +330,6 @@ def test_adapters_penalise_refused_and_failed_only(ccm):
 
 
 def test_bad_configuration_is_rejected_up_front():
-    with pytest.raises(ValueError, match="dsed exact stepper"):
-        Evaluator(buck, period=T, engine="pwl", steady=SteadySpec("pss"))
     with pytest.raises(ValueError, match="min_periods"):
         Evaluator(buck, period=T, steady=SteadySpec(min_periods=4))
     with pytest.raises(ValueError, match="name of a default KPI"):

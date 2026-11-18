@@ -250,7 +250,7 @@ def _frequency_response_exact(builder, period, switch_fn_of, output,
     ends = []
     for u in (u0 + du, u0 - du):
         sf = switch_fn_of(u)
-        _check_schedule(sf, period)
+        _check_schedule(sf, period, "frequency_response")
         if not (sf(0.0) == mask0):
             raise ValueError(
                 "frequency_response: the input moves the gate at the "

@@ -58,9 +58,10 @@ b.add_resistor ("R_L",  "vout", "sec_gnd", 10.0)
 > 1 GΩ tie and tells you exactly which node it anchored to (the
 > lowest-numbered node of the subnet — here `sec_gnd`, so the device
 > is called `R_auto_iso_sec_gnd`; which node carries the tie does not
-> matter, since all it does is fix the subnet's reference). Inspect it
-> with
-> `result._preflight`, or pass `auto_regularize=False` to get the
+> matter, since all it does is fix the subnet's reference). The tie
+> goes on the run's own copy of the circuit — your builder is not
+> changed. Inspect it with `result.plan.ties` (the circuit that ran is
+> `result.circuit`), or pass `auto_regularize=False` to get the
 > original named error instead.
 >
 > If you do write it by hand, make it **large**:

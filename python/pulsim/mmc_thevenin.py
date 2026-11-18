@@ -198,7 +198,8 @@ def make_mmc_thevenin_driver(arms, builder, cache, dt, state_size):
                 f"{n_on}, outside [0, n_sm={a.n_sm}]")
         r_eq, v_eq, changed = arm.pre_step(i_prev, n_on)
         if changed:
-            builder.update_resistor_R(a.name, r_eq)
+            # The run's own pool (the cache's) takes the value through
+            # refactor_parametric; the caller's builder is not touched.
             # Path refactor of the resident factors — O(etree
             # path), not a rebuild, and the reason a gating event
             # costs microseconds instead of a refactorisation.

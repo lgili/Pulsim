@@ -452,7 +452,13 @@ class Sum:
             raise ValueError(
                 f"Sum: expected {len(self.weights)} inputs, "
                 f"got {len(inputs)}")
-        return sum(w * x for w, x in zip(self.weights, inputs))
+        # A plain left-to-right sum, as the kernel graph runs it: the
+        # builtin sum() is compensated since Python 3.12 (one answer per
+        # interpreter).
+        acc = 0.0
+        for w, x in zip(self.weights, inputs):
+            acc += w * x
+        return acc
 
 
 @dataclass
@@ -569,12 +575,15 @@ class TransferFunction:
         # Keep only what we need.
         if len(self._x_hist) > len(self.num):
             self._x_hist = self._x_hist[:len(self.num)]
-        # Compute the numerator contribution.
-        num_part = sum(b * (self._x_hist[i] if i < len(self._x_hist) else 0.0)
-                        for i, b in enumerate(self.num))
-        # Compute the denominator (feedback) contribution.
-        den_part = sum(a * (self._y_hist[i] if i < len(self._y_hist) else 0.0)
-                        for i, a in enumerate(self.den))
+        # Numerator and denominator (feedback) contributions, summed
+        # left to right as the kernel graph does (the builtin sum() is
+        # compensated since Python 3.12).
+        num_part = 0.0
+        for i, b in enumerate(self.num):
+            num_part += b * (self._x_hist[i] if i < len(self._x_hist) else 0.0)
+        den_part = 0.0
+        for i, a in enumerate(self.den):
+            den_part += a * (self._y_hist[i] if i < len(self._y_hist) else 0.0)
         y = num_part - den_part
         self._y_hist.insert(0, y)
         if len(self._y_hist) > len(self.den):
@@ -1242,10 +1251,10 @@ class ClosedLoop:
 _TICK_TOL = 1e-9
 
 
-def _next_tick_after(t: float, t_start: float, T: float) -> float:
-    """First instant of the t_start + k*T schedule strictly after ``t``."""
-    k = math.floor((t - t_start) / T + _TICK_TOL) + 1
-    return t_start + k * T
+def _next_tick_index(t: float, t_start: float, T: float) -> int:
+    """Integer k of the first instant t_start + k*T strictly after ``t``
+    (an integer tick counter: no accumulated or stored float time)."""
+    return math.floor((t - t_start) / T + _TICK_TOL) + 1
 
 
 def bind_pi_to_switch(
@@ -1341,7 +1350,7 @@ def bind_pi_to_switch(
     # the `[0.5]` / `[t_start - T_PWM]` lists callers used to write
     # by hand.
     duty_state = [0.5]
-    next_tick = [t_start]  # first update at t_start
+    k_next = [0]  # integer index of the next tick; tick 0 at t_start
     duty_history: "list[tuple[float, float]]" = []
     error_history: "list[tuple[float, float]]" = []
 
@@ -1366,7 +1375,7 @@ def bind_pi_to_switch(
         k·T_ctrl — calls this instead, so the update count is the
         schedule's and never depends on how close a step lands.
         """
-        next_tick[0] = _next_tick_after(t, t_start, T_PWM)
+        k_next[0] = _next_tick_index(t, t_start, T_PWM)
         m = float(measured(x))
         sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
         error = sp - m
@@ -1378,13 +1387,16 @@ def bind_pi_to_switch(
     def step_observer(t: float, x) -> None:
         # Throttle to the t_start + k*T_PWM schedule: prevents the loop
         # from chasing PWM ripple, and keeps ticks on the carrier edges.
-        if t < next_tick[0] - _TICK_TOL * T_PWM:
+        if t < t_start + k_next[0] * T_PWM - _TICK_TOL * T_PWM:
             return
         _tick(t, x)
 
     # How a scheduling engine reaches past the throttle.
     step_observer.tick = _tick  # type: ignore[attr-defined]
 
+    # Read by periodic_steady_state: a gate driven by controller state
+    # is refused by name (the shooting state does not hold the PI).
+    switch_fn._closed_loop = "bind_pi_to_switch"  # type: ignore[attr-defined]
     return ClosedLoop(
         switch_fn=switch_fn,
         step_observer=step_observer,
@@ -1437,11 +1449,12 @@ def bind_pi_to_duty_callable(
 
     T_PWM = 1.0 / float(freq)
     duty_state = [0.5]
-    next_tick = [t_start]
+    k_next = [0]
     duty_history: "list[tuple[float, float]]" = []
 
     def duty_get() -> float:
         return duty_state[0]
+    duty_get._closed_loop = "bind_pi_to_duty_callable"  # type: ignore[attr-defined]
 
     _sp_is_callable = callable(setpoint)
 
@@ -1455,7 +1468,7 @@ def bind_pi_to_duty_callable(
         k·T_ctrl — calls this instead, so the update count is the
         schedule's and never depends on how close a step lands.
         """
-        next_tick[0] = _next_tick_after(t, t_start, T_PWM)
+        k_next[0] = _next_tick_index(t, t_start, T_PWM)
         sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
         new_duty = pi.update(
             setpoint=sp,
@@ -1466,7 +1479,7 @@ def bind_pi_to_duty_callable(
         duty_history.append((t, duty_state[0]))
 
     def step_observer(t: float, x) -> None:
-        if t < next_tick[0] - _TICK_TOL * T_PWM:
+        if t < t_start + k_next[0] * T_PWM - _TICK_TOL * T_PWM:
             return
         _tick(t, x)
 

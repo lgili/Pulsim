@@ -184,7 +184,7 @@ def wire_pmsm_foc(chain,
     # Late import to avoid circular dependency at module load.
     from .control import (  # type: ignore[import-not-found]
         ClarkeTransform, ParkTransform, InverseParkTransform,
-        SpaceVectorModulator, PIController, PwmGenerator)
+        SpaceVectorModulator, PIController, PwmGenerator, Sum)
 
     pfx = output_prefix
     v_sat_eff = float(v_sat if v_sat is not None else v_dc / 2.0)
@@ -255,18 +255,10 @@ def wire_pmsm_foc(chain,
                     output=f"{pfx}.gate_hs_{leg}")
 
     # ---------- Complementary low-side gates (no dead-time) ----------
-    # Use a tiny lambda-like block: 1 − HS. The block-chain executor
-    # supports arbitrary user blocks with .reset() + .update(x).
-    class _Complement:
-        def reset(self) -> None:
-            pass
-
-        def update(self, x) -> float:
-            return 1.0 - float(x)
-
+    # 1 − HS as a kernel Sum (1.0 + (-1)*x is 1.0 - x exactly).
     for leg in ("a", "b", "c"):
-        chain.add(f"{pfx}.ls_{leg}", _Complement(),
-                    inputs=dict(x=f"channel:{pfx}.gate_hs_{leg}"),
+        chain.add(f"{pfx}.ls_{leg}", Sum(weights=(1.0, -1.0)),
+                    inputs=dict(inputs=(1.0, f"channel:{pfx}.gate_hs_{leg}")),
                     output=f"{pfx}.gate_ls_{leg}")
 
     return FocWiringResult(

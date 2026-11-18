@@ -22,10 +22,9 @@ This module ships two functions:
   enough for the natural transient to die out. FFT every state
   variable over one period. Returns amplitudes + phases + THD.
 
-* :func:`run_harmonic_balance(builder, *, period, ...)` — convenience
-  wrapper. Calls :func:`run_periodic_shooting` to find the
-  steady-state ``x*``, runs **one clean period** from ``x*``, FFTs.
-  The full "find SS + measure spectrum" pipeline in one call.
+* :func:`run_harmonic_balance(builder, *, period, ...)` — deprecated
+  convenience wrapper: :func:`periodic_steady_state` on the fixed
+  engine, then the spectrum of its orbit period.
 
 For a true frequency-domain Newton (multi-tone or
 non-perturbatively-nonlinear systems) — that's a future addition.
@@ -256,20 +255,19 @@ def run_harmonic_balance(builder,
                               shooting_max_iters: int = 20,
                               **simulate_kwargs,
                               ) -> HarmonicAnalysisResult:
-    """One-call harmonic balance: find steady-state via
-    :func:`run_periodic_shooting`, then extract the harmonic
-    spectrum via :func:`analyze_harmonics`.
+    """Deprecated: one-call "harmonic balance" — the periodic steady
+    state by :func:`pulsim.periodic_steady_state` (``engine='pwl'``, or
+    ``engine='trbdf2'`` in ``simulate_kwargs``), then the spectrum of
+    its orbit period by :func:`analyze_harmonics`. Call those two
+    directly.
 
-    The full "do HB for me" pipeline. For a buck converter on a
-    100 kHz PWM you'd typically write::
+    For a buck converter on a 100 kHz PWM you'd typically write::
 
         result = p.run_harmonic_balance(
             b, period=10e-6, dt=100e-9,
             switch_fn=sw_fn,
             n_harmonics=10)
         print(f"V_out DC:        {result.amplitudes[Vout_idx, 0]:.3f} V")
-        print(f"V_out 1st harm:  {result.amplitudes[Vout_idx, 1]*1e3:.1f} mV")
-        print(f"V_out THD:       {result.thd[Vout_idx]*100:.2f} %")
 
     Parameters
     ----------
@@ -281,54 +279,47 @@ def run_harmonic_balance(builder,
         Time step for the underlying simulation.
     n_harmonics, n_samples_per_period
         Forwarded to :func:`analyze_harmonics`.
-    switch_fn, b_extra_fn
-        Forwarded to the underlying ``simulate`` call. Must be
-        periodic with ``period``.
+    switch_fn
+        The gate schedule, periodic with ``period``.
+    b_extra_fn
+        Refused by name (a Python callback is not periodic state).
     state_labels
         Optional per-state labels.
     shooting_tol, shooting_max_iters
-        Tolerance + iteration cap for the underlying periodic
-        shooting Newton.
+        Accepted and ignored (the shooting's own stopping rule).
     **simulate_kwargs
-        Forwarded to ``simulate``.
+        Forwarded to every period run.
 
     Returns
     -------
     HarmonicAnalysisResult
+        The spectrum of every MNA state over the orbit period. A
+        shooting that does not converge raises ``ConvergenceError``.
     """
+    import warnings
+
     import pulsim as _v2
+    from .periodic_steady_state import _unsup
 
-    # 1) Find steady state via periodic shooting.
-    ss = _v2.run_periodic_shooting(
-        builder,
-        t_period=period, dt=dt,
-        switch_fn=switch_fn,
-        b_extra_fn=b_extra_fn,
-        tol=shooting_tol,
-        max_iterations=shooting_max_iters,
-        **simulate_kwargs)
-
-    if not ss.converged:
-        raise RuntimeError(
-            f"run_harmonic_balance: periodic shooting failed to "
-            f"converge (||G||_∞ = {ss.final_residual:.3e} after "
-            f"{ss.n_iterations} iterations). Try a tighter "
-            f"shooting_tol, larger shooting_max_iters, or pre-run "
-            f"a transient to seed a closer x_initial.")
-
-    # 2) Run ONE clean period from x_steady_state with
-    #    enough samples for the FFT.
-    res = _v2.simulate(
-        builder,
-        t_end=period, dt=dt,
-        switch_fn=switch_fn,
-        b_extra_fn=b_extra_fn,
-        initial_state=ss.x_steady_state.tolist(),
-        **simulate_kwargs)
-
-    # 3) FFT.
+    warnings.warn(
+        "run_harmonic_balance is deprecated; use pulsim.periodic_steady_"
+        "state(..., engine='pwl', dt=dt) and analyze_harmonics(r.orbit, "
+        "period=T).", DeprecationWarning, stacklevel=2)
+    if b_extra_fn is not None:
+        raise _unsup("b_extra_fn", "run_harmonic_balance: b_extra_fn is "
+                     "a Python callback whose state is not part of the "
+                     "periodic state; it is no longer supported.")
+    engine = simulate_kwargs.pop("engine", "auto")
+    if engine not in ("auto", "pwl", "trbdf2"):
+        raise _unsup("engine", f"run_harmonic_balance: engine={engine!r}; "
+                     "use periodic_steady_state(engine='exact').")
+    ss = _v2.periodic_steady_state(
+        builder, period=period, switch_fn=switch_fn,
+        engine="trbdf2" if engine == "trbdf2" else "pwl", dt=dt,
+        options=simulate_kwargs)
+    # the orbit period IS a run of the map: one period from the orbit
     return analyze_harmonics(
-        res,
+        ss.orbit,
         period=period,
         n_harmonics=n_harmonics,
         n_samples_per_period=n_samples_per_period,

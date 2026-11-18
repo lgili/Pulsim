@@ -50,8 +50,13 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # device-kind capability table it is raised from.
     UnsupportedError,
     engine_capabilities,
+    # add-compiled-control-graph: algebraic loop / two writers / unknown
+    # block kind, raised when a control graph is built.
+    ControlGraphBuildError,
     # Builder API (Layer 6).
+    Circuit,
     CircuitBuilder,
+    Parameter,
     # Topology / device handles (opaque — produced by the
     # builder and consumed by the cache).
     Graph,
@@ -169,6 +174,8 @@ from .plot import (
 from .blockchain import (
     MixedDomainBlockChain,
     BlockSpec,
+    PythonBlock,
+    Rate,
     parse_block_chain,
 )
 from .dc_strategy import (
@@ -501,7 +508,9 @@ from ._ai_guide import ai_guide  # noqa: E402
 __all__ = [
     "ResolutionWarning",
     "ai_guide",
+    "Circuit",
     "CircuitBuilder",
+    "Parameter",
     "Graph",
     "DevicePool",
     "SwitchStateMask",
@@ -547,6 +556,7 @@ __all__ = [
     "ConvergenceError",
     "periodic_steady_state_supported",
     "UnsupportedError",
+    "ControlGraphBuildError",
     "value_and_grad",
     "KpiValue",
     "SensitivityResult",
@@ -607,6 +617,8 @@ __all__ = [
     "MixedDomainBlockChain",
     "BlockSpec",
     "parse_block_chain",
+    "PythonBlock",
+    "Rate",
     # DC operating-point strategies (v1 parity Phase A.2).
     "compute_dc_op",
     "PseudoTransientConfig",
@@ -796,7 +808,10 @@ if _HAS_SCOPE:
 # CircuitBuilder, define Cancelled exception, expose simulate-wrapped
 # analyses with `should_continue` cancellation.
 from . import _builder_ergonomics as _berg
+from ._circuit_ir import RunPlan, Tie
+from ._circuit_ir import install as _install_parameters
 _berg.install(CircuitBuilder)
+_install_parameters(CircuitBuilder)  # after _berg: wraps its add_* too
 
 
 # add-fixed-step-resolution-diagnostics thresholds (design D3).
@@ -1640,6 +1655,17 @@ def _result_plot(self, *signals, save=None, show=None, **kwargs):
 
 
 SimulationResult.plot = _result_plot  # type: ignore[attr-defined]
+# add-immutable-circuit-ir: the circuit that ran and what the run did to it.
+for _cls in (SimulationResult, _PEDRes):
+    _cls.plan = property(  # type: ignore[attr-defined]
+        lambda self: getattr(self, "_run_plan", None),
+        doc="The run's RunPlan (circuit, ties, preflight); None for a run "
+            "from a builder stand-in.")
+    _cls.circuit = property(  # type: ignore[attr-defined]
+        lambda self: getattr(getattr(self, "_run_plan", None), "circuit", None),
+        doc="The pulsim.Circuit this run simulated (with any regularising "
+            "ties); the caller's builder is never changed.")
+del _cls
 
 
 # =============================================================================
@@ -1856,7 +1882,7 @@ def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
 
 
 def simulate(
-    builder: "CircuitBuilder | LoadedCircuit",
+    builder: "CircuitBuilder | Circuit | LoadedCircuit",
     t_end: Optional[float] = None,
     dt: Optional[float] = None,
     *,
@@ -2018,8 +2044,11 @@ def simulate(
     Parameters
     ----------
     builder
-        A populated :class:`CircuitBuilder`, or a :class:`LoadedCircuit`
-        from :func:`load_yaml_file` / :func:`load_yaml_string`. From a
+        A populated :class:`CircuitBuilder`, an immutable :class:`Circuit`
+        (``builder.build()``), or a :class:`LoadedCircuit`
+        from :func:`load_yaml_file` / :func:`load_yaml_string`. The run
+        never changes it: preflight ties go on the run's own copy
+        (``result.plan.ties``, ``result.circuit``). From a
         ``LoadedCircuit`` the run takes ``t_end``, ``dt`` (when the YAML
         sets one), ``t_start`` (when ``t_start`` is left at 0.0) and
         ``store_every`` (when not passed) from its ``simulation:``
@@ -2192,6 +2221,26 @@ def simulate(
     if isinstance(builder, LoadedCircuit):
         builder, t_end, dt, t_start, store_every = _resolve_loaded_circuit(
             builder, t_end, dt, t_start, store_every)
+    # add-immutable-circuit-ir (BREAKING since 2.x): the run works on its
+    # OWN circuit. A builder is snapshotted here — before any kwarg can
+    # fail — and never mutated; a Circuit is immutable. The engines take
+    # a mutable CircuitBuilder, so the run gets a private clone of the
+    # run's circuit below, after the preflight.
+    _run_circuit = None
+    _caller_side_state = None
+    _caller_builder = builder  # identity checks (MMC arms) name the caller's
+    if isinstance(builder, Circuit):
+        if mmc_arms:
+            raise ValueError(
+                "simulate(circuit, mmc_arms=...): MMC arms are registered "
+                "on a CircuitBuilder; pass that builder, not a "
+                "pulsim.Circuit")
+        _run_circuit = builder
+    elif isinstance(builder, CircuitBuilder):
+        _run_circuit = builder._snapshot()
+        # Python-side tables (C blocks, Shockley parameters) until they
+        # live in the IR (group 3).
+        _caller_side_state = dict(builder.__dict__)
     if t_end is None:
         raise TypeError(
             "simulate(): missing required argument 't_end' (end time, s). "
@@ -2297,13 +2346,11 @@ def simulate(
 
     # ---- Topology preflight (v2.0 Phase 2) --------------------------
     #
-    # Placed AFTER kwarg validation and BEFORE the engine dispatch,
-    # both deliberately. After validation, because this MUTATES the
-    # caller's builder (it appends reference ties) and a call that
-    # dies on a typo'd kwarg must not leave the circuit changed.
-    # Before the dispatch, because mutating the builder is what lets
-    # BOTH engines inherit the fix — placing it later would have made
-    # auto_regularize a PWL-only feature the DSED path ignored.
+    # Placed BEFORE the engine dispatch so every engine runs the
+    # regularised circuit. The ties go on the RUN's circuit
+    # (add-immutable-circuit-ir): the caller's builder is never
+    # changed, `result.plan.ties` lists them and `result.circuit` is
+    # the circuit that ran.
     #
     # `None` means "not set"; resolve it here rather than relying on
     # an `is not False` identity test, which would silently treat
@@ -2311,22 +2358,33 @@ def simulate(
     if auto_regularize is None:
         auto_regularize = True
     _preflight_report = None
+    _ties = []
     if auto_regularize:
-        _preflight_report = builder.run_preflight(
-            PreflightOptions(auto_regularize=True))
+        if _run_circuit is not None:
+            _run_circuit, _preflight_report, _ties = (
+                _run_circuit.with_preflight(
+                    PreflightOptions(auto_regularize=True)))
+        else:  # a builder stand-in (test doubles)
+            _preflight_report = builder.run_preflight(
+                PreflightOptions(auto_regularize=True))
         if not _preflight_report.empty():
             import warnings
             warnings.warn(
                 "simulate(): " + _preflight_report.summary() +
                 "\n  These ties give the MNA a voltage reference "
                 "without loading the circuit (1 GΩ draws nanoamps). "
-                "Inspect them via result._preflight, or pass "
-                "auto_regularize=False to get the original singular"
-                "-matrix error instead. Note the ties persist on the "
-                "builder, so re-running the SAME builder with "
-                "auto_regularize=False will not restore the error — "
-                "rebuild the circuit for that.",
+                "They were added to this run's own copy of the circuit "
+                "(result.plan.ties, result.circuit); your builder is "
+                "unchanged, so auto_regularize=False on it raises the "
+                "original singular-matrix error.",
                 stacklevel=2)
+    _run_plan = None
+    if _run_circuit is not None:
+        builder = _run_circuit.to_builder()
+        if _caller_side_state:
+            builder.__dict__.update(_caller_side_state)
+        _run_plan = RunPlan(circuit=_run_circuit, ties=tuple(
+            Tie(*t) for t in _ties), preflight=_preflight_report)
 
     # add-python-builder-ergonomics: if the caller didn't pass an
     # explicit initial_state, ask the builder for its recorded ICs.
@@ -2393,6 +2451,9 @@ def simulate(
     # every engine; dsed refuses closed_loops / step_observer itself.
     _plan = _compose_control(builder, closed_loops, step_observer,
                              controller_period, switch_fn)
+    # A control graph's driven sources reach every engine (above the
+    # dispatch: add-compiled-control-graph).
+    b_extra_fn = _plan.merge_b_extra(b_extra_fn)
 
     # ---- Parameter sensitivities: the exact path only. Above the
     # dispatch (three early returns below), so every engine refuses or
@@ -2521,6 +2582,7 @@ def simulate(
             )
         try:
             _dsed_res._preflight = _preflight_report
+            _dsed_res._run_plan = _run_plan
             _dsed_res.engine_used = "dsed"
             _dsed_res.engine_route_reason = None
             # v2.0 Phase 3 item 5 — the unified result: with the
@@ -2668,6 +2730,8 @@ def simulate(
         # t_start + k*T_j, landed like a gate edge; `.tick` (the
         # loop's unthrottled update) is what the plan holds. An
         # every-step observer has no grid to ride here.
+        # A control graph with rates runs on its group ticks here.
+        _plan = _plan.for_variable_step()
         if _plan.every_step:
             raise _unsupported(
                 "trbdf2", "step_observer",
@@ -2698,6 +2762,8 @@ def simulate(
             # its own breaking change, not this one).
             switch_fn = make_constant_switch_fn(SwitchStateMask(_n_sw))
         cache = PwlStateSpaceCache(builder.graph, builder.pool)
+        if _run_circuit is not None:  # one analysis per structure
+            cache.share_symbolic(_run_circuit)
         # Lazy build only needs a positive dt to mark the cache
         # dynamic; the stepper solves at its own per-step dt via
         # solve_at, never at this value.
@@ -2733,6 +2799,7 @@ def simulate(
                 _partial = _aborted.partial
                 _partial._builder = builder
                 _partial._preflight = _preflight_report
+                _partial._run_plan = _run_plan
                 _partial._switch_fn = switch_fn
                 # The wreckage gets the same handles the survivors
                 # get — including an empty-but-present stats dict,
@@ -2743,6 +2810,7 @@ def simulate(
             raise
         res._builder = builder
         res._preflight = _preflight_report
+        res._run_plan = _run_plan
         res._switch_fn = switch_fn
         res._trbdf2_stats = _stats
         res.control_tick_counts = list(_stats["control_tick_counts"])
@@ -2889,6 +2957,8 @@ def simulate(
     # the default") true — they previously described intent, not
     # behaviour.
     cache = PwlStateSpaceCache(builder.graph, builder.pool)
+    if _run_circuit is not None:  # one analysis per structure
+        cache.share_symbolic(_run_circuit)
     cache.build_lazy(dt)
 
     # v2.0 Phase 3 "obra №2" — GGJ Thevenin MMC arms. The driver
@@ -2961,7 +3031,7 @@ def simulate(
         max_dt_halvings = 0
         from .mmc_thevenin import make_mmc_thevenin_driver
         _mmc_obs, _mmc_b, _mmc_finalize = make_mmc_thevenin_driver(
-            mmc_arms, builder, cache, dt,
+            mmc_arms, _caller_builder, cache, dt,
             builder.pool.state_size(builder.graph))
         step_observer, b_extra_fn = _compose_step_hooks(
             step_observer, b_extra_fn, _mmc_obs, _mmc_b,
@@ -3236,6 +3306,7 @@ def simulate(
                 _partial = _aborted.partial
                 _partial._builder = builder
                 _partial._preflight = _preflight_report
+                _partial._run_plan = _run_plan
                 _partial._switch_fn = kwargs.get("switch_fn")
             except AttributeError:  # pragma: no cover — defensive
                 pass
@@ -3285,6 +3356,7 @@ def simulate(
         # The preflight facts are properties of the CIRCUIT, but a
         # user reads them off the result, so attach both.
         res._preflight = _preflight_report
+        res._run_plan = _run_plan
     except AttributeError:  # pragma: no cover
         pass
     try:
@@ -3733,7 +3805,8 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     # to ride (the same split `_compose_control` makes: a source with
     # no period runs every step, which only the fixed engine has).
     if step_observer is not None and controller_period is None \
-            and getattr(step_observer, "period", None) is None:
+            and getattr(step_observer, "period", None) is None \
+            and not getattr(step_observer, "_rate_ticks", None):
         why.append(_blk("step_observer",
             "a step_observer with no cadence (pass "
             "controller_period=<T_ctrl>, or use a ClosedLoop, "
