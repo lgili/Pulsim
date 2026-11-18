@@ -31,6 +31,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <array>
 #include <cstddef>
 #include <unordered_map>
 #include <utility>
@@ -46,6 +47,7 @@
 #include "pulsim/dsed/period_integrals.hpp"
 #include "pulsim/dsed/periodic_orbit.hpp"
 #include "pulsim/dsed/design_batch.hpp"
+#include "pulsim/dsed/period_thermal.hpp"
 #include "pulsim/ir/circuit.hpp"
 #include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/dsed/step_controller.hpp"
@@ -1721,6 +1723,55 @@ void init_module(py::module_& m) {
         "'run_failed', 'irreproducible'); 'period' is the verification "
         "period (dsed_period_map's dict, with the observables). DC "
         "sources only.");
+
+    // add-design-optimization-workflow DECISIONS 28: one device's junction
+    // temperature on a fixed periodic orbit (pulsim/dsed/period_thermal.hpp).
+    m.def("_junction_fixed_point",
+        [](std::vector<std::array<Real, 2>> on_pts,
+           std::vector<std::array<Real, 2>> off_pts,
+           const pulsim::thermal::LossTable3D* on,
+           const pulsim::thermal::LossTable3D* off, Real period, Real p_fixed,
+           Real r_th, Real t_amb, const pulsim::thermal::ConductionTable* cond,
+           Real q1, Real q2, Real i_max) {
+            namespace pt = pulsim::dsed::period_thermal;
+            pt::DevicePower d;
+            d.on_pts = std::move(on_pts);
+            d.off_pts = std::move(off_pts);
+            d.on = on;
+            d.off = off;
+            d.cond = cond;
+            d.q1 = q1;
+            d.q2 = q2;
+            d.i_max = i_max;
+            d.p_fixed = p_fixed;
+            d.period = period;
+            pt::Junction j;
+            {
+                py::gil_scoped_release nogil;
+                j = pt::solve_junction(d, r_th, t_amb);
+            }
+            const auto parts = d.at(j.tj);
+            py::dict out;
+            out["runaway"] = j.runaway;
+            out["tj"] = j.tj;
+            out["p"] = j.p;
+            out["residual"] = j.residual;
+            out["slope"] = j.slope;
+            out["evaluations"] = j.evaluations;
+            out["e_on"] = parts[1];
+            out["e_off"] = parts[2];
+            out["p_cond_table"] = parts[3];
+            return out;
+        },
+        py::arg("on_pts"), py::arg("off_pts"), py::arg("on").none(true),
+        py::arg("off").none(true), py::arg("period"), py::arg("p_fixed"),
+        py::arg("r_th"), py::arg("t_amb"), py::arg("cond").none(true),
+        py::arg("q1") = 0.0, py::arg("q2") = 0.0, py::arg("i_max") = 0.0,
+        "Smallest T_j >= t_amb with T_j = t_amb + r_th P(T_j), P the "
+        "device's loss on a fixed orbit: p_fixed + (sum E_on + sum E_off) / "
+        "period over the commutation points (|v|, |i|), plus a conduction "
+        "table's (a q1 + b q2) / period. Returns runaway, tj, p, residual, "
+        "slope (r_th dP/dT), evaluations, e_on, e_off, p_cond_table.");
 
     // add-design-optimization-workflow DECISIONS 26: the kernel batch
     // evaluator (pulsim/dsed/design_batch.hpp). The plan is parsed and the

@@ -3138,6 +3138,10 @@ def _design_batch(base: Circuit, plan: dict[typing.Any, typing.Any], table: typi
     """
     pulsim.design's kernel batch: every design of `table` evaluated on the exact steady-state route with the GIL released (pulsim/dsed/design_batch.hpp). Internal.
     """
+def _junction_fixed_point(on_pts: collections.abc.Sequence[typing.Annotated[collections.abc.Sequence[float], "FixedSize(2)"]], off_pts: collections.abc.Sequence[typing.Annotated[collections.abc.Sequence[float], "FixedSize(2)"]], on: LossTable3D, off: LossTable3D, period: float, p_fixed: float, r_th: float, t_amb: float, cond: ConductionTable, q1: float = 0.0, q2: float = 0.0, i_max: float = 0.0) -> dict[typing.Any, typing.Any]:
+    """
+    Smallest T_j >= t_amb with T_j = t_amb + r_th P(T_j), P the device's loss on a fixed orbit: p_fixed + (sum E_on + sum E_off) / period over the commutation points (|v|, |i|), plus a conduction table's (a q1 + b q2) / period. Returns runaway, tj, p, residual, slope (r_th dP/dT), evaluations, e_on, e_off, p_cond_table.
+    """
 def _lcp_enumerate(M: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], q: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> tuple[int, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]]:
     """
     2^k enumeration (k <= 12): (number of solutions, z, w) with the fewest basic z.

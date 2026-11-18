@@ -992,6 +992,94 @@ operation in the order of the Python path (`design._kpis`,
 Reverse: `evaluate_many(..., backend='thread')` is the old default;
 removing `_design_kernel.run` from `evaluate_many` restores it.
 
+## 27. PWM and pulse voltage sources on the steady-state route (slice 6, item 0)
+
+Question: does the kernel period map handle a PWM source's corners, or
+must the route refuse them?
+
+Evidence (`.scratch` probe, not shipped): a 24 V / 0 V, 100 kHz,
+D = 0.4 PWM source into 100 uH and 47 uF || 5 ohm. With the refusal
+bypassed, `periodic_steady_state` returns the orbit
+`(v_C, i_L) = (9.5979041, 1.63187764)`; the matrix exponential's fixed
+point `(I - Phi)^-1 z` agrees to 4.1e-16 and 3.7e-16 relative. The
+stepper lands the source's corners. What is missing is elsewhere:
+`builder.components()` exposes NO parameters for `pwm_voltage_source`
+and `pulse_voltage_source` (`{}`), so `_not_t_periodic` cannot check
+that the source's period divides `T`; a 30 kHz source under a 100 kHz
+section would converge to a map that is not a steady state. The kernel
+period map behind the design KPIs (`dsed_period_map`,
+`design_batch.hpp`) also takes DC sources only.
+
+Option taken: keep the refusal by name on every engine, with the
+message corrected (it said the edges were not events of the exact
+stepper, which the probe refutes). The test
+`test_a_pwm_voltage_source_is_refused_by_name_on_every_engine` checks
+the device and the reason.
+
+To reverse: expose the source's `frequency`, `duty`, `phase` (and the
+pulse timing) in `components()`, add them to `_not_t_periodic`, drop
+the two kinds from the refusal, and add them to the period map's
+dynamic-source support.
+
+## 28. Event losses and the junction fixed point on the orbit (slice 6, item 3)
+
+Question: on the exact route the electrical orbit does not depend on
+T_j (no `temperature_dependent`); only the loss tables do. How is
+`T_j = T_amb + R_th P(T_j)` solved, and what is read at the events?
+
+Option taken. (a) The reading rule of `add-in-kernel-event-losses`
+(turn-on: `v` before, `i` after; turn-off the reverse) on the period
+map's left and right limits, already used for switches since slice 5,
+now also for a diode's `E_off_table` in `switch_specs` (its recovery).
+The sampled `device_loss_summary` used to ignore a diode named there;
+it now refuses it by name, so the two routes never disagree silently.
+(b) `ThermalSpec(mode="kernel")`, the default on the exact route
+without `loss_at` / `temperature_dependent`: per device the commutation
+points are collected once and `pulsim/dsed/period_thermal.hpp` solves
+`g(T) = T - T_amb - R_th P(T) = 0` for the smallest root above `T_amb`
+(the point the physical iteration climbs to). `P` is linear in `T_j`
+between the tables' `T_j` knots, so the solver brackets segment by
+segment and regula falsi (Illinois) lands in one step where `g` is
+linear; above the last knot it steps to twice the linear root.
+Stopping rule: `|g| <= 1e-9 K`, or a bracket narrower than 1e-13
+relative. Runaway: no bracket because `g` does not rise above the last
+knot (`R_th dP/dT_j >= 1`) or the search passes 1e6 C; the record is
+`infeasible`, `thermal_runaway`, the violation `R_th dP/dT_j - 1`.
+(c) A `ConductionTable` linear in `i` (one or two current knots) gives
+`(a(T) int|i| + b(T) int i^2) / T` over a new on-state-current
+observable (`g_off = 0`); it heats the junction only (`p_cond_table.*`)
+so the electrical energy balance still closes.
+
+Evidence: closed-form oracle `(T_amb + R(Pc + Ps(1 - 25a))) / (1 -
+R Ps a)` on a buck with linear tables, R = 2 and 20 K/W: 1e-13 K; the
+damped loop: 7.7e-4 K and 0.017 K away (its 0.1 K stopping rule).
+Runaway at `R Ps a = 1.2`: slope reported 1.2000. Buck example's best
+of 32 designs (SYN-B, 60.5 kHz, r_th = 3 K/W): kernel 43.271746 C,
+fixed point 43.271621 C. Three-phase SPWM VSI, 10 kHz, 1 us dead time,
+600 V, T_j = 125 C: kernel E_on / E_off per switch against
+`device_loss_summary` on a settled `dsed` period, 1.8e-13 relative;
+diode recovery counts 199 / 201 = turn-off counts.
+
+A finding on the way: with the star load's neutral returned through
+1 MOhm the same comparison gave 9.3e-7, every turn-on's `i` 1.3e-4 A
+apart. Cause: the neutral resistor makes a common-mode mode of
+`(L/3)/R_n` = 1.7 ns, and the sampled summary reads the turn-on current
+at the first sample after the edge (0.21 ns later in that run), where
+the current has already moved; the kernel reads the exact right limit.
+With 1 uF || 1 kOhm the mode is slow and the two agree to 1.8e-13. The
+sampled reading is right to O(h) of the step after the edge; it is not
+an engine error.
+
+What the kernel mode does not do: feed `T_j` back into the electrical
+solution (that is `temperature_dependent=True`, the fixed point), draw
+the event energy from the circuit, or run inside the kernel batch (a
+thermal evaluator takes the Python path, `counters["batch"] ==
+"python: a thermal loop"`; the solve itself is the kernel's).
+
+To reverse: `ThermalSpec(mode="fixed_point")` restores the loop per
+evaluator; dropping the `"auto"` resolution in `_evaluate` restores it
+everywhere; the diode refusal in `device_loss_summary` is one block.
+
 ## Missing from the kernel (recorded, worked around in Python)
 
 Items 1 and 2 are done (add-parameter-sensitivities slice, 2026-11):

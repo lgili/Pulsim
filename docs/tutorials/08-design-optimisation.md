@@ -121,11 +121,15 @@ refused [1.e+30 1.e+30] [1.e+30]
   check accepts the circuit and the transient otherwise, and says so in
   `counters["steady_method"]`. A `pss` failure is `failed`, never a
   silent transient.
-* `ThermalSpec(r_th={"S": 2.0}, t_amb=40)` closes `T_j` by a damped
-  fixed point (0.1 K); switching tables are read at each device's
-  `T_j`; it stops when the estimated distance to the fixed point (not
-  the last step) is below `tol`; the circuit is re-simulated only when
-  `temperature_dependent=True` (then `build` reads `design["_T_j"]`).
+* `ThermalSpec(r_th={"S": 2.0}, t_amb=40)` closes `T_j`. On the exact
+  `pss` route it is solved in the kernel (`mode="kernel"`, the default
+  there): the switching tables are re-read at every commutation of the
+  fixed orbit and `T_j = t_amb + r_th P(T_j)` is solved exactly
+  (residual < 1e-9 K), a runaway (`r_th dP/dT_j >= 1`) being
+  `infeasible`. Elsewhere, or with `loss_at=` / `temperature_dependent=`,
+  it is a damped fixed point (`mode="fixed_point"`, within 0.1 K); the
+  circuit is re-simulated only when `temperature_dependent=True` (then
+  `build` reads `design["_T_j"]`). See `docs/losses-and-thermal.md`.
 * `Evaluator(circuit=base, fields={"L": "L.L", "C": "C.C"},
   schedule=lambda d: make_pwm_switch_fn(d["f_sw"], ...), ...)` instead
   of `build=`: one immutable `pulsim.Circuit` (`builder.build()`)

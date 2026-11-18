@@ -185,7 +185,7 @@ class SteadySpec:
 
 @dataclass(frozen=True)
 class ThermalSpec:
-    """Junction temperature by a damped fixed point (design D4).
+    """Junction temperature: ``T_j = t_amb + r_th P(T_j)`` per device.
 
     ``r_th`` maps a device name to its junction-to-ambient thermal
     resistance (K/W). ``loss_at`` (optional) is a callable
@@ -194,7 +194,23 @@ class ThermalSpec:
     simulated loss (no temperature dependence). ``temperature_dependent``
     tells the evaluator that ``build`` reads ``design['_T_j']`` (a
     mapping device -> deg C) so the circuit must be re-simulated at
-    each iterate."""
+    each iterate.
+
+    ``mode``: ``'kernel'`` solves the fixed point in the kernel on the
+    exact steady-state route (DECISIONS 28): the orbit is fixed, the
+    loss tables are re-read at each commutation of the period (turn-on:
+    ``v`` before, ``i`` after; turn-off the reverse) at the trial
+    ``T_j``, and the root is exact (``thermal_residual``, K), with a
+    runaway refused when ``r_th dP/dT_j >= 1``. ``'fixed_point'`` is the
+    damped iteration, stopping within ``tol`` of the fixed point.
+    ``'auto'`` (default): ``'kernel'`` on the exact route without
+    ``loss_at`` or ``temperature_dependent``, else ``'fixed_point'``.
+    ``conduction`` (kernel mode): device -> ``{"i": [...], "tj": [...],
+    "v_on": [[...]]}``, an on-state voltage table ``V_on(i, T_j)`` linear
+    in ``i`` (one or two current knots); the device's heat is then
+    ``V_on(|i|, T_j) |i|`` over its on-state current, reported as
+    ``p_cond_table.<device>``, while the record's ``conduction`` loss
+    stays the circuit's own (the energy balance)."""
 
     r_th: Mapping[str, float]
     t_amb: float = 25.0
@@ -203,6 +219,44 @@ class ThermalSpec:
     max_iter: int = 20
     loss_at: Optional[Callable[[str, float, float], float]] = None
     temperature_dependent: bool = False
+    mode: str = "auto"
+    conduction: Optional[Mapping[str, Mapping[str, Any]]] = None
+
+
+def _check_thermal(th):
+    """Refuse a ThermalSpec that cannot run, by name, at construction."""
+    if th.mode not in ("auto", "kernel", "fixed_point"):
+        raise ValueError(f"ThermalSpec.mode: 'auto', 'kernel' or "
+                         f"'fixed_point', got {th.mode!r}")
+    if th.mode == "kernel" and (th.loss_at is not None
+                                or th.temperature_dependent):
+        raise ValueError(
+            "ThermalSpec(mode='kernel'): the kernel reads the loss tables "
+            "on a fixed orbit; loss_at= and temperature_dependent= need "
+            "the Python loop (mode='fixed_point')")
+    for d, c in (th.conduction or {}).items():
+        if th.mode == "fixed_point" or th.loss_at is not None \
+                or th.temperature_dependent:
+            raise ValueError(
+                f"ThermalSpec.conduction[{d!r}]: conduction tables are "
+                "read by the kernel fixed point only (mode='kernel' or "
+                "'auto', without loss_at / temperature_dependent)")
+        if d not in th.r_th:
+            raise KeyError(f"ThermalSpec.conduction names {d!r}, which has "
+                           "no r_th")
+        _conduction_table(c)
+
+
+def _conduction_table(c):
+    """``{"i", "tj", "v_on"}`` -> the kernel ``ConductionTable``."""
+    from ._pulsim import ConductionTable
+    extra = sorted(set(c) - {"i", "tj", "v_on"})
+    if extra:
+        raise ValueError(f"a conduction table takes i, tj, v_on; got {extra}")
+    v = np.asarray(c["v_on"], dtype=float)
+    return ConductionTable([float(x) for x in c["i"]],
+                           [float(x) for x in c["tj"]],
+                           v.ravel(order="C").tolist())
 
 
 @dataclass(frozen=True)
@@ -730,6 +784,8 @@ class Evaluator:
             if len(v) != 2:
                 raise ValueError(f"constraint {k!r}: give (lo, hi), got {v!r}")
         self.thermal = thermal
+        if thermal is not None:
+            _check_thermal(thermal)
         self.steady = steady
         self.engine = engine
         self.samples_per_period = samples_per_period
@@ -1074,6 +1130,27 @@ class Evaluator:
             if d not in names:
                 raise KeyError(f"ThermalSpec.r_th names {d!r}, which is not "
                                f"a device of the circuit")
+        mode = th.mode
+        exact = isinstance(run, _pk.Period)
+        if mode == "auto":
+            mode = ("kernel" if exact and th.loss_at is None
+                    and not th.temperature_dependent else "fixed_point")
+        if mode == "kernel" and not exact:
+            raise unsupported(
+                "design", "thermal",
+                f"ThermalSpec(mode='kernel'): the route is "
+                f"{counters.get('route', '?')!r}, not the exact steady-state "
+                "route (steady=SteadySpec(method='pss'), engine 'dsed') "
+                "whose period map the kernel reads; use mode='fixed_point'")
+        if mode == "fixed_point" and th.conduction:
+            raise unsupported(
+                "design", "thermal",
+                "ThermalSpec.conduction: conduction tables are read by the "
+                f"kernel fixed point, which needs the exact route (this is "
+                f"{counters.get('route', '?')!r})")
+        if mode == "kernel":
+            return self._thermal_kernel(b, run, a, z, design, did, counters)
+        counters["thermal_mode"] = "fixed_point"
         tj = {d: float(th.t_amb) for d in th.r_th}
         omega, prev, dist = 1.0, math.inf, math.inf
         for k in range(1, th.max_iter + 1):
@@ -1127,6 +1204,88 @@ class Evaluator:
         kpis = self._kpis(b, run, a, z, design, did, rows, losses, counters)
         for d in tj:
             kpis[f"t_j.{d}"] = tj[d]
+        return kpis, losses, tj
+
+    def _thermal_kernel(self, b, run, a, z, design, did, counters):
+        """``mode='kernel'``: each device's ``T_j = t_amb + r_th P(T_j)``
+        solved by the kernel on the fixed orbit (DECISIONS 28)."""
+        from ._pulsim import _junction_fixed_point
+        th = self.thermal
+        rows, losses = self._loss_rows(b, run, a, z)
+        specs = self.loss_options.get("switch_specs") or {}
+        semis = {n: bit for n, _, bit in run.spec.semis}
+        tj, evals, resid, heat = {}, 0, 0.0, {}
+        for d, r_th in th.r_th.items():
+            sp = specs.get(d) or {}
+            on_t, off_t = sp.get("E_on_table"), sp.get("E_off_table")
+            cat = dict(losses.get(d) or {})
+            on = off = []
+            if on_t is not None or off_t is not None:
+                for t, ref, curve in ((on_t, "E_on_ref", "E_on_curve"),
+                                      (off_t, "E_off_ref", "E_off_curve")):
+                    if t is None and (float(sp.get(ref, 0.0)) > 0
+                                      or sp.get(curve) is not None):
+                        raise unsupported(
+                            "design", "thermal",
+                            f"switch_specs[{d!r}] mixes a loss table with "
+                            f"{ref} / {curve}; the kernel fixed point reads "
+                            "tables only (mode='fixed_point')")
+                on, off = _pk.commutations(run.edges(d, semis[d]))
+                cat.pop("switching", None)
+                cat.pop("recovery", None)
+            cond, q1, q2, i_max = None, 0.0, 0.0, 0.0
+            if d in (th.conduction or {}):
+                cond = _conduction_table(th.conduction[d])
+                st = run.st[run.spec.idx[("ion", d)]]
+                if float(st[4]) >= 0.0:
+                    q1, i_max = float(st[0]), float(st[2])
+                elif float(st[2]) <= 0.0:
+                    q1, i_max = -float(st[0]), -float(st[4])
+                else:
+                    raise unsupported(
+                        "design", "thermal",
+                        f"ThermalSpec.conduction[{d!r}]: the on-state "
+                        "current changes sign over the period, so int |i| "
+                        "is not a period integral")
+                q2 = float(st[1])
+                cat.pop("conduction", None)
+            try:
+                out = _junction_fixed_point(
+                    on, off, None if on_t is None else on_t._kernel(),
+                    None if off_t is None else off_t._kernel(), run.T,
+                    _psum(cat.values()), float(r_th), float(th.t_amb), cond,
+                    q1, q2, i_max)
+            except ValueError as e:      # a conduction table, by name
+                raise unsupported("design", "thermal",
+                                  f"ThermalSpec.conduction[{d!r}]: {e}") from e
+            evals += int(out["evaluations"])
+            if out["runaway"]:
+                counters["thermal_mode"] = "kernel"
+                counters["thermal_iterations"] = evals
+                raise _Infeasible(
+                    f"thermal_runaway: {d} has no junction temperature above "
+                    f"t_amb = {th.t_amb:g} C (r_th dP/dT_j = "
+                    f"{out['slope']:.4g} >= 1 at {out['tj']:.4g} C)",
+                    {"thermal_runaway": max(out["slope"] - 1.0, 1e-12)})
+            tj[d] = float(out["tj"])
+            resid = max(resid, abs(float(out["residual"])))
+            if cond is not None:
+                heat[d] = float(out["p_cond_table"])
+        counters["thermal_mode"] = "kernel"
+        counters["thermal_iterations"] = evals
+        counters["thermal_residual"] = resid
+        hot = max(tj[d] - th.t_limit for d in tj)
+        if hot > 0:
+            raise _Infeasible(
+                f"thermal_limit: the fixed point T_j = {max(tj.values()):.4g} C "
+                f"exceeds t_limit = {th.t_limit:g} C", {"thermal_limit": hot})
+        rows, losses = self._loss_rows(b, run, a, z, tj)
+        losses = self._losses_at(losses, tj)
+        kpis = self._kpis(b, run, a, z, design, did, rows, losses, counters)
+        for d in tj:
+            kpis[f"t_j.{d}"] = tj[d]
+        for d, v in heat.items():
+            kpis[f"p_cond_table.{d}"] = v
         return kpis, losses, tj
 
     def _losses_at(self, losses, tj):
@@ -1282,8 +1441,10 @@ class Evaluator:
         key = src.structure_hash() if static else None
         spec = self._spec_cache.get(key) if static else None
         if spec is None:
-            spec = _pk.spec_for(_as_builder(src), self.output,
-                                self.loss_options, self._nodes)
+            spec = _pk.spec_for(
+                _as_builder(src), self.output, self.loss_options,
+                self._nodes, tuple(sorted(
+                    (self.thermal.conduction or {}) if self.thermal else ())))
             if static:
                 self._spec_cache[key] = spec   # read-only once stored
         return spec

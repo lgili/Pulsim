@@ -1865,6 +1865,18 @@ def device_loss_summary(
         diode_specs, "diode_specs")
     switch_by_bid, switch_by_name = _build_spec_lookup(
         switch_specs, "switch_specs")
+    # A diode's recovery TABLE is read on the exact steady-state route's
+    # period map only; here it used to be ignored without a word.
+    for bid_, desc_ in comps_by_bid.items():
+        if desc_.get("kind") == "diode" and (
+                bid_ in switch_by_bid or desc_.get("name") in switch_by_name):
+            raise ValueError(
+                f"switch_specs names diode {desc_.get('name')!r}: a diode's "
+                "recovery-energy table (E_off_table) is read on the exact "
+                "steady-state route's period map only (pulsim.design "
+                "Evaluator, steady=SteadySpec(method='pss'), engine "
+                "'dsed'); give the sampled summary its recovery through "
+                "diode_specs.")
     cond_by_bid, cond_by_name = _build_spec_lookup(
         conduction_specs, "conduction_specs")
 

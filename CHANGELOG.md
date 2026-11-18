@@ -24,6 +24,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Added** `Kpi.formula(name, expr)`: a declarative arithmetic KPI over
   KPIs, design variables and `loss.<device>`. The buck example's volume
   and heatsink KPIs are formulas now (same records).
+* **Added** `ThermalSpec(mode="kernel")`, the default on the exact
+  steady-state route: the switching / recovery tables are re-read at
+  every commutation of the fixed orbit (turn-on: `v` before, `i` after;
+  turn-off the reverse) and `T_j = T_amb + R_th P(T_j)` is solved in C++
+  (`_pulsim._junction_fixed_point`) to 1e-9 K; `R_th dP/dT_j >= 1` is an
+  `infeasible` `thermal_runaway`. `mode="fixed_point"` keeps the damped
+  loop. `ThermalSpec(conduction=...)` heats the junction from an on-state
+  table linear in `i`. Synthetic tables throughout.
+* **Added** a diode's recovery table on the exact route:
+  `switch_specs={"D1": {"E_off_table": t, "Tj": 125}}`, read at each
+  turn-off, the record's `recovery` loss (kernel batch included).
+* **Changed** `device_loss_summary` refuses a diode named in
+  `switch_specs` (it was ignored without a word); use `diode_specs`.
+* **Changed** the PWM / pulse voltage source refusal of
+  `periodic_steady_state` now names the real reasons (no source period
+  to check, DC-only period map); the stepper does land their corners.
 * **Changed** the record arithmetic sums with CPython 3.12's compensated
   float sum on every Python version (`design._psum`): records on Python
   3.10 / 3.11 may move by one ulp and now equal 3.12+'s.

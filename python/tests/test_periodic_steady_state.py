@@ -531,10 +531,12 @@ def test_boost_with_a_zero_band_diode_settles(v_th, R, v_out, i_l):
 @pytest.mark.parametrize("engine", ["exact", "pwl", "trbdf2"])
 def test_a_pwm_voltage_source_is_refused_by_name_on_every_engine(engine):
     """A PWM source is exact on the dsed transient (its corners are time
-    events, integration batch 9), but the kernel period map takes DC
-    sources only (`dsed_period_map` would raise a plain ValueError) and
-    the shooting does not place the source's corners: refused by name,
-    before any period run, never a sampled fallback."""
+    events, integration batch 9) and the shooting would place its corners
+    (with the check bypassed the orbit equals the matrix exponential's to
+    4e-16, DECISIONS 27), but the builder exposes no source period to
+    check T-periodicity with, and the kernel period map takes DC sources
+    only: refused by name, before any period run, never a sampled
+    fallback."""
     b = p.CircuitBuilder()
     b.add_pwm_voltage_source("Vg", "in", "gnd", 5.0, 0.0, 1 / T, 0.5)
     b.add_resistor("R", "in", "a", 10.0)
@@ -543,7 +545,7 @@ def test_a_pwm_voltage_source_is_refused_by_name_on_every_engine(engine):
     b.add_resistor("RL", "o", "gnd", 100.0)
     kw = {} if engine == "exact" else {"dt": T / 200}
     ok, why = p.periodic_steady_state_supported(b, T, engine=engine, **kw)
-    assert not ok and "'Vg'" in why
+    assert not ok and "'Vg'" in why and "period" in why
     with pytest.raises(p.UnsupportedError) as ei:
         p.periodic_steady_state(b, period=T, engine=engine, **kw)
     assert ei.value.device == "Vg"

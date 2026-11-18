@@ -334,7 +334,7 @@ class Plan:
             rms(("i", name))
             row["i_rms"] = P.store()
             sp = specs.get(name)
-            if kind == "switch" and sp is not None:
+            if sp is not None:          # a switch's or a diode's tables
                 on, off, tj = (sp.get("E_on_table"), sp.get("E_off_table"),
                                sp.get("Tj"))
                 ok = ((on is not None or off is not None)

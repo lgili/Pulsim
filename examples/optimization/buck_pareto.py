@@ -153,7 +153,7 @@ def switching_period(design):
     return 1.0 / design["f_sw"]
 
 
-def make_evaluator(form="circuit"):
+def make_evaluator(form="circuit", thermal=None):
     """One evaluator per part. ``form='circuit'`` (default): one shared
     immutable circuit per part, a design being ``with_value`` of it;
     ``'factory'``: ``build`` per design. Same records. Everything is a
@@ -161,7 +161,9 @@ def make_evaluator(form="circuit"):
     pickles and ``evaluate_many(backend='process')`` runs it (each
     worker builds the part's circuit once). With the circuit form and
     formula KPIs, ``evaluate_many`` runs the kernel batch: every design
-    in one GIL-free kernel call, on ``workers`` native threads."""
+    in one GIL-free kernel call, on ``workers`` native threads.
+    ``thermal`` (a ``ThermalSpec``, optional) closes each switch's
+    junction temperature on its loss tables (tutorial 08)."""
     t_switch_specs = {
         name: {"Q1": part.switch_spec(Tj=T_J_MAX)} for name, part in
         PARTS.items()}
@@ -179,7 +181,7 @@ def make_evaluator(form="circuit"):
         kpis=kpis_of(name),
         constraints=[Constraint.max("ripple_v", RIPPLE_MAX),
                      Constraint.min("r_th_sa", R_TH_SA_MIN)],
-        steady=SteadySpec(method="pss"),
+        steady=SteadySpec(method="pss"), thermal=thermal,
         loss_options={"switch_specs": t_switch_specs[name]})
         for name in PARTS}
 

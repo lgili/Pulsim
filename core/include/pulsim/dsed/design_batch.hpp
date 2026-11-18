@@ -26,6 +26,7 @@
 
 #include "pulsim/dsed/builder_adapter.hpp"
 #include "pulsim/dsed/period_integrals.hpp"
+#include "pulsim/dsed/period_thermal.hpp"
 #include "pulsim/dsed/periodic_orbit.hpp"
 #include "pulsim/ir/circuit.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -135,40 +136,8 @@ struct DesignOut {
 
 namespace detail {
 
-/// numpy's pairwise summation of `np.sum` over a contiguous float64
-/// vector (checked against numpy 2.4 on 5840 random vectors, n 8..299).
-inline Real np_pairwise(const Real* a, std::size_t n) {
-    if (n < 8) {
-        Real res = 0.;
-        for (std::size_t i = 0; i < n; ++i) res += a[i];
-        return res;
-    }
-    if (n <= 128) {
-        Real r[8];
-        for (int j = 0; j < 8; ++j) r[j] = a[j];
-        std::size_t i = 8;
-        for (; i < n - (n % 8); i += 8) {
-            for (int j = 0; j < 8; ++j) r[j] += a[i + static_cast<std::size_t>(j)];
-        }
-        Real res = ((r[0] + r[1]) + (r[2] + r[3])) + ((r[4] + r[5]) + (r[6] + r[7]));
-        for (; i < n; ++i) res += a[i];
-        return res;
-    }
-    std::size_t n2 = n / 2;
-    n2 -= n2 % 8;
-    return np_pairwise(a, n2) + np_pairwise(a + n2, n - n2);
-}
-
-/// `_period_kpis._table_switching_loss`'s sum: a plain loop below 8
-/// terms, `np.sum` from 8 on.
-inline Real python_total(const std::vector<Real>& e) {
-    if (e.size() < 8) {
-        Real acc = 0.0;
-        for (Real x : e) acc += x;
-        return acc;
-    }
-    return np_pairwise(e.data(), e.size());
-}
+using period_thermal::np_pairwise;
+using period_thermal::python_total;
 
 struct Fallback {
     std::string why;

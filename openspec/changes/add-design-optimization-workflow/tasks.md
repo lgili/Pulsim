@@ -26,7 +26,7 @@
 - [x] 6.3 Docs: "Using Pulsim inside an optimiser" (contract, statuses, determinism, why derivative-free, the finite-difference table, synthetic parts)
 
 ## 7. Integration with later changes
-- [ ] 7.1 With `add-in-kernel-event-losses`: `ThermalSpec(mode='kernel')` default; the fixed point kept as `mode='fixed_point'`; test that both agree within 0.1 K on the example's best design
+- [x] 7.1 With `add-in-kernel-event-losses`: `ThermalSpec(mode='kernel')` default; the fixed point kept as `mode='fixed_point'`; test that both agree within 0.1 K on the example's best design (exact route only; measured 1.3e-4 K; `test_design_thermal_kernel.py`, `test_period_thermal.cpp`, DECISIONS 28)
 - [x] 7.2 With `add-immutable-circuit-ir`: `Evaluator(circuit=…)` with `with_params`; counter test that a batch on one topology performs one symbolic analysis (`test_design_circuit_form.py`; the exact stepper performs none, and shares its labels and observables per structure instead)
 - [x] 7.3 With `add-parameter-sensitivities`: `gradients=True`; test against the sensitivities change's oracle — as `gradients={variable: '<component>.<field>'}` (the variable-to-parameter map is needed; a scaled map is refused), pss route only, `record.grads` (`test_sensitivity_kpi.py`)
 - [x] 7.4 Declarative, picklable KPI and constraint specs; `backend='process'` refuses an unpicklable part by name before any worker starts; the buck example on processes gives the thread records (`test_design_declarative.py`, DECISIONS 21)
