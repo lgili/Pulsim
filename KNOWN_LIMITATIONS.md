@@ -275,19 +275,31 @@ refuses them.
 
 `add_ideal_switch` / `add_diode(form='branch')` solve the switch current
 as an unknown, so `R_on = 0` and `g_off = 0` are representable. This
-slice runs the switch on `pwl` and `trbdf2` and the diode on `pwl`
+slice runs the switch and the diode on `pwl` and `trbdf2`
 (`docs/known-limitations.md`, branch-form table); other engines refuse
 with `feature='branch_form'`. A mode that makes a state dependent (an
 inductor opened by an ideal switch with `g_off = 0`, two capacitors
-paralleled through `R_on = 0`) runs on `pwl` only with
-`discontinuity_restart=True` (re-initialised and recorded in
-`res.reinit_records`); without the rule, and always on `trbdf2`, it is
-refused with `feature='dependent_states'`;
+paralleled through `R_on = 0`) runs on `pwl` with
+`discontinuity_restart=True` and on `trbdf2` (re-initialised by three
+SDIRK(2,2) steps and recorded in `res.reinit_records`, the same record
+on both); on `pwl` without the rule it is refused with
+`feature='dependent_states'`, as on `trbdf2` with a stateful device
+history (Coss, Lauritzen, IGBT tail, PMSM, saturable inductor). On
+`trbdf2` no diode crossing is located inside the re-initialisation step
+itself (a diode left on its forbidden side is re-decided at the next
+step's start; one that crosses and returns inside it is missed). The
+re-initialisation step's size is the controller's previous proposal,
+not error-controlled for the dependent states. The record takes
+`d = K·x(t+h)`, so on `trbdf2` (h is the controller's step, not the
+user's dt) Λ and ΔW also contain the source motion over that step when
+the cut-set or loop holds a time-varying source. Both engines project
+with a diagonal M (coupled windings in a cut-set are not handled). The
+round-off floor of the error estimate is off on SDIRK steps, so it does
+not apply to the three re-initialisation steps;
 an island bounded only by open ideal elements (OFF ideal diodes
 included: the gauge of D3 is not implemented) with `floating_node`; a
 loop of closed ideal elements and voltage sources with
-`ideal_voltage_loop`. On `trbdf2` the dependent-state check is static
-(any ideal element that could form one is refused up front).
+`ideal_voltage_loop`, with the same four fields on both engines.
 
 ### Fixed engine: first order after a discontinuity (by default)
 

@@ -1097,9 +1097,10 @@ def test_branch_form_cell(kind, engine):
 
 
 # Dependent modes (a switch opening an inductor cut-set, task 5.5): pwl
-# re-initialises under the restart rule; every other cell is refused by
-# name (trbdf2 statically, dsed/bdf1 because the branch form is refused).
-_DEP_REFUSAL = {"pwl": "dependent_states", "trbdf2": "dependent_states",
+# re-initialises under the restart rule, trbdf2 always (three SDIRK
+# steps); pwl without the rule refuses by name, dsed/bdf1 because the
+# branch form is refused.
+_DEP_REFUSAL = {"pwl": "dependent_states",
                 "dsed": "branch_form", "bdf1": "branch_form"}
 
 
@@ -1132,7 +1133,8 @@ def test_dependent_states_cell(engine, restart):
         assert (e.engine, e.feature, e.device) == (named, _DEP_REFUSAL[named], "S")
         assert not (engine == "pwl" and restart), f"pwl+restart refused: {e}"
         return
-    assert engine == "pwl" and restart, f"{engine} ran a dependent mode silently"
+    assert (engine == "pwl" and restart) or engine == "trbdf2", (
+        f"{engine} ran a dependent mode silently")
     assert len(r.reinit_records) == 1
 
 

@@ -1881,6 +1881,19 @@ def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
     return lc.builder, t_end, dt, t_start, store_every
 
 
+
+def _warn_impulse(res, on_impulse):
+    """simulate(on_impulse='warn'): one UserWarning per run (D4 records)."""
+    if on_impulse == "warn" and list(getattr(res, "reinit_records", ())):
+        import warnings
+        r0 = res.reinit_records[0]
+        warnings.warn(
+            f"simulate(on_impulse='warn'): {len(res.reinit_records)} "
+            f"impulsive re-initialisation(s); first at t = {r0.t:g}: "
+            f"{', '.join(r0.devices)} made {', '.join(r0.states)} dependent "
+            f"({r0.kind}, {r0.dW:.6g} J removed). See res.reinit_records.",
+            UserWarning, stacklevel=3)
+
 def simulate(
     builder: "CircuitBuilder | Circuit | LoadedCircuit",
     t_end: Optional[float] = None,
@@ -2703,8 +2716,7 @@ def simulate(
             "engine='dsed', or drop mode_selection.")
 
     if engine == "trbdf2":
-        # add-branch-form-ideal-switch: a branch-form diode is refused
-        # here by name (the table's form row; the switch runs).
+        # The capability table by name (the branch form runs here).
         from . import _pulsim as _k  # type: ignore[import-not-found]
         _k._require_supported(builder.graph, builder.pool, "trbdf2")
         # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse
@@ -2793,6 +2805,7 @@ def simulate(
                     enable_newton_line_search),
                 enable_newton_lm=bool(enable_newton_lm),
                 newton_roundoff_budget=int(newton_roundoff_budget or 0),
+                on_impulse_error=on_impulse == "error",
             )
         except SimulationAborted as _aborted:
             try:
@@ -2832,6 +2845,7 @@ def simulate(
         _auto_check_voltage_sanity(res, builder,
                                     voltage_sanity_factor)
         _trbdf2_warn_stats(res, builder, _stats, _engine_asked)
+        _warn_impulse(res, on_impulse)
         return res
 
     # ---- engine='pwl' from here on ----
@@ -3448,15 +3462,7 @@ def simulate(
     _warn_newton_roundoff(res, "simulate()")
     _warn_resolution(builder, res, dt)
     _warn_unlocated_edges(res)
-    if on_impulse == "warn" and list(getattr(res, "reinit_records", ())):
-        import warnings
-        r0 = res.reinit_records[0]
-        warnings.warn(
-            f"simulate(on_impulse='warn'): {len(res.reinit_records)} "
-            f"impulsive re-initialisation(s); first at t = {r0.t:g}: "
-            f"{', '.join(r0.devices)} made {', '.join(r0.states)} dependent "
-            f"({r0.kind}, {r0.dW:.6g} J removed). See res.reinit_records.",
-            UserWarning, stacklevel=2)
+    _warn_impulse(res, on_impulse)
 
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:

@@ -6,6 +6,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Ideal switch on TR-BDF2: branch-form diode, structural pass, re-initialisation
+
+* **Added** the branch form on `engine='trbdf2'` for the diode too
+  (`add_diode(form='branch')`; it was refused with `feature='branch_form'`):
+  an ON diode's crossing signal is its solved current `i_s`, the noise bound
+  of the decision is read on that unknown.
+* **Added** the per-mode structural pass on `trbdf2`: `floating_node` and
+  `ideal_voltage_loop` are raised with the same four fields as on `pwl`; an
+  ON ideal diode closing a loop of sources and closed ideal elements is
+  turned OFF (`res.ideal_loop_releases`), a second release at one instant is
+  refused.
+* **Added** re-initialisation at impulsive events on `trbdf2` (task 5.5): a
+  step entering a mode with dependent states (an inductor cut-set opened, a
+  capacitor loop closed by ideal elements) and the two after it are
+  SDIRK(2,2) steps, the jumping states are left out of that step's error
+  estimate, and an impulsive entry is recorded in `res.reinit_records` with
+  the fixed engine's record and `on_impulse` policy (the record code moved
+  to `pwl/reinit.hpp`, shared by both engines; `pwl` bit-identical).
+  Measured: cut-set opened at 5 ms on 9.932620872 A: `i_L = 0` from the
+  first step, `v` = 0 from the second, `|Λ| = L·i` and `ΔW = ½·L·i²` =
+  49.3285 mJ exact, projection gap 0; capacitor loop: 4.000000 V within
+  2.0e-13, 6.0 µC and 24.0 µJ within 1e-15 relative, switch current
+  4.5e-10 A from the second step. The static `dependent_states` refusal of
+  `trbdf2` is gone; `engine='auto'` without `dt` now routes an ideal-switch
+  circuit to `trbdf2` like any other (it went to `pwl` or asked for `dt`).
+* Ideal DCM buck (`R_on = 0`, `g_off = 0`) on `trbdf2` at rtol 1e-9: orbit
+  error 9.3e-8 V over 100 periods (task 6.3, bound 1e-6); smallest committed
+  step away from the gate-edge probes 1.56e-10 s against 1.11e-14 s for the
+  conductance form (task 7.2), rejects 210 against 1108. Default-option
+  results of conductance-form circuits are bit-identical.
+
 ### Newton roundoff acceptance: a typed budget abort, and two review fixes
 
 * **Added** `pulsim.NewtonRoundoffBudgetExceeded`, a `SimulationAborted`

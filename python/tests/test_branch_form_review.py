@@ -58,10 +58,12 @@ def _rl_ideal():
     return b
 
 
-def test_h4_auto_routes_an_ideal_switch_away_from_trbdf2():
+def test_h4_auto_routes_an_ideal_switch_like_any_circuit():
+    """Task 5.5: trbdf2 runs the branch form, so engine='auto' routes an ideal-switch
+    circuit like any other (design D7): no dt -> trbdf2, dt -> pwl."""
     fn = lambda t: _mask(True)  # noqa: E731
-    with pytest.raises(ValueError, match="pass dt"):
-        p.simulate(_rl_ideal(), 1e-4, engine="auto", switch_fn=fn)
+    r = _quiet(lambda: p.simulate(_rl_ideal(), 1e-4, engine="auto", switch_fn=fn))
+    assert r.engine_used == "trbdf2"
     r = _quiet(lambda: p.simulate(_rl_ideal(), 1e-4, dt=1e-6, engine="auto", switch_fn=fn))
     assert r.engine_used == "pwl"
 

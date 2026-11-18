@@ -163,3 +163,63 @@ Each entry: question → option taken → evidence → how to reverse.
       opt-in split runs with an opaque `switch_fn`); L4 (commutation
       events of ideal diodes, C++ `run_trbdf2` callers, `res.i` hold —
       listed as remaining work).
+
+## TR-BDF2 (feat/core-p2-trbdf2, task 5.5 and the trbdf2 half of group 4)
+
+14. **One record, two engines.** → The detection of an entered dependent
+    structure and the record (explicit projection, `on_impulse`) moved from
+    `run_transient.hpp` into `pwl/reinit.hpp` (`in_dependent_mode`,
+    `ReinitTracker::entering / record / note`), arithmetic unchanged; the
+    fixed engine calls it from the same place. → Evidence: the golden probe
+    and a byte compare of pwl's cut-set, capacitor-loop and ideal DCM buck
+    runs (times, states, records) are identical before and after. On
+    `trbdf2` the record is made after each committed step from the step's
+    start state, as on `pwl`; `test_the_record_means_the_same_on_both_engines`
+    pins Λ and ΔW of the same circuit to 1e-12. → Reverse: inline the
+    tracker back into both engines.
+
+15. **Which TR-BDF2 steps re-initialise.** Design D7: SDIRK x3 after an event
+    with dependent states. → Every step whose mode has a dependent structure
+    the last committed mode had not is an SDIRK(2,2) step, and so are the
+    next two, whatever the circuit (the post-event SDIRK of
+    `update-trbdf2-post-event-restart` stays Newton-only). Gated entries (and
+    the start) are recorded when impulsive; diode-only entries (an ideal
+    diode stopping at i = 0) are consistent and only take the steps. The
+    gate-edge probe (a trapezoidal step of femtoseconds) is not committed
+    when the post-edge mode is such an entry (it read 1e13 V on a 10 A
+    cut-set). → Evidence: with gated entries only, the ideal DCM buck's TR
+    stage after each diode turn-off read the pre-event derivative slot of the
+    now-algebraic inductor current: 5 steps below 1e-12 s per period and 910
+    rejects in 100 periods; with diode-only entries too: none, 210 rejects,
+    orbit error 9.3e-8 V. A circuit with a Coss, Lauritzen, IGBT-tail, PMSM
+    or saturable-inductor history that enters such a mode is refused
+    (`dependent_states`): the SDIRK step has no stage law for them. →
+    Reverse: `entering(..., gated_only=true)` in the step loop.
+
+16. **The error estimate of the re-initialisation step.** The states of the
+    entered structure jump by design (flux / charge conserved by the BE
+    stages at any h), so their k1 − k2 is the jump over γ_s·h, not an error;
+    left in, it does not shrink with h and rejects to h_min. → Their entries
+    are zero in that one step's estimate; other states keep theirs. Task
+    7.2 is measured away from the committed gate-edge probes (h_probe_floor,
+    1e-14 s in both forms): 1.56e-10 s branch against 1.11e-14 s conductance.
+    → Reverse: drop the exclusion loop in the SDIRK estimate.
+
+17. **No crossing inside the re-initialisation step.** A landing there would
+    be a trapezoidal sub-step across the impulse. → Crossing detection is
+    skipped on that step (shortcut noted in the code); a diode left on its
+    forbidden side is re-decided at the next step's start by the held-diode
+    path. The `engine='auto'` route (review H4) is reversed by design D7: an
+    ideal-switch circuit without `dt` now runs on `trbdf2`. → Reverse: land
+    with an SDIRK sub-step.
+
+18. **What the step-1 review changed.** The re-initialisation step's
+    estimate skips the dependent states, so with every state dependent its
+    proposal is 5x. → It does not set the post-edge h memory (it ratcheted
+    the restart 5x per period); its growth is not capped (capping it left
+    step 2 at 5e-12 s on the capacitor loop, and the switch current, a
+    C*dv/h round-off, rose from 4.5e-10 to 1.14e-9 A). A resumed run
+    continues its committed mode (no re-initialisation at the seam); the
+    probe-commit gate counts diode-only entries; an ON branch diode's held
+    tolerance scales with its current. → Reverse: each is one condition in
+    trbdf2_transient.hpp marked "review M1/M3/L1/L5".
