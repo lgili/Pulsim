@@ -1224,6 +1224,9 @@ Measured, not changed:
   1e-7 .. 1e-9` 0.80 W (both edges counted at the start). Plain
   `simulate(engine='dsed')` at `1 - 1e-7`: 4 transitions in 3 periods. The
   cause is in `scheduler.hpp` (not editable here); KNOWN_LIMITATIONS row.
+  Later fixed by the exact-engine track (session 6: D = 1 - 1e-7 gives
+  2.7004444754 W at phase 0 and T/2, `test_exact_period_end_pulse.py`);
+  the row was removed at integration batch 12.
 * (8) The kernel plan is built once per evaluator (`ev._kplan`), like
   `_spec_cache`: changing `kpis` or `constraints` on an evaluator after
   its first `evaluate_many` is not supported; build a new evaluator.

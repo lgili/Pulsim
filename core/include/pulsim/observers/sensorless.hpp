@@ -165,6 +165,7 @@ inline void add_sliding_mode_observer_to_chain(
             kTwoPi * params.f_init_hz;
         state->pll_integ   = Real{0};
     };
+    chain.capture(state);
     chain.add(std::move(step), std::move(reset));
 }
 
@@ -313,6 +314,7 @@ inline void add_flux_mras_observer_to_chain(
     auto reset = [state]() {
         *state = detail::MrasState{};
     };
+    chain.capture(state);
     chain.add(std::move(step), std::move(reset));
 }
 

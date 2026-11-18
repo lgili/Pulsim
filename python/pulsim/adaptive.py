@@ -132,6 +132,18 @@ def run_transient_adaptive(builder,
     """
     import pulsim as _v2
 
+    names = getattr(builder, "_device_loss_names", lambda: [])()
+    if names:
+        # each segment is a fresh run: its last step's heat would be
+        # dropped, and the result carries no loss records
+        from ._refusal import unsupported
+        raise unsupported(
+            "adaptive", "device_losses",
+            f"run_transient_adaptive cannot honour the loss port of "
+            f"{names[0]!r} (set_device_losses): it resumes the run in "
+            f"segments, which drops the heat in flight at each boundary. "
+            f"Use simulate(engine='pwl').", device=names[0])
+
     if dt_min is None:
         dt_min = dt_init
     if dt_max is None:

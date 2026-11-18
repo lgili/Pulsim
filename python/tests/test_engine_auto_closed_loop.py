@@ -53,10 +53,9 @@ def _pi_buck(setpoint=5.0):
 
 
 def _tail_mean(res, node, from_t):
-    t = np.asarray(res.times)
-    v = np.asarray(res.v(node))
-    m = t > from_t
-    return float(np.trapezoid(v[m], t[m]) / (t[m][-1] - t[m][0]))
+    # Exactly clipped at from_t: starting at the first sample past it is an
+    # O(h) metric error on a variable grid.
+    return ps.time_average(res.times, res.v(node), t_from=from_t)
 
 
 def test_buck_pi_reaches_setpoint_without_choosing_dt():
@@ -160,10 +159,8 @@ def test_setpoint_step_is_tracked():
     # samples at 6 V, flagged by simulate's held-diode warning).
     assert not [w for w in caught
                 if "commutation rule forbids" in str(w.message)]
-    t = np.asarray(res.times)
-    v = np.asarray(res.v("vout"))
-    before = float(np.mean(v[(t > 8e-3) & (t < 10e-3)]))
-    after = float(np.mean(v[t > 18e-3]))
+    before = ps.time_average(res.times, res.v("vout"), t_from=8e-3, t_to=10e-3)
+    after = ps.time_average(res.times, res.v("vout"), t_from=18e-3)
     assert before == pytest.approx(3.0, rel=0.08)
     assert after == pytest.approx(6.0, rel=0.08)
 

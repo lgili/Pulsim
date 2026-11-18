@@ -212,6 +212,20 @@ def _pmsm(on):
     return b
 
 
+def _induction(on):
+    b = p.CircuitBuilder()
+    for i, node in enumerate(("ua", "ub", "uc")):
+        b.add_sine_voltage_source(f"Vs{i}", node, "gnd", 0.0, 40.0, 60.0,
+                                  -2.0 * math.pi / 3.0 * i)
+        b.add_resistor(f"Rs{i}", node, node + "2", 1.0)
+        b.add_resistor(f"Rl{i}", node + "2", "gnd", 1e3)
+    if on:
+        b.add_induction_machine_mna("Md", "ua2", "ub2", "uc2", "nn", "w",
+                                    R_s=0.5, L_ls=2e-3, R_r=0.4, L_lr=2e-3,
+                                    L_m=60e-3, pole_pairs=2, J=1e-2)
+    return b
+
+
 def _junction_cap(on):
     # tasks.md 1.1: 10 V, 1 kΩ, 100 nF ∥ Cn(1 µF, 1 V, 0.5), 1 MΩ load.
     b = p.CircuitBuilder()
@@ -317,6 +331,7 @@ CELLS = {
     "LauritzenDiode": (_clamp(lambda b: b.add_lauritzen_diode(
         "Dd", "o", "gnd")), "o", "Dd", 2e-3, 2e-7, False),
     "PmsmMna": (_pmsm, "ua2", "Md", 2e-2, 1e-5, False),
+    "InductionMachineMna": (_induction, "ua2", "Md", 2e-2, 1e-5, False),
     "IdealTransformer": (_xfmr, "o", "Td", 5e-4, 1e-7, False),
     "VCCS": (_ctl(lambda b: b.add_vccs("Gd", "a", "gnd", "x", "gnd", 5e-3)),
              "o", "Gd", 5e-4, 1e-7, False),
@@ -1182,10 +1197,9 @@ def _rated_chain(b, rate):
 
 
 @pytest.mark.parametrize("rate,feature", [
-    (dict(period=1e-4, offset=2e-5), "control_rate_offset"),
     (dict(period=1e-4, compute_delay=2e-5), "compute_delay"),
 ])
-def test_control_rate_offset_and_delay_time_refused_on_trbdf2(rate, feature):
+def test_control_rate_delay_time_refused_on_trbdf2(rate, feature):
     b = _rc()
     ch = _rated_chain(b, p.Rate(**rate))
     with pytest.raises(p.UnsupportedError) as ei:
@@ -1201,6 +1215,13 @@ def test_control_rate_keywords_honoured_on_pwl(rate):
     b = _rc()
     ch = _rated_chain(b, p.Rate(**rate))
     _sim("pwl", b, step_observer=ch.make_step_observer(b))
+    assert ch.tick_counts == [20]     # ceil((2e-3 - offset) / 1e-4)
+
+
+def test_control_rate_offset_honoured_on_trbdf2():
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(period=1e-4, offset=2e-5))
+    _sim("trbdf2", b, step_observer=ch.make_step_observer(b))
     assert ch.tick_counts == [20]     # ceil((2e-3 - offset) / 1e-4)
 
 
@@ -1302,6 +1323,37 @@ def test_allow_implicit_segments_is_refused_off_the_exact_engine(engine):
     assert ei.value.feature == "allow_implicit_segments"
 
 
+# add-in-kernel-event-losses: a device loss port is honoured on the
+# fixed-step engine only; every other engine refuses it by name, with the
+# device, before a step is taken (task 3.1 brings trbdf2 and dsed in).
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "bdf1", "auto"))
+def test_device_losses_cell(engine):
+    b = _rc()
+    b.add_diode("S", "o", "gnd", 1e3, 1e-9)
+    b.add_voltage_source("Vamb", "amb", "gnd", 25.0)
+    b.add_resistor("Rth", "tj", "amb", 1.0)
+    b.add_capacitor("Cth", "tj", "amb", 1e-3)
+    b.set_device_losses("S", junction="tj")
+    if engine != "pwl":
+        with pytest.raises(p.UnsupportedError) as ei:
+            if engine == "bdf1":
+                k.run_transient_bdf1(
+                    b, k.SimulationOptions(t_start=0.0, t_end=1e-4, dt=1e-6),
+                    lambda _t: p.SwitchStateMask(b.graph.num_switches))
+            else:
+                _sim(engine, b)
+        assert (ei.value.feature, ei.value.device) == ("device_losses", "S")
+        # 'auto' names the engine it resolved to
+        assert ei.value.engine == engine or (
+            engine == "auto" and ei.value.engine in ("trbdf2", "dsed"))
+        return
+    r = _sim(engine, b)
+    assert r.device_energy("S")["E_cond_electrical"] > 0.0
+    # 'auto' with a step routes to pwl and honours the port
+    r = _sim("auto", b, dt=1e-6)
+    assert r.engine_used == "pwl" and r.device_energy("S")["n_on"] >= 0
+
+
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "exact"))
 def test_reinit_records_on_every_engine(engine):
     # result.reinit_records (the impulse at a mode entry) is on every engine since the fixed
@@ -1326,3 +1378,44 @@ def test_reinit_records_on_every_engine(engine):
     (rec,) = recs
     assert (rec.kind, rec.sample) == ("capacitor_loop", 0)
     assert rec.lambda_ == pytest.approx(6e-6, rel=1e-12)
+
+
+# ---------------------------------------------------------------------
+# The gated forms of the Diode kind (add-pwl-igbt-and-thyristor 4.5):
+# IGBT / GTO (gate held) and thyristor / TRIAC (latching), gate on, each
+# clamping the sine like a diode with a drop; their own engine column.
+# ---------------------------------------------------------------------
+GATED_CELLS = {
+    "GateHeld": (_clamp(lambda b: b.add_igbt("Qd", "o", "gnd", 1e-3, 1e9,
+                                             V_ce0=0.7, reverse_blocking=True,
+                                             V_th=0.701)),
+                 "o", "Qd", 2e-3, 2e-7, True),
+    "Latching": (_clamp(lambda b: b.add_thyristor("Td", "o", "gnd", 1e-3, 1e9,
+                                                  V_f=0.7, V_th=0.701)),
+                 "o", "Td", 2e-3, 2e-7, True),
+}
+
+
+def test_gated_rows_cover_both_modes():
+    assert set(k._gated_capabilities()) == set(GATED_CELLS)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("mode", list(GATED_CELLS))
+def test_gated_cell(mode, engine):
+    _check_cell(mode + "[gated]", GATED_CELLS[mode], engine,
+                k._gated_capabilities()[mode][engine])
+
+
+def test_gated_doc_block_equals_the_kernel_table():
+    import pathlib
+    doc = (pathlib.Path(__file__).resolve().parents[2] / "docs"
+           / "known-limitations.md").read_text(encoding="utf-8")
+    block = doc.split("<!-- gated-capabilities:begin -->")[1].split(
+        "<!-- gated-capabilities:end -->")[0]
+    cols = ("pwl", "trbdf2", "dsed", "bdf1", "ac_sweep")
+    doc_table = {}
+    for ln in block.strip().splitlines()[2:]:
+        cells = [c.strip() for c in ln.strip("|").split("|")]
+        doc_table[cells[0]] = {c: v == "yes" for c, v in zip(cols, cells[1:])}
+    assert doc_table == k._gated_capabilities()

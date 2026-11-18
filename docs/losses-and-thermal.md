@@ -80,7 +80,11 @@ state is `V_f + i/g_on`, so a diode carrying 48 A at `g_on = 1e3`
 sits at `V_f` + 48 mV — inside `V_f < v_D < V_th`, where the voltage
 alone cannot say whether it conducts. Its loss is `V_f·i + i²/g_on`, so
 `P_avg` already contains the drop: a `conduction_specs` `V_f0` for the
-same diode is a separate estimate, not an addition. `switch_fn=` is only needed for a result built
+same diode is a separate estimate, not an addition. The gated PWL
+devices (`add_igbt(reverse_blocking=True)`, `add_gto`, `add_thyristor`,
+`add_triac`) are diode rows with the same law: an IGBT's conduction loss
+is `V_ce0·I_avg + R_on·I_rms²` (10 A DC at `V_ce0 = 0.9 V`,
+`R_on = 10 mΩ`: 10.0 W; the bidirectional switch read 1.0 W). `switch_fn=` is only needed for a result built
 without the record (it is then re-evaluated, with a warning). Duties are
 time-weighted per step, so a variable-step grid does not bias them.
 
@@ -410,6 +414,79 @@ Pulsim ships (`allow_synthetic=True`); they illustrate the reading, not
 a device. Not covered: the event energy is not drawn from the circuit
 (the PWL switch is ideal, as in PLECS), and `T_j` does not feed back
 into the electrical solution in kernel mode.
+
+## Event losses inside the transient (`set_device_losses`)
+
+The summaries above are post-hoc: the run ends, then the tables are
+read. `CircuitBuilder.set_device_losses` reads them inside the time loop
+of `engine="pwl"` and deposits the heat into a node of a thermal network
+built in the same circuit (°C is a node voltage, W a current):
+
+```python
+b.add_voltage_source("Vamb", "amb", "gnd", 40.0)      # ambient, °C
+b.add_resistor("Rth", "tj", "amb", 1.0)               # K/W
+b.add_capacitor("Cth", "tj", "amb", 0.01)             # J/K
+b.set_device_losses("Q1", junction="tj",              # closed loop
+                    E_on=LossTable(...), E_off=LossTable(...),
+                    V_on=ConductionTable(...), conduction="table")
+res = p.simulate(b, 0.1, dt=1e-6, switch_fn=pwm)
+res.v("tj")                    # junction temperature, °C
+res.loss_events("Q1")          # t, kind, v, i, Tj, E (structured array)
+res.device_energy("Q1")        # E_on, E_off, E_cond_electrical, E_cond_table, n_on, n_off
+```
+
+* Temperature: `junction="tj"` reads the tables at the junction node's
+  temperature before each event and heats that node (closed loop);
+  `Tj=125` reads at a fixed temperature, and with `heat_node="tj"` still
+  heats that node (open loop), without it only records.
+* Reading rule: the table on the left of "Event losses on the periodic
+  orbit" below, the same function (`thermal::commutation_point`) on both
+  routes. On `pwl`, `x⁻` / `x⁺` are the samples before and after the
+  step that changed the mask, the samples `device_loss_summary` reads:
+  on a three-phase VSI at `Tj = 125` the kernel's `E_on` / `E_off` per
+  switch equal `device_loss_summary(switch_specs=...)` within 1e-9.
+  A diode's `E_off` is its recovery, read at each natural turn-off.
+* Deposition: the heat of a step is a rectangular power over the next
+  step; the trapezoid rule's capacitor history passes half of it on, so
+  the network receives it over two steps (h/2 + h/2), exactly in sum
+  while every step is trapezoidal (the default). A backward-Euler /
+  SDIRK step (`discontinuity_restart=True`, a commutation split) keeps no
+  capacitor current, so at each switch between step kinds up to half a
+  step's heat can be lost or delivered twice while `heat_injected`
+  counts the full amount. Measured on the 10 kHz chopper of the tests
+  (20 ms, 1200 restart steps): the network's energy matches
+  `heat_injected` within 4e-10 (2.7e-13 without restarts).
+  Ten 1 mJ events into 0.01 J/K with no leak raise the junction
+  1.000 K (1e-6). `res.heat_injected + res.heat_pending` equals the
+  recorded event and conduction energy within 1e-12 (the last step's
+  heat is still pending when the run ends).
+* Conduction: `conduction="electrical"` (default) heats with the device's
+  own electrical dissipation per step, as `device_loss_summary` reads it
+  (energy balance closes); `"table"` with `V_on(|i|, T_j)·|i|` over the
+  on-state ends of the step, trapezoidal. Both are reported.
+* Refusals by name (`UnsupportedError` / `ValueError`, naming the
+  device): `trbdf2`, `dsed`, `bdf1`, and `auto` when it does not route
+  to `pwl` (no `dt=`), refuse a circuit with a
+  loss port; an unknown device, a device that is not a PWL switch or
+  diode, both or neither of `junction` / `Tj`, `conduction="table"`
+  without `V_on`, and a deposit node without a capacitor on it.
+* YAML: a `losses:` block on a `switch`, `diode`, `mosfet`,
+  `mosfet_with_body_diode` or `igbt` (`junction`, `Tj`, `heat_node`,
+  `e_on`, `e_off`, `v_on`, `conduction`; unknown keys refused).
+* Parts: `part.attach_losses(b, "Q1", T_amb=40)` builds the part's
+  Foster or Cauer chain from a node `Tj_Q1` and hands its tables over
+  unreduced (a PLECS XML part through `lib.import_plecs_xml`); a
+  synthetic part needs `allow_synthetic=True`.
+
+Not covered: the event energy is not drawn from the circuit (the PWL
+switch is ideal); `T_j` does not change `V_f` or `g_on`; a device that
+flips twice inside one outer step (a commutation split) records no
+event, since only the step's end masks are compared; a thermal
+capacitor to ground starts at 0 °C from a zero initial state, and the
+first events read that (tie the capacitors to the ambient node, as
+above, or start from a DC operating point); a resumed run
+(`resume_from=`) drops the heat of the step in flight; the circuit's IR
+and content hash do not include the loss ports.
 
 ## Device-level switching energy — `add_power_mosfet`
 

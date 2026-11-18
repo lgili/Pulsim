@@ -58,6 +58,7 @@ unless called with `allow_non_passive=True`.
 | SineCurrentSource | Source | yes | yes | yes | yes | yes |
 | PulseCurrentSource | Source | yes | yes | yes | yes | yes |
 | PwlCurrentSource | Source | yes | yes | yes | yes | yes |
+| InductionMachineMna | NewtonStateful | yes | yes | no | no | no |
 <!-- engine-capabilities:end -->
 
 The charge laws `ChargeLaw.table` / `.vdmos_cgd` are the
@@ -87,6 +88,22 @@ ideal elements and voltage sources with `feature='ideal_voltage_loop'`.
 | Diode | yes | yes | no | no | no |
 <!-- branch-form-capabilities:end -->
 
+The gated PWL devices are a form of the Diode row with their own column
+(`add_igbt(reverse_blocking=True)` and `add_gto`: GateHeld;
+`add_thyristor` and `add_triac`: Latching); "no" raises
+`UnsupportedError(feature='gated_diode')`. Not modelled: turn-off time
+`t_q` and commutation failure, dv/dt and break-over firing, a latching
+current distinct from `I_H`, gate power, reverse recovery and switching
+energies. `I_H > 0` chops an inductive current into `R_off` (a voltage
+`I_H·R_off` without a snubber).
+
+<!-- gated-capabilities:begin -->
+| Form | pwl | trbdf2 | dsed | bdf1 | ac_sweep |
+|---|---|---|---|---|---|
+| GateHeld | yes | yes | no | no | yes |
+| Latching | yes | yes | no | no | yes |
+<!-- gated-capabilities:end -->
+
 Circuit-level limits, also raised as `UnsupportedError` (with `feature`
 set): coupled inductors (`add_transformer`, `add_inductor_coupling`) on
 `dsed` and `bdf1`; PWL diodes with `integrator='bdf2'` on `dsed`;
@@ -95,9 +112,8 @@ capacitor loops (parallel capacitors) on `dsed`; C blocks, controllers
 `live_stream`, `max_dt_halvings`, `mmc_arms`, `on_cache`, the inductor
 guards, `enable_substep_state_correction` and `discontinuity_restart` on
 `dsed`; the fixed-step keywords (`discontinuity_restart` among them) on
-`trbdf2`; a control-graph `Rate` with an `offset`
-(`control_rate_offset`) or a `compute_delay` time (`compute_delay`) on
-`trbdf2`; a `b_extra_fn.next_jump_after` declaration is read by `pwl`
+`trbdf2`; a control-graph `Rate` with a `compute_delay` time
+(`compute_delay`) on `trbdf2`; a `b_extra_fn.next_jump_after` declaration is read by `pwl`
 only (a no-op on `trbdf2` / `dsed`, which control the step on their own
 error estimate); `enable_nonlinear_refresh=False` with a smooth /
 Shockley diode, MOSFET or IGBT on every transient engine;
@@ -150,6 +166,15 @@ event where the signal jumps.
 | A device whose power no loss model covers (Lauritzen diode, level-1 MOSFET/IGBT, controlled sources) refuses the efficiency. | Buck with a Lauritzen diode: efficiency would read 0.99989 without the diode's 1.36 W of 28.4 W; it is `refused` (`feature="losses"`). | Evaluate without `loads=` for the other KPIs, or use the PWL diode / switch. |
 | `method="transient"` settles to the engine's own orbit. | DCM buck on `trbdf2`: estimated distance 1.4e-10, true error 2.2e-5 (the engine's accuracy). A PWM voltage source on `trbdf2` never settles to 1e-6 (period noise 2.7e-4). | `method="pss"` (exact stepper), or a switch with a schedule instead of a PWM source. |
 
+## Event losses in the transient (`set_device_losses`)
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| Only `engine="pwl"` reads loss tables inside the run; `trbdf2`, `dsed`, `bdf1` and `auto` without `dt=` (with `dt=` it routes to `pwl` and honours the port) refuse a circuit with a loss port by name (`UnsupportedError`, feature `device_losses`, the device). | Conformance cell `test_device_losses_cell`. The variable-step hook waits for the unified event queue (task 3.1). | `engine="pwl"`, or the post-hoc `device_loss_summary` / the periodic-orbit evaluator on the other engines. |
+| The event energy is not drawn from the circuit: the PWL switch is ideal, the table energy only heats the junction. | By design, as in PLECS and PSIM. | Model the transition (`add_power_mosfet`) when the electrical side must see it. |
+| `T_j` does not feed back into the device (`V_f`, `g_on` stay fixed). | Task 4.1 (optional) not done. | Re-run with `V_f` / `g_on` at the settled `T_j`. |
+| A resumed run (`resume_from=`) drops the heat of the step in flight, and a loss port is not part of the circuit's IR or content hash. | One step's heat at the resume point. | Run the thermal transient in one piece. |
+
 ## Devices
 
 | Limitation | Measured | Workaround |
@@ -195,8 +220,8 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **Only the DC machine is solved in the matrix.** `b.add_dc_machine` is MNA-native; the PMSM observer, BLDC and induction motor are still explicit observers on `pwl` only (forward Euler; the induction motor's rotor flux is integrated exactly over each step since 2026-11, but its EMF still reaches the circuit one step late) (`b.add_pmsm_mna` is native). No machine model is validated against measurements: the tests check analytic limits of the equations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). | Use `b.add_dc_machine`; halve `dt` to check an observer run. |
-| No angle node on `add_dc_machine` (`theta_node` raises `UnsupportedError`); no `components()` entry for the machine as a whole (its sub-elements are listed). | — | Integrate `res.v(omega_node)`, or build the angle: `add_vccs` from the speed node into a 1 F capacitor. |
+| **Native machines: DC machine, PMSM and induction machine are solved in the matrix; the observers are not.** `b.add_dc_machine`, `b.add_pmsm_mna`, `b.add_induction_machine_mna` are MNA-native on `pwl` and `trbdf2`; `p.add_pmsm`, `p.add_bldc`, `p.add_induction_motor` are explicit observers on `pwl` only (first order). The PMSM and induction machine have no DC operating point (the DC assembly stamps Newton devices open, so the preflight ties their neutral, rotor-flux and speed nodes to ground through 1 GΩ) and no AC-sweep stamp; `dsed` refuses them (speed-dependent, not LTI between events). No machine model is validated against measurements: the tests check analytic limits of the equations and independent ODE integrations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). Induction machine free acceleration: 1.0e-5 of synchronous speed at 20 µs on `pwl` with `discontinuity_restart=True`. | Use the native machines; halve `dt` to check an observer run. On `pwl` pass `discontinuity_restart=True` for a three-phase start (first order otherwise). |
+| No `components()` entry for a composite machine as a whole (its sub-elements are listed). | — | — |
 
 ## Passives
 

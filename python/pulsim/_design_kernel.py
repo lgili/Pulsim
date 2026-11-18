@@ -592,6 +592,8 @@ def plan_of(ev):
     """The evaluator's kernel plan, or a string naming why it has none
     (the batch then takes the Python path for every design)."""
     p = ev.__dict__.get("_kplan")
+    if p is not None:
+        ev._check_frozen()   # the plan froze kpis= / constraints=
     if p is None:
         p = _plan_or_reason(ev)
         ev._kplan = p
@@ -608,6 +610,8 @@ def _plan_or_reason(ev):
         return "a thermal loop"
     if ev.gradients:
         return "gradients="
+    if ev.options:
+        return "options= (refused on this route, per design)"
     if not ev._spec_static:
         return "a design variable moves a value the observables read"
     from . import _pulsim as _k

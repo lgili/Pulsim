@@ -37,10 +37,7 @@ def run(engine, t_end=20 * T, **kw):
 
 
 def tw(r, node="out", t0=10 * T):
-    t = np.asarray(r.times)
-    v = np.asarray(r.v(node))
-    m = t > t0
-    return float(np.trapezoid(v[m], t[m]) / (t[m][-1] - t[m][0]))
+    return p.time_average(r.times, r.v(node), t_from=t0)   # exactly clipped
 
 
 if __name__ == "__main__":

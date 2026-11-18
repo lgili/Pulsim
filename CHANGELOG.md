@@ -6,6 +6,209 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration batch 12: unified device interface 1–3, in-kernel event losses, IR scopes, TR-BDF2 track 6, event queue, control graph 4, PWL IGBT / thyristor, exact engine session 6 merged
+
+* **Fixed** `periodic_steady_state` by shooting ran a thyristor / TRIAC
+  with its latch OFF at every period start (the latch is not in the
+  state); it now refuses a latching device by name (`gated_diode`).
+* **Fixed** on `pwl` with `discontinuity_restart` (or an event split) a
+  gated device's commutations were missing from
+  `result.commutation_events`: the record compared with a stamp the
+  restart stages had already replaced.
+* **Fixed** a trbdf2 run resumed with `observer_origin` lost a tick that
+  fell within `h_min` below the split.
+* **Fixed** a YAML `igbt` with a `losses:` block was refused ("unknown
+  key 'losses'") once the IGBT's key list became strict; the key is
+  accepted again and the block reaches the loss tracker.
+* **Fixed** a `Circuit` with a loss port (`set_device_losses`) lost the
+  port silently through `to_yaml`, `pickle` and
+  `sweep(circuit, backend="process")` (the process sweep reported
+  0 J of heat where the run deposits 9 mJ). `to_yaml` now refuses it by
+  name; `with_value` and the thread / kernel sweep paths carry the port.
+  Writing loss ports into the YAML dialect (and into `value_hash`) is
+  left to the circuit-IR track.
+* **Changed** the `SolverSnapshot` pickle (version 3, device interface)
+  carries the control graph's "controllers' state dropped" marker as a
+  13th field, so a pickled snapshot of a closed-loop run is refused at
+  resume as on the control-graph branch; 12-field version-3 pickles and
+  Pulsim 2.0 pickles still load.
+* **Fixed** a trbdf2 resume of a control graph whose rate group has an
+  offset checked the grid without the offset: a resume off the
+  `t_start + offset + k*T` grid the event queue schedules was let
+  through (its ticks would land one offset late), and a resume on it
+  was refused. The check now
+  reads the group's offset (`CxxBlockChain.group_offset`).
+* **Fixed** `periodic_steady_state` by shooting (pwl / trbdf2) ran a
+  circuit with a loss port and dropped each period's turn-on and its
+  last step's heat; it now refuses the port by name.
+
+### Unified device interface, steps 1–3: one history fold, one kernel-built refresh, one device-state vector
+
+* **Changed** (internal) the five stateful-device histories (Coss,
+  Lauritzen diode, MNA PMSM, IGBT tail, saturable inductor) are one
+  object in both transient drivers, and the Newton refresh is one
+  kernel function reading one step context, instead of two chains of
+  five wrappers. Results are bit-identical (golden and stateful-device
+  byte compares), except on TR-BDF2 where a PMSM and an IGBT tail share
+  a terminal: their stamps now add in the other order (reassociation,
+  at most 1 ulp per Jacobian entry; no tested circuit has both).
+* **Deprecated** `simulate(enable_nonlinear_refresh=...)` (and
+  `SolverConfig.enable_nonlinear_refresh`): the kernel stamps every
+  Newton device itself. `True` is what the kernel does by default;
+  `False` on a circuit with Newton devices is still refused by name.
+  Emits a `DeprecationWarning`; removed in a later release.
+* **Changed (snapshot format)** `SolverSnapshot` holds every device
+  state as one flat vector, `dev_state`, with its layout (`dev_layout`,
+  `dev_layout_names`, `layout_signature`) and the solver-owned mode bits
+  as `mask`. A resume refuses a snapshot whose layout is not the
+  circuit's, naming the first block that differs (before, a circuit with
+  the same number of unknowns but other device kinds failed inside one
+  history's size check; it is now refused by block name). A snapshot
+  without a layout (a 2.0 pickle, a hand-built one, or one whose named
+  field was written) is still checked per history, by size. Pickle version 3; Pulsim 2.0
+  pickles (10, 11 or 12 fields) still load and resume identically.
+* **Soft-deprecated** (no warning yet) the named snapshot fields `history`,
+  `saturable_history`, `coss_history`, `lauritzen_history`,
+  `igbt_tail_history`, `pmsm_history` and `diode_on`: views of
+  `dev_state` / `mask` for one release. Writing one turns the snapshot
+  into a 2.0-style payload (as `steady_state` does).
+
+### Optimisation slice 7: event losses inside the transient (`pwl`)
+
+* **Added** `CircuitBuilder.set_device_losses(device, junction= | Tj=,
+  heat_node=, E_on=, E_off=, V_on=, conduction=)`: the fixed-step engine
+  reads the loss tables at every commutation by the reading rule
+  (turn-on `v` before / `i` after, turn-off the reverse) and deposits the
+  heat into a thermal node of the circuit, closing the electro-thermal
+  loop inside one run. `res.loss_events(device)`,
+  `res.device_energy(device)`, `res.heat_injected` / `heat_pending`.
+  YAML `losses:` block; `Part.attach_losses` builds a part's thermal
+  chain and hands its tables over unreduced. Other engines refuse a loss
+  port by name (`UnsupportedError`, feature `device_losses`).
+* **Changed** the periodic-orbit route (`_period_kpis.commutations`)
+  calls the kernel's reading rule, so both routes share one function.
+* **Fixed** an `Evaluator` whose `kpis=` or `constraints=` were changed
+  after its first batch ran the cached kernel plan with the old ones;
+  it is now refused by name.
+* **Fixed** `Evaluator(options=)` was silently dropped on the pss/dsed
+  route, and a keyword simulate() only warned it ignores (`rtol` on
+  `pwl`, `integrator` on `trbdf2`) was dropped on the others; both are
+  now refused by name (`refusal` feature `options`).
+
+### TR-BDF2: no step grind after a diode turn-off; ticks at edges; pulse cap
+
+- After a diode with `g_off > 0` turns off on a linear circuit, the next
+  step is one SDIRK(2,2) step with a filtered error estimate (C++
+  `sdirk_after_turn_off`, default on). The DCM buck (400 periods, rtol
+  1e-5): 7,608 -> 4,212 accepted steps, 2,606 -> 804 steps below 1e-11 s,
+  end-state error 1.17e-5 -> 1.28e-5. The post-event sample is a
+  backward-Euler solve when the jump is instant on its scale.
+- A controller tick due at a gate edge fires before the edge probe is
+  committed: a closed loop's rising edges get their post-edge sample
+  (0 -> 199 of 199).
+- An opaque `switch_fn`'s step cap follows the gate's recent pulses, not
+  the narrowest pulse of the run, and lifts between predicted toggles of a
+  periodic gate (cl_boost_pi start-up: 519,783 -> 28,049 steps in 0.3 ms;
+  1,594 with declared edges, the same per period once the gate is learned).
+- An ON diode's turn-off noise floor reads the voltage across it, not its
+  common mode.
+- `device_loss_summary` reads `unresolved` from the step that holds
+  `t_off + t_rr` (on a variable grid a long step there now flags the
+  turn-off; uniform grids are unchanged).
+
+### Unified event queue (add-unified-event-queue, group 2 and the trbdf2 part of 4.1)
+
+* **Added** `core/include/pulsim/events/event_queue.hpp`: one queue of
+  time events per run (control ticks, gate edges, source breakpoints,
+  output samples, the end of the run). Periodic events are computed from
+  an integer counter, `(t0 + offset) + k*period`, never accumulated;
+  events at one instant come out in a fixed order (sample, tick, gate
+  edge, breakpoint, end; registration order inside a kind); nothing
+  allocates after `start`.
+* **Changed** the TR-BDF2 engine takes its controller ticks, its
+  gate-edge cache and its step clamp from the queue. Results are
+  byte-identical (34-case compare: the golden circuits, closed loops,
+  multi-rate ticks, opaque gates, pulse sources).
+* **Added** a control-graph `Rate` with an `offset` runs on `trbdf2`
+  (ticks at `t_start + offset + k*period`); it was refused
+  (`UnsupportedError`, feature `control_rate_offset`).
+  `run_transient_trbdf2(observer_offsets=...)`.
+* **Added** tick grids keep their phase on resume: `events::Rate::origin`
+  (NaN = the run's t0), `run_transient(tick_origin=)` and
+  `run_transient_trbdf2(observer_origin=)` tick at `(origin + offset) + k*T`
+  from the first instant at or after `t_start`, so a run resumed between
+  ticks ticks where the uninterrupted one would.
+* **Changed** the fixed-step engine's Python tick sources (a closed loop
+  with a period, a `step_observer` with `controller_period`) are scheduled
+  by the kernel's event queue instead of a Python scheduler object in the
+  step observer: the same instants, counts and lateness
+  (`control_tick_counts`, `control_tick_jitter_max`), byte-identical
+  results and the same order inside a step, and Python is entered only at
+  a tick. `run_transient(tick_periods=, tick_fns=, tick_before=)`;
+  `SimulationResult.kernel_tick_counts` / `kernel_tick_jitter_max`.
+* **Added** `core/include/pulsim/events/step_hooks.hpp`: accepted-step and
+  commutation callbacks (`StepHooks::on_accept`, `on_commutation`), called
+  by the pwl and trbdf2 engines (`run_transient(..., hooks)`,
+  `run_transient_trbdf2(..., hooks)`); meant to become the hook of the in-kernel event losses (the loss tracker still runs on its own `accept` call; C++ only, not exposed to Python).
+  `events::TickPlan` / `TickInfo{scheduled_t, k}`: the kernel's tick
+  registration.
+* **Changed** trbdf2 reads its source breakpoints and its end of run from
+  the queue (byte-identical).
+* The control graph's PWM gate states its edges through the control
+  graph's G23 (`CxxChainPwmGate.next_edge_after`, see the batch 11 entry
+  below); `trbdf2` reads them from the queue's gate source, which a tick
+  invalidates.
+
+### Control graph G26-G31: controller state, gate, state-time ticks, ll16
+
+* **Fixed** a serial `sweep` / `monte_carlo` continued each point from the
+  previous point's controller (`closed_loops=[loop]`, R = 10, 8, 10, 8:
+  v_out 5.149, 6.607, 7.716, 7.984 V); every point now restarts the
+  caller's graphs, Python controller objects are deep-copied per point,
+  and a closure over mutable state or a graph on parallel points is
+  refused by name (`controller_state`).
+* **Fixed** `resume_from` continued whatever the last run left in the
+  controllers; the snapshot now carries the graphs' and C blocks' state
+  (export_c libraries gain the optional `pulsim_cblock_save` /
+  `pulsim_cblock_restore` pair). A pickled snapshot of a closed loop, an
+  opaque native block and (on trbdf2) a resume between two ticks are
+  refused by name.
+* **Added** `MixedDomainBlockChain.gate`: a discrete gate whose edges are
+  the graph's publication instants.
+* **Added** `simulate(control_tick="state")` (default `"label"`): the
+  closed-loop helpers tick on `x(kT)` and the split snap narrows to
+  1e-6 dt (`SimulationOptions.split_snap`); pwl+split is second order on
+  the closed-loop benchmarks (cl_buck_pi 1.39e-3 -> 8.4e-6 at the
+  harness dt).
+* **Fixed** `ll16_flyback_closed_loop` was not a flyback (an uncoupled
+  secondary); `benchmarks/tools/circuit_lint.py` finds such netlists.
+* **Changed** the raw kernel Clarke / inverse Clarke / SVM structs use
+  the one law of `block_laws.h` (ulps; duty at `v_dc <= 0` normalises by
+  1 instead of returning 0.5), equal to the Python classes bit for bit.
+* A run holding an export_c library's static state refuses a concurrent
+  run of it on another thread.
+
+### PWL IGBT with a knee, kernel thyristor, GTO, TRIAC (add-pwl-igbt-and-thyristor)
+
+* **Added** `add_igbt(..., V_ce0=, reverse_blocking=, V_th=)`: with
+  `reverse_blocking=True` the IGBT conducts `(v_CE − V_ce0)/R_on` only
+  forward with the gate on; `device_loss_summary` reads
+  `V_ce0·I + R_on·I²` (10.0 W at 10 A, 0.9 V, 10 mΩ, where the switch
+  read 1.0 W). **Staged BREAKING**: `reverse_blocking` unset stays
+  `False` (the old bidirectional switch, bit-identical) with a
+  `FutureWarning` in this release and becomes `True` in the next.
+* **Added** `add_thyristor`, `add_gto`, `add_triac` (`switch_indices_of`)
+  and `make_phase_control_fn`; YAML types `thyristor`, `gto`, `triac` and
+  the `igbt` keys `V_ce0`, `reverse_blocking`, `V_th`. The latch is a
+  kernel device state, turned off at the current zero (or `I_H` once the
+  gate is off) by each engine's crossing machinery, on `pwl` and
+  `trbdf2`; `dsed` and `bdf1` refuse by name (`feature='gated_diode'`).
+  Six-pulse bridge, 400 V, 20 A: 540.15 / 467.78 / 270.06 V at
+  α = 0 / 30 / 60° (analytic 540.19 / 467.82 / 270.10), 460.59 V with
+  1 mH overlap (460.62).
+* **Deprecated** `make_thyristor_switch_fn` and `BlockChain.add_thyristor`
+  (`DeprecationWarning` naming `add_thyristor`).
+
 ### Exact engine session 6: wrong answers closed at their first diverging event
 
 * **Fixed** the forward converter on `dsed`/`exact`. It kept its
@@ -17,7 +220,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   default selection, and the switch cut the inductor current at every
   gate-off. A mode entered through an impulsive re-initialisation now
   goes to the complementarity selection.
-* **Fixed** a gated diode bridge from rest on `mode_selection='lcp'`.
+* **Fixed** a diode bridge behind a gated switch, started from rest, on
+  `mode_selection='lcp'`.
   It refused because D1 was OFF and forward-biased by 0.314 V.
 * **Fixed** the phase-shift full bridge. The diode-law check refused a
   5e-15 V forward bias at t = 0, which is inside the engine's own zero
@@ -28,6 +232,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   known limitation is removed.
 * **Changed** the dsed port model now corrects several floating islands
   jointly. A single island is unchanged.
+
+### Native machines: induction machine, PMSM harmonics / BLDC (add-mna-native-machines)
+
+* **Added** `CircuitBuilder.add_induction_machine_mna`: a squirrel-cage
+  induction machine solved in the circuit matrix (stationary frame,
+  constant stator inductance, rotor flux as two internal nodes, torque
+  into the speed node), new kind `InductionMachineMna`, on `pwl` and
+  `trbdf2`; `dsed` and the AC sweep refuse it by name. Checked against
+  the equivalent circuit (locked rotor, synchronous speed, slip 0.05,
+  within 4.5e-4 at 50 µs) and an independent SciPy integration of a
+  direct-on-line start (second order on `pwl` with
+  `discontinuity_restart=True`; `trbdf2` 1.6e-5 at rtol 1e-8). YAML `type: induction_machine`;
+  `induction_motor` gains `model: mna | observer` (default `observer`).
+  Traces `<name>.T_em/omega/psi_ra/psi_rb` on the result.
+* **Added** `add_pmsm_mna(harmonics=[(h, psi_h, phi_h), ...])`: a
+  non-sinusoidal PM flux, back-EMF and torque from the same series;
+  `CircuitBuilder.add_bldc_mna` (trapezoidal back-EMF, 0.40 % RMS from
+  the ideal trapezoid at 25 harmonics) and
+  `pulsim.machines.pm_harmonics_from_waveform` (fit a measured back-EMF).
+* **Fixed** on `pwl` every step of an `add_pmsm_mna` machine failed at
+  the requested `dt` (the cache cannot factorise the linear part, whose
+  flux rows exist only in the Newton refresh) and was re-taken at `dt/2`
+  with a warning. The step now runs at `dt`: results change (they are
+  those of the `dt` asked for), no `dt_retries`.
+* **Added** `add_dc_machine(theta_node=...)`: the shaft angle through a
+  unit VCCS into a 1 F capacitor (was refused).
+* **Added** two analytic reference cases, `im_locked_rotor` and
+  `im_free_acceleration` (`dsed` refused).
 
 ### Integration batch 11: circuit IR YAML, TR-BDF2 ideal switch, pwl complementarity, exact step 3, control graph G23, optimisation slice 6 merged
 
@@ -462,6 +694,68 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   outcomes in `v2_triage.yaml` (DECISIONS G17): `cl_buck_pi`,
   `cl_buck_aggressive_pi`, `ll16` (pwl) agree; `ll14`, `ll15` and `ll16`
   (trbdf2) disagree, not yet diagnosed; `cl_boost_pi` grinds on trbdf2.
+
+### Circuit IR slice 3 (add-immutable-circuit-ir)
+
+* **Added** scopes (group 8). A subsystem instance is a scope of the
+  circuit: `Circuit.scopes()` lists the tree (`path`, `name`, `kind` =
+  the `define_subsystem` definition, `parent`), `Circuit.scope_of(name)`
+  the scope of a device, node or parameter. `define_subsystem(...)
+  .instantiate` opens one per instance; `with builder.scope(path,
+  kind=...)` (C++ `open_scope` / `close_scope`) opens one by hand. A
+  parameter declared in a scope belongs to it (`leg_a/sm17/Ron`), and an
+  expression looks names up from its scope outward (an inner name
+  shadows an outer one), so `with_params({"leg_a/sm17/Ron": ...})`
+  re-values one instance. Names are unchanged (`leg_a/sm17/C`): a scoped
+  circuit equals its hand-prefixed twin element for element and
+  simulates bit for bit like it on pwl, trbdf2 and dsed (pinned on a
+  302-branch arm); its
+  `structure_hash` (and so `value_hash`) and `scopes()` differ. YAML netlists take
+  `circuit.subsystems` (nested blocks with `name`, `kind`, `ports`,
+  `parameters`, `nodes`, `devices`, `subsystems`); `Circuit.to_yaml()`
+  writes the tree and `from_yaml` restores it. A circuit without scopes
+  hashes as before. **Migration:** instantiating a definition twice at
+  one path was refused by the duplicate device name; it is now refused
+  first, by the path (`already used by an instance`). A nested
+  `instantiate` through a body's proxy after that body returned is
+  refused (it would have opened the scope at the wrong level). Inside
+  a scope, `param("Ron", "2*Ron")` is refused as a cycle (it read the
+  outer `Ron`), and `bind_param` / `set_param` find the scope's own name
+  first: a body's `s.param("Cv")` is stored as `<path>/Cv` and found by
+  its local name while the body runs. A YAML block name holding `/` is
+  refused (nest blocks).
+* **Added** `yaml::load` / `load_yaml_string` read the emitter's
+  document (`Circuit.to_yaml()`, same `value_hash`), and a `type:` that
+  names a registry kind without an authoring type of its own
+  (`shockley_diode`, `lauritzen_diode`, `nonlinear_capacitor`,
+  `pmsm_mna`) is read with the emitter's entry (`pins: [...]`, stored
+  fields): one schema table (`ir::kKindYaml` / `kKindFields`, compile-time
+  checked) for both readers.
+* **Changed** `Circuit.from_yaml` applies the authoring bounds to every
+  value a document writes (`R1: G must be a finite number > 0 (got
+  -1)`), as `with_value` does; a branch-form switch or diode keeps its
+  own rule (`R_on`, `g_off` >= 0). Not every `add_*` checks them
+  (`add_resistor` takes R < 0): such a circuit still pickles (the pickle
+  reads its own text without the bounds), but `from_yaml(c.to_yaml())`
+  refuses it. **Migration:** a document with an out-of-bound value is
+  refused by name.
+* **Changed** a NaN or an infinity is refused by name at both ends:
+  `to_yaml` (and so pickling) raises `to_yaml: device "R1": "G" is .nan`,
+  and `from_yaml` reads no `.nan` / `.inf` / `nan` / `inf` (`"V" must be
+  a finite number`). A branch-form switch or diode no longer writes its
+  `g_on` (1/R_on, infinite when ideal); `from_yaml` sets it from
+  `branch_form.R_on` as `add_*` does. **Migration:** a document written
+  before this change with `g_on: .inf` on a branch-form device is
+  refused; delete that key.
+* **Changed** a `Circuit`'s tables and hashes (`nodes()`, `devices()`,
+  `structure_hash()`, ...) are computed on first use: a derivation
+  (`with_value`, `with_params`, a sweep point) costs its clone only.
+* **Changed** `Evaluator(circuit=...).evaluate_many(backend="process")`
+  runs the circuit form (a `Circuit` pickles); a part beside it that
+  does not pickle is still refused by name.
+* Numbers in `to_yaml` stay shortest-round-trip (`std::to_chars`), not
+  `%.17g`: the same exact round trip (tested), text a person would type
+  (DECISIONS 16).
 
 ### Circuit IR slice 2 (add-immutable-circuit-ir)
 

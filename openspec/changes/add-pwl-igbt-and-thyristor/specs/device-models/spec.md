@@ -14,8 +14,10 @@ power SHALL be `V_ce0·i + R_on·i²`. `reverse_blocking=False` with
 `V_ce0 = 0` SHALL be bit-identical to the IGBT before this requirement.
 A `V_ce0` that is negative, not finite, or positive without reverse
 blocking SHALL be refused with an error naming the device. The device
-SHALL be usable on `pwl`, `trbdf2` and `dsed`, in the DC operating
-point, and through the YAML `igbt` keys `V_ce0` and `reverse_blocking`.
+SHALL be usable on `pwl` and `trbdf2`, in the DC operating point, and
+through the YAML `igbt` keys `V_ce0` and `reverse_blocking`; `dsed`,
+`exact` and `bdf1` SHALL refuse it with `feature='gated_diode'` and the
+device name.
 
 #### Scenario: Forward conduction shows the knee
 - **GIVEN** 10 A forced collector to emitter through an IGBT with
@@ -30,9 +32,9 @@ point, and through the YAML `igbt` keys `V_ce0` and `reverse_blocking`.
 - **THEN** the current is `−1e-7 A` (`R_off = 1e9 Ω`), not `−1e4 A`
 
 #### Scenario: Gate off blocks forward voltage
-- **WHEN** +100 V is applied with the gate off, on `pwl`, `trbdf2` and
-  `dsed`
-- **THEN** `|i| ≤ 1e-7 A` on each engine
+- **WHEN** +100 V is applied with the gate off, on `pwl` and `trbdf2`
+- **THEN** `|i| ≤ 1e-7 A` on each engine, and `dsed` refuses the circuit
+  by name
 
 #### Scenario: Legacy device is one flag away
 - **WHEN** a three-phase inverter is built with
@@ -56,8 +58,8 @@ gate is on and `i > 0`, and, once the gate is off, stay on while
 turn-off SHALL be located by the engine's event detection on the
 current, not by comparing a sampled current with a fixed epsilon. `V_f`
 and `I_H` SHALL be finite and non-negative, else refused by name. The
-thyristor SHALL be usable on `pwl`, `trbdf2` and `dsed`, and through
-the YAML type `thyristor`.
+thyristor SHALL be usable on `pwl` and `trbdf2`, and through the YAML
+type `thyristor`; `dsed`, `exact` and `bdf1` SHALL refuse it by name.
 
 #### Scenario: Phase-controlled half-wave rectifier off the grid
 - **GIVEN** a 100 V peak, 60 Hz source, a thyristor and a 10 Ω load,

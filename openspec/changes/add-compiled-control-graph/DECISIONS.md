@@ -500,13 +500,212 @@ Each entry: question → option taken → evidence → how to reverse.
   1e-10 of their scale. No skip.
 - **Reverse.** Restore the struct bodies (git) and `= cos` / `= sin`.
 
+## G26. Controller state per sweep point and in the snapshot
+
+- **Question.** A serial `sweep` reused the caller's controllers: point
+  k continued point k-1's integrator (`closed_loops=[loop]`, R = 10, 8,
+  10, 8 ohm: v_out 5.1487, 6.6073, 7.7160, 7.9842 V at 1 ms; points 0
+  and 2 differ). `resume_from` continued whatever the last run left in
+  the graphs and C blocks, not the snapshot's run (the G22 hook).
+- **Taken (sweep).** Inside `sweep` / `monte_carlo`
+  (`_control_state.sweep_points`) each point restarts the caller's
+  graphs from the state they had when the sweep began
+  (`CxxBlockChain.save_state` / `restore_state` plus the Python-held
+  parts). Python controller objects in the keyword arguments
+  (`step_observer`, `switch_fn`, `b_extra_fn`, `closed_loops`) are
+  deep-copied per point (one memo: an observer and its gate stay
+  paired); the caller's object is untouched. Refused by name
+  (`UnsupportedError`, feature `controller_state`): a closure over
+  mutable state (cannot be copied), a graph on parallel points (one
+  graph stepped by several threads). The old `ValueError` for parallel
+  stateful kwargs is now that refusal. A plain `simulate()` keeps G22
+  (the caller's graphs carry over; C blocks restart).
+- **Taken (snapshot).** `SolverSnapshot` holds an opaque
+  `std::shared_ptr<void> control_state` (`result.hpp`); Python stores
+  `[(chain, GraphState)]` in it after the trbdf2 and pwl runs.
+  `resume_from` restores it, so another run in between does not leak.
+  A graph's state: every kernel block's POD (`BlockChain::capture`, a
+  copy and a restorer per adapter; `uncaptured_blocks()` lists a block
+  with a reset and no capture), signals, tick grid, recordings; a
+  `PythonBlock` object: a deep copy of its `__dict__`; a Python C block:
+  its state dict and buffers; a native C block: the optional ABI pair
+  `pulsim_cblock_save` / `pulsim_cblock_restore` (every `export_c`
+  shim emits it over its static struct; restore returns 0, or nonzero
+  to refuse). Refused by name: an opaque
+  native block (no pair), an object whose state does not deep-copy, a
+  pickled snapshot of a run with controllers (the state does not
+  pickle; the last field of the pickle tuple marks it — field 13 of
+  the version-3 tuple since integration batch 12), a snapshot of other
+  controllers.
+- **trbdf2 resume.** The kernel ticks observers at `t_start + k*T`; a
+  graph resumed between two ticks would tick off its grid (1.63, 1.73
+  ms instead of 1.6, 1.7 ms; duty up to 0.9 % off). Refused on trbdf2
+  when any rate group's next tick (`next_due_per_group`) is off the
+  `t_start + k*period` grid (feature `resume_from`; `auto` names it as
+  the route blocker).
+  Reproducer for the TR-BDF2 track: `probes/trbdf2_resume_tick_phase.py`
+  (needs a per-observer first tick). Resuming on a tick is allowed.
+- **Also refused (review).** A graph block running a function whose
+  closure cells, defaults or the module globals it reads may hold
+  mutable state, followed into the functions and bound methods they
+  hold (its state is not copied; the same test refuses such a
+  `step_observer` in a sweep; only `pulsim._pulsim` natives count as
+  stateless),
+  and a resume from a snapshot that carries no state for a controller
+  that has already run. A sweep mixing a graph and a controller object
+  deep-copies only the object. The export_c restore returns nonzero on
+  a size mismatch (refused by name).
+- **Limits.** A call refused after the control plan is composed (a
+  route blocker, a configuration error) has already put the snapshot's
+  or sweep start's state into the caller's graphs. Every run with
+  controllers copies their state into the final snapshot (recordings
+  included). A restored object's `__dict__` holds copies: outside
+  references to its old sub-objects no longer follow it.
+- **Evidence.** `test_controller_state_isolation.py` (helper loop in
+  both sweep forms, chain as `step_observer`, controller object on
+  threads, refusals; resume on pwl at 1.53 ms bit-identical duties and
+  rel 1e-9 states, trbdf2 at 1.5 ms rel 1e-6);
+  `test_control_graph_rerun.py` (Python and `export_c` blocks resumed
+  from an older snapshot, pwl and trbdf2; an opaque inline block
+  refused). The old strict xfail is gone.
+- **Reverse.** Drop `sweep_points` / `point_kwargs` from `sweep.py`,
+  `save_into` / the snapshot branch of `start_run`.
+
+## G27. One run at a time on an export_c library's static state
+
+- **Question.** Two circuits that load one `export_c` library share its
+  static struct. G22 resets it per run and G26 restores it on resume,
+  so sequential runs are clean; two runs at once on user threads would
+  step one struct twice per tick.
+- **Taken.** The run's control plan holds the static-state libraries
+  of its circuit and of the C blocks inside the caller's graphs
+  (`c_block.static_state_hold`, re-entrant per thread,
+  released when the plan is dropped as `simulate()` returns or
+  unwinds; a `simulate` wrapper would have moved every warning's
+  stacklevel); a run on another thread that needs one is refused by
+  name (`RuntimeError`). Parallel sweeps already refuse C blocks.
+  Limits: after an exception the hold lives as long as its traceback;
+  a nested run on the same thread (from an observer) is not refused.
+- **Evidence.** `test_a_static_library_runs_on_one_thread_at_a_time`:
+  a run started from inside another's observer on a second thread is
+  refused; after the first run returns the same call runs.
+- **Reverse.** Drop `ControlPlan.static_hold`.
+
+## G28. A discrete Gate: a graph signal drives switches on its ticks
+
+- **Taken.** `MixedDomainBlockChain.gate(builder, {channel: switch})`
+  returns a native schedule (`CxxChainSignalGate`): switch on while the
+  published signal is > 0.5. Its `next_edge_after(t)` is the graph's
+  `next_jump_after(t)` (the publication instants), so pwl+split splits
+  at them and trbdf2 lands them; it marks `follows_controller`, so
+  shooting refuses it as it refuses the loop gate. It needs the built
+  graph (`make_step_observer` first; `ValueError` otherwise).
+- **Evidence.** `test_control_graph_gate.py`: a 100 kHz comparator
+  regulates a buck to 12 V; on trbdf2 every change of Q is recorded by
+  a step that starts on a tick k*T (within 1e-12 s); pwl+split and
+  trbdf2 end within 1e-3 of each other.
+- **Waits.** A comparator crossing located between ticks is 7.2 (a
+  state event on the unified device interface).
+- **Reverse.** Remove `gate`, `ChainSignalGate` and its adapter branch.
+
+## G29. One Clarke / inverse Clarke / SVM law (G25's leftover)
+
+- **Taken.** `ClarkeTransform`, `InverseClarkeTransform` and
+  `SpaceVectorModulator` in `blocks.hpp` (raw `add_clarke` /
+  `add_inverse_clarke` / `add_svm`, `CxxClarkeTransform`,
+  `CxxSpaceVectorModulator`) call `pl_clarke` / `pl_inverse_clarke` /
+  `pl_svm`, the law the Python classes and the export already use
+  (no libm call but `sqrt`, correctly rounded). Numbers move by ulps;
+  `v_dc <= 0` now normalises by 1 (the Python class) instead of
+  returning duty 0.5.
+- **Evidence.** `test_raw_kernel_clarke_and_svm_are_the_one_law`: 10^4
+  random inputs at v_dc = 400, 0, -5, byte-identical to the Python
+  classes (Clarke and SVM; the inverse Clarke struct is the same
+  one-line call, not reachable without a graph run). Golden probe identical (no golden circuit uses them).
+- **Reverse.** Restore the struct bodies (git).
+
+## G30. control_tick="state": second order for pwl+split closed loops
+
+- **Question.** pwl+split converges at first order on the closed-loop
+  circuits: label time samples `x(kT - dt)` (G17 / docs/control-graph.md)
+  and the split moves an edge within `0.01*dt` of a step boundary onto
+  it.
+- **Taken.** `simulate(control_tick="state")`, default `"label"` (every
+  number unchanged; golden identical). It runs the label-time graphs
+  (closed-loop helpers, C blocks) in state time for that run (tick k on
+  `x(kT)`, held from `kT`; their publication instants are declared, so
+  the restart rule restarts on them) and sets
+  `SimulationOptions.split_snap` (new, default 0.01, validated in
+  [1e-12, 0.25]) to 1e-6. State time alone left the order ragged (1.4e-6
+  floor on cl_buck_pi, order 0.0-1.9); the snap was the rest.
+- **Evidence.** pwl+split, max |v(kT) - ref| / span against
+  `probes/closed_loop_reference.py`, dt = T/d (harness dt = T/20; ll15
+  T/10, ll16 T/26.7):
+
+  | circuit | label T/20 | state T/20 | state T/40 .. T/640 orders |
+  |---|---:|---:|---|
+  | cl_buck_pi | 1.39e-3 | 8.35e-6 | 2.07 2.06 2.01 2.00 2.00 |
+  | cl_buck_aggressive_pi | 1.95e-2 | 8.25e-5 | 2.43 1.81 2.37 1.99 1.99 |
+  | cl_boost_pi | 4.16e-4 | 4.05e-5 | 1.72 2.21 2.39 2.37 2.07 |
+  | ll14_buck_closed_loop | 3.04e-4 | 7.77e-5 | 1.08 1.58 1.82 1.88 2.01 |
+  | ll16_flyback (G31) | 2.63e-4 | 3.27e-5 | 1.77 1.83 1.96 2.04 (to T/320) |
+  | ll15_boost_closed_loop | 1.01e-5 | 1.01e-5 | same as label (duty pinned at 0.85) |
+
+  Label time stays at order 1.00 (cl_buck_pi 1.39e-3 -> 4.2e-5 at
+  T/640). Cost: wall time within the noise of the label run (0.40 vs
+  0.42 s, ll14 at T/640; 0.80 vs 0.59 s, cl_boost_pi).
+  `test_control_tick_state.py`: the pwl+split duty history sits 10x
+  closer to trbdf2 rtol 1e-10 in state time; the default is the label
+  run, byte for byte.
+- **Limit.** The one `snap` also merges diode crossings; at 1e-6*dt
+  two estimates of one crossing may split into two sub-steps (no change
+  measured on diode_bridge_rectifier / half_bridge_transformer_dc).
+- **Why not default.** It moves every closed-loop number (frozen cells,
+  examples, the golden probe); the brief keeps defaults.
+- **Reverse.** Drop the kwarg and the field.
+
+## G31. ll16 is a flyback again; a structural lint of the circuits
+
+- **Question.** `ll16_flyback_closed_loop` was not a flyback: `Lsec`
+  was coupled to nothing (V(vout) = 0 on every engine, an open loop)
+  and `Lm_core` / `Lleak_prim` sat in parallel with the switch, so each
+  turn-off cut 604 A into roff = 1e7 ohm (G23 marked it `suspect`).
+- **Taken.** `Lm_core` (160 uH) across an ideal 4:1 transformer
+  (`transformer` T1, secondary dot reversed), `uic: true` (the DC point
+  shorts Lm through the switch). The 2 uH leakage is folded into Lm: it
+  had no clamp to take its current at turn-off. The independent tool
+  (`probes/closed_loop_reference.py`, topology `flyback`: Lm, ideal
+  transformer, Shockley diode by Radau) gives the reference: trbdf2
+  rtol 1e-10 within 9.5e-8 of span on v(out) at every tick, pwl+split
+  2.9e-4. Back on the strict gate (no `suspect`): every cell disagrees
+  on V(sec) / V(drain) and is frozen. In the DCM idle interval the drain
+  is set by the residual Lm current through roff (no drain
+  capacitance), so it follows the solver tolerance (trbdf2 default vs
+  rtol 1e-8: 0.31 of span on V(drain), 1.7e-5 on V(vout)). States agree
+  (V(vout) / I(Lm): trbdf2 1.7e-5 / 5.7e-5, pwl+split 8.1e-5 / 5.4e-4).
+  As authored the 12 V set-point is out of reach (duty capped at 0.5
+  with a 4:1 ratio gives Vout + Vd = 12 V in CCM) and the 2 ms run ends
+  in the start-up (6.7 V); kept, it is the author's loop.
+- **Lint.** `benchmarks/tools/circuit_lint.py`, two rules on the
+  netlist graph: `source_free` (an inductor whose biconnected block has
+  no source, switch, winding or `ic`: it never carries current) and
+  `inductor_cutset` (one switch open, the others closed, diodes on: a
+  node group off ground that meets only inductors, whose current each
+  turn-off cuts). On the 126 circuits it found only the old ll16 (both
+  rules); a first variant with every switch open flagged 47 synchronous
+  converters and was dropped. `test_circuit_lint.py` keeps the set
+  clean.
+- **Reverse.** Restore the old netlist and the `suspect` entry.
+
 ## Hooks for task groups 6–7 (not in this slice)
 
-- **6.1 graph state in the solver snapshot.** `SolverSnapshot`
-  (`core/include/pulsim/solver/run_transient.hpp`, forbidden) needs an
-  opaque `std::vector<Real> control_state` plus a save/restore callback
-  pair `(BlockChain::save_state(), restore_state())`; each block then
-  needs `xd` slices (G5).
+- **6.1 tick events.** Done for the snapshot (G26). The graph's ticks
+  still reach `pwl` through the observer and `trbdf2` through
+  `observer_periods`. On the event queue
+  (`origin/feat/core-p3-event-queue`, `events/event_queue.hpp`) each
+  rate group becomes `add_periodic(Kind::ControlTick, Rate{period,
+  offset})`; on resume `offset = next_due() - t_start`, which lifts the
+  G26 trbdf2 refusal. `next_due()` is in `BlockChain` now.
 - **6.2 continuous-rate blocks.** Their states must join the MNA
   unknowns: a stamping hook in `run_transient` / `trbdf2_transient`
   (`(x, h) -> rows`), not available from the observer.

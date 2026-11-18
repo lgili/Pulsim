@@ -30,6 +30,7 @@
 #include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
+#include "pulsim/topology/switch_state.hpp"
 
 #include <algorithm>
 #include <array>
@@ -40,6 +41,7 @@
 #include <memory>
 #include <queue>
 #include <stdexcept>
+#include <tuple>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -128,6 +130,9 @@ struct ChainContext {
 
 using BlockStepFn = std::function<void(ChainContext&)>;
 using BlockResetFn = std::function<void()>;
+/// A copy of one block's state; calling the returned closure puts the
+/// copy back (snapshot / resume, a run's declared initial state).
+using BlockSaveFn = std::function<std::function<void()>()>;
 
 
 // =============================================================================
@@ -144,6 +149,7 @@ public:
         BlockStepFn step;       // phase 1: compute the outputs
         BlockStepFn update;     // phase 2: state transition (may be empty)
         BlockResetFn reset;
+        BlockSaveFn save;       // empty: stateless, or state not capturable
         std::vector<Read> reads;
         std::vector<Index> writes;
         int group = 0;
@@ -219,6 +225,28 @@ public:
         if (b.name.empty()) b.name = "block" + std::to_string(blocks_.size());
         blocks_.push_back(std::move(b));
         compiled_ = false;
+    }
+
+    /// The block being built keeps its state in `*p...` (copyable PODs):
+    /// save_state() copies them, restore_state() assigns the copies back.
+    /// A block with a reset but no capture is reported by
+    /// uncaptured_blocks() (its state would not reach a snapshot).
+    template <class... T>
+    void capture(std::shared_ptr<T>... p) {
+        pending_.save = [p...]() -> std::function<void()> {
+            return [p..., c = std::make_tuple(T(*p)...)]() {
+                std::tie(*p...) = c;
+            };
+        };
+    }
+
+    /// Names of the blocks that hold state no snapshot captures.
+    [[nodiscard]] std::vector<std::string> uncaptured_blocks() const {
+        std::vector<std::string> out;
+        for (const auto& b : blocks_) {
+            if (b.reset && !b.save) out.push_back(b.name);
+        }
+        return out;
     }
 
     /// Forget the reads and writes of a block whose build failed.
@@ -362,6 +390,68 @@ public:
         std::vector<Index> out_slots;   // slots its blocks write
     };
 
+    /// Everything a run changes in the graph: block states, signals,
+    /// tick grid, published values, recordings, counters. Restorable
+    /// only into the chain that saved it.
+    struct State {
+        const BlockChain* owner = nullptr;
+        std::vector<std::function<void()>> blocks;
+        std::vector<Real> sig;
+        std::unordered_map<Index, Real> b_extra;
+        std::vector<std::vector<Real>> recordings;
+        std::vector<Real> recording_times;
+        std::uint64_t n_evals = 0, n_block_evals = 0, n_calls = 0;
+        std::vector<Group> groups;
+        std::vector<Real> pub;
+        Real last_t = Real{0}, t0 = Real{0}, solver_dt = Real{0};
+    };
+
+    [[nodiscard]] State save_state() const {
+        State s;
+        s.owner = this;
+        for (const auto& b : blocks_) if (b.save) s.blocks.push_back(b.save());
+        s.sig = ctx_.sig;
+        s.b_extra = b_extra_map_;
+        for (const auto& r : recordings_) s.recordings.push_back(r.history);
+        s.recording_times = recording_times_;
+        s.n_evals = n_evals_;
+        s.n_block_evals = n_block_evals_;
+        s.n_calls = n_calls_;
+        s.groups = groups_;
+        s.pub = pub_;
+        s.last_t = last_t_;
+        s.t0 = t0_;
+        s.solver_dt = solver_dt_;
+        return s;
+    }
+
+    void restore_state(const State& s) {
+        if (s.owner != this || s.groups.size() != groups_.size() ||
+            s.recordings.size() != recordings_.size() ||
+            s.sig.size() != ctx_.sig.size()) {
+            throw std::invalid_argument(
+                "BlockChain.restore_state: the state belongs to another "
+                "control graph (or this one changed since it was saved)");
+        }
+        for (const auto& r : s.blocks) r();
+        ctx_.sig = s.sig;
+        b_extra_map_ = s.b_extra;
+        for (Size i = 0; i < recordings_.size(); ++i) {
+            recordings_[i].history = s.recordings[i];
+        }
+        recording_times_ = s.recording_times;
+        n_evals_ = s.n_evals;
+        n_block_evals_ = s.n_block_evals;
+        n_calls_ = s.n_calls;
+        groups_ = s.groups;
+        pub_ = s.pub;
+        last_t_ = s.last_t;
+        t0_ = s.t0;
+        solver_dt_ = s.solver_dt;
+    }
+
+
+
     /// Add a discrete group; returns its id (>= 1).
     int add_group(Real period, Real offset, int delay_kind, Real delay_time) {
         if (!(period > Real{0}) || !std::isfinite(period)) {
@@ -401,9 +491,20 @@ public:
     }
 
     [[nodiscard]] bool has_rates() const noexcept { return groups_.size() > 1; }
+    /// Smallest offset of the rate groups (0 without any).
+    [[nodiscard]] Real min_group_offset() const noexcept {
+        Real m = std::numeric_limits<Real>::infinity();
+        for (Size gi = 1; gi < groups_.size(); ++gi) {
+            m = std::min(m, groups_[gi].offset);
+        }
+        return std::isfinite(m) ? m : Real{0};
+    }
     [[nodiscard]] Size n_groups() const noexcept { return groups_.size(); }
     [[nodiscard]] Real group_period(int g) const {
         return groups_.at(static_cast<Size>(g)).period;
+    }
+    [[nodiscard]] Real group_offset(int g) const {
+        return groups_.at(static_cast<Size>(g)).offset;
     }
     /// Ticks delivered per group (index 0: evaluations of group 0).
     [[nodiscard]] std::vector<std::uint64_t> tick_counts() const {
@@ -411,6 +512,27 @@ public:
         for (const auto& g : groups_) c.push_back(g.n_ticks);
         return c;
     }
+    /// The instant of the next tick due (any rate group), on the graph's
+    /// own grid t0 + offset + k*period; infinity without rate groups.
+    [[nodiscard]] Real next_due() const noexcept {
+        Real best = std::numeric_limits<Real>::infinity();
+        for (Size gi = 1; gi < groups_.size(); ++gi) {
+            const auto& g = groups_[gi];
+            best = std::min(best, t0_ + g.offset +
+                                      static_cast<Real>(g.k) * g.period);
+        }
+        return best;
+    }
+    /// Each rate group's next tick instant (group order, group 0 left out).
+    [[nodiscard]] std::vector<Real> next_due_per_group() const {
+        std::vector<Real> out;
+        for (Size gi = 1; gi < groups_.size(); ++gi) {
+            const auto& g = groups_[gi];
+            out.push_back(t0_ + g.offset + static_cast<Real>(g.k) * g.period);
+        }
+        return out;
+    }
+    [[nodiscard]] Size n_calls() const noexcept { return n_calls_; }
     [[nodiscard]] Real tick_jitter_max() const noexcept {
         Real j = Real{0};
         for (const auto& g : groups_) j = std::max(j, g.jitter_max);
@@ -472,7 +594,9 @@ public:
     /// tick and calls here with the state at the tick).
     void observe_tick(Real t, const Vector& x) {
         rearm_if_restarted(t);
-        if (n_calls_ == 0) t0_ = t;
+        // The first tick is the earliest group's tick 0, at t0 + its
+        // offset (the kernel schedules t0 + offset + k*period).
+        if (n_calls_ == 0) t0_ = t - min_group_offset();
         last_t_ = t;
         ++n_calls_;
         run_pass(t, &x, Real{0}, /*every_call=*/false, t);
@@ -945,6 +1069,32 @@ struct ChainPwmGate {
                                       t, l.phase, l.period, thr));
         }
         return best;
+    }
+};
+
+/// A discrete gate (task 6.2): bit `idx` is ON while its signal (what the
+/// sinks see) exceeds 0.5. The signal moves only when a rate group
+/// publishes, so the gate's edges are among the graph's publication
+/// instants (`next_jump_after`, which a label-time graph leaves
+/// undeclared): engines land them instead of sampling the gate. The
+/// chain must outlive the gate.
+struct ChainSignalGate {
+    BlockChain* chain = nullptr;
+    Size num_switches = 0;
+    std::vector<std::pair<Index, Index>> pairs;   // (slot, switch index)
+
+    [[nodiscard]] topology::SwitchStateMask operator()(Real /*t*/) const {
+        topology::SwitchStateMask mask{num_switches};
+        for (const auto& [s, idx] : pairs) {
+            if (chain->sink_value(s) > Real{0.5}) {
+                mask.set(static_cast<Size>(idx), true);
+            }
+        }
+        return mask;
+    }
+
+    [[nodiscard]] Real next_edge_after(Real t) const {
+        return chain->next_jump_after(t);
     }
 };
 
