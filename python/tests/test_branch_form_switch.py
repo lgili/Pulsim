@@ -257,7 +257,7 @@ def test_branch_switch_refused_by_name(engine):
         engine, "branch_form", "S", "Switch")
 
 
-@pytest.mark.parametrize("engine", ["trbdf2", "dsed"])
+@pytest.mark.parametrize("engine", ["dsed"])
 def test_branch_diode_refused_by_name(engine):
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 1e3)
@@ -276,22 +276,23 @@ def test_branch_switch_refused_by_the_ac_sweep():
     assert (ei.value.engine, ei.value.feature) == ("ac_sweep", "branch_form")
 
 
-@pytest.mark.parametrize("R_on, g_off, why", [(0.0, 0.0, "g_off = 0"), (1e-3, 0.0, "g_off = 0")])
-def test_trbdf2_refuses_dependent_states(R_on, g_off, why):
+@pytest.mark.parametrize("R_on, g_off", [(0.0, 0.0), (1e-3, 0.0)])
+def test_trbdf2_runs_g_off_zero(R_on, g_off):
+    """Task 5.5: g_off = 0 runs on trbdf2 (it was refused statically); a switch that
+    never opens enters no dependent mode."""
     b = _rl(R_on, g_off)
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim(b, t_end=1e-4, switch_fn=lambda t: _mask(b, ["S"]), engine="trbdf2")
-    assert (ei.value.engine, ei.value.feature, ei.value.device) == (
-        "trbdf2", "dependent_states", "S")
-    assert why in str(ei.value)
+    r = _sim(b, t_end=1e-4, switch_fn=lambda t: _mask(b, ["S"]), engine="trbdf2")
+    assert len(r.reinit_records) == 0 and r.i("L")[-1] > 0.9
 
 
-def test_trbdf2_refuses_an_ideal_switch_closing_a_capacitor_loop():
+def test_trbdf2_runs_an_ideal_switch_closing_a_consistent_capacitor_loop():
+    """Both capacitors at 0 V when the loop closes: re-initialised (three SDIRK steps), no
+    impulse, no record."""
     b = p.CircuitBuilder()
     b.add_capacitor("C1", "x", "gnd", 1e-6)
     b.add_capacitor("C2", "y", "gnd", 3e-6)
     b.add_resistor("R", "x", "gnd", 1e3)
     b.add_ideal_switch("S", "x", "y", 0.0, 1e-9)
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim(b, t_end=1e-4, switch_fn=lambda t: _mask(b, ["S"]), engine="trbdf2")
-    assert ei.value.feature == "dependent_states"
+    r = _sim(b, t_end=1e-4, switch_fn=lambda t: _mask(b, ["S"]), engine="trbdf2")
+    assert len(r.reinit_records) == 0
+    assert r._trbdf2_stats["n_reinit_steps"] == 3

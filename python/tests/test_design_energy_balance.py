@@ -74,9 +74,15 @@ def test_no_balance_when_a_source_is_not_measured():
 
 
 def test_a_stepped_route_is_held_to_its_own_tolerance():
-    r = _ev(engine="pwl", options={"dt": T / 200}).evaluate(CCM)
+    # trbdf2's variable steps: above the exact routes' 1e-8 (DECISIONS 29:
+    # stepped stays 1e-1, first order at gate edges: -3.9e-2 at T/25)
+    r = _ev(engine="trbdf2", steady=SteadySpec(method="transient")
+            ).evaluate(CCM)
     assert r.status == "ok"
-    assert 1e-8 < abs(r.counters["energy_residual"]) < 1e-1
+    assert 1e-8 < abs(r.counters["energy_residual"]) < 1e-2
+    # pss on the fixed step: each side of a gate edge integrated alone
+    r = _ev(engine="pwl", options={"dt": T / 200}).evaluate(CCM)
+    assert r.status == "ok" and abs(r.counters["energy_residual"]) < 1e-8
     assert p.design._ENERGY_RTOL == {"exact": 1e-8, "sampled": 1e-8,
                                      "stepped": 1e-1}
 

@@ -28,6 +28,7 @@
 #include "pulsim/models/flux_table.hpp"
 #include "pulsim/models/jiles_atherton.hpp"
 #include "pulsim/models/power_mosfet.hpp"
+#include "pulsim/numeric/parse_real.hpp"
 
 #include <yaml-cpp/yaml.h>
 
@@ -482,11 +483,10 @@ struct YamlIo {
         if (!n || !n.IsScalar()) fail(who, std::format("\"{}\" must be a number", key));
         const std::string& s = n.Scalar();
         Real x{};
-        const auto r = std::from_chars(s.data(), s.data() + s.size(), x);
-        if (r.ec != std::errc{} || r.ptr != s.data() + s.size()) {
+        if (!numeric::parse_real(s.data(), s.data() + s.size(), x)) {
             fail(who, std::format("\"{}\" is not a number: \"{}\"", key, s));
         }
-        if (!std::isfinite(x)) {   // from_chars reads "nan" / "inf"; to_yaml never writes them
+        if (!std::isfinite(x)) {   // to_yaml never writes a non-finite value
             fail(who, std::format("\"{}\" must be a finite number, got \"{}\"", key, s));
         }
         return x;
@@ -665,7 +665,10 @@ struct YamlIo {
         if (const auto ns = root["nodes"]) {
             for (const auto& n : ns) {
                 const auto name = text(n, "nodes", "nodes");
-                if (b.resolve_node_(name) != b.graph().num_nodes() - 1) {
+                // Sequenced: the operands of != have no evaluation order (MSVC
+                // read num_nodes() before resolve_node_ created the node).
+                const Index created = b.resolve_node_(name);
+                if (created != b.graph().num_nodes() - 1) {
                     fail("nodes", std::format("\"{}\" is listed twice or names ground", name));
                 }
             }

@@ -439,9 +439,12 @@ public:
             ++result.n_accept;
 
             // 4. Did we land on a gate edge?
+            bool fired = false;
             if (t_gate < t_end && near_time(t, t_gate)) {
                 if (at_corner) t = t_gate;
                 const IntegratorChoice prev_choice = choice;
+                fired = true;
+                x_pre_ = x;   // the left limit, recorded only if the edge projects a dependent state
                 fire_gate_event_(t_gate, x, rk_state, bdf2_state,
                                     prev_choice, result);
                 // Re-query stiffness for the new mode
@@ -461,7 +464,7 @@ public:
             ++step_idx;
             if (step_idx % store_every_ == 0) {
                 ped_push_sample(result, t, x, system_.current_mask(),
-                                step_mask, nullptr);
+                                step_mask, fired && x_pre_ != x ? &x_pre_ : nullptr);
             }
         }
 

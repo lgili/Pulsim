@@ -691,4 +691,46 @@ TEST_CASE("TR-BDF2: one SDIRK step after a diode event, filter on or off",
         cache, b.graph(), b.pool(), o,
         [&](Real) { return all_open(n_sw); }, {}, std::nullopt, &s_lin);
     REQUIRE(s_lin.n_sdirk_steps == 0);
+
+    // Order: every step after the first diode event an SDIRK(2,2) step,
+    // the controller switched off (rtol 1) so every step IS the ceiling
+    // (306 accepts at 200 us over 60 ms). Halving the ceiling divides the
+    // error against a 12.5 us run by 4.09 (measured; 4.07, 4.04, 4.0 down
+    // to 25 us): second order. Plain TR-BDF2 on the same grid gives 2.28,
+    // the first-order edge restart. The window is interpolated at 20 ms:
+    // tail_mean starts at the first sample past it, an O(h) metric error
+    // that alone measured 1.95.
+    auto run_h = [&](Real h_max, solver::TrBdf2Stats& st) {
+        solver::TrBdf2Options oh;
+        oh.t_end = 60e-3;
+        oh.h_max = h_max;
+        oh.rtol = 1.0;
+        oh.atol = 1e-3;
+        oh.sdirk_after_diode_event = Size{1} << 40;
+        oh.sdirk_on_linear_circuits = true;
+        const auto res = solver::run_transient_trbdf2(
+            cache, b.graph(), b.pool(), oh,
+            [&](Real) { return all_open(n_sw); }, {}, std::nullopt, &st);
+        const Index n = b.node_id_of("out");
+        const Real t0 = 20e-3;
+        Real acc = 0.0;
+        for (Size k = 1; k < res.times.size(); ++k) {
+            const Real ta = res.times[k - 1], tb = res.times[k];
+            if (tb <= t0) { continue; }
+            const Real va = res.states[k - 1][n], vb = res.states[k][n];
+            const Real a0 = std::max(ta, t0);
+            const Real v0 = va + (vb - va) * (a0 - ta) / (tb - ta);
+            acc += 0.5 * (tb - a0) * (v0 + vb);
+        }
+        return acc / (res.times.back() - t0);
+    };
+    solver::TrBdf2Stats s1, s2, s_ref;
+    const Real v1 = run_h(200e-6, s1);
+    const Real v2 = run_h(100e-6, s2);
+    const Real v_ref = run_h(12.5e-6, s_ref);
+    REQUIRE(s1.n_sdirk_steps > s1.n_accept / 2);
+    const Real ratio = std::abs(v1 - v_ref) / std::abs(v2 - v_ref);
+    INFO("e(200us) = " << std::abs(v1 - v_ref) << ", e(100us) = "
+         << std::abs(v2 - v_ref) << ", ratio " << ratio);
+    REQUIRE(ratio > 3.5);
 }
