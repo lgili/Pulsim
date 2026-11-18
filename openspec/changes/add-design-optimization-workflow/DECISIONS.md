@@ -569,6 +569,91 @@ batches (item 2 of this slice).
 is then `None` and the Python loop runs); `LossTable.total` falls back by
 deleting its body to `np.sum(self(...))`.
 
+## 20. The circuit form (slice 5, task 7.2) and what still holds the GIL
+
+Question: how does a design reach the immutable circuit IR? → (1)
+`Evaluator(circuit=base, fields={variable: target})`, the target a
+named parameter (`with_params`) or `"<component>.<field>"`
+(`with_value`, the sensitivities' naming); the gate schedule fixed
+(`switch_fn=`) or per design (`schedule(design)`); design keys outside
+`fields` (a frequency, a part) are read by `period` / `schedule` / the
+KPIs only. `build=` keeps working unchanged; exactly one of the two.
+The circuit form refuses `ThermalSpec(temperature_dependent=True)`
+(no `_T_j` input) and `backend='process'` (a `Circuit` does not
+pickle) by name. (2) `periodic_steady_state` and the pwl/trbdf2
+shooting take a `Circuit` like `simulate` does: the period runs share
+its symbolic plan. (3) What is resolved once instead of per record:
+the kernel observables (`spec_for`), on the circuit form, when no
+variable moves a value they read (whitelist: inductor, capacitor,
+resistor; any other kind is re-resolved per design, tested with
+`Vin.V`); the state labels of the exact stepper per (structure hash,
+section mask) for any `Circuit` (they were one full state-space
+extraction per evaluation, 10.7 us); the options digest per evaluator
+(the base circuit by `value_hash()`, the design by its variables:
+flat designs are canonicalised inline, same ids as before, asserted on
+51 designs). (4) The switching-table losses of the kernel route are
+read in scalars (`_period_kpis._table_switching_loss`): the same edge
+limits, each point by the kernel table, summed as numpy sums them
+(a plain loop below 8 terms, `np.sum` above) -- bit for bit equal to
+`_switch_switching_loss` (random sequences of 0..17 edges, and the
+example's records with the path disabled); any other spec takes the
+general path. (5) Hot-path function-level imports replaced by module
+attributes read at call time (tests still replace them).
+→ Reverse: drop `circuit=` from `Evaluator.__init__` (the factory form
+is untouched); `_LABELS` and the spec cache are plain dicts to delete.
+
+Counters (asserted, `test_design_circuit_form.py`): records of the
+circuit form equal the factory form's in every field but the id
+(dsed pss, exact transient, pwl pss, pwl transient, trbdf2 transient);
+a pwl batch of 6 designs on 3 threads makes 1 symbolic analysis on the
+circuit form and >= 6 on the factory form; the exact stepper makes no
+symbolic analysis at all (dense per-mask extraction), and there the
+labels and the observables are computed once per batch (6 per 6
+designs before); 8 threads give the 1-thread records and leave the
+base's `value_hash` unchanged; < 500 Python calls per evaluation.
+
+Evidence (buck Pareto, `examples/optimization/buck_pareto.py`, 512
+designs: 376 ok / 136 infeasible, every record bit for bit equal to
+7b195243's on both forms):
+
+| | Python calls / evaluation (cProfile) | wall / evaluation | kernel share |
+|---|---|---|---|
+| 7b195243 (factory) | 751 | ~440 us | 20 % |
+| factory form now | 521 | | 24 % |
+| circuit form now | 378 | 164 us | 36 % (59 us) |
+
+Per evaluation, circuit form (wall, nested phases, best of 5): kernel
+orbit 59 us; solver set-up 24 (schedule periodicity check 6, circuit
+check 2, `to_builder` 1, cache + adapter 1.3, census, the rest glue);
+loss rows 15; KPIs 15; build 8 (two `with_value` 5); design id 8;
+implausible-voltage check 5; result object 5; the record ~15.
+
+Throughput (`evaluate_many`, 128 SYN-A designs, interleaved best of 5,
+one process per tree; load average 9-12 from other agents' builds on
+10 cores, observation, not asserted):
+
+| | 1 thread | 4 threads | 8 threads |
+|---|---|---|---|
+| 7b195243 (factory) | 3239 evals/s | 2856 | 3150 |
+| factory form now | 3927 | 3802 | 4191 |
+| circuit form now | 5025 | 4865 | 4879 |
+
+THREADS STILL DO NOT SCALE: 8 threads are not faster than 1. What holds
+the GIL is everything but the one `dsed_periodic_orbit` call: about
+105 us of Python per evaluation against 59 us of kernel (Amdahl ceiling
+1.6x before any GIL hand-off cost), spread over the phases above with
+no single item above 25 us. What would make the thread backend scale:
+a batch kernel call (all designs' Newton loops on a C++ pool in one
+GIL-free call) lifts the ceiling to ~1.4x only, because the Python
+set-up and post-processing stay serial; the process backend has no
+shared GIL and is item 2 of this slice (the declarative KPIs make the
+example picklable; the circuit form needs a picklable `Circuit`).
+
+Needed from the IR (recorded in its DECISIONS): a picklable `Circuit`
+(group 4.3) for the process backend; the Python side state of a builder
+(`_graph_driven`) is lost by `build()`, so a control graph's driven
+source cannot be refused on the circuit form (group 3).
+
 ## Missing from the kernel (recorded, worked around in Python)
 
 Items 1 and 2 are done (add-parameter-sensitivities slice, 2026-11):

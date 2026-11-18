@@ -120,14 +120,21 @@ refused [1.e+30 1.e+30] [1.e+30]
   `T_j`; it stops when the estimated distance to the fixed point (not
   the last step) is below `tol`; the circuit is re-simulated only when
   `temperature_dependent=True` (then `build` reads `design["_T_j"]`).
+* `Evaluator(circuit=base, fields={"L": "L.L", "C": "C.C"},
+  schedule=lambda d: make_pwm_switch_fn(d["f_sw"], ...), ...)` instead
+  of `build=`: one immutable `pulsim.Circuit` (`builder.build()`)
+  shared by every evaluation and thread, a design being `with_params` /
+  `with_value` of it (targets: a `builder.param` name or
+  `"<component>.<field>"`). Same records as the factory form; no
+  rebuild, one symbolic analysis per batch, the state labels and KPI
+  observables resolved once (about 0.16 ms per buck design).
 * `ev.evaluate_many(designs, workers=8)` keeps the input order and gives
   the same records on 1 or 8 threads. On the `pss` route the period
-  runs and the KPI integrals are one kernel call with the GIL released
-  (`counters["kpi_path"] == "kernel"`, about 0.4 ms per buck design),
-  and so is the whole Newton loop (`counters["pss_loop"] == "kernel"`),
-  but building the circuit, the loss rows and the KPIs hold the GIL, so
-  threads still do not speed it up; `backend="process"` helps for large
-  batches of picklable evaluators.
+  runs, the KPI integrals and the whole Newton loop are one kernel call
+  with the GIL released (`counters["pss_loop"] == "kernel"`), but the
+  set-up, the loss rows, the KPIs and the record still hold the GIL
+  (about two thirds of an evaluation), so threads do not speed the buck
+  up; `backend="process"` (picklable evaluators, `build=` form) does.
 
 ## 4. Why derivative-free
 

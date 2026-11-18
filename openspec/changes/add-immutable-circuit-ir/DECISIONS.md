@@ -211,3 +211,20 @@ is not a precondition; `simulate()` keeps its entry points and calls
   `SymbolicAnalysis` is read-only after `export_symbolic` (adoption
   copies it).
 - **Reverse:** drop `share_symbolic` calls; caches analyse privately.
+
+## 13. Needs recorded by the optimisation slice 5 (Evaluator(circuit=...))
+
+What the design evaluator needed from the IR and used instead
+(add-design-optimization-workflow DECISIONS 20):
+
+* **A picklable `Circuit`** (task 4.3): `evaluate_many(backend='process')`
+  ships the evaluator to worker processes; the circuit form is refused
+  there by name and the factory form is the process path.
+* **Builder side state in the IR** (task 3): `_graph_driven` (a control
+  graph's `drive_source`) is a Python attribute of the builder and does
+  not survive `build()`, so `simulate(circuit)`,
+  `periodic_steady_state(circuit)` and the evaluator cannot refuse a
+  graph-driven source given as a `Circuit`.
+* Not needed: a GIL-free batch `with_params` or a cheaper clone --
+  `with_value` costs 2.5 us and `to_builder` 1 us per design, against
+  ~105 us of Python per evaluation.

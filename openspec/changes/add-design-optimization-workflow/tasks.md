@@ -27,7 +27,7 @@
 
 ## 7. Integration with later changes
 - [ ] 7.1 With `add-in-kernel-event-losses`: `ThermalSpec(mode='kernel')` default; the fixed point kept as `mode='fixed_point'`; test that both agree within 0.1 K on the example's best design
-- [ ] 7.2 With `add-immutable-circuit-ir`: `Evaluator(circuit=…)` with `with_params`; counter test that a batch on one topology performs one symbolic analysis
+- [x] 7.2 With `add-immutable-circuit-ir`: `Evaluator(circuit=…)` with `with_params`; counter test that a batch on one topology performs one symbolic analysis (`test_design_circuit_form.py`; the exact stepper performs none, and shares its labels and observables per structure instead)
 - [x] 7.3 With `add-parameter-sensitivities`: `gradients=True`; test against the sensitivities change's oracle — as `gradients={variable: '<component>.<field>'}` (the variable-to-parameter map is needed; a scaled map is refused), pss route only, `record.grads` (`test_sensitivity_kpi.py`)
 
 ## 8. Verification

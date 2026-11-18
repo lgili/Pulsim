@@ -57,6 +57,10 @@ class TransientMap:
     def __init__(self, builder, T, switch_fn, engine, dt=None, options=None):
         from .periodic_steady_state import (_check_circuit, _check_schedule,
                                             _err)
+        from .periodic_steady_state import _from_circuit
+        builder, circuit = _from_circuit(builder)
+        # the runs take the Circuit itself: one symbolic analysis for all
+        self._src = builder if circuit is None else circuit
         self.builder, self.T, self.sf, self.engine = builder, float(T), \
             switch_fn, engine
         if engine not in ("pwl", "trbdf2"):
@@ -202,7 +206,7 @@ class TransientMap:
 
     def simulate(self, x, periods=1):
         from . import simulate
-        return simulate(self.builder, t_end=periods * self.T,
+        return simulate(self._src, t_end=periods * self.T,
                         engine=self.engine, switch_fn=self.sf,
                         initial_state=self.full(x), **self.kw)
 

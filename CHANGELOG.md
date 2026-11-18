@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Optimisation slice 5: the evaluator on the circuit IR
+
+* **Added** `pulsim.design.Evaluator(circuit=..., fields=..., switch_fn=
+  | schedule=...)`: designs as `with_params` / `with_value` of one shared
+  immutable `pulsim.Circuit`, no rebuild; records equal the `build=`
+  form's. `periodic_steady_state` (all engines) accepts a `Circuit`;
+  its period runs share the circuit's symbolic plan. The buck Pareto
+  example uses it (`make_evaluator(form="circuit")`, default).
+* **Changed** per evaluation: the exact stepper's state labels are
+  cached per structure, the KPI observables per evaluator, switching
+  tables are read in scalars (bit for bit), no function-level imports:
+  buck Pareto 751 -> 378 Python calls and ~440 -> 164 us per design,
+  1 thread 3239 -> 5025 evaluations/s, records bit for bit unchanged
+  (512 designs). Threads still do not scale (DECISIONS 20).
+
 ### Integration batch 8: control graph, optimisation slice 4 and circuit IR merged
 
 * **Fixed** (control graph review) `PIController`, `Limiter`,

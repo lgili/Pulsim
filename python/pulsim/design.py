@@ -34,6 +34,19 @@ from typing import Any, Callable, Mapping, Optional, Sequence
 
 import numpy as np
 
+import sys
+
+from . import Cancelled
+from . import _period_kpis as _pk
+from ._pulsim import ConvergenceError  # type: ignore[import-not-found]
+from ._refusal import UnsupportedError, unsupported
+from .periodic_steady_state import _closed_loop_source
+
+# modules read at call time (tests replace their attributes): a
+# function-level import costs importlib calls in every evaluation
+_pkg = sys.modules[__package__]
+_pss = sys.modules[__package__ + ".periodic_steady_state"]
+
 __all__ = [
     "EvaluationRecord",
     "Evaluator",
@@ -441,7 +454,22 @@ class Evaluator:
         ``build(design) -> builder`` or ``(builder, switch_fn)``. Called
         once per evaluation (and per thermal iterate when
         ``thermal.temperature_dependent``); it must not share mutable
-        state between calls.
+        state between calls. Give ``build`` or ``circuit``, not both.
+    circuit
+        A :class:`pulsim.Circuit` (``builder.build()``) shared by every
+        evaluation and every worker thread: a design is
+        ``circuit.with_params`` / ``with_value`` of it through
+        ``fields``, with no rebuild and one symbolic analysis per batch.
+    fields
+        With ``circuit``: ``{design variable: target}``, the target a
+        named parameter (``builder.param``) or ``"<component>.<field>"``
+        (the names of ``Circuit.devices()`` and of the sensitivities).
+        Design keys not in it (a frequency, a part name) are read by
+        ``period``, ``schedule`` and the KPIs only.
+    switch_fn, schedule
+        With ``circuit``: the gate schedule, fixed (``switch_fn``) or
+        per design (``schedule(design) -> switch_fn``); neither for a
+        circuit without controlled switches.
     period
         The switching period ``T`` (s), or ``period(design) -> T``.
     loads
@@ -489,7 +517,11 @@ class Evaluator:
         ``'gradients'``); no gradient is ever a finite difference.
     """
 
-    def __init__(self, build: Callable, *, period,
+    def __init__(self, build: Optional[Callable] = None, *, period,
+                 circuit: Any = None,
+                 fields: Optional[Mapping[str, str]] = None,
+                 switch_fn: Any = None,
+                 schedule: Optional[Callable] = None,
                  loads: Sequence[str] = (),
                  sources: Optional[Sequence[str]] = None,
                  output: Optional[str] = None,
@@ -515,6 +547,30 @@ class Evaluator:
                              "(the settle estimate reads x(n/2) ... x(n))")
         if not (isinstance(samples_per_period, int) and samples_per_period >= 4):
             raise ValueError("samples_per_period must be an int >= 4")
+        if (build is None) == (circuit is None):
+            raise TypeError("Evaluator: give build= (a factory) or circuit= "
+                            "(a pulsim.Circuit), exactly one")
+        self.circuit = circuit
+        self.fields = dict(fields or {})
+        self.switch_fn = switch_fn
+        self.schedule = schedule
+        if circuit is None:
+            if fields or switch_fn is not None or schedule is not None:
+                raise TypeError("Evaluator: fields=, switch_fn= and "
+                                "schedule= go with circuit=; a build= "
+                                "factory returns its own schedule")
+        else:
+            self._targets, self._spec_static = _resolve_fields(
+                circuit, self.fields)
+            if switch_fn is not None and schedule is not None:
+                raise TypeError("Evaluator: give switch_fn= (fixed) or "
+                                "schedule= (per design), not both")
+            if thermal is not None and thermal.temperature_dependent:
+                raise ValueError(
+                    "Evaluator(circuit=...): ThermalSpec.temperature_"
+                    "dependent needs a build= factory that reads "
+                    "design['_T_j']; a fixed circuit has no such input")
+        self._spec_cache: dict = {}
         self.build = build
         self.period = period
         self.loads = tuple(loads)
@@ -535,7 +591,6 @@ class Evaluator:
             gradients = {str(g): str(g) for g in gradients}
         self.gradients = dict(gradients) if gradients else None
         if self.gradients and thermal is not None:
-            from ._refusal import unsupported
             raise unsupported(
                 "design.evaluate", "gradients", "Evaluator: gradients= with "
                 "a thermal loop: the junction temperature depends on the "
@@ -548,8 +603,15 @@ class Evaluator:
         th = None
         if self.thermal is not None:
             th = asdict(self.thermal)
+        form = dict(build=self.build)
+        if self.circuit is not None:
+            # the base by its value hash (structure and every value), the
+            # design by its variables: no per-record circuit hashing
+            form = dict(circuit=f"{self.circuit.value_hash():016x}",
+                        fields=self.fields, switch_fn=self.switch_fn,
+                        schedule=self.schedule)
         return dict(
-            build=self.build, period=self.period, loads=self.loads,
+            **form, period=self.period, loads=self.loads,
             sources=self.sources, output=self.output,
             kpis=[(k.name, k.fn) for k in self.kpis],
             constraints=self.constraints, thermal=th,
@@ -558,8 +620,24 @@ class Evaluator:
             loss_options=self.loss_options, gradients=self.gradients)
 
     def design_id(self, design: Mapping[str, Any]) -> str:
-        return _digest({"design": dict(design),
-                        "options": self._options_digest})
+        # the parameter vector: a flat design of numbers and strings is
+        # canonicalised inline (what _canon_value gives it, faster)
+        flat = {}
+        for k, v in design.items():
+            t = type(v)
+            if t is float:
+                flat[str(k)] = v.hex()
+            elif t is str or t is bool or t is int:
+                flat[str(k)] = v
+            else:
+                flat = None
+                break
+        if flat is None:
+            return _digest({"design": dict(design),
+                            "options": self._options_digest})
+        s = json.dumps({"design": flat, "options": self._options_digest},
+                       sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(s.encode()).hexdigest()
 
     def _provenance(self):
         # one frozen mapping per evaluator: it does not depend on the design
@@ -574,7 +652,6 @@ class Evaluator:
     # -- public ----------------------------------------------------------
     def evaluate(self, design: Mapping[str, Any]) -> EvaluationRecord:
         """One design -> one record (design D3 status mapping)."""
-        from ._refusal import UnsupportedError
         t0 = time.perf_counter()
         design = dict(design)
         did = self.design_id(design)
@@ -631,8 +708,14 @@ class Evaluator:
         designs are ``refused`` with identical fields (the
         configuration, not the design, is unsupported). Any other
         exception propagates."""
-        from ._refusal import unsupported
         from .sweep import _run_jobs
+        if backend == "process" and self.circuit is not None and \
+                workers != 1:
+            raise TypeError(
+                "Evaluator(circuit=...).evaluate_many(backend='process'): a "
+                "pulsim.Circuit does not pickle (yet), so it cannot reach a "
+                "worker process. Use backend='thread' (the circuit is "
+                "immutable and shared by the threads) or a build= factory.")
         jobs = [(self, dict(d)) for d in designs]
         head = jobs[:3]
         out, _, _ = _run_jobs(head, parallel=False, backend="thread",
@@ -665,15 +748,38 @@ class Evaluator:
             raise ValueError(f"period must be positive and finite, got {T!r}")
         return T
 
+    def _circuit_of(self, design):
+        """The design's circuit: ``with_params`` of its parameter
+        targets, then ``with_value`` of its field targets."""
+        c = self.circuit
+        prm = {t: float(design[v]) for v, (kind, t) in self._targets.items()
+               if kind == "param"}
+        if prm:
+            c = c.with_params(prm)
+        for v, (kind, t) in self._targets.items():
+            if kind == "field":
+                c = c.with_value(t, float(design[v]))
+        return c
+
     def _build(self, design):
-        out = self.build(design)
+        """``(src, switch_fn)``: ``src`` the builder of ``build`` or the
+        design's :class:`pulsim.Circuit`."""
+        if self.circuit is not None:
+            missing = sorted(v for v in self._targets if v not in design)
+            if missing:
+                raise KeyError(f"design has no {missing} (fields= of the "
+                               f"evaluator); design keys: {sorted(design)}")
+            sf = (self.schedule(design) if self.schedule is not None
+                  else self.switch_fn)
+            out = (self._circuit_of(design), sf)
+        else:
+            out = self.build(design)
         if isinstance(out, tuple):
             if len(out) != 2:
                 raise ValueError("build(design) must return a builder or "
                                  "(builder, switch_fn)")
         else:
             out = (out, None)
-        from .periodic_steady_state import _closed_loop_source
         src = _closed_loop_source(out[1])
         driven = getattr(out[0], "_graph_driven", None)
         if driven and not src:
@@ -681,7 +787,6 @@ class Evaluator:
         if src:
             # no step_observer reaches the evaluator's runs: the gate or
             # source would follow a controller that never updates
-            from ._refusal import unsupported
             raise unsupported(
                 "design", "closed_loop",
                 f"Evaluator: build(design) returned a circuit driven by "
@@ -692,8 +797,8 @@ class Evaluator:
 
     def _evaluate(self, design, did, counters, grads=None):
         T = self._period_of(design)
-        b, sf = self._build(design)
-        run, a, z = self._steady(b, sf, T, counters)
+        src, sf = self._build(design)
+        run, a, z, b = self._steady(src, sf, T, counters)
         th = self.thermal
         if th is None:
             rows, losses = self._loss_rows(b, run, a, z)
@@ -740,8 +845,8 @@ class Evaluator:
                     break
             if th.temperature_dependent:
                 # the electrical solution depends on T_j: re-simulate
-                b, sf = self._build({**design, "_T_j": _fz(tj)})
-                run, a, z = self._steady(b, sf, T, counters)
+                src, sf = self._build({**design, "_T_j": _fz(tj)})
+                run, a, z, b = self._steady(src, sf, T, counters)
         else:
             raise _Infeasible(
                 f"thermal_runaway: no fixed point within {th.max_iter} "
@@ -780,8 +885,10 @@ class Evaluator:
         return out
 
     def _steady(self, b, sf, T, counters):
-        """``(result, t_from, t_to)`` of one steady period."""
-        from .periodic_steady_state import _pss_refusal
+        """``(result, t_from, t_to, builder)`` of one steady period;
+        ``b`` is a builder or (``circuit=``) a :class:`pulsim.Circuit`,
+        which the runs take as it is (one symbolic analysis per
+        structure)."""
         method = self.steady.method
         if method == "auto":
             if self.engine not in ("auto", "dsed"):
@@ -791,7 +898,7 @@ class Evaluator:
             else:
                 # the capability probe builds the exact stepper: a kernel
                 # error there is a failed design, not a crash (_engine)
-                e = _engine(lambda: _pss_refusal(b, T, sf))
+                e = _engine(lambda: _pss._pss_refusal(b, T, sf))
                 if e is None:
                     method = "pss"
                 else:
@@ -803,7 +910,6 @@ class Evaluator:
                         f"{' (' + e.device + ')' if e.device else ''}")
         counters["steady_method"] = method
         if self.gradients and method != "pss":
-            from ._refusal import unsupported
             raise unsupported(
                 "design.evaluate", "gradients", "Evaluator: gradients= on "
                 f"the {method} route ({counters.get('steady_route_reason', '')}"
@@ -813,17 +919,17 @@ class Evaluator:
             return self._pss(b, sf, T, counters)
         return self._transient(b, sf, T, counters)
 
-    def _transient(self, b, sf, T, counters):
+    def _transient(self, src, sf, T, counters):
         """Simulate ``n`` periods (``n`` doubling from ``min_periods``)
         until the true state at the period starts has settled."""
-        from . import simulate
+        b = _as_builder(src)
         spec = self.steady
         engine = self.engine
         kw = dict(self.options)
         n = max(2, spec.min_periods)
         while True:
-            run = _engine(lambda: simulate(
-                b, t_end=n * T, engine=engine, switch_fn=sf, **kw))
+            run = _engine(lambda: _pkg.simulate(
+                src, t_end=n * T, engine=engine, switch_fn=sf, **kw))
             self._count(run, counters, b, sf)
             counters["route"] = f"transient/{getattr(run, 'engine_used', engine)}"
             counters["periods"] = n
@@ -843,32 +949,40 @@ class Evaluator:
             # (4e-7 x 200 = 7.999999999999999e-05): read the run's end
             t1 = float(np.asarray(run.times)[-1])
             t1 = t1 if abs(t1 - n * T) <= 1e-9 * T else n * T
-            return run, t1 - T, t1
+            return run, t1 - T, t1, b
         # dsed: the settle run has no step cap; re-run the last period
         # from its true state with the KPI sampling.
         x0 = np.asarray(run.states_reduced, dtype=float)[-1]
-        run2 = _engine(lambda: simulate(
-            b, t_end=T, dt=T / self.samples_per_period, engine="dsed",
+        run2 = _engine(lambda: _pkg.simulate(
+            src, t_end=T, dt=T / self.samples_per_period, engine="dsed",
             switch_fn=sf, initial_state=x0,
             **{k: v for k, v in kw.items() if k != "dt"}))
         self._count(run2, counters, b, sf)
-        return run2, 0.0, T
+        return run2, 0.0, T, b
 
-    def _pss(self, b, sf, T, counters):
-        from . import simulate
-        from ._pulsim import ConvergenceError  # type: ignore[import-not-found]
-        from ._period_kpis import Period, Spec, spec_for
-        from .periodic_steady_state import periodic_steady_state
+    def _spec(self, src):
+        """The kernel observables: once per evaluator on the circuit
+        form when no design variable moves a value they read."""
+        static = self.circuit is not None and self._spec_static
+        key = src.structure_hash() if static else None
+        spec = self._spec_cache.get(key) if static else None
+        if spec is None:
+            spec = _pk.spec_for(_as_builder(src), self.output, self.loss_options)
+            if static:
+                self._spec_cache[key] = spec   # read-only once stored
+        return spec
+
+    def _pss(self, src, sf, T, counters):
         if self.engine in ("pwl", "trbdf2"):
-            return self._pss_transient(b, sf, T, counters)
+            return self._pss_transient(src, sf, T, counters)
         counters["route"] = "pss/dsed"
-        spec = spec_for(b, self.output, self.loss_options)
-        obs = spec if isinstance(spec, Spec) else None
+        spec = self._spec(src)
+        obs = spec if isinstance(spec, _pk.Spec) else None
 
         def solve():
             try:
-                return periodic_steady_state(
-                    b, period=T, switch_fn=sf,
+                return _pss.periodic_steady_state(
+                    src, period=T, switch_fn=sf,
                     max_period_runs=self.steady.max_period_runs,
                     sensitivities=(sorted(set(self.gradients.values()))
                                    if self.gradients else None),
@@ -892,6 +1006,7 @@ class Evaluator:
             "engine_steps", 0) + int(r.n_engine_steps)
         counters["simulations"] += int(r.n_period_runs)
         ctx = r._ctx
+        b = ctx.builder
         counters["python_callbacks"] = int(ctx.n_python_callbacks)
         counters["nogil_period_runs"] = int(ctx.n_nogil_runs)
         counters["pss_loop"] = ctx.loop
@@ -899,8 +1014,8 @@ class Evaluator:
         d = r._period
 
         def sampled(n):
-            run = _engine(lambda: simulate(
-                b, t_end=n * T, dt=T / self.samples_per_period,
+            run = _engine(lambda: _pkg.simulate(
+                src, t_end=n * T, dt=T / self.samples_per_period,
                 engine="dsed", switch_fn=sf, initial_state=r.x0, rtol=1e-11,
                 atol=1e-14))
             self._count(run, counters, b)
@@ -910,12 +1025,12 @@ class Evaluator:
             # the KPIs are the kernel's closed-form period integrals;
             # waveforms only when a user KPI reads them
             counters["kpi_path"] = "kernel"
-            kp = Period(obs, d, T)
+            kp = _pk.Period(obs, d, T)
             _raise_if_suspect_kernel(kp, b)
             # two periods, the second read: as the sampled route below
             kp.lazy_run = _Deferred(lambda: sampled(2))
             kp.pss_orbit = r
-            return kp, 0.0, T
+            return kp, 0.0, T, b
         counters["kpi_path"] = "sampled: " + (
             spec if obs is None else
             "no kernel period map" if d is None else d["integrals_reason"])
@@ -925,18 +1040,15 @@ class Evaluator:
         run = sampled(2)
         if self.gradients:
             run.pss_orbit = r
-        return run, T, 2 * T
+        return run, T, 2 * T, b
 
-    def _pss_transient(self, b, sf, T, counters):
+    def _pss_transient(self, src, sf, T, counters):
         """``method='pss'`` on the fixed or variable engine: the orbit of
         that engine's own transient (add-periodic-steady-state-shooting
         5.1-5.3); the KPIs read the second of two periods run from it."""
-        from ._pulsim import ConvergenceError  # type: ignore[import-not-found]
-        from .periodic_steady_state import periodic_steady_state
         engine = self.engine
         counters["route"] = f"pss/{engine}"
         if self.gradients:
-            from ._refusal import unsupported
             raise unsupported(
                 "design.evaluate", "gradients", "Evaluator: gradients= on "
                 f"pss/{engine}: exact orbit sensitivities exist on the "
@@ -946,8 +1058,8 @@ class Evaluator:
 
         def solve():
             try:
-                return periodic_steady_state(
-                    b, period=T, switch_fn=sf, engine=engine, dt=dt,
+                return _pss.periodic_steady_state(
+                    src, period=T, switch_fn=sf, engine=engine, dt=dt,
                     options=kw, max_period_runs=self.steady.max_period_runs)
             except (ConvergenceError, np.linalg.LinAlgError) as e:
                 raise _Failed(str(e)) from e
@@ -971,8 +1083,9 @@ class Evaluator:
         # Two periods, the second measured (an edge AT the section is
         # then inside the window), the same restart rule as the map.
         run = _engine(lambda: m.simulate(r.x0, periods=2))
+        b = m.builder
         self._count(run, counters, b)
-        return run, T, 2 * T
+        return run, T, 2 * T, b
 
     def _gradients(self, b, run, design, kpis, grads, counters):
         """``grads[kpi][variable]`` from the orbit sensitivities; the
@@ -1033,6 +1146,7 @@ class Evaluator:
         from .sensitivity import _prepare
         dv = float(design[var])
         b2, sf2 = self._build({**design, var: dv * (1 + 1e-6) + 1e-300})
+        b2 = _as_builder(b2)
         moved = sorted(
             f"{c['name']}.{k}" for c in b2.components()
             for k, v in c["params"].items()
@@ -1118,11 +1232,10 @@ class Evaluator:
                     spec["Tj"] = float(tj[dev])
             if ss:
                 opts["switch_specs"] = ss
-        from ._period_kpis import Period, loss_rows
-        if isinstance(run, Period):
+        if isinstance(run, _pk.Period):
             # the period's edge log is kernel output: an inconsistent one
             # ("edges do not alternate") fails this design, not the batch
-            rows = _engine(lambda: loss_rows(b, run, opts))
+            rows = _engine(lambda: _pk.loss_rows(b, run, opts))
         else:
             rows = {r["name"]: r for r in device_loss_summary(
                 b, run, t_from=a, t_to=z, **opts) if "name" in r}
@@ -1151,9 +1264,7 @@ class Evaluator:
         return rows, losses
 
     def _kpis(self, b, run, a, z, design, did, rows, losses, counters):
-        from ._period_kpis import Period
-        from ._refusal import unsupported
-        kp = run if isinstance(run, Period) else None
+        kp = run if isinstance(run, _pk.Period) else None
         comps = {c["name"]: c for c in b.components()}
         kpis: dict = {}
         src = self.sources
@@ -1255,6 +1366,46 @@ class Evaluator:
                                      "default KPI")
                 kpis[k.name] = float(k.fn(per))
         return kpis
+
+
+def _as_builder(src):
+    """A builder for the post-processing (names, pool, graph) of a run
+    whose input was a builder or a :class:`pulsim.Circuit`."""
+    return src if hasattr(src, "pool") else src.to_builder()
+
+
+# kinds whose values the kernel observables never read (spec_for reads
+# source values, conductances, V_f): a whitelist, so a new kind is
+# re-resolved per design until it is listed here
+_SPEC_FREE_KINDS = ("inductor", "capacitor", "resistor")
+
+
+def _resolve_fields(circuit, fields):
+    """``({variable: ('param'|'field', target)}, spec_static)`` with every
+    target checked against ``circuit``; ``spec_static`` is False when a
+    variable moves a value the kernel observables read."""
+    from . import Circuit
+    if not isinstance(circuit, Circuit):
+        raise TypeError(f"Evaluator(circuit=...) takes a pulsim.Circuit "
+                        f"(builder.build()), got {type(circuit).__name__}")
+    devs = {d["name"]: d for d in circuit.devices()}
+    kinds = {c["name"]: c["kind"] for c in circuit.components()}
+    params = {pr.name for pr in circuit.parameters()}
+    out, moved = {}, set()
+    for var, t in fields.items():
+        t = str(t)
+        if "." in t:
+            circuit.get_value(t)   # ValueError naming device and field
+            out[str(var)] = ("field", t)
+            moved.add(t.rsplit(".", 1)[0])
+        elif t in params:
+            out[str(var)] = ("param", t)
+            moved.update(n for n, d in devs.items() if t in d["params"].values())
+        else:
+            raise ValueError(
+                f"Evaluator: fields[{var!r}] = {t!r} is neither a parameter "
+                f"of the circuit ({sorted(params)}) nor '<component>.<field>'")
+    return out, all(kinds.get(n) in _SPEC_FREE_KINDS for n in moved)
 
 
 def _true_state(b, run):
@@ -1393,7 +1544,6 @@ def _engine(fn):
     """Run an engine call; a kernel non-convergence (a RuntimeError,
     ``SimulationAborted`` included) becomes ``failed``. Refusals
     (``UnsupportedError``, a ValueError) and cancellation pass."""
-    from . import Cancelled
     try:
         return fn()
     except (Cancelled, NotImplementedError, RecursionError):

@@ -197,6 +197,14 @@ def loss_rows(b, kp, loss_options):
             seq = kp.edges(name, bit)
             if not seq:
                 seq = [(bool(kp.first_mask.get(bit)), 0.0, 0.0)]
+            sw = _table_switching_loss(seq, spec)
+            if sw is not None:
+                sw["P_sw_avg"] = sw["E_sw_total"] / T
+                sw["f_sw_estimate"] = (sw["n_turn_on_events"]
+                                       + sw["n_turn_off_events"]) / (2.0 * T)
+                row.update(sw)
+                rows[name] = row
+                continue
             cl = np.array([s[0] for s in seq], dtype=bool)
             v = np.array([s[1] for s in seq], dtype=float)
             i = np.array([s[2] for s in seq], dtype=float)
@@ -208,3 +216,59 @@ def loss_rows(b, kp, loss_options):
             row.update(sw)
         rows[name] = row
     return rows
+
+
+def _table_switching_loss(seq, spec):
+    """:func:`pulsim.losses._switch_switching_loss` on an edge sequence
+    for a spec whose energies are all 3-D tables at a scalar ``Tj``,
+    in scalars: the same edges, the same limits (turn-on: blocking ``v``
+    before, load ``i`` after; turn-off: the reverse), each point read by
+    the kernel table and summed as numpy sums them -- bit for bit (a
+    test compares the two). ``None`` for any other spec, or a
+    non-finite point (the general path refuses it)."""
+    from .loss_tables import LossTable
+    on_t, off_t, tj = (spec.get("E_on_table"), spec.get("E_off_table"),
+                       spec.get("Tj"))
+    if (on_t is None and off_t is None) or type(tj) not in (int, float) \
+            or not math.isfinite(tj):
+        return None
+    for t, ref, curve in ((on_t, "E_on_ref", "E_on_curve"),
+                          (off_t, "E_off_ref", "E_off_curve")):
+        if t is None and (float(spec.get(ref, 0.0)) > 0
+                          or spec.get(curve) is not None):
+            return None        # a mixed spec: the general path
+        if t is not None and not isinstance(t, LossTable):
+            return None
+    on, off = [], []
+    for (c0, v0, i0), (c1, v1, i1) in zip(seq, seq[1:]):
+        if c0 != c1:
+            if c1:
+                on.append((abs(v0), abs(i1)))
+            else:
+                off.append((abs(v1), abs(i0)))
+    tj = float(tj)
+
+    def total(table, pts):
+        if table is None or not pts:
+            return 0.0
+        if not all(math.isfinite(v) and math.isfinite(i) for v, i in pts):
+            raise _NonFinite
+        f = table._kernel()
+        e = [f(v, i, tj) for v, i in pts]
+        if len(e) < 8:         # numpy's pairwise sum is a plain loop here
+            acc = 0.0
+            for x in e:
+                acc += x
+            return float(acc)
+        return float(np.sum(e))
+    try:
+        e_on, e_off = total(on_t, on), total(off_t, off)
+    except _NonFinite:
+        return None
+    return {"E_sw_on_total": e_on, "E_sw_off_total": e_off,
+            "E_sw_total": e_on + e_off, "n_turn_on_events": len(on),
+            "n_turn_off_events": len(off)}
+
+
+class _NonFinite(Exception):
+    pass

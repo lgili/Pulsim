@@ -111,6 +111,19 @@ def build(design):
     return b, sf
 
 
+def build_circuit(part_name):
+    """The circuit form: ONE immutable circuit per part (its switch
+    conductance); a design is ``with_value`` of ``L.L`` and ``C.C`` of
+    it, shared by every worker thread, with no rebuild."""
+    b, _ = build({"part": part_name, "L": 10e-6, "C": 100e-6, "f_sw": 1e5})
+    return b.build()
+
+
+def schedule(design):
+    """The gate schedule of a design (``Q1`` is bit 0, ``Q2`` bit 1)."""
+    return p.make_dead_time_pwm_pair_fn(design["f_sw"], D, 0, 1, 2, 0.0)
+
+
 def _volume(per):
     """Box volume (m^3) of the illustrative law; heatsink sized so the
     hotter switch sits at 125 C."""
@@ -137,14 +150,23 @@ def _r_th_sa(design, losses):
     return (T_J_MAX - T_AMB - r_jc * max(p_q.values())) / p_tot
 
 
-def make_evaluator():
+def make_evaluator(form="circuit"):
+    """One evaluator per part. ``form='circuit'`` (default): the shared
+    immutable circuit (thread backend); ``'factory'``: ``build`` per
+    design (the same records; the form a process pool can carry)."""
     t_switch_specs = {
         name: {"Q1": part.switch_spec(Tj=T_J_MAX)} for name, part in
         PARTS.items()}
+
+    def source(name):
+        if form == "factory":
+            return dict(build=build)
+        return dict(circuit=build_circuit(name),
+                    fields={"L": "L.L", "C": "C.C"}, schedule=schedule)
     # One evaluator per part: the switch's loss table belongs to the
     # options, so it is part of every record's options digest.
     return {name: Evaluator(
-        build, period=lambda d: 1.0 / d["f_sw"], loads=("R_load",),
+        **source(name), period=lambda d: 1.0 / d["f_sw"], loads=("R_load",),
         output="vout",
         kpis=[Kpi("volume", _volume),
               Kpi("r_th_sa", lambda per: _r_th_sa(per.design, per.losses))],
@@ -170,8 +192,8 @@ def latin_hypercube(n, seed=0):
     return out
 
 
-def evaluate_all(designs, workers=1):
-    evs = make_evaluator()
+def evaluate_all(designs, workers=1, form="circuit"):
+    evs = make_evaluator(form)
     recs = [None] * len(designs)
     for name, ev in evs.items():
         idx = [i for i, d in enumerate(designs) if d["part"] == name]
