@@ -44,8 +44,8 @@ conformance test of `add-engine-conformance-matrix`.
 - [ ] 5.5 Test: two edges of one bit inside one fixed step are counted and reported, not dropped silently
 
 ## 6. Modulators and duty registers
-- [ ] 6.1 `events/modulator.hpp`: `DutyRegister`, `LatchPolicy`, `CarrierPwm` (single switch and complementary leg with dead time), `EdgeList`; Python bindings
-- [ ] 6.2 `bind_pi_to_switch` builds a `CarrierPwm` with `Immediate` latching; the tick handler writes the register; delete the throttle in `control.py:1350-1355`
+- [x] 6.1 `events/modulator.hpp`: `DutyRegister`, `LatchPolicy`, `CarrierPwm` (single switch and complementary leg with dead time), `EdgeList`; Python bindings — `pulsim.DutyRegister`, `make_carrier_pwm_fn`, `make_edge_list_fn` (DECISIONS 12)
+- [x] 6.2 `bind_pi_to_switch` builds a `CarrierPwm` with `Immediate` latching; the tick handler writes the register; delete the throttle in `control.py:1350-1355` — through the control graph's `ChainPwmGate`, now `CarrierPwm` legs on chain-owned registers; the throttle was already gone (the loop is a rated graph) (DECISIONS 12)
 - [ ] 6.3 C blocks and `BlockChain` register rates; delete the throttle in `c_block.py:387-390` and `BlockChain::make_step_observer`
 - [ ] 6.4 Oracle: closed-loop tests identical on pwl, within tolerance on trbdf2; analytic edges of `CarrierPwm` equal those of `make_pwm_switch_fn` for constant duty to 1 ulp
 - [ ] 6.5 Measure the closed-loop buck ns/step before and after (estimate to verify: 1.3–2.5 µs → about 0.4 µs)

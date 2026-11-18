@@ -169,6 +169,7 @@ public:
             s.valid = false;
             s.pending = kNone;
             if (s.periodic) {
+                s.origin = std::isnan(s.rate.origin) ? t0 : s.rate.origin;
                 if (std::isnan(s.rate.origin)) {
                     s.base = t0 + s.rate.offset;
                 } else {
@@ -304,6 +305,17 @@ public:
         return {taken_buf_.data(), n};
     }
 
+    /// A periodic source's grid origin (its Rate's, or the run's t0) and
+    /// the index of its next instant: what a snapshot carries, so a resumed
+    /// run passes the origin back (Rate::origin) and ticks on the same grid
+    /// with the same k.
+    [[nodiscard]] Real grid_origin(std::uint32_t id) const {
+        return slots_.at(id).origin;
+    }
+    [[nodiscard]] std::uint64_t next_k(std::uint32_t id) const {
+        return slots_.at(id).k;
+    }
+
     /// Events taken from a source since `start`.
     [[nodiscard]] std::uint64_t taken(std::uint32_t id) const {
         return slots_.at(id).n_taken;
@@ -329,6 +341,7 @@ private:
         bool valid = false;
         Rate rate{Real{1}, Real{0}};
         Real base = Real{0};
+        Real origin = Real{0};
         Real once_t = Real{0};
         Real pending = kNone;
         std::uint64_t k = 0;

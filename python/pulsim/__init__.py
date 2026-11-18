@@ -86,6 +86,9 @@ from ._pulsim import (  # type: ignore[import-not-found]
     load_yaml_file,
     # Source helpers (Layer 2 V5+).
     make_pwm_switch_fn,
+    DutyRegister,
+    make_carrier_pwm_fn,
+    make_edge_list_fn,
     make_phase_control_fn,
     make_constant_switch_fn,
     make_dead_time_pwm_pair_fn,
@@ -536,6 +539,9 @@ __all__ = [
     "NativeMultiMaskPwm",
     "wire_chain_from_yaml",
     "make_pwm_switch_fn",
+    "DutyRegister",
+    "make_carrier_pwm_fn",
+    "make_edge_list_fn",
     "make_phase_control_fn",
     "make_constant_switch_fn",
     "make_dead_time_pwm_pair_fn",
@@ -2752,15 +2758,22 @@ def simulate(
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
             switch_fn=switch_fn)
+        # the tick sources trbdf2 registers (for_variable_step's count)
+        _tick_origins = _resume_tick_origins(resume_from, len(_plan.ticks) + len(
+            _plan.rate_ticks) + len(getattr(_plan.c_graph, "_rate_ticks", None) or []))
         if resume_from is not None and any(
-                _off_tick_grid(_g._cxx_chain, t_start) for _g in _plan.graphs):
-            # trbdf2 ticks at t_start + k*T: a graph resumed between two
-            # of its ticks would tick off its own grid (G26)
+                _off_tick_grid(_g._cxx_chain, t_start, _tick_origins)
+                for _g in _plan.graphs):
+            # without the snapshot's tick origins trbdf2 ticks at t_start +
+            # k*T: a graph resumed between two of its ticks would tick off
+            # its own grid (G26)
             _rb = _Blocker(
                 "resume_from: a control graph resumes between two of its "
-                "ticks and the variable-step engine schedules ticks at "
-                "t_start + k*T (off the graph's grid); resume on a tick "
-                "instant, or use engine='pwl'")
+                "ticks and the snapshot carries no tick grid for this run's "
+                "controllers (pickled before version 4, built by hand, or "
+                "from a run with other controllers), so the variable-step "
+                "engine would schedule ticks at t_start + k*T, off the "
+                "graph's grid; resume on a tick instant, or use engine='pwl'")
             _rb.feature = "resume_from"
             _route_reasons = [*_route_reasons, _rb]
         if engine == "trbdf2":
@@ -2926,6 +2939,8 @@ def simulate(
                 observers=[_f for _f, _ in _plan.ticks],
                 observer_offsets=list(_plan.tick_offsets),
                 observer_monitors=_monitor_flags(_plan.ticks),
+                observer_origins=_resume_tick_origins(resume_from,
+                                                      len(_plan.ticks)),
                 # None: the kernel stamps the Newton devices itself.
                 enable_nonlinear_refresh=enable_nonlinear_refresh,
                 max_newton_iterations=int(max_newton_iterations or 0),
@@ -3408,6 +3423,10 @@ def simulate(
             kwargs["resume_from"] = resume_from
         # Python tick sources: scheduled by the kernel's event queue.
         kwargs.update(_plan.fixed_tick_kwargs())
+        _origins = _resume_tick_origins(resume_from,
+                                        len(kwargs.get("tick_periods", ())))
+        if _origins:   # a resume keeps the run's tick grid
+            kwargs["tick_origins"] = _origins
         if _PWL_RECIPE.get() is not None:  # sweep(circuit, ...) replays it
             _PWL_RECIPE.get().update(
                 opts=opts, dt=dt, kwargs=dict(kwargs), mmc=bool(mmc_arms),
@@ -3630,15 +3649,27 @@ def simulate(
     return res
 
 
-def _off_tick_grid(cxx, t_start: float) -> bool:
-    """A resumed graph whose rate groups do not all tick on t_start +
-    offset + k*period (what trbdf2's event queue schedules): some group
+def _resume_tick_origins(resume_from, n: int) -> "list[float]":
+    """The snapshot's per-source tick-grid origins when it has one per
+    tick source of this run (the run that wrote it had the same
+    controllers), else [] (each source's grid then starts at t_start)."""
+    if resume_from is None or n == 0:
+        return []
+    origins = list(getattr(resume_from, "tick_origin", None) or [])
+    return [float(o) for o in origins] if len(origins) == n else []
+
+
+def _off_tick_grid(cxx, t_start: float, origins=()) -> bool:
+    """A resumed graph whose rate groups do not all tick on origin +
+    offset + k*period (what trbdf2's event queue schedules; origin is the
+    snapshot's when every source shares one, else t_start): some group
     would leave its grid."""
     if not cxx.n_calls:
         return False
+    origin = origins[0] if origins and len(set(origins)) == 1 else t_start
     for gi, due in enumerate(cxx.next_due_per_group(), start=1):
         period = float(cxx.group_period(gi))
-        q = (float(due) - t_start - float(cxx.group_offset(gi))) / period
+        q = (float(due) - origin - float(cxx.group_offset(gi))) / period
         if abs(q - round(q)) > 1e-9 * max(1.0, abs(q)):
             return True
     return False

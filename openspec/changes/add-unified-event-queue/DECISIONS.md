@@ -379,3 +379,55 @@ the pre-event state (`x_pre_event`) when an event ended the step. So
 state before the event, as on pwl and trbdf2 (a zero-time cascade is one
 commutation). Tested against the result's own record (`step_masks`):
 same count and same instants on a PWM buck with a freewheel diode.
+
+## 12. Modulators: the control graph's PWM gate on `CarrierPwm` (group 6)
+
+- `events/modulator.hpp` holds `LatchPolicy`, `DutyRegister`,
+  `CarrierPwm` (moved out of `gate_source.hpp`) and the new `EdgeList`
+  (sorted (t, bit, on) edges; a bit holds its last edge at or before t,
+  OFF before its first; the last edge of an instant wins). It includes
+  only `pwm_phase`, `switch_state` and `sources/pwm_leg.hpp` (the leg
+  thresholds, moved verbatim out of `switch_schedule.hpp`), so the
+  control graph can include it without pulling in the engines.
+- `ChainPwmGate` is a list of `CarrierPwm` legs. Each leg reads a
+  `DutyRegister` the chain owns (`BlockChain::duty_register(slot)`,
+  `std::deque` for stable addresses, Immediate latch). The chain writes
+  every register after each call that can change what a sink sees:
+  `compile`, `run_pass` (both exits), `step`, `set_output`,
+  `set_channel`, `reset`, `restore_state`. So the tick handler writes
+  the register, and the gate reads only the register.
+- Why byte-identical: `CarrierPwm::apply` sets the bit to
+  `!reached(p, d)`, which is `p.u < d - tol` (the old test) for every
+  non-NaN duty; `next_edge` is the same `next_constant_crossing` call on
+  the same duty. Two legs on one bit used to OR; that is now refused
+  ("driven by two legs"), as `GateSet` refuses it. No caller did it.
+- `bind_pi_to_switch` builds its gate through `make_pwm_gate`, so it is
+  on `CarrierPwm` with Immediate latching. The throttle task 6.2 names
+  (`control.py:1350-1355`) no longer exists: the loop is a control graph
+  whose rate group ticks once per period.
+- Python: `pulsim.DutyRegister(value, latch='immediate'|'carrier_start',
+  period, phase)`, `make_carrier_pwm_fn(period, duty, switch_idx,
+  num_switches, low_side=-1, dead_time=0, phase=0)` and
+  `make_edge_list_fn(edges, num_switches)`. Both return a
+  `SwitchSchedule` with edges, so every engine lands them; the carrier
+  one holds its register (shared_ptr) and is `follows_controller`.
+
+## 13. Tick phase in snapshots (resume)
+
+- `SolverSnapshot::tick_origin` / `tick_next_k`: one entry per tick
+  source of the run, in registration order. The origin is the grid's
+  (`Rate::origin`, or the run's t0); next_k is the index of the next
+  instant (`EventQueue::grid_origin`, `next_k`). Filled at the end of a
+  pwl and a trbdf2 run (the final-snapshot sites only).
+- Pickle version 4 = version 3's 13 fields + these two (15 fields).
+  Version 3 (12 or 13 fields) still loads, with no tick phase.
+- `simulate(resume_from=)` passes the origins back when the snapshot has
+  one per tick source of the resumed run: `observer_origins` (trbdf2)
+  and `tick_origins` (pwl Python tick sources). The queue then starts
+  each source at its first instant >= t_start on the old grid, with the
+  old k. trbdf2 no longer refuses a graph resumed between two of its
+  ticks; it still refuses when the snapshot has no usable origins
+  (pickled before version 4, built by hand, or a different number of
+  tick sources, as after a pwl run whose graphs tick themselves).
+- Number change: a plain Python tick source resumed mid-period on pwl
+  used to restart its grid at t_start; it now keeps the run's grid.

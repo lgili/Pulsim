@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Event queue, phase 3 (add-unified-event-queue)
+
+* **Added** controllers on `engine='dsed'`: `closed_loops`, a
+  `step_observer` with a period and rated control graphs tick on the
+  exact engine's event queue (from `t_start=0`; every-step observers are
+  refused). cl_boost_pi, cl_buck_pi and cl_buck_aggressive_pi now agree.
+* **Added** `pulsim.control.Monitor(fn, period)`: a read-only periodic
+  observer; trbdf2 and dsed runs are bit-identical with or without it.
+* **Added** `pulsim.DutyRegister`, `make_carrier_pwm_fn` and
+  `make_edge_list_fn`. The control graph's PWM gate is now a carrier
+  modulator on a duty register (results unchanged).
+* **Changed** a run's `final_snapshot` carries each tick source's grid
+  origin and next index (`tick_origin`, `tick_next_k`; pickle version
+  4, version 3 still loads). A trbdf2 resume between two ticks of a
+  control graph now continues on the graph's grid instead of being
+  refused; a plain Python tick source resumed on pwl keeps the run's
+  grid instead of restarting it at `t_start`.
+
 ### Integration batch 12: unified device interface 1–3, in-kernel event losses, IR scopes, TR-BDF2 track 6, event queue, control graph 4, PWL IGBT / thyristor, exact engine session 6 merged
 
 * **Fixed** `periodic_steady_state` by shooting ran a thyristor / TRIAC

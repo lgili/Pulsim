@@ -174,6 +174,9 @@ struct TrBdf2Options {
     /// NaN (default) = t_start. A resumed run passes the original run's
     /// t_start so it ticks bit-exactly where the uninterrupted run would.
     Real observer_origin = std::numeric_limits<Real>::quiet_NaN();
+    /// Empty = `observer_origin` for every source; else one origin per
+    /// source (a resume passes its snapshot's `tick_origin`).
+    std::vector<Real> observer_origins;
     /// Newton settings, used only when the circuit has nonlinear
     /// devices. Same knobs and defaults as the fixed engine. The
     /// tolerances are absolute; loosening them is not a fix for an
@@ -1282,6 +1285,12 @@ inline SimulationResult run_transient_trbdf2(
                 "finite number of seconds >= 0");
         }
     }
+    if (!opts.observer_origins.empty()
+        && opts.observer_origins.size() != t_ctrl.size()) {
+        throw std::invalid_argument(
+            "run_transient_trbdf2: observer_origins must be empty or one "
+            "per controller source");
+    }
     events::EventQueue queue;
     if (has_ticks) {
         for (std::size_t j = 0; j < t_ctrl.size(); ++j) {
@@ -1291,7 +1300,9 @@ inline SimulationResult run_transient_trbdf2(
                 && opts.observer_monitors[j] != 0;
             queue.add_periodic(mon ? events::Kind::Monitor : events::Kind::ControlTick,
                                events::Rate{t_ctrl[j], off,
-                                            opts.observer_origin},
+                                            opts.observer_origins.empty()
+                                                ? opts.observer_origin
+                                                : opts.observer_origins[j]},
                                /*lands=*/!mon);
         }
     }
@@ -3174,6 +3185,12 @@ inline SimulationResult run_transient_trbdf2(
     result.final_snapshot.stamped_mask =
         x_mask_known ? mask_bits(x_mask) : std::vector<bool>{};
     hs.save(history, result.final_snapshot);
+    if (has_ticks) {   // the tick sources are ids 0..n-1
+        for (std::uint32_t j = 0; j < t_ctrl.size(); ++j) {
+            result.final_snapshot.tick_origin.push_back(queue.grid_origin(j));
+            result.final_snapshot.tick_next_k.push_back(queue.next_k(j));
+        }
+    }
     result.final_snapshot.valid = true;
     result.newton = newton_ws.take_counters();
     return result;

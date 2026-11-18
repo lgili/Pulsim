@@ -3083,6 +3083,12 @@ inline SimulationResult run_transient(
     // last step was stored), for a resume's row 0.
     result.final_snapshot.stamped_mask =
         stamped_known ? mask_bits(stamped_mask) : std::vector<bool>{};
+    if (has_ticks) {   // the tick sources are ids 0..n-1
+        for (std::uint32_t j = 0; j < ticks->rates.size(); ++j) {
+            result.final_snapshot.tick_origin.push_back(tick_queue.grid_origin(j));
+            result.final_snapshot.tick_next_k.push_back(tick_queue.next_k(j));
+        }
+    }
     result.final_snapshot.valid = true;
     result.newton = newton_ws.take_counters();
     if (lt) lt->write(result);
