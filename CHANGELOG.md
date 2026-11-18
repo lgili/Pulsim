@@ -37,6 +37,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   22). It shows the `pss/pwl` route's `p_in` 1 % high on a DCM buck.
 * **Fixed** `simulate(engine='dsed')` raised `IndexError` for a schedule
   narrower than the circuit's switch count (diode mode check).
+* **Fixed** an extremum attained at both ends of a periodic orbit was
+  reported at t0 or at t0 + T depending on a last-bit difference, so the
+  kernel and Python Newton loops disagreed by exactly T on Linux. Both
+  now report the earliest instant of values tied within 1e-12 relative
+  (DECISIONS 20a).
+* **Fixed** (review a7) two events logged at one sample raised
+  `KeyError` in the exact-path sensitivities (the mask between them had
+  no mode); (review b4) the period map attached an event lying between
+  two samples to the later one, where the sensitivity path raised: both
+  now refuse it, "has no sample of its own".
 
 ### Integration batch 9: the exact engine merged
 

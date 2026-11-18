@@ -264,3 +264,24 @@ def test_the_buck_example_records_do_not_depend_on_the_scalar_path(
     slow = bp.evaluate_all(ds)
     assert [(r.status, r.kpis, r.losses) for r in fast] == \
         [(r.status, r.kpis, r.losses) for r in slow]
+
+
+def test_an_extremum_at_both_ends_of_the_orbit_is_reported_at_t0():
+    # CCM buck, PWM on at t = 0: the inductor current's valley is the
+    # section, attained at t = 0 and t = T (equal to rounding); the input
+    # node is constant, its peak attained everywhere. Both report the
+    # EARLIEST instant, in the kernel and in the Python closed forms (an
+    # orbit whose ends tie in the other order once gave t0 + T on Linux).
+    b, sf = buck(CCM)
+    spec = pk.spec_for(b, "vin", {})
+    r = p.periodic_steady_state(b, period=T, switch_fn=sf,
+                                sensitivities=["L.L"], _observables=spec)
+    st = np.asarray(r._period["stats"])
+    j_i, j_v = spec.idx[("i", "L")], spec.idx[("node", "vin")]
+    assert st[j_i, 5] == 0.0                        # valley time of i_L
+    assert st[j_v, 3] == 0.0 and st[j_v, 5] == 0.0  # constant node
+    kv = r.kpi("L", "valley")
+    assert kv.where == 0.0 and not kv.non_unique    # ends are one point
+    # the rule itself: a tie keeps the earlier instant whatever the order
+    from pulsim.sensitivity import _EXTREMUM_TIE
+    assert _EXTREMUM_TIE == 1e-12

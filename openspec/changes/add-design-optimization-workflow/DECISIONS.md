@@ -654,6 +654,40 @@ Needed from the IR (recorded in its DECISIONS): a picklable `Circuit`
 (`_graph_driven`) is lost by `build()`, so a control graph's driven
 source cannot be refused on the circuit form (group 3).
 
+### 20a. A tied extremum is reported at its earliest instant
+
+CI (Linux, 7b195243) failed `test_kernel_loop_equals_the_python_loop
+[boost CCM]`: one extremum time differed by exactly T. On a periodic
+orbit x(0) = x(T), so an extremum attained at an orbit end is attained
+at both ends, and the kernel and the Python closed forms picked
+different ends after a last-bit difference in the value. The rule, now
+identical in `dsed/period_integrals.hpp` (`detail::extremum_candidate`,
+`kExtremumTie`) and `sensitivity._extrema` (`_EXTREMUM_TIE`): two
+candidates whose values agree within 1e-12 relative are one extremum;
+the larger (smaller) value is kept and the EARLIEST time is reported.
+The test's one-period exception is removed; a new test pins a both-ends
+extremum (the CCM buck's inductor valley, a constant node) at t = 0.
+
+An extremum tied at the two orbit ends is NOT flagged `non_unique`
+(the coordinator suggested it should be): the two ends are one point of
+the orbit, and their parameter derivatives are equal there, because
+dx(T)/dp = M dx0/dp + dP/dp = dx0/dp at the fixed point. The gradient is
+therefore well defined; `non_unique` stays reserved for two distinct
+interior instants. Other sites checked: `design._extreme` returns values
+only, records carry no peak times, the near-miss scan reports no times.
+
+Review items a7 and b4 (§18), fixed with it: the sensitivity context
+now builds a mode for every mask an event log names, so two events at
+one sample go through the mask between them (a test splits a gate edge
+in two and gets the unsplit sensitivities bit for bit; KeyError
+before). Both sides attach an event to the first sample at or after it
+(within 4 ulp) and refuse it, "has no sample of its own", when that
+sample is more than 1e-12·max(|t|, t_end) later
+(`sensitivity._attach_events`, `detail::kEventSampleTol`): the jump is
+applied to that sample's left limit, so a later sample would be a wrong
+number. The engine stores a sample at every event, so no run in the
+suite reaches the refusal; the tests move a logged event by hand.
+
 ## 21. Declarative KPIs and the process backend (slice 5, item 2)
 
 * `Kpi.efficiency()`, `Kpi.ripple(node)`, `Kpi.mean(node)`,

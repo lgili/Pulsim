@@ -573,6 +573,30 @@ class _Traj:
     n_steps: int
 
 
+_EVENT_SAMPLE_TOL = 1e-12   # = detail::kEventSampleTol (period_integrals.hpp)
+
+
+def _attach_events(times, log) -> dict:
+    """``k -> [event]``: each logged event goes to the first sample at or
+    after it (within 4 ulp, as the kernel's period map does) and must be
+    at that sample, since its jump is applied to the sample's left limit."""
+    events: dict = {}
+    t_last = float(times[-1])
+    t_tol = 4 * np.finfo(float).eps * max(abs(t_last), t_last - times[0])
+    for e in log:
+        t = float(e["t"])
+        k = int(np.searchsorted(times, t - t_tol, side="left"))
+        if k == len(times) or times[k] - t > _EVENT_SAMPLE_TOL * max(
+                abs(t), t_last):
+            raise RuntimeError(
+                f"sensitivities: event {e['name']!r} at t = {e['t']!r} has "
+                "no sample of its own in the trajectory.")
+        events.setdefault(k, []).append(dict(
+            t=t, name=str(e["name"]), type=int(e["predicate_type"]),
+            old=e["old_mask"], new=e["new_mask"]))
+    return events
+
+
 def _run(builder, sf, x0, t_end, dt_max, dt_init, ic_from_builder):
     from . import PwlStateSpaceCache
     from . import _pulsim
@@ -601,17 +625,7 @@ def _run(builder, sf, x0, t_end, dt_max, dt_init, ic_from_builder):
     times = np.asarray(r["times"], dtype=float)
     states = np.asarray(r["states"], dtype=float).reshape(len(times), -1)
     log = list(r["event_log"])
-    events: dict = {}
-    for e in log:
-        k = int(np.argmin(np.abs(times - e["t"])))
-        if abs(times[k] - e["t"]) > 1e-12 * max(abs(e["t"]), t_end):
-            raise RuntimeError(
-                f"sensitivities: event {e['name']!r} at t = {e['t']!r} has "
-                "no sample of its own in the trajectory.")
-        events.setdefault(k, []).append(dict(
-            t=float(e["t"]), name=str(e["name"]),
-            type=int(e["predicate_type"]), old=e["old_mask"],
-            new=e["new_mask"]))
+    events = _attach_events(times, log)
     masks, left = [], []
     cur = log[0]["old_mask"] if log else m0
     for k in range(len(times)):
@@ -637,7 +651,10 @@ class _Context:
         self.params = params
         self.comps = list(builder.components())
         self.mask_by_key = {}
-        for m in traj.masks + traj.mask_left:
+        # with the masks between two events logged at one sample (a7)
+        between = [m for evs in traj.events.values() for e in evs
+                   for m in (e["old"], e["new"])]
+        for m in traj.masks + traj.mask_left + between:
             self.mask_by_key.setdefault(str(m), m)
         base = _snapshot(builder, self.mask_by_key, h_max, ic_from_builder)
         n_p = len(params)
@@ -1036,6 +1053,11 @@ def _kpi(sr, row, kind, t0, t1):
     return rms, Ig / (2 * W * rms) if rms > 0 else Ig * 0.0, False, None
 
 
+#: Relative tie of two extremum values (detail::kExtremumTie in
+#: core/include/pulsim/dsed/period_integrals.hpp): reported at the earliest.
+_EXTREMUM_TIE = 1e-12
+
+
 def _extrema_grid(s0, s1, K, re_max):
     """K uniform cells of [s0, s1] plus s0 + (s1 - s0)/2^m down to about
     1/(2 re_max): a fast mode's extremum near the start is bracketed (16
@@ -1156,14 +1178,20 @@ def _extrema(sr, row, kind, t0, t1, K=16):
     for kind_ in (("peak", "valley") if kind == "ripple" else (kind,)):
         sg = 1.0 if kind_ == "peak" else -1.0
         i = int(np.argmax(sg * ys))
+        # canonical instant: the earliest candidate within the extremum
+        # tie (the orbit's two ends agree to rounding; the kernel's rule,
+        # detail::extremum_candidate, is the same)
+        j = min((q for q in range(len(cands))
+                 if abs(ys[q] - ys[i]) <= _EXTREMUM_TIE * max(
+                     abs(ys[q]), abs(ys[i]))), key=lambda q: cands[q][1])
         tie = [cd for cd in cands
                if sg * (ys[i] - cd[0]) <= 1e-9 * span
-               and abs(cd[1] - cands[i][1]) > 1e-9 * (t1 - t0)
+               and abs(cd[1] - cands[j][1]) > 1e-9 * (t1 - t0)
                # the two ends of an orbit are one point
-               and not (sr.periodic and abs(abs(cd[1] - cands[i][1])
+               and not (sr.periodic and abs(abs(cd[1] - cands[j][1])
                                             - (t1 - t0)) <= 1e-9 * (t1 - t0)
                         and t0 == tr.times[0] and t1 == tr.times[-1])]
-        out[kind_] = (cands[i][0], cands[i][2], bool(tie), cands[i][1])
+        out[kind_] = (cands[i][0], cands[j][2], bool(tie), cands[j][1])
     if kind == "ripple":
         p_, v_ = out["peak"], out["valley"]
         return (p_[0] - v_[0], p_[1] - v_[1], p_[2] or v_[2],
