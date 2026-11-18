@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import random
+import sys
 import time
 
 import mpmath as mp
@@ -280,7 +281,7 @@ def run(p, dps=50, forced=None, verbose=False, scan=mp.mpf("2e-6")):
         if hit:
             k = len(events)
             new, ns, nf, cands = pick(k, t, z)
-            events.append(dict(t=t, mode=new, prev=m, n_static=ns, n_fwd=nf,
+            events.append(dict(t=t, z=z, mode=new, prev=m, n_static=ns, n_fwd=nf,
                                cands=cands))
             if verbose:
                 print(f"  event {k:2d} t={mp.nstr(t, 25):>28s} "
@@ -308,53 +309,99 @@ def _ncomm(r):
 
 
 def scipy_check(rtie):
-    """Independent float64 check: full 3-node MNA (ac1, dp, dn) with the
-    capacitor as a voltage source, the PWL network solved by trying the 16
-    modes, integrated by scipy Radau (the vector field is Lipschitz)."""
+    """Independent float64 check: full 4x4 MNA (ac1, dp, dn, capacitor as a
+    voltage source), scipy expm propagation with the integral of vC as a
+    state, brentq roots, and the post-event mode picked by a finite nudge
+    (the one mode whose signs hold 1e-14..1e-6 s later), not by Taylor signs."""
     import numpy as np
-    from scipy.integrate import solve_ivp
+    from scipy.linalg import expm
+    from scipy.optimize import brentq
 
     Vm, w, Rs, L, C, RL = 325.0, 2 * np.pi * 50, 0.5, 1e-3, 470e-6, 100.0
     gon, goff = 1e3, 1e-9
     D = [(0, 1), (-1, 1), (2, 0), (2, -1)]   # (anode, cathode); -1 = ground
-    modes = list(itertools.product((False, True), repeat=4))
+    maps = []
+    for m in itertools.product((False, True), repeat=4):
+        Y = np.zeros((4, 4))
+        for (a, c), on in zip(D, m):
+            gg = gon if on else goff
+            for i, j, s in ((a, a, 1), (c, c, 1), (a, c, -1), (c, a, -1)):
+                if i >= 0 and j >= 0:
+                    Y[i, j] += s * gg
+        Y[2, 2] += 1 / rtie
+        Y[1, 1] += 1 / RL
+        Y[1, 2] -= 1 / RL
+        Y[2, 2] += 1 / RL
+        Y[2, 1] -= 1 / RL
+        Y[1, 3], Y[2, 3], Y[3, 1], Y[3, 2] = 1, -1, 1, -1
+        S = np.linalg.solve(Y, np.array([[1, 0], [0, 0], [0, 0], [0, 1]], float))
+        V = np.array([(S[a] if a >= 0 else 0) - (S[c] if c >= 0 else 0) for a, c in D])
+        F = np.zeros((5, 5))       # [iL, vC, sin, cos, int vC]
+        F[0, :2] = [(-Rs - S[0, 0]) / L, -S[0, 1] / L]
+        F[1, :2] = [S[3, 0] / C, S[3, 1] / C]   # x[3] = current dp -> dn through C
+        F[0, 2], F[2, 3], F[3, 2], F[4, 1] = Vm / L, w, -w, 1
+        sg = np.array([1 if on else -1 for on in m])
+        maps.append((sg, V, F))
 
-    def net(iL, vC):
-        for m in modes:
-            Y = np.zeros((4, 4))
-            rhs = np.zeros(4)
-            for (a, c), on in zip(D, m):
-                gg = gon if on else goff
-                for i, j, s in ((a, a, 1), (c, c, 1), (a, c, -1), (c, a, -1)):
-                    if i >= 0 and j >= 0:
-                        Y[i, j] += s * gg
-            Y[2, 2] += 1 / rtie
-            Y[1, 1] += 1 / RL
-            Y[1, 2] -= 1 / RL
-            Y[2, 2] += 1 / RL
-            Y[2, 1] -= 1 / RL
-            Y[1, 3], Y[2, 3], Y[3, 1], Y[3, 2] = 1, -1, 1, -1
-            rhs[0], rhs[3] = iL, vC
-            x = np.linalg.solve(Y, rhs)
-            v = [(x[a] if a >= 0 else 0) - (x[c] if c >= 0 else 0) for a, c in D]
-            if all((vi >= 0) == on or abs(vi) < 1e-12 for vi, on in zip(v, m)):
-                return x, -x[3]
-        raise RuntimeError("no consistent mode")
+    def pick(y):
+        for dt in 10.0 ** np.arange(-14, -5):   # float64 cannot see a uA rail below 1e-9 s
+            ok = [k for k, (sg, V, F) in enumerate(maps)
+                  if np.all(sg * (V @ (expm(F * dt) @ y)[:2]) > 0)]
+            if len(ok) == 1:
+                nudges.append(dt)
+                return ok[0], dt
+        raise RuntimeError(f"mode not unique: {ok} y={y}")
 
-    def f(t, y):
-        x, ic = net(y[0], y[1])
-        return [(Vm * np.sin(w * t) - Rs * y[0] - x[0]) / L, ic / C, y[1]]
+    t, y, nudges = 0.0, np.array([0, 0, 0, 1, 0], float), []
+    (k, t0), n_ev, marks = pick(y), 0, {}
+    while t < 0.04 - 1e-15:
+        sg, V, F = maps[k]
+        stop = min(x for x in (0.03, 0.04) if x > t + 1e-15)
+        H = stop - t
 
-    s = solve_ivp(f, (0, 0.04), [0, 0, 0], method="Radau", rtol=1e-11,
-                  atol=[1e-12, 1e-10, 1e-14], max_step=2e-6, t_eval=[0.03, 0.04])
-    return (s.y[2, 1] - s.y[2, 0]) / 0.01
+        def adv(yp, dt):
+            return expm(F * dt) @ yp
+
+        # the picked mode was checked at t0; scan from there (chunked: expm of
+        # a 1e12 s^-1 mode over 10 ms overflows)
+        taus = [t0 * 2.0 ** j for j in range(60) if t0 * 2.0 ** j < min(2e-6, H)]
+        taus += list(np.arange(2e-6, H, 2e-6)) + [H]
+        prev, yp, hit = taus[0], adv(y, taus[0]), None
+        for tau in taus[1:]:
+            yn = adv(yp, tau - prev)
+            gv = sg * (V @ yn[:2])
+            if np.any(gv <= 0):
+                d = int(np.argmin(gv))
+                hit = brentq(lambda x: sg[d] * (V @ adv(yp, x)[:2])[d], 0.0, tau - prev,
+                             xtol=1e-24, rtol=1e-15)
+                yn = adv(yp, hit)
+                tau = prev + hit
+                break
+            prev, yp = tau, yn
+        y = yn
+        t += tau
+        if hit is not None:
+            (k, t0), n_ev = pick(y), n_ev + 1
+        else:
+            t0 = 1e-14
+            if stop in (0.03, 0.04):
+                marks[stop] = y[4]
+    return (marks[0.04] - marks[0.03]) / 0.01, n_ev, nudges
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dps", type=int, default=50)
-    ap.add_argument("--all", action="store_true", help="precision, grounded, sensitivity, scipy")
+    ap.add_argument("--all", action="store_true", help="precision, grounded, sensitivity")
+    ap.add_argument("--scipy", action="store_true", help="independent float64 expm check")
     a = ap.parse_args()
+    sys.stdout.reconfigure(line_buffering=True)
+    if a.scipy:
+        for rt in (1e6, 1e-3):
+            bus, n, nudges = scipy_check(rt)
+            print(f"float64 scipy expm (independent MNA) Rtie={rt:g}: bus {bus:.10f}, {n} events,"
+                  f" nudge needed to resolve each mode [s]: {' '.join(f'{x:.0e}' for x in nudges)}")
+        return
     t0 = time.time()
     r = run(params(), a.dps)
     print(f"[floating, dps {a.dps}, {time.time() - t0:.0f} s]")
@@ -389,8 +436,6 @@ def main():
             print(f"perturb {eps:g} {''.join('+' if v > 0 else '-' for v in sc.values())}: "
                   f"bus {mp.nstr(rs['bus'], 20)} d={mp.nstr(rs['bus'] - r['bus'], 3)} "
                   f"commutations {_ncomm(rs)} ambiguous {len(rs['ambiguous'])}")
-    for rt in (1e6, 1e-3):
-        print(f"scipy Radau (float64, independent MNA) Rtie={rt:g}: bus {scipy_check(rt):.9f}")
 
 
 if __name__ == "__main__":
