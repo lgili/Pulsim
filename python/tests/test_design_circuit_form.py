@@ -86,11 +86,20 @@ def caches(monkeypatch):
         return c
 
     monkeypatch.setattr(p, "PwlStateSpaceCache", spy)
+    real_sim = p.Simulation
+
+    def sim_spy(*a, **k):  # simulate() runs through the kernel object
+        s = real_sim(*a, **k)
+        made.append(s)
+        return s
+
+    monkeypatch.setattr(p, "Simulation", sim_spy)
     return made
 
 
 def _analyses(made):
-    return sum(int(c.metrics().symbolic_analyses) for c in made)
+    return sum(int(getattr(c, "cache", c).metrics().symbolic_analyses)
+               for c in made)
 
 
 def test_one_symbolic_analysis_per_batch(caches):

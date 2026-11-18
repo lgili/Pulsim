@@ -60,7 +60,7 @@ unchanged.
 ## 9. Stage B — options and errors in the kernel
 - [x] 9.1 `core/include/pulsim/sim/options.hpp`: `RunOptions` and its parts; one defaults table; `to_simulation_options`, `to_trbdf2_options`
 - [ ] 9.2 `core/include/pulsim/sim/error.hpp` (the `PulsimError` mix-in; each class keeps its `std` base; `solver/unsupported.hpp` of Phase 0 gains the mix-in), `diagnostic.hpp`; pybind translators to the Python classes of 8.1
-  - Done: `sim/error.hpp` `PulsimError` mix-in on `UnsupportedError`, `sim::OptionsError`, `SimulationAborted`, `ConvergenceFailure`, `Cancelled`; translators to `pulsim.PulsimError` subclasses. Open: `diagnostic.hpp` (the facade's `sim::Diagnostic` lives in `simulation.hpp`), `NetlistError` / `SingularError` (DECISIONS 10).
+  - Done: `sim/error.hpp` `PulsimError` mix-in on `UnsupportedError`, `sim::OptionsError`, `SimulationAborted`, `ConvergenceFailure`, `Cancelled`; translators to `pulsim.PulsimError` subclasses; `sim/diagnostic.hpp`. Open: `NetlistError` / `SingularError` (DECISIONS 10).
 - [ ] 9.3 Remove the sentinels (`max_newton_iterations=0` warns for one release) and the four recorded-only fields of `SimulationOptions` (**BREAKING**)
   - Done: no sentinel in `RunOptions`, `simulate()` (`max_newton_iterations=0` warns) or the raw TR-BDF2 binding. Open: the four recorded-only `SimulationOptions` fields (the YAML loader stores them there; they need a home on `LoadedCircuit` first).
 - [x] 9.4 Raw TR-BDF2 binding defaults follow the table (**BREAKING**); CHANGELOG migration note
@@ -76,6 +76,7 @@ unchanged.
 
 ## 11. Stage B — simulate() on the facade
 - [ ] 11.1 `simulate()` builds `RunOptions` and calls `Simulation` for runs with no Python callback; then for every run through `add_gate` / `add_tick` / `add_source_term` adapters
+  - Done: `'pwl'` and `'trbdf2'` runs go through `Simulation` (callbacks included: `set_switch_fn`, `add_tick`, `set_source_term`, `set_step_observer`, `set_tick_before`, live ring, resume), goldens identical (DECISIONS 14). Open: `mmc_arms` / `on_cache`, `sweep()`'s replay, the C++ chain fast path, and the exact engine.
 - [ ] 11.2 Oracle: goldens bit-identical; warning set unchanged; fixed overhead not above 0.2; a native-schedule run holds no GIL (thread sweep scales as in audit row 23)
 - [ ] 11.3 One undriven-switch policy on every engine (**BREAKING**), per the owner's answer; migration note; tests for `Refuse`, `Open`, `Closed`
 

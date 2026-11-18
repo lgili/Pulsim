@@ -109,3 +109,28 @@
     and five in-function `from . import` on the hot path became module
     handles. The kernel time is unchanged (same drivers, same options;
     goldens identical).
+
+14. **simulate() on the kernel object, engine by engine.** The `'pwl'` and
+    `'trbdf2'` runs go through `sim::Simulation` (goldens, stateful,
+    engines and options compares identical). Choices that keep the bits:
+    the object owns the cache (`Simulation.cache`, built on first use), so
+    the run's cache is the object's; the initial state and
+    `start_from_dc_op` apply to the first run call only (a continuation
+    is the snapshot's); the first call's tick grid has a NaN origin (the
+    run's t0, as the raw drivers get it) and continuations keep the
+    original t0; a Python schedule's `next_edge_after` is read on the
+    fixed step only (`run_transient_trbdf2` never read it); `restore(s,
+    at_snapshot_time=False)` keeps simulate()'s "an explicit t_start
+    wins"; the preflight is simulate()'s (`auto_regularize=False` on the
+    object, which receives the tied circuit); C blocks are composed by
+    simulate() and passed as attachments (`controls_composed=True`).
+    `pulsim._pulsim._run_simulation(sim)` is a module function so a
+    profiler sees the kernel run as one C call, as it saw `run_transient`.
+    Still direct: `mmc_arms` / `on_cache` (they need the cache before the
+    options exist: `mmc_arms` forces `max_dt_halvings = 0`), `sweep()`'s
+    replay, the C++ chain fast path, and the exact engine (its driver is
+    composed in `_dsed_dispatch.py`, owned by the event-queue and exact
+    tracks). Measured in one process, the object path is not slower than
+    the direct one (43.7 vs 44.2 us per call through a builder; 39.8 vs
+    42.8 us through a Circuit).
+

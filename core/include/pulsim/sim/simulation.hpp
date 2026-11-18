@@ -19,14 +19,18 @@
 #include "pulsim/ir/circuit.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
+#include "pulsim/sim/diagnostic.hpp"
 #include "pulsim/sim/options.hpp"
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/solver/trbdf2_transient.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/solver/voltage_sanity.hpp"
+#include "pulsim/streaming/live_ring.hpp"
 
 #include <format>
 #include <functional>
+#include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -34,17 +38,6 @@
 #include <vector>
 
 namespace pulsim::sim {
-
-enum class Severity : std::uint8_t { Info, Warning, Error };
-
-/// A non-error message of a run, in order of occurrence.
-struct Diagnostic {
-    Severity severity = Severity::Warning;
-    std::string code;     // stable: "preflight_ties", "undriven_switches", ...
-    std::string message;
-    std::string device;
-    std::optional<Real> t;
-};
 
 /// What the constructor decided.
 struct RunPlan {
@@ -98,7 +91,11 @@ public:
 
     /// Plans the run; throws `OptionsError`, `UnsupportedError` or
     /// `std::invalid_argument` before anything is solved.
-    Simulation(ir::Circuit circuit, RunOptions options)
+    /// `controls_composed`: the caller drives the circuit's C blocks /
+    /// graph-driven sources through the attachments (pulsim.simulate()
+    /// composes them in Python); otherwise they are refused.
+    Simulation(ir::Circuit circuit, RunOptions options,
+               bool controls_composed = false)
         : circuit_(std::move(circuit)), opts_(std::move(options)) {
         plan_.asked = opts_.engine;
         if (!(opts_.t_end > opts_.t_start)) {
@@ -110,7 +107,7 @@ public:
             throw OptionsError("dt", std::format(
                 "Simulation: dt must be positive, got {}", *opts_.dt));
         }
-        if (!circuit_.controls().empty()) {
+        if (!controls_composed && !circuit_.controls().empty()) {
             throw UnsupportedError(engine_label(opts_.engine), "c_blocks", "", "",
                 "Simulation: the circuit declares C blocks / graph-driven "
                 "sources, which pulsim.simulate() composes in Python; the "
@@ -167,6 +164,13 @@ public:
         t_cursor_ = opts_.t_start;
     }
 
+    // The cache refers to the builder's graph and pool: not copyable or
+    // movable.
+    Simulation(const Simulation&) = delete;
+    Simulation& operator=(const Simulation&) = delete;
+    Simulation(Simulation&&) = delete;
+    Simulation& operator=(Simulation&&) = delete;
+
     // ---- Attachments (things that are not part of the circuit) ----------
     void set_switch_fn(solver::SwitchScheduleFn fn,
                        std::function<Real(Real)> next_edge = {}) {
@@ -191,13 +195,22 @@ public:
     }
     /// A control tick at t_start + k*period (pwl: the first grid point at
     /// or after it; trbdf2: landed exactly).
-    void add_tick(Real period, TickFn fn) {
+    /// `offset` shifts the grid: ticks at t_start + offset + k*period.
+    void add_tick(Real period, TickFn fn, Real offset = Real{0}) {
         if (!(period > Real{0})) {
             throw OptionsError("tick", std::format(
                 "Simulation.add_tick: period must be positive, got {}", period));
         }
         tick_periods_.push_back(period);
+        tick_offsets_.push_back(offset);
         ticks_.push_back(std::move(fn));
+    }
+    /// pwl: runs on every tick instant before the ticks (a composed control
+    /// graph's state update).
+    void set_tick_before(solver::StepObserverFn fn) { tick_before_ = std::move(fn); }
+    /// pwl: push each step's (t, x) into a live ring; its stop flag cancels.
+    void set_live_ring(std::shared_ptr<streaming::LiveRing> ring) {
+        live_ring_ = std::move(ring);
     }
     void set_cancel(solver::ShouldContinueFn fn) { cancel_ = std::move(fn); }
     void set_initial_state(Vector x) { x0_ = std::move(x); }
@@ -220,15 +233,33 @@ public:
     [[nodiscard]] const solver::SolverSnapshot& snapshot() const noexcept {
         return snapshot_;
     }
-    /// Continue from `s`: the next run call starts at `s.t` with its state.
-    void restore(const solver::SolverSnapshot& s) {
+    /// Continue from `s`: the next run call starts at `s.t` with its state
+    /// (`at_snapshot_time = false`: at the options' t_start, as
+    /// pulsim.simulate(resume_from=, t_start=) does).
+    void restore(const solver::SolverSnapshot& s, bool at_snapshot_time = true) {
         if (!s.valid) {
             throw OptionsError("snapshot",
                 "Simulation.restore: the snapshot is not valid (it came from a "
                 "run that produced none)");
         }
         snapshot_ = s;
-        t_cursor_ = s.t;
+        t_cursor_ = at_snapshot_time ? s.t : opts_.t_start;
+    }
+
+    /// The run's PWL cache, built on first use and kept across run calls
+    /// (a hook may refactor parameters in it before the run).
+    pwl::PwlStateSpaceCache& cache() {
+        if (!cache_) {
+            cache_.emplace(builder_->graph(), builder_->pool());
+            cache_->share_symbolic(circuit_.symbolic_plan());
+            // trbdf2 solves at its own step; the lazy build needs only a
+            // positive dt to mark the cache dynamic (simulate()'s rule).
+            const Real h_max = opts_.dt.value_or(Real{0});
+            cache_->build_lazy(plan_.engine == Engine::FixedTrap ? *opts_.dt
+                               : h_max > Real{0} ? h_max
+                               : (opts_.t_end - opts_.t_start) / Real{1000});
+        }
+        return *cache_;
     }
 
     // ---- Running -------------------------------------------------------------
@@ -245,7 +276,9 @@ public:
         }
         const solver::SolverSnapshot* resume =
             snapshot_.valid ? &snapshot_ : nullptr;
-        const Vector* x0 = (resume == nullptr && x0_) ? &*x0_ : nullptr;
+        // The initial state seeds the first run call (with a restored
+        // snapshot too, as the drivers take both); continuations ignore it.
+        const Vector* x0 = (!ran_ && x0_) ? &*x0_ : nullptr;
         const auto& g = graph();
         auto& p = builder_->pool();  // the cache stamps device state into it
         if (!switch_fn_ && plan_.asked == EngineChoice::Auto
@@ -259,31 +292,50 @@ public:
                 "switch_fn, or set dt for the fixed-step engine.");
         }
         auto switch_fn = switch_fn_ ? switch_fn_ : default_switch_fn_();
-        pwl::PwlStateSpaceCache cache(g, p);
-        cache.share_symbolic(circuit_.symbolic_plan());
+        auto& cache = this->cache();
+        // The first run call starts the grid's ticks at the run's t0 (NaN);
+        // a continuation keeps the original run's grid.
+        const Real origin = t_cursor_ == opts_.t_start
+                ? std::numeric_limits<Real>::quiet_NaN() : opts_.t_start;
+        const bool dc_op = opts_.start_from_dc_op && !ran_;
+        ran_ = true;
         solver::SimulationResult res;
         if (plan_.engine == Engine::FixedTrap) {
             auto so = to_simulation_options(opts_);
             so.t_start = t_cursor_;
             so.t_end = t;
-            cache.build_lazy(so.dt);
             events::TickPlan tp;
-            for (const Real T : tick_periods_) {
-                tp.rates.push_back(events::Rate{T, Real{0}, opts_.t_start});
+            for (std::size_t j = 0; j < tick_periods_.size(); ++j) {
+                tp.rates.push_back(
+                    events::Rate{tick_periods_[j], tick_offsets_[j], origin});
             }
             tp.fn = [this](std::uint32_t j, const events::TickInfo&, Real tt,
                            const Vector& x) { ticks_[j](tt, x); };
+            tp.before = tick_before_;
+            auto observer = observer_;
+            auto cancel = cancel_;
+            if (live_ring_) {  // atomics only: no GIL in the ring's part
+                observer = [ring = live_ring_, user = observer_](
+                               Real tt, const Vector& x) {
+                    if (user) user(tt, x);
+                    if (ring->should_decimate()) {
+                        ring->push(tt, x.data(), static_cast<std::size_t>(x.size()));
+                    }
+                };
+                cancel = [ring = live_ring_, user = cancel_]() {
+                    return !ring->stopped() && (!user || user());
+                };
+            }
             res = solver::run_transient(cache, g, p, so, switch_fn, b_extra_,
-                    opts_.start_from_dc_op && resume == nullptr, refresh_,
-                    observer_, x0, cancel_, resume, next_jump_, next_edge_,
-                    ticks_.empty() ? nullptr : &tp);
+                    dc_op, refresh_, observer, x0, cancel, resume, next_jump_,
+                    next_edge_, ticks_.empty() ? nullptr : &tp);
         } else {
             auto to = to_trbdf2_options(opts_);
             to.t_start = t_cursor_;
             to.t_end = t;
             to.observer_periods = tick_periods_;
-            cache.build_lazy(to.h_max > Real{0} ? to.h_max
-                                                : (t - t_cursor_) / Real{1000});
+            to.observer_offsets = tick_offsets_;
+            to.observer_origin = origin;
             std::function<void(Size, Real, const Vector&)> tick_fn;
             if (!ticks_.empty()) {
                 tick_fn = [this](Size j, Real tt, const Vector& x) {
@@ -437,7 +489,12 @@ private:
     solver::StepObserverFn observer_;
     solver::ShouldContinueFn cancel_;
     std::vector<Real> tick_periods_;
+    std::vector<Real> tick_offsets_;
     std::vector<TickFn> ticks_;
+    solver::StepObserverFn tick_before_;
+    std::shared_ptr<streaming::LiveRing> live_ring_;
+    std::optional<pwl::PwlStateSpaceCache> cache_;
+    bool ran_ = false;
 };
 
 }  // namespace pulsim::sim

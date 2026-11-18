@@ -1919,6 +1919,51 @@ def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
     return step_observer, b_extra_fn
 
 
+def _options_error(option, message):
+    """An `OptionsError` (a ValueError) naming the option, as the kernel's
+    own value checks raise it (one error type for a bad count on every
+    path)."""
+    err = OptionsError(message)
+    err.option = option
+    return err
+
+
+def _new_pwl_cache(builder, circuit, dt):
+    """The fixed-step PWL cache — lazy (Phase-0 fix #7), one symbolic
+    analysis per structure."""
+    cache = PwlStateSpaceCache(builder.graph, builder.pool)
+    if circuit is not None:
+        cache.share_symbolic(circuit)
+    cache.build_lazy(dt)
+    return cache
+
+
+def _run_on_simulation(circuit, run_opts, kw):
+    """One pwl run through the kernel object, with simulate()'s resolved
+    driver keywords (`kw`, as `run_transient` takes them)."""
+    sim = Simulation(circuit, run_opts, True)
+    sim.set_switch_fn(kw["switch_fn"])
+    get = kw.get
+    if get("b_extra_fn") is not None:
+        sim.set_source_term(kw["b_extra_fn"])
+    if get("step_observer") is not None:
+        sim.set_step_observer(kw["step_observer"])
+    if get("initial_state") is not None:
+        sim.set_initial_state(kw["initial_state"])
+    if get("should_continue") is not None:
+        sim.set_cancel(kw["should_continue"])
+    if get("live_ring") is not None:
+        sim.set_live_ring(kw["live_ring"])
+    if get("resume_from") is not None:
+        sim.restore(kw["resume_from"], False)  # simulate()'s t_start wins
+    if get("tick_periods"):
+        for period, fn in zip(kw["tick_periods"], kw["tick_fns"]):
+            sim.add_tick(period, fn)
+    if get("tick_before") is not None:
+        sim.set_tick_before(kw["tick_before"])
+    return _pulsim_module._run_simulation(sim)  # simulate() attaches handles
+
+
 def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
     """Unpack a :class:`LoadedCircuit` for :func:`simulate`.
 
@@ -2467,7 +2512,7 @@ def simulate(
             isinstance(newton_roundoff_budget, bool)
             or int(newton_roundoff_budget) != newton_roundoff_budget
             or int(newton_roundoff_budget) < 1):
-        raise ValueError(
+        raise _options_error("newton_roundoff_budget",
             f"simulate(newton_roundoff_budget={newton_roundoff_budget}): "
             "must be an integer >= 1 (consecutive Newton solves accepted at roundoff "
             "before NewtonRoundoffBudgetExceeded; default 130).")
@@ -2941,8 +2986,10 @@ def simulate(
         # The kernel resolves the options (sim::to_trbdf2_options): h_max
         # = dt or 0, h_init = dt_init or 0, rtol / atol from sim::Defaults.
         # _ro.trbdf2_options without the wrapper frame (hot path).
-        _to = _pulsim_module._trbdf2_options_kw(
+        _tro = _pulsim_module._run_options_kw(
             t_end, dt, "trbdf2", t_start,
+            enable_nonlinear_refresh=enable_nonlinear_refresh,
+            auto_regularize=False,  # applied above, on _run_circuit
             rtol=rtol, atol=atol, dt_init=dt_init or None,
             max_event_iterations=max_event_iterations,
             max_newton_iterations=max_newton_iterations,
@@ -2951,7 +2998,6 @@ def simulate(
             enable_newton_lm=enable_newton_lm,
             newton_roundoff_budget=newton_roundoff_budget,
             on_impulse=on_impulse)
-        _h_max = _to["h_max"]
         _n_sw = builder.graph.num_switches
         if switch_fn is None:
             # No driver: all-OPEN here (the v2.0 semantics; the
@@ -2959,38 +3005,58 @@ def simulate(
             # router sends this case to instead — flipping THAT is
             # its own breaking change, not this one).
             switch_fn = make_constant_switch_fn(SwitchStateMask(_n_sw))
-        cache = PwlStateSpaceCache(builder.graph, builder.pool)
-        if _run_circuit is not None:  # one analysis per structure
-            cache.share_symbolic(_run_circuit)
-        # Lazy build only needs a positive dt to mark the cache
-        # dynamic; the stepper solves at its own per-step dt via
-        # solve_at, never at this value.
-        cache.build_lazy(_h_max if _h_max > 0.0 else _span / 1000.0)
         try:
-            res, _stats = run_transient_trbdf2(
-                cache, builder.graph, builder.pool,
-                t_start=float(t_start), t_end=float(t_end),
-                rtol=_to["rtol"], atol=_to["atol"],
-                h_init=_to["h_init"], h_max=_h_max,
-                switch_fn=switch_fn,
-                b_extra_fn=b_extra_fn,
-                initial_state=initial_state,
-                resume_from=resume_from,
-                max_event_iterations=_to["max_event_iterations"],
-                should_continue=should_continue,
-                observer_periods=[_p for _, _p in _plan.ticks],
-                observers=[_f for _f, _ in _plan.ticks],
-                observer_offsets=list(_plan.tick_offsets),
-                # None: the kernel stamps the Newton devices itself.
-                enable_nonlinear_refresh=enable_nonlinear_refresh,
-                max_newton_iterations=_to["max_newton_iterations"],
-                tol_newton_dx=_to["tol_newton_dx"],
-                tol_newton_res=_to["tol_newton_res"],
-                enable_newton_line_search=_to["enable_newton_line_search"],
-                enable_newton_lm=_to["enable_newton_lm"],
-                newton_roundoff_budget=_to["newton_roundoff_budget"],
-                on_impulse_error=_to["on_impulse_error"],
-            )
+            if _run_circuit is not None and _kernel_run is None:
+                # add-kernel-simulation-object 11.1: through the kernel object.
+                _sim = Simulation(_run_circuit, _tro, True)
+                _sim.set_switch_fn(switch_fn)
+                if b_extra_fn is not None:
+                    _sim.set_source_term(b_extra_fn)
+                if initial_state is not None:
+                    _sim.set_initial_state(initial_state)
+                if should_continue is not None:
+                    _sim.set_cancel(should_continue)
+                if resume_from is not None:
+                    _sim.restore(resume_from, False)  # simulate()'s t_start wins
+                for (_f, _p), _o in zip(_plan.ticks, _plan.tick_offsets
+                                        or [0.0] * len(_plan.ticks)):
+                    _sim.add_tick(_p, _f, _o)
+                res = _pulsim_module._run_simulation(_sim)
+                _stats = _sim.trbdf2_stats
+            else:
+                _to = _pulsim_module._to_trbdf2_options(_tro)
+                _h_max = _to["h_max"]
+                cache = PwlStateSpaceCache(builder.graph, builder.pool)
+                if _run_circuit is not None:  # one analysis per structure
+                    cache.share_symbolic(_run_circuit)
+                # Lazy build only needs a positive dt to mark the cache
+                # dynamic; the stepper solves at its own per-step dt via
+                # solve_at, never at this value.
+                cache.build_lazy(_h_max if _h_max > 0.0 else _span / 1000.0)
+                res, _stats = run_transient_trbdf2(
+                    cache, builder.graph, builder.pool,
+                    t_start=float(t_start), t_end=float(t_end),
+                    rtol=_to["rtol"], atol=_to["atol"],
+                    h_init=_to["h_init"], h_max=_h_max,
+                    switch_fn=switch_fn,
+                    b_extra_fn=b_extra_fn,
+                    initial_state=initial_state,
+                    resume_from=resume_from,
+                    max_event_iterations=_to["max_event_iterations"],
+                    should_continue=should_continue,
+                    observer_periods=[_p for _, _p in _plan.ticks],
+                    observers=[_f for _f, _ in _plan.ticks],
+                    observer_offsets=list(_plan.tick_offsets),
+                    # None: the kernel stamps the Newton devices itself.
+                    enable_nonlinear_refresh=enable_nonlinear_refresh,
+                    max_newton_iterations=_to["max_newton_iterations"],
+                    tol_newton_dx=_to["tol_newton_dx"],
+                    tol_newton_res=_to["tol_newton_res"],
+                    enable_newton_line_search=_to["enable_newton_line_search"],
+                    enable_newton_lm=_to["enable_newton_lm"],
+                    newton_roundoff_budget=_to["newton_roundoff_budget"],
+                    on_impulse_error=_to["on_impulse_error"],
+                )
         except SimulationAborted as _aborted:
             try:
                 _partial = _aborted.partial
@@ -3066,10 +3132,13 @@ def simulate(
     # mask. This also makes the docs (gotchas.md "lazy-build is
     # the default") true — they previously described intent, not
     # behaviour.
-    cache = PwlStateSpaceCache(builder.graph, builder.pool)
-    if _run_circuit is not None:  # one analysis per structure
-        cache.share_symbolic(_run_circuit)
-    cache.build_lazy(dt)
+    # add-kernel-simulation-object 11.1: the run goes through the kernel
+    # object (sim::Simulation, which owns the cache) unless a hook needs
+    # the cache before the run or sweep() replays a recipe.
+    _via_sim = (_run_circuit is not None and _kernel_run is None
+                and not mmc_arms and on_cache is None
+                and _PWL_RECIPE.get() is None)
+    cache = None if _via_sim else _new_pwl_cache(builder, _run_circuit, dt)
 
     # v2.0 Phase 3 "obra №2" — GGJ Thevenin MMC arms. The driver
     # needs THIS cache (its observer refactors these factors in
@@ -3181,20 +3250,22 @@ def simulate(
     # Construct options: the kernel resolves them from one RunOptions
     # (sim::to_simulation_options; every default in sim::Defaults).
     if store_every is not None and int(store_every) < 1:
-        raise ValueError(
+        raise _options_error("store_every",
             f"simulate(store_every={store_every}): must be >= 1 "
             "(1 records every step)")
     if max_event_iterations is not None and int(max_event_iterations) < 0:
-        raise ValueError(
+        raise _options_error("max_event_iterations",
             f"simulate(max_event_iterations={max_event_iterations}"
             "): must be >= 0 (0 disables event iteration)")
     if max_dt_halvings is not None and int(max_dt_halvings) < 0:
-        raise ValueError(
+        raise _options_error("max_dt_halvings",
             f"simulate(max_dt_halvings={max_dt_halvings}): must "
             "be >= 0 (0 disables the retry)")
-    # _ro.simulation_options without the wrapper frame (hot path).
-    opts = _pulsim_module._simulation_options_kw(
-        t_end, dt, "pwl", t_start,
+    # _ro.run_options without the wrapper frame (hot path).
+    _run_opts = _pulsim_module._run_options_kw(
+        t_end, dt, "pwl", t_start, start_from_dc_op=start_from_dc_op,
+        enable_nonlinear_refresh=enable_nonlinear_refresh,
+        auto_regularize=False,  # applied above, on _run_circuit
         store_every=store_every,
         max_newton_iterations=max_newton_iterations,
         max_event_iterations=max_event_iterations,
@@ -3211,6 +3282,8 @@ def simulate(
         resolution_diagnostics=resolution_diagnostics,
         inductor_freeze_di_max=inductor_freeze_di_max,
         inductor_abs_clamp=inductor_abs_clamp)
+    opts = (None if _via_sim
+            else _pulsim_module._to_simulation_options(_run_opts))
 
     # Default switch_fn: all switches closed (v1.x behaviour).
     #
@@ -3351,6 +3424,9 @@ def simulate(
     cxx_chain = getattr(step_observer, "_cxx_chain", None) \
         if step_observer is not None and not _plan.fixed_tick_kwargs() \
         else None
+    if cxx_chain is not None and _via_sim:  # the raw chain entry point
+        cache = _new_pwl_cache(builder, _run_circuit, dt)
+        opts = _pulsim_module._to_simulation_options(_run_opts)
     if cxx_chain is not None:
         from . import _pulsim as _k  # type: ignore[import-not-found]
         chain_dt = getattr(step_observer, "_chain_dt", dt)
@@ -3404,10 +3480,13 @@ def simulate(
                 ic_from_builder=_ic_from_builder,
                 auto_regularize=bool(auto_regularize))
         try:
-            res = (_kernel_run.result if _kernel_run is not None else
-                   run_transient(
-                       cache, builder.graph, builder.pool, opts, **kwargs,
-                   ))
+            if _kernel_run is not None:
+                res = _kernel_run.result
+            elif _via_sim:
+                res = _run_on_simulation(_run_circuit, _run_opts, kwargs)
+            else:
+                res = run_transient(
+                    cache, builder.graph, builder.pool, opts, **kwargs)
         except SimulationAborted as _aborted:
             # The partial trace is a fresh pybind-owned object with
             # none of the side-table attributes simulate() attaches

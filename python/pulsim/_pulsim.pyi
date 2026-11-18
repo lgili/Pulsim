@@ -3671,11 +3671,13 @@ class Simulation:
     """
     The kernel object that is a simulation: Simulation(circuit, options) plans the run (preflight on a private copy, routing, the option x engine refusals, the device capability check, the Newton stamps); attach gate sources, ticks and source terms; run() or run_until(t) + snapshot() / restore(). Engines 'pwl' and 'trbdf2'; the exact engine is refused (pulsim.simulate composes it). C blocks / graph-driven sources are refused (simulate composes them).
     """
-    def __init__(self, circuit: Circuit, options: RunOptions) -> None:
+    def __init__(self, circuit: Circuit, options: RunOptions, controls_composed: bool = False) -> None:
+        """
+        controls_composed=True: the caller drives the circuit's C blocks / graph-driven sources through the attachments (as pulsim.simulate() does); otherwise they are refused.
+        """
+    def add_tick(self, period: float, fn: typing.Any, offset: float = 0.0) -> None:
         ...
-    def add_tick(self, period: float, fn: typing.Any) -> None:
-        ...
-    def restore(self, snapshot: SolverSnapshot) -> None:
+    def restore(self, snapshot: SolverSnapshot, at_snapshot_time: bool = True) -> None:
         ...
     def run(self) -> SimulationResult:
         ...
@@ -3685,6 +3687,8 @@ class Simulation:
         ...
     def set_initial_state(self, x: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> None:
         ...
+    def set_live_ring(self, ring: LiveRingHandle) -> None:
+        ...
     def set_source_term(self, b_extra_fn: typing.Any) -> None:
         ...
     def set_step_observer(self, step_observer: typing.Any) -> None:
@@ -3693,8 +3697,22 @@ class Simulation:
         """
         The gate source: t -> SwitchStateMask (a native schedule runs in C++). Kept alive by the Simulation.
         """
+    def set_tick_before(self, fn: typing.Any) -> None:
+        """
+        pwl: runs at every tick instant before the ticks.
+        """
     def snapshot(self) -> SolverSnapshot:
         ...
+    @property
+    def builder(self) -> CircuitBuilder:
+        """
+        The builder of the circuit the run solves (read-only use).
+        """
+    @property
+    def cache(self) -> PwlStateSpaceCache:
+        """
+        The run's PWL cache (built on first use, kept across runs).
+        """
     @property
     def circuit(self) -> Circuit:
         """
@@ -3778,6 +3796,10 @@ def _run_options_kw(t_end: float, dt: float | None, engine: str, t_start: float,
 def _run_pwl_points(circuit: Circuit, names: collections.abc.Sequence[str], table: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], options: SimulationOptions, dt: float, switch_fn: typing.Any, start_from_dc_op: bool, enable_nonlinear_refresh: bool | None, initial_state: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"] | None, auto_regularize: bool, n_threads: int) -> tuple[typing.Any, ...]:
     """
     Internal (sweep(circuit, ...) kernel path, task 5.2): run the points of a parameter table (rows = points, columns = names: parameters, or "device.field") on the pwl engine, n_threads native threads, without the GIL. Returns ([(result, circuit, builder, own_preflight) or None per point], stats); None = re-run that point through simulate().
+    """
+def _run_simulation(simulation: Simulation) -> SimulationResult:
+    """
+    Simulation.run() without the result handles: simulate()'s call.
     """
 def _simulation_options_kw(t_end: float, dt: float | None, engine: str, t_start: float, **kwargs) -> SimulationOptions:
     ...

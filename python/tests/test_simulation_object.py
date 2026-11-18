@@ -245,6 +245,10 @@ def test_simulation_keeps_its_python_callables_alive():
     assert alive() is not None
     sim.run()
     assert hits == [k * 4 * dt for k in range(5)]
+    # A replaced gate source is released (the object holds one, not all).
+    sim.set_switch_fn(p.NativePwm2Switch(8 * dt, 0.25, 2))
+    gc.collect()
+    assert alive() is None
 
 
 def test_the_docs_page_is_the_option_table():

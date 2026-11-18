@@ -215,3 +215,23 @@ TEST_CASE("every pulsim error is a PulsimError and keeps its std base",
     STATIC_REQUIRE(std::is_base_of_v<PulsimError, analysis::Cancelled>);
     STATIC_REQUIRE(std::is_base_of_v<std::runtime_error, analysis::Cancelled>);
 }
+
+TEST_CASE("the object keeps one cache and lands offset ticks on the grid",
+          "[sim][facade]") {
+    const auto circuit = ir::Circuit::from_builder(shockley_buck());
+    sim::RunOptions o;
+    o.engine = sim::EngineChoice::Pwl;
+    o.t_end = 64 * kDt;
+    o.dt = kDt;
+    sim::Simulation s{circuit, o};
+    s.set_switch_fn(gate);
+    const auto* cache = &s.cache();
+    std::vector<Real> hits;
+    s.add_tick(16 * kDt, [&hits](Real t, const Vector&) { hits.push_back(t); },
+               4 * kDt);
+    (void)s.run_until(32 * kDt);
+    (void)s.run();
+    REQUIRE(&s.cache() == cache);
+    // t_start + offset + k*period, k = 0..3, across the split.
+    REQUIRE(hits == std::vector<Real>{4 * kDt, 20 * kDt, 36 * kDt, 52 * kDt});
+}

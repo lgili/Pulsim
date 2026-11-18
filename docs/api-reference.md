@@ -140,12 +140,15 @@ caller's circuit is unchanged), routing (`plan['engine']`,
 `plan['route_reasons']`), the option and device refusals. `RunOptions`
 fields are the `simulate()` keywords; `None` means "not set" and the
 default comes from one kernel table (`sim::Defaults`). Attachments:
-`set_switch_fn`, `add_tick(period, fn)`, `set_source_term`,
-`set_step_observer` (`pwl`), `set_cancel`, `set_initial_state`;
-`snapshot()` / `restore()` continue a run exactly. Engines `'pwl'` and
-`'trbdf2'` (results equal `simulate()` bit for bit); `'exact'` and
-circuits with C blocks are refused: use `simulate()`. Invalid values
-raise `pulsim.OptionsError` (`.option`).
+`set_switch_fn`, `add_tick(period, fn, offset=0.0)`, `set_source_term`,
+`set_step_observer` and `set_tick_before` (`pwl`), `set_live_ring`,
+`set_cancel`, `set_initial_state`; `cache` is the run's PWL cache (built
+on first use); `snapshot()` / `restore()` continue a run exactly.
+Engines `'pwl'` and `'trbdf2'` — `simulate()` itself runs them through
+this object; `'exact'` is refused, and so are C blocks unless
+`controls_composed=True` says the attachments drive them (use
+`simulate()`, which composes them). Invalid values raise
+`pulsim.OptionsError` (`.option`).
 
 ## `CircuitBuilder`
 

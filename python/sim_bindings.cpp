@@ -94,19 +94,6 @@ py::dict trbdf2_dict(const solver::TrBdf2Options& o) {
     return d;
 }
 
-py::dict stats_dict(const solver::TrBdf2Stats& st) {
-    py::dict d;
-    d["n_accept"] = st.n_accept;
-    d["n_reject"] = st.n_reject;
-    d["n_gate_events"] = st.n_gate_events;
-    d["n_diode_events"] = st.n_diode_events;
-    d["n_solves"] = st.n_solves;
-    d["n_forced_accepts"] = st.n_forced_accepts;
-    d["n_ctrl_ticks"] = st.n_ctrl_ticks;
-    d["control_tick_counts"] = st.ctrl_tick_counts;
-    return d;
-}
-
 }  // namespace
 
 void init_module(py::module_& m) {
@@ -406,13 +393,22 @@ void init_module(py::module_& m) {
           py::arg("options"),
           "The fixed-step driver's SimulationOptions resolved from a "
           "RunOptions (sim::to_simulation_options).");
+    // A module function (not a method) so profilers see the kernel run as
+    // one C call, as they see run_transient.
+    m.def("_run_simulation",
+          [](sim::Simulation& s) {
+              py::gil_scoped_release rel;
+              return s.run();
+          },
+          py::arg("simulation"),
+          "Simulation.run() without the result handles: simulate()'s call.");
     m.def("_to_trbdf2_options",
           [](const RunOptions& o) { return trbdf2_dict(sim::to_trbdf2_options(o)); },
           py::arg("options"),
           "The variable-step driver's options resolved from a RunOptions, as "
           "a dict (sim::to_trbdf2_options).");
 
-    py::class_<sim::Simulation>(m, "Simulation",
+    py::class_<sim::Simulation>(m, "Simulation", py::dynamic_attr(),
         "The kernel object that is a simulation: Simulation(circuit, "
         "options) plans the run (preflight on a private copy, routing, the "
         "option x engine refusals, the device capability check, the Newton "
@@ -421,49 +417,88 @@ void init_module(py::module_& m) {
         "'trbdf2'; the exact engine is refused (pulsim.simulate composes "
         "it). C blocks / graph-driven sources are refused (simulate "
         "composes them).")
-        .def(py::init<ir::Circuit, RunOptions>(), py::arg("circuit"),
-             py::arg("options"))
+        .def(py::init<ir::Circuit, RunOptions, bool>(), py::arg("circuit"),
+             py::arg("options"), py::arg("controls_composed") = false,
+             "controls_composed=True: the caller drives the circuit's C "
+             "blocks / graph-driven sources through the attachments (as "
+             "pulsim.simulate() does); otherwise they are refused.")
         .def("set_switch_fn",
-            [](sim::Simulation& s, py::object fn) {
+            [](py::object self, py::object fn) {
+                // Holds the callable (replacing the previous one): the
+                // kernel keeps only a C++ handle to it.
+                self.attr("_held_switch_fn") = fn;
+                auto& s = self.cast<sim::Simulation&>();
                 // Width-checked, as simulate() and the raw drivers check it.
                 auto a = pulsim_bindings_common::adapt_switch_fn(
                     fn, s.builder().graph().num_switches());
                 std::function<Real(Real)> edge = std::move(a.next_edge);
-                if (!edge && py::hasattr(fn, "next_edge_after")) {
+                // A Python schedule's declared edges: the fixed step reads
+                // them (as run_transient does); the variable step lands
+                // native edges only (as run_transient_trbdf2 does).
+                if (!edge && s.plan().engine == sim::Engine::FixedTrap
+                    && py::hasattr(fn, "next_edge_after")) {
                     edge = fn.attr("next_edge_after")
                                .cast<std::function<Real(Real)>>();
                 }
                 s.set_switch_fn(std::move(a.fn), std::move(edge));
             },
-            py::arg("switch_fn"), py::keep_alive<1, 2>(),
+            py::arg("switch_fn"),
             "The gate source: t -> SwitchStateMask (a native schedule runs "
             "in C++). Kept alive by the Simulation.")
         .def("set_source_term",
-            [](sim::Simulation& s, py::object fn) {
+            [](py::object self, py::object fn) {
+                // Holds the callable (replacing the previous one): the
+                // kernel keeps only a C++ handle to it.
+                self.attr("_held_source_term") = fn;
+                auto& s = self.cast<sim::Simulation&>();
+                solver::BExtraFn b;
                 std::function<Real(Real)> jump;
-                if (py::hasattr(fn, "next_jump_after")) {
-                    jump = fn.attr("next_jump_after")
-                               .cast<std::function<Real(Real)>>();
-                }
-                s.set_source_term(fn.cast<solver::BExtraFn>(), std::move(jump));
+                pulsim_bindings_common::resolve_b_extra(fn, b, jump);
+                s.set_source_term(std::move(b), std::move(jump));
             },
-            py::arg("b_extra_fn"), py::keep_alive<1, 2>())
+            py::arg("b_extra_fn"))
         .def("set_step_observer",
-            [](sim::Simulation& s, py::object fn) {
-                s.set_step_observer(fn.cast<solver::StepObserverFn>());
+            [](py::object self, py::object fn) {
+                // Holds the callable (replacing the previous one): the
+                // kernel keeps only a C++ handle to it.
+                self.attr("_held_step_observer") = fn;
+                auto& s = self.cast<sim::Simulation&>();
+                s.set_step_observer(pulsim_bindings_common::step_fn(fn));
             },
-            py::arg("step_observer"), py::keep_alive<1, 2>())
+            py::arg("step_observer"))
         .def("add_tick",
-            [](sim::Simulation& s, Real period, py::object fn) {
-                s.add_tick(period,
-                           fn.cast<std::function<void(Real, const Vector&)>>());
+            [](sim::Simulation& s, Real period, py::object fn, Real offset) {
+                s.add_tick(period, pulsim_bindings_common::step_fn(fn), offset);
             },
-            py::arg("period"), py::arg("fn"), py::keep_alive<1, 3>())
+            py::arg("period"), py::arg("fn"), py::arg("offset") = 0.0,
+            py::keep_alive<1, 3>())
+        .def("set_tick_before",
+            [](py::object self, py::object fn) {
+                // Holds the callable (replacing the previous one): the
+                // kernel keeps only a C++ handle to it.
+                self.attr("_held_tick_before") = fn;
+                auto& s = self.cast<sim::Simulation&>();
+                s.set_tick_before(pulsim_bindings_common::step_fn(fn));
+            },
+            py::arg("fn"),
+            "pwl: runs at every tick instant before the ticks.")
+        .def("set_live_ring", &sim::Simulation::set_live_ring,
+             py::arg("ring"))
+        .def_property_readonly("cache", &sim::Simulation::cache,
+             py::return_value_policy::reference_internal,
+             "The run's PWL cache (built on first use, kept across runs).")
+        .def_property_readonly("builder", &sim::Simulation::builder,
+             py::return_value_policy::reference_internal,
+             "The builder of the circuit the run solves (read-only use).")
         .def("set_cancel",
-            [](sim::Simulation& s, py::object fn) {
+            [](py::object self, py::object fn) {
+                // Holds the callable (replacing the previous one): the
+                // kernel keeps only a C++ handle to it.
+                self.attr("_held_cancel") = fn;
+                auto& s = self.cast<sim::Simulation&>();
                 s.set_cancel(fn.cast<solver::ShouldContinueFn>());
             },
-            py::arg("should_continue"), py::keep_alive<1, 2>())
+            py::arg("should_continue"))
         .def("set_initial_state", &sim::Simulation::set_initial_state,
              py::arg("x"))
         .def("run",
@@ -478,7 +513,8 @@ void init_module(py::module_& m) {
             },
             py::arg("t"))
         .def("snapshot", &sim::Simulation::snapshot)
-        .def("restore", &sim::Simulation::restore, py::arg("snapshot"))
+        .def("restore", &sim::Simulation::restore, py::arg("snapshot"),
+             py::arg("at_snapshot_time") = true)
         .def_property_readonly("circuit", &sim::Simulation::circuit,
             "The circuit the run solves: the caller's plus any preflight "
             "ties (the caller's circuit is never changed).")
@@ -512,7 +548,7 @@ void init_module(py::module_& m) {
                 return out;
             })
         .def_property_readonly("trbdf2_stats", [](const sim::Simulation& s) {
-                return stats_dict(s.trbdf2_stats());
+                return pulsim_bindings_common::trbdf2_stats_dict(s.trbdf2_stats());
             });
 }
 

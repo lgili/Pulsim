@@ -14,6 +14,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   judges every keyword against the engine the run lands on from this one
   declaration: honoured, or refused with `UnsupportedError(engine,
   feature=<keyword>)`. Nothing is accepted and ignored any more.
+* **Changed** `simulate()` runs the `'pwl'` and `'trbdf2'` engines through
+  the kernel object (`sim::Simulation`), which owns the cache: results are
+  bit-identical. Runs whose hooks need the cache before the run
+  (`mmc_arms`, `on_cache`), `sweep()`'s replayed recipe and the C++
+  control-chain fast path still call the drivers directly; the exact
+  engine is composed in Python. `Simulation` gains
+  `add_tick(period, fn, offset=0.0)`, `set_tick_before`, `set_live_ring`,
+  `cache`, `builder`, `restore(snapshot, at_snapshot_time=True)` and the
+  `controls_composed` constructor flag; a replaced callable is released
+  (it was kept alive until the object died). Code that spied on
+  `pulsim.PwlStateSpaceCache` to read a `simulate()` run's cache counters
+  now finds the cache at `Simulation.cache`.
+* **Changed** a bad count (`store_every < 1`, a negative
+  `max_event_iterations` / `max_dt_halvings`, `newton_roundoff_budget < 1`)
+  raises `pulsim.OptionsError` (a `ValueError`, `.option` = the keyword) on
+  every path, as the kernel's own checks do.
 * **Added** `sim::Defaults` (`core/include/pulsim/sim/defaults.hpp`): every
   default of a run in one place. `SimulationOptions`, `TrBdf2Options`, the
   kernel resolution of `RunOptions`, the exact engine's dispatcher and
