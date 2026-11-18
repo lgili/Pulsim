@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### TR-BDF2: no diode turns off carrying reverse current
+
+- An ON conductance-form diode's crossing floor was 1e-8 of the node
+  voltages, 0.7 mA through `g_on = 1e3` on a 36 V boost: the boost of the
+  shooting suite turned off at -0.705 mA (`sw` at -3.5e5 V, 9577
+  floor-accepted steps). The floor is now a leakage-scale current.
+- A turn-off whose landing bracket reached its conditioning floor (the DCM
+  buck: -9e-7 A left, `sw` at 446 V) lands on the secant root of the
+  bracketing states. Worst reverse current at a turn-off: boost 0 A, DCM
+  buck -1.2e-16 A; new invariant test. trbdf2 numbers moved: pss buck DCM
+  gap 9.8e-9 -> 1.0e-8, boost 4.6e-9 -> 5.2e-9.
+
 ### Ideal switch on TR-BDF2: branch-form diode, structural pass, re-initialisation
 
 * **Added** the branch form on `engine='trbdf2'` for the diode too

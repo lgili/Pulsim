@@ -345,6 +345,23 @@ inline Real held_tolerance(const pwl::DiodeEventState& diodes,
     if (e.is_on && e.var >= 0) {
         return Real{1e-8} * (Real{1} + std::abs(e.V_f) + std::abs(x[e.var]));
     }
+    // An ON conductance-form diode's signal is V_f + i/g_on: 1e-8 of the
+    // node voltages is i = 0.7 mA at g_on = 1e3 on a 36 V boost, so a step
+    // from +0.37 to -0.71 mA was "riding the boundary", never landed, and
+    // the diode turned off later carrying -0.7 mA (sw at -3.5e5 V, 9577
+    // floor-accepted steps). Its noise is a leakage-scale current,
+    // g_off * (1 + |v|) (a bridge diode riding at -1.6e-7 A against
+    // 3.3e-7 A), read as voltage through 1/g_on, plus the difference's
+    // round-off; a DCM buck's 9e-7 A overshoot (446 V over g_off) is then
+    // a crossing.
+    if (e.is_on && e.g_on > Real{0}) {
+        constexpr Real eps = std::numeric_limits<Real>::epsilon();
+        const Real va = std::abs(stamping::read_node_voltage(x, e.from));
+        const Real vk = std::abs(stamping::read_node_voltage(x, e.to));
+        return e.g_off / e.g_on
+                   * (Real{1} + std::abs(e.V_th) + std::abs(e.V_f) + va + vk)
+               + Real{64} * eps * (va + vk);
+    }
     return Real{1e-8}
            * (Real{1} + std::abs(e.V_th) + std::abs(e.V_f)
               + std::abs(stamping::read_node_voltage(x, e.from))
@@ -2597,6 +2614,9 @@ inline SimulationResult run_transient_trbdf2(
                             || std::abs(s_post) * ce.g_on / ce.g_off <= v_tol;
                     };
                     Real sb_raw = sb;   // the unhalved signal at tb
+                    Real sa_raw = sa;
+                    Vector x_ta = x_sig;
+                    Vector x_tb = tb < t + h ? x_g : x_1;
                     for (int it = 0; it < 40; ++it) {
                         t_loc = std::clamp(
                             ta - sa * (tb - ta) / (sb - sa),
@@ -2631,12 +2651,15 @@ inline SimulationResult run_transient_trbdf2(
                         if ((sm > Real{0}) == (sa > Real{0})) {
                             ta = t_loc;
                             sa = sm;
+                            sa_raw = sm;
+                            x_ta = x_trial;
                             if (side == -1) { sb *= Real{0.5}; }
                             side = -1;
                         } else {
                             tb = t_loc;
                             sb = sm;
                             sb_raw = sm;
+                            x_tb = x_trial;
                             if (side == +1) { sa *= Real{0.5}; }
                             side = +1;
                         }
@@ -2649,9 +2672,32 @@ inline SimulationResult run_transient_trbdf2(
                     // Land the step at t* = tb (the post-crossing
                     // side, so decide_next_state sees the crossed
                     // signal), commit the trap sub-step there.
-                    const Real dt_land =
+                    Real dt_land =
                         std::max(tb - t, dt_floor);
-                    if (!trap_solve(mask_step, t, dt_land, x_trial)) {
+                    // A turn-off still past spike_ok when the bracket hit
+                    // its conditioning floor (the zero 0.6 ps after t on
+                    // a DCM buck, bracket 8 ps: -9e-7 A left, sw at 446 V)
+                    // lands on the secant root of the two bracketing
+                    // states: a trap solve there would carry eps*2C/dt of
+                    // noise, the size of the error. Linear circuits only.
+                    // shortcut: the capacitor current is the bracket's
+                    // (i_C = 2C/dt (v - v_n) - i_n of an interpolated v),
+                    // exact to O(bracket * di_C/dt).
+                    const bool interp_land = turn_off && !nl_effective
+                        && !spike_ok(sb_raw) && sa_raw != sb_raw
+                        && (sa_raw > Real{0}) != (sb_raw > Real{0});
+                    bool land_ok = true;
+                    if (interp_land) {
+                        const Real th = sa_raw / (sa_raw - sb_raw);
+                        const Real t_lin = ta + th * (tb - ta);
+                        // Post-crossing side by a hair, as the solve lands.
+                        const Real thp = std::min(Real{1}, th * (Real{1} + Real{1e-6}));
+                        x_trial = x_ta + thp * (x_tb - x_ta);
+                        dt_land = std::max(t_lin - t, h_probe_floor);
+                    } else {
+                        land_ok = trap_solve(mask_step, t, dt_land, x_trial);
+                    }
+                    if (!land_ok) {
                         // Newton failed on the landing sub-step: x_trial
                         // is its warm start, not a state. Reject and
                         // retake shorter (it was committed before).
