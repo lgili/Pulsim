@@ -49,6 +49,7 @@ import subprocess
 import sys
 import threading
 import warnings
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence

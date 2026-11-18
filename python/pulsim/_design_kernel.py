@@ -626,10 +626,10 @@ def _plan_or_reason(ev):
 
 def _native(sf):
     from . import _pulsim as _k
+    from .periodic_steady_state import _closed_loop_source
     return (isinstance(sf, (_k.SwitchSchedule, _k.NativePwm2Switch,
                             _k.NativeMultiMaskPwm))
-            and getattr(sf, "_closed_loop", None) is None
-            and not getattr(sf, "follows_controller", False)
+            and not _closed_loop_source(sf)       # the one predicate
             and (not isinstance(sf, _k.SwitchSchedule) or sf.has_edges))
 
 
