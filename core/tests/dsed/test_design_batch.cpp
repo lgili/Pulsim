@@ -28,7 +28,7 @@ using SSM = topology::SwitchStateMask;
 struct Gate {
     Real T, D;
     SSM operator()(Real t) const {
-        SSM m(1);
+        SSM m(2);   // the circuit's width: S, then the diode's bit (decided by commutation)
         const Real ph = t - T * std::floor(t / T);
         m.set(0, ph < D * T);
         return m;
