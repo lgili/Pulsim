@@ -54,15 +54,15 @@ Closed forms used below.
 - [ ] 7.4 Tests: continuous PI on the RC — `v(0.5 ms) = 0.467719269784`, `v(1 ms) = 0.801233889654` within 1e-9 on the exact strategy and within 1e-6 on TR-BDF2 at rtol 1e-8; hysteresis control — rise and fall times 200.6707 µs within 1e-9 s and the ripple exactly 1.000 A within 1e-9; a saturating continuous PI crosses its limit as an event
 
 ## 8. C export
-- [ ] 8.1 One expression per block kind rendered to the kernel and to C
-- [ ] 8.2 `export_c`: state struct, init, per-rate step functions, rate tables, C-block shim for single-rate graphs
-- [ ] 8.3 Refusals: `PythonBlock`, source-less `CBlock`, continuous blocks
-- [ ] 8.4 Tests: for every block kind and for a PI + limiter + PWM graph, the export compiled with `-ffp-contract=off` and loaded through `add_c_block` reproduces the in-kernel graph bit for bit over 10⁴ ticks; the export compiles with `-std=c99 -Wall -Werror -pedantic` and contains no `malloc`
+- [x] 8.1 (block_laws.h; DelayBlock and SignalDemux are a FIFO and a copy, DECISIONS G19) One expression per block kind rendered to the kernel and to C
+- [x] 8.2 `export_c`: state struct, init, per-rate step functions, rate tables, C-block shim for single-rate graphs
+- [x] 8.3 (also a rate with a compute_delay) Refusals: `PythonBlock`, source-less `CBlock`, continuous blocks
+- [x] 8.4 (also -Wextra; tick counters tested at 10^9) Tests: for every block kind and for a PI + limiter + PWM graph, the export compiled with `-ffp-contract=off` and loaded through `add_c_block` reproduces the in-kernel graph bit for bit over 10⁴ ticks; the export compiles with `-std=c99 -Wall -Werror -pedantic` and contains no `malloc`
 
 ## 9. Consolidation
-- [ ] 9.1 (partial: `MixedDomainBlockChain` and YAML chains build the graph, `PythonBlock` adapter exists; `bind_pi_*` / `add_c_block` / the composition blocks remain) `MixedDomainBlockChain`, `bind_pi_to_switch`, `bind_pi_to_duty_callable`, `add_c_block`, YAML chains build a `ControlGraph`; closures through the `PythonBlock` adapter with a deprecation warning; remove the two composition blocks in `simulate()`
-- [x] 9.2 Measurement gate (counters): `n_block_evals = n_ticks × blocks in the group`; zero Python calls during a run of a graph with no `PythonBlock` (baseline from 1.3); for a 10 kHz controller on a dt = 1e-7 fixed run, block evaluations fall from one per step to one per tick (1000× fewer, by count)
-- [ ] 9.3 C blocks on `trbdf2` and on the exact strategy: same output as on the fixed engine within the engine tolerance (refused / open-loop today)
+- [x] 9.1 (label-time groups keep every closed-loop number, DECISIONS G13–G16) `MixedDomainBlockChain`, `bind_pi_to_switch`, `bind_pi_to_duty_callable`, `add_c_block`, YAML chains build a `ControlGraph`; closures through the `PythonBlock` adapter with a deprecation warning; remove the two composition blocks in `simulate()`
+- [x] 9.2 (also on the consolidated paths: `bind_pi_to_switch(measured="out")` and a compiled C block make 0 Python calls on pwl and trbdf2; closed-loop buck 2188 → 204 ns/step) Measurement gate (counters): `n_block_evals = n_ticks × blocks in the group`; zero Python calls during a run of a graph with no `PythonBlock` (baseline from 1.3); for a 10 kHz controller on a dt = 1e-7 fixed run, block evaluations fall from one per step to one per tick (1000× fewer, by count)
+- [x] 9.3 (trbdf2 runs them, the state-time law; the exact strategy refuses by name, DECISIONS G21) C blocks on `trbdf2` and on the exact strategy: same output as on the fixed engine within the engine tolerance (refused / open-loop today)
 
 ## 10. Docs and verification
 - [ ] 10.1 Control guide (rates, order, delay, continuous blocks, export), migration note for insertion-order chains, AI_GUIDE, CHANGELOG

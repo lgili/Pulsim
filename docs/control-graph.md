@@ -50,9 +50,12 @@ Python class and are bit-identical to it (10⁴ random inputs each,
 `SignalMux`, `SignalDemux`, `LookupTable1D`, `MathBlock`,
 `MovingAverageFilter`, `Differentiator`, `PIDController`, `Sum`,
 `Integrator`, `FirstOrderLowPass`, `PwmGenerator`; and `PIController`,
-`Gain`, `Subtract`, `Limiter` (kernel blocks, same numbers). Not yet
-compared byte for byte: `SpaceVectorModulator`, the Clarke / Park
-transforms and the PLL.
+`Gain`, `Subtract`, `Limiter` (kernel blocks, same numbers);
+`SpaceVectorModulator`, `ClarkeTransform`, `InverseClarkeTransform`,
+`ParkTransform`, `InverseParkTransform` and `PLL` (two or three outputs:
+`theta_hat`, `omega_hat`, and `omega_hat / 2 pi`). Every law lives once,
+in `core/include/pulsim/blockchain/block_laws.h`, which the kernel calls
+and `export_c` copies.
 
 A block's initial state (`PIController(integrator_state=...)`,
 `Comparator(state=True)`, `FirstOrderLowPass(state=...)`, a
@@ -160,6 +163,113 @@ on each tick and the hold is exact:
 | `pwl`, `dt` = 0.1 µs, `discontinuity_restart=True` | 7.3e-11 |
 | `trbdf2`, `rtol=1e-10` | 7.8e-9 |
 | `trbdf2`, `rtol=1e-12` | 3.7e-10 |
+
+## Label time: the closed-loop helpers and C blocks
+
+`bind_pi_to_switch`, `bind_pi_to_duty_callable` and `add_c_block` build
+control graphs (`MixedDomainBlockChain(label_time=True)`, one rate group
+per loop / block). `simulate()` composes every graph, closed loop and C
+block in one place above the engine dispatch (`_control_plan.py`); with
+no `PythonBlock` in them the kernel runs them with no Python call (the
+gate of `bind_pi_to_switch` is a C++ `CxxChainPwmGate`).
+
+**The law.** The fixed engine calls an observer with `(t_n, x_{n-1})`
+before step n (from `t_{n-1}` to `t_n`). A label-time group due at
+`tau = t_start + k*T` runs at the first call whose **label** `t_n >=
+tau - 1e-9*dt` (and `tau < t_end - 1e-9*dt`), reads `x_{n-1}`, and its
+output drives step n. So tick 0 runs at `t_start` on `x0`, and tick
+`k >= 1` samples `x(kT - dt)` and holds its output from `kT - dt`: the
+whole grid after tick 0 is **one solver step early** (an advance, not a
+delay; the first hold lasts `T - dt`). This is the protocol the helpers
+had before 2.1; it is kept so every closed-loop number is unchanged. A
+chain with ordinary `Rate`s (state time, G6) samples `x(kT)` instead.
+On `trbdf2` both modes tick on the exact instants.
+
+Closed form, P loop on the RC of the table above (`K_p = 2`, set-point
+1 V, `T = 100 µs`), label time at step `h`: `w_0 = 0`,
+`w_{k+1} = a_k w_k + (1 - a_k)·2(1 - w_k)`, `a_0 = e^{-(T-h)/τ}`,
+`a_k = e^{-T/τ}`, `w_k = v(kT - h)`. `w_10 = 0.643457839998` at
+`h = 1 µs`, `0.643536938647` at `h = 0.1 µs`; `h → 0` gives the state-time
+`v[10] = 0.643545722992` (`one_sample`: 0.659695654069).
+
+| C-block P loop on `pwl`, `w_10` | error |
+|---|---|
+| `dt` = 1 µs | 6.17e-5 |
+| `dt` = 0.1 µs | 6.14e-6 |
+
+First order: a label-time graph declares no jumps (as the helpers did
+not), so the trapezoidal step averages each held jump (known
+limitations); `discontinuity_restart=True` does not restart on them
+(1.06e-4 / 1.05e-5). Use a state-time chain with `drive_source` for an
+exact hold.
+
+### Migration: helpers and C blocks (2.1)
+
+| Before | Now |
+|---|---|
+| `bind_pi_to_switch` / `bind_pi_to_duty_callable` ran Python closures: per step a tick scheduler, the composed observer, the gate and `pwm_on` (4044 Python calls for 10 ticks over 1 ms). | A control graph: the PI in the kernel, the gate in C++. `measured="vout"` (a node name) makes no Python call; a `measured` / `setpoint` callable runs through `PythonBlock` with a `DeprecationWarning` (3 calls per tick). Closed-loop buck, 20 ms at `dt` = 0.1 µs: 2188 → 204 ns/step. Every result bit-identical. |
+| `pi` (the `PIController` passed in) was updated in place. | The kernel block starts from `pi`'s state; `pi` is not updated. Read `loop.duty_history` / `error_history` (live views of the graph's recordings). |
+| `bind_pi_to_switch(t_start=)` aligned the throttle. | Ignored: ticks align to the run's `t_start`. |
+| `add_c_block`: a Python observer and `b_extra` per step (5014 calls / 1 ms); it also fired at `t_end` (11 fires where 10 are due), which changed the last sample of the run. | One graph per builder (`builder._c_graph`), one `CBlock` per block: `code=` / `lib=` run in C++ with no Python call (2041 → 168 ns/step), `fn=` through the adapter with a `DeprecationWarning`. No tick at `t_end`: only the run's final sample changes (t = `t_end` when the span is a multiple of the block `dt`). |
+| `add_c_block` with a block `dt` below the solver step (no `sim_dt=`) ran every step with a wrong `dt`. | `ControlGraphBuildError` (pass `sim_dt=` to clamp, as before). |
+| `simulate()` composed closed loops and C blocks in two places below the engine dispatch (pwl only). | One composition above the dispatch (`ControlPlan.for_fixed_step` / `for_variable_step`). |
+| `SpaceVectorModulator`, the Clarke / Park transforms and `PLL` in a chain ran the kernel `add_svm` / `add_clarke` / `add_park` / `add_pll` laws: other roundings, `v_dc <= 0` gave duty 0.5, the PLL started at 0 Hz and wrapped to [-π, π); `PLL` needed three outputs. | Their classes' laws, bit-identical (G18): numbers change in FOC chains (rounding level; from the first tick for a PLL); `PLL` takes two or three outputs. |
+| A C block cache under the system temp dir, shared by all users. | A per-user cache, mode 0700; a foreign or group/world-writable cached library is refused. |
+
+## C export
+
+`pulsim.export_c(chain, builder, outputs=[...])` renders a rated graph to
+one C99 file (`CExport.source`; `.write(path)`): the law table, a state
+struct, `<prefix>_init`, one `<prefix>_step_rate<g>(s, in, t)` per rate,
+the rate table (`<prefix>_period`, `<prefix>_offset`), 64-bit tick
+counters (`<prefix>_ticks`, `<prefix>_next_tick`) and, for a single-rate
+graph, the `pulsim_cblock_step` shim, so the file loads back through
+`add_c_block(lib=...)`. `in[k]` is `CExport.inputs[k]` (a node, or a
+channel no block writes); the shim writes `outputs` to `out[]`. No
+`malloc`: the shim's state is static (one library, one instance).
+
+Compiled with `-ffp-contract=off` (MSVC's default `/fp:precise` does not
+contract) it is bit-identical to the kernel graph: every block kind over
+10⁴ ticks, and a PI + limiter + PWM graph in a circuit through
+`add_c_block`. Refused by name: `PythonBlock`, a `CBlock`, a graph with
+no `Rate` (continuous time) and a rate with a `compute_delay`.
+A multi-rate export splits the kernel's single pass into one function
+per rate: when several rates are due at one instant, call them in rate
+order (`step_rate0` first); that reproduces the kernel when no block
+reads, at a shared instant, a signal a later-called rate writes. The shim
+writes NaN to its outputs when it is wired (`n_in`, `n_out`) or clocked
+(`dt`) unlike the export; its state is static, so two `add_c_block`s of
+the same library share one instance.
+
+```python
+ex = pulsim.export_c(chain, builder, outputs=["y"])
+ex.write("ctl.c")   # cc -std=c99 -O2 -ffp-contract=off -shared -fPIC ctl.c -o ctl.so
+pulsim.add_c_block(b, inputs=[("v", "out")], outputs=[("v", "sw", "gnd")],
+                   dt=1e-6, lib="ctl.so")
+```
+
+C blocks compile into a per-user cache, mode 0700
+(`~/Library/Caches/pulsim/cblock`, `~/.cache/pulsim/cblock` or
+`$XDG_CACHE_HOME/pulsim/cblock`, `%LOCALAPPDATA%\pulsim\cblock`); a
+cached library that another user owns or can write is refused.
+
+## Other engines and resume
+
+C blocks run on `trbdf2` (`engine="trbdf2"`; `auto` keeps routing them
+to `pwl`): the engine lands its steps on the ticks, so a block samples
+`v(kT)` and holds from `kT`, the state-time law (`v[10] =
+0.643545722992`, met within 1e-7 at rtol 1e-9). The exact strategy
+(`exact` / `dsed`) refuses them by name: it has no `b_extra` input.
+
+A graph keeps its tick counters and block states across `simulate()`
+calls on the same builder: a run that goes on from the previous `t_end`
+(`resume_from=`) continues the tick grid; a run that starts earlier
+restarts it. The C-block graph is compiled once per circuit layout.
+`control_tick_counts` and `CBlockHandle.n_fires` count the last run's
+ticks. Resume between ticks: a tick due exactly at the previous `t_end`
+is dropped there (the horizon) and runs at the resumed start on the
+snapshot state `x(t_end)`, where the uninterrupted `pwl` run used
+`x(t_end - h)` (label time).
 
 ## Not yet
 

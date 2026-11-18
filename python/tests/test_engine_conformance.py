@@ -805,13 +805,14 @@ def test_mode_guard_diagnostics_only_on_dsed(engine):
     assert "mode_guard" not in r.diagnostics
 
 
-@pytest.mark.parametrize("engine", ("trbdf2", "dsed"))
+@pytest.mark.parametrize("engine", ("dsed", "exact"))
 def test_c_blocks_refused(engine):
+    # trbdf2 runs C blocks since task 9.3 (test_c_block_engines.py)
     b = _rc()
     b._c_blocks = [_CBlock()]
     with pytest.raises(p.UnsupportedError) as ei:
         _sim(engine, b)
-    assert (ei.value.engine, ei.value.feature) == (engine, "c_blocks")
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "c_blocks")
 
 
 @pytest.mark.parametrize("vth", (0.0, 0.7))

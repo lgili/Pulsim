@@ -35,6 +35,83 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   XP-1 / XP-2 are gone with the track's fixes; Linux and Windows CI must
   confirm them.
 
+### Control graph: C blocks on trbdf2, resume, review fixes (task 9.3)
+
+* **Added** `engine="trbdf2"` runs C blocks (the state-time law: it
+  lands on the ticks); `auto` still routes them to `pwl`; `exact` /
+  `dsed` refuse them by name.
+* **Fixed** resuming (`resume_from=`) a run with C blocks restarted
+  their tick grid at the resumed start (the graph was rebuilt per run);
+  it is now built once per circuit layout and continues. Closed loops
+  and graphs already continued.
+* **Fixed** a reused closed loop reported cumulative
+  `control_tick_counts` ([40] on its second 2 ms run).
+* **Fixed** `export_c`: a `DelayBlock` that breaks a loop pushed its
+  input before the producer ran (one extra sample); it now pushes after
+  the pass like the kernel, from `initial_value`. `export_c` no longer
+  replaces the chain's running backend. The shim writes NaN when wired
+  or clocked unlike the export.
+* **Fixed** the C-block cache refused its own libraries under umask 002
+  (group-writable); new libraries are mode 0700, a symlinked entry is
+  refused.
+* **Fixed** `step_loop_python_callbacks` hid a `PythonBlock` inside a
+  composed C++ tick, and listed a graph's C++ `b_extra_fn` as Python.
+
+### Control graph: C export, transforms on their class laws (group 8)
+
+* **Added** `pulsim.export_c(chain, builder, outputs)`: a rated graph
+  as one C99 file (state struct, init, per-rate steps, rate table,
+  64-bit tick counters, and a `pulsim_cblock_step` shim for a
+  single-rate graph that loads through `add_c_block(lib=)`). Built from
+  the kernel's own law table (`block_laws.h`); compiled with
+  `-ffp-contract=off` it is bit-identical to the kernel graph (every
+  block kind, 10⁴ ticks). Refused by name: `PythonBlock`, `CBlock`, a
+  graph with no `Rate`, a rate with a `compute_delay`.
+* **Changed** `SpaceVectorModulator`, `ClarkeTransform`,
+  `InverseClarkeTransform`, `ParkTransform`, `InverseParkTransform` and
+  `PLL` in a chain run their class's law (bit-identical on 10⁴ inputs)
+  instead of the kernel `add_svm` / `add_clarke` / `add_park` /
+  `add_pll` laws (other roundings; the PLL started at 0 Hz and wrapped
+  to [-π, π)). FOC chains change at rounding level, PLL chains from the
+  first tick. `PLL` takes two or three outputs.
+* **Security** the C-block compile cache moved from the shared temp dir
+  to a per-user directory, mode 0700; a cached library that another
+  user owns or can write is refused.
+
+### Control graph: helpers and C blocks consolidated (task 9.1)
+
+* **Changed** `bind_pi_to_switch`, `bind_pi_to_duty_callable` and
+  `add_c_block` build control graphs in *label time* (the protocol they
+  had: a tick runs at the observer label `t_n` with `x_{n-1}`), and
+  `simulate()` composes closed loops, C blocks and graphs in one place
+  above the engine dispatch (the two pwl-only composition blocks are
+  gone). Every closed-loop number is bit-identical (probe of 93 arrays
+  on pwl, pwl+restart, trbdf2), except the final sample of a C-block run
+  whose span is a multiple of the block `dt`: the old throttle also
+  fired at `t_end` (11 fires where 10 are due). docs/control-graph.md
+  states the law and its P-loop closed form (`w_10 = 0.643457839998` at
+  `dt` = 1 µs).
+* **Added** `measured="vout"` (a node name) for the helpers: no Python
+  call per run. A `measured` / `setpoint` callable, a non-pulsim `pi`
+  and `add_c_block(fn=)` run through `PythonBlock` with a
+  `DeprecationWarning`. `code=` / `lib=` C blocks run in C++.
+  Closed-loop buck 2188 → 204 ns/step, C block 2041 → 168 ns/step;
+  Python calls per 1 ms run 4044 → 0 (node name) / 30 (lambda), C block
+  5014 → 0 (`code=`) / 20 (`fn=`).
+* **Changed** the helper's `pi` object is no longer updated during the
+  run (the kernel block starts from its state); `duty_history` /
+  `error_history` are live views of the graph's recordings;
+  `bind_pi_to_switch(t_start=)` is ignored.
+* **Changed** a C block whose `dt` is below the solver step (no
+  `sim_dt=`) is a `ControlGraphBuildError` (it ran every step with the
+  wrong `dt`).
+* **Changed** a helper's `step_observer` passed by hand now carries its
+  cadence, so trbdf2 runs it instead of refusing: the six
+  `closed_loop/*` reference circuits get a trbdf2 reference. New frozen
+  outcomes in `v2_triage.yaml` (DECISIONS G17): `cl_buck_pi`,
+  `cl_buck_aggressive_pi`, `ll16` (pwl) agree; `ll14`, `ll15` and `ll16`
+  (trbdf2) disagree, not yet diagnosed; `cl_boost_pi` grinds on trbdf2.
+
 ### Integration batch 8: control graph, optimisation slice 4 and circuit IR merged
 
 * **Fixed** (control graph review) `PIController`, `Limiter`,
