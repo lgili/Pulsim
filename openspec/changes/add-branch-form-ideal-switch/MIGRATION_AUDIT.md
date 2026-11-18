@@ -249,6 +249,7 @@ circuits on pwl. They need a re-run, not a rewrite **(inferred)**.
 | Risk 4 (first half: thermal summary skips ideal elements) | **Closed.** `device_thermal_summary` reports a branch-form element (solved `v·i`, 0 W for an ideal one, `P_impulse_avg` as a constant offset); `device_loss_summary` always carries the impulsive category on it. A kernel loss port still does not heat its junction with the impulse: `impulse_in_junction=False` + warning (event-losses track). | DECISIONS #51; `test_impulse_losses.py` |
 | `add_switch` / `add_diode(form='branch')` dropped `g_on` given with `R_on` | **Closed.** Refused by name. | DECISIONS #51 |
 | Asymmetric edge metric (`boost_switching_complex` 0.030 / 0.0023) | **Closed for the diagnostic** (`metrics.err_rms_symmetric`). The gate keeps the reference's first sample and span: making it symmetric is part of the re-baseline (6c). | DECISIONS #48 |
+| `'lcp'` cost (target <= 1.2x) | **Partly closed.** Selector memos (bit-identical on the 102 cells): NPC 4.8x → 2.0-2.4x, boost PFC 1.8x → 1.5x; median cell 1.06x unchanged. The remainder is the per-site work in `run_transient.hpp` (frozen here). | DECISIONS #52 |
 | References that converge on ideal circuits | **Tooling closed**: ideal-twin references show their convergence (two tools, Richardson estimate with the measured order) and state an uncertainty; a cell is graded only when it is <= tol/10. Result: see 6e. | DECISIONS #49, #50 |
 
 ### 6a. The "worse" ideal-twin cells, classified

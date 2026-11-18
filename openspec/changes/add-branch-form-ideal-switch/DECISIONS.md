@@ -1092,5 +1092,20 @@ TR-BDF2 tracks 6-8 24-33 and ideal switch 4 34-39.)
     coordinates), q pivoted with the stored blocks by the same expressions;
     (c) the driving-point resistance per (H generation, pivot set, port).
     A generation number names one H content: equal generations, equal H.
-    Pinned: `[modes][memo]` (one selector over repeated / new (Z, u) against a
-    fresh selector per site, equal to the bit) and the 102-cell byte check.
+    Pinned: `[modes][memo]` (one selector over repeated / new (Z, u), plain
+    and coordinate-anchored ports, against a fresh selector per site: the
+    decision, counters, current and gap equal to the bit; pivot and
+    resistance memos hit) and the 102-cell byte check (`lcp_cost_gate
+    --compare` against the merged tree's `'lcp'` run: ALL bit-identical, in
+    each of 3 rounds). Cost (`lcp_cost_gate --reps 7`, 3 rounds alternating
+    the old and new build, median of the rounds' medians, load average
+    10-16 on a shared 16 GB Mac): NPC three-level 4.84 / 4.16 / 3.40x →
+    2.03 / 2.44 / 2.13x (pwl / restart / split), boost PFC 1.83 / 1.75 /
+    1.33x → 1.53 / 1.54 / 1.48x; the median cell is unchanged (1.06 / 1.06
+    / 1.06 → 1.06 / 1.09 / 1.06); cells above 1.2x: 6 / 6 / 7 → 8 / 8 / 10
+    of 34, the extra ones cells with no LCP work whose ratio moves by 2x
+    between rounds at this load (noise, not the memos). Target <= 1.2x NOT
+    met on NPC and PFC: what remains is outside these two headers (the
+    selector is about a quarter of NPC's samples after the change; the rest
+    of the site is the step loop's per-site port callbacks in the frozen
+    `run_transient.hpp`).

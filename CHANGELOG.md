@@ -28,6 +28,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every variant, resumable (`--resume DIR`); ideal-twin references must
   show their convergence (two tools refined, Richardson estimate with the
   measured order) and every reference states its uncertainty.
+* **Performance** `mode_selection='lcp'`: the mode selector keeps its
+  hybrid-LCP factor, its widened-pass pivots and its driving-point
+  resistances while their inputs repeat bit for bit. Results unchanged
+  (bit-identical on the 102 reference cells); NPC three-level ~4.8x →
+  ~2.0-2.4x the default, boost PFC ~1.8x → ~1.5x.
 
 ### Ideal switch 6: `form=` on every switch / diode creator, `mode_selection='auto'` (no default flipped)
 

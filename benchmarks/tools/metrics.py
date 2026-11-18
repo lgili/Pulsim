@@ -76,6 +76,8 @@ def err_rms(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = 
 
 def _rms(g, d2, exclude):
     """sqrt of the time mean of ``d2`` on ``g``, ``exclude`` intervals left out."""
+    if len(g) < 2 or g[-1] <= g[0]:
+        raise ValueError("the two traces share no time window")
     if not len(exclude):
         return float(np.sqrt(np.trapezoid(d2, g) / (g[-1] - g[0])))
     seg = np.diff(g) * 0.5 * (d2[1:] + d2[:-1])
