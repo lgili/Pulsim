@@ -136,7 +136,8 @@ def _count_split(t1, t2, T, monitor, second):
     t1 and resumed on `second`."""
     def run(t_end, seen, engine="trbdf2", **extra):
         b = _buck()
-        fn = (lambda t, x: seen.append(t))
+        def fn(t, x):
+            seen.append(t)
         obs = dict(step_observer=p.control.Monitor(fn, T)) if monitor else \
             dict(step_observer=fn, controller_period=T)
         kw = dict(rtol=1e-6) if engine == "trbdf2" else dict(dt=1e-7)
