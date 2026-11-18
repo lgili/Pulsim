@@ -25,6 +25,7 @@ E3  A bridge whose DC side floats aborted with "factorize failed
 
 from __future__ import annotations
 
+import re
 import warnings
 
 import numpy as np
@@ -516,11 +517,13 @@ def test_tight_atol_stops_at_the_conditioning_floor():
     r0 = p.simulate(b0, t_end=t_end, switch_fn=pwm0, **kw)
     st = r._trbdf2_stats
     assert st["n_conditioning_rejects"] >= 1
-    assert 0.0 < st["h_conditioning_floor"] < 1e-11
+    # 8.1e-13 s measured; where the floor sits follows the pivot order (Eigen)
+    assert 0.0 < st["h_conditioning_floor"] < 1e-10
     t, t0 = np.asarray(r.times), np.asarray(r0.times)
     dv = np.interp(t, t0, np.asarray(r0.v("vout"))) - np.asarray(r.v("vout"))
     assert np.abs(dv).max() < 5e-5          # 3.1e-6 V measured
-    assert 0.0 <= t_end - t[-1] < 1e-12     # 9.5e-15 s sliver measured
+    # the 9.5e-15 s sliver; an edge landed exactly on t_end leaves none
+    assert 0.0 <= t_end - t[-1] < 1e-12
 
 
 def test_an_unresolvable_island_is_refused_by_name():
@@ -531,8 +534,8 @@ def test_an_unresolvable_island_is_refused_by_name():
     with pytest.raises(p.SimulationAborted) as ei:
         p.simulate(b, t_end=t_end, engine="trbdf2", switch_fn=pwm)
     msg = str(ei.value)
-    assert "numerically singular" in msg
-    assert "node x" in msg or "node y" in msg
+    # x or y: which island node shows the zero pivot follows the ordering
+    assert "numerically singular" in msg and re.search(r"node [xy]\b", msg)
     assert "give it a DC path" in msg
 
 

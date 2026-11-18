@@ -120,6 +120,53 @@ inline std::string fmt_e(Real v) {
 }
 }  // namespace detail
 
+/// Parlett–Reinsch balancing (LAPACK dgebal's scaling step, no permutation):
+/// `M ← S⁻¹·M·S` with S diagonal powers of 2 (exact), so every row and column
+/// of the result have comparable 1-norms; returns S's diagonal. Eigen's
+/// EigenSolver does not balance, and its backward error is ε·‖M‖ in every
+/// entry: a g_off-limited winding current (a 4e14 /s row) put that error into
+/// the slow modes, and a flyback's output drifted to 1.3e-3 V where the exact
+/// solution of the same matrix is −9.2e-8 V. A balanced matrix is unchanged
+/// (S = I), so its propagator is bit-identical. make_exact_lti keeps the
+/// balanced eigenpairs only where their residual is the smaller one.
+[[nodiscard]] inline Vector balance_in_place(DenseMatrix& M) {
+    const auto n = M.rows();
+    Vector s = Vector::Ones(n);
+    constexpr Real radix = Real{2};
+    for (bool done = false; !done;) {
+        done = true;
+        for (Eigen::Index i = 0; i < n; ++i) {
+            const Real c0 = M.col(i).cwiseAbs().sum() - std::abs(M(i, i));
+            const Real r = M.row(i).cwiseAbs().sum() - std::abs(M(i, i));
+            if (!(c0 > Real{0}) || !(r > Real{0})) continue;
+            Real c = c0, f = Real{1};
+            while (c < r / radix) { f *= radix; c *= radix * radix; }
+            while (c > r * radix) { f /= radix; c /= radix * radix; }
+            if ((c + r) / f < Real{0.95} * (c0 + r)) {
+                done = false;
+                s[i] *= f;
+                M.row(i) /= f;
+                M.col(i) *= f;
+            }
+        }
+    }
+    return s;
+}
+
+/// max over the eigenpairs of ‖A·v − λ·v‖ / (‖v‖·max(|λ|, 1/h_max)): each
+/// pair's relative error on the time scale it acts on within a step.
+[[nodiscard]] inline Real eigen_residual(const DenseMatrix& A, const Eigen::MatrixXcd& V,
+                                         const Eigen::VectorXcd& lam, Real h_max) {
+    const Eigen::MatrixXcd R = A.cast<std::complex<Real>>() * V - V * lam.asDiagonal();
+    Real worst = Real{0};
+    for (Eigen::Index i = 0; i < V.cols(); ++i) {
+        const Real den = V.col(i).norm() * std::max(std::abs(lam[i]), Real{1} / h_max);
+        worst = std::max(worst, den > Real{0} ? R.col(i).norm() / den
+                                              : std::numeric_limits<Real>::infinity());
+    }
+    return worst;
+}
+
 /// Build the propagator of ẋ = A·x + b. `scale` is D's diagonal (√m
 /// per state, empty for the identity); `h_max` is the longest step the
 /// caller will take, which tier 2's bound needs.
@@ -143,10 +190,34 @@ inline std::string fmt_e(Real v) {
     out.bs = out.d.cwiseProduct(b);
     out.norm_A1 = out.As.cwiseAbs().colwise().sum().maxCoeff();
 
+    // Both decompositions when balancing changes the matrix: balancing can also
+    // HURT (eigenvectors of the balanced matrix are accurate on its scale, and
+    // the scaling back, up to 4e6 on the phase-shift bridge, amplified their
+    // error: propagator 1.5e-3 off against 8.5e-9 unbalanced, V_out 24.33 V for
+    // 24.07 V). Keep the one with the smaller residual on the mode's own scale.
     Eigen::EigenSolver<DenseMatrix> es(out.As);
-    if (es.info() == Eigen::Success) {
+    bool ok = es.info() == Eigen::Success;
+    if (ok) {
         out.lambda = es.eigenvalues();
-        const Eigen::MatrixXcd Vt = es.eigenvectors();
+    }
+    Eigen::MatrixXcd Vt = ok ? Eigen::MatrixXcd(es.eigenvectors()) : Eigen::MatrixXcd{};
+    DenseMatrix Ab = out.As;
+    const Vector sb = balance_in_place(Ab);
+    if ((sb.array() != Real{1}).any()) {
+        Eigen::EigenSolver<DenseMatrix> eb(Ab);
+        if (eb.info() == Eigen::Success) {
+            Eigen::MatrixXcd Vb = sb.cast<std::complex<Real>>().asDiagonal() * eb.eigenvectors();
+            Vb.colwise().normalize();   // κ₂ of unit columns, as without balancing
+            const Eigen::VectorXcd lb = eb.eigenvalues();
+            if (!ok || eigen_residual(out.As, Vb, lb, h_max)
+                           < eigen_residual(out.As, Vt, out.lambda, h_max)) {
+                Vt = std::move(Vb);
+                out.lambda = lb;
+                ok = true;
+            }
+        }
+    }
+    if (ok) {
         Eigen::JacobiSVD<Eigen::MatrixXcd> svd(Vt);
         const auto& sv = svd.singularValues();
         out.kappa = sv(n - 1) > Real{0}

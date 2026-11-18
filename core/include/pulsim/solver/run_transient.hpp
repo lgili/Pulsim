@@ -73,6 +73,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <format>
 #include <functional>
 #include <optional>
@@ -478,7 +480,39 @@ inline SimulationResult run_transient(
                 std::to_string(state_size)
                 + " — it belongs to a different circuit.");
         }
+        if (resume_from->post_edge_derivatives) {
+            throw std::invalid_argument(std::format(
+                "run_transient(resume_from=...): the snapshot was taken "
+                "by a variable-step run that ended exactly on a gate edge "
+                "(t = {}): its x is the pre-edge solve but its device "
+                "derivatives are already the post-edge ones, and a "
+                "fixed-step run started from that pair rings and fails at "
+                "the next edge. Resume it with engine='trbdf2', or end "
+                "the first run off the edge.", resume_from->t));
+        }
         x = resume_from->x;   // device state: hs.load below
+    }
+    // The time grid: t_k = t_origin + (k_off + k)·dt. A resume from a
+    // fixed-step snapshot taken with this dt continues ITS grid, so the
+    // resumed sample times (and the gate edges they meet) are the
+    // continuous run's to the bit; restarting the grid at t_split moved
+    // them by ~1e-20 s and an edge then landed a rounding apart.
+    Real t_origin = opts.t_start;
+    Size k_off = 0;
+    if (resume_snap != nullptr && std::isfinite(resume_snap->grid_origin)
+        && resume_snap->grid_dt == opts.dt && resume_snap->t == opts.t_start
+        // consistency only, to a few ulps: the check and the loop's
+        // t_k may round differently (FMA contraction); the loop's
+        // expression is the same in both runs, so t_k is exact anyway
+        && std::abs(resume_snap->grid_origin
+                    + static_cast<Real>(resume_snap->grid_step) * opts.dt
+                    - opts.t_start)
+               <= Real{8} * std::numeric_limits<Real>::epsilon()
+                      * (std::abs(resume_snap->grid_origin)
+                         + static_cast<Real>(resume_snap->grid_step)
+                               * opts.dt)) {
+        t_origin = resume_snap->grid_origin;
+        k_off = resume_snap->grid_step;
     }
 
     // The five stateful-device histories (Coss, Lauritzen, PMSM, IGBT
@@ -923,7 +957,7 @@ inline SimulationResult run_transient(
         // site's own step (DECISIONS F2): the next site is one step away, and
         // a 100·h / 1e4·h backward-Euler look-ahead with the sources frozen
         // decided a floating bridge's ties on a trajectory that never happens.
-        // pwl::select_site is the engine-neutral driver trbdf2 calls too.
+        // pwl::select_site is the engine-neutral driver (trbdf2 hook: not yet).
         return pwl::select_site(
             mode_selector, *mode_ports, cache, diodes,
             [&](const std::vector<char>& on) {
@@ -1475,6 +1509,7 @@ inline SimulationResult run_transient(
     // stack they would otherwise unwind with. `t_reached` tracks the
     // step being attempted so the exception can say where it stopped.
     Real t_reached = opts.t_start;
+    Size k_reached = 0;   // grid index of t_reached (snapshot)
     try {
 
     if (cache.dt() > Real{0}) {
@@ -1607,11 +1642,12 @@ inline SimulationResult run_transient(
             if (should_continue && !should_continue()) {
                 break;
             }
-            const Real t = opts.t_start +
-                            static_cast<Real>(k) * opts.dt;
+            const Real t = t_origin +
+                            static_cast<Real>(k_off + k) * opts.dt;
             t_reached = t;
-            const Real t_prev = opts.t_start +
-                                 static_cast<Real>(k - 1) * opts.dt;
+            k_reached = k;
+            const Real t_prev = t_origin +
+                                 static_cast<Real>(k_off + k - 1) * opts.dt;
             // The heat the previous step queued, as this step's power.
             if (lt) lt->advance(opts.dt);
 
@@ -2985,12 +3021,13 @@ inline SimulationResult run_transient(
                 "the thermal network.");
         }
         for (Size k = 0; k < n_steps; ++k) {
-            const Real t = opts.t_start +
-                            static_cast<Real>(k) * opts.dt;
+            const Real t = t_origin +
+                            static_cast<Real>(k_off + k) * opts.dt;
             t_reached = t;
+            k_reached = k;
             const Real t_prev = k > 0
-                ? (opts.t_start +
-                    static_cast<Real>(k - 1) * opts.dt)
+                ? (t_origin +
+                    static_cast<Real>(k_off + k - 1) * opts.dt)
                 : opts.t_start;
             // Sub-step bisection snapshot (Layer 5 V2.2). At
             // k=0 we don't have a prev step; just use the
@@ -3283,6 +3320,9 @@ inline SimulationResult run_transient(
     // reproduce the run).
     result.final_snapshot.t = t_reached;
     result.final_snapshot.x = x;
+    result.final_snapshot.grid_origin = t_origin;
+    result.final_snapshot.grid_step = k_off + k_reached;
+    result.final_snapshot.grid_dt = opts.dt;
     hs.save(history, result.final_snapshot);
     result.final_snapshot.mask =
         has_diodes ? diodes.snapshot_on_bits() : std::vector<bool>{};

@@ -69,6 +69,7 @@
 #include "pulsim/topology/graph.hpp"
 
 #include <format>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -89,6 +90,7 @@ struct PreflightFinding {
     std::vector<Index> component;        ///< every node in the subnet
     Real inserted_resistance = Real{0};  ///< 0 when reporting only
     std::string detail;                  ///< human-facing sentence
+    std::string domain = "electrical";   ///< the subnet's domain (ir::Circuit labels it)
 
     [[nodiscard]] bool was_fixed() const noexcept {
         return inserted_resistance > Real{0};
@@ -213,6 +215,16 @@ private:
     if (!pool.is_registered(branch.id)) {
         return true;
     }
+    // add-permeance-magnetic-domain: a permeance on a magnetic node is a
+    // DC path — the DC assembly writes flux conservation there, which
+    // determines the node (dc_assemble.hpp, `charge_rows`).
+    if (!pool.flux_nodes().empty()) {
+        const auto k = pool.kind_of(branch.id);
+        if ((k == SK::Capacitor || k == SK::NonlinearCapacitor) &&
+            (pool.is_flux_node(branch.from) || pool.is_flux_node(branch.to))) {
+            return true;
+        }
+    }
     switch (branch.kind) {
         case topology::BranchKind::PassiveLinear:
             return pool.kind_of(branch.id) != SK::Capacitor;
@@ -285,6 +297,41 @@ components_without_ground(
                         : std::format("node '{}'", name);
 }
 
+/// add-permeance-magnetic-domain: refuse a magnetic island (a galvanic
+/// component holding a magnetic node) that does not reach ground. The
+/// usual repair, a 1 GΩ tie, would be a magnetic resistance: a spurious
+/// loss and a trapped flux that decays. Throws `std::invalid_argument`
+/// naming the lowest-index flux node of the islands.
+inline void require_magnetic_reference(const topology::Graph& graph,
+                                       const DevicePool& pool) {
+    if (pool.flux_nodes().empty()) return;
+    std::vector<std::pair<Index, Index>> primary_ties;
+    for (Index b = 0; b < graph.num_branches(); ++b) {
+        if (pool.is_registered(b) &&
+            pool.kind_of(b) == DevicePool::StoredKind::IdealTransformer) {
+            primary_ties.push_back(pool.ideal_transformer_primary_nodes(b));
+        }
+    }
+    const auto isolated = detail::components_without_ground(
+        graph, [](const topology::Branch&) { return true; }, primary_ties);
+    // Name the lowest-index flux node: the order of a component's nodes (and
+    // of the components) is the traversal's and differed between platforms.
+    Index named = -1;
+    for (const auto& comp : isolated) {
+        for (const Index n : comp) {
+            if (pool.is_flux_node(n) && (named < 0 || n < named)) named = n;
+        }
+    }
+    if (named >= 0) {
+        throw std::invalid_argument(std::format(
+            "the magnetic network containing {} has no node tied to the "
+            "reference: connect one of its nodes to gnd (a winding does "
+            "not connect the electrical and magnetic sides galvanically). "
+            "Pulsim does not insert a tie resistor on a magnetic node: it "
+            "would be a spurious magnetic loss.", node_label(graph, named)));
+    }
+}
+
 /// Analyse `graph` / `pool` and report what would need regularizing.
 /// Pure — inserts nothing. `analyze_preflight` is what a caller uses
 /// to inspect a circuit; `CircuitBuilder::run_preflight` applies it.
@@ -292,6 +339,7 @@ components_without_ground(
     const topology::Graph& graph,
     const DevicePool& pool,
     const PreflightOptions& opts = {}) {
+    require_magnetic_reference(graph, pool);
     PreflightReport report;
 
     // An ideal transformer's primary is a pair of node references,

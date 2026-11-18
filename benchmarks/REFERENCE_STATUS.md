@@ -259,15 +259,15 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | three_phase/three_phase_balanced_rl_load.yaml | 1.82e-06 | 1.83e-06 | 1.83e-06 | 4.22e-05 | 6.01e-07 |
 | three_phase/three_phase_diode_rectifier.yaml | 1.51 | 0.00632 | 0.00631 | 5.51e-05 | 0.00034 |
 
-## Analytic set (24 cases; agree = within the frozen ceiling, 1e-3 when none)
+## Analytic set (26 cases; agree = within the frozen ceiling, 1e-3 when none)
 
 | configuration | agree | disagree | error | refused | unverified |
 |---|---:|---:|---:|---:|---:|
-| pwl | 23 | 1 | 0 | 0 | 0 |
-| pwl+restart | 23 | 1 | 0 | 0 | 0 |
-| pwl+split | 24 | 0 | 0 | 0 | 0 |
-| trbdf2 | 24 | 0 | 0 | 0 | 0 |
-| dsed | 19 | 0 | 0 | 5 | 0 |
+| pwl | 25 | 1 | 0 | 0 | 0 |
+| pwl+restart | 25 | 1 | 0 | 0 | 0 |
+| pwl+split | 26 | 0 | 0 | 0 | 0 |
+| trbdf2 | 26 | 0 | 0 | 0 | 0 |
+| dsed | 21 | 0 | 0 | 5 | 0 |
 
 | case | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
@@ -295,6 +295,8 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | buck_dcm | 0.000538 | 5.32e-08 | 1.87e-08 | 5.62e-07 | 7.34e-10 |
 | im_locked_rotor | 1.35e-06 | 1.35e-06 | 1.35e-06 | 8.23e-06 | refused |
 | im_free_acceleration | 9.62e-05 | 6e-06 | 6e-06 | 4.25e-05 | refused |
+| gapped_core_rl | 0.00159 | 1.84e-06 | 1.84e-06 | 2.26e-07 | 4.37e-16 |
+| three_limb_zero_seq | 0.00159 | 1.84e-06 | 1.84e-06 | 2.27e-07 | 2.59e-14 |
 
 ## Notes
 

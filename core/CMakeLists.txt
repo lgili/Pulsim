@@ -182,6 +182,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer2/test_gapped_core.cpp               # Phase 4 C.4
         tests/layer2/test_jiles_atherton_core.cpp       # Phase 4 C.4 (JA in loop)
         tests/layer2/test_controlled_sources.cpp        # add-controlled-source-set
+        tests/layer2/test_permeance.cpp                 # add-permeance-magnetic-domain
     )
     target_link_libraries(pulsim_core_layer2_tests
         PRIVATE
@@ -431,6 +432,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_layer5_v3_tests
         tests/layer5_v3/test_main.cpp
         tests/layer5_v3/test_snapshot_restore.cpp
+        tests/layer5_v3/test_device_interface.cpp
         tests/layer5_v3/test_substep_correction.cpp
         tests/layer5_v3/test_resolution_diagnostics.cpp
     )

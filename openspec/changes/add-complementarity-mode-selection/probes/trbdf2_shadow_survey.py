@@ -1,5 +1,5 @@
 """mode_selection='shadow' on trbdf2 is bit-identical to the default
-(add-complementarity-mode-selection 4.2; DECISIONS #36 of add-branch-form-ideal-switch).
+(add-complementarity-mode-selection 4.2; DECISIONS #42 of add-branch-form-ideal-switch).
 
     PYTHONPATH=<worktree>/python:<worktree>/benchmarks python3 trbdf2_shadow_survey.py [--circuits GLOB]
 

@@ -57,6 +57,7 @@
 
 #include "pulsim/models/jiles_atherton.hpp"
 #include "pulsim/models/saturable_inductor.hpp"
+#include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
@@ -268,11 +269,39 @@ public:
     /// non-converging step at dt/2 after the history has already
     /// moved, and without this the retry would integrate from a
     /// state the circuit never reached.
-    [[nodiscard]] std::vector<Entry> snapshot() const { return entries_; }
-    void restore(const std::vector<Entry>& snap) { entries_ = snap; }
-
-    /// Number of reals per device in the flat layout.
+    // ---- device::StatefulKind (device/kind.hpp) ----
+    static constexpr device::StateBlock kBlock = device::StateBlock::SaturableInductor;
+    static constexpr DevicePool::StoredKind kStoredKind =
+        DevicePool::StoredKind::SaturableInductor;
     static constexpr Size kFlatPerDevice = 7;
+    /// Every real an entry carries from step to step, the snapshot's
+    /// (`to_flat` order) first, then the stage scratch: the in-run
+    /// rollback copies exactly these.
+    template <class E, class F> static void for_each_state(E& e, F&& f) {
+        f(e.lambda_old);
+        f(e.i_L_old);
+        f(e.V_L_old);
+        f(e.ja_state.H);
+        f(e.ja_state.M);
+        f(e.ja_state.delta_hint);
+        f(e.ja_state.n_sub);
+        f(e.lambda_gamma);
+        f(e.i_gamma);
+        f(e.ja_gamma.H);
+        f(e.ja_gamma.M);
+        f(e.ja_gamma.delta_hint);
+        f(e.ja_gamma.n_sub);
+    }
+    [[nodiscard]] std::vector<Entry>& mutable_entries() noexcept {
+        return entries_;
+    }
+    void commit(const Vector& x, Real /*h*/, TrBdf2Stage stage) {
+        update_from_state(x, stage);
+    }
+    /// The slot refresh reads the probe's voltage, not its step.
+    void refresh_derivatives(const Vector& x_probe, Real /*h*/) {
+        refresh_derivatives(x_probe);
+    }
 
     /// Flat state per device, for state export / resume: (λ, i, v)
     /// then the Jiles-Atherton state (H, M, branch direction,

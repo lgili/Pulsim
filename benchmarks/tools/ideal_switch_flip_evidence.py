@@ -355,7 +355,7 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     warnings.simplefilter("ignore")
     if a.from_json:
-        recs = json.loads(Path(a.from_json).read_text())
+        recs = json.loads(Path(a.from_json).read_text(encoding="utf-8"))
     else:
         pats = [p if p.startswith("circuits/") else f"circuits/{p}" for p in a.circuits.split(",")]
         recs = run(pats, tuple(a.variants.split(",")))

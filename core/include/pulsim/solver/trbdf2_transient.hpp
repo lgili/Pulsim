@@ -761,11 +761,6 @@ inline SimulationResult run_transient_trbdf2(
     // interface step 2): every solve, probe and landing sets it once, so
     // no stamp can read a step that this solve did not set.
     pwl::StepCtx step_ctx{};
-    const bool has_coss = !hs.coss.empty();
-    const bool has_laur = !hs.laur.empty();
-    const bool has_tail = !hs.tail.empty();
-    const bool has_pmsm = !hs.pmsm.empty();
-    const bool has_sat = !hs.sat.empty();
     const pwl::NonlinearRefreshFn nl_effective = pwl::build_device_refresh(
         nl_static, hs, step_ctx, /*sat_increment_form=*/true);
 
@@ -1929,6 +1924,10 @@ inline SimulationResult run_transient_trbdf2(
     // probe is taken here. With `commit` false, or no room before
     // t_end, only the derivative slots are replaced (states kept).
     bool post_event_pending = false;
+    // Where the probe whose derivatives replaced the slots without a
+    // commit reached (snapshot: x is then the pre-edge solve, the slots
+    // post-edge; a sliver step to t_end may still follow).
+    Real slots_only_t = std::numeric_limits<Real>::quiet_NaN();
     auto restart_after_gate_event = [&](bool settled, Real t_gates,
                                         Real hp, bool commit) {
         if (!opts.refresh_after_event) {
@@ -1966,6 +1965,7 @@ inline SimulationResult run_transient_trbdf2(
             || t + dtp >= queue.next_of(events::Kind::ControlTick) - h_min) {
             history.refresh_derivatives(x_trial, dtp);
             hs.refresh_derivatives(x_trial, dtp);
+            slots_only_t = t + dtp;   // where the unused probe reached
             return;
         }
         history.update_from_state(x_trial, dtp);
@@ -2001,8 +2001,7 @@ inline SimulationResult run_transient_trbdf2(
     // at dt = gamma*h with the DERIVATIVE slots zeroed and the STATE slots
     // set to the stage's base: the same factor, no new history method.
     const Real gs = Real{1} - Real{1} / std::sqrt(Real{2});
-    const bool sdirk_possible = !has_coss && !has_laur && !has_tail
-                                && !has_pmsm && !has_sat;
+    const bool sdirk_possible = !hs.any();
     const bool sdirk_ok = sdirk_possible
                           && (opts.sdirk_on_linear_circuits || nl_effective);
     // ---- the SDIRK restart after a diode turn-off on a linear circuit ----
@@ -2165,7 +2164,8 @@ inline SimulationResult run_transient_trbdf2(
         // The bits the probe was solved under (a landing has already
         // reset gates_decided to its pre-commutation mask).
         // Pure overlay: a record must not re-apply the gates (combine
-        // sets g and opens a gate-held device); m_rec is the mode solved.
+        // sets g and opens a gate-held device). After an instant jump the
+        // record is the mode the BE solves were decided under (m_rec).
         result.record_switch_state(
             m_rec ? *m_rec
             : has_diodes ? switch_fn(t).overlay(diodes.current_diode_mask(),
@@ -2552,6 +2552,8 @@ inline SimulationResult run_transient_trbdf2(
                 // A final sliver (an edge landed a few h_min before t_end)
                 // ends the run here, as the loop already does within h_min.
                 if (t + h >= t_stop && h <= Real{64} * h_min) {
+                    // the SDIRK stage swapped in derivative-free history:
+                    // the run's final snapshot must hold the real one
                     if (sdirk) history.restore(hist_snap);
                     break;
                 }
@@ -3680,6 +3682,8 @@ inline SimulationResult run_transient_trbdf2(
     result.final_snapshot.stamped_mask =
         x_mask_known ? mask_bits(x_mask) : std::vector<bool>{};
     hs.save(history, result.final_snapshot);
+    result.final_snapshot.post_edge_derivatives =
+        slots_only_t >= t - h_min;   // NaN: never
     result.final_snapshot.valid = true;
     result.newton = newton_ws.take_counters();
     return result;

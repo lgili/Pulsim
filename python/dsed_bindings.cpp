@@ -1113,7 +1113,9 @@ void init_module(py::module_& m) {
             }),
             py::arg("builder"),
             py::arg("cache"),
-            py::arg("b_extra_fn") = py::none())
+            py::arg("b_extra_fn") = py::none(),
+            // the adapter holds the builder's graph/pool and the cache by reference
+            py::keep_alive<1, 2>(), py::keep_alive<1, 3>())
         .def("set_refuse_implicit", &NativeAdapter::set_refuse_implicit,
              py::arg("on"),
              "add-exact-propagator-strategy 13.2: refuse a segment with no "

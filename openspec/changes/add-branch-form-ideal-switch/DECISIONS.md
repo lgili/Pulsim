@@ -666,7 +666,10 @@ Each entry: question → option taken → evidence → how to reverse.
     typed SimulationAborted naming node y. The initial settle's singular
     error is typed the same way. Bit-identical on the 16 hash runs.
 
-34. **Track 8 reviewer findings (items 1-2) and the batch-12 merge.**
+(Numbered 34-35 on feat/core-p2-trbdf2; renumbered 40-41 at the merge of
+integration batch 13, behind the ideal-switch entries 34-39.)
+
+40. **Track 8 reviewer findings (items 1-2) and the batch-12 merge.**
     (1) A singular final sliver on an SDIRK step left the history with
     zeroed derivative slots (the snapshot a resume reads). → It restores
     `hist_snap` before `break`. (2) Tests: the sliver may be 0 on another
@@ -690,7 +693,7 @@ Each entry: question → option taken → evidence → how to reverse.
     the step, `StepCtx` replaces the stage fields, ll16 (coupled, G31)
     now agrees on trbdf2 (0.000363): its freeze is dropped (item 2c).
 
-35. **Shipped examples on trbdf2 (coordinator items).** (a) `flyback`
+41. **Shipped examples on trbdf2 (coordinator items).** (a) `flyback`
     (doc gates, every rtol 1e-3 .. 1e-9): the switch node has no
     capacitance, so with Q1, its body diode and D_cl all OFF the
     leakage drives it through g_off alone (tau = L_lk g ~ 3e-14 s). After
@@ -728,7 +731,10 @@ Each entry: question → option taken → evidence → how to reverse.
 
 ## Ideal switch 4 (feat/core-a-ideal-switch, 2026-11-18)
 
-24. **Task 6.1: the LCP decides ideal diodes from their crossing signals
+(Numbered 24-29 on the branch; renumbered 34-39 at integration batch 13
+behind TR-BDF2 tracks 6-8, which took 24-33.)
+
+34. **Task 6.1: the LCP decides ideal diodes from their crossing signals
     and replaces the structural loop release under `'lcp'`.** Question:
     how does an ideal diode (R_on = 0) enter the port LCP, whose hybrid
     coordinates put an ON port's row at 1/R_on? → Option taken: an ideal
@@ -785,7 +791,7 @@ Each entry: question → option taken → evidence → how to reverse.
     → Reverse: drop `coords_of_` (ideal ports refused again) and restore
     the `branch_form_diode` refusal in `run_transient`.
 
-25. **Task 6.4 (last clause): the impulsive energy is a loss category
+35. **Task 6.4 (last clause): the impulsive energy is a loss category
     booked to a switch.** Question: to which device is a re-initialisation
     dW booked, and where is it read? → Option taken: every `ReinitRecord`
     carries `cause` (`pwl/reinit.hpp`, shared by pwl and trbdf2): the
@@ -802,7 +808,7 @@ Each entry: question → option taken → evidence → how to reverse.
     reading rule there takes `E_impulse_total` from the summary. →
     Evidence (`python/tests/test_impulse_losses.py`): the capacitor loop
     books 24 µJ to `S` within 1e-9 relative on pwl and trbdf2, and
-    impulse + conduction equals the stored-energy drop within 1e-12; the
+    impulse + conduction equals the stored-energy drop within 1e-12 (measured; the test bound is 1e-10 since batch 13, a platform margin); the
     cut-set (10 V, 1 Ω, 1 mH) closes source = resistor + switch + impulse
     to −2.57e-5 at τ/20 and −6.48e-6 at τ/40 on pwl (second order, taken
     around the pulse step: across it the sample quadrature is first
@@ -812,7 +818,7 @@ Each entry: question → option taken → evidence → how to reverse.
     never a switch toggling elsewhere on the step (review finding).
     → Reverse: drop the field and the keys.
 
-26. **Shared island correction (`events/islands.hpp`).** Question: pwl and
+36. **Shared island correction (`events/islands.hpp`).** Question: pwl and
     dsed each carried a floating-island KCL correction; which is shared?
     → Option taken: `find_islands(graph, pool, mask, weak_g)` and
     `IslandCorrection` (joint LU when there are 2+ islands and the
@@ -823,18 +829,19 @@ Each entry: question → option taken → evidence → how to reverse.
     `[pwl_ports]`). dsed (`dsed/*`) is not edited here: its switch to the
     header is the dsed owner's (weak_g 1e-6 there, 1e-3 on pwl, as today).
 
-27. **Engine-neutral site driver for trbdf2 (complementarity 4.2).**
+37. **Engine-neutral site driver for trbdf2 (complementarity 4.2).**
     `pwl::select_site(selector, ports, cache, diodes, mask_of, prev_on,
     x0, dt, h_site, b_extra, Z, u, xj, coords)` in `pwl/mode_ports.hpp`
-    is the whole decision of one site: run_transient now calls it, and
-    trbdf2's settle calls it with its own stage's (mask, dt, b_extra).
+    is the whole decision of one site: run_transient now calls it;
+    trbdf2's zero-time cascades call it with their own probe's (mask, dt,
+    b_extra) since TR-BDF2 track 9 (#42).
     `trbdf2_transient.hpp` is not edited here (its owner's branch has
     commits on it after this branch's base). The shared tests skip trbdf2
     while it refuses `mode_selection` by name and run once the hook lands
     (`test_lcp_agrees_with_the_default_settle_on_every_engine`); the cost
     gate (`probes/measurement_gate.py`) runs over pwl and trbdf2.
 
-28. **Nits.** (a) A branch-form diode flip forced by a gate edge at the
+38. **Nits.** (a) A branch-form diode flip forced by a gate edge at the
     step start is decided in the restart's first stage; it was stamped at
     the step end (one dt late). It is now stamped at t_prev when the
     step's gate bits changed at its start and the flip is already in the
@@ -846,7 +853,7 @@ Each entry: question → option taken → evidence → how to reverse.
     / `settle_rounds_total` (were always 0; no test reaches a guard mask
     cycle without a hook, so this is not tested).
 
-29. **Default-flip evidence (not the flip).** `benchmarks/tools/
+39. **Default-flip evidence (not the flip).** `benchmarks/tools/
     ideal_switch_flip_evidence.py` writes `benchmarks/IDEAL_SWITCH_FLIP_
     EVIDENCE.md`: 109 reference circuits × 5 configurations × {default,
     branch, lcp, branch+lcp}, graded the same way in both directions
@@ -869,6 +876,8 @@ Each entry: question → option taken → evidence → how to reverse.
     cost item before `'lcp'` can be a default.
 
 ## Ideal switch 5 (feat/core-a-ideal-switch, 2026-11-18)
+
+(Numbered 30-34 on the ideal-switch branch; integration renumbers them.)
 
 30. **`'lcp'` poses the LCP only where its answer can differ from a known
     one.** Question: `'lcp'` cost 4.4–5.6× the default on pwl (one LCP and
@@ -979,7 +988,9 @@ Each entry: question → option taken → evidence → how to reverse.
 
 ## TR-BDF2 track 9 (feat/core-p2-trbdf2)
 
-36. **Mode selection on trbdf2 (complementarity 4.2 / 6.3 / 4b.3).**
+(Numbered 36 on feat/core-p2-trbdf2 before the batch-13 merge.)
+
+42. **Mode selection on trbdf2 (complementarity 4.2 / 6.3 / 4b.3).**
     Sites: trbdf2 decides diode modes only at its five zero-time
     cascades (initial settle, gate edge at a step boundary, diode event,
     landing, gate-edge landing). After each, `mode_site` calls

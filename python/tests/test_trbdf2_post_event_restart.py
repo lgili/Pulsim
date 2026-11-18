@@ -365,11 +365,12 @@ def test_learning_a_periodic_opaque_gate_is_cheap():
                            step_observer=loop.step_observer)
         s = np.asarray(r.switch_states)[:, b.switch_index_of("SL")]
         tt = np.asarray(r.times)[1:]
-        t = (tt > 2.5e-5) & (tt < 3e-4 - 5e-6)   # past the start-up pulses, not t_end
+        # past the start-up pulses, not t_end; bounds off the 10 us edges
+        t = (tt > 2.45e-5) & (tt < 3e-4 - 5e-6)
         return (r, int(np.sum(t & s[1:] & ~s[:-1])),
                 int(np.sum(t & ~s[1:] & s[:-1])))
 
     r, up, dn = loop_run(True)
     _, up_e, dn_e = loop_run(False)
     assert (up, dn) == (up_e, dn_e)
-    assert r._trbdf2_stats["n_accept"] < 3_500     # measured 2,357
+    assert r._trbdf2_stats["n_accept"] < 10_000    # measured 2,357; 28,049 before

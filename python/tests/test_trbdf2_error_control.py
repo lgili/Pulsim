@@ -201,7 +201,7 @@ def test_doubled_tolerances_restore_the_previous_density():
     st = res._trbdf2_stats
     assert st["h_max_basis"] == 0
     # macOS 1242 -> 1199: the estimate is filtered in the window after a
-    # chatter break (DECISIONS #35 of add-branch-form-ideal-switch). Before
+    # chatter break (DECISIONS #41 of add-branch-form-ideal-switch). Before
     # that, 1242 on macOS, 1213 on Linux and 1211 on Windows CI: the
     # floating-bus bridge's step sequence moves with rounding. A
     # roundoff-sized floor ground this run to max_steps, orders away.
