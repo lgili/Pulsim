@@ -1,30 +1,160 @@
-benchmarks/circuits: 126 pulsim-v1 YAMLs, not loadable by the 2.0 loader (not run)
-26 YAMLs under examples/, cap 60 s each
-circuit                                        auto today     would exact  first non-exact reason
-examples/boost_realistic_igbt.yaml             pwl            False        refused: device T1 (IgbtLevel1)
-examples/boost_realistic_mosfet_v14.yaml       pwl            False        refused: device M1 (MosfetLevel1)
-examples/boost_saturable_inductor.yaml         pwl            False        refused: device L_boost (SaturableInductor)
-examples/buck.yaml                             pwl            True         
-examples/buck_converter.yaml                   pwl            True         
-examples/common_source_amplifier.yaml          pwl            False        refused: device M1 (MosfetLevel1)
-examples/flyback.yaml                          pwl            False        refused: extraction
-examples/half_bridge_pwm.yaml                  pwl            True         
-examples/half_wave_rectifier.yaml              pwl            False        refused: extraction
-examples/hysteretic_inductor_demo.yaml         pwl            False        refused: device L_core (SaturableInductor)
-examples/induction_motor_dol.yaml              pwl            True         
-examples/ldo_with_opamp.yaml                   pwl            False        refused: device M1 (MosfetLevel1)
-examples/phase_shift_full_bridge.yaml          pwl            False        refused: extraction
-examples/pwm_chopper_realistic_mosfet.yaml     pwl            False        refused: device M1 (MosfetLevel1)
-examples/rc_circuit.yaml                       pwl            True         
-examples/rc_pulse.yaml                         pwl            True         
-examples/refrigerator_compressor_cc.yaml       -              v1           pulsim-v1 netlist, not loadable
-examples/rl_circuit.yaml                       pwl            True         
-examples/rlc_circuit.yaml                      pwl            True         
-examples/rlc_step_response.yaml                pwl            True         
-examples/stress_buck_switching.yaml            pwl            True         
-examples/stress_large_rc_ladder.yaml           pwl            True         
-examples/stress_large_resistive_ladder.yaml    pwl            False        refused: extraction
-examples/three_phase_diode_rectifier.yaml      pwl            True         
-examples/three_phase_inverter.yaml             pwl            True         
-examples/voltage_divider.yaml                  pwl            False        refused: extraction
-totals: False 12, True 13, v1 1
+
+examples/: 26 YAMLs, cap 60 s each
+circuit                                                    auto today     would exact  first non-exact reason
+examples/boost_realistic_igbt.yaml                         pwl            False        refused: device T1 (IgbtLevel1)
+examples/boost_realistic_mosfet_v14.yaml                   pwl            False        refused: device M1 (MosfetLevel1)
+examples/boost_saturable_inductor.yaml                     pwl            False        refused: device L_boost (SaturableInductor)
+examples/buck.yaml                                         pwl            True         
+examples/buck_converter.yaml                               pwl            True         
+examples/common_source_amplifier.yaml                      pwl            False        refused: device M1 (MosfetLevel1)
+examples/flyback.yaml                                      pwl            True         
+examples/half_bridge_pwm.yaml                              pwl            True         
+examples/half_wave_rectifier.yaml                          pwl            True         
+examples/hysteretic_inductor_demo.yaml                     pwl            False        refused: device L_core (SaturableInductor)
+examples/induction_motor_dol.yaml                          pwl            True         
+examples/ldo_with_opamp.yaml                               pwl            False        refused: device M1 (MosfetLevel1)
+examples/phase_shift_full_bridge.yaml                      pwl            error        DiodeModeInconsistentError: simulate(engine='dsed'): diode 'D2' is OFF while forward-biased by 5.1e-15 V at t = 0 s (1000001 samples break
+examples/pwm_chopper_realistic_mosfet.yaml                 pwl            False        refused: device M1 (MosfetLevel1)
+examples/rc_circuit.yaml                                   pwl            True         
+examples/rc_pulse.yaml                                     pwl            True         
+examples/refrigerator_compressor_cc.yaml                   fails (RuntimeError) v1           pulsim-v1 netlist, not loadable
+examples/rl_circuit.yaml                                   pwl            True         
+examples/rlc_circuit.yaml                                  pwl            True         
+examples/rlc_step_response.yaml                            pwl            True         
+examples/stress_buck_switching.yaml                        pwl            True         
+examples/stress_large_rc_ladder.yaml                       pwl            True         
+examples/stress_large_resistive_ladder.yaml                pwl            True         
+examples/three_phase_diode_rectifier.yaml                  pwl            True         
+examples/three_phase_inverter.yaml                         pwl            True         
+examples/voltage_divider.yaml                              pwl            True         
+totals: False 7, True 17, error 1, v1 1
+
+benchmarks/circuits/ (v1 reader): 126 YAMLs, cap 60 s each
+circuit                                                    auto today     would exact  first non-exact reason
+benchmarks/circuits/closed_loop/cl_boost_pi.yaml           fails (ValueError) False        refused: step_observer
+benchmarks/circuits/closed_loop/cl_buck_aggressive_pi.yaml fails (ValueError) False        refused: step_observer
+benchmarks/circuits/closed_loop/cl_buck_hysteresis.yaml    -              unmapped     v1 reader: component type 'hysteresis'
+benchmarks/circuits/closed_loop/cl_buck_integrator.yaml    -              unmapped     v1 reader: component type 'integrator'
+benchmarks/circuits/closed_loop/cl_buck_limiter_chain.yaml -              unmapped     v1 reader: component type 'limiter'
+benchmarks/circuits/closed_loop/cl_buck_lookup_duty.yaml   -              unmapped     v1 reader: component type 'lookup_table'
+benchmarks/circuits/closed_loop/cl_buck_pi.yaml            fails (ValueError) False        refused: step_observer
+benchmarks/circuits/closed_loop/cl_buck_pi_with_gain.yaml  -              unmapped     v1 reader: component type 'gain'
+benchmarks/circuits/closed_loop/cl_buck_pid.yaml           -              unmapped     v1 reader: component type 'pid_controller'
+benchmarks/circuits/closed_loop/cl_buck_rate_limited_ref.yaml -              unmapped     v1 reader: component type 'rate_limiter'
+benchmarks/circuits/closed_loop/cl_buck_sample_hold.yaml   -              unmapped     v1 reader: component type 'sample_hold'
+benchmarks/circuits/closed_loop/ll14_buck_closed_loop.yaml fails (ValueError) False        refused: step_observer
+benchmarks/circuits/closed_loop/ll15_boost_closed_loop.yaml fails (ValueError) False        refused: step_observer
+benchmarks/circuits/closed_loop/ll16_flyback_closed_loop.yaml fails (ValueError) False        refused: step_observer
+benchmarks/circuits/diodes/back_to_back_diodes_sine.yaml   trbdf2         True         
+benchmarks/circuits/diodes/diode_bridge_rectifier.yaml     trbdf2         True         
+benchmarks/circuits/diodes/diode_clamp_overvoltage.yaml    trbdf2         True         
+benchmarks/circuits/diodes/diode_half_wave_rl_load.yaml    trbdf2         True         
+benchmarks/circuits/diodes/diode_rectifier.yaml            trbdf2         True         
+benchmarks/circuits/diodes/half_wave_rectifier_sine.yaml   trbdf2         True         
+benchmarks/circuits/diodes/ll05_diode_rectifier_filter.yaml fails (RuntimeError) error        RuntimeError: compute_dc_operating_point: the PWL diode states never settled — 16 rounds of re-solving still flip at least o
+benchmarks/circuits/diodes/voltage_doubler.yaml            trbdf2         True         
+benchmarks/circuits/linear/bridge_resistive_pure.yaml      trbdf2         True         
+benchmarks/circuits/linear/capacitor_natural_discharge.yaml trbdf2         True         
+benchmarks/circuits/linear/current_divider_3way.yaml       trbdf2         True         
+benchmarks/circuits/linear/current_source_rc.yaml          trbdf2         True         
+benchmarks/circuits/linear/current_source_rl_step.yaml     trbdf2         True         
+benchmarks/circuits/linear/lc_low_pass_sine.yaml           trbdf2         True         
+benchmarks/circuits/linear/ll01_resistive_divider_dc.yaml  trbdf2         True         
+benchmarks/circuits/linear/ll02_rc_pulse_charge.yaml       trbdf2         True         
+benchmarks/circuits/linear/ll03_rl_step.yaml               trbdf2         True         
+benchmarks/circuits/linear/pulse_voltage_rl.yaml           trbdf2         True         
+benchmarks/circuits/linear/rc_dc.yaml                      trbdf2         True         
+benchmarks/circuits/linear/rc_step.yaml                    trbdf2         True         
+benchmarks/circuits/linear/rl_natural_response.yaml        trbdf2         True         
+benchmarks/circuits/linear/rl_step.yaml                    trbdf2         True         
+benchmarks/circuits/linear/rlc_series_resonant.yaml        trbdf2         True         
+benchmarks/circuits/linear/sine_voltage_rc.yaml            trbdf2         True         
+benchmarks/circuits/linear/two_stage_rc_lowpass.yaml       trbdf2         True         
+benchmarks/circuits/linear/voltage_divider_3stage.yaml     trbdf2         True         
+benchmarks/circuits/magnetics/core_loss_steinmetz_sine.yaml trbdf2         True         
+benchmarks/circuits/magnetics/coupled_inductor_step.yaml   trbdf2         True         
+benchmarks/circuits/magnetics/half_bridge_transformer_dc.yaml trbdf2         True         
+benchmarks/circuits/magnetics/inductor_chain_step.yaml     trbdf2         True         
+benchmarks/circuits/magnetics/saturating_inductor_step.yaml -              unmapped     v1 reader: saturable_inductor (v1 exponent law has no 2.0 equivalent)
+benchmarks/circuits/magnetics/transformer_leakage.yaml     trbdf2         True         
+benchmarks/circuits/magnetics/transformer_step_up.yaml     trbdf2         True         
+benchmarks/circuits/motors/motor_dc_brush_step_load.yaml   trbdf2         True         
+benchmarks/circuits/motors/motor_induction_locked_rotor.yaml trbdf2         True         
+benchmarks/circuits/motors/motor_pmsm_dq_open_loop.yaml    trbdf2         True         
+benchmarks/circuits/resonance/bode_rlc_low_pass.yaml       trbdf2         True         
+benchmarks/circuits/resonance/driven_lc_series_resonance.yaml trbdf2         True         
+benchmarks/circuits/resonance/lc_resonant_tank.yaml        trbdf2         True         
+benchmarks/circuits/resonance/ll04_rlc_underdamped.yaml    trbdf2         True         
+benchmarks/circuits/resonance/rl_high_pass_sine.yaml       trbdf2         True         
+benchmarks/circuits/resonance/rlc_overdamped_step.yaml     trbdf2         True         
+benchmarks/circuits/resonance/rlc_parallel_step.yaml       trbdf2         True         
+benchmarks/circuits/resonance/rlc_step.yaml                trbdf2         True         
+benchmarks/circuits/stress/high_q_rlc_ringdown.yaml        trbdf2         True         
+benchmarks/circuits/stress/periodic_rc_pwm.yaml            trbdf2         True         
+benchmarks/circuits/stress/stiff_rc_high_freq_switching.yaml trbdf2         True         
+benchmarks/circuits/stress/stiff_rlc.yaml                  trbdf2         True         
+benchmarks/circuits/stress/stiff_two_timescale_rc.yaml     trbdf2         True         
+benchmarks/circuits/switching/basic/chopper_with_rc_snubber.yaml trbdf2         True         
+benchmarks/circuits/switching/basic/mosfet_nmos_dc.yaml    trbdf2         False        refused: device M1 (MosfetLevel1)
+benchmarks/circuits/switching/basic/pwm_voltage_rc.yaml    trbdf2         True         
+benchmarks/circuits/switching/basic/pwm_voltage_rl_filter.yaml trbdf2         True         
+benchmarks/circuits/switching/basic/snubber_rc.yaml        trbdf2         True         
+benchmarks/circuits/switching/basic/vcswitch_resistor.yaml trbdf2         True         
+benchmarks/circuits/switching/boost/boost_classic.yaml     trbdf2         True         
+benchmarks/circuits/switching/boost/boost_pfc_open_loop.yaml trbdf2         True         
+benchmarks/circuits/switching/boost/boost_switching_complex.yaml trbdf2         True         
+benchmarks/circuits/switching/boost/cascaded_boost_buck.yaml trbdf2         True         
+benchmarks/circuits/switching/boost/ll07_boost_vcswitch.yaml trbdf2         True         
+benchmarks/circuits/switching/boost/ll12_pfc_boost_continuous.yaml trbdf2         False        refused: device D_rec1 (ShockleyDiode)
+benchmarks/circuits/switching/boost/synchronous_boost.yaml trbdf2         True         
+benchmarks/circuits/switching/boost/textbook_erickson_boost_ccm.yaml trbdf2         True         
+benchmarks/circuits/switching/boost/two_phase_interleaved_boost.yaml trbdf2         True         
+benchmarks/circuits/switching/buck/buck_dcm.yaml           trbdf2         True         
+benchmarks/circuits/switching/buck/buck_hard_switching_reference.yaml trbdf2         True         
+benchmarks/circuits/switching/buck/buck_igbt.yaml          fails (SimulationAborted) False        refused: device Q1 (IgbtLevel1)
+benchmarks/circuits/switching/buck/buck_mosfet_nonlinear.yaml trbdf2         False        refused: device M1 (MosfetLevel1)
+benchmarks/circuits/switching/buck/buck_pmos.yaml          -              unmapped     v1 reader: component type 'pmos'
+benchmarks/circuits/switching/buck/buck_switching.yaml     trbdf2         True         
+benchmarks/circuits/switching/buck/buck_with_current_sense.yaml trbdf2         True         
+benchmarks/circuits/switching/buck/cascaded_buck_buck.yaml trbdf2         True         
+benchmarks/circuits/switching/buck/high_freq_gan_buck.yaml trbdf2         True         
+benchmarks/circuits/switching/buck/ll06_buck_vcswitch.yaml trbdf2         True         
+benchmarks/circuits/switching/buck/ll08_buck_mosfet.yaml   trbdf2         False        refused: device M1 (MosfetLevel1)
+benchmarks/circuits/switching/buck/sync_buck_500khz.yaml   trbdf2         True         
+benchmarks/circuits/switching/buck/synchronous_buck.yaml   trbdf2         True         
+benchmarks/circuits/switching/buck/textbook_erickson_buck_ccm.yaml trbdf2         True         
+benchmarks/circuits/switching/buck/triple_sync_buck.yaml   trbdf2         True         
+benchmarks/circuits/switching/buck_boost/bidirectional_buck_boost.yaml trbdf2         True         
+benchmarks/circuits/switching/buck_boost/buck_boost.yaml   trbdf2         True         
+benchmarks/circuits/switching/buck_boost/cuk_converter.yaml trbdf2         True         
+benchmarks/circuits/switching/buck_boost/sepic.yaml        trbdf2         True         
+benchmarks/circuits/switching/inverter/half_bridge_inverter.yaml trbdf2         True         
+benchmarks/circuits/switching/inverter/half_bridge_inverter_lc.yaml trbdf2         True         
+benchmarks/circuits/switching/inverter/half_bridge_lc_filter.yaml trbdf2         True         
+benchmarks/circuits/switching/inverter/lcc_resonant_inverter.yaml trbdf2         True         
+benchmarks/circuits/switching/inverter/ll09_half_bridge_inverter_leg.yaml trbdf2         True         
+benchmarks/circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml trbdf2         True         
+benchmarks/circuits/switching/isolated/active_clamp_forward.yaml trbdf2         True         
+benchmarks/circuits/switching/isolated/dual_active_bridge.yaml trbdf2         True         
+benchmarks/circuits/switching/isolated/flyback_converter.yaml trbdf2         True         
+benchmarks/circuits/switching/isolated/forward_converter.yaml trbdf2         True         
+benchmarks/circuits/switching/isolated/full_bridge_dc.yaml trbdf2         True         
+benchmarks/circuits/switching/isolated/ll11_llc_resonant_converter.yaml fails (SimulationAborted) False        refused: device D1 (ShockleyDiode)
+benchmarks/circuits/switching/isolated/ll13_active_clamp_forward.yaml fails (RuntimeError) error        RuntimeError: compute_dc_operating_point: no DC operating point. The direct solve failed with: solve_with_newton: failed to 
+benchmarks/circuits/switching/isolated/synchronous_flyback.yaml trbdf2         True         
+benchmarks/circuits/switching/multilevel/cascaded_h_bridge_5level.yaml trbdf2         True         
+benchmarks/circuits/switching/multilevel/flying_capacitor_3level.yaml trbdf2         True         
+benchmarks/circuits/switching/multilevel/mmc_4cell_chain.yaml trbdf2         True         
+benchmarks/circuits/switching/multilevel/npc_three_level_halfbridge.yaml trbdf2         True         
+benchmarks/circuits/switching/multilevel/t_type_3level_halfbridge.yaml trbdf2         True         
+benchmarks/circuits/thermal/buck_electrothermal.yaml       -              unmapped     v1 reader: mosfet loss/thermal block
+benchmarks/circuits/thermal/electrothermal_resistor_self_heating.yaml trbdf2         True         
+benchmarks/circuits/thermal/long_run_drift_buck.yaml       trbdf2         True         
+benchmarks/circuits/three_phase/grid_pll_lock.yaml         -              unmapped     v1 reader: component type 'gain'
+benchmarks/circuits/three_phase/interleaved_buck_3ph.yaml  trbdf2         True         
+benchmarks/circuits/three_phase/pll_grid_sync.yaml         -              unmapped     v1 reader: component type 'pll'
+benchmarks/circuits/three_phase/three_phase_balanced_rl_load.yaml trbdf2         True         
+benchmarks/circuits/three_phase/three_phase_diode_rectifier.yaml trbdf2         True         
+benchmarks/circuits/three_phase/three_phase_dq_decoupling.yaml -              unmapped     v1 reader: component type 'pll'
+benchmarks/circuits/three_phase/vector_control_open_loop.yaml -              unmapped     v1 reader: component type 'pll'
+totals: False 12, True 97, error 2, unmapped 15

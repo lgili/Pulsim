@@ -1279,7 +1279,7 @@ def _closure_warning(helper: str, what: str, instead: str) -> None:
     warnings.warn(
         f"{helper}({what}=<callable>): a Python callable runs through the "
         "pulsim.PythonBlock adapter, one Python call per controller tick. "
-        f"{instead}", DeprecationWarning, stacklevel=3)
+        f"{instead}", DeprecationWarning, stacklevel=4)
 
 
 def _pi_loop_graph(builder, pi, measured, setpoint, T: float, helper: str):

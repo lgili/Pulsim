@@ -409,32 +409,29 @@ def _run_points(args_iter, grid, kpi_fn, parallel, backend, n_workers,
 
 def _circuit_form(builder_factory, parallel, backend, simulate_kwargs):
     """``(factory, backend)`` for a ``pulsim.Circuit`` first argument:
-    its points run on threads, which share the circuit (it is immutable);
-    a process pool cannot carry it."""
+    its points run on threads, which share the circuit (it is immutable),
+    or with ``backend="process"`` in workers that receive it through its
+    YAML pickle."""
     from . import Circuit
     if not isinstance(builder_factory, Circuit):
         return builder_factory, backend
-    if parallel and backend == "process":
-        raise ValueError(
-            "backend='process' cannot carry a pulsim.Circuit (it does "
-            "not pickle); use backend='thread' or 'auto' — the circuit "
-            "is immutable and shared by the threads")
     from ._circuit_ir import c_blocks_of
-    if c_blocks_of(builder_factory):
-        # A C block keeps its tick counter and outputs in its handle, which
-        # every derived circuit shares: point 2 would start from point 1's
-        # state (a frozen controller). A factory builds one per point.
+    if parallel and c_blocks_of(builder_factory):
+        # Every derived circuit shares the C blocks' handles; each run
+        # restarts them (G22), so serial points are independent, but
+        # threads would step one block state at once.
         from ._refusal import unsupported
         names = ", ".join(str(h.name) for h in c_blocks_of(builder_factory))
         raise unsupported(
             "sweep", "c_blocks",
-            f"sweep(circuit) / monte_carlo(circuit): the circuit carries C "
-            f"blocks ({names}), whose state persists across runs, so the "
-            "points would share one controller. Pass a builder factory "
-            "that adds the blocks per point.")
+            f"sweep(circuit, parallel=True) / monte_carlo: the circuit "
+            f"carries C blocks ({names}), one state shared by every point, "
+            "so threads would step it at once. Run parallel=False, or pass "
+            "a builder factory that adds the blocks per point.")
     stateful = [k for k in ("step_observer", "closed_loops")
                 if simulate_kwargs.get(k) is not None]
-    if getattr(simulate_kwargs.get("switch_fn"), "_closed_loop", None):
+    from .periodic_steady_state import _closed_loop_source
+    if _closed_loop_source(simulate_kwargs.get("switch_fn")):
         stateful.append("switch_fn (a closed loop)")
     if parallel and stateful:
         # one controller object would run every point at once on threads
@@ -443,7 +440,8 @@ def _circuit_form(builder_factory, parallel, backend, simulate_kwargs):
             "the points would share one controller's state on threads. "
             "Run parallel=False, or pass a builder factory that builds a "
             "fresh controller per point.")
-    return _CircuitPoints(builder_factory), "thread"
+    return _CircuitPoints(builder_factory), (
+        "process" if parallel and backend == "process" else "thread")
 
 
 def sweep(builder_factory: Callable[..., Any],
@@ -466,7 +464,8 @@ def sweep(builder_factory: Callable[..., Any],
         then ``circuit.with_params`` of its parameter names (and
         ``with_value`` of its ``"device.field"`` names). Its points
         share one symbolic analysis and run on threads when
-        ``parallel`` (``backend="process"`` is refused).
+        ``parallel`` (``backend="process"`` ships the circuit to each
+        worker as YAML; the points there do not share the analysis).
     params
         Dict mapping parameter names to value sequences. The sweep
         runs over the Cartesian product (every combination).

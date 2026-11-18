@@ -91,6 +91,10 @@ class DiodeStateTrace:
     v_start: Optional[np.ndarray] = field(default=None, repr=False)
     closed_start: Optional[np.ndarray] = field(default=None, repr=False)
     V_f: float = 0.0
+    # An ideal branch-form diode (R_on = 0) solves its current as an
+    # unknown: that column, and its step-start values, replace the law.
+    i_branch: Optional[np.ndarray] = field(default=None, repr=False)
+    i_branch_start: Optional[np.ndarray] = field(default=None, repr=False)
     _messages: List[str] = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
@@ -119,6 +123,8 @@ class DiodeStateTrace:
 
     @property
     def current(self) -> np.ndarray:
+        if self.i_branch is not None:
+            return self.i_branch
         if not self.V_f:  # legacy expression: bit-identical at V_f = 0
             return self.v * self.g
         return self.g * (self.v - self.v_off)
@@ -126,6 +132,9 @@ class DiodeStateTrace:
     @property
     def current_start(self) -> np.ndarray:
         """Branch current at the start of the step after each sample."""
+        if self.i_branch is not None:
+            return (self.i_branch_start if self.i_branch_start is not None
+                    else self.i_branch)
         if not self.V_f:
             return self.v_start * self.g_start
         return self.g_start * (self.v_start - self.v_off_start)
@@ -162,12 +171,18 @@ class DiodeStateTrace:
             return closed.copy()
         i_pk = float(np.max(np.abs(self.current)))
         thr = max(1e-12, 1e-6 * i_pk)
-        i_fwd = self.g_on * (np.asarray(self.v, dtype=float) - self.V_f)
+        if self.i_branch is not None:
+            # ideal (R_on = 0) branch form: g_on = inf, v = V_f when ON
+            # (inf·0 = NaN); the solved current is the forward current.
+            i_fwd = np.asarray(self.current, dtype=float)
+            fwd_start = np.asarray(self.current_start, dtype=float) > thr
+        else:
+            i_fwd = self.g_on * (np.asarray(self.v, dtype=float) - self.V_f)
+            # A step's start is the right limit of the sample before it
+            # (v_start; the sample itself except at a DSED event).
+            fwd_start = self.g_on * (np.asarray(self.v_start, dtype=float)
+                                     - self.V_f) > thr
         fwd = i_fwd > thr
-        # A step's start is the right limit of the sample before it
-        # (v_start; the sample itself except at a DSED event).
-        fwd_start = self.g_on * (np.asarray(self.v_start, dtype=float)
-                                 - self.V_f) > thr
         either = fwd.copy()
         either[1:] |= fwd_start[:-1]
         stamp = closed.copy()
@@ -347,6 +362,11 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
                                  g_off=g_off, V_th=V_th, v=v,
                                  closed=closed, recorded=True,
                                  v_start=v_s, closed_start=c_s, V_f=V_f)
+            if prm.get("branch_form") and not np.isfinite(g_on):
+                col = int(builder.pool.branch_var_id_for_switch(bid, builder.graph))
+                tr.i_branch = np.asarray(states[:, col], dtype=float)
+                if states_s is not states:
+                    tr.i_branch_start = np.asarray(states_s[:, col], dtype=float)
         else:
             reason = why if rec is None else (
                 "its mask bit could not be resolved from the builder")

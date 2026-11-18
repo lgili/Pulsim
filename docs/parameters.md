@@ -76,6 +76,36 @@ argument. `add_nonlinear_capacitor` (an overloaded method) does not
 take a `Parameter` (`TypeError`); bind its field after adding it:
 `b.bind_param("C1.C0", "Cj")`.
 
+## Expressions
+
+A `str` value makes a derived parameter: an expression over the
+parameters declared before it, re-evaluated whenever one of them is set.
+A derived parameter cannot be set itself.
+
+```python
+Lb = b.param("Lbase", 1e-3, "H")
+L2 = b.param("L2", "2*Lbase", "H")       # 2e-3, bit for bit
+c.with_params(Lbase=2e-3)                # L2 -> 4e-3
+```
+
+Grammar: `+ - * /`, `^` (right-associative, binds tighter than unary
+minus: `-2^2` is -4), parentheses, C-locale numbers (`1e-3`, no unit
+suffixes), `pi`, and the functions `abs sqrt exp log log10 sin cos tan
+atan sinh cosh tanh` (one argument) and `min max pow atan2` (two). The
+arithmetic runs in the order written, so the result equals the same
+arithmetic typed out. Errors name the parameter (or device and field),
+the text and the column; a non-finite result is refused.
+
+In a YAML netlist, `circuit.parameters: [{name, value, unit}]` declares
+parameters (a string `value` is an expression; any order, a cycle is
+refused naming it), and a string in a value field is an expression:
+`{type: inductor, name: L1, from: a, to: b, L: "2*Lbase"}` drives
+`L1.L` through a derived parameter `L1:L`. Enumerated keys (`law`,
+`model`, `form`) are never read as expressions. `spice_to_builder`
+keeps top-level `.param` lines as parameters, evaluates `{expression}`
+values, and drives a top-level R / L / C whose value names a parameter.
+`Circuit.to_yaml()` writes the expression text, not its value.
+
 ## Sweeping a circuit
 
 `pulsim.sweep(circuit, params={"Lbase": [...], "RL.R": [...]}, ...)`

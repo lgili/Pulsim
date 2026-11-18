@@ -44,8 +44,8 @@ Closed forms used below.
 
 ## 6. Tick events and outputs (needs `add-unified-event-queue`)
 - [ ] 6.1 Discrete groups on queue tick events; graph state in the solver snapshot
-- [ ] 6.2 `Modulator` sink writing the duty register; `ControlledSource` sink; discrete `Gate`
-- [ ] 6.3 Tests: realised duty within 1 ppm of the commanded one on the variable-step engines (0.4 ppm measured with scheduled ticks); `n_gate_events` equals the analytic edge count; snapshot and resume in the middle of a period reproduces the uninterrupted run bit for bit
+- [ ] 6.2 `Modulator` sink writing the duty register; `ControlledSource` sink; discrete `Gate` (partial, G23: the loop's `ChainPwmGate` is the modulator sink and declares its edges; `ControlledSource` and a discrete `Gate` block not done)
+- [ ] 6.3 Tests: realised duty within 1 ppm of the commanded one on the variable-step engines (0.4 ppm measured with scheduled ticks); `n_gate_events` equals the analytic edge count; snapshot and resume in the middle of a period reproduces the uninterrupted run bit for bit (partial, G23: duty within 1 ppm and `n_gate_events` = 2 per period on trbdf2 in `python/tests/test_closed_loop_reference.py`; snapshot not done)
 
 ## 7. Continuous rate (needs `add-unified-device-interface`)
 - [ ] 7.1 Continuous subgraph compiled into one residual contribution (`f_c`, `h`) on the AD scalar

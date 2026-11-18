@@ -365,6 +365,56 @@ conduction trace as a **constant offset** (thermal time constants ≫
 nanosecond switching transitions, so the impulse energy is smeared
 across the cycle — standard PSIM convention).
 
+## Event losses and T_j on the periodic orbit (design evaluator)
+
+On the exact steady-state route (`pulsim.design.Evaluator`,
+`steady=SteadySpec(method="pss")`, engine `dsed`) the loss tables are
+read at every commutation of the steady period, from the period map's
+left and right limits at the event, by one rule:
+
+| Event | Blocking voltage | Current | Temperature |
+|---|---|---|---|
+| turn-on | `|v(x⁻)|`, before | `|i(x⁺)|`, after | `T_j` |
+| turn-off | `|v(x⁺)|`, after | `|i(x⁻)|`, before | `T_j` |
+
+* Switches: `switch_specs={"Q1": {"E_on_table": LossTable, "E_off_table":
+  LossTable, "Tj": 125}}`. On a three-phase SPWM inverter (10 kHz, 1 µs
+  dead time, 600 V, 200 edges each way per 20 ms period) the kernel's
+  `E_on` / `E_off` equal `device_loss_summary`'s on a settled `dsed`
+  period within 1.8e-13 (test, tolerance 1e-9).
+* Diodes: `switch_specs={"D1": {"E_off_table": LossTable, "Tj": 125}}`
+  is the recovery energy, read at each turn-off by the turn-off row
+  (`v` after, `i` before); it is the record's `recovery` loss. Its count
+  equals the diode's turn-off count in the period. This is the exact
+  route only: `device_loss_summary` refuses a diode in `switch_specs` by
+  name (it used to ignore it) and takes recovery through `diode_specs`.
+* The junction: `ThermalSpec(r_th={"Q1": 2.5}, t_amb=40)` on this
+  route defaults to `mode="kernel"`: the orbit is fixed, `P(T_j)` is the
+  device's fixed loss plus its table energies over the period, and
+  `T_j = t_amb + r_th P(T_j)` is solved in C++ segment by segment
+  between the tables' `T_j` knots (exact where the tables are linear;
+  residual below 1e-9 K, `counters["thermal_residual"]`). It is the
+  smallest root above `t_amb`, where the physical iteration settles; no
+  root (`r_th dP/dT_j >= 1`) is `infeasible` / `thermal_runaway`, with
+  the slope in the reason. `mode="fixed_point"` keeps the damped loop
+  (and `loss_at=`, `temperature_dependent=`); on the buck example's best
+  design (SYN-B, 60.5 kHz, r_th 3 K/W) `T_j(Q1)` is 43.27175 °C against
+  43.27162 °C, 1.3e-4 K apart (test: 0.1 K).
+* Conduction: by default the circuit's own dissipation (the closed-form
+  period integrals). `ThermalSpec(conduction={"Q1": {"i": [...], "tj":
+  [...], "v_on": [[...]]}})` heats the junction with `V_on(|i|, T_j)·|i|`
+  over the on-state current instead, in closed form when the table is
+  linear in `i` (one or two current knots; more knots, a current that
+  changes sign, or a table clamped at 0 in range are refused by name).
+  It is reported as `p_cond_table.<device>`; the record's `conduction`
+  loss stays the circuit's, so the energy balance still closes.
+
+The tables in the tests and the examples are SYNTHETIC, as are the parts
+Pulsim ships (`allow_synthetic=True`); they illustrate the reading, not
+a device. Not covered: the event energy is not drawn from the circuit
+(the PWL switch is ideal, as in PLECS), and `T_j` does not feed back
+into the electrical solution in kernel mode.
+
 ## Device-level switching energy — `add_power_mosfet`
 
 To simulate the switching transient itself instead of annotating it,

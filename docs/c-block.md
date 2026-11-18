@@ -267,6 +267,13 @@ p.add_c_block(b, ..., dt=50e-6, fn=step)   # sim with dt=2e-6
 | Compiled C/C++ | the opaque `*state` pointer — allocate in `init` (or lazily), free in `term`. One instance per `add_c_block` call. |
 | Inline C/C++ | works the same via `*state`. **Caveat:** a `static` variable in inline code is shared by every block compiled from *identical* source (they share one cached library) — use `*state` for per-instance state. |
 
+Every `simulate()` without `resume_from=` starts each block over: the
+Python `state` dict goes back to the one passed to `add_c_block`, and a
+compiled block's `term` (if any) then `init` (if any) run again, with
+`*state` set to `NULL` in between. A library with no `init` that
+allocates lazily needs a `term`, or each run leaks that allocation;
+a `static` variable outside `*state` is never reset.
+
 ---
 
 ## From YAML

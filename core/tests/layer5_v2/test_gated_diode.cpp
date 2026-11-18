@@ -16,6 +16,7 @@
 #include "pulsim/pwl/dc_operating_point.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
 #include "pulsim/solver/unsupported.hpp"
+#include "pulsim/yaml/emitter.hpp"
 
 #include <stdexcept>
 
@@ -176,4 +177,26 @@ TEST_CASE("Gated devices: dsed and bdf1 refuse by name", "[gated][caps]") {
     }
     CHECK_NOTHROW(require_supported(b.graph(), b.pool(), pwl::Engine::FixedTrap));
     CHECK_NOTHROW(require_supported(b.graph(), b.pool(), pwl::Engine::TrBdf2));
+}
+
+TEST_CASE("Gated devices: the circuit YAML (and pickle) keeps the gate", "[gated][yaml]") {
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "a", "gnd", 10.0);
+    b.add_thyristor("T", "a", "k", 1e-3, 1e9, 0.7, 0.05);
+    b.add_gto("G", "a", "k2");
+    b.add_diode("D", "a", "k3", 1e3, 1e-9, 0.0, 0.7);
+    b.add_resistor("R", "k", "gnd", 10.0);
+    b.add_resistor("R2", "k2", "gnd", 10.0);
+    b.add_resistor("R3", "k3", "gnd", 10.0);
+    const auto c = b.build();
+    const auto y = ir::to_yaml(c);
+    const auto c2 = ir::from_yaml(y);
+    CHECK(c2.structure_hash() == c.structure_hash());
+    CHECK(c2.value_hash() == c.value_hash());
+    CHECK(ir::to_yaml(c2) == y);
+    CHECK(c2.pool().num_gated_diodes() == 2);
+    CHECK(c2.pool().diode_params(1).gate == SD::Gate::Latching);
+    CHECK(c2.pool().diode_params(1).I_H == 0.05);
+    CHECK(c2.pool().diode_params(2).gate == SD::Gate::Held);
+    CHECK(c2.pool().diode_params(3).gate == SD::Gate::None);
 }

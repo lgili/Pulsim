@@ -271,23 +271,43 @@ refuse the same way, with `feature` set to the keyword. Controllers
 (`closed_loops`, `step_observer`) run on `pwl` and `trbdf2` only; `dsed`
 refuses them.
 
+### Switch-mask width: checked at the Python entry points and on `pwl`
+
+A mask whose width is not `graph.num_switches` is refused on every
+engine reached from Python and on the C++ `run_transient` /
+`run_transient_bdf1`. The C++ `trbdf2` and `dsed` kernels
+(`trbdf2_transient.hpp`, `dsed/scheduler*.hpp`) called directly from C++
+do not check it yet; their Python bindings do.
+
 ### Ideal switch (branch form): opt-in, first slice
 
 `add_ideal_switch` / `add_diode(form='branch')` solve the switch current
 as an unknown, so `R_on = 0` and `g_off = 0` are representable. This
-slice runs the switch on `pwl` and `trbdf2` and the diode on `pwl`
+slice runs the switch and the diode on `pwl` and `trbdf2`
 (`docs/known-limitations.md`, branch-form table); other engines refuse
 with `feature='branch_form'`. A mode that makes a state dependent (an
 inductor opened by an ideal switch with `g_off = 0`, two capacitors
-paralleled through `R_on = 0`) runs on `pwl` only with
-`discontinuity_restart=True` (re-initialised and recorded in
-`res.reinit_records`); without the rule, and always on `trbdf2`, it is
-refused with `feature='dependent_states'`;
+paralleled through `R_on = 0`) runs on `pwl` with
+`discontinuity_restart=True` and on `trbdf2` (re-initialised by three
+SDIRK(2,2) steps and recorded in `res.reinit_records`, the same record
+on both); on `pwl` without the rule it is refused with
+`feature='dependent_states'`, as on `trbdf2` with a stateful device
+history (Coss, Lauritzen, IGBT tail, PMSM, saturable inductor). On
+`trbdf2` no diode crossing is located inside the re-initialisation step
+itself (a diode left on its forbidden side is re-decided at the next
+step's start; one that crosses and returns inside it is missed). The
+re-initialisation step's size is the controller's previous proposal,
+not error-controlled for the dependent states. The record takes
+`d = K·x(t+h)`, so on `trbdf2` (h is the controller's step, not the
+user's dt) Λ and ΔW also contain the source motion over that step when
+the cut-set or loop holds a time-varying source. Both engines project
+with a diagonal M (coupled windings in a cut-set are not handled). The
+round-off floor of the error estimate is off on SDIRK steps, so it does
+not apply to the three re-initialisation steps;
 an island bounded only by open ideal elements (OFF ideal diodes
 included: the gauge of D3 is not implemented) with `floating_node`; a
 loop of closed ideal elements and voltage sources with
-`ideal_voltage_loop`. On `trbdf2` the dependent-state check is static
-(any ideal element that could form one is refused up front).
+`ideal_voltage_loop`, with the same four fields on both engines.
 
 ### Fixed engine: first order after a discontinuity (by default)
 
@@ -391,12 +411,32 @@ names every case above when `MODE_GUARD = False`, and under
 stored samples only, so a wrong mode shorter than one stored step is not
 seen.
 
-### Complementarity mode selection: dsed only
+### Complementarity mode selection: dsed and pwl, not trbdf2
 
-`mode_selection='lcp'` and the default-mode guard run on `engine='dsed'`
-only; `pwl` and `trbdf2` still decide with their settle and refuse
-`'shadow'`/`'lcp'` by name (hooks: add-complementarity-mode-selection
-task 4.2). The guard and the LCP decide at events; a commutation the
+`mode_selection='shadow'` / `'lcp'` and the default-mode guard run on
+`engine='dsed'` and `engine='pwl'`; `trbdf2` still decides with its
+settle and refuses `'shadow'`/`'lcp'` by name (add-complementarity-mode-selection
+task 4.2). On `pwl` they are not posed for a circuit with a Newton device
+or a branch-form (ideal) diode (`'shadow'`/`'lcp'` refuse by name there;
+the guard is off), nor with `max_event_iterations = 0`. The pwl guard
+judges only a settle that ended without a fixed point (a mask cycle or an
+exhausted round budget): a converged settle obeys the diode law by
+construction. The settle's own solve on a floating island (a bridge's DC
+bus on a tie) rounds the island's common mode to ε·(C/h·v)/G_tie — 3e-4 …
+0.3 V behind 1 GΩ at dt/1 … dt/1000, measured against a double-double solve
+(DECISIONS F1) — and the settle decides on that; the LCP's port model
+corrects it, the trajectory is not changed. On the V_f = 0 bridge with
+the restart rule or the event split the settle ends 6.8e-3 / 4.5e-3 V off
+trbdf2 where `'lcp'` lands within 3.1e-5 / 4.6e-7 V (DECISIONS F3); the
+guard does not see it (the settle converged). `'shadow'` keeps the
+trajectory bit-identical but not the cache counters (its judge solves
+candidate masks). A restart stage or split sub-step entered with the
+previous stage's mask cycle is not solved by the settle at all (the
+cycle flag is kept per outer step and the event iteration stops on it
+before its first round); the shadow and the guard skip that site
+(DECISIONS F3).
+
+On `dsed` the guard and the LCP decide at events; a commutation the
 event locator misses is not decided. A diode predicate that starts a
 step at exactly zero is located from the side it leaves to over the
 first `100·h_e` (DECISIONS #19); a crossing back inside that sliver is
@@ -449,6 +489,49 @@ after `t_start + k*T`. When `T` is not a multiple of `dt` each tick is
 late by less than `dt` (`simulate` warns; `result.control_tick_jitter_max`
 records the largest lateness); `T < dt` is refused. `trbdf2` lands every
 tick exactly. Pick `dt = T/n` for an exact fixed-step cadence.
+
+### Closed loops: what each engine gets right
+
+Measured against an independent reference outside pulsim (expm flow per
+mode / Radau, the PI law re-typed, ticks at `kT`:
+`openspec/changes/add-compiled-control-graph/probes/closed_loop_reference.py`).
+The gate of `bind_pi_to_switch` declares its edges (G23).
+
+- **`trbdf2` is the reference.** At rtol 1e-10 it meets `v(kT)` within
+  1.1e-7 of the span on the five closed-loop benchmark circuits; default
+  tolerances within 7e-5.
+- **`pwl` is first order** in a helper loop: label time samples
+  `x(kT - dt)`. Without the event split it also samples the gate on the
+  grid, so the duty moves in steps of `dt/T` (5 % at 100 kHz, `dt` =
+  0.5 µs) and the loop dithers: `cl_boost_pi` 0.20 of the span. Pass
+  `discontinuity_restart=True, enable_substep_state_correction=True` to
+  split at the gate's edges: 4.2e-4.
+- **`trbdf2`: no post-edge sample at an edge that is also a tick**
+  (`core/include/pulsim/solver/trbdf2_transient.hpp`,
+  `restart_after_gate_event` refuses its commit when
+  `t + h_p >= t_next_tick - h_min`). A loop's period start is a tick, so
+  every rising edge ramps in the record across the first post-edge step,
+  whose length follows rtol: the states converge, `V(sw)` does not
+  (`ll14` rtol 1e-8 vs 1e-10: 0.06). Reproducer
+  `probes/trbdf2_tick_edge_sample.py` (closed loop 0/199 rising edges
+  with a post-edge sample, open loop 199/199). `ll14` / `ll15` trbdf2 and
+  pwl+split are frozen `disagree` on `V(sw)` until the engine fires the
+  tick before the commit; pwl and pwl+restart also miss the states (gate
+  sampled on the grid, duty in steps of dt/T: `ll14` I(L1) 0.13).
+- **`trbdf2`: the learned narrowest pulse never relaxes**
+  (same file, `learn_gate_toggles`: `gate_pulse_min` is a running
+  minimum and caps every later step at twice it). A `switch_fn` with no
+  edge oracle that shows one 0.28 ns pulse is stepped at 0.56 ns for the
+  rest of the run (`cl_boost_pi` hit `max_steps` at 5.59 ms of 30 ms
+  before G23). Reproducer `probes/trbdf2_sticky_pulse_cap.py`.
+- **`resume_from` and C blocks: the snapshot carries no block state.**
+  Every run without `resume_from` restarts each C block (G22); a resumed
+  run continues whatever state the blocks hold, which is the state at the
+  end of the circuit's LAST run, not at the snapshot. `half = simulate(c,
+  t1)`, any other `simulate(c, ...)`, then `simulate(c,
+  resume_from=half.final_snapshot)` resumes the circuit from `half` and
+  the controller from the other run (found by the batch-11 review, not
+  yet reproduced in a test). Resume only from the run just made.
 
 ### TR-BDF2 still refactors on every new step size
 
@@ -530,11 +613,17 @@ The differential matrix (strict gate: every observable, every interval)
 records its `disagree` / `error` cells as `known:` per configuration in
 `benchmarks/manifests/v2_triage.yaml` (counts in
 `benchmarks/REFERENCE_STATUS.md`). Each is an open finding, not a
-tolerance. No circuit is `unverified` any more. (`sepic` carried a
-`reference: suspect` mark while its trbdf2 reference ground to
-`max_steps`; that grind is fixed and the reference gives pwl 1.9e-3 and
-trbdf2 3.0e-5, both agree; dsed is a frozen `error`. `cuk_converter`
-carried it because its diode was reversed; see below.)
+tolerance. One circuit has no valid reference and is `unverified` on
+every engine (`reference: suspect`): `ll16_flyback_closed_loop`, which
+is not a flyback (`Lsec` is not coupled, `V(vout)` = 0, so the PI
+integrates a constant error; every turn-off interrupts `I(Lm_core)`
+(604 A) into `roff` = 1e7 Ω: pwl `V(drain)` 9.5e3 V at dt, 3.7e4 V at
+dt/4, and trbdf2 fails Newton at `h_min` at 7-14 µs, so nothing
+converges). (`sepic` carried the mark while its trbdf2
+reference ground to `max_steps`; that grind is fixed and the reference
+gives pwl 1.9e-3 and trbdf2 3.0e-5, both agree; dsed is a frozen
+`error`. `cuk_converter` carried it because its diode was reversed; see
+below.)
 
 **`cuk_converter` runs in DCM: −17.5 V, not −12 V.** Until 2026-11 the
 file and its ngspice deck had `Drect` reversed (anode at ground), so with
@@ -555,20 +644,18 @@ start from the DC operating point, which `dsed` cannot take (refused).
 
 ### TR-BDF2 on a bridge whose DC side floats on a tie resistor
 
-`engine='trbdf2'` on a diode bridge whose DC bus is referenced only by a
-1 MΩ tie still depends on rounding. Under a 1e-15 relative perturbation
-of the element values (20 runs) the run always finishes, but takes
-1231-1254 steps and 7-10 diode events, and the 30-40 ms bus average is
-311.155 to 311.341 V (pwl at dt 1e-6 and 2.5e-7: 311.344 V). A few
-picosecond samples right after a turn-off at the source zero crossing
-show an OFF diode 0.6 V forward (the L·g_off ringing of the line
-inductor). The two
-diodes of a half-cycle turn off at the same current zero (a tie), and
-through the OFF interval the floating rail is set by nano-amp g_off
-leakage whose sign flips at the source's zero crossings. The bus
-differential (dp − dn) of the unperturbed run is within 9e-4 V of pwl;
-the common mode is not. A real bridge has a defined reference (Y
-capacitors, a grounded rail): give the model one.
+`engine='trbdf2'` follows the exact mode sequence of the 1 MΩ-tied
+floating-bus bridge (`benchmarks/BRIDGE_GROUND_TRUTH.md`). Its 30–40 ms
+bus average is 311.341410 V against the exact 311.343881 V at rtol 2e-5
+(the default step ceiling's O(h²) error; 1.9e-4 V at rtol 1e-7), and a
+1e-15 perturbation moves it by at most 9e-6 V. The number of diode
+events still varies under rounding (leakage-scale decisions at the
+zero-current turn-offs), without effect on the waveforms. Average a
+variable-step result over a window with its end points interpolated: the
+samples after 30 ms divided by 10 ms read 311.154 V here.
+`engine='dsed'` (exact) reads 311.343881428 V on the same bridge
+(−4.5e-10 V, integration batch 11 tree); it read 311.316685 V, 0.0272 V
+low, before the floating-island fix.
 
 ### First stored sample of algebraic nodes
 

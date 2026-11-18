@@ -480,3 +480,21 @@ def test_inductive_cut_without_freewheel_names_the_igbt():
     sw = p.make_pwm_switch_fn(10e3, 0.5, 0, 1)
     with pytest.warns(UserWarning, match=r"'Q1'.*freewheel"):
         p.simulate(b, 2e-4, engine="pwl", dt=1e-7, switch_fn=sw)
+
+
+def test_mode_selection_is_refused_with_a_gated_device():
+    # the complementarity port knows no gate: it would turn a gate-off IGBT on
+    b, sw = _igbt_forced(10.0)
+    with pytest.raises(p.UnsupportedError, match="Q") as ei:
+        p.simulate(b, 1e-5, engine="pwl", dt=1e-6, switch_fn=sw, mode_selection="lcp")
+    assert ei.value.feature == "mode_selection"
+
+
+def test_a_pickled_circuit_keeps_the_gate():
+    import pickle
+    b, _ = _half_wave(30.0, I_H=0.05)
+    c = b.build()
+    c2 = pickle.loads(pickle.dumps(c))
+    assert c2.value_hash() == c.value_hash() and c2.structure_hash() == c.structure_hash()
+    gates = {d["name"]: d["params"].get("gate") for d in c2.components()}
+    assert gates["T"] == 2

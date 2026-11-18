@@ -70,3 +70,13 @@
    off the decision time. trbdf2's `record_post_event` now records a pure
    overlay. Its other `mask_at` calls are decision sites. `gate_of` is a
    linear scan (O(gated × diodes) per step), left as is.
+11. **Merge seams with integration batch 11** (2797411):
+   - The pwl complementarity mode selection and the default mode guard
+     (`judge_mode`, the LCP) know no gate: they would judge a gate-off
+     IGBT under forward bias as violating and turn it on. A circuit with
+     a gated device skips the guard and refuses `mode_selection`
+     (`feature='mode_selection'`, naming the device).
+   - The circuit YAML emitter (and so `pickle` of a `Circuit`) wrote a
+     gated device as a plain diode. It now writes `gate` (1 Held,
+     2 Latching) and `I_H`, and reads them back through
+     `add_gated_diode`; an ungated diode's YAML is unchanged.
