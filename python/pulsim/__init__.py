@@ -1813,6 +1813,22 @@ def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
     return tuple(out)
 
 
+def _warn_impulses(res) -> None:
+    """simulate(on_impulse='warn'): one warning naming the first of the
+    run's impulsive re-initialisations (pwl or the exact engine)."""
+    recs = list(getattr(res, "reinit_records", None) or ())
+    if not recs:
+        return
+    import warnings
+    r0 = recs[0]
+    warnings.warn(
+        f"simulate(on_impulse='warn'): {len(recs)} "
+        f"impulsive re-initialisation(s); first at t = {r0.t:g}: "
+        f"{', '.join(r0.devices)} made {', '.join(r0.states)} dependent "
+        f"({r0.kind}, {r0.dW:.6g} J removed). See res.reinit_records.",
+        UserWarning, stacklevel=3)
+
+
 def _carry_jumps(fn, parts):
     """Give a composed b_extra_fn the declared jumps of its parts.
 
@@ -2339,7 +2355,8 @@ def simulate(
     # column) until the default flip (DECISIONS #3).
     if engine == "exact":
         engine = "dsed"
-    # Every engine: those that refuse dependent modes never record.
+    # Every engine: pwl (branch form) and the exact engine (dependent
+    # states) record; trbdf2 refuses dependent modes and never records.
     if on_impulse not in ("record", "warn", "error"):
         raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
                          "'record', 'warn' or 'error'")
@@ -2628,6 +2645,24 @@ def simulate(
         _auto_check_voltage_sanity(_dsed_res, builder,
                                     voltage_sanity_factor)
         _dsed.check_diode_modes(_dsed_res, builder)
+        # on_impulse on the exact engine (its dependent-state projections,
+        # recorded after the run): 'error' refuses the run as pwl's kernel
+        # does at the event, 'warn' warns.
+        _recs = list(getattr(_dsed_res, "reinit_records", None) or ())
+        if _recs and on_impulse == "error":
+            r0 = _recs[0]
+            cut = r0.kind == "cut_set"
+            dev = r0.devices[0] if r0.devices else ""
+            raise _unsupported(
+                "dsed", "impulse",
+                f"on_impulse='error': at t = {r0.t:g} '{dev}' makes "
+                f"{', '.join(r0.states)} dependent ("
+                f"{'an inductor cut-set' if cut else 'a capacitor loop'}); "
+                f"re-initialising them moves {r0.lambda_:.6g} "
+                f"{'V*s' if cut else 'C'} and removes {r0.dW:.6g} J.",
+                device=dev)
+        if on_impulse == "warn":
+            _warn_impulses(_dsed_res)
         return _dsed_res
 
     if resume_from is not None and t_start == 0.0:
@@ -3444,15 +3479,8 @@ def simulate(
     _warn_newton_roundoff(res, "simulate()")
     _warn_resolution(builder, res, dt)
     _warn_unlocated_edges(res)
-    if on_impulse == "warn" and list(getattr(res, "reinit_records", ())):
-        import warnings
-        r0 = res.reinit_records[0]
-        warnings.warn(
-            f"simulate(on_impulse='warn'): {len(res.reinit_records)} "
-            f"impulsive re-initialisation(s); first at t = {r0.t:g}: "
-            f"{', '.join(r0.devices)} made {', '.join(r0.states)} dependent "
-            f"({r0.kind}, {r0.dW:.6g} J removed). See res.reinit_records.",
-            UserWarning, stacklevel=2)
+    if on_impulse == "warn":
+        _warn_impulses(res)
 
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:
