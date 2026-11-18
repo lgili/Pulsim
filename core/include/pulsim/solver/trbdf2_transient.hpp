@@ -1556,12 +1556,16 @@ inline SimulationResult run_transient_trbdf2(
     // switch_fn (a closed loop's, declared edges or not) got span/1000. On
     // ll15 (closed-loop boost, 5 ms) that was one 4 us step per 5 us
     // period, each at its local tolerance and all errors of one sign:
-    // I(L) 0.066 A off after 23 periods. In a run with controller ticks,
-    // once a gate bit rises three times a constant period p apart, a step
-    // is capped at p/20 (default ceiling only; the floors stay those of
+    // I(L) 0.066 A off after 23 periods. A rise counts only at a controller
+    // tick (a trailing-edge closed-loop PWM rises on its tick); once a gate
+    // bit has so risen three times a constant period p apart, a step is
+    // capped at p/20 (default ceiling only; the floors stay those of
     // h_max). An open-loop gate keeps its fewer steps per period (the CCM
-    // buck's <= 8 per period is a pinned decision); a tick that drives no
-    // periodic gate caps nothing.
+    // buck's <= 8 per period is a pinned decision) unless its rises happen
+    // to fall on ticks (then it is capped at most at T_tick/20). The cap is
+    // a run-wide minimum (a short periodic episode keeps it) and is
+    // relearned after a resume (the rise times are not in the snapshot).
+    Real last_tick_t = -std::numeric_limits<Real>::infinity();
     std::vector<Real> gate_rise_t(3 * n_sw_total,
                                   -std::numeric_limits<Real>::infinity());
     SwitchStateMask gate_rise_prev = gate_prev;
@@ -1569,13 +1573,18 @@ inline SimulationResult run_transient_trbdf2(
     auto learn_gate_period = [&](const SwitchStateMask& sw, Real at_t) {
         if (sw == gate_rise_prev) return;
         for (const Size i : gate_bits) {
-            if (!sw.get(i) || gate_rise_prev.get(i)) continue;
+            if (!sw.get(i) || gate_rise_prev.get(i)
+                || !(std::abs(at_t - last_tick_t) <= Real{4} * h_min)) {
+                continue;
+            }
             Real* r3 = &gate_rise_t[3 * i];
             r3[0] = r3[1];
             r3[1] = r3[2];
             r3[2] = at_t;
             const Real p1 = r3[2] - r3[1], p0 = r3[1] - r3[0];
-            if (std::isfinite(p0) && p1 > Real{0}
+            // p1 >= 20 pulse floors: rises a few h_min apart (glitches of
+            // a phase comparison) are no period to cap the run by.
+            if (std::isfinite(p0) && p1 >= Real{20} * gate_pulse_floor
                 && std::abs(p1 - p0) <= Real{1e-6} * p1 + Real{4} * h_min) {
                 gate_period_cap = std::min(gate_period_cap, p1 / Real{20});
             }
@@ -2017,6 +2026,7 @@ inline SimulationResult run_transient_trbdf2(
             } else {
                 observer_fn(t, x);
             }
+            last_tick_t = t;
             ++st.n_ctrl_ticks;
             ++st.ctrl_tick_counts[j];
             ++tick_k[j];
@@ -2056,8 +2066,8 @@ inline SimulationResult run_transient_trbdf2(
             // the step cap the narrowest pulse seen so far implies.
             SwitchStateMask sw_now = switch_fn(t + Real{0.5} * h_min);
             learn_gate_period(sw_now, t);
-            if (has_ticks && !(opts.h_max > Real{0}) && gate_period_cap < h) {
-                h = std::max(gate_period_cap, h_min);
+            if (has_ticks && !(opts.h_max > Real{0})) {
+                h = std::min(h, std::max(gate_period_cap, h_lo));
             }
             if (learn_gates) {
                 learn_gate_toggles(sw_now, t);
@@ -2974,7 +2984,7 @@ inline SimulationResult run_transient_trbdf2(
                             th * (Real{1} + Real{1e-6}),
                             (t + dt_land - ta) / (tb - ta)));
                         x_trial = x_ta + thp * (x_tb - x_ta);
-                        if (t + dt_land > t_lin) ++st.n_interp_floor_landings;
+                        if (dt_land > t_lin - t) ++st.n_interp_floor_landings;
                     } else {
                         land_ok = trap_solve(mask_step, t, dt_land, x_trial);
                     }
@@ -3232,6 +3242,12 @@ inline SimulationResult run_transient_trbdf2(
                     // sample at 199 of 199 rising edges (V(sw) ramped across
                     // the first post-edge step: ll14 / ll15).
                     fire_due_ticks();
+                    // The rise is at the tick, here; the next step starts
+                    // h_probe later (the committed probe), off the tick.
+                    if (has_ticks) {
+                        learn_gate_period(
+                            switch_fn(t + Real{0.5} * h_min), t);
+                    }
                     // Zero-time diode cascade AT the edge, BEFORE
                     // any real step under the new mask. Without
                     // this, a gate opening an inductor's only path

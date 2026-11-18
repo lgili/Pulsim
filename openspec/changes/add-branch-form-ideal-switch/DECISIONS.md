@@ -510,8 +510,14 @@ Each entry: question → option taken → evidence → how to reverse.
     floors unchanged). Scoped to runs with ticks after the review: on every
     switch_fn gate it cost the CCM buck 8,803 steps in 400 periods against
     its pinned <= 8 per period, and a monitor-only tick period (the first
-    version capped at T_tick/20) is no gate's period. Open-loop gates are
-    therefore unchanged (owner question: should they get p/20 too?).
+    version capped at T_tick/20) is no gate's period. The second review
+    found any tick (a monitor's) still capped open-loop gates (1,729 ->
+    8,960 steps): a rise now counts only at a tick (learned where the tick
+    fires: at a step start, or at a gate-edge landing, whose committed probe
+    starts the next step h_probe after the tick), the period must exceed 20
+    pulse floors, and the cap does not go below the chatter floor. Monitor
+    run 1,706 vs 1,729 without the monitor. Open-loop gates are therefore
+    unchanged (owner question: should they get p/20 too?).
     ll15 I(L) at 23 T minus converged, rtol 1e-4, 1e-5, 1e-6, 1e-7, 1e-8,
     1e-10: before 0.142, 0.066, 0.0155, 3.6e-3, 7.9e-4, 4.7e-5 A; after
     5.3e-3, 3.5e-3, 1.25e-3, 5.9e-4, 4.6e-4, 4.7e-5 A (the first three
@@ -523,10 +529,10 @@ Each entry: question → option taken → evidence → how to reverse.
     sample landed, solved states: the duty error was tolerance error (11x
     smaller now at the default). Harness cells (interp measure; vs the rtol
     1e-8 reference / vs rtol 1e-10): ll15 1.23e-3 / 1.23e-3 -> 2.6e-4 /
-    2.9e-4, ll14 1.06e-3 / 1.07e-3 -> 5.6e-4 / 5.7e-4: both agree
+    2.9e-4, ll14 1.06e-3 / 1.07e-3 -> 5.5e-4 / 5.6e-4: both agree
     (tolerance 1e-3, untouched). The rtol 1e-8 reference is capped too; the
     vs-1e-10 figures are the honest ones and agree as well. Cost (accepted,
-    default tolerances): ll14 13,336 -> 20,718; ll15 39,660 -> 55,757;
+    default tolerances): ll14 13,336 -> 20,673; ll15 39,660 -> 55,541;
     cl_buck_pi 13,367 -> 19,264; cl_buck_aggressive_pi 6,776 -> 7,988;
     cl_boost_pi (30 ms) 19,839 -> 72,154 (3.6x; wall 0.06 -> 0.08-0.14 s,
     one run each on a loaded machine). Errors vs rtol 1e-10: cl_buck_pi
@@ -560,7 +566,7 @@ Each entry: question → option taken → evidence → how to reverse.
     `controlled=` in `_diode_turn_offs`.
 
 30. **Learning a periodic opaque gate: the step cap is 64 w, sampled every
-    w/2.** Question: cl_boost_pi behind an opaque lambda took 26,947 of its
+    w/2.** Question: cl_boost_pi behind an opaque lambda took 26,944 of its
     28,049 steps in the first 0.1 ms. Measured per period: 37, 17,922,
     8,568, then 56-62: the PI starts from duty 0, the first pulses are
     0.28 ns and 0.585 ns wide, and the cap 2 w held until the third rise

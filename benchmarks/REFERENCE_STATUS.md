@@ -146,10 +146,10 @@ cell disagrees by edge timing; edge err above it: the states differ.
 
 | circuit | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
-| closed_loop/cl_boost_pi.yaml | 0.0582 | 0.0579 | 8.55e-05 | 1.32e-06 | refused |
+| closed_loop/cl_boost_pi.yaml | 0.0582 | 0.0579 | 8.55e-05 | 1.31e-06 | refused |
 | closed_loop/cl_buck_aggressive_pi.yaml | 0.00662 | 0.00709 | 0.00404 | 3.72e-05 | refused |
 | closed_loop/cl_buck_pi.yaml | 0.0121 | 0.0123 | 0.00049 | 1.88e-05 | refused |
-| closed_loop/ll14_buck_closed_loop.yaml | 0.249 | 0.221 | 0.188 | 0.000562 | refused |
+| closed_loop/ll14_buck_closed_loop.yaml | 0.249 | 0.221 | 0.188 | 0.000547 | refused |
 | closed_loop/ll15_boost_closed_loop.yaml | 0.22 | 0.0659 | 0.05 | 0.000264 | refused |
 | closed_loop/ll16_flyback_closed_loop.yaml | unverified | unverified | unverified | unverified | refused |
 | diodes/back_to_back_diodes_sine.yaml | 1.14e-05 | 1.14e-05 | 1.14e-05 | 0 | 1.15e-05 |
