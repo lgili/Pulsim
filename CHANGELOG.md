@@ -29,12 +29,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with the same 512 records (DECISIONS 21).
 * **Added** an independent periodicity check on the exact route (one
   plain `simulate(engine='dsed')` period from `x*`, once per topology
-  and event pattern, `Evaluator.periodicity_checks`; a mismatch is
-  `failed`, `'periodicity'`) and an energy-balance guard on every
+  and event pattern, `Evaluator.periodicity_checks`; a mismatch raises
+  `pulsim.design.PeriodicityError`) and an energy-balance guard on every
   record: `counters['energy_residual']` (P_in − ΣP − dE/T over P_in;
-  1e-8 on the exact stepper, 1e-1 on the stepped engines, else
+  1e-8 on the kernel period, 1e-8·(2000/n)² on a run sampled n times per
+  period, 1e-1 on the stepped engines, else
   `failed`, `'energy_balance'`) and `counters['p_table']` (DECISIONS
   22). It shows the `pss/pwl` route's `p_in` 1 % high on a DCM buck.
+* **Fixed** (review) a native `SwitchSchedule` passed as `switch_fn=`
+  was digested by its type name, so two duty cycles shared every
+  `design_id`; it is now digested by its mask at its first 64 edges
+  (DECISIONS 24).
 * **Fixed** `simulate(engine='dsed')` raised `IndexError` for a schedule
   narrower than the circuit's switch count (diode mode check).
 * **Fixed** an extremum attained at both ends of a periodic orbit was

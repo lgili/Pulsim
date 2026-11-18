@@ -5,6 +5,7 @@ return to ``x*``; once per (topology, event pattern), a mismatch fails
 the design by name."""
 
 import numpy as np
+import pytest
 
 import pulsim as p
 import pulsim.design as design
@@ -52,15 +53,30 @@ def test_one_check_per_event_pattern_and_records_unchanged(monkeypatch):
             (r.status, r.kpis, r.losses, r.counters)
 
 
-def test_a_map_the_engine_does_not_reproduce_fails_by_name(monkeypatch):
+def test_a_map_the_engine_does_not_reproduce_stops_the_batch(monkeypatch):
+    # a defect of the map, not an outcome of one design: raised, so no
+    # record depends on which design of the pattern was checked
     calls = _spy(monkeypatch, perturb=1e-6)
     ev = _ev()
-    recs = [ev.evaluate(d) for d in DESIGNS]
-    assert [r.status for r in recs] == ["failed"] * 3
-    assert all(r.reason.startswith("periodicity:") for r in recs)
-    assert len(calls) == 1                  # the failure is cached
+    for d in DESIGNS[:2]:
+        with pytest.raises(design.PeriodicityError, match="periodicity"):
+            ev.evaluate(d)
+    assert len(calls) == 1                  # the deviation is cached
     (dev,) = ev.periodicity_checks.values()
     assert 1e-8 < dev < 1e-5
+    with pytest.raises(design.PeriodicityError):
+        _ev().evaluate_many(DESIGNS)
+
+
+def test_two_schedules_of_one_helper_have_different_ids():
+    # a native SwitchSchedule is opaque: it is digested by its edges
+    from .test_design_circuit_form import _C, _B
+    ids = [Evaluator(circuit=_C, fields={"L": "L.L"}, period=T,
+                     switch_fn=p.make_pwm_switch_fn(
+                         1 / T, D, _B.switch_index_of("S"),
+                         _B.graph.num_switches)).design_id({"L": 1e-4})
+           for D in (0.4, 0.5, 0.5)]
+    assert ids[0] != ids[1] == ids[2]
 
 
 def test_the_check_restarts_in_a_pickled_evaluator():

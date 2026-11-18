@@ -77,4 +77,15 @@ def test_a_stepped_route_is_held_to_its_own_tolerance():
     r = _ev(engine="pwl", options={"dt": T / 200}).evaluate(CCM)
     assert r.status == "ok"
     assert 1e-8 < abs(r.counters["energy_residual"]) < 1e-1
-    assert p.design._ENERGY_RTOL == {"exact": 1e-8, "stepped": 1e-1}
+    assert p.design._ENERGY_RTOL == {"exact": 1e-8, "sampled": 1e-8,
+                                     "stepped": 1e-1}
+
+
+def test_a_coarser_sampling_widens_the_sampled_tolerance_as_1_over_n2():
+    # DCM buck, dsed transient: 1.3e-7 at 200 samples per period (the
+    # rows integrate products of per-step lines), within 1e-8 (2000/200)^2
+    dcm = dict(CCM, L=20e-6, R=50.0)
+    r = _ev(engine="dsed", samples_per_period=200,
+            steady=SteadySpec(method="transient")).evaluate(dcm)
+    assert r.status == "ok"
+    assert 1e-8 < abs(r.counters["energy_residual"]) <= 1e-6

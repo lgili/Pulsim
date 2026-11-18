@@ -52,6 +52,7 @@ __all__ = [
     "Evaluator",
     "Kpi",
     "Constraint",
+    "PeriodicityError",
     "SteadySpec",
     "ThermalSpec",
     "SteadyPeriod",
@@ -62,6 +63,14 @@ __all__ = [
 ]
 
 STATUSES = ("ok", "refused", "failed", "infeasible")
+
+
+class PeriodicityError(Exception):
+    """The exact route's shooting map and a plain ``simulate`` period
+    disagree at the orbit: a defect of the map, raised out of
+    ``evaluate`` / ``evaluate_many`` (never a record; not a
+    ``RuntimeError``, so no engine wrapper turns it into ``failed``)."""
+
 
 class _Failed(Exception):
     """Internal: a design-specific non-convergence (-> ``failed``)."""
@@ -401,11 +410,31 @@ def _canon_value(v, _seen=None):
     if hasattr(v, "__dict__"):
         return {"type": f"{type(v).__module__}.{type(v).__qualname__}",
                 "fields": canon(vars(v))}
+    if callable(v) and callable(getattr(v, "next_edge_after", None)):
+        # an opaque native schedule (SwitchSchedule): by its behaviour,
+        # the first edges and the mask after each (else two duties of one
+        # helper would share every design id)
+        return {"schedule": _schedule_fingerprint(v)}
     if callable(v):
         return f"{getattr(v, '__module__', '?')}.{getattr(v, '__qualname__', type(v).__qualname__)}"
     raise TypeError(
         f"values must be numbers, strings, booleans, arrays, functions or "
         f"mappings / sequences of them, got {type(v).__name__}: {v!r}")
+
+
+def _schedule_fingerprint(sf, n_edges=64):
+    """``[(t.hex(), mask)]``: the mask at 0 and after each of the first
+    ``n_edges`` edges. shortcut: two schedules equal on these edges and
+    different later share it; 64 edges cover several periods of every
+    built-in helper."""
+    out = [("0", str(sf(0.0)))]
+    t = 0.0
+    for _ in range(n_edges):
+        t = float(sf.next_edge_after(t))
+        if not math.isfinite(t):
+            break
+        out.append((t.hex(), str(sf(t))))
+    return out
 
 
 def _digest(obj) -> str:
@@ -1142,10 +1171,12 @@ class Evaluator:
         ``simulate(engine='dsed')`` period from ``x*`` (another entry
         point: dispatch, adapter, event projection) must return to
         ``x*``. It costs one to two evaluations (DECISIONS 22), so it runs
-        once per (topology, event pattern) per evaluator and process and
-        is logged in ``periodicity_checks``, not in the records (whose
-        counters must not depend on the order of a batch); a mismatch
-        fails every design of that pattern."""
+        once per (topology, event pattern) per evaluator and process,
+        logged in ``periodicity_checks``. A passing check is a sample,
+        not a per-design guarantee; a mismatch raises
+        :class:`PeriodicityError` out of the batch (a defect of the map,
+        not an outcome of the design), so no record depends on which
+        design was checked."""
         key = (tuple((c["kind"], tuple(c.get("nodes", ())))
                      for c in b.components()),
                tuple(name for name, _ in r.pattern))
@@ -1157,16 +1188,18 @@ class Evaluator:
             xs = np.asarray(run.states_reduced, dtype=float)
             dev = np.abs(xs[-1] - r.x0)
             den = np.abs(xs).max(axis=0) + np.abs(r.x0)
+            # a state that sits at zero is measured against the largest
+            den = np.maximum(den, 1e-12 * float(den.max(initial=0.0)))
             with np.errstate(divide="ignore", invalid="ignore"):
                 q = np.where(dev == 0.0, 0.0, dev / np.where(den > 0, den,
                                                              1e-300))
             done = self.periodicity_checks[key] = float(q.max())
         if not done <= _PERIODIC_RTOL:
-            raise _Failed(
+            raise PeriodicityError(
                 "periodicity: a plain simulate(engine='dsed') period from "
                 "the shooting's x* moved it by "
                 f"{done:.3e} (relative, tolerance {_PERIODIC_RTOL:.0e}); the "
-                "shooting map and the engine disagree for this event "
+                "shooting map and the engine disagree for the event "
                 f"pattern {[n for n, _ in r.pattern]}")
 
     def _spec(self, src):
@@ -1535,9 +1568,11 @@ class Evaluator:
                                   if p_out + p_loss > 0 else math.nan)
             _energy_balance(
                 comps, src, rows, losses, p_in, counters,
-                0.0 if kp is not None else _stored_power(run, comps, a, z),
-                "exact" if kp is not None or getattr(
-                    run, "engine_used", "") == "dsed" else "stepped")
+                _stored_power_kernel(kp, comps) if kp is not None
+                else _stored_power(run, comps, a, z),
+                "exact" if kp is not None else "sampled" if getattr(
+                    run, "engine_used", "") == "dsed" else "stepped",
+                self.samples_per_period)
         if self.output is not None:
             if kp is not None:
                 kpis["v_out"] = kp.mean(("node", self.output))
@@ -1807,10 +1842,11 @@ def _engine(fn):
 
 
 # |P_in - sum P - dE/T| / P_in, an order above the worst record measured
-# (DECISIONS 22): exact stepper 1.3e-9 (DCM buck, transient route; <=
-# 1e-11 on the kernel period); time-stepping engines 3.9e-2 (pwl at
-# T/25 with sub-step correction; 9.9e-3 pss/pwl DCM buck, 9.5e-5 trbdf2)
-_ENERGY_RTOL = {"exact": 1e-8, "stepped": 1e-1}
+# (DECISIONS 22): kernel period 3.9e-12 (DCM buck); a dsed run sampled
+# n times per period 1.3e-9 (n = 2000), 1.3e-7 (200), 2.1e-6 (50) -- the
+# rows integrate products of per-step lines, O(1/n^2) -- so 1e-8 (2000/n)^2;
+# time-stepping engines 3.9e-2 (pwl at T/25 with sub-step correction)
+_ENERGY_RTOL = {"exact": 1e-8, "sampled": 1e-8, "stepped": 1e-1}
 
 
 def _stored_power(run, comps, a, z):
@@ -1835,8 +1871,31 @@ def _stored_power(run, comps, a, z):
     return e / (z - a)
 
 
+def _stored_power_kernel(kp, comps):
+    """``dE/T`` over a kernel period from its end values: the shooting
+    stops at a scaled residual, so ``x(T)`` is ``x*`` only to that."""
+    def at(key, end):
+        return float((kp.y_end if end else kp.y_start)[kp._j(key)])
+
+    def vc(nodes, end):
+        return sum(sg * at(("node#", int(k)), end)
+                   for k, sg in zip(nodes, (1.0, -1.0)) if int(k) >= 0)
+    e = 0.0
+    for n, c in comps.items():
+        if c["kind"] == "inductor":
+            k, y0, y1 = float(c["params"]["L_henries"]), at(("i", n), False), \
+                at(("i", n), True)
+        elif c["kind"] == "capacitor":
+            k, y0, y1 = float(c["params"]["C_farads"]), vc(c["nodes"], False), \
+                vc(c["nodes"], True)
+        else:
+            continue
+        e += 0.5 * k * (y1 * y1 - y0 * y0)
+    return e / kp.T
+
+
 def _energy_balance(comps, src, rows, losses, p_in, counters, p_stored,
-                    route):
+                    route, n_samples=2000):
     """``P_in = P_out + sum P_loss`` over the steady period, from the
     same integrals as the KPIs: the sources' delivered power against
     every device's dissipated ``P_avg`` (loads included) and the power
@@ -1861,7 +1920,8 @@ def _energy_balance(comps, src, rows, losses, p_in, counters, p_stored,
     counters["p_table"] = sum(v for c in losses.values()
                               for k, v in c.items()
                               if k in ("switching", "recovery", "core"))
-    tol = _ENERGY_RTOL[route]
+    tol = _ENERGY_RTOL[route] * (max(1.0, (2000.0 / n_samples) ** 2)
+                                 if route == "sampled" else 1.0)
     if not abs(res) <= tol:
         raise _Failed(
             f"energy_balance: P_in = {p_in:.9g} W but the devices dissipate "

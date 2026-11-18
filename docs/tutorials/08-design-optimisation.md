@@ -63,9 +63,13 @@ with `counters["p_table"]`, the datasheet losses outside that balance
 | `ok` | steady period reached, every bound met | KPIs, violations all 0 |
 | `infeasible` | a bound exceeded, or a thermal runaway | KPIs and `violations[name]` in the KPI's unit (runaway: no KPIs) |
 | `refused` | `pulsim.UnsupportedError` anywhere | `refusal = (engine, feature, device, kind)`, no KPIs |
-| `failed` | an engine's non-convergence, `not_settled`, a non-finite KPI, `energy_balance` (P_in ≠ ΣP + dE/T beyond the route's tolerance), `periodicity` (a plain period from the orbit leaves it) | `reason`, counters, no KPIs |
+| `failed` | an engine's non-convergence, `not_settled`, a non-finite KPI, `energy_balance` (P_in ≠ ΣP + dE/T beyond the route's tolerance) | `reason`, counters, no KPIs |
 
-Any other exception propagates: it is a bug, not a design outcome. Do
+Any other exception propagates: it is a bug, not a design outcome. One
+is raised on purpose: `pulsim.design.PeriodicityError`, when a plain
+`dsed` period started from a kernel orbit does not return to it (a
+defect of the period map, checked once per topology and event
+pattern, so it stops the whole batch rather than failing some records). Do
 not wrap `evaluate` in a broad `except`; that is how refusals became
 silent wrong answers in a GUI.
 

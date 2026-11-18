@@ -735,7 +735,10 @@ runs ONCE per (topology, orbit event-name pattern) per evaluator and
 process, logged in `Evaluator.periodicity_checks`, never in a record:
 record counters must not depend on batch order or backend (they are
 compared bit for bit across 1/8 threads and processes). A mismatch
-fails every design of that pattern, `reason='periodicity: ...'`. The
+raises `pulsim.design.PeriodicityError` out of `evaluate` /
+`evaluate_many` (review §24, item 1: failing the records made them
+depend on which design was checked first). The deviation is relative
+per state, its denominator floored at 1e-12 of the largest state. The
 Python-loop route (no kernel map) already verifies with `simulate`; the
 `pwl` / `trbdf2` routes' map IS that engine's transient, so the check
 does not apply there. The first check found a crash: a schedule
@@ -748,7 +751,8 @@ containment check now skips a diode the record has no column for (its
 Energy balance. On every record with KPIs and `loads=`: `res = (P_in -
 sum P_avg - dE/T) / P_in` from the same integrals as the KPIs (sources'
 delivered power, every device's dissipated `P_avg`, loads included;
-`dE/T` of L and C between the window ends, 0 on a kernel period). The
+`dE/T` of L and C between the window ends; on a kernel period from the
+period's own `y_start` / `y_end`, review §24 item 4). The
 record carries `counters['energy_residual']` and `counters['p_table']`
 (switching, recovery and core losses from tables / datasheets: outside
 the circuit's balance, so never in `res`). Not formed when a source of
@@ -758,16 +762,18 @@ or controlled source). Measured |res|:
 | circuit | pss/dsed | transient/dsed | pss/pwl T/200 | transient/pwl | transient/trbdf2 |
 |---|---|---|---|---|---|
 | buck CCM | 2.1e-13 | 3.7e-12 | 2.5e-4 | 5.0e-10 | 5.5e-7 |
-| buck DCM | 1.0e-11 | 1.3e-9 (4.8e-6 without dE/T) | 9.9e-3 | 1.0e-7 | failed (implausible V) |
+| buck DCM | 3.9e-12 (1.0e-11 without dE/T) | 1.3e-9 (4.8e-6 without dE/T) | 9.9e-3 | 1.0e-7 | failed (implausible V) |
 | boost CCM | 6.5e-13 | 1.0e-10 | 2.1e-9 | 4.5e-9 | failed |
 | boost DCM | 8.4e-14 | not settled | 1.7e-4 | not settled | failed |
 | 3-phase VSI (SPWM, dt 1 us) | refused | refused | 1.6e-3 | 6.5e-7 | 9.5e-5 |
 | buck Pareto, 512 designs | <= 1.2e-13 | | | | |
 | pwl T/25, sub-step correction (test) | | | | 3.9e-2 | |
 
-Tolerance by route, an order above the worst measured: 1e-8 when the
-KPIs come from the exact stepper (kernel period or a `dsed` run), 1e-1
-on the time-stepping engines. A violation is `failed`,
+Tolerance by route, an order above the worst measured: 1e-8 on the
+kernel period (`exact`); 1e-8 (2000/n)^2 on a sampled `dsed` run with
+n samples per period (`sampled`: the rows integrate products of
+per-step lines, O(1/n^2); DCM buck 1.3e-9 / 1.3e-7 / 2.1e-6 at n =
+2000 / 200 / 50); 1e-1 on the time-stepping engines (`stepped`). A violation is `failed`,
 `'energy_balance: ...'` with both powers and the residual; a test
 scales one load's `P_avg` by 1 + 1e-6 and the record fails.
 
@@ -807,6 +813,61 @@ I + (f+ - f-) w^T / (w . f-)` for that event (today only diode events
 get one; no other state event reaches the period runs, so nothing is
 silently missing now). The probe `probes/peak_current_mode.py` is the
 oracle. Not started: this slice ran out of time after items 1-4.
+
+## 24. Fresh-context review of slice 5 (items 1-4) and what changed
+
+Reviewer (opus, read-only) on 18c62e86, 00c7df92 and the tie-rule diff.
+Acted on (one commit, tests shown failing before where a test exists):
+
+* (1, bug) The periodicity result was cached per (topology, pattern)
+  and decided the records of later designs, so records depended on
+  batch order and backend (each process chunk starts with an empty
+  cache). A mismatch now raises `pulsim.design.PeriodicityError` (a
+  plain `Exception`, so no engine wrapper turns it into `failed`) out of
+  `evaluate` / `evaluate_many`: a defect of the map stops the batch, and
+  no record depends on which design was checked. A passing check is a
+  sample of the map, not a per-design guarantee (documented).
+* (2, bug) A native `SwitchSchedule` canonicalised to its type name, so
+  `Evaluator(circuit=c, switch_fn=make_pwm_switch_fn(f, 0.4, ..))` and
+  the same at 0.5 shared every `design_id`. An object with
+  `next_edge_after` is now digested by its behaviour: the mask at 0 and
+  after each of its first 64 edges (`_schedule_fingerprint`; shortcut:
+  schedules equal on those edges and different later share it).
+  The buck example's ids are unchanged (its schedule is a function).
+* (3, risk) On a sampled `dsed` window the rows integrate products of
+  per-step lines, which is O(1/n^2) away from the exact stored energy:
+  DCM buck 1.3e-9 (n = 2000 samples per period), 1.3e-7 (200), 2.1e-6
+  (50); at 200 a correct record failed. Route `sampled` now has
+  tolerance 1e-8 (2000/n)^2; the kernel period keeps 1e-8.
+* (4, risk) The kernel route took dE/T = 0, but the shooting stops at a
+  scaled residual: dE/T now comes from the period's own start and end
+  values (inductor currents, node voltages; DCM buck residual 1.0e-11
+  -> 3.9e-12).
+* (5, risk) The periodicity deviation had no floor: a state sitting at
+  zero (a DCM inductor current at the section) divided rounding noise
+  by ~0. The denominator is floored at 1e-12 of the largest.
+
+Recorded, not changed:
+* (6) The tie rule is relative only (1e-12): an extremum of 0 against
+  1e-20 noise is not a tie and may still flip with the last bit, and a
+  chain of three values each within 1e-12 of the next is resolved by
+  the kernel's running rule and Python's best-then-earliest rule
+  differently. The CI case (equal to rounding at a nonzero value) is
+  covered; an absolute floor needs the observable's span, which the
+  kernel's streaming search does not have before the end.
+* (7, nit) A non-deterministic circuit factory is refused in the worker
+  (at unpickling), not before the workers start: one process cannot
+  see it.
+
+Process backend, buck example SYN-A, interleaved best of 5, load 6-9
+from other builds (observation, not asserted): 4096 designs, circuit
+form 6484 / 9801 / 9692 evaluations/s on 1 / 4 / 8 workers (factory
+form 5177 / 8648 / 8868); about 16k designs (32768-point hypercube,
+SYN-A half) with a ctest build beside it, load 8-9: processes 2588 /
+3153 / 2798, threads 1371 / 1546 / 1615 on the same machine state.
+Processes give about 2x the threads under load; worker start-up (spawn, import pulsim,
+unpickle, build the base) is about 0.3 s per worker, so a batch needs
+thousands of designs before processes pay.
 
 ## Missing from the kernel (recorded, worked around in Python)
 
