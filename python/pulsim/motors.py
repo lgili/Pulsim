@@ -264,6 +264,30 @@ _DC_OBSERVER_DEPRECATION = (
     "operating point). The observer is kept until a later release.")
 
 
+# add-mna-native-machines task 5.1: each observer names its native
+# replacement and its measured first-order error.
+_OBSERVER_DEPRECATION = {
+    "pmsm": ("the PMSM observer injects the back-EMF of the previous step "
+             "and carries one average inductance (settled-speed error "
+             "-0.37 % at dt = 50 us, -1.98 % at 200 us; no saliency in the "
+             "electrical dynamics). Use CircuitBuilder.add_pmsm_mna"),
+    "bldc": ("the BLDC observer injects the trapezoidal back-EMF of the "
+             "previous step (first order, as the PMSM observer: -0.37 % "
+             "settled speed at dt = 50 us). Use CircuitBuilder.add_bldc_mna"),
+    "im": ("the induction-motor observer integrates the rotor flux and the "
+           "speed outside the matrix (free-acceleration speed error 0.71 % "
+           "of synchronous at dt = 50 us, 2.9 % at 200 us). Use "
+           "CircuitBuilder.add_induction_machine_mna"),
+}
+
+
+def _warn_observer(fn: str, kind: str) -> None:
+    warnings.warn(f"{fn} is deprecated: {_OBSERVER_DEPRECATION[kind]}, which "
+                  "solves the machine inside the matrix (second order, pwl "
+                  "and trbdf2). The observer is kept until a later release.",
+                  DeprecationWarning, stacklevel=3)
+
+
 @dataclass
 class DcMotor:
     """A DC motor instance. Holds parameters + a `Mechanical` block.
@@ -582,6 +606,7 @@ def add_pmsm(builder,
         observer's ``mech.theta_rad`` is initialised to this value
         so ``θ_e(t=0) = pp · theta_init``.
     """
+    _warn_observer("add_pmsm", "pmsm")
     if len(phase_nodes) != 3:
         raise ValueError("phase_nodes must have 3 entries")
 
@@ -827,6 +852,7 @@ def make_pmsm_observer(builder, motor: PMSM, *, dt: float,
         default device name; override when running multiple motors
         in the same circuit.
     """
+    _warn_observer("make_pmsm_observer", "pmsm")
     return _make_3phase_motor_observer(builder, motor, dt=dt,
                                             waveform="sinusoidal",
                                             name=name)
@@ -859,12 +885,15 @@ def add_bldc(builder,
                 ) -> BLDC:
     """Add a 3-phase BLDC motor. Same topology as PMSM but the
     observer drives the back-EMF with a trapezoidal shape."""
-    pmsm = add_pmsm(builder, name=name,
-                       phase_nodes=phase_nodes,
-                       neutral_node=neutral_node,
-                       R_s=R_s, L_s=L_s, psi_pm=psi_pm,
-                       pole_pairs=pole_pairs,
-                       J=J, B=B, T_load=T_load, T_load_fn=T_load_fn)
+    _warn_observer("add_bldc", "bldc")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        pmsm = add_pmsm(builder, name=name,
+                        phase_nodes=phase_nodes,
+                        neutral_node=neutral_node,
+                        R_s=R_s, L_s=L_s, psi_pm=psi_pm,
+                        pole_pairs=pole_pairs,
+                        J=J, B=B, T_load=T_load, T_load_fn=T_load_fn)
     # Upgrade the PMSM dataclass to a BLDC (same fields).
     return BLDC(
         R_s_ohm=pmsm.R_s_ohm, L_s_H=pmsm.L_s_H,
@@ -880,6 +909,7 @@ def make_bldc_observer(builder, motor: BLDC, *, dt: float,
                           name: str = "M1") -> "MotorObserverBundle":
     """Build a :class:`MotorObserverBundle` for a BLDC with trapezoidal
     back-EMF. See :func:`make_pmsm_observer` for the bundle API."""
+    _warn_observer("make_bldc_observer", "bldc")
     return _make_3phase_motor_observer(builder, motor, dt=dt,
                                             waveform="trapezoidal",
                                             name=name)
@@ -1018,6 +1048,7 @@ def add_induction_motor(builder,
       conditions or a brief startup excitation) for steady-state
       operation tests.
     """
+    _warn_observer("add_induction_motor", "im")
     if len(phase_nodes) != 3:
         raise ValueError("phase_nodes must have 3 entries")
     if L_m * L_m >= L_s * L_r:
@@ -1069,6 +1100,7 @@ def make_induction_motor_observer(builder,
     instantaneous rotor-flux derivative and injected into each phase's
     dummy voltage source via ``b_extra``.
     """
+    _warn_observer("make_induction_motor_observer", "im")
     state_size = builder.pool.state_size(builder.graph)
     phase_idx = tuple(
         builder.pool.branch_var_id_for_inductor(bid, builder.graph)
@@ -1227,7 +1259,9 @@ def im_parameters_from_nameplate(*,
         Kwargs: ``R_s``, ``L_s``, ``R_r``, ``L_r``, ``L_m``,
         ``pole_pairs``, ``J``. Plus ``_diagnostics`` carrying the
         derived intermediate quantities (rated current, rated
-        torque, synchronous speed).
+        torque, synchronous speed) and ``status = "estimated"``: the
+        values are a rule-of-thumb split, not a measurement, and must
+        not be reported as the machine's parameters.
 
     Examples
     --------
@@ -1270,6 +1304,7 @@ def im_parameters_from_nameplate(*,
         "pole_pairs": pole_pairs,
         "J": J,
         "_diagnostics": {
+            "status": "estimated",
             "I_rated_A": I_rated,
             "T_rated_Nm": T_rated,
             "omega_sync_rad_s": omega_s,

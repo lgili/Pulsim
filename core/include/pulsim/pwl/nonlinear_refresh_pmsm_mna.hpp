@@ -65,6 +65,23 @@ namespace pulsim::pwl {
 
 namespace detail {
 
+/// The flux row from λ − λ_n = dλ_inc − lam_off (increment form, see
+/// `PmsmMnaHistory::Entry`): the same residual as
+///   trapezoidal  (v − R i) + (dλ/dt)_n − (2/h)(λ − λ_n)
+///   BDF2         (v − R i) − (c1 λ + c2 λ_γ + c3 λ_n)/h
+///                = (v − R i) − (c1 (λ − λ_n) + c2 (λ_γ − λ_n))/h
+///                  (c1 + c2 + c3 = 0)
+///   backward E.  (v − R i) − (λ − λ_n)/h
+/// with every flux term an increment, so its round-off is eps·|Δλ|·d.
+inline Real flux_row_(Real v_minus_ri, Real dlam_inc,
+                      const PmsmMnaHistory::Entry& e, Size k, Real d_coef,
+                      bool bdf2, bool be, Real h, const TrBdf2Coeffs& kc) {
+    const Real dl = dlam_inc - e.lam_off[k];
+    if (bdf2) return v_minus_ri - (kc.c1 * dl + kc.c2 * e.dlam_gamma[k]) / h;
+    if (be) return v_minus_ri - d_coef * dl;
+    return v_minus_ri + e.dlam_old[k] - d_coef * dl;
+}
+
 /// Induction-machine entry (add-mna-native-machines group 2).
 ///
 /// Stator row k: the PMSM's flux row with λ_k = Σ_j L_kj i_j + Σ_r M_kr λ_r
@@ -84,7 +101,7 @@ inline Real refresh_induction_entry_(
     using IM = models::InductionMachineMna;
     const auto& p = e.im;
     const auto kc = trbdf2_coeffs();
-    const auto sm = IM::stator(p);
+    const auto& sm = e.im_sm;   // built once per run (init)
     const auto dv = IM::derived(p);
     const auto C = IM::clarke();
     std::array<Real, 3> i{}, v{};
@@ -101,16 +118,13 @@ inline Real refresh_induction_entry_(
     const std::array<bool, 2> r_act{
         stamping::node_is_active(e.rotor_node[0]),
         stamping::node_is_active(e.rotor_node[1])};
-    const auto lam = IM::lambda_s(p, i, lr);
+    const auto dlam = PmsmMnaHistory::delta_lambda(e, x);
     Real max_i = Real{0};
 
-    // ---- stator rows (conductance form, as the PMSM's) ----------
+    // ---- stator rows (conductance form, increment form as the PMSM's)
     for (Size k = 0; k < 3; ++k) {
-        const Real hist =
-            bdf2 ? (kc.c2 * e.lambda_gamma[k] + kc.c3 * e.lambda_old[k]) / h
-                 : (be ? Real{0} : -e.dlam_old[k])
-                       - d_coef * e.lambda_old[k];
-        const Real R_row = (v[k] - p.R_s * i[k]) - d_coef * lam[k] - hist;
+        const Real R_row = flux_row_(v[k] - p.R_s * i[k], dlam[k], e, k,
+                                     d_coef, bdf2, be, h, kc);
         const Index row = e.cur_row[k];
         const bool ph_act = stamping::node_is_active(e.phase_node[k]);
         f_nl[row] += R_row;
@@ -148,14 +162,15 @@ inline Real refresh_induction_entry_(
     for (Size n = 0; n < 2; ++n) {
         if (!r_act[n]) continue;
         const Index rn = e.rotor_node[n];
-        f_nl[rn] -= g[n];
+        const Real cn = e.c_rotor[n];   // C·dλ/dt = C·g on the node
+        f_nl[rn] -= cn * g[n];
         for (Size m = 0; m < 2; ++m) {
-            if (r_act[m]) J_nl.coeffRef(rn, e.rotor_node[m]) -= dg_dl[n][m];
+            if (r_act[m]) J_nl.coeffRef(rn, e.rotor_node[m]) -= cn * dg_dl[n][m];
         }
         for (Size j = 0; j < 3; ++j) {
-            J_nl.coeffRef(rn, e.cur_row[j]) -= dv.Lm_over_tau_r * C[n][j];
+            J_nl.coeffRef(rn, e.cur_row[j]) -= cn * (dv.Lm_over_tau_r * C[n][j]);
         }
-        if (om_act) J_nl.coeffRef(rn, e.omega_node) -= dg_dw[n];
+        if (om_act) J_nl.coeffRef(rn, e.omega_node) -= cn * dg_dw[n];
     }
 
     // ---- torque into the speed node -----------------------------
@@ -206,7 +221,7 @@ inline Real refresh_pmsm_mna(
         const auto& p = e.params;
         const Real theta_e = PmsmMnaHistory::theta_e_of(e, x);
         const auto ind = models::PmsmMna::inductance(p, theta_e);
-        const auto lpm0 = models::PmsmMna::lambda_pm(p, theta_e, 0);
+        const auto dlam = PmsmMnaHistory::delta_lambda(e, x, &ind.L);
         const auto lpm1 = models::PmsmMna::lambda_pm(p, theta_e, 1);
 
         std::array<Real, 3> i{}, v{};
@@ -221,20 +236,10 @@ inline Real refresh_pmsm_mna(
 
         // ---- electrical rows ----------------------------------
         for (Size k = 0; k < 3; ++k) {
-            Real lam = lpm0[k], dlam_dth = lpm1[k];
-            for (Size j = 0; j < 3; ++j) {
-                lam += ind.L[k][j] * i[j];
-                dlam_dth += ind.dL[k][j] * i[j];
-            }
-            // Trapezoidal carries the previous derivative; BDF2 is
-            // one-sided and does not.
-            const Real hist =
-                bdf2 ? (kc.c2 * e.lambda_gamma[k]
-                        + kc.c3 * e.lambda_old[k]) / h
-                     : (be ? Real{0} : -e.dlam_old[k])
-                           - d_coef * e.lambda_old[k];
-            const Real R_row =
-                (v[k] - p.R_s * i[k]) - d_coef * lam - hist;
+            Real dlam_dth = lpm1[k];
+            for (Size j = 0; j < 3; ++j) dlam_dth += ind.dL[k][j] * i[j];
+            const Real R_row = detail::flux_row_(
+                v[k] - p.R_s * i[k], dlam[k], e, k, d_coef, bdf2, be, h, kc);
             const Index row = e.cur_row[k];
             const bool ph_act = stamping::node_is_active(e.phase_node[k]);
 
@@ -279,8 +284,8 @@ inline Real refresh_pmsm_mna(
         if (th_act && om_act) {
             // dθ/dt = ω: inject ω into the θ node's 1 F capacitor.
             const Real omega = stamping::read_node_voltage(x, e.omega_node);
-            f_nl[e.theta_node] -= omega;
-            J_nl.coeffRef(e.theta_node, e.omega_node) -= Real{1};
+            f_nl[e.theta_node] -= e.c_theta * omega;   // C·dθ/dt = C·ω
+            J_nl.coeffRef(e.theta_node, e.omega_node) -= e.c_theta;
         }
     }
     return max_i;

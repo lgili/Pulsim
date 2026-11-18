@@ -2180,6 +2180,8 @@ void init_module(py::module_& m) {
                           static_cast<int>(m.branch_id[2]));
                       d["omega_node"] = static_cast<int>(m.omega_node);
                       d["theta_node"] = static_cast<int>(m.theta_node);
+                      d["omega0"] = m.omega0;   // the DC point holds these
+                      d["theta0"] = m.theta0;
                       py::dict pr;
                       pr["R_s"] = m.params.R_s;
                       pr["L_d"] = m.params.L_d;
@@ -2217,6 +2219,7 @@ void init_module(py::module_& m) {
                       d["rotor_nodes"] = py::make_tuple(
                           static_cast<int>(m.rotor_node[0]),
                           static_cast<int>(m.rotor_node[1]));
+                      d["omega0"] = m.omega0;   // the DC point holds it
                       py::dict pr;
                       pr["R_s"] = m.params.R_s;
                       pr["L_ls"] = m.params.L_ls;
@@ -3144,6 +3147,32 @@ void init_module(py::module_& m) {
             "integrals over a decimated grid alias. Unpacked on each "
             "access; the kernel stores ceil(num_switches/8) bytes per "
             "sample.")
+        .def_property_readonly("gate_states",
+            [](const SimulationResult& r) -> py::object {
+                const Size stride = r.switch_state_stride;
+                if (!r.switch_states_complete() || r.gate_state_bits.empty() ||
+                    r.gate_state_bits.size() != r.switch_state_bits.size()) {
+                    return py::none();
+                }
+                const auto n = static_cast<py::ssize_t>(r.times.size());
+                const auto nb = static_cast<py::ssize_t>(r.num_switch_bits);
+                py::array_t<bool> out(std::vector<py::ssize_t>{n, nb});
+                auto* ptr = out.mutable_data();
+                for (py::ssize_t k = 0; k < n; ++k) {
+                    const std::uint8_t* row = r.gate_state_bits.data()
+                        + static_cast<std::size_t>(k) * stride;
+                    for (py::ssize_t j = 0; j < nb; ++j) {
+                        ptr[k * nb + j] = ((row[j / 8] >> (j % 8)) & 1U) != 0U;
+                    }
+                }
+                return std::move(out);
+            },
+            "Per-sample record of the COMMANDED gate bit each gated PWL "
+            "device (IGBT, GTO, thyristor, TRIAC) was decided under, in "
+            "the layout of switch_states (column j = "
+            "builder.switch_index_of(name); False for every other "
+            "column). switch_states holds the stamped conduction state. "
+            "None in a circuit without a gated device.")
         .def_property_readonly("switch_states_unsolved",
             [](const SimulationResult& r) -> py::object {
                 if (!r.switch_states_complete()) {

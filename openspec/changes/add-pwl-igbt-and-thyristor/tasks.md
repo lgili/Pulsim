@@ -5,7 +5,7 @@
 
 ## 2. Pool, mask and record
 - [x] 2.1 `DevicePool::add_gated_diode`; event state carries `(c, g)`; effective-mask construction (commanded bit → `g`, cache key ← `c`)
-- [ ] 2.2 (NOT DONE: the stamped state `c` is recorded; the gate `g` is not, DECISIONS 7) Result records the commanded and the effective state per step under distinct names
+- [x] 2.2 (`result.gate_states` = commanded gate `g`, `result.switch_states` = stamped state `c`; the missed-turn-on check of `_diode_state` reads `g` again, DECISIONS 15) Result records the commanded and the effective state per step under distinct names
 - [x] 2.3 Test: `SwitchStateMask(num_switches)` with `.set(i, True)` for the gate; control case proves forward conduction before any blocking assertion
 
 ## 3. IGBT
@@ -21,7 +21,7 @@
 - [x] 4.2 `trbdf2`: crossing signal, held tolerance, forbidden-state check
 - [ ] 4.3 `dsed`: predicates and settle — NOT DONE: dsed refuses gated devices by name (`feature='gated_diode'`), DECISIONS 2
 - [ ] 4.4 (end to end on pwl and trbdf2 only — gate-off block with a 410 A control; dsed refuses; no per-site test of the sub-step watcher or trbdf2 boundary settle) Per-site test: gate held off under forward bias → `|i| ≤ g_off·|v|` on `pwl`, `trbdf2`, `dsed`
-- [ ] 4.5 (partial: GateHeld / Latching cells × pwl, trbdf2, dsed, bdf1, gate held on — no gate edge, no DC or AC cell) Conformance rows (`add-engine-conformance-matrix`): `igbt[gated]`, `thyristor`, `gto`, `triac` × {pwl, trbdf2, dsed, DC, AC}
+- [ ] 4.5 (partial: GateHeld / Latching cells × pwl, trbdf2, dsed, bdf1, gate held on AND with gate edges — PWM / phase control, `test_gated_cell_with_gate_edges`; DC: the IGBT knee DC test (3.2); no AC-sweep cell run) Conformance rows (`add-engine-conformance-matrix`): `igbt[gated]`, `thyristor`, `gto`, `triac` × {pwl, trbdf2, dsed, DC, AC}
 
 ## 5. Thyristor, GTO, TRIAC
 - [x] 5.1 `add_thyristor`, `add_gto`, `add_triac`; `switch_indices_of`

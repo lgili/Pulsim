@@ -196,6 +196,7 @@ public:
         coss.from_flat(s.view(StateBlock::NonlinearCapacitor));
         laur.from_flat(s.view(StateBlock::LauritzenDiode));
         pmsm.from_flat(s.view(StateBlock::PmsmMna));
+        pmsm.rebase_reference(s.x);   // increment-form reference = x
         tail.from_flat(s.view(StateBlock::IgbtTail));
     }
 };

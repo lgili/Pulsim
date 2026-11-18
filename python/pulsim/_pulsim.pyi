@@ -1793,6 +1793,11 @@ class SimulationResult:
         Complete state at the end of the run. Pass it to simulate(resume_from=...) to continue EXACTLY where this left off.
         """
     @property
+    def gate_states(self) -> typing.Any:
+        """
+        Per-sample record of the COMMANDED gate bit each gated PWL device (IGBT, GTO, thyristor, TRIAC) was decided under, in the layout of switch_states (column j = builder.switch_index_of(name); False for every other column). switch_states holds the stamped conduction state. None in a circuit without a gated device.
+        """
+    @property
     def heat_injected(self) -> float:
         """
         J of heat the run deposited into thermal nodes.

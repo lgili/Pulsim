@@ -249,6 +249,10 @@ public:
         Index omega_node = -1;
         Index theta_node = -1;
         models::PmsmMna::Params params;
+        /// Mechanical initial conditions: the DC operating point holds the
+        /// speed and angle nodes here (add-mna-native-machines 3.5).
+        Real omega0 = 0;
+        Real theta0 = 0;
     };
 
     /// Register an MNA-native PMSM. Each phase branch MUST be
@@ -260,7 +264,8 @@ public:
     /// `PmsmMnaHistory`.
     void add_pmsm_mna(const std::array<Index, 3>& branch_ids,
                       Index omega_node, Index theta_node,
-                      models::PmsmMna::Params p) {
+                      models::PmsmMna::Params p, Real omega0 = 0,
+                      Real theta0 = 0) {
         models::PmsmMna::validate(p);
         for (const Index b : branch_ids) {
             entries_[b] = Entry{p};
@@ -268,7 +273,8 @@ public:
                 static_cast<Index>(num_inductors_++);
         }
         pmsm_mna_machines_.push_back(
-            PmsmMnaMachine{branch_ids, omega_node, theta_node, p});
+            PmsmMnaMachine{branch_ids, omega_node, theta_node, p, omega0,
+                           theta0});
     }
 
     [[nodiscard]] const std::vector<PmsmMnaMachine>&
@@ -286,11 +292,13 @@ public:
         Index omega_node = -1;
         std::array<Index, 2> rotor_node{-1, -1};
         models::InductionMachineMna::Params params;
+        Real omega0 = 0;   //!< the DC operating point holds the speed here
     };
     void add_induction_machine_mna(const std::array<Index, 3>& branch_ids,
                                    Index omega_node,
                                    const std::array<Index, 2>& rotor_nodes,
-                                   models::InductionMachineMna::Params p) {
+                                   models::InductionMachineMna::Params p,
+                                   Real omega0 = 0) {
         models::InductionMachineMna::validate(p);
         for (const Index b : branch_ids) {
             entries_[b] = Entry{p};
@@ -298,7 +306,7 @@ public:
                 static_cast<Index>(num_inductors_++);
         }
         induction_machines_.push_back(
-            InductionMachine{branch_ids, omega_node, rotor_nodes, p});
+            InductionMachine{branch_ids, omega_node, rotor_nodes, p, omega0});
     }
     [[nodiscard]] const std::vector<InductionMachine>&
     induction_machines() const noexcept {

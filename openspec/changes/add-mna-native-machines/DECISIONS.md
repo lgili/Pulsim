@@ -155,6 +155,7 @@ Each entry: question → option taken → why → how to reverse.
 
 ## D13. DC operating point with machines (tasks 2.7 "DC held", 3.5)
 
+- Superseded by D19 (batch 13). Original note:
 - Not done in this pass. The DC assembly stamps every Newton device
   except the saturable inductor OPEN, so a PMSM or induction machine has
   no electrical rows at DC; the preflight then ties the neutral, the
@@ -198,3 +199,116 @@ Each entry: question → option taken → why → how to reverse.
   `J_lin + J_nl` each iteration anyway). No other circuit takes it, so
   the 21 non-machine goldens are unchanged; the two `im_*` goldens and
   every machine figure were re-measured at the true `dt`.
+
+## D16. Flux rows in increment form (small-step abort)
+
+- Symptom: a PMSM at `dt = 10 ns` aborted (ψ_pm 0.05 at t = 1.2e-5 s;
+  ψ_pm 0.5 at 5e-8 s, and 25 retries already at 100 ns; `trbdf2` with
+  ψ_pm 0.5 stalled at h_min at t = 0). Cause: the row
+  `v − R i − (2/h)(λ(x) − λ_old)` subtracts two O(ψ_pm) numbers; their
+  round-off `eps·(2/h)·|λ|` is 2e-9 V at 10 ns for ψ = 0.05, above
+  Newton's absolute 1e-9 tolerance (which stays absolute: making it
+  relative lets the DC cascade stop at a spurious root, memory note).
+- Fix: the row is written as `(2/h)·(Δλ − λ_off)` with Δλ computed
+  from the increments, never as a difference of totals:
+  - PMSM: `L·Δi` + the saliency term with
+    `cos2θ − cos2θ0 = −2 sin(θ+θ0) sin(θ−θ0)`, the PM term with
+    `−2ψ_h sin(h(θ+θ0)/2 + φ_h) sin(hΔθ/2)` per harmonic
+    (`PmsmMna::lambda_increment`);
+  - induction machine: `L_s·Δi + M·Δλ_r` (constant stator matrices,
+    now cached once per entry).
+- The reference point `(i_old, θ_old, λr_old)` is the committed state.
+  `extrapolate_previous` (SDIRK pseudo-history) moves it by a stored
+  offset `λ_off`, and a resume rebases it on the snapshot `x`
+  (`λ_off = 0` bitwise for a consistent snapshot).
+- The Jacobian is unchanged and the rows stay in conductance form.
+  This CHANGES THE PMSM / IM LAW AS WRITTEN: the device-interface port
+  must carry the increment form.
+- Moved numbers (1 µs, end values): PMSM pwl ω −13.059179906729224 →
+  −13.059179906729375; trbdf2 −13.061329289736987 → −13.061329289735662;
+  ψ 0.5 pwl −5.355988036500754 → −5.355988036498043; IM pwl
+  1.530198626034774 → 1.530198626034761; IM trbdf2 1.5308411400090733
+  → 1.5308411400087307. All ≤ 3e-13 relative: round-off of the old row.
+- After: PMSM and IM at 1 µs, 100 ns, 10 ns, 1 ns, from rest and from a
+  running high-flux state, take zero dt retries.
+
+## D17. Internal 1 F integrator capacitors are not parameters
+
+- The angle node (PMSM) and the rotor-flux nodes (IM) integrate through
+  a builder-made 1 F capacitor that `with_value("…_theta.C")` /
+  `("…_Cra.C")` could edit, silently scaling `θ` or `λ_r` dynamics.
+- Fix: the injection is scaled by the capacitance read at init
+  (`C·ω` into the angle node, `C·g(·)` into the rotor rows), so the
+  value of C cancels. Any other capacitor or a nonlinear capacitor on
+  those nodes is refused by name. Tests: an edit to 0.25 F gives the
+  same result within 1e-9 relative.
+
+## D18. Observer deprecations (group 5)
+
+- `add_pmsm`, `make_pmsm_observer`, `add_bldc`, `make_bldc_observer`,
+  `add_induction_motor`, `make_induction_motor_observer` emit one
+  `DeprecationWarning` naming the native builder, with the measured
+  observer error (PMSM −0.37 % at 50 µs, −1.98 % at 200 µs; IM free
+  acceleration 0.71 % / 2.9 % of synchronous speed).
+- `im_parameters_from_nameplate` labels its result
+  `_diagnostics["status"] = "estimated"`.
+
+## D19. DC operating point with held mechanics (2.7, 3.5)
+
+- `dc_assemble` stamps each machine's DC rows after the conductance
+  floor: stator `v − R·i − ω_e·∂λ/∂θ_e = 0` (di/dt = 0) at the held
+  `(ω0, θ0)` — for the PMSM `ω_e·(∂L/∂θ_e·i + ∂λ_pm/∂θ_e)`, for the
+  induction machine no stator EMF and the rotor rows `dλ_r/dt = 0`
+  (the steady rotor flux at `ω0`). Linear: no Newton at DC.
+- The KCL rows of the speed and angle nodes are replaced by `v = ω0`,
+  `v = θ0` (no torque balance; the transient takes over). `ω0`, `θ0`
+  are the builder's `omega0` / `theta0`, now kept on the pool record
+  (YAML keys `omega0` / `theta0` of the `pmsm_mna` /
+  `induction_machine_mna` registry entry, value hash only when
+  nonzero, so existing hashes are unchanged).
+- A speed or angle node that another device drives (anything but
+  capacitors, resistors and current outputs) would be over-determined:
+  refused by name, naming that device. Prescribe the speed with
+  `omega0` for the DC point instead. Known limit: an inductor on the
+  speed node (a torsional spring in the velocity analogy, e.g. a
+  two-mass shaft) is refused too, although its DC short would only copy
+  `ω0` to the load node; start such a shaft from zero state.
+- The held rows keep no `gmin`: `compute_dc_op` re-applies the hold
+  after its floor, so `ω = ω0` exactly, not `ω0/(1 + gmin)`.
+- `start_from_dc_op` seeds the machine histories from the DC point
+  (`λ`, `i`, `θ`), and the held nodes' capacitors from the KCL residual
+  the hold replaced (`seed_held_machine_capacitors`: angle `i_C = C·ω0`,
+  speed `i_C` = net torque; a DC capacitor is otherwise seeded at 0, and
+  the first step then advanced θ by h·ω0/2 and moved i by 2.4e-3 A).
+  The first step continues the DC point: |i(h) − i(0)| = 4.8e-7 A
+  (round) and 1.3e-6 A (salient) at h = 1 µs, ratio 4.000 per halving,
+  against a > 1e-3 A jump from zero state. `pwl` only: `trbdf2` refuses
+  `start_from_dc_op`. The other stateful histories (Coss,
+  Lauritzen, IGBT tail, saturable inductor) are still NOT seeded after
+  the DC point on `pwl` (pre-existing; left so non-machine results stay
+  bit-identical).
+- References (`test_machine_dc_hold.py`, conformance `DC held` cells):
+  PMSM at rest `i = (v − v_n)/R_s` within 1e-9 on a salient rotor;
+  at 50 and −30 rad/s the round-rotor closed form
+  `i_k = (v_k − v_n + ω_e·ψ·sin(θ_e − 2πk/3))/R_s`; induction machine
+  `i = (v − v_n)/R_s` and `λ_r` from the 2×2 steady rotor law at 0 and
+  80 rad/s.
+
+## D20. Preflight, YAML authoring types
+
+- The preflight counts a machine stator as a DC path and the speed,
+  angle and rotor-flux nodes as defined at DC: no 1 GΩ tie and no
+  warning on a machine's own nodes (it tied the neutral, the speed and
+  the angle node before). Machine results move by the removed leak.
+- YAML `pmsm` (the `add_pmsm_mna` arguments) and `bldc` (the
+  `add_bldc_mna` arguments; the trapezoid series is ported to the loader
+  and pinned equal to `trapezoid_harmonics` by
+  `test_yaml_composites.py`). `theta_node` is a scoped node key.
+
+## D21. Flux maps (group 4) not done
+
+- `FluxMapDQ` (co-energy bicubic fit, kernel ∇W' and Hessian, the
+  saturating locked-rotor reference) is a new law with its own Newton
+  smoothness requirements (memory: device laws must be smooth to
+  1e-12). Not started in this batch; tasks 4.1–4.5 and the
+  `pmsm_mna[flux_map]` conformance row stay open.

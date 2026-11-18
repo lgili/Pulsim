@@ -282,6 +282,59 @@ struct PmsmMna {
         return out;
     }
 
+    /// λ(θ_e, i) − λ(θ0_e, i0) without cancellation. `dth_e` = θ_e − θ0_e
+    /// and `di` = i − i0 are passed in (node-voltage differences, exact
+    /// when the two are close). The flux row multiplies this by 2/h, so
+    /// its round-off must scale with the increment, not with |λ|
+    /// (eps·(2/h)·ψ_pm exceeds Newton's 1e-9 V at h = 10 ns, ψ = 0.05):
+    ///   L(θ) − L(θ0): the dq block Pᵀ·diag(L_d, L_q)·P is
+    ///     Σ·I + Δ·[[cos 2θ, sin 2θ], [sin 2θ, −cos 2θ]],  Δ = (L_d − L_q)/2,
+    ///   and cos 2θ − cos 2θ0 = −2 sin(θ + θ0) sin(θ − θ0),
+    ///       sin 2θ − sin 2θ0 = +2 cos(θ + θ0) sin(θ − θ0);
+    ///   λ_pm: cos(h·a + φ) − cos(h·a0 + φ) = −2 sin(h(a + a0)/2 + φ)·sin(h(a − a0)/2).
+    /// `L` must be inductance(p, th_e).L (passed in: the stamp has it).
+    [[nodiscard]] static Vec3 lambda_increment(const Params& p, const Mat3& L,
+                                               Real th_e, Real th0_e,
+                                               Real dth_e, const Vec3& i0,
+                                               const Vec3& di) noexcept {
+        Vec3 out{};
+        for (Size k = 0; k < 3; ++k) {
+            Real acc = 0;
+            for (Size j = 0; j < 3; ++j) acc += L[k][j] * di[j];
+            out[k] = acc;
+        }
+        // [L(θ) − L(θ0)]·i0 = C⁻¹·ΔQ·(C·i0); only the dq block moves.
+        const Real half_diff = Real{0.5} * (p.L_d - p.L_q);
+        if (half_diff != Real{0}) {
+            const Mat3 C = clarke(), Ci = clarke_inv();
+            const Real a0 = C[0][0] * i0[0] + C[0][1] * i0[1] + C[0][2] * i0[2];
+            const Real b0 = C[1][0] * i0[0] + C[1][1] * i0[1] + C[1][2] * i0[2];
+            const Real s1 = std::sin(dth_e), sum = th_e + th0_e;
+            const Real dc = Real{-2} * std::sin(sum) * s1;
+            const Real ds = Real{2} * std::cos(sum) * s1;
+            const Real qa = half_diff * (dc * a0 + ds * b0);
+            const Real qb = half_diff * (ds * a0 - dc * b0);
+            for (Size k = 0; k < 3; ++k) out[k] += Ci[k][0] * qa + Ci[k][1] * qb;
+        }
+        auto pm = [&](Real h, Real psi, Real phi) {
+            const Real sh = std::sin(h * dth_e / Real{2});
+            for (Size k = 0; k < 3; ++k) {
+                const Real mid = h * (sum_offset(th_e, th0_e, k)) / Real{2} + phi;
+                out[k] += Real{-2} * psi * std::sin(mid) * sh;
+            }
+        };
+        if (p.harmonics) {
+            for (const auto& t : *p.harmonics) pm(t.h, t.psi, t.phi);
+        } else {
+            pm(Real{1}, p.psi_pm, Real{0});
+        }
+        return out;
+    }
+    /// a + a0 for phase k (each angle carries the phase offset).
+    [[nodiscard]] static Real sum_offset(Real th_e, Real th0_e, Size k) noexcept {
+        return th_e + th0_e + Real{2} * phase_offset(k);
+    }
+
     /// Electromagnetic torque from co-energy, plus its partials.
     ///   T = pp·[ λ_pm'ᵀ i + ½ iᵀ L' i ]
     ///   ∂T/∂i_j   = pp·[ λ_pm'_j + (L' i)_j ]

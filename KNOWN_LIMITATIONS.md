@@ -689,11 +689,12 @@ consistent-initial-conditions solve.
 
 `b.add_dc_machine`, `b.add_pmsm_mna` and `b.add_induction_machine_mna`
 are solved in the matrix on `pwl` and `trbdf2`; the PMSM, BLDC and
-induction-motor observers are not, and stay first order on `pwl`. The
-PMSM and the induction machine have no DC operating point and no AC-sweep
-stamp; `dsed` refuses them by name. Not done: flux maps (saturation), the
-DC operating point with held mechanics, deprecation of the PMSM / BLDC /
-induction observers. None of the machine tests is a validation against a
+induction-motor observers are not, stay first order on `pwl`, and warn
+as deprecated. The DC operating point holds a machine's speed and angle
+at `omega0` / `theta0` (no torque balance) and refuses a speed or angle
+node another device drives; the PMSM and the induction machine have no
+AC-sweep stamp; `dsed` refuses them by name. Not done: flux maps
+(saturation). None of the machine tests is a validation against a
 measured machine: they check analytic properties of the equations and
 independent integrations of them.
 

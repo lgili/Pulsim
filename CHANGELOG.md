@@ -256,6 +256,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   flux rows exist only in the Newton refresh) and was re-taken at `dt/2`
   with a warning. The step now runs at `dt`: results change (they are
   those of the `dt` asked for), no `dt_retries`.
+* **Fixed** a PMSM at `dt` = 10 ns aborted (ψ_pm 0.05; 0.5 already took
+  25 retries at 100 ns, and stalled at t = 0 on `trbdf2`): the flux row
+  subtracted two flux totals and its round-off, eps·(2/h)·|λ|, exceeded
+  Newton's 1e-9 V tolerance. PMSM and induction-machine rows now carry
+  the flux increment in closed form: zero retries from 1 µs to 1 ns;
+  1 µs results move by at most 3e-13 relative.
+* **Added** a DC operating point for `add_pmsm_mna` and
+  `add_induction_machine_mna`: the speed and angle are held at `omega0`
+  / `theta0` (new YAML keys of the registry entry), the stator sees the
+  back-EMF of that speed, the rotor flux its steady value; the first
+  transient step continues it. The preflight no longer ties the
+  machines' neutral, speed, angle and rotor-flux nodes through 1 GΩ, so
+  machine results move by the removed leak.
+* **Added** YAML types `pmsm` and `bldc` (the `add_pmsm_mna` /
+  `add_bldc_mna` arguments).
+* **Changed** the angle and rotor-flux integrator capacitors no longer
+  scale their state when edited (`with_value("M_theta.C", ...)`).
+* **Deprecated** `add_pmsm`, `add_bldc`, `add_induction_motor` and their
+  `make_*_observer` functions (`DeprecationWarning` naming the native
+  builder and the measured first-order error).
 * **Added** `add_dc_machine(theta_node=...)`: the shaft angle through a
   unit VCCS into a 1 F capacitor (was refused).
 * **Added** two analytic reference cases, `im_locked_rotor` and

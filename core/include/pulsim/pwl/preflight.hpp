@@ -227,11 +227,33 @@ private:
             // A saturable inductor is a short at DC (v = dλ/dt = 0),
             // exactly like a linear one; the other Newton devices
             // are stamped open by the DC assembly and stay so here.
-            return pool.kind_of(branch.id) == SK::SaturableInductor;
+            // The MNA-native machines' stator rows are v − R·i − e = 0 at
+            // DC (dc_assemble, add-mna-native-machines D19): a path.
+            return pool.kind_of(branch.id) == SK::SaturableInductor ||
+                   pool.kind_of(branch.id) == SK::PmsmMna ||
+                   pool.kind_of(branch.id) == SK::InductionMachineMna;
         case topology::BranchKind::Switch:
             return true;
     }
     return true;
+}
+
+/// A machine's speed / angle nodes are held and its rotor-flux nodes
+/// carry the steady rotor law in the DC system (dc_assemble, D19): each
+/// is defined at DC, as if tied to ground.
+[[nodiscard]] inline std::vector<std::pair<Index, Index>>
+machine_dc_ties(const DevicePool& pool) {
+    std::vector<std::pair<Index, Index>> out;
+    for (const auto& m : pool.pmsm_mna_machines()) {
+        out.emplace_back(m.omega_node, kGround);
+        out.emplace_back(m.theta_node, kGround);
+    }
+    for (const auto& m : pool.induction_machines()) {
+        out.emplace_back(m.omega_node, kGround);
+        out.emplace_back(m.rotor_node[0], kGround);
+        out.emplace_back(m.rotor_node[1], kGround);
+    }
+    return out;
 }
 
 /// Group nodes into components under `edge_ok`, then return one
@@ -348,10 +370,12 @@ components_without_ground(
     // singular while the report claimed they were fixed — see
     // `CircuitBuilder::run_preflight`, which iterates to a fixed
     // point instead.
+    auto dc_ties = primary_ties;
+    for (const auto& t : detail::machine_dc_ties(pool)) dc_ties.push_back(t);
     const auto dc_floating = detail::components_without_ground(
         graph, [&pool](const topology::Branch& br) {
             return detail::conducts_at_dc(pool, br);
-        }, primary_ties);
+        }, dc_ties);
 
     // A component that is ALSO galvanically isolated is already
     // described by finding 1 at the same anchor; reporting the same

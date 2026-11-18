@@ -103,3 +103,42 @@ def test_induction_machine_misspelled_key_is_refused():
     with pytest.raises(Exception, match="T_Load"):
         _yaml("    - {type: induction_machine, name: M, " + _IM_KEYS
               + ", L_ls: 2.0e-3, L_lr: 2.0e-3, T_Load: 3}\n")
+
+
+_PM_KEYS = ("phase_nodes: [ua, ub, uc], neutral_node: nn, omega_node: w, "
+            "theta_node: th, R_s: 0.5, pole_pairs: 4, J: 1.0e-3, B: 1.0e-4")
+
+
+def test_pmsm_yaml_is_the_builder_device():
+    y = _yaml("    - {type: pmsm, name: M, " + _PM_KEYS
+              + ", L_d: 1.0e-3, L_q: 3.0e-3, psi_pm: 0.05, omega0: 2.0, "
+              "theta0: 0.1}\n")
+    b = p.CircuitBuilder()
+    b.add_pmsm_mna("M", "ua", "ub", "uc", "nn", "w", "th", R_s=0.5, L_d=1e-3,
+                   L_q=3e-3, psi_pm=0.05, pole_pairs=4, J=1e-3, B=1e-4,
+                   omega0=2.0, theta0=0.1)
+    assert _components(y) == _components(b)
+    assert y.pool.pmsm_mna_machines() == b.pool.pmsm_mna_machines()
+
+
+def test_bldc_yaml_is_the_python_composite():
+    y = _yaml("    - {type: bldc, name: M, " + _PM_KEYS
+              + ", L_s: 1.0e-3, k_e: 0.05, flat_top_deg: 110, "
+              "n_harmonics: 15}\n")
+    b = p.CircuitBuilder()
+    b.add_bldc_mna("M", "ua", "ub", "uc", "nn", "w", "th", R_s=0.5, L_s=1e-3,
+                   k_e=0.05, pole_pairs=4, J=1e-3, B=1e-4, flat_top_deg=110.0,
+                   n_harmonics=15)
+    assert _components(y) == _components(b)
+    got, want = y.pool.pmsm_mna_machines(), b.pool.pmsm_mna_machines()
+    assert len(got[0]["params"]["harmonics"]) == 8   # odd h <= 15
+    assert got == want
+
+
+@pytest.mark.parametrize("typ,extra,frag", [
+    ("pmsm", "L_d: 1.0e-3, L_q: 1.0e-3, psi_pm: 0.05, Psi_pm: 1", "Psi_pm"),
+    ("bldc", "L_s: 1.0e-3, k_e: 0.05, flat_top_deg: 180", "flat_top_deg"),
+])
+def test_pmsm_bldc_bad_keys_are_refused_by_name(typ, extra, frag):
+    with pytest.raises(Exception, match=frag):
+        _yaml(f"    - {{type: {typ}, name: M, " + _PM_KEYS + ", " + extra + "}\n")

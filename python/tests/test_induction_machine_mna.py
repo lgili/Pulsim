@@ -266,3 +266,94 @@ def test_inverter_fed_start_agrees_on_pwl_and_trbdf2():
     w2 = np.interp(ts, r2.times, r2.v("w"))
     assert w1[-1] > 0.9 * W_SYNC          # it accelerates to near sync
     assert np.max(np.abs(w1 - w2)) < 1e-3 * W_SYNC
+
+
+@pytest.mark.parametrize("dt", [1e-8, 1e-9])
+def test_small_steps_take_no_retry_at_full_flux(dt):
+    # Near synchronous speed, |lambda| ~ 0.4 Wb: (2/h)*(lambda - lambda_old)
+    # as a difference of absolute fluxes carried eps*(2/h)*|lambda| ~ 2e-8 V
+    # of round-off at 10 ns. The stator rows take the increment
+    # L*di + M*dlambda_r instead.
+    b = _machine(p.CircuitBuilder(), J=J_DOL)
+    first = p.simulate(b, t_end=0.3, dt=2e-5, engine="pwl")
+    assert first.v("w")[-1] > 0.9 * W_SYNC
+    res = p.simulate(b, t_end=0.3 + 2000 * dt, dt=dt, engine="pwl",
+                     resume_from=first.final_snapshot)
+    assert not res.dt_retries
+    assert res.times[-1] > 0.3 + 1990 * dt      # ran to the end
+
+
+def test_nameplate_estimate_is_labelled_and_observers_name_the_native_path():
+    import warnings
+    kw = p.im_parameters_from_nameplate(P_rated_W=4000.0, V_LL_V=400.0,
+                                        f_Hz=50.0)
+    assert kw["_diagnostics"]["status"] == "estimated"
+    b = p.CircuitBuilder()
+    with pytest.warns(DeprecationWarning,
+                      match=r"add_induction_motor.*add_induction_machine_mna"):
+        m = p.add_induction_motor(b, name="M", phase_nodes=("a", "b", "c"),
+                                  neutral_node="n", R_s=RS, L_s=LLS + LM,
+                                  R_r=RR, L_r=LLR + LM, L_m=LM,
+                                  pole_pairs=PP, J=J_DOL)
+    with pytest.warns(DeprecationWarning, match="0.71 %"):
+        p.make_induction_motor_observer(b, m, dt=5e-5)
+    b2 = p.CircuitBuilder()
+    with warnings.catch_warnings(record=True) as got:
+        warnings.simplefilter("always")
+        p.add_bldc(b2, name="M", phase_nodes=("a", "b", "c"),
+                   neutral_node="n", R_s=0.5, L_s=1e-3, psi_pm=0.05,
+                   pole_pairs=4, J=1e-3)
+    msgs = [str(w.message) for w in got
+            if issubclass(w.category, DeprecationWarning)]
+    assert len(msgs) == 1 and "add_bldc_mna" in msgs[0], msgs
+    with pytest.warns(DeprecationWarning, match="add_pmsm_mna"):
+        p.add_pmsm(p.CircuitBuilder(), name="M", phase_nodes=("a", "b", "c"),
+                   neutral_node="n", R_s=0.5, L_s=1e-3, psi_pm=0.05,
+                   pole_pairs=4, J=1e-3)
+
+
+def test_torque_trace_is_the_shaft_acceleration():
+    # Not a re-evaluation of the same formula: the shaft integrates
+    # J dw/dt = T_em - T_load - B w with the trapezoidal companion of its
+    # own capacitor, so J (w1 - w0)/h = (T0 + T1)/2 - T_load - B (w0 + w1)/2
+    # holds step by step for the torque the stamp injected. The recorded
+    # M.T_em trace (from the result) must satisfy it.
+    Jm, Bm, TL, dt = 0.01, 2e-3, 1.5, 2e-5
+    b = p.CircuitBuilder()
+    for k, node in enumerate(("ua", "ub", "uc")):
+        b.add_sine_voltage_source(
+            f"V{'abc'[k]}", node, "gnd", 0.0, V_RMS * math.sqrt(2), F,
+            -2 * math.pi / 3 * k)
+    b.add_induction_machine_mna("M", "ua", "ub", "uc", "nn", "w",
+                                R_s=RS, L_ls=LLS, R_r=RR, L_lr=LLR, L_m=LM,
+                                pole_pairs=PP, J=Jm, B=Bm, T_load=TL)
+    res = p.simulate(b, t_end=0.05, dt=dt, engine="pwl")
+    t = np.asarray(res.times)
+    w = np.asarray(res.v("w"))
+    T = np.asarray(res.signal("M.T_em"))
+    h = np.diff(t)
+    shaft = Jm * np.diff(w) / h + TL + Bm * (w[1:] + w[:-1]) / 2
+    avg = (T[1:] + T[:-1]) / 2
+    assert np.max(np.abs(T)) > 10.0                  # a real start
+    # Interval 0 excluded: the fixed engine starts the J capacitor's
+    # companion from i_C(0) = 0, not T_em - T_load = -1.5 N·m (its known
+    # first-order start), so that interval reads T_load/2 = 0.75 off.
+    # Measured on the rest: 3.5e-12 N·m.
+    assert abs((shaft - avg)[0] - TL / 2) < 1e-9
+    assert np.max(np.abs(shaft - avg)[1:]) < 1e-7 * np.max(np.abs(T))
+
+
+@pytest.mark.parametrize("cap", ["M_Cra", "M_Crb"])
+def test_rotor_flux_integrator_capacitance_is_not_a_parameter(cap):
+    # The rotor flux is the voltage of a node whose 1 F capacitor
+    # integrates dlambda_r/dt. An edit of that capacitor (with_value,
+    # YAML) used to rescale the rotor time constant silently; the stamp
+    # now injects C*dlambda_r/dt, so C drops out.
+    c = _machine(p.CircuitBuilder(), J=J_DOL).build()
+    ref = p.simulate(c, t_end=0.02, dt=5e-5, engine="pwl")
+    got = p.simulate(c.with_value(f"{cap}.C", 3.0), t_end=0.02, dt=5e-5,
+                     engine="pwl")
+    for sig in ("w", "M_psi_ra", "M_psi_rb"):
+        a, b = np.asarray(ref.v(sig)), np.asarray(got.v(sig))
+        # measured <= 2.3e-15 (Newton converges to round-off here)
+        assert np.max(np.abs(a - b)) < 1e-9 * (1 + np.max(np.abs(a))), sig
