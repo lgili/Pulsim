@@ -1,4 +1,4 @@
-"""Cost gate of mode_selection='lcp' on pwl (DECISIONS #30 of add-branch-form-ideal-switch).
+"""Cost gate of mode_selection='lcp' on pwl and trbdf2 (--configs trbdf2) (DECISIONS #30 of add-branch-form-ideal-switch).
 
     PYTHONPATH=<worktree>/python:<worktree>/benchmarks python3 lcp_cost_gate.py [--reps 7]
         [--configs pwl,pwl+restart,pwl+split] [--save out.npz] [--compare base.npz] [--circuits GLOB]
@@ -41,7 +41,7 @@ def cells(pattern):
             yield rel, case
 
 
-def timed(case, kw):
+def timed(case, kw, engine="pwl"):
     """(wall of simulate(), result or the error text)."""
     orig = pulsim.simulate
     box = {}
@@ -54,7 +54,7 @@ def timed(case, kw):
             box["t"] = time.perf_counter() - t0
     pulsim.simulate = sim
     try:
-        res = case.run("pwl")
+        res = case.run(engine)
     except Exception as ex:  # noqa: BLE001 - a refused / failing cell is reported, not timed
         res = f"{type(ex).__name__}: {ex}"[:120]
     finally:
@@ -79,12 +79,12 @@ def main(argv=None) -> int:
           f"{'quiet+cached/sites':>18s} same")
     for rel, case in cells(a.circuits):
         for cfg in a.configs.split(","):
-            kw = rs.CONFIGS[cfg][1]
+            eng, kw = rs.CONFIGS[cfg]
             td, tl, last = [], [], None
             for _ in range(a.reps):
-                t, _r = timed(case, kw)
+                t, _r = timed(case, kw, eng)
                 td.append(t)
-                t, last = timed(case, dict(kw, mode_selection="lcp"))
+                t, last = timed(case, dict(kw, mode_selection="lcp"), eng)
                 tl.append(t)
             name = rel.removeprefix("circuits/")
             if isinstance(last, str):

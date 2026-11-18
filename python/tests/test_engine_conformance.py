@@ -627,8 +627,9 @@ _REFUSED = {
         {"discontinuity_restart": True}, ("trbdf2", "dsed")),
     "resolution_diagnostics": (
         {"resolution_diagnostics": True}, ("trbdf2", "dsed")),
-    # add-complementarity-mode-selection: the shadow runs on pwl and the
-    # dsed event integrator (this RC has no diode, so dsed routes to "auto")
+    # add-complementarity-mode-selection: the shadow runs on pwl, trbdf2 and
+    # the dsed event integrator; this RC has no diode: nothing to select
+    # (trbdf2 refuses that by name, dsed routes to "auto", which has no hook)
     "mode_selection": ({"mode_selection": "shadow"}, ("trbdf2", "dsed")),
 }
 
@@ -782,11 +783,13 @@ def _half_wave():
 
 
 @pytest.mark.parametrize("mode", ("shadow", "lcp"))
-def test_mode_selection_refused_by_name_on_a_diode_circuit_on_trbdf2(mode):
-    # trbdf2's settle has no hook yet: refused by name (pwl and dsed run it).
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim("trbdf2", _half_wave(), mode_selection=mode)
-    assert (ei.value.engine, ei.value.feature) == ("trbdf2", "mode_selection")
+def test_mode_selection_runs_on_a_diode_circuit_on_trbdf2(mode):
+    # task 4.2 on trbdf2: its zero-time cascades are the sites (the cell
+    # flipped from refuse to support)
+    r = _sim("trbdf2", _half_wave(), mode_selection=mode)
+    key = "mode_shadow" if mode == "shadow" else "mode_selection"
+    ms = r.diagnostics[key]
+    assert sum(ms["sites"].values()) > 0 and ms["errors"] == 0
 
 
 @pytest.mark.parametrize("mode", ("shadow", "lcp"))
@@ -828,23 +831,18 @@ def test_mode_guard_diagnostics_on_pwl_and_dsed(engine):
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
 def test_lcp_agrees_with_the_default_settle_on_every_engine(engine):
-    # add-complementarity-mode-selection 6.3: one cell per engine. trbdf2
-    # skips while its settle refuses by name (hook 4.2: it calls
-    # pwl::select_site at its settle site); the cell runs once it lands.
+    # add-complementarity-mode-selection 6.3: one cell per engine (trbdf2
+    # calls pwl::select_site at its zero-time cascades).
     r0 = _sim(engine, _half_wave())
-    try:
-        r1 = _sim(engine, _half_wave(), mode_selection="lcp")
-    except p.UnsupportedError as e:
-        if (e.engine, e.feature) == ("trbdf2", "mode_selection"):
-            pytest.skip("trbdf2 settle hook (task 4.2) not landed")
-        raise
+    r1 = _sim(engine, _half_wave(), mode_selection="lcp")
     ms = r1.diagnostics["mode_selection"]
     assert ms["errors"] == 0 and ms["capped"] == 0 and ms.get("inconsistent", 0) == 0
 
     def avg(r):     # time-weighted, exactly clipped to [0, 2 ms]
         t, v = np.asarray(r.times), np.asarray(r.v("o"))
         return float(np.trapezoid(v, t)) / (t[-1] - t[0])
-    assert avg(r1) == pytest.approx(avg(r0), rel=1e-6)    # pwl, dsed: 0.0 measured
+    # pwl, dsed: 0.0 measured; trbdf2 3.1e-9 (its sites decide event instants)
+    assert avg(r1) == pytest.approx(avg(r0), rel=1e-6)
 
 
 @pytest.mark.parametrize("engine", ("dsed", "exact"))

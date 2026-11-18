@@ -2211,12 +2211,12 @@ def simulate(
         problem (LCP) — counted in ``result.diagnostics['mode_guard']``.
         On ``engine='pwl'`` the same guard runs after every settle that
         ends without a consistent mode (a mask cycle or an exhausted
-        budget). ``'lcp'`` (``pwl`` / ``dsed``): the LCP decides every
-        event, counters in ``result.diagnostics['mode_selection']``.
-        ``'shadow'`` (``pwl`` / ``dsed``): the default run, plus the LCP
-        solved beside it; disagreements in
-        ``result.diagnostics['mode_shadow']``. ``'shadow'`` / ``'lcp'`` on
-        ``trbdf2`` raise :class:`UnsupportedError`.
+        budget). ``'lcp'``: the LCP decides every event (on ``trbdf2``
+        every zero-time diode cascade whose settled mode is not a clear,
+        consistent answer),
+        counters in ``result.diagnostics['mode_selection']``.
+        ``'shadow'``: the default run, plus the LCP solved beside it;
+        disagreements in ``result.diagnostics['mode_shadow']``.
     allow_implicit_segments
         ``engine='exact'`` (alias ``'dsed'``) only. A segment whose mode the
         exact kernel cannot step (a user ``b_extra_fn``: ``feature='source'``;
@@ -2810,15 +2810,6 @@ def simulate(
             f"{allow_implicit_segments!r}): the keyword governs the exact "
             f"engine's numeric segments; this run lands on engine={engine!r}, "
             "which has no exact segments. Use engine='exact', or drop it.")
-    if mode_selection in ("shadow", "lcp") and engine == "trbdf2":
-        raise _unsupported(
-            engine, "mode_selection",
-            f"simulate(engine={_engine_asked!r}, mode_selection="
-            f"{mode_selection!r}): the complementarity selection runs on "
-            "engine='pwl' and engine='dsed'; this run lands on "
-            "engine='trbdf2', whose settle has no hook yet. Use "
-            "engine='pwl' or 'dsed', or drop mode_selection.")
-
     if engine == "trbdf2":
         # The capability table by name (the branch form runs here).
         from . import _pulsim as _k  # type: ignore[import-not-found]
@@ -2911,6 +2902,7 @@ def simulate(
                 enable_newton_lm=bool(enable_newton_lm),
                 newton_roundoff_budget=int(newton_roundoff_budget or 0),
                 on_impulse_error=on_impulse == "error",
+                mode_selection={"shadow": 1, "lcp": 2}.get(mode_selection, 0),
             )
         except SimulationAborted as _aborted:
             try:
@@ -2946,6 +2938,8 @@ def simulate(
         res.control_tick_counts = list(_stats["control_tick_counts"])
         res.control_tick_jitter_max = 0.0
         res.engine_used = "trbdf2"
+        if mode_selection in ("shadow", "lcp"):
+            res.diagnostics = dict(res.mode_diagnostics)
         res.engine_route_reason = None
         res.step_loop_python_callbacks = _step_loop_python_callbacks(
             switch_fn=switch_fn, b_extra_fn=b_extra_fn,

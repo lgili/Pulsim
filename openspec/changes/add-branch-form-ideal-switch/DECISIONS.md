@@ -976,3 +976,59 @@ Each entry: question → option taken → evidence → how to reverse.
     wall ratio ideal / default 1.05–1.11 on pwl, 1.05 on trbdf2;
     ideal+lcp 1.40–1.66 (loaded machine, one run per cell).
     Migration audit for 9.1–9.3: `MIGRATION_AUDIT.md` (no default flipped).
+
+## TR-BDF2 track 9 (feat/core-p2-trbdf2)
+
+36. **Mode selection on trbdf2 (complementarity 4.2 / 6.3 / 4b.3).**
+    Sites: trbdf2 decides diode modes only at its five zero-time
+    cascades (initial settle, gate edge at a step boundary, diode event,
+    landing, gate-edge landing). After each, `mode_site` calls
+    `pwl::select_site` on the cascade's LAST probe: mask = the cascade's
+    gates with the start bits (bits0, the mode before the event), dt =
+    `last_probe_dt`, b_extra = that probe's `b_stage` (mode-independent);
+    h_site = the controller's h (the initial settle: h_init or h_max/100;
+    the next site is a step away; the probe's femtoseconds would put every
+    ON current inside the tie band). Every site counts under
+    `sites['restart']`, disagreements carry `site = 'event'`.
+    'shadow': posed at every site, nothing it computes is used; the
+    masks are built from the site's own mask, no `switch_fn` call.
+    'lcp': a settled cascade whose crossing signals on its own probe are
+    clear of zero by 1e-8 of the circuit scale (pwl's quiet test, islands
+    corrected) is a nondegenerate solution of the site's LCP and kept;
+    else (round cap, a tie, a breach) the LCP's mode is applied and
+    probed (x_sig from that probe); a mode its own probe violates is
+    counted `inconsistent` and not reported settled (a gate-edge restart
+    re-probes instead of committing it). A candidate singular at the probe
+    step leaves the settle's answer, counted in `errors`. The settle's
+    rounds still run first: 'lcp' on trbdf2 is "settle, then LCP where it
+    can differ" (`settle_rounds_total` is not counted on trbdf2, 0). Not
+    sites: a landing whose decision held every bit, and the diode-event
+    path after the chatter guard is exhausted (no cascade runs there). No answer cache (pwl's active-set
+    cache): trbdf2 sites are commutations only; cost measured without it.
+    Refused by name as on pwl: no PWL diode, a Newton device,
+    max_event_iterations = 0, a gated diode. The default guard stays off
+    on trbdf2 (it would move default numbers). `update_from_state_floored`
+    is not used: the cascades' decisions are unchanged (bits by
+    `decide_probe`'s noise bound), and the LCP decides the rest.
+    Results. 'shadow' bit-identical: golden (all cases), 16 hash runs, 68
+    reference runs (34 diode circuits x conductance/branch), besides 4 runs
+    (2 circuits x 2 forms) refused by name for a Newton device. Bridge truth (311.343881 V, 30-40 ms
+    clipped): rtol 2e-5 default -2.4683e-3 / 'lcp' -2.4736e-3 V
+    (conductance), -2.4713e-3 / -2.4715e-3 (branch); rtol 1e-7
+    -1.9111e-4 / -1.9110e-4, -1.9106e-4 / -1.9104e-4: integration error
+    either way; default and 'lcp' within 5.3e-6 V (rtol 2e-5) and 2e-8 V
+    (rtol 1e-7). Events: the default commits D3+ at
+    10.0458 ms (truth 10.0058: one 40 us ceiling step late); 'lcp'
+    (conductance) at 10.0063 / 10.0059 ms (the shadow records the
+    default's mode there as inconsistent, violation 3.6e-3 V). Branch
+    form under 'lcp': exactly the truth's 11 commutations in order
+    (default 13-14 with a D3/D4 chatter at 19.994 ms); conductance 'lcp'
+    keeps that chatter (a leakage-scale tie). Strict cells: all 34 diode
+    circuits agree in outcome under 'lcp' (as by default); 11 change
+    numerically (largest: boost_pfc_open_loop 1.72e-7 -> 1.84e-7, all
+    within 7 %). Left (review): `decide_probe`'s failed retake restores
+    `last_probe_dt` but not `b_stage` (reachable only with a Newton
+    device, which 'lcp' refuses). Cost
+    (median of 7 interleaved in-process runs, load 12-15): median ratio
+    1.075, max 1.80 (diode_rectifier, 388 sites), 7 of 34 above 1.2.
+    → Reverse: drop `mode_site` calls and the TrBdf2Options field.
