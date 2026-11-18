@@ -54,6 +54,8 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_scheduler_auto.cpp  # Gate 4.D — auto-dispatch RK45↔BDF2 per mode
         tests/dsed/test_period_integrals.cpp  # period map, M, closed-form integrals
         tests/dsed/test_periodic_orbit.cpp  # the Newton shooting loop in the kernel
+        tests/dsed/test_design_batch.cpp  # the kernel batch evaluator of pulsim.design
+        tests/dsed/test_period_thermal.cpp  # the junction fixed point on an orbit
     )
     target_link_libraries(pulsim_core_dsed_tests
         PRIVATE
@@ -70,6 +72,7 @@ if(PULSIM_BUILD_TESTS)
     # without rebuilding the tree.
     add_executable(pulsim_core_mode_tests
         tests/modes/test_mode_selector.cpp
+        tests/modes/test_pwl_mode_ports.cpp
     )
     target_link_libraries(pulsim_core_mode_tests
         PRIVATE
@@ -466,6 +469,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_yaml_tests
         tests/yaml/test_main.cpp
         tests/yaml/test_yaml_loader.cpp
+        tests/yaml/test_circuit_yaml.cpp
     )
     target_link_libraries(pulsim_core_yaml_tests
         PRIVATE

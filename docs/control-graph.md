@@ -119,9 +119,11 @@ ch.tick_counts                                             # [200, 400]
   ticks at most once per step). `controller_period=` with a rated
   chain is a `ValueError`: the groups set the ticks.
 - A reused observer (a second `simulate()`) restarts its tick grid at
-  the new `t_start`; block state carries over unless you call
-  `chain.reset()`. With `resume_from=` the grid restarts at the resume
-  instant (graph state in the snapshot is task 6).
+  the new `t_start`; the state of a chain *you* pass carries over unless
+  you call `chain.reset()`. A circuit's C blocks do not carry over: every
+  run starts each block from its declared initial state (a `Circuit` is
+  immutable, so `simulate(c)` twice is bit-identical); only
+  `resume_from=` continues them (graph state in the snapshot is task 6).
 - `dt` passed to a block is its group's period.
 - Groups due at the same instant run in one pass of the schedule, so a
   fast group reading a slow group's signal sees that instant's value.
@@ -203,6 +205,16 @@ limitations); `discontinuity_restart=True` does not restart on them
 (1.06e-4 / 1.05e-5). Use a state-time chain with `drive_source` for an
 exact hold.
 
+**Gate edges.** The gate of `bind_pi_to_switch` (and any
+`make_pwm_gate`) declares its edges (`gate.next_edge_after(t)`: period
+starts and the OFF threshold under the duties held now). `trbdf2` lands
+on them; `pwl` splits at them with `discontinuity_restart=True,
+enable_substep_state_correction=True`. Without the split `pwl` samples
+the gate on its grid, so the duty moves in steps of `dt/T`. Closed-loop
+buck against an independent reference (max |v(kT) - ref| / span,
+`dt = T/20`): `pwl` 3.6e-2, with the split 1.4e-3, and 1.8e-5 for a
+state-time chain with the same gate; `trbdf2` default 4.2e-5.
+
 ### Migration: helpers and C blocks (2.1)
 
 | Before | Now |
@@ -226,7 +238,9 @@ counters (`<prefix>_ticks`, `<prefix>_next_tick`) and, for a single-rate
 graph, the `pulsim_cblock_step` shim, so the file loads back through
 `add_c_block(lib=...)`. `in[k]` is `CExport.inputs[k]` (a node, or a
 channel no block writes); the shim writes `outputs` to `out[]`. No
-`malloc`: the shim's state is static (one library, one instance).
+`malloc`: the shim's state is static, so a circuit takes one block of a
+library (a second `add_c_block` of it on the same builder is refused);
+its `init` runs again at the start of every run (G22).
 
 Compiled with `-ffp-contract=off` (MSVC's default `/fp:precise` does not
 contract) it is bit-identical to the kernel graph: every block kind over
@@ -238,8 +252,9 @@ per rate: when several rates are due at one instant, call them in rate
 order (`step_rate0` first); that reproduces the kernel when no block
 reads, at a shared instant, a signal a later-called rate writes. The shim
 writes NaN to its outputs when it is wired (`n_in`, `n_out`) or clocked
-(`dt`) unlike the export; its state is static, so two `add_c_block`s of
-the same library share one instance.
+(`dt`) unlike the export. For a second instance, compile the file again
+under another name, or export it with another `prefix` and drive
+`<prefix>_init` / `<prefix>_step_rate0` on your own state.
 
 ```python
 ex = pulsim.export_c(chain, builder, outputs=["y"])
@@ -251,7 +266,11 @@ pulsim.add_c_block(b, inputs=[("v", "out")], outputs=[("v", "sw", "gnd")],
 C blocks compile into a per-user cache, mode 0700
 (`~/Library/Caches/pulsim/cblock`, `~/.cache/pulsim/cblock` or
 `$XDG_CACHE_HOME/pulsim/cblock`, `%LOCALAPPDATA%\pulsim\cblock`); a
-cached library that another user owns or can write is refused.
+cached library that another user owns or can write is refused, and so is
+a `pulsim` or `cblock` directory that is not both yours and private. Windows
+has no POSIX owner or mode: there the cache must sit inside
+`%USERPROFILE%` (whose ACL is the user's), and a `LOCALAPPDATA` outside
+it is refused.
 
 ## Other engines and resume
 
@@ -261,10 +280,12 @@ to `pwl`): the engine lands its steps on the ticks, so a block samples
 0.643545722992`, met within 1e-7 at rtol 1e-9). The exact strategy
 (`exact` / `dsed`) refuses them by name: it has no `b_extra` input.
 
-A graph keeps its tick counters and block states across `simulate()`
-calls on the same builder: a run that goes on from the previous `t_end`
-(`resume_from=`) continues the tick grid; a run that starts earlier
-restarts it. The C-block graph is compiled once per circuit layout.
+A chain you pass keeps its tick counters and block states across
+`simulate()` calls on the same builder: a run that goes on from the
+previous `t_end` (`resume_from=`) continues the tick grid; a run that
+starts earlier restarts it. A circuit's C-block graph restarts at every
+run without `resume_from` (G22); with it, it continues the state the
+*last* run left (resume from that run's snapshot). The C-block graph is compiled once per circuit layout.
 `control_tick_counts` and `CBlockHandle.n_fires` count the last run's
 ticks. Resume between ticks: a tick due exactly at the previous `t_end`
 is dropped there (the horizon) and runs at the resumed start on the
@@ -274,5 +295,5 @@ snapshot state `x(t_end)`, where the uninterrupted `pwl` run used
 ## Not yet
 
 Continuous-rate blocks solved with the circuit, tick events on the
-unified event queue, modulators and comparator state events, and graph
+unified event queue, comparator state events, and graph
 state in the solver snapshot (tasks 6–7 of `add-compiled-control-graph`).

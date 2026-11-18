@@ -627,8 +627,8 @@ _REFUSED = {
         {"discontinuity_restart": True}, ("trbdf2", "dsed")),
     "resolution_diagnostics": (
         {"resolution_diagnostics": True}, ("trbdf2", "dsed")),
-    # add-complementarity-mode-selection: the shadow is on the dsed event
-    # integrator only (this RC has no diode, so dsed routes to "auto")
+    # add-complementarity-mode-selection: the shadow runs on pwl and the
+    # dsed event integrator (this RC has no diode, so dsed routes to "auto")
     "mode_selection": ({"mode_selection": "shadow"}, ("trbdf2", "dsed")),
 }
 
@@ -782,31 +782,43 @@ def _half_wave():
 
 
 @pytest.mark.parametrize("mode", ("shadow", "lcp"))
-@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto"))
-def test_mode_selection_refused_by_name_on_a_diode_circuit_off_dsed(engine, mode):
-    # Integration batch 6a: pwl had no cell. With a diode present the
-    # refusal is the missing hook, not "nothing to select".
+def test_mode_selection_refused_by_name_on_a_diode_circuit_on_trbdf2(mode):
+    # trbdf2's settle has no hook yet: refused by name (pwl and dsed run it).
     with pytest.raises(p.UnsupportedError) as ei:
-        _sim(engine, _half_wave(), mode_selection=mode)
-    assert ei.value.feature == "mode_selection"
-    if engine != "auto":                       # auto names the engine it lands on
-        assert ei.value.engine == engine
+        _sim("trbdf2", _half_wave(), mode_selection=mode)
+    assert (ei.value.engine, ei.value.feature) == ("trbdf2", "mode_selection")
+
+
+@pytest.mark.parametrize("mode", ("shadow", "lcp"))
+def test_mode_selection_refused_on_a_diode_free_pwl_run(mode):
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim("pwl", mode_selection=mode)
+    assert (ei.value.engine, ei.value.feature) == ("pwl", "mode_selection")
+
+
+@pytest.mark.parametrize("mode", ("shadow", "lcp"))
+def test_mode_selection_runs_on_pwl(mode):
+    # add-complementarity-mode-selection 4.2 / 6.3: the cell flipped from
+    # refuse to support on the fixed engine.
+    r = _sim("pwl", _half_wave(), mode_selection=mode)
+    key = "mode_shadow" if mode == "shadow" else "mode_selection"
+    assert r.diagnostics[key]["lcp_count"] > 0
 
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
-def test_mode_guard_diagnostics_only_on_dsed(engine):
-    # The default-mode guard (add-complementarity-mode-selection task 4)
-    # judges every settled diode mode on dsed and reports there; the
-    # other engines have no hook yet and carry no such key.
+def test_mode_guard_diagnostics_on_pwl_and_dsed(engine):
+    # The default-mode guard (add-complementarity-mode-selection task 4,
+    # 4b.3 on pwl) judges every settled diode mode and reports there;
+    # trbdf2 has no hook yet and carries no such key.
     r = _sim(engine, _half_wave())
     g = (getattr(r, "diagnostics", None) or {}).get("mode_guard")
-    if engine != "dsed":
+    if engine == "trbdf2":
         assert g is None
         return
     assert g["checks"] > 0 and g["repairs"] == 0 and g["repair_times"] == []
     assert g["settle_caps"] == 0 and g["lcp"]["capped"] == 0     # DECISIONS #24, #25
     rec = {"class": "passive_reciprocal", "device": "", "kind": ""}
-    assert g["passivity"] == rec        # task 5.1 class, dsed only
+    assert g["passivity"] == rec        # task 5.1 class
     r = _sim(engine, _half_wave(), mode_selection="lcp")
     assert r.diagnostics["mode_selection"]["lcp_count"] > 0
     assert r.diagnostics["mode_selection"]["capped"] == 0
@@ -1109,9 +1121,10 @@ def test_branch_form_cell(kind, engine):
 
 
 # Dependent modes (a switch opening an inductor cut-set, task 5.5): pwl
-# re-initialises under the restart rule; every other cell is refused by
-# name (trbdf2 statically, dsed/bdf1 because the branch form is refused).
-_DEP_REFUSAL = {"pwl": "dependent_states", "trbdf2": "dependent_states",
+# re-initialises under the restart rule, trbdf2 always (three SDIRK
+# steps); pwl without the rule refuses by name, dsed/bdf1 because the
+# branch form is refused.
+_DEP_REFUSAL = {"pwl": "dependent_states",
                 "dsed": "branch_form", "bdf1": "branch_form"}
 
 
@@ -1144,7 +1157,8 @@ def test_dependent_states_cell(engine, restart):
         assert (e.engine, e.feature, e.device) == (named, _DEP_REFUSAL[named], "S")
         assert not (engine == "pwl" and restart), f"pwl+restart refused: {e}"
         return
-    assert engine == "pwl" and restart, f"{engine} ran a dependent mode silently"
+    assert (engine == "pwl" and restart) or engine == "trbdf2", (
+        f"{engine} ran a dependent mode silently")
     assert len(r.reinit_records) == 1
 
 

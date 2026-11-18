@@ -300,11 +300,28 @@ void init_module(py::module_& m) {
         .def(py::init<Size>(), py::arg("num_switches") = 0)
         .def("set",
               [](topology::SwitchStateMask& self,
-                 Size i, bool v) { self.set(i, v); },
+                 Size i, bool v) {
+                  // An index past the width wrote a bit nothing reads.
+                  if (i >= self.size()) {
+                      throw py::index_error(
+                          "SwitchStateMask.set: bit " + std::to_string(i) +
+                          " is out of range for a mask of width " +
+                          std::to_string(self.size()));
+                  }
+                  self.set(i, v);
+              },
               py::arg("i"), py::arg("v"),
               "Set switch `i` to state `v` (True=ON).")
         .def("get",
-              &topology::SwitchStateMask::get,
+              [](const topology::SwitchStateMask& self, Size i) {
+                  if (i >= self.size()) {
+                      throw py::index_error(
+                          "SwitchStateMask.get: bit " + std::to_string(i) +
+                          " is out of range for a mask of width " +
+                          std::to_string(self.size()));
+                  }
+                  return self.get(i);
+              },
               py::arg("i"),
               "Return True if switch `i` is ON.")
         .def_property_readonly("size",
@@ -2470,6 +2487,14 @@ void init_module(py::module_& m) {
                         "add-branch-form-ideal-switch: refuse the run at the "
                         "first impulsive re-initialisation (simulate("
                         "on_impulse='error')) instead of recording it.")
+        .def_readwrite("mode_selection",
+                        &SimulationOptions::mode_selection,
+                        "Fixed engine diode decision: 0 the settle (guarded "
+                        "by mode_guard), 1 'shadow', 2 'lcp' "
+                        "(add-complementarity-mode-selection).")
+        .def_readwrite("mode_guard", &SimulationOptions::mode_guard,
+                        "Fixed engine: re-decide with the LCP a settle that "
+                        "ends in a mode violating a diode's law.")
         .def_readwrite("discontinuity_restart",
                         &SimulationOptions::discontinuity_restart,
                         "Fixed engine: take the step after a discontinuity "
@@ -2749,6 +2774,83 @@ void init_module(py::module_& m) {
             },
             "Resolution diagnostics of a pwl run (None when off, and "
             "for trbdf2/dsed). See pulsim.ResolutionWarning.")
+        .def_property_readonly("mode_diagnostics",
+            [](const SimulationResult& r) {
+                // add-complementarity-mode-selection on pwl: the dsed keys.
+                auto rep = [](const solver::ModeReport& m) {
+                    py::dict d;
+                    d["events"] = m.lcp_events;
+                    d["lcp_count"] = m.lcp_events;
+                    d["sites"] = py::dict(
+                        py::arg("step") = m.sites_step,
+                        py::arg("restart") = m.sites_restart,
+                        py::arg("substep") = m.sites_substep,
+                        py::arg("static") = m.sites_static);
+                    d["lcps"] = m.lcps;
+                    d["lcp_pivots_total"] = m.pivots_total;
+                    d["max_pivots_per_event"] = m.max_pivots_per_event;
+                    d["ties"] = m.ties;
+                    d["widenings"] = m.widenings;
+                    d["capped"] = m.capped;
+                    d["leak_pins"] = m.leak_pins;
+                    d["pin_judgements"] = m.pin_judgements;
+                    d["unfixed"] = m.unfixed;
+                    d["enumerations"] = m.enumerations;
+                    d["nonunique_modes"] = m.nonunique_modes;
+                    d["hysteresis_released"] = m.released;
+                    d["settle_rounds_total"] = m.settle_rounds_total;
+                    d["mask_cycles"] = m.mask_cycles;
+                    d["inconsistent"] = m.inconsistent;
+                    d["port_solves"] = m.port_solves;
+                    d["port_model_problems"] = m.lcps;
+                    d["errors"] = m.errors;
+                    d["last_error"] = m.last_error;
+                    d["passivity"] = py::dict(py::arg("class") = m.passivity,
+                                              py::arg("device") = m.passivity_device,
+                                              py::arg("kind") = m.passivity_kind);
+                    py::list dl;
+                    for (const auto& x : m.disagreements) {
+                        py::dict e;
+                        e["t"] = x.t;
+                        e["site"] = x.site;
+                        e["settle_mode"] = x.settle_mode;
+                        e["lcp_mode"] = x.lcp_mode;
+                        e["previous_mode"] = x.previous_mode;
+                        e["settle_rounds"] = x.settle_rounds;
+                        e["pivots"] = x.pivots;
+                        e["status"] = x.status;
+                        e["settle_consistent"] = x.settle_consistent;
+                        e["lcp_consistent"] = x.lcp_consistent;
+                        e["settle_violation"] = x.settle_violation;
+                        e["lcp_violation"] = x.lcp_violation;
+                        dl.append(e);
+                    }
+                    d["disagreements"] = dl;
+                    return d;
+                };
+                py::dict out;
+                if (r.mode_report.mode == 1) out["mode_shadow"] = rep(r.mode_report);
+                if (r.mode_report.mode == 2) out["mode_selection"] = rep(r.mode_report);
+                if (r.mode_guard.enabled) {
+                    const auto& g = r.mode_guard;
+                    py::dict d = rep(g.lcp);
+                    d["checks"] = g.checks;
+                    d["repairs"] = g.repairs;
+                    d["confirmed"] = g.confirmed;
+                    d["failed"] = g.failed;
+                    d["settle_caps"] = g.settle_caps;
+                    d["lcp"] = rep(g.lcp);   // dsed's nesting; the flat keys stay
+                    d["repair_times"] = g.repair_times;
+                    d["repair_diodes"] = g.repair_diodes;
+                    d["repair_violations"] = g.repair_violations;
+                    d["passivity"] = rep(r.mode_report)["passivity"];
+                    out["mode_guard"] = d;
+                }
+                return out;
+            },
+            "add-complementarity-mode-selection on pwl: 'mode_shadow' / "
+            "'mode_selection' counters and the default guard's "
+            "'mode_guard' (simulate() copies them to res.diagnostics).")
         .def_property_readonly("counters",
             [](const SimulationResult& r) {
                 py::dict d;
@@ -3176,7 +3278,14 @@ void init_module(py::module_& m) {
               "False when the schedule cannot name its edges (a "
               "make_combined_switch_fn with a plain Python callable "
               "in it); the variable-step engines then search for "
-              "them by sampling.");
+              "them by sampling.")
+        .def_property_readonly("follows_controller",
+              [](const sources::SwitchSchedule& s) {
+                  return s.follows_controller;
+              },
+              "True when a part is a control graph's PWM gate (a "
+              "closed loop): its edges are those of the duty held "
+              "now, so shooting and sensitivities refuse it.");
 
     m.def("make_pwm_switch_fn",
         &sources::make_pwm_switch_fn,
@@ -3272,7 +3381,11 @@ void init_module(py::module_& m) {
                     cpp_fns.emplace_back(
                         fn.cast<sources::SwitchSchedule>());
                 } else if (py::isinstance<pulsim::blockchain::ChainPwmGate>(fn)) {
-                    cpp_fns.emplace_back(fn.cast<pulsim::blockchain::ChainPwmGate>());
+                    const auto g = fn.cast<pulsim::blockchain::ChainPwmGate>();
+                    sources::SwitchSchedule s{
+                        g, [g](Real t) { return g.next_edge_after(t); }};
+                    s.follows_controller = true;
+                    cpp_fns.emplace_back(std::move(s));
                 } else {
                     cpp_fns.emplace_back(fn.cast<SwitchScheduleFn>());
                 }
@@ -3281,6 +3394,10 @@ void init_module(py::module_& m) {
                 num_switches, std::move(cpp_fns));
         },
         py::arg("num_switches"), py::arg("fns"),
+        // a ChainPwmGate is copied by value but reads its chain through a
+        // pointer: the parts must outlive the combination (a temporary
+        // loop's gate segfaulted on the first call)
+        py::keep_alive<0, 2>(),
         "Compose multiple switch_fn callbacks into a single "
         "SwitchSchedule whose mask is the bitwise OR of all "
         "sub-masks. Useful for combining e.g. a primary-"
@@ -4241,7 +4358,10 @@ void init_module(py::module_& m) {
         "A PWM switch_fn whose duty is a control-graph signal; every "
         "engine calls it in C++.")
         .def("__call__", [](const ChainPwmGate& self, Real t) { return self(t); },
-            py::arg("t"));
+            py::arg("t"))
+        .def("next_edge_after", &ChainPwmGate::next_edge_after, py::arg("t"),
+            "First gate edge strictly after t under the duties held now "
+            "(period starts and OFF thresholds); stale after a tick.");
 
     py::class_<ChainBExtra>(m, "CxxChainBExtra",
         "A control graph's driven-source b_extra_fn(t), with the instants "
@@ -5145,7 +5265,7 @@ void init_module(py::module_& m) {
            py::object resume_from,
            std::vector<Real> observer_periods,
            std::vector<py::object> observers,
-           Size newton_roundoff_budget) {
+           Size newton_roundoff_budget, bool on_impulse_error) {
             solver::BExtraFn b_extra_fn;
             std::function<Real(Real)> unused_next_jump;  // trbdf2 lands its ticks
             resolve_b_extra(b_extra_obj, b_extra_fn, unused_next_jump);
@@ -5180,6 +5300,7 @@ void init_module(py::module_& m) {
             if (newton_roundoff_budget > 0) {
                 o.newton_roundoff_budget = newton_roundoff_budget;
             }
+            o.on_impulse_error = on_impulse_error;
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "trbdf2");
             std::optional<Vector> x0;
@@ -5190,8 +5311,8 @@ void init_module(py::module_& m) {
             // function in pure C++ AND hands the stepper its analytic
             // next_edge_after — edge landing then costs zero Python
             // round-trips and no bisection.
-            auto adapted =
-                pulsim_bindings_common::adapt_switch_fn(switch_fn_obj);
+            auto adapted = pulsim_bindings_common::adapt_switch_fn(
+                switch_fn_obj, static_cast<Size>(graph.num_switches()));
             const solver::SwitchScheduleFn switch_fn = std::move(adapted.fn);
             const std::function<Real(Real)> next_edge_fn =
                 std::move(adapted.next_edge);
@@ -5266,6 +5387,7 @@ void init_module(py::module_& m) {
             d["h_post_event_min"] = st.h_post_event_min;
             d["n_probe_newton_retries"] = st.n_probe_newton_retries;
             d["n_sdirk_steps"] = st.n_sdirk_steps;
+            d["n_reinit_steps"] = st.n_reinit_steps;
             d["n_filtered_estimates"] = st.n_filtered_estimates;
             d["n_roundoff_floor_accepts"] = st.n_roundoff_floor_accepts;
             d["n_noise_held_decisions"] = st.n_noise_held_decisions;
@@ -5293,6 +5415,7 @@ void init_module(py::module_& m) {
         py::arg("observer_periods") = std::vector<Real>{},
         py::arg("observers") = std::vector<py::object>{},
         py::arg("newton_roundoff_budget") = Size{0},
+        py::arg("on_impulse_error") = false,
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "

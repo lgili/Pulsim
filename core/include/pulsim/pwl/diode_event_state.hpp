@@ -129,8 +129,7 @@ public:
         bool changed = false;
         for (Size i = 0; i < diodes_.size(); ++i) {
             auto& d = diodes_[i];
-            const Real v = stamping::read_node_voltage(x, d.from)
-                           - stamping::read_node_voltage(x, d.to);
+            const Real v = d.law_voltage(x, d.is_on);
             const bool next = models::SwitchedDiode::decide(d.is_on, v, d.params());
             if (next != d.is_on
                 && std::abs(models::SwitchedDiode::crossing_signal(

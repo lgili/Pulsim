@@ -269,10 +269,10 @@ P_rr = 0.988 W, 500 turn-offs (10 uJ * 100 kHz = 1 W at V_R = 24 V)
 
 ### 3.5 YAML netlist
 
-`p.load_yaml_*` return a `LoadedCircuit` (`.builder`, `.options`,
-`.switch_names`). `simulation:` must be top-level (nested: refused);
-`p.simulate(lc)` takes t_end/dt from it. The gate drive is not in the
-YAML: pass a `switch_fn`.
+`p.load_yaml_*` return a `LoadedCircuit` (`.builder`, `.options`).
+`simulation:` is top-level; `p.simulate(lc)` takes t_end/dt from it.
+No gate drive in YAML: pass a `switch_fn`.
+`c.to_yaml()` / `p.Circuit.from_yaml(t)`: exact round trip (pickle).
 
 ```python
 lc = p.load_yaml_string("""
@@ -296,8 +296,7 @@ v_out(end) = 9.933 V
 ### 3.6 Parameter sweep
 
 `p.sweep` calls a builder factory per point (Cartesian product of
-`params`), forwards `**simulate_kwargs` to every run, and calls
-`kpi_fn(res, params)`.
+`params`), forwards `**simulate_kwargs`, calls `kpi_fn(res, params)`.
 
 ```python
 def make_buck(R_load):

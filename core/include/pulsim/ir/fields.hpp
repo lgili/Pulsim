@@ -75,6 +75,7 @@ struct Parameter {
     std::string unit;
     std::optional<Real> lo;
     std::optional<Real> hi;
+    std::string expr{};   // group 7: defined by this expression (empty: a literal)
 };
 
 struct ParamId { std::uint32_t v; };
@@ -98,6 +99,7 @@ struct FieldSpec {
     Bound bound;
     Real (*get)(const ParamsVariant&);
     void (*set)(ParamsVariant&, Real);
+    bool derived = false;    // computed from a stored member (R = 1/G): not serialised
 
     [[nodiscard]] constexpr bool named(std::string_view n) const noexcept {
         return n == name || (!alias.empty() && n == alias);
@@ -137,7 +139,8 @@ template <class P, auto M>
         [](const ParamsVariant& e) -> Real {
             return Real{1} / (std::get<P>(e).*M);
         },
-        [](ParamsVariant& e, Real v) { std::get<P>(e).*M = Real{1} / v; }};
+        [](ParamsVariant& e, Real v) { std::get<P>(e).*M = Real{1} / v; },
+        true};
 }
 
 namespace m = ::pulsim::models;
