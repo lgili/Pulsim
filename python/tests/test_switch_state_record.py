@@ -243,7 +243,9 @@ def test_snapshot_without_stamped_mask_flags_row_zero():
     r0 = _run(b, 12 * T, "pwl", dt=T / 200, switch_fn=pwm)
     snap = r0.final_snapshot
     st = snap.__getstate__()
-    assert len(st) == 12   # 11 + restart_steps_left (add-discontinuity-restart-rule)
+    # 11 + restart_steps_left (add-discontinuity-restart-rule) + the
+    # controllers-state marker (G26)
+    assert len(st) == 13
     again = pickle.loads(pickle.dumps(snap))
     assert list(again.stamped_mask) == list(snap.stamped_mask)
     pre = type(snap).__new__(type(snap))   # an 11-field pickle still loads

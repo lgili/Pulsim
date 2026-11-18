@@ -337,6 +337,11 @@ inline SimulationResult run_transient(
             "that contains an event with the restart rule's SDIRK "
             "window); set both, or neither");
     }
+    if (!(opts.split_snap >= Real{1e-12} && opts.split_snap <= Real{0.25})) {
+        throw std::invalid_argument(
+            "run_transient: split_snap must be in [1e-12, 0.25] (a "
+            "fraction of dt)");
+    }
     if (!switch_fn_user) {
         throw std::invalid_argument(
             "run_transient: switch_fn callback is required");
@@ -1367,7 +1372,7 @@ inline SimulationResult run_transient(
     // add-fixed-step-event-splitting (validated above to imply the rule).
     const bool split = opts.enable_substep_state_correction;
     // Events this close to a step boundary are taken at it (design D4).
-    const Real snap = opts.dt * Real{0.01};
+    const Real snap = opts.dt * opts.split_snap;
     // A source jump snapped to the step end (t - snap <= tau < t): the
     // solve AT `src_end_at` reads the built-in sources at `src_end_read`
     // (= tau, so value_at(tau - left_by) is the pre-jump level). NaN

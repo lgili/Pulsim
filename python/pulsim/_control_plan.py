@@ -19,7 +19,7 @@ from __future__ import annotations
 import math
 import warnings
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 TickFn = Callable[[float, object], None]
 
@@ -48,6 +48,11 @@ class ControlPlan:
     tick_graph: List[Optional[TickFn]] = field(default_factory=list)
     # The builder's C-block graph (add_c_block), last in every order.
     c_graph: Optional[TickFn] = None
+    # The run's control graphs, put in their starting state (G26).
+    graphs: List[TickFn] = field(default_factory=list)
+    # The static-state C libraries this run holds (G27; released with
+    # the plan).
+    static_hold: Any = None
     _sched: Optional["FixedStepTicks"] = None
     _ticks0: dict = field(default_factory=dict)
 
@@ -85,7 +90,7 @@ class ControlPlan:
         self._ticks0 = {}
         for obs in graphs + list(self.every_step):
             cxx = getattr(obs, "_cxx_chain", None)
-            if cxx is not None and cxx.label_time:
+            if cxx is not None and _helper(obs):
                 cxx.set_solver_dt(float(dt))
                 cxx.set_horizon(float(t_end))
                 # a reused helper graph keeps counting: report this run's
@@ -137,7 +142,7 @@ class ControlPlan:
                 jitter = max(jitter, float(cxx.tick_jitter_max))
         for obs in self.every_step:      # a helper graph passed as step_observer
             cxx = getattr(obs, "_cxx_chain", None)
-            if cxx is not None and cxx.label_time:
+            if cxx is not None and _helper(obs):
                 counts.append(int(sum(cxx.tick_counts()[1:]))
                               - self._ticks0.get(id(cxx), 0))
                 jitter = max(jitter, float(cxx.tick_jitter_max))
@@ -172,11 +177,14 @@ class ControlPlan:
             every_step=[o for o in self.every_step
                         if o is not self.rate_observer],
             inner_observers=self.inner_observers,
-            b_extra_fn=self.b_extra_fn)
+            b_extra_fn=self.b_extra_fn,
+            graphs=self.graphs,
+            static_hold=self.static_hold)
 
 
 def compose_control(builder, closed_loops, step_observer, controller_period,
-                    switch_fn, resume: bool = False) -> ControlPlan:
+                    switch_fn, resume: bool = False,
+                    snapshot=None, control_tick: str = "label") -> ControlPlan:
     from ._pulsim import make_combined_switch_fn  # type: ignore[import-not-found]
 
     loops = list(closed_loops or [])
@@ -235,14 +243,31 @@ def compose_control(builder, closed_loops, step_observer, controller_period,
             plan.rate_offsets = list(step_observer._rate_offsets)
             plan.rate_delays = list(step_observer._rate_delays)
         plan.b_extra_fn = getattr(step_observer, "_b_extra_fn", None)
-    from .c_block import _c_graph_observer
+    from .c_block import _c_graph_observer, static_state_hold
+    plan.static_hold = static_state_hold(           # G27: one run at a time
+        builder, plan.inner_observers)
     plan.c_graph = _c_graph_observer(builder, fresh=not resume)
+    # every graph from its declared initial state, or the snapshot's
+    from ._control_state import start_run
+    plan.graphs = start_run(plan, snapshot if resume else None)
+    # control_tick='state' (G30): the label-time graphs (closed-loop
+    # helpers, C blocks) tick at the state time for this run
+    for obs in plan.graphs:
+        g = getattr(obs, "_graph", None)
+        if g is not None and g.label_time:
+            obs._cxx_chain.set_label_time(control_tick == "label")
     for _fn, period in plan.ticks:
         if not (period > 0.0 and math.isfinite(period)):
             raise ValueError(
                 f"simulate(): controller period {period!r} must be a "
                 "positive finite number of seconds")
     return plan
+
+
+def _helper(obs) -> bool:
+    """A label-time graph (helpers, C blocks), whatever mode this run's
+    control_tick put its chain in."""
+    return bool(getattr(getattr(obs, "_graph", None), "label_time", False))
 
 
 def _check_fixed_periods(periods, dt: float, stacklevel: int = 4) -> None:

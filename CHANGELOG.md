@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Control graph G26-G31: controller state, gate, state-time ticks, ll16
+
+* **Fixed** a serial `sweep` / `monte_carlo` continued each point from the
+  previous point's controller (`closed_loops=[loop]`, R = 10, 8, 10, 8:
+  v_out 5.149, 6.607, 7.716, 7.984 V); every point now restarts the
+  caller's graphs, Python controller objects are deep-copied per point,
+  and a closure over mutable state or a graph on parallel points is
+  refused by name (`controller_state`).
+* **Fixed** `resume_from` continued whatever the last run left in the
+  controllers; the snapshot now carries the graphs' and C blocks' state
+  (export_c libraries gain the optional `pulsim_cblock_save` /
+  `pulsim_cblock_restore` pair). A pickled snapshot of a closed loop, an
+  opaque native block and (on trbdf2) a resume between two ticks are
+  refused by name.
+* **Added** `MixedDomainBlockChain.gate`: a discrete gate whose edges are
+  the graph's publication instants.
+* **Added** `simulate(control_tick="state")` (default `"label"`): the
+  closed-loop helpers tick on `x(kT)` and the split snap narrows to
+  1e-6 dt (`SimulationOptions.split_snap`); pwl+split is second order on
+  the closed-loop benchmarks (cl_buck_pi 1.39e-3 -> 8.4e-6 at the
+  harness dt).
+* **Fixed** `ll16_flyback_closed_loop` was not a flyback (an uncoupled
+  secondary); `benchmarks/tools/circuit_lint.py` finds such netlists.
+* **Changed** the raw kernel Clarke / inverse Clarke / SVM structs use
+  the one law of `block_laws.h` (ulps; duty at `v_dc <= 0` normalises by
+  1 instead of returning 0.5), equal to the Python classes bit for bit.
+* A run holding an export_c library's static state refuses a concurrent
+  run of it on another thread.
+
 ### Integration batch 11: circuit IR YAML, TR-BDF2 ideal switch, pwl complementarity, exact step 3, control graph G23, optimisation slice 6 merged
 
 * **Fixed** `make_combined_switch_fn` of a control-graph gate whose loop

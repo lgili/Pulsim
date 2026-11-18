@@ -122,24 +122,47 @@ def test_resume_from_continues_the_block():
 
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "batch-11 review: a SolverSnapshot carries no C-block state; a resume "
-    "continues the blocks from the circuit's LAST run (KNOWN_LIMITATIONS, "
-    "control-graph track)"))
-def test_resume_from_an_older_snapshot_continues_that_runs_block():
+@pytest.mark.parametrize("engine,kw,t_half", [
+    ("pwl", dict(dt=DT), 1.05e-4),          # off a block tick (G22)
+    ("trbdf2", dict(rtol=1e-9), 1.0e-4)])   # trbdf2 resumes on a tick (G26)
+@pytest.mark.parametrize("kind", ["python", "exported"])
+def test_resume_from_an_older_snapshot_continues_that_runs_block(
+        kind, engine, kw, t_half, tmp_path):
+    # G26: the snapshot carries the block state, so another run in between
+    # does not leak into the resumed one (before: it continued whatever
+    # the last run left)
+    add = _py if kind == "python" else _exported(tmp_path)
     b = _rc()
-    _py(b)
+    add(b)
     c = b.build()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        full = p.simulate(c, 2e-4, dt=DT, engine="pwl")
-        half = p.simulate(c, 1.05e-4, dt=DT, engine="pwl")
-        p.simulate(c, 1.5e-4, dt=DT, engine="pwl")        # another run between
-        rest = p.simulate(c, 2e-4, dt=DT, engine="pwl",
-                          resume_from=half.final_snapshot)
+        full = p.simulate(c, 2e-4, engine=engine, **kw)
+        half = p.simulate(c, t_half, engine=engine, **kw)
+        p.simulate(c, 1.5e-4, engine=engine, **kw)        # another run between
+        rest = p.simulate(c, 2e-4, engine=engine,
+                          resume_from=half.final_snapshot, **kw)
     j = c.to_builder().node_id_of("c")
     xf, xr = np.asarray(full.states), np.asarray(rest.states)
-    assert xr[-1, j] == pytest.approx(xf[-1, j], rel=1e-9)
+    assert xr[-1, j] == pytest.approx(xf[-1, j],
+                                      rel=1e-9 if engine == "pwl" else 1e-6)
+
+
+def test_resume_refuses_an_opaque_native_block():
+    # inline C keeps its state behind *state: no save / restore pair
+    _cc()
+    b = _rc()
+    _inline(b)
+    c = b.build()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        half = p.simulate(c, 1.05e-4, dt=DT, engine="pwl")
+        with pytest.raises(p.UnsupportedError) as e:
+            p.simulate(c, 2e-4, dt=DT, engine="pwl",
+                       resume_from=half.final_snapshot)
+    assert e.value.feature == "controller_state"
+    assert "pulsim_cblock_save" in str(e.value) and "ctl" in str(e.value)
+
 
 def test_two_circuits_sharing_an_exported_library_start_clean(tmp_path):
     # one static state behind both circuits: B's first run must not start
@@ -155,3 +178,41 @@ def test_two_circuits_sharing_an_exported_library_start_clean(tmp_path):
         xa = np.asarray(p.simulate(ca, 2e-4, dt=DT, engine="pwl").states)
         xb = np.asarray(p.simulate(cb, 2e-4, dt=DT, engine="pwl").states)
     assert xa.tobytes() == xb.tobytes()
+
+
+def test_a_static_library_runs_on_one_thread_at_a_time(tmp_path):
+    # G27: circuits sharing an export_c library share its static struct;
+    # a run on another thread while one steps it is refused by name, and
+    # the hold is released when the run returns
+    import threading
+    _cc()
+    add = _exported(tmp_path)
+    ba, bb = _rc(), _rc()
+    add(ba)
+    add(bb)
+    ca, cb = ba.build(), bb.build()
+    seen = []
+
+    def other():
+        try:
+            p.simulate(cb, 2e-5, dt=DT, engine="pwl")
+            seen.append(None)
+        except RuntimeError as exc:
+            seen.append(str(exc))
+
+    def obs(t, x):
+        if not seen:
+            th = threading.Thread(target=other)
+            th.start()
+            th.join()
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        p.simulate(ca, 2e-5, dt=DT, engine="pwl", step_observer=obs)
+        assert seen and seen[0] is not None and "static state" in seen[0]
+    # released: a run on yet another thread is not refused
+    seen.clear()
+    th = threading.Thread(target=other)
+    th.start()
+    th.join()
+    assert seen == [None]

@@ -948,6 +948,7 @@ load_yaml_string = _yaml_retired_as_retired_error(load_yaml_string)
 load_yaml_file = _yaml_retired_as_retired_error(load_yaml_file)
 from ._refusal import unsupported as _unsupported  # noqa: E402
 from ._control_plan import compose_control as _compose_control  # noqa: E402
+from ._control_state import save_into as _save_control_state  # noqa: E402
 
 # add-mna-native-machines: CircuitBuilder.add_dc_machine (a linear
 # composite of existing kernel elements, solved inside the matrix).
@@ -1966,6 +1967,7 @@ def simulate(
     on_cache=None,
     controller_period: Optional[float] = None,
     resume_from=None,
+    control_tick: str = "label",
     # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
     solver: Optional["SolverOptions"] = None,
     # --- forward parameter sensitivities (exact path only) ---
@@ -2499,9 +2501,15 @@ def simulate(
     # (fix-control-tick-semantics). Above the dispatch so its refusals
     # (controller_period without an observer, a bad period) hold on
     # every engine; dsed refuses closed_loops / step_observer itself.
+    if control_tick not in ("label", "state"):
+        raise ValueError(
+            f"simulate(control_tick={control_tick!r}): use 'label' (the "
+            "default) or 'state'")
     _plan = _compose_control(builder, closed_loops, step_observer,
                              controller_period, switch_fn,
-                             resume=resume_from is not None)
+                             resume=resume_from is not None,
+                             snapshot=resume_from,
+                             control_tick=control_tick)
     # A control graph's driven sources reach every engine (above the
     # dispatch: add-compiled-control-graph).
     b_extra_fn = _plan.merge_b_extra(b_extra_fn)
@@ -2705,6 +2713,17 @@ def simulate(
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
             switch_fn=switch_fn)
+        if resume_from is not None and any(
+                _off_tick_grid(_g._cxx_chain, t_start) for _g in _plan.graphs):
+            # trbdf2 ticks at t_start + k*T: a graph resumed between two
+            # of its ticks would tick off its own grid (G26)
+            _rb = _Blocker(
+                "resume_from: a control graph resumes between two of its "
+                "ticks and the variable-step engine schedules ticks at "
+                "t_start + k*T (off the graph's grid); resume on a tick "
+                "instant, or use engine='pwl'")
+            _rb.feature = "resume_from"
+            _route_reasons = [*_route_reasons, _rb]
         if engine == "trbdf2":
             # Task 9.3: trbdf2 lands its steps on a C block's ticks
             # (state-time law); only 'auto' keeps routing them to pwl,
@@ -2917,6 +2936,7 @@ def simulate(
         _trbdf2_warn_stats(res, builder, _stats, _engine_asked)
         if on_impulse == "warn":
             _warn_impulses(res)
+        _save_control_state(_plan.graphs, res)
         return res
 
     # ---- engine='pwl' from here on ----
@@ -3136,6 +3156,9 @@ def simulate(
         opts.newton_roundoff_budget = int(newton_roundoff_budget)
     if enable_substep_state_correction is not None:
         opts.enable_substep_state_correction = enable_substep_state_correction
+    if control_tick == "state":
+        # G30: a split edge is moved by at most 1e-6 dt (0.01 dt before)
+        opts.split_snap = 1e-6
     if discontinuity_restart is not None:
         opts.discontinuity_restart = bool(discontinuity_restart)
     opts.on_impulse_error = on_impulse == "error"
@@ -3544,7 +3567,21 @@ def simulate(
     # the trace it was solved against.
     if _mmc_finalize is not None and len(res.states) > 0:
         _mmc_finalize(res.times[-1], res.states[-1])
+    _save_control_state(_plan.graphs, res)
     return res
+
+
+def _off_tick_grid(cxx, t_start: float) -> bool:
+    """A resumed graph whose rate groups do not all tick on t_start +
+    k*period (what trbdf2 schedules): some group would leave its grid."""
+    if not cxx.n_calls:
+        return False
+    for gi, due in enumerate(cxx.next_due_per_group(), start=1):
+        period = float(cxx.group_period(gi))
+        q = (float(due) - t_start) / period
+        if abs(q - round(q)) > 1e-9 * max(1.0, abs(q)):
+            return True
+    return False
 
 
 def _warn_newton_roundoff(res, eng) -> None:

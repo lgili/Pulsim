@@ -69,6 +69,8 @@ from typing import Any, Callable, Dict, Optional, Sequence
 import numpy as np
 
 from ._builder_ergonomics import RetiredDeviceError
+from ._control_state import point_kwargs as _point_kwargs
+from ._control_state import sweep_points as _sweep_points
 from ._refusal import UnsupportedError
 
 # Configuration refusals hold for every point: they propagate out of
@@ -294,7 +296,8 @@ _PER_RUN_KWARGS = ("step_observer", "closed_loops", "b_extra_fn",
 
 
 def _run_circuit_points(points, grid, kpi_fn, *, parallel, backend,
-                        n_workers, verbose, simulate_kwargs):
+                        n_workers, verbose, simulate_kwargs,
+                        point_kwargs=None):
     """``sweep(circuit, ...)`` / ``monte_carlo(circuit, ...)`` (task 5.2).
 
     Point 0 runs through ``simulate`` and records what it handed the pwl
@@ -311,7 +314,8 @@ def _run_circuit_points(points, grid, kpi_fn, *, parallel, backend,
     kw = simulate_kwargs
     n = len(grid)
     stats = {"kernel_points": 0, "symbolic_analyses": 0, "preflights": 0}
-    args_iter = [(points, kpi_fn, p, kw) for p in grid]
+    kws = point_kwargs or [kw] * n       # the controllers copied per point
+    args_iter = [(points, kpi_fn, p, k) for p, k in zip(grid, kws)]
     if (n < 2 or (parallel and backend == "process")
             or any(kw.get(k) is not None for k in _PER_RUN_KWARGS)
             or kw.get("progress") or kw.get("enable_nonlinear_refresh") is False):
@@ -328,7 +332,7 @@ def _run_circuit_points(points, grid, kpi_fn, *, parallel, backend,
         tokens = [cir.KERNEL_RUN.set(run), cir.PWL_RECIPE.set(recipe)]
         try:
             return simulate(points(**grid[i]) if run is None else run.circuit,
-                            **kw)
+                            **kws[i])
         finally:
             cir.PWL_RECIPE.reset(tokens[1])
             cir.KERNEL_RUN.reset(tokens[0])
@@ -402,7 +406,8 @@ def _run_points(args_iter, grid, kpi_fn, parallel, backend, n_workers,
         return _run_circuit_points(
             args_iter[0][0], grid, kpi_fn, parallel=parallel,
             backend=backend, n_workers=n_workers, verbose=verbose,
-            simulate_kwargs=simulate_kwargs)
+            simulate_kwargs=simulate_kwargs,
+            point_kwargs=[a[3] for a in args_iter])
     return (*_run_jobs(args_iter, parallel=parallel, backend=backend,
                        n_workers=n_workers, verbose=verbose), {})
 
@@ -428,18 +433,7 @@ def _circuit_form(builder_factory, parallel, backend, simulate_kwargs):
             f"carries C blocks ({names}), one state shared by every point, "
             "so threads would step it at once. Run parallel=False, or pass "
             "a builder factory that adds the blocks per point.")
-    stateful = [k for k in ("step_observer", "closed_loops")
-                if simulate_kwargs.get(k) is not None]
-    from .periodic_steady_state import _closed_loop_source
-    if _closed_loop_source(simulate_kwargs.get("switch_fn")):
-        stateful.append("switch_fn (a closed loop)")
-    if parallel and stateful:
-        # one controller object would run every point at once on threads
-        raise ValueError(
-            f"sweep(circuit, parallel=True) with {', '.join(stateful)}: "
-            "the points would share one controller's state on threads. "
-            "Run parallel=False, or pass a builder factory that builds a "
-            "fresh controller per point.")
+    # controllers in the keyword arguments: _control_state.point_kwargs
     return _CircuitPoints(builder_factory), (
         "process" if parallel and backend == "process" else "thread")
 
@@ -519,18 +513,19 @@ def sweep(builder_factory: Callable[..., Any],
                f"(grid shape {shape})  "
                f"params: {keys}")
 
+    kws = _point_kwargs(simulate_kwargs, n_runs, parallel)
     args_iter = []
     grid_params = []
-    for combo in grid_iter:
+    for combo, kw in zip(grid_iter, kws):
         p_dict = dict(zip(keys, combo))
         grid_params.append(p_dict)
-        args_iter.append(
-            (builder_factory, kpi_fn, p_dict, simulate_kwargs))
+        args_iter.append((builder_factory, kpi_fn, p_dict, kw))
 
     t0 = time.perf_counter()
-    kpi_list, failed, backend_used, counters = _run_points(
-        args_iter, grid_params, kpi_fn, parallel, backend, n_workers,
-        verbose, simulate_kwargs)
+    with _sweep_points():        # the caller's graphs restart per point
+        kpi_list, failed, backend_used, counters = _run_points(
+            args_iter, grid_params, kpi_fn, parallel, backend, n_workers,
+            verbose, simulate_kwargs)
 
     wall = time.perf_counter() - t0
     if verbose:
@@ -603,13 +598,15 @@ def monte_carlo(builder_factory: Callable[..., Any],
         print(f"  monte_carlo: {n_samples} random draws  "
                f"params: {list(distributions)}")
 
-    args_iter = [(builder_factory, kpi_fn, s, simulate_kwargs)
-                   for s in samples]
+    kws = _point_kwargs(simulate_kwargs, n_samples, parallel)
+    args_iter = [(builder_factory, kpi_fn, s, kw)
+                 for s, kw in zip(samples, kws)]
 
     t0 = time.perf_counter()
-    kpi_list, failed, backend_used, counters = _run_points(
-        args_iter, samples, kpi_fn, parallel, backend, n_workers,
-        verbose, simulate_kwargs)
+    with _sweep_points():        # the caller's graphs restart per point
+        kpi_list, failed, backend_used, counters = _run_points(
+            args_iter, samples, kpi_fn, parallel, backend, n_workers,
+            verbose, simulate_kwargs)
 
     wall = time.perf_counter() - t0
     if verbose:

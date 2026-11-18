@@ -187,6 +187,13 @@ had before 2.1; it is kept so every closed-loop number is unchanged. A
 chain with ordinary `Rate`s (state time, G6) samples `x(kT)` instead.
 On `trbdf2` both modes tick on the exact instants.
 
+`simulate(control_tick="state")` (off by default) runs these graphs in
+state time for that run: tick k samples `x(kT)` and holds from `kT`. It
+also narrows the event split's snap from `0.01*dt` to `1e-6*dt`
+(`SimulationOptions.split_snap`), so with
+`discontinuity_restart=True, enable_substep_state_correction=True` a
+PWM edge is no longer moved by up to `dt/100` (DECISIONS G30).
+
 Closed form, P loop on the RC of the table above (`K_p = 2`, set-point
 1 V, `T = 100 µs`), label time at step `h`: `w_0 = 0`,
 `w_{k+1} = a_k w_k + (1 - a_k)·2(1 - w_k)`, `a_0 = e^{-(T-h)/τ}`,

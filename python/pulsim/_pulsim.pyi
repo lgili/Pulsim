@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class ConvergenceError(RuntimeError):
@@ -1307,6 +1307,14 @@ class SimulationOptions:
     def rtol(self, arg0: float) -> None:
         ...
     @property
+    def split_snap(self) -> float:
+        """
+        Split events within split_snap*dt of a step boundary are taken at it (default 0.01).
+        """
+    @split_snap.setter
+    def split_snap(self, arg0: float) -> None:
+        ...
+    @property
     def store_every(self) -> int:
         """
         Output decimation: record every m-th step (default 1 = every step). The solver still integrates at `dt`; only what is STORED changes, and the recorded grid stays uniform at m*dt so FFT/harmonic analysis stays valid. Cuts result memory by m on long high-fidelity runs.
@@ -2208,13 +2216,21 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[bool], list[float], list[float], list[float], list[float], list[float], bool, list[bool], int]:
+    def __getstate__(self) -> tuple[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[bool], list[float], list[float], list[float], list[float], list[float], bool, list[bool], int, bool]:
         ...
     def __init__(self) -> None:
         ...
     def __repr__(self) -> str:
         ...
     def __setstate__(self, arg0: tuple[typing.Any, ...]) -> None:
+        ...
+    @property
+    def _control_state(self) -> typing.Any:
+        """
+        The controllers' state at t (pulsim internal; set by simulate(), read by resume_from).
+        """
+    @_control_state.setter
+    def _control_state(self, arg1: typing.Any) -> None:
         ...
     @property
     def coss_history(self) -> list[float]:
@@ -2753,6 +2769,16 @@ class CxxChainPwmGate:
         """
         First gate edge strictly after t under the duties held now (period starts and OFF thresholds); stale after a tick.
         """
+class CxxChainSignalGate:
+    """
+    A discrete gate: a switch is ON while its control-graph signal exceeds 0.5; its edges are the graph's publication instants. Every engine calls it in C++.
+    """
+    def __call__(self, t: float) -> SwitchStateMask:
+        ...
+    def next_edge_after(self, t: float) -> float:
+        """
+        First instant strictly after t at which the gate may switch (a publication of the graph; inf for a label-time graph).
+        """
 class CxxChainBExtra:
     """
     A control graph's driven-source b_extra_fn(t), with the instants its value may jump (next_jump_after), both in C++.
@@ -2761,6 +2787,10 @@ class CxxChainBExtra:
         ...
     def next_jump_after(self, arg0: float) -> float:
         ...
+class CxxBlockChainState:
+    """
+    A copy of everything a run changes in one control graph (block states, signals, tick grid, recordings); restorable only into the graph that saved it. Opaque; does not pickle.
+    """
 class CxxBlockChain:
     """
     C++ block chain executor. Build via add_<block>(...) methods, bind nodes, then pass make_step_observer(dt) to simulate().
@@ -2899,6 +2929,10 @@ class CxxBlockChain:
         """
         A switch_fn (C++, no GIL): for each (channel, switch_idx, period, phase) the bit is ON while pulsim.control.pwm_on(t, period, duty, phase) with duty = what the channel's sinks see.
         """
+    def make_signal_gate(self, num_switches: int, mapping: collections.abc.Sequence[tuple[str, int]]) -> CxxChainSignalGate:
+        """
+        A discrete gate (C++, no GIL): for each (channel, switch_idx) the bit is ON while what the channel's sinks see is > 0.5.
+        """
     def make_sink_b_extra_fn(self, state_size: int) -> CxxChainBExtra:
         """
         Return the driven-source b_extra_fn(t) with next_jump_after(t) (the instants the published values may change).
@@ -2915,6 +2949,14 @@ class CxxBlockChain:
         """
         Name (and kind) of the most recently added block.
         """
+    def next_due(self) -> float:
+        """
+        Instant of the next tick on the graph's own grid (inf: none).
+        """
+    def next_due_per_group(self) -> list[float]:
+        """
+        Each rate group's next tick instant (group 1, 2, ...).
+        """
     def record_channel(self, name: str, reserve_n: int = 0) -> None:
         """
         Register a channel name for per-step logging. After simulate() returns, fetch the trace via get_channel_history(name).
@@ -2925,6 +2967,14 @@ class CxxBlockChain:
         """
     def reset(self) -> None:
         ...
+    def restore_state(self, state: CxxBlockChainState) -> None:
+        """
+        Put back a state saved from this graph.
+        """
+    def save_state(self) -> CxxBlockChainState:
+        """
+        A copy of the graph's run state (snapshot / resume).
+        """
     def schedule(self) -> list[str]:
         """
         Block names in evaluation order.
@@ -2961,6 +3011,10 @@ class CxxBlockChain:
         """
         Ticks per group (index 0: evaluations of the every-call group).
         """
+    def uncaptured_blocks(self) -> list[str]:
+        """
+        Blocks holding state that save_state() does not copy.
+        """
     @property
     def has_rates(self) -> bool:
         ...
@@ -2970,6 +3024,11 @@ class CxxBlockChain:
     @property
     def n_block_evals(self) -> int:
         ...
+    @property
+    def n_calls(self) -> int:
+        """
+        Observer calls since the last restart of the tick grid.
+        """
     @property
     def n_evals(self) -> int:
         ...
