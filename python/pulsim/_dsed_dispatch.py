@@ -561,6 +561,10 @@ H_E_REL = 1e-7
 # settle still decides but is judged: a mode the guard would repair raises
 # UnsupportedError('dsed', 'consistent_mode') instead (DECISIONS #26).
 MODE_GUARD = True
+# Test hook: the settle's round cap (the engine's default, 64). A test lowers it
+# to reach the give-up deterministically: the cap is otherwise met only by the
+# rounding of a diode pair fighting at rest (macOS yes, Linux / Windows no).
+SETTLE_ROUND_CAP = 64
 
 
 def _shadow_h_e(builder: Any, switch_fn: Any, t_window: float) -> float:
@@ -905,7 +909,7 @@ def run_dsed_from_builder(
                     rtol=opts.rtol, atol=opts.atol,
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
                     store_every=opts.store_every, event_log=False,
-                    **shadow_kw)
+                    settle_round_cap=SETTLE_ROUND_CAP, **shadow_kw)
             elif opts.integrator == "bdf2":
                 native_res = run_bdf2_b11(
                     native_adapter, sf, x0, t_window,

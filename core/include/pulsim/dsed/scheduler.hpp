@@ -358,14 +358,12 @@ public:
         bool step_fired = false;
         Vector x_pre_event;
 
-        constexpr std::size_t kMaxSteps = 10'000'000;
-
         auto f = [this](Real tau, const Vector& xx) -> Vector {
             return system_.rhs(tau, xx);
         };
 
         while (t < t_end) {
-            if (result.n_accept + result.n_reject > kMaxSteps) {
+            if (result.n_accept + result.n_reject > max_steps_) {
                 throw ConvergenceFailure(ConvergenceKind::MaxSteps, t, "",
                     "PEDSimulator: exceeded max-step cap");
             }
@@ -731,6 +729,12 @@ public:
     void set_event_projection(bool on) noexcept {
         enable_event_projection_ = on;
     }
+
+    // Test hooks: the step cap (default 10M) and the settle's round cap
+    // (default 64). A small cap reaches the give-up deterministically on
+    // any build and any rounding; production code leaves the defaults.
+    void set_max_steps(std::size_t n) noexcept { max_steps_ = n; }
+    void set_settle_round_cap(int n) noexcept { settle_round_cap_ = n < 1 ? 1 : n; }
 
 private:
     struct PredicateEvent {
@@ -1474,7 +1478,7 @@ private:
         requires HasNodePairVoltage<System> {
         MaskT mask = system_.current_mask();
         const Real tol = zero_band_tol_(t, x);
-        constexpr int kMaxRounds = 64;
+        const int kMaxRounds = settle_round_cap_;
         for (int round = 0; round < kMaxRounds; ++round) {
             ++settle_rounds_;
             bool flipped = false;
@@ -1520,7 +1524,7 @@ private:
                 }
                 throw ConvergenceFailure(ConvergenceKind::Settle, t, "",
                     "PEDSimulator: diode configuration did not "
-                    "settle after 64 rounds at t = "
+                    "settle after " + std::to_string(kMaxRounds) + " rounds at t = "
                     + sci_(t) + " s (diodes: " + culprits
                     + ") — a pair is fighting over the same node; "
                     "add a small hysteresis band (e.g. V_th = V_f + "
@@ -1822,6 +1826,8 @@ private:
     std::vector<std::pair<Index, Index>> shadow_nodes_;
     Vector shadow_x_;
     int settle_rounds_ = 0;
+    int settle_round_cap_ = 64;
+    std::size_t max_steps_ = 10'000'000;
     // The predicate that fired the last predicate event, and when: only
     // it is skipped as "just fired" at a step starting at that instant.
     int last_fired_index_ = -1;

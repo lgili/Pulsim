@@ -1217,7 +1217,8 @@ void init_module(py::module_& m) {
            Real mode_shadow_h_e,
            Real mode_lcp_h_e,
            Real mode_guard_h_e,
-           bool mode_guard_refuse) {
+           bool mode_guard_refuse,
+           int settle_round_cap) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
@@ -1310,6 +1311,7 @@ void init_module(py::module_& m) {
                     std::move(sched_diodes));
             }
             sim.set_event_projection(enable_event_projection);
+            sim.set_settle_round_cap(settle_round_cap);
             std::vector<std::string> diode_names;
             if (mode_shadow_h_e > Real{0}) {
                 pulsim::pwl::DiodeEventState census(adapter.graph(), adapter.pool());
@@ -1383,6 +1385,7 @@ void init_module(py::module_& m) {
         py::arg("mode_lcp_h_e") = Real{0},
         py::arg("mode_guard_h_e") = Real{0},
         py::arg("mode_guard_refuse") = false,
+        py::arg("settle_round_cap") = 64,
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "

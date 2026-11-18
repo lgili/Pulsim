@@ -19,6 +19,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Changed** the reference gate's dsed column: 39 agree / 16 disagree /
   12 error / 40 refused -> 83 / 0 / 0 / 24 (`sepic`'s frozen `error`
   dropped: it agrees, 1.5e-6); pwl / trbdf2 cells identical to the digit.
+* **Fixed** (CI at e22ae97a) two tests that reached a give-up only by
+  rounding or by running long: the round-capped settle on the five-bridge
+  bus (0 caps on Linux / Windows, 4 on macOS) now also runs with the cap
+  forced to 2 rounds through a test hook (`_dsed_dispatch.SETTLE_ROUND_CAP`,
+  `PEDSimulator::set_settle_round_cap`): 11 caps, the bus within 1.49e-4 V
+  of pwl extrapolated in dt, as at 64; the step-cap test uses
+  `set_max_steps(50000)` (it ran 10M steps, 120 s timeout on the coverage
+  build).
 
 ### Integration batch 8: control graph, optimisation slice 4 and circuit IR merged
 
