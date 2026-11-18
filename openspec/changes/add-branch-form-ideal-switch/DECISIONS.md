@@ -665,3 +665,63 @@ Each entry: question → option taken → evidence → how to reverse.
     g_off 1e-12: was a bare RuntimeError from the probe ladder cap; now a
     typed SimulationAborted naming node y. The initial settle's singular
     error is typed the same way. Bit-identical on the 16 hash runs.
+
+34. **Track 8 reviewer findings (items 1-2) and the batch-12 merge.**
+    (1) A singular final sliver on an SDIRK step left the history with
+    zeroed derivative slots (the snapshot a resume reads). → It restores
+    `hist_snap` before `break`. (2) Tests: the sliver may be 0 on another
+    platform (`<=`); the singular node may be x or y (pivot order); call
+    bounds widened to >= 30 % margin (CCM < 52, DCM < 100). (4) The
+    conditioning floor was run-wide; it belongs to the mode with the
+    island. → Keyed by the step-start mode (`sw_now` overlaid with the
+    diode bits), looked up at each step start. On the abort-(a) circuit:
+    unchanged (the island's mode is the run's). (5) The post-event
+    record and its BE solves built `m_rec` with `mask_at` (combine,
+    which applies gates); now the pure overlay plus `settle_mode`, as the
+    integration side's record. Identical without gated devices. (6, 7)
+    Left, documented: the bisection's predicted probes and `ceil(2h/w)`
+    assume a pure `switch_fn` (the engine already calls it at arbitrary
+    instants); a pulse that shrinks by more than 2x between periods can
+    be missed, counted in `n_gate_undersampled`. (8) The bit-identity of
+    DECISIONS #32 is measured on macOS/clang only. (9) Factor hits also
+    count the noise-bound and probe solves, so the reuse ratios of #32
+    are of all `solve_at` traffic, not of step solves only. Merge of
+    integration batch 12 (7ff35556): the event queue's EndOfRun bounds
+    the step, `StepCtx` replaces the stage fields, ll16 (coupled, G31)
+    now agrees on trbdf2 (0.000363): its freeze is dropped (item 2c).
+
+35. **Shipped examples on trbdf2 (coordinator items).** (a) `flyback`
+    (doc gates, every rtol 1e-3 .. 1e-9): the switch node has no
+    capacitance, so with Q1, its body diode and D_cl all OFF the
+    leakage drives it through g_off alone (tau = L_lk g ~ 3e-14 s). After
+    a D_cl turn-off the restart is dropped when the post-event BE pair
+    disagrees (i_p is round-off at 1e-12 s steps: 1.5e-8 vs 3.2e-8 A
+    against atol 1e-8; at 1.6e-11 s the output capacitor's real drift,
+    2e5 V/s, exceeds the pair tolerance), or the turn-off is committed by
+    the chatter guard, which starts no restart; raw TR-BDF2 then reads the
+    mode as error at any h and sat at 5e-14 s for 10 M steps. Tried, not
+    kept: a 4x/16x BE ladder and a restart on the chatter path (each
+    moved the grind one period later). → A grind is refused early, by
+    name: 200,000 accepted steps advancing < 1e-4 of the span raise
+    SimulationAborted ("the controller is grinding"), and the Python layer
+    names the inductor-only nodes (sw, sec_anode) with the remedy (a node
+    capacitance, or engine='pwl'). Refused in 1-2 s (was 10 M steps).
+    With 100 pF on sw the example completes (1.77 M steps, a real 5 MHz
+    Coss-leakage ring). (b) `phase_shift_full_bridge` (phi = pi/2, 100 ns
+    dead time): completed on this tree but slowly: 21,468 chatter breaks,
+    each pinning h at h_chatter = 2e-12 s for 1000 forced accepts (3.65 M
+    steps, 3.37 M forced). → Inside that window (where h_lo already
+    says the raw estimate reads the L*g_off mode at any h) the estimate is
+    Hosea-Shampine filtered: 147 k steps, 16 k forced; mean V_out
+    1.0-1.2 ms 22.816 V (truth 22.851), 1.8-2.0 ms 23.979 V (truth
+    24.066; rtol 1e-6 / 1e-7: 23.798 / 23.969, not converged in rtol:
+    open). It moves only runs with chatter breaks: bridge rejects 88 -> 76
+    at rtol 1e-5 with the error unchanged (7.079e-6); buck CCM rtol 1e-3
+    errors equal to 4 digits; the 1 mH line bridge of test_trbdf2_error_control
+    1242 -> 1199 accepted (10 diode events, 5 chatter breaks); the reference
+    flyback_converter cell 2.72e-06 -> 2.7e-06. (c) `three_phase_diode_rectifier`: the
+    default route is pwl at the YAML's dt = 2e-5. Over 0.4-0.8 s against
+    trbdf2 rtol 1e-10: V_dc rel 1.5e-5 and the common mode 4.95e-4 (7.6
+    mV) are right; the LINE CURRENTS are wrong, 9.7-12.6 % RMS (peak 20.3
+    A against 13.66 A): first order on the charging pulses, 0.7-0.9 % at
+    dt = 2e-6. Not the gauge.
