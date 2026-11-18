@@ -1,0 +1,10 @@
+pulsim from /Users/lgili/pulsim_wt/p4-mosfet/python/pulsim/__init__.py
+family           events | settle rnds/ev lcp solves/ev | lcp piv max (D9) piv/ev solves/ev | default us/ev lcp us/ev
+buck_rest             1 |           2.50          2.00 |      0 (2) ok     0.00      2.00 |        2233.0    2073.5
+dcm_buck           1178 |           2.36          3.32 |      2 (2) ok     2.00      3.32 |           4.0       5.1
+boost_50            978 |           2.65          3.44 |      2 (2) ok     2.16      3.43 |           1.7       4.4
+boost_500          1157 |           2.41          3.34 |      2 (2) ok     2.00      3.31 |           1.7       2.7
+bridge1_vf07         40 |           2.33          6.87 |      3 (6) ok     5.17      7.63 |        6761.3   10245.7
+bridge1_vf0          39 |           2.37          9.15 |      3 (6) ok     5.90      8.40 |        6446.6    9835.1
+bridge3_overlap  _UnsupportedNotImplemented: pulsim.simulate(engine='dsed', builder=...): the C++ extractor rejected this topology — most commonl
+bridge3_cfilter      60 |           2.02          6.46 |      3 (5) ok     3.98      6.46 |        5667.9    6692.7

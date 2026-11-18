@@ -1,3 +1,3 @@
-ramp RC integrator=auto: max|v - ref| = 8.966e-08 V, samples 5006, n_exact_steps 0, tiers [3], reasons ['PWM / pulse source: not piecewise-constant events yet'], sample near 1 ms: False
-ramp RC integrator=rk45: max|v - ref| = 8.966e-08 V, samples 5006, n_exact_steps 0, tiers [3], reasons ['PWM / pulse source: not piecewise-constant events yet'], sample near 1 ms: False
+ramp RC integrator=auto: max|v - ref| = 2.682e-13 V, samples 5001, n_exact_steps 5000, tiers [1], reasons [''], sample near 1 ms: True
+ramp RC integrator=rk45: max|v - ref| = 2.682e-13 V, samples 5001, n_exact_steps 5000, tiers [1], reasons [''], sample near 1 ms: True
 sine RL at h = 1.0e-03 s (T/20): max|i - ref| = 3.197e-13 A over 101 samples, n_exact_steps 100, tiers [1]

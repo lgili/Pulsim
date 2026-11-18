@@ -795,10 +795,12 @@ def test_mode_guard_diagnostics_only_on_dsed(engine):
         assert g is None
         return
     assert g["checks"] > 0 and g["repairs"] == 0 and g["repair_times"] == []
+    assert g["settle_caps"] == 0 and g["lcp"]["capped"] == 0     # DECISIONS #24, #25
     rec = {"class": "passive_reciprocal", "device": "", "kind": ""}
     assert g["passivity"] == rec        # task 5.1 class, dsed only
     r = _sim(engine, _half_wave(), mode_selection="lcp")
     assert r.diagnostics["mode_selection"]["lcp_count"] > 0
+    assert r.diagnostics["mode_selection"]["capped"] == 0
     assert r.diagnostics["mode_selection"]["passivity"] == rec
     assert "mode_guard" not in r.diagnostics
 
@@ -1225,6 +1227,7 @@ def test_exact_segments_only_on_the_exact_engine(engine):
     segs = ex["segments"]
     assert segs and all(s["exact"] and s["reason"] is None for s in segs)
     assert sum(s["n_segments"] for s in segs) >= 2      # the diode commutates
+    assert ex["auto_would_route"] is True               # 13.3 report-only field, same on both names
 
 
 # Integration batch 6b: 'exact' and 'dsed' are one engine on every device cell and the

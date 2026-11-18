@@ -87,15 +87,13 @@ def test_port_model_equals_the_prototype_port_lcp(name):
 MODEL_DIFFERENCE = {"boost_50": 1, "boost_500": 1}
 # Slice-2 D5 leak pins (DECISIONS.md #13): a tie left after widening whose current holds a floating
 # island (i * R_jj > tol_w) is ON unless the engine's exact judge accepts the all-ties-OFF mode. This
-# probe surface has no judge, so every pin stands. bridge3_cfilter: every turn-off; conductance-form
-# physics (the leak divider forward-biases an OFF diode by volts), the ideal reference has a gauge
-# instead. bridge1: series-pair turn-offs where event-location residuals (pA) look like pins; on dsed
-# the judge sends them OFF (test_mode_shadow.py: 0 LCP errors on the bridges). Whether a pA
-# residual crosses the pin threshold is last-bit rounding, so bridge1 is bounded, not pinned:
-# measured vf0 3 (macOS arm64) / 2 (CI x86-64), vf07 2 (macOS) / 3 (Linux arm64). The bridges'
-# waveforms are held to the reference by test_mode_lcp.py::test_lcp_bridges_match_trbdf2.
+# probe surface has no judge, so every pin stands. bridge3_cfilter: one per turn-off (structural:
+# conductance-form physics, the leak divider forward-biases an OFF diode by volts; the ideal
+# reference has a gauge instead). bridge1 had 2-3 rounding-dependent pins at its series-pair
+# turn-offs (and CI x86-64 two mismatches): the widened passes pivoted the previous mode's port
+# matrix onto the all-OFF candidate through a block of condition ~5e11 and read the pair's split as
+# +-0.5 V. Posed in the candidate mode with the island's KCL exact (DECISIONS.md #30) they are gone.
 LEAK_PINS = {"bridge3_cfilter": 12}
-LEAK_PIN_BOUND = {"bridge1_vf07": 3, "bridge1_vf0": 3}
 
 
 @pytest.mark.parametrize("name", list(B.FAMILIES))
@@ -122,10 +120,7 @@ def test_selected_mode_equals_the_prototype_mode_at_every_event(name):
     assert len(bad) == MODEL_DIFFERENCE.get(name, 0), bad
     if bad:
         assert bad == [0.0]
-    if name in LEAK_PIN_BOUND:
-        assert 2 <= len(pins) <= LEAK_PIN_BOUND[name], pins
-    else:
-        assert len(pins) == LEAK_PINS.get(name, 0), pins
+    assert len(pins) == LEAK_PINS.get(name, 0), pins
 
 
 def test_at_rest_zero_drop_diode_is_one_lcp_two_pivots_and_off():

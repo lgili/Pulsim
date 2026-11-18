@@ -354,13 +354,17 @@ def test_boost_with_a_wrong_settled_mode_is_repaired_or_named(v_th, R, v_end):
     r = p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
     assert r.diagnostics["mode_guard"]["repairs"] > 0
     assert np.asarray(r.v("vout"))[-1] == pytest.approx(v_end, abs=1e-4)
+    # Merge re-pin (DECISIONS #26 of add-complementarity-mode-selection): with the kernel guard
+    # off the settle is still judged and refuses at its first wrong event, before the
+    # stored-sample guard reads a sample (was: DiodeModeInconsistentError naming D1).
     b, fn = _boost(v_th, R)
     DD.MODE_GUARD = False
     try:
-        with pytest.raises(DD.DiodeModeInconsistentError, match="D1"):
+        with pytest.raises(p.UnsupportedError) as ei:
             p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
     finally:
         DD.MODE_GUARD = True
+    assert (ei.value.feature, ei.value.device.split()[0]) == ("consistent_mode", "D1")
 
 
 def test_boost_with_a_threshold_band_runs_and_agrees():
@@ -394,9 +398,12 @@ def test_half_wave_rl_rectifier_with_a_zero_band_diode_is_repaired_or_named():
     assert np.trapezoid(r.i("L"), t) / 3e-3 == pytest.approx(
         np.trapezoid(ref.i("L"), tr) / 3e-3, abs=1e-4)
     assert np.abs(np.interp(t, tr, ref.v("a")) - np.asarray(r.v("a"))).max() < 1e-4
+    # merge re-pin as in the boost test above (was: DiodeModeInconsistentError, 'D' ON while
+    # carrying reverse current): the judged settle refuses first, naming D
     DD.MODE_GUARD = False
     try:
-        with pytest.raises(DD.DiodeModeInconsistentError, match="'D' is ON while carrying"):
+        with pytest.raises(p.UnsupportedError) as ei:
             p.simulate(build(), 3e-3, engine="dsed")
     finally:
         DD.MODE_GUARD = True
+    assert (ei.value.feature, ei.value.device.split()[0]) == ("consistent_mode", "D")

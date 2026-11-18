@@ -1,0 +1,30 @@
+benchmarks/circuits: 126 pulsim-v1 YAMLs, not loadable by the 2.0 loader (not run)
+26 YAMLs under examples/, cap 60 s each
+circuit                                        auto today     would exact  first non-exact reason
+examples/boost_realistic_igbt.yaml             pwl            False        refused: device T1 (IgbtLevel1)
+examples/boost_realistic_mosfet_v14.yaml       pwl            False        refused: device M1 (MosfetLevel1)
+examples/boost_saturable_inductor.yaml         pwl            False        refused: device L_boost (SaturableInductor)
+examples/buck.yaml                             pwl            True         
+examples/buck_converter.yaml                   pwl            True         
+examples/common_source_amplifier.yaml          pwl            False        refused: device M1 (MosfetLevel1)
+examples/flyback.yaml                          pwl            False        refused: extraction
+examples/half_bridge_pwm.yaml                  pwl            True         
+examples/half_wave_rectifier.yaml              pwl            False        refused: extraction
+examples/hysteretic_inductor_demo.yaml         pwl            False        refused: device L_core (SaturableInductor)
+examples/induction_motor_dol.yaml              pwl            True         
+examples/ldo_with_opamp.yaml                   pwl            False        refused: device M1 (MosfetLevel1)
+examples/phase_shift_full_bridge.yaml          pwl            False        refused: extraction
+examples/pwm_chopper_realistic_mosfet.yaml     pwl            False        refused: device M1 (MosfetLevel1)
+examples/rc_circuit.yaml                       pwl            True         
+examples/rc_pulse.yaml                         pwl            True         
+examples/refrigerator_compressor_cc.yaml       -              v1           pulsim-v1 netlist, not loadable
+examples/rl_circuit.yaml                       pwl            True         
+examples/rlc_circuit.yaml                      pwl            True         
+examples/rlc_step_response.yaml                pwl            True         
+examples/stress_buck_switching.yaml            pwl            True         
+examples/stress_large_rc_ladder.yaml           pwl            True         
+examples/stress_large_resistive_ladder.yaml    pwl            False        refused: extraction
+examples/three_phase_diode_rectifier.yaml      pwl            True         
+examples/three_phase_inverter.yaml             pwl            True         
+examples/voltage_divider.yaml                  pwl            False        refused: extraction
+totals: False 12, True 13, v1 1
