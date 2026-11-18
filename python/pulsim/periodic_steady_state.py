@@ -292,12 +292,30 @@ def _schedule_edges(sf, t_lo, t_hi):
         t = e
 
 
+def _direct_source(obj):
+    """The one predicate for "follows a controller": a helper's
+    ``_closed_loop`` mark, a C++ schedule's ``follows_controller``
+    member, or a control graph's C++ gate / driven-source overlay."""
+    from ._pulsim import (  # type: ignore[import-not-found]
+        CxxChainBExtra, CxxChainPwmGate)
+    src = getattr(obj, "_closed_loop", None)
+    if isinstance(src, str):
+        return src
+    if getattr(obj, "follows_controller", False) is True:
+        return "make_combined_switch_fn with a control-graph gate in it"
+    if isinstance(obj, CxxChainPwmGate):
+        return "a control graph's PWM gate"
+    if isinstance(obj, CxxChainBExtra):
+        return "a control graph's driven-source overlay (b_extra_fn)"
+    return None
+
+
 def _closed_loop_source(sf):
-    """Where ``sf``'s gate comes from when it follows a controller: its
-    own ``_closed_loop`` mark, or one on an object its code closes over
-    or reads as a global (a hand-written gate around ``duty_get`` of
+    """Where ``sf`` comes from when it follows a controller (see
+    `_direct_source`), or what its code closes over or reads as a global
+    (a hand-written gate around ``duty_get`` of
     ``bind_pi_to_duty_callable``, a lambda around ``loop.switch_fn``)."""
-    src = getattr(sf, "_closed_loop", None)
+    src = _direct_source(sf)
     if src or not callable(sf):
         return src
     import inspect
@@ -306,8 +324,8 @@ def _closed_loop_source(sf):
     except (TypeError, ValueError):
         return None
     for v in (*cv.nonlocals.values(), *cv.globals.values()):
-        src = getattr(v, "_closed_loop", None)
-        if isinstance(src, str):
+        src = _direct_source(v)
+        if src:
             return src
     return None
 
@@ -421,10 +439,11 @@ def _check_circuit(builder, T, comps):
             raise _unsup(
                 "", device=c["name"],
                 kind=builder.pool.kind_of(c["branch_id"]).name, msg=
-                f"source {c['name']!r} is a {kind}: its edges are not "
-                "events of the exact stepper, so the one-period map "
-                "would not be computed exactly. Model the gate with a "
-                "switch and a schedule, or use a transient.")
+                f"source {c['name']!r} is a {kind}: the builder does not "
+                "expose its period, so the section cannot be checked to "
+                "be T-periodic, and the kernel period map behind the "
+                "design KPIs takes DC sources only. Model the gate with "
+                "a switch and a schedule, or use a transient.")
         why = _not_t_periodic(kind, c["params"], T)
         if why:
             raise _unsup(

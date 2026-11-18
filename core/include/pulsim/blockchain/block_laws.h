@@ -33,13 +33,17 @@ PL_INLINE double pl_clamp(double lo, double hi, double u) {
 /* cos and sin through volatile pointers: a compiler fuses cos(x) and
  * sin(x) into one sincos call, which differs from the two by an ulp on
  * some inputs (4 of 10^4 Park inputs on macOS arm64); Python calls
- * both, so the laws do too. */
+ * both, so the laws do too. The pointers name these wrappers, not the
+ * library's cos / sin: taking the address of a standard library
+ * function is unspecified in C++ (and cos may be a macro or overloaded). */
+PL_INLINE double pl_cos_call(double x) { return cos(x); }
+PL_INLINE double pl_sin_call(double x) { return sin(x); }
 PL_INLINE double pl_cos(double x) {
-    double (*volatile f)(double) = cos;
+    double (*volatile f)(double) = pl_cos_call;
     return f(x);
 }
 PL_INLINE double pl_sin(double x) {
-    double (*volatile f)(double) = sin;
+    double (*volatile f)(double) = pl_sin_call;
     return f(x);
 }
 

@@ -166,9 +166,48 @@ def test_every_block_kind_is_bit_identical_in_c(tmp_path):
         step(st, vin, t)
         want[k] = [kern.get(s) for s in ex.signals]
         got[k] = [get(st, j) for j in range(n)]
-    assert got.tobytes() == want.tobytes()
+    # cos / sin / fmod come from the C compiler's libm here and from the
+    # extension's in the kernel: on Windows MinGW's against MSVC's UCRT.
+    # Signals of the Park / PLL laws are bit-identical when the two libms
+    # agree on this run's values; otherwise within 1e-10 of their scale
+    # (an ulp per call over 1e4 steps is 2.2e-12; the PLL's integrators
+    # accumulate it, hence the margin: a judgement, not a derivation).
+    trig = [ex.signals.index(s) for s in ("th", "w", "f", "pd", "pq",
+                                          "pa", "pb")]
+    rest = [j for j in range(n) if j not in trig]
+    assert got[:, rest].tobytes() == want[:, rest].tobytes()
+    if _libm_agrees(tmp_path, want[:, ex.signals.index("th")]):
+        assert got[:, trig].tobytes() == want[:, trig].tobytes()
+    else:
+        scale = 1.0 + np.abs(want[:, trig]).max(axis=0)
+        assert np.all(np.abs(got[:, trig] - want[:, trig]) <= 1e-10 * scale)
     # every kind did something
     assert all(np.unique(want[:, j]).size > 1 for j in range(n))
+
+
+def _libm_agrees(tmp_path, xs) -> bool:
+    """Whether the C compiler's cos / sin / fmod give Python's (the
+    extension's libm) bit for bit on the values the test produced."""
+    src = tmp_path / "libm_probe.c"
+    src.write_text(
+        "#include <math.h>\n"
+        "double probe_cos(double x) { return cos(x); }\n"
+        "double probe_sin(double x) { return sin(x); }\n"
+        "double probe_fmod(double x, double y) { return fmod(x, y); }\n")
+    so = tmp_path / "libm_probe.so"
+    r = subprocess.run([_cc(), *FLAGS, str(src), "-o", str(so), "-lm"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    lib = ctypes.CDLL(str(so))
+    for f in (lib.probe_cos, lib.probe_sin):
+        f.restype, f.argtypes = ctypes.c_double, [ctypes.c_double]
+    lib.probe_fmod.restype = ctypes.c_double
+    lib.probe_fmod.argtypes = [ctypes.c_double, ctypes.c_double]
+    two_pi = 2.0 * math.pi
+    return all(lib.probe_cos(x) == math.cos(x) and
+               lib.probe_sin(x) == math.sin(x) and
+               lib.probe_fmod(x, two_pi) == math.fmod(x, two_pi)
+               for x in map(float, xs))
 
 
 def _pi_pwm(rate):
