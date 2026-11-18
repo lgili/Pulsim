@@ -540,7 +540,12 @@ inline SimulationResult run_transient_trbdf2(
 
     pwl::HistoryState history(graph, pool);
     pwl::DiodeEventState diodes(graph, pool);
-    const SwitchStateMask diode_owned = diodes.diode_owned_bits();
+    // Bits the solver owns outright; a gated device's bit is its gate,
+    // driven by switch_fn (add-pwl-igbt-and-thyristor).
+    const SwitchStateMask diode_owned =
+        diodes.diode_owned_bits().overlay(SwitchStateMask(
+            static_cast<std::size_t>(graph.num_switches())),
+            diodes.gated_bits());
     const bool has_diodes = diodes.entries().size() > 0;
 
     const Size state_size = pool.state_size(graph);
@@ -882,8 +887,7 @@ inline SimulationResult run_transient_trbdf2(
     auto mask_at = [&](Real at_t) {
         SwitchStateMask m = switch_fn(at_t);
         if (has_diodes) {
-            m = combine_masks(m, diodes.current_diode_mask(),
-                               diode_owned);
+            m = diodes.combine(m);
         }
         return m;
     };
@@ -1390,10 +1394,14 @@ inline SimulationResult run_transient_trbdf2(
     // turn-on: a 2.1e-11 s sample with Q1 ON and D1 ON, v_sw = +6 V
     // across two 1 mOhm stamps. The step start compares and settles.
     SwitchStateMask gates_decided = gate_prev;
+    // `b` is a stamped mask: a gated device's bit there is its conduction
+    // state, so its gate is compared with the gate it was decided under.
+    const SwitchStateMask gated = diodes.gated_bits();
     auto gates_differ = [&](const SwitchStateMask& a,
                             const SwitchStateMask& b) {
         for (const Size i : gate_bits) {
-            if (a.get(i) != b.get(i)) {
+            if (gated.get(i) ? a.get(i) != diodes.gate_of(i)
+                             : a.get(i) != b.get(i)) {
                 return true;
             }
         }
@@ -1536,7 +1544,10 @@ inline SimulationResult run_transient_trbdf2(
         // The toggle is at the edge, not at the next step's start
         // (t + dtp): dtp differs per edge and biased gate_pulse_min.
         if (learn_gates) {
-            learn_gate_toggles(m_probe, t);
+            // m_probe is a stamped mask: a gated device's bit there is its
+            // conduction state, not its gate.
+            learn_gate_toggles(diodes.num_gated() > 0 ? switch_fn(t_gates)
+                                                      : m_probe, t);
         }
         x = x_trial;
         x_sig = x;
@@ -1843,9 +1854,7 @@ inline SimulationResult run_transient_trbdf2(
             SwitchStateMask mask_step =
                 gates_flat ? sw_now : switch_fn(t + Real{0.5} * h);
             if (has_diodes) {
-                mask_step = combine_masks(
-                    mask_step, diodes.current_diode_mask(),
-                    diode_owned);
+                mask_step = diodes.combine(mask_step);
             }
 
             // ---- stage 1: TR over γh (or SDIRK stage 1, BE over γ_s h) ----

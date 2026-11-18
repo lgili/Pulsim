@@ -600,12 +600,46 @@ inline void load_device(
             real_or(dev, "g_on_diode",   Real{1e3}),
             real_or(dev, "g_off_diode",  Real{1e-9}));
     } else if (type == "igbt") {
+        // add-pwl-igbt-and-thyristor: V_ce0, reverse_blocking (default
+        // False, True when V_ce0 > 0 — the builder's stage-1 default).
+        const Real V_ce0 = real_or(dev, "V_ce0", Real{0});
         b.add_igbt(
             name,
             require_string(dev, idx, type, "collector"),
             require_string(dev, idx, type, "emitter"),
             real_or(dev, "R_on",  Real{10e-3}),
-            real_or(dev, "R_off", Real{1e9}));
+            real_or(dev, "R_off", Real{1e9}),
+            V_ce0,
+            bool_or(dev, "reverse_blocking", V_ce0 > Real{0}),
+            real_or(dev, "V_th", Real{0}));
+    } else if (type == "thyristor" || type == "gto" || type == "triac") {
+        const bool tri = type == "triac";
+        const bool gto = type == "gto";
+        if (gto) {
+            require_only_keys(dev, idx, type,
+                              {"anode", "cathode", "R_on", "R_off", "V_f", "V_th"});
+        } else if (tri) {
+            require_only_keys(dev, idx, type,
+                              {"t1", "t2", "R_on", "R_off", "V_f", "I_H", "V_th"});
+        } else {
+            require_only_keys(dev, idx, type, {"anode", "cathode", "R_on",
+                                               "R_off", "V_f", "I_H", "V_th"});
+        }
+        const std::string a = require_string(dev, idx, type, tri ? "t1" : "anode");
+        const std::string k = require_string(dev, idx, type, tri ? "t2" : "cathode");
+        const Real R_on = real_or(dev, "R_on", Real{1e-3});
+        const Real R_off = real_or(dev, "R_off", Real{1e9});
+        const Real V_f = real_or(dev, "V_f", Real{0});
+        const Real V_th = real_or(dev, "V_th", Real{0});
+        if (gto) {
+            b.add_gto(name, a, k, R_on, R_off, V_f, V_th);
+        } else if (tri) {
+            b.add_triac(name, a, k, R_on, R_off, V_f,
+                        real_or(dev, "I_H", Real{0}), V_th);
+        } else {
+            b.add_thyristor(name, a, k, R_on, R_off, V_f,
+                            real_or(dev, "I_H", Real{0}), V_th);
+        }
     } else if (type == "transformer") {
         b.add_transformer(
             name,
@@ -906,7 +940,7 @@ inline void load_device(
             "inductor, saturable_inductor, hysteretic_inductor, "
             "diode, nonlinear_diode (retired; needs allow_non_passive), switch, "
             "mosfet, mosfet_with_body_diode, mosfet_level1, "
-            "power_mosfet, igbt, igbt_level1, vcvs, vccs, ccvs, cccs, gyrator, "
+            "power_mosfet, igbt, igbt_level1, thyristor, gto, triac, vcvs, vccs, ccvs, cccs, gyrator, "
             "sine_current_source, pulse_current_source, "
             "pwl_current_source, op_amp_ideal, "
             "gapped_core_inductor, transformer, multi_winding_transformer, "

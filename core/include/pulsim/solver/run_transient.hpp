@@ -651,7 +651,6 @@ inline SimulationResult run_transient(
         // carry (size-checked by name inside).
         diodes.restore_on_bits(resume_snap->diode_on);
     }
-    const auto diode_owned = diodes.diode_owned_bits();
     const bool has_diodes = diodes.num_diodes() > 0;
 
     // add-branch-form-ideal-switch D3: the per-mode structural pass, run
@@ -819,8 +818,7 @@ inline SimulationResult run_transient(
         // start mask (diodes OFF) can be a false floating island (review
         // L2). On a failed solve the start mask's check names the cause.
         const auto dc_start_mask = has_diodes
-            ? combine_masks(switch_fn(opts.t_start),
-                            diodes.current_diode_mask(), diode_owned)
+            ? diodes.combine(switch_fn(opts.t_start))
             : switch_fn(opts.t_start);
         auto dc = [&] {
             try {
@@ -1175,9 +1173,7 @@ inline SimulationResult run_transient(
             const bool seeded =
                 initial_state != nullptr || resume_snap != nullptr;
             stamped_mask = has_diodes
-                    ? combine_masks(switch_fn(opts.t_start),
-                                    diodes.current_diode_mask(),
-                                    diode_owned)
+                    ? diodes.combine(switch_fn(opts.t_start))
                     : switch_fn(opts.t_start);
             stamped_known = !seeded;
             result.record_switch_state(stamped_mask,
@@ -1441,9 +1437,7 @@ inline SimulationResult run_transient(
                 ++result.split_event_overflows;
             }
             if (has_diodes) {
-                mask_pre = combine_masks(
-                    mask_pre, diodes.current_diode_mask(),
-                    diode_owned);
+                mask_pre = diodes.combine(mask_pre);
             }
 
             // Accumulate b_extra into the reused buffer (audit #6), in the
@@ -1531,17 +1525,12 @@ inline SimulationResult run_transient(
             do {
                 auto mask = gate_at(restart_rule ? gate_t : at_t);
                 if (has_diodes) {
-                    const auto diode_mask =
-                        diodes.current_diode_mask();
-                    mask = combine_masks(mask, diode_mask,
-                                          diode_owned);
+                    mask = diodes.combine(mask);
                 }
                 bool released = false;
                 while (structure.active() && check_mode(mask, true, at_t)) {
                     released = true;
-                    mask = combine_masks(gate_at(restart_rule ? gate_t : at_t),
-                                         diodes.current_diode_mask(),
-                                         diode_owned);
+                    mask = diodes.combine(gate_at(restart_rule ? gate_t : at_t));
                 }
                 // A release back onto a mask already solved this step is the
                 // loop forward-biasing the diode: refuse rather than let the
@@ -2773,10 +2762,7 @@ inline SimulationResult run_transient(
             do {
                 auto mask = gate_at(gate_t);
                 if (has_diodes) {
-                    const auto diode_mask =
-                        diodes.current_diode_mask();
-                    mask = combine_masks(mask, diode_mask,
-                                          diode_owned);
+                    mask = diodes.combine(mask);
                 }
                 // Phase-0 fix #9: a repeated mask within one step's
                 // event iteration is a CYCLE (mask A -> B -> A ...,

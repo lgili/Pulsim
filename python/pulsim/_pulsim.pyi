@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class ConvergenceError(RuntimeError):
@@ -400,6 +400,10 @@ class CircuitBuilder:
         """
         Saturable inductor on a gapped core from geometry: N turns, Ae [m^2], le [m], TOTAL gap lg [m], initial mu_r, B_sat [T] (= mu0*Ms, the datasheet value). lambda(i) is generated from Ampere's law by sweeping the core field through M = Ms*tanh(H/H0), with exact slopes.
         """
+    def add_gto(self, name: str, anode: str, cathode: str, R_on: float = 0.001, R_off: float = 1000000000.0, *, V_f: float = 0.0, V_th: float = 0.0) -> CircuitBuilder:
+        """
+        Add a PWL GTO: conducts i = (v - V_f)/R_on > 0 while its mask bit (the gate-drive state) is on; the bit off turns it off whatever the current.
+        """
     def add_gyrator(self, name: str, p1_pos: str, p1_neg: str, p2_pos: str, p2_neg: str, g: float) -> CircuitBuilder:
         """
         Gyrator: i1 = g*v2, i2 = -g*v1 [S], currents INTO p1_pos and p2_pos. Lossless; an impedance Z on one port appears as 1/(g^2 Z) on the other (a capacitor C as an inductor C/g^2). res.i(name, port=1|2).
@@ -416,9 +420,9 @@ class CircuitBuilder:
         """
         Add an IDEAL transformer: v_s = n*v_p, i_p = -n*i_s, n = N_s/N_p. The secondary is the branch (i(name) is its current); the primary is a node pair receiving the reflected current. It transforms DC -- add a magnetising inductance across the primary if the real device has one.
         """
-    def add_igbt(self, name: str, collector: str, emitter: str, R_on: float = 0.01, R_off: float = 1000000000.0) -> CircuitBuilder:
+    def add_igbt(self, name: str, collector: str, emitter: str, R_on: float = 0.01, R_off: float = 1000000000.0, *, V_ce0: float = 0.0, reverse_blocking: bool | None = None, V_th: float = 0.0) -> CircuitBuilder:
         """
-        Add an IGBT as a controlled switch (collector → emitter). Defaults: R_on=10mΩ, R_off=1GΩ. No anti-parallel diode by default.
+        Add a PWL IGBT (collector → emitter), its mask bit the gate. reverse_blocking=True: ON while the gate is on and i = (v_CE - V_ce0)/R_on > 0, turned on at v_CE >= max(V_th, V_ce0); conduction power V_ce0*i + R_on*i^2. reverse_blocking=False: a switch that conducts both ways (V_ce0 must be 0). Not given: False with a FutureWarning (True when V_ce0 > 0). V_ce0, R_on: a straight line through two points of the datasheet V_CE(I_C) curve. No anti-parallel diode: add_diode(..., V_f=...) separately.
         """
     def add_igbt_level1(self, name: str, collector: str, emitter: str, gate: str, V_CE_sat: float = 1.5, R_CE_sat: float = 0.05, V_T: float = 5.0, kappa: float = 10.0, v_knee: float = 0.01, with_fwd: bool = False, tau_tail: float = 0.0, k_tail: float = 0.0, V_F: float = 0.7) -> CircuitBuilder:
         """
@@ -545,6 +549,10 @@ class CircuitBuilder:
         """
         Add a controlled switch (driven by switch_fn at simulation time).
         """
+    def add_thyristor(self, name: str, anode: str, cathode: str, R_on: float = 0.001, R_off: float = 1000000000.0, *, V_f: float = 0.0, I_H: float = 0.0, V_th: float = 0.0) -> CircuitBuilder:
+        """
+        Add a PWL thyristor (SCR), its mask bit the gate: fires when the gate is on and v_AK >= max(V_th, V_f), conducts i = (v - V_f)/R_on, stays on while i > 0 (gate on) or i > I_H (gate off). Turn-off is the engine's current-crossing event. V_f, R_on, I_H: datasheet V_T0, r_T, I_H.
+        """
     def add_transformer(self, name: str, p_from: str, p_to: str, s_from: str, s_to: str, L_p: float, L_s: float, k: float = 1.0) -> CircuitBuilder:
         """
         Add a two-winding linear transformer. Creates two coupled inductors with mutual inductance M = k·√(L_p·L_s). k=1 (default) for ideal coupling; k∈[0.9, 0.99] for realistic leakage.
@@ -573,6 +581,10 @@ class CircuitBuilder:
         internal nodes ``{name}.n{k}``; ``{name}.ret`` (0 V source) joins
         ``m_neg`` to ``k_neg`` when they differ (the return conductor's
         impedance is lumped into the forward one).
+        """
+    def add_triac(self, name: str, t1: str, t2: str, R_on: float = 0.001, R_off: float = 1000000000.0, *, V_f: float = 0.0, I_H: float = 0.0, V_th: float = 0.0) -> CircuitBuilder:
+        """
+        Add a PWL TRIAC: two anti-parallel thyristors `<name>_fwd` (t1 -> t2) and `<name>_rev` (t2 -> t1), one gate bit each: switch_indices_of(name).
         """
     def add_vccs(self, name: str, in_pos: str, in_neg: str, n_pos: str, n_neg: str, gm: float) -> CircuitBuilder:
         """
@@ -721,6 +733,10 @@ class CircuitBuilder:
         branches (MOSFET / IGBT / binary diode / explicit
         add_switch) in builder-call order. Raises
         out_of_range if `name` is a passive or source.
+        """
+    def switch_indices_of(self, name: str) -> list[int]:
+        """
+        Mask bit positions of a device: [i] for a switch or diode, [i_fwd, i_rev] for a TRIAC.
         """
     def update_capacitor_C(self, name: str, new_C_farads: float) -> None:
         """
@@ -3185,6 +3201,10 @@ def _cpp_ps_pwm_switching_function(m_ref: float, t: float, n_sm: int, f_carrier:
     """
     C++ hotpath: PS-PWM switching function — returns the integer count of SMs to insert at time `t` given the modulation reference `m_ref`. Equivalent to `ps_pwm_switching_function` in pulsim/mmc.py.
     """
+def _gated_capabilities() -> dict[typing.Any, typing.Any]:
+    """
+    The gated PWL devices' engine column (add-pwl-igbt-and-thyristor): {'GateHeld'|'Latching': {engine: bool}}; False refuses with UnsupportedError(feature='gated_diode').
+    """
 def _lcp_enumerate(M: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], q: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> tuple[int, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]]:
     """
     2^k enumeration (k <= 12): (number of solutions, z, w) with the fewest basic z.
@@ -3292,6 +3312,10 @@ def make_constant_switch_fn(mask: SwitchStateMask) -> SwitchSchedule:
 def make_dead_time_pwm_pair_fn(frequency: float, duty: float, hs_switch_idx: int, ls_switch_idx: int, num_switches: int, dead_time: float, phase: float = 0.0) -> SwitchSchedule:
     """
     Build a SwitchSchedule driving a complementary HS/LS half-bridge pair at `frequency` with `duty` and symmetric `dead_time` inserted at each commutation. Shoot-through is prevented by construction (HS and LS are never both ON). Other switch bits stay OFF.
+    """
+def make_phase_control_fn(frequency: float, alpha: float, width: float, switch_indices: collections.abc.Sequence[int], num_switches: int, phase: float = 0.0) -> SwitchSchedule:
+    """
+    Firing schedule of a p-pulse line-commutated converter (p = len(switch_indices)): gate k is ON for `width` seconds from (phase + alpha + k*2*pi/p) / (2*pi*frequency), every line period. alpha, phase in radians; phase puts gate 0's natural commutation instant (alpha = 0) on the line. A SwitchSchedule (edges known to every engine).
     """
 def make_phase_shift_full_bridge_fn(switching_frequency: float, phase_shift: float, leg_a_hs_idx: int, leg_a_ls_idx: int, leg_b_hs_idx: int, leg_b_ls_idx: int, num_switches: int, dead_time: float, carrier_phase: float = 0.0) -> SwitchSchedule:
     """

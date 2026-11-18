@@ -618,8 +618,15 @@ or settles a mode its law forbids raises a named error
 (`DiodeModeInconsistentError` for the latter). For a band, build the device from `add_switch` and
 `add_diode(V_th=V_f + 1e-3, V_f=...)`. The composites keep a fixed
 1 mΩ diode slope (`g_on_diode` only on `add_mosfet_with_body_diode`).
-`add_igbt` is still a bidirectional switch with no knee and no diode;
-`add_igbt_level1` is the IGBT that blocks reverse current.
+`add_igbt(..., V_ce0=, reverse_blocking=True)` is the PWL IGBT with a
+knee that blocks reverse current (no diode: add one); `add_igbt` with
+`reverse_blocking` unset is still the bidirectional switch for this
+release (`FutureWarning`). The gated PWL devices (IGBT with reverse
+blocking, GTO, thyristor, TRIAC) run on `pwl` and `trbdf2` and are
+refused by name on `dsed` and `bdf1`. The deprecated Python thyristor
+closure `make_thyristor_switch_fn` with `i_holding = 0` turns off only
+if a sample lands within 1 pA of the current zero (60 Hz half-wave at
+dt = 10 µs: −2.140 V mean instead of 29.699 V); use `add_thyristor`.
 
 ## Open OpenSpec proposals as of v1.3.0
 

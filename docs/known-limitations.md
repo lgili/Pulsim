@@ -85,6 +85,22 @@ ideal elements and voltage sources with `feature='ideal_voltage_loop'`.
 | Diode | yes | no | no | no | no |
 <!-- branch-form-capabilities:end -->
 
+The gated PWL devices are a form of the Diode row with their own column
+(`add_igbt(reverse_blocking=True)` and `add_gto`: GateHeld;
+`add_thyristor` and `add_triac`: Latching); "no" raises
+`UnsupportedError(feature='gated_diode')`. Not modelled: turn-off time
+`t_q` and commutation failure, dv/dt and break-over firing, a latching
+current distinct from `I_H`, gate power, reverse recovery and switching
+energies. `I_H > 0` chops an inductive current into `R_off` (a voltage
+`I_H·R_off` without a snubber).
+
+<!-- gated-capabilities:begin -->
+| Form | pwl | trbdf2 | dsed | bdf1 | ac_sweep |
+|---|---|---|---|---|---|
+| GateHeld | yes | yes | no | no | yes |
+| Latching | yes | yes | no | no | yes |
+<!-- gated-capabilities:end -->
+
 Circuit-level limits, also raised as `UnsupportedError` (with `feature`
 set): coupled inductors (`add_transformer`, `add_inductor_coupling`) on
 `dsed` and `bdf1`; PWL diodes with `integrator='bdf2'` on `dsed`;

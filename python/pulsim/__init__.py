@@ -86,6 +86,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     load_yaml_file,
     # Source helpers (Layer 2 V5+).
     make_pwm_switch_fn,
+    make_phase_control_fn,
     make_constant_switch_fn,
     make_dead_time_pwm_pair_fn,
     make_spwm_pair_fn,
@@ -535,6 +536,7 @@ __all__ = [
     "NativeMultiMaskPwm",
     "wire_chain_from_yaml",
     "make_pwm_switch_fn",
+    "make_phase_control_fn",
     "make_constant_switch_fn",
     "make_dead_time_pwm_pair_fn",
     "make_spwm_pair_fn",
