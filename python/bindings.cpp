@@ -4380,6 +4380,12 @@ void init_module(py::module_& m) {
                 throw std::runtime_error(
                     std::string("SolverSnapshot: malformed pickle state (a "
                                 "field has the wrong type): ") + e.what());
+              } catch (py::error_already_set& e) {
+                // a field that is not a sequence where one is read (tuple(bool))
+                if (!e.matches(PyExc_TypeError)) throw;
+                throw std::runtime_error(
+                    std::string("SolverSnapshot: malformed pickle state (a "
+                                "field has the wrong type): ") + e.what());
               }
             }));
 
