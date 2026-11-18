@@ -208,3 +208,26 @@ with a 1.1e5 V forward violation on D_fw at the held state, the slow-manifold pr
 L_o through g_off, and the guard judges the projected trajectory (200 checks, 0 repairs); the
 shadow LCP picks D_fw ON (0.014 V). pwl at the netlist dt reads 0.707 on the same cell, pwl at
 dt/10 0.032. The conformance coupled-inductor cell now requires dsed to agree.
+
+## Dependent states (2026-11-17)
+
+| Question | Option taken | Evidence | How to reverse |
+|---|---|---|---|
+| A mode whose algebraic block is singular (a capacitor loop, an inductor cut-set) | The general dense reduction (`compute_lti_state_space`, `general`): the same states as the structural path (capacitor forest by the same BFS and orientation, then every inductor), M̃ẏ + G̃y + ũ = 0 reduced with the rank-revealing SVD of G_aa: K·x = k on the states (K = WᵀG_as), the hidden constraint K·ẋ = 0 fixing the null part of the algebraic unknowns, flow ẋ = Π·f. `ContinuousLTI` gains `constraint_K`, `constraint_k`, `energy_weight` (C; L with its mutual terms), `constraint_devices`, `state_labels` (empty / 0 rows on every structural mode). A parallel-capacitor loop is reduced the same way (one capacitor a link). A time-varying source on a constraint is refused (its derivative would drive the state) | Closed forms in `test_exact_dependent_states.py` below; parallel capacitors 1 µF @ 10 V ∥ 3 µF @ 2 V start at 4.0 V and follow 4 e^(−t/4 ms) to 1e-12 (was refused); a floating C1 ∥ C2 charge follows 10(1 − e^(−t/6 ms)) to 3e-14 | Restore the two throws (`capacitors form a cycle`, `G_aa is singular`) |
+| The rank decision | On the equilibrated block Dr·G_aa·Dc (rows, then columns, to a unit largest entry), in both paths: the structural path's sparse LU accepts a cancellation pivot (g − g·g/g of a series resistor closing an inductor cut-set: R = 9.999999999999982 Ω gave A = −7.2e19 s⁻¹ instead of the cut-set), so after G_aa⁻¹ it computes cond₁ of the equilibrated block and sends the mode to the general path past the SVD's cut 1/(4·max(n,16)·ε); the general SVD runs on the same equilibrated block (generalized inverse Dc·Gs⁺·Dr, null spaces Dr·U₀ and Dc·V₀) | Rounding fuzz: 20 last-bit perturbations of R in the switched cut-set → one event sequence and the same records (2 of 20 lost both records before the cut) | Drop the cond₁ check |
+| Inconsistent state at a mode entry | Projected onto K·x = k, energy-weighted: x⁺ = x − E⁻¹Kᵀλ, λ = (KE⁻¹Kᵀ)⁻¹(Kx − k) — the closest consistent state in energy, conserving the charge of a capacitor loop and the flux of an inductor cut-set, ΔW = ½(Kx − k)ᵀλ lost. Applied at every mode entry whatever `enable_event_projection` says (scheduler.hpp `project_` calls it before its early return; scheduler_auto.hpp at t = 0 and every gate edge, the stored edge sample keeping the pre-projection state as its left limit) | `test_two_capacitors_share_their_charge`: 1.5 µF @ 8 V and 0 V tied by a 0 V source → both 4.000000 V, then 4 e^(−t/3 ms) to 1e-9; `test_an_inductor_cut_set_takes_the_current_to_zero` (2 A in 1 mH behind a 0 A source → i = 0); `test_a_switch_that_cuts_an_inductor_records_the_flux` (g_off = 0: each turn-off cuts the closed-form on-current, right limit 0) | Remove the `reinit_to_constraint` calls |
+| The impulse record | `result.reinit_records` (dsed / exact; absent on pwl / trbdf2): the fixed engine's ReinitRecord fields (feat/core-a-ideal-switch D4) — t, kind ("cut_set" \| "capacitor_loop"), devices (the algebraic rows that carry the constraint), states, `lambda_` (signed, the row scaled to a unit largest coefficient with its first state positive: C or V·s), dW (J, ≥ 0), projection_gap (max \|K·x⁺ − k\| after the projection: the exact engine has no step to compare against), sample (the stored left-limit sample, or −1). One record per eigen-direction of KE⁻¹Kᵀ whose residual is above 1e-9 of its scale | Oracles: λ = 6.000000 µC, ΔW = 24.00000 µJ, sample 0; \|Λ\| = L·i = 2 mV·s, ΔW = ½Li² = 2 mJ; conformance cell `test_reinit_records_only_on_the_exact_engine` | Drop the field in `_dsed_dispatch.py` |
+
+Cells moved (dsed, strict gate, refused → new): inductor_chain_step 4.9e-7,
+motor_induction_locked_rotor 1.6e-6 (agree); npc_three_level_halfbridge 0.58,
+half_bridge_inverter_lc 0.0037, t_type_3level_halfbridge 0.0089, half_bridge_transformer_dc
+0.035 (disagree, frozen with their cause). The four are split DC-link capacitors across the
+source, and the reference does not start from the netlist: pwl and trbdf2 store V(vcc) = one
+capacitor's ic at t = 0 and the source then splits the missing volts (V(mid) +12 V on the NPC);
+dsed starts consistent (V(vcc) = Vdc, both ic honoured, no record). pwl at dt/40 started from
+dsed's consistent state agrees with dsed on the NPC (8.0e-5) and the LC half bridge (2.6e-5)
+and converges on it at half order on the T-type (dt/10 0.028, dt/40 0.014, dt/160 0.0071);
+on half_bridge_transformer_dc it does not (0.0036, 0.0045, 0.0076: open). The route report's
+three-phase overlap bridge (DC current source in series with the line inductors) now extracts
+and stops on the diode law (`DiodeModeInconsistentError`, Dta at 126 µs, also on
+mode_selection='lcp'): the cut-set projection is not yet part of the diode selection.

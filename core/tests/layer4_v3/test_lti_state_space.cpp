@@ -439,13 +439,13 @@ TEST_CASE("compute_lti_state_space rejects 3-inductor triangle loop "
         std::runtime_error);
 }
 
-TEST_CASE("compute_lti_state_space rejects parallel capacitors",
+TEST_CASE("compute_lti_state_space extracts parallel capacitors with a constraint",
            "[bridge][lti][floating-cap]") {
-    // Two caps sharing both terminals = a cycle in the cap-edge graph.
-    // BFS can only include one as a tree edge; the other is detected
-    // and we throw a clear error pointing to the workaround
-    // (merge them into a single equivalent cap upstream).
-
+    // Two caps sharing both terminals = a cycle in the cap-edge graph: the
+    // general reduction keeps one state on the capacitor forest (C2 is
+    // recovered from it), so no constraint row is left: one RC of
+    // R1 + R2 = 20 Ω on C1 + C2 = 3 µF, energy weight C1 + C2 (before
+    // add-exact-propagator-strategy step 2b this mode was refused).
     builder::CircuitBuilder b;
     b.add_voltage_source("V1", "vin", "gnd", Real{5});
     b.add_resistor("R1",       "vin", "n1",  Real{10});
@@ -457,9 +457,11 @@ TEST_CASE("compute_lti_state_space rejects parallel capacitors",
     cache.build(Real{1e-6});
 
     SwitchStateMask m(0);
-    REQUIRE_THROWS_AS(
-        cache.compute_lti_state_space(m),
-        std::runtime_error);
+    const auto lti = cache.compute_lti_state_space(m);
+    REQUIRE(lti.A.rows() == 1);
+    CHECK(lti.constraint_K.rows() == 0);
+    CHECK(lti.A(0, 0) == Approx(-1.0 / (20.0 * 3e-6)).epsilon(1e-9));
+    CHECK(lti.energy_weight(0, 0) == Approx(3e-6).epsilon(1e-12));
 }
 
 TEST_CASE("compute_lti_state_space extracts magnetically coupled circuits",

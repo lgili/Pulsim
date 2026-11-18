@@ -92,15 +92,18 @@ def test_coupled_inductors_route_exact():
     assert (rep["exact"], rep["reason"]) == (True, None)
 
 
-def test_inductor_cut_set_is_not_exact_extraction():
-    # the three-phase overlap family: a DC current source in series with the line inductors
-    # (an inductor cut-set) -- dsed refuses its extraction today, so it is not exact-eligible
-    rep = p.exact_route(B.FAMILIES["bridge3_overlap"].builder(0.0), 0.02)
-    assert (rep["exact"], rep["reason"]) == (False, "extraction")
+def test_inductor_cut_set_stops_on_the_diode_law():
+    # the three-phase overlap family: a DC current source in series with the line inductors.
+    # The extraction takes it now (dependent states), but the diode settle picks a mode its law
+    # forbids at 126 us (on mode_selection='lcp' too): a named error, never a route verdict.
+    from pulsim._dsed_dispatch import DiodeModeInconsistentError
+    with pytest.raises(DiodeModeInconsistentError, match="Dta"):
+        p.exact_route(B.FAMILIES["bridge3_overlap"].builder(0.0), 0.02)
 
 
-def test_floating_capacitor_loop_is_not_exact_extraction():
-    # C1 || C2 between two non-ground nodes: a capacitor loop the extractor cannot reduce
+def test_floating_capacitor_loop_routes_exact():
+    # C1 || C2 between two non-ground nodes: a capacitor loop, reduced by the general path
+    # (one capacitor a link); the run follows 10 (1 - exp(-t / 6 ms)) to 3e-14
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "a", "gnd", 10.0)
     b.add_resistor("R1", "a", "x", 1e3)
@@ -108,7 +111,7 @@ def test_floating_capacitor_loop_is_not_exact_extraction():
     b.add_capacitor("C2", "x", "y", 2e-6)
     b.add_resistor("R2", "y", "gnd", 1e3)
     rep = p.exact_route(b, 1e-3)
-    assert (rep["exact"], rep["reason"]) == (False, "extraction")
+    assert (rep["exact"], rep["reason"]) == (True, None)
 
 
 def test_pwm_voltage_source_routes_exact():

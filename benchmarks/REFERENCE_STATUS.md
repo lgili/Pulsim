@@ -20,7 +20,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | pwl+restart | 83 | 16 | 7 | 0 | 2 |
 | pwl+split | 84 | 15 | 7 | 0 | 2 |
 | trbdf2 | 97 | 2 | 1 | 6 | 2 |
-| dsed | 88 | 1 | 0 | 17 | 2 |
+| dsed | 90 | 5 | 0 | 11 | 2 |
 
 ### Fixed engine: restart rule and split (circuits where any of the three does not agree)
 
@@ -80,6 +80,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | linear/current_source_rl_step.yaml | pwl | 0.001 | 0.00577 | V(out) | 0.00577 | 0.0% |  |  |
 | linear/rl_natural_response.yaml | pwl | 0.001 | 0.00577 | V(node) | 0.00577 | 0.0% |  |  |
 | magnetics/half_bridge_transformer_dc.yaml | pwl | 0.02 | 0.151 | V(out) | 0.15 | 2.5% | 9.2e-06 | 92 |
+| magnetics/half_bridge_transformer_dc.yaml | dsed | 0.001 | 0.0348 | V(out) | 0.0348 | 0.0% | 2e-05 |  |
 | magnetics/transformer_leakage.yaml | pwl | 0.001 | 0.0041 | V(sec) | 0.0041 | 0.0% |  |  |
 | magnetics/transformer_leakage.yaml | pwl+restart | 0.001 | 0.00409 | V(sec) | 0.00409 | 0.0% |  |  |
 | magnetics/transformer_leakage.yaml | pwl+split | 0.001 | 0.00409 | V(sec) | 0.00409 | 0.0% |  |  |
@@ -103,6 +104,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/buck/ll08_buck_mosfet.yaml | pwl+restart | 0.02 | 0.0842 | V(gate) | 0.0386 | 3.2% | 2.1e-07 | 1.1 |
 | switching/buck/ll08_buck_mosfet.yaml | pwl+split | 0.02 | 0.0842 | V(gate) | 0.0218 | 3.2% | 2e-07 | 1 |
 | switching/buck/ll08_buck_mosfet.yaml | trbdf2 | 0.001 | 0.00231 | V(sw) | 0.00178 | 0.0% | 9.6e-09 |  |
+| switching/inverter/half_bridge_inverter_lc.yaml | dsed | 0.001 | 0.00369 | V(load) | 0.00369 | 0.0% | 9.6e-13 |  |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | pwl | 0.02 | 0.0707 | V(ctrl_hi) | 0.0125 | 2.0% | 2.3e-12 | 9.1e-06 |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | pwl+restart | 0.02 | 0.0587 | V(ctrl_lo) | 0.0054 | 2.0% | 2.5e-07 | 1 |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | pwl+split | 0.02 | 0.0587 | V(ctrl_lo) | 0.0054 | 2.0% | 2.5e-07 | 1 |
@@ -129,9 +131,11 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/multilevel/mmc_4cell_chain.yaml | pwl | 0.02 | 0.0268 | V(out) | 1.54e-08 | 0.4% | 1e-12 | 5e-06 |
 | switching/multilevel/mmc_4cell_chain.yaml | pwl+restart | 0.02 | 0.0264 | V(out) | 3.21e-21 | 0.4% | 2e-07 | 1 |
 | switching/multilevel/mmc_4cell_chain.yaml | pwl+split | 0.02 | 0.0264 | V(out) | 3.21e-21 | 0.4% | 2e-07 | 1 |
+| switching/multilevel/npc_three_level_halfbridge.yaml | dsed | 0.001 | 0.58 | V(n_lo) | 0.58 | 0.0% | 0.00043 |  |
 | switching/multilevel/t_type_3level_halfbridge.yaml | pwl | 0.02 | 0.0749 | V(out) | 0.000758 | 2.0% | 1.2e-13 | 5.9e-07 |
 | switching/multilevel/t_type_3level_halfbridge.yaml | pwl+restart | 0.02 | 0.0738 | V(out) | 1.31e-06 | 2.0% | 2e-07 | 1 |
 | switching/multilevel/t_type_3level_halfbridge.yaml | pwl+split | 0.02 | 0.0738 | V(out) | 1.31e-06 | 2.0% | 2e-07 | 1 |
+| switching/multilevel/t_type_3level_halfbridge.yaml | dsed | 0.001 | 0.00887 | V(out) | 0.00887 | 0.0% | 1.2e-13 |  |
 | three_phase/three_phase_diode_rectifier.yaml | pwl | 0.02 | 1.51 | V(out) | 1.52 | 8.0% | 0.071 | 1.4e+03 |
 
 ### All cells (err_rms or outcome)
@@ -171,12 +175,12 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | linear/voltage_divider_3stage.yaml | 0 | 0 | 0 | 0 | 0 |
 | magnetics/core_loss_steinmetz_sine.yaml | 0.000228 | 0.000227 | 0.000227 | 0.000123 | 3.5e-06 |
 | magnetics/coupled_inductor_step.yaml | 0.00032 | 0.00032 | 0.00032 | 3.76e-06 | 6.72e-06 |
-| magnetics/half_bridge_transformer_dc.yaml | 0.151 | 0.000459 | 0.000459 | 2.37e-05 | refused |
-| magnetics/inductor_chain_step.yaml | 0.00231 | 5.34e-06 | 5.34e-06 | 9.05e-07 | refused |
+| magnetics/half_bridge_transformer_dc.yaml | 0.151 | 0.000459 | 0.000459 | 2.37e-05 | 0.0348 |
+| magnetics/inductor_chain_step.yaml | 0.00231 | 5.34e-06 | 5.34e-06 | 9.05e-07 | 4.89e-07 |
 | magnetics/transformer_leakage.yaml | 0.0041 | 0.00409 | 0.00409 | 0.000231 | 3.11e-05 |
 | magnetics/transformer_step_up.yaml | 4.64e-06 | 4.64e-06 | 4.64e-06 | 0 | 5.1e-06 |
 | motors/motor_dc_brush_step_load.yaml | 0.000289 | 4.5e-07 | 4.5e-07 | 6.06e-06 | 3.62e-07 |
-| motors/motor_induction_locked_rotor.yaml | 2.25e-06 | 2.25e-06 | 2.25e-06 | 5.1e-05 | refused |
+| motors/motor_induction_locked_rotor.yaml | 2.25e-06 | 2.25e-06 | 2.25e-06 | 5.1e-05 | 1.63e-06 |
 | motors/motor_pmsm_dq_open_loop.yaml | 0.000177 | 4.81e-07 | 4.81e-07 | 6.51e-06 | 4.45e-07 |
 | resonance/bode_rlc_low_pass.yaml | 0 | 0 | 0 | 0 | 0 |
 | resonance/driven_lc_series_resonance.yaml | 0.000771 | 0.000771 | 0.000771 | 0.000217 | 2.13e-06 |
@@ -224,7 +228,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/buck_boost/cuk_converter.yaml | unverified | unverified | unverified | unverified | unverified |
 | switching/buck_boost/sepic.yaml | unverified | unverified | unverified | unverified | unverified |
 | switching/inverter/half_bridge_inverter.yaml | 0.000376 | 1.16e-06 | 1.16e-06 | 9.06e-07 | 1.2e-06 |
-| switching/inverter/half_bridge_inverter_lc.yaml | 0.00103 | 7.93e-06 | 7.93e-06 | 0.000304 | refused |
+| switching/inverter/half_bridge_inverter_lc.yaml | 0.00103 | 7.93e-06 | 7.93e-06 | 0.000304 | 0.00369 |
 | switching/inverter/half_bridge_lc_filter.yaml | 0.00131 | 1.11e-06 | 1.11e-06 | 5e-06 | 1.48e-06 |
 | switching/inverter/lcc_resonant_inverter.yaml | 0.00565 | 0.000232 | 0.000232 | 8.37e-05 | 8.81e-05 |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | 0.0707 | 0.0587 | 0.0587 | 4.27e-05 | 0.000167 |
@@ -239,8 +243,8 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/multilevel/cascaded_h_bridge_5level.yaml | 0.0274 | 0.0269 | 0.0269 | 0 | 5.69e-05 |
 | switching/multilevel/flying_capacitor_3level.yaml | 0.0466 | 0.05 | 0.05 | 6.78e-05 | 3.71e-05 |
 | switching/multilevel/mmc_4cell_chain.yaml | 0.0268 | 0.0264 | 0.0264 | 0 | 5.74e-05 |
-| switching/multilevel/npc_three_level_halfbridge.yaml | 0.000937 | 1.79e-06 | 1.79e-06 | 1.71e-06 | refused |
-| switching/multilevel/t_type_3level_halfbridge.yaml | 0.0749 | 0.0738 | 0.0738 | 0.000108 | refused |
+| switching/multilevel/npc_three_level_halfbridge.yaml | 0.000937 | 1.79e-06 | 1.79e-06 | 1.71e-06 | 0.58 |
+| switching/multilevel/t_type_3level_halfbridge.yaml | 0.0749 | 0.0738 | 0.0738 | 0.000108 | 0.00887 |
 | thermal/electrothermal_resistor_self_heating.yaml | 0 | 0 | 0 | 0 | 0 |
 | thermal/long_run_drift_buck.yaml | 0.000603 | 1.12e-05 | 1.12e-05 | 2.58e-06 | 1.07e-05 |
 | three_phase/interleaved_buck_3ph.yaml | 0.00217 | 0.00249 | 1.75e-06 | 6.65e-08 | 2.2e-07 |

@@ -905,6 +905,13 @@ def run_dsed_from_builder(
                 res.exact["auto_would_route"] = bool(res.exact["segments"]) and all(
                     seg["exact"] for seg in res.exact["segments"])
             res.initial_condition_adjustment = ic_adjustment
+            # dependent states: the impulsive re-initialisations at mode entry,
+            # with the fixed engine's ReinitRecord fields (lambda as lambda_)
+            from types import SimpleNamespace
+            res.reinit_records = [
+                SimpleNamespace(**{("lambda_" if k == "lambda" else k): v
+                                   for k, v in r.items()})
+                for r in native_res.get("reinit_records", [])]
             et = native_res.get("event_times")
             res.event_times = (None if et is None
                                else np.asarray(et) + float(opts.t_start))

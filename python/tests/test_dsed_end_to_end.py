@@ -17,7 +17,6 @@ Verifies:
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 
 def _make_buck_ccm(V_in: float = 24.0,
@@ -332,9 +331,11 @@ def test_dsed_simulate_handles_npc_split_bus():
     assert abs(abs(v2) - V_dc / 2) < 5.0
 
 
-def test_dsed_simulate_rejects_parallel_caps():
-    """Parallel caps form a cycle in the cap-edge graph; the extractor
-    rejects them with a clear error pointing to the workaround."""
+def test_dsed_simulate_runs_parallel_caps():
+    """Parallel caps form a cycle in the cap-edge graph; the extractor's
+    general reduction keeps one as a state (add-exact-propagator-strategy
+    DECISIONS, dependent states): the 3 uF charge through 20 Ohm, tau 60 us
+    (it was refused before)."""
     import pulsim as p
     b = p.CircuitBuilder()
     b.add_voltage_source("V1", "vin", "gnd", 5.0)
@@ -343,9 +344,10 @@ def test_dsed_simulate_rejects_parallel_caps():
     b.add_capacitor("C2",      "n1",  "n2",  2e-6)   # PARALLEL
     b.add_resistor("R2",       "n2",  "gnd", 10.0)
 
-    with pytest.raises((RuntimeError, NotImplementedError),
-                       match=r"(?i)parallel|cycle|cap"):
-        p.simulate(b, t_end=1e-3, engine='dsed', integrator='rk45')
+    r = p.simulate(b, t_end=1e-3, engine='dsed', integrator='rk45')
+    t = np.asarray(r.times)
+    v = np.asarray(r.v("n1")) - np.asarray(r.v("n2"))
+    assert np.abs(v - 5.0 * (1 - np.exp(-t / 60e-6))).max() < 1e-6
 
 
 # ---------------------------------------------------------------------------

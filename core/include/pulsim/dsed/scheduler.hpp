@@ -986,6 +986,12 @@ private:
     /// Consistent reinitialisation (event_projection.hpp), through the
     /// System's cached eigenbasis when it has one.
     void project_(Real t, Vector& x) {
+        // dependent states first, whatever the event projection says: an
+        // inconsistent state is not a state of the mode (DECISIONS,
+        // dependent states)
+        if constexpr (requires { system_.reinit_to_constraint(t, x); }) {
+            system_.reinit_to_constraint(t, x);
+        }
         if constexpr (HasABInterface<System>) {
             if (!enable_event_projection_) {
                 return;

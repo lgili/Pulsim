@@ -296,18 +296,20 @@ def test_floating_capacitor_initial_voltage():
     assert abs(v[-1] - vt[-1]) < 1e-6
 
 
-def test_inconsistent_parallel_capacitors_are_refused_by_name():
-    # Parallel capacitors (1 uF at 10 V, 3 uF at 2 V) are a capacitor
-    # loop; the LTI extractor refuses every capacitor loop, so the
-    # charge-conserving start (4.0 V) is not reachable through
-    # simulate() yet. It must be a named refusal, never a wrong start.
+def test_inconsistent_parallel_capacitors_start_charge_conserving():
+    # Parallel capacitors (1 uF at 10 V, 3 uF at 2 V) are a capacitor loop: the extractor's
+    # general reduction keeps one as a state (add-exact-propagator-strategy DECISIONS, dependent
+    # states) and the builder ICs map to the charge-conserving start, 4.0 V (it was refused by
+    # name before), then the 4 uF discharge through 1 kOhm.
     b = p.CircuitBuilder()
     b.add_capacitor("C1", "a", "gnd", 1e-6, c0=10.0)
     b.add_capacitor("C2", "a", "gnd", 3e-6)
     b.set_initial("C2", 2.0)
     b.add_resistor("R", "a", "gnd", 1e3)
-    with pytest.raises(p.UnsupportedError, match="capacitors form a cycle"):
-        _run(b, t_end=1e-4)
+    r = _run(b, t_end=1e-4)
+    t, v = np.asarray(r.times), np.asarray(r.v("a"))
+    np.testing.assert_allclose(v, 4.0 * np.exp(-t / 4e-3), rtol=1e-12, atol=1e-12)
+    assert r.initial_condition_adjustment == pytest.approx(6.0)
 
 
 def test_consistent_initial_conditions_report_no_adjustment():
