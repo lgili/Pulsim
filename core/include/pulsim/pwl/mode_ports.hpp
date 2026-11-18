@@ -32,10 +32,14 @@
 // its terminals, so a bus fed by one to ground is not seen as an island
 // (accuracy only: no correction is made, none is wrong).
 //
-// Conductance-form diodes only (R_on = 1/g_on > 0): a branch-form diode is
-// reported through `branch_form_diode()` and handled by the caller.
+// Branch-form diodes (add-branch-form-ideal-switch 6.1) are ports with their
+// own R_on; an ideal one (R_on = 0) has no ON conductance to cut, so the
+// caller poses the site with it OFF (`ideal(j)`: the selector's OFF
+// coordinates) and the LCP reads its crossing signals directly: the port
+// current i_s when it conducts, the gap w = V_f − v when it blocks.
 // =============================================================================
 
+#include "pulsim/events/islands.hpp"
 #include "pulsim/events/mode_refusal.hpp"
 #include "pulsim/events/mode_selector.hpp"
 #include "pulsim/models/switched_diode.hpp"
@@ -73,9 +77,11 @@ public:
                 branch_form_ = std::string(graph.branch_name(d.branch_id));
             }
             nodes_.emplace_back(d.from, d.to);
+            // a branch-form diode's own R_on (0: ideal, posed in OFF
+            // coordinates by the selector, cut out of the site's mask)
             ports_.push_back(events::DiodePort{
-                d.var >= 0 ? Real{0} : Real{1} / d.g_on, d.g_off, d.V_f,
-                d.V_th});
+                d.var >= 0 ? pool.branch_R_on(d.branch_id) : Real{1} / d.g_on,
+                d.g_off, d.V_f, d.V_th});
         }
     }
 
@@ -86,9 +92,13 @@ public:
     [[nodiscard]] const std::vector<events::DiodePort>& ports() const noexcept {
         return ports_;
     }
+    /// Port j is an ideal diode (R_on = 0): posed OFF in the site's mask.
+    [[nodiscard]] bool ideal(std::size_t j) const noexcept {
+        return ports_[j].R_on == Real{0};
+    }
     [[nodiscard]] Size solves() const noexcept { return solves_; }
     /// Islands corrected so far (one per island and port problem).
-    [[nodiscard]] Size island_corrections() const noexcept { return island_fixes_; }
+    [[nodiscard]] Size island_corrections() const noexcept { return corr_.fixes(); }
 
     /// Pass 0: the k-port of the site's own system J(mask, dt)·s =
     /// −(b_c + b_extra) — the cache's direct solve of that (mask, dt), then
@@ -98,19 +108,24 @@ public:
         const auto& isl = islands_(mask);
         const Vector& b_c = bconst_(mask);
         cache_.solve_at(mask, dt, b_extra, sol_);
-        auto solve = [&](const Vector& rhs, Vector& out) {
-            cache_.solve_at(mask, dt, rhs, out);
-        };
-        prepare_(isl, b_c, solve);
+        corr_.prepare(isl, [&](Index ref, Vector& w) {
+            rhs_ = -b_c;
+            rhs_[ref] -= Real{1};          // J·w = e_ref (the cache adds b_c)
+            cache_.solve_at(mask, dt, rhs_, w);
+        });
         // Σ_S f, f = −(b_c + b_extra): the exact sum of the given rows.
-        fix_(isl, sol_, [&](const Island& s) { return -exact_sum_(s, b_c, &b_extra); });
+        corr_.fix(isl, sol_, [&](const events::Island& s) {
+            return -events::island_exact_sum(s, b_c, &b_extra);
+        });
         ports_of_(sol_, u);
         Z.resize(static_cast<Index>(nodes_.size()),
                  static_cast<Index>(nodes_.size()));
         for (std::size_t j = 0; j < nodes_.size(); ++j) {
             unit_rhs_(b_c, j, rhs_);   // J·s = −E_j
             cache_.solve_at(mask, dt, rhs_, sol_);
-            fix_(isl, sol_, [&](const Island& s) { return unit_sum_(s, j); });
+            corr_.fix(isl, sol_, [&](const events::Island& s) {
+                return events::island_unit_sum(s, nodes_[j].first, nodes_[j].second);
+            });
             column_(sol_, j, Z);
         }
         solves_ += nodes_.size() + 1 + isl.size();
@@ -169,15 +184,6 @@ public:
     }
 
 private:
-    /// A floating island under one mask: `g` is its KCL sum as a row over
-    /// the unknowns, from the boundary branches alone.
-    struct Island {
-        Index ref = -1;                          // the correction's injection row
-        std::vector<std::pair<Index, Real>> g;   // (column, Σ boundary conductance)
-        std::vector<char> in;                    // in[node]
-        std::vector<Index> nodes;
-    };
-
     /// Per-mask memo bound: a long run on many diodes visits many masks;
     /// past this many the memo starts over (only b_c and the island lists
     /// are kept, both cheap to rebuild).
@@ -195,177 +201,15 @@ private:
         return it->second;
     }
 
-    /// The islands of `mask` (empty when the circuit holds a device kind
-    /// the rule does not classify, or none floats). Ported from the dsed
-    /// adapter's `port_islands_of_` (c4255226); kept separate because that
-    /// one is a private member of the dsed adapter (unify in Phase 3).
-    const std::vector<Island>& islands_(const topology::SwitchStateMask& mask) {
+    /// The islands of `mask` (events/islands.hpp, shared with dsed): empty
+    /// when the circuit holds a device kind the rule does not classify.
+    const std::vector<events::Island>& islands_(const topology::SwitchStateMask& mask) {
         auto it = islands_cache_.find(mask);
         if (it != islands_cache_.end()) return it->second;
-        std::vector<Island> out;
-        const Index nn = graph_.num_nodes();
-        std::vector<Index> up(static_cast<std::size_t>(nn + 1));   // nn = ground
-        for (Index i = 0; i <= nn; ++i) up[static_cast<std::size_t>(i)] = i;
-        auto root = [&](Index i) {
-            Index r = i < 0 ? nn : i;
-            while (up[static_cast<std::size_t>(r)] != r) r = up[static_cast<std::size_t>(r)];
-            return r;
-        };
-        auto join = [&](Index a, Index b) { up[static_cast<std::size_t>(root(a))] = root(b); };
-        struct Weak { Index a, b; Real g; };
-        std::vector<Weak> weak;
-        using K = DevicePool::StoredKind;
-        bool known = true;
-        Size sw = 0;
-        for (Index b = 0; b < graph_.num_branches() && known; ++b) {
-            const auto& br = graph_.branch(b);
-            if (!pool_.is_registered(b)) { known = false; break; }
-            const K kind = pool_.kind_of(b);
-            if (br.kind == topology::BranchKind::Switch) {
-                const bool on = mask.get(sw++);
-                if (kind == K::Diode || kind == K::Switch) {
-                    if (on) join(br.from, br.to);
-                    else weak.push_back({br.from, br.to, kind == K::Diode
-                        ? pool_.diode_params(b).g_off : pool_.switch_g_off(b)});
-                } else {
-                    known = false;
-                }
-                continue;
-            }
-            switch (kind) {
-            case K::Resistor: {
-                const Real g = pool_.resistor_params(b).G;
-                if (std::abs(g) <= kWeakResistor) weak.push_back({br.from, br.to, g});
-                else join(br.from, br.to);
-                break;
-            }
-            case K::Capacitor: case K::Inductor: case K::VoltageSource:
-            case K::PWMVoltageSource: case K::SineVoltageSource: case K::PulseVoltageSource:
-            case K::CurrentSource: case K::SineCurrentSource: case K::PulseCurrentSource:
-            case K::PwlCurrentSource:
-                // strong, or a source: no source sits on an island's boundary
-                join(br.from, br.to);
-                break;
-            default:
-                known = false;
-            }
-        }
-        if (known) {
-            std::vector<Index> rt(static_cast<std::size_t>(nn));
-            std::unordered_map<Index, Index> size;
-            for (Index i = 0; i < nn; ++i) ++size[rt[static_cast<std::size_t>(i)] = root(i)];
-            const Index gr = root(-1);
-            std::unordered_map<Index, std::size_t> slot;
-            for (Index i = 0; i < nn; ++i) {
-                const Index r = rt[static_cast<std::size_t>(i)];
-                if (r == gr || size[r] < 2) continue;   // grounded, or nothing internal
-                auto [s, fresh] = slot.try_emplace(r, out.size());
-                if (fresh) {
-                    out.emplace_back();
-                    out.back().ref = i;
-                    out.back().in.assign(static_cast<std::size_t>(nn), 0);
-                }
-                out[s->second].in[static_cast<std::size_t>(i)] = 1;
-                out[s->second].nodes.push_back(i);
-            }
-            for (auto& isl : out) {
-                std::unordered_map<Index, Real> col;
-                for (const auto& w : weak) {
-                    const bool ia = w.a >= 0 && isl.in[static_cast<std::size_t>(w.a)];
-                    const bool ib = w.b >= 0 && isl.in[static_cast<std::size_t>(w.b)];
-                    if (ia == ib) continue;   // internal, or not touching the island
-                    const Index i = ia ? w.a : w.b, o = ia ? w.b : w.a;
-                    col[i] += w.g;
-                    if (o >= 0) col[o] -= w.g;
-                }
-                isl.g.assign(col.begin(), col.end());
-                std::sort(isl.g.begin(), isl.g.end());   // a fixed summation order
-            }
-            std::erase_if(out, [](const Island& isl) { return isl.g.empty(); });
-        }
         if (islands_cache_.size() >= kMemoMasks) islands_cache_.clear();
-        return islands_cache_.emplace(mask, std::move(out)).first->second;
-    }
-
-    /// w = J⁻¹·e_ref and κ = g·w per island, for the current (mask, dt).
-    template <class Solve>
-    void prepare_(const std::vector<Island>& isl, const Vector& b_c, Solve&& solve) {
-        ws_.resize(isl.size());
-        kap_.resize(isl.size());
-        for (std::size_t m = 0; m < isl.size(); ++m) {
-            rhs_ = -b_c;
-            rhs_[isl[m].ref] -= Real{1};          // J·w = e_ref
-            solve(rhs_, ws_[m]);
-            kap_[m] = dot_(isl[m], ws_[m]);
-        }
-        // Several islands: K(m, n) = g_m·w_n is the identity in exact
-        // arithmetic (disjoint islands, g_m sums J's rows over S_m), but
-        // behind a 1e7 Ω tie the off-diagonal rounding moved two buses
-        // joined by 1 MΩ by 6.5e-9 V when corrected one after another.
-        joint_ok_ = false;
-        if (isl.size() > 1) {
-            const auto k = static_cast<Index>(isl.size());
-            DenseMatrix K(k, k);
-            for (Index m = 0; m < k; ++m)
-                for (Index n = 0; n < k; ++n)
-                    K(m, n) = dot_(isl[static_cast<std::size_t>(m)],
-                                   ws_[static_cast<std::size_t>(n)]);
-            if (K.allFinite()) {
-                joint_lu_.compute(K);
-                joint_ok_ = std::isfinite(joint_lu_.rcond()) && joint_lu_.rcond() > Real{0};
-            }
-        }
-    }
-
-    /// Impose each island's KCL sum on s, a solution of J·s = f with
-    /// Σ_S f = src(island).
-    template <class Src>
-    void fix_(const std::vector<Island>& isl, Vector& s, Src&& src) {
-        if (isl.size() > 1 && joint_ok_) {   // else: one after another, as dsed (#30)
-            Vector sig(static_cast<Index>(isl.size()));
-            for (std::size_t m = 0; m < isl.size(); ++m)
-                sig[static_cast<Index>(m)] = dot_(isl[m], s) - src(isl[m]);
-            const Vector a = joint_lu_.solve(sig);
-            for (std::size_t m = 0; m < isl.size(); ++m) s -= ws_[m] * a[static_cast<Index>(m)];
-            island_fixes_ += isl.size();
-            return;
-        }
-        for (std::size_t m = 0; m < isl.size(); ++m) {
-            const Real sig = dot_(isl[m], s) - src(isl[m]);
-            if (kap_[m] != Real{0} && std::isfinite(kap_[m])) {
-                s -= ws_[m] * (sig / kap_[m]);
-                ++island_fixes_;
-            }
-        }
-    }
-
-    static Real dot_(const Island& isl, const Vector& s) {
-        Real a = Real{0};
-        for (const auto& [j, g] : isl.g) a += g * s[j];
-        return a;
-    }
-
-    /// Σ over the island's rows of b_c (+ b_extra), summed exactly
-    /// (Neumaier): the rows are O(C/dt·v) and cancel to the island's net.
-    static Real exact_sum_(const Island& isl, const Vector& b_c, const Vector* b2) {
-        Real s = Real{0}, c = Real{0};
-        auto add = [&](Real v) {
-            const Real t = s + v;
-            c += std::abs(s) >= std::abs(v) ? (s - t) + v : (v - t) + s;
-            s = t;
-        };
-        for (const Index i : isl.nodes) {
-            add(b_c[i]);
-            if (b2) add((*b2)[i]);
-        }
-        return s + c;
-    }
-
-    /// Σ_S of −E_j (the unit injection of port j).
-    [[nodiscard]] Real unit_sum_(const Island& isl, std::size_t j) const {
-        const auto [a, c] = nodes_[j];
-        return Real((c >= 0 && isl.in[static_cast<std::size_t>(c)]) ? 1 : 0)
-             - Real((a >= 0 && isl.in[static_cast<std::size_t>(a)]) ? 1 : 0);
+        return islands_cache_
+            .emplace(mask, events::find_islands(graph_, pool_, mask, kWeakResistor))
+            .first->second;
     }
 
     [[nodiscard]] Real vp_(const Vector& s, std::size_t j) const {
@@ -400,13 +244,10 @@ private:
     std::vector<events::DiodePort> ports_;
     std::string branch_form_;
     std::unordered_map<topology::SwitchStateMask, Vector> bconst_cache_;
-    std::unordered_map<topology::SwitchStateMask, std::vector<Island>> islands_cache_;
-    std::vector<Vector> ws_;
-    std::vector<Real> kap_;
-    Eigen::PartialPivLU<DenseMatrix> joint_lu_;
-    bool joint_ok_ = false;
+    std::unordered_map<topology::SwitchStateMask, std::vector<events::Island>> islands_cache_;
+    events::IslandCorrection corr_;
     Vector rhs_, sol_;
-    Size solves_ = 0, island_fixes_ = 0;
+    Size solves_ = 0;
 };
 
 /// Structural passivity at the diode ports (design D3), the dsed adapter's
@@ -455,8 +296,9 @@ inline int judge_mode(const DiodeEventState& diodes, const std::vector<char>& on
     for (std::size_t j = 0; j < es.size(); ++j) {
         const auto& d = es[j];
         const auto p = d.params();
-        const Real v = stamping::read_node_voltage(x, d.from) -
-                       stamping::read_node_voltage(x, d.to);
+        // the law's own reading: v_a − v_k, or V_f + i_s for an ON
+        // branch-form diode (g_on = 1 there: i is the solved current)
+        const Real v = d.law_voltage(x, on[j] != 0);
         Real viol;
         bool bad;
         if (on[j]) {
@@ -473,6 +315,45 @@ inline int judge_mode(const DiodeEventState& diodes, const std::vector<char>& on
     if (worst) *worst = w;
     if (worst_j) *worst_j = wj;
     return ok ? 1 : 0;
+}
+
+/// The LCP of one decision site, engine-neutral (add-complementarity-mode-
+/// selection task 4.2; add-branch-form-ideal-switch 6.1). The site solves
+/// J(mask, for_dt)·s = −(b_c + b_extra) through `cache.solve_at` — pwl's
+/// trapezoidal step, a restart stage on the factor of 2γh, a split sub-step,
+/// the static step (for_dt = 0); trbdf2 calls it with its own stage's
+/// (mask, dt, b_extra). `mask_of(on)` overlays diode bits `on` (diode order)
+/// on the site's gates; `prev_on` the bits the site starts from; `x0` the
+/// state at its start (the circuit scales); `h_site` the step the tie
+/// tolerance divides by. The selector poses every pass on the site's own
+/// (Z, u) (DECISIONS F2); an ideal diode is cut out of it (OFF coordinates);
+/// the judge reads the engine's own solve of each candidate.
+/// `Z`, `u`, `xj`, `coords`: caller scratch (no allocation once sized).
+template <class MaskOf>
+[[nodiscard]] events::ModeSelection select_site(
+    events::ModeSelector& sel, PwlModePorts& ports, const PwlStateSpaceCache& cache,
+    const DiodeEventState& diodes, MaskOf&& mask_of, const std::vector<char>& prev_on,
+    const Vector& x0, Real for_dt, Real h_site, const Vector& b_extra,
+    DenseMatrix& Z, Vector& u, Vector& xj, std::vector<char>& coords) {
+    coords.assign(prev_on.size(), 0);
+    for (std::size_t j = 0; j < prev_on.size(); ++j)
+        coords[j] = ports.ideal(j) ? 0 : prev_on[j];
+    const auto mask0 = mask_of(coords);
+    const auto sc = ports.scale(x0);
+    bool have_site = false;
+    auto port_at = [&](Real, DenseMatrix& Zp, Vector& up) {
+        if (!have_site) {
+            ports.site(mask0, for_dt, b_extra, Z, u);
+            have_site = true;
+        }
+        Zp = Z;
+        up = u;
+    };
+    auto judge = [&](const std::vector<char>& on) {
+        cache.solve_at(mask_of(on), for_dt, b_extra, xj);
+        return judge_mode(diodes, on, xj, sc, sel.tol);
+    };
+    return sel.select(ports.ports(), prev_on, port_at, h_site, sc, judge);
 }
 
 }  // namespace pulsim::pwl

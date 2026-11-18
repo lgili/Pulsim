@@ -881,6 +881,10 @@ inline SimulationResult run_transient(
     // run_restart): x1, its diode bits and the histories at x0.
     Vector rs_x1, rs_x2;
     std::vector<bool> rs_bits, rs_bits2, rs_bits_be, rs_solved2;
+    // The diode bits after stage 1 of a restart that starts at the step
+    // start: a branch-form flip already there was forced at t_prev.
+    std::vector<bool> rs_bits_first;
+    bool rs_first_valid = false;
     std::vector<Real> rs_hist;
     std::vector<pwl::NonlinearCapacitorHistory::Entry> rs_coss;
     std::vector<pwl::LauritzenDiodeHistory::Entry> rs_laur;
@@ -944,19 +948,14 @@ inline SimulationResult run_transient(
     Vector mode_x0, mode_xj, mode_u;
     DenseMatrix mode_Z;
     std::vector<bool> mode_bits0, mode_bits;
-    std::vector<char> mode_prev_on, mode_settled;
+    std::vector<char> mode_prev_on, mode_coords, mode_settled;
     if (has_diodes && (opts.mode_selection != 0 || opts.mode_guard)) {
         mode_ports.emplace(cache, graph, pool, diodes);
-        const std::string bf = mode_ports->branch_form_diode();
+        // A branch-form diode is a port of its own R_on (an ideal one is
+        // posed OFF: task 6.1). The default guard stays off on such circuits:
+        // it would change the numbers of a run that asked for nothing.
+        const bool bf = !mode_ports->branch_form_diode().empty() && opts.mode_selection == 0;
         const char* mname = opts.mode_selection == 1 ? "shadow" : "lcp";
-        if (opts.mode_selection != 0 && !bf.empty()) {
-            throw UnsupportedError(
-                "pwl", "mode_selection", bf, "Diode",
-                std::format("engine 'pwl': mode_selection='{}' with the branch-form "
-                            "diode '{}': its complementarity port is not wired on pwl "
-                            "yet (add-branch-form-ideal-switch task 6.1). Use "
-                            "form='conductance', or drop mode_selection.", mname, bf));
-        }
         if (opts.mode_selection != 0 && nl_refresh_effective) {
             throw UnsupportedError(
                 "pwl", "mode_selection", "", "",
@@ -973,7 +972,7 @@ inline SimulationResult run_transient(
                             "nothing is decided. Drop mode_selection or allow event "
                             "iterations.", mname));
         }
-        if (!bf.empty() || nl_refresh_effective || max_iters == 0) {
+        if (bf || nl_refresh_effective || max_iters == 0) {
             mode_ports.reset();
         } else {
             mode_passivity = pwl::passivity_of(graph, pool);
@@ -1042,29 +1041,18 @@ inline SimulationResult run_transient(
         const auto& es = diodes.entries();
         mode_prev_on.assign(es.size(), 0);
         for (std::size_t j = 0; j < es.size(); ++j) mode_prev_on[j] = mode_bits0[j] ? 1 : 0;
-        const auto mask0 = combine_masks(gates, mode_mask_of(mode_prev_on), diode_owned);
         const Real h_site = for_dt <= Real{0} ? Real{1} : be ? for_dt * Real{0.5} : for_dt;
-        const auto sc = mode_ports->scale(mode_x0);
         // Every pass, the selector's tie widenings included, is posed on the
         // site's own step (DECISIONS F2): the next site is one step away, and
         // a 100·h / 1e4·h backward-Euler look-ahead with the sources frozen
         // decided a floating bridge's ties on a trajectory that never happens.
-        bool have_site = false;
-        auto port_at = [&](Real, DenseMatrix& Z, Vector& u) {
-            if (!have_site) {
-                mode_ports->site(mask0, for_dt, bx, mode_Z, mode_u);
-                have_site = true;
-            }
-            Z = mode_Z;
-            u = mode_u;
-        };
-        auto judge = [&](const std::vector<char>& on) {
-            cache.solve_at(combine_masks(gates, mode_mask_of(on), diode_owned),
-                           for_dt, bx, mode_xj);
-            return pwl::judge_mode(diodes, on, mode_xj, sc, mode_selector.tol);
-        };
-        return mode_selector.select(mode_ports->ports(), mode_prev_on, port_at, h_site,
-                                    sc, judge);
+        // pwl::select_site is the engine-neutral driver trbdf2 calls too.
+        return pwl::select_site(
+            mode_selector, *mode_ports, cache, diodes,
+            [&](const std::vector<char>& on) {
+                return combine_masks(gates, mode_mask_of(on), diode_owned);
+            },
+            mode_prev_on, mode_x0, for_dt, h_site, bx, mode_Z, mode_u, mode_xj, mode_coords);
     };
     // 'lcp': the LCP decides the site; one solve under its mode. Returns
     // whether the mode changed from the start bits.
@@ -1076,10 +1064,50 @@ inline SimulationResult run_transient(
         const auto sel = mode_select(gates, for_dt, be, bx);
         mode_note(r, sel);
         r.port_solves = mode_ports->solves();
+        if (mode_failed(sel) && mode_Z.rows() == static_cast<Index>(mode_diode_names.size())) {
+            // An ideal port shorted by a loop (Z_jj = 0) that the loop
+            // forward-biases: refused by the name the settle's release uses.
+            const Real zs = std::max(Real{1}, mode_Z.cwiseAbs().maxCoeff());
+            const Real vs = mode_ports->scale(mode_x0).vscale;
+            for (std::size_t j = 0; j < mode_diode_names.size(); ++j) {
+                const auto jj = static_cast<Index>(j);
+                if (!mode_ports->ideal(j) || std::abs(mode_Z(jj, jj)) > Real{1e-12} * zs ||
+                    !(mode_u[jj] - mode_ports->ports()[j].V_f > mode_selector.tol * vs)) {
+                    continue;
+                }
+                throw UnsupportedError(
+                    "pwl", "ideal_voltage_loop", mode_diode_names[j], "Diode",
+                    std::format("engine 'pwl': at t = {} the ideal diode {} (R_on = 0) "
+                                "closes a loop of voltage sources and closed ideal "
+                                "elements that forward-biases it by {} V "
+                                "(mode_selection='lcp': no consistent mode): its "
+                                "current is undefined. Give it R_on > 0.",
+                                at_t, mode_diode_names[j],
+                                mode_u[jj] - mode_ports->ports()[j].V_f));
+            }
+        }
         events::raise_if_refused(sel, "pwl", at_t, mode_diode_names, mode_passivity);
         mode_bits.assign(sel.on.begin(), sel.on.end());
         diodes.restore_on_bits(mode_bits);
         const auto mask = combine_masks(gates, diodes.current_diode_mask(), diode_owned);
+        if (structure.active()) {
+            // The LCP releases an ideal diode a loop reverse-biases (Z_jj = 0,
+            // q_j > 0) and finds no mode when the loop forward-biases it, so a
+            // loop diode left ON here is a defect, not a mode to release.
+            const auto& ms = structure.check(mask, for_dt > Real{0});
+            result.mode_structure_checks = structure.checks_run();
+            if (!ms.loop_diodes.empty()) {
+                throw UnsupportedError(
+                    "pwl", "ideal_voltage_loop",
+                    std::string(graph.branch_name(ms.loop_diodes.front())), "Diode",
+                    std::format("engine 'pwl': at t = {} mode_selection='lcp' left the "
+                                "ideal diode '{}' ON in a loop of voltage sources and "
+                                "closed ideal elements (mode {}): its current is "
+                                "undefined. Give it R_on > 0.",
+                                at_t, graph.branch_name(ms.loop_diodes.front()),
+                                mask.to_string()));
+            }
+        }
         solve(mask, x);
         stamped_mask = mask;
         stamped_known = true;
@@ -1980,6 +2008,8 @@ inline SimulationResult run_transient(
                     ++result.mode_guard.checks;
                     const bool breach = flipped || (mask_cycle && !cycle_in);
                     if (breach) ++result.mode_guard.settle_caps;
+                    if (mask_cycle && !cycle_in) ++result.mode_guard.lcp.mask_cycles;
+                    result.mode_guard.lcp.settle_rounds_total += iters;
                     if (breach &&
                         mode_guard_site(at_t, gates, for_dt, backward_euler, b_extra,
                                         [&](const topology::SwitchStateMask& m, Vector& out) {
@@ -2023,6 +2053,10 @@ inline SimulationResult run_transient(
             // With the split a built-in source jump inside the step is an
             // event of its own; only one taken at t_prev (within snap
             // either side) restarts the step.
+            // a gate edge at the step start (stamps its forced flips there)
+            const bool edge_restart =
+                restart_rule && stamped_known && !(mask_pre == stamped_mask);
+            rs_first_valid = false;
             if (restart_rule &&
                 (!stamped_known || !(mask_pre == stamped_mask) ||
                  (has_jump_sources &&
@@ -2093,6 +2127,10 @@ inline SimulationResult run_transient(
                 if (has_diodes) {
                     rs_x1 = x;
                     diodes.snapshot_on_bits_into(rs_bits);
+                    if (t_from == t_prev) {
+                        rs_bits_first.assign(rs_bits.begin(), rs_bits.end());
+                        rs_first_valid = true;
+                    }
                     history.snapshot_into(rs_hist);
                     // assign() keeps the buffers' capacity (snapshot()
                     // returned a fresh vector per restart step).
@@ -2650,11 +2688,15 @@ inline SimulationResult run_transient(
                     }
                     if (has_ideal_diode && pool.is_branch_form(e.branch_id)) {
                         // shortcut: stamped at the step end, not interpolated;
-                        // the event split locates it when it is on.
+                        // the event split locates it when it is on. A flip a
+                        // gate edge forced in the restart's first stage is
+                        // stamped at the edge (t_prev).
                         if (static_cast<bool>(commut_on_prev[j]) != e.is_on) {
+                            const bool at_edge = edge_restart && rs_first_valid &&
+                                                 rs_bits_first[j] == e.is_on;
                             step_events.push_back(CommutationEvent{
-                                .t_estimated = t, .branch_id = e.branch_id,
-                                .new_state = e.is_on});
+                                .t_estimated = at_edge ? t_prev : t,
+                                .branch_id = e.branch_id, .new_state = e.is_on});
                         }
                         continue;
                     }

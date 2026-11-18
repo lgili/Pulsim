@@ -4,8 +4,8 @@
 
 The circuits are test_branch_form_switch.py's: the three-phase inverter (6 switches + 6 antiparallel
 diodes = 12 switching elements, 400 V, 10 kHz carrier, dt = 1 us, 4 ms) and the buck (switch +
-diode, T = 10 us, dt = T/100, 2 ms), each built in both forms, on pwl (the implicit trapezoid on
-the cache; trbdf2 refuses the branch form by name, so 7.2 cannot be measured yet).
+diode, T = 10 us, dt = T/100, 2 ms), each built in both forms, on every engine in ENGINES (7.1 pwl, 7.2 trbdf2;
+an engine that refuses a form by name prints the refusal instead of a ratio).
 ns/step is the median of REPS interleaved wall-clock runs divided by the stored steps; counters are from one run. 7.3: the flip
 is allowed only if the inverter's branch-form ns/step is at most 1.5x the conductance form's.
 """
@@ -20,6 +20,7 @@ import pulsim as p
 import test_branch_form_switch as T
 
 REPS = 7
+ENGINES = ("pwl", "trbdf2")
 
 
 def run(make, branch, engine):
@@ -47,14 +48,18 @@ def main():
     print("pulsim from", p.__file__)
     ratios = {}
     for name, make in (("inverter", T._inverter), ("buck", T._buck)):
-        for engine in ("pwl",):
+        for engine in ENGINES:
             walls = {False: [], True: []}
             res = {}
-            for _ in range(REPS):
-                for branch in (False, True):          # interleaved: same load on both
-                    r, w = run(make, branch, engine)
-                    walls[branch].append(w)
-                    res[branch] = r
+            try:
+                for _ in range(REPS):
+                    for branch in (False, True):      # interleaved: same load on both
+                        r, w = run(make, branch, engine)
+                        walls[branch].append(w)
+                        res[branch] = r
+            except p.UnsupportedError as e:
+                print(f"{name:9s} {engine:7s} refused: {e.feature} ({e.device})")
+                continue
             ns = {}
             for branch in (False, True):
                 c = counters(res[branch])
@@ -65,6 +70,9 @@ def main():
             ratios[(name, engine)] = ns[True] / ns[False]
             print(f"{name:9s} {engine:7s} branch / conductance = {ratios[(name, engine)]:.3f}")
     r = ratios[("inverter", "pwl")]
+    if ("inverter", "trbdf2") in ratios:
+        r2 = ratios[("inverter", "trbdf2")]
+        print(f"7.2 (12-switch inverter, trbdf2): {r2:.3f}")
     print(f"7.3 gate (12-switch inverter, pwl): {r:.3f} {'<=' if r <= 1.5 else '>'} 1.5 -> "
           f"{'flip allowed' if r <= 1.5 else 'flip held'}")
 

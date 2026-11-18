@@ -1495,6 +1495,11 @@ class ReinitRecord:
     One impulsive re-initialisation (add-branch-form-ideal-switch D4): kind 'cut_set' (lambda = flux, V*s) or 'capacitor_loop' (lambda = charge, C); dW the energy removed [J]; sample the stored sample of the step that carried the pulse (-1: not stored).
     """
     @property
+    def cause(self) -> str:
+        """
+        The switch the impulsive energy dW is booked to (pulsim.losses.impulse_losses).
+        """
+    @property
     def dW(self) -> float:
         ...
     @property

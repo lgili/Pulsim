@@ -256,7 +256,8 @@ inline int enumerate_lcp(const DenseMatrix& M, const Vector& q, Vector& z,
     return count;
 }
 
-/// One diode port in the conductance form (D1, R_on = 1/g_on).
+/// One diode port (D1): the conductance form has R_on = 1/g_on; a branch-form
+/// diode its own R_on, 0 for the ideal diode (posed in OFF coordinates).
 struct DiodePort {
     Real R_on;
     Real g_off;
@@ -391,7 +392,7 @@ public:
         // (5e11: ±0.5 V on a 1e-11 V pair of turn-offs).
         constexpr bool kAnchored = std::is_invocable_v<PortFn&, Real, const std::vector<char>&,
                                                        DenseMatrix&, Vector&>;
-        anchor_ = prev_on;
+        coords_of_(ports, prev_on, anchor_);
         prev_ = &prev_on;   // valid during this call only (read by solve_with_hysteresis_)
         for (int pass = 0; pass < 3; ++pass) {
             Real h = h_e * factors[pass];
@@ -404,7 +405,7 @@ public:
                     mode[j] = st_[j] > 0 ? 1 : 0;
                     decided[j] = st_[j] >= 0 ? 1 : 0;
                 }
-                if constexpr (kAnchored) anchor_ = mode;
+                if constexpr (kAnchored) coords_of_(ports, mode, anchor_);
                 const Real cap = Real{0.5} * horizon(mode, decided);
                 if (cap < h) {
                     h = cap;
@@ -503,6 +504,21 @@ public:
     [[nodiscard]] const Vector& last_gap() const noexcept { return wg_; }
 
 private:
+    // The coordinates the port problem is posed in: the given mode, except
+    // that an ideal port (R_on = 0, add-branch-form-ideal-switch 6.1) is
+    // always in OFF coordinates (z = i, ŵ = w): ON, it is a constraint, not
+    // a conductance, so hybrid_lcp's ON row (1/R_on) does not exist and the
+    // caller cuts it out of the network (Z, u) instead. A port shorted by a
+    // loop of sources and closed ideal elements then has Z_jj = 0: OFF when
+    // the loop reverse-biases it (q_j > 0, the release of DECISIONS #12), no
+    // solution when it forward-biases it. R_on > 0 ports keep their mode.
+    static void coords_of_(const std::vector<DiodePort>& ports,
+                           const std::vector<char>& mode, std::vector<char>& out) {
+        out = mode;
+        for (std::size_t j = 0; j < ports.size(); ++j)
+            if (ports[j].R_on == Real{0}) out[j] = 0;
+    }
+
     // Principal pivot of (H_, q_) from the previous mode's coordinates to
     // coord_ (z_j = w_j where coord_ is 1, i_j where 0). False when the
     // pivot block is singular.
