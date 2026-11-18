@@ -93,3 +93,27 @@ def test_a_give_up_on_the_native_adapter_does_not_fall_through_to_the_next_bridg
     with pytest.raises(p.ConvergenceError, match="max-step cap"):
         p.simulate(b, t_end=1e-3, engine="exact")
     assert calls == []
+
+
+def test_an_untyped_kernel_error_after_extraction_is_not_rerun_numerically(monkeypatch):
+    # Review of batch 9: any RuntimeError of the native exact run (a root finder that did not
+    # converge, a singular static mode) fell through to Bridge.10 on a diode-free circuit.
+    calls = []
+
+    def boom(*a, **k):
+        raise RuntimeError("EventPredictor: root finder did not converge")
+
+    def bridge10(*a, **k):
+        calls.append(1)
+        raise AssertionError("fell through to Bridge.10")
+    for name in ("run_ped_native_builder", "run_bdf2_native_builder", "run_auto_native_builder"):
+        monkeypatch.setattr(p._pulsim, name, boom)
+    for name in ("run_ped_native", "run_bdf2_native", "run_auto_native"):
+        monkeypatch.setattr(p._pulsim, name, bridge10)
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_resistor("R", "in", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    with pytest.raises(RuntimeError, match="root finder"):
+        p.simulate(b, t_end=1e-3, engine="exact")
+    assert calls == []
