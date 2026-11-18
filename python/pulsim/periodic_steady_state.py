@@ -423,10 +423,11 @@ def _check_circuit(builder, T, comps):
             raise _unsup(
                 "", device=c["name"],
                 kind=builder.pool.kind_of(c["branch_id"]).name, msg=
-                f"source {c['name']!r} is a {kind}: its edges are not "
-                "events of the exact stepper, so the one-period map "
-                "would not be computed exactly. Model the gate with a "
-                "switch and a schedule, or use a transient.")
+                f"source {c['name']!r} is a {kind}: the builder does not "
+                "expose its period, so the section cannot be checked to "
+                "be T-periodic, and the kernel period map behind the "
+                "design KPIs takes DC sources only. Model the gate with "
+                "a switch and a schedule, or use a transient.")
         why = _not_t_periodic(kind, c["params"], T)
         if why:
             raise _unsup(

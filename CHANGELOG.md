@@ -26,6 +26,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Optimisation slice 6: the kernel batch evaluator, event losses on the orbit
 
+* **Added** the kernel batch evaluator: `Evaluator.evaluate_many` (new
+  default `backend=None`) runs a circuit-form evaluator with declarative
+  KPIs on the exact steady-state route as one kernel call
+  (`_pulsim._design_batch`) on `workers` native threads with the GIL
+  released: derivation, orbit, integrals, losses, KPIs, energy balance,
+  constraints and status per design, no Python per design. Records equal
+  `evaluate()`'s bit for bit. Buck Pareto, 4096 designs, load 15-19 on
+  10 cores: 10022 / 15502 / 21621 / 25369 evaluations/s on 1 / 2 / 4 / 8
+  threads (the Python thread path: 3597 / 2391 / 2286 / 2405). A design
+  the kernel does not finish, and every design of an evaluator the plan
+  cannot express, runs on the Python path with the reason in
+  `counters['batch']`; `backend='kernel'` refuses instead;
+  `ev.last_batch` counts both.
+* **Added** `Kpi.formula(name, expr)`: a declarative arithmetic KPI over
+  KPIs, design variables and `loss.<device>`. The buck example's volume
+  and heatsink KPIs are formulas now (same records).
+* **Added** `ThermalSpec(mode="kernel")`, the default on the exact
+  steady-state route: the switching / recovery tables are re-read at
+  every commutation of the fixed orbit (turn-on: `v` before, `i` after;
+  turn-off the reverse) and `T_j = T_amb + R_th P(T_j)` is solved in C++
+  (`_pulsim._junction_fixed_point`) to 1e-9 K; `R_th dP/dT_j >= 1` is an
+  `infeasible` `thermal_runaway`. `mode="fixed_point"` keeps the damped
+  loop. `ThermalSpec(conduction=...)` heats the junction from an on-state
+  table linear in `i`. Synthetic tables throughout.
+* **Added** a diode's recovery table on the exact route:
+  `switch_specs={"D1": {"E_off_table": t, "Tj": 125}}`, read at each
+  turn-off, the record's `recovery` loss (kernel batch included).
+* **Changed** `device_loss_summary` refuses a diode named in
+  `switch_specs` (it was ignored without a word); use `diode_specs`.
+* **Changed** the PWM / pulse voltage source refusal of
+  `periodic_steady_state` now names the real reasons (no source period
+  to check, DC-only period map); the stepper does land their corners.
+* **Changed** the record arithmetic sums with CPython 3.12's compensated
+  float sum on every Python version (`design._psum`): records on Python
+  3.10 / 3.11 may move by one ulp and now equal 3.12+'s.
 * **Fixed** the evaluator's periodicity check: when its own plain
   `simulate` period failed, the first design of its event pattern was
   recorded `failed` and later designs passed on another design's check;

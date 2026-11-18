@@ -910,6 +910,176 @@ Recorded, not changed:
   once per chunk (its cache is emptied on pickling). Documented
   behaviour, unchanged.
 
+## 26. The kernel batch evaluator (slice 6, item 2)
+
+Question: threads did not scale (1371 / 1546 / 1615 evaluations/s on
+1 / 4 / 8 threads) because the per-design glue was Python. How does a
+whole design run without Python?
+
+Option taken: `evaluate_many` (default `backend=None`) hands the kernel
+(`_pulsim._design_batch`, `core/include/pulsim/dsed/design_batch.hpp`)
+the parameter table, one period and one native schedule per design and
+a thread count. Per design, on `std::thread`s with the GIL released:
+`with_params` / `with_value` of the shared base `Circuit`, builder,
+cache (sharing the base's symbolic plan), adapter, the schedule's
+periodicity test, `periodic_orbit_newton`, the stability test, the
+implausible-voltage scan, the switching energies from the loss tables
+at the period's edge limits, and a REGISTER PROGRAM for the rows,
+losses, KPIs, energy balance and violations. The program is written by
+`pulsim/_design_kernel.Plan` once per evaluator, operation for
+operation in the order of the Python path (`design._kpis`,
+`_period_kpis.loss_rows`, `_energy_balance`), so records are EQUAL to
+`evaluate()`'s -- every field but `wall_s`, counters included.
+
+* Fallback, not a second implementation of the outcomes: a design the
+  kernel cannot finish (orbit status other than converged, an unstable
+  multiplier, no closed-form integrals, an implausible voltage, an
+  energy balance or a non-finite KPI, any C++ exception -- a bound
+  check of `with_value` included) is returned with its reason and
+  re-run on the Python path, which owns the wording of every `failed`
+  and `refused` record; the record carries `counters['batch'] =
+  'python: kernel: <reason>'`. A design whose schedule is not native
+  (an opaque Python callable), a missing variable, a period or schedule
+  factory that raises: the Python path, named likewise. Statuses
+  therefore cannot differ between the paths; `ok` / `infeasible` and
+  every number are the program's.
+* What the plan cannot express sends the whole batch to the Python
+  path with the reason in every record's `counters['batch']` and in
+  `ev.last_batch['python_reasons']`: the factory form, a callable KPI,
+  a thermal loop (until item 3), `gradients=`, a design variable that
+  moves a value the observables read, loss options other than table
+  switch specs, a transient or stepped route. `backend='kernel'`
+  refuses instead (ValueError naming it); `'thread'` / `'process'` are
+  the Python path as before (their records carry no `batch` key).
+* `Kpi.formula(name, expr)`: arithmetic over KPIs, design variables and
+  `loss.<device>`, compiled once (`_design_kernel.Formula`) and run by
+  the same stack interpreter on both paths (IEEE division by zero; a
+  non-finite value is `failed`). The buck example's two callables are
+  now formulas; their records are the callables' bit for bit (512 of
+  512 per part checked).
+* Sums: CPython >= 3.12 `sum()` of floats is Neumaier-compensated,
+  3.10 / 3.11 a plain loop, so `sum()` in the record arithmetic made a
+  record depend on the Python version (and the kernel could not mirror
+  it). The record arithmetic now uses `design._psum` (CPython 3.12's
+  algorithm on every version, `SumN` in the kernel): records on 3.12+
+  unchanged, on 3.10 / 3.11 they may move by an ulp (and now equal
+  3.12+'s). `np.sum` of the switching energies (8 or more edges) is
+  numpy's pairwise sum, mirrored (`np_pairwise`, checked against numpy
+  2.4 on 5840 random vectors).
+* The periodicity check stays in Python, once per event pattern of the
+  batch (the first design of each pattern in input order: what the
+  sequential Python path checks) and for every design with an event at
+  the section; a mismatch raises out of `evaluate_many`.
+* Threads inside the kernel vs one GIL-released call per design from a
+  Python thread pool, measured on the buck Pareto designs (4096, both
+  parts, interleaved best of 5, evaluator reused, load average 15-19 on
+  10 cores from other agents' builds): kernel threads 10022 / 15502 /
+  21621 / 25369 evaluations/s on 1 / 2 / 4 / 8; per-design calls 6037 /
+  7991 / 7768 / 7631 (the per-call Python dominates); the Python thread
+  path 3597 / 2391 / 2286 / 2405. Kept: threads inside the kernel.
+  The kernel call alone runs 10246 -> 49721 designs/s on 1 -> 8 threads
+  (8192-design table); the remaining serial part is the record
+  materialisation in Python (about 18-23 us per design: `design_id`'s
+  digest 8 us, the record and its mappings), which is what limits the
+  8-thread total.
+* Not unified with circuit IR task 5.2 (`_run_pwl_points`,
+  feat/core-p3-circuit-ir a8ee6eb7, not merged here): both derive per
+  row and run on `std::thread`s with an atomic index; that one runs
+  the pwl transient for `sweep`, this one the exact orbit for the
+  evaluator. Unify the row derivation and the thread loop when both are
+  in one tree.
+
+Reverse: `evaluate_many(..., backend='thread')` is the old default;
+removing `_design_kernel.run` from `evaluate_many` restores it.
+
+## 27. PWM and pulse voltage sources on the steady-state route (slice 6, item 0)
+
+Question: does the kernel period map handle a PWM source's corners, or
+must the route refuse them?
+
+Evidence (`.scratch` probe, not shipped): a 24 V / 0 V, 100 kHz,
+D = 0.4 PWM source into 100 uH and 47 uF || 5 ohm. With the refusal
+bypassed, `periodic_steady_state` returns the orbit
+`(v_C, i_L) = (9.5979041, 1.63187764)`; the matrix exponential's fixed
+point `(I - Phi)^-1 z` agrees to 4.1e-16 and 3.7e-16 relative. The
+stepper lands the source's corners. What is missing is elsewhere:
+`builder.components()` exposes NO parameters for `pwm_voltage_source`
+and `pulse_voltage_source` (`{}`), so `_not_t_periodic` cannot check
+that the source's period divides `T`; a 30 kHz source under a 100 kHz
+section would converge to a map that is not a steady state. The kernel
+period map behind the design KPIs (`dsed_period_map`,
+`design_batch.hpp`) also takes DC sources only.
+
+Option taken: keep the refusal by name on every engine, with the
+message corrected (it said the edges were not events of the exact
+stepper, which the probe refutes). The test
+`test_a_pwm_voltage_source_is_refused_by_name_on_every_engine` checks
+the device and the reason.
+
+To reverse: expose the source's `frequency`, `duty`, `phase` (and the
+pulse timing) in `components()`, add them to `_not_t_periodic`, drop
+the two kinds from the refusal, and add them to the period map's
+dynamic-source support.
+
+## 28. Event losses and the junction fixed point on the orbit (slice 6, item 3)
+
+Question: on the exact route the electrical orbit does not depend on
+T_j (no `temperature_dependent`); only the loss tables do. How is
+`T_j = T_amb + R_th P(T_j)` solved, and what is read at the events?
+
+Option taken. (a) The reading rule of `add-in-kernel-event-losses`
+(turn-on: `v` before, `i` after; turn-off the reverse) on the period
+map's left and right limits, already used for switches since slice 5,
+now also for a diode's `E_off_table` in `switch_specs` (its recovery).
+The sampled `device_loss_summary` used to ignore a diode named there;
+it now refuses it by name, so the two routes never disagree silently.
+(b) `ThermalSpec(mode="kernel")`, the default on the exact route
+without `loss_at` / `temperature_dependent`: per device the commutation
+points are collected once and `pulsim/dsed/period_thermal.hpp` solves
+`g(T) = T - T_amb - R_th P(T) = 0` for the smallest root above `T_amb`
+(the point the physical iteration climbs to). `P` is linear in `T_j`
+between the tables' `T_j` knots, so the solver brackets segment by
+segment and regula falsi (Illinois) lands in one step where `g` is
+linear; above the last knot it steps to twice the linear root.
+Stopping rule: `|g| <= 1e-9 K`, or a bracket narrower than 1e-13
+relative. Runaway: no bracket because `g` does not rise above the last
+knot (`R_th dP/dT_j >= 1`) or the search passes 1e6 C; the record is
+`infeasible`, `thermal_runaway`, the violation `R_th dP/dT_j - 1`.
+(c) A `ConductionTable` linear in `i` (one or two current knots) gives
+`(a(T) int|i| + b(T) int i^2) / T` over a new on-state-current
+observable (`g_off = 0`); it heats the junction only (`p_cond_table.*`)
+so the electrical energy balance still closes.
+
+Evidence: closed-form oracle `(T_amb + R(Pc + Ps(1 - 25a))) / (1 -
+R Ps a)` on a buck with linear tables, R = 2 and 20 K/W: 1e-13 K; the
+damped loop: 7.7e-4 K and 0.017 K away (its 0.1 K stopping rule).
+Runaway at `R Ps a = 1.2`: slope reported 1.2000. Buck example's best
+of 32 designs (SYN-B, 60.5 kHz, r_th = 3 K/W): kernel 43.271746 C,
+fixed point 43.271621 C. Three-phase SPWM VSI, 10 kHz, 1 us dead time,
+600 V, T_j = 125 C: kernel E_on / E_off per switch against
+`device_loss_summary` on a settled `dsed` period, 1.8e-13 relative;
+diode recovery counts 199 / 201 = turn-off counts.
+
+A finding on the way: with the star load's neutral returned through
+1 MOhm the same comparison gave 9.3e-7, every turn-on's `i` 1.3e-4 A
+apart. Cause: the neutral resistor makes a common-mode mode of
+`(L/3)/R_n` = 1.7 ns, and the sampled summary reads the turn-on current
+at the first sample after the edge (0.21 ns later in that run), where
+the current has already moved; the kernel reads the exact right limit.
+With 1 uF || 1 kOhm the mode is slow and the two agree to 1.8e-13. The
+sampled reading is right to O(h) of the step after the edge; it is not
+an engine error.
+
+What the kernel mode does not do: feed `T_j` back into the electrical
+solution (that is `temperature_dependent=True`, the fixed point), draw
+the event energy from the circuit, or run inside the kernel batch (a
+thermal evaluator takes the Python path, `counters["batch"] ==
+"python: a thermal loop"`; the solve itself is the kernel's).
+
+To reverse: `ThermalSpec(mode="fixed_point")` restores the loop per
+evaluator; dropping the `"auto"` resolution in `_evaluate` restores it
+everywhere; the diode refusal in `device_loss_summary` is one block.
+
 ## Missing from the kernel (recorded, worked around in Python)
 
 Items 1 and 2 are done (add-parameter-sensitivities slice, 2026-11):

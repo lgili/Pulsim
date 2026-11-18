@@ -26,12 +26,14 @@
 - [x] 6.3 Docs: "Using Pulsim inside an optimiser" (contract, statuses, determinism, why derivative-free, the finite-difference table, synthetic parts)
 
 ## 7. Integration with later changes
-- [ ] 7.1 With `add-in-kernel-event-losses`: `ThermalSpec(mode='kernel')` default; the fixed point kept as `mode='fixed_point'`; test that both agree within 0.1 K on the example's best design
+- [x] 7.1 With `add-in-kernel-event-losses`: `ThermalSpec(mode='kernel')` default; the fixed point kept as `mode='fixed_point'`; test that both agree within 0.1 K on the example's best design (exact route only; measured 1.3e-4 K; `test_design_thermal_kernel.py`, `test_period_thermal.cpp`, DECISIONS 28)
 - [x] 7.2 With `add-immutable-circuit-ir`: `Evaluator(circuit=…)` with `with_params`; counter test that a batch on one topology performs one symbolic analysis (`test_design_circuit_form.py`; the exact stepper performs none, and shares its labels and observables per structure instead)
 - [x] 7.3 With `add-parameter-sensitivities`: `gradients=True`; test against the sensitivities change's oracle — as `gradients={variable: '<component>.<field>'}` (the variable-to-parameter map is needed; a scaled map is refused), pss route only, `record.grads` (`test_sensitivity_kpi.py`)
 - [x] 7.4 Declarative, picklable KPI and constraint specs; `backend='process'` refuses an unpicklable part by name before any worker starts; the buck example on processes gives the thread records (`test_design_declarative.py`, DECISIONS 21)
 - [x] 7.5 Independent periodicity check of the exact route, once per topology and event pattern; a mismatch is `failed` (`test_design_periodicity.py`, DECISIONS 22)
 - [x] 7.6 Energy-balance guard on every record, tolerance by route from measured residuals; the record carries the residual and the table losses (`test_design_energy_balance.py`, DECISIONS 22)
+
+- [x] 7.7 Kernel batch evaluator: `evaluate_many` runs a circuit-form, declarative evaluator's designs in one GIL-free kernel call on native threads; records equal the Python path's; fallbacks and what the plan cannot express named in `counters['batch']` (`test_design_kernel_batch.py`, `test_design_batch.cpp`, DECISIONS 26)
 
 ## 8. Verification
 - [x] 8.1 ruff, pytest, `openspec validate --all --strict`
