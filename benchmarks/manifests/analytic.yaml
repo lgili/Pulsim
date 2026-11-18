@@ -217,3 +217,23 @@ cases:
     dsed:
       ceiling: 1.0e-06
       measured: 7.338e-10
+  gapped_core_rl:
+    pwl:
+      ceiling: 0.00318
+      measured: 0.00159
+    trbdf2:
+      ceiling: 4.53e-07
+      measured: 2.263e-07
+    dsed:
+      ceiling: 1.0e-06
+      measured: 4.367e-16
+  three_limb_zero_seq:
+    pwl:
+      ceiling: 0.00318
+      measured: 0.00159
+    trbdf2:
+      ceiling: 4.53e-07
+      measured: 2.266e-07
+    dsed:
+      ceiling: 1.0e-06
+      measured: 2.593e-14

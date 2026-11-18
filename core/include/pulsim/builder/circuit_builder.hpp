@@ -542,6 +542,136 @@ public:
         return *this;
     }
 
+    // ---- add-permeance-magnetic-domain ---------------------------------
+    // A magnetic network in the gyrator–capacitor form: a magnetic node's
+    // potential is the magnetomotive force F [A], the through variable is
+    // the flux rate dΦ/dt [V], F·dΦ/dt is power. A permeance P [H] is a
+    // capacitor (Φ = P·F), a magnetic resistance is a resistor
+    // (F = R_m·dΦ/dt, loss R_m·(dΦ/dt)²), a winding is a gyrator. Every
+    // magnetic island needs one node tied to ground (the shared
+    // reference); preflight refuses an island without one instead of
+    // inserting a tie resistor, which would be a spurious magnetic loss.
+
+    /// Winding of `turns` turns: electrical port (e_pos, e_neg), magnetic
+    /// port (m_pos, m_neg). v_e = N·dΦ/dt and F(m_pos) − F(m_neg) = N·i_e,
+    /// with i_e INTO e_pos and the flux rate dΦ/dt leaving m_pos into the
+    /// magnetic network. The gyrator of `add_gyrator` with g = 1/N, so
+    /// lossless: v_e·i_e = F·dΦ/dt. `res.i(name, port=1)` is i_e.
+    CircuitBuilder& add_winding(std::string_view name, std::string_view e_pos,
+                                std::string_view e_neg, std::string_view m_pos,
+                                std::string_view m_neg, Real turns) {
+        if (!(turns > Real{0}) || !std::isfinite(turns)) {
+            throw std::invalid_argument(std::format(
+                "add_winding(\"{}\"): turns must be positive and finite (got {}); "
+                "swap m_pos and m_neg to reverse the winding.", name, turns));
+        }
+        add_gyrator(name, e_pos, e_neg, m_pos, m_neg, Real{1} / turns);
+        mark_flux_(m_pos);
+        mark_flux_(m_neg);
+        return *this;
+    }
+
+    /// Linear permeance P [H] between magnetic nodes: Φ = P·F, stored
+    /// energy P·F²/2. A capacitor of value P.
+    CircuitBuilder& add_permeance(std::string_view name, std::string_view m_a,
+                                  std::string_view m_b, Real P) {
+        if (!(P > Real{0}) || !std::isfinite(P)) {
+            throw std::invalid_argument(std::format(
+                "add_permeance(\"{}\"): P must be positive and finite (got {}).",
+                name, P));
+        }
+        add_capacitor(name, m_a, m_b, P);
+        mark_flux_(m_a);
+        mark_flux_(m_b);
+        return *this;
+    }
+
+    /// Air gap of cross-section `area` [m²] and length `length` [m]:
+    /// P = μ₀·area/length (no fringing).
+    CircuitBuilder& add_air_gap(std::string_view name, std::string_view m_a,
+                                std::string_view m_b, Real area, Real length) {
+        require_geometry_("add_air_gap", name, area, length);
+        add_permeance(name, m_a, m_b, models::MU_0 * area / length);
+        pool_.set_magnetic_geometry(graph_.num_branches() - 1, area, length);
+        return *this;
+    }
+
+    /// Magnetic resistance R_m [S = A/V]: F = R_m·dΦ/dt, loss
+    /// R_m·(dΦ/dt)², classical eddy loss of a core segment (a lamination
+    /// of conductivity σ, thickness d, length l, area A: R_m = σ·d²·l/(12·A)).
+    /// In series with a winding's flux path it appears on the electrical
+    /// side as a resistance N²/R_m across the winding.
+    CircuitBuilder& add_magnetic_resistance(std::string_view name,
+                                            std::string_view m_a,
+                                            std::string_view m_b, Real R_m) {
+        if (!(R_m > Real{0}) || !std::isfinite(R_m)) {
+            throw std::invalid_argument(std::format(
+                "add_magnetic_resistance(\"{}\"): R_m must be positive and finite "
+                "(got {}).", name, R_m));
+        }
+        add_resistor(name, m_a, m_b, R_m);
+        mark_flux_(m_a);
+        mark_flux_(m_b);
+        return *this;
+    }
+
+    /// Saturable core segment of area `area` [m²] and length `length` [m]
+    /// with the `GappedCore` material law B = μ₀·(H + M_s·tanh(H/H₀)),
+    /// M_s = B_sat/μ₀, H₀ = M_s/(μ_r − 1), H = F/length:
+    ///     Φ(F) = μ₀·A·[F/l + M_s·tanh(F/(l·H₀))]
+    ///     P(F) = (μ₀·A/l)·[1 + (μ_r − 1)·sech²(F/(l·H₀))]
+    /// stamped in flux (charge) form, so flux is conserved. A gap is a
+    /// separate `add_air_gap` in series. Newton engines only (pwl,
+    /// trbdf2); the event-driven engines refuse it by name.
+    CircuitBuilder& add_saturable_permeance(std::string_view name,
+                                            std::string_view m_a,
+                                            std::string_view m_b, Real area,
+                                            Real length, Real mu_r, Real B_sat) {
+        require_geometry_("add_saturable_permeance", name, area, length);
+        if (!(mu_r > Real{1}) || !std::isfinite(mu_r)) {
+            throw std::invalid_argument(std::format(
+                "add_saturable_permeance(\"{}\"): mu_r must be > 1 and finite "
+                "(got {}).", name, mu_r));
+        }
+        if (!(B_sat > Real{0}) || !std::isfinite(B_sat)) {
+            throw std::invalid_argument(std::format(
+                "add_saturable_permeance(\"{}\"): B_sat must be positive and "
+                "finite (got {}).", name, B_sat));
+        }
+        const Real p_air = models::MU_0 * area / length;
+        const Real h0 = (B_sat / models::MU_0) / (mu_r - Real{1});
+        return add_permeance_law(
+            name, m_a, m_b,
+            models::NonlinearCapacitor::tanh_law(mu_r * p_air, p_air, length * h0),
+            area, length);
+    }
+
+    /// Nonlinear permeance with an explicit charge law Φ(F) (a `tanh` law
+    /// or a `ChargeTable` with knots (F, Φ, P)); `area`, `length` > 0 give
+    /// the B and H outputs, 0 leaves them undefined.
+    CircuitBuilder& add_permeance_law(std::string_view name, std::string_view m_a,
+                                      std::string_view m_b,
+                                      const models::NonlinearCapacitor::Params& law,
+                                      Real area = Real{0}, Real length = Real{0}) {
+        if (law.law == models::ChargeLawKind::Junction ||
+            law.law == models::ChargeLawKind::VdmosCgd) {
+            throw std::invalid_argument(std::format(
+                "add_permeance_law(\"{}\"): a permeance needs an odd law "
+                "(tanh or a table), not {}.", name,
+                models::NonlinearCapacitor::law_name(law)));
+        }
+        if (area != Real{0} || length != Real{0}) {
+            require_geometry_("add_permeance_law", name, area, length);
+        }
+        add_nonlinear_capacitor_law(name, m_a, m_b, law);
+        if (area > Real{0}) {
+            pool_.set_magnetic_geometry(graph_.num_branches() - 1, area, length);
+        }
+        mark_flux_(m_a);
+        mark_flux_(m_b);
+        return *this;
+    }
+
     /// i(t) = i_dc + i_amplitude·sin(2π·frequency·t + phase) out of
     /// `n_pos`; `phase` in radians.
     CircuitBuilder& add_sine_current_source(
@@ -1244,6 +1374,9 @@ public:
                 "1/R, so 0 would stamp an infinity and quietly turn "
                 "the whole solution into NaN.", opts.tie_resistance));
         }
+        // A magnetic island is never tied (a tie is a magnetic loss):
+        // refused by name whatever `auto_regularize` says.
+        pwl::require_magnetic_reference(graph_, pool_);
         if (!opts.auto_regularize) {
             return pwl::analyze_preflight(graph_, pool_, opts);
         }
@@ -2481,6 +2614,23 @@ private:
     /// integer ids and mask bitstrings; now a singular factorization
     /// or a stalled Newton can name the offending device.
     // add-controlled-source-set helpers.
+    void mark_flux_(std::string_view node) {
+        const Index idx = resolve_node_(node);
+        if (idx != graph_.ground()) pool_.mark_flux_node(idx);
+    }
+    static void require_geometry_(std::string_view method, std::string_view name,
+                                  Real area, Real length) {
+        if (!(area > Real{0}) || !std::isfinite(area)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): area must be positive and finite (got {}).",
+                method, name, area));
+        }
+        if (!(length > Real{0}) || !std::isfinite(length)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): length must be positive and finite (got {}).",
+                method, name, length));
+        }
+    }
     static void require_finite_(std::string_view method,
                                 std::string_view name, std::string_view key,
                                 Real v) {

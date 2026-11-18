@@ -251,6 +251,18 @@ for the v1.4 cycle.
 - A YAML `pwl_current_source` `file:` path is relative to the working
   directory, not to the netlist, and is not echoed by `components()`.
 
+## Magnetic networks (2.x)
+
+- Gyrator–capacitor form only: no fringing, no core-shape library, and
+  the in-loop loss is classical eddy loss (`add_magnetic_resistance`).
+  Hysteretic permeance and excess loss wait for the unified device
+  interface. No loss model is validated against measurement.
+- A magnetic island without a node on `gnd` is refused; no tie resistor
+  is inserted on a magnetic node.
+- DC flux rows are linear: a saturable permeance on an internal
+  magnetic node makes the DC operating point fail by name. `set_initial`
+  ignores a saturable permeance without a warning.
+
 ---
 
 ## Transient engines (2.0)

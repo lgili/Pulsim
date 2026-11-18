@@ -582,10 +582,19 @@ void init_module(py::module_& m) {
               "ngspice VDMOS C_gd(v_gd): s = (CGDMAX-CGDMIN)/(1+pi/2), "
               "C = CGDMAX - s + s*tanh(a*u) for u > 0, "
               "CGDMAX - s + s*atan(a*u) for u <= 0.")
+        .def_static("tanh",
+              [](Real c_max, Real c_min, Real v0) {
+                  auto p = models::NonlinearCapacitor::tanh_law(c_max, c_min, v0);
+                  models::NonlinearCapacitor::validate(p);
+                  return p;
+              },
+              py::arg("c_max"), py::arg("c_min"), py::arg("v0"),
+              "Odd saturation law Q = c_min*v + (c_max - c_min)*v0*tanh(v/v0); "
+              "C(0) = c_max, C -> c_min. The law of add_saturable_permeance.")
         .def_property_readonly("kind",
               [](const models::NonlinearCapacitor::Params& p) {
                   return std::string{models::NonlinearCapacitor::law_name(p)};
-              }, "'junction', 'table' or 'vdmos_cgd'.")
+              }, "'junction', 'table', 'vdmos_cgd' or 'tanh'.")
         .def("charge",
               [](const models::NonlinearCapacitor::Params& p, Real v) {
                   return models::NonlinearCapacitor::charge(p, v);
@@ -817,6 +826,129 @@ void init_module(py::module_& m) {
               "and p2_pos. Lossless; an impedance Z on one port appears "
               "as 1/(g^2 Z) on the other (a capacitor C as an inductor "
               "C/g^2). res.i(name, port=1|2).")
+        // ---- add-permeance-magnetic-domain ---------------------------
+        .def("add_winding", &builder::CircuitBuilder::add_winding,
+              py::arg("name"), py::arg("e_pos"), py::arg("e_neg"),
+              py::arg("m_pos"), py::arg("m_neg"), py::arg("turns"),
+              py::return_value_policy::reference,
+              "Winding of `turns` turns between an electrical port (e_pos, "
+              "e_neg) and a magnetic port (m_pos, m_neg): v = N*dPhi/dt, "
+              "F(m_pos) - F(m_neg) = N*i, with i INTO e_pos and the flux "
+              "rate leaving m_pos. A gyrator with g = 1/N (lossless). "
+              "res.i(name, port=1) is the winding current.")
+        .def("add_permeance", &builder::CircuitBuilder::add_permeance,
+              py::arg("name"), py::arg("m_a"), py::arg("m_b"), py::arg("P"),
+              py::return_value_policy::reference,
+              "Linear permeance P [H] between magnetic nodes (MMF [A] is "
+              "the node potential, flux rate [V] the through variable): "
+              "Phi = P*F. Every magnetic island needs one node tied to gnd.")
+        .def("add_air_gap", &builder::CircuitBuilder::add_air_gap,
+              py::arg("name"), py::arg("m_a"), py::arg("m_b"),
+              py::arg("area"), py::arg("length"),
+              py::return_value_policy::reference,
+              "Air gap: permeance mu0*area/length (area [m^2], length [m]; "
+              "no fringing).")
+        .def("add_magnetic_resistance",
+              &builder::CircuitBuilder::add_magnetic_resistance,
+              py::arg("name"), py::arg("m_a"), py::arg("m_b"), py::arg("R_m"),
+              py::return_value_policy::reference,
+              "Magnetic resistance R_m [S = A/V]: F = R_m*dPhi/dt, loss "
+              "R_m*(dPhi/dt)^2 inside the solve (classical eddy loss; a "
+              "lamination: R_m = sigma*d^2*l/(12*A)). Seen from a winding of "
+              "N turns it is a resistance N^2/R_m across the winding.")
+        .def("add_saturable_permeance",
+              [](builder::CircuitBuilder& self, std::string_view name,
+                 std::string_view m_a, std::string_view m_b,
+                 std::optional<Real> area, std::optional<Real> length,
+                 std::optional<Real> mu_r, std::optional<Real> B_sat,
+                 const std::optional<models::ChargeTable>& table)
+                  -> builder::CircuitBuilder& {
+                  if (table) {
+                      if (mu_r || B_sat) {
+                          throw std::invalid_argument(std::format(
+                              "add_saturable_permeance(\"{}\"): pass either "
+                              "table= or mu_r and B_sat, not both.", name));
+                      }
+                      return self.add_permeance_law(
+                          name, m_a, m_b,
+                          models::NonlinearCapacitor::from_table(
+                              std::make_shared<const models::ChargeTable>(*table)),
+                          area.value_or(Real{0}), length.value_or(Real{0}));
+                  }
+                  if (!area || !length || !mu_r || !B_sat) {
+                      throw std::invalid_argument(std::format(
+                          "add_saturable_permeance(\"{}\"): needs area, length, "
+                          "mu_r and B_sat (or table=).", name));
+                  }
+                  return self.add_saturable_permeance(name, m_a, m_b, *area,
+                                                      *length, *mu_r, *B_sat);
+              },
+              py::arg("name"), py::arg("m_a"), py::arg("m_b"),
+              py::arg("area") = py::none(), py::arg("length") = py::none(),
+              py::kw_only(), py::arg("mu_r") = py::none(),
+              py::arg("B_sat") = py::none(), py::arg("table") = py::none(),
+              py::return_value_policy::reference,
+              "Saturable core segment (area [m^2], length [m]) with the "
+              "GappedCore material law B = mu0*(H + Ms*tanh(H/H0)), "
+              "Ms = B_sat/mu0, H0 = Ms/(mu_r - 1): Phi(F) = mu0*A*[F/l + "
+              "Ms*tanh(F/(l*H0))], stamped in flux form. Or table= a "
+              "ChargeTable with knots (F, Phi, P) covering both signs. "
+              "Newton engines (pwl, trbdf2) only.")
+        .def("magnetic_element",
+              [](const builder::CircuitBuilder& self, std::string_view name) {
+                  using K = pwl::DevicePool::StoredKind;
+                  const auto& g = self.graph();
+                  const auto& pool = self.pool();
+                  const Index bid = self.branch_id_of(name);
+                  const auto& br = g.branch(bid);
+                  auto label = [&](Index n) {
+                      return n == topology::Graph::ground()
+                                 ? std::string{"gnd"} : g.node(n).name;
+                  };
+                  const bool mag = pool.is_flux_node(br.from) || pool.is_flux_node(br.to);
+                  py::dict d;
+                  const auto k = pool.kind_of(bid);
+                  if (mag && k == K::Capacitor) {
+                      d["kind"] = "permeance";
+                      d["P"] = pool.capacitor_params(bid).C;
+                  } else if (mag && k == K::NonlinearCapacitor) {
+                      d["kind"] = "saturable_permeance";
+                      d["law"] = pool.nonlinear_capacitor_params(bid);
+                  } else if (mag && k == K::Resistor) {
+                      d["kind"] = "magnetic_resistance";
+                      d["R_m"] = Real{1} / pool.resistor_params(bid).G;
+                  } else if (mag && k == K::Gyrator) {
+                      d["kind"] = "winding";
+                      d["turns"] = Real{1} / pool.gyrator_params(bid).g;
+                  } else {
+                      throw py::key_error(std::format(
+                          "'{}' is not a magnetic element (winding, permeance, "
+                          "air gap, saturable permeance or magnetic resistance)",
+                          name));
+                  }
+                  d["m_a"] = label(br.from);
+                  d["m_b"] = label(br.to);
+                  d["area"] = py::none();
+                  d["length"] = py::none();
+                  for (const auto& mg : pool.magnetic_geometry()) {
+                      if (mg.branch == bid) { d["area"] = mg.area; d["length"] = mg.length; }
+                  }
+                  return d;
+              },
+              py::arg("name"),
+              "Description of a magnetic element: kind ('winding', "
+              "'permeance', 'saturable_permeance', 'magnetic_resistance'), "
+              "its magnetic nodes m_a, m_b, its value (P, law, R_m or turns) "
+              "and area / length (None without geometry). KeyError otherwise.")
+        .def("magnetic_nodes",
+              [](const builder::CircuitBuilder& self) {
+                  std::vector<std::string> out;
+                  for (const Index n : self.pool().flux_nodes()) {
+                      out.push_back(self.graph().node(n).name);
+                  }
+                  return out;
+              },
+              "Names of the magnetic nodes (touched by a magnetic element).")
         .def("add_sine_current_source",
               &builder::CircuitBuilder::add_sine_current_source,
               py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
@@ -1639,6 +1771,9 @@ void init_module(py::module_& m) {
                               } else if (q.law == models::ChargeLawKind::VdmosCgd) {
                                   d["cgd_max"] = q.cgd_max; d["cgd_min"] = q.cgd_min;
                                   d["a"] = q.a;
+                              } else if (q.law == models::ChargeLawKind::Tanh) {
+                                  d["c_max"] = q.cgd_max; d["c_min"] = q.cgd_min;
+                                  d["V0"] = q.V0;
                               } else {
                                   d["knots"] = q.table->size();
                               }

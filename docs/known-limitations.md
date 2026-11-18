@@ -208,6 +208,16 @@ event where the signal jumps.
 | One ESR value (no frequency dependence), single-pair line (no coupled three-phase cable). The DC-bias capacitance is `odd_charge_table` only: no `fit_mlcc_dc_bias`, no YAML, and it is a Newton device (`pwl` / `trbdf2`). | — | Read ESR at the switching frequency; fit `R_ac(f)` of windings with `fit_rac_ladder`; integrate the datasheet C(V) curve into knots yourself. |
 | **A winding with an `rac=` ladder cannot be coupled.** `add_inductor_coupling` refuses it with `UnsupportedError` (feature `rac`): coupling the main inductor alone would leave the cells' flux uncoupled. | — | Couple windings built with `esr=`, or use `add_transformer`. |
 
+## Magnetic networks
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **No fringing and no core-shape library.** `add_air_gap` is `P = μ₀·A/l` on the given area; every section takes its own area, length and permeability. Shipped parameters are synthetic. | — | Enlarge the gap area by your fringing factor; enter the sections of the core yourself. |
+| **Rate-dependent loss is eddy loss only, and not validated against measurement.** `add_magnetic_resistance` gives `R_m·(dΦ/dt)²`; the hysteretic permeance, the excess-loss element and the loss fitter are not shipped (YAML `hysteretic_permeance` / `excess_loss` are refused by name). | — | `add_hysteretic_core_inductor` for one flux path; Steinmetz / iGSE after the run. |
+| **DC operating point: a saturable permeance on a node reached only through permeances is refused by name** (its flux row needs the Newton DC refresh). Linear permeances get flux rows (per node, or per group joined by magnetic resistances and winding ports); the DC flux is solved from zero. | — | Start the transient from zero or from `initial_state=` (tutorial 09). |
+| `set_initial` ignores a saturable permeance (it records capacitor and inductor values only), without a warning. | — | Write its MMF into `initial_state` at its node. |
+| A saturable permeance runs on `pwl` and `trbdf2` only; `dsed`, `bdf1` and the AC sweep refuse it by name. | — | Linear permeances run on every engine. |
+
 ## Found by the examples audit (2026-11-13)
 
 Reproducers are in `probes/` (run them against the tree to re-measure);

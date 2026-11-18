@@ -1,12 +1,10 @@
 # Pulsim 2.x usage guide (for AI coding assistants)
 
-This file ships inside the `pulsim` package and describes its version.
+This file ships in the `pulsim` package and describes its version.
 `python -m pulsim.guide` prints it with the installed version on the
-first line; `pulsim.ai_guide()` returns the same text. When this guide
-and your memory of Pulsim disagree, the guide wins: Pulsim 2 changed
-behaviour but kept most 1.x names. Every `python` block below is
-executed by the test suite, and every printed number is the one it
-prints.
+first line; `pulsim.ai_guide()` returns the same text. The guide beats
+your memory: Pulsim 2 changed behaviour but kept most 1.x names. Every
+`python` block runs in the test suite; printed numbers are its output.
 
 Short version:
 
@@ -31,16 +29,14 @@ Short version:
 ## 1. Ask the installed package first
 
 - `python -m pulsim.guide` (this text) and `python -m pulsim.guide --path`.
-- The native classes are pybind11 builtins: `inspect.signature` fails on
-  them. Read the first line of `__doc__`, or the shipped type stubs
-  (`pulsim/_pulsim.pyi`, PEP 561) that IDEs and mypy read.
+- Native classes are pybind11 builtins (`inspect.signature` fails): read
+  the first `__doc__` line or the type stubs (`pulsim/_pulsim.pyi`).
 - `p.catalog()` lists every builder method and helper by category;
   `p.example("buck")` prints a runnable snippet (`"rc"`, `"boost"`,
   `"yaml"`, `"bode"`, ...).
 - `res.v(name)` / `res.i(name)` with a misspelled name raise
-  `p.NameNotFoundError` with close matches. An attribute that does not
-  exist on `pulsim` raises `AttributeError`, with a migration hint for
-  retired 1.x names.
+  `p.NameNotFoundError` with close matches. A missing `pulsim` attribute
+  raises `AttributeError` with a 1.x migration hint.
 
 ```python
 import pulsim as p
@@ -57,8 +53,8 @@ That union is pybind11's `float`, as in the stub.
 ## 2. Mental model
 
 - **Netlist by name.** Nodes are strings; `"gnd"`, `"GND"` and `"0"` are
-  ground. Every `b.add_*` call adds a branch between two nodes; the
-  first argument is the branch name used later by `res.i(name)`.
+  ground. Each `b.add_*` adds a branch; its first argument is the name
+  `res.i(name)` takes.
 - **Piecewise-linear switching.** `add_switch`, `add_mosfet`, `add_igbt`
   and `add_diode` are two-state branches: conductance `g_on` (or
   `1/R_on`) on, `g_off` off; `add_diode(V_f=)` adds a series drop
@@ -68,6 +64,9 @@ That union is pybind11's `float`, as in the stub.
   `add_power_mosfet`, saturable magnetics) are solved with Newton;
   `add_nonlinear_diode` is retired. Gate transients:
   `p.double_pulse_test`, trbdf2 or `dt` <= 0.2 ns.
+- **Shared flux** (one path: `add_saturable_transformer`): `add_winding`
+  (F=N*i), `add_permeance`, `add_air_gap`, `add_saturable_permeance`,
+  `add_magnetic_resistance`; node = MMF. Tie each island to gnd.
 - **Engines** (`p.simulate(..., engine=...)`):
 
 | engine | step | use it for |
@@ -160,13 +159,13 @@ on-steps per period: [50]
 ```
 
 For a half bridge, `p.make_dead_time_pwm_pair_fn` drives the high- and
-low-side bits with a dead time; for a three-phase bridge see 3.7. The
-helpers also name their edges (`pwm.next_edge_after(t)`), so the
-variable-step engines land on them. A plain callable has no edges:
-`trbdf2` can step over a short pulse or dead time silently (D = 0.03:
-0.17 V vs 1.20 V) and `dsed` bisects only changes it sees at its
-`dt_max / 10` polls (and warns). Use a helper or pass `dt`. Both call
-it out of time order: keep it a pure function of `t`.
+low-side bits with a dead time; for a three-phase bridge see 3.7.
+Helpers name their edges (`pwm.next_edge_after(t)`); variable-step
+engines land on them. A plain callable has no edges: `trbdf2` can step
+over a short pulse or dead time silently (D = 0.03: 0.17 V vs 1.20 V);
+`dsed` bisects only changes seen at its `dt_max / 10` polls (and
+warns). Use a helper or pass `dt`. Both call it out of time order:
+keep it a pure function of `t`.
 
 ### 3.3 Bridge rectifier from `pulsim.topology`
 
@@ -657,7 +656,7 @@ with the checks in its section 6 before reporting it.
 ## 9. Where to read more
 
 - `docs/getting-started.md`; `docs/tutorials/01-rc-charging.md` ...
-  `08-design-optimisation.md`.
+  `09-magnetic-networks.md`.
 - `docs/api-reference.md`, `docs/gotchas.md`, `docs/troubleshooting.md`,
   `docs/losses-and-thermal.md`,
   `docs/loss-thermal.md`, `docs/mental-model.md`, `docs/how-pulsim-works/`.

@@ -1,4 +1,4 @@
-"""Analytic reference set: 20 circuits with a closed-form (or exact
+"""Analytic reference set: 22 circuits with a closed-form (or exact
 piecewise-LTI) solution, one per entry of :data:`CASES`.
 
 Each :class:`Case` has ``build(k)`` -> ``(builder, switch_fn)`` where ``k``
@@ -403,6 +403,40 @@ def _buck_exact(R, D, t_end):
     return f
 
 
+# ------------------------------- 21-22: permeance magnetic network ---
+# add-permeance-magnetic-domain: windings and permeances (gyrator-capacitor
+# form). Closed forms of the reluctance network; synthetic core numbers.
+
+_MU0 = 4e-7 * math.pi
+_P_CORE = _MU0 * 2000.0 * 76e-6 / 72e-3          # 2.653 uH
+_P_GAP = _MU0 * 76e-6 / 0.5e-3                   # 191.0 nH
+_L_GAPPED = 25 ** 2 / (1 / _P_CORE + 1 / _P_GAP)  # 111.36 uH
+_L0_3LIMB = 100 ** 2 / (1 / 5e-6 + 3 / 50e-9)     # 166.1 uH
+
+
+def _gapped_rl(k):
+    b = _b()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_resistor("R", "in", "e", 10.0 * k)
+    b.add_winding("W", "e", "gnd", "m1", "gnd", 25)
+    b.add_permeance("Pc", "m1", "m2", _P_CORE)
+    b.add_air_gap("G", "m2", "gnd", 76e-6, 0.5e-3)
+    return b, None
+
+
+def _three_limb_zero(k):
+    # Three limbs of 5 uH with 100-turn windings, an air return of 50 nH:
+    # the zero-sequence inductance N^2/(1/P_L + 3/P_air) per phase.
+    b = _b()
+    b.add_voltage_source("V", "in", "gnd", 1.0)
+    for j in range(3):
+        b.add_resistor(f"R{j}", "in", f"e{j}", 1.0 * k)
+        b.add_winding(f"W{j}", f"e{j}", "gnd", f"x{j}", "gnd", 100)
+        b.add_permeance(f"L{j}", f"x{j}", "T", 5e-6)
+    b.add_permeance("Air", "T", "gnd", 50e-9)
+    return b, None
+
+
 # ------------------------------------------------------------- the table ---
 
 CASES = [
@@ -457,6 +491,12 @@ CASES = [
          _buck_exact(1.0, 0.5, 40 * _TB), 40 * _TB, _TB / 200, ALL),
     Case("buck_dcm", "buck DCM, R 50 Ohm, D 0.3, from rest", _buck(50.0, 0.3), _v("vout"),
          _buck_exact(50.0, 0.3, 40 * _TB), 40 * _TB, _TB / 200, ALL),
+    Case("gapped_core_rl", "winding on a gapped core (permeances), 10 V, 10 Ohm", _gapped_rl,
+         _i("R"), lambda t: 1.0 * (1 - np.exp(-np.asarray(t) * 10.0 / _L_GAPPED)),
+         5 * _L_GAPPED / 10.0, _L_GAPPED / 10.0 / 100, ALL),
+    Case("three_limb_zero_seq", "three-limb core, zero sequence, 1 V, 1 Ohm", _three_limb_zero,
+         _i("R0"), lambda t: 1.0 * (1 - np.exp(-np.asarray(t) / _L0_3LIMB)),
+         5 * _L0_3LIMB, _L0_3LIMB / 100, ALL),
 ]
 
 BY_ID = {c.id: c for c in CASES}

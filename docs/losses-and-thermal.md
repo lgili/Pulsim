@@ -316,6 +316,25 @@ Inline `{"K": ..., "alpha": ..., "beta": ...}` is accepted in place of
 `material`. Non-positive `N_turns` / `A_core` / `V_core` → `ValueError`
 (no silent zeros).
 
+### In-loop core loss in a magnetic network
+
+The Steinmetz / iGSE estimate above runs after the transient: it reads
+`B(t)` from the trace and never changes the circuit. In a magnetic
+network (tutorial 09), `b.add_magnetic_resistance(name, a, b, R_m)`
+between two magnetic nodes dissipates `R_m·(dΦ/dt)²` inside the solve,
+so the loss damps the circuit. It is classical eddy loss only
+(`P ∝ f²·B²`); `device_loss_summary` lists it with
+`kind="magnetic_resistance"`, `category="core_loss"` and its `R_m`.
+
+| | Steinmetz / iGSE (post-hoc) | magnetic resistance (in loop) |
+|---|---|---|
+| frequency law | `f^α·B^β`, fitted | `f²·B²` (eddy only) |
+| changes the waveform | no | yes |
+| hysteresis, excess loss | inside the fit | not modelled yet |
+
+`R_m` is fitted to a loss figure, not predicted; neither model is
+validated against measurement here.
+
 ## Junction temperature — `device_thermal_summary`
 
 Same kwargs as `device_loss_summary`, plus per-device Foster networks:

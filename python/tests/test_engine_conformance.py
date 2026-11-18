@@ -1055,6 +1055,85 @@ def test_charge_law_and_power_mosfet_refused_by_the_ac_sweep(name):
     assert ei.value.device == cell[2]
 
 
+# ---------------------------------------------------------------------
+# add-permeance-magnetic-domain (task 5.4): the magnetic elements are
+# composites of existing kinds (winding = Gyrator, permeance / air gap =
+# Capacitor, magnetic resistance = Resistor, saturable permeance =
+# NonlinearCapacitor with the tanh law), so they add no table row. Their
+# cells: run and agree with pwl where every kind they are made of runs,
+# refused by name (the device) elsewhere.
+# ---------------------------------------------------------------------
+
+def _magnetic(saturable):
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "in", "gnd", 10.0)
+        b.add_resistor("R1", "in", "o", 1.0)
+        b.add_resistor("R2", "o", "gnd", 1e3)
+        if on:
+            b.add_winding("Wd", "o", "gnd", "m1", "gnd", 25)
+            b.add_magnetic_resistance("Rm", "m1", "m2", 0.625)  # 1 kOhm across
+            if saturable:
+                b.add_saturable_permeance("Core", "m2", "m3", 76e-6, 72e-3,
+                                          mu_r=2000.0, B_sat=0.35)
+            else:
+                b.add_permeance("Core", "m2", "m3", 2.653e-6)
+            b.add_air_gap("Gap", "m3", "gnd", 76e-6, 0.5e-3)
+        return b
+    return build
+
+
+MAGNETIC_CELLS = {
+    "magnetic[linear]": (
+        (_magnetic(False), "o", "Core", 5e-4, 1e-7, False),
+        ("Gyrator", "Capacitor", "Resistor")),
+    "magnetic[saturable_permeance]": (
+        (_magnetic(True), "o", "Core", 5e-4, 2e-8, False),
+        ("Gyrator", "Capacitor", "NonlinearCapacitor", "Resistor")),
+}
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("name", list(MAGNETIC_CELLS))
+def test_magnetic_element_cells(name, engine):
+    cell, kinds = MAGNETIC_CELLS[name]
+    _check_cell(name, cell, engine, _composite_supported(kinds, engine))
+
+
+MU0_CONF = 4e-7 * np.pi
+
+
+def test_linear_magnetic_cell_on_the_ac_sweep():
+    # Seen from the winding, series magnetic elements are parallel
+    # electrical ones: R_m -> N²/R_m, permeance P -> inductance N²·P.
+    assert _composite_supported(MAGNETIC_CELLS["magnetic[linear]"][1], "ac_sweep")
+
+    def H(b):
+        r = k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e2, 1e3, 1e4], b.node_id_of("o"), b.node_id_of("o"))
+        return np.asarray(r.H, dtype=complex)
+
+    e = _magnetic(False)(False)
+    e.add_resistor("Req", "o", "gnd", 25 ** 2 / 0.625)
+    e.add_inductor("Lc", "o", "gnd", 25 ** 2 * 2.653e-6)
+    e.add_inductor("Lg", "o", "gnd", 25 ** 2 * MU0_CONF * 76e-6 / 0.5e-3)
+    got, want = H(_magnetic(False)(True)), H(e)
+    assert np.max(np.abs(got - want)) < 1e-9 * np.max(np.abs(want))
+
+
+def test_saturable_permeance_refused_by_the_ac_sweep():
+    cell, kinds = MAGNETIC_CELLS["magnetic[saturable_permeance]"]
+    assert not _composite_supported(kinds, "ac_sweep")
+    b = cell[0](True)
+    with pytest.raises(p.UnsupportedError) as ei:
+        k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
+    assert ei.value.engine == "ac_sweep"
+    assert ei.value.device == "Core"
+
+
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
 def test_voltage_sanity_factor_honoured_on_every_engine(engine):
     # A 10 V node against a bound of 0.5 x 10 V: every engine's trace is

@@ -1829,6 +1829,17 @@ def device_loss_summary(
     known_names = {c.get("name") for c in comps_by_bid.values()
                      if c.get("name")}
     known_bids = set(comps_by_bid)
+    magnetic_resistances = set()
+    if getattr(builder, "magnetic_nodes", None) is not None and builder.magnetic_nodes():
+        for c in comps_by_bid.values():
+            nm = c.get("name")
+            if c.get("kind") != "resistor" or not nm:
+                continue
+            try:
+                builder.magnetic_element(nm)
+            except KeyError:
+                continue
+            magnetic_resistances.add(nm)
 
     def _build_spec_lookup(
         specs: Optional[Mapping[Any, Mapping[str, Any]]],
@@ -2017,6 +2028,19 @@ def device_loss_summary(
                 continue
             stats = _conduction_stats(_branch_v(states_w, nodes), 1.0 / R,
                                       times_w, _branch_v(states_s_w, nodes))
+            if name and name in magnetic_resistances:
+                # add-permeance-magnetic-domain: F = R_m*dPhi/dt, so the
+                # "current" statistics are the flux rate [V] and P_avg is
+                # the in-loop core loss R_m*(dPhi/dt)^2.
+                summary.append({
+                    "branch_id": int(bid),
+                    "kind": "magnetic_resistance",
+                    "category": "core_loss",
+                    "name": name,
+                    "R_m": R,
+                    **stats,
+                })
+                continue
             summary.append({
                 "branch_id": int(bid),
                 "kind": "resistor",

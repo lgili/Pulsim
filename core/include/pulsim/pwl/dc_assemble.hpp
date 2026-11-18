@@ -52,6 +52,8 @@
 #include <cmath>
 #include <format>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace pulsim::pwl {
 
@@ -93,6 +95,110 @@ inline void stamp_inductor_dc(sparse::Matrix& J, Vector& b,
     // tiny epsilon — physically equivalent to a near-zero
     // resistance in series with the inductor. KLU handles it.
     J.coeffRef(branch_var_id, branch_var_id) += Real{-1e-12};
+}
+
+/// add-permeance-magnetic-domain: the magnetic nodes whose DC row needs
+/// flux conservation. At DC a permeance is open. A magnetic node that
+/// touches only permeances has an empty KCL row; nodes joined only by
+/// magnetic resistances and winding ports (no other path) have KCL rows
+/// that sum to zero (each such branch current enters one node of the
+/// group and leaves another). Either way the missing equation is that
+/// the net flux leaving the group is zero, Σ ±Φ_k = 0 (the reluctance-
+/// network solution from zero flux). Indexed by node: −1 for an ordinary
+/// row, otherwise the group's row that carries Σ ±C·ΔF (the lowest node
+/// of the group; its resistor terms sum to zero over the group, so the
+/// other rows' KCL makes them vanish). Every node of a group skips the
+/// conductance floor. Empty when the circuit has no magnetic node, so
+/// every other circuit assembles exactly as before.
+[[nodiscard]] inline std::vector<Index> charge_rows(const topology::Graph& graph,
+                                                    const DevicePool& pool) {
+    std::vector<Index> rows;
+    if (pool.flux_nodes().empty()) return rows;
+    const Index nn = graph.num_nodes();
+    std::vector<char> cand(static_cast<Size>(nn), char{0});
+    for (const Index n : pool.flux_nodes()) {
+        if (n >= 0 && n < nn) cand[static_cast<Size>(n)] = 1;
+    }
+    using SK = DevicePool::StoredKind;
+    auto clear = [&](Index n) {
+        if (n >= 0 && n < nn) cand[static_cast<Size>(n)] = 0;
+    };
+    std::vector<std::pair<Index, Index>> r_edges;
+    for (Index b = 0; b < graph.num_branches(); ++b) {
+        const auto& br = graph.branch(b);
+        const bool reg = pool.is_registered(b);
+        const auto k = reg ? pool.kind_of(b) : SK::Resistor;
+        if (reg && (k == SK::Capacitor || k == SK::NonlinearCapacitor)) continue;
+        if (reg && k == SK::Resistor) {
+            r_edges.emplace_back(br.from, br.to);
+            continue;
+        }
+        if (reg && k == SK::Gyrator) {
+            // A winding: its graph branch is the magnetic port, a group
+            // edge like a resistance; its electrical port is a pair of
+            // node references.
+            r_edges.emplace_back(br.from, br.to);
+            const auto [p, q] = pool.control_nodes(b);
+            clear(p);
+            clear(q);
+            continue;
+        }
+        clear(br.from);
+        clear(br.to);
+        if (!reg) continue;
+        // Node references that carry current without being a graph edge.
+        if (k == SK::IdealTransformer) {
+            const auto [p, q] = pool.ideal_transformer_primary_nodes(b);
+            clear(p);
+            clear(q);
+        }
+    }
+    // Groups of candidates joined by resistors and winding ports; such an
+    // edge to any other node (or to ground) anchors the group: its KCL
+    // rows determine it.
+    std::vector<Index> parent(static_cast<Size>(nn));
+    for (Index i = 0; i < nn; ++i) parent[static_cast<Size>(i)] = i;
+    auto find = [&](Index i) {
+        while (parent[static_cast<Size>(i)] != i) {
+            parent[static_cast<Size>(i)] = parent[static_cast<Size>(parent[static_cast<Size>(i)])];
+            i = parent[static_cast<Size>(i)];
+        }
+        return i;
+    };
+    auto is_cand = [&](Index n) { return n >= 0 && n < nn && cand[static_cast<Size>(n)] != 0; };
+    for (const auto [a, c] : r_edges) {
+        if (is_cand(a) && is_cand(c)) {
+            const Index ra = find(a), rc = find(c);
+            parent[static_cast<Size>(std::max(ra, rc))] = std::min(ra, rc);
+        }
+    }
+    std::vector<char> anchored(static_cast<Size>(nn), char{0});
+    for (const auto [a, c] : r_edges) {
+        if (is_cand(a) != is_cand(c)) anchored[static_cast<Size>(find(is_cand(a) ? a : c))] = 1;
+    }
+    rows.assign(static_cast<Size>(nn), Index{-1});
+    for (Index i = 0; i < nn; ++i) {
+        if (is_cand(i) && anchored[static_cast<Size>(find(i))] == 0) {
+            rows[static_cast<Size>(i)] = find(i);  // the root is the lowest node
+        }
+    }
+    return rows;
+}
+
+/// The conductance floor on every node row except those of a flux-
+/// conservation group (a gmin there would be a flux leak, and the
+/// gmin-stepping ramp starts at 1e-2 S against permeances of ~1e-7 H).
+inline void stamp_gmin_dc(sparse::Matrix& J, Index num_nodes, Real g,
+                          const std::vector<Index>& rows) {
+    if (rows.empty()) {
+        stamp_gmin(J, num_nodes, g);
+        return;
+    }
+    if (!(g > Real{0})) return;
+    const Index n = std::min<Index>(num_nodes, static_cast<Index>(J.rows()));
+    for (Index i = 0; i < n; ++i) {
+        if (rows[static_cast<Size>(i)] < 0) J.coeffRef(i, i) += g;
+    }
 }
 
 /// Build the DC MNA matrix. `t_eval` is the evaluation time
@@ -137,6 +243,11 @@ inline void dc_assemble(const topology::Graph& graph,
 
     const Vector x = Vector::Zero(static_cast<Index>(state_size));
     Size switch_idx = 0;
+    const std::vector<Index> q_rows = charge_rows(graph, pool);
+    auto q_row = [&](Index n) {
+        return (q_rows.empty() || n < 0) ? Index{-1} : q_rows[static_cast<Size>(n)];
+    };
+    auto is_q_row = [&](Index n) { return q_row(n) >= 0; };
 
     for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
         const auto& branch = graph.branch(b_id);
@@ -153,9 +264,18 @@ inline void dc_assemble(const topology::Graph& graph,
                                                           coord, p);
                 break;
             }
-            case DevicePool::StoredKind::Capacitor:
-                // Skip — open circuit at DC.
+            case DevicePool::StoredKind::Capacitor: {
+                // Open circuit at DC — except into a flux-conservation
+                // row, where it adds its charge ±C·(v_from − v_to) (= 0).
+                const Real C = pool.capacitor_params(branch.id).C;
+                for (const auto [row, s] : {std::pair{q_row(coord.from), Real{1}},
+                                            std::pair{q_row(coord.to), Real{-1}}}) {
+                    if (row < 0) continue;
+                    if (stamping::node_is_active(coord.from)) J.coeffRef(row, coord.from) += s * C;
+                    if (stamping::node_is_active(coord.to)) J.coeffRef(row, coord.to) -= s * C;
+                }
                 break;
+            }
             case DevicePool::StoredKind::Inductor: {
                 const Index branch_var_id =
                     pool.branch_var_id_for_inductor(branch.id, graph);
@@ -272,6 +392,20 @@ inline void dc_assemble(const topology::Graph& graph,
             // secondary (n·V_p instead of 0). The linear inductor's
             // own DC stamp is the right one.
             if (pool.kind_of(branch.id)
+                    == DevicePool::StoredKind::NonlinearCapacitor &&
+                (is_q_row(coord.from) || is_q_row(coord.to))) {
+                // shortcut: flux rows are linear-only; a nonlinear one
+                // needs the Newton DC refresh (the unified device
+                // interface) — refused by name until then.
+                throw std::runtime_error(std::format(
+                    "DC operating point: the nonlinear permeance '{}' touches "
+                    "a magnetic node with no winding, whose DC row is flux "
+                    "conservation; that row is linear-only for now. Start the "
+                    "transient from zero flux (the default) or from initial "
+                    "conditions instead of a DC operating point.",
+                    graph.branch_name(branch.id)));
+            }
+            if (pool.kind_of(branch.id)
                 == DevicePool::StoredKind::SaturableInductor) {
                 const Index branch_var_id =
                     pool.branch_var_id_for_inductor(branch.id, graph);
@@ -287,7 +421,7 @@ inline void dc_assemble(const topology::Graph& graph,
     // branch-current rows must be left alone. Defaults to zero: the
     // assembler stays neutral and the SOLVER opts in, so AC / LTI /
     // sweep consumers that build their own matrices are unaffected.
-    stamp_gmin(J, graph.num_nodes(), gmin);
+    stamp_gmin_dc(J, graph.num_nodes(), gmin, q_rows);
 }
 
 /// A rank deficiency of the DC system that no amount of
@@ -736,7 +870,7 @@ inline Vector compute_dc_op(const topology::Graph& graph,
                 "mask {}{}",
                 mask.to_string(), defect.detail));
         }
-        stamp_gmin(J, graph.num_nodes(), gmin);
+        stamp_gmin_dc(J, graph.num_nodes(), gmin, charge_rows(graph, pool));
         sparse::compress_in_place(J);
     }
 
