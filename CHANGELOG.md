@@ -41,6 +41,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `_pulsim_aliases` (the C++ builder has stored both since 1.5; a
   Circuit carries them). **Migration:** a test double that relied on the
   Python `set_initial` / `set_alias` fallbacks must implement them.
+* **Added** `Circuit.to_yaml()`, `Circuit.from_yaml(text)` (C++
+  `pulsim/yaml/emitter.hpp`), `Circuit.clone()` and pickle (through the
+  YAML). The text is the lowered circuit: one entry per registry kind
+  instance (all 27 kinds; a missing kind fails to compile), stored
+  fields written shortest-round-trip and defaults omitted, plus
+  couplings, branch-form order, parameters and bindings, initial
+  conditions, aliases, power-MOSFET records and control declarations.
+  `from_yaml(to_yaml(c))` keeps both hashes and simulates bit for bit
+  (pinned for one cell per kind on pwl / trbdf2 / dsed, the 25 shipped
+  examples and the 111 v1 harness circuits) and `to_yaml` is a fixed
+  point after one round. Errors name the device and the key. A C block
+  is refused (a Python callable).
+* **Changed** `sweep(circuit, backend="process")` runs (the circuit
+  reaches each worker through its pickle); it was refused.
+* **Changed** `Circuit.value_hash()` hashes a saturable inductor's flux
+  table / Jiles-Atherton core and a nonlinear capacitor's charge table
+  by content, not by address: two circuits built alike now hash alike
+  across processes. **Migration:** a stored value_hash of a circuit with
+  such a table changes once.
 * **Changed** `Circuit.with_value` / `with_params` / `with_preflight` /
   `with_ties` / `to_builder`, `PwlStateSpaceCache.build_lazy` and
   `CircuitBuilder.initial_state` release the GIL.

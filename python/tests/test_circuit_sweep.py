@@ -117,12 +117,6 @@ def test_monte_carlo_threads_share_the_circuit():
     assert c.value_hash() == h
 
 
-def test_process_backend_is_refused_for_a_circuit():
-    with pytest.raises(ValueError, match="backend='process' cannot carry a pulsim.Circuit"):
-        p.sweep(parametric(), params={"L": [1e-4]}, kpi_fn=_kpi,
-                parallel=True, backend="process", verbose=False, **_kw())
-
-
 def test_a_circuit_of_another_structure_does_not_share(caches):
     kw = _kw()
     with warnings.catch_warnings():

@@ -62,8 +62,9 @@ is not a precondition; `simulate()` keeps its entry points and calls
   `R` / `R_on` / `R_off` setters write `1 / R` exactly as the builder
   does, so the stored bits equal a rebuild. Table-valued parameters
   (flux tables, charge tables, Jiles–Atherton cores) are shared
-  immutable objects and enter `value_hash` by identity; the PWL
-  current-source knots enter by content.
+  immutable objects; the PWL current-source knots enter `value_hash` by
+  content. (Tables entered by identity until decision 16, which hashes
+  them by content.)
 - **Evidence:** the per-kind test (6.4) sets one field of every kind with
   `with_value` and compares against a rebuild with the new literal.
 - **Reverse:** when `add-unified-device-interface` lands its field
@@ -335,3 +336,60 @@ is not a precondition; `simulate()` keeps its entry points and calls
 - Controls enter the structure stream behind a tag and a count; the
   backend label is `"kernel"` only when a point ran in the kernel; a
   thread that cannot be started leaves its points to the others.
+
+## 16. The YAML round trip writes the lowered form (group 4)
+
+- **Option:** `core/include/pulsim/yaml/emitter.hpp` (free functions
+  `ir::to_yaml(circuit)` / `ir::from_yaml(text)`; Python
+  `Circuit.to_yaml()` / `Circuit.from_yaml()`). The document is the
+  LOWERED circuit: nodes in unknown order, one entry per registry-kind
+  instance in branch order (a PMSM's three phase branches as one entry),
+  then the side records (couplings, branch-form order, parameters,
+  bindings, initial conditions, aliases, power-MOSFET records, control
+  declarations). `from_yaml` adds every branch first (so a sensed branch
+  named later resolves), then the pool entries in branch order, so the
+  pool's counters (source, inductor and branch-form slots) come back in
+  the same order. Additions only: a `derived` flag on `FieldSpec`
+  (reciprocal rows), `friend struct ir::YamlIo` on the builder.
+- **Schema table:** a kind's keys are its non-derived rows of
+  `kKindFields` plus its pins and its table / law / waveform keys; its
+  name is `kKindYaml`, checked against `kKindCaps` by a `static_assert`,
+  and a kind without a reader fails to compile (`static_assert` in the
+  visitor). The authoring loader (`yaml/loader.hpp`, composite types
+  such as `mosfet` with a body diode) is unchanged: composites do not
+  survive lowering one to one, so the round-trip format is a second,
+  exact dialect, not the authoring one.
+- **Stored members, not authoring values.** A resistor is written as
+  `G`, a branch switch as `g_on` plus its `R_on` in `branch_form`:
+  writing `R` would read back as `1/(1/G)`, which differs from `G` by an
+  ulp for some values. Defaults (a value-initialised `Params`) are
+  omitted bit for bit.
+- **Numbers shortest-round-trip, not `%.17g`.** `std::to_chars` writes
+  the shortest text that reads back to the same double (never more than
+  17 significant digits; `0.1`, not `0.10000000000000001`), and
+  `std::from_chars` reads it; both are locale-free. The guarantee asked
+  of 17 digits (exact round trip, fixed point after one round) holds and
+  is tested; the text is what a person would type.
+- **Tables hash by content.** `value_hash` read a flux / charge table's
+  address, so the same circuit hashed differently per process and after
+  a round trip. It now hashes the knots (and every Jiles-Atherton
+  scalar). Changes the value_hash of circuits with such tables only.
+- **Not serialised:** a control with a handle (a C block: a Python
+  callable) is refused by name; graph-driven declarations (no handle)
+  round-trip with their content hash. `from_yaml` validates syntax,
+  kinds, keys, pin counts, node and branch names, and the models' own
+  `validate` (the pool's add path); it does not re-apply authoring
+  bounds (a branch-form `g_off = 0` is legal there and would fail the
+  field bound).
+- **Pickle / clone:** pickle is the YAML text; `clone()` returns another
+  handle to the same data. `sweep(circuit, backend="process")` is
+  therefore allowed (its workers do not share the symbolic plan).
+- **Evidence:** `test_circuit_yaml.py` — one cell per kind (the
+  engine-conformance cells, plus the table / vdmos / power-MOSFET and
+  branch-form variants) on pwl, trbdf2 and dsed: equal hashes, fixed
+  point, bit-identical `times` / `states` or the same refusal; the 25
+  shipped examples; the 111 v1 harness circuits that the reader loads
+  (15 use unmapped v1 blocks). Pinned: `structure_hash` 0x57BF94FE7FA50967,
+  `value_hash` 0x746D6010F3DC01E0 for the V-R-C cell (C++ and Python).
+- **Reverse:** when `add-unified-device-interface` lands generated field
+  tables, `kKindYaml` and the reader's visitor come from them.

@@ -31,12 +31,12 @@ lands).
 - [x] 3.4 Oracle: `test_initial_conditions_across_engines.py`, the alias tests, the C-block tests, `res.i` of Shockley diodes unchanged; a grep-based test that no module sets a private attribute on a builder
 
 ## 4. YAML round trip, clone, pickle, hashes
-- [ ] 4.1 Schema table shared by loader and emitter (generated from the device field tables when `add-unified-device-interface` section 12 has landed; otherwise kept in `yaml/schema.hpp`), covering every registry kind including `shockley_diode`, `lauritzen_diode`, `nonlinear_capacitor`, `pmsm_mna` and the flux-table inductor
-- [ ] 4.2 `yaml/emitter.hpp`: `Circuit::to_yaml()` (17 significant digits, defaults omitted, metadata kept); `Circuit::from_yaml()`
-- [ ] 4.3 `structure_hash()`, `value_hash()`; `clone()`; pickle through YAML
-- [ ] 4.4 Tests: for every shipped example, every harness circuit and one circuit per kind, `from_yaml(to_yaml(c))` has the same `value_hash` and simulates bit-identically; `to_yaml` is a fixed point after one round; a registry kind without a schema entry fails; provenance metadata survives
-- [ ] 4.5 Oracle: `test_shipped_yaml_examples.py`, `test_yaml_composite_devices.py`, `test_yaml_integrator_option.py` green
-- [ ] 4.6 Docs: YAML reference (new kinds), `AI_GUIDE.md`
+- [x] 4.1 Schema table shared by loader and emitter (generated from the device field tables when `add-unified-device-interface` section 12 has landed; otherwise kept in `yaml/schema.hpp`), covering every registry kind including `shockley_diode`, `lauritzen_diode`, `nonlinear_capacitor`, `pmsm_mna` and the flux-table inductor (done as `kKindYaml` + the non-derived `kKindFields` rows in `yaml/emitter.hpp`, shared by the emitter and the round-trip reader; the authoring loader keeps its composite types, DECISIONS 16)
+- [x] 4.2 `yaml/emitter.hpp`: `Circuit::to_yaml()` (exact shortest round-trip digits, at most 17 — DECISIONS 16, defaults omitted, metadata kept); `Circuit::from_yaml()`
+- [x] 4.3 `structure_hash()`, `value_hash()`; `clone()`; pickle through YAML
+- [x] 4.4 Tests: for every shipped example, every harness circuit and one circuit per kind, `from_yaml(to_yaml(c))` has the same `value_hash` and simulates bit-identically; `to_yaml` is a fixed point after one round; a registry kind without a schema entry fails; provenance metadata survives
+- [x] 4.5 Oracle: `test_shipped_yaml_examples.py`, `test_yaml_composite_devices.py`, `test_yaml_integrator_option.py` green
+- [x] 4.6 Docs: YAML reference (new kinds), `AI_GUIDE.md`
 
 ## 5. Sweeps over a circuit
 - [x] 5.1 `sweep(circuit, params=...)` and `monte_carlo(circuit, ...)` beside the `builder_factory` forms; the circuit is shared by the worker threads

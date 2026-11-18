@@ -98,6 +98,7 @@ struct FieldSpec {
     Bound bound;
     Real (*get)(const ParamsVariant&);
     void (*set)(ParamsVariant&, Real);
+    bool derived = false;    // computed from a stored member (R = 1/G): not serialised
 
     [[nodiscard]] constexpr bool named(std::string_view n) const noexcept {
         return n == name || (!alias.empty() && n == alias);
@@ -137,7 +138,8 @@ template <class P, auto M>
         [](const ParamsVariant& e) -> Real {
             return Real{1} / (std::get<P>(e).*M);
         },
-        [](ParamsVariant& e, Real v) { std::get<P>(e).*M = Real{1} / v; }};
+        [](ParamsVariant& e, Real v) { std::get<P>(e).*M = Real{1} / v; },
+        true};
 }
 
 namespace m = ::pulsim::models;

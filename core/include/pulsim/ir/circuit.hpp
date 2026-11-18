@@ -315,8 +315,12 @@ private:
                 dev.fields.push_back(Field{static_cast<std::uint16_t>(f), Value{x}});
                 v.real(x);
             }
-            // Values outside the scalar rows. Tables are shared immutable
-            // objects, identified by address (decision 4 in DECISIONS.md).
+            // Values outside the scalar rows, tables by CONTENT (decision
+            // 16: an address differs per process and per round trip).
+            auto reals = [&](const std::vector<Real>& xs) {
+                v.word(xs.size());
+                for (const Real x : xs) v.real(x);
+            };
             std::visit([&](const auto& p) {
                 using P = std::decay_t<decltype(p)>;
                 if constexpr (std::is_same_v<P, models::PwlCurrentSource::Params>) {
@@ -325,11 +329,25 @@ private:
                     for (const Real y : p.w.v) v.real(y);
                     v.word(p.w.periodic ? 1u : 0u);
                 } else if constexpr (std::is_same_v<P, models::SaturableInductor::Params>) {
-                    v.word(reinterpret_cast<std::uintptr_t>(p.table.get()));
-                    v.word(reinterpret_cast<std::uintptr_t>(p.ja.get()));
+                    v.word(p.table ? 1u : 0u);
+                    if (p.table) {
+                        reals(p.table->i_knots()); reals(p.table->lambda_knots());
+                        reals(p.table->slope_knots()); v.real(p.table->L_residual());
+                    }
+                    v.word(p.ja ? 1u : 0u);
+                    if (const auto* j = p.ja.get()) {
+                        for (const Real x : {j->N, j->Ae, j->le, j->lg, j->ja.Ms, j->ja.a,
+                                             j->ja.alpha, j->ja.c, j->ja.k,
+                                             j->substep_frac, j->M0}) v.real(x);
+                        v.word(static_cast<std::uint64_t>(j->substeps_min));
+                    }
                 } else if constexpr (std::is_same_v<P, models::NonlinearCapacitor::Params>) {
                     v.word(static_cast<std::uint64_t>(p.law));
-                    v.word(reinterpret_cast<std::uintptr_t>(p.table.get()));
+                    v.word(p.table ? 1u : 0u);
+                    if (p.table) {
+                        reals(p.table->v_knots()); reals(p.table->q_knots());
+                        reals(p.table->c_knots());
+                    }
                 }
             }, params);
             d->devices.push_back(std::move(dev));

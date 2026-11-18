@@ -3018,7 +3018,16 @@ class Circuit:
     """
     Immutable circuit (add-immutable-circuit-ir). Built with `builder.build()`; a handle to shared, read-only data, cheap to copy and safe to share between threads. `simulate(circuit, ...)` runs it; the builder it came from can keep being edited.
     """
+    @staticmethod
+    def from_yaml(text: str) -> Circuit:
+        """
+        Inverse of `to_yaml`; errors name the device and the key.
+        """
+    def __getstate__(self) -> tuple[str]:
+        ...
     def __repr__(self) -> str:
+        ...
+    def __setstate__(self, arg0: tuple[typing.Any, ...]) -> None:
         ...
     def aliases(self) -> dict[typing.Any, typing.Any]:
         """
@@ -3027,6 +3036,10 @@ class Circuit:
     def branch_id_of(self, name: str) -> int:
         """
         As CircuitBuilder.branch_id_of().
+        """
+    def clone(self) -> Circuit:
+        """
+        Another handle to the same immutable data (no copy).
         """
     def components(self) -> typing.Any:
         """
@@ -3075,6 +3088,10 @@ class Circuit:
     def to_builder(self) -> CircuitBuilder:
         """
         A new, independent CircuitBuilder holding this circuit (the circuit is not affected by edits to it).
+        """
+    def to_yaml(self) -> str:
+        """
+        The lowered circuit as YAML; `Circuit.from_yaml` reads it back with the same `value_hash`. Refuses a C block (a Python callable).
         """
     def value_hash(self) -> int:
         """

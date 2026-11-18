@@ -18,6 +18,7 @@
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/solver/run_transient.hpp"
+#include "pulsim/yaml/emitter.hpp"
 #include "switch_fn_adapter.hpp"
 
 #include <atomic>
@@ -243,6 +244,22 @@ void init_module(py::module_& m) {
         .def("value_hash", &Circuit::value_hash,
              "64-bit hash of the structure and every value (fields, "
              "couplings, initial conditions, aliases).")
+        .def("to_yaml", [](const Circuit& c) { return pulsim::ir::to_yaml(c); },
+             py::call_guard<py::gil_scoped_release>(),
+             "The lowered circuit as YAML; `Circuit.from_yaml` reads it back "
+             "with the same `value_hash`. Refuses a C block (a Python "
+             "callable).")
+        .def_static("from_yaml", [](const std::string& text) { return pulsim::ir::from_yaml(text); },
+                    py::arg("text"), py::call_guard<py::gil_scoped_release>(),
+                    "Inverse of `to_yaml`; errors name the device and the key.")
+        .def("clone", [](const Circuit& c) { return c; },
+             "Another handle to the same immutable data (no copy).")
+        .def(py::pickle(
+            [](const Circuit& c) { return py::make_tuple(pulsim::ir::to_yaml(c)); },
+            [](const py::tuple& t) {
+                if (t.size() != 1) throw std::runtime_error("Circuit: bad pickle state");
+                return pulsim::ir::from_yaml(t[0].cast<std::string>());
+            }))
         .def_property_readonly("nodes", [](const Circuit& c) {
                 py::list out;
                 for (const auto& n : c.nodes()) out.append(n.name);

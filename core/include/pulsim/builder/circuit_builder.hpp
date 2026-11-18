@@ -58,7 +58,7 @@
 #include <utility>
 #include <vector>
 
-namespace pulsim::ir { class Circuit; }
+namespace pulsim::ir { class Circuit; struct YamlIo; }
 
 namespace pulsim::builder {
 
@@ -2473,6 +2473,7 @@ private:
     CircuitBuilder& operator=(const CircuitBuilder&) = default;
 
     friend class ir::Circuit;  // with_value: set_value_ with its own name
+    friend struct ir::YamlIo;  // from_yaml replays branches and the pool
 
     struct FieldRef_ {
         Index branch;
