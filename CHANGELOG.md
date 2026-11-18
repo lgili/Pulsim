@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Unified device interface, steps 1–2: one history fold, one kernel-built refresh
+
+* **Changed** (internal) the five stateful-device histories (Coss,
+  Lauritzen diode, MNA PMSM, IGBT tail, saturable inductor) are one
+  object in both transient drivers, and the Newton refresh is one
+  kernel function reading one step context, instead of two chains of
+  five wrappers. Results are bit-identical (golden and stateful-device
+  byte compares).
+* **Deprecated** `simulate(enable_nonlinear_refresh=...)` (and
+  `SolverConfig.enable_nonlinear_refresh`): the kernel stamps every
+  Newton device itself. `True` is what the kernel does by default;
+  `False` on a circuit with Newton devices is still refused by name.
+  Emits a `DeprecationWarning`; removed in a later release.
+
 ### Integration batch 10: control graph 2, optimisation slice 5, circuit IR 2, exact engine dependent states merged
 
 * **Fixed** a C block reached a run only through a Python attribute of

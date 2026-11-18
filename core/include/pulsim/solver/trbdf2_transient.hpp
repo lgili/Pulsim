@@ -83,6 +83,7 @@
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/nonlinear_capacitor_history.hpp"
 #include "pulsim/pwl/igbt_tail_history.hpp"
+#include "pulsim/pwl/device_refresh.hpp"
 #include "pulsim/pwl/stateful_histories.hpp"
 #include "pulsim/pwl/lauritzen_diode_history.hpp"
 #include "pulsim/pwl/nonlinear_refresh_igbt_tail.hpp"
@@ -411,9 +412,7 @@ inline SimulationResult run_transient_trbdf2(
     // standard one, so the stages never solve the linear skeleton.
     // The stateful kinds bring their own wrappers below.
     const pwl::NonlinearRefreshFn nl_static =
-        (nl_refresh || !pool.requires_static_refresh())
-            ? nl_refresh
-            : pwl::make_combined_diode_mosfet_refresh();
+        pwl::static_device_refresh(pool, nl_refresh);
 
     const Real span  = opts.t_end - opts.t_start;
     // Default step ceiling. span/1000 alone is a TRAP on a long
@@ -656,122 +655,17 @@ inline SimulationResult run_transient_trbdf2(
     hs.init(graph, pool);
     if (initial_state.has_value()) hs.seed_from_dc_op(x);
     if (resume_from != nullptr) hs.from_snapshot(*resume_from);
-    auto& coss = hs.coss;
-    auto& laur = hs.laur;
-    auto& tail = hs.tail;
-    auto& pmsm = hs.pmsm;
-    auto& sat = hs.sat;
-    const bool has_coss = !coss.empty();
-    auto coss_stage = pwl::CossStage::Trapezoidal;
-    Real coss_h = Real{0};
-    const bool has_laur = !laur.empty();
-    const bool has_tail = !tail.empty();
-    const bool has_pmsm = !pmsm.empty();
-    const bool has_sat = !sat.empty();
-
-    // One stage/step pair drives all four: they are always stamped
-    // in the same stage of the same step.
-    auto dev_stage = pwl::TrBdf2Stage::Trapezoidal;
-    Real dev_h = Real{0};
-
-    pwl::NonlinearRefreshFn nl_effective = nl_static;
-    if (has_coss) {
-        nl_effective =
-            [user = nl_static, &coss, &coss_stage,
-             &coss_h](const Vector& xx, sparse::Matrix& J_nl,
-                        Vector& f_nl, const topology::Graph& g,
-                        const pwl::DevicePool& pp) -> Real {
-                Real m = Real{0};
-                if (user) {
-                    m = user(xx, J_nl, f_nl, g, pp);
-                } else {
-                    sparse::zero_keep_pattern(J_nl);
-                    f_nl.setZero();
-                }
-                return std::max(
-                    m, pwl::refresh_nonlinear_capacitors(
-                           xx, J_nl, f_nl, coss, coss_h,
-                           coss_stage, &coss.q_gamma()));
-            };
-    }
-
-    if (has_laur) {
-        nl_effective =
-            [user = nl_effective, &laur, &dev_stage, &dev_h](
-                const Vector& xx, sparse::Matrix& J_nl, Vector& f_nl,
-                const topology::Graph& g,
-                const pwl::DevicePool& pp) -> Real {
-                Real m = Real{0};
-                if (user) {
-                    m = user(xx, J_nl, f_nl, g, pp);
-                } else {
-                    sparse::zero_keep_pattern(J_nl);
-                    f_nl.setZero();
-                }
-                return std::max(m, pwl::refresh_lauritzen_diodes(
-                                       xx, J_nl, f_nl, laur, dev_h,
-                                       dev_stage));
-            };
-    }
-    if (has_tail) {
-        nl_effective =
-            [user = nl_effective, &tail, &dev_stage, &dev_h](
-                const Vector& xx, sparse::Matrix& J_nl, Vector& f_nl,
-                const topology::Graph& g,
-                const pwl::DevicePool& pp) -> Real {
-                Real m = Real{0};
-                if (user) {
-                    m = user(xx, J_nl, f_nl, g, pp);
-                } else {
-                    sparse::zero_keep_pattern(J_nl);
-                    f_nl.setZero();
-                }
-                return std::max(m, pwl::refresh_igbt_tails(
-                                       xx, J_nl, f_nl, tail, dev_h,
-                                       dev_stage));
-            };
-    }
-    if (has_pmsm) {
-        nl_effective =
-            [user = nl_effective, &pmsm, &dev_stage, &dev_h](
-                const Vector& xx, sparse::Matrix& J_nl, Vector& f_nl,
-                const topology::Graph& g,
-                const pwl::DevicePool& pp) -> Real {
-                Real m = Real{0};
-                if (user) {
-                    m = user(xx, J_nl, f_nl, g, pp);
-                } else {
-                    sparse::zero_keep_pattern(J_nl);
-                    f_nl.setZero();
-                }
-                return std::max(m, pwl::refresh_pmsm_mna(
-                                       xx, J_nl, f_nl, pmsm, dev_h,
-                                       dev_stage));
-            };
-    }
-    if (has_sat) {
-        nl_effective =
-            [user = nl_effective, &sat, &dev_stage, &dev_h](
-                const Vector& xx, sparse::Matrix& J_nl, Vector& f_nl,
-                const topology::Graph& g,
-                const pwl::DevicePool& pp) -> Real {
-                Real m = Real{0};
-                if (user) {
-                    m = user(xx, J_nl, f_nl, g, pp);
-                } else {
-                    sparse::zero_keep_pattern(J_nl);
-                    f_nl.setZero();
-                }
-                Real mx = Real{0};
-                for (const auto& e : sat.entries()) {
-                    mx = std::max(mx, pwl::stamp_saturable_inductor(
-                                          e, xx, J_nl, f_nl, dev_h,
-                                          dev_stage,
-                                          /*increment_form=*/true));
-                }
-                return std::max(m, mx);
-            };
-    }
+    // One step context for every stateful stamp (add-unified-device-
+    // interface step 2): every solve, probe and landing sets it once, so
+    // no stamp can read a step that this solve did not set.
+    pwl::StepCtx step_ctx{};
+    const bool has_coss = !hs.coss.empty();
+    const bool has_laur = !hs.laur.empty();
+    const bool has_tail = !hs.tail.empty();
+    const bool has_pmsm = !hs.pmsm.empty();
+    const bool has_sat = !hs.sat.empty();
+    const pwl::NonlinearRefreshFn nl_effective = pwl::build_device_refresh(
+        nl_static, hs, step_ctx, /*sat_increment_form=*/true);
 
     std::string newton_last_error;
     // Roundoff acceptance (add-newton-roundoff-acceptance), on for every
@@ -852,8 +746,8 @@ inline SimulationResult run_transient_trbdf2(
         // EVERY trapezoidal solve tells the stateful devices which
         // step it is taking. The linear part always received `dt`
         // through compute_b_extra / solve_dispatch, but the Coss,
-        // Lauritzen, IGBT-tail, PMSM and saturable-inductor wrappers
-        // read (dev_h, coss_h), which the step loop assigns only
+        // Lauritzen, IGBT-tail, PMSM and saturable-inductor stamps
+        // read the step context, which the step loop assigns only
         // after this point — so the zero-time diode settle above the
         // loop, and every probe / landing solve inside it, stamped
         // those devices with h = 0 (the settle) or with the PREVIOUS
@@ -861,13 +755,10 @@ inline SimulationResult run_transient_trbdf2(
         // any circuit with a diode divided by zero in the settle and
         // took the process down (SIGSEGV, measured); a Coss produced
         // NaN diode bits in silence, because the settle discards the
-        // solve's return value. Setting the pair here, at the one
+        // solve's return value. Setting it here, at the one
         // choke point all trapezoidal solves pass through, is the
-        // same fix run_transient applies to `refresh_dt`.
-        dev_stage = pwl::TrBdf2Stage::Trapezoidal;
-        dev_h = dt;
-        coss_stage = pwl::CossStage::Trapezoidal;
-        coss_h = dt;
+        // same fix run_transient applies to its `step_ctx`.
+        step_ctx = {dt, pwl::TrBdf2Stage::Trapezoidal};
         history.compute_b_extra(dt, b_stage);
         accumulate_sources(t0 + dt, b_src);
         b_stage += b_src;
@@ -1800,10 +1691,7 @@ inline SimulationResult run_transient_trbdf2(
             accumulate_sources(t + h_pt, b_src);
             b_stage += b_src;
             x_g = x;                 // Newton warm start
-            coss_stage = pwl::CossStage::Trapezoidal;
-            coss_h = hg;
-            dev_stage = pwl::TrBdf2Stage::Trapezoidal;
-            dev_h = hg;
+            step_ctx = {hg, pwl::TrBdf2Stage::Trapezoidal};
             bool stage_ok =
                 solve_dispatch(mask_step, hg, b_stage, x_g);
             ++st.n_solves;
@@ -1848,10 +1736,7 @@ inline SimulationResult run_transient_trbdf2(
                 // the matrix is still the one factored at gamma*h — the
                 // identity c1/h == 2/(gamma*h) is what allows that.
                 hs.capture_gamma(x_g);
-                coss_stage = pwl::CossStage::Bdf2Stage2;
-                coss_h = h;
-                dev_stage = pwl::TrBdf2Stage::Bdf2Stage2;
-                dev_h = h;
+                step_ctx = {h, pwl::TrBdf2Stage::Bdf2Stage2};
                 x_1 = x_g;           // Newton warm start
                 stage_ok =
                     solve_dispatch(mask_step, hg, b_stage, x_1);

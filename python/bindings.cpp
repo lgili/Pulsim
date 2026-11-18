@@ -121,13 +121,8 @@ inline pulsim::pwl::NonlinearRefreshFn transient_refresh(
     const char* engine) {
     using pulsim::pwl::SolveClass;
     if (!enable.has_value()) return {};
-    if (*enable) {
-        // The chain stamps only static Newton devices; on a circuit with
-        // none it would only reroute a linear solve through Newton.
-        return pool.requires_static_refresh()
-                   ? pulsim::pwl::make_combined_diode_mosfet_refresh()
-                   : pulsim::pwl::NonlinearRefreshFn{};
-    }
+    // True: what the kernel builds by itself (pwl::static_device_refresh).
+    if (*enable) return {};
     for (pulsim::Index b = 0; b < graph.num_branches(); ++b) {
         if (!pool.is_registered(b)
             || pulsim::pwl::kind_caps(pool.kind_of(b)).cls

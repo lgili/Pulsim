@@ -41,6 +41,7 @@
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/nonlinear_refresh_saturable_inductor.hpp"
 #include "pulsim/pwl/igbt_tail_history.hpp"
+#include "pulsim/pwl/device_refresh.hpp"
 #include "pulsim/pwl/stateful_histories.hpp"
 #include "pulsim/pwl/lauritzen_diode_history.hpp"
 #include "pulsim/pwl/pmsm_mna_history.hpp"
@@ -425,175 +426,26 @@ inline SimulationResult run_transient(
     hs.init(graph, pool);
     if (initial_state != nullptr) hs.seed_from_dc_op(x);
     if (resume_snap != nullptr) hs.from_snapshot(*resume_snap);
-    auto& sat_history = hs.sat;
-    auto& coss_history = hs.coss;
-    auto& laur_history = hs.laur;
-    auto& pmsm_history = hs.pmsm;
-    auto& tail_history = hs.tail;
-    const bool has_saturable = !sat_history.empty();
-    const bool has_coss = !coss_history.empty();
-    const bool has_lauritzen = !laur_history.empty();
-    const bool has_pmsm = !pmsm_history.empty();
-    const bool has_igbt_tail = !tail_history.empty();
 
-    // V17: shared dt that the saturable-inductor refresh
-    // reads each iteration. Updated when sub-step correction
-    // splits dt into dt1 + dt2.
-    // Fixed for the whole run. An earlier comment here claimed it
-    // was "updated when sub-step correction splits dt into dt1+dt2";
-    // it never was, and it is safe only because that path solves
-    // linearly through cache.solve_at and never consults this. The
-    // dt-retry refuses saturable-inductor circuits for the same
-    // reason — see `dt_retry_can_help`.
-    Real refresh_dt = opts.dt;
-    // The rule of the solve in flight, set beside refresh_dt at the one
-    // point every solve passes through (run_event_iteration): the
-    // SDIRK stages of discontinuity_restart are BackwardEuler, with
-    // refresh_dt = the γ·h each stage advances.
-    pwl::TrBdf2Stage refresh_stage = pwl::TrBdf2Stage::Trapezoidal;
+    // The step every stateful stamp of the next solve integrates over:
+    // set at the one point every solve passes through
+    // (run_event_iteration), including the dt-retry sub-steps, the
+    // commutation split and the SDIRK stages of discontinuity_restart
+    // (BackwardEuler over the γ·h each stage advances).
+    pwl::StepCtx step_ctx{opts.dt, pwl::TrBdf2Stage::Trapezoidal};
 
-
-    // The static Newton chain is the kernel's: with no callback from
-    // the caller, Newton devices get the standard one instead of being
-    // simulated as open circuits (the raw binding used to default to
-    // that: 10.000 V on a clamp that reads 0.594 V).
+    // The Newton refresh is built by the kernel (add-unified-device-
+    // interface step 2): the static stamps (with no callback from the
+    // caller, Newton devices get the standard ones instead of being
+    // simulated as open circuits: 10.000 V on a clamp that reads 0.594 V),
+    // then every stateful history, all reading `step_ctx`, which
+    // run_event_iteration sets before every solve. `nl_refresh` is a
+    // deprecated override of the static stamps only.
     const pwl::NonlinearRefreshFn nl_static =
-        (nl_refresh || !pool.requires_static_refresh())
-            ? nl_refresh
-            : pwl::make_combined_diode_mosfet_refresh();
-    pwl::NonlinearRefreshFn nl_refresh_effective = nl_static;
-    if (has_coss) {
-        nl_refresh_effective =
-            [user_refresh = nl_refresh_effective, &coss_history,
-             &refresh_dt, &refresh_stage](const Vector& xx,
-                            sparse::Matrix& J_nl,
-                            Vector& f_nl,
-                            const topology::Graph& g,
-                            const pwl::DevicePool& pp) -> Real {
-                Real max_i = Real{0};
-                if (user_refresh) {
-                    max_i = user_refresh(xx, J_nl, f_nl, g, pp);
-                } else {
-                    sparse::zero_keep_pattern(J_nl);
-                    f_nl.setZero();
-                }
-                return std::max(
-                    max_i,
-                    pwl::refresh_nonlinear_capacitors(
-                        xx, J_nl, f_nl, coss_history,
-                        refresh_dt,
-                        refresh_stage == pwl::TrBdf2Stage::BackwardEuler
-                            ? pwl::CossStage::BackwardEuler
-                            : pwl::CossStage::Trapezoidal));
-            };
-    }
-    if (has_lauritzen) {
-        nl_refresh_effective =
-            [user_refresh = nl_refresh_effective, &laur_history,
-             &refresh_dt, &refresh_stage](const Vector& xx,
-                            sparse::Matrix& J_nl,
-                            Vector& f_nl,
-                            const topology::Graph& g,
-                            const pwl::DevicePool& pp) -> Real {
-                Real max_i = Real{0};
-                if (user_refresh) {
-                    max_i = user_refresh(xx, J_nl, f_nl, g, pp);
-                } else {
-                    sparse::zero_keep_pattern(J_nl);
-                    f_nl.setZero();
-                }
-                return std::max(
-                    max_i,
-                    pwl::refresh_lauritzen_diodes(
-                        xx, J_nl, f_nl, laur_history,
-                        refresh_dt, refresh_stage));
-            };
-    }
-    if (has_pmsm) {
-        nl_refresh_effective =
-            [user_refresh = nl_refresh_effective, &pmsm_history,
-             &refresh_dt, &refresh_stage](const Vector& xx,
-                            sparse::Matrix& J_nl,
-                            Vector& f_nl,
-                            const topology::Graph& g,
-                            const pwl::DevicePool& pp) -> Real {
-                Real max_i = Real{0};
-                if (user_refresh) {
-                    max_i = user_refresh(xx, J_nl, f_nl, g, pp);
-                } else {
-                    sparse::zero_keep_pattern(J_nl);
-                    f_nl.setZero();
-                }
-                return std::max(
-                    max_i,
-                    pwl::refresh_pmsm_mna(
-                        xx, J_nl, f_nl, pmsm_history, refresh_dt,
-                        refresh_stage));
-            };
-    }
-    if (has_igbt_tail) {
-        nl_refresh_effective =
-            [user_refresh = nl_refresh_effective, &tail_history,
-             &refresh_dt, &refresh_stage](const Vector& xx,
-                            sparse::Matrix& J_nl,
-                            Vector& f_nl,
-                            const topology::Graph& g,
-                            const pwl::DevicePool& pp) -> Real {
-                Real max_i = Real{0};
-                if (user_refresh) {
-                    max_i = user_refresh(xx, J_nl, f_nl, g, pp);
-                } else {
-                    sparse::zero_keep_pattern(J_nl);
-                    f_nl.setZero();
-                }
-                return std::max(
-                    max_i,
-                    pwl::refresh_igbt_tails(
-                        xx, J_nl, f_nl, tail_history,
-                        refresh_dt, refresh_stage));
-            };
-    }
-    if (has_saturable) {
-        nl_refresh_effective =
-            // `nl_refresh_effective`, NOT the raw `nl_refresh`.
-            // This wrapper is installed LAST, so capturing the raw
-            // user callback discarded every wrapper before it: a
-            // circuit with a saturable inductor and any of {Coss,
-            // Lauritzen diode, MNA-native PMSM, IGBT tail} lost all
-            // four of those Newton stamps in silence. Measured: an
-            // electrically DISCONNECTED saturable inductor on its
-            // own node dropped an IGBT's turn-off energy from
-            // 16.87 mJ to 0.045 mJ — exactly the no-tail value.
-            // The other four wrappers (lines above) always captured
-            // the accumulated one; this was the odd one out.
-            [user_refresh = nl_refresh_effective, &sat_history,
-             &refresh_dt, &refresh_stage](const Vector& x,
-                            sparse::Matrix& J_nl,
-                            Vector& f_nl,
-                            const topology::Graph& g,
-                            const pwl::DevicePool& p)
-                -> Real {
-                Real max_i = Real{0};
-                if (user_refresh) {
-                    max_i = user_refresh(x, J_nl, f_nl, g, p);
-                } else {
-                    if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
-                    if (f_nl.size() > 0) f_nl.setZero();
-                }
-                // Additive saturable-inductor stamping, through
-                // the one shared helper — this file used to carry a
-                // third byte-identical copy of the body, alongside
-                // the two in nonlinear_refresh_saturable_inductor.hpp.
-                for (const auto& e : sat_history.entries()) {
-                    max_i = std::max(
-                        max_i,
-                        pwl::stamp_saturable_inductor(
-                            e, x, J_nl, f_nl, refresh_dt,
-                            refresh_stage));
-                }
-                return max_i;
-            };
-    }
+        pwl::static_device_refresh(pool, nl_refresh);
+    const pwl::NonlinearRefreshFn nl_refresh_effective =
+        pwl::build_device_refresh(nl_static, hs, step_ctx,
+                                  /*sat_increment_form=*/false);
 
     pwl::DiodeEventState diodes{graph, pool};
     diodes.reset();
@@ -1448,8 +1300,8 @@ inline SimulationResult run_transient(
             // no rollback of its flux.)
             // A restart stage advances for_dt/2 (= γh) on the factor of
             // for_dt (= 2γh); the devices are told the interval and the rule.
-            refresh_dt = backward_euler ? for_dt * Real{0.5} : for_dt;
-            refresh_stage = backward_euler
+            step_ctx.h = backward_euler ? for_dt * Real{0.5} : for_dt;
+            step_ctx.stage = backward_euler
                 ? pwl::TrBdf2Stage::BackwardEuler
                 : pwl::TrBdf2Stage::Trapezoidal;
             iters = 0;

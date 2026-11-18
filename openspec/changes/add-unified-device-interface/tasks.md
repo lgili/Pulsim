@@ -19,12 +19,12 @@ machine (`-j2`, `nice`).
 - [x] 1.5 Docs: none (internal)
 
 ## 2. Kernel-built refresh
-- [ ] 2.1 `pwl::build_device_refresh(graph, pool, histories, StepCtx&)`: the static diode / MOSFET / IGBT stamps (kernel-built since `add-engine-conformance-matrix`) plus one typed pass per history, in one function; both drivers call it
-- [ ] 2.2 Delete the two wrapper chains (RT:471-600, TB:588-697) in favour of 2.1; keep `nl_refresh` as a deprecated override that replaces the base stamps only
-- [ ] 2.3 Remove whatever `make_combined_diode_mosfet_refresh()` call sites remain in `python/bindings.cpp` (four on this branch); `enable_nonlinear_refresh=` emits a `DeprecationWarning`
-- [ ] 2.4 C++ tests: the Phase 0 clamp test (0.594 V with no callback) still passes; every pair of stateful kinds in one circuit keeps each kind's single-kind result
-- [ ] 2.5 Oracle: goldens bit-identical; matrix unchanged
-- [ ] 2.6 Docs: CHANGELOG deprecation note; `docs/internals` section on the refresh
+- [x] 2.1 `pwl::build_device_refresh(graph, pool, histories, StepCtx&)`: the static diode / MOSFET / IGBT stamps (kernel-built since `add-engine-conformance-matrix`) plus one typed pass per history, in one function; both drivers call it
+- [x] 2.2 Delete the two wrapper chains (RT:471-600, TB:588-697) in favour of 2.1; keep `nl_refresh` as a deprecated override that replaces the base stamps only
+- [x] 2.3 Remove whatever `make_combined_diode_mosfet_refresh()` call sites remain in `python/bindings.cpp` (four on this branch); `enable_nonlinear_refresh=` emits a `DeprecationWarning`
+- [x] 2.4 C++ tests: the Phase 0 clamp test (0.594 V with no callback) still passes; every pair of stateful kinds in one circuit keeps each kind's single-kind result
+- [x] 2.5 Oracle: goldens bit-identical; matrix unchanged
+- [x] 2.6 Docs: CHANGELOG deprecation note; `docs/internals` section on the refresh
 
 ## 3. Flat device-state vector and snapshot
 - [ ] 3.1 `device/device_state.hpp`: `DeviceState`, `DeviceStateLayout`, signature
