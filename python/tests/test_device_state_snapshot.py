@@ -100,19 +100,22 @@ def test_each_block_holds_its_device_s_state_at_the_end(engine):
     assert np.array_equal(np.asarray(snap.x), np.asarray(res.states)[-1])
 
 
+@pytest.mark.parametrize("path", ["legacy", "interface"])
 @pytest.mark.parametrize("t_split", [4.2e-5, 5.0e-5, 5.5e-5])
-def test_split_fixed_step_run_is_the_continuous_one_bit_for_bit(t_split):
+def test_split_fixed_step_run_is_the_continuous_one_bit_for_bit(t_split, path):
     """The snapshot carries the grid (origin, index, dt), so the resumed
     run continues the continuous run's time grid and meets every gate
     edge at the same instant. Before, the grid restarted at t_split, the
     sample times moved by ~1e-20 s and the states drifted apart after the
     next edge (8e-12 of scale). Split between edges and exactly on one
     (5e-5 on, 5.5e-5 off)."""
-    full = _pwl(1e-4)
-    first = _pwl(t_split)
+    # On 'interface' too: the Lauritzen and IGBT-tail local charges must
+    # survive the snapshot against the UNINTERRUPTED run, not only a resume.
+    full = _pwl(1e-4, device_path=path)
+    first = _pwl(t_split, device_path=path)
     snap = pickle.loads(pickle.dumps(first.final_snapshot))
     assert snap.grid_dt == 2e-8 and snap.grid_origin == 0.0
-    second = _pwl(1e-4, resume_from=snap)
+    second = _pwl(1e-4, resume_from=snap, device_path=path)
     t_full = np.asarray(full.times)
     i0 = len(np.asarray(first.times)) - 1
     t2 = np.asarray(second.times)

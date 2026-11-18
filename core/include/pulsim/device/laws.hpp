@@ -70,7 +70,8 @@ template <Size N> inline constexpr bool is_ad_v<ad::ADRealN<N>> = true;
 
 /// g(u) for a law univariate in u (λ(i), Q(v)), parameters Real: g runs at
 /// ONE tangent and `ad::chain` spreads it over u's N slots (u's slots are
-/// the seeds ±1, so the result equals g at width N to the bit, at the cost
+/// the seeds ±1 or 0 at every call site, so the result equals g at width N
+/// to the bit; for a general AD u it is equal to rounding — at the cost
 /// of one tangent instead of N — the 3 % speed gate, task 15.7). With AD
 /// parameters (sensitivities) g runs at the full width.
 template <class P, class T, class G>

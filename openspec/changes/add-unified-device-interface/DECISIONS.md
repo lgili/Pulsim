@@ -459,3 +459,19 @@
     IGBT-tail snapshot taken on either path exactly as the snapshot it came
     from. Full ctest 937 (936 + the fixed bound), the law and perf targets on
     Eigen 3.4.0 green.
+36. **Reviewer, slice 4 (fresh context, read-only).** No law defect found
+    (Lauritzen and tail condensation, commit, capture, Coss floor, increment
+    form checked against the hand stamps). Fixed: task 4.3 of
+    add-parameter-sensitivities narrowed to what the memcmp test shows (four
+    static kinds); the split-equals-continuous resume test now runs on
+    'interface' too (the local charges survive a snapshot against the
+    UNINTERRUPTED run, bit-for-bit); the `univariate` comment states its ±1/0
+    seed condition. Left, stated: (1) `iface_ctx` is not in the rollback /
+    snapshot state — capture after a rollback that sits between a stage-1
+    stamp and its capture would read the newer step context (no engine order
+    does that today; the stepper's rollback must keep stamp → capture
+    adjacent, or the field joins `for_each_state`); (2) the step-9 readings
+    test does not cover the IGBT tail reading nor `for_each_static_reading`;
+    (3) the relaxed branch of the equivalence gate (#29) is not Jacobian
+    evidence for a defect confined to a few transients — the C++ law tests
+    are.
