@@ -134,3 +134,20 @@ def test_on_impulse_warn_on_the_exact_engine(engine):
     with pytest.warns(UserWarning, match="impulsive re-initialisation"):
         r = p.simulate(_cap_loop(), 1e-4, engine=engine, dt=1e-6, on_impulse="warn")
     assert len(r.reinit_records) == 1
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_one_record_per_event_and_direction(engine):
+    # The settle may project in a trial mode before it settles (scheduler.hpp
+    # settle_and_project_): only the settled mode's projection, from the pre-event state,
+    # reaches the result. The invariant over the dependent-state circuits: at most one
+    # record per instant and constraint direction, each with dW >= 0 and its sample. (No
+    # circuit here makes the settle try a constrained trial mode: this guards the invariant,
+    # it does not reproduce the reviewer's case.)
+    b, fn = _switched_cut_set()
+    for bb, extra in ((_cap_loop(), {}), (_cut_set_at_start(), {}), (b, {"switch_fn": fn})):
+        r = p.simulate(bb, 2e-3, engine=engine, dt=1e-6, **extra)
+        keys = [(rec.t, tuple(rec.states)) for rec in r.reinit_records]
+        assert len(keys) == len(set(keys)), keys
+        for rec in r.reinit_records:
+            assert rec.dW >= 0.0 and 0 <= rec.sample < len(r.times)

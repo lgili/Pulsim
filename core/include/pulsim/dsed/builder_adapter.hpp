@@ -464,6 +464,14 @@ public:
         }
         const DenseMatrix& K = e.constraint_K;
         const Eigen::LLT<DenseMatrix> el(e.energy_weight);
+        if (el.info() != Eigen::Success) {
+            // the extractor refuses a non-positive-definite weight; never project with one
+            throw UnsupportedError(
+                "dsed", "extraction", "", "",
+                "dsed: the energy weight of a dependent-state mode is not positive "
+                "definite (a coupling with |k| >= 1?): the projection is undefined. "
+                "Use engine='pwl' or 'trbdf2'.");
+        }
         const DenseMatrix EiKt = el.solve(K.transpose());
         const Eigen::SelfAdjointEigenSolver<DenseMatrix> es(K * EiKt);
         const DenseMatrix& Q = es.eigenvectors();
