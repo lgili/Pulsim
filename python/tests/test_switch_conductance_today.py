@@ -32,10 +32,6 @@ def _rl(g_on, g_off, closed, engine, **kw):
         return p.simulate(b, t_end=10e-3, switch_fn=fn, engine=engine, **kw)
 
 
-def test_pulsim_under_test_is_this_worktree():
-    assert "pulsim_wt/phase0/" in p.__file__ or "phase0" in p.__file__
-
-
 def test_closed_switch_control_conducts():
     r = _rl(1e3, 1e-9, lambda t: True, "pwl", dt=5e-5)
     assert r.i("L")[-1] == pytest.approx(9.98955, abs=1e-5)

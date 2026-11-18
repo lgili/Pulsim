@@ -220,12 +220,7 @@ def _assert_internal_node_is_sane(kind, rtol=1e-6, atol=1e-9):
 # Lauritzen case aborted at h_min before the refresh (t = 135 us).
 # An IGBT-tail case is not here: in this circuit it aborts at h_min at
 # the first turn-off with and without the refresh (the documented
-# stall). Nor a saturable-inductor case: as the buck's own inductor it
-# loses its whole current at a turn-off edge on TR-BDF2, with and
-# without the refresh (the edge cascade's Newton probe does not converge
-# at its 1e-16 s step, the failure is ignored, the diode is never turned
-# on, and one 2e-11 s step under all-OFF bits cuts 10 A to zero; v_sw
-# 2.6e7 V). Reported, not fixed here.
+# stall). The saturable-inductor buck has its own test below.
 def _gated_buck(kind, engine):
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 24.0)
@@ -246,12 +241,10 @@ def _gated_buck(kind, engine):
         m = p.SwitchStateMask(n)
         m.set(k, bool((t / T) - np.floor(t / T + 1e-9) < 0.5 - 1e-9))
         return m
-    # trbdf2 at rtol 2e-5 / atol 2e-8, the density the defaults had
-    # before update-trbdf2-error-control: at the defaults (twice as
-    # strict now) the Lauritzen case hits the known h_min stall at
-    # t = 15 us, as it did before at rtol 5e-6.
-    kw = dict(dt=T / 400) if engine == "pwl" else dict(rtol=2e-5,
-                                                         atol=2e-8)
+    # trbdf2 at the defaults. Until the failed cascade probes were
+    # handled (TR-BDF2 event follow-up) the Lauritzen case stalled at
+    # h_min at t = 15 us here and ran at doubled tolerances.
+    kw = dict(dt=T / 400) if engine == "pwl" else {}
     return p.simulate(b, t_end=20 * T, engine=engine, switch_fn=fn, **kw)
 
 
@@ -270,3 +263,37 @@ def test_gate_edge_refreshes_a_stateful_device(kind):
         m = t > 10e-5
         out.append(np.trapezoid(v[m], t[m]) / (t[m][-1] - t[m][0]))
     assert _rel(out[0], out[1]) < 2e-2
+
+
+def test_saturable_buck_inductor_keeps_its_current_at_turn_off():
+    """A saturable inductor as the buck's own inductor. The edge
+    cascade's probe is a 2e-16 s trap step, where 2L/h = 1e12 ohm puts
+    one ulp of inductor current far above Newton's absolute tolerances.
+    A failed probe's state was its warm start; the cascade decided the
+    diode bits on it, the freewheeling diode never turned on and one
+    step under all-OFF bits cut 10 A to zero (7.68 V reported, 11.13 V
+    measured with roundoff acceptance off and the fix removed). Probes
+    now climb 100x per Newton failure and a cascade with no converged
+    probe refuses by name; the C++ test "a failed Newton probe at a
+    gate edge is retried" runs it with roundoff acceptance off."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9)
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_saturable_inductor("L", "sw", "out", 100e-6, 20.0, 10e-6)
+    b.add_capacitor("C", "out", "gnd", 47e-6)
+    b.add_resistor("RL", "out", "gnd", 2.0)
+    n, k, T = b.graph.num_switches, b.switch_index_of("S"), 1e-5
+
+    def fn(t):
+        m = p.SwitchStateMask(n)
+        m.set(k, bool((t / T) - np.floor(t / T + 1e-9) < 0.5 - 1e-9))
+        return m
+    res = p.simulate(b, t_end=20 * T, engine="trbdf2", switch_fn=fn)
+    t = np.asarray(res.times)
+    v = np.asarray(res.v("out"))
+    m = t > 10 * T
+    tw = float(np.trapezoid(v[m], t[m]) / (t[m][-1] - t[m][0]))
+    # engine='pwl', dt = T/400: 12.8491 V; trbdf2 measured 12.8507 V.
+    assert abs(tw - 12.8491) < 1e-3 * 12.8491, tw
+    assert res._trbdf2_stats["n_gate_events"] >= 38

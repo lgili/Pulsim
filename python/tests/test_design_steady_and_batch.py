@@ -191,7 +191,7 @@ def test_a_mid_run_mode_refusal_does_not_stop_the_batch(monkeypatch):
     three records, not a configuration verdict."""
     from pulsim._refusal import unsupported
 
-    def refuse(self, design, did, counters):
+    def refuse(self, design, did, counters, grads=None):
         raise unsupported("dsed", "consistent_mode", "mode selection at t = 1 s",
                           device="D1", kind="Diode")
     monkeypatch.setattr(Evaluator, "_evaluate", refuse)

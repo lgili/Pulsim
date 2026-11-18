@@ -114,6 +114,13 @@ public:
         ++n_samples_;
     }
 
+    /// Drop the last sample (no-op when empty).
+    void pop_back() noexcept {
+        if (n_samples_ == 0) return;
+        data_.resize(data_.size() - static_cast<std::size_t>(n_state_));
+        --n_samples_;
+    }
+
     void clear() noexcept {
         data_.clear();
         n_samples_ = 0;

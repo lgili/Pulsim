@@ -31,7 +31,7 @@ def _run(dt, L, n=200):
     return r, [str(w.message) for w in caught]
 
 
-# (L, dt, stalls at roundoff). Measured before this change: 100 uH
+# (L, dt, needs the acceptance today). Measured before this change: 100 uH
 # aborts at 1e-11, 1e-12, 1e-13 s (||dx|| 1.863e-9, 1.490e-8, 1.192e-7);
 # 10 mH aborts at 1e-9 ... 1e-11 s. On the in-house LU of the Newton
 # workspace (update-newton-persistent-solver A2, integration batch 5)
@@ -44,12 +44,12 @@ CASES = [(100e-6, 1e-10, False), (100e-6, 1e-11, False),
          (10e-3, 1e-11, True), (10e-3, 1e-12, False)]
 
 
-@pytest.mark.parametrize("L, dt, aborted_before", CASES)
-def test_roundoff_stall_completes_and_is_reported(L, dt, aborted_before):
+@pytest.mark.parametrize("L, dt, needs_acceptance", CASES)
+def test_roundoff_stall_completes_and_is_reported(L, dt, needs_acceptance):
     r, msgs = _run(dt, L)
     n_acc = r.newton_roundoff_accepts
-    assert (n_acc > 0) == aborted_before
-    if aborted_before:
+    assert (n_acc > 0) == needs_acceptance
+    if needs_acceptance:
         assert r.newton_roundoff_omega_max <= 8 * np.finfo(float).eps
         assert any("accepted" in m and "8 eps" in m for m in msgs), msgs
     # The answer is the physics, not noise: over 200 steps i(t) - i0 is

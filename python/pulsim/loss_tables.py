@@ -46,6 +46,9 @@ def _ascending(name: str, axis) -> np.ndarray:
     a = np.asarray(axis, dtype=float).ravel()
     if a.size == 0:
         raise ValueError(f"LossTable: {name} axis is empty")
+    if not np.all(np.isfinite(a)):
+        raise ValueError(f"LossTable: {name} axis has non-finite entries "
+                         f"{a.tolist()}")
     if a.size > 1 and not np.all(np.diff(a) > 0):
         raise ValueError(
             f"LossTable: {name} axis must be strictly ascending, got "
@@ -133,6 +136,11 @@ class LossTable:
             np.asarray(tj, dtype=float))
         shape = vq.shape
         vq, iq, tq = vq.ravel(), iq.ravel(), tq.ravel()
+        for name, q in (("v", vq), ("i", iq), ("tj", tq)):
+            if not np.all(np.isfinite(q)):
+                # NaN propagated, +-inf gave NaN, inf or a clamped 0: a
+                # silent number where the kernel table refuses
+                raise ValueError(f"LossTable: non-finite {name} query")
 
         v0, v1, wv = _interp_axis(vq, self.v_axis)
         i0, i1, wi = _interp_axis(iq, self.i_axis)
@@ -145,6 +153,15 @@ class LossTable:
                 for at, ww_t in ((t0, 1.0 - wt), (t1, wt)):
                     out += e[av, ai, at] * ww_v * ww_i * ww_t
         return np.maximum(out, 0.0).reshape(shape)
+
+    def to_kernel(self):
+        """The same table as a kernel `pulsim._pulsim.LossTable3D`
+        (`core/include/pulsim/thermal/loss_table.hpp`), which reads it
+        with this class's rule: multilinear, extrapolated, clamped at 0."""
+        from ._pulsim import LossTable3D
+        return LossTable3D(self.v_axis.tolist(), self.i_axis.tolist(),
+                           self.tj_axis.tolist(),
+                           self.energy.ravel(order="C").tolist())
 
     # -- construction ----------------------------------------------
     @classmethod

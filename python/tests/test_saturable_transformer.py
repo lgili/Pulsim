@@ -148,23 +148,18 @@ def test_inrush_when_energised_at_the_voltage_zero_crossing():
     assert first_sat > 3.0 * first_lin, (first_sat, first_lin)
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="TR-BDF2 Newton stalls at h_min after a hard "
-                          "switching edge when any Newton device is present: "
-                          "||dx|| sits at 1e-7 and the worst residual is on "
-                          "T1.lp, a LINEAR inductor row scaled by 2L/h, so "
-                          "the absolute residual criterion cannot be met at "
-                          "a femtosecond landing step. Solver-level; tracked "
-                          "separately. The device is right on the fixed "
-                          "engine (every other test in this file).")
 def test_engines_agree_below_saturation():
     """On the variable-step engine, with the RC snubber the parity
     test in test_engine_auto.py uses: an ideal switch interrupting the
     primary leakage current with nowhere for it to go is an
     unresolved fast mode that the adaptive engine refuses by name
     (max_steps), while the fixed engine numerically damps it. That is
-    the circuit's fault, not the device's — and with the snubber in
-    place what remains is the Newton stall named in the xfail."""
+    the circuit's fault, not the device's. With the snubber in place
+    this was the documented TR-BDF2 h_min stall (a strict xfail): it
+    aborted at 4-24 us, then at 494 us with roundoff acceptance. Cured
+    by handling every failed Newton probe of the zero-time diode
+    cascades (they were read as states): it completes, 15.3104 V
+    against 15.31 V (TR-BDF2 event follow-up, CHANGELOG)."""
     def build():
         b = p.CircuitBuilder()
         b.add_voltage_source("Vin", "vin", "gnd", 48.0)
@@ -199,7 +194,8 @@ def test_engines_agree_below_saturation():
     dc_r = float(np.trapezoid(v_r[m_r], t_r[m_r]) / (t_r[m_r][-1] - t_r[m_r][0]))
     dc_v = float(np.trapezoid(v_v[m_v], t_v[m_v]) / (t_v[m_v][-1] - t_v[m_v][0]))
     assert dc_r > 3.0
-    assert abs(dc_v - dc_r) < 0.03 * abs(dc_r), (dc_v, dc_r)
+    # measured: 15.3104 V against the pwl reference (was 3 %)
+    assert abs(dc_v - dc_r) < 3e-3 * abs(dc_r), (dc_v, dc_r)
 
 
 def test_yaml_round_trip():

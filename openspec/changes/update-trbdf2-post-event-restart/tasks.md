@@ -14,17 +14,17 @@
 - [x] 3.2 Lauritzen diode, IGBT tail, PMSM slot refresh, with a test each — implemented for all three; tested: Lauritzen (`[lauritzen]`, which aborted at h_min before the change and now completes). IGBT tail: the gated test circuit aborts at h_min at the first turn-off with and without the change (the documented stall); PMSM: no gated PMSM circuit was built (its diode-event test still passes)
 - [x] 3.3 `test_trbdf2_stateful_with_diodes.py` still passes; add one case per device with a gate edge (two of five, see 3.1/3.2)
 - [x] 3.4 Roundoff: buck with a 10 mF, 400 V capacitor at rtol 1e-8; record whether the lengthened refresh probe of design D1 is used and whether the step count changes without it — `probes/cap_roundoff.py` (800 V buck, 10 mF, 40 periods; v_out only reaches 32 V): the lengthened probe is not implemented; at rtol 1e-8 1054 accepted steps (1712 before) with the same v_out error against pwl (5.8e-4 V, the reference's own)
-- [x] 3.5 (not implemented; see DECISIONS.md 5) Gate: only if 4.1 or 4.3 fails for a circuit because no usable probe exists, implement the SDIRK(2,2) first step (design D3) for that case
+- [x] 3.5 (not implemented then, see DECISIONS.md 5; follow-up: one SDIRK(2,2) step after each diode event, DECISIONS.md 9) Gate: only if 4.1 or 4.3 fails for a circuit because no usable probe exists, implement the SDIRK(2,2) first step (design D3) for that case
 
 ## 4. Proposal memory and acceptance
 - [x] 4.1 Store the controller's proposal in `h_mem_gate`; un-xfail 1.1 with: post-edge step above 1e-8 s at every listed period of `p6_ratchet.py`; at most 8 accepted steps per period (prototype 4.1); output error at the end not above 2× the value recorded in 1.3
 - [x] 4.2 Before/after measurement: accepted steps, solves and factorisations for the 400-period buck (the 3–4× fewer solves is an estimate; the prototype gives 3.5×) — 7241 → 1636 accepted steps (4.1 per period), 16262 → 5018 solves (3.2×, probes included), 82 → 65 rejects, error 9.84e-4 → 7.18e-5; factorisations are not counted by the engine
-- [ ] 4.3 DCM buck: no accepted step below 1e-11 s; `i_L` error stays at or below 1e-9 A (1e-10 today) — **not met**: smallest step still 4e-14 s (after diode turn-offs, not refreshed); 15242 → 8932 accepted steps, error 2.39e-4 → 1.62e-5; strict xfail kept
+- [ ] 4.3 DCM buck: no accepted step below 1e-11 s; `i_L` error stays at or below 1e-9 A (1e-10 today) — **not met**: smallest step still 4e-14 s (after diode turn-offs, not refreshed); 15242 → 8932 accepted steps, error 2.39e-4 → 1.62e-5; strict xfail kept; follow-up with the SDIRK step: 9373 accepted steps, 4432 rejects, smallest step still 4e-15 s (gate-edge probe steps and diode-landing sub-steps), xfail kept (DECISIONS.md 9)
 - [x] 4.4 Cross-engine: buck CCM and DCM, flyback, bridge rectifier: time-weighted `v_out` (`np.trapezoid`) of `'trbdf2'` against `'pwl'` at T/800 and `'dsed'`, agreement not worse than before this change — `tw_err` column of the baseline (CCM 5.94e-4 → 1.51e-5, DCM 6.08e-4 → 9.84e-5, bridge unchanged; dsed refuses the V_th = 0 diodes at t = 0, pwl at fine dt used); flyback via `test_engine_auto.py::test_flyback_snubber_parity_and_spike` (passes)
 - [x] 4.5 (diode events have no memory and no refresh; the bridge and the MOSFET half bridge are bit-for-bit unchanged) The flyback's diode-event count does not grow (diode events still have no memory)
 
 ## 5. The stall (reported, not promised)
-- [x] 5.1 Re-run 1.4. Report: does it still abort, at which step size, and with which `||dx||` and residual. Delete the known-limitations row and un-xfail the test only if it passes — still aborts, now at t = 10 µs at h_min (last steps 4.13e-9 s, then rejected to 1e-14 s), `||dx||` = 2.286e-7 at T1.pm, residual 7.6e-6 on T1.m (1.2e-15 relative); row and xfail kept
+- [x] 5.1 Re-run 1.4. Report: does it still abort, at which step size, and with which `||dx||` and residual. Delete the known-limitations row and un-xfail the test only if it passes — still aborts, now at t = 10 µs at h_min (last steps 4.13e-9 s, then rejected to 1e-14 s), `||dx||` = 2.286e-7 at T1.pm, residual 7.6e-6 on T1.m (1.2e-15 relative); row and xfail kept; follow-up: completes (15.3104 V vs 15.31 V) once failed cascade probes are handled (DECISIONS 8); row deleted, xfail flipped
 
 ## 6. Documentation
 - [x] 6.1 `CHANGELOG.md` **BREAKING (step sequence)** with the before/after table
@@ -33,3 +33,11 @@
 ## 7. Verification
 - [x] 7.1 `ruff check`, `pytest` (throttled), `ctest`, stub check; reference harness on the variable-step circuits — ruff clean; pytest 2016 passed, 4 skipped, 9 xfailed; ctest 749/749; stubs up to date
 - [x] 7.2 `openspec validate update-trbdf2-post-event-restart --strict` and `openspec validate --all --strict`
+
+## 8. Follow-up: tight-tolerance grinds (DECISIONS.md 12)
+- [x] 8.1 SEPIC at rtol 1e-8 / atol 1e-12: mechanism traced (estimate at its roundoff floor on g_off-held nodes; no-change zero-time events), fixed, `test_trbdf2_roundoff_floor.py` bounds accepted steps (28,539 against `max_steps`; V_out 17.31570 V)
+- [x] 8.2 325 V floating bridge at rtol 1e-6 and 1e-7 completes (1,971 and 3,241 accepted steps; bus within 0.007 V of pwl); landing cascades that undo their flip record no event
+- [x] 8.3 DCM strict xfail kept with the measured cause (4,325 steps below 1e-11 s; L·g_off mode and edge probes)
+
+## 9. ll08 regression (follow-up)
+- [x] 9.1 `ll08_buck_mosfet` trbdf2 back to at most 0.00231 with the MOSFET half bridge kept at time-weighted error ≤ 3e-4 V and ≤ 200 rejects — 1.11e-4; 2.36e-4 V, 101 rejects (DECISIONS.md 13)
