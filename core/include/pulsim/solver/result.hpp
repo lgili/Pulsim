@@ -205,6 +205,13 @@ struct InductorGuardAction {
 /// segment restarts from h_init.
 struct SolverSnapshot {
     Real t = Real{0};
+    /// Per control-tick source of the run, in registration order: its
+    /// grid's origin and the index of its next instant (add-unified-
+    /// event-queue). A resume passes the origins back, so the ticks stay
+    /// on the run's grid. Empty: no ticks, or a snapshot older than pickle
+    /// version 4.
+    std::vector<Real> tick_origin;
+    std::vector<std::uint64_t> tick_next_k;
     /// MNA unknowns at `t`.
     Vector x;
     /// Every device state the run carries (add-unified-device-interface

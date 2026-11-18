@@ -50,6 +50,7 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_trbdf2_stage_coeffs.cpp
         tests/dsed/test_exact_lti.cpp
         tests/dsed/test_convergence_failure.cpp  # typed give-up sites
+        tests/dsed/test_exact_queue_ticks.cpp  # ticks, monitors, step hooks on the queue
         tests/dsed/test_event_projection.cpp
         tests/dsed/test_scheduler_auto.cpp  # Gate 4.D — auto-dispatch RK45↔BDF2 per mode
         tests/dsed/test_period_integrals.cpp  # period map, M, closed-form integrals

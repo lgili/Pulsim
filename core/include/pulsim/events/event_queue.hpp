@@ -45,13 +45,18 @@ enum class Kind : std::uint8_t {
     GateEdge = 2,
     SourceBreakpoint = 3,
     EndOfRun = 4,
+    /// A tick that only READS (pulsim.control.Monitor): registered with
+    /// lands = false, so its instants never end a step; engines call it at
+    /// the first accepted step at or after each instant and never let it
+    /// re-sample a gate or cap a step. Last at an instant.
+    Monitor = 5,
 };
 
 /// Bit of `kind` in a kind mask (`take_due`).
 [[nodiscard]] constexpr std::uint32_t kind_bit(Kind k) noexcept {
     return std::uint32_t{1} << static_cast<unsigned>(k);
 }
-inline constexpr std::uint32_t kAllKinds = 0x1Fu;
+inline constexpr std::uint32_t kAllKinds = 0x3Fu;
 
 struct TimeEvent {
     Real t;
@@ -94,6 +99,9 @@ struct TickPlan {
     /// engine's label-time graphs and internal drivers, which ran before
     /// the Python tick sources when those were part of the observer).
     std::function<void(Real t, const Vector& x)> before;
+    /// Optional, per rate: true registers it as a `Kind::Monitor` (empty =
+    /// every rate is a ControlTick). Engines without landings ignore it.
+    std::vector<bool> monitor;
 };
 
 class EventQueue {
@@ -161,6 +169,7 @@ public:
             s.valid = false;
             s.pending = kNone;
             if (s.periodic) {
+                s.origin = std::isnan(s.rate.origin) ? t0 : s.rate.origin;
                 if (std::isnan(s.rate.origin)) {
                     s.base = t0 + s.rate.offset;
                 } else {
@@ -296,6 +305,17 @@ public:
         return {taken_buf_.data(), n};
     }
 
+    /// A periodic source's grid origin (its Rate's, or the run's t0) and
+    /// the index of its next instant: what a snapshot carries, so a resumed
+    /// run passes the origin back (Rate::origin) and ticks on the same grid
+    /// with the same k.
+    [[nodiscard]] Real grid_origin(std::uint32_t id) const {
+        return slots_.at(id).origin;
+    }
+    [[nodiscard]] std::uint64_t next_k(std::uint32_t id) const {
+        return slots_.at(id).k;
+    }
+
     /// Events taken from a source since `start`.
     [[nodiscard]] std::uint64_t taken(std::uint32_t id) const {
         return slots_.at(id).n_taken;
@@ -321,6 +341,7 @@ private:
         bool valid = false;
         Rate rate{Real{1}, Real{0}};
         Real base = Real{0};
+        Real origin = Real{0};
         Real once_t = Real{0};
         Real pending = kNone;
         std::uint64_t k = 0;

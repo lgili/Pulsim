@@ -79,6 +79,7 @@
 #include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/sources/spwm_pair_fn.hpp"
 #include "pulsim/sources/switch_schedule.hpp"
+#include "pulsim/events/gate_source.hpp"   // DutyRegister, CarrierPwm, EdgeList
 #include "pulsim/sources/three_phase_spwm_fn.hpp"
 #include "pulsim/streaming/live_ring.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -3648,6 +3649,87 @@ void init_module(py::module_& m) {
         "steps is exactly that many steps in every period. "
         "Usable as `switch_fn=` in simulate / run_transient.");
 
+    // add-unified-event-queue task 6.1: the modulator primitives.
+    py::class_<events::DutyRegister, std::shared_ptr<events::DutyRegister>>(
+        m, "DutyRegister",
+        "A duty a controller writes (`write(value, t)`) and a "
+        "make_carrier_pwm_fn modulator reads. latch='immediate' takes a "
+        "write at once; latch='carrier_start' holds it until the next "
+        "start of the carrier (period, phase), which must equal the "
+        "modulator's.")
+        .def(py::init([](Real value, const std::string& latch, Real period,
+                         Real phase) {
+                 events::DutyRegister r{value};
+                 if (latch == "carrier_start") {
+                     if (!(period > Real{0})) {
+                         throw std::invalid_argument(
+                             "DutyRegister: latch='carrier_start' needs period > 0");
+                     }
+                     r.latch = events::LatchPolicy::AtCarrierStart;
+                     r.T = period;
+                     r.phase = phase;
+                 } else if (latch != "immediate") {
+                     throw std::invalid_argument(
+                         "DutyRegister: latch must be 'immediate' or "
+                         "'carrier_start'; got '" + latch + "'");
+                 }
+                 return std::make_shared<events::DutyRegister>(r);
+             }),
+             py::arg("value") = 0.0, py::arg("latch") = "immediate",
+             py::arg("period") = 0.0, py::arg("phase") = 0.0)
+        .def("write", &events::DutyRegister::write, py::arg("value"), py::arg("t"),
+             "Write a duty; `t` is the tick's scheduled instant.")
+        .def("read", &events::DutyRegister::read, py::arg("t"),
+             "The duty in force at t.")
+        .def_property_readonly("value",
+             [](const events::DutyRegister& r) { return r.value; },
+             "The latched duty (a 'carrier_start' write not yet latched "
+             "is not in it).");
+
+    m.def("make_carrier_pwm_fn",
+        [](Real period, std::shared_ptr<events::DutyRegister> duty,
+           Index switch_idx, Size num_switches, Index low_side, Real dead_time,
+           Real phase) {
+            if (!duty) throw std::invalid_argument("make_carrier_pwm_fn: duty is None");
+            events::GateSet set(num_switches);
+            set.add(events::CarrierPwm{period, phase, duty.get(), switch_idx,
+                                       low_side, dead_time}, "carrier_pwm");
+            const auto s = set.to_schedule();
+            // the schedule holds the register: it lives as long as the gate
+            sources::SwitchSchedule out{
+                [s, duty](Real t) { return s(t); },
+                [s, duty](Real t) { return s.next_edge_after(t); }};
+            out.follows_controller = true;
+            return out;
+        },
+        py::arg("period"), py::arg("duty"), py::arg("switch_idx"),
+        py::arg("num_switches"), py::arg("low_side") = -1,
+        py::arg("dead_time") = 0.0, py::arg("phase") = 0.0,
+        "A SwitchSchedule: a sawtooth carrier of `period` (starting at "
+        "`phase` seconds) compared with the DutyRegister `duty`; "
+        "`switch_idx` is ON while the carrier is below the duty. With "
+        "`low_side` >= 0 a complementary leg with `dead_time`. For a "
+        "constant duty it equals make_pwm_switch_fn / "
+        "make_dead_time_pwm_pair_fn exactly. Its edges are those of the "
+        "duty held now: write the register from a controller tick "
+        "(closed_loops / a step_observer with a period) and every engine "
+        "re-asks the edge after the tick.");
+
+    m.def("make_edge_list_fn",
+        [](const std::vector<std::tuple<Real, Index, bool>>& edges,
+           Size num_switches) {
+            std::vector<events::EdgeList::Edge> e;
+            e.reserve(edges.size());
+            for (const auto& [t, bit, on] : edges) e.push_back({t, bit, on});
+            events::GateSet set(num_switches);
+            set.add(events::EdgeList{std::move(e)}, "edge_list");
+            return set.to_schedule();
+        },
+        py::arg("edges"), py::arg("num_switches"),
+        "A SwitchSchedule from explicit gate edges (t, switch_idx, on): "
+        "the bit takes `on` at t and holds it until its next edge, OFF "
+        "before its first. Engines land every edge exactly.");
+
     m.def("make_phase_control_fn",
         &sources::make_phase_control_fn,
         py::arg("frequency"), py::arg("alpha"), py::arg("width"),
@@ -3922,6 +4004,13 @@ void init_module(py::module_& m) {
             [](const SolverSnapshot& s) { return s.mask; },
             [](SolverSnapshot& s, std::vector<bool> v) { s.mask = std::move(v); },
             "Deprecated name of ``mask``.")
+        .def_readwrite("tick_origin", &SolverSnapshot::tick_origin,
+            "Per control-tick source, in registration order: the origin of "
+            "its grid (ticks at origin + offset + k*period). simulate("
+            "resume_from=) passes it back so the resumed ticks stay on the "
+            "run's grid. Empty: no ticks, or an older snapshot.")
+        .def_readwrite("tick_next_k", &SolverSnapshot::tick_next_k,
+            "Per control-tick source: the index k of its next instant.")
         .def_readwrite("stamped_mask", &SolverSnapshot::stamped_mask,
             "The switch / diode mask stamped for the solve that "
             "produced ``x`` (one bool per SwitchStateMask bit): the "
@@ -4188,7 +4277,8 @@ void init_module(py::module_& m) {
            std::vector<Real> tick_periods,
            std::vector<std::function<void(Real, const Vector&)>> tick_fns,
            py::object tick_before_obj,
-           Real tick_origin) {
+           Real tick_origin,
+           std::vector<Real> tick_origins) {
             // add-unified-event-queue group 5: Python tick sources, which
             // the kernel's queue schedules (source j calls tick_fns[j]).
             if (tick_periods.size() != tick_fns.size()) {
@@ -4196,10 +4286,16 @@ void init_module(py::module_& m) {
                     "run_transient: tick_periods and tick_fns must have the "
                     "same length");
             }
+            if (!tick_origins.empty() && tick_origins.size() != tick_periods.size()) {
+                throw std::invalid_argument(
+                    "run_transient: tick_origins must be empty or as long as "
+                    "tick_periods");
+            }
             pulsim::events::TickPlan tick_plan;
-            for (const Real T : tick_periods) {
-                tick_plan.rates.push_back(
-                    pulsim::events::Rate{T, Real{0}, tick_origin});
+            for (std::size_t j = 0; j < tick_periods.size(); ++j) {
+                tick_plan.rates.push_back(pulsim::events::Rate{
+                    tick_periods[j], Real{0},
+                    tick_origins.empty() ? tick_origin : tick_origins[j]});
             }
             tick_plan.fn = [&tick_fns](std::uint32_t j, const pulsim::events::TickInfo&,
                                        Real t, const Vector& xs) {
@@ -4326,6 +4422,7 @@ void init_module(py::module_& m) {
             std::vector<std::function<void(Real, const Vector&)>>{},
         py::arg("tick_before") = py::none(),
         py::arg("tick_origin") = std::numeric_limits<Real>::quiet_NaN(),
+        py::arg("tick_origins") = std::vector<Real>{},
         "Run a fixed-dt transient simulation. switch_fn(t) "
         "→ SwitchStateMask; b_extra_fn(t) → Vector adds "
         "to b_constant at each step. `step_observer(t, x)` "
@@ -5027,7 +5124,7 @@ void init_module(py::module_& m) {
         .def("make_pwm_gate",
             [](BlockChain& self, Size num_switches,
                const std::vector<std::tuple<std::string, Index, Real, Real>>& legs) {
-                ChainPwmGate g{&self, num_switches, {}};
+                ChainPwmGate g{num_switches, {}};
                 for (const auto& [ch, idx, period, phase] : legs) {
                     if (idx < 0 || static_cast<Size>(idx) >= num_switches ||
                         !(period > Real{0})) {
@@ -5035,7 +5132,7 @@ void init_module(py::module_& m) {
                             "make_pwm_gate: switch index out of range or "
                             "period <= 0");
                     }
-                    g.legs.push_back({self.slot(ch), idx, period, phase});
+                    g.add_leg(self, self.slot(ch), idx, period, phase);
                 }
                 return g;
             }, py::arg("num_switches"), py::arg("legs"), py::keep_alive<0, 1>(),
@@ -5904,7 +6001,9 @@ void init_module(py::module_& m) {
            std::vector<py::object> observers,
            Size newton_roundoff_budget, bool on_impulse_error,
            std::vector<Real> observer_offsets,
-           Real observer_origin) {
+           Real observer_origin,
+           std::vector<bool> observer_monitors,
+           std::vector<Real> observer_origins) {
             solver::BExtraFn b_extra_fn;
             std::function<Real(Real)> unused_next_jump;  // trbdf2 lands its ticks
             resolve_b_extra(b_extra_obj, b_extra_fn, unused_next_jump);
@@ -5926,7 +6025,15 @@ void init_module(py::module_& m) {
             }
             o.observer_periods = std::move(observer_periods);
             o.observer_offsets = std::move(observer_offsets);
+            if (!observer_monitors.empty()
+                && observer_monitors.size() != o.observer_periods.size()) {
+                throw std::invalid_argument(
+                    "run_transient_trbdf2: observer_monitors must be empty or "
+                    "as long as observer_periods");
+            }
+            o.observer_monitors.assign(observer_monitors.begin(), observer_monitors.end());
             o.observer_origin = observer_origin;
+            o.observer_origins = std::move(observer_origins);
             if (max_newton_iterations > 0) {
                 o.max_newton_iterations = max_newton_iterations;
             }
@@ -6065,6 +6172,8 @@ void init_module(py::module_& m) {
         py::arg("on_impulse_error") = false,
         py::arg("observer_offsets") = std::vector<Real>{},
         py::arg("observer_origin") = std::numeric_limits<Real>::quiet_NaN(),
+        py::arg("observer_monitors") = std::vector<bool>{},
+        py::arg("observer_origins") = std::vector<Real>{},
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "

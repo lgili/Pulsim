@@ -14,7 +14,8 @@
 // a `SwitchSchedule` for the engines (`to_schedule`), so every engine
 // lands its edges through the event queue as it does today's helpers'.
 //
-// `CarrierPwm` is a sawtooth carrier compared with a duty held in a
+// The modulators (`CarrierPwm`, `DutyRegister`, `EdgeList`) live in
+// events/modulator.hpp. `CarrierPwm` is a sawtooth carrier compared with a duty held in a
 // `DutyRegister` (one switch, or a complementary leg with dead time). Its
 // arithmetic is that of `make_pwm_switch_fn` / `make_dead_time_pwm_pair_fn`
 // (pwm_phase, the same thresholds), so for a constant duty its masks and
@@ -28,6 +29,7 @@
 // shortcut: sawtooth carrier only (no triangle); add a Carrier enum when a
 // centre-aligned modulator is needed.
 
+#include "pulsim/events/modulator.hpp"
 #include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/sources/switch_schedule.hpp"
@@ -45,119 +47,6 @@
 #include <vector>
 
 namespace pulsim::events {
-
-enum class LatchPolicy : std::uint8_t { Immediate, AtCarrierStart };
-
-/// A duty a controller writes and a modulator reads. `AtCarrierStart`
-/// latches a write at the first start, strictly after the write, of the
-/// carrier (`T`, `phase`) the register is given.
-struct DutyRegister {
-    Real value = Real{0};
-    LatchPolicy latch = LatchPolicy::Immediate;
-    Real T = Real{0};        // AtCarrierStart: the latching carrier
-    Real phase = Real{0};
-    Real shadow = Real{0};
-    Real latch_k = Real{0};  // carrier period index from which shadow holds
-    bool pending = false;
-
-    /// `t` is the write's SCHEDULED instant (a tick handler passes
-    /// `TickInfo::scheduled_t`): an engine may land a tick slightly early,
-    /// and the landed time could fall in the previous carrier period.
-    void write(Real v, Real t) {
-        if (latch == LatchPolicy::Immediate) {
-            value = v;
-            return;
-        }
-        if (!(T > Real{0})) {
-            throw std::invalid_argument(
-                "DutyRegister: AtCarrierStart needs the carrier period T");
-        }
-        // Period index with the carrier's own snapping, so the latch and
-        // the modulator agree on which period an instant belongs to.
-        const Real k = pwm_phase::cycle_position(t, phase, T).k;
-        if (pending && k >= latch_k) value = shadow;   // the older write latched
-        shadow = v;
-        latch_k = k + Real{1};
-        pending = true;
-    }
-    /// The duty in force at t.
-    [[nodiscard]] Real read(Real t) const noexcept {
-        if (!pending) return value;
-        return pwm_phase::cycle_position(t, phase, T).k >= latch_k ? shadow
-                                                                    : value;
-    }
-};
-
-/// One switch (`ls` = -1) or a complementary leg with dead time, driven by
-/// a sawtooth carrier of period `T` starting at `phase`.
-struct CarrierPwm {
-    Real T;
-    Real phase = Real{0};
-    const DutyRegister* duty;
-    Index hs;
-    Index ls = -1;
-    Real dead_time = Real{0};
-
-    [[nodiscard]] std::vector<Index> owned_bits() const {
-        return ls < 0 ? std::vector<Index>{hs} : std::vector<Index>{hs, ls};
-    }
-    [[nodiscard]] Real resolution() const noexcept { return Real{0}; }
-
-    [[nodiscard]] Real duty_at(Real t) const { return duty->read(t); }
-
-    /// Refuses what would silently misbehave: no register, T <= 0, a leg
-    /// on one bit, and an AtCarrierStart register latching on another
-    /// carrier (its latch would fall between this carrier's edges).
-    /// The register must outlive every schedule built from this source.
-    void check(const std::string& name) const {
-        const auto bad = [&](const char* why) {
-            throw std::invalid_argument("CarrierPwm '" + name + "': " + why);
-        };
-        if (duty == nullptr) bad("no DutyRegister");
-        if (!(T > Real{0})) bad("carrier period T must be > 0");
-        if (hs == ls) bad("hs and ls are the same switch bit");
-        if (duty->latch == LatchPolicy::AtCarrierStart
-            && (duty->T != T || duty->phase != phase)) {
-            bad("its AtCarrierStart DutyRegister latches on a different "
-                "carrier (T and phase must equal the modulator's)");
-        }
-    }
-
-    void apply(Real t, topology::SwitchStateMask& m) const {
-        const Real d = duty_at(t);
-        const auto p = pwm_phase::cycle_position(t, phase, T);
-        if (ls < 0) {
-            m.set(static_cast<Size>(hs), !pwm_phase::reached(p, d));
-            return;
-        }
-        const auto th = thresholds(d);
-        m.set(static_cast<Size>(hs), false);
-        m.set(static_cast<Size>(ls), false);
-        sources::detail::stamp_leg(m, sources::detail::pair_state(p, th),
-                                   static_cast<Size>(hs),
-                                   static_cast<Size>(ls));
-    }
-
-    [[nodiscard]] Real next_edge(Real t) const {
-        const Real d = duty_at(t);
-        if (ls < 0) {
-            const std::array<Real, 1> thr{d};
-            return pwm_phase::next_constant_crossing(t, phase, T, thr);
-        }
-        const auto th = thresholds(d);
-        const std::array<Real, 3> thr{th.hs_end, th.ls_start, th.ls_end};
-        return pwm_phase::next_constant_crossing(t, phase, T, thr);
-    }
-
-private:
-    // make_dead_time_pwm_pair_fn's thresholds, computed the same way.
-    [[nodiscard]] sources::detail::PairThresholds thresholds(Real d) const {
-        const Real dt_eff =
-            std::max(Real{0}, std::min(dead_time, T * Real{0.5}));
-        const Real dd = dt_eff / T;
-        return {d - dd, d, Real{1} - dd};
-    }
-};
 
 /// Today's helpers as a gate source: the schedule's mask, restricted to
 /// the bits it is declared to own; its edges unchanged.

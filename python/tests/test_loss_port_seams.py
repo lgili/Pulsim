@@ -260,7 +260,8 @@ def test_trbdf2_resume_of_an_offset_group_checks_the_offset_grid():
     """Ticks at 30 us + k*100 us. The queue resumes them at t_start +
     offset + k*T: from 1.5 ms (on the grid, next tick 1.53 ms) it lands
     them; from 1.53 ms (a tick instant, but 30 us past the grid origin)
-    they would fall at 1.56, 1.66 ms, so it is refused by name."""
+    they would fall at 1.56, 1.66 ms: the snapshot's tick origin keeps
+    them on the run's grid (event-queue DECISIONS 13; before: refused)."""
     b, ch, obs, first = _offset_chain_run(1.5e-3)
     p.simulate(b, 2e-3, engine="trbdf2", step_observer=obs,
                resume_from=first.final_snapshot)
@@ -268,9 +269,11 @@ def test_trbdf2_resume_of_an_offset_group_checks_the_offset_grid():
     np.testing.assert_allclose(t, 3e-5 + np.arange(len(t)) * 1e-4, atol=1e-12)
     assert len(t) == 20
     b, ch, obs, first = _offset_chain_run(1.53e-3)
-    with pytest.raises(p.UnsupportedError, match="between two"):
-        p.simulate(b, 2e-3, engine="trbdf2", step_observer=obs,
-                   resume_from=first.final_snapshot)
+    p.simulate(b, 2e-3, engine="trbdf2", step_observer=obs,
+               resume_from=first.final_snapshot)
+    t = np.asarray(ch._cxx_chain.get_recording_times())
+    np.testing.assert_allclose(t, 3e-5 + np.arange(len(t)) * 1e-4, atol=1e-12)
+    assert len(t) == 20
 
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2"))

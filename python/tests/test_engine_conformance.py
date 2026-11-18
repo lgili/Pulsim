@@ -938,12 +938,16 @@ def test_loops_at_two_rates_on_trbdf2():
     assert (len(lb.duty_history), len(mon)) == (20, 200)
 
 
-def test_closed_loop_refused_on_dsed():
+def test_two_closed_loops_on_dsed():
+    # add-unified-event-queue group 3: the exact engine's queue ticks them
     b = _two_bucks()
     la = _loop(b, "outa", "Qa", 20e3)
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim("dsed", b, closed_loops=[la])
-    assert ei.value.feature == "closed_loops"
+    lb = _loop(b, "outb", "Qb", 2e3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 10e-3, closed_loops=[la, lb], engine="dsed")
+    assert (len(la.duty_history), len(lb.duty_history)) == (200, 20)
+    assert list(r.control_tick_counts) == [200, 20]
 
 
 def test_resume_from_refused_on_dsed():
@@ -1370,12 +1374,19 @@ def test_control_rate_offset_honoured_on_trbdf2():
 
 
 @pytest.mark.parametrize("engine", ("dsed", "exact"))
-def test_control_rate_refused_on_dsed(engine):
+def test_control_rate_offset_honoured_on_dsed(engine):
     b = _rc()
-    ch = _rated_chain(b, p.Rate(1e-4))
+    ch = _rated_chain(b, p.Rate(period=1e-4, offset=2e-5))
+    _sim(engine, b, step_observer=ch.make_step_observer(b))
+    assert ch.tick_counts == [20]     # ceil((2e-3 - offset) / 1e-4)
+
+
+def test_control_rate_delay_time_refused_on_dsed():
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(period=1e-4, compute_delay=2e-5))
     with pytest.raises(p.UnsupportedError) as ei:
-        _sim(engine, b, step_observer=ch.make_step_observer(b))
-    assert (ei.value.engine, ei.value.feature) == ("dsed", "step_observer")
+        _sim("dsed", b, step_observer=ch.make_step_observer(b))
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "compute_delay")
 
 
 # add-exact-propagator-strategy group 13: engine='exact' is the canonical name of the event-driven

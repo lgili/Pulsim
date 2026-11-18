@@ -165,11 +165,18 @@ struct TrBdf2Options {
     /// at t_start + offset_j + k*T_j, ceil((span - offset_j)/T_j) times.
     /// Empty = every offset 0; else as long as `observer_periods`.
     std::vector<Real> observer_offsets;
+    /// Empty = none; else per source: true = a Monitor (events::Kind::
+    /// Monitor, never landed, never invalidates the gate, called at the
+    /// first accepted step at or after each instant).
+    std::vector<char> observer_monitors;
     /// The tick grid's origin (add-unified-event-queue): ticks at
     /// (observer_origin + offset_j) + k*T_j, from the first one >= t_start.
     /// NaN (default) = t_start. A resumed run passes the original run's
     /// t_start so it ticks bit-exactly where the uninterrupted run would.
     Real observer_origin = std::numeric_limits<Real>::quiet_NaN();
+    /// Empty = `observer_origin` for every source; else one origin per
+    /// source (a resume passes its snapshot's `tick_origin`).
+    std::vector<Real> observer_origins;
     /// Newton settings, used only when the circuit has nonlinear
     /// devices. Same knobs and defaults as the fixed engine. The
     /// tolerances are absolute; loosening them is not a fix for an
@@ -1336,14 +1343,25 @@ inline SimulationResult run_transient_trbdf2(
                 "finite number of seconds >= 0");
         }
     }
+    if (!opts.observer_origins.empty()
+        && opts.observer_origins.size() != t_ctrl.size()) {
+        throw std::invalid_argument(
+            "run_transient_trbdf2: observer_origins must be empty or one "
+            "per controller source");
+    }
     events::EventQueue queue;
     if (has_ticks) {
         for (std::size_t j = 0; j < t_ctrl.size(); ++j) {
             const Real off = multi_rate && !opts.observer_offsets.empty()
                 ? opts.observer_offsets[j] : Real{0};
-            queue.add_periodic(events::Kind::ControlTick,
+            const bool mon = multi_rate && j < opts.observer_monitors.size()
+                && opts.observer_monitors[j] != 0;
+            queue.add_periodic(mon ? events::Kind::Monitor : events::Kind::ControlTick,
                                events::Rate{t_ctrl[j], off,
-                                            opts.observer_origin});
+                                            opts.observer_origins.empty()
+                                                ? opts.observer_origin
+                                                : opts.observer_origins[j]},
+                               /*lands=*/!mon);
         }
     }
     // First source corner strictly after `after` (+inf when none).
@@ -2009,6 +2027,19 @@ inline SimulationResult run_transient_trbdf2(
         queue.invalidate(edge_src);
     };
 
+    // ---- monitors: read only (Kind::Monitor) ----
+    auto fire_due_monitors = [&]() {
+        // a step may span several instants: take them all (one per
+        // source per take_due call)
+        while (t >= queue.next_of(events::Kind::Monitor) - h_min) {
+            for (const auto& ev : queue.take_due(
+                     t, h_min, events::kind_bit(events::Kind::Monitor))) {
+                tick_fn(ev.source, t, x);
+                ++st.ctrl_tick_counts[ev.source];
+            }
+        }
+    };
+
     try {
         while (t < queue.next_of(events::Kind::EndOfRun) - h_min
                && steps < opts.max_steps) {
@@ -2020,6 +2051,7 @@ inline SimulationResult run_transient_trbdf2(
             // ---- controller tick: fire AT the scheduled instant,
             //      before this step's mask is sampled ----
             fire_due_ticks();
+            fire_due_monitors();
 
             // Shortly after the chatter guard gave up, the LTE may not
             // walk h below h_chatter: under all-OFF bridge bits a 1 mH
@@ -3336,6 +3368,7 @@ inline SimulationResult run_transient_trbdf2(
         // A run stopped by should_continue right after an event: the
         // record ends on the committed state, as the snapshot does.
         drop_superseded_event_sample(-std::numeric_limits<Real>::infinity());
+        fire_due_monitors();   // instants inside the last step
         if (steps >= opts.max_steps) {
             throw std::runtime_error(
                 "run_transient_trbdf2: max_steps ("
@@ -3391,6 +3424,12 @@ inline SimulationResult run_transient_trbdf2(
     hs.save(history, result.final_snapshot);
     result.final_snapshot.post_edge_derivatives =
         slots_only_t >= t - h_min;   // NaN: never
+    if (has_ticks) {   // the tick sources are ids 0..n-1
+        for (std::uint32_t j = 0; j < t_ctrl.size(); ++j) {
+            result.final_snapshot.tick_origin.push_back(queue.grid_origin(j));
+            result.final_snapshot.tick_next_k.push_back(queue.next_k(j));
+        }
+    }
     result.final_snapshot.valid = true;
     result.newton = newton_ws.take_counters();
     return result;
