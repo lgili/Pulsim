@@ -332,8 +332,36 @@ The 74 agree → agree cells are counted as circuit by their err ratio.
 | dsed | 97 | 0 | 0 | 12 | 1 | 108 | 0 | 0 |
 
 No cell worse, none newly refused. The dsed `better` is
-`flyback_converter` (err 2.72e-6 → 2.69e-6, both agree: the 1 % rule). `benchmarks/IDEAL_SWITCH_FLIP_EVIDENCE.md`
-is not regenerated here: its other variants were measured before the
-TR-BDF2 track merged (its `default` rows moved since: ll16 now runs on
-pwl and trbdf2), so a merged table would mix two trees. Regenerate all
-variants in one run before the flip.
+`flyback_converter` (err 2.72e-6 → 2.69e-6, both agree: the 1 % rule). `benchmarks/IDEAL_SWITCH_FLIP_EVIDENCE.md` is regenerated with every variant
+on one tree in 6e.
+
+### 6e. Evidence regenerated, references with an uncertainty (tree `36a3936108`)
+
+`ideal_switch_flip_evidence.py --resume DIR`, every variant in one run on the
+committed tree (`benchmarks/IDEAL_SWITCH_FLIP_EVIDENCE.md`). `branch`, `lcp`,
+`branch+lcp` and `auto` change no graded cell against `default` on pwl
+(any configuration); `lcp` is refused on 2 circuits by name.
+
+Ideal-twin references (104 circuits with one): uncertainty u <= 1e-4 on 91,
+<= 2e-3 on 5, above 2e-3 on 8:
+
+| circuit | reference | u | why |
+|---|---|---:|---|
+| ll11_llc_resonant_converter | pwl+restart dt/64 | 0.58 | neither tool converges on its ladder |
+| full_bridge_dc | pwl+restart dt/64 | 0.021 | |
+| ll07_boost_vcswitch | pwl+restart dt/256 | 0.013 | trbdf2 0.069, e_cross 0.04 |
+| t_type_3level_halfbridge | pwl+restart dt/256 | 0.011 | trbdf2 ladder gives no estimate |
+| diode_rectifier | trbdf2 rtol 1e-10 | 0.0048 | both tools converge (3.5e-8, 6.3e-6) and differ by 0.0048 |
+| vcswitch_resistor | trbdf2 rtol 1e-10 | 0.0037 | |
+| flyback_converter | trbdf2 rtol 1e-10 | 0.0033 | both converge, differ by 0.0033 |
+| boost_switching_complex | pwl+restart dt/256 | 0.0026 | trbdf2 0.031, e_cross 0.011 |
+
+The 16 "reference" cells of 6a, regraded: none is `worse` any more.
+`diode_rectifier`, `boost_switching_complex`, `ll07`, `flyback_converter`
+and `t_type` are `not comparable` on every pwl configuration and trbdf2 (u
+above tol/10), except plain pwl on the first three, which is now refused by
+name (`dependent_states` at t = 0: a capacitor loop through the ideal diode;
+pwl + restart runs it). `flying_capacitor_3level` grades `agree` (trbdf2
+ideal 7.96e-5, u = 5e-5). Two converged tools disagreeing on `diode_rectifier`
+and `flyback_converter` is a finding, not noise: the ideal-diode commutation is
+modelled differently by the two tools there; not investigated here.

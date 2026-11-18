@@ -1,151 +1,151 @@
 pulsim from /Users/lgili/pulsim_wt/phase0/python/pulsim/__init__.py
 circuit                          config       sites disagr  LCP settle both neith breach repairs   err_def   err_lcp maxpiv sh=off def=off lcp=def
-# buck at rest, gate off, V_th=0: trbdf2 rtol 1e-10 end sw = 2.101969315673673e-11
+# buck at rest, gate off, V_th=0: trbdf2 rtol 1e-10 end sw = 7.069266446597148e-14
 buck at rest, gate off, V_th=0   pwl           2000      0    0      0    0     0      0       0 +7.40e-08 +7.40e-08 +7.40e-08      6    yes     yes     yes   (0.0 s)
-    lcp: sites 2000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 6 ties 0 leak_pins 93 errors 0 breaches 0
+    lcp: sites 1999 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 6 ties 0 leak_pins 93 errors 0 breaches 0
 buck at rest, gate off, V_th=0   pwl+restart   2008      0    0      0    0     0      0       0 +8.59e-08 +8.59e-08 +8.59e-08      6    yes     yes     yes   (0.0 s)
-    lcp: sites 2008 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 6 ties 3 leak_pins 74 errors 0 breaches 0
+    lcp: sites 2007 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 6 ties 3 leak_pins 74 errors 0 breaches 0
 buck at rest, gate off, V_th=0   pwl+split     2007      0    0      0    0     0      0       0 +8.59e-08 +8.59e-08 +8.59e-08      6    yes     yes     yes   (0.0 s)
-    lcp: sites 2007 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 6 ties 1 leak_pins 73 errors 0 breaches 0
-# DCM buck V_th=0, 400 T: trbdf2 rtol 1e-10 end vout = 9.100213085463578
-DCM buck V_th=0, 400 T           pwl          80000      0    0      0    0     0      0       0 -7.55e-03 -7.55e-03 -7.55e-03      2    yes     yes     yes   (0.2 s)
-    lcp: sites 80000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck V_th=0, 400 T           pwl+restart  84181      0    0      0    0     0      0       0 +6.24e-06 +6.24e-06 +6.24e-06      2    yes     yes     yes   (0.2 s)
-    lcp: sites 84181 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck V_th=0, 400 T           pwl+split    83913      0    0      0    0     0      0       0 +9.06e-07 +9.06e-07 +9.06e-07      2    yes     yes     yes   (0.2 s)
-    lcp: sites 83913 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-# DCM buck V_th=1e-2, 400 T: trbdf2 rtol 1e-10 end vout = 9.100213085463578
-DCM buck V_th=1e-2, 400 T        pwl          80000      0    0      0    0     0      0       0 -7.55e-03 -7.55e-03 -7.55e-03      2    yes     yes     yes   (0.2 s)
-    lcp: sites 80000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck V_th=1e-2, 400 T        pwl+restart  84181      0    0      0    0     0      0       0 +6.24e-06 +6.24e-06 +6.24e-06      2    yes     yes     yes   (0.2 s)
-    lcp: sites 84181 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck V_th=1e-2, 400 T        pwl+split    83913      0    0      0    0     0      0       0 +9.06e-07 +9.06e-07 +9.06e-07      2    yes     yes     yes   (0.2 s)
-    lcp: sites 83913 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-# boost R=50 V_th=0, 400 T: trbdf2 rtol 1e-10 end out = 23.80641899306707
-boost R=50 V_th=0, 400 T         pwl          80000      0    0      0    0     0      0       0 -5.64e-03 -5.64e-03 -5.64e-03      2    yes     yes     yes   (0.2 s)
-    lcp: sites 80000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-boost R=50 V_th=0, 400 T         pwl+restart  83241      0    0      0    0     0      0       0 +5.93e-06 +5.93e-06 +5.93e-06      2    yes     yes     yes   (0.2 s)
-    lcp: sites 83241 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-boost R=50 V_th=0, 400 T         pwl+split    83110      0    0      0    0     0      0       0 -2.29e-06 -2.29e-06 -2.29e-06      2    yes     yes     yes   (0.2 s)
-    lcp: sites 83110 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-# boost R=500 V_th=0, 400 T: trbdf2 rtol 1e-10 end out = 44.72166182694367
-boost R=500 V_th=0, 400 T        pwl          80000      0    0      0    0     0      0       0 -4.19e-03 -4.19e-03 -4.19e-03      2    yes     yes     yes   (0.2 s)
-    lcp: sites 80000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-boost R=500 V_th=0, 400 T        pwl+restart  84089      0    0      0    0     0      0       0 +5.28e-05 +5.28e-05 +5.28e-05      2    yes     yes     yes   (0.2 s)
-    lcp: sites 84089 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-boost R=500 V_th=0, 400 T        pwl+split    83828      0    0      0    0     0      0       0 -7.32e-06 -7.32e-06 -7.32e-06      2    yes     yes     yes   (0.2 s)
-    lcp: sites 83828 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-# half-wave RL: trbdf2 rtol 1e-10 end mean:out = 3.1806916922325157
+    lcp: sites 2006 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 6 ties 1 leak_pins 73 errors 0 breaches 0
+# DCM buck V_th=0, 400 T: trbdf2 rtol 1e-10 end vout = 9.100213167750626
+DCM buck V_th=0, 400 T           pwl          80000      0    0      0    0     0      0       0 -7.55e-03 -7.55e-03 -7.55e-03      2    yes     yes     yes   (0.1 s)
+    lcp: sites 35 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck V_th=0, 400 T           pwl+restart  84181      0    0      0    0     0      0       0 +6.15e-06 +6.15e-06 +6.15e-06      2    yes     yes     yes   (0.1 s)
+    lcp: sites 155 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck V_th=0, 400 T           pwl+split    83913      0    0      0    0     0      0       0 +8.24e-07 +8.24e-07 +8.24e-07      2    yes     yes     yes   (0.1 s)
+    lcp: sites 43 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+# DCM buck V_th=1e-2, 400 T: trbdf2 rtol 1e-10 end vout = 9.100213167750626
+DCM buck V_th=1e-2, 400 T        pwl          80000      0    0      0    0     0      0       0 -7.55e-03 -7.55e-03 -7.55e-03      2    yes     yes     yes   (0.1 s)
+    lcp: sites 816 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck V_th=1e-2, 400 T        pwl+restart  84181      0    0      0    0     0      0       0 +6.15e-06 +6.15e-06 +6.15e-06      2    yes     yes     yes   (0.1 s)
+    lcp: sites 1520 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck V_th=1e-2, 400 T        pwl+split    83913      0    0      0    0     0      0       0 +8.24e-07 +8.24e-07 +8.24e-07      2    yes     yes     yes   (0.1 s)
+    lcp: sites 827 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+# boost R=50 V_th=0, 400 T: trbdf2 rtol 1e-10 end out = 23.806419871066755
+boost R=50 V_th=0, 400 T         pwl          80000      0    0      0    0     0      0       0 -5.64e-03 -5.64e-03 -5.64e-03      2    yes     yes     yes   (0.1 s)
+    lcp: sites 10 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+boost R=50 V_th=0, 400 T         pwl+restart  83241      0    0      0    0     0      0       0 +5.05e-06 +5.05e-06 +5.05e-06      2    yes     yes     yes   (0.1 s)
+    lcp: sites 42 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+boost R=50 V_th=0, 400 T         pwl+split    83110      0    0      0    0     0      0       0 -3.17e-06 -3.17e-06 -3.17e-06      2    yes     yes     yes   (0.1 s)
+    lcp: sites 14 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+# boost R=500 V_th=0, 400 T: trbdf2 rtol 1e-10 end out = 44.721662200974116
+boost R=500 V_th=0, 400 T        pwl          80000      0    0      0    0     0      0       0 -4.19e-03 -4.19e-03 -4.19e-03      2    yes     yes     yes   (0.1 s)
+    lcp: sites 52 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+boost R=500 V_th=0, 400 T        pwl+restart  84089      0    0      0    0     0      0       0 +5.24e-05 +5.24e-05 +5.24e-05      2    yes     yes     yes   (0.1 s)
+    lcp: sites 84 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+boost R=500 V_th=0, 400 T        pwl+split    83828      0    0      0    0     0      0       0 -7.70e-06 -7.70e-06 -7.70e-06      2    yes     yes     yes   (0.1 s)
+    lcp: sites 20 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+# half-wave RL: trbdf2 rtol 1e-10 end mean:out = 3.180691682430754
 half-wave RL                     pwl           6000      0    0      0    0     0      0       0 +1.11e-05 +1.11e-05 +1.11e-05      2    yes     yes     yes   (0.0 s)
-    lcp: sites 6000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+    lcp: sites 2 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
 half-wave RL                     pwl+restart   6026      0    0      0    0     0      0       0 -7.68e-05 -7.68e-05 -7.68e-05      2    yes     yes     yes   (0.0 s)
-    lcp: sites 6026 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-half-wave RL                     pwl+split     6020      0    0      0    0     0      0       0 -8.77e-05 -8.77e-05 -8.77e-05      2    yes     yes     yes   (0.0 s)
-    lcp: sites 6020 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-# 1-ph bridge V_f=0.7: trbdf2 rtol 1e-10 end p-n = 93.83805537707278
-1-ph bridge V_f=0.7              pwl          20000    505    0      0  505     0      0       0 +7.19e-05 +7.19e-05 +7.19e-05      7    yes     yes      no   (0.1 s)
-    lcp: sites 20000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 7 ties 2 leak_pins 20 errors 0 breaches 0
+    lcp: sites 2 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+half-wave RL                     pwl+split     6020      0    0      0    0     0      0       0 -8.76e-05 -8.76e-05 -8.76e-05      2    yes     yes     yes   (0.0 s)
+    lcp: sites 2 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+# 1-ph bridge V_f=0.7: trbdf2 rtol 1e-10 end p-n = 93.83805554652963
+1-ph bridge V_f=0.7              pwl          20000    505    0      0  505     0      0       0 +7.17e-05 +7.17e-05 +7.17e-05      7    yes     yes      no   (0.0 s)
+    lcp: sites 44 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 3 ties 0 leak_pins 20 errors 0 breaches 0
     t=5.110000000e-03 step     settle=1000 lcp=0001 prev=1001 rounds=3 -> both (viol settle 0 V, lcp 0 V)
     t=5.120000000e-03 step     settle=1000 lcp=0000 prev=1000 rounds=1 -> both (viol settle 0 V, lcp 0 V)
     t=5.130000000e-03 step     settle=1000 lcp=0000 prev=1000 rounds=1 -> both (viol settle 0 V, lcp 0 V)
-1-ph bridge V_f=0.7              pwl+restart  20263    565    0      0  565     0      0       0 -1.60e-05 -1.60e-05 -1.60e-05      7    yes     yes      no   (0.1 s)
-    lcp: sites 20193 settle_rounds 0 mask_cycles 0 inconsistent 41 max_piv 7 ties 15 leak_pins 59 errors 0 breaches 0
+1-ph bridge V_f=0.7              pwl+restart  20263    565    0      0  565     0      0       0 -1.62e-05 -1.62e-05 -1.62e-05      7    yes     yes      no   (0.0 s)
+    lcp: sites 52 settle_rounds 0 mask_cycles 0 inconsistent 1 max_piv 7 ties 2 leak_pins 28 errors 0 breaches 0
     t=5.112928932e-03 restart  settle=0001 lcp=1000 prev=0001 rounds=1 -> both (viol settle 0 V, lcp 0 V)
     t=5.120000000e-03 restart  settle=0001 lcp=0000 prev=0001 rounds=1 -> both (viol settle 0 V, lcp 0 V)
     t=5.130000000e-03 restart  settle=0001 lcp=1000 prev=0001 rounds=1 -> both (viol settle 0 V, lcp 0 V)
-1-ph bridge V_f=0.7              pwl+split    20243    567    0     27  540     0      0       0 +4.33e-07 +4.33e-07 +4.33e-07      7    yes     yes      no   (0.1 s)
-    lcp: sites 20163 settle_rounds 0 mask_cycles 0 inconsistent 87 max_piv 3 ties 0 leak_pins 19 errors 0 breaches 0
+1-ph bridge V_f=0.7              pwl+split    20243    567    0     27  540     0      0       0 +2.64e-07 +2.64e-07 +2.64e-07      7    yes     yes      no   (0.0 s)
+    lcp: sites 38 settle_rounds 0 mask_cycles 0 inconsistent 1 max_piv 3 ties 0 leak_pins 16 errors 0 breaches 0
     t=5.104250582e-03 restart  settle=0001 lcp=0000 prev=0000 rounds=2 -> settle (viol settle 0 V, lcp 0.000298 V)
     t=5.112928932e-03 restart  settle=0001 lcp=1000 prev=0001 rounds=1 -> both (viol settle 0 V, lcp 0 V)
     t=5.120000000e-03 restart  settle=0001 lcp=0000 prev=0001 rounds=1 -> both (viol settle 0 V, lcp 0 V)
-# 1-ph bridge V_f=0: trbdf2 rtol 1e-10 end p-n = 95.17111663119155
-1-ph bridge V_f=0                pwl          20000     21    2      1   18     0     30       2 +1.04e-04 +1.04e-04 +1.04e-04      7    yes      NO      no   (0.1 s)
-    lcp: sites 20000 settle_rounds 0 mask_cycles 0 inconsistent 3 max_piv 7 ties 6 leak_pins 27 errors 0 breaches 0
+# 1-ph bridge V_f=0: trbdf2 rtol 1e-10 end p-n = 95.17111682197483
+1-ph bridge V_f=0                pwl          20000     21    2      1   18     0     30       2 +1.04e-04 +1.04e-04 +1.04e-04      7    yes      NO      no   (0.0 s)
+    lcp: sites 48 settle_rounds 0 mask_cycles 0 inconsistent 1 max_piv 7 ties 0 leak_pins 25 errors 0 breaches 0
     t=5.110000000e-03 step     settle=1000 lcp=0001 prev=1001 rounds=3 -> both (viol settle 0 V, lcp 3.64e-15 V)
     t=1.511000000e-02 step     settle=0010 lcp=0100 prev=0110 rounds=3 -> both (viol settle 0 V, lcp 6.06e-15 V)
     t=2.511000000e-02 step     settle=1000 lcp=0001 prev=1001 rounds=3 -> both (viol settle 0 V, lcp 3.64e-15 V)
     guard repair t=1.051200000e-01 D1 (branch #1) violation 9.88e-07 V
     guard repair t=1.251200000e-01 D1 (branch #1) violation 9.88e-07 V
-1-ph bridge V_f=0                pwl+restart  20205     46    2      2   42     0     43       2 +6.76e-03 +6.76e-03 +3.13e-05      7    yes      NO      no   (0.1 s)
-    lcp: sites 20198 settle_rounds 0 mask_cycles 0 inconsistent 37 max_piv 7 ties 42 leak_pins 43 errors 0 breaches 0
+1-ph bridge V_f=0                pwl+restart  20205     46    2      2   42     0     43       2 +6.76e-03 +6.76e-03 +3.11e-05      7    yes      NO      no   (0.0 s)
+    lcp: sites 26 settle_rounds 0 mask_cycles 0 inconsistent 1 max_piv 3 ties 3 leak_pins 3 errors 0 breaches 0
     t=5.110000000e-03 restart  settle=0001 lcp=0000 prev=1001 rounds=3 -> both (viol settle 0 V, lcp 0 V)
     t=5.110000000e-03 restart  settle=0001 lcp=0000 prev=1001 rounds=3 -> both (viol settle 0 V, lcp 0 V)
     t=1.511000000e-02 step     settle=0010 lcp=0100 prev=0110 rounds=3 -> both (viol settle 0 V, lcp 6.06e-15 V)
     guard repair t=1.151200000e-01 D2 (branch #3) violation 0.00091 V
     guard repair t=1.751200000e-01 D2 (branch #3) violation 0.00091 V
-1-ph bridge V_f=0                pwl+split    20168     47    0     21   26     0     25       0 +4.52e-03 +4.52e-03 +4.60e-07      3    yes     yes      no   (0.1 s)
-    lcp: sites 20159 settle_rounds 0 mask_cycles 0 inconsistent 80 max_piv 3 ties 0 leak_pins 20 errors 0 breaches 0
+1-ph bridge V_f=0                pwl+split    20168     47    0     21   26     0     25       0 +4.52e-03 +4.52e-03 +2.69e-07      3    yes     yes      no   (0.0 s)
+    lcp: sites 41 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 3 ties 0 leak_pins 20 errors 0 breaches 0
     t=5.105253103e-03 restart  settle=0001 lcp=0000 prev=0000 rounds=2 -> both (viol settle 0 V, lcp 0 V)
     t=1.511000000e-02 step     settle=0010 lcp=0100 prev=0110 rounds=3 -> both (viol settle 0 V, lcp 6.06e-15 V)
     t=1.510525310e-02 restart  settle=0010 lcp=0000 prev=0000 rounds=2 -> settle (viol settle 0 V, lcp 0.00275 V)
 # 3-ph bridge overlap L_s=1mH: trbdf2 rtol 1e-10 end p-n = skipped: trbdf2 does not finish it (max_steps / h_min, KNOWN_LIMITATIONS)
 3-ph bridge overlap L_s=1mH      pwl           4000      0    0      0    0     0      0       0       n/a       n/a       n/a      7    yes     yes     yes   (0.0 s)
-    lcp: sites 4000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 7 ties 0 leak_pins 0 errors 0 breaches 0
+    lcp: sites 35 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 7 ties 0 leak_pins 0 errors 0 breaches 0
 3-ph bridge overlap L_s=1mH      pwl+restart   4121      0    0      0    0     0      0       0       n/a       n/a       n/a      7    yes     yes     yes   (0.0 s)
-    lcp: sites 4121 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 7 ties 0 leak_pins 0 errors 0 breaches 0
+    lcp: sites 15 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 7 ties 0 leak_pins 0 errors 0 breaches 0
 3-ph bridge overlap L_s=1mH      pwl+split     4104      0    0      0    0     0      0       0       n/a       n/a       n/a      7    yes     yes     yes   (0.0 s)
-    lcp: sites 4104 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 7 ties 0 leak_pins 0 errors 0 breaches 0
-# 3-ph bridge C filter V_f=0.7: trbdf2 rtol 1e-10 end p-n = 171.7878336075392
+    lcp: sites 23 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 7 ties 0 leak_pins 0 errors 0 breaches 0
+# 3-ph bridge C filter V_f=0.7: trbdf2 rtol 1e-10 end p-n = 171.7878336075388
 3-ph bridge C filter V_f=0.7     pwl          20000      1    0      0    1     0      0       0 +4.34e-10 +4.34e-10 +4.34e-10      6    yes     yes      no   (0.1 s)
-    lcp: sites 20000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 6 ties 0 leak_pins 27 errors 0 breaches 0
+    lcp: sites 9100 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 6 ties 0 leak_pins 27 errors 0 breaches 0
     t=6.470000000e-03 step     settle=100000 lcp=000000 prev=100000 rounds=1 -> both (viol settle 0 V, lcp 0 V)
 3-ph bridge C filter V_f=0.7     pwl+restart  20530      0    0      0    0     0      0       0 +4.34e-10 +4.34e-10 +4.34e-10      3    yes     yes     yes   (0.1 s)
-    lcp: sites 20530 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 3 ties 0 leak_pins 2 errors 0 breaches 0
+    lcp: sites 9484 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 3 ties 0 leak_pins 2 errors 0 breaches 0
 3-ph bridge C filter V_f=0.7     pwl+split    20490      0    0      0    0     0      0       0 +4.34e-10 +4.34e-10 +4.34e-10      6    yes     yes     yes   (0.1 s)
-    lcp: sites 20490 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 6 ties 0 leak_pins 2 errors 0 breaches 0
-# DCM buck L(1+1e-05): trbdf2 rtol 1e-10 end vout = 9.1001802163689
-DCM buck L(1+1e-05)              pwl          80000      0    0      0    0     0      0       0 -7.50e-03 -7.50e-03 -7.50e-03      2    yes     yes     yes   (0.2 s)
-    lcp: sites 80000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck L(1+1e-05)              pwl+restart  84181      0    0      0    0     0      0       0 +6.27e-06 +6.27e-06 +6.27e-06      2    yes     yes     yes   (0.2 s)
-    lcp: sites 84181 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck L(1+1e-05)              pwl+split    83913      0    0      0    0     0      0       0 +9.41e-07 +9.41e-07 +9.41e-07      2    yes     yes     yes   (0.2 s)
-    lcp: sites 83913 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-# DCM buck L(1-1e-05): trbdf2 rtol 1e-10 end vout = 9.100245922918166
-DCM buck L(1-1e-05)              pwl          80000      0    0      0    0     0      0       0 -7.61e-03 -7.61e-03 -7.61e-03      2    yes     yes     yes   (0.2 s)
-    lcp: sites 80000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck L(1-1e-05)              pwl+restart  84181      0    0      0    0     0      0       0 +6.24e-06 +6.24e-06 +6.24e-06      2    yes     yes     yes   (0.2 s)
-    lcp: sites 84181 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck L(1-1e-05)              pwl+split    83913      0    0      0    0     0      0       0 +9.03e-07 +9.03e-07 +9.03e-07      2    yes     yes     yes   (0.2 s)
-    lcp: sites 83913 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-# DCM buck L(1+0.0001): trbdf2 rtol 1e-10 end vout = 9.099884756731521
-DCM buck L(1+0.0001)             pwl          80000      0    0      0    0     0      0       0 -7.41e-03 -7.41e-03 -7.41e-03      2    yes     yes     yes   (0.2 s)
-    lcp: sites 80000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck L(1+0.0001)             pwl+restart  84180      0    0      0    0     0      0       0 +6.22e-06 +6.22e-06 +6.22e-06      2    yes     yes     yes   (0.2 s)
-    lcp: sites 84180 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck L(1+0.0001)             pwl+split    83914      0    0      0    0     0      0       0 +9.15e-07 +9.15e-07 +9.15e-07      2    yes     yes     yes   (0.2 s)
-    lcp: sites 83914 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-# DCM buck L(1-0.0001): trbdf2 rtol 1e-10 end vout = 9.10054142420285
-DCM buck L(1-0.0001)             pwl          80000      0    0      0    0     0      0       0 -7.62e-03 -7.62e-03 -7.62e-03      6    yes     yes     yes   (0.2 s)
-    lcp: sites 80000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 6 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck L(1-0.0001)             pwl+restart  84186      0    0      0    0     0      0       0 +6.28e-06 +6.28e-06 +6.28e-06      2    yes     yes     yes   (0.2 s)
-    lcp: sites 84186 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck L(1-0.0001)             pwl+split    83909      0    0      0    0     0      0       0 +9.27e-07 +9.27e-07 +9.27e-07      2    yes     yes     yes   (0.3 s)
-    lcp: sites 83909 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-# DCM buck L(1+0.01): trbdf2 rtol 1e-10 end vout = 9.067580363866686
-DCM buck L(1+0.01)               pwl          80000      0    0      0    0     0      0       0 -2.31e-03 -2.31e-03 -2.31e-03      2    yes     yes     yes   (0.2 s)
-    lcp: sites 80000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck L(1+0.01)               pwl+restart  84187      0    0      0    0     0      0       0 +5.66e-06 +5.66e-06 +5.66e-06      2    yes     yes     yes   (0.3 s)
-    lcp: sites 84187 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck L(1+0.01)               pwl+split    83915      0    0      0    0     0      0       0 +8.24e-07 +8.24e-07 +8.24e-07      2    yes     yes     yes   (0.3 s)
-    lcp: sites 83915 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-# DCM buck L(1-0.01): trbdf2 rtol 1e-10 end vout = 9.133251054852796
-DCM buck L(1-0.01)               pwl          80000      0    0      0    0     0      0       0 -5.64e-03 -5.64e-03 -5.64e-03      2    yes     yes     yes   (0.3 s)
-    lcp: sites 80000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck L(1-0.01)               pwl+restart  84185      0    0      0    0     0      0       0 +4.86e-06 +4.86e-06 +4.86e-06      2    yes     yes     yes   (0.4 s)
-    lcp: sites 84185 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
-DCM buck L(1-0.01)               pwl+split    83911      0    0      0    0     0      0       0 +1.02e-06 +1.02e-06 +1.02e-06      2    yes     yes     yes   (0.3 s)
-    lcp: sites 83911 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+    lcp: sites 9404 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 6 ties 0 leak_pins 2 errors 0 breaches 0
+# DCM buck L(1+1e-05): trbdf2 rtol 1e-10 end vout = 9.10018031488067
+DCM buck L(1+1e-05)              pwl          80000      0    0      0    0     0      0       0 -7.50e-03 -7.50e-03 -7.50e-03      2    yes     yes     yes   (0.1 s)
+    lcp: sites 39 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck L(1+1e-05)              pwl+restart  84181      0    0      0    0     0      0       0 +6.17e-06 +6.17e-06 +6.17e-06      2    yes     yes     yes   (0.1 s)
+    lcp: sites 155 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck L(1+1e-05)              pwl+split    83913      0    0      0    0     0      0       0 +8.43e-07 +8.43e-07 +8.43e-07      2    yes     yes     yes   (0.1 s)
+    lcp: sites 43 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+# DCM buck L(1-1e-05): trbdf2 rtol 1e-10 end vout = 9.100245995709566
+DCM buck L(1-1e-05)              pwl          80000      0    0      0    0     0      0       0 -7.61e-03 -7.61e-03 -7.61e-03      2    yes     yes     yes   (0.1 s)
+    lcp: sites 31 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck L(1-1e-05)              pwl+restart  84181      0    0      0    0     0      0       0 +6.16e-06 +6.16e-06 +6.16e-06      2    yes     yes     yes   (0.1 s)
+    lcp: sites 155 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck L(1-1e-05)              pwl+split    83913      0    0      0    0     0      0       0 +8.30e-07 +8.30e-07 +8.30e-07      2    yes     yes     yes   (0.1 s)
+    lcp: sites 43 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+# DCM buck L(1+0.0001): trbdf2 rtol 1e-10 end vout = 9.099884848020427
+DCM buck L(1+0.0001)             pwl          80000      0    0      0    0     0      0       0 -7.41e-03 -7.41e-03 -7.41e-03      2    yes     yes     yes   (0.1 s)
+    lcp: sites 49 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck L(1+0.0001)             pwl+restart  84180      0    0      0    0     0      0       0 +6.12e-06 +6.12e-06 +6.12e-06      2    yes     yes     yes   (0.1 s)
+    lcp: sites 153 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck L(1+0.0001)             pwl+split    83914      0    0      0    0     0      0       0 +8.24e-07 +8.24e-07 +8.24e-07      2    yes     yes     yes   (0.1 s)
+    lcp: sites 41 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+# DCM buck L(1-0.0001): trbdf2 rtol 1e-10 end vout = 9.100541517113946
+DCM buck L(1-0.0001)             pwl          80000      0    0      0    0     0      0       0 -7.62e-03 -7.62e-03 -7.62e-03      6    yes     yes     yes   (0.1 s)
+    lcp: sites 75 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 6 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck L(1-0.0001)             pwl+restart  84186      0    0      0    0     0      0       0 +6.19e-06 +6.19e-06 +6.19e-06      2    yes     yes     yes   (0.1 s)
+    lcp: sites 147 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck L(1-0.0001)             pwl+split    83909      0    0      0    0     0      0       0 +8.34e-07 +8.34e-07 +8.34e-07      2    yes     yes     yes   (0.1 s)
+    lcp: sites 35 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+# DCM buck L(1+0.01): trbdf2 rtol 1e-10 end vout = 9.067580389742947
+DCM buck L(1+0.01)               pwl          80000      0    0      0    0     0      0       0 -2.31e-03 -2.31e-03 -2.31e-03      2    yes     yes     yes   (0.1 s)
+    lcp: sites 39 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck L(1+0.01)               pwl+restart  84187      0    0      0    0     0      0       0 +5.63e-06 +5.63e-06 +5.63e-06      2    yes     yes     yes   (0.1 s)
+    lcp: sites 171 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck L(1+0.01)               pwl+split    83915      0    0      0    0     0      0       0 +7.98e-07 +7.98e-07 +7.98e-07      2    yes     yes     yes   (0.1 s)
+    lcp: sites 43 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+# DCM buck L(1-0.01): trbdf2 rtol 1e-10 end vout = 9.133251074921503
+DCM buck L(1-0.01)               pwl          80000      0    0      0    0     0      0       0 -5.64e-03 -5.64e-03 -5.64e-03      2    yes     yes     yes   (0.1 s)
+    lcp: sites 39 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck L(1-0.01)               pwl+restart  84185      0    0      0    0     0      0       0 +4.84e-06 +4.84e-06 +4.84e-06      2    yes     yes     yes   (0.1 s)
+    lcp: sites 145 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
+DCM buck L(1-0.01)               pwl+split    83911      0    0      0    0     0      0       0 +9.98e-07 +9.98e-07 +9.98e-07      2    yes     yes     yes   (0.1 s)
+    lcp: sites 31 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 2 ties 0 leak_pins 0 errors 0 breaches 0
 # 5-bridge bank, L_s=0.2 mH: trbdf2 rtol 1e-10 end p0-n0 = skipped: trbdf2 does not finish it (max_steps / h_min, KNOWN_LIMITATIONS)
-5-bridge bank, L_s=0.2 mH        pwl           4000      0    0      0    0     0      0       0       n/a       n/a       n/a     16    yes     yes     yes   (0.4 s)
-    lcp: sites 4000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 16 ties 0 leak_pins 0 errors 0 breaches 0
-5-bridge bank, L_s=0.2 mH        pwl+restart   4918      0    0      0    0     0      0       0       n/a       n/a       n/a     16    yes     yes     yes   (0.4 s)
-    lcp: sites 4918 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 16 ties 0 leak_pins 0 errors 0 breaches 0
-5-bridge bank, L_s=0.2 mH        pwl+split     4857      0    0      0    0     0      0       0       n/a       n/a       n/a     16    yes     yes     yes   (0.4 s)
-    lcp: sites 4857 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 16 ties 0 leak_pins 0 errors 0 breaches 0
+5-bridge bank, L_s=0.2 mH        pwl           4000      0    0      0    0     0      0       0       n/a       n/a       n/a     16    yes     yes     yes   (0.2 s)
+    lcp: sites 1247 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 16 ties 0 leak_pins 0 errors 0 breaches 0
+5-bridge bank, L_s=0.2 mH        pwl+restart   4918      0    0      0    0     0      0       0       n/a       n/a       n/a     16    yes     yes     yes   (0.1 s)
+    lcp: sites 744 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 16 ties 0 leak_pins 0 errors 0 breaches 0
+5-bridge bank, L_s=0.2 mH        pwl+split     4857      0    0      0    0     0      0       0       n/a       n/a       n/a     16    yes     yes     yes   (0.1 s)
+    lcp: sites 947 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 16 ties 0 leak_pins 0 errors 0 breaches 0
 # 10-bridge bank, L_s=0.2 mH: trbdf2 rtol 1e-10 end p0-n0 = skipped: trbdf2 does not finish it (max_steps / h_min, KNOWN_LIMITATIONS)
-10-bridge bank, L_s=0.2 mH       pwl           4000      0    0      0    0     0      0       0       n/a       n/a       n/a     31    yes     yes     yes   (1.6 s)
-    lcp: sites 4000 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 31 ties 0 leak_pins 0 errors 0 breaches 0
-10-bridge bank, L_s=0.2 mH       pwl+restart   5747      0    0      0    0     0      0       0       n/a       n/a       n/a     31    yes     yes     yes   (1.6 s)
-    lcp: sites 5747 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 31 ties 0 leak_pins 0 errors 0 breaches 0
-10-bridge bank, L_s=0.2 mH       pwl+split     5640      0    0      0    0     0      0       0       n/a       n/a       n/a     31    yes     yes     yes   (1.8 s)
-    lcp: sites 5640 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 31 ties 0 leak_pins 1 errors 0 breaches 0
+10-bridge bank, L_s=0.2 mH       pwl           4000      0    0      0    0     0      0       0       n/a       n/a       n/a     31    yes     yes     yes   (1.1 s)
+    lcp: sites 2503 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 31 ties 0 leak_pins 0 errors 0 breaches 0
+10-bridge bank, L_s=0.2 mH       pwl+restart   5747      0    0      0    0     0      0       0       n/a       n/a       n/a     31    yes     yes     yes   (0.5 s)
+    lcp: sites 1875 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 31 ties 0 leak_pins 0 errors 0 breaches 0
+10-bridge bank, L_s=0.2 mH       pwl+split     5640      0    0      0    0     0      0       0       n/a       n/a       n/a     31    yes     yes     yes   (0.6 s)
+    lcp: sites 2143 settle_rounds 0 mask_cycles 0 inconsistent 0 max_piv 31 ties 0 leak_pins 1 errors 0 breaches 0
