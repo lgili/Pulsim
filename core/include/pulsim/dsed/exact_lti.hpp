@@ -130,7 +130,11 @@ inline std::string fmt_e(Real v) {
     ExactLTI out;
     const auto n = A.rows();
     if (n == 0) {
-        out.reason = "no state";
+        // a static mode: nothing to propagate, the step is the identity
+        // on an empty state (the samples are the mode's algebraic solve)
+        out.kappa = Real{1};
+        out.tier = 1;
+        out.valid = true;
         return out;
     }
     out.d = scale.size() == n ? scale : Vector::Ones(n);

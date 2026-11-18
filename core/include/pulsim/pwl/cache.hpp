@@ -638,11 +638,31 @@ public:
         const int n_ind = static_cast<int>(inds.size());
         const int n_state = n_cap + n_ind;
         if (n_state == 0) {
-            throw std::runtime_error(
-                "compute_lti_state_space: circuit has no "
-                "dynamic elements (caps or inductors); the "
-                "PED engine integrates state equations, so a "
-                "purely static circuit has no state to evolve.");
+            // A static mode (no capacitor, no inductor): nothing to
+            // propagate, every unknown is algebraic, x = −G⁻¹(b + b_extra).
+            // The exact engine still lands its events (source corners,
+            // switch edges, diode predicates read through this map);
+            // add-exact-propagator-strategy DECISIONS, static circuits.
+            auto solver = sparse::make_default_solver();
+            if (!solver->analyze(G_st_sp) || !solver->factorize(G_st_sp)) {
+                throw std::runtime_error(
+                    "compute_lti_state_space: algebraic block "
+                    "G_aa is singular in a static mode; circuit "
+                    "topology does not have a unique algebraic "
+                    "solution for this switch mask.");
+            }
+            DenseMatrix Ginv(n_mna, n_mna);
+            Vector rhs = Vector::Zero(n_mna), sol;
+            for (int j = 0; j < n_mna; ++j) {
+                rhs[j] = Real{1};
+                solver->solve(rhs, sol);
+                Ginv.col(j) = sol;
+                rhs[j] = Real{0};
+            }
+            Vector rec_const0 = -(Ginv * b_a);
+            return ContinuousLTI{DenseMatrix(0, 0), Vector(0), {}, {},
+                                 DenseMatrix(0, n_mna), DenseMatrix(n_mna, 0),
+                                 std::move(rec_const0), DenseMatrix(-Ginv), {}};
         }
 
         // Declared OUTSIDE the n_cap > 0 block so it stays in scope

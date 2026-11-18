@@ -171,3 +171,25 @@ half order in this measure (ll06 and full_bridge_dc alike: dt/10 0.031, dt/40 0.
 0.0079; its sample at an edge is the right limit and its trace ramps the jump over the previous
 step), while dsed sits at 1.7e-4 / 2.7e-5 at the netlist's dt. pwl and trbdf2 cells are
 unchanged (their results record no right limits; bit identity below).
+
+## The refusal table by the extractor's own reason (2026-11-17)
+
+The bridge refusal now leads with the C++ extractor's reason (it sat past the triage's
+600-character cut, behind the generic "floating capacitors / nonlinear devices" text, which
+was true of neither), and `exact_triage.py cause()` classifies it. `probes/exact_triage.out`
+after the step above (34 refusals): 10 static circuits ("no dynamic elements"), 7 coupled
+inductors, 6 `step_observer` (correct), 6 `G_aa` singular, 3 MOSFET level 1 + 2 Shockley
+(correct). The previous agent's draft split (10 / 7 / 6) is confirmed cell by cell.
+
+## Static circuits (2026-11-17)
+
+| Question | Option taken | Evidence | How to reverse |
+|---|---|---|---|
+| A mode with no capacitor and no inductor | `compute_lti_state_space` returns an EMPTY state: A 0×0, recovery x = −G⁻¹(b + b_extra(t)) through the same sparse LU as the structural path (a singular G is refused with the `G_aa` message); `make_exact_lti` marks the empty stepper tier 1 (the step is the identity on nothing). No state is faked: the scheduler, its event location (gate edges, source corners, diode predicates read through the recovery map; a sine source's oscillator pair is still augmented, so its zero crossings are located on the exact trajectory) and the mode guard are unchanged | Closed forms, `test_exact_static_circuits.py` (dsed / exact): divider 7.5 V to 1e-12; gated resistor on / off levels to 1e-12 with the 30 µs edge stored left (on) and its right limit off; sine → R → diode: samples within 1e-9 of the piecewise closed form and events within 1e-9 of 10 / 20 / 30 ms. C++ `compute_lti_state_space gives a static circuit an empty state` (was: rejects it) | Restore the throw at `n_state == 0` |
+
+Cells moved (dsed, strict gate, refused → agree): back_to_back_diodes_sine 1.1e-5,
+diode_clamp_overvoltage 6.0e-12, bridge_resistive_pure 1.3e-13, current_divider_3way 0,
+voltage_divider_3stage 0, transformer_step_up 5.1e-6, vcswitch_resistor 3.2e-6,
+cascaded_h_bridge_5level 5.7e-5, mmc_4cell_chain 5.7e-5,
+electrothermal_resistor_self_heating 0. Against pwl at dt/40: the sine cells 1.3e-8; the
+switched ones 3.6e-3 … 4.3e-3, pwl's own edge ramp (step 1).

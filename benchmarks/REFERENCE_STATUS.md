@@ -20,7 +20,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | pwl+restart | 83 | 16 | 7 | 0 | 2 |
 | pwl+split | 84 | 15 | 7 | 0 | 2 |
 | trbdf2 | 97 | 2 | 1 | 6 | 2 |
-| dsed | 72 | 0 | 0 | 34 | 2 |
+| dsed | 82 | 0 | 0 | 24 | 2 |
 
 ### Fixed engine: restart rule and split (circuits where any of the three does not agree)
 
@@ -143,16 +143,16 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | closed_loop/ll14_buck_closed_loop.yaml | error | error | error | refused | refused |
 | closed_loop/ll15_boost_closed_loop.yaml | error | error | error | refused | refused |
 | closed_loop/ll16_flyback_closed_loop.yaml | error | error | error | refused | refused |
-| diodes/back_to_back_diodes_sine.yaml | 1.14e-05 | 1.14e-05 | 1.14e-05 | 0 | refused |
+| diodes/back_to_back_diodes_sine.yaml | 1.14e-05 | 1.14e-05 | 1.14e-05 | 0 | 1.15e-05 |
 | diodes/diode_bridge_rectifier.yaml | 0.000216 | 0.000177 | 0.000173 | 3.22e-05 | 6.58e-06 |
-| diodes/diode_clamp_overvoltage.yaml | 0.00565 | 0.00565 | 0.00565 | 0 | refused |
+| diodes/diode_clamp_overvoltage.yaml | 0.00565 | 0.00565 | 0.00565 | 0 | 6.01e-12 |
 | diodes/diode_half_wave_rl_load.yaml | 0.0186 | 0.000598 | 0.000611 | 1.65e-05 | 6.92e-06 |
 | diodes/diode_rectifier.yaml | 0.0139 | 0.00157 | 0.00134 | 0.000183 | 1.26e-05 |
 | diodes/half_wave_rectifier_sine.yaml | 0.000393 | 0.000112 | 4.09e-05 | 2.36e-05 | 4.6e-06 |
 | diodes/voltage_doubler.yaml | 0.000222 | 3e-05 | 3.02e-05 | 5.04e-06 | 5.39e-07 |
-| linear/bridge_resistive_pure.yaml | 0 | 0 | 0 | 0 | refused |
+| linear/bridge_resistive_pure.yaml | 0 | 0 | 0 | 0 | 1.33e-13 |
 | linear/capacitor_natural_discharge.yaml | 0.000798 | 7.52e-07 | 7.52e-07 | 5.63e-06 | 6.11e-07 |
-| linear/current_divider_3way.yaml | 0 | 0 | 0 | 0 | refused |
+| linear/current_divider_3way.yaml | 0 | 0 | 0 | 0 | 0 |
 | linear/current_source_rc.yaml | 5.66e-10 | 4.07e-10 | 4.07e-10 | 0 | 3.58e-10 |
 | linear/current_source_rl_step.yaml | 0.00577 | 3.99e-05 | 3.99e-05 | 2.14e-06 | 6.04e-07 |
 | linear/lc_low_pass_sine.yaml | 3.26e-05 | 3.26e-05 | 3.26e-05 | 0.000118 | 1.14e-06 |
@@ -167,13 +167,13 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | linear/rlc_series_resonant.yaml | 0.00033 | 0.00033 | 0.00033 | 0.000354 | 3.41e-06 |
 | linear/sine_voltage_rc.yaml | 4.42e-05 | 4.42e-05 | 4.42e-05 | 0.000111 | 3.06e-06 |
 | linear/two_stage_rc_lowpass.yaml | 0.00145 | 1.01e-05 | 1.01e-05 | 3.44e-06 | 4.62e-07 |
-| linear/voltage_divider_3stage.yaml | 0 | 0 | 0 | 0 | refused |
+| linear/voltage_divider_3stage.yaml | 0 | 0 | 0 | 0 | 0 |
 | magnetics/core_loss_steinmetz_sine.yaml | 0.000228 | 0.000227 | 0.000227 | 0.000123 | 3.5e-06 |
 | magnetics/coupled_inductor_step.yaml | 0.00032 | 0.00032 | 0.00032 | 3.76e-06 | refused |
 | magnetics/half_bridge_transformer_dc.yaml | 0.151 | 0.000459 | 0.000459 | 2.37e-05 | refused |
 | magnetics/inductor_chain_step.yaml | 0.00231 | 5.34e-06 | 5.34e-06 | 9.05e-07 | refused |
 | magnetics/transformer_leakage.yaml | 0.0041 | 0.00409 | 0.00409 | 0.000231 | refused |
-| magnetics/transformer_step_up.yaml | 4.64e-06 | 4.64e-06 | 4.64e-06 | 0 | refused |
+| magnetics/transformer_step_up.yaml | 4.64e-06 | 4.64e-06 | 4.64e-06 | 0 | 5.1e-06 |
 | motors/motor_dc_brush_step_load.yaml | 0.000289 | 4.5e-07 | 4.5e-07 | 6.06e-06 | 3.62e-07 |
 | motors/motor_induction_locked_rotor.yaml | 2.25e-06 | 2.25e-06 | 2.25e-06 | 5.1e-05 | refused |
 | motors/motor_pmsm_dq_open_loop.yaml | 0.000177 | 4.81e-07 | 4.81e-07 | 6.51e-06 | 4.45e-07 |
@@ -195,7 +195,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/basic/pwm_voltage_rc.yaml | 0.000883 | 9.98e-09 | 9.98e-09 | 8.98e-09 | 1.15e-07 |
 | switching/basic/pwm_voltage_rl_filter.yaml | 0.00429 | 6.93e-06 | 6.93e-06 | 6.53e-05 | 2.26e-06 |
 | switching/basic/snubber_rc.yaml | 0.000561 | 0.000561 | 0.000561 | 1.65e-07 | 1.73e-07 |
-| switching/basic/vcswitch_resistor.yaml | 0.0332 | 0.0682 | 0.0332 | 0 | refused |
+| switching/basic/vcswitch_resistor.yaml | 0.0332 | 0.0682 | 0.0332 | 0 | 3.16e-06 |
 | switching/boost/boost_classic.yaml | 0.000313 | 1.04e-06 | 3.94e-07 | 9.53e-06 | 6.96e-07 |
 | switching/boost/boost_pfc_open_loop.yaml | 0.0304 | 0.0304 | 1.06e-05 | 1.7e-07 | 2.62e-07 |
 | switching/boost/boost_switching_complex.yaml | 0.00192 | 0.000334 | 3.15e-05 | 1.05e-05 | 2.99e-05 |
@@ -235,12 +235,12 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/isolated/full_bridge_dc.yaml | 0.0828 | 0.0815 | 0.0815 | 0.000142 | 2.65e-05 |
 | switching/isolated/ll11_llc_resonant_converter.yaml | error | error | error | error | refused |
 | switching/isolated/synchronous_flyback.yaml | 0.207 | 1.01e-06 | 1.01e-06 | 9.15e-06 | refused |
-| switching/multilevel/cascaded_h_bridge_5level.yaml | 0.0274 | 0.0269 | 0.0269 | 0 | refused |
+| switching/multilevel/cascaded_h_bridge_5level.yaml | 0.0274 | 0.0269 | 0.0269 | 0 | 5.69e-05 |
 | switching/multilevel/flying_capacitor_3level.yaml | 0.0466 | 0.05 | 0.05 | 6.78e-05 | 3.71e-05 |
-| switching/multilevel/mmc_4cell_chain.yaml | 0.0268 | 0.0264 | 0.0264 | 0 | refused |
+| switching/multilevel/mmc_4cell_chain.yaml | 0.0268 | 0.0264 | 0.0264 | 0 | 5.74e-05 |
 | switching/multilevel/npc_three_level_halfbridge.yaml | 0.000937 | 1.79e-06 | 1.79e-06 | 1.71e-06 | refused |
 | switching/multilevel/t_type_3level_halfbridge.yaml | 0.0749 | 0.0738 | 0.0738 | 0.000108 | refused |
-| thermal/electrothermal_resistor_self_heating.yaml | 0 | 0 | 0 | 0 | refused |
+| thermal/electrothermal_resistor_self_heating.yaml | 0 | 0 | 0 | 0 | 0 |
 | thermal/long_run_drift_buck.yaml | 0.000603 | 1.12e-05 | 1.12e-05 | 2.58e-06 | 1.07e-05 |
 | three_phase/interleaved_buck_3ph.yaml | 0.00217 | 0.00249 | 1.75e-06 | 6.65e-08 | 2.2e-07 |
 | three_phase/three_phase_balanced_rl_load.yaml | 1.82e-06 | 1.83e-06 | 1.83e-06 | 4.22e-05 | 6.01e-07 |
@@ -254,7 +254,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | pwl+restart | 20 | 0 | 0 | 0 | 0 |
 | pwl+split | 20 | 0 | 0 | 0 | 0 |
 | trbdf2 | 20 | 0 | 0 | 0 | 0 |
-| dsed | 13 | 0 | 0 | 7 | 0 |
+| dsed | 18 | 0 | 0 | 2 | 0 |
 
 | case | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
@@ -266,14 +266,14 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | lc_lossless | 0.00178 | 3.31e-05 | 3.31e-05 | 5.5e-05 | 5e-14 |
 | sine_rc | 9.65e-07 | 9.65e-07 | 9.65e-07 | 5.85e-06 | 5.55e-15 |
 | sine_rl | 9.65e-07 | 9.65e-07 | 9.65e-07 | 6.3e-06 | 7.43e-15 |
-| wheatstone | 0 | 0 | 0 | 0 | refused |
+| wheatstone | 0 | 0 | 0 | 0 | 8.88e-17 |
 | pulse_rc | 3.25e-06 | 3.25e-06 | 3.25e-06 | 1.01e-06 | 7.8e-14 |
 | coupled_k099 | 0.000765 | 8.27e-06 | 8.27e-06 | 8.13e-07 | refused |
-| ideal_transformer | 0 | 0 | 0 | 0 | refused |
-| vcvs_gain2 | 0 | 0 | 0 | 0 | refused |
+| ideal_transformer | 0 | 0 | 0 | 0 | 3.05e-17 |
+| vcvs_gain2 | 0 | 0 | 0 | 0 | 0 |
 | shockley_op | 6.67e-13 | 6.67e-13 | 6.67e-13 | 6.67e-13 | refused |
-| pwl_diode_drop | 0 | 0 | 0 | 0 | refused |
-| halfwave_r | 5.38e-09 | 5.38e-09 | 5.38e-09 | 3.81e-08 | refused |
+| pwl_diode_drop | 0 | 0 | 0 | 0 | 1.85e-16 |
+| halfwave_r | 5.38e-09 | 5.38e-09 | 5.38e-09 | 3.81e-08 | 5.38e-09 |
 | halfwave_rl | 9.65e-06 | 1.44e-06 | 1.44e-06 | 3.76e-06 | 5.69e-09 |
 | hard_switched_rc | 0.01 ✗ | 4.92e-05 | 4.92e-05 | 2.22e-06 | 7.58e-14 |
 | buck_ccm | 0.000256 | 1.23e-08 | 1.23e-08 | 3.37e-07 | 3.84e-15 |

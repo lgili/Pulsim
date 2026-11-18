@@ -153,9 +153,11 @@ TEST_CASE("compute_lti_state_space recovers buck CCM analytical (A, b)",
     }
 }
 
-TEST_CASE("compute_lti_state_space rejects a circuit without state vars",
+TEST_CASE("compute_lti_state_space gives a static circuit an empty state",
            "[bridge][lti]") {
-    // Pure resistive divider: no caps, no inductors → no state to evolve
+    // Pure resistive divider: no caps, no inductors → nothing to propagate;
+    // the recovery map is the algebraic solve (add-exact-propagator-strategy
+    // DECISIONS, static circuits): v(n2) = 5 · 100 / 200 = 2.5 V
     builder::CircuitBuilder b;
     b.add_voltage_source("V1", "n1", "gnd", Real{5});
     b.add_resistor("R1", "n1", "n2", Real{100});
@@ -165,9 +167,12 @@ TEST_CASE("compute_lti_state_space rejects a circuit without state vars",
     cache.build(Real{1e-6});
 
     SwitchStateMask m(0);   // no switches
-    REQUIRE_THROWS_AS(
-        cache.compute_lti_state_space(m),
-        std::runtime_error);
+    const auto lti = cache.compute_lti_state_space(m);
+    REQUIRE(lti.A.rows() == 0);
+    REQUIRE(lti.recover_from_state.cols() == 0);
+    REQUIRE(lti.recover_const.size() == lti.recover_from_b.rows());
+    const auto n2 = b.node_id_of("n2");
+    REQUIRE(std::abs(lti.recover_const(n2) - Real{2.5}) < Real{1e-12});
 }
 
 TEST_CASE("compute_lti_state_space handles a single floating capacitor "
