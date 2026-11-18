@@ -643,6 +643,103 @@ def test_fixed_step_feature_refused_by_name(feature, engine):
     assert (ei.value.engine, ei.value.feature) == (engine, feature)
 
 
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto", "dsed"))
+def test_sensitivities_cell(engine):
+    """add-parameter-sensitivities: honoured on the exact path only;
+    every other engine refuses the keyword by name (a gradient there
+    would be a difference of runs with events on the step grid)."""
+    if engine != "dsed":
+        with pytest.raises(p.UnsupportedError) as ei:
+            _sim(engine, sensitivities=["R.R"])
+        assert (ei.value.engine, ei.value.feature) == (
+            engine, "sensitivities")
+        return
+    r = _sim(engine, sensitivities=["R.R"])
+    assert r.sensitivity.params == ["R.R"]
+    assert r.sensitivity.states.shape[2] == 1
+
+
+# add-periodic-steady-state-shooting group 5: periodic_steady_state(engine=)
+# and SteadySpec(method='pss') x engine. Honoured on the exact stepper
+# ('exact' and 'dsed' one engine, bit-identical), 'pwl' and 'trbdf2' (the
+# orbit of that engine's transient); anything else refused before a run.
+_PSS_T = 1e-5
+
+
+def _pss_buck(d=None, shockley=False):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9)
+    if shockley:
+        b.add_shockley_diode("D1", "gnd", "sw")
+    else:
+        b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "vout", 100e-6)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", 50.0)
+    return b, p.make_pwm_switch_fn(1 / _PSS_T, 0.3, b.switch_index_of("S"),
+                                   b.graph.num_switches)
+
+
+def _pss_kw(engine):
+    return {"dt": _PSS_T / 100} if engine in ("pwl", "trbdf2") else {}
+
+
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "exact", "bdf1"))
+def test_periodic_steady_state_engine_cell(engine):
+    b, sf = _pss_buck()
+    if engine == "bdf1":
+        with pytest.raises(ValueError, match="engine must be"):
+            p.periodic_steady_state(b, period=_PSS_T, switch_fn=sf,
+                                    engine=engine)
+        return
+    r = p.periodic_steady_state(b, period=_PSS_T, switch_fn=sf,
+                                engine=engine, **_pss_kw(engine))
+    v = r.x0[r.state_labels.index("v(vout)")]
+    assert v == pytest.approx(8.99624708728943, rel=1e-6)
+    assert r._ctx.loop == ("fd-broyden" if engine in ("pwl", "trbdf2")
+                           else "kernel")
+    # a Newton device is refused by name on every engine, before a run
+    bs, sfs = _pss_buck(shockley=True)
+    ok, why = p.periodic_steady_state_supported(
+        bs, _PSS_T, sfs, engine=engine, **_pss_kw(engine))
+    assert not ok and "D1" in why
+
+
+def test_periodic_steady_state_exact_and_dsed_are_bit_identical():
+    out = []
+    for eng in ("dsed", "exact"):
+        b, sf = _pss_buck()
+        r = p.periodic_steady_state(b, period=_PSS_T, switch_fn=sf,
+                                    engine=eng)
+        out.append((r.x0, r.monodromy, r.n_period_runs))
+    assert np.array_equal(out[0][0], out[1][0])
+    assert np.array_equal(out[0][1], out[1][1]) and out[0][2] == out[1][2]
+
+
+@pytest.mark.parametrize("engine", ("auto", "dsed", "exact", "pwl", "trbdf2"))
+def test_steady_spec_pss_engine_cell(engine):
+    from pulsim.design import Evaluator, SteadySpec
+
+    def build(_d):
+        return _pss_buck()
+    recs = {}
+    for eng in dict.fromkeys(("exact", engine)):
+        recs[eng] = Evaluator(build, period=_PSS_T, loads=("RL",),
+                              output="vout", engine=eng,
+                              options=_pss_kw(eng),
+                              steady=SteadySpec("pss")).evaluate({})
+    r = recs[engine]
+    assert r.status == "ok"
+    route = {"auto": "dsed", "exact": "dsed"}.get(engine, engine)
+    assert r.counters["route"] == f"pss/{route}"
+    assert r.counters["pss_period_runs"] >= 1
+    assert r.kpis["v_out"] == pytest.approx(recs["exact"].kpis["v_out"],
+                                            rel=1e-6)
+    if engine == "dsed":
+        assert r.kpis == recs["exact"].kpis
+
+
 @pytest.mark.parametrize("engine", ("trbdf2", "dsed"))
 def test_mode_selection_lcp_refused_by_name_without_the_event_integrator(engine):
     # 'lcp' decides on the dsed event integrator only; this RC routes to "auto"
@@ -955,6 +1052,154 @@ def test_voltage_sanity_factor_honoured_on_every_engine(engine):
                        voltage_sanity_factor=0.5, **kw)
     assert r._implausible_voltage.peak == pytest.approx(10.0)
 
+
+# ---------------------------------------------------------------------
+# The branch form (add-branch-form-ideal-switch 4.3): a FORM of the
+# Switch and Diode kinds with its own engine column, checked like the
+# kind cells (no silent cell) and against the docs block.
+# ---------------------------------------------------------------------
+def _switch_branch(on):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_resistor("Rb", "in", "gnd", 1e3)
+    if on:
+        b.add_ideal_switch("Sd", "in", "a", 1e-3, 1e-9)
+    b.add_resistor("R1", "a", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 100e-9)
+    return b
+
+
+FORM_CELLS = {
+    "Switch": (_switch_branch, "o", "Sd", 5e-4, 1e-7, True),
+    "Diode": (_clamp(lambda b: b.add_diode("Dd", "o", "gnd", form="branch",
+                                           R_on=1e-3, g_off=1e-9,
+                                           V_th=0.701, V_f=0.7)),
+              "o", "Dd", 2e-3, 2e-7, False),
+}
+
+
+def test_branch_form_rows_cover_switch_and_diode():
+    caps = k._branch_form_capabilities()
+    assert set(caps) == set(FORM_CELLS)
+    for row in caps.values():
+        assert row["pwl"], "the reference engine runs the branch form"
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("kind", list(FORM_CELLS))
+def test_branch_form_cell(kind, engine):
+    _check_cell(kind + "[branch]", FORM_CELLS[kind], engine,
+                k._branch_form_capabilities()[kind][engine])
+
+
+# Dependent modes (a switch opening an inductor cut-set, task 5.5): pwl
+# re-initialises under the restart rule, trbdf2 always (three SDIRK
+# steps); pwl without the rule refuses by name, dsed/bdf1 because the
+# branch form is refused.
+_DEP_REFUSAL = {"pwl": "dependent_states",
+                "dsed": "branch_form", "bdf1": "branch_form"}
+
+
+@pytest.mark.parametrize("engine,restart",
+                         [(e, False) for e in (*ENGINES, "exact")] + [("pwl", True)])
+def test_dependent_states_cell(engine, restart):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_ideal_switch("S", "vin", "a", 0.0, 0.0)
+    b.add_resistor("R", "a", "m", 1.0)
+    b.add_inductor("L", "m", "gnd", 1e-3)
+
+    def fn(t):
+        m = p.SwitchStateMask(1)
+        m.set(0, t < 2e-4)
+        return m
+    kw = dict(discontinuity_restart=True) if restart else {}
+    if engine in ("pwl", "dsed"):
+        kw["dt"] = 5e-6
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if engine == "bdf1":
+                r = k.run_transient_bdf1(
+                    b, k.SimulationOptions(t_start=0.0, t_end=3e-4, dt=5e-6), fn)
+            else:
+                r = p.simulate(b, 3e-4, engine=engine, switch_fn=fn, **kw)
+    except p.UnsupportedError as e:
+        named = "dsed" if engine == "exact" else engine  # the table column
+        assert (e.engine, e.feature, e.device) == (named, _DEP_REFUSAL[named], "S")
+        assert not (engine == "pwl" and restart), f"pwl+restart refused: {e}"
+        return
+    assert (engine == "pwl" and restart) or engine == "trbdf2", (
+        f"{engine} ran a dependent mode silently")
+    assert len(r.reinit_records) == 1
+
+
+@pytest.mark.parametrize("kind", list(FORM_CELLS))
+def test_branch_form_exact_alias_refuses_like_dsed(kind):
+    out = {}
+    for eng in ("dsed", "exact"):
+        with pytest.raises(p.UnsupportedError) as ei:
+            _run(*_args(FORM_CELLS[kind]), eng)
+        e = ei.value
+        out[eng] = (e.engine, e.feature, e.device, e.kind)
+    assert out["dsed"] == out["exact"] and out["dsed"][1] == "branch_form"
+
+
+def test_branch_form_matrix_equals_the_docs():
+    import pathlib
+    doc = (pathlib.Path(__file__).resolve().parents[2] / "docs"
+           / "known-limitations.md").read_text(encoding="utf-8")
+    block = doc.split("<!-- branch-form-capabilities:begin -->")[1].split(
+        "<!-- branch-form-capabilities:end -->")[0]
+    cols = ("pwl", "trbdf2", "dsed", "bdf1", "ac_sweep")
+    doc_table = {}
+    for ln in block.strip().splitlines()[2:]:
+        cells = [c.strip() for c in ln.strip("|").split("|")]
+        doc_table[cells[0]] = {c: v == "yes" for c, v in zip(cols, cells[1:])}
+    assert doc_table == k._branch_form_capabilities()
+
+# ---------------------------------------------------------------------
+# add-compiled-control-graph task 4: a control-graph Rate on each engine
+# ---------------------------------------------------------------------
+
+def _rated_chain(b, rate):
+    ch = p.MixedDomainBlockChain(rate=rate)
+    ch.add("g", p.Gain(k=0.5), inputs=dict(x="o"), output="y")
+    return ch
+
+
+@pytest.mark.parametrize("rate,feature", [
+    (dict(period=1e-4, offset=2e-5), "control_rate_offset"),
+    (dict(period=1e-4, compute_delay=2e-5), "compute_delay"),
+])
+def test_control_rate_offset_and_delay_time_refused_on_trbdf2(rate, feature):
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(**rate))
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim("trbdf2", b, step_observer=ch.make_step_observer(b))
+    assert (ei.value.engine, ei.value.feature) == ("trbdf2", feature)
+
+
+@pytest.mark.parametrize("rate", [
+    dict(period=1e-4, offset=2e-5), dict(period=1e-4, compute_delay=2e-5),
+    dict(period=1e-4, compute_delay="one_sample"),
+])
+def test_control_rate_keywords_honoured_on_pwl(rate):
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(**rate))
+    _sim("pwl", b, step_observer=ch.make_step_observer(b))
+    assert ch.tick_counts == [20]     # ceil((2e-3 - offset) / 1e-4)
+
+
+@pytest.mark.parametrize("engine", ("dsed", "exact"))
+def test_control_rate_refused_on_dsed(engine):
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(1e-4))
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sim(engine, b, step_observer=ch.make_step_observer(b))
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "step_observer")
+
+
 # add-exact-propagator-strategy group 13: engine='exact' is the canonical name of the event-driven
 # exact engine, 'dsed' its alias. Every keyword cell of 'dsed' holds under 'exact', and the
 # refusal keeps naming 'dsed' (the capability-table column; DECISIONS, group 13 slice).
@@ -1000,10 +1245,11 @@ def test_exact_and_dsed_are_bit_identical_on_every_cell(kind):
 
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "exact"))
-def test_reinit_records_only_on_the_exact_engine(engine):
-    # result.reinit_records (dependent states: the impulse at a mode entry) rides on the event
-    # integrator's runs only, the same on both names: two 1.5 uF capacitors at 8 V and 0 V tied
-    # by a 0 V source share 6 uC at t = 0
+def test_reinit_records_on_every_engine(engine):
+    # result.reinit_records (the impulse at a mode entry) is on every engine since the fixed
+    # engine's D4 records (feat/core-a-ideal-switch): two 1.5 uF capacitors at 8 V and 0 V tied
+    # by a 0 V source share 6 uC at t = 0. The exact engine records that start, the same on both
+    # names; pwl / trbdf2 record none at t = 0 (measured: their records are at switching events)
     b = p.CircuitBuilder()
     b.add_capacitor("C1", "a", "gnd", 1.5e-6, 8.0)
     b.add_capacitor("C2", "b", "gnd", 1.5e-6, 0.0)
@@ -1014,7 +1260,7 @@ def test_reinit_records_only_on_the_exact_engine(engine):
         r = p.simulate(b, 1e-4, engine=engine, dt=1e-6)
     recs = getattr(r, "reinit_records", None)
     if engine in ("pwl", "trbdf2"):
-        assert recs is None
+        assert list(recs) == []
         return
     (rec,) = recs
     assert (rec.kind, rec.sample) == ("capacitor_loop", 0)

@@ -293,3 +293,38 @@ def test_retired_device_propagates_from_monte_carlo():
                       distributions={"R": lambda r: r.uniform(9.0, 11.0)},
                       n_samples=3, kpi_fn=kpi, seed=1, t_end=T_END,
                       dt=DT, verbose=False)
+
+
+class _DiesWhenLoaded:
+    """A job argument that pickles in the parent and fails to load in the
+    worker: an unimportable module (``import``) or a dying process."""
+
+    def __init__(self, how):
+        self.how = how
+
+    def __reduce__(self):
+        import importlib
+        import os
+        if self.how == "import":
+            return importlib.import_module, ("pulsim_tests_no_such_module",)
+        return os._exit, (3,)
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("how", ["import", "exit"])
+def test_a_worker_that_cannot_load_its_job_raises_instead_of_hanging(how):
+    """CI (spawn, installed wheel): a worker that died unpickling its job
+    left multiprocessing.Pool waiting forever; the job is named now."""
+    from pulsim.sweep import _run_jobs
+    with pytest.raises(RuntimeError, match="backend='process'") as e:
+        _run_jobs([(_DiesWhenLoaded(how),)] * 3, parallel=True,
+                  backend="process", n_workers=2, verbose=False)
+    if how == "import":
+        assert "pulsim_tests_no_such_module" in str(e.value)
+
+
+def test_an_unpicklable_job_is_refused_before_any_worker_starts():
+    from pulsim.sweep import _run_jobs
+    with pytest.raises(TypeError, match="job 0 does not pickle"):
+        _run_jobs([(lambda: 0,)], parallel=True, backend="process",
+                  n_workers=2, verbose=False)

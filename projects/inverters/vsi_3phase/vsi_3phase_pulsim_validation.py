@@ -14,8 +14,9 @@ shipped with current Pulsim:
   shoot-through prevention (HS and LS in the same leg never close
   simultaneously by construction).
 
-The body diodes are added explicitly to clamp the phase midpoint
-during turn-off (the VSI helper itself doesn't add them).
+The VSI helper adds the six antiparallel freewheel diodes itself, and
+the switch bits come from its ``switch_indices``. The load star point
+floats (1 MΩ reference), as in a real three-wire load.
 """
 
 from __future__ import annotations
@@ -32,22 +33,13 @@ def _build_builder(vp, R_load: float | None = None, L_load: float = 5e-3):
     b = p.CircuitBuilder()
     b.add_voltage_source("Vdc", "vdc", "gnd", float(vp.V_dc))
 
-    add_three_phase_vsi(
+    # The helper adds the six antiparallel freewheel diodes itself (v2.0).
+    vsi = add_three_phase_vsi(
         b, "INV",
         vdc_pos="vdc", vdc_neg="gnd",
         out_a="mid_a", out_b="mid_b", out_c="mid_c",
         R_on=1e-3, R_off=1e9,
     )
-
-    # 6 anti-parallel body diodes (the VSI helper does not add them).
-    # They let the inductive load current free-wheel during turn-off
-    # without unbounded dV/dt on the phase midpoint.
-    for tag, anode, cathode in [
-        ("D_HS_A", "mid_a", "vdc"), ("D_LS_A", "gnd", "mid_a"),
-        ("D_HS_B", "mid_b", "vdc"), ("D_LS_B", "gnd", "mid_b"),
-        ("D_HS_C", "mid_c", "vdc"), ("D_LS_C", "gnd", "mid_c"),
-    ]:
-        b.add_diode(tag, anode, cathode, 1e3, 1e-9, V_th=0.7)
 
     add_three_phase_rl_load(
         b, "LD",
@@ -56,8 +48,11 @@ def _build_builder(vp, R_load: float | None = None, L_load: float = 5e-3):
         R=R, L=float(L_load),
         topology="star",
     )
-    b.add_resistor("R_n_to_gnd", "n", "gnd", 1.0e-3)
-    return b
+    # Floating star point, referenced through 1 MΩ. A milliohm tie to the
+    # negative rail would drive (V_dc/2)/R of DC through every phase
+    # (AI_GUIDE trap 7).
+    b.add_resistor("R_n_to_gnd", "n", "gnd", 1.0e6)
+    return b, vsi.switch_indices
 
 
 def simulate_vsi(vp,
@@ -76,13 +71,9 @@ def simulate_vsi(vp,
     if m_a is None:
         m_a = float(vp.m_a)
 
-    b = _build_builder(vp)
+    b, idx = _build_builder(vp)
 
-    legs = p.ThreePhaseLegIndices(
-        hs_a=0, ls_a=1,
-        hs_b=2, ls_b=3,
-        hs_c=4, ls_c=5,
-    )
+    legs = p.ThreePhaseLegIndices(*idx)   # [HSa, LSa, HSb, LSb, HSc, LSc]
     spwm = p.make_three_phase_spwm_fn(
         carrier_frequency=float(vp.f_sw),
         modulation_frequency=float(vp.f_o),

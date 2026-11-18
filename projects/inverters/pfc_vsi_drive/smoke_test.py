@@ -23,8 +23,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from validation_data import KPI_23, OP_23
-from pfc_vsi_drive_pulsim_validation import (
+from validation_data import KPI_23, OP_23  # noqa: E402
+from pfc_vsi_drive_pulsim_validation import (  # noqa: E402
     make_sim_params,
     simulate_frontend,
     simulate_inverter,
@@ -40,7 +40,7 @@ def _avg(arr: np.ndarray) -> float:
 
 
 def main() -> int:
-    print(f"=== PFC-VSI compressor drive — smoke test ===")
+    print("=== PFC-VSI compressor drive — smoke test ===")
     print(f"OP: {OP_23.label}")
     print()
 
@@ -88,8 +88,8 @@ def main() -> int:
     v_a_ss    = inv.v_mid_a[n_inv:]
     v_shunt_ss = inv.v_n_shunt_inv[n_inv:]
 
-    print(f"  KPI                target (PSIM)         Pulsim         delta")
-    print(f"  " + "-"*68)
+    print("  KPI                target (PSIM)         Pulsim         delta")
+    print("  " + "-"*68)
     tgt_v_in = KPI_23.V_in_rms or 0.0
     tgt_v_link = KPI_23.V_link_avg or 0.0
     print(f"  V_ac RMS [V]       {KPI_23.V_in_rms:>16.2f}   {_rms(v_ac_ss):>10.2f}     {_rms(v_ac_ss) - tgt_v_in:+.2f}")
@@ -101,7 +101,7 @@ def main() -> int:
     i_f500 = v_shunt_ss / float(R508.R)
     print(f"  I_F500 RMS [A]     {KPI_23.I_F500_rms:>16.3f}   {_rms(i_f500):>10.3f}     {_rms(i_f500) - (KPI_23.I_F500_rms or 0):+.3f}")
     print()
-    print(f"  (full KPI matrix in run_validation.py)")
+    print("  (full KPI matrix in run_validation.py)")
     return 0
 
 

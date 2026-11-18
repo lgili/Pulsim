@@ -111,6 +111,13 @@ struct SimulationOptions {
     /// line search when both are enabled.
     bool enable_newton_lm = false;
 
+    /// Newton roundoff-acceptance run budget: the most consecutive
+    /// solves that may be accepted at roundoff with no converged solve
+    /// between them (add-newton-roundoff-acceptance DECISIONS 10d). One
+    /// more raises NewtonRoundoffBudgetExceeded, which no retry ladder
+    /// swallows. A test handle; 130 = 10x the worst honest run.
+    Size newton_roundoff_budget = Size{130};
+
     /// v2.0 Phase 2 (B.4) — local time-step reduction on a failed
     /// step.
     ///
@@ -167,6 +174,12 @@ struct SimulationOptions {
     /// coincides with the step end. Off = the engine before the rule,
     /// bit for bit.
     bool discontinuity_restart = false;
+    /// add-branch-form-ideal-switch D4: a dependent mode (an inductor
+    /// cut-set or a capacitor loop made by ideal elements) entered with
+    /// inconsistent states is re-initialised by the SDIRK x3 restart and
+    /// recorded in `SimulationResult::reinit_records`; true refuses the run
+    /// at the first such event instead (`on_impulse='error'`).
+    bool on_impulse_error = false;
 
     /// add-fixed-step-resolution-diagnostics: per-step normalised
     /// truncation estimate of the linear capacitors and inductors and a

@@ -25,7 +25,8 @@
 # doesn't overshoot into negative-V_DS region):
 #
 #   M1 ON  (V_g = 10 V, V_OV = 8 V):
-#     V_drain solves 0.5·V² − 9·V + 12 = 0 → V_drain ≈ 1.45 V
+#     KCL (12−V)/50 = V/100 + K·(16·V − V²)·(1+λ·V)
+#     → V_drain ≈ 1.33 V (1.36 V with λ = 0)
 #     (this is the equilibrium between R_in's voltage divider
 #      and M1's triode I-V curve)
 #   M1 OFF (V_g = 0, MOSFET in cutoff):
@@ -34,7 +35,7 @@
 #                                          = 12·100/150 = 8 V
 #
 # With 40 %% PWM duty, the time-average drain voltage is
-# 0.4·1.45 + 0.6·8 ≈ 5.4 V.
+# 0.4·1.33 + 0.6·8 ≈ 5.33 V.
 
 circuit:
   devices:

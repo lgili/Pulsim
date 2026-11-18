@@ -70,8 +70,10 @@ def build_plant() -> p.CircuitBuilder:
         v_dc=0.0, v_amplitude=V_AC_PEAK,
         frequency=F_AC, phase=0.0,
     )
-    # Pin neutral to ground.
-    b.add_resistor("R_n", "ac_n", "gnd", 1.0e-3)
+    # Reference the mains loosely. A 1 mΩ tie here plus the 1 mΩ
+    # rect_n tie below shorted the source through D3 on every negative
+    # half-cycle (51.7 kA peak) — AI_GUIDE trap 7.
+    b.add_resistor("R_n", "ac_n", "gnd", 1.0e6)
 
     # 4-diode full-bridge rectifier: ac_l, ac_n → rect_p, rect_n
     b.add_diode("D1", "ac_l",   "rect_p", 1e3, 1e-9, V_th=0.5)  # idx 1
@@ -98,7 +100,7 @@ def main() -> None:
     builder = build_plant()
     vbus_idx = builder.node_id_of("vbus")
     ac_l_idx = builder.node_id_of("ac_l")
-    sw_idx   = builder.node_id_of("sw")
+    ac_n_idx = builder.node_id_of("ac_n")
     # L_pfc is branch index 10 (1 Vsrc + 1 Rn + 4 diodes + 1 Rrect_n + 1 L_pfc).
     # Actually: 0=Vac, 1=Rn, 2=D1, 3=D2, 4=D3, 5=D4, 6=Rrn, 7=L_pfc.
     iL_idx = builder.pool.branch_var_id_for_inductor(7, builder.graph)
@@ -136,7 +138,9 @@ def main() -> None:
         v_loop_observer(t, x)
 
         # Inner current loop, every dt: i_ref tracks |v_ac| × K_amp.
-        i_ref = K_amp_get() * fabs(float(x[ac_l_idx])) / V_AC_PEAK
+        # |v_ac| line-to-neutral: v(ac_l) alone is ~0 on the negative
+        # half-cycle (D3 clamps ac_l to rect_n = gnd).
+        i_ref = K_amp_get() * fabs(float(x[ac_l_idx] - x[ac_n_idx])) / V_AC_PEAK
         duty[0] = pi_i.update(setpoint=i_ref,
                                  measured=float(x[iL_idx]), dt=DT)
 
@@ -150,7 +154,7 @@ def main() -> None:
             m.set(q1_idx, True)
         return m
 
-    print(f"\n  PFC boost CL:")
+    print("\n  PFC boost CL:")
     print(f"    inner: PI(Kp={KP_I}, Ki={KI_I}), duty ∈ [{DUTY_MIN}, {DUTY_MAX}]")
     print(f"    outer: PI(Kp={KP_V}, Ki={KI_V}), K_amp ∈ [{K_MIN}, {K_MAX}]")
     print(f"    V_bus target: {V_BUS_REF:.0f} V, mains: {V_AC_PEAK:.0f} V peak @ {F_AC:.0f} Hz")
@@ -165,20 +169,28 @@ def main() -> None:
 
     times = np.asarray(res.times) * 1e3   # ms
     v_bus_arr = res.v("vbus")
-    v_ac_arr  = res.v("ac_l")
+    v_ac_arr  = res.v("ac_l") - res.v("ac_n")
     i_L_arr   = np.array([s[iL_idx]   for s in res.states])
 
     # KPI
-    # Last 2 AC cycles → assess settled V_bus and i_L tracking.
-    # Time-weighted (p.steady_state_stats): correct on any grid, unlike a
-    # plain mean over the samples of a variable-step run.
-    ss_bus = p.steady_state_stats(res, "vbus", last=0.4 * T_END)
+    # Last 3 AC cycles (the outer loop settles by ~150 ms) → settled
+    # V_bus and i_L tracking. Time-weighted (p.steady_state_stats):
+    # correct on any grid, unlike a plain sample mean.
+    ss_bus = p.steady_state_stats(res, "vbus", last=3.0 / F_AC)
     v_bus_mean = ss_bus.mean
     v_bus_ripple = ss_bus.ripple_pp
-    print(f"\n  KPI:")
+    print("\n  KPI:")
     print(f"    V_bus mean (late):  {v_bus_mean:.2f} V (target {V_BUS_REF:.0f})")
     print(f"    V_bus ripple (pp):  {v_bus_ripple:.2f} V")
-    print(f"    i_L peak:           {i_L_arr.max():.3f} A")
+    print(f"    i_L peak:           {i_L_arr.max():.3f} A (cold-start inrush)")
+    # True power factor P / (V_rms · I_rms) over the same 3 cycles.
+    t0 = T_END - 3.0 / F_AC
+    i_ac = -res.i("V_ac")
+    p_ac = p.time_average(res.times, v_ac_arr * i_ac, t_from=t0)
+    v_rms = np.sqrt(p.time_average(res.times, v_ac_arr ** 2, t_from=t0))
+    i_rms = np.sqrt(p.time_average(res.times, i_ac ** 2, t_from=t0))
+    print(f"    PF = P/(V_rms·I_rms): {p_ac / (v_rms * i_rms):.3f}  "
+          f"(P_ac = {p_ac:.0f} W)")
     # Power-factor proxy: correlation between i_L and |v_ac|, sample-
     # weighted (this script runs on a fixed dt, where that is fine).
     k_late = int(0.6 * res.num_steps())

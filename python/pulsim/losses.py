@@ -1408,7 +1408,7 @@ def _switch_switching_loss(closed_trace: np.ndarray,
             # one of its axes.
             tab = _as_loss_table(table)
             tj_arr = _resolve_tj(tj_spec, times)
-            return float(np.sum(tab(V_blk, I_load, tj_arr[load_k])))
+            return tab.total(V_blk, I_load, tj_arr[load_k])
         if curve is not None:
             # Nonlinear E(I) from the datasheet curve (at V_ref), scaled
             # linearly by the actual blocking voltage.
@@ -1552,6 +1552,18 @@ def _estimate_dominant_frequency(B: np.ndarray,
 # ---------------------------------------------------------------
 # Top-level summary.
 # ---------------------------------------------------------------
+
+def _warn_ideal_skipped(desc) -> None:
+    # An ideal branch-form element (R_on = 0: g_on = inf) has no
+    # conductance law to integrate; its losses are add-branch-form-ideal-switch
+    # task 6.4. Say so instead of dropping the row silently (review M5).
+    if desc.get("params", {}).get("branch_form"):
+        warnings.warn(
+            f"device_loss_summary: '{desc.get('name')}' is an ideal "
+            "branch-form element (R_on = 0); its losses are not computed "
+            "yet and it is left out of the summary (and of the thermal "
+            "summary).", UserWarning, stacklevel=3)
+
 
 def device_loss_summary(
     builder,
@@ -1990,6 +2002,7 @@ def device_loss_summary(
             V_th  = float(params.get("V_th", 0.0))
             V_f   = float(params.get("V_f", 0.0))
             if not (np.isfinite(g_on) and np.isfinite(g_off)):
+                _warn_ideal_skipped(desc)
                 switch_seq_idx += 1
                 continue
             from_id, to_id = desc.get("nodes", (None, None))
@@ -2084,6 +2097,7 @@ def device_loss_summary(
             g_on  = float(params.get("g_on", float("nan")))
             g_off = float(params.get("g_off", float("nan")))
             if not (np.isfinite(g_on) and np.isfinite(g_off)):
+                _warn_ideal_skipped(desc)
                 switch_seq_idx += 1
                 continue
             sw_bit = switch_bits.get(int(bid), switch_seq_idx)

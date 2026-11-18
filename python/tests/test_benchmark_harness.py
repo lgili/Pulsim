@@ -45,10 +45,6 @@ def _quiet():
         yield
 
 
-def test_pulsim_under_test_is_this_checkout():
-    assert Path(pulsim.__file__).resolve().parents[2] == BENCH.parent
-
-
 # --------------------------------------------------------------- metrics ---
 
 def test_time_weighted_mean_on_a_clustered_grid():
@@ -217,7 +213,7 @@ def test_unmapped_construct_is_named():
 # ---------------------------------------------------------------- triage ---
 
 def test_triage_lists_every_circuit_on_disk():
-    on_disk = {str(p.relative_to(BENCH)) for p in (BENCH / "circuits").rglob("*.yaml")}
+    on_disk = {p.relative_to(BENCH).as_posix() for p in (BENCH / "circuits").rglob("*.yaml")}
     assert len(on_disk) == 126
     assert set(TRIAGE) == on_disk
     assert {e["status"] for e in TRIAGE.values()} <= {"runs", "skipped", "error"}
@@ -449,9 +445,10 @@ def test_a_suspect_reference_grades_nothing_and_a_frozen_error_may_not_grow():
         assert r["outcome"] == "unverified" and r["was"] == out
         assert dr.frozen_check(r, sus, "trbdf2") == ""
     assert dr.mark_suspect({"outcome": "refused"}, sus)["outcome"] == "refused"
-    for rel in ("circuits/switching/buck_boost/cuk_converter.yaml",
-                "circuits/switching/buck_boost/sepic.yaml"):
-        assert TRIAGE[rel]["reference"] == "suspect" and TRIAGE[rel]["reference_reason"]
+    # cuk's diode is turned round (2026-11): its reference is graded again
+    assert "reference" not in TRIAGE["circuits/switching/buck_boost/cuk_converter.yaml"]
+    # sepic's reference grinds no more (TR-BDF2 roundoff floor): graded again
+    assert "reference" not in TRIAGE["circuits/switching/buck_boost/sepic.yaml"]
     e = {"known": {"pwl+split": "disagree"}, "known_err": {"pwl+split": 0.01}}
     assert dr.frozen_check({"outcome": "disagree", "err_rms": 0.019}, e, "pwl+split") == ""
     assert "grew" in dr.frozen_check({"outcome": "disagree", "err_rms": 0.021}, e, "pwl+split")

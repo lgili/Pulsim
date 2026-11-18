@@ -117,7 +117,7 @@ def main() -> None:
     p_inst = p.instantaneous_power_3phase(va, vb, vc,
                                               iL_a, iL_b, iL_c)
 
-    print(f"\n  Sequence analysis (steady state, 50 Hz fundamental):")
+    print("\n  Sequence analysis (steady state, 50 Hz fundamental):")
     print(f"    |V_p|   = {abs(Vp):>7.1f} V  (line-to-neutral peak; "
           f"target {V_RMS*np.sqrt(2):.1f})")
     print(f"    |V_n|   = {abs(Vn):>7.2f} V")
@@ -128,11 +128,12 @@ def main() -> None:
           f"unbalance — symmetric rectifier ≈ 0)")
     # Window means are time-weighted (p.time_average): correct on any
     # grid, unlike a plain mean over the samples of a variable-step run.
-    print(f"\n  DC bus:")
+    print("\n  DC bus:")
     print(f"    V_dc mean (after 40 ms): "
           f"{p.time_average(times, v_dc, t_from=40e-3):.1f} V  "
-          f"(target ≈ V_LL_peak·1.35 ≈ "
-          f"{V_RMS*np.sqrt(2)*np.sqrt(3)*1.35/np.sqrt(2):.0f})")
+          f"(peak-charged C: below V_LL_peak = {V_RMS*np.sqrt(6):.0f} V by part "
+          f"of the ripple; 1.35·V_LL_rms = {V_RMS*np.sqrt(3)*1.35:.0f} V is the "
+          f"unfiltered average)")
     print(f"    V_dc ripple (40-80 ms): "
           f"{v_dc[times > 40e-3].max() - v_dc[times > 40e-3].min():.1f} V")
     print(f"    P_grid mean (40-80 ms): {p.time_average(times, p_inst, t_from=40e-3):.1f} W")

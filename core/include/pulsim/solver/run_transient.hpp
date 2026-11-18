@@ -61,6 +61,8 @@
 #include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
+#include "pulsim/pwl/branch_structure.hpp"
+#include "pulsim/pwl/reinit.hpp"
 
 #include <algorithm>
 #include <array>
@@ -653,6 +655,106 @@ inline SimulationResult run_transient(
     const auto diode_owned = diodes.diode_owned_bits();
     const bool has_diodes = diodes.num_diodes() > 0;
 
+    // add-branch-form-ideal-switch D3: the per-mode structural pass, run
+    // once per mode before its first solve (inactive, and free, without
+    // an ideal branch-form element).
+    pwl::BranchStructureChecker structure{graph, pool, "pwl"};
+    // Ideal diodes turned OFF this step because they closed a stiff loop.
+    std::vector<Index> loop_released;
+    std::vector<bool> loop_bits;
+    // Returns true when it turned loop-closing ideal diodes OFF: the
+    // caller re-forms the mask and checks again.
+    auto check_mode = [&](const topology::SwitchStateMask& m, bool dynamic,
+                          Real at_t) -> bool {
+        const auto& ms = structure.check(m, dynamic);
+        result.mode_structure_checks = structure.checks_run();
+        if (!ms.loop_diodes.empty()) {
+            // A diode across a loop of sources and closed ideal elements
+            // conducts an undefined current; OFF is its only consistent
+            // state when the loop reverse-biases it (the turn-on edge of
+            // a CCM buck: switch ON while the freewheeling diode still
+            // conducts). If the diode law turns it back ON within the
+            // same step the loop forward-biases it: refuse.
+            Index b = ms.loop_diodes.front();
+            bool again = false;
+            for (const Index d : ms.loop_diodes) {
+                if (std::find(loop_released.begin(), loop_released.end(), d) !=
+                    loop_released.end()) {
+                    b = d;
+                    again = true;
+                    break;
+                }
+            }
+            if (!dynamic || again) {
+                throw UnsupportedError(
+                    "pwl", "ideal_voltage_loop",
+                    std::string(graph.branch_name(b)), "Diode",
+                    std::format(
+                        "engine 'pwl': at t = {} the ideal diode '{}' (R_on = "
+                        "0) closes a loop of voltage sources and closed ideal "
+                        "elements in mode {}{}: its current is undefined. Give "
+                        "it R_on > 0.",
+                        at_t, graph.branch_name(b), m.to_string(),
+                        again ? ", and the loop forward-biases it (turned OFF,"
+                                " it turned back ON)" : ""));
+            }
+            diodes.snapshot_on_bits_into(loop_bits);
+            const auto ents = diodes.entries();
+            for (const Index d : ms.loop_diodes) {
+                loop_released.push_back(d);
+                for (Size q = 0; q < ents.size(); ++q) {
+                    if (ents[q].branch_id == d) loop_bits[q] = false;
+                }
+            }
+            diodes.restore_on_bits(loop_bits);
+            ++result.ideal_loop_releases;
+            return true;
+        }
+        return false;
+    };
+    // D4: the SDIRK x3 restart realises the projection onto a dependent
+    // mode; without the rule the trapezoid rings (+-397 V). Decided on the
+    // COMMITTED mode: an event-iteration iterate may pass through one
+    // (CCM buck: switch off, diode not yet on; review M6).
+    // `in_dependent_mode` and the record live in pwl/reinit.hpp (shared
+    // with engine='trbdf2').
+    auto in_dependent_mode = [&](const pwl::DependentStructure& d,
+                                 const Vector& xs) {
+        return pwl::in_dependent_mode(graph, pool, d, xs);
+    };
+    auto refuse_dependent = [&](const pwl::ModeStructure& ms,
+                                const topology::SwitchStateMask& m, Real at_t) {
+        if (opts.discontinuity_restart) return;
+        const auto it = std::find_if(
+            ms.dependent.begin(), ms.dependent.end(),
+            [&](const pwl::DependentStructure& d) { return in_dependent_mode(d, x); });
+        if (it == ms.dependent.end()) return;
+        const auto& d = *it;
+        const Index el = d.elements.front();
+        std::string states;
+        for (Index b : d.states) {
+            if (!states.empty()) states += ", ";
+            states += graph.branch_name(b);
+        }
+        throw UnsupportedError(
+            "pwl", "dependent_states", std::string(graph.branch_name(el)),
+            std::string(pwl::stored_kind_name(pool.kind_of(el))),
+            std::format(
+                "engine 'pwl': at t = {} the mode {} makes {} dependent "
+                "(a {} through the ideal element '{}'): its re-initialisation "
+                "is the SDIRK x3 restart, so pass discontinuity_restart=True, "
+                "or give '{}' {} > 0.",
+                at_t, m.to_string(),
+                states,
+                d.kind == pwl::DependentStructure::Kind::CutSet
+                    ? "cut-set of inductors" : "loop of capacitors",
+                graph.branch_name(el), graph.branch_name(el),
+                d.kind == pwl::DependentStructure::Kind::CutSet ? "g_off"
+                                                                : "R_on"));
+    };
+    // D4 records: the last committed mask and each branch's mask bit.
+    pwl::ReinitTracker reinit{graph, pool, structure.active()};
+
     // ---- DC operating-point pre-charge (Layer 5 V3) ------------------
     //
     // When the user requests `start_from_dc_op = true`, compute
@@ -694,10 +796,27 @@ inline SimulationResult run_transient(
         dc_opts.enable_line_search = opts.enable_newton_line_search;
         dc_opts.enable_lm          = opts.enable_newton_lm;
 
-        auto dc = pwl::compute_dc_operating_point(
-            graph, pool, switch_fn(opts.t_start), nl_static,
-            dc_opts, has_diodes ? &diodes : nullptr,
-            "run_transient(start_from_dc_op)");
+        // The DC mode is the one the DC diode iteration converges to; the
+        // start mask (diodes OFF) can be a false floating island (review
+        // L2). On a failed solve the start mask's check names the cause.
+        const auto dc_start_mask = has_diodes
+            ? combine_masks(switch_fn(opts.t_start),
+                            diodes.current_diode_mask(), diode_owned)
+            : switch_fn(opts.t_start);
+        auto dc = [&] {
+            try {
+                return pwl::compute_dc_operating_point(
+                    graph, pool, switch_fn(opts.t_start), nl_static,
+                    dc_opts, has_diodes ? &diodes : nullptr,
+                    "run_transient(start_from_dc_op)", "pwl");
+            } catch (const std::runtime_error&) {
+                if (structure.active()) {
+                    (void)check_mode(dc_start_mask, false, opts.t_start);
+                }
+                throw;
+            }
+        }();
+        if (structure.active()) (void)check_mode(dc.mask, false, opts.t_start);
         x = std::move(dc.x);
         history.seed_from_dc_op(x);
         initial_mask = dc.mask;
@@ -1079,6 +1198,10 @@ inline SimulationResult run_transient(
         const Real restart_dt = Real{2} * (kGamma * opts.dt);
         Size restart_factorizations = 0;
 
+        pwl::NewtonRoundoffAcceptance newton_roundoff_run;
+        newton_roundoff_run.enabled = true;
+        newton_roundoff_run.max_consecutive = opts.newton_roundoff_budget;
+
         // ---- add-fixed-step-resolution-diagnostics (read-only) ----
         // Truncation: e = (h/12)|f_{k+1} − 2f_k + f_{k−1}| per linear
         // C/L (f = i/C, v/L from the committed companion), over the
@@ -1161,6 +1284,9 @@ inline SimulationResult run_transient(
                 // schedule: its oracle answer is stale (review M3).
                 edge_from = std::numeric_limits<Real>::infinity();
                 edge_next = -std::numeric_limits<Real>::infinity();
+                // ... and so may its declared b_extra_fn jumps (review L6).
+                bj_from = std::numeric_limits<Real>::infinity();
+                bj_next = -std::numeric_limits<Real>::infinity();
             }
             gate_memo_n = 0;
             // ---- add-fixed-step-event-splitting: the step's events ----
@@ -1281,7 +1407,12 @@ inline SimulationResult run_transient(
             if (split && !next_edge_fn) {
                 // An opaque switch_fn: a gate change between two grid
                 // samples was not located (review M3).
-                if (have_prev_gate && !(mask_pre == prev_gate)) {
+                // Counted only when the change happened INSIDE the
+                // previous step (the gate at t_prev - snap is already the
+                // new mask); an edge exactly on the grid point t_prev was
+                // taken where it is (review L4).
+                if (have_prev_gate && !(mask_pre == prev_gate) &&
+                    gate_at(t_prev - snap) == mask_pre) {
                     ++result.unlocated_gate_steps;
                 }
                 prev_gate = mask_pre;
@@ -1323,8 +1454,8 @@ inline SimulationResult run_transient(
             // add-newton-roundoff-acceptance: a dynamic-path Newton
             // solve that exhausts its budget at row roundoff is
             // accepted and counted (DC and static paths: never).
-            pwl::NewtonRoundoffAcceptance newton_roundoff;
-            newton_roundoff.enabled = true;
+            // One object for the run: its counters are the run budget.
+            pwl::NewtonRoundoffAcceptance& newton_roundoff = newton_roundoff_run;
             auto note_roundoff = [&]() {
                 if (!newton_roundoff.accepted) return;
                 ++result.newton_roundoff_accepts;
@@ -1377,6 +1508,7 @@ inline SimulationResult run_transient(
             // restored on breach so x and the diode state agree
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
+            loop_released.clear();
             do {
                 auto mask = gate_at(restart_rule ? gate_t : at_t);
                 if (has_diodes) {
@@ -1384,6 +1516,34 @@ inline SimulationResult run_transient(
                         diodes.current_diode_mask();
                     mask = combine_masks(mask, diode_mask,
                                           diode_owned);
+                }
+                bool released = false;
+                while (structure.active() && check_mode(mask, true, at_t)) {
+                    released = true;
+                    mask = combine_masks(gate_at(restart_rule ? gate_t : at_t),
+                                         diodes.current_diode_mask(),
+                                         diode_owned);
+                }
+                // A release back onto a mask already solved this step is the
+                // loop forward-biasing the diode: refuse rather than let the
+                // cycle detector turn it into a breach (review H1).
+                if (released && !nl_refresh_effective &&
+                    std::find(masks_seen.begin(),
+                              masks_seen.begin() +
+                                  static_cast<std::ptrdiff_t>(n_masks_seen),
+                              mask) != masks_seen.begin() +
+                                  static_cast<std::ptrdiff_t>(n_masks_seen)) {
+                    const Index d = loop_released.back();
+                    throw UnsupportedError(
+                        "pwl", "ideal_voltage_loop",
+                        std::string(graph.branch_name(d)), "Diode",
+                        std::format(
+                            "engine 'pwl': at t = {} the ideal diode '{}' (R_on "
+                            "= 0) closes a loop of voltage sources and closed "
+                            "ideal elements that forward-biases it (turned OFF, "
+                            "it turned back ON): its current is undefined. Give "
+                            "it R_on > 0.",
+                            at_t, graph.branch_name(d)));
                 }
                 // Phase-0 fix #9: a repeated mask within one step's
                 // event iteration is a CYCLE (mask A -> B -> A ...,
@@ -1447,7 +1607,9 @@ inline SimulationResult run_transient(
                     // `solve_at` delegates to `solve` bit-identically
                     // when the dt matches, so the nominal path costs
                     // nothing extra.
-                    if (restart_rule && for_dt == restart_dt) {
+                    // Every restart stage counts, the split's sub-interval
+                    // stages (dt_eq = 2γ·h_sub) included (review L8b).
+                    if (restart_rule && (for_dt == restart_dt || backward_euler)) {
                         const auto m0 = cache.metrics();
                         cache.solve_at(mask, for_dt, b_extra, x);
                         const auto m1 = cache.metrics();
@@ -1657,6 +1819,8 @@ inline SimulationResult run_transient(
                         run_event_iteration(t_from + h, Real{2} * h_b, true);
                         diodes.snapshot_on_bits_into(rs_bits_be);
                         keep_be = rs_bits_be == rs_bits;
+                    } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                        throw;   // a run budget: never swallowed by a retry
                     } catch (const std::runtime_error&) {
                         ++result.stage2_retry_failures;
                     }
@@ -1748,16 +1912,12 @@ inline SimulationResult run_transient(
                             for (Size j = 0; j < ents.size(); ++j) {
                                 const auto& e = ents[j];
                                 const bool on = diodes_snap[j];
-                                const Real v1 =
-                                    stamping::read_node_voltage(x_first, e.from) -
-                                    stamping::read_node_voltage(x_first, e.to);
+                                const Real v1 = e.law_voltage(x_first, on);
                                 if (models::SwitchedDiode::decide(
                                         on, v1, e.params()) == on) {
                                     continue;
                                 }
-                                const Real v0 =
-                                    stamping::read_node_voltage(x_prev, e.from) -
-                                    stamping::read_node_voltage(x_prev, e.to);
+                                const Real v0 = e.law_voltage(x_prev, on);
                                 // Already on the far side at the start:
                                 // the crossing is at a (the rule alone).
                                 cross_scratch[j] =
@@ -1887,6 +2047,8 @@ inline SimulationResult run_transient(
                     committed_be = true;
                 }
                 }   // !split
+            } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                throw;   // a run budget: never retried at a smaller dt
             } catch (const std::runtime_error& nominal_failed) {
                 // NOTE the narrow catch. Everything the solver throws
                 // is a runtime_error; a foreign exception is not.
@@ -1960,6 +2122,8 @@ inline SimulationResult run_transient(
                             } else {
                                 run_event_iteration(t_sub, sub_dt);
                             }
+                        } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                            throw;   // a run budget: never retried at a smaller dt
                         } catch (const std::runtime_error& sub_failed) {
                             why = sub_failed.what();
                             all_ok = false;
@@ -2382,6 +2546,20 @@ inline SimulationResult run_transient(
                     rd_since_store = 0;
                 }
             }
+            // add-branch-form-ideal-switch D4 (task 5.1): a dependent mode
+            // entered this step was re-initialised by the SDIRK x3 restart;
+            // record the explicit projection from the step's start state.
+            // shortcut: x- is the state at the step start (with the event
+            // split, not the split instant); the record's t is t_prev.
+            if (structure.active()) {
+                const auto& now = structure.check(stamped_mask, true);
+                refuse_dependent(now, stamped_mask, t_prev);
+                reinit.record(structure, stamped_mask, x_prev, x, t_prev,
+                              k % opts.store_every == 0
+                                  ? static_cast<long>(result.times.size()) - 1
+                                  : -1L,
+                              opts.on_impulse_error, "pwl", result);
+            }
         }
         if (diag && rd_steps > 0) {
             rd.unestimated_fraction =
@@ -2617,6 +2795,10 @@ inline SimulationResult run_transient(
     }
     catch (const SimulationAborted&) {
         throw;                       // already carries its payload
+    }
+    catch (const pwl::NewtonRoundoffBudgetExceeded& e) {
+        throw SimulationAborted(e.what(), std::move(result), t_reached,
+                                /*roundoff_budget=*/true);
     }
     catch (const std::runtime_error& e) {
         // Narrow on purpose — see the note at the dt-retry above.

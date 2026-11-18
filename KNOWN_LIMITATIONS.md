@@ -271,6 +271,36 @@ refuse the same way, with `feature` set to the keyword. Controllers
 (`closed_loops`, `step_observer`) run on `pwl` and `trbdf2` only; `dsed`
 refuses them.
 
+### Ideal switch (branch form): opt-in, first slice
+
+`add_ideal_switch` / `add_diode(form='branch')` solve the switch current
+as an unknown, so `R_on = 0` and `g_off = 0` are representable. This
+slice runs the switch and the diode on `pwl` and `trbdf2`
+(`docs/known-limitations.md`, branch-form table); other engines refuse
+with `feature='branch_form'`. A mode that makes a state dependent (an
+inductor opened by an ideal switch with `g_off = 0`, two capacitors
+paralleled through `R_on = 0`) runs on `pwl` with
+`discontinuity_restart=True` and on `trbdf2` (re-initialised by three
+SDIRK(2,2) steps and recorded in `res.reinit_records`, the same record
+on both); on `pwl` without the rule it is refused with
+`feature='dependent_states'`, as on `trbdf2` with a stateful device
+history (Coss, Lauritzen, IGBT tail, PMSM, saturable inductor). On
+`trbdf2` no diode crossing is located inside the re-initialisation step
+itself (a diode left on its forbidden side is re-decided at the next
+step's start; one that crosses and returns inside it is missed). The
+re-initialisation step's size is the controller's previous proposal,
+not error-controlled for the dependent states. The record takes
+`d = K·x(t+h)`, so on `trbdf2` (h is the controller's step, not the
+user's dt) Λ and ΔW also contain the source motion over that step when
+the cut-set or loop holds a time-varying source. Both engines project
+with a diagonal M (coupled windings in a cut-set are not handled). The
+round-off floor of the error estimate is off on SDIRK steps, so it does
+not apply to the three re-initialisation steps;
+an island bounded only by open ideal elements (OFF ideal diodes
+included: the gauge of D3 is not implemented) with `floating_node`; a
+loop of closed ideal elements and voltage sources with
+`ideal_voltage_loop`, with the same four fields on both engines.
+
 ### Fixed engine: first order after a discontinuity (by default)
 
 `engine='pwl'` keeps the trapezoidal derivative across a gate edge, a
@@ -432,37 +462,6 @@ late by less than `dt` (`simulate` warns; `result.control_tick_jitter_max`
 records the largest lateness); `T < dt` is refused. `trbdf2` lands every
 tick exactly. Pick `dt = T/n` for an exact fixed-step cadence.
 
-### TR-BDF2 stalls at `h_min` after a hard switching edge
-
-With a Newton device in the circuit (a saturable transformer, a
-saturable inductor, a smooth junction), `engine='trbdf2'` — and
-`engine='auto'` when it routes there — can abort right after a hard
-switching edge with `Newton failed at t = ... with h already at
-h_min`. Both Newton norms are at their noise floor; the worst residual
-sits on a LINEAR inductor row scaled by `2L/h`. Reproducer: the
-snubbed flyback in
-`python/tests/test_saturable_transformer.py::test_engines_agree_below_saturation`
-(strict xfail), characterised in
-`python/tests/test_newton_stall_and_mask_chatter.py`.
-
-**Do not loosen `tol_newton_dx` / `tol_newton_res` to get past it.**
-That flyback, re-run with `tol_newton_dx=1e-5, tol_newton_res=1e-4`,
-completes and reports V_out = 3.53 V; the fixed engine
-(`engine='pwl', dt=1e-8`) gives 15.31 V. The absolute step test is
-load-bearing: making it scale-aware lets the DC cascade stop at a
-spurious root 10.67 V away (CHANGELOG 2.0.0, *Two engine defects
-characterised, and one tempting fix refuted*).
-
-**Workaround.** Run the circuit on `engine='pwl'` with an explicit
-`dt`. **Fix.** Needs the step controller not to drive `h` to `h_min`
-after an event landing, or a row-equilibrated Jacobian — not a
-tolerance change.
-
-A saturable inductor used as a buck's own inductor loses its whole
-current at a turn-off edge on TR-BDF2 (`v_sw` = 2.6e7 V; comment above
-`_gated_buck` in `test_trbdf2_stateful_with_diodes.py`; a fix is in
-progress). Use `engine='pwl'` with a `dt`.
-
 ### TR-BDF2 still refactors on every new step size
 
 `engine='trbdf2'` solves through one event solver per switch state.
@@ -531,39 +530,63 @@ from control blocks other than PI → PWM (`hysteresis`, `integrator`,
 `limiter`, `lookup_table`, `gain`, `pid_controller`, `rate_limiter`,
 `sample_hold`), four PLL / dq circuits, a p-channel MOSFET, the v1
 saturable-inductor law, and a MOSFET with a loss/thermal block. Failing
-on `pwl` (3): `buck_igbt` (Newton does not converge),
-`ll05_diode_rectifier_filter` (no consistent DC diode configuration),
-`ll13_active_clamp_forward` (no DC operating point).
-`ll16_flyback_closed_loop` completes since the Newton roundoff
-acceptance, through 1,645 roundoff accepts with a diverged state
-(I(Lm_core) ≈ 2.4e13 A from t = 0); a fix that makes it loud again is in
-progress.
+on `pwl` (2): `buck_igbt` (Newton does not converge),
+`ll05_diode_rectifier_filter` (no consistent DC diode configuration).
+`ll13_active_clamp_forward` and `ll16_flyback_closed_loop` have no DC
+operating point: Vin, Lleak_prim and Lm_core form a source-inductor
+loop. The DC solve refuses it by name (`UnsupportedError`, feature
+`dc_operating_point`) and the v1 reader starts both from zero state,
+with a warning. ll16 is not a flyback as written (Lm_core and Lsec are
+uncoupled): I(Lm_core) ramps to 604 A and the secondary is dead.
 The differential matrix (strict gate: every observable, every interval)
 records its `disagree` / `error` cells as `known:` per configuration in
 `benchmarks/manifests/v2_triage.yaml` (counts in
 `benchmarks/REFERENCE_STATUS.md`). Each is an open finding, not a
-tolerance. Two circuits have no valid reference and are `unverified`
-on every engine (`reference: suspect`): `sepic`, whose trbdf2 reference
-grinds to `max_steps` (an open TR-BDF2 regression), and `cuk_converter`:
+tolerance. No circuit is `unverified` any more. (`sepic` carried a
+`reference: suspect` mark while its trbdf2 reference ground to
+`max_steps`; that grind is fixed and the reference gives pwl 1.9e-3 and
+trbdf2 3.0e-5, both agree; dsed is a frozen `error`. `cuk_converter`
+carried it because its diode was reversed; see below.)
 
-**`cuk_converter` is ill-posed as written; its reference is marked
-suspect.** `Drect` is reversed: the file (and its ngspice deck) put the
-anode at ground and the cathode at `mid`, so the diode conducts while S1
-is ON and blocks the freewheel path while S1 is OFF. With S1 and Drect
-both OFF, L1's current (through `Ccpl`) and L2's current meet at `mid`
-with only Drect's `g_off` = 1e-6 S between them: an inductor cut-set,
-so `mid` reaches 2.6e4-3.5e6 V. The trbdf2 rtol 1e-8 reference accepts
-3,163 steps at `h_min` above tolerance and ends V(out) at +11.92 V; pwl
-does not converge with dt (0.233 / 0.232 / 0.226). With the diode turned
-round (`nodes: [mid, 0]`) both engines agree (V(out) over 1.5-2 ms:
--17.4951 V trbdf2 rtol 1e-8, -17.4971 V pwl; `|mid|` <= 39.1 V), though
-that trbdf2 run forces 748,763 accepts, so it is not yet a clean reference.
-Reproducer (from `benchmarks/tools`): `v1_reader.load('../circuits/switching/buck_boost/cuk_converter.yaml').run('trbdf2', rtol=1e-8, atol=1e-12)`,
-then `max |v(mid)|` (3.55e6 V) and `result._trbdf2_stats['n_forced_accepts']` (3163). The manifest marks the reference `suspect`
-(every cell `unverified`); the netlist is kept as the v1 file wrote it.
+**`cuk_converter` runs in DCM: −17.5 V, not −12 V.** Until 2026-11 the
+file and its ngspice deck had `Drect` reversed (anode at ground), so with
+S1 and Drect both OFF the two inductor currents met at `mid` through
+`g_off` = 1e-6 S (`mid` at 2.6e4-3.5e6 V). The diode now has its anode at
+`mid`. The output is not the CCM value: D = 0.49 (dead time),
+K = 2·(L1‖L2)/(R·T) = 2·23.5 µH/(20 Ω·20 µs) = 0.1175 < (1−D)² = 0.26,
+so the converter is in DCM and V_out = −V_in·D/√K = −17.15 V in steady
+state (CCM would give −V_in·D/(1−D) = −11.5 V). The 2 ms run has not
+settled: V(out) over 1.5-2 ms is −17.4951 V (trbdf2 rtol 1e-8) and
+−17.4971 V (pwl). Every configuration agrees with the trbdf2 reference
+(pwl 8.5e-4, pwl+restart 7.8e-6, pwl+split 6.2e-6, trbdf2 9.3e-5); the
+reference takes 18,192 steps with 15 forced accepts. dsed is a frozen
+`error`: "diode configuration did not settle" at t = 3.3e-4 s.
 
 Circuits whose v1 file has no `uic: true`
 start from the DC operating point, which `dsed` cannot take (refused).
+
+### TR-BDF2 on a bridge whose DC side floats on a tie resistor
+
+`engine='trbdf2'` on a diode bridge whose DC bus is referenced only by a
+1 MΩ tie still depends on rounding. Under a 1e-15 relative perturbation
+of the element values (20 runs) the run always finishes, but takes
+1231-1254 steps and 7-10 diode events, and the 30-40 ms bus average is
+311.155 to 311.341 V (pwl at dt 1e-6 and 2.5e-7: 311.344 V). A few
+picosecond samples right after a turn-off at the source zero crossing
+show an OFF diode 0.6 V forward (the L·g_off ringing of the line
+inductor). The two
+diodes of a half-cycle turn off at the same current zero (a tie), and
+through the OFF interval the floating rail is set by nano-amp g_off
+leakage whose sign flips at the source's zero crossings. The bus
+differential (dp − dn) of the unperturbed run is within 9e-4 V of pwl;
+the common mode is not. The branch-form bridge (`form='branch'`) takes
+8-12 diode events over the same 20 runs and its bus average is
+311.1547 V in every run. The engines do not agree on the answer either:
+dsed / exact give 311.3167 V and pwl 311.3439 V (it chatters the series
+pair every dt at 4.66 ms); the round-off of the floating rail's common
+mode is the mechanism (`DECISIONS #19` of add-branch-form-ideal-switch).
+A real bridge has a defined reference (Y capacitors, a grounded rail):
+give the model one.
 
 ### First stored sample of algebraic nodes
 

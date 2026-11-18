@@ -36,6 +36,7 @@
 #include "pulsim/blockchain/blocks.hpp"
 #include "pulsim/blockchain/block_adapters.hpp"
 #include "pulsim/blockchain/chain.hpp"
+#include "pulsim/blockchain/ported_blocks.hpp"
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/mmc/arm.hpp"
 #include "pulsim/motors/mechanical.hpp"
@@ -46,6 +47,7 @@
 #include "pulsim/observers/sensorless.hpp"
 #include "pulsim/solver/bdf1.hpp"
 #include "pulsim/switchgear/switchgear_adapters.hpp"
+#include "pulsim/thermal/loss_table.hpp"
 #include "pulsim/thermal/thermal_adapters.hpp"
 #include "pulsim/models/ideal_diode.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -85,6 +87,28 @@ namespace py = pybind11;
 using namespace pybind11::literals;  // for "name"_a kwarg shorthand
 
 namespace pulsim_kernel_bindings {
+
+/// A b_extra_fn argument as (fn, next_jump_after). A control graph's
+/// CxxChainBExtra runs in C++ (no GIL per call); any other callable goes
+/// through pybind's functional caster, its optional next_jump_after too.
+inline void resolve_b_extra(const py::object& obj,
+                            pulsim::solver::BExtraFn& fn,
+                            std::function<pulsim::Real(pulsim::Real)>& next_jump) {
+    if (obj.is_none()) return;
+    if (py::isinstance<pulsim::blockchain::ChainBExtra>(obj)) {
+        const auto& c = obj.cast<const pulsim::blockchain::ChainBExtra&>();
+        fn = c.fn;
+        next_jump = [ch = c.chain](pulsim::Real t) {
+            return ch->next_jump_after(t);
+        };
+        return;
+    }
+    fn = obj.cast<pulsim::solver::BExtraFn>();
+    if (py::hasattr(obj, "next_jump_after")) {
+        next_jump = obj.attr("next_jump_after")
+                        .cast<std::function<pulsim::Real(pulsim::Real)>>();
+    }
+}
 
 /// The static Newton chain for a transient driver. `None` lets the kernel
 /// decide (it builds the standard chain when the pool needs one); `True`
@@ -146,8 +170,19 @@ void init_module(py::module_& m) {
     // The type is created here rather than in Python because the
     // translator has to name it at throw time, and the result object
     // it carries is a pybind-bound C++ type.
+    //
+    // `ConvergenceError` (add-parameter-sensitivities, task 5a) is the
+    // common base of every non-convergence: a RuntimeError, so the
+    // `except RuntimeError` of callers keeps working.
+    static py::object convergence_exc = py::exception<void>(
+        m, "ConvergenceError", PyExc_RuntimeError);
     static py::object aborted_exc = py::exception<void>(
-        m, "SimulationAborted", PyExc_RuntimeError);
+        m, "SimulationAborted", convergence_exc);
+    // The run's Newton roundoff-acceptance budget ran out: a
+    // SimulationAborted (same payload), typed so callers need not parse
+    // the message.
+    static py::object budget_exc = py::exception<void>(
+        m, "NewtonRoundoffBudgetExceeded", aborted_exc.ptr());
     py::register_exception_translator(
         [](std::exception_ptr pe) {
             if (!pe) {
@@ -156,13 +191,15 @@ void init_module(py::module_& m) {
             try {
                 std::rethrow_exception(pe);
             } catch (const solver::SimulationAborted& e) {
-                py::object inst = aborted_exc(e.what());
+                py::object& type =
+                    e.roundoff_budget() ? budget_exc : aborted_exc;
+                py::object inst = type(e.what());
                 // `partial` is a COPY: the C++ exception is destroyed
                 // as the translator returns, so a reference would
                 // dangle the moment the caller touched it.
                 inst.attr("partial") = py::cast(e.partial());
                 inst.attr("t_failed") = py::cast(e.t_failed());
-                PyErr_SetObject(aborted_exc.ptr(), inst.ptr());
+                PyErr_SetObject(type.ptr(), inst.ptr());
             }
         });
 
@@ -209,6 +246,22 @@ void init_module(py::module_& m) {
         "The kernel's device-kind capability table: {kind: {'class': "
         "solve class, 'pwl'|'trbdf2'|'dsed'|'bdf1'|'ac_sweep': bool}}. "
         "An engine marked False refuses the kind with UnsupportedError.");
+    m.def("_branch_form_capabilities",
+        []() {
+            py::dict out;
+            for (const auto& row : pwl::kBranchFormCaps) {
+                py::dict d;
+                for (std::size_t e = 0; e < pwl::kEngineNames.size(); ++e) {
+                    d[py::str(std::string(pwl::kEngineNames[e]))] =
+                        row.supports(static_cast<pwl::Engine>(e));
+                }
+                out[py::str(std::string(row.name))] = d;
+            }
+            return out;
+        },
+        "The branch form's engine column (add-branch-form-ideal-switch): "
+        "{'Switch'|'Diode': {engine: bool}}; False refuses with "
+        "UnsupportedError(feature='branch_form').");
     m.def("_require_supported",
         [](const topology::Graph& graph, const pwl::DevicePool& pool,
            const std::string& engine_in) {
@@ -415,6 +468,35 @@ void init_module(py::module_& m) {
                         "that silently rewires the circuit.")
         .def_readwrite("name_prefix",
                         &pwl::PreflightOptions::name_prefix);
+
+    // ---- add-in-kernel-event-losses group 1: datasheet tables ---------
+    py::class_<thermal::LossTable3D>(m, "LossTable3D",
+        "Switching energy E(v, i, Tj) [J] on a rectilinear grid, read like "
+        "pulsim.LossTable: multilinear, linear extrapolation past the "
+        "edges, clamped at 0. Build it with LossTable.to_kernel().")
+        .def(py::init<std::vector<Real>, std::vector<Real>,
+                      std::vector<Real>, std::vector<Real>>(),
+              py::arg("v_axis"), py::arg("i_axis"), py::arg("tj_axis"),
+              py::arg("energy"),
+              "Strictly ascending axes; energy row-major (v, i, Tj).")
+        .def("__call__", &thermal::LossTable3D::operator(), py::arg("v"),
+              py::arg("i"), py::arg("tj"), "E [J] at one point.")
+        .def_property_readonly("v_axis", &thermal::LossTable3D::v_axis)
+        .def_property_readonly("i_axis", &thermal::LossTable3D::i_axis)
+        .def_property_readonly("tj_axis", &thermal::LossTable3D::tj_axis)
+        .def_property_readonly("energy", &thermal::LossTable3D::energy);
+    py::class_<thermal::ConductionTable>(m, "ConductionTable",
+        "On-state voltage V_on(i, Tj) [V] on a rectilinear grid, read like "
+        "pulsim.LossTable (multilinear, extrapolated, clamped at 0).")
+        .def(py::init<std::vector<Real>, std::vector<Real>,
+                      std::vector<Real>>(),
+              py::arg("i_axis"), py::arg("tj_axis"), py::arg("v_on"),
+              "Strictly ascending axes; v_on row-major (i, Tj).")
+        .def("__call__", &thermal::ConductionTable::operator(), py::arg("i"),
+              py::arg("tj"), "V_on [V] at one point.")
+        .def_property_readonly("i_axis", &thermal::ConductionTable::i_axis)
+        .def_property_readonly("tj_axis", &thermal::ConductionTable::tj_axis)
+        .def_property_readonly("v_on", &thermal::ConductionTable::v_on);
 
     // ---- add-power-mosfet-datasheet-device: charge laws ----------------
     py::class_<models::ChargeTable>(m, "ChargeTable",
@@ -937,7 +1019,8 @@ void init_module(py::module_& m) {
               "Add a linear capacitor. C in farads.\n"
               "Optional `c0` records an initial voltage (V) on the\n"
               "capacitor — consumed by `simulate(initial_state=None)`\n"
-              "to seed the cap's positive-terminal node.")
+              "as the voltage across it, v(n_pos) - v(n_neg); a loop of\n"
+              "c0 values that breaks KVL raises ValueError.")
         .def("add_inductor",
               &builder::CircuitBuilder::add_inductor,
               py::arg("name"), py::arg("n_pos"),
@@ -1057,11 +1140,40 @@ void init_module(py::module_& m) {
               "generated from Ampere's law by sweeping the core field "
               "through M = Ms*tanh(H/H0), with exact slopes.")
         .def("add_diode",
-              &builder::CircuitBuilder::add_diode,
+              [](builder::CircuitBuilder& self, std::string_view name,
+                 std::string_view anode, std::string_view cathode,
+                 std::optional<double> g_on, std::optional<double> g_off,
+                 double V_th, double V_f, std::string_view form,
+                 std::optional<double> R_on) -> builder::CircuitBuilder& {
+                  // add-branch-form-ideal-switch: form='branch' (R_on,
+                  // g_off default 0; a given g_on means R_on = 1/g_on).
+                  if (form == "branch") {
+                      const double r = R_on ? *R_on
+                                     : g_on ? 1.0 / *g_on : 0.0;
+                      return self.add_diode_branch(name, anode, cathode, r,
+                                                   g_off.value_or(0.0), V_th,
+                                                   V_f);
+                  }
+                  if (form != "conductance") {
+                      throw py::value_error(std::format(
+                          "add_diode(\"{}\"): form='{}'; expected "
+                          "'conductance' or 'branch'.", name, form));
+                  }
+                  if (!g_on || !g_off || R_on) {
+                      throw py::value_error(std::format(
+                          "add_diode(\"{}\"): the conductance form takes g_on "
+                          "and g_off (R_on is the branch form's: "
+                          "form='branch').", name));
+                  }
+                  return self.add_diode(name, anode, cathode, *g_on, *g_off,
+                                        V_th, V_f);
+              },
               py::arg("name"), py::arg("anode"),
-              py::arg("cathode"), py::arg("g_on"),
-              py::arg("g_off"), py::arg("V_th") = 0.0,
-              py::arg("V_f") = 0.0,
+              py::arg("cathode"), py::arg("g_on") = py::none(),
+              py::arg("g_off") = py::none(), py::arg("V_th") = 0.0,
+              py::arg("V_f") = 0.0, py::kw_only(),
+              py::arg("form") = "conductance",
+              py::arg("R_on") = py::none(),
               py::return_value_policy::reference,
               "Add a binary switched diode (V2's "
               "SwitchedDiode). g_on/g_off in siemens. "
@@ -1077,6 +1189,15 @@ void init_module(py::module_& m) {
               py::return_value_policy::reference,
               "Add a smooth-blend nonlinear diode "
               "(V3's IdealDiode, AD-driven).")
+        .def("add_ideal_switch",
+              &builder::CircuitBuilder::add_ideal_switch,
+              py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
+              py::arg("R_on") = 0.0, py::arg("g_off") = 0.0,
+              py::return_value_policy::reference,
+              "Add a controlled switch in BRANCH form (its own current "
+              "unknown): R_on >= 0 in series when closed (0 = ideal), "
+              "g_off >= 0 in parallel when open (0 = ideal). Engines and "
+              "refusals: the capability table (add-branch-form-ideal-switch).")
         .def("add_switch",
               &builder::CircuitBuilder::add_switch,
               py::arg("name"), py::arg("n_pos"),
@@ -1316,6 +1437,10 @@ void init_module(py::module_& m) {
                               kind_str = "switch";
                               params["g_on"]  = pool.switch_g_on(bid);
                               params["g_off"] = pool.switch_g_off(bid);
+                              if (pool.is_branch_form(bid)) {
+                                  params["R_on"] = pool.branch_R_on(bid);
+                                  params["branch_form"] = 1;
+                              }
                               break;
                           }
                           case K::Capacitor: {
@@ -1339,6 +1464,10 @@ void init_module(py::module_& m) {
                               params["g_off"] = p.g_off;
                               params["V_th"]  = p.V_th;
                               params["V_f"]   = p.V_f;
+                              if (pool.is_branch_form(bid)) {
+                                  params["R_on"] = pool.branch_R_on(bid);
+                                  params["branch_form"] = 1;
+                              }
                               break;
                           }
                           case K::NonlinearDiode: {
@@ -1778,6 +1907,12 @@ void init_module(py::module_& m) {
               "(or saturable inductor) branch's i_L unknown. "
               "Throws if `branch_id` is not registered as an "
               "inductor.")
+        .def("branch_var_id_for_switch",
+              &pwl::DevicePool::branch_var_id_for_switch,
+              py::arg("branch_id"), py::arg("graph"),
+              "State-vector index of a branch-form switch or diode's "
+              "current unknown i_s, or -1 for the conductance form "
+              "(add-branch-form-ideal-switch).")
         .def("branch_var_id_for_source",
               &pwl::DevicePool::branch_var_id_for_source,
               py::arg("branch_id"), py::arg("graph"),
@@ -2237,6 +2372,10 @@ void init_module(py::module_& m) {
                         &SimulationOptions::enable_newton_line_search)
         .def_readwrite("enable_newton_lm",
                         &SimulationOptions::enable_newton_lm)
+        .def_readwrite("newton_roundoff_budget",
+                        &SimulationOptions::newton_roundoff_budget,
+                        "Most consecutive Newton solves accepted at roundoff "
+                        "before NewtonRoundoffBudgetExceeded (default 130).")
         .def_readwrite("enable_substep_state_correction",
                         &SimulationOptions::enable_substep_state_correction)
         .def_readwrite("resolution_diagnostics",
@@ -2244,6 +2383,11 @@ void init_module(py::module_& m) {
                         "Record SimulationResult.resolution (truncation "
                         "estimate + ringing detector) on the pwl engine. "
                         "Read-only: states are bit-identical either way.")
+        .def_readwrite("on_impulse_error",
+                        &SimulationOptions::on_impulse_error,
+                        "add-branch-form-ideal-switch: refuse the run at the "
+                        "first impulsive re-initialisation (simulate("
+                        "on_impulse='error')) instead of recording it.")
         .def_readwrite("discontinuity_restart",
                         &SimulationOptions::discontinuity_restart,
                         "Fixed engine: take the step after a discontinuity "
@@ -2424,6 +2568,21 @@ void init_module(py::module_& m) {
         .def_readonly("cycle_detected",
                        &solver::EventIterationBreach::cycle_detected);
 
+    py::class_<ReinitRecord>(m, "ReinitRecord",
+        "One impulsive re-initialisation (add-branch-form-ideal-switch "
+        "D4): kind 'cut_set' (lambda = flux, V*s) or 'capacitor_loop' "
+        "(lambda = charge, C); dW the energy removed [J]; sample the "
+        "stored sample of the step that carried the pulse (-1: not "
+        "stored).")
+        .def_readonly("t", &ReinitRecord::t)
+        .def_readonly("kind", &ReinitRecord::kind)
+        .def_readonly("devices", &ReinitRecord::devices)
+        .def_readonly("states", &ReinitRecord::states)
+        .def_readonly("lambda_", &ReinitRecord::lambda)
+        .def_readonly("dW", &ReinitRecord::dW)
+        .def_readonly("projection_gap", &ReinitRecord::projection_gap)
+        .def_readonly("sample", &ReinitRecord::sample);
+
     py::class_<CommutationEvent>(m, "CommutationEvent",
         "Sub-step commutation timing event (V2.2 + V3).")
         .def_readonly("t_estimated",
@@ -2519,6 +2678,8 @@ void init_module(py::module_& m) {
                 d["stage2_retry_failures"] = r.stage2_retry_failures;
                 d["unlocated_gate_steps"] = r.unlocated_gate_steps;
                 d["split_event_overflows"] = r.split_event_overflows;
+                d["mode_structure_checks"] = r.mode_structure_checks;
+                d["ideal_loop_releases"] = r.ideal_loop_releases;
                 return d;
             },
             "Fixed-step loop counters (pwl engine; 0 elsewhere): "
@@ -2658,6 +2819,10 @@ void init_module(py::module_& m) {
             "Bytes held by the stamped-mask record.")
         .def_readonly("commutation_events",
                        &SimulationResult::commutation_events)
+        .def_readonly("reinit_records",
+                       &SimulationResult::reinit_records,
+                       "Impulsive re-initialisations of dependent modes "
+                       "(add-branch-form-ideal-switch D4).")
         .def_readonly("inductor_guard_actions",
                        &SimulationResult::inductor_guard_actions,
                        "Inductors whose current a post-solve guard "
@@ -2673,7 +2838,10 @@ void init_module(py::module_& m) {
                        &SimulationResult::n_restart_factorizations,
                        "Factorisations made for the restart stages: one "
                        "per mask at 2*gamma*dt (more only if the segment "
-                       "byte budget evicts). 0 with the rule off.")
+                       "byte budget evicts), plus every refactor for a "
+                       "restart stage of another size (event-split "
+                       "sub-intervals, the stage-2 re-try). 0 with the "
+                       "rule off.")
         .def_readonly("n_split_steps", &SimulationResult::n_split_steps,
                        "Steps split at a gate edge, source jump or diode "
                        "crossing inside them "
@@ -3281,14 +3449,7 @@ void init_module(py::module_& m) {
             // then restarts on them and reads their left limit.
             BExtraFn b_extra_fn;
             std::function<Real(Real)> b_extra_next_jump;
-            if (!b_extra_obj.is_none()) {
-                b_extra_fn = b_extra_obj.cast<BExtraFn>();
-                if (py::hasattr(b_extra_obj, "next_jump_after")) {
-                    b_extra_next_jump =
-                        b_extra_obj.attr("next_jump_after")
-                            .cast<std::function<Real(Real)>>();
-                }
-            }
+            resolve_b_extra(b_extra_obj, b_extra_fn, b_extra_next_jump);
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "pwl");
             // Convert optional initial_state to a Vector pointer.
@@ -3868,7 +4029,8 @@ void init_module(py::module_& m) {
         "C++ PWM generator (sawtooth comparator, 0/1 output).")
         .def(py::init<>())
         .def_readwrite("frequency", &PwmGenerator::frequency)
-        .def_readwrite("phase",     &PwmGenerator::phase)
+        .def_readwrite("phase",     &PwmGenerator::phase,
+                        "Seconds, a delay (an advance in periods before 2026-11).")
         .def("reset", &PwmGenerator::reset)
         .def("update", &PwmGenerator::update,
               py::arg("duty"), py::arg("t"));
@@ -3971,6 +4133,26 @@ void init_module(py::module_& m) {
         .def_static("time",        &InputRef::from_time)
         .def_static("dt",          &InputRef::from_dt);
 
+    // add-compiled-control-graph: an algebraic loop, a signal with two
+    // writers, an unknown block kind. A ValueError subclass.
+    py::register_exception<pulsim::blockchain::ControlGraphBuildError>(
+        m, "ControlGraphBuildError", PyExc_ValueError);
+
+    py::class_<ChainTick>(m, "CxxChainTick",
+        "A control-graph tick callback the variable-step engine calls in "
+        "C++ (no Python call per tick).")
+        .def("__call__", [](ChainTick& self, Real t, const Vector& x) {
+            self.fn(t, x);
+        });
+
+    py::class_<ChainBExtra>(m, "CxxChainBExtra",
+        "A control graph's driven-source b_extra_fn(t), with the instants "
+        "its value may jump (next_jump_after), both in C++.")
+        .def("__call__", [](ChainBExtra& self, Real t) { return self.fn(t); })
+        .def("next_jump_after", [](ChainBExtra& self, Real t) {
+            return self.chain->next_jump_after(t);
+        });
+
     py::class_<BlockChain>(m, "CxxBlockChain",
         "C++ block chain executor. Build via add_<block>(...) "
         "methods, bind nodes, then pass make_step_observer(dt) to "
@@ -3978,22 +4160,67 @@ void init_module(py::module_& m) {
         .def(py::init<>())
         .def("size", &BlockChain::size)
         .def("reset", &BlockChain::reset)
+        .def("name_last", &BlockChain::name_last, py::arg("name"),
+            py::arg("kind") = std::string{},
+            "Name (and kind) of the most recently added block.")
+        .def("compile", &BlockChain::compile,
+            "Order the blocks (direct-feedthrough topological order, "
+            "ties by insertion); raises ControlGraphBuildError on an "
+            "algebraic loop.")
+        .def("schedule", &BlockChain::schedule,
+            "Block names in evaluation order.")
+        .def("reorders", &BlockChain::reorders,
+            "Pairs whose evaluation order differs from insertion order.")
+        .def("add_group", &BlockChain::add_group, py::arg("period"),
+            py::arg("offset") = 0.0, py::arg("delay_kind") = 0,
+            py::arg("delay_time") = 0.0,
+            "Add a Discrete{period, offset} rate group (delay_kind 0 = "
+            "zero, 1 = a time, 2 = one sample); returns its id (>= 1).")
+        .def("set_block_group", &BlockChain::set_block_group,
+            py::arg("block"), py::arg("group"))
+        .def_property_readonly("has_rates", &BlockChain::has_rates)
+        .def("group_period", &BlockChain::group_period, py::arg("group"))
+        .def("tick_counts", &BlockChain::tick_counts,
+            "Ticks per group (index 0: evaluations of the every-call group).")
+        .def_property_readonly("tick_jitter_max", &BlockChain::tick_jitter_max)
+        .def("add_source_sink", &BlockChain::add_source_sink,
+            py::arg("name"), py::arg("row"), py::arg("gain"),
+            "b_extra[row] += gain * (signal `name` after compute_delay).")
+        .def("set_solver_dt", &BlockChain::set_solver_dt, py::arg("dt"))
+        .def("make_tick_observer", [](BlockChain& self) {
+                return ChainTick{&self, self.make_tick_observer()};
+            }, py::keep_alive<0, 1>(),
+            "Tick callback for the variable-step engine (exact protocol).")
+        .def_property_readonly("n_evals", &BlockChain::n_evals)
+        .def_property_readonly("n_block_evals", &BlockChain::n_block_evals)
         .def("get_channel", &BlockChain::get_channel, py::arg("name"))
+        .def("sink_value", [](BlockChain& self, const std::string& name) {
+            return self.sink_value(self.find_slot(name));
+        }, py::arg("name"),
+        "What a circuit sink (switch mask, driven source) sees: a rate "
+        "group's output after its compute_delay.")
         .def("set_channel", [](BlockChain& self, const std::string& name,
                                    Real value) {
-            self.channels()[name] = value;
+            self.set_channel(name, value);
         }, py::arg("name"), py::arg("value"))
         .def("bind_nodes", [](BlockChain& self,
                                 const std::function<Index(const std::string&)>&
                                     node_id_of) {
             self.bind_nodes(node_id_of);
         }, py::arg("node_id_of"),
-            "Resolve every InputRef::Node by calling node_id_of(name).")
+            "Resolve InputRef::Node inputs given by name, by calling "
+            "node_id_of(name), for the blocks added AFTER this call.")
         .def("make_step_observer", [](BlockChain& self, Real dt) {
             return self.make_step_observer(dt);
         }, py::arg("dt"),
             "Return a step_observer(t, x) callable that the kernel "
             "uses to invoke the chain each step.")
+        .def("make_sink_b_extra_fn",
+            [](BlockChain& self, Size state_size) {
+                return ChainBExtra{&self, self.make_b_extra_fn(state_size)};
+            }, py::arg("state_size"), py::keep_alive<0, 1>(),
+            "Return the driven-source b_extra_fn(t) with next_jump_after(t) "
+            "(the instants the published values may change).")
         .def("make_b_extra_fn",
             [](BlockChain& self, Size state_size) {
                 return self.make_b_extra_fn(state_size);
@@ -4040,8 +4267,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, Index idx, Real value) {
                 // No public accessor — go through ctx; the user
                 // typically sets via motor adapters, not directly.
-                self.channels()["__noop"] = value;  // placeholder
-                (void)idx;
+                (void)self; (void)idx; (void)value;  // placeholder
             }, py::arg("idx"), py::arg("value"),
             "Diagnostic — directly set a b_extra entry. Most "
             "users should add motor blocks instead.")
@@ -4050,16 +4276,13 @@ void init_module(py::module_& m) {
             [](BlockChain& self, Real k, InputRef x, std::string out) {
                 auto blk = std::make_shared<Gain>();
                 blk->k = k;
-                auto p = make_gain_step(blk, x, out);
-                if (x.kind == InputRef::Kind::Node) {
-                    self.register_node_ref(&x);
-                }
+                auto p = make_gain_step(self, blk, x, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("k"), py::arg("x"), py::arg("output"))
         .def("add_subtract",
             [](BlockChain& self, InputRef a, InputRef b, std::string out) {
                 auto blk = std::make_shared<Subtract>();
-                auto p = make_subtract_step(blk, a, b, out);
+                auto p = make_subtract_step(self, blk, a, b, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("a"), py::arg("b"), py::arg("output"))
         .def("add_sum",
@@ -4068,7 +4291,7 @@ void init_module(py::module_& m) {
                 std::string out) {
                 auto blk = std::make_shared<Sum>();
                 blk->w0 = w0; blk->w1 = w1; blk->w2 = w2;
-                auto p = make_sum_step(blk, a, b, c, out);
+                auto p = make_sum_step(self, blk, a, b, c, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("w0") = 1.0, py::arg("w1") = 1.0,
                 py::arg("w2") = 0.0,
@@ -4088,7 +4311,7 @@ void init_module(py::module_& m) {
                 else if (op == "sqrt") blk->op = MathBlock::Op::Sqrt;
                 else if (op == "pow2") blk->op = MathBlock::Op::Pow2;
                 else throw std::runtime_error("unknown MathBlock op: " + op);
-                auto p = make_math_block_step(blk, a, b, out);
+                auto p = make_math_block_step(self, blk, a, b, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("op"), py::arg("a"), py::arg("b"),
                 py::arg("output"))
@@ -4096,17 +4319,21 @@ void init_module(py::module_& m) {
             [](BlockChain& self, Real Kp, Real Ki,
                 Real output_min, Real output_max,
                 InputRef setpoint, InputRef measured, InputRef dt_ref,
-                std::string out) {
+                std::string out, Real integrator_state, Real prev_error) {
                 auto blk = std::make_shared<PIController>();
                 blk->Kp = Kp; blk->Ki = Ki;
                 blk->output_min = output_min; blk->output_max = output_max;
-                auto p = make_pi_controller_step(blk, setpoint, measured,
+                blk->integral = integrator_state;
+                blk->prev_error = prev_error;
+                auto p = make_pi_controller_step(self, blk, setpoint, measured,
                                                        dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("Kp"), py::arg("Ki"),
                 py::arg("output_min"), py::arg("output_max"),
                 py::arg("setpoint"), py::arg("measured"),
-                py::arg("dt"), py::arg("output"))
+                py::arg("dt"), py::arg("output"),
+                py::arg("integrator_state") = Real{0},
+                py::arg("prev_error") = Real{0})
         .def("add_pid_controller",
             [](BlockChain& self, Real Kp, Real Ki, Real Kd, Real tau_d,
                 Real output_min, Real output_max,
@@ -4116,7 +4343,7 @@ void init_module(py::module_& m) {
                 blk->Kp = Kp; blk->Ki = Ki; blk->Kd = Kd;
                 blk->tau_d = tau_d;
                 blk->output_min = output_min; blk->output_max = output_max;
-                auto p = make_pid_controller_step(blk, setpoint, measured,
+                auto p = make_pid_controller_step(self, blk, setpoint, measured,
                                                         dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("Kp"), py::arg("Ki"), py::arg("Kd"),
@@ -4129,7 +4356,7 @@ void init_module(py::module_& m) {
                 std::string out) {
                 auto blk = std::make_shared<FirstOrderLowPass>();
                 blk->tau = tau;
-                auto p = make_first_order_lpf_step(blk, input_value,
+                auto p = make_first_order_lpf_step(self, blk, input_value,
                                                          dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("tau"), py::arg("input_value"), py::arg("dt"),
@@ -4141,7 +4368,7 @@ void init_module(py::module_& m) {
                 auto blk = std::make_shared<Integrator>();
                 blk->gain = gain;
                 blk->output_min = output_min; blk->output_max = output_max;
-                auto p = make_integrator_step(blk, x, dt_ref, out);
+                auto p = make_integrator_step(self, blk, x, dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("gain"), py::arg("output_min"),
                 py::arg("output_max"), py::arg("x"), py::arg("dt"),
@@ -4151,7 +4378,7 @@ void init_module(py::module_& m) {
                 InputRef x, InputRef dt_ref, std::string out) {
                 auto blk = std::make_shared<Differentiator>();
                 blk->filter_alpha = filter_alpha;
-                auto p = make_differentiator_step(blk, x, dt_ref, out);
+                auto p = make_differentiator_step(self, blk, x, dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("filter_alpha"), py::arg("x"), py::arg("dt"),
                 py::arg("output"))
@@ -4160,7 +4387,7 @@ void init_module(py::module_& m) {
                 InputRef x, std::string out) {
                 auto blk = std::make_shared<Limiter>();
                 blk->min_v = min_v; blk->max_v = max_v;
-                auto p = make_limiter_step(blk, x, out);
+                auto p = make_limiter_step(self, blk, x, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("min_v"), py::arg("max_v"),
                 py::arg("x"), py::arg("output"))
@@ -4169,25 +4396,41 @@ void init_module(py::module_& m) {
                 std::string out) {
                 auto blk = std::make_shared<MovingAverageFilter>();
                 blk->window = window;
-                auto p = make_moving_average_step(blk, x, out);
+                auto p = make_moving_average_step(self, blk, x, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("window"), py::arg("x"), py::arg("output"))
         .def("add_pwm_generator",
             [](BlockChain& self, Real frequency, Real phase,
+                std::optional<Real> phase_fraction,
                 InputRef duty, InputRef t_ref, std::string out) {
                 auto blk = std::make_shared<PwmGenerator>();
                 blk->frequency = frequency; blk->phase = phase;
-                auto p = make_pwm_generator_step(blk, duty, t_ref, out);
+                if (phase_fraction) {
+                    if (phase != Real{0}) {
+                        throw std::invalid_argument(
+                            "add_pwm_generator: give phase (seconds) or "
+                            "phase_fraction (of the period), not both");
+                    }
+                    // The old `phase` reading (an advance of f periods),
+                    // bit for bit: offset -(f * (1/frequency)).
+                    blk->phase = -(*phase_fraction * (Real{1} / frequency));
+                }
+                auto p = make_pwm_generator_step(self, blk, duty, t_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("frequency"), py::arg("phase") = 0.0,
-                py::arg("duty"), py::arg("t"), py::arg("output"))
+                py::kw_only(), py::arg("phase_fraction") = py::none(),
+                py::arg("duty"), py::arg("t"), py::arg("output"),
+            "PWM comparator. phase is in seconds, a delay, as "
+            "PwmGenerator(phase=); phase_fraction= is an advance in periods "
+            "(what phase= read before 2026-11: phase=x is now "
+            "phase_fraction=x, or phase=-x/frequency).")
         .def("add_svm",
             [](BlockChain& self, Real v_dc,
                 InputRef v_alpha, InputRef v_beta,
                 std::string da, std::string db, std::string dc) {
                 auto blk = std::make_shared<SpaceVectorModulator>();
                 blk->v_dc = v_dc;
-                auto p = make_svm_step(blk, v_alpha, v_beta, da, db, dc);
+                auto p = make_svm_step(self, blk, v_alpha, v_beta, da, db, dc);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("v_dc"), py::arg("v_alpha"), py::arg("v_beta"),
                 py::arg("output_a"), py::arg("output_b"),
@@ -4196,7 +4439,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, InputRef a, InputRef b, InputRef c,
                 std::string alpha, std::string beta, std::string zero) {
                 auto blk = std::make_shared<ClarkeTransform>();
-                auto p = make_clarke_step(blk, a, b, c, alpha, beta, zero);
+                auto p = make_clarke_step(self, blk, a, b, c, alpha, beta, zero);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("a"), py::arg("b"), py::arg("c"),
                 py::arg("output_alpha"), py::arg("output_beta"),
@@ -4205,7 +4448,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, InputRef alpha, InputRef beta,
                 InputRef zero, std::string a, std::string b, std::string c) {
                 auto blk = std::make_shared<InverseClarkeTransform>();
-                auto p = make_inverse_clarke_step(blk, alpha, beta, zero,
+                auto p = make_inverse_clarke_step(self, blk, alpha, beta, zero,
                                                         a, b, c);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("alpha"), py::arg("beta"),
@@ -4216,7 +4459,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, InputRef alpha, InputRef beta,
                 InputRef theta, std::string d, std::string q) {
                 auto blk = std::make_shared<ParkTransform>();
-                auto p = make_park_step(blk, alpha, beta, theta, d, q);
+                auto p = make_park_step(self, blk, alpha, beta, theta, d, q);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("alpha"), py::arg("beta"), py::arg("theta"),
                 py::arg("output_d"), py::arg("output_q"))
@@ -4224,7 +4467,7 @@ void init_module(py::module_& m) {
             [](BlockChain& self, InputRef d, InputRef q, InputRef theta,
                 std::string alpha, std::string beta) {
                 auto blk = std::make_shared<InverseParkTransform>();
-                auto p = make_inverse_park_step(blk, d, q, theta,
+                auto p = make_inverse_park_step(self, blk, d, q, theta,
                                                       alpha, beta);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("d"), py::arg("q"), py::arg("theta"),
@@ -4235,13 +4478,89 @@ void init_module(py::module_& m) {
                 std::string theta, std::string omega, std::string freq) {
                 auto blk = std::make_shared<PLL>();
                 blk->f_nominal = f_nominal; blk->Kp = Kp; blk->Ki = Ki;
-                auto p = make_pll_step(blk, v_alpha, v_beta, dt_ref,
+                auto p = make_pll_step(self, blk, v_alpha, v_beta, dt_ref,
                                             theta, omega, freq);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("f_nominal"), py::arg("Kp"), py::arg("Ki"),
                 py::arg("v_alpha"), py::arg("v_beta"), py::arg("dt"),
                 py::arg("output_theta"), py::arg("output_omega"),
                 py::arg("output_freq"))
+
+        // ---- Ported from pulsim.control (add-compiled-control-graph) ----
+        .def("add_ported",
+            [](BlockChain& self, const std::string& kind,
+               const PortedParams& params, std::vector<InputRef> inputs,
+               const std::vector<std::string>& outputs) {
+                try {
+                    auto p = make_ported_step(self, kind, params,
+                                              std::move(inputs), outputs);
+                    self.add(std::move(p.step), std::move(p.reset),
+                             std::move(p.update));
+                } catch (...) {
+                    self.discard_pending();
+                    throw;
+                }
+            }, py::arg("kind"), py::arg("params"), py::arg("inputs"),
+                py::arg("outputs"),
+            "A block ported from pulsim.control, Python-exact (kinds: "
+            "comparator, rate_limiter, sample_hold, transfer_function, "
+            "state_machine, op_amp, lookup_table_1d, math, ema, "
+            "differentiator, pid, sum, signal_mux, signal_demux).")
+        .def("add_python_block",
+            [](BlockChain& self, py::function fn,
+               std::vector<InputRef> inputs,
+               const std::vector<std::string>& outputs) {
+                std::vector<InputRef> in;
+                for (auto& r : inputs) in.push_back(self.in(std::move(r)));
+                std::vector<Index> out;
+                for (const auto& o : outputs) out.push_back(self.out(o));
+                // Owned by the chain; the chain dies under the GIL.
+                auto f = std::make_shared<py::function>(std::move(fn));
+                auto step = [f, in, out](ChainContext& c) {
+                    py::gil_scoped_acquire gil;   // the kernel runs without it
+                    py::tuple args(in.size());
+                    for (Size i = 0; i < in.size(); ++i) {
+                        args[i] = py::float_(resolve(in[i], c));
+                    }
+                    py::object r = (*f)(*args);
+                    if (out.size() == 1) {
+                        c.put(out[0], r.cast<Real>());
+                        return;
+                    }
+                    const auto v = r.cast<std::vector<Real>>();
+                    if (v.size() != out.size()) {
+                        // std::invalid_argument crosses the kernel's run
+                        // loop as itself (ValueError), a py::value_error
+                        // became SimulationAborted.
+                        throw std::invalid_argument(
+                            "PythonBlock returned " + std::to_string(v.size()) +
+                            " values for " + std::to_string(out.size()) +
+                            " outputs");
+                    }
+                    for (Size i = 0; i < out.size(); ++i) c.put(out[i], v[i]);
+                };
+                self.add(std::move(step), {});
+            }, py::arg("fn"), py::arg("inputs"), py::arg("outputs"),
+            "A block that calls fn(*input_values) (Python, under the GIL) "
+            "once per evaluation; returns a float or one value per output.")
+        .def("add_delay",
+            [](BlockChain& self, long long samples, Real initial_value,
+                InputRef x, std::string out) {
+                if (samples < 1) {
+                    throw ControlGraphBuildError(
+                        "DelayBlock: samples must be >= 1 (got " +
+                        std::to_string(samples) + ")");
+                }
+                auto blk = std::make_shared<DelayBlock>();
+                blk->samples = static_cast<Size>(samples);
+                blk->initial_value = initial_value;
+                auto p = make_delay_step(self, blk, x, out);
+                self.add(std::move(p.step), std::move(p.reset),
+                         std::move(p.update));
+            }, py::arg("samples"), py::arg("initial_value"),
+                py::arg("x"), py::arg("output"),
+            "y[k] = x[k - samples]; not direct feedthrough, so it breaks "
+            "an algebraic loop.")
 
         // ---- Motor blocks (Phase D / C++ port) ----
         .def("add_dc_motor",
@@ -4578,7 +4897,7 @@ void init_module(py::module_& m) {
         },
         py::arg("chain"), py::arg("num_switches"), py::arg("mapping"),
         "Build a switch_fn(t) that sets bit `idx` ON when "
-        "`chain.channels[channel_name] > 0.5`. `mapping` is a list "
+        "`chain.sink_value(channel_name) > 0.5`. `mapping` is a list "
         "of (channel_name, switch_idx) pairs.");
 
     // ----- BDF1 (implicit Euler) — Phase B.2 ------------------------------
@@ -4625,7 +4944,7 @@ void init_module(py::module_& m) {
            Real t_start, Real t_end, Real rtol, Real atol,
            Real h_init, Real h_max,
            py::object switch_fn_obj,
-           solver::BExtraFn b_extra_fn,
+           py::object b_extra_obj,
            py::object initial_state,
            Size max_event_iterations,
            solver::ShouldContinueFn should_continue,
@@ -4637,7 +4956,11 @@ void init_module(py::module_& m) {
            bool enable_newton_line_search, bool enable_newton_lm,
            py::object resume_from,
            std::vector<Real> observer_periods,
-           std::vector<py::object> observers) {
+           std::vector<py::object> observers,
+           Size newton_roundoff_budget, bool on_impulse_error) {
+            solver::BExtraFn b_extra_fn;
+            std::function<Real(Real)> unused_next_jump;  // trbdf2 lands its ticks
+            resolve_b_extra(b_extra_obj, b_extra_fn, unused_next_jump);
             solver::TrBdf2Options o;
             o.t_start = t_start;
             o.t_end   = t_end;
@@ -4666,6 +4989,10 @@ void init_module(py::module_& m) {
             }
             o.enable_newton_line_search = enable_newton_line_search;
             o.enable_newton_lm = enable_newton_lm;
+            if (newton_roundoff_budget > 0) {
+                o.newton_roundoff_budget = newton_roundoff_budget;
+            }
+            o.on_impulse_error = on_impulse_error;
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "trbdf2");
             std::optional<Vector> x0;
@@ -4691,6 +5018,10 @@ void init_module(py::module_& m) {
             }
             std::vector<std::function<void(Real, const Vector&)>> obs_fns;
             for (const auto& ob : observers) {
+                if (py::isinstance<ChainTick>(ob)) {   // control graph: C++ path
+                    obs_fns.push_back(ob.cast<ChainTick&>().fn);
+                    continue;
+                }
                 obs_fns.push_back(ob.cast<
                     std::function<void(Real, const Vector&)>>());
             }
@@ -4746,6 +5077,13 @@ void init_module(py::module_& m) {
             d["n_derivative_refreshes"] = st.n_derivative_refreshes;
             d["n_refresh_probes"] = st.n_refresh_probes;
             d["h_post_event_min"] = st.h_post_event_min;
+            d["n_probe_newton_retries"] = st.n_probe_newton_retries;
+            d["n_sdirk_steps"] = st.n_sdirk_steps;
+            d["n_reinit_steps"] = st.n_reinit_steps;
+            d["n_filtered_estimates"] = st.n_filtered_estimates;
+            d["n_roundoff_floor_accepts"] = st.n_roundoff_floor_accepts;
+            d["n_noise_held_decisions"] = st.n_noise_held_decisions;
+            d["n_probe_noise_retakes"] = st.n_probe_noise_retakes;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
@@ -4753,7 +5091,7 @@ void init_module(py::module_& m) {
         py::arg("rtol"), py::arg("atol"),
         py::arg("h_init"), py::arg("h_max"),
         py::arg("switch_fn"),
-        py::arg("b_extra_fn") = solver::BExtraFn{},
+        py::arg("b_extra_fn") = py::none(),
         py::arg("initial_state") = py::none(),
         py::arg("max_event_iterations") = Size{0},
         py::arg("should_continue") = solver::ShouldContinueFn{},
@@ -4768,6 +5106,8 @@ void init_module(py::module_& m) {
         py::arg("resume_from") = py::none(),
         py::arg("observer_periods") = std::vector<Real>{},
         py::arg("observers") = std::vector<py::object>{},
+        py::arg("newton_roundoff_budget") = Size{0},
+        py::arg("on_impulse_error") = false,
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "
@@ -4781,10 +5121,10 @@ void init_module(py::module_& m) {
            const topology::Graph& graph,
            const pwl::DevicePool& pool,
            const SimulationOptions& opts,
-           SwitchScheduleFn switch_fn,
+           py::object switch_fn_obj,
            BlockChain& chain,
            Real chain_dt,
-           BExtraFn b_extra_fn,
+           py::object b_extra_obj,
            bool start_from_dc_op,
            std::optional<bool> enable_nonlinear_refresh,
            py::object initial_state,
@@ -4793,8 +5133,23 @@ void init_module(py::module_& m) {
            py::object resume_from) {
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "pwl");
+            // The declarations run_transient reads (a native schedule's
+            // edges, a b_extra_fn's next_jump_after): this path dropped
+            // them, so the restart rule never saw a declared jump here.
+            auto adapted =
+                pulsim_bindings_common::adapt_switch_fn(switch_fn_obj);
+            const SwitchScheduleFn switch_fn = std::move(adapted.fn);
+            std::function<Real(Real)> next_edge_fn = std::move(adapted.next_edge);
+            if (!next_edge_fn && py::hasattr(switch_fn_obj, "next_edge_after")) {
+                next_edge_fn = switch_fn_obj.attr("next_edge_after")
+                                   .cast<std::function<Real(Real)>>();
+            }
+            BExtraFn b_extra_fn;
+            std::function<Real(Real)> b_extra_next_jump;
+            resolve_b_extra(b_extra_obj, b_extra_fn, b_extra_next_jump);
             // Build a step_observer that calls the chain DIRECTLY in
             // C++ — no Python roundtrip per step.
+            chain.set_solver_dt(opts.dt);   // rate groups: state at the tick
             auto step_observer = chain.make_step_observer(chain_dt);
             // Wrap with a LiveRing push when streaming is requested.
             // Both layers are GIL-free in the hot path: chain step is
@@ -4843,14 +5198,16 @@ void init_module(py::module_& m) {
                                           observer_eff,
                                           x_init_ptr,
                                           continue_eff,
-                                          resume_ptr);
+                                          resume_ptr,
+                                          b_extra_next_jump,
+                                          next_edge_fn);
             }
             return result;
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
         py::arg("opts"), py::arg("switch_fn"),
         py::arg("chain"), py::arg("chain_dt"),
-        py::arg("b_extra_fn") = BExtraFn{},
+        py::arg("b_extra_fn") = py::none(),
         py::arg("start_from_dc_op") = false,
         py::arg("enable_nonlinear_refresh") = py::none(),
         py::arg("initial_state") = py::none(),
@@ -5114,6 +5471,9 @@ void init_module(py::module_& m) {
 namespace pulsim_dsed_bindings {
     void init_module(pybind11::module_& m);
 }
+namespace pulsim_ir_bindings {  // add-immutable-circuit-ir (ir_bindings.cpp)
+    void init_module(pybind11::module_& m);
+}
 
 PYBIND11_MODULE(_pulsim, m) {
     m.doc() = "Pulsim — power-electronics simulator. Header-only C++23 "
@@ -5121,4 +5481,5 @@ PYBIND11_MODULE(_pulsim, m) {
               "Newton refinement, and the high-level CircuitBuilder API.";
     pulsim_kernel_bindings::init_module(m);
     pulsim_dsed_bindings::init_module(m);
+    pulsim_ir_bindings::init_module(m);
 }

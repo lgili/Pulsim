@@ -52,6 +52,8 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_convergence_failure.cpp  # typed give-up sites
         tests/dsed/test_event_projection.cpp
         tests/dsed/test_scheduler_auto.cpp  # Gate 4.D — auto-dispatch RK45↔BDF2 per mode
+        tests/dsed/test_period_integrals.cpp  # period map, M, closed-form integrals
+        tests/dsed/test_periodic_orbit.cpp  # the Newton shooting loop in the kernel
     )
     target_link_libraries(pulsim_core_dsed_tests
         PRIVATE
@@ -78,6 +80,21 @@ if(PULSIM_BUILD_TESTS)
         pulsim_apply_target_defaults(pulsim_core_mode_tests)
     endif()
     catch_discover_tests(pulsim_core_mode_tests)
+
+    # add-in-kernel-event-losses group 1 — the kernel loss tables
+    # (core/include/pulsim/thermal/loss_table.hpp), header-only.
+    add_executable(pulsim_core_thermal_tests
+        tests/thermal/test_loss_table.cpp
+    )
+    target_link_libraries(pulsim_core_thermal_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_thermal_tests)
+    endif()
+    catch_discover_tests(pulsim_core_thermal_tests)
 
     # =============================================================================
     # pulsim_core_layer0_tests — bootstrap-pulsim-v2-kernel
@@ -429,6 +446,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_builder_tests
         tests/builder/test_main.cpp
         tests/builder/test_circuit_builder.cpp
+        tests/builder/test_circuit_ir.cpp
     )
     target_link_libraries(pulsim_core_builder_tests
         PRIVATE
@@ -511,6 +529,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4_v2/test_dc_assemble.cpp
         tests/layer4_v2/test_seeding.cpp
         tests/layer4_v2/test_integration_rc_dc_op.cpp
+        tests/layer4_v2/test_branch_form_switch.cpp
     )
     target_link_libraries(pulsim_core_layer4_v2_tests
         PRIVATE
@@ -559,12 +578,15 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v4/test_continuation_rectifier.cpp  # V8 continuation
         tests/layer5_v4/test_vf0_continuation_rectifier.cpp  # V9 V_F0 cont
         tests/layer5_v4/test_pseudo_transient_rectifier.cpp  # V10 PTC
+        tests/layer5_v4/test_newton_roundoff_acceptance.cpp
     )
     target_link_libraries(pulsim_core_layer5_v4_tests
         PRIVATE
             pulsim::core
             Catch2::Catch2WithMain
     )
+    target_compile_definitions(pulsim_core_layer5_v4_tests PRIVATE
+        PULSIM_PWL_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/include/pulsim/pwl")
     if(COMMAND pulsim_apply_target_defaults)
         pulsim_apply_target_defaults(pulsim_core_layer5_v4_tests)
     endif()

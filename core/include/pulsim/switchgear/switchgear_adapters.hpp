@@ -57,9 +57,9 @@ inline void add_thyristor_to_chain(
     auto state = std::make_shared<ThyristorState>();
     state->i_holding = i_holding;
 
-    auto step = [state, gate_ref = std::move(gate_ref),
-                    current_ref = std::move(current_ref),
-                    output_channel = std::move(output_channel)]
+    auto step = [state, gate_ref = chain.in(std::move(gate_ref)),
+                    current_ref = chain.in(std::move(current_ref)),
+                    output_channel = chain.out(output_channel)]
                    (ChainContext& ctx) {
         // Gate trigger asserted (gate signal > 0.5)?
         const Real gate = blockchain::resolve(gate_ref, ctx);
@@ -73,8 +73,7 @@ inline void add_thyristor_to_chain(
                 state->latched_on = true;
             }
         }
-        ctx.channels[output_channel] =
-            state->latched_on ? Real{1} : Real{0};
+        ctx.put(output_channel, state->latched_on ? Real{1} : Real{0});
     };
     auto reset = [state]() { state->reset(); };
     chain.add(std::move(step), std::move(reset));
@@ -107,9 +106,9 @@ inline void add_fuse_to_chain(
     auto state = std::make_shared<FuseState>();
     state->blown = !initial_intact;
 
-    auto step = [state, current_ref = std::move(current_ref),
+    auto step = [state, current_ref = chain.in(std::move(current_ref)),
                     i2t_threshold,
-                    output_channel = std::move(output_channel)]
+                    output_channel = chain.out(output_channel)]
                    (ChainContext& ctx) {
         if (!state->blown) {
             if (state->t_last >= Real{0}) {
@@ -124,7 +123,7 @@ inline void add_fuse_to_chain(
             }
             state->t_last = ctx.t;
         }
-        ctx.channels[output_channel] = state->blown ? Real{0} : Real{1};
+        ctx.put(output_channel, state->blown ? Real{0} : Real{1});
     };
     auto reset = [state]() { state->reset(); };
     chain.add(std::move(step), std::move(reset));

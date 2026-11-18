@@ -121,6 +121,7 @@ nav:
       - Getting Started: getting-started.md
       - 'Using Pulsim with AI Assistants': ai-guide.md
       - Mental Model: mental-model.md
+      - 'Parameters and Value Updates': parameters.md
       - 'Tutorial 01 — RC Charging': tutorials/01-rc-charging.md
       - 'Tutorial 02 — Buck Converter': tutorials/02-buck-converter.md
       - 'Tutorial 03 — Isolated Flyback': tutorials/03-flyback-isolated.md
@@ -129,6 +130,7 @@ nav:
       - 'Tutorial 06 — IGBT Boost': tutorials/06-igbt-boost.md
       - 'Tutorial 07 — DC Machine': tutorials/07-dc-machine.md
       - 'Tutorial 08 — Using Pulsim inside an optimiser': tutorials/08-design-optimisation.md
+      - 'Parameter Sensitivities': sensitivities.md
       - 'Motors — Induction (Phase 2)': motors-induction.md
       - 'Motors — Sensorless Observers (Phase 2)': motors-sensorless.md
       - 'Modular Multilevel Converters (MMC)': mmc.md

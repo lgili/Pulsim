@@ -66,6 +66,27 @@ MosfetLevel1, Capacitor, NonlinearCapacitor, Resistor, Inductor and
 Shockley / Lauritzen diode rows: it runs on `pwl` and `trbdf2` and is
 refused on `dsed`, `bdf1` and the kernel AC sweep, naming the channel.
 
+The branch form of a switch or diode (`add_ideal_switch`,
+`add_diode(form='branch')`, YAML `form: branch`; opt-in) has its own
+column; "no" raises `UnsupportedError(feature='branch_form')`. A mode
+whose ideal elements (`R_on = 0` or `g_off = 0`) make a state dependent
+(an inductor cut-set, a capacitor loop) runs on `pwl` with
+`discontinuity_restart=True` and on `trbdf2` (always: three SDIRK(2,2)
+steps after the entry), and an impulsive entry is recorded in
+`res.reinit_records` (`on_impulse='error'` refuses it with
+`feature='impulse'`); on `pwl` without the rule, and on `trbdf2` with a
+Coss, Lauritzen, IGBT-tail, PMSM or saturable-inductor history, it is
+refused with `feature='dependent_states'`; a node bounded only by open ideal elements with
+`g_off = 0` is refused with `feature='floating_node'`, a loop of closed
+ideal elements and voltage sources with `feature='ideal_voltage_loop'`.
+
+<!-- branch-form-capabilities:begin -->
+| Form | pwl | trbdf2 | dsed | bdf1 | ac_sweep |
+|---|---|---|---|---|---|
+| Switch | yes | yes | no | no | no |
+| Diode | yes | yes | no | no | no |
+<!-- branch-form-capabilities:end -->
+
 Circuit-level limits, also raised as `UnsupportedError` (with `feature`
 set): coupled inductors (`add_transformer`, `add_inductor_coupling`) on
 `dsed` and `bdf1`; PWL diodes with `integrator='bdf2'` on `dsed`;
@@ -74,10 +95,19 @@ capacitor loops (parallel capacitors) on `dsed`; C blocks, controllers
 `live_stream`, `max_dt_halvings`, `mmc_arms`, `on_cache`, the inductor
 guards, `enable_substep_state_correction` and `discontinuity_restart` on
 `dsed`; the fixed-step keywords (`discontinuity_restart` among them) on
+`trbdf2`; a control-graph `Rate` with an `offset`
+(`control_rate_offset`) or a `compute_delay` time (`compute_delay`) on
 `trbdf2`; a `b_extra_fn.next_jump_after` declaration is read by `pwl`
 only (a no-op on `trbdf2` / `dsed`, which control the step on their own
 error estimate); `enable_nonlinear_refresh=False` with a smooth /
-Shockley diode, MOSFET or IGBT on every transient engine.
+Shockley diode, MOSFET or IGBT on every transient engine;
+`sensitivities=` on every engine but `dsed`, and on `dsed` a parameter
+that is not an R, L, C, DC-source value or the duty of a single-switch
+trailing-edge PWM (`sensitivity_parameter`; a dead-time pair's duty is
+refused), a time-varying source, a Newton device, an opaque gate or
+`b_extra_fn`, a mode without an exact propagator, an RK45 step, a
+grazing diode event (`grazing_event`), and a KPI window edge on a moving
+event where the signal jumps.
 
 ## Engines
 
@@ -86,12 +116,9 @@ Shockley diode, MOSFET or IGBT on every transient engine.
 | **`dsed` can settle a zero-band diode into the wrong mode; two guards stop it being returned.** The complementarity guard (default) judges each settled mode and repairs the wrong ones with the LCP; the stored-sample guard raises `DiodeModeInconsistentError` for what the kernel guard misses. | Boost 12 V, 100 µH, 47 µF, 100 kHz, D = 0.5, V_th = 0 at 20 / 50 / 500 Ω: repaired (7 / 16 / 23 events), ends on trbdf2 rtol 1e-10. LC tank into a series diode with V_th = 0 (a double crossing inside one step): the kernel guard returns v = -5.18 V at 10 µs (trbdf2 9.50 V); the stored-sample guard raises. | `V_th = 1e-3` for the double crossing, or `pwl` / `trbdf2`. |
 | **Fixed-step controller ticks land on the `dt` grid.** Source j ticks at `t_start + k*T_j` on both engines; `trbdf2` lands each instant, `pwl` delivers it at the first grid point at or after it. | `T = 2.5*dt` over 100 µs at `dt` = 1 µs: 40 ticks, each late by less than `dt` (`result.control_tick_jitter_max`), with a warning; `T < dt` raises. | `dt = T/n`, or omit `dt` (`trbdf2`). |
 | **By default the fixed engine is first order after a discontinuity.** The start (ICs included), every gate edge and every source jump leave a stale trapezoidal history (`v_prev`, `i_prev`). Guide trap 9; pinned by `test_first_step_order.py` and `test_fixed_step_discontinuity_order.py`. | RL decay, R = 1 Ω, L = 1 mH, `i0` = 5 A: relative error at 5 τ 1.997e-3, 9.99e-4, 5.00e-4 at `dt` = 4, 2, 1 µs (order 1.00); with `discontinuity_restart=True` (three SDIRK(2,2) steps per discontinuity) 6.66e-6, order 2.00. Buck CCM `i_L` at T/50: 1.18e-2 A, 1.17e-7 A with the rule. An edge off the `dt` grid stays first order unless `enable_substep_state_correction=True` (needs the rule) splits the step at it: buck D = 0.4567 `v_C` at T/50 8.08e-2 V → 1.07e-6 V, order 2. An undeclared `b_extra_fn` jump stays first order either way. Sample 0 of `v(a)` reads 0 V either way; the consistent value is -5 V. | `discontinuity_restart=True` (gate sampled at the step start); keep edges on the grid. |
-| **TR-BDF2 stalls at `h_min` after a hard switching edge when a Newton device is present.** Pinned by `test_saturable_transformer.py::test_engines_agree_below_saturation`. | Snubbed 48 V flyback with a saturable transformer. `engine='trbdf2'` and `'auto'` abort at t = 604 µs with `||dx|| = 1.69e-07` (at 24 µs before the Newton roundoff acceptance; the failing solve is still refused). `engine='pwl', dt=1e-8` gives V_out = 15.31 V. | Use `engine='pwl'` with a `dt`. Do not loosen `tol_newton_dx` / `tol_newton_res` ([Gotchas](gotchas.md)). |
-| **TR-BDF2 at a tight tolerance can grind to `max_steps` on a SEPIC.** Found by the reference harness after the TR-BDF2 error-control change; it ran before. | `benchmarks/circuits/switching/buck_boost/sepic.yaml` with `rtol=1e-8, atol=1e-12`: `SimulationAborted` (`max_steps` 10,000,000) near t = 0.74-0.78 ms of 2 ms. At default tolerances it completes. | Use the default `rtol`, or `engine='pwl'` with a `dt`. |
-| **A saturable inductor as a buck's own inductor loses its current at a turn-off edge on TR-BDF2.** Described above `_gated_buck` in `test_trbdf2_stateful_with_diodes.py`; a fix is in progress. | The edge cascade's Newton probe does not converge at its 1e-16 s step, the failure is ignored, the freewheel diode is never turned on, and one 2e-11 s all-OFF step cuts 10 A to zero (`v_sw` = 2.6e7 V). | `engine='pwl'` with a `dt`. |
-| **`ll16_flyback_closed_loop` completes on `pwl` with a diverged state.** Since the Newton roundoff acceptance it is not refused; making it fail loudly again is in progress. | 1,645 Newton solves accepted at roundoff (`result.newton_roundoff_accepts`); I(Lm_core) ≈ 2.4e13 A from t = 0, node `drain` at 1.0e4 V on a 48 V circuit. The harness keeps it `error`. | Do not use its waveforms; read `newton_roundoff_accepts` and the implausible-voltage warning on any run. |
 | **Diode-mask chatter on the fixed engine.** With PWL diodes and a Newton device in the same circuit, the diode mask is re-decided at every Newton iteration and no mask is self-consistent at a small step. Pinned by `test_newton_stall_and_mask_chatter.py`. | PSFB with a saturable primary and a floating secondary. At `dt` = 20, 10, 5 and 2 ns it aborts near t = 1.5 µs, even split into 64 sub-steps. At 50 ns it runs. V_out = `v(vout) - v(rect_neg)`, averaged over 1.5-2 ms, is 6.771 V. With a linear primary it is 6.765 V at 50 ns and 6.938 V at 10 ns (6.937 V at 5 ns). So 50 ns reads 2.4 % low. | Run at 50 ns and accept about 2.5 % low; check it against the linear-primary circuit at 10 ns. `add_shockley_diode` runs at 10 ns but changes the model: each junction drops about 0.7 V and a PWL diode drops none (trap 1). V_out falls to 5.785 V (-16.6 %). Use it only if you want that drop. |
 | **TR-BDF2 femtosecond landing step after a diode turn-off.** Pinned by `test_trbdf2_stateful_with_diodes.py::test_no_kilovolt_artefact_on_the_internal_node`. | L-D-RC rectifier, 20 V source, constant 111 µH. On TR-BDF2 the L-D node peaks at 1539 V on a 3e-14 s step; on `pwl` it peaks at 23.1 V. The output peak is the same on both: 19.640 V and 19.641 V. | Do not take `max()` of internal nodes from a TR-BDF2 run. Check peaks on `engine='pwl'` with a `dt`. |
+| **A floating diode bridge has an undetermined common mode on TR-BDF2.** A V_th = 0 bridge whose DC bus is tied to ground only through 1 MΩ has no defined common mode once every diode is off. | 325 V, 1 mH line, 470 µF, 100 Ω: v(dp) − v(dn) agrees with `pwl` (`dt = 1e-6`) to 0.017 V at rtol 1e-5, 0.007 V at 1e-6 and 0.0015 V at 1e-7, but v(dp) alone differs by up to 41 V, 265 V and 32 V. (It ground to `max_steps` at rtol 1e-6 and 1e-7 before the TR-BDF2 roundoff-floor fix.) | Measure the bus as v(dp) − v(dn), or ground one DC rail. |
 | **TR-BDF2 can miss PWL-diode commutations.** Guide trap 13. | 230 V rms bridge, 0.1 Ω, 470 µF, 1 kΩ. With `V_th = 0` it runs half-wave: 318.79 V and 12.91 V pp, against 322.06 V and 6.38 V pp with `dt=1e-6`. With `V_th = 0.7` and 1 mH of line, D2 and D4 are held OFF while forward-biased for one sample at 75.92 ms; V_dc is 321.80 V against 321.82 V. Snubbed boost (24 V, 220 µH, 50 kHz, D = 0.5, 1 nF across D1, 100 µF, 30 Ω), V_out over 2-3 ms: with `V_th = 0`, 24.64 V on `trbdf2` and `auto`, against 54.89 V with `dt = 1e-8`. With `V_th = 0.7` on `auto`, 56.18 V against 54.89 V (+2.3 %), and D1 is held ON while reverse-biased on 106 samples. | Pass `dt`. Rerun with `dt` whenever `simulate` warns that a diode "rode its conduction boundary", or `res.i` warns that one was held "in a state its commutation rule forbids". |
 | The sliding-mode warning says `engine='auto'` even when `engine='trbdf2'` was requested. | Seen on the `V_th = 0` bridge above. | None needed: the warning describes the TR-BDF2 run. |
 | **`trbdf2` and `auto` can crash the Python process.** | The saturable-primary PSFB of the mask-chatter row, with no `dt`. With `t_end = 0.2 ms` it raises `SimulationAborted` at t = 0 (`h_min`). With `t_end = 2 ms` the process dies with a segmentation fault (exit code 139). | Pass `dt`. Run variable-step jobs you cannot vet in a subprocess. |
@@ -112,12 +139,13 @@ Shockley diode, MOSFET or IGBT on every transient engine.
 | Limitation | Measured | Workaround |
 |---|---|---|
 | A slow mode limits the orbit's accuracy to the map's rounding over one minus the Floquet radius. | Zero-mean sine current into 1 µF ∥ 1 TΩ (Floquet radius 1 - 1e-9): v(0) = 0.15726 V against 0.159155 V. | Add the real loss; check `floquet_radius`. |
+| `engine='pwl'` / `'trbdf2'` shooting differentiates the map by finite differences (`n` period runs per Jacobian, Broyden updates between them), so it costs more runs than the exact stepper and has no orbit sensitivities (`sensitivities=` refused). `pwl` needs a gate edge at `t = 0` and `T/dt` an integer; `trbdf2` needs a schedule with `next_edge_after` and fixes the step ceiling at `dt` (default `T/100`); nonlinear devices are refused on both. | DCM buck from zero: 12 period runs on `pwl` (6 on the exact stepper). Orbit vs the engine's own 4000-period transient: 1.2e-11 (`pwl`) and 2.6e-9 (`trbdf2`) of the state scale. | `engine='exact'` when the circuit is in its coverage. |
 
 ## Design evaluation (`pulsim.design`)
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| Threads do not speed up the `pss` route: the shooting Newton and the KPI post-processing are Python and hold the GIL. | 64 DCM-buck designs: 1 thread 0.50 s, 8 threads 0.47 s; the kernel is 13 % of an evaluation. | `evaluate_many(..., backend="process")` for large batches. |
+| Threads do not speed up the `pss` route: the shooting Newton runs in the kernel without the GIL, but circuit building, the loss rows and the KPIs are Python and hold it. | 64 SYN-A designs: 2445 evaluations/s on 1 thread, 1848 on 4, 1740 on 8; the kernel is 21 % of an evaluation. | `evaluate_many(..., backend="process")` for large batches. |
 | A device whose power no loss model covers (Lauritzen diode, level-1 MOSFET/IGBT, controlled sources) refuses the efficiency. | Buck with a Lauritzen diode: efficiency would read 0.99989 without the diode's 1.36 W of 28.4 W; it is `refused` (`feature="losses"`). | Evaluate without `loads=` for the other KPIs, or use the PWL diode / switch. |
 | `method="transient"` settles to the engine's own orbit. | DCM buck on `trbdf2`: estimated distance 1.4e-10, true error 2.2e-5 (the engine's accuracy). A PWM voltage source on `trbdf2` never settles to 1e-6 (period noise 2.7e-4). | `method="pss"` (exact stepper), or a switch with a schedule instead of a PWM source. |
 
@@ -166,7 +194,7 @@ Shockley diode, MOSFET or IGBT on every transient engine.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **Only the DC machine is solved in the matrix.** `b.add_dc_machine` is MNA-native; the PMSM observer, BLDC and induction motor are still forward-Euler observers on `pwl` only (`b.add_pmsm_mna` is native). No machine model is validated against measurements: the tests check analytic limits of the equations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). | Use `b.add_dc_machine`; halve `dt` to check an observer run. |
+| **Only the DC machine is solved in the matrix.** `b.add_dc_machine` is MNA-native; the PMSM observer, BLDC and induction motor are still explicit observers on `pwl` only (forward Euler; the induction motor's rotor flux is integrated exactly over each step since 2026-11, but its EMF still reaches the circuit one step late) (`b.add_pmsm_mna` is native). No machine model is validated against measurements: the tests check analytic limits of the equations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). | Use `b.add_dc_machine`; halve `dt` to check an observer run. |
 | No angle node on `add_dc_machine` (`theta_node` raises `UnsupportedError`); no `components()` entry for the machine as a whole (its sub-elements are listed). | — | Integrate `res.v(omega_node)`, or build the angle: `add_vccs` from the speed node into a 1 F capacitor. |
 
 ## Passives
@@ -177,6 +205,22 @@ Shockley diode, MOSFET or IGBT on every transient engine.
 | **YAML has no `rac:` ladder or `transmission_line` type.** `rac:` on an inductor is refused by name; `esr`, `esl`, `c_par` are read. Other unknown per-device keys are still ignored without a warning. | — | Build ladders and lines from Python. |
 | One ESR value (no frequency dependence), single-pair line (no coupled three-phase cable). The DC-bias capacitance is `odd_charge_table` only: no `fit_mlcc_dc_bias`, no YAML, and it is a Newton device (`pwl` / `trbdf2`). | — | Read ESR at the switching frequency; fit `R_ac(f)` of windings with `fit_rac_ladder`; integrate the datasheet C(V) curve into knots yourself. |
 | **A winding with an `rac=` ladder cannot be coupled.** `add_inductor_coupling` refuses it with `UnsupportedError` (feature `rac`): coupling the main inductor alone would leave the cells' flux uncoupled. | — | Couple windings built with `esr=`, or use `add_transformer`. |
+
+## Found by the examples audit (2026-11-13)
+
+Reproducers are in `probes/` (run them against the tree to re-measure);
+each example affected says so where it prints the number. Fixed since
+the audit (see the CHANGELOG): the `pseudo_trans` divergence,
+`run_transient_adaptive` reading low, the forward-Euler induction-motor
+flux and `run_ac_sweep` reading inside the start-up. The `b_extra` sign
+and the moving `branch_var_id_for_*` index are contracts, documented in
+`simulate` and `docs/api-reference.md`.
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **`device_loss_summary`'s resistor `P_avg` is first order in `dt` on PWM currents** (each edge becomes a one-step ramp in the stored samples; the switch `P_avg` is exact). Owner: `python/pulsim/losses.py`, `device_loss_summary` (line 1556). Probe: `probes/loss_resistor_first_order_edges.py`. | R in series with a PWM switch: 1114.24 / 1121.77 / 1125.54 W at 50 / 100 / 200 steps per period against the exact 1129.30 W; M1 11.2926 W against 11.2930 W. | `p.time_average(t, R * i**2)` with `i` from `res.i`, or halve `dt`. |
+| **`compute_bh_loop` can return a negative loop area (a negative core loss).** A closed sine loop on the `permalloy` J-A set has ∮H dB < 0 above ~300 A/m, and the `ferrite_n87` area shrinks as the drive rises into saturation. Owner: `python/pulsim/hysteresis.py`, `JilesAthertonModel.update`, the irreversible slope at line 336. Probe: `probes/ja_negative_loop_area.py`. | permalloy 29.1 / −12.4 / −14.8 J/m³ at 100 / 300 / 1000 A/m; ferrite_n87 42.8 / 28.8 / 13.9 J/m³ at 300 / 1000 / 3000 A/m. The δ_M guard and a ≥ 0 clamp on the slope do not remove it. | Check the sign of `energy_per_cycle_per_m3`, and that the J-A B matches the circuit's B (`run_psfb_ja_loss_analysis.py` does both). |
+| **Tightly coupled half bridge: `trbdf2` aborted and a coarse fixed step read low without warning** (audit report). Owner: `core/include/pulsim/solver/trbdf2_transient.hpp`. Probe: `probes/half_bridge_tight_coupling.py`. | Audit: `refactorize failed (numerically singular)` at h ≈ 5e-14 s for k = 0.999 / 0.99999; at k = 0.99999 `dt` = 2e-8 gave 4.17 V against 4.99 V at 1e-8. NOT reproduced on this tree with the project's half bridge (3 ms, mean over 2–3 ms): k = 0.99999 reads 4.869 / 4.870 V at `dt` = 2e-8 / 1e-8 and `trbdf2` runs (4.924 V); k = 0.999: 4.685 / 4.688 / 4.695 V. The configuration behind the audit's numbers was not recorded. | `engine='pwl'`; halve `dt` and compare. |
 
 ## Older entries
 

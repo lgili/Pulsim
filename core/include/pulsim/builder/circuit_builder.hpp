@@ -38,12 +38,14 @@
 #include "pulsim/models/resistor.hpp"
 #include "pulsim/models/transformer.hpp"
 #include "pulsim/models/voltage_source.hpp"
+#include "pulsim/ir/fields.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/preflight.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <format>
@@ -56,11 +58,176 @@
 #include <utility>
 #include <vector>
 
+namespace pulsim::ir { class Circuit; }
+
 namespace pulsim::builder {
 
 class CircuitBuilder {
 public:
     CircuitBuilder() = default;
+    CircuitBuilder(CircuitBuilder&&) = default;
+    CircuitBuilder& operator=(CircuitBuilder&&) = default;
+
+    /// Deliberate deep copy (add-immutable-circuit-ir). The copy
+    /// constructor stays private so a builder is never copied by
+    /// accident (pybind, pass-by-value); `ir::Circuit` and a run's own
+    /// regularised circuit are built from clones.
+    [[nodiscard]] CircuitBuilder clone() const { return CircuitBuilder(*this); }
+
+    /// Immutable snapshot of this builder (`ir/circuit.hpp`); the
+    /// builder can keep being edited. Defined in `ir/circuit.hpp`.
+    [[nodiscard]] ir::Circuit build() const;
+
+    /// Set one value field in place: `set_value("R1.R", 2.0)`. Fields
+    /// come from the kind's row of `ir::kKindFields`; the new value
+    /// must satisfy the field's bound. Values the pool keeps twice (a
+    /// PMSM's machine record, a coupled inductor's self-inductance) are
+    /// re-derived, so the result equals rebuilding with the new literal.
+    /// Refuses, naming device and field: an unknown device or field, an
+    /// out-of-bound value, and a power-MOSFET composite (its element
+    /// values are derived from the datasheet record).
+    /// A field bound to a parameter literal becomes a literal again.
+    void set_value(std::string_view device_dot_field, Real value) {
+        set_value_("set_value", device_dot_field, value);
+    }
+
+    // ---- add-immutable-circuit-ir group 6: named parameters --------
+    /// A field driven by a parameter: branch, field index in the kind's
+    /// row of `ir::kKindFields`, parameter index.
+    struct ParamBinding {
+        Index branch;
+        std::uint16_t field;
+        std::uint32_t param;
+    };
+
+    /// Declare a named parameter: `param("Lbase", 1e-3, "H")`. Bind
+    /// fields to it with `bind_param` (Python: pass it to any `add_*`
+    /// in place of a number); `Circuit::with_params` re-values it.
+    ir::Parameter param(std::string_view name, Real value,
+                        std::string_view unit = {},
+                        std::optional<Real> lo = std::nullopt,
+                        std::optional<Real> hi = std::nullopt) {
+        if (name.empty() || name.find('.') != std::string_view::npos) {
+            throw std::invalid_argument(std::format(
+                "param(\"{}\"): a parameter name must be non-empty and "
+                "contain no '.'", name));
+        }
+        if (find_param_(name) != kNoParam_) {
+            throw std::invalid_argument(std::format(
+                "param(\"{}\"): a parameter of that name already exists",
+                name));
+        }
+        ir::Parameter p{std::string{name}, value, std::string{unit}, lo, hi};
+        check_param_(p, value);
+        params_.push_back(p);
+        return p;
+    }
+
+    [[nodiscard]] std::span<const ir::Parameter> parameters() const noexcept {
+        return params_;
+    }
+    [[nodiscard]] std::span<const ParamBinding> param_bindings() const noexcept {
+        return bindings_;
+    }
+
+    /// Drive field `device_dot_field` by parameter `name`: the field
+    /// takes the parameter's value now and on every `set_param`.
+    void bind_param(std::string_view device_dot_field, std::string_view name) {
+        const auto pi = require_param_("bind_param", name);
+        if (const auto dot = device_dot_field.rfind('.');
+            dot != std::string_view::npos) {
+            const auto hit = branch_index_.find(device_dot_field.substr(0, dot));
+            const auto field = device_dot_field.substr(dot + 1);
+            if (hit != branch_index_.end() && pool_.is_branch_form(hit->second) &&
+                field != "V_th" && field != "V_f") {
+                throw std::invalid_argument(std::format(
+                    "bind_param(\"{}\"): device \"{}\" is in branch form; a "
+                    "parameter cannot drive its {} yet (set it with "
+                    "with_value / set_value)", device_dot_field,
+                    device_dot_field.substr(0, dot), field));
+            }
+        }
+        const auto r = resolve_field_("bind_param", device_dot_field);
+        const Real v = params_[pi].value;
+        if (!ir::within(r.spec->bound, v)) {
+            throw std::invalid_argument(std::format(
+                "bind_param(\"{}\"): field {} of device \"{}\" must be {} "
+                "(parameter \"{}\" is {})", device_dot_field, r.spec->name,
+                graph_.branch_name(r.branch), ir::bound_text(r.spec->bound),
+                name, v));
+        }
+        apply_field_(r, v, "bind_param", device_dot_field);
+        unbind_(r.branch, r.field);
+        bindings_.push_back(ParamBinding{r.branch, r.field,
+                                         static_cast<std::uint32_t>(pi)});
+    }
+
+    /// Re-value parameter `name` and every field bound to it. All bounds
+    /// (the parameter's and each driven field's) are checked before
+    /// anything changes.
+    void set_param(std::string_view name, Real value) {
+        const auto pi = require_param_("set_param", name);
+        check_param_(params_[pi], value);
+        for (const auto& bd : bindings_) {
+            if (bd.param != pi) continue;
+            const auto& spec = ir::fields_of(pool_.kind_of(bd.branch))[bd.field];
+            if (!ir::within(spec.bound, value)) {
+                throw std::invalid_argument(std::format(
+                    "parameter \"{}\" = {}: field {} of device \"{}\" must "
+                    "be {}", name, value, spec.name,
+                    graph_.branch_name(bd.branch), ir::bound_text(spec.bound)));
+            }
+        }
+        // Every driven device checked on a copy first (all, or nothing).
+        std::vector<std::pair<Index, pwl::DevicePool::ParamsVariant>> next;
+        for (const auto& bd : bindings_) {
+            if (bd.param != pi) continue;
+            auto it = std::find_if(next.begin(), next.end(),
+                [&](const auto& x) { return x.first == bd.branch; });
+            if (it == next.end()) {
+                next.emplace_back(bd.branch, pool_.params_of(bd.branch));
+                it = std::prev(next.end());
+            }
+            const auto& spec = ir::fields_of(pool_.kind_of(bd.branch))[bd.field];
+            spec.set(it->second, value);
+            try {
+                ir::check_device(it->second, spec.name);
+            } catch (const std::invalid_argument& e) {
+                throw std::invalid_argument(std::format(
+                    "parameter \"{}\" = {}: device \"{}\": {}", name,
+                    value, graph_.branch_name(bd.branch), e.what()));
+            }
+        }
+        params_[pi].value = value;
+        for (auto& [b, params] : next) {
+            pool_.params_of_mut(b) = std::move(params);
+            pool_.sync_derived_values(b);
+        }
+    }
+
+    /// Read one value field (`"R1.R"`), as `set_value` resolves it.
+    [[nodiscard]] Real get_value(std::string_view device_dot_field) const {
+        const auto dot = device_dot_field.rfind('.');
+        const auto dev = dot == std::string_view::npos
+            ? device_dot_field : device_dot_field.substr(0, dot);
+        const auto hit = branch_index_.find(dev);
+        const auto* spec = (hit == branch_index_.end() ||
+                            dot == std::string_view::npos)
+            ? nullptr
+            : ir::find_field(pool_.kind_of(hit->second),
+                             device_dot_field.substr(dot + 1));
+        if (hit != branch_index_.end() && dot != std::string_view::npos &&
+            pool_.is_branch_form(hit->second) &&
+            device_dot_field.substr(dot + 1) == "R_on") {
+            return pool_.branch_R_on(hit->second);
+        }
+        if (spec == nullptr) {
+            throw std::invalid_argument(std::format(
+                "get_value(\"{}\"): no such device value field",
+                device_dot_field));
+        }
+        return spec->get(pool_.params_of(hit->second));
+    }
 
     /// Return the node index for `name`, creating it if not
     /// yet registered. `"gnd"` / `"GND"` / `"0"` all map to
@@ -1102,8 +1269,8 @@ public:
     /// Returns a `Vector` of size
     /// `num_nodes + num_state_branches` (the same shape
     /// `pulsim.simulate(initial_state=…)` expects). Capacitor ICs
-    /// land on the *node* voltage column of the capacitor's
-    /// positive terminal; inductor and source ICs land on their
+    /// set node voltages so that v(from) - v(to) = c0 for every cap
+    /// (see the walk below); inductor and source ICs land on their
     /// pool-mapped current state-vector slot.
     [[nodiscard]] pulsim::Vector initial_state() const {
         // State size: node voltages + every state-branch current.
@@ -1116,8 +1283,13 @@ public:
                 ++n_state_extras;
             }
         }
+        // Branch-form switch currents (add-branch-form-ideal-switch) start at 0.
+        n_state_extras += static_cast<Index>(pool_.num_branch_switches());
         pulsim::Vector x0 = pulsim::Vector::Zero(
             static_cast<int>(n_nodes + n_state_extras));
+        struct CapEdge { Index other; Real v_ab; Index branch; };
+        std::unordered_map<Index, std::vector<CapEdge>> cap_adj;
+        std::unordered_map<Index, bool> is_from;
         for (const auto& [b_id, value] : initial_conditions_) {
             if (b_id < 0 || b_id >= graph_.num_branches()) continue;
             // Inductor / source: write into the pool-mapped state
@@ -1135,13 +1307,57 @@ public:
                     x0(col) = value;
                 }
             } else if (pool_.is_capacitor(b_id)) {
-                // Cap IC → node voltage of the positive terminal.
                 const auto& br = graph_.branch(b_id);
-                if (br.from >= 0 && br.from < n_nodes) {
-                    x0(br.from) = value;
-                }
+                cap_adj[br.from].push_back({br.to, value, b_id});
+                cap_adj[br.to].push_back({br.from, -value, b_id});
+                is_from[br.from] = true;
+                is_from.try_emplace(br.to, false);
             }
             // Resistors and other kinds: silently ignored.
+        }
+        // A cap IC is a node-voltage DIFFERENCE, v(from) - v(to) = c0.
+        // Writing c0 into the positive terminal alone zeroed the upper
+        // cap of a series pair given 10 V / 10 V. Walk each group of
+        // caps joined by shared nodes from ground or, when it does not
+        // reach ground, from a node that is only ever a negative
+        // terminal, held at 0 V (a lone floating cap keeps its old
+        // placement, v(from) = c0, v(to) = 0). A loop of ICs that
+        // breaks KVL is refused.
+        std::unordered_map<Index, Real> known;
+        std::vector<Index> roots;
+        for (const auto& kv : is_from) {
+            if (kv.first != kGround) roots.push_back(kv.first);
+        }
+        std::sort(roots.begin(), roots.end(), [&](Index a, Index b) {
+            return std::pair{is_from.at(a), a} < std::pair{is_from.at(b), b};
+        });
+        if (cap_adj.contains(kGround)) roots.insert(roots.begin(), kGround);
+        for (const Index root : roots) {
+            if (known.contains(root)) continue;
+            known[root] = 0.0;
+            std::vector<Index> stack{root};
+            while (!stack.empty()) {
+                const Index a = stack.back();
+                stack.pop_back();
+                for (const auto& e : cap_adj.at(a)) {
+                    const Real vb = known.at(a) - e.v_ab;
+                    const auto it = known.find(e.other);
+                    if (it == known.end()) {
+                        known[e.other] = vb;
+                        stack.push_back(e.other);
+                    } else if (std::abs(it->second - vb) >
+                               1e-9 * std::max(Real{1}, std::abs(vb))) {
+                        throw std::invalid_argument(std::format(
+                            "initial_state: the capacitor initial voltages "
+                            "around '{}' break KVL (a loop of c0 values does "
+                            "not sum to zero)",
+                            name_of(e.branch)));
+                    }
+                }
+            }
+        }
+        for (const auto& [node, v] : known) {
+            if (node >= 0 && node < n_nodes) x0(node) = v;
         }
         return x0;
     }
@@ -1189,6 +1405,9 @@ public:
             } else if (pool_.is_inductor(b)) {
                 col = pool_.branch_var_id_for_inductor(b, graph_);
                 prefix = "I(";
+            } else if (pool_.is_branch_form(b)) {
+                col = pool_.branch_var_id_for_switch(b, graph_);
+                prefix = "I(";
             } else {
                 continue;
             }
@@ -1233,6 +1452,7 @@ public:
                 "add_diode(\"{}\"): forward drop V_f must be a finite "
                 "number >= 0 V (got {}).", name, V_f));
         }
+        require_conductances_("add_diode", name, g_on, g_off);
         const Index a_idx = resolve_node_(anode);
         const Index k_idx = resolve_node_(cathode);
         const Index b_id = add_branch_(
@@ -1269,12 +1489,48 @@ public:
     CircuitBuilder& add_switch(
         std::string_view name, std::string_view from,
         std::string_view to, Real g_on, Real g_off) {
+        require_conductances_("add_switch", name, g_on, g_off);
         const Index from_idx = resolve_node_(from);
         const Index to_idx   = resolve_node_(to);
         const Index b_id = add_branch_(
             name, from_idx, to_idx,
             topology::BranchKind::Switch);
         pool_.add_switch(b_id, g_on, g_off);
+        return *this;
+    }
+
+    /// add-branch-form-ideal-switch (design D1, D6): a controlled switch
+    /// in BRANCH form — its own current unknown, R_on >= 0 in series
+    /// (R_on = 0: a 0 V source when ON), g_off >= 0 in parallel when OFF
+    /// (g_off = 0: i = 0). Opt-in until the default flip.
+    CircuitBuilder& add_ideal_switch(
+        std::string_view name, std::string_view from,
+        std::string_view to, Real R_on = Real{0}, Real g_off = Real{0}) {
+        require_branch_values_("add_ideal_switch", name, R_on, g_off);
+        const Index from_idx = resolve_node_(from);
+        const Index to_idx   = resolve_node_(to);
+        const Index b_id = add_branch_(
+            name, from_idx, to_idx, topology::BranchKind::Switch);
+        pool_.add_switch(b_id, branch_g_on_(R_on), g_off);
+        pool_.set_branch_form(b_id, R_on);
+        return *this;
+    }
+
+    /// add-branch-form-ideal-switch D5: a PWL diode in BRANCH form (ON:
+    /// v = V_f + R_on·i; OFF: i = g_off·v), decided on its solved current
+    /// while ON. `add_diode(form='branch')` in Python.
+    CircuitBuilder& add_diode_branch(
+        std::string_view name, std::string_view anode,
+        std::string_view cathode, Real R_on = Real{0},
+        Real g_off = Real{0}, Real V_th = Real{0}, Real V_f = Real{0}) {
+        require_branch_values_("add_diode", name, R_on, g_off);
+        require_diode_drop_("add_diode", name, V_f);
+        const Index a_idx = resolve_node_(anode);
+        const Index k_idx = resolve_node_(cathode);
+        const Index b_id = add_branch_(
+            name, a_idx, k_idx, topology::BranchKind::Switch);
+        pool_.add_diode(b_id, branch_g_on_(R_on), g_off, V_th, V_f);
+        pool_.set_branch_form(b_id, R_on);
         return *this;
     }
 
@@ -1330,6 +1586,8 @@ public:
         Real R_off = Real{1e9},
         bool body_diode = true,
         Real V_F        = Real{0.7}) {
+        require_conductances_("add_mosfet", name, Real{1} / R_on,
+                              Real{1} / R_off, "R_on", "R_off", R_on, R_off);
         if (!body_diode) {
             return add_switch(name, drain, source,
                                 Real{1} / R_on,
@@ -1356,6 +1614,12 @@ public:
         Real g_on_diode  = Real{1e3},
         Real g_off_diode = Real{1e-9}) {
         require_diode_drop_("add_mosfet_with_body_diode", name, V_F);
+        require_conductances_("add_mosfet_with_body_diode", name,
+                              Real{1} / R_on, Real{1} / R_off, "R_on",
+                              "R_off", R_on, R_off);
+        require_conductances_("add_mosfet_with_body_diode", name,
+                              g_on_diode, g_off_diode, "g_on_diode",
+                              "g_off_diode");
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
         // Main switch (drain → source).
@@ -1387,6 +1651,8 @@ public:
         std::string_view emitter,
         Real R_on  = Real{10e-3},
         Real R_off = Real{1e9}) {
+        require_conductances_("add_igbt", name, Real{1} / R_on,
+                              Real{1} / R_off, "R_on", "R_off", R_on, R_off);
         return add_switch(std::move(name),
                             std::move(collector),
                             std::move(emitter),
@@ -2008,6 +2274,54 @@ private:
         }
     }
 
+    // add-branch-form-ideal-switch task 2.1: the conductance form needs a
+    // finite g_on > 0 (an infinite one aborted "numerically singular"
+    // mid-run) and a finite g_off >= 0. `field_on`/`field_off` name the
+    // caller's own parameters (R_on for a MOSFET, g_on for add_switch).
+    static void require_conductances_(std::string_view fn,
+                                      std::string_view name, Real g_on,
+                                      Real g_off,
+                                      std::string_view field_on = "g_on",
+                                      std::string_view field_off = "g_off",
+                                      Real shown_on = std::nan(""),
+                                      Real shown_off = std::nan("")) {
+        if (!(g_on > Real{0}) || !std::isfinite(g_on)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): {} = {} is invalid: the conductance form needs a "
+                "finite on-conductance g_on > 0 (an ideal R_on = 0 switch is "
+                "the branch form, add_ideal_switch).", fn, name, field_on,
+                std::isnan(shown_on) ? g_on : shown_on));
+        }
+        if (!(g_off >= Real{0}) || !std::isfinite(g_off)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): {} = {} is invalid: the off-conductance g_off "
+                "must be finite and >= 0.", fn, name, field_off,
+                std::isnan(shown_off) ? g_off : shown_off));
+        }
+    }
+
+    static void require_branch_values_(std::string_view fn,
+                                       std::string_view name, Real R_on,
+                                       Real g_off) {
+        if (!(R_on >= Real{0}) || !std::isfinite(R_on)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): R_on = {} is invalid: the branch form needs a "
+                "finite R_on >= 0 (0 is the ideal switch).", fn, name, R_on));
+        }
+        if (!(g_off >= Real{0}) || !std::isfinite(g_off)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): g_off = {} is invalid: the off-conductance must "
+                "be finite and >= 0 (0 is the ideal open switch).", fn, name,
+                g_off));
+        }
+    }
+
+    // The conductance a branch-form switch reports as g_on (never stamped).
+    [[nodiscard]] static Real branch_g_on_(Real R_on) noexcept {
+        return R_on > Real{0} ? Real{1} / R_on
+                              : std::numeric_limits<Real>::infinity();
+    }
+
     [[nodiscard]] static constexpr bool is_ground_alias_(
         std::string_view name) noexcept {
         return name == "gnd" || name == "GND" || name == "0";
@@ -2148,7 +2462,204 @@ private:
         return b_id;
     }
 
-    topology::Graph                         graph_;
+    CircuitBuilder(const CircuitBuilder&) = default;
+    CircuitBuilder& operator=(const CircuitBuilder&) = default;
+
+    friend class ir::Circuit;  // with_value: set_value_ with its own name
+
+    struct FieldRef_ {
+        Index branch;
+        std::uint16_t field;
+        const ir::FieldSpec* spec;
+    };
+
+    /// Resolve "<device>.<field>"; refuses, naming device and field, an
+    /// unknown device or field and a power-MOSFET composite member.
+    [[nodiscard]] FieldRef_ resolve_field_(std::string_view fn,
+                                           std::string_view device_dot_field) const {
+        const auto dot = device_dot_field.rfind('.');
+        if (dot == std::string_view::npos || dot == 0 ||
+            dot + 1 == device_dot_field.size()) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): expected \"<device>.<field>\", e.g. "
+                "\"R1.R\"", fn, device_dot_field));
+        }
+        const auto dev = device_dot_field.substr(0, dot);
+        const auto field = device_dot_field.substr(dot + 1);
+        const auto hit = branch_index_.find(dev);
+        if (hit == branch_index_.end()) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): no device named \"{}\"",
+                fn, device_dot_field, dev));
+        }
+        const Index b = hit->second;
+        for (const auto& [ch, rec] : power_mosfets_) {
+            const bool member = ch == b ||
+                std::find(rec.sub_elements.begin(), rec.sub_elements.end(),
+                          dev) != rec.sub_elements.end();
+            if (member) {
+                throw std::invalid_argument(std::format(
+                    "{}(\"{}\"): \"{}\" belongs to the power MOSFET "
+                    "\"{}\", whose element values are derived from its "
+                    "datasheet record; rebuild it with the new value",
+                    fn, device_dot_field, dev, rec.name));
+            }
+        }
+        const auto kind = pool_.kind_of(b);
+        const auto* spec = ir::find_field(kind, field);
+        if (spec == nullptr) {
+            std::string names;
+            for (const auto& f : ir::fields_of(kind)) {
+                names += names.empty() ? "" : ", ";
+                names += f.name;
+            }
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): device \"{}\" ({}) has no value field "
+                "\"{}\"; its fields: {}", fn, device_dot_field, dev,
+                pwl::kKindCaps[static_cast<std::size_t>(kind)].name, field,
+                names.empty() ? std::string{"none"} : names));
+        }
+        return FieldRef_{b, static_cast<std::uint16_t>(
+                             spec - ir::fields_of(kind).data()), spec};
+    }
+
+    /// Write one field after checking the device as its `add_*` does
+    /// (`ir::check_device`); a refusal leaves the device unchanged.
+    void apply_field_(const FieldRef_& r, Real value,
+                      std::string_view fn = {}, std::string_view what = {}) {
+        auto params = pool_.params_of(r.branch);
+        r.spec->set(params, value);
+        try {
+            ir::check_device(params, r.spec->name);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): device \"{}\": {} (got {} = {})", fn, what,
+                graph_.branch_name(r.branch), e.what(), r.spec->name, value));
+        }
+        pool_.params_of_mut(r.branch) = std::move(params);
+        pool_.sync_derived_values(r.branch);
+    }
+
+    /// A branch-form switch or diode (add-branch-form-ideal-switch) is
+    /// stamped from its R_on (kept beside the pool's g_on) and g_off, both
+    /// allowed to be 0; its V_th / V_f go through the field table. g_on
+    /// and R_off are not read by the branch law: refused by name, as
+    /// `check_device` refuses an unread field. Returns false when
+    /// `device_dot_field` is not a branch-form R_on / g_off / g_on / R_off.
+    bool set_branch_form_value_(std::string_view fn,
+                                std::string_view device_dot_field, Real value) {
+        const auto dot = device_dot_field.rfind('.');
+        if (dot == std::string_view::npos) return false;
+        const auto dev = device_dot_field.substr(0, dot);
+        const auto field = device_dot_field.substr(dot + 1);
+        const auto hit = branch_index_.find(dev);
+        if (hit == branch_index_.end() || !pool_.is_branch_form(hit->second) ||
+            field == "V_th" || field == "V_f") {
+            return false;
+        }
+        const Index b = hit->second;
+        auto params = pool_.params_of(b);
+        Real* g_on = nullptr;
+        Real* g_off = nullptr;
+        bool diode = false;
+        std::visit([&](auto& prm) {
+            if constexpr (requires { prm.g_on; prm.g_off; }) {
+                g_on = &prm.g_on;
+                g_off = &prm.g_off;
+                diode = requires { prm.V_f; };
+            }
+        }, params);
+        if (g_on == nullptr) return false;
+        Real R_on = pool_.branch_R_on(b);
+        if (field == "R_on") {
+            R_on = value;
+        } else if (field == "g_off") {
+            *g_off = value;
+        } else {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): device \"{}\" is in branch form: its fields "
+                "are R_on, g_off{} (the branch law does not read {})", fn,
+                device_dot_field, dev, diode ? ", V_th, V_f" : "", field));
+        }
+        require_branch_values_(fn, dev, R_on, *g_off);
+        *g_on = branch_g_on_(R_on);
+        pool_.params_of_mut(b) = std::move(params);
+        pool_.set_branch_form(b, R_on);   // R_on / g_off are never bound
+        return true;
+    }
+
+    void set_value_(std::string_view fn, std::string_view device_dot_field,
+                    Real value) {
+        if (set_branch_form_value_(fn, device_dot_field, value)) return;
+        const auto r = resolve_field_(fn, device_dot_field);
+        if (!ir::within(r.spec->bound, value)) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): field {} of device \"{}\" must be {} "
+                "(got {})", fn, device_dot_field, r.spec->name,
+                graph_.branch_name(r.branch), ir::bound_text(r.spec->bound),
+                value));
+        }
+        apply_field_(r, value, fn, device_dot_field);
+        unbind_(r.branch, r.field);
+    }
+
+    void unbind_(Index branch, std::uint16_t field) {
+        std::erase_if(bindings_, [&](const ParamBinding& x) {
+            return x.branch == branch && x.field == field;
+        });
+    }
+
+    static constexpr std::size_t kNoParam_ = static_cast<std::size_t>(-1);
+    [[nodiscard]] std::size_t find_param_(std::string_view name) const noexcept {
+        for (std::size_t i = 0; i < params_.size(); ++i) {
+            if (params_[i].name == name) return i;
+        }
+        return kNoParam_;
+    }
+    [[nodiscard]] std::size_t require_param_(std::string_view fn,
+                                             std::string_view name) const {
+        const auto i = find_param_(name);
+        if (i == kNoParam_) {
+            std::string names;
+            for (const auto& p : params_) {
+                names += names.empty() ? "" : ", ";
+                names += p.name;
+            }
+            throw std::invalid_argument(std::format(
+                "{}: no parameter named \"{}\"; parameters: {}", fn, name,
+                names.empty() ? std::string{"none"} : names));
+        }
+        return i;
+    }
+    static void check_param_(const ir::Parameter& p, Real value) {
+        if (!std::isfinite(value) || (p.lo && value < *p.lo) ||
+            (p.hi && value > *p.hi)) {
+            throw std::invalid_argument(std::format(
+                "parameter \"{}\" must be a finite number{}{} (got {})",
+                p.name,
+                p.lo ? std::format(" >= {}", *p.lo) : std::string{},
+                p.hi ? std::format(" <= {}", *p.hi) : std::string{}, value));
+        }
+    }
+
+    std::vector<ir::Parameter> params_;
+    std::vector<ParamBinding>  bindings_;
+
+    /// The builder's graph, copyable only through `Graph::clone` so
+    /// the builder's (private) copy constructor stays a default one:
+    /// a member added later is copied without anyone listing it.
+    struct GraphSlot_ : topology::Graph {
+        GraphSlot_() = default;
+        GraphSlot_(const GraphSlot_& o) : topology::Graph(o.clone()) {}
+        GraphSlot_& operator=(const GraphSlot_& o) {
+            static_cast<topology::Graph&>(*this) = o.clone();
+            return *this;
+        }
+        GraphSlot_(GraphSlot_&&) noexcept = default;
+        GraphSlot_& operator=(GraphSlot_&&) noexcept = default;
+    };
+
+    GraphSlot_                              graph_;
     pwl::DevicePool                         pool_;
     std::unordered_map<std::string, Index,
                         NodeKeyHash, std::equal_to<>> node_map_;
@@ -2173,3 +2684,6 @@ private:
 };
 
 }  // namespace pulsim::builder
+
+// `CircuitBuilder::build()` is defined with `ir::Circuit`.
+#include "pulsim/ir/circuit.hpp"

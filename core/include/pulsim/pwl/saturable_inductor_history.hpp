@@ -85,6 +85,8 @@ public:
         //! λ at the γ stage point; read only by the BDF2 stage, and
         //! only between the two stages of one step.
         Real  lambda_gamma = Real{0};
+        //! i_L at the γ stage point (the increment form reads it).
+        Real  i_gamma = Real{0};
         //! Jiles-Atherton step-start state (H_n, M_n), meaningful
         //! only when params.ja is set. Committed on accept; a
         //! rejected step never touches it (evaluations integrate
@@ -186,6 +188,7 @@ public:
     /// evaluation — as the base the BDF2 stage integrates from.
     void capture_gamma(const Vector& x_gamma) {
         for (auto& e : entries_) {
+            e.i_gamma = x_gamma[e.branch_var_id];
             if (e.params.ja) {
                 const auto ev = models::JilesAthertonCore::evaluate(
                     *e.params.ja, e.ja_state, x_gamma[e.branch_var_id]);

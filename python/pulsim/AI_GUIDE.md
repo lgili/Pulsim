@@ -327,13 +327,14 @@ R_load =  10.0 ohm -> V_out = 12.00 V
 R_load = 100.0 ohm -> V_out = 15.79 V
 ```
 
-At 100 ohm the inductor current reaches zero each cycle (discontinuous
-conduction), so `V_out` rises above `D * V_in` (physics). `p.sweep_path_aware` reuses the factorisation for R/L/C-only
+At 100 ohm the buck is in DCM, so `V_out` > `D * V_in`. `p.sweep_path_aware` reuses the factorisation for R/L/C-only
 sweeps; `parallel=True` runs on threads when the step loop is native.
 For optimisers, `p.design`: `Evaluator(build, period=T,
 loads=("RL",), output="vout").evaluate(d)`, `build(d) -> (b, switch_fn)`.
 Read `rec.kpis` only for status `ok`/`infeasible`; `refused`/`failed`
-carry `rec.reason` and no number.
+carry `rec.reason` and no number. Exact gradients (dsed only):
+`r = p.simulate(..., engine="dsed", sensitivities=["L.L", "S.duty"])`,
+`v, g = r.kpi("vout", "avg")`; other engines refuse.
 
 ### 3.7 Three-phase inverter with sinusoidal PWM
 
@@ -403,7 +404,7 @@ b.add_vccs(name, in_pos, in_neg, n_pos, n_neg, gm)
 b.add_cccs(name, control, n_pos, n_neg, gain)
 b.add_ccvs(name, control, out_pos, out_neg, rm)
 b.add_gyrator(name, p1_pos, p1_neg, p2_pos, p2_neg, g)
-b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.0, V_f=0.0)
+b.add_diode(name, anode, cathode, g_on=None, g_off=None, V_th=0.0, V_f=0.0, ...)
 b.add_shockley_diode(name, anode, cathode, I_S=1e-12, n=1.0, V_T=0.025852, G_min=1e-12, BV=0.0)
 b.add_switch(name, n_pos, n_neg, g_on, g_off)
 b.add_mosfet(name, drain, source, R_on=0.001, R_off=1000000000.0, body_diode=True, V_F=0.7)
@@ -458,21 +459,21 @@ Each row was measured on this version. The fix column is what to write.
 
 | # | Wrong assumption | What actually happens | Do this instead |
 |---|---|---|---|
-| 1 | `V_th` of `add_diode` / `add_bridge_rectifier` is a forward drop | It is the turn-on threshold. On-state is `V_f + I/g_on`: 10 A into `g_on = 20 S` gives 0.500 V for `V_th = 0` and `0.7` alike, 1.200 V with `V_f = 0.7`. `add_three_phase_vsi(V_f=)` and the MOSFET/IGBT diode `V_F` ARE drops | Pass `V_f` (PSIM's diode drop; losses include `V_f*I`), or `b.add_shockley_diode` for an exponential law. Never also a `conduction_specs` `V_f0` |
+| 1 | `V_th` of `add_diode` / `add_bridge_rectifier` is a forward drop | It is the turn-on threshold. On-state is `V_f + I/g_on`: 10 A into `g_on = 20 S` gives 0.500 V for `V_th = 0` and `0.7` alike, 1.200 V with `V_f = 0.7`. `add_three_phase_vsi(V_f=)` and the MOSFET/IGBT diode `V_F` ARE drops | Pass `V_f` (losses include `V_f*I`), or `b.add_shockley_diode`. Never also a `conduction_specs` `V_f0` |
 | 2 | `v.mean()` over a result is the average | The default grid is variable-step and clusters at events. Rectifier of 6.2: `.mean()` 4.575 V vs 6.330 V (-28 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
 | 3 | `p.SwitchStateMask(1)` sets bit 0 | It is a mask of SIZE 1, all OFF | `m = p.SwitchStateMask(b.graph.num_switches); m.set(i, True)` |
 | 4 | MOSFET k is switch bit k | `add_mosfet` adds `<name>_body`, so bits interleave with diodes (below) | `b.switch_index_of(name)` |
 | 5 | Loosening `tol_newton_dx` / `tol_newton_res` fixes a Newton abort | Both are absolute on purpose. Snubbed flyback, `tol_newton_dx=1e-5, tol_newton_res=1e-4`: `auto` 3.53 V, fixed engine 15.31 V, silently | Keep the defaults; read the abort; run `engine='pwl'` with `dt`; fix gate edges, body diodes, initial state |
 | 6 | `p.scope` is a module | `p.scope(b, res, signals=[...])` plots (matplotlib) | `from pulsim.scope import LiveScope` (needs pyqtgraph); `import pulsim.scope as m` gives you the function |
-| 7 | Tie an isolated secondary or a floating neutral to ground with a tiny resistor | A milliohm tie is a galvanic bond. Tutorial 04's VSI: a 1 mOhm neutral-to-rail tie drove 58.8 A DC per phase | Leave it to `auto_regularize` (default on): it ties each floating subnet with 1 GOhm and warns. Own tie: 1 MOhm or more |
-| 8 | `res.v` of a floating DC rail is the DC voltage | It is to ground. Bridge with `ac_b="gnd"`, load across `dp`/`dn`: `v("dp")` spans -0.7..325.0 V, `v("dn")` -325.0..0.7 V; `dp - dn` averages 321.85 V on both engines | `res.v("dp") - res.v("dn")`, or ground one DC rail (3.3) |
+| 7 | Tie an isolated secondary or a floating neutral to ground with a tiny resistor | A milliohm tie is a galvanic bond. Tutorial 04's VSI: a 1 mOhm neutral-to-rail tie drove 58.8 A DC per phase | Leave it to `auto_regularize` (default on): the run's copy gets 1 GOhm per floating subnet (`res.plan.ties`), your builder none. Own tie: >= 1 MOhm |
+| 8 | `res.v` of a floating DC rail is the DC voltage | It is to ground. Bridge with `ac_b="gnd"`, load across `dp`/`dn`: `v("dp")` spans -0.7..325.0 V, `v("dn")` -325.0..0.7 V; `dp - dn` averages 321.85 V | `res.v("dp") - res.v("dn")`, or ground one DC rail (3.3) |
 | 9 | A fixed-step run is second order | By default each gate edge, source jump and start (ICs too) leaves a stale history: first order, ringing. RL decay, `i0=1`: 1.85e-3 at `dt=1e-5`, 0.92e-3 at `5e-6` | `discontinuity_restart=True` (6.3): gate read at step start; jumping `b_extra_fn` needs `.next_jump_after`. Sample 0 reads 0 V |
-| 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid unless split. Buck D = 0.25, 100 kHz, `make_pwm_switch_fn`: 6.24 V at `dt=2e-7` (12.5 on-steps run as 13), 6.00 V at `1e-7` | Whole-step `D/f_sw` (3.2), or 6.3 + `enable_substep_state_correction=True`: helper edges are split, order 2 |
+| 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid unless split. Buck D = 0.25, 100 kHz, `make_pwm_switch_fn`: 6.24 V at `dt=2e-7` (12.5 steps run as 13), 6.00 V at `1e-7` | Whole-step `D/f_sw` (3.2), or 6.3 + `enable_substep_state_correction=True`: helper edges are split, order 2 |
 | 11 | Omitting `switch_fn` leaves switches open | With `dt`, undriven controlled switches are ALL CLOSED and `simulate` only warns: the buck of 3.2 runs at D = 1 and settles at 24.0 V, not 12 V; without `dt`, `auto` refuses | Always pass `switch_fn` when the circuit has controlled switches |
-| 12 | `except Exception:` around `simulate` keeps a script robust | A broad except turns a refusal into a silent wrong answer | Let it raise, or catch `pulsim.UnsupportedError` (`.engine`, `.feature`); never `Exception` |
-| 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee: a diode on "its conduction boundary" or in a state "its commutation rule forbids", a `switch_fn` pulse narrower than its sampling. Silence is no proof: a one-shot `switch_fn` pulse under a quarter of the step ceiling (`dt`, else `t_end/1000`) can be skipped | Rerun with `dt`, compare (6.2); `dt` <= 4x the narrowest pulse |
-| 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | Linear joins make each edge a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (D = 0.25): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, exact 1.5044 A. Same for `device_loss_summary`'s `i_rms`, not `P_avg` | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three |
-| 15 | Controllers run each step | A source ticks at `t_start + k*T`, `ceil(span/T)` times | `step_observer` needs `controller_period=`; see `res.control_tick_counts` |
+| 12 | `except Exception:` around `simulate` keeps a script robust | A broad except turns a refusal into a silent wrong answer | Let it raise, or catch `pulsim.UnsupportedError` (`.engine`, `.feature`) |
+| 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee (a diode on its conduction boundary, a pulse narrower than its sampling). Silence is no proof: a one-shot pulse under a quarter of the step ceiling (`dt`, else `t_end/1000`) can be skipped | Rerun with `dt`, compare (6.2); `dt` <= 4x the narrowest pulse |
+| 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | Each edge is a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (D = 0.25): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, exact 1.5044 A. Same for `device_loss_summary`'s `i_rms`, not `P_avg` | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three |
+| 15 | Controllers run each step, chains in insertion order | Ticks at `t_start + k*T`, `ceil(span/T)` times. A chain runs in graph order; a loop with no `DelayBlock`, an unported block, a stateful block with no `p.Rate(T)` raise `ControlGraphBuildError` | `controller_period=` or `p.Rate`; custom code: `p.PythonBlock(fn)` |
 | 16 | No `ResolutionWarning` means resolved | Opt-in (`resolution_diagnostics=True`); estimates, not bounds | Halve `dt` (6.3) |
 
 Traps 1, 3 and 4, executed:
@@ -580,7 +581,7 @@ for r in (fixed, var):
 
 ```text
 pwl    time-weighted 6.331 V, sample mean 6.330 V
-trbdf2 time-weighted 6.330 V, sample mean 4.575 V
+trbdf2 time-weighted 6.330 V, sample mean 4.607 V
 ```
 
 The engines agree; the sample mean on the variable grid does not.
@@ -656,10 +657,8 @@ with the checks in its section 6 before reporting it.
 
 ## 9. Where to read more
 
-Paths are from the repository root (the site mirrors `docs/`).
-
 - `docs/getting-started.md`; `docs/tutorials/01-rc-charging.md` ...
-  `08-design-optimisation.md` (executed, end to end).
+  `08-design-optimisation.md`.
 - `docs/api-reference.md`, `docs/gotchas.md`, `docs/troubleshooting.md`,
   `docs/losses-and-thermal.md`,
   `docs/loss-thermal.md`, `docs/mental-model.md`, `docs/how-pulsim-works/`.

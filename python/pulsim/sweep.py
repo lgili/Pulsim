@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import functools
 import itertools
+import pickle
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Sequence
@@ -148,6 +149,20 @@ def _run_one_reraise(args, job):
     return "ok", job(args)
 
 
+def _run_one_pickled(blob, job, reraise):
+    """Process-pool worker: loads its job here, so a job that does not
+    load in the child (its module is not importable there) raises in the
+    parent by name instead of killing the worker."""
+    try:
+        args = pickle.loads(blob)
+    except Exception as exc:  # noqa: BLE001 — re-raised with the cause
+        raise RuntimeError(
+            f"backend='process': a worker could not load its job ({exc!r}); "
+            "every function in a job must be importable by module name in "
+            "a fresh interpreter, with the same pulsim") from None
+    return (_run_one_reraise if reraise else _run_one_captured)(args, job)
+
+
 _BACKENDS = ("auto", "thread", "process")
 
 
@@ -213,24 +228,86 @@ def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose,
             for k, _ in enumerate(ex.map(run_captured, rest), first + 1):
                 progress(k)
     else:
-        from multiprocessing import Pool
-        with Pool(nw) as pool:
+        # A multiprocessing.Pool waits forever for a worker that died
+        # (spawn: a job whose module the child cannot import); this
+        # executor raises BrokenProcessPool instead.
+        from concurrent.futures import ProcessPoolExecutor
+        from concurrent.futures.process import BrokenProcessPool
+        blobs = []
+        for i in rest:   # refused before any worker starts
             try:
-                worker = (functools.partial(_run_one_captured, job=job)
-                          if not reraise else
-                          functools.partial(_run_one_reraise, job=job))
-                for k, (i, (status, out)) in enumerate(zip(rest, pool.imap(
-                        worker, [args_iter[i] for i in rest])), first + 1):
+                blobs.append(pickle.dumps(args_iter[i]))
+            except Exception as exc:
+                raise TypeError(
+                    f"backend='process': job {i} does not pickle ({exc}); "
+                    "use backend='thread' or top-level functions") from exc
+        worker = functools.partial(_run_one_pickled, job=job, reraise=reraise)
+        if os.name == "nt":
+            nw = min(nw, 61)   # ProcessPoolExecutor's limit on Windows
+        with ProcessPoolExecutor(nw) as ex:
+            try:
+                for k, (i, (status, out)) in enumerate(
+                        zip(rest, ex.map(worker, blobs)), first + 1):
                     if status == "ok":
                         kpi_list[i] = out[0]
                     else:
                         failed.append((i, out))
                     progress(k)
-            except Exception:
-                pool.terminate()
+            except BrokenProcessPool as exc:
+                raise RuntimeError(
+                    "backend='process': a worker process died before "
+                    f"returning, or its result did not unpickle ({exc}); a "
+                    "spawned worker must import the same pulsim and every "
+                    "function of the job") from exc
+            except BaseException:
+                ex.shutdown(wait=False, cancel_futures=True)
                 raise
     failed.sort()
     return kpi_list, failed, backend
+
+
+class _CircuitPoints:
+    """``sweep(circuit, ...)`` / ``monte_carlo(circuit, ...)``: point
+    ``p`` is ``circuit.with_params`` of its parameter names, then
+    ``with_value`` of its ``"device.field"`` names. Every point shares
+    the circuit's structure, so its symbolic analysis is done once."""
+
+    def __init__(self, circuit):
+        self.circuit = circuit
+
+    def __call__(self, **p):
+        c = self.circuit.with_params(
+            {k: v for k, v in p.items() if "." not in k})
+        for k, v in p.items():
+            if "." in k:
+                c = c.with_value(k, v)
+        return c
+
+
+def _circuit_form(builder_factory, parallel, backend, simulate_kwargs):
+    """``(factory, backend)`` for a ``pulsim.Circuit`` first argument:
+    its points run on threads, which share the circuit (it is immutable);
+    a process pool cannot carry it."""
+    from . import Circuit
+    if not isinstance(builder_factory, Circuit):
+        return builder_factory, backend
+    if parallel and backend == "process":
+        raise ValueError(
+            "backend='process' cannot carry a pulsim.Circuit (it does "
+            "not pickle); use backend='thread' or 'auto' — the circuit "
+            "is immutable and shared by the threads")
+    stateful = [k for k in ("step_observer", "closed_loops")
+                if simulate_kwargs.get(k) is not None]
+    if getattr(simulate_kwargs.get("switch_fn"), "_closed_loop", None):
+        stateful.append("switch_fn (a closed loop)")
+    if parallel and stateful:
+        # one controller object would run every point at once on threads
+        raise ValueError(
+            f"sweep(circuit, parallel=True) with {', '.join(stateful)}: "
+            "the points would share one controller's state on threads. "
+            "Run parallel=False, or pass a builder factory that builds a "
+            "fresh controller per point.")
+    return _CircuitPoints(builder_factory), "thread"
 
 
 def sweep(builder_factory: Callable[..., Any],
@@ -249,7 +326,11 @@ def sweep(builder_factory: Callable[..., Any],
     ----------
     builder_factory
         Function `(**params) -> CircuitBuilder` that constructs a
-        populated builder.
+        populated builder, or a :class:`pulsim.Circuit`: each point is
+        then ``circuit.with_params`` of its parameter names (and
+        ``with_value`` of its ``"device.field"`` names). Its points
+        share one symbolic analysis and run on threads when
+        ``parallel`` (``backend="process"`` is refused).
     params
         Dict mapping parameter names to value sequences. The sweep
         runs over the Cartesian product (every combination).
@@ -268,7 +349,7 @@ def sweep(builder_factory: Callable[..., Any],
         ``res.step_loop_python_callbacks``: empty (the step loop is
         native, e.g. a ``make_pwm_switch_fn`` schedule) → the other
         jobs run on threads, which share the GIL-free kernel; any
-        Python callable → a `multiprocessing.Pool`. On threads,
+        Python callable → a process pool. On threads,
         `builder_factory` and `kpi_fn` run concurrently in this
         interpreter, so they must not share mutable state;
         ``"process"`` restores the separate-process model (arguments
@@ -290,6 +371,8 @@ def sweep(builder_factory: Callable[..., Any],
     SweepResult
         Parallel arrays of parameters and KPIs.
     """
+    builder_factory, backend = _circuit_form(builder_factory, parallel, backend,
+                                              simulate_kwargs)
     keys = list(params.keys())
     vals = [list(params[k]) for k in keys]
     shape = tuple(len(v) for v in vals)
@@ -355,7 +438,8 @@ def monte_carlo(builder_factory: Callable[..., Any],
     Parameters
     ----------
     builder_factory
-        `(**params) -> CircuitBuilder`.
+        `(**params) -> CircuitBuilder`, or a :class:`pulsim.Circuit`
+        (as in :func:`sweep`).
     distributions
         Dict mapping parameter names to draw functions. Each draw
         function is called as ``rng_draw(np_default_rng)`` and must
@@ -372,6 +456,8 @@ def monte_carlo(builder_factory: Callable[..., Any],
     ----------------
     Same as :func:`sweep`.
     """
+    builder_factory, backend = _circuit_form(builder_factory, parallel, backend,
+                                              simulate_kwargs)
     rng = np.random.default_rng(seed)
     samples = []
     for _ in range(n_samples):
@@ -449,28 +535,22 @@ def monte_carlo(builder_factory: Callable[..., Any],
 # etc.) is unchanged.
 
 
-# Component-kind dispatch table for the in-place builder updaters.
-# Maps `DevicePool::StoredKind` enum values to the matching
-# `CircuitBuilder.update_<kind>(name, value)` method name. Keys are
-# integers (the enum's underlying value); we look up the integer
-# from `pool.kind_of(branch_id)` which returns the StoredKind.
-#
-# The kind enum is exposed to Python as `_pulsim.StoredKind` —
-# we don't import it eagerly to keep this module importable without
-# the kernel extension (e.g. for docs builds). Lookup happens
-# inside the helper via duck-typing on `pool.kind_of()`'s return.
-_KIND_TO_UPDATE_METHOD = {
-    "Resistor":      "update_resistor_R",
-    "Inductor":      "update_inductor_L",
-    "Capacitor":     "update_capacitor_C",
-    "VoltageSource": "update_voltage_source_V",
+# The kinds `refactor_parametric` supports, and the value field
+# `builder.set_value("<name>.<field>", v)` updates in place for each.
+# Lookup happens inside the helper via duck-typing on
+# `pool.kind_of()`'s return (its `.name`).
+_KIND_TO_FIELD = {
+    "Resistor":      "R",
+    "Inductor":      "L",
+    "Capacitor":     "C",
+    "VoltageSource": "V",
 }
 
 
 def _resolve_param_kind(builder, name: str) -> Optional[str]:
     """Look up the device kind for a builder-time component name.
 
-    Returns one of the strings in `_KIND_TO_UPDATE_METHOD`, or None
+    Returns one of the strings in `_KIND_TO_FIELD`, or None
     if the name is unknown / the kind isn't parametric-refactor-supported.
     """
     try:
@@ -484,7 +564,7 @@ def _resolve_param_kind(builder, name: str) -> Optional[str]:
     # kind comes back as the `StoredKind` enum; its `.name` attribute
     # is the canonical string ("Resistor", "Inductor", etc.).
     kind_str = getattr(kind, "name", str(kind))
-    if kind_str in _KIND_TO_UPDATE_METHOD:
+    if kind_str in _KIND_TO_FIELD:
         return kind_str
     return None
 
@@ -598,21 +678,20 @@ def sweep_path_aware(
                 # injected into KPIs but not a real pool entry).
                 if kind is None:
                     continue
-                method = getattr(builder, _KIND_TO_UPDATE_METHOD[kind])
-                method(n, v)
+                builder.set_value(f"{n}.{_KIND_TO_FIELD[kind]}", v)
             return builder
         return sweep(_legacy_factory, params=params,
                      kpi_fn=kpi_fn, parallel=False,
                      verbose=verbose, t_end=t_end, dt=dt,
                      **simulate_kwargs)
 
-    # Resolve every param name → (branch_id, update_method_name) once.
+    # Resolve every param name → (branch_id, field) once.
     resolved = []
     for n in keys:
         kind = _resolve_param_kind(builder, n)
         assert kind is not None, "pre-flight guarantees kind"
         resolved.append((n, builder.branch_id_of(n),
-                         _KIND_TO_UPDATE_METHOD[kind]))
+                         _KIND_TO_FIELD[kind]))
 
     # Build the cache ONCE at the initial values.
     cache = _v2.PwlStateSpaceCache(builder.graph, builder.pool)
@@ -644,8 +723,8 @@ def sweep_path_aware(
         grid_params.append(p_dict)
 
         # 1. Push pool updates through builder convenience setters.
-        for n, b_id, method_name in resolved:
-            getattr(builder, method_name)(n, p_dict[n])
+        for n, b_id, fld in resolved:
+            builder.set_value(f"{n}.{fld}", p_dict[n])
 
         # 2. Refactor every active mask's cached factor via the
         #    path-based update. Batch overload pushes all updates
@@ -753,8 +832,7 @@ def monte_carlo_path_aware(
             for n, v in p.items():
                 kind = _resolve_param_kind(builder, n)
                 if kind is not None:
-                    method = getattr(builder, _KIND_TO_UPDATE_METHOD[kind])
-                    method(n, v)
+                    builder.set_value(f"{n}.{_KIND_TO_FIELD[kind]}", v)
             return builder
         return monte_carlo(
             _legacy_factory, distributions=distributions,
@@ -767,7 +845,7 @@ def monte_carlo_path_aware(
         kind = _resolve_param_kind(builder, n)
         assert kind is not None, "pre-flight guarantees kind"
         resolved.append((n, builder.branch_id_of(n),
-                         _KIND_TO_UPDATE_METHOD[kind]))
+                         _KIND_TO_FIELD[kind]))
 
     cache = _v2.PwlStateSpaceCache(builder.graph, builder.pool)
     cache.build(dt)
@@ -797,8 +875,8 @@ def monte_carlo_path_aware(
     total_refactor_us = 0.0
 
     for i, sample in enumerate(samples):
-        for n, b_id, method_name in resolved:
-            getattr(builder, method_name)(n, sample[n])
+        for n, b_id, fld in resolved:
+            builder.set_value(f"{n}.{fld}", sample[n])
         if len(resolved) == 1:
             res = cache.refactor_parametric(
                 resolved[0][1], sample[resolved[0][0]])

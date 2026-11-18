@@ -43,11 +43,11 @@ Bode guide).
 - [x] 4.2 Tests: `steady_state` on the DCM buck (PWL diode, C++ schedule) returns the reference orbit; `frequency_response` on the DCM buck returns a finite response whose DC gain matches task 3.3
 
 ## 5. Fixed and TR-BDF2 engines (needs `add-discontinuity-restart-rule`, `add-fixed-step-event-splitting`)
-- [ ] 5.1 Map on the true state with a restart at the section `t₀`
-- [ ] 5.2 `M` by finite differences with Broyden updates; refresh rule on the convergence rate
-- [ ] 5.3 `run_periodic_shooting`, `run_harmonic_balance` delegate; old implementations removed; deprecation note on `run_harmonic_balance`
-- [ ] 5.4 Tests: on each engine the orbit equals that engine's own 4000-period transient within 1e-8 of the state scale; fixed engine at T/100 and T/101 agree within 1e-4 on the DCM buck (today −0.023 % against −0.50 %); `run_periodic_shooting` on the DCM buck within 1e-4 of 8.996247 V (today 8.8998 V)
-- [ ] 5.5 Measurement gate (period runs, counted): DCM buck from zero ≤ 12 runs on the fixed engine, against `(N + 1)` per iteration today
+- [x] 5.1 Map on the true state with a restart at the section `t₀`
+- [x] 5.2 `M` by finite differences with Broyden updates; refresh rule on the convergence rate
+- [x] 5.3 `run_periodic_shooting`, `run_harmonic_balance` delegate; old implementations removed; deprecation note on `run_harmonic_balance`
+- [x] 5.4 Tests: on each engine the orbit equals that engine's own 4000-period transient within 1e-8 of the state scale; fixed engine at T/100 and T/101 agree within 1e-4 on the DCM buck (today −0.023 % against −0.50 %); `run_periodic_shooting` on the DCM buck within 1e-4 of 8.996247 V (today 8.8998 V)
+- [x] 5.5 Measurement gate (period runs, counted): DCM buck from zero ≤ 12 runs on the fixed engine, against `(N + 1)` per iteration today
 
 ## 6. State events with a field jump (needs `add-unified-event-queue`, `add-unified-device-interface`)
 - [ ] 6.1 Saltation for comparator-driven gate edges, hysteresis-band diodes and reset maps; flat device-state vector in `x₀`

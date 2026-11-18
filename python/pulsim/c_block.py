@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
+import math
 import os
 import shutil
 import subprocess
@@ -382,12 +383,15 @@ def add_c_block(builder,
     user_state: dict = dict(state) if state else {}
     inp_buf = np.zeros(n_in, dtype=float)
     out_buf = np.zeros(n_out, dtype=float)
-    fire = {"last_t": None, "n": 0}
+    fire = {"t0": None, "k": 0, "n": 0}
 
     def step_observer(t: float, x) -> None:
-        last_t = fire["last_t"]
-        if last_t is not None and (t - last_t) < dt - 1e-12:
-            return  # ZOH — hold previous outputs
+        # Integer tick counter: tick k is due at t0 + k*dt (t0 = the
+        # first call); outputs are held (ZOH) in between.
+        if fire["t0"] is None:
+            fire["t0"] = float(t)
+        if t < fire["t0"] + fire["k"] * dt - 1e-9 * dt:
+            return
         for k, loc in enumerate(in_locs):
             inp_buf[k] = float(x[loc])
         ret = fn(float(t), float(dt), inp_buf, out_buf, user_state)
@@ -398,7 +402,7 @@ def add_c_block(builder,
                     f"c_block {name!r}: step fn returned {ret_arr.size} "
                     f"values but the block has {n_out} outputs")
             out_buf[:] = ret_arr
-        fire["last_t"] = t
+        fire["k"] = math.floor((t - fire["t0"]) / dt + 1e-9) + 1
         fire["n"] += 1
 
     def b_extra_fn(t: float) -> list:

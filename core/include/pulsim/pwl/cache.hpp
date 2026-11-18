@@ -26,6 +26,7 @@
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/segment.hpp"
+#include "pulsim/pwl/symbolic_plan.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
 #include "pulsim/topology/enumerator.hpp"
@@ -1754,7 +1755,12 @@ public:
             //     path-based attempt only when the union path covers
             //     > MAX_PATH_LENGTH_RATIO of the columns (where
             //     path-based wouldn't save work vs a fresh factorise).
-            bool try_path = can_try_partial;
+            // Branch form (add-branch-form-ideal-switch D2): a flip swaps
+            // (s, a) between 1 and -g_off and (s, s) between -R_on and 1;
+            // the path refactor keeps the old pivot order and lands on a
+            // g_off-sized pivot (|x - x_ref| = 1.3e4 on the 16-mask bridge).
+            // Refactor in full there; the conductance form is unchanged.
+            bool try_path = can_try_partial && pool_.num_branch_switches() == 0;
             if (try_path && pop > 1) {
                 const Index n_state = static_cast<Index>(
                     pool_.state_size(graph_));
@@ -1831,6 +1837,13 @@ public:
         if (!rank1_initialized_) {
             rank1_backend_hint_ = hint;
         }
+    }
+
+    /// Share symbolic analyses with every cache given the same plan
+    /// (`ir::Circuit::symbolic_plan()`: all circuits of one structure).
+    /// Set before the first factorisation.
+    void share_symbolic(std::shared_ptr<SymbolicPlan> plan) noexcept {
+        plan_ = std::move(plan);
     }
 
     /// Snapshot the rank-1 telemetry counters. Read-only from outside;
@@ -2379,6 +2392,11 @@ private:
                 if (prev_mask.get(switch_idx) != curr_mask.get(switch_idx)) {
                     if (branch.from >= 0) uniq.insert(branch.from);
                     if (branch.to   >= 0) uniq.insert(branch.to);
+                    if (const Index v =
+                            pool_.branch_var_id_for_switch(branch.id, graph_);
+                        v >= 0) {
+                        uniq.insert(v);
+                    }
                 }
                 ++switch_idx;
             }
@@ -2517,6 +2535,7 @@ private:
     mutable std::shared_ptr<const sparse::SymbolicAnalysis> sym_static_;
     mutable std::atomic<std::uint64_t> symbolic_analyses_{0};
     mutable std::atomic<std::uint64_t> symbolic_fallbacks_{0};
+    std::shared_ptr<SymbolicPlan> plan_;  // add-immutable-circuit-ir
 
     /// Analyse `J` on `solver`, adopting the regime's shared analysis
     /// when `J` has its pattern. Returns `analyze`'s verdict.
@@ -2524,9 +2543,15 @@ private:
                                        const sparse::Matrix& J,
                                        bool dynamic) const {
         auto& sym = dynamic ? sym_dynamic_ : sym_static_;
+        bool seeded = false;
+        if (!sym && plan_) {
+            sym = plan_->get(dynamic);
+            seeded = sym != nullptr;
+        }
         if (sym && solver.adopt_symbolic(*sym, J)) {
             return true;
         }
+        if (seeded) sym.reset();  // the plan's pattern is not this one
         if (!solver.analyze(J)) {
             return false;
         }
@@ -2534,6 +2559,7 @@ private:
         auto mine = solver.export_symbolic(J);
         if (!sym) {
             sym = std::move(mine);
+            if (plan_ && sym) plan_->offer(dynamic, sym);
         } else if (mine) {
             // A sharing-capable backend refused the shared analysis:
             // the pattern differs from the regime's.

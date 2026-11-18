@@ -16,7 +16,11 @@ expressed as a chain of mixed-domain blocks:
 
 The chain replaces ~40 lines of hand-written observer/state code with
 a 4-block declarative spec, while reaching the same KPI (V_out tracks
-setpoint, recovers from setpoint step at t = 1 ms).
+setpoint, recovers from a +2 V setpoint step at t = 5 ms). The loop
+settles in ~3 ms, so each KPI window is the last 2 ms before / after
+the step. At 14 V the duty (0.583) falls between two dt-grid levels
+(one LSB = dt/T_PWM = 0.01): the PI dithers and V_out shows ~0.9 V pp
+around the right mean (AI_GUIDE trap 10).
 
 This validates:
   * inputs from a real circuit node (`from_node="vout"`),
@@ -42,8 +46,8 @@ V_REF    = 12.0
 F_PWM    = 100e3
 T_PWM    = 1.0 / F_PWM
 DT       = 1.0e-7
-T_END    = 3.0e-3
-T_STEP   = 1.0e-3
+T_END    = 10.0e-3
+T_STEP   = 5.0e-3
 R_LOAD   = 5.0
 
 KP       = 0.020
@@ -66,9 +70,9 @@ def build_plant() -> p.CircuitBuilder:
 
 
 class SetpointBlock:
-    """Tiny step-setpoint custom block — illustrates that the chain
-    accepts any class with `update(...) -> float` (not just stdlib
-    blocks)."""
+    """Tiny step-setpoint custom block — any class with
+    `update(...) -> float` runs in the chain through `p.PythonBlock`
+    (one Python call per evaluation)."""
 
     def __init__(self, v_pre: float, v_post: float, t_step: float):
         self.v_pre = v_pre
@@ -90,7 +94,8 @@ def main() -> None:
     # Build the chain.
     # -------------------------------------------------------------------------
     chain = p.MixedDomainBlockChain()
-    chain.add("setpoint", SetpointBlock(V_REF, V_REF + 2.0, T_STEP),
+    chain.add("setpoint", p.PythonBlock(SetpointBlock(V_REF, V_REF + 2.0,
+                                                     T_STEP)),
                 inputs=dict(t="time"),
                 output="sp")
     chain.add("lpf", p.FirstOrderLowPass(tau=TAU_LPF),
@@ -117,7 +122,7 @@ def main() -> None:
     switch_fn = chain.make_pwm_switch_fn("gate", num_switches=num_switches,
                                             switch_idx=0)
 
-    print(f"  Closed-loop buck via chain:")
+    print("  Closed-loop buck via chain:")
     print(f"    Kp={KP}, Ki={KI},  duty ∈ [{DUTY_MIN}, {DUTY_MAX}]")
     print(f"    setpoint = {V_REF} V until t={T_STEP*1e3:.1f} ms, "
           f"then {V_REF + 2.0} V")
@@ -136,15 +141,16 @@ def main() -> None:
 
     # Time-weighted window means (p.time_average): correct on any grid,
     # unlike a plain mean over the samples of a variable-step run.
-    pre_step  = p.time_average(res.times, v_out_arr, 0.5e-3, 1.0e-3)
-    post_step = p.time_average(res.times, v_out_arr, t_from=2.5e-3)
-    print(f"\n  KPI:")
-    print(f"    V_out pre-step  (0.5–1 ms):  mean={pre_step:.3f} V "
+    pre_step  = p.time_average(res.times, v_out_arr, T_STEP - 2e-3, T_STEP)
+    post_step = p.time_average(res.times, v_out_arr, t_from=T_END - 2e-3)
+    after = times >= T_STEP * 1e3
+    print("\n  KPI:")
+    print(f"    V_out pre-step  ({T_STEP*1e3-2:.0f}–{T_STEP*1e3:.0f} ms):  mean={pre_step:.3f} V "
           f"(target {V_REF:.1f})")
-    print(f"    V_out post-step (2.5–3 ms):  mean={post_step:.3f} V "
+    print(f"    V_out post-step ({T_END*1e3-2:.0f}–{T_END*1e3:.0f} ms): mean={post_step:.3f} V "
           f"(target {V_REF + 2.0:.1f})")
-    print(f"    max during transient:        {v_out_arr.max():.3f} V")
-    print(f"    min during transient:        {v_out_arr.min():.3f} V")
+    print(f"    max after step:              {v_out_arr[after].max():.3f} V")
+    print(f"    min after step:              {v_out_arr[after].min():.3f} V")
     print(f"    samples:                     {res.num_steps()}")
 
     # -------------------------------------------------------------------------

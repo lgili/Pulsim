@@ -46,16 +46,16 @@ inline void add_thermal_power_injection_to_chain(
     Index junction_node_idx,
     std::string power_channel = std::string{}) {
 
-    auto step = [P_ref = std::move(P_ref),
+    auto step = [P_ref = chain.in(std::move(P_ref)),
                     junction_node_idx,
-                    power_channel = std::move(power_channel)]
+                    power_channel = chain.out(power_channel)]
                    (ChainContext& ctx) {
         const Real P = blockchain::resolve(P_ref, ctx);
         if (ctx.b_extra) {
             (*ctx.b_extra)[junction_node_idx] = -P;
         }
-        if (!power_channel.empty()) {
-            ctx.channels[power_channel] = P;
+        if (power_channel >= 0) {
+            ctx.put(power_channel, P);
         }
     };
     chain.add(std::move(step));
@@ -78,17 +78,17 @@ inline void add_resistive_power_injection_to_chain(
     Index junction_node_idx,
     std::string power_channel = std::string{}) {
 
-    auto step = [R_ohm, i_ref = std::move(i_ref),
+    auto step = [R_ohm, i_ref = chain.in(std::move(i_ref)),
                     junction_node_idx,
-                    power_channel = std::move(power_channel)]
+                    power_channel = chain.out(power_channel)]
                    (ChainContext& ctx) {
         const Real i = blockchain::resolve(i_ref, ctx);
         const Real P = R_ohm * i * i;
         if (ctx.b_extra) {
             (*ctx.b_extra)[junction_node_idx] = -P;
         }
-        if (!power_channel.empty()) {
-            ctx.channels[power_channel] = P;
+        if (power_channel >= 0) {
+            ctx.put(power_channel, P);
         }
     };
     chain.add(std::move(step));

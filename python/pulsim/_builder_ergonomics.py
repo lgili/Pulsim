@@ -163,88 +163,6 @@ def _set_initial(self, device_name: str, value: float) -> None:
     _ic_dict(self)[str(device_name)] = float(value)
 
 
-def _initial_state_vector(self):
-    """Synthesise the flat ``initial_state`` ndarray from recorded
-    ICs. Zero everywhere else.
-
-    Returns
-    -------
-    numpy.ndarray
-        Shape ``(num_nodes + num_state_branches,)``.
-
-    Notes
-    -----
-    The state-variable layout is governed by the C++ pool — only
-    inductors and voltage sources have a dedicated current state
-    column; capacitor voltages are computed as node-difference, so
-    setting ``c0=5.0`` on a cap maps to the *node* voltage of the
-    cap's positive terminal (not a separate column).
-    """
-    import numpy as _np
-    n_nodes = int(self.graph.num_nodes)
-    # Probe the state size by running an empty cache build; cheaper:
-    # ask the pool for the state dimension via DC OP. Pragmatic: use
-    # the most common layout n_nodes + (num inductors + num sources).
-    # We compute it explicitly by scanning devices.
-    ic_map = _ic_dict(self)
-    # Build initial state by iterating recorded ICs and writing into
-    # the appropriate column.
-    # First, determine total state size. Walk each branch and look up
-    # if it has a state index.
-    n_state = 0
-    state_offsets: dict[str, tuple[int, str]] = {}
-    for d in self.devices():
-        b_id = self.branch_id_of(d.name)
-        # Try inductor first.
-        for accessor in (
-            "branch_var_id_for_inductor",
-            "branch_var_id_for_source",
-        ):
-            fn = getattr(self.pool, accessor, None)
-            if fn is None:
-                continue
-            try:
-                idx = int(fn(b_id, self.graph))
-                state_offsets[d.name] = (idx, accessor)
-                n_state = max(n_state, idx + 1)
-                break
-            except Exception:  # noqa: BLE001 — wrong kind
-                continue
-    # Default: state size is at least num_nodes + num_state_branches.
-    size = max(n_nodes + len(state_offsets), n_state)
-    x0 = _np.zeros(size, dtype=float)
-
-    # Write recorded ICs into their slots.
-    for name, value in ic_map.items():
-        if name in state_offsets:
-            # Inductor / source — has a state-vector column directly.
-            idx, _ = state_offsets[name]
-            x0[idx] = value
-        else:
-            # Capacitor — set the *node* voltage of the positive
-            # terminal. We need to know which node that is.
-            # `devices()` gives us the terminal names.
-            dev = next(
-                (d for d in self.devices() if d.name == name), None,
-            )
-            if dev is None or len(dev.terminals) < 2:
-                warnings.warn(
-                    f"initial_state_vector: cannot place IC for "
-                    f"{name!r} — device not found in builder.devices(). "
-                    "Skipping.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-                continue
-            try:
-                node_idx = self.node_id_of(dev.terminals[0])
-            except IndexError:
-                continue
-            if node_idx >= 0:
-                x0[node_idx] = value
-    return x0
-
-
 # ---------------------------------------------------------------------------
 # Alias helpers
 # ---------------------------------------------------------------------------
@@ -384,11 +302,6 @@ def install(builder_cls) -> None:
     builder_cls._resolve_alias = _resolve_alias_native  # type: ignore[attr-defined]
     if not hasattr(builder_cls, "set_initial"):
         builder_cls.set_initial = _set_initial             # type: ignore[attr-defined]
-    if not hasattr(builder_cls, "initial_state"):
-        builder_cls.initial_state = _initial_state_vector   # type: ignore[attr-defined]
-    native = getattr(builder_cls, "add_shockley_diode", None)
-    if native is not None and not getattr(native, "_records_params", False):
-        builder_cls.add_shockley_diode = _recording_shockley(native)  # type: ignore[attr-defined]
     native = getattr(builder_cls, "add_nonlinear_diode", None)
     if native is not None and not getattr(native, "_retired", False):
         builder_cls.add_nonlinear_diode = _retired_nonlinear_diode(native)  # type: ignore[attr-defined]
@@ -424,48 +337,19 @@ def _retired_nonlinear_diode(native):
     return add_nonlinear_diode
 
 
-def _recording_shockley(native):
-    """``add_shockley_diode`` that also keeps its law parameters.
-
-    ``builder.components()`` reports a Shockley diode with empty
-    ``params`` (the binding exposes none), so ``result.i()`` and the
-    loss / thermal summaries could not evaluate its current. The
-    native call runs first (it validates); the parameters are then
-    stored by device name in ``builder._shockley_params`` and read
-    back by :func:`shockley_params`."""
-    def add_shockley_diode(self, name: str, anode: str, cathode: str,
-                           I_S: float = 1e-12, n: float = 1.0,
-                           V_T: float = 0.025852, G_min: float = 1e-12,
-                           BV: float = 0.0) -> CircuitBuilder:
-        out = native(self, name, anode, cathode, I_S, n, V_T, G_min, BV)
-        table = getattr(self, "_shockley_params", None)
-        if table is None:
-            table = {}
-            try:
-                self._shockley_params = table
-            except AttributeError:  # pragma: no cover — no dynamic_attr
-                return out
-        table[str(name)] = {"I_S": float(I_S), "n": float(n),
-                            "V_T": float(V_T), "G_min": float(G_min),
-                            "BV": float(BV)}
-        return out
-
-    # The binding's docstring (signature line included), without
-    # functools.wraps' __wrapped__: inspect.signature must read this
-    # function, not the builtin, which has none.
-    add_shockley_diode.__doc__ = native.__doc__
-    add_shockley_diode.__qualname__ = "CircuitBuilder.add_shockley_diode"
-    add_shockley_diode._records_params = True  # type: ignore[attr-defined]
-    return add_shockley_diode
-
-
 def shockley_params(builder, name: str) -> "dict | None":
     """The ``add_shockley_diode`` parameters of device ``name``
-    (``I_S``, ``n``, ``V_T``, ``G_min``, ``BV``), or ``None`` when the
-    builder did not record them (a diode added by a path that bypassed
-    the Python ``add_shockley_diode``)."""
-    table = getattr(builder, "_shockley_params", None) or {}
-    return table.get(str(name))
+    (``I_S``, ``n``, ``V_T``, ``G_min``, ``BV``), read from the
+    device's own value fields, or ``None`` when ``name`` is not a
+    Shockley diode."""
+    try:
+        kind = builder.pool.kind_of(builder.branch_id_of(str(name)))
+    except Exception:  # noqa: BLE001 — not a device of this builder
+        return None
+    if getattr(kind, "name", None) != "ShockleyDiode":
+        return None
+    return {f: float(builder.get_value(f"{name}.{f}"))
+            for f in ("I_S", "n", "V_T", "G_min", "BV")}
 
 
 def _resolve_alias_native(self, name: str):

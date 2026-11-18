@@ -248,6 +248,19 @@ inline void load_device(
         ? dev["name"].as<std::string>()
         : std::string{"<unnamed>"};
 
+    // add-branch-form-ideal-switch: `form` is conductance | branch, on a
+    // switch or a diode only (a typo must not fall back silently).
+    if (dev["form"]) {
+        const std::string form = string_or(dev, "form", "");
+        if ((form != "conductance" && form != "branch") ||
+            (type != "switch" && type != "diode")) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: form: '{}' is not supported; use "
+                "form: conductance or form: branch on a switch or a diode.",
+                device_label(dev, idx, type), form));
+        }
+    }
+
     if (type == "voltage_source") {
         b.add_voltage_source(
             name,
@@ -500,6 +513,20 @@ inline void load_device(
         if (T_load != Real{0}) {
             b.add_current_source(name + ".tl", "gnd", omega, T_load);
         }
+    } else if (type == "diode" &&
+               string_or(dev, "form", "conductance") == "branch") {
+        // add-branch-form-ideal-switch: `form: branch` (R_on, g_off
+        // default 0 = ideal; a given g_on means R_on = 1/g_on).
+        b.add_diode_branch(
+            name,
+            require_string(dev, idx, type, "anode"),
+            require_string(dev, idx, type, "cathode"),
+            dev["g_on"] && !dev["R_on"]
+                ? Real{1} / require_real(dev, idx, type, "g_on")
+                : real_or(dev, "R_on", Real{0}),
+            real_or(dev, "g_off", Real{0}),
+            real_or(dev, "V_th", Real{0}),
+            real_or(dev, "V_f", Real{0}));
     } else if (type == "diode") {
         b.add_diode(
             name,
@@ -536,6 +563,16 @@ inline void load_device(
             require_string(dev, idx, type, "anode"),
             require_string(dev, idx, type, "cathode"),
             p);
+    } else if (type == "switch" &&
+               string_or(dev, "form", "conductance") == "branch") {
+        b.add_ideal_switch(
+            name,
+            require_string(dev, idx, type, "from"),
+            require_string(dev, idx, type, "to"),
+            dev["g_on"] && !dev["R_on"]
+                ? Real{1} / require_real(dev, idx, type, "g_on")
+                : real_or(dev, "R_on", Real{0}),
+            real_or(dev, "g_off", Real{0}));
     } else if (type == "switch") {
         b.add_switch(
             name,

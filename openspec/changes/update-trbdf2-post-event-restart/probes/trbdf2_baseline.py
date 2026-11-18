@@ -2,6 +2,8 @@
 
     python trbdf2_baseline.py --record   # untouched build: writes trbdf2_baseline.json
     python trbdf2_baseline.py            # after a change: before/after table
+    python trbdf2_baseline.py --save=F   # also write this run's rows/hashes to F
+    python trbdf2_baseline.py --against=F  # compare with F's rows/hashes instead
 
 Needs PYTHONPATH=<worktree>/python. Errors are against exact piecewise-LTI
 references where one exists (buck CCM/DCM via expm + root finding, pulse RC,
@@ -217,6 +219,7 @@ CIRCUITS = {
 PWL_RUNS = {
     "pwl_buck_ccm": lambda: buck(1.0, 0.5, 40, "pwl", dt=T / 200),
     "pwl_shockley": lambda: shockley_rect("pwl", dt=1e-6),
+    "dsed_buck_ccm": lambda: buck(1.0, 0.5, 40, "dsed"),
 }
 
 
@@ -286,6 +289,8 @@ def main():
     record = "--record" in sys.argv
     only = [a for a in sys.argv[1:] if not a.startswith("--")]
     base = json.loads(OUT.read_text()) if OUT.exists() else None
+    opt = dict(a[2:].split("=", 1) for a in sys.argv[1:] if a.startswith("--") and "=" in a)
+    cmp = json.loads(Path(opt["against"]).read_text()) if "against" in opt else base
     if record:
         refs = {n: reference(n) for n in CIRCUITS}
     else:
@@ -305,7 +310,7 @@ def main():
     hdr = f"{'case':22s} {'err':>19s} {'tw_err':>19s} {'accept':>13s} {'solves':>13s} {'reject':>9s} {'h_min':>19s}"
     print(hdr)
     for k, r in rows.items():
-        b = (base or {}).get("rows", {}).get(k, {}) if not record else {}
+        b = (cmp or {}).get("rows", {}).get(k, {}) if not record else {}
         if "error" in r:
             print(f"{k:22s} {r['error']}")
             continue
@@ -316,9 +321,12 @@ def main():
             return ns if old is None else f"{format(old, fmt)}>{ns}"
         print(f"{k:22s} {c('err', '.2e'):>19s} {c('tw_err', '.2e'):>19s} {c('n_accept', 'd'):>13s} "
               f"{c('n_solves', 'd'):>13s} {c('n_reject', 'd'):>9s} {c('h_min', '.1e'):>19s}  wall {r['wall_s']:.2f}s {r['extra'] or ''}")
-    if base:
+    if "save" in opt:
+        Path(opt["save"]).write_text(json.dumps({"rows": rows, "pwl_sha256": hashes}, indent=1))
+    if cmp:
         for n, hsh in hashes.items():
-            print(f"{n}: bit-identical={hsh == base['pwl_sha256'][n]}")
+            old = cmp["pwl_sha256"].get(n)
+            print(f"{n}: bit-identical={'(no record)' if old is None else hsh == old}")
 
 
 if __name__ == "__main__":

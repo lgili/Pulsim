@@ -188,7 +188,7 @@ jobs:
       - name: Run Python tests
         run: |
           # the reference harness runs in its own job (reference-smoke)
-          pytest python/tests -v -m "not reference"
+          pytest python/tests -v -m "not reference" --timeout=900
 
   # =============================================================================
   # Reference harness (restore-reference-benchmark-harness): analytic set,
@@ -237,7 +237,48 @@ jobs:
           pip install ".[dev]"
 
       - name: Reference smoke (analytic, goldens, counters)
-        run: pytest python/tests/test_benchmark_harness.py -v -m reference
+        run: pytest python/tests/test_benchmark_harness.py -v -m reference --timeout=900
+
+  # =============================================================================
+  # Slow examples guard (python/tests/test_examples_claims.py): runs every
+  # shipped script and notebook against the installed wheel and checks the
+  # numbers its docs claim. The scripts' subprocesses import the parent's
+  # pulsim, never <repo>/python.
+  # =============================================================================
+  examples-guard:
+    runs-on: ubuntu-24.04
+    continue-on-error: false
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libeigen3-dev gcc-13 g++-13
+
+      - name: Build and install package
+        env:
+          CC: gcc-13
+          CXX: g++-13
+          CMAKE_BUILD_PARALLEL_LEVEL: '2'
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest numpy scipy matplotlib nbformat nbclient ipykernel
+          pip install ".[dev]"
+          python -m ipykernel install --user --name python3
+
+      - name: Examples guard
+        env:
+          PULSIM_RUN_EXAMPLES: '1'
+          MPLBACKEND: Agg
+        run: pytest python/tests/test_examples_claims.py -v --timeout=1800
 
   # =============================================================================
   # Code Quality

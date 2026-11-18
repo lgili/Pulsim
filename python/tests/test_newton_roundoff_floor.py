@@ -31,7 +31,7 @@ def _run(dt, L, n=200):
     return r, [str(w.message) for w in caught]
 
 
-# (L, dt, stalls at roundoff). Measured before this change: 100 uH
+# (L, dt, needs the acceptance today). Measured before this change: 100 uH
 # aborts at 1e-11, 1e-12, 1e-13 s (||dx|| 1.863e-9, 1.490e-8, 1.192e-7);
 # 10 mH aborts at 1e-9 ... 1e-11 s. On the in-house LU of the Newton
 # workspace (update-newton-persistent-solver A2, integration batch 5)
@@ -44,12 +44,12 @@ CASES = [(100e-6, 1e-10, False), (100e-6, 1e-11, False),
          (10e-3, 1e-11, True), (10e-3, 1e-12, False)]
 
 
-@pytest.mark.parametrize("L, dt, aborted_before", CASES)
-def test_roundoff_stall_completes_and_is_reported(L, dt, aborted_before):
+@pytest.mark.parametrize("L, dt, needs_acceptance", CASES)
+def test_roundoff_stall_completes_and_is_reported(L, dt, needs_acceptance):
     r, msgs = _run(dt, L)
     n_acc = r.newton_roundoff_accepts
-    assert (n_acc > 0) == aborted_before
-    if aborted_before:
+    assert (n_acc > 0) == needs_acceptance
+    if needs_acceptance:
         assert r.newton_roundoff_omega_max <= 8 * np.finfo(float).eps
         assert any("accepted" in m and "8 eps" in m for m in msgs), msgs
     # The answer is the physics, not noise: over 200 steps i(t) - i0 is
@@ -66,3 +66,27 @@ def test_a_run_that_converged_is_untouched():
     r, _ = _run(1e-8, 10e-3)
     assert r.newton_roundoff_accepts == 0
     assert r.newton_roundoff_omega_max == 0.0
+
+
+def test_the_run_budget_is_an_option_and_its_abort_is_typed():
+    """100 uH at dt = 1e-13 s accepts every step at roundoff. With the
+    budget at 2 the third consecutive acceptance raises the typed
+    NewtonRoundoffBudgetExceeded, a SimulationAborted carrying the
+    partial result; the default (130) is not reached in 50 steps."""
+    assert issubclass(p.NewtonRoundoffBudgetExceeded, p.SimulationAborted)
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_resistor("R", "in", "a", 10.0)
+    b.add_inductor("L1", "a", "m", 100e-6, 0.9)
+    b.add_inductor("L2", "m", "d", 100e-6, 0.9)
+    b.add_shockley_diode("D", "d", "gnd")
+    kw = dict(t_end=50e-13, dt=1e-13, engine="pwl", max_dt_halvings=0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert p.simulate(b, **kw).newton_roundoff_accepts > 2
+        with pytest.raises(p.NewtonRoundoffBudgetExceeded,
+                           match="3 consecutive") as ei:
+            p.simulate(b, newton_roundoff_budget=2, **kw)
+    assert ei.value.partial is not None
+    with pytest.raises(ValueError, match="newton_roundoff_budget"):
+        p.simulate(b, newton_roundoff_budget=0, **kw)

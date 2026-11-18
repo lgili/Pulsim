@@ -672,6 +672,22 @@ public:
         return full;
     }
 
+    /// The current mask's recovery map (x_full = R·x + r, DC sources)
+    /// and energy scale √m per state: period_integrals.hpp reads the
+    /// observables and the modal basis of a mode from them.
+    [[nodiscard]] const DenseMatrix& recover_from_state() const {
+        ensure_current_resolved_();
+        return current_entry_->recover_from_state;
+    }
+    [[nodiscard]] const Vector& recover_const() const {
+        ensure_current_resolved_();
+        return current_entry_->recover_const;
+    }
+    [[nodiscard]] Vector energy_scale() const {
+        ensure_current_resolved_();
+        return energy_scale_(*current_entry_, 0);
+    }
+
     /// The graph / pool this adapter was built over — the diode
     /// predicate derivation (v2.0 Phase 3) runs its census on the
     /// same objects so the two engines cannot drift.
@@ -1250,8 +1266,13 @@ public:
             return ids.size() - 1;
         };
         std::vector<std::pair<std::size_t, std::size_t>> edges;
-        for (const auto& c : cps)
-            edges.emplace_back(idx(c.primary_branch_id), idx(c.secondary_branch_id));
+        for (const auto& c : cps) {
+            // two statements: argument order is unspecified (GCC numbered the
+            // secondary first and named the group "L2+L1")
+            const auto a = idx(c.primary_branch_id);
+            const auto b = idx(c.secondary_branch_id);
+            edges.emplace_back(a, b);
+        }
         // union-find over the windings
         std::vector<std::size_t> root(ids.size());
         for (std::size_t i = 0; i < root.size(); ++i) root[i] = i;

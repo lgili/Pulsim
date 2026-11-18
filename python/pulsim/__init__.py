@@ -32,7 +32,7 @@ For full control, fall back to the explicit pipeline:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from ._pulsim import (  # type: ignore[import-not-found]
     # v2.0 Phase 2 — raised when a transient cannot continue. Unlike
@@ -43,13 +43,20 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # were whole would be the silent wrong answer this API exists to
     # avoid, so the partial trace has to be asked for.
     SimulationAborted,
+    NewtonRoundoffBudgetExceeded,
+    ConvergenceError,
     # add-engine-conformance-matrix: the typed refusal (a ValueError
     # carrying engine / feature / device / kind) and the kernel's
     # device-kind capability table it is raised from.
     UnsupportedError,
     engine_capabilities,
+    # add-compiled-control-graph: algebraic loop / two writers / unknown
+    # block kind, raised when a control graph is built.
+    ControlGraphBuildError,
     # Builder API (Layer 6).
+    Circuit,
     CircuitBuilder,
+    Parameter,
     # Topology / device handles (opaque — produced by the
     # builder and consumed by the cache).
     Graph,
@@ -167,6 +174,8 @@ from .plot import (
 from .blockchain import (
     MixedDomainBlockChain,
     BlockSpec,
+    PythonBlock,
+    Rate,
     parse_block_chain,
 )
 from .dc_strategy import (
@@ -339,6 +348,8 @@ from .spice_import import (
 )
 # add-power-mosfet-datasheet-device: charge laws, double pulse, fitters.
 from ._pulsim import ChargeLaw, ChargeTable  # type: ignore[import-not-found]
+# add-in-kernel-event-losses: kernel datasheet tables (LossTable.to_kernel()).
+from ._pulsim import ConductionTable, LossTable3D  # type: ignore[import-not-found]
 from . import datasheet as datasheet  # noqa: F401  (re-export submodule)
 from .double_pulse import DoublePulseResult, double_pulse_metrics, double_pulse_test
 from .stream import LiveStream, NativeLiveStream
@@ -432,8 +443,15 @@ from .steady_state import (
 )
 from .periodic_steady_state import (
     periodic_steady_state,  # noqa: F401
+    periodic_steady_state_supported,  # noqa: F401
     PeriodicSteadyStateResult,  # noqa: F401
     SampledModel,  # noqa: F401
+)
+# add-parameter-sensitivities — exact gradients on the dsed path.
+from .sensitivity import (
+    value_and_grad,  # noqa: F401
+    KpiValue,  # noqa: F401
+    SensitivityResult,  # noqa: F401
 )
 
 # v2.0 Phase 3 — subsystems: define once, instantiate many, with
@@ -490,7 +508,9 @@ from ._ai_guide import ai_guide  # noqa: E402
 __all__ = [
     "ResolutionWarning",
     "ai_guide",
+    "Circuit",
     "CircuitBuilder",
+    "Parameter",
     "Graph",
     "DevicePool",
     "SwitchStateMask",
@@ -532,7 +552,14 @@ __all__ = [
     "Cancelled",
     "RetiredDeviceError",
     "SimulationAborted",
+    "NewtonRoundoffBudgetExceeded",
+    "ConvergenceError",
+    "periodic_steady_state_supported",
     "UnsupportedError",
+    "ControlGraphBuildError",
+    "value_and_grad",
+    "KpiValue",
+    "SensitivityResult",
     "engine_capabilities",
     # Closed-loop control building blocks (Phase 2 + add-python-closed-loop-helper v1.5).
     "PIController",
@@ -590,6 +617,8 @@ __all__ = [
     "MixedDomainBlockChain",
     "BlockSpec",
     "parse_block_chain",
+    "PythonBlock",
+    "Rate",
     # DC operating-point strategies (v1 parity Phase A.2).
     "compute_dc_op",
     "PseudoTransientConfig",
@@ -734,6 +763,8 @@ __all__ = [
     "spice_to_builder",
     "ChargeLaw",
     "ChargeTable",
+    "LossTable3D",
+    "ConductionTable",
     "DoublePulseResult",
     "double_pulse_metrics",
     "double_pulse_test",
@@ -777,7 +808,10 @@ if _HAS_SCOPE:
 # CircuitBuilder, define Cancelled exception, expose simulate-wrapped
 # analyses with `should_continue` cancellation.
 from . import _builder_ergonomics as _berg
+from ._circuit_ir import RunPlan, Tie
+from ._circuit_ir import install as _install_parameters
 _berg.install(CircuitBuilder)
+_install_parameters(CircuitBuilder)  # after _berg: wraps its add_* too
 
 
 # add-fixed-step-resolution-diagnostics thresholds (design D3).
@@ -786,11 +820,21 @@ _RESOLUTION_UNESTIMATED_MAX = 0.5
 
 
 def _warn_unlocated_edges(res):
-    """Event splitting without an edge oracle (review M3): say so once."""
+    """Fixed-step loop counters that mean a less accurate step: say so once.
+
+    * ``unlocated_gate_steps`` (review M3 / L4): a gate change from a
+      switch_fn without an edge oracle that happened INSIDE the previous
+      step (an edge exactly on the grid is not counted);
+    * ``split_event_overflows`` (L5): steps with more events than the
+      split takes; the rest were taken unsplit (first order there);
+    * ``stage2_retry_failures`` (M3): restart stage-2 backward-Euler
+      re-tries that failed, so the SDIRK stage 2 they were checking was
+      kept (it may carry an overshoot of the diode mode change).
+    """
     c = getattr(res, "counters", None) or {}
+    import warnings
     n = c.get("unlocated_gate_steps", 0)
     if n:
-        import warnings
         warnings.warn(
             f"simulate(enable_substep_state_correction=True): {n} gate "
             "change(s) came from a switch_fn without next_edge_after(t) "
@@ -799,17 +843,40 @@ def _warn_unlocated_edges(res):
             "schedule an oracle (make_pwm_switch_fn & co. have one) or "
             "put the edges on the dt grid. See res.counters.",
             UserWarning, stacklevel=3)
+    n = c.get("split_event_overflows", 0)
+    if n:
+        warnings.warn(
+            f"simulate(enable_substep_state_correction=True): {n} step(s) "
+            "had more events than the event split takes (8 per step); "
+            "the events beyond it were taken unsplit, first order there. "
+            "Reduce dt. See res.counters['split_event_overflows'].",
+            UserWarning, stacklevel=3)
+    n = c.get("stage2_retry_failures", 0)
+    if n:
+        warnings.warn(
+            f"simulate(discontinuity_restart=True): {n} restart step(s) "
+            "changed a diode's mode in SDIRK stage 2 and the backward-Euler "
+            "re-try that checks it failed; the SDIRK stage 2 was kept and "
+            "may overshoot the mode change. Reduce dt. See "
+            "res.counters['stage2_retry_failures'].",
+            UserWarning, stacklevel=3)
+
+
+def _resolution_flagged(res) -> bool:
+    """True when :func:`_warn_resolution` warns for this run."""
+    rd = getattr(res, "resolution", None)
+    return rd is not None and bool(
+        rd.lte_max > _RESOLUTION_LTE_MAX or list(rd.ringing)
+        or rd.unestimated_fraction > _RESOLUTION_UNESTIMATED_MAX)
 
 
 def _warn_resolution(builder, res, dt):
     """One ResolutionWarning per run (see ResolutionWarning)."""
-    rd = getattr(res, "resolution", None)
-    if rd is None:
+    if not _resolution_flagged(res):
         return
+    rd = res.resolution
     ring = list(rd.ringing)
     unest = rd.unestimated_fraction > _RESOLUTION_UNESTIMATED_MAX
-    if not (rd.lte_max > _RESOLUTION_LTE_MAX or ring or unest):
-        return
     import warnings
     lines = []
     if rd.lte_max > _RESOLUTION_LTE_MAX:
@@ -1149,6 +1216,14 @@ def _result_i(self, name: str, t=None, *, port=None):
             break
         except Exception:  # noqa: BLE001 — wrong device kind
             continue
+    if state_idx is None:
+        # A branch-form switch or diode solves its own current i_s.
+        fn = getattr(builder.pool, "branch_var_id_for_switch", None)
+        try:
+            k = int(fn(b_id, builder.graph)) if fn else -1
+        except Exception:  # noqa: BLE001 — not a switched branch
+            k = -1
+        state_idx = k if k >= 0 else None
     states = _sa(self)
     if state_idx is not None:
         # Owned, writable copy of the single column — see the note
@@ -1580,6 +1655,17 @@ def _result_plot(self, *signals, save=None, show=None, **kwargs):
 
 
 SimulationResult.plot = _result_plot  # type: ignore[attr-defined]
+# add-immutable-circuit-ir: the circuit that ran and what the run did to it.
+for _cls in (SimulationResult, _PEDRes):
+    _cls.plan = property(  # type: ignore[attr-defined]
+        lambda self: getattr(self, "_run_plan", None),
+        doc="The run's RunPlan (circuit, ties, preflight); None for a run "
+            "from a builder stand-in.")
+    _cls.circuit = property(  # type: ignore[attr-defined]
+        lambda self: getattr(getattr(self, "_run_plan", None), "circuit", None),
+        doc="The pulsim.Circuit this run simulated (with any regularising "
+            "ties); the caller's builder is never changed.")
+del _cls
 
 
 # =============================================================================
@@ -1795,8 +1881,21 @@ def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
     return lc.builder, t_end, dt, t_start, store_every
 
 
+
+def _warn_impulse(res, on_impulse):
+    """simulate(on_impulse='warn'): one UserWarning per run (D4 records)."""
+    if on_impulse == "warn" and list(getattr(res, "reinit_records", ())):
+        import warnings
+        r0 = res.reinit_records[0]
+        warnings.warn(
+            f"simulate(on_impulse='warn'): {len(res.reinit_records)} "
+            f"impulsive re-initialisation(s); first at t = {r0.t:g}: "
+            f"{', '.join(r0.devices)} made {', '.join(r0.states)} dependent "
+            f"({r0.kind}, {r0.dW:.6g} J removed). See res.reinit_records.",
+            UserWarning, stacklevel=3)
+
 def simulate(
-    builder: "CircuitBuilder | LoadedCircuit",
+    builder: "CircuitBuilder | Circuit | LoadedCircuit",
     t_end: Optional[float] = None,
     dt: Optional[float] = None,
     *,
@@ -1827,9 +1926,11 @@ def simulate(
     tol_newton_res: Optional[float] = None,
     enable_newton_line_search: Optional[bool] = None,
     enable_newton_lm: Optional[bool] = None,
+    newton_roundoff_budget: Optional[int] = None,
     enable_substep_state_correction: Optional[bool] = None,
     discontinuity_restart: Optional[bool] = None,
     resolution_diagnostics: Optional[bool] = None,
+    on_impulse: str = "record",
     inductor_freeze_di_max: Optional[float] = None,
     inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
@@ -1843,6 +1944,8 @@ def simulate(
     resume_from=None,
     # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
     solver: Optional["SolverOptions"] = None,
+    # --- forward parameter sensitivities (exact path only) ---
+    sensitivities: "Optional[Sequence[str]]" = None,
     mode_selection: Optional[str] = None,
     allow_implicit_segments: Optional[bool] = None,
 ) -> SimulationResult:
@@ -1955,8 +2058,11 @@ def simulate(
     Parameters
     ----------
     builder
-        A populated :class:`CircuitBuilder`, or a :class:`LoadedCircuit`
-        from :func:`load_yaml_file` / :func:`load_yaml_string`. From a
+        A populated :class:`CircuitBuilder`, an immutable :class:`Circuit`
+        (``builder.build()``), or a :class:`LoadedCircuit`
+        from :func:`load_yaml_file` / :func:`load_yaml_string`. The run
+        never changes it: preflight ties go on the run's own copy
+        (``result.plan.ties``, ``result.circuit``). From a
         ``LoadedCircuit`` the run takes ``t_end``, ``dt`` (when the YAML
         sets one), ``t_start`` (when ``t_start`` is left at 0.0) and
         ``store_every`` (when not passed) from its ``simulation:``
@@ -2012,7 +2118,10 @@ def simulate(
         switch state at each sample.  Defaults to all-closed.
     b_extra_fn
         PWL-only: Callable ``t -> list[float]`` adding to the constant
-        residual at each step.  Defaults to None.
+        residual F = J·x + b at each step.  An entry ``e`` on a voltage
+        source's row gives v(+) − v(−) = V − e (write −v to add v); on
+        a node row it draws a current ``e`` out of the node.  Defaults
+        to None.
     start_from_dc_op
         PWL-only: If ``True``, seed the initial state from
         :func:`compute_dc_op` instead of zero.
@@ -2045,6 +2154,22 @@ def simulate(
         :class:`SolverOptions`). Cross-check on the other engine
         instead (``engine='pwl'`` with an explicit ``dt`` after a
         TR-BDF2 abort).
+    newton_roundoff_budget
+        ``pwl`` / ``trbdf2``: the most consecutive Newton solves that
+        may be accepted at roundoff with no converged solve between
+        them (default 130, ten times the worst honest run measured).
+        One more raises :class:`NewtonRoundoffBudgetExceeded`, a
+        :class:`SimulationAborted` with the partial result.
+    sensitivities
+        ``engine='dsed'`` only (every other engine refuses it):
+        parameter names ``"<component>.<field>"`` (``R``, ``L``,
+        ``C``, ``V``; ``"<switch>.duty"`` of a trailing-edge PWM).
+        The run is the exact stepper with events located and no event
+        projection; the result gains ``.sensitivity`` (``states``
+        ``(n, n_state, n_p)``), ``.sens(signal, param)`` and
+        ``.kpi(signal, kind, with_grad=True)``. Exact or refused, never
+        a finite difference: see :mod:`pulsim.sensitivity`.
+
     mode_selection
         How PWL diodes are decided at an event. ``None`` / ``'legacy'``
         (default): today's settle; on ``engine='dsed'`` a guard judges
@@ -2119,6 +2244,26 @@ def simulate(
     if isinstance(builder, LoadedCircuit):
         builder, t_end, dt, t_start, store_every = _resolve_loaded_circuit(
             builder, t_end, dt, t_start, store_every)
+    # add-immutable-circuit-ir (BREAKING since 2.x): the run works on its
+    # OWN circuit. A builder is snapshotted here — before any kwarg can
+    # fail — and never mutated; a Circuit is immutable. The engines take
+    # a mutable CircuitBuilder, so the run gets a private clone of the
+    # run's circuit below, after the preflight.
+    _run_circuit = None
+    _caller_side_state = None
+    _caller_builder = builder  # identity checks (MMC arms) name the caller's
+    if isinstance(builder, Circuit):
+        if mmc_arms:
+            raise ValueError(
+                "simulate(circuit, mmc_arms=...): MMC arms are registered "
+                "on a CircuitBuilder; pass that builder, not a "
+                "pulsim.Circuit")
+        _run_circuit = builder
+    elif isinstance(builder, CircuitBuilder):
+        _run_circuit = builder._snapshot()
+        # Python-side tables (C blocks, Shockley parameters) until they
+        # live in the IR (group 3).
+        _caller_side_state = dict(builder.__dict__)
     if t_end is None:
         raise TypeError(
             "simulate(): missing required argument 't_end' (end time, s). "
@@ -2194,6 +2339,10 @@ def simulate(
     # column) until the default flip (DECISIONS #3).
     if engine == "exact":
         engine = "dsed"
+    # Every engine: those that refuse dependent modes never record.
+    if on_impulse not in ("record", "warn", "error"):
+        raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
+                         "'record', 'warn' or 'error'")
     from . import _dsed_dispatch as _dsed
     _dsed._validate_engine_kwargs(
         engine=engine,
@@ -2209,16 +2358,22 @@ def simulate(
         raise ValueError(
             f"simulate(): mode_selection={mode_selection!r}; expected "
             "None, 'legacy', 'shadow' or 'lcp'.")
+    if newton_roundoff_budget is not None and (
+            isinstance(newton_roundoff_budget, bool)
+            or int(newton_roundoff_budget) != newton_roundoff_budget
+            or int(newton_roundoff_budget) < 1):
+        raise ValueError(
+            f"simulate(newton_roundoff_budget={newton_roundoff_budget}): "
+            "must be an integer >= 1 (consecutive Newton solves accepted at roundoff "
+            "before NewtonRoundoffBudgetExceeded; default 130).")
 
     # ---- Topology preflight (v2.0 Phase 2) --------------------------
     #
-    # Placed AFTER kwarg validation and BEFORE the engine dispatch,
-    # both deliberately. After validation, because this MUTATES the
-    # caller's builder (it appends reference ties) and a call that
-    # dies on a typo'd kwarg must not leave the circuit changed.
-    # Before the dispatch, because mutating the builder is what lets
-    # BOTH engines inherit the fix — placing it later would have made
-    # auto_regularize a PWL-only feature the DSED path ignored.
+    # Placed BEFORE the engine dispatch so every engine runs the
+    # regularised circuit. The ties go on the RUN's circuit
+    # (add-immutable-circuit-ir): the caller's builder is never
+    # changed, `result.plan.ties` lists them and `result.circuit` is
+    # the circuit that ran.
     #
     # `None` means "not set"; resolve it here rather than relying on
     # an `is not False` identity test, which would silently treat
@@ -2226,22 +2381,33 @@ def simulate(
     if auto_regularize is None:
         auto_regularize = True
     _preflight_report = None
+    _ties = []
     if auto_regularize:
-        _preflight_report = builder.run_preflight(
-            PreflightOptions(auto_regularize=True))
+        if _run_circuit is not None:
+            _run_circuit, _preflight_report, _ties = (
+                _run_circuit.with_preflight(
+                    PreflightOptions(auto_regularize=True)))
+        else:  # a builder stand-in (test doubles)
+            _preflight_report = builder.run_preflight(
+                PreflightOptions(auto_regularize=True))
         if not _preflight_report.empty():
             import warnings
             warnings.warn(
                 "simulate(): " + _preflight_report.summary() +
                 "\n  These ties give the MNA a voltage reference "
                 "without loading the circuit (1 GΩ draws nanoamps). "
-                "Inspect them via result._preflight, or pass "
-                "auto_regularize=False to get the original singular"
-                "-matrix error instead. Note the ties persist on the "
-                "builder, so re-running the SAME builder with "
-                "auto_regularize=False will not restore the error — "
-                "rebuild the circuit for that.",
+                "They were added to this run's own copy of the circuit "
+                "(result.plan.ties, result.circuit); your builder is "
+                "unchanged, so auto_regularize=False on it raises the "
+                "original singular-matrix error.",
                 stacklevel=2)
+    _run_plan = None
+    if _run_circuit is not None:
+        builder = _run_circuit.to_builder()
+        if _caller_side_state:
+            builder.__dict__.update(_caller_side_state)
+        _run_plan = RunPlan(circuit=_run_circuit, ties=tuple(
+            Tie(*t) for t in _ties), preflight=_preflight_report)
 
     # add-python-builder-ergonomics: if the caller didn't pass an
     # explicit initial_state, ask the builder for its recorded ICs.
@@ -2297,6 +2463,8 @@ def simulate(
             if _np_check.any(_np_check.asarray(candidate) != 0.0):
                 initial_state = candidate
                 _ic_from_builder = True
+        except ValueError:
+            raise   # capacitor ICs that break KVL: a refusal, not a mock
         except Exception:  # noqa: BLE001 — test mocks etc.
             pass
 
@@ -2306,6 +2474,29 @@ def simulate(
     # every engine; dsed refuses closed_loops / step_observer itself.
     _plan = _compose_control(builder, closed_loops, step_observer,
                              controller_period, switch_fn)
+    # A control graph's driven sources reach every engine (above the
+    # dispatch: add-compiled-control-graph).
+    b_extra_fn = _plan.merge_b_extra(b_extra_fn)
+
+    # ---- Parameter sensitivities: the exact path only. Above the
+    # dispatch (three early returns below), so every engine refuses or
+    # honours it.
+    if sensitivities is not None and engine != "dsed":
+        raise _unsupported(
+            engine, "sensitivities",
+            f"simulate(engine={engine!r}, sensitivities=...): forward "
+            "sensitivities are computed on the exact path only "
+            "(engine='dsed'); on this engine a gradient would be a "
+            "finite difference of runs whose events sit on the step grid "
+            "(off by a factor of ten on the DCM buck). Pass "
+            "engine='dsed'.")
+    if sensitivities is not None and mode_selection in ("shadow", "lcp"):
+        raise _unsupported(
+            engine, "sensitivities",
+            f"simulate(sensitivities=..., mode_selection={mode_selection!r})"
+            ": the sensitivity run differentiates the legacy event "
+            "settle; a mode chosen by the complementarity problem has no "
+            "derivative here. Drop mode_selection.")
 
     # ---- Engine dispatch: DSED takes the early-return path. ----
     # For engine='dsed', `integrator` ∈ {'auto', 'rk45', 'bdf2', None}.
@@ -2336,6 +2527,8 @@ def simulate(
             # own step, so accepting this would promise a mechanism
             # that does not exist there.
             "max_dt_halvings": max_dt_halvings is not None,
+            # DSED runs no Newton roundoff acceptance.
+            "newton_roundoff_budget": newton_roundoff_budget is not None,
             # v2.0 Phase 1: output decimation is a fixed-grid
             # concept; the DSED engine emits variable-step samples,
             # so honouring `store_every` there would mean something
@@ -2381,29 +2574,39 @@ def simulate(
         # preflight report on the way out, so `result._preflight` —
         # which the warning tells every user to read — is not a
         # PWL-only attribute.
-        _dsed_res = _dsed.run_dsed_from_builder(
-            builder=builder,
-            t_end=t_end,
-            dt=dt,
-            rtol=rtol,
-            atol=atol,
-            dt_init=dt_init,
-            integrator=integrator,
-            stiffness_threshold=stiffness_threshold,
-            h_bdf2=h_bdf2,
-            t_start=t_start,
-            switch_fn=switch_fn,
-            b_extra_fn=b_extra_fn,
-            # Builder ICs (c0= / i0=) are a full-MNA vector: the
-            # dispatcher maps them per device onto the reduced state.
-            initial_state=None if _ic_from_builder else initial_state,
-            builder_initial_state=initial_state if _ic_from_builder else None,
-            progress=progress,
-            mode_selection=mode_selection,
-            allow_implicit_segments=bool(allow_implicit_segments),
-        )
+        if sensitivities is not None:
+            from .sensitivity import simulate_sensitivities
+            _dsed_res = simulate_sensitivities(
+                builder, t_end, sensitivities=sensitivities, dt=dt,
+                t_start=t_start, switch_fn=switch_fn,
+                initial_state=None if _ic_from_builder else initial_state,
+                ic_from_builder=_ic_from_builder, dt_init=dt_init,
+                b_extra_fn=b_extra_fn, integrator=integrator)
+        else:
+            _dsed_res = _dsed.run_dsed_from_builder(
+                builder=builder,
+                t_end=t_end,
+                dt=dt,
+                rtol=rtol,
+                atol=atol,
+                dt_init=dt_init,
+                integrator=integrator,
+                stiffness_threshold=stiffness_threshold,
+                h_bdf2=h_bdf2,
+                t_start=t_start,
+                switch_fn=switch_fn,
+                b_extra_fn=b_extra_fn,
+                # Builder ICs (c0= / i0=) are a full-MNA vector: the
+                # dispatcher maps them per device onto the reduced state.
+                initial_state=None if _ic_from_builder else initial_state,
+                builder_initial_state=initial_state if _ic_from_builder else None,
+                progress=progress,
+                mode_selection=mode_selection,
+                allow_implicit_segments=bool(allow_implicit_segments),
+            )
         try:
             _dsed_res._preflight = _preflight_report
+            _dsed_res._run_plan = _run_plan
             _dsed_res.engine_used = "dsed"
             _dsed_res.engine_route_reason = None
             # v2.0 Phase 3 item 5 — the unified result: with the
@@ -2470,6 +2673,13 @@ def simulate(
             #   no dt         -> the engine picks, and uses the
             #                    variable-step path when it can
             # which makes the new engine opt-in by OMISSION.
+            # A branch-form circuit trbdf2 refuses routes, not raises (review H4).
+            from . import _pulsim as _k  # type: ignore[import-not-found]
+            try:
+                _k._require_supported(builder.graph, builder.pool, "trbdf2")
+            except UnsupportedError as e:
+                if e.feature in ("branch_form", "dependent_states"):
+                    _route_reasons = [*_route_reasons, str(e)]
             if dt is not None and dt > 0:
                 _route_reasons = _route_reasons or [
                     "an explicit dt was given, which requests a "
@@ -2524,6 +2734,9 @@ def simulate(
             "engine='dsed', or drop mode_selection.")
 
     if engine == "trbdf2":
+        # The capability table by name (the branch form runs here).
+        from . import _pulsim as _k  # type: ignore[import-not-found]
+        _k._require_supported(builder.graph, builder.pool, "trbdf2")
         # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse
         #      MNA kernel. L-stable, LTE-controlled — no dt to
         #      guess; `dt` (optional) is the step CEILING h_max,
@@ -2547,6 +2760,8 @@ def simulate(
         # t_start + k*T_j, landed like a gate edge; `.tick` (the
         # loop's unthrottled update) is what the plan holds. An
         # every-step observer has no grid to ride here.
+        # A control graph with rates runs on its group ticks here.
+        _plan = _plan.for_variable_step()
         if _plan.every_step:
             raise _unsupported(
                 "trbdf2", "step_observer",
@@ -2577,6 +2792,8 @@ def simulate(
             # its own breaking change, not this one).
             switch_fn = make_constant_switch_fn(SwitchStateMask(_n_sw))
         cache = PwlStateSpaceCache(builder.graph, builder.pool)
+        if _run_circuit is not None:  # one analysis per structure
+            cache.share_symbolic(_run_circuit)
         # Lazy build only needs a positive dt to mark the cache
         # dynamic; the stepper solves at its own per-step dt via
         # solve_at, never at this value.
@@ -2605,12 +2822,15 @@ def simulate(
                 enable_newton_line_search=bool(
                     enable_newton_line_search),
                 enable_newton_lm=bool(enable_newton_lm),
+                newton_roundoff_budget=int(newton_roundoff_budget or 0),
+                on_impulse_error=on_impulse == "error",
             )
         except SimulationAborted as _aborted:
             try:
                 _partial = _aborted.partial
                 _partial._builder = builder
                 _partial._preflight = _preflight_report
+                _partial._run_plan = _run_plan
                 _partial._switch_fn = switch_fn
                 # The wreckage gets the same handles the survivors
                 # get — including an empty-but-present stats dict,
@@ -2621,6 +2841,7 @@ def simulate(
             raise
         res._builder = builder
         res._preflight = _preflight_report
+        res._run_plan = _run_plan
         res._switch_fn = switch_fn
         res._trbdf2_stats = _stats
         res.control_tick_counts = list(_stats["control_tick_counts"])
@@ -2642,6 +2863,7 @@ def simulate(
         _auto_check_voltage_sanity(res, builder,
                                     voltage_sanity_factor)
         _trbdf2_warn_stats(res, builder, _stats, _engine_asked)
+        _warn_impulse(res, on_impulse)
         return res
 
     # ---- engine='pwl' from here on ----
@@ -2767,6 +2989,8 @@ def simulate(
     # the default") true — they previously described intent, not
     # behaviour.
     cache = PwlStateSpaceCache(builder.graph, builder.pool)
+    if _run_circuit is not None:  # one analysis per structure
+        cache.share_symbolic(_run_circuit)
     cache.build_lazy(dt)
 
     # v2.0 Phase 3 "obra №2" — GGJ Thevenin MMC arms. The driver
@@ -2839,7 +3063,7 @@ def simulate(
         max_dt_halvings = 0
         from .mmc_thevenin import make_mmc_thevenin_driver
         _mmc_obs, _mmc_b, _mmc_finalize = make_mmc_thevenin_driver(
-            mmc_arms, builder, cache, dt,
+            mmc_arms, _caller_builder, cache, dt,
             builder.pool.state_size(builder.graph))
         step_observer, b_extra_fn = _compose_step_hooks(
             step_observer, b_extra_fn, _mmc_obs, _mmc_b,
@@ -2903,10 +3127,13 @@ def simulate(
         opts.enable_newton_line_search = enable_newton_line_search
     if enable_newton_lm is not None:
         opts.enable_newton_lm = enable_newton_lm
+    if newton_roundoff_budget is not None:
+        opts.newton_roundoff_budget = int(newton_roundoff_budget)
     if enable_substep_state_correction is not None:
         opts.enable_substep_state_correction = enable_substep_state_correction
     if discontinuity_restart is not None:
         opts.discontinuity_restart = bool(discontinuity_restart)
+    opts.on_impulse_error = on_impulse == "error"
     if resolution_diagnostics is not None:
         opts.resolution_diagnostics = bool(resolution_diagnostics)
     if inductor_freeze_di_max is not None and inductor_freeze_di_max > 0:
@@ -3111,6 +3338,7 @@ def simulate(
                 _partial = _aborted.partial
                 _partial._builder = builder
                 _partial._preflight = _preflight_report
+                _partial._run_plan = _run_plan
                 _partial._switch_fn = kwargs.get("switch_fn")
             except AttributeError:  # pragma: no cover — defensive
                 pass
@@ -3160,6 +3388,7 @@ def simulate(
         # The preflight facts are properties of the CIRCUIT, but a
         # user reads them off the result, so attach both.
         res._preflight = _preflight_report
+        res._run_plan = _run_plan
     except AttributeError:  # pragma: no cover
         pass
     try:
@@ -3251,6 +3480,7 @@ def simulate(
     _warn_newton_roundoff(res, "simulate()")
     _warn_resolution(builder, res, dt)
     _warn_unlocated_edges(res)
+    _warn_impulse(res, on_impulse)
 
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:
@@ -3315,9 +3545,15 @@ def _warn_newton_roundoff(res, eng) -> None:
             f"row's residual is within "
             f"{res.newton_roundoff_omega_max:.2g} of the magnitudes it "
             f"sums (at most 8 eps; worst at MNA row "
-            f"{res.newton_roundoff_row}). This replaces an abort that "
-            f"no tolerance could have passed; it is not a loosened "
-            f"tol_newton_dx. Check result.newton_roundoff_accepts.",
+            f"{res.newton_roundoff_row}, measured against the "
+            f"magnitudes at the solve's start state). Each would "
+            f"otherwise have aborted at its iteration budget; the "
+            f"state kept is the iterate whose residual was checked. "
+            f"It is not a loosened tol_newton_dx, and it does not "
+            f"validate the state itself: a run that starts from a "
+            f"wrong state can be accepted at roundoff all the way. "
+            f"More than 130 consecutive accepts abort the run. Check "
+            f"result.newton_roundoff_accepts.",
             stacklevel=3)
 
 
@@ -3593,7 +3829,8 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     # to ride (the same split `_compose_control` makes: a source with
     # no period runs every step, which only the fixed engine has).
     if step_observer is not None and controller_period is None \
-            and getattr(step_observer, "period", None) is None:
+            and getattr(step_observer, "period", None) is None \
+            and not getattr(step_observer, "_rate_ticks", None):
         why.append(_blk("step_observer",
             "a step_observer with no cadence (pass "
             "controller_period=<T_ctrl>, or use a ClosedLoop, "

@@ -59,9 +59,37 @@ unsupported_device(const topology::Graph& graph, const pwl::DevicePool& pool,
                             message);
 }
 
+/// add-branch-form-ideal-switch task 4.3: the first branch-form switch /
+/// diode engine `e` does not run refuses as
+/// `UnsupportedError(engine, 'branch_form', device, kind)`.
+inline void require_branch_form_supported(const topology::Graph& graph,
+                                          const pwl::DevicePool& pool,
+                                          pwl::Engine e) {
+    if (pool.num_branch_switches() == 0) return;
+    for (Index b = 0; b < graph.num_branches(); ++b) {
+        if (!pool.is_registered(b) || !pool.is_branch_form(b)) continue;
+        const auto k = pool.kind_of(b);
+        for (const auto& row : pwl::kBranchFormCaps) {
+            if (row.kind != k || row.supports(e)) continue;
+            throw UnsupportedError(
+                std::string(pwl::engine_name(e)), "branch_form",
+                std::string(graph.branch_name(b)), std::string(row.name),
+                std::format(
+                    "engine '{}' cannot simulate '{}', a {} in branch form "
+                    "(add_ideal_switch / add_diode(form='branch')): it would "
+                    "run a different circuit. The branch form runs on "
+                    "engine='pwl' and engine='trbdf2'; or use the "
+                    "conductance form (add_switch / add_diode with g_on, "
+                    "g_off).",
+                    pwl::engine_name(e), graph.branch_name(b), row.name));
+        }
+    }
+}
+
 /// Throw `UnsupportedError` for the first branch engine `e` cannot run.
 inline void require_supported(const topology::Graph& graph,
                               const pwl::DevicePool& pool, pwl::Engine e) {
+    require_branch_form_supported(graph, pool, e);
     const auto b = find_unsupported(graph, pool, e);
     if (!b) return;
     const auto kind = pwl::stored_kind_name(pool.kind_of(*b));

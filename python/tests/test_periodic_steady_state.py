@@ -99,17 +99,20 @@ def test_legacy_steady_state_dcm_raises():
                        switch_fn=_grid_gate(b, 0.3))
 
 
-def test_legacy_shooting_dcm_is_biased_by_the_history_reset():
-    """`run_periodic_shooting` restarts each period from the MNA
-    vector and converges to 8.8998 V, -1.07 %. Task 5.3 flips it."""
+def test_legacy_shooting_dcm_reaches_the_fixed_engine_orbit():
+    """`run_periodic_shooting` restarted each period from the MNA vector
+    and converged to 8.8998 V (-1.07 %). Task 5.3: it delegates to
+    `periodic_steady_state(engine='pwl')` and lands on the fixed
+    engine's own orbit, 8.996246 V (the exact one within 1e-4)."""
     b = _buck(50.0)
-    r = run_periodic_shooting(b, t_period=T, dt=T / 100,
-                              switch_fn=_grid_gate(b, 0.3))
-    assert r.converged
+    with pytest.warns(DeprecationWarning, match="periodic_steady_state"):
+        r = run_periodic_shooting(b, t_period=T, dt=T / 100,
+                                  switch_fn=_grid_gate(b, 0.3))
+    assert r.converged and r.message == ""
     v_c = float(r.x_steady_state[2])
-    assert v_c == pytest.approx(8.8998, abs=2e-4)
-    assert v_c / ref.DCM_ORBIT[1] - 1 == pytest.approx(-0.0107,
-                                                       abs=2e-4)
+    assert v_c == pytest.approx(8.996247, abs=1e-4)
+    assert v_c == pytest.approx(ref.DCM_ORBIT[1], rel=1e-6)
+    assert r.n_simulations <= 12
 
 
 # ---------------------------------------------------------------------
@@ -258,13 +261,13 @@ def test_source_input_matches_a_finite_difference(dcm):
     dv = 1e-3
     cols = []
     for sign in (1, -1):
-        b.update_voltage_source_V("Vin", ref.VIN + sign * dv)
+        b.set_value("Vin.V", ref.VIN + sign * dv)
         try:
             other = p.periodic_steady_state(b, period=T,
                                             switch_fn=_pwm(b, 0.3))
             cols.append(other._ctx.run(r.x0).x_end)
         finally:
-            b.update_voltage_source_V("Vin", ref.VIN)
+            b.set_value("Vin.V", ref.VIN)
     fd = (cols[0] - cols[1]) / (2 * dv)
     assert np.allclose(sm.B[:, 0], fd, rtol=1e-6, atol=1e-9)
     # vout is the capacitor state: C selects it, D is zero

@@ -1,9 +1,12 @@
 """Ensure the locally built pulsim extension is used for all tests."""
 
-import importlib
 import glob
+import hashlib
+import importlib
 import os
 import sys
+
+import pytest
 
 
 def _normalize_path(path: str) -> str:
@@ -47,14 +50,20 @@ def _ensure_pulsim_path() -> tuple[bool, str, str]:
     # Prefer local build tree only when native extension is actually present.
     if _build_tree_has_extension(build_path):
         _remove_path(build_path)
-        _remove_path(source_python_path)
+        _demote_path(source_python_path)
         sys.path.insert(0, build_path)
         return True, build_path, source_python_path
     _remove_path(build_path)
-    # When tests are executed from python/tests, pytest can prepend
-    # <repo>/python, which shadows the installed wheel package.
-    _remove_path(source_python_path)
+    _demote_path(source_python_path)
     return False, build_path, source_python_path
+
+
+def _demote_path(path: str) -> None:
+    """Keep <repo>/python importable (the ``tests`` package) but after the
+    installed pulsim: a spawned worker inherits sys.path and would import
+    the extension-less source pulsim first and die."""
+    _remove_path(path)
+    sys.path.append(path)
 
 
 def _ensure_benchmarks_path() -> None:
@@ -89,7 +98,7 @@ def _reload_pulsim_if_needed(
         # If local source/build trees are stale, fall back to installed package.
         if exc.name == "pulsim._pulsim":
             _remove_path(build_path)
-            _remove_path(source_python_path)
+            _demote_path(source_python_path)
             _clear_cached_pulsim_modules()
             importlib.invalidate_caches()
             importlib.import_module("pulsim")
@@ -100,3 +109,49 @@ def _reload_pulsim_if_needed(
 _prefer_build_tree, _build_path, _source_python_path = _ensure_pulsim_path()
 _ensure_benchmarks_path()
 _reload_pulsim_if_needed(_prefer_build_tree, _build_path, _source_python_path)
+
+
+# The pulsim under test must be this checkout: its source tree, or an
+# installed build of it (CI installs a wheel into site-packages). A stale
+# install (the developer Mac has pulsim 1.8.0 in site-packages) is refused.
+_CHECKOUT_PKG = os.path.join(_source_python_path, "pulsim")
+# Files a wheel copies verbatim; __init__.py carries __version__.
+_FINGERPRINT = ("__init__.py", "design.py", "_pulsim.pyi")
+
+
+def _digest(pkg: str) -> dict:
+    out = {}
+    for f in _FINGERPRINT:
+        path = os.path.join(pkg, f)
+        out[f] = (hashlib.sha256(open(path, "rb").read()).hexdigest()
+                  if os.path.isfile(path) else None)
+    return out
+
+
+def pulsim_checkout_mismatch(mod) -> str:
+    """'' when ``mod`` is this checkout's pulsim, else why it is not."""
+    pkg = os.path.dirname(os.path.realpath(mod.__file__))
+    if _is_within(pkg, os.path.realpath(_CHECKOUT_PKG)):
+        return ""
+    stale = [f for f, h in _digest(pkg).items() if h != _digest(_CHECKOUT_PKG)[f]]
+    if not stale:
+        return ""
+    return (f"the imported pulsim is not this checkout: {mod.__file__} "
+            f"(version {getattr(mod, '__version__', '?')}) differs from "
+            f"{_CHECKOUT_PKG} in {stale}; build this tree or put "
+            f"{_source_python_path} on PYTHONPATH")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _pulsim_is_this_checkout():
+    msg = pulsim_checkout_mismatch(sys.modules["pulsim"])
+    if msg:
+        pytest.fail(msg, pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def _source_tree_after_installed_pulsim():
+    # pytest prepends <repo>/python again whenever it imports a test module
+    # or package; a process-backend worker must not see it first
+    if not _is_within(sys.modules["pulsim"].__file__, _source_python_path):
+        _demote_path(_source_python_path)
