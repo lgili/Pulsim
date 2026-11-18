@@ -547,3 +547,16 @@ def test_a_pwm_voltage_source_is_refused_by_name_on_every_engine(engine):
     with pytest.raises(p.UnsupportedError) as ei:
         p.periodic_steady_state(b, period=T, engine=engine, **kw)
     assert ei.value.device == "Vg"
+
+
+def test_dependent_states_are_refused_by_name():
+    # a capacitor across the source is a loop (K x = k): the period map would
+    # carry the mode-entry projection and a Floquet multiplier of exactly 1
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "s", "gnd", 5.0)
+    b.add_capacitor("C1", "s", "gnd", 1e-6)
+    b.add_resistor("R", "s", "o", 10.0)
+    b.add_capacitor("C2", "o", "gnd", 1e-6)
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.periodic_steady_state(b, period=1e-3)
+    assert (ei.value.engine, ei.value.feature) == ("periodic_steady_state", "dependent_states")

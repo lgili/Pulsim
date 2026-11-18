@@ -97,6 +97,8 @@ def cause(r):
     if r["outcome"] in ("refused", "error"):
         if feat == "device" or (r.get("kind") and feat in ("", "device")):
             return f"Newton device refused by name ({r.get('kind') or r.get('device')})"
+        if feat == "floating_island":
+            return f"port factor singular on a floating island (node {r.get('device')}, #27)"
         if feat == "initial_state" or "initial_state" in msg and "full" in msg:
             return "DC start refused (non-zero consistent start)"
         # the extractor's own reason leads the bridge refusal (it used to sit past the

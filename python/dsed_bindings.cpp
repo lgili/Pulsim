@@ -286,6 +286,10 @@ public:
 
     void set_poll(Real poll) noexcept { search_.set_poll(poll); }
 
+    /// Whether next_edge_after names real edges (the selector's probe
+    /// horizon); the EdgeSearch fallback returns poll boundaries.
+    [[nodiscard]] bool has_edge_oracle() const noexcept { return has_nea_; }
+
 private:
     py::object fn_;
     py::object nea_attr_;
@@ -1060,6 +1064,13 @@ void init_module(py::module_& m) {
         // dsed_period_map: Python calls of this schedule (owned by the
         // caller's frame; null elsewhere).
         std::size_t* n_python_calls = nullptr;
+
+        /// Whether next_edge_after names real edges (the selector's probe
+        /// horizon); the EdgeSearch fallback returns poll boundaries.
+        [[nodiscard]] bool has_edge_oracle() const noexcept {
+            return (is_native_ && native_.next_edge) || has_nea_;
+        }
+
         py::object fn_;
         pulsim_bindings_common::SwitchFnAdapter native_;
         bool       is_native_ = false;
@@ -1117,6 +1128,9 @@ void init_module(py::module_& m) {
                 return self.A_matrix();
             },
             "Continuous-time A matrix for the active mask.")
+        .def("n_constraints", &NativeAdapter::n_constraints,
+            "Rows of the dependent-state constraint K x = k on the active "
+            "mask (a capacitor loop or an inductor cut-set; 0 otherwise).")
         .def("b_vector",
             &NativeAdapter::b_vector,
             py::arg("t"),

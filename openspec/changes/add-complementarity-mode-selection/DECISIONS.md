@@ -487,7 +487,7 @@ choices it did not pin.
       a refusal with the guard off). For a single-shot pulse T_ref is the
       run length. Fix: cap the probe at the next time event; it changes
       every guarded run's selection trace, so it needs its own
-      bit-identity pass. Not seen on any survey circuit.
+      bit-identity pass. Not seen on any survey circuit. Fixed 2026-11-18: #31.
     - With no exact step (tier 3, allowed numeric), `first_departure_`
       returns +∞, so the widening is uncapped and #24's early release is
       possible again. Under the default (13.2) such a mode is refused
@@ -603,9 +603,114 @@ choices it did not pin.
     drop the `fix` calls in `diode_port_problem_full` and the
     anchored callbacks (each half alone is measurable with the probes).
 
+31. **The selector's probes stop at the next time event (closes the
+    first risk of #28).** The judge's probes and `first_departure_` used
+    to propagate up to 12 800·h_e with the gates and the source piece
+    frozen at t. Each probe is now capped at `next_time_event_(t)`: the
+    next edge the switch function announces, or the next source corner,
+    else the run's end. An edge within `near_time` of t is the one just
+    landed, so the edge after it is used. When the mode holds up to the
+    cap, `first_departure_` returns the time event itself, so the
+    widening (#24) never looks past a gate edge or a source corner.
+    Before, it returned +∞ there.
+    - **No edge oracle.** A switch function without `next_edge_after`
+      adds no cap. Its scheduler adapter (`PySwitchFnSSM`, `PySwitchFn`)
+      answers `next_edge_after` with the dt_max/10 poll boundary of
+      `EdgeSearch`, which is not an edge, and caches its search. The
+      adapters now say so through `has_edge_oracle()`, an optional member
+      of the scheduler's SwitchFn contract. A type without it is trusted.
+    - **Measured failure without that rule.** Capping at the poll
+      boundary brought #24's defect back: the bridge bank released a
+      diode early again, 0.128 V off pwl
+      (`test_a_widened_pass_does_not_release_a_diode_before_its_own_turn_off[lcp]`).
+    - **Bit identity.** `survey_bit_identity.py` against the step-2b
+      build: 81 trajectories identical, plus the 9 settle-only refusals
+      unchanged (same t, same violation). Golden ALL IDENTICAL;
+      `bit_identity.py` 36/36 default and shadow (pwl / trbdf2 do not
+      use the selector).
+    - **Interface.** `ModeSelector`'s public interface is unchanged. Only
+      the value its `horizon` callback can return on the dsed scheduler
+      changed: finite at a time event.
+    - **Tests.** Rounding fuzz in `test_probe_horizon.py`: a DCM buck
+      whose diode turns off a few µs before each gate edge, 21 runs with
+      every component perturbed at 1e-15, default and `'lcp'`, gives one
+      mode sequence (ptp of the output 1.5e-13 V on 17.1 V).
+    - **Reverse.** Drop the `cap` lines in `judge_` and
+      `first_departure_`.
+
+32. **The singular port factor on a floating island is a typed refusal
+    (#27).** `diode_port_problem_full` solves through `port_solve_`.
+    When `solve_at` fails "numerically singular" and the mask has a
+    floating island, the failure becomes
+    `pulsim.UnsupportedError(engine='dsed', feature='floating_island',
+    device=<island node>, kind='Node')`. The node is the island node
+    named in the factor's diagnosis, else the island's reference node.
+    The message keeps the factor's text and names the remedies: a
+    smaller tie resistance, or engine 'pwl' / 'trbdf2'. Any other failure
+    passes unchanged.
+    - **Why typed.** Before, it reached Python as a `RuntimeError`, and
+      callers that try the next bridge on `RuntimeError` could take it
+      for an extraction failure.
+    - **Tests.** `test_port_factor_beyond_the_bound_refuses_instead_of_rounding`
+      runs on 'dsed' and 'exact' alike (1 TΩ ties, 2 mF), with
+      `engine == 'dsed'` and `feature == 'floating_island'`.
+      `exact_triage.cause()` names the cause.
+    - **Reverse.** Call `cache_.solve_at` directly again.
+
+33. **Fresh-context review (2026-11-18) of the exact-engine steps.** A
+    read-only reviewer (opus, medium) read 98225161 … e9a10fe7. It found
+    no change to the pwl / trbdf2 paths, and the projection algebra,
+    dW ≥ 0, the LLT coupling path and the typed island refusal sound.
+    **Fixed:**
+    - **Undone projections.** Records of a projection the scheduler
+      undid (`x = shadow_x_` in the guard's repair and in the settle-cap
+      path) are dropped (`truncate_reinit_log`). Before, a repaired event
+      listed a record whose λ and dW never happened.
+    - **#31's skip rule.** An edge within `near_time` of t is skipped
+      only when it is the edge just fired (`last_time_event_t_`, 0 at
+      the start). Before, a predicate located a few ulps before an
+      unfired gate edge probed a whole period past it.
+    - **`judge_` with no room before the event.** It returns −1 (not
+      judged) instead of 1 (consistent).
+    - **The island refusal's node name.** It now matches the whole name
+      ("n" no longer matches "node n1").
+    - **The auto scheduler's numeric paths.** A gate edge that projects
+      a dependent state keeps its left limit, only when x moved, so
+      nothing else changes.
+    - **Periodic steady state.** A constrained mode is refused by name
+      (feature `dependent_states`). The period map has no Jacobian of
+      the projection, and K x = k gives a multiplier of exactly 1.
+    - **User injection on a constraint.** A user `b_extra_fn` on a
+      constrained mode is refused (feature `extraction`). The flow keeps
+      K ẋ = 0, so the injection would break K x = k unseen.
+    - **Tests.** `test_probe_horizon.py` says that it is the fuzz of the
+      decision and does not show the cap firing.
+
+    **Recorded, not fixed:**
+    - Records follow the eigen-directions of KE⁻¹Kᵀ. Two identical
+      independent loops (a symmetric split link) give a degenerate
+      eigenvalue, and the records mix the loops. The sum is exact.
+    - `kind` can be "mixed".
+    - The selector judges a candidate from the unprojected state
+      (already open under dependent states).
+    - The structural cond₁ cut and the general SVD tolerance differ by
+      up to a factor of n.
+    - `fast_t_` is not cleared per `simulate()` (latent: one simulator
+      per call).
+    - `test_dsed_auto_integrator` takes its event time from the engine.
+    - `with_right_limits` extends only times, states and switch rows.
+    - Found while trying to make the cap fire: a gated single-phase
+      bridge (100 V sine, 100 µF ∥ 100 Ω bus, a 10 kHz switch to 5 Ω)
+      fails on `mode_selection='lcp'` with D1 OFF and forward-biased by
+      0.314 V at t = 1e-5 s. It fails identically with the cap disabled,
+      so the cap is not the cause. The default selection runs it with
+      2 repairs.
+
+    → Reverse: each fix is local (the named function).
+
 ## Slice 4: the fixed engine (2026-11-13 … 2026-11-17)
 
-Numbered F1, F2, … so they do not collide with #22–#31 of
+Numbered F1, F2, … so they do not collide with #22–#33 of
 `feat/core-a-complementarity` (written in parallel on dsed, merged here
 2026-11-18 through `feat/core-integration`). The 2026-11-13
 work in progress recorded its port model as "22."; F1 replaces it.

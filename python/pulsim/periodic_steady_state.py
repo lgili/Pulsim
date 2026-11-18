@@ -625,6 +625,14 @@ class _Solver:
         a = self._A.get(key)
         if a is None:
             self.ad.set_mask(mask)
+            if self.ad.n_constraints():
+                # the period map has no Jacobian of the mode-entry projection,
+                # and K x = k gives a Floquet multiplier of exactly 1
+                raise _unsup(
+                    "dependent_states",
+                    "a mode of the period has dependent states (a capacitor "
+                    "loop or an inductor cut-set); its monodromy is not "
+                    "derived. Add a series resistance, or use simulate().")
             a = np.asarray(self.ad.A_matrix(), dtype=float)
             self._A[key] = a
         return a
