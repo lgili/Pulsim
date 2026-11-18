@@ -416,18 +416,18 @@ def _circuit_form(builder_factory, parallel, backend, simulate_kwargs):
     if not isinstance(builder_factory, Circuit):
         return builder_factory, backend
     from ._circuit_ir import c_blocks_of
-    if c_blocks_of(builder_factory):
-        # A C block keeps its tick counter and outputs in its handle, which
-        # every derived circuit shares: point 2 would start from point 1's
-        # state (a frozen controller). A factory builds one per point.
+    if parallel and c_blocks_of(builder_factory):
+        # Every derived circuit shares the C blocks' handles; each run
+        # restarts them (G22), so serial points are independent, but
+        # threads would step one block state at once.
         from ._refusal import unsupported
         names = ", ".join(str(h.name) for h in c_blocks_of(builder_factory))
         raise unsupported(
             "sweep", "c_blocks",
-            f"sweep(circuit) / monte_carlo(circuit): the circuit carries C "
-            f"blocks ({names}), whose state persists across runs, so the "
-            "points would share one controller. Pass a builder factory "
-            "that adds the blocks per point.")
+            f"sweep(circuit, parallel=True) / monte_carlo: the circuit "
+            f"carries C blocks ({names}), one state shared by every point, "
+            "so threads would step it at once. Run parallel=False, or pass "
+            "a builder factory that adds the blocks per point.")
     stateful = [k for k in ("step_observer", "closed_loops")
                 if simulate_kwargs.get(k) is not None]
     from .periodic_steady_state import _closed_loop_source

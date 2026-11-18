@@ -52,10 +52,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   struct, stepped twice per tick). The C-block cache also checks its
   `pulsim/` parent, and on Windows must sit inside `%USERPROFILE%`.
 * **Fixed** a `Circuit` with a stateful C block answered differently on
-  each `simulate()` (1.383 V, then 1.785 V): block state carried over.
+  each `simulate()` (reported 1.383 V, then 1.785 V; the test's
+  integrator 0.358, 0.466, 0.574 V on three runs): block state carried
+  over.
   Every run now starts each C block from its declared initial state
   (native `init` re-run, Python state dict copied back) on every engine;
-  only `resume_from=` continues it (G22).
+  only `resume_from=` continues it (G22). A serial `sweep(circuit)` with
+  C blocks now runs (its points are independent); `parallel=True` is
+  still refused.
 * **Changed** `CxxBlockChain.add_park` / `add_inverse_park` / `add_pll`
   and `CxxParkTransform` / `CxxPLL` run the one law of
   `pulsim.control` (block_laws.h): the raw PLL angle is in [0, 2π), not

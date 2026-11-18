@@ -280,10 +280,12 @@ to `pwl`): the engine lands its steps on the ticks, so a block samples
 0.643545722992`, met within 1e-7 at rtol 1e-9). The exact strategy
 (`exact` / `dsed`) refuses them by name: it has no `b_extra` input.
 
-A graph keeps its tick counters and block states across `simulate()`
-calls on the same builder: a run that goes on from the previous `t_end`
-(`resume_from=`) continues the tick grid; a run that starts earlier
-restarts it. The C-block graph is compiled once per circuit layout.
+A chain you pass keeps its tick counters and block states across
+`simulate()` calls on the same builder: a run that goes on from the
+previous `t_end` (`resume_from=`) continues the tick grid; a run that
+starts earlier restarts it. A circuit's C-block graph restarts at every
+run without `resume_from` (G22); with it, it continues the state the
+*last* run left (resume from that run's snapshot). The C-block graph is compiled once per circuit layout.
 `control_tick_counts` and `CBlockHandle.n_fires` count the last run's
 ticks. Resume between ticks: a tick due exactly at the previous `t_end`
 is dropped there (the horizon) and runs at the resumed start on the

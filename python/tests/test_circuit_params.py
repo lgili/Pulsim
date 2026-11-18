@@ -334,16 +334,25 @@ def test_a_circuit_carries_its_c_blocks():
     assert rc.circuit.controls()[0][3] is handle
 
 
-def test_a_circuit_sweep_refuses_c_blocks_and_dc_settle_runs_each_once():
-    """The block's handle (tick counter, outputs) is shared by every
-    derived circuit, so a circuit sweep would hand point 2 point 1's
-    controller: refused by name. compute_dc_op(strategy='settle') used to
-    copy the builder's __dict__ onto a run that already carried the
-    blocks: each block then drove its source twice."""
+def test_a_circuit_sweep_with_c_blocks_runs_serially_only():
+    """The block's handle is shared by every derived circuit. Each run
+    restarts it (G22), so a serial sweep's points are independent; on
+    threads they would step one state at once: refused by name.
+    compute_dc_op(strategy='settle') used to copy the builder's __dict__
+    onto a run that already carried the blocks: each block then drove
+    its source twice."""
     c = _c_block_circuit([]).build()
     with pytest.raises(p.UnsupportedError, match=r"C blocks \(ctl\)"):
         p.sweep(c, params={"R.R": [1.0, 2.0]}, kpi_fn=lambda r, q: {},
-                verbose=False, t_end=1e-4, dt=1e-6)
+                verbose=False, t_end=1e-4, dt=1e-6, parallel=True)
+    vals = [1.0, 2.0, 1.0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = p.sweep(c, params={"R.R": vals},
+                      kpi_fn=lambda r, q: {"v": float(np.asarray(r.states)[-1].sum())},
+                      verbose=False, t_end=1e-4, dt=1e-6)
+    kpi = list(res.kpis["v"])
+    assert kpi[0] == kpi[2] != kpi[1]         # point 3 = point 1: no carry-over
     from pulsim._circuit_ir import c_blocks_of
     b = _c_block_circuit([])
     assert len(c_blocks_of(b)) == 1
