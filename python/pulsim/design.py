@@ -605,11 +605,13 @@ def _gate_edges(sf, a, z):
         return None
     out, t = [], a - 1e-9 * (z - a)
     for _ in range(1_000_000):
-        t = float(nxt(t))
-        if not (math.isfinite(t) and t <= z + 1e-12 * abs(z)):
-            break
-        out.append(t)
-    return (sf, out) if out else None
+        t_new = float(nxt(t))
+        if not math.isfinite(t_new) or t_new > z + 1e-12 * abs(z):
+            return (sf, out) if out else None
+        if not t_new > t:
+            return None          # a schedule that does not advance: no correction
+        out.append(t := t_new)
+    return None                  # over a million edges: no correction
 
 
 def _node_col(builder, name):
@@ -1330,9 +1332,14 @@ class Evaluator:
                     None if off_t is None else off_t._kernel(), run.T,
                     _psum(cat.values()), float(r_th), float(th.t_amb), cond,
                     q1, q2, i_max)
-            except ValueError as e:      # a conduction table, by name
-                raise unsupported("design", "thermal",
-                                  f"ThermalSpec.conduction[{d!r}]: {e}") from e
+            except ValueError as e:
+                if cond is not None and "conduction table" in str(e):
+                    raise unsupported(
+                        "design", "thermal",
+                        f"ThermalSpec.conduction[{d!r}]: {e}") from e
+                raise _Failed(f"thermal: {d}: {e}") from e
+            except RuntimeError as e:    # the root was not located
+                raise _Failed(f"thermal: {d}: {e}") from e
             evals += int(out["evaluations"])
             if out["runaway"]:
                 counters["thermal_mode"] = "kernel"

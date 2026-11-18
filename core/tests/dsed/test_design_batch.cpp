@@ -137,3 +137,38 @@ TEST_CASE("Design batch: a table on 1 and 4 threads, in order, fallbacks named",
         REQUIRE(one[i].n_runs >= 2);
     }
 }
+
+TEST_CASE("Design batch: a cancellation stops the batch and is re-thrown",
+          "[v2][dsed][design_batch]") {
+    // it was caught as a std::runtime_error and turned into a fallback,
+    // so a cancelled batch finished every design and re-ran it in Python
+    builder::CircuitBuilder b;
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0);
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9);
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9);
+    b.add_inductor("L", "sw", "vout", 100e-6);
+    b.add_capacitor("C", "vout", "gnd", 47e-6);
+    b.add_resistor("RL", "vout", "gnd", 5.0);
+    const auto base = ir::Circuit::from_builder(b);
+    dz::Plan plan;
+    plan.names = {"L.L"};
+    plan.is_param = {false};
+    plan.n_regs = 1;
+    const Real T = 1e-5;
+    const Gate g{T, 0.5};
+    std::vector<Real> rows(64, 100e-6);
+    std::vector<Real> periods(rows.size(), T);
+    std::vector<const Gate*> scheds(rows.size(), &g);
+    auto cancel = [](auto&, const Gate&, const Vector&, Real,
+                     const std::vector<dsed::PeriodObservable>&,
+                     const std::vector<std::pair<int, int>>&,
+                     Real) -> dsed::PeriodMapResult<SSM> {
+        throw analysis::Cancelled("design batch");
+    };
+    for (int nt : {1, 4}) {
+        REQUIRE_THROWS_AS(dz::evaluate_batch<Gate>(base, plan, rows.data(),
+                                                   rows.size(), periods, scheds,
+                                                   cancel, nt),
+                          analysis::Cancelled);
+    }
+}

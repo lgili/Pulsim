@@ -1184,6 +1184,56 @@ diodes and reset maps of 6.1 need the same per-event identity).
 
 To reverse: delete the three files; nothing else references them.
 
+## 31. Fresh-context review of slice 6 and what changed
+
+Reviewer (opus, read-only) on 1128f953..5c422914. No disagreement
+between the kernel batch and the Python path was found. Acted on:
+
+* (1, bug) `_gate_edges` looped a million times on a schedule whose
+  `next_edge_after(t)` returns `t`, then inserted a million duplicate
+  points; past a million edges it truncated silently. A schedule that
+  does not advance, or has over a million edges in the window, now turns
+  the two-sided correction off (the straight integral, as before DECISIONS
+  29). Test: `test_a_schedule_that_does_not_advance_turns_the_correction_off`.
+* (3, risk) A `std::system_error` while starting a worker thread left the
+  started threads joinable and `std::terminate`d; the spawn loop now stops
+  and the started threads plus the caller drain the table.
+* (4, risk) `analysis::Cancelled` (a `std::runtime_error`) was caught as a
+  kernel error: a cancelled batch finished every design as a fallback and
+  re-ran it in Python. It is re-thrown, the other workers stop at their
+  next design, and the first exception is re-thrown after the join
+  (`test_design_batch.cpp`, "a cancellation stops the batch").
+* (5, 7) `solve_junction` declared a runaway when the expanding bracket
+  passed 1e6 C with g still rising (slope reported < 1), and returned the
+  last iterate after 200 regula falsi steps unconverged. Runaway is now
+  only `r_th dP/dT_j >= 1`; a root above 1e6 C is a root (test:
+  `R P0 a = 1 - 1e-7`, T* = 2.65e9 C, within 1e-6), infeasible by `t_limit` like any hot root;
+  an unconverged search throws and the record is `failed`.
+* (6) Every `ValueError` of the fixed point was labelled a conduction-table
+  refusal; only the table's own refusals are `unsupported` now, the rest
+  (a non-finite loss) `failed`.
+* (11) `boost_gradient.grid` raises a named error when no design is ok.
+
+Measured, not changed:
+
+* (2) An edge within 1e-12 T of a period end with its own sample would be
+  dropped by the `tol < t < T - tol` filter (both paths). Not reachable
+  with the schedules measured: the scheduler does not resolve such a pulse
+  at all. Buck with loss tables: `D = 1 - 1e-6` 2.70 W switching,
+  `D = 1 - 1e-7 .. 1 - 1e-15` 0.0 W (no event in the period map), `D =
+  1e-7 .. 1e-9` 0.80 W (both edges counted at the start). Plain
+  `simulate(engine='dsed')` at `1 - 1e-7`: 4 transitions in 3 periods. The
+  cause is in `scheduler.hpp` (not editable here); KNOWN_LIMITATIONS row.
+* (8) The kernel plan is built once per evaluator (`ev._kplan`), like
+  `_spec_cache`: changing `kpis` or `constraints` on an evaluator after
+  its first `evaluate_many` is not supported; build a new evaluator.
+* (9, 10) Operand indices of the internal plan are not range-checked (the
+  plan is generated, never user input); the fallback note names the first
+  eight indices. Left.
+
+To reverse: the edits are independent; each named test fails without its
+change (the thread-spawn guard has none: it needs the thread limit hit).
+
 ## Missing from the kernel (recorded, worked around in Python)
 
 Items 1 and 2 are done (add-parameter-sensitivities slice, 2026-11):

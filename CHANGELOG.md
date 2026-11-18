@@ -8,6 +8,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Optimisation slice 6: the kernel batch evaluator, event losses on the orbit
 
+* **Fixed** (review of slice 6, DECISIONS 31) a schedule whose
+  `next_edge_after(t)` returns `t` hung the fixed-step `p_in` correction
+  (a million iterations); a cancellation inside the kernel batch became a
+  silent Python re-run of every design and is now re-raised; a thread that
+  cannot start no longer terminates the process; the junction fixed point
+  no longer calls a root above 1e6 C a runaway, an unconverged search is
+  `failed` instead of a root, and only a conduction table's own refusal is
+  labelled one. Known limitation added: a gate pulse shorter than about
+  1e-7 of the period at the period's end is not resolved by `dsed`.
 * **Added** `examples/optimization/boost_gradient.py`: a boost's L and C
   sized with exact orbit-sensitivity gradients
   (`value_and_grad` + `scipy.optimize.minimize(jac=True)`), falling back

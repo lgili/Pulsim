@@ -70,3 +70,16 @@ def test_the_transient_route_keeps_its_own_balance():
     r = _pwl(200, method="transient")
     assert r.status == "ok"
     assert abs(r.counters["energy_residual"]) < 1e-6
+
+
+def test_a_schedule_that_does_not_advance_turns_the_correction_off():
+    # review of slice 6: _gate_edges looped a million times on
+    # next_edge_after(t) == t and inserted a million duplicate points
+    from types import SimpleNamespace as NS
+
+    from pulsim import design
+    stuck = NS(next_edge_after=lambda t: max(t, 0.0))
+    assert design._gate_edges(stuck, 0.0, T) is None
+    _b, sf = buck(DESIGN)
+    sf_, edges = design._gate_edges(sf, 0.0, 2 * T)
+    assert sf_ is sf and edges == pytest.approx([0.0, T / 2, T, 1.5 * T, 2 * T])

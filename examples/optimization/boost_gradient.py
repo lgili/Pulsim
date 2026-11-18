@@ -127,6 +127,8 @@ def grid(n=8, workers=4):
     designs = [{"L": float(a), "C": float(c)} for a in ls for c in cs]
     recs = ev.evaluate_many(designs, workers=workers)
     ok = [r for r in recs if r.status == "ok"]
+    if not ok:
+        raise RuntimeError(f"no design of the grid is ok: {recs[0].reason}")
     return min(ok, key=lambda r: r.kpis["cost"]), recs, ev
 
 

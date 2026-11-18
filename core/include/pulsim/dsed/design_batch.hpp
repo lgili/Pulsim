@@ -24,6 +24,7 @@
 // caller re-runs it on the Python path, which owns every non-`ok`
 // outcome's wording. Nothing here throws out of a worker.
 
+#include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/dsed/builder_adapter.hpp"
 #include "pulsim/dsed/period_integrals.hpp"
 #include "pulsim/dsed/period_thermal.hpp"
@@ -44,7 +45,9 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <span>
+#include <system_error>
 #include <string>
 #include <thread>
 #include <utility>
@@ -440,6 +443,8 @@ DesignOut evaluate_design(const ir::Circuit& base, const Plan& plan,
     } catch (const Fallback& f) {
         out.status = Status::Fallback;
         out.reason = f.why;
+    } catch (const pulsim::analysis::Cancelled&) {
+        throw;   // the batch stops; not a design outcome (evaluate_batch)
     } catch (const std::exception& e) {
         out.status = Status::Fallback;
         out.reason = std::string("kernel error: ") + e.what();
@@ -468,18 +473,36 @@ std::vector<DesignOut> evaluate_batch(const ir::Circuit& base, const Plan& plan,
     std::vector<DesignOut> out(n_rows);
     std::atomic<std::size_t> next{0};
     const std::size_t width = plan.names.size();
+    // the first exception that escapes a design (a cancellation; every
+    // design outcome is caught in evaluate_design) stops the other
+    // workers and is re-thrown after the join
+    std::mutex err_mu;
+    std::exception_ptr err;
+    std::atomic<bool> stop{false};
     auto work = [&] {
         RunPeriod rp = run_period;   // per-thread copy of the functor
-        for (std::size_t i; (i = next.fetch_add(1)) < n_rows;) {
-            out[i] = evaluate_design(base, plan, rows + i * width, periods[i],
-                                     *scheds[i], rp);
+        for (std::size_t i; !stop.load() && (i = next.fetch_add(1)) < n_rows;) {
+            try {
+                out[i] = evaluate_design(base, plan, rows + i * width, periods[i],
+                                         *scheds[i], rp);
+            } catch (...) {
+                std::lock_guard<std::mutex> lk(err_mu);
+                if (!err) err = std::current_exception();
+                stop.store(true);
+            }
         }
     };
     const auto nt = static_cast<std::size_t>(std::max(1, n_threads));
     std::vector<std::thread> pool;
-    for (std::size_t t = 1; t < std::min(nt, n_rows); ++t) pool.emplace_back(work);
+    try {
+        for (std::size_t t = 1; t < std::min(nt, n_rows); ++t) pool.emplace_back(work);
+    } catch (const std::system_error&) {
+        // no more threads on this machine: the started ones and this
+        // thread drain the table (a destroyed joinable thread terminates)
+    }
     work();
     for (auto& th : pool) th.join();
+    if (err) std::rethrow_exception(err);
     return out;
 }
 

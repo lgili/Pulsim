@@ -37,6 +37,16 @@ TEST_CASE("Period thermal: the junction fixed point and its runaway",
         REQUIRE(std::abs(j.residual) <= 1e-9);
         REQUIRE(std::abs(j.slope - R * P0 * a) < 1e-9);
     }
+    {   // the root far above 1e6 C is a root, not a runaway (it was
+        // reported as one, with a slope below 1)
+        const double R = (1 - 1e-7) / (P0 * a);
+        const double want = (t_amb + R * P0 * (1 - 25 * a)) / (1 - R * P0 * a);
+        const auto far = pt::solve_junction(d, R, t_amb);
+        REQUIRE_FALSE(far.runaway);
+        REQUIRE(want > 1e9);
+        REQUIRE(std::abs(far.tj - want) < 1e-6 * want);
+        REQUIRE(far.slope < 1.0);
+    }
     const auto j = pt::solve_junction(d, 1.2 / (P0 * a), t_amb);
     REQUIRE(j.runaway);
     REQUIRE(std::abs(j.slope - 1.2) < 1e-9);

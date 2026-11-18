@@ -188,11 +188,15 @@ inline Junction solve_junction(const DevicePower& d, Real r_th, Real t_amb,
     auto bracket = [&](Real lo, Real glo, Real hi, Real ghi) {
         int side = 0;
         Real x = hi, gx = ghi;
+        bool done = false;
         for (int it = 0; it < 200; ++it) {
             if (ghi == 0.0) return finish(hi, 0.0, (ghi - glo) / (hi - lo));
             x = hi - ghi * (hi - lo) / (ghi - glo);
             gx = g(x);
-            if (std::abs(gx) <= tol || hi - lo <= 1e-13 * std::max(Real{1}, std::abs(x))) break;
+            if (std::abs(gx) <= tol || hi - lo <= 1e-13 * std::max(Real{1}, std::abs(x))) {
+                done = true;
+                break;
+            }
             if (gx < 0) {
                 lo = x;
                 glo = gx;
@@ -204,6 +208,10 @@ inline Junction solve_junction(const DevicePower& d, Real r_th, Real t_amb,
                 if (side == 1) glo *= 0.5;
                 side = 1;
             }
+        }
+        if (!done) {
+            throw std::runtime_error("solve_junction: the root was not located in 200 "
+                                     "regula falsi steps");
         }
         return finish(x, gx, (ghi - glo) / (hi - lo));
     };
@@ -221,7 +229,9 @@ inline Junction solve_junction(const DevicePower& d, Real r_th, Real t_amb,
         const Real ghi = g(hi);
         if (ghi >= 0.0) return bracket(a, ga, hi, ghi);
         const Real s = (ghi - ga) / (hi - a);
-        if (!(s > 0.0) || hi > 1e6) {
+        // runaway iff g stops rising (r_th dP/dT_j >= 1); beyond the last
+        // knot g is linear, so a rising g is bracketed by the next step
+        if (!(s > 0.0)) {
             out.runaway = true;
             out.tj = hi;
             out.residual = ghi;
@@ -233,9 +243,7 @@ inline Junction solve_junction(const DevicePower& d, Real r_th, Real t_amb,
         ga = ghi;
         hi = a + std::max(Real{1}, -2.0 * ga / s);
     }
-    out.runaway = true;
-    out.tj = hi;
-    return out;
+    throw std::runtime_error("solve_junction: no root bracketed in 200 expansions");
 }
 
 }  // namespace pulsim::dsed::period_thermal
