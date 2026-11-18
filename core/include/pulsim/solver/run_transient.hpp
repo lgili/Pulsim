@@ -41,6 +41,7 @@
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/nonlinear_refresh_saturable_inductor.hpp"
 #include "pulsim/pwl/igbt_tail_history.hpp"
+#include "pulsim/pwl/stateful_histories.hpp"
 #include "pulsim/pwl/lauritzen_diode_history.hpp"
 #include "pulsim/pwl/pmsm_mna_history.hpp"
 #include "pulsim/pwl/nonlinear_capacitor_history.hpp"
@@ -415,19 +416,25 @@ inline SimulationResult run_transient(
         history.from_flat(resume_from->history);
     }
 
-    pwl::SaturableInductorHistory sat_history;
-    sat_history.init(graph, pool);
-    // Warm-start: seed the saturable-inductor (i_L_old, V_L_old) from
-    // `initial_state` too. Otherwise the first Newton refresh sees zeros
-    // and stamps a wrong Jacobian → convergence failure or wrong solution
-    // on step 1. No-op when there are no saturable inductors. Must run
-    // AFTER init() and after `x = *initial_state` above.
-    if (initial_state != nullptr) {
-        sat_history.seed_from_dc_op(x);
-    }
-    // Resume WINS over a builder-IC seed: the snapshot is the state.
-    if (resume_snap != nullptr) sat_history.from_flat(resume_snap->saturable_history);
+    // The five stateful-device histories (Coss, Lauritzen, PMSM, IGBT
+    // tail, saturable inductor), one object: every operation below visits
+    // all five (add-unified-device-interface step 1). Seeded from
+    // `initial_state` so the first Newton refresh does not see zeros;
+    // resume WINS over a builder-IC seed: the snapshot is the state.
+    pwl::StatefulHistories hs;
+    hs.init(graph, pool);
+    if (initial_state != nullptr) hs.seed_from_dc_op(x);
+    if (resume_snap != nullptr) hs.from_snapshot(*resume_snap);
+    auto& sat_history = hs.sat;
+    auto& coss_history = hs.coss;
+    auto& laur_history = hs.laur;
+    auto& pmsm_history = hs.pmsm;
+    auto& tail_history = hs.tail;
     const bool has_saturable = !sat_history.empty();
+    const bool has_coss = !coss_history.empty();
+    const bool has_lauritzen = !laur_history.empty();
+    const bool has_pmsm = !pmsm_history.empty();
+    const bool has_igbt_tail = !tail_history.empty();
 
     // V17: shared dt that the saturable-inductor refresh
     // reads each iteration. Updated when sub-step correction
@@ -445,62 +452,6 @@ inline SimulationResult run_transient(
     // refresh_dt = the γ·h each stage advances.
     pwl::TrBdf2Stage refresh_stage = pwl::TrBdf2Stage::Trapezoidal;
 
-    // V17: if any saturable inductors are present, wrap the
-    // user's nl_refresh with our additive saturable
-    // stamping. The user-supplied refresh runs first (it
-    // zero-clears + stamps diodes/MOSFETs/IGBTs); we then
-    // ADD the saturable inductor contributions on top.
-    // Phase 4 C.1 — charge-based Coss. Unlike the saturable
-    // inductor below, this one is handed the ACTUAL step size each
-    // solve (`refresh_dt` is assigned before every solve on every
-    // path, including the sub-step and retry ones) and its history
-    // has snapshot/restore, so a step that is thrown away rolls
-    // back. Those two omissions are exactly why the saturable
-    // inductor has to refuse a variable step.
-    pwl::NonlinearCapacitorHistory coss_history;
-    coss_history.init(graph, pool);
-    if (initial_state != nullptr) {
-        coss_history.seed_from_dc_op(x);
-    }
-    // Resume WINS over a builder-IC seed: the snapshot is the state.
-    if (resume_snap != nullptr) coss_history.from_flat(resume_snap->coss_history);
-    const bool has_coss = !coss_history.empty();
-
-    // The Lauritzen diode's stored charge, same shape as the Coss
-    // history above: state that the Newton stamp reads and the
-    // step commits, snapshot/restored on rejection.
-    pwl::LauritzenDiodeHistory laur_history;
-    laur_history.init(graph, pool);
-    if (initial_state != nullptr) {
-        laur_history.seed_from_dc_op(x);
-    }
-    // Resume WINS over a builder-IC seed: the snapshot is the state.
-    if (resume_snap != nullptr) laur_history.from_flat(resume_snap->lauritzen_history);
-    const bool has_lauritzen = !laur_history.empty();
-
-    // Phase 4 C.3 — the MNA-native PMSM's flux-linkage state. Same
-    // shape as the Lauritzen diode: stamped per Newton iteration
-    // from committed history, snapshot/restored on rejection.
-    pwl::PmsmMnaHistory pmsm_history;
-    pmsm_history.init(graph, pool);
-    if (initial_state != nullptr) {
-        pmsm_history.seed_from_dc_op(x);
-    }
-    // Resume WINS over a builder-IC seed: the snapshot is the state.
-    if (resume_snap != nullptr) pmsm_history.from_flat(resume_snap->pmsm_history);
-    const bool has_pmsm = !pmsm_history.empty();
-
-    // The IGBT turn-off tail's stored charge. Same shape again,
-    // except this pass stamps a DELTA on top of the ordinary IGBT
-    // stamp rather than replacing it — see the refresh header.
-    pwl::IgbtTailHistory tail_history;
-    tail_history.init(graph, pool);
-    if (initial_state != nullptr) {
-        tail_history.seed_from_dc_op(x);
-    }
-    // Resume WINS over a builder-IC seed: the snapshot is the state.
-    if (resume_snap != nullptr) tail_history.from_flat(resume_snap->igbt_tail_history);
-    const bool has_igbt_tail = !tail_history.empty();
 
     // The static Newton chain is the kernel's: with no callback from
     // the caller, Newton devices get the standard one instead of being
@@ -872,11 +823,7 @@ inline SimulationResult run_transient(
     // saturable inductor cannot, which is the second reason it
     // refuses a variable step; this device was given the
     // capability up front rather than as a follow-up.
-    std::vector<pwl::NonlinearCapacitorHistory::Entry> coss_snap;
-    std::vector<pwl::LauritzenDiodeHistory::Entry> laur_snap;
-    std::vector<pwl::PmsmMnaHistory::Entry> pmsm_snap;
-    std::vector<pwl::IgbtTailHistory::Entry> tail_snap;
-    std::vector<pwl::SaturableInductorHistory::Entry> sat_snap;
+    pwl::StatefulHistories::Snapshot hs_snap;   // V3 rollback point
     std::vector<bool> diodes_snap;                  // V3 diode-bit snapshot
     std::vector<bool> last_solved_bits;             // breach re-sync bits
     // Restart stage-1 state, kept for the stage-2 fallback (see
@@ -884,11 +831,7 @@ inline SimulationResult run_transient(
     Vector rs_x1, rs_x2;
     std::vector<bool> rs_bits, rs_bits2, rs_bits_be, rs_solved2;
     std::vector<Real> rs_hist;
-    std::vector<pwl::NonlinearCapacitorHistory::Entry> rs_coss;
-    std::vector<pwl::LauritzenDiodeHistory::Entry> rs_laur;
-    std::vector<pwl::PmsmMnaHistory::Entry> rs_pmsm;
-    std::vector<pwl::IgbtTailHistory::Entry> rs_tail;
-    std::vector<pwl::SaturableInductorHistory::Entry> rs_sat;
+    pwl::StatefulHistories::Snapshot rs_hs;
     std::vector<CommutationEvent> step_events;      // per-step event scratch
     std::vector<bool> post_event_bits;              // event-split scratch
     // add-fixed-step-event-splitting workspace: the step's first solve
@@ -1408,11 +1351,7 @@ inline SimulationResult run_transient(
             if (may_roll_back) {
                 ++result.rollback_snapshots;
                 history.snapshot_into(history_snap);
-                coss_snap = coss_history.snapshot();
-                laur_snap = laur_history.snapshot();
-                pmsm_snap = pmsm_history.snapshot();
-                tail_snap = tail_history.snapshot();
-                sat_snap = sat_history.snapshot();
+                hs.snapshot_into(hs_snap);
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(diodes_snap);
                 } else {
@@ -1710,17 +1649,7 @@ inline SimulationResult run_transient(
             Real be_commit_h = kGamma * opts.dt;   // set by run_restart
             auto commit_backward_euler = [&](Real h_e) {
                 history.update_from_state_backward_euler(x, h_e);
-                coss_history.update_from_state(x, h_e, true);
-                laur_history.update_from_state(
-                    x, h_e, pwl::TrBdf2Stage::BackwardEuler);
-                pmsm_history.update_from_state(
-                    x, h_e, pwl::TrBdf2Stage::BackwardEuler);
-                tail_history.update_from_state(
-                    x, h_e, pwl::TrBdf2Stage::BackwardEuler);
-                if (has_saturable) {
-                    sat_history.update_from_state(
-                        x, pwl::TrBdf2Stage::BackwardEuler);
-                }
+                hs.commit(x, h_e, pwl::TrBdf2Stage::BackwardEuler);
             };
             // One Alexander SDIRK(2,2) step of h from t_from (γ = 1 −
             // 1/√2, L-stable, order 2). Both stages are backward-Euler-
@@ -1762,25 +1691,12 @@ inline SimulationResult run_transient(
                     rs_x1 = x;
                     diodes.snapshot_on_bits_into(rs_bits);
                     history.snapshot_into(rs_hist);
-                    // assign() keeps the buffers' capacity (snapshot()
-                    // returned a fresh vector per restart step).
-                    auto keep = [](auto& dst, const auto& src) {
-                        dst.assign(src.begin(), src.end());
-                    };
-                    keep(rs_coss, coss_history.entries());
-                    keep(rs_laur, laur_history.entries());
-                    keep(rs_pmsm, pmsm_history.entries());
-                    keep(rs_tail, tail_history.entries());
-                    keep(rs_sat, sat_history.entries());
+                    hs.snapshot_into(rs_hs);   // keeps the capacity
                 }
                 const bool cycle_1 = mask_cycle;
                 constexpr Real c = (Real{1} - kGamma) / kGamma;
                 history.extrapolate_previous(x, c);
-                coss_history.extrapolate_previous(x, c);
-                laur_history.extrapolate_previous(x, c);
-                pmsm_history.extrapolate_previous(x, c);
-                tail_history.extrapolate_previous(x, c);
-                if (has_saturable) sat_history.extrapolate_previous(x, c);
+                hs.extrapolate_previous(x, c);
                 accumulate_b_extra(t_from + h, dt_eq, true);
                 run_event_iteration(t_from + h, dt_eq, true);
                 const Size iters_2 = iters;
@@ -1817,11 +1733,7 @@ inline SimulationResult run_transient(
                     rs_solved2 = last_solved_bits;
                     auto histories_at_x0 = [&] {
                         history.restore(rs_hist);
-                        coss_history.restore(rs_coss);
-                        laur_history.restore(rs_laur);
-                        pmsm_history.restore(rs_pmsm);
-                        tail_history.restore(rs_tail);
-                        sat_history.restore(rs_sat);
+                        hs.restore(rs_hs);
                     };
                     x = rs_x1;
                     diodes.restore_on_bits(rs_bits);
@@ -1852,11 +1764,7 @@ inline SimulationResult run_transient(
                         histories_at_x0();
                         x = rs_x1;
                         history.extrapolate_previous(x, c);
-                        coss_history.extrapolate_previous(x, c);
-                        laur_history.extrapolate_previous(x, c);
-                        pmsm_history.extrapolate_previous(x, c);
-                        tail_history.extrapolate_previous(x, c);
-                        if (has_saturable) sat_history.extrapolate_previous(x, c);
+                        hs.extrapolate_previous(x, c);
                         x = rs_x2;
                         diodes.restore_on_bits(rs_bits2);
                         stamped_mask = stamped_2;
@@ -1888,13 +1796,7 @@ inline SimulationResult run_transient(
             // masks equal the post-event one, so no trigger would.
             auto commit_trap = [&](Real h) {
                 history.update_from_state(x, h);
-                coss_history.update_from_state(x, h);
-                laur_history.update_from_state(x, h);
-                pmsm_history.update_from_state(x, h);
-                tail_history.update_from_state(x, h);
-                if (has_saturable) {
-                    sat_history.update_from_state(x);
-                }
+                hs.commit(x, h, pwl::TrBdf2Stage::Trapezoidal);
             };
             auto split_step = [&]() {
                 split_events.clear();
@@ -1957,11 +1859,7 @@ inline SimulationResult run_transient(
                             // inside (split).
                             x = x_prev;
                             history.restore(history_snap);
-                            coss_history.restore(coss_snap);
-                            laur_history.restore(laur_snap);
-                            pmsm_history.restore(pmsm_snap);
-                            tail_history.restore(tail_snap);
-                            sat_history.restore(sat_snap);
+                            hs.restore(hs_snap);
                             diodes.restore_on_bits(diodes_snap);
                             mask_cycle = false;
                             // Post-event bits: the diodes that cross
@@ -2047,11 +1945,7 @@ inline SimulationResult run_transient(
                         // start, and re-take it as a restart step.
                         x = x_prev;
                         history.restore(history_snap);
-                        coss_history.restore(coss_snap);
-                        laur_history.restore(laur_snap);
-                        pmsm_history.restore(pmsm_snap);
-                        tail_history.restore(tail_snap);
-                        sat_history.restore(sat_snap);
+                        hs.restore(hs_snap);
                         if (has_diodes) {
                             diodes.restore_on_bits(diodes_snap);
                         }
@@ -2105,11 +1999,7 @@ inline SimulationResult run_transient(
                     // the circuit rather than of the run.
                     x = x_prev;
                     history.restore(history_snap);
-                    coss_history.restore(coss_snap);
-                    laur_history.restore(laur_snap);
-                    pmsm_history.restore(pmsm_snap);
-                    tail_history.restore(tail_snap);
-                    sat_history.restore(sat_snap);
+                    hs.restore(hs_snap);
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }
@@ -2180,15 +2070,8 @@ inline SimulationResult run_transient(
                             commit_backward_euler(be_commit_h);
                         } else if (j + 1 < n_sub) {
                             history.update_from_state(x, sub_dt);
-                            coss_history.update_from_state(x,
-                                                            sub_dt);
-                            laur_history.update_from_state(x,
-                                                            sub_dt);
-                            pmsm_history.update_from_state(x,
-                                                            sub_dt);
-                            tail_history.update_from_state(x,
-                                                            sub_dt);
-                            sat_history.update_from_state(x);
+                            hs.commit(x, sub_dt,
+                                      pwl::TrBdf2Stage::Trapezoidal);
                         } else {
                             committed_dt = sub_dt;
                             committed_be = sub_restart;
@@ -2449,13 +2332,7 @@ inline SimulationResult run_transient(
                 commit_backward_euler(be_commit_h);
             } else {
             history.update_from_state(x, committed_dt);
-            coss_history.update_from_state(x, committed_dt);
-            laur_history.update_from_state(x, committed_dt);
-            pmsm_history.update_from_state(x, committed_dt);
-            tail_history.update_from_state(x, committed_dt);
-            if (has_saturable) {
-                sat_history.update_from_state(x);
-            }
+            hs.commit(x, committed_dt, pwl::TrBdf2Stage::Trapezoidal);
             }
             if (restart) {
                 ++result.n_restart_steps;
@@ -2939,11 +2816,7 @@ inline SimulationResult run_transient(
     result.final_snapshot.t = t_reached;
     result.final_snapshot.x = x;
     result.final_snapshot.history = history.to_flat();
-    result.final_snapshot.saturable_history = sat_history.to_flat();
-    result.final_snapshot.coss_history = coss_history.to_flat();
-    result.final_snapshot.lauritzen_history = laur_history.to_flat();
-    result.final_snapshot.igbt_tail_history = tail_history.to_flat();
-    result.final_snapshot.pmsm_history = pmsm_history.to_flat();
+    hs.to_snapshot(result.final_snapshot);
     result.final_snapshot.diode_on =
         has_diodes ? diodes.snapshot_on_bits() : std::vector<bool>{};
     // The mask x was solved under (the record's last row when the

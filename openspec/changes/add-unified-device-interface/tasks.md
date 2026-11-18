@@ -12,11 +12,11 @@ machine (`-j2`, `nice`).
 - [ ] 0.2 Record the baseline: extension build time, ns/step of audit rows 10–13 (Shockley buck, MOSFET level 1), `grep -rn "StoredKind::" core/include python/*.cpp | wc -l` (123)
 
 ## 1. Fold the five history classes (no behaviour change)
-- [ ] 1.1 `pwl/stateful_histories.hpp`: a tuple of the five history objects with `for_each(f)`, `init`, `seed_from_dc_op`, `commit(x, h, stage)`, `capture_gamma`, `snapshot_into`, `restore`, `to_flat`, `from_flat`
-- [ ] 1.2 Replace the 56 named calls in `solver/run_transient.hpp` by the folds
-- [ ] 1.3 Replace the 43 named calls in `solver/trbdf2_transient.hpp` by the folds
-- [ ] 1.4 Oracle: goldens bit-identical; trbdf2 counters identical; `test_stateful_device_stamps_compose.py`, `test_snapshot_resume_stateful.py`, `test_trbdf2_stateful_with_diodes.py`, `test_trbdf2_stateful_devices.py` green
-- [ ] 1.5 Docs: none (internal)
+- [x] 1.1 `pwl/stateful_histories.hpp`: a tuple of the five history objects with `for_each(f)`, `init`, `seed_from_dc_op`, `commit(x, h, stage)`, `capture_gamma`, `snapshot_into`, `restore`, `to_flat`, `from_flat`
+- [x] 1.2 Replace the 56 named calls in `solver/run_transient.hpp` by the folds
+- [x] 1.3 Replace the 43 named calls in `solver/trbdf2_transient.hpp` by the folds
+- [x] 1.4 Oracle: goldens bit-identical; trbdf2 counters identical; `test_stateful_device_stamps_compose.py`, `test_snapshot_resume_stateful.py`, `test_trbdf2_stateful_with_diodes.py`, `test_trbdf2_stateful_devices.py` green
+- [x] 1.5 Docs: none (internal)
 
 ## 2. Kernel-built refresh
 - [ ] 2.1 `pwl::build_device_refresh(graph, pool, histories, StepCtx&)`: the static diode / MOSFET / IGBT stamps (kernel-built since `add-engine-conformance-matrix`) plus one typed pass per history, in one function; both drivers call it

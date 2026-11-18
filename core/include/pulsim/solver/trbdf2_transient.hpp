@@ -83,6 +83,7 @@
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/nonlinear_capacitor_history.hpp"
 #include "pulsim/pwl/igbt_tail_history.hpp"
+#include "pulsim/pwl/stateful_histories.hpp"
 #include "pulsim/pwl/lauritzen_diode_history.hpp"
 #include "pulsim/pwl/nonlinear_refresh_igbt_tail.hpp"
 #include "pulsim/pwl/nonlinear_refresh_lauritzen_diode.hpp"
@@ -646,71 +647,26 @@ inline SimulationResult run_transient_trbdf2(
     // the pair — but the history term is not, and stamping the
     // trapezoidal one in a BDF2 stage would converge to the wrong
     // answer with every outward sign of health.
-    pwl::NonlinearCapacitorHistory coss;
-    coss.init(graph, pool);
-    if (initial_state.has_value()) {
-        coss.seed_from_dc_op(x);
-    }
-    // After the seed, never before: the snapshot is the state.
-    if (resume_from != nullptr) coss.from_flat(resume_from->coss_history);
+    // The five stateful-device histories as one object
+    // (add-unified-device-interface step 1); seeded from initial_state,
+    // then the snapshot, which WINS: it is the state. Each is committed
+    // only on ACCEPT under the rule its last solve stamped, so a
+    // rejected step never touches them and no rollback is needed.
+    pwl::StatefulHistories hs;
+    hs.init(graph, pool);
+    if (initial_state.has_value()) hs.seed_from_dc_op(x);
+    if (resume_from != nullptr) hs.from_snapshot(*resume_from);
+    auto& coss = hs.coss;
+    auto& laur = hs.laur;
+    auto& tail = hs.tail;
+    auto& pmsm = hs.pmsm;
+    auto& sat = hs.sat;
     const bool has_coss = !coss.empty();
-    std::vector<pwl::NonlinearCapacitorHistory::Entry> coss_snap;
-    std::vector<Real> q_gamma(coss.entries().size(), Real{0});
     auto coss_stage = pwl::CossStage::Trapezoidal;
     Real coss_h = Real{0};
-    // Commit a Coss step under the BDF2 rule the stage actually
-    // used — never re-derived from C(v)dv/dt, which would not
-    // conserve charge.
-    auto commit_coss = [&](const Vector& x_end, Real h_full) {
-        const Real c1 = Real{2} + std::sqrt(Real{2});
-        const Real gam = Real{2} - std::sqrt(Real{2});
-        const Real rho = (Real{1} - gam) / gam;
-        const Real c2 = -(Real{1} + rho) / (Real{1} - gam);
-        const Real c3 = Real{1} / std::sqrt(Real{2});
-        Size qi = 0;
-        auto snap = coss.snapshot();
-        for (auto& e : snap) {
-            const Real v =
-                stamping::read_node_voltage(x_end, e.from)
-                - stamping::read_node_voltage(x_end, e.to);
-            const Real q =
-                models::NonlinearCapacitor::charge(e.params, v);
-            e.i_prev = (c1 * q + c2 * q_gamma[qi] + c3 * e.q_prev)
-                       / h_full;
-            e.v_prev = v;
-            e.q_prev = q;
-            ++qi;
-        }
-        coss.restore(snap);
-    };
-
-    // v2.0 — the three other stateful devices. Each carries a
-    // first-order state whose BDF2 second stage was derived
-    // alongside the Coss's; see `trbdf2_stage.hpp`. Their histories
-    // are committed only on ACCEPT, exactly like the Coss, so a
-    // rejected step never touches them and no rollback is needed.
-    pwl::LauritzenDiodeHistory laur;
-    laur.init(graph, pool);
-    if (initial_state.has_value()) laur.seed_from_dc_op(x);
-    if (resume_from != nullptr) laur.from_flat(resume_from->lauritzen_history);
     const bool has_laur = !laur.empty();
-
-    pwl::IgbtTailHistory tail;
-    tail.init(graph, pool);
-    if (initial_state.has_value()) tail.seed_from_dc_op(x);
-    if (resume_from != nullptr) tail.from_flat(resume_from->igbt_tail_history);
     const bool has_tail = !tail.empty();
-
-    pwl::PmsmMnaHistory pmsm;
-    pmsm.init(graph, pool);
-    if (initial_state.has_value()) pmsm.seed_from_dc_op(x);
-    if (resume_from != nullptr) pmsm.from_flat(resume_from->pmsm_history);
     const bool has_pmsm = !pmsm.empty();
-
-    pwl::SaturableInductorHistory sat;
-    sat.init(graph, pool);
-    if (initial_state.has_value()) sat.seed_from_dc_op(x);
-    if (resume_from != nullptr) sat.from_flat(resume_from->saturable_history);
     const bool has_sat = !sat.empty();
 
     // One stage/step pair drives all four: they are always stamped
@@ -721,7 +677,7 @@ inline SimulationResult run_transient_trbdf2(
     pwl::NonlinearRefreshFn nl_effective = nl_static;
     if (has_coss) {
         nl_effective =
-            [user = nl_static, &coss, &q_gamma, &coss_stage,
+            [user = nl_static, &coss, &coss_stage,
              &coss_h](const Vector& xx, sparse::Matrix& J_nl,
                         Vector& f_nl, const topology::Graph& g,
                         const pwl::DevicePool& pp) -> Real {
@@ -735,7 +691,7 @@ inline SimulationResult run_transient_trbdf2(
                 return std::max(
                     m, pwl::refresh_nonlinear_capacitors(
                            xx, J_nl, f_nl, coss, coss_h,
-                           coss_stage, &q_gamma));
+                           coss_stage, &coss.q_gamma()));
             };
     }
 
@@ -1509,30 +1465,11 @@ inline SimulationResult run_transient_trbdf2(
         if (!commit || t + dtp >= opts.t_end - h_min
             || (has_ticks && t + dtp >= t_next_tick - h_min)) {
             history.refresh_derivatives(x_trial, dtp);
-            if (has_coss) coss.refresh_derivatives(x_trial, dtp);
-            if (has_laur) laur.refresh_derivatives(x_trial);
-            if (has_tail) tail.refresh_derivatives(x_trial);
-            if (has_pmsm) pmsm.refresh_derivatives(x_trial);
-            if (has_sat) sat.refresh_derivatives(x_trial);
+            hs.refresh_derivatives(x_trial, dtp);
             return;
         }
         history.update_from_state(x_trial, dtp);
-        if (has_coss) coss.update_from_state(x_trial, dtp);
-        if (has_laur) {
-            laur.update_from_state(x_trial, dtp,
-                                   pwl::TrBdf2Stage::Trapezoidal);
-        }
-        if (has_tail) {
-            tail.update_from_state(x_trial, dtp,
-                                   pwl::TrBdf2Stage::Trapezoidal);
-        }
-        if (has_pmsm) {
-            pmsm.update_from_state(x_trial, dtp,
-                                   pwl::TrBdf2Stage::Trapezoidal);
-        }
-        if (has_sat) {
-            sat.update_from_state(x_trial, pwl::TrBdf2Stage::Trapezoidal);
-        }
+        hs.commit(x_trial, dtp, pwl::TrBdf2Stage::Trapezoidal);
         // The toggle is at the edge, not at the next step's start
         // (t + dtp): dtp differs per edge and biased gate_pulse_min.
         if (learn_gates) {
@@ -1906,36 +1843,15 @@ inline SimulationResult run_transient_trbdf2(
                 b_src);
             b_stage += b_src;
             if (stage_ok) {
-                if (has_coss) {
-                    // Q at the stage point feeds the BDF2 history
-                    // term; h is the FULL step there, while the
-                    // matrix is still the one factored at gamma*h.
-                    Size qi = 0;
-                    for (const auto& e : coss.entries()) {
-                        const Real vg =
-                            stamping::read_node_voltage(x_g, e.from)
-                            - stamping::read_node_voltage(x_g, e.to);
-                        q_gamma[qi++] =
-                            models::NonlinearCapacitor::charge(
-                                e.params, vg);
-                    }
-                    coss_stage = pwl::CossStage::Bdf2Stage2;
-                    coss_h = h;
-                }
-                if (has_laur || has_tail || has_pmsm
-                    || has_sat) {
-                    // Each device's state AT THE STAGE POINT feeds
-                    // the BDF2 history term. `h` is the FULL step
-                    // there, while the matrix is still the one
-                    // factored at gamma*h — the identity
-                    // c1/h == 2/(gamma*h) is what allows that.
-                    if (has_laur) laur.capture_gamma(x_g);
-                    if (has_tail) tail.capture_gamma(x_g);
-                    if (has_pmsm) pmsm.capture_gamma(x_g);
-                    if (has_sat) sat.capture_gamma(x_g);
-                    dev_stage = pwl::TrBdf2Stage::Bdf2Stage2;
-                    dev_h = h;
-                }
+                // Each device's state AT THE STAGE POINT feeds the
+                // BDF2 history term. `h` is the FULL step there, while
+                // the matrix is still the one factored at gamma*h — the
+                // identity c1/h == 2/(gamma*h) is what allows that.
+                hs.capture_gamma(x_g);
+                coss_stage = pwl::CossStage::Bdf2Stage2;
+                coss_h = h;
+                dev_stage = pwl::TrBdf2Stage::Bdf2Stage2;
+                dev_h = h;
                 x_1 = x_g;           // Newton warm start
                 stage_ok =
                     solve_dispatch(mask_step, hg, b_stage, x_1);
@@ -2538,27 +2454,9 @@ inline SimulationResult run_transient_trbdf2(
                     // NEXT step from their pre-landing state with a
                     // stale V_old — found by an adversarial read
                     // while the hysteretic core was being wired in.
-                    if (has_coss) {
-                        // Trapezoidal commit (the landing is a single
-                        // trap step); commit_coss is the BDF2 form.
-                        coss.update_from_state(x_trial, dt_land);
-                    }
-                    if (has_laur) {
-                        laur.update_from_state(
-                            x_trial, dt_land, pwl::TrBdf2Stage::Trapezoidal);
-                    }
-                    if (has_tail) {
-                        tail.update_from_state(
-                            x_trial, dt_land, pwl::TrBdf2Stage::Trapezoidal);
-                    }
-                    if (has_pmsm) {
-                        pmsm.update_from_state(
-                            x_trial, dt_land, pwl::TrBdf2Stage::Trapezoidal);
-                    }
-                    if (has_sat) {
-                        sat.update_from_state(
-                            x_trial, pwl::TrBdf2Stage::Trapezoidal);
-                    }
+                    // (the landing is a single trapezoidal step)
+                    hs.commit(x_trial, dt_land,
+                              pwl::TrBdf2Stage::Trapezoidal);
                     x = x_trial;
                     x_sig = x;
                     t += dt_land;
@@ -2662,30 +2560,12 @@ inline SimulationResult run_transient_trbdf2(
                 } else {
                     history.commit_trbdf2(x_1, h, x_g);
                 }
-                if (has_coss) {
-                    commit_coss(x_1, h);
-                }
                 // Committed under the rule the stage actually used,
                 // so the derivative each history carries into the
-                // next step is the one the method produced.
-                if (has_laur) {
-                    laur.update_from_state(
-                        x_1, h, pwl::TrBdf2Stage::Bdf2Stage2);
-                }
-                if (has_tail) {
-                    tail.update_from_state(
-                        x_1, h, pwl::TrBdf2Stage::Bdf2Stage2);
-                }
-                if (has_pmsm) {
-                    pmsm.update_from_state(
-                        x_1, h, pwl::TrBdf2Stage::Bdf2Stage2);
-                }
-                if (has_sat) {
-                    // The stage matters now: the hysteretic law's
-                    // commit must integrate from the same base the
-                    // converged BDF2 residual used, (H_γ, M_γ).
-                    sat.update_from_state(x_1, pwl::TrBdf2Stage::Bdf2Stage2);
-                }
+                // next step is the one the method produced (the
+                // hysteretic law integrates from the same base the
+                // converged BDF2 residual used, (H_γ, M_γ)).
+                hs.commit(x_1, h, pwl::TrBdf2Stage::Bdf2Stage2);
                 x = x_1;
                 x_sig = x;
                 t += h;
@@ -2857,11 +2737,7 @@ inline SimulationResult run_transient_trbdf2(
     // may already be post-edge (see initial_mask above).
     result.final_snapshot.stamped_mask =
         x_mask_known ? mask_bits(x_mask) : std::vector<bool>{};
-    result.final_snapshot.saturable_history = sat.to_flat();
-    result.final_snapshot.coss_history = coss.to_flat();
-    result.final_snapshot.lauritzen_history = laur.to_flat();
-    result.final_snapshot.igbt_tail_history = tail.to_flat();
-    result.final_snapshot.pmsm_history = pmsm.to_flat();
+    hs.to_snapshot(result.final_snapshot);
     result.final_snapshot.valid = true;
     result.newton = newton_ws.take_counters();
     return result;
