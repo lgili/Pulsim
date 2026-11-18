@@ -100,35 +100,51 @@ def test_each_block_holds_its_device_s_state_at_the_end(engine):
     assert np.array_equal(np.asarray(snap.x), np.asarray(res.states)[-1])
 
 
-def test_split_fixed_step_run_matches_the_continuous_one():
-    """Not bit for bit: the resumed run's time grid starts from t_split,
-    so its sample times differ from the continuous run's by ~1e-20 s and
-    a gate edge lands a rounding apart (measured: states equal up to the
-    edge at 5e-5, then within 8e-12)."""
+@pytest.mark.parametrize("t_split", [4.2e-5, 5.0e-5, 5.5e-5])
+def test_split_fixed_step_run_is_the_continuous_one_bit_for_bit(t_split):
+    """The snapshot carries the grid (origin, index, dt), so the resumed
+    run continues the continuous run's time grid and meets every gate
+    edge at the same instant. Before, the grid restarted at t_split, the
+    sample times moved by ~1e-20 s and the states drifted apart after the
+    next edge (8e-12 of scale). Split between edges and exactly on one
+    (5e-5 on, 5.5e-5 off)."""
     full = _pwl(1e-4)
-    first = _pwl(4.2e-5)
+    first = _pwl(t_split)
     snap = pickle.loads(pickle.dumps(first.final_snapshot))
+    assert snap.grid_dt == 2e-8 and snap.grid_origin == 0.0
     second = _pwl(1e-4, resume_from=snap)
     t_full = np.asarray(full.times)
-    x_full = np.asarray(full.states)
+    i0 = len(np.asarray(first.times)) - 1
     t2 = np.asarray(second.times)
+    n = min(len(t2), len(t_full) - i0)
+    assert n > 0.99 * len(t2)
+    assert np.array_equal(t2[:n], t_full[i0:i0 + n])
+    assert np.array_equal(np.asarray(second.states)[:n],
+                          np.asarray(full.states)[i0:i0 + n])
+    assert np.array_equal(np.asarray(second.final_snapshot.dev_state),
+                          np.asarray(full.final_snapshot.dev_state))
+
+
+def test_a_snapshot_without_a_grid_restarts_the_grid_at_its_t():
+    """A 2.0 / version-3 pickle, a hand-built or a variable-step snapshot
+    carries no grid: the resumed grid starts at t_start, as before (within
+    1e-9 of scale of the continuous run, not bit for bit)."""
+    full = _pwl(1e-4)
+    snap = _pwl(4.2e-5).final_snapshot
+    snap.grid_origin = float("nan")
+    second = _pwl(1e-4, resume_from=snap)
+    i0 = int(np.searchsorted(np.asarray(full.times), snap.t))
     x2 = np.asarray(second.states)
-    # compare on the time points the two grids share (to 1e-15 s)
-    k = np.clip(np.searchsorted(t_full, t2), 1, len(t_full) - 1)
-    k -= (t2 - t_full[k - 1]) < (t_full[k] - t2)
-    common = np.abs(t_full[k] - t2) < 1e-15
-    assert common.mean() > 0.99
+    x_full = np.asarray(full.states)[i0:i0 + len(x2)]
     scale = np.abs(x_full).max(axis=0) + 1e-12
-    assert (np.abs(x_full[k[common]] - x2[common]) / scale).max() < 1e-9
+    assert (np.abs(x_full - x2[:len(x_full)]) / scale).max() < 1e-9
 
 
 @pytest.mark.parametrize("first_engine,second_engine",
                          [("pwl", "trbdf2"), ("trbdf2", "pwl")])
 def test_a_snapshot_resumes_on_the_other_engine(first_engine, second_engine):
-    """Split off any gate edge: a TR-BDF2 run that ends exactly ON an edge
-    stores the edge sample with the pre-edge solve, and the fixed engine
-    resumed from it aborts at the next edge (found while writing this
-    test; the same on the build before step 3)."""
+    """Split off any gate edge (a TR-BDF2 snapshot ON an edge is refused
+    by the fixed engine: next test)."""
     run = {"pwl": _pwl, "trbdf2": _trbdf2}
     t_split = 4.77e-5             # S is off: the Coss holds ~24 V
     first = run[first_engine](t_split)
@@ -139,24 +155,73 @@ def test_a_snapshot_resumes_on_the_other_engine(first_engine, second_engine):
     # starts from the snapshot's x, device state and mode bits
     assert np.array_equal(x2[0], np.asarray(snap.x))
     # each stateful kind continues from its own state across the seam,
-    # checked up to the next gate edge. Measured with one block of the
-    # snapshot zeroed (relative error of the probe): saturable 0.39 on
-    # i(L); IGBT tail 0.066 / 0.0041 on i(Q1); Coss 0.82 on v(Cj) into
-    # TR-BDF2 but not on these probes into the fixed engine (it moves a
-    # branch current there); intact <= 7.1e-4.
+    # checked up to the next gate edge
+    for name, err in _seam_errors(second_engine, second, full).items():
+        assert err <= 4e-3, name   # intact <= 7.1e-4; a dropped state > 2e-2
+
+
+_RUN = {"pwl": _pwl, "trbdf2": _trbdf2}
+_T_SPLIT = 4.77e-5              # S is off: the Coss holds ~24 V
+_PROBES = {
+    "i(L)": lambda r: np.asarray(r.i("L")),
+    "v(Cj)": lambda r: np.asarray(r.v("vin")) - np.asarray(r.v("sw")),
+    "i(Q1)": lambda r: np.asarray(r.i("Rsense")),
+    "v(out)": lambda r: np.asarray(r.v("out")),
+    "i(D1)": lambda r: np.asarray(r.i("D1")),
+}
+
+
+def _seam_errors(second_engine, second, full):
+    """Relative error of each probe of the resumed run up to the next
+    gate edge. i(D1) is compared with the TR-BDF2 continuous run: the
+    fixed engine's own continuous run rings in i(D1) after the Coss
+    turn-off (trapezoid, 8.39 / 6.86 A), the resumed one does not."""
     t2 = np.asarray(second.times)
-    tf = np.asarray(full.times)
-    w = (t2 > t_split) & (t2 < 4.99e-5)
-    probes = {
-        "i(L)": lambda r: np.asarray(r.i("L")),
-        "v(Cj)": lambda r: np.asarray(r.v("vin")) - np.asarray(r.v("sw")),
-        "i(Q1)": lambda r: np.asarray(r.i("Rsense")),
-        "v(out)": lambda r: np.asarray(r.v("out")),
-    }
-    for name, f in probes.items():
-        y_full = f(full)
-        err = np.abs(f(second)[w] - np.interp(t2[w], tf, y_full)).max()
-        assert err <= 2e-3 * np.abs(y_full).max(), name
+    w = (t2 > _T_SPLIT) & (t2 < 4.99e-5)
+    out = {}
+    for name, f in _PROBES.items():
+        ref = full
+        if name == "i(D1)" and second_engine != "trbdf2":
+            ref = _trbdf2(1e-4)
+        y = f(ref)
+        out[name] = (np.abs(f(second)[w] - np.interp(t2[w], np.asarray(
+            ref.times), y)).max() / np.abs(y).max())
+    return out
+
+
+@pytest.mark.parametrize("first_engine,second_engine",
+                         [("pwl", "trbdf2"), ("trbdf2", "pwl")])
+def test_a_lost_coss_block_is_caught_in_both_directions(first_engine,
+                                                       second_engine):
+    """The seam test must see a snapshot whose Coss block was dropped.
+    Measured with the block zeroed: into TR-BDF2, v(Cj) 0.82 (intact
+    6e-7); into the fixed engine, i(D1) 4.1e-2 against the TR-BDF2 run
+    (intact 2.1e-7) while v(Cj) stays at 2e-6 — the fixed engine moves
+    the lost charge through the conducting D1."""
+    first = _RUN[first_engine](_T_SPLIT)
+    snap = first.final_snapshot
+    snap.coss_history = [0.0] * len(list(snap.coss_history))
+    second = _RUN[second_engine](1e-4, resume_from=snap)
+    full = _RUN[second_engine](1e-4)
+    errs = _seam_errors(second_engine, second, full)
+    assert max(errs.values()) > 2e-2, errs
+
+
+def test_a_trbdf2_snapshot_on_a_gate_edge_is_refused_by_the_fixed_engine():
+    """TR-BDF2 ending exactly on an edge keeps the pre-edge x but has
+    already replaced the device derivative slots with the post-edge ones
+    (a 22.9 kA Coss discharge through the closed switch). The fixed engine
+    started from that pair rang and aborted at the next edge (Newton at
+    2e4 A residuals); it now refuses by name. TR-BDF2 resumes from it."""
+    snap = _trbdf2(5e-5).final_snapshot
+    assert snap.post_edge_derivatives
+    assert not _trbdf2(4.77e-5).final_snapshot.post_edge_derivatives
+    with pytest.raises(ValueError, match="gate edge"):
+        _pwl(1e-4, resume_from=snap)
+    again = pickle.loads(pickle.dumps(snap))
+    assert again.post_edge_derivatives
+    res = _trbdf2(1e-4, resume_from=again)
+    assert np.isfinite(np.asarray(res.states)).all()
 
 
 def test_a_snapshot_of_another_circuit_is_refused_by_block_name():
@@ -196,6 +261,8 @@ def test_a_pulsim_2_0_pickle_resumes_like_the_snapshot_it_came_from():
     legacy = SolverSnapshot.__new__(SolverSnapshot)
     legacy.__setstate__(old)
     assert list(legacy.dev_layout) == []            # converted at resume
+    # 2.0 carried no grid: compare with the same snapshot without one
+    snap.grid_origin = float("nan")
     a = _pwl(1e-4, resume_from=snap)
     b = _pwl(1e-4, resume_from=legacy)
     assert np.array_equal(np.asarray(a.states), np.asarray(b.states))
@@ -212,7 +279,30 @@ def test_a_dev_state_without_its_layout_is_refused():
 
 def test_a_newer_pickle_version_is_refused_by_version():
     snap = SolverSnapshot.__new__(SolverSnapshot)
-    with pytest.raises(RuntimeError, match="pickle version 4"):
-        snap.__setstate__(("SolverSnapshot", 4, 0.0))
+    with pytest.raises(RuntimeError, match="pickle version 5"):
+        snap.__setstate__(("SolverSnapshot", 5, 0.0))
     with pytest.raises(RuntimeError, match="pickle version 3"):
         snap.__setstate__(("Other", 3) + (0,) * 10)
+    with pytest.raises(RuntimeError, match="pickle version 4"):
+        snap.__setstate__(("SolverSnapshot", 4) + (0,) * 10)   # 12 fields
+
+
+def test_a_version_3_pickle_loads_and_resumes_on_a_restarted_grid():
+    """Version 3 = version 4 without the grid field: it loads, and resumes
+    exactly as the same snapshot without a grid."""
+    snap = _pwl(4.2e-5).final_snapshot
+    v4 = snap.__getstate__()
+    # 14 fields: version 3's 13 (the controllers'-state marker at 12, batch
+    # 12) + the grid (13). The slice's own 13-field version 4 (grid at 12,
+    # no marker) still loads, grid included.
+    assert v4[1] == 4 and len(v4) == 14 and v4[12] is False
+    v4_13 = SolverSnapshot.__new__(SolverSnapshot)
+    v4_13.__setstate__(tuple(v4[:12]) + (v4[13],))
+    assert v4_13.grid_origin == snap.grid_origin and v4_13._control_state is None
+    old = SolverSnapshot.__new__(SolverSnapshot)
+    old.__setstate__(("SolverSnapshot", 3) + tuple(v4[2:12]))
+    assert np.isnan(old.grid_origin) and not old.post_edge_derivatives
+    snap.grid_origin = float("nan")
+    a = _pwl(1e-4, resume_from=snap)
+    b = _pwl(1e-4, resume_from=old)
+    assert np.array_equal(np.asarray(a.states), np.asarray(b.states))

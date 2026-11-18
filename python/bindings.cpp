@@ -285,6 +285,21 @@ void init_module(py::module_& m) {
         "The gated PWL devices' engine column (add-pwl-igbt-and-"
         "thyristor): {'GateHeld'|'Latching': {engine: bool}}; False "
         "refuses with UnsupportedError(feature='gated_diode').");
+
+    m.def("_stateful_kinds",
+        []() {
+            py::dict out;
+            const pwl::StatefulHistories kinds;
+            kinds.for_each([&out](const auto& k) {
+                out[py::str(std::string(device::kStateBlocks[
+                    static_cast<std::size_t>(k.kBlock)].name))] =
+                    std::string(pwl::stored_kind_name(k.kStoredKind));
+            });
+            return out;
+        },
+        "The kernel's stateful Newton kinds (pwl::StatefulKinds), in fold "
+        "order: {state block name: StoredKind name of the kind-table row "
+        "it runs under}.");
     m.def("_require_supported",
         [](const topology::Graph& graph, const pwl::DevicePool& pool,
            const std::string& engine_in) {
@@ -456,6 +471,9 @@ void init_module(py::module_& m) {
                        "reported the issue.")
         .def_readonly("detail", &pwl::PreflightFinding::detail,
                        "Human-facing explanation, naming the node.")
+        .def_readonly("domain", &pwl::PreflightFinding::domain,
+                       "Domain of the subnet (electrical, thermal, "
+                       "mechanical); set by Circuit.with_preflight.")
         .def("was_fixed", &pwl::PreflightFinding::was_fixed)
         .def("__repr__", [](const pwl::PreflightFinding& f) {
             return std::string("PreflightFinding(node=") +
@@ -636,10 +654,19 @@ void init_module(py::module_& m) {
               "ngspice VDMOS C_gd(v_gd): s = (CGDMAX-CGDMIN)/(1+pi/2), "
               "C = CGDMAX - s + s*tanh(a*u) for u > 0, "
               "CGDMAX - s + s*atan(a*u) for u <= 0.")
+        .def_static("tanh",
+              [](Real c_max, Real c_min, Real v0) {
+                  auto p = models::NonlinearCapacitor::tanh_law(c_max, c_min, v0);
+                  models::NonlinearCapacitor::validate(p);
+                  return p;
+              },
+              py::arg("c_max"), py::arg("c_min"), py::arg("v0"),
+              "Odd saturation law Q = c_min*v + (c_max - c_min)*v0*tanh(v/v0); "
+              "C(0) = c_max, C -> c_min. The law of add_saturable_permeance.")
         .def_property_readonly("kind",
               [](const models::NonlinearCapacitor::Params& p) {
                   return std::string{models::NonlinearCapacitor::law_name(p)};
-              }, "'junction', 'table' or 'vdmos_cgd'.")
+              }, "'junction', 'table', 'vdmos_cgd' or 'tanh'.")
         .def("charge",
               [](const models::NonlinearCapacitor::Params& p, Real v) {
                   return models::NonlinearCapacitor::charge(p, v);
@@ -656,7 +683,7 @@ void init_module(py::module_& m) {
         py::dynamic_attr())  // allow Python-side metadata
                               // (initial conditions, aliases)
         .def(py::init<>())
-        .def("node", &builder::CircuitBuilder::node,
+        .def("node", py::overload_cast<std::string_view>(&builder::CircuitBuilder::node),
               py::arg("name"),
               "Look up or create a node by name. "
               "\"gnd\" / \"GND\" / \"0\" alias to ground.")
@@ -871,6 +898,129 @@ void init_module(py::module_& m) {
               "and p2_pos. Lossless; an impedance Z on one port appears "
               "as 1/(g^2 Z) on the other (a capacitor C as an inductor "
               "C/g^2). res.i(name, port=1|2).")
+        // ---- add-permeance-magnetic-domain ---------------------------
+        .def("add_winding", &builder::CircuitBuilder::add_winding,
+              py::arg("name"), py::arg("e_pos"), py::arg("e_neg"),
+              py::arg("m_pos"), py::arg("m_neg"), py::arg("turns"),
+              py::return_value_policy::reference,
+              "Winding of `turns` turns between an electrical port (e_pos, "
+              "e_neg) and a magnetic port (m_pos, m_neg): v = N*dPhi/dt, "
+              "F(m_pos) - F(m_neg) = N*i, with i INTO e_pos and the flux "
+              "rate leaving m_pos. A gyrator with g = 1/N (lossless). "
+              "res.i(name, port=1) is the winding current.")
+        .def("add_permeance", &builder::CircuitBuilder::add_permeance,
+              py::arg("name"), py::arg("m_a"), py::arg("m_b"), py::arg("P"),
+              py::return_value_policy::reference,
+              "Linear permeance P [H] between magnetic nodes (MMF [A] is "
+              "the node potential, flux rate [V] the through variable): "
+              "Phi = P*F. Every magnetic island needs one node tied to gnd.")
+        .def("add_air_gap", &builder::CircuitBuilder::add_air_gap,
+              py::arg("name"), py::arg("m_a"), py::arg("m_b"),
+              py::arg("area"), py::arg("length"),
+              py::return_value_policy::reference,
+              "Air gap: permeance mu0*area/length (area [m^2], length [m]; "
+              "no fringing).")
+        .def("add_magnetic_resistance",
+              &builder::CircuitBuilder::add_magnetic_resistance,
+              py::arg("name"), py::arg("m_a"), py::arg("m_b"), py::arg("R_m"),
+              py::return_value_policy::reference,
+              "Magnetic resistance R_m [S = A/V]: F = R_m*dPhi/dt, loss "
+              "R_m*(dPhi/dt)^2 inside the solve (classical eddy loss; a "
+              "lamination: R_m = sigma*d^2*l/(12*A)). Seen from a winding of "
+              "N turns it is a resistance N^2/R_m across the winding.")
+        .def("add_saturable_permeance",
+              [](builder::CircuitBuilder& self, std::string_view name,
+                 std::string_view m_a, std::string_view m_b,
+                 std::optional<Real> area, std::optional<Real> length,
+                 std::optional<Real> mu_r, std::optional<Real> B_sat,
+                 const std::optional<models::ChargeTable>& table)
+                  -> builder::CircuitBuilder& {
+                  if (table) {
+                      if (mu_r || B_sat) {
+                          throw std::invalid_argument(std::format(
+                              "add_saturable_permeance(\"{}\"): pass either "
+                              "table= or mu_r and B_sat, not both.", name));
+                      }
+                      return self.add_permeance_law(
+                          name, m_a, m_b,
+                          models::NonlinearCapacitor::from_table(
+                              std::make_shared<const models::ChargeTable>(*table)),
+                          area.value_or(Real{0}), length.value_or(Real{0}));
+                  }
+                  if (!area || !length || !mu_r || !B_sat) {
+                      throw std::invalid_argument(std::format(
+                          "add_saturable_permeance(\"{}\"): needs area, length, "
+                          "mu_r and B_sat (or table=).", name));
+                  }
+                  return self.add_saturable_permeance(name, m_a, m_b, *area,
+                                                      *length, *mu_r, *B_sat);
+              },
+              py::arg("name"), py::arg("m_a"), py::arg("m_b"),
+              py::arg("area") = py::none(), py::arg("length") = py::none(),
+              py::kw_only(), py::arg("mu_r") = py::none(),
+              py::arg("B_sat") = py::none(), py::arg("table") = py::none(),
+              py::return_value_policy::reference,
+              "Saturable core segment (area [m^2], length [m]) with the "
+              "GappedCore material law B = mu0*(H + Ms*tanh(H/H0)), "
+              "Ms = B_sat/mu0, H0 = Ms/(mu_r - 1): Phi(F) = mu0*A*[F/l + "
+              "Ms*tanh(F/(l*H0))], stamped in flux form. Or table= a "
+              "ChargeTable with knots (F, Phi, P) covering both signs. "
+              "Newton engines (pwl, trbdf2) only.")
+        .def("magnetic_element",
+              [](const builder::CircuitBuilder& self, std::string_view name) {
+                  using K = pwl::DevicePool::StoredKind;
+                  const auto& g = self.graph();
+                  const auto& pool = self.pool();
+                  const Index bid = self.branch_id_of(name);
+                  const auto& br = g.branch(bid);
+                  auto label = [&](Index n) {
+                      return n == topology::Graph::ground()
+                                 ? std::string{"gnd"} : g.node(n).name;
+                  };
+                  const bool mag = pool.is_flux_node(br.from) || pool.is_flux_node(br.to);
+                  py::dict d;
+                  const auto k = pool.kind_of(bid);
+                  if (mag && k == K::Capacitor) {
+                      d["kind"] = "permeance";
+                      d["P"] = pool.capacitor_params(bid).C;
+                  } else if (mag && k == K::NonlinearCapacitor) {
+                      d["kind"] = "saturable_permeance";
+                      d["law"] = pool.nonlinear_capacitor_params(bid);
+                  } else if (mag && k == K::Resistor) {
+                      d["kind"] = "magnetic_resistance";
+                      d["R_m"] = Real{1} / pool.resistor_params(bid).G;
+                  } else if (mag && k == K::Gyrator) {
+                      d["kind"] = "winding";
+                      d["turns"] = Real{1} / pool.gyrator_params(bid).g;
+                  } else {
+                      throw py::key_error(std::format(
+                          "'{}' is not a magnetic element (winding, permeance, "
+                          "air gap, saturable permeance or magnetic resistance)",
+                          name));
+                  }
+                  d["m_a"] = label(br.from);
+                  d["m_b"] = label(br.to);
+                  d["area"] = py::none();
+                  d["length"] = py::none();
+                  for (const auto& mg : pool.magnetic_geometry()) {
+                      if (mg.branch == bid) { d["area"] = mg.area; d["length"] = mg.length; }
+                  }
+                  return d;
+              },
+              py::arg("name"),
+              "Description of a magnetic element: kind ('winding', "
+              "'permeance', 'saturable_permeance', 'magnetic_resistance'), "
+              "its magnetic nodes m_a, m_b, its value (P, law, R_m or turns) "
+              "and area / length (None without geometry). KeyError otherwise.")
+        .def("magnetic_nodes",
+              [](const builder::CircuitBuilder& self) {
+                  std::vector<std::string> out;
+                  for (const Index n : self.pool().flux_nodes()) {
+                      out.push_back(self.graph().node(n).name);
+                  }
+                  return out;
+              },
+              "Names of the magnetic nodes (touched by a magnetic element).")
         .def("add_sine_current_source",
               &builder::CircuitBuilder::add_sine_current_source,
               py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
@@ -1840,6 +1990,9 @@ void init_module(py::module_& m) {
                               } else if (q.law == models::ChargeLawKind::VdmosCgd) {
                                   d["cgd_max"] = q.cgd_max; d["cgd_min"] = q.cgd_min;
                                   d["a"] = q.a;
+                              } else if (q.law == models::ChargeLawKind::Tanh) {
+                                  d["c_max"] = q.cgd_max; d["c_min"] = q.cgd_min;
+                                  d["V0"] = q.V0;
                               } else {
                                   d["knots"] = q.table->size();
                               }
@@ -2860,7 +3013,10 @@ void init_module(py::module_& m) {
         .def_readonly("lambda_", &ReinitRecord::lambda)
         .def_readonly("dW", &ReinitRecord::dW)
         .def_readonly("projection_gap", &ReinitRecord::projection_gap)
-        .def_readonly("sample", &ReinitRecord::sample);
+        .def_readonly("sample", &ReinitRecord::sample)
+        .def_readonly("cause", &ReinitRecord::cause,
+                      "The switch the impulsive energy dW is booked to "
+                      "(pulsim.losses.impulse_losses).");
 
     py::class_<CommutationEvent>(m, "CommutationEvent",
         "Sub-step commutation timing event (V2.2 + V3).")
@@ -3831,6 +3987,21 @@ void init_module(py::module_& m) {
             "Deprecated view of one block of ``dev_state`` (the 2.0 field). "
             "Writing it turns the snapshot into a 2.0-style payload.")
         .def_readwrite("valid", &SolverSnapshot::valid)
+        .def_readwrite("grid_origin", &SolverSnapshot::grid_origin,
+            "The fixed-step grid ``t`` sits on: t == grid_origin + "
+            "grid_step * grid_dt to rounding (NaN: none). A fixed-step resume "
+            "with the same dt continues it, so its trace is the continuous "
+            "run's bit for bit.")
+        .def_readwrite("grid_step", &SolverSnapshot::grid_step,
+            "Index of ``t`` on the fixed-step grid (see ``grid_origin``).")
+        .def_readwrite("grid_dt", &SolverSnapshot::grid_dt,
+            "Step of the fixed-step grid (see ``grid_origin``); NaN: none.")
+        .def_readwrite("post_edge_derivatives",
+            &SolverSnapshot::post_edge_derivatives,
+            "True when a variable-step run ended exactly on a gate edge "
+            "after refreshing the device derivatives for the post-edge "
+            "circuit (``x`` is the pre-edge solve). engine='pwl' refuses "
+            "to resume from it; engine='trbdf2' resumes.")
         .def_readwrite("restart_steps_left",
             &SolverSnapshot::restart_steps_left,
             "discontinuity_restart: SDIRK restart steps still owed when "
@@ -3873,11 +4044,15 @@ void init_module(py::module_& m) {
         })
         .def(py::pickle(
             [](const SolverSnapshot& s) {
-                // Version 3: a tag first, so it never reads as the 2.0
-                // tuples (which start with t).
+                // A tag first, so it never reads as the 2.0 tuples
+                // (which start with t). Version 4 = version 3 + the
+                // controllers'-state marker (field 12) + the grid and the
+                // edge flag (field 13). Read: v3 with 12 or 13 fields
+                // (13 = the marker), v4 with 13 (grid at 12, the
+                // device-interface branch) or 14 fields.
                 const auto& L = s.legacy;
                 return py::make_tuple(
-                    std::string("SolverSnapshot"), 3, s.t, s.x, s.dev_state,
+                    std::string("SolverSnapshot"), 4, s.t, s.x, s.dev_state,
                     s.dev_layout, s.layout_signature, s.mask, s.stamped_mask,
                     s.restart_steps_left, s.valid,
                     s.is_legacy()
@@ -3889,20 +4064,36 @@ void init_module(py::module_& m) {
                     // the controllers' state does not pickle: a resume
                     // from the copy refuses by name instead of
                     // continuing whatever the graphs hold
-                    static_cast<bool>(s.control_state));
+                    static_cast<bool>(s.control_state),
+                    py::make_tuple(s.grid_origin, s.grid_step, s.grid_dt,
+                                   s.post_edge_derivatives));
             },
             [](py::tuple t) {
                 SolverSnapshot s;
                 if (t.size() >= 2 && py::isinstance<py::str>(t[0])) {
+                    const int ver = t[1].cast<int>();
                     if (t[0].cast<std::string>() != "SolverSnapshot"
-                        || t[1].cast<int>() != 3
-                        || (t.size() != 12 && t.size() != 13)) {
+                        || !((ver == 3 && (t.size() == 12 || t.size() == 13))
+                             || (ver == 4 && (t.size() == 13 || t.size() == 14)))) {
                         throw std::runtime_error(
                             "SolverSnapshot: pickle version "
-                            + std::to_string(t[1].cast<int>()) + " with "
+                            + std::to_string(ver) + " with "
                             + std::to_string(t.size())
                             + " fields; this Pulsim reads version 3 "
-                              "(12 or 13 fields)");
+                              "(12 or 13 fields) and 4 (13 or 14 fields)");
+                    }
+                    if (ver == 4) {
+                        auto G = t[t.size() - 1].cast<py::tuple>();
+                        if (G.size() != 4) {
+                            throw std::runtime_error(
+                                "SolverSnapshot: the version-4 grid field "
+                                "has " + std::to_string(G.size())
+                                + " values, expected 4");
+                        }
+                        s.grid_origin = G[0].cast<Real>();
+                        s.grid_step = G[1].cast<Size>();
+                        s.grid_dt = G[2].cast<Real>();
+                        s.post_edge_derivatives = G[3].cast<bool>();
                     }
                     s.t = t[2].cast<Real>();
                     s.x = t[3].cast<Vector>();
@@ -3930,7 +4121,10 @@ void init_module(py::module_& m) {
                         g.igbt_tail_history = L[4].cast<std::vector<Real>>();
                         g.pmsm_history = L[5].cast<std::vector<Real>>();
                     }
-                    if (t.size() == 13 && t[12].cast<bool>()) {
+                    // the marker: field 12 of a 13-field v3 or a 14-field v4
+                    const bool has_marker = (ver == 3 && t.size() == 13)
+                                            || (ver == 4 && t.size() == 14);
+                    if (has_marker && t[12].cast<bool>()) {
                         // a marker the resume refuses by name (pulsim._control_state)
                         s.control_state = std::shared_ptr<void>(
                             new py::object(py::str("dropped by pickling")),
@@ -4380,17 +4574,7 @@ void init_module(py::module_& m) {
     // a bool default here could not distinguish "the user asked for
     // no refresh" from "the user said nothing", and getting that
     // wrong is the difference between 0.7 V and 5.0 V at a diode.
-    auto resolve_refresh =
-        [](const pwl::DevicePool& pool,
-            std::optional<bool> enable) -> pwl::NonlinearRefreshFn {
-            const bool want =
-                enable.has_value() ? *enable
-                                    : pool.has_nonlinear_devices();
-            if (!want) {
-                return {};
-            }
-            return pwl::make_combined_diode_mosfet_refresh();
-        };
+    auto resolve_refresh = &pwl::dc_device_refresh;
 
     m.def("compute_dc_op_with_strategy",
         [resolve_refresh](const topology::Graph& graph,
@@ -5846,9 +6030,15 @@ void init_module(py::module_& m) {
             d["n_sdirk_steps"] = st.n_sdirk_steps;
             d["n_reinit_steps"] = st.n_reinit_steps;
             d["n_filtered_estimates"] = st.n_filtered_estimates;
+            d["n_interp_floor_landings"] = st.n_interp_floor_landings;
             d["n_roundoff_floor_accepts"] = st.n_roundoff_floor_accepts;
             d["n_noise_held_decisions"] = st.n_noise_held_decisions;
             d["n_probe_noise_retakes"] = st.n_probe_noise_retakes;
+            d["n_factor_builds"] = st.n_factor_builds;
+            d["n_factor_refactors"] = st.n_factor_refactors;
+            d["n_factor_hits"] = st.n_factor_hits;
+            d["n_conditioning_rejects"] = st.n_conditioning_rejects;
+            d["h_conditioning_floor"] = st.h_conditioning_floor;
             return py::make_tuple(std::move(res), std::move(d));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),

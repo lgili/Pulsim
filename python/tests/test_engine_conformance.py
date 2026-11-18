@@ -826,6 +826,27 @@ def test_mode_guard_diagnostics_on_pwl_and_dsed(engine):
     assert "mode_guard" not in r.diagnostics
 
 
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
+def test_lcp_agrees_with_the_default_settle_on_every_engine(engine):
+    # add-complementarity-mode-selection 6.3: one cell per engine. trbdf2
+    # skips while its settle refuses by name (hook 4.2: it calls
+    # pwl::select_site at its settle site); the cell runs once it lands.
+    r0 = _sim(engine, _half_wave())
+    try:
+        r1 = _sim(engine, _half_wave(), mode_selection="lcp")
+    except p.UnsupportedError as e:
+        if (e.engine, e.feature) == ("trbdf2", "mode_selection"):
+            pytest.skip("trbdf2 settle hook (task 4.2) not landed")
+        raise
+    ms = r1.diagnostics["mode_selection"]
+    assert ms["errors"] == 0 and ms["capped"] == 0 and ms.get("inconsistent", 0) == 0
+
+    def avg(r):     # time-weighted, exactly clipped to [0, 2 ms]
+        t, v = np.asarray(r.times), np.asarray(r.v("o"))
+        return float(np.trapezoid(v, t)) / (t[-1] - t[0])
+    assert avg(r1) == pytest.approx(avg(r0), rel=1e-6)    # pwl, dsed: 0.0 measured
+
+
 @pytest.mark.parametrize("engine", ("dsed", "exact"))
 def test_c_blocks_refused(engine):
     # trbdf2 runs C blocks since task 9.3 (test_c_block_engines.py)
@@ -1029,8 +1050,30 @@ def _pm(on):
     return b
 
 
+def _tail(on):
+    # An IGBT switched off by its gate: the tail charge (tau_tail, k_tail)
+    # keeps conducting after cutoff and slows the collector's rise. The
+    # control is the same IGBT with no tail, so presence proves the TAIL
+    # stamp runs (not merely the IGBT).
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_pulse_voltage_source("Vg", "g", "gnd", 0.0, 15.0, 0.0, 1e-4,
+                               2e-4, 2e-6, 2e-6)
+    b.add_resistor("R", "in", "o", 100.0)
+    b.add_capacitor("C", "o", "gnd", 100e-9)
+    if on:
+        b.add_igbt_level1("Qd", "o", "gnd", "g", tau_tail=1e-5, k_tail=0.5)
+    else:
+        b.add_igbt_level1("Qd", "o", "gnd", "g")
+    return b
+
+
 # name -> (cell, kinds it is made of)
 VARIANT_CELLS = {
+    "IgbtLevel1[tail]": (
+        (_tail, "o", "Qd", 4e-4, 2e-7, False),
+        ("IgbtLevel1", "Capacitor", "Resistor", "VoltageSource",
+         "PulseVoltageSource")),
     "NonlinearCapacitor[table]": (
         (_law_cap(lambda: p.ChargeLaw.table(p.ChargeTable.from_capacitance(
             [-1.0, 0.0, 5.0, 10.0, 20.0], [1.2e-6, 1e-6, 5e-7, 3e-7, 2e-7]))),
@@ -1048,6 +1091,28 @@ VARIANT_CELLS = {
 def _composite_supported(kinds, column):
     caps = p.engine_capabilities()
     return all(caps[kd][column] for kd in kinds)
+
+
+# Every stateful Newton kind of the kernel's list (pwl::StatefulKinds,
+# device/kind.hpp) -> the conformance cell that runs it on every engine.
+STATEFUL_CELLS = {
+    "nonlinear_capacitor": "NonlinearCapacitor",
+    "lauritzen_diode": "LauritzenDiode",
+    "pmsm_mna": "PmsmMna",
+    "igbt_tail": "IgbtLevel1[tail]",
+    "saturable_inductor": "SaturableInductor",
+}
+
+
+def test_every_stateful_kind_has_a_conformance_cell():
+    kinds = k._stateful_kinds()
+    assert set(kinds) == set(STATEFUL_CELLS), (
+        "a stateful kind without a conformance cell (add it to "
+        "STATEFUL_CELLS and give it a cell)")
+    for name, cell in STATEFUL_CELLS.items():
+        assert cell in CELLS or cell in VARIANT_CELLS, cell
+        # the kind-table row whose engine column the cell is checked against
+        assert kinds[name] == cell.split("[")[0], (name, kinds[name])
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -1068,6 +1133,85 @@ def test_charge_law_and_power_mosfet_refused_by_the_ac_sweep(name):
             [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
     assert ei.value.engine == "ac_sweep"
     assert ei.value.device == cell[2]
+
+
+# ---------------------------------------------------------------------
+# add-permeance-magnetic-domain (task 5.4): the magnetic elements are
+# composites of existing kinds (winding = Gyrator, permeance / air gap =
+# Capacitor, magnetic resistance = Resistor, saturable permeance =
+# NonlinearCapacitor with the tanh law), so they add no table row. Their
+# cells: run and agree with pwl where every kind they are made of runs,
+# refused by name (the device) elsewhere.
+# ---------------------------------------------------------------------
+
+def _magnetic(saturable):
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "in", "gnd", 10.0)
+        b.add_resistor("R1", "in", "o", 1.0)
+        b.add_resistor("R2", "o", "gnd", 1e3)
+        if on:
+            b.add_winding("Wd", "o", "gnd", "m1", "gnd", 25)
+            b.add_magnetic_resistance("Rm", "m1", "m2", 0.625)  # 1 kOhm across
+            if saturable:
+                b.add_saturable_permeance("Core", "m2", "m3", 76e-6, 72e-3,
+                                          mu_r=2000.0, B_sat=0.35)
+            else:
+                b.add_permeance("Core", "m2", "m3", 2.653e-6)
+            b.add_air_gap("Gap", "m3", "gnd", 76e-6, 0.5e-3)
+        return b
+    return build
+
+
+MAGNETIC_CELLS = {
+    "magnetic[linear]": (
+        (_magnetic(False), "o", "Core", 5e-4, 1e-7, False),
+        ("Gyrator", "Capacitor", "Resistor")),
+    "magnetic[saturable_permeance]": (
+        (_magnetic(True), "o", "Core", 5e-4, 2e-8, False),
+        ("Gyrator", "Capacitor", "NonlinearCapacitor", "Resistor")),
+}
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("name", list(MAGNETIC_CELLS))
+def test_magnetic_element_cells(name, engine):
+    cell, kinds = MAGNETIC_CELLS[name]
+    _check_cell(name, cell, engine, _composite_supported(kinds, engine))
+
+
+MU0_CONF = 4e-7 * np.pi
+
+
+def test_linear_magnetic_cell_on_the_ac_sweep():
+    # Seen from the winding, series magnetic elements are parallel
+    # electrical ones: R_m -> N²/R_m, permeance P -> inductance N²·P.
+    assert _composite_supported(MAGNETIC_CELLS["magnetic[linear]"][1], "ac_sweep")
+
+    def H(b):
+        r = k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e2, 1e3, 1e4], b.node_id_of("o"), b.node_id_of("o"))
+        return np.asarray(r.H, dtype=complex)
+
+    e = _magnetic(False)(False)
+    e.add_resistor("Req", "o", "gnd", 25 ** 2 / 0.625)
+    e.add_inductor("Lc", "o", "gnd", 25 ** 2 * 2.653e-6)
+    e.add_inductor("Lg", "o", "gnd", 25 ** 2 * MU0_CONF * 76e-6 / 0.5e-3)
+    got, want = H(_magnetic(False)(True)), H(e)
+    assert np.max(np.abs(got - want)) < 1e-9 * np.max(np.abs(want))
+
+
+def test_saturable_permeance_refused_by_the_ac_sweep():
+    cell, kinds = MAGNETIC_CELLS["magnetic[saturable_permeance]"]
+    assert not _composite_supported(kinds, "ac_sweep")
+    b = cell[0](True)
+    with pytest.raises(p.UnsupportedError) as ei:
+        k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
+    assert ei.value.engine == "ac_sweep"
+    assert ei.value.device == "Core"
 
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))

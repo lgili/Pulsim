@@ -309,6 +309,19 @@ class CauerStage:
     C_th_J_per_K: float
 
 
+def _thermal_nodes(builder, *names) -> None:
+    """Declare a thermal network's nodes thermal (add-immutable-circuit-ir
+    9.4): an electrical pin on one of them is refused at ``build()``, a
+    floating network is a thermal-domain preflight finding, and a probe
+    reports degC. Only a pulsim ``CircuitBuilder`` takes the tag (a
+    subsystem proxy or a test double gets the names as before)."""
+    from ._pulsim import CircuitBuilder
+    if isinstance(builder, CircuitBuilder):
+        for n in names:
+            if n not in ("gnd", "GND", "0"):
+                builder.node(n, "thermal")
+
+
 def add_cauer_thermal_network(builder,
                                     stages,
                                     *,
@@ -356,6 +369,9 @@ def add_cauer_thermal_network(builder,
                                   curr, ambient_node,
                                   float(s.C_th_J_per_K))
         prev = curr
+    # after the devices, so the node order (every index) is as before
+    _thermal_nodes(builder, ambient_node, junction_node,
+                   *(f"{name_prefix}_stage_{k}" for k in range(n - 1)))
 
 
 class ThermalLimitMonitor:
@@ -487,6 +503,9 @@ def add_foster_network(builder,
                                   curr, prev,
                                   float(s.C_th_J_per_K))
         prev = curr
+    # after the devices, so the node order (every index) is as before
+    _thermal_nodes(builder, ambient_node, junction_node,
+                   *(f"{name_prefix}_stage_{k}" for k in range(n - 1)))
 
 
 def make_thermal_observer(builder,
@@ -1265,6 +1284,7 @@ def add_shared_heatsink(
         raise ValueError(
             f"add_shared_heatsink: device names must be unique (got {names})")
 
+    _thermal_nodes(builder, ambient_node, sink_node)
     builder.add_voltage_source(f"{name_prefix}_amb",
                                   ambient_node, "gnd", float(T_amb_C))
     builder.add_resistor(f"{name_prefix}_Rsa",
@@ -1282,6 +1302,7 @@ def add_shared_heatsink(
         R_cs = float(d.R_th_case_to_sink_K_per_W)
         if R_cs > 0:
             case_node = f"{pfx}_case"
+            _thermal_nodes(builder, case_node)
             builder.add_resistor(f"{pfx}_Rcs", sink_node, case_node, R_cs)
             prev = case_node
         else:
@@ -1294,6 +1315,7 @@ def add_shared_heatsink(
         n = len(stages)
         for k, s in enumerate(stages):
             curr = f"{pfx}_Tj" if k == n - 1 else f"{pfx}_stage{k}"
+            _thermal_nodes(builder, curr)
             builder.add_resistor(f"{pfx}_R{k}", prev, curr,
                                     float(s.R_th_K_per_W))
             # Foster stage: C across its own R; Cauer stage: C to ambient.

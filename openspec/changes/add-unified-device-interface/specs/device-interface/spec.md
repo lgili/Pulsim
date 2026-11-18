@@ -124,15 +124,22 @@ All device state SHALL live in one flat vector owned by the run, laid
 out per kind in registry order, holding `(q_n, q̇_n)` per charge row and
 the reals of the kind's `State`. Rolling back a rejected step SHALL be
 one copy of that vector. A snapshot SHALL be
-`{t, x, dev_state, mask}` plus the stamped mask and a layout signature,
-SHALL hold physical quantities only, and SHALL be refused by name when
-its layout does not match the circuit.
+`{t, x, dev_state, mask}` plus the stamped mask, a layout signature and,
+from a fixed-step run, its time grid (origin, step index, step), SHALL
+hold physical quantities only, and SHALL be refused by name when its
+layout does not match the circuit.
 
 #### Scenario: Exact resume
 - **GIVEN** a circuit containing every stateful kind
 - **WHEN** a fixed-step run is split at an arbitrary step and resumed
   from the snapshot
 - **THEN** the resumed trace is bit-identical to the continuous run
+
+#### Scenario: A variable-step snapshot taken on a gate edge
+- **GIVEN** a variable-step run that ends exactly on a gate edge, after
+  replacing the device derivatives with the post-edge ones
+- **WHEN** the fixed-step engine is asked to resume from its snapshot
+- **THEN** it refuses by name, and the variable-step engine resumes from it
 
 #### Scenario: A snapshot taken on engine A resumes on engine B
 - **GIVEN** a snapshot taken at the end of a fixed-step run

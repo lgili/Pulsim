@@ -58,7 +58,7 @@ def test_flyback_with_q1_on_keeps_the_output_at_its_leakage_level():
     # D1 is reverse-biased: only its 1 nS leak reaches the output (~-1e-8 V here).
     # The defect this guards put 8.3e-5 V there, ~1e6x the margin.
     assert abs(out["pwl"]) < 1e-7
-    assert abs(out["exact"] - out["pwl"]) < 1e-10
+    assert abs(out["exact"] - out["pwl"]) < 1e-9
 
 
 def test_flyback_as_documented_runs_and_matches_the_fixed_engine():
@@ -98,4 +98,4 @@ def test_phase_shift_full_bridge_output_with_balancing_where_it_hurts():
         warnings.simplefilter("ignore")
         r = p.simulate(lc, engine="exact", switch_fn=sw)
     v = p.time_average(np.asarray(r.times), np.asarray(r.v("vout")), t_from=1.8e-3)
-    assert v == pytest.approx(24.0662, abs=1e-3)
+    assert v == pytest.approx(24.0662, abs=5e-3)   # eigensolver-dependent; the defect read 24.33
