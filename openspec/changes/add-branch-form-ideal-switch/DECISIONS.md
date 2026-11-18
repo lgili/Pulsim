@@ -1043,3 +1043,91 @@ behind TR-BDF2 tracks 6-8, which took 24-33.)
     (median of 7 interleaved in-process runs, load 12-15): median ratio
     1.075, max 1.80 (diode_rectifier, 388 sites), 7 of 34 above 1.2.
     → Reverse: drop `mode_site` calls and the TrBdf2Options field.
+
+## TR-BDF2 track 10 (feat/core-p2-trbdf2)
+
+43. **PSFB zero-time current jumps: diagnosed, not fixed.** Question:
+    why does the phase-shift full bridge example's 1.8-2.0 ms mean not
+    converge in rtol (23.92-24.00 V over rtol 1e-4..1e-8; truth 24.066 V,
+    dsed dt 1e-9 / pwl+lcp / pwl dt 5e-9 within 1.5e-3 V)? Measured on
+    this tree (`.scratch` probes, debug print in the gate-edge cascade):
+    at a freewheel edge (LS_B off, HS_A on) the rectifier pair D2/D3 is
+    a tie: probed ON they carry -4.8e-8 A (h·di/dt < 0, OFF is right);
+    probed OFF, a 1.8e-15 s probe sits inside the L·g_off transient of
+    the series winding / L_out loop and reads them +9.7e3 V forward. The
+    cascade alternates to its 16-round cap and the step runs unsettled;
+    the committed edge probe holds +-1e4 V on the primary and the next
+    femtosecond TR-BDF2 steps ring at up to 2e5 V; a diode event on a
+    ring turns D2/D3 ON (the 1.2 A zero-time jumps). Tried, not kept,
+    all together: (a) gate-edge probes, commit and slot refresh by
+    backward Euler (no pre-edge derivative term), (b) a cycle of bit
+    sets lengthens the probe x10 up to min(span·1e-6, h/100), (c) one
+    SDIRK step with the filtered estimate after every edge on a linear
+    circuit. Chatter breaks fell 16-17k -> 2-8k and diode events 3-5x,
+    but the mean still does not converge (rtol 1e-4..1e-8: 24.004,
+    -, 23.997, 23.971, 24.025 V; jumps 468 / - / 1964 / 2867 / 6722 vs
+    2054 / 2171 / 3464 / 3617 / 8026): after the edge the OFF mode's
+    D2 voltage still rings across zero in 1e-13..1e-12 s steps while its
+    slow value is -2 mV (2e-5 of the bus), so every ring is a crossing.
+    The attempt moved every trbdf2 cell with gate edges and diodes, so
+    it was reverted; the patch is kept in the worktree's .scratch
+    (`t10/trbdf2_item1_attempt.hpp`). Next: decide crossings of a diode
+    whose OFF voltage is algebraic noise on the slow manifold (a probe
+    past the L·g_off mode, as in (b), at every diode event, not only at
+    edges), and find why the post-edge ring grows on an L-stable step.
+    The 'lcp' failure ("no conduction state" at 3.24e-5 s, rtol 1e-5;
+    1.24e-5 s at rtol 1e-7) is at the same kind of site; unchanged.
+
+44. **Newton from the run's start state.** Question: a Newton circuit
+    from a zero start (48 V + 1 µF + closed switch + Shockley diode;
+    `ll13_active_clamp_forward` in branch form) aborted at t = 0 with h
+    at h_min: the solve converged in dx (7e-16 V), but its residual is
+    the round-off of the 2C/h·v terms (4.8e-6 A), and the round-off
+    acceptance scales each row by its magnitudes AT THE START STATE,
+    which for x = 0 has none of those terms. Option taken: until the
+    first accepted step, a failed Newton solve is retried once from the
+    step's linear solve (`cache.solve_at` on the same mask, dt and
+    b_extra: the nonlinear laws left out). Its terms are the residual's.
+    The linear start can still be far from the answer (the diode law at
+    its 48 V scales row b to ~1e9 A), so a round-off acceptance from it
+    is re-measured by one more solve from the converged state, which
+    must converge or round-off-accept at that state's scale. Scope: any
+    Newton failure before the first committed step (accepted step or
+    diode-event landing) is retried, not only a declined round-off
+    acceptance (telling them apart needs a flag in the shared
+    `nonlinear_solve.hpp`); a retry can converge to another root than a
+    smaller h would have. `nonlinear_solve.hpp` is untouched (pwl
+    bit-identical). Counted in `n_newton_start_retries`. Runs whose
+    first solves converge are unchanged (golden: no counter moved). Measured: the minimal circuit runs in both forms (4
+    retries; V(b) at 10 µs 0.29184 V vs pwl dt 1e-9 0.29187); ll13
+    branch form runs (1 retry), conductance form unchanged (0 retries).
+    Tried, not kept: replacing the zero start's derivative slots by a
+    probe's when they are inconsistent (a consistent start). It moved
+    every trbdf2 reference run from a uic start, and ll13's reference
+    (rtol 1e-8) then aborted at t = 19 µs (its drain reaches 3.7e8 V: an
+    opened inductor path): a strict cell got worse.
+
+45. **The final sliver.** A gate edge within 64 h_min of t_end is not
+    landed: the step runs to t_end under the pre-edge gates and the next
+    run settles the edge at its start (its first step reads the gates at
+    t_start + h_min/2). Only without a stateful device history: that
+    settle does not commit its probe, and the Coss buck of
+    test_device_state_snapshot resumed that way read i(D1) 474x and
+    v(Cj) 0.86 off the continuous run; there the edge is still landed and
+    the snapshot flagged (pwl refuses it, trbdf2 resumes it). Nor when a
+    source corner or a controller tick lies inside the gap. The 24 V buck
+    with edges 1e-9·T before each period: last step 9.3e-15 s -> a full
+    step; its snapshot is unflagged and pwl resumes from it (6.8e-3 V
+    from the continuous pwl run at 3T; tested). An accepted step longer
+    than 64 h_min clears `slots_only_t` (its slots are its own); a
+    shorter one, the sliver after a landed edge, keeps the flag. Not fixed: `steady_state(engine='trbdf2',
+    dt=1e-7)` on that buck still finds no orbit (one period from the
+    answer: 4.9e-3 -> 1.6e-5): the monodromy probes take different step
+    grids (a 2.9e-14 s step at the mid-period edge), and slot 0's column
+    scales as 1/probe (a fixed offset, not a derivative). The test is
+    an xfail. Also: a diode-event landing now drops a post-event record
+    placed after it (`drop_superseded_event_sample`), as an accepted
+    step does; a record ahead of a landing broke the monotone time axis
+    (seen only with the reverted #43 attempt). `decide_probe`'s failed
+    retake restores `b_stage` (#42 leftover; reachable only on a Newton
+    circuit, which 'lcp' refuses).
