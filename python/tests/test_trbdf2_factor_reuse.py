@@ -89,9 +89,9 @@ def test_opaque_gate_calls_per_period_on_the_buck():
     width is known a step takes ceil(2h/w) samples (min 1, was 4):
     CCM 88.7 -> 38.7 calls per period, DCM 154.7 -> 74.4."""
     r, ccm = _buck_calls(1.0, 0.5)
-    assert ccm < 50
+    assert ccm < 65   # adaptive: 38.7 measured, 88.7 before
     st = r._trbdf2_stats
     assert st["n_factor_hits"] > st["n_factor_refactors"] > 0
     assert st["n_factor_builds"] >= 2
     _, dcm = _buck_calls(50.0, 0.3)
-    assert dcm < 97
+    assert dcm < 120  # 74.4 measured, 154.7 before

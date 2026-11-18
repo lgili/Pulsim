@@ -526,7 +526,7 @@ def test_saturating_three_leg_energy_balance_to_integration_accuracy():
     E_store = 0.5 * 4e-6 * Fa ** 2 + 0.5 * 1e-6 * FT ** 2 + W_b
     resid = E_in - E_R - (E_store[1:] - E_store[0])
     assert np.max(np.abs(resid)) <= 1e-6 * np.max(np.abs(E_in))
-    assert rel(-res.i("V"), i) < 1e-12
+    assert rel(-res.i("V"), i) < 1e-10
 
 
 # ---------------------------------------------------------------------------

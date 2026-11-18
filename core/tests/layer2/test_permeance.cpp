@@ -166,7 +166,7 @@ TEST_CASE("DC flux rows: a gapped core under DC bias divides the MMF as the "
     CHECK(rel(F1, F) < 1e-9);
     // R_gap/(R_core + R_gap) = (1/Pg)/(1/Pc + 1/Pg)
     CHECK(rel(F2, F * (1 / Pg) / (1 / Pc + 1 / Pg)) < 1e-9);
-    CHECK(rel(Pc * (F1 - F2), Pg * F2) < 1e-12);  // flux continuity
+    CHECK(rel(Pc * (F1 - F2), Pg * F2) < 1e-9);  // flux continuity (cancellation in F1 - F2)
     // Winding voltage 0, up to the conductance floor: gmin (1e-12 S) on
     // m1 at F = 50 A-turn draws a 5e-11 Wb/s flux rate, v_e = N·5e-11.
     CHECK(std::abs(node_v(b, x, "e")) < 1e-8);

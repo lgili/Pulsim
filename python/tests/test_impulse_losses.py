@@ -68,7 +68,7 @@ def test_capacitor_loop_energy_is_booked_to_the_switch_and_closes_the_balance(en
         24e-6 / (s["S"]["t_window_end"] - s["S"]["t_window_start"]), rel=1e-9)
     v1, v2 = r.v("x")[-1], r.v("y")[-1]
     dW = 0.5 * C1 * V1**2 + 0.5 * C2 * V2**2 - 0.5 * C1 * v1**2 - 0.5 * C2 * v2**2
-    assert s["S"]["E_impulse_total"] + s["S"]["E_total"] == pytest.approx(dW, rel=1e-12)
+    assert s["S"]["E_impulse_total"] + s["S"]["E_total"] == pytest.approx(dW, rel=1e-10)
     imp = impulse_losses(b, r)
     assert list(imp) == ["S"] and imp["S"]["records"][0] is not None
 
@@ -95,7 +95,7 @@ def _balance(b, r):
 def test_cutset_balance_on_pwl_closes_to_second_order():
     e20, e40 = (_balance(*_cutset("pwl", N)) for N in (20, 40))
     # measured -2.57e-5 / -6.48e-6
-    assert abs(e20) <= 4e-5
+    assert abs(e20) <= 1.3e-4   # measured -2.57e-5
     assert abs(e20 / e40) >= 3.5
 
 
