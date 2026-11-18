@@ -542,3 +542,107 @@ adds (a thyristor is a diode port whose OFF→ON is additionally gated)
 implement it. The mode selector reads the ports from the registry; the
 stamp (conductance or branch form) is unchanged, so the sparsity
 pattern stays mask-invariant. In the conductance form `R_on = 1/g_on`.
+
+## How to add a device kind (slice 2, 2026-11-18)
+
+> For the agents adding kinds now (IGBT / thyristor, native machines).
+> It names what exists on `feat/core-p3-device-interface`; the long-term
+> shape (D1–D5) replaces the per-kind history class with `Device::eval`.
+
+Every kind has a row in the kind table; pick the category first.
+
+**All categories.**
+
+1. `pwl/device_pool.hpp`: an alternative in `DevicePool::Entry`, the
+   matching `StoredKind` value (same index, `static_assert`ed), an
+   `add_*` method, and one row in `kKindCaps` (name = the Python enum
+   member; `SolveClass`; the engines that run it). A missing row does not
+   compile.
+2. `python/tests/test_engine_conformance.py`: one entry in `CELLS` per
+   `StoredKind` (`test_table_has_one_row_per_kind_and_names_match_the_enum`
+   fails without it). Every engine whose bit is clear must refuse by name
+   (`solver/unsupported.hpp`, `refuse_unsupported_kinds`); every set bit
+   must agree with `pwl`.
+
+**Mode kinds (PWL two-state: switch, diode, thyristor, PWL IGBT).** The
+per-mode constant stamp goes in `pwl/assemble.hpp` / `pwl/dc_assemble.hpp`
+(cached `(G, C, b)` split; `J`'s pattern must not depend on the mode).
+A self-commutated kind decides its mode with the one law of
+`models/switched_diode.hpp` (`decide`, `crossing_signal`) and exposes its
+complementarity port through `pwl/mode_ports.hpp` (D10). No Newton code.
+
+**Static Newton kinds (algebraic, no memory: Shockley, MOSFET L1).** A
+law `current<S>(v, p)` templated on the scalar (it must compile for
+`ad::ADRealN<N>`), stamped by `pwl/nonlinear_refresh_device.hpp`
+through `make_combined_diode_mosfet_refresh`; `SolveClass::NewtonStatic`.
+
+**Stateful Newton kinds (memory: Coss, Lauritzen, IGBT tail, saturable
+inductor, MNA PMSM, native machines).** One history class in its own
+header, `pwl/<kind>_history.hpp`, with:
+
+| Member | Meaning |
+|---|---|
+| `struct Entry` | static data (rows, params) + every real carried step to step |
+| `init(graph, pool)` | build the entries; per run, may allocate |
+| `seed_from_dc_op(x)` | state from a warm start |
+| `commit(x, h, TrBdf2Stage)` | accept the step `h` solved under that rule |
+| `capture_gamma(x_γ)` | TR-BDF2 stage point (scratch for the BDF2 stage) |
+| `extrapolate_previous(x1, c)` | SDIRK restart pseudo-history |
+| `refresh_derivatives(x, h)` | post-event derivative slots |
+| `to_flat()` / `from_flat(v)` | snapshot block (physical state only; refuse a size mismatch by name) |
+| `static for_each_state(Entry&, f)` | visits EVERY real carried step to step, snapshot reals first, then stage scratch: the in-run rollback copies exactly these |
+| `entries()`, `mutable_entries()`, `empty()` | the instances (the rollback writes through `mutable_entries`) |
+| `kBlock`, `kFlatPerDevice`, `kStoredKind` | its `device::StateBlock` (the block's name is the refusal name), reals per instance in the snapshot, the kind-table row whose engine column applies |
+
+plus a stamp overload `stamp_kind(const History&, x, J_nl, f_nl, const
+StepCtx&)` in `pwl/device_refresh.hpp` that reads `h` and the stage ONLY
+from the `StepCtx` it is given (never a captured step: TR-BDF2 probe
+solves divided by zero that way). Then: append a `device::StateBlock`
+(at the END: older snapshots keep loading) with its row in
+`device::kStateBlocks`, and append the class to `pwl::StatefulKinds`
+(`pwl/stateful_histories.hpp`). The concept `device::StatefulKind`
+(`device/kind.hpp`) checks the list at compile time; the drivers, the
+refresh, rollback and the snapshot iterate the list, so no file under
+`solver/` changes. Rows stay in conductance form (no `h` factor on a
+flux row). A conformance cell per variant goes in `VARIANT_CELLS`
+(`test_every_stateful_kind_has_a_conformance_cell` names a missing one).
+
+**Rows only the Newton refresh stamps** (a branch current of a flux or
+machine kind) are empty in the cached linear matrix, and its factorisation
+then fails before Newton runs. `pwl/assemble.hpp` (`BranchKind::Nonlinear`)
+puts a 1e-12 placeholder on such a row for the saturable inductor and on the
+nodes of a Coss; a new kind with own rows needs the same line. The MNA PMSM
+lacks it: its nominal step throws "numerically singular … M1_a has no
+equation" on every step and only the dt/2 retry, which assembles without
+factorising, runs (DECISIONS #22).
+
+## What later changes can rely on (after slice 2)
+
+- **`refactor-unified-transient-stepper`.** One `StatefulHistories`
+  (fold over `pwl::StatefulKinds`) with `commit(x, h, stage)`,
+  `capture_gamma`, `extrapolate_previous`, `refresh_derivatives(x, h)`,
+  a one-vector rollback point (`snapshot_into` / `restore`, stage scratch
+  included) and one Newton refresh built by `build_device_refresh` that
+  reads the step from one `StepCtx` (`{h, stage}`, set before every
+  solve). The snapshot is engine-independent (`x`, `dev_state` in named
+  blocks, `mask`, `stamped_mask`) plus the fixed-step grid; the stepper
+  adds its controller state (last `h`, LTE history) to make a
+  variable-step resume exact. Not yet: one stepper-owned `Formula` /
+  `StepCtx` shared with `device/device.hpp` (the drivers still use
+  `pwl::StepCtx` + `TrBdf2Stage`).
+- **`add-probes-and-recorders` (generic pin currents).** Not yet: the
+  stateful kinds still stamp by hand, so there is no per-kind `f` / `q`
+  to read currents from. What exists: the kinds are enumerable at compile
+  time (`StatefulKinds`) and at run time (`_stateful_kinds()`), each with
+  its entries (rows, params, state), so a recorder can visit them
+  without per-kind code in `solver/`. `Device::eval` (D7's
+  `i_k = f_k + a·q_k + r_k`) is the source once a kind is ported.
+- **`add-external-device-abi`.** The `Device` contract is the ABI shape:
+  `n_pins`, `n_internal`, `n_params`, `Params<S>` (standard layout, `S`
+  only), one `eval(p, x, out)` over the scalar, the integrator owning the
+  formula (`history_term`, `stamp_fq`). Not yet: an engine that stamps a
+  `Device` (the sparse `jac_slot` write and a `Device` list beside
+  `StatefulKinds`).
+- **`add-parameter-sensitivities`.** `seed_params<D, N, Offset>` and the
+  concept's third instantiation (AD parameters, Real unknowns) give
+  `∂f/∂p`, `∂q/∂p` from the same law; nothing integrates them yet.
