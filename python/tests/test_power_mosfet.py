@@ -541,7 +541,7 @@ def _threshold_case():
         u = vg - vd
         c = cmax - s_ + s_ * (math.tanh(a * u) if u > 0 else math.atan(a * u))
         vov = vg - VT
-        i = -fwd(vov - vd, -vd) if vd < 0 else fwd(vov, vd)
+        i = (-fwd(vov - vd, -vd) + 2 * fwd(vov - 0.5 * vd, 0.0)) if vd < 0 else fwd(vov, vd)
         drv = 6 - 6 * math.cos(2 * math.pi * F * t)
         return np.linalg.solve([[CGS + c, -c], [-c, c]], [(drv - vg) / RG, (VDD - vd) / RL - i])
 
@@ -581,3 +581,23 @@ def test_gate_driven_threshold_crossing_is_second_order():
                                            atol=rt * 1e-3, dt=250e-9) for rt in (1e-6, 1e-8))
     assert np.log(e6 / e8) / np.log(n8 / n6) > 1.5, (e6, n6, e8, n8)
     assert e8 < 1e-3
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+@pytest.mark.parametrize("vgs", [3.2, 4.0])
+def test_current_through_a_partly_on_channel_crosses_zero(engine, vgs):
+    """The Level-1 law jumped by 2·α(1−β)K·V_OV² across V_DS = 0 (5.2 mA at
+    V_GS = 3.2 V); a ±10 mA sine through the channel had no solution at its
+    zero crossing and both engines aborted (probes/vds_zero_jump.py)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vg", "g", "gnd", vgs)
+    b.add_sine_current_source("I", "gnd", "d", 0.0, 10e-3, 1e3)
+    b.add_capacitor("C", "d", "gnd", 1e-9)
+    b.add_mosfet_level1("M", "d", "gnd", "g", K=1.43, V_T=3.0, lambda_=0.0, kappa=15.0,
+                        with_body_diode=False)
+    kw = dict(dt=1e-6) if engine == "pwl" else {}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=2e-3, engine=engine, **kw)
+    v = np.asarray(r.v("d"))
+    assert v.min() < 0 < v.max() and np.max(np.abs(v)) < 0.05

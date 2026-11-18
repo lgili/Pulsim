@@ -70,6 +70,10 @@ def test_rac_ladder_yaml_is_the_python_composite():
     b = p.CircuitBuilder()
     b.add_inductor("L", "a", "b", 1e-4, c_par=1e-11, rac=lad)
     assert _components(y) == _components(b)
+    # coupling the main inductor alone would leave the cells uncoupled
+    y.add_inductor("L2", "b", "gnd", 1e-4)
+    with pytest.raises(p.UnsupportedError, match="R_ac ladder"):
+        y.add_inductor_coupling("L", "L2", 0.9)
 
 
 @pytest.mark.parametrize("rac, match", [

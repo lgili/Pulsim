@@ -148,7 +148,7 @@ struct MosfetLevel1 {
         // CONTINUITY AT V_DS = 0 (add-power-mosfet-datasheet-device,
         // 2026-11-18). The β blend leaks the saturation term at
         // V_DS = 0: forward(V_OV, 0) = α(1 − β)·K·V_OV² = L(V_OV) ≠ 0
-        // (5.2 mA at V_GS = 3.2 V, 0.87 µA at 4 V for K = 1.43,
+        // (2.6 mA at V_GS = 3.2 V, 0.44 µA at 4 V for K = 1.43,
         // κ = 15), so the plain mirror jumped by 2L across V_DS = 0. A
         // current through a partly-on channel then had no solution at
         // its zero crossing and both engines aborted

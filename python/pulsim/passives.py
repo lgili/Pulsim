@@ -420,11 +420,20 @@ def _wrap_inductor(native, native_c):
     return add_inductor
 
 
+def _has_branch(b, name: str) -> bool:
+    # a YAML-loaded ladder (rac: cells) never passed through add_inductor(rac=)
+    try:
+        b.branch_id_of(name)
+    except (IndexError, ValueError):
+        return False
+    return True
+
+
 def _wrap_coupling(native):
     def add_inductor_coupling(self, name_a: str, name_b: str,
                               k: float) -> "CircuitBuilder":
         for n in (name_a, name_b):
-            if n in getattr(self, "_rac_windings", ()):
+            if n in getattr(self, "_rac_windings", ()) or _has_branch(self, f"{n}.rac_l0"):
                 from ._refusal import unsupported
                 raise unsupported(
                     "", "rac", f"add_inductor_coupling({name_a!r}, "

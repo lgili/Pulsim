@@ -711,6 +711,17 @@ or settles a mode its law forbids raises a named error
 `add_igbt` is still a bidirectional switch with no knee and no diode;
 `add_igbt_level1` is the IGBT that blocks reverse current.
 
+### Level-1 MOSFET: zero-voltage current near threshold
+
+The logistic blend of `add_mosfet_level1` / `add_power_mosfet` leaks the
+saturation term at V_DS = 0: `i = α(1−β)·K·V_OV²` (2.6 mA at V_GS = 3.2 V,
+0.44 µA at 4 V for K = 1.43, κ = 15). Since 2026-11-18 the law is
+continuous across V_DS = 0 (it used to jump by twice that, and a current
+crossing zero through a partly-on channel aborted both engines), so the
+zero-current point sits at V_DS ≈ −L/g (−4.6 mV at 3.2 V). Removing the
+leak changes the forward law and every pinned result; it is an owner
+decision (add-power-mosfet-datasheet-device DECISIONS 19).
+
 ## Open OpenSpec proposals as of v1.3.0
 
 The following proposals are accepted as in-flight work but **not**
