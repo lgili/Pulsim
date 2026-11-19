@@ -336,7 +336,13 @@ def _exact_result(
     (add-probes-and-recorders D3: one result type on every engine).
 
     ``times``, ``states``, ``switch_states`` and ``reinit_records`` are
-    the kernel result's own fields. ``states`` is the reconstructed
+    the kernel result's own fields. A ``reinit_records`` entry is written
+    for each eigen-direction of a projection whose residual exceeds 1e-9 of
+    the circuit's scale along it (each state counted at least at the
+    circuit's vscale for a capacitor or iscale for an inductor): a located
+    zero of an ideal diode's current writes none, and neither does a real
+    cut-set jump below that bound (1e-7 A cut in a circuit carrying 1e4 A is
+    projected silently, dW ~ 5e-18 J). ``states`` is the reconstructed
     full-MNA trajectory (node voltages, then source and inductor branch
     currents: the pwl engine's row layout) when the kernel returned one,
     else the reduced integrator state. The exact-engine extras are
@@ -754,7 +760,20 @@ def run_dsed_from_builder(
     initial_mask = sf(opts.t_start)
     adapter.set_mask(initial_mask)
     try:
-        _ = adapter.A_matrix()
+        for _k in range(builder.graph.num_switches + 1):
+            try:
+                _ = adapter.A_matrix()
+                break
+            except ValueError as e:
+                # the start mask's diode bits are not a decision: an ideal diode ON
+                # in a loop of sources there starts OFF; the scheduler decides it
+                # (or refuses the loop by name) at t_start
+                if (getattr(e, "feature", None) != "ideal_voltage_loop"
+                        or getattr(e, "kind", None) != "Diode"
+                        or _k == builder.graph.num_switches):
+                    raise
+                initial_mask.set(builder.switch_index_of(e.device), False)
+                adapter.set_mask(initial_mask)
     except NotImplementedError as e:
         # a reduction numerically singular on a node group: the floating-island
         # refusal of the native run (DECISIONS #27), named here at the start

@@ -1601,7 +1601,8 @@ inline constexpr auto kBranchFormCaps = std::to_array<FormCaps>({
                                engine_bit(Engine::Dsed))},
     {"Diode", DevicePool::StoredKind::Diode,
      static_cast<std::uint8_t>(engine_bit(Engine::FixedTrap) |
-                               engine_bit(Engine::TrBdf2))},
+                               engine_bit(Engine::TrBdf2) |
+                               engine_bit(Engine::Dsed))},
 });
 
 /// add-pwl-igbt-and-thyristor: the GATED forms of the Diode kind (IGBT /

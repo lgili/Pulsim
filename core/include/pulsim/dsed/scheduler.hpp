@@ -259,6 +259,14 @@ struct SchedulerDiode {
     Real V_th;
     Real V_f;                 // forward drop while ON
     std::string label;        // named, Phase-1 style
+    Index var = -1;           // branch form: the solved current's MNA row
+    Real R_on = Real{0};      // branch form: its own ON resistance (0: ideal)
+    /// An ON branch-form diode is read on its solved current (the complementarity
+    /// pair on its own variables: ON the current, OFF v_D). With R_on > 0 the settle
+    /// decides it on the conductance twin's band (tol_w / R_on): a located turn-on
+    /// leaves v_D's residue / R_on in the current. Read as v_D across its nodes, a
+    /// 5 mOhm clamp's turn-off (19 uV) was missed: ON at -3.75 mA for 5867 samples.
+    [[nodiscard]] bool reads_current() const noexcept { return var >= 0; }
 
     [[nodiscard]] models::SwitchedDiode::Params params() const noexcept {
         return {.g_on = g_on, .g_off = g_off, .V_th = V_th, .V_f = V_f};
@@ -1296,6 +1304,27 @@ private:
     void decide_modes_(Real t, Vector& x, MaskT& mask, const MaskT& gates_prev,
                        const MaskT& prev_bits, const MaskT& rec,
                        PEDResult<MaskT>& result) {
+        // a decision that rejected a candidate as an ideal loop and then found no
+        // admissible mode is refused by the loop's name: that loop is the cause
+        rejected_loop_.reset();
+        try {
+            decide_modes_impl_(t, x, mask, gates_prev, prev_bits, rec, result);
+        } catch (const UnsupportedError& e) {
+            if (e.feature() == "consistent_mode" && rejected_loop_) {
+                const UnsupportedError loop = *rejected_loop_;
+                rejected_loop_.reset();
+                throw UnsupportedError("dsed", loop.feature(), loop.device(), loop.kind(),
+                                       std::string{loop.what()} + " No other mode is admissible: "
+                                       + e.what());
+            }
+            throw;
+        }
+        rejected_loop_.reset();
+    }
+    std::optional<UnsupportedError> rejected_loop_;
+    void decide_modes_impl_(Real t, Vector& x, MaskT& mask, const MaskT& gates_prev,
+                            const MaskT& prev_bits, const MaskT& rec,
+                            PEDResult<MaskT>& result) {
         if constexpr (HasNodePairVoltage<System>) {
             if (has_diodes_ && lcp_decides_) {
                 auto& rep = result.mode_shadow;
@@ -1345,6 +1374,13 @@ private:
                     throw;
                 arbitrate();
                 return;
+            } catch (const UnsupportedError& e) {
+                // a settle round turned an ideal diode ON into a loop of sources:
+                // that mode is not a candidate; the LCP decides among the others
+                if (!guard_ || guard_refuses_ || e.feature() != "ideal_voltage_loop") throw;
+                rejected_loop_ = e;
+                arbitrate();
+                return;
             }
             shadow_compare_(t, shadow_x_, gates_prev, prev_bits, result, &rec);
             guard_check_(t, x, mask, gates_prev, prev_bits, rec, result);
@@ -1364,8 +1400,10 @@ private:
         requires HasNodePairVoltage<System> {
         if (shadow_ports_.empty()) {
             for (const auto& d : diodes_) {
+                // a branch-form diode is a port with its own R_on; an ideal one
+                // (R_on = 0) is posed OFF (pwl::select_site)
                 shadow_ports_.push_back(events::DiodePort{
-                    Real{1} / d.g_on, d.g_off, d.V_f, d.V_th});
+                    d.var >= 0 ? d.R_on : Real{1} / d.g_on, d.g_off, d.V_f, d.V_th});
                 shadow_nodes_.emplace_back(d.from, d.to);
                 shadow_labels_.push_back(d.label);
             }
@@ -1381,18 +1419,34 @@ private:
             [&](Real h, const std::vector<char>& anchor, DenseMatrix& Z, Vector& u) {
                 auto m = gates_prev;   // posed in the anchor mode (DECISIONS #30)
                 for (std::size_t j = 0; j < diodes_.size(); ++j)
-                    m.set(diodes_[j].switch_idx, anchor[j] != 0);
+                    m.set(diodes_[j].switch_idx, anchor[j] != 0
+                                               && !(diodes_[j].var >= 0 && diodes_[j].R_on == Real{0}));
                 system_.diode_port_problem(m, t, x_held, h, shadow_nodes_, Z, u);
             },
             shadow_.h_e, sc,
+            // a candidate whose ON ideal diode closes a loop of sources cannot be
+            // posed: it is REJECTED as a candidate (judge 0, departs at once); the
+            // run is refused only when no candidate can be posed
             [&](const std::vector<char>& m) {
                 Real worst = Real{0};
-                const int c = judge_(gates_prev, m, t, x_held, sc, worst);
+                int c = 0;
+                try {
+                    c = judge_(gates_prev, m, t, x_held, sc, worst);
+                } catch (const UnsupportedError& e) {
+                    if (e.feature() != "ideal_voltage_loop") throw;
+                    rejected_loop_ = e;
+                }
                 system_.set_mask(rec);
                 return c;
             },
             [&](const std::vector<char>& m, const std::vector<char>& decided) {
-                const Real d = first_departure_(gates_prev, m, decided, t, x_held, sc);
+                Real d = Real{0};
+                try {
+                    d = first_departure_(gates_prev, m, decided, t, x_held, sc);
+                } catch (const UnsupportedError& e) {
+                    if (e.feature() != "ideal_voltage_loop") throw;
+                    rejected_loop_ = e;
+                }
                 system_.set_mask(rec);
                 return d;
             });
@@ -1419,12 +1473,67 @@ private:
         requires HasNodePairVoltage<System> {
         const auto sel = run_selector_(t, x_held, gates_prev, prev_bits, rec, rep);
         events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_);
+        rejected_loop_.reset();   // a mode was selected: a later refusal is not that loop's
         for (std::size_t j = 0; j < diodes_.size(); ++j)
             diode_bits_.set(diodes_[j].switch_idx, sel.on[j] != 0);
         MaskT m = gates_prev.overlay(diode_bits_, diode_owned_);
         system_.set_mask(m);
+        pose_or_open_loops_(t, x_held, gates_prev, m);
         release_band_ties_(t, x_held, m);
+        pose_or_open_loops_(t, x_held, gates_prev, m);
         return m;
+    }
+
+    /// A selected mode whose ON ideal diode closes a loop of sources and closed
+    /// ideal elements (two ideal diodes in parallel: the LCP's zero-impedance ports
+    /// leave the split undefined) cannot be posed. That diode is turned OFF, as the
+    /// implicit engines do, when the mode left is consistent on its own trajectory
+    /// (the judge); otherwise the loop is refused by its name.
+    void pose_or_open_loops_(Real t, const Vector& x_held, const MaskT& gates_prev, MaskT& m)
+        requires HasNodePairVoltage<System> {
+        if constexpr (HasExactStep<System>) {
+            for (std::size_t k = 0;; ++k) {
+                try {
+                    (void)system_.has_exact_step();
+                    return;
+                } catch (const UnsupportedError& e) {
+                    if (e.feature() != "ideal_voltage_loop" || k >= diodes_.size()) throw;
+                    rejected_loop_ = e;
+                    // the named diode first, then every other ON ideal one: the
+                    // first whose opening leaves a mode its own trajectory keeps
+                    std::vector<const SchedulerDiode*> cands;
+                    for (const auto& d : diodes_)
+                        if (diode_bits_.get(d.switch_idx) && d.reads_current() && d.R_on == Real{0}) {
+                            if (d.label == e.device() || d.label.starts_with(e.device() + " ("))
+                                cands.insert(cands.begin(), &d);
+                            else
+                                cands.push_back(&d);
+                        }
+                    const SchedulerDiode* hit = nullptr;
+                    for (const auto* cd : cands) {
+                        std::vector<char> mode(diodes_.size());
+                        for (std::size_t j = 0; j < diodes_.size(); ++j)
+                            mode[j] = diodes_[j].switch_idx != cd->switch_idx
+                                      && diode_bits_.get(diodes_[j].switch_idx);
+                        Real worst = Real{0};
+                        int c = 0;
+                        try {
+                            c = judge_(gates_prev, mode, t, x_held, last_scale_, worst);
+                        } catch (const UnsupportedError& e2) {
+                            if (e2.feature() != "ideal_voltage_loop") throw;
+                            c = 1;   // the next round opens the next loop, or refuses it
+                        }
+                        if (c != 0) { hit = cd; break; }
+                    }
+                    if (!hit) throw;
+                    diode_bits_.set(hit->switch_idx, false);
+                    m = gates_prev.overlay(diode_bits_, diode_owned_);
+                    system_.set_mask(m);
+                }
+            }
+        } else {
+            (void)t; (void)x_held; (void)gates_prev; (void)m;
+        }
     }
 
     /// A diode the LCP leaves OFF inside the zero band is a tie its
@@ -1445,11 +1554,23 @@ private:
                 if (diode_bits_.get(d.switch_idx)) continue;
                 const Real sig = models::SwitchedDiode::crossing_signal(
                     false, system_.node_pair_voltage(d.from, d.to, t, x), d.params());
-                if (!(std::abs(sig) <= tol) || !zero_band_on_(t, x, d, mask, tol, false))
+                const MaskT before = mask;
+                try {
+                    if (!(std::abs(sig) <= tol) || !zero_band_on_(t, x, d, mask, tol, false))
+                        continue;
+                    diode_bits_.set(d.switch_idx, true);
+                    mask = mask.overlay(diode_bits_, diode_owned_);
+                    system_.set_mask(mask);
+                    if constexpr (HasExactStep<System>) (void)system_.has_exact_step();
+                } catch (const UnsupportedError& e) {
+                    // a tie released ON into a loop of closed ideal elements (a body
+                    // diode across its closed switch) is not a mode: it stays OFF
+                    if (e.feature() != "ideal_voltage_loop") throw;
+                    diode_bits_.set(d.switch_idx, false);
+                    mask = before;
+                    system_.set_mask(mask);
                     continue;
-                diode_bits_.set(d.switch_idx, true);
-                mask = mask.overlay(diode_bits_, diode_owned_);
-                system_.set_mask(mask);
+                }
                 flipped = true;
             }
             if (!flipped) break;
@@ -1522,6 +1643,7 @@ private:
         try {
             sel = run_selector_(t, shadow_x_, gates_prev, prev_bits, rec, g.lcp);
             events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_);
+            rejected_loop_.reset();   // a mode was selected: a later refusal is not that loop's
         } catch (const UnsupportedError& e) {
             throw UnsupportedError(
                 "dsed", e.feature(),
@@ -1553,7 +1675,9 @@ private:
             diode_bits_.set(diodes_[j].switch_idx, sel.on[j] != 0);
         mask = gates_prev.overlay(diode_bits_, diode_owned_);
         system_.set_mask(mask);
+        pose_or_open_loops_(t, shadow_x_, gates_prev, mask);
         release_band_ties_(t, shadow_x_, mask);
+        pose_or_open_loops_(t, shadow_x_, gates_prev, mask);
         x = shadow_x_;
         undo_reinit_records_();
         const std::size_t mk = reinit_log_size_();
@@ -1582,10 +1706,14 @@ private:
         // 1.2e-8 V), was flipped and chattered 32 times. The forward converter's
         // rectifier is off by 0.0137 V.
         // (A reverse-current bound in its place failed both ways, DECISIONS #35.)
-        Real scale = Real{1};
-        if constexpr (requires { system_.port_scale_full(Vector{}); })
-            scale = system_.port_scale_full(Vector{}).vscale;
+        Real scale = Real{1}, iscale = Real{1};
+        if constexpr (requires { system_.port_scale_full(Vector{}); }) {
+            const auto sc = system_.port_scale_full(Vector{});
+            scale = sc.vscale;
+            iscale = sc.iscale;
+        }
         const Real tol_w = Real{1e-6} * scale;
+        const Real tol_i = Real{1e-6} * iscale;   // an ON branch diode's law is its current
         scale_floor_x_ = &x_held;   // signal_bound_ on a projection residue (settle_and_project_)
         const FloorReset_ reset_floor{scale_floor_x_};
         for (int pass = 0; pass <= 4; ++pass) {
@@ -1597,8 +1725,15 @@ private:
                 // no event will ever turn it ON, so only the rounding band protects it.
                 // A tied bridge (V_f = 0.7) left D1 OFF 3e-7 V above V_f, rising,
                 // and it stayed OFF while forward-biased by 1.1 V.
-                const Real tol = on ? std::max(band, tol_w) : band;
-                const Real v_d = system_.node_pair_voltage(d.from, d.to, t, x);
+                // an ON branch diode with R_on > 0 is read on its current but decided on
+                // the conductance twin's band (tol_w of v_D = V_f + R_on·i, in amperes):
+                // a located turn-on leaves v_D's residue / R_on in the current (the
+                // voltage doubler's D2, -1e-8 V / 5 mOhm = -2.1 uA against tol_i 1.2e-8 A
+                // chattered)
+                const Real tol = !on ? band
+                    : !d.reads_current() ? std::max(band, tol_w)
+                    : std::max({band, tol_i, d.R_on > Real{0} ? tol_w / d.R_on : Real{0}});
+                const Real v_d = law_v_(d, t, x);
                 const auto prm = d.params();
                 const bool by_value = models::SwitchedDiode::decide(on, v_d, prm);
                 if (by_value == on
@@ -1685,10 +1820,7 @@ public:
             for (std::size_t j = 0; j < nd; ++j) {
                 const auto& d = diodes_[j];
                 Real vd;
-                if constexpr (requires { system_.node_pair_voltage(d.from, d.to, t, x, Real{0}); })
-                    vd = system_.node_pair_voltage(d.from, d.to, t, x, rows[k].left_by);
-                else
-                    vd = system_.node_pair_voltage(d.from, d.to, t, x);
+                vd = law_v_(d, t, x, rows[k].left_by);
                 v[k * nd + j] = vd;
                 // the decision's own significance bound B (review s16 #2): a law
                 // broken inside it is one no decision of this engine can resolve
@@ -2143,8 +2275,7 @@ private:
                     xs = &settled_(t, x, x_set_, ts);
                     xs_mask = mask;
                 }
-                const Real v_d = system_.node_pair_voltage(
-                    d.from, d.to, ts, *xs);
+                const Real v_d = law_v_(d, ts, *xs);
                 const auto prm = d.params();
                 const bool by_value =
                     models::SwitchedDiode::decide(on, v_d, prm);
@@ -2247,10 +2378,35 @@ private:
         return 0;
     }
 
+    /// The node pair a diode's law reads in the system's CURRENT mode: an ideal
+    /// (branch-form) diode reads its complementarity variable, the solved current
+    /// (its MNA row, against ground) while ON and v_D while OFF; a conductance
+    /// diode always v_D.
+    [[nodiscard]] std::pair<Index, Index> law_pair_(const SchedulerDiode& d) const {
+        if constexpr (requires { system_.current_mask().get(d.switch_idx); }) {
+            if (d.reads_current() && system_.current_mask().get(d.switch_idx)) return {d.var, Index{-1}};
+        }
+        return {d.from, d.to};
+    }
+    /// The law voltage (pwl::DiodeEventState::law_voltage): V_f + i for an ON
+    /// ideal diode (g_on = 1 in its params), v_D otherwise. `left_by`: a source
+    /// jumping at t read at its left limit.
+    [[nodiscard]] Real law_v_(const SchedulerDiode& d, Real t, const Vector& x,
+                              Real left_by = Real{0}) const
+        requires HasNodePairVoltage<System> {
+        const auto [a, c] = law_pair_(d);
+        Real v;
+        if constexpr (requires { system_.node_pair_voltage(a, c, t, x, Real{0}); })
+            v = system_.node_pair_voltage(a, c, t, x, left_by);
+        else
+            v = system_.node_pair_voltage(a, c, t, x);
+        return d.var >= 0 && a == d.var ? d.V_f + v : v;
+    }
+
     /// |v_D| at (t, x), 0 when the system cannot state it.
     [[nodiscard]] Real signal_abs_(const SchedulerDiode& d, Real t, const Vector& x) const {
         if constexpr (HasNodePairVoltage<System>)
-            return std::abs(system_.node_pair_voltage(d.from, d.to, t, x));
+            return std::abs(law_v_(d, t, x) - (d.var >= 0 && law_pair_(d).first == d.var ? d.V_f : Real{0}));
         else
             return Real{0};
     }
@@ -2258,8 +2414,10 @@ private:
     /// |c|ᵀ(|R||x| + |r| + |R_b||b|) of a diode's voltage (rounding scale), or
     /// −1 when the system cannot state it.
     [[nodiscard]] Real signal_scale_(const SchedulerDiode& d, Real t, const Vector& x) const {
-        if constexpr (requires { system_.node_pair_voltage_scale(d.from, d.to, t, x); })
-            return system_.node_pair_voltage_scale(d.from, d.to, t, x);
+        if constexpr (requires { system_.node_pair_voltage_scale(d.from, d.to, t, x); }) {
+            const auto [a, c] = law_pair_(d);
+            return system_.node_pair_voltage_scale(a, c, t, x);
+        }
         else
             return Real{-1};
     }
@@ -2289,7 +2447,8 @@ private:
                 Real S = std::max(signal_scale_(d, t, x), s0);
                 if (scale_floor_x_) S = std::max(S, signal_scale_(d, t, *scale_floor_x_));
                 return gn * (S + V)
-                       + e * (std::max({v, v0, system_.node_pair_voltage_forced(d.from, d.to)}) + V);
+                       + e * (std::max({v, v0, system_.node_pair_voltage_forced(law_pair_(d).first,
+                                                                              law_pair_(d).second)}) + V);
             }
         }
         return zero_band_tol_(t, x);
@@ -2302,7 +2461,7 @@ private:
     [[nodiscard]] Real law_signal_(const SchedulerDiode& d, bool on, Real t, const Vector& x,
                                    std::optional<bool> ref_on = std::nullopt) const
         requires HasNodePairVoltage<System> {
-        const Real v = system_.node_pair_voltage(d.from, d.to, t, x);
+        const Real v = law_v_(d, t, x);
         if (on) return -(v - d.V_f);
         return v - (ref_on.value_or(on) ? d.V_f : std::max(d.V_th, d.V_f));
     }

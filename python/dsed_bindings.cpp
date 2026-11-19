@@ -32,6 +32,7 @@
 #include <pybind11/stl.h>
 
 #include <array>
+#include <memory>
 #include <cstddef>
 #include <unordered_map>
 #include <utility>
@@ -1359,6 +1360,19 @@ void init_module(py::module_& m) {
                     adapter.graph(), adapter.pool());
                 if (census.num_diodes() > 0) {
                     diode_owned = census.diode_owned_bits();
+                    // An OFF ideal diode across a path of closed ideal elements
+                    // (a body diode across its closed switch) has v_D = 0
+                    // structurally and every ON candidate is a loop: its turn-on
+                    // predicate is held below zero while that holds (it crossed
+                    // on rounding: the PSFB's D_LS_B chattered 32 times in 2e-10 s).
+                    std::shared_ptr<pulsim::pwl::BranchStructureChecker> shorted;
+                    try {
+                        shorted = std::make_shared<pulsim::pwl::BranchStructureChecker>(
+                            adapter.graph(), adapter.pool(), "dsed");
+                        if (!shorted->active()) shorted.reset();
+                    } catch (const std::exception&) {
+                        shorted.reset();   // compute_lti_state_space refuses it by name
+                    }
                     for (const auto& d : census.entries()) {
                         std::string label =
                             pulsim::pwl::branch_label(
@@ -1366,11 +1380,37 @@ void init_module(py::module_& m) {
                         const NativeAdapter* ad = &adapter;
                         const pulsim::Index from = d.from;
                         const pulsim::Index to = d.to;
+                        // a branch-form diode's ON law is its solved current, R_on = 0
+                        // or not (SchedulerDiode::reads_current): V_f + i with the
+                        // census's g_on = 1, so the signal and its bands are amperes
+                        const pulsim::Index var = d.var;
+                        const Real R_on_b = d.var >= 0
+                            ? adapter.pool().branch_R_on(d.branch_id) : Real{0};
                         const auto prm = d.params();
+                        const auto chk = var >= 0 && R_on_b == Real{0} ? shorted : nullptr;
+                        const pulsim::Index bid = d.branch_id;
+                        const pulsim::Size sw = d.switch_idx;
                         pred.add_predicate(pulsim::dsed::EventPredicate{
                             .name = label + " turns ON",
-                            .fn = [ad, from, to, prm](
+                            .fn = [ad, from, to, prm, chk, bid, sw](
                                       Real t, const Vector& x) {
+                                if (chk) {
+                                    auto m = ad->current_mask();
+                                    m.set(sw, true);
+                                    try {
+                                        const auto& ld = chk->check(m, true).loop_diodes;
+                                        // a loop through a source is a real bias: the law
+                                        // decides (refused by name as ideal_voltage_loop);
+                                        // the projection's rounding (2e-14 V at mid_b) is
+                                        // not bounded by the node pair's own scale
+                                        if (std::find(ld.begin(), ld.end(), bid) != ld.end()
+                                            && std::abs(ad->node_pair_voltage(from, to, t, x))
+                                                   <= Real{1e-9} * ad->port_scale(t, x).vscale)
+                                            return Real{-1};
+                                    } catch (const std::exception&) {
+                                        // a floating node of the candidate: the law decides
+                                    }
+                                }
                                 return pulsim::models::SwitchedDiode::
                                     crossing_signal(
                                         false,
@@ -1388,13 +1428,19 @@ void init_module(py::module_& m) {
                         });
                         pred.add_predicate(pulsim::dsed::EventPredicate{
                             .name = label + " turns OFF",
-                            .fn = [ad, from, to, prm](
+                            // an ideal (branch-form) diode's ON law reads its
+                            // solved current: V_f + i (g_on = 1, the census's
+                            // law_voltage)
+                            .fn = [ad, from, to, var, prm](
                                       Real t, const Vector& x) {
                                 return pulsim::models::SwitchedDiode::
                                     crossing_signal(
                                         true,
-                                        ad->node_pair_voltage(
-                                            from, to, t, x),
+                                        var >= 0
+                                            ? prm.V_f + ad->node_pair_voltage(
+                                                  var, -1, t, x)
+                                            : ad->node_pair_voltage(
+                                                  from, to, t, x),
                                         prm);
                             },
                             .type = pulsim::dsed::PredicateType::DiodeOff,
@@ -1408,8 +1454,8 @@ void init_module(py::module_& m) {
                         sched_diodes.push_back(
                             pulsim::dsed::SchedulerDiode{
                                 d.switch_idx, d.from, d.to,
-                                d.g_on, d.g_off, d.V_th, d.V_f,
-                                std::move(label)});
+                                prm.g_on, d.g_off, d.V_th, d.V_f,
+                                std::move(label), d.var, R_on_b});
                     }
                 }
             }

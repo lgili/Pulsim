@@ -133,6 +133,11 @@ template <class AdapterT>
     out.owned = census.diode_owned_bits();
     for (const auto& d : census.entries()) {
         std::string label = pwl::branch_label(adapter.graph(), d.branch_id);
+        if (d.var >= 0)   // its current is a solved unknown, not g·v: not posed here
+            throw UnsupportedError("dsed", "branch_form", label, "Diode",
+                                   "the exact period map / integrals read a diode's current as "
+                                   "g·v; '" + label + "' is a branch-form (ideal) diode. Use "
+                                   "simulate(engine='dsed') or the conductance form.");
         const AdapterT* ad = &adapter;
         const Index from = d.from;
         const Index to = d.to;
