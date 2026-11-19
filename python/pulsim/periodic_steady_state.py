@@ -773,6 +773,12 @@ class _Solver:
         c = self._diode(ev["name"])
         a, k = (int(v) for v in c["nodes"])
         p = c["params"]
+        if ev["type"] == _DIODE_OFF and p.get("branch_form"):
+            # an ON branch-form diode turns off on its solved current
+            var = int(self.builder.pool.branch_var_id_for_switch(
+                c["branch_id"], self.builder.graph))
+            ad.set_mask(ev["old"])
+            return float(ad.node_pair_voltage(var, -1, t, x))
         V_f, V_th = float(p.get("V_f", 0.0)), float(p["V_th"])
         thr = V_f if ev["type"] == _DIODE_OFF else (
             V_th if V_f == 0.0 else max(V_th, V_f))

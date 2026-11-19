@@ -58,6 +58,10 @@ dsed::PeriodMapResult<SSM> one_period(
     auto diodes = dsed::add_diode_predicates(ad, pred);
     dsed::PEDSimulator<Ad, Gate> sim(ad, g, dsed::PIController(1e-11, 1e-14),
                                      std::move(pred), g.T * 1e-6, g.T, 1);
+    if (!diodes.list.empty()) {   // as dsed_period_map's period_run does
+        sim.enable_diode_commutation(diodes.owned, SSM(ad.graph().num_switches()),
+                                     diodes.list);
+    }
     sim.set_event_projection(false);
     sim.set_diode_law_check(0.0);  // as the period-map callers do
     const auto res = sim.simulate(x0, g.T);
@@ -255,6 +259,10 @@ TEST_CASE("Period map: an event without its own sample is refused",
     dsed::PEDSimulator<decltype(ad), Gate> sim(
         ad, g, dsed::PIController(1e-11, 1e-14), std::move(pred), T * 1e-6,
         T, 1);
+    if (!diodes.list.empty()) {   // as dsed_period_map's period_run does
+        sim.enable_diode_commutation(diodes.owned, SSM(ad.graph().num_switches()),
+                                     diodes.list);
+    }
     sim.set_event_projection(false);
     sim.set_diode_law_check(0.0);  // as the period-map callers do
     Vector x0(1);
@@ -271,4 +279,58 @@ TEST_CASE("Period map: an event without its own sample is refused",
     REQUIRE_THROWS_WITH(
         dsed::period_map_from_run(ad, res, diodes, obs, {}, true),
         Catch::Matchers::ContainsSubstring("has no sample of its own"));
+}
+
+TEST_CASE("Period map: ideal branch-form switch and diode (DCM buck)",
+          "[v2][dsed][period_integrals][branch_form]") {
+    // R_on = 0 for both: the diode's turn-OFF predicate is its solved
+    // current, so the saltation's gradient is that current's recovery row
+    const Real T = 1e-5, D = 0.3;
+    builder::CircuitBuilder b;
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0);
+    b.add_ideal_switch("S", "vin", "sw", 0.0, 1e-9);
+    b.add_diode_branch("D1", "gnd", "sw", 0.0, 1e-9);
+    b.add_inductor("L", "sw", "vout", 100e-6);
+    b.add_capacitor("C", "vout", "gnd", 47e-6);
+    b.add_resistor("RL", "vout", "gnd", 50.0);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(T);
+    dsed::NativeCircuitBuilderAdapter<> ad{b.graph(), b.pool(), cache};
+    ad.set_mask(Gate{T, D, 2}(0.0));
+    const auto var = [&](const char* n) {
+        dsed::PeriodObservable o;
+        const Index bid = b.branch_id_of(n);
+        o.w = {{n[0] == 'L' ? b.pool().branch_var_id_for_inductor(bid, b.graph())
+                            : b.pool().branch_var_id_for_switch(bid, b.graph()), 1.0}};
+        return o;
+    };
+    Vector x0(2);
+    x0 << 9.0, 0.0;   // near the orbit: v(vout) 9 V, i(L) 0 (DCM)
+    const auto r = one_period(ad, Gate{T, D, 2}, x0,
+                              {var("L"), var("S"), var("D1")}, {});
+    bool off = false;
+    for (const auto& e : r.events) {
+        UNSCOPED_INFO("event at t = " << e.t << ": " << e.name);
+        off = off || (e.name.starts_with("D1") && e.name.ends_with(" turns OFF"));
+    }
+    REQUIRE(off);
+    REQUIRE(r.integrals_ok);
+    // KCL at sw, integrated: i_L = i_S + i_D (each read on its own unknown)
+    CHECK(std::abs(r.stats[0].int1 - r.stats[1].int1 - r.stats[2].int1)
+          <= 1e-9 * std::abs(r.stats[0].int1));
+    // M against a central difference of the map (affine between events)
+    REQUIRE(r.monodromy.rows() == 2);
+    for (Index j = 0; j < 2; ++j) {
+        const Real h = 1e-6;
+        Vector xp = x0, xm = x0;
+        xp[j] += h;
+        xm[j] -= h;
+        const Vector fd = (one_period(ad, Gate{T, D, 2}, xp, {}, {}).x_end
+                           - one_period(ad, Gate{T, D, 2}, xm, {}, {}).x_end)
+                          / (2 * h);
+        for (Index i = 0; i < 2; ++i) {
+            CHECK(std::abs(fd[i] - r.monodromy(i, j))
+                  <= 1e-6 * (1 + std::abs(r.monodromy(i, j))));
+        }
+    }
 }
