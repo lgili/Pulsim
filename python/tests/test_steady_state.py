@@ -172,11 +172,12 @@ def test_a_circuit_with_no_affine_orbit_is_refused():
     def sf(t):
         return p.SwitchStateMask(n)
 
-    # The branch-form diode (the default since the release) reports
-    # its commutations, so the pattern check refuses first. Under the
-    # conductance form `commutation_events` came back EMPTY and the
-    # residual backstop refused ("no periodic orbit": one period from
-    # the "answer" moved it by 1.2).
+    # Under the release defaults the diode's commutations are reported
+    # (the branch form always; the conductance form with the restart
+    # rule), so the pattern check refuses first. The pre-release run
+    # (conductance, restart-less) returned EMPTY `commutation_events`
+    # and the residual backstop refused ("no periodic orbit": one
+    # period from the "answer" moved it by 1.2).
     with pytest.raises(ValueError, match="switching pattern moved"):
         p.steady_state(b, period=T, dt=DT, switch_fn=sf,
                         probe_scale=50.0)
