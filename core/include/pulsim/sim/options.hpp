@@ -157,8 +157,7 @@ inline constexpr std::array<OptionSpec, 50> kRunOptionTable{{
     {"solver", kEvery, Unset::Always, "None", ""},
     {"sensitivities", kExact, Unset::None, "None",
      "sensitivities are computed on the exact path only"},
-    {"mode_selection", kEvery, Unset::Legacy, "None ('legacy')",
-     "mode_selection='shadow' / 'lcp' needs a settle hook this engine lacks"},
+    {"mode_selection", kEvery, Unset::Legacy, "None ('legacy')", ""},
     {"allow_implicit_segments", kExact, Unset::None, "None",
      "allow_implicit_segments governs the exact engine's numeric segments"},
     // Every engine: a kernel recorder pass over the stored arrays, composed
