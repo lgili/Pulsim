@@ -1,6 +1,7 @@
 """add-branch-form-ideal-switch D6: ``form=`` wherever a PWL switch or an
 ungated PWL diode is created (add_switch, the MOSFET / IGBT helpers, the
-topology helpers, YAML), default 'conductance' (unchanged), validated by
+topology helpers, YAML), default 'branch' for add_switch / add_diode since the
+number-changing release ('conductance' before), validated by
 name. The branch form is the same element as add_ideal_switch /
 add_diode(form='branch')."""
 from __future__ import annotations
@@ -24,21 +25,25 @@ def _branch(b, name):
 # ---- add_switch ---------------------------------------------------------------
 def test_add_switch_form():
     b = p.CircuitBuilder()
-    b.add_switch("S0", "a", "b", 1e3, 1e-9)                      # default unchanged
+    b.add_switch("S0", "a", "b", 1e3, 1e-9)                      # default: branch since the release
+    b.add_switch("C0", "a", "b", 1e3, 1e-9, form="conductance")  # the legacy form, explicit
     b.add_switch("S1", "a", "b", form="branch")                  # ideal
     b.add_switch("S2", "a", "b", 1e3, 1e-9, form="branch")       # R_on = 1/g_on
     b.add_switch("S3", "a", "b", form="branch", R_on=0.5, g_off=1e-6)
     c = _comps(b)
-    assert not _branch(b, "S0") and c["S0"]["g_on"] == 1e3
+    assert _branch(b, "S0") and c["S0"]["R_on"] == pytest.approx(1e-3) and c["S0"]["g_off"] == 1e-9
+    assert not _branch(b, "C0") and c["C0"]["g_on"] == 1e3
     assert _branch(b, "S1") and c["S1"]["R_on"] == 0.0 and c["S1"]["g_off"] == 0.0
     assert c["S2"]["R_on"] == pytest.approx(1e-3) and c["S2"]["g_off"] == 1e-9
     assert c["S3"]["R_on"] == 0.5 and c["S3"]["g_off"] == 1e-6
     with pytest.raises(ValueError, match=r"add_switch\(\"X\"\): form='ideal'"):
         b.add_switch("X", "a", "b", 1e3, 1e-9, form="ideal")
     with pytest.raises(ValueError, match="conductance form takes g_on"):
-        b.add_switch("X", "a", "b")
+        b.add_switch("X", "a", "b", form="conductance")
     with pytest.raises(ValueError, match="conductance form takes g_on"):
-        b.add_switch("X", "a", "b", 1e3, 1e-9, R_on=1.0)
+        b.add_switch("X", "a", "b", 1e3, 1e-9, R_on=1.0, form="conductance")
+    with pytest.raises(ValueError, match=r"add_switch\(\"X\"\): form='branch' takes R_on or g_on"):
+        b.add_switch("X", "a", "b", 1e3, 1e-9, R_on=1.0)          # the default form refuses it too
 
 
 @pytest.mark.parametrize("creator", ["add_switch", "add_diode"])

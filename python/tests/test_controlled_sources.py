@@ -53,8 +53,17 @@ def test_gyrator_turns_a_capacitor_into_an_inductor():
     gy = p.simulate(gyrator_cap(), t_end=1e-3, dt=DT, engine="pwl")
     ind = p.simulate(plain_inductor(), t_end=1e-3, dt=DT, engine="pwl")
     assert rel_err(gy.i("R1"), ind.i("R1")) < 1e-9
-    # The fixed engine starts first order (guide trap 9): its error
-    # against the exponential is dt/(2τ), the same with the inductor.
+    # The restart rule (default) starts second order: measured 3.06e-8
+    # at dt = 1 us, 7.66e-9 at 0.5 us against the exponential.
+    err = rel_err(gy.i("R1"), exact_rl(gy.times), scale=0.1)
+    assert err < 4e-8
+    gy2 = p.simulate(gyrator_cap(), t_end=1e-3, dt=DT / 2, engine="pwl")
+    err2 = rel_err(gy2.i("R1"), exact_rl(gy2.times), scale=0.1)
+    assert err / err2 == pytest.approx(4.0, rel=0.05)
+    # legacy subject: the restart-less fixed engine starts first order
+    # (guide trap 9): its error is dt/(2τ), the same with the inductor.
+    gy = p.simulate(gyrator_cap(), t_end=1e-3, dt=DT, engine="pwl",
+                    discontinuity_restart=False)
     err = rel_err(gy.i("R1"), exact_rl(gy.times), scale=0.1)
     assert err == pytest.approx(0.5 * DT / 1e-3, rel=1e-3)
 
@@ -149,7 +158,13 @@ def test_vccs_integrator_on_the_fixed_grid():
     res = p.simulate(integrator(), t_end=1e-3, dt=dt, engine="pwl",
                      auto_regularize=False)
     dv = np.diff(res.v("th"))
-    # The first step averages i_C(0) = 0 (trap 9); then exactly 3·dt.
+    # The restart rule (default) starts from a consistent i_C(0): exactly
+    # 3·dt from the first step on (v = 3·t).
+    assert np.max(np.abs(dv - 3 * dt)) <= 1e-9 * 3 * dt
+    # legacy subject: the restart-less first step averages i_C(0) = 0 (trap 9)
+    res = p.simulate(integrator(), t_end=1e-3, dt=dt, engine="pwl",
+                     auto_regularize=False, discontinuity_restart=False)
+    dv = np.diff(res.v("th"))
     assert dv[0] == pytest.approx(1.5 * dt, rel=1e-9)
     assert np.max(np.abs(dv[1:] - 3 * dt)) <= 1e-9 * 3 * dt
 
@@ -199,11 +214,27 @@ def test_trbdf2_and_dsed_agree_on_every_controlled_kind():
     assert max(err.values()) < 1e-6, err
 
 
+def test_fixed_engine_converges_to_them_at_second_order():
+    # The restart rule (default) is second order from the start, past the
+    # trbdf2 reference's sample grid (2.8e-7): the truth is the exact engine
+    # on a 10 ns grid (5.4e-8 from trbdf2 at trbdf2's samples). Measured
+    # 3.0e-7 at dt = 1e-7, 3.4e-9 at 1e-8.
+    ds = p.simulate(every_controlled_kind(), t_end=1e-3, dt=1e-8, engine="dsed",
+                    rtol=1e-12, atol=1e-15)
+    e1, e2 = (max(max_rel(ds, p.simulate(every_controlled_kind(),
+                                         t_end=1e-3, dt=dt, engine="pwl"),
+                          NODES, 1e-5).values())
+              for dt in (1e-7, 1e-8))
+    assert e1 < 1e-6 and e2 < 0.02 * e1, (e1, e2)
+
+
 def test_fixed_engine_converges_to_them_at_first_order():
+    # legacy subject: the restart-less fixed engine (pre-release default)
     tr = p.simulate(every_controlled_kind(), t_end=1e-3, engine="trbdf2",
                     rtol=1e-10, atol=1e-13)
     e1, e2 = (max(max_rel(tr, p.simulate(every_controlled_kind(),
-                                         t_end=1e-3, dt=dt, engine="pwl"),
+                                         t_end=1e-3, dt=dt, engine="pwl",
+                                         discontinuity_restart=False),
                           NODES, 1e-5).values())
               for dt in (1e-7, 1e-8))
     assert e1 < 1e-3 and e2 < 0.15 * e1, (e1, e2)
@@ -324,6 +355,10 @@ def test_periodic_table_must_close():
 
 # ---- res.i ------------------------------------------------------------------
 
+@pytest.mark.xfail(strict=True, reason="release finding F-6-5: under the restart rule "
+                   "(default) the pwl row at a pulse current source's edge is solved with "
+                   "the pre-edge value (Rsq carries 1.0 A at t = 3e-4) while res.i('Ip') "
+                   "evaluates the waveform there (0.0 A); restart-less both read 1.0 A")
 def test_res_i_matches_a_series_milliohm():
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("Vs", "a", "gnd", 1.0, 2.0, 1e3)

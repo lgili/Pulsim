@@ -83,10 +83,17 @@ def test_a_monitor_on_a_diode_free_dsed_circuit_asks_for_rk45():
     b.add_resistor("R", "in", "out", 1.0)
     b.add_capacitor("C", "out", "gnd", 1e-6)
     m = p.control.Monitor(lambda t, x: None, 1e-6)
-    with pytest.raises(p.UnsupportedError):
-        p.simulate(b, 1e-5, engine="dsed", step_observer=m)
+    # the refusal needs the 'auto' integrator: without the output rule (output_rtol=0)
+    with pytest.raises(p.UnsupportedError, match="with a Monitor"):
+        p.simulate(b, 1e-5, engine="dsed", step_observer=m, output_rtol=0)
     ref = p.simulate(b, 1e-5, engine="dsed", integrator="rk45")
     mon = p.simulate(b, 1e-5, engine="dsed", integrator="rk45", step_observer=m)
+    assert np.asarray(mon.states).tobytes() == np.asarray(ref.states).tobytes()
+    # the release default (output_rtol=1e-5) already runs rk45: the Monitor is
+    # accepted and leaves the run bit-identical
+    ref = p.simulate(b, 1e-5, engine="dsed")
+    mon = p.simulate(b, 1e-5, engine="dsed", step_observer=m)
+    assert np.asarray(mon.times).tobytes() == np.asarray(ref.times).tobytes()
     assert np.asarray(mon.states).tobytes() == np.asarray(ref.states).tobytes()
 
 

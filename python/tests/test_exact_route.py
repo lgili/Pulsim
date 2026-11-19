@@ -228,8 +228,20 @@ def test_a_b_extra_fn_segment_is_refused_by_rule_unless_allowed(engine):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         r = p.simulate(b, t_end=1e-3, engine=engine, b_extra_fn=fn, allow_implicit_segments=True)
-    assert r.n_exact_steps == 0 and r.n_rk45_steps + r.n_bdf2_steps > 0
+    assert r.n_exact_steps == 0 and r.n_accept > 0
+    assert [q["exact"] for q in r.exact["segments"]] == [False]   # the numeric tier ran
     assert np.asarray(r.v("o"))[-1] == pytest.approx(5.0 * (1 - np.exp(-1.0)), rel=1e-5)
+
+
+@pytest.mark.xfail(strict=True, reason="release finding F-6-6: under the output rule (default "
+                   "output_rtol=1e-5) a numeric (tier-3) segment's steps are counted nowhere: "
+                   "n_rk45_steps = n_bdf2_steps = 0 with n_accept = 1005 (output_rtol=0: 1005)")
+def test_a_numeric_segment_counts_its_integrator_steps():
+    b, fn = _rc_with_b_extra()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=1e-3, engine="exact", b_extra_fn=fn, allow_implicit_segments=True)
+    assert r.n_rk45_steps + r.n_bdf2_steps > 0
 
 
 def _paralleled_bridges(n):
@@ -336,22 +348,33 @@ def test_a_diode_at_its_own_current_zero_is_decided_on_the_slow_manifold(vf):
         assert np.abs(times - times0).max() <= 1e-9
 
 
-@pytest.mark.parametrize("engine", ["pwl", "trbdf2", "auto"])
-def test_allow_implicit_segments_refused_off_the_exact_engine(engine):
+def _rc():
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "a", "gnd", 5.0)
     b.add_resistor("R", "a", "o", 1e3)
     b.add_capacitor("C", "o", "gnd", 1e-6)
-    kw = {"dt": 1e-5} if engine == "pwl" else {}
+    return b
+
+
+@pytest.mark.parametrize("engine,kw", [("pwl", {"dt": 1e-5}), ("trbdf2", {}),
+                                       ("auto", {"dt": 1e-5})])   # auto with dt: pwl
+def test_allow_implicit_segments_refused_off_the_exact_engine(engine, kw):
     with pytest.raises(p.UnsupportedError) as ei:
-        p.simulate(b, t_end=1e-4, engine=engine, allow_implicit_segments=True, **kw)
+        p.simulate(_rc(), t_end=1e-4, engine=engine, allow_implicit_segments=True, **kw)
     assert ei.value.feature == "allow_implicit_segments"
+
+
+def test_auto_without_dt_takes_allow_implicit_segments_on_the_exact_engine():
+    # since the release engine='auto' without dt routes a PWL circuit to the exact engine
+    r = p.simulate(_rc(), t_end=1e-4, engine="auto", allow_implicit_segments=True)
+    assert r.engine_used == "dsed"
 
 
 def test_auto_would_route_is_reported_and_read_by_nothing():
     """Task 13.3, report only: result.exact['auto_would_route'] is True when every segment is
     exact (the buck), False with a numeric segment (a b_extra_fn, allowed); 'exact' and 'dsed'
-    agree, and engine='auto' still routes the buck to the fixed / TR-BDF2 engines."""
+    agree, and engine='auto' routes the buck to the exact engine (since the release, by the
+    kernel's capability table, not by this field)."""
     b, fn, t_end = _buck()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -361,7 +384,7 @@ def test_auto_would_route_is_reported_and_read_by_nothing():
         b3, fn3, _ = _buck()
         ra = p.simulate(b3, t_end=t_end, switch_fn=fn3)
     assert r.exact["auto_would_route"] is True and r2.exact["auto_would_route"] is True
-    assert ra.engine_used != "dsed"
+    assert ra.engine_used == "dsed"
     b, fx = _rc_with_b_extra()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

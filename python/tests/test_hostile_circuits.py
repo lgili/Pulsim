@@ -418,7 +418,15 @@ def test_a_mains_rectifier_runs_at_a_coarse_dt():
     perfectly reasonable thing for a user to type. A step of it will
     not converge even with the line-search promotion, and that used
     to end the run."""
+    # The release default (the restart rule's SDIRK steps at the diode's
+    # turn-on) converges at this dt with no retry at all.
     res = _run(mains_rectifier(), t_end=1.7e-2, dt=2e-4)
+    v = np.asarray(res.v("vout"))
+    assert np.isfinite(v).all()
+    assert v.max() == pytest.approx(399.3, abs=2.0)
+    assert len(res.dt_retries) == 0
+    # legacy subject: the restart-less step (pre-release default) needs the retry
+    res = _run(mains_rectifier(), t_end=1.7e-2, dt=2e-4, discontinuity_restart=False)
     v = np.asarray(res.v("vout"))
     assert np.isfinite(v).all()
     assert v.max() == pytest.approx(399.3, abs=2.0)
@@ -431,7 +439,8 @@ def test_the_retry_does_not_move_a_single_sample():
     an FFT of the result is silently wrong — which is the whole
     reason store_every was made a pure stride in Phase 1."""
     dt = 2e-4
-    res = _run(mains_rectifier(), t_end=1.7e-2, dt=dt)
+    # legacy subject: the retry happens on the restart-less step only
+    res = _run(mains_rectifier(), t_end=1.7e-2, dt=dt, discontinuity_restart=False)
     t = np.asarray(res.times)
     assert len(res.dt_retries) >= 1
     np.testing.assert_allclose(t, np.arange(len(t)) * dt,
@@ -441,6 +450,7 @@ def test_the_retry_does_not_move_a_single_sample():
 
 
 def test_opting_out_restores_the_hard_failure():
+    # legacy subject: only the restart-less step fails here without the retry
     with pytest.raises(RuntimeError, match="converge"):
         _run(mains_rectifier(), t_end=1.7e-2, dt=2e-4,
-             max_dt_halvings=0)
+             max_dt_halvings=0, discontinuity_restart=False)

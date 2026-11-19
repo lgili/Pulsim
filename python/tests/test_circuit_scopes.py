@@ -429,6 +429,8 @@ def test_a_shipped_example_in_a_subsystem_is_the_example(path):
     lc = p.load_yaml_file(str(path))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
+        # the built Circuit carries no switch driver: undriven='closed' is the
+        # policy this flat-vs-scoped comparison always ran with (the default refuses)
         _compare_wrapped(path.read_text(encoding="utf-8"),
                          run={"t_end": lc.t_start + 50 * lc.dt, "dt": lc.dt,
-                              "engine": "pwl"})
+                              "engine": "pwl", "undriven": "closed"})

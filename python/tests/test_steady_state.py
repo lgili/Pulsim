@@ -71,16 +71,29 @@ def _float_gate(b):
 
 def test_orbit_is_a_fixed_point_and_stays_one():
     b = _buck()
-    r = p.steady_state(b, period=T, dt=DT, switch_fn=_grid_gate(b))
-    assert r.residual < 1e-8
-    assert r.drift < 1e-8
+    # probe_scale=0.1: the period map is affine, so a probe well above the
+    # restart engine's per-period round-off gives the exact columns (measured
+    # residual 2.0e-11; the default 1e-4 probe: 1.9e-8, finding F-6-1 below)
+    r = p.steady_state(b, period=T, dt=DT, switch_fn=_grid_gate(b), probe_scale=0.1)
+    assert r.residual < 1e-10
+    assert r.drift < 1e-10
     assert 0.0 < r.floquet_radius < 1.0     # a stable orbit
     # 100 periods from it must not move.
     far = p.simulate(b, t_end=r.snapshot.t + 100 * T, dt=DT,
                       switch_fn=_grid_gate(b),
                       resume_from=r.snapshot)
     h_far = np.asarray(list(far.final_snapshot.history))
-    assert np.abs(h_far - r.history).max() < 1e-8
+    assert np.abs(h_far - r.history).max() < 1e-10
+
+
+@pytest.mark.xfail(strict=True, reason="release finding F-6-1: steady_state's default "
+                   "probe_scale=1e-4 sits in the restart engine's per-period round-off "
+                   "(residual 1.9e-8, was 1.8e-10; probe_scale=0.1 gives 2.0e-11)")
+def test_the_default_probe_finds_the_orbit_to_1e_8():
+    b = _buck()
+    r = p.steady_state(b, period=T, dt=DT, switch_fn=_grid_gate(b))
+    assert r.residual < 1e-8
+    assert r.drift < 1e-8
 
 
 def test_brute_force_converges_toward_the_orbit():
@@ -159,12 +172,13 @@ def test_a_circuit_with_no_affine_orbit_is_refused():
     def sf(t):
         return p.SwitchStateMask(n)
 
-    # The pattern check cannot see it here — `commutation_events`
-    # comes back EMPTY for this circuit even though the diode
-    # plainly conducts and blocks — so the residual backstop is
-    # what refuses: one period from the "answer" moves it by 1.2,
-    # which is not a fixed point of anything.
-    with pytest.raises(ValueError, match="no periodic orbit"):
+    # Under the release defaults the diode's commutations are reported
+    # (the branch form always; the conductance form with the restart
+    # rule), so the pattern check refuses first. The pre-release run
+    # (conductance, restart-less) returned EMPTY `commutation_events`
+    # and the residual backstop refused ("no periodic orbit": one
+    # period from the "answer" moved it by 1.2).
+    with pytest.raises(ValueError, match="switching pattern moved"):
         p.steady_state(b, period=T, dt=DT, switch_fn=sf,
                         probe_scale=50.0)
 

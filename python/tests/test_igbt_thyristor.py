@@ -131,7 +131,8 @@ def test_igbt_default_warns_and_stays_the_old_switch():
                 if new:
                     b.add_igbt(name, c, e, reverse_blocking=False)
                 else:
-                    b.add_switch(name, c, e, 1 / 10e-3, 1 / 1e9)
+                    # legacy subject: add_igbt's default IS the conductance switch (add_igbt was not flipped)
+                    b.add_switch(name, c, e, 1 / 10e-3, 1 / 1e9, form="conductance")
             b.add_resistor("R" + ph, ph, "n" + ph, 5.0)
             b.add_inductor("L" + ph, "n" + ph, "s", 2e-3)
         return b

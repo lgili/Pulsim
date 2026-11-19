@@ -108,7 +108,9 @@ def test_pwl_split_uses_the_gate_edges():
     # (gate sampled at the step start) is several times further off.
     ev_split, _ = _errors("pwl", dt=5e-7, discontinuity_restart=True,
                           enable_substep_state_correction=True)
-    ev_restart, _ = _errors("pwl", dt=5e-7, discontinuity_restart=True)
+    # (the split now follows the rule by default: "alone" says split off)
+    ev_restart, _ = _errors("pwl", dt=5e-7, discontinuity_restart=True,
+                            enable_substep_state_correction=False)
     assert ev_split < 1e-2
     assert ev_restart > 3 * ev_split
 
