@@ -1301,3 +1301,23 @@
     (12.4) remain; (3) a builder-time bound would need the pinned builder
     contracts (negative R, m = 0, ideal g_off = 0) to become separate
     kinds or explicit opt-outs first.
+
+## Slice 11c — #56: stateful kinds at the DC start (2026-11-19)
+
+`simulate(start_from_dc_op=True)` solved the operating point through
+`nl_static`, which has no DC stamp for the Lauritzen law: the diode was
+open (v_a = 2.000 V where the law gives 0.73096 V, a bisection of
+I_S·expm1(v/V_T)·τ/(τ+T_M) + G_min·v against the source). Fixed on both
+device paths: `dc_device_refresh` now stamps the Lauritzen DC law on the
+legacy path too, and `run_transient` takes it for the DC solve when a
+Lauritzen diode is present (a caller's override still wins). The seed
+after the DC point goes through `StatefulHistories::seed_from_dc_op`,
+so every stateful kind starts on its DC curve, not only the PMSM and
+external devices: before, a saturable inductor started from zero flux
+(0 → 0.99 V excursion), a nonlinear capacitor from zero charge (1.05 V)
+and the IGBT tail from no stored charge (18 mV). Default-path change,
+truth-backed: `compute_dc_operating_point(Legacy)` with a Lauritzen diode
+moves 2.000 V → 0.73096 V. Test: `test_dc_start_stateful_seed.py`
+(10 cases, all failed before; after: flat to 5.8e-15 / 1.1e-13 /
+7.8e-14 / 4.4e-16 V on both paths). TR-BDF2 and esdirk43 refuse
+`start_from_dc_op` by name, so the same start is not checked there.

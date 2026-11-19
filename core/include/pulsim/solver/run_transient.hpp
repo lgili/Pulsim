@@ -781,10 +781,17 @@ inline SimulationResult run_transient(
         const auto dc_start_mask = has_diodes
             ? diodes.combine(switch_fn(opts.t_start))
             : switch_fn(opts.t_start);
+        // The DC refresh (device DECISIONS #56): the static chain has no
+        // DC stamp for a Lauritzen diode (it solved it open); the caller's
+        // override keeps winning.
+        const pwl::NonlinearRefreshFn& dc_refresh =
+            (nl_refresh || pool.lauritzen_diode_branches().empty())
+                ? nl_static
+                : pwl::dc_device_refresh(pool, true, opts.device_path);
         auto dc = [&] {
             try {
                 return pwl::compute_dc_operating_point(
-                    graph, pool, switch_fn(opts.t_start), nl_static,
+                    graph, pool, switch_fn(opts.t_start), dc_refresh,
                     dc_opts, has_diodes ? &diodes : nullptr,
                     "run_transient(start_from_dc_op)", "pwl");
             } catch (const std::runtime_error&) {
@@ -797,9 +804,10 @@ inline SimulationResult run_transient(
         if (structure.active()) (void)check_mode(dc.mask, false, opts.t_start);
         x = std::move(dc.x);
         history.seed_from_dc_op(x);
-        hs.get<pwl::PmsmMnaHistory>().seed_from_dc_op(x);   // λ, i, θ at the held DC point (D19)
-        // the external devices' charges and model state at the DC point
-        hs.get<pwl::ExternalDeviceHistory>().seed_from_dc_op(x);
+        // every stateful kind on its DC curve: PMSM λ, i, θ at the held
+        // point (D19), external charges, Lauritzen q_M, IGBT tail Q,
+        // nonlinear-capacitor q, saturable flux (empty kinds: no-op)
+        hs.seed_from_dc_op(x);
         seed_held_machine_capacitors(graph, pool, dc.mask, opts.t_start, x,
                                      hs.get<pwl::PmsmMnaHistory>(), history);
         initial_mask = dc.mask;
