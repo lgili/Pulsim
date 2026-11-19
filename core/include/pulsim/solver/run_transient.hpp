@@ -1838,6 +1838,7 @@ inline SimulationResult run_transient(
                                 // not an event.
                                 const auto& m = gate_at(e);
                                 if (!(m == gate_mask)) {
+                                    ++result.n_gate_events;
                                     if (e < t_prev + snap) {
                                         gate_t = e;
                                     } else {
@@ -1845,6 +1846,10 @@ inline SimulationResult run_transient(
                                     }
                                     gate_mask = m;
                                 }
+                            } else {
+                                // taken by the sample at t (no gate read
+                                // here: it would be a counted switch_fn call)
+                                ++result.n_gate_events;
                             }
                             edge_from = e;
                             e = next_edge_fn(e);
@@ -1852,6 +1857,9 @@ inline SimulationResult run_transient(
                         }
                         ev_overflow = ev_overflow || e < t - snap;
                     }
+                    // an edge exactly on the grid point t: the next step's
+                    // oracle query (strictly after t) skips it
+                    if (edge_next == t) ++result.n_gate_events;
                 }
                 if (has_jump_sources) {
                     Real e = sources::next_source_jump_after(pool, graph, t_prev);
@@ -1890,6 +1898,7 @@ inline SimulationResult run_transient(
                         ++m;
                     } else {
                         ev_s[m - 1] = ev_t[q];
+                        ++result.n_gate_events_unresolved;
                     }
                 }
                 n_ev = m;

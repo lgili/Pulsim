@@ -865,6 +865,8 @@ def _warn_unlocated_edges(res):
       step (an edge exactly on the grid is not counted);
     * ``split_event_overflows`` (L5): steps with more events than the
       split takes; the rest were taken unsplit (first order there);
+    * ``n_gate_events_unresolved`` (tasks 3.4/5.5): step events merged
+      into an earlier one closer than ``split_snap*dt``;
     * ``stage2_retry_failures`` (M3): restart stage-2 backward-Euler
       re-tries that failed, so the SDIRK stage 2 they were checking was
       kept (it may carry an overshoot of the diode mode change).
@@ -888,6 +890,14 @@ def _warn_unlocated_edges(res):
             "had more events than the event split takes (8 per step); "
             "the events beyond it were taken unsplit, first order there. "
             "Reduce dt. See res.counters['split_event_overflows'].",
+            UserWarning, stacklevel=3)
+    n = c.get("n_gate_events_unresolved", 0)
+    if n:
+        warnings.warn(
+            f"simulate(enable_substep_state_correction=True): {n} step "
+            "event(s) fell closer than split_snap*dt to an earlier one and "
+            "were merged into it (a gate pulse that narrow is lost). "
+            "Reduce dt. See res.counters['n_gate_events_unresolved'].",
             UserWarning, stacklevel=3)
     n = c.get("stage2_retry_failures", 0)
     if n:

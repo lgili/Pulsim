@@ -3441,6 +3441,8 @@ void init_module(py::module_& m) {
                 d["stage2_retry_failures"] = r.stage2_retry_failures;
                 d["unlocated_gate_steps"] = r.unlocated_gate_steps;
                 d["split_event_overflows"] = r.split_event_overflows;
+                d["n_gate_events"] = r.n_gate_events;
+                d["n_gate_events_unresolved"] = r.n_gate_events_unresolved;
                 d["mode_structure_checks"] = r.mode_structure_checks;
                 d["ideal_loop_releases"] = r.ideal_loop_releases;
                 return d;

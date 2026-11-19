@@ -605,3 +605,58 @@ same count and same instants on a PWM buck with a freewheel diode.
   today; the learned caps then bound its segment length.
 - **3.4 (trbdf2)**: it already warns on `n_gate_undersampled`; the pwl
   diagnostic comes with the fixed engine's gate counts (section 17).
+
+## 17. Resume at an edge, an instant at t_end, gate counts (2026-11-19)
+
+- **Resume exactly at a gate edge (DECISIONS 14 (a))**: one change in the
+  step clamp. A resumed run whose snapshot committed no edge
+  (`post_edge_derivatives` false) and whose first step reads other gates
+  than its x was solved under lands that edge with an h_min step, as an
+  edge one ulp after t_start is. Opaque buck split at 4.3 T (the gate is
+  still ON at the split instant by one ulp): 3.19e-4 V off the
+  uninterrupted run with 7 rejects before, 9.1e-7 V and 0 rejects after.
+  Declared-edge splits (4 T, 4.15 T, 4.3 T) unchanged.
+- **An instant at t_end (DECISIONS 14 (c))**: opt-in `Rate::closed_end`
+  (default false, the half-open rule). The queue takes a closed rate's
+  instant up to `t_end_closed` (`start`'s new optional argument, NaN =
+  t_end). The fixed engine passes t_end + tick_tol: its last observer call
+  is labelled t_end (state x_{n-1}, as every tick), so no extra call is
+  needed (the note in 14 (c) that it was "at t_n-1's step" read the loop
+  wrong). A resumed run does not fire it again (its `k0` is past it).
+  Tests: `[event_queue]` closed_end queue case and the fixed-engine case
+  in `test_zero_alloc.cpp` (5 ticks, the last at t_end; the resume fires
+  4, from 125 us).
+  TR-BDF2 not done: its ticks come from `observer_*` options, not from a
+  `TickPlan`; it needs an option and `fire_due_ticks` to stop at
+  t_end + h_min for closed sources.
+- **Gate counts on the fixed engine (5.3/5.5)**: `counters['n_gate_events']`
+  and `['n_gate_events_unresolved']`, counted on the event-split path with
+  an edge oracle only (where the step walks the oracle; 0 elsewhere, so the
+  default path costs nothing). An edge inside the step counts when the
+  gate changes across it; an edge within snap before the step end or
+  exactly on it counts without a gate read (a read is a counted
+  switch_fn call and would move the goldens' counters). Unresolved = step
+  events merged into an earlier one closer than snap. Analytic constants
+  (0.3/5.4, `test_gate_event_counts.py`): PWM buck over 5.15 periods,
+  2 edges per period x 5 = 10 on pwl and on trbdf2; a 40 ns pulse
+  (narrower than the 68.7 ns step, both edges inside one step in some
+  periods) 2 x 5 + 1 (its sixth fall is before t_end), 0 unresolved; a
+  0.2 ns pulse: 11 counted, 5 unresolved (the first fall is taken at the
+  step start), warned. DSED not done (out). Cost: none on the default
+  path (no splitting); pwl buck/vsi instructions per step unchanged.
+- **3.4 (pwl)**: `simulate` warns on `counters['n_gate_events_unresolved']`
+  (events merged within split_snap*dt: a pulse that narrow is lost).
+- **Moved test**: `test_trbdf2_resume_controller.py::test_an_explicit_h_init_still_wins`
+  split at 10 T, exactly at an opaque edge: its 1e-9 first step was the
+  defect (1.0e-4 V off the uninterrupted run; 3.5e-7 V with the edge
+  landed). It now splits at 10.2 T, where the explicit h_init still wins.
+- **Hand-off (slice 3, not done)**: (1) the resume-edge test compares the
+  gate bits with the snapshot's mask, so a gated device (IGBT, thyristor)
+  whose gate bit the zero-time settle already moved may not see the edge
+  (review finding; plain switches are fine): compare with the gates held
+  before the settle, or carry them in the snapshot. (2) `closed_end` on
+  TR-BDF2 (an `observer_*` option + `fire_due_ticks` / monitors up to
+  t_end + h_min for closed sources) and in the bindings. (3) DSED: 3.3,
+  3.4, 5.3 and the dsed column of 5.4. (4) Group 10 (samples as events)
+  not started. (5) `n_gate_events` without event splitting (the default
+  fixed path) is 0: counting there costs a mask compare per step.
