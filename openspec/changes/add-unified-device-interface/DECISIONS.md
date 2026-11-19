@@ -494,3 +494,31 @@
     branch's previous baselines, every pwl / dsed case identical and the
     trbdf2 cases moved by integration's TR-BDF2 tracks 7–8. New baselines
     `golden_m13` / `sbit_m13`.
+38. **The whole-run gap of #27 (15.7): not in the device path; wall time
+    on this machine cannot resolve 3 %.** Two load-independent
+    measurements on e9805fb4 (same build, both paths):
+    (a) instructions retired per accepted step (`/usr/bin/time -l`, 30 runs
+    minus a 0-run baseline per path, `.scratch/instr.sh`):
+
+    | case | legacy | interface | ratio |
+    |---|---|---|---|
+    | saturable inductor only (pwl) | 16 903 | 17 235 | 1.020 |
+    | Coss only (pwl) | 13 900 | 13 659 | 0.983 |
+    | IGBT tail + Lauritzen chopper (pwl) | 28 470 | 26 918 | 0.945 |
+    | IGBT tail + Lauritzen chopper (trbdf2) | 96 710 | 91 416 | 0.945 |
+    | boost MOSFET + Coss + saturable (pwl) | 33 777 | 29 299 | 0.867 |
+    | boost MOSFET + Coss + saturable (trbdf2) | 132 431 | 114 144 | 0.862 |
+
+    Same Newton iteration totals on both paths (one case 21 042 vs 21 051).
+    (b) `sample` profiles (15 s each): the device code (stamps, laws,
+    commits, `exp`/`pow`/`atan`) is 5–14 % of a run's samples on either
+    path; the interface share exceeds the legacy one by 1–2 % of the run
+    (saturable inductor: the law's commit re-evaluates λ through
+    `commit_fq`, 159 vs 75 samples, and the stamp 662 vs 498), which is
+    the +2.0 % instruction count of that case. The 1.06–1.13× of #27
+    and of an in-process ABBA timing on this machine (load 14–46, eight
+    other agents: the same probe gave 1.30× and 0.96× for one case on two
+    passes) is scheduling noise: no case retires more than 2 % more
+    instructions on 'interface'. 15.7 ticked on that measured reason;
+    wall-time confirmation on a quiet machine stays a release-checklist
+    item, and no timing is asserted.
