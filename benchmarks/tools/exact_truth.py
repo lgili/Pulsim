@@ -1388,13 +1388,21 @@ class Solver:
         the left limit, the second the right limit."""
         rows = {c: self.obs_row(c) for c in cols}
         out = {c: [] for c in cols}
-        last = None
+        last, prev, phi = None, None, None  # prev = (seg, tau, y); phi = (dyn, h, expm(H h))
         for t in ts:
             side = 1 if (last is not None and t == last) else -1
             last = t
             seg = self.seg_at(t, side)
             tau = t - seg.t0
-            y = seg.y(tau)
+            if seg.x and prev and prev[0] is seg and tau > prev[1]:
+                # expm per point is the cost of a fine grid: step from the last sample
+                h = tau - prev[1]
+                if phi is None or phi[0] is not seg.dyn or abs(h - phi[1]) > mp.mpf(10) ** (5 - mp.mp.dps) * h:
+                    phi = (seg.dyn, h, mp.expm(seg.dyn.H * h))
+                y = phi[2] * prev[2]
+            else:
+                y = seg.y(tau)
+            prev = (seg, tau, y)
             x = seg.dyn.X * y
             for c, (r, waves) in rows.items():
                 v = (r * x)[0] + sum(s * wv.value(t, side) for wv, s in waves)
