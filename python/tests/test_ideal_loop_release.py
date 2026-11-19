@@ -46,7 +46,9 @@ KW = {"engine": "pwl", "discontinuity_restart": True,
 
 
 def _sim(b, mode, **kw):
-    extra = {"mode_selection": mode} if mode else {}
+    # Legacy subject: mode None is "the default settle" the LCP is compared with; the
+    # release default mode_selection='auto' picks 'lcp' here, so the settle is named
+    extra = {"mode_selection": mode or "legacy"}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return p.simulate(b, **KW, **kw, **extra)
