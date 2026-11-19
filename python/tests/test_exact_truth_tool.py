@@ -6,7 +6,8 @@ written from the circuit's own equations: RC / RL / RLC steps, a sine-driven
 RC, a PWM buck's periodic orbit in DCM (the diode turn-off by root finding),
 an ideal diode feeding R-L (the extinction angle), charge conservation when
 an ideal switch parallels two capacitors, and an ideal switch closing a DC
-source onto an inductor (the matrix-exponential path). The tool's values are
+source onto an inductor and an RC driven by a finite pulse edge (the
+matrix-exponential path). The tool's values are
 compared after conversion to float: both sides agree to ~1e-20, so 1e-12
 relative is a pure float64 bound. Energy balance (sources = dissipation +
 stored-energy change + impulsive loss) closes to ~1e-20 or better.
@@ -25,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmarks" / "too
 import exact_truth as et  # noqa: E402
 
 CASES = ["RC step", "RL step", "RLC step", "RC sine", "buck DCM orbit", "ideal half-wave RL",
-         "capacitor jump", "ideal L ramp (expm path)"]
+         "capacitor jump", "ideal L ramp (expm path)", "RC ramp edge"]
 
 
 @pytest.mark.parametrize("case", CASES)

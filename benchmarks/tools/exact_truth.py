@@ -192,6 +192,20 @@ class Wave:
     def ramps(self) -> bool:
         return self.kind == "pulse" and (self.p["t_rise"] > 0 or self.p["t_fall"] > 0)
 
+    def piece_at(self, t: Fr):
+        """(c0, c1): the value is c0 + c1 t on [t, next break) (right limit)."""
+        if self.kind != "pulse" or not self.ramps():
+            return self.const_at(t), Fr(0)
+        p, e = self.p, self._pulse_pos(t)
+        v0, v1, tr, pw, tf = (p[k] for k in ("v_initial", "v_pulse", "t_rise", "t_width", "t_fall"))
+        if e is not None and e < tr:
+            sl = (v1 - v0) / tr
+            return v0 + sl * e - sl * t, sl
+        if e is not None and tr + pw <= e < tr + pw + tf:
+            sl = (v0 - v1) / tf
+            return v1 + sl * (e - tr - pw) - sl * t, sl
+        return self.const_at(t), Fr(0)
+
     def const_at(self, t: Fr) -> Fr:
         """Piecewise-constant value on [t, next break) (right limit)."""
         if self.kind == "dc":
@@ -353,8 +367,6 @@ class Circuit:
                 if ns[0] in self.gate_src and self.gate_src[ns[0]] is c:
                     self.waves[ns[0]] = wv
                     continue
-                if wv.ramps():
-                    raise Unsupported(f"pulse source with finite edges driving the circuit ({nm})")
                 self.vsrc.append((nm, ns[0], ns[1], wv))
             elif t == "current_source":
                 self.isrc.append((nm, ns[0], ns[1], Fr(value(c["value"]))))
@@ -403,11 +415,15 @@ class Circuit:
         self.switches = [i for i, dv in enumerate(self.devs) if dv["kind"] == "S"]
         fs = sorted({f for _, _, _, wv in self.vsrc for f in wv.freqs()})
         self.freqs = fs
-        self.m = 1 + 2 * len(fs)
+        # exosystem w = [1, sin w1 t, cos w1 t, ..., (t if a source ramps)]
+        self.ramp = any(wv.ramps() for _, _, _, wv in self.vsrc)
+        self.m = 1 + 2 * len(fs) + (1 if self.ramp else 0)
         self.S = mp.zeros(self.m, self.m)
         for j, f in enumerate(fs):
             w = 2 * mp.pi * f
             self.S[1 + 2 * j, 2 + 2 * j], self.S[2 + 2 * j, 1 + 2 * j] = w, -w
+        if self.ramp:
+            self.S[self.m - 1, 0] = 1
         self.E = self._E()
 
     def default_observables(self):
@@ -491,7 +507,10 @@ class Circuit:
             i = self.ix[f"Is({nm})"]
             branch(a, b, i)
             vrow(i, a, b)
-            addB(i, 0, -wv.const_at(self._tsrc))
+            c0, c1 = wv.piece_at(self._tsrc)
+            addB(i, 0, -c0)
+            if c1:
+                addB(i, self.m - 1, -c1)
             if wv.kind == "sine":
                 j = 1 + 2 * self.freqs.index(wv.f)
                 addB(i, j, -mp.mpf(wv.amp) * mp.cos(wv.ph))
@@ -537,7 +556,7 @@ class Circuit:
     _tsrc = Fr(0)
 
     def src_key(self, t: Fr):
-        return tuple(wv.const_at(t) for _, _, _, wv in self.vsrc)
+        return tuple(wv.piece_at(t) for _, _, _, wv in self.vsrc)
 
     def next_break(self, t: Fr):
         c = [dv["sched"].next_edge(t) for dv in self.devs if dv["kind"] == "S"]
@@ -735,7 +754,7 @@ class Dyn:
         for k in range(r):
             for i in range(r):
                 V[i, k] = VF[i, k]
-        res = mp.inf
+        res = mp.mpf(0) if ck.ramp else mp.inf   # a ramp (t' = 1) is a Jordan block: expm
         for k, (mu, u) in enumerate(pairs):
             um = mp.matrix(u)
             col = mp.matrix(r, 1)
@@ -806,6 +825,8 @@ def w_at(ck, t):
     for f in ck.freqs:
         a = 2 * mp.pi * f * t
         out += [mp.sin(a), mp.cos(a)]
+    if ck.ramp:
+        out.append(mp.mpf(t))
     return out
 
 
@@ -902,6 +923,8 @@ class Solver:
         for j, f in enumerate(ck.freqs):
             w = 2 * mp.pi * f
             ck.S[1 + 2 * j, 2 + 2 * j], ck.S[2 + 2 * j, 1 + 2 * j] = w, -w
+        if ck.ramp:
+            ck.S[ck.m - 1, 0] = 1
         self.structs, self.dyns = {}, {}
         self.Em = to_mp(ck.E)
         self.tol = mp.mpf(10) ** (-(dps - 12))
@@ -1753,7 +1776,25 @@ def case_ramp(dps):
              i0 + V * (t1 - t0) / (2 * L))], sol
 
 
-CASES = [("ideal L ramp (expm path)", case_ramp), ("RC step", case_rc), ("RL step", case_rl), ("RLC step", case_rlc),
+def case_rc_edge(dps):
+    """RC driven by a pulse with a 100 us rising edge: superposition of two
+    ramps, v = a [r(t) - r(t - tr)], r(t) = t - tau (1 - e^{-t/tau})."""
+    R, C, tr, V = _g(1e3), mp.mpf(1e-6), mp.mpf(1e-4), mp.mpf(5)
+    sol = Solver(Circuit(_net("rc_edge", [
+        dict(type="voltage_source", name="Vp", nodes=["in", 0],
+             waveform=dict(type="pulse", v_initial=0.0, v_pulse=5.0, t_rise=1e-4, t_fall=1e-4,
+                           t_width=1.0, period=3.0)),
+        _R("R", "in", "out", 1e3), dict(type="capacitor", name="C", nodes=["out", 0], value=1e-6)],
+        2e-3, 1e-6, ["V(out)"])), dps).run()
+    tau, a = R * C, V / tr
+
+    def r(t):
+        return t - tau * (1 - mp.exp(-t / tau)) if t > 0 else mp.mpf(0)
+    return [(f"v({t * 1e6:g} us)", _at(sol, "V(out)", t), a * (r(mp.mpf(t)) - r(mp.mpf(t) - tr)))
+            for t in (5e-5, 1.5e-3)], sol
+
+
+CASES = [("ideal L ramp (expm path)", case_ramp), ("RC ramp edge", case_rc_edge), ("RC step", case_rc), ("RL step", case_rl), ("RLC step", case_rlc),
          ("RC sine", case_sine_rc), ("floating bridge", case_bridge),
          ("buck CCM orbit", case_buck_ccm), ("buck DCM orbit", case_buck_dcm),
          ("ideal half-wave RL", case_halfwave_rl), ("capacitor jump", case_cap_jump)]
