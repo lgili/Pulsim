@@ -1,3 +1,5 @@
+Status (closeout 2026-11-19): open boxes — 4.6 OWNER (which real parts; data list under 4.6); 5.1, 5.2 NOT DONE (5.2's composite retirement RELEASE); 5.3 BLOCKED BY 5.2 (its AC part met by add-unified-device-interface 10.2).
+
 ## 1. Charge laws
 - [x] 1.1 `models/charge_table.hpp`: `ChargeTable` from triples `(v, Q, C)` and from pairs `(v, C)`; Hermite `charge(v)`, exact `capacitance(v)`, linear tails, Fritsch–Carlson check and clamp; refusals by name (fewer than 3 knots, no `v = 0` knot, `v` not increasing, `C ≤ 0`)
 - [x] 1.2 C++ test: junction law C0 = 2 nF, V0 = 25 V, m = 0.5 at 64 knots with exact slopes → Q(400 V) = 312.31 nC within 1e-4, C(400 V) = 485.07 pF within 1e-3; `C(v)` equals the finite difference of `Q(v)` within 1e-7
@@ -36,13 +38,15 @@
 - [x] 4.4 `pulsim.lib.power_mosfet(number)` and `Part.add_to(builder, name, drain, source, gate, T_j=)`
 - [x] 4.5 PLECS "table and formula": import-time evaluation with a whitelisted expression grammar (no `eval`), `variables=` argument, provenance note; formulas using `lookup(...)` stay refused
 - [ ] 4.6 First real parts (owner decision on which and where they live); CI acceptance: double pulse at the datasheet condition within the declared tolerance
-  - Not ticked: owner decision; no part without datasheet provenance ships (owner note *shipped-parts-are-synthetic*). The CI loop over `validated` parts is in place and runs empty.
+  - OWNER: which real parts ship and whether digitised curves may be redistributed (DECISIONS 1). No part without datasheet provenance ships (owner note *shipped-parts-are-synthetic*); synthetic parts are refused by part number unless `allow_synthetic=True` (`lib/parts.py`). In place and exercised: the fitters (4.1, round trips 4.2), the part schema and its refusals (4.3), `pulsim.lib.power_mosfet` / `Part.add_to` (4.4), `Part.acceptance_check` and the CI loop over `validated` parts (runs empty), the ngspice double-pulse deck (7.3, skips cleanly without ngspice). Data that closes it, per part: the datasheet PDF reference and revision; output characteristics I_D(V_DS) at ≥ 3 V_GS values at 25 °C and 125 °C (or 150 °C); the transfer curve I_D(V_GS) at the same temperatures; C_iss / C_oss / C_rss against V_DS; R_DS(on) against T_j; the gate-charge curve (Q_gs, Q_gd plateau); the body-diode forward curve and Q_rr / t_rr at the stated di/dt; the datasheet switching condition (V_DD, I_D, R_g, L, T_j) with E_on / E_off. For `validated`: one measured double-pulse waveform at that condition (not used by the fitters), held out of the fit as `validated_on`.
 
 ## 5. Table channel and single device (after `add-unified-device-interface`)
 - [ ] 5.1 `ChannelTable` with monotonicity checks and the terminal-swap third quadrant; C¹ test at `V_DS = 0`
 - [ ] 5.2 The power MOSFET as one f/q device; composite retired behind the same API; results within 1e-9 of step 2
 - [ ] 5.3 Generic outputs: `res.i`, loss rows; AC from f and q
-  - Not ticked (5.1–5.3): need `add-unified-device-interface` (Phase 3). Until then `res.i` / loss rows do not cover the composite; `components()` lists its sub-elements.
+  - 5.1 NOT DONE: the device interface has landed (no longer blocked); the table channel law and its C¹ test were not attempted in the closeout session. Its only consumer is 5.2.
+  - 5.2 NOT DONE (a new multi-terminal stateful f/q kind: channel + charges + body diode on the device interface), and its second half is RELEASE: retiring the composite behind the same API changes `add_power_mosfet`'s numbers (within 1e-9, not bit-identical), so the swap waits for the number-changing release; the single device itself can land behind an option first.
+  - 5.3 Partly met elsewhere: the AC sweep linearises every kind of the composite from its f and q (`add-unified-device-interface` 10.2; `test_charge_law_and_power_mosfet_on_the_ac_sweep`). `res.i` / loss rows of the composite are BLOCKED BY 5.2 (generic outputs of the single device) — the composite's drain current would need `res.i` of a NonlinearCapacitor, which raises (its current needs the stored charge); `res.i` raises with the 1 mΩ series-resistor recipe.
 
 ## 6. Documentation
 - [x] 6.1 `AI_GUIDE.md` (device choice table, the time-step trap), `docs/losses-and-thermal.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (non-goals), `CHANGELOG.md` (BREAKING importer default)

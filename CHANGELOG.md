@@ -22,6 +22,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every state's range (counters in `diagnostics['output_grid']`). Default
   `None` keeps today's samples; refused by name off the exact engine.
 
+### `components()` entry of the DC machine
+
+* **Added** `CircuitBuilder.record_composite(kind, name, anchor, members)` /
+  `composites()`; `add_dc_machine` and the YAML `dc_machine` record the
+  machine, and `components()` gives its `{name}.em` entry the keys
+  `composite`, `composite_name`, `sub_elements` and `composite_params`
+  (read back from the members). `to_yaml` / `from_yaml` keep the record.
+  A `dc_machine` record must name `{name}.la`, `.em`, `.j` (and the
+  optional `.ra`, `.b`, `.tl`) with their kinds; anything else is refused
+  by name.
+
+### Hysteretic permeance and the core-loss element fitter
+
+* **Added** `CircuitBuilder.add_hysteretic_permeance(name, m_a, m_b, area,
+  length, Ms, a, alpha, c, k)`: a Jiles-Atherton core segment in the
+  permeance network (a unit winding plus a one-turn JA inductor; no new
+  device kind), equal to `add_hysteretic_core_inductor` seen from a winding
+  to 1e-9 on pwl and trbdf2. YAML type `hysteretic_permeance` (refused by
+  name before). `res.flux` / `b_field` / `h_field` refuse it by name (its
+  flux depends on the JA state); the MMF is `res.i(name)`.
+* **Added** `pulsim.fit_core_loss_elements(f, B, P_v, *, geometry)`: the
+  hysteresis / eddy / excess split of sine loss data mapped to the magnetic
+  resistance `R_m` and the excess coefficient `c` of a segment; the fitted
+  points are listed and are not a validation.
+
 ### esdirk43 runs the stateful kinds and the losses; the exact engine's loss port
 
 * **Added** `integrator='esdirk43'` (engine `trbdf2`) runs the nonlinear

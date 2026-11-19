@@ -27,6 +27,8 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 - [ ] 3.3 `engine='auto'` route as `add-exact-propagator-strategy` D11 (task 19.1 there) once its default-flip gate holds
 - [ ] 3.4 Delete what the owning changes list at the flip (device-interface DECISIONS 25: the hand stamps)
 - [ ] 3.5 Re-run the rehearsal on the release tree: configuration (a) is then the new default and must equal the regenerated `REFERENCE_STATUS.md`
+- [ ] 3.6 `add_igbt(reverse_blocking=...)` defaults to `True` (YAML `igbt` the same); update helpers and examples that relied on reverse conduction (`add-pwl-igbt-and-thyristor` 8.1, DECISIONS 4 there)
+- [ ] 3.7 YAML `induction_motor` defaults to `model: mna` (BREAKING, CHANGELOG) (`add-mna-native-machines` 5.3)
 
 ## 4. Regeneration (one re-baseline)
 - [ ] 4.1 Goldens, `pwl_identity` / `trbdf2_identity` baselines
@@ -39,6 +41,7 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 - [ ] 5.1 CHANGELOG: one BREAKING entry per flipped option with its old value and the keyword that restores it
 - [ ] 5.2 Deprecation notes: the old values stay reachable for one release; `'dsed'` as an alias of `'exact'` (roadmap decision 8)
 - [ ] 5.3 `integrator='esdirk43'` documented as opt-in (not flipped)
+- [ ] 5.4 One release AFTER this one: delete the four deprecated `update_*` bindings and the subsystem proxy's string-prefix code (`add-immutable-circuit-ir` 11.1 / 11.2; deprecated with a `DeprecationWarning` naming `with_value` / `set_value`, DECISIONS 10 there)
 
 ## 6. Verification
 - [ ] 6.1 ruff, full pytest, full ctest, `pytest -m reference`, `reference_status` exit 0, `DO_NOT_TRACK=1 openspec validate --all --strict`, stubs `--check`, Eigen 3.4.0 for touched C++

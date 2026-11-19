@@ -1,3 +1,5 @@
+Status (closeout 2026-11-19): implementation complete; remaining boxes are release-gated (11.1, 11.2) or blocked by another change (0.1, a status box: `add-kernel-simulation-object` 10.3 / 10.5).
+
 Every numbered section is one or more PRs and ends with the
 verification set: `ruff check`, `pytest python/tests`, `ctest`,
 `openspec validate --all --strict`, the stub check, and
@@ -7,7 +9,7 @@ checkpoint hashes and the differential runner of
 lands).
 
 ## 0. Preconditions and baseline
-- [ ] 0.1 `add-kernel-simulation-object` section 10 merged (`Simulation{Circuit, RunOptions}` with `Circuit` as a view)
+- [ ] 0.1 `add-kernel-simulation-object` section 10 merged (`Simulation{Circuit, RunOptions}` with `Circuit` as a view) — BLOCKED BY `add-kernel-simulation-object` 10.3 (C++ tests of the facade without Python) and 10.5 (the conformance matrix through `Simulation`), still open there; 10.1, 10.2, 10.4 are merged. Not a precondition of this change's work (maintainer, DECISIONS intro): it is a status box only
 - [x] 0.2 Record: `components()` dumps of every shipped example and harness circuit; build + analyse + assemble time of a 100-point sweep on the audit's buck and on the n = 1502 ladder; the list of builder private attributes set from Python (4) and read with `getattr` (7 sites) — `probes/components_baseline.json` (152 circuits, 136 load), `probes/sweep_probe.py`, BASELINE.md
 
 ## 1. Immutable snapshot of the builder
@@ -76,5 +78,5 @@ lands).
 - [x] 10.3 Oracle: sweep results equal
 
 ## 11. Remove the deprecated surface (one release later)
-- [ ] 11.1 Delete the four `update_*` bindings and the string-prefix code of the subsystem proxy
-- [ ] 11.2 Oracle: suite; stub check; `openspec/CORE_ROADMAP.md` status
+- [ ] 11.1 Delete the four `update_*` bindings and the string-prefix code of the subsystem proxy — RELEASE: one release after the number-changing release, which ships their `DeprecationWarning` (DECISIONS 10); listed as `update-number-changing-release` 5.4
+- [ ] 11.2 Oracle: suite; stub check; `openspec/CORE_ROADMAP.md` status — RELEASE: the oracle of 11.1, run with it

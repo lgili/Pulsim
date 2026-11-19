@@ -566,6 +566,10 @@ class CircuitBuilder:
         """
         Jiles-Atherton hysteretic core INSIDE the Newton loop: N turns on a core (Ae [m^2], le [m], TOTAL gap lg [m]) of a material (Ms, a, alpha, c, k). The magnetisation is solved at the same time level as the current with its exact tangent in the Jacobian -- no dummy source, no observer, no one-step lag. i(name) is the winding current; replay the B-H trajectory from it with pulsim.compute_bh_loop.
         """
+    def add_hysteretic_permeance(self, name: str, m_a: str, m_b: str, area: float, length: float, Ms: float, a: float, alpha: float, c: float, k: float, substeps_min: int = 8, M0: float = 0.0) -> CircuitBuilder:
+        """
+        Hysteretic permeance: a core segment (area [m^2], length [m]) with the Jiles-Atherton law (Ms, a, alpha, c, k) between magnetic nodes m_a, m_b -- the dual of a one-turn add_hysteretic_core_inductor: a unit winding '<name>.w' on the internal node '<name>.e' and the JA inductor '<name>' (N = 1, no gap). The MMF F(m_a) - F(m_b) is i(name) (H = F/length), the flux rate is v('<name>.e'). Newton engines (pwl, trbdf2) only.
+        """
     def add_ideal_switch(self, name: str, n_pos: str, n_neg: str, R_on: float = 0.0, g_off: float = 0.0) -> CircuitBuilder:
         """
         Add a controlled switch in BRANCH form (its own current unknown): R_on >= 0 in series when closed (0 = ideal), g_off >= 0 in parallel when open (0 = ideal). Engines and refusals: the capability table (add-branch-form-ideal-switch).
@@ -814,6 +818,10 @@ class CircuitBuilder:
         """
         Enumerate every device in the circuit. Returns a list of dicts (kind, name, nodes, params, branch_id) in insertion order. Consumed by `pulsim.schematic`.
         """
+    def composites(self) -> list[typing.Any]:
+        """
+        The recorded composites: [{kind, name, anchor, members}].
+        """
     def compute_time_varying_b_extra(self, t: float) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
         """
         Sum the b_extra contributions from all time-varying voltage sources (sine + PWM + pulse) at time `t`. Returns a full-MNA-sized vector. The pulsim.simulate engine='pwl' applies this automatically; engine='dsed' calls it via the CircuitBuilderAdapter to overlay AC / PWM source values per PED step.
@@ -890,6 +898,10 @@ class CircuitBuilder:
     def position_hints(self) -> dict[typing.Any, typing.Any]:
         """
         Dict mapping every node_id used in the circuit to its current role hint.
+        """
+    def record_composite(self, kind: str, name: str, anchor: str, members: collections.abc.Sequence[str]) -> CircuitBuilder:
+        """
+        Record a composite built from existing kinds by an authoring helper (add_dc_machine does): components() then gives its anchor member's entry the keys composite, composite_name, sub_elements (and composite_params for a dc_machine). Metadata only; to_yaml / from_yaml keep it.
         """
     def run_preflight(self, options: PreflightOptions = ...) -> PreflightReport:
         """

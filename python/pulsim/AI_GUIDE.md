@@ -1,6 +1,5 @@
 # Pulsim 2.x usage guide (for AI coding assistants)
 
-This file ships in the `pulsim` package and describes its version.
 `python -m pulsim.guide` prints it with the installed version on the
 first line; `pulsim.ai_guide()` returns it. The guide beats
 your memory: Pulsim 2 changed behaviour but kept most 1.x names. Every
@@ -445,8 +444,10 @@ sample INDEX; at a time, use `np.interp(t, res.times, res.v(name))`.
 A ground name gives zeros. `phase` of the two PWM helpers and `carrier_phase`
 are time shifts in SECONDS (`t - phase`); `modulation_phase` and the
 `phase` of `add_sine_voltage_source` are radians.
-`add_capacitor(c0=, esr=, esl=)` / `add_inductor(i0=, esr=, c_par=, rac=)`
-set ICs and parasitics; MLCC bias: `passives.fit_mlcc_dc_bias`.
+`add_capacitor(c0=, esr=, esl=)` / `add_inductor(i0=, esr=, c_par=, rac=)`:
+datasheet ESR, ESL, C_par; fixed step `dt <= 1/(20*f_res)`. MLCC bias:
+`passives.fit_mlcc_dc_bias`. Lines: `model='pi'` only (no Bergeron), with
+`passives.recommend_line_sections(delay, t_rise)` sections.
 Other `simulate` keywords: `switch_fn`, `t_start`, `store_every`,
 `auto_regularize`, `progress`.
 
