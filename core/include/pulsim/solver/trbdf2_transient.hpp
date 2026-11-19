@@ -76,6 +76,7 @@
 // tail, the MNA-native PMSM and the saturable inductor. There are
 // no refusals left.
 
+#include "pulsim/sim/defaults.hpp"
 #include "pulsim/events/event_queue.hpp"
 #include "pulsim/events/step_hooks.hpp"
 #include "pulsim/pwl/cache.hpp"
@@ -129,8 +130,8 @@ struct TrBdf2Options {
     device::DevicePath device_path = device::DevicePath::Legacy;
     Real t_start = Real{0};
     Real t_end   = Real{0};
-    Real rtol    = Real{1e-4};
-    Real atol    = Real{1e-6};
+    Real rtol    = sim::Defaults::rtol_variable;  // was 1e-4
+    Real atol    = sim::Defaults::atol_variable;  // was 1e-6
     /// 0 = auto (h_max / 100).
     Real h_init  = Real{0};
     /// Step ceiling — also the gate-edge SAMPLING resolution
@@ -155,7 +156,7 @@ struct TrBdf2Options {
     /// because nothing they compute is kept.
     Real h_min   = Real{0};
     Size max_steps = Size{10'000'000};
-    Size max_event_iterations = Size{16};
+    Size max_event_iterations = sim::Defaults::max_event_iterations;
     /// Digital-controller sample period. When positive, the run
     /// LANDS a step boundary on every k·T_ctrl and fires the
     /// observer there — the cadence a discrete controller actually
@@ -190,9 +191,9 @@ struct TrBdf2Options {
     /// devices. Same knobs and defaults as the fixed engine. The
     /// tolerances are absolute; loosening them is not a fix for an
     /// h_min abort (see SimulationOptions::tol_newton_dx).
-    Size max_newton_iterations = Size{50};
-    Real tol_newton_dx  = Real{1e-9};
-    Real tol_newton_res = Real{1e-9};
+    Size max_newton_iterations = sim::Defaults::max_newton_iterations;
+    Real tol_newton_dx  = sim::Defaults::tol_newton_dx;
+    Real tol_newton_res = sim::Defaults::tol_newton_res;
     bool enable_newton_line_search = false;
     bool enable_newton_lm = false;
     /// Post-event restart (update-trbdf2-post-event-restart). After
@@ -215,7 +216,7 @@ struct TrBdf2Options {
     /// between them (add-newton-roundoff-acceptance DECISIONS 10d). One
     /// more raises NewtonRoundoffBudgetExceeded, which no retry ladder
     /// swallows. A test handle; 130 = 10x the worst honest run.
-    Size newton_roundoff_budget = Size{130};
+    Size newton_roundoff_budget = sim::Defaults::newton_roundoff_budget;
     /// L-stable restart (maintainer decision 1 of the TR-BDF2 follow-up):
     /// the number of Alexander SDIRK(2,2) steps taken after a diode
     /// event and after the initial diode settle, instead of TR-BDF2

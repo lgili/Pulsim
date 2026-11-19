@@ -30,6 +30,7 @@
 // high-fidelity run no longer has to hold every sample.
 
 #include "pulsim/numeric/dense.hpp"
+#include "pulsim/sim/error.hpp"
 #include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/solver/state_trajectory.hpp"
@@ -709,7 +710,7 @@ struct SimulationResult {
 /// truncated result as if it were a whole one is exactly the silent
 /// wrong answer this project keeps removing; a caller who wants the
 /// partial trace has to ask for it by catching this type.
-class SimulationAborted : public std::runtime_error {
+class SimulationAborted : public std::runtime_error, public PulsimError {
 public:
     SimulationAborted(const std::string& what,
                        SimulationResult partial,

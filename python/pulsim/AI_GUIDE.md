@@ -84,7 +84,7 @@ That union is pybind11's `float`, as in the stub.
 - **Omit `dt`** for passive, source-driven and diode-commutated
   circuits (trap 13), and as the second engine in a cross-check.
   Step ceiling `min(span/1000, period/20)`; `rtol` bounds the true
-  local error.
+  local error. Refusals: `p.option_capabilities()`.
 
 ## 3. Canonical examples
 
@@ -468,7 +468,7 @@ Each row was measured on this version. The fix column is what to write.
 | 9 | A fixed-step run is second order | By default each gate edge, source jump and start (ICs too) leaves a stale history: first order, ringing. RL decay, `i0=1`: 1.85e-3 at `dt=1e-5`, 0.92e-3 at `5e-6` | `discontinuity_restart=True` (6.3): gate read at step start; jumping `b_extra_fn` needs `.next_jump_after`. Sample 0 reads 0 V |
 | 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid unless split. Buck D = 0.25, 100 kHz, `make_pwm_switch_fn`: 6.24 V at `dt=2e-7` (12.5 steps run as 13), 6.00 V at `1e-7` | Whole-step `D/f_sw` (3.2), or 6.3 + `enable_substep_state_correction=True`: helper edges are split, order 2 |
 | 11 | Omitting `switch_fn` leaves switches open | With `dt`, undriven controlled switches are ALL CLOSED and `simulate` only warns: the buck of 3.2 runs at D = 1 and settles at 24.0 V, not 12 V; without `dt`, `auto` refuses | Always pass `switch_fn` when the circuit has controlled switches |
-| 12 | `except Exception:` around `simulate` keeps a script robust | A broad except turns a refusal into a silent wrong answer | Let it raise, or catch `pulsim.UnsupportedError` (`.engine`, `.feature`) |
+| 12 | `except Exception:` around `simulate` keeps a script robust | A broad except turns a refusal into a silent wrong answer | Let it raise, or catch `p.PulsimError` (`.engine`, `.feature`) |
 | 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee (a diode on its conduction boundary, a pulse narrower than its sampling). Silence is no proof: a one-shot pulse under a quarter of the step ceiling (`dt`, else `t_end/1000`) can be skipped | Rerun with `dt`, compare (6.2); `dt` <= 4x the narrowest pulse |
 | 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | Each edge is a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (D = 0.25): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, exact 1.5044 A. Same for `device_loss_summary`'s `i_rms`, not `P_avg` | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three |
 | 15 | Controllers run each step, chains in insertion order | Ticks at `t_start + k*T`, `ceil(span/T)` times. A chain runs in graph order; a loop with no `DelayBlock`, an unported block, a stateful block with no `p.Rate(T)` raise `ControlGraphBuildError` | `controller_period=` or `p.Rate`; custom code: `p.PythonBlock(fn)` |

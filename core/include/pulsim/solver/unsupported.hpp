@@ -8,6 +8,7 @@
 // it as `pulsim.UnsupportedError` with the four fields as attributes.
 
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/sim/error.hpp"
 #include "pulsim/topology/graph.hpp"
 
 #include <format>
@@ -18,7 +19,7 @@
 
 namespace pulsim {
 
-class UnsupportedError : public std::invalid_argument {
+class UnsupportedError : public std::invalid_argument, public PulsimError {
 public:
     UnsupportedError(std::string engine, std::string feature,
                      std::string device, std::string kind,

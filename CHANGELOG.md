@@ -86,6 +86,100 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and inductors is refused by name (`UnsupportedError`,
   `feature='ideal_voltage_loop'`, the loop listed); it was a bare
   `RuntimeError` after a solve of 1e13 A.
+
+### Kernel simulation object: one option x engine table, one defaults table, `pulsim.Simulation`
+
+* **Added** `pulsim.option_capabilities()`: the option x engine table
+  (`sim::kRunOptionTable`, `core/include/pulsim/sim/options.hpp`), one row
+  per `simulate()` keyword with the engines that honour it. `simulate()`
+  judges every keyword against the engine the run lands on from this one
+  declaration: honoured, or refused with `UnsupportedError(engine,
+  feature=<keyword>)`. Nothing is accepted and ignored any more.
+* **Changed** `simulate()` runs the `'pwl'` and `'trbdf2'` engines through
+  the kernel object (`sim::Simulation`), which owns the cache: results are
+  bit-identical. Runs whose hooks need the cache before the run
+  (`mmc_arms`, `on_cache`), `sweep()`'s replayed recipe and the C++
+  control-chain fast path still call the drivers directly; the exact
+  engine is composed in Python. `Simulation` gains
+  `add_tick(period, fn, offset=0.0)`, `set_tick_before`, `set_live_ring`,
+  `cache`, `builder`, `restore(snapshot, at_snapshot_time=True)` and the
+  `controls_composed` constructor flag; a replaced callable is released
+  (it was kept alive until the object died). Code that spied on
+  `pulsim.PwlStateSpaceCache` to read a `simulate()` run's cache counters
+  now finds the cache at `Simulation.cache`.
+* **Changed** a bad count (`store_every < 1`, a negative
+  `max_event_iterations` / `max_dt_halvings`, `newton_roundoff_budget < 1`)
+  raises `pulsim.OptionsError` (a `ValueError`, `.option` = the keyword) on
+  every path, as the kernel's own checks do.
+* **Added** `sim::Defaults` (`core/include/pulsim/sim/defaults.hpp`): every
+  default of a run in one place. `SimulationOptions`, `TrBdf2Options`, the
+  kernel resolution of `RunOptions`, the exact engine's dispatcher and
+  `simulate()` read it (`pulsim._pulsim.run_option_defaults()`).
+* **Added** `sim::RunOptions` / `sim::Simulation`
+  (`core/include/pulsim/sim/simulation.hpp`) and their bindings
+  `pulsim.RunOptions` / `pulsim.Simulation(circuit, options)`: a run
+  planned by the kernel (preflight on a private copy, routing with
+  reasons, the option and device refusals, the Newton stamps, the cache,
+  the voltage-sanity check as a diagnostic) with `run()`, `run_until(t)`,
+  `snapshot()` / `restore()`, `set_switch_fn`, `add_tick`,
+  `set_source_term`. Engines `'pwl'` and `'trbdf2'`; results equal
+  `simulate()` bit for bit. `simulate()` resolves its fixed-step and
+  TR-BDF2 options through the same kernel functions
+  (`sim::to_simulation_options` / `to_trbdf2_options`).
+* **Changed** `result.engine_route_reason` for a fixed-step-only keyword
+  now quotes the table's reason (`pulsim.option_capabilities()` row) and
+  lists the keywords in table order.
+* **BREAKING** keywords the landing engine cannot honour now raise
+  `UnsupportedError` instead of a `UserWarning` and being ignored:
+  `rtol`, `atol`, `dt_init` on the fixed step (explicit `engine='pwl'`, or
+  `'auto'` with a `dt`); `integrator`, `stiffness_threshold`, `h_bdf2` on
+  `'pwl'` / `'trbdf2'` / `'auto'` (`integrator='kernel'` / `'default'` on
+  `'pwl'` is still accepted). Migration: drop the keyword, or drop `dt`
+  to let `'auto'` take the variable step that honours it.
+* **BREAKING** the exact engine (`engine='exact'` / `'dsed'`) refuses the
+  Newton and event keywords it never read: `enable_nonlinear_refresh`,
+  `max_newton_iterations`, `tol_newton_dx`, `tol_newton_res`,
+  `enable_newton_line_search=True`, `enable_newton_lm=True`,
+  `max_event_iterations`, and `control_tick='state'`. Migration: drop them
+  (they had no effect there). `max_dt_halvings=0` is now accepted on it
+  (no retry exists to disable).
+* **BREAKING** `max_newton_iterations=0` (and
+  `SolverOptions(max_newton_iterations=0)`) as "the default" is deprecated
+  (`DeprecationWarning`; the run uses the default, 50); the signature
+  default and the `SolverOptions.max_newton_iterations` field default are
+  `None`. Migration: pass `None` or omit it.
+* **BREAKING** a negative `max_newton_iterations` (any engine) or
+  `max_event_iterations` (`trbdf2`) raises `pulsim.OptionsError` naming
+  it; the first used to fall back to the default in silence. Migration:
+  pass `None` for the default.
+* **BREAKING** `newton_roundoff_budget=0` on `trbdf2` is a zero budget (it
+  was replaced by 130, as on the raw binding). Migration: `None`.
+* **BREAKING** `engine='trbdf2'` — or `'auto'` without `dt`, which lands
+  there — with `max_event_iterations=0` raises
+  `UnsupportedError` (it used to be replaced by 16 in silence); the
+  variable step has no off switch for its event localisation. And
+  `tol_newton_dx=0` / `tol_newton_res=0` are values on `trbdf2` as on
+  `pwl`. The raw `run_transient_trbdf2` binding follows the table:
+  `max_event_iterations`, `max_newton_iterations` and
+  `newton_roundoff_budget` default to `None` (= `sim::Defaults`) and `0` is
+  a value (refused for the first two, a zero budget for the third);
+  `tol_newton_dx` / `tol_newton_res` default to -1 (= the kernel's) and 0
+  is a value. Migration: pass `None` (or omit) where you passed 0 for
+  "default".
+* **Added** `pulsim.PulsimError`, the base of every pulsim error
+  (`UnsupportedError`, `ConvergenceError` / `SimulationAborted`,
+  `Cancelled`, `NameNotFoundError`, and the new `pulsim.OptionsError`, a
+  `ValueError` carrying `option`, raised for a `RunOptions` value no
+  engine takes). Each keeps its standard base, so existing `except
+  ValueError` / `RuntimeError` / `KeyError` still catch them. In C++,
+  `pulsim::PulsimError` (`sim/error.hpp`) is the same mix-in on
+  `UnsupportedError`, `sim::OptionsError`, `solver::SimulationAborted`,
+  `ConvergenceFailure` and `analysis::Cancelled`.
+* **BREAKING** (C++) `solver::TrBdf2Options` defaults `rtol` / `atol` are
+  `sim::Defaults::rtol_variable` / `atol_variable` = 1e-5 / 1e-8, the
+  values `simulate()` always used (they were 1e-4 / 1e-6). Migration: set
+  them explicitly for the old step density.
+
 ### Integration batch 14a: event queue 3, device interface 3, unified stepper 2, ideal switch 5, TR-BDF2 track 8 merged
 
 * **Changed** the `SolverSnapshot` pickle is version 5, one layout with

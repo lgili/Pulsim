@@ -248,32 +248,18 @@ def test_simulate_pwl_without_dt_raises_actionable_error():
     assert "engine='dsed'" in msg   # the suggested alternative
 
 
-def test_simulate_pwl_with_dsed_kwargs_warns_but_runs():
-    """engine='pwl' with dsed-only kwargs (rtol, integrator, ...)
-    emits UserWarning but doesn't error — scripts that copy-paste
-    kwargs keep running."""
+def test_simulate_pwl_with_dsed_kwargs_is_refused_by_name():
+    """engine='auto' with a dt lands on pwl, which has no error estimate:
+    rtol is refused by name (add-kernel-simulation-object; it used to be
+    warned about and ignored)."""
     import pulsim as p
-    import warnings as _w
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "n0", "gnd", 5.0)
     b.add_resistor("R1", "n0", "n1", 100.0)
     b.add_capacitor("C1", "n1", "gnd", 1e-6)
-    with _w.catch_warnings(record=True) as caught:
-        _w.simplefilter("always")
-        # Pass rtol (dsed-only) with engine='pwl' (default)
-        res = p.simulate(b, t_end=1e-3, dt=1e-5, rtol=1e-6)
-        # Must have at least one UserWarning about the leaked kwarg
-        leak_warnings = [
-            w for w in caught
-            if issubclass(w.category, UserWarning)
-            and "engine='pwl'" in str(w.message)
-            and "ignored" in str(w.message)
-        ]
-        assert len(leak_warnings) >= 1, (
-            f"Expected UserWarning about leaked dsed kwarg; got {caught}"
-        )
-    # Simulation completed despite the warning
-    assert res.num_steps() > 0
+    with pytest.raises(p.UnsupportedError) as e:
+        p.simulate(b, t_end=1e-3, dt=1e-5, rtol=1e-6)
+    assert (e.value.engine, e.value.feature) == ("pwl", "rtol")
 
 
 def test_simulate_dsed_unknown_integrator_raises():

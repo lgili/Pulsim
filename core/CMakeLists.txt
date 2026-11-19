@@ -87,6 +87,21 @@ if(PULSIM_BUILD_TESTS)
     endif()
     catch_discover_tests(pulsim_core_mode_tests)
 
+    # add-kernel-simulation-object — sim::RunOptions, the option x engine
+    # table and the sim::Simulation facade (core/include/pulsim/sim/).
+    add_executable(pulsim_core_sim_tests
+        tests/sim/test_simulation.cpp
+    )
+    target_link_libraries(pulsim_core_sim_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_sim_tests)
+    endif()
+    catch_discover_tests(pulsim_core_sim_tests)
+
     # refactor-unified-transient-stepper — the stepper's stage tables,
     # controllers and policies (core/include/pulsim/solver/step/).
     add_executable(pulsim_core_step_tests

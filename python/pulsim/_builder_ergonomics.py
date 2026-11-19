@@ -34,6 +34,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._pulsim import PulsimError  # type: ignore[import-not-found]
+
 if TYPE_CHECKING:
     from ._pulsim import CircuitBuilder, IdealDiodeParams
 
@@ -51,7 +53,7 @@ class RetiredYamlDeviceError(RetiredDeviceError, RuntimeError):
     ``RuntimeError`` like every other YAML refusal."""
 
 
-class Cancelled(RuntimeError):
+class Cancelled(RuntimeError, PulsimError):
     """Raised by long-running analyses when the user's
     ``should_continue`` callback returns ``False``.
 

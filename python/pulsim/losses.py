@@ -1596,7 +1596,7 @@ def _impulse_cause(builder, result, rec) -> str:
     try:
         states = np.asarray(result.switch_states, dtype=bool)
         times = np.asarray(result.times, dtype=float)
-    except Exception:  # noqa: BLE001 - no record: fall back
+    except (AttributeError, TypeError, ValueError):  # no record: fall back
         states = times = None
     if states is not None and states.ndim == 2 and len(times) > 1:
         k = int(getattr(rec, "sample", -1))
@@ -1607,7 +1607,7 @@ def _impulse_cause(builder, result, rec) -> str:
         for name in devices:
             try:
                 bit = int(builder.switch_index_of(name))
-            except Exception:  # noqa: BLE001 - not a switch-kind branch
+            except (IndexError, KeyError, ValueError):  # not a switch-kind branch
                 continue
             if 0 <= bit < states.shape[1] and states[k, bit] != states[k - 1, bit]:
                 changed.append(name)
@@ -1620,7 +1620,7 @@ def _impulse_cause(builder, result, rec) -> str:
 def _diode_names(builder) -> set:
     try:
         return {d.get("name", "") for d in builder.components() if d.get("kind") == "diode"}
-    except Exception:  # noqa: BLE001
+    except AttributeError:  # a builder without components()
         return set()
 
 

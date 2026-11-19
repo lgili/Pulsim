@@ -65,6 +65,7 @@
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/run_transient.hpp"
+#include "pulsim/sim/simulation.hpp"
 #include "pulsim/solver/trbdf2_transient.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/errors/convergence.hpp"
@@ -93,27 +94,7 @@ using namespace pybind11::literals;  // for "name"_a kwarg shorthand
 
 namespace pulsim_kernel_bindings {
 
-/// A b_extra_fn argument as (fn, next_jump_after). A control graph's
-/// CxxChainBExtra runs in C++ (no GIL per call); any other callable goes
-/// through pybind's functional caster, its optional next_jump_after too.
-inline void resolve_b_extra(const py::object& obj,
-                            pulsim::solver::BExtraFn& fn,
-                            std::function<pulsim::Real(pulsim::Real)>& next_jump) {
-    if (obj.is_none()) return;
-    if (py::isinstance<pulsim::blockchain::ChainBExtra>(obj)) {
-        const auto& c = obj.cast<const pulsim::blockchain::ChainBExtra&>();
-        fn = c.fn;
-        next_jump = [ch = c.chain](pulsim::Real t) {
-            return ch->next_jump_after(t);
-        };
-        return;
-    }
-    fn = obj.cast<pulsim::solver::BExtraFn>();
-    if (py::hasattr(obj, "next_jump_after")) {
-        next_jump = obj.attr("next_jump_after")
-                        .cast<std::function<pulsim::Real(pulsim::Real)>>();
-    }
-}
+using pulsim_bindings_common::resolve_b_extra;
 
 /// The static Newton chain for a transient driver. The kernel always
 /// builds it when the pool needs one, so `None` and `True` are the same
@@ -123,25 +104,8 @@ inline pulsim::pwl::NonlinearRefreshFn transient_refresh(
     const pulsim::topology::Graph& graph,
     const pulsim::pwl::DevicePool& pool, std::optional<bool> enable,
     const char* engine) {
-    using pulsim::pwl::SolveClass;
-    if (!enable.has_value()) return {};
-    // True: what the kernel builds by itself (pwl::static_device_refresh).
-    if (*enable) return {};
-    for (pulsim::Index b = 0; b < graph.num_branches(); ++b) {
-        if (!pool.is_registered(b)
-            || pulsim::pwl::kind_caps(pool.kind_of(b)).cls
-                   != SolveClass::NewtonStatic) {
-            continue;
-        }
-        const std::string name(graph.branch_name(b));
-        throw pulsim::UnsupportedError(engine, "enable_nonlinear_refresh",
-            name, std::string(pulsim::pwl::stored_kind_name(pool.kind_of(b))),
-            std::string(engine) + ": enable_nonlinear_refresh=False would "
-            "simulate '" + name + "' (a Newton device: smooth / Shockley "
-            "diode, MOSFET, IGBT) as an open circuit. Pass None (the "
-            "default) or True.");
-    }
-    return {};
+    // One rule for every entry point (add-kernel-simulation-object).
+    return pulsim::sim::transient_refresh(graph, pool, enable, engine);
 }
 
 void init_module(py::module_& m) {
@@ -159,8 +123,6 @@ void init_module(py::module_& m) {
     // `pulsim.Cancelled` (defined in
     // `python/pulsim/_builder_ergonomics.py`) catches this and
     // re-raises with its own attribute layout.
-    static py::object cancelled_exc = py::register_exception<
-        analysis::Cancelled>(m, "_CxxCancelled", PyExc_RuntimeError);
 
     // v2.0 Phase 2: a transient that dies part-way brings the run
     // with it. `py::register_exception` can only carry a message, so
@@ -174,8 +136,26 @@ void init_module(py::module_& m) {
     // `ConvergenceError` (add-parameter-sensitivities, task 5a) is the
     // common base of every non-convergence: a RuntimeError, so the
     // `except RuntimeError` of callers keeps working.
-    static py::object convergence_exc = py::exception<void>(
-        m, "ConvergenceError", PyExc_RuntimeError);
+    //
+    // add-kernel-simulation-object (8.1): every pulsim error is also a
+    // `PulsimError`, so one `except pulsim.PulsimError` catches them all
+    // while each keeps its standard base (ValueError, RuntimeError, ...).
+    static py::object pulsim_exc = py::exception<void>(
+        m, "PulsimError", PyExc_Exception);
+    const auto pulsim_error_type = [&m](const char* name, PyObject* base) {
+        py::object t = py::reinterpret_borrow<py::object>(
+            reinterpret_cast<PyObject*>(&PyType_Type))(
+            name, py::make_tuple(py::handle(base), pulsim_exc),
+            py::dict(py::arg("__module__") = m.attr("__name__")));
+        m.attr(name) = t;
+        return t;
+    };
+    static py::object convergence_exc =
+        pulsim_error_type("ConvergenceError", PyExc_RuntimeError);
+    // The kernel's Cancelled (`pulsim.Cancelled` catches and re-raises it
+    // with its own attributes); a PulsimError too.
+    static py::object cancelled_exc =
+        pulsim_error_type("_CxxCancelled", PyExc_RuntimeError);
     static py::object aborted_exc = py::exception<void>(
         m, "SimulationAborted", convergence_exc);
     // The run's Newton roundoff-acceptance budget ran out: a
@@ -215,8 +195,13 @@ void init_module(py::module_& m) {
     // The typed refusal (add-engine-conformance-matrix). A ValueError,
     // so `except ValueError` keeps working; the four fields say which
     // engine refused which device or feature.
-    static py::object unsupported_exc = py::exception<void>(
-        m, "UnsupportedError", PyExc_ValueError);
+    static py::object unsupported_exc =
+        pulsim_error_type("UnsupportedError", PyExc_ValueError);
+    // A RunOptions value no engine can take (sim::OptionsError): a
+    // ValueError naming the option.
+    static py::object options_exc =
+        pulsim_error_type("OptionsError", PyExc_ValueError);
+    options_exc.attr("option") = "";
     for (const char* a : {"engine", "feature", "device", "kind"}) {
         unsupported_exc.attr(a) = "";
     }
@@ -234,6 +219,12 @@ void init_module(py::module_& m) {
                 inst.attr("device") = e.device();
                 inst.attr("kind") = e.kind();
                 PyErr_SetObject(unsupported_exc.ptr(), inst.ptr());
+            } catch (const analysis::Cancelled& e) {
+                PyErr_SetString(cancelled_exc.ptr(), e.what());
+            } catch (const sim::OptionsError& e) {
+                py::object inst = options_exc(e.what());
+                inst.attr("option") = e.option();
+                PyErr_SetObject(options_exc.ptr(), inst.ptr());
             }
         });
 
@@ -6352,18 +6343,18 @@ void init_module(py::module_& m) {
            py::object switch_fn_obj,
            py::object b_extra_obj,
            py::object initial_state,
-           Size max_event_iterations,
+           std::optional<Size> max_event_iterations,
            solver::ShouldContinueFn should_continue,
            Real observer_period,
            py::object observer_obj,
            std::optional<bool> enable_nonlinear_refresh,
-           Size max_newton_iterations,
+           std::optional<Size> max_newton_iterations,
            Real tol_newton_dx, Real tol_newton_res,
            bool enable_newton_line_search, bool enable_newton_lm,
            py::object resume_from,
            std::vector<Real> observer_periods,
            std::vector<py::object> observers,
-           Size newton_roundoff_budget, bool on_impulse_error,
+           std::optional<Size> newton_roundoff_budget, bool on_impulse_error,
            std::vector<Real> observer_offsets,
            Real observer_origin,
            std::vector<bool> observer_monitors,
@@ -6381,8 +6372,18 @@ void init_module(py::module_& m) {
             o.atol    = atol;
             o.h_init  = h_init;
             o.h_max   = h_max;
-            if (max_event_iterations > 0) {
-                o.max_event_iterations = max_event_iterations;
+            // add-kernel-simulation-object: None keeps the kernel's
+            // default (sim::Defaults); every value is a value. The variable
+            // step has no off switch for its event localisation, so 0 is
+            // refused rather than replaced.
+            if (max_event_iterations) {
+                if (*max_event_iterations == 0) {
+                    throw UnsupportedError("trbdf2", "max_event_iterations",
+                        "", "", "run_transient_trbdf2: max_event_iterations=0 "
+                        "(no event localisation) is not available on the "
+                        "variable step; pass None for the default.");
+                }
+                o.max_event_iterations = *max_event_iterations;
             }
             o.observer_period = observer_period;
             if (observers.size() != observer_periods.size()) {
@@ -6402,19 +6403,26 @@ void init_module(py::module_& m) {
             o.observer_origin = observer_origin;
             o.observer_origins = std::move(observer_origins);
             o.observer_next_k = std::move(observer_next_k);
-            if (max_newton_iterations > 0) {
-                o.max_newton_iterations = max_newton_iterations;
+            if (max_newton_iterations) {
+                if (*max_newton_iterations == 0) {
+                    throw sim::OptionsError("max_newton_iterations",
+                        "run_transient_trbdf2: max_newton_iterations must be "
+                        ">= 1 (None = the default)");
+                }
+                o.max_newton_iterations = *max_newton_iterations;
             }
-            if (tol_newton_dx > Real{0}) {
+            // A value when >= 0 (simulate() passes the resolved one); the
+            // negative default keeps the kernel's (sim::Defaults).
+            if (tol_newton_dx >= Real{0}) {
                 o.tol_newton_dx = tol_newton_dx;
             }
-            if (tol_newton_res > Real{0}) {
+            if (tol_newton_res >= Real{0}) {
                 o.tol_newton_res = tol_newton_res;
             }
             o.enable_newton_line_search = enable_newton_line_search;
             o.enable_newton_lm = enable_newton_lm;
-            if (newton_roundoff_budget > 0) {
-                o.newton_roundoff_budget = newton_roundoff_budget;
+            if (newton_roundoff_budget) {
+                o.newton_roundoff_budget = *newton_roundoff_budget;
             }
             o.on_impulse_error = on_impulse_error;
             o.mode_selection = mode_selection;
@@ -6480,43 +6488,8 @@ void init_module(py::module_& m) {
                     x0, &st, next_edge_fn, should_continue,
                     observer_fn, nl_refresh, resume_ptr, tick_fn);
             }
-            py::dict d;
-            d["n_accept"]       = st.n_accept;
-            d["n_reject"]       = st.n_reject;
-            d["n_gate_events"]  = st.n_gate_events;
-            d["n_diode_events"] = st.n_diode_events;
-            d["n_solves"]       = st.n_solves;
-            d["n_chatter_breaks"] = st.n_chatter_breaks;
-            d["n_forced_accepts"] = st.n_forced_accepts;
-            d["n_ctrl_ticks"]     = st.n_ctrl_ticks;
-            d["control_tick_counts"] = st.ctrl_tick_counts;
-            d["n_newton_retries"] = st.n_newton_retries;
-            d["gate_pulse_min"]   = st.gate_pulse_min;
-            d["n_gate_undersampled"] = st.n_gate_undersampled;
-            d["gate_sample_spacing_max"] = st.gate_sample_spacing_max;
-            d["n_held_diode_redecided"] = st.n_held_diode_redecided;
-            d["probe_floor_used"] = st.probe_floor_used;
-            d["n_gate_boundary_settles"] = st.n_gate_boundary_settles;
-            d["h_max_basis"] = st.h_max_basis;
-            d["n_source_breakpoints"] = st.n_source_breakpoints;
-            d["n_derivative_refreshes"] = st.n_derivative_refreshes;
-            d["n_refresh_probes"] = st.n_refresh_probes;
-            d["h_post_event_min"] = st.h_post_event_min;
-            d["n_probe_newton_retries"] = st.n_probe_newton_retries;
-            d["n_newton_start_retries"] = st.n_newton_start_retries;
-            d["n_sdirk_steps"] = st.n_sdirk_steps;
-            d["n_reinit_steps"] = st.n_reinit_steps;
-            d["n_filtered_estimates"] = st.n_filtered_estimates;
-            d["n_interp_floor_landings"] = st.n_interp_floor_landings;
-            d["n_roundoff_floor_accepts"] = st.n_roundoff_floor_accepts;
-            d["n_noise_held_decisions"] = st.n_noise_held_decisions;
-            d["n_probe_noise_retakes"] = st.n_probe_noise_retakes;
-            d["n_factor_builds"] = st.n_factor_builds;
-            d["n_factor_refactors"] = st.n_factor_refactors;
-            d["n_factor_hits"] = st.n_factor_hits;
-            d["n_conditioning_rejects"] = st.n_conditioning_rejects;
-            d["h_conditioning_floor"] = st.h_conditioning_floor;
-            return py::make_tuple(std::move(res), std::move(d));
+            return py::make_tuple(std::move(res),
+                pulsim_bindings_common::trbdf2_stats_dict(st));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
         py::arg("t_start"), py::arg("t_end"),
@@ -6525,20 +6498,20 @@ void init_module(py::module_& m) {
         py::arg("switch_fn"),
         py::arg("b_extra_fn") = py::none(),
         py::arg("initial_state") = py::none(),
-        py::arg("max_event_iterations") = Size{0},
+        py::arg("max_event_iterations") = py::none(),
         py::arg("should_continue") = solver::ShouldContinueFn{},
         py::arg("observer_period") = Real{0},
         py::arg("step_observer") = py::none(),
         py::arg("enable_nonlinear_refresh") = py::none(),
-        py::arg("max_newton_iterations") = Size{0},
-        py::arg("tol_newton_dx") = Real{0},
-        py::arg("tol_newton_res") = Real{0},
+        py::arg("max_newton_iterations") = py::none(),
+        py::arg("tol_newton_dx") = Real{-1},
+        py::arg("tol_newton_res") = Real{-1},
         py::arg("enable_newton_line_search") = false,
         py::arg("enable_newton_lm") = false,
         py::arg("resume_from") = py::none(),
         py::arg("observer_periods") = std::vector<Real>{},
         py::arg("observers") = std::vector<py::object>{},
-        py::arg("newton_roundoff_budget") = Size{0},
+        py::arg("newton_roundoff_budget") = py::none(),
         py::arg("on_impulse_error") = false,
         py::arg("observer_offsets") = std::vector<Real>{},
         py::arg("observer_origin") = std::numeric_limits<Real>::quiet_NaN(),
@@ -6916,6 +6889,9 @@ namespace pulsim_dsed_bindings {
 namespace pulsim_ir_bindings {  // add-immutable-circuit-ir (ir_bindings.cpp)
     void init_module(pybind11::module_& m);
 }
+namespace pulsim_sim_bindings {  // add-kernel-simulation-object (sim_bindings.cpp)
+    void init_module(pybind11::module_& m);
+}
 
 PYBIND11_MODULE(_pulsim, m) {
     m.doc() = "Pulsim — power-electronics simulator. Header-only C++23 "
@@ -6924,4 +6900,5 @@ PYBIND11_MODULE(_pulsim, m) {
     pulsim_kernel_bindings::init_module(m);
     pulsim_dsed_bindings::init_module(m);
     pulsim_ir_bindings::init_module(m);
+    pulsim_sim_bindings::init_module(m);
 }
