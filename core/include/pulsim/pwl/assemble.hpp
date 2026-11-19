@@ -401,7 +401,22 @@ inline void assemble_impl(const topology::Graph& graph,
                 S.coeffRef(branch_var_id, branch_var_id) +=
                     Real{1e-12};
             } else if (src_kind ==
+                    DevicePool::StoredKind::ExternalDevice) {
+                // add-external-device-abi: the same G_min on each branch
+                // that carries an internal unknown (the equations then
+                // match a built-in device's to the bit)
+                const auto& xp = pool.external_device_params(branch.id);
+                const auto& br = xp.branches;
+                const auto k = static_cast<std::size_t>(
+                    std::find(br.begin(), br.end(), branch.id) - br.begin());
+                if (k < xp.inst->model().d().n_internal) {
+                    const Index branch_var_id =
+                        pool.branch_var_id_for_inductor(branch.id, graph);
+                    S.coeffRef(branch_var_id, branch_var_id) += Real{1e-12};
+                }
+} else if (src_kind ==
                     DevicePool::StoredKind::NonlinearCapacitor) {
+
                 // Phase 4 C.1 — same reasoning, node rows: a Coss
                 // has no branch-current unknown and no linear
                 // contribution at all, so without a G_min its

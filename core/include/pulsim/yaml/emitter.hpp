@@ -60,7 +60,8 @@ inline constexpr std::array<std::string_view, pwl::DevicePool::kNumKinds> kKindY
     "igbt_level1", "vcvs", "saturable_inductor", "nonlinear_capacitor",
     "shockley_diode", "lauritzen_diode", "pmsm_mna", "ideal_transformer",
     "vccs", "cccs", "ccvs", "gyrator", "sine_current_source",
-    "pulse_current_source", "pwl_current_source", "induction_machine_mna"};
+    "pulse_current_source", "pwl_current_source", "induction_machine_mna",
+    "external_device"};
 
 namespace yaml_detail {
 
@@ -102,7 +103,7 @@ namespace m = ::pulsim::models;
         case K::NonlinearDiode: case K::MosfetLevel1: case K::IgbtLevel1:
         case K::SaturableInductor: case K::NonlinearCapacitor:
         case K::ShockleyDiode: case K::LauritzenDiode: case K::PmsmMna:
-        case K::InductionMachineMna:
+        case K::InductionMachineMna: case K::ExternalDevice:
             return BK::Nonlinear;
         default:
             return BK::Source;
@@ -301,6 +302,12 @@ namespace yaml_detail {
         const auto& dev = devs[static_cast<std::size_t>(bi)];
         const auto& prm = pool.params_of(bi);
         where = std::format("device \"{}\"", dev.name);
+        if (kind == K::ExternalDevice) {
+            // add-external-device-abi: its law is native code the YAML cannot carry
+            throw std::invalid_argument(where + ": an external device is not written to YAML "
+                                        "(its model is a native library; rebuild it with "
+                                        "add_external_device)");
+        }
         Map e;
         e.add("kind", std::string{kKindYaml[static_cast<std::size_t>(kind)]});
         if (kind == K::PmsmMna || kind == K::InductionMachineMna) {
@@ -998,6 +1005,10 @@ private:
                 p.w.periodic = n["periodic"] && text(n["periodic"], who, "periodic") == "true";
                 m::PwlWaveform::validate(p.w, who);
                 pool.add_pwl_current_source(bi, p);
+            } else if constexpr (std::is_same_v<P, pwl::DevicePool::ExternalDeviceParams>) {
+                // add-external-device-abi: a netlist never loads native code
+                fail(who, "external_device is not read from YAML: loading a model library "
+                          "runs native code and needs an explicit add_external_device(lib=...) call");
             } else {
                 static_assert(sizeof(P) == 0, "from_yaml: a registry kind without a reader");
             }

@@ -33,8 +33,12 @@ enum class StateBlock : std::uint8_t {
     LauritzenDiode,        ///< (q_M, f) per Lauritzen diode
     IgbtTail,              ///< (q, f) per IGBT turn-off tail
     PmsmMna,               ///< (λ, i, v) × 3 per MNA PMSM
+    /// add-external-device-abi: ONE real per "instance" — the count is the
+    /// number of reals all external devices carry (per device: q_n, q̇_n,
+    /// q_γ per row, then the model's n_state), since the size varies per model.
+    ExternalDevice,
 };
-inline constexpr std::size_t kNumStateBlocks = 6;
+inline constexpr std::size_t kNumStateBlocks = 7;
 
 struct StateBlockInfo {
     std::string_view name;
@@ -50,6 +54,7 @@ inline constexpr std::array<StateBlockInfo, kNumStateBlocks> kStateBlocks{{
     {"lauritzen_diode", 2},
     {"igbt_tail", 2},
     {"pmsm_mna", 9},
+    {"external_device", 1},
 }};
 
 /// Instance count per block, in layout order.

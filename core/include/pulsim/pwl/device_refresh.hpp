@@ -171,6 +171,12 @@ inline Real stamp_kind(SaturableInductorHistory& k, const Vector& x,
     }
     return m;
 }
+inline Real stamp_kind(ExternalDeviceHistory& k, const Vector& x,
+                       sparse::Matrix& J, Vector& f, const StepCtx& c,
+                       [[maybe_unused]] bool inc) {
+    // no hand stamp exists: 'legacy' routes an external device through its law
+    return k.stamp(x, J, f, c.h, c.stage);
+}
 
 namespace detail {
 template <class K>

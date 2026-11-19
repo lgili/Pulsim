@@ -26,6 +26,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/external_device_history.hpp"
 #include "pulsim/pwl/igbt_tail_history.hpp"
 #include "pulsim/pwl/interface_stamps.hpp"
 #include "pulsim/pwl/lauritzen_diode_history.hpp"
@@ -50,7 +51,7 @@ namespace pulsim::pwl {
 /// kind is appended here (design.md, "How to add a device kind").
 using StatefulKinds = device::TypeList<
     NonlinearCapacitorHistory, LauritzenDiodeHistory, PmsmMnaHistory,
-    IgbtTailHistory, SaturableInductorHistory>;
+    IgbtTailHistory, SaturableInductorHistory, ExternalDeviceHistory>;
 
 using StatefulCheck = device::detail::ListCheck<StatefulKinds>;
 static_assert(StatefulCheck::kinds,

@@ -541,6 +541,10 @@ class CircuitBuilder:
         """
         Add a binary switched diode (V2's SwitchedDiode). g_on/g_off in siemens. V_f: forward drop while ON (PSIM's diode voltage drop), in volts: v = V_f + i/g_on; must be finite and >= 0. V_th: turn-on threshold in volts, effectively max(V_th, V_f) when V_f > 0; V_th > V_f is a hysteresis band. OFF is plain g_off.
         """
+    def add_external_device(self, name: str, nodes: collections.abc.Sequence[str], lib: str, model: str, params: typing.Any = None, *, check_contract: bool = True, debug_jacobian: bool = False) -> CircuitBuilder:
+        """
+        Add an instance of an EXTERNAL device model (add-external-device-abi): `lib` is a shared library built against pulsim_xdev.h; loading it runs arbitrary native code with your privileges (no sandbox). `nodes` are its pins in the model's order; `params` maps field names to a value or (value, unit) (the unit must equal the declared one). The model's contract (Jacobian, finiteness, KCL, declared claims) is checked here and refused by name; `debug_jacobian=True` re-checks the Jacobian at every evaluation of the run.
+        """
     def add_gapped_core_inductor(self, name: str, n_pos: str, n_neg: str, N: float, Ae: float, le: float, lg: float, mu_r0: float = 2000.0, B_sat: float = 0.35, knots: int = 128) -> CircuitBuilder:
         """
         Saturable inductor on a gapped core from geometry: N turns, Ae [m^2], le [m], TOTAL gap lg [m], initial mu_r, B_sat [T] (= mu0*Ms, the datasheet value). lambda(i) is generated from Ampere's law by sweeping the core field through M = Ms*tanh(H/H0), with exact slopes.
@@ -1221,12 +1225,15 @@ class StoredKind:
       PwlCurrentSource
 
       InductionMachineMna
+
+      ExternalDevice
     """
     CCCS: typing.ClassVar[StoredKind]
     CCVS: typing.ClassVar[StoredKind]
     Capacitor: typing.ClassVar[StoredKind]
     CurrentSource: typing.ClassVar[StoredKind]
     Diode: typing.ClassVar[StoredKind]
+    ExternalDevice: typing.ClassVar[StoredKind]
     Gyrator: typing.ClassVar[StoredKind]
     IdealTransformer: typing.ClassVar[StoredKind]
     IgbtLevel1: typing.ClassVar[StoredKind]
