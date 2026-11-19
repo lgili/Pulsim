@@ -32,8 +32,11 @@
 // (PULSIM_STEP_DRIVER): an adapter left out of line costs a call per phase
 // and two closure hops per captured local, and a driver inlined into the
 // engine's own large body runs slower than the same driver alone
-// (refactor-unified-transient-stepper DECISIONS 14). Empty on MSVC, as the
-// other forced-inline macros of the code base.
+// (refactor-unified-transient-stepper DECISIONS 14) on the fixed engine.
+// The TR-BDF2 engine measured the opposite (DECISIONS 16): its phases touch
+// so many engine locals that an out-of-line driver's closure hops cost more,
+// so both its drivers are PULSIM_STEP_PHASE. Measure per engine. Empty on
+// MSVC, as the other forced-inline macros of the code base.
 #if defined(__GNUC__) || defined(__clang__)
 #define PULSIM_STEP_PHASE __attribute__((always_inline))
 #define PULSIM_STEP_DRIVER __attribute__((noinline))
@@ -78,13 +81,16 @@ struct StepFrame {
     }
 };
 
-enum class Verdict : std::uint8_t { Accept, Retry, Abort };
+// Reject and End are a deciding body's (`decides`, the TR-BDF2 loop):
+// Reject discards the attempt and the next one starts at poll (no rollback:
+// the body carries what the attempt learned); End ends the run without it.
+enum class Verdict : std::uint8_t { Accept, Retry, Abort, Reject, End };
 struct Decision {
     Verdict verdict = Verdict::Accept;
     Real h = Real{0};   // the retry's step (Retry) or the next proposal (Accept)
 };
 
-enum class StepStatus : std::uint8_t { Accepted, Stopped, Done, Aborted };
+enum class StepStatus : std::uint8_t { Accepted, Stopped, Done, Aborted, Rejected };
 
 template <class C>
 concept StepController = requires(C& c, const C& cc, bool ok, Real err, Real h,
@@ -102,6 +108,14 @@ concept StepController = requires(C& c, const C& cc, bool ok, Real err, Real h,
 template <class B>
 constexpr bool body_localizes() {
     if constexpr (requires { B::localizes; }) return B::localizes;
+    return false;
+}
+
+/// A body that decides its own steps (`static constexpr bool decides =
+/// true`): its phases return the Verdict and its clock is its own.
+template <class B>
+constexpr bool body_decides() {
+    if constexpr (requires { B::decides; }) return B::decides;
     return false;
 }
 
@@ -177,6 +191,30 @@ struct LteClock {
     }
 };
 
+/// The clock of a deciding body (the TR-BDF2 loop, slice 3b): the time,
+/// the end test and the step memory (`LteController`, whose `h` is the
+/// proposal) are the body's; the clock frames the attempt and nothing else
+/// (the body advances `t` in its commit and decides every rejection).
+template <class Live>
+struct BodyClock {
+    static constexpr bool uses_lte = true;
+    Live& live_;
+    const LteController& mem;
+    const Real& t;
+    Real t_end = Real{0};
+    [[nodiscard]] PULSIM_STEP_PHASE bool done() const { return !live_(); }
+    [[nodiscard]] StepFrame frame() const noexcept {
+        StepFrame f{0, t, t, Real{0}, t_end};
+        f.resize(mem.h);
+        return f;
+    }
+    Decision on_result(bool ok, Real, Real h) const noexcept {
+        return {ok ? Verdict::Accept : Verdict::Abort, h};
+    }
+    void accepted(Real) const noexcept {}
+    void advance(const StepFrame&) const noexcept {}
+};
+
 /// Runs every stage of `I` over `f.h` through the body's single solve
 /// point, in order; the stage spec carries the step context the devices
 /// are told, so no solve can see a stale one.
@@ -208,49 +246,71 @@ inline constexpr int kMaxResolves = 200;
 /// from a sliver an event cut it to.
 template <Integrator I, StepController C, class Body>
 PULSIM_STEP_PHASE inline StepStatus step_once(C& ctrl, Body& body) {
-    constexpr bool rollback = C::uses_lte || body_localizes<Body>();
-    if (ctrl.done()) return StepStatus::Done;
-    if (!body.poll()) return StepStatus::Stopped;
-    StepFrame f = ctrl.frame();
-    body.begin(f);
-    if (const Real hc = body.clamp(f, f.h); hc < f.h) f.resize(hc);
-    if constexpr (rollback) body.save();
-    bool cut = false;
-    Real proposal = f.h;
-    for (int n = 0;; ++n) {
-        Decision d{Verdict::Abort, f.h};
-        if (n < kMaxResolves) {
-            const bool ok = body.take(f);
-            Real err = Real{0};
-            if constexpr (C::uses_lte) {
-                if (ok) err = body.error(f);
+    if constexpr (body_decides<Body>()) {
+        // One ATTEMPT (slice 3b, DECISIONS 15): begin and clamp re-run on
+        // every attempt; take, error and after_solve each return the
+        // verdict (after_solve may cut the step and commit at its landing).
+        if (ctrl.done()) return StepStatus::Done;
+        if (!body.poll()) return StepStatus::Stopped;
+        StepFrame f = ctrl.frame();
+        body.begin(f);
+        f.resize(body.clamp(f, f.h));
+        Verdict v = body.take(f);
+        if (v == Verdict::Accept) v = body.error(f);
+        if (v == Verdict::Accept) v = body.after_solve(f);
+        if (v == Verdict::Reject) return StepStatus::Rejected;
+        if (v != Verdict::Accept) {
+            return v == Verdict::End ? StepStatus::Done : StepStatus::Aborted;
+        }
+        body.commit(f);
+        body.on_step(f);
+        ctrl.advance(f);
+        return StepStatus::Accepted;
+    } else {
+        constexpr bool rollback = C::uses_lte || body_localizes<Body>();
+        if (ctrl.done()) return StepStatus::Done;
+        if (!body.poll()) return StepStatus::Stopped;
+        StepFrame f = ctrl.frame();
+        body.begin(f);
+        if (const Real hc = body.clamp(f, f.h); hc < f.h) f.resize(hc);
+        if constexpr (rollback) body.save();
+        bool cut = false;
+        Real proposal = f.h;
+        for (int n = 0;; ++n) {
+            Decision d{Verdict::Abort, f.h};
+            if (n < kMaxResolves) {
+                const bool ok = body.take(f);
+                Real err = Real{0};
+                if constexpr (C::uses_lte) {
+                    if (ok) err = body.error(f);
+                }
+                d = ctrl.on_result(ok, err, f.h);
             }
-            d = ctrl.on_result(ok, err, f.h);
-        }
-        if (d.verdict == Verdict::Abort) {
-            if constexpr (rollback) body.restore();
-            return StepStatus::Aborted;
-        }
-        if constexpr (C::uses_lte) {
-            if (d.verdict == Verdict::Retry) {
-                body.restore();
-                f.resize(body.clamp(f, d.h));
+            if (d.verdict == Verdict::Abort) {
+                if constexpr (rollback) body.restore();
+                return StepStatus::Aborted;
+            }
+            if constexpr (C::uses_lte) {
+                if (d.verdict == Verdict::Retry) {
+                    body.restore();
+                    f.resize(body.clamp(f, d.h));
+                    continue;
+                }
+            }
+            if (!cut) proposal = d.h;
+            if (!body.after_solve(f)) {
+                cut = true;
+                if constexpr (rollback) body.restore();
                 continue;
             }
+            break;
         }
-        if (!cut) proposal = d.h;
-        if (!body.after_solve(f)) {
-            cut = true;
-            if constexpr (rollback) body.restore();
-            continue;
-        }
-        break;
+        body.commit(f);
+        body.on_step(f);
+        ctrl.accepted(proposal);
+        ctrl.advance(f);
+        return StepStatus::Accepted;
     }
-    body.commit(f);
-    body.on_step(f);
-    ctrl.accepted(proposal);
-    ctrl.advance(f);
-    return StepStatus::Accepted;
 }
 
 /// A body made of an engine's phase callables (slice 3a, DECISIONS 13):
@@ -281,12 +341,52 @@ PhaseBody<Poll, Begin, Take, After, Commit, OnStep> phase_body(
     return {p, b, t, a, c, o};
 }
 
+/// A deciding body made of an engine's phase callables (slice 3b): the
+/// TR-BDF2 loop's phases, the SAME callables its legacy loop calls. They
+/// take no frame (the engine reads its own t and h); clamp returns the
+/// step it landed; take, error and after_solve return the Verdict; on_step
+/// runs after every accepted step, whichever phase committed it.
+template <class Poll, class Begin, class Clamp, class Take, class Error, class After,
+          class Commit, class OnStep>
+struct DecidingPhaseBody {
+    static constexpr bool decides = true;
+    Poll& poll_;
+    Begin& begin_;
+    Clamp& clamp_;
+    Take& take_;
+    Error& error_;
+    After& after_;
+    Commit& commit_;
+    OnStep& on_step_;
+    PULSIM_STEP_PHASE bool poll() { return poll_(); }
+    PULSIM_STEP_PHASE void begin(const StepFrame&) { begin_(); }
+    PULSIM_STEP_PHASE Real clamp(const StepFrame&, Real) { return clamp_(); }
+    PULSIM_STEP_PHASE Verdict take(const StepFrame&) { return take_(); }
+    PULSIM_STEP_PHASE Verdict error(const StepFrame&) { return error_(); }
+    PULSIM_STEP_PHASE Verdict after_solve(StepFrame&) { return after_(); }
+    PULSIM_STEP_PHASE void commit(const StepFrame&) { commit_(); }
+    PULSIM_STEP_PHASE void on_step(const StepFrame&) { on_step_(); }
+};
+
+template <class Poll, class Begin, class Clamp, class Take, class Error, class After,
+          class Commit, class OnStep>
+DecidingPhaseBody<Poll, Begin, Clamp, Take, Error, After, Commit, OnStep> phase_body(
+    Poll& p, Begin& b, Clamp& cl, Take& t, Error& e, After& a, Commit& c, OnStep& o) {
+    return {p, b, cl, t, e, a, c, o};
+}
+
 /// The run: steps until the clock is done, the body stops it or a step
 /// aborts. Returns the last status.
 template <Integrator I, StepController C, class Body>
 PULSIM_STEP_PHASE inline StepStatus run(C& ctrl, Body& body) {
     StepStatus s = StepStatus::Done;
-    while ((s = step_once<I>(ctrl, body)) == StepStatus::Accepted) {
+    if constexpr (body_decides<Body>()) {
+        while ((s = step_once<I>(ctrl, body)) == StepStatus::Accepted
+               || s == StepStatus::Rejected) {
+        }
+    } else {
+        while ((s = step_once<I>(ctrl, body)) == StepStatus::Accepted) {
+        }
     }
     return s;
 }

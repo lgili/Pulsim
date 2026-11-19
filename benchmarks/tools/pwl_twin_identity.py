@@ -30,16 +30,16 @@ ENV = "PULSIM_PWL_STEPPER_TWIN"
 
 
 @contextlib.contextmanager
-def twin(on: bool):
-    old = os.environ.get(ENV)
-    os.environ[ENV] = "1" if on else "0"
+def twin(on: bool, env: str = ENV):
+    old = os.environ.get(env)
+    os.environ[env] = "1" if on else "0"
     try:
         yield
     finally:
         if old is None:
-            os.environ.pop(ENV, None)
+            os.environ.pop(env, None)
         else:
-            os.environ[ENV] = old
+            os.environ[env] = old
 
 
 def _value(v, depth=0):
@@ -126,12 +126,12 @@ def first_difference(a, b, path="", rtol=0.0) -> str | None:
     return None if a == b else f"{path}: differs"
 
 
-def run_both(fn):
+def run_both(fn, env: str = ENV):
     """(old-loop fingerprint, twin fingerprint); an exception is its
     type and message (a refusal must be the same refusal on both)."""
     fps = []
     for on in (False, True):
-        with twin(on), warnings.catch_warnings():
+        with twin(on, env), warnings.catch_warnings():
             warnings.simplefilter("ignore")
             try:
                 fps.append(fingerprint(fn()))
@@ -140,8 +140,8 @@ def run_both(fn):
     return fps[0], fps[1]
 
 
-def check(name, fn) -> bool:
-    a, b = run_both(fn)
+def check(name, fn, env: str = ENV) -> bool:
+    a, b = run_both(fn, env)
     d = first_difference(a, b)
     tag = " (raised)" if "raised" in a else ""
     print(f"DIFFER {name}: {d}" if d else f"IDENTICAL {name}{tag}", flush=True)

@@ -335,3 +335,43 @@ TEST_CASE("Integrators: err_exponent and LteController's laws agree",
     CHECK(s1.t_off == 0.1);
     CHECK(s1.factor_dt == step::Sdirk22::stage(0.1, 0).factor_dt);
 }
+
+TEST_CASE("Stepper, deciding body: a rejected attempt restarts at poll, End stops",
+          "[step][stepper]") {
+    // slice 3b (DECISIONS 15): the TR-BDF2 loop's shape. Attempt 1 is
+    // rejected in error, attempt 2 in after_solve, attempt 3 is accepted
+    // (the body advances t), attempt 4 ends the run in take.
+    std::vector<std::string> log;
+    Real t = 0, t_end = 1;
+    pulsim::step::LteController mem;
+    mem.h = 0.25;
+    int attempt = 0;
+    auto live = [&] { return t < t_end; };
+    auto poll = [&] { log.push_back("poll"); return true; };
+    auto begin = [&] { ++attempt; log.push_back("begin"); };
+    auto clamp = [&] { log.push_back("clamp"); return mem.h; };
+    auto take = [&] {
+        log.push_back("take");
+        return attempt == 4 ? step::Verdict::End : step::Verdict::Accept;
+    };
+    auto error = [&] {
+        log.push_back("error");
+        return attempt == 1 ? step::Verdict::Reject : step::Verdict::Accept;
+    };
+    auto after = [&] {
+        log.push_back("after");
+        return attempt == 2 ? step::Verdict::Reject : step::Verdict::Accept;
+    };
+    auto commit = [&] { log.push_back("commit"); t += mem.h; };
+    auto on_step = [&] { log.push_back("on_step"); };
+    auto body = step::phase_body(poll, begin, clamp, take, error, after, commit, on_step);
+    step::BodyClock clock{live, mem, t, t_end};
+    CHECK(step::run<step::TrBdf2>(clock, body) == step::StepStatus::Done);
+    const std::vector<std::string> want{
+        "poll", "begin", "clamp", "take", "error",                       // rejected
+        "poll", "begin", "clamp", "take", "error", "after",              // rejected
+        "poll", "begin", "clamp", "take", "error", "after", "commit", "on_step",
+        "poll", "begin", "clamp", "take"};                               // End
+    CHECK(log == want);
+    CHECK(t == 0.25);
+}

@@ -44,7 +44,8 @@ at equal times or time-weighted measures, never sample means.
 
 ## 6. The variable-step stepper
 - [ ] 6.1 `solver/step/stepper.hpp`: `Stepper<I, C>`; instantiate `Stepper<TrBdf2, Lte>`; hidden engine name `trbdf2-next`
-  - Skeleton done (`solver/step/stepper.hpp`, DECISIONS 10), proven on a toy body only; `Stepper<TrBdf2, Lte>` over the driver's loop and `trbdf2-next` not started
+  - Skeleton done (`solver/step/stepper.hpp`, DECISIONS 10), proven on a toy body only
+  - Slice 3b (DECISIONS 15): the TR-BDF2 loop cut in place into eight phase lambdas that the legacy loop and the twin `step::run<TrBdf2>(BodyClock, phase_body(...))` both call (internal `PULSIM_TRBDF2_STEPPER_TWIN=1`, not an engine name); the skeleton grew a deciding-body branch (one ATTEMPT per call; `Verdict::Reject` restarts at poll with no rollback; `End`). Identity: see DECISIONS 15. Cost gate met after DECISIONS 16 (both drivers forced inline; default +0.10–0.35 % over the base, twin ≤ 1.0007× default). Open: `trbdf2-next` name / route; the decision (reject, forced accept, chatter guard) still in the body, not in the controller; a skeleton-owned rollback
 - [ ] 6.2 Equality proof: `trbdf2-next` step-identical to `trbdf2` on every harness circuit and every suite circuit that runs on `trbdf2`; runner job added
 - [ ] 6.3 Zero-alloc test for the variable-step stepper (accepted, rejected and Newton-retried steps)
 - [ ] 6.4 Switch `engine='trbdf2'` and `engine='auto'` without `dt` to the stepper; keep `engine='trbdf2-legacy'`
