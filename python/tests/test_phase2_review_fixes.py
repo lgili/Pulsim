@@ -68,8 +68,10 @@ def test_the_retry_says_it_happened():
     Its own documentation says the user is entitled to know."""
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
+        # The restart-less step is the trigger (the release rule converges this
+        # rectifier without a retry): pinned legacy.
         res = p.simulate(_rect(), t_end=1.7e-2, dt=2e-4,
-                          enable_nonlinear_refresh=True)
+                          enable_nonlinear_refresh=True, discontinuity_restart=False)
     assert len(res.dt_retries) >= 1
     hits = [w for w in caught if "re-taken at a smaller step"
             in str(w.message)]
@@ -152,9 +154,11 @@ def test_the_partial_trace_can_resolve_names():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         with pytest.raises(p.SimulationAborted) as exc:
+            # The restart-less step's Newton failure is the trigger (the release
+            # rule converges): pinned legacy.
             p.simulate(_rect(), t_end=1.7e-2, dt=2e-4,
                         enable_nonlinear_refresh=True,
-                        max_dt_halvings=0)
+                        max_dt_halvings=0, discontinuity_restart=False)
     partial = exc.value.partial
     v = np.asarray(partial.v("vout"))
     assert len(v) == partial.num_steps()
