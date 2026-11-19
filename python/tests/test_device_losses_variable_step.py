@@ -110,6 +110,10 @@ def _run(engine, **kw):
     # pwl reads an edge's two sides one dt apart: first order in dt
     ("pwl", dict(dt=1e-7), 1.5e-3, 1.5e-3),
     ("trbdf2", dict(rtol=1e-6, atol=1e-9, dt=2.5e-7), 2e-5, 2.5e-5),
+    # integrator='esdirk43': conduction on its stage weights b, the same
+    # event sites (add-high-order-stiff-integrator)
+    pytest.param("trbdf2", dict(rtol=1e-6, atol=1e-9, dt=2.5e-7, integrator="esdirk43"),
+                 2e-5, 2.5e-5, id="esdirk43"),
 ])
 def test_event_and_conduction_energy_converge_to_the_closed_form_truth(engine, kw, tol_ev, tol_cond):
     ev, cond = _truth()
@@ -127,7 +131,8 @@ def test_pwl_event_energy_is_first_order_in_dt():
     assert 2.5 < err[0] / err[1] < 6.0
 
 
-def test_trbdf2_ledger_and_junction_receive_the_recorded_heat():
+@pytest.mark.parametrize("integ", [None, "esdirk43"])
+def test_trbdf2_ledger_and_junction_receive_the_recorded_heat(integ):
     """Closed loop on trbdf2: heat_injected + heat_pending = every event and
     conduction energy of S1 (the ledger), and the thermal network received
     it (C·ΔT + ∫(T - T_amb)/R dt) to the run's accuracy."""
@@ -135,7 +140,8 @@ def test_trbdf2_ledger_and_junction_receive_the_recorded_heat():
     b, fn = _rl_chopper(thermal=(r_th, c_th))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        res = p.simulate(b, T_END, switch_fn=fn, engine="trbdf2", rtol=1e-6, atol=1e-9)
+        res = p.simulate(b, T_END, switch_fn=fn, engine="trbdf2", rtol=1e-6, atol=1e-9,
+                         integrator=integ)
     e = res.device_energy("S1")
     recorded = e["E_on"] + e["E_off"] + e["E_cond_electrical"]
     assert res.heat_injected + res.heat_pending == pytest.approx(recorded, rel=1e-12)

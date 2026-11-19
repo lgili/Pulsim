@@ -238,7 +238,9 @@ PULSIM_IFACE_INLINE inline Real stamp_entry(const SaturableInductorHistory::Entr
     const bool incr = inc && !e.params.ja && !e.params.table;
     std::array<Real, 3> dq{}, dqg{};
     if (incr) {
-        dq[2] = -models::SaturableInductor::flux_increment(xl[2], e.i_L_old, e.params);
+        // (lambda_offset: an esdirk43 stage's base, else 0)
+        dq[2] = -(models::SaturableInductor::flux_increment(xl[2], e.i_L_old, e.params)
+                  - e.lambda_offset);
         if (bdf2) {
             dqg[2] = -models::SaturableInductor::flux_increment(e.i_gamma, e.i_L_old,
                                                                e.params);
