@@ -66,17 +66,15 @@ def test_charge_is_conserved_exactly():
     i_src, dt = 6.0, 2e-11
     t, v = _ramp("nonlinear", i_src=i_src, dt=dt)
     q_sim = _q_closed(v)
-    # The exact statement, not a loose one: the trapezoidal
-    # companion starts from i = 0 while the source is already
-    # delivering, so it is short by exactly half a step of charge
-    # for the whole run — Q(v(t)) = I·(t − h/2), forever, with no
-    # accumulating drift. (That half-step shows up as a 1/(2k)
-    # relative error at sample k, which is how it was identified:
-    # 0.25 at k = 2, 0.167 at k = 3.)
-    q_ref = i_src * (t - dt / 2.0)
-    ok = t > 10 * dt
-    err = np.abs(q_sim[ok] - q_ref[ok]) / q_ref[ok]
-    assert err.max() < 1e-6, err.max()
+    # The exact statement: Q(v(t)) = I·t at every sample from the first. The
+    # restart-less trapezoidal companion started from i = 0 while the source
+    # was already delivering and stayed short by half a step of charge,
+    # Q = I·(t − h/2), forever; the release restart rule's consistent start
+    # removes it (measured 1.0e-10 relative; was 1e-6 past sample 10 against
+    # the shifted reference).
+    q_ref = i_src * t[1:]
+    err = np.abs(q_sim[1:] - q_ref) / q_ref
+    assert err.max() < 1e-9, err.max()
 
 
 def test_a_linear_datasheet_cap_gets_the_dead_time_wrong():
