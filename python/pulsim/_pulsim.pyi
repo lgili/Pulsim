@@ -4542,13 +4542,13 @@ def ja_replay(N: float, Ae: float, le: float, lg: float, Ms: float, a: float, al
     """
     Replay the in-loop Jiles-Atherton device on a current trace with the kernel's own integrator; returns (H, M, B) arrays.
     """
-def load_yaml_file(path: str, *, allow_native_code: typing.Any = None) -> LoadedCircuit:
+def load_yaml_file(path: str, *, allow_native_code: typing.Any = None, switch_form: str = 'branch') -> LoadedCircuit:
     """
     Parse a YAML circuit description from disk. Returns LoadedCircuit(builder, options); errors and warnings name the path. Same key checks as `load_yaml_string`; a relative `lib:` of an `external_device` is taken from the file's folder.
     """
-def load_yaml_string(yaml_text: str, *, allow_native_code: typing.Any = None) -> LoadedCircuit:
+def load_yaml_string(yaml_text: str, *, allow_native_code: typing.Any = None, switch_form: str = 'branch') -> LoadedCircuit:
     """
-    Parse a YAML circuit description from an in-memory string. Returns LoadedCircuit(builder, options). Warns on unknown top-level / `circuit:` / `simulation:` keys; refuses a `simulation:` block indented under `circuit:`. `allow_native_code`: the shared libraries (paths or directories, symlinks followed) an `external_device` entry may load; without it every such entry is refused (a relative `lib:` is taken from the working directory).
+    Parse a YAML circuit description from an in-memory string. Returns LoadedCircuit(builder, options). Warns on unknown top-level / `circuit:` / `simulation:` keys; refuses a `simulation:` block indented under `circuit:`. `allow_native_code`: the shared libraries (paths or directories, symlinks followed) an `external_device` entry may load; without it every such entry is refused (a relative `lib:` is taken from the working directory). `switch_form`: the form of a `switch` / `diode` that names none ('branch', the default; 'conductance' restores the pre-release meaning).
     """
 def make_carrier_pwm_fn(period: float, duty: DutyRegister, switch_idx: int, num_switches: int, low_side: int = -1, dead_time: float = 0.0, phase: float = 0.0) -> SwitchSchedule:
     """
