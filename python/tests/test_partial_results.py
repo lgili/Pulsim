@@ -39,7 +39,9 @@ def _fail():
         warnings.simplefilter("ignore")
         return p.simulate(failing_rectifier(), t_end=1.7e-2, dt=2e-4,
                            enable_nonlinear_refresh=True,
-                           max_dt_halvings=0)
+                           max_dt_halvings=0,
+                           # legacy subject: restart-less fixed step (the restart converges here)
+                           discontinuity_restart=False)
 
 
 def test_the_failure_is_still_a_failure():
