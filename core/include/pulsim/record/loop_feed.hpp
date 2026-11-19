@@ -250,6 +250,9 @@ public:
     /// the last or the next sample): counted, never fabricated.
     [[nodiscard]] Size n_dropped() const noexcept { return n_dropped_; }
     [[nodiscard]] const std::vector<Recorder>& recorders() const noexcept { return recs_; }
+    /// RingSink for recorder k (`Recorder::stream_to`): its kept rows are
+    /// pushed into `ring` as the run goes (the ring must outlive the runs).
+    void stream_to(Size k, streaming::LiveRing* ring) { recs_.at(k).stream_to(ring); }
 
     /// Task 0b.7: the feed's run state at the end of a run (it goes into
     /// the final snapshot): the last sample, its mask, a settled event at

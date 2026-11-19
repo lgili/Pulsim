@@ -67,6 +67,17 @@ class Recorder:
     period, offset
         Statistics per period ``[offset + kT, offset + (k+1)T]``; only
         complete periods are reported.
+    stream
+        A :class:`pulsim.NativeLiveStream` (task 8.3, the RingSink): every
+        kept row is pushed into its ring as ``(t, one value per probe)``
+        (attached with ``state_size = len(probes)``, the probe texts as
+        channel names; the stream's own ``decimate`` applies). In the loop
+        (pwl, trbdf2) the rows arrive while the engine runs; on the
+        stored-array pass (the exact engine, the routes without the
+        Simulation object) after it. ``keep='none'`` pushes nothing. Its
+        stop / pause act on the run only through ``should_continue``. Each
+        run re-attaches it (a new ring); a run whose loop feed had to fall
+        back to the stored pass keeps the rows the loop pushed.
     """
 
     name: str
@@ -77,6 +88,15 @@ class Recorder:
     period: Optional[float] = None
     offset: float = 0.0
     times: Sequence[float] = ()
+    stream: Any = None
+
+
+def _ring_of(r: "Recorder"):
+    """Attach r.stream for r's probes and return its native ring (or None)."""
+    if r.stream is None:
+        return None
+    r.stream.attach(len(r.probes), names=list(r.probes))
+    return r.stream.native_ring
 
 
 _RESOLUTION = ("exact", "settled", "within_dt")
@@ -304,7 +324,7 @@ def _reading(res, atom: str) -> np.ndarray:
     raise ValueError(f"reading {atom!r} is not supported")
 
 
-def record_result(res, recs: "list[Recorder]") -> dict:
+def record_result(res, recs: "list[Recorder]", stream: bool = True) -> dict:
     """Run the kernel recorders over a finished result."""
     from . import _pulsim
     from ._result_views import with_right_limits
@@ -347,7 +367,8 @@ def record_result(res, recs: "list[Recorder]") -> dict:
             float(r.period or 0.0), float(r.offset), atoms, t,
             np.ascontiguousarray(left), [int(k) for k in idx],
             np.ascontiguousarray(right),
-            [float(x) for x in np.asarray(r.times, dtype=float).reshape(-1)])
+            [float(x) for x in np.asarray(r.times, dtype=float).reshape(-1)],
+            _ring_of(r) if stream else None)
         out[r.name] = _checked(r, d, t[0], t[-1], "stored-arrays")
     return out
 
@@ -603,6 +624,10 @@ def attach_loop_feed(sim, engine: str) -> None:
         plan.why_not = str(e)
         return
     plan.sim = sim
+    for k, r in enumerate(plan.recs):
+        ring = _ring_of(r)
+        if ring is not None:
+            feed.stream_to(k, ring)
     feed.arm(engine == "pwl")
     plan.feed = feed
 
@@ -672,8 +697,10 @@ def simulate_with_recorders(simulate: Callable[..., Any], kw: dict,
             "of a decimated run would alias; record with store_every=1 and "
             f"Recorder(keep='decimate', every={se}) to keep fewer rows")
     why = plan.why_not if feed is None else "the step hook did not fire"
+    # rows the loop already pushed stay the stream's (no restart, no repeat)
+    pushed = plan.feed is not None and plan.feed.n_steps > plan.n_steps0
     try:
-        res.recorded = record_result(res, recs)
+        res.recorded = record_result(res, recs, stream=not pushed)
     except UnsupportedError as e:
         if _LOOP_ONLY_WHY not in str(e):
             raise

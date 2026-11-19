@@ -519,6 +519,49 @@ counts (the caller sizes it; the in-loop test covers None and Decimate).
   the next step) and ~170 per step of fixed Python setup at 3299 steps
   (recorder construction, reading resolution, result arrays), ~45 at 4x.
 
+## 23. Leftovers of slice 5: 4.2, 8.3, 1.4 (2026-11-19)
+
+- **4.2.** `stats.time_average` / `time_rms` (and so `steady_state_stats`
+  mean / rms) are the kernel recorder's window statistics
+  (`_pulsim._record_pass` over the clipped trace with the window it
+  covers exactly): one implementation. `time_window` keeps the clipping,
+  the refusals and the repeated-timestamp rule (a duplicate start is
+  dropped; an inner duplicate is a zero-length piece in both). Results
+  move at rounding level only (different summation order). NOT
+  delegated: `_result_views.pl_integral*` — they take per-step right
+  limits (`y_start`) and `|y|`, which `_record_pass` does not express
+  without event rows per step; the loss paths keep them.
+- **8.3.** `Recorder(stream=NativeLiveStream(...))`: the stream is
+  attached with one column per probe (probe texts as channel names) and
+  its ring handed to the recorder's `RingSink` — `LoopFeed::stream_to`
+  in the loop (pwl, trbdf2: rows arrive while the engine runs), the
+  `ring=` argument of `_record_pass` on the stored-array pass (exact
+  engine: after it). `NativeLiveStream.attach` now resets its reader
+  counters (a re-attached stream read nothing from its new ring before).
+  Test: the consumer reads exactly the recording's kept rows on the three
+  engines, and only the second run's rows after a re-run.
+- **1.4.** `docs/result-reference.md` (nav: Result Reference), with the
+  note on a run that throws (the feed is detached; re-run with the same
+  or fresh `Recorder` objects).
+- **Reviewer items left recorded:** the right side read at a diode
+  landing (20) and the Coss right side: neither is a small change
+  provable against an analytic value in this slice (both need the
+  device-state law at the event instant, i.e. R2 of the stepper track).
+- **Fresh-context review** (opus, read-only, diff from 2b61202d): no
+  bit-identity defect in the fast paths (plain / linear tables, the
+  on_step fast step, the cached period window, save / restore). Fixed:
+  a loop feed that fell back to the stored pass (`n_dropped > 0`)
+  re-attached the stream and pushed every row again into a new ring (now
+  the loop's rows stay); a window a few ulps wide averaged to -0 (the
+  recorder snaps its edges together; the helpers use the line there,
+  test added); docs: the stream's `decimate` applies, `recorder_feed`
+  keys per mode, re-attach per run. Left: `save_to` needs a bound
+  `SolverSnapshot` (every route that reaches it returns one today); no
+  test drives the fast step through a jump / bracket mask change / restore
+  mid-window against the general path (covered by the 12-case bit-identity
+  compare, not by a committed test); time_average sums step by step
+  (CHANGELOG note).
+
 ## Requests to the stepper track
 
 - **R1.** One per-accepted-step call for all engines, after commit:
@@ -628,3 +671,17 @@ Slice 2 (this branch, after 2b18f11a):
   step); R5 (exact engine in the loop); 4.2 delegation, 8.3 `live_stream`
   over `RingSink`, 1.4 result reference page. Eigen 3.4.0: record / perf / step / thermal targets 29/29 at 98419f48.
 
+
+## Hand-off (slice 5, 2026-11-19)
+
+- Done: 0b.10 cost work (22; targets still NOT met: pwl +16 %, trbdf2
+  +6.5 % for one probe keep='every'), 4.2 for `time_average` /
+  `time_rms` (23), 8.3 `Recorder(stream=)` (23), 1.4 result reference
+  page (23). No loop-file hunk in this slice.
+- Open: 0b.10 remainder (~170 instructions per pwl step outside
+  `record/`: loop bookkeeping + the `std::function` hop, a loop-file
+  change; the jump test + state copy), `pl_integral*` delegation, R5
+  (exact engine in the loop), the diode-landing / Coss right sides (R2).
+- Verified on this tip: pytest full, `-m reference`, REFERENCE_STATUS.md
+  unchanged, ruff, openspec --strict, stubs --check; record + perf + step
+  targets on Eigen 3.4.0 (record + perf on Eigen 5). Full ctest NOT run.

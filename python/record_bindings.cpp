@@ -127,10 +127,12 @@ void init_module(py::module_& m) {
              Size every_n, const std::vector<std::pair<Real, Real>>& windows, Real period,
              Real offset, const std::vector<std::string>& reading_names, const F64& t,
              const F64& readings, const std::vector<Size>& event_rows, const F64& right,
-             const std::vector<Real>& sample_times) {
+             const std::vector<Real>& sample_times,
+             std::shared_ptr<pulsim::streaming::LiveRing> ring) {
               rec::Recorder r = make_recorder(probe_texts, keep, every_n, windows, period,
                                               offset, sample_times);
               r.bind(reading_names);
+              r.stream_to(ring.get());
               const Size m_r = reading_names.size();
               {
                   py::gil_scoped_release nogil;
@@ -143,7 +145,7 @@ void init_module(py::module_& m) {
           py::arg("probes"), py::arg("keep"), py::arg("every_n"), py::arg("windows"),
           py::arg("period"), py::arg("offset"), py::arg("reading_names"), py::arg("t"),
           py::arg("readings"), py::arg("event_rows"), py::arg("right"),
-          py::arg("sample_times") = std::vector<Real>{},
+          py::arg("sample_times") = std::vector<Real>{}, py::arg("ring") = nullptr,
           "Kernel recorder pass over stored arrays (add-probes-and-recorders); "
           "use pulsim.simulate(..., recorders=[...]).");
 
@@ -194,6 +196,12 @@ void init_module(py::module_& m) {
              },
              py::arg("snapshot"), py::arg("spec"),
              "save() into snapshot.recorder_state, spec into recorder_spec.")
+        .def("stream_to",
+             [](rec::LoopFeed& f, Size k, std::shared_ptr<pulsim::streaming::LiveRing> ring) {
+                 f.stream_to(k, ring.get());
+             },
+             py::arg("k"), py::arg("ring"), py::keep_alive<1, 3>(),
+             "Push recorder k's kept rows into a LiveRingHandle while the run goes.")
         .def("restore", [](rec::LoopFeed& f, const std::vector<Real>& s) { f.restore(s); },
              py::arg("state"), "Continue from save()'s output.")
         .def_property_readonly("restored", &rec::LoopFeed::restored)

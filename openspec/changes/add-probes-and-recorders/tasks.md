@@ -28,7 +28,7 @@ states at equal times.
 - [x] 1.1 `SimulationResult` default-constructible with fill methods used by kernel adapters only; binding exposes construction for adapters and tests
 - [x] 1.2 The DSED adapter fills a `SimulationResult`; delete `_PEDSimulationResult` (`_dsed_dispatch.py:330-476`); `n_accept`, `n_reject`, `n_events`, `n_rk45_steps`, `n_bdf2_steps`, `cpu_time_seconds` become read-only properties
 - [x] 1.3 Oracle: every dsed test passes unmodified; `isinstance(res, pulsim.SimulationResult)` on the three engines; `device_loss_summary` on a switch + diode buck unchanged on dsed
-- [ ] 1.4 Docs: result reference; CHANGELOG (**BREAKING**: class identity) — CHANGELOG done; the result reference page not written
+- [x] 1.4 Docs: result reference; CHANGELOG (**BREAKING**: class identity) — CHANGELOG done; `docs/result-reference.md` (DECISIONS 23)
 
 ## 2. Grid kind and typed statistics
 - [x] 2.1 `record/grid.hpp`: `GridKind`; `RunStats`; `res.grid`, `res.stats`
@@ -43,7 +43,7 @@ states at equal times.
 
 ## 4. Measures on the result
 - [x] 4.1 (as Python methods over the C++ recorder pass, DECISIONS 16) `avg`, `rms`, `integral`, `at`, `minmax` (piecewise-linear, right-limit aware, exact `h·(a² + ab + b²)/3` for the square)
-- [ ] 4.2 (methods done; the `stats.time_average` / `pl_integral` delegation not done) Python methods; `stats.time_average`, `stats.time_rms`, `_result_views.pl_integral*` delegate
+- [ ] 4.2 (methods done; `stats.time_average` / `time_rms` delegate to the recorder (DECISIONS 23); `pl_integral*` NOT delegated: per-step right limits and |y|) Python methods; `stats.time_average`, `stats.time_rms`, `_result_views.pl_integral*` delegate
 - [ ] 4.3 (done: rectified sine on three engines equals time_average / time_rms to 1e-12; not done: the PR #140 six-run check) Tests: analytic triangle and PWM waveforms on a uniform and on a clustered grid give the same `avg` / `rms` to 1e-12; the PR #140 circuit: six runs agree within 0.3 % through `res.avg`
 - [ ] 4.4 Docs: `AI_GUIDE.md` trap on `.mean()`; measurement page; examples use `res.avg`
 
@@ -71,7 +71,7 @@ states at equal times.
 ## 8. Sampling policies and sinks
 - [ ] 8.1 (store_every lifted for in-loop recorders, DECISIONS 19; trbdf2 refuses store_every itself, so the accepted-grid `Decimate` is the Recorder's keep='decimate') `Decimate{n}`: fixed grid identical to `store_every`; accepted grid keeps every n-th step and all event rows; lift the `store_every` refusal on the variable-step engine
 - [ ] 8.2 (`land=false` done as 0b.8; landing waits for the event queue in the loop) `Times{t}` / `Period{T}`: landing through `OutputSample` events when `add-unified-event-queue` is present; linear interpolation with the `interpolated` flag otherwise or when `land = false`
-- [ ] 8.3 (C++ `RingSink` done; `live_stream` on every engine waits for 0b.6) `RingSink` over `LiveRing`; `live_stream` on every engine
+- [x] 8.3 (`Recorder(stream=NativeLiveStream)` on pwl, trbdf2 in the loop and exact on the stored pass; DECISIONS 23) `RingSink` over `LiveRing`; `live_stream` on every engine
 - [ ] 8.4 Tests: `store_every` goldens on the fixed engine; a decimated accepted-grid record gives the same `avg` as the full record to 1e-12; `t_eval` samples equal the states of a run with gate edges at those times; a `live_stream` consumer sees the same rows on pwl and trbdf2
 - [ ] 8.5 Oracle: conformance matrix cells for `store_every` / `live_stream` updated in this PR only
 

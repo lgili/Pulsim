@@ -4309,6 +4309,10 @@ class _LoopFeed:
         """
         save() into snapshot.recorder_state, spec into recorder_spec.
         """
+    def stream_to(self, k: int, ring: LiveRingHandle) -> None:
+        """
+        Push recorder k's kept rows into a LiveRingHandle while the run goes.
+        """
     @property
     def armed(self) -> bool:
         ...
@@ -4399,7 +4403,7 @@ def _probe_atoms(text: str) -> list[str]:
     """
     The readings of a probe expression, normalised, in first-use order (add-probes-and-recorders). Raises ValueError naming the probe.
     """
-def _record_pass(probes: collections.abc.Sequence[str], keep: str, every_n: int, windows: collections.abc.Sequence[tuple[float, float]], period: float, offset: float, reading_names: collections.abc.Sequence[str], t: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], readings: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], event_rows: collections.abc.Sequence[int], right: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], sample_times: collections.abc.Sequence[float] = []) -> dict[typing.Any, typing.Any]:
+def _record_pass(probes: collections.abc.Sequence[str], keep: str, every_n: int, windows: collections.abc.Sequence[tuple[float, float]], period: float, offset: float, reading_names: collections.abc.Sequence[str], t: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], readings: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], event_rows: collections.abc.Sequence[int], right: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], sample_times: collections.abc.Sequence[float] = [], ring: LiveRingHandle | None = None) -> dict[typing.Any, typing.Any]:
     """
     Kernel recorder pass over stored arrays (add-probes-and-recorders); use pulsim.simulate(..., recorders=[...]).
     """
