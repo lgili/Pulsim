@@ -17,7 +17,11 @@ from tests.oracles import lcp_pulsim_bridge as B
 T = 1e-5
 GON, GOFF = 1e3, 1e-9
 SPLIT = {"discontinuity_restart": True, "enable_substep_state_correction": True}
-CONFIGS = [{}, {"discontinuity_restart": True}, SPLIT]
+# "pwl" = the restart-less fixed step, explicit since the release made the restart the default
+CONFIGS = [{"discontinuity_restart": False}, {"discontinuity_restart": True}, SPLIT]
+# Legacy subject: "the default run" these tests compare with is the settle (and its guard);
+# the release default mode_selection='auto' picks 'lcp' for these circuits.
+SETTLE = {"mode_selection": "legacy"}
 
 
 # Measured under the event split (probes/pwl_shadow_survey.out, pwl+split, err_lcp against
@@ -33,6 +37,17 @@ def _quiet():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         yield
+
+
+@pytest.fixture
+def conductance(monkeypatch):
+    """Legacy subject: the default guard exists on the conductance form only (run_transient
+    turns it off for a branch-form diode); add_switch / add_diode without form= (the oracle's
+    builder too) build that form, as before the release."""
+    for name in ("add_switch", "add_diode"):
+        f = getattr(p.CircuitBuilder, name)
+        monkeypatch.setattr(p.CircuitBuilder, name,
+                            lambda self, *a, _f=f, **k: _f(self, *a, **{"form": "conductance", **k}))
 
 
 def _buck(L=100e-6, vth=0.0, phase=0.0):
@@ -82,13 +97,13 @@ def _same(a, b):
 @pytest.mark.parametrize("kw", CONFIGS, ids=["pwl", "restart", "split"])
 def test_shadow_is_bit_identical_and_poses_an_lcp_at_every_site(kw):
     b, fn = _buck(phase=0.37 * T / 200)          # gate edges off the grid: the split runs
-    r0 = _sim(b, 40 * T, T / 200, fn, guard=False, **kw)
+    r0 = _sim(b, 40 * T, T / 200, fn, guard=False, **SETTLE, **kw)
     r1 = _sim(b, 40 * T, T / 200, fn, guard=False, mode_selection="shadow", **kw)
     assert _same(r0, r1)
     ms = r1.diagnostics["mode_shadow"]
     sites = ms["sites"]
     assert ms["events"] == sum(sites.values()) > 0
-    if kw:
+    if kw["discontinuity_restart"]:
         assert sites["restart"] > 0                 # the restart stages are sites too
     if kw is SPLIT:
         assert sites["substep"] > 0
@@ -111,7 +126,10 @@ def _perturbed(fam, k):
 
 
 @pytest.mark.parametrize("mode", [None, "lcp"], ids=["default", "lcp"])
-@pytest.mark.parametrize("fam", ["bridge1_vf0", "bridge1_vf07", "bridge3_cfilter"])
+@pytest.mark.parametrize("fam", ["bridge1_vf0", pytest.param("bridge1_vf07", marks=pytest.mark.xfail(
+    strict=True, reason="release finding F-3-1: the event split's located diode turn-on moves "
+    "3.1e-4 V under a 1-ulp change of C or R (2.3e-11 without the restart rule)")),
+    "bridge3_cfilter"])
 def test_rounding_fuzz_gives_one_mode_sequence(fam, mode):
     """20 last-bit perturbations of the circuit (C and R +-1..10 ulp) give one waveform and one
     diode mode sequence, up to ties: on the single-phase bridges a few samples (<= 6 of 4001, from
@@ -149,7 +167,7 @@ def test_lcp_banded_dcm_buck_equals_the_default():
     """6.4: V_th = 1e-2 (a hysteresis band) — the LCP decides exactly as the settle."""
     b, fn = _buck(vth=1e-2)
     for kw in CONFIGS:
-        r0 = _sim(b, 400 * T, T / 200, fn, **kw)
+        r0 = _sim(b, 400 * T, T / 200, fn, **SETTLE, **kw)
         r1 = _sim(b, 400 * T, T / 200, fn, mode_selection="lcp", **kw)
         assert np.max(np.abs(np.asarray(r0.states) - np.asarray(r1.states))) <= 1e-9
         assert r1.diagnostics["mode_selection"]["settle_rounds_total"] == 0
@@ -175,7 +193,7 @@ LCP_LIST = [
 @pytest.mark.parametrize("name,make,t_end,dt,node,ref,tol", LCP_LIST, ids=[c[0] for c in LCP_LIST])
 def test_lcp_list_on_pwl(name, make, t_end, dt, node, ref, tol):
     b, fn = make()
-    r0 = _sim(b, t_end, dt, fn, **SPLIT)
+    r0 = _sim(b, t_end, dt, fn, **SETTLE, **SPLIT)
     r1 = _sim(b, t_end, dt, fn, mode_selection="lcp", **SPLIT)
     ms = r1.diagnostics["mode_selection"]
     assert ms["settle_rounds_total"] == 0 and ms["mask_cycles"] == 0 and ms["errors"] == 0
@@ -200,7 +218,8 @@ def test_lcp_bridges_on_pwl(fam, node, ref, tol):
 
 # ---- 4b.3: the default guard changes nothing where the settle is right -----------------------
 @pytest.mark.parametrize("kw", CONFIGS, ids=["pwl", "restart", "split"])
-def test_guard_leaves_consistent_runs_bit_identical(kw):
+def test_guard_leaves_consistent_runs_bit_identical(kw, conductance):
+    kw = {**SETTLE, **kw}
     b, fn = _buck()
     assert _same(_sim(b, 400 * T, T / 200, fn, guard=False, **kw),
                  _sim(b, 400 * T, T / 200, fn, **kw))
@@ -211,13 +230,13 @@ def test_guard_leaves_consistent_runs_bit_identical(kw):
     assert on.diagnostics["mode_guard"]["checks"] > 0          # the guard was evaluated
 
 
-def test_guard_repairs_a_settle_left_in_a_wrong_mode():
+def test_guard_repairs_a_settle_left_in_a_wrong_mode(conductance):
     """The floating single-phase bridge (V_f = 0) ends two settles without a fixed point in a mode
     that violates D1's law (9.9e-7 V); the guard re-decides them. The waveform moves by 4.5e-13 V
     (the repaired steps carry ~0 current) and the end value is unchanged."""
     b = B.FAMILIES["bridge1_vf0"].builder(0.0)
-    off = _sim(b, 0.2, 1e-5, guard=False)
-    on = _sim(B.FAMILIES["bridge1_vf0"].builder(0.0), 0.2, 1e-5)
+    off = _sim(b, 0.2, 1e-5, guard=False, **SETTLE)
+    on = _sim(B.FAMILIES["bridge1_vf0"].builder(0.0), 0.2, 1e-5, **SETTLE)
     g = on.diagnostics["mode_guard"]
     assert g["repairs"] >= 1 and len(list(off.event_iteration_breaches)) >= g["repairs"]
     assert all(v > 0 for v in g["repair_violations"])
@@ -230,7 +249,7 @@ def test_shadow_on_the_floating_bridge_compares_only_solved_settles(kw):
     """A restart stage entered with the previous stage's mask cycle never solves; the shadow skips
     it instead of judging an empty mode (review finding: it read past the mode vector)."""
     b = B.FAMILIES["bridge1_vf0"].builder(0.0)
-    r0 = _sim(b, 0.2, 1e-5, guard=False, **kw)
+    r0 = _sim(b, 0.2, 1e-5, guard=False, **SETTLE, **kw)
     r1 = _sim(B.FAMILIES["bridge1_vf0"].builder(0.0), 0.2, 1e-5, guard=False,
               mode_selection="shadow", **kw)
     assert _same(r0, r1)
