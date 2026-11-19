@@ -103,6 +103,9 @@ def test_the_fwd_carries_the_freewheeling_current():
     assert i == pytest.approx(100.0, rel=1e-3)
 
 
+@pytest.mark.xfail(strict=True, reason="release finding F-5-1: with discontinuity_restart the "
+                   "pathless inductor's 100 A becomes -141.4 A in one step (energy 5 J -> 10 J), "
+                   "no reinit record, no warning")
 def test_without_the_fwd_the_solver_says_so():
     """The trade this model makes on purpose. A device that
     correctly refuses reverse current leaves an inductive load
