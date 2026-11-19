@@ -22,17 +22,27 @@ ROOT = Path(__file__).resolve().parents[2]
 PROBES = ROOT / "openspec" / "changes" / "add-immutable-circuit-ir" / "probes"
 sys.path[:0] = [str(PROBES), str(ROOT / "benchmarks"), str(ROOT / "benchmarks" / "tools")]
 
+import next_defaults  # noqa: E402
 import sweep_probe  # noqa: E402
 
 pytest.importorskip("yaml")
 CIRCUITS = sweep_probe.circuits()
+# Task 0.2's record, taken when add_switch / add_diode / YAML switch+diode
+# defaulted to form='conductance': kept as the legacy-period pin.
 RECORD = json.loads((PROBES / "components_baseline.json").read_text(encoding="utf-8"))
+# Release flip (DECISIONS section 5): the default form is now 'branch', which
+# adds R_on (= 1/g_on) and branch_form=1 to every switch / diode row's params;
+# nothing else moves. Re-recorded with `sweep_probe.py components --out ...`.
+RECORD_BRANCH = json.loads(
+    (PROBES / "components_branch_default.json").read_text(encoding="utf-8"))
+with next_defaults.legacy():  # the same circuits, explicit form='conductance'
+    LEGACY = dict(sweep_probe.circuits())
 
 
 def test_every_circuit_is_recorded():
     # Task 0.2's record: a circuit added to examples/ or benchmarks/ must
     # be added to the record (re-run `sweep_probe.py components`).
-    assert {cid for cid, _ in CIRCUITS} == set(RECORD)
+    assert {cid for cid, _ in CIRCUITS} == set(RECORD) == set(RECORD_BRANCH)
     assert sum(not isinstance(b, Exception) for _, b in CIRCUITS) == 136
 
 
@@ -50,11 +60,20 @@ def _switch_names(b):
 @pytest.mark.parametrize("cid,b", CIRCUITS, ids=[cid for cid, _ in CIRCUITS])
 def test_lowered_equals_builder(cid, b):
     if isinstance(b, Exception):
-        assert RECORD[cid] == f"unloadable: {type(b).__name__}"
+        assert RECORD[cid] == RECORD_BRANCH[cid] == f"unloadable: {type(b).__name__}"
         return
     c = b.build()
-    # The record of task 0.2 is today's components(); the snapshot too.
-    assert {"n": len(c.components()), "sha": sweep_probe.digest(c)} == RECORD[cid]
+    # The record is today's components(); the snapshot too.
+    assert {"n": len(c.components()), "sha": sweep_probe.digest(c)} == RECORD_BRANCH[cid]
+    # Legacy-period proof: built with form='conductance' it is task 0.2's pin,
+    # and the flip's only change is R_on / branch_form on switch / diode rows.
+    lc = LEGACY[cid].build()
+    assert {"n": len(lc.components()), "sha": sweep_probe.digest(lc)} == RECORD[cid]
+    for new, old in zip(c.components(), lc.components(), strict=True):
+        if new != old:
+            assert old["kind"] in ("switch", "diode")
+            extra = new["params"].pop("R_on"), new["params"].pop("branch_form")
+            assert new == old and extra == (1.0 / old["params"]["g_on"], 1)
     assert c.components() == b.components()
     assert c.state_var_names() == b.state_var_names()
     assert c.nodes == [n["name"] for n in b.graph.nodes]
