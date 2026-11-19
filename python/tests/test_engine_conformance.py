@@ -1658,10 +1658,12 @@ def test_device_path_cell(name, engine):
     if engine == "pwl":
         assert np.array_equal(ta, ti)
         err = float(np.max(np.abs(vi - va)))
-        # 1e-12 is a rounding claim while both paths take the same Newton
-        # iterations; one iteration apart they differ by up to the Newton
-        # tolerance (1e-9 absolute by default; DECISIONS #29).
-        tol = 1e-12 * span if np.array_equal(na, ni) else 1e-8
+        # A rounding claim while both paths take the same Newton iterations
+        # (1e-12 measured on macOS; bounded at 1e-9 like the equivalence
+        # gate, another compiler's libm/FMA differs in the last bits); one
+        # iteration apart they differ by up to the Newton tolerance (1e-9
+        # absolute by default; DECISIONS #29).
+        tol = 1e-9 * span if np.array_equal(na, ni) else 1e-8
         if not np.array_equal(na, ni):   # a stopping difference, not a law one
             assert na.shape == ni.shape and np.count_nonzero(na != ni) <= max(
                 3, na.size // 100), f"{name}: Newton counts differ widely"
