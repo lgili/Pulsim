@@ -260,15 +260,15 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | three_phase/three_phase_balanced_rl_load.yaml | 1.82e-06 | 1.83e-06 | 1.83e-06 | 4.22e-05 | 6.01e-07 |
 | three_phase/three_phase_diode_rectifier.yaml | 1.51 | 0.00632 | 0.00631 | 5.51e-05 | 0.00034 |
 
-## Analytic set (26 cases; agree = within the frozen ceiling, 1e-3 when none)
+## Analytic set (27 cases; agree = within the frozen ceiling, 1e-3 when none)
 
 | configuration | agree | disagree | error | refused | unverified |
 |---|---:|---:|---:|---:|---:|
-| pwl | 25 | 1 | 0 | 0 | 0 |
-| pwl+restart | 25 | 1 | 0 | 0 | 0 |
-| pwl+split | 26 | 0 | 0 | 0 | 0 |
-| trbdf2 | 26 | 0 | 0 | 0 | 0 |
-| dsed | 21 | 0 | 0 | 5 | 0 |
+| pwl | 26 | 1 | 0 | 0 | 0 |
+| pwl+restart | 26 | 1 | 0 | 0 | 0 |
+| pwl+split | 27 | 0 | 0 | 0 | 0 |
+| trbdf2 | 27 | 0 | 0 | 0 | 0 |
+| dsed | 22 | 0 | 0 | 5 | 0 |
 
 | case | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
