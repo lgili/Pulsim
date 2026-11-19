@@ -76,6 +76,8 @@
 // tail, the MNA-native PMSM and the saturable inductor. There are
 // no refusals left.
 
+#include <cstdlib>  // XTOGGLE
+#include <cstdio>  // XTOGGLE
 #include "pulsim/events/event_queue.hpp"
 #include "pulsim/events/step_hooks.hpp"
 #include "pulsim/pwl/cache.hpp"
@@ -945,6 +947,15 @@ inline SimulationResult run_transient_trbdf2(
     // the cascades at a located diode event (see `be_probe_dt`).
     bool probe_be = false;
     std::vector<pwl::HistoryEntry> hist_be, hist_be0;
+    // XTOGGLE (temporary experiment switches; removed before commit)
+    auto xenv = [](const char* n) { const char* v = std::getenv(n); return v != nullptr && v[0] == '1'; };
+    const bool x_nowip = xenv("PULSIM_X_NOWIP");
+    const bool x_nobeprobe = x_nowip || xenv("PULSIM_X_NOBEPROBE");
+    const bool x_noedge = x_nowip || xenv("PULSIM_X_NOEDGE");
+    const bool x_nopost = x_nowip || xenv("PULSIM_X_NOPOST");
+    const bool x_noland = x_nowip || xenv("PULSIM_X_NOLAND");
+    const bool x_filtall = xenv("PULSIM_X_FILT");
+    const bool x_dbg = xenv("PULSIM_X_DBG");
     auto trap_solve = [&](const SwitchStateMask& m, Real t0, Real dt,
                            Vector& out_x) -> bool {
         // EVERY trapezoidal solve tells the stateful devices which
@@ -2133,7 +2144,7 @@ inline SimulationResult run_transient_trbdf2(
         // decision at the edge stays the trapezoidal probe's.
         bool be_commit = false;
         edge_be_committed = false;
-        be_commit = rings(m_probe, dtp, &x_trial);
+        be_commit = !x_noedge && rings(m_probe, dtp, &x_trial);
         if (be_commit) x_trial = ring_be;
         edge_be_committed = be_commit;
         update_history(x_trial, dtp, be_commit);
@@ -2194,7 +2205,7 @@ inline SimulationResult run_transient_trbdf2(
     // 2e-17 s reads at its start (+951 V forward on an OFF PSFB rectifier
     // diode whose slow value is +13 mV) and one longer than it rings.
     // Not at gate edges: there that transient is the physics.
-    const bool be_events = !nl_effective && sdirk_possible;
+    const bool be_events = !x_nobeprobe && !nl_effective && sdirk_possible;
     bool sdirk_event = false;   // the pending restart came from such an event
     // A turn-off whose jump is not instant on the trace still restarts
     // with SDIRK(2,2): derivative-free and L-stable, where a TR-BDF2 step
@@ -2303,7 +2314,7 @@ inline SimulationResult run_transient_trbdf2(
         // (derivative-free, L-stable) after a turn-on too: a TR-BDF2 step
         // reads the pre-event slots and its trapezoidal stage rings it.
         bool ring = false;
-        if (be_events && n_sdirk_diode > 0 && last_probe_ok) {
+        if (!x_nopost && !nl_effective && sdirk_possible && n_sdirk_diode > 0 && last_probe_ok) {
             SwitchStateMask m_ring = has_diodes
                 ? switch_fn(t).overlay(diodes.current_diode_mask(),
                                        diodes.diode_owned_bits())
@@ -2975,7 +2986,7 @@ inline SimulationResult run_transient_trbdf2(
             // Also inside the window after the chatter guard gave up: there
             // the raw estimate reads the L*g_off mode as error at any h (see
             // h_lo), and every step sat at h_chatter as a forced accept.
-            if ((opts.filter_error_estimate || (sdirk && (sdirk_event || sdirk_raw) && !reinit_step)
+            if ((x_filtall || opts.filter_error_estimate || (sdirk && (sdirk_event || sdirk_raw) && !reinit_step)
                  || t - chatter_exhaust_t <= Real{1e3} * h_chatter)
                 && !nl_effective
                 && !entries.empty()) {
@@ -3087,6 +3098,13 @@ inline SimulationResult run_transient_trbdf2(
                 // Cannot shrink further: accept, but CONFESS —
                 // silence here would be an unbounded-error hole.
                 ++st.n_forced_accepts;
+                if (x_dbg) {  // XTOGGLE
+                    Size im = 0; Real wm = 0;
+                    for (Size i = 0; i < entries.size(); ++i) { const Real w = std::abs(est_v[i] / est_sc[i]); if (w > wm) { wm = w; im = i; } }
+                    std::fprintf(stderr, "XDBG forced t=%.15e h=%.3e h_lo=%.3e err=%.3e sdirk=%d ev=%d raw=%d reinit=%d worst=%zu(L=%d,w=%.3e) bits=", t, h, h_lo, err, int(sdirk), int(sdirk_event), int(sdirk_raw), int(reinit_step), im, int(entries[im].kind != pwl::DevicePool::StoredKind::Capacitor), wm);
+                    for (const auto& e : diodes.entries()) std::fprintf(stderr, "%d", int(e.is_on));
+                    std::fprintf(stderr, "\n");
+                }
             }
             if (err > Real{1} && h > h_lo * Real{1.0001}) {
                 // reject: elementary controller, order-3 exponent
@@ -3589,7 +3607,7 @@ inline SimulationResult run_transient_trbdf2(
                         land_ok = trap_solve(mask_step, t, dt_land, x_trial);
                         // A landing sub-step that rings a parasitic mode of
                         // the pre-event mode is committed as BE (as an edge).
-                        land_be = land_ok && rings(mask_step, dt_land, &x_trial);
+                        land_be = !x_noland && land_ok && rings(mask_step, dt_land, &x_trial);
                         if (land_be) x_trial = ring_be;
                     }
                     if (!land_ok) {
