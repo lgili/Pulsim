@@ -136,15 +136,16 @@ struct StepCtx {
     const bool want =
         enable.has_value() ? *enable : pool.has_nonlinear_devices();
     if (!want) return {};
-    if (path != device::DevicePath::Interface || pool.lauritzen_diode_branches().empty()) {
+    if (pool.lauritzen_diode_branches().empty()) {
         return standard_static_refresh(path);
     }
-    // add-unified-device-interface 10.3: on the interface path a Lauritzen
-    // diode enters the DC point through its law at Formula::Dc (its local
-    // charge row solved at q̇ = 0: i = τ/(τ+T_M)·i_S(v) + G_min·v). The hand
-    // path has no DC stamp for it (an open circuit); unchanged until the
-    // release. (The IGBT tail's DC current is exactly 0: no stamp.)
-    return [base = make_interface_static_refresh()](
+    // add-unified-device-interface 10.3: a Lauritzen diode enters the DC
+    // point through its law at Formula::Dc (its local charge row solved at
+    // q̇ = 0: i = τ/(τ+T_M)·i_S(v) + G_min·v), on both paths: the hand path
+    // had no DC stamp for it and solved it open (2.000 V where the law gives
+    // 0.73096 V; add-high-order-stiff-integrator DECISIONS 17). (The IGBT
+    // tail's DC current is exactly 0: no stamp.)
+    return [base = standard_static_refresh(path)](
                const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
                const topology::Graph& graph, const DevicePool& p) -> Real {
         Real m = base(x, J_nl, f_nl, graph, p);
