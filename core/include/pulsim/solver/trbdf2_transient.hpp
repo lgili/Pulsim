@@ -2890,7 +2890,7 @@ inline SimulationResult run_transient_trbdf2(
         // error: the LTE and the controller's verdict (reject, forced accept)
         auto tb_error = [&]<bool kE = false>() PULSIM_STEP_PHASE {
             (void)ed_hd0; (void)ed_d; (void)ed_y0;   // captured outside kE (MSVC)
-            (void)ed_sq0; (void)ed_shd0; (void)ed_sd; (void)ed_spsi5; (void)ed_sqmax;
+            (void)ed_sf; (void)ed_sq0; (void)ed_shd0; (void)ed_sd; (void)ed_spsi5; (void)ed_sqmax;
 
             // ---- LTE over the differential variables ----
             Real err_sq = Real{0};
@@ -3150,7 +3150,9 @@ inline SimulationResult run_transient_trbdf2(
                     e2 += w * w;
                 }
                 // the q rows keep their share without a floor: the floor
-                // never accepts a step on a stateful kind's error
+                // never accepts a step on a stateful kind's error (today
+                // unreachable: a stateful kind sets nl_effective; kept so a
+                // future relaxation of that guard cannot drop them)
                 const Real err_n = std::sqrt((e2 + q_sq) / static_cast<Real>(entries.size() + n_q));
                 if (err_n <= Real{1}) {
                     // Not clamped to 1 (keep h): measured, the SEPIC at

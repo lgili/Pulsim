@@ -762,7 +762,8 @@ carry_q pays. Not ported.
 **One round-off floor.** The estimate's floor (noise = J^-1(|J||x| +
 |b|)·eps) now runs once in `tb_error` for both integrators. The q rows
 keep their share of the norm without a floor, so the floor never accepts
-a step on a stateful kind's error. ESDIRK reads
+a step on a stateful kind's error (today the floor does not run at all
+with a stateful kind: they set nl_effective). ESDIRK reads
 each entry's state noise times Σ|e_j| (+|e_0|/γ); the noise right-hand
 side alternates signs (an all-positive one cancels through J^-1 where
 the elimination's round-off does not: PSFB defect (2), update-trbdf2-
@@ -816,3 +817,27 @@ Hand-off after entry 17:
   thermal` was not in the integration branch at the start of this step;
   it is now (origin/feat/core-integration a32b97ed), and this branch
   does not have it yet: merge first, then start.
+
+Verification on this tip: pytest 5971 passed (110 skipped, 8 xfailed)
+from the repository root; `pytest -m reference` 383 passed;
+`reference_status` exit 0, REFERENCE_STATUS.md unchanged (strict counts
+unchanged); C++ step, dsed, perf, thermal, record, layer5_v3, xdev pass
+on Eigen 5 and on Eigen 3.4.0 (trees deleted); g++-15 syntax check of
+bindings.cpp and test_recorder.cpp: no error, no warning in a touched
+header; stubs up to date; ruff clean; openspec strict valid. Byte
+compares against the pre-change build: goldens, stateful 41, engines,
+steps, pwl_identity 390/390, trbdf2_identity 371/371, AC 57/57, the
+recorder set and the esdirk43 scoreboard identical; only esdirk43 runs
+with stateful kinds moved (saturable LC, saturable table, the device
+circuits: the q rows in the norm), all inside their test bounds. Cost
+(instructions per accepted step, min of 3 interleaved runs, base | tip):
+buck_pwl 3100.2 | 3101.5, vsi_pwl 4769.8 | 4769.5, buck_trbdf2 11038.5 |
+11043.8, bridge_trbdf2 12799.4 | 12810.5 (all within +0.09 %). Reviewer
+(fresh context, read-only): one MSVC capture (`ed_sf` not named with
+`(void)` in tb_error), fixed; doubts left: the PMSM `stage_base`
+overwrites a non-zero step-start `lam_off` (only on a resume from a
+snapshot not taken at a commit), `ed_sqmax` is not in the resume
+snapshot, a q row that has always been exactly 0 has a scale of
+`numeric_limits::min()`, no test drives the new kinds through a diode
+event localisation, a failed stage or the forced SDIRK step. Full ctest
+not run.
