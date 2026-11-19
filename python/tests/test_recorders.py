@@ -44,9 +44,13 @@ RUNS = {
 # first step lags by V*dt/(2*tau), and that offset decays with tau, so the
 # window average is off by ~1.3e-3 V at dt = 1e-6 (bound V*dt/tau = 1e-2).
 # pwl / trbdf2 run through the kernel Simulation object, whose step hooks
-# feed the recorders while the engine runs; the exact engine stores exact
-# right limits, which its scheduler hook does not carry: stored-array pass.
+# feed the recorders while the engine runs; the exact engine runs this
+# diode-free RC on integrator 'auto', which has no step hooks: stored arrays.
 FEEDING = {"pwl": "in-loop", "trbdf2": "in-loop", "exact": "stored-arrays"}
+# a circuit with diodes routes the exact engine to its event-driven
+# integrator, which feeds the recorders in the loop too (session 26); the
+# diode-free RC above runs on 'auto' (no step hooks: the stored arrays)
+FEEDING_DIODES = dict(FEEDING, exact="in-loop")
 RC_BOUND = {"pwl": V * 1e-6 / TAU, "trbdf2": 2e-5 * V, "exact": 2e-5 * V}
 
 
@@ -395,7 +399,7 @@ def test_stream_delivers_the_recorders_kept_rows(eng):
     rec = p.Recorder("bus", rec_probes, keep="every", stream=st)
     res = p.simulate(_rectifier(), t_end=20e-3, recorders=[rec], **RUNS[eng])
     r = res.recorded["bus"]
-    assert r.feeding == FEEDING[eng]
+    assert r.feeding == FEEDING_DIODES[eng]
     assert st.channel_names == rec_probes
     got = st.get_new_samples()
     assert got is not None

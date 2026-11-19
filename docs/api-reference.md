@@ -414,7 +414,8 @@ r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
   | engine | mode | |
   |---|---|---|
   | `pwl`, `trbdf2` | `'in-loop'` | fed from the engine's step hooks while it runs: every accepted step, whatever `store_every` keeps |
-  | `exact` | `'stored-arrays'` | a pass over the stored result (its stored right limits are exact) |
+  | `exact` (event-driven integrator: diodes, loss ports, controllers, `integrator='rk45'`) | `'in-loop'` | fed from its step hooks: full MNA states, event rows at their exact instants (resolution `'exact'`); not with the junction temperature loop or a fresh `t_start` run |
+  | `exact` (`integrator='auto'` / `'bdf2'`) | `'stored-arrays'` | a pass over the stored result (its stored right limits are exact) |
 
   In-loop readings are functions of the state alone: `v()`, `i()` of an
   inductor / voltage source / branch-form switch or diode / resistor, and

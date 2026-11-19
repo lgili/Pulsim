@@ -48,6 +48,8 @@
 #include "pulsim/dsed/scheduler_auto.hpp"
 #include "pulsim/dsed/period_integrals.hpp"
 #include "pulsim/dsed/loss_port.hpp"
+#include "pulsim/dsed/loop_feed_adapter.hpp"
+#include "pulsim/record/loop_feed.hpp"
 #include "pulsim/dsed/periodic_orbit.hpp"
 #include "pulsim/dsed/design_batch.hpp"
 #include "pulsim/dsed/period_thermal.hpp"
@@ -1324,7 +1326,8 @@ void init_module(py::module_& m) {
            std::vector<bool> tick_monitors,
            const pulsim::solver::SolverSnapshot* resume,
            std::vector<Real> tick_origins,
-           std::vector<std::uint64_t> tick_next_k) {
+           std::vector<std::uint64_t> tick_next_k,
+           py::object loop_feed) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             // add-unified-event-queue group 3: control ticks on the
             // scheduler's queue; each gets the full MNA state.
@@ -1538,6 +1541,27 @@ void init_module(py::module_& m) {
                     });
                 }
             }
+            // add-probes-and-recorders R5 / 0b.11: the recorders fed in the loop
+            // (record::LoopFeed through dsed/loop_feed_adapter.hpp: full MNA
+            // states, events at their exact instants). Not with the junction
+            // loop: its kick moves the state after the step's hooks, so the
+            // feed's sample would miss the step's heat (the stored arrays have it)
+            std::optional<pulsim::dsed::ExactFeedAdapter<NativeAdapter>> feed_ad;
+            std::string feed_refused;
+            if (!loop_feed.is_none()) {
+                if (loss && loss->has_heat()) {
+                    feed_refused = "the junction temperature loop corrects the state after "
+                                   "each step's hooks (dsed/loss_port.hpp kick), so an in-loop "
+                                   "sample would miss the step's heat";
+                } else {
+                    auto& f = loop_feed.cast<pulsim::record::LoopFeed&>();
+                    f.set_circuit(adapter.graph(), adapter.pool());
+                    feed_ad.emplace(adapter, f.hooks(),
+                                    resume != nullptr ? resume->t : Real{0});
+                    feed_ad->attach(loss_hooks);
+                    sim.set_hooks(&loss_hooks);
+                }
+            }
             // session 24: resume at a snapshot's committed instant
             using ResumeT = pulsim::dsed::ExactResumeState<pulsim::topology::SwitchStateMask>;
             std::optional<ResumeT> rs;
@@ -1623,6 +1647,7 @@ void init_module(py::module_& m) {
                 d["heat_injected"] = out.heat_injected;
                 d["heat_pending"] = out.heat_pending;
             }
+            if (!feed_refused.empty()) d["loop_feed_refused"] = feed_refused;
             if (!tick_cbs.empty()) d["control_tick_counts"] = sim.tick_counts();
             d["exact"] = exact_report_dict(adapter, res.n_predicate_evals);
             if (mode_shadow_h_e > Real{0}) {
@@ -1681,6 +1706,7 @@ void init_module(py::module_& m) {
         py::arg("resume") = static_cast<const pulsim::solver::SolverSnapshot*>(nullptr),
         py::arg("tick_origins") = std::vector<Real>{},
         py::arg("tick_next_k") = std::vector<std::uint64_t>{},
+        py::arg("loop_feed") = py::none(),
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "

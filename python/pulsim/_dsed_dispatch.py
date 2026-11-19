@@ -517,8 +517,10 @@ def _mark_no_snapshot(res, integrator: str, t_start, bridge: str = "") -> None:
 
 def _check_resume_snapshot(snap, integrator, t_start) -> None:
     """Refuse by name a snapshot the exact engine cannot continue exactly
-    (session 24): another integrator, a shifted clock, a recorder's state,
-    or another engine's device histories it has no state for."""
+    (session 24): another integrator, a shifted clock, or another engine's
+    device histories it has no state for. A recorder's state (field 18) is
+    continued by the in-loop feed (session 26), or refused by
+    simulate(recorders=...) when this run cannot feed it."""
     if integrator == "bdf2":
         raise unsupported(
             "dsed", "resume_from", message=
@@ -531,12 +533,6 @@ def _check_resume_snapshot(snap, integrator, t_start) -> None:
             f"simulate(engine='dsed', resume_from=..., t_start={t_start!r}): the "
             f"exact engine resumes on its own clock at the snapshot's instant "
             f"({snap.t!r} s); a different t_start would relabel time. Drop t_start.")
-    if getattr(snap, "recorder_state", None) and len(snap.recorder_state):
-        raise unsupported(
-            "dsed", "resume_from", message=
-            "simulate(engine='dsed', resume_from=...): the snapshot carries an "
-            "in-loop recorder's state (field 18), which the exact engine does not "
-            "feed in its loop yet. Resume on the engine that wrote it.")
     cs = snap.controller_state
     if cs is not None and cs[0] == _EXACT_SNAPSHOT_KIND:
         return
@@ -1064,6 +1060,10 @@ def run_dsed_from_builder(
                 if mode_selection == "shadow":
                     shadow_kw["mode_shadow_h_e"] = h_e
             if opts.integrator == "rk45":
+                # add-probes-and-recorders R5: the recorders in the loop
+                from . import _recorders as _rec
+                feed_slot = _rec.ExactFeedSlot(builder)
+                _rec.attach_loop_feed(feed_slot, "dsed")
                 native_res = run_ped_b11(
                     native_adapter, sf, x0,
                     float(t_end) if resume_from is not None else t_window,
@@ -1072,6 +1072,7 @@ def run_dsed_from_builder(
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
                     store_every=opts.store_every, event_log=False,
                     settle_round_cap=SETTLE_ROUND_CAP, diode_law_rel=DIODE_LAW_REL,
+                    loop_feed=feed_slot.feed,
                     **shadow_kw,
                     **({"tick_fns": [f for f, _p, _o in ticks],
                         "tick_periods": [float(p) for _f, p, _o in ticks],
@@ -1079,6 +1080,8 @@ def run_dsed_from_builder(
                         "tick_monitors": [bool(getattr(f, "_pulsim_monitor", False))
                                           for f, _p, _o in ticks]}
                        if ticks else {}))
+                if "loop_feed_refused" in native_res:
+                    _rec.exact_feed_refused(native_res["loop_feed_refused"])
             elif opts.integrator == "bdf2":
                 native_res = run_bdf2_b11(
                     native_adapter, sf, x0, t_window,
