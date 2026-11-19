@@ -277,3 +277,67 @@ a source that follows a controller (`feature='closed_loop'`).
    orbit is up to 1e-5 of noise). → Reverse: the `polished` flag in
    `periodic_orbit.hpp`, `periodic_steady_state.py`,
    `_transient_shooting.py`; `sig0` / `on_tie` in `zero_band_on_`.
+
+## On the exact engine's settle (2026-11-19, merge of 2b1d808e)
+
+22. **The scheduler hunk of 21(a) is gone; the stop rule stands on the
+   exact engine's own fix, with a rounding floor in the estimate.**
+   The merge takes `dsed/scheduler.hpp` whole from
+   `feat/core-a-complementarity` 2b1d808e (settle at located diode
+   events, significance ladder; `sig0` / `on_tie` removed).
+   Re-proved on the merged build (macOS arm64, Eigen 5):
+   - 25 period runs within ±3e-10 V of the boost DCM orbit, dt_max = T
+     (the solver's map): 0 wrong-branch (all end at i_L = −1.259e-8 A).
+   - Boost DCM v_C* = 36.594400837864811 V, 21 runs, kernel = Python
+     loop; error +6.7e-11 V against the 50-digit 36.594400837798
+     (estimate 5.7e-11 V). The other DCM cases: buck −5.2e-11, boost
+     V_th 1 mV +7.2e-11 V. `test_periodic_orbit_kernel` keeps
+     max(1e-8, 2·estimate): 140× over the worst measured error.
+   - `test_design_thermal_kernel` 125 °C inverter: green at 1e-9.
+   - Gradient truths (boost and buck DCM): green at their bounds.
+   Two things moved, each with its mechanism:
+   (a) *A zero residual is not an exact orbit.* The merged map is far
+   less noisy: the sine into 1 µF ‖ 1 TΩ (|μ| = 1 − 1e-9) now ends
+   Newton with G = 0.0 exactly, the estimate (I − M)⁻¹·G = 0, and the
+   solve returned v(0) 5.2e-7 relative off (8.3e-8 V against a 3.2e-10 V
+   tolerance) as converged. The estimate is now
+   |(I − M)⁻¹·G| + |(I − M)⁻¹|·(u·scale): one ulp of each state's scale
+   is a floor of the map's rounding, amplified. Here it is 9.8e-8 V
+   (actual 8.3e-8 V) and the solve raises the noise floor again; at
+   rtol = 1e-6 it returns (estimate 1.8e-7, error 2.2e-7 V). Same
+   formula in the kernel loop (`periodic_orbit.hpp`), the Python loop
+   (`_rounding_floor`) and `_transient_shooting.py`. The floor is a
+   LOWER bound of the map's rounding (one ulp; the real rounding of a
+   period run is larger), so the estimate is not an upper bound of the
+   error (2.2e-7 V error against 1.8e-7 V estimate at rtol = 1e-6
+   above); its job is that a zero residual cannot claim an exact orbit.
+   `scale` is the running max over the period runs (0.44 V here, the
+   start-up runs), as in the rest of the rule. On the boost DCM
+   (|μ| = 0.99894) it raises the estimate from 3.4e-11 to 5.7e-11 V,
+   still 1000× inside rtol; the run counts do not move.
+   (b) *The orbit's sensitivity period runs at dt_max = T*
+   (`orbit_sensitivities(n_steps=1)`, was T/50). At dt_max = T/50 the
+   exact stepper's settle kept the boost DCM diode ON past its own
+   turn-off in 18 of 25 runs within ±3e-10 V of the orbit (event log
+   "D1 turns OFF" with old mask = new mask, −0.049 A at the next
+   samples; with the diode-law check on, the run raises
+   `DiodeModeInconsistentError` instead). At dt_max = T: 0 of 25. The
+   propagators are exact at any h, so only the sample grid changes;
+   the gradient truths and every orbit-KPI test are unchanged in
+   their bounds. Trade-off (reviewer): `_Mode` picks its tier from
+   u·‖A‖·h_max, so at h_max = T a near-defective mode that was tier 2 at
+   T/50 can be tier 3 and the orbit gradient is refused by name; at
+   T/50 the wrong branch is refused too (the `per > 1e-7` check). Both
+   are refusals, not wrong numbers; the DCM case is the common one.
+   → REQUEST to the exact-engine track (owner of
+   `zero_band_on_` / `decision_cap_`): the same settle at dt_max = T/50.
+   Reproducer: `.scratch/p6/sens_run.py` in the p4-pss worktree (boost
+   DCM of `test_periodic_orbit_kernel`, x within ±3e-10 V of
+   36.594400837798, `run_ped_native_builder(..., rtol=1e-11,
+   atol=1e-14, dt_init=T·1e-6, dt_max=T/50, enable_event_projection=
+   False)`).
+   FD ladder of `test_example_boost_gradient` re-measured: dcost/dL
+   3.75e-7 off at (1e-3, 1e-4) (was 1.15e-6), 2.7× inside the 1e-6
+   bound: not the ≥ 5× a finer ladder needs, so (1e-2, 1e-3) stays
+   (8.2e-8 L, 7.1e-12 C). → Reverse: `_rounding_floor` and its two
+   twins; `n_steps=1` back to 50 once the request lands.

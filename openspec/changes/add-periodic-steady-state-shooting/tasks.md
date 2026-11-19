@@ -25,7 +25,11 @@ Bode guide).
 Stop rule (DECISIONS 21): `rtol` bounds the orbit error estimate
 `(I − M)⁻¹·G`, reported as `orbit_error_estimate`; the boost DCM orbit
 is the mpmath value `probes/boost_dcm_truth.py` (36.594400837798 V) to
-7e-11 V. Open groups 6 and 7 need the event queue / device interface /
+7e-11 V. On the exact engine's own settle (DECISIONS 22, 2b1d808e) the
+branch's scheduler hunk is gone: 0 of 25 wrong-branch period runs, the
+orbit 6.7e-11 V from mpmath, and the estimate carries the map's rounding
+floor |(I − M)⁻¹|·(u·scale). Open request to the exact track: the same
+settle at dt_max = T/50 (18 of 25 wrong). Open groups 6 and 7 need the event queue / device interface /
 control graph in `x₀`; orbits on `engine='trbdf2'` with a frozen step
 grid inside the loop wait for the loop freeze to lift.
 

@@ -492,15 +492,19 @@ def test_slow_mode_is_not_accepted_on_a_small_residual():
     zero the residual is already within rtol, and the solver used to
     return x0 = 0 with stable=True. The state error is residual/(1 - |mu|);
     one Newton step finds the orbit, whose v(0) is i_pk/(omega C) =
-    0.159155 V. The map's rounding (~1e-12 V) is amplified 1e9 times, so
-    the answer is good to about 1 % (measured 0.15726 V), which the
-    default rtol=1e-9 cannot claim: that is a ConvergenceError naming
-    the noise floor (it used to be returned as the orbit), and a
-    tolerance the map can meet returns it within that tolerance."""
+    0.159155 V. The map's rounding is amplified 1e9 times: on the exact
+    engine of 2b1d808e Newton ends at G = 0.0 exactly with v(0) 8.3e-8 V
+    off, which the default rtol=1e-9 cannot claim. The estimate's
+    rounding floor makes that a ConvergenceError naming the noise floor
+    (DECISIONS 21, 22), and a tolerance the map can meet returns the
+    orbit within that tolerance."""
     b = p.CircuitBuilder()
     b.add_sine_current_source("I", "gnd", "o", 0.0, 1e-3, 1 / TP)
     b.add_capacitor("C", "o", "gnd", 1e-6)
     b.add_resistor("Rbig", "o", "gnd", 1e12)
+    # The merged exact map ends Newton at G = 0.0 exactly; the estimate's
+    # rounding floor |(I - M)^-1| (u scale) (9.8e-8 V here) is what still
+    # refuses the orbit (it was returned 8.3e-8 V off, DECISIONS 22).
     with pytest.raises(p.ConvergenceError, match="stopped decreasing.*rtol"):
         p.periodic_steady_state(b, period=TP)
     v_true = 1e-3 / (2 * np.pi / TP * 1e-6)

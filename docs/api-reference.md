@@ -634,7 +634,10 @@ sm.response([0.0])                   # H(z=1): d v_out / d D = 23.09 V
   and of the error estimate `(I − M)⁻¹·G` (the next correction) is
   within `rtol·(scale_i + |x0_i|)`. With a slow multiplier the error
   is `|G|/(1 − |μ|)`: on a DCM boost (|μ| = 0.99894) a residual of
-  1.1e-9 V is 1.07e-6 V of state. When the map's rounding, amplified
+  1.1e-9 V is 1.07e-6 V of state. The estimate includes the map's
+  rounding floor `|(I − M)⁻¹|·(u·scale)` (u the double-precision unit
+  roundoff): a residual that happens to be exactly 0 does not make
+  the orbit exact. When the map's rounding, amplified
   by `1/(1 − |μ|)`, keeps the estimate above `rtol`, the solve raises
   `ConvergenceError` (loosen `rtol`) instead of returning an orbit it
   cannot vouch for.

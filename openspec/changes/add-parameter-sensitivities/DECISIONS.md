@@ -204,3 +204,34 @@ confirmed. Found and fixed (each with a test in
   and the TR-BDF2 / fixed-engine parts of 6.x (unified stepper, loop
   freeze), 6.1 in the stepper (event queue), 8.x (controller gains through
   the control graph: not started), 9.x.
+
+## 13. Hand-off (2026-11-19, after the merge of the exact engine 2b1d808e)
+
+- 4.1 / 4.2 are done on the device-interface track (`Params<S>` on every
+  law, `device::seed_params`, `check_param_tangent` at 1e-8 against a
+  fourth-order central difference for every parameter of every kind).
+  Marked done here with the references.
+- 4.4 (new, open): a circuit gradient THROUGH a Newton law needs an
+  engine that runs the law and differentiates its step. The exact path
+  refuses Newton kinds (`kKindCaps`: `FixedTrap | TrBdf2` only); the
+  design's path is D1 in the stepper (group 5): LOOP FREEZE. Nothing on
+  this branch differentiates a Newton device; the reference
+  (`_sens_reference.shockley_run`, trapezoidal + Newton in numpy) stays
+  the only one.
+- 8.x open. The tick saltation is u⁺ = g(x, x_d, p) ⇒
+  S_u⁺ = ∂g/∂x·S_x + ∂g/∂x_d·S_xd + ∂g/∂p, with the held source value u
+  an extra state of the segment propagator (u' = 0). `g` is the compiled
+  graph's tick; it has no derivative today (`block_laws.h` doubles only).
+  REQUEST to the control-graph track: block laws instantiated on the AD
+  scalar (as `device/laws.hpp` did), or a per-kind Jacobian of the tick
+  map, exposed to Python. A finite difference of the tick would be the
+  low-order FD of the same code this change exists to replace.
+  Also needed here: `sensitivity._run` passing `tick_fns` /
+  `tick_periods` to `run_ped_native_builder`, and modes keyed by
+  (mask, held source values).
+- `orbit_sensitivities` runs its period at dt_max = T (was T/50): the
+  exact stepper's settle at T/50 picks the wrong diode branch near the
+  boost DCM orbit (shooting DECISIONS 22, request to the exact track).
+- 9.1 sweep guide waits for group 6; 9.2 is the verification of each
+  push (ruff, pytest, the touched C++ targets; full ctest on the
+  integration tree).

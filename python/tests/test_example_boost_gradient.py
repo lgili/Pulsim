@@ -35,12 +35,11 @@ def test_the_gradient_at_the_start_is_a_central_difference(bg):
         # Each value is a Newton-shooting orbit, exact to its rtol = 1e-9
         # of the state scale (the stop rule bounds the orbit error
         # estimate, DECISIONS 21): over a 1e-4 relative step that is up
-        # to ~1e-5 of the derivative. Measured 1.15e-6 of dcost/dL at
-        # (1e-3, 1e-4), the same digits before and after the stop-rule
-        # fix (this CCM orbit never took the old polish exit), and the
-        # selector picks 1e-4 (its estimate sees only truncation). At
-        # (1e-2, 1e-3) the Richardson value meets the exact gradient to
-        # 3.0e-10 (L) and 2.3e-12 (C).
+        # to ~1e-5 of the derivative. Re-measured on the exact engine's
+        # diode settle (DECISIONS 22): dcost/dL is 3.75e-7 off at
+        # (1e-3, 1e-4) (1.15e-6 before), only 2.7x inside the bound, so the
+        # finer ladder stays out; at (1e-2, 1e-3) the Richardson value
+        # meets the exact gradient to 8.2e-8 (L) and 7.1e-12 (C).
         fd, err, _h = ref.central_difference(val, x0[name],
                                              rel_steps=(1e-2, 1e-3))
         assert abs(g[name] - fd) <= 1e-6 * abs(fd), (name, g[name], fd, err)

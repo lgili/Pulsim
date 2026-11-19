@@ -470,6 +470,14 @@ def _scaled(v, x, scale, rtol):
     return float(q.max())
 
 
+def _rounding_floor(IM, scale):
+    """``|(I - M)^-1| (u scale)``: one ulp of each state's scale, amplified.
+    The period map's rounding is at least that; a residual that comes out
+    exactly zero does not make the orbit exact (|mu| = 1 - 1e-9 returned a
+    zero estimate 260x outside rtol=1e-9)."""
+    return np.abs(np.linalg.inv(IM)) @ (np.finfo(float).eps * scale)
+
+
 def _divides(P, T):
     """Is ``P`` a period of the section, i.e. ``T/P`` a positive integer?"""
     if not (P > 0 and math.isfinite(P)):
@@ -1293,9 +1301,9 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
             if singular:
                 err_est = float("nan")
                 break
-            corr = np.linalg.solve(IM, G)
+            corr = np.abs(np.linalg.solve(IM, G)) + _rounding_floor(IM, scale)
             est = _scaled(corr, traj.x0, scale, rtol)
-            err_est = float(np.abs(corr).max())
+            err_est = float(corr.max())
             if est <= 1.0:
                 break
             # a full Newton step whose correction did not halve is the

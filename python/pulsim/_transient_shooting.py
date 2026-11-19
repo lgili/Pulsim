@@ -258,7 +258,8 @@ class TransientMap:
 def solve(m, x, *, rtol, max_period_runs, n_relax):
     """Newton shooting on ``m`` from ``x``: ``(x0, M, mu, history,
     full_state, residual, last run)`` or a ``ConvergenceError``."""
-    from .periodic_steady_state import _ARMIJO, _N_LAMBDA, _conv
+    from .periodic_steady_state import (_ARMIJO, _N_LAMBDA, _conv,
+                                        _rounding_floor)
     n = m.n
     scale = np.zeros(n)
     history: list = []
@@ -322,9 +323,9 @@ def solve(m, x, *, rtol, max_period_runs, n_relax):
             if singular:
                 err_est = float("nan")
                 break
-            corr = np.linalg.solve(IM, G)
+            corr = np.abs(np.linalg.solve(IM, G)) + _rounding_floor(IM, scale)
             est = scaled(corr, x)
-            err_est = float(np.abs(corr).max())
+            err_est = float(corr.max())
             if est <= 1.0:
                 break
             stalls = stalls + 1 if polished >= 0.0 and not (

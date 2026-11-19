@@ -140,6 +140,26 @@ TEST_CASE("Orbit loop: the stop rule bounds the orbit error, not the residual",
         CHECK(s.status == dsed::OrbitStatus::NoiseFloor);
         CHECK(!s.has_period);
     }
+
+    SECTION("an exactly-zero residual still carries the map's rounding") {
+        // G = 0.0 exactly with |mu| = 1 - 1e-9: one ulp of the scale,
+        // amplified 1e9x (2.2e-7), is far above rtol (1e-9 x 2): the
+        // estimate must not report 0 and the solve must refuse
+        // (shooting DECISIONS 22: a sine into 1 uF || 1 TOhm did)
+        struct Exact {
+            Map operator()(const Vector& x, bool) const {
+                Map r;
+                r.x_end = x;
+                r.monodromy = DenseMatrix::Constant(1, 1, 1.0 - 1e-9);
+                r.scale = Vector::Constant(1, 1.0);
+                r.n_steps = 1;
+                return r;
+            }
+        };
+        const auto s = dsed::periodic_orbit_newton<SSM>(Exact{}, Vector::Ones(1), 1.0, {});
+        CHECK(s.status == dsed::OrbitStatus::NoiseFloor);
+        CHECK(!s.has_period);
+    }
 }
 
 TEST_CASE("Orbit loop: every non-converged outcome is a status, never an orbit",

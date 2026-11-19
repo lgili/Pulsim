@@ -15,7 +15,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   solve raises `ConvergenceError` (loosen `rtol`) instead of returning
   the orbit: a sine into 1 µF ‖ 1 TΩ (|μ| = 1 − 1e-9) used to return
   v(0) 1.2 % off at `rtol=1e-9`. In `Evaluator` design batches such a
-  design falls back to the Python path and fails there too.
+  design falls back to the Python path and fails there too. The
+  estimate includes the map's rounding floor `|(I − M)⁻¹|·(u·scale)`:
+  a residual that comes out exactly zero no longer reports an exact
+  orbit.
 
 ### Integration batch 14b-1: machines leftovers, TR-BDF2 tracks 9–10, device interface 4, ideal switch 6–7 merged
 

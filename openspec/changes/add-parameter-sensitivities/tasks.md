@@ -30,8 +30,9 @@ Reference values.
 - [x] 3.2 Tests: the three orbit gradients above within 1e-7 relative, and equal to central differences of the steady-state solve within 1e-7 (prototype: 3.4e-10, 5.5e-9, 3.5e-10). Added: the boost DCM orbit gradients against a 50-digit truth (`../add-periodic-steady-state-shooting/probes/boost_dcm_gradient_truth.py`): dv/dL −147071.20063612 (9.1e-13), dv/dC −26.9197607319 (2.7e-8), dv/dR 0.0294136442960 (1.1e-11), dv/dD 58.8485296697 (2.6e-12); and the DCM buck against `buck_dcm_gradient_truth.py`, which reproduces the prototype's three values: dv/dL −34575.1542277 (2.1e-12), dv/dC 76.7954491988 (1.4e-8), dv/dR 0.0692255006485 (1.3e-11), dv/dD 23.0895697020 (2.1e-12)
 
 ## 4. Parameters on the AD scalar (needs `add-unified-device-interface`)
-- [ ] 4.1 `Params<S>` for every device; parameter seeding helpers in `ad/ad_scalar.hpp`
-- [ ] 4.2 Per-device unit tests: `∂f/∂p`, `∂q/∂p` by AD against a central difference of the law within 1e-8 relative, for every parameter of every device kind
+- [x] 4.1 `Params<S>` for every device; parameter seeding helpers in `ad/ad_scalar.hpp` — done on the device-interface track: every law of `device/laws.hpp` and `device/machine_laws.hpp` is templated on `Params<S>`, seeding is `device::seed_params<D, N>` (`device/device.hpp`)
+- [x] 4.2 Per-device unit tests: `∂f/∂p`, `∂q/∂p` by AD against a central difference of the law within 1e-8 relative, for every parameter of every device kind — done on the device-interface track: `check_param_tangent` (`core/tests/layer5_v3/test_device_laws.cpp`, fourth-order central difference, every parameter, rows f and q) over ShockleyDiode, IdealDiode, LauritzenDiode, MosfetLevel1, IgbtLevel1, IgbtTail, SaturableInductor, NonlinearCapacitor, PmsmMna, InductionMachine; `test_device_interface.cpp` "parameters seeded as AD give the parameter derivative of the same law"
+- [ ] 4.4 Circuit sensitivities THROUGH a Newton law (Shockley `I_s` / `n·V_t`, saturable inductor `L_0` / `I_sat`, Level-1 MOSFET `K` / `V_T`) against an independent integration — OPEN, blocked: the exact path does not admit these devices (`kKindCaps`: Newton kinds run on `FixedTrap | TrBdf2` only, `pwl/device_pool.hpp`), and the path the design names for them is the D1 stage recurrence in the stepper (group 5, LOOP FREEZE). The laws' own ∂/∂p (4.1, 4.2) are ready for it
 - [x] 4.3 Test: `Params<Real>` build is bit-identical — for the four static kinds (memcmp against the model's own `Params`, `test_device_laws.cpp`; the default path never instantiates a law, so the golden hashes do not show it; the junction Coss law is a few ulp by design, DECISIONS #27); `static_assert` on layout (`laws::kLawLayout`; add-unified-device-interface DECISIONS #33, #35)
 
 ## 5. Recurrence in the stepper (needs `refactor-unified-transient-stepper`)
@@ -54,7 +55,7 @@ Reference values.
 - [x] 7.5 Measurement gate: a gradient with respect to 8 parameters costs one run with 8 back-substitutions per stage, against 16 runs by central differences (counted as period runs or steps, not wall time)
 
 ## 8. Controller gains (needs `add-compiled-control-graph`)
-- [ ] 8.1 Block parameters as parameters; discrete-state sensitivities updated at ticks
+- [ ] 8.1 Block parameters as parameters; discrete-state sensitivities updated at ticks — OPEN (2026-11-19): the saltation at a tick is the controller's Jacobian ∂u/∂(x, x_d, p), and the compiled graph exposes no derivative of its tick map (`blockchain/block_laws.h` is one double expression per kind, no `S`/AD instantiation); the exact sensitivity run also carries no ticks (`sensitivity._run` calls `run_ped_native_builder` without `tick_fns`, and `simulate(engine='dsed', sensitivities=…)` refuses controllers by name). Needs: block laws on the AD scalar (request to the control-graph track, DECISIONS 13), then source-value columns per tick segment here
 - [ ] 8.2 Test: discrete P loop on an RC (`K_p = 2`, 100 µs): `∂v[10]/∂K_p` equals the derivative of the closed-form recurrence within 1e-9
 
 ## 9. Docs and verification

@@ -233,8 +233,15 @@ template <class MaskT, class RunFn>
                 out.orbit_error_estimate = std::numeric_limits<Real>::quiet_NaN();
                 break;
             }
-            const Real est = scaled(delta, tx);
-            out.orbit_error_estimate = max_abs(delta);
+            // plus the map's rounding: one ulp of each state's scale,
+            // amplified by |(I − M)⁻¹| (an exactly-zero residual does not
+            // make the orbit exact; Python `_rounding_floor`)
+            const Vector bound =
+                delta.cwiseAbs()
+                + IM.inverse().cwiseAbs()
+                      * (std::numeric_limits<Real>::epsilon() * out.scale);
+            const Real est = scaled(bound, tx);
+            out.orbit_error_estimate = max_abs(bound);
             if (est <= Real{1}) {
                 break;
             }
