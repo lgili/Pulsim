@@ -198,13 +198,16 @@ def _ramp_exact(t, R=1e3, G=1e-3):
 
 
 @pytest.mark.parametrize("which", ["contract", "contract_v1"])
-@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2", "esdirk43"])
 def test_a_time_dependent_law_reads_the_solve_time(libs, which, engine):
     """The law g(t) is algebraic, so v_a at every output time is the closed
     form at THAT time: with t stuck at 0 v_a would stay at 0.5 V. The
-    library built against the header as of c90fc07f gets the time too."""
+    library built against the header as of c90fc07f gets the time too
+    (esdirk43: each of the five stages at its own time)."""
     b = _ramp(libs[which])
-    kw = dict(rtol=1e-6) if engine == "trbdf2" else {}
+    kw = dict(rtol=1e-6) if engine != "pwl" else {}
+    if engine == "esdirk43":
+        engine, kw["integrator"] = "trbdf2", "esdirk43"
     res = p.simulate(b, engine=engine, t_end=1e-3, dt=1e-5, **kw)
     t = np.asarray(res.times)
     v = np.asarray(res.states)[:, b.node_id_of("a")]
@@ -229,13 +232,27 @@ def test_the_static_path_hands_the_model_the_solve_time(libs):
     assert np.max(np.abs(v[1:] - _ramp_exact(t[1:]))) <= 1e-9   # Newton's tolerance
 
 
-def test_esdirk43_refuses_an_external_device_by_name(libs):
-    # its stages take no arbitrary pseudo-previous state yet (integration 14h)
-    with pytest.raises(p.UnsupportedError) as e:
-        p.simulate(_ramp(libs["contract"]), engine="trbdf2", t_end=1e-5,
-                   integrator="esdirk43")
-    assert (e.value.feature, e.value.device, e.value.kind) == (
-        "integrator=esdirk43", "X", "ExternalDevice")
+@pytest.mark.parametrize("make", [_satind, _rectifier])
+def test_twin_equals_the_builtin_law_on_esdirk43(libs, make):
+    # integrator='esdirk43': the external device's q rows take the stage
+    # form (base ψ, backward Euler of γh). The twin against the built-in law
+    # on the same integrator (same steps), and the built-in against TR-BDF2
+    # under a 100 ns ceiling at rtol 1e-10 (the truth here)
+    kw = dict(t_end=2e-3, dt=1e-6, rtol=1e-8, atol=1e-11, engine="trbdf2",
+              device_path="interface", integrator="esdirk43")
+    builtin = p.simulate(make(libs, False), **kw)
+    ext = p.simulate(make(libs, True), **kw)
+    ref = p.simulate(make(libs, False), **{**kw, "integrator": None, "dt": 1e-7,
+                                           "rtol": 1e-10, "atol": 1e-13})
+    xb, xe, xr = (np.asarray(r.states) for r in (builtin, ext, ref))
+    scale = np.maximum(np.abs(xr).max(axis=0), 1e-9)
+    twin = (np.abs(xe[-1] - xb[-1]) / scale).max()
+    truth = (np.abs(xb[-1] - xr[-1]) / scale).max()
+    # measured: twin 1e-15 / 0 (<= 1e-12 locally; 1e-9 for other libm, CI
+    # lesson); truth 1.3e-8 / 5.3e-9, the reference's own error (a 50 ns
+    # ceiling quarters it: 3.3e-9 / 1.7e-9)
+    assert twin <= 1e-9
+    assert truth <= 1e-7
 
 
 # ---- DC operating point: f(x), df/dx with the storage terms dropped -------
@@ -672,7 +689,11 @@ def test_trbdf2_snapshot_resume_carries_the_model_state(libs):
 
 
 @pytest.mark.parametrize("kw", [dict(engine="pwl", dt=1e-6),
-                                dict(engine="trbdf2", rtol=1e-7, atol=1e-10)])
+                                dict(engine="trbdf2", rtol=1e-7, atol=1e-10),
+                                # integration 14k: device_state per committed time
+                                # through the ESDIRK landings and forced SDIRK steps
+                                dict(engine="trbdf2", rtol=1e-7, atol=1e-10,
+                                     integrator="esdirk43")])
 def test_device_output_covers_a_pwm_run_with_gate_edges_and_a_diode(libs, kw):
     """trbdf2 commits a step, then a gate-edge restart moves t in the same
     iteration: every committed sample needs its trace row (review #1)."""
@@ -688,6 +709,7 @@ def test_device_output_covers_a_pwm_run_with_gate_edges_and_a_diode(libs, kw):
     fn = p.make_pwm_switch_fn(100e3, 0.5, b.switch_index_of("Q1"), b.graph.num_switches)
     res = p.simulate(b, switch_fn=fn, t_end=2e-4, **kw)
     v = np.asarray(res.v("vout"))
+    assert np.all(np.diff(np.asarray(res.times)) > 0)
     np.testing.assert_allclose(res.device_output("M", "i(a)"), 1e-3 * v, rtol=0, atol=1e-15)
 
 

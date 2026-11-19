@@ -257,9 +257,18 @@ def analytical_rc_step(times: List[float], v0: float, r: float, c: float) -> Lis
     return [v0 * (1.0 - math.exp(-t / tau)) for t in times]
 
 
-def analytical_rl_step(times: List[float], v0: float, r: float, ind: float) -> List[float]:
+def analytical_rl_step(times: List[float], v0: float, r: float, ind: float,
+                       t_rise: float = 0.0) -> List[float]:
+    """V(L) of a series R-L driven by a 0 -> V step, ``v0 = V(L) at 0+``: v0 e^{-t/tau}.
+    With ``t_rise`` > 0 (a pulse source's linear edge) the exact closed form of the
+    ramp: v0 (tau/t_r)(1 - e^{-t/tau}) on [0, t_r], v0 (tau/t_r)(e^{t_r/tau} - 1)
+    e^{-t/tau} after it (the source's later edges are not modelled)."""
     tau = ind / r
-    return [v0 * math.exp(-t / tau) for t in times]
+    if t_rise <= 0.0:
+        return [v0 * math.exp(-t / tau) for t in times]
+    k = v0 * tau / t_rise
+    return [-k * math.expm1(-t / tau) if t <= t_rise
+            else k * math.expm1(t_rise / tau) * math.exp(-t / tau) for t in times]
 
 
 def analytical_rlc_step(times: List[float], v0: float, r: float, ind: float, c: float) -> List[float]:
@@ -301,7 +310,7 @@ def validate_analytical(times: List[float], values: List[float], model: str, par
     elif model == "rl_step":
         r = parse_value(params["r"])
         ind = parse_value(params["l"])
-        reference = analytical_rl_step(times, v0, r, ind)
+        reference = analytical_rl_step(times, v0, r, ind, parse_value(params.get("t_rise", 0.0)))
     elif model == "rlc_step":
         r = parse_value(params["r"])
         ind = parse_value(params["l"])

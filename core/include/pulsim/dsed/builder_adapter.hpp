@@ -156,7 +156,8 @@ public:
         const topology::Graph& graph,
         const pwl::DevicePool& pool,
         pwl::PwlStateSpaceCache& cache,
-        std::function<Vector(Real)> b_extra_fn = nullptr)
+        std::function<Vector(Real)> b_extra_fn = nullptr,
+        bool loss_port = false)
         : graph_{graph},
           pool_{pool},
           cache_{cache},
@@ -166,7 +167,7 @@ public:
         collect_pwl_sources_();
         // The LTI extraction drops Newton devices; refuse them here so
         // every caller (not only simulate()) gets the typed refusal.
-        require_supported(graph, pool, pwl::Engine::Dsed);
+        require_supported(graph, pool, pwl::Engine::Dsed, loss_port);
     }
 
     // ----- HasLTIPerMode contract --------------------------------
@@ -608,6 +609,7 @@ public:
     /// Records so far, and dropping those of a projection the scheduler
     /// undid (it restored the pre-event state and projects again).
     [[nodiscard]] std::size_t reinit_log_size() const noexcept { return reinit_log_.size(); }
+    [[nodiscard]] const std::vector<ReinitRecord>& reinit_log() const noexcept { return reinit_log_; }
     void truncate_reinit_log(std::size_t n) { if (n < reinit_log_.size()) reinit_log_.resize(n); }
 
     /// The run's records, handed over (the log starts empty again).

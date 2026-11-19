@@ -43,25 +43,31 @@ def _buck(oracle):
     return b, pwm
 
 
-def _split(oracle, t1, t_end=8 * T):
+def _split(oracle, t1, t_end=8 * T, integrator=None):
+    kw = dict(engine="trbdf2", integrator=integrator)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         b, f = _buck(oracle)
-        r0 = p.simulate(b, t_end=t_end, engine="trbdf2", switch_fn=f)
+        r0 = p.simulate(b, t_end=t_end, switch_fn=f, **kw)
         b, f = _buck(oracle)
-        ra = p.simulate(b, t_end=t1, engine="trbdf2", switch_fn=f)
+        ra = p.simulate(b, t_end=t1, switch_fn=f, **kw)
         b, f = _buck(oracle)
         rb = p.simulate(b, t_start=float(ra.final_snapshot.t), t_end=t_end,
-                        engine="trbdf2", switch_fn=f,
-                        resume_from=ra.final_snapshot)
+                        switch_fn=f, resume_from=ra.final_snapshot, **kw)
     return r0, ra, rb
 
 
-def test_an_opaque_gate_resumed_at_its_edge_lands_it():
+# integration 14k: the same on integrator='esdirk43' (measured end 1.4e-7 V,
+# first step 7.4e-16 s; declared edges 3.8e-8 V)
+_INTEG = pytest.mark.parametrize("integ", [None, "esdirk43"])
+
+
+@_INTEG
+def test_an_opaque_gate_resumed_at_its_edge_lands_it(integ):
     t1 = 4.3 * T
     _, pre = _buck(False)
     assert pre(t1).to_string() != pre(t1 + 1e-12).to_string()   # AT the edge
-    r0, ra, rb = _split(False, t1)
+    r0, ra, rb = _split(False, t1, integrator=integ)
     assert not ra.final_snapshot.post_edge_derivatives
     x0, xb = np.asarray(r0.states)[-1], np.asarray(rb.states)[-1]
     # 3.2e-4 V before; the other splits of this run: <= 1.1e-6 V
@@ -74,12 +80,13 @@ def test_an_opaque_gate_resumed_at_its_edge_lands_it():
     assert tb[1] - tb[0] < 1e-12
 
 
+@_INTEG
 @pytest.mark.parametrize("t1", [4.15 * T, 4.3 * T, 4 * T])
-def test_an_edge_the_first_run_committed_is_not_landed_again(t1):
+def test_an_edge_the_first_run_committed_is_not_landed_again(t1, integ):
     """With declared edges the run that ends on an edge lands it (its
     snapshot says post_edge_derivatives) and the resumed run must not land
     it a second time; a split between edges is unchanged."""
-    r0, ra, rb = _split(True, t1)
+    r0, ra, rb = _split(True, t1, integrator=integ)
     tb = np.asarray(rb.times)
     assert tb[1] - tb[0] > 1e-9
     assert (ra._trbdf2_stats["n_gate_events"] + rb._trbdf2_stats["n_gate_events"]
