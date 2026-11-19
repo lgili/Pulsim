@@ -1424,13 +1424,23 @@ class Solver:
         the left limit, the second the right limit."""
         rows = {c: self.obs_row(c) for c in cols}
         out = {c: [] for c in cols}
-        last, prev, phi = None, None, None  # prev = (seg, tau, y); phi = (dyn, h, expm(H h))
+        last, prev, phi, cseg, ca = None, None, None, None, None  # prev = (seg, tau, y); phi = (dyn, h, expm(H h))
         for t in ts:
             side = 1 if (last is not None and t == last) else -1
             last = t
             seg = self.seg_at(t, side)
             tau = t - seg.t0
-            if seg.x and prev and prev[0] is seg and tau > prev[1]:
+            if not seg.x:
+                # eigen path: per column Re sum a_k e^{lam_k tau} (N terms, not N^2)
+                if seg is not cseg:
+                    cseg = seg
+                    ca = {c: seg.coef(r * seg.dyn.X) for c, (r, _) in rows.items()}
+                e = [mp.exp(lk * tau) for lk in seg.dyn.lam]
+                for c, (r, waves) in rows.items():
+                    v = mp.re(mp.fdot(ca[c], e)) + sum(s * wv.value(t, side) for wv, s in waves)
+                    out[c].append(v)
+                continue
+            if prev and prev[0] is seg and tau > prev[1]:
                 # expm per point is the cost of a fine grid: step from the last sample
                 h = tau - prev[1]
                 if phi is None or phi[0] is not seg.dyn or abs(h - phi[1]) > mp.mpf(10) ** (5 - mp.mp.dps) * h:
