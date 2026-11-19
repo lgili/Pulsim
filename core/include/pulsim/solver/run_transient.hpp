@@ -1192,9 +1192,7 @@ inline SimulationResult run_transient(
                                 const topology::SwitchStateMask& gates, Real for_dt,
                                 bool be, const Vector& bx, Size rounds, bool cycle) {
         auto& r = result.mode_report;
-        // A later stage entered with the previous stage's mask cycle never
-        // solves (run_event_iteration breaks before round 1): no settled
-        // mode to compare, and the cycle was counted at that stage.
+        // No solve at this site: no settled mode to compare.
         if (last_solved_bits.size() != diodes.entries().size()) return;
         mode_count_site(r, kind);
         r.settle_rounds_total += rounds;
@@ -1987,13 +1985,21 @@ inline SimulationResult run_transient(
                 // (adversarial-review finding P0-R3); there the
                 // iteration budget alone bounds the cost.
                 if (!nl_refresh_effective) {
+                    // A cycle of THIS call: `mask_cycle` stays set from an
+                    // earlier stage or sub-step of the outer step, and
+                    // breaking on it skipped this stage's solve (x stayed
+                    // at the earlier stage's time, committed as this one).
+                    bool cycle_here = false;
                     for (Size ms = 0; ms < n_masks_seen; ++ms) {
                         if (masks_seen[ms] == mask) {
-                            mask_cycle = true;
+                            cycle_here = true;
                             break;
                         }
                     }
-                    if (mask_cycle) break;
+                    if (cycle_here) {
+                        mask_cycle = true;
+                        break;
+                    }
                     if (n_masks_seen < masks_seen.size()) {
                         masks_seen[n_masks_seen++] = mask;
                     }

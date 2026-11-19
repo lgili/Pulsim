@@ -105,6 +105,26 @@ def _commutations(b, r, dt):
 
 
 @pytest.mark.parametrize("form", ["branch", "conductance"])
+def test_pwl_split_bus_is_the_same_under_rounding_fuzz(form):
+    # The D1+D4+ turn-on (23.578 ms) is split at a D4 crossing read from round-off;
+    # the restart's stage 1 then cycles (D4 on/off). That cycle used to make stage 2
+    # skip its solve, so stage 1's state (at t + gamma*h) was kept as the step's:
+    # -1.5045e-4 V instead of -3.733e-6 V on the branch form (the conductance form
+    # -9.594e-6 V), chosen by 1e-15 of rounding: by the platform's libm on CI.
+    dt = 1e-6
+    rng = np.random.default_rng(7)
+    errs = []
+    for k in range(5):   # draws 1-4 hit the cycle on macOS arm64 before the fix
+        d = np.zeros(6) if k == 0 else rng.uniform(-1, 1, 6) * FUZZ
+        r = p.simulate(_bridge(d, form), t_end=40e-3, dt=dt, engine="pwl",
+                       discontinuity_restart=True, enable_substep_state_correction=True)
+        errs.append(_window_avg(r) - TRUTH)
+    errs = np.asarray(errs)
+    assert np.abs(errs).max() <= 1e-5, errs
+    assert np.ptp(errs) <= 1e-6, errs
+
+
+@pytest.mark.parametrize("form", ["branch", "conductance"])
 @pytest.mark.parametrize("mode", [None, "lcp"])
 def test_pwl_finds_the_exact_bus_and_the_eleven_commutations(form, mode):
     # pwl, restart + split, dt = 1 us: -3.733e-6 V measured for both forms and
