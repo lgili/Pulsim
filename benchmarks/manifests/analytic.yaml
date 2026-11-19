@@ -9,8 +9,8 @@
 cases:
   rc_charge:
     pwl:
-      ceiling: 0.00318
-      measured: 0.00159
+      ceiling: 3.69e-06
+      measured: 1.845e-06
     trbdf2:
       ceiling: 4.52e-07
       measured: 2.26e-07
@@ -19,8 +19,8 @@ cases:
       measured: 1.545e-15
   rc_esr_charge:
     pwl:
-      ceiling: 0.000288
-      measured: 0.0001441
+      ceiling: 2.7e-08
+      measured: 1.348e-08
     trbdf2:
       ceiling: 3.25e-07
       measured: 1.627e-07
@@ -29,8 +29,8 @@ cases:
       measured: 4.195e-14
   rc_discharge:
     pwl:
-      ceiling: 0.00318
-      measured: 0.00159
+      ceiling: 3.69e-06
+      measured: 1.845e-06
     trbdf2:
       ceiling: 1.32e-06
       measured: 6.601e-07
@@ -39,8 +39,8 @@ cases:
       measured: 1.184e-14
   rl_step:
     pwl:
-      ceiling: 0.00223
-      measured: 0.001117
+      ceiling: 2.6e-06
+      measured: 1.298e-06
     trbdf2:
       ceiling: 1.25e-06
       measured: 6.251e-07
@@ -49,8 +49,8 @@ cases:
       measured: 4.368e-15
   rlc_underdamped:
     pwl:
-      ceiling: 0.00123
-      measured: 0.000613
+      ceiling: 2.84e-05
+      measured: 1.42e-05
     trbdf2:
       ceiling: 0.000116
       measured: 5.781e-05
@@ -59,8 +59,8 @@ cases:
       measured: 4.706e-14
   rlc_overdamped:
     pwl:
-      ceiling: 0.000106
-      measured: 5.306e-05
+      ceiling: 8.41e-08
+      measured: 4.207e-08
     trbdf2:
       ceiling: 4.48e-07
       measured: 2.238e-07
@@ -69,8 +69,8 @@ cases:
       measured: 2.705e-12
   lc_lossless:
     pwl:
-      ceiling: 0.00356
-      measured: 0.00178
+      ceiling: 6.61e-05
+      measured: 3.306e-05
     trbdf2:
       ceiling: 0.00011
       measured: 5.499e-05
@@ -119,8 +119,8 @@ cases:
       measured: 4.632e-07
   coupled_k099:
     pwl:
-      ceiling: 0.00153
-      measured: 0.000765
+      ceiling: 1.65e-05
+      measured: 8.273e-06
     trbdf2:
       ceiling: 1.63e-06
       measured: 8.127e-07
@@ -171,8 +171,8 @@ cases:
       ceiling: 1.08e-08
       measured: 5.383e-09
     trbdf2:
-      ceiling: 7.61e-08
-      measured: 3.807e-08
+      ceiling: 5.17e-08
+      measured: 2.587e-08
     dsed:  # was refused (static circuit); add-exact-propagator-strategy, static circuits
       ceiling: 1.0e-06
       measured: 5.383e-09
@@ -196,24 +196,24 @@ cases:
       refused: UnsupportedError
   halfwave_rl:
     pwl:
-      ceiling: 1.93e-05
-      measured: 9.646e-06
+      ceiling: 2.88e-06
+      measured: 1.439e-06
     trbdf2:
       ceiling: 7.52e-06
       measured: 3.761e-06
     dsed:  # was known: error (the stored-sample diode guard); the complementarity guard repairs it (batch 6a)
       ceiling: 1.14e-08
-      measured: 5.694e-09
+      measured: DiodeModeInconsistentError
       reason: 'exact-propagator slice 1 settles D ON through -0.85 A reverse current after the 2nd cycle
         (err_rms 0.3995, silently); the integration batch-4 diode-law guard turns that into DiodeModeInconsistentError
         (before the slice: "did not settle after 64 rounds")'
       measured: DiodeModeInconsistentError
   hard_switched_rc:
     pwl:
-      known: disagree
-      reason: trapezoidal ringing in the on-state, tau_on = R_on*C = 1 ps << dt = 1 ns (max error 100
-        % of span); review P5 resolution diagnostics
-      measured: 0.01005
+      ceiling: 9.83e-05
+      measured: 4.916e-05
+      # was known: disagree (trapezoidal ringing, tau_on = R_on*C = 1 ps << dt = 1 ns);
+      # agrees under the number-changing release defaults (restart rule + branch form)
     trbdf2:
       ceiling: 2.5e-06
       measured: 2.224e-06
@@ -225,8 +225,8 @@ cases:
       measured: 1.071e-13
   buck_ccm:
     pwl:
-      ceiling: 0.000512
-      measured: 0.0002561
+      ceiling: 2.46e-08
+      measured: 1.231e-08
     trbdf2:
       ceiling: 6.73e-07
       measured: 3.367e-07
@@ -235,11 +235,11 @@ cases:
       measured: 2.584e-15
   buck_dcm:
     pwl:
-      ceiling: 0.00108
-      measured: 0.0005377
+      ceiling: 3.74e-08
+      measured: 1.872e-08
     trbdf2:
-      ceiling: 1.13e-06
-      measured: 5.635e-07
+      ceiling: 1.12e-06
+      measured: 5.622e-07
       reason: 'update-trbdf2-post-event-restart / error-control: 4.136e-07 -> 5.635e-07 (integration batch
         5, reported; pre-merge ceiling 8.27e-07)'
     dsed:
@@ -258,8 +258,8 @@ cases:
       refused: UnsupportedError
   im_free_acceleration:
     pwl:
-      ceiling: 0.000192
-      measured: 9.618e-05
+      ceiling: 1.2e-05
+      measured: 6.0e-06
       reason: 'add-mna-native-machines D15: the first figure was measured at dt/2 (every
         step failed into a retry); now at the dt asked for, 4.711e-05 -> 9.618e-05'
     trbdf2:
@@ -269,8 +269,8 @@ cases:
       refused: UnsupportedError
   gapped_core_rl:
     pwl:
-      ceiling: 0.00318
-      measured: 0.00159
+      ceiling: 3.69e-06
+      measured: 1.845e-06
     trbdf2:
       ceiling: 4.53e-07
       measured: 2.263e-07
@@ -279,8 +279,8 @@ cases:
       measured: 4.367e-16
   three_limb_zero_seq:
     pwl:
-      ceiling: 0.00318
-      measured: 0.00159
+      ceiling: 3.69e-06
+      measured: 1.845e-06
     trbdf2:
       ceiling: 4.53e-07
       measured: 2.266e-07
