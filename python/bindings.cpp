@@ -34,6 +34,8 @@
 
 #include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/analysis/mna_sweep.hpp"
+#include "pulsim/pwl/device_readings.hpp"
+#include "pulsim/ir/fields.hpp"
 #include "pulsim/blockchain/blocks.hpp"
 #include "pulsim/blockchain/block_adapters.hpp"
 #include "pulsim/blockchain/chain.hpp"
@@ -1999,25 +2001,32 @@ void init_module(py::module_& m) {
                       try {
                           const auto kind = pool.kind_of(bid);
                           using K = pwl::DevicePool::StoredKind;
+                          // add-unified-device-interface 12.2: the scalar
+                          // params are the kind's listed field rows
+                          // (ir::kKindFields, `listed` = the scalars this
+                          // listed before, so the output is unchanged),
+                          // keyed by the authoring name; the cases below add
+                          // only kind names and the non-scalar entries
+                          // (references, tables, forms).
+                          {
+                              const auto& v = pool.params_of(bid);
+                              for (const auto& f : ir::fields_of(kind)) {
+                                  if (f.listed) {
+                                      params[py::str(std::string(f.key()))] = f.get(v);
+                                  }
+                              }
+                          }
                           switch (kind) {
                           case K::Resistor: {
                               kind_str = "resistor";
-                              const auto& p =
-                                  pool.resistor_params(bid);
-                              params["R_ohms"] = Real{1} / p.G;
                               break;
                           }
                           case K::VoltageSource: {
                               kind_str = "voltage_source";
-                              const auto& p =
-                                  pool.voltage_source_params(bid);
-                              params["V"] = p.V;
                               break;
                           }
                           case K::Switch: {
                               kind_str = "switch";
-                              params["g_on"]  = pool.switch_g_on(bid);
-                              params["g_off"] = pool.switch_g_off(bid);
                               if (pool.is_branch_form(bid)) {
                                   params["R_on"] = pool.branch_R_on(bid);
                                   params["branch_form"] = 1;
@@ -2026,25 +2035,15 @@ void init_module(py::module_& m) {
                           }
                           case K::Capacitor: {
                               kind_str = "capacitor";
-                              const auto& p =
-                                  pool.capacitor_params(bid);
-                              params["C_farads"] = p.C;
                               break;
                           }
                           case K::Inductor: {
                               kind_str = "inductor";
-                              const auto& p =
-                                  pool.inductor_params(bid);
-                              params["L_henries"] = p.L;
                               break;
                           }
                           case K::Diode: {
                               kind_str = "diode";
                               const auto& p = pool.diode_params(bid);
-                              params["g_on"]  = p.g_on;
-                              params["g_off"] = p.g_off;
-                              params["V_th"]  = p.V_th;
-                              params["V_f"]   = p.V_f;
                               if (p.gate != models::SwitchedDiode::Gate::None) {
                                   params["gate"] =
                                       p.gate == models::SwitchedDiode::Gate::Held
@@ -2059,26 +2058,16 @@ void init_module(py::module_& m) {
                           }
                           case K::NonlinearDiode: {
                               kind_str = "nonlinear_diode";
-                              // IdealDiode::Params struct varies; just
-                              // expose what schematic needs (none yet).
                               break;
                           }
                           case K::CurrentSource: {
                               kind_str = "current_source";
-                              const auto& p =
-                                  pool.current_source_params(bid);
-                              params["I"] = p.I;
                               break;
                           }
                           case K::PWMVoltageSource:
                               kind_str = "pwm_voltage_source"; break;
                           case K::SineVoltageSource: {
                               kind_str = "sine_voltage_source";
-                              // Read by periodic_steady_state's
-                              // period check.
-                              const auto& p =
-                                  pool.sine_voltage_source_params(bid);
-                              params["frequency"] = p.frequency;
                               break;
                           }
                           case K::PulseVoltageSource:
@@ -2112,60 +2101,39 @@ void init_module(py::module_& m) {
                               kind_str = "induction_machine_mna"; break;
                           case K::IdealTransformer: {
                               kind_str = "ideal_transformer";
-                              params["n"] =
-                                  pool.ideal_transformer_params(bid).n;
                               break;
                           }
                           // add-controlled-source-set
                           case K::VCCS: {
                               kind_str = "vccs";
                               const auto [cp, cn] = pool.control_nodes(bid);
-                              params["gm"] = pool.vccs_params(bid).gm;
                               params["in_pos"] = static_cast<int>(cp);
                               params["in_neg"] = static_cast<int>(cn);
                               break;
                           }
                           case K::CCCS:
                               kind_str = "cccs";
-                              params["gain"] = pool.cccs_params(bid).gain;
                               params["control"] = std::string(
                                   self.name_of(pool.control_branch(bid)));
                               break;
                           case K::CCVS:
                               kind_str = "ccvs";
-                              params["rm"] = pool.ccvs_params(bid).rm;
                               params["control"] = std::string(
                                   self.name_of(pool.control_branch(bid)));
                               break;
                           case K::Gyrator: {
                               kind_str = "gyrator";
                               const auto [p1, n1] = pool.control_nodes(bid);
-                              params["g"] = pool.gyrator_params(bid).g;
                               params["p1_pos"] = static_cast<int>(p1);
                               params["p1_neg"] = static_cast<int>(n1);
                               break;
                           }
                           case K::SineCurrentSource: {
                               kind_str = "sine_current_source";
-                              const auto& w =
-                                  pool.sine_current_source_params(bid).w;
-                              params["i_dc"] = w.v_dc;
-                              params["i_amplitude"] = w.v_amplitude;
-                              params["frequency"] = w.frequency;
-                              params["phase"] = w.phase;
                               break;
                           }
                           case K::PulseCurrentSource: {
                               kind_str = "pulse_current_source";
-                              const auto& w =
-                                  pool.pulse_current_source_params(bid).w;
-                              params["i_initial"] = w.v_initial;
-                              params["i_pulsed"] = w.v_pulsed;
-                              params["t_start"] = w.t_start;
-                              params["pulse_width"] = w.pulse_width;
-                              params["period"] = w.period;
-                              params["rise_time"] = w.rise_time;
-                              params["fall_time"] = w.fall_time;
                               break;
                           }
                           case K::PwlCurrentSource: {
@@ -5455,6 +5423,47 @@ void init_module(py::module_& m) {
         "freqs/H arrays.\n"
         "Optional `should_continue` is invoked between frequency\n"
         "points; raises pulsim.Cancelled when it returns False.");
+
+    // add-unified-device-interface 9.2: a static Newton branch's current and
+    // absorbed power at each stored state, from its device law (the reading
+    // the in-loop recorders take; `pwl::static_reading`).
+    m.def("static_device_readings",
+        [](const topology::Graph& graph, const pwl::DevicePool& pool,
+           py::array_t<double, py::array::c_style | py::array::forcecast> states,
+           Index branch_id) -> py::object {
+            // an IGBT with a tail: its current is i_ss plus the tail's delta,
+            // which needs the stored charge (not in the states)
+            if (pool.is_registered(branch_id)
+                && pool.kind_of(branch_id) == pwl::DevicePool::StoredKind::IgbtLevel1
+                && models::IgbtLevel1::has_tail(pool.igbt_level1_params(branch_id))) {
+                return py::none();
+            }
+            const auto s = states.unchecked<2>();
+            const auto n_rows = s.shape(0), n_cols = s.shape(1);
+            if (n_cols < static_cast<py::ssize_t>(pool.state_size(graph))) {
+                throw py::value_error(std::format(
+                    "static_device_readings: states has {} columns, the circuit "
+                    "needs {}", n_cols, pool.state_size(graph)));
+            }
+            py::array_t<double> cur(n_rows), pw(n_rows);
+            auto c = cur.mutable_unchecked<1>();
+            auto w = pw.mutable_unchecked<1>();
+            Vector x(n_cols);
+            for (py::ssize_t r = 0; r < n_rows; ++r) {
+                for (py::ssize_t k = 0; k < n_cols; ++k) x[k] = s(r, k);
+                pwl::DeviceReading d;
+                if (!pwl::static_reading(graph, pool, x, branch_id, d)) return py::none();
+                c(r) = d.i_pin[0];
+                w(r) = d.power;
+            }
+            return py::make_tuple(std::move(cur), std::move(pw));
+        },
+        py::arg("graph"), py::arg("pool"), py::arg("states"), py::arg("branch_id"),
+        "The current INTO the first pin and the absorbed power of a static "
+        "Newton branch (smooth / Shockley diode, level-1 MOSFET / IGBT "
+        "without the tail's delta) at each row of `states`, from its device "
+        "law. None when the branch is not a static Newton branch, or is an "
+        "IGBT with a tail (its delta needs the stored charge).");
 
     // ---- Control blocks (Phase A.1 in kernel) ----------------------------
     //

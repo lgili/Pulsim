@@ -736,6 +736,9 @@ def device_thermal_summary(
     * A Shockley diode (``add_shockley_diode``) dissipates
       ``v_D · i_D`` with ``i_D`` its exponential law at the recorded
       ``v_D``.
+    * A level-1 MOSFET, a level-1 IGBT without a tail and a smooth
+      diode dissipate ``v · i`` with ``i`` the kernel's device law at
+      each stored state.
     * A branch-form switch / diode (``form='branch'``, ``R_on >= 0``)
       dissipates its solved ``v · i`` (0 W for an ideal one) plus its
       impulsive re-initialisation energy as a constant offset
@@ -903,6 +906,33 @@ def device_thermal_summary(
                      - _views.node_voltage_trace(states_s, int(to_id)))
             i_D = _diode_state.shockley_current(v_D, prm)
             i_D_s = _diode_state.shockley_current(v_D_s, prm)
+            P_cond_t = v_D * i_D
+            P_start_t = v_D_s * i_D_s
+            v_w, v_s_w = win.cont(v_D, v_D_s)
+            i_w, i_s_w = win.cont(i_D, i_D_s)
+            E_cond = _views.pl_integral_product(win.times, v_w, i_w,
+                                                v_s_w, i_s_w)
+        elif kind in ("mosfet_level1", "igbt_level1", "nonlinear_diode"):
+            # the kernel's device law at each state, as device_loss_summary
+            from . import _pulsim as _kmod
+            from_id, to_id = desc.get("nodes", (None, None))
+            rd = _kmod.static_device_readings(builder.graph, builder.pool,
+                                              states, int(bid))
+            rd_s = _kmod.static_device_readings(builder.graph, builder.pool,
+                                                states_s, int(bid))
+            if rd is None or rd_s is None or from_id is None or to_id is None:
+                warnings.warn(
+                    f"device_thermal_summary: {name!r} ({kind}) is skipped: its "
+                    f"current needs a stored charge (an IGBT tail). Put a 1 mOhm "
+                    f"resistor in series and give its v*i to the thermal model.",
+                    stacklevel=2)
+                continue
+            v_D = (_views.node_voltage_trace(states, int(from_id))
+                   - _views.node_voltage_trace(states, int(to_id)))
+            v_D_s = (_views.node_voltage_trace(states_s, int(from_id))
+                     - _views.node_voltage_trace(states_s, int(to_id)))
+            i_D = np.asarray(rd[0], float)
+            i_D_s = np.asarray(rd_s[0], float)
             P_cond_t = v_D * i_D
             P_start_t = v_D_s * i_D_s
             v_w, v_s_w = win.cont(v_D, v_D_s)

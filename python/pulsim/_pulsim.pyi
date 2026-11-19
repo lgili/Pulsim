@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePath', 'DevicePool', 'DiodeModeInconsistentError', 'DtRetry', 'DutyRegister', 'EventIterationBreach', 'FluxMapDQ', 'Graph', 'GridKind', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'InternalError', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'OptionsError', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PulsimError', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'RunOptions', 'RunStats', 'Simulation', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_carrier_pwm_fn', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_edge_list_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_option_defaults', 'run_option_table', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePath', 'DevicePool', 'DiodeModeInconsistentError', 'DtRetry', 'DutyRegister', 'EventIterationBreach', 'FluxMapDQ', 'Graph', 'GridKind', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'InternalError', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'OptionsError', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PulsimError', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'RunOptions', 'RunStats', 'Simulation', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'device_field_table', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_carrier_pwm_fn', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_edge_list_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_option_defaults', 'run_option_table', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'static_device_readings', 'thermal_voltage']
 class PulsimError(Exception):
     pass
 class ConvergenceError(RuntimeError, PulsimError):
@@ -2395,6 +2395,9 @@ class SimulationResult:
         |                            | breakdown branch when ``BV > 0``): the  |
         |                            | kernel's law, ``add_shockley_diode``    |
         |                            | parameters                              |
+        | ``mosfet_level1``,         | the kernel's device law at each stored  |
+        | ``igbt_level1`` (no tail), | state (``static_device_readings``):     |
+        | ``nonlinear_diode``        | drain / collector / anode current       |
         +----------------------------+-----------------------------------------+
 
         Sentinel handling. Pulsim uses ``node_id = −1`` for the
@@ -2421,14 +2424,16 @@ class SimulationResult:
         ``result._switch_fn = your_switch_fn`` for a switch, and then the
         switch_fn is re-evaluated with a warning.
 
-        Not yet supported (their device params aren't exposed by
-        ``builder.components()`` today): ``mosfet_level1``,
-        ``igbt_level1``, ``nonlinear_diode``, ``lauritzen_diode``,
-        ``nonlinear_capacitor``, ``vcvs``, ``saturable_inductor``. Calls
-        on those kinds raise :class:`NotImplementedError` with the
-        recipe that works: a small series resistor (1 mOhm) whose
-        ``res.i()`` is the device current. ``device_loss_summary`` does
-        not report them either.
+        ``mosfet_level1``, ``igbt_level1`` (without a tail) and
+        ``nonlinear_diode`` read the kernel's device law at each stored
+        state; a ``saturable_inductor`` is its own branch-current column.
+        Not yet supported: ``lauritzen_diode``, ``nonlinear_capacitor`` and
+        an IGBT with a tail (their current needs a stored charge the states
+        do not give the law), and the ``power_mosfet`` composite. Calls on
+        those kinds raise
+        :class:`NotImplementedError` with the recipe that works: a small
+        series resistor (1 mOhm) whose ``res.i()`` is the device current.
+        ``device_loss_summary`` does not report them either.
 
         Sign convention. Current is positive flowing from the ``from``
         terminal to the ``to`` terminal of the ``add_*`` call (matches
@@ -4501,6 +4506,10 @@ def compute_dc_operating_point(graph: Graph, pool: DevicePool, mask: SwitchState
     """
 def describe_implausible_voltage(graph: Graph, pool: DevicePool, finding: ImplausibleVoltage) -> str:
     ...
+def device_field_table() -> list[typing.Any]:
+    """
+    Every device kind's value fields (ir::kKindFields): name, key (the builder argument), unit, bound, default, description, listed (in components()), derived (stored as another field).
+    """
 def dopri5_solve(f: collections.abc.Callable, t0: float, t_end: float, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], rtol: float = 1e-05, atol: float = 1e-08, dt_min: float = 1e-12, dt_max: float = 0.0, safety: float = 0.9, growth_max: float = 5.0, shrink_min: float = 0.2, dt_init: float = -1.0) -> dict[typing.Any, typing.Any]:
     """
     Dormand-Prince 5(4) embedded adaptive Runge-Kutta solver (Phase 2.4 C++ port). Solves dx/dt = f(t, x) from t0 to t_end. Returns a dict with t, x, n_accepted, n_rejected, n_f_evals. The Python f(t, x) callable is invoked from C++ with the GIL re-acquired around each evaluation.
@@ -4650,6 +4659,10 @@ def shockley_saturation_current_at(I_S_ref: float, T_kelvin: float, T_ref_kelvin
 def shockley_voltage_for_current(i: float, I_S: float = 1e-12, n: float = 1.0, V_T: float = 0.025852) -> float:
     """
     Closed-form inverse of the Shockley law: the forward voltage that carries `i` amps. Useful for sizing and for checking a simulation against the model.
+    """
+def static_device_readings(graph: Graph, pool: DevicePool, states: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], branch_id: int) -> typing.Any:
+    """
+    The current INTO the first pin and the absorbed power of a static Newton branch (smooth / Shockley diode, level-1 MOSFET / IGBT without the tail's delta) at each row of `states`, from its device law. None when the branch is not a static Newton branch, or is an IGBT with a tail (its delta needs the stored charge).
     """
 def thermal_voltage(T_kelvin: float) -> float:
     """

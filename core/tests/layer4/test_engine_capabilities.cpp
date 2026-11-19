@@ -11,6 +11,8 @@
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/solver/unsupported.hpp"
 
+#include <algorithm>
+#include <array>
 #include <string>
 #include <string_view>
 
@@ -49,10 +51,19 @@ TEST_CASE("kKindCaps has one row per StoredKind, named as the enum",
         if (row.newton()) {
             REQUIRE_FALSE(row.supports(Engine::Dsed));
             REQUIRE_FALSE(row.supports(Engine::Bdf1));
-            // add-external-device-abi: the AC sweep linearises an external
-            // device at the DC point from its declared Jacobians
-            REQUIRE(row.supports(Engine::AcSweep)
-                    == (std::string_view(row.name) == "ExternalDevice"));
+            // add-external-device-abi / add-unified-device-interface 10.2:
+            // the AC sweep linearises exactly these Newton kinds at the DC
+            // point (each has an analytic small-signal test); the induction
+            // machine is refused (no small-signal test yet). A new Newton
+            // kind must be added here or refused on purpose.
+            constexpr std::array<std::string_view, 9> kAcNewton{
+                "NonlinearDiode", "MosfetLevel1", "IgbtLevel1",
+                "SaturableInductor", "NonlinearCapacitor", "ShockleyDiode",
+                "LauritzenDiode", "PmsmMna", "ExternalDevice"};
+            const bool listed = std::find(kAcNewton.begin(), kAcNewton.end(),
+                                          std::string_view(row.name)) != kAcNewton.end();
+            REQUIRE(row.supports(Engine::AcSweep) == listed);
+            REQUIRE((listed || std::string_view(row.name) == "InductionMachineMna"));
         }
     }
 }

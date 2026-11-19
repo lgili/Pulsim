@@ -11,7 +11,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include "pulsim/analysis/linearize.hpp"
 #include "pulsim/analysis/mna_sweep.hpp"
+#include "pulsim/pwl/dc_operating_point.hpp"
+#include "pulsim/pwl/device_refresh.hpp"
+
+#include <Eigen/Dense>
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/pwl/assemble.hpp"
 #include "pulsim/topology/switch_state.hpp"
@@ -123,23 +128,64 @@ TEST_CASE("sweep of RC, RL and RLC matches the closed form to 1e-12",
     }
 }
 
-TEST_CASE("sweep refuses a Newton branch by name and kind",
-          "[analysis][mna_sweep][fix-mna-sweep-correctness]") {
+TEST_CASE("sweep linearises a Shockley diode at its DC point",
+          "[analysis][mna_sweep][add-unified-device-interface]") {
+    // fix-mna-sweep-correctness refused it; 10.2 linearises it: at the DC
+    // point v0, H = 1/(1 + R·g), g = I_S/(n·V_T)·e^{v0/(n·V_T)} + G_min
+    const Real I_S = 1e-12, VT = 0.025852, Gm = 1e-12, R = 1.0;
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "in", "gnd", Real{1.7});
+    b.add_resistor("R", "in", "a", R);
+    b.add_shockley_diode("Dj", "a", "gnd", I_S, 1.0, VT, Gm);
+    topology::SwitchStateMask mask(b.graph().num_switches());
+    const auto src = b.pool().branch_var_id_for_source(0, b.graph());
+    const auto a = b.node_id_of("a");
+    const auto op = pwl::compute_dc_operating_point(
+        b.graph(), b.pool(), mask,
+        pwl::dc_device_refresh(b.pool(), true, device::DevicePath::Interface));
+    const Real v0 = op.x[a];
+    REQUIRE(v0 > 0.6);
+    REQUIRE(v0 < 0.8);
+    const Real g = I_S / VT * std::exp(v0 / VT) + Gm;
+    const auto res = analysis::run_mna_sweep(b.graph(), b.pool(), mask, {100.0, 1e4},
+                                             static_cast<Size>(src), static_cast<Size>(a));
+    for (const auto& H : res.H) {
+        REQUIRE(std::abs(H - Complex{1.0 / (1.0 + R * g), 0.0}) <= 1e-12);
+    }
+}
+
+TEST_CASE("linearize: a linear circuit is the sweep's linear part, bit for bit",
+          "[analysis][mna_sweep][add-unified-device-interface]") {
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "in", "gnd", Real{1});
+    b.add_resistor("R", "in", "a", Real{10});
+    b.add_inductor("L", "a", "o", Real{1e-3});
+    b.add_capacitor("C", "o", "gnd", Real{1e-6});
+    topology::SwitchStateMask mask(b.graph().num_switches());
+    const auto lin = analysis::linearize(b.graph(), b.pool(), mask,
+                                         Vector::Zero(b.pool().state_size(b.graph())));
+    const auto sm = analysis::detail::assemble_sweep_matrices(b.graph(), b.pool(), mask);
+    REQUIRE(lin.G.nonZeros() == sm.G.nonZeros());
+    REQUIRE(lin.C.nonZeros() == sm.E.nonZeros());
+    REQUIRE(Eigen::MatrixXd(lin.G) == Eigen::MatrixXd(sm.G));
+    REQUIRE(Eigen::MatrixXd(lin.C) == Eigen::MatrixXd(sm.E));
+}
+
+TEST_CASE("linearize: a stored-charge device adds one local unknown",
+          "[analysis][mna_sweep][add-unified-device-interface]") {
     builder::CircuitBuilder b;
     b.add_voltage_source("V", "in", "gnd", Real{1.7});
     b.add_resistor("R", "in", "a", Real{1});
-    b.add_shockley_diode("Dj", "a", "gnd");
+    b.add_lauritzen_diode("D", "a", "gnd", 1e-12, 1.0, 0.025852, 1e-4, 5e-5);
     topology::SwitchStateMask mask(b.graph().num_switches());
-    const auto src = b.pool().branch_var_id_for_source(0, b.graph());
-    try {
-        (void)analysis::run_mna_sweep(b.graph(), b.pool(), mask, {100.0},
-                                      static_cast<Size>(src),
-                                      static_cast<Size>(b.node_id_of("a")));
-        FAIL("expected a refusal");
-    } catch (const std::invalid_argument& e) {
-        const std::string msg = e.what();
-        INFO(msg);
-        REQUIRE(msg.find("'Dj'") != std::string::npos);
-        REQUIRE(msg.find("ShockleyDiode") != std::string::npos);
-    }
+    const auto n = static_cast<Index>(b.pool().state_size(b.graph()));
+    const auto op = pwl::compute_dc_operating_point(
+        b.graph(), b.pool(), mask,
+        pwl::dc_device_refresh(b.pool(), true, device::DevicePath::Interface));
+    const auto lin = analysis::linearize(b.graph(), b.pool(), mask, op.x);
+    REQUIRE(lin.n_circuit == n);
+    REQUIRE(lin.G.rows() == n + 1);
+    // the charge row: A·q_M − q_E(v)/T_M, mass 1
+    REQUIRE(lin.C.coeff(n, n) == 1.0);
+    REQUIRE(lin.G.coeff(n, n) == Catch::Approx(1.0 / 5e-5 + 1.0 / 1e-4).epsilon(1e-15));
 }

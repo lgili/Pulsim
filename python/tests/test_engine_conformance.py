@@ -1167,16 +1167,27 @@ def test_charge_law_and_power_mosfet_cells(name, engine):
 
 
 @pytest.mark.parametrize("name", list(VARIANT_CELLS))
-def test_charge_law_and_power_mosfet_refused_by_the_ac_sweep(name):
+def test_charge_law_and_power_mosfet_on_the_ac_sweep(name):
+    # add-unified-device-interface 10.2: every kind of these composites is
+    # linearised at the DC point (each law's analytic small-signal test is in
+    # test_ac_linearize.py); the composite runs and the device is present.
     cell, kinds = VARIANT_CELLS[name]
-    assert not _composite_supported(kinds, "ac_sweep")
-    b = cell[0](True)
-    with pytest.raises(p.UnsupportedError) as ei:
-        k.run_mna_sweep_kernel(
+    assert _composite_supported(kinds, "ac_sweep")
+
+    def H(on):
+        b = cell[0](on)
+        return np.asarray(k.run_mna_sweep_kernel(
             b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
-            [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
-    assert ei.value.engine == "ac_sweep"
-    assert ei.value.device == cell[2]
+            [1e2, 1e4, 1e6], b.node_id_of("o"), b.node_id_of("o")).H, dtype=complex)
+
+    on = H(True)
+    assert np.all(np.isfinite(on))
+    if name == "IgbtLevel1[tail]":
+        # this cell's DC point has the gate at 0 V: the IGBT is off, so its
+        # tail has nothing to linearise (the control differs only by the
+        # tail); the conducting tail is tested in test_ac_linearize.py
+        return
+    assert np.max(np.abs(on - H(False))) > PRESENCE * np.max(np.abs(on))
 
 
 # ---------------------------------------------------------------------
@@ -1247,8 +1258,9 @@ def test_linear_magnetic_cell_on_the_ac_sweep():
 
 
 def test_saturable_permeance_refused_by_the_ac_sweep():
+    # the NonlinearCapacitor kind is linearised, but not as a permeance on a
+    # magnetic node: its DC point needs a nonlinear flux-conservation row
     cell, kinds = MAGNETIC_CELLS["magnetic[saturable_permeance]"]
-    assert not _composite_supported(kinds, "ac_sweep")
     b = cell[0](True)
     with pytest.raises(p.UnsupportedError) as ei:
         k.run_mna_sweep_kernel(
@@ -1256,6 +1268,7 @@ def test_saturable_permeance_refused_by_the_ac_sweep():
             [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
     assert ei.value.engine == "ac_sweep"
     assert ei.value.device == "Core"
+    assert ei.value.feature == "nonlinear_permeance"
 
 
 # ---------------------------------------------------------------------
@@ -1911,6 +1924,15 @@ def test_machine_ac_sweep_cell(name):
             H(True)
         assert ei.value.engine == "ac_sweep"
         assert ei.value.device == dev or ei.value.device.startswith(dev + "_")
+        return
+    if name != "dc_machine":
+        # the PMSM kind is linearised at an equilibrium only; these driven
+        # cells are not one (a current, so a torque the held DC point does
+        # not balance): refused by name, the reason stated
+        with pytest.raises(p.UnsupportedError) as ei:
+            H(True)
+        assert ei.value.engine == "ac_sweep" and ei.value.device.startswith(dev + "_")
+        assert "torque balance" in str(ei.value)
         return
     on = H(True)
     assert np.max(np.abs(on - off)) > PRESENCE * np.max(np.abs(on))

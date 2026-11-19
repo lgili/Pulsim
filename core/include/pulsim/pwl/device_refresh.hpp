@@ -136,7 +136,29 @@ struct StepCtx {
     const bool want =
         enable.has_value() ? *enable : pool.has_nonlinear_devices();
     if (!want) return {};
-    return standard_static_refresh(path);
+    if (path != device::DevicePath::Interface || pool.lauritzen_diode_branches().empty()) {
+        return standard_static_refresh(path);
+    }
+    // add-unified-device-interface 10.3: on the interface path a Lauritzen
+    // diode enters the DC point through its law at Formula::Dc (its local
+    // charge row solved at q̇ = 0: i = τ/(τ+T_M)·i_S(v) + G_min·v). The hand
+    // path has no DC stamp for it (an open circuit); unchanged until the
+    // release. (The IGBT tail's DC current is exactly 0: no stamp.)
+    return [base = make_interface_static_refresh()](
+               const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
+               const topology::Graph& graph, const DevicePool& p) -> Real {
+        Real m = base(x, J_nl, f_nl, graph, p);
+        using Law = device::laws::LauritzenDiode;
+        constexpr device::StepCtx dc{Real{0}, device::Formula::Dc, Real{0}};
+        for (const Index b : p.lauritzen_diode_branches()) {
+            const auto& br = graph.branch(b);
+            std::array<Real, 3> xl{};
+            m = std::max(m, iface::stamp_local<Law, 2>(
+                                {br.from, br.to}, xl, Law::from(p.lauritzen_diode_params(b)),
+                                x, dc, Real{0}, Real{0}, Real{0}, &J_nl, &f_nl));
+        }
+        return m;
+    };
 }
 
 // The Newton stamp of each stateful kind, reading the step ONLY from `c`.

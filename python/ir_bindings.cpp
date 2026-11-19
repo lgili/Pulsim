@@ -236,6 +236,35 @@ py::tuple run_pwl_points(const Circuit& base, const std::vector<std::string>& na
 }  // namespace
 
 void init_module(py::module_& m) {
+    // add-unified-device-interface 12.2: the field rows (ir::kKindFields)
+    // in one Python shape, for the generated device reference and
+    // `pulsim.device_fields`. `default` is the value-initialised Params'.
+    m.def("device_field_table", []() {
+        py::list out;
+        for (std::size_t k = 0; k < pulsim::pwl::DevicePool::kNumKinds; ++k) {
+            const auto d = pulsim::ir::yaml_detail::make_params(k);
+            py::list fields;
+            for (const auto& f : pulsim::ir::kKindFields[k]) {
+                py::dict e;
+                e["name"] = std::string(f.name);
+                e["key"] = std::string(f.key());
+                e["unit"] = std::string(f.unit);
+                e["bound"] = std::string(pulsim::ir::bound_text(f.bound));
+                e["default"] = f.get(d);
+                e["description"] = std::string(f.description);
+                e["listed"] = f.listed;
+                e["derived"] = f.derived;
+                fields.append(std::move(e));
+            }
+            py::dict row;
+            row["kind"] = std::string(pulsim::ir::kKindYaml[k]);
+            row["fields"] = std::move(fields);
+            out.append(std::move(row));
+        }
+        return out;
+    }, "Every device kind's value fields (ir::kKindFields): name, key (the "
+       "builder argument), unit, bound, default, description, listed (in "
+       "components()), derived (stored as another field).");
     m.def("_eval_expr", [](const std::string& text, const std::vector<std::string>& names,
                            const std::vector<pulsim::Real>& values, const std::string& who) {
             if (names.size() != values.size()) {

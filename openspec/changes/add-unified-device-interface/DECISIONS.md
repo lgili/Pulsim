@@ -1063,3 +1063,241 @@
 - Task groups 5–14: every open box carries its reason in tasks.md. Next
   candidates without a loop edit: 10.x (AC/DC from f and q), 12.x (field
   tables). No new stepper request this slice (#49's two stand).
+
+## Slice 11 — AC and DC from f and q (2026-11-19)
+
+55. **`linearize` (task 10.1/10.2): what is linearised, where, and what is
+    refused.** `analysis/linearize.hpp`. The linear part is the sweep's own
+    assembly (`linear_part`: `assemble_segment_split` at the caller's mask,
+    E = C_split/2), unchanged operation for operation; a circuit with no
+    Newton device returns it before anything else runs (62 sweep outputs of
+    the existing tests byte-identical against the merged tip; C++ test
+    "a linear circuit is the sweep's linear part, bit for bit"). External
+    devices keep their path (same calls, same order). Every built-in
+    Newton kind adds ∂f/∂x to G and ∂q/∂x to C from ONE forward-AD
+    evaluation of its `Device` law at x0. The operating point: the DC point
+    of the caller's mask through the device laws
+    (`dc_device_refresh(…, Interface)`), PWL diodes held at the mask (as the
+    external path always did); internal unknowns (the saturable inductor's
+    current, the PMSM's phase currents, θ, ω) are read from that x0; a
+    LOCAL charge (Lauritzen q_M, IGBT-tail Q) is taken at its DC value
+    (its affine row solved at q̇ = 0) and kept as an EXTRA unknown after the
+    circuit's — condensing it would give an ω-dependent admittance, not a
+    real (G, C) pair. Refused by name (`UnsupportedError(engine='ac_sweep')`):
+    InductionMachineMna (kind table; no analytic small-signal test written);
+    a Jiles–Atherton inductor (`feature='hysteretic_core'`: the incremental
+    L depends on the direction of the excursion, a minor loop — no unique
+    small-signal model); a nonlinear capacitor on a magnetic node
+    (`feature='nonlinear_permeance'`: its DC point needs a nonlinear
+    flux-conservation row the DC assembly lacks — it used to fail as "no DC
+    operating point"); a PMSM held at ω ≠ 0 (abc quantities rotate: no
+    equilibrium) or whose shaft row of the FREE system, (G·x0 + b)_ω +
+    f_ω(x0), is not 0 to 1e-9 of its largest term (the DC point holds the
+    mechanics, so it does not enforce T = T_load by itself). The two
+    conformance PMSM cells (BLDC harmonics, flux map) are driven, so not in
+    torque balance: they are refused with that reason. The IGBT-tail
+    conformance cell's DC point has the gate at 0 V (IGBT off), so the tail
+    has nothing to linearise there: presence is not asserted for it (the
+    conducting tail is the analytic test).
+
+56. **The DC point through the device contract (task 10.3).** What
+    `Formula::Dc` (q̇ = 0) means per kind, and what the code does:
+    static kinds — already their laws on the interface path; saturable
+    inductor — the DC assembly's short IS the law at DC (f₂ = v = 0);
+    nonlinear capacitor — open IS the law (q only); IGBT tail — its DC
+    current is exactly 0 (Q = τ·k·i_ss, i_tail = Q/τ − k·i_ss): no stamp;
+    Lauritzen diode — the hand path has NO DC stamp (an open circuit: a
+    1.7 V source behind 1 Ω reads 1.700 V at the anode, the law 0.7242 V);
+    `dc_device_refresh` on `DevicePath::Interface` now stamps its law at
+    DC (local row condensed, `iface::stamp_local` at `Formula::Dc`), mpmath
+    bisection agrees to 1e-12. The default path is untouched (no default
+    number moves). NOT done: `run_transient(start_from_dc_op)` on the
+    interface path builds its DC refresh inside the loop file
+    (`nl_static`), so it still opens the Lauritzen diode — a one-line loop
+    hunk (use `dc_device_refresh(pool, …, path)` there) left for the
+    stepper owner / the release. PMSM — `Formula::Dc` would be WRONG at a
+    held speed (q̇ = ω·∂λ/∂θ ≠ 0); the DC assembly's held-mechanics stamp
+    (v = R·i + ω_e·(∂L·i + λ'_pm)) is the right law; tested against the
+    closed form at ω0 = 40 rad/s on both paths (1e-12).
+
+    **The loop hunk, for the next agent (one place, two lines; not applied
+    in slice 11 — LOOP FREEZE).** File `core/include/pulsim/solver/
+    run_transient.hpp`, the `if (start_from_dc_op)` block of `run_transient`
+    (the pwl engine; trbdf2 refuses `start_from_dc_op`), merged tip
+    7f5ec31f lines ~786-802:
+    (a) the call `pwl::compute_dc_operating_point(graph, pool,
+        switch_fn(opts.t_start), nl_static, …)` passes `nl_static`; pass
+        `nl_refresh ? nl_static : pwl::dc_device_refresh(pool, true,
+        opts.device_path)` instead (`nl_refresh` is the deprecated
+        caller override, which must keep winning). On `DevicePath::Legacy`
+        `dc_device_refresh` returns `standard_static_refresh(Legacy)`, the
+        same function `nl_static` is, so the default path stays
+        byte-identical;
+    (b) after `history.seed_from_dc_op(x);` the block seeds only the PMSM
+        and external-device histories; add
+        `hs.get<pwl::LauritzenDiodeHistory>().seed_from_dc_op(x);` so q_M
+        starts on its DC curve (q_M = q_e·τ/(τ + T_M), dq_M/dt = 0) rather
+        than at 0 — without (b), (a) gives the right sample 0 and then a
+        recovery transient from an empty charge.
+    The test that must fail before and pass after: V = 2 V, R = 1 Ω,
+    `add_lauritzen_diode("D", "a", "gnd", tau=1e-4, T_M=5e-5)`,
+    `simulate(b, 1e-6, dt=1e-7, engine="pwl", start_from_dc_op=True,
+    device_path="interface")`: `r.v("a")[0]` must equal
+    `compute_dc_operating_point(…, device_path=Interface).x[a]` = 0.73096 V
+    (measured on 7f5ec31f: 2.000 V, the open diode, on both paths), and
+    `r.v("a")` should then stay at it over the run (a consistent start has
+    no transient; this flatness is expected, not measured — gate it at
+    1e-6 and tighten once seen); on `device_path="legacy"` sample 0 stays 2.000 V
+    (no default number moves).
+
+57. **trbdf2's error control did not refine a small sine** (observation for
+    the TR-BDF2 track, not chased here). The junction-capacitor case at
+    10 kHz with a 5 mV sine on 5 V: rtol 1e-8, 1e-10 and 1e-12 all gave
+    1004 accepted points (span/1000, the default ceiling) and the same
+    8.6e-4 error of the fitted fundamental; the ceiling alone sets the
+    accuracy (1.5e-4 at h_max = 1 µs, 1.5e-6 at 0.1 µs, 9.8e-8 at 25 ns).
+    The local error per step there is ~amp·(ωh)³/12 ≈ 1e-7 V against
+    rtol·|x| = 5e-10 V, so the estimate does not see it. The cross-check
+    tests pass `dt = T/400` (the ceiling).
+
+58. **Measured errors (task 10.4).** |H_sweep − H_ref|/|H_ref| at
+    100 Hz / 1 kHz / 10 kHz; closed form | small-signal trbdf2 transient
+    (1e-3·bias sine, h_max = T/400, whole periods after ≥ 2 ms, cubic
+    spline + Simpson, time-weighted):
+    Shockley at 1 A 6.9e-13 6.8e-13 3.6e-13 | 6.8e-7 1.8e-6 8.5e-6;
+    saturable L(I) 5.7e-12 5.7e-13 5.8e-14 | 1.1e-5 1.0e-5 5.0e-6;
+    junction C(V) 1.0e-10 9.7e-11 5.3e-11 | 2.7e-7 2.5e-6 9.3e-6;
+    transformer k = 0.99 1.4e-17 1.4e-16 5.9e-16 | 1.9e-6 1.3e-6 3.0e-7;
+    RC through the closed switch < 1e-9 (asserted) | < 1e-3 (asserted);
+    Lauritzen 7.0e-13 7.1e-13 7.1e-13 | 7.6e-7 3.1e-6 2.8e-6;
+    IGBT static 1.3e-10 ×3 | 8.7e-9 ×3; IGBT + tail 1.3e-10 ×3 |
+    3.2e-7 2.5e-6 1.5e-6; MOSFET L1 1.7e-9 1.5e-9 7.2e-10 |
+    6.5e-7 5.0e-6 9.9e-6; smooth ideal diode 3.2e-10 3.2e-10 2.3e-10 |
+    1.2e-7 9.8e-7 7.0e-6; PMSM at rest (motional impedance) < 1e-9 |
+    2.2e-6 2.3e-7 7.5e-8. MOSFET / IGBT / ideal diode take g from a central
+    difference of two DC points (their closed form needs the law's
+    smoothing); the others from the law's own closed form. Tiny-bias
+    linearisations: Shockley at 1 pA (g itself, 1.6e-9: the 1/H − 1 extraction cancels) and the saturable
+    inductor at 1e-12 A (L_0 to 1e-9) match. Gates: closed form 1e-9
+    (1e-6 for the central-difference kinds, 1e-10 Lauritzen), transient
+    1e-3.
+
+59. **Generic outputs (tasks 9.2-9.5) without the 9.1 loop recording.**
+    `res.i` reads the kernel law for the static kinds through a new
+    read-only binding, `static_device_readings(graph, pool, states,
+    branch_id)`, which runs `pwl::static_reading` (the law the in-loop
+    recorders read) on each stored state. No loop file is touched. The
+    Python ladder stays for the kinds it already covered, so no existing
+    `res.i` number moves (baseline identical); deleting it is 9.1's job.
+    Uncovered, still raising with the 1 mOhm recipe: the Lauritzen diode
+    and the IGBT tail (the law needs the stored charge, a local unknown
+    the states do not hold), the nonlinear capacitor (its current is
+    dq/dt, a step quantity), and the `power_mosfet` composite (its kind is
+    not a pool device). Row 0 of a zero start is not a solve: the smooth
+    diode's non-passive law reads -1.2e-5 A at v = 0 there, so the test
+    compares from row 1. The loss summary integrates the product of the
+    piecewise-linear v and i, so its reference uses the same quadrature
+    (the trapezoid of v·i differs by 1.6e-4 on the MOSFET case). Measured
+    against the sense resistor, max |i − i_Rs| / peak and the energy
+    error: MOSFET 2e-13 / 4e-15, IGBT 1.7e-12 / 2e-13, smooth diode
+    1.7e-12 / 3e-13, Shockley 1.5e-12 / 3e-13, saturable L 1.1e-12 /
+    5e-14 (worst of pwl and trbdf2).
+
+60. **Slice 11 review (fresh-context reviewer, read-only) and hand-off.**
+    No existing AC, DC or `res.i` number changed; no refusal was lifted
+    without an analytic test; no kind linearised at a wrong point. Fixed:
+    the PMSM torque-balance check refused a 3e-14 N·m residual at a 1e-12 V
+    bias (relative-only tolerance); it now has an absolute floor of the
+    torque of 1 nA through the PM flux. Added a held-rotor test with a DC
+    current and a balancing `T_load` (the θ stiffness S = pp²ψ cos θ_e i_a0
+    in the shaft row, against the closed form to 1e-9). The
+    `static_device_readings` binding refuses a states array narrower than
+    the circuit's state; `device_thermal_summary` warns when it skips a
+    tailed IGBT. Left: (a) `simulate(device_path='interface',
+    start_from_dc_op=True)` still starts from `nl_static`, which does not
+    stamp the Lauritzen law, so its DC point differs from
+    `compute_dc_operating_point(device_path=Interface)` — the loop hunk of
+    #56, not done (LOOP FREEZE); (b) the saturable table test uses a
+    straight-line table and the 1 pA case sits at L_0, so only the 1 A case
+    probes the operating point; (c) the conformance AC cells for the
+    composites check finiteness and presence only (the analytic numbers are
+    in test_ac_linearize.py). Next slice: 9.1 (per-sample pin currents in
+    the loop) lets 9.2 delete the Python ladder and cover the stored-charge
+    kinds; group 12 (field tables) not started.
+
+## Slice 11b — merge 214947c1, field tables, 9.4 (2026-11-19)
+
+61. **Field tables (group 12): what is the single source, and what the
+    builder does with it.** The rows already existed (`ir::kKindFields`,
+    add-immutable-circuit-ir: name, authoring alias, bound, getter/setter);
+    they gain `unit`, `description` (a `consteval` check refuses an
+    undocumented row) and `listed`. The default is the value-initialised
+    `Params` (`yaml_detail::make_params`), the same rule the YAML emitter
+    uses to omit defaults; it is not stored twice. Generated from the rows:
+    the `components()` scalar params (only rows flagged `listed`, which are
+    exactly the scalars it listed before — a first version listed every
+    row and changed a pinned digest in test_circuit_ir.py, 105 tests; the
+    full set is `Circuit.devices()["fields"]`, which was already
+    table-driven), the device reference page (`scripts/
+    generate_device_reference.py`, `--check`; `test_device_fields.py`
+    fails on a stale page — the stub byte-check is not in CI either, it is
+    the same test-level wiring), and `pulsim.device_fields`. Builder
+    validation: a builder-time bound check from the rows was implemented
+    and REMOVED — it refused 250 tests' pinned builder contracts (negative
+    R, `m = 0` as a linear capacitor, an ideal branch-form switch's
+    `g_off = 0` / `g_on = inf`, NaN left for the emitter to refuse). The
+    bound stays where it was enforced (`with_value`, `bind_param` /
+    `set_param`, the YAML registry reader), each naming device and field;
+    every `add_*` already named its device in its own errors except the
+    Shockley and Lauritzen diodes, which now do (message extended, the old
+    text kept). YAML: the four kinds already load as registry entries
+    (`type: <kind>`, `pins:`); added round-trip tests (YAML →
+    `Circuit.devices()` fields and `components()` equal to the builder's)
+    and a bit-identical pwl run each. The external device's field list
+    (`pulsim_xdev_field`: name, unit, default, numeric closed [lo, hi], no
+    description) maps onto the same `device_fields` dict; what differs is
+    the bound (numeric interval vs a bound class) and the missing
+    description. Oracle: `components()` over every call of the full suite
+    (1600 tests, 35 638 calls) identical as a per-test multiset (threaded
+    batches call in any order); the only differences are an external
+    device's `library` path and hash, which point at a per-session temp
+    build of the test model (identical once those two keys are dropped).
+    Not done: a separate YAML reference page (the device page's Name column
+    is the key list); the flux-table inductor (a table, no scalar rows).
+
+62. **9.4 adaptive vs fixed grid.** `device_loss_summary` E_total on trbdf2
+    (266-511 points, adaptive) vs pwl (8001, dt = 0.25 µs), behind a 2 mH
+    inductor (a resistive circuit gives trbdf2 no state to adapt on: it
+    runs at its step ceiling): MOSFET −0.113 %, IGBT −0.047 %, Shockley
+    −0.043 % (gate 0.5 %). The retired non-passive smooth diode is left
+    out: behind the inductor its pwl run aborts in Newton.
+
+63. **Merge 214947c1 and the external Lauritzen twin on the sweep.** The
+    twin's q_M is an internal unknown (a circuit branch variable), so the
+    existing `ExternalDeviceHistory::linearise` already linearises it; the
+    sweep of the twin equals the built-in Lauritzen sweep (linearize's
+    local row) to rtol 1e-9 at 1 kHz-100 MHz, with the charge pole visible
+    (H moves > 1 % between the ends).
+
+64. **Slice 11b verification, cost, review and hand-off.** Seen passing on
+    this tip's code: full pytest 5824 passed (the 4 test_stubs failures
+    appear only under the components()-recording plugin, which wraps the
+    method; test_stubs passes without it); `-m reference` 382 passed;
+    reference_status exit 0, REFERENCE_STATUS.md unchanged; AC 53/53
+    identical to the merged base, pwl 379 / trbdf2 371 identical,
+    stateful identical, res.i 124 keys worst rel 0; openspec 78/78; ruff;
+    stubs and page `--check`; C++ builder, yaml, analysis, layer4, xdev,
+    layer5_v3, layer4_v3, record on Eigen 5 and 3.4.0 (trees deleted).
+    Full ctest not run. Cost (instructions per accepted step, min of 6
+    interleaved runs, base = merged tip 7f5ec31f): buck_pwl 3079.2 →
+    3078.3, vsi_pwl 4765.0 → 4760.4, buck_trbdf2 11026.0 → 11018.3,
+    bridge_trbdf2 12772.6 → 12768.6 (all within ±0.1 %; the earlier
+    +0.6 % buck_pwl was one round: its rounds spread 3078-3098 on both
+    packages). Reviewer (fresh context, read-only): no correctness defect;
+    the `listed` rows match the removed hand-written scalars kind by kind;
+    fixed its claim and test findings (b500f12b). Hand-off: (1) the
+    #56 loop hunk (Lauritzen at the DC start) with its failing test;
+    (2) the flux-table inductor in YAML (12.2) and a YAML reference page
+    (12.4) remain; (3) a builder-time bound would need the pinned builder
+    contracts (negative R, m = 0, ideal g_off = 0) to become separate
+    kinds or explicit opt-outs first.

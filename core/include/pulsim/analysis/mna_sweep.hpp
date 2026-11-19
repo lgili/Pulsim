@@ -7,12 +7,14 @@
 // cached MNA matrix without running a transient per frequency. This
 // header provides the C++ kernel implementation:
 //
-//   1. Refuse any Newton-stamped branch (it would be dropped, not
-//      linearised).
+//   1. Refuse any kind with no small-signal model (it would be dropped,
+//      not linearised).
 //   2. Take (G, C) from the transient assembler `assemble_segment_split`
 //      at the caller's switch mask; the mass matrix is E = C/2 (the
 //      split stores the trapezoidal 2/dt coefficients), so capacitors,
-//      inductors and coupled windings are the transient's own.
+//      inductors and coupled windings are the transient's own. A Newton
+//      device adds ∂f/∂x, ∂q/∂x of its law at the DC operating point
+//      (`analysis/linearize.hpp`).
 //   3. For each test frequency ω_k = 2π·f_k, build the complex matrix
 //      `M_k = jω_k·E − A`, solve `M_k · X = B` (with B sourced from
 //      the unit-impulse on the input branch), and read off the output
@@ -34,6 +36,7 @@
 #pragma once
 
 #include "pulsim/analysis/cancellation.hpp"
+#include "pulsim/analysis/linearize.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/assemble.hpp"
@@ -78,10 +81,11 @@ struct MnaSweepResult {
 
 namespace detail {
 
-/// Refuse a circuit with a Newton-stamped branch. The sweep linearises
-/// nothing: `assemble_segment_split` stamps only the linear devices, so a
-/// smooth diode would be an open circuit, a saturable inductor a short and
-/// a junction capacitor absent: the transfer function of another circuit.
+/// Refuse a kind the sweep has no small-signal model for (the
+/// `kKindCaps` ac_sweep column): `linearize` stamps the linear elements,
+/// switches at the fixed mask, and the Newton kinds whose law it
+/// linearises at the DC point; any other kind would be dropped, giving the
+/// transfer function of another circuit.
 inline void require_linear_for_sweep(const topology::Graph& graph,
                                       const pwl::DevicePool& pool) {
     require_branch_form_supported(graph, pool, pwl::Engine::AcSweep);
@@ -91,9 +95,10 @@ inline void require_linear_for_sweep(const topology::Graph& graph,
     throw unsupported_device(graph, pool, pwl::Engine::AcSweep, bid,
         std::format(
             "run_mna_sweep: branch '{}' is a {} (a Newton device); the "
-            "kernel AC sweep stamps only linear elements and switches at a "
-            "fixed mask and does not linearise it at an operating point, so "
-            "it would return the transfer function of a different circuit. "
+            "kernel AC sweep has no small-signal model for this kind (it "
+            "linearises only the kinds marked ac_sweep in "
+            "pulsim.engine_capabilities()), so it would return the transfer "
+            "function of a different circuit. "
             "Use a time-domain routine instead: pulsim.run_ac_sweep, "
             "pulsim.fra.run_fra, "
             "pulsim.frequency_response, or run_mna_sweep(..., "
@@ -102,12 +107,7 @@ inline void require_linear_for_sweep(const topology::Graph& graph,
             pwl::stored_kind_name(pool.kind_of(bid))));
 }
 
-/// The sweep's matrices: `G` (every dt-independent stamp) and the mass
-/// matrix `E`, both from the transient assembler. Its split stores the
-/// trapezoidal coefficients of 1/dt in `C` (J = G + C/dt), and 2/dt is
-/// the trapezoidal companion of d/dt, so `E = C/2`: capacitors, inductors
-/// and the mutual terms of every coupled winding pair, the same elements
-/// the transient integrates.
+/// The linear part as (G, E), the mass matrix E = C_split/2.
 struct SweepMatrices {
     sparse::Matrix G;
     sparse::Matrix E;
@@ -117,13 +117,28 @@ struct SweepMatrices {
 assemble_sweep_matrices(const topology::Graph& graph,
                          const pwl::DevicePool& pool,
                          const topology::SwitchStateMask& mask) {
-    SweepMatrices m;
-    sparse::Matrix C;
-    Vector b;
-    pwl::assemble_segment_split(graph, pool, mask, m.G, C, b);
-    m.E = Real{0.5} * C;
-    m.E.makeCompressed();
-    return m;
+    Linearization m = linear_part(graph, pool, mask);
+    return {std::move(m.G), std::move(m.C)};
+}
+
+/// The small-signal model the sweep solves: the linear part alone for a
+/// linear circuit (the assembly it always used, operation for operation),
+/// else `linearize` at the DC operating point of `mask` — the external
+/// devices from their declared Jacobians, the built-in Newton kinds from
+/// their `Device` laws, the DC point solved through those laws
+/// (`dc_device_refresh` on the interface path).
+[[nodiscard]] inline Linearization sweep_model(const topology::Graph& graph,
+                                               const pwl::DevicePool& pool,
+                                               const topology::SwitchStateMask& mask) {
+    if (!pool.requires_newton()) return linear_part(graph, pool, mask);
+    require_linearisable(graph, pool);
+    pwl::DCOperatingPointOptions dc_opts;
+    const pwl::NonlinearRefreshFn refresh = has_builtin_newton(graph, pool)
+        ? pwl::dc_device_refresh(pool, true, device::DevicePath::Interface)
+        : pwl::NonlinearRefreshFn{};
+    const auto op = pwl::compute_dc_operating_point(
+        graph, pool, mask, refresh, dc_opts, nullptr, "run_mna_sweep", "ac_sweep");
+    return linearize(graph, pool, mask, op.x, dc_opts.t_eval);
 }
 
 [[nodiscard]] inline ComplexSparseMatrix to_complex(const sparse::Matrix& A) {
@@ -176,41 +191,24 @@ assemble_sweep_matrices(const topology::Graph& graph,
     // 1. Newton devices are refused, not dropped.
     detail::require_linear_for_sweep(graph, pool);
 
-    // 2. (G, E) from the transient assembler at the caller's mask. The
-    //    descriptor form reads E·dx/dt + G·x + b = 0; substituting
-    //    x -> x_op + x̂·e^{jωt} gives (jω·E + G)·x̂ = −b̂, read at
-    //    output_node_idx for b̂ = e_input.
-    detail::SweepMatrices sm =
-        detail::assemble_sweep_matrices(graph, pool, mask);
-
-    // 3. External devices (add-external-device-abi), the one Newton kind the
-    //    sweep linearises: at the DC operating point of this mask, G += ∂f/∂x
-    //    and E += ∂q/∂x from the model's declared Jacobians.
-    if (!pool.external_device_branches().empty()) {
-        pwl::DCOperatingPointOptions dc_opts;
-        const auto op = pwl::compute_dc_operating_point(
-            graph, pool, mask, {}, dc_opts, nullptr, "run_mna_sweep", "ac_sweep");
-        // the model state the DC point was solved with (init at x = 0)
-        pwl::ExternalDeviceHistory xh;
-        xh.set_start_time(dc_opts.t_eval);
-        xh.init(graph, pool);
-        xh.linearise(op.x, sm.G, sm.E, dc_opts.t_eval);
-        sm.G.makeCompressed();
-        sm.E.makeCompressed();
-    }
+    // 2. (G, E): the descriptor form reads E·dx/dt + G·x + b = 0;
+    //    substituting x -> x_op + x̂·e^{jωt} gives (jω·E + G)·x̂ = −b̂, read
+    //    at output_node_idx for b̂ = e_input. Rows past the circuit's are
+    //    device-local charges (linearize.hpp).
+    const Linearization sm = detail::sweep_model(graph, pool, mask);
 
     const Index n = sm.G.rows();
-    if (n <= 0) {
+    if (sm.n_circuit <= 0) {
         throw std::runtime_error(
             "run_mna_sweep: empty MNA matrix");
     }
-    if (static_cast<Index>(input_state_idx) >= n ||
-        static_cast<Index>(output_node_idx) >= n) {
+    if (static_cast<Index>(input_state_idx) >= sm.n_circuit ||
+        static_cast<Index>(output_node_idx) >= sm.n_circuit) {
         throw std::runtime_error(
             "run_mna_sweep: input/output index out of range");
     }
     const ComplexSparseMatrix J_c = detail::to_complex(sm.G);
-    const ComplexSparseMatrix E_c = detail::to_complex(sm.E);
+    const ComplexSparseMatrix E_c = detail::to_complex(sm.C);
 
     // 4. Per-frequency factor + solve.
     MnaSweepResult result;

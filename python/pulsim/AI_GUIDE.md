@@ -20,8 +20,7 @@ Short version:
 - PWL diode `V_th` is a turn-on threshold; `V_f` is the forward drop.
   Without `dt`, rerun with `dt` on any `simulate` warning (trap 13).
 - Loss and thermal summaries average the WHOLE run, start-up too (3.4).
-- `run_mna_sweep(freqs=)` covers linear parts and switches at `mask=`;
-  it refuses Newton devices.
+- `run_mna_sweep(freqs=)` linearises at the DC point (switches at `mask=`).
 - Check every result physically (6) before reporting it.
 - A Pulsim exception is a refusal with a reason. Read it; do not catch
   it, and do not loosen `tol_newton_dx` / `tol_newton_res` to get past it.
