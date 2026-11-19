@@ -1,0 +1,54 @@
+{
+ "circuit": "circuits/linear/voltage_divider_3stage.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(n_mid)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": 1,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "5.55e-69",
+ "max_eigvec_cond": "1.0",
+ "windows": {
+  "full": {
+   "V(n_mid)": {
+    "mean": "9.999999999999999956631913",
+    "rms": "9.999999999999999956631913",
+    "d_prec": "1.84e-33"
+   }
+  },
+  "last20": {
+   "V(n_mid)": {
+    "mean": "9.999999999999999956631913",
+    "rms": "9.999999999999999956631913",
+    "d_prec": "1.84e-33"
+   }
+  }
+ },
+ "energy_J": {
+  "R1": "4.0e-5",
+  "R2": "8.0e-5",
+  "R3": "0.00012",
+  "src:Vsrc": "0.00024"
+ },
+ "energy_balance_rel": "7.91e-62",
+ "precision_doubling_rel": "1.84e-34",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 0.0,
+ "uniform_dt_floor": 0.0,
+ "dt": 5e-06,
+ "stored_dt": 6.25e-07
+}

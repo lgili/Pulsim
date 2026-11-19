@@ -1,0 +1,52 @@
+{
+ "circuit": "circuits/resonance/rl_high_pass_sine.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "0.0",
+ "max_eigvec_cond": "6.87",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "-0.07225637040662754965431477",
+    "rms": "3.345650109242580607360623",
+    "d_prec": "6.86e-32"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "-3.991225899558983210152362e-8",
+    "rms": "3.36897670372825725756368",
+    "d_prec": "5.94e-32"
+   }
+  }
+ },
+ "energy_J": {
+  "R1": "2.40441137047663e-5",
+  "src:Vac": "2.50883103176342e-5"
+ },
+ "energy_balance_rel": "1.77e-62",
+ "precision_doubling_rel": "2.35e-30",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 1.1982913385203809e-05,
+ "uniform_dt_floor": 0.0007694190181854136,
+ "dt": 5e-06,
+ "stored_dt": 6.25e-07
+}

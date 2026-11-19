@@ -1,0 +1,52 @@
+{
+ "circuit": "circuits/magnetics/core_loss_steinmetz_sine.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "I(L1)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "0.0",
+ "max_eigvec_cond": "2.25",
+ "windows": {
+  "full": {
+   "I(L1)": {
+    "mean": "0.0626186250910837436654723",
+    "rms": "0.08466717052207470847301716",
+    "d_prec": "1.18e-32"
+   }
+  },
+  "last20": {
+   "I(L1)": {
+    "mean": "0.05075876641409131603177736",
+    "rms": "0.07579370387979716753510931",
+    "d_prec": "1.05e-32"
+   }
+  }
+ },
+ "energy_J": {
+  "R_ser": "3.58426488210704e-7",
+  "src:Vac": "4.07440140814425e-7"
+ },
+ "energy_balance_rel": "-1.48e-61",
+ "precision_doubling_rel": "1.95e-30",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 1.6774986860693283e-06,
+ "uniform_dt_floor": 0.00010751407194969569,
+ "dt": 1e-07,
+ "stored_dt": 1.25e-08
+}

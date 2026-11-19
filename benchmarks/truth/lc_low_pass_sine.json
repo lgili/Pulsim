@@ -1,0 +1,52 @@
+{
+ "circuit": "circuits/linear/lc_low_pass_sine.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "8.24e-63",
+ "max_eigvec_cond": "27.4",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "0.04785588507230356950462934",
+    "rms": "0.7385769247140223195731472",
+    "d_prec": "2.16e-33"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "0.05706790380855787025517559",
+    "rms": "0.4558439518579363560407808",
+    "d_prec": "3.21e-33"
+   }
+  }
+ },
+ "energy_J": {
+  "Rload": "2.18198349488009e-5",
+  "src:Vac": "4.02771537579929e-5"
+ },
+ "energy_balance_rel": "-7.66e-61",
+ "precision_doubling_rel": "1.3e-30",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 1.3641945411206723e-07,
+ "uniform_dt_floor": 8.74871854909271e-06,
+ "dt": 1e-06,
+ "stored_dt": 1.25e-07
+}

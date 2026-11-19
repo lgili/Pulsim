@@ -1489,7 +1489,8 @@ class Solver:
         jumps = sum((j["dE"] for j in self.jumps if w0 < j["t"] <= w1), mp.mpf(0))
         src = sum((v for k, v in acc.items() if k.startswith("src:")), mp.mpf(0))
         diss = sum((v for k, v in acc.items() if not k.startswith("src:")), mp.mpf(0))
-        scale = max(abs(src), abs(diss), abs(Es[1] - Es[0]), abs(jumps), mp.mpf(10) ** -300)
+        # stored energy in the scale: a circuit at rest has only rounding in every term
+        scale = max(abs(src), abs(diss), abs(Es[0]), abs(Es[1]), abs(jumps), mp.mpf(10) ** -300)
         bal = (src - diss - (Es[1] - Es[0] - jumps)) / scale
         return dict(per=acc, source=src, dissipated=diss, dE=Es[1] - Es[0], jump_dE=jumps,
                     impulsive_loss=-jumps, balance_rel=bal)

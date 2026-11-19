@@ -1,0 +1,126 @@
+{
+ "circuit": "circuits/diodes/half_wave_rectifier_sine.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.6,
+ "events": [
+  {
+   "t": "0.002524125923891905397148694",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.01185315439043257917583047",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.01252412592389190539714869",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02185315439043257917583047",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02252412592389190539714869",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03185315439043257917583047",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03252412592389190539714869",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.04185315439043257917583047",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.04252412592389190539714869",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 9,
+ "n_events": 9,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "D1+",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "3.04e-66",
+ "max_eigvec_cond": "9.6e+3",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "22.66878591435974941405077",
+    "rms": "22.79878733420248889644072",
+    "d_prec": "3.37e-31"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "23.03131664710573665419872",
+    "rms": "23.03842685728295762248012",
+    "d_prec": "2.03e-30"
+   }
+  }
+ },
+ "energy_J": {
+  "Rload": "0.0519784703910192",
+  "D1": "0.000118882478016839",
+  "src:Vac": "0.10738746513772"
+ },
+ "energy_balance_rel": "5.55e-58",
+ "precision_doubling_rel": "2.38e-20",
+ "event_time_diff_s": "2.85e-21",
+ "u_stored_trace": 9.851360756355864e-07,
+ "uniform_dt_floor": 4.13088243235703e-05,
+ "dt": 5e-05,
+ "stored_dt": 6.25e-06
+}

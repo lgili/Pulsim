@@ -1,0 +1,57 @@
+{
+ "circuit": "circuits/stress/high_q_rlc_ringdown.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "wall_s": 0.0,
+ "events": [
+  {
+   "t": "1.000000000000000062281591e-9",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 0,
+ "n_events": 1,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "1.34e-61",
+ "max_eigvec_cond": "1.0",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "9.983013605438158511166349",
+    "rms": "11.45610955290293852618976",
+    "d_prec": "3.86e-31"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "10.02121425758674989508319",
+    "rms": "10.98607803227126228227662",
+    "d_prec": "2.68e-31"
+   }
+  }
+ },
+ "energy_J": {
+  "R1": "3.16303434422474e-5",
+  "src:Vp": "0.000128850162070945"
+ },
+ "energy_balance_rel": "1.29e-59",
+ "precision_doubling_rel": "6.76e-30",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 1.603994390352112e-06,
+ "uniform_dt_floor": 0.00010292873855826644,
+ "dt": 2e-06,
+ "stored_dt": 2.5e-07
+}
