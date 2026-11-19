@@ -2046,8 +2046,9 @@ def truth(path, form="conductance", dps=(30, 60), out_dir=TRUTH_DIR, write=True,
         stem = Path(rel).stem + (".ideal" if form == "ideal" else "")
         with gzip.open(out_dir / f"{stem}.csv.gz", "wt", encoding="utf-8", newline="") as f:
             f.write("time," + ",".join(cols) + "\n")
+            # values to 12 digits: the interpolation error of the stored grid (u stored) is far larger
             for i in range(len(th)):
-                f.write(f"{float(th[i])!r}," + ",".join(repr(float(yh[c][i])) for c in cols) + "\n")
+                f.write(f"{float(th[i])!r}," + ",".join(f"{float(yh[c][i]):.12g}" for c in cols) + "\n")
         (out_dir / f"{stem}.json").write_text(json.dumps(rec, indent=1), encoding="utf-8")
     return rec
 
