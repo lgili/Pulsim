@@ -121,22 +121,21 @@ BOOST = {20.0: (23.786198209, 852, 856), 50.0: (23.806428021, 969, 978), 500.0: 
 
 @pytest.mark.parametrize("R", list(BOOST))
 def test_lcp_and_guard_fix_the_zero_threshold_boost(R):
-    """With V_th = 0 the settle keeps D1 ON through the DCM current zero (-0.86 / -1.07 / -1.18 A
-    at R = 20 / 50 / 500 ohm); 'lcp' and the guarded default decide those events OFF."""
+    """With V_th = 0 the settle kept D1 ON through the DCM current zero (-0.86 / -1.07 / -1.18 A
+    at R = 20 / 50 / 500 ohm), and with the guard off it refused there (DECISIONS #26). Since
+    exact engine session 10 an ON diode at its current zero is decided by its own ON trajectory,
+    so the settle alone, the guarded default and 'lcp' take the same events to the last bit,
+    with no repair."""
     ref, ev_settle, ev_lcp = BOOST[R]
     b, fn = _boost(R)
-    # the settle alone kept D1 ON (> 3e-2 V off ref); judged, it refuses there (DECISIONS #26)
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim(b, 400 * T, fn, guard=False)
-    assert (ei.value.engine, ei.value.feature, ei.value.device.split()[0]) == ("dsed", "consistent_mode", "D1")
+    r_set = _sim(b, 400 * T, fn, guard=False)
     r_lcp = _sim(b, 400 * T, fn, mode_selection="lcp")
     r_def = _sim(b, 400 * T, fn)
     assert _end(r_lcp, "out") == pytest.approx(ref, abs=2e-5)          # measured -1.5e-6 .. -1.24e-5
     assert r_lcp.n_events == ev_lcp
     assert np.array_equal(np.asarray(r_lcp.states), np.asarray(r_def.states))
-    g = r_def.diagnostics["mode_guard"]
-    assert g["repairs"] > 0 and len(g["repair_times"]) == g["repairs"]
-    assert {d.split()[0] for d in g["repair_diodes"]} == {"D1"}
+    assert np.array_equal(np.asarray(r_set.states), np.asarray(r_def.states))
+    assert r_def.diagnostics["mode_guard"]["repairs"] == 0
 
 
 def test_guard_fixes_the_half_wave_rl_rectifier():
