@@ -43,6 +43,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 
 namespace pulsim::pwl {
@@ -170,6 +171,87 @@ public:
     [[nodiscard]] bool interface() const noexcept {
         return path_ == device::DevicePath::Interface;
     }
+    // ---- the stage form (βh, ψ) of integrator='esdirk43' ----
+    // The kinds whose stage takes an arbitrary base: one q row per state
+    // (q_n, q̇_n); a stage is backward Euler of βh from q_n = ψ. The rows
+    // run in fold order, kind after kind.
+    template <class K>
+    static constexpr bool kStageForm = std::is_same_v<K, NonlinearCapacitorHistory>
+        || std::is_same_v<K, SaturableInductorHistory>
+        || std::is_same_v<K, ExternalDeviceHistory>;
+    /// Does kind k's stage take an arbitrary base (empty kinds do)?
+    template <class K>
+    [[nodiscard]] static bool stage_form(const K& k) noexcept {
+        if (k.empty()) return true;
+        if constexpr (std::is_same_v<K, SaturableInductorHistory>) return k.stage_form();
+        else return kStageForm<K>;
+    }
+    [[nodiscard]] std::size_t stage_rows() const {
+        std::size_t n = 0;
+        for_each([&n](const auto& k) {
+            using K = std::remove_cvref_t<decltype(k)>;
+            if constexpr (kStageForm<K>) n += k.stage_rows();
+        });
+        return n;
+    }
+    void stage_start(Real hh, Real* q0, Real* hqd0) const {
+        for_each([&](const auto& k) {
+            using K = std::remove_cvref_t<decltype(k)>;
+            if constexpr (kStageForm<K>) {
+                k.stage_start(hh, q0, hqd0);
+                q0 += k.stage_rows();
+                hqd0 += k.stage_rows();
+            }
+        });
+    }
+    /// Base ψ of every row, and ψ − q_n(step start) built from increments.
+    void stage_base(const Real* psi, const Real* dpsi) {
+        for_each([&](auto& k) {
+            using K = std::remove_cvref_t<decltype(k)>;
+            if constexpr (kStageForm<K>) {
+                k.stage_base(psi, dpsi);
+                psi += k.stage_rows();
+                dpsi += k.stage_rows();
+            }
+        });
+    }
+    /// d = q(x) − ψ per row (ψ: the bases just set).
+    void stage_increment(const Vector& x, const Real* psi, Real* d) const {
+        for_each([&](const auto& k) {
+            using K = std::remove_cvref_t<decltype(k)>;
+            if constexpr (kStageForm<K>) {
+                k.stage_increment(x, psi, d);
+                psi += k.stage_rows();
+                d += k.stage_rows();
+            }
+        });
+    }
+    /// Commit the stage just solved from the bases set (backward Euler of
+    /// h_e); `h_step` is the whole step (an external model's accept()).
+    void stage_commit(const Vector& x, Real h_e, Real h_step) {
+        for_each([&](auto& k) {
+            using K = std::remove_cvref_t<decltype(k)>;
+            if constexpr (std::is_same_v<K, ExternalDeviceHistory>) {
+                k.commit(x, h_e, TrBdf2Stage::BackwardEuler, h_step);
+            } else if constexpr (kStageForm<K>) {
+                if constexpr (iface::kPorted<K>) {
+                    if (interface()) {
+                        iface::commit(k, x, h_e, TrBdf2Stage::BackwardEuler);
+                        return;
+                    }
+                }
+                k.commit(x, h_e, TrBdf2Stage::BackwardEuler);
+            }
+        });
+    }
+    /// After the stages: every scratch of the stage form back to rest.
+    void stage_clear() {
+        for_each([](auto& k) {
+            using K = std::remove_cvref_t<decltype(k)>;
+            if constexpr (kStageForm<K>) k.stage_clear();
+        });
+    }
+
     /// SDIRK restart: pseudo previous state x0 + c·(x1 − x0).
     void extrapolate_previous(const Vector& x1, Real c) {
         for_each([&](auto& k) { k.extrapolate_previous(x1, c); });

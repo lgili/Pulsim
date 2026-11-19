@@ -186,7 +186,41 @@ public:
         return v;
     }
 
-    void commit(const Vector& x, Real h, TrBdf2Stage st) {
+    // ---- the stage form (βh, ψ) of integrator='esdirk43' ----
+    // Every row is a q row (q_n, q̇_n): pin rows q̇ = the committed formula
+    // derivative, internal rows q̇ = −f. A stage is backward Euler of βh
+    // from q_n = ψ.
+    [[nodiscard]] std::size_t stage_rows() const noexcept {
+        std::size_t n = 0;
+        for (const auto& d : devices_) n += d.inst->rows();
+        return n;
+    }
+    void stage_start(Real hh, Real* q0, Real* hqd0) const {
+        for (const auto& d : devices_) {
+            const std::size_t R = d.inst->rows();
+            for (std::size_t r = 0; r < R; ++r) {
+                *q0++ = cells_[d.off + r];
+                *hqd0++ = hh * cells_[d.off + R + r];
+            }
+        }
+    }
+    void stage_base(const Real* psi, const Real* /*dpsi*/) {
+        for (const auto& d : devices_) {
+            for (std::size_t r = 0; r < d.inst->rows(); ++r) cells_[d.off + r] = *psi++;
+        }
+    }
+    void stage_increment(const Vector& x, const Real* psi, Real* dq) const {
+        for (const auto& d : devices_) {
+            gather_(d, x);
+            eval_(d, time_());
+            for (std::size_t r = 0; r < d.inst->rows(); ++r) *dq++ = d.o.q[r] - *psi++;
+        }
+    }
+    void stage_clear() noexcept {}
+
+    /// `h_accept` (> 0): the step the model's accept() advances when the
+    /// formula's h is a stage's (esdirk43 commits backward Euler of γh).
+    void commit(const Vector& x, Real h, TrBdf2Stage st, Real h_accept = Real{-1}) {
         const device::StepCtx c{time_(), formula_of_(st), h};
         const Real a = device::formula_a(c);
         for (auto& d : devices_) {
@@ -204,7 +238,7 @@ public:
             }
             d.inst->verify_params_unchanged();
             gather_(d, x);   // accept sees x even if eval wrote into its copy
-            accept_(d, h);
+            accept_(d, h_accept > Real{0} ? h_accept : h);
         }
     }
 

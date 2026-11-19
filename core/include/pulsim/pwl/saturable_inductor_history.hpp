@@ -100,7 +100,49 @@ public:
         //! the two stages of one attempt like lambda_gamma does.
         models::JilesAthertonCore::State ja_gamma{};
         models::SaturableInductor::Params params;
+        //! An esdirk43 stage's base minus the step-start flux, ψ − λ(i_L_old),
+        //! built from increments (no cancellation): the increment form of
+        //! the backward-Euler stage subtracts it. 0 outside those stages.
+        Real  lambda_offset = Real{0};
     };
+
+    // ---- the stage form (βh, ψ) of integrator='esdirk43' ----
+    // One q row per device: q = λ, q̇ = V_L. A stage is backward Euler of
+    // βh from the base λ_old = ψ; the increment form reads λ(i) − ψ as
+    // Δλ(i, i_L_old) − (ψ − λ_old) with that offset carried exactly. Not the
+    // hysteretic law (its base is a magnetisation state, refused upstream).
+    [[nodiscard]] std::size_t stage_rows() const noexcept { return entries_.size(); }
+    void stage_start(Real hh, Real* q0, Real* hqd0) const {
+        for (const auto& e : entries_) {
+            *q0++ = e.lambda_old;
+            *hqd0++ = hh * e.V_L_old;
+        }
+    }
+    void stage_base(const Real* psi, const Real* dpsi) {
+        for (auto& e : entries_) {
+            e.lambda_old = *psi++;
+            e.lambda_offset = *dpsi++;
+        }
+    }
+    void stage_increment(const Vector& x, const Real* psi, Real* d) const {
+        for (const auto& e : entries_) {
+            const Real i = x[e.branch_var_id];
+            *d++ = e.params.table
+                ? models::SaturableInductor::flux(i, e.params) - *psi
+                : models::SaturableInductor::flux_increment(i, e.i_L_old, e.params)
+                      - e.lambda_offset;
+            ++psi;
+        }
+    }
+    void stage_clear() noexcept {
+        for (auto& e : entries_) e.lambda_offset = Real{0};
+    }
+    [[nodiscard]] bool stage_form() const noexcept {
+        for (const auto& e : entries_) {
+            if (e.params.ja) return false;
+        }
+        return true;
+    }
 
     /// The JA base state for a stage. The trapezoidal stage — and
     /// every fixed-engine solve, probe, landing and seed — integrates
