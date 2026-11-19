@@ -388,8 +388,13 @@ def test_a_rebuild_with_the_same_size_and_mtime_is_refused(libs, tmp_path):
     st = os.stat(lib)
     data = bytearray(lib.read_bytes())
     data[-1] ^= 0xFF                       # one byte: same size
-    lib.write_bytes(bytes(data))
-    os.utime(lib, ns=(st.st_atime_ns, st.st_mtime_ns))   # same mtime
+    # replaced the way a linker does it (a new file renamed over the path).
+    # Writing into the loaded file itself truncates it, and Linux then drops
+    # the image's relocated pages: the process dies at the next call into it.
+    new = tmp_path / f"same.new{EXT}"
+    new.write_bytes(bytes(data))
+    os.utime(new, ns=(st.st_atime_ns, st.st_mtime_ns))   # same mtime
+    os.replace(new, lib)
     assert os.stat(lib).st_size == st.st_size and os.stat(lib).st_mtime_ns == st.st_mtime_ns
     with pytest.raises(ValueError, match="changed on disk"):
         p.CircuitBuilder().add_external_device("Y", ["a", "gnd"], str(lib), "good_resistor")
