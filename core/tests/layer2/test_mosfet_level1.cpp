@@ -142,6 +142,47 @@ TEST_CASE("MosfetLevel1 — Jacobian via AD returns finite partials",
     REQUIRE(partials[1] < 0);
 }
 
+TEST_CASE("MosfetLevel1 — continuous and C1 across V_DS = 0 at every gate drive",
+          "[v2][layer2_v13][mosfet_level1][unit]") {
+    // The β blend leaks forward(V_OV, 0) = α(1−β)·K·V_OV² at V_DS = 0;
+    // the plain terminal-swap mirror jumped by twice that (5.2 mA at
+    // V_GS = 3.2 V for these parameters) and both engines aborted at the
+    // zero crossing of a current through a partly-on channel
+    // (openspec/changes/add-power-mosfet-datasheet-device/probes/
+    // vds_zero_jump.py). Value and the three AD partials must now match
+    // on both sides of V_DS = 0.
+    MosfetLevel1::Params p{.K = 1.43, .V_T = 3.0, .lambda = 0.02, .kappa = 15.0};
+    for (int k = 0; k <= 120; ++k) {
+        const Real vgs = 1.0 + 0.05 * k;               // 1 .. 7 V
+        const Real e = 1e-9;
+        // C¹, not C²: the second derivative may differ on the two sides.
+        // So the step across 0 (−e → +e) is bounded by 2e × the larger
+        // one-sided slope (from ±e → ±3e), with margin. The old jump was 2L
+        // in the value and ~2κL in the partials, far above these bounds.
+        auto at = [&](Real x) {
+            return evaluate_current_and_jacobian<MosfetLevel1>(
+                ModelInputs<MosfetLevel1>{x, 0.0, vgs}, p);
+        };
+        const auto [i_m3, d_m3] = at(-3.0 * e);
+        const auto [i_lo, d_lo] = at(-e);
+        const auto [i_hi, d_hi] = at(e);
+        const auto [i_p3, d_p3] = at(3.0 * e);
+        INFO("V_GS = " << vgs << " i(-e) = " << i_lo << " i(+e) = " << i_hi);
+        const Real slope = std::max(std::abs(i_p3 - i_hi), std::abs(i_lo - i_m3));
+        REQUIRE(std::abs(i_hi - i_lo) <= 1.5 * slope + 1e-15);
+        for (int j = 0; j < 3; ++j) {
+            INFO("partial " << j << ": " << d_lo[j] << " vs " << d_hi[j]);
+            const Real curv = std::max(std::abs(d_p3[j] - d_hi[j]),
+                                       std::abs(d_lo[j] - d_m3[j]));
+            REQUIRE(std::abs(d_hi[j] - d_lo[j])
+                    <= 1.5 * curv + 1e-4 * std::abs(d_hi[j]) + 1e-14);   // AD rounding ~1e-6 rel
+        }
+    }
+    // V_DS >= 0 is the forward law, unchanged; fully on, the third quadrant
+    // is the plain mirror to the last bit (the added term is below one ulp).
+    REQUIRE(iD(p, 12.0, -0.5) == -iD(p, 12.5, 0.5));
+}
+
 TEST_CASE("MosfetLevel1 — V_GS sweep: monotonic I_D in saturation",
           "[v2][layer2_v13][mosfet_level1][unit]") {
     MosfetLevel1::Params p{

@@ -273,6 +273,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | case | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
 | rc_charge | 0.00159 | 1.84e-06 | 1.84e-06 | 2.26e-07 | 1.55e-14 |
+| rc_esr_charge | 0.000144 | 1.35e-08 | 1.35e-08 | 1.63e-07 | 4.19e-14 |
 | rc_discharge | 0.00159 | 1.84e-06 | 1.84e-06 | 6.6e-07 | 1.18e-14 |
 | rl_step | 0.00112 | 1.3e-06 | 1.3e-06 | 6.25e-07 | 1.9e-15 |
 | rlc_underdamped | 0.000613 | 1.42e-05 | 1.42e-05 | 5.78e-05 | 5.1e-15 |

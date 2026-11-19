@@ -1218,6 +1218,84 @@ def test_saturable_permeance_refused_by_the_ac_sweep():
     assert ei.value.device == "Core"
 
 
+# ---------------------------------------------------------------------
+# Realistic passives (add-realistic-passives 6.1): composites of linear
+# R, L, C (and a 0 V return source), so each runs wherever its parts run,
+# AC sweep included; the odd DC-bias table is the NonlinearCapacitor kind.
+# ---------------------------------------------------------------------
+def _passive(add):
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 2e3)
+        b.add_resistor("R", "in", "o", 1e3)
+        b.add_resistor("Rl", "o", "gnd", 1e4)
+        if on:
+            add(b)
+        return b
+    return build
+
+
+def _odd_table():
+    from pulsim.passives import odd_charge_table
+    v = np.linspace(0.0, 40.0, 9)
+    return odd_charge_table(v, 1e-6 * 10 * np.arctan(v / 10), 1e-6 / (1 + (v / 10) ** 2))
+
+
+def _ladder():
+    from pulsim.passives import RacLadder
+    return RacLadder(R_dc=50.0, L_hf=5e-3, R_k=(500.0,), L_k=(5e-3,))
+
+
+PASSIVE_CELLS = {
+    "capacitor[esr/esl]": (
+        (_passive(lambda b: b.add_capacitor("Cp", "o", "gnd", 100e-9, esr=300.0,
+                                            esl=1e-3)),
+         "o", "Cp", 1e-3, 1e-7, False),
+        ("Capacitor", "Inductor", "Resistor")),
+    "inductor[esr/c_par/rac]": (
+        (_passive(lambda b: b.add_inductor("Lp", "o", "gnd", 10e-3, c_par=1e-9,
+                                           rac=_ladder())),
+         "o", "Lp", 1e-3, 1e-7, False),
+        ("Capacitor", "Inductor", "Resistor")),
+    "transmission_line[pi]": (
+        (_passive(lambda b: (b.add_transmission_line("T", "o", "gnd", "f", "gnd",
+                                                     Z0=1e3, delay=20e-6, sections=4,
+                                                     R=10.0),
+                             b.add_resistor("Rf", "f", "gnd", 500.0))),
+         "o", "T.c0", 1e-3, 1e-7, False),
+        ("Capacitor", "Inductor", "Resistor")),
+    "nonlinear_capacitor[odd table]": (
+        (_passive(lambda b: b.add_nonlinear_capacitor(
+            "Cn", "o", "gnd", p.ChargeLaw.table(_odd_table()))),
+         "o", "Cn", 1e-3, 1e-7, False),
+        ("NonlinearCapacitor",)),
+}
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("name", list(PASSIVE_CELLS))
+def test_realistic_passive_cells(name, engine):
+    cell, kinds = PASSIVE_CELLS[name]
+    _check_cell(name, cell, engine, _composite_supported(kinds, engine))
+
+
+@pytest.mark.parametrize("name", list(PASSIVE_CELLS))
+def test_realistic_passive_cells_on_the_ac_sweep(name):
+    # The linear composites sweep (their analytic impedances are pinned in
+    # test_passives.py); the DC-bias capacitor is refused by name.
+    cell, kinds = PASSIVE_CELLS[name]
+    b = cell[0](True)
+    run = lambda: k.run_mna_sweep_kernel(  # noqa: E731
+        b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+        [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
+    if _composite_supported(kinds, "ac_sweep"):
+        assert np.all(np.isfinite(np.asarray(run().H)))
+    else:
+        with pytest.raises(p.UnsupportedError) as ei:
+            run()
+        assert (ei.value.engine, ei.value.device) == ("ac_sweep", cell[2])
+
+
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
 def test_voltage_sanity_factor_honoured_on_every_engine(engine):
     # A 10 V node against a bound of 0.5 x 10 V: every engine's trace is

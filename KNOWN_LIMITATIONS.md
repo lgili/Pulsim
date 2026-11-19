@@ -724,10 +724,13 @@ independent integrations of them.
 ## Passives (`add-realistic-passives`, composites)
 
 ESR/ESL/`c_par`, the `R_ac` ladder and the π-section line are networks
-of R, L, C (YAML reads `esr`, `esl`, `c_par`; `rac:` is refused by
-name). Not done: YAML `rac:` and `transmission_line`, the MLCC DC-bias
-table (needs the charge-law `NonlinearCapacitor`), the
-Bergeron line (needs a kernel device; `model="bergeron"` is refused).
+of R, L, C (YAML reads `esr`, `esl`, `c_par` and `rac:` ladder cells;
+an `(f, R_ac)` curve is refused by name). The MLCC DC-bias capacitor
+(`fit_mlcc_dc_bias`, YAML `nonlinear_capacitor` with `dc_bias:`) is a
+Newton device (pwl / trbdf2) integrating the small-signal curve (no
+hysteresis). Not done: YAML `transmission_line` and the Bergeron line
+(a stateful kernel kind, deferred to the unified device interface;
+`model="bergeron"` is refused).
 The π line overshoots an ideal step by 27 % at any section count (the
 exact line does not): give the source a rise time and use
 `recommend_line_sections`. A fitted ladder reproduces its own data; it
@@ -757,6 +760,17 @@ refused by name on `dsed` and `bdf1`. The deprecated Python thyristor
 closure `make_thyristor_switch_fn` with `i_holding = 0` turns off only
 if a sample lands within 1 pA of the current zero (60 Hz half-wave at
 dt = 10 µs: −2.140 V mean instead of 29.699 V); use `add_thyristor`.
+
+### Level-1 MOSFET: zero-voltage current near threshold
+
+The logistic blend of `add_mosfet_level1` / `add_power_mosfet` leaks the
+saturation term at V_DS = 0: `i = α(1−β)·K·V_OV²` (2.6 mA at V_GS = 3.2 V,
+0.44 µA at 4 V for K = 1.43, κ = 15). Since 2026-11-18 the law is
+continuous across V_DS = 0 (it used to jump by twice that, and a current
+crossing zero through a partly-on channel aborted both engines), so the
+zero-current point sits at V_DS ≈ −L/g (−4.6 mV at 3.2 V). Removing the
+leak changes the forward law and every pinned result; it is an owner
+decision (add-power-mosfet-datasheet-device DECISIONS 19).
 
 ## Open OpenSpec proposals as of v1.3.0
 

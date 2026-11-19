@@ -738,7 +738,7 @@ circuit:
     REQUIRE(load_error("circuit:\n  devices:\n"
                        "    - {type: inductor, name: L9, from: a, to: gnd, "
                        "L: 1.0e-6, rac: [1, 2]}\n")
-                .find("'rac' is not read") != std::string::npos);
+                .find("inductor 'L9': rac must be a map") != std::string::npos);
     REQUIRE(load_error("circuit:\n  devices:\n"
                        "    - {type: dc_machine, name: M9, a_pos: a, a_neg: gnd, "
                        "omega_node: w, L_a: 1.0e-3, K: 0.0, J: 1.0e-5}\n")

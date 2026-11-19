@@ -146,8 +146,27 @@ struct MosfetLevel1 {
         // The anti-parallel body diode the header used to
         // prescribe as the fix does not prevent it (that case
         // landed at −63 V; without the diode, −50 V).
+        //
+        // CONTINUITY AT V_DS = 0 (add-power-mosfet-datasheet-device,
+        // 2026-11-18). The β blend leaks the saturation term at
+        // V_DS = 0: forward(V_OV, 0) = α(1 − β)·K·V_OV² = L(V_OV) ≠ 0
+        // (2.6 mA at V_GS = 3.2 V, 0.44 µA at 4 V for K = 1.43,
+        // κ = 15), so the plain mirror jumped by 2L across V_DS = 0. A
+        // current through a partly-on channel then had no solution at
+        // its zero crossing and both engines aborted
+        // (probes/vds_zero_jump.py). The third-quadrant branch adds
+        // 2·L(V_OV − V_DS/2): equal to 2L at V_DS = 0 (continuous),
+        // with V_DS-derivative −L' there, which cancels the mirror's
+        // extra ∂F/∂V_OV term (C¹). L decays like e^{−κ(V_OV + |V_DS|/2)},
+        // so the term is below one ulp of the current wherever the
+        // channel is well on or well off, and the V_DS ≥ 0 branch is
+        // untouched. Left as found: the forward law's own L at V_DS = 0⁺
+        // (a near-threshold leak with zero voltage); removing it changes
+        // the V_DS ≥ 0 law and every pinned result.
         if (V_DS < S{0}) {
-            return -forward_current_<S>(V_OV - V_DS, -V_DS, p);
+            return -forward_current_<S>(V_OV - V_DS, -V_DS, p)
+                   + Real{2} * forward_current_<S>(
+                         V_OV - Real{0.5} * V_DS, S{0}, p);
         }
         return forward_current_<S>(V_OV, V_DS, p);
     }
