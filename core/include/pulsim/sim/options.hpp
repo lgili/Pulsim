@@ -71,7 +71,7 @@ struct OptionSpec {
 /// the order refusals are listed in). Python reads it through
 /// `pulsim._pulsim.run_option_table()`; a test asserts its names equal
 /// simulate()'s parameters.
-inline constexpr std::array<OptionSpec, 51> kRunOptionTable{{
+inline constexpr std::array<OptionSpec, 52> kRunOptionTable{{
     {"engine", kEvery, Unset::Always, "'auto'", ""},
     {"rtol", kTrBdf2 | kExact, Unset::None, "1e-5 (trbdf2), 1e-6 (exact)",
      "rtol bounds a variable step's error estimate; a fixed step has none"},
@@ -164,14 +164,17 @@ inline constexpr std::array<OptionSpec, 51> kRunOptionTable{{
     {"mode_selection", kEvery, Unset::Legacy, "None ('legacy')", ""},
     {"allow_implicit_segments", kExact, Unset::None, "None",
      "allow_implicit_segments governs the exact engine's numeric segments"},
-    // update-number-changing-release: without dt the exact engine's samples
-    // are chosen by rule (a dt, store_every or recorders keep today's samples)
-    {"output_rtol", kExact, Unset::None, "None (today's samples)",
-     "output_rtol is the exact engine's output-grid rule"},
+    // Every engine: the policy for controlled switches nothing drives,
+    // decided above the dispatch (pulsim._undriven_policy, task 11.3).
+    {"undriven", kEvery, Unset::Always, "None (each engine's own)", ""},
     // Every engine: a kernel recorder pass over the stored arrays, composed
     // above the dispatch (pulsim._recorders); store_every > 1 and
     // resume_from are refused with it there, by name.
     {"recorders", kEvery, Unset::Always, "None", ""},
+    // update-number-changing-release: without dt the exact engine's samples
+    // are chosen by rule (a dt, store_every or recorders keep today's samples)
+    {"output_rtol", kExact, Unset::None, "None (today's samples)",
+     "output_rtol is the exact engine's output-grid rule"},
     {"control_tick", kEvery, Unset::Always, "'label'", ""},
     {"device_path", kPwl | kTrBdf2, Unset::Legacy, "'legacy'",
      "device_path selects which code stamps the Newton devices; the exact "

@@ -51,9 +51,10 @@ unchanged.
 
 ## 6. Stage A — finalize once
 - [x] 6.1 `_finalize(result, plan)`: handles, `engine_used`, `engine_route_reason`, stats warnings, voltage sanity, for every engine
-- [ ] 6.2 Separate PR: voltage sanity on `dsed` (**BREAKING**: a new warning); CHANGELOG note
-- [ ] 6.3 Oracle: goldens; warning set unchanged in 6.1, plus the documented new warning in 6.2
-  - Done for 6.1 (`_finalize(out, plan)`, `__init__.py:4090`): goldens identical, warning set 414 = 414. Open: 6.2 (for the release; DECISIONS 23).
+- [x] 6.2 Separate PR: voltage sanity on `dsed` (**BREAKING**: a new warning); CHANGELOG note
+  - Done (DECISIONS 26.4): the exact engine has run the check since Stage A (`_auto_check_voltage_sanity`, `test_voltage_sanity_warns_on_every_engine[exact]`), so no new warning exists to flip; pwl's inline copy is now the same function at the same frame depth (`test_one_voltage_check_names_the_callers_line_on_every_engine`). CHANGELOG entry "One undriven-switch policy ...".
+- [x] 6.3 Oracle: goldens; warning set unchanged in 6.1, plus the documented new warning in 6.2
+  - Done for 6.1 (`_finalize(out, plan)`, `__init__.py:4090`): goldens identical, warning set 414 = 414. 6.2: warning set and byte compares identical to a67d3994 (DECISIONS 27).
 
 ## 7. Stage A — dispatch table
 - [x] 7.1 `_run_dsed(plan)`, `_run_trbdf2(plan)`, `_run_pwl(plan)`; `simulate()` = plan → table → finalize
@@ -91,7 +92,8 @@ unchanged.
 - [ ] 11.1 `simulate()` builds `RunOptions` and calls `Simulation` for runs with no Python callback; then for every run through `add_gate` / `add_tick` / `add_source_term` adapters
   - Done: `'pwl'` and `'trbdf2'` runs go through `Simulation` (callbacks included: `set_switch_fn`, `add_tick` (monitors too), `set_source_term`, `set_step_observer`, `set_tick_before`, live ring, resume with the v5 tick grid), goldens identical (DECISIONS 14, 15). `mmc_arms` / `on_cache` and the C++ chain fast path run on the object's builder and cache (DECISIONS 20). Open: `sweep()`'s replay and the exact engine (DECISIONS 16).
 - [ ] 11.2 Oracle: goldens bit-identical; warning set unchanged; fixed overhead not above 0.2; a native-schedule run holds no GIL (thread sweep scales as in audit row 23)
-- [ ] 11.3 One undriven-switch policy on every engine (**BREAKING**), per the owner's answer; migration note; tests for `Refuse`, `Open`, `Closed`
+- [x] 11.3 One undriven-switch policy on every engine (**BREAKING**), per the owner's answer; migration note; tests for `Refuse`, `Open`, `Closed`
+  - Done as an option (DECISIONS 26.1): `simulate(undriven=None|'refuse'|'open'|'closed')`, decided once in the plan, a row of the option table; `None` = today's per-engine behaviour. The release default `'refuse'` is `_plan.DEFAULT_UNDRIVEN` in `next_defaults.py` `PLAN` (update-number-changing-release 3.1); migration note in the CHANGELOG (`undriven='closed'` restores the old fixed-step / exact behaviour). Tests: `test_undriven_policy.py`.
 
 ## 12. Stage B — remaining Python-only semantics
 - [ ] 12.1 C-block zero-order hold as a kernel tick handler

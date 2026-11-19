@@ -188,3 +188,59 @@ Outside dsed:
 - `exact_output_step` and its `fits` allocate per step: there is a per-step augmented vector, and an `advance_` for the interval end. This is part of the +75 % wall time at 1e-5.
 - Tier-2 (Padé) segments are not bounded. They keep the dt_max grid and are counted as unbounded.
 - The tolerance is per state, not per observable. An observable that is a difference of large states gets that absolute error.
+
+## 3. One undriven policy and the per-engine blocks (tasks 2.1–2.3, feat/core-release-options)
+
+Owner decisions delegated to the orchestrator (2026-11-19), implemented as
+options whose default is today's; the full record is DECISIONS 26 of
+`add-kernel-simulation-object`. The release flips two library defaults, both
+data in `benchmarks/tools/next_defaults.py` section `PLAN`:
+
+| item (DECISIONS 23 of add-kernel-simulation-object) | today pwl / trbdf2 / exact | release value | mechanism | profile entry |
+|---|---|---|---|---|
+| 1 undriven controlled switch | closed + warning / refused by name (`switch_fn`) / closed + warning; `auto` no dt refuses | `'refuse'` on every engine and `auto`, naming each switch | `simulate(undriven=)`, `None` reads `_plan.DEFAULT_UNDRIVEN` | `PLAN["DEFAULT_UNDRIVEN"] = 'refuse'` |
+| 7 count checks | pwl (after the mmc combinations) / `max_event_iterations` in the kernel's words, the rest refused by name / all refused by name | one message per count, every engine that reads it, before the mmc combinations | `_plan.UNIFORM_ENGINE_RULES` | `PLAN["UNIFORM_ENGINE_RULES"] = True` |
+| 6 `on_impulse` | refused at the event (kernel) / same / after the run, `kind=''`; `integrator='bdf2'` ignores it | bdf2 refuses `on_impulse` by name; the exact refusal names the kind | `_plan.UNIFORM_ENGINE_RULES` | same entry |
+| 5 `mode_selection='auto'` | one place now (`_route`) | — (done, no caller-visible change) | none | none |
+| 6.2 voltage check | one function on every engine now (the exact engine had it already) | — (done) | none | none |
+| 4 `resume_from` clock | snapshot's t unless t_start is set / same / refused | — (one rule, `plan.resolved_from`) | none | none |
+| 2, 3, 9 `mmc_arms` / `on_cache`, `progress` / `live_stream`, the exact loss port | per engine | kept per engine (engine-inherent), refused by name elsewhere | option table | none |
+
+C++: one row of `sim::kRunOptionTable` (`undriven`). Blast radius of the
+profile on `python/tests` with the two new entries: section 3 below (hand-off).
+
+## 4. Blast radius with `PLAN` (hand-off, feat/core-release-options)
+
+`next_defaults_pytest.py` on full `python/tests`, re-measured on the same
+day: a67d3994 (no `PLAN`) 480 failed / 0 errors (recorded 479 in section 1;
+the extra one was not identified — every one of the 480 still fails after);
+this branch with `DEFAULT_UNDRIVEN='refuse'` and `UNIFORM_ENGINE_RULES=True`
+518 failed / 0 errors. No failure went away; 38 are new. By class, before ->
+after: new refusal by name 6 -> 31, other assertion 102 -> 112, engine route
+/ result layout 71 -> 74, the rest unchanged (numeric 193, digest 50,
+warning / raise 28, exception 24, snapshot 6).
+
+The 38 new: 26 rely on an undriven controlled switch (`'refuse'`), 6 pin
+today's behaviour on purpose (`test_release_uniform_rules.py` 5,
+`test_next_defaults.py` 1), 6 are harness artefacts (the harness's
+`simulate` wrapper adds a frame, so the 4 caller-line voltage-check tests
+see its file; it routes `auto` before the call, so 2 `undriven=` auto cases
+take another engine). Files relying on an undriven switch (not fixed):
+
+| file | tests |
+|---|---|
+| `test_circuit_scopes.py` | 7 |
+| `test_cache_budget.py` | 3 |
+| `test_cross_cutting_on_every_engine.py` | 3 |
+| `test_undriven_policy.py` (the `None` pins) | 3 |
+| `test_dsed_control_ticks.py` (refused as `switch_fn` before `step_observer`) | 2 |
+| `test_exact_guard_transient.py` | 2 |
+| `test_mosfet_body_diode_default.py` | 2 |
+| `test_mode_auto.py` (gated: `switch_fn` before `mode_selection`) | 1 |
+| `test_circuit_sweep.py` | 1 |
+| `test_controller_state_isolation.py` | 1 |
+| `test_named_diagnostics.py` | 1 |
+
+The fix at the release is the same in each: drive the switch
+(`switch_fn=`) or pass `undriven='closed'` where the test means today's
+fixed-step / exact behaviour.

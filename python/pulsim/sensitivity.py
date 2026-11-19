@@ -518,9 +518,11 @@ class _Mode:
 # ----------------------------------------------------------------------
 
 class _ConstSchedule:
-    def __init__(self, n):
+    def __init__(self, n, closed=False):
         from . import SwitchStateMask
         self._m = SwitchStateMask(n)
+        for i in range(n if closed else 0):   # simulate(undriven='closed')
+            self._m.set(i, True)
 
     def __call__(self, t):
         return self._m

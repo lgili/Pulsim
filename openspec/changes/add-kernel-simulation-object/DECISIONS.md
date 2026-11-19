@@ -480,3 +480,143 @@
       `-m reference` 383. The loss-port refusals are item 9 of 23.
       Bytecodes on the merged tip: 2834 / 3683 / 4374 (dsed: the PR head's
       own +26, 3993 -> 4019).
+
+26. **The per-engine blocks of 23 get ONE release behaviour each, behind a
+    mechanism whose default is today's (orchestrator decision 2026-11-19;
+    branch `feat/core-release-options`).** Three mechanisms, the smallest
+    per item: (a) a keyword resolved in the plan, `None` = today (only
+    `undriven`); (b) one library switch `pulsim._plan.UNIFORM_ENGINE_RULES`
+    (False today) for differences not worth a keyword; (c) kept per engine,
+    documented, where the difference is the engine's own. The release values
+    are data in `benchmarks/tools/next_defaults.py` section `PLAN` (applied
+    by `next_defaults_pytest.py` and `nd.plan_defaults()`). With every new
+    value at its default nothing a caller sees changes (oracles in 27).
+    C++ changed: one row of `sim::kRunOptionTable` (`undriven`, every engine,
+    never refused; the array grows 50 -> 51) so the table still covers every
+    keyword (`test_the_table_covers_every_simulate_parameter`).
+    1. **Undriven switches (item 1 of 23; task 11.3).** Today, pinned by
+       `test_cross_cutting_on_every_engine.py` (`test_an_undriven_switch_is_
+       closed_with_a_warning[pwl|exact]`, `..._is_refused_on_trbdf2`) and
+       `test_undriven_policy.py` (`test_none_keeps_*`): pwl all CLOSED + one
+       warning (decided in `_run_pwl` after the cache hooks); trbdf2 refused
+       by name by the route's blocker (`UnsupportedError`, feature
+       `switch_fn`) — `_undriven('trbdf2')`'s all-OPEN mask is reached only
+       when the circuit has no controlled switch, or a closed loop without a
+       gate; `auto` without dt raises the route's `ValueError`, with dt it is
+       pwl; the exact engine all CLOSED + one warning (inside the
+       dispatcher). Release: `'refuse'`. Mechanism (a): `simulate(undriven=
+       None|'refuse'|'open'|'closed')`, a table row; `None` reads
+       `_plan.DEFAULT_UNDRIVEN` (None today). Decided ONCE in `_plan_run`
+       right after `_compose` (`_undriven_policy`), only when the composed
+       drive has no `switch_fn` and a policy is set: the census's controlled
+       bits (`_switch_census`; diode-owned bits are the solver's, so a
+       diode-only circuit takes no policy) named by `switch_index_of`.
+       `'refuse'` raises `UnsupportedError(engine=<asked>, feature=
+       'switch_fn', device=<first>)` naming every switch and both remedies
+       (`switch_fn=` / `closed_loops=`, or `undriven='open'|'closed'`),
+       before the route, so `auto` refuses it the same way. `'open'` /
+       `'closed'`: `plan.undriven = (policy, names)`; `_route` passes it to
+       `_trbdf2_blockers`, whose switch blocker then does not fire (so `auto`
+       without dt takes trbdf2); each engine builds the same native constant
+       mask in `_undriven(engine, builder, stacklevel, policy)` where it
+       always did (the exact engine through `run_dsed_from_builder(undriven=)`
+       so its poll warning for a user `switch_fn` is not raised; the
+       sensitivity run through `_ConstSchedule(n, closed)`, which has the
+       edge oracle that path requires). One diagnostic, no warning:
+       `plan.diagnostics` (code `undriven`) and `result.diagnostics
+       ['undriven'] = {'policy', 'switches'}` on every engine. Tests:
+       `test_undriven_policy.py` (each policy x pwl / trbdf2 / exact / auto:
+       the waveform equals the circuit with the switch replaced by 1/g_off
+       or 1/g_on on the same engine within 1e-9, and every engine equals the
+       closed form within its own agreement; 'refuse' names `S_hi, S_lo` on
+       every engine and through auto with and without dt; the library
+       default is read only for None). Limits (reviewer, kept): the policy
+       applies only when the composed drive has no `switch_fn` at all — a
+       partial drive (one switch gated, another not) is not refused or
+       named; `'refuse'` sits above the route, so it fires before an
+       engine's own capability refusal (exact + thyristor: "no driver", not
+       the gated-device refusal) and with `engine='auto'` the error's
+       `engine` is `'auto'` (as the sensitivities refusal). `None` on the
+       exact engine's `sensitivities=` run refuses (unchanged); `'open'` /
+       `'closed'` run there. Profile: `PLAN["DEFAULT_UNDRIVEN"] =
+       'refuse'`.
+    2. **Count checks (item 7) and on_impulse (item 6): mechanism (b),
+       `UNIFORM_ENGINE_RULES`.** Today, pinned by `test_release_uniform_
+       rules.py`: `max_event_iterations < 0` is an `OptionsError` on pwl
+       ("(0 disables event iteration)") and on trbdf2 in the kernel's own
+       words ("(None = the default)"); the exact engine refuses all three
+       counts by name, trbdf2 refuses `store_every` / `max_dt_halvings` by
+       name (so "validation that runs for pwl only" was in fact only a
+       wording and an ORDER difference); pwl checks the counts after the
+       `mmc_arms` combinations (`store_every=0` with arms reads "decimation
+       can drop the final state"). `on_impulse='error'`: pwl and trbdf2
+       refuse at the event in the kernel (`pwl/reinit.hpp`, an ideal
+       branch-form device makes the structure checker active), the exact
+       engine records and refuses in `_finalize` after the run with
+       `kind=''`; the exact engine's `integrator='bdf2'` never projects, so
+       `'warn'` / `'error'` are silently ignored there (seen: zero records on
+       the capacitor loop that records one on rk45). Release (switch True):
+       `_uniform_checks` right after `_route` — one message per count on
+       every engine that reads it (pwl's), before the arms; `integrator=
+       'bdf2'` with `on_impulse != 'record'` refused by name (feature
+       `on_impulse`); the exact engine's impulse refusal names the device
+       kind (`pool.kind_of(...).name`, the kernel's `stored_kind_name`).
+       NOT done: refusing at the event on the exact engine — its scheduler
+       can retract a trial projection's record (`undo_reinit_records_`, four
+       truncation sites in `dsed/scheduler.hpp`, owned by the exact-engine
+       track), so a record is final only at the end of the run; the after-
+       run refusal raises the same class and fields. Also not refused: a
+       static source-capacitor loop / current-source cut-set at t_start on
+       pwl / trbdf2 without an ideal device (the structure checker is
+       inactive; seen: zero records). Profile: `PLAN["UNIFORM_ENGINE_
+       RULES"] = True`.
+    3. **Kept per engine (c).** `mmc_arms` / `on_cache` (items 2: the fixed
+       engine's own cache), `progress` / `live_stream` (3: the per-step ring;
+       `progress` also runs on the exact engine), the exact engine's loss-port
+       refusals (9: its event clock). Every other engine refuses them by
+       name through the option table. `sweep()`'s recipe (8) is read once in
+       the plan since 23: nothing left.
+    4. **Done without a mechanism (no caller-visible change).**
+       `mode_selection='auto'` (item 5) is resolved in ONE place, `_route`
+       (`_resolve_mode_auto(builder, engine, max_event_iterations,
+       sensitivities)`, one rule per engine); the exact engine's rule (lcp
+       with a PWL diode, else the settle; the settle with `sensitivities=`)
+       moved from `run_dsed_from_builder` (now `mode_auto=` in, the dead
+       `'auto'` branches removed) and from `_plan_run`. The resolution never
+       warns or raises on the exact engine, so moving it above the dispatcher
+       reorders nothing; `test_release_uniform_rules.py` checks the plan's
+       record equals the result's on each engine. The voltage check (task
+       6.2): the exact engine has run it since 23 (`_auto_check_voltage_
+       sanity` on the arrays; `test_voltage_sanity_warns_on_every_engine
+       [exact]`), so there is no new warning to flip; pwl's inline copy is
+       replaced by the same function at the same frame depth (same caller
+       line: `test_one_voltage_check_names_the_callers_line_on_every_
+       engine`). `resume_from` / `t_start` (item 4): pwl and trbdf2 start at
+       the snapshot's t when t_start is left 0.0 (an explicit t_start wins:
+       the snapshot's state at that clock); the exact engine refuses by name;
+       one rule in `_plan_run`, and `plan.resolved_from['t_start']` reads
+       `'resume_from'` when it applied.
+
+27. **Hand-off of 26 (feat/core-release-options, 2026-11-19).** Verified with
+    every new option at its default against an a67d3994 extract (same
+    extension): full `python/tests` 6005 passed / 110 skipped / 8 xfailed
+    (the extract: 5944 / 111 / 8 — `test_no_home_paths` skips outside git —
+    plus the 59 new tests), the per-test warning set equal but one entry,
+    the new `test_none_keeps_trbdf2_and_auto_refusals` pinning today's
+    warning; goldens, stateful, engines, options and hooks byte compares
+    identical; `pwl_identity` 390/390; `trbdf2_identity` 370/371 (the one
+    difference is the extract's path inside a refusal message);
+    `-m reference` 383; `reference_status` rc 0, `REFERENCE_STATUS.md`
+    unchanged, its json identical; examples 138; ruff, `openspec validate
+    --strict` 79, stubs `--check`, `mkdocs build --strict` clean; overhead
+    gate pwl 2874 <= 2890, trbdf2 3700 <= 3760 (ceilings not raised);
+    `pulsim_core_sim_tests` 1206 assertions pass on Eigen 5 and Eigen 3.4.0.
+    Full ctest not run. Review (fresh context, read-only): defaults
+    identical on 17 A/B scenarios; fixed — `run_dsed_from_builder` applies
+    the plan's rule to an `'auto'` that reaches it unresolved, and the docs
+    state that `None` refuses on the exact engine's `sensitivities=` run and
+    that the policy applies only when nothing drives any switch; kept (26
+    item 1 limits) — a partial drive is not refused, `'refuse'` precedes an
+    engine's capability refusal, `engine='auto'` names `'auto'`. Blast radius
+    of the profile with the two `PLAN` entries:
+    `update-number-changing-release` DECISIONS section 3.
