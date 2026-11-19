@@ -143,13 +143,21 @@ def test_engine_warnings_with_recorders_point_at_the_callers_line():
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         # (integrator= on trbdf2 used to warn; the option table now refuses
-        # it by name, so an undriven switch is the warning here)
+        # it by name. An undriven switch warned next, until the release made
+        # undriven='refuse' the default and an explicit policy silent; the
+        # warning here is the split's: an opaque gate edge off the grid)
         b = p.CircuitBuilder()
         b.add_voltage_source("V", "in", "gnd", 1.0)
         b.add_switch("S", "in", "out", 1e3, 1e-9)
         b.add_resistor("R", "out", "gnd", 1.0)
-        p.simulate(b, t_end=1e-5, dt=1e-6, engine="pwl",
+        n = b.graph.num_switches
+
+        def gate(t):
+            m = p.SwitchStateMask(n)
+            m.set(0, t >= 3.5e-6)
+            return m
+        p.simulate(b, t_end=1e-5, dt=1e-6, engine="pwl", switch_fn=gate,
                    recorders=[p.Recorder("x", ["v(out)"])])
-    mine = [x for x in w if "no switch_fn was given" in str(x.message)]
+    mine = [x for x in w if "could not be located" in str(x.message)]
     assert mine and all(x.filename == __file__ for x in mine), \
         [(x.filename, x.lineno) for x in mine]
