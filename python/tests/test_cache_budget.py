@@ -100,9 +100,14 @@ def test_event_solver_metrics_are_visible():
     assert cache.metrics().event_hits == 0
 
 
+# The simulate() tests below never drive the switches (their subject is storage):
+# undriven='closed' is the policy those runs always had (the default refuses).
+UNDRIVEN = "closed"
+
+
 def test_result_total_bytes_covers_more_than_states():
     b = _four_switch_builder()
-    res = pulsim.simulate(b, t_end=1e-4, dt=1e-6)
+    res = pulsim.simulate(b, t_end=1e-4, dt=1e-6, undriven=UNDRIVEN)
     assert res.total_bytes > res.states_bytes   # + times + diagnostics
 
 
@@ -111,9 +116,9 @@ def test_store_every_via_solver_options_bundle():
     # (review finding store-every-unreachable-from-every-public-
     # entry-point).
     b = _four_switch_builder()
-    flat = pulsim.simulate(b, t_end=1e-4, dt=1e-6, store_every=10)
+    flat = pulsim.simulate(b, t_end=1e-4, dt=1e-6, store_every=10, undriven=UNDRIVEN)
     bundled = pulsim.simulate(
-        b, t_end=1e-4, dt=1e-6,
+        b, t_end=1e-4, dt=1e-6, undriven=UNDRIVEN,
         solver=pulsim.SolverOptions(store_every=10))
     assert flat.num_steps() == bundled.num_steps()
     assert bundled.num_steps() == 11
@@ -130,11 +135,11 @@ def test_flat_store_every_beats_the_bundle_in_both_directions():
     bundle = pulsim.SolverOptions(store_every=100)
 
     # Explicit full rate must WIN over a decimating bundle.
-    assert pulsim.simulate(b, t_end=1e-4, dt=1e-6,
+    assert pulsim.simulate(b, t_end=1e-4, dt=1e-6, undriven=UNDRIVEN,
                            store_every=1, solver=bundle).num_steps() == 101
     # Omitted -> the bundle applies.
-    assert pulsim.simulate(b, t_end=1e-4, dt=1e-6,
+    assert pulsim.simulate(b, t_end=1e-4, dt=1e-6, undriven=UNDRIVEN,
                            solver=bundle).num_steps() == 2
     # A different explicit value also wins.
-    assert pulsim.simulate(b, t_end=1e-4, dt=1e-6,
+    assert pulsim.simulate(b, t_end=1e-4, dt=1e-6, undriven=UNDRIVEN,
                            store_every=10, solver=bundle).num_steps() == 11
