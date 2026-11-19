@@ -2455,18 +2455,6 @@ inline SimulationResult run_transient_trbdf2(
             throw std::invalid_argument(
                 "run_transient_trbdf2: integrator must be 0 (TR-BDF2) or 1 (ESDIRK4(3))");
         }
-        if (esdirk && lt) {
-            // The loss tracker's heat is advanced per TR-BDF2 / SDIRK stage
-            // solve and integrated with their quadrature weights; the five
-            // ESDIRK stages do neither yet (integration batch 14h).
-            const auto& s = pool.device_losses().front();
-            throw UnsupportedError(
-                "trbdf2", "integrator=esdirk43", s.device, "",
-                std::format("engine 'trbdf2': integrator='esdirk43' cannot honour "
-                            "the loss port of '{}' (set_device_losses) yet: the "
-                            "in-kernel losses follow the TR-BDF2 stages. Drop "
-                            "integrator='esdirk43'.", s.device));
-        }
         if (esdirk && hs.any()) {
             auto k = pwl::DevicePool::StoredKind::Resistor;
             bool found = false;
@@ -2496,6 +2484,10 @@ inline SimulationResult run_transient_trbdf2(
         std::vector<pwl::HistoryEntry> ed_hist;
         bool ed_land = false;   // the pending landing was an ESDIRK step
         bool ed_forced = false;  // this SDIRK step was forced by kE (slots of another mode)
+        // The capacitor slots of a localisation bracket's two ends and of the
+        // last trial (ed_slots), for a landing interpolated between them.
+        std::vector<Real> ed_ia, ed_ib, ed_it;
+        Real ed_thp = Real{0};
         // The five stages of one ESDIRK4(3) step on the factor of h/2
         // (G + C/(γh)): stage s is backward Euler of γh from the pseudo
         // previous state ψ_s (the entries' state slots, derivative slots 0),
@@ -2586,10 +2578,24 @@ inline SimulationResult run_transient_trbdf2(
             history.restore(hist_snap);
             return ok;
         };
+        // The capacitor current a BE commit of stage s of the step hh that
+        // ed_stages just took would store: the stage's own derivative
+        // C·d_s/(γ·hh), KCL-consistent at that stage's state. Inductor slots
+        // are readings of the state (0 here, unused).
+        auto ed_slots = [&](int s, Real hh, std::vector<Real>& out) {
+            out.resize(entries.size());
+            for (Size i = 0; i < entries.size(); ++i) {
+                out[i] = entries[i].kind == pwl::DevicePool::StoredKind::Capacitor
+                    ? entries[i].C_or_L * ed_d[static_cast<std::size_t>(s)][i]
+                          / (step::Esdirk43::gamma * hh)
+                    : Real{0};
+            }
+        };
         // take, ESDIRK: one step of h; x_g = stage 1 (c = 1/2) for the
         // crossing detector, x_1 = stage 5.
         auto ed_take = [&]() -> step::Verdict {
             if (landed_on_bp && t + h < bp_t - h_min) landed_on_bp = false;
+            if (lt) lt->advance(h);  // the heat owed, as a power over h
             hg = Real{2} * step::Esdirk43::gamma * h;
             h_pt = Real{0.5} * h;
             bool ok = true;
@@ -2631,6 +2637,15 @@ inline SimulationResult run_transient_trbdf2(
             }
             x_g = ed_y[0];
             return step::Verdict::Accept;
+        };
+        // In-kernel losses of an ESDIRK step (or landing) just solved by
+        // ed_stages: the conduction power on its quadrature, b1 on the
+        // start, b2..b5 on Y1..Y4, b6 on x1 = Y5 (order 4, as the states).
+        auto ed_loss_accept = [&](Real t0, Real t1, const Vector& x1,
+                                  const SwitchStateMask& m) {
+            using E = step::Esdirk43;
+            lt->accept_step<4>(t0, t1, x1, m, {&ed_y[0], &ed_y[1], &ed_y[2], &ed_y[3]},
+                               {E::b(1), E::b(2), E::b(3), E::b(4)}, E::b(0), E::b(5));
         };
         // The loop body, cut IN PLACE into the step's phases (slice 3b of
         // refactor-unified-transient-stepper, DECISIONS 15): each phase is ONE
@@ -2905,6 +2920,8 @@ inline SimulationResult run_transient_trbdf2(
         // (kE: integrator='esdirk43'; one instantiation per integrator,
         // selected once per run in run_twin, no per-step branch)
         auto tb_take = [&]<bool kE = false>() PULSIM_STEP_PHASE {
+            // names read only under kE, captured by reference outside it (MSVC)
+            (void)ed_take; (void)ed_forced;
 
             // Step mask: sampled at the midpoint — piecewise-
             // constant gates are constant over (t, t+h) by the
@@ -3095,6 +3112,7 @@ inline SimulationResult run_transient_trbdf2(
         };
         // error: the LTE and the controller's verdict (reject, forced accept)
         auto tb_error = [&]<bool kE = false>() PULSIM_STEP_PHASE {
+            (void)ed_hd0; (void)ed_d; (void)ed_y0;   // captured outside kE (MSVC)
 
             // ---- LTE over the differential variables ----
             Real err_sq = Real{0};
@@ -3352,6 +3370,8 @@ inline SimulationResult run_transient_trbdf2(
         // after_solve: diode crossings, the localisation and its landing (a
         // commutated step is committed here, at the landing)
         auto tb_after = [&]<bool kE = false>() PULSIM_STEP_PHASE {
+            (void)ed_stages; (void)ed_slots; (void)ed_loss_accept; (void)ed_hist;   // captured outside kE (MSVC)
+            (void)ed_land; (void)ed_ia; (void)ed_ib; (void)ed_it; (void)ed_thp;
 
             // ---- diode crossing detection on the accepted step ----
             commutated = false;
@@ -3727,6 +3747,13 @@ inline SimulationResult run_transient_trbdf2(
                     // then -20 V in one step, a floating bridge +1.76 V).
                     Vector x_ta = x;
                     Vector x_tb = tb < t + h ? x_g : x_1;
+                    if constexpr (kE) {
+                        if (!sdirk) {   // the slots of x (committed) and of x_tb (its stage)
+                            ed_ia.resize(entries.size());
+                            for (Size i = 0; i < entries.size(); ++i) ed_ia[i] = entries[i].i_prev;
+                            ed_slots(tb < t + h ? 0 : step::Esdirk43::n_stages - 1, h, ed_ib);
+                        }
+                    }
                     for (int it = 0; it < 40; ++it) {
                         t_loc = std::clamp(
                             ta - sa * (tb - ta) / (sb - sa),
@@ -3766,7 +3793,11 @@ inline SimulationResult run_transient_trbdf2(
                         const Real sm =
                             detail_trbdf2::crossing_signal(
                                 diodes, cross_idx, x_trial);
+                        if constexpr (kE) {
+                            if (!sdirk) ed_slots(step::Esdirk43::n_stages - 1, dts, ed_it);
+                        }
                         if ((sm > Real{0}) == (sa > Real{0})) {
+                            if constexpr (kE) { if (!sdirk) ed_ia = ed_it; }
                             ta = t_loc;
                             sa = sm;
                             sa_raw = sm;
@@ -3774,6 +3805,7 @@ inline SimulationResult run_transient_trbdf2(
                             if (side == -1) { sb *= Real{0.5}; }
                             side = -1;
                         } else {
+                            if constexpr (kE) { if (!sdirk) ed_ib = ed_it; }
                             tb = t_loc;
                             sb = sm;
                             sb_raw = sm;
@@ -3829,6 +3861,7 @@ inline SimulationResult run_transient_trbdf2(
                             th * (Real{1} + Real{1e-6}),
                             (t + dt_land - ta) / (tb - ta)));
                         x_trial = x_ta + thp * (x_tb - x_ta);
+                        if constexpr (kE) ed_thp = thp;
                         if (dt_land > t_lin - t) ++st.n_interp_floor_landings;
                     } else if constexpr (kE) {
                         ed_land = !sdirk;
@@ -3869,6 +3902,20 @@ inline SimulationResult run_transient_trbdf2(
                                 x_trial, step::Esdirk43::gamma * dt_land);
                         } else {
                             history.update_from_state(x_trial, dt_land);
+                            if (interp_land && !sdirk) {
+                                // the interpolated state between two ESDIRK
+                                // states: its capacitor current is the same
+                                // interpolation of theirs (KCL is linear under
+                                // one mask); the trapezoidal reconstruction
+                                // over dt_land missed KCL by ~1e-5 of the node
+                                history.snapshot_into(hist_snap);
+                                for (Size i = 0; i < hist_snap.size(); ++i) {
+                                    if (hist_snap[i].kind == pwl::DevicePool::StoredKind::Capacitor) {
+                                        hist_snap[i].i_prev = ed_ia[i] + ed_thp * (ed_ib[i] - ed_ia[i]);
+                                    }
+                                }
+                                history.restore(hist_snap);
+                            }
                         }
                     } else {
                     history.update_from_state(x_trial, dt_land);
@@ -3972,7 +4019,14 @@ inline SimulationResult run_transient_trbdf2(
                     result.record_switch_state(mask_step);
                     if (hooks) hooks->accepted(t_hook0, t, x, mask_step);
                     // the landing is a trapezoidal sub-step
-                    if (lt) lt->accept_step(t_hook0, t, x, mask_step, nullptr, 0.5, 0, 0.5);
+                    if (lt) {
+                        if constexpr (kE) {
+                            if (ed_land) ed_loss_accept(t_hook0, t, x, mask_step);
+                            else lt->accept_step(t_hook0, t, x, mask_step, nullptr, 0.5, 0, 0.5);
+                        } else {
+                            lt->accept_step(t_hook0, t, x, mask_step, nullptr, 0.5, 0, 0.5);
+                        }
+                    }
                     if (structure.active()) reinit.note(mask_step);
                     x_mask = mask_step;
                     x_mask_known = true;
@@ -4008,6 +4062,7 @@ inline SimulationResult run_transient_trbdf2(
         };
         // commit: the accepted step (history, state, record, proposal, post-edge restart)
         auto tb_commit = [&]<bool kE = false>() PULSIM_STEP_PHASE {
+            (void)ed_hist; (void)ed_loss_accept;   // captured outside kE (MSVC)
 
             if (!commutated) {
                 // ---- accept ----
@@ -4067,6 +4122,8 @@ inline SimulationResult run_transient_trbdf2(
                     const Real w = Real{0.5} / (Real{2} - gamma);
                     if (sdirk) {
                         lt->accept_step(t_pre, t, x, mask_step, &x_g, 0, Real{1} - gs, gs);
+                    } else if constexpr (kE) {
+                        ed_loss_accept(t_pre, t, x, mask_step);
                     } else {
                         lt->accept_step(t_pre, t, x, mask_step, &x_g, w, w, Real{1} - Real{2} * w);
                     }

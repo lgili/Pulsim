@@ -99,14 +99,51 @@ def test_dcm_buck_events_and_waveform_agree_with_trbdf2():
     assert np.all(np.diff(runs["esdirk43"].times) >= 0)
 
 
-def test_a_loss_port_is_refused_by_name():
-    # the in-kernel losses follow the TR-BDF2 stages (integration batch 14h)
-    from .test_device_losses_variable_step import _rl_chopper
-    b, fn = _rl_chopper()
-    with pytest.raises(p.UnsupportedError) as e:
-        p.simulate(b, t_end=1e-5, engine="trbdf2", switch_fn=fn, integrator="esdirk43")
-    assert (e.value.engine, e.value.feature, e.value.device) == (
-        "trbdf2", "integrator=esdirk43", "S1")
+def _loss_buck():
+    # the buck of the recorder tests with E = k·v·i tables on S1 and D1 and
+    # S1's junction on a thermal RC (synthetic data)
+    from .test_device_losses_variable_step import KOFF, KON, _kvi
+    from .test_recorder_device_readings import _buck
+    b, fn, t_end, _, _ = _buck()
+    b.add_voltage_source("Vamb", "amb", "gnd", 25.0)
+    b.add_resistor("Rth", "tj", "amb", 5.0)
+    b.add_capacitor("Cth", "tj", "amb", 1e-4)
+    b.set_device_losses("S1", E_on=_kvi(KON), E_off=_kvi(KOFF), junction="tj")
+    b.set_device_losses("D1", E_on=_kvi(KON), E_off=_kvi(KOFF), Tj=25.0)
+    return b, fn, t_end, ["S1", "D1"]
+
+
+def _loss_vsi():
+    from .test_device_losses_kernel import _switch_names, _vsi
+    b, fn = _vsi()
+    tab = p.LossTable(v_axis=[0.0, 800.0], i_axis=[0.0, 60.0], tj_axis=[25.0, 150.0],
+                      energy=np.array([[[0.0, 0.0], [0.0, 0.0]],
+                                       [[0.0, 0.0], [2e-3, 3e-3]]]))
+    names = _switch_names(b)
+    for n in names:
+        b.set_device_losses(n, Tj=125.0, E_on=tab, E_off=tab)
+    return b, fn, 4e-3, names
+
+
+@pytest.mark.parametrize("case", [_loss_buck, _loss_vsi])
+def test_in_kernel_losses_agree_with_trbdf2_at_tight_tolerance(case):
+    # integrator='esdirk43' books the same events at the same sites and
+    # integrates conduction on its stage weights b: agreement with the
+    # TR-BDF2 run at rtol 1e-8 (measured: worst 2.8e-6 of the device's
+    # largest energy; rtol 1e-9 grinds TR-BDF2 itself on the buck's
+    # capacitance-free switch node). Closed form: test_device_losses_variable_step
+    runs = {}
+    for integ in (None, "esdirk43"):
+        b, fn, t_end, names = case()
+        runs[integ] = p.simulate(b, t_end=t_end, engine="trbdf2", switch_fn=fn,
+                                 integrator=integ, rtol=1e-8, atol=1e-11)
+    for n in names:
+        a, e = runs[None].device_energy(n), runs["esdirk43"].device_energy(n)
+        assert (e["n_on"], e["n_off"]) == (a["n_on"], a["n_off"]), n
+        for k in ("E_on", "E_off", "E_cond_electrical"):
+            scale = max(abs(a["E_on"]), abs(a["E_off"]), abs(a["E_cond_electrical"]))
+            assert abs(e[k] - a[k]) <= 2e-5 * scale, (n, k, e[k], a[k])
+    # the ledger and the junction: test_device_losses_variable_step
 
 
 def test_in_loop_recorder_runs_and_agrees_with_trbdf2():
