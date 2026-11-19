@@ -281,6 +281,33 @@ public:
         return node_v(from) - node_v(to);
     }
 
+    /// The rounding scale of node_pair_voltage: the same sums with every
+    /// term taken in absolute value, |c|ᵀ(|R||x| + |r| + |R_b||b|). Times the
+    /// unit round-off (and the summation length) it bounds the error of the
+    /// recovered voltage (the inner-product bound).
+    [[nodiscard]] Real node_pair_voltage_scale(Index from, Index to, Real t,
+                                               const Vector& x) const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        const Vector* b_extra =
+            has_dynamic_sources_ ? &build_time_varying_b_extra_(t, Real{0}) : nullptr;
+        auto node_s = [&](Index n) -> Real {
+            if (n < 0) return Real{0};
+            Real v = e.recover_from_state.row(n).cwiseAbs().dot(x.cwiseAbs())
+                     + std::abs(e.recover_const[n]);
+            if (b_extra) v += e.recover_from_b.row(n).cwiseAbs().dot(b_extra->cwiseAbs());
+            return v;
+        };
+        return node_s(from) + node_s(to);
+    }
+
+    /// The summation length of node_pair_voltage (state plus source terms).
+    [[nodiscard]] Index node_pair_voltage_terms() const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        return e.recover_from_state.cols() + (has_dynamic_sources_ ? e.recover_from_b.cols() : 0) + 1;
+    }
+
     /// v2.0 Phase 3 item 2 — the current mode's exact stepper, or
     /// nullptr when it does not apply (time-varying sources, or a
     /// defective eigenbasis for this mask). The scheduler treats
@@ -427,6 +454,14 @@ public:
         ensure_current_resolved_();
         ensure_exact_built_(*current_entry_);
         return pulsim::dsed::exact_settle_length(current_entry_->exact, t_res);
+    }
+
+    /// The current mode's propagator error per unit of state, as the
+    /// propagator states it (exact_step_error).
+    [[nodiscard]] Real exact_step_error() const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        return pulsim::dsed::exact_step_error(current_entry_->exact);
     }
 
     /// The tier-1 bound's longest step (D2); the scheduler sets its

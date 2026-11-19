@@ -771,6 +771,20 @@ inline constexpr Real kSettleTau = Real{40};
     return std::isfinite(r_lo) ? kSettleTau / r_lo : Real{0};
 }
 
+/// A step's error per unit of state, as the propagator states it: tier 1
+/// u·κ₂(Ṽ) and the kept pairs' first-order defect (pair_quality); tier 2
+/// its Padé error estimate, or the tier's accepted level when not judged.
+/// 0 without an exact step.
+[[nodiscard]] inline Real exact_step_error(const ExactLTI& e) {
+    if (!e.valid) return Real{0};
+    if (e.tier == 1) {
+        Real r = kExactRoundoff * e.kappa;
+        if (std::isfinite(e.defect)) r = std::max(r, e.defect);
+        return r;
+    }
+    return std::isfinite(e.pade_defect) ? e.pade_defect : kExactTierBound;
+}
+
 /// Slow-manifold projection (event_projection.hpp) with the cached
 /// tier-1 basis: modes with Re λ < −fast_threshold go to their
 /// quasi-static value −w/λ. False when tier 1 is not available.
