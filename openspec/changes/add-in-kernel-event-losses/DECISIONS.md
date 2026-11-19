@@ -201,6 +201,62 @@ Pickle version 5 gains field 17 (18 fields); 17-field tuples still load.
 Loss ports are hashed in the circuit IR when present (structure: names,
 nodes, conduction kind, which tables; values: Tj and the table arrays).
 
+## 16. trbdf2 with a junction ground to max_steps: the forcing jumps at every step (diagnosis)
+
+Reported: the three-phase VSI with six RC junctions (`_vsi_case` of
+`test_exact_junction_loop.py` on `feat/core-a-complementarity`) raised
+`SimulationAborted` (max_steps 1e7) at t = 20 µs on trbdf2, rtol 1e-9 and
+1e-10; the same VSI without the junctions runs.
+
+Smallest stalling circuit (bisected on the netlist): ONE switch held ON
+(no switching, no event tables), 10 V into 1 Ω, conduction loss into one
+RC junction (2 K/W, 200 µF to a 25 V ambient source), 2 ms, atol 1e-12:
+
+| rtol | no junction acc / rej / forced | with the junction |
+|---|---|---|
+| 1e-6 | 1152 / 6 / 1 | 111 972 / 156 830 / 20 570 |
+| 1e-8 | 1656 / 6 / 1 | SimulationAborted (grinding) |
+| 1e-10 | 3983 / 6 / 1 | SimulationAborted (grinding) |
+
+The VSI with ONE junction (on INV__HSa, 40 µs, rtol 1e-6): 14 926
+accepted, 11 100 rejected, 2085 forced accepts (without: 1021 / 7 / 1).
+With the junction alone (an RC node, no loss port) or with losses at a
+fixed T_j the counts are the junction-free ones: the FEED causes it.
+
+Trace (a temporary per-attempt print in the error phase, not committed):
+every rejected or forced step names a junction capacitor as the largest
+component — 13 177 of 13 185 on the one-junction VSI, 2 444 121 of
+2 444 130 (2 206 611 rejects + 237 519 forced, 25 µs) on the six-junction
+VSI at rtol 1e-9 (the rest are phase inductors). A cascade at t = 1.5004e-5 s (one junction, rtol 1e-6):
+
+| h attempted | heat power E/h | estimate (K) | scale (K) | verdict |
+|---|---|---|---|---|
+| 4.0e-8 | 1.47e-3 W | 2.400e-8 | 7.7e-11 | reject |
+| 1.0e-9 | 5.65e-2 W | 4.018e-8 | 7.7e-11 | reject |
+| 2.2e-11 | 2.64 W | 4.060e-8 | 7.7e-11 | reject |
+| 4.0e-16 (h_lo) | 1.47e5 W | 4.061e-8 | 7.7e-11 | FORCED |
+| 4.0e-16 | 0.205 W | -4.061e-8 | 7.8e-11 | FORCED (f_n = 1.47e5 A) |
+
+The estimate does not move with h. Cause: the tracker delivers the heat
+E owed by the last accepted step as the power E/h over the step being
+attempted, so the injected current jumps at every step boundary and a
+retry with a smaller h raises it as 1/h. The capacitor's history current
+i_prev is the LEFT limit (it embeds the previous step's power), and both
+the trapezoidal stage and the estimate's f_n read it: TR-BDF2's estimate
+of a jump ΔJ at the step start is 2|c_lte|/γ · h·ΔJ/C = 0.138·E/C,
+independent of h (measured 4.061e-8 K = 0.138 × 5.88e-11 J / 2e-4 F).
+Every h down to h_lo fails, the step is forced, and the forced step's own
+power E/h_lo becomes the next step's f_n (the second forced accept). Not
+the estimator alone: the trapezoid integrates (J_left + J_now)/2 over the
+first stage, so the jump is a real O(E/C) error of that stage, not noise.
+The scale makes it worse but is not the cause: the capacitor's voltage is
+the temperature RISE (0 at the start), so its scale is atol (here 1e-12
+K) for the first microseconds; a kelvin-sized atol would only move the
+threshold — the estimate is independent of h, so some h_attempt always
+fails once E/C > tolerance/0.138, and tightening rtol makes it worse.
+(c), the impulsive / event energy at a commutation, is the same jump with
+a larger E (the reject cascade at each edge); (d) and (e) were not seen.
+
 ## Not done / known gaps
 
 The exact engine (`dsed` / `exact`) still refuses a loss port (its exact
