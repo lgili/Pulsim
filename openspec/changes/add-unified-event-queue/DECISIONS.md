@@ -431,3 +431,104 @@ same count and same instants on a PWM buck with a freewheel diode.
   tick sources, as after a pwl run whose graphs tick themselves).
 - Number change: a plain Python tick source resumed mid-period on pwl
   used to restart its grid at t_start; it now keeps the run's grid.
+
+## 14. The edge oracle under a driven duty; the restart rule reads declared edges
+
+- **The oracle was not wrong.** A `bind_pi_to_switch` gate is a
+  `ChainPwmGate`: `CarrierPwm` legs on chain-owned `DutyRegister`s
+  (DECISIONS 12). Its `next_edge_after` reads the register the tick handler
+  writes, so inside the current tick interval it IS the gate's edge
+  (carrier crossing of the latched duty), and the fixed engine drops its
+  memo after every observer call (the only place a tick runs). Measured on
+  ll15 during a run (a probe calling `next_edge_after` after each observer
+  call): 0.3226 us after the t = 0 tick (duty 0.0645), then 50.25,
+  55.25 us ... (duty 0.05, the PI's minimum, for the whole run). The
+  "2.5 / 7.5 us" of the hand-off is what the oracle answers BEFORE the
+  run's first tick (the register's construction value, duty 0.5): a query
+  outside a run, not a stale answer inside one. `make_combined_switch_fn`
+  keeps the oracle only when every part declares one; an opaque Python
+  callable declares none (`adapt_switch_fn` gives no `next_edge`), and a
+  label-time `ChainSignalGate` declares +inf on purpose (control-graph G16:
+  its changes are at observer calls, i.e. on the grid). So "declared edge"
+  already means "provably where the gate changes until the next tick"; no
+  oracle code changed.
+- **What the two symptoms were.** (i) ll15 pwl+split records one
+  `switch_states` change because every pulse (0.25 us at duty 0.05) lies
+  inside one 0.5 us step and the sample at t is post-edge (OFF): the split
+  places the pulse (v(out) at the ticks 9.9e-6 of the span against
+  `closed_loop_reference.py`); the reference_status 0.050 is V(sw) against
+  trbdf2's samples ("chatter"), a sampling artefact, unchanged. (ii) fix B
+  read the gate's left limit at t whenever the oracle had an edge inside the
+  step; for a pulse that starts on the grid and ends inside the step that is
+  OFF for the whole step, so every ll15 pulse was dropped (V(sw) 0.0659 ->
+  0.216 against trbdf2). D4 widens the same pulse to the step. Both are
+  first order; neither is the oracle.
+- **Fix B + one rule: written, measured, NOT on this branch.** Code on
+  branch `feat/core-p3-event-queue-fixb` (pushed; two loop hunks of
+  `run_transient.hpp`: the `restart_gate_time` lambda after `snap`, its
+  call after `gate_memo_n = 0;` in the dynamic loop, and the static
+  path's `gate_t`). Restart rule without the split: a step whose schedule
+  declares an edge in (t_prev + snap, t - max(snap, left_by)) reads the
+  gate's left limit at t; on the dynamic path a bit that turned at t_prev
+  and is back by t (a pulse narrower than the step: ll15 at its minimum
+  duty, the high side of a dead-time pair) keeps D4 (per bit: a
+  whole-mask test missed the dead-time pair, fresh-context review).
+  Measured (old = fix A only / new; truth = 50-digit exact engine unless
+  named):
+  - exact, pwl+restart, every solved circuit: 5 better, 1 worse, 75
+    identical. vcswitch_resistor 0.0592 / 0; ll06_buck_vcswitch 0.117 /
+    0.0510 (dt/4 0.0259); ll07_boost_vcswitch 0.0183 / 0.00217;
+    boost_pfc_open_loop 0.0304 / 0.0191; boost_switching_complex 3.07e-4 /
+    2.98e-4; WORSE interleaved_buck_3ph 0.00249 / 0.00966 at dt (dt/4:
+    0.00246 / 0.00058: the old does not converge, the new does).
+  - ll15 (Radau reference, max |v(out) - ref| / span at the ticks):
+    pwl+restart 0.0300 / 0.0300 (dt), 0.00257 / 0.00105 (dt/2), 0.00076 /
+    0.00105 (dt/4); pwl and pwl+split byte-identical (pwl+split 9.9e-6).
+    reference_status V(sw): 0.0659 / 0.0659 (pure fix B: 0.216).
+  - ll14 (Radau): pwl+restart 0.0402 / 0.0648 (dt), 0.0257 / 0.0197
+    (dt/2), 0.0148 / 0.0106 (dt/4). reference_status 0.221 / 0.195.
+  - reference_status pwl+restart: ll16 0.208 / 0.116, vcswitch 0.0682 /
+    0.0332, boost_pfc agrees (0.0191), cl_boost_pi 0.0579 / 0.0543, ll06
+    0.118 / 0.0704; exit 0; counts 89/19 -> 90/18.
+  - goldens: all byte-identical except `vsi_pwl_restart` (SPWM, off-grid
+    edges): V(a) rms vs a dt/20 split run 19.0 / 2.69 V, I(La) rms 3.9e-3
+    / 3.6e-3 A, I(Lb) rms 4.9e-3 / 5.5e-3 A.
+  - full pytest: 6 tests pin D4's rule-alone numbers and fail:
+    `test_restart_rule_integration::test_controller_ticks_are_unchanged_
+    and_the_gate_moves_one_step` (an off-grid edge now moves zero samples,
+    not one), `test_fixed_step_event_splitting` rule-alone values (RL
+    edge at 0.3 dt: -8.50e-3 / +3.64e-3; at 0.7 dt: -3.64e-3 /
+    +8.48e-3; buck duty edge: 0.0808 / -0.409 V; the two stateful
+    devices' "rule alone is not second order"). The strict xfail
+    `test_the_restart_rule_fires_a_declared_gate_edge_on_time` passes.
+- **Why it is not merged.** Fix B moves each off-grid edge from the next
+  grid point (D4, displacement (1 - f) dt) to the previous one
+  (displacement f dt): the sample at t is in the right mode (the exact
+  score's gain on algebraic nodes), but the state error only changes
+  sign and size with f, so it is worse whenever f > 1/2 (buck duty
+  f ~ 0.83: 5x; ll14 at dt). That is a coin flip on the states, not a
+  move toward the truth. Proposal for whoever takes it (the stepper,
+  which owns the loop): on the dynamic path round each declared edge to
+  the NEAREST grid point (f < 1/2: left limit at t; f >= 1/2: D4), which
+  bounds the displacement by dt/2 and is never worse than D4 on the
+  states; keep the left limit on the static path (exact there); re-pin
+  the six tests with measured values; the split stays the order-2 answer.
+- **Requests for the stepper / TR-BDF2 tracks (loop locals, not done here).**
+  (a) TR-BDF2: a run resumed AT a gate edge misses it (stepper DECISIONS
+  11): the post-edge "edge already landed" cache is a loop local; put
+  `edge_from` / the landed-edge time in `SolverSnapshot` (new pickle index)
+  and seed the queue's `GateEdge` source from it. (b) TR-BDF2 opaque-gate
+  learning (`gate_pulse_min`, sampled gate history, noise-held decisions)
+  is loop-local: buck resume 0/44 bit-identical (stepper DECISIONS 12); move
+  it into a `SampledGate` object (tasks 3.1) owned by the skeleton and
+  carried by the snapshot. (c) The queue never takes an instant AT t_end
+  (half-open [t0, t_end), fix-control-tick-semantics; control-graph G15):
+  a per-source `Rate::closed_end` is a queue-only change, but the fixed
+  engine starts its queue at `t_end - 1e-9 dt` and runs ticks only at
+  observer calls (the last one at t_n-1's step), so landing it needs a
+  final observer call in the loop: stepper. (d) With fix B, the retry
+  comment at `run_transient.hpp` ~2628 ("the gate keeps the step's start
+  sample, as the restart rule alone") is stale: `gate_t0` can be the left
+  limit at t. (e) The restart-rule "declared edge one step late" strict
+  xfail (`test_gated_device_seams.py`, owner this track) passes with fix
+  B; it stays an xfail here until the edge-placement rule is chosen.
