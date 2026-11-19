@@ -18,6 +18,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stored arrays (`store_every > 1` and `resume_from` are refused with
   recorders, by name). Without `recorders` nothing changes.
 
+### One result type (add-probes-and-recorders, second slice)
+
+* **BREAKING** (class identity) `simulate(engine='exact' / 'dsed')`
+  returns a `pulsim.SimulationResult`, as pwl and trbdf2 do;
+  `_PEDSimulationResult` is gone. Every value is bit-identical (all 109
+  harness circuits). On the exact engine `res.times` is the read-only
+  float64 array (was a list), `switch_states` is a fresh array per access
+  (was read-only), `reinit_records` are `pulsim.ReinitRecord`, and the
+  pwl attributes exist there (`final_snapshot.valid` is False). The exact
+  engine's `n_accept` / `n_reject` / `n_events` / `n_rk45_steps` /
+  `n_bdf2_steps` / `n_exact_steps` / `cpu_time_seconds` are read-only
+  properties over `res.stats` (absent on the other engines, as before).
+* **Added** `res.grid` (`pulsim.GridKind`: Uniform on pwl, Accepted on
+  trbdf2 / exact) and `res.stats` (`pulsim.RunStats`, engine-independent
+  counters; `_trbdf2_stats` stays for one release).
+* **Added** `res.avg / rms / integral / minmax(probe, t0, t1)` and
+  `res.at(probe, t)`: time-weighted measures through the kernel recorder
+  (the arithmetic of `time_average`; the right limit at an exact-engine
+  event). Prefer them to `.mean()` on a non-uniform grid.
+* **Added** `Recorder(keep='times', times=[...])` (t_eval rows, linear on
+  the step, `Recording.interpolated`), `p(device)` readings for resistors,
+  inductors, PWL / Shockley diodes, switches and voltage sources; `i()` /
+  `p()` of a capacitor (derivative, not the companion law), MOSFET, IGBT
+  and the other kinds without a stored-sample law are refused by name
+  before the run. Engine warnings of `simulate(recorders=...)` point at
+  the caller's line.
+
 ### Integration batch 14a: event queue 3, device interface 3, unified stepper 2, ideal switch 5, TR-BDF2 track 8 merged
 
 * **Changed** the `SolverSnapshot` pickle is version 5, one layout with

@@ -169,7 +169,7 @@ def test_simulate_dsed_runs_on_buck_ccm_without_scipy() -> None:
     # asserted: it depends on the machine's load): the result is the
     # native adapter's, with its own accepted-step count.
     print(f"DSED 5 ms buck: {elapsed * 1000:.0f} ms")
-    assert type(res).__name__ == "_PEDSimulationResult"
+    assert type(res).__name__ == "SimulationResult"
     assert 0 < res.n_accept <= 2 * 5000, res.n_accept
 
 
@@ -208,5 +208,5 @@ def test_simulate_dsed_takes_fewer_steps_than_pwl_on_buck_ccm() -> None:
     rd = p.simulate(b, t_end=5e-3, engine="dsed", switch_fn=pwm)
     t_dsed = time.perf_counter() - t0
     print(f"DSED/PWL wall speed-up on buck CCM: {t_pwl / t_dsed:.1f}x")
-    assert type(rd).__name__ == "_PEDSimulationResult"
+    assert type(rd).__name__ == "SimulationResult"
     assert 0 < 5 * rd.n_accept <= rp.num_steps(), (rd.n_accept, rp.num_steps())

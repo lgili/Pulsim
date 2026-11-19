@@ -312,9 +312,8 @@ private:
 // ---------------------------------------------------------------------------
 // PEDResult / PEDResultAuto → Python dict converters.
 //
-// We return a dict so callers can index by name; the existing
-// _PEDSimulationResult wrapper in `python/pulsim/_dsed_dispatch.py`
-// already handles arbitrary attribute access.
+// We return a dict so callers can index by name;
+// `_dsed_dispatch._exact_result` fills a SimulationResult from it.
 // ---------------------------------------------------------------------------
 
 /// The mask each stored sample is reconstructed and recorded under:

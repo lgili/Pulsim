@@ -39,6 +39,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/record/probe.hpp"
+#include "pulsim/streaming/live_ring.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -60,9 +61,10 @@ struct Window {
 };
 
 struct RecorderSpec {
-    enum class Keep : std::uint8_t { Every, Decimate, None };
+    enum class Keep : std::uint8_t { Every, Decimate, None, Times };
     Keep keep = Keep::Every;
     Size every_n = 1;            // Decimate: keep sample 0, n, 2n, ...
+    std::vector<Real> sample_times;  // Times (t_eval): increasing; one row each
     std::vector<Window> windows; // declared windows
     Real period = 0;             // > 0: one window per period
     Real offset = 0;             // first period starts here
@@ -96,6 +98,15 @@ public:
         if (!(spec_.period >= 0) || !std::isfinite(spec_.period) || !std::isfinite(spec_.offset)) {
             throw std::invalid_argument("recorder: period must be finite and >= 0, offset finite");
         }
+        if (spec_.keep == RecorderSpec::Keep::Times) {
+            const auto& ts = spec_.sample_times;
+            for (Size k = 0; k < ts.size(); ++k) {
+                if (!std::isfinite(ts[k]) || (k > 0 && !(ts[k] > ts[k - 1]))) {
+                    throw std::invalid_argument(
+                        "recorder: sample times must be finite and strictly increasing");
+                }
+            }
+        }
         for (const auto& w : spec_.windows) {
             if (!(std::isfinite(w.t0) && std::isfinite(w.t1) && w.t1 > w.t0)) {
                 throw std::invalid_argument(std::format(
@@ -113,6 +124,7 @@ public:
         left_.resize(np);
         start_.resize(np);
         right_.resize(np);
+        row_.resize(np);
     }
 
     /// Map every probe reading to a column of the feeder's reading row.
@@ -146,7 +158,9 @@ public:
         Size rows = 0;
         if (spec_.keep == RecorderSpec::Keep::Every) rows = n_samples;
         if (spec_.keep == RecorderSpec::Keep::Decimate) rows = n_samples / spec_.every_n + 1;
+        if (spec_.keep == RecorderSpec::Keep::Times) rows = spec_.sample_times.size();
         times_.reserve(rows);
+        if (spec_.keep == RecorderSpec::Keep::Times) interpolated_.reserve(rows);
         values_.reserve(rows * np);
         if (spec_.period > 0 && t_last > spec_.offset) {
             const Real nf = std::floor((t_last - spec_.offset) / spec_.period) + 1;
@@ -169,12 +183,12 @@ public:
         }
         eval_into(readings, left_);
         if (n_samples_ > 0 && t > t_prev_) piece(t_prev_, t);
-        const bool keep =
-            spec_.keep == RecorderSpec::Keep::Every ||
-            (spec_.keep == RecorderSpec::Keep::Decimate && n_samples_ % spec_.every_n == 0);
-        if (keep) {
-            times_.push_back(t);
-            values_.insert(values_.end(), left_.begin(), left_.end());
+        if (spec_.keep == RecorderSpec::Keep::Times) {
+            emit_times(t);
+        } else if (spec_.keep == RecorderSpec::Keep::Every ||
+                   (spec_.keep == RecorderSpec::Keep::Decimate &&
+                    n_samples_ % spec_.every_n == 0)) {
+            keep_row(t, left_);
         }
         start_ = left_;
         t_prev_ = t;
@@ -193,6 +207,32 @@ public:
         start_ = right_;
     }
 
+    /// End of the run: a requested time at the last sample takes its value
+    /// (the right limit when an event fired there). Times past the last
+    /// sample, or before the first, are not reached (`n_times_unreached`).
+    void flush() {
+        if (spec_.keep != RecorderSpec::Keep::Times) return;
+        const auto& ts = spec_.sample_times;
+        while (n_samples_ > 0 && next_time_ < ts.size() &&
+               (ts[next_time_] == t_prev_ || near(ts[next_time_], t_prev_))) {
+            keep_row(ts[next_time_], start_, false);
+            ++next_time_;
+        }
+        unreached_ += ts.size() - next_time_;
+        next_time_ = ts.size();
+    }
+
+    /// RingSink: every kept row (n_probes values) is also pushed into
+    /// `ring` (its state size must be n_probes; its own decimation applies).
+    void stream_to(streaming::LiveRing* ring) {
+        if (ring != nullptr && ring->state_size() != probes_.size()) {
+            throw std::invalid_argument(std::format(
+                "recorder: ring state size {} != {} probes", ring->state_size(),
+                probes_.size()));
+        }
+        ring_ = ring;
+    }
+
     // ---- results ----
     [[nodiscard]] Size n_probes() const noexcept { return probes_.size(); }
     [[nodiscard]] const std::vector<Probe>& probes() const noexcept { return probes_; }
@@ -201,6 +241,12 @@ public:
     /// Kept rows: `times()[r]`, `values()[r * n_probes() + p]`.
     [[nodiscard]] const std::vector<Real>& times() const noexcept { return times_; }
     [[nodiscard]] const std::vector<Real>& values() const noexcept { return values_; }
+    /// Times: per kept row, 1 when it lies strictly inside a step (linear
+    /// on the dense-output line), 0 when it is a sample.
+    [[nodiscard]] const std::vector<std::uint8_t>& interpolated() const noexcept {
+        return interpolated_;
+    }
+    [[nodiscard]] Size n_times_unreached() const noexcept { return unreached_; }
     [[nodiscard]] const std::vector<Real>& event_times() const noexcept { return event_t_; }
     [[nodiscard]] const std::vector<Real>& event_left() const noexcept { return event_left_; }
     [[nodiscard]] const std::vector<Real>& event_right() const noexcept { return event_right_; }
@@ -215,12 +261,43 @@ private:
     std::vector<Size> cols_, offs_;
     Size n_readings_ = 0;
     bool bound_ = false;
-    std::vector<Real> scratch_, left_, start_, right_;
+    std::vector<Real> scratch_, left_, start_, right_, row_;
     Real t_prev_ = 0;
     Size n_samples_ = 0;
     std::vector<Real> times_, values_;
     std::vector<Real> event_t_, event_left_, event_right_;
     std::vector<WindowStat> declared_, periodic_;
+    std::vector<std::uint8_t> interpolated_;
+    Size next_time_ = 0, unreached_ = 0;
+    streaming::LiveRing* ring_ = nullptr;
+
+    void keep_row(Real t, const std::vector<Real>& v, bool interp = false) {
+        times_.push_back(t);
+        values_.insert(values_.end(), v.begin(), v.end());
+        if (spec_.keep == RecorderSpec::Keep::Times) interpolated_.push_back(interp ? 1 : 0);
+        if (ring_ != nullptr && ring_->should_decimate()) ring_->push(t, v.data(), v.size());
+    }
+
+    // Requested times in [t_prev_, t): on the line from start_ (the right
+    // limit at t_prev_ when an event fired there) to left_. A time at t
+    // waits for the next sample or flush(), which know whether t is an event.
+    void emit_times(Real t) {
+        const auto& ts = spec_.sample_times;
+        while (next_time_ < ts.size() && ts[next_time_] < t && !near(ts[next_time_], t)) {
+            const Real tau = ts[next_time_++];
+            if (n_samples_ == 0 || tau < t_prev_) {
+                if (!(n_samples_ > 0 && near(tau, t_prev_))) { ++unreached_; continue; }
+            }
+            if (tau == t_prev_ || near(tau, t_prev_)) {
+                keep_row(tau, start_, false);
+                continue;
+            }
+            for (Size p = 0; p < probes_.size(); ++p) {
+                row_[p] = lerp(t_prev_, start_[p], t, left_[p], tau);
+            }
+            keep_row(tau, row_, true);
+        }
+    }
 
     void require_bound(std::span<const Real> readings) const {
         if (!bound_) throw std::logic_error("recorder: bind() before feeding");
@@ -337,6 +414,7 @@ inline void feed_table(Recorder& rec, std::span<const Real> t, std::span<const R
     if (e != event_rows.size()) {
         throw std::invalid_argument("feed_table: event rows must be increasing row indices");
     }
+    rec.flush();
 }
 
 /// In-loop feeding from the engines' accepted-step hook. `columns[j]` is
@@ -345,6 +423,7 @@ inline void feed_table(Recorder& rec, std::span<const Real> t, std::span<const R
 /// sample (`rec.sample(t_start, ...)`) when it knows it; otherwise the
 /// record starts at the end of the first accepted step. No right limits
 /// (the hook has none): see DECISIONS "requests to the stepper track".
+/// With `Keep::Times` the caller calls `rec.flush()` after the run.
 inline void attach(events::StepHooks& hooks, Recorder& rec, std::vector<Index> columns) {
     auto buf = std::make_shared<std::vector<Real>>(columns.size());
     hooks.on_accept([&rec, buf, cols = std::move(columns)](

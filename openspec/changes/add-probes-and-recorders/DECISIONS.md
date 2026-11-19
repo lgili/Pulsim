@@ -151,6 +151,106 @@ correct. Fixed:
 Not changed: `attach()` with `Keep::Every` regrows if `reserve` under-
 counts (the caller sizes it; the in-loop test covers None and Decimate).
 
+## 15. One result type (sections 1, 2 — slice 2)
+
+- `SimulationResult` is default-constructible; the exact engine's adapter
+  (`_dsed_dispatch._exact_result`) fills an empty one through
+  `_adapter_fill(times, states, switch_states, reinit_records)` and
+  `_set_run_info(engine, grid, stats)`. `_PEDSimulationResult` is deleted;
+  `isinstance(res, pulsim.SimulationResult)` on every engine.
+- Byte compare against 656b894f (all 109 harness circuits x 3 engines,
+  every public attribute, `res.v/i` of every observable, the warnings,
+  `device_loss_summary`): see the hand-off for the numbers. Type changes
+  on the exact engine, values bit-identical: `times` is the read-only
+  float64 view (was a list of floats, as pwl's was before
+  update-fixed-step-loop-bookkeeping); `switch_states` /
+  `switch_states_unsolved` are fresh writable arrays per access (were
+  read-only); `reinit_records` are `pulsim.ReinitRecord` (were
+  SimpleNamespace; same fields, plus `cause = ""`); the result gains the
+  pwl attributes (`final_snapshot` with `valid = False`, `newton`,
+  `counters`, `dt_retries = []`, ...), so code that tested
+  `getattr(res, "final_snapshot", None) is None` must test `.valid`
+  (every in-tree caller already did).
+- `n_accept`, `n_reject`, `n_events`, `n_rk45_steps`, `n_bdf2_steps`,
+  `n_exact_steps`, `cpu_time_seconds` are read-only properties over
+  `res.stats`, present on exact-engine results only: on pwl / trbdf2 they
+  raise AttributeError as before, because `design.py` and
+  `periodic_steady_state.py` use `getattr(res, "n_accept", None)` to tell
+  the engines apart (a trbdf2 `n_accept` there would have changed the
+  `engine_steps` count design studies report).
+- The exact-engine extras stay instance attributes (`states_reduced`,
+  `has_full_states`, `right_limit_*`, `exact`, `event_times`, ...).
+- `_result_views.with_right_limits` returned `copy.copy(result)` with
+  patched arrays; a kernel result's arrays are read-only properties, so it
+  now returns a `_ResultView` (attributes it sets, the rest read from the
+  result; the result type's Python methods run against the view).
+- shortcut: `res.grid` / `res.stats` are set by the Python finalisation
+  of `simulate()` (pwl and trbdf2 tails, the exact adapter), not by the
+  C++ drivers (loop freeze). A bare `run_transient` result carries
+  `grid = Uniform` and `stats.engine = ""`. pwl reports only
+  `n_solves`, `n_factorizations`, `n_newton_iterations` (from
+  `res.newton`); `n_steps` is 0 there (`store_every` hides it). trbdf2
+  maps its dict (`n_diode_events` -> `n_state_events`); exact: its
+  integrator counts, `n_events` -> `n_mode_events`.
+- `_trbdf2_stats` stays, the same dict, for one release (2.2);
+  `_trbdf2_warn_stats` keeps reading its `stats` argument (in simulate()
+  the numbers of `res.stats`): tests drive its confessions with edited
+  dicts on a real result.
+
+## 16. Measures and t_eval (sections 4, 0b.8)
+
+- `res.avg / rms / integral / minmax(probe, t0=None, t1=None)` and
+  `res.at(probe, t)` are Python methods over the kernel recorder pass
+  (`record::feed_table`), not C++ members of `SimulationResult`: the
+  readings come from `res.v` / `res.i` (the per-kind laws live in Python
+  until section 5's `ProbeSet`). Same arithmetic as `time_average` /
+  `time_rms` (tests: rel 1e-12 on three engines).
+- `at(t)` at an exact-engine event returns the right limit; pwl / trbdf2
+  store no right limit (section 3), so there `at` and the windows see a
+  jump as a ramp over the following step, as `time_average` does.
+- `Recorder(keep='times', times=[...])` (t_eval, `Times{land=false}`):
+  one row per requested time, linear on the step that holds it, the right
+  limit at an event instant, `interpolated` flags the rows that are not
+  samples. Landing (`land=true`) needs `OutputSample` events in the loop:
+  not done (loop freeze, event-queue integration).
+- `RingSink`: `Recorder::stream_to(LiveRing*)` pushes every kept row (C++;
+  in-loop use through `attach`). `live_stream` from Python on every engine
+  waits for in-loop Python feeding (0b.6).
+
+## 17. Device readings in the stored-array pass (item 3)
+
+- `p(dev)` = `v(from, to) * i(dev)` per sample (both limits on the exact
+  engine) for kinds whose `i()` is exact on a stored sample and runs from
+  the first terminal to the second through the device: resistor,
+  inductor, PWL diode, switch, Shockley diode, and the voltage sources
+  (absorbed power; a source that delivers reads negative — tested:
+  source energy = resistor energy + capacitor energy).
+- Refused by name before the run (reading and reason):
+  `i()` / `p()` of `capacitor` (derivative of the stored voltage, not the
+  companion law: section 6, owner decision pending),
+  `nonlinear_capacitor`, `mosfet_level1`, `igbt_level1`,
+  `nonlinear_diode`, `lauritzen_diode`, `vcvs`, `saturable_inductor` (no
+  per-sample current law on a stored result); `p()` of any other kind
+  (multi-terminal, or a source whose sign convention is "out of n_pos").
+  `i()` of the remaining kinds is `res.i` (the existing ladder).
+
+## 18. Sections stopped, and why
+
+- 3 (event rows on pwl / trbdf2): the drivers must store the right limit
+  at every event: an edit to the loop bodies (freeze); requests R1/R2.
+- 5, 10 (`ProbeSet` in C++, delete the `_result_i` ladder): precondition
+  0.1 (device-interface section 9: generic pin currents) is not merged on
+  this base; the per-kind laws stay in Python until it is.
+- 6: owner decision pending (BREAKING capacitor current).
+- 7 (in-kernel recording at the push sites): loop freeze; waits for the
+  stepper's single hook.
+- 8.1 (decimation on the accepted grid, lifting the `store_every`
+  refusal) waits for in-loop feeding (0b.6); 8.2 landing: see 16.
+- 9 (`Signal` ndarray subclass, `GridWarning`): not started. It changes
+  what `res.v` returns on trbdf2 / exact (a subclass propagates through
+  arithmetic) and every in-tree `.mean()` over those results would warn;
+  it needs its own PR with the suite run under `-W error::GridWarning`.
+
 ## Requests to the stepper track
 
 - **R1.** One per-accepted-step call for all engines, after commit:
@@ -173,8 +273,29 @@ counts (the caller sizes it; the in-loop test covers None and Decimate).
 
 ## Hand-off
 
-- tasks 0b.5 (option-table row), 0b.6 (feeding on R1-R3, then lift the
-  `store_every` refusal), 0b.7 (snapshot index), 0b.8 (`Times`, `RingSink`,
-  `at`).
-- Sections 1-3, 5-10 of tasks.md untouched.
-- The exact scheduler's `set_hooks` path is not exercised with a recorder.
+Slice 2 (this branch, after 2b18f11a):
+- Done: one result type (1.1-1.3, CHANGELOG), `GridKind` / `RunStats`
+  (2.1-2.3), result measures `avg / rms / integral / minmax / at` (4.1,
+  part of 4.2-4.3), 0b.8 (`keep='times'`, `RingSink`, `at`), `p()`
+  readings and pre-run refusals of inexact `i()` / `p()` (17), in-loop
+  feeding through the exact scheduler's `set_hooks` tested
+  (`test_exact_queue_ticks.cpp`: equals the stored-array pass of the
+  left-limit table to 1e-12), `attach()` keep-every with an undercounting
+  `reserve` tested, engine warnings of `simulate(recorders=...)` at the
+  caller's line (re-emitted; under `-W error` the run's own exception
+  wins).
+- Byte compare against 656b894f: 109 circuits x 3 engines (327 cells;
+  every public attribute, `v/i` of every observable, warning lists,
+  `device_loss_summary`): identical except, on the 100 exact-engine
+  cells, `times` list -> array (same bytes) and the new pwl attributes
+  (`dt_retries`, `heat_injected`, `n_restart_steps` were absent).
+  Goldens 22/22 IDENTICAL (syncbuck_dsed: counters absent -> 0).
+  Reference: `pytest -m reference` 368 passed, REFERENCE_STATUS.md
+  unchanged. pytest 5214 passed / 108 skipped / 6 xfailed. C++: record +
+  dsed targets on Eigen 3.4.0 (13 + 126 cases) and locally (`ctest -R
+  'record|dsed'` 32/32). Full ctest NOT run (orchestrator rule: the
+  integration tree runs it).
+- Open: 0b.5 (option-table row at the Simulation-object integration),
+  0b.6 (stepper R1-R3), 0b.7 (snapshot index 17, see tasks), 1.4 result
+  reference page, 3, 4.2 delegation of `stats.time_average`, 4.3 PR #140
+  check, 5-10 (see 18).

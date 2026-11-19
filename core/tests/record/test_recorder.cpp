@@ -288,3 +288,100 @@ TEST_CASE("probe / recorder: malformed declarations are refused (review findings
     Recorder r({Probe::compile("v(x)")}, tiny);
     CHECK_THROWS_AS(r.reserve(10, 1.0), std::invalid_argument);
 }
+
+TEST_CASE("recorder: Times rows are linear inside a step and the right limit at an event",
+          "[record]") {
+    // the square wave of the limits test: 0 until t = 1, jump to 1, back to 0 at t = 2
+    RecorderSpec spec;
+    spec.keep = RecorderSpec::Keep::Times;
+    spec.sample_times = {0.0, 0.3, 1.0, 1.15, 2.0, 2.5, 3.0};
+    auto r = make({"v(s)"}, spec, {"v(s)"});
+    auto feed = [&](Real t, Real left) { r.sample(t, std::span<const Real>(&left, 1)); };
+    auto jump = [&](Real right) { r.event(std::span<const Real>(&right, 1)); };
+    feed(0.0, 0.0);
+    feed(0.6, 0.6);   // a ramp 0 -> 0.6 on the first step
+    feed(1.0, 0.0);
+    jump(1.0);
+    feed(1.3, 1.0);
+    feed(2.0, 1.0);
+    jump(0.0);
+    feed(3.0, 0.0);
+    r.flush();
+    CHECK(r.times() == spec.sample_times);
+    const auto& v = r.values();
+    REQUIRE(v.size() == 7);
+    CHECK(v[0] == 0.0);
+    CHECK(v[1] == Catch::Approx(0.3).epsilon(1e-15));
+    CHECK(v[2] == 1.0);   // t = 1: the right limit
+    CHECK(v[3] == 1.0);
+    CHECK(v[4] == 0.0);   // t = 2: the right limit
+    CHECK(v[5] == 0.0);
+    CHECK(v[6] == 0.0);   // the last sample, through flush()
+    CHECK(r.interpolated() == std::vector<std::uint8_t>{0, 1, 0, 1, 0, 1, 0});
+    CHECK(r.n_times_unreached() == 0);
+}
+
+TEST_CASE("recorder: Times outside the record are counted, not invented", "[record]") {
+    RecorderSpec spec;
+    spec.keep = RecorderSpec::Keep::Times;
+    spec.sample_times = {-1.0, 0.5, 5.0};
+    auto r = make({"v(s)"}, spec, {"v(s)"});
+    const std::vector<Real> t{0, 1}, x{0, 2};
+    record::feed_table(r, t, x, 1, {}, {});
+    CHECK(r.times() == std::vector<Real>{0.5});
+    CHECK(r.values() == std::vector<Real>{1.0});
+    CHECK(r.n_times_unreached() == 2);
+    RecorderSpec bad;
+    bad.keep = RecorderSpec::Keep::Times;
+    bad.sample_times = {0.5, 0.5};
+    CHECK_THROWS_AS(make({"v(s)"}, bad, {"v(s)"}), std::invalid_argument);
+}
+
+TEST_CASE("recorder: RingSink pushes every kept row into a LiveRing", "[record]") {
+    RecorderSpec spec;
+    spec.keep = RecorderSpec::Keep::Decimate;
+    spec.every_n = 2;
+    auto r = make({"v(a)", "2*v(a)"}, spec, {"v(a)"});
+    streaming::LiveRing ring(16, 2, 1);
+    r.stream_to(&ring);
+    for (int k = 0; k < 5; ++k) {
+        const Real y = k;
+        r.sample(k, std::span<const Real>(&y, 1));
+    }
+    CHECK(ring.head() == 3);   // rows 0, 2, 4
+    streaming::LiveRing wrong(16, 3, 1);
+    CHECK_THROWS_AS(r.stream_to(&wrong), std::invalid_argument);
+}
+
+TEST_CASE("recorder: attach() with Keep::Every survives an undercounting reserve",
+          "[record]") {
+    // the caller sizes the kept table; too small a reserve regrows (one
+    // allocation per doubling) and loses nothing
+    auto r = make({"v(a)", "v(b) - v(a)"}, RecorderSpec{}, {"v(a)", "v(b)"});
+    r.reserve(2, 0.0);
+    events::StepHooks hooks;
+    record::attach(hooks, r, {1, -1});   // v(a) = x[1], v(b) = ground
+    Vector x(2);
+    const topology::SwitchStateMask mask(1);
+    for (int k = 1; k <= 1000; ++k) {
+        x << 0.0, static_cast<Real>(k);
+        hooks.accepted(k - 1, k, x, mask);
+    }
+    REQUIRE(r.times().size() == 1000);
+    CHECK(r.times().front() == 1.0);
+    CHECK(r.times().back() == 1000.0);
+    CHECK(r.values()[2 * 999] == 1000.0);
+    CHECK(r.values()[2 * 999 + 1] == -1000.0);
+}
+
+TEST_CASE("recorder: several requested times within 4 ulps of the last sample all land",
+          "[record]") {
+    RecorderSpec spec;
+    spec.keep = RecorderSpec::Keep::Times;
+    spec.sample_times = {std::nextafter(1.0, 0.0), 1.0};
+    auto r = make({"v(s)"}, spec, {"v(s)"});
+    const std::vector<Real> t{0, 1}, x{0, 2};
+    record::feed_table(r, t, x, 1, {}, {});
+    CHECK(r.values() == std::vector<Real>{2.0, 2.0});
+    CHECK(r.n_times_unreached() == 0);
+}

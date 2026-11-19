@@ -3119,6 +3119,29 @@ void init_module(py::module_& m) {
                        &SimulationResult::Resolution::n_branches_covered)
         .def_readonly("ringing", &SimulationResult::Resolution::ringing);
 
+    py::enum_<record::GridKind>(m, "GridKind",
+        "What grid a result's rows sit on (add-probes-and-recorders D3).")
+        .value("Uniform", record::GridKind::Uniform)
+        .value("Accepted", record::GridKind::Accepted)
+        .value("Requested", record::GridKind::Requested);
+    {
+        auto rs = py::class_<record::RunStats>(m, "RunStats",
+            "Engine-independent run counters; zero where an engine does not "
+            "report one. `engine` names the engine that filled them.");
+        rs.def_readonly("engine", &record::RunStats::engine);
+#define PULSIM_RUNSTAT(f) rs.def_readonly(#f, &record::RunStats::f);
+        PULSIM_RUNSTAT(n_steps) PULSIM_RUNSTAT(n_accept) PULSIM_RUNSTAT(n_reject)
+        PULSIM_RUNSTAT(n_solves) PULSIM_RUNSTAT(n_factorizations)
+        PULSIM_RUNSTAT(n_gate_events) PULSIM_RUNSTAT(n_state_events)
+        PULSIM_RUNSTAT(n_mode_events) PULSIM_RUNSTAT(n_ctrl_ticks)
+        PULSIM_RUNSTAT(n_newton_iterations) PULSIM_RUNSTAT(n_newton_retries)
+        PULSIM_RUNSTAT(n_forced_accepts) PULSIM_RUNSTAT(n_chatter_breaks)
+        PULSIM_RUNSTAT(n_gate_undersampled) PULSIM_RUNSTAT(n_rk45_steps)
+        PULSIM_RUNSTAT(n_bdf2_steps) PULSIM_RUNSTAT(n_exact_steps)
+        PULSIM_RUNSTAT(gate_pulse_min) PULSIM_RUNSTAT(gate_sample_spacing_max)
+        PULSIM_RUNSTAT(cpu_time_seconds)
+#undef PULSIM_RUNSTAT
+    }
     py::class_<SimulationResult>(m, "SimulationResult",
         "Output of run_transient: parallel `times` and "
         "`states` arrays, plus event diagnostics.",
@@ -3441,7 +3464,121 @@ void init_module(py::module_& m) {
                        &SimulationResult::newton_roundoff_omega_max)
         .def_readonly("newton_roundoff_row",
                        &SimulationResult::newton_roundoff_row)
-        .def("num_steps", &SimulationResult::num_steps);
+        .def("num_steps", &SimulationResult::num_steps)
+        .def("empty", &SimulationResult::empty, "True when nothing was recorded.")
+        // add-probes-and-recorders D3: one result type on every engine.
+        .def(py::init<>(),
+             "An empty result. Kernel adapters fill it (`_adapter_fill`, "
+             "`_set_run_info`); every engine returns this type.")
+        .def("_adapter_fill",
+            [](SimulationResult& r,
+               py::array_t<Real, py::array::c_style | py::array::forcecast> t,
+               py::array_t<Real, py::array::c_style | py::array::forcecast> x,
+               py::object sw, py::list reinit) {
+                if (!r.times.empty() || r.states.rows() != 0) {
+                    throw std::logic_error("_adapter_fill: the result is already filled");
+                }
+                if (t.ndim() != 1 || x.ndim() != 2
+                    || (t.shape(0) != 0 && x.shape(0) != t.shape(0))) {
+                    throw std::invalid_argument(
+                        "_adapter_fill: times must be 1-D and states 2-D with one row per time");
+                }
+                const auto rows = static_cast<Size>(t.shape(0));
+                const auto cols = static_cast<Index>(x.shape(1));
+                r.times.assign(t.data(), t.data() + rows);
+                r.states.set_state_size(cols);
+                r.states.reserve(rows);
+                for (Size k = 0; k < rows; ++k) {
+                    r.states.push_back(Eigen::Map<const Vector>(
+                        x.data() + k * static_cast<Size>(cols), cols));
+                }
+                if (!sw.is_none()) {
+                    auto b = py::array_t<bool, py::array::c_style | py::array::forcecast>::ensure(sw);
+                    if (!b || b.ndim() != 2 || static_cast<Size>(b.shape(0)) != rows) {
+                        throw std::invalid_argument(
+                            "_adapter_fill: switch_states must be (len(times), n_switches) bool");
+                    }
+                    const auto nb = static_cast<Size>(b.shape(1));
+                    r.begin_switch_state_record(nb, rows);
+                    const bool* src = b.data();
+                    for (Size k = 0; k < rows; ++k) {
+                        for (Size byte = 0; byte < r.switch_state_stride; ++byte) {
+                            std::uint8_t v = 0;
+                            for (Size j = byte * 8; j < std::min(nb, byte * 8 + 8); ++j) {
+                                v |= static_cast<std::uint8_t>(src[k * nb + j] ? 1U : 0U) << (j % 8);
+                            }
+                            r.switch_state_bits.push_back(v);
+                        }
+                    }
+                }
+                for (const auto& item : reinit) {
+                    const auto d = item.cast<py::dict>();
+                    ReinitRecord rr;
+                    rr.t = d["t"].cast<Real>();
+                    rr.kind = d["kind"].cast<std::string>();
+                    rr.devices = d["devices"].cast<std::vector<std::string>>();
+                    rr.states = d["states"].cast<std::vector<std::string>>();
+                    rr.lambda = d["lambda"].cast<Real>();
+                    rr.dW = d["dW"].cast<Real>();
+                    rr.projection_gap = d["projection_gap"].cast<Real>();
+                    rr.sample = d["sample"].cast<long>();
+                    if (d.contains("cause")) rr.cause = d["cause"].cast<std::string>();
+                    r.reinit_records.push_back(std::move(rr));
+                }
+            },
+            "times"_a, "states"_a, "switch_states"_a = py::none(),
+            "reinit_records"_a = py::list(),
+            "Adapter use only: fill an empty result from arrays (times, "
+            "states, the per-sample mask, re-initialisation dicts).")
+        .def("_set_run_info",
+            [](SimulationResult& r, const std::string& engine, record::GridKind grid,
+               const py::dict& d) {
+                r.grid = grid;
+                auto& s = r.stats;
+                s = record::RunStats{};
+                s.engine = engine;
+                const std::pair<const char*, Size record::RunStats::*> sizes[] = {
+                    {"n_steps", &record::RunStats::n_steps},
+                    {"n_accept", &record::RunStats::n_accept},
+                    {"n_reject", &record::RunStats::n_reject},
+                    {"n_solves", &record::RunStats::n_solves},
+                    {"n_factorizations", &record::RunStats::n_factorizations},
+                    {"n_gate_events", &record::RunStats::n_gate_events},
+                    {"n_state_events", &record::RunStats::n_state_events},
+                    {"n_mode_events", &record::RunStats::n_mode_events},
+                    {"n_ctrl_ticks", &record::RunStats::n_ctrl_ticks},
+                    {"n_newton_iterations", &record::RunStats::n_newton_iterations},
+                    {"n_newton_retries", &record::RunStats::n_newton_retries},
+                    {"n_forced_accepts", &record::RunStats::n_forced_accepts},
+                    {"n_chatter_breaks", &record::RunStats::n_chatter_breaks},
+                    {"n_gate_undersampled", &record::RunStats::n_gate_undersampled},
+                    {"n_rk45_steps", &record::RunStats::n_rk45_steps},
+                    {"n_bdf2_steps", &record::RunStats::n_bdf2_steps},
+                    {"n_exact_steps", &record::RunStats::n_exact_steps}};
+                const std::pair<const char*, Real record::RunStats::*> reals[] = {
+                    {"gate_pulse_min", &record::RunStats::gate_pulse_min},
+                    {"gate_sample_spacing_max", &record::RunStats::gate_sample_spacing_max},
+                    {"cpu_time_seconds", &record::RunStats::cpu_time_seconds}};
+                std::size_t used = 0;
+                for (const auto& [k, m] : sizes) {
+                    if (d.contains(k)) { s.*m = d[k].cast<Size>(); ++used; }
+                }
+                for (const auto& [k, m] : reals) {
+                    if (d.contains(k)) { s.*m = d[k].cast<Real>(); ++used; }
+                }
+                if (used != d.size()) {
+                    throw std::invalid_argument("_set_run_info: unknown RunStats key");
+                }
+            },
+            "engine"_a, "grid"_a, "stats"_a,
+            "Adapter use only: set the grid kind and the run statistics.")
+        .def_readonly("grid", &SimulationResult::grid,
+            "GridKind of the rows: Uniform (pwl), Accepted (trbdf2, dsed) "
+            "or Requested. A plain .mean() over an Accepted grid is not a "
+            "time average: use pulsim.time_average.")
+        .def_readonly("stats", &SimulationResult::stats,
+            "RunStats: engine-independent counters (zero where the engine "
+            "does not report one).");
 
     // ---- run_transient ---------------------------------------------------
     //

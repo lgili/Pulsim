@@ -200,6 +200,30 @@ def step_start_states(result, states: np.ndarray,
     return st, mk
 
 
+class _ResultView:
+    """``result`` with some attributes replaced on the view: everything
+    else is read from ``result``, and the result type's Python methods
+    (``v``, ``i``, ...) run against the view, so they see the replaced
+    per-sample arrays. (A kernel result's arrays are read-only
+    properties: it cannot be copied and patched.)"""
+
+    def __init__(self, result):
+        object.__setattr__(self, "_result", result)
+
+    def __getattr__(self, name):
+        import types
+        attr = getattr(type(self._result), name, None)
+        if isinstance(attr, types.FunctionType):
+            return attr.__get__(self)
+        return getattr(self._result, name)
+
+    def num_steps(self) -> int:
+        return len(self.times)
+
+    def empty(self) -> bool:
+        return len(self.times) == 0
+
+
 def with_right_limits(result):
     """A shallow copy of ``result`` whose trace shows each jump on both
     sides: after every sample in ``result.right_limit_index`` a sample
@@ -215,8 +239,6 @@ def with_right_limits(result):
     working. This is how the reference harness compares a jump side
     for side (a variable-step reference stores the left limit at t and
     the right limit one tiny step later)."""
-    import copy
-
     idx = getattr(result, "right_limit_index", None)
     rl = getattr(result, "right_limit_states", None)
     if idx is None or rl is None or len(idx) == 0:
@@ -224,7 +246,7 @@ def with_right_limits(result):
     idx = np.asarray(idx, dtype=np.int64)
     t = np.asarray(result.times, dtype=float)
     pos = idx + 1
-    out = copy.copy(result)
+    out = _ResultView(result)
     out.times = np.insert(t, pos, np.nextafter(t[idx], np.inf))
     out.states = np.insert(np.asarray(result.states), pos,
                            np.asarray(rl, dtype=float), axis=0)

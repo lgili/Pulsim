@@ -68,7 +68,8 @@ void init_module(py::module_& m) {
           [](const std::vector<std::string>& probe_texts, const std::string& keep,
              Size every_n, const std::vector<std::pair<Real, Real>>& windows, Real period,
              Real offset, const std::vector<std::string>& reading_names, const F64& t,
-             const F64& readings, const std::vector<Size>& event_rows, const F64& right) {
+             const F64& readings, const std::vector<Size>& event_rows, const F64& right,
+             const std::vector<Real>& sample_times) {
               std::vector<rec::Probe> probes;
               probes.reserve(probe_texts.size());
               for (const auto& s : probe_texts) probes.push_back(rec::Probe::compile(s));
@@ -76,7 +77,10 @@ void init_module(py::module_& m) {
               if (keep == "every") spec.keep = rec::RecorderSpec::Keep::Every;
               else if (keep == "decimate") spec.keep = rec::RecorderSpec::Keep::Decimate;
               else if (keep == "none") spec.keep = rec::RecorderSpec::Keep::None;
-              else throw std::invalid_argument("keep must be 'every', 'decimate' or 'none'");
+              else if (keep == "times") spec.keep = rec::RecorderSpec::Keep::Times;
+              else throw std::invalid_argument(
+                  "keep must be 'every', 'decimate', 'none' or 'times'");
+              spec.sample_times = sample_times;
               spec.every_n = every_n;
               for (const auto& [a, b] : windows) spec.windows.push_back({a, b});
               spec.period = period;
@@ -102,11 +106,16 @@ void init_module(py::module_& m) {
               out["windows"] = stats(r.windows(), np);
               out["periods"] = stats(r.periods(), np);
               out["n_samples"] = r.n_samples();
+              py::array_t<bool> interp(static_cast<py::ssize_t>(r.interpolated().size()));
+              std::copy(r.interpolated().begin(), r.interpolated().end(), interp.mutable_data());
+              out["interpolated"] = interp;
+              out["n_times_unreached"] = r.n_times_unreached();
               return out;
           },
           py::arg("probes"), py::arg("keep"), py::arg("every_n"), py::arg("windows"),
           py::arg("period"), py::arg("offset"), py::arg("reading_names"), py::arg("t"),
           py::arg("readings"), py::arg("event_rows"), py::arg("right"),
+          py::arg("sample_times") = std::vector<Real>{},
           "Kernel recorder pass over stored arrays (add-probes-and-recorders); "
           "use pulsim.simulate(..., recorders=[...]).");
 }

@@ -70,6 +70,8 @@ from ._pulsim import (  # type: ignore[import-not-found]
     SimulationOptions,
     DevicePath,
     SimulationResult,
+    GridKind,
+    RunStats,
     CommutationEvent,
     PreflightFinding,
     PreflightIssue,
@@ -528,6 +530,8 @@ __all__ = [
     "SimulationOptions",
     "DevicePath",
     "SimulationResult",
+    "GridKind",
+    "RunStats",
     "CommutationEvent",
     "PreflightFinding",
     "PreflightIssue",
@@ -1641,18 +1645,10 @@ def _result_h_field(self, name: str):
 # concrete C++ type, but the type itself accepts attribute injection
 # (py::dynamic_attr() on the binding).
 SimulationResult.v = _result_v          # type: ignore[attr-defined]
-# v2.0 Phase 3 item 5 — one result surface for both engines. The
-# dsed wrapper's `.states` is the reconstructed full-MNA trajectory
-# (same row layout), so the same accessors bind verbatim. On a
-# result without full states (a non-builder path) they fail with
-# the shape mismatch naming the limitation rather than silently
-# indexing reduced states as if they were node voltages.
-from ._dsed_dispatch import (  # noqa: E402 — must follow the
-    _PEDSimulationResult as _PEDRes,  # accessor definitions above
-)
-_PEDRes.v = _result_v                   # type: ignore[attr-defined]
+# add-probes-and-recorders D3: every engine returns this one type (the
+# exact engine's adapter fills an empty SimulationResult), so the
+# accessors bind once.
 SimulationResult.i = _result_i
-_PEDRes.i = _result_i       # type: ignore[attr-defined]          # type: ignore[attr-defined]
 SimulationResult.power = _result_power  # type: ignore[attr-defined]
 SimulationResult.signal = _result_signal      # type: ignore[attr-defined]
 SimulationResult.signals = _result_signals    # type: ignore[attr-defined]
@@ -1660,9 +1656,37 @@ SimulationResult.currents = _result_currents  # type: ignore[attr-defined]
 SimulationResult.flux = _result_flux          # type: ignore[attr-defined]
 SimulationResult.b_field = _result_b_field    # type: ignore[attr-defined]
 SimulationResult.h_field = _result_h_field    # type: ignore[attr-defined]
-_PEDRes.flux = _result_flux                    # type: ignore[attr-defined]
-_PEDRes.b_field = _result_b_field              # type: ignore[attr-defined]
-_PEDRes.h_field = _result_h_field              # type: ignore[attr-defined]
+
+
+def _exact_stat(attr: str, field: str):
+    """A read-only exact-engine counter over ``res.stats``. Absent
+    (AttributeError) on the other engines' results, as before the
+    result types were merged, so ``getattr(res, name, default)`` keeps
+    telling the engines apart."""
+    def get(self):
+        st = self.stats
+        if st.engine != "dsed":
+            raise AttributeError(
+                f"'SimulationResult' has no attribute {attr!r} on a "
+                f"{st.engine or 'kernel'} run (read res.stats.{field})")
+        return getattr(st, field)
+    return property(get, doc=f"Exact engine only: res.stats.{field}.")
+
+
+for _a, _f in (("n_accept", "n_accept"), ("n_reject", "n_reject"),
+               ("n_events", "n_mode_events"), ("n_rk45_steps", "n_rk45_steps"),
+               ("n_bdf2_steps", "n_bdf2_steps"),
+               ("n_exact_steps", "n_exact_steps"),
+               ("cpu_time_seconds", "cpu_time_seconds")):
+    setattr(SimulationResult, _a, _exact_stat(_a, _f))
+del _a, _f
+
+from . import _recorders as _rec_mod  # noqa: E402
+SimulationResult.avg = _rec_mod.result_avg            # type: ignore[attr-defined]
+SimulationResult.rms = _rec_mod.result_rms            # type: ignore[attr-defined]
+SimulationResult.integral = _rec_mod.result_integral  # type: ignore[attr-defined]
+SimulationResult.minmax = _rec_mod.result_minmax      # type: ignore[attr-defined]
+SimulationResult.at = _rec_mod.result_at              # type: ignore[attr-defined]
 
 
 def _result_plot(self, *signals, save=None, show=None, **kwargs):
@@ -1731,7 +1755,7 @@ SimulationResult.plot = _result_plot  # type: ignore[attr-defined]
 from . import loss_tables as _loss_tables  # noqa: E402
 _loss_tables.install(CircuitBuilder, SimulationResult)
 # add-immutable-circuit-ir: the circuit that ran and what the run did to it.
-for _cls in (SimulationResult, _PEDRes):
+for _cls in (SimulationResult,):
     _cls.plan = property(  # type: ignore[attr-defined]
         lambda self: getattr(self, "_run_plan", None),
         doc="The run's RunPlan (circuit, ties, preflight); None for a run "
@@ -3095,7 +3119,8 @@ def simulate(
         res._preflight = _preflight_report
         res._run_plan = _run_plan
         res._switch_fn = switch_fn
-        res._trbdf2_stats = _stats
+        res._trbdf2_stats = _stats   # alias of res.stats for one release
+        _set_run_info(res, "trbdf2", _stats)
         res.control_tick_counts = list(_stats["control_tick_counts"])
         res.control_tick_jitter_max = 0.0
         res.engine_used = "trbdf2"
@@ -3636,6 +3661,7 @@ def simulate(
         # router that cannot be interrogated is a router that
         # surprises people.
         res.engine_used = "pwl"
+        _set_run_info(res, "pwl")
         res.diagnostics = dict(res.mode_diagnostics)
         res.engine_route_reason = (
             "; ".join(_route_reasons) if _route_reasons else None)
@@ -3836,17 +3862,42 @@ def _warn_newton_roundoff(res, eng) -> None:
             stacklevel=3)
 
 
+def _set_run_info(res, engine: str, stats=None) -> None:
+    """Fill ``res.grid`` / ``res.stats`` (add-probes-and-recorders D3)
+    from what the engine reports; counters it does not report stay 0."""
+    nw = res.newton
+    d = {"n_solves": int(nw.solves), "n_factorizations": int(nw.factorizations),
+         "n_newton_iterations": int(nw.iterations)}
+    grid = GridKind.Uniform
+    if engine == "trbdf2":
+        grid = GridKind.Accepted
+        st = stats or {}
+        for k in ("n_accept", "n_reject", "n_solves", "n_gate_events",
+                  "n_ctrl_ticks", "n_newton_retries", "n_forced_accepts",
+                  "n_chatter_breaks", "n_gate_undersampled",
+                  "gate_pulse_min", "gate_sample_spacing_max"):
+            if k in st:
+                d[k] = st[k]
+        d["n_steps"] = int(st.get("n_accept", 0))
+        d["n_state_events"] = int(st.get("n_diode_events", 0))
+    res._set_run_info(engine, grid, d)
+
+
 def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
     """The variable-step engine's own confessions, from its stats and
     its switch-state record. Each one names what the engine could not
     guarantee and how to cross-check it."""
     import warnings
     eng = f"simulate(engine={engine_asked!r})"
+    # reads the `stats` argument (in simulate() the same numbers as
+    # res.stats): tests drive the confessions with edited dicts
+    def _st(k):
+        return stats.get(k, 0)
     _warn_newton_roundoff(res, eng)
-    if stats.get("n_forced_accepts", 0) > 0:
+    if _st("n_forced_accepts") > 0:
         warnings.warn(
             f"{eng}: "
-            f"{stats['n_forced_accepts']} step(s) were "
+            f"{_st('n_forced_accepts')} step(s) were "
             "accepted with the error estimate above tolerance "
             "because h had already reached its floor (usually "
             "the sliver between two events). The trace is "
@@ -3859,11 +3910,11 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
     # (measured 1 on the hysteresis-banded flyback); a sliding model
     # produces them every few cycles (8 in 0.1 s on a V_th = 0 bridge
     # behind 0.1 ohm).
-    if stats.get("n_chatter_breaks", 0) > 3:
+    if _st("n_chatter_breaks") > 3:
         warnings.warn(
             f"{eng}: a diode rode its "
             f"conduction boundary on "
-            f"{stats['n_chatter_breaks']} step(s): its "
+            f"{_st('n_chatter_breaks')} step(s): its "
             "current sat at zero while the engine decided its "
             "state (a SLIDING-MODE model; the usual cause is an "
             "ideal V_th=0 diode at a zero-current commutation, "
@@ -3880,9 +3931,9 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
     # stepped over before its width was known (the step is capped at
     # twice the gate's recent pulses while it keeps toggling). A one-shot pulse that
     # no sample hit is not counted: nothing saw it.
-    if stats.get("n_gate_undersampled", 0) > 0:
-        w = float(stats.get("gate_pulse_min", 0.0))
-        sp = float(stats.get("gate_sample_spacing_max", 0.0))
+    if _st("n_gate_undersampled") > 0:
+        w = float(_st("gate_pulse_min"))
+        sp = float(_st("gate_sample_spacing_max"))
         warnings.warn(
             f"{eng}: switch_fn produced a gate pulse of {w:.3g} s, "
             "narrower than the spacing at which the engine had been "

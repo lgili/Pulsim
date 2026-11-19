@@ -32,6 +32,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/record/grid.hpp"
 #include "pulsim/solver/state_trajectory.hpp"
 #include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/thermal/device_losses.hpp"
@@ -567,6 +568,11 @@ struct SimulationResult {
     Size newton_roundoff_accepts = 0;
     Real newton_roundoff_omega_max = 0;
     Index newton_roundoff_row = kInvalidIndex;
+
+    /// add-probes-and-recorders D3: the grid the rows sit on and the run's
+    /// engine-independent counters (set by the engine adapter).
+    record::GridKind grid = record::GridKind::Uniform;
+    record::RunStats stats;
 
     /// Start the record for a circuit with `num_switches` mask bits.
     /// Call once, before the first sample is stored.

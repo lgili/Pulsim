@@ -179,7 +179,10 @@ def test_unhonourable_options_are_refused_by_name(kw, match):
 
 
 @pytest.mark.parametrize("rec,match", [
-    (p.Recorder("x", ["p(R1)"]), r"p\(R1\)"),
+    (p.Recorder("x", ["i(C1)"]), r"i\(C1\) of a capacitor"),
+    (p.Recorder("x", ["v(out)"], keep="times"), "times"),
+    (p.Recorder("x", ["v(out)"], keep="times", times=(0.5e-3, 2e-3)),
+     "inside"),
     (p.Recorder("x", ["v(out"]), "probe"),
     (p.Recorder("x", ["v(out)"], windows=[(0.5e-3, 2e-3)]), r"windows\[0\]"),
     (p.Recorder("x", ["v(out)"], keep="some"), "keep"),
