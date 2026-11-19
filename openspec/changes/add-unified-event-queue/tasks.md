@@ -25,9 +25,9 @@ conformance test of `add-engine-conformance-matrix`.
 - [x] 2.5 Oracle: for every harness circuit with an analytic schedule, the accepted-step sequence and the states are identical to 0.2; zero-alloc tests green — oracle used: the 34-case byte compare against a50a2c77 (DECISIONS 2), not a committed baseline (e06d5d2d)
 
 ## 3. The opaque-callable adapter
-- [ ] 3.1 `events/sampled_gate.hpp`: move the sampling, pulse-width learning and bisection of `trbdf2_transient.hpp:960-1190` into `SampledGate` without changing the algorithm; `resolution()`, `n_gate_undersampled`, `gate_pulse_min`
-- [ ] 3.2 TR-BDF2 calls `SampledGate`; oracle: results and counters identical for the opaque-callable tests
-- [ ] 3.3 DSED calls `SampledGate`; delete `dsed_bindings.cpp:174-258` (**BREAKING** for opaque callables on dsed); oracle: synchronous buck with a plain Python `switch_fn` reads 11.49 V within the existing tolerance; an edge is within the declared resolution of the analytic one
+- [x] 3.1 `events/sampled_gate.hpp`: move the sampling, pulse-width learning and bisection of TR-BDF2's opaque-gate block into `SampledGate` without changing the algorithm; `resolution()`, `n_gate_undersampled`, `gate_pulse_min`
+- [x] 3.2 TR-BDF2 calls `SampledGate`; oracle: results and counters identical for the opaque-callable tests — goldens, stateful, engines, step sequences, pwl 390/390, trbdf2 371/371 byte-identical; buck/bridge trbdf2 instructions per step 11012 -> 11006, 12755 -> 12744 (DECISIONS 16)
+- [ ] 3.3 DSED calls `SampledGate`; delete `dsed_bindings.cpp:174-258` (**BREAKING** for opaque callables on dsed) — open: DSED out of slice 3 (what it needs: DECISIONS 16); oracle: synchronous buck with a plain Python `switch_fn` reads 11.49 V within the existing tolerance; an edge is within the declared resolution of the analytic one
 - [ ] 3.4 Diagnostic when a seen pulse is narrower than the resolution, on every engine
 - [ ] 3.5 Docs: `docs/dsed.md`, `AI_GUIDE.md` (switch_fn section), CHANGELOG migration note
 

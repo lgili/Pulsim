@@ -80,6 +80,7 @@
 #include "pulsim/events/event_queue.hpp"
 #include "pulsim/events/locate.hpp"
 #include "pulsim/events/mode_set.hpp"
+#include "pulsim/events/sampled_gate.hpp"
 #include "pulsim/events/step_hooks.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
@@ -1730,44 +1731,14 @@ inline SimulationResult run_transient_trbdf2(
     // only the FIRST sub-interval whose end differs, and the step is
     // capped at kCapPulses narrowest pulses with ceil(2 h / w) samples, so
     // the samples stay half a pulse apart once a pulse is known.
-    constexpr int kGateSamples = 4;
-    constexpr Real kCapPulses = 64;   // step cap in recent narrowest pulses
     const bool learn_gates = !next_edge_fn;
     const Size n_sw_total = static_cast<Size>(graph.num_switches());
-    std::vector<Real> gate_last_toggle(n_sw_total, Real{0});
-    // The last closed high / low pulse width of each gate bit (0 = none).
-    std::vector<Real> gate_w_last(2 * n_sw_total, Real{0});
-    // The last three toggle times of each bit per direction (fall, rise).
-    std::vector<Real> gate_dir_t(6 * n_sw_total,
-                                 -std::numeric_limits<Real>::infinity());
-    std::vector<bool> gate_toggled(n_sw_total, false);
-    SwitchStateMask gate_prev = switch_fn(opts.t_start
-                                          + Real{0.5} * h_min);
-    Real gate_pulse_min = std::numeric_limits<Real>::infinity();
-    // A "pulse" shorter than this is a floating-point glitch of the
-    // user's phase comparison, not a pulse a step could resolve.
-    const Real gate_pulse_floor =
-        std::max(Real{16} * h_min, span_ref * Real{1e-9});
-    Real gate_spacing_max = Real{0};
-    // Per gate bit: the largest sampling spacing used since that bit's
-    // PREVIOUS seen toggle (or the run start, before its first one),
-    // i.e. while the pulse now closing was open or while pulses could
-    // have passed unseen. A pulse is "undersampled" only against THAT
-    // spacing: compared with the run-wide maximum, every smooth SPWM
-    // whose pulses narrow gradually (each one landed, at a spacing
-    // already capped by the previous pulse) was flagged — 22 times
-    // over 0.2 s of a 10 kHz three-phase VSI whose 16000 edges were
-    // all landed. Not reset at a bit's FIRST toggle: a PWM that starts
-    // late is found by the walking sample only after some pulses went
-    // by at the idle spacing, and those are what the warning confesses.
-    std::vector<Real> gate_spacing_open(n_sw_total, Real{0});
-    std::vector<Size> gate_bits;
-    for (Size i = 0; i < n_sw_total; ++i) {
-        if (!diode_owned.get(i)) {
-            gate_bits.push_back(i);
-        }
-    }
-    Real gate_jitter = Real{0};
+    // The opaque gate's learned state, its step caps and its sampling
+    // (add-unified-event-queue 3.1): events/sampled_gate.hpp.
+    events::SampledGate gate(n_sw_total, diode_owned,
+                             switch_fn(opts.t_start + Real{0.5} * h_min),
+                             h_min, h_max, span_ref, learn_gates,
+                             st.n_gate_undersampled);
     // The gate bits the diode bits were last decided (or last solved)
     // under. A gate edge that falls within an ulp of a step's END is
     // not seen by that step's samples (t + h rounds to the pre-edge
@@ -1777,164 +1748,19 @@ inline SimulationResult run_transient_trbdf2(
     // tick (which ends a step exactly on k·T) met a 10 kHz buck's
     // turn-on: a 2.1e-11 s sample with Q1 ON and D1 ON, v_sw = +6 V
     // across two 1 mOhm stamps. The step start compares and settles.
-    SwitchStateMask gates_decided = gate_prev;
+    SwitchStateMask gates_decided = gate.last_gate();
     // `b` is a stamped mask: a gated device's bit there is its conduction
     // state, so its gate is compared with the gate it was decided under.
     const SwitchStateMask gated = diodes.gated_bits();
     auto gates_differ = [&](const SwitchStateMask& a,
                             const SwitchStateMask& b) {
-        for (const Size i : gate_bits) {
+        for (const Size i : gate.gate_bits()) {
             if (gated.get(i) ? a.get(i) != diodes.gate_of(i)
                              : a.get(i) != b.get(i)) {
                 return true;
             }
         }
         return false;
-    };
-    auto learn_gate_toggles = [&](const SwitchStateMask& sw,
-                                   Real at_t) {
-        if (sw == gate_prev) {
-            return;
-        }
-        for (Size i = 0; i < n_sw_total; ++i) {
-            if (diode_owned.get(i) || sw.get(i) == gate_prev.get(i)) {
-                continue;
-            }
-            if (gate_toggled[i]) {
-                const Real w = at_t - gate_last_toggle[i];
-                if (w > gate_pulse_floor) {
-                    gate_w_last[2 * i + (gate_prev.get(i) ? 1 : 0)] = w;
-                }
-                if (w > gate_pulse_floor && w < gate_pulse_min) {
-                    gate_pulse_min = w;
-                }
-                // 1 % margin: a pulse as wide as the spacing cannot fit
-                // between two samples, and the widths carry the
-                // bisection's h_min of noise. Every pulse, not only a new
-                // minimum: the cap lapses on a quiet bit (burst mode), so
-                // a pulse after the pause can be undersampled again.
-                if (w > gate_pulse_floor
-                    && gate_spacing_open[i] > Real{1.01} * w) {
-                    ++st.n_gate_undersampled;
-                }
-                gate_spacing_open[i] = Real{0};
-            }
-            gate_toggled[i] = true;
-            gate_last_toggle[i] = at_t;
-            Real* dt3 = &gate_dir_t[6 * i + (sw.get(i) ? 3 : 0)];
-            dt3[0] = dt3[1];
-            dt3[1] = dt3[2];
-            dt3[2] = at_t;
-        }
-        gate_prev = sw;
-    };
-    // A periodic gate is a periodic source too: the default ceiling gives
-    // every PWM / pulse / sine source 20 steps per period, and a gate from
-    // switch_fn (a closed loop's, declared edges or not) got span/1000. On
-    // ll15 (closed-loop boost, 5 ms) that was one 4 us step per 5 us
-    // period, each at its local tolerance and all errors of one sign:
-    // I(L) 0.066 A off after 23 periods. A rise counts only at a controller
-    // tick (a trailing-edge closed-loop PWM rises on its tick); once a gate
-    // bit has so risen three times a constant period p apart, a step is
-    // capped at p/20 (default ceiling only; the floors stay those of
-    // h_max). An open-loop gate keeps its fewer steps per period (the CCM
-    // buck's <= 8 per period is a pinned decision) unless its rises happen
-    // to fall on ticks (then it is capped at most at T_tick/20). The cap is
-    // a run-wide minimum (a short periodic episode keeps it) and is
-    // relearned after a resume (the rise times are not in the snapshot).
-    Real last_tick_t = -std::numeric_limits<Real>::infinity();
-    std::vector<Real> gate_rise_t(3 * n_sw_total,
-                                  -std::numeric_limits<Real>::infinity());
-    SwitchStateMask gate_rise_prev = gate_prev;
-    Real gate_period_cap = std::numeric_limits<Real>::infinity();
-    auto learn_gate_period = [&](const SwitchStateMask& sw, Real at_t) {
-        if (sw == gate_rise_prev) return;
-        for (const Size i : gate_bits) {
-            if (!sw.get(i) || gate_rise_prev.get(i)
-                || !(std::abs(at_t - last_tick_t) <= Real{4} * h_min)) {
-                continue;
-            }
-            Real* r3 = &gate_rise_t[3 * i];
-            r3[0] = r3[1];
-            r3[1] = r3[2];
-            r3[2] = at_t;
-            const Real p1 = r3[2] - r3[1], p0 = r3[1] - r3[0];
-            // p1 >= 20 pulse floors: rises a few h_min apart (glitches of
-            // a phase comparison) are no period to cap the run by.
-            if (std::isfinite(p0) && p1 >= Real{20} * gate_pulse_floor
-                && std::abs(p1 - p0) <= Real{1e-6} * p1 + Real{4} * h_min) {
-                gate_period_cap = std::min(gate_period_cap, p1 / Real{20});
-            }
-        }
-        gate_rise_prev = sw;
-    };
-    // The step cap: kCapPulses x the narrowest RECENT pulse. Per bit, the last
-    // high and low widths count while the bit keeps toggling (quiet for at
-    // most twice its last period; a quiet bit keeps the run's narrowest
-    // pulse as its cap); a running minimum over the run held a
-    // closed loop's 0.28 ns start-up pulse as the cap for ever (519,783
-    // steps in 0.3 ms of cl_boost_pi with an opaque gate). A phase whose
-    // ending toggle comes at a regular period (a trailing-edge PWM's rise
-    // at kT) is not capped until just before the predicted toggle: the
-    // same run took 58,514 steps with the cap over the whole long phase.
-    // Returns the step limit (infinite: none).
-    // The narrowest recent pulse of a bit whose cap was lifted: the gate
-    // samples inside a lifted step stay half of it apart (a gate that gets
-    // faster, a skipped pulse resuming, puts pulses where none is
-    // predicted: only the samples can see them).
-    Real gate_sample_w = std::numeric_limits<Real>::infinity();
-    std::vector<Real> gate_frac;
-    auto gate_pulse_cap = [&](Real at_t) {
-        Real lim = std::numeric_limits<Real>::infinity();
-        gate_sample_w = std::numeric_limits<Real>::infinity();
-        for (const Size i : gate_bits) {
-            const Real wh = gate_w_last[2 * i + 1];
-            const Real wl = gate_w_last[2 * i];
-            if (!gate_toggled[i] || (wh <= Real{0} && wl <= Real{0})) {
-                continue;
-            }
-            if (at_t - gate_last_toggle[i] > Real{2} * (wh + wl)) {
-                // Quiet: the narrowest pulse of the run, as before. Pulses
-                // resuming after a pause (burst mode, a soft-start pulse
-                // then PWM) were stepped over with the cap lapsed: 4 of 99
-                // 10 ns pulses, every 1 ns one.
-                if (std::isfinite(gate_pulse_min)) {
-                    lim = std::min(lim, Real{2} * gate_pulse_min);
-                }
-                continue;
-            }
-            Real w = std::numeric_limits<Real>::infinity();
-            if (wh > Real{0}) w = std::min(w, wh);
-            if (wl > Real{0}) w = std::min(w, wl);
-            // A pulse a step holds must show at a sample. A pulse ends
-            // with a toggle in each direction once per period; when one
-            // direction is
-            // regular, a step that ends before its next predicted toggle
-            // cannot hold a pulse that ends there, and any other toggle it
-            // holds is seen at its end and located.
-            Real reg = std::numeric_limits<Real>::infinity();
-            bool any_reg = false;
-            for (const Size dir : {Size{0}, Size{3}}) {
-                const Real* d3 = &gate_dir_t[6 * i + dir];
-                const Real p1 = d3[2] - d3[1], p0 = d3[1] - d3[0];
-                if (!std::isfinite(p0) || p1 <= Real{0}
-                    || std::abs(p1 - p0) > Real{1e-6} * p1 + Real{4} * h_min) {
-                    continue;
-                }
-                any_reg = true;
-                const Real margin = Real{2} * w + Real{1e-3} * p1;
-                reg = std::min(reg, d3[2] + p1 - margin - at_t);
-            }
-            // kCapPulses * w with the gate sampled every w/2 inside the
-            // step (gate_sample_w): the same sampling as 2 w with 4 samples,
-            // in 32x fewer solves. cl_boost_pi's start-up pulses (0.28 ns,
-            // then 0.585 ns, before the rises prove periodic) cost 26,490
-            // steps in two periods at 2 w.
-            lim = std::min(lim, any_reg ? std::max(kCapPulses * w, reg)
-                                        : kCapPulses * w);
-            gate_sample_w = std::min(gate_sample_w, w);
-        }
-        return lim;
     };
     // Diode bits found held in a forbidden state at a step's start
     // (see the crossing detector).
@@ -2063,7 +1889,7 @@ inline SimulationResult run_transient_trbdf2(
         if (learn_gates) {
             // m_probe is a stamped mask: a gated device's bit there is its
             // conduction state, not its gate.
-            learn_gate_toggles(diodes.num_gated() > 0 ? switch_fn(t_gates)
+            gate.learn_toggles(diodes.num_gated() > 0 ? switch_fn(t_gates)
                                                       : m_probe, t);
         }
         x = x_trial;
@@ -2334,7 +2160,7 @@ inline SimulationResult run_transient_trbdf2(
             } else {
                 observer_fn(t, x);
             }
-            last_tick_t = t;
+            gate.note_tick(t);
             ++st.n_ctrl_ticks;
             ++st.ctrl_tick_counts[j];
         }
@@ -2635,13 +2461,13 @@ inline SimulationResult run_transient_trbdf2(
             end_cut_h = t_stop - t < h ? h : Real{0};
             h = std::clamp(h, std::min(h_lo, t_stop - t),
                            std::min(h_max, t_stop - t));
-            learn_gate_period(sw_now, t);
+            gate.learn_period(sw_now, t);
             if (has_ticks && !(opts.h_max > Real{0})) {
-                h = std::min(h, std::max(gate_period_cap, h_lo));
+                h = std::min(h, std::max(gate.period_cap(), h_lo));
             }
             if (learn_gates) {
-                learn_gate_toggles(sw_now, t);
-                const Real cap = gate_pulse_cap(t);
+                gate.learn_toggles(sw_now, t);
+                const Real cap = gate.pulse_cap(t);
                 if (std::isfinite(cap)) {
                     h = std::min(h, std::max({cap, h_min, h_cond}));
                 }
@@ -2710,105 +2536,12 @@ inline SimulationResult run_transient_trbdf2(
             // was one of the samples).
             gates_flat = false;
             if (!landed_on_edge) {
-                // Samples per step: 4, or half the recent narrowest pulse
-                // apart in a lifted step (switch_fn calls only, no solves).
-                // Once a recent pulse width w is known the samples are w/2
-                // apart (DECISIONS #30), and a step shorter than w/2 needs
-                // only its end: the floor of 4 is for gates not yet seen.
-                // It cost the CCM buck 3 Python switch_fn calls per step.
-                int n_gs = kGateSamples;
-                if (learn_gates && std::isfinite(gate_sample_w)
-                    && gate_sample_w > Real{0}) {
-                    n_gs = static_cast<int>(std::clamp(
-                        std::ceil(Real{2} * h / gate_sample_w),
-                        Real{1}, Real{4096}));
-                }
-                if (learn_gates) {
-                    const Real spacing =
-                        h / static_cast<Real>(n_gs);
-                    gate_spacing_max =
-                        std::max(gate_spacing_max, spacing);
-                    for (const Size i : gate_bits) {
-                        gate_spacing_open[i] =
-                            std::max(gate_spacing_open[i], spacing);
-                    }
-                }
-                // h/4, h/2, 3h/4, h, plus one sample at a fraction
-                // that walks the golden-ratio sequence from step to
-                // step: fixed fractions alone PHASE-LOCK to a PWM when
-                // h is a multiple of its period (h_max = span/1000 =
-                // 20 µs against 10 µs), and then never see a pulse
-                // that starts after the run has reached h_max.
-                gate_jitter += Real{0.6180339887498949};
-                gate_jitter -= std::floor(gate_jitter);
-                std::vector<Real>& frac = gate_frac;
-                frac.resize(static_cast<std::size_t>(n_gs) + 1);
-                for (int k = 1; k <= n_gs; ++k) {
-                    frac[static_cast<std::size_t>(k - 1)] =
-                        static_cast<Real>(k) / static_cast<Real>(n_gs);
-                }
-                frac[static_cast<std::size_t>(n_gs)] =
-                    std::clamp(gate_jitter, Real{0.01}, Real{0.99});
-                std::sort(frac.begin(), frac.end());
-                Real lo = t, hi = t + h;
-                bool edge_found = false;
-                for (const Real f : frac) {
-                    const Real tk = f >= Real{1} ? t + h : t + h * f;
-                    if (!(switch_fn(tk) == sw_now)) {
-                        hi = tk;
-                        edge_found = true;
-                        break;
-                    }
-                    lo = tk;
-                }
+                // Sampling and bisection: SampledGate::locate.
+                Real hi = t + h;
+                const bool edge_found =
+                    gate.locate(switch_fn, sw_now, t, h, hi);
                 gates_flat = !edge_found;
                 if (edge_found) {
-                    // A periodic bit predicts its next toggle: two calls
-                    // 4 h_min either side of it bound the edge, and the
-                    // bisection reads every midpoint outside the bounds
-                    // from them instead of calling switch_fn (~25 calls ->
-                    // ~5 per edge). Same result: the bisection already
-                    // assumes one change of the mask in (lo, hi], under
-                    // which a point the gate was verified at answers for
-                    // every midpoint on its side.
-                    Real known_lo = lo, known_hi = hi;
-                    if (learn_gates) {
-                        Real te = std::numeric_limits<Real>::infinity();
-                        for (const Size i : gate_bits) {
-                            const Real* d3 =
-                                &gate_dir_t[6 * i + (sw_now.get(i) ? 0 : 3)];
-                            const Real p1 = d3[2] - d3[1], p0 = d3[1] - d3[0];
-                            if (std::isfinite(p0) && p1 > Real{0}
-                                && std::abs(p1 - p0)
-                                       <= Real{1e-6} * p1 + Real{4} * h_min
-                                && d3[2] + p1 > lo) {
-                                te = std::min(te, d3[2] + p1);
-                            }
-                        }
-                        if (te > lo && te < hi) {
-                            for (const Real tv : {te - Real{4} * h_min,
-                                                  te + Real{4} * h_min}) {
-                                if (!(tv > known_lo && tv < known_hi)) continue;
-                                if (switch_fn(tv) == sw_now) {
-                                    known_lo = tv;
-                                } else {
-                                    known_hi = tv;
-                                }
-                            }
-                        }
-                    }
-                    for (int it = 0; it < 60 && (hi - lo) > h_min;
-                         ++it) {
-                        const Real mid = Real{0.5} * (lo + hi);
-                        const bool same = mid <= known_lo ? true
-                            : mid >= known_hi ? false
-                            : (switch_fn(mid) == sw_now);
-                        if (same) {
-                            lo = mid;
-                        } else {
-                            hi = mid;
-                        }
-                    }
                     h = std::max(hi - t, h_min);
                     landed_on_edge = true;
                     queue.locate(edge_src, hi);
@@ -4025,7 +3758,7 @@ inline SimulationResult run_transient_trbdf2(
                     // The rise is at the tick, here; the next step starts
                     // h_probe later (the committed probe), off the tick.
                     if (has_ticks) {
-                        learn_gate_period(
+                        gate.learn_period(
                             switch_fn(t + Real{0.5} * h_min), t);
                     }
                     // Zero-time diode cascade AT the edge, BEFORE
@@ -4089,7 +3822,7 @@ inline SimulationResult run_transient_trbdf2(
                         h = std::max(h, h_pre_bp);
                         fire_due_ticks();   // as at a gate edge
                         if (has_ticks) {
-                            learn_gate_period(
+                            gate.learn_period(
                                 switch_fn(t + Real{0.5} * h_min), t);
                         }
                         const Real hp =
@@ -4188,10 +3921,10 @@ inline SimulationResult run_transient_trbdf2(
                 + " — the controller is grinding; check for an "
                   "unresolved fast mode or raise max_steps");
         }
-        if (std::isfinite(gate_pulse_min)) {
-            st.gate_pulse_min = gate_pulse_min;
+        if (std::isfinite(gate.gate_pulse_min())) {
+            st.gate_pulse_min = gate.gate_pulse_min();
         }
-        st.gate_sample_spacing_max = gate_spacing_max;
+        st.gate_sample_spacing_max = gate.gate_spacing_max();
         st.probe_floor_used = h_probe_learned;
         st.n_noise_held_decisions = n_noise_held;
         st.n_probe_noise_retakes = n_probe_noise_retakes;

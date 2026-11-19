@@ -587,3 +587,21 @@ same count and same instants on a PWM buck with a freewheel diode.
   caller's stop. The exact engine's mode settle (`settle_and_project_`) is
   a projection with its own cycle rule; `events::settle` fits its outer
   loop if its round returns `Round`.
+
+## 16. SampledGate (group 3, 2026-11-19)
+
+- **`events/sampled_gate.hpp`** (3.1/3.2): TR-BDF2's opaque-gate state and
+  its three jobs (pulse-width learning, the period / pulse step caps, the
+  sampling + bisection of a step) moved verbatim into `SampledGate`, owned
+  by the run (a local of `run_transient_trbdf2`, as the vectors were).
+  Accessors `resolution()` (h_max / 4, the declared spacing),
+  `n_gate_undersampled()`, `gate_pulse_min()`, `gate_spacing_max()`.
+  Goldens, stateful, engines, step sequences, 390/390 and 371/371
+  byte-identical. Not carried by the snapshot: a resumed run relearns
+  (unchanged; DECISIONS 14 (b) asks for it, needs a pickle index).
+- **3.3 left open**: DSED is out of this slice. What it needs: construct a
+  `SampledGate` over its segment (it has the same `switch_fn` and the
+  h_min / h_max pair) and call `locate` where `dsed_bindings.cpp` samples
+  today; the learned caps then bound its segment length.
+- **3.4 (trbdf2)**: it already warns on `n_gate_undersampled`; the pwl
+  diagnostic comes with the fixed engine's gate counts (section 17).
