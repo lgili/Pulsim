@@ -251,7 +251,9 @@ def test_counters_on_the_synchronous_buck():
     # perf row 22: 2000 periods, two exact steps per period, one
     # eigendecomposition per visited mask, no Pade.
     b, fn = _sync_buck()
-    r = _run(b, t_end=20e-3, switch_fn=fn)
+    # Counters of the event grid: the release output rule (output_rtol 1e-5)
+    # adds output steps, so this pins the legacy output grid (output_rtol=0).
+    r = _run(b, t_end=20e-3, switch_fn=fn, output_rtol=0)
     assert abs(r.n_exact_steps - 4000) <= 1
     assert r.exact["n_eig"] == len(r.exact["masks"]) == 2
     assert r.exact["n_pade"] == 0
@@ -353,13 +355,17 @@ def test_boost_with_a_wrong_settled_mode_is_repaired_or_named(v_th, R, v_end):
     # 1e-4, measured <= 1e-5). Re-pin: repaired run -> no repair needed.
     import pulsim._dsed_dispatch as DD
     b, fn = _boost(v_th, R)
-    r = p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
+    r = p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)       # release mode selection
+    assert np.asarray(r.v("vout"))[-1] == pytest.approx(v_end, abs=1e-4)
+    # The settle and its guard are the legacy mode selection: pinned below.
+    b, fn = _boost(v_th, R)
+    r = p.simulate(b, 3e-3, engine="dsed", switch_fn=fn, mode_selection="legacy")
     assert r.diagnostics["mode_guard"]["repairs"] == 0
     assert np.asarray(r.v("vout"))[-1] == pytest.approx(v_end, abs=1e-4)
     b, fn = _boost(v_th, R)
     DD.MODE_GUARD = False
     try:
-        r_off = p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
+        r_off = p.simulate(b, 3e-3, engine="dsed", switch_fn=fn, mode_selection="legacy")
     finally:
         DD.MODE_GUARD = True
     assert np.asarray(r_off.v("vout"))[-1] == pytest.approx(v_end, abs=1e-4)
@@ -389,8 +395,11 @@ def test_half_wave_rl_rectifier_with_a_zero_band_diode_is_repaired_or_named():
         b.add_resistor("R", "a", "b", 10.0)
         b.add_inductor("L", "b", "gnd", 1e-3)
         return b
+    # The settle's guard is the legacy mode selection (pinned for its counter);
+    # the waveform checks below run on the release default.
+    assert p.simulate(build(), 3e-3, engine="dsed",
+                      mode_selection="legacy").diagnostics["mode_guard"]["repairs"] == 0
     r = p.simulate(build(), 3e-3, engine="dsed")
-    assert r.diagnostics["mode_guard"]["repairs"] == 0
     # The run against trbdf2 rtol 1e-10 (batch 6b, checkpoint review M2): mean i(L)
     # 0.2937666 vs 0.2937670 A (measured 3.7e-7), v(a) on dsed's samples within 5.8e-5 V.
     ref = p.simulate(build(), 3e-3, engine="trbdf2", rtol=1e-10, atol=1e-13)
