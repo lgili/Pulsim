@@ -303,7 +303,7 @@ says where the implementation departs from them or what it settled.
     emptiness test) and allocate nothing per step
     (`test_zero_alloc.cpp`, "fixed engine twin on the step skeleton").
 
-    **Speed gate NOT met (why this slice is on a WIP branch).**
+    **Speed gate NOT met at first (resolved: cause and fix in 14).**
     Instructions retired per accepted step, in-process
     (`proc_pid_rusage` `ri_instructions` around `simulate()` only,
     min of 3–6 alternating runs; `.scratch/instr_inproc.py`; noise ≤ 0.2 %
@@ -332,3 +332,72 @@ says where the implementation departs from them or what it settled.
     `SwitchStateMask` holds a `std::vector`; the loop body copy-
     CONSTRUCTED it per step).
 
+
+14. **Slice 3a's speed cost, found: a hoisted mask's copy-ASSIGNMENT,
+    and the twin's out-of-line adapters (2026-11-19; slice 3b must not
+    repeat either).** Found by bisecting builds measured with the
+    in-process probe (`.scratch/instr_inproc.py`, instructions retired
+    per accepted step) and by the extension's disassembly (`otool -tvV`,
+    the calls of the `run_transient` body). Two separate costs:
+
+    (a) Default path. `mask_pre` was hoisted out of the loop body so
+    every phase sees it. The body's `SwitchStateMask mask_pre =
+    gate_at(gate_t);` (a copy-CONSTRUCTION from the reference `gate_at`
+    returns into its memo: the empty heap vector costs a null test)
+    became `mask_pre = gate_at(gate_t);`, a copy-ASSIGNMENT, whose
+    defaulted form calls `std::vector<std::uint64_t>::__assign_with_size`
+    OUT OF LINE on every copy, empty vectors included (13 such calls in
+    the body against 12 at f69a2cbd). With the twin compiled out this
+    one line was the whole default-path cost (buck 3141 → 3078, VSI
+    4770 → 4712 once fixed). Fix at the cause:
+    `SwitchStateMask::operator=(const&)` copies the two inline words
+    and touches the vector only when either side holds heap words
+    (the same mask bit for bit; `static_assert(kInlineWords == 2)`).
+    The other per-step mask copy-assignments the PR line already had
+    (`stamped_mask = mask`, `prev_gate = mask_pre`) get cheaper too, so
+    the slice is also compared with f69a2cbd + the same class fix
+    + fix A (the PR line + fix A, the loop this slice must equal) —
+    "fair" below.
+
+    (b) Twin. The five `tw_*` adapters were each emitted out of line
+    (1200 / 1047 / 778 / 608 / 330 instructions), so the twin paid five
+    calls per step and reached every hoisted local through two closure
+    hops (1.038× buck, 1.019× VSI), and its out-of-line closure cost the
+    default VSI loop +33 instructions per step. Fix: every adapter
+    (`tw_*`, `PhaseBody`'s forwarders, `step_once`, `run`) is
+    `PULSIM_STEP_PHASE` (forced inline), and EACH driver — the legacy
+    loop (`run_legacy`) and the twin (`run_twin`) — is one out-of-line
+    function (`PULSIM_STEP_DRIVER`, renamed from `PULSIM_STEP_TWIN`).
+    The legacy loop alone in its function runs faster than inlined in
+    `run_transient`'s 13k-instruction body (buck 3087 → 3034). Both
+    macros are empty on MSVC, as the code base's other forced-inline
+    macros (the gate is measured on clang).
+
+    Instructions per accepted step, this tip (three runs each; f69a2cbd
+    min of six; Shockley / RLC one run):
+
+    | case | f69a2cbd | fair | default | twin / default |
+    |---|---|---|---|---|
+    | buck_pwl | 3080 | 3034 (3053–3056 typical) | 3040 / 3040 / 3042 | 1.0098 / 1.0096 / 1.0029 |
+    | vsi_pwl | 4709 | 4693 | 4706 / 4704 / 4698 | 1.0060 / 1.0072 / 1.0077 |
+    | vsi_pwl_restart | 4857 | 4843 | 4863 / 4868 / 4865 | 1.0060 / 1.0065 / 1.0079 |
+    | shockbuck_pwl | 18689 | 18682 | 18652 | 1.0010 |
+    | rlc152_pwl | 18499 | 18592 | 18416 | 1.0010 |
+
+    Gates met: default ≤ f69a2cbd + 0.5 % (VSI + restart +0.2 %), and
+    ≤ fair + 0.5 % (VSI +0.1–0.3 %, VSI + restart +0.4–0.5 %, the
+    tightest row; buck, Shockley, RLC below it); twin ≤ 1.01× (buck 1.0098 is at the edge: the skeleton's own clock work,
+    ~30 instructions per step). Noise on this loaded machine is larger
+    than DECISIONS 13 measured: f69a2cbd against itself spans 0.6 % on
+    the buck, and the SAME twin code moved 3050 → 3073 between two
+    builds that changed only the legacy driver (code layout).
+
+    For slice 3b (the TR-BDF2 loop): (1) a per-step object hoisted to
+    cross phases turns its per-step initialisation into an ASSIGNMENT —
+    check every class type's copy / move assignment for an out-of-line
+    call (vector members) and prefer an in-place reset; (2) force every
+    adapter between the skeleton and the phases inline and keep each
+    driver ONE out-of-line function; (3) measure with the twin compiled
+    out first (`if (false && twin)`): it splits the cut's cost from the
+    twin's presence; (4) compare against the base with the same
+    non-loop fixes, not only the PR line.
