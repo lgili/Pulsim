@@ -257,6 +257,138 @@ fails once E/C > tolerance/0.138, and tightening rtol makes it worse.
 (c), the impulsive / event energy at a commutation, is the same jump with
 a larger E (the reject cascade at each edge); (d) and (e) were not seen.
 
+## 17. trbdf2: the heat power changes at the step start, with its right limit in the history
+
+Fix of 16, in the shared tracker and the two `advance` sites of
+`trbdf2_transient.hpp` (TR-BDF2 / SDIRK take, ESDIRK take) plus the
+slots-only refresh; the error estimate is NOT changed.
+
+1. RIGHT LIMIT. `advance(h, history, right_limit)` computes, per deposit
+   node, ΔJ = (power of this attempt) − (power the last commit was solved
+   under, `left_`) and adds each capacitor's share of ΔJ to its stored
+   current `i_prev`. The share is the capacitors' response to a current
+   step with every state held: Kc·y = e_d on the nodes reached from the
+   deposit node through capacitors (nodes held by an independent voltage
+   source to ground end the walk), share_k = C_k·(y_from − y_to) — 1 for an
+   RC, 1 and 1 for a Foster pair, 1 and 0 for a Cauer ladder. Computed once
+   (`bind_`, dense LU of a few nodes). The trapezoidal stage then integrates
+   the attempt's own constant power from the step start, TR-BDF2 is exact
+   for it on a capacitor, and the estimate measures the network's response
+   instead of the boundary jump (a real error of the first stage, not only
+   an estimator artefact: 16). Bookkeeping (`applied` per capacitor) undoes
+   the previous attempt's share on a retry; a commit (`accept_step`) or the
+   slots-only refresh (`slots_rewritten`) zeroes it and records `left_`. An
+   SDIRK restart attempt passes `right_limit = false`: its backward-Euler
+   stages read no stored current, the history is its zeroed copy, and the
+   snapshot it restores still holds the share. Not corrected (the old rule,
+   the run unchanged): a walk that meets anything but resistors,
+   capacitors, inductors, PWL switches / diodes, current sources and
+   grounded independent voltage sources; a walk that reaches no fixed node
+   (Kc singular); more than 256 nodes.
+2. NO LAG FOR CONDUCTION. With a corrected network, the conduction power at
+   the step start (`pred_`: v·i, or V_on(|i|, T_j)·|i| on the table rule,
+   at the last accepted reading or the event's right limit) is delivered
+   over the step and the step's own energy, booked at its commit as
+   before, owes the queue only the difference (which may be negative for a
+   moment). A constant loss reaches the junction with no lag; a smooth
+   loss leaves P'·h²/2 per step for the next one: T_j is second order in h
+   for conduction. A commutation's energy and an impulse still reach the
+   junction as E/h over the first step after the edge (first order in that
+   step: a steady offset ≈ P_events·h/(2C)); a landing shorter than the
+   attempt keeps the rest at the SAME power (`h_now_ -= h`).
+3. Conservation unchanged: `heat_injected + heat_pending` = every energy
+   booked (the delivered prediction is moved to injected at the commit and
+   taken off the queue).
+4. Snapshot: the loss state is version 2 when `left_` / `pred_` hold
+   something (two more lists at the end of the queue lists); version 1 —
+   pwl, fixed T_j, every older snapshot — still loads (no field-count change).
+5. Untouched: pwl (`accept` / `advance(dt)`; `inject` adds an empty list),
+   fixed-T_j loss ports (no deposit node: no binding, no prediction), runs
+   without loss ports (`lt` null). Byte compares vs 061e4099 identical:
+   goldens 21/21, stateful 41, engines 35/35, steps 28/28, pwl_identity
+   390/390, trbdf2_identity 371/371. Instructions per accepted step
+   (interleaved, min of 3): buck pwl 3099.5 → 3099.1, vsi pwl 4764.0 →
+   4769.3 (+0.11 %), buck trbdf2 11033.9 → 11019.5, bridge trbdf2 12784.0 →
+   12772.3.
+
+Steps (accepted / rejected / forced), atol 1e-12, before → after:
+
+| case | rtol | before | after |
+|---|---|---|---|
+| held switch + RC (2 ms) | 1e-6 | 111 972 / 156 830 / 20 570 | 1137 / 6 / 1 |
+| | 1e-8 | aborted (grinding) | 1596 / 6 / 1 |
+| | 1e-10 | aborted (grinding) | 4665 / 6 / 1 |
+| buck, 2 junctions (202.5 µs) | 1e-6 | 17 055 / 17 312 / 2777 | 1035 / 7 / 1 |
+| | 1e-8 | 26 492 / 30 905 / 4692 | 1106 / 7 / 1 |
+| | 1e-9 | 46 824 / 78 451 / 7848 | 1410 / 7 / 1 |
+| | 1e-10 | 95 289 / 145 131 / 15 494 | 2846 / 26 / 1 |
+| VSI, 6 junctions (2.03 ms) | 1e-6 | 38 354 / 34 169 / 6469 | 1488 / 90 / 1 |
+| | 1e-8 | max_steps at 20 µs | 5781 / 183 / 1 |
+| | 1e-9 | max_steps at 20 µs | 12 160 / 172 / 1 |
+| | 1e-10 | max_steps at 20 µs | 25 869 / 244 / 1 |
+
+VSI 1e-9 → 1e-10: ×2.13 steps (TR-BDF2's rtol^(-1/3) = 2.15); the buck is
+h_max-bound (span/1000) above 1e-9. The forced accept left is the start's.
+
+Truths (`test_trbdf2_junction_feed.py`). A switch closing at 10 µs into a
+resistor (a constant loss, no electrical state) feeding an RC, a Foster
+pair and a Cauer ladder: max |T_j − closed form| / rise at rtol 1e-4 / 1e-6
+/ 1e-8 / 1e-10 = RC 3.7e-7 / 3.7e-7 / 3.0e-7 / 2.6e-8, Foster 1.0e-5 /
+6.7e-6 / 4.3e-7 / 2.2e-8, Cauer 9.2e-6 / 4.5e-6 / 3.2e-7 / 1.7e-8 (before:
+aborted at 1e-6 and below); esdirk43 at 1e-10 ≤ 1.1e-8 (before: the same
+stall). Ledger exact (0 to the last bit); the RC's own energy C·θ + ∫θ/R
+equals heat_injected within 1e-6 (the trapezoid on samples). The RL
+chopper into one RC (closed form with impulses, test_exact_junction_loop's
+`_rc_truth`): max error / rise 9.0e-4 / 2.6e-4 / 3.1e-5 at rtol 1e-6 / 1e-8
+/ 1e-10 (1031 / 3315 / 15 278 steps); before: 3.5e-4 at 1e-6 with 25 649
+steps (the forced accepts at h_lo delivered each commutation's energy over
+femtoseconds), aborted at 1e-8 and 1e-10. Richardson on trbdf2 (T_j at ten
+times vs rtol 1e-12 / 1e-11): buck 4.1e-4 (h_max-bound) … 8.3e-5 (1e-10),
+6.0e-6 (1e-11); VSI 3.9e-2 (1e-6), 1.2e-2 (1e-9), 8.4e-5 (1e-10) — its
+large values at loose rtol are samples within 1e-7 s of a diode
+commutation that moves with rtol (a 20 K event energy on one side of the
+sample or the other). The old engine's buck at rtol 1e-10 (95 289 steps)
+and the new one at 1e-12 agree within 2.9e-6 of the rise.
+
+Test moved: `test_trbdf2_resume_continues_the_loss_record` runs at rtol
+1e-8 (was 1e-6, the old engine aborts at 1e-8 on this circuit): at 1e-6
+the new junction is 6.4e-3 K (full) / 3.2e-3 K (resumed) from the closed
+form at t_end (the old one, with 25× more steps, 9.6e-5 K), so two step
+sequences cannot meet the test's 1e-4 K; at 1e-8 they differ by 1.2e-5 K
+and the energies by < 1e-9. No other existing test moved.
+
+Open (hand-off): (i) a commutation's energy as a STATE JUMP at the edge
+(y·E on the walk's nodes and the capacitors' v_prev, the slots re-derived
+from Kc⁻¹(−G·y·E)) would remove the first-order offset of 2 — the data are
+in `bind_`; its sites are next to the event hooks (1885, 3774), left for the
+merge of the recorder branch. Not estimated today: the estimate sees a
+constant power over the step, so that offset is an estimator blind spot,
+bounded by one post-edge step's heat. (ii) The first SDIRK step of a run
+books 64.6 % of its conduction (p(x_g) reads half the power; seen as a
+-3.5e-6 relative conduction deficit on the 2 ms RC), pre-existing, not
+chased. (iii) The PSFB's non-convergence on trbdf2 has no loss port and is
+not this cause.
+
+Review (fresh-context reader) and what was done with it:
+
+- S1 fixed: a run ending on an attempt it did not commit (an End sliver)
+  left that attempt's share in the history the final snapshot saved, so a
+  resume added it twice. `retract()` takes it back before `hs.save`.
+- S2 fixed: the chopper's closed form is now a test
+  (`test_the_switching_chopper_junction_follows_its_closed_form`, rtol 1e-8,
+  1.5e-3 of the rise; 2.6e-4 measured).
+- N1 fixed: with no correctable network `slots_rewritten` does nothing,
+  and the prediction is made only for nodes that have shares (a network
+  `bind_` skips keeps the old rule). Left: in a circuit with both kinds,
+  a landing shortens `h_now_` for the old-rule nodes too (the rest of their
+  energy keeps its power instead of spreading over the attempted length).
+  No test has such a circuit.
+- N2 fixed: after a version-1 restore the history's power is unknown, so
+  the correction waits for the first commit (`left_known_`).
+- A branch with no registered device kind counts as plain in
+  `classify_nodes_` (a controlled source would be read as passive); no
+  shipped circuit puts one on a thermal node.
+
 ## Not done / known gaps
 
 The exact engine (`dsed` / `exact`) still refuses a loss port (its exact

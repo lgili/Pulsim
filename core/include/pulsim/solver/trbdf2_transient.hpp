@@ -1891,6 +1891,7 @@ inline SimulationResult run_transient_trbdf2(
         if (!commit || t + dtp >= opts.t_end - h_min
             || t + dtp >= queue.next_of(events::Kind::ControlTick) - h_min) {
             history.refresh_derivatives(x_trial, dtp);
+            if (lt) lt->slots_rewritten();
             hs.refresh_derivatives(x_trial, dtp);
             slots_only_t = t + dtp;   // where the unused probe reached
             return;
@@ -2449,7 +2450,9 @@ inline SimulationResult run_transient_trbdf2(
         // crossing detector, x_1 = stage 5.
         auto ed_take = [&]() -> step::Verdict {
             if (landed_on_bp && t + h < bp_t - h_min) landed_on_bp = false;
-            if (lt) lt->advance(h);  // the heat owed, as a power over h
+            // the heat owed, as a power over h; its right limit in the
+            // capacitors' slots (the explicit stage reads them)
+            if (lt) lt->advance(h, history, true);
             hg = Real{2} * step::Esdirk43::gamma * h;
             h_pt = Real{0.5} * h;
             bool ok = true;
@@ -2762,7 +2765,9 @@ inline SimulationResult run_transient_trbdf2(
                 zero_derivatives(hist_s1);
                 history.restore(hist_s1);
             }
-            if (lt) lt->advance(h);  // the heat owed, as a power over h
+            // the heat owed, as a power over h; a TR-BDF2 attempt also puts its
+            // right limit in the capacitors' slots (a restart's stages read none)
+            if (lt) lt->advance(h, history, !sdirk);
             history.compute_b_extra(hg, b_stage);
             accumulate_sources(t + h_pt, b_src);
             b_stage += b_src;
@@ -4157,6 +4162,7 @@ inline SimulationResult run_transient_trbdf2(
     // may already be post-edge (see initial_mask above).
     result.final_snapshot.stamped_mask =
         x_mask_known ? mask_bits(x_mask) : std::vector<bool>{};
+    if (lt) lt->retract(history);   // the snapshot holds committed slots (DECISIONS 17)
     hs.save(history, result.final_snapshot);
     result.final_snapshot.post_edge_derivatives =
         slots_only_t >= t - h_min;   // NaN: never

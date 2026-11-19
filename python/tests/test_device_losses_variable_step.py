@@ -172,8 +172,13 @@ def test_trbdf2_record_only_port_leaves_the_run_bit_identical():
 def test_trbdf2_resume_continues_the_loss_record():
     """Item 4 on trbdf2: the resumed run's record continues the first run's
     (events, ledgers, heat in flight); trbdf2 resumes to its tolerance, so
-    the totals agree with the uninterrupted run to that tolerance."""
-    kw = dict(engine="trbdf2", rtol=1e-6, atol=1e-9)
+    the totals agree with the uninterrupted run to that tolerance.
+    rtol 1e-8 (was 1e-6, where this run aborted before DECISIONS 17): at
+    1e-6 the junction is accurate to ~6e-3 K against the closed form (each
+    commutation's energy reaches it over the first step after the edge), so
+    two step sequences cannot agree to 1e-4 K there; at 1e-8 they agree to
+    1.2e-5 K."""
+    kw = dict(engine="trbdf2", rtol=1e-8, atol=1e-11)
     b, fn = _rl_chopper(thermal=(5.0, 1e-4))
     t1 = 10.3 / FSW
     with warnings.catch_warnings():

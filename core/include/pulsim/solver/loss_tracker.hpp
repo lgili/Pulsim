@@ -35,6 +35,11 @@
 // event() books a commutation from the engine's left / right limits; the
 // accept_step() whose mask is the event's right side then starts its
 // quadrature from the right limit, so the flip is not read twice.
+// They call advance(h, history): the power changes at the step start, and
+// every capacitor that carries the change gets the right limit of its
+// current in the history (DECISIONS 17) — the stages and the error
+// estimate read that slot, and the left limit made every step boundary a
+// jump the estimate could not shrink (DECISIONS 16).
 //
 // impulses(result.reinit_records): the energy of an impulsive
 // re-initialisation (a capacitor loop closed, a cut-set opened, by an
@@ -45,14 +50,17 @@
 // Engines without these calls refuse a circuit with loss ports by name
 // (`require_supported`, feature "device_losses").
 
+#include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/pwl_branch_law.hpp"
 #include "pulsim/stamping/branch_coord.hpp"
 #include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <algorithm>
 #include <array>
 #include <format>
 #include <stdexcept>
@@ -100,6 +108,9 @@ public:
             devs_.push_back(std::move(d));
         }
         (void)engine;
+        bool deposits = false;
+        for (const auto& d : devs_) deposits = deposits || d.node >= 0;
+        if (deposits) classify_nodes_(graph, pool);
     }
 
     [[nodiscard]] bool active() const noexcept { return !devs_.empty(); }
@@ -121,6 +132,7 @@ public:
     /// sources/current_waveform_b_extra.hpp).
     void inject(Vector& b) const {
         for (const auto& n : now_) b[n.node] -= n.e / h_now_;
+        for (const auto& q : pred_) b[q.node] -= q.e;   // W (advance(h, hist) only)
     }
 
     /// One accepted step from (t0, x0) to (t1, x1) under `mask`.
@@ -211,15 +223,29 @@ private:
                       const std::array<Real, N>& ws, Real w0, Real w1,
                       const Real* e_exact = nullptr) {
         const Real h = t1 - t0;
+        // the history just committed holds this power (DECISIONS 17)
+        slots_rewritten();
+        // the predicted conduction power reached the network over h; the
+        // step's own energy (queued below) owes only the difference
+        for (const auto& q : pred_) {
+            injected_.add(q.e * h);
+            add_(queue_, q.node, -q.e * h);
+        }
         // the power E/h_now_ reached the network over h of this step: a
-        // committed step shorter than the attempt (a landing) keeps the rest
+        // committed step shorter than the attempt (a landing) keeps the rest,
+        // at the same power until the next advance (no jump for the solves
+        // between: the edge's probe)
         const Real frac = h >= h_now_ * (Real{1} - Real{1e-12}) ? Real{1} : h / h_now_;
         for (auto& n : now_) {
             const Real e = frac == Real{1} ? n.e : n.e * frac;
             injected_.add(e);
             n.e -= e;
         }
-        if (frac == Real{1}) now_.clear();
+        if (frac == Real{1}) {
+            now_.clear();
+        } else if (!shares_.empty()) {
+            h_now_ -= h;
+        }
         for (std::size_t di = 0; di < devs_.size(); ++di) {
             auto& d = devs_[di];
             const bool on1 = mask.get(static_cast<Size>(d.law.bit));
@@ -378,7 +404,204 @@ public:
         queue_.clear();
     }
 
+    /// advance() for the variable-step integrators (trbdf2's TR-BDF2,
+    /// SDIRK restart and ESDIRK steps). The conduction power at the step
+    /// start is delivered over the step, so a constant loss has no lag; and
+    /// with `right_limit` (a step whose stages and estimate read the
+    /// capacitors' stored current; NOT a restart, whose backward-Euler stages
+    /// read none) the power's change at the step START, from the one the
+    /// history was committed under (left_), goes into the capacitors' slots:
+    /// each gets its share, the capacitors' response to a current step with
+    /// every state held (DECISIONS 17). `hist` holds the last commit plus
+    /// what an earlier attempt of this step added (a restart's snapshot /
+    /// restore keeps it).
+    void advance(Real h_next, pwl::HistoryState& hist, bool right_limit) {
+        advance(h_next);
+        if (!bound_) bind_(hist);
+        if (shares_.empty()) return;   // no network it can correct: the old rule
+        // the energy queue then owes only the step's departure from it
+        pred_.clear();
+        for (const auto& d : devs_) {
+            // a network bind_ could not correct keeps the old rule
+            if (d.node < 0 || !corrected_(d.node)) continue;
+            const bool on = d.ev_pending ? d.ev_on : d.on;
+            const Real v = d.ev_pending ? d.ev_v : d.v;
+            const Real i = d.ev_pending ? d.ev_i : d.i;
+            Real pw = 0;
+            if (d.spec.conduction == thermal::ConductionHeat::Electrical) {
+                pw = v * i;
+            } else if (d.spec.v_on && on) {
+                pw = (*d.spec.v_on)(std::abs(i), tj_of_(d)) * std::abs(i);
+            }
+            if (pw != Real{0}) add_(pred_, d.node, pw);
+        }
+        if (!right_limit || !left_known_) return;
+        for (auto& s : shares_) {
+            const Real dj = power_(pred_, s.node) + power_(now_, s.node) / h_now_
+                - power_(left_, s.node);
+            for (auto& m : s.members) {
+                const Real d = m.share * dj;
+                hist.add_to_i_prev(m.entry, d - m.applied);
+                m.applied = d;
+            }
+        }
+    }
+
+    /// The engine replaced the capacitors' stored currents without a commit
+    /// (a slots-only refresh from a probe solved under the power owed now).
+    void slots_rewritten() {
+        left_.clear();
+        left_known_ = true;
+        if (bound_ && shares_.empty()) return;   // nothing to correct
+        for (const auto& n : now_) add_(left_, n.node, n.e / h_now_);
+        for (const auto& q : pred_) add_(left_, q.node, q.e);
+        for (auto& s : shares_) {
+            for (auto& m : s.members) m.applied = 0;
+        }
+    }
+
+    /// Take this attempt's share back out of the history (the run ends on
+    /// an attempt that was not committed, a final sliver: the snapshot must
+    /// hold the committed slots, which a resume corrects again).
+    void retract(pwl::HistoryState& hist) {
+        for (auto& s : shares_) {
+            for (auto& m : s.members) {
+                hist.add_to_i_prev(m.entry, -m.applied);
+                m.applied = 0;
+            }
+        }
+    }
+
 private:
+    // ---- DECISIONS 17: the capacitors' share of a step of heat power ----
+    [[nodiscard]] bool corrected_(Index node) const noexcept {
+        for (const auto& s : shares_) {
+            if (s.node == node) return true;
+        }
+        return false;
+    }
+    struct Member {
+        Size entry;          // index in HistoryState::entries()
+        Real share;          // its current per ampere into the deposit node
+        Real applied = 0;    // what advance() added to its i_prev since the commit
+    };
+    struct Share {
+        Index node;
+        std::vector<Member> members;
+    };
+    template <typename Heats>
+    static Real power_(const Heats& v, Index node) {
+        for (const auto& q : v) {
+            if (q.node == node) return q.e;
+        }
+        return 0;
+    }
+    /// A node is FIXED when an independent voltage source ties it to ground
+    /// or to a fixed node (its voltage does not answer a current step); it is
+    /// PLAIN when every element on it is a resistor, capacitor, inductor, PWL
+    /// switch / diode, current source or such a source.
+    void classify_nodes_(const topology::Graph& g, const pwl::DevicePool& pool) {
+        using K = pwl::DevicePool::StoredKind;
+        const auto nn = static_cast<Size>(g.num_nodes());
+        fixed_.assign(nn, 0);
+        plain_.assign(nn, 1);
+        auto vsrc = [](K k) {
+            return k == K::VoltageSource || k == K::PWMVoltageSource ||
+                   k == K::SineVoltageSource || k == K::PulseVoltageSource;
+        };
+        auto is_fixed = [&](Index n) { return n < 0 || fixed_[static_cast<Size>(n)] != 0; };
+        for (bool grew = true; grew;) {
+            grew = false;
+            for (Index b = 0; b < g.num_branches(); ++b) {
+                if (!pool.is_registered(b) || !vsrc(pool.kind_of(b))) continue;
+                const auto& br = g.branch(b);
+                for (const auto [n, o] : {std::pair{br.from, br.to}, std::pair{br.to, br.from}}) {
+                    if (n >= 0 && !is_fixed(n) && is_fixed(o)) {
+                        fixed_[static_cast<Size>(n)] = 1;
+                        grew = true;
+                    }
+                }
+            }
+        }
+        for (Index n = 0; n < g.num_nodes(); ++n) {
+            for (const Index b : g.branches_of(n)) {
+                // shortcut: a branch outside the pool counts as plain; mark it
+                // not plain if a controlled source ever sits on a thermal node
+                if (!pool.is_registered(b)) continue;
+                const auto k = pool.kind_of(b);
+                const bool ok = k == K::Resistor || k == K::Capacitor ||
+                    k == K::Inductor || k == K::Switch || k == K::Diode ||
+                    k == K::CurrentSource || k == K::SineCurrentSource ||
+                    k == K::PulseCurrentSource || k == K::PwlCurrentSource ||
+                    (vsrc(k) && is_fixed(n));
+                if (!ok) plain_[static_cast<Size>(n)] = 0;
+            }
+        }
+    }
+    /// For each deposit node d: the capacitors reached from d through
+    /// capacitors (fixed nodes end the walk) and Kc·y = e_d, Kc the
+    /// capacitance matrix of those nodes; capacitor k's share is
+    /// C_k·(y_from − y_to). Skipped (no correction, the old left limit) when
+    /// a node of the walk is not plain, the walk never reaches a fixed node
+    /// (Kc singular) or it spans more than 256 nodes.
+    void bind_(const pwl::HistoryState& hist) {
+        bound_ = true;
+        if (fixed_.empty()) return;
+        using K = pwl::DevicePool::StoredKind;
+        const auto& es = hist.entries();
+        auto fixed = [&](Index n) { return n < 0 || fixed_[static_cast<Size>(n)] != 0; };
+        std::vector<Index> done;
+        for (const auto& dv : devs_) {
+            if (dv.node < 0 || std::find(done.begin(), done.end(), dv.node) != done.end()) continue;
+            done.push_back(dv.node);
+            if (fixed(dv.node)) continue;
+            std::vector<Index> nodes{dv.node};
+            bool ok = true;
+            for (std::size_t q = 0; q < nodes.size() && ok; ++q) {
+                ok = plain_[static_cast<Size>(nodes[q])] != 0 && nodes.size() <= 256;
+                for (const auto& e : es) {
+                    if (e.kind != K::Capacitor) continue;
+                    const Index o = e.from == nodes[q] ? e.to : e.to == nodes[q] ? e.from : -2;
+                    if (o == -2 || fixed(o)) continue;
+                    if (std::find(nodes.begin(), nodes.end(), o) == nodes.end()) nodes.push_back(o);
+                }
+            }
+            if (!ok) continue;
+            const auto pos = [&](Index n) -> Index {
+                if (fixed(n)) return -1;
+                return static_cast<Index>(std::find(nodes.begin(), nodes.end(), n) - nodes.begin());
+            };
+            const auto m = static_cast<Index>(nodes.size());
+            DenseMatrix kc = DenseMatrix::Zero(m, m);
+            std::vector<Size> caps;
+            for (Size k = 0; k < es.size(); ++k) {
+                const auto& e = es[k];
+                if (e.kind != K::Capacitor) continue;
+                const Index a = pos(e.from), b = pos(e.to);
+                if ((a < 0 && b < 0) || a == m || b == m) continue;   // outside the walk
+                caps.push_back(k);
+                if (a >= 0) kc(a, a) += e.C_or_L;
+                if (b >= 0) kc(b, b) += e.C_or_L;
+                if (a >= 0 && b >= 0) {
+                    kc(a, b) -= e.C_or_L;
+                    kc(b, a) -= e.C_or_L;
+                }
+            }
+            const Eigen::FullPivLU<DenseMatrix> lu(kc);
+            if (!lu.isInvertible()) continue;
+            Vector rhs = Vector::Zero(m);
+            rhs[0] = 1;   // nodes[0] is the deposit node
+            const Vector y = lu.solve(rhs);
+            Share s{dv.node, {}};
+            for (const Size k : caps) {
+                const Index a = pos(es[k].from), b = pos(es[k].to);
+                const Real share = es[k].C_or_L * ((a >= 0 ? y[a] : 0) - (b >= 0 ? y[b] : 0));
+                if (share != Real{0}) s.members.push_back({k, share, 0});
+            }
+            shares_.push_back(std::move(s));
+        }
+    }
+
     struct Dev {
         thermal::DeviceLossSpec spec;   // a copy: the pool may grow mid-run
         Index branch = -1, node = -1;
@@ -486,6 +709,12 @@ private:
 
     std::vector<Dev> devs_;
     std::vector<Heat> queue_, now_;   // energy owed next step / this step
+    std::vector<Heat> left_;          // power (W) the last commit was solved under
+    std::vector<Heat> pred_;          // conduction power (W) delivered over this step
+    std::vector<Share> shares_;       // per deposit node (bound on the first advance(h, hist))
+    std::vector<char> fixed_, plain_; // per node (empty: no deposit node)
+    bool bound_ = false;
+    bool left_known_ = true;          // false after a version-1 resume, until a commit
     Real h_now_ = 1;
     thermal::CompensatedSum injected_;
     std::size_t n_reinit_ = 0;   // reinit records already booked
@@ -496,9 +725,13 @@ public:
     /// its events. A resume restores it in place of begin(), so the
     /// resumed run's records and junction heat continue the first run's.
     [[nodiscard]] std::vector<Real> save() const {
-        std::vector<Real> o{Real{1}, static_cast<Real>(devs_.size()), h_now_,
+        // version 2 adds left_ and pred_ (two more lists), written only when
+        // they hold something (pwl never fills them: its state stays version 1)
+        const bool v2 = !left_.empty() || !pred_.empty();
+        std::vector<Real> o{v2 ? Real{2} : Real{1}, static_cast<Real>(devs_.size()), h_now_,
                             injected_.s, injected_.c};
-        for (const auto* v : {&queue_, &now_}) {
+        for (const auto* v : {&queue_, &now_, &left_, &pred_}) {
+            if (v == &left_ && !v2) break;
             o.push_back(static_cast<Real>(v->size()));
             for (const auto& q : *v) {
                 o.push_back(static_cast<Real>(q.node));
@@ -532,7 +765,8 @@ public:
             return s[k++];
         };
         auto count = [&]() { return static_cast<std::size_t>(next()); };
-        if (next() != Real{1} || count() != devs_.size()) {
+        const Real version = next();
+        if ((version != Real{1} && version != Real{2}) || count() != devs_.size()) {
             throw std::invalid_argument(
                 "device losses: the snapshot's loss state is for another set "
                 "of loss ports (set_device_losses) than this circuit's");
@@ -540,7 +774,12 @@ public:
         h_now_ = next();
         injected_.s = next();
         injected_.c = next();
-        for (auto* v : {&queue_, &now_}) {
+        left_.clear();
+        pred_.clear();
+        // a version-1 state does not say which power its slots hold
+        left_known_ = version == Real{2};
+        for (auto* v : {&queue_, &now_, &left_, &pred_}) {
+            if (v == &left_ && version == Real{1}) break;
             v->clear();
             for (std::size_t n = count(); n > 0; --n) {
                 const auto node = static_cast<Index>(next());
