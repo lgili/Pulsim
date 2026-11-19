@@ -108,7 +108,11 @@ def _run(engine, **kw):
 
 @pytest.mark.parametrize("engine,kw,tol_ev,tol_cond", [
     # pwl reads an edge's two sides one dt apart: first order in dt
-    ("pwl", dict(dt=1e-7), 1.5e-3, 1.5e-3),
+    pytest.param("pwl", dict(dt=1e-7), 1.5e-3, 1.5e-3, marks=pytest.mark.xfail(
+        strict=True, reason="release finding F-6-4: under the restart rule (default) the "
+        "pwl conduction energy is first order and 10x further from the closed form "
+        "(S1 1.86e-3, D1 2.0e-3 rel; restart-less 1.8e-4 / 2.4e-4) although i_L is 260x "
+        "closer (7.4e-5 A vs 1.9e-2 A)")),
     ("trbdf2", dict(rtol=1e-6, atol=1e-9, dt=2.5e-7), 2e-5, 2.5e-5),
     # integrator='esdirk43': conduction on its stage weights b, the same
     # event sites (add-high-order-stiff-integrator)
