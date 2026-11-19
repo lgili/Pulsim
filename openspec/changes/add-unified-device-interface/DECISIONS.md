@@ -974,3 +974,92 @@
 - Release list: the MOSFET's negative slope near threshold and past
   saturation onset (#44), a quiet-machine wall-time check (#38), #47's
   relative leak cut-off.
+
+## Slice 10 — integration merge, evidence labels, restart cause (2026-11-19)
+
+51. **What the evidence table's above-1e-12 cells are.**
+    (a) `analytic:im_locked_rotor` / `im_free_acceleration` pwl 0.0355 /
+    0.0389 (trbdf2 1.3e-4 / 2.3e-5) were NOT the analytic error (that is the
+    `err` columns, equal on both paths) and not a law difference: the worst
+    column is state 3, the floating star point, max |v| 3.0e-11 / 5.8e-11 V
+    (physically 0), measured against its own round-off through the 1e-9
+    floor; the absolute difference 3.5e-11 / 3.9e-11 V is 2.5e-13 / 2.0e-13
+    of the 141 / 195 V phases (`.scratch/probe_2a_im.py`). The law-circuit
+    block already dropped such a neutral; the analytic block did not. Tool
+    fixed: a state at round-off level (max ≤ 1e-12 of the circuit's largest)
+    is measured against the circuit's largest — 1e-12, not a looser cut, so a
+    small-unit state (a 3e-8 C stored charge next to 400 V) keeps its own
+    scale (reviewer); the table gained a `grid` column and the
+    header says what each column means.
+    (b) The trbdf2 law cells (1.02e-12 … 5.77e-7) are grid-driven, not law
+    differences (`.scratch/probe_2a.py`): in every one the accepted step
+    sequences part early by a rounding of the error estimate — coss+saturable
+    boost at step 6 (t = 23 ns; difference before the parting 7.9e-18 of
+    scale), fast-gate boost step 60 (2.7e-15), IGBT+VDMOS chopper step 68
+    (1.1e-11), permeance core step 3 (3.9e-22), tail+Lauritzen step 1 (0) —
+    same accepted-point counts, Newton counts equal until well after the
+    parting. After it each run carries its own truncation error; at the
+    common times the difference is ≤ 0.58·rtol (rtol 1e-6). Gate: the
+    existing `test_trbdf2_trajectories_agree_to_rtol` (10·rtol); the table
+    now marks those cells `parted`.
+
+52. **`mosl1_pwl_restart` moves ≤ 4.8e-6 of scale: the restart stage solves
+    inside the gate ramp.** Experiment (`.scratch/probe_2b.py`, old law =
+    `.scratch/pypre44`, add3b90a): the golden `mos_l1` circuit (0.1 µs gate
+    edges) with `discontinuity_restart=True` differs from the old law from
+    the first sample (4.83e-6 at t = 0.1 µs, V_DS = 345 µV, decaying to
+    3.5e-6 by 0.4 µs); plain `mosl1_pwl` is byte-identical although it too
+    sits at V_DS = 169 µV at t = 0.1 µs with V_GS = 10 V. With 1 ns gate edges
+    (`.scratch/probe_2b_fast.py`) BOTH runs are byte-identical under the two
+    laws. So the integration verifier's reading is half right: the leak band
+    is V_DS ≈ 0, but the discriminator is V_GS — the SDIRK restart stage
+    (2γ·dt after the edge) solves inside the 0.1 µs ramp, at an intermediate
+    V_GS where κ·V_OV is small and the leak f(a, 0)·e^{−κ|V_DS|} is far above
+    half an ulp of the current; at V_GS = 10 V (κ·V_OV = 15·7 = 105) it is below it
+    and #47's exit returns the old value bit for bit. Expected, not chased.
+
+53. **The machine commit gate no longer needs bit equality across two code
+    paths.** `test_device_laws.cpp` "the machine laws stamp, commit and
+    capture as the hand stamp": `dlam_gamma` stays `==` (`iface::capture_gamma`
+    for the machine IS the history's `capture_gamma`, one function — a
+    comment says so); `lambda_old` (law eval vs model) and `dlam_old`
+    (v − R·i in two functions) now compare to 8 ulp of the three phases'
+    flux terms (max(|λ_k|, 0.1 H·max|i|, 1 Wb): λ sums L·i terms that can
+    cancel) / of max(|v|, |R·i|) — a compiler that contracts one side to an
+    FMA passes. Built and run on Eigen 5 and 3.4.0. (The machines' ∂/∂p
+    against central differences already existed, `check_param_tangent` at
+    the end of the same test; add-parameter-sensitivities 4.2 is annotated
+    with the coverage.)
+
+54. **The saturable inductor after the integration merge: NOT under 1.02.**
+    Python probe (`.scratch/instr.sh satind_pwl`, K = 20, merged tree
+    d386a013): 16 843 → 17 283 (1.026), 16 790 → 17 228 (1.026),
+    16 842 → 17 156 (1.019). The standalone C++ driver of the same circuit
+    (`.scratch/satrun.cpp`, `-O3 -ffp-contract=off`, min of five) on the
+    same sources: 16 889 → 17 087 (1.012). The interface path's extra cost
+    per step is ≈ 440 instructions in the extension and ≈ 200 in the driver
+    for the same code, so about half of it is how the extension's
+    translation unit compiles the refresh (inlining budget in the large
+    binding TU, the default `-ffp-contract`), not the law — consistent with
+    #50 (cheaper in isolation, dearer in place). Not fixed this slice;
+    next step: compare the two builds' `build_device_refresh` interface
+    lambda (`-Rpass-missed=inline` on the binding TU that instantiates
+    `run_transient`), then #50's untried levers.
+
+### Hand-off (2026-11-19, slice 10)
+
+- Merged `origin/feat/core-integration` e3ee5341 (d386a013, no conflicts;
+  stubs `--check` clean, REFERENCE_STATUS.md regenerated unchanged). Python
+  set on the merge: pytest 5524 passed / 107 skipped / 8 xfailed, reference
+  377, reference_status exit 0, ruff, openspec 78/78; goldens vs
+  `golden_4aa` differ only in the trbdf2 stat key (`n_newton_start_retries`,
+  33 → 34 keys) and `syncbuck_dsed`'s zero Newton counters (both accepted in
+  the integration); stateful compare identical.
+- #51 (evidence labels: analytic IM cells were a floating neutral; trbdf2
+  law cells are parted grids, tolerance-bounded; regenerated: 289/289 cells
+  agree, 0 same-grid cells above 1e-12, 7 parted), #52 (restart cell: the
+  restart stage solves inside the gate ramp), #53 (machine commit gate
+  FMA-safe), #54 (saturable inductor 1.019–1.026, open).
+- Task groups 5–14: every open box carries its reason in tasks.md. Next
+  candidates without a loop edit: 10.x (AC/DC from f and q), 12.x (field
+  tables). No new stepper request this slice (#49's two stand).

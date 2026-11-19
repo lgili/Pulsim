@@ -983,6 +983,8 @@ TEST_CASE("the machine laws stamp, commit and capture as the hand stamp",
                 hl.capture_gamma(x);
                 pwl::iface::capture_gamma(hi, x);
                 for (int k = 0; k < 3; ++k) {
+                    // iface::capture_gamma IS the history's capture_gamma (one
+                    // function): exact equality cannot depend on FMA contraction.
                     CHECK(hi.entries()[0].dlam_gamma[k] == hl.entries()[0].dlam_gamma[k]);
                 }
                 hl.commit(x, h, st);
@@ -990,10 +992,23 @@ TEST_CASE("the machine laws stamp, commit and capture as the hand stamp",
                 const auto& el = hl.entries()[0];
                 const auto& ei = hi.entries()[0];
                 for (int k = 0; k < 3; ++k) {
-                    CHECK(ei.lambda_old[k] == el.lambda_old[k]);   // the same law, bitwise
-                    CHECK(ei.i_old[k] == el.i_old[k]);
-                    CHECK(ei.v_old[k] == el.v_old[k]);
-                    CHECK(ei.dlam_old[k] == el.dlam_old[k]);
+                    // λ and v − R·i come from two code paths (the law's eval vs the
+                    // hand commit): a compiler may contract one of them to an FMA,
+                    // so a few ulp, not bit equality (bitwise on macOS clang).
+                    // λ sums L·i terms (+ M·λ_r, λ_pm) that can cancel: scale by
+                    // the terms (L ≤ 62 mH in machine_entry → 0.1 H·max|i|).
+                    const Real i_max = std::max({std::abs(el.i_old[0]), std::abs(el.i_old[1]),
+                                                 std::abs(el.i_old[2])});
+                    const Real lam_scale = std::max({std::abs(el.lambda_old[0]),
+                                                     std::abs(el.lambda_old[1]),
+                                                     std::abs(el.lambda_old[2]),
+                                                     Real{0.1} * i_max, Real{1}});
+                    CHECK(close(ei.lambda_old[k], el.lambda_old[k], lam_scale, 8));
+                    CHECK(ei.i_old[k] == el.i_old[k]);   // copies of x (set_reference)
+                    CHECK(ei.v_old[k] == el.v_old[k]);   // one subtraction, no contraction
+                    const Real ri = std::abs((kind == 2 ? e.im.R_s : e.params.R_s) * ei.i_old[k]);
+                    CHECK(close(ei.dlam_old[k], el.dlam_old[k],
+                                std::max(std::abs(el.v_old[k]), ri), 8));
                     CHECK(ei.lam_off[k] == Real{0});
                 }
                 CHECK(ei.theta_old == el.theta_old);

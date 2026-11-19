@@ -30,8 +30,8 @@ Reference values.
 - [x] 3.2 Tests: the three orbit gradients above within 1e-7 relative, and equal to central differences of the steady-state solve within 1e-7 (prototype: 3.4e-10, 5.5e-9, 3.5e-10)
 
 ## 4. Parameters on the AD scalar (needs `add-unified-device-interface`)
-- [ ] 4.1 `Params<S>` for every device; parameter seeding helpers in `ad/ad_scalar.hpp`
-- [ ] 4.2 Per-device unit tests: `∂f/∂p`, `∂q/∂p` by AD against a central difference of the law within 1e-8 relative, for every parameter of every device kind
+- [ ] 4.1 `Params<S>` for every device; parameter seeding helpers in `ad/ad_scalar.hpp` — PARTIAL (add-unified-device-interface slice 10): every Newton law has `Params<S>` (static diode / Shockley / MOSFET L1 / IGBT L1, nonlinear capacitor, saturable inductor, Lauritzen, IGBT tail, PMSM, induction machine) and `device::seed_params` seeds them; the static and mode kinds (R, L, C, sources, switches) have none until that change's group 11
+- [ ] 4.2 Per-device unit tests: `∂f/∂p`, `∂q/∂p` by AD against a central difference of the law within 1e-8 relative, for every parameter of every device kind — PARTIAL (add-unified-device-interface slice 10 audit): `check_param_tangent` in `test_device_laws.cpp` covers every Newton law with a parameter tangent, the machines' (R_s, T_load) included; table / Jiles–Atherton laws refuse by name (no tangent); static and mode kinds wait for 4.1
 - [x] 4.3 Test: `Params<Real>` build is bit-identical — for the four static kinds (memcmp against the model's own `Params`, `test_device_laws.cpp`; the default path never instantiates a law, so the golden hashes do not show it; the junction Coss law is a few ulp by design, DECISIONS #27); `static_assert` on layout (`laws::kLawLayout`; add-unified-device-interface DECISIONS #33, #35)
 
 ## 5. Recurrence in the stepper (needs `refactor-unified-transient-stepper`)
