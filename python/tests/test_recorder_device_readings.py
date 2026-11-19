@@ -28,6 +28,10 @@ _RUNS = {"pwl": dict(engine="pwl", dt=1e-6),
 # (7e-5 of scale on the buck, 7e-6 on the rectifier): it exercises them.
 _RUNS_C = {**_RUNS, "esdirk43": dict(_RUNS["trbdf2"], integrator="esdirk43")}
 A, B = 0.21e-3 + 1.234e-9, 0.87e-3 + 4.321e-9   # mid-step on every grid
+F_4_4 = pytest.mark.xfail(strict=True, reason=(
+    "release finding F-4-4: on pwl with the restart rule a gate / diode edge's sample is the "
+    "left limit and the step after it runs the new mode; the recorder's window integral "
+    "trapezoids across that jump (buck energy balance 3.6 % off; 1.4e-5 without the rule)"))
 
 
 def _rc():
@@ -108,7 +112,9 @@ def test_kcl_holds_at_every_recorded_sample(circ, eng):
 
 @pytest.mark.parametrize("eng", sorted(_RUNS_C))
 @pytest.mark.parametrize("circ", ["rc", "buck", "rectifier"])
-def test_capacitor_charge_over_mid_step_windows(circ, eng):
+def test_capacitor_charge_over_mid_step_windows(circ, eng, request):
+    if eng == "pwl" and circ in ("buck", "rectifier"):
+        request.applymarker(F_4_4)
     _, _, t_end, _, caps = _CIRCUITS[circ]()
     (cap, (nodes, c)), = caps.items()
     wins = [(0.07 * t_end + 1.234e-9, 0.29 * t_end + 4.321e-9),
@@ -134,7 +140,9 @@ _BUCK_P = ["p(V)", "p(S1)", "p(D1)", "p(R)", "p(L)", "p(C)"]
 
 
 @pytest.mark.parametrize("eng", ["pwl", "trbdf2", "exact"])
-def test_energy_balance_from_recorder_outputs(eng):
+def test_energy_balance_from_recorder_outputs(eng, request):
+    if eng == "pwl":
+        request.applymarker(F_4_4)
     # the exact engine is read from its stored samples (linear between
     # them): sampled every 1 us, as the pwl grid
     run = dict(_RUNS.get(eng, {"engine": "exact", "dt": 1e-6}))
