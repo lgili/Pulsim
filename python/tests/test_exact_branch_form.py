@@ -365,7 +365,10 @@ def test_an_ideal_body_diode_across_its_closed_switch_does_not_chatter(tmp_path)
     """examples/phase_shift_full_bridge.yaml with every switch and diode ideal (branch,
     R_on = 0) and C_oss / C_j across them: D_LS_B sits across its closed switch LS_B,
     v_D = 0 structurally and every ON candidate is a loop; its turn-on predicate is held
-    while that holds. It chattered at 66 ns (32 commutations in 2e-10 s) before."""
+    while that holds. It chattered at 66 ns (32 commutations in 2e-10 s) before. To 30 us:
+    rectifier D3 sits across D1, D2, D4 ON (a closed path of ideal diodes) and the structure
+    checker blames D4 for that loop, not D3; the hold tested blame and D3 chattered at
+    22.5 us. It now tests whether the bit adds a loop."""
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
     s = (root / "examples" / "phase_shift_full_bridge.yaml").read_text(encoding="utf-8")
@@ -387,5 +390,69 @@ def test_an_ideal_body_diode_across_its_closed_switch_does_not_chatter(tmp_path)
                                            si("LS_B"), len(lc.switch_names), 100e-9)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        r = p.simulate(lc, t_end=2e-5, engine="exact", switch_fn=fn, rtol=1e-9, atol=1e-12)
-    assert np.asarray(r.times)[-1] == pytest.approx(2e-5, rel=1e-12)
+        r = p.simulate(lc, t_end=3e-5, engine="exact", switch_fn=fn, rtol=1e-9, atol=1e-12)
+    assert np.asarray(r.times)[-1] == pytest.approx(3e-5, rel=1e-12)
+
+
+def _psfb_ideal(tmp_path, g_on=None):
+    """examples/phase_shift_full_bridge.yaml with every switch and diode ideal (branch,
+    R_on = 0, g_off = 1e-9 kept), or its conductance twin at g_on."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    s = (root / "examples" / "phase_shift_full_bridge.yaml").read_text(encoding="utf-8")
+    new = (f"      g_on: {g_on!r}\n      g_off: 1.0e-9\n" if g_on
+           else "      form: branch\n      R_on: 0.0\n      g_off: 1.0e-9\n")
+    s2 = s.replace("      g_on: 1.0e3\n      g_off: 1.0e-9\n", new)
+    assert s2 != s
+    f = tmp_path / f"psfb_{g_on}.yaml"
+    f.write_text(s2, encoding="utf-8")
+    lc = p.load_yaml_file(str(f))
+    si = lc.builder.switch_index_of
+    fn = p.make_phase_shift_full_bridge_fn(100e3, np.pi / 2, si("HS_A"), si("LS_A"), si("HS_B"),
+                                           si("LS_B"), len(lc.switch_names), 100e-9)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(lc, t_end=2e-3, engine="exact", switch_fn=fn, rtol=1e-9, atol=1e-12)
+    t = np.asarray(r.times)
+    assert t[-1] == pytest.approx(2e-3, rel=1e-12)
+    return p.time_average(t, np.asarray(r.v("vout")), t_from=1.8e-3)
+
+
+def test_the_ideal_phase_shifted_full_bridge_runs_through_its_rectifier_overlap(tmp_path):
+    """The ideal PSFB's rectifier overlap (all four diodes conducting) is a loop of ideal
+    diodes: it runs on a three-diode representative, the fourth OFF across the closed path
+    (v_D = 0 structurally). Three defects stopped it, each seen in a trace: (1) at 34.97 us
+    the representative D1, D2, D3 ON / D4 OFF was rejected by the judge for v_D4 = 1.7e-15 V
+    of rounding (the hold applies there too); (2) the loop opening then turned OFF the
+    primary's freewheeling D_LS_A, which is not in the loop, and the run was refused; (3) the
+    selector's horizon read the same rounding as a departure: the run went through but
+    V_out averaged 2 % off. Reference: the conductance twin at g_on = 1e6 S on the same
+    engine (24.0714 V; the mpmath truth refuses the ideal start at rest, DECISIONS s22)."""
+    v_ideal = _psfb_ideal(tmp_path)
+    v_twin = _psfb_ideal(tmp_path, g_on=1.0e6)
+    assert v_ideal == pytest.approx(v_twin, rel=1e-4)
+
+
+def _source_cap(amplitude):
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "a", "gnd", 0.0, amplitude, 50.0)
+    _ideal_diode(b, "D", "a", "k")
+    b.add_capacitor("C", "k", "gnd", 1e-6, 0.0)
+    b.add_resistor("R", "k", "gnd", 1e3)
+    b.add_resistor("Ra", "a", "gnd", 1e3)
+    return b
+
+
+@pytest.mark.parametrize("mode_selection", [None, "lcp"])
+def test_a_capacitor_loop_candidate_is_rejected_not_the_run(mode_selection):
+    """An ideal diode from a sine onto a capacitor: ON it puts the capacitor in a loop with
+    the time-varying source (source_capacitor_loop, not posed). With the sine going
+    negative the diode stays OFF: that candidate is rejected and the run goes on (it was
+    refused at the start). Going positive no other mode is admissible: refused by that name."""
+    kw = {} if mode_selection is None else dict(mode_selection=mode_selection)
+    r = _run(_source_cap(-10.0), 9e-3, None, **kw)
+    assert np.asarray(r.times)[-1] == pytest.approx(9e-3, rel=1e-12)
+    assert np.abs(np.asarray(r.v("k"))).max() == 0.0
+    with pytest.raises(p.UnsupportedError) as ei:
+        _run(_source_cap(10.0), 9e-3, None, **kw)
+    assert ei.value.feature == "source_capacitor_loop"

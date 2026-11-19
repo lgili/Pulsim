@@ -1388,22 +1388,27 @@ void init_module(py::module_& m) {
                             ? adapter.pool().branch_R_on(d.branch_id) : Real{0};
                         const auto prm = d.params();
                         const auto chk = var >= 0 && R_on_b == Real{0} ? shorted : nullptr;
-                        const pulsim::Index bid = d.branch_id;
                         const pulsim::Size sw = d.switch_idx;
                         pred.add_predicate(pulsim::dsed::EventPredicate{
                             .name = label + " turns ON",
-                            .fn = [ad, from, to, prm, chk, bid, sw](
+                            .fn = [ad, from, to, prm, chk, sw](
                                       Real t, const Vector& x) {
                                 if (chk) {
                                     auto m = ad->current_mask();
                                     m.set(sw, true);
                                     try {
-                                        const auto& ld = chk->check(m, true).loop_diodes;
+                                        // the bit closes a loop iff it adds one: a new loop
+                                        // passes through the added branch, whichever diode
+                                        // the checker blames (the PSFB's D3 across D1, D2,
+                                        // D4 ON was not blamed: D4 was, and D3 chattered)
+                                        const std::size_t with = chk->check(m, true).loop_diodes.size();
+                                        m.set(sw, false);
+                                        const std::size_t without = chk->check(m, true).loop_diodes.size();
                                         // a loop through a source is a real bias: the law
                                         // decides (refused by name as ideal_voltage_loop);
                                         // the projection's rounding (2e-14 V at mid_b) is
                                         // not bounded by the node pair's own scale
-                                        if (std::find(ld.begin(), ld.end(), bid) != ld.end()
+                                        if (with > without
                                             && std::abs(ad->node_pair_voltage(from, to, t, x))
                                                    <= Real{1e-9} * ad->port_scale(t, x).vscale)
                                             return Real{-1};

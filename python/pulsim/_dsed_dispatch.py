@@ -768,11 +768,20 @@ def run_dsed_from_builder(
                 # the start mask's diode bits are not a decision: an ideal diode ON
                 # in a loop of sources there starts OFF; the scheduler decides it
                 # (or refuses the loop by name) at t_start
-                if (getattr(e, "feature", None) != "ideal_voltage_loop"
-                        or getattr(e, "kind", None) != "Diode"
-                        or _k == builder.graph.num_switches):
+                feature = getattr(e, "feature", None)
+                if _k == builder.graph.num_switches:
                     raise
-                initial_mask.set(builder.switch_index_of(e.device), False)
+                if feature == "ideal_voltage_loop" and getattr(e, "kind", None) == "Diode":
+                    initial_mask.set(builder.switch_index_of(e.device), False)
+                elif feature == "source_capacitor_loop" and _k == 0:
+                    # it names the source, not the diode: every diode starts OFF
+                    from ._pulsim import StoredKind  # type: ignore[import-not-found]
+                    g = builder.graph
+                    for b in range(g.num_branches):
+                        if builder.pool.kind_of(b) == StoredKind.Diode:
+                            initial_mask.set(builder.switch_index_of(g.branch_name(b)), False)
+                else:
+                    raise
                 adapter.set_mask(initial_mask)
     except NotImplementedError as e:
         # a reduction numerically singular on a node group: the floating-island

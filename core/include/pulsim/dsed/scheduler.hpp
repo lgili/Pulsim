@@ -1322,6 +1322,13 @@ private:
         rejected_loop_.reset();
     }
     std::optional<UnsupportedError> rejected_loop_;
+    /// A candidate mode the extraction cannot pose: an ON ideal diode closing a
+    /// loop of sources and closed ideal elements, or a capacitor loop through a
+    /// time-varying source. The candidate is rejected and the search goes on; the
+    /// run is refused (by that name) only when no admissible mode remains.
+    [[nodiscard]] static bool candidate_refusal_(const UnsupportedError& e) {
+        return e.feature() == "ideal_voltage_loop" || e.feature() == "source_capacitor_loop";
+    }
     void decide_modes_impl_(Real t, Vector& x, MaskT& mask, const MaskT& gates_prev,
                             const MaskT& prev_bits, const MaskT& rec,
                             PEDResult<MaskT>& result) {
@@ -1377,7 +1384,7 @@ private:
             } catch (const UnsupportedError& e) {
                 // a settle round turned an ideal diode ON into a loop of sources:
                 // that mode is not a candidate; the LCP decides among the others
-                if (!guard_ || guard_refuses_ || e.feature() != "ideal_voltage_loop") throw;
+                if (!guard_ || guard_refuses_ || !candidate_refusal_(e)) throw;
                 rejected_loop_ = e;
                 arbitrate();
                 return;
@@ -1433,7 +1440,7 @@ private:
                 try {
                     c = judge_(gates_prev, m, t, x_held, sc, worst);
                 } catch (const UnsupportedError& e) {
-                    if (e.feature() != "ideal_voltage_loop") throw;
+                    if (!candidate_refusal_(e)) throw;
                     rejected_loop_ = e;
                 }
                 system_.set_mask(rec);
@@ -1444,7 +1451,7 @@ private:
                 try {
                     d = first_departure_(gates_prev, m, decided, t, x_held, sc);
                 } catch (const UnsupportedError& e) {
-                    if (e.feature() != "ideal_voltage_loop") throw;
+                    if (!candidate_refusal_(e)) throw;
                     rejected_loop_ = e;
                 }
                 system_.set_mask(rec);
@@ -1497,7 +1504,7 @@ private:
                     (void)system_.has_exact_step();
                     return;
                 } catch (const UnsupportedError& e) {
-                    if (e.feature() != "ideal_voltage_loop" || k >= diodes_.size()) throw;
+                    if (!candidate_refusal_(e) || k >= diodes_.size()) throw;
                     rejected_loop_ = e;
                     // the named diode first, then every other ON ideal one: the
                     // first whose opening leaves a mode its own trajectory keeps
@@ -1520,8 +1527,12 @@ private:
                         try {
                             c = judge_(gates_prev, mode, t, x_held, last_scale_, worst);
                         } catch (const UnsupportedError& e2) {
-                            if (e2.feature() != "ideal_voltage_loop") throw;
-                            c = 1;   // the next round opens the next loop, or refuses it
+                            if (!candidate_refusal_(e2)) throw;
+                            // another loop: the next round opens it, or refuses it; the
+                            // same loop (named by the same diode): this opening is not in
+                            // it (the PSFB opened its freewheeling D_LS_A for the
+                            // rectifier's four-diode loop at 34.97 µs)
+                            c = e2.device() != e.device() ? 1 : 0;
                         }
                         if (c != 0) { hit = cd; break; }
                     }
@@ -1565,7 +1576,7 @@ private:
                 } catch (const UnsupportedError& e) {
                     // a tie released ON into a loop of closed ideal elements (a body
                     // diode across its closed switch) is not a mode: it stays OFF
-                    if (e.feature() != "ideal_voltage_loop") throw;
+                    if (!candidate_refusal_(e)) throw;
                     diode_bits_.set(d.switch_idx, false);
                     mask = before;
                     system_.set_mask(mask);
@@ -1716,6 +1727,7 @@ private:
         const Real tol_i = Real{1e-6} * iscale;   // an ON branch diode's law is its current
         scale_floor_x_ = &x_held;   // signal_bound_ on a projection residue (settle_and_project_)
         const FloorReset_ reset_floor{scale_floor_x_};
+        int reopened = 0;
         for (int pass = 0; pass <= 4; ++pass) {
             const Real band = tie_band_(t, x);
             std::string flipped;
@@ -1732,7 +1744,8 @@ private:
                 // chattered)
                 const Real tol = !on ? band
                     : !d.reads_current() ? std::max(band, tol_w)
-                    : std::max({band, tol_i, d.R_on > Real{0} ? tol_w / d.R_on : Real{0}});
+                    : std::max({signal_bound_(d, t, x, Real{-1}, Real{0}, band), tol_i,
+                                d.R_on > Real{0} ? tol_w / d.R_on : Real{0}});
                 const Real v_d = law_v_(d, t, x);
                 const auto prm = d.params();
                 const bool by_value = models::SwitchedDiode::decide(on, v_d, prm);
@@ -1754,7 +1767,27 @@ private:
             changed = true;
             mask = mask.overlay(diode_bits_, diode_owned_);
             system_.set_mask(mask);
-            project_(t, x);
+            try {
+                project_(t, x);
+            } catch (const UnsupportedError& e) {
+                // a flip into a mode the extraction cannot pose (a loop of closed
+                // ideal elements, a capacitor loop through a time-varying source)
+                // reopens the decision from the held state, as the settle restarts
+                // from settle_x0_: a loop diode is opened where the mode left keeps
+                // its own trajectory (pose_or_open_loops_). Once; past it, refused.
+                if (!candidate_refusal_(e)) throw;
+                if (reopened >= 1)
+                    throw UnsupportedError(
+                        "dsed", e.feature(), e.device(), e.kind(),
+                        "dsed at t = " + sci_(t) + " s: the re-settle flipped " + flipped
+                        + " into a mode that cannot be posed, after reopening the decision "
+                        "once: " + e.what());
+                ++reopened;
+                rejected_loop_ = e;
+                x = x_held;
+                pose_or_open_loops_(t, x_held, mask, mask);
+                project_(t, x);
+            }
         }
         if (changed && reinit_tracked_() && reinit_log_size_() > mark) {
             // an abandoned mode's impulsive jump is not physics (settle_and_project_)
@@ -1816,7 +1849,6 @@ public:
             if (!(system_.current_mask() == m)) system_.set_mask(m);
             const Real t = result.times[rows[k].k];
             const Vector& x = *rows[k].x;
-            const Real zb = zero_band_tol_(t, x);
             for (std::size_t j = 0; j < nd; ++j) {
                 const auto& d = diodes_[j];
                 Real vd;
@@ -1824,7 +1856,8 @@ public:
                 v[k * nd + j] = vd;
                 // the decision's own significance bound B (review s16 #2): a law
                 // broken inside it is one no decision of this engine can resolve
-                band[k * nd + j] = std::max(zb, signal_bound_(d, t, x, Real{0}, Real{0}));
+                band[k * nd + j] = std::max(signal_bound_(d, t, x, Real{-1}, Real{0}),
+                                            signal_bound_(d, t, x, Real{0}, Real{0}));
                 const bool on = m.get(d.switch_idx);
                 const Real i = on ? d.g_on * (vd - d.V_f) : d.g_off * vd;
                 ipk[j] = std::max(ipk[j], std::abs(i));
@@ -2279,9 +2312,10 @@ private:
                 const auto prm = d.params();
                 const bool by_value =
                     models::SwitchedDiode::decide(on, v_d, prm);
+                // the zero band in the signal's unit (amperes for an ON branch diode)
                 const bool in_band =
                     std::abs(models::SwitchedDiode::crossing_signal(
-                        on, v_d, prm)) <= tol;
+                        on, v_d, prm)) <= signal_bound_(d, ts, *xs, Real{-1}, Real{0});
                 // A flip is confirmed on the OFF-mode trajectory: in
                 // the OFF mode g_off turns a rounding-level current
                 // into volts of v_D (1e-18 A → 1e-9 V at 1 nS), so the
@@ -2430,9 +2464,13 @@ private:
     /// error (exact_step_error) applied to the signal's magnitude along the
     /// trajectory and to its forced amplitude F (node_pair_voltage_forced: the
     /// sine particular solution the free response cancels at rest), V the
-    /// diode's threshold. The zero band when the system cannot state it.
+    /// diode's threshold. The zero band when the system cannot state it, or
+    /// when s0 < 0: max(zero band, band_v), a voltage band, in THE SIGNAL'S
+    /// unit — × iscale/vscale for a diode read on its current (an ON branch
+    /// diode: its signal is amperes; a volt band compared with it was off by
+    /// vscale/iscale, session 21 debt a).
     [[nodiscard]] Real signal_bound_(const SchedulerDiode& d, Real t, const Vector& x,
-                                     Real s0, Real v0) const {
+                                     Real s0, Real v0, Real band_v = Real{0}) const {
         if constexpr (requires { system_.node_pair_voltage_terms();
                                  system_.exact_step_error();
                                  system_.node_pair_voltage_forced(d.from, d.to); }) {
@@ -2451,7 +2489,14 @@ private:
                                                                               law_pair_(d).second)}) + V);
             }
         }
-        return zero_band_tol_(t, x);
+        const Real band = std::max(zero_band_tol_(t, x), band_v);
+        if constexpr (requires { system_.port_scale(t, x); }) {
+            if (d.var >= 0 && law_pair_(d).first == d.var) {
+                const auto sc = system_.port_scale(t, x);
+                if (sc.vscale > Real{0} && sc.iscale > Real{0}) return band * (sc.iscale / sc.vscale);
+            }
+        }
+        return band;
     }
 
     /// A diode's law signal in volts, positive = the law is broken: ON (`on`)
@@ -2651,7 +2696,8 @@ private:
                     const auto& dd = diodes_[j];
                     const Real sig = law_signal_(dd, mode[j] != 0, t + d, x_tmp_);
                     // a non-finite state (an unstable mode over 1e4·h_e) is a violation
-                    const bool bad = breaks_law_(dd, mode[j] != 0, t + d, x_tmp_);
+                    const bool bad = breaks_law_(dd, mode[j] != 0, t + d, x_tmp_)
+                                     && !held_across_ideal_path_(dd, m, t + d, x_tmp_, sc);
                     // reported in volts: ON -> −i·zs, OFF -> v − V_on
                     const Real viol = mode[j] ? dd.g_on * sig * zs : sig;
                     const Real v_eff = std::isfinite(viol) ? viol
@@ -2670,6 +2716,36 @@ private:
             (void)gates; (void)mode; (void)t; (void)x; (void)sc; (void)worst_j;
             return -1;
         }
+    }
+
+    /// An OFF ideal diode whose ON mode would close a loop of closed ideal
+    /// elements sits across a closed path: v_D = 0 structurally, and its
+    /// rounding (the recovery's, not bounded by the node pair's own scale) is
+    /// not a forward bias. The predicate's hold (dsed_bindings: the bit adds a
+    /// loop and |v_D| ≤ 1e-9·vscale), applied by the judge: the PSFB's
+    /// overlap representative D1, D2, D3 ON with D4 OFF read v_D4 = 1.7e-15 V
+    /// and was rejected at 34.97 µs. Leaves the system's mask at `m`.
+    bool held_across_ideal_path_(const SchedulerDiode& d, const MaskT& m, Real t,
+                                 const Vector& x, const events::CircuitScale& sc)
+        requires HasNodePairVoltage<System> {
+        if (!(d.reads_current() && d.R_on == Real{0}) || m.get(d.switch_idx)) return false;
+        if (!(std::abs(system_.node_pair_voltage(d.from, d.to, t, x)) <= Real{1e-9} * sc.vscale))
+            return false;
+        bool loop = false;
+        if constexpr (HasExactStep<System>) {
+            MaskT on = m;
+            on.set(d.switch_idx, true);
+            system_.set_mask(on);
+            try {
+                (void)system_.has_exact_step();
+            } catch (const UnsupportedError& e) {
+                loop = e.feature() == "ideal_voltage_loop";
+            } catch (const std::exception&) {
+                // another refusal of the ON mode: not this structure, the law decides
+            }
+            system_.set_mask(m);
+        }
+        return loop;
     }
 
     /// The selector's horizon (DECISIONS #24): the first d of
@@ -2691,7 +2767,6 @@ private:
                 m.set(diodes_[j].switch_idx, mode[j] != 0);
             system_.set_mask(m);
             if (!system_.has_exact_step()) return inf;
-            (void)sc;
             // the probe stops at the next time event: past it the gates or a
             // source's piece differ, so the trajectory does not happen (#28)
             const Real cap = next_time_event_(t) - t;
@@ -2703,7 +2778,9 @@ private:
                 for (std::size_t j = 0; j < diodes_.size(); ++j) {
                     if (!decided[j]) continue;
                     // the judge's own test (breaks_law_; NaN counts as a departure)
-                    if (breaks_law_(diodes_[j], mode[j] != 0, t + d, x_tmp_)) return d;
+                    if (breaks_law_(diodes_[j], mode[j] != 0, t + d, x_tmp_)
+                        && !held_across_ideal_path_(diodes_[j], m, t + d, x_tmp_, sc))
+                        return d;
                 }
                 if (d == cap) return cap;   // the mode's trajectory ends at the time event
             }
