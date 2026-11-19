@@ -64,7 +64,7 @@ public:
     void on_commutation(CommutationFn f) { commut_.push_back(std::move(f)); }
 
     // refactor-unified-transient-stepper slice 3a: called by the step
-    // skeleton only (the fixed engine's twin today; DECISIONS 13).
+    // skeleton, the only driver of both engines (DECISIONS 13, 17, 20).
     // probes R1: once per accepted step, after commit, with the state the
     // step started from and its mask beside the end state and the mask the
     // step was stamped under. On the fixed engine `x_start` is the

@@ -904,20 +904,7 @@ TEST_CASE("stored-charge kinds (Lauritzen, IGBT tail): allocation count is "
     }
 }
 
-namespace {
-// The fixed engine's skeleton driver is the default since slice 3c; the
-// legacy loop is internal, PULSIM_PWL_STEPPER_LEGACY=1
-// (refactor-unified-transient-stepper DECISIONS 17).
-void set_pwl_twin(bool on) {
-#ifdef _WIN32
-    _putenv_s("PULSIM_PWL_STEPPER_LEGACY", on ? "0" : "1");
-#else
-    setenv("PULSIM_PWL_STEPPER_LEGACY", on ? "0" : "1", 1);
-#endif
-}
-}  // namespace
-
-TEST_CASE("fixed engine twin on the step skeleton: the legacy run, its own hooks, no per-step allocation",
+TEST_CASE("fixed engine on the step skeleton: its hooks, no per-step allocation",
           "[v2][perf][zero_alloc][stepper]") {
     SwitchedRC f;
     f.cache->build_lazy(Real{1e-6});
@@ -949,10 +936,7 @@ TEST_CASE("fixed engine twin on the step skeleton: the legacy run, its own hooks
         ++n_step;
     });
     hooks.on_device_state([&](Real, const Vector&, const pwl::StatefulHistories&) { ++n_dev; });
-    auto run = [&](bool twin, Real t_end) {
-        set_pwl_twin(twin);
-        // back to the default even if the run throws (the variable is process-wide)
-        struct Restore { ~Restore() { set_pwl_twin(true); } } restore;
+    auto run = [&](Real t_end) {
         opts.t_end = t_end;
         n_acc = n_step = n_dev = bad = 0;
         const std::size_t b0 = g_new_count.load();
@@ -962,33 +946,16 @@ TEST_CASE("fixed engine twin on the step skeleton: the legacy run, its own hooks
         const std::size_t d = g_new_count.load() - b0;
         return std::pair{d, std::move(r)};
     };
-    auto [d_old, r_old] = run(false, 2e-3);
-    CHECK(n_acc == 2000);
-    // slice 3c: the hooks live in the shared phases, so the legacy loop
-    // calls them too
-    CHECK(n_step == 2000);
-    CHECK(n_dev == 2000);
-    run(true, 2e-3);      // warm-up
-    auto [d2, r2] = run(true, 2e-3);
+    run(2e-3);      // warm-up
+    const std::size_t d2 = run(2e-3).first;
     CHECK(n_acc == 2000);
     CHECK(n_step == 2000);
     CHECK(n_dev == 2000);
     CHECK(bad == 0);
-    // Two code paths: within 1e-12 of scale here (bit identity is the
-    // local gate, benchmarks/tools/pwl_twin_identity.py).
-    REQUIRE(r2.times.size() == r_old.times.size());
-    REQUIRE(r2.states.size() == r_old.states.size());
-    Real worst = 0.0, scale = 0.0;
-    for (std::size_t i = 0; i < r_old.states.size(); ++i) {
-        CHECK(r2.times[i] == Catch::Approx(r_old.times[i]).margin(1e-18));
-        worst = std::max(worst, (r2.states[i] - r_old.states[i]).cwiseAbs().maxCoeff());
-        scale = std::max(scale, r_old.states[i].cwiseAbs().maxCoeff());
-    }
-    CHECK(worst <= 1e-12 * scale);
-    auto [d4, r4] = run(true, 4e-3);
+    const std::size_t d4 = run(4e-3).first;
     CHECK(n_step == 4000);
-    INFO("operator-new: twin 2000 steps " << d2 << ", 4000 steps " << d4 << ", legacy " << d_old);
+    INFO("operator-new: 2000 steps " << d2 << ", 4000 steps " << d4);
     if (kCountsMeaningful) {
-        CHECK(d4 <= d2 + 2);   // no per-step allocation on the twin
+        CHECK(d4 <= d2 + 2);   // no per-step allocation
     }
 }
