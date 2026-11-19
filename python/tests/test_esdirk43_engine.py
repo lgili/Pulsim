@@ -59,21 +59,6 @@ def test_trbdf2_refuses_another_engines_integrator_by_name():
     assert (e.value.engine, e.value.feature) == ("trbdf2", "integrator")
 
 
-def test_a_stateful_newton_history_is_refused_by_device_and_kind():
-    # the Lauritzen diode keeps a Newton history whose stage takes no
-    # arbitrary base yet (the nonlinear capacitor, the saturable inductor and
-    # external devices take the stage form: tests below)
-    b = p.CircuitBuilder()
-    b.add_voltage_source("V", "a", "gnd", 1.0)
-    b.add_resistor("R", "a", "m", 1.0)
-    b.add_lauritzen_diode("Dl", "m", "gnd")
-    with pytest.raises(p.UnsupportedError) as e:
-        p.simulate(b, t_end=1e-5, engine="trbdf2", integrator="esdirk43")
-    assert e.value.feature == "integrator=esdirk43"
-    assert e.value.device == "Dl"
-    assert e.value.kind == "LauritzenDiode"
-
-
 # ---- stateful kinds through the stage form (βh, ψ) ------------------------
 # A lossless LC whose inductor saturates (atan law): smooth and nonlinear.
 # Truth: scipy DOP853 at rtol 1e-13 on L(i)·di/dt = V − v, C·dv/dt = i.
@@ -188,15 +173,34 @@ def test_nonlinear_capacitor_is_fourth_order_against_an_ode_truth():
     assert _cap_err(r) <= 1e-8
 
 
-@pytest.mark.parametrize("name", ["boost_mosfet_coss_saturable", "chopper_igbt_vdmos"])
+def buck_mosfet_coss():
+    # task 3.4: a Level-1 MOSFET buck (high side, Coss, Shockley freewheel)
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_mosfet_level1("M", "vin", "sw", "g", K=0.5, V_T=3.0, kappa=4.0,
+                        with_body_diode=False)
+    b.add_nonlinear_capacitor("Coss", "vin", "sw", 200e-12, 0.7, 0.45)
+    b.add_shockley_diode("D", "gnd", "sw", 1e-12, 1.2, 0.025852)
+    b.add_resistor("Rs", "sw", "gnd", 2e3)
+    b.add_inductor("L", "sw", "out", 47e-6)
+    b.add_capacitor("C", "out", "gnd", 10e-6)
+    b.add_resistor("R", "out", "gnd", 6.0)
+    b.add_pulse_voltage_source("Vg", "g", "gnd", 0.0, 40.0, 0.0, 6e-6, 10e-6, 3e-7, 3e-7)
+    return b
+
+
+@pytest.mark.parametrize("name", ["boost_mosfet_coss_saturable", "chopper_igbt_vdmos",
+                                  "buck_mosfet_coss", "chopper_igbt_tail_lauritzen"])
 def test_device_circuits_agree_with_trbdf2_at_tight_tolerance(name):
     # Level-1 MOSFET + Coss + saturable inductor + Shockley rectifier; IGBT
-    # + the VDMOS C_gd law + saturable freewheel path. Reference: TR-BDF2 at
-    # rtol 1e-9 under a 2.5 ns ceiling (at its own steps TR-BDF2 is 8.3e-5 /
-    # 3.5e-5 off it; esdirk43 measured 6.3e-6 / 7.2e-6, and moves toward it
-    # under a ceiling: 1.6e-6 / 3.4e-7 at 2.5 ns)
+    # + the VDMOS C_gd law + saturable freewheel path; the Level-1 MOSFET
+    # buck; IGBT tail + Lauritzen freewheel (DECISIONS 17). Reference:
+    # TR-BDF2 at rtol 1e-9 under a 2.5 ns ceiling (at its own steps TR-BDF2
+    # is 8.3e-5 / 3.5e-5 / 1.3e-7 / 3.8e-7 off it; esdirk43 measured
+    # 6.3e-6 / 7.2e-6 / 1.1e-7 / 5.5e-8, and moves toward it under a
+    # ceiling: 1.6e-6 / 3.4e-7 at 2.5 ns for the first two)
     from . import test_device_path_equivalence as Q
-    fac = getattr(Q, name)
+    fac = globals().get(name) or getattr(Q, name)
     te = 4e-5
     ref = p.simulate(fac(), engine="trbdf2", t_end=te, rtol=1e-9, atol=1e-12, dt=2.5e-9)
     run = p.simulate(fac(), engine="trbdf2", t_end=te, integrator="esdirk43",

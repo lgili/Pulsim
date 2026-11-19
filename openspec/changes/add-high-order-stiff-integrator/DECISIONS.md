@@ -699,3 +699,120 @@ pass from the repository root); `pytest -m reference` 382 passed;
 layer5_v3, xdev pass on Eigen 5 and on Eigen 3.4.0; g++-15 syntax check
 clean on the touched headers; stubs up to date; ruff clean. Full ctest
 not run.
+
+## 17. Every stateful kind on the stage form; the q rows in the estimate; one round-off floor (2026-11-19)
+
+**Stage form for the charge kinds and the machines.** The Lauritzen
+diode (q_M) and the IGBT tail (Q) commit through the affine relation
+q = K0 + K1·s(x) that `begin_step(h, stage)` rebuilds at every stamp; a
+stage's increment is `K0 + K1·s(x) − ψ` with the K0/K1 of the stage's own
+last stamp, and `stage_commit` calls `begin_step(h_e, BE)` before the
+hand-path commit because the rollback restored the pre-step pair. The
+PMSM and induction machine carry λ (3 rows per machine) through
+`lam_off` / `delta_lambda`. The `kStageForm` trait and `stage_form()`
+are gone: every kind is on the form. Truths (`test_esdirk43_stateful_
+kinds.py`), esdirk43 vs TR-BDF2 at the same rtol:
+
+| case | truth | esdirk43 | TR-BDF2 | order (fixed ceiling) |
+|---|---|---|---|---|
+| Lauritzen reverse recovery | closed form | 3.2e-6 (rtol 1e-8; source-edge floor) | 2.0e-1 at any rtol | 3.97, 4.05 (TR-BDF2 2.1) |
+| IGBT tail turn-off | closed form | 1.4e-7 (1e-8) | 5.2e-3 | 3.88, 3.74 |
+| PMSM locked rotor | closed form | 8.5e-10 (1e-9) | 9.3e-8 | 3.96 (then a 4e-9 floor) |
+| PMSM free acceleration | TR-BDF2 at 1e-10 | rel 9e-7 on ω_end (1e-8) | — | — |
+| induction machine | pinned SciPy | ew 5.3e-8, ei 4.5e-6 (1e-8, 20 µs ceiling) | 5.7e-6, 4.3e-6 | — |
+| DC machine | closed form | 8.2e-10 (1e-8) | 3.2e-6 | — |
+
+A rejected step leaves no device state behind: with `dt_init = t_end/4`
+the Lauritzen, IGBT and PMSM-free runs reject 12, 11, 9 times (1, 0, 0 without) and are
+bit-identical, times and states, to the runs started at the step they
+accepted (`ed_stages` snapshots and restores `hs` on every path; K0/K1
+are part of the rollback). The interface path agrees with the legacy
+path on the Lauritzen and IGBT runs.
+
+**Jiles-Atherton stays refused (by name, a new reason).** Loop energy
+against the fixed engine at dt 1e-6 (W = 1.78336e-4 J): esdirk43 at a
+5e-6 ceiling −2.4e-7, 2e-5 −1.5e-5, 1e-4 −3e-4..−4.8e-4: first order,
+and TR-BDF2 is first order on the same law, even with c = 1 (ratios
+~2.0). The in-loop JA law is the limiter; a fourth-order integrator buys
+nothing there.
+
+**The q rows in the error norm (esdirk43).** A circuit whose dynamics
+live only in the stateful kinds (a Lauritzen recovery, an IGBT tail) had
+no estimate: the embedded difference covered the linear entries only,
+so steps sat at the ceiling for any rtol. The q rows now enter the norm,
+scale `rtol·max(|q0|, |q1|, 1e-3·max|q0|)` (the max over committed
+step-start values only, so a rejected trial cannot loosen later scales). FINDING, left unchanged: the
+same gap exists on TR-BDF2 (its Lauritzen error is 2e-1 at any rtol);
+closing it changes default numbers, so it needs its own change.
+
+**carry_q (measured, not ported).** 10^4 periods, rtol 1e-6. Flux (a
+saturable inductor across a cosine source, exact invariant λ(kT) =
+λ(0)): drift −2.8e-12 of V/ω per period on esdirk43. Charge (a tanh-law
+C1 and 1 µF C2 exchanging charge through a periodic switch, no DC path
+from their top plates): the raw drift −4.7e-7 of Q0 per period is a
+modeled leak, the same with linear capacitors (−3.3e-7), on both
+integrators, at any g_off, R_b, rtol (1e-6..1e-8) or Newton tolerance;
+a 5e-10 S leak through ∫(v_a + v_c − 2v_b)dt removes it to a residual of
+−4.7e-10 (esdirk43) / −5.0e-10 (TR-BDF2) per period, also independent of
+rtol. The engine's Newton tolerance is absolute and tight, so the
+committed q(x) differs from the carried stage value at round-off; the
+step-layer measurement (test_esdirk43.cpp, newton_tol 0.03) is where
+carry_q pays. Not ported.
+
+**One round-off floor.** The estimate's floor (noise = J^-1(|J||x| +
+|b|)·eps) now runs once in `tb_error` for both integrators. The q rows
+keep their share of the norm without a floor, so the floor never accepts
+a step on a stateful kind's error. ESDIRK reads
+each entry's state noise times Σ|e_j| (+|e_0|/γ); the noise right-hand
+side alternates signs (an all-positive one cancels through J^-1 where
+the elimination's round-off does not: PSFB defect (2), update-trbdf2-
+post-event-restart DECISIONS 21). TR-BDF2 keeps today's rule unless
+`roundoff_floor = 1` (low-level `run_transient_trbdf2` only; default 0:
+byte-identical by construction). PSFB 0–2 ms, mean over 1.8–2.0 ms vs
+the exact engine's 24.0661693 V:
+
+| run | error | accepted | rejected | forced | floor accepts |
+|---|---|---|---|---|---|
+| TR-BDF2 rtol 1e-5, floor 0 | −9.14e-2 | 23797 | 8233 | 2336 | 8 |
+| TR-BDF2 rtol 1e-5, floor 1 | −8.92e-2 | 24379 | 8152 | 2210 | 3 |
+| TR-BDF2 rtol 1e-6, floor 0 | −7.56e-2 | 20996 | — | 3884 | 30 |
+| TR-BDF2 rtol 1e-6, floor 1 | −7.02e-2 | 20871 | — | 3779 | 3 |
+| esdirk43 rtol 1e-5 | −1.02e-1 | 9634 | 1239 | 112 | 0 |
+
+Both complete either way; the floor is not what limits the PSFB (the
+forced accepts at h_min are). LC tank, 1000 periods, esdirk43: rejects
+15 / 7 / 6 / 6 at rtol 1e-5 / 1e-8 / 1e-10 / 1e-12 (≤ 0.001 per step),
+identical before and after, 0 floor accepts: the 4.5–8 per period of
+entry 15 was the prototype's.
+
+**Task 3.4.** A Level-1 MOSFET buck (high side, Coss, Shockley
+freewheel) and the IGBT-tail + Lauritzen chopper against TR-BDF2 at rtol
+1e-9 under a 2.5 ns ceiling: esdirk43 1.1e-7 / 5.5e-8 of the state
+scale (TR-BDF2 at its own steps 1.3e-7 / 3.8e-7). `engine='auto'` never
+selects esdirk43, so its results are unchanged by construction.
+
+**Device DC start (add-unified-device-interface #56, same branch).**
+`simulate(start_from_dc_op=True)` now solves the DC point with the
+Lauritzen law (it was open: 2.000 V where the law gives 0.73096 V) and
+seeds every stateful kind from it (`StatefulHistories::seed_from_dc_op`).
+Default-path number moved, truth-backed: `compute_dc_operating_point`
+on the legacy path with a Lauritzen diode, 2.000 → 0.73096 V (bisection
+of the law). See that change's DECISIONS, slice 11c.
+
+Hand-off after entry 17:
+- DONE: the Lauritzen diode, IGBT tail, PMSM, induction and DC machines
+  on esdirk43 (refusals gone) with closed-form / reference truths, orders
+  and the reject-leaves-no-state test; the q rows in the esdirk43 norm;
+  one round-off floor in `tb_error` (TR-BDF2 default unchanged, opt-in
+  `roundoff_floor = 1` on the low-level binding); task 3.4.
+- NOT DONE: (a) dense-output bracketing of events (stage values only);
+  (b) the Jiles-Atherton law stays refused (first order on both
+  integrators: the in-loop law, not the integrator, needs work);
+  (c) the q rows missing from TR-BDF2's own estimate (a default-number
+  change: Lauritzen 2e-1 at any rtol there); (d) carry_q in the engine
+  (no measurable drift to remove); (e) tasks 4.3, 5.x; (f) the Newton
+  refresh rule of entry 8; (g) the SEPIC-like g_off node for the floor;
+  (h) commutation energy as a thermal state jump: `feat/core-p2-trbdf2-
+  thermal` was not in the integration branch at the start of this step;
+  it is now (origin/feat/core-integration a32b97ed), and this branch
+  does not have it yet: merge first, then start.
