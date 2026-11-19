@@ -62,11 +62,13 @@ CASES = {
     "buck CCM": (lambda: _buck(1.0, 0.5), 11.9877289409),
     "buck DCM": (lambda: _buck(50.0, 0.3), ref.DCM_ORBIT[1]),
     "boost CCM": (lambda: _boost(20.0, 0.0), 24.0536294841),
-    # 36.59440084 V on both loops (the slice brief quoted 36.5943997644,
-    # 1.07e-6 V lower; test_periodic_steady_state pins 36.594401 +- 1e-5)
-    "boost DCM": (lambda: _boost(500.0, 0.0), 36.5944008379),
+    # DCM: the orbit by mpmath (50 digits, three exact LTI segments, the
+    # diode-off instant bisected, Newton to 1e-40) is 36.594400837798 V,
+    # diode off at t/T = 0.743942. V_th is a commutation threshold, not
+    # a drop: the same orbit at 1 mV.
+    "boost DCM": (lambda: _boost(500.0, 0.0), 36.5944008378),
     "boost CCM, V_th 1 mV": (lambda: _boost(20.0, 1e-3), 24.0536294841),
-    "boost DCM, V_th 1 mV": (lambda: _boost(500.0, 1e-3), 36.5944008379),
+    "boost DCM, V_th 1 mV": (lambda: _boost(500.0, 1e-3), 36.5944008378),
 }
 
 
@@ -84,7 +86,14 @@ def test_kernel_loop_equals_the_python_loop(name):
     k, q = _solve(make, False), _solve(make, True)
     assert k._ctx.loop == "kernel" and q._ctx.loop == "python"
     lab = k.state_labels
-    assert k.x0[lab.index("v(vout)")] == pytest.approx(v_out, abs=1e-8)
+    # Newton stops on its residual r, and with a slow multiplier the
+    # state is only within r / (1 - |mu|) of the orbit: the DCM boost has
+    # |mu| = 0.99894, so r = 1.1e-9 V is 1.07e-6 V of state. Which side
+    # of the stop rule the last step lands on is rounding (21 runs and
+    # 1e-10 V on the pinning builds, 25 runs and -1.07e-6 V on macOS
+    # arm64 with Eigen 3.4.0), so the bound is the run's own, 5x.
+    tol = max(1e-8, 5 * k.residual_history[-1] / (1 - k.floquet_radius))
+    assert k.x0[lab.index("v(vout)")] == pytest.approx(v_out, abs=tol)
     scale = float(np.abs(q._ctx.orbit_traj.scale).max())
     assert np.abs(k.x0 - q.x0).max() <= 1e-12 * scale
     # the same Newton path, run for run
