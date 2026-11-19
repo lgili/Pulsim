@@ -1192,7 +1192,7 @@ class Solver:
             y = dy.y0(Ex, w_at(ck, t))
             xp = dy.X * y
             dE = self.stored(xp) - self.stored(xm)
-            if abs(dE) > self.tol * (1 + abs(self.stored(xm))):
+            if abs(dE) > mp.mpf(10) ** (-(mp.mp.dps // 2)) * (1 + abs(self.stored(xm))):  # projection noise is ~15 digits
                 self.jumps.append(dict(t=t, dE=dE, x_minus=xm, x_plus=xp, mode=mode,
                                        w_src=self.jump_source_work(mode, xm, xp)))
             info.update(cause=cause, prev=prev, mode=mode)
@@ -2126,7 +2126,7 @@ def report(out=REPORT, truth_dir=TRUTH_DIR, dps=50):
           "the gate measure (`metrics.err_rms`) of the EXACT waveform sampled on the netlist's",
           "uniform dt grid (no event samples) against the truth: what a perfect fixed-step trace",
           "scores; a pwl cell near it disagrees through the measure, not the engine. `prec`: max",
-          "difference of the 30- and 60-digit runs (45 / 90 where 30 cannot select the mode) on the netlist grid, relative to the column's",
+          "difference of the 30- and 60-digit runs (45 / 75 where 30 cannot select the mode) on the netlist grid, relative to the column's",
           "peak. `modes`: events at which more than one mode is consistent (followed: the one",
           "with the fewest flips); `weak`: events where only a mode with a device pinned at its",
           "boundary (v = 0 identically) is consistent. `impulsive loss`: energy lost in the state",
