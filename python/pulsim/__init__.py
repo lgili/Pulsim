@@ -1411,8 +1411,19 @@ def _result_i(self, name: str, t=None, *, port=None):
     if kind in ("sine_current_source", "pulse_current_source",
                 "pwl_current_source"):
         val = builder.pool.current_waveform_value
-        return _finalize(_np.array([val(b_id, float(tt))
-                                    for tt in _ta(self)], dtype=float))
+        tt_all = _np.asarray(_ta(self), dtype=float)
+        out = _np.array([val(b_id, float(tt)) for tt in tt_all], dtype=float)
+        if getattr(self, "right_limit_index", None) is not None and out.size > 1:
+            # A result that keeps event limits stores the LEFT limit at an
+            # event (the restart rule and the exact engine solve the row at
+            # a source jump with the pre-jump value): read a jump's left
+            # side there too (release finding F-6-5). Rows 1..: row 0 is
+            # the run's start.
+            left = _np.array([val(b_id, float(_np.nextafter(tt, -_np.inf)))
+                              for tt in tt_all[1:]], dtype=float)
+            jump = _np.abs(left - out[1:]) > 1e-9 * (_np.abs(left) + _np.abs(out[1:])) + 1e-300
+            out[1:] = _np.where(jump, left, out[1:])
+        return _finalize(out)
     if kind == "vccs":
         v_c = (_node_v(states, int(params["in_pos"]))
                - _node_v(states, int(params["in_neg"])))

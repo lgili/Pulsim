@@ -797,6 +797,10 @@ def device_thermal_summary(
     # (_result_views.solved_part). T_j_trace keeps one sample per
     # result.times: the dropped rows read T_ambient, where the network
     # starts.
+    # The events inside stored steps as rows (the fixed engine's event
+    # split; _result_views.with_inner_events); T_j_trace drops them again.
+    result = _views.with_inner_events(result)
+    inner_keep = getattr(result, "_inner_keep", None)
     t_all = np.asarray(result.times, dtype=float)
     n_full = int(t_all.shape[0])
     result = _views.solved_part(result)
@@ -1113,6 +1117,8 @@ def device_thermal_summary(
             # variable-step trace is on its own grid and stays so).
             T_j_trace = np.concatenate(
                 (np.full(n_lead, T_amb_dev), T_j_trace))
+        if inner_keep is not None and np.shape(T_j_trace) == inner_keep.shape:
+            T_j_trace = np.asarray(T_j_trace)[inner_keep]
         T = win.span if times.size > 1 else 1.0
         P_cond_avg = (float(E_cond) / T if T > 0 and times.size > 1
                       else float(P_cond_t.mean()))

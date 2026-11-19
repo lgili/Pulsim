@@ -590,6 +590,32 @@ struct SimulationResult {
     Size num_switch_bits = 0;
     std::vector<Size> switch_state_unsolved;
     bool has_switch_states = false;
+    /// Release group B (event samples): the RIGHT limits of the run, kept
+    /// beside the samples (a stored sample at an event is its LEFT limit).
+    /// `right_limit_index[j]` is the sample the j-th right limit belongs to
+    /// (increasing), its state row `right_limit_states[j*w .. (j+1)*w)` (w =
+    /// `event_limit_width`) and its mask `right_limit_switch_bits[j*nb ..]`
+    /// (one byte 0/1 per switch bit, nb = `event_limit_switches`). The fixed
+    /// engine under the restart rule records, at the start sample of each
+    /// SDIRK restart step, the start of the line whose trapezoid is the
+    /// step's own quadrature (StepLines in loss_tracker.hpp): the right
+    /// limit to second order, exact for the step's integral of any quantity
+    /// linear in the state. `inner_event_*`: an event INSIDE a fixed step
+    /// (the event split): after sample `inner_event_after[j]`, at
+    /// `inner_event_times[j]`, the left limit (the sub-step that ended
+    /// there, under its mask) and the right limit as above (a NaN row:
+    /// none). `has_event_limits` false: no record (Python reads None).
+    bool has_event_limits = false;
+    Size event_limit_width = 0;
+    Size event_limit_switches = 0;
+    std::vector<Size> right_limit_index;
+    std::vector<Real> right_limit_states;
+    std::vector<std::uint8_t> right_limit_switch_bits;
+    std::vector<Size> inner_event_after;
+    std::vector<Real> inner_event_times;
+    std::vector<Real> inner_event_left, inner_event_right;
+    std::vector<std::uint8_t> inner_event_left_bits, inner_event_right_bits;
+
     /// add-pwl-igbt-and-thyristor 2.2: per sample, the gate bit `g` each
     /// gated device was decided under (the COMMANDED state; the stamped
     /// conduction state is `switch_state_bits`), same layout: a gated
