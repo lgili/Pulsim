@@ -122,7 +122,8 @@ def test_without_the_restart_pwl_is_first_order_at_the_zoh_jumps():
     engine's, not the graph's; the restart rule removes it (above)."""
     errs = []
     for dt in (1e-6, 1e-7):
-        r, _ = _run("pwl", dt=dt)
+        # legacy subject: the restart-less step (the pre-release default)
+        r, _ = _run("pwl", dt=dt, discontinuity_restart=False)
         errs.append(abs(_samples(r)[10] - 0.643545722992))
     assert 5e-5 < errs[0] < 7e-5
     assert errs[0] / errs[1] == pytest.approx(10.0, rel=0.02)
