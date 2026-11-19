@@ -202,6 +202,9 @@ void init_module(py::module_& m) {
     static py::object options_exc =
         pulsim_error_type("OptionsError", PyExc_ValueError);
     options_exc.attr("option") = "";
+    // An engine broke its own invariant (sim::InternalError): a pulsim bug.
+    static py::object internal_exc =
+        pulsim_error_type("InternalError", PyExc_RuntimeError);
     for (const char* a : {"engine", "feature", "device", "kind"}) {
         unsupported_exc.attr(a) = "";
     }
@@ -225,6 +228,8 @@ void init_module(py::module_& m) {
                 py::object inst = options_exc(e.what());
                 inst.attr("option") = e.option();
                 PyErr_SetObject(options_exc.ptr(), inst.ptr());
+            } catch (const InternalError& e) {
+                PyErr_SetString(internal_exc.ptr(), e.what());
             }
         });
 

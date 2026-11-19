@@ -2002,6 +2002,17 @@ inline SimulationResult run_transient_trbdf2(
         }
         event_sample_t = -std::numeric_limits<Real>::infinity();
     };
+    // Every recorded time: a sample below the previous one is the engine
+    // breaking its own invariant, raised rather than returned as a result.
+    auto push_time = [&](Real ts, const char* kind) {
+        if (ts < result.times.back()) {
+            throw InternalError(std::format(
+                "run_transient_trbdf2: a {} sample at t = {:.17g} lies before "
+                "the previous sample t = {:.17g} (time went backward; a "
+                "pulsim bug)", kind, ts, result.times.back()));
+        }
+        result.times.push_back(ts);
+    };
 
     // ---- post-gate-edge restart ----
     // A gate edge leaves the companion history holding the PRE-edge
@@ -2094,7 +2105,7 @@ inline SimulationResult run_transient_trbdf2(
         const Real t_hook0 = t;
         t += dtp;
         drop_superseded_event_sample(t);
-        result.times.push_back(t);
+        push_time(t, "gate-edge");
         result.states.push_back(x);
         result.event_iteration_count.push_back(0);
         result.record_switch_state(m_probe);
@@ -2269,7 +2280,7 @@ inline SimulationResult run_transient_trbdf2(
             sdirk_event = false;   // no post-jump sample: no turn-off restart
             return;
         }
-        result.times.push_back(tp);
+        push_time(tp, "post-event");
         result.states.push_back(*xr);
         result.event_iteration_count.push_back(0);
         // The bits the probe was solved under (a landing has already
@@ -3551,7 +3562,7 @@ inline SimulationResult run_transient_trbdf2(
                     newton_at_start = false;   // a committed step
                     // a post-event record ahead of this landing goes
                     drop_superseded_event_sample(t);
-                    result.times.push_back(t);
+                    push_time(t, "diode-landing");
                     result.states.push_back(x);
                     result.event_iteration_count.push_back(0);
                     // The landing is a REAL trap solve over dt_land
@@ -3634,7 +3645,7 @@ inline SimulationResult run_transient_trbdf2(
                 if (h > Real{64} * h_min)
                     slots_only_t = std::numeric_limits<Real>::quiet_NaN();
                 drop_superseded_event_sample(t);
-                result.times.push_back(t);
+                push_time(t, "step");
                 result.states.push_back(x);
                 result.event_iteration_count.push_back(0);
                 // Both TR-BDF2 stages solved under mask_step.
