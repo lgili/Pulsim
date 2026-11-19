@@ -473,6 +473,41 @@ public:
         pulsim::dsed::exact_fast_samples(current_entry_->exact, t_e, h, out);
     }
 
+    /// The output-grid rule's step from (t, x) (exact_chord_step) on the
+    /// augmented state: `tol` per circuit state, `rtol` for each oscillator
+    /// state (amplitude 1: a sine source's own chord). h when the mode has no
+    /// tier-1 basis (`bounded` = false).
+    [[nodiscard]] Real exact_output_step(Real t, const Vector& x, const Vector& tol,
+                                         Real rtol, Real h, bool& bounded) const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        const LTIEntry& e = *current_entry_;
+        const auto n = x.size();
+        const auto k = static_cast<Index>(e.aug_omegas.size());
+        Vector xa(n + 2 * k), ta(n + 2 * k);
+        xa.head(n) = x;
+        ta.head(n) = tol;
+        for (Index j = 0; j < k; ++j) {
+            const Real w = e.aug_omegas[static_cast<Size>(j)];
+            xa[n + 2 * j] = std::sin(w * t);
+            xa[n + 2 * j + 1] = std::cos(w * t);
+            ta[n + 2 * j] = ta[n + 2 * j + 1] = rtol;
+        }
+        if (pwl_sources_.empty()) {
+            return exact_chord_step(e.exact, xa, nullptr, nullptr, ta, h, bounded);
+        }
+        const auto m = static_cast<Index>(pwl_sources_.size());
+        Vector v(m), s(m), c0 = Vector::Zero(n + 2 * k), c1 = Vector::Zero(n + 2 * k);
+        for (Index j = 0; j < m; ++j) {
+            const auto [vj, sj] = pwl_value_slope_(pwl_sources_[static_cast<Size>(j)], t);
+            v[j] = vj;
+            s[j] = sj;
+        }
+        c0.head(n) = e.pwl_cols * v;
+        c1.head(n) = e.pwl_cols * s;
+        return exact_chord_step(e.exact, xa, &c0, &c1, ta, h, bounded);
+    }
+
     /// The current mode's settle length for decisions (exact_settle_length).
     [[nodiscard]] Real exact_settle_length(Real t_res) const {
         ensure_current_resolved_();

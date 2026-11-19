@@ -771,6 +771,60 @@ inline constexpr Real kSettleTau = Real{40};
     return std::isfinite(r_lo) ? kSettleTau / r_lo : Real{0};
 }
 
+/// The output-grid rule (update-number-changing-release): the longest step
+/// δ ≤ h from x whose chord x(0)→x(δ) stays within tol_j of x_j(τ) for every
+/// τ ∈ [0, δ] and every component j. Between events ẋ = Ax + b + c0 + c1·τ,
+/// so ẍ(τ) = Σ_k V_jk z̈_k e^{λ_k τ} with z̈ = V⁻¹ẍ(0), ẍ(0) = A(Ax + b + c0) + c1,
+/// and a chord's error is at most δ²/8 · max_τ |ẍ_j(τ)|. Two bounds of that
+/// max, both rigorous (g_k = e^{max(0, Re λ_k)δ}; complex pairs by modulus):
+///   B_j = Σ_k |V_jk z̈_k| g_k                     (triangle inequality)
+///   |ẍ_j(0)| + δ Σ_k |V_jk z̈_k| |λ_k| g_k        (|e^s − 1| ≤ |s| e^{max(0, Re s)})
+/// the second keeps the cancellation between modes at τ = 0 (a source's forced
+/// response cancelled by the free response at rest). δ is the largest step
+/// that either bound admits. Tier 1 only (a diagonalising basis); `bounded` =
+/// false and h returned otherwise. c0 / c1 nullable (no piecewise-linear source).
+[[nodiscard]] inline Real exact_chord_step(const ExactLTI& e, const Vector& x,
+                                           const Vector* c0, const Vector* c1,
+                                           const Vector& tol, Real h, bool& bounded) {
+    bounded = e.valid && e.tier == 1;
+    if (!bounded || !(h > Real{0})) return h;
+    const auto n = x.size();
+    // modal coordinates: z = V⁻¹x, ż = Λz + w (+ V⁻¹c0), z̈ = Λż (+ V⁻¹c1)
+    Eigen::VectorXcd zdd(n);
+    for (Eigen::Index k = 0; k < n; ++k) {
+        std::complex<Real> z{e.Vinv_re.row(k).dot(x), e.Vinv_im.row(k).dot(x)};
+        std::complex<Real> zd = e.lambda[k] * z + e.w[k];
+        if (c0 != nullptr) zd += std::complex<Real>{e.Vinv_re.row(k).dot(*c0), e.Vinv_im.row(k).dot(*c0)};
+        zdd[k] = e.lambda[k] * zd;
+        if (c1 != nullptr) zdd[k] += std::complex<Real>{e.Vinv_re.row(k).dot(*c1), e.Vinv_im.row(k).dot(*c1)};
+    }
+    // whether step d satisfies one of the two bounds for every component
+    auto fits = [&](Real d) {
+        for (Eigen::Index j = 0; j < n; ++j) {
+            Real B = Real{0}, C = Real{0}, a0 = Real{0};
+            for (Eigen::Index k = 0; k < n; ++k) {
+                const Real re = e.lambda[k].real();
+                const Real g = re > Real{0} ? std::exp(re * d) : Real{1};
+                const Real m = std::hypot(e.V_re(j, k), e.V_im(j, k)) * std::abs(zdd[k]) * g;
+                B += m;
+                C += m * std::abs(e.lambda[k]);
+                a0 += e.V_re(j, k) * zdd[k].real() - e.V_im(j, k) * zdd[k].imag();
+            }
+            if (d * d * std::min(B, std::abs(a0) + d * C) > Real{8} * tol[j]) return false;
+        }
+        return true;
+    };
+    if (fits(h)) return h;
+    // the admitted set is an interval [0, δ*] (both bounds grow with d): bisect in log d
+    Real lo = h * Real{1e-12}, hi = h;
+    if (!fits(lo)) return lo;
+    for (int it = 0; it < 60 && hi > lo * Real{1.01}; ++it) {
+        const Real mid = std::sqrt(lo * hi);
+        (fits(mid) ? lo : hi) = mid;
+    }
+    return lo;
+}
+
 /// A step's error per unit of state, as the propagator states it: tier 1
 /// u·κ₂(Ṽ) and the kept pairs' first-order defect (pair_quality); tier 2
 /// its Padé error estimate, or the tier's accepted level when not judged.

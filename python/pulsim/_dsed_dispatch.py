@@ -480,6 +480,15 @@ def _result_from_native(native_res, t_start: float):
     for key in ("mode_shadow", "mode_selection", "mode_guard"):
         if key in native_res:
             res.diagnostics[key] = native_res[key]
+    if "n_output_capped" in native_res:   # the output-grid rule (output_rtol)
+        og = {k: int(native_res[k]) for k in ("n_output_capped", "n_output_unbounded")}
+        res.diagnostics["output_grid"] = og
+        if og["n_output_capped"]:
+            warnings.warn(
+                f"simulate(engine='exact', output_rtol=...): the output grid's sample cap "
+                f"bit in {og['n_output_capped']} interval(s): linear interpolation between "
+                "those samples is NOT within output_rtol (diagnostics['output_grid']). "
+                "Pass dt for a fixed output step.", RuntimeWarning, stacklevel=4)
     # dependent states: the impulsive re-initialisations at mode entry
     # are the result's own `reinit_records` (filled by _exact_result)
     return res
@@ -547,6 +556,7 @@ def run_dsed_from_builder(
     mode_selection: Optional[str] = None,
     allow_implicit_segments: bool = True,
     ticks: Optional[Any] = None,
+    output_rtol: Optional[float] = None,
 ):
     """Run a PED simulation from a :class:`pulsim.CircuitBuilder`.
 
@@ -653,6 +663,17 @@ def run_dsed_from_builder(
                 f"simulate(engine='dsed', t_start={t_start!r}): the loss port of "
                 f"{_loss_names[0]!r} records its events on the run's own clock "
                 "from 0. Drop t_start, or use engine='pwl' / 'trbdf2'.")
+        integrator = "rk45"
+    # update-number-changing-release: the output-grid rule cuts the
+    # event-driven integrator's exact steps; 'auto' becomes 'rk45' as for
+    # diodes (the exact segments are the same propagator), 'bdf2' refuses.
+    if output_rtol:
+        if integrator == "bdf2":
+            raise unsupported(
+                "dsed", "output_rtol", message=
+                "simulate(engine='dsed', integrator='bdf2', output_rtol=...): the "
+                "output-grid rule cuts the event-driven integrator's exact steps. "
+                "Drop integrator='bdf2', or drop output_rtol.")
         integrator = "rk45"
     # Device kinds: the kernel's capability table, before any adapter
     # is built (the Python adapter below would extract the LTI system
@@ -927,6 +948,7 @@ def run_dsed_from_builder(
                     store_every=opts.store_every, event_log=False,
                     settle_round_cap=SETTLE_ROUND_CAP, diode_law_rel=DIODE_LAW_REL,
                     **shadow_kw,
+                    **({"output_rtol": float(output_rtol)} if output_rtol else {}),
                     **({"tick_fns": [f for f, _p, _o in ticks],
                         "tick_periods": [float(p) for _f, p, _o in ticks],
                         "tick_offsets": [float(o) for _f, _p, o in ticks],

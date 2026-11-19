@@ -102,6 +102,7 @@ _ASK = {
     "should_continue": lambda: True, "on_cache": lambda cache: None,
     "sensitivities": ["R.R"], "mode_selection": "lcp",
     "allow_implicit_segments": True, "device_path": "interface",
+    "output_rtol": 1e-4,
 }
 # Cells exercised elsewhere (they need a controller, a stream, an MMC arm or
 # a snapshot to be built): test_closed_loop*, test_live*, test_mmc*,

@@ -484,6 +484,7 @@ public:
                     if (fast_k_ < fast_t_.size()) {
                         h_ex = std::min(h_ex, fast_t_[fast_k_] - t);
                     }
+                    if (output_rtol_ > Real{0}) h_ex = output_step_(t, x, h_ex, result.n_events);
                     // no sliver step short of the edge (scheduler_auto.hpp)
                     if (h_ex < t_target - t && near_time(t + h_ex, t_target)) {
                         h_ex = t_target - t;
@@ -806,6 +807,20 @@ public:
     void set_event_projection(bool on) noexcept {
         enable_event_projection_ = on;
     }
+
+    /// The output-grid rule (update-number-changing-release; off = rtol 0):
+    /// each exact step is cut so that linear interpolation between samples
+    /// is within rtol·max(|x_j| seen so far, atol) of every state
+    /// (exact_chord_step), at most `cap` cut steps between two events
+    /// (n_output_capped counts the intervals where the cap bit). The event
+    /// projection then removes the parasitic cluster only (project_).
+    void set_output_rule(Real rtol, Real atol, std::size_t cap) noexcept {
+        output_rtol_ = rtol;
+        output_atol_ = atol;
+        output_cap_ = cap;
+    }
+    [[nodiscard]] std::size_t n_output_capped() const noexcept { return n_output_capped_; }
+    [[nodiscard]] std::size_t n_output_unbounded() const noexcept { return n_output_unbounded_; }
 
     // Test hooks: the step cap (default 10M) and the settle's round cap
     // (default 64). A small cap reaches the give-up deterministically on
@@ -1270,7 +1285,13 @@ private:
             if (!enable_event_projection_) {
                 return;
             }
-            const Real thr = Real{100} / dt_max_;
+            Real thr = Real{100} / dt_max_;
+            // the output rule resolves every mode: only the parasitic cluster
+            // (exact_settle_length's cut) is not a state of the run
+            if constexpr (HasExactStep<System>) {
+                if (output_rtol_ > Real{0} && system_.has_exact_step())
+                    thr = Real{1} / (kParasiticFraction * resolved_scale_(t));
+            }
             if constexpr (requires { system_.project_slow(t, x, thr); }) {
                 system_.project_slow(t, x, thr);
             } else {
@@ -2878,6 +2899,38 @@ private:
     // default so the demo systems and raw-LTI paths are untouched;
     // the builder runners enable it.
     bool enable_event_projection_ = false;
+    // the output-grid rule (set_output_rule, output_step_)
+    Real output_rtol_ = Real{0};
+    Real output_atol_ = Real{0};
+    std::size_t output_cap_ = 0, output_count_ = 0, output_events_ = 0;
+    std::size_t n_output_capped_ = 0, n_output_unbounded_ = 0;
+    Vector output_scale_, output_tol_, output_end_;
+
+    /// The exact step from (t, x) cut by the output rule (exact_chord_step).
+    Real output_step_(Real t, const Vector& x, Real h, std::size_t n_events) {
+        if constexpr (requires(bool& b) { system_.exact_output_step(t, x, x, Real{}, h, b); }) {
+            if (n_events != output_events_) {   // a new interval
+                output_events_ = n_events;
+                output_count_ = 0;
+            }
+            if (output_count_ >= output_cap_) return h;
+            if (output_scale_.size() != x.size()) output_scale_ = Vector::Zero(x.size());
+            // the scale of the interval ahead too: a state starting from rest
+            // would otherwise be cut to its atol floor
+            advance_(t, x, h, output_end_);
+            output_scale_ = output_scale_.cwiseMax(x.cwiseAbs()).cwiseMax(output_end_.cwiseAbs());
+            output_tol_ = output_scale_.cwiseMax(Vector::Constant(x.size(), output_atol_)) * output_rtol_;
+            bool bounded = true;
+            const Real d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded);
+            if (!bounded) ++n_output_unbounded_;
+            if (!(d < h)) return h;
+            if (++output_count_ == output_cap_) ++n_output_capped_;
+            // never below the time's own resolution (a zero tolerance is floored by atol)
+            return std::max(d, Real{64} * std::numeric_limits<Real>::epsilon() * std::max(Real{1}, std::abs(t)));
+        }
+        (void)t; (void)x; (void)n_events;
+        return h;
+    }
     Real probe_t_end_ = std::numeric_limits<Real>::infinity();   // next_time_event_
     std::size_t reinit_mark_ = 0;   // reinit_log_size_() before the settle
     Vector settle_x0_;   // settle_and_project_: the pre-event state (its records)
