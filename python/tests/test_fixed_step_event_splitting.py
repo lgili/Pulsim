@@ -26,8 +26,12 @@ from scipy.optimize import brentq
 
 import pulsim as p
 
-RULE = dict(discontinuity_restart=True)
+# "The rule alone" names the split off: since the number-changing release the
+# split's default follows the rule (on), and the release default IS ``SPLIT``.
+RULE = dict(discontinuity_restart=True, enable_substep_state_correction=False)
 SPLIT = dict(discontinuity_restart=True, enable_substep_state_correction=True)
+# legacy subject: the restart-less fixed step (the pre-release default engine)
+OLD_DEFAULT = dict(discontinuity_restart=False)
 GON, GOFF = 1e3, 1e-9
 
 
@@ -145,19 +149,20 @@ def _buck_exact(Rl, D, nper):
     return x
 
 
-def _buck_builder(Rl):
+def _buck_builder(Rl, form=None):
+    f = {} if form is None else {"form": form}
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", VIN)
-    b.add_switch("S", "vin", "sw", GON, GOFF)
-    b.add_diode("D1", "gnd", "sw", GON, GOFF)
+    b.add_switch("S", "vin", "sw", GON, GOFF, **f)
+    b.add_diode("D1", "gnd", "sw", GON, GOFF, **f)
     b.add_inductor("L", "sw", "vout", LB)
     b.add_capacitor("C", "vout", "gnd", CB)
     b.add_resistor("RL", "vout", "gnd", Rl)
     return b
 
 
-def _buck(Rl, N, nper, fn=None, D=0.4567, phase=T0, **kw):
-    b = _buck_builder(Rl)
+def _buck(Rl, N, nper, fn=None, D=0.4567, phase=T0, form=None, **kw):
+    b = _buck_builder(Rl, form)
     if fn is None:
         fn = p.make_pwm_switch_fn(FSW, D, b.switch_index_of("S"),
                                   b.graph.num_switches, phase)
@@ -220,22 +225,31 @@ def test_diode_turn_off_is_located_within_005_dt():
 
     def offs(**k2):
         return _off_events(_buck(50.0, 100, 1000, **kw, **k2), 100, 995 * TB)
-    off = offs(**SPLIT)
-    assert len(off) == 5
-    assert all(abs(d) <= 0.05 for _, d in off), off          # engine: |d| < 1e-4
-    assert all(abs(k - round(k)) > 0.01 for k, _ in off), off
-    # The rule alone: every estimate is a grid index, 0.98 dt early.
+    split = offs(**SPLIT)
+    assert len(split) == 5
+    assert all(abs(d) <= 0.05 for _, d in split), split      # engine: |d| < 1e-4
+    assert all(abs(k - round(k)) > 0.01 for k, _ in split), split
+    # The release default is the split.
+    assert offs() == split
+    # The rule alone: every estimate is a grid index. The branch-form diode
+    # (default) reports the grid point that ends the crossing step: within
+    # one dt after the located crossing.
     off = offs(**RULE)
     assert all(abs(k - round(k)) < 1e-3 for k, _ in off), off
+    assert all(0.0 < k - ks < 1.0 for (k, _), (ks, _) in zip(off, split)), (off, split)
+    # legacy subject: the conductance form reported the step's START, 0.98 dt early
+    off = offs(form="conductance", **RULE)
+    assert all(abs(k - round(k)) < 1e-3 for k, _ in off), off
     assert all(0.95 <= d <= 1.0 for _, d in off), off
-    # Default engine: a grid index too, 0.32-0.33 dt early.
-    off = offs()
+    # legacy subject: the pre-release default engine (restart-less, conductance
+    # form): a grid index too, 0.32-0.33 dt early.
+    off = offs(form="conductance", **OLD_DEFAULT)
     assert all(abs(k - round(k)) < 1e-3 for k, _ in off), off
     assert all(0.31 <= d <= 0.34 for _, d in off), off
 
 
 def test_dcm_result_does_not_depend_on_where_the_grid_falls():
-    # p15/p12: the default engine is 0.50 % off at T/101 (0.023 % at T/100).
+    # p15/p12: the pre-release default engine is 0.50 % off at T/101 (0.023 % at T/100).
     # Relative error against the exact steady state of each run's own
     # duty (round(0.3 N)/N), 2000 periods (8.5 RC).
     def rel(N, **kw):
@@ -247,17 +261,17 @@ def test_dcm_result_does_not_depend_on_where_the_grid_falls():
     # Task 1.3: the restart rule ALONE already removes the outlier
     # (T/101 +6.9e-6 relative); the split takes it to 7e-8.
     assert abs(rel(101, **RULE)) < 2e-5
-    assert rel(101) == pytest.approx(-4.97e-3, rel=0.05)
+    assert rel(101, **OLD_DEFAULT) == pytest.approx(-4.97e-3, rel=0.05)
+    assert rel(101) == split[101]          # the release default is the split
 
 
 def test_split_off_is_the_restart_rule_bit_for_bit():
     """With every edge on the grid (D = 0.5 at T/100) the split finds no
-    event: split ON is the restart rule alone, bit for bit; and an
-    explicit False is the rule too."""
+    event: split ON is the restart rule alone (RULE: an explicit False),
+    bit for bit; and so is the split at its default (it follows the rule)."""
     on = _buck(1.0, 100, 10, D=0.5, **SPLIT)
     rule = _buck(1.0, 100, 10, D=0.5, **RULE)
-    off = _buck(1.0, 100, 10, D=0.5, enable_substep_state_correction=False,
-                **RULE)
+    off = _buck(1.0, 100, 10, D=0.5, discontinuity_restart=True)
     assert on.n_split_steps == 0
     for r in (on, off):
         assert np.array_equal(np.asarray(r.states), np.asarray(rule.states))
@@ -267,7 +281,7 @@ def test_split_off_is_the_restart_rule_bit_for_bit():
 
 def test_split_without_the_restart_rule_is_refused():
     with pytest.raises(p.UnsupportedError, match="discontinuity_restart") as ei:
-        _buck(1.0, 100, 2, enable_substep_state_correction=True)
+        _buck(1.0, 100, 2, enable_substep_state_correction=True, discontinuity_restart=False)
     assert "enable_substep_state_correction" in str(ei.value)
     assert ei.value.feature == "enable_substep_state_correction"
 
