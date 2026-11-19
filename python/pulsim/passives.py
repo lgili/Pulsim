@@ -13,8 +13,8 @@ the DC and AC analyses exactly like the elements it is made of.
   winding's ``R_ac(f)`` curve (a fit reproduces its own data by
   construction: that is not a validation).
 * ``add_transmission_line(..., model="pi")``: lumped π sections.
-* ``odd_charge_table``: the DC-bias C(v) of an MLCC as an odd
-  ``ChargeTable`` for the existing charge-law ``NonlinearCapacitor``
+* ``odd_charge_table`` / ``fit_mlcc_dc_bias``: the DC-bias C(v) of an
+  MLCC as an odd ``ChargeTable`` for the existing charge-law ``NonlinearCapacitor``
   (a Newton device, so pwl / trbdf2 only, unlike the composites above).
 
 ``{name}`` stays the ideal element, so ``c0``, ``i0`` and
@@ -38,6 +38,7 @@ __all__ = [
     "RacLadder",
     "fit_rac_ladder",
     "odd_charge_table",
+    "fit_mlcc_dc_bias",
     "recommend_line_sections",
     "install",
 ]
@@ -186,6 +187,44 @@ def odd_charge_table(v: Sequence[float], Q: Sequence[float],
     return ChargeTable(np.concatenate([-v[:0:-1], v]).tolist(),
                        np.concatenate([-q[:0:-1], q]).tolist(),
                        np.concatenate([c[:0:-1], c]).tolist())
+
+
+def fit_mlcc_dc_bias(v_bias: Sequence[float], c_ratio: Sequence[float],
+                     C_nominal: float, *, tol: float = 0.01):
+    """An odd charge table from a datasheet DC-bias curve.
+
+    ``v_bias`` [V] (≥ 0, strictly increasing) and ``c_ratio`` = C/C_nominal
+    at each bias (> 0), e.g. read off the manufacturer's curve for the
+    exact part; ``C_nominal`` [F]. The small-signal ``C(v) = C_nominal ·
+    c_ratio(v)`` is integrated into ``Q(v)`` (monotone interpolation;
+    :func:`pulsim.datasheet.fit_charge_table` adds knots until the table's
+    ``C(v)`` reproduces every input point within ``tol``) and mirrored to
+    an odd table (:func:`odd_charge_table`). Returns a
+    :class:`pulsim.datasheet.ChargeTableFit`: ``.table`` (pass it as
+    ``ChargeLaw.table(fit.table)`` to ``add_nonlinear_capacitor``),
+    ``.residual`` (largest relative error of ``C`` at the input points:
+    the fit reproduces its own data, which is not a validation).
+    Large-signal behaviour (hysteresis, ageing) is not represented.
+    """
+    from .datasheet import ChargeTableFit, fit_charge_table
+
+    who = "fit_mlcc_dc_bias"
+    v = np.asarray(v_bias, dtype=float)
+    r = np.asarray(c_ratio, dtype=float)
+    cn = float(C_nominal)
+    if not (math.isfinite(cn) and cn > 0):
+        raise ValueError(f"{who}: C_nominal must be finite and > 0 (got {C_nominal!r}).")
+    if v.ndim != 1 or v.shape != r.shape or v.size < 2:
+        raise ValueError(f"{who}: v_bias and c_ratio must be 1-D of equal length >= 2.")
+    if not np.all(np.isfinite(v)) or v[0] < 0 or np.any(np.diff(v) <= 0):
+        raise ValueError(f"{who}: v_bias must be finite, >= 0 and strictly increasing.")
+    if not np.all(np.isfinite(r)) or np.any(r <= 0):
+        raise ValueError(f"{who}: every c_ratio must be finite and > 0.")
+    half = fit_charge_table(v, cn * r, tol=tol).table
+    table = odd_charge_table(half.v_knots, half.q_knots, half.c_knots)
+    res = float(np.max(np.abs(np.array([table.capacitance(float(x)) for x in v])
+                              - cn * r) / (cn * r)))
+    return ChargeTableFit(table, res, len(table.v_knots), int(table.clamped_tangents))
 
 
 # ---------------------------------------------------------------------------
@@ -381,11 +420,20 @@ def _wrap_inductor(native, native_c):
     return add_inductor
 
 
+def _has_branch(b, name: str) -> bool:
+    # a YAML-loaded ladder (rac: cells) never passed through add_inductor(rac=)
+    try:
+        b.branch_id_of(name)
+    except (IndexError, ValueError):
+        return False
+    return True
+
+
 def _wrap_coupling(native):
     def add_inductor_coupling(self, name_a: str, name_b: str,
                               k: float) -> "CircuitBuilder":
         for n in (name_a, name_b):
-            if n in getattr(self, "_rac_windings", ()):
+            if n in getattr(self, "_rac_windings", ()) or _has_branch(self, f"{n}.rac_l0"):
                 from ._refusal import unsupported
                 raise unsupported(
                     "", "rac", f"add_inductor_coupling({name_a!r}, "

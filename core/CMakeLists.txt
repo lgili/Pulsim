@@ -50,6 +50,7 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_trbdf2_stage_coeffs.cpp
         tests/dsed/test_exact_lti.cpp
         tests/dsed/test_convergence_failure.cpp  # typed give-up sites
+        tests/dsed/test_exact_queue_ticks.cpp  # ticks, monitors, step hooks on the queue
         tests/dsed/test_event_projection.cpp
         tests/dsed/test_scheduler_auto.cpp  # Gate 4.D — auto-dispatch RK45↔BDF2 per mode
         tests/dsed/test_period_integrals.cpp  # period map, M, closed-form integrals
@@ -85,6 +86,54 @@ if(PULSIM_BUILD_TESTS)
         pulsim_apply_target_defaults(pulsim_core_mode_tests)
     endif()
     catch_discover_tests(pulsim_core_mode_tests)
+
+    # add-kernel-simulation-object — sim::RunOptions, the option x engine
+    # table and the sim::Simulation facade (core/include/pulsim/sim/).
+    add_executable(pulsim_core_sim_tests
+        tests/sim/test_simulation.cpp
+    )
+    target_link_libraries(pulsim_core_sim_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_sim_tests)
+    endif()
+    catch_discover_tests(pulsim_core_sim_tests)
+
+    # refactor-unified-transient-stepper — the stepper's stage tables,
+    # controllers and policies (core/include/pulsim/solver/step/).
+    add_executable(pulsim_core_step_tests
+        tests/step/test_integrators.cpp
+        tests/step/test_controllers.cpp
+        tests/step/test_stepper.cpp
+        tests/step/test_esdirk43.cpp  # add-high-order-stiff-integrator
+    )
+    target_link_libraries(pulsim_core_step_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_step_tests)
+    endif()
+    catch_discover_tests(pulsim_core_step_tests)
+
+    # add-probes-and-recorders — probes and recorders
+    # (core/include/pulsim/record/), header-only.
+    add_executable(pulsim_core_record_tests
+        tests/record/test_recorder.cpp
+    )
+    target_link_libraries(pulsim_core_record_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_record_tests)
+    endif()
+    catch_discover_tests(pulsim_core_record_tests)
 
     # add-in-kernel-event-losses group 1 — the kernel loss tables
     # (core/include/pulsim/thermal/loss_table.hpp), header-only.
@@ -433,6 +482,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v3/test_main.cpp
         tests/layer5_v3/test_snapshot_restore.cpp
         tests/layer5_v3/test_device_interface.cpp
+        tests/layer5_v3/test_device_laws.cpp
         tests/layer5_v3/test_substep_correction.cpp
         tests/layer5_v3/test_resolution_diagnostics.cpp
     )
@@ -564,6 +614,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4_v3/test_lti_recovery.cpp
         tests/layer4_v3/test_lti_state_space.cpp   # Bridge.3 — DSED bridge
         tests/layer4_v3/test_induction_machine_mna.cpp  # add-mna-native-machines
+        tests/layer4_v3/test_pmsm_flux_map.cpp          # add-mna-native-machines group 4
     )
     target_link_libraries(pulsim_core_layer4_v3_tests
         PRIVATE

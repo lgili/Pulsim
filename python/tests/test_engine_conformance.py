@@ -359,6 +359,8 @@ COUPLED = (_coupled, "x", "Kd", 3e-3, 1e-6, False)
 
 
 def _switch_fn(b, needs):
+    if callable(needs):   # a gate schedule built for this circuit
+        return needs(b)
     return _Closed(b.graph.num_switches) if needs else None
 
 
@@ -627,8 +629,9 @@ _REFUSED = {
         {"discontinuity_restart": True}, ("trbdf2", "dsed")),
     "resolution_diagnostics": (
         {"resolution_diagnostics": True}, ("trbdf2", "dsed")),
-    # add-complementarity-mode-selection: the shadow runs on pwl and the
-    # dsed event integrator (this RC has no diode, so dsed routes to "auto")
+    # add-complementarity-mode-selection: the shadow runs on pwl, trbdf2 and
+    # the dsed event integrator; this RC has no diode: nothing to select
+    # (trbdf2 refuses that by name, dsed routes to "auto", which has no hook)
     "mode_selection": ({"mode_selection": "shadow"}, ("trbdf2", "dsed")),
 }
 
@@ -782,11 +785,13 @@ def _half_wave():
 
 
 @pytest.mark.parametrize("mode", ("shadow", "lcp"))
-def test_mode_selection_refused_by_name_on_a_diode_circuit_on_trbdf2(mode):
-    # trbdf2's settle has no hook yet: refused by name (pwl and dsed run it).
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim("trbdf2", _half_wave(), mode_selection=mode)
-    assert (ei.value.engine, ei.value.feature) == ("trbdf2", "mode_selection")
+def test_mode_selection_runs_on_a_diode_circuit_on_trbdf2(mode):
+    # task 4.2 on trbdf2: its zero-time cascades are the sites (the cell
+    # flipped from refuse to support)
+    r = _sim("trbdf2", _half_wave(), mode_selection=mode)
+    key = "mode_shadow" if mode == "shadow" else "mode_selection"
+    ms = r.diagnostics[key]
+    assert sum(ms["sites"].values()) > 0 and ms["errors"] == 0
 
 
 @pytest.mark.parametrize("mode", ("shadow", "lcp"))
@@ -828,23 +833,18 @@ def test_mode_guard_diagnostics_on_pwl_and_dsed(engine):
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
 def test_lcp_agrees_with_the_default_settle_on_every_engine(engine):
-    # add-complementarity-mode-selection 6.3: one cell per engine. trbdf2
-    # skips while its settle refuses by name (hook 4.2: it calls
-    # pwl::select_site at its settle site); the cell runs once it lands.
+    # add-complementarity-mode-selection 6.3: one cell per engine (trbdf2
+    # calls pwl::select_site at its zero-time cascades).
     r0 = _sim(engine, _half_wave())
-    try:
-        r1 = _sim(engine, _half_wave(), mode_selection="lcp")
-    except p.UnsupportedError as e:
-        if (e.engine, e.feature) == ("trbdf2", "mode_selection"):
-            pytest.skip("trbdf2 settle hook (task 4.2) not landed")
-        raise
+    r1 = _sim(engine, _half_wave(), mode_selection="lcp")
     ms = r1.diagnostics["mode_selection"]
     assert ms["errors"] == 0 and ms["capped"] == 0 and ms.get("inconsistent", 0) == 0
 
     def avg(r):     # time-weighted, exactly clipped to [0, 2 ms]
         t, v = np.asarray(r.times), np.asarray(r.v("o"))
         return float(np.trapezoid(v, t)) / (t[-1] - t[0])
-    assert avg(r1) == pytest.approx(avg(r0), rel=1e-6)    # pwl, dsed: 0.0 measured
+    # pwl, dsed: 0.0 measured; trbdf2 3.1e-9 (its sites decide event instants)
+    assert avg(r1) == pytest.approx(avg(r0), rel=1e-6)
 
 
 @pytest.mark.parametrize("engine", ("dsed", "exact"))
@@ -938,12 +938,16 @@ def test_loops_at_two_rates_on_trbdf2():
     assert (len(lb.duty_history), len(mon)) == (20, 200)
 
 
-def test_closed_loop_refused_on_dsed():
+def test_two_closed_loops_on_dsed():
+    # add-unified-event-queue group 3: the exact engine's queue ticks them
     b = _two_bucks()
     la = _loop(b, "outa", "Qa", 20e3)
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim("dsed", b, closed_loops=[la])
-    assert ei.value.feature == "closed_loops"
+    lb = _loop(b, "outb", "Qb", 2e3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 10e-3, closed_loops=[la, lb], engine="dsed")
+    assert (len(la.duty_history), len(lb.duty_history)) == (200, 20)
+    assert list(r.control_tick_counts) == [200, 20]
 
 
 def test_resume_from_refused_on_dsed():
@@ -1214,6 +1218,84 @@ def test_saturable_permeance_refused_by_the_ac_sweep():
     assert ei.value.device == "Core"
 
 
+# ---------------------------------------------------------------------
+# Realistic passives (add-realistic-passives 6.1): composites of linear
+# R, L, C (and a 0 V return source), so each runs wherever its parts run,
+# AC sweep included; the odd DC-bias table is the NonlinearCapacitor kind.
+# ---------------------------------------------------------------------
+def _passive(add):
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 2e3)
+        b.add_resistor("R", "in", "o", 1e3)
+        b.add_resistor("Rl", "o", "gnd", 1e4)
+        if on:
+            add(b)
+        return b
+    return build
+
+
+def _odd_table():
+    from pulsim.passives import odd_charge_table
+    v = np.linspace(0.0, 40.0, 9)
+    return odd_charge_table(v, 1e-6 * 10 * np.arctan(v / 10), 1e-6 / (1 + (v / 10) ** 2))
+
+
+def _ladder():
+    from pulsim.passives import RacLadder
+    return RacLadder(R_dc=50.0, L_hf=5e-3, R_k=(500.0,), L_k=(5e-3,))
+
+
+PASSIVE_CELLS = {
+    "capacitor[esr/esl]": (
+        (_passive(lambda b: b.add_capacitor("Cp", "o", "gnd", 100e-9, esr=300.0,
+                                            esl=1e-3)),
+         "o", "Cp", 1e-3, 1e-7, False),
+        ("Capacitor", "Inductor", "Resistor")),
+    "inductor[esr/c_par/rac]": (
+        (_passive(lambda b: b.add_inductor("Lp", "o", "gnd", 10e-3, c_par=1e-9,
+                                           rac=_ladder())),
+         "o", "Lp", 1e-3, 1e-7, False),
+        ("Capacitor", "Inductor", "Resistor")),
+    "transmission_line[pi]": (
+        (_passive(lambda b: (b.add_transmission_line("T", "o", "gnd", "f", "gnd",
+                                                     Z0=1e3, delay=20e-6, sections=4,
+                                                     R=10.0),
+                             b.add_resistor("Rf", "f", "gnd", 500.0))),
+         "o", "T.c0", 1e-3, 1e-7, False),
+        ("Capacitor", "Inductor", "Resistor")),
+    "nonlinear_capacitor[odd table]": (
+        (_passive(lambda b: b.add_nonlinear_capacitor(
+            "Cn", "o", "gnd", p.ChargeLaw.table(_odd_table()))),
+         "o", "Cn", 1e-3, 1e-7, False),
+        ("NonlinearCapacitor",)),
+}
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("name", list(PASSIVE_CELLS))
+def test_realistic_passive_cells(name, engine):
+    cell, kinds = PASSIVE_CELLS[name]
+    _check_cell(name, cell, engine, _composite_supported(kinds, engine))
+
+
+@pytest.mark.parametrize("name", list(PASSIVE_CELLS))
+def test_realistic_passive_cells_on_the_ac_sweep(name):
+    # The linear composites sweep (their analytic impedances are pinned in
+    # test_passives.py); the DC-bias capacitor is refused by name.
+    cell, kinds = PASSIVE_CELLS[name]
+    b = cell[0](True)
+    run = lambda: k.run_mna_sweep_kernel(  # noqa: E731
+        b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+        [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
+    if _composite_supported(kinds, "ac_sweep"):
+        assert np.all(np.isfinite(np.asarray(run().H)))
+    else:
+        with pytest.raises(p.UnsupportedError) as ei:
+            run()
+        assert (ei.value.engine, ei.value.device) == ("ac_sweep", cell[2])
+
+
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
 def test_voltage_sanity_factor_honoured_on_every_engine(engine):
     # A 10 V node against a bound of 0.5 x 10 V: every engine's trace is
@@ -1371,12 +1453,19 @@ def test_control_rate_offset_honoured_on_trbdf2():
 
 
 @pytest.mark.parametrize("engine", ("dsed", "exact"))
-def test_control_rate_refused_on_dsed(engine):
+def test_control_rate_offset_honoured_on_dsed(engine):
     b = _rc()
-    ch = _rated_chain(b, p.Rate(1e-4))
+    ch = _rated_chain(b, p.Rate(period=1e-4, offset=2e-5))
+    _sim(engine, b, step_observer=ch.make_step_observer(b))
+    assert ch.tick_counts == [20]     # ceil((2e-3 - offset) / 1e-4)
+
+
+def test_control_rate_delay_time_refused_on_dsed():
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(period=1e-4, compute_delay=2e-5))
     with pytest.raises(p.UnsupportedError) as ei:
-        _sim(engine, b, step_observer=ch.make_step_observer(b))
-    assert (ei.value.engine, ei.value.feature) == ("dsed", "step_observer")
+        _sim("dsed", b, step_observer=ch.make_step_observer(b))
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "compute_delay")
 
 
 # add-exact-propagator-strategy group 13: engine='exact' is the canonical name of the event-driven
@@ -1564,3 +1653,274 @@ def test_gated_doc_block_equals_the_kernel_table():
         cells = [c.strip() for c in ln.strip("|").split("|")]
         doc_table[cells[0]] = {c: v == "yes" for c, v in zip(cols, cells[1:])}
     assert doc_table == k._gated_capabilities()
+
+
+# ---- the device path (add-unified-device-interface DECISIONS #23) --------
+# Generated from the registry: every Newton kind (and Newton variant) cell,
+# on every Newton engine, either runs on device_path='interface' and agrees
+# with the hand stamps, or refuses by name; which one is the kernel's
+# registry (`_device_path_ported`), so a ported kind without a passing cell
+# and a refusal the registry does not predict both fail.
+_NEWTON_PORTED, _BLOCKS_PORTED = k._device_path_ported()
+_BLOCK_OF = {cell: blk for blk, cell in STATEFUL_CELLS.items()}
+_PATH_CELLS = {n: c for n, c in CELLS.items() if n in _NEWTON_PORTED}
+_PATH_CELLS.update({n: v[0] for n, v in VARIANT_CELLS.items()
+                    if n.split("[")[0] in _NEWTON_PORTED})
+
+
+def _sat_law(add):
+    """The saturable inductor under another law, driven by a sine so the
+    current reverses (the hysteretic core runs both branches)."""
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 5e3, 0.0)
+        b.add_resistor("R1", "in", "o", 10.0)
+        b.add_resistor("R2", "o", "gnd", 1e3)
+        if on:
+            add(b)
+        return b
+    return build
+
+
+# Path-only cells: the table and Jiles-Atherton inductor laws (the device
+# path's adapters choose the law per instance; the engine cells above run
+# the atan law only).
+_PATH_CELLS.update({
+    "SaturableInductor[table]": (_sat_law(lambda b: b.add_saturable_inductor_table(
+        "Ld", "o", "gnd", [0.0, 0.2, 0.5, 1.0, 2.0],
+        [0.0, 2e-4, 4e-4, 5e-4, 6e-4])), "o", "Ld", 4e-4, 5e-8, False),
+    "SaturableInductor[ja]": (_sat_law(lambda b: b.add_hysteretic_core_inductor(
+        "Ld", "o", "gnd", 100.0, 1e-4, 0.1, 0.0, 4.0e5, 50.0, 5e-5, 0.2,
+        30.0)), "o", "Ld", 4e-4, 5e-8, False),
+})
+_BLOCK_OF.update({"SaturableInductor[table]": "saturable_inductor",
+                  "SaturableInductor[ja]": "saturable_inductor"})
+
+
+def _run_path(cell, engine, path):
+    build, node, _dev, t_end, dt, sw = cell
+    b = build(True)
+    kw = dict(dt=dt) if engine == "pwl" else {}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end, engine=engine, switch_fn=_switch_fn(b, sw),
+                       device_path=path, **kw)
+    return (np.asarray(r.times, float), np.asarray(r.v(node), float),
+            np.asarray(r.newton.iterations_per_solve))
+
+
+def test_every_newton_kind_has_a_device_path_cell():
+    assert set(_NEWTON_PORTED) <= set(_PATH_CELLS)
+    assert set(_BLOCKS_PORTED) == set(STATEFUL_CELLS)
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+@pytest.mark.parametrize("name", sorted(_PATH_CELLS))
+def test_device_path_cell(name, engine):
+    cell = _PATH_CELLS[name]
+    base = name.split("[")[0]
+    block = _BLOCK_OF.get(name)
+    ported = _NEWTON_PORTED[base] and _BLOCKS_PORTED.get(block, True)
+    try:
+        ta, va, na = _run_path(cell, engine, "legacy")
+    except p.UnsupportedError:
+        pytest.skip(f"{name} is not on {engine} (kind table)")
+    try:
+        ti, vi, ni = _run_path(cell, engine, "interface")
+    except ValueError as e:
+        assert not ported, f"{name} on {engine}: refused but ported: {e}"
+        assert "not on the device interface yet" in str(e)
+        assert base in str(e) or (block is not None and block in str(e)), e
+        return
+    assert ported, f"{name} on {engine}: ran on 'interface' but not ported"
+    span = float(np.max(va) - np.min(va)) or float(np.max(np.abs(va))) or 1.0
+    if engine == "pwl":
+        assert np.array_equal(ta, ti)
+        err = float(np.max(np.abs(vi - va)))
+        # A rounding claim while both paths take the same Newton iterations
+        # (1e-12 measured on macOS; bounded at 1e-9 like the equivalence
+        # gate, another compiler's libm/FMA differs in the last bits); one
+        # iteration apart they differ by up to the Newton tolerance (1e-9
+        # absolute by default; DECISIONS #29).
+        tol = 1e-9 * span if np.array_equal(na, ni) else 1e-8
+        if not np.array_equal(na, ni):   # a stopping difference, not a law one
+            assert na.shape == ni.shape and np.count_nonzero(na != ni) <= max(
+                3, na.size // 100), f"{name}: Newton counts differ widely"
+        assert err <= tol, f"{name}: {err:.3g} vs span {span:.3g}"
+    else:
+        err = float(np.max(np.abs(np.interp(ta, ti, vi) - va)))
+        assert err <= TOL * span, f"{name}: {err:.3g} vs span {span:.3g}"
+
+
+# ---------------------------------------------------------------------
+# The DC column of the machine kinds (add-mna-native-machines 2.7, 3.7):
+# "DC held" — the operating point holds the speed / angle at their
+# initial values and solves the stator with di/dt = 0. At rest the
+# cell's network is linear in closed form: each phase is a Thevenin
+# source v_k(0)·1000/1001 behind 1·1000/1001 Ohm, into R_s to a floating
+# neutral (sum of currents 0). The AC column is `ac_sweep` above.
+# ---------------------------------------------------------------------
+@pytest.mark.parametrize("kind", ["PmsmMna", "InductionMachineMna"])
+def test_machine_dc_held_cell(kind):
+    build, amp = {"PmsmMna": (_pmsm, 12.0),
+                  "InductionMachineMna": (_induction, 40.0)}[kind]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        r = p.simulate(build(True), 1e-5, dt=1e-6, engine="pwl",
+                       start_from_dc_op=True)
+    v = np.array([amp * math.sin(-2.0 * math.pi / 3.0 * i) for i in range(3)])
+    vth, rth = v * 1000.0 / 1001.0, 1000.0 / 1001.0
+    i_ref = (vth - vth.mean()) / (rth + 0.5)
+    got = np.array([float(np.asarray(r.i(f"Md_{x}"))[0]) for x in "abc"])
+    assert np.abs(i_ref).max() > 1.0   # control: a real operating point
+    assert got == pytest.approx(i_ref, abs=1e-9 * np.abs(i_ref).max())
+
+
+def _bldc(on):
+    b = _pmsm(False)
+    if on:
+        b.add_bldc_mna("Md", "ua2", "ub2", "uc2", "nn", "w", "th", R_s=0.5,
+                       L_s=2e-3, k_e=0.2, pole_pairs=4, J=1e-3, B=1e-4)
+    return b
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_pmsm_harmonics_cell(engine):
+    # pmsm_mna[harmonics] (3.7): the BLDC's PM-flux series; same kind,
+    # same table row as the sinusoidal PMSM
+    _check_cell("PmsmMna[harmonics]", (_bldc, "ua2", "Md", 2e-2, 1e-5, False),
+                engine, p.engine_capabilities()["PmsmMna"][engine])
+
+
+def _pmsm_flux_map(on):
+    b = _pmsm(False)
+    if on:
+        # SYNTHETIC saturating, cross-coupled co-energy (test_pmsm_flux_map)
+        g = np.arange(-30.0, 30.5, 2.0)
+        D, Q = np.meshgrid(g, g, indexing="ij")
+        x = np.hypot(D, Q) / 10.0
+        f = 1e-3 * np.tanh(x) / np.where(x == 0.0, 1.0, x) + np.where(x == 0.0, 1e-3, 0.0)
+        fm = p.FluxMapDQ.from_tables(g, g, 0.05 + f * D, 2e-3 * Q + f * Q,
+                                     source="synthetic: conformance")
+        b.add_pmsm_flux_map("Md", "ua2", "ub2", "uc2", "nn", "w", "th",
+                            R_s=0.5, flux_map=fm, pole_pairs=4, J=1e-3,
+                            B=1e-4)
+    return b
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_pmsm_flux_map_cell(engine):
+    # pmsm_mna[flux_map] (3.7): same kind, same table row
+    _check_cell("PmsmMna[flux_map]",
+                (_pmsm_flux_map, "ua2", "Md", 2e-2, 1e-5, False),
+                engine, p.engine_capabilities()["PmsmMna"][engine])
+
+
+def _dc_machine(on):
+    # a 10 V supply through 1 Ohm, a 100 Ohm bleed: the machine's armature
+    # current and back-EMF move the terminal voltage
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "s", "gnd", 10.0)
+    b.add_resistor("Rs", "s", "a", 1.0)
+    b.add_resistor("Rb", "a", "gnd", 100.0)
+    if on:
+        b.add_dc_machine("Md", "a", "gnd", "w", R_a=0.5, L_a=1e-3, K=0.1,
+                         J=1e-5, B=1e-4)
+    return b
+
+
+_DC_MACHINE_KINDS = ("Resistor", "Inductor", "IdealTransformer", "Capacitor")
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_dc_machine_cell(engine):
+    # dc_machine (1.10): a composite of linear kinds, so each engine
+    # column is theirs (dsed runs it, D10)
+    _check_cell("dc_machine", (_dc_machine, "a", "Md", 2e-2, 1e-5, False),
+                engine, _composite_supported(_DC_MACHINE_KINDS, engine))
+
+
+@pytest.mark.parametrize("name", ["dc_machine", "PmsmMna[harmonics]",
+                                  "PmsmMna[flux_map]"])
+def test_machine_ac_sweep_cell(name):
+    # AC column of the machine rows (1.10, 3.7): the DC machine's linear
+    # composite is swept (presence: the machine moves the terminal
+    # impedance); the PMSM rows follow the kind's table entry, refused by
+    # name when unsupported
+    build, node, dev = {"dc_machine": (_dc_machine, "a", "Md"),
+                        "PmsmMna[harmonics]": (_bldc, "ua2", "Md"),
+                        "PmsmMna[flux_map]": (_pmsm_flux_map, "ua2", "Md")}[name]
+    supported = (_composite_supported(_DC_MACHINE_KINDS, "ac_sweep")
+                 if name == "dc_machine"
+                 else p.engine_capabilities()["PmsmMna"]["ac_sweep"])
+
+    def H(on):
+        b = build(on)
+        r = k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e1, 1e2, 1e3], b.node_id_of(node), b.node_id_of(node))
+        return np.asarray(r.H, dtype=complex)
+
+    off = H(False)
+    if not supported:
+        with pytest.raises(p.UnsupportedError) as ei:
+            H(True)
+        assert ei.value.engine == "ac_sweep"
+        assert ei.value.device == dev or ei.value.device.startswith(dev + "_")
+        return
+    on = H(True)
+    assert np.max(np.abs(on - off)) > PRESENCE * np.max(np.abs(on))
+
+
+def test_dc_machine_dc_cell():
+    # DC column: the steady state in closed form, ω = (V_a − R_a·B·ω/K)/K
+    # with V_a from the 1 Ohm / 100 Ohm divider and the armature current
+    b = _dc_machine(True)
+    x = p.compute_dc_op(b, gmin=0.0)
+    # i_a = B·ω/K; v_a = K·ω + R_a·i_a; (10 − v_a)/1 = v_a/100 + i_a
+    K, Ra, B = 0.1, 0.5, 1e-4
+    w = 10.0 / ((1 + 1 / 100) * (K + Ra * B / K) + B / K)
+    assert x[b.node_id_of("w")] == pytest.approx(w, rel=1e-9)
+
+
+# Gate EDGES in the gated cells (add-pwl-igbt-and-thyristor 4.5): a PWM
+# gate on the IGBT clamp, a phase-controlled pulse on the thyristor
+# clamp (latch past the pulse). The schedules declare their edges.
+def _gate_schedule(name, make):
+    def mk(b):
+        try:
+            j = b.switch_index_of(name)
+        except Exception:  # noqa: BLE001 — the presence control's circuit
+            return None
+        return make(j, b.graph.num_switches)
+    return mk
+
+
+def _scr_r(on):
+    # a phase-controlled half-wave rectifier, 10 Ohm: the turn-off at the
+    # voltage zero is continuous, the 60 deg firing edge is the event (a
+    # clamp's turn-off sits on a capacitor transient the reference cannot
+    # converge at a sample instant)
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
+    b.add_resistor("R", "o", "gnd", 10.0)
+    if on:
+        b.add_thyristor("Td", "in", "o", 1e-3, 1e9)
+    return b
+
+
+GATED_EDGE_CELLS = {
+    "GateHeld": (GATED_CELLS["GateHeld"][0], "o", "Qd", 2e-3, 2e-7,
+                 _gate_schedule("Qd", lambda j, n: p.make_pwm_switch_fn(
+                     3e3, 0.37, j, n))),
+    "Latching": (_scr_r, "o", "Td", 2e-3, 2e-7,
+                 _gate_schedule("Td", lambda j, n: p.make_phase_control_fn(
+                     1e3, math.radians(60.0), 1e-4, [j], n))),
+}
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("mode", list(GATED_EDGE_CELLS))
+def test_gated_cell_with_gate_edges(mode, engine):
+    _check_cell(mode + "[gated, edges]", GATED_EDGE_CELLS[mode], engine,
+                k._gated_capabilities()[mode][engine])

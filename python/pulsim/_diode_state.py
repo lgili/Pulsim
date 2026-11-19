@@ -318,6 +318,13 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
     node_v = _views.node_voltage_trace
     rec, why = _views.recorded_switch_states(result, builder)
     bits = _views.switch_bits_by_branch(builder) if rec is not None else {}
+    # The commanded gate per sample (add-pwl-igbt-and-thyristor 2.2): the
+    # missed-turn-on check of a gated device reads it.
+    gates = getattr(result, "gate_states", None) if rec is not None else None
+    if gates is not None:
+        gates = np.asarray(gates, dtype=bool)
+        if gates.shape != np.shape(rec):
+            gates = None
     states_s, rec_s = _views.step_start_states(result, states, rec)
     unsolved = _views.recorded_unsolved(result, n) if rec is not None \
         else np.zeros(n, dtype=bool)
@@ -409,10 +416,15 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
                                                     v <= v_env))
             # A gated device (IGBT, GTO, thyristor) blocks forward
             # voltage while its gate is off: OFF under forward bias is
-            # its law, not a missed turn-on.
+            # its law, not a missed turn-on. With its gate ON it is a
+            # missed turn-on like a diode's; without a gate record, not
+            # judged.
             off_fwd = ~exempt & ~closed & (v - V_on > 1e-3) & (v > 1e-3)
             if "gate" in prm:
-                off_fwd[:] = False
+                if gates is not None and bit is not None:
+                    off_fwd &= gates[:, bit]
+                else:
+                    off_fwd[:] = False
             on_rev = ~exempt & closed & (v - V_f < -1e-3)
             viol = off_fwd | on_rev
             if viol.any():

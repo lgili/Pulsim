@@ -116,3 +116,88 @@ Each entry: question → option taken → why → how to reverse.
     Third-quadrant and T_j checks run on trbdf2 from a seeded gate: on pwl
     the inconsistent start leaves an undamped trapezoidal ring on the drain
     (4.7e-4 V p-p), and TR-BDF2 from an all-zero gate stalls at h_min.
+
+## Session 2026-11-18 (passives + MOSFET leftovers)
+
+18. **Suspected first-order defect at a gate-driven threshold crossing:
+    not reproduced.** → Measured, nothing changed in the engines.
+    `probes/threshold_order.py`: gate driven by a smooth 6 − 6·cos(ωt)
+    (2 MHz) through R_g into C_gs and C_gd (linear, or the VDMOS law),
+    400 V behind 40 Ω; reference scipy Radau at rtol 1e-12 on the same two
+    node equations, error over each engine's OWN samples (interpolating an
+    engine's output between samples adds an O(h²) error of its own, which
+    first made trbdf2 look stuck at 4e-4 V).
+
+    | case | engine | steps | max abs error v_d | order |
+    |---|---|---|---|---|
+    | linear C_gd | pwl dt 250 → 7.8 ps | 1000 → 32000 | 3.3e-2 → 1.2e-4 V | 2.60, 0.28, 1.28, 2.00, 2.00 |
+    | linear C_gd | trbdf2 rtol 1e-3 → 1e-8 | 51 → 1903 | 5.2e-1 → 2.4e-4 V | 2.23, 2.00, 2.21, 2.09, 2.05 (vs steps) |
+    | VDMOS C_gd | pwl dt 250 → 7.8 ps | 1000 → 32000 | 7.1e-4 → 7.1e-7 V | 2.00, 2.00, 2.00, 1.99, 1.98 |
+    | VDMOS C_gd | trbdf2 rtol 1e-3 → 1e-8 | 44 → 1717 | 2.4e-1 → 2.0e-4 V | 1.62, 1.90, 1.86, 2.17, 2.09 (vs steps) |
+
+    The threshold crossing itself (V_GS = V_T near 93 ns) is second order
+    at every dt. The largest error sits at the saturation→triode edge
+    (V_DS = V_GS − V_T near 215 ns): the β blend of width 1/κ = 67 mV is
+    crossed in ~13 ps there, and pwl is pre-asymptotic until dt resolves
+    it (the 0.28 / 1.28 rows), then second order. The laws are C¹ or
+    smoother there (the logistic blends are C∞; vdmos_cgd's C(u) is C⁴ at
+    u = 0, tanh and atan agree to u⁵), so no event location or law change
+    is needed. The double pulse (`p4_dpt` fixture, 5 ns gate ramps) on pwl:
+    E_on changes by 9.4e-11, 9.7e-13, 1.5e-13, 2.5e-14 J per halving from
+    0.4 ns. Pinned: `test_gate_driven_threshold_crossing_is_second_order`
+    (pwl 1.8–2.2 per halving at 250/125/62.5 ps; trbdf2 > 1.5 against its
+    step count between rtol 1e-6 and 1e-8).
+
+19. **Found instead: the Level-1 law was discontinuous at V_DS = 0.**
+    `forward(V_OV, 0) = α(1 − β)·K·V_OV² = L ≠ 0` (the β blend leaks the
+    saturation term at V_DS = 0) and the third quadrant mirrored it, so
+    `i` jumped by `2L` across V_DS = 0: 5.17 mA at V_GS = 3.2 V, 0.40 mA
+    at 3.5 V, 0.87 µA at 4 V (K = 1.43, κ = 15). A ±10 mA sine current
+    through the channel at a fixed gate (`probes/vds_zero_jump.py`)
+    aborted BOTH engines at its zero crossing, at V_GS = 3.2 V and 4 V (a
+    sliding mode at V_DS = 0: no solution exists inside the jump).
+    → Fixed in the third-quadrant branch only: it adds `2·L(V_OV − V_DS/2)`
+    (continuous: 2L at 0; C¹: its V_DS-derivative −L' cancels the
+    mirror's extra ∂F/∂V_OV). L decays like e^{−κ(V_OV + |V_DS|/2)}, so the
+    term is below one ulp of the current wherever the channel is well on
+    or well off, and the V_DS ≥ 0 branch is untouched. Byte compare
+    against the cf1ddb84 build (and again after merging batch 12,
+    against a 7ff35556 build, same outcome): every golden, stateful, engine and
+    power-MOSFET case IDENTICAL except one, `mosl1_trbdf2` (Level-1
+    buck, gate ramp 100 ns), which ABORTED at t = 0 before (Newton stall
+    at node sw, ||dx|| 8e-4) and now runs; it agrees with pwl at
+    dt = 1e-8 to 0.028 V on a 61 V span of v(out), and v(sw) dips to
+    −2.8 mV, the third quadrant this term repairs. After the fix the
+    probe's jump is ≤ 1.7e-14 A (the ±1e-15 V probe offset times g) and
+    both engines run both gate voltages (`probes/vds_zero_jump.py`). C++ test: value and all three AD partials
+    match across ±1 nV at 121 gate voltages from 1 to 7 V.
+    → Left as found (owner decision, it moves every pinned result): the
+    forward law's own leak L at V_DS = 0⁺ (current with zero voltage near
+    threshold; with the fix the zero-current point sits at V_DS ≈ −L/g,
+    −4.6 mV at V_GS = 3.2 V, 1.5e-7 V at 4 V), and the existing negative
+    slope of the law below threshold (−2.2e-5 A per 0.5 mV step at
+    V_GS = 2.85 V, V_DS = −0.1 V before the fix; −2.4e-5 after, at 2.6 V,
+    −0.35 V). The clean fix is a forward law with forward(V_OV, 0) = 0.
+    → Superseded 2026-11-19 (add-unified-device-interface DECISIONS #44):
+    both quadrants now run forward − forward(V_OV, 0)·e^{−κ|V_DS|}, zero at
+    V_DS = 0 and C¹, the forward law's bits where that term is below half
+    an ulp; the `2·L(V_OV − V_DS/2)` term is gone.
+    → Reverse: drop the added term in `MosfetLevel1::current`.
+
+20. **Task 1.6 (charge conservation at 1e-9): met, with the measurement
+    corrected.** DECISIONS 17 attributed the 2.2e-8 residue to the
+    engine's corner steps. It is a leak: `pwl/assemble.hpp` stamps a
+    1e-12 S placeholder from each NonlinearCapacitor node to ground (so
+    the cached factorisation does not fail before Newton stamps), and at
+    400 V over ~22 µs that is 8.8e-15 C = 2.8e-8 of 312 nC. The new test
+    measures the charge with a series 10 nF linear "charge meter" (same
+    rule, same current at every solve, so its C·Δv is the engine's own
+    quadrature of the law's current), with no auto-regularize bleeder (a
+    1 GΩ tie leaks another 2.3e-9) and the placeholder leak at the meter
+    node added to the balance (1e-12 S × ∫v_m dt). Measured (balance /
+    charge moved): pwl 7e-14..4e-12 for all three laws; trbdf2 8.7e-11
+    (table), 1.8e-10 (vdmos_cgd), 5.6e-10 (junction; 2.2e-9 at rtol 1e-7 —
+    grows with step count, cause not found). Bounds 1e-9 (pwl), 2e-9
+    (trbdf2). The placeholder itself is left (removing it changes every
+    result with a nonlinear capacitor); it is a recorded defect: a Coss
+    held at 400 V leaks 4e-10 A.

@@ -100,19 +100,22 @@ def test_each_block_holds_its_device_s_state_at_the_end(engine):
     assert np.array_equal(np.asarray(snap.x), np.asarray(res.states)[-1])
 
 
+@pytest.mark.parametrize("path", ["legacy", "interface"])
 @pytest.mark.parametrize("t_split", [4.2e-5, 5.0e-5, 5.5e-5])
-def test_split_fixed_step_run_is_the_continuous_one_bit_for_bit(t_split):
+def test_split_fixed_step_run_is_the_continuous_one_bit_for_bit(t_split, path):
     """The snapshot carries the grid (origin, index, dt), so the resumed
     run continues the continuous run's time grid and meets every gate
     edge at the same instant. Before, the grid restarted at t_split, the
     sample times moved by ~1e-20 s and the states drifted apart after the
     next edge (8e-12 of scale). Split between edges and exactly on one
     (5e-5 on, 5.5e-5 off)."""
-    full = _pwl(1e-4)
-    first = _pwl(t_split)
+    # On 'interface' too: the Lauritzen and IGBT-tail local charges must
+    # survive the snapshot against the UNINTERRUPTED run, not only a resume.
+    full = _pwl(1e-4, device_path=path)
+    first = _pwl(t_split, device_path=path)
     snap = pickle.loads(pickle.dumps(first.final_snapshot))
     assert snap.grid_dt == 2e-8 and snap.grid_origin == 0.0
-    second = _pwl(1e-4, resume_from=snap)
+    second = _pwl(1e-4, resume_from=snap, device_path=path)
     t_full = np.asarray(full.times)
     i0 = len(np.asarray(first.times)) - 1
     t2 = np.asarray(second.times)
@@ -279,6 +282,8 @@ def test_a_dev_state_without_its_layout_is_refused():
 
 def test_a_newer_pickle_version_is_refused_by_version():
     snap = SolverSnapshot.__new__(SolverSnapshot)
+    with pytest.raises(RuntimeError, match="pickle version 6"):
+        snap.__setstate__(("SolverSnapshot", 6, 0.0))
     with pytest.raises(RuntimeError, match="pickle version 5"):
         snap.__setstate__(("SolverSnapshot", 5, 0.0))
     with pytest.raises(RuntimeError, match="pickle version 3"):
@@ -288,17 +293,11 @@ def test_a_newer_pickle_version_is_refused_by_version():
 
 
 def test_a_version_3_pickle_loads_and_resumes_on_a_restarted_grid():
-    """Version 3 = version 4 without the grid field: it loads, and resumes
+    """Version 3 = version 5 without the grid field: it loads, and resumes
     exactly as the same snapshot without a grid."""
     snap = _pwl(4.2e-5).final_snapshot
     v4 = snap.__getstate__()
-    # 14 fields: version 3's 13 (the controllers'-state marker at 12, batch
-    # 12) + the grid (13). The slice's own 13-field version 4 (grid at 12,
-    # no marker) still loads, grid included.
-    assert v4[1] == 4 and len(v4) == 14 and v4[12] is False
-    v4_13 = SolverSnapshot.__new__(SolverSnapshot)
-    v4_13.__setstate__(tuple(v4[:12]) + (v4[13],))
-    assert v4_13.grid_origin == snap.grid_origin and v4_13._control_state is None
+    assert v4[1] == 5 and len(v4) == 17
     old = SolverSnapshot.__new__(SolverSnapshot)
     old.__setstate__(("SolverSnapshot", 3) + tuple(v4[2:12]))
     assert np.isnan(old.grid_origin) and not old.post_edge_derivatives
@@ -306,3 +305,48 @@ def test_a_version_3_pickle_loads_and_resumes_on_a_restarted_grid():
     a = _pwl(1e-4, resume_from=snap)
     b = _pwl(1e-4, resume_from=old)
     assert np.array_equal(np.asarray(a.states), np.asarray(b.states))
+
+
+@pytest.mark.parametrize("path", ["legacy", "interface"])
+def test_every_pickle_layout_resumes_the_stored_charge_kinds_on_both_paths(path):
+    """Every layout this Pulsim reads (2.0: 10/11/12 fields; version 3:
+    12/13; version 4: 13/14/15; version 5: 17) loads a snapshot holding a Lauritzen
+    diode and an IGBT tail taken on either device path, and resumes on
+    that path exactly as the snapshot it came from (the layouts without a
+    grid as the same snapshot without one)."""
+    snap = _pwl(4.2e-5, device_path=path).final_snapshot
+    assert list(snap.lauritzen_history)[0] != 0.0     # charge really stored
+    assert list(snap.igbt_tail_history)[0] != 0.0
+    v5 = snap.__getstate__()
+    assert v5[1] == 5 and len(v5) == 17
+    old = (snap.t, list(snap.x), list(snap.history), list(snap.diode_on),
+           list(snap.saturable_history), list(snap.coss_history),
+           list(snap.lauritzen_history), list(snap.igbt_tail_history),
+           list(snap.pmsm_history), True, list(snap.stamped_mask),
+           int(snap.restart_steps_left))
+    # version 4's variants around the same core: grid only (13 fields);
+    # marker + grid (14, the PR); grid + marker (+ controller) (14 / 15, the
+    # device interface); marker + grid + controller (15, its last form)
+    core, marker, grid = tuple(v5[2:12]), v5[12], v5[13]
+    v4 = ("SolverSnapshot", 4) + core
+    with_grid = [v4 + (grid,), v4 + (marker, grid), v4 + (grid, marker),
+                 v4 + (grid, marker, None), v4 + (marker, grid, None), v5]
+    no_grid = [("SolverSnapshot", 3) + core,
+               ("SolverSnapshot", 3) + core + (marker,),
+               old, old[:11], old[:10]]
+
+    def resume(s):
+        return np.asarray(_pwl(1e-4, resume_from=s, device_path=path).states)
+
+    def load(state):
+        s = SolverSnapshot.__new__(SolverSnapshot)
+        s.__setstate__(state)
+        return s
+
+    ref = resume(snap)
+    for state in with_grid:
+        assert np.array_equal(resume(load(state)), ref), len(state)
+    snap.grid_origin = float("nan")
+    ref = resume(snap)
+    for state in no_grid:
+        assert np.array_equal(resume(load(state)), ref), len(state)

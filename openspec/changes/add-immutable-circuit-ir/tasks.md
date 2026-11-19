@@ -13,7 +13,7 @@ lands).
 ## 1. Immutable snapshot of the builder
 - [x] 1.1 `core/include/pulsim/ir/circuit.hpp`: ids, `Value` (literal only for now), `Node`, `Device`, `Scope` (root only), `InitialCondition`, `Alias`, `Circuit` handle over shared const data — the root scope is implicit (no `Scope` table until group 8)
 - [x] 1.2 `CircuitBuilder::build()`; `Circuit::lowered()` reproducing `Graph` + `DevicePool` in the builder's insertion order
-- [ ] 1.3 `sim::Simulation` takes `ir::Circuit`; `simulate()` calls `build()`; binding `pulsim.Circuit` — binding and `simulate(circuit)` done; the `Simulation` part waits for 0.1 (maintainer's slice decision, DECISIONS.md)
+- [x] 1.3 `sim::Simulation` takes `ir::Circuit`; `simulate()` calls `build()`; binding `pulsim.Circuit` — binding and `simulate(circuit)` done; `sim::Simulation{ir::Circuit, RunOptions}` and `pulsim.Simulation(circuit, options)` landed with `add-kernel-simulation-object` (it owns a copy; the preflight ties go on its own copy, `test_simulation.cpp` "the caller's circuit is never changed")
 - [x] 1.4 Tests: `components()`, unknown indices, switch order and `initial_state()` equal between the builder and `build().lowered()` for every example and harness circuit
 - [x] 1.5 Oracle: suite and goldens bit-identical; zero-alloc tests green
 - [x] 1.6 Docs: `docs/mental-model.md` (builder → circuit → lowered); stubs

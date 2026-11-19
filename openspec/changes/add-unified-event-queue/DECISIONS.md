@@ -281,3 +281,153 @@ with the step's (t, x), which is the "label" mode. "state" mode samples at
 the state time; when that branch merges, it maps onto `TickPlan::fn`
 reading `info.scheduled_t` against `t`. Both modes must stay bit-identical
 to `FixedStepTicks`, so this needs a golden row each. Pending merge.
+
+## 9. The exact engine on the queue (groups 3 + 7, consumption site)
+
+`dsed/scheduler.hpp`, `PEDSimulator` only (the BDF2 and auto schedulers
+are untouched and refuse ticks: `simulate()` routes a run with controllers
+to the event-driven integrator, an explicit `integrator='bdf2'` is
+refused by name). Functions touched: `simulate()` (queue start, ticks at
+t = 0, the loop-top tick block, the two landing sites), `next_gate_edge_`
+(now reads the queue), `next_time_event_` (the probe horizon also stops
+at the next tick), `next_switch_edge_` (deleted, its poll inlined);
+added `start_time_events_`, `tick_due_`, `run_due_ticks_`, `set_ticks`,
+`tick_counts`.
+
+- **One queue per run**: tick sources (ids 0..n-1 = the plan's j), the
+  gate oracle (`GateEdge`), the source corners (`SourceBreakpoint`).
+- **The oracles are asked at every step, as before.** A cached edge is
+  NOT bit-identical: the three-phase SPWM oracle answers the same edge
+  one ulp apart depending on the query point (vsi_dsed moved by 8.7e-19 s
+  in times, 2e-12 in states with the lazy refresh). So both sources are
+  invalidated before each `next_after`; caching belongs to the unified
+  stepper, which may change sequences. The poll of a gate with no oracle
+  is unchanged.
+- **Ticks land like gate edges**: the step target is
+  `min(t_gate, t_end, next tick)`. At a landing that is an edge, a tick or
+  both, the ticks of that instant run FIRST (D2), then the existing gate
+  event samples the switch function at the right limit (dropped when the
+  mask did not change), so a duty written at a period start already
+  decides that period's rising edge (tested: duty 0 written at the 5th
+  period start keeps the switch OFF from that instant). A tick
+  invalidates the gate source and the RK45 FSAL slope (a driven source
+  may have jumped). Take tolerance: `max(1e-12, 8 eps |t|)`, the
+  engine's `near_time` rule. Ticks run with the full MNA state rebuilt
+  through the current mode (`recover_full`); the step time equals the
+  scheduled instant to that tolerance.
+- **Count rule** as everywhere: instants `t_k < t_end`.
+- **A tick and a diode event at one instant** are ordered by path: on the
+  exact path a diode root located at the very end of the step fires
+  first and the tick runs at the next loop top on the projected state;
+  on the RK45 path a root at the step end is not taken and the tick runs
+  on the pre-event state. Both are one instant; D2 does not order state
+  events against ticks (that is group 11's single selection).
+- A native-adapter rejection with controllers raises the named
+  `step_observer` refusal; `sensitivities=` with controllers is refused
+  (the sensitivity run has no ticks).
+- **t_start != 0 with controllers is refused**: the engine runs its gate
+  in local time from 0, the controller in `simulate()`'s time.
+- Result: the six closed-loop reference circuits were refused on dsed
+  for want of ticks. Now cl_boost_pi 1.3e-6, cl_buck_aggressive_pi
+  3.2e-5, cl_buck_pi 1.8e-5 agree; ll14 / ll15 / ll16 are refused for a
+  Shockley diode (a Newton device the exact engine does not run), which
+  their earlier refusal had hidden. Open-loop dsed byte-identical (buck,
+  buck at dt, VSI, pulse RC, sync buck, opaque gate).
+- Not allocation-free: the exact engine's RK45 step returns vectors per
+  step, so the zero-alloc test is not extended to it; the queue calls
+  themselves allocate nothing after `start`.
+
+## 10. A declared monitor (`Kind::Monitor`)
+
+The TR-BDF2 branch had added no monitor kind (checked:
+`git log origin/feat/core-p2-trbdf2 -- core/include/pulsim/events`), so it
+is added here, appended to the enum so no existing value moves:
+`Kind::Monitor = 5` (`kAllKinds` 0x3F), last at an instant.
+
+- A monitor source is registered with `lands = false`. Engines call it at
+  the first accepted step at or after each instant (`t >= t_k - tol`),
+  with that step's (t, x), and once more after the loop for instants
+  inside the last step, so the count is the controllers' rule,
+  ceil(span / T). It never ends a step, never invalidates the gate,
+  never resets the RK45 slope and is not read by any landing or cap
+  (those read `next_of(Kind::ControlTick)`), so the trajectory is
+  bit-identical to the run without it.
+- `TickPlan::monitor` (per rate, empty = none), `TrBdf2Options::
+  observer_monitors` (trbdf2 consumption sites: the registration and the
+  loop-top tick call), dsed `tick_monitors`. The fixed engine has no
+  landings: a monitor ticks there like any source (unchanged).
+- Python: `pulsim.control.Monitor(fn, period)` passed as `step_observer`;
+  `_control_plan.monitor_flags` tells the engines. Tested bit-identical
+  on pwl, trbdf2 and dsed (times and states), with a control that the
+  same observer undeclared does move the run.
+- A monitor's `t` is the accepted step's time, not its scheduled
+  instant (dense output at the instant is not done); on dsed it runs at
+  the loop top, so at an event instant it sees the post-event state.
+  A step that spans several instants calls each one (`take_due` is
+  repeated until none is due; a 1 us monitor under 20 kHz PWM: 2000
+  calls in 2 ms on trbdf2 and dsed, runs still bit-identical).
+- dsed: ticks force the event-driven (rk45) integrator. For a monitor
+  alone on a diode-free circuit that would change the integrator the run
+  uses, so it is refused unless `integrator='rk45'` is passed.
+
+## 11. Step hooks on the exact engine (event losses task 3.1)
+
+`PEDSimulator::set_hooks(StepHooks*)`: `start` after the t = 0 settle and
+ticks, `accepted(t0, t, x, step_mask)` at both accepted-step sites, with
+the pre-event state (`x_pre_event`) when an event ended the step. So
+`on_commutation` fires at every change of the integrated mask with the
+state before the event, as on pwl and trbdf2 (a zero-time cascade is one
+commutation). Tested against the result's own record (`step_masks`):
+same count and same instants on a PWM buck with a freewheel diode.
+
+## 12. Modulators: the control graph's PWM gate on `CarrierPwm` (group 6)
+
+- `events/modulator.hpp` holds `LatchPolicy`, `DutyRegister`,
+  `CarrierPwm` (moved out of `gate_source.hpp`) and the new `EdgeList`
+  (sorted (t, bit, on) edges; a bit holds its last edge at or before t,
+  OFF before its first; the last edge of an instant wins). It includes
+  only `pwm_phase`, `switch_state` and `sources/pwm_leg.hpp` (the leg
+  thresholds, moved verbatim out of `switch_schedule.hpp`), so the
+  control graph can include it without pulling in the engines.
+- `ChainPwmGate` is a list of `CarrierPwm` legs. Each leg reads a
+  `DutyRegister` the chain owns (`BlockChain::duty_register(slot)`,
+  `std::deque` for stable addresses, Immediate latch). The chain writes
+  every register after each call that can change what a sink sees:
+  `compile`, `run_pass` (both exits), `step`, `set_output`,
+  `set_channel`, `reset`, `restore_state`. So the tick handler writes
+  the register, and the gate reads only the register.
+- Why byte-identical: `CarrierPwm::apply` sets the bit to
+  `!reached(p, d)`, which is `p.u < d - tol` (the old test) for every
+  non-NaN duty; `next_edge` is the same `next_constant_crossing` call on
+  the same duty. Two legs on one bit used to OR; that is now refused
+  ("driven by two legs"), as `GateSet` refuses it. No caller did it.
+- `bind_pi_to_switch` builds its gate through `make_pwm_gate`, so it is
+  on `CarrierPwm` with Immediate latching. The throttle task 6.2 names
+  (`control.py:1350-1355`) no longer exists: the loop is a control graph
+  whose rate group ticks once per period.
+- Python: `pulsim.DutyRegister(value, latch='immediate'|'carrier_start',
+  period, phase)`, `make_carrier_pwm_fn(period, duty, switch_idx,
+  num_switches, low_side=-1, dead_time=0, phase=0)` and
+  `make_edge_list_fn(edges, num_switches)`. Both return a
+  `SwitchSchedule` with edges, so every engine lands them; the carrier
+  one holds its register (shared_ptr) and is `follows_controller`.
+
+## 13. Tick phase in snapshots (resume)
+
+- `SolverSnapshot::tick_origin` / `tick_next_k`: one entry per tick
+  source of the run, in registration order. The origin is the grid's
+  (`Rate::origin`, or the run's t0); next_k is the index of the next
+  instant (`EventQueue::grid_origin`, `next_k`). Filled at the end of a
+  pwl and a trbdf2 run (the final-snapshot sites only).
+- Pickle version 4 = version 3's 13 fields + these two (15 fields).
+  Version 3 (12 or 13 fields) still loads, with no tick phase.
+- `simulate(resume_from=)` passes the origins back when the snapshot has
+  one per tick source of the resumed run: `observer_origins` (trbdf2)
+  and `tick_origins` (pwl Python tick sources). The queue then starts
+  each source at its first instant >= t_start on the old grid, with the
+  old k. trbdf2 no longer refuses a graph resumed between two of its
+  ticks; it still refuses when the snapshot has no usable origins
+  (pickled before version 4, built by hand, or a different number of
+  tick sources, as after a pwl run whose graphs tick themselves).
+- Number change: a plain Python tick source resumed mid-period on pwl
+  used to restart its grid at t_start; it now keeps the run's grid.

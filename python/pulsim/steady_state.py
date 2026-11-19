@@ -280,8 +280,13 @@ def steady_state(builder, *, period: float, dt: float | None = None,
               "(measured: +0.38 A of DC inductor current in the first "
               "period). Settle with a transient run instead, and use "
               "its final_snapshot as the starting point of the next.")
-    base = run_period(base_in)
     h0 = np.asarray(list(base_in.history), dtype=float)
+    # The probes resume from hand-built snapshots, which carry no
+    # step-controller memory; on the variable-step engine the base run
+    # must start the same way or the columns difference two step
+    # sequences (refactor-unified-transient-stepper DECISIONS 8).
+    base = run_period(_snapshot_like(base_in, h0)
+                      if kw.get("engine") == "trbdf2" else base_in)
     c = np.asarray(list(base.final_snapshot.history), dtype=float)
     n = c.size
     if n == 0:

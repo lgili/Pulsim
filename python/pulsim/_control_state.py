@@ -176,7 +176,7 @@ class GraphState:
             if isinstance(saved, str):
                 self.missing.append(saved)
             else:
-                self.parts.append((kind, obj, saved))
+                self.parts.append((kind, name, obj, saved))
 
     def restore(self, obs, why: str) -> None:
         if self.missing:
@@ -187,7 +187,7 @@ class GraphState:
                 "in separate processes, or give the block a capturable "
                 "state.")
         _cxx(obs).restore_state(self.cxx_state)
-        for kind, obj, saved in self.parts:
+        for kind, _name, obj, saved in self.parts:
             _restore_part(kind, obj, saved)
 
 
@@ -200,6 +200,9 @@ def start_run(plan, snapshot) -> list:
         return graphs
     payload = None if snapshot is None else getattr(
         snapshot, "_control_state", None)
+    if _portable(payload):
+        _restore_pickled(graphs, payload[2])
+        return graphs
     if isinstance(payload, str):
         raise unsupported(
             "resume_from", _FEATURE,
@@ -211,6 +214,9 @@ def start_run(plan, snapshot) -> list:
     saved = {} if payload is None else {id(c): (c, s) for c, s in payload}
     for obs in graphs:
         cxx = _cxx(obs)
+        if snapshot is None:
+            # only a resume serves the tick its snapshot's run left out
+            cxx.drop_horizon_state()
         if snapshot is not None and saved:
             hit = saved.get(id(cxx))
             if hit is None or hit[0] is not cxx:
@@ -246,6 +252,66 @@ def start_run(plan, snapshot) -> list:
         else:
             s0[1].restore(obs, "sweep")
     return graphs
+
+
+_TAG = "pulsim.controllers"
+
+
+def _portable(payload) -> bool:
+    return isinstance(payload, tuple) and payload[:2] == (_TAG, 1)
+
+
+def pickle_payload(value):
+    """Field 12 of a pickled snapshot: the controllers' state as bytes
+    (each graph's kernel part by ``CxxBlockChain.dump_state``, its
+    Python-held parts as they are) when every part pickles, else True (a
+    resume from the copy refuses by name). Read back on the machine that
+    wrote it."""
+    if _portable(value):
+        return value
+    if isinstance(value, str):
+        return True
+    import pickle
+    try:
+        graphs = []
+        for cxx, gs in value:
+            if gs.missing:
+                return True
+            graphs.append((cxx.dump_state(gs.cxx_state),
+                           [(kind, name, saved) for kind, name, _o, saved in gs.parts]))
+        payload = (_TAG, 1, graphs)
+        pickle.dumps(payload)
+    except Exception:  # noqa: BLE001 - a part that does not pickle: the marker
+        return True
+    return payload
+
+
+def _restore_pickled(graphs, entries) -> None:
+    """A pickled snapshot's controllers into this run's graphs, matched by
+    position (the run's graph order) and checked by structure."""
+    def other(why):
+        return unsupported(
+            "resume_from", _FEATURE,
+            "simulate(resume_from=...): the pickled snapshot holds the state "
+            f"of other controllers than this run's ({why}); resume with "
+            "controllers built the same way as the run that wrote it.")
+    if len(entries) != len(graphs):
+        raise other(f"{len(entries)} control graphs saved, {len(graphs)} in this run")
+    states = []
+    for obs, (data, parts) in zip(graphs, entries):
+        cxx = _cxx(obs)
+        try:
+            state = cxx.load_state(data)
+        except ValueError as exc:
+            raise other(str(exc)) from None
+        held = {(k, n): o for k, n, o in _block_parts(getattr(obs, "_graph", None))}
+        if set(held) != {(k, n) for k, n, _s in parts}:
+            raise other("their Python-held blocks differ")
+        states.append((cxx, state, [(k, held[(k, n)], saved) for k, n, saved in parts]))
+    for cxx, state, parts in states:          # all checked: now restore
+        cxx.restore_state(state)
+        for kind, obj, saved in parts:
+            _restore_part(kind, obj, saved)
 
 
 def save_into(graphs, res) -> None:

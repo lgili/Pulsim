@@ -32,7 +32,7 @@ Reference values.
 ## 4. Parameters on the AD scalar (needs `add-unified-device-interface`)
 - [ ] 4.1 `Params<S>` for every device; parameter seeding helpers in `ad/ad_scalar.hpp`
 - [ ] 4.2 Per-device unit tests: `∂f/∂p`, `∂q/∂p` by AD against a central difference of the law within 1e-8 relative, for every parameter of every device kind
-- [ ] 4.3 Test: `Params<Real>` build is bit-identical on the golden hashes; `static_assert` on layout
+- [x] 4.3 Test: `Params<Real>` build is bit-identical — for the four static kinds (memcmp against the model's own `Params`, `test_device_laws.cpp`; the default path never instantiates a law, so the golden hashes do not show it; the junction Coss law is a few ulp by design, DECISIONS #27); `static_assert` on layout (`laws::kLawLayout`; add-unified-device-interface DECISIONS #33, #35)
 
 ## 5. Recurrence in the stepper (needs `refactor-unified-transient-stepper`)
 - [ ] 5.1 Stage recurrence of D1 for backward Euler, trapezoidal, TR-BDF2 (and ESDIRK when present); history of `dq/dp`

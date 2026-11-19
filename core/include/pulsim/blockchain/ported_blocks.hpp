@@ -37,6 +37,7 @@ struct DelayBlock {
     Size samples = 1;
     Real initial_value = Real{0};
     std::deque<Real> buf;
+    template <class F> void fields(F&& f) { f(samples); f(initial_value); f(buf); }
 
     void reset() { buf.assign(samples, initial_value); }
 
@@ -117,6 +118,7 @@ struct PyTransferFunction {
     std::vector<Real> num, den;
     std::vector<Real> xh, yh;   // newest first; capacity num / max(1, den)
     int nx = 0, ny = 0;
+    template <class F> void fields(F&& f) { f(num); f(den); f(xh); f(yh); f(nx); f(ny); }
     void reset() { nx = 0; ny = 0; }
     Real update(Real x) {
         xh.resize(num.size());
@@ -150,6 +152,7 @@ struct PyOpAmp {
 /// `pulsim.control.LookupTable1D`.
 struct PyLookupTable1D {
     std::vector<Real> xs, ys;
+    template <class F> void fields(F&& f) { f(xs); f(ys); }
     Real update(Real x) const {
         return pl_lookup_1d(xs.data(), ys.data(), static_cast<int>(xs.size()), x);
     }

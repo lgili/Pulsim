@@ -50,6 +50,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     SwitchSchedule,
     UnsupportedError,
 )
+from ._pulsim import run_option_defaults as _run_option_defaults  # type: ignore[import-not-found]
 from ._refusal import _UnsupportedNotImplemented, unsupported
 
 
@@ -61,6 +62,8 @@ from ._refusal import _UnsupportedNotImplemented, unsupported
 # detector's DOPRI5/BDF2 choice; rk45/bdf2 = force one integrator for
 # ALL modes (rk45 still takes the exact stepper where it exists).
 IntegratorChoice = Literal["auto", "rk45", "bdf2"]
+
+_DEFAULTS = _run_option_defaults()
 
 
 # =============================================================================
@@ -76,13 +79,14 @@ class DSEDOptions:
     through :func:`_resolve_dsed_options` which produces one of these.
     The scheduler downstream reads ONLY this struct.
     """
-    rtol: float = 1e-6
-    atol: float = 1e-9
-    dt_max: float = 1e-5
-    dt_init: float = 1e-9
+    # Defaults: sim::Defaults (the one table, add-kernel-simulation-object).
+    rtol: float = _DEFAULTS["rtol_exact"]
+    atol: float = _DEFAULTS["atol_exact"]
+    dt_max: float = _DEFAULTS["dt_max_exact"]
+    dt_init: float = _DEFAULTS["dt_init_exact"]
     integrator: IntegratorChoice = "auto"
-    stiffness_threshold: float = 10.0
-    h_bdf2: float = 1e-6
+    stiffness_threshold: float = _DEFAULTS["stiffness_threshold"]
+    h_bdf2: float = _DEFAULTS["h_bdf2"]
     store_every: int = 1
     t_start: float = 0.0
     switch_fn: Optional[Callable[[float], Any]] = None
@@ -144,25 +148,10 @@ def _validate_engine_kwargs(
                 "switch to `engine='dsed'` for variable-step (no dt "
                 "needed)."
             )
-        leaked = {
-            name: val for name, val in (
-                ("rtol", rtol), ("atol", atol),
-                ("dt_init", dt_init),
-                ("integrator", integrator),
-                ("stiffness_threshold", stiffness_threshold),
-                ("h_bdf2", h_bdf2),
-            )
-            if val is not None
-        }
-        if leaked:
-            warnings.warn(
-                f"simulate(engine='pwl'): the following kwargs are "
-                f"ignored by the fixed-step engine: "
-                f"{sorted(leaked.keys())}. Either remove them or "
-                f"switch to engine='dsed'.",
-                UserWarning,
-                stacklevel=3,
-            )
+        # Options this engine does not honour (rtol, atol, dt_init,
+        # integrator, ...) are refused by simulate() from the option x
+        # engine table once the run's engine is known; they used to be a
+        # warning here, and then ignored.
         return
 
     # --- engine='auto' / 'trbdf2' branch. 'auto' ROUTES (to the
@@ -191,22 +180,6 @@ def _validate_engine_kwargs(
                 f"simulate(engine={engine!r}): dt_init must be "
                 f"positive, "
                 f"got {dt_init!r}")
-        leaked = {
-            name: val for name, val in (
-                ("integrator", integrator),
-                ("stiffness_threshold", stiffness_threshold),
-                ("h_bdf2", h_bdf2),
-            )
-            if val is not None
-        }
-        if leaked:
-            warnings.warn(
-                f"simulate(engine={engine!r}): the following kwargs "
-                "belong to the dsed engine and are ignored here: "
-                f"{sorted(leaked.keys())}.",
-                UserWarning,
-                stacklevel=3,
-            )
         return
 
     # --- engine='dsed' branch ---
@@ -279,7 +252,7 @@ def _resolve_dsed_options(
     Validation must be called FIRST — this function assumes its
     inputs are sane.
     """
-    dt_max = dt if (dt is not None and dt > 0) else 1e-5
+    dt_max = dt if (dt is not None and dt > 0) else _DEFAULTS["dt_max_exact"]
 
     # integrator was already validated to be in _VALID_INTEGRATORS;
     # cast for the type checker.
@@ -289,15 +262,16 @@ def _resolve_dsed_options(
     )
 
     return DSEDOptions(
-        rtol=rtol if rtol is not None else 1e-6,
-        atol=atol if atol is not None else 1e-9,
+        rtol=rtol if rtol is not None else _DEFAULTS["rtol_exact"],
+        atol=atol if atol is not None else _DEFAULTS["atol_exact"],
         dt_max=dt_max,
-        dt_init=dt_init if dt_init is not None else 1e-9,
+        dt_init=dt_init if dt_init is not None else _DEFAULTS["dt_init_exact"],
         integrator=resolved_integrator,
         stiffness_threshold=(
-            stiffness_threshold if stiffness_threshold is not None else 10.0
+            stiffness_threshold if stiffness_threshold is not None
+            else _DEFAULTS["stiffness_threshold"]
         ),
-        h_bdf2=h_bdf2 if h_bdf2 is not None else 1e-6,
+        h_bdf2=h_bdf2 if h_bdf2 is not None else _DEFAULTS["h_bdf2"],
         store_every=store_every,
         t_start=t_start,
         switch_fn=switch_fn,
@@ -340,29 +314,41 @@ _BRIDGE_FALLBACK_MESSAGE = (
 )
 
 
-class _PEDSimulationResult:
-    """Duck-typed mimic of :class:`pulsim.SimulationResult` populated
-    by the PED scheduler.
+def _exact_result(
+    times,
+    states,
+    *,
+    states_full=None,
+    switch_states=None,
+    right_limit_index=None,
+    right_limit_states=None,
+    right_limit_switch_states=None,
+    reinit_records=(),
+    n_accept: int = 0,
+    n_reject: int = 0,
+    n_events: int = 0,
+    n_rk45_steps: int = 0,
+    n_bdf2_steps: int = 0,
+    n_exact_steps: int = 0,
+    cpu_time_seconds: float = 0.0,
+):
+    """The exact engine's run as a :class:`pulsim.SimulationResult`
+    (add-probes-and-recorders D3: one result type on every engine).
 
-    Pulsim's C++ ``SimulationResult`` has read-only pybind11 properties
-    (``def_readonly``), so we can't construct one from Python and
-    populate its fields. This wrapper provides the SAME public
-    interface (``times``, ``states``, ``num_steps()``, ``empty()``)
-    so downstream code that consumes ``simulate(...)`` results works
-    regardless of whether the engine was ``pwl`` or ``dsed``.
+    ``times``, ``states``, ``switch_states`` and ``reinit_records`` are
+    the kernel result's own fields. ``states`` is the reconstructed
+    full-MNA trajectory (node voltages, then source and inductor branch
+    currents: the pwl engine's row layout) when the kernel returned one,
+    else the reduced integrator state. The exact-engine extras are
+    attributes of the instance:
 
-    The PED-specific fields are exposed as additional attributes:
-
-    * ``n_accept`` / ``n_reject`` — PI controller accept/reject counts
-    * ``n_events`` — number of mask transitions fired
-    * ``n_rk45_steps`` / ``n_bdf2_steps`` / ``n_exact_steps`` —
-      per-integrator step counts (``n_exact_steps``: closed-form LTI
-      propagator)
-      (only populated when ``integrator='auto'`` was selected)
-    * ``cpu_time_seconds`` — wall-clock from the PED scheduler
-    * ``event_iteration_count`` / ``commutation_events`` — empty lists
-      (PED uses a different event model)
-    * ``switch_states`` — the per-sample mode mask, ``(n, n_switches)``
+    * ``states_reduced`` / ``has_full_states`` -- the reduced integrator
+      state, and whether ``states`` is the full MNA vector;
+    * ``n_accept`` / ``n_reject`` / ``n_events`` / ``n_rk45_steps`` /
+      ``n_bdf2_steps`` / ``n_exact_steps`` / ``cpu_time_seconds`` --
+      read-only properties over ``res.stats`` (exact-engine results
+      only);
+    * ``switch_states`` -- the per-sample mode mask, ``(n, n_switches)``
       bool, the same record the pwl / trbdf2 engines carry. Each full
       MNA sample is reconstructed THROUGH that sample's mask, so a
       switched branch's current is exactly ``g(bit) · v`` there.
@@ -370,7 +356,7 @@ class _PEDSimulationResult:
       voltages to apply it to) or no typed mask (the Python-adapter
       path, which never carries PWL diodes).
     * ``right_limit_index`` / ``right_limit_states`` /
-      ``right_limit_switch_states`` — at every sample where an event
+      ``right_limit_switch_states`` -- at every sample where an event
       fired, the RIGHT limit: the full MNA state and the mask the next
       step starts from (the post-event state rebuilt through the
       post-event mask). The sample itself is the LEFT limit, the state
@@ -382,122 +368,68 @@ class _PEDSimulationResult:
       0.0234 A against 0.0535 A. Empty when no event fired, ``None``
       when ``switch_states`` is ``None``.
     """
-
-    def __init__(
-        self,
-        times: list,
-        states: list,
-        *,
-        states_full=None,
-        switch_states=None,
-        right_limit_index=None,
-        right_limit_states=None,
-        right_limit_switch_states=None,
-        n_accept: int = 0,
-        n_reject: int = 0,
-        n_events: int = 0,
-        n_rk45_steps: int = 0,
-        n_bdf2_steps: int = 0,
-        n_exact_steps: int = 0,
-        cpu_time_seconds: float = 0.0,
-    ) -> None:
-        self.times = times
-        # v2.0 Phase 3 item 5 — THE UNIFIED RESULT. When the kernel
-        # hands back the reconstructed full-MNA trajectory (node
-        # voltages, then source and inductor branch currents — the
-        # pwl engine's exact row layout), `.states` IS that, so
-        # `res.states[:, node_id]`, `res.v('name')` and
-        # `res.i('name')` mean the same thing on both engines. The
-        # reduced integrator state stays available as
-        # `.states_reduced` for anyone studying the modes
-        # themselves. Read-only either way: a result is an output,
-        # not a scratch pad.
-        arr = _np.asarray(states, dtype=float)
-        if arr.ndim == 1:
-            arr = arr.reshape(len(times), -1) if times else arr.reshape(0, 0)
-        arr.setflags(write=False)
-        full = None
-        if states_full is not None:
-            full = _np.asarray(states_full, dtype=float)
-            if full.size == 0 or full.ndim != 2                     or full.shape[0] != len(times):
-                full = None
-            else:
-                full.setflags(write=False)
-        self.states_reduced = arr
-        self.states = full if full is not None else arr
-        self.has_full_states = full is not None
-        self.n_accept = n_accept
-        self.n_reject = n_reject
-        self.n_events = n_events
-        self.n_rk45_steps = n_rk45_steps
-        self.n_bdf2_steps = n_bdf2_steps
-        self.n_exact_steps = n_exact_steps
-        self.cpu_time_seconds = cpu_time_seconds
-        # add-exact-propagator-strategy D10: per visited mask the
-        # propagator tier (1 eig, 2 Pade, 3 none), kappa2 and the reason
-        # for any tier but 1, plus n_eig / n_pade / n_phi_cache_hits /
-        # n_predicate_evals. Event instants and predicate types as
-        # arrays. Set by the native builder path; None elsewhere.
-        self.exact = None
-        self.initial_condition_adjustment = None
-        self.event_times = None
-        self.event_types = None
-        # PWL-engine diagnostic fields — empty for PED, but exposed
-        # for API-compat with code that destructures both result types.
-        self.event_iteration_count: list = []
-        self.commutation_events: list = []
-        sw = None
-        if switch_states is not None and full is not None:
-            sw = _np.asarray(switch_states, dtype=bool)
-            if sw.ndim != 2 or sw.shape[0] != len(times):
-                sw = None
-            else:
-                sw.setflags(write=False)
-        self.switch_states = sw
-        self.switch_states_unsolved = (
-            _np.zeros(len(times), dtype=bool) if sw is not None else None)
-        rl_idx = rl_states = rl_sw = None
-        if sw is not None and right_limit_index is not None:
-            rl_idx = _np.asarray(right_limit_index, dtype=_np.int64)
-            rl_states = _np.asarray(right_limit_states, dtype=float)
-            rl_sw = _np.asarray(right_limit_switch_states, dtype=bool)
-            if rl_idx.size == 0:
-                rl_states = _np.zeros((0, full.shape[1]))
-                rl_sw = _np.zeros((0, sw.shape[1]), dtype=bool)
-            ok = (rl_idx.ndim == 1
-                  and rl_states.shape == (rl_idx.size, full.shape[1])
-                  and rl_sw.shape == (rl_idx.size, sw.shape[1])
-                  and (rl_idx.size == 0
-                       or (rl_idx.min() >= 0
-                           and rl_idx.max() < len(times)
-                           and _np.all(_np.diff(rl_idx) > 0))))
-            if ok:
-                for a in (rl_idx, rl_states, rl_sw):
-                    a.setflags(write=False)
-            else:
-                rl_idx = rl_states = rl_sw = None
-        self.right_limit_index = rl_idx
-        self.right_limit_states = rl_states
-        self.right_limit_switch_states = rl_sw
-
-    @property
-    def states_bytes(self) -> int:
-        """Bytes held by the sample buffer (parity with the PWL
-        engine's ``SimulationResult.states_bytes``)."""
-        return int(self.states.nbytes)
-
-    def num_steps(self) -> int:
-        return len(self.times)
-
-    def empty(self) -> bool:
-        return len(self.times) == 0
-
-    def __repr__(self) -> str:
-        return (
-            f"_PEDSimulationResult(n_steps={len(self.times)}, "
-            f"n_accept={self.n_accept}, n_events={self.n_events}, "
-            f"cpu={self.cpu_time_seconds * 1e3:.2f}ms)"
-        )
+    from ._pulsim import GridKind, SimulationResult  # type: ignore[import-not-found]
+    t_arr = _np.asarray(times, dtype=float).reshape(-1)
+    arr = _np.asarray(states, dtype=float)
+    if arr.ndim == 1:
+        arr = arr.reshape(len(t_arr), -1) if len(t_arr) else arr.reshape(0, 0)
+    arr.setflags(write=False)
+    full = None
+    if states_full is not None:
+        full = _np.asarray(states_full, dtype=float)
+        if full.size == 0 or full.ndim != 2 or full.shape[0] != len(t_arr):
+            full = None
+        else:
+            full.setflags(write=False)
+    sw = None
+    if switch_states is not None and full is not None:
+        sw = _np.asarray(switch_states, dtype=bool)
+        if sw.ndim != 2 or sw.shape[0] != len(t_arr):
+            sw = None
+    res = SimulationResult()
+    res._adapter_fill(t_arr, full if full is not None else arr, sw,
+                      list(reinit_records))
+    res._set_run_info("dsed", GridKind.Accepted, {
+        "n_steps": int(n_accept), "n_accept": int(n_accept),
+        "n_reject": int(n_reject), "n_mode_events": int(n_events),
+        "n_rk45_steps": int(n_rk45_steps), "n_bdf2_steps": int(n_bdf2_steps),
+        "n_exact_steps": int(n_exact_steps),
+        "cpu_time_seconds": float(cpu_time_seconds)})
+    res.states_reduced = arr
+    res.has_full_states = full is not None
+    # add-exact-propagator-strategy D10: per visited mask the
+    # propagator tier (1 eig, 2 Pade, 3 none), kappa2 and the reason
+    # for any tier but 1, plus n_eig / n_pade / n_phi_cache_hits /
+    # n_predicate_evals. Event instants and predicate types as
+    # arrays. Set by the native builder path; None elsewhere.
+    res.exact = None
+    res.initial_condition_adjustment = None
+    res.event_times = None
+    res.event_types = None
+    rl_idx = rl_states = rl_sw = None
+    if sw is not None and right_limit_index is not None:
+        rl_idx = _np.asarray(right_limit_index, dtype=_np.int64)
+        rl_states = _np.asarray(right_limit_states, dtype=float)
+        rl_sw = _np.asarray(right_limit_switch_states, dtype=bool)
+        if rl_idx.size == 0:
+            rl_states = _np.zeros((0, full.shape[1]))
+            rl_sw = _np.zeros((0, sw.shape[1]), dtype=bool)
+        ok = (rl_idx.ndim == 1
+              and rl_states.shape == (rl_idx.size, full.shape[1])
+              and rl_sw.shape == (rl_idx.size, sw.shape[1])
+              and (rl_idx.size == 0
+                   or (rl_idx.min() >= 0
+                       and rl_idx.max() < len(t_arr)
+                       and _np.all(_np.diff(rl_idx) > 0))))
+        if ok:
+            for a in (rl_idx, rl_states, rl_sw):
+                a.setflags(write=False)
+        else:
+            rl_idx = rl_states = rl_sw = None
+    res.right_limit_index = rl_idx
+    res.right_limit_states = rl_states
+    res.right_limit_switch_states = rl_sw
+    return res
 
 
 def _result_from_native(native_res, t_start: float):
@@ -505,8 +437,8 @@ def _result_from_native(native_res, t_start: float):
     import numpy as np
     # One array conversion, not one per sample.
     times = (np.asarray(native_res["times"], dtype=float)
-             + float(t_start)).tolist()
-    res = _PEDSimulationResult(
+             + float(t_start))
+    res = _exact_result(
         times=times,
         states=native_res["states"],
         states_full=native_res.get("states_full"),
@@ -515,6 +447,7 @@ def _result_from_native(native_res, t_start: float):
         right_limit_states=native_res.get("right_limit_states"),
         right_limit_switch_states=native_res.get(
             "right_limit_switch_states"),
+        reinit_records=native_res.get("reinit_records", []),
         n_accept=native_res.get("n_accept", 0),
         n_reject=native_res.get("n_reject", 0),
         n_events=native_res.get("n_events", 0),
@@ -541,13 +474,8 @@ def _result_from_native(native_res, t_start: float):
     for key in ("mode_shadow", "mode_selection", "mode_guard"):
         if key in native_res:
             res.diagnostics[key] = native_res[key]
-    # dependent states: the impulsive re-initialisations at mode entry,
-    # with the fixed engine's ReinitRecord fields (lambda as lambda_)
-    from types import SimpleNamespace
-    res.reinit_records = [
-        SimpleNamespace(**{("lambda_" if k == "lambda" else k): v
-                           for k, v in r.items()})
-        for r in native_res.get("reinit_records", [])]
+    # dependent states: the impulsive re-initialisations at mode entry
+    # are the result's own `reinit_records` (filled by _exact_result)
     return res
 
 
@@ -612,8 +540,15 @@ def run_dsed_from_builder(
     builder_initial_state: Optional[Any] = None,
     mode_selection: Optional[str] = None,
     allow_implicit_segments: bool = True,
+    ticks: Optional[Any] = None,
 ):
     """Run a PED simulation from a :class:`pulsim.CircuitBuilder`.
+
+    ``ticks`` (``[(fn, period, offset), ...]``): control ticks scheduled
+    by the event-driven integrator's event queue, ``fn(t, x_full)`` at
+    every ``offset + k*period`` before ``t_end`` (add-unified-event-queue
+    group 3). They need the native adapter and the event-driven
+    integrator; anything else refuses them by name.
 
     ``builder_initial_state`` (not None) says the builder declared
     ``c0=`` / ``i0=`` / ``set_initial`` values; they are mapped per
@@ -647,6 +582,7 @@ def run_dsed_from_builder(
     ``opts.integrator``, and the NotImplementedError disappears.
     """
     import numpy as np
+    mode_auto = None   # mode_selection='auto' resolved: its record
 
     # ------------------------------------------------------------------
     # v2.0 Phase 3 — structural refusal, BEFORE any work happens.
@@ -699,6 +635,23 @@ def run_dsed_from_builder(
     # with every Newton device silently ABSENT). The native adapter
     # repeats the check for C++ callers.
     _kern._require_supported(builder.graph, builder.pool, "dsed")
+    ticks = list(ticks or [])
+    if ticks:
+        if integrator not in (None, "auto", "rk45"):
+            raise unsupported(
+                "dsed", "step_observer", message=
+                f"simulate(engine='dsed', integrator={integrator!r}): control "
+                "ticks run on the event-driven integrator only. Drop integrator.")
+        monitors_only = all(getattr(f, "_pulsim_monitor", False) for f, _p, _o in ticks)
+        if monitors_only and _n_diodes == 0 and integrator != "rk45":
+            # routing to rk45 would change the run the Monitor promises not to touch
+            raise unsupported(
+                "dsed", "step_observer", message=
+                "simulate(engine='dsed') with a Monitor: monitors run on the "
+                "event-driven integrator, and this circuit would otherwise run "
+                "on the 'auto' one, so the Monitor would change the run. Pass "
+                "integrator='rk45' (then the run is the same with or without it).")
+        integrator = "rk45"
 
     opts = _resolve_dsed_options(
         dt=dt,
@@ -912,6 +865,15 @@ def run_dsed_from_builder(
                 x0, ic_adjustment = native_adapter.reduced_initial_state(
                     builder)
             shadow_kw = {}
+            if mode_selection == "auto":
+                # 'lcp' where it applies (diodes), else the settle. A diode
+                # circuit always reaches here on rk45: 'auto' became 'rk45'
+                # and 'bdf2' was refused above (the census of _n_diodes).
+                from . import _mode_auto_record
+                if _n_diodes == 0:
+                    mode_selection, mode_auto = _mode_auto_record(None, "no_diodes")
+                else:
+                    mode_selection, mode_auto = _mode_auto_record("lcp", None)
             if mode_selection in ("shadow", "lcp") and (
                     opts.integrator != "rk45" or _n_diodes == 0):
                 raise unsupported(
@@ -936,7 +898,14 @@ def run_dsed_from_builder(
                     rtol=opts.rtol, atol=opts.atol,
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
                     store_every=opts.store_every, event_log=False,
-                    settle_round_cap=SETTLE_ROUND_CAP, diode_law_rel=DIODE_LAW_REL, **shadow_kw)
+                    settle_round_cap=SETTLE_ROUND_CAP, diode_law_rel=DIODE_LAW_REL,
+                    **shadow_kw,
+                    **({"tick_fns": [f for f, _p, _o in ticks],
+                        "tick_periods": [float(p) for _f, p, _o in ticks],
+                        "tick_offsets": [float(o) for _f, _p, o in ticks],
+                        "tick_monitors": [bool(getattr(f, "_pulsim_monitor", False))
+                                          for f, _p, _o in ticks]}
+                       if ticks else {}))
             elif opts.integrator == "bdf2":
                 native_res = run_bdf2_b11(
                     native_adapter, sf, x0, t_window,
@@ -952,6 +921,10 @@ def run_dsed_from_builder(
                     store_every=opts.store_every, event_log=False)
             res = _result_from_native(native_res, opts.t_start)
             res.initial_condition_adjustment = ic_adjustment
+            res.control_tick_counts = [int(n) for n in native_res.get(
+                "control_tick_counts", ())]
+            if mode_auto is not None:
+                res.diagnostics["mode_selection_auto"] = mode_auto
             return res
         except (UnsupportedError, _InconsistentInitialState, ConvergenceError):
             # A refusal is an answer, not a reason to try the next
@@ -960,7 +933,7 @@ def run_dsed_from_builder(
             # (the next bridge would re-run it without the refusal of
             # implicit segments).
             raise
-        except (RuntimeError, ValueError):
+        except (RuntimeError, ValueError) as e:
             # Bridge.11 native adapter rejected the circuit (e.g. nonlinear
             # device that the C++ extractor can't handle). Silently fall
             # through to Bridge.10 — the Python adapter has identical
@@ -976,10 +949,22 @@ def run_dsed_from_builder(
             # run it numerically (an untyped kernel error mid-run, e.g. a
             # root finder that did not converge, would come back as a
             # silent numeric run; integration batch 9 review).
+            if ticks:
+                raise unsupported(
+                    "dsed", "step_observer", message=
+                    "simulate(engine='dsed'): control ticks run on the native "
+                    f"adapter only, which rejected this circuit ({e}). Use "
+                    "engine='pwl' or 'trbdf2'.") from e
             if _n_diodes > 0 or (not adapter_rejected and not allow_implicit_segments
                                  and opts.integrator != "bdf2"):
                 raise
 
+    if ticks:
+        raise unsupported(
+            "dsed", "step_observer", message=
+            "simulate(engine='dsed'): control ticks run on the native adapter "
+            "only, which is not available for this circuit. Use engine='pwl' "
+            "or 'trbdf2'.")
     if full_x0 is not None and ambiguous:
         x0 = full_x0          # the non-native bridges read it as reduced, as before
     elif full_x0 is not None:
@@ -987,6 +972,10 @@ def run_dsed_from_builder(
             f"simulate(engine='dsed'): initial_state has shape {full_x0.shape}, "
             f"expected ({n_state},); a full-MNA vector is accepted only on the "
             "native adapter.")
+    if mode_selection == "auto":
+        from . import _mode_auto_record
+        mode_selection, mode_auto = _mode_auto_record(
+            None, "no_diodes")  # only reached without diodes (re-raised above)
     if mode_selection in ("shadow", "lcp"):
         raise unsupported(
             "dsed", "mode_selection", message=
@@ -1045,7 +1034,7 @@ def run_dsed_from_builder(
         times = [float(t) + float(opts.t_start) for t in times_arr]
         states = [np.asarray(states_arr[i], dtype=float)
                   for i in range(len(times))]
-        return _PEDSimulationResult(
+        out = _exact_result(
             times=times,
             states=states,
             n_accept=native_res.get("n_accept", 0),
@@ -1056,6 +1045,9 @@ def run_dsed_from_builder(
             n_exact_steps=native_res.get("n_exact_steps", 0),
             cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
         )
+        if mode_auto is not None:
+            out.diagnostics = {"mode_selection_auto": mode_auto}
+        return out
 
     # ---- No fallback. ----
     # The Bridge.11 native-builder path and the Bridge.10

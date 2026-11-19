@@ -71,15 +71,41 @@ def err_rms(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = 
     span = max(float(r.max() - r.min()), abs_scale)
     if span <= 0.0:
         raise ValueError("flat reference: give abs_scale > 0")
-    d2 = (a - r) ** 2
+    return _rms(g, (a - r) ** 2, exclude) / span
+
+
+def _rms(g, d2, exclude):
+    """sqrt of the time mean of ``d2`` on ``g``, ``exclude`` intervals left out."""
     if not len(exclude):
-        return float(np.sqrt(np.trapezoid(d2, g) / (g[-1] - g[0])) / span)
+        return float(np.sqrt(np.trapezoid(d2, g) / (g[-1] - g[0])))
     seg = np.diff(g) * 0.5 * (d2[1:] + d2[:-1])
     keep = ~_inside(0.5 * (g[1:] + g[:-1]), exclude)
     window = float(np.diff(g)[keep].sum())
     if window <= 0.0:
         raise ValueError("every interval excluded")
-    return float(np.sqrt(seg[keep].sum() / window) / span)
+    return float(np.sqrt(seg[keep].sum() / window))
+
+
+def err_rms_symmetric(a: tuple, b: tuple, *, abs_scale: float = 0.0, exclude=()) -> float:
+    """:func:`err_rms` with neither trace the reference, for a DIAGNOSTIC:
+    ``err_rms_symmetric(a, b) == err_rms_symmetric(b, a)`` bit for bit.
+
+    ``a``, ``b`` are ``(t, y)`` traces. Both lose their initial sample(s) (the
+    stored initial state of pwl / trbdf2, not the t = 0+ solution: kept on one
+    side only, it was interpolated into the other's first step) and the span is
+    the larger of the two traces' spans on the common window (floored at
+    ``abs_scale``). ``err_rms`` keeps the reference's first sample and divides by
+    the reference's span: on an ideal boost whose ``V(out)`` holds 24 V (6 mV of
+    ripple) two converged traces read 0.030 one way and 0.0023 the other."""
+    ta, ya = _window(*a, exclude_t0=True)
+    tb, yb = _window(*b, exclude_t0=True)
+    g, va, vb = _on_grid(ta, ya, (tb, yb))
+    if len(g) < 2 or g[-1] <= g[0]:
+        raise ValueError("the two traces share no time window")
+    span = max(float(np.ptp(va)), float(np.ptp(vb)), abs_scale)
+    if span <= 0.0:
+        raise ValueError("flat traces: give abs_scale > 0")
+    return _rms(g, (va - vb) ** 2, exclude) / span
 
 
 def err_max(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = False,

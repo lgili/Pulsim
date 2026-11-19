@@ -63,7 +63,7 @@ harness, never to `pulsim`:
 | Triage of all 126 files (`runs` / `skipped` / `error`, `known` cells) | `manifests/v2_triage.yaml` |
 | Time-weighted metrics (`err_rms`, `err_max`, `time_mean`) | `tools/metrics.py` |
 | Differential runner, circuit x engine | `tools/differential_runner.py` |
-| 22 analytic circuits and their ceilings | `analytic/__init__.py`, `manifests/analytic.yaml` |
+| 25 analytic circuits and their ceilings | `analytic/__init__.py`, `manifests/analytic.yaml` |
 | Golden checkpoints of `engine='pwl'` (45 circuits) | `goldens/pwl/*.json`, `tools/goldens.py` |
 | Counter gate (12 circuits x engines) | `manifests/perf_counters.yaml`, `tools/counters.py` |
 | Tests | `python/tests/test_benchmark_harness.py` (marker `reference`) |

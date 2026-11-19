@@ -165,6 +165,13 @@ rated torque, rated current, and per-phase impedance for sanity checks.
 
 - [Tutorial 07 — DC Machine](tutorials/07-dc-machine.md): the MNA-native
   DC machine.
+- MNA-native machines, solved in the matrix (second order, no
+  one-step lag): `CircuitBuilder.add_induction_machine_mna` (this
+  machine; YAML `induction_machine`), `add_pmsm_mna` (PMSM, salient or
+  round rotor, PM-flux harmonics; YAML `pmsm`) and `add_bldc_mna`
+  (trapezoidal back-EMF; YAML `bldc`). The observers on this page
+  (`add_induction_motor`, `add_pmsm`, `add_bldc`) are deprecated in
+  their favour; see `docs/known-limitations.md` for the engine table.
 
 - [Motors — Sensorless Observers](motors-sensorless.md)
 - `python/pulsim/motors.py` — source.

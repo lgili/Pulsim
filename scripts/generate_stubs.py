@@ -78,6 +78,7 @@ STUBGEN_FLAGS = [
     # where the enum class lives so it prints ``DCStrategy.Auto``.
     "--enum-class-locations", "DCStrategy:pulsim._pulsim",
     "--enum-class-locations", "ParametricRefactorMode:pulsim._pulsim",
+    "--enum-class-locations", "DevicePath:pulsim._pulsim",
     # Print the expressions matched by KNOWN_INVALID_EXPRESSIONS as-is
     # so the rules below can rewrite them deterministically (stubgen
     # would otherwise replace the TYPE with ``...``, losing it).

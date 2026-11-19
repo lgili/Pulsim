@@ -26,6 +26,7 @@
 #pragma once
 
 #include "pulsim/blockchain/blocks.hpp"
+#include "pulsim/events/modulator.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -36,6 +37,8 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <deque>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -43,6 +46,8 @@
 #include <stdexcept>
 #include <tuple>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -134,6 +139,68 @@ using BlockResetFn = std::function<void()>;
 /// copy back (snapshot / resume, a run's declared initial state).
 using BlockSaveFn = std::function<std::function<void()>()>;
 
+/// Bytes of a graph's state (the controllers' part of a pickled snapshot):
+/// trivially copyable values as their bytes, a vector / deque as its size
+/// and elements, a block struct holding containers through its `fields`.
+/// Read back on the machine (and build) that wrote it.
+namespace state_io {
+struct Writer {
+    std::string buf;
+    void raw(const void* p, std::size_t n) {
+        buf.append(static_cast<const char*>(p), n);
+    }
+};
+struct Reader {
+    std::string_view s;
+    std::size_t i = 0;
+    void raw(void* p, std::size_t n) {
+        if (n > s.size() - i) {
+            throw std::invalid_argument(
+                "control graph state: truncated or from another graph");
+        }
+        std::memcpy(p, s.data() + i, n);
+        i += n;
+    }
+};
+template <class T>
+concept HasFields = requires(T& t) { t.fields([](auto&) {}); };
+template <class T> struct is_seq : std::false_type {};
+template <class E> struct is_seq<std::vector<E>> : std::true_type {};
+template <class E> struct is_seq<std::deque<E>> : std::true_type {};
+
+template <class T>
+void put(Writer& w, const T& v) {
+    if constexpr (is_seq<T>::value) {
+        const std::uint64_t n = v.size();
+        w.raw(&n, sizeof n);
+        for (const auto& e : v) put(w, e);
+    } else if constexpr (HasFields<T>) {
+        const_cast<T&>(v).fields([&w](auto& f) { put(w, f); });
+    } else {
+        static_assert(std::is_trivially_copyable_v<T>,
+                      "a captured block state needs fields() for its containers");
+        w.raw(&v, sizeof v);
+    }
+}
+template <class T>
+void get(Reader& r, T& v) {
+    if constexpr (is_seq<T>::value) {
+        std::uint64_t n = 0;
+        r.raw(&n, sizeof n);
+        if (n > r.s.size()) {
+            throw std::invalid_argument(
+                "control graph state: truncated or from another graph");
+        }
+        v.resize(static_cast<std::size_t>(n));
+        for (auto& e : v) get(r, e);
+    } else if constexpr (HasFields<T>) {
+        v.fields([&r](auto& f) { get(r, f); });
+    } else {
+        r.raw(&v, sizeof v);
+    }
+}
+}  // namespace state_io
+
 
 // =============================================================================
 // BlockChain — the control graph
@@ -150,6 +217,8 @@ public:
         BlockStepFn update;     // phase 2: state transition (may be empty)
         BlockResetFn reset;
         BlockSaveFn save;       // empty: stateless, or state not capturable
+        std::function<void(state_io::Writer&)> dump;   // with save
+        std::function<void(state_io::Reader&)> load;
         std::vector<Read> reads;
         std::vector<Index> writes;
         int group = 0;
@@ -238,6 +307,8 @@ public:
                 std::tie(*p...) = c;
             };
         };
+        pending_.dump = [p...](state_io::Writer& w) { (state_io::put(w, *p), ...); };
+        pending_.load = [p...](state_io::Reader& r) { (state_io::get(r, *p), ...); };
     }
 
     /// Names of the blocks that hold state no snapshot captures.
@@ -343,6 +414,7 @@ public:
         group0_used_ = std::any_of(blocks_.begin(), blocks_.end(),
             [](const Block& b) { return b.group == 0; });
         compiled_ = true;
+        sync_duties();
     }
 
     /// Consumer/producer pairs whose schedule order differs from their
@@ -404,6 +476,10 @@ public:
         std::vector<Group> groups;
         std::vector<Real> pub;
         Real last_t = Real{0}, t0 = Real{0}, solver_dt = Real{0};
+        std::vector<char> queued;
+        Vector horizon_x;
+        Real horizon_t = Real{0};
+        bool has_horizon_x = false;
     };
 
     [[nodiscard]] State save_state() const {
@@ -422,6 +498,10 @@ public:
         s.last_t = last_t_;
         s.t0 = t0_;
         s.solver_dt = solver_dt_;
+        s.queued = queued_;
+        s.horizon_x = horizon_x_;
+        s.horizon_t = horizon_t_;
+        s.has_horizon_x = has_horizon_x_;
         return s;
     }
 
@@ -433,6 +513,12 @@ public:
                 "BlockChain.restore_state: the state belongs to another "
                 "control graph (or this one changed since it was saved)");
         }
+        assign_state(s);
+    }
+
+    /// restore_state without the checks: also puts back a live copy over
+    /// a graph a failed load_state left with another graph's sizes.
+    void assign_state(const State& s) {
         for (const auto& r : s.blocks) r();
         ctx_.sig = s.sig;
         b_extra_map_ = s.b_extra;
@@ -448,6 +534,51 @@ public:
         last_t_ = s.last_t;
         t0_ = s.t0;
         solver_dt_ = s.solver_dt;
+        queued_ = s.queued;
+        horizon_x_ = s.horizon_x;
+        horizon_t_ = s.horizon_t;
+        has_horizon_x_ = s.has_horizon_x;
+        sync_duties();
+    }
+
+    /// `s` (a save_state() of this graph) as bytes: what a pickled
+    /// snapshot carries. Read back by load_state on the same machine.
+    [[nodiscard]] std::string dump_state(const State& s) {
+        if (s.owner != this) {
+            throw std::invalid_argument(
+                "BlockChain.dump_state: the state belongs to another graph");
+        }
+        const State live = save_state();
+        restore_state(s);
+        state_io::Writer w;
+        try {
+            io(w);
+        } catch (...) {
+            assign_state(live);
+            throw;
+        }
+        restore_state(live);
+        return std::move(w.buf);
+    }
+
+    /// The State that dump_state wrote (the live graph is left as it is).
+    /// Throws std::invalid_argument for bytes of another graph.
+    [[nodiscard]] State load_state(std::string_view bytes) {
+        const State live = save_state();
+        try {
+            state_io::Reader r{bytes};
+            io(r);
+            if (r.i != bytes.size()) {
+                throw std::invalid_argument(
+                    "control graph state: from another graph (trailing bytes)");
+            }
+            State s = save_state();
+            restore_state(live);
+            return s;
+        } catch (...) {
+            assign_state(live);
+            throw;
+        }
     }
 
 
@@ -562,12 +693,54 @@ public:
             // state x_{n-1} (the closed-loop helpers' protocol).
             if (!label_time_) tx = t - solver_dt_;
         }
+        // A resume at the label of the last run's last call (whose tick the
+        // horizon left out) serves it with that call's state, as the run
+        // that did not stop there did (not with the resumed state).
+        const Vector* xp = &x;
+        if (has_horizon_x_ && n_calls_ > 0 && t == horizon_t_ && t == last_t_) {
+            xp = &horizon_x_;
+        }
+        has_horizon_x_ = false;
+        stash_ = false;
         last_t_ = t;
         ++n_calls_;
         fixed_label_pass_ = label_time_;
-        run_pass(tx, &x, dt_group0, /*every_call=*/group0_used_,
+        fixed_queue_pass_ = queue_driven_;
+        run_pass(tx, xp, dt_group0, /*every_call=*/group0_used_,
                  /*record_t=*/has_rates() ? tx : t);
         fixed_label_pass_ = false;
+        fixed_queue_pass_ = false;
+        if (stash_) {        // the last call of a run: keep what it saw
+            if (xp != &horizon_x_) horizon_x_ = *xp;
+            horizon_t_ = t;
+            has_horizon_x_ = true;
+        }
+    }
+
+    /// Queue-driven ticks on the fixed engine (control_tick='state'): the
+    /// kernel's event queue decides when a rate group ticks; its tick
+    /// source calls mark_queued(g) and the graph's next fixed-step
+    /// observer call (the same kernel call, after the ticks) runs every
+    /// marked group in one pass. The graph keeps its own grid for the
+    /// tick instants, its jumps and the snapshot.
+    void set_queue_driven(bool on) {
+        queue_driven_ = on;
+        queued_.assign(groups_.size(), 0);
+    }
+    [[nodiscard]] bool queue_driven() const noexcept { return queue_driven_; }
+    /// Forget the tick a horizon left out (a run that is not a resume of
+    /// the snapshot that holds it starts without it).
+    void drop_horizon_state() noexcept { has_horizon_x_ = false; }
+    [[nodiscard]] Real last_call_t() const noexcept { return last_t_; }
+    /// The grid's t0 (set by the first call) and group g's next tick index:
+    /// a queue source registered for g ticks at t0 + offset + k*period.
+    [[nodiscard]] Real grid_t0() const noexcept { return t0_; }
+    [[nodiscard]] std::uint64_t group_next_k(int g) const {
+        return groups_.at(static_cast<Size>(g)).k;
+    }
+    void mark_queued(int g) {
+        if (queued_.size() != groups_.size()) queued_.assign(groups_.size(), 0);
+        queued_.at(static_cast<Size>(g)) = 1;
     }
 
     /// Label-time mode (the protocol of the closed-loop helpers and C
@@ -588,6 +761,7 @@ public:
         if (s >= 0 && static_cast<Size>(s) < pub_.size()) {
             pub_[static_cast<Size>(s)] = value;
         }
+        sync_duties();
     }
 
     /// Exact protocol (the variable-step engine lands a step on every
@@ -662,6 +836,8 @@ public:
         n_calls_ = 0;
         if (!dt_given_) solver_dt_ = Real{0};
         for (auto& g : groups_) { g.k = 0; g.pending = false; }
+        std::fill(queued_.begin(), queued_.end(), 0);
+        has_horizon_x_ = false;
     }
 
     // ---- running --------------------------------------------------------
@@ -681,6 +857,9 @@ public:
         std::fill(pub_.begin(), pub_.end(), Real{0});
         n_calls_ = 0;
         if (!dt_given_) solver_dt_ = Real{0};
+        std::fill(queued_.begin(), queued_.end(), 0);
+        has_horizon_x_ = false;
+        sync_duties();
     }
 
     /// Evaluate the graph once at (t, x) with block step `dt`.
@@ -698,6 +877,7 @@ public:
         }
         ++n_evals_;
         n_block_evals_ += static_cast<std::uint64_t>(order_.size());
+        sync_duties();
         if (!recordings_.empty()) {
             recording_times_.push_back(t);
             for (auto& rec : recordings_) {
@@ -782,6 +962,15 @@ public:
 
     void set_channel(const std::string& name, Real value) {
         ctx_.put(slot(name), value);   // "" -> no-op
+        sync_duties();
+    }
+
+    /// A duty register holding what slot `s`'s sinks see, kept current
+    /// by every call that can change it (Immediate latch). The chain owns
+    /// it; a CarrierPwm built on it must not outlive the chain.
+    [[nodiscard]] const events::DutyRegister* duty_register(Index s) {
+        duties_.push_back({s, events::DutyRegister{sink_value(s)}});
+        return &duties_.back().second;
     }
 
     /// Value of slot `s` (sinks resolved to a slot at build time).
@@ -828,8 +1017,93 @@ public:
     }
 
 private:
+    static constexpr std::uint64_t kStateMagic = 0x5053474300000001ULL;
+
+    // One walk for both directions (Writer: put, Reader: get + checks).
+    template <class IO>
+    void io(IO& a) {
+        constexpr bool rd = std::is_same_v<IO, state_io::Reader>;
+        auto x = [&a](auto& v) {
+            if constexpr (std::is_same_v<IO, state_io::Reader>) {
+                state_io::get(a, v);
+            } else {
+                state_io::put(a, v);
+            }
+        };
+        auto same = [](bool ok) {
+            if (!ok) {
+                throw std::invalid_argument(
+                    "control graph state: written by another graph (its "
+                    "blocks, channels or rate groups differ)");
+            }
+        };
+        std::uint64_t magic = kStateMagic;
+        x(magic);
+        same(magic == kStateMagic);
+        std::uint64_t n = blocks_.size();
+        x(n);
+        same(n == blocks_.size());
+        for (auto& b : blocks_) {
+            std::vector<char> name(b.name.begin(), b.name.end());
+            x(name);
+            same(std::string(name.begin(), name.end()) == b.name);
+            if constexpr (rd) { if (b.load) b.load(a); }
+            else { if (b.dump) b.dump(a); }
+        }
+        const Size n_sig = ctx_.sig.size();
+        x(ctx_.sig);
+        same(ctx_.sig.size() == n_sig);
+        std::vector<Index> bk;
+        std::vector<Real> bv;
+        for (const auto& [k, v] : b_extra_map_) { bk.push_back(k); bv.push_back(v); }
+        x(bk);
+        x(bv);
+        same(bk.size() == bv.size());
+        if constexpr (rd) {
+            b_extra_map_.clear();
+            for (Size i = 0; i < bk.size(); ++i) b_extra_map_[bk[i]] = bv[i];
+        }
+        n = recordings_.size();
+        x(n);
+        same(n == recordings_.size());
+        for (auto& rec : recordings_) x(rec.history);
+        x(recording_times_);
+        x(n_evals_);
+        x(n_block_evals_);
+        x(n_calls_);
+        n = groups_.size();
+        x(n);
+        same(n == groups_.size());
+        for (auto& g : groups_) {
+            x(g.k);
+            x(g.n_ticks);
+            x(g.pending_at);
+            x(g.pending);
+            x(g.jitter_max);
+        }
+        const Size n_pub = pub_.size();
+        x(pub_);
+        same(pub_.size() == n_pub);
+        x(last_t_);
+        x(t0_);
+        x(solver_dt_);
+        x(queued_);
+        x(horizon_t_);
+        x(has_horizon_x_);
+        std::vector<Real> hx(horizon_x_.data(), horizon_x_.data() + horizon_x_.size());
+        x(hx);
+        if constexpr (rd) {
+            horizon_x_ = Vector::Map(hx.data(), static_cast<Index>(hx.size()));
+            sync_duties();
+        }
+    }
+
     [[nodiscard]] static Real tick_tol(const Group& g) noexcept {
         return Real{1e-9} * g.period;
+    }
+
+    void sync_duties() noexcept {
+        for (auto& [s, reg] : duties_) reg.value = sink_value(s);
     }
 
     void publish(const Group& g) {
@@ -861,8 +1135,22 @@ private:
             // t >= due - 1e-9*dt and due < t_end - 1e-9*dt.
             const Real tol = fixed_label_pass_ ? Real{1e-9} * solver_dt_
                                                : tick_tol(g);
-            if (fixed_label_pass_ && !(tau[gi] < t_end_ - tol)) continue;
-            if (tx >= tau[gi] - tol) {
+            bool hit = false;
+            if (fixed_queue_pass_) {
+                hit = gi < queued_.size() && queued_[gi] != 0;
+                // due on the graph's grid but not taken: the queue's last
+                // instant is < t_end, so this is a run's last call
+                if (!hit && tx >= tau[gi] - tol) stash_ = true;
+            } else {
+                if (fixed_label_pass_ && !(tau[gi] < t_end_ - tol)) {
+                    // left out by the horizon only: a resume at this
+                    // label serves it with this call's state
+                    if (tx >= tau[gi] - tol) stash_ = true;
+                    continue;
+                }
+                hit = tx >= tau[gi] - tol;
+            }
+            if (hit) {
                 due_[gi] = 1;
                 any = true;
                 g.jitter_max = std::max(g.jitter_max, tx - tau[gi]);
@@ -871,7 +1159,11 @@ private:
                 if (g.delay == Delay::OneSample) publish(g);
             }
         }
-        if (!any) return;
+        if (fixed_queue_pass_) std::fill(queued_.begin(), queued_.end(), 0);
+        if (!any) {
+            sync_duties();   // a pending publication may have landed
+            return;
+        }
         if (every_call) ++groups_[0].n_ticks;
         ctx_.t = has_rates() ? tx : record_t;
         ctx_.x = x;
@@ -904,6 +1196,7 @@ private:
                 g.pending_at = tau[gi] + g.delay_time;
             }
         }
+        sync_duties();
         if (!recordings_.empty()) {
             recording_times_.push_back(record_t);
             for (auto& rec : recordings_) {
@@ -980,6 +1273,7 @@ private:
     std::vector<char> due_;
     std::vector<char> delayed_;
     std::vector<Real> pub_;
+    std::deque<std::pair<Index, events::DutyRegister>> duties_;   // PWM legs
     std::vector<Sink> sinks_;
     std::uint64_t n_calls_ = 0;
     Real last_t_ = Real{0};
@@ -989,6 +1283,13 @@ private:
     Real solver_dt_ = Real{0};
     bool label_time_ = false;
     bool fixed_label_pass_ = false;
+    bool queue_driven_ = false;
+    bool fixed_queue_pass_ = false;
+    std::vector<char> queued_;
+    Vector horizon_x_;
+    Real horizon_t_ = Real{0};
+    bool has_horizon_x_ = false;
+    bool stash_ = false;
     Real t_end_ = std::numeric_limits<Real>::infinity();
 };
 
@@ -1035,25 +1336,31 @@ make_chain_switch_fn(BlockChain& chain, Size num_switches,
 }
 
 
-/// A PWM gate whose duty is a graph signal (what its sinks see): bit
-/// `idx` is ON while the carrier position u < duty - tol, the comparison
-/// of pulsim.control.pwm_on operation for operation (grid-exact snap of
-/// pwm_phase::cycle_position). Runs in C++, no GIL. The chain must
-/// outlive the gate.
+/// A PWM gate whose duty is a graph signal (what its sinks see): one
+/// events::CarrierPwm per leg, reading a DutyRegister the chain keeps
+/// equal to the signal (BlockChain::duty_register). Bit `idx` is ON while
+/// the carrier position u < duty - tol, the comparison of
+/// pulsim.control.pwm_on operation for operation. Runs in C++, no GIL.
+/// The chain must outlive the gate.
 struct ChainPwmGate {
-    struct Leg { Index slot; Index idx; Real period; Real phase; };
-    BlockChain* chain = nullptr;
     Size num_switches = 0;
-    std::vector<Leg> legs;
+    std::vector<events::CarrierPwm> legs;   // one switch each, distinct bits
+
+    /// Leg on switch `idx` whose duty is what slot `slot`'s sinks see.
+    void add_leg(BlockChain& chain, Index slot, Index idx, Real period, Real phase) {
+        for (const auto& l : legs) {
+            if (l.hs == idx) {
+                throw std::invalid_argument(
+                    "make_pwm_gate: switch bit " + std::to_string(idx)
+                    + " is driven by two legs");
+            }
+        }
+        legs.push_back(events::CarrierPwm{period, phase, chain.duty_register(slot), idx});
+    }
 
     [[nodiscard]] topology::SwitchStateMask operator()(Real t) const {
         topology::SwitchStateMask mask{num_switches};
-        for (const auto& l : legs) {
-            const auto p = pwm_phase::cycle_position(t, l.phase, l.period);
-            if (p.u < chain->sink_value(l.slot) - p.tol) {
-                mask.set(static_cast<Size>(l.idx), true);
-            }
-        }
+        for (const auto& l : legs) l.apply(t, mask);
         return mask;
     }
 
@@ -1063,11 +1370,7 @@ struct ChainPwmGate {
     /// every observer call (a loop ticks through its observer).
     [[nodiscard]] Real next_edge_after(Real t) const {
         Real best = std::numeric_limits<Real>::infinity();
-        for (const auto& l : legs) {
-            const std::array<Real, 1> thr{chain->sink_value(l.slot)};
-            best = std::min(best, pwm_phase::next_constant_crossing(
-                                      t, l.phase, l.period, thr));
-        }
+        for (const auto& l : legs) best = std::min(best, l.next_edge(t));
         return best;
     }
 };

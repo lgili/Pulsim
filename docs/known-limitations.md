@@ -61,6 +61,72 @@ unless called with `allow_non_passive=True`.
 | InductionMachineMna | NewtonStateful | yes | yes | no | no | no |
 <!-- engine-capabilities:end -->
 
+## Option capability matrix
+
+Which engine honours which `simulate()` keyword. This table is the
+kernel's (`sim::kRunOptionTable`, `pulsim.option_capabilities()`);
+`test_simulation_object.py` checks that it equals this page and that
+every "refused" cell raises `pulsim.UnsupportedError` naming the engine
+and the keyword (`feature`) when the keyword is set to a value that asks
+for something (`None`, `False`, `store_every=1`, `max_dt_halvings=0`,
+`mode_selection='legacy'`, `control_tick='label'` ask for nothing). No
+engine accepts a keyword and ignores it. The defaults are
+`sim::Defaults` (`core/include/pulsim/sim/defaults.hpp`).
+
+<!-- option-capabilities:begin -->
+| Keyword | pwl | trbdf2 | exact (dsed) | default |
+|---|---|---|---|---|
+| `engine` | yes | yes | yes | 'auto' |
+| `rtol` | refused | yes | yes | 1e-5 (trbdf2), 1e-6 (exact) |
+| `atol` | refused | yes | yes | 1e-8 (trbdf2), 1e-9 (exact) |
+| `dt_init` | refused | yes | yes | kernel's choice (trbdf2), 1e-9 (exact) |
+| `integrator` | refused | refused | yes | 'auto' (exact) |
+| `stiffness_threshold` | refused | refused | yes | 10.0 |
+| `h_bdf2` | refused | refused | yes | 1e-6 |
+| `t_start` | yes | yes | yes | 0.0 |
+| `switch_fn` | yes | yes | yes | None |
+| `b_extra_fn` | yes | yes | yes | None |
+| `step_observer` | yes | yes | yes | None |
+| `start_from_dc_op` | yes | refused | refused | False |
+| `enable_nonlinear_refresh` | yes | yes | refused | None (stamp the Newton devices when there are any) |
+| `max_newton_iterations` | yes | yes | refused | 50 |
+| `max_event_iterations` | yes | yes | refused | 16 |
+| `strict_event_iterations` | yes | refused | refused | False |
+| `max_dt_halvings` | yes | refused | refused | 6 |
+| `voltage_sanity_factor` | yes | yes | yes | 100 |
+| `store_every` | yes | refused | refused | 1 |
+| `auto_regularize` | yes | yes | yes | True |
+| `tol_newton_dx` | yes | yes | refused | 1e-9 |
+| `tol_newton_res` | yes | yes | refused | 1e-9 |
+| `enable_newton_line_search` | yes | yes | refused | False |
+| `enable_newton_lm` | yes | yes | refused | False |
+| `newton_roundoff_budget` | yes | yes | refused | 130 |
+| `enable_substep_state_correction` | yes | refused | refused | False |
+| `discontinuity_restart` | yes | refused | refused | False |
+| `resolution_diagnostics` | yes | refused | refused | False |
+| `on_impulse` | yes | yes | yes | 'record' |
+| `inductor_freeze_di_max` | yes | refused | refused | None (off) |
+| `inductor_abs_clamp` | yes | refused | refused | None (off) |
+| `progress` | yes | refused | yes | False |
+| `initial_state` | yes | yes | yes | None (the circuit's ICs) |
+| `should_continue` | yes | yes | refused | None |
+| `closed_loops` | yes | yes | yes | None |
+| `live_stream` | yes | refused | refused | None |
+| `mmc_arms` | yes | refused | refused | None |
+| `on_cache` | yes | refused | refused | None |
+| `controller_period` | yes | yes | yes | None |
+| `resume_from` | yes | yes | refused | None |
+| `solver` | yes | yes | yes | None |
+| `sensitivities` | refused | refused | yes | None |
+| `mode_selection` | yes | yes | yes | None ('legacy') |
+| `allow_implicit_segments` | refused | refused | yes | None |
+| `recorders` | yes | yes | yes | None |
+| `control_tick` | yes | yes | yes | 'label' |
+| `device_path` | yes | yes | refused | 'legacy' |
+| `t_end` | yes | yes | yes | required |
+| `dt` | yes | yes | yes | None (pwl: required; trbdf2: kernel ceiling; exact: 1e-5) |
+<!-- option-capabilities:end -->
+
 The charge laws `ChargeLaw.table` / `.vdmos_cgd` are the
 NonlinearCapacitor row. `add_power_mosfet` is a composite of the
 MosfetLevel1, Capacitor, NonlinearCapacitor, Resistor, Inductor and
@@ -107,8 +173,9 @@ energies. `I_H > 0` chops an inductive current into `R_off` (a voltage
 Circuit-level limits, also raised as `UnsupportedError` (with `feature`
 set): coupled inductors (`add_transformer`, `add_inductor_coupling`) on
 `dsed` and `bdf1`; PWL diodes with `integrator='bdf2'` on `dsed`;
-capacitor loops (parallel capacitors) on `dsed`; C blocks, controllers
-(`step_observer`, `closed_loops`), `start_from_dc_op`, `store_every`,
+capacitor loops (parallel capacitors) on `dsed`; C blocks, an every-step
+`step_observer` (no `controller_period`), `device_path='interface'`,
+`start_from_dc_op`, `store_every`,
 `live_stream`, `max_dt_halvings`, `mmc_arms`, `on_cache`, the inductor
 guards, `enable_substep_state_correction` and `discontinuity_restart` on
 `dsed`; the fixed-step keywords (`discontinuity_restart` among them) on
@@ -219,6 +286,7 @@ event where the signal jumps.
 | Limitation | Measured | Workaround |
 |---|---|---|
 | **`add_power_mosfet` is a composite of Newton devices: no `res.i` of the device and no loss row.** Generic outputs arrive with the unified device interface (Phase 3). | `res.i("Q1")` raises like `mosfet_level1`; `device_loss_summary` omits it. | `p.double_pulse_test` (sense resistor), or a 1 mΩ resistor in series. |
+| **The level-1 MOSFET has a negative slope near threshold.** The triode polynomial at small or negative overdrive makes dI/dV_DS < 0 at V_DS = 0 for V_OV in (≈ −0.72/κ, 0), and just past saturation onset (down to −0.040 S for K = 1.43, κ = 15); there `i·v` reaches −0.29 mW. The zero-voltage leak `α(1−β)·K·V_OV²` is gone since 2026-11-19: zero current at V_DS = 0, C¹ across it (add-unified-device-interface DECISIONS #44). | K = 1.43, κ = 15: min dI/dV_DS −0.040 S; min i·v −0.29 mW at V_OV = −0.20 V, V_DS = −0.21 V. | Drive the gate well past threshold (κ·V_OV ≫ 1), or raise `kappa`. |
 | **`add_power_mosfet` non-goals:** p-channel, live T_j inside the law (T_j is run-constant), drain inductance and package networks, avalanche, SiC/GaN effects, a table channel (constant-K Level-1 only), AC analysis. | - | - |
 | **A gate transient on `pwl` needs a step that resolves it.** | The 400 V / 10 A double pulse with a 65 ns plateau: 7501 steps at `dt` = 0.2 ns; `trbdf2` takes about 1200. | `engine="trbdf2"`. |
 | **VDMOS import: absent capacitances are 0 (LTspice), not ngspice's defaults** (CGDMAX 2 nF, CGDMIN 20 pF, CGS 1.4 nF, CJO 0.5 nF). CJO uses the junction law without SPICE's FC linearisation. | - | Write every charge parameter in the card; `charge="drop"` restores the ideal-gate device. |
@@ -228,16 +296,18 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **Native machines: DC machine, PMSM and induction machine are solved in the matrix; the observers are not.** `b.add_dc_machine`, `b.add_pmsm_mna`, `b.add_induction_machine_mna` are MNA-native on `pwl` and `trbdf2`; `p.add_pmsm`, `p.add_bldc`, `p.add_induction_motor` are explicit observers on `pwl` only (first order). The PMSM and induction machine have no DC operating point (the DC assembly stamps Newton devices open, so the preflight ties their neutral, rotor-flux and speed nodes to ground through 1 GΩ) and no AC-sweep stamp; `dsed` refuses them (speed-dependent, not LTI between events). No machine model is validated against measurements: the tests check analytic limits of the equations and independent ODE integrations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). Induction machine free acceleration: 1.0e-5 of synchronous speed at 20 µs on `pwl` with `discontinuity_restart=True`. | Use the native machines; halve `dt` to check an observer run. On `pwl` pass `discontinuity_restart=True` for a three-phase start (first order otherwise). |
+| **Native machines: DC machine, PMSM and induction machine are solved in the matrix; the observers are not.** `b.add_dc_machine`, `b.add_pmsm_mna`, `b.add_induction_machine_mna` are MNA-native on `pwl` and `trbdf2`; `p.add_pmsm`, `p.add_bldc`, `p.add_induction_motor` are explicit observers on `pwl` only (first order). The DC operating point holds a machine's speed and angle at `omega0` / `theta0` (no torque balance; a speed or angle node another device drives is refused by name); the PMSM and induction machine have no AC-sweep stamp; `dsed` refuses them (speed-dependent, not LTI between events). No machine model is validated against measurements: the tests check analytic limits of the equations and independent ODE integrations. | DC motor observer, sine drive, speed error 13.6 % at `dt` = 100 µs (first order); `add_dc_machine` 0.48 % (second order). Induction machine free acceleration: 1.0e-5 of synchronous speed at 20 µs on `pwl` with `discontinuity_restart=True`. | Use the native machines; halve `dt` to check an observer run. On `pwl` pass `discontinuity_restart=True` for a three-phase start (first order otherwise). |
+| **Flux-map PMSM: DC point only at rest, no YAML form, defined on its grid plus a 10 % band.** `p.FluxMapDQ.from_tables` fits one co-energy spline to both flux tables (reciprocal by construction) and `b.add_pmsm_flux_map` stamps it on `pwl` and `trbdf2`. The held-mechanics DC point refuses `omega0 != 0` by name (the stator law is nonlinear in the current when spinning); `yaml.emit` refuses the map; the law is defined on the grid plus 10 % of each axis span (checked positive definite there; an accepted state outside is refused by name, Newton iterates pass through a smooth unmeasured extension). Reciprocity is judged from the tables' cross derivatives (central differences). The induction machine has no saturation. | Synthetic cross-coupled map: reciprocity defect 0.19 % (reciprocal, 1 A grid), 9.1 % with λ_q × 1.1 (refused at the default 2 %). | Tabulate the whole operating range; start a flux-map machine from zero state or at rest. |
 | No `components()` entry for a composite machine as a whole (its sub-elements are listed). | — | — |
 
 ## Passives
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **The π-section line overshoots an ideal step by 27 % at any section count.** `b.add_transmission_line(model="pi")` is a lumped ladder; the exact (Bergeron) line is not implemented and `model="bergeron"` is refused. | 50 Ω, 100 ns, source-matched, open end: far-end peak 1.271 V with 50 sections (exact 1.000 V). With a 20 ns edge and `recommend_line_sections` (55) the peak is 1.046 V. | Give the source a realistic rise time and use `p.passives.recommend_line_sections(delay, t_rise)` sections. |
-| **YAML has no `rac:` ladder or `transmission_line` type.** `rac:` on an inductor is refused by name; `esr`, `esl`, `c_par` are read. Other unknown per-device keys are still ignored without a warning. | — | Build ladders and lines from Python. |
-| One ESR value (no frequency dependence), single-pair line (no coupled three-phase cable). The DC-bias capacitance is `odd_charge_table` only: no `fit_mlcc_dc_bias`, no YAML, and it is a Newton device (`pwl` / `trbdf2`). | — | Read ESR at the switching frequency; fit `R_ac(f)` of windings with `fit_rac_ladder`; integrate the datasheet C(V) curve into knots yourself. |
+| **The π-section line overshoots an ideal step by 27 % at any section count.** `b.add_transmission_line(model="pi")` is a lumped ladder; the exact (Bergeron) line is not implemented and `model="bergeron"` is refused (it waits for the unified device interface; DECISIONS D12). | 50 Ω, 100 ns, source-matched, open end: far-end peak 1.271 V with 50 sections (exact 1.000 V). With a 20 ns edge and `recommend_line_sections` (55) the peak is 1.046 V. | Give the source a realistic rise time and use `p.passives.recommend_line_sections(delay, t_rise)` sections. |
+| **YAML has no `transmission_line` type, and `rac:` takes ladder cells only.** `rac: {R_dc, L_hf, R: [...], L: [...]}` is read; an `(f, R_ac)` curve is refused by name (fitting needs Python). `nonlinear_capacitor` takes `law:` or `dc_bias: {v, C}` (no residual check: `dc_bias` points become knots as given). Other unknown per-device keys of the older types are still ignored without a warning. | — | Fit with `p.passives.fit_rac_ladder` / `fit_mlcc_dc_bias` in Python and write the cells or the table. |
+| One ESR value (no frequency dependence), single-pair line (no coupled three-phase cable). The DC-bias capacitor is a Newton device (`pwl` / `trbdf2`; dsed, bdf1 and the AC sweep refuse it by name) and integrates the small-signal curve: no hysteresis, no ageing, no temperature. | — | Read ESR at the switching frequency; fit `R_ac(f)` of windings with `fit_rac_ladder`; the MLCC curve with `fit_mlcc_dc_bias`. |
+| **ESL resonance on the fixed step.** `esl` in series with `C` resonates at `1/(2π√(esl·C))`; a fixed step that does not resolve it rings at the Nyquist rate. | — | `dt <= 1/(20·f_res)`, or `engine="trbdf2"`. |
 | **A winding with an `rac=` ladder cannot be coupled.** `add_inductor_coupling` refuses it with `UnsupportedError` (feature `rac`): coupling the main inductor alone would leave the cells' flux uncoupled. | — | Couple windings built with `esr=`, or use `add_transformer`. |
 
 ## Magnetic networks

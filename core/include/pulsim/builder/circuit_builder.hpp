@@ -548,7 +548,11 @@ public:
         Real lambda = Real{0.02},
         Real kappa  = Real{15.0},
         bool with_body_diode = true,
-        Real V_F = Real{0.7}) {
+        Real V_F = Real{0.7},
+        std::string_view form = "conductance") {
+        const bool branch = is_branch_form_("add_mosfet_level1", name, form);
+        require_form_target_("add_mosfet_level1", name, branch, with_body_diode,
+                             "with_body_diode");
         if (with_body_diode) require_diode_drop_("add_mosfet_level1", name, V_F);
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
@@ -583,6 +587,7 @@ public:
                 /*g_on=*/Real{1e3},
                 /*g_off=*/Real{1e-9},
                 /*V_th=*/Real{0}, /*V_f=*/V_F);
+            if (branch) pool_.set_branch_form(body_b, Real{1} / Real{1e3});
         }
         return *this;
     }
@@ -1180,7 +1185,10 @@ public:
         bool with_fwd = false,
         Real tau_tail = Real{0},
         Real k_tail   = Real{0},
-        Real V_F      = Real{0.7}) {
+        Real V_F      = Real{0.7},
+        std::string_view form = "conductance") {
+        const bool branch = is_branch_form_("add_igbt_level1", name, form);
+        require_form_target_("add_igbt_level1", name, branch, with_fwd, "with_fwd");
         if (with_fwd) require_diode_drop_("add_igbt_level1", name, V_F);
         if (!(R_CE_sat > Real{0})) {
             throw std::invalid_argument(std::format(
@@ -1249,6 +1257,7 @@ public:
                 /*g_on=*/Real{1e3},
                 /*g_off=*/Real{1e-9},
                 /*V_th=*/Real{0}, /*V_f=*/V_F);
+            if (branch) pool_.set_branch_form(fwd_b, Real{1} / Real{1e3});
         }
         return *this;
     }
@@ -1382,7 +1391,8 @@ public:
         Real J, Real B = Real{0}, Real T_load = Real{0},
         Real L_0 = Real{0},
         Real omega0 = Real{0}, Real theta0 = Real{0},
-        const std::vector<std::array<Real, 3>>& harmonics = {}) {
+        const std::vector<std::array<Real, 3>>& harmonics = {},
+        std::shared_ptr<const models::FluxMapDQ> flux_map = {}) {
         if (!(J > Real{0})) {
             throw std::invalid_argument(std::format(
                 "add_pmsm_mna(\"{}\"): J must be > 0 (got {}); it is the "
@@ -1404,11 +1414,26 @@ public:
             p.harmonics = std::make_shared<
                 const std::vector<models::PmsmMna::PmHarmonic>>(std::move(hs));
         }
+        p.flux_map = std::move(flux_map);
         try {
             models::PmsmMna::validate(p);
         } catch (const std::invalid_argument& e) {
             throw std::invalid_argument(std::format(
                 "add_pmsm_mna(\"{}\"): {}", name, e.what()));
+        }
+        if (p.flux_map) {
+            // L_d, L_q, psi_pm must be the map's origin values: they set
+            // L_0's default and are what the pool reports.
+            const auto o = p.flux_map->eval(Real{0}, Real{0});
+            auto off = [](Real a, Real b) {
+                return std::abs(a - b) > Real{1e-9} * std::max(std::abs(b), Real{1e-12});
+            };
+            if (off(L_d, o.hdd) || off(L_q, o.hqq) || off(psi_pm, o.gd)) {
+                throw std::invalid_argument(std::format(
+                    "add_pmsm_mna(\"{}\"): with a flux map, L_d, L_q and "
+                    "psi_pm must equal the map's values at i = 0 ({}, {}, {}); "
+                    "got ({}, {}, {})", name, o.hdd, o.hqq, o.gd, L_d, L_q, psi_pm));
+            }
         }
         const Index n_idx = resolve_node_(neutral);
         const std::array<std::string_view, 3> ph{phase_a, phase_b,
@@ -1422,7 +1447,7 @@ public:
         }
         const Index om_idx = resolve_node_(omega_node);
         const Index th_idx = resolve_node_(theta_node);
-        pool_.add_pmsm_mna(ids, om_idx, th_idx, p);
+        pool_.add_pmsm_mna(ids, om_idx, th_idx, p, omega0, theta0);
         // Mechanical circuit: ordinary linear elements, so the
         // mechanics inherit the trapezoidal companion.
         add_capacitor(std::string{name} + "_J", omega_node, "gnd", J,
@@ -1492,7 +1517,7 @@ public:
         const std::string rb = std::string{name} + "_psi_rb";
         const Index om_idx = resolve_node_(omega_node);
         const std::array<Index, 2> rn{resolve_node_(ra), resolve_node_(rb)};
-        pool_.add_induction_machine_mna(ids, om_idx, rn, p);
+        pool_.add_induction_machine_mna(ids, om_idx, rn, p, omega0);
         add_capacitor(std::string{name} + "_Cra", ra, "gnd", Real{1});
         add_capacitor(std::string{name} + "_Crb", rb, "gnd", Real{1});
         add_capacitor(std::string{name} + "_J", omega_node, "gnd", J,
@@ -2038,16 +2063,23 @@ public:
         Real R_on  = Real{1e-3},
         Real R_off = Real{1e9},
         bool body_diode = true,
-        Real V_F        = Real{0.7}) {
-        require_conductances_("add_mosfet", name, Real{1} / R_on,
-                              Real{1} / R_off, "R_on", "R_off", R_on, R_off);
-        if (!body_diode) {
-            return add_switch(name, drain, source,
-                                Real{1} / R_on,
-                                Real{1} / R_off);
+        Real V_F        = Real{0.7},
+        std::string_view form = "conductance") {
+        if (is_branch_form_("add_mosfet", name, form)) {
+            require_branch_values_("add_mosfet", name, R_on, Real{1} / R_off);
+            if (!body_diode)
+                return add_ideal_switch(name, drain, source, R_on, Real{1} / R_off);
+        } else {
+            require_conductances_("add_mosfet", name, Real{1} / R_on,
+                                  Real{1} / R_off, "R_on", "R_off", R_on, R_off);
+            if (!body_diode) {
+                return add_switch(name, drain, source,
+                                    Real{1} / R_on,
+                                    Real{1} / R_off);
+            }
         }
         return add_mosfet_with_body_diode(
-            name, drain, source, R_on, R_off, V_F);
+            name, drain, source, R_on, R_off, V_F, Real{1e3}, Real{1e-9}, form);
     }
 
     /// Add an n-channel power MOSFET WITH its intrinsic
@@ -2065,14 +2097,26 @@ public:
         Real R_off       = Real{1e9},
         Real V_F         = Real{0.7},
         Real g_on_diode  = Real{1e3},
-        Real g_off_diode = Real{1e-9}) {
+        Real g_off_diode = Real{1e-9},
+        std::string_view form = "conductance") {
+        // form='branch': the switch is R_on in series, the body diode
+        // R_on = 1/g_on_diode (g_on_diode = inf: the ideal diode).
+        const bool branch =
+            is_branch_form_("add_mosfet_with_body_diode", name, form);
         require_diode_drop_("add_mosfet_with_body_diode", name, V_F);
-        require_conductances_("add_mosfet_with_body_diode", name,
-                              Real{1} / R_on, Real{1} / R_off, "R_on",
-                              "R_off", R_on, R_off);
-        require_conductances_("add_mosfet_with_body_diode", name,
-                              g_on_diode, g_off_diode, "g_on_diode",
-                              "g_off_diode");
+        if (branch) {
+            require_branch_values_("add_mosfet_with_body_diode", name, R_on,
+                                   Real{1} / R_off);
+            require_branch_values_("add_mosfet_with_body_diode", name,
+                                   Real{1} / g_on_diode, g_off_diode);
+        } else {
+            require_conductances_("add_mosfet_with_body_diode", name,
+                                  Real{1} / R_on, Real{1} / R_off, "R_on",
+                                  "R_off", R_on, R_off);
+            require_conductances_("add_mosfet_with_body_diode", name,
+                                  g_on_diode, g_off_diode, "g_on_diode",
+                                  "g_off_diode");
+        }
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
         // Main switch (drain → source).
@@ -2080,8 +2124,9 @@ public:
             name, drain_idx, source_idx,
             topology::BranchKind::Switch);
         pool_.add_switch(b_switch,
-                          Real{1} / R_on,
+                          branch ? branch_g_on_(R_on) : Real{1} / R_on,
                           Real{1} / R_off);
+        if (branch) pool_.set_branch_form(b_switch, R_on);
         // Body diode (source → drain — anti-parallel).
         const std::string body_name = std::string{name} + "_body";
         const Index b_body = add_branch_(
@@ -2089,6 +2134,7 @@ public:
             topology::BranchKind::Switch);
         pool_.add_diode(b_body, g_on_diode,
                           g_off_diode, /*V_th=*/Real{0}, /*V_f=*/V_F);
+        if (branch) pool_.set_branch_form(b_body, Real{1} / g_on_diode);
         (void)name;
         return *this;
     }
@@ -2113,9 +2159,21 @@ public:
         Real R_off = Real{1e9},
         Real V_ce0 = Real{0},
         bool reverse_blocking = false,
-        Real V_th = Real{0}) {
-        require_conductances_("add_igbt", name, Real{1} / R_on,
-                              Real{1} / R_off, "R_on", "R_off", R_on, R_off);
+        Real V_th = Real{0},
+        std::string_view form = "conductance") {
+        const bool branch = is_branch_form_("add_igbt", name, form);
+        if (branch && reverse_blocking) {
+            throw std::invalid_argument(std::format(
+                "add_igbt(\"{}\"): form='branch' with reverse_blocking=True: "
+                "a gated PWL diode has no branch form (capability table "
+                "kBranchFormCaps); use form='conductance'.", name));
+        }
+        if (branch) {
+            require_branch_values_("add_igbt", name, R_on, Real{1} / R_off);
+        } else {
+            require_conductances_("add_igbt", name, Real{1} / R_on,
+                                  Real{1} / R_off, "R_on", "R_off", R_on, R_off);
+        }
         if (!(V_ce0 >= Real{0}) || !std::isfinite(V_ce0)) {
             throw std::invalid_argument(std::format(
                 "add_igbt(\"{}\"): V_ce0 = {} must be a finite number >= 0 V.",
@@ -2128,6 +2186,7 @@ public:
                 "reverse current against the drop.", name, V_ce0));
         }
         require_finite_("add_igbt", name, "V_th", V_th);
+        if (branch) return add_ideal_switch(name, collector, emitter, R_on, Real{1} / R_off);
         if (!reverse_blocking) {
             return add_switch(std::move(name),
                                 std::move(collector),
@@ -2882,6 +2941,29 @@ private:
         return *this;
     }
 
+    /// `form=` of every helper that builds a PWL switch or diode
+    /// (add-branch-form-ideal-switch D6): true for 'branch'.
+    static bool is_branch_form_(std::string_view fn, std::string_view name,
+                                std::string_view form) {
+        if (form == "branch") return true;
+        if (form == "conductance") return false;
+        throw std::invalid_argument(std::format(
+            "{}(\"{}\"): form='{}'; expected 'conductance' or 'branch'.", fn,
+            name, form));
+    }
+
+    /// form='branch' names the helper's PWL diode: without one it would be
+    /// silently ignored, so it is refused.
+    static void require_form_target_(std::string_view fn, std::string_view name,
+                                     bool branch, bool has_diode,
+                                     std::string_view flag) {
+        if (branch && !has_diode) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): form='branch' applies to the PWL diode, but {}=false "
+                "builds none; drop form= or set {}=true.", fn, name, flag, flag));
+        }
+    }
+
     static void require_diode_drop_(std::string_view fn,
                                     std::string_view name, Real V_F) {
         if (!(V_F >= Real{0}) || !std::isfinite(V_F)) {
@@ -2917,6 +2999,9 @@ private:
         }
     }
 
+    /// Smallest nonzero branch-form R_on (Ohm): DECISIONS #41.
+    static constexpr Real kBranchRonMin = Real{1e-9};
+
     static void require_branch_values_(std::string_view fn,
                                        std::string_view name, Real R_on,
                                        Real g_off) {
@@ -2924,6 +3009,17 @@ private:
             throw std::invalid_argument(std::format(
                 "{}(\"{}\"): R_on = {} is invalid: the branch form needs a "
                 "finite R_on >= 0 (0 is the ideal switch).", fn, name, R_on));
+        }
+        // 0 is decided exactly everywhere (structure, port coordinates); an
+        // R_on below kBranchRonMin is neither: its ON port row 1/R_on is
+        // past any circuit's conductance scale (add-branch-form-ideal-switch
+        // DECISIONS #41).
+        if (R_on > Real{0} && R_on < kBranchRonMin) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): R_on = {} is invalid: a branch-form R_on below {} "
+                "Ohm is past the round-off resolution of the port. Give R_on = 0 "
+                "for the ideal switch, or R_on >= {} Ohm.", fn, name, R_on,
+                kBranchRonMin, kBranchRonMin));
         }
         if (!(g_off >= Real{0}) || !std::isfinite(g_off)) {
             throw std::invalid_argument(std::format(
@@ -3181,6 +3277,35 @@ private:
     /// and R_off are not read by the branch law: refused by name, as
     /// `check_device` refuses an unread field. Returns false when
     /// `device_dot_field` is not a branch-form R_on / g_off / g_on / R_off.
+    /// `I_H` of a gated PWL device (add-pwl-igbt-and-thyristor): a value
+    /// of the gated law only, so not a row of the diode's field table
+    /// (every plain diode would emit and hash it).
+    bool set_holding_current_(std::string_view fn,
+                              std::string_view device_dot_field, Real value) {
+        const auto dot = device_dot_field.rfind('.');
+        if (dot == std::string_view::npos ||
+            device_dot_field.substr(dot + 1) != "I_H") {
+            return false;
+        }
+        const auto dev = device_dot_field.substr(0, dot);
+        const auto hit = branch_index_.find(dev);
+        if (hit == branch_index_.end()) return false;
+        auto params = pool_.params_of(hit->second);
+        auto* sd = std::get_if<models::SwitchedDiode::Params>(&params);
+        if (sd == nullptr || sd->gate == models::SwitchedDiode::Gate::None) {
+            return false;
+        }
+        if (!(std::isfinite(value) && value >= Real{0})) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): I_H of device \"{}\" must be a finite number "
+                ">= 0 (got {})", fn, device_dot_field, dev, value));
+        }
+        sd->I_H = value;
+        pool_.params_of_mut(hit->second) = std::move(params);
+        pool_.sync_derived_values(hit->second);
+        return true;
+    }
+
     bool set_branch_form_value_(std::string_view fn,
                                 std::string_view device_dot_field, Real value) {
         const auto dot = device_dot_field.rfind('.');
@@ -3226,6 +3351,7 @@ private:
     void set_value_(std::string_view fn, std::string_view device_dot_field,
                     Real value) {
         if (set_branch_form_value_(fn, device_dot_field, value)) return;
+        if (set_holding_current_(fn, device_dot_field, value)) return;
         const auto r = resolve_field_(fn, device_dot_field);
         if (!ir::within(r.spec->bound, value)) {
             throw std::invalid_argument(std::format(
