@@ -47,6 +47,8 @@ def test_twin_runs_the_reference_circuit_as_the_legacy_loop(rel, mode):
     path = ROOT / "benchmarks" / rel
     if not path.exists():
         pytest.skip(f"{rel} not in this checkout")
+    if mode and "nonlinear" in rel:
+        pytest.skip("mode_selection is refused with a Newton device (by name)")
     case = v1_reader.load(path)
     eng, kw = rs.CONFIGS["trbdf2"]
     kw = dict(kw, mode_selection=mode) if mode else kw
