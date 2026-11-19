@@ -2228,7 +2228,7 @@ def device_loss_summary(
                 warnings.warn(
                     f"device_loss_summary: {name!r} ({kind}) is left out: its "
                     "current needs a stored charge (an IGBT tail). Put a 1 mOhm "
-                    "resistor in series and read its v*i.", RuntimeWarning,
+                    "resistor in series and read its v*i.", UserWarning,
                     stacklevel=2)
                 continue
             v_D, v_D_s = win.cont(_branch_v(states, nodes), _branch_v(states_s, nodes))

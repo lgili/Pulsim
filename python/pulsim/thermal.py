@@ -857,10 +857,13 @@ def device_thermal_summary(
         T_amb_dev = float(t_spec.get("T_ambient_C", T_ambient_C))
 
         if kind not in _THERMAL_KINDS:
-            raise ValueError(
+            from ._pulsim import OptionsError  # type: ignore[import-not-found]
+            err = OptionsError(  # a ValueError, typed
                 f"device_thermal_summary: thermal_specs names {name!r} "
                 f"(kind {kind!r}), which has no loss model here (supported: "
                 f"{', '.join(sorted(_THERMAL_KINDS))}).")
+            err.option = "thermal_specs"
+            raise err
         loss = loss_by_bid.get(bid)
         if loss is None:
             if (kind == "switch" and switch_fn is None and kernel_masks is None
