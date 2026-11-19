@@ -569,7 +569,12 @@ def test_example_psfb_completes_with_a_bounded_step_count():
     time): each chatter break pinned h at h_chatter = 2e-12 s for 1000
     forced accepts (3.65 M steps, 3.37 M forced). The estimate is now
     filtered in that window: 147 k steps. Mean V_out over 1.0-1.2 ms
-    22.816 V against the exact-route truth 22.851 V."""
+    22.816 V against the exact-route truth 22.851 V.
+
+    This is a "completes with a bounded step count and monotone time"
+    test, NOT a correctness claim: the run is KNOWN not to converge with
+    rtol on trbdf2 (DECISIONS #21 of update-trbdf2-post-event-restart);
+    the loose 22.851 +- 0.2 V pin only catches a gross failure."""
     lc = p.load_yaml_file(str(_EXAMPLES / "phase_shift_full_bridge.yaml"))
     si, n = lc.builder.switch_index_of, len(lc.switch_names)
     fn = p.make_phase_shift_full_bridge_fn(
