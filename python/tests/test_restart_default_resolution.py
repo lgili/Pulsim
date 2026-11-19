@@ -2,8 +2,8 @@
 run plan (update-number-changing-release blockers 1.5 and 1.8).
 
 ``discontinuity_restart`` / ``enable_substep_state_correction`` = None mean
-"this run's default": ``pulsim._plan.DEFAULT_*`` (False today; the release
-sets both True). The split's default follows the rule's resolved value; under
+"this run's default": ``pulsim._plan.DEFAULT_*`` (both True since the
+release; False before). The split's default follows the rule's resolved value; under
 ``mmc_arms`` the rule's default is not applied, with one diagnostic. An
 explicit True / False does what it did before.
 """
@@ -46,15 +46,28 @@ def _same(a, b):
                                rtol=0, atol=0)
 
 
-def test_todays_defaults_are_both_off():
-    assert _plan.DEFAULT_DISCONTINUITY_RESTART is False
-    assert _plan.DEFAULT_SUBSTEP_STATE_CORRECTION is False
-    _same(_run(), _run(discontinuity_restart=False,
-                       enable_substep_state_correction=False))
+@pytest.fixture
+def pre_release_defaults(monkeypatch):
+    monkeypatch.setattr(_plan, "DEFAULT_DISCONTINUITY_RESTART", False)
+    monkeypatch.setattr(_plan, "DEFAULT_SUBSTEP_STATE_CORRECTION", False)
 
 
-def test_explicit_restart_alone_keeps_the_split_off_today():
-    # the split's default is DEFAULT_SUBSTEP_STATE_CORRECTION and the rule
+def test_the_release_defaults_are_both_on():
+    # update-number-changing-release R1 flipped both (DECISIONS 5)
+    assert _plan.DEFAULT_DISCONTINUITY_RESTART is True
+    assert _plan.DEFAULT_SUBSTEP_STATE_CORRECTION is True
+    _same(_run(), _run(discontinuity_restart=True,
+                       enable_substep_state_correction=True))
+
+
+def test_explicit_restart_alone_turns_the_split_on():
+    # the split's default follows the rule's resolved value
+    _same(_run(discontinuity_restart=True),
+          _run(discontinuity_restart=True, enable_substep_state_correction=True))
+
+
+def test_explicit_restart_alone_kept_the_split_off_before_the_release(pre_release_defaults):
+    # legacy period: with the pre-release plan defaults the split stayed off
     _same(_run(discontinuity_restart=True),
           _run(discontinuity_restart=True, enable_substep_state_correction=False))
 
