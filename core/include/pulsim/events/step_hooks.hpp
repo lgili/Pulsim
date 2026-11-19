@@ -38,12 +38,24 @@
 #include "pulsim/topology/switch_state.hpp"
 
 #include <functional>
+#include <stdexcept>
 #include <vector>
 
 namespace pulsim::pwl {
 class StatefulHistories;
 class HistoryState;
 }
+
+#if defined(__GNUC__) || defined(__clang__)
+#define PULSIM_HOOKS_INLINE __attribute__((always_inline)) inline
+#define PULSIM_HOOKS_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define PULSIM_HOOKS_INLINE inline
+#define PULSIM_HOOKS_NOINLINE __declspec(noinline)
+#else
+#define PULSIM_HOOKS_INLINE inline
+#define PULSIM_HOOKS_NOINLINE
+#endif
 
 namespace pulsim::events {
 
@@ -122,17 +134,105 @@ public:
     void on_event(EventFn f) { event_.push_back(std::move(f)); }
     [[nodiscard]] bool has_event() const noexcept { return !event_.empty(); }
     void event(Real t, const Vector& x_left, const topology::SwitchStateMask& mask_left,
-               const Vector& x_right, const topology::SwitchStateMask& mask_right) const {
+               const Vector& x_right, const topology::SwitchStateMask& mask_right) {
+        flush_steps();   // the sink sees its steps before an event at their end
         for (const auto& f : event_) f(t, x_left, mask_left, x_right, mask_right);
     }
     void on_step(StepFn f) { step_.push_back(std::move(f)); }
     void on_device_state(DeviceStateFn f) { device_state_.push_back(std::move(f)); }
-    [[nodiscard]] bool has_step() const noexcept { return !step_.empty(); }
+    /// probes 0b.10: ONE listener may take the accepted steps through a
+    /// plain function pointer (no std::function hop) that is told when the
+    /// step starts exactly where the previous call to it ended: `x_start` /
+    /// `mask_start` are then nullptr (contiguous: bit for bit the previous
+    /// call's `x_end` / `mask_end`), otherwise the step's start. The first
+    /// call of a run always carries the start. `step()` calls it too.
+    using StepSinkFn = void (*)(void* ctx, Real t_prev, const Vector* x_start,
+                                const topology::SwitchStateMask* mask_start, Real t,
+                                const Vector& x_end, const topology::SwitchStateMask& mask_end);
+    /// The sink may also take CONTIGUOUS steps under one mask in batches:
+    /// `rows` holds n rows of `stride` = 1 + state size reals each, `t` then
+    /// the end state (copies: nothing points into the engine), all solved
+    /// under `mask` and each starting where the previous one ended. The
+    /// hooks hand them over before any other sink call or event, when the
+    /// buffer is full, and at `flush_steps()` (the engines call it at the
+    /// end of a run; a run that throws leaves its rows held until the next
+    /// `start()` drops them).
+    using StepBatchFn = void (*)(void* ctx, const Real* rows, Size n, Size stride,
+                                 const topology::SwitchStateMask& mask);
+    void set_step_sink(StepSinkFn f, void* ctx, StepBatchFn batch = nullptr) {
+        flush_steps();   // rows held for the sink being replaced go to it
+        if (sink_ != nullptr && f != nullptr) {
+            throw std::logic_error("StepHooks: a step sink is already set (one per hooks)");
+        }
+        sink_ = f;
+        sink_ctx_ = ctx;
+        batch_fn_ = f != nullptr ? batch : nullptr;
+    }
+    /// Any step listener (an `on_step` function or the sink).
+    [[nodiscard]] bool has_step() const noexcept { return !step_.empty() || sink_ != nullptr; }
+    /// `on_step` functions: they need the start state on every step.
+    [[nodiscard]] bool has_step_fns() const noexcept { return !step_.empty(); }
+    [[nodiscard]] bool has_device_state() const noexcept { return !device_state_.empty(); }
     void step(Real t_prev, const Vector& x_start,
               const topology::SwitchStateMask& mask_start, Real t,
-              const Vector& x_end, const topology::SwitchStateMask& mask_end) const {
-        for (const auto& f : step_) f(t_prev, x_start, mask_start, t, x_end, mask_end);
+              const Vector& x_end, const topology::SwitchStateMask& mask_end) {
+        step(t_prev, x_start, mask_start, t, x_end, mask_end, false);
     }
+    /// The engines' call. `contiguous`: the step starts bit for bit where the
+    /// previous call of this run ended (x and mask); x_start / mask_start
+    /// need be valid only when it is false or `has_step_fns()`.
+    PULSIM_HOOKS_INLINE void step(Real t_prev, const Vector& x_start,
+                                  const topology::SwitchStateMask& mask_start, Real t,
+                                  const Vector& x_end, const topology::SwitchStateMask& mask_end,
+                                  bool contiguous) {
+        // the common step, in the engine's loop: one more row of an open
+        // batch under its mask (no step function to call)
+        if (contiguous && batch_n_ != 0 && step_.empty() &&
+            static_cast<Size>(x_end.size()) + 1 == batch_stride_ && mask_end == batch_mask_) {
+            Real* const row = batch_.data() + batch_n_ * batch_stride_;
+            row[0] = t;
+            const Real* const src = x_end.data();
+            for (Size k = 1; k < batch_stride_; ++k) row[k] = src[k - 1];
+            if (++batch_n_ == batch_cap_) flush_steps();
+            return;
+        }
+        step_other(t_prev, x_start, mask_start, t, x_end, mask_end, contiguous);
+    }
+    /// Every other step: out of the engine's loop.
+    PULSIM_HOOKS_NOINLINE void step_other(Real t_prev, const Vector& x_start,
+                                          const topology::SwitchStateMask& mask_start, Real t,
+                                          const Vector& x_end,
+                                          const topology::SwitchStateMask& mask_end,
+                                          bool contiguous) {
+        for (const auto& f : step_) f(t_prev, x_start, mask_start, t, x_end, mask_end);
+        if (sink_ == nullptr) return;
+        if (contiguous && batch_cap_ != 0 &&
+            static_cast<Size>(x_end.size()) + 1 == batch_stride_) {
+            if (batch_n_ == 0) {
+                batch_mask_ = mask_end;
+            } else if (!(mask_end == batch_mask_)) {
+                flush_steps();
+                batch_mask_ = mask_end;
+            }
+            Real* const row = batch_.data() + batch_n_ * batch_stride_;
+            row[0] = t;
+            const Real* const src = x_end.data();
+            for (Size k = 1; k < batch_stride_; ++k) row[k] = src[k - 1];
+            if (++batch_n_ == batch_cap_) flush_steps();
+            return;
+        }
+        flush_steps();
+        sink_(sink_ctx_, t_prev, contiguous ? nullptr : &x_start,
+              contiguous ? nullptr : &mask_start, t, x_end, mask_end);
+    }
+    /// Hand the batched steps to the sink (no-op when none are held).
+    void flush_steps() {
+        if (batch_n_ == 0) return;
+        const Size n = batch_n_;
+        batch_n_ = 0;
+        batch_fn_(sink_ctx_, batch_.data(), n, batch_stride_, batch_mask_);
+    }
+    [[nodiscard]] bool steps_held() const noexcept { return batch_n_ != 0; }
     void device_state(Real t, const Vector& x, const pwl::StatefulHistories& h) const {
         for (const auto& f : device_state_) f(t, x, h);
     }
@@ -152,6 +252,15 @@ public:
     /// stamped under are the "previous step" of the first accepted step.
     void start(const Vector& x0, const topology::SwitchStateMask& mask0, RunView view = {}) {
         view_ = view;
+        batch_n_ = 0;   // rows of a run that threw are dropped
+        batch_cap_ = 0;
+        if (batch_fn_ != nullptr) {
+            // the batch buffer: sized here, never regrown during the run
+            batch_stride_ = static_cast<Size>(x0.size()) + 1;
+            batch_cap_ = kBatchRows;
+            batch_.assign(batch_cap_ * batch_stride_, Real{0});
+            batch_mask_ = mask0;   // its words too (a wide mask's heap words)
+        }
         for (const auto& f : start_) f(x0, mask0);
         if (empty()) return;
         x_prev_ = x0;          // sizes the buffer (the only allocation)
@@ -191,6 +300,13 @@ private:
     std::vector<DeviceStateFn> device_state_;
     std::vector<EventFn> event_;
     std::vector<StartFn> start_;
+    StepSinkFn sink_ = nullptr;
+    void* sink_ctx_ = nullptr;
+    StepBatchFn batch_fn_ = nullptr;
+    static constexpr Size kBatchRows = 128;
+    std::vector<Real> batch_;
+    Size batch_cap_ = 0, batch_n_ = 0, batch_stride_ = 0;   // rows
+    topology::SwitchStateMask batch_mask_;
     Vector x_prev_;
     topology::SwitchStateMask mask_prev_;
     RunView view_;

@@ -133,6 +133,7 @@ public:
             }
         }
         const Size np = probes_.size();
+        np_ = np;
         declared_.resize(spec_.windows.size() * np);
         for (Size w = 0; w < spec_.windows.size(); ++w) {
             for (Size p = 0; p < np; ++p) {
@@ -141,6 +142,8 @@ public:
             }
         }
         stats_ = !spec_.windows.empty() || spec_.period > 0;
+        slow_ = stats_ || (spec_.keep != RecorderSpec::Keep::Every &&
+                           spec_.keep != RecorderSpec::Keep::None);
         left_.resize(np);
         start_.resize(np);
         right_.resize(np);
@@ -170,6 +173,7 @@ public:
             max_atoms = std::max(max_atoms, pr.atoms().size());
         }
         offs_.push_back(cols_.size());
+        plain_ = std::find(src_.begin(), src_.end(), kNotPlain) == src_.end();
         n_readings_ = reading_names.size();
         scratch_.resize(max_atoms);
         bound_ = true;
@@ -211,31 +215,102 @@ public:
     /// The left limit at `t`: the end of an accepted step.
     PULSIM_RECORD_INLINE void sample(Real t, std::span<const Real> readings) {
         require_bound(readings);
+        sample_row(t, readings.data());
+    }
+    /// `sample` for a feeder that bound this recorder to its own reading
+    /// row (LoopFeed): `readings` holds the bound number of readings.
+    PULSIM_RECORD_INLINE void sample_row(Real t, const Real* readings) {
         if (n_samples_ > 0 && !(t >= t_prev_)) [[unlikely]] {
             bad_order(t);
         }
-        eval_into(readings, left_);
-        if (stats_ && n_samples_ > 0 && t > t_prev_) {
-            if (spec_.windows.empty() && in_fast_window(t_prev_, t)) {
-                accumulate_window(t_prev_, t);
-            } else {
-                piece(t_prev_, t);
-            }
+        if (plain_) {
+            // every probe is one reading: a load and a store each
+            Real* const lf = left_.data();
+            const Size* const src = src_.data();
+            for (Size p = 0; p < np_; ++p) lf[p] = readings[src[p]];
+        } else {
+            eval_into({readings, n_readings_}, left_);
         }
-        if (spec_.keep == RecorderSpec::Keep::Every) {
-            keep_row(t, left_);
-        } else if (spec_.keep == RecorderSpec::Keep::Times) {
-            emit_times(t);
-        } else if (spec_.keep == RecorderSpec::Keep::Decimate &&
-                   n_samples_ % spec_.every_n == 0) {
+        if (slow_) [[unlikely]] {
+            sample_slow(t);
+        } else if (spec_.keep == RecorderSpec::Keep::Every) {
             keep_row(t, left_);
         }
-        const Size np = left_.size();
         Real* const st = start_.data();
         const Real* const lf = left_.data();
-        for (Size p = 0; p < np; ++p) st[p] = lf[p];
+        for (Size p = 0; p < np_; ++p) st[p] = lf[p];
         t_prev_ = t;
         ++n_samples_;
+    }
+
+    /// `sample_row` for n rows in order: row k at `t[k * ts]`, its readings
+    /// at `rd + k * rs`. Plain probes kept every row or none, period
+    /// statistics or none and no ring: the kept rows are written column by
+    /// column and only the last row moves the line when there are no
+    /// statistics (the same values, per probe the same operations in the
+    /// same order); anything else, or a time out of order, row by row.
+    PULSIM_RECORD_INLINE void sample_block(const Real* t, Size ts, const Real* rd, Size rs,
+                                           Size n) {
+        using K = RecorderSpec::Keep;
+        if (n == 0) return;
+        bool rowwise = !plain_ || ring_ != nullptr || !spec_.windows.empty() ||
+                       (spec_.keep != K::Every && spec_.keep != K::None);
+        if (!rowwise) {
+            Real tp = t_prev_;
+            for (Size k = 0; k < n; ++k) {
+                const Real tk = t[k * ts];
+                rowwise = rowwise || ((n_samples_ > 0 || k > 0) && !(tk >= tp));
+                tp = tk;
+            }
+        }
+        if (rowwise) [[unlikely]] {
+            for (Size k = 0; k < n; ++k) sample_row(t[k * ts], rd + k * rs);
+            return;
+        }
+        const Size np = np_;
+        const Size* const src = src_.data();
+        if (spec_.keep == K::Every) {
+            const Size t0 = times_.size(), v0 = values_.size();
+            times_.resize(t0 + n);
+            values_.resize(v0 + n * np);
+            Real* const tt = times_.data() + t0;
+            Real* const vv = values_.data() + v0;
+            for (Size k = 0; k < n; ++k) tt[k] = t[k * ts];
+            if (np <= 2) {
+                for (Size p = 0; p < np; ++p) {   // column by column
+                    const Real* const c = rd + src[p];
+                    for (Size k = 0; k < n; ++k) vv[k * np + p] = c[k * rs];
+                }
+            } else {
+                for (Size k = 0; k < n; ++k) {
+                    for (Size p = 0; p < np; ++p) vv[k * np + p] = rd[k * rs + src[p]];
+                }
+            }
+        }
+        Real* const lf = left_.data();
+        Real* const st = start_.data();
+        if (stats_) {
+            for (Size k = 0; k < n; ++k) {
+                const Real tk = t[k * ts];
+                const Real* const r = rd + k * rs;
+                for (Size p = 0; p < np; ++p) lf[p] = r[src[p]];
+                if (n_samples_ > 0 && tk > t_prev_) {
+                    if (in_fast_window(t_prev_, tk)) {
+                        accumulate_window(t_prev_, tk);
+                    } else {
+                        piece(t_prev_, tk);
+                    }
+                }
+                for (Size p = 0; p < np; ++p) st[p] = lf[p];
+                t_prev_ = tk;
+                ++n_samples_;
+            }
+            return;
+        }
+        const Real* const r = rd + (n - 1) * rs;
+        for (Size p = 0; p < np; ++p) st[p] = lf[p] = r[src[p]];
+        t_prev_ = t[(n - 1) * ts];
+        n_samples_ += n;
     }
 
     /// How an event row's right value was obtained: the engine's exact
@@ -247,9 +322,13 @@ public:
     void event(std::span<const Real> readings_right, Resolution res = Resolution::Exact) {
         require_bound(readings_right);
         if (n_samples_ == 0) throw std::logic_error("recorder: event before any sample");
-        eval_into(readings_right, right_);
+        if (plain_) {
+            for (Size p = 0; p < np_; ++p) right_[p] = readings_right[src_[p]];
+        } else {
+            eval_into(readings_right, right_);
+        }
         push_event(t_prev_, res);
-        start_ = right_;
+        std::copy(right_.begin(), right_.end(), start_.begin());   // same size: no vector assign
     }
 
     /// A commutation the feeder only BRACKETS: the left limit is the last
@@ -292,6 +371,14 @@ public:
     }
 
     // ---- snapshot (task 0b.7): everything a resumed run continues from ----
+    /// What `save` appends, exactly (the caller reserves once: the kept
+    /// rows are most of it).
+    [[nodiscard]] Size save_size() const noexcept {
+        return 5 + 10 + start_.size() + left_.size() + times_.size() + values_.size() +
+               interpolated_.size() + event_t_.size() + event_t_right_.size() +
+               event_resolution_.size() + event_left_.size() + event_right_.size() + 2 +
+               10 * (declared_.size() + periodic_.size());
+    }
     /// Append the recorder's run state to `out` (flat; see `restore`): the
     /// last sample and the line's start (a partial window ends there), the
     /// counters, kept rows, event rows and every window's statistics.
@@ -415,6 +502,8 @@ public:
     [[nodiscard]] const std::vector<WindowStat>& windows() const noexcept { return declared_; }
     /// Period windows k = 0, 1, ... (complete or not): `[k * n_probes() + p]`.
     [[nodiscard]] const std::vector<WindowStat>& periods() const noexcept { return periodic_; }
+    /// Kept rows go to a LiveRing (`stream_to`).
+    [[nodiscard]] bool streams() const noexcept { return ring_ != nullptr; }
 
 private:
     std::vector<Probe> probes_;
@@ -424,8 +513,11 @@ private:
     std::vector<Size> cols_, offs_;
     std::vector<Size> src_;   // per probe: its reading for a plain probe, else kNotPlain
     Size n_readings_ = 0;
+    Size np_ = 0;             // probes_.size(), kept (the per-sample loops' bound)
+    bool plain_ = false;      // every probe is plain (src_ has no kNotPlain)
     bool bound_ = false;
     bool stats_ = false;      // declared windows or periods
+    bool slow_ = false;       // stats_, or kept rows other than every / none
     // Period fast path: the window holding the last piece's end (its
     // first entry, k * n_probes) and the open interval in which a piece
     // can only touch that window, without a snap (see piece()).
@@ -442,12 +534,33 @@ private:
     Size next_time_ = 0, unreached_ = 0;
     streaming::LiveRing* ring_ = nullptr;
 
+    // sample_row's statistics and its kept rows other than every / none:
+    // out of line, so the common sample keeps its registers
+    PULSIM_RECORD_NOINLINE void sample_slow(Real t) {
+        if (stats_ && n_samples_ > 0 && t > t_prev_) {
+            if (spec_.windows.empty() && in_fast_window(t_prev_, t)) {
+                accumulate_window(t_prev_, t);
+            } else {
+                piece(t_prev_, t);
+            }
+        }
+        if (spec_.keep == RecorderSpec::Keep::Every) {
+            keep_row(t, left_);
+        } else if (spec_.keep == RecorderSpec::Keep::Times) {
+            emit_times(t);
+        } else if (spec_.keep == RecorderSpec::Keep::Decimate &&
+                   n_samples_ % spec_.every_n == 0) {
+            keep_row(t, left_);
+        }
+    }
+
     void push_event(Real t_right, Resolution res) {
         event_t_.push_back(t_prev_);
         event_t_right_.push_back(t_right);
         event_resolution_.push_back(static_cast<std::uint8_t>(res));
-        event_left_.insert(event_left_.end(), left_.begin(), left_.end());
-        event_right_.insert(event_right_.end(), right_.begin(), right_.end());
+        // push_back, not a range insert: a few values a row, a third of the cost
+        for (const Real v : left_) event_left_.push_back(v);
+        for (const Real v : right_) event_right_.push_back(v);
     }
 
     PULSIM_RECORD_INLINE void keep_row(Real t, const std::vector<Real>& v, bool interp = false) {

@@ -54,6 +54,7 @@
 #include "pulsim/topology/switch_state.hpp"
 
 #include <bit>
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <span>
@@ -217,11 +218,17 @@ public:
         hooks.on_start([this](const Vector& x0, const topology::SwitchStateMask& m0) {
             on_start(x0, m0);
         });
-        hooks.on_step([this](Real t0, const Vector& xs, const topology::SwitchStateMask& ms,
-                             Real t, const Vector& xe, const topology::SwitchStateMask& me) {
-            on_step(t0, xs, ms, t, xe, me);
-        });
+        // 0b.10: the step sink, a plain function pointer told when a step
+        // starts where the previous one ended (no std::function hop, no jump
+        // test then); batched (a tight loop over copied rows) when every
+        // reading is a function of the state alone, on the fixed engine only
+        // (TR-BDF2 reports an event every ~3 steps: a batch that short costs
+        // more than the calls it saves) and not when a recorder streams (its
+        // rows reach the ring as the steps commit)
         settled_ = kind == Events::Settled;
+        bool batch = general_.empty() && !settled_;
+        for (const auto& r : recs_) batch = batch && !r.streams();
+        hooks.set_step_sink(&LoopFeed::sink_step, this, batch ? &LoopFeed::sink_batch : nullptr);
         hooks.on_event([this](Real t, const Vector& xl, const topology::SwitchStateMask& ml,
                               const Vector& xr, const topology::SwitchStateMask& mr) {
             on_event(t, xl, ml, xr, mr);
@@ -233,6 +240,7 @@ public:
 
     /// End of the run (`Keep::Times` rows at the last sample).
     void finish() {
+        if (view_of_ != nullptr) view_of_->flush_steps();   // the engines flush at a run's end
         for (auto& r : recs_) r.flush();
     }
 
@@ -263,16 +271,23 @@ public:
             // snapshot cannot carry it without inventing its left side
             throw std::logic_error("LoopFeed: an event report is pending at the run's end");
         }
+        if (view_of_ != nullptr && view_of_->steps_held()) {
+            throw std::logic_error("LoopFeed: steps held by the hooks (finish() first)");
+        }
         std::vector<Real> out{Real{1}, static_cast<Real>(recs_.size()),
                               static_cast<Real>(names_.size()), Real(started_),
                               Real(event_at_last_), t_last_, static_cast<Real>(n_steps_),
                               static_cast<Real>(n_jumps_), static_cast<Real>(n_events_),
                               static_cast<Real>(n_dropped_),
                               static_cast<Real>(x_last_.size())};
+        Size n = out.size() + static_cast<Size>(x_last_.size()) + 1 + mask_last_.size();
+        for (const auto& r : recs_) n += r.save_size();
+        out.reserve(n);   // once: the kept rows would regrow it
         for (Index k = 0; k < x_last_.size(); ++k) out.push_back(x_last_[k]);
         out.push_back(static_cast<Real>(mask_last_.size()));
         for (Size k = 0; k < mask_last_.size(); ++k) out.push_back(Real(mask_last_.get(k)));
         for (const auto& r : recs_) r.save(out);
+        assert(out.size() == n);
         return out;
     }
 
@@ -335,13 +350,13 @@ private:
     std::vector<Lin> lin_;         // linear forms over terms_ (LinearReading::eval's sum)
     std::vector<Term> terms_;
     std::vector<Size> general_;    // the others (products, devices)
-    std::vector<Real> row_, pending_, pending_left_;
-    Vector x_last_, x_seed_;
+    std::vector<Real> row_, pending_, pending_left_, blk_;
+    Vector x_last_, x_seed_, x_row_;
     std::vector<Real> seed_;
     bool seeded_ = false, restored_ = false;
     const topology::Graph* graph_ = nullptr;
     const pwl::DevicePool* pool_ = nullptr;
-    const events::StepHooks* view_of_ = nullptr;
+    events::StepHooks* view_of_ = nullptr;
     topology::SwitchStateMask mask_last_, mask_pending_;
     bool started_ = false, has_pending_ = false, attached_ = false, settled_ = false;
     bool event_at_last_ = false;  // a settled event row at the last sample
@@ -352,12 +367,15 @@ private:
     // post-event probe (TR-BDF2), the histories are still the left side's.
     void eval(Real t, const Vector& x, const topology::SwitchStateMask& mask,
               std::vector<Real>& out, bool probe_right = false) {
-        const Real* const xs = x.data();
-        Real* const o = out.data();
+        eval_state(x.data(), out.data());
+        eval_general(t, x, mask, out, probe_right);
+    }
+    // The unit and linear readings of a state (all of them when general_
+    // is empty)
+    PULSIM_RECORD_INLINE void eval_state(const Real* xs, Real* o) const noexcept {
         // 0 + x: the general path's sum, bit for bit (-0 reads +0 there too)
         for (const auto& u : unit_) o[u.dst] = Real{0} + xs[u.col];
         eval_lin(xs, o);
-        eval_general(t, x, mask, out, probe_right);
     }
     // LinearReading::eval, operation for operation
     PULSIM_RECORD_INLINE void eval_lin(const Real* xs, Real* o) const noexcept {
@@ -457,6 +475,7 @@ private:
         seed_.resize(names_.size());
         eval(0, x0, m0, seed_);
         x_seed_ = x0;
+        x_row_.resize(x0.size());   // a batched row the general path takes
         seeded_ = true;
     }
 
@@ -515,42 +534,142 @@ private:
         if (has_pending_) ++n_dropped_;  // two reports for one step: keep the last
         // fixed engine: xr is the end of the step being committed (the
         // histories are already its); variable step: a settled probe
-        eval(t, xr, mr, pending_, settled_);
-        if (settled_) eval(t, xl, ml, pending_left_);
+        if (general_.empty()) {
+            eval_state(xr.data(), pending_.data());
+            if (settled_) eval_state(xl.data(), pending_left_.data());
+        } else {
+            eval(t, xr, mr, pending_, settled_);
+            if (settled_) eval(t, xl, ml, pending_left_);
+        }
         mask_pending_ = mr;
         t_pending_ = t;
         has_pending_ = true;
     }
 
-    void on_step(Real t0, const Vector& xs, const topology::SwitchStateMask& ms, Real t,
-                 const Vector& xe, const topology::SwitchStateMask& me) {
-        // The common step (no event report, no event row at its start, the
-        // same mode, a start state bit for bit the last sample's): what the
-        // general path below does in that case, without its branches.
-        if (started_ && !has_pending_ && !event_at_last_ && ms == mask_last_ &&
-            (!settled_ || me == mask_last_) && bits_equal(xs, x_last_)) {
+    static void sink_step(void* self, Real t0, const Vector* xs,
+                          const topology::SwitchStateMask* ms, Real t, const Vector& xe,
+                          const topology::SwitchStateMask& me) {
+        static_cast<LoopFeed*>(self)->on_step(t0, xs, ms, t, xe, me);
+    }
+    static void sink_batch(void* self, const Real* rows, Size n, Size stride,
+                           const topology::SwitchStateMask& m) {
+        static_cast<LoopFeed*>(self)->on_batch(rows, n, stride, m);
+    }
+
+    // Contiguous steps under one mask, each row `t` then its end state
+    // (only when every reading is a unit or linear form: general_ empty).
+    // Row by row this is on_step(t_prev, nullptr, nullptr, t, x, m): once a
+    // row takes the common step, so do the rest (nothing between them can
+    // change the line's mode, raise a report or put an event row at their
+    // start), so the rest run as one loop and the line's state is copied
+    // once, from the last row.
+    void on_batch(const Real* rows, Size n, Size stride, const topology::SwitchStateMask& m) {
+        Size i = 0;
+        for (; i < n; ++i) {
+            if (started_ && !has_pending_ && m == mask_last_) break;
+            // a row the general path takes (rare): through a sized buffer
+            const Real* const row = rows + i * stride;
+            x_row_.resize(static_cast<Index>(stride - 1));
+            for (Size k = 1; k < stride; ++k) x_row_[static_cast<Index>(k - 1)] = row[k];
+            on_step_general(t_last_, nullptr, nullptr, row[0], x_row_, m);
+        }
+        if (i == n) return;
+        // the readings of every row, then each recorder over the block
+        const Size nr = row_.size(), nb = n - i;
+        if (blk_.size() < nb * nr) blk_.resize(nb * nr);   // once: the hooks' batch size
+        Real* const b = blk_.data();
+        for (Size r = 0; r < nb; ++r) {
+            eval_state(rows + (i + r) * stride + 1, b + r * nr);
+        }
+        for (auto& rec : recs_) rec.sample_block(rows + i * stride, stride, b, nr, nb);
+        const Real* const last = rows + (n - 1) * stride;
+        if (static_cast<Size>(x_last_.size()) + 1 != stride) {
+            x_last_.resize(static_cast<Index>(stride - 1));
+        }
+        for (Size k = 1; k < stride; ++k) x_last_[static_cast<Index>(k - 1)] = last[k];
+        event_at_last_ = false;
+        t_last_ = last[0];
+        n_steps_ += n - i;
+    }
+
+    // `xs` / `ms` nullptr: the engine's contiguous step (it starts bit for
+    // bit at the last sample's state and mask: no jump is possible).
+    PULSIM_RECORD_INLINE void on_step(Real t0, const Vector* xs,
+                                      const topology::SwitchStateMask* ms, Real t,
+                                      const Vector& xe, const topology::SwitchStateMask& me) {
+        // The common step: no event report pending, the step solved under
+        // the mode the line is in, and either an event row at its start (the
+        // line starts from its right side: no jump test, no bracket) or a
+        // start bit for bit the last sample's. What the general path below
+        // does in that case, without its branches.
+        if (started_ && !has_pending_ && me == mask_last_ &&
+            (event_at_last_ || xs == nullptr ||
+             (*ms == mask_last_ && bits_equal(*xs, x_last_)))) {
             {
-                const Real* const xv = xe.data();
-                Real* const o = row_.data();
-                for (const auto& u : unit_) o[u.dst] = Real{0} + xv[u.col];
-                eval_lin(xv, o);
-                if (!general_.empty()) eval_general(t, xe, me, row_, false);
+                eval_state(xe.data(), row_.data());
+                if (!general_.empty()) [[unlikely]] eval_general(t, xe, me, row_, false);
             }
-            for (auto& r : recs_) r.sample(t, row_);
+            for (auto& r : recs_) r.sample_row(t, row_.data());
             copy_state(xe);
-            mask_last_ = me;
+            event_at_last_ = false;
             t_last_ = t;
             ++n_steps_;
             return;
         }
         on_step_general(t0, xs, ms, t, xe, me);
     }
+    void on_step(Real t0, const Vector& xs, const topology::SwitchStateMask& ms, Real t,
+                 const Vector& xe, const topology::SwitchStateMask& me) {
+        on_step(t0, &xs, &ms, t, xe, me);
+    }
 
     // Every other step: the first, an event's, a jump's.
-    PULSIM_RECORD_NOINLINE void on_step_general(Real t0, const Vector& xs,
-                                                const topology::SwitchStateMask& ms, Real t,
+    PULSIM_RECORD_NOINLINE void on_step_general(Real t0, const Vector* xsp,
+                                                const topology::SwitchStateMask* msp, Real t,
                                                 const Vector& xe,
                                                 const topology::SwitchStateMask& me) {
+        // TR-BDF2's two event steps, each the path below with no branch
+        // taken but the event's; unit and linear readings only (no history
+        // reading to take from the report). Nearly every event is the first.
+        if (started_ && has_pending_ && settled_ && general_.empty()) {
+            if (t_last_ < t_pending_ && t_pending_ < t) {
+                // [t0, t_ev] committed, then the post-event probe [t_ev, t]
+                // as one hook step (branch 1 below)
+                has_pending_ = false;
+                for (auto& r : recs_) r.sample_row(t_pending_, pending_left_.data());
+                settled_event(pending_);
+                eval_state(xe.data(), row_.data());
+                for (auto& r : recs_) r.sample_row(t, row_.data());
+                copy_state(xe);
+                mask_last_ = me;
+                event_at_last_ = false;
+                t_last_ = t;
+                ++n_steps_;
+                return;
+            }
+            if (t_pending_ == t && me == mask_last_ &&
+                (xsp == nullptr || event_at_last_ ||
+                 (*msp == mask_last_ && bits_equal(*xsp, x_last_)))) {
+                // the step ending at a settled event reported before it
+                eval_state(xe.data(), row_.data());
+                for (auto& r : recs_) r.sample_row(t, row_.data());
+                copy_state(xe);
+                t_last_ = t;
+                ++n_steps_;
+                has_pending_ = false;
+                settled_event(pending_);
+                mask_last_ = mask_pending_;
+                return;
+            }
+        }
+        if (xsp == nullptr) {
+            // contiguous: the start is the last sample (its state and mask)
+            if (!started_) throw std::logic_error("LoopFeed: a run's first step carries its start");
+            xsp = &x_last_;
+            msp = &mask_last_;
+        }
+        const Vector& xs = *xsp;
+        const topology::SwitchStateMask& ms = *msp;
         if (!started_) {
             eval(t0, xs, ms, row_);
             if (seeded_ && same(xs, x_seed_)) {

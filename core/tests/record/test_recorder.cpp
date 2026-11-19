@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <string>
 #include <vector>
@@ -607,6 +608,158 @@ TEST_CASE("LoopFeed: the flat reading tables read what StateReading::eval reads"
                 CHECK(got == Catch::Approx(want).epsilon(1e-15).margin(1e-300));
                 CHECK(std::signbit(got) == std::signbit(want));
             }
+        }
+    }
+}
+
+TEST_CASE("LoopFeed: the fast step through a jump, a mask change and a restore mid-window "
+          "equals the recorder fed by hand",
+          "[record][loop_feed]") {
+    // Both engines' conventions, driven by hand: contiguous steps (the
+    // fixed engine's batches, TR-BDF2's sink step), a restart from another
+    // state (a settled jump row), a reported mode change (the fixed
+    // engine's bracket; TR-BDF2's settled event inside the next hook
+    // step), and the feed saved and restored into a new one mid-window
+    // (period windows open at the seam). The oracle is a Recorder fed the
+    // rows those conventions define (sample / event / event_bracket).
+    using topology::SwitchStateMask;
+    using R = record::Recorder::Resolution;
+    for (const bool bracket : {true, false}) {
+        INFO((bracket ? "fixed engine (bracket, batched)" : "TR-BDF2 (settled)"));
+        RecorderSpec spec;
+        spec.keep = RecorderSpec::Keep::Every;
+        spec.period = 0.25;
+        const std::vector<std::string> names{"v(a)", "v(a,b)"};
+        std::vector<record::StateReading> rs(2);
+        rs[0].a.cols = {0};
+        rs[0].a.coef = {1.0};
+        rs[1].a.cols = {0, 1};
+        rs[1].a.coef = {1.0, -1.0};
+        const auto new_feed = [&]() {
+            std::vector<Probe> ps;
+            for (const auto& n : names) ps.push_back(Probe::compile(n));
+            std::vector<Recorder> recs;
+            recs.emplace_back(std::move(ps), spec);
+            auto f = std::make_unique<record::LoopFeed>(names, rs, std::move(recs));
+            f->attach_own(bracket);
+            return f;
+        };
+        auto ref = make(names, spec, names);
+        const auto row = [&](const Vector& x) {
+            return std::vector<Real>{rs[0].eval(x), rs[1].eval(x)};
+        };
+        const auto state = [](Real t, Real shift) {
+            Vector y(2);
+            y << std::sin(7 * t) + shift, std::cos(3 * t) - shift;
+            return y;
+        };
+        auto feed = new_feed();
+        SwitchStateMask m0(1), m1(1);
+        m1.set(0, true);
+        Vector x = state(0, 0);
+        SwitchStateMask mask = m0;
+        feed->hooks().start(x, mask, {});
+        ref.sample(0, row(x));
+        bool contig = false;   // the first step carries its start
+        Real shift = 0;
+        Size n_jumps = 0, n_events = 0;
+        const Real dt = 0.01;
+        for (Size k = 1; k <= 200; ++k) {
+            const Real t0 = static_cast<Real>(k - 1) * dt, t = static_cast<Real>(k) * dt;
+            auto& h = feed->hooks();
+            if (k == 117) {
+                // a snapshot mid-window (0.25 < 1.16 < 1.25): the feed's state
+                // into a new feed, which the next run starts from x
+                h.flush_steps();
+                const auto st = feed->save();
+                feed = new_feed();
+                feed->restore(st);
+                feed->hooks().start(x, mask, {});
+                contig = false;   // a run's first step carries its start
+            }
+            auto& hk = feed->hooks();
+            if (k % 37 == 0) {
+                // a restart from another state than committed: a jump row
+                shift += 0.5;
+                const Vector xs = state(t0, shift);
+                const Vector xe = state(t, shift);
+                hk.step(t0, xs, mask, t, xe, mask, false);
+                ref.event(row(xs), R::Settled);
+                ref.sample(t, row(xe));
+                x = xe;
+                ++n_jumps;
+                contig = true;
+                continue;
+            }
+            if (k % 23 == 0) {
+                // a reported mode change
+                const SwitchStateMask next = mask == m0 ? m1 : m0;
+                const Vector xe = state(t, shift);
+                if (bracket) {
+                    // the fixed engine: reported at the step's start, the
+                    // right side the end of the first step under the new stamp
+                    hk.event(t0, x, mask, xe, next);
+                    hk.step(t0, x, mask, t, xe, next, contig);
+                    ref.event_bracket(t, row(xe));
+                    ref.sample(t, row(xe));
+                } else {
+                    // TR-BDF2: landed at t_ev inside the step, settled there;
+                    // the one hook step covers [t0, t] under the new mode
+                    const Real t_ev = t0 + 0.4 * dt;
+                    const Vector xl = state(t_ev, shift);
+                    shift += 0.25;   // the settle moves the state
+                    const Vector xr = state(t_ev, shift);
+                    const Vector xe2 = state(t, shift);
+                    hk.event(t_ev, xl, mask, xr, next);
+                    hk.step(t0, x, mask, t, xe2, next, contig);
+                    ref.sample(t_ev, row(xl));
+                    ref.event(row(xr), R::Settled);
+                    ref.sample(t, row(xe2));
+                    x = xe2;
+                    mask = next;
+                    ++n_events;
+                    contig = true;
+                    continue;
+                }
+                x = xe;
+                mask = next;
+                ++n_events;
+                contig = true;
+                continue;
+            }
+            const Vector xe = state(t, shift);
+            hk.step(t0, x, mask, t, xe, mask, contig);
+            ref.sample(t, row(xe));
+            x = xe;
+            contig = true;
+        }
+        feed->finish();
+        const auto& r = feed->recorders().front();
+        CHECK(feed->n_jumps() == n_jumps);
+        CHECK(feed->n_events() == n_events);
+        CHECK(feed->n_dropped() == 0);
+        CHECK(feed->n_steps() == 200);
+        // values are copies and exact sums (coefficients +-1): bit for bit
+        CHECK(r.times() == ref.times());
+        CHECK(r.values() == ref.values());
+        CHECK(r.event_times() == ref.event_times());
+        CHECK(r.event_t_right() == ref.event_t_right());
+        CHECK(r.event_resolution() == ref.event_resolution());
+        CHECK(r.event_left() == ref.event_left());
+        CHECK(r.event_right() == ref.event_right());
+        // the windows: one code path's sums against another's (a compiler
+        // may contract them differently)
+        REQUIRE(r.periods().size() == ref.periods().size());
+        REQUIRE(r.periods().size() >= 8 * 2);
+        for (Size k = 0; k < r.periods().size(); ++k) {
+            const auto& a = r.periods()[k];
+            const auto& b = ref.periods()[k];
+            INFO("window " << k);
+            CHECK(a.t0 == b.t0);
+            CHECK(a.t1 == b.t1);
+            CHECK(a.integral == Catch::Approx(b.integral).epsilon(1e-12).margin(1e-14));
+            CHECK(a.sq3 == Catch::Approx(b.sq3).epsilon(1e-12).margin(1e-14));
+            CHECK(a.complete() == b.complete());
         }
     }
 }

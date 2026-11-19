@@ -1748,6 +1748,13 @@ inline SimulationResult run_transient(
         const bool hook_step = hooks != nullptr && hooks->has_step();
         const bool hook_event = hooks != nullptr && hooks->has_event();
         const bool hook_mask = hook_step || hook_event;
+        // probes 0b.10: run-invariant flags, not the listener lists, per
+        // step; each step starts from the previous one's committed end
+        // (x_prev = x, mask_start = its stamp), so every step but the first
+        // is contiguous for the step sink (it skips its own jump test).
+        const bool hook_ds = hooks != nullptr && hooks->has_device_state();
+        const bool hook_acc = hooks != nullptr && !hooks->empty();
+        bool hook_contig = false;
         topology::SwitchStateMask mask_start;
         bool mask_start_known = false;
         if (hook_mask) {
@@ -3118,10 +3125,8 @@ inline SimulationResult run_transient(
             // Decimated recording (v2.0 Phase 1): uniform grid at
             // m·dt. Sample 0 (the IC, k = 0) is always recorded
             // above, keeping the parallel arrays aligned.
-            if (hooks) {
-                hooks->device_state(t, x, hs);   // #31: after the commit
-                hooks->accepted(t_prev, t, x, stamped_mask);
-            }
+            if (hook_ds) hooks->device_state(t, x, hs);   // #31: after the commit
+            if (hook_acc) hooks->accepted(t_prev, t, x, stamped_mask);
             if (k % opts.store_every == 0) {
                 result.times.push_back(t);
                 result.states.push_back(x);
@@ -3151,7 +3156,10 @@ inline SimulationResult run_transient(
                 if (hook_event && mask_start_known && !(stamped_mask == mask_start)) {
                     hooks->event(t_prev, x_prev, mask_start, x, stamped_mask);
                 }
-                if (hook_step) hooks->step(t_prev, x_prev, mask_start, t, x, stamped_mask);
+                if (hook_step) {
+                    hooks->step(t_prev, x_prev, mask_start, t, x, stamped_mask, hook_contig);
+                    hook_contig = true;
+                }
                 mask_start = stamped_mask;   // the next step's start
                 mask_start_known = true;
             }
@@ -3174,6 +3182,7 @@ inline SimulationResult run_transient(
             (void)step::run<step::Trapezoidal>(clock, body);
         };
         run_twin();
+        if (hook_step) hooks->flush_steps();   // the step sink's batched steps
         if (diag && rd_steps > 0) {
             rd.unestimated_fraction =
                 static_cast<Real>(rd_unest) / static_cast<Real>(rd_steps);
