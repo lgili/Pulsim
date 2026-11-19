@@ -501,3 +501,201 @@ companions, PWL switches / diodes and static Newton devices):
   elementary controller; a PI controller is a number change for TR-BDF2
   too); (e) task 4.3 / 5.x gates; (f) dense-output bracketing (stage values
   only today).
+
+## 16. Stateful kinds, readings and losses on esdirk43 (2026-11-19)
+
+**Capacitor committed current (KCL).** The in-loop `i()` / `p()` reading
+of a capacitor missed KCL by 7e-5 (buck) and 7e-6 (rectifier) of the node
+scale on esdirk43. Every bad sample sat at an interpolated floor landing
+(a turn-off at the bracket floor, the state interpolated between two ESDIRK
+states, `interp_land`). The trapezoidal reconstruction
+`2C/dt_land·(v − v_n) − i_n` over that sliver does not belong to ESDIRK
+states. The landing now commits the same interpolation of the two bracket
+ends' own stage currents `C·d_s/(γh)` (the committed slot at the left end,
+the last trial's stage 5 or the step's stage 1/5 at the right). KCL is
+linear under one mask, so the interpolation is exact up to the state's own
+interpolation. Measured (rtol 1e-7, atol 1e-10, residual / node scale):
+buck 3.9e-13 (in), 7.7e-13 (sw), 1.3e-8 (out; TR-BDF2 1.8e-7, the
+round-off term C·eps·|v|/h dominates); rectifier 5.9e-12, 1.5e-10,
+1.7e-10. No sample over 1e-9·scale + 8·C·eps·max|v|/h on either. The
+recorder's esdirk43 capacitor refusal is gone.
+Against `engine='dsed'` (end values, `.scratch/s4/acc.py`): esdirk43 is
+within 6e-10 – 2.5e-8 of the exact engine from rtol 1e-5 to 1e-9 on the
+DCM buck and the rectifier, flat in rtol — the exact engine's own floor
+at its defaults; the order after events is not resolvable against it
+(TR-BDF2 at rtol 1e-9: 2.2e-8 / 6.9e-8). The state trajectory did not
+move with the fix (same steps, same errors to 3 digits): only the
+committed slot after an interpolated landing changed.
+
+**Loss tracker.** `accept_step<N>` integrates the conduction power on the
+ESDIRK weights b over (x0, Y1..Y4, x1); the N = 1 overload keeps the
+TR-BDF2 expressions verbatim (byte compares identical). Heat is advanced
+once per accepted step (`advance(h)` in `ed_take`), events are booked at
+the TR-BDF2 sites. An ESDIRK landing integrates on its own stages; an
+interpolated or trapezoidal landing keeps the trapezoidal weights.
+Agreement with TR-BDF2 at rtol 1e-8 / atol 1e-11 (rtol 1e-9 grinds
+TR-BDF2 itself on the buck's capacitance-free switch node): equal n_on /
+n_off, worst 5.1e-7 (buck) and 2.8e-6 (VSI) of the device's largest
+energy; at rtol 1e-7 1.3e-5. Closed-form ramp (`test_device_losses_variable_step`)
+and the ledger balance pass on esdirk43.
+
+**Stateful kinds: the stage form (βh, ψ).** The nonlinear capacitor
+(Coss and the explicit C_gd / junction laws), the saturable inductor (atan
+and table laws) and external devices take the five stages. Each exposes
+its q rows to `StatefulHistories` (`stage_rows / stage_start / stage_base
+/ stage_increment / stage_commit / stage_clear`): q = charge, flux, or the
+external model's q per row; q̇ = the committed current, the terminal
+voltage, or the formula derivative (−f on internal rows). The engine
+builds ψ_s − q0 from the increments q(Y_j) − ψ_j and h·q̇0 with the same
+tableau weights as the linear entries (no cancellation of q0), sets the
+base on the histories, solves the stage with the backward-Euler stamp of
+γh (the stamps' own BE rule: `q_prev = ψ` for the capacitor and the
+external cells; `lambda_old = ψ` and `lambda_offset = ψ − λ(i_L_old)` for
+the saturable inductor, whose increment form subtracts the offset), and
+reads the increment back. `ed_stages` snapshots `hs` first and restores
+it after the last stage and on every throw: no stage, failed Newton,
+rejected step or Illinois trial leaves a trace. The commit (accepted
+step, or ESDIRK landing re-step) re-applies the last stage's base and
+commits backward Euler of γh (`stage_commit`; an external model's
+`accept()` advances the whole step h). The forced SDIRK(2,2) step on kE
+takes BE of gs·h for the q rows too: stage 1 from the committed state,
+stage 2 from ψ = q0 + ((1 − gs)/gs)·(q(x_g) − q0) set through the same
+stage form (`ed_sdirk_base`; the kinds' own `extrapolate_previous` moves
+λ_old but not the increment form's i_L_old), restored after the solve and
+re-applied at the commit. Off esdirk43 every new path is either under
+`if constexpr (kE)` or behind `kE && ed_sf`; the saturable offset is 0.0
+outside a stage (x − 0.0 is exact), the external `h_accept` defaults to
+the formula's h: byte compares identical.
+Kept refused by name (`integrator=esdirk43`): Lauritzen diode, IGBT tail,
+machines (PmsmMna), and the Jiles-Atherton saturable law (its base is a
+magnetisation state, not a q). The interpolated floor landing never meets
+a stateful kind (a stateful kind makes the run nonlinear, and the
+interpolated landing is linear-only).
+Not done: `carry_q` (the step ends on x1 = Y5 and q1 = Q(x1); in exact
+arithmetic the same as the q quadrature, it leaks the Newton residual per
+step — measured harmless here: a Newton tolerance of 1e-12 instead of
+1e-9 changes the saturable LC's error in the fourth digit); the Newton
+refresh rule of entry 8 (the engine's own Newton per stage solve); the
+stateful rows in the error norm (the estimate reads the linear entries
+only, as TR-BDF2's does).
+
+Measured (tests in `test_esdirk43_engine.py`):
+- Saturable LC (100 µH → 20 µH atan law, I_sat 0.1 A, 100 nF, 10 V landed
+  step) against scipy DOP853 at rtol 1e-13: fixed ceiling, end error after
+  4 periods 2.03e-3, 8.06e-5, 4.72e-6, 2.94e-7 at T0/20, /40, /80, /160 —
+  ratios 25.2, 17.1, 16.1 (observed order 4.0–4.6). Adaptive, rtol 1e-5 …
+  1e-10: esdirk43 1005 … 2943 steps, error 8.4e-8 … 2.4e-8; TR-BDF2 1358
+  … 50922 steps, 1.2e-3 … 1.1e-6. The esdirk43 floor (2e-8 … 8e-8, flat
+  in rtol and in the Newton tolerance) sits there from 0.01·T0 on and the
+  linear LC shows it too (2.4e-8): the landed source step's 7e-14 s
+  sliver, not the stages. Order by halving the tolerance is therefore not
+  measurable on this case; the fixed-ceiling halving is the measure.
+  Rejects: 0–32 per 4 periods at rtol 1e-5 … 1e-8, 106 at 1e-10 (TR-BDF2
+  24–104).
+- Junction-law capacitor charged through 1 kOhm from a landed 10 V step,
+  against scipy DOP853: fixed ceiling, max error 6.07e-6, 3.91e-7,
+  2.81e-8, 2.26e-9 at 3 µs/20 … /160 (ratios 15.5, 13.9, 12.4; the last
+  nears the source-step floor of 1e-9); at its own steps 2.1e-9 (TR-BDF2
+  8.6e-7). (A constant-current charge, q = I·t, is exact for any
+  consistent method and was dropped as a truth on the reviewer's note.)
+- Saturable table law (the atan curve as 41 knots, C¹ monotone cubic):
+  2.5e-6 of 0.5 A from TR-BDF2 under a T0/4000 ceiling, whose own error
+  is ~1e-6.
+- MOSFET L1 + Coss + saturable + Shockley boost, and IGBT + VDMOS C_gd +
+  saturable chopper, against TR-BDF2 at rtol 1e-9 under a 2.5 ns ceiling:
+  esdirk43 (rtol 1e-9, own steps) 6.3e-6 / 7.2e-6 of each state's scale;
+  TR-BDF2 at its own steps 8.3e-5 / 3.5e-5. Under a 2.5 ns ceiling
+  esdirk43 is 1.6e-6 / 3.4e-7 from it (the reference's own error).
+- DCM buck with a junction Coss and a saturable inductor (diode events →
+  19 forced SDIRK steps with the q rows): v(out) 3.1e-6, i(L) 3.2e-6
+  against TR-BDF2 under a 2 ns ceiling (whose own error is ~4e-6); equal
+  event counts.
+
+**External devices.** The twins against the built-ins on esdirk43
+(`test_external_device.py`): saturable-inductor twin 1e-15, Shockley twin
+0 (same steps); built-in against TR-BDF2 at rtol 1e-10 under a 100 ns
+ceiling 1.3e-8 / 5.3e-9, the reference's own error (50 ns: 3.3e-9 /
+1.7e-9). The time-dependent law reads each stage's own time (the ramp
+test passes on esdirk43 to 1e-9).
+
+**Slice 3's open list.**
+- Stale `ed_hist` / `ed_spsi5` at a landing: impossible by construction.
+  Every path that runs a trial (`ed_stages` of dts) ends in a landing;
+  an ESDIRK landing re-runs `ed_stages(dt_land)` immediately before its
+  commit, the interpolated landing does not read `ed_hist`, a failed
+  landing rejects (the next take re-runs the stages), and the chatter
+  guard's fall-through accept runs no trial. The KCL test on the
+  rectifier (Illinois trials at every commutation) is the test that would
+  fail: a trial's base committed with dt_land puts (Y5 − ψ5(dts))/(γ·
+  dt_land) in the slot, off KCL by O(1). Not mutation-tested.
+- The estimate's round-off floor: not done (no grind seen on the cases
+  here; the SEPIC-like g_off node is still the open case).
+- The oscillator reject rate: measured above and in entry 15 (4.5–8 per
+  period on the LC); the shared elementary controller is unchanged.
+- Dense output bracketing an event: not done (stage values only).
+
+**Cost.** Option off (default integrator), instructions per accepted step,
+min of 3 interleaved runs, pre-change build | this tip: buck_pwl 3090.9 |
+3094.6 (+0.12 %), vsi_pwl 4765.1 | 4772.4 (+0.15 %), buck_trbdf2 11017.4 |
+11017.6 (+0.00 %), bridge_trbdf2 12775.5 | 12780.8 (+0.04 %).
+Resonant cases (scoreboard `exact` measure, `.scratch/s4/res_cost.py`;
+instructions per accepted step include the harness call, min of 3):
+
+| case, rtol | TR-BDF2 err / steps / instr per step | esdirk43 err / steps / instr per step |
+|---|---|---|
+| lcc_resonant_inverter 1e-4 | 2.6e-4 / 2894 / 15.1k | 3.2e-6 / 1009 / 20.9k |
+| lcc_resonant_inverter 1e-6 | 1.2e-5 / 13751 / 12.8k | 1.4e-6 / 1372 / 27.2k |
+| lcc_resonant_inverter 1e-8 | 5.4e-7 / 64440 / 12.4k | 1.8e-8 / 4305 / 23.8k |
+| rlc_series_resonant 1e-4 | 1.6e-3 / 1773 / 9.8k | 2.1e-6 / 1003 / 12.6k |
+| rlc_series_resonant 1e-6 | 7.3e-5 / 8476 / 7.8k | 2.1e-6 / 1008 / 12.7k |
+| rlc_series_resonant 1e-8 | 3.3e-6 / 39821 / 7.4k | 9.7e-8 / 2248 / 15.1k |
+
+At equal or better accuracy on the LCC inverter: esdirk43 at 1e-4
+(3.2e-6, 1009 steps, 2.1e7 instructions) against TR-BDF2 at 1e-6
+(1.2e-5, 13751 steps, 1.8e8): 13.6× fewer steps, 8.4× fewer
+instructions; esdirk43 at 1e-8 (1.8e-8, 4305, 1.0e8) against TR-BDF2 at
+1e-8 (5.4e-7, 64440, 8.0e8): 15× fewer steps, 7.8× fewer instructions.
+One esdirk43 step costs 1.4–2.1× a TR-BDF2 step.
+The esdirk43 scoreboard configuration (`.scratch/ed/wp_score.py`, the
+seven circuits of entry 15) before (pre-change build) and after: every
+error identical to its printed digits; solves identical except
+diode_rectifier (20734 → 20736, 24124 → 24146, 29492 → 29482 at rtol
+1e-4, 1e-6, 1e-8: the interpolated landing's committed slot). (Entry 15's
+buck_switching and half_wave rows predate the filter fix; the pre-change
+build gives today's values for them.)
+
+**Review** (fresh-context, read-only, on f220a1da..HEAD). No blocking
+defect; B (state left behind, stale bases) clean on every traced path;
+C byte-identical by construction. Acted on: the constant-current
+capacitor truth (replaced by an ODE truth with an order check), the
+untested table law (test added), the interpolated-landing fix's coverage
+(the per-sample KCL test failed there before the fix: noted in the
+test). Left: the event-row KCL tolerance (`floor / 1e-15`, pre-existing)
+is loose; the forced-SDIRK stage-2 base is checked only through end
+values at 2e-5 (measured 3.1e-6); a stage-2 or non-singular stage-1
+throw in the forced SDIRK step skips the `hs` restore, harmless because
+it ends the run; an external model whose eval reads ctx.h sees γh in the
+stages and h in accept() (by design, untested).
+
+Hand-off after entry 16:
+- DONE: capacitor readings KCL-consistent on esdirk43 (refusal gone);
+  the loss tracker on esdirk43 (refusal gone); the stage form for the
+  nonlinear capacitor, the saturable inductor (atan, table) and external
+  devices, with the forced SDIRK step (refusals gone).
+- NEXT: (a) Lauritzen diode, IGBT tail, machines, the JA law: their
+  Newton histories need a q-row form (refused by name); (b) carry_q;
+  (c) the Newton refresh rule of entry 8; (d) the estimate's round-off
+  floor; (e) dense-output bracketing; (f) task 4.3 and 5.x gates (the
+  LLC with nonlinear Coss, the PSFB with a saturable inductor are now
+  runnable on esdirk43).
+
+Verification on this tip: pytest 5722 passed, 2 failed only from the
+python/ working directory (`test_ai_guide` CLI resolves a stale build
+path, `test_exact_route` opens an example by a root-relative path; both
+pass from the repository root); `pytest -m reference` 382 passed;
+`reference_status` exit 0 with the strict counts unchanged (pwl
+81/27/1/0/0, pwl+restart 89/19/1/0/0, pwl+split 91/17/1/0/0, trbdf2
+106/2/1/0/0, dsed 100/0/0/9/0); C++ step, dsed, perf, thermal, record,
+layer5_v3, xdev pass on Eigen 5 and on Eigen 3.4.0; g++-15 syntax check
+clean on the touched headers; stubs up to date; ruff clean. Full ctest
+not run.

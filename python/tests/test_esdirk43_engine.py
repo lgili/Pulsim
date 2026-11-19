@@ -128,27 +128,62 @@ def test_saturable_lc_agrees_with_trbdf2_and_the_truth_at_tight_tolerance():
     assert len(runs["esdirk43"].times) < len(runs[None].times)
 
 
-C0, V0, M, I0 = 1e-9, 0.7, 0.45, 1e-3
+def test_saturable_table_law_agrees_with_a_fine_trbdf2():
+    # the table law's stage branch (flux(i) − ψ): the same atan curve as 41
+    # knots (monotone cubic, C¹ only). Measured end error 2.5e-6 of 0.5 A
+    # against TR-BDF2 under a T0/4000 ceiling, whose own error is ~1e-6
+    # (T0/2000 moves it 1.2e-6)
+    ik = np.linspace(0.0, 1.0, 41)
+    lk = SLR * ik + (SL0 - SLR) * SIS * np.arctan(ik / SIS)
+
+    def lc():
+        b = p.CircuitBuilder()
+        b.add_pulse_voltage_source("V", "a", "gnd", 0.0, V, TD, 1.0, 0.0, 0.0, 0.0)
+        b.add_saturable_inductor_table("L", "a", "b", list(ik), list(lk))
+        b.add_capacitor("C", "b", "gnd", C)
+        return b
+
+    kw = dict(engine="trbdf2", t_end=TD + 4 * T0, rtol=1e-9, atol=1e-12)
+    ref = p.simulate(lc(), dt=T0 / 4000, **kw)
+    run = p.simulate(lc(), integrator="esdirk43", **kw)
+    assert abs(run.i("L")[-1] - ref.i("L")[-1]) <= 1e-5 * 0.5
+    assert abs(run.v("b")[-1] - ref.v("b")[-1]) <= 1e-5 * 20.0
 
 
-def _cap_charge():
-    # a junction-law capacitor charged by a constant current from 1 us: its
-    # charge is I·t, so v(t) is closed form (Rleak 1e15: below 1e-10)
+C0, V0, M, RS, TDC = 1e-9, 0.7, 0.45, 1e3, 1e-6
+
+
+def _cap_rc():
+    # a junction-law capacitor charged through 1 kOhm from a 10 V step
+    # landed at 1 us; truth: scipy DOP853 on C(v)·dv/dt = (10 − v)/R
     b = p.CircuitBuilder()
-    b.add_pulse_current_source("I", "c", "gnd", 0.0, I0, 1e-6, 1.0, 0.0, 0.0, 0.0)
-    b.add_resistor("Rleak", "c", "gnd", 1e15)
+    b.add_pulse_voltage_source("V", "a", "gnd", 0.0, V, TDC, 1.0, 0.0, 0.0, 0.0)
+    b.add_resistor("R", "a", "c", RS)
     b.add_nonlinear_capacitor("Cn", "c", "gnd", C0, V0, M)
     return b
 
 
-def test_nonlinear_capacitor_charge_is_the_closed_form():
-    r = p.simulate(_cap_charge(), engine="trbdf2", t_end=2e-5,
-                   integrator="esdirk43", rtol=1e-8, atol=1e-11)
+def _cap_err(r):
+    from scipy.integrate import solve_ivp
     t = np.asarray(r.times)
-    q = I0 * np.maximum(t - 1e-6, 0.0)
-    v = V0 * ((1.0 + q * (1.0 - M) / (C0 * V0)) ** (1.0 / (1.0 - M)) - 1.0)
-    # measured 6.9e-8 of max v, equal to TR-BDF2's (the source-step sliver)
-    assert np.max(np.abs(np.asarray(r.v("c")) - v)) <= 3e-7 * np.max(v)
+    m = t >= TDC
+    s = solve_ivp(lambda _, y: [(V - y[0]) / RS * (1.0 + y[0] / V0) ** M / C0],
+                  (0.0, float(t[-1] - TDC)), [0.0], method="DOP853",
+                  rtol=1e-13, atol=1e-16, dense_output=True)
+    return np.max(np.abs(np.asarray(r.v("c"))[m] - s.sol(t[m] - TDC)[0])) / V
+
+
+def test_nonlinear_capacitor_is_fourth_order_against_an_ode_truth():
+    # measured max errors over the run: 6.07e-6, 3.91e-7, 2.81e-8, 2.26e-9
+    # at 3 us/20../160 (ratios 15.5, 13.9, 12.4; the last nears the landed
+    # source step's 1e-9 floor); at its own steps 2.1e-9 (TR-BDF2 8.6e-7)
+    e = [_cap_err(p.simulate(_cap_rc(), engine="trbdf2", t_end=TDC + 3e-6,
+                             integrator="esdirk43", dt=3e-6 / n, rtol=1.0, atol=1.0))
+         for n in (20, 40)]
+    assert e[0] / e[1] > 2.0 ** 3.5, e
+    r = p.simulate(_cap_rc(), engine="trbdf2", t_end=TDC + 3e-6,
+                   integrator="esdirk43", rtol=1e-8, atol=1e-11)
+    assert _cap_err(r) <= 1e-8
 
 
 @pytest.mark.parametrize("name", ["boost_mosfet_coss_saturable", "chopper_igbt_vdmos"])

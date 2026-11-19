@@ -23,7 +23,9 @@ EPS = np.finfo(float).eps
 _RUNS = {"pwl": dict(engine="pwl", dt=1e-6),
          "trbdf2": dict(engine="trbdf2", rtol=1e-7, atol=1e-10)}
 # the companion readings on integrator='esdirk43' too (the KCL and charge
-# tests; the per-kind tests keep _RUNS)
+# tests; the per-kind tests keep _RUNS). Before the interpolated-landing fix
+# the per-sample KCL check failed on esdirk43 at exactly those landings
+# (7e-5 of scale on the buck, 7e-6 on the rectifier): it exercises them.
 _RUNS_C = {**_RUNS, "esdirk43": dict(_RUNS["trbdf2"], integrator="esdirk43")}
 A, B = 0.21e-3 + 1.234e-9, 0.87e-3 + 4.321e-9   # mid-step on every grid
 
