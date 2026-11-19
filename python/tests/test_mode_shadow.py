@@ -51,16 +51,15 @@ def test_banded_circuits_report_no_disagreement(fam, V_th, t_end):
     assert ms["hysteresis_released"] > 0      # the band is exercised: held OFF, then released
 
 
-def test_zero_threshold_boost_disagreements_are_the_settles_errors():
-    """dsed's boost with V_th = 0 stays ON at the DCM current zero (1.01 V low after 400 T,
-    test_mode_selection_today.py). The shadow finds those events; at each the LCP's mode is
-    consistent over 100 h_e and 1e4 h_e and the settle's is not."""
+def test_zero_threshold_boost_settle_agrees_with_the_lcp():
+    """dsed's boost with V_th = 0 stayed ON at the DCM current zero (1.01 V low after 400 T);
+    the shadow found those events, at each the LCP's mode consistent and the settle's not.
+    Since the settle decides a located event on the settled state with the significance ladder
+    (exact engine sessions 10-13) it agrees with the LCP at all 258 events of 100 T.
+    Re-pinned (was: every disagreement is the settle's error)."""
     ms = _run("boost_500", 0.0, 100 * T, "shadow").diagnostics["mode_shadow"]
-    dis = ms["disagreements"]
-    assert len(dis) > 0 and ms["errors"] == 0
-    for d in dis:
-        assert d["lcp_consistent"] is True and d["settle_consistent"] is False, d
-        assert d["settle_mode"] == (True,) and d["lcp_mode"] == (False,)
+    assert ms["errors"] == 0 and ms["disagreements"] == []
+    assert ms["events"] > 200
     assert ms["max_pivots_per_event"] <= 2
 
 
@@ -87,23 +86,27 @@ def test_shadow_counters_and_keys():
     assert ms["port_model_problems"] >= ms["lcp_count"] > 0
 
 
-@pytest.mark.parametrize("engine", ("trbdf2", "auto"))
-def test_shadow_refused_by_name_on_trbdf2(engine):
-    """pwl runs the shadow since slice 4 (test_mode_pwl.py); trbdf2 has no hook yet."""
+@pytest.mark.parametrize("mode", ("shadow", "lcp"))
+def test_mode_selection_runs_on_trbdf2(mode):
+    """trbdf2's zero-time cascades are its decision sites (task 4.2 there):
+    'shadow' is the default run byte for byte; 'lcp' decides the sites whose
+    settled mode is not a clear, consistent answer."""
     b = B.FAMILIES["bridge1_vf07"].builder(0.0)
-    kw = {"dt": 1e-6} if engine == "pwl" else {}
-    with pytest.raises(p.UnsupportedError) as ei:
-        p.simulate(b, t_end=1e-3, engine=engine, mode_selection="shadow", **kw)
-    assert ei.value.feature == "mode_selection" and ei.value.engine == "trbdf2"
-
-
-@pytest.mark.parametrize("engine", ("trbdf2",))
-def test_lcp_refused_by_name_on_trbdf2(engine):
-    """'lcp' runs on dsed (task 6.1) and pwl (6.3); trbdf2 has no event hook yet."""
-    b = B.FAMILIES["bridge1_vf07"].builder(0.0)
-    with pytest.raises(p.UnsupportedError) as ei:
-        p.simulate(b, t_end=1e-3, engine=engine, mode_selection="lcp", **({"dt": 1e-6} if engine == "pwl" else {}))
-    assert (ei.value.engine, ei.value.feature) == (engine, "mode_selection")
+    r0 = p.simulate(b, t_end=1e-3, engine="trbdf2")
+    r = p.simulate(B.FAMILIES["bridge1_vf07"].builder(0.0), t_end=1e-3, engine="trbdf2",
+                   mode_selection=mode)
+    key = "mode_shadow" if mode == "shadow" else "mode_selection"
+    ms = r.diagnostics[key]
+    assert ms["errors"] == 0 and ms["inconsistent"] == 0
+    assert sum(ms["sites"].values()) > 0
+    if mode == "shadow":
+        assert np.asarray(r.states).tobytes() == np.asarray(r0.states).tobytes()
+        assert np.asarray(r.times).tobytes() == np.asarray(r0.times).tobytes()
+        assert ms["lcp_count"] == sum(ms["sites"].values())
+    else:
+        def bus(x):
+            return np.asarray(x.v("p"))[-1] - np.asarray(x.v("n"))[-1]
+        np.testing.assert_allclose(bus(r), bus(r0), rtol=1e-3)
 
 
 def test_shadow_without_the_event_integrator_is_refused_on_dsed():

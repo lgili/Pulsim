@@ -466,3 +466,40 @@ def test_a_suspect_reference_grades_nothing_and_a_frozen_error_may_not_grow():
         for cfg, out in (ent.get("known") or {}).items():
             if out == "disagree":
                 assert (ent.get("known_err") or {}).get(cfg), (rel, cfg)
+
+
+def test_the_edge_diagnostic_is_symmetric_and_the_gate_is_not():
+    # Two converged traces of a held 24 V output (6 mV ripple), each with its
+    # stored initial state 0 V at t = 0 and a different first step: the gate keeps
+    # the reference's first sample and divides by the reference's span, so it
+    # depends on the side; the edge diagnostic does not, to the bit.
+    def trace(t1, dt):
+        t = np.concatenate(([0.0], np.arange(t1, 1e-3, dt)))
+        y = 24.0 + 3e-3 * np.sin(2 * np.pi * 5e3 * t)
+        y[0] = 0.0
+        return (t, {"V(out)": y}, None)
+    a, b = trace(1.25e-8, 1.25e-8), trace(5e-9, 1e-7)
+    cols = ["V(out)"]
+    ab, ba = dr.compare(a, b, cols, 1e-3)[0], dr.compare(b, a, cols, 1e-3)[0]
+    assert max(ab, ba) > 3 * min(ab, ba)                       # the gate is one-sided
+    da, db = dr.diagnose(a, b, cols, 1e-3), dr.diagnose(b, a, cols, 1e-3)
+    assert da["edge_rms"] == db["edge_rms"] and da["excluded_frac"] == db["excluded_frac"]
+    assert da["edge_rms"] < 1e-2                               # both traces are the same signal
+    ya, yb = (a[0], a[1]["V(out)"]), (b[0], b[1]["V(out)"])
+    assert metrics.err_rms_symmetric(ya, yb) == metrics.err_rms_symmetric(yb, ya)
+
+
+def test_flip_evidence_resumes_per_circuit(tmp_path, monkeypatch):
+    # a second run with the same cache measures nothing; a missing cell is measured again
+    import ideal_switch_flip_evidence as ev
+    pat = ["circuits/linear/rc_step.yaml"]
+    recs, refs, tree = ev.run(pat, ("default",), tmp_path)
+    assert recs and {r["variant"] for r in recs} == {"default"}
+    assert refs["circuits/linear/rc_step.yaml"]["default"]["name"]
+    monkeypatch.setattr(ev, "run_circuit", lambda *a, **k: pytest.fail("measured again"))
+    again, _, _ = ev.run(pat, ("default",), tmp_path)
+    assert again == recs
+    monkeypatch.undo()
+    more, _, _ = ev.run(pat, ("default", "auto"), tmp_path)
+    assert {r["variant"] for r in more} == {"default", "auto"}
+    assert [r for r in more if r["variant"] == "default"] == recs

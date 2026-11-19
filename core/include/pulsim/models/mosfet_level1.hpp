@@ -146,10 +146,50 @@ struct MosfetLevel1 {
         // The anti-parallel body diode the header used to
         // prescribe as the fix does not prevent it (that case
         // landed at −63 V; without the diode, −50 V).
+        //
+        // C¹ AND PASSIVE AT V_DS = 0 (unified-device-interface #44). The β
+        // blend leaks forward(V_OV, 0) = α(1 − β)·K·V_OV² = L(V_OV) ≠ 0 at
+        // V_DS = 0 (peak 0.439·K/κ² at V_OV = 2.4/κ; 2.8 mA for K = 1.43,
+        // κ = 15), so the plain mirror jumped by 2L there and both engines
+        // aborted at the zero crossing of a current through a partly-on
+        // channel (add-power-mosfet-datasheet-device probes/vds_zero_jump.py).
+        // Each quadrant runs forward_c1_ = forward − L·e^{−κ|V_DS|}: zero at
+        // V_DS = 0 (no current at zero voltage), equal one-sided derivatives
+        // there (C¹), and the model's own bits wherever the subtracted term
+        // is below half an ulp (fully on, or |V_DS| ≫ 1/κ).
         if (V_DS < S{0}) {
-            return -forward_current_<S>(V_OV - V_DS, -V_DS, p);
+            return -forward_c1_<S>(V_OV - V_DS, -V_DS, p);
         }
-        return forward_current_<S>(V_OV, V_DS, p);
+        return forward_c1_<S>(V_OV, V_DS, p);
+    }
+
+    /// h(a, d) = forward(a, d) − forward(a, 0)·e^{−κd} for d ≥ 0 (a = V_OV,
+    /// d = V_DS). h(·, 0) = 0; ∂h/∂d(a, 0) = ∂f/∂d(a, 0) + κ·f(a, 0) on both
+    /// sides of the mirror, ∂h/∂V_GS(a, 0) = 0, so the mirrored law is C¹.
+    /// For κd ≤ 1 it is written without the subtraction (expm1, no
+    /// cancellation near d = 0):
+    ///   α·K·{λd·[a² − β(u)u²] + a²(1−α)·E + α·d·(2a − d) + u²·α·(1−β(u))·E},
+    ///   u = a − d, E = 1 − e^{−κd}.
+    template <numeric::FloatingPoint S, class P = Params>
+    [[nodiscard]] static S forward_c1_(const S& a, const S& d, const P& p) noexcept {
+        using std::exp; using std::expm1;
+        const S f = forward_current_<S>(a, d, p);
+        const S kd = p.kappa * d;
+        const S leak = forward_current_<S>(a, S{0}, p) * exp(S(-kd));
+        // below half an ulp of f: the model's bits, untouched
+        if (leak <= Real{0x1p-54} * f && -leak <= Real{0x1p-54} * f) return f;
+        if (kd > Real{1}) return f - leak;
+        const S u = a - d;
+        const S alpha = numeric::logistic(S(p.kappa * a));
+        const S one_minus_alpha = numeric::logistic(S(-(p.kappa * a)));
+        const S beta_u = numeric::logistic(S(p.kappa * u));
+        const S one_minus_beta_u = numeric::logistic(S(-(p.kappa * u)));
+        const S E = -expm1(S(-kd));
+        const S bracket = p.lambda * d * (a * a - beta_u * u * u)
+                          + a * a * one_minus_alpha * E
+                          + alpha * d * (Real{2} * a - d)
+                          + u * u * alpha * one_minus_beta_u * E;
+        return alpha * p.K * bracket;
     }
 
 };

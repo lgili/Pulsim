@@ -23,6 +23,7 @@
 #include "pulsim/numeric/dictionary.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/assemble.hpp"
+#include "pulsim/pwl/branch_structure.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/segment.hpp"
@@ -34,6 +35,7 @@
 #include "pulsim/topology/switch_state.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <atomic>
 #include <bit>
 #include <chrono>
@@ -387,6 +389,142 @@ public:
         seg.solver->solve_neg_sum(seg.b_constant, b_extra, x);
     }
 
+    /// The reduction's solves, refined in double-double (exact engine 8).
+    /// A bus held to ground by 1 MΩ against 1 kS diodes gives G_aa a
+    /// condition ~1e10 or more, and G_sa·G_aa⁻¹·G_as − G_ss then cancels
+    /// node voltages of ~R_g·i down to the bus row (~1/R): plain double
+    /// lost 0.55 of A's −100 /s bus entry with ten rectifier banks (bus
+    /// 2e-4 V off at 0.1 ms, a diode predicate 3e-5 V off, a reversed
+    /// diode kept ON for 4.6 µs). Every solve is refined with compensated
+    /// residuals (fma + TwoSum, Dot2: as if in twice the working precision)
+    /// and the solution kept as hi + lo; the products with G_sa are summed
+    /// the same way and rounded once. A column whose refinement does not
+    /// converge keeps its plain solve. The stamped G itself is rounded
+    /// data: the result is accurate for that G, not for the netlist.
+    /// A mode whose refined operators all lie within 1e-12 of the plain
+    /// ones (relative to each row's largest entry) keeps the plain ones,
+    /// bit for bit.
+    /// `solve(r, x)` applies the plain G_aa⁻¹ (the sparse LU, or the general
+    /// path's SVD inverse when G_aa has full rank there).
+    template <class Solve>
+    static void refine_schur_(const sparse::Matrix& Gaa, const sparse::Matrix& Gas,
+                              const sparse::Matrix& Gsa, const sparse::Matrix& Gss,
+                              const Vector& ba, const Vector& bs, Solve&& solve,
+                              DenseMatrix& X, Vector& xb, DenseMatrix& Ginv,
+                              DenseMatrix& S, Vector& Sb, DenseMatrix& GsaGinv) {
+        const auto na = Gaa.rows();
+        const auto ns = Gsa.rows();
+        // s + c += a·b, product and sum both error-free
+        const auto acc = [](Real& s, Real& c, Real a, Real b) {
+            const Real p = a * b;
+            const Real pe = std::fma(a, b, -p);
+            const Real t = s + p;
+            const Real bp = t - s;
+            c += (s - (t - bp)) + (p - bp) + pe;
+            s = t;
+        };
+        Vector s(na), c(na), rho(na), d;
+        // x = G_aa⁻¹·r as hi + lo, starting from the plain solve in hi
+        const auto refine = [&](const Vector& r, Vector& hi, Vector& lo) {
+            lo.setZero(na);
+            const Vector plain = hi;
+            bool converged = false;
+            Real last = std::numeric_limits<Real>::infinity();
+            for (int it = 0; it < 10; ++it) {
+                s = r;
+                c.setZero();
+                for (Eigen::Index k = 0; k < Gaa.outerSize(); ++k) {
+                    for (sparse::Matrix::InnerIterator e(Gaa, k); e; ++e) {
+                        acc(s[e.row()], c[e.row()], -e.value(), hi[k]);
+                        acc(s[e.row()], c[e.row()], -e.value(), lo[k]);
+                    }
+                }
+                rho = s + c;
+                solve(rho, d);
+                const Real dn = d.cwiseAbs().maxCoeff();
+                if (!(dn < Real{0.5} * last)) break;   // stalled: keep what we have
+                // a second, smaller correction shows the iteration contracts
+                if (it > 0) converged = true;
+                last = dn;
+                for (Eigen::Index i = 0; i < na; ++i) {  // (hi, lo) += d
+                    const Real t = hi[i] + d[i];
+                    const Real bp = t - hi[i];
+                    const Real e = (hi[i] - (t - bp)) + (d[i] - bp) + lo[i];
+                    hi[i] = t + e;
+                    lo[i] = e - (hi[i] - t);
+                }
+                constexpr Real u = std::numeric_limits<Real>::epsilon();
+                if (!(dn > Real{4} * u * u * hi.cwiseAbs().maxCoeff())) {
+                    converged = true;
+                    break;
+                }
+            }
+            if (!converged) {   // never trade the plain column for a non-contracting one
+                hi = plain;
+                lo.setZero(na);
+            }
+        };
+        const DenseMatrix Gss_d = DenseMatrix(Gss);
+        Vector ps(ns), pc(ns);
+        // out += G_sa·(hi + lo), summed error-free, rounded once
+        const auto product = [&](const Vector& hi, const Vector& lo, Vector& out) {
+            ps = out;
+            pc.setZero();
+            for (Eigen::Index k = 0; k < Gsa.outerSize(); ++k) {
+                for (sparse::Matrix::InnerIterator e(Gsa, k); e; ++e) {
+                    acc(ps[e.row()], pc[e.row()], e.value(), hi[k]);
+                    acc(ps[e.row()], pc[e.row()], e.value(), lo[k]);
+                }
+            }
+            out = ps + pc;
+        };
+        DenseMatrix Xr(na, X.cols()), Gr(na, na), Sr(ns, S.cols()), Pr(ns, na);
+        Vector xbr, Sbr, hi, lo, col, r;
+        for (Eigen::Index j = 0; j < X.cols(); ++j) {
+            r.setZero(na);
+            for (sparse::Matrix::InnerIterator e(Gas, j); e; ++e) r[e.row()] = e.value();
+            hi = X.col(j);
+            refine(r, hi, lo);
+            Xr.col(j) = hi + lo;
+            col = -Gss_d.col(j);
+            product(hi, lo, col);
+            Sr.col(j) = col;
+        }
+        hi = xb;
+        refine(ba, hi, lo);
+        xbr = hi + lo;
+        Sbr = -bs;
+        product(hi, lo, Sbr);
+        for (Eigen::Index j = 0; j < na; ++j) {
+            r.setZero(na);
+            r[j] = Real{1};
+            hi = Ginv.col(j);
+            refine(r, hi, lo);
+            Gr.col(j) = hi + lo;
+            col.setZero(ns);
+            product(hi, lo, col);
+            Pr.col(j) = col;
+        }
+        // the plain operators stay unless some row moved past 1e-12 of its scale
+        const auto moved = [](const auto& a, const auto& b) {
+            for (Eigen::Index i = 0; i < a.rows(); ++i) {
+                const Real sc = b.row(i).cwiseAbs().maxCoeff();
+                if ((a.row(i) - b.row(i)).cwiseAbs().maxCoeff() > Real{1e-12} * sc) return true;
+            }
+            return false;
+        };
+        if (!(moved(S, Sr) || moved(Sb, Sbr) || moved(GsaGinv, Pr) || moved(X, Xr)
+              || moved(xb, xbr) || moved(Ginv, Gr))) {
+            return;
+        }
+        X = std::move(Xr);
+        xb = std::move(xbr);
+        Ginv = std::move(Gr);
+        S = std::move(Sr);
+        Sb = std::move(Sbr);
+        GsaGinv = std::move(Pr);
+    }
+
     // -------------------------------------------------------------
     // DSED bridge — continuous-time LTI state-space extraction
     // (notes/DSED_BRIDGE_DESIGN.md — currently a stub; implementation
@@ -464,6 +602,30 @@ public:
         std::vector<std::string> state_labels;
     };
 
+    /// The device names of an MNA row for a re-initialisation record, as the
+    /// fixed engine's ReinitRecord names them: a node row by its
+    /// capacitors ("C1"; "C1, C3" when several share it), a branch-current
+    /// row by its inductor, source or branch-form switch; else row_label.
+    [[nodiscard]] std::string record_label_(Index r) const {
+        std::string caps;
+        for (Index b = 0; b < graph_.num_branches(); ++b) {
+            const auto& br = graph_.branch(b);
+            if (!pool_.is_registered(b)) continue;
+            const auto k = pool_.kind_of(b);
+            if (r < graph_.num_nodes()) {
+                if (k == DevicePool::StoredKind::Capacitor && (br.from == r || br.to == r))
+                    caps += (caps.empty() ? "" : ", ") + std::string(graph_.branch_name(b));
+                continue;
+            }
+            const bool owns =
+                (pool_.is_inductor(b) && pool_.branch_var_id_for_inductor(b, graph_) == r) ||
+                (pool_.is_voltage_source(b) && pool_.branch_var_id_for_source(b, graph_) == r) ||
+                (pool_.is_branch_form(b) && pool_.branch_var_id_for_switch(b, graph_) == r);
+            if (owns) return std::string(graph_.branch_name(b));
+        }
+        return caps.empty() ? row_label(graph_, pool_, r) : caps;
+    }
+
     /// Extract continuous-time `(A, b)` for the given switch mask.
     ///
     /// v2.0 Phase 1: uses the assembler's EXACT (G, C, b) split —
@@ -506,6 +668,14 @@ public:
         const topology::SwitchStateMask& mask,
         Real h_a = Real{1e-6},
         Real h_b = Real{5e-7}) const {
+        // add-branch-form-ideal-switch task 8: the implicit engines'
+        // per-mode structural pass before the extraction, refusing by the
+        // same names (floating_node, ideal_voltage_loop, dependent_states);
+        // this extractor is the exact engine's
+        if (pool_.num_branch_switches() > 0) {
+            BranchStructureChecker structure{graph_, pool_, "dsed"};
+            if (structure.active()) (void)structure.check(mask, true);
+        }
         // ---------------------------------------------------------
         // Steps 1-2 (v2.0 Phase 1): EXACT (G, C, b) split from the
         // assembler — no more two-assembly finite-difference
@@ -826,12 +996,21 @@ public:
             const int d = static_cast<int>(W.cols());
             // f(x, u) = Af·x + Fs·u_s + Fa·u_a
             DenseMatrix Af(ns, ns), Fs(ns, ns), Fa(ns, na);
+            DenseMatrix PGas = P * Gas;
             if (ns > 0) {
-                Af = mlu.solve(Gsa * P * Gas - Gss);
+                DenseMatrix S = Gsa * PGas - Gss, GsaP = Gsa * P;
+                if (d == 0 && na > 0) {   // regular G_aa: the solves refined as above
+                    Vector xb = Vector::Zero(na), Sb = Vector::Zero(ns);
+                    refine_schur_(Gaa.sparseView(), Gas.sparseView(), Gsa.sparseView(),
+                                  Gss.sparseView(), Vector::Zero(na), Vector::Zero(ns),
+                                  [&](const Vector& r, Vector& o) { o = P * r; },
+                                  PGas, xb, P, S, Sb, GsaP);
+                }
+                Af = mlu.solve(S);
                 Fs = -mlu.inverse();
-                Fa = mlu.solve(Gsa * P);
+                Fa = mlu.solve(GsaP);
             }
-            DenseMatrix Rax = -P * Gas, Ras = DenseMatrix::Zero(na, ns), Raa = -P;
+            DenseMatrix Rax = -PGas, Ras = DenseMatrix::Zero(na, ns), Raa = -P;
             DenseMatrix K(d, ns);
             Vector kc = Vector::Zero(d);
             const Vector u_const = Tg.transpose() * b_orig;
@@ -847,6 +1026,38 @@ public:
                 const DenseMatrix MinvGsaN = mlu.solve(Gsa * N);
                 const DenseMatrix H = K * MinvGsaN;
                 Eigen::FullPivLU<DenseMatrix> hlu(H);
+                // isInvertible() is relative to H's own largest pivot, so an H that is
+                // rounding of K·M⁻¹G_sa·N (no state fixes the null direction: a floating
+                // group whose ties fell under the SVD cut) passed and its 1/rounding
+                // inverse sent the group to 1e17 V. The same cut as the SVD's, on the
+                // scale H has without cancellation.
+                const DenseMatrix Minv = mlu.inverse();
+                const Real h_scale = ((W.cwiseAbs().transpose() * Gas.cwiseAbs())
+                                      * Minv.cwiseAbs() * (Gsa.cwiseAbs() * N.cwiseAbs()))
+                                         .maxCoeff();
+                if (hlu.isInvertible()
+                    && !(hlu.matrixLU().diagonal().cwiseAbs().minCoeff()
+                         > Real{4} * Real(std::max(d, 16))
+                               * std::numeric_limits<Real>::epsilon() * h_scale)) {
+                    // name the group by its node with the largest null-vector entry
+                    std::string where;
+                    Real nmax = Real{0};
+                    for (int i = 0; i < na; ++i) {
+                        const Real ni = N.row(i).cwiseAbs().maxCoeff();
+                        const auto info = describe_row(graph_, pool_,
+                                                       static_cast<Index>(arows[static_cast<Size>(i)]));
+                        if (info.kind == RowKind::NodeVoltage && ni > nmax) {
+                            nmax = ni;
+                            where = info.label;
+                        }
+                    }
+                    throw std::runtime_error(
+                        "compute_lti_state_space: algebraic block G_aa is numerically "
+                        "singular at " + (where.empty() ? std::string{"a node group"} : where)
+                        + ": a direction it cannot resolve (a node group tied to "
+                        "the rest only by conductances below its rounding) is fixed by "
+                        "no state for this switch mask.");
+                }
                 if (!hlu.isInvertible()) {
                     throw std::runtime_error(
                         "compute_lti_state_space: algebraic block G_aa is singular "
@@ -929,11 +1140,27 @@ public:
             out.constraint_k = std::move(kc);
             out.energy_weight = std::move(E);
             for (const Index r : out.state_row_indices)
-                out.state_labels.push_back(row_label(graph_, pool_, r));
+                out.state_labels.push_back(record_label_(r));
+            // devices as pwl names them: the branch rows (switches, sources,
+            // inductors) that carry the constraint; node rows only if none does
+            std::vector<Index> crow;
             for (int i = 0; i < W.rows(); ++i)
                 if (d > 0 && W.row(i).cwiseAbs().maxCoeff() > Real{1e-9})
-                    out.constraint_devices.push_back(
-                        row_label(graph_, pool_, arows[static_cast<Size>(i)]));
+                    crow.push_back(arows[static_cast<Size>(i)]);
+            // (a branch-form switch first: impulse_losses books the record to
+            // devices[0], and a source in the same loop is not the cause)
+            auto is_switch_row = [&](Index r) {
+                for (Index b = 0; b < graph_.num_branches(); ++b)
+                    if (pool_.is_registered(b) && pool_.is_branch_form(b)
+                        && pool_.branch_var_id_for_switch(b, graph_) == r) return true;
+                return false;
+            };
+            const bool any_branch = std::any_of(crow.begin(), crow.end(),
+                [&](Index r) { return r >= graph_.num_nodes(); });
+            std::stable_partition(crow.begin(), crow.end(), is_switch_row);
+            for (const Index r : crow)
+                if (!any_branch || r >= graph_.num_nodes())
+                    out.constraint_devices.push_back(record_label_(r));
             return out;
         };
 
@@ -1313,7 +1540,10 @@ public:
                     return general();
                 }
             }
-            const DenseMatrix Gsa_Ginv = Gsa_sp * Ginv;
+            DenseMatrix Gsa_Ginv = Gsa_sp * Ginv;
+            refine_schur_(Gaa_sp, Gas_sp, Gsa_sp, Gss_sp, b_a_v, b_s,
+                          [&](const Vector& r, Vector& o) { solver->solve(r, o); },
+                          Ginv_Gas, Ginv_ba, Ginv, Schur_G, Schur_b, Gsa_Ginv);
             for (int j = 0; j < n_alg; ++j) {
                 B.col(alg_rows[j]) = Gsa_Ginv.col(j);
             }

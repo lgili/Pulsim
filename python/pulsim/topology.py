@@ -127,6 +127,7 @@ def add_bridge_rectifier(builder,
                             g_off: float = 1e-9,
                             V_th: float = 0.7,
                             V_f: float = 0.0,
+                            form: str = "conductance",
                             ) -> BridgeRectifierResult:
     """Add a four-diode full-wave bridge rectifier to the builder.
 
@@ -175,6 +176,10 @@ def add_bridge_rectifier(builder,
         estimate on the simulated current instead, use
         ``device_loss_summary(..., conduction_specs={name: {"V_f0": ...,
         "r_on": ...}})`` — not both, or ``V_f`` is counted twice.
+    form
+        ``add_diode``'s ``form``: ``'conductance'`` (default) or
+        ``'branch'`` (each diode ``R_on = 1/g_on``; ``g_on=math.inf`` is
+        the ideal diode).
 
     Returns
     -------
@@ -195,7 +200,7 @@ def add_bridge_rectifier(builder,
         bid = builder.graph.num_branches
         diode_name = f"{name}__{tag}"
         builder.add_diode(diode_name, frm, to, g_on, g_off, V_th=V_th,
-                          V_f=V_f)
+                          V_f=V_f, form=form)
         out.diode_branch_ids.append(int(bid))
         out.diode_names.append(diode_name)
     return out
@@ -219,6 +224,7 @@ def add_three_phase_vsi(builder,
                             V_f: float = 0.7,
                             R_d: float = 0.05,
                             V_th: float = 0.0,
+                            form: str = "conductance",
                             ) -> ThreePhaseVsiResult:
     """Add the power stage of a 3-phase voltage source inverter: three
     half-bridges, each an upper and a lower switch WITH its
@@ -310,6 +316,12 @@ def add_three_phase_vsi(builder,
         Turn-on threshold of each diode (V), effectively
         ``max(V_th, V_f)``. Default 0 (pure PSIM: turn on at ``V_f``).
         ``V_th > V_f`` (e.g. ``V_f + 1e-3``) gives a hysteresis band.
+    form
+        ``'conductance'`` (default) or ``'branch'`` for the switches and
+        the diodes. ``R_on = 0`` / ``R_d = 0`` is the ideal element and
+        needs ``form='branch'``; the conductance form refuses it (it used
+        to become 1 mOhm silently). ``R_off`` must be > 0 (``math.inf``:
+        an ideal open switch).
 
     Returns
     -------
@@ -335,8 +347,20 @@ def add_three_phase_vsi(builder,
         # Low-side: composed via a separate complementary observer
         # or a dead-time half-bridge helper.
     """
-    g_on = 1.0 / R_on if R_on > 0 else 1e3
-    g_off = 1.0 / R_off if R_off > 0 else 1e-9
+    branch = _form("add_three_phase_vsi", name, form) == "branch"
+    if not R_off > 0:
+        raise ValueError(f"add_three_phase_vsi({name!r}): R_off = {R_off} must be "
+                         "> 0 (math.inf is the ideal open switch).")
+    if not branch:
+        for label, v in (("R_on", R_on), ("R_d", R_d)):
+            if not v > 0 and (label == "R_on" or with_freewheel_diodes):
+                raise ValueError(
+                    f"add_three_phase_vsi({name!r}): {label} = {v}: the conductance "
+                    f"form needs {label} > 0; {label} = 0 is the ideal element, "
+                    "form='branch' (it is no longer replaced by 1 mOhm).")
+    g_off = 1.0 / R_off
+    sw = (dict(form="branch", R_on=R_on, g_off=g_off) if branch
+          else dict(g_on=1.0 / R_on, g_off=g_off))
     out = ThreePhaseVsiResult()
     # Walk in (HS, LS) pairs so the resulting switch_indices list is
     # [HSa, LSa, HSb, LSb, HSc, LSc] — the order most natural for
@@ -348,18 +372,18 @@ def add_three_phase_vsi(builder,
     ]
     for tag, frm, to in legs:
         sw_idx = builder.graph.num_switches
-        builder.add_switch(f"{name}__{tag}", frm, to,
-                              g_on=g_on, g_off=g_off)
+        builder.add_switch(f"{name}__{tag}", frm, to, **sw)
         out.switch_indices.append(int(sw_idx))
     if with_freewheel_diodes:
         # Antiparallel to each switch: the upper diode conducts from the
         # leg output UP to the positive rail, the lower one from the
         # negative rail UP to the leg output. Same order as the switches.
-        g_d_on = 1.0 / R_d if R_d > 0 else 1e3
+        dk = (dict(form="branch", R_on=R_d) if branch
+              else dict(g_on=1.0 / R_d))
         for tag, frm, to in legs:
             d_name = f"{name}__D{tag[0].lower()}{tag[2]}"
-            builder.add_diode(d_name, to, frm, g_d_on, g_off, V_th=V_th,
-                              V_f=V_f)
+            builder.add_diode(d_name, to, frm, g_off=g_off, V_th=V_th,
+                              V_f=V_f, **dk)
             out.diode_names.append(d_name)
     return out
 
@@ -514,6 +538,13 @@ class FlybackResult:
     suggested_dt: float = 1e-7
 
 
+def _form(fn: str, name: str, form: str) -> str:
+    if form not in ("conductance", "branch"):
+        raise ValueError(f"{fn}({name!r}): form={form!r}; expected 'conductance' "
+                         "or 'branch'.")
+    return form
+
+
 def _suggested_dt_for(f_sw: float) -> float:
     """Heuristic: aim for ≥ 100 samples per switching period so PWM
     edges and ringing on L/C aren't aliased."""
@@ -538,6 +569,7 @@ def add_buck(builder,
               diode_g_on: float = 1e3,
               diode_g_off: float = 1e-6,
               V_th: float = 0.0,
+              form: str = "conductance",
               ) -> BuckResult:
     """Add a synchronous-rectifier-style buck power stage.
 
@@ -588,6 +620,10 @@ def add_buck(builder,
         Diode on/off conductances and commutation threshold. Default
         1 kS / 1 µS / 0 V. ``V_th`` is the turn-on threshold, NOT a
         forward drop: the on-state is ``diode_g_on`` alone.
+    form
+        ``'conductance'`` (default) or ``'branch'`` for the switch and the
+        diode (``R_on = 1/g_on``; ``g_on=math.inf`` is the ideal element).
+        ``add_boost`` and ``add_flyback`` take it too.
 
     Returns
     -------
@@ -620,10 +656,11 @@ def add_buck(builder,
 
     out.switch_branch_id = int(builder.graph.num_branches)
     builder.add_switch(out.switch_name, vin_node, sw_mid,
-                          g_on=g_on, g_off=g_off)
+                          g_on=g_on, g_off=g_off, form=form)
 
     builder.add_diode(out.diode_name, gnd_node, sw_mid,
-                          g_on=diode_g_on, g_off=diode_g_off, V_th=V_th)
+                          g_on=diode_g_on, g_off=diode_g_off, V_th=V_th,
+                          form=form)
 
     out.inductor_branch_id = int(builder.graph.num_branches)
     builder.add_inductor(out.inductor_name, sw_mid, vout_node, L)
@@ -649,6 +686,7 @@ def add_boost(builder,
                diode_g_on: float = 1e3,
                diode_g_off: float = 1e-6,
                V_th: float = 0.0,
+               form: str = "conductance",
                ) -> BoostResult:
     """Add a boost power stage.
 
@@ -697,10 +735,11 @@ def add_boost(builder,
 
     out.switch_branch_id = int(builder.graph.num_branches)
     builder.add_switch(out.switch_name, sw_mid, gnd_node,
-                          g_on=g_on, g_off=g_off)
+                          g_on=g_on, g_off=g_off, form=form)
 
     builder.add_diode(out.diode_name, sw_mid, vout_node,
-                          g_on=diode_g_on, g_off=diode_g_off, V_th=V_th)
+                          g_on=diode_g_on, g_off=diode_g_off, V_th=V_th,
+                          form=form)
 
     builder.add_capacitor(out.capacitor_name, vout_node, gnd_node, C)
     builder.add_resistor(out.load_name, vout_node, gnd_node, R_load)
@@ -725,6 +764,7 @@ def add_flyback(builder,
                  diode_g_on: float = 1e3,
                  diode_g_off: float = 1e-6,
                  V_th: float = 0.0,
+                 form: str = "conductance",
                  ) -> FlybackResult:
     """Add a flyback power stage.
 
@@ -783,7 +823,7 @@ def add_flyback(builder,
 
     out.switch_branch_id = int(builder.graph.num_branches)
     builder.add_switch(out.switch_name, sw_mid, gnd_node,
-                          g_on=g_on, g_off=g_off)
+                          g_on=g_on, g_off=g_off, form=form)
 
     out.secondary_branch_id = int(builder.graph.num_branches)
     builder.add_inductor(out.secondary_name, sec_mid, gnd_node, L_sec)
@@ -796,7 +836,8 @@ def add_flyback(builder,
     builder.add_inductor_coupling(out.primary_name, out.secondary_name, k)
 
     builder.add_diode(out.diode_name, sec_mid, vout_node,
-                          g_on=diode_g_on, g_off=diode_g_off, V_th=V_th)
+                          g_on=diode_g_on, g_off=diode_g_off, V_th=V_th,
+                          form=form)
 
     builder.add_capacitor(out.capacitor_name, vout_node, gnd_node, C)
     builder.add_resistor(out.load_name, vout_node, gnd_node, R_load)

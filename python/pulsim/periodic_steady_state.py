@@ -677,7 +677,7 @@ class _Solver:
             r = self._run_native(
                 self.ad, sf, x, self.T, rtol=1e-11, atol=1e-14,
                 dt_init=self.T * 1e-6, dt_max=self.T, store_every=1,
-                enable_event_projection=False, **self._guard)
+                enable_event_projection=False, diode_law_rel=0.0, **self._guard)
         except RuntimeError as e:
             raise _conv(f"a period run failed: {e}") from e
         times = np.asarray(r["times"], dtype=float)

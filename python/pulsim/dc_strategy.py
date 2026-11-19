@@ -56,6 +56,8 @@ from typing import Optional
 
 import numpy as np
 
+from . import _run_options as _ro
+
 
 __all__ = [
     "DCStrategy",
@@ -350,8 +352,10 @@ def compute_dc_op(builder,
     from . import _pulsim as _k  # type: ignore[import-not-found]
 
     if device_path not in ("legacy", "interface"):
-        raise ValueError(f"compute_dc_op(device_path={device_path!r}): "
-                         "expected 'legacy' or 'interface'")
+        from . import _options_error
+        raise _options_error("device_path",
+                             f"compute_dc_op(device_path={device_path!r}): "
+                             "expected 'legacy' or 'interface'")
     if mask is None:
         mask = _k.SwitchStateMask(builder.graph.num_switches)
 
@@ -366,8 +370,9 @@ def compute_dc_op(builder,
             strategy=getattr(_k.DCStrategy,
                               _KERNEL_STRATEGIES[strategy]),
             enable_cascade=(strategy == "auto"),
-            max_event_iterations=(16 if max_event_iterations is None
-                                   else int(max_event_iterations)),
+            max_event_iterations=(_ro.DEFAULTS["max_event_iterations"]
+                                  if max_event_iterations is None
+                                  else int(max_event_iterations)),
             ss_n_steps=int(source_step.n_steps),
             t_eval=float(t_eval),
             enable_nonlinear_refresh=enable_nonlinear_refresh,

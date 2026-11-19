@@ -30,8 +30,10 @@
 // high-fidelity run no longer has to hold every sample.
 
 #include "pulsim/numeric/dense.hpp"
+#include "pulsim/sim/error.hpp"
 #include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/record/grid.hpp"
 #include "pulsim/solver/state_trajectory.hpp"
 #include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/thermal/device_losses.hpp"
@@ -40,6 +42,7 @@
 #include <limits>
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <stdexcept>
@@ -559,6 +562,15 @@ struct SimulationResult {
     Size num_switch_bits = 0;
     std::vector<Size> switch_state_unsolved;
     bool has_switch_states = false;
+    /// add-pwl-igbt-and-thyristor 2.2: per sample, the gate bit `g` each
+    /// gated device was decided under (the COMMANDED state; the stamped
+    /// conduction state is `switch_state_bits`), same layout: a gated
+    /// device's bit at its switch index, every other bit 0. Empty in a
+    /// circuit without a gated device.
+    std::vector<std::uint8_t> gate_state_bits;
+    /// Set by an engine for the duration of its run only (it reads the
+    /// engine's diode state); `record_switch_state` appends its mask.
+    std::function<topology::SwitchStateMask()> gate_mask_fn;
 
     /// Transient Newton solves that ended at the iteration budget and
     /// were accepted at roundoff level (add-newton-roundoff-acceptance:
@@ -568,12 +580,18 @@ struct SimulationResult {
     Real newton_roundoff_omega_max = 0;
     Index newton_roundoff_row = kInvalidIndex;
 
+    /// add-probes-and-recorders D3: the grid the rows sit on and the run's
+    /// engine-independent counters (set by the engine adapter).
+    record::GridKind grid = record::GridKind::Uniform;
+    record::RunStats stats;
+
     /// Start the record for a circuit with `num_switches` mask bits.
     /// Call once, before the first sample is stored.
     void begin_switch_state_record(Size num_switches, Size n_reserve = 0) {
         num_switch_bits = num_switches;
         switch_state_stride = (num_switches + 7) / 8;
         switch_state_bits.clear();
+        gate_state_bits.clear();
         switch_state_unsolved.clear();
         if (n_reserve > 0 && switch_state_stride > 0) {
             switch_state_bits.reserve(n_reserve * switch_state_stride);
@@ -589,17 +607,23 @@ struct SimulationResult {
         if (!has_switch_states) {
             return;
         }
-        const Size nw = m.num_words();
-        for (Size b = 0; b < switch_state_stride; ++b) {
-            const Size w = b / 8;
-            const std::uint64_t word = w < nw ? m.word(w) : 0ULL;
-            switch_state_bits.push_back(static_cast<std::uint8_t>(
-                (word >> (8 * (b % 8))) & 0xFFULL));
-        }
+        pack_mask_(m, switch_state_bits);
+        if (gate_mask_fn) pack_mask_(gate_mask_fn(), gate_state_bits);
         if (!solved && !times.empty()) {
             // Index of the sample just recorded (call this right
             // after pushing onto `times`).
             switch_state_unsolved.push_back(times.size() - 1);
+        }
+    }
+
+    void pack_mask_(const topology::SwitchStateMask& m,
+                    std::vector<std::uint8_t>& out) const {
+        const Size nw = m.num_words();
+        for (Size b = 0; b < switch_state_stride; ++b) {
+            const Size w = b / 8;
+            const std::uint64_t word = w < nw ? m.word(w) : 0ULL;
+            out.push_back(static_cast<std::uint8_t>(
+                (word >> (8 * (b % 8))) & 0xFFULL));
         }
     }
 
@@ -657,7 +681,7 @@ struct SimulationResult {
         return states.bytes() +
                times.size() * sizeof(Real) +
                event_iteration_count.size() * sizeof(Size) +
-               switch_state_bits.size() +
+               switch_state_bits.size() + gate_state_bits.size() +
                newton.iterations_per_solve.size() * sizeof(std::uint16_t) +
                switch_state_unsolved.size() * sizeof(Size) +
                commutation_events.size() * sizeof(CommutationEvent) +
@@ -692,7 +716,7 @@ struct SimulationResult {
 /// truncated result as if it were a whole one is exactly the silent
 /// wrong answer this project keeps removing; a caller who wants the
 /// partial trace has to ask for it by catching this type.
-class SimulationAborted : public std::runtime_error {
+class SimulationAborted : public std::runtime_error, public PulsimError {
 public:
     SimulationAborted(const std::string& what,
                        SimulationResult partial,
@@ -701,7 +725,10 @@ public:
         : std::runtime_error(what),
           partial_(std::move(partial)),
           t_failed_(t_failed),
-          roundoff_budget_(roundoff_budget) {}
+          roundoff_budget_(roundoff_budget) {
+        // it captured the aborted engine's frame, which is unwinding
+        partial_.gate_mask_fn = nullptr;
+    }
 
     /// Everything that WAS computed, up to but not including the
     /// step that failed.

@@ -143,6 +143,8 @@ omega_hat, psi_alpha_adj, psi_beta_adj = mras.update(
 
 ## See also
 
-- [Induction Motors](motors-induction.md)
+- [Induction Motors](motors-induction.md), with the MNA-native PMSM,
+  BLDC and induction machines (`add_pmsm_mna`, `add_bldc_mna`,
+  `add_induction_machine_mna`).
 - `python/pulsim/observers.py` — source.
 - `openspec/changes/add-sensorless-motor-observers/` — proposal + spec.

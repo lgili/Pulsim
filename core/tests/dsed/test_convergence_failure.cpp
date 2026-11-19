@@ -212,3 +212,50 @@ TEST_CASE("ConvergenceFailure: a chattering diode is kind chatter and named",
     REQUIRE(e.time() < 2e-7);
     REQUIRE(std::string{e.what()}.find(e.device() + " is chattering") != std::string::npos);
 }
+
+// The end-of-run diode-law check every simulate() runs (set_diode_law_check(0) to skip): a stored sample whose
+// mask has D ON while the circuit drives it backwards is refused, typed.
+TEST_CASE("A stored sample breaking the diode law throws DiodeLawViolation",
+          "[v2][dsed][diode_law]") {
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "s", "gnd", -10.0);
+    b.add_resistor("R", "s", "a", 1.0);
+    b.add_diode("D", "a", "k", 1e3, 1e-9, 0.0);
+    b.add_capacitor("C", "k", "gnd", 1e-6);
+    b.add_resistor("RL", "k", "gnd", 100.0);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    using Adapter = NativeCircuitBuilderAdapter<>;
+    Adapter ad{b.graph(), b.pool(), cache};
+    std::vector<SchedulerDiode> diodes;
+    pwl::DiodeEventState census(ad.graph(), ad.pool());
+    for (const auto& d : census.entries())
+        diodes.push_back(SchedulerDiode{d.switch_idx, d.from, d.to, d.g_on, d.g_off, d.V_th,
+                                        d.V_f, pwl::branch_label(ad.graph(), d.branch_id)});
+    const Size di = diodes.front().switch_idx;
+    const auto n_sw = static_cast<Size>(ad.graph().num_switches());
+    PEDSimulator<Adapter, ZeroMask> sim(ad, ZeroMask{n_sw}, PIController{1e-6, 1e-9},
+                                        EventPredictor{}, Real{1e-9}, Real{1e-5}, 1);
+    sim.enable_diode_commutation(census.diode_owned_bits(), topology::SwitchStateMask(n_sw),
+                                 std::move(diodes));
+    ad.set_mask(topology::SwitchStateMask(n_sw));
+    auto res = sim.simulate(Vector::Zero(ad.n_state()), 1e-5);   // D stays OFF: no refusal
+    REQUIRE_FALSE(res.sample_masks.back().get(di));
+    res.sample_masks.back().set(di, true);                        // D ON against -10 V
+    try {
+        sim.check_diode_law(res);
+        FAIL("no DiodeLawViolation thrown");
+    } catch (const DiodeLawViolation& e) {
+        REQUIRE(e.diode().rfind("D", 0) == 0);
+        REQUIRE(e.time() == res.times.back());
+    }
+    sim.set_diode_law_check(0.0);
+    REQUIRE_NOTHROW(sim.check_diode_law(res));
+    // a left limit at an event is checked under the mask that produced it
+    sim.set_diode_law_check(1e-3);
+    res.sample_masks.back().set(di, false);
+    REQUIRE_NOTHROW(sim.check_diode_law(res));
+    res.pre_event_index.push_back(res.times.size() - 1);
+    res.pre_event_states.push_back(res.states.back());
+    res.step_masks.back().set(di, true);
+    REQUIRE_THROWS_AS(sim.check_diode_law(res), DiodeLawViolation);
+}

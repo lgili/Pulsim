@@ -34,6 +34,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pulsim::pwl {
@@ -77,8 +78,12 @@ public:
                     .I_H        = p.I_H,
                     .ideal      = var >= 0 && pool.branch_R_on(branch.id) == Real{0},
                 });
+                if (p.gate != models::SwitchedDiode::Gate::None) {
+                    ++num_gated_;   // switch indices rise: the index is sorted
+                    gated_index_.emplace_back(static_cast<Size>(switch_idx),
+                                              diodes_.size() - 1);
+                }
                 any_ideal_ = any_ideal_ || diodes_.back().ideal;
-                if (p.gate != models::SwitchedDiode::Gate::None) ++num_gated_;
             }
             ++switch_idx;
         }
@@ -149,12 +154,21 @@ public:
         return mask;
     }
     [[nodiscard]] Size num_gated() const noexcept { return num_gated_; }
+    /// The gate bits `g` (at each gated device's switch index; 0 elsewhere).
+    [[nodiscard]] topology::SwitchStateMask gate_mask() const {
+        topology::SwitchStateMask mask(num_switches_);
+        for (const auto& [idx, entry] : gated_index_) {
+            mask.set(idx, diodes_[entry].g);
+        }
+        return mask;
+    }
     /// The gate a gated device at switch index `idx` was last decided under.
     [[nodiscard]] bool gate_of(Size idx) const noexcept {
-        for (const auto& d : diodes_) {
-            if (d.switch_idx == idx) return d.g;
-        }
-        return false;
+        const auto it = std::ranges::lower_bound(
+            gated_index_, idx, {}, &std::pair<Size, Size>::first);
+        return it != gated_index_.end() && it->first == idx
+                   ? diodes_[it->second].g
+                   : false;
     }
 
     /// Re-decide each diode's state based on the just-computed
@@ -290,22 +304,46 @@ public:
         }
     }
 
+    /// Accepts the conduction bits alone, or followed by one gate bit
+    /// per gated device (`snapshot_mode_bits`).
     void restore_on_bits(const std::vector<bool>& bits) {
-        if (bits.size() != diodes_.size()) {
+        if (bits.size() != diodes_.size() &&
+            bits.size() != diodes_.size() + num_gated_) {
             throw std::invalid_argument(
                 "DiodeEventState::restore_on_bits: size "
                 "mismatch — expected " +
-                std::to_string(diodes_.size()) + ", got " +
+                std::to_string(diodes_.size()) + " (or " +
+                std::to_string(diodes_.size() + num_gated_) +
+                " with the gate bits), got " +
                 std::to_string(bits.size()));
         }
+        Size g = diodes_.size();
         for (Size i = 0; i < diodes_.size(); ++i) {
             diodes_[i].is_on = bits[i];
+            if (bits.size() > diodes_.size() &&
+                diodes_[i].gate != models::SwitchedDiode::Gate::None) {
+                diodes_[i].g = bits[g++];
+            }
         }
+    }
+
+    /// The solver-owned mode a run resumes from (`SolverSnapshot::mask`):
+    /// the conduction bits, then the gate bit `g` each gated device was
+    /// last decided under, in registration order (add-pwl-igbt-and-
+    /// thyristor D13). `g` is not `switch_fn(t)`: at a gate edge on the
+    /// seam it is the pre-edge gate the edge is compared against.
+    [[nodiscard]] std::vector<bool> snapshot_mode_bits() const {
+        auto bits = snapshot_on_bits();
+        for (const auto& d : diodes_) {
+            if (d.gate != models::SwitchedDiode::Gate::None) bits.push_back(d.g);
+        }
+        return bits;
     }
 
 private:
     Size num_switches_;
     Size num_gated_ = 0;
+    std::vector<std::pair<Size, Size>> gated_index_;   //!< (switch idx, entry)
     bool any_ideal_ = false;
     std::vector<DiodeEntry> diodes_;
     topology::SwitchStateMask owned_{0};

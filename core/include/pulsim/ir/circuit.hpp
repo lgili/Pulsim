@@ -594,6 +594,11 @@ private:
                             v.real(t.h); v.real(t.psi); v.real(t.phi);
                         }
                     }
+                    if (p.flux_map) {   // only then: existing hashes unchanged
+                        s.word(0x666c75786d6170ULL);
+                        reals(p.flux_map->kd); reals(p.flux_map->kq);
+                        reals(p.flux_map->coef);
+                    }
                 }
             }, params);
             d->devices.push_back(std::move(dev));
@@ -608,11 +613,19 @@ private:
         for (const auto& m : pool.pmsm_mna_machines()) {
             s.idx(m.omega_node);
             s.idx(m.theta_node);
+            if (m.omega0 != Real{0} || m.theta0 != Real{0}) {
+                v.word(static_cast<std::uint64_t>(m.branch_id[0] + 1));
+                v.real(m.omega0); v.real(m.theta0);
+            }
         }
         for (const auto& m : pool.induction_machines()) {
             s.idx(m.omega_node);
             s.idx(m.rotor_node[0]);
             s.idx(m.rotor_node[1]);
+            if (m.omega0 != Real{0}) {
+                v.word(static_cast<std::uint64_t>(m.branch_id[0] + 1));
+                v.real(m.omega0);
+            }
         }
         // Which fields a parameter drives is structure; parameter values
         // are values.

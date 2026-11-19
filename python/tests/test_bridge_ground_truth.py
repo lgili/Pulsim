@@ -68,6 +68,31 @@ def test_bus_average_is_the_exact_one_under_rounding_fuzz(form, rtol, bound):
     assert np.ptp(errs) <= 1e-4, errs
 
 
+# A rounding draw (1 in ~600; the CI Linux draw k = 9 was one) whose D1 turn-off
+# right after the 23.58 ms D1/D4 turn-on was landed by interpolation from the
+# chatter guard's end-of-step state instead of the committed one: 5 mV on the
+# 470 uF bus in 0.8 ps, -6.6e6 A in the capacitor's slot, the bus 293.1 -> 273.3 V
+# in one 4 ns step, the average +1.76 V.
+BAD_DRAW = [-8.940462613311986e-14, 7.849543978220341e-14, 8.261638074877127e-14,
+            8.403884324046143e-14, 7.473968453074871e-14, 9.429011228404387e-14]
+
+
+@pytest.mark.parametrize("form", ["branch", "conductance"])
+def test_bus_charge_is_conserved_on_every_step(form):
+    b = _bridge(np.asarray(BAD_DRAW), form)
+    r = p.simulate(b, t_end=40e-3, engine="trbdf2", rtol=1e-7, atol=1e-10)
+    assert abs(_window_avg(r) - TRUTH) <= 1e-3
+    # Physical invariant: only the line current and the load move the bus charge,
+    # so |C dv| over a step is at most h * (max|i_L| + max|v|/R_L).
+    t = np.asarray(r.times)
+    v = np.asarray(r.v("dp")) - np.asarray(r.v("dn"))
+    i_max = np.abs(np.asarray(r.i("Ls"))).max() + np.abs(v).max() / 100.0
+    dq = 470e-6 * np.abs(np.diff(v))
+    bound = 2.0 * np.diff(t) * i_max + 1e-9
+    k = int(np.argmax(dq / bound))
+    assert dq[k] <= bound[k], (t[k], dq[k], bound[k])
+
+
 def test_the_exact_engine_matches_the_ground_truth():
     # integration batch 11: -4.5e-10 V measured (0.0272 V low before the
     # floating-island fix); 1e-6 V leaves room for platform rounding

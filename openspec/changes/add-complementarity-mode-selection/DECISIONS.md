@@ -824,6 +824,36 @@ choices it did not pin.
 
     → Reverse: each block is local to its function.
 
+35. **The diode-law check is in the kernel; the resettle band stays a voltage
+    band (2026-11-18).**
+    - `PEDSimulator::check_diode_law` runs at the end of every projected
+      `simulate()`. It applies the same rule that python's
+      `check_diode_modes` used, over every stored sample under its own mask.
+      It throws `DiodeLawViolation`, which Python maps to the typed
+      `DiodeModeInconsistentError` (`.device`, `.t_failed`).
+      `run_ped_native_builder(diode_law_rel=…)` sets the threshold; 0 turns
+      it off.
+    - Unprojected runs are not checked. A period map
+      (`periodic_steady_state`, the orbit kernel) starts from Newton trial
+      states and is judged by its own residual. Checked there, the
+      zero-band boost failed on one event sample (-0.57 A at 10 µs).
+    - The kernel check reaches callers the Python check never saw.
+    - A per-state reverse-current bound for ON diodes was tried twice and
+      failed both times:
+      - **The LCP's own tol_i.** Its tol_w·C_max/h_e term is about 5 A at
+        h_e = 2e-12 s on the 20 µs flyback. Under `mode_selection='lcp'` it
+        kept Drect ON through -1.3 A over 540 samples, and the check caught
+        it.
+      - **1e-6·iscale.** The doubler's D2 chattered 32 times again, and the
+        fuzz bridge1 went from 11 to 13 events.
+    - The band therefore stays 1e-6 of the circuit's voltage scale. For an
+      ON diode, current and voltage differ only by g_on, so a current
+      bound is the same rule with a different scale.
+    - The fuzz (12 configs × 21 runs) is unchanged: 0 errors and one mode
+      sequence per config. The doubler takes 19 events on both selections.
+
+    → Reverse: drop the `check_diode_law` call in `simulate()`.
+
 ## Slice 4: the fixed engine (2026-11-13 … 2026-11-17)
 
 Numbered F1, F2, … so they do not collide with #22–#33 of
@@ -983,3 +1013,42 @@ F4. **Guard counters on pwl follow dsed's names; a site judges only its
     it after a repair. The 54-run shadow survey is unchanged (every
     value column identical; only wall times moved). → Reverse: the
     `cycle_in` lines in `run_transient.hpp`.
+
+## Ideal switch 6 (2026-11-18)
+
+F5. **`mode_selection='auto'`: the value the release flips to.** A
+    literal `'lcp'` default would raise wherever it refuses today
+    (migration audit F5). `'auto'` resolves before the run: `'lcp'` where
+    it applies, the settle (`None`) where `'lcp'` would refuse — no PWL
+    diode, a gated device, a Newton device (`pwl::lcp_circuit_refusal`, the
+    circuit half of run_transient's setup refusals, bound as
+    `_lcp_circuit_refusal`), `engine='trbdf2'` (no hook yet),
+    `sensitivities=`, `max_event_iterations=0`. The record
+    `result.diagnostics['mode_selection_auto'] = {requested, chosen,
+    reason}` is kept on every path; a warning only for
+    `max_event_iterations=0` (the caller asked for frozen modes). The
+    circuit reasons, trbdf2, `max_event_iterations=0` and `sensitivities=`
+    are tested (`test_mode_auto.py`; the circuit ones against the explicit
+    `'lcp'` refusal — the predicate is duplicated, not shared: the loop
+    files are frozen). The dsed "integrator other than rk45" branch is
+    defensive: the dispatcher forces rk45 whenever diodes exist. Not handled: a failure of the LCP during the run (a
+    secondary ray, an ideal loop the settle would release) raises under
+    `'auto'` as under `'lcp'`; catching it would mean re-running a stateful
+    `switch_fn`. A per-site fallback in `mode_lcp_site` is a loop edit
+    (listed). The C++ `SimulationOptions::mode_selection` keeps 0/1/2;
+    `'auto'` is a Python run option (for `sim::kRunOptionTable` at the
+    merge). → Reverse: the `'auto'` branches in `simulate()` and the dsed
+    dispatch.
+
+F6. **`'lcp'` cost in the tie band: the port matrix is built lazily.**
+    `PwlModePorts::correct()` (the island KCL on an engine solve) needs the
+    island correction of its (mask, dt) only, but went through `entry_()`,
+    which also built the k-column port matrix Z: one solve per port at
+    every new (mask, dt), split sub-steps included. Z is now built on the
+    first `site()` of the entry; `correct()` prepares the correction only.
+    Same solves in the same order for every Z that is used, so the states
+    are the same bits (`lcp_cost_gate.py --compare`). Not done: a Lemke
+    warm start from the previous site's basis and a reuse of Z's
+    factorization across sites (a warm start must not change the decision
+    on a degenerate tie, which needs its own test). → Reverse: `z_ready`
+    and `build_z_` in `pwl/mode_ports.hpp`.

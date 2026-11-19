@@ -151,7 +151,7 @@ public:
                 bool covered = false;
                 for_each([&](const auto& k) {
                     using K = std::remove_cvref_t<decltype(k)>;
-                    if (iface::kPorted<K> && K::kStoredKind == sk) covered = true;
+                    if (iface::kPorted<K> && iface::history_covers<K>(sk)) covered = true;
                 });
                 if (!covered) add(stored_kind_name(sk));
             }
@@ -290,6 +290,8 @@ public:
         history.from_flat(s.view(device::StateBlock::LinearCompanion));
         for_each_in_block_order(
             [&s](auto& k) { k.from_flat(s.view(k.kBlock)); });
+        // increment-form reference = the snapshot's x
+        get<PmsmMnaHistory>().rebase_reference(s.x);
     }
 
 private:

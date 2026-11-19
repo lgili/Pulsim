@@ -142,6 +142,48 @@ def analytic(repeats):
     return out
 
 
+def law_circuits(repeats):
+    """Circuits that exercise every ported Newton law (the reference set's
+    switched circuits use PWL devices and barely reach them): the
+    equivalence circuits of python/tests/test_device_path_equivalence.py
+    (MOSFET L1, Coss junction + VDMOS, saturable inductor, Shockley, IGBT L1
+    with and without its tail, Lauritzen) on both Newton engines."""
+    sys.path.insert(0, str(ROOT.parent / "python" / "tests"))
+    import test_device_path_equivalence as T  # noqa: PLC0415 - test circuits
+    out = []
+    runs = {"pwl": dict(t_end=200e-6, dt=20e-9, engine="pwl"),
+            "trbdf2": dict(t_end=200e-6, engine="trbdf2", rtol=1e-6, atol=1e-9)}
+    for name, make in sorted(T.CIRCUITS.items()):
+        for eng, kw in runs.items():
+            def run(make=make, kw=kw):
+                b = make()
+                return pulsim.simulate(b, **T._gate(b.graph.num_switches), **kw)
+            rec = _pair(run, repeats, lambda res: (None, "ran"))
+            rec.update(circuit=f"law:{name}", engine=eng)
+            out.append(rec)
+            print(_line(rec), flush=True)
+    # the MNA machines (DECISIONS #42): their pwl gate circuits
+    for name in sorted(getattr(T, "MACHINES", {})):
+        make, t_end, dt, sw, _ = T.MACHINES[name]
+        kw = dict(t_end=t_end, dt=dt, engine="pwl")
+        if sw is not None:
+            kw["switch_fn"] = sw
+
+        def run(make=make, kw=kw):
+            res = pulsim.simulate(make(), **kw)
+            # a floating neutral (physically 0 V, ~1e-11 V of round-off) is
+            # left out, as in the test's 1e-12 gate
+            v_ph = max(np.max(np.abs(np.asarray(res.v(n)))) for n in ("ua", "ub", "uc"))
+            if np.max(np.abs(np.asarray(res.v("nn")))) <= 1e-9 * v_ph:
+                return T._without(res, T._neutral_column(res))
+            return res
+        rec = _pair(run, repeats, lambda res: (None, "ran"))
+        rec.update(circuit=f"law:{name}", engine="pwl")
+        out.append(rec)
+        print(_line(rec), flush=True)
+    return out
+
+
 def _g(x):
     return "—" if x is None else f"{x:.3g}"
 
@@ -197,7 +239,8 @@ def main(argv=None) -> int:
     ap.add_argument("--repeats", type=int, default=2)
     ap.add_argument("--json")
     a = ap.parse_args(argv)
-    recs = differential(a.circuits.split(","), a.repeats) + analytic(a.repeats)
+    recs = (law_circuits(a.repeats) + differential(a.circuits.split(","), a.repeats)
+            + analytic(a.repeats))
     OUT.write_text(render(recs), encoding="utf-8")
     if a.json:
         Path(a.json).write_text(json.dumps(recs, indent=1, default=str), encoding="utf-8")

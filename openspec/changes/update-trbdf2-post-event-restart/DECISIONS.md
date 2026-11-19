@@ -495,3 +495,35 @@ The open questions of `design.md` had no answer and none was marked
    ten times the worst honest run). To reverse (b): drop the
    `x_sig = x;` in the no-flip branch; (c): drop the option and the
    `roundoff_budget` flag of `SimulationAborted`.
+
+18. **The +1.76 V floating-bridge draw was an interpolated landing from the
+   wrong bracket-start state (2026-11-18).** One rounding draw in ~600 of
+   the floating-bus bridge (branch-form diodes, rtol 1e-7; CI Linux draw
+   k = 9) read the 30-40 ms bus +0.5 ... +1.76 V high. Trace: at the
+   23.578 ms D1/D4 turn-on the chatter guard decided the bits on the END
+   of a 40 us trial (`x_sig = x_1`, bus 292.861 V). The retried 4 ns step
+   then found D1 turning off at once, the bracket sat at its floor, and
+   the turn-off was landed by interpolation from `x_ta = x_sig` while the
+   trial solves and the history start from the committed x (293.1105 V).
+   The landed state, 0.78 ps after t, was 5.4 mV below x on the 470 uF
+   bus; `update_from_state` made that i_C = -6.58e6 A, and the next
+   trapezoidal stage integrated it: 293.105 -> 273.303 V in one 4 ns
+   step. Fix: `x_ta` starts at the committed x (trbdf2_transient.hpp,
+   Illinois localisation). Measured: the bad draw -1.911e-4 V (the
+   good-draw value); fuzz 0 bad in 6000 branch draws at 1e-13, 6000 at
+   1e-15, 3000 conductance, 3000 `mode_selection='lcp'`. Regression:
+   `test_bus_charge_is_conserved_on_every_step` (the draw itself plus
+   |C dv| <= 2 h (max|i_L| + max|v|/R_L) on every sample pair). Left open
+   (reviewer 2026-11-18): the bracket's signal `sa` is still read on
+   `x_sig`, so after a chatter-guard break the localisation can collapse
+   onto t and land a no-op (no charge error, a wasted landing); reading
+   both interpolation signals on the endpoint states is the next step. To
+   reverse: `Vector x_ta = x_sig;`.
+   Hand-off (2026-11-18, after this fix): the PSFB example still does not
+   converge in rtol (`.scratch/t10/psfb_table.py`, 1.8-2.0 ms mean at rtol
+   1e-4 ... 1e-8: 23.966, 23.966, 23.966, 24.004, 24.005 V against
+   24.066 V; zero-time current jumps 1888 / 2415 / 2820 / 3566 / 6810).
+   The mechanism of track-10 note 43 stands (a D2/D3 tie at freewheel
+   edges, probed OFF inside the L·g_off transient); this fix does not
+   address it. Next in order: that tie, then the conditioning floor keyed
+   on the pre-settle mode.

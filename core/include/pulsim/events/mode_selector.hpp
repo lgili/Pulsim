@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <type_traits>
 #include <vector>
@@ -311,29 +312,49 @@ public:
                            const std::vector<DiodePort>& ports,
                            const std::vector<char>& prev_on,
                            DenseMatrix& H, Vector& q) {
-        const Eigen::Index k = u.size();
-        // e = Da·z + Γ·v (excess current over the previous stamp),
-        // v = (I + ZΓ)⁻¹(u − Z·Da·z), ŵ = A·z + B·v + c
-        Vector Da(k), Gm(k), A(k), B(k), c(k);
-        for (Eigen::Index j = 0; j < k; ++j) {
-            const auto& p = ports[static_cast<std::size_t>(j)];
-            if (prev_on[static_cast<std::size_t>(j)]) {
-                Da[j] = Real{1} / p.R_on; Gm[j] = p.g_off;
-                A[j] = Real{1} / p.R_on; B[j] = Real{1} / p.R_on;
-                c[j] = -p.V_f / p.R_on;
-            } else {
-                Da[j] = Real{1}; Gm[j] = Real{0};
-                A[j] = p.R_on; B[j] = Real{-1}; c[j] = p.V_f;
-            }
-        }
-        DenseMatrix IZG = Z * Gm.asDiagonal();
-        IZG.diagonal().array() += Real{1};
-        const Eigen::PartialPivLU<DenseMatrix> F(IZG);
-        const DenseMatrix FZ = F.solve(Z);
-        H = -(B.asDiagonal() * FZ * Da.asDiagonal());
-        H.diagonal() += A;
-        q = B.asDiagonal() * F.solve(u) + c;
+        HybridFactor f;
+        f.build(Z, ports, prev_on, H);
+        f.rhs(u, q);
     }
+
+    /// The u-free part of hybrid_lcp: H, the factor of I + ZΓ, B and c,
+    /// built from (Z, ports, prev_on) alone; rhs(u) is q.
+    struct HybridFactor {
+        Vector B, c;
+        Eigen::PartialPivLU<DenseMatrix> F;
+        void build(const DenseMatrix& Z, const std::vector<DiodePort>& ports,
+                   const std::vector<char>& prev_on, DenseMatrix& H) {
+            const Eigen::Index k = Z.rows();
+            // e = Da·z + Γ·v (excess current over the previous stamp),
+            // v = (I + ZΓ)⁻¹(u − Z·Da·z), ŵ = A·z + B·v + c
+            Vector Da(k), Gm(k), A(k);
+            B.resize(k);
+            c.resize(k);
+            for (Eigen::Index j = 0; j < k; ++j) {
+                const auto& p = ports[static_cast<std::size_t>(j)];
+                if (prev_on[static_cast<std::size_t>(j)]) {
+                    Da[j] = Real{1} / p.R_on; Gm[j] = p.g_off;
+                    A[j] = Real{1} / p.R_on; B[j] = Real{1} / p.R_on;
+                    c[j] = -p.V_f / p.R_on;
+                } else {
+                    Da[j] = Real{1}; Gm[j] = Real{0};
+                    A[j] = p.R_on; B[j] = Real{-1}; c[j] = p.V_f;
+                }
+            }
+            DenseMatrix IZG = Z * Gm.asDiagonal();
+            IZG.diagonal().array() += Real{1};
+            F.compute(IZG);
+            const DenseMatrix FZ = F.solve(Z);
+            H = -(B.asDiagonal() * FZ * Da.asDiagonal());
+            H.diagonal() += A;
+        }
+        void rhs(const Vector& u, Vector& q) const { q = B.asDiagonal() * F.solve(u) + c; }
+    };
+
+    /// Memo counters: hybrid factors / pivots built, and reused (bit-equal inputs).
+    struct MemoStats { long hybrid_builds = 0, hybrid_reuses = 0, pivot_builds = 0,
+                       pivot_reuses = 0, resistance_builds = 0, resistance_reuses = 0; };
+    [[nodiscard]] const MemoStats& memo_stats() const noexcept { return memo_; }
 
     /// Select the mode after an event. `port_at(h, Z, u)` fills the
     /// k-port of the previous mode's BE companion network of step h
@@ -402,13 +423,15 @@ public:
                 bool tie = false;
                 for (int s : st_) tie = tie || s < 0;
                 if (!tie) break;
-                std::vector<char> mode(ports.size()), decided(ports.size());
+                mode_.resize(ports.size());
+                decided_.resize(ports.size());
                 for (std::size_t j = 0; j < ports.size(); ++j) {
-                    mode[j] = st_[j] > 0 ? 1 : 0;
-                    decided[j] = st_[j] >= 0 ? 1 : 0;
+                    mode_[j] = st_[j] > 0 ? 1 : 0;
+                    decided_[j] = st_[j] >= 0 ? 1 : 0;
                 }
-                if constexpr (kAnchored) coords_of_(ports, mode, anchor_);
-                const Real cap = Real{0.5} * horizon(mode, decided);
+                if constexpr (kAnchored) coords_of_(ports, mode_, anchor_);
+                const Real cap = Real{0.5} * horizon(static_cast<const std::vector<char>&>(mode_),
+                                                     static_cast<const std::vector<char>&>(decided_));
                 if (cap < h) {
                     h = cap;
                     ++out.capped;
@@ -419,9 +442,10 @@ public:
             h_prev = h;
             if constexpr (kAnchored) port_at(h, static_cast<const std::vector<char>&>(anchor_), Z_, u_);
             else port_at(h, Z_, u_);
-            hybrid_lcp(Z_, u_, ports, anchor_, H_, q_);
+            hybrid_memo_(ports);
             H_he_ = H_;
             q_he_ = q_;
+            gen_he_ = h_gen_;
             st_prev_ = st_;
             int piv = 0;
             LcpStatus status = LcpStatus::Trivial;
@@ -440,7 +464,8 @@ public:
                     }
                     H_ = H_he_;
                     q_ = q_he_;
-                    if (!pivot_to_coords_(anchor_)) { status = LcpStatus::PivotCap; break; }
+                    h_gen_ = gen_he_;
+                    if (!pivot_memo_(anchor_)) { status = LcpStatus::PivotCap; break; }
                 }
                 status = solve_with_hysteresis_(ports, sc, h, piv, out.released);
                 out.shorted_held += shorted_held_;
@@ -523,6 +548,103 @@ private:
             if (ports[j].R_on == Real{0}) out[j] = 0;
     }
 
+    // ---- exact memos (add-branch-form-ideal-switch, 'lcp' cost) -------------
+    // Each memo returns what its computation returns on bit-equal inputs, so a
+    // hit gives the same bits as recomputing (the same code made the stored
+    // values). H_ carries a generation h_gen_: equal generations, equal H_.
+
+    template <class T>
+    static bool same_bits_(const T& a, const T& b) {
+        return a.size() == b.size() &&
+               std::memcmp(a.data(), b.data(), static_cast<std::size_t>(a.size()) *
+                                                   sizeof(typename T::Scalar)) == 0;
+    }
+
+    // hybrid_lcp on (Z_, u_, ports, anchor_) into (H_, q_): the factor is kept
+    // while (Z_, ports, anchor_) repeat (a quiet stretch of one (mask, dt) and
+    // mode), q while u_ repeats too (a widened pass on the site's own (Z, u)).
+    void hybrid_memo_(const std::vector<DiodePort>& ports) {
+        static_assert(sizeof(DiodePort) == 4 * sizeof(Real), "DiodePort is compared bitwise");
+        const bool hit = hf_ready_ && same_bits_(Z_, hf_Z_) && anchor_ == hf_anchor_ &&
+                         ports.size() == hf_ports_.size() &&
+                         std::memcmp(ports.data(), hf_ports_.data(),
+                                     ports.size() * sizeof(DiodePort)) == 0;
+        if (!hit) {
+            hf_.build(Z_, ports, anchor_, hf_H_);
+            hf_Z_ = Z_;
+            hf_anchor_ = anchor_;
+            hf_ports_ = ports;
+            hf_ready_ = true;
+            hf_q_ok_ = false;
+            hf_gen_ = ++gen_;
+            ++memo_.hybrid_builds;
+        } else {
+            ++memo_.hybrid_reuses;
+        }
+        if (!(hf_q_ok_ && same_bits_(u_, hf_u_))) {
+            hf_.rhs(u_, hf_q_);
+            hf_u_ = u_;
+            hf_q_ok_ = true;
+        }
+        H_ = hf_H_;
+        q_ = hf_q_;
+        h_gen_ = hf_gen_;
+    }
+
+    // pivot_to_coords_ with its matrix part kept per (h_gen_, coord_, prev_on):
+    // on a hit H_ is the stored pivot and q_ is pivoted with the stored blocks
+    // by the same expressions.
+    struct PivotEntry {
+        std::uint64_t gen_in = 0, gen_out = 0;
+        std::vector<char> coord, prev;
+        bool ok = false;
+        DenseMatrix H, Bi, Hab;
+        std::vector<Eigen::Index> idx, oth;
+    };
+    bool pivot_memo_(const std::vector<char>& prev_on) {
+        for (auto& e : pivots_) {
+            if (e.gen_in != h_gen_ || e.coord != coord_ || e.prev != prev_on) continue;
+            ++memo_.pivot_reuses;
+            if (!e.ok) return false;
+            if (e.idx.empty()) return true;
+            pivot_q_(e.Bi, e.Hab, e.idx, e.oth);
+            H_ = e.H;
+            h_gen_ = e.gen_out;
+            return true;
+        }
+        ++memo_.pivot_builds;
+        if (pivots_.size() >= kPivotMemo) pivots_.clear();
+        PivotEntry& e = pivots_.emplace_back();
+        e.gen_in = h_gen_;
+        e.coord = coord_;
+        e.prev = prev_on;
+        e.ok = pivot_to_coords_(prev_on);
+        if (e.ok && !idx_.empty()) {
+            e.H = H_;
+            e.Bi = pivot_Bi_;
+            e.Hab = pivot_Hab_;
+            e.idx = idx_;
+            e.oth = oth_;
+            e.gen_out = h_gen_ = ++gen_;
+        }
+        return e.ok;
+    }
+    static constexpr std::size_t kPivotMemo = 32;
+
+    // q_ of the pivot onto idx (the blocks Bi = H_bb⁻¹, Hab of pivot_to_coords_).
+    void pivot_q_(const DenseMatrix& Bi, const DenseMatrix& Hab,
+                  const std::vector<Eigen::Index>& idx, const std::vector<Eigen::Index>& oth) {
+        const auto nb = static_cast<Eigen::Index>(idx.size());
+        const auto na = static_cast<Eigen::Index>(oth.size());
+        Vector qb(nb), qa(na);
+        for (Eigen::Index r = 0; r < nb; ++r) qb[r] = q_[idx[static_cast<std::size_t>(r)]];
+        for (Eigen::Index r = 0; r < na; ++r) qa[r] = q_[oth[static_cast<std::size_t>(r)]];
+        const Vector qbn = -(Bi * qb);
+        const Vector qan = qa + Hab * qbn;
+        for (Eigen::Index r = 0; r < nb; ++r) q_[idx[static_cast<std::size_t>(r)]] = qbn[r];
+        for (Eigen::Index r = 0; r < na; ++r) q_[oth[static_cast<std::size_t>(r)]] = qan[r];
+    }
+
     // Principal pivot of (H_, q_) from the previous mode's coordinates to
     // coord_ (z_j = w_j where coord_ is 1, i_j where 0). False when the
     // pivot block is singular.
@@ -545,29 +667,25 @@ private:
         };
         const DenseMatrix Hbb = pick(idx_, idx_), Hba = pick(idx_, oth_);
         const DenseMatrix Hab = pick(oth_, idx_), Haa = pick(oth_, oth_);
-        Vector qb(nb), qa(na);
-        for (Eigen::Index r = 0; r < nb; ++r) qb[r] = q_[idx_[static_cast<std::size_t>(r)]];
-        for (Eigen::Index r = 0; r < na; ++r) qa[r] = q_[oth_[static_cast<std::size_t>(r)]];
         const Eigen::FullPivLU<DenseMatrix> lu(Hbb);
         if (!lu.isInvertible()) return false;
         const DenseMatrix Bi = lu.inverse();
         const DenseMatrix nBa = -(Bi * Hba);
         const DenseMatrix AB = Hab * Bi;
         const DenseMatrix Aa = Haa + Hab * nBa;
-        const Vector qbn = -(Bi * qb);
-        const Vector qan = qa + Hab * qbn;
+        pivot_q_(Bi, Hab, idx_, oth_);
         for (Eigen::Index r = 0; r < nb; ++r) {
             const Eigen::Index jr = idx_[static_cast<std::size_t>(r)];
-            q_[jr] = qbn[r];
             for (Eigen::Index c = 0; c < nb; ++c) H_(jr, idx_[static_cast<std::size_t>(c)]) = Bi(r, c);
             for (Eigen::Index c = 0; c < na; ++c) H_(jr, oth_[static_cast<std::size_t>(c)]) = nBa(r, c);
         }
         for (Eigen::Index r = 0; r < na; ++r) {
             const Eigen::Index jr = oth_[static_cast<std::size_t>(r)];
-            q_[jr] = qan[r];
             for (Eigen::Index c = 0; c < nb; ++c) H_(jr, idx_[static_cast<std::size_t>(c)]) = AB(r, c);
             for (Eigen::Index c = 0; c < na; ++c) H_(jr, oth_[static_cast<std::size_t>(c)]) = Aa(r, c);
         }
+        pivot_Bi_ = Bi;
+        pivot_Hab_ = Hab;
         return true;
     }
 
@@ -705,6 +823,30 @@ private:
         const auto nb = static_cast<Eigen::Index>(idx_.size());
         if (nb == 0) return H_(j, j);
         const bool j_in = coord_[static_cast<std::size_t>(j)] != 0;   // j pivots too
+        // the value is a function of (H_, idx_, j, j_in) alone: kept per generation
+        for (const auto& e : resist_) {
+            if (e.gen == h_gen_ && e.j == j && e.j_in == j_in && e.idx == idx_) {
+                ++memo_.resistance_reuses;
+                return e.r;
+            }
+        }
+        ++memo_.resistance_builds;
+        if (resist_.size() >= kResistMemo) resist_.clear();
+        const Real r = port_resistance_solve_(j, j_in);
+        resist_.push_back(ResistEntry{h_gen_, j, j_in, idx_, r});
+        return r;
+    }
+    struct ResistEntry {
+        std::uint64_t gen;
+        Eigen::Index j;
+        bool j_in;
+        std::vector<Eigen::Index> idx;
+        Real r;
+    };
+    static constexpr std::size_t kResistMemo = 64;
+
+    [[nodiscard]] Real port_resistance_solve_(Eigen::Index j, bool j_in) {
+        const auto nb = static_cast<Eigen::Index>(idx_.size());
         DenseMatrix Hbb(nb, nb);
         Vector hbj(nb), hjb(nb);
         Eigen::Index pj = -1;
@@ -722,6 +864,16 @@ private:
     }
 
     LemkeSolver lemke_;
+    MemoStats memo_;
+    HybridFactor hf_;
+    DenseMatrix hf_Z_, hf_H_, pivot_Bi_, pivot_Hab_;
+    Vector hf_u_, hf_q_;
+    std::vector<char> hf_anchor_, mode_, decided_;
+    std::vector<DiodePort> hf_ports_;
+    bool hf_ready_ = false, hf_q_ok_ = false;
+    std::uint64_t gen_ = 0, h_gen_ = 0, hf_gen_ = 0, gen_he_ = 0;
+    std::vector<PivotEntry> pivots_;
+    std::vector<ResistEntry> resist_;
     DenseMatrix Z_, H_, Hs_, H_he_;
     Vector u_, q_, qs_, zf_, wf_, zfull_, what_, i_, wg_, q_he_;
     std::vector<int> st_, cls_, st_prev_;

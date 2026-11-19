@@ -1071,7 +1071,7 @@ def _make_options(t_end: float, dt: float, **simulate_kwargs):
     opts.dt      = float(dt)
     # Pass-through Newton / event knobs if present.
     for k in ("max_newton_iterations", "max_event_iterations"):
-        if k in simulate_kwargs:
+        if simulate_kwargs.get(k) is not None:  # None = the kernel default
             setattr(opts, k, int(simulate_kwargs[k]))
     for k in ("tol_newton_dx", "tol_newton_res"):
         if k in simulate_kwargs and simulate_kwargs[k] is not None:

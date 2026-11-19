@@ -76,6 +76,7 @@
 // (0, −120°, +120°) for (a, b, c), λ_pm,a = ψ_pm cos θ_e so that
 // e_a = −ψ_pm·pp·ω·sin θ_e.
 
+#include "pulsim/models/flux_map_dq.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -112,6 +113,12 @@ struct PmsmMna {
         /// Non-sinusoidal PM flux; null = ψ_pm·cos(θ_e) (psi_pm is then
         /// the only PM parameter read).
         Harmonics harmonics{};
+        /// Saturating, cross-coupled dq law λ_dq = ∇W'(i_d, i_q) (group 4);
+        /// null = the constant L_d, L_q, ψ_pm above. With a map, L_d, L_q
+        /// and psi_pm are the map's values at the origin (the builder
+        /// checks it) and are read only for L_0's default and the
+        /// held-mechanics DC point at ω0 = 0.
+        std::shared_ptr<const FluxMapDQ> flux_map{};
     };
 
     static constexpr topology::BranchKind kind =
@@ -131,7 +138,7 @@ struct PmsmMna {
             throw std::invalid_argument(
                 "PmsmMna: L_0 must be >= 0 (0 selects the dq average)");
         }
-        if (!(p.psi_pm >= Real{0})) {
+        if (!(p.psi_pm >= Real{0}) && !p.flux_map) {   // a map carries its own
             throw std::invalid_argument(
                 "PmsmMna: psi_pm must be >= 0");
         }
@@ -153,6 +160,14 @@ struct PmsmMna {
                         "h >= 1 and finite psi, phi");
                 }
             }
+        }
+        if (p.flux_map) {
+            if (p.harmonics) {
+                throw std::invalid_argument(
+                    "PmsmMna: a flux map carries the PM flux in lambda_d; "
+                    "it cannot be combined with PM harmonics");
+            }
+            p.flux_map->validate();
         }
     }
 
@@ -282,6 +297,90 @@ struct PmsmMna {
         return out;
     }
 
+    /// λ_pm and its first two θ_e-derivatives from one trig evaluation per
+    /// term: `lambda_pm(p, θ, 0..2)` to the bit.
+    struct PmFlux {
+        Vec3 d0{}, d1{}, d2{};
+    };
+    [[nodiscard]] static PmFlux lambda_pm_all(const Params& p, Real theta_e) noexcept {
+        PmFlux out;
+        for (Size k = 0; k < 3; ++k) {
+            const Real a = theta_e + phase_offset(k);
+            if (p.harmonics) {
+                Real a0 = 0, a1 = 0, a2 = 0;
+                for (const auto& t : *p.harmonics) {
+                    const Real arg = t.h * a + t.phi;
+                    const Real c = std::cos(arg);
+                    a0 += t.psi * c;
+                    a1 += -(t.h * t.psi) * std::sin(arg);
+                    a2 += -(t.h * t.h * t.psi) * c;
+                }
+                out.d0[k] = a0;
+                out.d1[k] = a1;
+                out.d2[k] = a2;
+                continue;
+            }
+            const Real c = std::cos(a);
+            out.d0[k] = p.psi_pm * c;
+            out.d1[k] = -p.psi_pm * std::sin(a);
+            out.d2[k] = -p.psi_pm * c;
+        }
+        return out;
+    }
+
+    /// λ(θ_e, i) − λ(θ0_e, i0) without cancellation. `dth_e` = θ_e − θ0_e
+    /// and `di` = i − i0 are passed in (node-voltage differences, exact
+    /// when the two are close). The flux row multiplies this by 2/h, so
+    /// its round-off must scale with the increment, not with |λ|
+    /// (eps·(2/h)·ψ_pm exceeds Newton's 1e-9 V at h = 10 ns, ψ = 0.05):
+    ///   L(θ) − L(θ0): the dq block Pᵀ·diag(L_d, L_q)·P is
+    ///     Σ·I + Δ·[[cos 2θ, sin 2θ], [sin 2θ, −cos 2θ]],  Δ = (L_d − L_q)/2,
+    ///   and cos 2θ − cos 2θ0 = −2 sin(θ + θ0) sin(θ − θ0),
+    ///       sin 2θ − sin 2θ0 = +2 cos(θ + θ0) sin(θ − θ0);
+    ///   λ_pm: cos(h·a + φ) − cos(h·a0 + φ) = −2 sin(h(a + a0)/2 + φ)·sin(h(a − a0)/2).
+    /// `L` must be inductance(p, th_e).L (passed in: the stamp has it).
+    [[nodiscard]] static Vec3 lambda_increment(const Params& p, const Mat3& L,
+                                               Real th_e, Real th0_e,
+                                               Real dth_e, const Vec3& i0,
+                                               const Vec3& di) noexcept {
+        Vec3 out{};
+        for (Size k = 0; k < 3; ++k) {
+            Real acc = 0;
+            for (Size j = 0; j < 3; ++j) acc += L[k][j] * di[j];
+            out[k] = acc;
+        }
+        // [L(θ) − L(θ0)]·i0 = C⁻¹·ΔQ·(C·i0); only the dq block moves.
+        const Real half_diff = Real{0.5} * (p.L_d - p.L_q);
+        if (half_diff != Real{0}) {
+            const Mat3 C = clarke(), Ci = clarke_inv();
+            const Real a0 = C[0][0] * i0[0] + C[0][1] * i0[1] + C[0][2] * i0[2];
+            const Real b0 = C[1][0] * i0[0] + C[1][1] * i0[1] + C[1][2] * i0[2];
+            const Real s1 = std::sin(dth_e), sum = th_e + th0_e;
+            const Real dc = Real{-2} * std::sin(sum) * s1;
+            const Real ds = Real{2} * std::cos(sum) * s1;
+            const Real qa = half_diff * (dc * a0 + ds * b0);
+            const Real qb = half_diff * (ds * a0 - dc * b0);
+            for (Size k = 0; k < 3; ++k) out[k] += Ci[k][0] * qa + Ci[k][1] * qb;
+        }
+        auto pm = [&](Real h, Real psi, Real phi) {
+            const Real sh = std::sin(h * dth_e / Real{2});
+            for (Size k = 0; k < 3; ++k) {
+                const Real mid = h * (sum_offset(th_e, th0_e, k)) / Real{2} + phi;
+                out[k] += Real{-2} * psi * std::sin(mid) * sh;
+            }
+        };
+        if (p.harmonics) {
+            for (const auto& t : *p.harmonics) pm(t.h, t.psi, t.phi);
+        } else {
+            pm(Real{1}, p.psi_pm, Real{0});
+        }
+        return out;
+    }
+    /// a + a0 for phase k (each angle carries the phase offset).
+    [[nodiscard]] static Real sum_offset(Real th_e, Real th0_e, Size k) noexcept {
+        return th_e + th0_e + Real{2} * phase_offset(k);
+    }
+
     /// Electromagnetic torque from co-energy, plus its partials.
     ///   T = pp·[ λ_pm'ᵀ i + ½ iᵀ L' i ]
     ///   ∂T/∂i_j   = pp·[ λ_pm'_j + (L' i)_j ]
@@ -293,9 +392,17 @@ struct PmsmMna {
     };
     [[nodiscard]] static Torque torque(const Params& p, Real theta_e,
                                        const Vec3& i) noexcept {
-        const auto ind = inductance(p, theta_e);
-        const Vec3 lp1 = lambda_pm(p, theta_e, 1);
-        const Vec3 lp2 = lambda_pm(p, theta_e, 2);
+        return torque(p, inductance(p, theta_e), theta_e, i);
+    }
+    /// The same with `ind` = inductance(p, theta_e) already at hand.
+    [[nodiscard]] static Torque torque(const Params& p, const Inductance& ind,
+                                       Real theta_e, const Vec3& i) noexcept {
+        return torque(p, ind, lambda_pm(p, theta_e, 1), lambda_pm(p, theta_e, 2), i);
+    }
+    /// The same with λ_pm′ and λ_pm″ at hand too.
+    [[nodiscard]] static Torque torque(const Params& p, const Inductance& ind,
+                                       const Vec3& lp1, const Vec3& lp2,
+                                       const Vec3& i) noexcept {
         Torque t{};
         Real quad1 = 0, quad2 = 0, lin1 = 0, lin2 = 0;
         for (Size a = 0; a < 3; ++a) {
@@ -314,6 +421,100 @@ struct PmsmMna {
         t.dT_dtheta_m = p.pole_pairs * p.pole_pairs
                         * (lin2 + Real{0.5} * quad2);
         return t;
+    }
+    // ---------------------------------------------------------------
+    // Flux-map law (group 4). λ_abc = T⁻¹(θ_e)·[∇W'(i_d, i_q), L_0·i_0],
+    // i_dq0 = T(θ_e)·i, T = P(θ_e)·C. With Hb = blockdiag(∇²W', L_0):
+    //   ∂λ/∂i   = T⁻¹·Hb·T
+    //   ∂λ/∂θ_e = C⁻¹·P'ᵀ·λ_dq0 + T⁻¹·Hb·(P'·C·i),  P'·C·i = (i_q, −i_d, 0)
+    // Torque = ∂/∂θ_m of the abc co-energy (3/2)·W'(T·i):
+    //   T_em = (3/2)·pp·(λ_d·i_q − λ_q·i_d)
+    // (the constant-L machine's pp·[λ_pm'ᵀi + ½ iᵀL'i] for the linear map).
+    struct FluxMapState {
+        Vec3 lam{};          //!< λ_abc
+        Mat3 dlam_di{};      //!< ∂λ_abc/∂i_abc
+        Vec3 dlam_dth{};     //!< ∂λ_abc/∂θ_e
+        Real T = 0;          //!< T_em [N·m]
+        Vec3 dT_di{};
+        Real dT_dtheta_m = 0;
+        Real i_d = 0, i_q = 0, lam_d = 0, lam_q = 0;
+    };
+    [[nodiscard]] static FluxMapState flux_map_state(const Params& p, Real theta_e,
+                                                     const Vec3& i) {
+        const auto& fm = *p.flux_map;
+        const Real L0 = L_zero(p);
+        const Mat3 C = clarke(), Ci = clarke_inv();
+        const Mat3 P0 = park(theta_e, 0), P1 = park(theta_e, 1);
+        const Mat3 T = mul(P0, C), Ti = mul(Ci, transpose(P0));
+        const Mat3 Ci_P1t = mul(Ci, transpose(P1));
+        Vec3 x{};
+        for (Size r = 0; r < 3; ++r)
+            for (Size j = 0; j < 3; ++j) x[r] += T[r][j] * i[j];
+        const auto e = fm.eval(x[0], x[1]);
+        const Vec3 ldq{e.gd, e.gq, L0 * x[2]};
+        const Mat3 Hb{{{e.hdd, e.hdq, 0}, {e.hdq, e.hqq, 0}, {0, 0, L0}}};
+        const Vec3 rot{x[1], -x[0], Real{0}};
+        Vec3 Hrot{};
+        for (Size r = 0; r < 3; ++r)
+            for (Size s = 0; s < 3; ++s) Hrot[r] += Hb[r][s] * rot[s];
+        FluxMapState out;
+        out.dlam_di = mul(mul(Ti, Hb), T);
+        for (Size k = 0; k < 3; ++k)
+            for (Size r = 0; r < 3; ++r) {
+                out.lam[k] += Ti[k][r] * ldq[r];
+                out.dlam_dth[k] += Ci_P1t[k][r] * ldq[r] + Ti[k][r] * Hrot[r];
+            }
+        const Real pp = p.pole_pairs, k15 = Real{1.5} * pp;
+        out.T = k15 * (e.gd * x[1] - e.gq * x[0]);
+        const Real td = k15 * (e.hdd * x[1] - e.hdq * x[0] - e.gq);
+        const Real tq = k15 * (e.hdq * x[1] + e.gd - e.hqq * x[0]);
+        for (Size j = 0; j < 3; ++j) out.dT_di[j] = td * T[0][j] + tq * T[1][j];
+        out.dT_dtheta_m = pp * (td * x[1] - tq * x[0]);
+        out.i_d = x[0]; out.i_q = x[1]; out.lam_d = e.gd; out.lam_q = e.gq;
+        return out;
+    }
+
+    /// λ(θ_e, i) − λ(θ0_e, i0) for the flux map, in increment form (round-off
+    /// ∝ the increments, as `lambda_increment`):
+    ///   = C⁻¹·(P(θ) − P(θ0))ᵀ·λ_dq0(x0) + T⁻¹(θ)·(λ_dq0(x) − λ_dq0(x0)),
+    ///   x − x0 = P(θ)·C·Δi + (P(θ) − P(θ0))·C·i0,
+    /// with P(θ) − P(θ0) from the half-angle identities and the gradient
+    /// difference from `FluxMapDQ::grad_increment`.
+    [[nodiscard]] static Vec3 flux_map_increment(const Params& p, Real th_e,
+                                                 Real th0_e, Real dth_e,
+                                                 const Vec3& i0, const Vec3& di) {
+        const auto& fm = *p.flux_map;
+        const Real L0 = L_zero(p);
+        const Mat3 C = clarke(), Ci = clarke_inv();
+        const Mat3 P = park(th_e, 0), P0 = park(th0_e, 0);
+        const Real sh = std::sin(Real{0.5} * dth_e), sg = Real{0.5} * (th_e + th0_e);
+        const Real dc = Real{-2} * std::sin(sg) * sh, ds = Real{2} * std::cos(sg) * sh;
+        const Mat3 dP{{{dc, ds, 0}, {-ds, dc, 0}, {0, 0, 0}}};
+        Vec3 ci0{}, cdi{};
+        for (Size r = 0; r < 3; ++r)
+            for (Size j = 0; j < 3; ++j) {
+                ci0[r] += C[r][j] * i0[j];
+                cdi[r] += C[r][j] * di[j];
+            }
+        Vec3 x0{}, dx{};
+        for (Size r = 0; r < 3; ++r)
+            for (Size s = 0; s < 3; ++s) {
+                x0[r] += P0[r][s] * ci0[s];
+                dx[r] += P[r][s] * cdi[s] + dP[r][s] * ci0[s];
+            }
+        const auto e0 = fm.eval(x0[0], x0[1]);
+        const auto dg = fm.grad_increment(x0[0], x0[1], dx[0], dx[1]);
+        const Vec3 l0{e0.gd, e0.gq, L0 * x0[2]};
+        const Vec3 dl{dg[0], dg[1], L0 * dx[2]};
+        const Mat3 Ti = mul(Ci, transpose(P));
+        Vec3 out{};
+        for (Size k = 0; k < 3; ++k)
+            for (Size r = 0; r < 3; ++r) {
+                Real dPt_l0 = 0;   // (dPᵀ·λ0)_r
+                for (Size s = 0; s < 3; ++s) dPt_l0 += dP[s][r] * l0[s];
+                out[k] += Ci[k][r] * dPt_l0 + Ti[k][r] * dl[r];
+            }
+        return out;
     }
 };
 

@@ -59,6 +59,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <numbers>
 #include <format>
 #include <fstream>
 #include <initializer_list>
@@ -240,6 +241,62 @@ inline void read_table_file(const std::string& path, const std::string& who,
     return v;
 }
 
+/// Refuses a key of `node` that is not in `keys`, naming the device.
+inline void strict_keys(const YAML::Node& dev, std::size_t idx, const YAML::Node& node,
+                        const std::string& where,
+                        std::initializer_list<std::string_view> keys) {
+    for (const auto& kv : node) {
+        const auto k = kv.first.as<std::string>();
+        bool ok = false;
+        for (auto a : keys) ok = ok || k == a;
+        if (!ok) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: unknown key '{}' in {}",
+                device_label(dev, idx), k, where));
+        }
+    }
+}
+
+/// A charge-law map `{law: junction | vdmos_cgd | table, ...}` (power_mosfet
+/// C_gd / C_ds, nonlinear_capacitor law). `what` names the table in errors.
+[[nodiscard]] inline models::NonlinearCapacitor::Params charge_law_node(
+    const YAML::Node& dev, std::size_t idx, const YAML::Node& n,
+    const std::string& what, const std::string& where) {
+    auto reals = [&](const std::string& f) {
+        if (!n[f] || !n[f].IsSequence()) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: '{}' must be a list of numbers",
+                device_label(dev, idx), f));
+        }
+        return n[f].as<std::vector<Real>>();
+    };
+    const std::string law = n["law"] ? n["law"].as<std::string>() : "";
+    if (law == "junction") {
+        strict_keys(dev, idx, n, where, {"law", "C0", "V0", "m", "v_floor"});
+        return models::NonlinearCapacitor::junction(
+            require_real(n, idx, where, "C0"), require_real(n, idx, where, "V0"),
+            real_or(n, "m", Real{0.5}), real_or(n, "v_floor", Real{-0.9}));
+    }
+    if (law == "vdmos_cgd") {
+        strict_keys(dev, idx, n, where, {"law", "cgd_max", "cgd_min", "a"});
+        return models::NonlinearCapacitor::vdmos_cgd(
+            require_real(n, idx, where, "cgd_max"), require_real(n, idx, where, "cgd_min"),
+            require_real(n, idx, where, "a"));
+    }
+    if (law == "table") {
+        strict_keys(dev, idx, n, where, {"law", "v", "Q", "C"});
+        auto t = n["Q"]
+            ? models::ChargeTable(reals("v"), reals("Q"), reals("C"), what)
+            : models::ChargeTable::from_capacitance(reals("v"), reals("C"), what);
+        return models::NonlinearCapacitor::from_table(
+            std::make_shared<const models::ChargeTable>(std::move(t)));
+    }
+    throw std::runtime_error(std::format(
+        "yaml::load: device {}: {} must be a number (linear, F) or a "
+        "map with law: junction | vdmos_cgd | table (got law '{}')",
+        device_label(dev, idx), where, law));
+}
+
 /// Parse a single device entry; dispatches by `type`.
 /// add-in-kernel-event-losses 3.5: a `losses:` block on a switch-class
 /// device. Strict keys; tables as nested lists:
@@ -368,15 +425,20 @@ inline void load_device(
         ? dev["name"].as<std::string>()
         : std::string{"<unnamed>"};
 
-    // add-branch-form-ideal-switch: `form` is conductance | branch, on a
-    // switch or a diode only (a typo must not fall back silently).
+    // add-branch-form-ideal-switch: `form` is conductance | branch, on
+    // every type that builds a PWL switch or ungated diode (a typo must
+    // not fall back silently).
+    const std::string form = string_or(dev, "form", "conductance");
     if (dev["form"]) {
-        const std::string form = string_or(dev, "form", "");
         if ((form != "conductance" && form != "branch") ||
-            (type != "switch" && type != "diode")) {
+            (type != "switch" && type != "diode" && type != "mosfet" &&
+             type != "mosfet_with_body_diode" && type != "igbt" &&
+             type != "mosfet_level1" && type != "igbt_level1")) {
             throw std::runtime_error(std::format(
                 "yaml::load: device {}: form: '{}' is not supported; use "
-                "form: conductance or form: branch on a switch or a diode.",
+                "form: conductance or form: branch on a switch, diode, "
+                "mosfet, mosfet_with_body_diode, igbt, mosfet_level1 or "
+                "igbt_level1.",
                 device_label(dev, idx, type), form));
         }
     }
@@ -435,7 +497,7 @@ inline void load_device(
             real_or(dev, "lambda", Real{0.02}),
             real_or(dev, "kappa",  Real{15.0}),
             bool_or(dev, "with_body_diode", true),
-            real_or(dev, "V_F",    Real{0.7}));
+            real_or(dev, "V_F",    Real{0.7}), form);
     } else if (type == "vcvs") {
         b.add_vcvs(
             name,
@@ -585,7 +647,7 @@ inline void load_device(
             real_or(dev, "v_knee",   Real{0.01}),
             bool_or(dev, "with_fwd", false),
             Real{0}, Real{0},
-            real_or(dev, "V_F",      Real{0.7}));
+            real_or(dev, "V_F",      Real{0.7}), form);
     } else if (type == "resistor") {
         b.add_resistor(
             name,
@@ -612,23 +674,64 @@ inline void load_device(
             require_string(dev, idx, type, "to"),
             require_real(dev, idx, type, "C"));
     } else if (type == "inductor") {
-        if (dev["rac"]) {
-            throw std::runtime_error(std::format(
-                "yaml::load: inductor '{}': 'rac' is not read from YAML "
-                "yet; build the ladder in Python "
-                "(pulsim.passives.fit_rac_ladder, add_inductor(rac=)).",
-                name));
-        }
-        const Real esr = nonneg_or_zero(dev, type, name, "esr");
+        Real esr = nonneg_or_zero(dev, type, name, "esr");
         const Real c_par = nonneg_or_zero(dev, type, name, "c_par");
         const std::string from = require_string(dev, idx, type, "from");
         const std::string to = require_string(dev, idx, type, "to");
+        Real l_main = require_real(dev, idx, type, "L");
+        // rac: an R_ac ladder given by its cells (the expansion of
+        // python/pulsim/passives.py add_inductor(rac=)). Fitting an
+        // (f, R_ac) table needs Python's least squares: refused here.
+        std::vector<Real> rk, lk;
+        if (const YAML::Node rac = dev["rac"]) {
+            const std::string who = std::format("yaml::load: inductor '{}': rac", name);
+            if (!rac.IsMap() || rac["f"] || rac["R_ac"]) {
+                throw std::runtime_error(who +
+                    " must be a map {R_dc, L_hf, R: [...], L: [...]} of ladder "
+                    "cells; fit an (f, R_ac) curve in Python "
+                    "(pulsim.passives.fit_rac_ladder) and write its cells.");
+            }
+            strict_keys(dev, idx, rac, "rac", {"R_dc", "L_hf", "R", "L"});
+            if (esr > Real{0}) {
+                throw std::runtime_error(who + ": give esr or rac, not both "
+                                         "(the ladder's R_dc is the series resistance)");
+            }
+            esr = nonneg_or_zero(rac, type + ".rac", name, "R_dc");
+            const Real l_hf = require_real(rac, idx, type + ".rac", "L_hf");
+            rk = require_real_list(rac, idx, type + ".rac", "R");
+            lk = require_real_list(rac, idx, type + ".rac", "L");
+            Real l_tot = l_hf;
+            bool ok = std::isfinite(l_hf) && l_hf > Real{0} && rk.size() == lk.size();
+            for (std::size_t k = 0; ok && k < rk.size(); ++k) {
+                ok = std::isfinite(rk[k]) && rk[k] > Real{0} &&
+                     std::isfinite(lk[k]) && lk[k] > Real{0};
+                l_tot += ok ? lk[k] : Real{0};
+            }
+            if (!ok) {
+                throw std::runtime_error(who + ": L_hf and every cell R, L must be "
+                                         "finite and > 0, with as many R as L");
+            }
+            if (std::abs(l_tot - l_main) > Real{1e-9} * std::abs(l_main)) {
+                throw std::runtime_error(std::format(
+                    "{}: L_hf + sum(L) = {:.9g} H differs from L = {:.9g} H",
+                    who, l_tot, l_main));
+            }
+            l_main = l_hf;
+        }
         std::string a = from;
         if (esr > Real{0}) {
             b.add_resistor(name + ".esr", a, name + ".esr_n", esr);
             a = name + ".esr_n";
         }
-        b.add_inductor(name, a, to, require_real(dev, idx, type, "L"));
+        const std::size_t cells = rk.size();
+        std::string nxt = cells ? name + ".rac_n0" : to;
+        b.add_inductor(name, a, nxt, l_main);
+        for (std::size_t k = 0; k < cells; ++k) {
+            a = nxt;
+            nxt = k + 1 < cells ? std::format("{}.rac_n{}", name, k + 1) : to;
+            b.add_resistor(std::format("{}.rac_r{}", name, k), a, nxt, rk[k]);
+            b.add_inductor(std::format("{}.rac_l{}", name, k), a, nxt, lk[k]);
+        }
         if (c_par > Real{0}) {
             b.add_capacitor(name + ".cpar", from, to, c_par);
         }
@@ -748,7 +851,7 @@ inline void load_device(
             real_or(dev, "R_on",  Real{1e-3}),
             real_or(dev, "R_off", Real{1e9}),
             /*body_diode=*/true,
-            real_or(dev, "V_F",   Real{0.7}));
+            real_or(dev, "V_F",   Real{0.7}), form);
     } else if (type == "mosfet_with_body_diode") {
         b.add_mosfet_with_body_diode(
             name,
@@ -758,13 +861,13 @@ inline void load_device(
             real_or(dev, "R_off",        Real{1e9}),
             real_or(dev, "V_F",          Real{0.7}),
             real_or(dev, "g_on_diode",   Real{1e3}),
-            real_or(dev, "g_off_diode",  Real{1e-9}));
+            real_or(dev, "g_off_diode",  Real{1e-9}), form);
     } else if (type == "igbt") {
         // add-pwl-igbt-and-thyristor: V_ce0, reverse_blocking (default
         // False, True when V_ce0 > 0 — the builder's stage-1 default).
         require_only_keys(dev, idx, type, {"collector", "emitter", "R_on", "R_off",
                                            "V_ce0", "reverse_blocking", "V_th",
-                                           "losses"});   // load_losses, below
+                                           "losses", "form"});   // load_losses, below
         const Real V_ce0 = real_or(dev, "V_ce0", Real{0});
         b.add_igbt(
             name,
@@ -774,7 +877,7 @@ inline void load_device(
             real_or(dev, "R_off", Real{1e9}),
             V_ce0,
             bool_or(dev, "reverse_blocking", V_ce0 > Real{0}),
-            real_or(dev, "V_th", Real{0}));
+            real_or(dev, "V_th", Real{0}), form);
     } else if (type == "thyristor" || type == "gto" || type == "triac") {
         const bool tri = type == "triac";
         const bool gto = type == "gto";
@@ -901,6 +1004,93 @@ inline void load_device(
             require_string(dev, idx, type, "s_from"),
             require_string(dev, idx, type, "s_to"),
             require_real(dev, idx, type, "n"));
+    } else if (type == "pmsm" || type == "bldc") {
+        // add-mna-native-machines 3.6: CircuitBuilder.add_pmsm_mna and
+        // add_bldc_mna (python/pulsim/machines.py). The BLDC's PM-flux
+        // series is `trapezoid_harmonics`, ported here; test_yaml_composites
+        // pins the two expansions equal.
+        const bool bldc = type == "bldc";
+        if (bldc) {
+            require_only_keys(dev, idx, type,
+                              {"phase_nodes", "neutral_node", "omega_node",
+                               "theta_node", "R_s", "L_s", "k_e", "pole_pairs",
+                               "J", "B", "T_load", "flat_top_deg",
+                               "n_harmonics", "omega0", "theta0"});
+        } else {
+            require_only_keys(dev, idx, type,
+                              {"phase_nodes", "neutral_node", "omega_node",
+                               "theta_node", "R_s", "L_d", "L_q", "L_0",
+                               "psi_pm", "pole_pairs", "J", "B", "T_load",
+                               "omega0", "theta0"});
+        }
+        if (!dev["phase_nodes"] || !dev["phase_nodes"].IsSequence() ||
+            dev["phase_nodes"].size() != 3) {
+            throw std::runtime_error(std::format(
+                "yaml::load: {} '{}' requires phase_nodes: [a, b, c] "
+                "(sequence of 3 strings)", type, name));
+        }
+        std::array<std::string, 3> ph;
+        for (std::size_t k = 0; k < 3; ++k) {
+            if (!dev["phase_nodes"][k].IsScalar()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: {} '{}' phase_nodes[{}] must be a scalar "
+                    "node name", type, name, k));
+            }
+            ph[k] = dev["phase_nodes"][k].as<std::string>();
+        }
+        const std::string nn = require_string(dev, idx, type, "neutral_node");
+        const std::string w = require_string(dev, idx, type, "omega_node");
+        const std::string th = require_string(dev, idx, type, "theta_node");
+        const Real R_s = require_real(dev, idx, type, "R_s");
+        const Real pp = require_real(dev, idx, type, "pole_pairs");
+        const Real J = require_real(dev, idx, type, "J");
+        const Real B = nonneg_or_zero(dev, type, name, "B");
+        const Real T_load = real_or(dev, "T_load", Real{0});
+        const Real omega0 = real_or(dev, "omega0", Real{0});
+        const Real theta0 = real_or(dev, "theta0", Real{0});
+        if (!bldc) {
+            b.add_pmsm_mna(name, ph[0], ph[1], ph[2], nn, w, th, R_s,
+                           require_real(dev, idx, type, "L_d"),
+                           require_real(dev, idx, type, "L_q"),
+                           require_real(dev, idx, type, "psi_pm"), pp, J, B,
+                           T_load, real_or(dev, "L_0", Real{0}), omega0, theta0);
+        } else {
+            const Real k_e = require_real(dev, idx, type, "k_e");
+            const Real flat = real_or(dev, "flat_top_deg", Real{120});
+            const Real nh = real_or(dev, "n_harmonics", Real{25});
+            if (!(std::isfinite(k_e) && k_e > Real{0}) || !(pp >= Real{1}) ||
+                pp != std::floor(pp)) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: bldc '{}': k_e must be > 0 and pole_pairs a "
+                    "positive integer", name));
+            }
+            if (!(flat >= Real{0} && flat < Real{180})) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: bldc '{}': flat_top_deg must be in [0, 180)",
+                    name));
+            }
+            if (!(nh >= Real{1}) || nh != std::floor(nh) || nh > Real{1000}) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: bldc '{}': n_harmonics must be an integer in "
+                    "[1, 1000]", name));
+            }
+            // psi_h = (k_e/pp)·4·sin(h·γ)/(π·γ·h³), odd h (trapezoid_harmonics)
+            const Real gamma =
+                (Real{180} - flat) * (std::numbers::pi / Real{180}) / Real{2};
+            std::vector<std::array<Real, 3>> harm;
+            for (int h = 1; h <= static_cast<int>(nh); h += 2) {
+                const Real hr = h;
+                const Real s = gamma > Real{0}
+                    ? std::sin(hr * gamma) / (hr * gamma) : Real{1};
+                harm.push_back({hr, (k_e / pp) * Real{4} * s
+                                        / (std::numbers::pi * hr * hr),
+                                Real{0}});
+            }
+            const Real L_s = require_real(dev, idx, type, "L_s");
+            b.add_pmsm_mna(name, ph[0], ph[1], ph[2], nn, w, th, R_s, L_s, L_s,
+                           harm[0][1], pp, J, B, T_load, Real{0}, omega0,
+                           theta0, harm);
+        }
     } else if (type == "induction_machine" ||
                (type == "induction_motor" &&
                 string_or(dev, "model", "observer") == "mna")) {
@@ -1058,61 +1248,17 @@ inline void load_device(
         // parameter would otherwise silently take its default.
         auto strict = [&](const YAML::Node& node, const std::string& where,
                           std::initializer_list<std::string_view> keys) {
-            for (const auto& kv : node) {
-                const auto k = kv.first.as<std::string>();
-                bool ok = false;
-                for (auto a : keys) ok = ok || k == a;
-                if (!ok) {
-                    throw std::runtime_error(std::format(
-                        "yaml::load: device {}: unknown key '{}' in {}",
-                        device_label(dev, idx), k, where));
-                }
-            }
+            strict_keys(dev, idx, node, where, keys);
         };
         strict(dev, "power_mosfet",
                {"type", "name", "drain", "source", "gate", "K", "V_T",
                 "lambda", "kappa", "R_d", "C_gs", "C_gd", "C_ds", "R_g",
                 "L_s", "body_diode", "T_j", "rds_tc1", "rds_tc2", "vt_tc"});
-        auto reals = [&](const YAML::Node& n, const std::string& f) {
-            if (!n[f] || !n[f].IsSequence()) {
-                throw std::runtime_error(std::format(
-                    "yaml::load: device {}: '{}' must be a list of numbers",
-                    device_label(dev, idx), f));
-            }
-            return n[f].as<std::vector<Real>>();
-        };
         auto cap = [&](const std::string& f) -> models::PowerMosfet::Capacitance {
             const YAML::Node n = dev[f];
             if (!n) return Real{0};
             if (n.IsScalar()) return n.as<Real>();
-            const std::string law = n["law"] ? n["law"].as<std::string>() : "";
-            if (law == "junction") {
-                strict(n, f, {"law", "C0", "V0", "m", "v_floor"});
-                return models::NonlinearCapacitor::junction(
-                    require_real(n, idx, type + "." + f, "C0"),
-                    require_real(n, idx, type + "." + f, "V0"),
-                    real_or(n, "m", Real{0.5}), real_or(n, "v_floor", Real{-0.9}));
-            }
-            if (law == "vdmos_cgd") {
-                strict(n, f, {"law", "cgd_max", "cgd_min", "a"});
-                return models::NonlinearCapacitor::vdmos_cgd(
-                    require_real(n, idx, type + "." + f, "cgd_max"),
-                    require_real(n, idx, type + "." + f, "cgd_min"),
-                    require_real(n, idx, type + "." + f, "a"));
-            }
-            if (law == "table") {
-                strict(n, f, {"law", "v", "Q", "C"});
-                const std::string what = std::format("{}.{}", name, f);
-                auto t = n["Q"]
-                    ? models::ChargeTable(reals(n, "v"), reals(n, "Q"), reals(n, "C"), what)
-                    : models::ChargeTable::from_capacitance(reals(n, "v"), reals(n, "C"), what);
-                return models::NonlinearCapacitor::from_table(
-                    std::make_shared<const models::ChargeTable>(std::move(t)));
-            }
-            throw std::runtime_error(std::format(
-                "yaml::load: device {}: {} must be a number (linear, F) or a "
-                "map with law: junction | vdmos_cgd | table (got law '{}')",
-                device_label(dev, idx), f, law));
+            return charge_law_node(dev, idx, n, name + "." + f, type + "." + f);
         };
         models::PowerMosfet::Params p;
         p.K = require_real(dev, idx, type, "K");
@@ -1157,6 +1303,55 @@ inline void load_device(
             require_string(dev, idx, type, "drain"),
             require_string(dev, idx, type, "source"),
             require_string(dev, idx, type, "gate"), p);
+    } else if (type == "nonlinear_capacitor" && !dev["pins"]) {
+        // add-realistic-passives 4.5: a charge-law capacitor (the
+        // authoring form, from/to; the IR emitter's `pins:` entry takes
+        // the registry branch below). `law:` is
+        // the power_mosfet capacitance map; `dc_bias: {v, C}` (v >= 0,
+        // the first at 0) is an MLCC's small-signal C(v_bias) curve,
+        // integrated into an ODD charge table (C taken even in v).
+        strict_keys(dev, idx, dev, type, {"type", "name", "from", "to", "law", "dc_bias"});
+        if (static_cast<bool>(dev["law"]) == static_cast<bool>(dev["dc_bias"])) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device {}: nonlinear_capacitor needs exactly one "
+                "of 'law' (map with law: junction | vdmos_cgd | table) or "
+                "'dc_bias' (map with v, C)", device_label(dev, idx)));
+        }
+        models::NonlinearCapacitor::Params law;
+        if (const YAML::Node n = dev["law"]) {
+            if (!n.IsMap()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: device {}: 'law' must be a map with law: "
+                    "junction | vdmos_cgd | table", device_label(dev, idx)));
+            }
+            law = charge_law_node(dev, idx, n, name, type + ".law");
+        } else {
+            const YAML::Node db = dev["dc_bias"];
+            if (!db.IsMap()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: device {}: 'dc_bias' must be a map with v, C",
+                    device_label(dev, idx)));
+            }
+            strict_keys(dev, idx, db, "dc_bias", {"v", "C"});
+            const auto v = require_real_list(db, idx, type + ".dc_bias", "v");
+            const auto c = require_real_list(db, idx, type + ".dc_bias", "C");
+            if (v.size() != c.size() || v.size() < 2 || v.front() != Real{0}) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: device {}: dc_bias needs v and C of equal "
+                    "length >= 2 with v[0] = 0", device_label(dev, idx)));
+            }
+            std::vector<Real> vv, cc;
+            for (std::size_t k = v.size(); k-- > 1;) { vv.push_back(-v[k]); cc.push_back(c[k]); }
+            vv.insert(vv.end(), v.begin(), v.end());
+            cc.insert(cc.end(), c.begin(), c.end());
+            law = models::NonlinearCapacitor::from_table(
+                std::make_shared<const models::ChargeTable>(
+                    models::ChargeTable::from_capacitance(vv, cc, name)));
+        }
+        b.add_nonlinear_capacitor_law(
+            name,
+            require_string(dev, idx, type, "from"),
+            require_string(dev, idx, type, "to"), law);
     } else if (std::ranges::find(ir::kKindYaml, std::string_view{type}) !=
                ir::kKindYaml.end()) {
         // A registry kind without an authoring type of its own
@@ -1187,8 +1382,8 @@ inline void load_device(
             "pwl_current_source, op_amp_ideal, "
             "gapped_core_inductor, transformer, multi_winding_transformer, "
             "ideal_transformer, saturable_transformer, induction_motor, "
-            "induction_machine, dc_machine, winding, permeance, air_gap, "
-            "magnetic_resistance, saturable_permeance");
+            "induction_machine, dc_machine, pmsm, bldc, winding, permeance, "
+            "air_gap, magnetic_resistance, saturable_permeance");
     }
     if (dev["losses"]) load_losses(b, dev, idx, type, name);
 }
@@ -1387,7 +1582,7 @@ inline constexpr std::string_view kNodeKeys[] = {
     "from", "to", "anode", "cathode", "drain", "source", "gate", "collector",
     "emitter", "in_pos", "in_neg", "out", "out_pos", "out_neg", "a_pos", "a_neg",
     "p_from", "p_to", "s_from", "s_to", "p1_pos", "p1_neg", "p2_pos", "p2_neg",
-    "neutral_node", "omega_node",
+    "neutral_node", "omega_node", "theta_node",
     "omega", "theta"};   // a registry-kind entry (pmsm_mna); its `pins` lists too
 
 /// One subsystem block's naming: its ports (local name -> the node it
@@ -1554,7 +1749,7 @@ inline void load_simulation_options(
     // trace (the loader accepts unknown keys, so an unparsed option
     // would just vanish — the exact silent-drop pattern Phase 0
     // eliminated elsewhere).
-    opts.store_every = size_or(sim, "store_every", Size{1});
+    opts.store_every = size_or(sim, "store_every", pulsim::sim::Defaults::store_every);
     if (opts.store_every == 0) {
         throw std::invalid_argument(
             "simulation.store_every must be >= 1 "
@@ -1568,18 +1763,20 @@ inline void load_simulation_options(
         bool_or(sim, "enable_substep_state_correction",
                  false);
     opts.max_event_iterations =
-        size_or(sim, "max_event_iterations", Size{16});
+        size_or(sim, "max_event_iterations",
+                pulsim::sim::Defaults::max_event_iterations);
     opts.max_newton_iterations =
-        size_or(sim, "max_newton_iterations", Size{50});
+        size_or(sim, "max_newton_iterations",
+                pulsim::sim::Defaults::max_newton_iterations);
     opts.tol_newton_dx =
-        real_or(sim, "tol_newton_dx", Real{1e-9});
+        real_or(sim, "tol_newton_dx", pulsim::sim::Defaults::tol_newton_dx);
     opts.tol_newton_res =
-        real_or(sim, "tol_newton_res", Real{1e-9});
+        real_or(sim, "tol_newton_res", pulsim::sim::Defaults::tol_newton_res);
     // Phase 2.4 adaptive RK selector (schema v1.5, wiring v1.6).
     opts.integrator =
         string_or(sim, "integrator", std::string{"kernel"});
-    opts.rtol    = real_or(sim, "rtol",    Real{1e-5});
-    opts.atol    = real_or(sim, "atol",    Real{1e-8});
+    opts.rtol    = real_or(sim, "rtol",    pulsim::sim::Defaults::rtol_variable);
+    opts.atol    = real_or(sim, "atol",    pulsim::sim::Defaults::atol_variable);
     opts.dt_init = real_or(sim, "dt_init", Real{0});
 }
 

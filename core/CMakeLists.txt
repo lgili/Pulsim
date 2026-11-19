@@ -87,12 +87,28 @@ if(PULSIM_BUILD_TESTS)
     endif()
     catch_discover_tests(pulsim_core_mode_tests)
 
+    # add-kernel-simulation-object — sim::RunOptions, the option x engine
+    # table and the sim::Simulation facade (core/include/pulsim/sim/).
+    add_executable(pulsim_core_sim_tests
+        tests/sim/test_simulation.cpp
+    )
+    target_link_libraries(pulsim_core_sim_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_sim_tests)
+    endif()
+    catch_discover_tests(pulsim_core_sim_tests)
+
     # refactor-unified-transient-stepper — the stepper's stage tables,
     # controllers and policies (core/include/pulsim/solver/step/).
     add_executable(pulsim_core_step_tests
         tests/step/test_integrators.cpp
         tests/step/test_controllers.cpp
         tests/step/test_stepper.cpp
+        tests/step/test_esdirk43.cpp  # add-high-order-stiff-integrator
     )
     target_link_libraries(pulsim_core_step_tests
         PRIVATE
@@ -103,6 +119,21 @@ if(PULSIM_BUILD_TESTS)
         pulsim_apply_target_defaults(pulsim_core_step_tests)
     endif()
     catch_discover_tests(pulsim_core_step_tests)
+
+    # add-probes-and-recorders — probes and recorders
+    # (core/include/pulsim/record/), header-only.
+    add_executable(pulsim_core_record_tests
+        tests/record/test_recorder.cpp
+    )
+    target_link_libraries(pulsim_core_record_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_record_tests)
+    endif()
+    catch_discover_tests(pulsim_core_record_tests)
 
     # add-in-kernel-event-losses group 1 — the kernel loss tables
     # (core/include/pulsim/thermal/loss_table.hpp), header-only.
@@ -583,6 +614,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4_v3/test_lti_recovery.cpp
         tests/layer4_v3/test_lti_state_space.cpp   # Bridge.3 — DSED bridge
         tests/layer4_v3/test_induction_machine_mna.cpp  # add-mna-native-machines
+        tests/layer4_v3/test_pmsm_flux_map.cpp          # add-mna-native-machines group 4
     )
     target_link_libraries(pulsim_core_layer4_v3_tests
         PRIVATE

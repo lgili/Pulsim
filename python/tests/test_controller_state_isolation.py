@@ -201,13 +201,26 @@ def test_resume_restores_the_snapshots_loop_whatever_ran_between(engine, kw, t1)
         assert xs[-1, j] == pytest.approx(xf[-1, j], rel=1e-6)
 
 
-def test_a_pickled_snapshot_of_a_closed_loop_is_refused():
+def test_a_pickled_snapshot_of_an_opaque_controller_is_refused():
+    # a closed loop's state pickles (G33); a block over a mutable closure
+    # does not, so its pickled snapshot refuses by name
     b = _buck()
-    lp = _loop(b)
-    first = p.simulate(b, 1e-3, dt=DT, closed_loops=[lp])
+    hist = []
+
+    def opaque(x):
+        hist.append(x)
+        return x
+
+    ch = p.MixedDomainBlockChain()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ch.add("f", p.PythonBlock(opaque), inputs=dict(x="node:out"),
+               output="y", rate=p.Rate(1e-4))
+    obs = ch.make_step_observer(b)
+    first = p.simulate(b, 1e-3, dt=DT, step_observer=obs)
     snap = pickle.loads(pickle.dumps(first.final_snapshot))
     with pytest.raises(p.UnsupportedError) as e:
-        p.simulate(b, 2e-3, dt=DT, closed_loops=[lp], resume_from=snap)
+        p.simulate(b, 2e-3, dt=DT, step_observer=obs, resume_from=snap)
     assert e.value.feature == "controller_state" and "pickled" in str(e.value)
     # without controllers the pickled snapshot still resumes
     sw = p.make_pwm_switch_fn(10e3, 0.5, b.switch_index_of("Q"),

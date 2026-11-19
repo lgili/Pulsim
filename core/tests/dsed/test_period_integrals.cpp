@@ -59,6 +59,7 @@ dsed::PeriodMapResult<SSM> one_period(
     dsed::PEDSimulator<Ad, Gate> sim(ad, g, dsed::PIController(1e-11, 1e-14),
                                      std::move(pred), g.T * 1e-6, g.T, 1);
     sim.set_event_projection(false);
+    sim.set_diode_law_check(0.0);  // as the period-map callers do
     const auto res = sim.simulate(x0, g.T);
     return dsed::period_map_from_run(ad, res, diodes, obs, pairs, true);
 }
@@ -255,6 +256,7 @@ TEST_CASE("Period map: an event without its own sample is refused",
         ad, g, dsed::PIController(1e-11, 1e-14), std::move(pred), T * 1e-6,
         T, 1);
     sim.set_event_projection(false);
+    sim.set_diode_law_check(0.0);  // as the period-map callers do
     Vector x0(1);
     x0 << 1.5;
     auto res = sim.simulate(x0, T);

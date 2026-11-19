@@ -63,6 +63,11 @@ class ControlPlan:
     # the plan).
     static_hold: Any = None
     _ticks0: dict = field(default_factory=dict)
+    # control_tick='state' on the fixed engine: the graphs' rate groups are
+    # kernel queue sources (chain, group) after the Python ones, and the
+    # (origin, next k) of each on the graph's own grid.
+    control_tick: str = "label"
+    _queue_groups: List[Tuple[Any, int]] = field(default_factory=list)
 
     def merge_b_extra(self, user_fn):
         """The b_extra the engines see: the caller's ``b_extra_fn``, then
@@ -111,6 +116,19 @@ class ControlPlan:
         _check_fixed_periods([p for _f, p in self._kernel_ticks], float(dt))
         post = list(self.every_step) \
             + ([self.c_graph] if self.c_graph is not None else [])
+        self._queue_groups = []
+        queue = self.control_tick == "state"
+        for obs in self.graphs:
+            cxx = obs._cxx_chain
+            cxx.set_queue_driven(queue)
+            if queue:
+                self._queue_groups += [(cxx, gi) for gi
+                                       in range(1, len(cxx.tick_counts()))]
+        if self._queue_groups:
+            # the graphs run after the queue's ticks, in one pass each
+            post = list(self.loop_graphs) + post
+            self.tick_before = None
+            return self._compose(post)
         if self._kernel_ticks:
             self.tick_before = self._compose(list(self.loop_graphs))
             return self._compose(post)
@@ -143,14 +161,41 @@ class ControlPlan:
         _composed_observer._inner_observers = self.inner_observers  # type: ignore[attr-defined]
         return _composed_observer
 
-    def fixed_tick_kwargs(self) -> dict:
-        """run_transient's tick sources: empty without Python ticks."""
-        if not self._kernel_ticks:
+    def fixed_tick_kwargs(self, dt: float = 0.0, t_start: float = 0.0,
+                          resume_from=None) -> dict:
+        """run_transient's tick sources: empty without Python ticks or
+        queue-driven graphs. A resume keeps the Python sources' grids (the
+        snapshot's origins); a graph group ticks on the graph's own grid,
+        one step late: the pwl observer call labelled t_n carries
+        x(t_{n-1}), so the group's tick at tau is taken at the call whose
+        t_{n-1} >= tau (state time)."""
+        if not self._kernel_ticks and not self._queue_groups:
             return {}
+        n_py = len(self._kernel_ticks)
         kw = {"tick_periods": [float(p) for _f, p in self._kernel_ticks],
               "tick_fns": [f for f, _p in self._kernel_ticks]}
         if self.tick_before is not None:
             kw["tick_before"] = self.tick_before
+        n = n_py + len(self._queue_groups)
+        from . import _resume_tick_next_k, _resume_tick_origins
+        origins = _resume_tick_origins(resume_from, n)
+        ks = _resume_tick_next_k(resume_from, len(origins))
+        if not self._queue_groups:
+            if origins:   # a resume keeps the run's tick grid
+                kw["tick_origins"], kw["tick_next_ks"] = origins, ks
+            return kw
+        nan, unknown = float("nan"), 2 ** 64 - 1
+        kw["tick_origins"] = origins[:n_py] if origins else [nan] * n_py
+        kw["tick_next_ks"] = ks[:n_py] if ks else [unknown] * n_py
+        for cxx, gi in self._queue_groups:
+            # the graph continues its grid unless time goes back (it then
+            # rearms at t_start: rearm_if_restarted)
+            cont = bool(cxx.n_calls) and float(t_start) >= float(cxx.last_call_t)
+            t0 = float(cxx.grid_t0) if cont else float(t_start)
+            kw["tick_periods"].append(float(cxx.group_period(gi)))
+            kw["tick_fns"].append(cxx.make_queue_tick(gi))
+            kw["tick_origins"].append(t0 + float(cxx.group_offset(gi)) + float(dt))
+            kw["tick_next_ks"].append(int(cxx.group_next_k(gi)) if cont else 0)
         return kw
 
     def fixed_tick_counts(self, res):
@@ -282,6 +327,7 @@ def compose_control(builder, closed_loops, step_observer, controller_period,
     # every graph from its declared initial state, or the snapshot's
     from ._control_state import start_run
     plan.graphs = start_run(plan, snapshot if resume else None)
+    plan.control_tick = control_tick
     # control_tick='state' (G30): the label-time graphs (closed-loop
     # helpers, C blocks) tick at the state time for this run
     for obs in plan.graphs:

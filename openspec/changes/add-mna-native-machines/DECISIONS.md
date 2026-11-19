@@ -155,6 +155,7 @@ Each entry: question → option taken → why → how to reverse.
 
 ## D13. DC operating point with machines (tasks 2.7 "DC held", 3.5)
 
+- Superseded by D19 (batch 13). Original note:
 - Not done in this pass. The DC assembly stamps every Newton device
   except the saturable inductor OPEN, so a PMSM or induction machine has
   no electrical rows at DC; the preflight then ties the neutral, the
@@ -198,3 +199,184 @@ Each entry: question → option taken → why → how to reverse.
   `J_lin + J_nl` each iteration anyway). No other circuit takes it, so
   the 21 non-machine goldens are unchanged; the two `im_*` goldens and
   every machine figure were re-measured at the true `dt`.
+
+## D16. Flux rows in increment form (small-step abort)
+
+- Symptom: a PMSM at `dt = 10 ns` aborted (ψ_pm 0.05 at t = 1.2e-5 s;
+  ψ_pm 0.5 at 5e-8 s, and 25 retries already at 100 ns; `trbdf2` with
+  ψ_pm 0.5 stalled at h_min at t = 0). Cause: the row
+  `v − R i − (2/h)(λ(x) − λ_old)` subtracts two O(ψ_pm) numbers; their
+  round-off `eps·(2/h)·|λ|` is 2e-9 V at 10 ns for ψ = 0.05, above
+  Newton's absolute 1e-9 tolerance (which stays absolute: making it
+  relative lets the DC cascade stop at a spurious root, memory note).
+- Fix: the row is written as `(2/h)·(Δλ − λ_off)` with Δλ computed
+  from the increments, never as a difference of totals:
+  - PMSM: `L·Δi` + the saliency term with
+    `cos2θ − cos2θ0 = −2 sin(θ+θ0) sin(θ−θ0)`, the PM term with
+    `−2ψ_h sin(h(θ+θ0)/2 + φ_h) sin(hΔθ/2)` per harmonic
+    (`PmsmMna::lambda_increment`);
+  - induction machine: `L_s·Δi + M·Δλ_r` (constant stator matrices,
+    now cached once per entry).
+- The reference point `(i_old, θ_old, λr_old)` is the committed state.
+  `extrapolate_previous` (SDIRK pseudo-history) moves it by a stored
+  offset `λ_off`, and a resume rebases it on the snapshot `x`
+  (`λ_off = 0` bitwise for a consistent snapshot).
+- The Jacobian is unchanged and the rows stay in conductance form.
+  This CHANGES THE PMSM / IM LAW AS WRITTEN: the device-interface port
+  must carry the increment form.
+- Moved numbers (1 µs, end values): PMSM pwl ω −13.059179906729224 →
+  −13.059179906729375; trbdf2 −13.061329289736987 → −13.061329289735662;
+  ψ 0.5 pwl −5.355988036500754 → −5.355988036498043; IM pwl
+  1.530198626034774 → 1.530198626034761; IM trbdf2 1.5308411400090733
+  → 1.5308411400087307. All ≤ 3e-13 relative: round-off of the old row.
+- After: PMSM and IM at 1 µs, 100 ns, 10 ns, 1 ns, from rest and from a
+  running high-flux state, take zero dt retries.
+
+## D17. Internal 1 F integrator capacitors are not parameters
+
+- The angle node (PMSM) and the rotor-flux nodes (IM) integrate through
+  a builder-made 1 F capacitor that `with_value("…_theta.C")` /
+  `("…_Cra.C")` could edit, silently scaling `θ` or `λ_r` dynamics.
+- Fix: the injection is scaled by the capacitance read at init
+  (`C·ω` into the angle node, `C·g(·)` into the rotor rows), so the
+  value of C cancels. Any other capacitor or a nonlinear capacitor on
+  those nodes is refused by name. Tests: an edit to 0.25 F gives the
+  same result within 1e-9 relative.
+
+## D18. Observer deprecations (group 5)
+
+- `add_pmsm`, `make_pmsm_observer`, `add_bldc`, `make_bldc_observer`,
+  `add_induction_motor`, `make_induction_motor_observer` emit one
+  `DeprecationWarning` naming the native builder, with the measured
+  observer error (PMSM −0.37 % at 50 µs, −1.98 % at 200 µs; IM free
+  acceleration 0.71 % / 2.9 % of synchronous speed).
+- `im_parameters_from_nameplate` labels its result
+  `_diagnostics["status"] = "estimated"`.
+
+## D19. DC operating point with held mechanics (2.7, 3.5)
+
+- `dc_assemble` stamps each machine's DC rows after the conductance
+  floor: stator `v − R·i − ω_e·∂λ/∂θ_e = 0` (di/dt = 0) at the held
+  `(ω0, θ0)` — for the PMSM `ω_e·(∂L/∂θ_e·i + ∂λ_pm/∂θ_e)`, for the
+  induction machine no stator EMF and the rotor rows `dλ_r/dt = 0`
+  (the steady rotor flux at `ω0`). Linear: no Newton at DC.
+- The KCL rows of the speed and angle nodes are replaced by `v = ω0`,
+  `v = θ0` (no torque balance; the transient takes over). `ω0`, `θ0`
+  are the builder's `omega0` / `theta0`, now kept on the pool record
+  (YAML keys `omega0` / `theta0` of the `pmsm_mna` /
+  `induction_machine_mna` registry entry, value hash only when
+  nonzero, so existing hashes are unchanged).
+- A speed or angle node that another device drives (anything but
+  capacitors, resistors and current outputs) would be over-determined:
+  refused by name, naming that device. Prescribe the speed with
+  `omega0` for the DC point instead. Known limit: an inductor on the
+  speed node (a torsional spring in the velocity analogy, e.g. a
+  two-mass shaft) is refused too, although its DC short would only copy
+  `ω0` to the load node; start such a shaft from zero state.
+- The held rows keep no `gmin`: `compute_dc_op` re-applies the hold
+  after its floor, so `ω = ω0` exactly, not `ω0/(1 + gmin)`.
+- `start_from_dc_op` seeds the machine histories from the DC point
+  (`λ`, `i`, `θ`), and the held nodes' capacitors from the KCL residual
+  the hold replaced (`seed_held_machine_capacitors`: angle `i_C = C·ω0`,
+  speed `i_C` = net torque; a DC capacitor is otherwise seeded at 0, and
+  the first step then advanced θ by h·ω0/2 and moved i by 2.4e-3 A).
+  The first step continues the DC point: |i(h) − i(0)| = 4.8e-7 A
+  (round) and 1.3e-6 A (salient) at h = 1 µs, ratio 4.000 per halving,
+  against a > 1e-3 A jump from zero state. `pwl` only: `trbdf2` refuses
+  `start_from_dc_op`. The other stateful histories (Coss,
+  Lauritzen, IGBT tail, saturable inductor) are still NOT seeded after
+  the DC point on `pwl` (pre-existing; left so non-machine results stay
+  bit-identical).
+- References (`test_machine_dc_hold.py`, conformance `DC held` cells):
+  PMSM at rest `i = (v − v_n)/R_s` within 1e-9 on a salient rotor;
+  at 50 and −30 rad/s the round-rotor closed form
+  `i_k = (v_k − v_n + ω_e·ψ·sin(θ_e − 2πk/3))/R_s`; induction machine
+  `i = (v − v_n)/R_s` and `λ_r` from the 2×2 steady rotor law at 0 and
+  80 rad/s.
+
+## D20. Preflight, YAML authoring types
+
+- The preflight counts a machine stator as a DC path and the speed,
+  angle and rotor-flux nodes as defined at DC: no 1 GΩ tie and no
+  warning on a machine's own nodes (it tied the neutral, the speed and
+  the angle node before). Machine results move by the removed leak.
+- YAML `pmsm` (the `add_pmsm_mna` arguments) and `bldc` (the
+  `add_bldc_mna` arguments; the trapezoid series is ported to the loader
+  and pinned equal to `trapezoid_harmonics` by
+  `test_yaml_composites.py`). `theta_node` is a scoped node key.
+
+## D21. Flux maps (group 4) not done
+
+- `FluxMapDQ` (co-energy bicubic fit, kernel ∇W' and Hessian, the
+  saturating locked-rotor reference) is a new law with its own Newton
+  smoothness requirements (memory: device laws must be smooth to
+  1e-12). Not started in this batch; tasks 4.1–4.5 and the
+  `pmsm_mna[flux_map]` conformance row stay open.
+
+## D22. Flux maps (group 4)
+
+- Law: `models::FluxMapDQ` (new header `models/flux_map_dq.hpp`), a C²
+  bicubic co-energy `W'(i_d, i_q)` stored per cell in power form
+  (16 coefficients, `u = i_d − kd[a]`, `v = i_q − kq[b]`). λ = ∇W',
+  incremental inductances = the Hessian: reciprocal by construction,
+  λ C¹. `PmsmMna::Params::flux_map` (null = the constant-L machine,
+  every existing path untouched; hashes change only when a map is set).
+  New statics `PmsmMna::flux_map_state` (λ_abc, ∂λ/∂i = T⁻¹·Hb·T,
+  ∂λ/∂θ_e, T_em = (3/2)·pp·(λ_d·i_q − λ_q·i_d) and its partials) and
+  `flux_map_increment`; the stamp branches into
+  `detail::refresh_flux_map_entry_` (additive; the constant-L stamp and
+  its functions are not restructured).
+- Increment form (D16) kept: λ(θ, i) − λ(θ0, i0) = C⁻¹·ΔPᵀ·λ_dq0(x0) +
+  T⁻¹·(λ_dq0(x) − λ_dq0(x0)); the gradient difference is ∫H along the
+  segment, split at knot lines, 3-point Gauss (exact: H is degree ≤ 4
+  along a line in a cell). The direct difference of two evaluations
+  carries ~1e-15 Wb of cell-join round-off (W' ~ 1 J differenced into
+  λ ~ 0.06 Wb); the increment's round-off scales with the step.
+- Past the grid: second-order Taylor extension of W' across the boundary
+  (per axis, so corners too) — C², reciprocal, consistent with its
+  Hessian, so Newton iterates outside are on a smooth law. Continuing the
+  boundary cubic instead made λ_d FALL 14 A past a saturating map's grid
+  (the picoampere test caught it). The Taylor extension is not PD
+  arbitrarily far out either (reviewer: indefinite 10 A past a 32 A grid,
+  the mixed terms grow with the overshoot), so the law is DEFINED on the
+  grid plus a band of `kBand` = 0.1 × each axis span: `validate` checks
+  PD on that whole region (4 samples per cell, 8 across each band), and
+  `PmsmMnaHistory::update_from_state` refuses an ACCEPTED state outside
+  it by name (machine, map, grid). `validate` also refuses knots,
+  coefficient count, non-C² joins (rel 1e-11).
+- Fit (Python `FluxMapDQ.from_tables` = `machines.flux_map_from_tables`,
+  numpy only): clamped cubic B-splines with knots at the table grid,
+  least squares on both tables + W'(corner) = 0. Gradient data leave
+  free spline modes (7 on a 7×7 grid; `2n² > (n+2)²` is not enough):
+  fixed in the data matrix's null space by not-a-knot conditions (W' C³
+  across the first and last interior knot lines, exact for a cubic), so
+  the data fit is untouched; still undetermined (2×2 grid) → refused by
+  name. `smooth > 0` adds second differences of the coefficients.
+- Reciprocity: the design's fit residual / flux range is kept (stored as
+  `fit_residual`), but it is dominated by the PM and self terms: λ_q × 1.1
+  (cross terms off 10 %) scored 0.16 %, under the 2 % default. Added a
+  direct measure on the TABLES: max |∂λ_d/∂i_q − ∂λ_q/∂i_d| (central
+  differences, interior) over the cross inductance (floor 5 % of the self
+  inductance), same `tol`: 9.1 % for the ×1.1 table (refused by name),
+  0.19 % for the reciprocal one on a 1 A grid (truncation), 2.0 % at
+  ×1.02.
+- Numbers (synthetic maps): linear map vs constant-L run 3.0e-14 (pwl),
+  8.5e-14 (trbdf2) relative; reciprocity 6.9e-14 H; saturated
+  locked-rotor step vs SciPy (analytic law) 2.57e-4 A of 20 A on pwl and
+  trbdf2 = the 1 A-grid fit error (pwl vs the fitted-map ODE 7.1e-7 /
+  1.8e-7 A at 2 / 1 µs); energy balance of a saturated start 1.4e-9 of
+  E_in at 2 µs (5.5e-9 at 4 µs).
+- `add_pmsm_mna(flux_map=)` requires `L_d`, `L_q`, `psi_pm` equal to the
+  map's values at i = 0 (refused naming the machine otherwise);
+  `add_pmsm_flux_map` (Python) passes them. With a map: harmonics refused;
+  DC held point only at ω0 = 0 (linear `v = R·i`), ω0 ≠ 0 refused by name;
+  `yaml.emit` refuses (no YAML form); `ir::fields` reports L_d, L_q,
+  psi_pm as unread. `<name>.T_em` trace from the map.
+- Hand-off (2026-11-19): open in this change only 1.2 (no `components()`
+  composite entry, D2) and 5.3 (BREAKING default flip, next release).
+  Not done, by design.md's non-goals: saturation of the induction
+  machine's magnetising branch. Not verified: the full ctest on this tip
+  (integration batch), Windows/Linux, the Windows Newton stall on
+  `test_inverter_fed_start_agrees_on_pwl_and_trbdf2` (no Windows here).
+  The flux-map stamp is NOT yet a `Device`-contract law (the port agent
+  takes `refresh_flux_map_entry_` with the rest).

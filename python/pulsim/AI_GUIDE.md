@@ -58,9 +58,9 @@ That union is pybind11's `float`, as in the stub.
 - **Piecewise-linear switching.** `add_switch`, `add_mosfet`, `add_igbt`
   and `add_diode` are two-state branches: conductance `g_on` (or
   `1/R_on`) on, `g_off` off; `add_diode(V_f=)` adds a series drop
-  while on. Each one owns a bit in the switch-state mask. Controlled
-  switches follow `switch_fn(t) -> SwitchStateMask`; diodes commutate
-  on their own. Smooth devices (`add_shockley_diode`, `add_mosfet_level1`,
+  while on. Each owns a switch-mask bit. Controlled switches follow
+  `switch_fn(t) -> SwitchStateMask`; diodes self-commutate. Smooth
+  devices (`add_shockley_diode`, `add_mosfet_level1`,
   `add_power_mosfet`, saturable magnetics) are solved with Newton;
   `add_nonlinear_diode` is retired. Gate transients:
   `p.double_pulse_test`, trbdf2 or `dt` <= 0.2 ns.
@@ -84,7 +84,7 @@ That union is pybind11's `float`, as in the stub.
 - **Omit `dt`** for passive, source-driven and diode-commutated
   circuits (trap 13), and as the second engine in a cross-check.
   Step ceiling `min(span/1000, period/20)`; `rtol` bounds the true
-  local error.
+  local error. Refusals: `p.option_capabilities()`.
 
 ## 3. Canonical examples
 
@@ -120,14 +120,14 @@ DT = 1e-7
 
 b = p.CircuitBuilder()
 b.add_voltage_source("Vin", "vin", "gnd", 24.0)
-b.add_mosfet("Q1", "vin", "sw")              # also adds diode "Q1_body"
-b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)    # g_on, g_off; V_th = 0
+b.add_mosfet("Q1", "vin", "sw")            # also adds diode "Q1_body"
+b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)  # g_on, g_off; V_th = 0
 b.add_inductor("L", "sw", "vout", 100e-6)
 b.add_capacitor("C", "vout", "gnd", 47e-6)
 b.add_resistor("RL", "vout", "gnd", 10.0)
 
-q1 = b.switch_index_of("Q1")                 # never count bits by hand
-n_sw = b.graph.num_switches                  # Q1, Q1_body, D1 -> 3
+q1 = b.switch_index_of("Q1")               # never count bits by hand
+n_sw = b.graph.num_switches                # Q1, Q1_body, D1 -> 3
 pwm = p.make_pwm_switch_fn(100e3, 0.5, q1, n_sw)   # f, D, bit, size
 
 res = p.simulate(b, t_end=10e-3, dt=DT, switch_fn=pwm)
@@ -404,9 +404,9 @@ b.add_ccvs(name, control, out_pos, out_neg, rm)
 b.add_gyrator(name, p1_pos, p1_neg, p2_pos, p2_neg, g)
 b.add_diode(name, anode, cathode, g_on=None, g_off=None, V_th=0.0, V_f=0.0, ...)
 b.add_shockley_diode(name, anode, cathode, I_S=1e-12, n=1.0, V_T=0.025852, G_min=1e-12, BV=0.0)
-b.add_switch(name, n_pos, n_neg, g_on, g_off)
-b.add_mosfet(name, drain, source, R_on=0.001, R_off=1000000000.0, body_diode=True, V_F=0.7)
-b.add_igbt(name, collector, emitter, R_on=0.01, R_off=1000000000.0, ...)
+b.add_switch(name, n_pos, n_neg, g_on=None, g_off=None, ...)
+b.add_mosfet(name, drain, source, R_on=0.001, R_off=1e9, body_diode=True, V_F=0.7, ...)
+b.add_igbt(name, collector, emitter, R_on=0.01, R_off=1e9, ...)
 b.add_transformer(name, p_from, p_to, s_from, s_to, L_p, L_s, k=1.0)
 b.node_id_of(name)
 b.switch_index_of(name)
@@ -422,8 +422,8 @@ p.steady_state_stats(result, what, *, t_from=None, t_to=None, last=None, kind=No
 p.periodic_steady_state(builder, *, period, switch_fn=None, start_from=None, ...)
 p.time_average(t, y, t_from=None, t_to=None)
 p.time_rms(t, y, t_from=None, t_to=None)
-p.add_bridge_rectifier(builder, name, *, ac_a, ac_b, dc_pos, dc_neg, g_on=1000.0, g_off=1e-09, V_th=0.7, V_f=0.0)
-p.add_three_phase_vsi(builder, name, *, vdc_pos, vdc_neg, out_a, out_b, out_c, R_on=0.001, R_off=1000000000.0, with_freewheel_diodes=True, V_f=0.7, R_d=0.05, V_th=0.0)
+p.add_bridge_rectifier(builder, name, *, ac_a, ac_b, dc_pos, dc_neg, g_on=1000.0, g_off=1e-09, V_th=0.7, V_f=0.0, ...)
+p.add_three_phase_vsi(builder, name, *, vdc_pos, vdc_neg, out_a, out_b, out_c, R_on=0.001, R_off=1000000000.0, with_freewheel_diodes=True, V_f=0.7, R_d=0.05, V_th=0.0, ...)
 p.load_yaml_string(yaml_text)
 p.load_yaml_file(path)
 p.sweep(builder_factory, *, params, kpi_fn, parallel=False, n_workers=None, backend='auto', verbose=True, **simulate_kwargs)
@@ -446,8 +446,8 @@ sample INDEX; at a time, use `np.interp(t, res.times, res.v(name))`.
 A ground name gives zeros. `phase` of the two PWM helpers and `carrier_phase`
 are time shifts in SECONDS (`t - phase`); `modulation_phase` and the
 `phase` of `add_sine_voltage_source` are radians.
-`add_capacitor(c0=, esr=, esl=)` / `add_inductor(i0=, esr=, c_par=)`
-set initial conditions and series parasitics.
+`add_capacitor(c0=, esr=, esl=)` / `add_inductor(i0=, esr=, c_par=, rac=)`
+set ICs and parasitics; MLCC bias: `passives.fit_mlcc_dc_bias`.
 Other `simulate` keywords: `switch_fn`, `t_start`, `store_every`,
 `auto_regularize`, `progress`.
 
@@ -468,7 +468,7 @@ Each row was measured on this version. The fix column is what to write.
 | 9 | A fixed-step run is second order | By default each gate edge, source jump and start (ICs too) leaves a stale history: first order, ringing. RL decay, `i0=1`: 1.85e-3 at `dt=1e-5`, 0.92e-3 at `5e-6` | `discontinuity_restart=True` (6.3): gate read at step start; jumping `b_extra_fn` needs `.next_jump_after`. Sample 0 reads 0 V |
 | 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid unless split. Buck D = 0.25, 100 kHz, `make_pwm_switch_fn`: 6.24 V at `dt=2e-7` (12.5 steps run as 13), 6.00 V at `1e-7` | Whole-step `D/f_sw` (3.2), or 6.3 + `enable_substep_state_correction=True`: helper edges are split, order 2 |
 | 11 | Omitting `switch_fn` leaves switches open | With `dt`, undriven controlled switches are ALL CLOSED and `simulate` only warns: the buck of 3.2 runs at D = 1 and settles at 24.0 V, not 12 V; without `dt`, `auto` refuses | Always pass `switch_fn` when the circuit has controlled switches |
-| 12 | `except Exception:` around `simulate` keeps a script robust | A broad except turns a refusal into a silent wrong answer | Let it raise, or catch `pulsim.UnsupportedError` (`.engine`, `.feature`) |
+| 12 | `except Exception:` around `simulate` keeps a script robust | A broad except turns a refusal into a silent wrong answer | Let it raise, or catch `p.PulsimError` (`.engine`, `.feature`) |
 | 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee (a diode on its conduction boundary, a pulse narrower than its sampling). Silence is no proof: a one-shot pulse under a quarter of the step ceiling (`dt`, else `t_end/1000`) can be skipped | Rerun with `dt`, compare (6.2); `dt` <= 4x the narrowest pulse |
 | 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | Each edge is a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (D = 0.25): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, exact 1.5044 A. Same for `device_loss_summary`'s `i_rms`, not `P_avg` | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three |
 | 15 | Controllers run each step, chains in insertion order | Ticks at `t_start + k*T`, `ceil(span/T)` times. A chain runs in graph order; a loop with no `DelayBlock`, an unported block, a stateful block with no `p.Rate(T)` raise `ControlGraphBuildError` | `controller_period=` or `p.Rate`; custom code: `p.PythonBlock(fn)` |

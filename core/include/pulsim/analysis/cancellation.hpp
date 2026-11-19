@@ -25,6 +25,8 @@
 /// exception path keeps the contract uniform.
 #pragma once
 
+#include "pulsim/sim/error.hpp"
+
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -42,7 +44,7 @@ using ShouldContinueFn = std::function<bool()>;
 /// Inherits from :class:`std::runtime_error` so callers can keep
 /// using ``catch (const std::runtime_error&)`` without forcing a
 /// migration.
-class Cancelled : public std::runtime_error {
+class Cancelled : public std::runtime_error, public PulsimError {
 public:
     Cancelled(std::string where, long progress_index = -1)
         : std::runtime_error(

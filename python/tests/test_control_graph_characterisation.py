@@ -23,7 +23,8 @@ import pytest
 import pulsim as p
 
 _RUNNERS = {"run_transient", "run_transient_with_chain",
-            "run_transient_trbdf2"}
+            "run_transient_trbdf2",
+            "_run_simulation"}  # simulate()'s kernel object
 
 
 class PyCallsDuringRun:

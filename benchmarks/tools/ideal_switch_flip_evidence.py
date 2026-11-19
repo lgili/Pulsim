@@ -11,13 +11,16 @@ variants of each cell:
 * ``lcp``      ``mode_selection='lcp'`` (only on a circuit with a PWL diode:
   without one the default selection has nothing to decide);
 * ``branch+lcp`` both;
+* ``auto``     ``mode_selection='auto'`` (every circuit: ``'lcp'`` where it
+  applies, the settle where ``'lcp'`` refuses);
 * ``ideal``    every ``add_switch`` / ``add_diode`` an IDEAL branch-form element:
   ``R_on = 0`` and ``V_f = 0`` (the netlist's ``g_off`` and ``V_th`` kept).
   That is another circuit, so its cells are graded against a reference
-  regenerated for it by the harness's own tool (``differential_runner.
-  reference``: trbdf2 at rtol 1e-8, else pwl dt/4 when converged), run under
-  the same substitution; a circuit whose ideal twin has no reference is
-  ``not comparable`` with the reason;
+  regenerated for it whose convergence is shown (``converged_reference``:
+  trbdf2 and pwl + restart each refined, the uncertainty is a Richardson
+  estimate with the measured order);
+  a cell whose tol/10 is below that uncertainty is ``not comparable`` with
+  the reason;
 * ``ideal+lcp`` the ideal twin with ``mode_selection='lcp'``.
 
 Each cell is graded on the strict gate against the circuit's one reference,
@@ -25,7 +28,12 @@ exactly as reference_status.py grades it. Written to
 benchmarks/IDEAL_SWITCH_FLIP_EVIDENCE.md (and ``--json``):
 
     PYTHONPATH=python:benchmarks python3 benchmarks/tools/ideal_switch_flip_evidence.py \
-        [--circuits GLOB,...] [--json out.json] [--from-json out.json]
+        [--resume DIR] [--circuits GLOB,...] [--json out.json] [--from-json out.json]
+
+One command regenerates every variant on one tree; ``--resume DIR`` keeps each
+circuit's cells in ``DIR`` as they are measured, so a killed run started again
+measures only what is missing. Every reference carries its uncertainty
+(the References section).
 
 Nothing here changes a default; the flip itself belongs to the release.
 """
@@ -35,8 +43,11 @@ from __future__ import annotations
 import argparse
 import contextlib
 import fnmatch
+import hashlib
 import json
+import math
 import statistics
+import subprocess
 import sys
 import time
 import warnings
@@ -51,7 +62,7 @@ import pulsim  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "IDEAL_SWITCH_FLIP_EVIDENCE.md"
-VARIANTS = ("default", "branch", "lcp", "branch+lcp", "ideal", "ideal+lcp")
+VARIANTS = ("default", "branch", "lcp", "branch+lcp", "auto", "ideal", "ideal+lcp")
 # the structural refusals of an ideal circuit, by name (UnsupportedError.feature)
 STRUCTURAL = ("ideal_voltage_loop", "floating_node", "dependent_states", "impulse")
 RANK = {"agree": 0, "unverified": 0, "disagree": 1, "refused": 2, "error": 3,
@@ -128,59 +139,213 @@ def _has_pwl_diode(case):
     return any(c.get("type") == "diode" and "is" not in c for c in case._components)
 
 
-def run(patterns, want=VARIANTS):
-    triage = dr.load_triage()
+# (tool, settings, refinement factor between successive settings)
+LADDERS = (("trbdf2", (1e-8, 1e-9, 1e-10), 10.0),
+           ("pwl+restart", (8, 16, 32, 64, 128, 256), 2.0))
+
+
+def _ladder(case, cols, target, ladder):
+    """Refine one tool until its estimated error is at most ``target`` or the
+    ladder ends. Returns (name, trace, u): the finest setting run and its
+    error estimate (Richardson, from the last two moves: order
+    p = log_f(e1 / e2), u = e2 / (f^p - 1); inf with fewer than three settings
+    or a move that does not shrink). The order is measured, not assumed: the
+    interp measure converges at p ~ 0.5 across a jump (a ramp over one step)
+    — taking the last move as the error would understate it 2.4x."""
+    tool, levels, f = ladder
+    prev, name, moves, u = None, None, [], math.inf
+    for lv in levels:
+        try:
+            if tool == "trbdf2":
+                res, nm = case.run("trbdf2", rtol=lv, atol=lv * 1e-4), f"trbdf2 rtol={lv:g}"
+            else:
+                with rs.extra_kwargs({"discontinuity_restart": True}):
+                    res, nm = case.run("pwl", dt=case.dt / lv), f"pwl+restart dt/{lv}"
+            cur = dr.traces(res, cols)
+        except Exception:  # noqa: BLE001 - a tool that cannot run ends its ladder
+            break
+        if prev is not None:
+            moves.append(max(dr._sym(prev[1], cur, c, 1e-3) for c in cols))
+        prev, name = (nm, cur), nm
+        if len(moves) >= 2:
+            e1, e2 = moves[-2:]
+            if e2 == 0.0:      # identical outputs: a saturated ladder, not a proof of 0
+                u = e1
+            elif e1 > e2:
+                u = e2 / (f ** math.log(e1 / e2, f) - 1.0)
+            else:
+                u = math.inf
+            if u <= target:
+                break
+    return (name, prev[1] if prev else None, u)
+
+
+def converged_reference(case, cols, tol):
+    """A reference whose own convergence is shown, with its uncertainty.
+
+    Each tool (trbdf2 by rtol, pwl + restart by dt) is refined until its
+    estimated error (``_ladder``: Richardson with the measured order) is at
+    most tol/10 or its ladder ends. The reference is the finest setting of the
+    tool with the smaller estimate ``u``. When the other tool's own estimate
+    is below half of the two tools' distance ``e_cross``, that distance is a
+    real disagreement (a tool can converge to a wrong answer: ll07's ideal twin
+    on trbdf2) and ``u`` is at least ``e_cross``. A cell is graded against it
+    only when ``u <= tol_cell / 10``. Returns (trace or None, metadata)."""
+    got = {lad[0]: _ladder(case, cols, tol / 10, lad) for lad in LADDERS}
+    meta = {f"e_{k}": v[2] for k, v in got.items()}
+    ran = sorted((v[2], k) for k, v in got.items() if v[1] is not None and v[2] < math.inf)
+    if not ran:
+        meta.update(name=None, uncertainty=None, why="no tool has a finite error estimate (three settings, shrinking moves)")
+        return None, meta
+    u, best = ran[0]
+    name, tr, _ = got[best]
+    if len(ran) == 2:
+        other = got[ran[1][1]]
+        x = max(dr._sym(tr, other[1], c, 1e-3) for c in cols)
+        meta["e_cross"] = x
+        if other[2] <= x / 2:
+            u = max(u, x)
+    meta.update(name=name, uncertainty=u)
+    return tr, meta
+
+
+def default_reference(case, cols, tol):
+    """The gate's own reference (dr.reference, unchanged) and its uncertainty:
+    trbdf2 rtol 1e-8 against 1e-9, or pwl dt/2 against dt/4 (the symmetric
+    measure)."""
+    name, ref = dr.reference(case, cols, tol)
+    meta = {"name": name, "uncertainty": None}
+    if ref is None:
+        return None, meta
+    try:
+        if name.startswith("trbdf2"):
+            fine = dr.traces(case.run("trbdf2", rtol=1e-9, atol=1e-13), cols)
+        else:
+            fine = dr.traces(case.run("pwl", dt=case.dt / 2), cols)
+        meta["uncertainty"] = max(dr._sym(ref, fine, c, 1e-3) for c in cols)
+    except Exception as ex:  # noqa: BLE001 - stated, never assumed
+        meta["why"] = f"uncertainty not measured: {type(ex).__name__}"
+    return ref, meta
+
+
+def _tree():
+    """(commit, digest of the uncommitted tracked changes or '') of the tree this
+    run measures: two different sets of edits on one commit are two trees."""
+    root = Path(__file__).resolve().parents[2]
+    try:
+        head = subprocess.run(["git", "-C", str(root), "rev-parse", "--short=10", "HEAD"],
+                              capture_output=True, text=True, check=True).stdout.strip()
+        diff = subprocess.run(["git", "-C", str(root), "diff", "HEAD", "--binary"],
+                              capture_output=True, check=True).stdout
+    except Exception:  # noqa: BLE001 - not a checkout
+        return "unknown", "unknown"
+    return head, hashlib.sha256(diff).hexdigest()[:12] if diff else ""
+
+
+def _cell_file(cache, rel):
+    return Path(cache) / (rel.replace("/", "__") + ".json")
+
+
+def run_circuit(rel, entry, want=VARIANTS, have=None):
+    """Every (configuration, variant) cell of one circuit not already in
+    ``have`` (resumed cells), and the circuit's references with their
+    uncertainties."""
+    have = have or {}
+    case = v1_reader.load(ROOT / rel)
+    _, sw, _ = case.build()
+    switched = sw is not None or any(k in json.dumps(case._components)
+                                     for k in ('"diode"', '"pwm"', '"pulse"'))
+    cols = dr.observables_of(case)
+    tols = {e: entry.get("tol", {}).get(e, dr.default_tol(e, switched)) for e in dr.ENGINES}
+    tol = min(tols.values())
+    variants = [v for v in VARIANTS if v in want]
+    ref, rmeta = default_reference(case, cols, tol)
+    iref, imeta = None, {"name": None, "uncertainty": None}
+    if any(v.startswith("ideal") for v in variants):
+        try:
+            with ideal_form():
+                iref, imeta = converged_reference(case, cols, tol)
+        except Exception as ex:  # noqa: BLE001 - the reason is the table entry
+            imeta = {"name": None, "uncertainty": None,
+                     "why": f"ideal twin has no reference: {type(ex).__name__}: {ex}"[:200]}
+    diode = _has_pwl_diode(case)
     out = []
-    for rel, entry in sorted(triage.items()):
+    for cfg, (eng, kw) in rs.CONFIGS.items():
+        for var in variants:
+            if (cfg, var) in have:
+                out.append(have[(cfg, var)])
+                continue
+            rec = dict(circuit=rel, config=cfg, variant=var, tol=tols[eng])
+            ideal = var.startswith("ideal")
+            meta = imeta if ideal else rmeta
+            rec.update(reference=meta.get("name"), reference_uncertainty=meta.get("uncertainty"))
+            if "lcp" in var and not diode:
+                rec.update(outcome="n/a", message="no PWL diode: nothing to select")
+                out.append(rec)
+                continue
+            ms = "lcp" if "lcp" in var else "auto" if var == "auto" else None
+            k = dict(kw, **({"mode_selection": ms} if ms else {}))
+            ctx = (branch_form() if var.startswith("branch") else
+                   ideal_form() if ideal else contextlib.nullcontext())
+            rf = iref if ideal else ref
+            with ctx, rs.extra_kwargs(k):
+                kind, res, wall, msg, feat = _run_cell(case, eng)
+            rec.update(wall_s=wall, message=msg, feature=feat)
+            if kind != "ran":
+                rec["outcome"] = kind
+            elif rf is None:
+                rec.update(outcome="not comparable" if ideal else "error",
+                           message=meta.get("why") or "no converged reference")
+            elif ideal and not meta["uncertainty"] <= tols[eng] / 10:
+                rec.update(outcome="not comparable",
+                           message=f"reference uncertainty {meta['uncertainty']:.3g} > tol/10 "
+                                   f"({tols[eng] / 10:.3g}): {meta['name']}")
+            else:
+                dr.classify(rec, res, case, cols, rf, tols[eng],
+                            case.dt if eng == "pwl" else None)
+                dr.mark_suspect(rec, entry)
+            out.append({k2: v for k2, v in rec.items()
+                        if k2 in ("circuit", "config", "variant", "tol", "outcome", "err_rms",
+                                  "edge", "edge_rms", "wall_s", "message", "feature",
+                                  "reference", "reference_uncertainty")})
+            print(f"{rec['outcome']:9s} {cfg:12s} {var:11s} {rel} {rec.get('err_rms', '')}",
+                  flush=True)
+    return out, {"default": rmeta, "ideal": imeta}
+
+
+def run(patterns, want=VARIANTS, cache=None):
+    """Every circuit matching ``patterns``. With ``cache``, each circuit's cells
+    are written to ``cache/<circuit>.json`` once that circuit is done, and a
+    later run measures only the cells missing there (resumable per circuit; a
+    cell measured on another tree is measured again; cached cells of variants
+    not in ``want`` are kept)."""
+    tree = _tree()
+    out, refs = [], {}
+    for rel, entry in sorted(dr.load_triage().items()):
         if entry["status"] != "runs" or not any(fnmatch.fnmatch(rel, p) for p in patterns):
             continue
-        case = v1_reader.load(ROOT / rel)
-        _, sw, _ = case.build()
-        switched = sw is not None or any(k in json.dumps(case._components)
-                                         for k in ('"diode"', '"pwm"', '"pulse"'))
-        cols = dr.observables_of(case)
-        tols = {e: entry.get("tol", {}).get(e, dr.default_tol(e, switched)) for e in dr.ENGINES}
-        ref_name, ref = dr.reference(case, cols, min(tols.values()))
-        variants = [v for v in VARIANTS if v in want]
-        iref_name, iref, iwhy = None, None, None
-        if any(v.startswith("ideal") for v in variants):
-            try:
-                with ideal_form():
-                    iref_name, iref = dr.reference(case, cols, min(tols.values()))
-                if iref is None:
-                    iwhy = "no converged reference for the ideal twin (trbdf2 failed, pwl dt/4 off)"
-            except Exception as ex:  # noqa: BLE001 - the reason is the table entry
-                iwhy = f"ideal twin has no reference: {type(ex).__name__}: {ex}"[:200]
-        diode = _has_pwl_diode(case)
-        for cfg, (eng, kw) in rs.CONFIGS.items():
-            for var in variants:
-                rec = dict(circuit=rel, config=cfg, variant=var, tol=tols[eng])
-                if "lcp" in var and not diode:
-                    rec.update(outcome="n/a", message="no PWL diode: nothing to select")
-                    out.append(rec)
-                    continue
-                k = dict(kw, **({"mode_selection": "lcp"} if "lcp" in var else {}))
-                ctx = (branch_form() if var.startswith("branch") else
-                       ideal_form() if var.startswith("ideal") else contextlib.nullcontext())
-                rf, rfn = (iref, iref_name) if var.startswith("ideal") else (ref, ref_name)
-                with ctx, rs.extra_kwargs(k):
-                    kind, res, wall, msg, feat = _run_cell(case, eng)
-                rec.update(wall_s=wall, message=msg, feature=feat, reference=rfn)
-                if kind != "ran":
-                    rec["outcome"] = kind
-                elif rf is None:
-                    rec.update(outcome="not comparable" if var.startswith("ideal") else "error",
-                               message=iwhy if var.startswith("ideal") else "no converged reference")
-                else:
-                    dr.classify(rec, res, case, cols, rf, tols[eng],
-                                case.dt if eng == "pwl" else None)
-                    dr.mark_suspect(rec, entry)
-                out.append({k2: v for k2, v in rec.items()
-                            if k2 in ("circuit", "config", "variant", "tol", "outcome",
-                                      "err_rms", "wall_s", "message", "feature", "reference")})
-                print(f"{rec['outcome']:9s} {cfg:12s} {var:11s} {rel} {rec.get('err_rms', '')}",
-                      flush=True)
-    return out
+        have, f = {}, _cell_file(cache, rel) if cache else None
+        if f is not None and f.exists():
+            old = json.loads(f.read_text(encoding="utf-8"))
+            if old.get("tree") == list(tree):
+                have = {(r["config"], r["variant"]): r for r in old["cells"]}
+        if have and all((c, v) in have for c in rs.CONFIGS for v in want):
+            recs, meta = [have[(c, v)] for c in rs.CONFIGS for v in VARIANTS if v in want], old["refs"]
+        else:
+            recs, meta = run_circuit(rel, entry, want, have)
+            if have and not any(v.startswith("ideal") for v in want):
+                meta["ideal"] = old["refs"].get("ideal", meta["ideal"])   # kept with its cells
+        if f is not None:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_suffix(".tmp")
+            kept = [r for k, r in have.items() if k[1] not in want]
+            tmp.write_text(json.dumps({"tree": list(tree), "refs": meta, "cells": recs + kept},
+                                      indent=1),
+                           encoding="utf-8")
+            tmp.replace(f)
+        out += recs
+        refs[rel] = meta
+    return out, refs, tree
 
 
 def _cmp(a, b):
@@ -201,23 +366,26 @@ def _cmp(a, b):
     return "better" if eb < ea else "worse"     # graded the same way both directions
 
 
-def render(recs):
+def render(recs, refs=None, tree=("unknown", "")):
     by = {(r["circuit"], r["config"], r["variant"]): r for r in recs}
     circuits = sorted({r["circuit"] for r in recs})
     cfgs = [c for c in rs.CONFIGS if any(r["config"] == c for r in recs)]
     L = ["# Ideal switch / complementarity: default-flip evidence", "",
-         "Generated by `benchmarks/tools/ideal_switch_flip_evidence.py` (do not edit).",
+         "Generated by `benchmarks/tools/ideal_switch_flip_evidence.py` (do not edit), every",
+         f"variant in one run on one tree: `{tree[0]}`{f' (with uncommitted changes {tree[1]})' if tree[1] else ''}.",
+         "Regenerate: `PYTHONPATH=python:benchmarks python3 benchmarks/tools/"
+         "ideal_switch_flip_evidence.py --resume <dir>`.", "",
          "Every reference circuit of the differential matrix, every configuration, graded",
          "on the strict gate against the circuit's one reference (as",
          "`REFERENCE_STATUS.md`). Variants: `branch` = every `add_switch` / `add_diode` in",
          "the branch form with the same values (`R_on = 1/g_on`, same `g_off`, design D6);",
          "`lcp` = `mode_selection='lcp'` (only where a PWL diode exists; `n/a` otherwise);",
-         "`branch+lcp` both. Comparison of each variant against `default` in the same",
+         "`branch+lcp` both; `auto` = `mode_selection='auto'` (every circuit). Comparison of each variant against `default` in the same",
          "configuration: `same` (same outcome and err_rms within 1 %), `better` / `worse`",
          "(outcome rank, else err_rms beyond 1 %), `refused` / `error` (the default ran).",
          "`agree` counts `unverified` (a suspect reference) too. The branch variant has",
-         "finite R_on = 1/g_on (each netlist gives g_on): no R_on = 0 port appears",
-         "here; the ideal (R_on = 0) cases are in the unit tests. MOSFET / IGBT helpers and",
+         "finite R_on = 1/g_on (each netlist gives g_on); the R_on = 0 twin is the `ideal`",
+         "section below. MOSFET / IGBT helpers and",
          "Shockley diodes keep their own models (not switched by the variant).",
          "The wall ratio is variant / default over one run per cell (a noisy",
          "signal; the median-of-7 cost gate is",
@@ -280,7 +448,38 @@ def render(recs):
     if not better:
         L.append("| (none) | | | | | | |")
     L += _render_ideal(by, circuits, cfgs)
+    L += _render_refs(refs or {})
     return "\n".join(L) + "\n"
+
+
+def _u(m):
+    return f"{m['uncertainty']:.2g}" if m.get("uncertainty") is not None else "not stated"
+
+
+def _render_refs(refs):
+    """Every reference and its uncertainty (a reference without one grades nothing)."""
+    if not refs:
+        return []
+    L = ["", "## References and their uncertainty", "",
+         "`default`: the gate's reference (`differential_runner.reference`, unchanged); its",
+         "uncertainty is its distance to the next refinement (trbdf2 rtol 1e-9, or pwl dt/2",
+         "against dt/4). `ideal twin`: each tool refined",
+         "until its error estimate is at most tol/10 or its ladder ends (trbdf2 rtol 1e-8 → 1e-10,",
+         "pwl + restart dt/8 → dt/256); the estimate is Richardson's with the order measured from",
+         "the last two moves (the interp measure converges at order ~0.5 across a jump). The",
+         "reference is the tool with the smaller estimate u, raised to the two tools' distance",
+         "`e_cross` when the other tool's estimate is below half of it. A cell is graded only",
+         "when u <= its tol/10, else `not comparable`.",
+         "All distances are the symmetric measure (`metrics.err_rms_symmetric`).", "",
+         "| circuit | default reference | u | ideal-twin reference | u | u trbdf2 | u pwl | e cross |",
+         "|---|---|---:|---|---:|---:|---:|---:|"]
+    g = lambda m, k: f"{m[k]:.2g}" if m.get(k) not in (None, math.inf) else ""  # noqa: E731
+    for rel in sorted(refs):
+        d, i = refs[rel].get("default", {}), refs[rel].get("ideal", {})
+        L.append(f"| {rel.removeprefix('circuits/')} | {d.get('name') or 'none'} | {_u(d)} "
+                 f"| {i.get('name') or 'none'} | {_u(i)} | {g(i, 'e_trbdf2')} "
+                 f"| {g(i, 'e_pwl+restart')} | {g(i, 'e_cross')} |")
+    return L
 
 
 def _render_ideal(by, circuits, cfgs):
@@ -288,10 +487,11 @@ def _render_ideal(by, circuits, cfgs):
     if not any(v.startswith("ideal") for (_, _, v) in by):
         return []
     L = ["", "## The ideal switch (R_on = 0, V_f = 0)", "",
-         "Each `ideal` cell is graded against the ideal twin's own reference (the harness's",
-         "`reference()` run under the same substitution), then compared with the `default`",
-         "cell of the same configuration (graded against the original reference) as above.",
-         "`not comparable`: the ideal twin has no converged reference. Structural refusals",
+         "Each `ideal` cell is graded against the ideal twin's own reference, one whose",
+         "convergence is shown (see References: its uncertainty is a Richardson estimate),",
+         "then compared with the `default` cell of the same configuration (graded against the",
+         "original reference) as above. `not comparable`: the ideal twin's reference uncertainty",
+         "is above the cell's tol/10 (the reason is in the cause column). Structural refusals",
          "are counted by `UnsupportedError.feature`.", "",
          "| configuration | variant | better | same | worse | refused | error | not comparable "
          "| " + " | ".join(STRUCTURAL) + " | other refusal | median wall ratio |",
@@ -347,25 +547,25 @@ def _render_ideal(by, circuits, cfgs):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--circuits", default="*")
-    ap.add_argument("--json")
-    ap.add_argument("--from-json")
+    ap.add_argument("--json", help="also write every cell (and the references) here")
+    ap.add_argument("--from-json", help="render an earlier --json, measure nothing")
     ap.add_argument("--out", default=str(OUT))
     ap.add_argument("--variants", default=",".join(VARIANTS))
-    ap.add_argument("--merge", help="earlier --json whose cells the new run does not replace")
+    ap.add_argument("--resume", metavar="DIR",
+                    help="per-circuit cell cache: a killed run started again with the same "
+                         "DIR measures only the missing cells (same tree only)")
     a = ap.parse_args(argv)
     warnings.simplefilter("ignore")
     if a.from_json:
-        recs = json.loads(Path(a.from_json).read_text(encoding="utf-8"))
+        blob = json.loads(Path(a.from_json).read_text(encoding="utf-8"))
+        recs, refs, tree = blob["cells"], blob["refs"], tuple(blob["tree"])
     else:
         pats = [p if p.startswith("circuits/") else f"circuits/{p}" for p in a.circuits.split(",")]
-        recs = run(pats, tuple(a.variants.split(",")))
-        if a.merge:
-            have = {(r["circuit"], r["config"], r["variant"]) for r in recs}
-            recs += [r for r in json.loads(Path(a.merge).read_text(encoding="utf-8"))
-                     if (r["circuit"], r["config"], r["variant"]) not in have]
+        recs, refs, tree = run(pats, tuple(a.variants.split(",")), a.resume)
         if a.json:
-            Path(a.json).write_text(json.dumps(recs, indent=1), encoding="utf-8")
-    Path(a.out).write_text(render(recs), encoding="utf-8")
+            Path(a.json).write_text(json.dumps({"tree": list(tree), "refs": refs, "cells": recs},
+                                               indent=1), encoding="utf-8")
+    Path(a.out).write_text(render(recs, refs, tree), encoding="utf-8")
     return 0
 
 

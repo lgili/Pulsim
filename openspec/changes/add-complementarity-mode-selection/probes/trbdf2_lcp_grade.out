@@ -1,0 +1,306 @@
+agree     trbdf2       circuits/closed_loop/cl_boost_pi.yaml 1.3145358979371642e-06
+agree     trbdf2+lcp   circuits/closed_loop/cl_boost_pi.yaml 1.3145358979371642e-06
+agree     trbdf2       circuits/closed_loop/cl_buck_aggressive_pi.yaml 3.717155147615302e-05
+agree     trbdf2+lcp   circuits/closed_loop/cl_buck_aggressive_pi.yaml 3.717155147615302e-05
+agree     trbdf2       circuits/closed_loop/cl_buck_pi.yaml 1.8813157849177547e-05
+agree     trbdf2+lcp   circuits/closed_loop/cl_buck_pi.yaml 1.8813157849177547e-05
+agree     trbdf2       circuits/closed_loop/ll14_buck_closed_loop.yaml 0.0005472084324602457
+refused   trbdf2+lcp   circuits/closed_loop/ll14_buck_closed_loop.yaml 
+agree     trbdf2       circuits/closed_loop/ll15_boost_closed_loop.yaml 0.00026384588694819004
+refused   trbdf2+lcp   circuits/closed_loop/ll15_boost_closed_loop.yaml 
+agree     trbdf2       circuits/closed_loop/ll16_flyback_closed_loop.yaml 0.0003626069679574526
+refused   trbdf2+lcp   circuits/closed_loop/ll16_flyback_closed_loop.yaml 
+agree     trbdf2       circuits/diodes/back_to_back_diodes_sine.yaml 0.0
+agree     trbdf2+lcp   circuits/diodes/back_to_back_diodes_sine.yaml 0.0
+agree     trbdf2       circuits/diodes/diode_bridge_rectifier.yaml 3.2243224114208646e-05
+agree     trbdf2+lcp   circuits/diodes/diode_bridge_rectifier.yaml 3.22432241143299e-05
+agree     trbdf2       circuits/diodes/diode_clamp_overvoltage.yaml 0.0
+agree     trbdf2+lcp   circuits/diodes/diode_clamp_overvoltage.yaml 0.0
+agree     trbdf2       circuits/diodes/diode_half_wave_rl_load.yaml 1.5765276159432184e-05
+agree     trbdf2+lcp   circuits/diodes/diode_half_wave_rl_load.yaml 1.576733844191263e-05
+agree     trbdf2       circuits/diodes/diode_rectifier.yaml 0.00018265626759347581
+agree     trbdf2+lcp   circuits/diodes/diode_rectifier.yaml 0.00018265626650968586
+agree     trbdf2       circuits/diodes/half_wave_rectifier_sine.yaml 2.3555264888324925e-05
+agree     trbdf2+lcp   circuits/diodes/half_wave_rectifier_sine.yaml 2.3555264888324925e-05
+agree     trbdf2       circuits/diodes/voltage_doubler.yaml 5.052526986916813e-06
+agree     trbdf2+lcp   circuits/diodes/voltage_doubler.yaml 5.052526986916813e-06
+agree     trbdf2       circuits/linear/bridge_resistive_pure.yaml 0.0
+refused   trbdf2+lcp   circuits/linear/bridge_resistive_pure.yaml 
+agree     trbdf2       circuits/linear/capacitor_natural_discharge.yaml 5.629706612871422e-06
+refused   trbdf2+lcp   circuits/linear/capacitor_natural_discharge.yaml 
+agree     trbdf2       circuits/linear/current_divider_3way.yaml 0.0
+refused   trbdf2+lcp   circuits/linear/current_divider_3way.yaml 
+agree     trbdf2       circuits/linear/current_source_rc.yaml 0.0
+refused   trbdf2+lcp   circuits/linear/current_source_rc.yaml 
+agree     trbdf2       circuits/linear/current_source_rl_step.yaml 2.1363608728973157e-06
+refused   trbdf2+lcp   circuits/linear/current_source_rl_step.yaml 
+agree     trbdf2       circuits/linear/lc_low_pass_sine.yaml 0.0001181000655698765
+refused   trbdf2+lcp   circuits/linear/lc_low_pass_sine.yaml 
+agree     trbdf2       circuits/linear/ll01_resistive_divider_dc.yaml 0.0
+refused   trbdf2+lcp   circuits/linear/ll01_resistive_divider_dc.yaml 
+agree     trbdf2       circuits/linear/ll02_rc_pulse_charge.yaml 1.4845171538508543e-07
+refused   trbdf2+lcp   circuits/linear/ll02_rc_pulse_charge.yaml 
+agree     trbdf2       circuits/linear/ll03_rl_step.yaml 6.380156829024317e-06
+refused   trbdf2+lcp   circuits/linear/ll03_rl_step.yaml 
+agree     trbdf2       circuits/linear/pulse_voltage_rl.yaml 3.039159413527558e-05
+refused   trbdf2+lcp   circuits/linear/pulse_voltage_rl.yaml 
+agree     trbdf2       circuits/linear/rc_dc.yaml 6.844240692066428e-07
+refused   trbdf2+lcp   circuits/linear/rc_dc.yaml 
+agree     trbdf2       circuits/linear/rc_step.yaml 6.839838071007902e-07
+refused   trbdf2+lcp   circuits/linear/rc_step.yaml 
+agree     trbdf2       circuits/linear/rl_natural_response.yaml 6.662510250945746e-06
+refused   trbdf2+lcp   circuits/linear/rl_natural_response.yaml 
+agree     trbdf2       circuits/linear/rl_step.yaml 1.7537741817922427e-06
+refused   trbdf2+lcp   circuits/linear/rl_step.yaml 
+agree     trbdf2       circuits/linear/rlc_series_resonant.yaml 0.0003538352040761978
+refused   trbdf2+lcp   circuits/linear/rlc_series_resonant.yaml 
+agree     trbdf2       circuits/linear/sine_voltage_rc.yaml 0.00011064371798693529
+refused   trbdf2+lcp   circuits/linear/sine_voltage_rc.yaml 
+agree     trbdf2       circuits/linear/two_stage_rc_lowpass.yaml 3.4379748286272572e-06
+refused   trbdf2+lcp   circuits/linear/two_stage_rc_lowpass.yaml 
+agree     trbdf2       circuits/linear/voltage_divider_3stage.yaml 0.0
+refused   trbdf2+lcp   circuits/linear/voltage_divider_3stage.yaml 
+agree     trbdf2       circuits/magnetics/core_loss_steinmetz_sine.yaml 0.00012345736509715698
+refused   trbdf2+lcp   circuits/magnetics/core_loss_steinmetz_sine.yaml 
+agree     trbdf2       circuits/magnetics/coupled_inductor_step.yaml 3.7634882323864987e-06
+refused   trbdf2+lcp   circuits/magnetics/coupled_inductor_step.yaml 
+agree     trbdf2       circuits/magnetics/half_bridge_transformer_dc.yaml 2.0783901525900553e-05
+agree     trbdf2+lcp   circuits/magnetics/half_bridge_transformer_dc.yaml 2.0783901525900553e-05
+agree     trbdf2       circuits/magnetics/inductor_chain_step.yaml 9.054895272539028e-07
+refused   trbdf2+lcp   circuits/magnetics/inductor_chain_step.yaml 
+agree     trbdf2       circuits/magnetics/transformer_leakage.yaml 0.00023081813706232198
+refused   trbdf2+lcp   circuits/magnetics/transformer_leakage.yaml 
+agree     trbdf2       circuits/magnetics/transformer_step_up.yaml 0.0
+refused   trbdf2+lcp   circuits/magnetics/transformer_step_up.yaml 
+agree     trbdf2       circuits/motors/motor_dc_brush_step_load.yaml 6.064696104680419e-06
+refused   trbdf2+lcp   circuits/motors/motor_dc_brush_step_load.yaml 
+agree     trbdf2       circuits/motors/motor_induction_locked_rotor.yaml 5.1023907418179255e-05
+refused   trbdf2+lcp   circuits/motors/motor_induction_locked_rotor.yaml 
+agree     trbdf2       circuits/motors/motor_pmsm_dq_open_loop.yaml 6.51244013044879e-06
+refused   trbdf2+lcp   circuits/motors/motor_pmsm_dq_open_loop.yaml 
+agree     trbdf2       circuits/resonance/bode_rlc_low_pass.yaml 0.0
+refused   trbdf2+lcp   circuits/resonance/bode_rlc_low_pass.yaml 
+agree     trbdf2       circuits/resonance/driven_lc_series_resonance.yaml 0.00021693547046531693
+refused   trbdf2+lcp   circuits/resonance/driven_lc_series_resonance.yaml 
+agree     trbdf2       circuits/resonance/lc_resonant_tank.yaml 5.2923681221811485e-05
+refused   trbdf2+lcp   circuits/resonance/lc_resonant_tank.yaml 
+agree     trbdf2       circuits/resonance/ll04_rlc_underdamped.yaml 2.985206086381582e-05
+refused   trbdf2+lcp   circuits/resonance/ll04_rlc_underdamped.yaml 
+agree     trbdf2       circuits/resonance/rl_high_pass_sine.yaml 7.560186629041964e-05
+refused   trbdf2+lcp   circuits/resonance/rl_high_pass_sine.yaml 
+agree     trbdf2       circuits/resonance/rlc_overdamped_step.yaml 5.773779477873774e-06
+refused   trbdf2+lcp   circuits/resonance/rlc_overdamped_step.yaml 
+agree     trbdf2       circuits/resonance/rlc_parallel_step.yaml 1.6054899755341734e-05
+refused   trbdf2+lcp   circuits/resonance/rlc_parallel_step.yaml 
+agree     trbdf2       circuits/resonance/rlc_step.yaml 1.3106691466031622e-05
+refused   trbdf2+lcp   circuits/resonance/rlc_step.yaml 
+disagree  trbdf2       circuits/stress/high_q_rlc_ringdown.yaml 0.005660704313862718
+refused   trbdf2+lcp   circuits/stress/high_q_rlc_ringdown.yaml 
+agree     trbdf2       circuits/stress/periodic_rc_pwm.yaml 2.0018457237159785e-07
+refused   trbdf2+lcp   circuits/stress/periodic_rc_pwm.yaml 
+agree     trbdf2       circuits/stress/stiff_rc_high_freq_switching.yaml 1.4336373884121384e-05
+refused   trbdf2+lcp   circuits/stress/stiff_rc_high_freq_switching.yaml 
+agree     trbdf2       circuits/stress/stiff_rlc.yaml 0.0
+refused   trbdf2+lcp   circuits/stress/stiff_rlc.yaml 
+agree     trbdf2       circuits/stress/stiff_two_timescale_rc.yaml 7.791727459998158e-07
+refused   trbdf2+lcp   circuits/stress/stiff_two_timescale_rc.yaml 
+agree     trbdf2       circuits/switching/basic/chopper_with_rc_snubber.yaml 3.808264299536728e-05
+agree     trbdf2+lcp   circuits/switching/basic/chopper_with_rc_snubber.yaml 3.808264299536728e-05
+agree     trbdf2       circuits/switching/basic/mosfet_nmos_dc.yaml 0.0
+refused   trbdf2+lcp   circuits/switching/basic/mosfet_nmos_dc.yaml 
+agree     trbdf2       circuits/switching/basic/pwm_voltage_rc.yaml 8.983519418272177e-09
+refused   trbdf2+lcp   circuits/switching/basic/pwm_voltage_rc.yaml 
+agree     trbdf2       circuits/switching/basic/pwm_voltage_rl_filter.yaml 6.530221881992876e-05
+refused   trbdf2+lcp   circuits/switching/basic/pwm_voltage_rl_filter.yaml 
+agree     trbdf2       circuits/switching/basic/snubber_rc.yaml 1.6501991267211114e-07
+refused   trbdf2+lcp   circuits/switching/basic/snubber_rc.yaml 
+agree     trbdf2       circuits/switching/basic/vcswitch_resistor.yaml 0.0
+refused   trbdf2+lcp   circuits/switching/basic/vcswitch_resistor.yaml 
+agree     trbdf2       circuits/switching/boost/boost_classic.yaml 9.527566442560526e-06
+agree     trbdf2+lcp   circuits/switching/boost/boost_classic.yaml 9.514668322316165e-06
+agree     trbdf2       circuits/switching/boost/boost_pfc_open_loop.yaml 1.7248248710825554e-07
+agree     trbdf2+lcp   circuits/switching/boost/boost_pfc_open_loop.yaml 1.8370946633569206e-07
+agree     trbdf2       circuits/switching/boost/boost_switching_complex.yaml 1.0500501117972726e-05
+agree     trbdf2+lcp   circuits/switching/boost/boost_switching_complex.yaml 1.0500501117972726e-05
+agree     trbdf2       circuits/switching/boost/cascaded_boost_buck.yaml 5.947915957769135e-05
+agree     trbdf2+lcp   circuits/switching/boost/cascaded_boost_buck.yaml 5.94785051672718e-05
+agree     trbdf2       circuits/switching/boost/ll07_boost_vcswitch.yaml 0.00011717591989470303
+agree     trbdf2+lcp   circuits/switching/boost/ll07_boost_vcswitch.yaml 0.00011717591989470303
+agree     trbdf2       circuits/switching/boost/ll12_pfc_boost_continuous.yaml 0.00011521081619424171
+refused   trbdf2+lcp   circuits/switching/boost/ll12_pfc_boost_continuous.yaml 
+agree     trbdf2       circuits/switching/boost/synchronous_boost.yaml 8.185780815251335e-08
+refused   trbdf2+lcp   circuits/switching/boost/synchronous_boost.yaml 
+agree     trbdf2       circuits/switching/boost/textbook_erickson_boost_ccm.yaml 9.527566442560526e-06
+agree     trbdf2+lcp   circuits/switching/boost/textbook_erickson_boost_ccm.yaml 9.514668322316165e-06
+agree     trbdf2       circuits/switching/boost/two_phase_interleaved_boost.yaml 5.55780635033815e-06
+agree     trbdf2+lcp   circuits/switching/boost/two_phase_interleaved_boost.yaml 5.557666194166862e-06
+agree     trbdf2       circuits/switching/buck/buck_dcm.yaml 7.700050611619903e-06
+agree     trbdf2+lcp   circuits/switching/buck/buck_dcm.yaml 7.700050611619903e-06
+agree     trbdf2       circuits/switching/buck/buck_hard_switching_reference.yaml 2.271956177932155e-06
+agree     trbdf2+lcp   circuits/switching/buck/buck_hard_switching_reference.yaml 2.271956177932155e-06
+agree     trbdf2       circuits/switching/buck/buck_mosfet_nonlinear.yaml 5.084089745560601e-07
+refused   trbdf2+lcp   circuits/switching/buck/buck_mosfet_nonlinear.yaml 
+agree     trbdf2       circuits/switching/buck/buck_switching.yaml 1.360067792601683e-06
+agree     trbdf2+lcp   circuits/switching/buck/buck_switching.yaml 1.360067792601683e-06
+agree     trbdf2       circuits/switching/buck/buck_with_current_sense.yaml 3.1513135029191687e-06
+refused   trbdf2+lcp   circuits/switching/buck/buck_with_current_sense.yaml 
+agree     trbdf2       circuits/switching/buck/cascaded_buck_buck.yaml 1.4154704140156103e-05
+refused   trbdf2+lcp   circuits/switching/buck/cascaded_buck_buck.yaml 
+agree     trbdf2       circuits/switching/buck/high_freq_gan_buck.yaml 8.547859911869252e-05
+refused   trbdf2+lcp   circuits/switching/buck/high_freq_gan_buck.yaml 
+agree     trbdf2       circuits/switching/buck/ll06_buck_vcswitch.yaml 8.207421746919117e-05
+agree     trbdf2+lcp   circuits/switching/buck/ll06_buck_vcswitch.yaml 8.207421746919117e-05
+agree     trbdf2       circuits/switching/buck/ll08_buck_mosfet.yaml 0.00011002580891953246
+refused   trbdf2+lcp   circuits/switching/buck/ll08_buck_mosfet.yaml 
+agree     trbdf2       circuits/switching/buck/sync_buck_500khz.yaml 1.709870148508491e-05
+refused   trbdf2+lcp   circuits/switching/buck/sync_buck_500khz.yaml 
+agree     trbdf2       circuits/switching/buck/synchronous_buck.yaml 3.1421014165089453e-06
+refused   trbdf2+lcp   circuits/switching/buck/synchronous_buck.yaml 
+agree     trbdf2       circuits/switching/buck/textbook_erickson_buck_ccm.yaml 9.865307483534658e-06
+agree     trbdf2+lcp   circuits/switching/buck/textbook_erickson_buck_ccm.yaml 9.865307483534658e-06
+agree     trbdf2       circuits/switching/buck/triple_sync_buck.yaml 3.1782234731758117e-06
+refused   trbdf2+lcp   circuits/switching/buck/triple_sync_buck.yaml 
+agree     trbdf2       circuits/switching/buck_boost/bidirectional_buck_boost.yaml 3.1514258036590214e-06
+refused   trbdf2+lcp   circuits/switching/buck_boost/bidirectional_buck_boost.yaml 
+agree     trbdf2       circuits/switching/buck_boost/buck_boost.yaml 7.965939020100078e-06
+agree     trbdf2+lcp   circuits/switching/buck_boost/buck_boost.yaml 7.965939020100078e-06
+agree     trbdf2       circuits/switching/buck_boost/cuk_converter.yaml 9.252352868823179e-05
+agree     trbdf2+lcp   circuits/switching/buck_boost/cuk_converter.yaml 9.252352868823179e-05
+agree     trbdf2       circuits/switching/buck_boost/sepic.yaml 2.9605062068685612e-05
+agree     trbdf2+lcp   circuits/switching/buck_boost/sepic.yaml 2.9605062068685612e-05
+agree     trbdf2       circuits/switching/inverter/half_bridge_inverter.yaml 9.061610599078823e-07
+refused   trbdf2+lcp   circuits/switching/inverter/half_bridge_inverter.yaml 
+agree     trbdf2       circuits/switching/inverter/half_bridge_inverter_lc.yaml 0.000303148802262326
+refused   trbdf2+lcp   circuits/switching/inverter/half_bridge_inverter_lc.yaml 
+agree     trbdf2       circuits/switching/inverter/half_bridge_lc_filter.yaml 5.000453949575677e-06
+refused   trbdf2+lcp   circuits/switching/inverter/half_bridge_lc_filter.yaml 
+agree     trbdf2       circuits/switching/inverter/lcc_resonant_inverter.yaml 8.37454585025099e-05
+refused   trbdf2+lcp   circuits/switching/inverter/lcc_resonant_inverter.yaml 
+agree     trbdf2       circuits/switching/inverter/ll09_half_bridge_inverter_leg.yaml 4.270998899165557e-05
+refused   trbdf2+lcp   circuits/switching/inverter/ll09_half_bridge_inverter_leg.yaml 
+agree     trbdf2       circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml 9.177107886117626e-05
+refused   trbdf2+lcp   circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml 
+agree     trbdf2       circuits/switching/isolated/active_clamp_forward.yaml 0.00011701949729915705
+agree     trbdf2+lcp   circuits/switching/isolated/active_clamp_forward.yaml 0.00011701207140735972
+agree     trbdf2       circuits/switching/isolated/dual_active_bridge.yaml 3.4885263086187325e-05
+refused   trbdf2+lcp   circuits/switching/isolated/dual_active_bridge.yaml 
+agree     trbdf2       circuits/switching/isolated/flyback_converter.yaml 4.294506389510543e-05
+agree     trbdf2+lcp   circuits/switching/isolated/flyback_converter.yaml 4.294506389510543e-05
+agree     trbdf2       circuits/switching/isolated/forward_converter.yaml 2.1684599527880053e-05
+agree     trbdf2+lcp   circuits/switching/isolated/forward_converter.yaml 2.1684599527880053e-05
+agree     trbdf2       circuits/switching/isolated/full_bridge_dc.yaml 0.00014149087615906918
+agree     trbdf2+lcp   circuits/switching/isolated/full_bridge_dc.yaml 0.00014149087615906918
+error     trbdf2       circuits/switching/isolated/ll11_llc_resonant_converter.yaml 
+refused   trbdf2+lcp   circuits/switching/isolated/ll11_llc_resonant_converter.yaml 
+disagree  trbdf2       circuits/switching/isolated/ll13_active_clamp_forward.yaml 0.0013263898423162078
+refused   trbdf2+lcp   circuits/switching/isolated/ll13_active_clamp_forward.yaml 
+agree     trbdf2       circuits/switching/isolated/synchronous_flyback.yaml 9.14973244933861e-06
+refused   trbdf2+lcp   circuits/switching/isolated/synchronous_flyback.yaml 
+agree     trbdf2       circuits/switching/multilevel/cascaded_h_bridge_5level.yaml 0.0
+refused   trbdf2+lcp   circuits/switching/multilevel/cascaded_h_bridge_5level.yaml 
+agree     trbdf2       circuits/switching/multilevel/flying_capacitor_3level.yaml 6.778903177243971e-05
+refused   trbdf2+lcp   circuits/switching/multilevel/flying_capacitor_3level.yaml 
+agree     trbdf2       circuits/switching/multilevel/mmc_4cell_chain.yaml 0.0
+refused   trbdf2+lcp   circuits/switching/multilevel/mmc_4cell_chain.yaml 
+agree     trbdf2       circuits/switching/multilevel/npc_three_level_halfbridge.yaml 7.896400876681888e-06
+agree     trbdf2+lcp   circuits/switching/multilevel/npc_three_level_halfbridge.yaml 7.896400876681888e-06
+agree     trbdf2       circuits/switching/multilevel/t_type_3level_halfbridge.yaml 0.00011183662171416511
+refused   trbdf2+lcp   circuits/switching/multilevel/t_type_3level_halfbridge.yaml 
+agree     trbdf2       circuits/thermal/electrothermal_resistor_self_heating.yaml 0.0
+refused   trbdf2+lcp   circuits/thermal/electrothermal_resistor_self_heating.yaml 
+agree     trbdf2       circuits/thermal/long_run_drift_buck.yaml 2.583500328859788e-06
+refused   trbdf2+lcp   circuits/thermal/long_run_drift_buck.yaml 
+agree     trbdf2       circuits/three_phase/interleaved_buck_3ph.yaml 6.636652075725201e-08
+agree     trbdf2+lcp   circuits/three_phase/interleaved_buck_3ph.yaml 6.668415366269981e-08
+agree     trbdf2       circuits/three_phase/three_phase_balanced_rl_load.yaml 4.220849753607572e-05
+refused   trbdf2+lcp   circuits/three_phase/three_phase_balanced_rl_load.yaml 
+agree     trbdf2       circuits/three_phase/three_phase_diode_rectifier.yaml 5.5099492666162344e-05
+agree     trbdf2+lcp   circuits/three_phase/three_phase_diode_rectifier.yaml 5.5099492665042675e-05
+trbdf2 {'agree': 106, 'disagree': 2, 'error': 1, 'refused': 0, 'unverified': 0}
+trbdf2+lcp {'agree': 34, 'disagree': 0, 'error': 0, 'refused': 75, 'unverified': 0}
+circuits/closed_loop/ll14_buck_closed_loop.yaml              agree 0.0005472084324602457 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/closed_loop/ll15_boost_closed_loop.yaml             agree 0.00026384588694819004 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/closed_loop/ll16_flyback_closed_loop.yaml           agree 0.0003626069679574526 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/diodes/diode_bridge_rectifier.yaml                  agree 3.2243224114208646e-05 -> agree 3.22432241143299e-05 
+circuits/diodes/diode_half_wave_rl_load.yaml                 agree 1.5765276159432184e-05 -> agree 1.576733844191263e-05 
+circuits/diodes/diode_rectifier.yaml                         agree 0.00018265626759347581 -> agree 0.00018265626650968586 
+circuits/linear/bridge_resistive_pure.yaml                   agree 0.0 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/capacitor_natural_discharge.yaml             agree 5.629706612871422e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/current_divider_3way.yaml                    agree 0.0 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/current_source_rc.yaml                       agree 0.0 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/current_source_rl_step.yaml                  agree 2.1363608728973157e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/lc_low_pass_sine.yaml                        agree 0.0001181000655698765 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/ll01_resistive_divider_dc.yaml               agree 0.0 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/ll02_rc_pulse_charge.yaml                    agree 1.4845171538508543e-07 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/ll03_rl_step.yaml                            agree 6.380156829024317e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/pulse_voltage_rl.yaml                        agree 3.039159413527558e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/rc_dc.yaml                                   agree 6.844240692066428e-07 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/rc_step.yaml                                 agree 6.839838071007902e-07 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/rl_natural_response.yaml                     agree 6.662510250945746e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/rl_step.yaml                                 agree 1.7537741817922427e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/rlc_series_resonant.yaml                     agree 0.0003538352040761978 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/sine_voltage_rc.yaml                         agree 0.00011064371798693529 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/two_stage_rc_lowpass.yaml                    agree 3.4379748286272572e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/linear/voltage_divider_3stage.yaml                  agree 0.0 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/magnetics/core_loss_steinmetz_sine.yaml             agree 0.00012345736509715698 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/magnetics/coupled_inductor_step.yaml                agree 3.7634882323864987e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/magnetics/inductor_chain_step.yaml                  agree 9.054895272539028e-07 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/magnetics/transformer_leakage.yaml                  agree 0.00023081813706232198 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/magnetics/transformer_step_up.yaml                  agree 0.0 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/motors/motor_dc_brush_step_load.yaml                agree 6.064696104680419e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/motors/motor_induction_locked_rotor.yaml            agree 5.1023907418179255e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/motors/motor_pmsm_dq_open_loop.yaml                 agree 6.51244013044879e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/resonance/bode_rlc_low_pass.yaml                    agree 0.0 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/resonance/driven_lc_series_resonance.yaml           agree 0.00021693547046531693 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/resonance/lc_resonant_tank.yaml                     agree 5.2923681221811485e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/resonance/ll04_rlc_underdamped.yaml                 agree 2.985206086381582e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/resonance/rl_high_pass_sine.yaml                    agree 7.560186629041964e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/resonance/rlc_overdamped_step.yaml                  agree 5.773779477873774e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/resonance/rlc_parallel_step.yaml                    agree 1.6054899755341734e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/resonance/rlc_step.yaml                             agree 1.3106691466031622e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/stress/high_q_rlc_ringdown.yaml                     disagree 0.005660704313862718 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/stress/periodic_rc_pwm.yaml                         agree 2.0018457237159785e-07 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/stress/stiff_rc_high_freq_switching.yaml            agree 1.4336373884121384e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/stress/stiff_rlc.yaml                               agree 0.0 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/stress/stiff_two_timescale_rc.yaml                  agree 7.791727459998158e-07 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/basic/mosfet_nmos_dc.yaml                 agree 0.0 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/basic/pwm_voltage_rc.yaml                 agree 8.983519418272177e-09 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/basic/pwm_voltage_rl_filter.yaml          agree 6.530221881992876e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/basic/snubber_rc.yaml                     agree 1.6501991267211114e-07 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/basic/vcswitch_resistor.yaml              agree 0.0 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/boost/boost_classic.yaml                  agree 9.527566442560526e-06 -> agree 9.514668322316165e-06 
+circuits/switching/boost/boost_pfc_open_loop.yaml            agree 1.7248248710825554e-07 -> agree 1.8370946633569206e-07 
+circuits/switching/boost/cascaded_boost_buck.yaml            agree 5.947915957769135e-05 -> agree 5.94785051672718e-05 
+circuits/switching/boost/ll12_pfc_boost_continuous.yaml      agree 0.00011521081619424171 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/boost/synchronous_boost.yaml              agree 8.185780815251335e-08 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/boost/textbook_erickson_boost_ccm.yaml    agree 9.527566442560526e-06 -> agree 9.514668322316165e-06 
+circuits/switching/boost/two_phase_interleaved_boost.yaml    agree 5.55780635033815e-06 -> agree 5.557666194166862e-06 
+circuits/switching/buck/buck_mosfet_nonlinear.yaml           agree 5.084089745560601e-07 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' with a Newton device in 
+circuits/switching/buck/buck_with_current_sense.yaml         agree 3.1513135029191687e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/buck/cascaded_buck_buck.yaml              agree 1.4154704140156103e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/buck/high_freq_gan_buck.yaml              agree 8.547859911869252e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/buck/ll08_buck_mosfet.yaml                agree 0.00011002580891953246 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' with a Newton device in 
+circuits/switching/buck/sync_buck_500khz.yaml                agree 1.709870148508491e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/buck/synchronous_buck.yaml                agree 3.1421014165089453e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/buck/triple_sync_buck.yaml                agree 3.1782234731758117e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/buck_boost/bidirectional_buck_boost.yaml  agree 3.1514258036590214e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/inverter/half_bridge_inverter.yaml        agree 9.061610599078823e-07 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/inverter/half_bridge_inverter_lc.yaml     agree 0.000303148802262326 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/inverter/half_bridge_lc_filter.yaml       agree 5.000453949575677e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/inverter/lcc_resonant_inverter.yaml       agree 8.37454585025099e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/inverter/ll09_half_bridge_inverter_leg.yaml agree 4.270998899165557e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml agree 9.177107886117626e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/isolated/active_clamp_forward.yaml        agree 0.00011701949729915705 -> agree 0.00011701207140735972 
+circuits/switching/isolated/dual_active_bridge.yaml          agree 3.4885263086187325e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/isolated/ll11_llc_resonant_converter.yaml error None -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/isolated/ll13_active_clamp_forward.yaml   disagree 0.0013263898423162078 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/isolated/synchronous_flyback.yaml         agree 9.14973244933861e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/multilevel/cascaded_h_bridge_5level.yaml  agree 0.0 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/multilevel/flying_capacitor_3level.yaml   agree 6.778903177243971e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/multilevel/mmc_4cell_chain.yaml           agree 0.0 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/switching/multilevel/t_type_3level_halfbridge.yaml  agree 0.00011183662171416511 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/thermal/electrothermal_resistor_self_heating.yaml   agree 0.0 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/thermal/long_run_drift_buck.yaml                    agree 2.583500328859788e-06 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/three_phase/interleaved_buck_3ph.yaml               agree 6.636652075725201e-08 -> agree 6.668415366269981e-08 
+circuits/three_phase/three_phase_balanced_rl_load.yaml       agree 4.220849753607572e-05 -> refused None UnsupportedError: engine 'trbdf2': mode_selection='lcp' decides PWL diodes and t
+circuits/three_phase/three_phase_diode_rectifier.yaml        agree 5.5099492666162344e-05 -> agree 5.5099492665042675e-05 

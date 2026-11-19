@@ -83,6 +83,10 @@ def test_every_older_form_loads_its_blocks():
         "v4-15 device interface": (v4 + (GRID, False, CTRL),
                                    dict(grid=GRID, ctrl=CTRL)),
         "v4-15 event queue": (v4 + (False,) + TICKS, dict(ticks=TICKS)),
+        # the device interface's last version 4 (52f82c08): marker, grid,
+        # controller
+        "v4-15 device interface 52f82c08": (v4 + (False, GRID, CTRL),
+                                            dict(grid=GRID, ctrl=CTRL)),
         "v5": (st[:13] + (GRID, CTRL) + TICKS,
                dict(grid=GRID, ctrl=CTRL, ticks=TICKS)),
     }
@@ -109,7 +113,8 @@ def test_the_marker_is_read_from_each_variant():
     v4 = ("SolverSnapshot", 4) + core
     for state in (("SolverSnapshot", 3) + core + (True,), v4 + (True, GRID),
                   v4 + (GRID, True), v4 + (GRID, True, None),
-                  v4 + (True,) + TICKS, st[:12] + (True,) + st[13:]):
+                  v4 + (True,) + TICKS, v4 + (True, GRID, CTRL),
+                  st[:12] + (True,) + st[13:]):
         assert _load(state)._control_state is not None, len(state)
 
 

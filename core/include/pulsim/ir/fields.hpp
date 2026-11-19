@@ -382,6 +382,9 @@ inline void check_device(const ParamsVariant& v, std::string_view field) {
             m::ShockleyDiode::validate(p);
         } else if constexpr (std::is_same_v<P, m::PmsmMna::Params>) {
             if (p.harmonics && field == "psi_pm") unread("PM-harmonic");
+            if (p.flux_map && (field == "psi_pm" || field == "L_d" || field == "L_q")) {
+                unread("flux-map");
+            }
             m::PmsmMna::validate(p);
         } else if constexpr (std::is_same_v<P, m::InductionMachineMna::Params>) {
             m::InductionMachineMna::validate(p);

@@ -1573,15 +1573,15 @@ def _estimate_dominant_frequency(B: np.ndarray,
 # ---------------------------------------------------------------
 
 def _warn_ideal_skipped(desc) -> None:
-    # An ideal branch-form element (R_on = 0: g_on = inf) has no
-    # conductance law to integrate; its losses are add-branch-form-ideal-switch
-    # task 6.4. Say so instead of dropping the row silently (review M5).
+    # An ideal branch-form element (R_on = 0: g_on = inf) whose branch
+    # unknown was not found: no v·i to report. Say so instead of dropping
+    # the row silently (review M5).
     if desc.get("params", {}).get("branch_form"):
         warnings.warn(
             f"device_loss_summary: '{desc.get('name')}' is an ideal "
-            "branch-form element (R_on = 0); its losses are not computed "
-            "yet and it is left out of the summary (and of the thermal "
-            "summary).", UserWarning, stacklevel=3)
+            "branch-form element (R_on = 0) whose branch current was not "
+            "found in the result; it is left out of the summary (and of the "
+            "thermal summary).", UserWarning, stacklevel=3)
 
 
 def _impulse_cause(builder, result, rec) -> str:
@@ -1596,7 +1596,7 @@ def _impulse_cause(builder, result, rec) -> str:
     try:
         states = np.asarray(result.switch_states, dtype=bool)
         times = np.asarray(result.times, dtype=float)
-    except Exception:  # noqa: BLE001 - no record: fall back
+    except (AttributeError, TypeError, ValueError):  # no record: fall back
         states = times = None
     if states is not None and states.ndim == 2 and len(times) > 1:
         k = int(getattr(rec, "sample", -1))
@@ -1607,7 +1607,7 @@ def _impulse_cause(builder, result, rec) -> str:
         for name in devices:
             try:
                 bit = int(builder.switch_index_of(name))
-            except Exception:  # noqa: BLE001 - not a switch-kind branch
+            except (IndexError, KeyError, ValueError):  # not a switch-kind branch
                 continue
             if 0 <= bit < states.shape[1] and states[k, bit] != states[k - 1, bit]:
                 changed.append(name)
@@ -1620,7 +1620,7 @@ def _impulse_cause(builder, result, rec) -> str:
 def _diode_names(builder) -> set:
     try:
         return {d.get("name", "") for d in builder.components() if d.get("kind") == "diode"}
-    except Exception:  # noqa: BLE001
+    except AttributeError:  # a builder without components()
         return set()
 
 
@@ -1691,6 +1691,15 @@ def device_loss_summary(
       recorded stamped mask; without a record, ``switch_fn`` is
       re-evaluated (with a warning), and without either the switch
       entry is skipped (kept honest — no silent default).
+    * **ideal branch form** (``form='branch'``, ``R_on = 0``) — the solved
+      branch current and ``v · i`` (``form='branch'``; 0 W of conduction),
+      and always the impulsive category ``E_impulse_total`` /
+      ``n_impulses`` / ``P_impulse_avg`` (0 when nothing was booked to it).
+      A branch-form element with ``R_on > 0`` is reported as a conductance
+      switch (``g_on = 1/R_on``) and gets the impulsive keys only when
+      energy was booked to it. When a device with a kernel loss port has
+      impulsive energy booked to it, that energy is not in the port's
+      junction: ``impulse_in_junction=False`` and a ``RuntimeWarning``.
     * **shockley_diode** (``add_shockley_diode``) — the current is the
       kernel's exponential law at the recorded ``v_D``
       (``pulsim._diode_state.shockley_current``, the parameters
@@ -2386,14 +2395,34 @@ def device_loss_summary(
     # booked to the switch that entered the dependent mode. Not part of
     # E_total (the ideal element's v·i is 0 on both sides of the pulse).
     impulses = impulse_losses(builder, result, t_from=t_from, t_to=t_to)
-    if getattr(result, "reinit_records", None):
+    # A branch-form element always carries the category (0 J when nothing
+    # was booked to it): its conduction is ~0 by construction, so leaving
+    # the key out would read as "not computed".
+    has_records = bool(getattr(result, "reinit_records", None))
+    if has_records or any(e.get("form") == "branch" for e in summary):
         for entry in summary:
-            if entry.get("kind") in ("switch", "diode"):
+            if entry.get("kind") in ("switch", "diode") and (
+                    has_records or entry.get("form") == "branch"):
                 imp = impulses.pop(entry.get("name", ""), None) or {}
                 E_imp = float(imp.get("E_impulse_total", 0.0))
                 entry["E_impulse_total"] = E_imp
                 entry["n_impulses"] = int(imp.get("n_impulses", 0))
                 entry["P_impulse_avg"] = E_imp / T if T > 0 else 0.0
+        # A loss port (set_device_losses) heats its junction in the kernel
+        # with the table energies only. shortcut: reported, not wired; the
+        # wiring is the in-kernel event-losses track.
+        names = getattr(builder, "_device_loss_names", None)
+        ported = set(names()) if callable(names) else set()
+        hot = [e for e in summary if e.get("name") in ported and e.get("E_impulse_total")]
+        for entry in hot:
+            entry["impulse_in_junction"] = False
+        if hot:
+            warnings.warn(
+                "device_loss_summary: the impulsive energy (E_impulse_total) of "
+                + ", ".join(repr(e["name"]) for e in hot)
+                + " is not in its loss port's heat_injected or junction temperature "
+                "(known limitation: the kernel's loss port takes the table energies "
+                "only).", RuntimeWarning, stacklevel=2)
         for name, imp in impulses.items():
             warnings.warn(
                 f"device_loss_summary: {imp['E_impulse_total']:.6g} J of impulsive "

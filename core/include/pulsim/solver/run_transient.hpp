@@ -102,6 +102,55 @@ namespace pulsim::solver {
 }
 
 // -----------------------------------------------------------------------------
+// seed_held_machine_capacitors — the DC point holds each machine's speed
+// and angle node (add-mna-native-machines D19), where the capacitor is
+// NOT at rest: C·dθ/dt = C·ω0, J·dω/dt = net torque. Its companion
+// current is the KCL residual the hold replaced: the linear DC rows
+// (no hold) plus the machine's mechanical injection from the refresh,
+// i_C(leaving n) = −r[n]. A node with other than one capacitor to
+// ground keeps i_C = 0.
+// -----------------------------------------------------------------------------
+inline void seed_held_machine_capacitors(
+    const topology::Graph& graph, const pwl::DevicePool& pool,
+    const topology::SwitchStateMask& mask, Real t, const Vector& x,
+    const pwl::PmsmMnaHistory& pmsm, pwl::HistoryState& history) {
+    std::vector<Index> nodes;
+    for (const auto& m : pool.pmsm_mna_machines()) {
+        nodes.push_back(m.omega_node);
+        nodes.push_back(m.theta_node);
+    }
+    for (const auto& m : pool.induction_machines()) nodes.push_back(m.omega_node);
+    if (nodes.empty()) return;
+    sparse::Matrix J;
+    Vector r;
+    pwl::dc_assemble(graph, pool, mask, J, r, t, Real{0}, Real{1},
+                     /*hold_mechanics=*/false);
+    r += J * x;
+    sparse::Matrix J_nl(J.rows(), J.cols());
+    Vector f_nl = Vector::Zero(J.rows());
+    (void)pwl::refresh_pmsm_mna(x, J_nl, f_nl, pmsm, Real{1});
+    r += f_nl;   // only the mechanical rows are read
+    for (const Index n : nodes) {
+        if (!stamping::node_is_active(n)) continue;
+        Index cap = -1;
+        int n_caps = 0;
+        for (Index br = 0; br < graph.num_branches(); ++br) {
+            const auto& e = graph.branch(br);
+            if ((e.from != n && e.to != n) || !pool.is_registered(br) ||
+                pool.kind_of(br) != pwl::DevicePool::StoredKind::Capacitor) {
+                continue;
+            }
+            ++n_caps;
+            if (!stamping::node_is_active(e.from == n ? e.to : e.from)) cap = br;
+        }
+        if (n_caps != 1 || cap < 0) continue;
+        const Real i_leaving = -r[n];
+        history.set_capacitor_current(
+            cap, graph.branch(cap).from == n ? i_leaving : -i_leaving);
+    }
+}
+
+// -----------------------------------------------------------------------------
 // interp_commutation_time — linear-interpolated zero crossing
 // of the watched signal between t_prev and t_curr.
 //
@@ -559,6 +608,10 @@ inline SimulationResult run_transient(
     }
     const auto diode_owned = diodes.diode_owned_bits();
     const bool has_diodes = diodes.num_diodes() > 0;
+    // the commanded gate per sample (2.2); cleared before the result leaves
+    if (diodes.num_gated() > 0) {
+        result.gate_mask_fn = [&diodes] { return diodes.gate_mask(); };
+    }
     // Ideal (R_on = 0) branch-form diodes sit exactly at V_on while ON, so
     // the voltage-crossing record below never sees them turn off; their
     // commutations are read from the stamped state, step start to step end.
@@ -737,6 +790,9 @@ inline SimulationResult run_transient(
         if (structure.active()) (void)check_mode(dc.mask, false, opts.t_start);
         x = std::move(dc.x);
         history.seed_from_dc_op(x);
+        hs.get<pwl::PmsmMnaHistory>().seed_from_dc_op(x);   // λ, i, θ at the held DC point (D19)
+        seed_held_machine_capacitors(graph, pool, dc.mask, opts.t_start, x,
+                                     hs.get<pwl::PmsmMnaHistory>(), history);
         initial_mask = dc.mask;
         initial_mask_known = true;
     }
@@ -3332,7 +3388,7 @@ inline SimulationResult run_transient(
     result.final_snapshot.grid_dt = opts.dt;
     hs.save(history, result.final_snapshot);
     result.final_snapshot.mask =
-        has_diodes ? diodes.snapshot_on_bits() : std::vector<bool>{};
+        has_diodes ? diodes.snapshot_mode_bits() : std::vector<bool>{};
     // The mask x was solved under (the record's last row when the
     // last step was stored), for a resume's row 0.
     result.final_snapshot.stamped_mask =
@@ -3346,6 +3402,7 @@ inline SimulationResult run_transient(
     result.final_snapshot.valid = true;
     result.newton = newton_ws.take_counters();
     if (lt) lt->write(result);
+    result.gate_mask_fn = nullptr;   // it reads this frame's diode state
 
     return result;
 }

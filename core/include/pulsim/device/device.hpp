@@ -33,11 +33,20 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
+
+// Forced inlining of the per-instance stamps (task 15.7; see
+// pwl/interface_stamps.hpp): left out of line they cost more than the law.
+#if defined(__GNUC__) || defined(__clang__)
+#define PULSIM_DEVICE_INLINE __attribute__((always_inline))
+#else
+#define PULSIM_DEVICE_INLINE
+#endif
 
 namespace pulsim::device {
 
@@ -122,8 +131,23 @@ struct Out {
     std::array<S, R> q{};
 };
 
+/// A law's LOCAL rows (`n_local`, default 0): device-owned unknowns the
+/// engines never see (the eliminated stored charge of the Lauritzen diode
+/// and of the IGBT tail), numbered after the internal rows. `stamp_fq_local`
+/// condenses them out; the committed value lives in the instance's history.
 template <class D>
-inline constexpr std::size_t rows_v = D::n_pins + D::n_internal;
+inline constexpr std::size_t local_v = [] {
+    if constexpr (requires { D::n_local; }) return static_cast<std::size_t>(D::n_local);
+    else return std::size_t{0};
+}();
+
+/// Rows the law evaluates: pins, internal rows, local rows.
+template <class D>
+inline constexpr std::size_t rows_v = D::n_pins + D::n_internal + local_v<D>;
+
+/// Rows the engine stamps: pins and internal rows (the global unknowns).
+template <class D>
+inline constexpr std::size_t global_rows_v = D::n_pins + D::n_internal;
 
 /// Per-instance data a law reads but never differentiates: the law
 /// variant, a datasheet table, the Jiles-Atherton step-start state (D2's
@@ -209,6 +233,14 @@ inline constexpr bool has_f_v = [] {
     if constexpr (requires { D::kHasF; }) return static_cast<bool>(D::kHasF);
     else return true;
 }();
+/// A law whose `q` lives on internal rows only declares `kPinQ = false`
+/// (the saturable inductor, the machines): its commit then takes no time
+/// formula at all (q̇_n of a pin row is 0, of an internal row −f).
+template <class D>
+inline constexpr bool pin_q_v = [] {
+    if constexpr (requires { D::kPinQ; }) return static_cast<bool>(D::kPinQ);
+    else return true;
+}();
 
 /// One device's Newton contribution under `c`, dense: F[r] = f + a·q + r
 /// and J[r][k] = ∂F[r]/∂x[k], from one AD evaluation. `q_n`, `qdot_n`,
@@ -221,7 +253,7 @@ inline constexpr bool has_f_v = [] {
 /// Since c1 + c2 + c3 = 0 the history is then −q̇_n (trapezoidal), 0
 /// (backward Euler) or c2·dq_γ/h (BDF2). J is the same either way.
 template <Device D>
-Real stamp_fq(const aux_t<D>& aux,
+PULSIM_DEVICE_INLINE inline Real stamp_fq(const aux_t<D>& aux,
               const typename D::template Params<Real>& p,
               const std::array<Real, rows_v<D>>& x, const StepCtx& c,
               const std::array<Real, rows_v<D>>& q_n,
@@ -295,6 +327,42 @@ Real stamp_fq(const typename D::template Params<Real>& p,
     return stamp_fq<D>(aux_t<D>{}, p, x, c, q_n, qdot_n, q_gamma, F, J);
 }
 
+/// `stamp_fq` with the local rows condensed out (static condensation). The
+/// local rows and the global rows must be AFFINE in the local unknowns
+/// (`D::kLocalAffine`), so ONE Newton step from any start solves them to
+/// rounding: s = s₀ − J_LL⁻¹·F_L. Returns F and J over the global rows at
+/// the solved s, J = J_GG − J_GL·J_LL⁻¹·J_LG (the Schur complement), and
+/// writes the solved local values into `x[global..]` (the commit evaluates
+/// there). The start s₀ is the caller's `x[global..]` (the committed q_n,
+/// so the step is the increment of this solve). Shortcut: one local row
+/// (the two kinds that have one); a block solve is the upgrade for more.
+template <Device D>
+PULSIM_DEVICE_INLINE inline Real stamp_fq_local(const aux_t<D>& aux, const typename D::template Params<Real>& p,
+                    std::array<Real, rows_v<D>>& x, const StepCtx& c,
+                    const std::array<Real, rows_v<D>>& q_n,
+                    const std::array<Real, rows_v<D>>& qdot_n,
+                    const std::array<Real, rows_v<D>>& q_gamma,
+                    std::array<Real, global_rows_v<D>>& F,
+                    std::array<std::array<Real, global_rows_v<D>>, global_rows_v<D>>& J) {
+    static_assert(local_v<D> == 1, "stamp_fq_local: one local row (see the shortcut)");
+    static_assert(D::kLocalAffine, "stamp_fq_local: the local rows must be affine "
+                                   "in the local unknowns (one step solves them)");
+    constexpr std::size_t R = rows_v<D>, G = global_rows_v<D>, L = G;
+    std::array<Real, R> Ff{};
+    std::array<std::array<Real, R>, R> Jf{};
+    (void)stamp_fq<D>(aux, p, x, c, q_n, qdot_n, q_gamma, Ff, Jf);
+    const Real ds = -Ff[L] / Jf[L][L];
+    x[L] += ds;
+    Real worst = Real{0};
+    for (std::size_t r = 0; r < G; ++r) {
+        const Real w = Jf[r][L] / Jf[L][L];
+        F[r] = Ff[r] + Jf[r][L] * ds;
+        for (std::size_t k = 0; k < G; ++k) J[r][k] = Jf[r][k] - w * Jf[L][k];
+        worst = std::max(worst, std::abs(F[r]));
+    }
+    return worst;
+}
+
 /// Commit after an accepted step: q_n ← q(x) and q̇_n ← the derivative the
 /// step produced. On a PIN row that is the formula's a·q(x) + r (the row
 /// is a shared KCL, so f alone is not the derivative; physical, so a
@@ -314,6 +382,14 @@ Out<Real, rows_v<D>> commit_fq(const aux_t<D>& aux,
                                const std::array<Real, rows_v<D>>& q_gamma) {
     Out<Real, rows_v<D>> o;
     device::eval<D>(aux, p, x, o);
+    if constexpr (!pin_q_v<D>) {
+        for (std::size_t r = 0; r < rows_v<D>; ++r) {
+            assert(r >= D::n_pins || o.q[r] == Real{0});
+            qdot_n[r] = r >= D::n_pins ? -o.f[r] : Real{0};
+        }
+        q_n = o.q;
+        return o;
+    }
     const Real a = formula_a(c);
     for (std::size_t r = 0; r < rows_v<D>; ++r) {
         const Real qd = r >= D::n_pins
@@ -335,3 +411,5 @@ void commit_fq(const typename D::template Params<Real>& p,
 }
 
 }  // namespace pulsim::device
+
+#undef PULSIM_DEVICE_INLINE

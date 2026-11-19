@@ -59,11 +59,11 @@ Reference values.
 - [x] 7.3 Gate for the flip: ns/step of the 12-switch inverter on the implicit route at most 1.5 times the conductance form's; if not met, the flip is held and the measurement recorded here Met on pwl: 1.073× (median of 7 interleaved, DECISIONS 23); the flip itself is not done in this slice
 
 ## 8. Exact route with ideal switches (needs `add-exact-propagator-strategy` groups 1–6)
-- [ ] 8.1 Reduced state per mode (dimension `n_x − rank(K)`), explicit projection at mode entry, gauge directions from `add-complementarity-mode-selection` D10; saltation with the projection as reset map
+- [ ] 8.1 Reduced state per mode (dimension `n_x − rank(K)`), explicit projection at mode entry, gauge directions from `add-complementarity-mode-selection` D10; saltation with the projection as reset map (partial, DECISIONS 40: the controlled ideal switch runs on dsed with the projection and records of its dependent-state modes and the pwl structural refusals; the ideal diode is still refused as `branch_form`)
 - [ ] 8.2 Tests: ideal DCM buck orbit within 1e-9 of 8.9963970815477 V and diode-off instant within 1e-11·T of `0.79983739563545·T` (prototype: 4.5e-12 V, 2.0e-12·T); Floquet multipliers 0 and 0.9889768767 within 1e-8; capacitor-loop and cut-set records equal to the implicit strategies' within 1e-9
 
 ## 9. Default flip (in the single number-changing release)
-- [ ] 9.1 Migration audit: every example, tutorial and test circuit built with the ideal default; every refusal listed with its remedy and fixed in the repository Audit written (`MIGRATION_AUDIT.md`, DECISIONS #44: the ideal twin of every reference circuit and its refusals by name); the fixes in the repository remain
+- [ ] 9.1 Migration audit: every example, tutorial and test circuit built with the ideal default; every refusal listed with its remedy and fixed in the repository Audit written (`MIGRATION_AUDIT.md`, DECISIONS #44: the ideal twin of every reference circuit and its refusals by name); the fixes in the repository remain Slice 6: `form=` on every switch / ungated diode creator and YAML type (DECISIONS #51), the VSI `R_on = 0` fallback refused (BREAKING), the ideal ll10 / ll15 DC point refused by name (#53), the 101 worse ideal cells classified (audit 6a); the before-the-flip list is audit 6c
 - [ ] 9.2 Default form = branch, ideal (D6); `form='conductance'` warns; topology helpers follow the default
 - [ ] 9.3 Re-baseline through the reference harness together with the other number-changing defaults; CHANGELOG lists each changed number and its cause
 

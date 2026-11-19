@@ -106,7 +106,7 @@ public:
     /// −(b_c + b_extra) — the cache's direct solve of that (mask, dt), then
     /// each floating island's KCL imposed exactly. dt = 0: static.
     /// Z and the island correction depend on (mask, dt) only (unit
-    /// right-hand sides): built once per pair and kept (DECISIONS #40), so a
+    /// right-hand sides): built once per pair and kept (branch-form DECISIONS #40), so a
     /// site costs the one solve for u — none when `x_site` is the engine's
     /// own solve of J(mask, dt)·s = −(b_c + b_extra), the same bits.
     void site(const topology::SwitchStateMask& mask, Real dt,
@@ -115,6 +115,7 @@ public:
         const auto& isl = islands_(mask);
         const Vector& b_c = bconst_(mask);
         SiteEntry& e = entry_(mask, dt, isl, b_c);
+        if (!e.z_ready) build_z_(e, mask, dt, isl, b_c);
         if (x_site) {
             sol_ = *x_site;
         } else {
@@ -232,6 +233,7 @@ private:
         Real dt;
         DenseMatrix Z;
         events::IslandCorrection corr;
+        bool z_ready = false;  // Z is built on the first `site`: `correct` needs corr only
     };
 
     SiteEntry& entry_(const topology::SwitchStateMask& mask, Real dt,
@@ -253,6 +255,13 @@ private:
             rhs_[ref] -= Real{1};          // J·w = e_ref (the cache adds b_c)
             cache_.solve_at(mask, dt, rhs_, w);
         });
+        solves_ += isl.size();
+        return e;
+    }
+
+    /// The port matrix of an entry: one solve per port, island-corrected.
+    void build_z_(SiteEntry& e, const topology::SwitchStateMask& mask, Real dt,
+                  const std::vector<events::Island>& isl, const Vector& b_c) {
         const auto k = static_cast<Index>(nodes_.size());
         e.Z.resize(k, k);
         for (std::size_t j = 0; j < nodes_.size(); ++j) {
@@ -263,9 +272,9 @@ private:
             });
             column_(col_, j, e.Z);
         }
-        solves_ += nodes_.size() + isl.size();
+        solves_ += nodes_.size();
         ++port_builds_;
-        return e;
+        e.z_ready = true;
     }
 
     const Vector& bconst_(const topology::SwitchStateMask& mask) {
@@ -364,6 +373,29 @@ private:
     return out;
 }
 
+/// Why `mode_selection='lcp'` would refuse this CIRCUIT on `pwl` (the
+/// circuit half of run_transient's setup refusals; the option half —
+/// max_event_iterations = 0 — and the engine are the caller's):
+/// `reason` is "" (it applies), "no_diodes", "gated" (`device` named) or
+/// "newton". It is what `mode_selection='auto'` reads; a test pins it to
+/// the run's own refusals.
+struct LcpCircuitRefusal {
+    std::string reason;
+    std::string device;
+};
+[[nodiscard]] inline LcpCircuitRefusal lcp_circuit_refusal(
+    const topology::Graph& graph, const DevicePool& pool) {
+    const DiodeEventState diodes{graph, pool};
+    if (diodes.num_diodes() == 0) return {"no_diodes", {}};
+    if (diodes.num_gated() > 0) {
+        for (const auto& e : diodes.entries())
+            if (e.gate != models::SwitchedDiode::Gate::None)
+                return {"gated", std::string(graph.branch_name(e.branch_id))};
+    }
+    if (pool.requires_newton()) return {"newton", {}};
+    return {};
+}
+
 /// The engine's own law on a solved state (the judge of D6 step 4 on
 /// `pwl`): 1 when every diode obeys the state `on[j]` it was solved under
 /// — ON: i = g_on·(v − V_f) ≥ −tol·iscale; OFF: v − V_on ≤ tol·vscale,
@@ -415,7 +447,7 @@ inline int judge_mode(const DiodeEventState& diodes, const std::vector<char>& on
 /// (Z, u) (DECISIONS F2); an ideal diode is cut out of it (OFF coordinates);
 /// the judge reads the engine's own solve of each candidate.
 /// `Z`, `u`, `xj`, `coords`: caller scratch (no allocation once sized).
-/// `x_site` (optional, added for pwl's cost: DECISIONS #40): the caller's
+/// `x_site` (optional, added for pwl's cost: branch-form DECISIONS #40): the caller's
 /// own solve of the site's system under the start mask, given only when no
 /// ideal diode is ON in `prev_on` (the start mask is then the posed one);
 /// the port voltages are read from it instead of solving again.
