@@ -364,6 +364,7 @@ public:
         // step rather than integrating an inconsistent mode.
         RK45State rk_state;
         PEDResult<MaskT> result;
+        law_settled_.clear();
         {
             MaskT m0 = system_.current_mask();
             const MaskT prev0 = diode_bits_;
@@ -496,7 +497,10 @@ public:
                                         system_.current_mask(), step_mask,
                                         step_fired ? &x_pre_event
                                                    : nullptr);
+                        if (step_fired && has_event_sample_)
+                            law_settled_.emplace_back(result.times.size() - 1, event_sample_);
                     }
+                    has_event_sample_ = false;
                     continue;
                 }
             }
@@ -1535,8 +1539,12 @@ public:
                                    && result.pre_event_index.back() + 1 == ns;
         std::vector<Row> rows;
         rows.reserve(result.times.size() + result.pre_event_states.size());
+        std::vector<const Vector*> xk(ns, nullptr);
+        for (std::size_t k = 0; k < ns; ++k) xk[k] = &result.states[k];
+        for (const auto& [k, xs] : law_settled_)   // D1: the state the decision read
+            if (k < ns) xk[k] = &xs;
         for (std::size_t k = 0; k < result.times.size(); ++k)
-            rows.push_back({k, &result.states[k], &result.sample_masks[k],
+            rows.push_back({k, xk[k], &result.sample_masks[k],
                             k + 1 == ns && !last_has_left ? half_step(k) : Real{0}});
         for (std::size_t j = 0; j < result.pre_event_states.size()
                                 && j < result.pre_event_index.size(); ++j) {
@@ -1820,6 +1828,18 @@ private:
         decide_modes_(t_event, x, final_mask,
                       effective_gates_(new_mask, prev_bits), prev_bits,
                       old_mask, result);
+        // D1: the law check reads, at a located diode event's right-limit sample,
+        // the state the decision read: the settled mode after its parasitic
+        // transient (~L·g_off, far below anything the run resolves; read
+        // un-relaxed, the check depends on rounding). The stored sample stays
+        // the exact map's state at t (sensitivities and period integrals
+        // propagate from it and attach the event to its own sample).
+        has_event_sample_ = false;
+        if (settle_decisions_) {
+            Real ts = t_event;
+            const Vector& xs = settled_(t_event, x, event_sample_, ts);
+            if (&xs == &event_sample_ && ts > t_event) has_event_sample_ = true;
+        }
         settle_decisions_ = false;
         loc_dx_.resize(0);
 
@@ -1916,7 +1936,12 @@ private:
         if constexpr (HasExactStep<System>) {
             if constexpr (requires { system_.exact_settle_length(Real{}); }) {
                 if (system_.has_exact_step()) {
-                    const Real d = system_.exact_settle_length(dt_max_);
+                    Real d = system_.exact_settle_length(dt_max_);
+                    // never read past the next scheduled event: the gate edge is
+                    // the physics that comes next (a cap shorter than the decay
+                    // decides on the state at the cap)
+                    const Real te = next_time_event_(t);
+                    if (std::isfinite(te) && te > t) d = std::min(d, te - t);
                     if (d > Real{0}) {
                         advance_(t, x, d, out);
                         ts = t + d;
@@ -2249,10 +2274,16 @@ private:
                 m.set(diodes_[j].switch_idx, mode[j] != 0);
             system_.set_mask(m);
             if (!system_.has_exact_step()) return -1;
-            const Real tol_v = Real{1e-9} * sc.vscale;
+            // ONE JUDGE'S BOUND: the decision's signal (v_D − V_on, volts) against
+            // the decision's significance bound B (signal_bound_), not a fraction of
+            // the circuit's voltage scale: a repair inside B would second-guess the
+            // decision with a different rule. The horizons stay past the parasitic
+            // transient (a held state's law broken inside it is the guard's case).
             const Real zs = sc.vscale / sc.iscale;
             const Real cap = next_time_event_(t) - t;   // DECISIONS #28
             if (!(cap > Real{0})) return -1;            // nothing to judge before the event
+            bool violated = false;
+            Real worst_all = Real{0};
             for (const Real f : {Real{1e2}, Real{1e4}}) {
                 const Real d = std::min(f * shadow_.h_e, cap);
                 if (!(d > Real{0})) break;
@@ -2260,20 +2291,24 @@ private:
                 for (std::size_t j = 0; j < diodes_.size(); ++j) {
                     const auto& dd = diodes_[j];
                     const Real v = system_.node_pair_voltage(dd.from, dd.to, t + d, x_tmp_);
-                    // violation in volts: ON  -> −i·zs, OFF -> v − V_on
-                    const Real viol = mode[j]
-                        ? -(dd.g_on * (v - dd.V_f)) * zs
-                        : v - std::max(dd.V_th, dd.V_f);
+                    const Real sig = mode[j] ? -(v - dd.V_f) : v - std::max(dd.V_th, dd.V_f);
                     // a non-finite state (an unstable mode over 1e4·h_e) is a violation
+                    const bool bad = !std::isfinite(sig)
+                        || sig > signal_bound_(dd, t + d, x_tmp_, Real{0}, Real{0});
+                    // reported in volts: ON -> −i·zs, OFF -> v − V_on
+                    const Real viol = mode[j] ? dd.g_on * sig * zs : sig;
                     const Real v_eff = std::isfinite(viol) ? viol
                                                            : std::numeric_limits<Real>::infinity();
-                    if (v_eff > worst) {
+                    worst_all = std::max(worst_all, v_eff);
+                    if (bad && (!violated || v_eff > worst)) {
+                        violated = true;
                         worst = v_eff;
                         if (worst_j) *worst_j = static_cast<int>(j);
                     }
                 }
             }
-            return worst > tol_v ? 0 : 1;
+            if (!violated) worst = worst_all;   // the largest (insignificant) one
+            return violated ? 0 : 1;
         } else {
             (void)gates; (void)mode; (void)t; (void)x; (void)sc; (void)worst_j;
             return -1;
@@ -2433,6 +2468,9 @@ private:
     Vector x_lad_;             // ladder_sign_'s rung state
     Vector x_set_, x_off_;     // settled_: the cascade's and the OFF probe's
     bool settle_decisions_ = false;   // fire_event_: a located diode event
+    Vector event_sample_;             // D1: the settled state stored at a located diode event
+    bool has_event_sample_ = false;
+    std::vector<std::pair<std::size_t, Vector>> law_settled_;   // D1: (sample, settled state)
     // The located root's time tolerance (locator) and the state error it
     // carries, x(t + t_tol) − x(t) in the pre-event mode (fire_event_).
     Real loc_t_tol_ = Real{0};
