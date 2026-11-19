@@ -359,7 +359,7 @@ def _helper(obs) -> bool:
     return bool(getattr(getattr(obs, "_graph", None), "label_time", False))
 
 
-def _check_fixed_periods(periods, dt: float, stacklevel: int = 5) -> None:
+def _check_fixed_periods(periods, dt: float, stacklevel: int = 6) -> None:
     """A period below dt is refused (two ticks in one step); a period
     that is not a multiple of dt warns (ticks late by less than dt)."""
     for period in periods:

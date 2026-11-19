@@ -20,7 +20,57 @@ carries (``result.plan``: circuit, ties, preflight); this plan holds it as
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Optional
+from typing import Any, Iterator, Mapping, Optional
+
+
+# plan.features: the keywords that put a feature in the run (set, not
+# default), plus "builder_ics" when the builder's i0= / c0= seed the state.
+FEATURE_KW = ("switch_fn", "b_extra_fn", "step_observer", "closed_loops",
+              "controller_period", "should_continue", "live_stream",
+              "mmc_arms", "on_cache", "progress", "initial_state",
+              "resume_from", "start_from_dc_op", "sensitivities",
+              "store_every", "recorders")
+
+
+class ResolvedFrom(Mapping):
+    """``plan.resolved_from``: keyword -> 'explicit' | 'solver' | 'yaml' |
+    'default', computed when read, so a run that never reads it pays one
+    dict copy. 'explicit' = not the signature's default (an explicit
+    default reads 'default'); 'yaml' / 'solver' = filled from a
+    LoadedCircuit / SolverOptions (`mark`)."""
+
+    __slots__ = ("_args", "_defaults", "_marks", "_d")
+
+    def __init__(self, args: dict, defaults: dict):
+        self._args, self._defaults, self._marks, self._d = args, defaults, {}, None
+
+    def mark(self, key: str, source: str) -> None:
+        self._marks[key] = source
+        self._d = None
+
+    def _dict(self) -> dict:
+        if self._d is None:
+            out = {}
+            for k, d in self._defaults.items():
+                v = self._args[k]
+                out[k] = ("default" if v is d or (
+                    d is not None and type(v) is type(d) and v == d)
+                    else "explicit")
+            out.update(self._marks)
+            self._d = out
+        return self._d
+
+    def __getitem__(self, key: str) -> str:
+        return self._dict()[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._dict())
+
+    def __len__(self) -> int:
+        return len(self._dict())
+
+    def __repr__(self) -> str:
+        return f"ResolvedFrom({self._dict()!r})"
 
 
 @dataclass(frozen=True)
@@ -133,7 +183,6 @@ class SimPlan:
     engine: str
     engine_asked: str
     route_reasons: tuple
-    features: frozenset
     t_start: float
     t_end: float
     step: Any                        # FixedStep | VariableStep | ExactStep
@@ -142,7 +191,34 @@ class SimPlan:
     initial: Initial
     drive: Drive
     device_path: str
+    device_path_enum: Any            # pulsim.DevicePath
     voltage_sanity_factor: Optional[float]
     auto_regularize: bool
     diagnostics: tuple = ()
     resolved_from: Mapping[str, str] = field(default_factory=dict)
+
+    @property
+    def features(self) -> frozenset:
+        """The features in play: FEATURE_KW keywords that are set, and
+        "builder_ics" when the builder's i0= / c0= seed the state."""
+        out = {k for k in FEATURE_KW if self.resolved_from[k] != "default"}
+        if self.initial.from_builder:
+            out.add("builder_ics")
+        return frozenset(out)
+
+
+@dataclass(frozen=True)
+class RunOutcome:
+    """What an engine runner hands ``_finalize``: the result and the drive
+    as the run finally composed it (pwl composes its cache hooks, the
+    default switch_fn and the live stream's cancel hook at run time, and
+    the kernel object's builder is the one the result reads)."""
+    result: Any
+    builder: Any
+    switch_fn: Any = None
+    b_extra_fn: Any = None
+    step_observer: Any = None
+    should_continue: Any = None
+    stats: Any = None               # trbdf2's stats dict
+    cxx_chain: Any = None           # pwl: the chain fast path's C++ chain
+    mmc_finalize: Any = None        # pwl: the MMC arms' end-of-run fold

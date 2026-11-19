@@ -67,7 +67,6 @@ def test_resolved_from_names_the_solver_bundle_and_the_yaml():
     assert plan.resolved_from["dt"] == "yaml"
 
 
-@pytest.mark.xfail(strict=True, reason="Stage A group 7 builds the runners")
 def test_engine_branches_read_only_the_plan():
     """1.2: each engine runner takes the plan and nothing else: its only
     parameter is `plan` and every free name it reads is a module-level
@@ -101,7 +100,6 @@ def test_engine_branches_read_only_the_plan():
         assert free <= module_names, (name, sorted(free - module_names))
 
 
-@pytest.mark.xfail(strict=True, reason="Stage A group 7 builds the table")
 def test_simulate_is_plan_table_finalize():
     """7.1: simulate() does not branch on the engine; the table does."""
     fn = _functions(_PKG / "__init__.py", {"simulate"})["simulate"]

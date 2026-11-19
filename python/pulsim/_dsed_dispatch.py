@@ -695,7 +695,7 @@ def run_dsed_from_builder(
     sf = opts.switch_fn
     if sf is None:
         from . import _undriven
-        sf = _undriven("dsed", builder, stacklevel=4)
+        sf = _undriven("dsed", builder, stacklevel=5)
 
     adapter = CircuitBuilderAdapter(
         builder=builder, cache=cache, switch_fn=sf,
@@ -726,7 +726,7 @@ def run_dsed_from_builder(
             "on exactly; otherwise pass a smaller dt or give the "
             "callable a next_edge_after(t) method.",
             UserWarning,
-            stacklevel=3,
+            stacklevel=4,  # (run_dsed_from_builder <- _run_dsed <- simulate)
         )
 
     adapter = CircuitBuilderAdapter(
