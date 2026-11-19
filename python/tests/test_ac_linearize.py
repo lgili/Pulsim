@@ -146,6 +146,33 @@ def test_shockley_diode_at_one_ampere():
     _check(make, "a", bias, exact, 1e-9)
 
 
+def test_branch_form_switch_and_shockley_diode_in_one_sweep():
+    # integration 14m: the branch-form stamp (feat/core-branch-form-coverage)
+    # and the Newton linearisation at the DC point (batch 14l) together: RC
+    # through a CLOSED IDEAL switch (R_on = 0, its own current row) into a
+    # Shockley diode whose exponential term carries exactly 1 A at the bias
+    I_S, n, Gm, R, C, I = 1e-12, 1.0, 1e-12, 1.0, 1e-3, 1.0
+    v0 = n * VT * np.log1p(I / I_S)              # I_S·(e^{v0/nV_T} − 1) = I
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", v0 + R * (I + v0 * Gm))
+    b.add_switch("S", "in", "m", form="branch", R_on=0.0, g_off=1e-9)
+    b.add_resistor("R", "m", "a", R)
+    b.add_shockley_diode("D", "a", "gnd", I_S=I_S, n=n, V_T=VT, G_min=Gm)
+    b.add_capacitor("C", "a", "gnd", C)
+    m = p.SwitchStateMask(b.graph.num_switches)
+    m.set(b.switch_index_of("S"), True)
+    H = p.run_mna_sweep(b, output_idx=b.node_id_of("a"), freqs=F,
+                        v_in_branch_id=b.branch_id_of("V"), mask=m).H
+    g = 1.0 / (n * VT / (I + I_S)) + Gm          # small-signal conductance
+    exact = 1 / (1 + R * (g + 1j * W * C))       # 1/(1+jωRC) loaded by g
+    assert _rel(H, exact) < 1e-9, (H, exact, _rel(H, exact))
+    # the open switch leaves the diode alone at its zero-bias point
+    m_off = p.SwitchStateMask(b.graph.num_switches)
+    H_off = p.run_mna_sweep(b, output_idx=b.node_id_of("a"), freqs=F,
+                            v_in_branch_id=b.branch_id_of("V"), mask=m_off).H
+    assert np.max(np.abs(H_off)) < 1e-6
+
+
 def test_shockley_linearisation_is_smooth_at_one_picoampere():
     # 1 pA of forward current: the sweep sees g = I_S/(nV_T)·e^{v/nV_T} + G_min
     I_S, Gm, R = 1e-12, 1e-12, 1e3

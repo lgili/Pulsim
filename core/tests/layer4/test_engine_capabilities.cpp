@@ -66,6 +66,16 @@ TEST_CASE("kKindCaps has one row per StoredKind, named as the enum",
             REQUIRE((listed || std::string_view(row.name) == "InductionMachineMna"));
         }
     }
+    // the BRANCH form of Switch / Diode (update-number-changing-release
+    // 1.7): every engine but bdf1 (retired, refused by name), the AC sweep
+    // included (stamped at the caller's mask)
+    for (const auto& row : kBranchFormCaps) {
+        INFO(row.name);
+        for (const Engine e : {Engine::FixedTrap, Engine::TrBdf2, Engine::Dsed, Engine::AcSweep}) {
+            REQUIRE(row.supports(e));
+        }
+        REQUIRE_FALSE(row.supports(Engine::Bdf1));
+    }
 }
 
 TEST_CASE("the junction capacitor is a Newton kind",
