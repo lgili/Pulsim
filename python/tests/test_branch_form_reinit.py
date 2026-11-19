@@ -46,7 +46,7 @@ def _cutset(open_at=100, steps=106, **kw):
 
 def test_cutset_without_the_rule_is_refused_by_name():
     with pytest.raises(p.UnsupportedError) as ei:
-        _cutset()
+        _cutset(discontinuity_restart=False)   # legacy subject: the restart-less fixed step
     e = ei.value
     assert (e.engine, e.feature, e.device, e.kind) == ("pwl", "dependent_states", "S", "Switch")
     assert "discontinuity_restart=True" in str(e)
