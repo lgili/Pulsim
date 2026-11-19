@@ -9,6 +9,7 @@ gyrator–capacitor form, on magnetic nodes beside the electrical ones:
 | flux rate `dΦ/dt` [V] | branch current |
 | permeance `P` [H] (`add_permeance`, `add_air_gap`) | capacitor |
 | saturable limb (`add_saturable_permeance`) | nonlinear capacitor |
+| hysteretic limb (`add_hysteretic_permeance`) | unit gyrator + one-turn JA inductor |
 | eddy loss (`add_magnetic_resistance`) | resistor |
 | winding of `N` turns (`add_winding`) | gyrator `g = 1/N` |
 
@@ -190,10 +191,16 @@ positive.
 dissipates `R_m·(dΦ/dt)²`: classical eddy loss, inside the solve, so it
 damps the circuit. It appears in `p.device_loss_summary` with
 `category="core_loss"`. Its value is fitted, not predicted: Pulsim's
-core-loss model is not validated against measurement. Hysteresis and
-excess loss in the network form are not available yet; use
-`add_hysteretic_core_inductor` for one flux path, or a Steinmetz / iGSE
-estimate after the run (see the losses page).
+core-loss model is not validated against measurement.
+`add_hysteretic_permeance(name, a, b, area, length, Ms, a, alpha, c, k)`
+puts a Jiles-Atherton segment in the network (its MMF is `res.i(name)`,
+its flux rate `res.v(name + ".e")`); `p.fit_core_loss_elements` turns
+sine loss data into `R_m` and the excess coefficient `c`, and
+`add_excess_loss(name, a, b, c, eps)` puts that excess term in series
+(permeance, then eddy resistance, then excess element): its MMF is
+`res.i(name)`, its flux rate `res.v(name + ".e")`, and its loss
+`(3/4)·(eps/Û)²` below the square-root law at a flux-rate amplitude
+`Û` — choose `eps ≤ 1.15e-3·Û`.
 
 ## Limits
 

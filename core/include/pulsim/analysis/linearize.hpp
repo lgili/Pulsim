@@ -330,6 +330,11 @@ inline void require_linearisable(const topology::Graph& graph, const pwl::Device
                 {}, L::ShockleyDiode::from(pool.shockley_diode_params(br.id)), two,
                 pwl::iface::gather<2>(x0, two, 2), m.G, m.C);
             break;
+        case SK::ExcessLoss:   // at u0 = 0: the core conductance c/√ε
+            detail_lin::add_law<L::ExcessLoss, 2>(
+                {}, L::ExcessLoss::from(pool.excess_loss_params(br.id)), two,
+                pwl::iface::gather<2>(x0, two, 2), m.G, m.C);
+            break;
         case SK::MosfetLevel1: {
             const auto at = pwl::detail::mosfet_level1_terminals(pool, br);
             detail_lin::add_law<L::MosfetLevel1, 3>(

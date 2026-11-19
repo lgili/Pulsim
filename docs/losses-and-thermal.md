@@ -326,15 +326,23 @@ The Steinmetz / iGSE estimate above runs after the transient: it reads
 `B(t)` from the trace and never changes the circuit. In a magnetic
 network (tutorial 09), `b.add_magnetic_resistance(name, a, b, R_m)`
 between two magnetic nodes dissipates `R_m·(dΦ/dt)²` inside the solve,
-so the loss damps the circuit. It is classical eddy loss only
+so the loss damps the circuit. It is classical eddy loss
 (`P ∝ f²·B²`); `device_loss_summary` lists it with
 `kind="magnetic_resistance"`, `category="core_loss"` and its `R_m`.
+`b.add_excess_loss(name, a, b, c, eps)` adds Bertotti's excess loss,
+`F = c·u/(u² + eps²)^¼` for the flux rate `u` (`P ∝ (f·B)^1.5`); it is
+listed with `kind="excess_loss"`, `category="core_loss"`, `c` and `eps`.
+Under a sine flux rate of amplitude `Û` its loss is
+`c·Û^1.5·0.556418` (the mean of `|cos|^1.5`) less `(3/4)·(eps/Û)²` of
+it: `eps ≤ 1.15e-3·Û` keeps it within 1e-6. It does not feed a thermal
+node: the kernel's loss port belongs to switching devices (a junction);
+a core temperature is not modelled.
 
-| | Steinmetz / iGSE (post-hoc) | magnetic resistance (in loop) |
+| | Steinmetz / iGSE (post-hoc) | magnetic elements (in loop) |
 |---|---|---|
-| frequency law | `f^α·B^β`, fitted | `f²·B²` (eddy only) |
+| frequency law | `f^α·B^β`, fitted | eddy `f²·B²`, excess `(f·B)^1.5`, JA loop |
 | changes the waveform | no | yes |
-| hysteresis, excess loss | inside the fit | not modelled yet |
+| hysteresis, excess loss | inside the fit | `add_hysteretic_permeance`, `add_excess_loss` |
 
 `R_m` is fitted to a loss figure, not predicted; neither model is
 validated against measurement here.

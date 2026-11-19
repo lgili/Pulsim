@@ -184,3 +184,176 @@ Each entry: question → option taken → why → how to reverse.
   static and coupled cases as "ran although refused" (the case table and
   the manifest disagree there; not this change's to settle).
 - Reverse: delete the case, its manifest entry and golden; count back to 20.
+
+## D17. Bergeron line after the device interface landed (closeout 2026-11-19)
+
+- Question: D12 deferred section 5 to the device interface; it has
+  landed (`device::StatefulKind`, `pwl::StatefulKinds`). Is section 5
+  doable now without touching a time loop?
+- Finding: not on the contract as it stands. A stateful kind declares
+  `kFlatPerDevice`, which must equal its block's compile-time
+  `reals_per_instance` (`StatefulCheck::reals`); a delay line carries
+  `ceil(τ/dt) + 1` samples of `(v, i)` per end, fixed per run but not per
+  kind. And every stateful kind must sit on a Newton row of `kKindCaps`
+  (`StatefulCheck::newton`); the line is linear (`1/Z0` in the cached
+  matrix, history sources in `b`), so as a Newton kind it would push every
+  circuit holding a line onto the Newton path.
+- What closes it: a variable-length state block (the in-run rollback and
+  the snapshot's flat vector are already `std::vector<Real>`; the block
+  table and the reader need a per-instance length), a linear "b-source"
+  category whose stamp adds to `b` only (the cached matrix keeps `1/Z0`
+  from the build), then tasks 5.1–5.10 unchanged. The trbdf2 step cap at
+  τ can be set by the run plan as `dt_max` (above the dispatch, no loop
+  hunk); stage-time lookup reads `StepCtx::t`.
+- Option: left open as NOT DONE (not attempted in the closeout session);
+  `model="bergeron"` keeps refusing by name.
+
+## D18. Bergeron line: the five design questions answered before code (2026-11-19, branch feat/core-p5-line-and-excess)
+
+Status: DESIGN ONLY in this session (the excess-loss element of
+add-permeance-magnetic-domain took it). No line code is on the branch;
+`add_transmission_line(model="bergeron")` keeps raising
+`UnsupportedError` naming the device (D6), there is no kernel kind to
+refuse anywhere else. The answers below are what the implementation
+follows; each names its truth.
+
+Law (lossless, Z0, τ; i_k, i_m into the line at each port):
+i_k(t) = v_k(t)/Z0 + I_k(t), I_k(t) = −a_m(t−τ)·2/Z0 with the outgoing
+wave a_m(s) = (v_m(s) + Z0·i_m(s))/2, i.e. I_k(t) = −v_m(t−τ)/Z0 −
+i_m(t−τ) (and k ↔ m). Exact for the line: given exact port values at
+t − τ the relation at t has no discretisation error.
+
+### (1) Fixed step (pwl)
+
+- Matrix: 1/Z0 across each port, in the CACHED matrix (mask independent);
+  I_k, I_m enter b at the solve time, as a time-varying source does: no
+  refactorisation, ever.
+- The committed times are NOT a uniform grid: dt-retry sub-steps,
+  discontinuity-restart stages and the post-event second sample (2) land
+  off k·dt (run_transient.hpp, the retry and restart paths). So the far
+  end is found by TIME on both engines — binary search of the committed
+  times for t − τ — and the index shortcut "sample n − k" is taken only
+  while every committed time since t − τ is exactly on the k·dt grid
+  (a flag cleared by any off-grid commit). From the review.
+- Lookup of the far end at t − τ: k = floor(τ/dt), θ = τ/dt − k. If
+  min(θ, 1 − θ) ≤ 64·eps·(τ/dt) (τ = k·dt, or (k+1)·dt, to rounding) the
+  stored sample at that time is
+  used: no interpolation, and a line between resistors / sources is then
+  EXACT — the lattice plateaus to rounding (gate 1e-12 relative, not
+  bit-equality: two code paths). Otherwise linear interpolation between
+  samples n − k and n − k − 1 with weights (1 − θ, θ). Error, derived:
+  the interpolant's response to e^{jωt} is H = (1 − θ) + θe^{−jωdt}
+  against the exact e^{−jωθdt}; |H|² = 1 − 2θ(1−θ)(1 − cos ωdt), so each
+  pass loses θ(1−θ)(ωdt)²/2 of a wave's amplitude (DISSIPATIVE, never
+  amplifying) and its phase error is O((ωdt)³); after n = T/τ passes the
+  amplitude error is n·θ(1−θ)(ωdt)²/2 — second order in dt at a fixed
+  end time. A step (a discontinuous wave) is smeared over one dt; its
+  plateaus are exact (a constant interpolates exactly), so the lattice
+  plateau values hold to rounding even for non-integer τ/dt once the
+  front has passed (task 5.5's 2 % bound is on the front only).
+- dt > τ: refused by name (`UnsupportedError`, feature `dt`, the line):
+  the far-end value would be in the future.
+
+### (2) Variable step (trbdf2; esdirk43)
+
+- Bound: every stage time t_s ≤ t_n + h must satisfy t_s − τ ≤ t_n (the
+  far end must be committed), i.e. h ≤ τ_min over the circuit's lines.
+  Registered in the RUN PLAN as `dt_max = min(dt_max, τ_min)` (above the
+  dispatch, the plan rule of add-kernel-simulation-object; no loop
+  hunk); the counter `diagnostics['line_step_bound'] = {tau_min,
+  n_steps_at_bound}` is computed from the accepted step list after the
+  run (h ≥ τ_min·(1 − 1e-12)), so the step controller is not touched.
+- Lookup: binary search in the committed, time-ordered buffer of
+  (t, v, i) per port, then linear interpolation (second order: the order
+  of TR-BDF2). esdirk43 (order 4/3) would be cut to order 2 by it and its
+  embedded estimate would then lie: REFUSED by name on esdirk43 in the
+  first slice (cubic Hermite with the stored rates is the upgrade).
+- The estimator must not see the source as a jump (the defect class of
+  add-in-kernel-event-losses DECISIONS 16/17: a source evaluated as E/h
+  over the attempt jumps at every step boundary and grows as 1/h on a
+  retry). Here I_k(t) is a FIXED continuous function of t on each step —
+  the interpolant of committed samples, independent of the attempted h —
+  so its value at t_n used by the trapezoid's left limit equals the value
+  it had when t_n was solved (both read the same immutable samples:
+  t_n − τ ≤ t_{n−1} because h ≤ τ). A retry re-evaluates the same
+  function. What remains is a REAL discontinuity: a front launched at an
+  event t_e arrives at t_e + τ. Rule: every landed event (switch, diode,
+  source edge) of the run schedules a time breakpoint t_e + τ per line in
+  the kernel event queue (one hop: a breakpoint landing schedules none,
+  so the queue stays bounded; later reflections are found by the
+  ordinary error control, as any kink is).
+- Committed state only: samples are appended in the shared COMMIT phase
+  (`StatefulKinds::commit`, once per committed time) — never in a stage
+  solve, a rejected attempt or a localisation trial, which only READ the
+  buffer. A post-event commit at the same t appends the right limit as a
+  second sample with the same t (a lookup at exactly t_e takes the right
+  limit, matching the event rows' convention). Samples older than
+  t − τ − (one sample) are dropped; the buffer is bounded by
+  τ/h_min_seen + 2 and refused by name above 2^20 samples per port.
+
+### (3) Exact engine
+
+A delay e^{−sτ} is not a finite-dimensional LTI state: `kKindCaps` row
+dsed = no (refused by name through the table, as every non-LTI kind);
+`engine='auto'` routes away with the reason recorded by the existing
+capability check in `_route` (the reason names the kind). bdf1 = no.
+
+### (4) Snapshot / resume
+
+The buffer is state: a new pickle block at the next free index (19 today:
+18 is the recorder) `("pulsim.lines", 1, [per line: t, v_k, i_k, v_m,
+i_m arrays])`, bounded by (2) above; readers accept the 17/18/19-field
+layouts with no lines and refuse by name a snapshot with lines resumed
+into a circuit whose lines differ (count, Z0, τ). Truth: a run split at
+any t equals the uninterrupted one (pwl: to rounding at τ = k·dt;
+trbdf2: within its tolerance, as the other resume tests).
+
+### (5) AC sweep and DC point
+
+- AC: the EXACT two-port of the transient model, stamped in ABCD form
+  with the port-m current as an extra unknown (finite at every ω; the
+  Y form 1/(Z0·sin ωτ) is singular at ωτ = kπ): rows
+  V_k = cos(ωτ)·V_m + jZ0·sin(ωτ)·I_m', I_k = (j/Z0)·sin(ωτ)·V_m +
+  cos(ωτ)·I_m' (I_m' = −i_m). Lossy (R lumped R/4 – R/2 – R/4): the
+  product of the five ABCD matrices (the transient model's own small-
+  signal model, not the distributed γℓ line — they differ by O(R²/Z0²)).
+  Truths: lossless delay e^{−jωτ} into a matched load (1e-9); quarter-wave
+  transformer Z_in = Z0²/R_L at ωτ = π/2 (1e-9); the same number from a
+  long transient's steady-state amplitude (within the transient's
+  tolerance).
+- DC: the line is its series resistance; lossless, a wire — v_k = v_m,
+  i_k = −i_m, stamped as a 0 V branch (plus R), so the existing posedness
+  refusals apply by name: an ideal voltage loop through lines refuses as
+  an ideal loop; two ports with separate references keep the common mode
+  undefined and refuse as a floating island. The buffer is initialised
+  from the DC solution (constant waves), so a line carrying DC starts
+  with no wave (task 5.7: far-end voltage constant to 1e-9).
+
+### Closed forms the tests will use (derived here)
+
+- Matched source (R_s = Z0), open end, 1 V step: incident wave 1/2 V, far
+  end 0 before τ and exactly 1.000 V after (Γ_L = 1, Γ_s = 0).
+- R_s = 10 Ω, Z0 = 50 Ω, open end: incident V⁺ = Z0/(Z0 + R_s) = 5/6,
+  Γ_s = (R_s − Z0)/(R_s + Z0) = −2/3, Γ_L = 1; far end after (2n+1)τ:
+  V⁺·2·Σ_{j=0..n} Γ_s^j = 1.6667, 0.5556, 1.2963 V (n = 0, 1, 2) → 1 V.
+  Shorted end (Γ_L = −1): far-end voltage 0, far-end current after
+  (2n+1)τ (2V⁺/Z0)·Σ_{j=0..n}(−Γ_s)^j = 33.333, 55.556, 70.370 mA → V/R_s
+  = 100 mA.
+- Lossy, matched both ends, R = 1 Ω on 50 Ω: Z0/(2·Z0 + R) = 0.4950495 V.
+- Energy: stored energy = (1/Z0)·[∫_{t−τ}^{t} a_k(s)² ds + ∫_{t−τ}^{t}
+  a_m(s)² ds] (the waves in flight); energy in − energy out = Δstored, to
+  the trapezoid's order on the buffer samples.
+
+### Kind and hot path
+
+One kind `TransmissionLine` (two branches, one per port) with a NEW
+solve class `LinearDelay` (linear matrix, b-source, state): not Newton,
+so a circuit with a line stays on the cached-LU path. D17's two contract
+extensions are needed first: a variable-length state block (per-instance
+length; the in-run rollback and the snapshot vector are already
+`std::vector<Real>`) and a b-source stamp hook in `StatefulKinds` (one
+run-invariant `if (pool.has_lines())` in the shared source phase, no
+per-step branch or copy for circuits without a line; to be measured at
+the cost gate). Loop hunks expected: that one call in the shared phase;
+the commit rides the existing `StatefulKinds::commit`; the step bound is
+in the plan.

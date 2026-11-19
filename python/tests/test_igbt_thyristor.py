@@ -498,3 +498,83 @@ def test_a_pickled_circuit_keeps_the_gate():
     assert c2.value_hash() == c.value_hash() and c2.structure_hash() == c.structure_hash()
     gates = {d["name"]: d["params"].get("gate") for d in c2.components()}
     assert gates["T"] == 2
+
+
+# ---------------------------------------------------------------------
+# Per-site blocking tests (task 4.4, pwl and trbdf2): a gate held OFF
+# under forward bias passes only g_off·v at every stored sample, at the
+# decision sites a ramp reaches mid-step (pwl sub-step watcher / event
+# iteration, trbdf2 crossing signal) and at a hard gate turn-off on a step
+# boundary with an inductive current (the edge in `combine`, trbdf2's
+# boundary settle). Each has a control in which the same device conducts.
+# The exact engine refuses gated devices by name (task 4.3).
+# ---------------------------------------------------------------------
+
+G_OFF = 1e-9
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_gate_off_device_never_turns_on_under_a_rising_forward_voltage(engine):
+    # 10 V, 1 kHz sine through 1 kOhm: v_CE crosses V_th = 0.9 V inside a
+    # step (dt = 7 us is no divisor of the crossing time)
+    def circuit(gate):
+        b = p.CircuitBuilder()
+        b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
+        b.add_resistor("R", "in", "c", 1e3)
+        b.add_igbt("Q", "c", "gnd", 10e-3, 1.0 / G_OFF, V_ce0=0.9,
+                   reverse_blocking=True)
+        on = [b.switch_index_of("Q")] if gate else []
+        return b, _Mask(b.graph.num_switches, on)
+
+    b, sw = circuit(True)
+    r = _sim(b, 1e-3, engine, sw, dt=7e-6)
+    assert np.max(np.asarray(r.i("Q"))) > 9e-3   # control: (10 − 0.9)/1 kOhm
+    b, sw = circuit(False)
+    r = _sim(b, 1e-3, engine, sw, dt=7e-6)
+    v = np.asarray(r.v("c"))
+    i = np.asarray(r.i("Q"))
+    assert np.max(v) > 9.9                         # forward bias reached
+    assert np.all(np.abs(i) <= G_OFF * np.abs(v) * (1 + 1e-9) + 1e-15)
+    col = b.switch_index_of("Q")
+    assert not np.any(np.asarray(r.switch_states)[:, col])
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_gate_turned_off_on_a_step_boundary_blocks_the_inductive_current(engine):
+    # 100 V into an RL load (10 Ohm, 1 mH) through the IGBT, freewheel
+    # diode across the load. Gate on for 200 us, off after: v_CE jumps to
+    # about 100 V (plus the diode's i/g_on while it freewheels) and the IGBT
+    # current to g_off·v_CE, while the load current decays through the
+    # diode (control: ~8.6 A before).
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "dc", "gnd", 100.0)
+    b.add_igbt("Q", "dc", "c", 10e-3, 1.0 / G_OFF, V_ce0=0.9,
+               reverse_blocking=True)
+    b.add_resistor("RL", "c", "m", 10.0)
+    b.add_inductor("L", "m", "gnd", 1e-3)
+    b.add_diode("Dfw", "gnd", "c", 1e3, 1e-9)    # g_on, g_off
+    j, n = b.switch_index_of("Q"), b.graph.num_switches
+    t_off = 200e-6
+
+    class Gate:
+        def __call__(self, t):
+            m = p.SwitchStateMask(n)
+            m.set(j, t < t_off)
+            return m
+
+        def next_edge_after(self, t):
+            return t_off if t < t_off else math.inf
+
+    r = _sim(b, 400e-6, engine, Gate(), dt=1e-6)
+    t = np.asarray(r.times)
+    i = np.asarray(r.i("Q"))
+    v_ce = 100.0 - np.asarray(r.v("c"))
+    before = (t > 150e-6) & (t < t_off)
+    # every sample decided under the gate off (the trbdf2 edge sample at
+    # t_off + 6e-13 s still carries the left limit, decided with it on)
+    after = ~np.asarray(r.gate_states)[:, j]
+    assert np.all(t[after] >= t_off) and np.sum(after) > 50
+    assert np.min(i[before]) > 5.0                 # control: conducting
+    assert np.min(v_ce[after]) > 99.0             # forward bias, gate off
+    assert np.all(np.abs(i[after]) <= G_OFF * v_ce[after] * (1 + 1e-9) + 1e-15)
+    assert np.asarray(r.i("L"))[after][0] > 5.0   # the load current freewheels

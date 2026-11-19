@@ -62,6 +62,7 @@ unless called with `allow_non_passive=True`.
 | PwlCurrentSource | Source | yes | yes | yes | yes | yes |
 | InductionMachineMna | NewtonStateful | yes | yes | no | no | no |
 | ExternalDevice | NewtonStateful | yes | yes | no | no | yes |
+| ExcessLoss | NewtonStatic | yes | yes | no | no | yes |
 <!-- engine-capabilities:end -->
 
 ## Option capability matrix
@@ -322,7 +323,7 @@ event where the signal jumps.
 | Limitation | Measured | Workaround |
 |---|---|---|
 | **No fringing and no core-shape library.** `add_air_gap` is `P = μ₀·A/l` on the given area; every section takes its own area, length and permeability. Shipped parameters are synthetic. | — | Enlarge the gap area by your fringing factor; enter the sections of the core yourself. |
-| **Rate-dependent loss is eddy loss only, and not validated against measurement.** `add_magnetic_resistance` gives `R_m·(dΦ/dt)²`; the hysteretic permeance, the excess-loss element and the loss fitter are not shipped (YAML `hysteretic_permeance` / `excess_loss` are refused by name). | — | `add_hysteretic_core_inductor` for one flux path; Steinmetz / iGSE after the run. |
+| **Rate-dependent loss is eddy loss only, and not validated against measurement.** `add_magnetic_resistance` gives `R_m·(dΦ/dt)²`, `add_hysteretic_permeance` the Jiles-Atherton loop and `add_excess_loss` Bertotti's `c·sign(u)·|u|^½`, linear below the flux rate `eps` (sine loss (3/4)·(eps/Û)² below the square-root law; the exact engine refuses it by name). `fit_core_loss_elements` maps loss data to `R_m` and `c`; a fit is not a validation. | — | `add_hysteretic_core_inductor` for one flux path; Steinmetz / iGSE after the run. |
 | **DC operating point: a saturable permeance on a node reached only through permeances is refused by name** (its flux row needs the Newton DC refresh). Linear permeances get flux rows (per node, or per group joined by magnetic resistances and winding ports); the DC flux is solved from zero. | — | Start the transient from zero or from `initial_state=` (tutorial 09). |
 | `set_initial` ignores a saturable permeance (it records capacitor and inductor values only), without a warning. | — | Write its MMF into `initial_state` at its node. |
 | A saturable permeance runs on `pwl` and `trbdf2` only; `dsed`, `bdf1` and the AC sweep refuse it by name. | — | Linear permeances run on every engine. |

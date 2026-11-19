@@ -56,10 +56,12 @@ TEST_CASE("kKindCaps has one row per StoredKind, named as the enum",
             // point (each has an analytic small-signal test); the induction
             // machine is refused (no small-signal test yet). A new Newton
             // kind must be added here or refused on purpose.
-            constexpr std::array<std::string_view, 9> kAcNewton{
+            // ExcessLoss: at the DC point (zero flux rate) the regularised
+            // core, a conductance c/√ε (add-permeance-magnetic-domain 4.2).
+            constexpr std::array<std::string_view, 10> kAcNewton{
                 "NonlinearDiode", "MosfetLevel1", "IgbtLevel1",
                 "SaturableInductor", "NonlinearCapacitor", "ShockleyDiode",
-                "LauritzenDiode", "PmsmMna", "ExternalDevice"};
+                "LauritzenDiode", "PmsmMna", "ExternalDevice", "ExcessLoss"};
             const bool listed = std::find(kAcNewton.begin(), kAcNewton.end(),
                                           std::string_view(row.name)) != kAcNewton.end();
             REQUIRE(row.supports(Engine::AcSweep) == listed);

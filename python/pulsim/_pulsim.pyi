@@ -546,6 +546,10 @@ class CircuitBuilder:
         """
         Add a binary switched diode (V2's SwitchedDiode). g_on/g_off in siemens. V_f: forward drop while ON (PSIM's diode voltage drop), in volts: v = V_f + i/g_on; must be finite and >= 0. V_th: turn-on threshold in volts, effectively max(V_th, V_f) when V_f > 0; V_th > V_f is a hysteresis band. OFF is plain g_off.
         """
+    def add_excess_loss(self, name: str, m_a: str, m_b: str, c: float, eps: float) -> CircuitBuilder:
+        """
+        Excess (anomalous) core loss between magnetic nodes m_a, m_b: F = c*u/(u^2 + eps^2)^0.25 for the flux rate u [V] through it (m_a -> m_b), Bertotti's square-root law c*sign(u)*|u|^0.5 (c = k_x*l/sqrt(A) [A/V^0.5]) made linear below |u| ~ eps [V]. Sine loss within (3/4)*(eps/U)^2 of c*U^1.5*0.55641 at flux-rate amplitude U: eps <= 1.15e-3*U for 1e-6. A unit winding '<name>.w' on the internal node '<name>.e' (its voltage is u) and the ExcessLoss conductance '<name>' (i(name) is F). Newton engines (pwl, trbdf2) and the AC sweep; the exact engine refuses it by name.
+        """
     def add_external_device(self, name: str, nodes: collections.abc.Sequence[str], lib: str, model: str, params: typing.Any = None, *, check_contract: bool = True, debug_jacobian: bool = False, record: bool = False) -> CircuitBuilder:
         """
         Add an instance of an EXTERNAL device model (add-external-device-abi): `lib` is a shared library built against pulsim_xdev.h; loading it runs arbitrary native code with your privileges (no sandbox). `nodes` are its pins in the model's order; `params` maps field names to a value or (value, unit) (the unit must equal the declared one). The model's contract (Jacobian, finiteness, KCL, declared claims) is checked here and refused by name; `debug_jacobian=True` re-checks the Jacobian at every evaluation of the run. `record=True` traces the device's readings at every accepted step of a pwl / trbdf2 run: res.device_output(name, key) with key 'i(<pin>)', 'power' or one of the model's named outputs.
@@ -565,6 +569,10 @@ class CircuitBuilder:
     def add_hysteretic_core_inductor(self, name: str, from_node: str, to_node: str, N: float, Ae: float, le: float, lg: float, Ms: float, a: float, alpha: float, c: float, k: float, substeps_min: int = 8, M0: float = 0.0) -> CircuitBuilder:
         """
         Jiles-Atherton hysteretic core INSIDE the Newton loop: N turns on a core (Ae [m^2], le [m], TOTAL gap lg [m]) of a material (Ms, a, alpha, c, k). The magnetisation is solved at the same time level as the current with its exact tangent in the Jacobian -- no dummy source, no observer, no one-step lag. i(name) is the winding current; replay the B-H trajectory from it with pulsim.compute_bh_loop.
+        """
+    def add_hysteretic_permeance(self, name: str, m_a: str, m_b: str, area: float, length: float, Ms: float, a: float, alpha: float, c: float, k: float, substeps_min: int = 8, M0: float = 0.0) -> CircuitBuilder:
+        """
+        Hysteretic permeance: a core segment (area [m^2], length [m]) with the Jiles-Atherton law (Ms, a, alpha, c, k) between magnetic nodes m_a, m_b -- the dual of a one-turn add_hysteretic_core_inductor: a unit winding '<name>.w' on the internal node '<name>.e' and the JA inductor '<name>' (N = 1, no gap). The MMF F(m_a) - F(m_b) is i(name) (H = F/length), the flux rate is v('<name>.e'). Newton engines (pwl, trbdf2) only.
         """
     def add_ideal_switch(self, name: str, n_pos: str, n_neg: str, R_on: float = 0.0, g_off: float = 0.0) -> CircuitBuilder:
         """
@@ -814,6 +822,10 @@ class CircuitBuilder:
         """
         Enumerate every device in the circuit. Returns a list of dicts (kind, name, nodes, params, branch_id) in insertion order. Consumed by `pulsim.schematic`.
         """
+    def composites(self) -> list[typing.Any]:
+        """
+        The recorded composites: [{kind, name, anchor, members}].
+        """
     def compute_time_varying_b_extra(self, t: float) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
         """
         Sum the b_extra contributions from all time-varying voltage sources (sine + PWM + pulse) at time `t`. Returns a full-MNA-sized vector. The pulsim.simulate engine='pwl' applies this automatically; engine='dsed' calls it via the CircuitBuilderAdapter to overlay AC / PWM source values per PED step.
@@ -890,6 +902,10 @@ class CircuitBuilder:
     def position_hints(self) -> dict[typing.Any, typing.Any]:
         """
         Dict mapping every node_id used in the circuit to its current role hint.
+        """
+    def record_composite(self, kind: str, name: str, anchor: str, members: collections.abc.Sequence[str]) -> CircuitBuilder:
+        """
+        Record a composite built from existing kinds by an authoring helper (add_dc_machine does): components() then gives its anchor member's entry the keys composite, composite_name, sub_elements (and composite_params for a dc_machine). Metadata only; to_yaml / from_yaml keep it.
         """
     def run_preflight(self, options: PreflightOptions = ...) -> PreflightReport:
         """
@@ -1232,12 +1248,15 @@ class StoredKind:
       InductionMachineMna
 
       ExternalDevice
+
+      ExcessLoss
     """
     CCCS: typing.ClassVar[StoredKind]
     CCVS: typing.ClassVar[StoredKind]
     Capacitor: typing.ClassVar[StoredKind]
     CurrentSource: typing.ClassVar[StoredKind]
     Diode: typing.ClassVar[StoredKind]
+    ExcessLoss: typing.ClassVar[StoredKind]
     ExternalDevice: typing.ClassVar[StoredKind]
     Gyrator: typing.ClassVar[StoredKind]
     IdealTransformer: typing.ClassVar[StoredKind]

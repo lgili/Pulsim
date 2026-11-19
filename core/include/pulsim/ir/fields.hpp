@@ -293,6 +293,10 @@ inline constexpr std::array kShockley{
     direct<SH, &SH::G_min>("G_min", B::NonNegative).doc("S", "parallel conductance"),
     direct<SH, &SH::i_lim>("i_lim", B::Positive).doc("A", "current at which the exponential turns linear"),
     direct<SH, &SH::BV>("BV", B::NonNegative).doc("V", "reverse breakdown voltage (0: none)")};
+using EX = m::ExcessLoss::Params;
+inline constexpr std::array kExcessLoss{
+    direct<EX, &EX::c>("c", B::Positive).doc("A/V^0.5", "excess-loss coefficient: F = c*sign(u)*|u|^0.5 for |u| >> eps").listed_in_components(),
+    direct<EX, &EX::eps>("eps", B::Positive).doc("V", "flux rate below which the law is linear (slope c/sqrt(eps))").listed_in_components()};
 using LD = m::LauritzenDiode::Params;
 inline constexpr std::array kLauritzen{
     direct<LD, &LD::I_S>("I_S", B::Positive).doc("A", "saturation current"),
@@ -366,7 +370,7 @@ inline constexpr std::array<std::span<const FieldSpec>, pwl::DevicePool::kNumKin
         detail::kPmsm,         detail::kIdealXfmr,     detail::kVccs,
         detail::kCccs,         detail::kCcvs,          detail::kGyrator,
         detail::kSineI,        detail::kPulseI,        detail::kPwlI,
-        detail::kInductionMachine, detail::kExternal};
+        detail::kInductionMachine, detail::kExternal, detail::kExcessLoss};
 static_assert(kKindFields.size() == pwl::kKindCaps.size(),
               "every device kind needs a row in ir::kKindFields");
 
@@ -418,6 +422,8 @@ inline void check_device(const ParamsVariant& v, std::string_view field) {
             m::LauritzenDiode::validate(p);
         } else if constexpr (std::is_same_v<P, m::ShockleyDiode::Params>) {
             m::ShockleyDiode::validate(p);
+        } else if constexpr (std::is_same_v<P, m::ExcessLoss::Params>) {
+            m::ExcessLoss::validate(p);
         } else if constexpr (std::is_same_v<P, m::PmsmMna::Params>) {
             if (p.harmonics && field == "psi_pm") unread("PM-harmonic");
             if (p.flux_map && (field == "psi_pm" || field == "L_d" || field == "L_q")) {

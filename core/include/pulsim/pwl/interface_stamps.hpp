@@ -571,7 +571,7 @@ template <class K>
 [[nodiscard]] constexpr bool static_kind_ported(DevicePool::StoredKind k) noexcept {
     using SK = DevicePool::StoredKind;
     return k == SK::NonlinearDiode || k == SK::ShockleyDiode
-        || k == SK::MosfetLevel1 || k == SK::IgbtLevel1;
+        || k == SK::MosfetLevel1 || k == SK::IgbtLevel1 || k == SK::ExcessLoss;
 }
 
 }  // namespace pulsim::pwl::iface
