@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### One undriven-switch policy and the release's uniform engine rules (options, defaults unchanged)
+
+* **Added** `simulate(undriven=None | 'refuse' | 'open' | 'closed')`: what
+  controlled switches nothing drives do, the same on `pwl`, `trbdf2`,
+  `'exact'` and through `engine='auto'`. `'refuse'` raises
+  `UnsupportedError` (`feature='switch_fn'`) naming every undriven switch;
+  `'open'` / `'closed'` run them in that state with one entry in
+  `result.diagnostics['undriven']` (no warning). `None` (the default) keeps
+  today's per-engine behaviour: all closed with a warning on `pwl` and
+  `'exact'` (the exact engine's `sensitivities=` run refuses), refused on
+  `trbdf2`, refused by `'auto'` without `dt`. The policy applies when
+  nothing drives any switch; once `switch_fn=`, a closed loop's gate or a
+  control graph drives one, the drive decides the rest as before. The
+  option table (`pulsim.option_capabilities()`) has the row.
+* **Changed (no number moves)** `mode_selection='auto'` is resolved in one
+  place for every engine (the exact engine's rule moved from its dispatcher
+  into the plan); the fixed engine's voltage check is the same function as
+  the other engines'; `plan.resolved_from['t_start']` reads `'resume_from'`
+  when a resume took the snapshot's clock.
+* **Upcoming at the number-changing release** (`benchmarks/tools/next_defaults.py`,
+  section `PLAN`): `undriven='refuse'` becomes the default (**BREAKING**:
+  pass `undriven='closed'` for the old fixed-step / exact behaviour); and
+  `pulsim._plan.UNIFORM_ENGINE_RULES` turns on — the count checks
+  (`store_every`, `max_event_iterations`, `max_dt_halvings`) give one message
+  on every engine that reads them, before the `mmc_arms` combinations;
+  `on_impulse='warn'` / `'error'` with the exact engine's `integrator='bdf2'`
+  (which cannot detect an impulse) is refused by name; the exact engine's
+  impulse refusal names the device kind.
+
 ### esdirk43 runs the stateful kinds and the losses; the exact engine's loss port
 
 * **Added** `integrator='esdirk43'` (engine `trbdf2`) runs the nonlinear

@@ -49,18 +49,25 @@ engine this way. Now:
 - Behaviour that legitimately differs per engine is an explicit per-engine
   entry of the plan or of `_finalize`, never a position in the code.
 
-## What still differs per engine (today's behaviour, kept)
+## What still differs per engine, and how the release makes it one
 
-Stage A moved code without changing a result, a warning or a refusal. These
-blocks are per engine on purpose until the number-changing release decides
-them (DECISIONS 23 of `add-kernel-simulation-object`):
+Stage A moved code without changing a result, a warning or a refusal. The
+blocks that were per engine (DECISIONS 23 of `add-kernel-simulation-object`)
+now each have ONE release behaviour behind a mechanism whose default is
+today's (DECISIONS 26): a keyword resolved in the plan (`None` = today), a
+library default in `pulsim._plan` the number-changing release flips
+(`benchmarks/tools/next_defaults.py`, section `PLAN`), or "kept per engine"
+where the difference is the engine's own.
 
-| block | pwl | trbdf2 | dsed |
-|---|---|---|---|
-| no `switch_fn` (`_undriven`) | all closed + warning, decided in the run after the cache hooks | all open, silent, decided while planning | all closed + warning, decided inside the exact dispatcher |
-| `mmc_arms`, `on_cache` | composed in the run (they need the run's cache) | refused by the route | refused by the route |
-| `progress`, `live_stream` | wired in the run | refused / routed | refused |
-| finalize | breaches, dt retries, guard, resolution and unlocated-edge warnings; voltage check | stats warnings; voltage check | `on_impulse='error'` refuses after the run; voltage check |
-| `mode_selection='auto'` | resolved by the route | resolved by the route (always the settle) | resolved inside the exact dispatcher |
+| block | today: pwl | today: trbdf2 | today: exact (dsed) | release | mechanism |
+|---|---|---|---|---|---|
+| controlled switches nothing drives | all closed + one warning (in the run, after the cache hooks) | refused by name (`feature='switch_fn'`); `'auto'` without `dt` refuses, with `dt` it is pwl | all closed + one warning (inside the exact dispatcher; the `sensitivities=` run refuses) | `'refuse'`: `UnsupportedError` naming every switch, on every engine, above the route (only when nothing drives any switch: a partial drive is the drive's) | `simulate(undriven=None\|'refuse'\|'open'\|'closed')`; `None` reads `_plan.DEFAULT_UNDRIVEN` (`None` today); `'open'` / `'closed'` run that mask on every engine and through `'auto'`, one entry in `result.diagnostics['undriven']` and `plan.diagnostics` |
+| count checks (`store_every`, `max_event_iterations`, `max_dt_halvings`) | Python, after the `mmc_arms` combinations | `max_event_iterations` by the kernel (its own wording); the others refused by name | all three refused by name | one check and one message per option on every engine that reads it, before the `mmc_arms` combinations | `_plan.UNIFORM_ENGINE_RULES` (False today) |
+| `on_impulse='warn'/'error'` | refused at the event by the kernel (ideal branch-form devices) | the same | recorded; `'error'` refuses after the run (the scheduler can retract a trial projection's record); `integrator='bdf2'` never detects one and ignores the keyword | `integrator='bdf2'` refuses `on_impulse` by name; the exact engine's refusal names the device kind as the kernel's | `_plan.UNIFORM_ENGINE_RULES` |
+| `mode_selection='auto'` | resolved in `_route` | resolved in `_route` (the settle: no rule yet) | resolved in `_route` (was: inside the exact dispatcher) | the same (done) | one function, `_resolve_mode_auto`, one rule per engine |
+| voltage check | one function `_auto_check_voltage_sanity` on every engine (was: an inline copy on pwl) | same | same | the same (done) | none needed |
+| `resume_from` clock | starts at the snapshot's `t` when `t_start` is left 0.0; an explicit `t_start` wins | same | refused by name | the same | one rule in `_plan_run`; `plan.resolved_from['t_start'] == 'resume_from'` |
+| `mmc_arms`, `on_cache`, `progress`, `live_stream` | composed / wired in the run (they need the run's own cache or per-step ring) | refused / routed by the option table | refused (`progress` runs) | kept per engine | the option table refuses them by name |
+| loss port on the exact engine | honours `integrator`, `t_start` | honours both | refuses `integrator='bdf2'` and `t_start != 0` by name (its events run on its own clock) | kept per engine | refusal by name |
 
 Stage B moves the plan into the kernel (`sim::RunOptions`, `sim::Simulation`).

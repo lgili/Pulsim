@@ -76,6 +76,23 @@ PROFILE = {
     },
 }
 
+# Library defaults the run plan reads when the call leaves the keyword None
+# (``pulsim._plan`` attributes, every engine and the 'auto' route): the harness
+# sets the attribute, not a keyword (apply with plan_defaults()).
+PLAN = {
+    "DEFAULT_UNDRIVEN": Entry(
+        "refuse", "add-kernel-simulation-object",
+        "DECISIONS 26.1 (task 11.3; orchestrator decision 2026-11-19: an undriven "
+        "controlled switch is refused by name on every engine; simulate(undriven=) "
+        "keeps 'open' / 'closed' / None reachable)", "undriven_refuse"),
+    "UNIFORM_ENGINE_RULES": Entry(
+        True, "add-kernel-simulation-object",
+        "DECISIONS 26.2 (items 6-7 of DECISIONS 23: one count check per option on every "
+        "engine that reads it; on_impulse refused by name where the run cannot detect "
+        "an impulse; the exact engine's impulse refusal names the device kind)",
+        "uniform_rules"),
+}
+
 # Builder-time choice, every engine (applied by builder_form()).
 BUILDER = {"form": Entry("branch", "add-branch-form-ideal-switch",
                          "DECISIONS 23 (measurement gate: flip allowed on pwl), 39 (flip "
@@ -104,8 +121,9 @@ NOT_APPLIED = (
     ("pwl, trbdf2", "composite diode V_F as a conduction drop", "update-composite-diode-forward-drop",
      "nothing to flip: already the default on this tree (the add_mosfet / Level-1 docstrings "
      "read V_F as the body diode's CONDUCTION DROP); a builder default, not a run option"),
-    ("all", "one undriven-switch policy and blocks 2-8", "add-kernel-simulation-object",
-     "DECISIONS 23 (branch feat/core-p3-simulation-object): owner decisions, not options"),
+    ("pwl", "mmc_arms / on_cache, progress / live_stream", "add-kernel-simulation-object",
+     "DECISIONS 26.3: kept per engine (they need the fixed engine's own cache / per-step "
+     "ring); every other engine refuses them by name (option table)"),
 )
 
 
@@ -126,6 +144,21 @@ def apply_profile(engine: str, kwargs: dict, only=None) -> dict:
 
 
 @contextlib.contextmanager
+def plan_defaults(on: bool = True):
+    """``pulsim._plan`` takes the PLAN values for the duration (restored after)."""
+    from pulsim import _plan
+    old = {k: getattr(_plan, k) for k in PLAN}
+    try:
+        if on:
+            for k, e in PLAN.items():
+                setattr(_plan, k, e.value)
+        yield
+    finally:
+        for k, v in old.items():
+            setattr(_plan, k, v)
+
+
+@contextlib.contextmanager
 def builder_form(on: bool = True):
     """add_switch / add_diode build the branch form with the same values (design D6)."""
     if not on:
@@ -139,6 +172,7 @@ def builder_form(on: bool = True):
 def table() -> list:
     rows = [(eng, k, e) for eng, d in PROFILE.items() for k, e in d.items()]
     rows += [("all", k, e) for k, e in BUILDER.items()]
+    rows += [("all", f"_plan.{k}", e) for k, e in PLAN.items()]
     rows += [("auto", "route", ROUTE)]
     rows += [(eng, "integrator (extra column)", e) for eng, _, e in EXTRA.values()]
     return rows

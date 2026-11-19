@@ -547,8 +547,19 @@ def run_dsed_from_builder(
     mode_selection: Optional[str] = None,
     allow_implicit_segments: bool = True,
     ticks: Optional[Any] = None,
+    undriven: Optional[str] = None,
+    mode_auto: Optional[dict] = None,
 ):
     """Run a PED simulation from a :class:`pulsim.CircuitBuilder`.
+
+    ``mode_auto``: the record of ``mode_selection='auto'`` as simulate()'s
+    plan resolved it (`_resolve_mode_auto`, the one place); ``mode_selection``
+    then arrives as 'lcp' or None (a caller that passes 'auto' itself gets
+    the same rule applied here).
+
+    ``undriven`` ('open' / 'closed', from ``simulate(undriven=...)``): the
+    mask of the controlled switches when ``switch_fn`` is None, without the
+    all-closed warning (the plan holds the one diagnostic).
 
     ``ticks`` (``[(fn, period, offset), ...]``): control ticks scheduled
     by the event-driven integrator's event queue, ``fn(t, x_full)`` at
@@ -588,7 +599,9 @@ def run_dsed_from_builder(
     ``opts.integrator``, and the NotImplementedError disappears.
     """
     import numpy as np
-    mode_auto = None   # mode_selection='auto' resolved: its record
+    if mode_selection == "auto":   # not through simulate(): the plan's rule, here
+        from . import _resolve_mode_auto
+        mode_selection, mode_auto = _resolve_mode_auto(builder, "dsed", None)
 
     # ------------------------------------------------------------------
     # v2.0 Phase 3 — structural refusal, BEFORE any work happens.
@@ -714,7 +727,8 @@ def run_dsed_from_builder(
     sf = opts.switch_fn
     if sf is None:
         from . import _undriven
-        sf = _undriven("dsed", builder, stacklevel=5)
+        sf = (_undriven("dsed", builder, stacklevel=5) if undriven is None
+              else _undriven("dsed", builder, 5, undriven))
 
     adapter = CircuitBuilderAdapter(
         builder=builder, cache=cache, switch_fn=sf,
@@ -892,15 +906,6 @@ def run_dsed_from_builder(
                 x0, ic_adjustment = native_adapter.reduced_initial_state(
                     builder)
             shadow_kw = {}
-            if mode_selection == "auto":
-                # 'lcp' where it applies (diodes), else the settle. A diode
-                # circuit always reaches here on rk45: 'auto' became 'rk45'
-                # and 'bdf2' was refused above (the census of _n_diodes).
-                from . import _mode_auto_record
-                if _n_diodes == 0:
-                    mode_selection, mode_auto = _mode_auto_record(None, "no_diodes")
-                else:
-                    mode_selection, mode_auto = _mode_auto_record("lcp", None)
             if mode_selection in ("shadow", "lcp") and (
                     opts.integrator != "rk45" or _n_diodes == 0):
                 raise unsupported(
@@ -1004,10 +1009,6 @@ def run_dsed_from_builder(
             f"simulate(engine='dsed'): initial_state has shape {full_x0.shape}, "
             f"expected ({n_state},); a full-MNA vector is accepted only on the "
             "native adapter.")
-    if mode_selection == "auto":
-        from . import _mode_auto_record
-        mode_selection, mode_auto = _mode_auto_record(
-            None, "no_diodes")  # only reached without diodes (re-raised above)
     if mode_selection in ("shadow", "lcp"):
         raise unsupported(
             "dsed", "mode_selection", message=

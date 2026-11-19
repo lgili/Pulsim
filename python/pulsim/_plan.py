@@ -43,6 +43,24 @@ new = tuple.__new__
 DEFAULT_DISCONTINUITY_RESTART = False
 DEFAULT_SUBSTEP_STATE_CORRECTION = False
 
+# simulate(undriven=None): the policy for controlled switches nothing drives
+# (no switch_fn, no closed loop's gate), read only when the call leaves it
+# None. None = today's per-engine behaviour (pwl and the exact engine run
+# them all CLOSED with a warning; trbdf2 refuses them by name; 'auto' without
+# dt refuses, with dt it is pwl). 'refuse' | 'open' | 'closed' hold on every
+# engine and through 'auto'. The number-changing release sets 'refuse'
+# (add-kernel-simulation-object DECISIONS 26, task 11.3).
+DEFAULT_UNDRIVEN = None
+
+# The engines' remaining position-dependent rules made uniform, one switch
+# (DECISIONS 26): the count checks (store_every, max_event_iterations,
+# max_dt_halvings) with one message on every engine that reads them, before
+# the mmc_arms combinations; on_impulse='warn'/'error' refused by name where
+# the run cannot detect an impulse (the exact engine's integrator='bdf2');
+# the exact engine's impulse refusal names the device kind as the kernel's.
+# False today; True at the number-changing release.
+UNIFORM_ENGINE_RULES = False
+
 
 # plan.features: the keywords that put a feature in the run (set, not
 # default), plus "builder_ics" when the builder's i0= / c0= seed the state.
@@ -55,12 +73,13 @@ FEATURE_KW = ("switch_fn", "b_extra_fn", "step_observer", "closed_loops",
 
 class ResolvedFrom(Mapping):
     """``plan.resolved_from``: keyword -> 'explicit' | 'solver' | 'yaml' |
-    'default', computed when read, so a run that never reads it pays one
-    tuple. ``args``: the values as passed (captured at call time), in the
-    order of ``defaults`` (simulate()'s parameters after ``builder``).
-    'explicit' = not the signature's default (an explicit default reads
-    'default'); 'yaml' / 'solver' = filled from a LoadedCircuit /
-    SolverOptions (`mark`)."""
+    'resume_from' | 'default', computed when read, so a run that never
+    reads it pays one tuple. ``args``: the values as passed (captured at
+    call time), in the order of ``defaults`` (simulate()'s parameters after
+    ``builder``). 'explicit' = not the signature's default (an explicit
+    default reads 'default'); 'yaml' / 'solver' = filled from a
+    LoadedCircuit / SolverOptions; 'resume_from' = ``t_start`` taken from
+    the snapshot's clock (`mark`)."""
 
     __slots__ = ("_args", "_defaults", "_marks", "_d")
 
@@ -209,13 +228,23 @@ class SimPlan(NamedTuple):
     voltage_sanity_factor: Optional[float]
     auto_regularize: bool
     resolved_from: Mapping[str, str]
+    # None, or (policy, switch names): an undriven= policy that applied
+    # (controlled switches nothing drives), decided above the dispatch.
+    undriven: Any = None
 
     @property
     def diagnostics(self) -> tuple:
-        """The planning facts (Stage A: the route's reasons), built when
-        read from ``route_reasons`` (a tuple of strings, fixed at call
-        time)."""
-        return tuple(Diagnostic("route", str(r)) for r in self.route_reasons)
+        """The planning facts (the route's reasons, then the undriven
+        policy that applied), built when read from ``route_reasons`` (a
+        tuple of strings, fixed at call time) and ``undriven``."""
+        out = tuple(Diagnostic("route", str(r)) for r in self.route_reasons)
+        if self.undriven is not None:
+            pol, names = self.undriven
+            out += (Diagnostic("undriven", (
+                f"undriven={pol!r}: {len(names)} controlled switch(es) with "
+                f"no driver run {'OPEN' if pol == 'open' else 'CLOSED'}: "
+                + ", ".join(names))),)
+        return out
 
     @property
     def features(self) -> frozenset:

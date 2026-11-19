@@ -69,3 +69,23 @@ trbdf2_identity, and a hash of every PSS / sensitivity / orbit / AC output).
    has no dg/dt term (pre-existing; a time-varying source takes the Python
    map, which has it); `bind_param("<dev>.g_on")` on an ideal device makes it
    non-ideal at bind time (intended: the parameter is the device's g_on).
+
+## 2. One undriven policy and the per-engine blocks (tasks 2.1–2.3, feat/core-release-options)
+
+Owner decisions delegated to the orchestrator (2026-11-19), implemented as
+options whose default is today's; the full record is DECISIONS 26 of
+`add-kernel-simulation-object`. The release flips two library defaults, both
+data in `benchmarks/tools/next_defaults.py` section `PLAN`:
+
+| item (DECISIONS 23 of add-kernel-simulation-object) | today pwl / trbdf2 / exact | release value | mechanism | profile entry |
+|---|---|---|---|---|
+| 1 undriven controlled switch | closed + warning / refused by name (`switch_fn`) / closed + warning; `auto` no dt refuses | `'refuse'` on every engine and `auto`, naming each switch | `simulate(undriven=)`, `None` reads `_plan.DEFAULT_UNDRIVEN` | `PLAN["DEFAULT_UNDRIVEN"] = 'refuse'` |
+| 7 count checks | pwl (after the mmc combinations) / `max_event_iterations` in the kernel's words, the rest refused by name / all refused by name | one message per count, every engine that reads it, before the mmc combinations | `_plan.UNIFORM_ENGINE_RULES` | `PLAN["UNIFORM_ENGINE_RULES"] = True` |
+| 6 `on_impulse` | refused at the event (kernel) / same / after the run, `kind=''`; `integrator='bdf2'` ignores it | bdf2 refuses `on_impulse` by name; the exact refusal names the kind | `_plan.UNIFORM_ENGINE_RULES` | same entry |
+| 5 `mode_selection='auto'` | one place now (`_route`) | — (done, no caller-visible change) | none | none |
+| 6.2 voltage check | one function on every engine now (the exact engine had it already) | — (done) | none | none |
+| 4 `resume_from` clock | snapshot's t unless t_start is set / same / refused | — (one rule, `plan.resolved_from`) | none | none |
+| 2, 3, 9 `mmc_arms` / `on_cache`, `progress` / `live_stream`, the exact loss port | per engine | kept per engine (engine-inherent), refused by name elsewhere | option table | none |
+
+C++: one row of `sim::kRunOptionTable` (`undriven`). Blast radius of the
+profile on `python/tests` with the two new entries: section 3 below (hand-off).

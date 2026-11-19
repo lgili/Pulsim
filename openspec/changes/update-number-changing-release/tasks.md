@@ -11,14 +11,16 @@ Rehearsal at fe75ee01: the full profile makes NO cell worse on pwl, trbdf2 or th
 - [ ] 1.9 Re-run `next_defaults_rehearsal.py run` and the pytest blast radius on the release candidate; no cell left in the first three worse classes, no refusal group in section 1b
 
 ## 2. Owner decisions before the flip
-- [ ] 2.1 One undriven-switch policy (`add-kernel-simulation-object` DECISIONS 23 item 1, task 11.3 there): today pwl and dsed run all CLOSED with a warning, trbdf2 refuses, `auto` without dt refuses; under the release route `auto` would run it on the exact engine, CLOSED
-- [ ] 2.2 The other per-engine blocks 2–8 of the same decision (`mmc_arms` / `on_cache`, `progress` / `live_stream`, `resume_from` time, `mode_selection='auto'` resolution site, `on_impulse='error'`, pwl-only value checks, `sweep()` recipe)
-- [ ] 2.3 One voltage-sanity check (`add-kernel-simulation-object` task 6.2)
+- [x] 2.1 One undriven-switch policy (`add-kernel-simulation-object` DECISIONS 23 item 1, task 11.3 there): today pwl and dsed run all CLOSED with a warning, trbdf2 refuses, `auto` without dt refuses; under the release route `auto` would run it on the exact engine, CLOSED
+- [x] 2.2 The other per-engine blocks 2–8 of the same decision (`mmc_arms` / `on_cache`, `progress` / `live_stream`, `resume_from` time, `mode_selection='auto'` resolution site, `on_impulse='error'`, pwl-only value checks, `sweep()` recipe)
+- [x] 2.3 One voltage-sanity check (`add-kernel-simulation-object` task 6.2)
+  - 2.1–2.3 decided by the orchestrator (2026-11-19) and implemented behind options whose default is today's (DECISIONS 2 here; DECISIONS 26 of `add-kernel-simulation-object`): `undriven='refuse'` (`_plan.DEFAULT_UNDRIVEN`) and `_plan.UNIFORM_ENGINE_RULES = True` are the release values in `next_defaults.py` `PLAN`; `mode_selection='auto'`, the voltage check and the resume clock are one rule each already; `mmc_arms` / `on_cache`, `progress` / `live_stream`, the exact loss port stay per engine (engine-inherent). Open: the exact engine refuses `on_impulse='error'` after the run, not at the event (its scheduler can retract a record; `dsed/scheduler.hpp` is the exact-engine track's).
 - [ ] 2.4 TR-BDF2 step grid: flip only with its option and its accuracy sign-off (`update-trbdf2-factor-reuse` 5.6, 6.1)
 - [ ] 2.5 The exact route's output grid without `dt` (rehearsal section "engine='auto' under the profile")
 
 ## 3. The flip
 - [ ] 3.1 Defaults in `simulate()` and `sim::kRunOptionTable` take the values of `benchmarks/tools/next_defaults.py` (`--list`)
+  - Includes the `PLAN` section: `pulsim._plan.DEFAULT_UNDRIVEN = 'refuse'`, `pulsim._plan.UNIFORM_ENGINE_RULES = True` (then delete the switch and the today-branches it guards).
 - [ ] 3.2 `add_switch` / `add_diode` default to `form='branch'` (design D6 of `add-branch-form-ideal-switch`); YAML loader the same
 - [ ] 3.3 `engine='auto'` route as `add-exact-propagator-strategy` D11 (task 19.1 there) once its default-flip gate holds
 - [ ] 3.4 Delete what the owning changes list at the flip (device-interface DECISIONS 25: the hand stamps)
