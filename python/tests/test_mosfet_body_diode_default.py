@@ -51,7 +51,8 @@ def test_the_body_diode_is_there_by_default():
     b = _freewheel()
     assert b.node_id_of("sw") >= 0
     # It is a real, named device — reachable like any other.
-    res = p.simulate(b, t_end=1e-6, dt=1e-9, engine="pwl")
+    # the gate is driven OFF: an undriven switch is refused since the release
+    res = p.simulate(b, t_end=1e-6, dt=1e-9, engine="pwl", switch_fn=_all_off(b))
     i_body = np.asarray(res.i("M1_body"))
     assert np.all(np.isfinite(i_body))
 
@@ -98,7 +99,7 @@ def test_without_it_the_node_runs_away_and_the_current_dies():
 
 def test_opting_out_leaves_no_body_device():
     b = _freewheel(body_diode=False)
-    res = p.simulate(b, t_end=1e-8, dt=1e-8, engine="pwl")
+    res = p.simulate(b, t_end=1e-8, dt=1e-8, engine="pwl", switch_fn=_all_off(b))
     with pytest.raises(Exception):
         res.i("M1_body")
 
