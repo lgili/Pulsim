@@ -11,7 +11,7 @@ analytic cases against their closed form (``metrics.err_rms``, as the
 reference harness); v1 circuits the exact truth solves against the mpmath
 truth (``exact_scoreboard.grade``, the ``exact`` measure); the rest (Newton
 devices) against trbdf2 at rtol 1e-10 (not independent; said so). A golden
-whose new run is FARTHER from its truth (beyond 2x, above 1e-12) is flagged.
+whose new run is FARTHER from its truth is flagged and keeps its old golden.
 """
 
 from __future__ import annotations
@@ -93,18 +93,23 @@ def _null():
 def main() -> int:
     warnings.simplefilter("ignore")
     rows, worse = [], []
-    names = sorted(p.stem for p in goldens.GOLDEN_DIR.glob("*.json"))
+    runs = {n: goldens.snapshot(run(), names, newton) for n, run, names, newton in goldens.cases()}
+    names = sorted(runs)
     for name in names:
         old = json.loads((goldens.LEGACY_DIR / f"{name}.json").read_text(encoding="utf-8"))
-        new = json.loads((goldens.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+        new = runs[name]
         if not goldens.compare(old, new) and old["n_steps"] == new["n_steps"]:
             continue
         t, col, ov, nv, r = moved(old, new)
         eo, en, tname = truth_errors(name)
-        closer = ("new closer" if en < eo else "equal" if en == eo else
-                  "WORSE" if en > 2 * eo and en > 1e-12 else "within 2x")
-        if closer == "WORSE":
+        on_file = json.loads((goldens.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+        kept = not goldens.compare(old, on_file)
+        if en > eo:   # farther from the truth: never regenerated (the old golden stays on file)
+            closer = f"FARTHER ({en / eo:.3g}x){'; old golden kept' if kept else '; REGENERATED'}"
             worse.append(name)
+        else:
+            closer = "new closer" if en < eo else "equal"
+            assert not kept, f"{name}: closer to the truth but its golden was not regenerated"
         rows.append(f"| {name} | t={t:.6g} {col} | {ov:.9g} | {nv:.9g} | {tname} | {eo:.3g} | {en:.3g} | {closer} |")
         print(rows[-1], flush=True)
     L = ["# Release golden diff", "",
@@ -112,7 +117,8 @@ def main() -> int:
          "Every fixed-engine golden (`benchmarks/goldens/pwl/`) the number-changing release changed: the",
          "checkpoint entry that moved most (old = `benchmarks/goldens/pwl_legacy/`, the pre-release",
          "defaults, still checked under `next_defaults.legacy()`; new = the defaults), and the whole run",
-         "against its truth under each. `WORSE`: the new run is more than 2x farther from its truth.", "",
+         "against its truth under each. `FARTHER`: the new run is farther from its truth than the old;",
+         "such a golden is not regenerated (the file keeps the pre-release value) and is reported.", "",
          f"{len(rows)} of {len(names)} goldens changed; {len(worse)} worse against the truth"
          + (f": {', '.join(worse)}." if worse else "."), "",
          "| golden | entry | old | new | truth | old error | new error | verdict |",
