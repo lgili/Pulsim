@@ -52,7 +52,10 @@ Three stages, each releasable.
      lib=None, code=None, lang="c", params=None)`; compilation through
      the C block's compile cache, which moves to a per-user directory.
    - YAML type `external_device`; a netlist that loads native code is
-     refused unless the caller passes `allow_native_code=True`.
+     refused unless the load call lists the library (or its directory)
+     in `allow_native_code=[...]`, paths compared with symlinks
+     followed; `allow_native_code=True` is refused (the netlist must not
+     choose the library).
    - Registration checks: ABI version, pattern bounds, finite outputs,
      and the supplied Jacobians against finite differences.
 2. **Equations to C** (`pulsim.xdev`): the user declares pins, internal

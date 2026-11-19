@@ -476,6 +476,19 @@ inline void check_contract(const Instance& in) {
             in.check_jacobian_at(x.data(), st.data(), o, "registration check (accepted state)");
         }
     }
+
+    // ---- named outputs: finite (Instance::outputs refuses) and pure --------
+    if (d.n_outputs > 0) {
+        std::vector<Real> a(d.n_outputs), b(d.n_outputs);
+        for (const auto& x : probes) {
+            in.outputs(x.data(), state0.data(), a.data());
+            in.outputs(x.data(), state0.data(), b.data());
+            if (std::memcmp(a.data(), b.data(), a.size() * sizeof(Real)) != 0) {
+                in.refuse_("outputs_fn is not a pure function of (x, ctx): two calls at x = "
+                           + Instance::vec(x.data(), in.rows()) + " differ");
+            }
+        }
+    }
 }
 
 }  // namespace pulsim::xdev

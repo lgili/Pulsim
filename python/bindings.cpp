@@ -1495,7 +1495,8 @@ void init_module(py::module_& m) {
               [](builder::CircuitBuilder& b, const std::string& name,
                  const std::vector<std::string>& nodes, const std::string& lib,
                  const std::string& model, const py::object& params,
-                 bool check_contract, bool debug_jacobian) -> builder::CircuitBuilder& {
+                 bool check_contract, bool debug_jacobian,
+                 bool record) -> builder::CircuitBuilder& {
                   // add-external-device-abi: loading `lib` runs its native
                   // code; this call (the user naming the path) is the opt-in.
                   auto m = xdev::load_model(lib, model);
@@ -1522,11 +1523,12 @@ void init_module(py::module_& m) {
                   }
                   auto p = xdev::resolve_params(*m, name, given);
                   return b.add_external_device(name, nodes, std::move(m), std::move(p),
-                                               check_contract, debug_jacobian);
+                                               check_contract, debug_jacobian, record);
               },
               py::arg("name"), py::arg("nodes"), py::arg("lib"), py::arg("model"),
               py::arg("params") = py::none(), py::kw_only(),
               py::arg("check_contract") = true, py::arg("debug_jacobian") = false,
+              py::arg("record") = false,
               py::return_value_policy::reference,
               "Add an instance of an EXTERNAL device model (add-external-device-abi): "
               "`lib` is a shared library built against pulsim_xdev.h; loading it runs "
@@ -1535,7 +1537,10 @@ void init_module(py::module_& m) {
               "or (value, unit) (the unit must equal the declared one). The model's "
               "contract (Jacobian, finiteness, KCL, declared claims) is checked here "
               "and refused by name; `debug_jacobian=True` re-checks the Jacobian at "
-              "every evaluation of the run.")
+              "every evaluation of the run. `record=True` traces the device's "
+              "readings at every accepted step of a pwl / trbdf2 run: "
+              "res.device_output(name, key) with key 'i(<pin>)', 'power' or one of "
+              "the model's named outputs.")
         .def("add_saturable_inductor_table",
               &builder::CircuitBuilder::add_saturable_inductor_table,
               py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
@@ -2090,6 +2095,15 @@ void init_module(py::module_& m) {
                               kind_str = "shockley_diode"; break;
                           case K::LauritzenDiode:
                               kind_str = "lauritzen_diode"; break;
+                          case K::ExternalDevice: {
+                              kind_str = "external_device";
+                              const auto& in = *pool.external_device_params(bid).inst;
+                              const auto& md = in.model().d();
+                              for (std::uint32_t k = 0; k < md.n_fields; ++k) {
+                                  params[md.fields[k].name] = in.params()[k];
+                              }
+                              break;
+                          }
                           case K::PmsmMna:
                               kind_str = "pmsm_mna"; break;
                           case K::InductionMachineMna:
@@ -2174,6 +2188,23 @@ void init_module(py::module_& m) {
                           static_cast<int>(br.to));
                       desc["params"] = params;
                       desc["branch_id"] = static_cast<int>(bid);
+                      if (std::string_view(kind_str) == "external_device") {
+                          // add-external-device-abi 1.6: trace a result to its code
+                          const auto& ep = pool.external_device_params(bid);
+                          const auto& m = ep.inst->model();
+                          char hx[17];
+                          std::snprintf(hx, sizeof hx, "%016llx",
+                                        static_cast<unsigned long long>(m.library_hash()));
+                          desc["model"] = m.name();
+                          desc["library"] = m.library_path();
+                          desc["library_hash"] = std::string("fnv1a64:") + hx;
+                          py::list pins;
+                          for (const Index n : ep.pins) pins.append(static_cast<int>(n));
+                          desc["pins"] = py::tuple(pins);
+                          desc["internal_branch"] = static_cast<int>(
+                              std::find(ep.branches.begin(), ep.branches.end(), bid)
+                              - ep.branches.begin());
+                      }
                       // add-power-mosfet-datasheet-device: the channel's
                       // entry stands for the whole composite.
                       if (const auto* pm = self.power_mosfet_record(bid)) {
@@ -3904,26 +3935,52 @@ void init_module(py::module_& m) {
         }
     };
 
+    // add-external-device-abi 1.7: the libraries a netlist may load. A
+    // list of paths (files or directories); True is refused on purpose: a
+    // netlist from an untrusted source must not choose the library.
+    auto native_allow = [](const py::object& a) {
+        yaml::LoadOptions o;
+        if (a.is_none() || (py::isinstance<py::bool_>(a) && !a.cast<bool>())) return o;
+        if (py::isinstance<py::bool_>(a)) {
+            throw py::value_error(
+                "allow_native_code=True is not accepted: pass the library paths or "
+                "directories the netlist may load, allow_native_code=[path, ...] "
+                "(a netlist must not choose the native code it runs)");
+        }
+        if (py::isinstance<py::str>(a)) {
+            throw py::type_error("allow_native_code must be a list of paths, not one string");
+        }
+        const py::module_ os = py::module_::import("os");
+        for (const auto& e : a) o.allow_native_code.push_back(os.attr("fspath")(e).cast<std::string>());
+        return o;
+    };
     m.def("load_yaml_string",
-        [emit_load_warnings](const std::string& yaml_text) {
-            auto lc = yaml::load_string(yaml_text);
+        [emit_load_warnings, native_allow](const std::string& yaml_text,
+                                           const py::object& allow_native_code) {
+            auto lc = yaml::load_string(yaml_text, native_allow(allow_native_code));
             emit_load_warnings(lc);
             return lc;
-        }, py::arg("yaml_text"),
+        }, py::arg("yaml_text"), py::kw_only(), py::arg("allow_native_code") = py::none(),
         "Parse a YAML circuit description from an in-memory "
         "string. Returns LoadedCircuit(builder, options). Warns on "
         "unknown top-level / `circuit:` / `simulation:` keys; refuses "
-        "a `simulation:` block indented under `circuit:`.");
+        "a `simulation:` block indented under `circuit:`. "
+        "`allow_native_code`: the shared libraries (paths or directories, "
+        "symlinks followed) an `external_device` entry may load; without "
+        "it every such entry is refused (a relative `lib:` is taken from "
+        "the working directory).");
     m.def("load_yaml_file",
-        [emit_load_warnings](const std::string& path) {
-            auto lc = yaml::load_file(path);
+        [emit_load_warnings, native_allow](const std::string& path,
+                                           const py::object& allow_native_code) {
+            auto lc = yaml::load_file(path, native_allow(allow_native_code));
             emit_load_warnings(lc);
             return lc;
-        }, py::arg("path"),
+        }, py::arg("path"), py::kw_only(), py::arg("allow_native_code") = py::none(),
         "Parse a YAML circuit description from disk. "
         "Returns LoadedCircuit(builder, options); errors and "
         "warnings name the path. Same key checks as "
-        "`load_yaml_string`.");
+        "`load_yaml_string`; a relative `lib:` of an `external_device` "
+        "is taken from the file's folder.");
 
     // ---- PWM switch_fn helper (Layer 2 V5) -------------------------------
     //

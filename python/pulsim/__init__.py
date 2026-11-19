@@ -1713,6 +1713,7 @@ SimulationResult.rms = _rec_mod.result_rms            # type: ignore[attr-define
 SimulationResult.integral = _rec_mod.result_integral  # type: ignore[attr-defined]
 SimulationResult.minmax = _rec_mod.result_minmax      # type: ignore[attr-defined]
 SimulationResult.at = _rec_mod.result_at              # type: ignore[attr-defined]
+SimulationResult.device_output = _rec_mod.result_device_output  # type: ignore[attr-defined]
 
 
 def _result_plot(self, *signals, save=None, show=None, **kwargs):
@@ -2102,8 +2103,9 @@ def _run_on_simulation(circuit, run_opts, kw, sim=None):
         sim = Simulation(circuit, run_opts, True)
     sim.set_switch_fn(kw["switch_fn"])
     _rec_mod.attach_loop_feed(sim, "pwl")  # recorders in the loop (0b.6)
+    trace = _rec_mod.attach_xdev_trace(sim)  # record=True external devices
     if not kw.keys() - _SIM_RUN_BASE_KW:  # the common call: nothing else
-        return _pulsim_module._run_simulation(sim), sim.builder
+        return _with_trace(_pulsim_module._run_simulation(sim), trace), sim.builder
     get = kw.get
     if get("b_extra_fn") is not None:
         sim.set_source_term(kw["b_extra_fn"])
@@ -2132,7 +2134,13 @@ def _run_on_simulation(circuit, run_opts, kw, sim=None):
             "Simulation setter (a kernel defect, please report it)")
     # simulate() attaches the handles; the result reads the builder whose
     # pool the run stamped device state into.
-    return _pulsim_module._run_simulation(sim), sim.builder
+    return _with_trace(_pulsim_module._run_simulation(sim), trace), sim.builder
+
+
+def _with_trace(res, trace):
+    if trace is not None:
+        res._xdev_trace = trace
+    return res
 
 
 def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
@@ -3285,6 +3293,7 @@ def simulate(
                 _sim = Simulation(_run_circuit, _tro, True)
                 _sim.set_switch_fn(switch_fn)
                 _rec_mod.attach_loop_feed(_sim, "trbdf2")
+                _xtrace = _rec_mod.attach_xdev_trace(_sim)
                 if b_extra_fn is not None:
                     _sim.set_source_term(b_extra_fn)
                 if initial_state is not None:
@@ -3298,7 +3307,7 @@ def simulate(
                         _plan.tick_offsets or [0.0] * len(_plan.ticks),
                         _monitor_flags(_plan.ticks), strict=True):
                     _sim.add_tick(_p, _f, _o, _m)
-                res = _pulsim_module._run_simulation(_sim)
+                res = _with_trace(_pulsim_module._run_simulation(_sim), _xtrace)
                 _stats = _sim.trbdf2_stats
                 builder = _sim.builder  # the pool the run stamped state into
             else:

@@ -3,9 +3,11 @@
 - [x] 1.2 `core/include/pulsim/device/external_device.hpp`: `ExternalDevice` registry entry with run-time arity; span-based `stamp_fq` overload sharing the time-formula coefficients with the static overload; slot reservation from the fixed patterns
 - [x] 1.3 Loader and registration checks (version, size, pattern bounds and duplicates, parameter bounds, `validate`, finite outputs, Jacobian against central differences at 16 points); each refusal names the device and the reason
 - [x] 1.4 Non-finite `eval` output during a run → Newton failure naming the device
-- [ ] 1.5 `python/pulsim/_native_cache.py`: the C block's compile cache moved to a per-user directory (mode 0700, ownership check); `c_block.py` uses it; test that a foreign-owned cached file is rebuilt, and that the existing C block tests pass
-- [ ] 1.6 `pulsim.add_external_device(builder, name, nodes, *, lib=None, code=None, lang="c", params=None, check_jacobian=True)`; binding, stubs; `components()` entry with library path and hash
-- [ ] 1.7 YAML type `external_device` (`lib` or `code`, `nodes`, `params`); refused without `allow_native_code=True`; strict keys from the field table
+- [x] 1.5 (DECISIONS #32: factored, a non-private cached library is rebuilt) `python/pulsim/_native_cache.py`: the C block's compile cache moved to a per-user directory (mode 0700, ownership check); `c_block.py` uses it; test that a foreign-owned cached file is rebuilt, and that the existing C block tests pass
+- [~] 1.6 (`components()` entry with library path and FNV-1a hash done, #31; the `pulsim.add_external_device(..., code=)` free function is not — `CircuitBuilder.add_external_device` stays the entry) `pulsim.add_external_device(builder, name, nodes, *, lib=None, code=None, lang="c", params=None, check_jacobian=True)`; binding, stubs; `components()` entry with library path and hash
+- [x] 1.7 (DECISIONS #30) YAML type `external_device` (`lib`, `model`, `nodes`, `params`); refused unless the load call lists the library or its directory in `allow_native_code=[...]` (symlinks followed before the comparison; a library outside the list refused by name; `allow_native_code=True` refused with a message asking for the paths); strict keys from the field table; inline `code` out of this slice
+
+Slice 4 notes (DECISIONS #24-#34): merged feat/core-integration b28f1e57; the Lauritzen twin with an internal charge (3.1, 1.5e-11) and the junction capacitor (2.2, 2.8e-15 once the test matches the built-in's 1e-12 S node G_min); kernel-owned state verified across rejected trbdf2 steps and snapshot / resume, steady state refuses by name (3.2 partial); named outputs as an appended descriptor block read behind `struct_size`, `res.device_output(name, key)` for devices added with `record=True` (3.4); YAML `external_device` behind an `allow_native_code=[paths]` allow list (1.7); `components()` with library hash (1.6 part); the native cache factored into `_native_cache.py`, a non-private cached library rebuilt (1.5). Still open: 3.3 events (needs a generic event-signal source in the loops, #29), the steady-state copy of the external block, 1.6's `code=`, section 4 (not started), section 5.
 
 Slice 3 notes (DECISIONS #17-#23): the solve's time in `ctx->t` (`PULSIM_XDEV_HOST_TIME`; a library built against the header as of c90fc07f gets it too); DC operating point and kernel AC sweep for external devices (2.1, 2.3 done); the reviewer's #16 list closed (one-sided differences for non-SMOOTH models, always-on state / parameter guards, interleaved + threaded reentrancy probes, byte hash, MAX_PATH prefix, overflowing sum); an `examples/` model (self-heating resistor, C, its own build script and claim). Still open: 1.5, 1.6's `code=` / `components()` hash, 1.7 (YAML opt-in), 2.2, 3.1–3.4, stages 4–6.
 
@@ -15,7 +17,7 @@ Slice 1 notes (DECISIONS.md): 1.1 header is `core/include/pulsim/xdev/pulsim_xde
 
 ## 2. Acceptance: stateless devices
 - [x] 2.1 (pwl 0.0 / trbdf2 done; DC operating point 0.0 on both twins, DECISIONS #18) External Shockley diode (same expression as `models/shockley_diode.hpp`, including the linear extension above `i_lim` and `G_min`) in a 20 V half-wave rectifier: node voltages equal the built-in's within 1e-12 on `pwl` and in the DC operating point, within 1e-9 on `trbdf2`
-- [ ] 2.2 External junction capacitor (`q` only, `C0 = 2 nF`, `V0 = 25 V`, `m = 0.5`): equals `add_nonlinear_capacitor` within 1e-12 on `pwl`; charge at 400 V = 312.31 nC
+- [x] 2.2 (2.8e-15 with the built-in's structural G_min matched; 312.3106 nC — DECISIONS #26) External junction capacitor (`q` only, `C0 = 2 nF`, `V0 = 25 V`, `m = 0.5`): equals `add_nonlinear_capacitor` within 1e-12 on `pwl`; charge at 400 V = 312.31 nC
 - [x] 2.3 (at 0.39 A: 1.8e-15; plus the saturable inductor's L(I), 5.7e-11 — DECISIONS #20) AC: external Shockley at 1 A → small-signal resistance `n·V_T/(I + I_S)` within 1e-9
 - [x] 2.4 Negative tests: wrong `abi_version`; pattern index out of range; a Jacobian entry scaled by 1.01; a parameter outside its bounds; `eval` returning NaN — each refused or reported with the device name
 - [x] 2.5 Sweep on 8 threads with an external device is bit-identical to the serial run (`test_threaded_sweep_with_an_external_device_equals_the_serial_run`, thread backend, 8 workers registering concurrently)
@@ -23,10 +25,10 @@ Slice 1 notes (DECISIONS.md): 1.1 header is `core/include/pulsim/xdev/pulsim_xde
 - [x] 2.6 Twin of the saturable inductor (internal row, flux q) on pwl (6e-16) and trbdf2; snapshot / resume bit-identical with model state (`energy_meter`)
 
 ## 3. State, events, outputs
-- [ ] 3.1 Internal unknowns: external Lauritzen diode (one internal charge) against the built-in within 1e-10
-- [ ] 3.2 `init` / `accept` with kernel-owned state in the flat device-state vector; snapshot and restore round-trip (steady-state solver, rejected steps)
-- [ ] 3.3 `events`: a current-limit latch whose opening instant matches the analytic crossing within the engine's event tolerance, on `pwl` and `trbdf2`
-- [ ] 3.4 `outputs`: named outputs available as `res.device_output(name, key)`; current and power through the generic outputs of the device interface
+- [x] 3.1 (1.5e-11 pwl, both device paths — DECISIONS #25) Internal unknowns: external Lauritzen diode (one internal charge) against the built-in within 1e-10
+- [~] 3.2 (rejected trbdf2 steps 1.6e-15, snapshot / resume, DECISIONS #27; the steady-state solvers REFUSE the block by name — the period map does not copy it yet) `init` / `accept` with kernel-owned state in the flat device-state vector; snapshot and restore round-trip (steady-state solver, rejected steps)
+- [ ] 3.3 (open: what the loops lack is written in DECISIONS #29; `n_events` reserved and refused) `events`: a current-limit latch whose opening instant matches the analytic crossing within the engine's event tolerance, on `pwl` and `trbdf2`
+- [x] 3.4 (appended descriptor block 1, `record=True`, DECISIONS #28) `outputs`: named outputs available as `res.device_output(name, key)`; current and power through the generic outputs of the device interface
 - [~] 3.5 (kind-table row + conformance cell `ExternalDevice`: pwl, trbdf2, DC, ac_sweep yes; dsed, bdf1 refused — DECISIONS #18/#20/#23) Conformance rows (`add-engine-conformance-matrix`): `external_device` × {pwl ok, trbdf2 ok, dsed refused, DC ok, AC ok}
 
 ## 4. Equations to C (`pulsim.xdev`)
@@ -42,7 +44,7 @@ Slice 1 notes (DECISIONS.md): 1.1 header is `core/include/pulsim/xdev/pulsim_xde
 - [ ] 5.3 Test: a Verilog-A diode compiled by the user's tool chain, same circuit in ngspice and Pulsim, within 1e-6 (skipped when the compiler is absent)
 
 ## 6. Documentation
-- [ ] 6.1 `docs/external-devices.md` (the row convention, purity of `eval`, the 1e-12 smoothness requirement, trust boundary), `docs/c-block.md` (cache location; C block versus external device), `AI_GUIDE.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (no sandbox, no external PWL devices, OSDI coverage), `CHANGELOG.md` (cache move)
+- [~] 6.1 (all done except `AI_GUIDE.md`, which got only the two YAML signatures: it is at its 32 KiB cap) `docs/external-devices.md` (the row convention, purity of `eval`, the 1e-12 smoothness requirement, trust boundary), `docs/c-block.md` (cache location; C block versus external device), `AI_GUIDE.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (no sandbox, no external PWL devices, OSDI coverage), `CHANGELOG.md` (cache move)
 
 ## 7. Verification
 - [ ] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check

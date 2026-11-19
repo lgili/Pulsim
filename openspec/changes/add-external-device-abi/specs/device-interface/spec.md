@@ -84,15 +84,23 @@ run SHALL be reported as a solver failure naming the device.
 
 Native code SHALL be loaded only at the caller's explicit request. A
 YAML netlist that declares an external device SHALL be refused unless
-the load call passes `allow_native_code=True`. Compiled libraries SHALL
-be cached in a directory private to the current user, and a cached file
-not owned by that user SHALL NOT be loaded.
+the load call lists its library, or a directory containing it, in
+`allow_native_code`; paths SHALL be compared after resolving symbolic
+links, and a blanket permission (`allow_native_code=True`) SHALL be
+refused. Compiled libraries SHALL be cached in a directory private to
+the current user, and a cached file not owned by that user, or
+writable by others, SHALL NOT be loaded.
 
 #### Scenario: Netlist with native code
 - **WHEN** a netlist containing `type: external_device` is loaded
-  without `allow_native_code=True`
+  without `allow_native_code`
 - **THEN** loading fails with an error that names the device and the
   option
+
+#### Scenario: Library outside the allow list
+- **WHEN** the netlist's library resolves (symlinks followed) to a file
+  that is neither listed nor inside a listed directory
+- **THEN** loading fails naming the device and the resolved path
 
 #### Scenario: Foreign cache entry
 - **GIVEN** a file with the expected cache name that is owned by

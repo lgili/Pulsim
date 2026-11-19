@@ -4,8 +4,10 @@ An external device is an implicit Newton device whose law comes from a shared
 library you build: Pulsim stamps it like a built-in device on the `pwl` and
 `trbdf2` engines, in the DC operating point (`start_from_dc_op`,
 `compute_dc_operating_point`) and in the kernel AC sweep. Status: stages 1–3
-of `add-external-device-abi` (C ABI, checks, Python call, time, DC, AC); no
-YAML type yet.
+of `add-external-device-abi` (C ABI, checks, Python call, time, DC, AC),
+internal unknowns and model state, named outputs, and a YAML type behind an
+allow list. Not yet: event functions (zero crossings located by the engine),
+inline `code=`, equations-to-C (`pulsim.xdev`), OSDI.
 
 ## Loading a library runs native code
 
@@ -13,8 +15,22 @@ A shared library is arbitrary native code that runs with your privileges.
 Pulsim checks the model's *mathematics* (below); it does not sandbox it and
 cannot stop a library from crashing the process or reading your files. Load
 only libraries you built or trust. Pulsim never loads a library on its own:
-only `add_external_device(..., lib=path)` loads one, with the path you name.
-There is no YAML device type, so a netlist cannot make Pulsim load code.
+`add_external_device(..., lib=path)` loads the path you name, and a YAML
+netlist's `external_device` loads only a library the load call lists:
+
+```python
+lc = pulsim.load_yaml_file("net.yaml", allow_native_code=["/opt/mymodels"])
+```
+
+`allow_native_code` is a list of library files or directories; the netlist's
+`lib:` (relative to the YAML file's folder, or to the working directory for
+`load_yaml_string`) and every list entry are resolved with symlinks followed
+before the comparison, and a library outside the list is refused by name.
+Without the list every `external_device` entry is refused, and
+`allow_native_code=True` is refused too: a netlist from an untrusted source
+must not choose the code it runs. The cache of compiled C blocks is per user
+(mode 0700); a cached library another user owns or can write is rebuilt,
+never loaded.
 
 ## The contract
 
@@ -79,6 +95,36 @@ threads at once against the serial results (a probe for a model that shares
 scratch between calls, not a proof: a race that does not fire there is not
 excluded). Every model must be reentrant; there is no serial-only mode.
 
+## Internal unknowns, model state, outputs
+
+- **Internal unknowns** are rows `n_pins …` (x, f, q); each is an unknown of
+  the circuit on a branch named after the device (`name`, `name#1`, …), with
+  the 1e-12 branch conductance a built-in inductor row has. The Lauritzen
+  diode with its stored charge as one internal unknown
+  (`core/tests/xdev/twin_models.cpp`, `lauritzen_twin`) gives the built-in's
+  reverse recovery on `pwl` (both device paths) and `trbdf2`.
+- **Model state** (`n_state` reals, `init`, `accept`) lives in the kernel's
+  flat device-state vector: snapshots carry it, a rejected step restores it
+  (`accept` runs for accepted steps only), a resumed run continues it.
+- **Named outputs** (appended descriptor block 1, still ABI version 1:
+  `n_outputs`, `outputs` = {name, unit}, `outputs_fn(ctx, x, out)` evaluated
+  with the committed state). A library built against an older header has no
+  outputs and loads unchanged. Add the device with `record=True` and read
+
+  ```python
+  res.device_output("M", "i(a)")     # current INTO the device at pin a: f + committed dq/dt
+  res.device_output("M", "power")    # sum of pin voltage x pin current
+  res.device_output("M", "energy")   # one of the model's named outputs
+  ```
+
+  at every stored sample of a `pwl` / `trbdf2` run (traced at each accepted
+  step; nothing is traced without `record=True`). `power` and `i(<pin>)` are
+  reserved keys; a model naming an output so is refused.
+- **Events are reserved, not supported**: `n_events` must be 0. No engine
+  locates an external device's zero crossing yet (the locators are
+  per-kind: gate edges and switched-diode signals), so a model declaring one
+  is refused instead of running without its events.
+
 ## Building a model, platforms
 
 - Compile against the installed package: `cc -std=c99 -shared -fPIC
@@ -105,10 +151,29 @@ b.add_external_device("L1", ["a", "gnd"], "/path/libmymodels.so", "satind_twin",
 ```
 
 Parameters by field name; a `(value, unit)` pair must use the declared unit
-(no conversion). Engines: `pwl`, `trbdf2` run it (`device_path='legacy'`
+(no conversion). `components()` lists the device as `external_device` with
+its parameters, `model`, `library` (the canonical path loaded) and
+`library_hash` (FNV-1a of the library's bytes at load), so a result can be
+traced to the code that produced it. Engines: `pwl`, `trbdf2` run it (`device_path='legacy'`
 routes it through its law too: it has no hand stamp), the DC operating
 point and the kernel AC sweep; `dsed` (the exact engine) and `bdf1` refuse it
 with `UnsupportedError`. The exact engine admits no Newton device at all: it
 propagates each topology mode in closed form, which a law known only through
 `f`, `q` and their Jacobians at sampled points cannot give.
 The test models in `core/tests/xdev/` are illustrations, not part models.
+
+## YAML
+
+```yaml
+- type: external_device
+  name: D1
+  nodes: [a, k]                 # the model's pin order
+  lib: models/libmymodels.so    # relative to this file's folder
+  model: my_diode
+  params: {I_S: 1.0e-12, V_T: [0.025852, V]}
+```
+
+Keys are strict (`type`, `name`, `nodes`, `lib`, `model`, `params`); a
+parameter must be one of the model's fields and a `[value, unit]` pair must
+use its declared unit. Inline `code:` is not accepted. Loading needs
+`allow_native_code=[...]` (above).

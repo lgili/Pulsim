@@ -54,6 +54,7 @@ public:
         /// Each pattern entry's offset into J_nl's value array, validated
         /// before every use (-1: not resolved yet).
         mutable std::vector<std::ptrdiff_t> fslot, qslot;
+        bool record = false;     ///< traced by xdev::OutputTrace (res.device_output)
     };
 
     void init(const topology::Graph& graph, const DevicePool& pool) {
@@ -64,6 +65,7 @@ public:
             Device d;
             d.inst = p.inst;
             d.at = p.pins;
+            d.record = p.record;
             const std::size_t ni = p.inst->model().d().n_internal;
             for (std::size_t k = 0; k < ni; ++k) {
                 d.at.push_back(pool.branch_var_id_for_inductor(p.branches[k], graph));
@@ -80,6 +82,7 @@ public:
         }
         // consistent start at x = 0: q_n = q(0), model state from init(0)
         for (auto& d : devices_) start_(d, nullptr);
+        start_cells_ = cells_;
     }
 
     [[nodiscard]] bool empty() const noexcept { return devices_.empty(); }
@@ -90,6 +93,32 @@ public:
 
     void seed_from_dc_op(const Vector& x) {
         for (auto& d : devices_) start_(d, &x);
+        start_cells_ = cells_;
+    }
+
+    /// The generic readings of device k (add-unified-device-interface step
+    /// 9's convention) at x with the committed cells — or, `at_start`, the
+    /// cells the run started from (init / DC seed / restored snapshot):
+    /// dst = [i_pin[0..n_pins) (f + committed q̇, current INTO the device),
+    /// power = Σ v_pin·i_pin, the model's named outputs]. Read-only.
+    [[nodiscard]] std::size_t reading_width(std::size_t k) const {
+        const auto& md = devices_[k].inst->model().d();
+        return md.n_pins + 1 + md.n_outputs;
+    }
+    void reading(std::size_t k, const Vector& x, Real t, bool at_start, Real* dst) const {
+        const Device& d = devices_[k];
+        const std::vector<Real>& cells = at_start ? start_cells_ : cells_;
+        const std::size_t R = d.inst->rows(), NP = d.inst->model().d().n_pins;
+        const Real* st = cells.data() + d.off + 3 * R;
+        gather_(d, x);
+        d.inst->eval(d.x.data(), st, d.o, t);
+        Real p = Real{0};
+        for (std::size_t r = 0; r < NP; ++r) {
+            dst[r] = d.o.f[r] + cells[d.off + R + r];
+            p += d.x[r] * dst[r];
+        }
+        dst[NP] = p;
+        d.inst->outputs(d.x.data(), st, dst + NP + 1, t);
     }
 
     /// The time every later evaluation hands the model (ctx->t): the
@@ -253,6 +282,7 @@ public:
                 + std::to_string(flat.size()) + " — the snapshot belongs to a different circuit");
         }
         cells_ = flat;
+        start_cells_ = cells_;
     }
 
 private:
@@ -340,6 +370,7 @@ private:
 
     std::vector<Device> devices_;
     std::vector<Real> cells_;
+    std::vector<Real> start_cells_;   ///< the cells the run started from (readings at t_start)
     const Real* t_ = nullptr;
     Real t0_ = Real{0};
 };

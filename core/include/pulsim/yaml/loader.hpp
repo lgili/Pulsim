@@ -58,6 +58,7 @@
 
 #include <array>
 #include <charconv>
+#include <filesystem>
 #include <cmath>
 #include <numbers>
 #include <format>
@@ -87,7 +88,25 @@ struct LoadedCircuit {
     std::vector<std::string>   warnings{};
 };
 
+/// add-external-device-abi 1.7: what a netlist may load. A YAML
+/// `external_device` names a shared library, i.e. native code: it is loaded
+/// only when its path (symlinks followed) is one of `allow_native_code` or
+/// lies inside one of its directories. Empty: every external device is
+/// refused by name. A netlist from an untrusted source cannot choose the
+/// library — the caller lists what may run.
+struct LoadOptions {
+    std::vector<std::string> allow_native_code;
+    /// Where a relative `lib:` is taken from (the YAML file's folder for
+    /// `load_file`; the working directory for `load_string`).
+    std::string base_dir;
+};
+
 namespace detail {
+
+/// The options of the load in progress on this thread (load_text's scope):
+/// reached by `load_device` at any nesting (subsystems) without threading
+/// them through every loader signature.
+inline thread_local const LoadOptions* tl_load_options = nullptr;
 
 [[nodiscard]] inline std::string device_label(
     const YAML::Node& dev, std::size_t idx,
@@ -412,6 +431,86 @@ inline void load_losses(builder::CircuitBuilder& b, const YAML::Node& dev,
     }
 }
 
+/// `type: external_device` — {name, nodes, lib, model, params}; params by
+/// the model's field names, a number or [value, unit] (strict: an unknown
+/// field is refused by the model's field table).
+inline void load_external_device(builder::CircuitBuilder& b, const YAML::Node& dev,
+                                 std::size_t idx) {
+    namespace fs = std::filesystem;
+    const std::string who = device_label(dev, idx, "external_device");
+    require_only_keys(dev, idx, "external_device", {"nodes", "lib", "model", "params"});
+    const LoadOptions* opts = tl_load_options;
+    if (!opts || opts->allow_native_code.empty()) {
+        throw std::runtime_error(std::format(
+            "yaml::load: device {} loads native code (a shared library runs with your "
+            "privileges); refused unless the load call lists the library: pass "
+            "allow_native_code=[<library path or directory>, ...]", who));
+    }
+    if (!dev["nodes"] || !dev["nodes"].IsSequence()) {
+        throw std::runtime_error(std::format("yaml::load: device {} needs 'nodes' as a list "
+                                             "of node names, in the model's pin order", who));
+    }
+    const auto nodes = dev["nodes"].as<std::vector<std::string>>();
+    const std::string lib = require_string(dev, idx, "external_device", "lib");
+    const std::string model = require_string(dev, idx, "external_device", "model");
+    auto u8 = [](const std::string& s) { return fs::path(std::u8string(s.begin(), s.end())); };
+    fs::path lp = u8(lib);
+    if (lp.is_relative()) lp = u8(opts->base_dir.empty() ? "." : opts->base_dir) / lp;
+    std::error_code ec;
+    const fs::path canon = fs::canonical(lp, ec);
+    if (ec) {
+        throw std::runtime_error(std::format("yaml::load: device {}: library '{}' not found ({})",
+                                             who, lib, ec.message()));
+    }
+    bool allowed = false;
+    for (const auto& a : opts->allow_native_code) {
+        std::error_code e2;
+        const fs::path ca = fs::canonical(u8(a), e2);
+        if (e2) continue;   // an entry that does not exist allows nothing
+        if (ca == canon) allowed = true;
+        if (fs::is_directory(ca, e2)) {
+            const fs::path rel = canon.lexically_relative(ca);
+            allowed = allowed || (!rel.empty() && *rel.begin() != "..");
+        }
+    }
+    const auto u8s = canon.u8string();
+    const std::string canon_s(u8s.begin(), u8s.end());
+    if (!allowed) {
+        throw std::runtime_error(std::format(
+            "yaml::load: device {}: library '{}' (resolved: '{}') is not in "
+            "allow_native_code; refused", who, lib, canon_s));
+    }
+    auto m = xdev::load_model(canon_s, model);
+    std::vector<xdev::NamedParam> given;
+    if (dev["params"]) {
+        if (!dev["params"].IsMap()) {
+            throw std::runtime_error(std::format("yaml::load: device {}: 'params' must be a map "
+                                                 "of field name to a number or [value, unit]", who));
+        }
+        for (const auto& kv : dev["params"]) {
+            xdev::NamedParam np;
+            np.name = kv.first.as<std::string>();
+            const YAML::Node v = kv.second;
+            try {
+                if (v.IsSequence() && v.size() == 2) {
+                    np.value = v[0].as<Real>();
+                    np.unit = v[1].as<std::string>();
+                    np.has_unit = true;
+                } else {
+                    np.value = v.as<Real>();
+                }
+            } catch (const YAML::Exception&) {
+                throw std::runtime_error(std::format("yaml::load: device {}: parameter '{}' must "
+                                                     "be a number or [value, unit]", who, np.name));
+            }
+            given.push_back(std::move(np));
+        }
+    }
+    const std::string name = dev["name"].as<std::string>();
+    auto prm = xdev::resolve_params(*m, name, given);
+    b.add_external_device(name, nodes, std::move(m), std::move(prm));
+}
+
 inline void load_device(
     builder::CircuitBuilder& b, const YAML::Node& dev,
     std::size_t idx) {
@@ -424,6 +523,14 @@ inline void load_device(
     const std::string name = dev["name"] && dev["name"].IsScalar()
         ? dev["name"].as<std::string>()
         : std::string{"<unnamed>"};
+    if (type == "external_device") {
+        if (!dev["name"] || !dev["name"].IsScalar()) {
+            throw std::runtime_error(std::format(
+                "yaml::load: device #{} (external_device) needs a 'name'", idx));
+        }
+        load_external_device(b, dev, idx);
+        return;
+    }
 
     // add-branch-form-ideal-switch: `form` is conductance | branch, on
     // every type that builds a PWL switch or ungated diode (a typo must
@@ -1787,7 +1894,13 @@ namespace detail {
 /// Shared body of `load_string` / `load_file`. `source` is recorded on
 /// the result and is what error messages call the file.
 [[nodiscard]] inline LoadedCircuit load_text(
-    const std::string& yaml_text, const std::string& source) {
+    const std::string& yaml_text, const std::string& source,
+    const LoadOptions& opts = {}) {
+    struct Scope {
+        const LoadOptions* prev;
+        explicit Scope(const LoadOptions* o) : prev(tl_load_options) { tl_load_options = o; }
+        ~Scope() { tl_load_options = prev; }
+    } const scope(&opts);
     YAML::Node root;
     try {
         root = YAML::Load(yaml_text);
@@ -1905,14 +2018,19 @@ namespace detail {
 /// `std::runtime_error` on validation errors or malformed
 /// YAML.
 [[nodiscard]] inline LoadedCircuit load_string(
-    const std::string& yaml_text) {
-    return detail::load_text(yaml_text, "<string>");
+    const std::string& yaml_text, const LoadOptions& opts = {}) {
+    return detail::load_text(yaml_text, "<string>", opts);
 }
 
 /// Parse a YAML circuit description from a file on disk.
 /// Wraps any I/O or parse errors with the file path.
 [[nodiscard]] inline LoadedCircuit load_file(
-    const std::string& path) {
+    const std::string& path, LoadOptions opts = {}) {
+    if (opts.base_dir.empty()) {
+        const auto parent = std::filesystem::path(std::u8string(path.begin(), path.end()))
+                                .parent_path().u8string();
+        opts.base_dir.assign(parent.begin(), parent.end());
+    }
     std::ifstream stream(path);
     if (!stream.is_open()) {
         throw std::runtime_error(
@@ -1921,7 +2039,7 @@ namespace detail {
     std::stringstream ss;
     ss << stream.rdbuf();
     try {
-        return detail::load_text(ss.str(), path);
+        return detail::load_text(ss.str(), path, opts);
     } catch (const std::exception& e) {
         throw std::runtime_error(
             "yaml::load_file('" + path + "'): " + e.what());

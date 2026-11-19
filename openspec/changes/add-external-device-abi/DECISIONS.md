@@ -294,6 +294,108 @@
     law known only through f, q and their Jacobians at sampled points has no
     closed-form propagator. Documented as a limitation.
 
+## Slice 4 — state, outputs, YAML allow list, native cache (2026-11-20)
+
+24. **Merge of feat/core-integration b28f1e57** (real merge, 552c3086).
+    `pwl::StepCtx::t` is still written at every place the skeleton writes
+    the step context (pwl `run_event_iteration`; trbdf2 probe `trap_solve`,
+    stage 1, stage 2) — no new writer appeared. The time test
+    (`test_a_time_dependent_law_reads_the_solve_time`, ramp conductance, both
+    libraries, pwl and trbdf2) re-run: worst |v_a − closed form| = 1.1e-16 V on all four (pwl / trbdf2 × `contract` / `contract_v1`).
+25. **3.1 Lauritzen twin with an internal charge** (`lauritzen_twin`,
+    `twin_models.cpp`): f = {i, −i, A·q_M − q_E/T_M}, q = {0, 0, q_M} — the
+    device law's local row as an internal unknown of the circuit. Double
+    pulse (400 V, 20 A, 50 nH, S1 on at 1 µs), pwl dt = 0.2 ns: worst relative gap 1.5e-11 (legacy device path) / 1.3e-11 (interface), same grid, the stray current recovers to −105.8 A in both; trbdf2 (rtol 1e-6, both 7528 samples): 2.6e-7 relative on i(Lstray), interpolated.
+    The built-in condenses q_M (K0/K1, or the interface path's local row);
+    the external solves it as a circuit unknown with the 1e-12 branch
+    conductance (#7) — 1e-12·q_M ≈ 1e-19 A against 10 A terms.
+26. **2.2 junction capacitor** (`junction_cap_twin`, hand Jacobian, the
+    built-in's operation order and floor clamp; probe box above the floor,
+    where the clamp is not C1): gap 2.4e-15 (legacy) / 2.8e-15 (interface) relative on pwl dt = 1 ns once the test adds the built-in's structural G_min (assemble.hpp stamps 1e-12 S on each node of a nonlinear capacitor; without it the gap was 1.03e-11 — the built-in sits 4e-9 V under 400 V, the twin does not). Charge delivered at 400 V: ∫ i(pos) dt over the recorded generic reading = 312.3106 nC. The resistor-current trapezoid gives 332.3 nC: it counts the t = 0 sample (40 A at v = 0) that no step integrated.
+27. **3.2 state in the flat vector** — already true since slice 1 (cells =
+    q_n, q̇_n, q_γ per row, then n_state). Verified now: on trbdf2 the
+    rejected steps leave no trace (the meter's energy equals the rectangle
+    sum over the stored accepted steps, rectifier + meter, trbdf2 rtol 1e-6: 496 accepted, 39 rejected, |meter − sum| / sum = 1.6e-15), a trbdf2 snapshot /
+    resume carries the model state (resumed run vs straight run: 1.2e-4 relative at most (another step grid after the controller restart); on its own grid the resumed meter equals the snapshot energy plus the rectangle sum over the second run's steps (rel 1e-12 asserted)). Steady state: `steady_state` refuses by name (NotImplementedError naming the block `external_device`: its `_snapshot_like` copies only listed blocks) — the period map does not carry the model state yet; `periodic_steady_state` refuses stateful devices (UnsupportedError). Both tested. Copying the block in the period map is NOT done (the message counts the block's cells as "device(s)": 7 for one meter — another track's wording, left).
+28. **3.4 named outputs — appended descriptor block 1** (ABI version stays
+    1): `n_outputs`, `n_events` (reserved, must be 0), `outputs`
+    ({name, unit}, frozen element), `outputs_fn(ctx, x, out)`; size 224 / 136
+    (`PULSIM_XDEV_DESCRIPTOR_OUTPUTS_SIZE`, also the feature-test macro a
+    library compiled against either header can use), asserted in the header.
+    The host reads the block only when `struct_size` covers it (an older
+    library — `contract_v1` — loads unchanged and has no outputs); names are
+    unique, non-empty and not a generic key (`power`, `i(<pin>)`); outputs
+    are checked finite and pure at the probes. Readings: per device,
+    i(<pin>) = f + committed q̇ (the device interface's step-9 convention,
+    `pwl/device_readings.hpp`), power = Σ v·i, then the named outputs with
+    the committed state. NOT through `DeviceReading` (fixed 4 pins / 2 rows:
+    an external device has up to 64 rows): `ExternalDeviceHistory::reading`
+    computes the same quantities. Trace: `xdev::OutputTrace` on
+    `StepHooks::device_state` (after the commit; on the recorders' hook set
+    when there is one), only for devices added with `record=True` — a run
+    without one attaches nothing (no cost). The start row comes from a copy
+    of the history taken at the first accepted step (its start cells = init /
+    DC seed / restored snapshot) and the stored initial state.
+    `res.device_output(name, key)` maps the stored samples to traced rows by
+    exact time; a stored sample that is not a committed step (trbdf2's
+    post-event record of a probe solve) is refused by name, not
+    interpolated. Two trbdf2 commit sites stored a sample without the
+    `device_state` hook (the post-event probe commit and the diode landing):
+    the hook is now fired there (shared phases of trbdf2_transient.hpp, no
+    effect without hooks; nothing else consumes `device_state`).
+29. **3.3 events — left open; what is missing.** The engines locate only
+    their own kinds' crossings: pwl splits a step at gate edges (switch_fn
+    oracle bisection) and at switched-diode crossings found from the step's
+    first solve (`run_event_iteration` / `split_step`, `ev_t[]`); trbdf2
+    clamps to gate edges and localises a crossing by Illinois on trial
+    trapezoidal solves of ONE signal, `detail_trbdf2::crossing_signal(
+    diodes, idx, x)` (DiodeEventState only). `StepHooks::on_event` is a
+    REPORT after the settle, not a locator. Carrying an external g(x) needs,
+    in the shared phases: (a) a generic event-signal source on
+    `StatefulHistories` (per kind: `n_signals()`, `signal(k, x, t)`),
+    sampled at the step's end (pwl) / stage and end points (trbdf2); (b) the
+    pwl split to accept a crossing time from such a signal (secant on the
+    first solve, as the diode split) and commit the sub-interval; (c) the
+    trbdf2 Illinois loop to take `crossing_signal` from that source instead
+    of only `DiodeEventState`; (d) after the landing, the kind's `accept`
+    (where a latch flips its state). None exists without a loop edit, so the
+    header reserves `n_events` (refused when non-zero) and 3.3 stays open.
+30. **1.7 YAML** — owner decision: an ALLOW LIST. `load_yaml_string /
+    load_yaml_file(..., allow_native_code=[paths or directories])`; the
+    netlist's `lib:` (relative to the file's folder; the working directory
+    for a string) and each entry are `std::filesystem::canonical`
+    (symlinks followed) before the comparison; a directory entry admits
+    what lies under it; an entry that does not exist admits nothing; a
+    library outside the list is refused naming the device and the resolved
+    path; `allow_native_code=True` is refused (TypeError for a bare string).
+    The options reach `load_device` through a thread-local scope set by
+    `load_text` (no signature change through the subsystem loaders). Keys
+    strict (`type, name, nodes, lib, model, params`); parameters through
+    the model's field table (`resolve_params`: unknown name, repeated name,
+    wrong unit refused). Inline `code:` refused as an unknown key. The IR
+    emitter still refuses external devices (Circuit pickling unchanged).
+31. **1.6 components()** — `kind: external_device`, `params` by field name,
+    `model`, `library` (canonical path), `library_hash` =
+    `fnv1a64:<16 hex>` of the bytes read at load, `pins`, `internal_branch`.
+32. **1.5 cache** — the per-user cache already existed (merged from the
+    control-graph track, refusing a foreign or writable cached file). Now
+    factored into `pulsim/_native_cache.py` (`cache_dir`, `check_owned`,
+    `is_private`, `compiled`); `c_block` keeps its names as aliases; a
+    cached LIBRARY that is not private (foreign owner, group/world-writable,
+    symlink) is deleted and rebuilt; a cache DIRECTORY that is not private
+    is still refused (Pulsim cannot repair what another user controls).
+33. **Cost and byte comparisons on this tip.** Golden / stateful / engines
+    byte comparisons against the baseline recorded before slice 4: all
+    IDENTICAL. Newton buck, instructions per accepted step, K = 10, three
+    runs: pwl 28 944 / 31 204 / 31 056 (baseline 29 113 / 30 764 / 30 572),
+    trbdf2 59 297 / 59 848 / 59 610 (baseline 59 326 / 59 231 / 59 457) —
+    within the run-to-run spread. Twins, external / built-in, K = 40, three
+    runs: satind 1.111 / 1.185 / 1.121, satind hand Jacobian 1.138 / 1.155 /
+    1.161, Shockley rectifier 1.098 / 1.141 / 1.102 (≤ 1.2×; K = 10 runs
+    scatter 1.12–1.27 and are not used). A run without a `record=True`
+    device attaches no trace.
+34. **Section 4 (`pulsim.xdev` SymPy) not started** — goals 1–5 took the slice; nothing of section 4 exists.
+
 ## Requests to other tracks
 
 - **Stepper track** (DONE in slice 3, #17/#18 — kept for the record): (a) the DC operating point needs the stateful fold (an

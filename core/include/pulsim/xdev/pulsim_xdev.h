@@ -112,6 +112,17 @@ typedef int32_t(PULSIM_XDEV_CALL *pulsim_xdev_accept_fn)(const pulsim_xdev_ctx *
                                                         double *state);
 typedef void(PULSIM_XDEV_CALL *pulsim_xdev_reserved_fn)(void);
 
+/* A named output (appended block, see below). FROZEN like pulsim_xdev_field. */
+typedef struct pulsim_xdev_output {
+    const char *name; /* the key of res.device_output(device, name) */
+    const char *unit; /* SI unit text, "" for none */
+} pulsim_xdev_output;
+/* Optional: write out[n_outputs] at x with the committed state (ctx->state
+ * after the accepted step). Pure, like eval. Called after accepted steps
+ * only when the caller asks for the outputs, never inside a Newton solve. */
+typedef int32_t(PULSIM_XDEV_CALL *pulsim_xdev_outputs_fn)(const pulsim_xdev_ctx *c,
+                                                         const double *x, double *out);
+
 typedef struct pulsim_xdev_descriptor {
     uint32_t abi_version; /* PULSIM_XDEV_ABI_VERSION the library was built with */
     uint32_t struct_size; /* sizeof(pulsim_xdev_descriptor) of the library */
@@ -131,12 +142,23 @@ typedef struct pulsim_xdev_descriptor {
     pulsim_xdev_init_fn init;
     pulsim_xdev_accept_fn accept;
     pulsim_xdev_reserved_fn reserved[4]; /* parameter derivatives (later); zero */
+    /* ---- appended block 1: named outputs (still ABI version 1). A host
+     * reads it only when struct_size >= PULSIM_XDEV_DESCRIPTOR_OUTPUTS_SIZE;
+     * an older library's struct ends above and has no outputs. */
+    uint32_t n_outputs;
+    uint32_t n_events;   /* reserved for event functions: must be 0 (refused otherwise) */
+    const pulsim_xdev_output *outputs; /* n_outputs */
+    pulsim_xdev_outputs_fn outputs_fn; /* required when n_outputs > 0 */
 } pulsim_xdev_descriptor;
 
 /* The version-1 sizes, FROZEN: a host refuses a library struct smaller than
  * these and reads an appended field only when struct_size covers it. */
 #define PULSIM_XDEV_DESCRIPTOR_V1_SIZE \
     (offsetof(pulsim_xdev_descriptor, reserved) + 4 * sizeof(pulsim_xdev_reserved_fn))
+/* The size with appended block 1 (named outputs); also the feature test a
+ * library compiled against either header can use. FROZEN. */
+#define PULSIM_XDEV_DESCRIPTOR_OUTPUTS_SIZE \
+    (offsetof(pulsim_xdev_descriptor, outputs_fn) + sizeof(pulsim_xdev_outputs_fn))
 #define PULSIM_XDEV_CTX_V1_SIZE (offsetof(pulsim_xdev_ctx, instance) + sizeof(const void *))
 
 /* The layout, asserted wherever this header is compiled (the host AND every
@@ -170,6 +192,11 @@ PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_descriptor, eval) == PULSIM_XDEV_P8_P4(1
 PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_descriptor, accept) == PULSIM_XDEV_P8_P4(160, 100), desc_accept);
 PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_descriptor, reserved) == PULSIM_XDEV_P8_P4(168, 104), desc_reserved);
 PULSIM_XDEV_LAYOUT(PULSIM_XDEV_DESCRIPTOR_V1_SIZE == PULSIM_XDEV_P8_P4(200, 120), desc_v1_size);
+PULSIM_XDEV_LAYOUT(sizeof(pulsim_xdev_output) == PULSIM_XDEV_P8_P4(16, 8), output_size);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_descriptor, n_outputs) == PULSIM_XDEV_P8_P4(200, 120), desc_n_outputs);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_descriptor, outputs) == PULSIM_XDEV_P8_P4(208, 128), desc_outputs);
+PULSIM_XDEV_LAYOUT(PULSIM_XDEV_DESCRIPTOR_OUTPUTS_SIZE == PULSIM_XDEV_P8_P4(224, 136), desc_outputs_size);
+PULSIM_XDEV_LAYOUT(sizeof(pulsim_xdev_descriptor) == PULSIM_XDEV_DESCRIPTOR_OUTPUTS_SIZE, desc_size);
 
 /* The ONE exported symbol: the index-th model of the library (0, 1, ...),
  * NULL past the last. The returned descriptor lives as long as the library. */

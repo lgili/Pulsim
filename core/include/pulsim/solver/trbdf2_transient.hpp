@@ -2129,7 +2129,10 @@ inline SimulationResult run_transient_trbdf2(
         result.states.push_back(x);
         result.event_iteration_count.push_back(0);
         result.record_switch_state(m_probe);
-        if (hooks) hooks->accepted(t_hook0, t, x, m_probe);
+        if (hooks) {
+            hooks->device_state(t, x, hs);   // #31: the probe committed the histories
+            hooks->accepted(t_hook0, t, x, m_probe);
+        }
         // the probe is a trapezoidal step
         if (lt) lt->accept_step(t_hook0, t, x, m_probe, nullptr, 0.5, 0, 0.5);
         if (structure.active()) reinit.note(m_probe);
@@ -3721,7 +3724,10 @@ inline SimulationResult run_transient_trbdf2(
                     // current the solver carried, with no phantom
                     // g_on·(v − V_f) from the post-flip bits.
                     result.record_switch_state(mask_step);
-                    if (hooks) hooks->accepted(t_hook0, t, x, mask_step);
+                    if (hooks) {
+                        hooks->device_state(t, x, hs);   // #31: the landing committed them
+                        hooks->accepted(t_hook0, t, x, mask_step);
+                    }
                     // the landing is a trapezoidal sub-step
                     if (lt) lt->accept_step(t_hook0, t, x, mask_step, nullptr, 0.5, 0, 0.5);
                     if (structure.active()) reinit.note(mask_step);
