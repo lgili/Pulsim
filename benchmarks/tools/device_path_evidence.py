@@ -148,7 +148,7 @@ def law_circuits(repeats):
     equivalence circuits of python/tests/test_device_path_equivalence.py
     (MOSFET L1, Coss junction + VDMOS, saturable inductor, Shockley, IGBT L1
     with and without its tail, Lauritzen) on both Newton engines."""
-    sys.path.insert(0, str(ROOT / "python" / "tests"))
+    sys.path.insert(0, str(ROOT.parent / "python" / "tests"))
     import test_device_path_equivalence as T  # noqa: PLC0415 - test circuits
     out = []
     runs = {"pwl": dict(t_end=200e-6, dt=20e-9, engine="pwl"),

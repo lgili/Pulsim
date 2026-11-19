@@ -522,3 +522,129 @@
     instructions on 'interface'. 15.7 ticked on that measured reason;
     wall-time confirmation on a quiet machine stays a release-checklist
     item, and no timing is asserted.
+
+## Slice 6 — MOSFET C¹, reviewer fixes (2026-11-18)
+
+39. **The MOSFET law is C¹ through V_DS = 0 on 'interface' (the legacy law
+    is not).** The model's forward law f(a, d) = α(a)·K·(1+λd)·[a² −
+    β(a−d)(a−d)²] (a = V_OV, d = V_DS, α = β = σ(κ·)) leaves
+    f(a, 0) = K·a²·σ(κa)·σ(−κa) at d = 0, so the mirrored reverse branch
+    −f(a−d, −d) JUMPS by 2·f(a, 0) at V_DS = 0 — the near-threshold leak,
+    peak 0.439·K/κ² at a = 2.4/κ (1.9e-3·K at κ = 15). The interface law
+    (`device/laws.hpp` `MosfetLevel1`, no longer the model body) is
+    h(a, d) = f(a, d) − f(a, 0)·e^{−κd}, mirrored the same way: h(·, 0) = 0
+    and both one-sided derivatives at 0 equal ∂f/∂d(a, 0) + κ·f(a, 0)
+    (∂/∂V_GS: 0 on both sides), so it is C¹ for ANY weight w(d) with
+    w(0) = 1; e^{−κd} was chosen because it only RAISES the slope
+    (f(a, 0) ≥ 0) and dies within a few 1/κ, so off-state leakage at
+    |V_DS| ≫ 1/κ is the model's (κd > 1 evaluates the model's own forward
+    law minus the term f(a, 0)·e^{−κ|V_DS|}, the whole difference). A
+    first version, h = f(a, d) − f(a, 0) everywhere, was C¹ too but removed
+    the model's off-state leakage K·a²·σ(κa) at every V_DS (28 µA on the
+    boost's soft κ = 4 device at V_GS = 0): the boost's paths parted by
+    4.9e-3 of scale. For κd ≤ 1 h is written without the subtraction
+    (expm1 of the logistics' difference: no cancellation at small d);
+    `ad::expm1` added.
+    Tests (`test_device_laws.cpp` `[mosfet]`; three devices: default, the
+    boost's K = 0.5 / κ = 4, K = 50 / κ = 15): (a) the law equals the model
+    minus the weighted, mirrored leak — value and AD Jacobian — to 1e-9 of
+    scale on 400 random points each, threshold band included; (b) i(0) = 0
+    exactly; |i(±e) ∓ g₀e| ≤ O(e²) and the jump of every Jacobian column
+    falls ≥ 500× per 1000× smaller e (e = 1e-5, 1e-8, 1e-11) on 12
+    overdrives across the band; CONTROL: the model's own jump at a = 2.4/κ
+    exceeds 0.86·K/κ²; (c) strictly increasing, positive slope and passive
+    on |V_DS| ≤ 0.5/κ, log-spaced from 1e-13 V (≈ 1e-16 A on the default
+    device), at overdrives 0.5, 2.4, 8, 60, −4, −8 /κ. NOT fixed, both
+    paths (release list): the slope at V_DS = 0 is negative for
+    a ∈ (≈ −1.3/κ, 0) — the triode polynomial 2·V_OV·V_DS at negative
+    overdrive (asserted at a = −1/κ on both laws) — and the same
+    σ(κu)·u² makes the triode/saturation corner non-monotone where λ·a² is
+    small. A monotone overdrive (softplus², EKV-like) would fix both but
+    moves the corner by ~1e-3·K at EVERY overdrive: a law change for the
+    release, not this port. Readings (`for_each_static_reading`) report the
+    interface law on either path.
+    Equivalence (`test_device_path_equivalence.py`, pwl, legacy vs
+    interface, of scale): the always-on AC reverse-conduction circuit (new;
+    V_DS through zero both ways at V_OV = 9 V) 5.4e-15; the boost with 1 ns
+    gate edges and κ = 15 (new control) 1.8e-14 (trbdf2 2.5e-8, gate 1e-5);
+    the IGBT / Coss / permeance circuits unchanged (≤ 7.5e-14). The soft boost
+    (κ = 4, 0.3 µs ramps) parts BY DESIGN: 2.5e-3 of scale on pwl, 2.1e-4 on
+    trbdf2, largest on the first turn-on ramp (V_DS ≈ 0 while a crosses
+    threshold); with 1 ns edges but κ = 4 it still parts by 5e-9 after every
+    turn-off (the off-state leak at V_DS ≈ 0 is 28 µA there). It is a
+    recorded cell (`RECORDED`; asserted visible and below 1e-2 of scale),
+    not a gated one; its DC point is gated (V_DS = 12 V). The AC circuit has
+    no gate edge to land both TR-BDF2 grids on (4 common times of 2757); its
+    TR-BDF2 evidence is the conformance MosfetLevel1 cell (AC, interpolated).
+40. **Reviewer (fresh context, read-only) on the three integration merges
+    and the Tanh port.** Merges: no defect (c465ea51 resolves as the
+    automatic merge; 0a56fec1's layout was superseded by f7547a33, whose
+    13/14/15-field readers agree; the test deletions there are covered
+    elsewhere). Tanh law: Q bit-identical, but the AD tangent was
+    1 − tanh², which cancels in saturation ((C_max/C_min)·eps of J; exactly
+    C_min past 19·V0). Fixed: with Real parameters the tangent is the
+    model's `sech2_` through `ad::chain`; a permeance at C_max/C_min = 2000
+    driven to 40·V0 joins the law test (law 4); with the fix disabled that
+    law fails 708 of 59 030 `[laws]` assertions, with it 0.
+
+41. **Evidence regenerated at this slice's code (2026-11-18).**
+    (a) Instructions retired per accepted step (`.scratch/instr.sh`, K = 20
+    runs minus a 0-run baseline per path, same build; the MOSFET law now
+    costs 4 logistics + expm1 near V_DS = 0 and two model calls + exp away
+    from it):
+
+    | case | legacy | interface | ratio |
+    |---|---|---|---|
+    | saturable inductor only (pwl) | 16 827 | 17 306 | 1.028 |
+    | Coss only (pwl) | 13 930 | 13 758 | 0.988 |
+    | IGBT tail + Lauritzen chopper (pwl) | 28 429 | 27 272 | 0.959 |
+    | IGBT tail + Lauritzen chopper (trbdf2) | 93 862 | 85 458 | 0.910 |
+    | boost MOSFET + Coss + saturable (pwl) | 33 674 | 30 902 | 0.918 |
+    | boost MOSFET + Coss + saturable (trbdf2) | 122 208 | 109 669 | 0.897 |
+    | boost, 1 ns edges, κ = 15 (pwl, new) | 34 309 | 31 257 | 0.911 |
+    | MOSFET on, AC reverse conduction (pwl, new) | 21 905 | 21 194 | 0.968 |
+
+    Every case but the saturable inductor (below) is below legacy; the boost's ratio rose from 0.867
+    (#38) to 0.918 with the C¹ law (its two paths now also run slightly
+    different trajectories, #39); the saturable inductor read 1.020 in #38
+    on unchanged code, and two repeats today read 1.023 and 1.031 — AT the
+    3 % gate's edge, one sample over it; its law did not change here, so
+    the saturable-inductor commit (#38: `commit_fq` re-evaluates λ) is the
+    open item, not this slice (Coss: 0.988 and
+    0.979; boost pwl 0.915, boost trbdf2 0.896, chopper trbdf2 0.939 against
+    0.910) — the probe's spread is ~1 % on pwl, ~3 % on the 1298-step
+    trbdf2 chopper.
+    (b) `benchmarks/DEVICE_PATH_EVIDENCE.md` regenerated
+    (`benchmarks/tools/device_path_evidence.py`). The tool's law-circuit
+    section (added in e9805fb4) never ran: it put `benchmarks/python/tests`
+    on the path (ROOT is `benchmarks/`) and could not import the
+    equivalence circuits, and the file was last written at e17fc920, before
+    it; fixed (ROOT.parent). Today's file: 277 cells run on both paths
+    (12 `law:` rows new), 274 with the same outcome and error to 3
+    significant digits, 4 refused by name (the induction machine). The 3
+    others, all MOSFET, same outcome: `mosfet_nmos_dc` pwl and trbdf2
+    (error 0 → 2.58e-9, paths 2.58e-12 of scale apart) and `ll08_buck_mosfet`
+    trbdf2 (1.10e-4 → 1.13e-4, 2.35e-9 apart; its pwl cell 2.35e-21): the
+    C¹ law is a different operation order from the model body (not
+    bit-identical any more), which moves a Newton stop within its
+    tolerance and the adaptive grid; no reference cell reaches the leak.
+    `law:` rows: the soft boost 2.49e-3 (pwl) / 2.08e-4 (trbdf2), every
+    other ≤ 1.81e-14 (pwl) and ≤ 1.0e-9 (trbdf2). The `speed` column is
+    wall time under load (other agents, this slice's own C++ build): not
+    evidence; (a) is.
+
+### Hand-off (2026-11-18)
+
+- Step 5 of the brief NOT started (context budget): merge
+  `origin/feat/core-p5-machines` (33dbd853 at hand-off; `git merge-tree`
+  shows ONE conflict, `python/tests/test_engine_conformance.py` — both sides
+  append a block at the end of the file (this branch: the device-path cells;
+  machines: `test_machine_dc_held_cell` …): keep both), then port the MNA
+  PMSM and the induction machine in the machines branch's increment form
+  (`pwl/pmsm_mna_history.hpp`: `lambda_of`, `delta_lambda`, `lam_off`,
+  `dlam_gamma`, `c_theta` / `c_rotor`) per #34; 'interface' refuses both by
+  name until then.
+- `StepHooks::on_device_state` (#31) is still the stepper track's call;
+  origin/feat/core-p3-stepper (8fa641df) has no hook yet.
+- The MOSFET law's sub-threshold band and corner (#39) are release-list
+  items, as is a quiet-machine wall-time check (#38).

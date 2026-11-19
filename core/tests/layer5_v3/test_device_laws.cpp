@@ -17,6 +17,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -25,6 +26,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 using namespace pulsim;
@@ -139,7 +141,8 @@ TEST_CASE("static laws equal the hand AD stamp", "[device][laws]") {
     sd.BV = 5.0;
     check_static<L::ShockleyDiode, models::ShockleyDiode>(sd, -6.0, 0.9, 1);
     check_static<L::IdealDiode, models::IdealDiode>({}, -5.0, 5.0, 2);
-    check_static<L::MosfetLevel1, models::MosfetLevel1>({}, -10.0, 10.0, 3);
+    // MosfetLevel1: the law departs from the model by the documented leak
+    // (DECISIONS #39), checked in "the MOSFET law is the model minus its leak".
     check_static<L::IgbtLevel1, models::IgbtLevel1>({}, -2.0, 20.0, 4);
 }
 
@@ -156,11 +159,14 @@ TEST_CASE("the Coss law stamps, commits and captures as the hand stamp",
         tq.push_back(models::NonlinearCapacitor::charge(jn, tv.back()));
         tc.push_back(models::NonlinearCapacitor::capacitance(jn, tv.back()));
     }
-    const std::array<models::NonlinearCapacitor::Params, 4> laws{
+    // law 4: a permeance at μ_r ≈ 2000 driven to 40·V0 — the tangent must
+    // be the model's sech², not AD's 1 − tanh² (reviewer, 2026-11-18)
+    const std::array<models::NonlinearCapacitor::Params, 5> laws{
         jn, models::NonlinearCapacitor::vdmos_cgd(2e-9, 1e-10, 0.3),
         models::NonlinearCapacitor::from_table(
             std::make_shared<const models::ChargeTable>(tv, tq, tc, "t")),
-        models::NonlinearCapacitor::tanh_law(2e-6, 1e-7, 5.0)};
+        models::NonlinearCapacitor::tanh_law(2e-6, 1e-7, 5.0),
+        models::NonlinearCapacitor::tanh_law(2e-6, 1e-9, 1.0)};
     for (std::size_t law = 0; law < laws.size(); ++law) {
         const auto& mp = laws[law];
         INFO("law " << law);
@@ -178,7 +184,7 @@ TEST_CASE("the Coss law stamps, commits and captures as the hand stamp",
             Vector x(2);
             // the junction above its floor (v ≥ −0.5 V); VDMOS on both
             // sides of x = −1 (v/A < −1); the table inside and past it
-            x[0] = law == 1 || law == 3 ? rng(-20.0, 40.0) : rng(0.0, 40.0);
+            x[0] = law == 1 || law >= 3 ? rng(-20.0, 40.0) : rng(0.0, 40.0);
             x[1] = rng(-0.5, 0.5);
             const Real h = rng(1e-9, 1e-6);
             for (auto st : {pwl::TrBdf2Stage::Trapezoidal,
@@ -225,7 +231,7 @@ TEST_CASE("the Coss law stamps, commits and captures as the hand stamp",
         if (law != 2) {
             check_param_tangent<L::NonlinearCapacitor>(
                 L::NonlinearCapacitor::aux_from(mp), L::NonlinearCapacitor::from(mp),
-                {law == 0 ? 12.0 : law == 3 ? 4.0 : 3.0, 0.0});
+                {law == 0 ? 12.0 : law >= 3 ? 4.0 : 3.0, 0.0});
             check_param_tangent<L::NonlinearCapacitor>(
                 L::NonlinearCapacitor::aux_from(mp), L::NonlinearCapacitor::from(mp),
                 {law == 0 ? -0.2 : -9.0, 0.1});
@@ -377,7 +383,9 @@ TEST_CASE("Params<Real> evaluates the legacy law to rounding",
         device::Out<Real, 3> o;
         L::MosfetLevel1::eval(lp, v, o);
         const Real ref = models::MosfetLevel1::current<Real>(v.data(), mp);
-        CHECK(close(o.f[0], ref, Real{1}, 1));
+        // Far from threshold (V_OV = 3, κ = 15) the leak the MOSFET law
+        // drops is K·9·e^{-45}; its expression is another order (#39).
+        CHECK(close(o.f[0], ref, Real{1}, 8));
     }
 }
 
@@ -619,7 +627,8 @@ void check_params_real_bit_identical(const typename Model::Params& mp, Real lo, 
         const auto pa = device::seed_params<Law, Law::n_params>(lp);
         device::Out<ad::ADRealN<Law::n_params>, NT> o;
         Law::eval(pa, v, o);
-        CHECK(close(o.f[0].value(), a, a, 4));
+        // The MOSFET law is the model minus its V_DS = 0 leak (DECISIONS #39).
+        if constexpr (!std::is_same_v<Law, L::MosfetLevel1>) CHECK(close(o.f[0].value(), a, a, 4));
     }
 }
 }  // namespace
@@ -632,4 +641,147 @@ TEST_CASE("Params<Real> is bit-identical to the model's own Params (legacy body)
     check_params_real_bit_identical<models::IdealDiode, L::IdealDiode, 2>({}, -3.0, 1.5, 32);
     check_params_real_bit_identical<models::MosfetLevel1, L::MosfetLevel1, 3>({}, -8.0, 12.0, 33);
     check_params_real_bit_identical<models::IgbtLevel1, L::IgbtLevel1, 3>({}, -2.0, 16.0, 34);
+}
+
+// ---- the MOSFET law: C¹ through V_DS = 0 (DECISIONS #39) -------------------
+namespace {
+
+/// The model's current at V_DS = 0⁺ (the leak) times e^{−κ|V_DS|}, mirrored
+/// as the model mirrors its law: legacy − interface, to rounding.
+template <class S>
+S mosfet_leak(const std::array<S, 3>& v, const models::MosfetLevel1::Params& p) {
+    using std::exp;
+    const S vds = v[0] - v[1];
+    const S vov = v[2] - v[1] - p.V_T;
+    if (vds < Real{0})
+        return -models::MosfetLevel1::forward_current_<S>(vov - vds, S{0}, p) * exp(S(p.kappa * vds));
+    return models::MosfetLevel1::forward_current_<S>(vov, S{0}, p) * exp(S(-(p.kappa * vds)));
+}
+
+/// i and ∂i/∂(v_d, v_s, v_g) of the interface law at (V_DS, V_GS).
+struct Iv { Real i; std::array<Real, 3> g; };
+Iv law_at(const models::MosfetLevel1::Params& mp, Real vds, Real vgs) {
+    const std::array<Real, 3> x{vds, 0.0, vgs};
+    std::array<Real, 3> F{};
+    std::array<std::array<Real, 3>, 3> J{};
+    constexpr std::array<Real, 3> z{};
+    device::stamp_fq<L::MosfetLevel1>(device::aux_t<L::MosfetLevel1>{}, L::MosfetLevel1::from(mp),
+                                     x, {Real{0}, device::Formula::Dc, Real{0}}, z, z, z, F, J);
+    return {F[0], J[0]};
+}
+
+models::MosfetLevel1::Params mosfet(Real K, Real V_T, Real kappa) {
+    models::MosfetLevel1::Params p;
+    p.K = K;
+    p.V_T = V_T;
+    p.kappa = kappa;
+    return p;
+}
+
+// default; the equivalence boost's device; a large device
+const std::array<models::MosfetLevel1::Params, 3> kMosfets{
+    models::MosfetLevel1::Params{}, mosfet(0.5, 3.0, 4.0), mosfet(50.0, 3.0, 15.0)};
+
+}  // namespace
+
+TEST_CASE("the MOSFET law is the model minus its leak at V_DS = 0",
+          "[device][laws][mosfet]") {
+    // Value and Jacobian against the model's AD minus the leak's AD, over
+    // the whole range (threshold band included). The tolerance is a
+    // relative 1e-9 of the terms' scale (two expressions through exp;
+    // the leak itself is up to 1.9e-3·K).
+    std::uint64_t seed = 61;
+    for (const auto& mp : kMosfets) {
+        Lcg rng{seed++};
+        for (int t = 0; t < 400; ++t) {
+            const Real vds = rng(-6.0, 6.0), vgs = rng(-1.0, 9.0);
+            using A = ad::ADRealN<3>;
+            const std::array<A, 3> xa{A{vds, {1.0, 0.0, 0.0}}, A{0.0, {0.0, 1.0, 0.0}},
+                                      A{vgs, {0.0, 0.0, 1.0}}};
+            const A ref = models::MosfetLevel1::current<A>(xa.data(), mp) - mosfet_leak<A>(xa, mp);
+            const auto [i, g] = law_at(mp, vds, vgs);
+            const Real scale = mp.K * (1.0 + vds * vds + vgs * vgs);
+            INFO("vds " << vds << " vgs " << vgs << " law " << i << " ref " << ref.value());
+            CHECK(std::abs(i - ref.value()) <= 1e-9 * scale);
+            for (std::size_t k = 0; k < 3; ++k)
+                CHECK(std::abs(g[k] - ref.deriv(k)) <= 1e-9 * scale);
+        }
+    }
+}
+
+TEST_CASE("the MOSFET law is C1 through V_DS = 0 and the model is not",
+          "[device][laws][mosfet]") {
+    for (const auto& mp : kMosfets) {
+        // overdrives across the threshold band, in units of 1/κ
+        for (Real xk : {-12.0, -4.0, -2.0, -1.0, -0.3, 0.0, 0.5, 1.0, 2.4, 4.0, 12.0, 60.0}) {
+            const Real vgs = mp.V_T + xk / mp.kappa;
+            const auto z0 = law_at(mp, 0.0, vgs);
+            CHECK(z0.i == 0.0);   // no current at zero voltage
+            const Real gscale = std::abs(z0.g[0]) + mp.K / mp.kappa;
+            // |i(±e) ∓ g0·e| and |∂i(+e) − ∂i(−e)| shrink with e: as e², e
+            // (a bound on i'' of 50·K·(1+κ)², generous), to rounding.
+            const Real c2 = 50.0 * mp.K * (1.0 + mp.kappa) * (1.0 + mp.kappa);
+            std::array<Real, 3> dg_prev{};
+            for (Real e : {1e-5, 1e-8, 1e-11}) {
+                const auto p = law_at(mp, e, vgs);
+                const auto m = law_at(mp, -e, vgs);
+                INFO("K " << mp.K << " kappa " << mp.kappa << " xk " << xk << " e " << e);
+                CHECK(std::abs(p.i - z0.g[0] * e) <= c2 * e * e + 1e-13 * gscale * e);
+                CHECK(std::abs(m.i + z0.g[0] * e) <= c2 * e * e + 1e-13 * gscale * e);
+                for (std::size_t k = 0; k < 3; ++k) {
+                    const Real dg = std::abs(p.g[k] - m.g[k]);
+                    CHECK(dg <= 2.0 * c2 * e + 1e-12 * gscale);
+                    // continuous: the jump falls with e (1000× per step here)
+                    if (e < 1e-5) CHECK(dg <= 2e-3 * dg_prev[k] + 1e-12 * gscale);
+                    dg_prev[k] = dg;
+                }
+            }
+        }
+        // Control: the model jumps by 2·f(a, 0) at a = 2.4/κ, the leak's peak
+        // 0.439·K/κ² (DECISIONS #39) — the probe sees a discontinuity.
+        const Real vgs = mp.V_T + 2.4 / mp.kappa;
+        const std::array<Real, 3> vp{1e-12, 0.0, vgs}, vm{-1e-12, 0.0, vgs};
+        const Real jump = models::MosfetLevel1::current<Real>(vp.data(), mp)
+                          - models::MosfetLevel1::current<Real>(vm.data(), mp);
+        CHECK(jump > 2.0 * 0.43 * mp.K / (mp.kappa * mp.kappa));
+    }
+}
+
+TEST_CASE("the MOSFET law is monotone in V_DS around zero, to 1 pA",
+          "[device][laws][mosfet]") {
+    for (const auto& mp : kMosfets) {
+        // on, near-on and off; NOT the band a ∈ (≈ −1.3/κ, 0) (below)
+        for (Real xk : {0.5, 2.4, 8.0, 60.0, -4.0, -8.0}) {
+            const Real vgs = mp.V_T + xk / mp.kappa;
+            // a symmetric grid: log-spaced from 1e-13 V, then linear to
+            // ±0.5/κ (beyond, at small |a|, lies the band's mirror image:
+            // V_DS past V_OV, or V_GD − V_T in the band on the reverse side)
+            std::vector<Real> vds;
+            for (int k = -13; k <= -4; ++k) vds.push_back(std::pow(10.0, k));
+            for (int k = 1; k <= 20; ++k) vds.push_back(k * 0.025 / mp.kappa);
+            std::vector<Real> grid{0.0};
+            for (Real d : vds) { grid.push_back(d); grid.push_back(-d); }
+            std::sort(grid.begin(), grid.end());
+            grid.erase(std::unique(grid.begin(), grid.end()), grid.end());
+            Real prev = -std::numeric_limits<Real>::infinity();
+            for (Real d : grid) {
+                const auto s = law_at(mp, d, vgs);
+                INFO("K " << mp.K << " kappa " << mp.kappa << " xk " << xk << " vds " << d
+                          << " i " << s.i << " g " << s.g[0]);
+                CHECK(s.g[0] > 0.0);                  // positive slope
+                CHECK(s.i > prev);                    // strictly increasing
+                CHECK((d == 0.0 ? s.i == 0.0 : s.i * d > 0.0));   // passive here
+                prev = s.i;
+            }
+        }
+        // The band: the slope at V_DS = 0 is negative on BOTH paths (the
+        // triode polynomial at negative overdrive; release list, #39).
+        const Real vgs = mp.V_T - 1.0 / mp.kappa;
+        const auto s = law_at(mp, 0.0, vgs);
+        CHECK(s.g[0] < 0.0);
+        const Real h = 1e-6 / mp.kappa;
+        const std::array<Real, 3> vp{h, 0.0, vgs}, v0{2.0 * h, 0.0, vgs};
+        CHECK(models::MosfetLevel1::current<Real>(v0.data(), mp)
+              < models::MosfetLevel1::current<Real>(vp.data(), mp));
+    }
 }
