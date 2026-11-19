@@ -630,3 +630,37 @@ dsedall, the full scoreboard, banks 1/9/10/12 (20 ms) on both selections, ten-ba
 ### Hand-off (session 20)
 Trace the ten-bank failure first (likely D or persistence); then rule on (1); the root-band and N changes look sound on their own.
 
+
+## Session 21 (exact engine 20): the two-threshold ruling applied — PARKED, bar NOT met (2026-11-19)
+
+### The ruling (orchestrator) and how it is implemented (4e92dceb + this entry)
+- The engine simulates the circuit of the doubles it was given. DECISION threshold B_c = γ_n·(max(S, s0) + |V|) + e·max(N, n0, F) (+ K, still 0), plus the located root's band where the code already added it (ladder `b_loc`, case-(iii) settle offset). Used by: the ladder, the scan's crossing / confirmation / drift exit, the settle cascade (`zero_band_on_`), the selector's horizon (`breaks_law_(…, false)`), the root band itself.
+- VIOLATION threshold B_v = B_c + D: start case (iii) (`breaks_at`, the non-settled `|ga| > bound_at(t0, x0, true)`), the stored-sample law check (`err`, the law-check band), the guard's judge (`breaks_law_` default). Nothing else reads D.
+- Hysteresis exit: a mode that stands past B_c on its event side (inside the band) is broken where the violation leaves B_c + D, located by the scan's drift branch with the violation bound. The time a device sits in the band therefore ends at that located exit (or at the next step start's case (iii)).
+- A diode crossing whose settle kept every mode is not logged as an event (it is no commutation).
+
+### The ten-bank regression of session 20 — cause
+NOT D, NOT persistence: the normwise e-term N = ‖c·P·D⁻¹‖₂‖D·x‖₂ introduced in session 20. On a phase whose two diodes are both OFF the node is held by g_off: |c| ≈ 1/(2 g_off) = 5e8 V/A on i_L (≈ 2e-7 A), ‖D·x‖ ≈ 8, so e·N = 3.4e-11 × 2.6e11 = 8.9 V (five banks, Dt3b at 8.03 ms) / 0.447 V (ten banks, Dt0c at 17.56 ms: B_c grew with v_D and equalled it to 4 digits). The forward bias was never significant. Fix: N componentwise on the projected row, Σ|c_P,j||x_j| (the pushed tip's form on c_P; shortcut noted in `node_pair_bound_terms`: the stated e is normwise, the componentwise form is not strictly implied by it).
+
+### Five-case table (4e92dceb)
+| case | result |
+|---|---|
+| (1) full_bridge_dc | `test_full_bridge_dc_turns_both_freewheel_diodes_off_at_the_zero` PASSES (both OFF, event within 1e-15 s of the truth). Which diode leads in the rounded circuit and the scoreboard score: NOT measured (scoreboard not run) |
+| (2) bridge1_vf07 vs pwl + split | 12 events (as 2b1d808e). Second diode stays ON 5.10287 → 5.36691 ms (0.264 ms); pwl dt 1e-7 + split 5.1019 → 5.3359 ms (0.234 ms). Against the OLD PR-line baseline: 160 grid points > 1e-6 (max 0.177, local to that turn-off) |
+| (3) double crossing | PASSES (V_th 0 and 1e-3, 4 events). Without the no-op rule: 6 events — at each turn-off the OFF-mode ladder reads +2.1e-10 V (B_c 1.6e-14 V, root band 3.1e-12 V): the rounded circuit's ON zero and OFF zero differ by the ON row's data error (−2.2e-16 V × (1 + R·g_on) = 1e6); the settle keeps ON, the drift exit fires 2.03e-15 s later at B_c. Logged turn-off 1.887721473410736 us vs reference 1.8877214714713 us |
+| (4) inductor cut-set | PASSES |
+| (5) D2 at −1e-10 A | D2 not ON in bridge1_vf07's first period (table as pwl); the case's own test passes |
+
+### Measured on 4e92dceb
+| item | result |
+|---|---|
+| full pytest | 2 failed / 5541 passed / 107 skipped / 8 xfailed |
+| fail 1 | `test_a_tied_bridge_with_a_forward_drop_conducts_after_the_guard_repairs`: D4 chatters (32 commutations in 1e-7 s) at its first turn-on 6.869597018 us. With diode_law_rel = 0 and t_end 10 us: one event, no chatter — the guard / law-check path is involved. First wrong decision NOT traced. Suspect: the same data gap as case (3) (no consistent mode in the rounded circuit for a width set by D) re-decided at B_c in a loop |
+| fail 2 | `test_lcp_selection_runs_and_agrees_with_the_default[boost_pfc_open_loop]`: lcp vs default 1.74 V (bar 0.079 V). Not traced |
+| five-case + route + lcp test files | 99 passed |
+| banks vs pwl + split dt 1e-7, 20 ms, both selections | 1: 2.5e-5 V; 9: 1.7e-4; 10: 2.1e-4; 12: 2.8e-4 V (twelve RUN, 151 events). wall default/lcp 0.25/0.24, 25.9/26.4, 32.5/27.7, 51.5/49.5 s; build_seconds 0/0, 1.1/0.6, 1.8/0.9, 3.0/1.7 |
+| five banks | 2.2e-6 V vs pwl + split (was 0.237 V at 958bc6b9 + split thresholds) |
+| NOT run | scoreboard, goldens / bit-identity (the PR-line baseline is being rebuilt), C++ targets (Eigen 5 / 3.4.0), closed loops, cost before/after, reference_status, `-m reference` |
+
+### Hand-off (session 21)
+The ruling holds on the five cases. Open: the data gap — where the rounded circuit's ON and OFF zeros differ (by the ON row's data error amplified by 1 + R·g_on), no mode is consistent for a width the decision threshold cannot see; case (3) resolves it in one extra (unlogged) settle, the tied bridge with V_f loops. This is the case the ruling asked to write down: a decision inside D that has to be re-taken. Trace fail 1 first (print the ladder's g / B_c / b_loc at 6.8696 us), then fail 2; then the bar.
