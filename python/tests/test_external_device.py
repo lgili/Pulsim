@@ -214,6 +214,21 @@ def test_a_time_dependent_law_reads_the_solve_time(libs, which, engine):
     assert v[-1] == pytest.approx(1.0 / 3.0, abs=1e-9)
 
 
+def test_the_static_path_hands_the_model_the_solve_time(libs):
+    """run_transient on a dt = 0 cache (no C or L: the static path) reads
+    the same law at each grid time; t stuck at 0 kept v_a at 0.5 V."""
+    b = _ramp(libs["contract"])
+    cache = p.PwlStateSpaceCache(b.graph, b.pool)
+    cache.build()
+    res = p.run_transient(cache, b.graph, b.pool,
+                          p.SimulationOptions(t_start=0.0, t_end=1e-3, dt=1e-5),
+                          switch_fn=p.make_combined_switch_fn(b.graph.num_switches, []),
+                          enable_nonlinear_refresh=True)
+    t = np.asarray(res.times)
+    v = np.asarray(res.states)[:, b.node_id_of("a")]
+    assert np.max(np.abs(v[1:] - _ramp_exact(t[1:]))) <= 1e-9   # Newton's tolerance
+
+
 def test_esdirk43_refuses_an_external_device_by_name(libs):
     # its stages take no arbitrary pseudo-previous state yet (integration 14h)
     with pytest.raises(p.UnsupportedError) as e:

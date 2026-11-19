@@ -3264,6 +3264,7 @@ inline SimulationResult run_transient(
         };
         auto st_take = [&]() PULSIM_STEP_PHASE {
             const Real t = st_t;
+            step_ctx.t = t;   // the external devices' ctx->t (this path solves at t)
             const Real gate_t = st_gate_t;
             Size& iters = st_iters;
             bool& flipped = st_flipped;
