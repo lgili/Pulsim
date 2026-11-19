@@ -138,27 +138,28 @@ def test_lcp_and_guard_fix_the_zero_threshold_boost(R):
     assert r_def.diagnostics["mode_guard"]["repairs"] == 0
 
 
-def test_guard_fixes_the_half_wave_rl_rectifier():
-    """The settle held D1 OFF through a forward bias of 10 V at t = 0 (mean v(out) 1.06 V low)
-    until the significance ladder (exact engine sessions 12-13): the OFF mode's first value
-    above its own error bound is forward, so the settle decides t = 0 itself. Left to the
-    guard: one event 1 us before the turn-off at 30.0999 ms (gap 0.063 V), a rounding outcome
-    (wrong on macOS arm64, where the settle alone is refused by name; right on Linux). Every
-    stored OFF sample is reverse-biased."""
+def test_half_wave_rl_rectifier_matches_the_exact_truth():
+    """Against the exact truth (truth2 benchmarks/tools/exact_truth.py, diode_half_wave_rl_load,
+    50 digits): D1 ON from t = 0, OFF at 10.0999172, 30.0999172, 50.0999172 ms, ON at 20 and
+    40 ms + 1 us; mean v(out) 3.18069264315 V. The settle once held D1 OFF at t = 0 (1.06 V
+    low; fixed by the significance ladder) and then kept it ON at the 30.0999 ms turn-off: the
+    OFF probe read the root's residual (5e-15 A through g_off: +5e-9 V for ~1 ns), which is the
+    located root's own error, now part of the ladder's bound. The settle alone (no guard, no
+    law check) decides every event; the guard repairs nothing."""
     b = _half_wave_rl()
-    try:
-        _sim(b, 60e-3, guard=False)
-    except p.UnsupportedError as ei:
-        assert (ei.feature, ei.device.split()[0]) == ("consistent_mode", "D1")
-    r = _sim(b, 60e-3)
-    ref = 3.180662149                                                   # trbdf2 rtol 1e-10
-    assert _tw_mean(r, "out") == pytest.approx(ref, abs=1e-4)          # measured +3.0e-5
-    g = r.diagnostics["mode_guard"]
-    assert g["repairs"] in (0, 1)
-    assert all(abs(t - 0.0300999) < 1e-6 for t in g["repair_times"])
-    on = np.asarray(r.switch_states)[:, b.switch_index_of("D1")].astype(bool)
-    vd = np.asarray(r.v("in")) - np.asarray(r.v("out"))
-    assert vd[~on].max() < 1e-3
+    truth_off = [10.0999172e-3, 30.0999172e-3, 50.0999172e-3]
+    truth_on = [20.000001e-3, 40.000001e-3]
+    for guard in (False, True):
+        r = _sim(b, 60e-3, guard=guard)
+        assert _tw_mean(r, "out") == pytest.approx(3.18069264315096, abs=1e-6)   # measured -1.1e-8
+        et, ty = np.asarray(r.event_times), np.asarray(r.event_types)
+        assert len(et) == 5
+        assert et[ty == 2] == pytest.approx(truth_off, abs=1e-9)
+        assert et[ty == 1] == pytest.approx(truth_on, abs=1e-9)
+        on = np.asarray(r.switch_states)[:, b.switch_index_of("D1")].astype(bool)
+        vd = np.asarray(r.v("in")) - np.asarray(r.v("out"))
+        assert vd[~on].max() < 1e-3
+    assert r.diagnostics["mode_guard"]["repairs"] == 0
     r_lcp = _sim(b, 60e-3, mode_selection="lcp")
     assert np.array_equal(np.asarray(r_lcp.states), np.asarray(r.states))
 

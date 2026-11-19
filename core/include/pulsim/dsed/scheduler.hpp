@@ -944,6 +944,7 @@ private:
         const Real t_tol = std::max(
             Real{4} * std::numeric_limits<Real>::epsilon() * std::abs(t1),
             Real{1e-12} * h);
+        loc_t_tol_ = t_tol;
 
         const auto& preds = predictor_.predicates();
         Real band = Real{-1};
@@ -1771,6 +1772,17 @@ private:
             }
         }
 
+        // The root's error as a state error (x along the pre-event mode over
+        // the locator's tolerance): the decisions' significance includes it.
+        loc_dx_.resize(0);
+        if constexpr (HasExactStep<System>) {
+            if ((ptype == PredicateType::DiodeOn || ptype == PredicateType::DiodeOff)
+                && loc_t_tol_ > Real{0} && system_.has_exact_step()) {
+                advance_(t_event, x, loc_t_tol_, loc_dx_);
+                loc_dx_ -= x;
+            }
+        }
+
         // State projection — clamp algebraic constraints at the event.
         if (state_projection_) {
             x = state_projection_(t_event, x, ptype);
@@ -1821,6 +1833,7 @@ private:
                       effective_gates_(new_mask, prev_bits), prev_bits,
                       old_mask, result);
         settle_decisions_ = false;
+        loc_dx_.resize(0);
 
         // Consistent reinitialization (Phase-3 item 2). The event
         // deposits x off the new mode's slow manifold — a µA of
@@ -2030,8 +2043,11 @@ private:
     /// decision, the settle cascade, the LCP re-settle and the guard's repair.
     template <class G>
     int ladder_sign_(Real t0, const Vector& x0, const SchedulerDiode& d, Real cap,
-                     G&& g_of, Real& d_out)
+                     G&& g_of, Real& d_out, const Vector* dx0 = nullptr)
         requires HasExactStep<System> {
+        // dx0: the start's own error (a located root's): the signal moved by it
+        // along the mode, |g(x0 + dx0) − g(x0)|, is not significant either
+        if (dx0) x_offp_ = x0 + *dx0;
         // the trajectory's scale over the horizon: the propagated inputs'
         // rounding is relative to it, not to a state at rest
         advance_(t0, x0, cap, x_lad_);
@@ -2041,7 +2057,12 @@ private:
             const Real delta = cap * std::pow(Real{10}, Real(k - 12));
             advance_(t0, x0, delta, x_lad_);
             const Real g = g_of(t0 + delta, x_lad_);
-            if (std::abs(g) > signal_bound_(d, t0 + delta, x_lad_, s0, v0)) {
+            Real b_loc = Real{0};
+            if (dx0) {
+                advance_(t0, x_offp_, delta, x_lad2_);
+                b_loc = std::abs(g_of(t0 + delta, x_lad2_) - g);
+            }
+            if (std::abs(g) > signal_bound_(d, t0 + delta, x_lad_, s0, v0) + b_loc) {
                 d_out = delta;
                 return g > Real{0} ? 1 : -1;
             }
@@ -2136,12 +2157,24 @@ private:
                 const auto prm = d.params();
                 Real t0 = t;
                 const Vector& x0 = settled_(t, x, x_off_, t0);
+                // at a located event the root's error, carried to the settled start
+                const Vector* dx0 = nullptr;
+                Vector dxs;
+                if (settle_decisions_ && loc_dx_.size() == x.size()) {
+                    if (t0 > t) {
+                        advance_(t, x + loc_dx_, t0 - t, dxs);
+                        dxs -= x0;
+                    } else {
+                        dxs = loc_dx_;
+                    }
+                    dx0 = &dxs;
+                }
                 Real dj = Real{0};
                 const int sg = ladder_sign_(t0, x0, d, decision_cap_(t0),
                     [&](Real tau, const Vector& xx) {
                         return models::SwitchedDiode::crossing_signal(
                             false, system_.node_pair_voltage(d.from, d.to, tau, xx), prm);
-                    }, dj);
+                    }, dj, dx0);
                 // no significant rung: zero to double precision up to the cap,
                 // the diode keeps its mode (rest and exact ties stay quiet)
                 on = sg > 0;
@@ -2412,6 +2445,10 @@ private:
     Vector x_lad_;             // ladder_sign_'s rung state
     Vector x_set_, x_off_;     // settled_: the cascade's and the OFF probe's
     bool settle_decisions_ = false;   // fire_event_: a located diode event
+    // The located root's time tolerance (locator) and the state error it
+    // carries, x(t + t_tol) − x(t) in the pre-event mode (fire_event_).
+    Real loc_t_tol_ = Real{0};
+    Vector loc_dx_, x_lad2_, x_offp_;
     std::vector<Vector> scan_x_;
 };
 

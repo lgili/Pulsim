@@ -36,6 +36,7 @@ reference scenarios.
 
 from __future__ import annotations
 
+import re
 import warnings
 
 import numpy as _np
@@ -802,6 +803,18 @@ def run_dsed_from_builder(
     try:
         _ = adapter.A_matrix()
     except NotImplementedError as e:
+        # a reduction numerically singular on a node group: the floating-island
+        # refusal of the native run (DECISIONS #27), named here at the start
+        m = re.search(r"numerically singular at node (\S+):", str(e))
+        if m:
+            raise unsupported(
+                "dsed", "floating_island", device=m.group(1), kind="Node",
+                message=f"dsed: the mode's reduction is numerically singular on the "
+                f"floating island at node {m.group(1)}: its tie to ground is too weak "
+                f"for the cancellation on the island's pivot to stay under rounding "
+                f"(add-complementarity-mode-selection DECISIONS #27). Tie the island to "
+                f"ground with a smaller resistance, or use engine='pwl' or 'trbdf2'. "
+                f"Reduction: {str(e).splitlines()[0]}") from e
         raise unsupported(
             "dsed", "extraction", cls=_UnsupportedNotImplemented,
             message=_BRIDGE_FALLBACK_MESSAGE.format(

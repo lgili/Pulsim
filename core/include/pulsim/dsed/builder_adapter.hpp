@@ -1456,9 +1456,18 @@ private:
         try {
             cache_.solve_at(mask, dt, rhs, out);
         } catch (const std::runtime_error& e) {
-            const std::string msg = e.what();
+            refuse_on_island_(mask, e.what(), "the diode port problem's factor");
+            throw;
+        }
+    }
+
+    /// A factor or reduction "numerically singular" on a mask with a floating
+    /// island: the typed refusal (DECISIONS #27), naming the island node the
+    /// message names (else the first island's reference node). Else returns.
+    void refuse_on_island_(const MaskT& mask, const std::string& msg, const char* what) const {
+        {
             const auto& islands = port_islands_of_(mask);
-            if (islands.empty() || msg.find("numerically singular") == std::string::npos) throw;
+            if (islands.empty() || msg.find("numerically singular") == std::string::npos) return;
             std::string node;
             for (const auto& isl : islands) {
                 for (Size i = 0; i < isl.in.size(); ++i) {
@@ -1477,7 +1486,7 @@ private:
             if (node.empty()) node = graph_.node(islands.front().ref).name;
             throw UnsupportedError(
                 "dsed", "floating_island", node, "Node",
-                "dsed: the diode port problem's factor is numerically singular on the "
+                std::string("dsed: ") + what + " is numerically singular on the "
                 "floating island at node " + node + ": its tie to ground is too weak for "
                 "the cancellation on the island's pivot to stay under the selector's tie "
                 "tolerance (add-complementarity-mode-selection DECISIONS #27). Tie the "
@@ -1544,7 +1553,20 @@ private:
         }
         auto it = mask_cache_.find(current_mask_);
         if (it == mask_cache_.end()) {
-            auto lti = cache_.compute_lti_state_space(current_mask_);
+            auto lti = [&] {
+                try {
+                    return cache_.compute_lti_state_space(current_mask_);
+                } catch (const std::runtime_error& e) {
+                    refuse_on_island_(current_mask_, e.what(), "the mode's reduction");
+                    if (std::string_view{e.what()}.find("numerically singular")
+                        != std::string_view::npos)
+                        throw UnsupportedError(
+                            "dsed", "extraction", "", "",
+                            std::string("dsed: ") + e.what()
+                                + " Use engine='pwl' or 'trbdf2'.");
+                    throw;
+                }
+            }();
             if (b_extra_fn_ && lti.constraint_K.rows() > 0) {
                 // the flow keeps K·x' = 0, so a user injection on a
                 // constraint row would break K·x = k unseen (no closed form)

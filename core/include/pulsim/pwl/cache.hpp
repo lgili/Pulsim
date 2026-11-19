@@ -1026,6 +1026,38 @@ public:
                 const DenseMatrix MinvGsaN = mlu.solve(Gsa * N);
                 const DenseMatrix H = K * MinvGsaN;
                 Eigen::FullPivLU<DenseMatrix> hlu(H);
+                // isInvertible() is relative to H's own largest pivot, so an H that is
+                // rounding of K·M⁻¹G_sa·N (no state fixes the null direction: a floating
+                // group whose ties fell under the SVD cut) passed and its 1/rounding
+                // inverse sent the group to 1e17 V. The same cut as the SVD's, on the
+                // scale H has without cancellation.
+                const DenseMatrix Minv = mlu.inverse();
+                const Real h_scale = ((W.cwiseAbs().transpose() * Gas.cwiseAbs())
+                                      * Minv.cwiseAbs() * (Gsa.cwiseAbs() * N.cwiseAbs()))
+                                         .maxCoeff();
+                if (hlu.isInvertible()
+                    && !(hlu.matrixLU().diagonal().cwiseAbs().minCoeff()
+                         > Real{4} * Real(std::max(d, 16))
+                               * std::numeric_limits<Real>::epsilon() * h_scale)) {
+                    // name the group by its node with the largest null-vector entry
+                    std::string where;
+                    Real nmax = Real{0};
+                    for (int i = 0; i < na; ++i) {
+                        const Real ni = N.row(i).cwiseAbs().maxCoeff();
+                        const auto info = describe_row(graph_, pool_,
+                                                       static_cast<Index>(arows[static_cast<Size>(i)]));
+                        if (info.kind == RowKind::NodeVoltage && ni > nmax) {
+                            nmax = ni;
+                            where = info.label;
+                        }
+                    }
+                    throw std::runtime_error(
+                        "compute_lti_state_space: algebraic block G_aa is numerically "
+                        "singular at " + (where.empty() ? std::string{"a node group"} : where)
+                        + ": a direction it cannot resolve (a node group tied to "
+                        "the rest only by conductances below its rounding) is fixed by "
+                        "no state for this switch mask.");
+                }
                 if (!hlu.isInvertible()) {
                     throw std::runtime_error(
                         "compute_lti_state_space: algebraic block G_aa is singular "
