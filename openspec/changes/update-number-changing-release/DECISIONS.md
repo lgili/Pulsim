@@ -239,3 +239,131 @@ Paralleled diode bridges (`_paralleled_bridges(n)`; states 3n inductors + bus + 
   1e-5 needs ~700 samples per period), so most of their samples are needed; their extra time
   per sample is the rule's own per-step work (an extra `advance_` per step for the range,
   allocations, O(n²) `hypot` per bisection probe).
+
+### The fix
+
+1. **The bound (b): each mode saturates at its amplitude.** Between events, in modal coordinates
+   z = V⁻¹x, a mode is z_k(τ) = α_k + β_k τ + γ_k e^{λ_k τ} with γ_k = z̈_k(0)/λ_k² (λ_k = 0: z_k is
+   quadratic, z̈_k = (V⁻¹c1)_k; a piecewise-linear source's ramp keeps this form). The chord error
+   is linear in the trajectory and zero on its linear part, so e_j = Σ_k Re(V_jk e_k), and per mode
+   - |e_k| ≤ δ²/8 · |z̈_k| g_k, g_k = e^{max(0, Re λ_k)·δ} (the chord's Peano kernel is ≥ 0 and
+     integrates to ≤ δ²/8, so this holds for a complex term);
+   - |e_k| ≤ 2|γ_k| = (2/|λ_k|²)|z̈_k| when Re λ_k ≤ 0, λ_k ≠ 0 (the term and its chord both stay
+     within |γ_k|). Growing and zero modes have no such bound (s_k = ∞).
+   With F = the modes whose saturation level s_k = 2/|λ_k|² is below δ²/8 (a prefix of the modes
+   ordered by s_k) and S the rest, m_jk = |V_jk||z̈_k|g_k:
+
+       |e_j| ≤ Σ_{k∈F} m_jk s_k + δ²/8 · min(Σ_{k∈S} m_jk, |Σ_{k∈S} V_jk z̈_k| + δ Σ_{k∈S} m_jk|λ_k|)
+
+   With F empty this is the a32b97ed bound (the triangle-inequality bound and the one that keeps
+   the cancellation between modes at rest). Growing modes (always in S) are added per probe of δ
+   with g_k(δ), as before (an overflowing g fails the probe instead of producing NaN). Complex pairs: each complex term is bounded by modulus; repeated but
+   diagonalisable eigenvalues: V is a basis, nothing changes; defective modes: no tier-1 basis, the
+   step is `n_output_unbounded` and keeps the dt_max grid, as before. Time-varying sources: sine
+   sources are oscillator states of the augmented system (modes with Re λ = 0, s_k = 2/ω²);
+   piecewise-linear sources enter as c0 + c1·τ over the step (above). The bisection keeps `lo`
+   fitting, so any returned δ satisfies the bound whatever the split does to monotonicity.
+   After an event the fast modes ARE alive (amplitude ≫ tol): their term s_k m_jk exceeds the
+   tolerance, the curvature term rules, and the step stays short; the geometric post-event points
+   (`exact_fast_samples`) are unchanged.
+2. **Work per mode, not per step (a).** |V_jk| (n² `hypot`), the order of the modes by s_k and
+   the sorted s_k are computed once per mode, on the mode's `ExactLTI` (the per-mode cache that
+   already holds V, V⁻¹, λ; built on the rule's first call in that mode, so a run without the rule
+   holds nothing more). The adapter resets `entry.exact = ExactLTI{}` wherever a mode's matrix is
+   invalidated, which drops these too. The dsed mode cache has no byte budget (an unbounded
+   `unordered_map`); the new member is one n×n matrix per mode visited under the rule.
+   Per step: z = V⁻¹x by two gemv, then four n×(n+1) running sums over the sorted modes (O(n²));
+   a probe of δ is O(n) (binary search for the split, one pass over components). No heap
+   allocation in the step: `ChordWork` (owned by the scheduler) holds the augmented state, the
+   source vectors and the sums. The interval-end `advance_` that widens the state range is now
+   done only when the bound cuts the step (a wider range only lengthens a step, so an uncut step's
+   decision is the same).
+3. **A per-run budget (c).** At most 2e6 cut steps per run (`pulsim._dsed_dispatch.OUTPUT_BUDGET`,
+   passed to the native runner as `output_budget`, like `output_cap`). Past it the rule stops
+   cutting (the dt_max grid), `diagnostics['output_grid']['output_budget_t']` is the time it ran
+   out (None otherwise) and one RuntimeWarning names it.
+4. (d) — the tolerance per observable — not needed.
+
+### Results (extension built from this branch; the machine at load 7–175 from other agents)
+
+Paralleled bridges, 20 ms, conductance-form diodes (the test as written):
+
+| banks | `output_rtol` | samples a32b97ed -> now | wall a32b97ed -> now | `None` |
+|---|---|---|---|---|
+| 1 | 1e-5 | 21889 -> 20804 | 0.20 -> 0.17 s | 20155, 0.27 s |
+| 2 | 1e-5 | 34393 -> 20962 | 1.10 -> 0.63 s | 20315, 0.59 s |
+| 5 | 1e-5 | 99925 -> 21337 | 15.9 -> 4.8 s | 20591, 5.7 s |
+| 10 | 1e-5 | > 2.5e6 (est.; 261058 in 2 ms) -> 21857 | > 8 min -> 27 s | 20909, 31 s |
+| 10 | 1e-4 | (83523 in 2 ms) -> 21113 | -> 29 s | |
+
+- The ten-bridge test under the rule now costs about what it costs without it (< 3x target met).
+- Under the WHOLE release profile (branch-form diodes, `mode_selection='auto'`, `control_tick='state'`)
+  the ten-bridge run is refused at t = 19.969 ms: `DiodeModeInconsistentError`, Db8b OFF while
+  forward-biased by 0.73 V. NOT caused by this change: it is the same with `output_rtol` = 1e-4,
+  3e-5, 2e-5, 5e-6, with `mode_selection='lcp'`, and with `output_rtol=1e30` (the rule on, no step
+  ever cut: only the rule's event semantics — the parasitic-only projection and the exact-zero
+  root — differ from `None`, which runs). 5, 8 and 9 banks run under the same profile. Owner: the
+  exact engine's event decisions (`zero_band_on_` / settle; not touched here). Before this change
+  the same run would have reached 19.97 ms after ~30 min.
+- Reference set (100 circuits `auto+next` routes to the exact engine): the samples do not move
+  (3,600,621 -> 3,600,044 at 1e-5; `None` 2,982,860): no circuit there had the parasitic-noise
+  defect. Their extra samples are needed by the tolerance (lcc 41 -> 15156: a 1e-5 chord on a sine
+  needs ~700 samples per period), so the time ratio of those circuits stays far above 5x and the
+  +25 % target is not reachable without a looser tolerance or a per-observable one; the rule's own
+  per-step work is now O(n²) without allocation. Wall time, paired in one run (best of 5): a32b97ed
+  2.00 -> 3.63 s (1.82x, load ~8); this branch 9.86 -> 14.41 s (1.46x, load ~175: not comparable in
+  absolute terms). Worst five ratios before: lcc 101x, transformer_leakage 57x, steinmetz 51x,
+  high_freq_gan_buck 37x, diode_rectifier 25x; after: lcc 122x, transformer_leakage 43x, steinmetz
+  39x, synchronous_flyback 34x, t_type_3level 30x (same samples; ratio noise from the load).
+- `simulate()` overhead (bytecodes, warm call, the overhead test's buck, `engine='exact'`, no dt):
+  4401 without the rule, 4502 with it (a32b97ed: 4401 / 4483). The rule's per-call Python cost is
+  ~100 bytecodes; its C++ set-up is lazy (per-mode data on the first cut in that mode). The release
+  agent's 5456 on an `engine='auto'` call is the route: `pulsim.exact_route` alone executes 4745.
+
+### Invariants
+
+- `output_rtol=None`, untouched extension of a32b97ed as the baseline, against this branch:
+  dsed bit-identity 36/36; exact engine with and without `dt` on every benchmark circuit
+  222/222 byte-identical (`.scratch/ar/dsedid.py`, the rule's author's compare); goldens ok;
+  `pwl_identity` 390/390; `trbdf2_identity` 371/371. By construction: `output_step_` runs only under
+  `output_rtol_ > 0`, and the per-mode members are filled only by `exact_chord_step`.
+- Rule ON (1e-5 and 1e-4, the 100 dsed-routed circuits): every event instant is still a sample,
+  samples in time order, the event lists the same length; event times equal to ≤ 2.7e-16 s. The
+  states AT the event instants agree to 1e-12 (of max(scale, 1)) on 94 circuits; six transformer /
+  coupled-inductor circuits differ up to 6.7e-8 (flyback), 8.4e-9 (half_bridge_transformer_dc),
+  3.8e-9 (forward), 1.3e-10 (active_clamp_forward), 2.7e-11 (cuk), 1.5e-12 (sepic). That is the
+  grid sensitivity of these circuits' event states, not of this change: a32b97ed's own 1e-5 and
+  1e-4 runs differ from each other by 5.4e-8, 2.1e-8, 3.3e-9, 1.7e-10, 3.3e-11, 4.2e-12 on the same
+  circuits (and on five more above 1e-12). The 1e-12 bar of the brief is not met on them.
+
+### Functions changed in `core/include/pulsim/dsed/`
+
+- `exact_lti.hpp`: `ExactLTI` (three mutable per-mode members), new `ChordWork`, `exact_chord_step`
+  (body and a `ChordWork&` parameter).
+- `builder_adapter.hpp`: `exact_output_step` (a `ChordWork&` parameter, no locals allocated).
+- `scheduler.hpp`: `set_output_rule` (a `budget` parameter, default 2e6), new `output_budget_t()`;
+  the run-start reset (two lines after the existing output reset); the members after
+  `n_output_capped_` (`output_budget_`, `output_total_`, `output_budget_t_`, `output_work_`);
+  `output_step_`. Nothing moved or reformatted.
+- Outside: `python/dsed_bindings.cpp` (`output_budget` argument, `output_budget_t` key),
+  `_dsed_dispatch.py` (`OUTPUT_BUDGET`, the key, one warning), the `simulate()` docstring, stubs.
+
+### Verification
+
+- Rehearsal (`auto+next`, `dsed:output_grid`, `dsed+next`, `--jobs 1`, 136 units) re-run on this
+  branch against the old cell cache: outcomes unchanged unit by unit (`auto+next` 133 agree /
+  2 disagree / 1 error; both dsed configurations 122 agree / 14 refused, as before); `auto+next`
+  vs `auto` still 73 better / 6 worse; no cell worse than 2x against the old `auto+next` cell;
+  `auto+next` samples 3,794,590 -> 3,793,932.
+- dsed C++ tests on Eigen 5: 139 cases / 41211 assertions pass, `[output_rule]` included (330).
+- Full pytest (`python/tests`, one worker): 5971 passed, 110 skipped, 8 xfailed. After the
+  growing-mode fix's extension was installed: `test_exact_output_grid.py` and both ten-bridge
+  parametrisations, 12 passed.
+- `ruff check python/` clean; stubs `--check` rc 0. Full ctest not run on this tip.
+
+### Reviewer (one fresh-context pass)
+
+- Fixed: a growing mode (Re λ > 0) used a fixed envelope that could overflow or over-cut; it now
+  enters each bisection probe with exp(Re λ·d), and a non-finite probe does not fit (43a1f7c3).
+- Left as noted: the per-mode cache in `ExactLTI` is `mutable` and not thread-safe (same as the
+  propagator caches before it); a step floored at 64ε still counts as a cut toward the budget.
