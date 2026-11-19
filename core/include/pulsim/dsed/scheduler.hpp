@@ -1167,8 +1167,10 @@ private:
                         root = tb;
                 } else if (dio && static_cast<Real>(s) * gb < Real{0}
                            && !(static_cast<int>(ip) == last_fired_index_ && ta == last_fired_t_)) {
-                    const Real ba = bound_at(ta, xa());
-                    if (std::abs(ga) <= ba && std::abs(gb) > bound_at(tb, x_at(k + 1))) {
+                    // ONE bound for the test and the offset (review s16 #5): with
+                    // two, |gb| past B(tb) but inside B(ta) left no bracket
+                    const Real ba = std::max(bound_at(ta, xa()), bound_at(tb, x_at(k + 1)));
+                    if (std::abs(ga) <= ba && std::abs(gb) > ba) {
                         const Real off = static_cast<Real>(s) * ba;
                         const Real ga_s = ga + off;
                         root = ga_s == Real{0} ? ta
@@ -2258,7 +2260,7 @@ private:
 
     /// The significance bound of a diode signal read at (t, x) on a trajectory
     /// whose recovery scale is s0 and whose signal scale is v0:
-    ///   γ_n·(max(S(x), s0) + |V|) + e·(max(|v(x)|, v0, F) + |V|),
+    ///   γ_n·(max(S(x), s0) + |V|) + e·(max(|v(x)|, v0, Σ|c_j||x_j|, F) + |V|),
     /// γ_n = n·u the inner-product rounding of the recovery over its n terms
     /// (S = node_pair_voltage_scale), e the propagator's own stated relative
     /// error (exact_step_error) applied to the signal's magnitude along the
@@ -2276,8 +2278,13 @@ private:
                 const Real e = system_.exact_step_error();
                 const Real V = std::max(std::abs(d.V_f), std::abs(d.V_th));
                 const Real v = signal_abs_(d, t, x);
+                // e is relative to the state: it reaches v through Σ|c_j||x_j|, not
+                // through S, whose pads carry the rows' errors over u (for γ_n)
+                Real sx = signal_scale_(d, t, x);
+                if constexpr (requires { system_.node_pair_state_scale(d.from, d.to, t, x); })
+                    sx = system_.node_pair_state_scale(d.from, d.to, t, x);
                 return gn * (std::max(signal_scale_(d, t, x), s0) + V)
-                       + e * (std::max({v, v0, std::max(signal_scale_(d, t, x), s0),
+                       + e * (std::max({v, v0, sx,
                                         system_.node_pair_voltage_forced(d.from, d.to)}) + V);
             }
         }

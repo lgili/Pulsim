@@ -326,7 +326,18 @@ public:
         if (const auto* pr = pair_row_(e, from, to)) {   // the row's own terms (D4)
             Real v = pr->pad_c.dot(x.cwiseAbs()) + pr->pad_k;
             if (b_extra) v += pr->pad_d.dot(b_extra->cwiseAbs());
-            return v;
+            // the data term: the row is exact for the ASSEMBLED conductances,
+            // which carry a relative rounding u (a node's stamps summed,
+            // 400 + 2e-6 S); the signal's first-order response is |d|ᵀ|G||x|,
+            // the two nodes' voltage scale for nodes tied by their own
+            // conductances. full_bridge_dc: the row read −1.06e-15 V at a true
+            // 0 (u·(24 + 24) = 5.3e-15 V) and decided D3's mode on it.
+            const auto node_v = [&](Index n) {
+                Real w = e.recover_from_state.row(n).dot(x) + e.recover_const[n];
+                if (b_extra) w += e.recover_from_b.row(n).dot(*b_extra);
+                return std::abs(w);
+            };
+            return v + node_v(from) + node_v(to);
         }
         auto node_s = [&](Index n) -> Real {
             if (n < 0) return Real{0};
@@ -336,6 +347,23 @@ public:
             return v;
         };
         return node_s(from) + node_s(to);
+    }
+
+    /// Σ_j |c_j||x_j|: the state part of node_pair_voltage in absolute value,
+    /// the scale a relative error of the propagated state (exact_step_error)
+    /// reaches the voltage through. Not node_pair_voltage_scale: its pads
+    /// carry the rows' own errors over u (for γ_n), which times exact_step_error
+    /// put B at 1.2e-4 V on a twelve-bank diode (S 1.3e6 V).
+    [[nodiscard]] Real node_pair_state_scale(Index from, Index to, Real t,
+                                             const Vector& x) const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        (void)t;
+        if (const auto* pr = pair_row_(e, from, to)) return pr->c.cwiseAbs().dot(x.cwiseAbs());
+        Real v = Real{0};
+        for (const Index n : {from, to})
+            if (n >= 0) v += e.recover_from_state.row(n).cwiseAbs().dot(x.cwiseAbs());
+        return v;
     }
 
     /// Σ_ω |c·R·Z_ω|: the forced (sinusoidal steady-state) amplitude of a node

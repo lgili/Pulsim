@@ -48,6 +48,62 @@ def test_an_on_diode_row_is_the_size_of_its_current():
         v_old = ad.node_pair_voltage(fr, -1, 1e-3, x) - ad.node_pair_voltage(to, -1, 1e-3, x)
         # the same quantity, within the old reading's own rounding bound
         assert abs(v_row - v_old) <= n * u * s_old
-        # the row's terms: an ON diode's voltage is its current over g_on
-        assert s_row < 1e-3 * s_old
+        # the row's terms: an ON diode's voltage is its current over g_on, plus the
+        # data term (the two node voltages: the assembled conductances' rounding)
+        data = abs(ad.node_pair_voltage(fr, -1, 1e-3, x)) + abs(ad.node_pair_voltage(to, -1, 1e-3, x))
+        assert s_row - data < 1e-3 * s_old
         assert s_row >= abs(v_row)
+
+
+def _full_bridge_dc():
+    import sys
+    from pathlib import Path
+    bench = Path(__file__).resolve().parents[2] / "benchmarks"
+    sys.path[:0] = [str(bench), str(bench / "tools")]
+    import v1_reader
+    return v1_reader.load(bench / "circuits/switching/isolated/full_bridge_dc.yaml")
+
+
+def test_a_pair_row_bound_covers_the_assembled_conductances():
+    # full_bridge_dc, Q3 Q4 D3 D4 ON, i_L = 0: v(load_n) - v(vcc) is
+    # -24*2e-6/(400 + 2e-6) exactly; the row is exact for the ASSEMBLED
+    # 400 + 2e-6 S and read -1.06e-15 V off it, which its own terms (S ~ 2.4e-7)
+    # called significant and decided D3's mode on
+    from fractions import Fraction as F
+    b, _, _ = _full_bridge_dc().build()
+    g = b.graph
+    ix = {n["name"]: k for k, n in enumerate(g.nodes)}
+    cache = p.PwlStateSpaceCache(g, b.pool)
+    cache.build_lazy(1e-6)
+    ad = _pulsim._NativeCircuitBuilderAdapter(b, cache, None)
+    m = _pulsim.SwitchStateMask(g.num_switches)
+    for q in ("Q3", "Q4", "D3", "D4"):
+        m.set(b.switch_index_of(q), True)
+    ad.set_mask(m)
+    x = np.zeros(ad.n_state)
+    exact = float(-F(24) * 2 * F(1e-6) / (F(400) + 2 * F(1e-6)))
+    v = ad.node_pair_voltage(ix["load_n"], ix["vcc"], 0.0, x)
+    s, n, _, _ = ad._node_pair_bound_terms(ix["load_n"], ix["vcc"], 0.0, x)
+    u = np.finfo(float).eps / 2
+    assert abs(v - exact) <= n * u * s
+
+
+def test_full_bridge_dc_turns_both_freewheel_diodes_off_at_the_zero():
+    # the exact truth (benchmarks/tools/exact_truth.py): D3 and D4 carry the same
+    # current and turn OFF together at 14.8964700582364510 us; dsed kept D3 ON
+    # there (an exact-zero decision on the row's data error) and broke its law
+    # 0.2 us later (DiodeModeInconsistentError, 791 samples)
+    import warnings
+    case = _full_bridge_dc()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = case.run("dsed")
+    t = np.asarray(r.times)
+    s = np.asarray(r.switch_states).astype(bool)
+    b, _, _ = case.build()
+    k = np.flatnonzero((t > 14.9e-6) & (t < 20e-6))
+    assert k.size > 0
+    for d in ("D3", "D4"):
+        assert not s[k, b.switch_index_of(d)].any(), d
+    et = np.asarray(r.event_times)
+    assert np.abs(et - 14.8964700582364510e-6).min() < 1e-15
