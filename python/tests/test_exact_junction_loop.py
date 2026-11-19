@@ -171,8 +171,14 @@ def test_a_resumed_run_carries_the_junction_temperatures():
     b2, fn2, _ = _buck()
     r = _sim(b2, 200e-6, fn2, "dsed", resume_from=a.final_snapshot)
     np.testing.assert_allclose(r.final_snapshot.x, u.final_snapshot.x, rtol=1e-12, atol=1e-12)
+    t_u = np.asarray(u.times)
+    i0 = int(np.searchsorted(t_u, r.times[0]))
+    assert t_u[i0] == pytest.approx(r.times[0], rel=1e-15)
     for k in (0, 1):
         assert r.v(f"tj{k}")[-1] == pytest.approx(u.v(f"tj{k}")[-1], rel=1e-12)
+        # row 0 (the landing at the split edge) carries that edge's heat as the
+        # uninterrupted run's row at the same instant does (session 26 review)
+        assert r.v(f"tj{k}")[0] == pytest.approx(u.v(f"tj{k}")[i0], rel=1e-12)
     # the resumed tracker continues the first run's ledger (field 17): cumulative
     assert r.heat_injected == pytest.approx(u.heat_injected, rel=1e-12)
 
