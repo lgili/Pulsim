@@ -1422,7 +1422,7 @@ public:
         }
         const Index om_idx = resolve_node_(omega_node);
         const Index th_idx = resolve_node_(theta_node);
-        pool_.add_pmsm_mna(ids, om_idx, th_idx, p);
+        pool_.add_pmsm_mna(ids, om_idx, th_idx, p, omega0, theta0);
         // Mechanical circuit: ordinary linear elements, so the
         // mechanics inherit the trapezoidal companion.
         add_capacitor(std::string{name} + "_J", omega_node, "gnd", J,
@@ -1492,7 +1492,7 @@ public:
         const std::string rb = std::string{name} + "_psi_rb";
         const Index om_idx = resolve_node_(omega_node);
         const std::array<Index, 2> rn{resolve_node_(ra), resolve_node_(rb)};
-        pool_.add_induction_machine_mna(ids, om_idx, rn, p);
+        pool_.add_induction_machine_mna(ids, om_idx, rn, p, omega0);
         add_capacitor(std::string{name} + "_Cra", ra, "gnd", Real{1});
         add_capacitor(std::string{name} + "_Crb", rb, "gnd", Real{1});
         add_capacitor(std::string{name} + "_J", omega_node, "gnd", J,
@@ -3195,6 +3195,35 @@ private:
     /// and R_off are not read by the branch law: refused by name, as
     /// `check_device` refuses an unread field. Returns false when
     /// `device_dot_field` is not a branch-form R_on / g_off / g_on / R_off.
+    /// `I_H` of a gated PWL device (add-pwl-igbt-and-thyristor): a value
+    /// of the gated law only, so not a row of the diode's field table
+    /// (every plain diode would emit and hash it).
+    bool set_holding_current_(std::string_view fn,
+                              std::string_view device_dot_field, Real value) {
+        const auto dot = device_dot_field.rfind('.');
+        if (dot == std::string_view::npos ||
+            device_dot_field.substr(dot + 1) != "I_H") {
+            return false;
+        }
+        const auto dev = device_dot_field.substr(0, dot);
+        const auto hit = branch_index_.find(dev);
+        if (hit == branch_index_.end()) return false;
+        auto params = pool_.params_of(hit->second);
+        auto* sd = std::get_if<models::SwitchedDiode::Params>(&params);
+        if (sd == nullptr || sd->gate == models::SwitchedDiode::Gate::None) {
+            return false;
+        }
+        if (!(std::isfinite(value) && value >= Real{0})) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): I_H of device \"{}\" must be a finite number "
+                ">= 0 (got {})", fn, device_dot_field, dev, value));
+        }
+        sd->I_H = value;
+        pool_.params_of_mut(hit->second) = std::move(params);
+        pool_.sync_derived_values(hit->second);
+        return true;
+    }
+
     bool set_branch_form_value_(std::string_view fn,
                                 std::string_view device_dot_field, Real value) {
         const auto dot = device_dot_field.rfind('.');
@@ -3240,6 +3269,7 @@ private:
     void set_value_(std::string_view fn, std::string_view device_dot_field,
                     Real value) {
         if (set_branch_form_value_(fn, device_dot_field, value)) return;
+        if (set_holding_current_(fn, device_dot_field, value)) return;
         const auto r = resolve_field_(fn, device_dot_field);
         if (!ir::within(r.spec->bound, value)) {
             throw std::invalid_argument(std::format(

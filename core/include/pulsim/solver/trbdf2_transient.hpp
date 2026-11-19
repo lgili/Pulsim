@@ -406,9 +406,11 @@ inline Real held_tolerance(const pwl::DiodeEventState& diodes,
         constexpr Real eps = std::numeric_limits<Real>::epsilon();
         const Real va = stamping::read_node_voltage(x, e.from);
         const Real vk = stamping::read_node_voltage(x, e.to);
+        // a latch with its gate off holds down to I_H: its threshold sits
+        // I_H/g_on above V_f (add-pwl-igbt-and-thyristor 4.2; 0 ungated)
         return e.g_off / e.g_on
                    * (Real{1} + std::abs(e.V_th) + std::abs(e.V_f)
-                      + std::abs(va - vk))
+                      + std::abs(e.I_H) / e.g_on + std::abs(va - vk))
                + Real{64} * eps * (std::abs(va) + std::abs(vk));
     }
     return Real{1e-8}
@@ -1249,6 +1251,10 @@ inline SimulationResult run_transient_trbdf2(
     result.times.reserve(4096);
     result.begin_switch_state_record(
         static_cast<Size>(graph.num_switches()), 4096);
+    // the commanded gate per sample (2.2); cleared before the result leaves
+    if (diodes.num_gated() > 0) {
+        result.gate_mask_fn = [&diodes] { return diodes.gate_mask(); };
+    }
     result.times.push_back(opts.t_start);
     result.states.push_back(x);
     result.event_iteration_count.push_back(0);
@@ -1702,6 +1708,11 @@ inline SimulationResult run_transient_trbdf2(
                 result.switch_state_bits.resize(
                     result.switch_state_bits.size()
                     - result.switch_state_stride);
+                if (!result.gate_state_bits.empty()) {
+                    result.gate_state_bits.resize(
+                        result.gate_state_bits.size()
+                        - result.switch_state_stride);
+                }
             }
         }
         event_sample_t = -std::numeric_limits<Real>::infinity();
@@ -3475,7 +3486,7 @@ inline SimulationResult run_transient_trbdf2(
     result.final_snapshot.t = t;
     result.final_snapshot.x = x;
     result.final_snapshot.mask = diodes.num_diodes() > 0
-        ? diodes.snapshot_on_bits() : std::vector<bool>{};
+        ? diodes.snapshot_mode_bits() : std::vector<bool>{};
     // The mask x was solved under (the record's last row): diode_on
     // may already be post-edge (see initial_mask above).
     result.final_snapshot.stamped_mask =
@@ -3495,6 +3506,7 @@ inline SimulationResult run_transient_trbdf2(
     result.final_snapshot.controller = lte_ctrl.save();
     result.final_snapshot.valid = true;
     result.newton = newton_ws.take_counters();
+    result.gate_mask_fn = nullptr;   // it reads this frame's diode state
     return result;
 }
 

@@ -92,10 +92,6 @@ def test_ir_with_value_and_hash_on_gated_devices():
     bd.add_resistor("R", "k", "m", 10.0)
     bd.add_inductor("L", "m", "gnd", 10e-3)
     assert bd.build().value_hash() != c.value_hash()
-    # I_H is not a field of the value table: with_value refuses it by name
-    # (it must not rebuild the device as a plain diode)
-    with pytest.raises((ValueError, KeyError), match="I_H"):
-        c.with_value("T.I_H", 0.2)
     c2 = c.with_value("R.R", 20.0)
     assert {d["name"]: d["params"] for d in c2.components()}["T"]["gate"] == 2
     bi = p.CircuitBuilder()
@@ -156,3 +152,183 @@ def test_gated_commutations_are_recorded_under_the_restart_rule():
     # the restart rule takes each edge at its instant, one step later
     assert run(discontinuity_restart=True) == [(k + 1 if k else 0, s)
                                                for k, s in plain]
+
+
+# ---------------------------------------------------------------------
+# E: a declared gate edge under the restart rule (scr_halfwave_r).
+# make_phase_control_fn declares its edges (next_edge_after). The split
+# reads them and lands the edge at its instant; the restart rule alone
+# samples every gate at the step START (design D4) and reads no oracle,
+# so an edge inside a step fires one step late.
+# ---------------------------------------------------------------------
+_A_SCR = math.radians(60.0)
+
+
+def _scr_halfwave_error(**kw):
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 1e3)
+    b.add_thyristor("T", "a", "k", 1e-2, 1e9, V_f=0.7)
+    b.add_resistor("R", "k", "gnd", 10.0)
+    sw = p.make_phase_control_fn(1e3, _A_SCR, 1e-4, [b.switch_index_of("T")],
+                                 b.graph.num_switches)
+    assert math.isfinite(sw.next_edge_after(0.0))   # the edges are declared
+    r = _sim(b, 3e-3, "pwl", sw, dt=1e-6, **kw)
+    t, v = np.asarray(r.times), np.asarray(r.v("k"))
+    th = np.mod(2 * np.pi * 1e3 * t, 2 * np.pi)
+    on = (th > _A_SCR + 1e-12) & (th <= np.pi - math.asin(0.07))
+    ref = np.where(on, (10 * np.sin(th) - 0.7) * 10 / (10 + 1e-2),
+                   10 * np.sin(th) * 10 / (10 + 1e9))
+    return float(np.abs(v - ref)[1:].max()) / 10.0
+
+
+def test_the_split_fires_a_declared_gate_edge_on_time():
+    # control for the reproducer below (measured 8e-16)
+    assert _scr_halfwave_error(discontinuity_restart=True,
+                               enable_substep_state_correction=True) < 1e-9
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "owner: the event-queue track (add-unified-event-queue). Under "
+    "discontinuity_restart alone the fixed engine samples the gate at the "
+    "step start and does not read the schedule's declared edges: the "
+    "60 deg edge fires one 1 us step late (0.80 of the 10 V span at that "
+    "sample). The split lands it (test above)."))
+def test_the_restart_rule_fires_a_declared_gate_edge_on_time():
+    assert _scr_halfwave_error(discontinuity_restart=True) < 1e-9
+
+
+def _rect(alpha_deg, width):
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "a", "gnd", 0.0, 100.0, F)
+    b.add_thyristor("T", "a", "k", 1e-3, 1e9)
+    b.add_resistor("R", "k", "gnd", 10.0)
+    sw = p.make_phase_control_fn(F, math.radians(alpha_deg), width,
+                                 [b.switch_index_of("T")], b.graph.num_switches)
+    return b, sw
+
+
+_EDGE = 30.0 / 360.0 * T + 100e-6     # the 30 deg pulse's falling edge
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+@pytest.mark.parametrize("alpha,width,t_mid", [
+    (90.0, 100e-6, 60.0 / 360.0 * T),   # gate off, blocking forward
+    (30.0, 100e-6, _EDGE),              # the gate edge on the seam
+    (0.0, 0.9 * T, 0.75 * T),           # gate on, unlatched, reverse
+])
+def test_a_gated_resume_is_the_uninterrupted_run(engine, alpha, width, t_mid):
+    # add-pwl-igbt-and-thyristor D13: the snapshot carries the gate each
+    # device was decided under. Split on the 1 us grid; compared away
+    # from the current steps (a 1 us grid shift there is not a defect).
+    t_mid = round(t_mid * 1e6) * 1e-6
+    b, sw = _rect(alpha, width)
+    full = _sim(b, 1.5 * T, engine, sw)
+    first = _sim(b, t_mid, engine, sw)
+    second = _sim(b, 1.5 * T, engine, sw, t_start=t_mid,
+                  resume_from=first.final_snapshot)
+    t, i = np.asarray(full.times), np.asarray(full.i("T"))
+    t2, i2 = np.asarray(second.times), np.asarray(second.i("T"))
+    peak = float(np.abs(i).max())
+    assert peak > 5.0   # control: it fired
+    jumps = t[1:][np.abs(np.diff(i)) > 0.05 * peak]
+    keep = np.array([np.all(np.abs(x - jumps) > 2e-5) for x in t2])
+    assert keep.sum() > 0.9 * keep.size
+    tol = 1e-9 if engine == "pwl" else 1e-4
+    assert np.interp(t2[keep], t, i) == pytest.approx(i2[keep], abs=tol * peak)
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_the_snapshot_mask_carries_the_gate_bit(engine):
+    # conduction bit, then the gate bit: latched with the gate off after
+    # the pulse, latched with the gate on inside it
+    b, sw = _half_wave_rl()
+    assert list(_sim(b, 6e-3, engine, sw).final_snapshot.mask) == [True, False]
+    inside = 30.0 / 360.0 * T + 50e-6
+    assert list(_sim(b, inside, engine, sw).final_snapshot.mask) == [True, True]
+
+
+def test_holding_current_is_a_with_value_field():
+    b, sw = _half_wave_rl(I_H=0.05)
+    c = b.build()
+    c2 = c.with_value("T.I_H", 0.2)
+    assert {d["name"]: d["params"] for d in c2.components()}["T"]["I_H"] == 0.2
+    assert c2.value_hash() != c.value_hash()
+    with pytest.raises(ValueError, match="I_H"):
+        c.with_value("T.I_H", -1.0)
+    # a plain diode has no I_H
+    bd = p.CircuitBuilder()
+    bd.add_voltage_source("V", "a", "gnd", 1.0)
+    bd.add_diode("D", "a", "gnd", 1e3, 1e-9, 0.0, 0.0)
+    with pytest.raises((ValueError, KeyError), match="I_H"):
+        bd.build().with_value("D.I_H", 0.2)
+
+
+# ---------------------------------------------------------------------
+# F: the result records the commanded gate beside the stamped state
+# (task 2.2), and the missed-turn-on check reads it.
+# ---------------------------------------------------------------------
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_the_result_records_the_commanded_gate(engine):
+    b, sw = _half_wave_rl()
+    r = _sim(b, T, engine, sw)
+    j = b.switch_index_of("T")
+    g = np.asarray(r.gate_states)[:, j]
+    c = np.asarray(r.switch_states)[:, j]
+    t = np.asarray(r.times)
+    t_on = 30.0 / 360.0 * T
+    t_off = t_on + 100e-6
+    away = (np.abs(t - t_on) > 2e-6) & (np.abs(t - t_off) > 2e-6) & (t > 0)
+    assert np.array_equal(g[away], ((t > t_on) & (t < t_off))[away])
+    # distinct from the stamped state: latched after the pulse, gate off
+    assert (c & ~g).sum() > 10
+    from pulsim import _diode_state
+    traces = _diode_state.diode_state_traces(b, r)
+    assert [tr.n_rule_violations for tr in traces.values()] == [0]
+
+
+def test_a_circuit_without_a_gated_device_has_no_gate_record():
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 1e3)
+    b.add_diode("D", "a", "k", 1e3, 1e-9, 0.0, 0.0)
+    b.add_resistor("R", "k", "gnd", 10.0)
+    r = p.simulate(b, 1e-3, dt=1e-6, engine="pwl")
+    assert r.gate_states is None
+    assert r.switch_states is not None   # control: the stamped record exists
+
+
+class _Forced:
+    """A result whose recorded masks are replaced (the check reads only
+    the records): a missed turn-on cannot be provoked from a correct run."""
+
+    def __init__(self, res, j, stamped=None, gate=None):
+        self._res = res
+        self.switch_states = np.array(res.switch_states)
+        self.gate_states = np.array(res.gate_states)
+        if stamped is not None:
+            self.switch_states[:, j] = stamped
+        if gate is not None:
+            self.gate_states[:, j] = gate
+
+    def __getattr__(self, name):
+        if name.startswith("_"):   # not the original's cached traces
+            raise AttributeError(name)
+        return getattr(self._res, name)
+
+
+def test_the_missed_turn_on_check_reads_the_gate():
+    # a thyristor recorded OFF while its gate is on and it is forward-
+    # biased is a missed turn-on; with the gate recorded off it is not
+    b, sw = _half_wave_rl()
+    r = _sim(b, T, "pwl", sw)
+    j = b.switch_index_of("T")
+    from pulsim import _diode_state
+
+    def violations(res):
+        return [tr.n_rule_violations
+                for tr in _diode_state.diode_state_traces(b, res).values()]
+
+    assert violations(r) == [0]   # control: the real run is clean
+    gate_on = np.ones(len(r.times), dtype=bool)
+    assert violations(_Forced(r, j, stamped=False, gate=gate_on))[0] > 0
+    assert violations(_Forced(r, j, stamped=False,
+                              gate=np.zeros_like(gate_on))) == [0]

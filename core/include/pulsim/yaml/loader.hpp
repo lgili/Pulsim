@@ -59,6 +59,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <numbers>
 #include <format>
 #include <fstream>
 #include <initializer_list>
@@ -901,6 +902,93 @@ inline void load_device(
             require_string(dev, idx, type, "s_from"),
             require_string(dev, idx, type, "s_to"),
             require_real(dev, idx, type, "n"));
+    } else if (type == "pmsm" || type == "bldc") {
+        // add-mna-native-machines 3.6: CircuitBuilder.add_pmsm_mna and
+        // add_bldc_mna (python/pulsim/machines.py). The BLDC's PM-flux
+        // series is `trapezoid_harmonics`, ported here; test_yaml_composites
+        // pins the two expansions equal.
+        const bool bldc = type == "bldc";
+        if (bldc) {
+            require_only_keys(dev, idx, type,
+                              {"phase_nodes", "neutral_node", "omega_node",
+                               "theta_node", "R_s", "L_s", "k_e", "pole_pairs",
+                               "J", "B", "T_load", "flat_top_deg",
+                               "n_harmonics", "omega0", "theta0"});
+        } else {
+            require_only_keys(dev, idx, type,
+                              {"phase_nodes", "neutral_node", "omega_node",
+                               "theta_node", "R_s", "L_d", "L_q", "L_0",
+                               "psi_pm", "pole_pairs", "J", "B", "T_load",
+                               "omega0", "theta0"});
+        }
+        if (!dev["phase_nodes"] || !dev["phase_nodes"].IsSequence() ||
+            dev["phase_nodes"].size() != 3) {
+            throw std::runtime_error(std::format(
+                "yaml::load: {} '{}' requires phase_nodes: [a, b, c] "
+                "(sequence of 3 strings)", type, name));
+        }
+        std::array<std::string, 3> ph;
+        for (std::size_t k = 0; k < 3; ++k) {
+            if (!dev["phase_nodes"][k].IsScalar()) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: {} '{}' phase_nodes[{}] must be a scalar "
+                    "node name", type, name, k));
+            }
+            ph[k] = dev["phase_nodes"][k].as<std::string>();
+        }
+        const std::string nn = require_string(dev, idx, type, "neutral_node");
+        const std::string w = require_string(dev, idx, type, "omega_node");
+        const std::string th = require_string(dev, idx, type, "theta_node");
+        const Real R_s = require_real(dev, idx, type, "R_s");
+        const Real pp = require_real(dev, idx, type, "pole_pairs");
+        const Real J = require_real(dev, idx, type, "J");
+        const Real B = nonneg_or_zero(dev, type, name, "B");
+        const Real T_load = real_or(dev, "T_load", Real{0});
+        const Real omega0 = real_or(dev, "omega0", Real{0});
+        const Real theta0 = real_or(dev, "theta0", Real{0});
+        if (!bldc) {
+            b.add_pmsm_mna(name, ph[0], ph[1], ph[2], nn, w, th, R_s,
+                           require_real(dev, idx, type, "L_d"),
+                           require_real(dev, idx, type, "L_q"),
+                           require_real(dev, idx, type, "psi_pm"), pp, J, B,
+                           T_load, real_or(dev, "L_0", Real{0}), omega0, theta0);
+        } else {
+            const Real k_e = require_real(dev, idx, type, "k_e");
+            const Real flat = real_or(dev, "flat_top_deg", Real{120});
+            const Real nh = real_or(dev, "n_harmonics", Real{25});
+            if (!(std::isfinite(k_e) && k_e > Real{0}) || !(pp >= Real{1}) ||
+                pp != std::floor(pp)) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: bldc '{}': k_e must be > 0 and pole_pairs a "
+                    "positive integer", name));
+            }
+            if (!(flat >= Real{0} && flat < Real{180})) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: bldc '{}': flat_top_deg must be in [0, 180)",
+                    name));
+            }
+            if (!(nh >= Real{1}) || nh != std::floor(nh) || nh > Real{1000}) {
+                throw std::runtime_error(std::format(
+                    "yaml::load: bldc '{}': n_harmonics must be an integer in "
+                    "[1, 1000]", name));
+            }
+            // psi_h = (k_e/pp)·4·sin(h·γ)/(π·γ·h³), odd h (trapezoid_harmonics)
+            const Real gamma =
+                (Real{180} - flat) * (std::numbers::pi / Real{180}) / Real{2};
+            std::vector<std::array<Real, 3>> harm;
+            for (int h = 1; h <= static_cast<int>(nh); h += 2) {
+                const Real hr = h;
+                const Real s = gamma > Real{0}
+                    ? std::sin(hr * gamma) / (hr * gamma) : Real{1};
+                harm.push_back({hr, (k_e / pp) * Real{4} * s
+                                        / (std::numbers::pi * hr * hr),
+                                Real{0}});
+            }
+            const Real L_s = require_real(dev, idx, type, "L_s");
+            b.add_pmsm_mna(name, ph[0], ph[1], ph[2], nn, w, th, R_s, L_s, L_s,
+                           harm[0][1], pp, J, B, T_load, Real{0}, omega0,
+                           theta0, harm);
+        }
     } else if (type == "induction_machine" ||
                (type == "induction_motor" &&
                 string_or(dev, "model", "observer") == "mna")) {
@@ -1187,8 +1275,8 @@ inline void load_device(
             "pwl_current_source, op_amp_ideal, "
             "gapped_core_inductor, transformer, multi_winding_transformer, "
             "ideal_transformer, saturable_transformer, induction_motor, "
-            "induction_machine, dc_machine, winding, permeance, air_gap, "
-            "magnetic_resistance, saturable_permeance");
+            "induction_machine, dc_machine, pmsm, bldc, winding, permeance, "
+            "air_gap, magnetic_resistance, saturable_permeance");
     }
     if (dev["losses"]) load_losses(b, dev, idx, type, name);
 }
@@ -1387,7 +1475,7 @@ inline constexpr std::string_view kNodeKeys[] = {
     "from", "to", "anode", "cathode", "drain", "source", "gate", "collector",
     "emitter", "in_pos", "in_neg", "out", "out_pos", "out_neg", "a_pos", "a_neg",
     "p_from", "p_to", "s_from", "s_to", "p1_pos", "p1_neg", "p2_pos", "p2_neg",
-    "neutral_node", "omega_node",
+    "neutral_node", "omega_node", "theta_node",
     "omega", "theta"};   // a registry-kind entry (pmsm_mna); its `pins` lists too
 
 /// One subsystem block's naming: its ports (local name -> the node it
