@@ -21,6 +21,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   between events are cut so that linear interpolation is within `r` of
   every state's range (counters in `diagnostics['output_grid']`). Default
   `None` keeps today's samples; refused by name off the exact engine.
+  A run resumed with it samples its own grid (the rule's state ranges
+  restart at the snapshot instant); the events and states agree.
+* **Added** the exact engine keeps a snapshot and resumes
+  (`final_snapshot` / `resume_from`, on its own absolute clock, also on
+  the default `integrator='auto'`), runs the junction temperature loop
+  (`set_device_losses(junction=...)`, `heat_node=`) and a loss port with
+  `t_start`, and feeds recorders in the loop. A snapshot of another engine
+  resumes on it; an exact snapshot on pwl / trbdf2 is refused by name.
 
 ### One undriven-switch policy and the release's uniform engine rules (options, defaults unchanged)
 
@@ -64,9 +72,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Added** the exact engine (`engine='exact'` / `'dsed'`) tracks device
   losses (`set_device_losses`): switching energy on each event's two limits,
   conduction as the exact integral of v·i per mode, impulsive energy to the
-  commutating device. Refused by name (feature `device_losses`): a junction
-  or heat node, a `V_on` table, time-varying sources, `integrator='bdf2'`,
-  `t_start`, `resume_from`.
+  commutating device. Refused by name (feature `device_losses`): a `V_on`
+  table, time-varying sources, `integrator='bdf2'` (a junction or heat node,
+  `t_start` and `resume_from` run since: see the entry above).
 * **Changed** (benchmark harness only) the analytic reference of `rl_step`
   and `inductor_chain_step` is the closed form of the source's 1 ns ramp;
   engine outputs are unchanged.

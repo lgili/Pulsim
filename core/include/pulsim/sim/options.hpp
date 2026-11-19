@@ -171,8 +171,8 @@ inline constexpr std::array<OptionSpec, 52> kRunOptionTable{{
     // decided above the dispatch (pulsim._undriven_policy, task 11.3).
     {"undriven", kEvery, Unset::Always, "None (each engine's own)", ""},
     // Every engine: a kernel recorder pass over the stored arrays, composed
-    // above the dispatch (pulsim._recorders); store_every > 1 and
-    // resume_from are refused with it there, by name.
+    // above the dispatch (pulsim._recorders); a resume_from continues the
+    // record from the snapshot's recorder state (task 0b.7).
     {"recorders", kEvery, Unset::Always, "None", ""},
     {"control_tick", kEvery, Unset::Always, "'label'", ""},
     {"device_path", kPwl | kTrBdf2, Unset::Legacy, "'legacy'",

@@ -328,7 +328,10 @@ concept HasZcdRegister = requires(SwitchFn& fn, Real t) {
 /// The exact engine's state at a committed instant (snapshot / resume,
 /// add-exact-propagator-strategy session 24). The trajectory between two
 /// instants is a pure function of (t, x, mask) and the schedule, so this is
-/// everything a resumed run needs to take the same steps: the gate edges and
+/// everything a resumed run needs to take the same steps (except the output
+/// rule's cuts, `output_rtol`: its state ranges are per run and restart at
+/// the snapshot instant, so a resumed run with it samples a different grid of
+/// the same trajectory; the events and states agree): the gate edges and
 /// source corners are asked of their oracles at every step (no cursor), the
 /// control ticks carry their integer index in the snapshot's tick fields, and
 /// the rest is below. `mask` (the integrated mask, SolverSnapshot::

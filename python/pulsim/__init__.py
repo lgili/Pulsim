@@ -2651,9 +2651,11 @@ def simulate(
         per-period statistics (time-weighted, clipped exactly at the
         window edges), kept samples (every / every n-th / none) and both
         limits at events (exact engine). Read ``res.recorded[name]``
-        (:class:`pulsim.Recording`). Fed today by a kernel-side pass over
-        the stored arrays, so ``store_every > 1`` and ``resume_from``
-        are refused with recorders, by name. Without it nothing changes.
+        (:class:`pulsim.Recording`). Fed in the loop where the engine
+        allows it, otherwise by a kernel-side pass over the stored arrays
+        (``res.recorder_feed["why"]``; ``store_every > 1`` is refused by
+        name there). ``resume_from`` continues the record from the
+        snapshot's recorder state. Without it nothing changes.
 
     output_rtol
         ``engine='exact'`` only, default ``None`` (today's samples: one per
@@ -3546,7 +3548,7 @@ def _plan_run(
                 "it came from a run that produced none (an aborted run, "
                 "a SolverSnapshot() built by hand and never populated, or an "
                 "engine='dsed' run on a route that keeps none: integrator "
-                "'auto' / 'bdf2' or a fresh t_start, whose cause an unpickled "
+                "'bdf2' or a fresh t_start, whose cause an unpickled "
                 "snapshot no longer carries). Resuming from it would start "
                 "from zero without saying so.")
         _cs = resume_from.controller_state

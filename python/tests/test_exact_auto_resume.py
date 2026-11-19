@@ -92,3 +92,10 @@ def test_each_integrator_continues_only_its_own_snapshot():
     r2 = _run(200e-6, resume_from=ped.final_snapshot)
     assert r1.final_snapshot.controller_state[1][0] == 101.0
     assert r2.final_snapshot.controller_state[1][0] == 1.0
+
+
+def test_the_auto_snapshot_refusal_names_output_rtol_as_the_cause():
+    auto = _run(100e-6)
+    with pytest.raises(p.UnsupportedError) as ei:
+        _run(200e-6, output_rtol=1e-5, resume_from=auto.final_snapshot)
+    assert ei.value.feature == "resume_from" and "from output_rtol" in str(ei.value)

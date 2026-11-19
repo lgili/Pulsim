@@ -422,7 +422,8 @@ r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
   `p()` of those; any other reading, and runs that bypass the kernel
   Simulation object, use the stored-array pass (`res.recorder_feed["why"]`).
   `store_every > 1` works with in-loop recorders (statistics equal the
-  full run's) and is refused by name otherwise; `resume_from` is refused.
+  full run's) and is refused by name otherwise; `resume_from` continues the
+  record from the snapshot's recorder state.
   `keep="decimate"` keeps fewer rows with statistics from every step.
 - `steady_state_stats(result, "name")` looks the name up as a node
   (`result.v`) and as a branch (`result.i`); a name that is both raises

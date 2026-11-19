@@ -815,7 +815,9 @@ def run_dsed_from_builder(
                     "simulate(engine='dsed', resume_from=...): the snapshot was "
                     "written by integrator='auto' (the per-mode RK45/BDF2 "
                     "integrator), and this run would take the event-driven one "
-                    f"(integrator={integrator!r}{', control ticks' if ticks else ''}"
+                    f"(integrator={integrator!r}"
+                    f"{' from output_rtol' if output_rtol else ''}"
+                    f"{', control ticks' if ticks else ''}"
                     "), which cannot continue its step history. Resume with the "
                     "first segment's options.")
             integrator = "auto"
