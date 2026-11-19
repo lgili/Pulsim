@@ -95,7 +95,15 @@ inline void reentrant_(const Instance& in, const std::vector<std::vector<Real>>&
       }
     };
     std::vector<std::thread> pool;
-    for (std::size_t s = 0; s < 4; ++s) pool.emplace_back(work, s);
+    try {
+        for (std::size_t s = 0; s < 4; ++s) pool.emplace_back(work, s);
+    } catch (...) {
+        // a thread that could not start: join the started ones first (a
+        // joinable std::thread destroyed by the unwind calls std::terminate)
+        bad.store(0);
+        for (auto& th : pool) th.join();
+        throw;
+    }
     for (auto& th : pool) th.join();
     for (const auto& e : err) {
         if (e) std::rethrow_exception(e);
