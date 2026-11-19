@@ -209,3 +209,15 @@ limits are not wired; `scheduler.hpp` untouched). Task 3.3's dsed column,
 4.x (electrical feedback), 5.1 (summaries reading kernel records), 6.2
 (tutorial). A device that flips twice inside one pwl split step records no
 event; a cancelled run (`analysis::Cancelled`) carries no records.
+
+Hand-off for the exact engine (not started): the scheduler reports only
+`hook_accepted_(t0, t, x_left, mask)` (`dsed/scheduler.hpp:525`, `:713`);
+the right limit is the post-`fire_event_` state there. The smallest entry
+point is an `on_event`-style call beside `fire_event_` with
+(t, x_pre_event, mask_before, x, current_mask). A PWL device's conduction
+on an LTI segment is `g·∫(w·x)² − g·V_f·∫w·x`, which
+`period_integrals.hpp` already computes exactly for linear observables
+(`PeriodObservable`, the augmented exponential); the heat input needs a
+piecewise-constant source the propagator integrates exactly.
+Not measured: a hard-switched half-bridge with output capacitances (the
+requested energy-balance case); the capacitor loop is the balance test.
