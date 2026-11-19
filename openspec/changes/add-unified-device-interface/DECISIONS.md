@@ -1224,3 +1224,57 @@
     in test_ac_linearize.py). Next slice: 9.1 (per-sample pin currents in
     the loop) lets 9.2 delete the Python ladder and cover the stored-charge
     kinds; group 12 (field tables) not started.
+
+## Slice 11b — merge 214947c1, field tables, 9.4 (2026-11-19)
+
+61. **Field tables (group 12): what is the single source, and what the
+    builder does with it.** The rows already existed (`ir::kKindFields`,
+    add-immutable-circuit-ir: name, authoring alias, bound, getter/setter);
+    they gain `unit`, `description` (a `consteval` check refuses an
+    undocumented row) and `listed`. The default is the value-initialised
+    `Params` (`yaml_detail::make_params`), the same rule the YAML emitter
+    uses to omit defaults; it is not stored twice. Generated from the rows:
+    the `components()` scalar params (only rows flagged `listed`, which are
+    exactly the scalars it listed before — a first version listed every
+    row and changed a pinned digest in test_circuit_ir.py, 105 tests; the
+    full set is `Circuit.devices()["fields"]`, which was already
+    table-driven), the device reference page (`scripts/
+    generate_device_reference.py`, `--check`; `test_device_fields.py`
+    fails on a stale page — the stub byte-check is not in CI either, it is
+    the same test-level wiring), and `pulsim.device_fields`. Builder
+    validation: a builder-time bound check from the rows was implemented
+    and REMOVED — it refused 250 tests' pinned builder contracts (negative
+    R, `m = 0` as a linear capacitor, an ideal branch-form switch's
+    `g_off = 0` / `g_on = inf`, NaN left for the emitter to refuse). The
+    bound stays where it was enforced (`with_value`, `bind_param` /
+    `set_param`, the YAML registry reader), each naming device and field;
+    every `add_*` already named its device in its own errors except the
+    Shockley and Lauritzen diodes, which now do (message extended, the old
+    text kept). YAML: the four kinds already load as registry entries
+    (`type: <kind>`, `pins:`); added round-trip tests (YAML →
+    `Circuit.devices()` fields and `components()` equal to the builder's)
+    and a bit-identical pwl run each. The external device's field list
+    (`pulsim_xdev_field`: name, unit, default, numeric closed [lo, hi], no
+    description) maps onto the same `device_fields` dict; what differs is
+    the bound (numeric interval vs a bound class) and the missing
+    description. Oracle: `components()` over every call of the full suite
+    (1600 tests, 35 638 calls) identical as a per-test multiset (threaded
+    batches call in any order); the only differences are an external
+    device's `library` path and hash, which point at a per-session temp
+    build of the test model (identical once those two keys are dropped).
+    Not done: a separate YAML reference page (the device page's Name column
+    is the key list); the flux-table inductor (a table, no scalar rows).
+
+62. **9.4 adaptive vs fixed grid.** `device_loss_summary` E_total on trbdf2
+    (266-511 points, adaptive) vs pwl (8001, dt = 0.25 µs), behind a 2 mH
+    inductor (a resistive circuit gives trbdf2 no state to adapt on: it
+    runs at its step ceiling): MOSFET −0.113 %, IGBT −0.047 %, Shockley
+    −0.043 % (gate 0.5 %). The retired non-passive smooth diode is left
+    out: behind the inductor its pwl run aborts in Newton.
+
+63. **Merge 214947c1 and the external Lauritzen twin on the sweep.** The
+    twin's q_M is an internal unknown (a circuit branch variable), so the
+    existing `ExternalDeviceHistory::linearise` already linearises it; the
+    sweep of the twin equals the built-in Lauritzen sweep (linearize's
+    local row) to rtol 1e-9 at 1 kHz-100 MHz, with the charge pole visible
+    (H moves > 1 % between the ends).

@@ -17,7 +17,8 @@ method's own handling: `required`, `same` (its default equals the
 model's), its own default when it differs, `not an argument`, or `?`
 (no readable signature: a Python wrapper). A field marked
 *derived* is stored as another field (R as G = 1/R); one marked
-*not listed* is left out of `components()`.
+*in components()* is listed in `CircuitBuilder.components()` params (the
+scalars it always listed); `Circuit.devices()` lists every field.
 
 
 ## `resistor`
@@ -26,8 +27,8 @@ Builder: `CircuitBuilder.add_resistor`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `R` | `R_ohms` | Ohm | a finite number > 0 | - | required | resistance (stored as G = 1/R) (*derived*) |
-| `G` |  | S | a finite number > 0 | - | not an argument | conductance 1/R (*not listed*) |
+| `R` | `R_ohms` | Ohm | a finite number > 0 | - | required | resistance (stored as G = 1/R) (*derived, in components()*) |
+| `G` |  | S | a finite number > 0 | - | not an argument | conductance 1/R |
 
 
 ## `voltage_source`
@@ -36,7 +37,7 @@ Builder: `CircuitBuilder.add_voltage_source`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `V` |  | V | a finite number | `0.0` | required | source voltage |
+| `V` |  | V | a finite number | `0.0` | required | source voltage (*in components()*) |
 
 
 ## `switch`
@@ -45,10 +46,10 @@ Builder: `CircuitBuilder.add_switch`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `g_on` |  | S | a finite number > 0 | - | `None` | closed-state conductance |
-| `g_off` |  | S | a finite number > 0 | - | `None` | open-state conductance |
-| `R_on` |  | Ohm | a finite number > 0 | - | `None` | closed-state resistance 1/g_on (*derived, not listed*) |
-| `R_off` |  | Ohm | a finite number > 0 | - | not an argument | open-state resistance 1/g_off (*derived, not listed*) |
+| `g_on` |  | S | a finite number > 0 | - | `None` | closed-state conductance (*in components()*) |
+| `g_off` |  | S | a finite number > 0 | - | `None` | open-state conductance (*in components()*) |
+| `R_on` |  | Ohm | a finite number > 0 | - | `None` | closed-state resistance 1/g_on (*derived*) |
+| `R_off` |  | Ohm | a finite number > 0 | - | not an argument | open-state resistance 1/g_off (*derived*) |
 
 
 ## `capacitor`
@@ -57,7 +58,7 @@ Builder: `CircuitBuilder.add_capacitor`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `C` | `C_farads` | F | a finite number > 0 | - | required | capacitance |
+| `C` | `C_farads` | F | a finite number > 0 | - | required | capacitance (*in components()*) |
 
 
 ## `inductor`
@@ -66,7 +67,7 @@ Builder: `CircuitBuilder.add_inductor`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `L` | `L_henries` | H | a finite number > 0 | - | required | inductance |
+| `L` | `L_henries` | H | a finite number > 0 | - | required | inductance (*in components()*) |
 
 
 ## `diode`
@@ -75,10 +76,10 @@ Builder: `CircuitBuilder.add_diode`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `g_on` |  | S | a finite number > 0 | - | `None` | on-state conductance |
-| `g_off` |  | S | a finite number > 0 | - | `None` | off-state conductance |
-| `V_th` |  | V | a finite number | `0.0` | same | commutation threshold (not a drop) |
-| `V_f` |  | V | a finite number >= 0 | `0.0` | same | forward conduction drop |
+| `g_on` |  | S | a finite number > 0 | - | `None` | on-state conductance (*in components()*) |
+| `g_off` |  | S | a finite number > 0 | - | `None` | off-state conductance (*in components()*) |
+| `V_th` |  | V | a finite number | `0.0` | same | commutation threshold (not a drop) (*in components()*) |
+| `V_f` |  | V | a finite number >= 0 | `0.0` | same | forward conduction drop (*in components()*) |
 
 
 ## `nonlinear_diode`
@@ -99,7 +100,7 @@ Builder: `CircuitBuilder.add_current_source`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `I` |  | A | a finite number | `0.0` | required | source current, out of the from node |
+| `I` |  | A | a finite number | `0.0` | required | source current, out of the from node (*in components()*) |
 
 
 ## `pwm_voltage_source`
@@ -123,7 +124,7 @@ Builder: `CircuitBuilder.add_sine_voltage_source`.
 |---|---|---|---|---|---|---|
 | `v_dc` |  | V | a finite number | `0.0` | required | DC offset |
 | `v_amplitude` |  | V | a finite number | `1.0` | required | amplitude |
-| `frequency` |  | Hz | a finite number > 0 | `50.0` | required | frequency |
+| `frequency` |  | Hz | a finite number > 0 | `50.0` | required | frequency (*in components()*) |
 | `phase` |  | rad | a finite number | `0.0` | same | phase |
 
 
@@ -254,7 +255,7 @@ Builder: `CircuitBuilder.add_ideal_transformer`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `n` |  | 1 | a finite number > 0 | `1.0` | required | turns ratio |
+| `n` |  | 1 | a finite number > 0 | `1.0` | required | turns ratio (*in components()*) |
 
 
 ## `vccs`
@@ -263,7 +264,7 @@ Builder: `CircuitBuilder.add_vccs`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `gm` |  | S | a finite number | `0.0` | required | transconductance |
+| `gm` |  | S | a finite number | `0.0` | required | transconductance (*in components()*) |
 
 
 ## `cccs`
@@ -272,7 +273,7 @@ Builder: `CircuitBuilder.add_cccs`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `gain` |  | A/A | a finite number | `0.0` | required | current gain |
+| `gain` |  | A/A | a finite number | `0.0` | required | current gain (*in components()*) |
 
 
 ## `ccvs`
@@ -281,7 +282,7 @@ Builder: `CircuitBuilder.add_ccvs`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `rm` |  | Ohm | a finite number | `0.0` | required | transresistance |
+| `rm` |  | Ohm | a finite number | `0.0` | required | transresistance (*in components()*) |
 
 
 ## `gyrator`
@@ -290,7 +291,7 @@ Builder: `CircuitBuilder.add_gyrator`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `g` |  | S | a finite number | `0.0` | required | gyration conductance |
+| `g` |  | S | a finite number | `0.0` | required | gyration conductance (*in components()*) |
 
 
 ## `sine_current_source`
@@ -299,10 +300,10 @@ Builder: `CircuitBuilder.add_sine_current_source`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `i_dc` |  | A | a finite number | `0.0` | required | DC offset |
-| `i_amplitude` |  | A | a finite number | `1.0` | required | amplitude |
-| `frequency` |  | Hz | a finite number > 0 | `50.0` | required | frequency |
-| `phase` |  | rad | a finite number | `0.0` | same | phase |
+| `i_dc` |  | A | a finite number | `0.0` | required | DC offset (*in components()*) |
+| `i_amplitude` |  | A | a finite number | `1.0` | required | amplitude (*in components()*) |
+| `frequency` |  | Hz | a finite number > 0 | `50.0` | required | frequency (*in components()*) |
+| `phase` |  | rad | a finite number | `0.0` | same | phase (*in components()*) |
 
 
 ## `pulse_current_source`
@@ -311,13 +312,13 @@ Builder: `CircuitBuilder.add_pulse_current_source`.
 
 | Name | Key | Unit | Bound | Default | Builder | Description |
 |---|---|---|---|---|---|---|
-| `i_initial` |  | A | a finite number | `0.0` | required | initial level |
-| `i_pulsed` |  | A | a finite number | `1.0` | required | pulsed level |
-| `t_start` |  | s | a finite number >= 0 | `0.0` | required | delay before the first edge |
-| `pulse_width` |  | s | a finite number >= 0 | `0.001` | required | time at the pulsed level |
-| `period` |  | s | a finite number >= 0 | `0.0` | same | period (0: one pulse) |
-| `rise_time` |  | s | a finite number >= 0 | `0.0` | same | rise time |
-| `fall_time` |  | s | a finite number >= 0 | `0.0` | same | fall time |
+| `i_initial` |  | A | a finite number | `0.0` | required | initial level (*in components()*) |
+| `i_pulsed` |  | A | a finite number | `1.0` | required | pulsed level (*in components()*) |
+| `t_start` |  | s | a finite number >= 0 | `0.0` | required | delay before the first edge (*in components()*) |
+| `pulse_width` |  | s | a finite number >= 0 | `0.001` | required | time at the pulsed level (*in components()*) |
+| `period` |  | s | a finite number >= 0 | `0.0` | same | period (0: one pulse) (*in components()*) |
+| `rise_time` |  | s | a finite number >= 0 | `0.0` | same | rise time (*in components()*) |
+| `fall_time` |  | s | a finite number >= 0 | `0.0` | same | fall time (*in components()*) |
 
 
 ## `pwl_current_source`
