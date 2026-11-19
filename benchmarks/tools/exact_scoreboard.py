@@ -63,6 +63,12 @@ def solved_circuits():
     return out
 
 
+def truth_dps(rel, form="conductance"):
+    """The working precision the stored truth record used (45 where 30 cannot select the mode)."""
+    f = ROOT / "truth" / f"{Path(rel).stem}{'' if form == 'conductance' else '.' + form}.json"
+    return json.loads(f.read_text(encoding="utf-8"))["dps"][0] if f.exists() else 30
+
+
 def graded_columns(sol, cols):
     """(graded, inputs, unknown): input = no circuit unknown in the column."""
     g, inp, unk = [], [], []
@@ -149,7 +155,7 @@ def run_circuit(rel):
     import yaml
     entry = yaml.safe_load((ROOT / "manifests" / "v2_triage.yaml").read_text(encoding="utf-8"))["circuits"][rel]
     t0 = time.time()
-    sol = et.Solver(et.Circuit(ROOT / rel), 30).run()
+    sol = et.Solver(et.Circuit(ROOT / rel), truth_dps(rel)).run()
     rec = dict(circuit=rel, truth_s=round(time.time() - t0, 1), n_events=len(sol.events) - 1)
     case = v1_reader.load(ROOT / rel)
     _, sw, _ = case.build()
@@ -193,7 +199,7 @@ def twins():
     import v1_reader
     out = {}
     for rel in TWINS:
-        sol = et.Solver(et.Circuit(ROOT / rel, "ideal"), 30).run()
+        sol = et.Solver(et.Circuit(ROOT / rel, "ideal"), truth_dps(rel, "ideal")).run()
         case = v1_reader.load(ROOT / rel)
         g, _, _ = graded_columns(sol, dr.observables_of(case))
         sp = spans(sol, g)
@@ -304,7 +310,17 @@ def render():
               "Each tool's refinement on the ideal twin (`ideal_switch_flip_evidence.ideal_form`), "
               "graded against the ideal truth (`departs`: first sample off by more than 1e-3 of span, "
               "and the truth event before it).", "",
-              "| circuit | run | exact | worst column | departs at [s] | truth event |", "|---|---|---:|---|---:|---|"]
+              ]
+        for rel, rows in twin.items():
+            fin = {fam: [x for x in rows if x["run"].startswith(fam) and "exact" in x][-1:]
+                   for fam in ("rtol", "pwl+restart")}
+            if all(fin.values()):
+                a, b = fin["rtol"][0], fin["pwl+restart"][0]
+                bad, good = (a, b) if a["exact"] > b["exact"] else (b, a)
+                L += [f"- {rel.removeprefix('circuits/')}: the finest {bad['run']} is {bad['exact']:.2g} from "
+                      f"the ideal truth, the finest {good['run']} {good['exact']:.2g}: "
+                      f"{'trbdf2' if bad is a else 'pwl+restart'} converges to a wrong waveform."]
+        L += ["", "| circuit | run | exact | worst column | departs at [s] | truth event |", "|---|---|---:|---|---:|---|"]
         for rel, rows in twin.items():
             for x in rows:
                 d = x.get("departure") or {}
