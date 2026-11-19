@@ -117,10 +117,10 @@ class Recording:
         # event_t_right, up to one dt after event_t)
         self.event_t_right = np.asarray(out.get("event_t_right",
                                                 out["event_t"]))
-        self.event_resolution = np.asarray(
-            [_RESOLUTION[int(k)] for k in out.get(
-                "event_resolution", np.zeros(self.event_t.size, np.uint8))],
-            dtype=object)
+        # one take, not a Python loop over the event rows
+        self.event_resolution = np.asarray(_RESOLUTION, dtype=object)[
+            np.asarray(out.get("event_resolution",
+                               np.zeros(self.event_t.size, np.uint8)), dtype=np.intp)]
         self.event_left = {p: out["event_left"][:, j]
                            for j, p in enumerate(names)}
         self.event_right = {p: out["event_right"][:, j]
@@ -639,8 +639,8 @@ def simulate_with_recorders(simulate: Callable[..., Any], kw: dict,
         if snap is not None:
             # task 0b.7: the record continues across simulate(resume_from=)
             try:
-                snap.recorder_state = feed.save()   # before finish(): no flush
-                snap.recorder_spec = _spec_signature(recs)
+                # before finish(): no flush
+                feed.save_to(snap, _spec_signature(recs))
             except RuntimeError as e:   # an event report pending at the end
                 plan.resumed = f"final_snapshot without recorder state: {e}"
         feed.finish()

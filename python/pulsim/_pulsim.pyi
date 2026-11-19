@@ -4305,6 +4305,10 @@ class _LoopFeed:
         """
         The feed's run state (snapshot field 18).
         """
+    def save_to(self, snapshot: SolverSnapshot, spec: str) -> None:
+        """
+        save() into snapshot.recorder_state, spec into recorder_spec.
+        """
     @property
     def armed(self) -> bool:
         ...

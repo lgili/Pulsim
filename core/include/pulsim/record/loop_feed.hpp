@@ -53,6 +53,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <span>
@@ -128,6 +129,23 @@ public:
         }
         for (auto& r : recs_) r.bind(names_);
         row_.resize(names_.size());
+        // the flat table: a reading that IS one state entry (v(n), a state
+        // column) costs a load and a store; the rest keep the general path
+        for (Size j = 0; j < readings_.size(); ++j) {
+            const auto& r = readings_[j];
+            if (r.dev.branch < 0 && !r.product && r.a.cols.size() == 1 &&
+                r.a.coef[0] == Real{1} && r.a.div == Real{1}) {
+                unit_.push_back({r.a.cols[0], j});
+            } else if (r.dev.branch < 0 && !r.product) {
+                // v(a,b), a resistor's current: one flat linear form
+                lin_.push_back({j, terms_.size(), terms_.size() + r.a.cols.size(), r.a.div});
+                for (Size k = 0; k < r.a.cols.size(); ++k) {
+                    terms_.push_back({r.a.cols[k], r.a.coef[k]});
+                }
+            } else {
+                general_.push_back(j);
+            }
+        }
     }
 
     LoopFeed(const LoopFeed&) = delete;
@@ -298,6 +316,22 @@ private:
     std::vector<StateReading> readings_;
     std::vector<Recorder> recs_;
     events::StepHooks hooks_;
+    struct Unit {
+        Index col;
+        Size dst;
+    };
+    struct Lin {
+        Size dst, begin, end;
+        Real div;
+    };
+    struct Term {
+        Index col;
+        Real coef;
+    };
+    std::vector<Unit> unit_;       // readings that are one state entry
+    std::vector<Lin> lin_;         // linear forms over terms_ (LinearReading::eval's sum)
+    std::vector<Term> terms_;
+    std::vector<Size> general_;    // the others (products, devices)
     std::vector<Real> row_, pending_, pending_left_;
     Vector x_last_, x_seed_;
     std::vector<Real> seed_;
@@ -315,11 +349,30 @@ private:
     // post-event probe (TR-BDF2), the histories are still the left side's.
     void eval(Real t, const Vector& x, const topology::SwitchStateMask& mask,
               std::vector<Real>& out, bool probe_right = false) {
-        for (Size j = 0; j < readings_.size(); ++j) {
+        const Real* const xs = x.data();
+        Real* const o = out.data();
+        // 0 + x: the general path's sum, bit for bit (-0 reads +0 there too)
+        for (const auto& u : unit_) o[u.dst] = Real{0} + xs[u.col];
+        eval_lin(xs, o);
+        eval_general(t, x, mask, out, probe_right);
+    }
+    // LinearReading::eval, operation for operation
+    PULSIM_RECORD_INLINE void eval_lin(const Real* xs, Real* o) const noexcept {
+        const Term* const tm = terms_.data();
+        for (const auto& l : lin_) {
+            Real s = Real{0};
+            for (Size k = l.begin; k < l.end; ++k) s += tm[k].coef * xs[tm[k].col];
+            o[l.dst] = l.div == Real{1} ? s : s / l.div;
+        }
+    }
+    void eval_general(Real t, const Vector& x, const topology::SwitchStateMask& mask,
+                      std::vector<Real>& out, bool probe_right) {
+        Real* const o = out.data();
+        for (const Size j : general_) {
             const auto& r = readings_[j];
-            out[j] = r.dev.law == DeviceCurrent::Law::None
-                         ? r.eval(x)
-                         : device(readings_[j], t, x, mask, probe_right);
+            o[j] = r.dev.law == DeviceCurrent::Law::None
+                       ? r.eval(x)
+                       : device(readings_[j], t, x, mask, probe_right);
         }
     }
 
@@ -404,6 +457,28 @@ private:
         seeded_ = true;
     }
 
+    // Bit for bit (the fast step's test; `same` decides otherwise): one
+    // pass the compiler vectorises, no call.
+    PULSIM_RECORD_INLINE static bool bits_equal(const Vector& a, const Vector& b) noexcept {
+        const Index n = a.size();
+        if (n != b.size()) return false;
+        const Real* pa = a.data();
+        const Real* pb = b.data();
+        std::uint64_t diff = 0;
+        for (Index k = 0; k < n; ++k) {
+            diff |= std::bit_cast<std::uint64_t>(pa[k]) ^ std::bit_cast<std::uint64_t>(pb[k]);
+        }
+        return diff == 0;
+    }
+    PULSIM_RECORD_INLINE void copy_state(const Vector& xe) {
+        if (x_last_.size() != xe.size()) {
+            x_last_ = xe;
+            return;
+        }
+        const Real* src = xe.data();
+        Real* dst = x_last_.data();
+        for (Index k = 0; k < xe.size(); ++k) dst[k] = src[k];
+    }
     static bool same(const Vector& a, const Vector& b) noexcept {
         if (a.size() != b.size()) return false;
         if (a.size() == 0 ||
@@ -446,6 +521,33 @@ private:
 
     void on_step(Real t0, const Vector& xs, const topology::SwitchStateMask& ms, Real t,
                  const Vector& xe, const topology::SwitchStateMask& me) {
+        // The common step (no event report, no event row at its start, the
+        // same mode, a start state bit for bit the last sample's): what the
+        // general path below does in that case, without its branches.
+        if (started_ && !has_pending_ && !event_at_last_ && ms == mask_last_ &&
+            (!settled_ || me == mask_last_) && bits_equal(xs, x_last_)) {
+            {
+                const Real* const xv = xe.data();
+                Real* const o = row_.data();
+                for (const auto& u : unit_) o[u.dst] = Real{0} + xv[u.col];
+                eval_lin(xv, o);
+                if (!general_.empty()) eval_general(t, xe, me, row_, false);
+            }
+            for (auto& r : recs_) r.sample(t, row_);
+            copy_state(xe);
+            mask_last_ = me;
+            t_last_ = t;
+            ++n_steps_;
+            return;
+        }
+        on_step_general(t0, xs, ms, t, xe, me);
+    }
+
+    // Every other step: the first, an event's, a jump's.
+    PULSIM_RECORD_NOINLINE void on_step_general(Real t0, const Vector& xs,
+                                                const topology::SwitchStateMask& ms, Real t,
+                                                const Vector& xe,
+                                                const topology::SwitchStateMask& me) {
         if (!started_) {
             eval(t0, xs, ms, row_);
             if (seeded_ && same(xs, x_seed_)) {

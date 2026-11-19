@@ -9,6 +9,7 @@
 
 #include "pulsim/record/loop_feed.hpp"
 #include "pulsim/record/recorder.hpp"
+#include "pulsim/solver/result.hpp"
 
 #include <memory>
 #include <string>
@@ -183,6 +184,16 @@ void init_module(py::module_& m) {
              "Register on the feed's own hooks; Simulation.set_loop_feed passes them.")
         .def("finish", &rec::LoopFeed::finish)
         .def("save", &rec::LoopFeed::save, "The feed's run state (snapshot field 18).")
+        .def("save_to",
+             [](const rec::LoopFeed& f, pulsim::solver::SolverSnapshot& snap,
+                const std::string& spec) {
+                 // in C++: a Python list of the state would cost O(kept rows)
+                 // Python floats on every run
+                 snap.recorder_state = f.save();
+                 snap.recorder_spec = spec;
+             },
+             py::arg("snapshot"), py::arg("spec"),
+             "save() into snapshot.recorder_state, spec into recorder_spec.")
         .def("restore", [](rec::LoopFeed& f, const std::vector<Real>& s) { f.restore(s); },
              py::arg("state"), "Continue from save()'s output.")
         .def_property_readonly("restored", &rec::LoopFeed::restored)

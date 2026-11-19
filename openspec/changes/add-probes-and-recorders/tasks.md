@@ -20,7 +20,7 @@ states at equal times.
 - [x] 0b.6 (DECISIONS 19) In-loop feeding for Python on the stepper's per-step hook (`record/loop_feed.hpp`, `Simulation::set_hooks`): pwl and trbdf2 through the Simulation object; the exact engine keeps the stored-array pass (its scheduler hook has no right limits); the `store_every` refusal lifted when the feed is in-loop (refused by name otherwise)
 - [x] 0b.9 (DECISIONS 20) Device readings in the loop under the committed mode: PWL switch / diode, capacitor (KCL-consistent), Shockley / smooth / Lauritzen diode, MOSFET, IGBT, saturable inductor, nonlinear capacitor, current sources, VCVS; `p()` of those; the rest refused by name
 - [x] 0b.7 (DECISIONS 21: pickle field 18) Recorder state in the snapshot (new pickle index) so `resume_from` works with recorders
-- [ ] 0b.10 (DECISIONS 21) Cost of an attached recorder ≤ +5 % (pwl) / +3 % (trbdf2) per accepted step for one plain statistics-only probe — NOT met (+28 % / +17 %); first steps done
+- [ ] 0b.10 (DECISIONS 21) Cost of an attached recorder ≤ +5 % (pwl) / +3 % (trbdf2) per accepted step for one plain statistics-only probe — NOT met (+28 % / +17 %); first steps done. Slice 5 (DECISIONS 22): one probe keep='every' +49 % → +16 % (pwl), +22 % → +6.5 % (trbdf2); statistics-only +28 % → +16 % / +17 % → +6.9 %; extra probe 26–67 instr; recorded values bit-identical on 12 cases; still NOT met
 - [ ] 0b.11 (request R5) The exact engine fed in the loop — waits for a per-segment step / event call in `dsed/scheduler.hpp`
 - [x] 0b.8 `Times` / `t_eval` sampling (`keep='times'`, linear, `land=false`; landing waits for the event queue in the loop), `RingSink` (`Recorder::stream_to(LiveRing*)`, C++), `at(t)` (`res.at`) (DECISIONS 16)
 
