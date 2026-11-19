@@ -11,14 +11,15 @@ unchanged.
 
 ## 0. Preconditions and baseline
 - [ ] 0.1 `add-engine-conformance-matrix` merged
-- [ ] 0.2 Record: `simulate()` line count (1435) and parameter count (40); `raise ValueError` count (406), broad-handler count (68; 13 in `__init__.py`), `warnings.warn(` count (44; 14 in `__init__.py`); fixed overhead of `simulate()` (audit row 21); the suite's warning set
+- [x] 0.2 Record: `simulate()` line count (1435) and parameter count (40); `raise ValueError` count (406), broad-handler count (68; 13 in `__init__.py`), `warnings.warn(` count (44; 14 in `__init__.py`); fixed overhead of `simulate()` (audit row 21); the suite's warning set
+  - Done (2026-11-19, merged f220a1da, before Stage A): `simulate()` 1846 lines (306 of them the docstring), 50 parameters; `raise ValueError` 560 in `python/pulsim` (ratchet 562), broad handlers 90 (13 in `__init__.py`; ratchet 90), `warnings.warn(` 65 (21 in `__init__.py`). Fixed overhead, information only (never asserted): bytecodes per call (`.scratch/opcount.py`, 2-switch buck) pwl 2480, trbdf2 3317; best of 300 wall, RC, 2 steps: pwl 34.4 us, trbdf2 194 us. The suite's warning set: 414 warnings recorded per test as (test, category, message, file; line when outside pulsim) by a pytest plugin (`pytest_warning_recorded`), compared after every Stage A group.
 
 ## 1. Stage A — tests first
 - [ ] 1.1 `test_plan_resolves_every_kwarg`: `set(plan.resolved_from) == set(signature(simulate).parameters) − {"builder"}` (xfail until 2.x lands)
   - Stands in: `test_the_table_covers_every_simulate_parameter` (every keyword is a row of the kernel's option table; the options are resolved by the kernel, DECISIONS 6). Open: a Python `plan.resolved_from`, if Stage A is built.
 - [ ] 1.2 `test_engine_branches_read_only_the_plan`: `ast` check on `_run_pwl`, `_run_trbdf2`, `_run_dsed` (xfail until 7)
-- [ ] 1.3 Ratchets: `raise ValueError` and broad-handler counts in `python/pulsim` may not rise; no broad handler without re-raise around a kernel call on the `simulate()` call path (one level deep)
-  - Done: the two count ratchets (`test_simulation_object.py`; broad handlers 89 -> 86); `test_simulate_swallows_no_kernel_error` (no broad handler in `simulate()`'s own body swallows, except the post-run voltage-sanity check; three narrowed to `AttributeError`). Open: the helpers one level down.
+- [x] 1.3 Ratchets: `raise ValueError` and broad-handler counts in `python/pulsim` may not rise; no broad handler without re-raise around a kernel call on the `simulate()` call path (one level deep)
+  - Done: the two count ratchets (`test_simulation_object.py`; broad handlers 89 -> 86); `test_simulate_swallows_no_kernel_error` (no broad handler in `simulate()`'s own body swallows, except the post-run voltage-sanity check; three narrowed to `AttributeError`). One level down: `test_helpers_one_level_down_swallow_no_kernel_error` (`test_run_plan.py`): the helpers that `simulate()`'s body calls may not add a swallowing broad handler; today's five are listed by name (census of test doubles, a bundle's `attach_to_result`, the post-run voltage check), shrink-only.
 - [x] 1.4 `test_cross_cutting_on_every_engine`: builder ICs, `resume_from` validation, preflight ties, undriven-switch behaviour and voltage sanity asserted per engine against today's behaviour
   - Done: `python/tests/test_cross_cutting_on_every_engine.py` (15 cases, pwl / trbdf2 / exact; also green on 656b894f).
 
