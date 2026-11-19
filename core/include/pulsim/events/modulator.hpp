@@ -125,6 +125,20 @@ struct CarrierPwm {
                                    static_cast<Size>(ls));
     }
 
+    /// How this modulator's edges move with the duty: {rising, falling}
+    /// d(edge instant)/d(duty). A single-switch leg turns ON at the period
+    /// start phase + kT (does not move) and OFF where the carrier position
+    /// reaches d, at phase + kT + d*T (moves by T). A dead-time pair: NaN
+    /// (its thresholds are not derived here). Used by the sensitivity of
+    /// a closed loop (the edge-time term of the event jump).
+    [[nodiscard]] std::array<Real, 2> edge_duty_derivative() const noexcept {
+        if (ls >= 0) {
+            const Real nan = std::numeric_limits<Real>::quiet_NaN();
+            return {nan, nan};
+        }
+        return {Real{0}, T};
+    }
+
     [[nodiscard]] Real next_edge(Real t) const {
         const Real d = duty_at(t);
         if (ls < 0) {

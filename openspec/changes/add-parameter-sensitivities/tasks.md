@@ -55,8 +55,8 @@ Reference values.
 - [x] 7.5 Measurement gate: a gradient with respect to 8 parameters costs one run with 8 back-substitutions per stage, against 16 runs by central differences (counted as period runs or steps, not wall time)
 
 ## 8. Controller gains (needs `add-compiled-control-graph`)
-- [ ] 8.1 Block parameters as parameters; discrete-state sensitivities updated at ticks — OPEN (2026-11-19): the saltation at a tick is the controller's Jacobian ∂u/∂(x, x_d, p), and the compiled graph exposes no derivative of its tick map (`blockchain/block_laws.h` is one double expression per kind, no `S`/AD instantiation); the exact sensitivity run also carries no ticks (`sensitivity._run` calls `run_ped_native_builder` without `tick_fns`, and `simulate(engine='dsed', sensitivities=…)` refuses controllers by name). Needs: block laws on the AD scalar (request to the control-graph track, DECISIONS 13), then source-value columns per tick segment here
-- [ ] 8.2 Test: discrete P loop on an RC (`K_p = 2`, 100 µs): `∂v[10]/∂K_p` equals the derivative of the closed-form recurrence within 1e-9
+- [x] 8.1 (2026-11-19, DECISIONS 14: duty-driven graph gates on the exact path; the closed-loop buck matches central differences of the exact map to <= 1e-8 at a plateau h/p 1e-5..1e-4, and the steady state gives dV/dVref = 1, dV/dKp = dV/dKi = 0; `python/tests/test_sensitivity_closed_loop.py`) Block parameters as parameters; discrete-state sensitivities updated at ticks
+- [ ] 8.2 (OPEN, DECISIONS 14: the exact path closes the loop only through gate edges; a graph-driven held source value is not a sensitivity state yet) Test: discrete P loop on an RC (`K_p = 2`, 100 µs): `∂v[10]/∂K_p` equals the derivative of the closed-form recurrence within 1e-9
 
 ## 9. Docs and verification
 - [ ] 9.1 Sensitivity guide (what is differentiated, the event rule, when it is refused, discrete against continuous gradient), sweep guide, AI_GUIDE, CHANGELOG — sensitivity guide (`docs/sensitivities.md`), AI_GUIDE and CHANGELOG done; the sweep guide waits for group 6

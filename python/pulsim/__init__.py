@@ -2799,12 +2799,6 @@ def _compose_for(engine, _plan, *, t_start, t_end, dt, sensitivities,
                 "controller_period=<T_ctrl seconds> and the ticks are "
                 "scheduled exactly. A ClosedLoop from bind_pi_to_switch "
                 "carries its own period.")
-        if _plan.ticks and sensitivities is not None:
-            raise _unsupported(
-                "dsed", "sensitivities",
-                "simulate(engine='dsed', sensitivities=...) with controllers: "
-                "the sensitivity run has no control ticks, so the loop would "
-                "run open. Drop sensitivities or the controllers.")
         if _plan.ticks and float(t_start) != 0.0:
             raise _unsupported(
                 "dsed", "step_observer",
@@ -3736,7 +3730,9 @@ def _run_dsed(plan):
             t_start=t_start, switch_fn=switch_fn,
             initial_state=None if _ic_from_builder else initial_state,
             ic_from_builder=_ic_from_builder, dt_init=dt_init,
-            b_extra_fn=b_extra_fn, integrator=integrator)
+            b_extra_fn=b_extra_fn, integrator=integrator,
+            ticks=[(f, p, o) for (f, p), o in zip(
+                _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))])
         if _mode_auto is not None:
             _diag = getattr(_dsed_res, "diagnostics", None)
             if isinstance(_diag, dict):
