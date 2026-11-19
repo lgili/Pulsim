@@ -20,8 +20,16 @@ in `notes/GATE1_RESULTS.md`, simplified to a 1-state system.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
+
+# `_dsed_reference` lives beside this file: importable without another
+# test file having put python/tests on sys.path first
+if str(Path(__file__).parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent))
 
 
 # -------------------------------------------------------------------------

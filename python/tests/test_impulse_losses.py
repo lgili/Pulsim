@@ -194,7 +194,7 @@ def test_thermal_summary_reports_ideal_elements_with_their_impulse():
     assert [e["name"] for e in th] == ["S"]
     e = th[0]
     assert e["form"] == "branch"
-    assert e["P_cond_avg"] == pytest.approx(loss["P_avg"], rel=1e-12, abs=1e-15)
+    assert e["P_cond_avg"] == pytest.approx(loss["P_avg"], rel=1e-9, abs=1e-15)   # thermal E_cond vs loss summary: two summation paths
     assert e["P_impulse_avg"] == loss["P_impulse_avg"] > 0
     assert e["P_total_avg"] == pytest.approx(e["P_cond_avg"] + e["P_impulse_avg"], rel=1e-12)
 
