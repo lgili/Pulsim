@@ -761,6 +761,7 @@ py::dict exact_report_dict(const AdapterT& adapter,
         row["backward_error"] = r.backward;
         row["refined"] = r.refined;
         row["balanced"] = r.balanced;
+        row["pade_defect"] = r.pade_defect;
         masks.append(row);
     }
     py::dict d;

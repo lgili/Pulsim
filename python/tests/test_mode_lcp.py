@@ -355,24 +355,32 @@ def _paralleled_bank(n):
 
 
 @pytest.mark.parametrize("n", [3, 5])
-def test_paralleled_bridges_meet_a_mode_refused_for_inaccurate_eigenpairs(n):
-    """add-exact-propagator-strategy D2 (review of slice 5): identical paralleled bridges reach
-    a mode whose eigenpairs carry a propagator defect far above 1e-10 (3.3e-7 with three, at a
-    backward error of 3.8 u: the eigenpair method cannot resolve this degenerate cluster;
-    refine_pairs keeps no cluster basis with kappa2 > 1e4); the exact engine refuses it by name
-    instead of stepping it."""
-    # The defect of a degenerate cluster depends on the basis the eigensolver picks inside
-    # it (Eigen versions may differ): either the mode is refused by that name, or every
-    # visited mode met the 1e-10 bar -- never a step on pairs that missed it.
+def test_paralleled_bridges_run_their_cluster_modes_on_the_pade_tier(n):
+    """add-exact-propagator-strategy D2 (exact engine 7): identical paralleled bridges reach
+    modes whose eigenpairs miss the defect bar (a degenerate cluster near -5 /s: defect 3.3e-7
+    with three banks, backward error 3.8 u). Those modes take the Pade tier, accepted on its
+    own estimated error (two scalings, a u-perturbed matrix; max over h_max/2^k): measured
+    2.8e-11 (three) and 4.1e-11 (five), the true error of one such mode against a 60-digit
+    exponential 0.9e-11 / 1.7e-11. Bus voltage against pwl+split at dt = 1e-7 (dt/2 moves it
+    1.1e-4 V with three banks, 1.3e-6 V with five): 1.1e-4 V, the same offset two banks show
+    on eigenpairs alone (test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp)."""
+    t_end = 0.02
+    tg = np.linspace(0.0, t_end, 2001)
+
+    def bus(r):
+        return np.interp(tg, r.times, np.asarray(r.v("p")) - np.asarray(r.v("n")))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        try:
-            r = p.simulate(_paralleled_bank(n), t_end=0.02, engine="dsed")
-        except p.UnsupportedError as e:
-            assert "inaccurate eigenpairs" in str(e)
-            return
+        r = p.simulate(_paralleled_bank(n), t_end=t_end, engine="dsed")
+        ref = p.simulate(_paralleled_bank(n), t_end=t_end, engine="pwl", dt=1e-7,
+                         discontinuity_restart=True, enable_substep_state_correction=True)
     rows = r.exact["masks"]
-    assert rows and all(m["tier"] != 1 or m["defect"] <= 1e-10 for m in rows)
+    # which modes miss the eigenpair bar depends on the eigensolver's basis inside the
+    # cluster; whatever their tier, each stated its bar
+    assert rows and all(m["tier"] in (1, 2) for m in rows)
+    assert all(m["defect"] <= 1e-10 for m in rows if m["tier"] == 1)
+    assert all(m["pade_defect"] <= 1e-10 for m in rows if m["tier"] == 2)
+    assert np.abs(bus(r) - bus(ref)).max() <= 1e-3
 
 
 @pytest.mark.parametrize("cap", [64, 1])
@@ -384,13 +392,10 @@ def test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp(cap, monkeypatch
     from the held state. The engine's own cap at 1 round (the test hook) throws at any
     event where a diode flips, so the give-up is forced on any platform; either way the
     result is within 1e-3 V of pwl extrapolated in dt (measured 1.1e-4 V), and the forced
-    cap is counted. Two bridges since the propagator is judged by its error
-    (add-exact-propagator-strategy, reviews of slices 4 and 5): three or more identical banks
-    reach a mode near 8.2-8.4 ms whose eigenpairs carry a propagator defect of 1.3e-7 (four)
-    to 3.3e-7 (three) at a backward error of 3-4 u -- an ill-conditioned cluster, a typed
-    refusal (test_paralleled_bridges_meet_a_mode_refused_for_inaccurate_eigenpairs)."""
+    cap is counted. Five bridges again since the cluster modes of identical banks take the
+    Pade tier (exact engine 7; slices 5-6 had cut it to two while those modes were refused)."""
     monkeypatch.setattr(DD, "SETTLE_ROUND_CAP", cap)
-    t_end, n = 0.02, 2
+    t_end, n = 0.02, 5
     tg = np.linspace(0.0, t_end, 2001)
 
     def bank():

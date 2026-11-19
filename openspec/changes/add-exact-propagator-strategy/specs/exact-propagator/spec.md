@@ -33,11 +33,23 @@ relative error of at most 1e-14 for every argument.
 
 For each switch mask the kernel SHALL choose the propagator by a bound
 it can state: the eigendecomposition in energy coordinates when
-`u·κ₂(V) ≤ 1e-10`; otherwise a Padé scaling-and-squaring exponential
-when `u·‖A·h‖₁ ≤ 1e-10`; otherwise the implicit integrator for the steps
-taken under that mask (`u` = 2.2e-16). The result SHALL list, per mask,
-the tier used, κ₂(V), and the reason for any tier other than the first.
-A basis MUST NOT be accepted on invertibility alone.
+`u·κ₂(V) ≤ 1e-10` and its propagator defect is ≤ 1e-10; otherwise a
+Padé scaling-and-squaring exponential when its own estimated error
+(two independent scalings and a u-relative perturbation of the matrix,
+the largest over the step lengths `h_max·2⁻ᵏ`) is ≤ 1e-10; otherwise
+no exact step for that mask (the implicit integrator when allowed, else
+a typed refusal) (`u` = 2.2e-16). The result SHALL list, per mask, the
+tier used, κ₂(V), the Padé estimate when it was judged, and the reason
+for any tier other than the first. A basis MUST NOT be accepted on
+invertibility alone, and a Padé result MUST NOT be accepted on the norm
+of `A·h` alone.
+
+#### Scenario: Degenerate cluster of paralleled bridges
+- **GIVEN** three or five identical three-phase diode bridges on one bus
+- **WHEN** the run reaches a mode whose eigenpairs miss the defect bar
+- **THEN** that mode takes the Padé tier with its estimate ≤ 1e-10
+- **AND** the bus voltage agrees within 1e-3 V with the fixed engine
+  with event splitting at a converged step
 
 #### Scenario: Critically damped RLC
 - **GIVEN** a series RLC (100 µH, 100 nF) with `R = 2·√(L/C)` exactly

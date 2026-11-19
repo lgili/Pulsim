@@ -659,6 +659,7 @@ public:
         Real backward;
         int refined;
         bool balanced;
+        Real pade_defect;
     };
     [[nodiscard]] std::vector<ExactReportRow> exact_report() const {
         std::vector<ExactReportRow> rows;
@@ -667,7 +668,8 @@ public:
                 rows.push_back({m, e.exact.tier, e.exact.kappa,
                                 e.exact.norm_A1 * h_max_,
                                 e.exact.reason, e.exact.defect, e.exact.backward,
-                                e.exact.refined, e.exact.balanced});
+                                e.exact.refined, e.exact.balanced,
+                                e.exact.pade_defect});
             }
         }
         return rows;

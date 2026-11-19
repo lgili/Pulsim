@@ -234,20 +234,39 @@ def _paralleled_bridges(n):
 
 
 @pytest.mark.parametrize("mode", [None, "lcp"])
-def test_a_stiff_near_defective_mode_is_refused_as_cost(mode):
-    """Ten three-phase bridges paralleled on one bus: the mode at rest (all 30 diodes ON) had no
-    exact step (kappa2(V) 2.3e6, ||A*h|| 1.5e6) and the numeric fallback made no progress past
-    1 us ("no meaningful progress"). engine='exact' names such a mode at its segment
-    (add-complementarity-mode-selection DECISIONS #25). Since the eigenpairs are refined and
-    judged by their propagator error (add-exact-propagator-strategy, review of slice 4), the
-    rest mode passes and a later mode of the run (ten identical bridges: clusters of repeated
-    eigenvalues) is the one refused, as inaccurate eigenpairs, still with no stiff fallback."""
+def test_ten_paralleled_bridges_are_refused_not_returned(mode):
+    """Ten three-phase bridges paralleled on one bus. The mode at rest once had no exact step
+    (add-complementarity-mode-selection DECISIONS #25); later a cluster mode was refused as
+    inaccurate eigenpairs. Since the Pade tier is judged by its own error (exact engine 7), every
+    mode has a propagator, and the run is refused by the diode-law check instead: an ON diode
+    carries -0.3 A near 0.87 ms. That wrong mode is a tier-1 mode, reached through a mode
+    selection that goes wrong on tier-1 modes alone (next test): a selection defect the
+    propagator change exposed, not a Pade error (add-exact-propagator-strategy DECISIONS,
+    exact engine 7). Either refusal is acceptable here; a returned waveform is not."""
+    from pulsim._dsed_dispatch import DiodeModeInconsistentError
     kw = {} if mode is None else {"mode_selection": mode}
-    with pytest.raises(p.UnsupportedError) as ei:
-        p.simulate(_paralleled_bridges(10), t_end=0.02, engine="exact", **kw)
-    assert (ei.value.engine, ei.value.feature) == ("dsed", "cost")
-    assert "near-defective" in str(ei.value) or "inaccurate eigenpairs" in str(ei.value)
-    assert "(stiff): no exact step" in str(ei.value)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            p.simulate(_paralleled_bridges(10), t_end=0.02, engine="exact", **kw)
+        except DiodeModeInconsistentError:
+            return                                   # measured: Db0b ON at -0.30 A, 0.87 ms
+        except p.UnsupportedError as e:
+            assert (e.engine, e.feature) == ("dsed", "cost")   # a mode with no exact step
+            return
+    pytest.fail("ten paralleled bridges returned a waveform")
+
+
+def test_ten_paralleled_bridges_are_refused_over_the_first_300_us_too():
+    """The deviation behind the refusal above is early: with the law check off (a probe, not a
+    test) the bus is 0.13 V off pwl+split (dt 5e-8, converged to 4e-7 V) at 0.3 ms, every visited
+    mode tier 1. With the check on, a 0.3 ms run is refused at 0.23 ms (Db9c ON at -0.20 A):
+    the check judges against the run's own peaks, so the 20 ms run meets it later, at 0.87 ms."""
+    from pulsim._dsed_dispatch import DiodeModeInconsistentError
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with pytest.raises(DiodeModeInconsistentError):
+            p.simulate(_paralleled_bridges(10), t_end=3e-4, engine="exact")
 
 
 @pytest.mark.parametrize("engine", ["pwl", "trbdf2", "auto"])

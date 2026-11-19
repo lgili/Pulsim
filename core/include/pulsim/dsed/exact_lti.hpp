@@ -23,8 +23,11 @@
 //           (pair_quality); pairs that miss are
 //           refined (refine_pairs), then the balanced pairs tried
 //   tier 2  Padé [13/13] scaling and squaring of [[Ãh, b̃h],[0,0]]
-//           (Higham 2005, Eigen's MatrixFunctions), cached per h,
-//           accepted when u·‖Ã·h_max‖₁ ≤ 1e-10
+//           (Higham 2005), squared as e^X − I (expm_aug), cached per
+//           h, accepted when its estimated error (pade_defect: two
+//           independent scalings, and a u-relative perturbation of the
+//           matrix), max over h = h_max·2⁻ᵏ, is ≤ 1e-10. It needs no
+//           eigenpairs: degenerate clusters and stiff modes take it.
 //   tier 3  neither: no exact step for this mask (`valid == false`);
 //           the scheduler takes its numeric path and the reason is
 //           in the run's exact report.
@@ -38,8 +41,7 @@
 
 #include <Eigen/Eigenvalues>
 #include <Eigen/SVD>
-#include <unsupported/Eigen/MatrixFunctions>
-
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <cstdio>
@@ -67,6 +69,7 @@ struct ExactLTI {
     Real backward = std::numeric_limits<Real>::quiet_NaN();  // first-order error, row-wise backward error / u
     int refined = 0;           // refinement iterations the kept pairs took
     bool balanced = false;     // the kept pairs are the balanced matrix's
+    Real pade_defect = std::numeric_limits<Real>::quiet_NaN();  // tier 2's error estimate (when judged)
 
     // Tier 1, physical coordinates: V = D⁻¹Ṽ, V⁻¹ = Ṽ⁻¹D, split into
     // real and imaginary parts so a step multiplies real vectors only.
@@ -361,6 +364,99 @@ inline int refine_pairs(const DenseMatrix& As, Eigen::MatrixXcd& V, Eigen::Vecto
     return used;
 }
 
+/// θ₁₃ of Higham 2005: ‖X‖₁ ≤ θ₁₃ needs no squaring.
+inline constexpr Real kPadeTheta13 = 5.371920351148152;
+
+/// e^M by scaling and squaring of the [13/13] Padé approximant (Higham
+/// 2005, θ₁₃ = 5.37), squared in the form B = e^X − I, (I + B)² =
+/// I + (2B + B²). Squaring e^X itself keeps the slow part of a stiff
+/// matrix as I + 1e-11·(…) and amplifies that rounding at every one of
+/// the ~23 squarings: on a paralleled-bridge mode (‖Ãh‖₁ = 2.5e7)
+/// Eigen's `.exp()` was 3.0e-9 off a 60-digit exponential, this form
+/// 4.3e-11 (macOS arm64, Eigen 5; DECISIONS, exact engine 7).
+[[nodiscard]] inline DenseMatrix expm_aug(const DenseMatrix& M) {
+    constexpr Real c[] = {64764752532480000.0, 32382376266240000.0, 7771770303897600.0,
+                          1187353796428800.0, 129060195264000.0, 10559470521600.0,
+                          670442572800.0, 33522128640.0, 1323241920.0, 40840800.0,
+                          960960.0, 16380.0, 182.0, 1.0};
+    const auto n = M.rows();
+    const Real nrm = n == 0 ? Real{0} : M.cwiseAbs().colwise().sum().maxCoeff();
+    if (!std::isfinite(nrm)) {
+        return DenseMatrix::Constant(n, n, std::numeric_limits<Real>::quiet_NaN());
+    }
+    int s = 0;
+    if (nrm > kPadeTheta13) {
+        std::frexp(nrm / kPadeTheta13, &s);   // nrm/θ ≤ 2^s, exact (no libm rounding)
+    }
+    const DenseMatrix X = M * std::ldexp(Real{1}, -s);
+    const DenseMatrix I = DenseMatrix::Identity(n, n);
+    const DenseMatrix X2 = X * X;
+    const DenseMatrix X4 = X2 * X2;
+    const DenseMatrix X6 = X4 * X2;
+    const DenseMatrix Uin = c[13] * X6 + c[11] * X4 + c[9] * X2;
+    const DenseMatrix U = X * (X6 * Uin + c[7] * X6 + c[5] * X4 + c[3] * X2 + c[1] * I);
+    const DenseMatrix Vin = c[12] * X6 + c[10] * X4 + c[8] * X2;
+    const DenseMatrix V = X6 * Vin + c[6] * X6 + c[4] * X4 + c[2] * X2 + c[0] * I;
+    DenseMatrix B = (V - U).partialPivLu().solve(Real{2} * U);   // r(X) − I
+    for (int k = 0; k < s; ++k) {
+        B = (Real{2} * B + B * B).eval();
+    }
+    B.diagonal().array() += Real{1};
+    return B;
+}
+
+/// Tier 2's error estimate at step h, for M = [[Ã, b̃],[0, 0]]: the
+/// larger of (1) the disagreement of e^{Mh} with (e^{Mh/3})³, two
+/// scalings whose rounding is independent, and (2) the change of e^{Mh}
+/// under u-relative perturbations of M's entries (two fixed sign
+/// patterns, the larger): an estimate of what the stored matrix's own
+/// rounding does to e^{Mh}. As ‖ΔE‖_F / max(1, ‖E‖_F). An estimate, not
+/// a bound: (1) alone missed a stiff near-conserved mode by 6× (its two
+/// scalings share the rounding of the cancelling rows), and a single
+/// sign pattern moved 37× under a reordering of the states (a cancelling
+/// pair given equal signs); the larger of all three was 1.3–10× above a
+/// 60-digit error on every probe (1.8× at the least).
+[[nodiscard]] inline Real pade_defect_at(const DenseMatrix& M, Real h) {
+    const DenseMatrix E = expm_aug(M * h);
+    const DenseMatrix E3 = expm_aug(M * (h / Real{3}));
+    Real d = (E - E3 * E3 * E3).norm();
+    for (int pattern = 0; pattern < 2; ++pattern) {
+        DenseMatrix P = M;
+        for (Eigen::Index j = 0; j < P.cols(); ++j) {
+            for (Eigen::Index i = 0; i < P.rows(); ++i) {
+                const bool plus = pattern == 0 ? (7 * i + 13 * j) % 5 < 3 : (i + j) % 2 == 0;
+                P(i, j) *= Real{1} + (plus ? kExactRoundoff : -kExactRoundoff);
+            }
+        }
+        d = std::max(d, (E - expm_aug(P * h)).norm());
+    }
+    d /= std::max(Real{1}, E.norm());
+    return std::isfinite(d) ? d : std::numeric_limits<Real>::infinity();
+}
+
+/// The largest pade_defect_at over h = h_max·2⁻ᵏ (one length per
+/// squaring count; steps between grid points are estimated by their
+/// neighbours, not bounded), down to the first h that needs no squaring.
+/// Stops at the first miss. Judged on the constant forcing column b̃: the
+/// per-step level + ramp columns of exact_advance_affine_into are not
+/// judged separately (their exponential shares the state block).
+[[nodiscard]] inline Real pade_defect(const DenseMatrix& As, const Vector& bs, Real h_max) {
+    const auto n = As.rows();
+    DenseMatrix M = DenseMatrix::Zero(n + 1, n + 1);
+    M.topLeftCorner(n, n) = As;
+    M.topRightCorner(n, 1) = bs;
+    const Real nrm = M.cwiseAbs().colwise().sum().maxCoeff();
+    Real worst = Real{0};
+    Real h = h_max;
+    for (int k = 0; k < 128; ++k, h *= Real{0.5}) {
+        worst = std::max(worst, pade_defect_at(M, h));
+        if (!(worst <= kExactTierBound) || nrm * h <= kPadeTheta13) {
+            break;
+        }
+    }
+    return worst;
+}
+
 /// Build the propagator of ẋ = A·x + b. `scale` is D's diagonal (√m
 /// per state, empty for the identity); `h_max` is the longest step the
 /// caller will take, which tier 2's bound needs; `horizon` is the run's
@@ -462,15 +558,16 @@ inline int refine_pairs(const DenseMatrix& As, Eigen::MatrixXcd& V, Eigen::Vecto
     } else {
         out.reason = "eigensolver failed";
     }
-    const Real nah = out.norm_A1 * h_max;
-    if (kExactRoundoff * nah <= kExactTierBound) {
+    out.pade_defect = pade_defect(out.As, out.bs, h_max);
+    if (out.pade_defect <= kExactTierBound) {
         out.tier = 2;
         out.valid = true;
         out.y.resize(n);
         return out;
     }
-    out.reason += "; ||A*h||_1 = " + detail::fmt_e(nah)
-                  + " > 1e-10/u (stiff): no exact step for this mode";
+    out.reason += "; Pade defect = " + detail::fmt_e(out.pade_defect)
+                  + " > 1e-10 at ||A*h||_1 <= " + detail::fmt_e(out.norm_A1 * h_max)
+                  + ": no exact step for this mode";
     return out;
 }
 
@@ -487,18 +584,23 @@ inline int refine_pairs(const DenseMatrix& As, Eigen::MatrixXcd& V, Eigen::Vecto
     M.topLeftCorner(n, n) = e.As * h;
     M.topRightCorner(n, 1) = bs * h;
     ++e.n_pade;
-    return M.exp();
+    return expm_aug(M);
 }
 
-/// Same, cached per h (the main step repeats h = dt_max).
+/// Same, cached per h (the main step repeats h = dt_max); least
+/// recently used out, so partial steps evict the main step's only when
+/// more than kPadeCacheSize − 1 other lengths cycle between two uses.
 [[nodiscard]] inline const DenseMatrix& pade_exp(const ExactLTI& e, Real h) {
-    for (const auto& [hh, E] : e.pade_cache) {
-        if (hh == h) {
+    for (std::size_t i = 0; i < e.pade_cache.size(); ++i) {
+        if (e.pade_cache[i].first == h) {
             ++e.n_pade_hits;
-            return E;
+            std::rotate(e.pade_cache.begin() + static_cast<std::ptrdiff_t>(i),
+                        e.pade_cache.begin() + static_cast<std::ptrdiff_t>(i) + 1,
+                        e.pade_cache.end());
+            return e.pade_cache.back().second;
         }
     }
-    constexpr std::size_t kPadeCacheSize = 16;
+    constexpr std::size_t kPadeCacheSize = 64;   // event scans take up to n_scan lengths per step
     if (e.pade_cache.size() >= kPadeCacheSize) {
         e.pade_cache.erase(e.pade_cache.begin());
     }
@@ -549,7 +651,7 @@ inline void exact_advance_affine_into(const ExactLTI& e, const Vector& x, Real h
         M.block(0, n + 1, n, 1) = e.d.cwiseProduct(c1) * (h * h);
         M(n + 1, n) = Real{1};
         ++e.n_pade;
-        const DenseMatrix E = M.exp();
+        const DenseMatrix E = expm_aug(M);
         e.y.noalias() = E.topLeftCorner(n, n) * e.d.cwiseProduct(x);
         out = (e.y + E.block(0, n, n, 1)).cwiseQuotient(e.d);
         return;
