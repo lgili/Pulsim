@@ -397,6 +397,9 @@ public:
     /// (no step was accepted) keeps the power already owed.
     void advance(Real h_next) {
         h_now_ = h_next;
+        // a resumed trbdf2 prediction is never booked by pwl's accept();
+        // advance(h, hist) rebuilds it for the variable-step engines
+        pred_.clear();
         for (const auto& q : queue_) {
             if (q.e == Real{0}) continue;
             add_(now_, q.node, q.e);

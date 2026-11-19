@@ -215,3 +215,41 @@ def test_the_switching_chopper_junction_follows_its_closed_form():
     rise = truth.max() - T_AMB
     assert rise > 1.0
     np.testing.assert_allclose(tj[off], truth, rtol=0, atol=1.5e-3 * rise)
+
+
+def test_a_trbdf2_snapshot_resumed_on_pwl_injects_no_stale_prediction():
+    """The trbdf2 snapshot carries the conduction power predicted for its
+    last step (loss state version 2). pwl never books that prediction:
+    resumed there, it must not keep injecting it (reviewer D1 of batch 14n:
+    T_j settled 1.96 K high, the switch's conduction loss as a phantom).
+    The switch opens at 1 ms: from 6 ms T_j is back at ambient on both."""
+    t_off = 1e-3
+
+    def make():
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "in", "gnd", 10.0)
+        b.add_switch("S1", "in", "x", 1e2, 1e-9)
+        b.add_resistor("R", "x", "gnd", 1.0)
+        b.add_voltage_source("Vamb", "amb", "gnd", T_AMB)
+        b.add_resistor("R1", "tj", "amb", 2.0)
+        b.add_capacitor("C1", "tj", "amb", 2e-4)
+        b.set_device_losses("S1", junction="tj")
+        n, k = b.graph.num_switches, b.switch_index_of("S1")
+
+        def fn(t):
+            m = p.SwitchStateMask(n)
+            m.set(k, t < t_off)
+            return m
+        return b, fn
+
+    b, fn = make()
+    first = _sim(b, 0.9e-3, fn, rtol=1e-8)
+    assert first.v("tj")[-1] > T_AMB + 1.0
+    for eng, kw in (("pwl", dict(dt=1e-7)), ("trbdf2", dict(rtol=1e-8, atol=1e-12))):
+        b, fn = make()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            r = p.simulate(b, 6e-3, switch_fn=fn, engine=eng,
+                           resume_from=first.final_snapshot, **kw)
+        # tau = 0.4 ms: 5 ms after the edge the rise is e^-12.5 of ~1.9 K
+        assert abs(np.asarray(r.v("tj"))[-1] - T_AMB) < 1e-3, eng
