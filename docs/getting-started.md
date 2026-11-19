@@ -57,17 +57,17 @@ print(f"v_C(1τ) = {np.interp(1e-3, res.times, v_c):.3f} V  [{res.engine_used}]"
 
 Expected output:
 ```
-v_C(1τ) = 3.151 V  [pwl]
+v_C(1τ) = 3.161 V  [pwl]
 ```
 
 Passing `dt` asks for the **fixed-step** trapezoidal engine (`pwl`). It
-starts from an all-zero state, so the 5 V source is switched on during
-the first step; the response is the exact exponential delayed by half a
-step (`dt/2 = 5 µs`), which is the 0.3 % gap to 3.161 V. Shrink `dt` and
-the gap shrinks with it.
+starts from an all-zero state, so the 5 V source switches on at `t = 0`;
+the engine restarts at that discontinuity, and what is left is the
+trapezoidal rule's own error (1.5e-5 V here, shrinking with `dt²`).
 
-Leave `dt` out and the default `engine='auto'` picks the engine — here
-the variable-step TR-BDF2 engine, which lands on the analytical value:
+Leave `dt` out and the default `engine='auto'` picks the engine — here,
+a piecewise-linear circuit, the exact event-driven engine, which lands
+on the analytical value:
 
 ```python
 res_auto = p.simulate(b, t_end=5e-3)
@@ -76,7 +76,7 @@ print(f"v_C(1τ) = {np.interp(1e-3, res_auto.times, res_auto.v('vc')):.3f} V"
 ```
 
 ```
-v_C(1τ) = 3.161 V  [trbdf2]
+v_C(1τ) = 3.161 V  [dsed]
 ```
 
 `res.engine_used` says which engine ran and `res.engine_route_reason`
@@ -109,7 +109,7 @@ print(f"i_R(0+) = {i_r[1] * 1e3:.3f} mA,  i_R(end) = {i_r[-1] * 1e6:.3f} µA")
 ```
 
 ```
-i_R(0+) = 4.975 mA,  i_R(end) = 33.858 µA
+i_R(0+) = 4.950 mA,  i_R(end) = 33.688 µA
 ```
 
 ## Plotting

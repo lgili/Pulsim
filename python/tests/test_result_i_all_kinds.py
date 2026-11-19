@@ -174,23 +174,21 @@ def test_switch_current_matches_inductor_when_closed():
     res = p.simulate(b, t_end=2e-3, dt=1e-7, switch_fn=sf)
     i_Q = res.i("Q1")
     i_L = res.i("L1")
-    times = np.asarray(res.times)
 
-    # Sample the mask trace via the same helper as the kernel.
-    from pulsim._result_views import evaluate_switch_mask_trace
-    closed = evaluate_switch_mask_trace(sf, times,
-                                            b.switch_index_of("Q1"))
+    # The mask the kernel stamped at each sample: a sample AT a gate edge
+    # is the left limit (event split), which re-evaluating sf(t) misreads.
+    closed = np.asarray(res.switch_states)[:, b.switch_index_of("Q1")].astype(bool)
+    leak = 2 * V_in * 1e-9    # twice V·g_off: the OFF diode's / switch's leakage
 
-    # While closed: i_Q ≈ i_L (allow a small numerical fudge for the
-    # finite g_on = 1 kS — not infinity).
-    if np.any(closed):
-        diff_closed = np.abs(i_Q[closed] - i_L[closed])
-        assert np.max(diff_closed) < 0.5, (
-            f"i_Q vs i_L mismatch when closed; "
-            f"max diff={np.max(diff_closed):.3f} A")
-    # While open: i_Q tiny (≤ V·g_off ≈ 12·1e-9 = 1.2e-8 A).
-    if np.any(~closed):
-        assert np.max(np.abs(i_Q[~closed])) < 1e-5
+    # While closed: KCL at sw, i_Q = i_L + the OFF diode's leakage
+    # (measured 1.20e-8 A).
+    assert np.any(closed) and np.any(~closed)
+    diff_closed = np.abs(i_Q[closed] - i_L[closed])
+    assert np.max(diff_closed) < leak, (
+        f"i_Q vs i_L mismatch when closed; "
+        f"max diff={np.max(diff_closed):.3e} A")
+    # While open: i_Q is the leakage, about V·g_off = 1.2e-8 A (measured 1.20e-8 A).
+    assert np.max(np.abs(i_Q[~closed])) < leak
 
 
 def test_switch_without_switch_fn_raises_with_hint():
@@ -201,7 +199,8 @@ def test_switch_without_switch_fn_raises_with_hint():
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 5.0)
     b.add_resistor("R", "vin", "n", 10.0)
-    b.add_switch("Q1", "n", "gnd", g_on=1e3, g_off=1e-9)
+    # legacy subject: a conductance-form switch's current needs its mask (branch form stores it)
+    b.add_switch("Q1", "n", "gnd", g_on=1e3, g_off=1e-9, form="conductance")
 
     sf = p.make_pwm_switch_fn(
         frequency=10e3,

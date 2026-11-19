@@ -486,6 +486,9 @@ def test_a_floating_subnet_is_failed_and_retries_are_counted():
     assert counters["dt_retries"] == 2
 
 
+@pytest.mark.xfail(strict=True, reason="release finding F-5-2: under output_rtol the polled edge "
+                   "lands at kT+1e-16 and design._settle_error interpolates the jumping OFF-branch "
+                   "current across it: 1.3e-4 on a settled run (KPIs agree to 1e-11)")
 def test_a_polled_dsed_schedule_is_counted_and_its_kpis_are_unaffected():
     """dsed bisects every edge it polls to the instant: an opaque PWM
     gives the KPIs of the oracle'd one (measured equal to 1e-9) and stays

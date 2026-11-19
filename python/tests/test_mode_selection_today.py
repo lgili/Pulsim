@@ -98,13 +98,14 @@ def test_boost_zero_threshold_dsed_settle_alone_lands_on_the_reference(R, settle
     assert REF_BOOST[R] - settle > 0.1
     saved = DD.MODE_GUARD, DD.DIODE_LAW_REL
     DD.MODE_GUARD, DD.DIODE_LAW_REL = False, 0.0  # the settle on its own
+    # legacy subject: the settle and its guard (mode_selection='legacy'; the default is now 'auto')
     try:
-        r0 = p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn)
+        r0 = p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn, mode_selection="legacy")
     finally:
         DD.MODE_GUARD, DD.DIODE_LAW_REL = saved
     assert _end(r0, "out") == pytest.approx(REF_BOOST[R], abs=1e-5)
     b, fn = _boost(0.0, R)
-    r = p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn)
+    r = p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn, mode_selection="legacy")
     assert _end(r, "out") == pytest.approx(REF_BOOST[R], abs=1e-5)
     assert r.diagnostics["mode_guard"]["repairs"] == 0
     b, fn = _boost(0.0, R)

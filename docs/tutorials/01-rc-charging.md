@@ -65,19 +65,18 @@ Expected:
 ```
 τ = 1.0 ms
 k·τ |  v_sim    v_exp
-  1  |  6.319    6.321
-  2  |  8.646    8.647
+  1  |  6.321    6.321
+  2  |  8.647    8.647
   3  |  9.502    9.502
 ```
 
-The simulation trails the exponential by 1.8 mV at `t = τ` (0.7 mV at 2τ).
-That gap is not integration error in the RC: the source jumps 0 → 10 V
-at `t = 0`, and the trapezoidal rule, which only sees the source at the
-samples `t = 0` and `t = dt`, treats the first step as a ramp. The
-response is therefore the exact exponential delayed by half a step,
-`dt / 2 = 0.5 µs`: compared with `V · (1 − exp(−(t − dt/2)/τ))` the
-error drops to ~1.5e-7 V. Divide `dt` by 10 and the gap at `t = τ`
-shrinks tenfold, to 0.18 mV.
+The simulation is on the exponential to 3.1e-7 V at `t = τ`. The source
+jumps 0 → 10 V at `t = 0`; the fixed-step engine restarts at that
+discontinuity instead of treating the first step as a ramp, so what is
+left is the trapezoidal rule's own second-order error: divide `dt` by 10
+and the error at `t = τ` shrinks a hundredfold, to 3.1e-9 V. (With
+`discontinuity_restart=False` the first step is a ramp and the response
+trails by half a step, 1.8 mV at `t = τ`.)
 
 ## What just happened
 

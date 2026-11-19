@@ -32,7 +32,8 @@ def _run(fam, V_th, t_end, mode=None, D=None):
 @pytest.mark.parametrize("fam,V_th,t_end", [("dcm_buck", 0.0, 40 * T), ("bridge1_vf07", 0.0, 0.04),
                                            ("boost_500", 0.0, 100 * T)])
 def test_shadow_is_bit_identical_to_the_default(fam, V_th, t_end):
-    r0, r1 = _run(fam, V_th, t_end), _run(fam, V_th, t_end, "shadow")
+    # legacy subject: the shadow's decider is the settle (mode_selection='legacy'), no longer the default
+    r0, r1 = _run(fam, V_th, t_end, "legacy"), _run(fam, V_th, t_end, "shadow")
     assert np.array_equal(np.asarray(r0.times), np.asarray(r1.times))
     assert np.array_equal(np.asarray(r0.states), np.asarray(r1.states))
     assert np.array_equal(np.asarray(r0.switch_states), np.asarray(r1.switch_states))

@@ -257,7 +257,8 @@ def test_a_kpi_that_simulates_does_not_change_the_replayed_run():
     values = [1e-4, 2e-4, 3e-4]
 
     def kpi(res, params):
-        p.simulate(factory(), t_end=1e-6, dt=1e-8, engine="pwl")
+        # any run will do: Q1 is undriven on purpose, so name the policy
+        p.simulate(factory(), t_end=1e-6, dt=1e-8, engine="pwl", undriven="open")
         return {"n": float(len(res.times))}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

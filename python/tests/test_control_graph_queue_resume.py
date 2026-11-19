@@ -22,7 +22,8 @@ T2 = 60 * T
 # the first run's t_end); between two
 SPLITS = {"on_tick": 37 * T, "step_after_tick": 37.05 * T,
           "between_ticks": 37.3 * T}
-PWL = {"label": dict(dt=5e-7),
+# legacy subject: 'label' is the old default tick, now named explicitly
+PWL = {"label": dict(dt=5e-7, control_tick="label"),
        "state": dict(dt=5e-7, control_tick="state", discontinuity_restart=True,
                      enable_substep_state_correction=True)}
 

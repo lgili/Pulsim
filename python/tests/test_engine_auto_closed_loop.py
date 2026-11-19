@@ -8,6 +8,9 @@ boundary, the phase drifts with the grid, and — the part that
 actually changes the answer — the PWM edge the controller commands
 is quantized to the grid. `engine='auto'` schedules the tick
 instants and lands them (and the gate edges) exactly.
+
+Since the release ``engine='auto'`` without dt runs a piecewise-linear
+circuit exact; the tests that read the TR-BDF2 stats name it.
 """
 
 import warnings
@@ -82,7 +85,7 @@ def test_controller_ticks_are_exact_and_none_are_lost():
     """
     b, sf, obs, hist = _pi_buck()
     res = ps.simulate(b, t_end=20e-3, switch_fn=sf,
-                       step_observer=obs, engine="auto")
+                       step_observer=obs, engine="trbdf2")
     assert res._trbdf2_stats["n_ctrl_ticks"] == 200
     assert len(hist) == 200
     spacing = np.diff(np.array([h[0] for h in hist]))
@@ -122,7 +125,7 @@ def test_closed_loop_handle_drives_the_engine():
         setpoint=5.0, switch="Q1", freq=FREQ)
     assert loop.period == pytest.approx(T_CTRL)
     res = ps.simulate(b, t_end=20e-3, closed_loops=[loop],
-                       engine="auto")
+                       engine="trbdf2")
     assert _tail_mean(res, "vout", 15e-3) == pytest.approx(
         5.0, rel=0.05)
     assert res._trbdf2_stats["n_ctrl_ticks"] == 200
@@ -196,7 +199,7 @@ def test_bare_observer_with_explicit_period():
         warnings.simplefilter("always")
         res = ps.simulate(b, t_end=1e-3, switch_fn=sf,
                            step_observer=lambda t, x: seen.append(t),
-                           controller_period=50e-6, engine="auto")
+                           controller_period=50e-6, engine="trbdf2")
     assert len(seen) == 20
     # The ticks end steps exactly on the turn-on edges (k * 100 us):
     # the edge was not landed, so the next step solved Q1 ON with D1
@@ -213,12 +216,17 @@ def test_fixed_engine_ticks_on_the_schedule():
     k * 100 us. Its elapsed-time throttle drifted and lost 2 of 200
     ticks (198, tail mean 4.985423 V); the schedule fires all
     ceil(20 ms / 100 us) = 200, the first at t = 0, and the tail mean
-    moves to 4.989752 V (one PI update more per 100 periods)."""
+    moves to 4.989752 V (one PI update more per 100 periods).
+
+    The truth is the same loop with exact edges: 4.968199 V (exact
+    engine), 4.968198 V (trbdf2 rtol 1e-8), 4.968163 V (pwl dt = 20 ns).
+    The release's restart puts the fixed engine at dt = 2 us 3.9e-3 V
+    from it; the restart-less engine of the old pin was 2.2e-2 V off."""
     b, sf, obs, hist = _pi_buck()
     res = ps.simulate(b, t_end=20e-3, dt=2e-6, switch_fn=sf,
                        step_observer=obs)
     assert _tail_mean(res, "vout", 15e-3) == pytest.approx(
-        4.989752, abs=1e-4)
+        4.968199, abs=5e-3)
     assert len(hist) == 200 and hist[0][0] == 0.0
     assert list(res.control_tick_counts) == [200]
     assert res.control_tick_jitter_max == 0.0
