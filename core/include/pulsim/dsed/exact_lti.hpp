@@ -101,7 +101,9 @@ struct ExactLTI {
 /// they have the run's size.
 struct ChordWork {
     Vector xa, ta, c0, c1, v, s;            // the adapter's augmented state / sources
-    Vector cr, ci, a;                       // V⁻¹c (re, im); |z̈_k|·g_k
+    Vector cr, ci, a;                       // V⁻¹c (re, im); |z̈_k| (decaying / zero modes)
+    Vector gB, gC;                          // the growing modes' terms at one probe
+    std::vector<Eigen::Index> grow;         // modes with Re λ > 0
     Eigen::VectorXcd zdd;
     DenseMatrix S, B, C, A0;                // n × (n+1) sums per split (exact_chord_step)
 };
@@ -799,7 +801,7 @@ inline constexpr Real kSettleTau = Real{40};
 /// e_j(τ) = Σ_k Re(V_jk e_k(τ)) with e_k the chord error of the mode's
 /// exponential term, and per mode two rigorous bounds hold (the Peano kernel of
 /// the chord is ≥ 0 and integrates to ≤ δ²/8, so this holds for complex terms):
-///   |e_k| ≤ δ²/8 · |z̈_k| g_k,   g_k = e^{max(0, Re λ_k)·h}   (curvature; δ ≤ h)
+///   |e_k| ≤ δ²/8 · |z̈_k| g_k,   g_k = e^{max(0, Re λ_k)·δ}   (curvature)
 ///   |e_k| ≤ 2|γ_k| = s_k |z̈_k|, s_k = 2/|λ_k|², Re λ_k ≤ 0     (|term|, |chord| ≤ |γ_k|)
 /// The second is the mode's amplitude: a projected parasitic mode whose
 /// amplitude is rounding contributes rounding, not λ²·rounding, so it no longer
@@ -810,8 +812,7 @@ inline constexpr Real kSettleTau = Real{40};
 ///                                       |Σ_{k∈S} V_jk z̈_k| + δ Σ_{k∈S} m_jk |λ_k|)
 /// (the S part bounds max|ẍ_j^S| by the triangle inequality, or by its value at
 /// τ = 0 plus |e^s − 1| ≤ |s|e^{max(0, Re s)}, which keeps the cancellation
-/// between modes at rest). With F empty this is the bound of a32b97ed except
-/// that a growing mode's g uses h instead of δ (larger: still a bound).
+/// between modes at rest). With F empty this is the bound of a32b97ed.
 /// Defective modes have no tier-1 basis: `bounded` = false and h returned.
 /// Any δ the bisection returns satisfies the bound (lo always fits), so the
 /// split need not make it monotone. c0 / c1 nullable (no piecewise-linear source).
@@ -858,9 +859,12 @@ inline constexpr Real kSettleTau = Real{40};
         w.ci.noalias() = e.Vinv_im * *c1;
         for (Eigen::Index k = 0; k < n; ++k) w.zdd[k] += std::complex<Real>{w.cr[k], w.ci[k]};
     }
+    // a growing mode's g_k = e^{Re λ_k δ} depends on the probe: its terms are added in fits
+    w.grow.clear();
     for (Eigen::Index k = 0; k < n; ++k) {
-        const Real re = e.lambda[k].real();
-        w.a[k] = std::abs(w.zdd[k]) * (re > Real{0} ? std::exp(re * h) : Real{1});
+        const bool grows = e.lambda[k].real() > Real{0};
+        if (grows) w.grow.push_back(k);
+        w.a[k] = grows ? Real{0} : std::abs(w.zdd[k]);
     }
     // column i = the split F = chord_order[0, i): S / B / C / A0 as in the bound above
     w.S.resize(n, n + 1);
@@ -888,8 +892,22 @@ inline constexpr Real kSettleTau = Real{40};
         const Real q = d * d / Real{8};
         const auto i = static_cast<Eigen::Index>(
             std::lower_bound(e.chord_s.data(), e.chord_s.data() + n_sat, q) - e.chord_s.data());
+        if (w.grow.empty()) {
+            return ((w.S.col(i).array()
+                     + q * w.B.col(i).array().min(w.A0.col(i).array().abs() + d * w.C.col(i).array()))
+                    <= tol.array()).all();
+        }
+        w.gB.setZero(n);
+        w.gC.setZero(n);
+        for (const Eigen::Index k : w.grow) {   // always in S (s_k = ∞)
+            const Real m = std::abs(w.zdd[k]) * std::exp(e.lambda[k].real() * d);
+            if (!std::isfinite(m)) return false;
+            w.gB += e.chord_vabs.col(k) * m;
+            w.gC += e.chord_vabs.col(k) * (m * std::abs(e.lambda[k]));
+        }
         return ((w.S.col(i).array()
-                 + q * w.B.col(i).array().min(w.A0.col(i).array().abs() + d * w.C.col(i).array()))
+                 + q * (w.B.col(i) + w.gB).array().min(
+                           w.A0.col(i).array().abs() + d * (w.C.col(i) + w.gC).array()))
                 <= tol.array()).all();
     };
     if (fits(h)) return h;
