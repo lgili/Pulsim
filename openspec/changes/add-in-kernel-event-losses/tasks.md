@@ -19,7 +19,7 @@
 ## 3. Other engines, YAML, parts
 - [x] 3.1 Hook on the commutation callback of `add-unified-event-queue`; `trbdf2` pulse deposition without refining the thermal kink (the shared LossTracker at the trbdf2 commit / landing / gate-edge sites and its event limits; DECISIONS 13)
 - [x] 3.2 `dsed` state-jump deposition and conduction heat between events, or the conformance refusal (refusal by name, DECISIONS 8)
-- [ ] 3.3 Engine agreement test: closed-loop mean `T_j` within 0.2 K across `pwl`, `trbdf2`, `dsed`; parity at fixed `Tj` within 1e-6 on the variable-step engines
+- [x] 3.3 Engine agreement test: closed-loop mean `T_j` within 0.2 K across `pwl`, `trbdf2`, `dsed`; parity at fixed `Tj` within 1e-6 on the variable-step engines (test_exact_junction_loop::test_closed_loop_mean_junction_temperature_agrees_across_the_three_engines; add-exact-propagator-strategy DECISIONS session 25)
 - [x] 3.4 Conformance rows (`add-engine-conformance-matrix`): `device_losses[event]`, `device_losses[conduction]` × {pwl, trbdf2, dsed}; no silent cell (pwl honours; trbdf2, dsed, bdf1, auto refuse by name: `test_device_losses_cell`, DECISIONS 8)
 - [x] 3.5 YAML `losses:` block with strict keys; loader tests (valid block; unknown key refused naming the key; `junction` and `Tj` together refused)
 - [x] 3.6 `Part.attach_losses(builder, device, *, T_amb, heatsink_node=None, allow_synthetic=False)`: builds the part's Cauer chain and sets its tables; synthetic part refused without the flag

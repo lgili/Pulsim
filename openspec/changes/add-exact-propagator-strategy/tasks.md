@@ -113,5 +113,5 @@ circuit of `numerics/p2_buck.py`: 24 V, 100 µH, 47 µF, `g_on = 1e3`,
 ## 20. Parity gaps before the default flip (DECISIONS session 24)
 - [x] 20.1 Snapshot and resume on the event-driven integrator: the committed instant (reduced state, mode, schedule position, step memory) in the snapshot's controller block with kind 3 (pickle field 14; still 19 fields), the loss tracker's state in field 17, the ticks' grid in fields 15-16; a pwl / trbdf2 snapshot resumes where its full state is one state of its stamped mode; the exact snapshot is refused by name on pwl / trbdf2. Tests: `python/tests/test_exact_resume.py`, `core/tests/dsed/test_exact_resume.cpp`
 - [ ] 20.2 A snapshot from the `auto` and `bdf2` schedulers (today only the event-driven integrator writes one; a diode-free circuit on the default `auto` route writes none)
-- [ ] 20.3 The junction temperature loop on the exact engine (design note DECISIONS session 24)
+- [x] 20.3 The junction temperature loop on the exact engine (design note DECISIONS session 24)
 - [ ] 20.4 Recorders fed in the loop on the exact engine (`add-probes-and-recorders` R5 / 0b.11); a resume refuses an in-loop recorder's state by name until then

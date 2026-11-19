@@ -740,3 +740,39 @@ Chain a2 found three pytest failures, all from this change: `test_saltation_hook
 Full ctest not run on this tip.
 
 Tasks: 20.1 ticked (seen passing); 20.2-20.4 and add-in-kernel-event-losses 3.3 left open.
+
+## Session 25 (exact engine 24): the snapshot's loose ends, the junction temperature loop (2026-11-19)
+
+### Merges
+`origin/feat/core-integration` fe75ee01 (caeebd99) and 061e4099, the run-plan refactor (7ce09a2b). The resume_from hunks were re-placed in the new functions; they are listed as item 10 of add-kernel-simulation-object DECISIONS 23. Post-merge: pytest 5852 passed / 110 skipped / 8 xfailed, reference 383, the dsed / layer4_v3 / mode / thermal / record C++ targets passing.
+
+### The snapshot's loose ends (c6d178e2)
+- **A route that keeps no snapshot names why.** That is `integrator='auto'` (PEDSimulatorAuto), `'bdf2'`, a fresh `t_start`, or the Python fallback (`_dsed_dispatch._mark_no_snapshot`). It sets `SolverSnapshot.invalid_reason` (not pickled), and the plan refuses a resume from it by name. Making PEDSimulatorAuto resumable is not small: it has its own stiffness choice and BDF2 history, in `scheduler_auto.hpp`. Task 20.2 stays open.
+- **An explicit `integrator='auto'` with `resume_from`** is refused where 'auto' would choose PEDSimulatorAuto. An unset integrator resumes on the integrator that wrote the snapshot.
+- **The exact snapshot carries the circuit's device-state layout** (the linear companions' count) and its signature, as pwl / trbdf2 do. Another layout is refused naming the block. No engine carries a topology / value hash. `ir::Circuit::value_hash` exists, but `simulate()` takes a builder: a request for the IR work.
+- **What depends on t_end** (`set_horizon`: `ExactLTI`'s refinement and tier over H = max(h_max, t_end); `next_time_event_` capped at t_end).
+  - Measured on the 81 scoreboard circuits at t_end and t_end/2: 39 circuits report a different defect (it is stated over H). None changes tier, refinement or balancing. The states are bit-equal at every common instant in all 81.
+  - Kept as is: the defect bound is an accuracy statement over the run, and a run-length-free bound would assume an arbitrary horizon.
+  - Pinned by `test_exact_resume::test_what_depends_on_the_runs_end_time_today`.
+
+### The junction temperature loop (task 3.3 of add-in-kernel-event-losses ticked; task 20.3)
+- **Construction:** as designed in session 24 (`dsed/loss_port.hpp` `step_heat_` / `impulse_`, `PEDSimulator::set_state_kick`, `LossTracker::take_heat`, `NativeCircuitBuilderAdapter::node_current_input`). A run without a deposit node takes the old path line for line.
+- **Measured:**
+  - the RL chopper's RC junction matches its closed form within 1e-9 of the rise at every sample off an edge;
+  - heat_injected equals the booked energy to 1e-12, with heat_pending exactly 0;
+  - buck T_j against trbdf2 (rtol 1e-10) agrees within 1e-4 of the rise;
+  - a resume at an edge carries the temperatures (1e-12);
+  - the closed-loop mean T_j agrees within 0.2 K on pwl / trbdf2 / dsed, and fixed-Tj energies within 1e-6 between trbdf2 and dsed.
+- **NOT verified:** the VSI against trbdf2. With six thermal networks, trbdf2 exhausts max_steps at about 20 µs at rtol 1e-10 and 1e-9; without them it runs. This is a trbdf2 defect, open; the test case is xfail strict on SimulationAborted.
+- **Changed:**
+  - The closed-form check's scale gained a floor of u·‖x‖. A VSI phase current at rest was refused at 4e-34, which is the rounding of a 25 V thermal state. This is a rounding floor; the 1e-9 bound is unchanged.
+  - The algebraic-response refusal reads node voltages only. The ambient source's branch current responds at once (C·dT/dt), and the exact engine's reconstructed branch currents exclude the heat current (documented in known-limitations).
+
+### Not done (successor)
+- Goal 3, recorders in the loop on the exact engine. The plan:
+  - a `dsed/` adapter that owns a `StepHooks`, attaches `record::LoopFeed`, and translates the scheduler's reduced states to full MNA (`recover_full`);
+  - capacitor currents from C·dv/dt via A·x + b, through a `StepRunView` history filled per step, or by refusing capacitor readings by name;
+  - removing the field-18 refusal in `_dsed_dispatch._check_resume_snapshot`.
+  - Request for `record/`: `LoopFeed` hard-codes `Resolution::Settled` for settled events; the exact engine wants `Exact` (a constructor flag).
+- Goal 4, loss-port refusals: V_on tables, time-varying sources, t_start.
+- The flips / scoreboard / banks / Eigen 3.4.0 runs and a fresh-context review of this session's diff.
