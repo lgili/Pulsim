@@ -822,7 +822,7 @@ def run_dsed_from_builder(
     # ---- Stage 1: build the cache + adapter ---------------------------
     try:
         from . import PwlStateSpaceCache as _PwlCache  # type: ignore[attr-defined]
-        from . import SwitchStateMask  # type: ignore[attr-defined]
+        from . import SwitchStateMask  # noqa: F401  # type: ignore[attr-defined]  (an install check)
         from .dsed._builder_bridge import CircuitBuilderAdapter
     except ImportError as e:
         raise RuntimeError(
@@ -844,29 +844,8 @@ def run_dsed_from_builder(
     # warning — review finding PY-3).
     sf = opts.switch_fn
     if sf is None:
-        n_sw = builder.graph.num_switches
-        try:
-            from ._pulsim import _switch_census
-            _, _nd, _controlled = _switch_census(
-                builder.graph, builder.pool)
-        except Exception:  # noqa: BLE001
-            _controlled = []
-        if _controlled:
-            warnings.warn(
-                f"simulate(engine='dsed'): no switch_fn was given, "
-                f"but the circuit has {len(_controlled)} controlled "
-                f"switch(es) (indices {list(_controlled)}). They "
-                "default to ALL CLOSED, which short-circuits bridge "
-                "legs (shoot-through). Pass an explicit switch_fn.",
-                stacklevel=3)
-        default_mask = SwitchStateMask(n_sw)
-        for i in range(n_sw):
-            default_mask.set(i, True)
-        try:   # native and edge-free: no Python call per step (pwl's default too)
-            from . import _pulsim as _nat   # type: ignore[attr-defined]
-            sf = _nat.make_constant_switch_fn(default_mask)
-        except (ImportError, AttributeError):
-            sf = lambda _t: default_mask  # noqa: E731
+        from . import _undriven
+        sf = _undriven("dsed", builder, stacklevel=5)
 
     adapter = CircuitBuilderAdapter(
         builder=builder, cache=cache, switch_fn=sf,
@@ -897,7 +876,7 @@ def run_dsed_from_builder(
             "on exactly; otherwise pass a smaller dt or give the "
             "callable a next_edge_after(t) method.",
             UserWarning,
-            stacklevel=3,
+            stacklevel=4,  # (run_dsed_from_builder <- _run_dsed <- simulate)
         )
 
     adapter = CircuitBuilderAdapter(
