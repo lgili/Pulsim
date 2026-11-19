@@ -248,6 +248,7 @@ public:
             if (n == 0) return;
             k.q_scales(s);
             for (std::size_t r = 0; r < n; ++r) {
+                if (s[r] < Real{0}) continue;   // no q entry: skipped by the estimate
                 if (!(s[r] > Real{0}) || !std::isfinite(s[r])) s[r] = Real{1};
             }
             s += n;

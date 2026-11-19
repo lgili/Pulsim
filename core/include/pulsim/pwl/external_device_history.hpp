@@ -261,17 +261,18 @@ public:
         }
     }
     /// atol_q / atol per row: the largest |∂q_r/∂x| of the row at the
-    /// model's last evaluation (its own capacitance / unit), 1 for a row
-    /// with no q entry.
+    /// model's last evaluation (its own capacitance / unit; 0 there → 1 in
+    /// the fold), −1 for a row with no q entry: it is not a state and stays
+    /// out of the estimate (it would dilute the q rows' RMS).
     void q_scales(Real* s) const {
         for (const auto& d : devices_) {
             const auto& md = d.inst->model().d();
             const std::size_t R = d.inst->rows();
-            std::fill(s, s + R, Real{0});
-            for (std::uint32_t k = 0; k < md.nnz_q && k < d.o.dq.size(); ++k) {
-                s[md.q_rows[k]] = std::max(s[md.q_rows[k]], std::abs(d.o.dq[k]));
+            std::fill(s, s + R, Real{-1});   // −1: a row with no q entry (no estimate)
+            for (std::uint32_t k = 0; k < md.nnz_q; ++k) {
+                Real& sr = s[md.q_rows[k]];
+                sr = std::max(sr, k < d.o.dq.size() ? std::abs(d.o.dq[k]) : Real{0});
             }
-            for (std::size_t r = 0; r < R; ++r) if (!(s[r] > Real{0})) s[r] = Real{1};
             s += R;
         }
     }

@@ -3073,6 +3073,7 @@ inline SimulationResult run_transient_trbdf2(
                     hs.trbdf2_increments(x_1, q_dg.data(), q_d1.data());
                 }
                 for (Size r = 0; r < nq; ++r) {
+                    if (q_atol[r] < Real{0}) continue;   // an external row with no q entry
                     Real ee, q0, q1;
                     if constexpr (kE) {
                         using E = step::Esdirk43;
