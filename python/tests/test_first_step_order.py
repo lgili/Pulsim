@@ -1,5 +1,8 @@
 """The fixed engine is GLOBALLY FIRST ORDER from an inconsistent start.
 
+(Without the restart: since the release ``discontinuity_restart=True`` is
+the default, and the tests of the defect pin it off.)
+
 The engine advertises trapezoidal companions and delivers second
 order only when the run happens to start consistent. At t_start the
 companion history carries just half of each device's state:
@@ -137,7 +140,8 @@ CASES = [
                           "for why the cheap backward-Euler start was rejected.")
 @pytest.mark.parametrize("name,run,exact", CASES[:4], ids=[c[0] for c in CASES[:4]])
 def test_the_fixed_engine_is_second_order_from_every_start(name, run, exact):
-    vals = [run(dt) for dt in DTS]
+    # legacy subject: the restart-less start (the release default restarts, below)
+    vals = [run(dt, discontinuity_restart=False) for dt in DTS]
     orders, rels = _order(vals, [exact] * len(DTS))
     assert all(o > 1.85 for o in orders), (name, orders, rels)
     # Not just the slope: the constant must be small too. First order
@@ -156,7 +160,9 @@ def test_the_first_step_is_half_a_backward_euler_step():
     b = p.CircuitBuilder()
     b.add_resistor("R", "a", "gnd", R)
     b.add_inductor("L", "a", "gnd", L, i0=i0)
-    i = np.asarray(p.simulate(b, t_end=4 * h, dt=h, engine="pwl").i("L"))
+    # legacy subject: the restart-less start
+    i = np.asarray(p.simulate(b, t_end=4 * h, dt=h, engine="pwl",
+                              discontinuity_restart=False).i("L"))
     assert i[0] == pytest.approx(i0, rel=1e-15)
     assert i[1] == pytest.approx(i0 / (1.0 + h * R / (2.0 * L)), rel=1e-12)
     # Step 2 onward IS a clean trapezoidal recursion — the history is
