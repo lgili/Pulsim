@@ -39,7 +39,6 @@ def _plan(*args, **kw):
     return p._plan_run(**bound.arguments)
 
 
-@pytest.mark.xfail(strict=True, reason="Stage A group 2 plans the keywords")
 def test_plan_resolves_every_kwarg():
     """1.1: a keyword cannot be added to simulate() without being planned."""
     plan = _plan(_rc(), 1e-4, 1e-6)
@@ -50,7 +49,6 @@ def test_plan_resolves_every_kwarg():
     assert plan.resolved_from["rtol"] == "default"
 
 
-@pytest.mark.xfail(strict=True, reason="Stage A group 2 plans the keywords")
 def test_resolved_from_names_the_solver_bundle_and_the_yaml():
     plan = _plan(_rc(), 1e-4, 1e-6,
                  solver=p.SolverOptions(store_every=2, rtol=None))

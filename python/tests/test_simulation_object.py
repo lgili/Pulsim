@@ -329,7 +329,8 @@ def test_simulate_snapshots_every_refusable_option():
     import ast
     nodes = _simulate_body_nodes()
     snap = next(n.value for n in nodes if isinstance(n, ast.Assign)
-                and getattr(n.targets[0], "id", "") == "_opt_values")
+                and getattr(n.targets[0], "id", "") == "_opt_values"
+                and isinstance(n.value, ast.Dict))
     dsed = next(c.args[1] for c in nodes if isinstance(c, ast.Call)
                 and getattr(c.func, "attr", "") == "refused"
                 and isinstance(c.args[0], ast.Constant)

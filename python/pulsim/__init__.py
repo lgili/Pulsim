@@ -1943,7 +1943,7 @@ def _zero_newton_iterations_is_none(n):
         warnings.warn(
             "simulate(max_newton_iterations=0): 0 as 'the default' is "
             "deprecated; pass None (the default, 50). From the next release "
-            "0 is refused.", DeprecationWarning, stacklevel=3)
+            "0 is refused.", DeprecationWarning, stacklevel=4)
         return None
     return n
 
@@ -2164,6 +2164,34 @@ def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
     if store_every is None and int(opts.store_every) != 1:
         store_every = int(opts.store_every)
     return lc.builder, t_end, dt, t_start, store_every
+
+
+# Stage A's plan.resolved_from: where each simulate() keyword's value came
+# from. 'explicit' = not the signature's default (an explicit default reads
+# 'default'); 'yaml' / 'solver' = filled from a LoadedCircuit / SolverOptions.
+_SOLVER_KW = ("enable_nonlinear_refresh", "max_newton_iterations",
+              "max_event_iterations", "store_every", "auto_regularize",
+              "tol_newton_dx", "tol_newton_res", "enable_newton_line_search",
+              "enable_newton_lm", "enable_substep_state_correction",
+              "discontinuity_restart", "resolution_diagnostics",
+              "inductor_freeze_di_max", "inductor_abs_clamp", "integrator",
+              "rtol", "atol", "dt_init")
+
+
+def _resolved_from(args: dict) -> dict:
+    out = {}
+    for k, d in _SIMULATE_DEFAULTS.items():
+        v = args[k]
+        out[k] = ("default" if v is d or (
+            d is not None and type(v) is type(d)
+            and v == d) else "explicit")
+    return out
+
+
+def _mark_resolved(resolved: dict, source: str, keys, was, now) -> None:
+    for k, a, b in zip(keys, was, now):
+        if a is not b:
+            resolved[k] = source
 
 
 # add-complementarity-mode-selection task 4b.3: the fixed engine's default
@@ -2572,199 +2600,27 @@ def simulate(
         _kw = {k: v for k, v in locals().items() if k != "recorders"}
         from ._recorders import simulate_with_recorders as _with_rec
         return _with_rec(simulate, _kw, recorders)
-    # ---- LoadedCircuit (YAML) + the run window. ----
-    # Above everything else, so every engine sees the same t_end / dt.
-    # A YAML whose run settings did not load (no top-level
-    # `simulation:` block) used to reach the engines as t_end = dt = 0
-    # and died on an engine-specific message about the step ceiling;
-    # refuse it here and name the file.
-    if isinstance(builder, LoadedCircuit):
-        builder, t_end, dt, t_start, store_every = _resolve_loaded_circuit(
-            builder, t_end, dt, t_start, store_every)
-    # add-immutable-circuit-ir (BREAKING since 2.x): the run works on its
-    # OWN circuit. A builder is snapshotted here — before any kwarg can
-    # fail — and never mutated; a Circuit is immutable. The engines take
-    # a mutable CircuitBuilder, so the run gets a private clone of the
-    # run's circuit below, after the preflight.
-    _run_circuit = None
-    _caller_builder = builder  # identity checks (MMC arms) name the caller's
-    if isinstance(builder, Circuit):
-        if mmc_arms:
-            raise ValueError(
-                "simulate(circuit, mmc_arms=...): MMC arms are registered "
-                "on a CircuitBuilder; pass that builder, not a "
-                "pulsim.Circuit")
-        _run_circuit = builder
-    elif isinstance(builder, CircuitBuilder):
-        # C blocks and graph-driven sources ride in the circuit
-        # (ControlDecls); the run reads them from its own builder.
-        _run_circuit = builder._snapshot()
-    if t_end is None:
-        raise TypeError(
-            "simulate(): missing required argument 't_end' (end time, s). "
-            "Only a LoadedCircuit with a simulation: block supplies it.")
-    if not (t_end > t_start):
-        raise ValueError(
-            f"simulate(): t_end ({t_end!r}) must be greater than t_start "
-            f"({t_start!r}). If these came from a YAML's "
-            "loaded.options, the file had no top-level simulation: block "
-            "(loaded.has_simulation is False); pass the LoadedCircuit "
-            "itself, simulate(loaded), to have the file named, or pass "
-            "t_end=.")
-
-    # ---- Merge `solver` bundle (v1.5 Round 2 ergonomics). ----
-    # For every advanced kernel knob, the flat kwarg wins when the
-    # user explicitly passed something non-default; otherwise we pull
-    # from `solver` if supplied. Purely additive — every existing
-    # call site that uses the flat kwargs continues to behave
-    # identically. This runs BEFORE the engine dispatch so the merged
-    # rtol/atol/dt_init/integrator values also flow into the DSED
-    # path when the user authors via `solver=`.
-    # add-kernel-simulation-object: 0 was "not set" for this one keyword
-    # (every other uses None): deprecated for one release, then refused.
-    # Before the merge, so an explicit 0 still defers to the bundle.
-    if max_newton_iterations is not None:
-        max_newton_iterations = _zero_newton_iterations_is_none(
-            max_newton_iterations)
-    if solver is not None:
-        if enable_nonlinear_refresh is None:
-            enable_nonlinear_refresh = solver.enable_nonlinear_refresh
-        if max_newton_iterations is None:
-            max_newton_iterations = solver.max_newton_iterations
-        if max_event_iterations is None:
-            max_event_iterations = solver.max_event_iterations
-        # `1` is a MEANINGFUL value here ("record every step"), not a
-        # "not passed" sentinel like the 0s above — so the flat kwarg
-        # only defers to the bundle when it was genuinely omitted.
-        # Using 1 as the sentinel silently discarded an explicit
-        # store_every=1 in favour of a bundle's decimation.
-        if store_every is None:
-            store_every = solver.store_every
-        if auto_regularize is None:
-            auto_regularize = solver.auto_regularize
-        if tol_newton_dx is None:
-            tol_newton_dx = solver.tol_newton_dx
-        if tol_newton_res is None:
-            tol_newton_res = solver.tol_newton_res
-        if enable_newton_line_search is None:
-            enable_newton_line_search = solver.enable_newton_line_search
-        if enable_newton_lm is None:
-            enable_newton_lm = solver.enable_newton_lm
-        if enable_substep_state_correction is None:
-            enable_substep_state_correction = (
-                solver.enable_substep_state_correction)
-        if discontinuity_restart is None:
-            discontinuity_restart = solver.discontinuity_restart
-        if resolution_diagnostics is None:
-            resolution_diagnostics = solver.resolution_diagnostics
-        if inductor_freeze_di_max is None:
-            inductor_freeze_di_max = solver.inductor_freeze_di_max
-        if inductor_abs_clamp is None:
-            inductor_abs_clamp = solver.inductor_abs_clamp
-        if integrator is None:
-            integrator = solver.integrator
-        if rtol is None:
-            rtol = solver.rtol
-        if atol is None:
-            atol = solver.atol
-        if dt_init is None:
-            dt_init = solver.dt_init
-
-    if enable_nonlinear_refresh is not None:
-        import warnings
-        warnings.warn(
-            "simulate(enable_nonlinear_refresh=...) is deprecated and will "
-            "be removed: the kernel stamps every Newton device itself "
-            "(add-unified-device-interface). True is the default "
-            "behaviour; False is refused on a circuit with Newton devices.",
-            DeprecationWarning, stacklevel=2)
-    # The bundle's 0 (SolverOptions(max_newton_iterations=0)), too.
-    if max_newton_iterations is not None:
-        max_newton_iterations = _zero_newton_iterations_is_none(
-            max_newton_iterations)
-    # The option x engine table (sim::kRunOptionTable) judges every keyword
-    # against the engine the run lands on: honoured, or refused by name.
-    # The table's rows the MNA engines can refuse, as passed; a literal, not
-    # locals(): simulate() has ~150 locals and pays on every call. The rows
-    # only the exact engine refuses are read in its branch, below.
-    # test_simulation_object keeps both literals equal to the table.
-    _opt_values = {
-        "rtol": rtol, "atol": atol, "dt_init": dt_init,
-        "integrator": integrator, "stiffness_threshold": stiffness_threshold,
-        "h_bdf2": h_bdf2, "start_from_dc_op": start_from_dc_op,
-        "strict_event_iterations": strict_event_iterations,
-        "max_dt_halvings": max_dt_halvings, "store_every": store_every,
-        "enable_substep_state_correction": enable_substep_state_correction,
-        "discontinuity_restart": discontinuity_restart,
-        "resolution_diagnostics": resolution_diagnostics,
-        "inductor_freeze_di_max": inductor_freeze_di_max,
-        "inductor_abs_clamp": inductor_abs_clamp, "progress": progress,
-        "live_stream": live_stream, "mmc_arms": mmc_arms,
-        "on_cache": on_cache, "sensitivities": sensitivities,
-        "mode_selection": mode_selection,
-        "allow_implicit_segments": allow_implicit_segments,
-    }
-
-    # ---- Validate first — fail fast on user mistakes (DSED side). ----
-    # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
-    # (rtol/atol/dt_init/integrator/stiffness_threshold/h_bdf2). For
-    # engine='pwl' it just warns on DSED-only kwarg leakage.
-    # add-exact-propagator-strategy D11: 'exact' is the canonical name of the
-    # event-driven exact engine and 'dsed' its alias. One run: the result's
-    # engine_used and every refusal keep naming 'dsed' (the capability-table
-    # column) until the default flip (DECISIONS #3).
-    if engine == "exact":
-        engine = "dsed"
-    # Every engine: pwl (branch form) and the exact engine (dependent
-    # states) record; trbdf2 refuses dependent modes and never records.
-    if on_impulse not in ("record", "warn", "error"):
-        raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
-                         "'record', 'warn' or 'error'")
-    # add-unified-device-interface (dual path): which code stamps the
-    # Newton kinds; 'interface' refuses an unported kind by name.
-    if device_path not in ("legacy", "interface"):
-        raise _options_error("device_path",
-                             f"simulate(device_path={device_path!r}): "
-                             "expected 'legacy' or 'interface'")
-    _device_path = getattr(DevicePath, device_path.capitalize())
-    # add-high-order-stiff-integrator: ESDIRK4(3) takes the variable-step
-    # engine's steps; the fixed clock and the exact engine refuse it by name.
-    if integrator == "esdirk43" and engine in ("pwl", "dsed"):
-        raise _unsupported(
-            engine, "integrator",
-            f"simulate(engine={engine!r}, integrator='esdirk43'): the "
-            "fourth-order ESDIRK takes the steps of the variable-step engine; "
-            + ("the fixed-step engine has one step size and its own "
-               "integrator" if engine == "pwl" else
-               "the exact engine propagates its segments with its own "
-               "integrators ('auto', 'rk45', 'bdf2')")
-            + ". Use engine='trbdf2'.")
-    _dsed = _dsed_dispatch_module
-    _dsed._validate_engine_kwargs(
-        engine=engine,
-        dt=dt,
-        rtol=rtol,
-        atol=atol,
-        dt_init=dt_init,
-        integrator=integrator,
-        stiffness_threshold=stiffness_threshold,
-        h_bdf2=h_bdf2,
-    )
-    if mode_selection not in (None, "legacy", "shadow", "lcp", "auto"):
-        raise ValueError(
-            f"simulate(): mode_selection={mode_selection!r}; expected "
-            "None, 'legacy', 'shadow', 'lcp' or 'auto'.")
-    _mode_auto = None
-    if mode_selection == "auto" and sensitivities is not None:
-        mode_selection, _mode_auto = _mode_auto_record(None, "sensitivities")
-    if newton_roundoff_budget is not None and (
-            isinstance(newton_roundoff_budget, bool)
-            or int(newton_roundoff_budget) != newton_roundoff_budget
-            or int(newton_roundoff_budget) < 1):
-        raise _options_error("newton_roundoff_budget",
-            f"simulate(newton_roundoff_budget={newton_roundoff_budget}): "
-            "must be an integer >= 1 (consecutive Newton solves accepted at roundoff "
-            "before NewtonRoundoffBudgetExceeded; default 130).")
+    # add-kernel-simulation-object Stage A: the keywords, resolved once.
+    _p = _plan_run(**locals())
+    builder = _p.builder; t_end = _p.t_end; dt = _p.dt; t_start = _p.t_start
+    store_every = _p.store_every; _run_circuit = _p._run_circuit
+    _caller_builder = _p._caller_builder
+    enable_nonlinear_refresh = _p.enable_nonlinear_refresh
+    max_newton_iterations = _p.max_newton_iterations
+    max_event_iterations = _p.max_event_iterations
+    auto_regularize = _p.auto_regularize; tol_newton_dx = _p.tol_newton_dx
+    tol_newton_res = _p.tol_newton_res
+    enable_newton_line_search = _p.enable_newton_line_search
+    enable_newton_lm = _p.enable_newton_lm
+    enable_substep_state_correction = _p.enable_substep_state_correction
+    discontinuity_restart = _p.discontinuity_restart
+    resolution_diagnostics = _p.resolution_diagnostics
+    inductor_freeze_di_max = _p.inductor_freeze_di_max
+    inductor_abs_clamp = _p.inductor_abs_clamp; integrator = _p.integrator
+    rtol = _p.rtol; atol = _p.atol; dt_init = _p.dt_init
+    _opt_values = _p._opt_values; engine = _p.engine
+    _device_path = _p._device_path; _dsed = _p._dsed
+    mode_selection = _p.mode_selection; _mode_auto = _p._mode_auto
 
     # ---- Topology preflight (v2.0 Phase 2) --------------------------
     #
@@ -4048,6 +3904,263 @@ def simulate(
         _mmc_finalize(res.times[-1], res.states[-1])
     _save_control_state(_plan.graphs, res)
     return res
+
+
+# Stage A's plan.resolved_from compares each keyword with these: taken from
+# the function object at import (a caller may wrap pulsim.simulate).
+_SIMULATE_DEFAULTS = {"t_end": simulate.__defaults__[0],
+                      "dt": simulate.__defaults__[1], **simulate.__kwdefaults__}
+
+
+def _plan_run(builder, t_end, dt, *,
+    engine, rtol, atol, dt_init, integrator, stiffness_threshold, h_bdf2,
+    t_start, switch_fn, b_extra_fn, step_observer, start_from_dc_op,
+    enable_nonlinear_refresh, max_newton_iterations, max_event_iterations,
+    strict_event_iterations, max_dt_halvings, voltage_sanity_factor,
+    store_every, auto_regularize, tol_newton_dx, tol_newton_res,
+    enable_newton_line_search, enable_newton_lm, newton_roundoff_budget,
+    enable_substep_state_correction, discontinuity_restart,
+    resolution_diagnostics, on_impulse, device_path,
+    inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
+    should_continue, closed_loops, live_stream, mmc_arms, on_cache,
+    controller_period, resume_from, control_tick, solver, sensitivities,
+    mode_selection, allow_implicit_segments, recorders,
+):
+    """simulate()'s keywords resolved, above the engine dispatch
+    (add-kernel-simulation-object Stage A): every statement here applies
+    to every engine. Takes exactly simulate()'s parameters."""
+    _resolved = _resolved_from(locals())
+    # ---- LoadedCircuit (YAML) + the run window. ----
+    # Above everything else, so every engine sees the same t_end / dt.
+    # A YAML whose run settings did not load (no top-level
+    # `simulation:` block) used to reach the engines as t_end = dt = 0
+    # and died on an engine-specific message about the step ceiling;
+    # refuse it here and name the file.
+    if isinstance(builder, LoadedCircuit):
+        _was = (t_end, dt, t_start, store_every)
+        builder, t_end, dt, t_start, store_every = _resolve_loaded_circuit(
+            builder, t_end, dt, t_start, store_every)
+        _mark_resolved(_resolved, "yaml", ("t_end", "dt", "t_start", "store_every"),
+                       _was, (t_end, dt, t_start, store_every))
+    # add-immutable-circuit-ir (BREAKING since 2.x): the run works on its
+    # OWN circuit. A builder is snapshotted here — before any kwarg can
+    # fail — and never mutated; a Circuit is immutable. The engines take
+    # a mutable CircuitBuilder, so the run gets a private clone of the
+    # run's circuit below, after the preflight.
+    _run_circuit = None
+    _caller_builder = builder  # identity checks (MMC arms) name the caller's
+    if isinstance(builder, Circuit):
+        if mmc_arms:
+            raise ValueError(
+                "simulate(circuit, mmc_arms=...): MMC arms are registered "
+                "on a CircuitBuilder; pass that builder, not a "
+                "pulsim.Circuit")
+        _run_circuit = builder
+    elif isinstance(builder, CircuitBuilder):
+        # C blocks and graph-driven sources ride in the circuit
+        # (ControlDecls); the run reads them from its own builder.
+        _run_circuit = builder._snapshot()
+    if t_end is None:
+        raise TypeError(
+            "simulate(): missing required argument 't_end' (end time, s). "
+            "Only a LoadedCircuit with a simulation: block supplies it.")
+    if not (t_end > t_start):
+        raise ValueError(
+            f"simulate(): t_end ({t_end!r}) must be greater than t_start "
+            f"({t_start!r}). If these came from a YAML's "
+            "loaded.options, the file had no top-level simulation: block "
+            "(loaded.has_simulation is False); pass the LoadedCircuit "
+            "itself, simulate(loaded), to have the file named, or pass "
+            "t_end=.")
+
+    # ---- Merge `solver` bundle (v1.5 Round 2 ergonomics). ----
+    # For every advanced kernel knob, the flat kwarg wins when the
+    # user explicitly passed something non-default; otherwise we pull
+    # from `solver` if supplied. Purely additive — every existing
+    # call site that uses the flat kwargs continues to behave
+    # identically. This runs BEFORE the engine dispatch so the merged
+    # rtol/atol/dt_init/integrator values also flow into the DSED
+    # path when the user authors via `solver=`.
+    # add-kernel-simulation-object: 0 was "not set" for this one keyword
+    # (every other uses None): deprecated for one release, then refused.
+    # Before the merge, so an explicit 0 still defers to the bundle.
+    if max_newton_iterations is not None:
+        max_newton_iterations = _zero_newton_iterations_is_none(
+            max_newton_iterations)
+    if solver is not None:
+        _was = (enable_nonlinear_refresh, max_newton_iterations,
+                max_event_iterations, store_every, auto_regularize,
+                tol_newton_dx, tol_newton_res, enable_newton_line_search,
+                enable_newton_lm, enable_substep_state_correction,
+                discontinuity_restart, resolution_diagnostics,
+                inductor_freeze_di_max, inductor_abs_clamp, integrator, rtol,
+                atol, dt_init)
+        if enable_nonlinear_refresh is None:
+            enable_nonlinear_refresh = solver.enable_nonlinear_refresh
+        if max_newton_iterations is None:
+            max_newton_iterations = solver.max_newton_iterations
+        if max_event_iterations is None:
+            max_event_iterations = solver.max_event_iterations
+        # `1` is a MEANINGFUL value here ("record every step"), not a
+        # "not passed" sentinel like the 0s above — so the flat kwarg
+        # only defers to the bundle when it was genuinely omitted.
+        # Using 1 as the sentinel silently discarded an explicit
+        # store_every=1 in favour of a bundle's decimation.
+        if store_every is None:
+            store_every = solver.store_every
+        if auto_regularize is None:
+            auto_regularize = solver.auto_regularize
+        if tol_newton_dx is None:
+            tol_newton_dx = solver.tol_newton_dx
+        if tol_newton_res is None:
+            tol_newton_res = solver.tol_newton_res
+        if enable_newton_line_search is None:
+            enable_newton_line_search = solver.enable_newton_line_search
+        if enable_newton_lm is None:
+            enable_newton_lm = solver.enable_newton_lm
+        if enable_substep_state_correction is None:
+            enable_substep_state_correction = (
+                solver.enable_substep_state_correction)
+        if discontinuity_restart is None:
+            discontinuity_restart = solver.discontinuity_restart
+        if resolution_diagnostics is None:
+            resolution_diagnostics = solver.resolution_diagnostics
+        if inductor_freeze_di_max is None:
+            inductor_freeze_di_max = solver.inductor_freeze_di_max
+        if inductor_abs_clamp is None:
+            inductor_abs_clamp = solver.inductor_abs_clamp
+        if integrator is None:
+            integrator = solver.integrator
+        if rtol is None:
+            rtol = solver.rtol
+        if atol is None:
+            atol = solver.atol
+        if dt_init is None:
+            dt_init = solver.dt_init
+        _mark_resolved(_resolved, "solver", _SOLVER_KW, _was, (
+            enable_nonlinear_refresh, max_newton_iterations,
+            max_event_iterations, store_every, auto_regularize,
+            tol_newton_dx, tol_newton_res, enable_newton_line_search,
+            enable_newton_lm, enable_substep_state_correction,
+            discontinuity_restart, resolution_diagnostics,
+            inductor_freeze_di_max, inductor_abs_clamp, integrator, rtol,
+            atol, dt_init))
+
+    if enable_nonlinear_refresh is not None:
+        import warnings
+        warnings.warn(
+            "simulate(enable_nonlinear_refresh=...) is deprecated and will "
+            "be removed: the kernel stamps every Newton device itself "
+            "(add-unified-device-interface). True is the default "
+            "behaviour; False is refused on a circuit with Newton devices.",
+            DeprecationWarning, stacklevel=3)  # (one frame below simulate)
+    # The bundle's 0 (SolverOptions(max_newton_iterations=0)), too.
+    if max_newton_iterations is not None:
+        max_newton_iterations = _zero_newton_iterations_is_none(
+            max_newton_iterations)
+    # The option x engine table (sim::kRunOptionTable) judges every keyword
+    # against the engine the run lands on: honoured, or refused by name.
+    # The table's rows the MNA engines can refuse, as passed; a literal, not
+    # locals(): simulate() has ~150 locals and pays on every call. The rows
+    # only the exact engine refuses are read in its branch, below.
+    # test_simulation_object keeps both literals equal to the table.
+    _opt_values = {
+        "rtol": rtol, "atol": atol, "dt_init": dt_init,
+        "integrator": integrator, "stiffness_threshold": stiffness_threshold,
+        "h_bdf2": h_bdf2, "start_from_dc_op": start_from_dc_op,
+        "strict_event_iterations": strict_event_iterations,
+        "max_dt_halvings": max_dt_halvings, "store_every": store_every,
+        "enable_substep_state_correction": enable_substep_state_correction,
+        "discontinuity_restart": discontinuity_restart,
+        "resolution_diagnostics": resolution_diagnostics,
+        "inductor_freeze_di_max": inductor_freeze_di_max,
+        "inductor_abs_clamp": inductor_abs_clamp, "progress": progress,
+        "live_stream": live_stream, "mmc_arms": mmc_arms,
+        "on_cache": on_cache, "sensitivities": sensitivities,
+        "mode_selection": mode_selection,
+        "allow_implicit_segments": allow_implicit_segments,
+    }
+
+    # ---- Validate first — fail fast on user mistakes (DSED side). ----
+    # `_validate_engine_kwargs` validates engine + DSED-specific kwargs
+    # (rtol/atol/dt_init/integrator/stiffness_threshold/h_bdf2). For
+    # engine='pwl' it just warns on DSED-only kwarg leakage.
+    # add-exact-propagator-strategy D11: 'exact' is the canonical name of the
+    # event-driven exact engine and 'dsed' its alias. One run: the result's
+    # engine_used and every refusal keep naming 'dsed' (the capability-table
+    # column) until the default flip (DECISIONS #3).
+    if engine == "exact":
+        engine = "dsed"
+    # Every engine: pwl (branch form) and the exact engine (dependent
+    # states) record; trbdf2 refuses dependent modes and never records.
+    if on_impulse not in ("record", "warn", "error"):
+        raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
+                         "'record', 'warn' or 'error'")
+    # add-unified-device-interface (dual path): which code stamps the
+    # Newton kinds; 'interface' refuses an unported kind by name.
+    if device_path not in ("legacy", "interface"):
+        raise _options_error("device_path",
+                             f"simulate(device_path={device_path!r}): "
+                             "expected 'legacy' or 'interface'")
+    _device_path = getattr(DevicePath, device_path.capitalize())
+    # add-high-order-stiff-integrator: ESDIRK4(3) takes the variable-step
+    # engine's steps; the fixed clock and the exact engine refuse it by name.
+    if integrator == "esdirk43" and engine in ("pwl", "dsed"):
+        raise _unsupported(
+            engine, "integrator",
+            f"simulate(engine={engine!r}, integrator='esdirk43'): the "
+            "fourth-order ESDIRK takes the steps of the variable-step engine; "
+            + ("the fixed-step engine has one step size and its own "
+               "integrator" if engine == "pwl" else
+               "the exact engine propagates its segments with its own "
+               "integrators ('auto', 'rk45', 'bdf2')")
+            + ". Use engine='trbdf2'.")
+    _dsed = _dsed_dispatch_module
+    _dsed._validate_engine_kwargs(
+        engine=engine,
+        dt=dt,
+        rtol=rtol,
+        atol=atol,
+        dt_init=dt_init,
+        integrator=integrator,
+        stiffness_threshold=stiffness_threshold,
+        h_bdf2=h_bdf2,
+    )
+    if mode_selection not in (None, "legacy", "shadow", "lcp", "auto"):
+        raise ValueError(
+            f"simulate(): mode_selection={mode_selection!r}; expected "
+            "None, 'legacy', 'shadow', 'lcp' or 'auto'.")
+    _mode_auto = None
+    if mode_selection == "auto" and sensitivities is not None:
+        mode_selection, _mode_auto = _mode_auto_record(None, "sensitivities")
+    if newton_roundoff_budget is not None and (
+            isinstance(newton_roundoff_budget, bool)
+            or int(newton_roundoff_budget) != newton_roundoff_budget
+            or int(newton_roundoff_budget) < 1):
+        raise _options_error("newton_roundoff_budget",
+            f"simulate(newton_roundoff_budget={newton_roundoff_budget}): "
+            "must be an integer >= 1 (consecutive Newton solves accepted at roundoff "
+            "before NewtonRoundoffBudgetExceeded; default 130).")
+
+    return _types.SimpleNamespace(resolved_from=_resolved,
+        builder=builder, t_end=t_end, dt=dt, t_start=t_start,
+        store_every=store_every, _run_circuit=_run_circuit,
+        _caller_builder=_caller_builder,
+        enable_nonlinear_refresh=enable_nonlinear_refresh,
+        max_newton_iterations=max_newton_iterations,
+        max_event_iterations=max_event_iterations,
+        auto_regularize=auto_regularize, tol_newton_dx=tol_newton_dx,
+        tol_newton_res=tol_newton_res,
+        enable_newton_line_search=enable_newton_line_search,
+        enable_newton_lm=enable_newton_lm,
+        enable_substep_state_correction=enable_substep_state_correction,
+        discontinuity_restart=discontinuity_restart,
+        resolution_diagnostics=resolution_diagnostics,
+        inductor_freeze_di_max=inductor_freeze_di_max,
+        inductor_abs_clamp=inductor_abs_clamp, integrator=integrator,
+        rtol=rtol, atol=atol, dt_init=dt_init, _opt_values=_opt_values,
+        engine=engine, _device_path=_device_path, _dsed=_dsed,
+        mode_selection=mode_selection, _mode_auto=_mode_auto)
 
 
 def _resume_tick_origins(resume_from, n: int) -> "list[float]":
