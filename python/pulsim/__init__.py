@@ -880,7 +880,7 @@ def _warn_unlocated_edges(res):
             "at the next grid point (first order there). Give the "
             "schedule an oracle (make_pwm_switch_fn & co. have one) or "
             "put the edges on the dt grid. See res.counters.",
-            UserWarning, stacklevel=3)
+            UserWarning, stacklevel=4)
     n = c.get("split_event_overflows", 0)
     if n:
         warnings.warn(
@@ -888,7 +888,7 @@ def _warn_unlocated_edges(res):
             "had more events than the event split takes (8 per step); "
             "the events beyond it were taken unsplit, first order there. "
             "Reduce dt. See res.counters['split_event_overflows'].",
-            UserWarning, stacklevel=3)
+            UserWarning, stacklevel=4)
     n = c.get("stage2_retry_failures", 0)
     if n:
         warnings.warn(
@@ -897,7 +897,7 @@ def _warn_unlocated_edges(res):
             "re-try that checks it failed; the SDIRK stage 2 was kept and "
             "may overshoot the mode change. Reduce dt. See "
             "res.counters['stage2_retry_failures'].",
-            UserWarning, stacklevel=3)
+            UserWarning, stacklevel=4)
 
 
 def _resolution_flagged(res) -> bool:
@@ -946,7 +946,7 @@ def _warn_resolution(builder, res, dt):
         "\n  Reduce dt, or omit dt to let the variable-step engine "
         "choose. The estimate is not an error bound. Details: "
         "res.resolution.",
-        ResolutionWarning, stacklevel=3)
+        ResolutionWarning, stacklevel=4)
 
 
 class ResolutionWarning(UserWarning):
@@ -1961,7 +1961,7 @@ def _warn_impulses(res) -> None:
         f"impulsive re-initialisation(s); first at t = {r0.t:g}: "
         f"{', '.join(r0.devices)} made {', '.join(r0.states)} dependent "
         f"({r0.kind}, {r0.dW:.6g} J removed). See res.reinit_records.",
-        UserWarning, stacklevel=3)
+        UserWarning, stacklevel=4)
 
 
 def _carry_jumps(fn, parts):
@@ -2759,46 +2759,18 @@ def simulate(
                 ticks=[(f, p, o) for (f, p), o in zip(
                     _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
             )
-        try:
-            _dsed_res._preflight = _preflight_report
-            _dsed_res._run_plan = _run_plan
-            _dsed_res.engine_used = "dsed"
-            _dsed_res.engine_route_reason = None
-            # v2.0 Phase 3 item 5 — the unified result: with the
-            # full-MNA trajectory reconstructed, the same name-based
-            # accessors the pwl engine gets now mean the same thing
-            # here. `_builder` is what they resolve names against.
-            _dsed_res._builder = builder
-            # No switch_fn: the DSED dispatcher installs a Python
-            # all-closed lambda, so a placeholder stands in for it.
-            _dsed_res.step_loop_python_callbacks = (
-                _step_loop_python_callbacks(
-                    switch_fn=(switch_fn if switch_fn is not None
-                               else "default"),
-                    b_extra_fn=b_extra_fn))
-        except AttributeError:  # pragma: no cover
-            pass
-        _auto_check_voltage_sanity(_dsed_res, builder,
-                                    voltage_sanity_factor)
-        # on_impulse on the exact engine (its dependent-state projections,
-        # recorded after the run): 'error' refuses the run as pwl's kernel
-        # does at the event, 'warn' warns.
-        _recs = list(getattr(_dsed_res, "reinit_records", None) or ())
-        if _recs and on_impulse == "error":
-            r0 = _recs[0]
-            cut = r0.kind == "cut_set"
-            dev = r0.devices[0] if r0.devices else ""
-            raise _unsupported(
-                "dsed", "impulse",
-                f"on_impulse='error': at t = {r0.t:g} '{dev}' makes "
-                f"{', '.join(r0.states)} dependent ("
-                f"{'an inductor cut-set' if cut else 'a capacitor loop'}); "
-                f"re-initialising them moves {r0.lambda_:.6g} "
-                f"{'V*s' if cut else 'C'} and removes {r0.dW:.6g} J.",
-                device=dev)
-        if on_impulse == "warn":
-            _warn_impulses(_dsed_res)
-        return _dsed_res
+        return _finalize("dsed", _dsed_res, builder=builder,
+                         _preflight_report=_preflight_report,
+                         _run_plan=_run_plan, switch_fn=switch_fn,
+                         b_extra_fn=b_extra_fn, step_observer=None,
+                         should_continue=None, closed_loops=None,
+                         voltage_sanity_factor=voltage_sanity_factor,
+                         on_impulse=on_impulse, mode_selection=None,
+                         _mode_auto=None, _stats=None, _engine_asked=None,
+                         _plan=None, _route_reasons=None, progress=None,
+                         cxx_chain=None, dt=None, _step_observer_user=None,
+                         _b_extra_fn_user=None, _closed_loops_user=None,
+                         _mmc_finalize=None)
 
     if resume_from is not None and t_start == 0.0:
         # Resuming means TIME continues too: a sine source
@@ -2974,40 +2946,21 @@ def simulate(
                         "snubber) or use engine='pwl' with a fixed dt."),
                     ) + tuple(_aborted.args[1:])
             raise
-        res._builder = builder
-        res._preflight = _preflight_report
-        res._run_plan = _run_plan
-        res._switch_fn = switch_fn
-        res._trbdf2_stats = _stats   # alias of res.stats for one release
-        _set_run_info(res, "trbdf2", _stats)
-        res.control_tick_counts = list(_stats["control_tick_counts"])
-        res.control_tick_jitter_max = 0.0
-        res.engine_used = "trbdf2"
-        if mode_selection in ("shadow", "lcp"):
-            res.diagnostics = dict(res.mode_diagnostics)
-        res.engine_route_reason = None
-        if _mode_auto is not None:
-            res.diagnostics = {**(getattr(res, "diagnostics", None) or {}),
-                               "mode_selection_auto": _mode_auto}
-        res.step_loop_python_callbacks = _step_loop_python_callbacks(
-            switch_fn=switch_fn, b_extra_fn=b_extra_fn,
-            # the loops' ticks are reported under closed_loops
-            step_observer=step_observer,
-            should_continue=should_continue,
-            closed_loops=closed_loops or None)
-        # The implausible-voltage detector is engine-independent
-        # (it reads the trace, not the stepper) and this engine's
-        # new all-OPEN default mask makes the inductor-open case it
-        # exists for MORE likely, not less. Run it here too — the
-        # pwl tail that normally does it is 500 lines below the
-        # auto return.
-        _auto_check_voltage_sanity(res, builder,
-                                    voltage_sanity_factor)
-        _trbdf2_warn_stats(res, builder, _stats, _engine_asked)
-        if on_impulse == "warn":
-            _warn_impulses(res)
-        _save_control_state(_plan.graphs, res)
-        return res
+        return _finalize("trbdf2", res, builder=builder,
+                         _preflight_report=_preflight_report,
+                         _run_plan=_run_plan, switch_fn=switch_fn,
+                         b_extra_fn=b_extra_fn, step_observer=step_observer,
+                         should_continue=should_continue,
+                         closed_loops=closed_loops,
+                         voltage_sanity_factor=voltage_sanity_factor,
+                         on_impulse=on_impulse,
+                         mode_selection=mode_selection,
+                         _mode_auto=_mode_auto, _stats=_stats,
+                         _engine_asked=_engine_asked, _plan=_plan,
+                         _route_reasons=None, progress=None, cxx_chain=None,
+                         dt=None, _step_observer_user=None,
+                         _b_extra_fn_user=None, _closed_loops_user=None,
+                         _mmc_finalize=None)
 
     # ---- engine='pwl' from here on ----
     # mypy/pyright: narrow Optional[float] → float.
@@ -3404,202 +3357,21 @@ def simulate(
             except AttributeError:  # pragma: no cover — defensive
                 pass
             raise
-    # Close the progress bar with a newline if we were in bar mode.
-    if progress is True or (isinstance(progress, str)
-                              and progress.lower() == "bar"):
-        import sys as _sys
-        _sys.stdout.write("\n")
-        _sys.stdout.flush()
-    # Phase-0 fix #9: the kernel no longer throws away a whole run
-    # on diode event-iteration cycles/budget exhaustion — it records
-    # breaches and continues. Surface them LOUDLY so the accepted
-    # per-step diode-state error is never silent.
-    _breaches = getattr(res, "event_iteration_breaches", None)
-    if _breaches:
-        import warnings
-        _b0 = _breaches[0]
-        warnings.warn(
-            f"simulate(): diode event iteration failed to settle on "
-            f"{len(_breaches)} of {len(res.times)} steps (first at "
-            f"t={_b0.t:.6g}, "
-            f"{'mask cycle' if _b0.cycle_detected else 'budget hit'}). "
-            "The solver kept the last consistent solve each time and "
-            "continued; waveforms near those instants carry a one-"
-            "flip diode-state error. Inspect "
-            "result.event_iteration_breaches, reduce dt, or pass "
-            "strict_event_iterations=True to restore the old hard "
-            "failure.",
-            stacklevel=2)
-
-    # Attach the builder so `result.v(name)` / `.i(name)` / `.power(name)`
-    # can resolve names without forcing the caller to re-pass the
-    # builder. The binding enables `py::dynamic_attr()` precisely so
-    # this assignment works.
-    try:
-        res._builder = builder
-    except AttributeError:  # pragma: no cover — pre-dynamic_attr builds
-        pass
-
-    # Stash the (composed) switch_fn so `result.i(switch_name)` can
-    # reconstruct switch-branch currents post-hoc by replaying the
-    # mask schedule at each result time. ``switch_fn`` here is the
-    # post-compose version (closed_loops + user) so it sees every
-    # switch the result actually exercised.
-    try:
-        # The preflight facts are properties of the CIRCUIT, but a
-        # user reads them off the result, so attach both.
-        res._preflight = _preflight_report
-        res._run_plan = _run_plan
-    except AttributeError:  # pragma: no cover
-        pass
-    try:
-        # Which engine actually ran, and — when the caller said
-        # 'auto' and did not get the variable-step one — why. A
-        # router that cannot be interrogated is a router that
-        # surprises people.
-        res.engine_used = "pwl"
-        _set_run_info(res, "pwl")
-        res.diagnostics = dict(res.mode_diagnostics)
-        if _mode_auto is not None:
-            res.diagnostics["mode_selection_auto"] = _mode_auto
-        res.engine_route_reason = (
-            "; ".join(_route_reasons) if _route_reasons else None)
-        res.step_loop_python_callbacks = _step_loop_python_callbacks(
-            switch_fn=switch_fn, b_extra_fn=b_extra_fn,
-            # the chain fast path runs the observer's C++ chain; the
-            # kernel's Python tick sources are step-loop observers too
-            step_observer=([f for f, _p in _plan._kernel_ticks]
-                           or (None if cxx_chain is not None
-                               else step_observer)),
-            should_continue=should_continue,
-            closed_loops=_closed_loops_user or None)
-    except AttributeError:  # pragma: no cover
-        pass
-    try:
-        # Per tick source, registration order; the largest lateness
-        # of a tick on this grid (0 when every T_j is a multiple of dt).
-        res.control_tick_counts, res.control_tick_jitter_max = \
-            _plan.fixed_tick_counts(res)
-    except AttributeError:  # pragma: no cover
-        pass
-    try:
-        res._switch_fn = switch_fn
-    except AttributeError:  # pragma: no cover
-        pass
-
-    # A post-solve inductor guard that FIRED replaced the solver's
-    # answer with a number the caller configured. Reading that limit
-    # off a plot as if it were current is the failure this warning
-    # exists to prevent: on the drive these guards were written for,
-    # the reported line current peaks at exactly 100.000 A because
-    # the clamp is 100 A.
-    # An inductor whose conduction path opens produces an unbounded
-    # voltage in an idealized model, and Pulsim reports it finitely
-    # and without comment — 2.9 MV on a 48 V circuit, `isfinite` true
-    # throughout. The current guards cannot see it: they watch i_L,
-    # which stays believable. Check the voltage against what the
-    # circuit's own sources can account for.
-    # The try covers ONLY the kernel call. Wrapping the warn() too
-    # meant that under `-W error` — where a warning IS an exception —
-    # the detector produced no signal at all: not the warning, and
-    # not the attribute either. A user who asked for warnings to be
-    # fatal is the last one who should be silently spared this.
-    _volt = None
-    try:
-        _k = _pulsim_module
-        _volt = _k.find_implausible_voltage(
-            builder.graph, builder.pool, res,
-            _ro.DEFAULTS["voltage_sanity_factor"]
-            if voltage_sanity_factor is None
-            else float(voltage_sanity_factor))
-    except Exception:  # pragma: no cover — never break a good run
-        _volt = None
-    if _volt is not None and _volt.node >= 0:
-        import warnings
-        res._implausible_voltage = _volt
-        warnings.warn(
-            "simulate(): " + _k.describe_implausible_voltage(
-                builder.graph, builder.pool, _volt),
-            stacklevel=2)
-
-    # A retried step integrated its interval more finely than the
-    # caller asked for. That is a change in ACCURACY, and the record
-    # exists because they are entitled to know — which is worth
-    # nothing if nobody says it out loud.
-    _retries = list(getattr(res, "dt_retries", []) or [])
-    if _retries:
-        import warnings
-        worst = max(d.halvings for d in _retries)
-        first = min(_retries, key=lambda d: d.t)
-        warnings.warn(
-            f"simulate(): {len(_retries)} step(s) would not converge "
-            f"at dt = {dt:g} and were re-taken at a smaller step "
-            f"(down to dt/{1 << worst}), first at t = "
-            f"{first.t:.6g} s. The sampling grid is unchanged — what "
-            f"changed is that those intervals were integrated more "
-            f"finely than you asked for. If it happens often, the "
-            f"run is telling you dt is too coarse for this circuit. "
-            f"Inspect result.dt_retries; pass max_dt_halvings=0 to "
-            f"get the failure back instead.\n  First reason: "
-            f"{first.reason[:200]}",
-            stacklevel=2)
-
-    _warn_newton_roundoff(res, "simulate()")
-    _warn_resolution(builder, res, dt)
-    _warn_unlocated_edges(res)
-    if on_impulse == "warn":
-        _warn_impulses(res)
-
-    _guards = list(getattr(res, "inductor_guard_actions", []) or [])
-    if _guards:
-        import warnings
-        lines = []
-        for g in _guards:
-            name = builder.graph.branch_name(g.branch_id) or \
-                f"branch #{g.branch_id}"
-            lines.append(
-                f"  * {name}: the guard replaced the solver's "
-                f"current on {g.total()} step(s), first at "
-                f"t = {g.t_first:.6g} s. Peak raw solve "
-                f"{g.worst_solved:.4g} A; limit reported "
-                f"{g.reported_limit:.4g} A. A guard that stays "
-                f"engaged over many steps is HOLDING the trajectory "
-                f"there, not trimming an outlier.")
-        warnings.warn(
-            "simulate(): a post-solve inductor guard replaced the "
-            "solver's answer.\n" + "\n".join(lines) +
-            "\n  These guards do not solve anything — they substitute "
-            "a limit you configured for a current the solver "
-            "computed, so what you plot for these inductors is the "
-            "limit. Before trusting the trace, find out WHY the "
-            "underlying current went there: re-run with the guard "
-            "off and with a smaller dt. If the value is unchanged by "
-            "dt, it is your model's own trajectory (an unbounded "
-            "open-loop stage, a missing snubber, a missing inrush "
-            "limiter), not solver noise — and clipping it is hiding "
-            "a modelling result, not a numerical one. Inspect "
-            "result.inductor_guard_actions.",
-            stacklevel=2)
-
-    # T2.2: auto-attach motor observer traces so
-    # `res.signal('M1.omega')` works without manual wiring. We walk
-    # the step_observer / b_extra_fn / closed_loops the user passed
-    # in and any MotorObserverBundle gets `.attach_to_result(res)`.
-    _auto_attach_motor_traces(
-        res,
-        step_observer=_step_observer_user,
-        b_extra_fn=_b_extra_fn_user,
-        closed_loops=_closed_loops_user,
-        builder=builder,
-    )
-    # v2.0 Phase 3: fold the last step's charge transfer into the
-    # Thevenin arms — the per-step observer only fires BEFORE
-    # solves, so without this `arm.v_c` would be one step behind
-    # the trace it was solved against.
-    if _mmc_finalize is not None and len(res.states) > 0:
-        _mmc_finalize(res.times[-1], res.states[-1])
-    _save_control_state(_plan.graphs, res)
-    return res
+    return _finalize("pwl", res, builder=builder,
+                     _preflight_report=_preflight_report,
+                     _run_plan=_run_plan, switch_fn=switch_fn,
+                     b_extra_fn=b_extra_fn, step_observer=step_observer,
+                     should_continue=should_continue,
+                     closed_loops=closed_loops,
+                     voltage_sanity_factor=voltage_sanity_factor,
+                     on_impulse=on_impulse, mode_selection=mode_selection,
+                     _mode_auto=_mode_auto, _stats=None, _engine_asked=None,
+                     _plan=_plan, _route_reasons=_route_reasons,
+                     progress=progress, cxx_chain=cxx_chain, dt=dt,
+                     _step_observer_user=_step_observer_user,
+                     _b_extra_fn_user=_b_extra_fn_user,
+                     _closed_loops_user=_closed_loops_user,
+                     _mmc_finalize=_mmc_finalize)
 
 
 # Stage A's plan.resolved_from compares each keyword with these: taken from
@@ -4346,6 +4118,291 @@ def _plan_run(builder, t_end, dt, *,
         initial_state=initial_state, _ic_from_builder=_ic_from_builder)
 
 
+def _finalize(engine, res, *, builder, _preflight_report, _run_plan,
+              switch_fn, b_extra_fn, step_observer, should_continue,
+              closed_loops, voltage_sanity_factor, on_impulse,
+              mode_selection, _mode_auto, _stats, _engine_asked, _plan,
+              _route_reasons, progress, cxx_chain, dt, _step_observer_user,
+              _b_extra_fn_user, _closed_loops_user, _mmc_finalize):
+    """The run's result, finished (Stage A, task 6.1): the handles every
+    engine's result carries (builder, preflight, the circuit plan,
+    engine_used, the route reason), and the post-run checks and warnings
+    each engine runs today, in today's order. One function, one section
+    per engine: what differs between them is recorded in DECISIONS 23."""
+    if engine == "dsed":
+        try:
+            res._preflight = _preflight_report
+            res._run_plan = _run_plan
+            res.engine_used = "dsed"
+            res.engine_route_reason = None
+            # v2.0 Phase 3 item 5 — the unified result: with the
+            # full-MNA trajectory reconstructed, the same name-based
+            # accessors the pwl engine gets now mean the same thing
+            # here. `_builder` is what they resolve names against.
+            res._builder = builder
+            # No switch_fn: the DSED dispatcher installs a Python
+            # all-closed lambda, so a placeholder stands in for it.
+            res.step_loop_python_callbacks = (
+                _step_loop_python_callbacks(
+                    switch_fn=(switch_fn if switch_fn is not None
+                               else "default"),
+                    b_extra_fn=b_extra_fn))
+        except AttributeError:  # pragma: no cover
+            pass
+        _auto_check_voltage_sanity(res, builder,
+                                    voltage_sanity_factor)
+        # on_impulse on the exact engine (its dependent-state projections,
+        # recorded after the run): 'error' refuses the run as pwl's kernel
+        # does at the event, 'warn' warns.
+        _recs = list(getattr(res, "reinit_records", None) or ())
+        if _recs and on_impulse == "error":
+            r0 = _recs[0]
+            cut = r0.kind == "cut_set"
+            dev = r0.devices[0] if r0.devices else ""
+            raise _unsupported(
+                "dsed", "impulse",
+                f"on_impulse='error': at t = {r0.t:g} '{dev}' makes "
+                f"{', '.join(r0.states)} dependent ("
+                f"{'an inductor cut-set' if cut else 'a capacitor loop'}); "
+                f"re-initialising them moves {r0.lambda_:.6g} "
+                f"{'V*s' if cut else 'C'} and removes {r0.dW:.6g} J.",
+                device=dev)
+        if on_impulse == "warn":
+            _warn_impulses(res)
+        return res
+    if engine == "trbdf2":
+        res._builder = builder
+        res._preflight = _preflight_report
+        res._run_plan = _run_plan
+        res._switch_fn = switch_fn
+        res._trbdf2_stats = _stats   # alias of res.stats for one release
+        _set_run_info(res, "trbdf2", _stats)
+        res.control_tick_counts = list(_stats["control_tick_counts"])
+        res.control_tick_jitter_max = 0.0
+        res.engine_used = "trbdf2"
+        if mode_selection in ("shadow", "lcp"):
+            res.diagnostics = dict(res.mode_diagnostics)
+        res.engine_route_reason = None
+        if _mode_auto is not None:
+            res.diagnostics = {**(getattr(res, "diagnostics", None) or {}),
+                               "mode_selection_auto": _mode_auto}
+        res.step_loop_python_callbacks = _step_loop_python_callbacks(
+            switch_fn=switch_fn, b_extra_fn=b_extra_fn,
+            # the loops' ticks are reported under closed_loops
+            step_observer=step_observer,
+            should_continue=should_continue,
+            closed_loops=closed_loops or None)
+        # The implausible-voltage detector is engine-independent
+        # (it reads the trace, not the stepper) and this engine's
+        # new all-OPEN default mask makes the inductor-open case it
+        # exists for MORE likely, not less. Run it here too — the
+        # pwl tail that normally does it is 500 lines below the
+        # auto return.
+        _auto_check_voltage_sanity(res, builder,
+                                    voltage_sanity_factor)
+        _trbdf2_warn_stats(res, builder, _stats, _engine_asked)
+        if on_impulse == "warn":
+            _warn_impulses(res)
+        _save_control_state(_plan.graphs, res)
+        return res
+    # Close the progress bar with a newline if we were in bar mode.
+    if progress is True or (isinstance(progress, str)
+                              and progress.lower() == "bar"):
+        import sys as _sys
+        _sys.stdout.write("\n")
+        _sys.stdout.flush()
+    # Phase-0 fix #9: the kernel no longer throws away a whole run
+    # on diode event-iteration cycles/budget exhaustion — it records
+    # breaches and continues. Surface them LOUDLY so the accepted
+    # per-step diode-state error is never silent.
+    _breaches = getattr(res, "event_iteration_breaches", None)
+    if _breaches:
+        import warnings
+        _b0 = _breaches[0]
+        warnings.warn(
+            f"simulate(): diode event iteration failed to settle on "
+            f"{len(_breaches)} of {len(res.times)} steps (first at "
+            f"t={_b0.t:.6g}, "
+            f"{'mask cycle' if _b0.cycle_detected else 'budget hit'}). "
+            "The solver kept the last consistent solve each time and "
+            "continued; waveforms near those instants carry a one-"
+            "flip diode-state error. Inspect "
+            "result.event_iteration_breaches, reduce dt, or pass "
+            "strict_event_iterations=True to restore the old hard "
+            "failure.",
+            stacklevel=3)
+
+    # Attach the builder so `result.v(name)` / `.i(name)` / `.power(name)`
+    # can resolve names without forcing the caller to re-pass the
+    # builder. The binding enables `py::dynamic_attr()` precisely so
+    # this assignment works.
+    try:
+        res._builder = builder
+    except AttributeError:  # pragma: no cover — pre-dynamic_attr builds
+        pass
+
+    # Stash the (composed) switch_fn so `result.i(switch_name)` can
+    # reconstruct switch-branch currents post-hoc by replaying the
+    # mask schedule at each result time. ``switch_fn`` here is the
+    # post-compose version (closed_loops + user) so it sees every
+    # switch the result actually exercised.
+    try:
+        # The preflight facts are properties of the CIRCUIT, but a
+        # user reads them off the result, so attach both.
+        res._preflight = _preflight_report
+        res._run_plan = _run_plan
+    except AttributeError:  # pragma: no cover
+        pass
+    try:
+        # Which engine actually ran, and — when the caller said
+        # 'auto' and did not get the variable-step one — why. A
+        # router that cannot be interrogated is a router that
+        # surprises people.
+        res.engine_used = "pwl"
+        _set_run_info(res, "pwl")
+        res.diagnostics = dict(res.mode_diagnostics)
+        if _mode_auto is not None:
+            res.diagnostics["mode_selection_auto"] = _mode_auto
+        res.engine_route_reason = (
+            "; ".join(_route_reasons) if _route_reasons else None)
+        res.step_loop_python_callbacks = _step_loop_python_callbacks(
+            switch_fn=switch_fn, b_extra_fn=b_extra_fn,
+            # the chain fast path runs the observer's C++ chain; the
+            # kernel's Python tick sources are step-loop observers too
+            step_observer=([f for f, _p in _plan._kernel_ticks]
+                           or (None if cxx_chain is not None
+                               else step_observer)),
+            should_continue=should_continue,
+            closed_loops=_closed_loops_user or None)
+    except AttributeError:  # pragma: no cover
+        pass
+    try:
+        # Per tick source, registration order; the largest lateness
+        # of a tick on this grid (0 when every T_j is a multiple of dt).
+        res.control_tick_counts, res.control_tick_jitter_max = \
+            _plan.fixed_tick_counts(res)
+    except AttributeError:  # pragma: no cover
+        pass
+    try:
+        res._switch_fn = switch_fn
+    except AttributeError:  # pragma: no cover
+        pass
+
+    # A post-solve inductor guard that FIRED replaced the solver's
+    # answer with a number the caller configured. Reading that limit
+    # off a plot as if it were current is the failure this warning
+    # exists to prevent: on the drive these guards were written for,
+    # the reported line current peaks at exactly 100.000 A because
+    # the clamp is 100 A.
+    # An inductor whose conduction path opens produces an unbounded
+    # voltage in an idealized model, and Pulsim reports it finitely
+    # and without comment — 2.9 MV on a 48 V circuit, `isfinite` true
+    # throughout. The current guards cannot see it: they watch i_L,
+    # which stays believable. Check the voltage against what the
+    # circuit's own sources can account for.
+    # The try covers ONLY the kernel call. Wrapping the warn() too
+    # meant that under `-W error` — where a warning IS an exception —
+    # the detector produced no signal at all: not the warning, and
+    # not the attribute either. A user who asked for warnings to be
+    # fatal is the last one who should be silently spared this.
+    _volt = None
+    try:
+        _k = _pulsim_module
+        _volt = _k.find_implausible_voltage(
+            builder.graph, builder.pool, res,
+            _ro.DEFAULTS["voltage_sanity_factor"]
+            if voltage_sanity_factor is None
+            else float(voltage_sanity_factor))
+    except Exception:  # pragma: no cover — never break a good run
+        _volt = None
+    if _volt is not None and _volt.node >= 0:
+        import warnings
+        res._implausible_voltage = _volt
+        warnings.warn(
+            "simulate(): " + _k.describe_implausible_voltage(
+                builder.graph, builder.pool, _volt),
+            stacklevel=3)
+
+    # A retried step integrated its interval more finely than the
+    # caller asked for. That is a change in ACCURACY, and the record
+    # exists because they are entitled to know — which is worth
+    # nothing if nobody says it out loud.
+    _retries = list(getattr(res, "dt_retries", []) or [])
+    if _retries:
+        import warnings
+        worst = max(d.halvings for d in _retries)
+        first = min(_retries, key=lambda d: d.t)
+        warnings.warn(
+            f"simulate(): {len(_retries)} step(s) would not converge "
+            f"at dt = {dt:g} and were re-taken at a smaller step "
+            f"(down to dt/{1 << worst}), first at t = "
+            f"{first.t:.6g} s. The sampling grid is unchanged — what "
+            f"changed is that those intervals were integrated more "
+            f"finely than you asked for. If it happens often, the "
+            f"run is telling you dt is too coarse for this circuit. "
+            f"Inspect result.dt_retries; pass max_dt_halvings=0 to "
+            f"get the failure back instead.\n  First reason: "
+            f"{first.reason[:200]}",
+            stacklevel=3)
+
+    _warn_newton_roundoff(res, "simulate()")
+    _warn_resolution(builder, res, dt)
+    _warn_unlocated_edges(res)
+    if on_impulse == "warn":
+        _warn_impulses(res)
+
+    _guards = list(getattr(res, "inductor_guard_actions", []) or [])
+    if _guards:
+        import warnings
+        lines = []
+        for g in _guards:
+            name = builder.graph.branch_name(g.branch_id) or \
+                f"branch #{g.branch_id}"
+            lines.append(
+                f"  * {name}: the guard replaced the solver's "
+                f"current on {g.total()} step(s), first at "
+                f"t = {g.t_first:.6g} s. Peak raw solve "
+                f"{g.worst_solved:.4g} A; limit reported "
+                f"{g.reported_limit:.4g} A. A guard that stays "
+                f"engaged over many steps is HOLDING the trajectory "
+                f"there, not trimming an outlier.")
+        warnings.warn(
+            "simulate(): a post-solve inductor guard replaced the "
+            "solver's answer.\n" + "\n".join(lines) +
+            "\n  These guards do not solve anything — they substitute "
+            "a limit you configured for a current the solver "
+            "computed, so what you plot for these inductors is the "
+            "limit. Before trusting the trace, find out WHY the "
+            "underlying current went there: re-run with the guard "
+            "off and with a smaller dt. If the value is unchanged by "
+            "dt, it is your model's own trajectory (an unbounded "
+            "open-loop stage, a missing snubber, a missing inrush "
+            "limiter), not solver noise — and clipping it is hiding "
+            "a modelling result, not a numerical one. Inspect "
+            "result.inductor_guard_actions.",
+            stacklevel=3)
+
+    # T2.2: auto-attach motor observer traces so
+    # `res.signal('M1.omega')` works without manual wiring. We walk
+    # the step_observer / b_extra_fn / closed_loops the user passed
+    # in and any MotorObserverBundle gets `.attach_to_result(res)`.
+    _auto_attach_motor_traces(
+        res,
+        step_observer=_step_observer_user,
+        b_extra_fn=_b_extra_fn_user,
+        closed_loops=_closed_loops_user,
+        builder=builder,
+    )
+    # v2.0 Phase 3: fold the last step's charge transfer into the
+    # Thevenin arms — the per-step observer only fires BEFORE
+    # solves, so without this `arm.v_c` would be one step behind
+    # the trace it was solved against.
+    if _mmc_finalize is not None and len(res.states) > 0:
+        _mmc_finalize(res.times[-1], res.states[-1])
+    _save_control_state(_plan.graphs, res)
+    return res
+
+
 def _resume_tick_origins(resume_from, n: int) -> "list[float]":
     """The snapshot's per-source tick-grid origins when it has one per
     tick source of this run (the run that wrote it had the same
@@ -4402,7 +4459,7 @@ def _warn_newton_roundoff(res, eng) -> None:
             f"wrong state can be accepted at roundoff all the way. "
             f"More than 130 consecutive accepts abort the run. Check "
             f"result.newton_roundoff_accepts.",
-            stacklevel=3)
+            stacklevel=4)
 
 
 def _set_run_info(res, engine: str, stats=None) -> None:
@@ -4448,7 +4505,7 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
             "than rtol promises — inspect "
             "result._trbdf2_stats and the event times if the "
             "waveform matters there.",
-            stacklevel=3)
+            stacklevel=4)
     # Threshold 3: a single boundary graze at startup is normal
     # (measured 1 on the hysteresis-banded flyback); a sliding model
     # produces them every few cycles (8 in 0.1 s on a V_th = 0 bridge
@@ -4467,7 +4524,7 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
             "~0.5 %. Cross-check with a dt (engine='pwl'), or give "
             "the diode a V_th above its V_f (V_th - V_f IS the "
             "hysteresis band).",
-            stacklevel=3)
+            stacklevel=4)
     # A gate pulse landed although narrower than the switch_fn
     # sampling used while it was open (or before that bit's first
     # edge): it was found by luck, so pulses that narrow may have been
@@ -4487,7 +4544,7 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
             "pulse> as the step ceiling (engine='trbdf2'), drive the "
             "gates with p.NativePwm2Switch, whose edges the engine "
             "computes, or use engine='pwl' with a dt on the PWM grid.",
-            stacklevel=3)
+            stacklevel=4)
     # The zero-time probe needed a longer step to factor: some subnet
     # reaches the rest of the circuit only through switches and diodes,
     # so while they are OFF its common mode is set by g_off alone. The
@@ -4512,7 +4569,7 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
             "subnet to ground (ground a rail, e.g. dc_neg, or add a "
             "resistor to gnd) or cross-check with engine='pwl' and a "
             "fixed dt.",
-            stacklevel=3)
+            stacklevel=4)
     # A diode held in a state its own commutation rule forbids is a
     # commutation the engine missed: every switched branch after it is
     # suspect. The record says so per sample (the same check res.i
@@ -4548,7 +4605,7 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
                 "switched branch from there on is suspect. Rerun with "
                 "engine='pwl' and a fixed dt and compare (res.i of each "
                 "diode says which samples)." + hint,
-                RuntimeWarning, stacklevel=3)
+                RuntimeWarning, stacklevel=4)
 
 
 def _floating_subnets(builder) -> list:
@@ -4764,7 +4821,7 @@ def _auto_check_voltage_sanity(res, builder, factor):
         warnings.warn(
             "simulate(): " + _k.describe_implausible_voltage(
                 builder.graph, builder.pool, volt),
-            stacklevel=3)
+            stacklevel=4)
 
 
 def _attach_native_machine_traces(result, builder) -> None:
