@@ -50,6 +50,9 @@ SELF_N = 5000                    # self-score: samples kept besides those near e
 ONSET = 0.05                     # the error's onset: first sample off by 5 % of tol
 # solved directly (20,000 schedule events, ~20 s); `truth` writes no record for it (its dt/32 CSV is 3.2 M rows)
 EXTRA = ("circuits/thermal/long_run_drift_buck.yaml",)
+# Scored here only, never by the strict reference gate (reference_status.CONFIGS):
+# ESDIRK4(3) on the variable-step engine (add-high-order-stiff-integrator).
+EXTRA_CONFIGS = {"trbdf2+esdirk43": ("trbdf2", {"integrator": "esdirk43"})}
 TWINS = ("circuits/diodes/diode_rectifier.yaml", "circuits/switching/isolated/flyback_converter.yaml")
 
 
@@ -173,7 +176,7 @@ def run_circuit(rel):
     if ref is not None:
         rec["reference"].update(grade(sol, ref, g, sp, case.dt, min(tols.values())))
     rec["cells"] = {}
-    for cfg, (eng, kw) in rs.CONFIGS.items():
+    for cfg, (eng, kw) in {**rs.CONFIGS, **EXTRA_CONFIGS}.items():
         with rs.extra_kwargs(kw):
             kind, res, wall, msg = dr.run_cell(case, eng)
         cell = dict(config=cfg, circuit=rel, reference=ref_name, tol=tols[eng], message=msg, wall_s=round(wall, 3))

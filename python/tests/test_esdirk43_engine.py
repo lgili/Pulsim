@@ -67,3 +67,33 @@ def test_a_stateful_newton_history_is_refused_by_device_and_kind():
     assert e.value.feature == "integrator=esdirk43"
     assert e.value.device == "Ls"
     assert e.value.kind == "SaturableInductor"
+
+
+def _buck_dcm():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 24.0)
+    b.add_switch("S", "in", "sw", 1e3, 1e-6)
+    b.add_diode("D", "gnd", "sw", 1e3, 1e-6, 0.0)
+    b.add_inductor("L", "sw", "out", 10e-6)
+    b.add_capacitor("C", "out", "gnd", 10e-6)
+    b.add_resistor("R", "out", "gnd", 20.0)
+    fn = p.make_pwm_switch_fn(100e3, 0.3, b.switch_index_of("S"), b.graph.num_switches)
+    return b, fn
+
+
+def test_dcm_buck_events_and_waveform_agree_with_trbdf2():
+    runs = {}
+    for integ in (None, "esdirk43"):
+        b, fn = _buck_dcm()
+        r = p.simulate(b, t_end=1e-4, engine="trbdf2", switch_fn=fn,
+                       integrator=integ, rtol=1e-8, atol=1e-11)
+        runs[integ] = r
+    s0, s1 = runs[None]._trbdf2_stats, runs["esdirk43"]._trbdf2_stats
+    assert (s1["n_diode_events"], s1["n_gate_events"]) == (
+        s0["n_diode_events"], s0["n_gate_events"])
+    t = np.linspace(1e-5, 1e-4, 200)
+    for sig in ("out", "sw"):
+        a = np.interp(t, runs[None].times, runs[None].v(sig))
+        e = np.interp(t, runs["esdirk43"].times, runs["esdirk43"].v(sig))
+        assert np.median(np.abs(a - e)) < 1e-3 * 24.0, sig
+    assert np.all(np.diff(runs["esdirk43"].times) >= 0)

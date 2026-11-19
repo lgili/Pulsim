@@ -340,6 +340,126 @@ than what one ESDIRK step per interval delivers (here 4.4e-4).
 Not measured: state events (DCM, diode commutation) located by re-steps,
 6 solves per re-step against 3.
 
+## 15. On the engine: `integrator='esdirk43'` on `engine='trbdf2'` (2026-11-19)
+
+**Selection.** `TrBdf2Options::integrator` (0 TR-BDF2, 1 ESDIRK4(3)) from
+`simulate(integrator='esdirk43')` → `sim::RunOptions::integrator_esdirk43`
+→ `to_trbdf2_options`; the `integrator` row of `kRunOptionTable` is now
+honoured on trbdf2 and the exact engine (values: simulate() refuses the
+exact engine's names on trbdf2 and 'esdirk43' on pwl / exact, by name,
+`feature='integrator'`). The engine's `tb_take`, `tb_error`, `tb_after`,
+`tb_commit` are template lambdas `<bool kE = false>`; `run_twin` picks the
+instantiation ONCE per run (`step::run<Esdirk43>` with four adapters, or
+the unchanged TrBdf2 body). Everything else — poll, begin, clamp, the
+crossing detection, Illinois, the landing path, the restart after events,
+mode selection, snapshot, ticks, hooks, the chatter guard, the controller
+object and its accounting — is the same code. The integrator-specific
+parts, all under `if constexpr (kE)`:
+- take: `ed_stages` — five backward-Euler stages of γh on the factor of
+  h/2 (the engine's `(mask, dt)` cache key: one factor per step), each
+  through the linear companion histories with the entries' state slots set
+  to ψ_s and derivative slots 0 (`compute_b_extra` at h/2 = BE of γh,
+  the mutual term included); h·ẏ0 from the committed derivative slots
+  (capacitor current, coupling-aware inductor di/dt: an evaluation);
+  x_g = stage 1 (c = 1/2, `h_pt = h/2`) for the crossing detector,
+  x_1 = stage 5 (stiffly accurate).
+- error: the embedded difference h·Σ(b − b̂)·ẏ per entry, ALWAYS filtered
+  on the stage factor (`filter_estimate(mask, h/2)` = (G + C/(γh))⁻¹·C/(γh));
+  exponent −1/4 in reject and accept; the round-off floor (TR-BDF2's
+  constants) is skipped.
+- after_solve: Illinois trials and the landing are ESDIRK re-steps of the
+  bracket (a trapezoidal trial over an ESDIRK-sized bracket put the
+  rectifier's events 1.4e-9 s off; re-steps: 2.1e-10).
+- commit: the last stage's base restored, `update_from_state_backward_euler
+  (x_1, γh)`: slots = (Y5 − ψ5)/(γh) and the inductor terminal voltage,
+  KCL-consistent at x_1. The landing commits the same way.
+
+**Restart (hand-off item v).** The explicit stage reads the derivative
+slots, and the embedded estimate is nearly blind to them (b0 − b̂0 = 0.0032
+against b0 = 0.158). A diode landing commits under the pre-commutation
+mask, so after it the slots belong to another mode: measured, the diode
+rectifier ran 298 diode events instead of 199 and 6× the error. So a step
+whose mask differs from the slots' mask (`x_mask`), and every restart /
+re-initialisation step, is the shared SDIRK(2,2) step (BE stages, no slot
+read); its commit leaves slots of the new mode. Its first-order estimate is
+filtered when kE forced it (fresh reviewer: raw, it reads the damped jump
+as error at any h; rectifier error at rtol 1e-6 2.7e-7 → 8.2e-8). A gate
+edge with the committed refresh probe already leaves slots of the new mode
+(`x_mask = m_probe`): ESDIRK continues directly.
+
+**Devices.** Run: R, C, L, coupled windings / two-winding transformer,
+sources, ideal and PWL switches, PWL diodes (events), static Newton
+devices (Shockley diode, the Level-1 MOSFET law without Coss: the engine's
+own Newton per stage solve). Refused by name (`UnsupportedError('trbdf2',
+'integrator=esdirk43', device, kind)`): every `StatefulKinds` history —
+NonlinearCapacitor (Coss), LauritzenDiode, PmsmMna (machines), IgbtTail,
+SaturableInductor, ExternalDevice — whose stage takes no arbitrary ψ yet;
+also the legacy loop. Not done: carry_q, stages in q, the Newton refresh
+rule of entry 8 (one Jacobian per attempt).
+
+**Orders through the engine** (fixed ceiling, rtol 1, LC 100 µH / 100 nF
+from a landed 10 V step, error after 10 periods): 5.165e-3, 3.240e-4,
+2.050e-5, 1.400e-6 V at T0/20, /40, /80, /160 — ratios 15.9, 15.8, 14.6
+(order 4; the test body's 5.16e-4, 3.24e-5, 2.02e-6 relative to 10 V).
+TR-BDF2 ratios 3.96, 3.99, 4.00. Index-2 and the stiff limit: not
+re-measured on the engine (entry 5 stands). A step from `initial_state`
+with derivative slots 0 is an inconsistent start for BOTH integrators
+(first-order global error, measured): start from a DC point and a landed
+source step.
+
+**Work-precision against truths** (atol = 1e-3 rtol; solves = linear
+solves incl. rejects; harness dt is the ceiling in the scoreboard rows).
+LC tank, 1000 periods (solves / period, energy drift, max error):
+rtol 1e-5 TR-BDF2 283, −7.4e-3, 7.0 V | ESDIRK 113, −4.5e-3, 1.7 V;
+1e-6 609, −7.3e-4, 1.5 V | 203, −2.7e-4, 0.17 V; 1e-8 2825, −7.2e-6,
+6.9e-2 V | 573, −8.2e-7, 1.6e-3 V. Rejects: ESDIRK 4.5–8 per period (the
+shared elementary controller on an oscillator; the test body's 72 solves
+per period at 1e-5 had none).
+Stiff ladder (spread 1e9, mpmath expm, ceiling = span): 1e-4 8.3e-4 / 195
+vs 8.5e-4 / 71; 1e-6 4.3e-5 / 721 vs 1.2e-5 / 231; 1e-8 2.0e-6 / 3141 vs
+1.5e-7 / 756. Shockley clamp (scipy Radau 1e-13, 2 ms): 1e-4 1.4e-4 / 450
+vs 3.7e-5 / 350; 1e-6 6.0e-6 / 1602 vs 6.1e-7 / 925; 1e-8 2.7e-7 / 6962
+vs 9.3e-9 / 2380.
+Exact scoreboard measure (`exact`, `.scratch/ed/wp_score.py`), TR-BDF2 |
+ESDIRK, error / solves:
+
+| circuit | rtol 1e-4 | rtol 1e-6 | rtol 1e-8 |
+|---|---|---|---|
+| rlc_series_resonant | 1.6e-3 / 4342 \| 2.1e-6 / 5015 | 7.3e-5 / 17610 \| 2.1e-6 / 5040 | 3.3e-6 / 80000 \| 9.7e-8 / 11875 |
+| high_q_rlc_ringdown | 2.7e-2 / 6515 \| 3.8e-4 / 5026 | 1.2e-3 / 27951 \| 1.3e-4 / 7171 | 5.6e-5 / 128061 \| 1.3e-6 / 21696 |
+| buck_switching | 4.9e-7 / 2460 \| 1.4e-7 / 5674 | 4.7e-7 / 2855 \| 7.3e-9 / 5946 | 2.9e-7 / 5725 \| 3.0e-9 / 6577 |
+| buck_dcm | 3.0e-6 / 4104 \| 1.0e-7 / 6810 | 2.5e-6 / 6494 \| 1.2e-8 / 10909 | 2.7e-7 / 21456 \| 3.8e-9 / 13853 |
+| boost_classic | 7.8e-6 / 5423 \| 1.6e-8 / 9804 | 6.4e-6 / 8707 \| 1.5e-8 / 13863 | 4.4e-7 / 26459 \| 1.5e-8 / 17307 |
+| diode_rectifier | 1.5e-6 / 8204 \| 6.7e-6 / 20734 | 4.9e-8 / 10877 \| 8.2e-8 / 24124 | 2.5e-9 / 21121 \| 4.8e-9 / 29492 |
+| half_wave_rectifier_sine | 4.8e-7 / 2219 \| 8.3e-8 / 5252 | 1.5e-8 / 2505 \| 1.3e-8 / 5375 | 8.1e-10 / 4302 \| 1.9e-9 / 5876 |
+
+(the switching rows: buck_switching, buck_dcm, boost_classic, rectifiers
+before the reviewer's filter fix for buck_switching / half_wave; the three
+re-run rows after it.) As D5b predicts: resonant — ESDIRK wins outright
+(high-Q ringdown at the default-like 1e-4: 2.7e-2 → 3.8e-4 with fewer
+solves; at equal error 6–13× fewer solves). Hard-switched buck / boost:
+ESDIRK at rtol 1e-4 is more accurate than TR-BDF2 at 1e-8 with 2.7–3×
+fewer solves; at equal rtol it costs 1.2–2.3× the solves. Rectifiers
+(event-dominated, diode commutations every few steps): ESDIRK LOSES —
+equal error costs ~2× the solves (each commutation is followed by a forced
+SDIRK step with a filtered estimate, and trials / landings cost 5 solves).
+
+**Events** (truth event times, nearest landed sample): diode_rectifier
+rtol 1e-6 max 1.2e-11 s (TR-BDF2) vs 2.1e-10 s (ESDIRK), 1e-8 4.6e-13 vs
+7.6e-12; buck_dcm 1e-6 7.3e-10 vs 2.8e-13, 1e-8 5.9e-11 vs 1.8e-13. Event
+counts equal the truth's (199; 34 diode + 80 gate). Landing re-steps per
+event: not counted (no stat key added: the stats keys are compared by the
+identity gates).
+
+**Fuzz** (every value × (1 + 1e-13·u), 30 draws each): DCM buck 0 bad
+(1287 steps every draw), floating-bus diode bridge 0 bad (1041–1049).
+
+**Option off.** Byte-identical to 39450607 on the four compares (goldens,
+stateful, engines, step sequences); instructions per accepted step (min of
+3, two runs each, base | this): buck_trbdf2 10962 / 10965 | 10992 / 10989
+(+0.25 %), shockbuck_trbdf2 72526 / 72509 | 72553 / 72569 (+0.06 %),
+bridge 12735 / 12705 | 12748 / 12756 (+0.2 %).
+
 ## Hand-off (what the engine-switch step needs)
 
 1. Body services: `solve_stage` for `{BackwardEuler, h/2, γh}` with an
@@ -365,3 +485,19 @@ Not measured: state events (DCM, diode commutation) located by re-steps,
 8. Open: 2003-paper cross-check of the tableau (SUNDIALS match only);
    state-event-dominated cost (DCM, diode commutations); tasks 3–5 on
    the engine (devices through `f`, `q`; resonant converters).
+
+Hand-off after entry 15 (the option runs on the engine for linear
+companions, PWL switches / diodes and static Newton devices):
+- DONE on the engine: items 1 (linear companions; one factor per step),
+  2 (dt-keyed cache; Newton per stage is the engine's own), 3 (bracket on
+  stage values, land by ESDIRK re-steps), 4 (the SDIRK step after a mode
+  change or restart), 5 (the option, refusals).
+- NEXT: (a) stateful Newton histories (Coss, saturable inductor, machines,
+  Lauritzen, IGBT tail, external) need the device interface's general
+  stage (βh, ψ) + carry_q (item 6) — refused by name today; (b) Newton:
+  one Jacobian per attempt with the refresh rule of entry 8; (c) the
+  round-off floor for the ESDIRK estimate (skipped: a SEPIC-like node held
+  by g_off may grind to h_lo); (d) the reject rate on oscillators (shared
+  elementary controller; a PI controller is a number change for TR-BDF2
+  too); (e) task 4.3 / 5.x gates; (f) dense-output bracketing (stage values
+  only today).
