@@ -2228,7 +2228,7 @@ def _mode_auto_record(chosen, reason, warn=False):
         warnings.warn(
             f"simulate(mode_selection='auto'): the complementarity selection "
             f"does not apply ({reason}); this run uses the legacy settle.",
-            UserWarning, stacklevel=4)
+            UserWarning, stacklevel=5)
     return chosen, {"requested": "auto",
                     "chosen": "lcp" if chosen == "lcp" else "legacy",
                     "reason": reason}
@@ -2689,40 +2689,33 @@ def simulate(
     # adaptive-RK selector below is PWL-specific and must NOT apply
     # to DSED integrator names.
     if engine == "dsed":
-        # Hard-fail on kwargs the DSED path cannot honor. Silently
-        # dropping these is the worst failure mode a simulator can
-        # have: a closed-loop circuit would run OPEN-loop and return
-        # plausible-looking (wrong) waveforms. C blocks were a warning
-        # followed by an open-loop run until add-engine-conformance-
-        # matrix; they change the physics, so they refuse too.
-        # The option x engine table (sim::kRunOptionTable): every keyword
-        # the exact engine cannot honour, plus C blocks (they drive the
-        # circuit through b_extra, which this engine does not consume).
-        # Controllers (closed_loops, controller_period, a periodic
-        # step_observer, control_tick) tick on its event queue: rows.
-        _offending = _ro.refused("dsed", {
-            **_opt_values, "c_blocks": bool(_c_blocks_of(builder)),
-            "device_path": device_path,
-            "enable_nonlinear_refresh": enable_nonlinear_refresh,
-            "max_newton_iterations": max_newton_iterations,
-            "max_event_iterations": max_event_iterations,
-            "tol_newton_dx": tol_newton_dx,
-            "tol_newton_res": tol_newton_res,
-            "enable_newton_line_search": enable_newton_line_search,
-            "enable_newton_lm": enable_newton_lm,
-            "newton_roundoff_budget": newton_roundoff_budget,
-            "should_continue": should_continue,
-            "resume_from": resume_from})
-        if _offending:
-            raise _unsupported(
-                "dsed", _offending[0],
-                f"simulate(engine='dsed'): {', '.join(_offending)} "
-                "is/are not supported by the DSED engine yet — the "
-                "run would silently ignore them (e.g. a closed-loop "
-                "converter would simulate OPEN-loop). Use "
-                "engine='pwl' for these features, or drop the "
-                "kwarg(s) if the open-loop behaviour is intended. "
-            )
+        _route(
+            "dsed", builder, _dsed, _plan, _opt_values, dt=dt,
+            t_start=t_start, resume_from=resume_from,
+            step_observer=step_observer, closed_loops=closed_loops,
+            controller_period=controller_period, live_stream=live_stream,
+            progress=progress, start_from_dc_op=start_from_dc_op,
+            strict_event_iterations=strict_event_iterations,
+            max_dt_halvings=max_dt_halvings, store_every=store_every,
+            mmc_arms=mmc_arms, on_cache=on_cache,
+            enable_substep_state_correction=enable_substep_state_correction,
+            discontinuity_restart=discontinuity_restart,
+            resolution_diagnostics=resolution_diagnostics,
+            inductor_freeze_di_max=inductor_freeze_di_max,
+            inductor_abs_clamp=inductor_abs_clamp, switch_fn=switch_fn,
+            rtol=rtol, atol=atol, dt_init=dt_init, integrator=integrator,
+            stiffness_threshold=stiffness_threshold, h_bdf2=h_bdf2,
+            allow_implicit_segments=allow_implicit_segments,
+            mode_selection=mode_selection, _mode_auto=_mode_auto,
+            max_event_iterations=max_event_iterations,
+            _engine_asked=engine, device_path=device_path,
+            enable_nonlinear_refresh=enable_nonlinear_refresh,
+            max_newton_iterations=max_newton_iterations,
+            tol_newton_dx=tol_newton_dx, tol_newton_res=tol_newton_res,
+            enable_newton_line_search=enable_newton_line_search,
+            enable_newton_lm=enable_newton_lm,
+            newton_roundoff_budget=newton_roundoff_budget,
+            should_continue=should_continue)
         # Controllers tick on the integrator's event queue
         # (add-unified-event-queue group 3), as on trbdf2.
         _plan = _plan.for_variable_step("dsed")
@@ -2847,175 +2840,35 @@ def simulate(
             pass
 
     _engine_asked = engine
-    _route_reasons: "list[str]" = []
-    if engine in ("auto", "trbdf2"):
-        _route_reasons = _trbdf2_blockers(
-            builder, dt=dt, step_observer=step_observer,
-            closed_loops=closed_loops,
-            controller_period=controller_period,
-            live_stream=live_stream, progress=progress,
-            start_from_dc_op=start_from_dc_op,
-            strict_event_iterations=strict_event_iterations,
-            max_dt_halvings=max_dt_halvings,
-            store_every=store_every, mmc_arms=mmc_arms,
-            on_cache=on_cache,
-            enable_substep_state_correction=(
-                enable_substep_state_correction),
-            discontinuity_restart=discontinuity_restart,
-            resolution_diagnostics=resolution_diagnostics,
-            inductor_freeze_di_max=inductor_freeze_di_max,
-            inductor_abs_clamp=inductor_abs_clamp,
-            switch_fn=switch_fn, opt_values=_opt_values)
-        # the tick sources trbdf2 registers (for_variable_step's count)
-        _tick_origins = _resume_tick_origins(resume_from, len(_plan.ticks) + len(
-            _plan.rate_ticks) + len(getattr(_plan.c_graph, "_rate_ticks", None) or []))
-        if resume_from is not None and any(
-                _off_tick_grid(_g._cxx_chain, t_start, _tick_origins)
-                for _g in _plan.graphs):
-            # without the snapshot's tick origins trbdf2 ticks at t_start +
-            # k*T: a graph resumed between two of its ticks would tick off
-            # its own grid (G26)
-            _rb = _Blocker(
-                "resume_from: a control graph resumes between two of its "
-                "ticks and the snapshot carries no tick grid for this run's "
-                "controllers (pickled before version 4, built by hand, or "
-                "from a run with other controllers), so the variable-step "
-                "engine would schedule ticks at t_start + k*T, off the "
-                "graph's grid; resume on a tick instant, or use engine='pwl'")
-            _rb.feature = "resume_from"
-            _route_reasons = [*_route_reasons, _rb]
-        if engine == "trbdf2":
-            # Task 9.3: trbdf2 lands its steps on a C block's ticks
-            # (state-time law); only 'auto' keeps routing them to pwl,
-            # so no existing auto run changes engine.
-            _route_reasons = [r for r in _route_reasons
-                              if getattr(r, "feature", "") != "c_blocks"]
-        if engine == "auto":
-            # ROUTE, don't refuse: 'auto' means "pick the engine",
-            # and a script written against the fixed-step API must
-            # keep working when it becomes the default.
-            #
-            # AN EXPLICIT dt IS A REQUEST FOR A FIXED STEP. Reading
-            # it as the variable engine's step CEILING instead
-            # would silently change the answer of every script that
-            # already passes one (measured: a closed-loop buck
-            # moved 4.985 -> 4.968 V). So the rule is simply:
-            #   dt given      -> fixed step, as before
-            #   no dt         -> the engine picks, and uses the
-            #                    variable-step path when it can
-            # which makes the new engine opt-in by OMISSION.
-            # A branch-form circuit trbdf2 refuses routes, not raises (review H4).
-            _k = _pulsim_module
-            try:
-                _k._require_supported(builder.graph, builder.pool, "trbdf2")
-            except UnsupportedError as e:
-                if e.feature in ("branch_form", "dependent_states"):
-                    _route_reasons = [*_route_reasons, str(e)]
-            if dt is not None and dt > 0:
-                _route_reasons = _route_reasons or [
-                    "an explicit dt was given, which requests a "
-                    "fixed step"]
-            if _route_reasons:
-                if dt is None or dt <= 0:
-                    raise ValueError(
-                        "simulate(): this circuit cannot use the "
-                        "variable-step engine — "
-                        + "; ".join(_route_reasons)
-                        + ". The fixed-step engine can run it, but "
-                        "needs a step: pass dt=<seconds> (or "
-                        "engine='dsed' for the event-driven "
-                        "path).")
-                engine = "pwl"
-                # Validation ran against the engine the caller
-                # ASKED for, so kwargs the fixed engine ignores
-                # (rtol/atol/dt_init/integrator) passed silently.
-                # Re-check now that we know where the run lands —
-                # a dropped kwarg the user believed in is exactly
-                # the failure mode the leak warning exists for.
-                _dsed._validate_engine_kwargs(
-                    engine="pwl", dt=dt, rtol=rtol, atol=atol,
-                    dt_init=dt_init, integrator=integrator,
-                    stiffness_threshold=stiffness_threshold,
-                    h_bdf2=h_bdf2)
-            else:
-                engine = "trbdf2"
-        elif _route_reasons:
-            raise _unsupported(
-                "trbdf2", getattr(_route_reasons[0], "feature", ""),
-                "simulate(engine='trbdf2'): "
-                + "; ".join(_route_reasons)
-                + ". Use engine='auto' to route to the fixed-step "
-                "engine automatically, or engine='pwl' explicitly.")
-
-    # engine is now 'trbdf2' or 'pwl' ('auto' never routes to dsed)
-    if allow_implicit_segments is not None:
-        raise _unsupported(
-            engine, "allow_implicit_segments",
-            f"simulate(engine={_engine_asked!r}, allow_implicit_segments="
-            f"{allow_implicit_segments!r}): the keyword governs the exact "
-            f"engine's numeric segments; this run lands on engine={engine!r}, "
-            "which has no exact segments. Use engine='exact', or drop it.")
-    if mode_selection == "auto":
-        mode_selection, _mode_auto = _resolve_mode_auto(
-            builder, engine, max_event_iterations)
-
-    # Phase 2.4 — adaptive RK selector (schema v1.5, wiring v1.6).
-    # Today only the kernel trap path is wired into run_transient.
-    # Reject other choices with a clear pointer at the deferred
-    # cache refactor so users get actionable feedback instead of a
-    # silent default-back to "kernel".
-    if integrator not in ("kernel", "default", None) and engine == "pwl":
-        if integrator not in ("dopri5", "radau"):
-            raise _unsupported("pwl", "integrator",
-                f"simulate(integrator={integrator!r}): unknown "
-                "integrator for engine='pwl'. Supported names: "
-                "'kernel' (default), 'dopri5', 'radau'. For DSED's "
-                "RK45/BDF2/auto integrators, use engine='dsed'."
-            )
-        raise NotImplementedError(
-            f"simulate(integrator={integrator!r}) is reserved for "
-            "the v1.6 cache refactor — `PwlStateSpaceCache` would "
-            "need to expose continuous-time (G, M, b) and the "
-            "Python adaptive RK integrators would need DAE Index-1 "
-            "support (M·dx/dt = g, with M structurally singular "
-            "for augmented MNA). Track this under the "
-            "'add-adaptive-runge-kutta-solvers' OpenSpec proposal. "
-            "For Phase 2.4, the integrator name and its tolerances "
-            "round-trip through `SimulationOptions` and YAML so "
-            "your config stays forward-compatible — drop "
-            "`integrator='kernel'` (or omit) to run today. "
-            "Note: engine='dsed' offers RK45/BDF2/auto today via the "
-            "Path-Based Event-Driven scheduler."
-        )
-    # The option x engine table: every keyword the landing engine cannot
-    # honour is refused by name (they used to be warned about and ignored:
-    # rtol / atol / dt_init on the fixed step, the exact engine's
-    # integrator / stiffness_threshold / h_bdf2 on both MNA engines).
-    if engine == "trbdf2" and integrator not in (None, "esdirk43"):
-        raise _unsupported(
-            "trbdf2", "integrator",
-            f"simulate(engine={_engine_asked!r}, integrator={integrator!r}): "
-            "this run lands on engine='trbdf2', whose integrators are TR-BDF2 "
-            "(the default: omit integrator) and 'esdirk43'. The exact "
-            "engine's integrators run on engine='exact'.")
-    _refused = _ro.refused(engine, _opt_values)
-    if _refused:
-        _routed = ("" if engine == _engine_asked else
-                   f" (engine={_engine_asked!r} routed it there: "
-                   + "; ".join(_route_reasons) + ")")
-        raise _unsupported(
-            engine, _refused[0],
-            f"simulate(engine={_engine_asked!r}): this run lands on "
-            f"engine={engine!r}{_routed}, which cannot honour "
-            f"{', '.join(_refused)}: "
-            + "; ".join(_ro.why(n) for n in _refused)
-            + ". Drop the keyword(s), or pick the engine that honours them "
-            "(pulsim.option_capabilities()).")
+    engine, _route_reasons, mode_selection, _mode_auto = _route(
+        engine, builder, _dsed, _plan, _opt_values, dt=dt, t_start=t_start,
+        resume_from=resume_from, step_observer=step_observer,
+        closed_loops=closed_loops, controller_period=controller_period,
+        live_stream=live_stream, progress=progress,
+        start_from_dc_op=start_from_dc_op,
+        strict_event_iterations=strict_event_iterations,
+        max_dt_halvings=max_dt_halvings, store_every=store_every,
+        mmc_arms=mmc_arms, on_cache=on_cache,
+        enable_substep_state_correction=enable_substep_state_correction,
+        discontinuity_restart=discontinuity_restart,
+        resolution_diagnostics=resolution_diagnostics,
+        inductor_freeze_di_max=inductor_freeze_di_max,
+        inductor_abs_clamp=inductor_abs_clamp, switch_fn=switch_fn,
+        rtol=rtol, atol=atol, dt_init=dt_init, integrator=integrator,
+        stiffness_threshold=stiffness_threshold, h_bdf2=h_bdf2,
+        allow_implicit_segments=allow_implicit_segments,
+        mode_selection=mode_selection, _mode_auto=_mode_auto,
+        max_event_iterations=max_event_iterations,
+        _engine_asked=_engine_asked, device_path=device_path,
+        enable_nonlinear_refresh=enable_nonlinear_refresh,
+        max_newton_iterations=max_newton_iterations,
+        tol_newton_dx=tol_newton_dx, tol_newton_res=tol_newton_res,
+        enable_newton_line_search=enable_newton_line_search,
+        enable_newton_lm=enable_newton_lm,
+        newton_roundoff_budget=newton_roundoff_budget,
+        should_continue=should_continue)
 
     if engine == "trbdf2":
-        # The capability table by name (the branch form runs here).
-        _k = _pulsim_module
-        _k._require_supported(builder.graph, builder.pool, "trbdf2")
         # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse
         #      MNA kernel. L-stable, LTE-controlled — no dt to
         #      guess; `dt` (optional) is the step CEILING h_max,
@@ -3830,6 +3683,234 @@ def simulate(
 # the function object at import (a caller may wrap pulsim.simulate).
 _SIMULATE_DEFAULTS = {"t_end": simulate.__defaults__[0],
                       "dt": simulate.__defaults__[1], **simulate.__kwdefaults__}
+
+
+def _route(engine, builder, _dsed, _plan, _opt_values, *, dt, t_start,
+           resume_from, step_observer, closed_loops, controller_period,
+           live_stream, progress, start_from_dc_op, strict_event_iterations,
+           max_dt_halvings, store_every, mmc_arms, on_cache,
+           enable_substep_state_correction, discontinuity_restart,
+           resolution_diagnostics, inductor_freeze_di_max,
+           inductor_abs_clamp, switch_fn, rtol, atol, dt_init, integrator,
+           stiffness_threshold, h_bdf2, allow_implicit_segments,
+           mode_selection, _mode_auto, max_event_iterations, _engine_asked,
+           device_path, enable_nonlinear_refresh, max_newton_iterations,
+           tol_newton_dx, tol_newton_res, enable_newton_line_search,
+           enable_newton_lm, newton_roundoff_budget, should_continue):
+    """The route (add-kernel-simulation-object Stage A, task 4): the engine
+    the run lands on and why, from the option x engine table
+    (sim::kRunOptionTable via _run_options) and the engines' capability
+    tables. engine 'dsed': every keyword the exact engine cannot honour
+    is refused by name (it never routes). 'auto' / 'trbdf2': the
+    variable-step blockers, the 'auto' rule (an explicit dt requests the
+    fixed step), the mode-selection 'auto' rule, and the refusals of the
+    engine landed on. Returns ``(engine, route_reasons, mode_selection,
+    mode_auto)``."""
+    if engine == "dsed":
+        # Hard-fail on kwargs the DSED path cannot honor. Silently
+        # dropping these is the worst failure mode a simulator can
+        # have: a closed-loop circuit would run OPEN-loop and return
+        # plausible-looking (wrong) waveforms. C blocks were a warning
+        # followed by an open-loop run until add-engine-conformance-
+        # matrix; they change the physics, so they refuse too.
+        # The option x engine table (sim::kRunOptionTable): every keyword
+        # the exact engine cannot honour, plus C blocks (they drive the
+        # circuit through b_extra, which this engine does not consume).
+        # Controllers (closed_loops, controller_period, a periodic
+        # step_observer, control_tick) tick on its event queue: rows.
+        _offending = _ro.refused("dsed", {
+            **_opt_values, "c_blocks": bool(_c_blocks_of(builder)),
+            "device_path": device_path,
+            "enable_nonlinear_refresh": enable_nonlinear_refresh,
+            "max_newton_iterations": max_newton_iterations,
+            "max_event_iterations": max_event_iterations,
+            "tol_newton_dx": tol_newton_dx,
+            "tol_newton_res": tol_newton_res,
+            "enable_newton_line_search": enable_newton_line_search,
+            "enable_newton_lm": enable_newton_lm,
+            "newton_roundoff_budget": newton_roundoff_budget,
+            "should_continue": should_continue,
+            "resume_from": resume_from})
+        if _offending:
+            raise _unsupported(
+                "dsed", _offending[0],
+                f"simulate(engine='dsed'): {', '.join(_offending)} "
+                "is/are not supported by the DSED engine yet — the "
+                "run would silently ignore them (e.g. a closed-loop "
+                "converter would simulate OPEN-loop). Use "
+                "engine='pwl' for these features, or drop the "
+                "kwarg(s) if the open-loop behaviour is intended. "
+            )
+        return engine, [], mode_selection, _mode_auto
+    _route_reasons: "list[str]" = []
+    if engine in ("auto", "trbdf2"):
+        _route_reasons = _trbdf2_blockers(
+            builder, dt=dt, step_observer=step_observer,
+            closed_loops=closed_loops,
+            controller_period=controller_period,
+            live_stream=live_stream, progress=progress,
+            start_from_dc_op=start_from_dc_op,
+            strict_event_iterations=strict_event_iterations,
+            max_dt_halvings=max_dt_halvings,
+            store_every=store_every, mmc_arms=mmc_arms,
+            on_cache=on_cache,
+            enable_substep_state_correction=(
+                enable_substep_state_correction),
+            discontinuity_restart=discontinuity_restart,
+            resolution_diagnostics=resolution_diagnostics,
+            inductor_freeze_di_max=inductor_freeze_di_max,
+            inductor_abs_clamp=inductor_abs_clamp,
+            switch_fn=switch_fn, opt_values=_opt_values)
+        # the tick sources trbdf2 registers (for_variable_step's count)
+        _tick_origins = _resume_tick_origins(resume_from, len(_plan.ticks) + len(
+            _plan.rate_ticks) + len(getattr(_plan.c_graph, "_rate_ticks", None) or []))
+        if resume_from is not None and any(
+                _off_tick_grid(_g._cxx_chain, t_start, _tick_origins)
+                for _g in _plan.graphs):
+            # without the snapshot's tick origins trbdf2 ticks at t_start +
+            # k*T: a graph resumed between two of its ticks would tick off
+            # its own grid (G26)
+            _rb = _Blocker(
+                "resume_from: a control graph resumes between two of its "
+                "ticks and the snapshot carries no tick grid for this run's "
+                "controllers (pickled before version 4, built by hand, or "
+                "from a run with other controllers), so the variable-step "
+                "engine would schedule ticks at t_start + k*T, off the "
+                "graph's grid; resume on a tick instant, or use engine='pwl'")
+            _rb.feature = "resume_from"
+            _route_reasons = [*_route_reasons, _rb]
+        if engine == "trbdf2":
+            # Task 9.3: trbdf2 lands its steps on a C block's ticks
+            # (state-time law); only 'auto' keeps routing them to pwl,
+            # so no existing auto run changes engine.
+            _route_reasons = [r for r in _route_reasons
+                              if getattr(r, "feature", "") != "c_blocks"]
+        if engine == "auto":
+            # ROUTE, don't refuse: 'auto' means "pick the engine",
+            # and a script written against the fixed-step API must
+            # keep working when it becomes the default.
+            #
+            # AN EXPLICIT dt IS A REQUEST FOR A FIXED STEP. Reading
+            # it as the variable engine's step CEILING instead
+            # would silently change the answer of every script that
+            # already passes one (measured: a closed-loop buck
+            # moved 4.985 -> 4.968 V). So the rule is simply:
+            #   dt given      -> fixed step, as before
+            #   no dt         -> the engine picks, and uses the
+            #                    variable-step path when it can
+            # which makes the new engine opt-in by OMISSION.
+            # A branch-form circuit trbdf2 refuses routes, not raises (review H4).
+            _k = _pulsim_module
+            try:
+                _k._require_supported(builder.graph, builder.pool, "trbdf2")
+            except UnsupportedError as e:
+                if e.feature in ("branch_form", "dependent_states"):
+                    _route_reasons = [*_route_reasons, str(e)]
+            if dt is not None and dt > 0:
+                _route_reasons = _route_reasons or [
+                    "an explicit dt was given, which requests a "
+                    "fixed step"]
+            if _route_reasons:
+                if dt is None or dt <= 0:
+                    raise ValueError(
+                        "simulate(): this circuit cannot use the "
+                        "variable-step engine — "
+                        + "; ".join(_route_reasons)
+                        + ". The fixed-step engine can run it, but "
+                        "needs a step: pass dt=<seconds> (or "
+                        "engine='dsed' for the event-driven "
+                        "path).")
+                engine = "pwl"
+                # Validation ran against the engine the caller
+                # ASKED for, so kwargs the fixed engine ignores
+                # (rtol/atol/dt_init/integrator) passed silently.
+                # Re-check now that we know where the run lands —
+                # a dropped kwarg the user believed in is exactly
+                # the failure mode the leak warning exists for.
+                _dsed._validate_engine_kwargs(
+                    engine="pwl", dt=dt, rtol=rtol, atol=atol,
+                    dt_init=dt_init, integrator=integrator,
+                    stiffness_threshold=stiffness_threshold,
+                    h_bdf2=h_bdf2)
+            else:
+                engine = "trbdf2"
+        elif _route_reasons:
+            raise _unsupported(
+                "trbdf2", getattr(_route_reasons[0], "feature", ""),
+                "simulate(engine='trbdf2'): "
+                + "; ".join(_route_reasons)
+                + ". Use engine='auto' to route to the fixed-step "
+                "engine automatically, or engine='pwl' explicitly.")
+
+    # engine is now 'trbdf2' or 'pwl' ('auto' never routes to dsed)
+    if allow_implicit_segments is not None:
+        raise _unsupported(
+            engine, "allow_implicit_segments",
+            f"simulate(engine={_engine_asked!r}, allow_implicit_segments="
+            f"{allow_implicit_segments!r}): the keyword governs the exact "
+            f"engine's numeric segments; this run lands on engine={engine!r}, "
+            "which has no exact segments. Use engine='exact', or drop it.")
+    if mode_selection == "auto":
+        mode_selection, _mode_auto = _resolve_mode_auto(
+            builder, engine, max_event_iterations)
+
+    # Phase 2.4 — adaptive RK selector (schema v1.5, wiring v1.6).
+    # Today only the kernel trap path is wired into run_transient.
+    # Reject other choices with a clear pointer at the deferred
+    # cache refactor so users get actionable feedback instead of a
+    # silent default-back to "kernel".
+    if integrator not in ("kernel", "default", None) and engine == "pwl":
+        if integrator not in ("dopri5", "radau"):
+            raise _unsupported("pwl", "integrator",
+                f"simulate(integrator={integrator!r}): unknown "
+                "integrator for engine='pwl'. Supported names: "
+                "'kernel' (default), 'dopri5', 'radau'. For DSED's "
+                "RK45/BDF2/auto integrators, use engine='dsed'."
+            )
+        raise NotImplementedError(
+            f"simulate(integrator={integrator!r}) is reserved for "
+            "the v1.6 cache refactor — `PwlStateSpaceCache` would "
+            "need to expose continuous-time (G, M, b) and the "
+            "Python adaptive RK integrators would need DAE Index-1 "
+            "support (M·dx/dt = g, with M structurally singular "
+            "for augmented MNA). Track this under the "
+            "'add-adaptive-runge-kutta-solvers' OpenSpec proposal. "
+            "For Phase 2.4, the integrator name and its tolerances "
+            "round-trip through `SimulationOptions` and YAML so "
+            "your config stays forward-compatible — drop "
+            "`integrator='kernel'` (or omit) to run today. "
+            "Note: engine='dsed' offers RK45/BDF2/auto today via the "
+            "Path-Based Event-Driven scheduler."
+        )
+    # The option x engine table: every keyword the landing engine cannot
+    # honour is refused by name (they used to be warned about and ignored:
+    # rtol / atol / dt_init on the fixed step, the exact engine's
+    # integrator / stiffness_threshold / h_bdf2 on both MNA engines).
+    if engine == "trbdf2" and integrator not in (None, "esdirk43"):
+        raise _unsupported(
+            "trbdf2", "integrator",
+            f"simulate(engine={_engine_asked!r}, integrator={integrator!r}): "
+            "this run lands on engine='trbdf2', whose integrators are TR-BDF2 "
+            "(the default: omit integrator) and 'esdirk43'. The exact "
+            "engine's integrators run on engine='exact'.")
+    _refused = _ro.refused(engine, _opt_values)
+    if _refused:
+        _routed = ("" if engine == _engine_asked else
+                   f" (engine={_engine_asked!r} routed it there: "
+                   + "; ".join(_route_reasons) + ")")
+        raise _unsupported(
+            engine, _refused[0],
+            f"simulate(engine={_engine_asked!r}): this run lands on "
+            f"engine={engine!r}{_routed}, which cannot honour "
+            f"{', '.join(_refused)}: "
+            + "; ".join(_ro.why(n) for n in _refused)
+            + ". Drop the keyword(s), or pick the engine that honours them "
+            "(pulsim.option_capabilities()).")
+    if engine == "trbdf2":
+        # The capability table by name (the branch form runs here).
+        _k = _pulsim_module
+        _k._require_supported(builder.graph, builder.pool, "trbdf2")
+    return engine, _route_reasons, mode_selection, _mode_auto
 
 
 def _plan_run(builder, t_end, dt, *,
