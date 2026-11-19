@@ -4,8 +4,10 @@
 ``'interface'`` runs every kind's law on the device interface. Gate:
 fixed-step trajectories within 1e-12 of each quantity's scale; TR-BDF2
 within an rtol-proportional tolerance (its accepted step sequence may
-differ by rounding); DC operating points within 1e-12; an unported kind
-refuses ``'interface'`` by name.
+differ by rounding); DC operating points within 1e-12. (``set_path``'s
+refusal of an unported kind has no test: every shipped Newton kind is
+ported, and a dummy kind cannot be added to the compile-time kind list from
+a test; DECISIONS #49.)
 
 The fixed-step gate is a ROUNDING claim only while both paths take the same
 Newton iterations: a path that stops one iteration apart (another

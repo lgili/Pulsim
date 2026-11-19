@@ -242,6 +242,64 @@ inline constexpr bool pin_q_v = [] {
     else return true;
 }();
 
+namespace detail_fq {
+/// The rest of `stamp_fq` over value / tangent accessors.
+/// `WithJ = false`: J was written by the law (`eval_jac`), only F here.
+template <class D, bool WithJ, class FV, class QV, class FD, class QD>
+PULSIM_DEVICE_INLINE inline Real assemble(
+    const StepCtx& c, const std::array<Real, rows_v<D>>& q_n,
+    const std::array<Real, rows_v<D>>& qdot_n, const std::array<Real, rows_v<D>>& q_gamma,
+    std::array<Real, rows_v<D>>& F, std::array<std::array<Real, rows_v<D>>, rows_v<D>>& J,
+    const std::array<Real, rows_v<D>>* dq, const std::array<Real, rows_v<D>>* dq_gamma,
+    FV fv, QV qv, FD fd, QD qd) {
+    constexpr std::size_t R = rows_v<D>;
+    constexpr bool hq = has_q_v<D>, hf = has_f_v<D>;
+    if constexpr (!hq) {
+        for (std::size_t r = 0; r < R; ++r) {
+            F[r] = fv(r);
+            if constexpr (WithJ)
+                for (std::size_t k = 0; k < R; ++k) J[r][k] = fd(r, k);
+        }
+        Real worst = Real{0};
+        for (std::size_t r = 0; r < R; ++r) worst = std::max(worst, std::abs(F[r]));
+        return worst;
+    }
+    const Real a = formula_a(c);
+    if constexpr (!hf) {
+        const auto hist = history_terms<R>(c, q_n, qdot_n, q_gamma);
+        Real worst = Real{0};
+        for (std::size_t r = 0; r < R; ++r) {
+            F[r] = a * qv(r) + hist[r];
+            if constexpr (WithJ)
+                for (std::size_t k = 0; k < R; ++k) J[r][k] = a * qd(r, k);
+            worst = std::max(worst, std::abs(F[r]));
+        }
+        return worst;
+    }
+    const auto hist = dq == nullptr ? history_terms<R>(c, q_n, qdot_n, q_gamma)
+                                    : std::array<Real, R>{};
+    Real worst = Real{0};
+    for (std::size_t r = 0; r < R; ++r) {
+        if (dq == nullptr) {
+            F[r] = fv(r) + a * qv(r) + hist[r];
+        } else {
+            Real hist = Real{0};
+            if (c.formula == Formula::Trapezoidal) {
+                hist = -qdot_n[r];
+            } else if (c.formula == Formula::Bdf2Stage2) {
+                hist = bdf2_weights().c2 * (*dq_gamma)[r] / c.h;
+            }
+            F[r] = fv(r) + a * (*dq)[r] + hist;
+        }
+        if constexpr (WithJ) {
+            for (std::size_t k = 0; k < R; ++k) J[r][k] = fd(r, k) + a * qd(r, k);
+        }
+        worst = std::max(worst, std::abs(F[r]));
+    }
+    return worst;
+}
+}  // namespace detail_fq
+
 /// One device's Newton contribution under `c`, dense: F[r] = f + a·q + r
 /// and J[r][k] = ∂F[r]/∂x[k], from one AD evaluation. `q_n`, `qdot_n`,
 /// `q_gamma` are the instance's committed charges, their derivatives and
@@ -264,57 +322,38 @@ PULSIM_DEVICE_INLINE inline Real stamp_fq(const aux_t<D>& aux,
               const std::array<Real, rows_v<D>>* dq = nullptr,
               const std::array<Real, rows_v<D>>* dq_gamma = nullptr) {
     constexpr std::size_t R = rows_v<D>;
-    std::array<ad::ADRealN<R>, R> xs{};
-    for (std::size_t k = 0; k < R; ++k) {
-        std::array<Real, R> d{};
-        d[k] = Real{1};
-        xs[k] = ad::ADRealN<R>{x[k], d};
-    }
-    Out<ad::ADRealN<R>, R> o;
-    device::eval<D>(aux, p, xs, o);
-    constexpr bool hq = has_q_v<D>, hf = has_f_v<D>;
-    if constexpr (!hq) {
-        for (std::size_t r = 0; r < R; ++r) {
-            F[r] = o.f[r].value();
-            for (std::size_t k = 0; k < R; ++k) J[r][k] = o.f[r].deriv(k);
-        }
-        Real worst = Real{0};
-        for (std::size_t r = 0; r < R; ++r) worst = std::max(worst, std::abs(F[r]));
-        return worst;
-    }
-    const Real a = formula_a(c);
-    if constexpr (!hf) {
-        const auto hist = history_terms<R>(c, q_n, qdot_n, q_gamma);
-        Real worst = Real{0};
-        for (std::size_t r = 0; r < R; ++r) {
-            F[r] = a * o.q[r].value() + hist[r];
-            for (std::size_t k = 0; k < R; ++k) J[r][k] = a * o.q[r].deriv(k);
-            worst = std::max(worst, std::abs(F[r]));
-        }
-        return worst;
-    }
-    const auto hist = dq == nullptr ? history_terms<R>(c, q_n, qdot_n, q_gamma)
-                                    : std::array<Real, R>{};
-    Real worst = Real{0};
-    for (std::size_t r = 0; r < R; ++r) {
-        if (dq == nullptr) {
-            F[r] = o.f[r].value() + a * o.q[r].value() + hist[r];
-        } else {
-            Real hist = Real{0};
-            if (c.formula == Formula::Trapezoidal) {
-                hist = -qdot_n[r];
-            } else if (c.formula == Formula::Bdf2Stage2) {
-                hist = bdf2_weights().c2 * (*dq_gamma)[r] / c.h;
-            }
-            F[r] = o.f[r].value() + a * (*dq)[r] + hist;
-        }
+    using Mat = std::array<std::array<Real, R>, R>;
+    // A law may write its Jacobian by hand (`eval_jac(aux, p, x, a, o, J)`:
+    // the Real values in `o` and the nonzero entries of J = ∂f/∂x + a·∂q/∂x
+    // as fd + a·qd of the AD tangents; the induction machine, whose AD width
+    // 10 cost half its stamp, DECISIONS #48).
+    if constexpr (requires(Out<Real, R>& o, Mat& m) { D::eval_jac(aux, p, x, Real{}, o, m); }) {
+        static_assert(has_q_v<D> && has_f_v<D>);
+        Out<Real, R> o;
+        J = Mat{};
+        D::eval_jac(aux, p, x, formula_a(c), o, J);
+        const auto none = [](std::size_t, std::size_t) { return Real{0}; };
+        return detail_fq::assemble<D, false>(
+            c, q_n, qdot_n, q_gamma, F, J, dq, dq_gamma, [&](std::size_t r) { return o.f[r]; },
+            [&](std::size_t r) { return o.q[r]; }, none, none);
+    } else {
+        std::array<ad::ADRealN<R>, R> xs{};
         for (std::size_t k = 0; k < R; ++k) {
-            J[r][k] = o.f[r].deriv(k) + a * o.q[r].deriv(k);
+            std::array<Real, R> d{};
+            d[k] = Real{1};
+            xs[k] = ad::ADRealN<R>{x[k], d};
         }
-        worst = std::max(worst, std::abs(F[r]));
+        Out<ad::ADRealN<R>, R> o;
+        device::eval<D>(aux, p, xs, o);
+        return detail_fq::assemble<D, true>(
+            c, q_n, qdot_n, q_gamma, F, J, dq, dq_gamma,
+            [&](std::size_t r) { return o.f[r].value(); },
+            [&](std::size_t r) { return o.q[r].value(); },
+            [&](std::size_t r, std::size_t k) { return o.f[r].deriv(k); },
+            [&](std::size_t r, std::size_t k) { return o.q[r].deriv(k); });
     }
-    return worst;
 }
+
 
 template <Device D>
 Real stamp_fq(const typename D::template Params<Real>& p,
@@ -371,9 +410,9 @@ PULSIM_DEVICE_INLINE inline Real stamp_fq_local(const aux_t<D>& aux, const typen
 /// which differs from it by the Newton residual (a saturable inductor's
 /// committed voltage is the solved v, as in every companion model).
 /// Returns the Real evaluation at `x` (the capture of a stage point reads
-/// it).
+/// it) — for a law with `eval_internal`, only its internal rows.
 template <Device D>
-Out<Real, rows_v<D>> commit_fq(const aux_t<D>& aux,
+PULSIM_DEVICE_INLINE inline Out<Real, rows_v<D>> commit_fq(const aux_t<D>& aux,
                                const typename D::template Params<Real>& p,
                                const std::array<Real, rows_v<D>>& x,
                                const StepCtx& c,
@@ -381,7 +420,14 @@ Out<Real, rows_v<D>> commit_fq(const aux_t<D>& aux,
                                std::array<Real, rows_v<D>>& qdot_n,
                                const std::array<Real, rows_v<D>>& q_gamma) {
     Out<Real, rows_v<D>> o;
-    device::eval<D>(aux, p, x, o);
+    // A law with internal-only q may evaluate just those rows for the
+    // commit (`eval_internal`; the pin rows of the returned Out are then
+    // not meaningful — no caller reads them).
+    if constexpr (!pin_q_v<D> && requires { D::eval_internal(aux, p, x, o); }) {
+        D::eval_internal(aux, p, x, o);
+    } else {
+        device::eval<D>(aux, p, x, o);
+    }
     if constexpr (!pin_q_v<D>) {
         for (std::size_t r = 0; r < rows_v<D>; ++r) {
             assert(r >= D::n_pins || o.q[r] == Real{0});

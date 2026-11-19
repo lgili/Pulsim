@@ -1051,6 +1051,83 @@ TEST_CASE("the machine laws stamp, commit and capture as the hand stamp",
             }
         }
     }
+    // The induction machine's hand Jacobian (`eval_jac`, DECISIONS #48) and
+    // commit rows (`eval_internal`) against its AD eval: the same values.
+    {
+        using IM = L::InductionMachine;
+        Lcg r3{11u};
+        const auto e = machine_entry(2, r3);
+        const auto aux = pwl::iface::im_aux(e);
+        const auto prm = IM::from(e.im);
+        for (int trial = 0; trial < 20; ++trial) {
+            std::array<Real, 10> x{};
+            for (auto& v : x) v = r3(-50.0, 50.0);
+            x[5] = r3(-0.5, 0.5);
+            x[6] = r3(-0.5, 0.5);
+            std::array<ad::ADRealN<10>, 10> xs{};
+            for (std::size_t k = 0; k < 10; ++k) {
+                std::array<Real, 10> d{};
+                d[k] = 1;
+                xs[k] = ad::ADRealN<10>{x[k], d};
+            }
+            device::Out<ad::ADRealN<10>, 10> o;
+            device::eval<IM>(aux, prm, xs, o);
+            device::Out<Real, 10> oi;
+            IM::eval_internal(aux, prm, x, oi);
+            for (const Real a : {2.0 / 1e-6, 1.0 / 1e-6, 1.7 / 1e-6}) {
+                device::Out<Real, 10> oh;
+                std::array<std::array<Real, 10>, 10> J{};
+                IM::eval_jac(aux, prm, x, a, oh, J);
+                for (std::size_t r = 0; r < 10; ++r) {
+                    INFO("trial " << trial << " row " << r << " a " << a);
+                    const auto close = [](Real u, Real v) {
+                        return std::abs(u - v) <= 1e-14 * std::max(Real{1}, std::abs(v));
+                    };
+                    CHECK(close(oh.f[r], o.f[r].value()));
+                    CHECK(close(oh.q[r], o.q[r].value()));
+                    if (r >= IM::n_pins) {
+                        CHECK(close(oi.f[r], o.f[r].value()));
+                        CHECK(close(oi.q[r], o.q[r].value()));
+                    }
+                    for (std::size_t k = 0; k < 10; ++k) {
+                        INFO("col " << k);
+                        CHECK(close(J[r][k], o.f[r].deriv(k) + a * o.q[r].deriv(k)));
+                    }
+                }
+            }
+        }
+    }
+    // The saturable inductor's hand Jacobian (atan law, DECISIONS #50).
+    {
+        using SL = L::SaturableInductor;
+        const SL::Params<Real> sp{1e-3, 2.0, 1e-5};
+        for (const Real i : {-7.0, -2.0, -0.3, 0.0, 0.4, 1.9, 6.5}) {
+            const std::array<Real, 3> x{1.5, -0.25, i};
+            std::array<ad::ADRealN<3>, 3> xs{};
+            for (std::size_t k = 0; k < 3; ++k) {
+                std::array<Real, 3> d{};
+                d[k] = 1;
+                xs[k] = ad::ADRealN<3>{x[k], d};
+            }
+            device::Out<ad::ADRealN<3>, 3> o;
+            device::eval<SL>(SL::Aux{}, sp, xs, o);
+            for (const Real a : {2.0 / 1e-7, 1.0 / 1e-7, 1.7 / 1e-7}) {
+                device::Out<Real, 3> oh;
+                std::array<std::array<Real, 3>, 3> J{};
+                SL::eval_jac(SL::Aux{}, sp, x, a, oh, J);
+                for (std::size_t r = 0; r < 3; ++r) {
+                    INFO("i " << i << " row " << r << " a " << a);
+                    const auto close = [](Real u, Real v) {
+                        return std::abs(u - v) <= 1e-15 * std::abs(v);
+                    };
+                    CHECK(close(oh.f[r], o.f[r].value()));
+                    CHECK(close(oh.q[r], o.q[r].value()));
+                    for (std::size_t k = 0; k < 3; ++k)
+                        CHECK(close(J[r][k], o.f[r].deriv(k) + a * o.q[r].deriv(k)));
+                }
+            }
+        }
+    }
     // ∂/∂(R_s, T_load) by AD against central differences
     Lcg rng{5u};
     for (int kind = 0; kind < 3; ++kind) {

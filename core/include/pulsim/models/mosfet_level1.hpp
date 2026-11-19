@@ -77,6 +77,8 @@
 #include "pulsim/topology/graph.hpp"
 
 #include <cmath>
+#include <bit>
+#include <cstdint>
 
 namespace pulsim::models {
 
@@ -98,10 +100,15 @@ struct MosfetLevel1 {
     template <numeric::FloatingPoint S, class P = Params>
     [[nodiscard]] static S forward_current_(
         const S& V_OV, const S& V_DS, const P& p) noexcept {
-        const S alpha_on =
-            numeric::logistic(S{p.kappa * V_OV});
-        const S beta_triode =
-            numeric::logistic(S{p.kappa * (V_OV - V_DS)});
+        return forward_with_<S>(V_OV, V_DS, numeric::logistic(S{p.kappa * V_OV}),
+                                numeric::logistic(S{p.kappa * (V_OV - V_DS)}), p);
+    }
+
+    /// `forward_current_` with α = σ(κ·V_OV) and β = σ(κ·(V_OV − V_DS))
+    /// given (forward_c1_ shares their exponentials; same operations).
+    template <numeric::FloatingPoint S, class P>
+    [[nodiscard]] static S forward_with_(const S& V_OV, const S& V_DS, const S& alpha_on,
+                                         const S& beta_triode, const P& p) noexcept {
         const S clm = S{1} + p.lambda * V_DS;
         const S i_triode = p.K *
             (Real{2} * V_OV * V_DS - V_DS * V_DS) * clm;
@@ -173,17 +180,36 @@ struct MosfetLevel1 {
     template <numeric::FloatingPoint S, class P = Params>
     [[nodiscard]] static S forward_c1_(const S& a, const S& d, const P& p) noexcept {
         using std::exp; using std::expm1;
-        const S f = forward_current_<S>(a, d, p);
-        const S kd = p.kappa * d;
-        const S leak = forward_current_<S>(a, S{0}, p) * exp(S(-kd));
-        // below half an ulp of f: the model's bits, untouched
-        if (leak <= Real{0x1p-54} * f && -leak <= Real{0x1p-54} * f) return f;
-        if (kd > Real{1}) return f - leak;
+        // #47: the same operations as the separate evaluations of 4aa3b15e
+        // (forward(a, d), forward(a, 0), four `numeric::logistic` calls), so
+        // the same bits; only shared and skipped work differs. σ(z), σ(−z)
+        // come from one exponential; the exits are decided on Real values
+        // (an AD value is the Real computation's value), and the AD f and
+        // forward(a, 0) are formed only on the exits that return them.
         const S u = a - d;
-        const S alpha = numeric::logistic(S(p.kappa * a));
-        const S one_minus_alpha = numeric::logistic(S(-(p.kappa * a)));
-        const S beta_u = numeric::logistic(S(p.kappa * u));
-        const S one_minus_beta_u = numeric::logistic(S(-(p.kappa * u)));
+        const LogisticPair<S> pa(S(p.kappa * a)), pu(S(p.kappa * u));
+        const S alpha = pa.pos(), beta_u = pu.pos();
+        const Real av = value_(a), dv = value_(d), alv = value_(alpha);
+        const ValueParams pv{value_(p.K), value_(p.lambda)};
+        const Real fv = forward_with_<Real>(av, dv, alv, value_(beta_u), pv);
+        const S kd = p.kappa * d;
+        if (leak_below_half_ulp_(av, value_(kd), fv, value_(p.kappa), pv.K)) {
+            return forward_with_<S>(a, d, alpha, beta_u, p);
+        }
+        // forward(a, 0): β = σ(κ·(a − 0)) = α. κd ≤ 1 and |L|/4 above half
+        // an ulp of f: e^{−κd} ≥ e^{−1} makes the computed leak exceed it
+        // too, so the half-ulp exit cannot be taken and κd > 1 is not.
+        const Real Lv = std::abs(forward_with_<Real>(av, Real{0}, alv, alv, pv));
+        const bool active = !(kd > Real{1}) && Lv >= Real{0x1p-1000}
+                            && Real{0.25} * Lv > Real{0x1p-54} * fv;
+        if (!active) {
+            const S f = forward_with_<S>(a, d, alpha, beta_u, p);
+            const S leak = forward_with_<S>(a, S{0}, alpha, alpha, p) * exp(S(-kd));
+            // below half an ulp of f: the model's bits, untouched
+            if (leak <= Real{0x1p-54} * f && -leak <= Real{0x1p-54} * f) return f;
+            if (kd > Real{1}) return f - leak;
+        }
+        const S one_minus_alpha = pa.neg(), one_minus_beta_u = pu.neg();
         const S E = -expm1(S(-kd));
         const S bracket = p.lambda * d * (a * a - beta_u * u * u)
                           + a * a * one_minus_alpha * E
@@ -191,6 +217,55 @@ struct MosfetLevel1 {
                           + u * u * alpha * one_minus_beta_u * E;
         return alpha * p.K * bracket;
     }
+
+    /// Cheap sufficient test for the "leak ≤ 2⁻⁵⁴·f" exit of forward_c1_,
+    /// without forward(a, 0) or exp (the default path's cost, #47). Bound
+    /// on the computed leak: forward(a, 0) = α(1 − β)·K·a² with β = α at
+    /// d = 0, and fl(α(1 − β)) ≤ 8·e^{−κ|a|} (for κa ≥ 0, 1 − fl(β) is exact
+    /// and ≤ t + 2⁻⁵² ≤ 5t when nonzero, t = fl(e^{−κa}) > 2⁻⁵⁴; for κa < 0
+    /// fl(α) ≤ e^{κa}(1 + 2u)), so leak ≤ 16·|K|·a²·e^{−s}, s = κ|a| + κd,
+    /// and e^{−s} ≤ 2^{−n} with n = ⌊s·log₂e⌋ − 1. The test asks
+    /// 64·|K|·a²·2^{−n} ≤ 2⁻⁵⁴·f: a factor 4 above the bound (rounding,
+    /// a subnormal product) with f normal and ≥ 2⁻⁹⁶⁰, so whenever it
+    /// passes the full code would also have returned f — bit-identical.
+    [[nodiscard]] static bool leak_below_half_ulp_(Real av, Real kdv, Real fv, Real kappa,
+                                                   Real K) noexcept {
+        if (!(fv >= Real{0x1p-960} && fv <= Real{0x1.fffffffffffffp+1023})) return false;
+        const Real sl = (std::abs(kappa * av) + kdv) * Real{1.4426950408889634};
+        if (!(sl >= Real{2})) return false;
+        const int n = static_cast<int>(sl < Real{1001} ? sl : Real{1001}) - 1;
+        // 64·2^{−n}, n ∈ [1, 1000]: a normal double built from its exponent
+        const Real scale = std::bit_cast<Real>(std::uint64_t(1023 + 6 - n) << 52);
+        return std::abs(K) * av * av * scale <= Real{0x1p-54} * fv;
+    }
+
+    struct ValueParams { Real K, lambda; };
+
+    template <class X>
+    [[nodiscard]] static Real value_(const X& x) noexcept {
+        if constexpr (requires { x.value(); }) return x.value();
+        else return static_cast<Real>(x);
+    }
+
+    /// σ(z) and σ(−z) with `numeric::logistic`'s operations for each, from
+    /// one exponential (both read exp(−|z|)), each formed on demand; z = ±0
+    /// or NaN: the two calls.
+    template <class S>
+    struct LogisticPair {
+        S z, e, den;
+        int side;   // +1: z > 0, −1: z < 0, 0: neither
+        explicit LogisticPair(const S& zz) noexcept : z(zz), side(0) {
+            using std::exp;
+            if (z > Real{0}) { e = exp(-z); den = S{1} + e; side = 1; }
+            else if (z < Real{0}) { e = exp(z); den = S{1} + e; side = -1; }
+        }
+        [[nodiscard]] S pos() const noexcept {
+            return side > 0 ? S{1} / den : side < 0 ? e / den : numeric::logistic(z);
+        }
+        [[nodiscard]] S neg() const noexcept {
+            return side > 0 ? e / den : side < 0 ? S{1} / den : numeric::logistic(S(-z));
+        }
+    };
 
 };
 

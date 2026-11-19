@@ -206,9 +206,19 @@ struct InductionMachine {
         return {m.R_s, m.T_load};
     }
 
-    template <class P, class X, class O>
-    static void eval(const Aux& a, const Params<P>& p, const std::array<X, 10>& x, O& o) {
-        using T = promote_t<P, X>;
+    /// The nonlinear terms' values and partials in u = (i_a, i_b, i_c, λ_rα,
+    /// λ_rβ, ω) (rows 7–9 and 5, 6 and 4 of x), in Real.
+    struct Terms {
+        std::array<Real, 3> lam;                   // stator flux λ_k = M·λ_r + L·i
+        std::array<std::array<Real, 6>, 3> dlam;
+        std::array<Real, 2> g;                     // rotor-flux rate
+        std::array<std::array<Real, 6>, 2> dg;
+        Real Te;                                   // torque
+        std::array<Real, 6> dT;
+    };
+    static constexpr std::array<std::size_t, 6> kU{7, 8, 9, 5, 6, 4};
+    template <class X>
+    [[nodiscard]] static Terms terms(const Aux& a, const std::array<X, 10>& x) {
         using IM = models::InductionMachineMna;
         const auto& m = *a.m;
         const auto& sm = *a.sm;
@@ -217,36 +227,80 @@ struct InductionMachine {
         const IM::Vec3 iv{value_of(x[7]), value_of(x[8]), value_of(x[9])};
         const IM::Vec2 lr{value_of(x[5]), value_of(x[6])};
         const Real omega = value_of(x[4]);
-        machine_detail::stator_f<T>(p, x, 7, o);
-        const std::array<T, 6> u{T(x[7]), T(x[8]), T(x[9]), T(x[5]), T(x[6]), T(x[4])};
+        Terms t;
         // stator flux: λ_k = M·λ_r + L·i (`PmsmMnaHistory::lambda_of` order)
         for (std::size_t k = 0; k < 3; ++k) {
             Real lam = sm.M[k][0] * lr[0] + sm.M[k][1] * lr[1];
             for (std::size_t j = 0; j < 3; ++j) lam += sm.L[k][j] * iv[j];
-            o.q[7 + k] = -chain_n(u, lam, {sm.L[k][0], sm.L[k][1], sm.L[k][2],
-                                           sm.M[k][0], sm.M[k][1], Real{0}});
+            t.lam[k] = lam;
+            t.dlam[k] = {sm.L[k][0], sm.L[k][1], sm.L[k][2], sm.M[k][0], sm.M[k][1], Real{0}};
         }
         // rotor flux: C_r·dλ_r/dt = C_r·g(i, λ_r, ω) injected into its node
-        const auto g = IM::rotor_rhs(m, iv, lr, omega);
+        t.g = IM::rotor_rhs(m, iv, lr, omega);
         const Real pp = m.pole_pairs, we = pp * omega;
         const Real dg_dl[2][2] = {{-dv.inv_tau_r, -we}, {we, -dv.inv_tau_r}};
         const Real dg_dw[2] = {-pp * lr[1], pp * lr[0]};
-        for (std::size_t n = 0; n < 2; ++n) {
-            const T gn = chain_n(u, g[n], {dv.Lm_over_tau_r * C[n][0],
-                                           dv.Lm_over_tau_r * C[n][1],
-                                           dv.Lm_over_tau_r * C[n][2], dg_dl[n][0],
-                                           dg_dl[n][1], dg_dw[n]});
-            o.f[5 + n] = -(a.c_rotor[n] * gn);
-        }
+        for (std::size_t n = 0; n < 2; ++n)
+            t.dg[n] = {dv.Lm_over_tau_r * C[n][0], dv.Lm_over_tau_r * C[n][1],
+                       dv.Lm_over_tau_r * C[n][2], dg_dl[n][0], dg_dl[n][1], dg_dw[n]};
         // torque into the speed node
         const Real kt = Real{1.5} * pp * dv.k_r;
         const auto is = IM::i_ab(iv);
-        const Real Te = kt * (lr[0] * is[1] - lr[1] * is[0]);
-        std::array<Real, 6> gT{};
-        for (std::size_t j = 0; j < 3; ++j) gT[j] = kt * (lr[0] * C[1][j] - lr[1] * C[0][j]);
-        gT[3] = kt * is[1];
-        gT[4] = -(kt * is[0]);
-        o.f[4] = -(chain_n(u, Te, gT) - p.T_load);
+        t.Te = kt * (lr[0] * is[1] - lr[1] * is[0]);
+        t.dT = {};
+        for (std::size_t j = 0; j < 3; ++j) t.dT[j] = kt * (lr[0] * C[1][j] - lr[1] * C[0][j]);
+        t.dT[3] = kt * is[1];
+        t.dT[4] = -(kt * is[0]);
+        return t;
+    }
+
+    template <class P, class X, class O>
+    static void eval(const Aux& a, const Params<P>& p, const std::array<X, 10>& x, O& o) {
+        using T = promote_t<P, X>;
+        const Terms t = terms(a, x);
+        machine_detail::stator_f<T>(p, x, 7, o);
+        const std::array<T, 6> u{T(x[7]), T(x[8]), T(x[9]), T(x[5]), T(x[6]), T(x[4])};
+        for (std::size_t k = 0; k < 3; ++k) o.q[7 + k] = -chain_n(u, t.lam[k], t.dlam[k]);
+        for (std::size_t n = 0; n < 2; ++n) o.f[5 + n] = -(a.c_rotor[n] * chain_n(u, t.g[n], t.dg[n]));
+        o.f[4] = -(chain_n(u, t.Te, t.dT) - p.T_load);
+    }
+
+    /// The internal rows only, as `eval` computes them (q = −λ, f = v − v_n −
+    /// R_s·i): all `commit_fq` keeps of a law whose q is internal.
+    static void eval_internal(const Aux& a, const Params<Real>& p,
+                              const std::array<Real, 10>& x, Out<Real, 10>& o) {
+        const auto& sm = *a.sm;
+        machine_detail::stator_f<Real>(p, x, 7, o);
+        for (std::size_t k = 0; k < 3; ++k) {
+            Real lam = sm.M[k][0] * x[5] + sm.M[k][1] * x[6];
+            for (std::size_t j = 0; j < 3; ++j) lam += sm.L[k][j] * x[7 + j];
+            o.q[7 + k] = -lam;
+        }
+    }
+
+    /// `eval` in Real with J = ∂f/∂x + a·∂q/∂x written out: the nonzero
+    /// entries of the AD tangents of `eval` on unit seeds, each as fd + a·qd
+    /// with fd or qd an exact zero dropped (x + 0 = x), so the same values.
+    /// `stamp_fq` uses it instead of AD width 10; J arrives zeroed.
+    static void eval_jac(const Aux& a, const Params<Real>& p, const std::array<Real, 10>& x,
+                         Real fa, Out<Real, 10>& o, std::array<std::array<Real, 10>, 10>& J) {
+        const Terms t = terms(a, x);
+        machine_detail::stator_f<Real>(p, x, 7, o);
+        for (std::size_t k = 0; k < 3; ++k) {
+            J[k][7 + k] = Real{1};
+            J[3][7 + k] = Real{-1};
+            J[7 + k][k] = Real{1};
+            J[7 + k][3] = Real{-1};
+            o.q[7 + k] = -t.lam[k];
+            for (std::size_t m = 0; m < 5; ++m) J[7 + k][kU[m]] = fa * -t.dlam[k][m];
+            J[7 + k][7 + k] = -p.R_s + fa * -t.dlam[k][k];
+        }
+        for (std::size_t n = 0; n < 2; ++n) {
+            o.f[5 + n] = -(a.c_rotor[n] * t.g[n]);
+            for (std::size_t m = 0; m < 6; ++m) J[5 + n][kU[m]] = -(a.c_rotor[n] * t.dg[n][m]);
+        }
+        o.f[4] = -(t.Te - p.T_load);
+        for (std::size_t m = 0; m < 5; ++m) J[4][kU[m]] = -t.dT[m];
     }
 };
 
