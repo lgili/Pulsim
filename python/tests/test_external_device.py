@@ -662,7 +662,10 @@ def test_junction_capacitor_twin_equals_add_nonlinear_capacitor_on_pwl(libs, pat
     # the charge that entered the device: the integral of its own pin current
     # (the generic reading, q-row companion current). Not the resistor's
     # current: its t = 0 sample (40 A, v = 0) is a value no step integrated.
-    rec = p.simulate(_charge(libs, True, record=True), **kw)
+    # Legacy subject: the trapezoid of the samples is the run's own quadrature on the
+    # restart-less step only; the release default takes the first step from the
+    # inconsistent start by backward Euler, and its t = 0 sample (0 A) is not integrated
+    rec = p.simulate(_charge(libs, True, record=True), **kw, discontinuity_restart=False)
     t = np.asarray(rec.times)
     q = float(np.trapezoid(np.asarray(rec.device_output("C", "i(pos)")), t))
     assert np.asarray(ext.v("a"))[-1] == pytest.approx(400.0, abs=1e-6)
@@ -776,7 +779,9 @@ def test_steady_state_refuses_the_model_state_by_name(libs):
 
 @pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
 def test_device_output_reads_the_generic_readings_and_the_named_outputs(libs, engine):
-    kw = dict(rtol=1e-6) if engine == "trbdf2" else {}
+    # Legacy subject on pwl: the energy is rebuilt from the stored grid, one accepted
+    # step per sample; the release default's restart accepts sub-steps at t = 0
+    kw = dict(rtol=1e-6) if engine == "trbdf2" else dict(discontinuity_restart=False)
     res = p.simulate(_metered(libs, record=True), engine=engine, t_end=1e-3, dt=1e-6,
                      device_path="interface", **kw)
     t = np.asarray(res.times)

@@ -1,5 +1,6 @@
 """update-number-changing-release: the exact engine's output-grid rule
-(``simulate(engine='exact', output_rtol=...)``, default off).
+(``simulate(engine='exact', output_rtol=...)``; default 1e-5 since the release,
+``output_rtol=0`` is the old 10 us grid).
 
 Without dt the exact engine sampled every 10 us (the default step cap). With
 ``output_rtol`` each exact step is cut so that linear interpolation between
@@ -114,22 +115,28 @@ def test_the_rule_bounds_linear_interpolation():
         # the dense run's own chords are far finer: its interpolant is the truth here
         err = np.abs(np.interp(q, t, y) - np.interp(q, td, yd)).max() / scale
         assert err < 4 * rtol, (name, err)
-    # 10 us grid of today: the same circuit without the rule is coarser
-    r0 = pulsim.simulate(build(), 2e-3, engine="exact")
+    # the old 10 us grid (output_rtol=0): the same circuit without the rule is coarser
+    r0 = pulsim.simulate(build(), 2e-3, engine="exact", output_rtol=0)
     assert len(r0.times) < len(t)
 
 
 def test_default_and_explicit_dt_keep_todays_samples():
-    """output_rtol=None is today's run; a dt, store_every or recorders keep
-    today's samples whatever output_rtol says."""
+    """output_rtol=0 is the old 10 us grid and the default is output_rtol=1e-5
+    (the release); a dt, store_every or recorders keep the old samples whatever
+    output_rtol says."""
     def build():
         b = pulsim.CircuitBuilder()
         b.add_voltage_source("V", "a", "gnd", 1.0)
         b.add_resistor("R", "a", "b", 1.0)
         b.add_capacitor("C", "b", "gnd", 1e-5)
         return b
-    base = pulsim.simulate(build(), 1e-4, engine="exact")
+    base = pulsim.simulate(build(), 1e-4, engine="exact", output_rtol=0)
     assert "output_grid" not in base.diagnostics
+    default = pulsim.simulate(build(), 1e-4, engine="exact")
+    rule = pulsim.simulate(build(), 1e-4, engine="exact", output_rtol=1e-5)
+    assert "output_grid" in default.diagnostics
+    np.testing.assert_array_equal(np.asarray(default.times), np.asarray(rule.times))
+    np.testing.assert_array_equal(np.asarray(default.states), np.asarray(rule.states))
     explicit = ({"dt": 1e-6}, {"recorders": [pulsim.Recorder("vb", probes=["v(b)"])]})
     for kw in explicit:
         a = pulsim.simulate(build(), 1e-4, engine="exact", **kw)
@@ -138,7 +145,7 @@ def test_default_and_explicit_dt_keep_todays_samples():
         np.testing.assert_array_equal(np.asarray(a.states), np.asarray(c.states))
     on = pulsim.simulate(build(), 1e-4, engine="exact", output_rtol=1e-4)
     assert len(on.times) > len(base.times)
-    for bad in (0.0, -1.0, float("inf"), True):
+    for bad in (-1.0, float("inf"), True):     # 0 is the explicit off since the release
         with pytest.raises(ValueError, match="output_rtol"):
             pulsim.simulate(build(), 1e-4, engine="exact", output_rtol=bad)
 
@@ -165,7 +172,7 @@ def test_events_keep_both_limits_and_order():
     b.add_resistor("R", "out", "gnd", 50.0)
     T = 1e-5
     fn = pulsim.make_pwm_switch_fn(1 / T, 0.3, b.switch_index_of("S"), b.graph.num_switches, 0.0)
-    r0 = pulsim.simulate(b, 40 * T, engine="exact", switch_fn=fn)
+    r0 = pulsim.simulate(b, 40 * T, engine="exact", switch_fn=fn, output_rtol=0)
     r1 = pulsim.simulate(b, 40 * T, engine="exact", switch_fn=fn, output_rtol=1e-4)
     t1 = np.asarray(r1.times)
     assert np.all(np.diff(t1) >= 0)
@@ -186,7 +193,7 @@ def test_the_loss_port_does_not_depend_on_the_output_grid(case):
     from .test_exact_loss_port import E_OFF, E_ON, _buck, _vsi_case
     make, t_end = {"buck": (_buck, 202.5e-6), "vsi": (_vsi_case, 2.03e-3)}[case]
     runs = []
-    for kw in ({}, {"output_rtol": 1e-5}):
+    for kw in ({"output_rtol": 0}, {"output_rtol": 1e-5}):
         b, fn, names = make()
         for n in names:
             b.set_device_losses(n, Tj=125.0, E_on=E_ON, E_off=E_OFF)

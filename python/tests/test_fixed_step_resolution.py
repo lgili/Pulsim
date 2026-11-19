@@ -34,6 +34,9 @@ def _rc():
 
 def _sim(b, **kw):
     kw.setdefault("resolution_diagnostics", True)    # opt-in (review M5)
+    # Legacy subject: the expectations measure the restart-less fixed step (the
+    # release default restarts at every discontinuity); tests of the rule pass True.
+    kw.setdefault("discontinuity_restart", False)
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         res = p.simulate(b, engine="pwl", **kw)

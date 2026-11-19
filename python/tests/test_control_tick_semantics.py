@@ -70,7 +70,7 @@ def test_two_closed_loops_without_dt():
     b = _two_bucks()
     la, lb = _loop(b, "outa", "Qa", 20e3), _loop(b, "outb", "Qb", 2e3)
     r = _sim(b, 10e-3, closed_loops=[la, lb])
-    assert r.engine_used == "trbdf2"
+    assert r.engine_used == "dsed"      # 'auto' without dt: the exact engine since the release
     assert (len(la.duty_history), len(lb.duty_history)) == (200, 20)
     assert list(r.control_tick_counts) == [200, 20]
 
@@ -91,7 +91,8 @@ def _multi_rate(monitor):
     if monitor:
         kw = dict(step_observer=lambda t, x: calls.append(t),
                   controller_period=50e-6)
-    r = _sim(b, 20e-3, closed_loops=[lp], engine="auto", **kw)
+    # the subject is trbdf2 ('auto' without dt routes to the exact engine since the release)
+    r = _sim(b, 20e-3, closed_loops=[lp], engine="trbdf2", **kw)
     t, v = np.asarray(r.times), np.asarray(r.v("out"))
     return r, lp, calls, p.time_average(t, v, t_from=15e-3)
 
