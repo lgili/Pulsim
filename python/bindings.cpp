@@ -4375,10 +4375,15 @@ void init_module(py::module_& m) {
                               L.lauritzen_history, L.igbt_tail_history,
                               L.pmsm_history))
                         : py::object(py::none()),
-                    // the controllers' state does not pickle: a resume
-                    // from the copy refuses by name instead of
-                    // continuing whatever the graphs hold
-                    static_cast<bool>(s.control_state),
+                    // the controllers' state as bytes where every part
+                    // has them (pulsim._control_state.pickle_payload),
+                    // else True: a resume from the copy refuses by name
+                    // instead of continuing whatever the graphs hold
+                    s.control_state
+                        ? py::module_::import("pulsim._control_state")
+                              .attr("pickle_payload")(
+                                  *static_cast<py::object*>(s.control_state.get()))
+                        : py::object(py::bool_(false)),
                     py::make_tuple(s.grid_origin, s.grid_step, s.grid_dt,
                                    s.post_edge_derivatives),
                     s.controller.empty()
@@ -4498,7 +4503,17 @@ void init_module(py::module_& m) {
                         g.igbt_tail_history = L[4].cast<std::vector<Real>>();
                         g.pmsm_history = L[5].cast<std::vector<Real>>();
                     }
-                    if (marker != npos && t[marker].cast<bool>()) {
+                    if (marker != npos && !py::isinstance<py::bool_>(t[marker])
+                        && !t[marker].is_none()) {
+                        // the controllers' state (pulsim._control_state)
+                        s.control_state = std::shared_ptr<void>(
+                            new py::object(py::reinterpret_borrow<py::object>(t[marker])),
+                            [](void* p) {
+                                if (!Py_IsInitialized()) return;
+                                py::gil_scoped_acquire gil;
+                                delete static_cast<py::object*>(p);
+                            });
+                    } else if (marker != npos && t[marker].cast<bool>()) {
                         // a marker the resume refuses by name (pulsim._control_state)
                         s.control_state = std::shared_ptr<void>(
                             new py::object(py::str("dropped by pickling")),
@@ -4572,13 +4587,21 @@ void init_module(py::module_& m) {
            std::shared_ptr<streaming::LiveRing> live_ring,
            py::object resume_from_obj,
            std::vector<Real> tick_periods,
-           std::vector<std::function<void(Real, const Vector&)>> tick_fns,
+           std::vector<py::object> tick_fn_objs,
            py::object tick_before_obj,
            Real tick_origin,
            std::vector<Real> tick_origins,
            std::vector<std::uint64_t> tick_next_ks) {
             // add-unified-event-queue group 5: Python tick sources, which
             // the kernel's queue schedules (source j calls tick_fns[j]).
+            // a graph's queue tick (CxxChainTick) runs in C++, no GIL
+            std::vector<std::function<void(Real, const Vector&)>> tick_fns;
+            for (const auto& o : tick_fn_objs) {
+                tick_fns.push_back(
+                    py::isinstance<pulsim::blockchain::ChainTick>(o)
+                        ? o.cast<pulsim::blockchain::ChainTick&>().fn
+                        : o.cast<std::function<void(Real, const Vector&)>>());
+            }
             if (tick_periods.size() != tick_fns.size()) {
                 throw std::invalid_argument(
                     "run_transient: tick_periods and tick_fns must have the "
@@ -4719,8 +4742,7 @@ void init_module(py::module_& m) {
         py::arg("live_ring") = std::shared_ptr<streaming::LiveRing>{},
         py::arg("resume_from") = py::none(),
         py::arg("tick_periods") = std::vector<Real>{},
-        py::arg("tick_fns") =
-            std::vector<std::function<void(Real, const Vector&)>>{},
+        py::arg("tick_fns") = std::vector<py::object>{},
         py::arg("tick_before") = py::none(),
         py::arg("tick_origin") = std::numeric_limits<Real>::quiet_NaN(),
         py::arg("tick_origins") = std::vector<Real>{},
@@ -5380,6 +5402,17 @@ void init_module(py::module_& m) {
             "A copy of the graph's run state (snapshot / resume).")
         .def("restore_state", &BlockChain::restore_state, py::arg("state"),
             "Put back a state saved from this graph.")
+        .def("dump_state", [](BlockChain& self, const BlockChain::State& s) {
+                return py::bytes(self.dump_state(s));
+            }, py::arg("state"),
+            "A state saved from this graph as bytes (what a pickled "
+            "snapshot carries; read back on the same machine and build).")
+        .def("load_state", [](BlockChain& self, const py::bytes& b) {
+                const std::string buf = b;
+                return self.load_state(buf);
+            }, py::arg("data"),
+            "The state dump_state wrote, restorable into this graph "
+            "(ValueError: bytes of another graph). The graph is unchanged.")
         .def("next_due_per_group", &BlockChain::next_due_per_group,
             "Each rate group's next tick instant (group 1, 2, ...).")
         .def("next_due", &BlockChain::next_due,
@@ -5464,6 +5497,31 @@ void init_module(py::module_& m) {
                 return ChainTick{&self, self.make_tick_observer()};
             }, py::keep_alive<0, 1>(),
             "Tick callback for the variable-step engine (exact protocol).")
+        .def("set_queue_driven", &BlockChain::set_queue_driven, py::arg("on"),
+            "Fixed engine: the kernel's event queue decides when a rate "
+            "group ticks (make_queue_tick); the graph's observer runs the "
+            "marked groups.")
+        .def_property_readonly("queue_driven", &BlockChain::queue_driven)
+        .def("drop_horizon_state", &BlockChain::drop_horizon_state,
+            "Forget the tick the last run's horizon left out (a run that "
+            "does not resume the snapshot holding it).")
+        .def_property_readonly("last_call_t", &BlockChain::last_call_t,
+            "The label of the last observer call.")
+        .def_property_readonly("grid_t0", &BlockChain::grid_t0,
+            "The tick grid's t0 (the first observer call's time).")
+        .def("group_next_k", &BlockChain::group_next_k, py::arg("group"),
+            "Rate group `group`'s next tick index on the graph's grid.")
+        .def("make_queue_tick", [](BlockChain& self, int group) {
+                if (group < 1 || static_cast<Size>(group) >= self.n_groups()) {
+                    throw std::invalid_argument("make_queue_tick: no such rate group");
+                }
+                BlockChain* ch = &self;
+                return ChainTick{ch, [ch, group](Real, const Vector&) {
+                    ch->mark_queued(group);
+                }};
+            }, py::arg("group"), py::keep_alive<0, 1>(),
+            "The kernel tick source of rate group `group` (C++, no GIL): "
+            "marks it due for the graph's next fixed-step pass.")
         .def_property_readonly("n_evals", &BlockChain::n_evals)
         .def_property_readonly("n_block_evals", &BlockChain::n_block_evals)
         .def("get_channel", &BlockChain::get_channel, py::arg("name"))
