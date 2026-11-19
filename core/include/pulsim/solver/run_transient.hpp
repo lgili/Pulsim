@@ -3127,35 +3127,35 @@ inline SimulationResult run_transient(
         // (grid step k = k_off + 1 .. k_off + n_steps - 1 of the run's
         // grid). Hooks only the skeleton calls (DECISIONS 13): probes R1
         // (`StepHooks::step`, the step's start state and mask) and the
-        // device interface's #31 (`device_state` after the commit). Out of
-        // line, so its inlined copy of the phases does not take the legacy
-        // loop's inlining budget.
-        auto run_twin = [&]() PULSIM_STEP_TWIN {
+        // device interface's #31 (`device_state` after the commit). Each
+        // driver is one out-of-line function with the phases inlined into
+        // it (DECISIONS 14).
+        auto run_twin = [&]() PULSIM_STEP_DRIVER {
             const bool hook_step = hooks != nullptr && hooks->has_step();
             topology::SwitchStateMask mask_start;
-            auto tw_begin = [&](const step::StepFrame& f) {
+            auto tw_begin = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
                 if (hook_step) mask_start = stamped_mask;
                 step_begin(f.k - k_off);
             };
-            auto tw_take = [&](const step::StepFrame&) {
+            auto tw_take = [&](const step::StepFrame&) PULSIM_STEP_PHASE {
                 step_take();
                 return true;   // a failed step throws (the legacy loop's rule)
             };
-            auto tw_after = [&](step::StepFrame&) {
+            auto tw_after = [&](step::StepFrame&) PULSIM_STEP_PHASE {
                 step_after_solve();
                 return true;   // pwl lands its events inside take
             };
-            auto tw_commit = [&](const step::StepFrame&) {
+            auto tw_commit = [&](const step::StepFrame&) PULSIM_STEP_PHASE {
                 step_commit();
                 if (hooks != nullptr) hooks->device_state(t_step, x, hs);
             };
-            auto tw_record = [&](const step::StepFrame& f) {
+            auto tw_record = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
                 step_record(f.k - k_off);
                 if (hook_step) {
                     hooks->step(t_prev_step, x_prev, mask_start, t_step, x, stamped_mask);
                 }
             };
-            auto tw_poll = [&]() { return !step_cancelled(); };
+            auto tw_poll = [&]() PULSIM_STEP_PHASE { return !step_cancelled(); };
             auto body = step::phase_body(tw_poll, tw_begin, tw_take, tw_after,
                                          tw_commit, tw_record);
             step::FixedController clock{.clock = fixed_grid,
@@ -3163,9 +3163,7 @@ inline SimulationResult run_transient(
                                         .n_steps = k_off + n_steps};
             (void)step::run<step::Trapezoidal>(clock, body);
         };
-        if (pwl_stepper_twin) {
-            run_twin();
-        } else {
+        auto run_legacy = [&]() PULSIM_STEP_DRIVER {
             for (Size k = 1; k < n_steps; ++k) {
                 if (step_cancelled()) {
                     break;
@@ -3176,6 +3174,11 @@ inline SimulationResult run_transient(
                 step_commit();
                 step_record(k);
             }
+        };
+        if (pwl_stepper_twin) {
+            run_twin();
+        } else {
+            run_legacy();
         }
         if (diag && rd_steps > 0) {
             rd.unestimated_fraction =

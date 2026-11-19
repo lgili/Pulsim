@@ -26,15 +26,20 @@
 #include "pulsim/solver/step/integrators.hpp"
 
 // A phase of an engine's step that both its legacy loop and the skeleton
-// call: forced inline into the legacy loop; the twin driver is kept out of
-// line (PULSIM_STEP_TWIN) so its copy does not take the loop's inlining
-// budget. Measured cost is still open (DECISIONS 13).
+// call, and every adapter between them (`run`, `step_once`, the body's
+// forwarders): forced inline into the DRIVER that calls it. Each driver
+// (the legacy loop, the skeleton's `run`) is one out-of-line function
+// (PULSIM_STEP_DRIVER): an adapter left out of line costs a call per phase
+// and two closure hops per captured local, and a driver inlined into the
+// engine's own large body runs slower than the same driver alone
+// (refactor-unified-transient-stepper DECISIONS 14). Empty on MSVC, as the
+// other forced-inline macros of the code base.
 #if defined(__GNUC__) || defined(__clang__)
 #define PULSIM_STEP_PHASE __attribute__((always_inline))
-#define PULSIM_STEP_TWIN __attribute__((noinline))
+#define PULSIM_STEP_DRIVER __attribute__((noinline))
 #else
 #define PULSIM_STEP_PHASE
-#define PULSIM_STEP_TWIN
+#define PULSIM_STEP_DRIVER
 #endif
 
 namespace pulsim::step {
@@ -202,7 +207,7 @@ inline constexpr int kMaxResolves = 200;
 /// accepts). The next proposal comes from the step's full attempt, not
 /// from a sliver an event cut it to.
 template <Integrator I, StepController C, class Body>
-StepStatus step_once(C& ctrl, Body& body) {
+PULSIM_STEP_PHASE inline StepStatus step_once(C& ctrl, Body& body) {
     constexpr bool rollback = C::uses_lte || body_localizes<Body>();
     if (ctrl.done()) return StepStatus::Done;
     if (!body.poll()) return StepStatus::Stopped;
@@ -261,13 +266,13 @@ struct PhaseBody {
     After& after_;
     Commit& commit_;
     OnStep& on_step_;
-    bool poll() { return poll_(); }
-    void begin(const StepFrame& f) { begin_(f); }
+    PULSIM_STEP_PHASE bool poll() { return poll_(); }
+    PULSIM_STEP_PHASE void begin(const StepFrame& f) { begin_(f); }
     Real clamp(const StepFrame&, Real h) const noexcept { return h; }
-    bool take(const StepFrame& f) { return take_(f); }
-    bool after_solve(StepFrame& f) { return after_(f); }
-    void commit(const StepFrame& f) { commit_(f); }
-    void on_step(const StepFrame& f) { on_step_(f); }
+    PULSIM_STEP_PHASE bool take(const StepFrame& f) { return take_(f); }
+    PULSIM_STEP_PHASE bool after_solve(StepFrame& f) { return after_(f); }
+    PULSIM_STEP_PHASE void commit(const StepFrame& f) { commit_(f); }
+    PULSIM_STEP_PHASE void on_step(const StepFrame& f) { on_step_(f); }
 };
 
 template <class Poll, class Begin, class Take, class After, class Commit, class OnStep>
@@ -279,7 +284,7 @@ PhaseBody<Poll, Begin, Take, After, Commit, OnStep> phase_body(
 /// The run: steps until the clock is done, the body stops it or a step
 /// aborts. Returns the last status.
 template <Integrator I, StepController C, class Body>
-StepStatus run(C& ctrl, Body& body) {
+PULSIM_STEP_PHASE inline StepStatus run(C& ctrl, Body& body) {
     StepStatus s = StepStatus::Done;
     while ((s = step_once<I>(ctrl, body)) == StepStatus::Accepted) {
     }
