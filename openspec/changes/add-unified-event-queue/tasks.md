@@ -10,7 +10,7 @@ conformance test of `add-engine-conformance-matrix`.
 ## 0. Preconditions and baseline
 - [ ] 0.1 `add-engine-conformance-matrix` merged (it is); record its schedule × engine and feature × engine cells
 - [ ] 0.2 Record for the buck, the synchronous buck with dead time, the three-phase VSI and one closed-loop buck: fixed-engine state hash, TR-BDF2 `n_accept` / `n_reject` / `n_gate_events` / `n_ctrl_ticks` / `n_diode_events`, DSED event count, ns/step (audit rows 1, 2, 16–18)
-- [ ] 0.3 Analytic edge counts for those circuits (edges per period × periods) written into the test as constants
+- [x] 0.3 Analytic edge counts for those circuits (edges per period × periods) written into the test as constants — `test_gate_event_counts.py` (PWM buck, pwl and trbdf2; DECISIONS 17)
 
 ## 1. One detection in the binding
 - [ ] 1.1 `python/gate_source.hpp`: `to_gate_source(obj, num_switches, default_resolution)` covering `SwitchSchedule`, `NativePwm2Switch`, `NativeMultiMaskPwm`, any callable; built on the shared adapter of `add-engine-conformance-matrix`
@@ -25,10 +25,10 @@ conformance test of `add-engine-conformance-matrix`.
 - [x] 2.5 Oracle: for every harness circuit with an analytic schedule, the accepted-step sequence and the states are identical to 0.2; zero-alloc tests green — oracle used: the 34-case byte compare against a50a2c77 (DECISIONS 2), not a committed baseline (e06d5d2d)
 
 ## 3. The opaque-callable adapter
-- [ ] 3.1 `events/sampled_gate.hpp`: move the sampling, pulse-width learning and bisection of `trbdf2_transient.hpp:960-1190` into `SampledGate` without changing the algorithm; `resolution()`, `n_gate_undersampled`, `gate_pulse_min`
-- [ ] 3.2 TR-BDF2 calls `SampledGate`; oracle: results and counters identical for the opaque-callable tests
-- [ ] 3.3 DSED calls `SampledGate`; delete `dsed_bindings.cpp:174-258` (**BREAKING** for opaque callables on dsed); oracle: synchronous buck with a plain Python `switch_fn` reads 11.49 V within the existing tolerance; an edge is within the declared resolution of the analytic one
-- [ ] 3.4 Diagnostic when a seen pulse is narrower than the resolution, on every engine
+- [x] 3.1 `events/sampled_gate.hpp`: move the sampling, pulse-width learning and bisection of TR-BDF2's opaque-gate block into `SampledGate` without changing the algorithm; `resolution()`, `n_gate_undersampled`, `gate_pulse_min`
+- [x] 3.2 TR-BDF2 calls `SampledGate`; oracle: results and counters identical for the opaque-callable tests — goldens, stateful, engines, step sequences, pwl 390/390, trbdf2 371/371 byte-identical; buck/bridge trbdf2 instructions per step 11012 -> 11006, 12755 -> 12744 (DECISIONS 16)
+- [ ] 3.3 DSED calls `SampledGate`; delete `dsed_bindings.cpp:174-258` (**BREAKING** for opaque callables on dsed) — open: DSED out of slice 3 (what it needs: DECISIONS 16); oracle: synchronous buck with a plain Python `switch_fn` reads 11.49 V within the existing tolerance; an edge is within the declared resolution of the analytic one
+- [ ] 3.4 Diagnostic when a seen pulse is narrower than the resolution, on every engine — partial: trbdf2 (`n_gate_undersampled`) and pwl (`n_gate_events_unresolved`, split path) warn; DSED open (DECISIONS 16, 17)
 - [ ] 3.5 Docs: `docs/dsed.md`, `AI_GUIDE.md` (switch_fn section), CHANGELOG migration note
 
 ## 4. Per-rate control ticks
@@ -39,9 +39,9 @@ conformance test of `add-engine-conformance-matrix`.
 ## 5. The fixed engine on the queue
 - [ ] 5.1 The fixed engine builds the mask of step `k` from the gate sources and reuses it until `next_landing`; ticks come from the queue — partial: ticks from the queue (done, byte-identical); mask reuse between oracle edges NOT done (not provably bit-identical at grid-coincident edges, DECISIONS 5)
 - [ ] 5.2 Delete the second composition (`__init__.py:2420-2455`) and the default-mask lambdas in favour of index composition (the undriven-switch policy itself is `add-kernel-simulation-object`; until then the current per-engine behaviour is kept)
-- [ ] 5.3 `n_gate_events` and `n_gate_events_unresolved` on the fixed engine and on DSED
-- [ ] 5.4 Oracle: fixed goldens bit-identical (no ticks); with ticks identical to the Phase 0 behaviour; `n_gate_events` equals the analytic count of 0.3 on pwl, trbdf2 and dsed; ns/step on audit rows 1–2 not above 0.2
-- [ ] 5.5 Test: two edges of one bit inside one fixed step are counted and reported, not dropped silently
+- [ ] 5.3 `n_gate_events` and `n_gate_events_unresolved` on the fixed engine and on DSED — partial: fixed engine, event-split path with an edge oracle (`res.counters`); DSED open (DECISIONS 17)
+- [ ] 5.4 Oracle: fixed goldens bit-identical (no ticks); with ticks identical to the Phase 0 behaviour; `n_gate_events` equals the analytic count of 0.3 on pwl, trbdf2 and dsed; ns/step on audit rows 1–2 not above 0.2 — partial: goldens bit-identical; analytic count equal on pwl and trbdf2 (`test_gate_event_counts.py`); dsed open
+- [x] 5.5 Test: two edges of one bit inside one fixed step are counted and reported, not dropped silently — `test_gate_event_counts.py` (both landed; narrower than split_snap*dt: counted, unresolved, warned)
 
 ## 6. Modulators and duty registers
 - [x] 6.1 `events/modulator.hpp`: `DutyRegister`, `LatchPolicy`, `CarrierPwm` (single switch and complementary leg with dead time), `EdgeList`; Python bindings — `pulsim.DutyRegister`, `make_carrier_pwm_fn`, `make_edge_list_fn` (DECISIONS 12; 57079368)
@@ -56,10 +56,10 @@ conformance test of `add-engine-conformance-matrix`.
 - [ ] 7.2 Oracle: pulse-driven RC on TR-BDF2: error below 1.8e-4 V and decreasing with `rtol`; fixed goldens bit-identical
 
 ## 8. State events
-- [ ] 8.1 `events/locate.hpp`: Illinois over a trial evaluator; unit tests on analytic crossings
-- [ ] 8.2 `events/mode_set.hpp`: `redecide`, `crossing_signal`, `settle` with cycle report
-- [ ] 8.3 TR-BDF2 localisation, the DSED predictor, the fixed-step event iteration and the DC operating point call 8.1 / 8.2
-- [ ] 8.4 Oracle: `commutation_events`, `event_iteration_count`, `event_iteration_breaches`, `n_diode_events` identical on the harness; the resistive half-wave conduction instants (223 µs, 9.777 ms) unchanged on every engine
+- [x] 8.1 `events/locate.hpp`: Illinois over a trial evaluator; unit tests on analytic crossings — `core/tests/modes/test_locate.cpp` `[event_locate]` (DECISIONS 15)
+- [x] 8.2 `events/mode_set.hpp`: `redecide`, `crossing_signal`, `settle` with cycle report — plus `forbidden`, `held_tolerance`, `MaskCycle<N>` (per-call cycle memory) (DECISIONS 15)
+- [ ] 8.3 TR-BDF2 localisation, the DSED predictor, the fixed-step event iteration and the DC operating point call 8.1 / 8.2 — partial: TR-BDF2 localisation (`events::illinois`) and its five zero-time cascades (`events::settle`), the DC operating point (`events::settle`), the fixed engine's event iteration on both paths (`MaskCycle`, `redecide`; its do-while stays: `settle` there cost 1.0–1.8 % per step). NOT the DSED predictor (another track owns `dsed/`; what it needs is in DECISIONS 15)
+- [x] 8.4 Oracle: `commutation_events`, `event_iteration_count`, `event_iteration_breaches`, `n_diode_events` identical on the harness; the resistive half-wave conduction instants (223 µs, 9.777 ms) unchanged on every engine — pwl/trbdf2 byte-identical (goldens with counters, stateful, engines, step sequences, `pwl_identity` 390/390, `trbdf2_identity` 371/371, every result attribute hashed); dsed untouched by this change
 
 ## 9. Remove the legacy inputs (one release later)
 - [ ] 9.1 Delete `next_edge_fn`, `observer_period`, the callable-only driver parameters and their adapters

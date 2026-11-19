@@ -468,6 +468,15 @@ struct SimulationResult {
     // list overflowed (kMaxStepEvents or the per-step search cap).
     Size unlocated_gate_steps = 0;
     Size split_event_overflows = 0;
+    // Event splitting with an edge oracle (tasks 5.3/5.5): the declared
+    // gate edges the steps met (a no-op edge inside a step is not one; an
+    // edge within snap of a grid point is counted unread), and the step
+    // events of any kind (gate edges, source and b_extra jumps) merged into
+    // an earlier one closer than snap, so not landed at their own instant
+    // (a gate pulse narrower than snap is lost; overflow has its own
+    // counter). 0 without splitting.
+    Size n_gate_events = 0;
+    Size n_gate_events_unresolved = 0;
     // add-unified-event-queue group 5: the fixed engine's control ticks
     // (one count per TickPlan source) and the largest lateness of a tick
     // on the grid (step time minus scheduled instant).

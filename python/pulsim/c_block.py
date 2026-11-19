@@ -42,11 +42,8 @@ from __future__ import annotations
 
 import copy
 import ctypes
-import hashlib
 import os
 import shutil
-import subprocess
-import sys
 import threading
 import warnings
 import weakref
@@ -55,6 +52,8 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
+
+from . import _native_cache
 
 __all__ = ["CBlock", "CBlockHandle", "add_c_block", "wire_c_blocks_from_yaml",
            "CBLOCK_ABI"]
@@ -422,52 +421,12 @@ def _find_compiler(lang: str):
 
 
 def _cache_dir() -> Path:
-    """Per-user compile cache, mode 0700: ~/Library/Caches/pulsim (macOS),
-    $XDG_CACHE_HOME or ~/.cache/pulsim (Linux), %LOCALAPPDATA%\\pulsim
-    (Windows). Before 2.1 it was a shared directory under the system
-    temp dir, where another user could plant a cblk_<hash>.so."""
-    if sys.platform == "win32":
-        base = Path(os.environ.get("LOCALAPPDATA")
-                    or Path.home() / "AppData" / "Local")
-    elif sys.platform == "darwin":
-        base = Path.home() / "Library" / "Caches"
-    else:
-        base = Path(os.environ.get("XDG_CACHE_HOME")
-                    or Path.home() / ".cache")
-    d = base / "pulsim" / "cblock"
-    d.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if os.name != "posix":
-        _check_in_profile(d)
-    for p in (d.parent, d):         # pulsim/ too: its owner could swap cblock/
-        if os.name == "posix" and p.lstat().st_uid == os.getuid() \
-                and not p.is_symlink():
-            os.chmod(p, 0o700)      # mkdir's mode is masked by the umask
-        _check_owned(p)
-    return d
+    """The C blocks' per-user compile cache (``_native_cache``)."""
+    return _native_cache.cache_dir("cblock")
 
 
-def _check_in_profile(path: Path) -> None:
-    """Windows has no POSIX owner or mode: keep the cache inside
-    %USERPROFILE%, whose ACL is the user's by default."""
-    home = Path(os.environ.get("USERPROFILE") or Path.home()).resolve()
-    if not Path(path).resolve().is_relative_to(home):
-        raise RuntimeError(
-            f"c_block: refusing {path}: it is outside your profile "
-            f"({home}), so pulsim cannot tell who may write it. Point "
-            "LOCALAPPDATA inside your profile.")
-
-
-def _check_owned(path: Path) -> None:
-    """Refuse a cache entry another user owns or can write (POSIX)."""
-    if os.name != "posix":
-        return
-    st = path.lstat()
-    if st.st_uid != os.getuid() or st.st_mode & 0o022 \
-            or path.is_symlink():
-        raise RuntimeError(
-            f"c_block: refusing {path}: owned by uid {st.st_uid} with mode "
-            f"{oct(st.st_mode & 0o777)}; the compile cache must belong to "
-            "you and be writable only by you. Remove it.")
+_check_in_profile = _native_cache.check_in_profile
+_check_owned = _native_cache.check_owned
 
 
 def _compile_inline(code: str, lang: str, symbol: str, *,
@@ -493,34 +452,10 @@ def _compile_inline(code: str, lang: str, symbol: str, *,
     flags += list(extra_compile_args or [])
     link = list(extra_link_args or [])
 
-    key = hashlib.sha256(
-        "|".join([compiler, lang, symbol, src, *flags, *link]).encode()
-    ).hexdigest()[:16]
-    cache = _cache_dir()
-    so_path = cache / f"cblk_{key}.so"
-    if so_path.exists():
-        _check_owned(so_path)
-        return so_path
-
-    # private names, then an atomic rename: a concurrent process never
-    # loads a half-written library
-    tag = f"{os.getpid()}_{threading.get_ident()}"
-    src_path = cache / f"cblk_{key}_{tag}{ext}"
-    tmp_so = cache / f"cblk_{key}_{tag}.so.tmp"
-    src_path.write_text(src)
-    cmd = [compiler, *flags, str(src_path), "-o", str(tmp_so), *link]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as exc:
-        raise RuntimeError(
-            f"c_block: inline {lang} compile failed:\n"
-            f"$ {' '.join(cmd)}\n{exc.stderr}") from None
-    finally:
-        src_path.unlink(missing_ok=True)
-    if os.name == "posix":
-        os.chmod(tmp_so, 0o700)     # the linker's mode follows the umask
-    os.replace(tmp_so, so_path)
-    return so_path
+    # a cached library another user owns or can write is rebuilt, never loaded
+    return _native_cache.compiled(
+        src, ext, [compiler, *flags], [compiler, lang, symbol, src, *flags, *link],
+        link=link, sub="cblock", prefix="cblk", who=f"c_block: inline {lang}")
 
 
 def add_c_block(builder,

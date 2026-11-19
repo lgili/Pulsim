@@ -29,6 +29,7 @@
 // all route through `compute_dc_operating_point`.
 
 #include "pulsim/analysis/cancellation.hpp"
+#include "pulsim/events/mode_set.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/dc_strategy.hpp"
@@ -177,7 +178,7 @@ struct DCOperatingPoint {
     const bool may_fall_through =
         opts.strategy == DCStrategy::Auto && opts.enable_cascade;
 
-    do {
+    (void)events::settle(max_rounds, [&](Size) {
         analysis::check_cancellation(opts.should_continue, who,
                                       static_cast<long>(iters));
         topology::SwitchStateMask mask = user_mask;
@@ -250,7 +251,8 @@ struct DCOperatingPoint {
 
         flipped = has_diodes && diodes->update_from_state(out.x);
         ++iters;
-    } while (flipped && iters < max_rounds);
+        return flipped ? events::Round::Flipped : events::Round::Settled;
+    });
 
     out.event_iterations = iters;
     require_sane_dc_state(graph, pool, out.x, opts.t_eval, who);

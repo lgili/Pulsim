@@ -159,3 +159,26 @@ TEST_CASE("xdev: the reviewer's open list (#16) and the solve's time", "[xdev]")
     CHECK(std::abs(o.f[0] - 3e-3) <= 1e-15);   // G (1 + t / 1 ms) at t = 2 ms
     CHECK((r.ctx_(nullptr, 1.0).host_features & PULSIM_XDEV_HOST_TIME) != 0u);
 }
+
+TEST_CASE("xdev: appended block 1 — named outputs, reserved events", "[xdev]") {
+    CHECK(refusal(PULSIM_XDEV_CONTRACT, "metered_resistor") == std::string{});
+    CHECK(has(refusal(PULSIM_XDEV_CONTRACT, "liar_output_name"), "generic reading"));
+    CHECK(has(refusal(PULSIM_XDEV_CONTRACT, "liar_events"), "event functions are not supported"));
+    CHECK(refusal(PULSIM_XDEV_CONTRACT, "partial_block") == std::string{});
+    CHECK(xdev::load_model(PULSIM_XDEV_CONTRACT, "partial_block")->d().n_outputs == 0u);
+    auto m = xdev::load_model(PULSIM_XDEV_CONTRACT, "metered_resistor");
+    REQUIRE(m->d().n_outputs == 2);
+    CHECK(std::string(m->d().outputs[0].name) == "energy");
+    xdev::Instance in("M", m, {2e-3});
+    const Real x[2] = {3.0, 1.0};
+    const Real state[1] = {0.25};
+    Real out[2] = {0, 0};
+    in.outputs(x, state, out);
+    CHECK(out[0] == 0.25);
+    CHECK(std::abs(out[1] - 2e-3 * 4.0) < 1e-18);
+    // the new twins register
+    CHECK(refusal(PULSIM_XDEV_TWINS, "lauritzen_twin",
+                  {1e-12, 1.0, 0.025852, 1e-7, 1e-8, 1e-12, 1e6}) == std::string{});
+    CHECK(refusal(PULSIM_XDEV_TWINS, "junction_cap_twin", {2e-9, 25.0, 0.5, -0.9})
+          == std::string{});
+}
