@@ -89,3 +89,39 @@ data in `benchmarks/tools/next_defaults.py` section `PLAN`:
 
 C++: one row of `sim::kRunOptionTable` (`undriven`). Blast radius of the
 profile on `python/tests` with the two new entries: section 3 below (hand-off).
+
+## 3. Blast radius with `PLAN` (hand-off, feat/core-release-options)
+
+`next_defaults_pytest.py` on full `python/tests`, re-measured on the same
+day: a67d3994 (no `PLAN`) 480 failed / 0 errors (recorded 479 in section 1;
+the extra one was not identified — every one of the 480 still fails after);
+this branch with `DEFAULT_UNDRIVEN='refuse'` and `UNIFORM_ENGINE_RULES=True`
+518 failed / 0 errors. No failure went away; 38 are new. By class, before ->
+after: new refusal by name 6 -> 31, other assertion 102 -> 112, engine route
+/ result layout 71 -> 74, the rest unchanged (numeric 193, digest 50,
+warning / raise 28, exception 24, snapshot 6).
+
+The 38 new: 26 rely on an undriven controlled switch (`'refuse'`), 6 pin
+today's behaviour on purpose (`test_release_uniform_rules.py` 5,
+`test_next_defaults.py` 1), 6 are harness artefacts (the harness's
+`simulate` wrapper adds a frame, so the 4 caller-line voltage-check tests
+see its file; it routes `auto` before the call, so 2 `undriven=` auto cases
+take another engine). Files relying on an undriven switch (not fixed):
+
+| file | tests |
+|---|---|
+| `test_circuit_scopes.py` | 7 |
+| `test_cache_budget.py` | 3 |
+| `test_cross_cutting_on_every_engine.py` | 3 |
+| `test_undriven_policy.py` (the `None` pins) | 3 |
+| `test_dsed_control_ticks.py` (refused as `switch_fn` before `step_observer`) | 2 |
+| `test_exact_guard_transient.py` | 2 |
+| `test_mosfet_body_diode_default.py` | 2 |
+| `test_mode_auto.py` (gated: `switch_fn` before `mode_selection`) | 1 |
+| `test_circuit_sweep.py` | 1 |
+| `test_controller_state_isolation.py` | 1 |
+| `test_named_diagnostics.py` | 1 |
+
+The fix at the release is the same in each: drive the switch
+(`switch_fn=`) or pass `undriven='closed'` where the test means today's
+fixed-step / exact behaviour.

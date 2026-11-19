@@ -596,3 +596,27 @@
        the snapshot's state at that clock); the exact engine refuses by name;
        one rule in `_plan_run`, and `plan.resolved_from['t_start']` reads
        `'resume_from'` when it applied.
+
+27. **Hand-off of 26 (feat/core-release-options, 2026-11-19).** Verified with
+    every new option at its default against an a67d3994 extract (same
+    extension): full `python/tests` 6005 passed / 110 skipped / 8 xfailed
+    (the extract: 5944 / 111 / 8 — `test_no_home_paths` skips outside git —
+    plus the 59 new tests), the per-test warning set equal but one entry,
+    the new `test_none_keeps_trbdf2_and_auto_refusals` pinning today's
+    warning; goldens, stateful, engines, options and hooks byte compares
+    identical; `pwl_identity` 390/390; `trbdf2_identity` 370/371 (the one
+    difference is the extract's path inside a refusal message);
+    `-m reference` 383; `reference_status` rc 0, `REFERENCE_STATUS.md`
+    unchanged, its json identical; examples 138; ruff, `openspec validate
+    --strict` 79, stubs `--check`, `mkdocs build --strict` clean; overhead
+    gate pwl 2874 <= 2890, trbdf2 3700 <= 3760 (ceilings not raised);
+    `pulsim_core_sim_tests` 1206 assertions pass on Eigen 5 and Eigen 3.4.0.
+    Full ctest not run. Review (fresh context, read-only): defaults
+    identical on 17 A/B scenarios; fixed — `run_dsed_from_builder` applies
+    the plan's rule to an `'auto'` that reaches it unresolved, and the docs
+    state that `None` refuses on the exact engine's `sensitivities=` run and
+    that the policy applies only when nothing drives any switch; kept (26
+    item 1 limits) — a partial drive is not refused, `'refuse'` precedes an
+    engine's capability refusal, `engine='auto'` names `'auto'`. Blast radius
+    of the profile with the two `PLAN` entries:
+    `update-number-changing-release` DECISIONS section 3.
