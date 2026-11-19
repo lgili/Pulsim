@@ -2771,7 +2771,7 @@ def simulate(
                 _ic_from_builder = True
         except ValueError:
             raise   # capacitor ICs that break KVL: a refusal, not a mock
-        except Exception:  # noqa: BLE001 — test mocks etc.
+        except AttributeError:  # a builder stand-in without initial_state
             pass
 
     # ---- Controllers: one composition for every engine ----
@@ -3526,7 +3526,7 @@ def simulate(
         try:
             _, _n_diode, _controlled = _switch_census(
                 builder.graph, builder.pool)
-        except Exception:  # noqa: BLE001 — test doubles w/o pool
+        except AttributeError:  # test doubles w/o pool
             _controlled = []
         if _controlled:
             import warnings
@@ -3627,7 +3627,7 @@ def simulate(
         names = None
         try:
             names = list(builder.state_var_names())
-        except Exception:  # noqa: BLE001 — older binaries lack it
+        except AttributeError:  # older binaries lack it
             names = None
         live_stream.attach(state_size, names=names)
         live_ring = live_stream.native_ring

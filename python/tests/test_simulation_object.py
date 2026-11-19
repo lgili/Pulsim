@@ -266,7 +266,7 @@ def test_simulation_keeps_its_python_callables_alive():
 def test_the_docs_page_is_the_option_table():
     import pathlib
     doc = (pathlib.Path(__file__).resolve().parents[2] / "docs"
-           / "known-limitations.md").read_text()
+           / "known-limitations.md").read_text(encoding="utf-8")
     block = doc.split("<!-- option-capabilities:begin -->\n")[1].split(
         "<!-- option-capabilities:end -->")[0]
     assert block.strip() == ro.markdown_table()
@@ -290,20 +290,22 @@ def _count(pattern):
     import re
     pkg = pathlib.Path(p.__file__).resolve().parent
     rx = re.compile(pattern, re.M)
-    return sum(len(rx.findall(f.read_text())) for f in pkg.rglob("*.py"))
+    return sum(len(rx.findall(f.read_text(encoding="utf-8")))
+               for f in pkg.rglob("*.py"))
 
 
 def test_ratchet_untyped_raises_and_broad_handlers_do_not_rise():
     # Counts on 2026-11-18 (add-kernel-simulation-object 1.3). Lower them
     # when a raise becomes typed or a handler is narrowed; never raise them.
     assert _count(r"raise ValueError") <= 526
-    assert _count(r"except Exception|except:\s*$|except BaseException") <= 89
+    assert _count(r"except Exception|except:\s*$|except BaseException") <= 86
 
 
 def test_simulate_snapshots_every_refusable_option():
     import ast
     import pathlib
-    src = (pathlib.Path(p.__file__).resolve().parent / "__init__.py").read_text()
+    src = (pathlib.Path(p.__file__).resolve().parent / "__init__.py").read_text(
+        encoding="utf-8")
     fn = next(n for n in ast.walk(ast.parse(src))
               if isinstance(n, ast.FunctionDef) and n.name == "simulate")
     snap = next(n.value for n in ast.walk(fn) if isinstance(n, ast.Assign)
@@ -434,3 +436,26 @@ def test_a_hook_on_the_chain_fast_path_keeps_one_cache():
     plain, hooked = run(), run(on_cache=seen.append)
     assert np.array_equal(np.asarray(plain.states), np.asarray(hooked.states))
     assert seen and seen[0].num_built_segments() >= 1  # the run used it
+
+
+def test_simulate_swallows_no_kernel_error():
+    """1.3: a broad handler in simulate() re-raises, except the listed
+    post-run diagnostic (a finished run is not broken by its own check)."""
+    import ast
+    import pathlib
+    src = (pathlib.Path(p.__file__).resolve().parent / "__init__.py").read_text(
+        encoding="utf-8")
+    fn = next(n for n in ast.walk(ast.parse(src))
+              if isinstance(n, ast.FunctionDef) and n.name == "simulate")
+    allowed = {"_volt = None"}  # find_implausible_voltage, after the run
+    swallowing = []
+    for h in ast.walk(fn):
+        if not isinstance(h, ast.ExceptHandler):
+            continue
+        kind = ast.unparse(h.type) if h.type is not None else ""
+        if kind and "Exception" not in kind:
+            continue
+        if not any(isinstance(x, ast.Raise) for x in ast.walk(h)) \
+                and ast.unparse(h.body[0]) not in allowed:
+            swallowing.append((h.lineno, kind or "bare"))
+    assert swallowing == []

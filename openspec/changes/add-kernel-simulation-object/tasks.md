@@ -15,10 +15,12 @@ unchanged.
 
 ## 1. Stage A — tests first
 - [ ] 1.1 `test_plan_resolves_every_kwarg`: `set(plan.resolved_from) == set(signature(simulate).parameters) − {"builder"}` (xfail until 2.x lands)
+  - Stands in: `test_the_table_covers_every_simulate_parameter` (every keyword is a row of the kernel's option table; the options are resolved by the kernel, DECISIONS 6). Open: a Python `plan.resolved_from`, if Stage A is built.
 - [ ] 1.2 `test_engine_branches_read_only_the_plan`: `ast` check on `_run_pwl`, `_run_trbdf2`, `_run_dsed` (xfail until 7)
 - [ ] 1.3 Ratchets: `raise ValueError` and broad-handler counts in `python/pulsim` may not rise; no broad handler without re-raise around a kernel call on the `simulate()` call path (one level deep)
-  - Done: the two count ratchets (`test_simulation_object.py`). Open: the one-level-deep broad-handler check.
-- [ ] 1.4 `test_cross_cutting_on_every_engine`: builder ICs, `resume_from` validation, preflight ties, undriven-switch behaviour and voltage sanity asserted per engine against today's behaviour
+  - Done: the two count ratchets (`test_simulation_object.py`; broad handlers 89 -> 86); `test_simulate_swallows_no_kernel_error` (no broad handler in `simulate()`'s own body swallows, except the post-run voltage-sanity check; three narrowed to `AttributeError`). Open: the helpers one level down.
+- [x] 1.4 `test_cross_cutting_on_every_engine`: builder ICs, `resume_from` validation, preflight ties, undriven-switch behaviour and voltage sanity asserted per engine against today's behaviour
+  - Done: `python/tests/test_cross_cutting_on_every_engine.py` (15 cases, pwl / trbdf2 / exact; also green on 656b894f).
 
 ## 2. Stage A — plan the options
 - [ ] 2.1 `python/pulsim/_plan.py`: `RunPlan` (frozen), `NewtonOptions`, `EventOptions`, `FixedStep` / `VariableStep` / `ExactStep`, `Diagnostic`
@@ -76,7 +78,7 @@ unchanged.
 
 ## 11. Stage B — simulate() on the facade
 - [ ] 11.1 `simulate()` builds `RunOptions` and calls `Simulation` for runs with no Python callback; then for every run through `add_gate` / `add_tick` / `add_source_term` adapters
-  - Done: `'pwl'` and `'trbdf2'` runs go through `Simulation` (callbacks included: `set_switch_fn`, `add_tick` (monitors too), `set_source_term`, `set_step_observer`, `set_tick_before`, live ring, resume with the v5 tick grid), goldens identical (DECISIONS 14, 15). Open: `mmc_arms` / `on_cache`, `sweep()`'s replay, the C++ chain fast path, and the exact engine (DECISIONS 16).
+  - Done: `'pwl'` and `'trbdf2'` runs go through `Simulation` (callbacks included: `set_switch_fn`, `add_tick` (monitors too), `set_source_term`, `set_step_observer`, `set_tick_before`, live ring, resume with the v5 tick grid), goldens identical (DECISIONS 14, 15). `mmc_arms` / `on_cache` and the C++ chain fast path run on the object's builder and cache (DECISIONS 20). Open: `sweep()`'s replay and the exact engine (DECISIONS 16).
 - [ ] 11.2 Oracle: goldens bit-identical; warning set unchanged; fixed overhead not above 0.2; a native-schedule run holds no GIL (thread sweep scales as in audit row 23)
 - [ ] 11.3 One undriven-switch policy on every engine (**BREAKING**), per the owner's answer; migration note; tests for `Refuse`, `Open`, `Closed`
 
