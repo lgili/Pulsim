@@ -1196,6 +1196,9 @@ class Solver:
                 self.jumps.append(dict(t=t, dE=dE, x_minus=xm, x_plus=xp, mode=mode,
                                        w_src=self.jump_source_work(mode, xm, xp)))
             info.update(cause=cause, prev=prev, mode=mode)
+            if (mode == prev and len(self.events) > 20
+                    and all(e["t"] == t and e["mode"] == mode for e in self.events[-20:])):
+                raise RuntimeError(f"no progress at t={mp.nstr(t, 20)}: a root keeps re-firing")
             self.events.append(info)
             if verbose:
                 print(f"  {len(self.events) - 1:4d} t={mp.nstr(t, 20):>24s} {cause:14s} "
@@ -1222,7 +1225,7 @@ class Solver:
         lam = dy.lam
         sc_all = mp.mpf(10) ** (-(self.dps - 8))
 
-        eps = mp.mpf(10) ** (-mp.mp.dps + 4)
+        eps = mp.mpf(10) ** (-(mp.mp.dps // 2))  # projection noise (~half the digits), as in taylor_sign
 
         def ev(tau):
             # (g, g', rounding noise of g): a crossing must exceed the noise of
@@ -1306,7 +1309,7 @@ class Solver:
         """find_root for an expm segment: march y by a fixed-step propagator,
         bisect on direct matrix exponentials."""
         dy = seg.dyn
-        eps = mp.mpf(10) ** (-mp.mp.dps + 4)
+        eps = mp.mpf(10) ** (-(mp.mp.dps // 2))  # projection noise (~half the digits), as in taylor_sign
         act = []
         for d, row in enumerate(rows):
             if row is None:
