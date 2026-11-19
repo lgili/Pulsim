@@ -181,7 +181,8 @@ def test_a_closed_loop_resumed_on_its_tick_continues_the_uninterrupted_run():
     tf, vf = np.asarray(rf.times), np.asarray(rf.v("out"))
     t2, v2 = np.asarray(r2.times), np.asarray(r2.v("out"))
     j = int(np.searchsorted(tf, t2[0]))
-    np.testing.assert_array_equal(tf[j:], t2)
+    # bit for bit on this machine; CI (another platform's libm) at 1e-12
+    np.testing.assert_allclose(t2, tf[j:], rtol=1e-12, atol=0)
     np.testing.assert_allclose(v2, vf[j:], rtol=1e-12, atol=1e-12)
 
 
