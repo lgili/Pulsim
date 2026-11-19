@@ -63,7 +63,8 @@ def test_branch_form_is_structure_and_its_r_on_a_value():
         if branch:
             b.add_ideal_switch("S", "a", "o", R_on, 1e-9)
         else:
-            b.add_switch("S", "a", "o", 1.0 / R_on, 1e-9)
+            # the conductance form, explicit since the release made branch the default
+            b.add_switch("S", "a", "o", 1.0 / R_on, 1e-9, form="conductance")
         b.add_resistor("R", "o", "gnd", 10.0)
         return b.build()
     # same kind, same g_on / g_off: the form alone tells them apart
