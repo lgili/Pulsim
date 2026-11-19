@@ -1808,6 +1808,7 @@ void init_module(py::module_& m) {
             d["marginal_direction"] = r.marginal_direction;
             d["marginal_mu"] = r.marginal_mu;
             d["residual"] = r.residual;
+            d["orbit_error_estimate"] = r.orbit_error_estimate;
             d["n_period_runs"] = r.n_runs;
             d["n_iterations"] = r.n_iterations;
             d["n_relax_rounds"] = r.n_relax_rounds;

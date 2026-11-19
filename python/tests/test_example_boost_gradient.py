@@ -32,11 +32,15 @@ def test_the_gradient_at_the_start_is_a_central_difference(bg):
     for name in ("L", "C"):
         def val(x, name=name):
             return f({**x0, name: x})[0]
-        # Each value is a Newton-shooting orbit, exact only to its stop
-        # rule (residual / (1 - |mu|)); over a 1e-4 step that noise is
-        # 1.1e-6 of dcost/dL on macOS arm64 + Eigen 3.4.0, and the
-        # selector still picks 1e-4 (its estimate sees only truncation). At 1e-3 the Richardson value meets the exact
-        # gradient to 3e-10 (L) and 2e-12 (C).
+        # Each value is a Newton-shooting orbit, exact to its rtol = 1e-9
+        # of the state scale (the stop rule bounds the orbit error
+        # estimate, DECISIONS 21): over a 1e-4 relative step that is up
+        # to ~1e-5 of the derivative. Measured 1.15e-6 of dcost/dL at
+        # (1e-3, 1e-4), the same digits before and after the stop-rule
+        # fix (this CCM orbit never took the old polish exit), and the
+        # selector picks 1e-4 (its estimate sees only truncation). At
+        # (1e-2, 1e-3) the Richardson value meets the exact gradient to
+        # 3.0e-10 (L) and 2.3e-12 (C).
         fd, err, _h = ref.central_difference(val, x0[name],
                                              rel_steps=(1e-2, 1e-3))
         assert abs(g[name] - fd) <= 1e-6 * abs(fd), (name, g[name], fd, err)

@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Periodic steady state: the stop rule bounds the orbit error
+
+* **Fixed** the exact stepper could keep a PWL diode ON past its own
+  turn-off crossing when the located state's ON-mode current was a
+  rounding residual (the OFF-mode probe read its amplified sign): one
+  period run of four near the DCM boost orbit ended at −0.63 A. The
+  boost DCM orbit moves from 36.594399763447576 V (one build) to
+  36.5944008378685 V; mpmath truth 36.594400837798 V.
+* **Changed** `periodic_steady_state` stops when the error estimate
+  `(I − M)⁻¹·G` (the next Newton correction), not only the residual,
+  is within `rtol`; the estimate is `result.orbit_error_estimate`.
+  When the map's rounding over `1 − |μ|` keeps it above `rtol` the
+  solve raises `ConvergenceError` (loosen `rtol`) instead of returning
+  the orbit: a sine into 1 µF ‖ 1 TΩ (|μ| = 1 − 1e-9) used to return
+  v(0) 1.2 % off at `rtol=1e-9`. In `Evaluator` design batches such a
+  design falls back to the Python path and fails there too.
+
 ### Integration batch 14a: event queue 3, device interface 3, unified stepper 2, ideal switch 5, TR-BDF2 track 8 merged
 
 * **Changed** the `SolverSnapshot` pickle is version 5, one layout with

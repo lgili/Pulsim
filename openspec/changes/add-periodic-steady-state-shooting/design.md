@@ -118,7 +118,13 @@ rate 0.3.
   `‖G(x₀ + λδ)‖ ≤ (1 − 1e-4·λ)·‖G(x₀)‖`.
 - If no `λ` is accepted: advance `n_relax` periods (default 5) by plain
   transient and retry; at most three such rounds.
-- Stop at `‖G‖ ≤ 1`, then verify with one more period run.
+- Stop at `‖G‖ ≤ 1` AND `‖(I − M)⁻¹·G‖ ≤ 1` (the next Newton
+  correction, i.e. the orbit error estimate: with a slow multiplier the
+  error is `|G|/(1 − |μ|)`, not `|G|`), then verify with one more period
+  run. The estimate is `orbit_error_estimate`. A correction that does
+  not halve after a step from `‖G‖ ≤ 1` is the map's rounding over
+  `1 − |μ|`: `ConvergenceError` (loosen `rtol`), never an orbit.
+  (DECISIONS 21.)
 - Budget: `max_period_runs` (default 60); exceeding it raises with the
   residual history, the last pattern and the multipliers of the last
   `M`.

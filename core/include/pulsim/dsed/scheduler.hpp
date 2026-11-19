@@ -1896,9 +1896,12 @@ private:
                                      bool fallback)
         requires HasNodePairVoltage<System> {
         const bool was = diode_bits_.get(d.switch_idx);
+        diode_bits_.set(d.switch_idx, true);
+        const MaskT mask_on = mask.overlay(diode_bits_, diode_owned_);
         diode_bits_.set(d.switch_idx, false);
-        system_.set_mask(mask.overlay(diode_bits_, diode_owned_));
+        const MaskT mask_off = mask.overlay(diode_bits_, diode_owned_);
         diode_bits_.set(d.switch_idx, was);
+        system_.set_mask(mask_off);
         // Without an exact OFF-mode step: the value law outside the
         // band, OFF inside it.
         bool on = fallback;
@@ -1906,6 +1909,31 @@ private:
             if (system_.has_exact_step()) {
                 on = false;
                 const auto prm = d.params();
+                // At the diode's own crossing its ON-mode signal is zero
+                // to rounding, and the OFF mode amplifies that rounding by
+                // about g_on/g_off into the OFF signal's starting value
+                // (2e-15 V of v_D on 1e3 S is 2e-12 A, 2e-3 V through
+                // 1 nS, either sign). A rung then decides only once the
+                // probe has moved further than that rounding (r0: the OFF
+                // voltage's distance from the crossing voltage, so a
+                // V_th > V_f band is not counted as rounding). A DCM boost
+                // kept its diode ON past the zero crossing in one period
+                // run of four (-0.63 A at T), by the sign of the rounding.
+                system_.set_mask(mask_on);
+                const Real v_on = system_.node_pair_voltage(d.from, d.to, t, x);
+                const Real s_on =
+                    models::SwitchedDiode::crossing_signal(true, v_on, prm);
+                const bool on_tie = std::abs(s_on) <= tol;
+                system_.set_mask(mask_off);
+                Real sig0 = Real{0};
+                Real r0 = Real{0};
+                if (on_tie) {
+                    sig0 = models::SwitchedDiode::crossing_signal(
+                        false, system_.node_pair_voltage(d.from, d.to, t, x),
+                        prm);
+                    r0 = sig0 - models::SwitchedDiode::crossing_signal(
+                                    false, v_on - s_on, prm);
+                }
                 for (int k = 0; k <= 12; ++k) {
                     const Real delta =
                         dt_max_ * std::pow(Real{10}, Real(k - 12));
@@ -1916,6 +1944,9 @@ private:
                             system_.node_pair_voltage(
                                 d.from, d.to, t + delta, x_tmp_),
                             prm);
+                    if (on_tie && !(std::abs(sig - sig0) > std::abs(r0))) {
+                        continue;
+                    }
                     if (sig > tol) {
                         on = true;
                         break;

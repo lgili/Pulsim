@@ -220,3 +220,60 @@ a source that follows a controller (`feature='closed_loop'`).
    of `I − M`. Both now refuse that LC as not isolated. An orbit with a
    genuine `| |μ| − 1 |` below the band is refused, never returned. →
    Reverse: `_FD_REL`, `TransientMap.marginal`.
+
+## The stop rule and the stuck diode (2026-11-19)
+
+21. **Newton stops on the orbit ERROR ESTIMATE, and a diode at its own
+   turn-off crossing is decided by the motion of its OFF signal.**
+   Question: why did the boost DCM orbit (12 V, 100 µH, 47 µF, 500 Ω,
+   D = 0.5; `test_periodic_orbit_kernel`) come back 1.07e-6 V off on one
+   build (36.594399763447576 V, 25 period runs, macOS arm64 + Eigen
+   3.4.0) and 1e-10 V off on others (21 runs)? Truth:
+   `probes/boost_dcm_truth.py` (mpmath, 50 digits) v_C* =
+   36.594400837798 V, diode off at t/T = 0.743942.
+   Evidence, two defects:
+   (a) *The period map.* One period from 25 starts within ±3e-10 V of
+   the orbit (`.scratch` probe, event projection off as in the map):
+   6 of 25 ended at i_L = −0.63 A instead of −1.26e-8 A, the event log
+   showing "D1 turns OFF" with old mask = new mask. At the located
+   turn-off the ON-mode current is a rounding residual (±2e-12 A, v_D
+   ~2e-15 V on 1e3 S); the settle's OFF-mode probe (`zero_band_on_`)
+   amplifies it through g_off = 1 nS into ±1e-3 V of starting signal,
+   and its first rung (δ = 1e-12·dt_max = 1e-17 s, where the true drift
+   is −1.2e14 V/s·δ = −1.2e-3 V) read the residual's sign and turned the
+   diode back ON; its DiodeOff predicate then started negative and
+   never fired again. Fix (scheduler.hpp, one hunk): when the diode's
+   ON-mode signal is in the zero band, a rung decides only once the
+   probe has moved further than the OFF voltage's distance from the
+   crossing voltage (the amplified rounding; a `V_th > V_f` band is not
+   counted in it).
+   After: 0 of 25. The Newton line search had been halving its steps
+   against that discontinuity (errors 2.1e-6, 1.07e-6, 5.4e-7 … V).
+   (b) *The stop rule.* It stopped one step after the residual met
+   `rtol`, without checking that step: with a slow multiplier the error
+   is |G|/(1 − |μ|) (μ = 0.998942: 1.14e-9 V of residual is 1.07e-6 V
+   of state), so the halved step above was returned. Now it stops when
+   every component of the residual AND of the next correction
+   `(I − M)⁻¹·G` is within `rtol·(scale_i + |x_i|)`, the estimate is
+   `orbit_error_estimate` on the result, and a full Newton step from a
+   converged residual whose correction does not halve is the map's
+   rounding over (1 − |μ|): `ConvergenceError` (C++ status
+   `noise_floor`) instead of an orbit. Damped steps and relaxation
+   rounds disarm that check (they contract linearly); on `pwl` /
+   `trbdf2` (difference M, linear convergence) it takes three such
+   steps in a row.
+   Numbers (old / new / truth, boost DCM v_C*): 36.594399763447576
+   (25 runs, the Eigen 3.4.0 build) / 36.5944008378685 (21 runs, kernel
+   and Python loops; error 7.0e-11 V, estimate 2.7e-11 V) /
+   36.594400837798. Orbit gradients against
+   `probes/boost_dcm_gradient_truth.py` (50-digit central differences):
+   dv/dL 9.1e-13, dv/dC 2.7e-8, dv/dR 1.1e-11, dv/dD 2.6e-12 relative.
+   Moved elsewhere: the zero-mean sine into 1 µF ‖ 1 TΩ (|μ| = 1 − 1e-9)
+   used to return v(0) 1.2 % off at the default rtol = 1e-9; it now
+   raises the noise floor and returns within `rtol=0.05`.
+   `test_example_boost_gradient`'s FD ladder stays (1e-2, 1e-3): its
+   1.15e-6 at (1e-3, 1e-4) is unchanged to the last digit (that CCM
+   orbit never took the old polish exit; a 1e-4 step over a 1e-9-rtol
+   orbit is up to 1e-5 of noise). → Reverse: the `polished` flag in
+   `periodic_orbit.hpp`, `periodic_steady_state.py`,
+   `_transient_shooting.py`; `sig0` / `on_tie` in `zero_band_on_`.

@@ -187,3 +187,20 @@ confirmed. Found and fixed (each with a test in
    controller error); decide with group 5.
 4. Temperature as a parameter: with `add-in-kernel-event-losses`.
 5. No `pulsim.optimize`: `value_and_grad` plus the worked example.
+
+## Hand-off (2026-11-19)
+
+- Saltation checked against the formulation: `_jump` forms
+  dτ/dp = −(∇g·S + g_p)/(∇g·f⁻) and S⁺ = S⁻ + (f⁻ − f⁺)·dτ/dp (f⁻ under
+  the old mask, f⁺ under the cascade's final one); a trailing gate edge has
+  dτ/dD = T. Orbit gradients solve (I − M)·dx* = ∂P/∂p with the solver's M.
+  `g_p` has no −∂V_th/∂p term (V_th is refused as a parameter).
+- Validated against 50-digit truths (shooting probes
+  `boost_dcm_gradient_truth.py`, `buck_dcm_gradient_truth.py`): every
+  orbit gradient within 2.7e-8 relative (C) and 1.3e-11 (L, R, D).
+- A state-event turn-on with a field jump (V_th = V_f + 1e-3, resonant
+  rectifier) matches central differences of the exact map to 1.0e-7.
+- Open, with the reason: 4.x (`Params<S>` on the device interface), 5.x
+  and the TR-BDF2 / fixed-engine parts of 6.x (unified stepper, loop
+  freeze), 6.1 in the stepper (event queue), 8.x (controller gains through
+  the control graph: not started), 9.x.

@@ -372,6 +372,17 @@ def test_non_differentiable_field_is_refused(name, dev, fld):
         "sensitivity_parameter", dev, fld)
 
 
+def test_more_than_64_parameters_and_duplicates_are_refused():
+    b = _buck()
+    with pytest.raises(p.UnsupportedError, match="65 parameters.*64") as ei:
+        p.simulate(b, 2 * T, engine="dsed", switch_fn=_pwm(b),
+                   sensitivities=["L.L"] * 65)
+    assert ei.value.feature == "sensitivities"
+    with pytest.raises(ValueError, match="duplicate"):
+        p.simulate(b, 2 * T, engine="dsed", switch_fn=_pwm(b),
+                   sensitivities=["L.L", "L.L"])
+
+
 def test_duty_of_a_non_pwm_schedule_is_refused():
     b = _buck()
     n, k = b.graph.num_switches, b.switch_index_of("S")
@@ -425,3 +436,102 @@ def test_time_varying_source_and_newton_device_are_refused():
     b.add_capacitor("C", "o", "gnd", 1e-6)
     with pytest.raises(p.UnsupportedError):
         p.simulate(b, 1e-3, engine="dsed", sensitivities=["R.R"])
+
+
+# ---------------------------------------------------------------------
+# Boost DCM orbit: saltation at the diode-off event and the duty edge,
+# against an independent 50-digit truth
+# ---------------------------------------------------------------------
+
+# openspec/changes/add-periodic-steady-state-shooting/probes/
+# boost_dcm_gradient_truth.py: mpmath orbit (three exact LTI segments, the
+# diode-off instant by Newton to 1e-45 T), central differences at
+# relative step 1e-15 in 50 digits (exact to every digit here).
+BOOST_DCM_ORBIT_GRAD = {"L.L": -147071.20063612, "C.C": -26.9197607319094,
+                        "RL.R": 0.0294136442959548,
+                        "S.duty": 58.8485296696508}
+
+
+# probes/buck_dcm_gradient_truth.py, the same construction on the DCM
+# buck (its orbit reproduces DCM_ORBIT to every printed digit)
+BUCK_DCM_ORBIT_GRAD = {"L.L": -34575.1542277091, "C.C": 76.7954491988042,
+                       "RL.R": 0.0692255006484714, "S.duty": 23.089569702041}
+
+
+@pytest.mark.parametrize("case", ["boost", "buck"])
+def test_dcm_orbit_gradients_against_the_50_digit_truth(case):
+    """Measured: boost L 9.1e-13, C 2.7e-8, R 1.1e-11, D 2.6e-12; buck
+    L 2.1e-12, C 1.4e-8, R 1.3e-11, D 2.1e-12 (C: the smallest relative
+    effect, so its absolute rounding shows)."""
+    from .test_periodic_orbit_kernel import _boost, _buck
+    b, sf = _boost(500.0, 0.0) if case == "boost" else _buck(50.0, 0.3)
+    truth = BOOST_DCM_ORBIT_GRAD if case == "boost" else BUCK_DCM_ORBIT_GRAD
+    r = p.periodic_steady_state(b, period=T, switch_fn=sf,
+                                sensitivities=list(truth))
+    iv = r.state_labels.index("v(vout)")
+    for name, v in truth.items():
+        rel = 3e-7 if name == "C.C" else 1e-9
+        assert r.dx0[name][iv] == pytest.approx(v, rel=rel), name
+
+
+# ---------------------------------------------------------------------
+# A field jump at turn-on (task 6.3, exact path): V_th = V_f + 1e-3
+# ---------------------------------------------------------------------
+
+BAND = dict(L=100e-6, C1=1e-6, C2=10e-6, R=100.0)
+BAND_NAMES = {"L1.L": "L", "C1.C": "C1", "C2.C": "C2", "R2.R": "R"}
+
+
+def _band_run(names=None, **kw):
+    """12 V -> L1 -> C1 resonant, rectified by a diode with a 1 mV band
+    (V_th = 1e-3, V_f = 0) into C2 || R2. The diode turns ON by a STATE
+    event (v_a - v_out crosses 1 mV), and conducts g_on (v - V_f): its
+    current jumps from ~0 to 1 A there, so f+ != f- and the saltation
+    term is part of the gradient. 300 us: 8 diode events."""
+    q = {**BAND, **kw}
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_inductor("L1", "vin", "a", q["L"])
+    b.add_capacitor("C1", "a", "gnd", q["C1"])
+    b.add_diode("D1", "a", "out", 1e3, 1e-9, 1e-3)
+    b.add_capacitor("C2", "out", "gnd", q["C2"])
+    b.add_resistor("R2", "out", "gnd", q["R"])
+    return p.simulate(b, 300e-6, engine="dsed", sensitivities=names)
+
+
+@pytest.fixture(scope="module")
+def band():
+    return _band_run(list(BAND_NAMES))
+
+
+@pytest.mark.parametrize("name", list(BAND_NAMES))
+def test_field_jump_at_turn_on_equals_a_central_difference(band, name):
+    """Measured 2.6e-8 .. 1.0e-7 relative (task bound 1e-5). The jump
+    term moves dv/dL1 1.5e-3, dv/dC1 1.3e-3, dv/dC2 1.5e-4 and dv/dR2
+    only 6.7e-7, so R2 checks the propagation, not the saltation."""
+    key = BAND_NAMES[name]
+
+    def vend(v):
+        return float(np.asarray(_band_run(**{key: v}).v("out"))[-1])
+
+    fd, err, _h = ref.central_difference(vend, BAND[key],
+                                         rel_steps=(1e-3, 1e-4))
+    s = band.sens("out", name)[-1]
+    assert abs(s - fd) <= 1e-5 * abs(fd), (s, fd, err)
+
+
+def test_the_turn_on_jump_is_not_zero(band, monkeypatch):
+    """Guard: dropping (f- - f+) dtau at the diode events moves dv/dL by
+    1.5e-3 relative (150x the central-difference bound above, 15x this
+    guard's): the field does jump here."""
+    ons = [e for e in band.sensitivity.event_dtau if "turns ON" in e["name"]]
+    assert len(ons) >= 3
+    real = sens._jump
+
+    def no_diode_jump(ctx, ev, x, S, params):
+        S1, dtau = real(ctx, ev, x, S, params)
+        return (S1, dtau) if ev["type"] == sens._GATE else (S, dtau)
+    monkeypatch.setattr(sens, "_jump", no_diode_jump)
+    cut = _band_run(["L1.L"]).sens("out", "L1.L")[-1]
+    full = band.sens("out", "L1.L")[-1]
+    assert abs(cut - full) > 1e-4 * abs(full), (cut, full)

@@ -27,7 +27,7 @@ Reference values.
 
 ## 3. Steady-state gradients (with slice 1 of `add-periodic-steady-state-shooting`)
 - [x] 3.1 `∂P/∂p` by one sensitivity period; `dx*/dp = (I − M)⁻¹·∂P/∂p`
-- [x] 3.2 Tests: the three orbit gradients above within 1e-7 relative, and equal to central differences of the steady-state solve within 1e-7 (prototype: 3.4e-10, 5.5e-9, 3.5e-10)
+- [x] 3.2 Tests: the three orbit gradients above within 1e-7 relative, and equal to central differences of the steady-state solve within 1e-7 (prototype: 3.4e-10, 5.5e-9, 3.5e-10). Added: the boost DCM orbit gradients against a 50-digit truth (`../add-periodic-steady-state-shooting/probes/boost_dcm_gradient_truth.py`): dv/dL −147071.20063612 (9.1e-13), dv/dC −26.9197607319 (2.7e-8), dv/dR 0.0294136442960 (1.1e-11), dv/dD 58.8485296697 (2.6e-12); and the DCM buck against `buck_dcm_gradient_truth.py`, which reproduces the prototype's three values: dv/dL −34575.1542277 (2.1e-12), dv/dC 76.7954491988 (1.4e-8), dv/dR 0.0692255006485 (1.3e-11), dv/dD 23.0895697020 (2.1e-12)
 
 ## 4. Parameters on the AD scalar (needs `add-unified-device-interface`)
 - [ ] 4.1 `Params<S>` for every device; parameter seeding helpers in `ad/ad_scalar.hpp`
@@ -43,8 +43,8 @@ Reference values.
 
 ## 6. Events (needs `add-unified-event-queue`, `add-fixed-step-event-splitting`)
 - [ ] 6.1 Jump correction for state events and for parameter-dependent time events; `dτ/dp` from modulators
-- [ ] 6.2 Refusals of the applicability rules, each with a test
-- [ ] 6.3 Tests: DCM buck transient values within 1e-5 relative on TR-BDF2 (rtol 1e-9) and on the fixed engine with event splitting; a rectifier with `V_th = V_f + 1e-3` (field jump at turn-on) within 1e-5 of a central difference on the exact path; the fixed engine without event splitting raises naming the diode
+- [ ] 6.2 Refusals of the applicability rules, each with a test — exact path done (`test_sensitivity_exact.py`: other engines, unknown component, non-differentiable field, more than 64 parameters and duplicates, non-PWM duty, opaque gate and callbacks, time-varying source and Newton device, grazing event); the fixed-engine-without-splitting refusal waits for `add-fixed-step-event-splitting`
+- [ ] 6.3 Tests: DCM buck transient values within 1e-5 relative on TR-BDF2 (rtol 1e-9) and on the fixed engine with event splitting; a rectifier with `V_th = V_f + 1e-3` (field jump at turn-on) within 1e-5 of a central difference on the exact path; the fixed engine without event splitting raises naming the diode — the exact-path rectifier is done (resonant LC rectifier, 8 diode events in 300 µs: 2.6e-8 … 1.0e-7 of central differences; dropping the jump term moves dv/dL by 1.5e-3, dv/dR only 6.7e-7); the TR-BDF2 / fixed-engine parts wait for groups 5–6 (loop freeze)
 
 ## 7. KPI gradients and optimisation interface
 - [x] 7.1 `res.sens`, `res.sensitivity.states`, `res.kpi(…, with_grad=True)` for final value, average, RMS, energy, peak, ripple; `non_unique` flag
