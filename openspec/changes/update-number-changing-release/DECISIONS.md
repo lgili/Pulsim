@@ -145,6 +145,11 @@ None of the 6 remaining worse cells comes from the output grid. The strict error
 
 Under `dsed:output_grid` / `dsed+next` (netlist dt), the counts are unchanged at 100/0/0/9/0.
 
+Not named above (integration batch 14n review): one analytic cell is less accurate under the rule while it
+still agrees, `analytic:hard_switched_rc` on dsed, 7.6e-14 -> 2.5e-10 against its closed form (rehearsal blocker
+list item 1, responsible `dsed:output_grid`). Cause not traced; the rule's projection threshold and the
+relocated event roots are the candidates.
+
 **Cost.** Measured on the 100 circuits `auto+next` routes to dsed, rule alone, wall time best of 2, all 100 run, cap hit 0 times, unbounded steps 0:
 
 | `output_rtol` | samples | wall |

@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Thermal networks on the variable-step engine; the exact engine's output grid
+
+* **Fixed** `engine='trbdf2'` (and `integrator='esdirk43'`) with a loss
+  port feeding a thermal network (`set_device_losses(junction=...)`) no
+  longer stalls: the heat power's change at each step start goes into the
+  thermal capacitors' stored current and the conduction power is delivered
+  over the step (a six-junction VSI ran out of steps at 20 µs; it now runs
+  at rtol 1e-9 in ~12 600 steps). Runs with a thermal network on trbdf2 /
+  esdirk43 give different (more accurate) junction temperatures; runs
+  without one are unchanged.
+* **Added** `simulate(engine='exact', output_rtol=r)`: without `dt`,
+  `store_every` or recorders, every event instant is a sample and the steps
+  between events are cut so that linear interpolation is within `r` of
+  every state's range (counters in `diagnostics['output_grid']`). Default
+  `None` keeps today's samples; refused by name off the exact engine.
+
 ### esdirk43 runs the stateful kinds and the losses; the exact engine's loss port
 
 * **Added** `integrator='esdirk43'` (engine `trbdf2`) runs the nonlinear
