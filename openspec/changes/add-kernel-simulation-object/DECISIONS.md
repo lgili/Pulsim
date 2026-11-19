@@ -207,3 +207,10 @@
     which is fine; a raw `run_*_native_builder` dict record would not be.
     Not verified here: Eigen 3.4.0 (the C++ touched is option plumbing,
     no sparse code).
+    State at hand-off: 9fbbdb2a + 09b5ff34 + this commit are LOCAL, not
+    pushed: the full ctest build (156 steps after the merge) did not
+    finish in this session, and no tip is pushed without it. Next agent:
+    `zsh .scratch/build.sh ctest`, run ctest, then push. Bytecode count
+    per simulate() call (`.scratch/opcount.py`, 6-branch buck): pwl 2462
+    vs 2398 at 656b894f (+64, above the DECISIONS 13 gate of "not above
+    base"; not investigated), trbdf2 3028 vs 3159.
