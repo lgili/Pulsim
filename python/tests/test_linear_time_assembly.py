@@ -32,7 +32,9 @@ def test_vsi_fixed_engine_one_structure_one_analysis():
                         on_cache=caches.append)
     (cache,) = caches
     m = cache.metrics()
-    assert cache.num_built_segments() > 20  # many masks visited
+    # many masks visited (the precondition, not the claim): 16 under the release default
+    # (16 with the restart rule alone too), 32 restart-less
+    assert cache.num_built_segments() > 10
     assert m.structure_builds <= 2
     assert m.symbolic_analyses <= 2
     assert m.symbolic_fallbacks == 0
