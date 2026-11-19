@@ -672,6 +672,7 @@ inline SimulationResult run_transient_trbdf2(
     // only on ACCEPT under the rule its last solve stamped, so a
     // rejected step never touches them and no rollback is needed.
     pwl::StatefulHistories hs;
+    hs.get<pwl::ExternalDeviceHistory>().set_start_time(opts.t_start);   // ctx->t of init
     hs.init(graph, pool);
     hs.set_path(opts.device_path, graph, pool, "run_transient_trbdf2");
     if (initial_state.has_value()) hs.seed_from_dc_op(x);
@@ -785,7 +786,7 @@ inline SimulationResult run_transient_trbdf2(
     // One step context for every stateful stamp (add-unified-device-
     // interface step 2): every solve, probe and landing sets it once, so
     // no stamp can read a step that this solve did not set.
-    pwl::StepCtx step_ctx{};
+    pwl::StepCtx step_ctx{Real{0}, pwl::TrBdf2Stage::Trapezoidal, opts.t_start};
     const pwl::NonlinearRefreshFn nl_effective = pwl::build_device_refresh(
         nl_static, hs, step_ctx, /*sat_increment_form=*/true);
 
@@ -980,6 +981,7 @@ inline SimulationResult run_transient_trbdf2(
         // choke point all trapezoidal solves pass through, is the
         // same fix run_transient applies to its `step_ctx`.
         step_ctx = step::Trapezoidal::stage(dt).ctx();
+        step_ctx.t = t0 + dt;   // the external devices' ctx->t
         history.compute_b_extra(dt, b_stage);
         accumulate_sources(t0 + dt, b_src);
         b_stage += b_src;
@@ -2758,6 +2760,7 @@ inline SimulationResult run_transient_trbdf2(
             b_stage += b_src;
             x_g = x;                 // Newton warm start
             step_ctx = stage0.ctx();
+            step_ctx.t = t + h_pt;
             // A step below the matrix's conditioning floor: 2C/h against
             // a node held only by g_off (a capacitor between two OFF
             // diodes) leaves a pivot below eps, and the factorization
@@ -2835,6 +2838,7 @@ inline SimulationResult run_transient_trbdf2(
                 // identity c1/h == 2/(gamma*h) is what allows that.
                 hs.capture_gamma(x_g);
                 step_ctx = step::TrBdf2::stage(h, 1).ctx();
+                step_ctx.t = t + h;
                 x_1 = x_g;           // Newton warm start
                 stage_ok =
                     solve_dispatch(mask_step, hg, b_stage, x_1);

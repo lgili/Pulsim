@@ -45,6 +45,9 @@ namespace pulsim::pwl {
 struct StepCtx {
     Real h = Real{0};
     TrBdf2Stage stage = TrBdf2Stage::Trapezoidal;
+    /// The time the solve is at (where the stage ends). Read only by the
+    /// external devices (ctx->t); no built-in law reads it.
+    Real t = Real{0};
 };
 
 [[nodiscard]] inline CossStage coss_stage_of(TrBdf2Stage s) noexcept {
@@ -200,6 +203,7 @@ static_assert(detail::AllStamp<StatefulKinds>::value,
     NonlinearRefreshFn base, StatefulHistories& hs, const StepCtx& ctx,
     bool increment_form) {
     if (!hs.any()) return base;
+    hs.get<ExternalDeviceHistory>().bind_time(&ctx.t);
     if (hs.interface()) {
         // DECISIONS #23: every stateful kind through its law (set_path
         // refused the run if one is not ported). Static dispatch.

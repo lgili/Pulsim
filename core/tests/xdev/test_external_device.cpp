@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -128,4 +129,33 @@ TEST_CASE("xdev: run-time finiteness and the debug Jacobian check", "[xdev]") {
     } catch (const xdev::ContractError& e) {
         CHECK(has(e.what(), "declared dq[0]/dx[0]"));
     }
+}
+
+TEST_CASE("xdev: the reviewer's open list (#16) and the solve's time", "[xdev]") {
+    xdev::EvalOut o;
+    // a finite output whose SUM overflows is not a refusal
+    auto huge = xdev::load_model(PULSIM_XDEV_CONTRACT, "huge_outside");
+    xdev::Instance h("Xh", huge, {1e-3});
+    xdev::check_contract(h);
+    h.size(o);
+    const Real out_of_box[2] = {5.0, 0.0};
+    CHECK_NOTHROW(h.eval(out_of_box, nullptr, o));
+    CHECK(o.df[0] == 1e308);
+    // an honest kink (no SMOOTH claim) at the probe centre: one-sided slopes
+    CHECK(refusal(PULSIM_XDEV_CONTRACT, "honest_kink").empty());
+    auto kink = xdev::load_model(PULSIM_XDEV_CONTRACT, "honest_kink");
+    xdev::Instance k("Xk", kink, {1e-3}, /*debug_jacobian=*/true);
+    k.size(o);
+    const Real at_kink[2] = {0.0, 0.0};
+    CHECK_NOTHROW(k.eval(at_kink, nullptr, o));
+    // a kink CLAIMED smooth stays refused
+    CHECK(has(refusal(PULSIM_XDEV_CONTRACT, "liar_kink"), "claims SMOOTH"));
+    // the time reaches ctx->t, with host_features saying so
+    auto ramp = xdev::load_model(PULSIM_XDEV_CONTRACT, "ramp_conductance");
+    xdev::Instance r("Xr", ramp, {1e-3});
+    r.size(o);
+    const Real v1[2] = {1.0, 0.0};
+    r.eval(v1, nullptr, o, /*t=*/2e-3);
+    CHECK(std::abs(o.f[0] - 3e-3) <= 1e-15);   // G (1 + t / 1 ms) at t = 2 ms
+    CHECK((r.ctx_(nullptr, 1.0).host_features & PULSIM_XDEV_HOST_TIME) != 0u);
 }

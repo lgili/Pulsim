@@ -56,6 +56,12 @@ F = r"([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)"
 # script -> [(regex with ONE group, (lo, hi))]. Reference for each value
 # in the script's own docstring (analytic formula or settled setpoint).
 SCRIPTS = {
+    # an external device (C model built by the script): closed-form steady state
+    "run_external_self_heating_resistor.py": [
+        (r"cold current: " + F, near(100.0, 1e-6)),
+        (r"settled temperature rise: " + F, near(42.841847, 1e-5)),
+        (r"settled current: " + F, near(85.68369, 1e-4)),
+    ],
     "run_buck_closed_loop.py": [
         (r"pre-step .*?mean=" + F, near(12.0, 0.05)),
         (r"post-step .*?mean=" + F, near(14.0, 0.05)),

@@ -29,15 +29,15 @@ INC = ROOT / "core" / "include"
 EXT = {"win32": ".dll", "darwin": ".so"}.get(sys.platform, ".so")
 
 
-def _compile(tmp, src, out, cxx):
+def _compile(tmp, src, out, cxx, inc=()):
     tool = shutil.which(os.environ.get("CXX" if cxx else "CC", "") or "") \
         or shutil.which("c++" if cxx else "cc")
     if tool is None or sys.platform == "win32":
         pytest.skip("no C/C++ compiler to build the test model libraries "
                     "(set PULSIM_XDEV_TEST_LIBDIR to CMake-built ones)")
     std = "-std=c++20" if cxx else "-std=c99"
-    cmd = [tool, std, "-O2", "-shared", "-fPIC", f"-I{INC}", str(src), "-o",
-           str(out)]
+    cmd = [tool, std, "-O2", "-shared", "-fPIC", *[f"-I{i}" for i in inc],
+           f"-I{INC}", str(src), "-o", str(out)]
     if sys.platform == "darwin":
         cmd.insert(1, "-undefined")
         cmd.insert(2, "dynamic_lookup")
@@ -45,6 +45,9 @@ def _compile(tmp, src, out, cxx):
         cmd.append("-lm")
     subprocess.run(cmd, check=True, capture_output=True, text=True)
     return str(out)
+
+
+KEYS = ("twins", "contract", "contract_v1")
 
 
 def _built_libs():
@@ -59,10 +62,11 @@ def _built_libs():
         for f in lib_dir.iterdir():
             if f.suffix not in (".so", ".dll", ".dylib"):
                 continue   # .lib / .exp / .pdb beside a Windows .dll
-            for key in ("twins", "contract"):
-                if f"pulsim_xdev_{key}" in f.name:
+            stem = f.stem.removeprefix("lib")
+            for key in KEYS:
+                if stem == f"pulsim_xdev_{key}":
                     found[key] = str(f)
-        if len(found) == 2:
+        if len(found) == len(KEYS):
             return found
     return None
 
@@ -78,6 +82,10 @@ def libs(tmp_path_factory):
             "twins": _compile(tmp, SRC / "twin_models.cpp", tmp / f"twins{EXT}", True),
             "contract": _compile(tmp, SRC / "contract_models.c",
                                  tmp / f"contract{EXT}", False),
+            # the same C models against the header as of c90fc07f
+            "contract_v1": _compile(tmp, SRC / "contract_models.c",
+                                    tmp / f"contract_v1{EXT}", False,
+                                    (SRC / "abi_v1_c90fc07f",)),
         }
     except pytest.skip.Exception:
         if os.environ.get("CI"):
@@ -169,11 +177,151 @@ def test_legacy_path_routes_the_external_device_through_its_law(libs):
     assert _err(a, i) <= 1e-9
 
 
-def test_dsed_and_dc_operating_point_refuse_by_name(libs):
+def test_dsed_refuses_by_name(libs):
     with pytest.raises(p.UnsupportedError, match="ExternalDevice"):
         p.simulate(_rectifier(libs, True), engine="dsed", **KW)
-    with pytest.raises(ValueError, match="external device 'D'"):
-        p.simulate(_rectifier(libs, True), start_from_dc_op=True, **KW)
+
+
+# ---- the solve's time reaches the model (ctx->t) --------------------------
+
+def _ramp(lib, R=1e3, G=1e-3):
+    """1 V -> R -> a -> ramp conductance g(t) = G (1 + t / 1 ms) -> gnd."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 1.0)
+    b.add_resistor("R", "in", "a", R)
+    b.add_external_device("X", ["a", "gnd"], lib, "ramp_conductance", {"G": G})
+    return b
+
+
+def _ramp_exact(t, R=1e3, G=1e-3):
+    return 1.0 / (1.0 + R * G * (1.0 + 1e3 * np.asarray(t)))
+
+
+@pytest.mark.parametrize("which", ["contract", "contract_v1"])
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_a_time_dependent_law_reads_the_solve_time(libs, which, engine):
+    """The law g(t) is algebraic, so v_a at every output time is the closed
+    form at THAT time: with t stuck at 0 v_a would stay at 0.5 V. The
+    library built against the header as of c90fc07f gets the time too."""
+    b = _ramp(libs[which])
+    kw = dict(rtol=1e-6) if engine == "trbdf2" else {}
+    res = p.simulate(b, engine=engine, t_end=1e-3, dt=1e-5, **kw)
+    t = np.asarray(res.times)
+    v = np.asarray(res.states)[:, b.node_id_of("a")]
+    assert t[-1] == pytest.approx(1e-3)
+    # sample 0 is the zero start (x = 0), not a solve
+    assert np.max(np.abs(v[1:] - _ramp_exact(t[1:]))) <= 1e-9   # Newton's tolerance
+    assert v[-1] == pytest.approx(1.0 / 3.0, abs=1e-9)
+
+
+# ---- DC operating point: f(x), df/dx with the storage terms dropped -------
+
+def _dc_rectifier(libs, external):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 5.0)
+    b.add_resistor("Rs", "in", "a", 1.0)
+    if external:
+        b.add_external_device("D", ["a", "out"], libs["twins"], "shockley_twin", SHOCK)
+    else:
+        b.add_shockley_diode("D", "a", "out", SHOCK["I_S"], SHOCK["n"], SHOCK["V_T"],
+                             SHOCK["G_min"])
+    b.add_capacitor("C", "out", "gnd", 10e-6)
+    b.add_resistor("R", "out", "gnd", 10.0)
+    return b
+
+
+def _dc_satind(libs, external):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 1.0)
+    b.add_resistor("R", "in", "a", 0.5)
+    if external:
+        b.add_external_device("L", ["a", "gnd"], libs["twins"], "satind_twin", SAT)
+    else:
+        b.add_saturable_inductor("L", "a", "gnd", SAT["L_0"], SAT["I_sat"],
+                                 SAT["L_residual"])
+    return b
+
+
+def _dc_x(b):
+    return np.asarray(p._pulsim.compute_dc_operating_point(
+        b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches)).x)
+
+
+@pytest.mark.parametrize("make", [_dc_rectifier, _dc_satind])
+def test_dc_operating_point_of_the_twin_equals_the_builtin(libs, make):
+    xb, xe = _dc_x(make(libs, False)), _dc_x(make(libs, True))
+    assert xb.shape == xe.shape
+    # <= 1e-12 of scale is the local identity gate; 1e-9 elsewhere (CI lesson)
+    assert np.max(np.abs(xb - xe)) <= 1e-9 * np.max(np.abs(xb))
+    assert np.max(np.abs(xb)) > 0.5      # a real operating point, not zeros
+
+
+@pytest.mark.parametrize("make", [_dc_rectifier, _dc_satind])
+def test_start_from_dc_op_with_an_external_device_equals_the_builtin(libs, make):
+    kw = dict(t_end=2e-5, dt=1e-6, start_from_dc_op=True, device_path="interface")
+    rb, re_ = p.simulate(make(libs, False), **kw), p.simulate(make(libs, True), **kw)
+    xb, xe = np.asarray(rb.states), np.asarray(re_.states)
+    assert np.max(np.abs(xb[0] - xe[0])) <= 1e-9 * np.max(np.abs(xb[0]))
+    # the truth: a DC source, so the run stays AT the DC point. (The built-in
+    # saturable inductor does not: its flux history is not seeded from the
+    # DC point on pwl and its current collapses at step 1 — recorded in
+    # DECISIONS #19, not this track's to change.)
+    assert np.max(np.abs(xe - xe[0])) <= 1e-9 * np.max(np.abs(xe))
+
+
+def test_dc_operating_point_hands_the_model_t_eval(libs):
+    b = _ramp(libs["contract"])
+    x = np.asarray(p._pulsim.compute_dc_operating_point(
+        b.graph, b.pool, p.SwitchStateMask(0), t_eval=5e-4).x)
+    # the DC solve's own conductance floor (1e-9 S at the node) moves it 1.6e-10
+    assert x[b.node_id_of("a")] == pytest.approx(float(_ramp_exact(5e-4)), abs=1e-9)
+    assert abs(x[b.node_id_of("a")] - 0.5) > 0.09    # t_eval reached the law
+
+
+# ---- AC sweep: linearised at the DC point (df/dx + jw dq/dx) --------------
+
+FREQS = np.array([10.0, 1e3, 1e5])
+
+
+def test_ac_sweep_of_the_external_shockley_is_its_small_signal_resistance(libs):
+    """Biased near 1 A: H = r_d / (R_s + r_d), r_d = n V_T / (I + I_S) (G_min
+    in parallel), from the DC point the sweep solved itself."""
+    b = _dc_rectifier(libs, True)
+    res = p.run_mna_sweep(b, output_idx=b.node_id_of("out"), freqs=FREQS,
+                          v_in_branch_id=b.branch_id_of("V"))
+    x = _dc_x(_dc_rectifier(libs, True))
+    va, vo = x[b.node_id_of("a")], x[b.node_id_of("out")]
+    i_dc = vo / 10.0 + 0.0                     # the load current = the diode current
+    assert 0.3 < i_dc < 1.0
+    vd = va - vo
+    g = SHOCK["I_S"] / (SHOCK["n"] * SHOCK["V_T"]) * np.exp(vd / (SHOCK["n"] * SHOCK["V_T"])) \
+        + SHOCK["G_min"]
+    r_d = 1.0 / g
+    assert r_d == pytest.approx(SHOCK["n"] * SHOCK["V_T"] / (i_dc - SHOCK["G_min"] * vd
+                                                         + SHOCK["I_S"]), rel=1e-9)
+    w = 2 * np.pi * FREQS
+    zl = 1.0 / (1.0 / 10.0 + 1j * w * 10e-6)   # R || C at the output
+    exact = zl / (1.0 + r_d + zl)
+    np.testing.assert_allclose(np.asarray(res.H), exact, rtol=1e-9)
+
+
+def test_ac_sweep_of_the_external_saturable_inductor_is_its_incremental_inductance(libs):
+    """At I = 2 A: L(I) = dλ/di = L_res + (L_0 - L_res) / (1 + (I/I_sat)^2) —
+    the same sweep as a built-in linear inductor of that L."""
+    b = _dc_satind(libs, True)
+    res = p.run_mna_sweep(b, output_idx=b.node_id_of("a"), freqs=FREQS,
+                          v_in_branch_id=b.branch_id_of("V"))
+    i_dc = 1.0 / 0.5
+    L = SAT["L_residual"] + (SAT["L_0"] - SAT["L_residual"]) / (1 + (i_dc / SAT["I_sat"]) ** 2)
+    lin = p.CircuitBuilder()
+    lin.add_voltage_source("V", "in", "gnd", 1.0)
+    lin.add_resistor("R", "in", "a", 0.5)
+    lin.add_inductor("L", "a", "gnd", L)
+    ref = p.run_mna_sweep(lin, output_idx=lin.node_id_of("a"), freqs=FREQS,
+                          v_in_branch_id=lin.branch_id_of("V"))
+    np.testing.assert_allclose(np.asarray(res.H), np.asarray(ref.H), rtol=1e-9)
+    w = 2 * np.pi * FREQS
+    np.testing.assert_allclose(np.asarray(res.H), 1j * w * L / (0.5 + 1j * w * L), rtol=1e-9)
 
 
 def test_snapshot_resume_carries_the_external_state_bit_identically(libs):
@@ -213,6 +361,49 @@ def test_debug_jacobian_catches_a_lie_the_registration_could_not_see(libs):
     p.simulate(build(False), t_end=1e-5, dt=1e-6)   # passes registration and runs
     with pytest.raises(ValueError, match="run-time debug check"):
         p.simulate(build(True), t_end=1e-5, dt=1e-6)
+
+
+def test_debug_jacobian_accepts_an_honest_kink_with_one_sided_slopes(libs):
+    """A model that does NOT claim SMOOTH declares the backward slope at its
+    kink (v = 0); the central quotient averages both sides (0.75 G) and
+    matches neither. Registration (the probe centre is v = 0) and the
+    run-time debug check accept either one-sided derivative."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 1.0, 1e3)
+    b.add_resistor("R", "in", "a", 100.0)
+    b.add_external_device("X", ["a", "gnd"], libs["contract"], "honest_kink",
+                          debug_jacobian=True)
+    res = p.simulate(b, t_end=1e-3, dt=1e-5)
+    va = np.asarray(res.states)[:, b.node_id_of("a")]
+    assert np.min(va) < 0 < np.max(va)    # the run crossed the kink both ways
+
+
+def test_a_rebuild_with_the_same_size_and_mtime_is_refused(libs, tmp_path):
+    if sys.platform == "win32":
+        pytest.skip("Windows locks a loaded DLL: it cannot change on disk")
+    lib = tmp_path / f"same{EXT}"
+    shutil.copyfile(libs["contract"], lib)
+    keep = p.CircuitBuilder()
+    keep.add_external_device("X", ["a", "gnd"], str(lib), "good_resistor")
+    st = os.stat(lib)
+    data = bytearray(lib.read_bytes())
+    data[-1] ^= 0xFF                       # one byte: same size
+    lib.write_bytes(bytes(data))
+    os.utime(lib, ns=(st.st_atime_ns, st.st_mtime_ns))   # same mtime
+    assert os.stat(lib).st_size == st.st_size and os.stat(lib).st_mtime_ns == st.st_mtime_ns
+    with pytest.raises(ValueError, match="changed on disk"):
+        p.CircuitBuilder().add_external_device("Y", ["a", "gnd"], str(lib), "good_resistor")
+    del keep
+
+
+@pytest.mark.skipif((os.cpu_count() or 1) < 2, reason="a race needs two cores to fire")
+def test_registration_refuses_a_model_that_is_not_reentrant(libs):
+    """liar_racy is pure when called serially (it passes the repeat and the
+    interleaved checks) but keeps its scratch in a static: concurrent calls
+    corrupt each other. The threaded registration probe sees it."""
+    with pytest.raises(ValueError, match="not reentrant"):
+        p.CircuitBuilder().add_external_device("X", ["a", "gnd"], libs["contract"],
+                                               "liar_racy")
 
 
 def test_registration_refuses_a_lying_model_by_name(libs):

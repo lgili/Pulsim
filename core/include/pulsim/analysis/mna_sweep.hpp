@@ -37,6 +37,8 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/assemble.hpp"
+#include "pulsim/pwl/dc_operating_point.hpp"
+#include "pulsim/pwl/external_device_history.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sparse/matrix.hpp"
@@ -178,8 +180,24 @@ assemble_sweep_matrices(const topology::Graph& graph,
     //    descriptor form reads E·dx/dt + G·x + b = 0; substituting
     //    x -> x_op + x̂·e^{jωt} gives (jω·E + G)·x̂ = −b̂, read at
     //    output_node_idx for b̂ = e_input.
-    const detail::SweepMatrices sm =
+    detail::SweepMatrices sm =
         detail::assemble_sweep_matrices(graph, pool, mask);
+
+    // 3. External devices (add-external-device-abi), the one Newton kind the
+    //    sweep linearises: at the DC operating point of this mask, G += ∂f/∂x
+    //    and E += ∂q/∂x from the model's declared Jacobians.
+    if (!pool.external_device_branches().empty()) {
+        pwl::DCOperatingPointOptions dc_opts;
+        const auto op = pwl::compute_dc_operating_point(
+            graph, pool, mask, {}, dc_opts, nullptr, "run_mna_sweep", "ac_sweep");
+        // the model state the DC point was solved with (init at x = 0)
+        pwl::ExternalDeviceHistory xh;
+        xh.set_start_time(dc_opts.t_eval);
+        xh.init(graph, pool);
+        xh.linearise(op.x, sm.G, sm.E, dc_opts.t_eval);
+        sm.G.makeCompressed();
+        sm.E.makeCompressed();
+    }
 
     const Index n = sm.G.rows();
     if (n <= 0) {

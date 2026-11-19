@@ -134,7 +134,10 @@ def run_mna_sweep(builder,
         PWL diodes held at ``mask``. It refuses (``ValueError`` naming the
         branch and its kind) any Newton device (smooth, Shockley and
         Lauritzen diodes, level-1 MOSFET/IGBT, saturable inductor,
-        junction capacitor, PMSM): it does not linearise them, so use
+        junction capacitor, PMSM): it does not linearise them (an
+        external device, ``add_external_device``, is the exception: it is
+        linearised at the DC operating point from its declared
+        Jacobians), so for those use
         :func:`run_ac_sweep`, :func:`pulsim.fra.run_fra`,
         :func:`frequency_response`, or this function with
         ``use_kernel=False`` (impulse-FFT, needs ``dt`` and ``t_end``).

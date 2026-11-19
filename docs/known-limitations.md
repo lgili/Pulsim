@@ -59,7 +59,7 @@ unless called with `allow_non_passive=True`.
 | PulseCurrentSource | Source | yes | yes | yes | yes | yes |
 | PwlCurrentSource | Source | yes | yes | yes | yes | yes |
 | InductionMachineMna | NewtonStateful | yes | yes | no | no | no |
-| ExternalDevice | NewtonStateful | yes | yes | no | no | no |
+| ExternalDevice | NewtonStateful | yes | yes | no | no | yes |
 <!-- engine-capabilities:end -->
 
 ## Option capability matrix
@@ -256,6 +256,7 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
+| **External devices (`add_external_device`) are refused by the exact engine (`dsed`) and `bdf1`.** `dsed` propagates each topology mode in closed form and admits no Newton device; a law known only through `f`, `q` and their Jacobians at sampled points has no closed-form propagator. No sandbox: a model library is native code. No YAML type yet. | `UnsupportedError(kind='ExternalDevice')` on `dsed` / `bdf1`. | `pwl`, `trbdf2`, the DC operating point and the kernel AC sweep run it (`docs/external-devices.md`). |
 | **`add_nonlinear_diode` is retired.** Its law `logistic(κ(v − V_F0))·(v − V_F0)/R_d` sources power for `0 < v < V_F0`. It now raises `RetiredDeviceError` unless called with `allow_non_passive=True` (YAML: `allow_non_passive: true`). | Default parameters, 0.636 V forced: −1.3923 A. 20 V / 1 kHz sine clamp through 10 Ω: `pwl` at `dt = 1 µs` aborts; `trbdf2` RMS 9.634 V against 10.01 V for the PWL and Shockley diodes. | `add_diode(..., V_f=)` or `add_shockley_diode`. |
 
 ## Switching helpers

@@ -72,10 +72,16 @@ typedef struct pulsim_xdev_monotone {
     uint32_t row, col;
 } pulsim_xdev_monotone;
 
+/* host_features bits: a set bit says the host fills that ctx field. A model
+ * reads the field only when the bit is set (a host built before the bit
+ * existed leaves it clear and passes 0). */
+#define PULSIM_XDEV_HOST_TIME (1u << 0) /* ctx->t is the time of the solve, s */
+
 typedef struct pulsim_xdev_ctx {
     uint32_t struct_size; /* sizeof(pulsim_xdev_ctx) of the HOST */
-    uint32_t host_features; /* version 1: 0 (bit set = an optional ctx field is filled) */
-    double t;             /* not filled in version 1 (host_features bit 0 clear): 0 */
+    uint32_t host_features; /* PULSIM_XDEV_HOST_* bits */
+    double t;             /* the time the solve is at (the stage time; t_eval at DC) when
+                           * host_features & PULSIM_XDEV_HOST_TIME, else 0 */
     const double *p;      /* n_fields parameter values, field order */
     const double *state;  /* n_state committed values (NULL if n_state == 0) */
     const void *instance; /* what `create` returned, or NULL */

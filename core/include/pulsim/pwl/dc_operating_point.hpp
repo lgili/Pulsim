@@ -35,6 +35,7 @@
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
+#include "pulsim/pwl/external_device_history.hpp"
 #include "pulsim/pwl/gmin.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -117,7 +118,7 @@ struct DCOperatingPoint {
     const topology::Graph& graph,
     const DevicePool& pool,
     const topology::SwitchStateMask& user_mask,
-    const NonlinearRefreshFn& refresh = {},
+    const NonlinearRefreshFn& refresh_in = {},
     const DCOperatingPointOptions& opts = {},
     DiodeEventState* diodes = nullptr,
     const char* who = "compute_dc_operating_point",
@@ -125,15 +126,29 @@ struct DCOperatingPoint {
     // Before the direct solve: its failure handler walks the cascade and
     // re-wraps every error as "no DC operating point".
     require_no_dc_voltage_loop(graph, pool, opts.t_eval, engine, &user_mask);
-    // add-external-device-abi: the DC solve stamps the static kinds only;
-    // an external device (a stateful kind) would be silently missing.
+    // add-external-device-abi: an external device's DC law is its f(x) and
+    // ∂f/∂x with the storage terms dropped (q̇ = 0), stamped after the static
+    // chain through the same Newton and cascade. Its model state is the one
+    // init(x = 0) gives (the transient's zero start); the transient re-seeds
+    // it at the DC point. A model whose DC Jacobian is singular there fails
+    // through the DC solver's own diagnosis.
+    NonlinearRefreshFn refresh = refresh_in;
     if (!pool.external_device_branches().empty()) {
-        const auto& p = pool.external_device_params(pool.external_device_branches().front());
-        throw UnsupportedError(
-            engine, "dc_operating_point", p.inst->device(), "ExternalDevice",
-            std::string(who) + ": external device '" + p.inst->device()
-                + "' has no DC operating-point stamp yet (the DC solve has no "
-                  "stateful-kind hook); start from zero initial conditions instead");
+        auto xh = std::make_shared<ExternalDeviceHistory>();
+        xh->set_start_time(opts.t_eval);
+        xh->init(graph, pool);
+        refresh = [base = refresh_in, xh, t = opts.t_eval](
+                      const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
+                      const topology::Graph& g, const DevicePool& p) -> Real {
+            Real m = Real{0};
+            if (base) {
+                m = base(x, J_nl, f_nl, g, p);
+            } else {
+                sparse::zero_keep_pattern(J_nl);
+                f_nl.setZero();
+            }
+            return std::max(m, xh->stamp_dc(x, J_nl, f_nl, t));
+        };
     }
 
     const bool has_diodes =
