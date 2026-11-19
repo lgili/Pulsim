@@ -558,6 +558,21 @@ inline void dc_assemble(const topology::Graph& graph,
                 const Index branch_var_id =
                     pool.branch_var_id_for_inductor(branch.id, graph);
                 stamp_inductor_dc(J, b, coord, branch_var_id);
+            } else if (pool.kind_of(branch.id)
+                       == DevicePool::StoredKind::ExternalDevice) {
+                // add-external-device-abi: the law (f, ∂f/∂x) is stamped by
+                // the DC refresh; each branch carrying an internal unknown
+                // gets the same −1e-12 diagonal as a DC inductor's branch
+                // row (as the transient's G_min, DECISIONS #7), so a twin's
+                // DC equations match the built-in's to the bit
+                const auto& xp = pool.external_device_params(branch.id);
+                const auto& br = xp.branches;
+                const auto k = static_cast<std::size_t>(
+                    std::find(br.begin(), br.end(), branch.id) - br.begin());
+                if (k < xp.inst->model().d().n_internal) {
+                    const Index bv = pool.branch_var_id_for_inductor(branch.id, graph);
+                    J.coeffRef(bv, bv) += Real{-1e-12};
+                }
             }
             break;
         }

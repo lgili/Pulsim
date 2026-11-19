@@ -2,8 +2,10 @@
 
 An external device is an implicit Newton device whose law comes from a shared
 library you build: Pulsim stamps it like a built-in device on the `pwl` and
-`trbdf2` engines. Status: stage 1 of `add-external-device-abi` (C ABI, checks,
-Python call); no YAML type, no DC operating point yet.
+`trbdf2` engines, in the DC operating point (`start_from_dc_op`,
+`compute_dc_operating_point`) and in the kernel AC sweep. Status: stages 1–3
+of `add-external-device-abi` (C ABI, checks, Python call, time, DC, AC); no
+YAML type yet.
 
 ## Loading a library runs native code
 
@@ -25,6 +27,21 @@ There is no YAML device type, so a netlist cannot make Pulsim load code.
   The integrator owns `d/dt`.
 - `eval` must be pure (no hidden state) and reentrant. State changes only in
   `accept`, into the kernel-owned array of `n_state` reals.
+- **Time**: `ctx->t` is the time of the solve (the end of the stage being
+  solved; `t_eval` in the DC operating point) whenever
+  `ctx->host_features & PULSIM_XDEV_HOST_TIME` — every host since this bit
+  was named sets it, and a library built before it reads the same field (the
+  bit is new, the field is not). The registration checks evaluate at t = 0:
+  a law that is only valid at other times must be valid at 0 as well.
+- **DC operating point**: the model's `f(x)` and `∂f/∂x` with the storage
+  terms dropped (`dq/dt = 0`), solved by the same Newton and cascade as the
+  built-in devices; the model state is the one `init(x = 0)` writes (the
+  transient re-seeds it at the DC point). A model with no DC path (a pure
+  `q` device between two otherwise floating nodes) makes the DC matrix
+  singular and the DC solver says so.
+- **AC sweep** (`run_mna_sweep(..., v_in_branch_id=...)`): linearised at the
+  DC operating point of the given mask, `G += ∂f/∂x`, `E += ∂q/∂x`, from the
+  model's declared Jacobians.
 - **Smoothness**: a Newton device law must be smooth to about 1e-12 — a 2L/h
   factor turns a 1e-9 V tolerance into 6e-13 A, and a cancellation-prone
   formula (`coth(x) - 1/x` without its series) once made a law non-monotone
@@ -46,7 +63,21 @@ SMOOTH, PASSIVE, RECIPROCAL and monotone pairs; model state written within
 (one comparison), every `accept` for writes past `n_state`;
 `debug_jacobian=True` re-checks the Jacobian at every evaluation (tolerance:
 1e-5 of the row plus the difference quotient's own rounding, so a 0.1 pF
-capacitance is checked, not floored away) and the `const` inputs.
+capacitance is checked, not floored away) and the `const` inputs. A model
+that does not claim SMOOTH may declare either one-sided derivative at a
+kink (forward and backward Richardson quotients are accepted besides the
+central one); a SMOOTH claim is held to the central quotient.
+
+Always on during a run, besides finiteness: a stateful model's committed
+state is compared after every evaluation (`n_state` reals; nothing for a
+stateless model) and `ctx->p` once per accepted step — a write through
+either is refused by name. A write into `x` reaches only the host's copy for
+that call (it is gathered again before `accept`). Purity also means "not
+depending on the previous call": registration evaluates x_a, x_b, x_a and
+requires the first result again, and evaluates the probe points from four
+threads at once against the serial results (a probe for a model that shares
+scratch between calls, not a proof: a race that does not fire there is not
+excluded). Every model must be reentrant; there is no serial-only mode.
 
 ## Building a model, platforms
 
@@ -59,10 +90,12 @@ capacitance is checked, not floored away) and the `const` inputs.
   Linux / macOS (LP64) and Windows (LLP64) share one layout, with no padding.
   A compiler that would lay it out differently fails to compile.
 - One loaded copy per path per process. Rebuilding a library while a circuit
-  in the same process still uses it is refused by name (its size or
-  modification time changed): the loader would otherwise keep running the old
-  code. Release those circuits (or restart) to load the new build. Windows
-  locks a loaded DLL, so it cannot change there.
+  in the same process still uses it is refused by name (its size,
+  modification time or bytes changed — the file is hashed at each load, so a
+  same-size same-second rebuild is seen too): the loader would otherwise keep
+  running the old code. Release those circuits (or restart) to load the new
+  build. Windows locks a loaded DLL, so it cannot change there; a path of
+  MAX_PATH (260) characters or more is loaded with the `\\?\` prefix.
 
 ## Python
 
@@ -73,6 +106,9 @@ b.add_external_device("L1", ["a", "gnd"], "/path/libmymodels.so", "satind_twin",
 
 Parameters by field name; a `(value, unit)` pair must use the declared unit
 (no conversion). Engines: `pwl`, `trbdf2` run it (`device_path='legacy'`
-routes it through its law too: it has no hand stamp); `dsed`, `bdf1`, the AC
-sweep and the DC operating point refuse it with `UnsupportedError`.
+routes it through its law too: it has no hand stamp), the DC operating
+point and the kernel AC sweep; `dsed` (the exact engine) and `bdf1` refuse it
+with `UnsupportedError`. The exact engine admits no Newton device at all: it
+propagates each topology mode in closed form, which a law known only through
+`f`, `q` and their Jacobians at sampled points cannot give.
 The test models in `core/tests/xdev/` are illustrations, not part models.

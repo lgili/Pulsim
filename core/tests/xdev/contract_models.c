@@ -161,6 +161,51 @@ static int32_t CALL tiny_cap_outside(const pulsim_xdev_ctx *c, const double *x, 
     dq[3] = k * C;
     return 0;
 }
+#ifndef PULSIM_XDEV_HOST_TIME
+#define PULSIM_XDEV_HOST_TIME 1u /* the header as of c90fc07f had no name for bit 0 */
+#endif
+/* g(t) = G·(1 + t / 1 ms): a law that reads the time (ctx->t) */
+static int32_t CALL ramp(const pulsim_xdev_ctx *c, const double *x, double *f, double *q,
+                         double *df, double *dq) {
+    const double t = (c->host_features & PULSIM_XDEV_HOST_TIME) ? c->t : 0.0;
+    const double g = G * (1 + 1e3 * t);
+    (void)dq;
+    cond(g, g * V, x, f, q, df);
+    return 0;
+}
+/* HONEST about a kink: exact one-sided slopes (G above 0, G/2 below; the
+ * backward slope AT 0) and no SMOOTH claim */
+static int32_t CALL honest_kink(const pulsim_xdev_ctx *c, const double *x, double *f, double *q,
+                                double *df, double *dq) {
+    const double g = V > 0 ? G : 0.5 * G;
+    (void)dq;
+    cond(g, g * V, x, f, q, df);
+    return 0;
+}
+/* pure when called serially, a data race when called concurrently: every
+ * call of every instance shares one static scratch (a liar about reentrancy) */
+static volatile double racy_scratch; /* volatile: -O2 would forward the store and hide the race */
+static int32_t CALL liar_racy(const pulsim_xdev_ctx *c, const double *x, double *f, double *q,
+                              double *df, double *dq) {
+    volatile double window = 0;
+    int k;
+    (void)dq;
+    racy_scratch = V;
+    for (k = 0; k < 4000; ++k) window += 1e-300; /* another call overwrites it here */
+    cond(G, G * racy_scratch + 0 * window, x, f, q, df);
+    return 0;
+}
+/* finite outputs everywhere; outside the box (V > 3) two of them are 1e308,
+ * whose sum overflows: not a reason to refuse */
+static int32_t CALL huge_outside(const pulsim_xdev_ctx *c, const double *x, double *f, double *q,
+                                 double *df, double *dq) {
+    good(c, x, f, q, df, dq);
+    if (V > 3) {
+        df[0] = 1e308;
+        df[3] = 1e308;
+    }
+    return 0;
+}
 static int32_t CALL meter_init(const pulsim_xdev_ctx *c, const double *x, double *s) {
     (void)c;
     (void)x;
@@ -218,6 +263,10 @@ static const pulsim_xdev_descriptor MODELS[] = {
     PLAIN("liar_offaxis", liar_offaxis, 0, 0),
     DESC("tiny_cap_outside", tiny_cap_outside, SMOOTH | PASSIVE, 0, 4, 4, QR, QC, 0, NULL, NULL,
          PULSIM_XDEV_ABI_VERSION),
+    PLAIN("ramp_conductance", ramp, SMOOTH | PASSIVE, 1),
+    PLAIN("honest_kink", honest_kink, PASSIVE, 0),
+    PLAIN("liar_racy", liar_racy, SMOOTH | PASSIVE, 0),
+    PLAIN("huge_outside", huge_outside, SMOOTH, 0),
 };
 
 PULSIM_XDEV_EXTERN_C PULSIM_XDEV_EXPORT const pulsim_xdev_descriptor *CALL

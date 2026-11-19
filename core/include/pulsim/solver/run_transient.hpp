@@ -576,6 +576,7 @@ inline SimulationResult run_transient(
     // `initial_state` so the first Newton refresh does not see zeros;
     // resume WINS over a builder-IC seed: the snapshot is the state.
     pwl::StatefulHistories hs;
+    hs.get<pwl::ExternalDeviceHistory>().set_start_time(opts.t_start);   // ctx->t of init
     hs.init(graph, pool);
     hs.set_path(opts.device_path, graph, pool, "run_transient");
     if (initial_state != nullptr) hs.seed_from_dc_op(x);
@@ -586,7 +587,7 @@ inline SimulationResult run_transient(
     // (run_event_iteration), including the dt-retry sub-steps, the
     // commutation split and the SDIRK stages of discontinuity_restart
     // (BackwardEuler over the γ·h each stage advances).
-    pwl::StepCtx step_ctx{opts.dt, pwl::TrBdf2Stage::Trapezoidal};
+    pwl::StepCtx step_ctx{opts.dt, pwl::TrBdf2Stage::Trapezoidal, opts.t_start};
 
     // The Newton refresh is built by the kernel (add-unified-device-
     // interface step 2): the static stamps (with no callback from the
@@ -793,6 +794,8 @@ inline SimulationResult run_transient(
         x = std::move(dc.x);
         history.seed_from_dc_op(x);
         hs.get<pwl::PmsmMnaHistory>().seed_from_dc_op(x);   // λ, i, θ at the held DC point (D19)
+        // the external devices' charges and model state at the DC point
+        hs.get<pwl::ExternalDeviceHistory>().seed_from_dc_op(x);
         seed_held_machine_capacitors(graph, pool, dc.mask, opts.t_start, x,
                                      hs.get<pwl::PmsmMnaHistory>(), history);
         initial_mask = dc.mask;
@@ -2017,6 +2020,7 @@ inline SimulationResult run_transient(
             // for_dt (= 2γh); the devices are told the interval and the rule.
             step_ctx = backward_euler ? step::BackwardEuler::on_factor(for_dt).ctx()
                                       : step::Trapezoidal::stage(for_dt).ctx();
+            step_ctx.t = at_t;   // the external devices' ctx->t
             iters = 0;
             flipped = false;
             // NOT reset: a mask cycle in ANY sub-step of a retry is a

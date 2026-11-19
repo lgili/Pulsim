@@ -207,10 +207,123 @@
     rebuilds; Windows paths beyond MAX_PATH (no `\\?\` prefix); the
     one-sum finiteness test refuses a finite sum that overflows.
 
+## Slice 3 — time, DC, AC, the reviewer's open list (2026-11-20)
+
+17. **The solve's time reaches the model.** `ctx->t` was always 0. Now
+    `pwl::StepCtx` (the driver-owned step context every stateful stamp reads)
+    carries `t`, set at the four places the context is written — pwl's single
+    solve choke point (`run_event_iteration`: `at_t`, the sub-step's end), the
+    trbdf2 probe/landing `trap_solve` (`t0 + dt`), stage 1 (`t + h_pt`, the γ
+    point) and stage 2 (`t + h`). The external kind holds a pointer to it
+    (`bind_time`, in `build_device_refresh`, after the `!hs.any()` return);
+    evaluations before the binding (init at the start, the DC solve, the AC
+    linearisation) use `set_start_time` = `t_start` / `t_eval`. No built-in law
+    reads `t`: built-ins pay one store per solve. Header: `PULSIM_XDEV_HOST_TIME`
+    (bit 0 of `host_features`, which the v1 header already defined as "a set
+    bit = an optional ctx field is filled") — purely additive, version stays 1,
+    sizes unchanged (`abi_v1_c90fc07f/` holds the header as of c90fc07f; the
+    `pulsim_xdev_contract_v1` library is built against it and gets the time
+    too). Test model `ramp_conductance` (g = G(1 + t/1 ms)): v_a at every
+    output time equals 1/(1 + R g(t)) to 5.6e-17 on pwl and trbdf2, from both
+    libraries. The registration checks evaluate at t = 0.
+18. **DC operating point.** `compute_dc_operating_point` wraps the refresh
+    when (and only when) the pool has an external device: after the static
+    chain, `ExternalDeviceHistory::stamp_dc` — the same stamp with
+    `Formula::Dc` (a = 0, no history term: f(x) and ∂f/∂x, q̇ = 0) — through
+    the same Newton and cascade. A branch carrying an internal unknown gets
+    the DC inductor's −1e-12 diagonal (`dc_assemble.hpp`), as #7 did for the
+    transient. Model state: init(x = 0) (the zero start); pwl's
+    `start_from_dc_op` re-seeds the external history at the DC point. Nothing
+    is refused by name: a model with no DC path fails through the DC solver's
+    own diagnosis. Twins (macOS, Apple clang): Shockley rectifier DC point 0.0
+    (bit-identical), saturable inductor 0.0 after the diagonal (2.0e-12 before
+    it: the built-in's 1e-12 Ω series term); test gate 1e-9 (CI lesson).
+19. **Found, not this track's: the built-in saturable inductor after
+    `start_from_dc_op` on pwl.** pwl seeds only the PMSM history from the DC
+    point; the saturable inductor's flux history keeps λ(0) = 0 while its
+    current is the DC current, so a 1 V / 0.5 Ω / L circuit that must stay at
+    i = 2 A drops to ~0 A at step 1. The external twin (seeded) stays at the DC
+    point to the bit. Fixing the built-in changes a default number: left to the
+    device-interface track (the test pins the external against the truth and
+    compares the two DC points only).
+20. **AC sweep.** `run_mna_sweep` (kernel) linearises an external device at
+    the DC operating point of the given mask: G += ∂f/∂x, E += ∂q/∂x (E is the
+    physical mass matrix, C/2 of the transient split; the Newton Jacobian is
+    df + a·dq with a = 2/h, so the signs agree). The capability row admits
+    `ac_sweep` for ExternalDevice only. Checks: external Shockley at 0.39 A,
+    H against r_d = n·V_T/(I + I_S) with R‖C load, 1.8e-15 relative; external
+    saturable inductor at 2 A against jωL(I)/(R + jωL(I)), L(I) = dλ/di, and
+    against a built-in linear inductor of that L, 5.7e-11 (the branch G_min).
+21. **The reviewer's open list (#16), closed:**
+    (a) `debug_jacobian` / registration at a kink: a model that does NOT
+    claim SMOOTH may declare either one-sided derivative (forward and backward
+    Richardson quotients accepted besides the central one); a SMOOTH claim is
+    held to the central quotient (`honest_kink` passes at the probe centre
+    and through a run with debug_jacobian; `liar_kink` still refused).
+    (b) const inputs during a run, always on: a stateful model's committed
+    state compared after every evaluation (n_state reals; zero cost for
+    n_state = 0), `ctx->p` against a frozen copy once per accepted step; `x`
+    is the host's per-call copy and is gathered again before `accept`.
+    (c) memoising models: registration adds an interleaved check (x_a, x_b,
+    x_a must repeat x_a) and a 4-thread probe (each thread evaluates the
+    probes in its own order 40 times; every result equal to the serial one to
+    the bit; exceptions carried out of the threads). Decided: NO THREAD_SAFE
+    claim and no serial mode — the v1 header already requires reentrancy, and
+    a new claim bit would silently serialise every existing library. A probe
+    is not a proof (a race that does not fire is not excluded; a thread
+    started with a different FP environment, e.g. FTZ set by a fast-math
+    library in the main thread, could make an honest model producing
+    subnormals look non-reentrant — documented).
+    (d) same size and mtime: the file identity includes an FNV-1a hash of its
+    bytes (read at each load request).
+    (e) Windows MAX_PATH: `\\?\` (or `\\?\UNC\`) prefix for paths ≥ 260
+    characters before LoadLibraryExW (not run: no Windows here; the
+    std::filesystem checks before it rely on the STL's long-path support).
+    (f) a finite output set whose sum overflows is no longer refused (a
+    NaN/Inf entry still is).
+    The Windows-skipped test (`a library rebuilt while loaded`) stays skipped
+    with its reason: Windows locks a loaded DLL, so the file cannot change.
+22. **Example (a real use, not a twin):** `examples/external_devices/
+    self_heating_resistor.c` (plain C, hand Jacobian, one internal unknown =
+    temperature rise; ILLUSTRATION parameters) built by
+    `examples/scripts/run_external_self_heating_resistor.py` with the system C
+    compiler against `pulsim.get_include()`; claim: the settled rise equals
+    the closed-form root of θ(1 + αθ) = R_th V²/R_0.
+23. **The exact engine (`dsed`) keeps refusing external devices by name**: it
+    propagates each topology mode in closed form and admits no Newton kind; a
+    law known only through f, q and their Jacobians at sampled points has no
+    closed-form propagator. Documented as a limitation.
+
 ## Requests to other tracks
 
-- **Stepper track**: (a) the DC operating point needs the stateful fold (an
+- **Stepper track** (DONE in slice 3, #17/#18 — kept for the record): (a) the DC operating point needs the stateful fold (an
   external device's f with Formula::Dc, or a "DC stamp" member of `StatefulKind`);
   until then #5 refuses. (b) `t` in `pulsim_xdev_ctx` is always 0: the refresh
   signature carries no time; a time-dependent external law needs the solve's t
   passed to `NonlinearRefreshFn` (or `pwl::StepCtx`).
+
+## Hand-off (2026-11-20, slice 3)
+
+- Open, in order: **1.7 YAML** — the design (design.md:130, spec
+  device-interface:86) names `allow_native_code=True`; the brief offered
+  `allow_external_devices=[paths]` (a per-path allow list is stricter: a
+  netlist cannot name a library the caller did not). Pieces: `yaml/loader.hpp`
+  type `external_device` (`nodes`, `lib` relative to the YAML file's folder,
+  `model`, `params` as numbers or `[value, unit]`, strict keys; refused
+  without the opt-in, naming the device and the keyword), `load_text`
+  options threaded to `load_device`, the two bindings and their stubs; the
+  IR emitter (`yaml/emitter.hpp:305`) still refuses — when it writes, it
+  writes `lib` = the canonical path the device was loaded from
+  (`Model::library_path()`), never one it did not get, and `Circuit`
+  pickling goes through `to_yaml` (ir_bindings.cpp:294), so pickling a
+  circuit with an external device needs the same opt-in on the reader.
+  Then 2.2 (junction capacitor twin), 3.1 (Lauritzen twin with an internal
+  charge), 3.2–3.4, 1.5, stages 4–6.
+- #19 (built-in saturable inductor not seeded by pwl `start_from_dc_op`) is
+  for the device-interface track.
+- Verified on 518e70c4 (macOS arm64 only): every C++ test target builds on
+  Eigen 5; xdev / yaml / layer5_v3 / step pass on Eigen 5 and Eigen 3.4.0;
+  full pytest 0 failed. The race model `liar_racy` needed `volatile` scratch:
+  at -O2 the store was forwarded and the 4-thread probe saw no race (the
+  probe was right, the test model was not). Full ctest, Linux, Windows not
+  run on this tip.
