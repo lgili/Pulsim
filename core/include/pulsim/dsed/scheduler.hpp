@@ -1473,6 +1473,7 @@ private:
         requires HasNodePairVoltage<System> {
         const auto sel = run_selector_(t, x_held, gates_prev, prev_bits, rec, rep);
         events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_);
+        rejected_loop_.reset();   // a mode was selected: a later refusal is not that loop's
         for (std::size_t j = 0; j < diodes_.size(); ++j)
             diode_bits_.set(diodes_[j].switch_idx, sel.on[j] != 0);
         MaskT m = gates_prev.overlay(diode_bits_, diode_owned_);
@@ -1642,6 +1643,7 @@ private:
         try {
             sel = run_selector_(t, shadow_x_, gates_prev, prev_bits, rec, g.lcp);
             events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_);
+            rejected_loop_.reset();   // a mode was selected: a later refusal is not that loop's
         } catch (const UnsupportedError& e) {
             throw UnsupportedError(
                 "dsed", e.feature(),
