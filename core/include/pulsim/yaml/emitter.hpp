@@ -503,6 +503,17 @@ namespace yaml_detail {
             o += "  - " + mm.str() + "\n";
         }
     }
+    if (!b.composites().empty()) {
+        o += "composites:\n";
+        for (const auto& c : b.composites()) {
+            std::string members = "[";
+            for (std::size_t i = 0; i < c.members.size(); ++i) {
+                members += (i ? ", " : "") + quote(c.members[i]);
+            }
+            o += "  - " + Map{}.add("kind", quote(c.kind)).add("name", quote(c.name))
+                .add("anchor", quote(c.anchor)).add("members", members + "]").str() + "\n";
+        }
+    }
     // shortcut: refused, not written; the IR track adds loss ports to the
     // dialect (and to value_hash). Silently dropping one lost its heat.
     if (const auto& ls = pool.device_losses(); !ls.empty()) {
@@ -731,14 +742,15 @@ struct YamlIo {
         keys(root, "document", {"pulsim_circuit", "nodes", "devices", "couplings",
                                 "branch_form", "scopes", "parameters", "bindings",
                                 "initial_conditions", "aliases", "power_mosfets",
-                                "controls", "magnetic_nodes", "magnetic_geometry"});
+                                "controls", "magnetic_nodes", "magnetic_geometry",
+                                "composites"});
         if (text(root["pulsim_circuit"], "document", "pulsim_circuit") != "1") {
             fail("document", "pulsim_circuit must be 1");
         }
         for (const auto* k : {"nodes", "devices", "couplings", "branch_form", "scopes", "parameters",
                               "bindings", "initial_conditions", "aliases",
                               "power_mosfets", "controls", "magnetic_nodes",
-                              "magnetic_geometry"}) {
+                              "magnetic_geometry", "composites"}) {
             if (root[k] && !root[k].IsSequence()) fail(k, "must be a list");
         }
         builder::CircuitBuilder b;
@@ -860,6 +872,14 @@ struct YamlIo {
                         br ? std::optional<std::string_view>{*br} : std::nullopt);
         }
         for (const auto& pm : root["power_mosfets"]) read_power_mosfet_(b, pm);
+        for (const auto& c : root["composites"]) {
+            keys(c, "a composite", {"kind", "name", "anchor", "members"});
+            const auto nm = text(c["name"], "a composite", "name");
+            std::vector<std::string> members;
+            for (const auto& x : c["members"]) members.push_back(text(x, nm, "members"));
+            b.record_composite(text(c["kind"], nm, "kind"), nm,
+                               text(c["anchor"], nm, "anchor"), std::move(members));
+        }
         for (const auto& ct : root["controls"]) {
             keys(ct, "a control", {"name", "kind", "hash"});
             const auto nm = text(ct["name"], "a control", "name");

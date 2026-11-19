@@ -2557,6 +2557,50 @@ public:
         return *this;
     }
 
+    /// A composite built from existing kinds by an authoring helper (the
+    /// DC machine of add-mna-native-machines, D2): its `kind`, `name`, the
+    /// member whose `components()` entry stands for it (`anchor`) and the
+    /// members in build order. Metadata only: no stamp reads it.
+    struct CompositeRecord {
+        std::string kind;
+        std::string name;
+        std::string anchor;
+        std::vector<std::string> members;
+    };
+
+    /// Record a composite; every member (the anchor included) must already
+    /// exist. Refused by name otherwise or when `name` is already recorded.
+    CircuitBuilder& record_composite(std::string_view kind, std::string_view name,
+                                     std::string_view anchor,
+                                     std::vector<std::string> members) {
+        for (const auto& c : composites_) {
+            if (c.name == name) {
+                throw std::invalid_argument(std::format(
+                    "record_composite(\"{}\"): already recorded as a {}",
+                    name, c.kind));
+            }
+        }
+        if (std::find(members.begin(), members.end(), anchor) == members.end()) {
+            throw std::invalid_argument(std::format(
+                "record_composite(\"{}\"): the anchor \"{}\" is not a member",
+                name, anchor));
+        }
+        for (const auto& m : members) {
+            if (branch_index_.find(m) == branch_index_.end()) {
+                throw std::invalid_argument(std::format(
+                    "record_composite(\"{}\"): no device named \"{}\"",
+                    name, m));
+            }
+        }
+        composites_.push_back(CompositeRecord{std::string{kind}, std::string{name},
+                                              std::string{anchor}, std::move(members)});
+        return *this;
+    }
+
+    [[nodiscard]] const std::vector<CompositeRecord>& composites() const noexcept {
+        return composites_;
+    }
+
     /// The power-MOSFET record whose channel is `branch_id`, or nullptr.
     [[nodiscard]] const models::PowerMosfet::Record*
     power_mosfet_record(Index branch_id) const {
@@ -3642,6 +3686,7 @@ private:
     std::unordered_map<std::string, AliasTarget> aliases_;
     // add-power-mosfet-datasheet-device: channel branch id -> composite.
     std::unordered_map<Index, models::PowerMosfet::Record> power_mosfets_;
+    std::vector<CompositeRecord> composites_;
     // add-immutable-circuit-ir group 3: opaque control declarations.
     std::vector<ir::ControlDecl> controls_;
 };

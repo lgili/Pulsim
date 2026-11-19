@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### `components()` entry of the DC machine
+
+* **Added** `CircuitBuilder.record_composite(kind, name, anchor, members)` /
+  `composites()`; `add_dc_machine` and the YAML `dc_machine` record the
+  machine, and `components()` gives its `{name}.em` entry the keys
+  `composite`, `composite_name`, `sub_elements` and `composite_params`
+  (read back from the members). `to_yaml` / `from_yaml` keep the record.
+
 ### Hysteretic permeance and the core-loss element fitter
 
 * **Added** `CircuitBuilder.add_hysteretic_permeance(name, m_a, m_b, area,

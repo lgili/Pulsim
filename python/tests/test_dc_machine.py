@@ -212,3 +212,61 @@ def test_dsed_runs_the_composite():
     r = _run(engine="dsed")
     assert r.engine_used == "dsed"
     assert _speed_error(r) <= 1e-5           # measured 1.8e-7
+
+
+# ---------------------------------------------------------------------
+# Task 1.2: one components() entry for the machine (DECISIONS D2). The
+# anchor `{name}.em` carries the composite; its parameters are read back
+# from the members, so they follow `with_value` and cannot go stale.
+# ---------------------------------------------------------------------
+
+def _machine_entry(b, name="M"):
+    (e,) = [d for d in b.components() if d.get("composite") == "dc_machine"]
+    assert e["composite_name"] == name and e["name"] == f"{name}.em"
+    return e
+
+
+def test_components_has_one_dc_machine_entry_with_its_parameters():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 10.0)
+    b.add_dc_machine("M", "a", "gnd", "w", R_a=0.5, L_a=1e-3, K=0.1,
+                     J=1e-5, B=1e-4, T_load=0.2, theta_node="th")
+    e = _machine_entry(b)
+    assert e["kind"] == "ideal_transformer"          # the entry keeps its kind
+    assert e["sub_elements"] == ["M.ra", "M.la", "M.em", "M.j", "M.b", "M.tl",
+                                 "M.th", "M.ct"]
+    want = dict(R_a=0.5, L_a=1e-3, K=0.1, J=1e-5, B=1e-4, T_load=0.2)
+    assert e["composite_params"] == pytest.approx(want, rel=1e-15)
+    assert [c["name"] for c in b.components() if "composite" in c] == ["M.em"]
+    # zero-valued members are absent and read back as 0
+    b2 = p.CircuitBuilder()
+    b2.add_dc_machine("M", "a", "gnd", "w", R_a=0.0, L_a=1e-3, K=0.1, J=1e-5)
+    e2 = _machine_entry(b2)
+    assert e2["sub_elements"] == ["M.la", "M.em", "M.j"]
+    assert (e2["composite_params"]["R_a"], e2["composite_params"]["B"],
+            e2["composite_params"]["T_load"]) == (0.0, 0.0, 0.0)
+
+
+def test_dc_machine_entry_survives_ir_round_trip_and_follows_with_value():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 10.0)
+    b.add_dc_machine("M", "a", "gnd", "w", R_a=0.5, L_a=1e-3, K=0.1,
+                     J=1e-5, B=1e-4)
+    c = b.build()
+    back = p.Circuit.from_yaml(c.to_yaml())
+    assert back.value_hash() == c.value_hash()
+    assert back.to_builder().components() == b.components()
+    assert back.to_builder().composites() == b.composites()
+    c2 = c.with_value("M.la.L", 2e-3)
+    assert _machine_entry(c2.to_builder())["composite_params"]["L_a"] == 2e-3
+
+
+def test_record_composite_refuses_by_name():
+    b = p.CircuitBuilder()
+    b.add_dc_machine("M", "a", "gnd", "w", R_a=0.5, L_a=1e-3, K=0.1, J=1e-5)
+    with pytest.raises(ValueError, match="already recorded"):
+        b.record_composite("dc_machine", "M", "M.em", ["M.em"])
+    with pytest.raises(ValueError, match="no device named \"X\""):
+        b.record_composite("dc_machine", "N", "M.em", ["M.em", "X"])
+    with pytest.raises(ValueError, match="anchor"):
+        b.record_composite("dc_machine", "N", "M.j", ["M.em"])

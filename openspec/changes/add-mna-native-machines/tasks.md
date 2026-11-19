@@ -1,6 +1,8 @@
+Status (closeout 2026-11-19): implementation complete; remaining boxes are release-gated (5.3, the YAML `induction_motor` default).
+
 ## 1. DC machine composite (today's structure)
 - [x] 1.1 `CircuitBuilder::add_dc_machine` (sub-elements `{name}.ra`, `{name}.la`, `{name}.em`, `{name}.j`, `{name}.b`, `{name}.tl`); validation by name (`R_a ≥ 0`, `L_a > 0`, `K > 0`, `J > 0`, `B ≥ 0`) — as a Python method installed on `CircuitBuilder` (`python/pulsim/machines.py`), DECISIONS D1; `{name}.ra`/`.b`/`.tl` only when non-zero (D6)
-- [ ] 1.2 Binding, stubs, `components()` entry `dc_machine`; YAML type `dc_machine` — PARTIAL: Python method + stubs, YAML type `dc_machine` (loader expansion pinned equal to the Python one); NO `components()` composite entry (DECISIONS D2)
+- [x] 1.2 Binding, stubs, `components()` entry `dc_machine`; YAML type `dc_machine` — Python method + stubs, YAML type `dc_machine` (loader expansion pinned equal to the Python one); closeout: the `components()` entry (DECISIONS D23) — the `{name}.em` entry carries `composite='dc_machine'`, its sub-elements and its parameters read back from the members (`test_components_has_one_dc_machine_entry_with_its_parameters`, `..._survives_ir_round_trip_and_follows_with_value`, `test_record_composite_refuses_by_name`; YAML = Python in `test_yaml_composites.py`)
 - [x] 1.3 Test (accuracy): the `p5b_dcmotor.py` case at dt = 12.5 µs, speed error against the exact solution ≤ 1e-4 (measured 7.45e-5) — measured 7.45e-5
 - [x] 1.4 Test (order): errors at 100, 50, 25, 12.5 µs fall by ≥ 3.5 per halving (measured 4.76e-3, 1.19e-3, 2.98e-4, 7.45e-5) — measured 4.76e-3, 1.19e-3, 2.98e-4, 7.45e-5 (ratios 3.99, 4.00, 4.00)
 - [x] 1.5 Test (DC operating point): 10 V, `K = 0.1`, `R_a = 0.5 Ω`, `T_load = 0.2 N·m` → `i = 2 A`, `ω = 90 rad/s` within 1e-9 — preflight false positive found and fixed (DECISIONS D9)

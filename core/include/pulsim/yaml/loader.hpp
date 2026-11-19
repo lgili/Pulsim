@@ -896,6 +896,12 @@ inline void load_device(
         if (T_load != Real{0}) {
             b.add_current_source(name + ".tl", "gnd", omega, T_load);
         }
+        std::vector<std::string> members;
+        if (R_a > Real{0}) members.push_back(name + ".ra");
+        for (const char* s : {".la", ".em", ".j"}) members.push_back(name + s);
+        if (B > Real{0}) members.push_back(name + ".b");
+        if (T_load != Real{0}) members.push_back(name + ".tl");
+        b.record_composite("dc_machine", name, name + ".em", std::move(members));
     } else if (type == "diode" &&
                string_or(dev, "form", "conductance") == "branch") {
         // add-branch-form-ideal-switch: `form: branch` (R_on, g_off

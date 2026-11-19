@@ -818,6 +818,10 @@ class CircuitBuilder:
         """
         Enumerate every device in the circuit. Returns a list of dicts (kind, name, nodes, params, branch_id) in insertion order. Consumed by `pulsim.schematic`.
         """
+    def composites(self) -> list[typing.Any]:
+        """
+        The recorded composites: [{kind, name, anchor, members}].
+        """
     def compute_time_varying_b_extra(self, t: float) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
         """
         Sum the b_extra contributions from all time-varying voltage sources (sine + PWM + pulse) at time `t`. Returns a full-MNA-sized vector. The pulsim.simulate engine='pwl' applies this automatically; engine='dsed' calls it via the CircuitBuilderAdapter to overlay AC / PWM source values per PED step.
@@ -894,6 +898,10 @@ class CircuitBuilder:
     def position_hints(self) -> dict[typing.Any, typing.Any]:
         """
         Dict mapping every node_id used in the circuit to its current role hint.
+        """
+    def record_composite(self, kind: str, name: str, anchor: str, members: collections.abc.Sequence[str]) -> CircuitBuilder:
+        """
+        Record a composite built from existing kinds by an authoring helper (add_dc_machine does): components() then gives its anchor member's entry the keys composite, composite_name, sub_elements (and composite_params for a dc_machine). Metadata only; to_yaml / from_yaml keep it.
         """
     def run_preflight(self, options: PreflightOptions = ...) -> PreflightReport:
         """

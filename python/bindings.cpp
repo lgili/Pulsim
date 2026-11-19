@@ -1144,6 +1144,31 @@ void init_module(py::module_& m) {
               "'permeance', 'saturable_permeance', 'magnetic_resistance'), "
               "its magnetic nodes m_a, m_b, its value (P, law, R_m or turns) "
               "and area / length (None without geometry). KeyError otherwise.")
+        .def("record_composite",
+              [](builder::CircuitBuilder& b, const std::string& kind,
+                 const std::string& name, const std::string& anchor,
+                 std::vector<std::string> members) -> builder::CircuitBuilder& {
+                  return b.record_composite(kind, name, anchor, std::move(members));
+              },
+              py::arg("kind"), py::arg("name"), py::arg("anchor"),
+              py::arg("members"), py::return_value_policy::reference,
+              "Record a composite built from existing kinds by an authoring "
+              "helper (add_dc_machine does): components() then gives its "
+              "anchor member's entry the keys composite, composite_name, "
+              "sub_elements (and composite_params for a dc_machine). "
+              "Metadata only; to_yaml / from_yaml keep it.")
+        .def("composites",
+              [](const builder::CircuitBuilder& b) {
+                  py::list out;
+                  for (const auto& c : b.composites()) {
+                      py::dict d;
+                      d["kind"] = c.kind; d["name"] = c.name;
+                      d["anchor"] = c.anchor; d["members"] = c.members;
+                      out.append(d);
+                  }
+                  return out;
+              },
+              "The recorded composites: [{kind, name, anchor, members}].")
         .def("magnetic_nodes",
               [](const builder::CircuitBuilder& self) {
                   std::vector<std::string> out;
@@ -2209,6 +2234,34 @@ void init_module(py::module_& m) {
                           desc["internal_branch"] = static_cast<int>(
                               std::find(ep.branches.begin(), ep.branches.end(), bid)
                               - ep.branches.begin());
+                      }
+                      // add-mna-native-machines D2: a recorded composite's
+                      // anchor entry carries it, its parameters read back
+                      // from the members (never stale after with_value).
+                      for (const auto& cr : self.composites()) {
+                          if (cr.anchor != self.name_of(bid)) continue;
+                          desc["composite"] = cr.kind;
+                          desc["composite_name"] = cr.name;
+                          desc["sub_elements"] = cr.members;
+                          if (cr.kind == "dc_machine") {
+                              auto member = [&](const char* sfx) -> std::optional<Index> {
+                                  const std::string m = cr.name + sfx;
+                                  if (std::find(cr.members.begin(), cr.members.end(), m)
+                                      == cr.members.end()) return std::nullopt;
+                                  return self.branch_id_of(m);
+                              };
+                              py::dict pd;
+                              const auto ra = member(".ra");
+                              pd["R_a"] = ra ? Real{1} / pool.resistor_params(*ra).G : Real{0};
+                              pd["L_a"] = pool.inductor_params(*member(".la")).L;
+                              pd["K"] = pool.ideal_transformer_params(*member(".em")).n;
+                              pd["J"] = pool.capacitor_params(*member(".j")).C;
+                              const auto bb = member(".b");
+                              pd["B"] = bb ? pool.resistor_params(*bb).G : Real{0};
+                              const auto tl = member(".tl");
+                              pd["T_load"] = tl ? pool.current_source_params(*tl).I : Real{0};
+                              desc["composite_params"] = pd;
+                          }
                       }
                       // add-power-mosfet-datasheet-device: the channel's
                       // entry stands for the whole composite.
