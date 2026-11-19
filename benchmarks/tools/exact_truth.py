@@ -961,11 +961,16 @@ class Solver:
         v = y
         rmax = max(abs(row[0, j]) for j in range(dyn.N))
         tiny = mp.mpf(10) ** (-mp.mp.dps + 5)
-        for _ in range(10):
+        # order 0: a device at an event sits on its boundary to the precision
+        # of the projection between modes (~15 digits lost when g_off and g_on
+        # meet): below 10^-(dps/2) of its scale it is zero and the derivatives
+        # decide (the bridge's rail turn-on re-selected the old mode forever)
+        tol0 = mp.mpf(10) ** (-(mp.mp.dps // 2))
+        for k in range(10):
             g = (row * v)[0]
             sc = sum(abs(row[0, j] * v[j]) for j in range(dyn.N))
             ref = rmax * max(abs(v[j]) for j in range(dyn.N))
-            if abs(g) > self.tol * sc and abs(g) > tiny * ref:
+            if abs(g) > (tol0 if k == 0 else self.tol) * sc and abs(g) > tiny * ref:
                 return 1 if g > 0 else -1
             v = dyn.H * v
         return 0
@@ -1608,10 +1613,19 @@ def commutations(sol, t_min=1e-12):
 
 
 def case_bridge(dps):
-    sol = Solver(Circuit(bridge_net()), dps).run()
+    """bridge_ground_truth.py's numbers. That script takes 1/R exactly; the
+    engine (and this tool on a netlist) stamps the double 1.0/R, which moves
+    the bus by -2.0e-16 V (311.343881428885841499): the exact 1/R here."""
+    ck = Circuit(bridge_net())
+    R = {"Rs": 0.5, "RL": 100.0, "Rtie": 1e6}
+    ck.res = [(nm, a, b, 1 / Fr(R[nm])) for nm, a, b, _ in ck.res]
+    sol = Solver(ck, dps).run()
     bus = sol.window(["V(dp,dn)"], mp.mpf("0.03"), mp.mpf("0.04"))["V(dp,dn)"]["mean"]
+    ev = [e["t"] for e in sol.events[1:] if e["prev"] != e["mode"]]
     return [("bus mean 30-40 ms", bus, mp.mpf("311.343881428885841697")),
-            ("commutations", mp.mpf(commutations(sol)), mp.mpf(11))], sol
+            ("commutations", mp.mpf(commutations(sol)), mp.mpf(11)),
+            ("event 1 (D1/D4 tie)", ev[0], mp.mpf("0.004453708135472069740740")),
+            ("event 11", ev[10], mp.mpf("0.039993904164045823079728"))], sol
 
 
 def _buck(L, dps):
