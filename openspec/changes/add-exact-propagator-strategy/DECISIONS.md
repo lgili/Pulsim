@@ -443,3 +443,15 @@ Db6b (Dt6b at 81f2991a) turns OFF at 0.94610409 ms by the drift case (no sign ch
 ### `test_bridge_behind_an_ideal_transformer_is_passive_nonreciprocal` (left failing)
 
 The answer is right (bus −4.0e-9 V from pwl at 1e-7, every diode law within 1e-13 V) but the guard repairs 3 events (81f2991a: 4; pinned 2). Repairs: D1 at 5.981 ms and 25.981 ms with a judged violation of 1.05e-7 V — just over the judge's 1e-9·vscale (≈ 1e-7 V), the same phase in two periods — and D4 at 21.790 ms by 0.32 V (a real settle error, repaired). The direction rule removed the fourth (a second D1 repair at 25.981 ms, 1e-18 s later). Not re-pinned: whether the two marginal D1 repairs are the settle's error or the judge's threshold is the open question (`.scratch/s18/pas.py`).
+
+### Verification at 35fff44a
+
+C++ dsed / layer4_v3 / mode targets pass on Eigen 5 and 3.4.0; full pytest 1 failed (the passivity test above), 5081 passed, 108 skipped, 6 xfailed; `-m reference` 373; `reference_status` exit 0, strict dsed 97 / 0 / 0 / 12 / 0; ruff, openspec (78), stubs clean; pwl and trbdf2 byte-identical (golden + bit-identity, default and shadow); `dsedall.sh` 307 / 307. Banks 1 (both) and 9 (default) run; the rest of the bar run was killed by the host (exit 143) before it finished; the scoreboard was not re-run on this tip.
+
+### Hand-off (session 15)
+
+1. A (12 banks): give an ON diode a signal without the recovery's cancellation (series inductor current, or c = e_n − e_x formed at build in the refined precision); then the law check and B can be one rule.
+2. k = 4: where a drift event is placed and what the event sample stores (decide, then fix).
+3. Passivity test: are the two D1 repairs at 1.05e-7 V the settle's or the judge's threshold.
+4. Cap `settled_`'s δ at the next time event.
+5. Re-run `bar.sh` and the scoreboard at this tip; then step 3 of the session-15 brief.
