@@ -359,6 +359,8 @@ COUPLED = (_coupled, "x", "Kd", 3e-3, 1e-6, False)
 
 
 def _switch_fn(b, needs):
+    if callable(needs):   # a gate schedule built for this circuit
+        return needs(b)
     return _Closed(b.graph.num_switches) if needs else None
 
 
@@ -1658,3 +1660,177 @@ def test_device_path_cell(name, engine):
     else:
         err = float(np.max(np.abs(np.interp(ta, ti, vi) - va)))
         assert err <= TOL * span, f"{name}: {err:.3g} vs span {span:.3g}"
+
+
+# ---------------------------------------------------------------------
+# The DC column of the machine kinds (add-mna-native-machines 2.7, 3.7):
+# "DC held" — the operating point holds the speed / angle at their
+# initial values and solves the stator with di/dt = 0. At rest the
+# cell's network is linear in closed form: each phase is a Thevenin
+# source v_k(0)·1000/1001 behind 1·1000/1001 Ohm, into R_s to a floating
+# neutral (sum of currents 0). The AC column is `ac_sweep` above.
+# ---------------------------------------------------------------------
+@pytest.mark.parametrize("kind", ["PmsmMna", "InductionMachineMna"])
+def test_machine_dc_held_cell(kind):
+    build, amp = {"PmsmMna": (_pmsm, 12.0),
+                  "InductionMachineMna": (_induction, 40.0)}[kind]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        r = p.simulate(build(True), 1e-5, dt=1e-6, engine="pwl",
+                       start_from_dc_op=True)
+    v = np.array([amp * math.sin(-2.0 * math.pi / 3.0 * i) for i in range(3)])
+    vth, rth = v * 1000.0 / 1001.0, 1000.0 / 1001.0
+    i_ref = (vth - vth.mean()) / (rth + 0.5)
+    got = np.array([float(np.asarray(r.i(f"Md_{x}"))[0]) for x in "abc"])
+    assert np.abs(i_ref).max() > 1.0   # control: a real operating point
+    assert got == pytest.approx(i_ref, abs=1e-9 * np.abs(i_ref).max())
+
+
+def _bldc(on):
+    b = _pmsm(False)
+    if on:
+        b.add_bldc_mna("Md", "ua2", "ub2", "uc2", "nn", "w", "th", R_s=0.5,
+                       L_s=2e-3, k_e=0.2, pole_pairs=4, J=1e-3, B=1e-4)
+    return b
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_pmsm_harmonics_cell(engine):
+    # pmsm_mna[harmonics] (3.7): the BLDC's PM-flux series; same kind,
+    # same table row as the sinusoidal PMSM
+    _check_cell("PmsmMna[harmonics]", (_bldc, "ua2", "Md", 2e-2, 1e-5, False),
+                engine, p.engine_capabilities()["PmsmMna"][engine])
+
+
+def _pmsm_flux_map(on):
+    b = _pmsm(False)
+    if on:
+        # SYNTHETIC saturating, cross-coupled co-energy (test_pmsm_flux_map)
+        g = np.arange(-30.0, 30.5, 2.0)
+        D, Q = np.meshgrid(g, g, indexing="ij")
+        x = np.hypot(D, Q) / 10.0
+        f = 1e-3 * np.tanh(x) / np.where(x == 0.0, 1.0, x) + np.where(x == 0.0, 1e-3, 0.0)
+        fm = p.FluxMapDQ.from_tables(g, g, 0.05 + f * D, 2e-3 * Q + f * Q,
+                                     source="synthetic: conformance")
+        b.add_pmsm_flux_map("Md", "ua2", "ub2", "uc2", "nn", "w", "th",
+                            R_s=0.5, flux_map=fm, pole_pairs=4, J=1e-3,
+                            B=1e-4)
+    return b
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_pmsm_flux_map_cell(engine):
+    # pmsm_mna[flux_map] (3.7): same kind, same table row
+    _check_cell("PmsmMna[flux_map]",
+                (_pmsm_flux_map, "ua2", "Md", 2e-2, 1e-5, False),
+                engine, p.engine_capabilities()["PmsmMna"][engine])
+
+
+def _dc_machine(on):
+    # a 10 V supply through 1 Ohm, a 100 Ohm bleed: the machine's armature
+    # current and back-EMF move the terminal voltage
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "s", "gnd", 10.0)
+    b.add_resistor("Rs", "s", "a", 1.0)
+    b.add_resistor("Rb", "a", "gnd", 100.0)
+    if on:
+        b.add_dc_machine("Md", "a", "gnd", "w", R_a=0.5, L_a=1e-3, K=0.1,
+                         J=1e-5, B=1e-4)
+    return b
+
+
+_DC_MACHINE_KINDS = ("Resistor", "Inductor", "IdealTransformer", "Capacitor")
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_dc_machine_cell(engine):
+    # dc_machine (1.10): a composite of linear kinds, so each engine
+    # column is theirs (dsed runs it, D10)
+    _check_cell("dc_machine", (_dc_machine, "a", "Md", 2e-2, 1e-5, False),
+                engine, _composite_supported(_DC_MACHINE_KINDS, engine))
+
+
+@pytest.mark.parametrize("name", ["dc_machine", "PmsmMna[harmonics]",
+                                  "PmsmMna[flux_map]"])
+def test_machine_ac_sweep_cell(name):
+    # AC column of the machine rows (1.10, 3.7): the DC machine's linear
+    # composite is swept (presence: the machine moves the terminal
+    # impedance); the PMSM rows follow the kind's table entry, refused by
+    # name when unsupported
+    build, node, dev = {"dc_machine": (_dc_machine, "a", "Md"),
+                        "PmsmMna[harmonics]": (_bldc, "ua2", "Md"),
+                        "PmsmMna[flux_map]": (_pmsm_flux_map, "ua2", "Md")}[name]
+    supported = (_composite_supported(_DC_MACHINE_KINDS, "ac_sweep")
+                 if name == "dc_machine"
+                 else p.engine_capabilities()["PmsmMna"]["ac_sweep"])
+
+    def H(on):
+        b = build(on)
+        r = k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e1, 1e2, 1e3], b.node_id_of(node), b.node_id_of(node))
+        return np.asarray(r.H, dtype=complex)
+
+    off = H(False)
+    if not supported:
+        with pytest.raises(p.UnsupportedError) as ei:
+            H(True)
+        assert ei.value.engine == "ac_sweep"
+        assert ei.value.device == dev or ei.value.device.startswith(dev + "_")
+        return
+    on = H(True)
+    assert np.max(np.abs(on - off)) > PRESENCE * np.max(np.abs(on))
+
+
+def test_dc_machine_dc_cell():
+    # DC column: the steady state in closed form, ω = (V_a − R_a·B·ω/K)/K
+    # with V_a from the 1 Ohm / 100 Ohm divider and the armature current
+    b = _dc_machine(True)
+    x = p.compute_dc_op(b, gmin=0.0)
+    # i_a = B·ω/K; v_a = K·ω + R_a·i_a; (10 − v_a)/1 = v_a/100 + i_a
+    K, Ra, B = 0.1, 0.5, 1e-4
+    w = 10.0 / ((1 + 1 / 100) * (K + Ra * B / K) + B / K)
+    assert x[b.node_id_of("w")] == pytest.approx(w, rel=1e-9)
+
+
+# Gate EDGES in the gated cells (add-pwl-igbt-and-thyristor 4.5): a PWM
+# gate on the IGBT clamp, a phase-controlled pulse on the thyristor
+# clamp (latch past the pulse). The schedules declare their edges.
+def _gate_schedule(name, make):
+    def mk(b):
+        try:
+            j = b.switch_index_of(name)
+        except Exception:  # noqa: BLE001 — the presence control's circuit
+            return None
+        return make(j, b.graph.num_switches)
+    return mk
+
+
+def _scr_r(on):
+    # a phase-controlled half-wave rectifier, 10 Ohm: the turn-off at the
+    # voltage zero is continuous, the 60 deg firing edge is the event (a
+    # clamp's turn-off sits on a capacitor transient the reference cannot
+    # converge at a sample instant)
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
+    b.add_resistor("R", "o", "gnd", 10.0)
+    if on:
+        b.add_thyristor("Td", "in", "o", 1e-3, 1e9)
+    return b
+
+
+GATED_EDGE_CELLS = {
+    "GateHeld": (GATED_CELLS["GateHeld"][0], "o", "Qd", 2e-3, 2e-7,
+                 _gate_schedule("Qd", lambda j, n: p.make_pwm_switch_fn(
+                     3e3, 0.37, j, n))),
+    "Latching": (_scr_r, "o", "Td", 2e-3, 2e-7,
+                 _gate_schedule("Td", lambda j, n: p.make_phase_control_fn(
+                     1e3, math.radians(60.0), 1e-4, [j], n))),
+}
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("mode", list(GATED_EDGE_CELLS))
+def test_gated_cell_with_gate_edges(mode, engine):
+    _check_cell(mode + "[gated, edges]", GATED_EDGE_CELLS[mode], engine,
+                k._gated_capabilities()[mode][engine])

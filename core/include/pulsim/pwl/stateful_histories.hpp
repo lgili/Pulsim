@@ -290,6 +290,8 @@ public:
         history.from_flat(s.view(device::StateBlock::LinearCompanion));
         for_each_in_block_order(
             [&s](auto& k) { k.from_flat(s.view(k.kBlock)); });
+        // increment-form reference = the snapshot's x
+        get<PmsmMnaHistory>().rebase_reference(s.x);
     }
 
 private:

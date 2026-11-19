@@ -20,6 +20,8 @@
 // vector. Throws on singular matrices.
 
 #include "pulsim/models/current_source.hpp"
+#include "pulsim/models/induction_machine_mna.hpp"
+#include "pulsim/models/pmsm_mna.hpp"
 #include "pulsim/models/pulse_voltage_source.hpp"
 #include "pulsim/models/pwm_voltage_source.hpp"
 #include "pulsim/models/resistor.hpp"
@@ -224,6 +226,151 @@ inline void stamp_gmin_dc(sparse::Matrix& J, Index num_nodes, Real g,
 ///
 /// `gmin` is the conductance floor stamped node-to-ground; see
 /// `gmin.hpp`. Zero (the default) leaves the matrix untouched.
+namespace detail {
+
+/// add-mna-native-machines 2.7 / 3.5 (DECISIONS D19): the DC rows of the
+/// MNA-native machines at the held mechanical state (ω0, θ0). Stator:
+/// `v − R·i − dλ/dt = 0` with di/dt = 0, so dλ/dt = ω_e·∂λ/∂θ_e (PMSM)
+/// and M·dλ_r/dt = 0 (IM: the rotor rows below are dλ_r/dt = 0). Linear
+/// at a held speed. `f = J·x + b = 0`, as the rest of the assembly.
+/// ω0 / θ0 are fixed values, not sources: a source-stepping pass does
+/// not scale them (the rows are linear and well posed at every scale).
+inline void stamp_machines_dc(const topology::Graph& graph,
+                              const DevicePool& pool, sparse::Matrix& J,
+                              Vector& b) {
+    const auto stator = [&](const std::array<Index, 3>& ids, const auto& coef,
+                            const std::array<Real, 3>& emf) {
+        std::array<Index, 3> row{};
+        for (Size k = 0; k < 3; ++k) {
+            row[k] = pool.branch_var_id_for_inductor(ids[k], graph);
+        }
+        for (Size k = 0; k < 3; ++k) {
+            const auto& br = graph.branch(ids[k]);
+            if (stamping::node_is_active(br.from)) {
+                J.coeffRef(row[k], br.from) += Real{1};
+                J.coeffRef(br.from, row[k]) += Real{1};
+            }
+            if (stamping::node_is_active(br.to)) {
+                J.coeffRef(row[k], br.to) -= Real{1};
+                J.coeffRef(br.to, row[k]) -= Real{1};
+            }
+            for (Size j = 0; j < 3; ++j) J.coeffRef(row[k], row[j]) -= coef(k, j);
+            b[row[k]] -= emf[k];
+        }
+        return row;
+    };
+    for (const auto& m : pool.pmsm_mna_machines()) {
+        const auto& p = m.params;
+        const Real th_e = p.pole_pairs * m.theta0;
+        const Real w_e = p.pole_pairs * m.omega0;
+        if (p.flux_map && w_e != Real{0}) {
+            // v = R·i + ω_e·∂λ/∂θ_e(i) is nonlinear in i with a map; the DC
+            // point here is linear (no Newton). At ω0 = 0 it is v = R·i.
+            throw std::invalid_argument(std::format(
+                "DC operating point: the flux-map PMSM '{}' is held at "
+                "omega0 = {} rad/s; its held-mechanics DC point is only "
+                "available at omega0 = 0 (the stator law is nonlinear in i "
+                "when spinning). Start from zero state instead.",
+                graph.branch_name(m.branch_id[0]), m.omega0));
+        }
+        const auto ind = models::PmsmMna::inductance(p, th_e);
+        const auto lp1 = models::PmsmMna::lambda_pm(p, th_e, 1);
+        std::array<Real, 3> emf{};
+        for (Size k = 0; k < 3; ++k) emf[k] = w_e * lp1[k];
+        stator(m.branch_id, [&](Size k, Size j) {
+            return (k == j ? p.R_s : Real{0}) + w_e * ind.dL[k][j];
+        }, emf);
+    }
+    using IM = models::InductionMachineMna;
+    for (const auto& m : pool.induction_machines()) {
+        const auto& p = m.params;
+        const auto row = stator(m.branch_id, [&](Size k, Size j) {
+            return k == j ? p.R_s : Real{0};
+        }, std::array<Real, 3>{});
+        const auto dv = IM::derived(p);
+        const auto C = IM::clarke();
+        const Real w_e = p.pole_pairs * m.omega0;
+        const Real dg_dl[2][2] = {{-dv.inv_tau_r, -w_e}, {w_e, -dv.inv_tau_r}};
+        for (Size n = 0; n < 2; ++n) {   // dλ_r/dt = g(i, λ_r, ω0) = 0
+            const Index rn = m.rotor_node[n];
+            if (!stamping::node_is_active(rn)) continue;
+            for (Size q = 0; q < 2; ++q) {
+                if (stamping::node_is_active(m.rotor_node[q])) {
+                    J.coeffRef(rn, m.rotor_node[q]) -= dg_dl[n][q];
+                }
+            }
+            for (Size j = 0; j < 3; ++j) {
+                J.coeffRef(rn, row[j]) -= dv.Lm_over_tau_r * C[n][j];
+            }
+        }
+    }
+}
+
+/// Replace the KCL row of each machine's speed and angle node by
+/// `v = ω0` / `v = θ0` (the DC point holds the mechanics; no torque
+/// balance). A node another device also fixes (a source, an inductor,
+/// a switch: anything but capacitors, resistors and current outputs)
+/// would be over-determined: refused by name.
+inline void hold_machine_mechanics(const topology::Graph& graph,
+                                   const DevicePool& pool, sparse::Matrix& J,
+                                   Vector& b) {
+    using SK = DevicePool::StoredKind;
+    std::vector<std::pair<Index, Real>> held;
+    const auto hold = [&](Index node, Real value, Index phase_a,
+                          const char* what) {
+        if (!stamping::node_is_active(node)) return;
+        for (const auto& [n, v] : held) {
+            if (n != node) continue;
+            if (v == value) return;
+            throw std::invalid_argument(std::format(
+                "DC operating point: two machines hold the {} node '{}' at "
+                "different values ({} and {})", what, graph.node(node).name,
+                v, value));
+        }
+        for (Index br = 0; br < graph.num_branches(); ++br) {
+            const auto& e = graph.branch(br);
+            if (e.from != node && e.to != node) continue;
+            if (!pool.is_registered(br)) continue;
+            const auto k = pool.kind_of(br);
+            if (k == SK::Capacitor || k == SK::Resistor || k == SK::CurrentSource ||
+                k == SK::VCCS || k == SK::CCCS || k == SK::SineCurrentSource ||
+                k == SK::PulseCurrentSource || k == SK::PwlCurrentSource) {
+                continue;
+            }
+            throw std::invalid_argument(std::format(
+                "DC operating point: machine '{}' holds its {} node '{}' at "
+                "its initial value (omega0 / theta0), but '{}' also fixes "
+                "that node (a source, an inductor, a transformer winding, a "
+                "switch: a prescribed or shared shaft). The DC point cannot "
+                "hold a node twice: prescribe the speed with omega0 alone, or "
+                "start the transient from zero state / initial conditions.",
+                graph.branch_name(phase_a), what, graph.node(node).name,
+                graph.branch_name(br)));
+        }
+        held.emplace_back(node, value);
+    };
+    for (const auto& m : pool.pmsm_mna_machines()) {
+        hold(m.omega_node, m.omega0, m.branch_id[0], "speed");
+        hold(m.theta_node, m.theta0, m.branch_id[0], "angle");
+    }
+    for (const auto& m : pool.induction_machines()) {
+        hold(m.omega_node, m.omega0, m.branch_id[0], "speed");
+    }
+    if (held.empty()) return;
+    std::vector<char> is_held(static_cast<Size>(J.rows()), 0);
+    for (const auto& [n, v] : held) is_held[static_cast<Size>(n)] = 1;
+    // keep the diagonal entry so the overwrite below never inserts
+    J.prune([&](const Index& r, const Index& c, const Real&) {
+        return r == c || is_held[static_cast<Size>(r)] == 0;
+    });
+    for (const auto& [n, v] : held) {
+        J.coeffRef(n, n) = Real{1};
+        b[n] = -v;
+    }
+}
+
+}  // namespace detail
+
 inline void dc_assemble(const topology::Graph& graph,
                          const DevicePool& pool,
                          const topology::SwitchStateMask& mask,
@@ -231,7 +378,8 @@ inline void dc_assemble(const topology::Graph& graph,
                          Vector& b,
                          Real t_eval = Real{0},
                          Real gmin = Real{0},
-                         Real source_scale = Real{1}) {
+                         Real source_scale = Real{1},
+                         bool hold_mechanics = true) {
     const Size state_size = pool.state_size(graph);
     J = sparse::Matrix(static_cast<Index>(state_size),
                         static_cast<Index>(state_size));
@@ -422,6 +570,10 @@ inline void dc_assemble(const topology::Graph& graph,
     // assembler stays neutral and the SOLVER opts in, so AC / LTI /
     // sweep consumers that build their own matrices are unaffected.
     stamp_gmin_dc(J, graph.num_nodes(), gmin, q_rows);
+    if (!pool.pmsm_mna_machines().empty() || !pool.induction_machines().empty()) {
+        detail::stamp_machines_dc(graph, pool, J, b);
+        if (hold_mechanics) detail::hold_machine_mechanics(graph, pool, J, b);
+    }
 }
 
 /// A rank deficiency of the DC system that no amount of
@@ -536,13 +688,18 @@ struct DCStructuralDefect {
     //    would be the same false accusation this function exists to
     //    avoid.
     const bool nonlinear_is_stamped = static_cast<bool>(refresh);
+    using SK = DevicePool::StoredKind;
     const auto dc_floating = detail::components_without_ground(
         graph, [&](const topology::Branch& br) {
             if (br.kind == topology::BranchKind::Nonlinear) {
-                return nonlinear_is_stamped;
+                // the machines' stator rows are stamped right here (D19)
+                return nonlinear_is_stamped ||
+                       (pool.is_registered(br.id) &&
+                        (pool.kind_of(br.id) == SK::PmsmMna ||
+                         pool.kind_of(br.id) == SK::InductionMachineMna));
             }
             return detail::conducts_at_dc(pool, br);
-        });
+        }, detail::machine_dc_ties(pool));
     if (!dc_floating.empty() && !dc_floating.front().empty()) {
         out.present = true;
         out.row = dc_floating.front().front();
@@ -871,6 +1028,11 @@ inline Vector compute_dc_op(const topology::Graph& graph,
                 mask.to_string(), defect.detail));
         }
         stamp_gmin_dc(J, graph.num_nodes(), gmin, charge_rows(graph, pool));
+        // the held rows are equations v = value, not KCL: no floor on them
+        if (!pool.pmsm_mna_machines().empty() ||
+            !pool.induction_machines().empty()) {
+            detail::hold_machine_mechanics(graph, pool, J, b);
+        }
         sparse::compress_in_place(J);
     }
 

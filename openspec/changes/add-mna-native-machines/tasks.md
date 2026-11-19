@@ -8,7 +8,7 @@
 - [x] 1.7 Test: a legacy call with `Kt ≠ Ke` routed to the native path is refused with the SI explanation
 - [x] 1.8 Optional `theta_node` through the VCCS of `add-controlled-source-set`: `θ(t) = ∫ω dt` within 1e-6 — unit VCCS `{name}.th` into a 1 F capacitor `{name}.ct`; measured 2.9e-7 rad against the exact augmented solution at dt = 2 µs
 - [x] 1.9 AC check: armature admittance of the composite against the analytic `1/(R_a + sL_a + K²/(sJ + B))` at 10 frequencies within 1e-6 (after `fix-mna-sweep-correctness` if the sweep needs it) — kernel complex MNA sweep, measured 1.9e-12
-- [ ] 1.10 Conformance rows (`add-engine-conformance-matrix`): `dc_machine` × {pwl ok, trbdf2 ok, dsed refused, DC ok, AC ok} — NOT DONE: the conformance matrix does not exist yet
+- [x] 1.10 Conformance rows (`add-engine-conformance-matrix`): `dc_machine` × {pwl ok, trbdf2 ok, dsed refused, DC ok, AC ok} — `test_dc_machine_cell` (engine columns from its linear kinds; dsed RUNS it, D10) and `test_dc_machine_dc_cell` (closed form); AC: `test_machine_ac_sweep_cell[dc_machine]` (kernel sweep, presence: the machine moves the terminal impedance)
 
 ## 2. Induction machine (after `add-unified-device-interface`)
 - [x] 2.1 `models/induction_machine_mna.hpp`: parameters, validation, `eval` with f and q for 3 stator rows, 2 rotor-flux rows and the speed-node torque; closed-form Jacobian — stamp in `pwl/nonlinear_refresh_pmsm_mna.hpp` (shared machine history, DECISIONS D11); rotor flux = two internal nodes with 1 F
@@ -17,32 +17,32 @@
 - [x] 2.4 Tests with the declared test machine (0.5 Ω, 2 mH, 0.4 Ω, 2 mH, 60 mH, pp = 2; 100 V rms phase, 60 Hz), speed node held by a source: locked rotor 57.88 A rms; synchronous speed 4.277 A rms and |mean torque| ≤ 0.01 N·m; slip 0.05 → 16.12 N·m and 12.29 A rms; each within 0.5 %
 - [x] 2.5 Free acceleration against an independent SciPy integration (rtol 1e-10): 1e-4 on `trbdf2`; order ≥ 3.5 per halving on `pwl` — rtol 1e-12, Radau and DOP853 agree to 1e-11, numbers pinned (`_machine_reference/induction_reference.py`); `trbdf2` 1.6e-5 (rtol 1e-8; 3.4e-4 at the default rtol); `pwl` 1.60e-4, 4.01e-5, 1.00e-5 at 80/40/20 µs, ratios 3.99, 4.00 with `discontinuity_restart=True` (2.1 without: the engine's inconsistent start, same on a plain RL load)
 - [x] 2.6 Engine agreement `pwl` / `trbdf2` within 1e-3; inverter-fed case (PWL bridge + machine) — sine-fed start and a six-step bridge start (switches, edge oracle): 3.3e-4 of synchronous speed
-- [ ] 2.7 Conformance rows: `induction_machine` × {pwl, trbdf2, dsed refused, DC held, AC} — PARTIAL: pwl ok, trbdf2 ok, dsed / bdf1 / AC refused by name; DC held not done (DECISIONS D13)
+- [x] 2.7 Conformance rows: `induction_machine` × {pwl, trbdf2, dsed refused, DC held, AC} — pwl ok, trbdf2 ok, dsed / bdf1 / AC refused by name; DC held (D19, `test_machine_dc_held_cell`)
 
 ## 3. PM-flux harmonics and BLDC
 - [x] 3.1 `PmsmMna::Params` harmonic list `(h, ψ_h, φ_h)`; `λ_pm`, `dλ_pm/dθ`, `d²λ_pm/dθ²` from the series; `ψ_1` only is bit-identical to the current device
 - [x] 3.2 `add_bldc_mna(..., k_e, flat_top_deg=120, n_harmonics=25)` and `pm_harmonics_from_waveform(theta, emf, omega)` — Python (`pulsim.machines`), `omega` is the electrical speed
 - [x] 3.3 Test: open-circuit back-EMF at constant speed against the ideal trapezoid, RMS deviation ≤ 0.5 % of the flat top at 25 harmonics (computed 0.40 %)
 - [x] 3.4 Test: torque from `∫ Σ e_k i_k dt / (ω·t)` equals the device's `T_em` mean within 1e-6 (co-energy consistency) — generator into 2 Ω at held speed: mechanical power from the holding source = copper loss within 2.1e-7; `T_em` trace mean = shaft torque (test bound rel 1e-9). 3.3: RMS deviation 0.40 % of the flat top (series alone 0.395 %)
-- [ ] 3.5 DC operating point with held mechanics for `PmsmMna` (today: fails, no DC stamp): at `θ0`, `ω0 = 0`, `i = v/R_s` within 1e-9
-- [ ] 3.6 YAML types `pmsm`, `bldc`
-- [ ] 3.7 Conformance rows: `pmsm_mna[harmonics]`, `pmsm_mna[flux_map]` × {pwl, trbdf2, dsed refused, DC held, AC}
+- [x] 3.5 DC operating point with held mechanics for `PmsmMna` (today: fails, no DC stamp): at `θ0`, `ω0 = 0`, `i = v/R_s` within 1e-9 (D19)
+- [x] 3.6 YAML types `pmsm`, `bldc` (D20)
+- [x] 3.7 Conformance rows: `pmsm_mna[harmonics]`, `pmsm_mna[flux_map]` × {pwl, trbdf2, dsed refused, DC held, AC} — `test_pmsm_harmonics_cell`, `test_pmsm_flux_map_cell` (pwl, trbdf2 agree; dsed, bdf1 refused by name), DC held: the PMSM cell and `test_pmsm_flux_map.py::test_dc_point_at_rest_is_v_over_r_and_spinning_is_refused` (at rest 1e-9; ω0 ≠ 0 refused by name, D22); AC: `test_machine_ac_sweep_cell` — the PmsmMna row has no AC stamp, refused by name
 
 ## 4. Flux maps
-- [ ] 4.1 `FluxMapDQ.from_tables(i_d, i_q, lambda_d, lambda_q, *, tol=0.02, smooth=0.0, source=...)`: co-energy bicubic fit, residual, positive-definite check, refusals by name
-- [ ] 4.2 Kernel evaluation of `∇W'` and the Hessian; picoampere-spacing monotonicity test along both axes
-- [ ] 4.3 Test: a map generated from `L_d = 1 mH`, `L_q = 3 mH`, `ψ_pm = 0.05 Wb` reproduces the linear `PmsmMna` run within 1e-9
-- [ ] 4.4 Test: reciprocity at 100 random points within 1e-9; a non-reciprocal input (one table scaled by 1.1) is refused naming the residual
-- [ ] 4.5 Test: a saturating map (analytic `λ_d = ψ_pm + L_d0·I_s·tanh(i_d/I_s)`) — locked-rotor current step against an independent SciPy integration, 1e-4
+- [x] 4.1 `FluxMapDQ.from_tables(i_d, i_q, lambda_d, lambda_q, *, tol=0.02, smooth=0.0, source=...)`: co-energy bicubic fit, residual, positive-definite check, refusals by name — numpy least squares + not-a-knot null-space fill (D22); refusals: residual > tol, rank (too coarse), not PD (kernel `validate`), origin values ≠ machine L_d/L_q/psi_pm (names the machine)
+- [x] 4.2 Kernel evaluation of `∇W'` and the Hessian; picoampere-spacing monotonicity test along both axes — `models/flux_map_dq.hpp`; 1 pA steps at knots, mid-cell and 14 A past the grid, increment = H·δ within 1e-9; stamp partials against central differences (C++ `test_pmsm_flux_map.cpp`): measured |∂λ/∂i − CD| ≤ 1e-9, increment vs plain difference ≤ 1e-15 Wb at 100 random states; a linear map equals `inductance`/`lambda_pm`/`torque` to ≤ 1e-14 Wb (C++ standalone run, 3902 assertions)
+- [x] 4.3 Test: a map generated from `L_d = 1 mH`, `L_q = 3 mH`, `ψ_pm = 0.05 Wb` reproduces the linear `PmsmMna` run within 1e-9 — measured max relative difference 3.0e-14 (pwl) and 8.5e-14 (trbdf2) on ω, θ, i_a over a 50 ms sine-fed IPM start (fit residual 6e-15)
+- [x] 4.4 Test: reciprocity at 100 random points within 1e-9; a non-reciprocal input (one table scaled by 1.1) is refused naming the residual — measured reciprocity 6.9e-14 H (bound 1e-12), Hessian against central differences 4.7e-14 H; the ×1.1 table: fit residual only 0.16 % of the flux range, so a direct reciprocity check on the tables was added (9.1 % of the cross inductance, refused at the default 2 %; the reciprocal table 0.19 %), D22
+- [x] 4.5 Test: a saturating map (analytic `λ_d = ψ_pm + L_d0·I_s·tanh(i_d/I_s)`) — locked-rotor current step against an independent SciPy integration, 1e-4 — a cross-coupled log-cosh co-energy instead (saturates with |i|, couples the axes), ramped dq voltages (`_machine_reference/flux_map_reference.py`): worst 2.57e-4 A of 20 A (1.3e-5) on pwl at 4/2/1 µs and on trbdf2, i.e. the 1 A-grid fit error (the fitted-map ODE differs from the analytic one by 2.57e-4 A); pwl against the fitted-map ODE 7.1e-7, 1.8e-7 A at 2, 1 µs (ratio 4.0); energy balance of a saturated start (sine-fed, |i| to 26 A, 0 → 59 rad/s): E_in = R∫i² + ΔW_field + ΔE_kin + ∫Bω², residual 1.4e-9 of E_in at 2 µs (5.5e-9 at 4 µs, second order)
 
 ## 5. Deprecation
-- [ ] 5.1 `DeprecationWarning` in `add_dc_motor`, `add_pmsm`, `add_bldc`, `add_induction_motor` and the `make_*_observer` functions, naming the native replacement and the measured first-order error — PARTIAL: `add_dc_motor` and `make_dc_motor_observer` only (DECISIONS D4)
-- [ ] 5.2 `im_parameters_from_nameplate` result labelled `estimated`
+- [x] 5.1 (DECISIONS D4, D18) `DeprecationWarning` in `add_dc_motor`, `add_pmsm`, `add_bldc`, `add_induction_motor` and the `make_*_observer` functions, naming the native replacement and the measured first-order error
+- [x] 5.2 `im_parameters_from_nameplate` result labelled `estimated` (`_diagnostics["status"]`, D18)
 - [ ] 5.3 Next release: YAML `induction_motor` default `model: mna` (BREAKING, CHANGELOG)
 
 ## 6. Documentation
-- [ ] 6.1 `AI_GUIDE.md` (machine table: native versus observer, which engine), `docs/motors-induction.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (non-goals; no machine is validated against measurement), `CHANGELOG.md` — PARTIAL (DC machine): AI_GUIDE row, motors-induction see-also, both limitation pages, CHANGELOG
+- [x] 6.1 `AI_GUIDE.md` (machine table: native versus observer, which engine), `docs/motors-induction.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (non-goals; no machine is validated against measurement), `CHANGELOG.md` — AI_GUIDE migration rows (native machines, DC machine), motors-induction see-also, both limitation pages (machines + flux-map row), CHANGELOG (induction machine, harmonics/BLDC, flux maps, DC point). A flux-map row in AI_GUIDE does not fit the guide's 32 KiB budget (`test_ai_guide`); the docstrings carry it
 - [x] 6.2 Tutorial: DC machine as a circuit (the speed node, loads as elements) — `docs/tutorials/07-dc-machine.md` (executed by test_doc_snippets)
 
 ## 7. Verification
-- [ ] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
+- [x] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check — at the group-4 tip: ruff clean, pytest 5153 passed / 108 skipped / 7 xfailed, `-m reference` 368 passed, reference_status rc 0, openspec 78/78, stubs up to date, goldens ALL IDENTICAL against the 33dbd853 baseline, the machine C++ target (layer4_v3, 29 cases) and 17 machine-named ctests pass, flux-map + induction tests on Eigen 3.4.0. Full ctest NOT run on this tip (orchestrator rule 2026-11-19: the integration batch runs it)

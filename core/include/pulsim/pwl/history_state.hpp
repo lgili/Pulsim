@@ -483,6 +483,18 @@ public:
         }
     }
 
+    /// Set a capacitor's companion current: a DC point that holds the
+    /// capacitor's node off steady state (a machine's speed / angle
+    /// node) is not i_C = 0 (add-mna-native-machines D19).
+    void set_capacitor_current(Index branch_id, Real i) {
+        for (auto& e : entries_) {
+            if (e.branch_id == branch_id &&
+                e.kind == DevicePool::StoredKind::Capacitor) {
+                e.i_prev = i;
+            }
+        }
+    }
+
     /// Diagnostic accessor.
     [[nodiscard]] const std::vector<HistoryEntry>& entries() const noexcept {
         return entries_;

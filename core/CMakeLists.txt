@@ -565,6 +565,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer4_v3/test_lti_recovery.cpp
         tests/layer4_v3/test_lti_state_space.cpp   # Bridge.3 — DSED bridge
         tests/layer4_v3/test_induction_machine_mna.cpp  # add-mna-native-machines
+        tests/layer4_v3/test_pmsm_flux_map.cpp          # add-mna-native-machines group 4
     )
     target_link_libraries(pulsim_core_layer4_v3_tests
         PRIVATE

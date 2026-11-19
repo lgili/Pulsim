@@ -300,3 +300,59 @@ def test_fixed_step_run_takes_no_dt_retry(dt):
     res = p.simulate(b, t_end=2000 * dt, dt=dt, engine="pwl")
     assert len(res.times) == 2001
     assert not res.dt_retries
+
+
+@pytest.mark.parametrize("psi", [0.05, 0.5])
+@pytest.mark.parametrize("dt", [1e-8, 1e-9])
+def test_small_steps_take_no_retry_from_a_running_state(psi, dt):
+    # The flux rows multiply lambda - lambda_old by 2/h. Written as a
+    # difference of two absolute fluxes the round-off was eps*(2/h)*psi,
+    # above Newton's absolute 1e-9 V at h = 10 ns, psi = 0.05: the run
+    # aborted (12 us at 10 ns, 50 ns at psi = 0.5). The rows now take the
+    # increment in closed form (PmsmMna::lambda_increment).
+    b = p.CircuitBuilder()
+    for k, n in enumerate(("ua", "ub", "uc")):
+        b.add_sine_voltage_source(f"V{n}", n, "gnd", 0.0, 12.0, 30.0,
+                                  -2 * math.pi / 3 * k)
+    b.add_pmsm_mna("M", "ua", "ub", "uc", "nn", "w", "th", R_s=0.5,
+                   L_d=1e-3, L_q=3e-3, psi_pm=psi, pole_pairs=4, J=1e-3,
+                   B=1e-4)
+    first = p.simulate(b, t_end=0.02, dt=2e-5, engine="pwl")
+    assert abs(first.v("w")[-1]) > 1.0          # running: theta, i moving
+    res = p.simulate(b, t_end=0.02 + 2000 * dt, dt=dt, engine="pwl",
+                     resume_from=first.final_snapshot)
+    assert not res.dt_retries
+    assert res.times[-1] > 0.02 + 1990 * dt     # ran to the end
+
+
+@pytest.mark.parametrize("dt", [1e-8, 1e-9])
+def test_small_steps_from_rest_run_to_the_end(dt):
+    # Before the increment form: aborted at t = 12 us (dt = 10 ns) and at
+    # t = 11 ns (dt = 1 ns), psi = 0.05, Newton stuck on its 1e-9 V floor.
+    b = p.CircuitBuilder()
+    _sources(b)
+    b.add_pmsm_mna("M1", "ua", "ub", "uc", "nn", "w", "th", R_s=RS,
+                   L_d=2e-3, L_q=2e-3, psi_pm=PSI, pole_pairs=PP, J=1e-3,
+                   B=1e-4)
+    res = p.simulate(b, t_end=2000 * dt, dt=dt, engine="pwl")
+    assert not res.dt_retries
+    assert res.times[-1] > 1990 * dt
+
+
+def test_angle_integrator_capacitance_is_not_a_parameter():
+    # theta is the voltage of a node whose 1 F capacitor integrates omega;
+    # C != 1 used to rescale theta silently (back-EMF at the wrong angle).
+    b = p.CircuitBuilder()
+    _sources(b)
+    b.add_pmsm_mna("M1", "ua", "ub", "uc", "nn", "w", "th", R_s=RS,
+                   L_d=1e-3, L_q=3e-3, psi_pm=PSI, pole_pairs=PP, J=1e-3,
+                   B=1e-4)
+    c = b.build()
+    ref = p.simulate(c, t_end=0.05, dt=2e-5, engine="pwl")
+    got = p.simulate(c.with_value("M1_theta.C", 0.25), t_end=0.05, dt=2e-5,
+                     engine="pwl")
+    for sig in ("w", "th"):
+        a, b2 = np.asarray(ref.v(sig)), np.asarray(got.v(sig))
+        assert np.max(np.abs(a)) > 1.0, sig                   # it moved
+        # measured 0.0 (the C-scaled injection cancels exactly)
+        assert np.max(np.abs(a - b2)) < 1e-9 * np.max(np.abs(a)), sig

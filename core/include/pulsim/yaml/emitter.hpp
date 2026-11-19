@@ -328,6 +328,14 @@ namespace yaml_detail {
             e.add("phases", phases + "]");
             if (kind == K::PmsmMna) {
                 e.add("omega", node(pm->omega_node)).add("theta", node(pm->theta_node));
+                if (pm->omega0 != Real{0}) e.add("omega0", num(pm->omega0));
+                if (pm->theta0 != Real{0}) e.add("theta0", num(pm->theta0));
+                if (pm->params.flux_map) {
+                    throw std::invalid_argument(std::format(
+                        "yaml::emit: PMSM '{}' has a flux map, which has no YAML "
+                        "form yet; emitting it would drop the saturation",
+                        g.branch_name(ids[0])));
+                }
                 if (const auto& hs = pm->params.harmonics) {
                     std::vector<Real> flat;  // h, psi, phi per term
                     for (const auto& t : *hs) flat.insert(flat.end(), {t.h, t.psi, t.phi});
@@ -337,6 +345,7 @@ namespace yaml_detail {
                 e.add("omega", node(im->omega_node))
                     .add("rotor", "[" + node(im->rotor_node[0]) + ", " +
                                   node(im->rotor_node[1]) + "]");
+                if (im->omega0 != Real{0}) e.add("omega0", num(im->omega0));
             }
             put_fields(e, prm, fields_of(kind));
             o += "  - " + e.str() + "\n";
@@ -884,7 +893,14 @@ private:
         namespace m = ::pulsim::models;
         const auto row = fields_of(kind);
         keys(n, who, {"kind", "name", "pins", "role", "control", "phases", "omega", "theta",
-                      "rotor", "harmonics", "table", "ja", "law", "t", "i", "periodic", "gate", "I_H"}, row);
+                      "rotor", "harmonics", "table", "ja", "law", "t", "i", "periodic", "gate", "I_H",
+                      "omega0", "theta0"}, row);
+        if ((n["omega0"] && kind != K::PmsmMna && kind != K::InductionMachineMna) ||
+            (n["theta0"] && kind != K::PmsmMna)) {
+            fail(who, "omega0 / theta0 are machine keys (theta0: pmsm_mna only)");
+        }
+        const Real omega0 = n["omega0"] ? real(n["omega0"], who, "omega0") : Real{0};
+        const Real theta0 = n["theta0"] ? real(n["theta0"], who, "theta0") : Real{0};
         if (n["harmonics"] && kind != K::PmsmMna) fail(who, "harmonics is a pmsm_mna key");
         if (n["rotor"] && kind != K::InductionMachineMna) {
             fail(who, "rotor is an induction_machine_mna key");
@@ -960,7 +976,7 @@ private:
                 }
                 // braced: omega before theta (not as two arguments)
                 const std::array<Index, 2> ot{pin(n["omega"], who), pin(n["theta"], who)};
-                pool.add_pmsm_mna({br[0], br[1], br[2]}, ot[0], ot[1], p);
+                pool.add_pmsm_mna({br[0], br[1], br[2]}, ot[0], ot[1], p, omega0, theta0);
             } else if constexpr (std::is_same_v<P, m::InductionMachineMna::Params>) {
                 const auto rn = n["rotor"];
                 if (!rn || !rn.IsSequence() || rn.size() != 2) fail(who, "rotor needs two nodes");
@@ -968,7 +984,7 @@ private:
                 const std::array<Index, 3> orr{pin(n["omega"], who), pin(rn[0], who),
                                                pin(rn[1], who)};
                 pool.add_induction_machine_mna({br[0], br[1], br[2]}, orr[0],
-                                               {orr[1], orr[2]}, p);
+                                               {orr[1], orr[2]}, p, omega0);
             } else if constexpr (std::is_same_v<P, m::IdealTransformer::Params>) { const auto c = xpins(); pool.add_ideal_transformer(bi, c[0], c[1], p); }
             else if constexpr (std::is_same_v<P, m::VCCS::Params>) { const auto c = xpins(); pool.add_vccs(bi, c[0], c[1], p); }
             else if constexpr (std::is_same_v<P, m::CCCS::Params>) pool.add_cccs(bi, b.branch_id_of(text(n["control"], who, "control")), p);

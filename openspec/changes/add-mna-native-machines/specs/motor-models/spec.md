@@ -95,9 +95,11 @@ The MNA-native PMSM SHALL accept flux-linkage maps `λ_d(i_d, i_q)` and
 `λ_q(i_d, i_q)`. The maps SHALL be represented as the gradient of one
 co-energy function so that `∂λ_d/∂i_q = ∂λ_q/∂i_d`, and the torque SHALL
 be `(3/2)·pp·(λ_d·i_q − λ_q·i_d)` from the same function. The fit
-residual SHALL be reported. Input tables whose fit residual exceeds the
-tolerance, or whose incremental inductance matrix is not positive
-definite, SHALL be refused naming the machine.
+residual SHALL be reported. Input tables whose fit residual or
+reciprocity defect exceeds the tolerance, or whose incremental inductance matrix is not positive
+definite, SHALL be refused naming the map (its source); a map whose
+values at zero current disagree with the machine's `L_d`, `L_q`,
+`psi_pm` SHALL be refused naming the machine.
 
 #### Scenario: Linear map equals the linear machine
 - **GIVEN** maps generated from `L_d = 1 mH`, `L_q = 3 mH`,
@@ -106,9 +108,19 @@ definite, SHALL be refused naming the machine.
 - **THEN** the two runs agree within 1e-9
 
 #### Scenario: Non-reciprocal tables refused
-- **WHEN** the `λ_q` table is scaled by 1.1 and the maps are built
-- **THEN** construction fails with an error naming the machine and the
-  fit residual
+- **GIVEN** a saturating, cross-coupled map whose `λ_q` table is scaled
+  by 1.1 (its cross terms then disagree by 10 %)
+- **WHEN** the maps are fitted with the default tolerance
+- **THEN** construction fails with an error naming the map's source and
+  its reciprocity defect (the tables' cross derivatives against each
+  other), and a reciprocal map reports its fit residual
+
+#### Scenario: Saturated locked-rotor step
+- **GIVEN** a map sampled from an analytic saturating, cross-coupled
+  co-energy and a locked rotor driven by ramped dq voltages
+- **WHEN** the machine runs on `pwl` and on `trbdf2`
+- **THEN** the dq currents agree with an independent SciPy integration
+  of the analytic law within 1e-4 of the steady current
 
 ### Requirement: DC Operating Point with Machines
 
