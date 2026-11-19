@@ -1327,7 +1327,8 @@ void init_module(py::module_& m) {
            const pulsim::solver::SolverSnapshot* resume,
            std::vector<Real> tick_origins,
            std::vector<std::uint64_t> tick_next_k,
-           py::object loop_feed) {
+           py::object loop_feed,
+           Real t_offset) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             // add-unified-event-queue group 3: control ticks on the
             // scheduler's queue; each gets the full MNA state.
@@ -1643,6 +1644,13 @@ void init_module(py::module_& m) {
                     Real heat_injected = 0, heat_pending = 0;
                 } out;
                 loss->write(out);
+                // a fresh run with t_start runs on the engine's clock from 0 and
+                // its times are relabelled by t_start: so are its loss events
+                if (t_offset != Real{0}) {
+                    for (auto& r : out.device_losses) {
+                        for (auto& e : r.events) e.t += t_offset;
+                    }
+                }
                 d["device_losses"] = py::cast(out.device_losses);
                 d["heat_injected"] = out.heat_injected;
                 d["heat_pending"] = out.heat_pending;
@@ -1707,6 +1715,7 @@ void init_module(py::module_& m) {
         py::arg("tick_origins") = std::vector<Real>{},
         py::arg("tick_next_k") = std::vector<std::uint64_t>{},
         py::arg("loop_feed") = py::none(),
+        py::arg("t_offset") = Real{0},
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "
@@ -1764,7 +1773,8 @@ void init_module(py::module_& m) {
            Real h_bdf2,
            Real stiffness_threshold,
            std::size_t store_every,
-           bool event_log) {
+           bool event_log,
+           const pulsim::solver::SolverSnapshot* resume) {
             // no loss tracking here: an adapter built with loss_port refuses by name
             pulsim::refuse_device_losses(adapter.pool(), "dsed");
             PySwitchFnSSM sf(std::move(switch_fn_obj));
@@ -1776,10 +1786,59 @@ void init_module(py::module_& m) {
                 adapter, std::move(sf), std::move(ctrl),
                 std::move(det), dt_init, dt_max, h_bdf2,
                 store_every);
+            // task 20.2 (session 26): snapshot / resume on this integrator too
+            using AutoT = pulsim::dsed::AutoResumeState<pulsim::topology::SwitchStateMask>;
+            const auto n_sw = static_cast<pulsim::Size>(adapter.graph().num_switches());
+            pulsim::device::DeviceStateLayout layout;
+            layout.count[static_cast<std::size_t>(pulsim::device::StateBlock::LinearCompanion)] =
+                static_cast<std::uint32_t>(adapter.pool().num_dynamic_branches());
+            std::optional<AutoT> rs;
+            if (resume != nullptr) {
+                if (resume->controller.kind != pulsim::step::ControllerState::Kind::Exact) {
+                    throw std::invalid_argument(
+                        "dsed(integrator='auto', resume_from=...): only an exact-engine "
+                        "snapshot of this integrator continues here");
+                }
+                if (!resume->dev_layout.empty()) {
+                    const std::string diff = layout.first_difference(resume->layout());
+                    if (!diff.empty() || resume->layout_signature
+                                             != resume->layout().signature(resume->dev_layout.size())) {
+                        throw std::invalid_argument(
+                            "dsed(resume_from=...): the snapshot belongs to a different "
+                            "circuit: " + (diff.empty() ? std::string("its device-state layout "
+                                                                      "is corrupt (signature)")
+                                                        : diff + " (this circuit, then the snapshot)"));
+                    }
+                }
+                rs = AutoT::unflatten(resume->controller.v);
+                if (rs->x.size() != x0.size() || resume->stamped_mask.size() != n_sw) {
+                    throw std::invalid_argument(
+                        "dsed(resume_from=...): the snapshot belongs to a different circuit "
+                        "(its state or switch count differs)");
+                }
+                pulsim::topology::SwitchStateMask m(n_sw);
+                for (pulsim::Size i = 0; i < n_sw; ++i) m.set(i, resume->stamped_mask[i]);
+                rs->mask = m;
+            }
             py::gil_scoped_release release;
-            auto res = sim.simulate(x0, t_end);
+            auto res = sim.simulate(x0, t_end, rs ? &*rs : nullptr);
             py::gil_scoped_acquire acquire;
             auto d = ped_result_auto_to_dict(res, event_log);
+            {   // the end instant as a snapshot (field 14 kind Exact, AutoResumeState)
+                const auto& f = sim.final_state();
+                pulsim::solver::SolverSnapshot snap;
+                snap.t = f.t;
+                if (!(adapter.current_mask() == f.mask)) adapter.set_mask(f.mask);
+                snap.x = adapter.recover_full(f.t, f.x);
+                snap.stamped_mask.resize(n_sw);
+                for (pulsim::Size i = 0; i < n_sw; ++i) snap.stamped_mask[i] = f.mask.get(i);
+                snap.controller.kind = pulsim::step::ControllerState::Kind::Exact;
+                snap.controller.v = f.flatten();
+                snap.dev_layout.assign(layout.count.begin(), layout.count.end());
+                snap.layout_signature = layout.signature();
+                snap.valid = true;
+                d["final_snapshot"] = py::cast(std::move(snap));
+            }
             d["exact"] = exact_report_dict(adapter, 0);
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
@@ -1798,6 +1857,7 @@ void init_module(py::module_& m) {
         py::arg("stiffness_threshold") = Real{10.0},
         py::arg("store_every")          = std::size_t{1},
         py::arg("event_log") = true,
+        py::arg("resume") = static_cast<const pulsim::solver::SolverSnapshot*>(nullptr),
         "Bridge.11 — native PEDSimulatorAuto over a "
         "NativeCircuitBuilderAdapter (per-mode RK45↔BDF2 dispatch).");
 

@@ -497,13 +497,11 @@ def _mark_no_snapshot(res, integrator: str, t_start, bridge: str = "") -> None:
     if bridge:
         why = (f"engine='dsed' ran this circuit on the {bridge} (the native "
                "adapter rejected it), which keeps no snapshot")
-    elif integrator in ("auto", "bdf2"):
-        why = (f"engine='dsed' ran this circuit on integrator={integrator!r} "
-               f"({'per-mode RK45/BDF2, PEDSimulatorAuto' if integrator == 'auto' else 'fixed-step BDF2'}"
-               "), which keeps no snapshot; only the event-driven integrator "
-               "writes one. Run the first segment with integrator='rk45' (a "
-               "circuit with diodes, a loss port or control ticks routes there "
-               "by default)")
+    elif integrator == "bdf2":
+        why = ("engine='dsed' ran this circuit on integrator='bdf2' (fixed-step "
+               "BDF2), which keeps no snapshot; the event-driven and the 'auto' "
+               "integrators write one. Run the first segment without "
+               "integrator='bdf2'")
     elif t_start:
         why = (f"engine='dsed' ran a fresh run with t_start={t_start!r} on its "
                "own clock from 0, so it writes no snapshot (its time would be "
@@ -513,6 +511,16 @@ def _mark_no_snapshot(res, integrator: str, t_start, bridge: str = "") -> None:
     s = _k.SolverSnapshot()
     s.invalid_reason = why
     res._set_final_snapshot(s)
+
+
+_AUTO_SNAPSHOT_TAG = 101.0   # dsed/scheduler_auto.hpp AutoResumeState::kTag
+
+
+def _auto_snapshot(snap) -> bool:
+    """Whether an exact-engine snapshot was written by integrator='auto'."""
+    cs = snap.controller_state
+    return (cs is not None and cs[0] == _EXACT_SNAPSHOT_KIND and len(cs[1]) > 0
+            and float(cs[1][0]) == _AUTO_SNAPSHOT_TAG)
 
 
 def _check_resume_snapshot(snap, integrator, t_start) -> None:
@@ -754,12 +762,8 @@ def run_dsed_from_builder(
                 f"simulate(engine='dsed', integrator='bdf2'): the loss port of "
                 f"{_loss_names[0]!r} (set_device_losses) is read on the "
                 "event-driven integrator only. Drop integrator='bdf2'.")
-        if t_start and resume_from is None:
-            raise unsupported(
-                "dsed", "device_losses", device=_loss_names[0], message=
-                f"simulate(engine='dsed', t_start={t_start!r}): the loss port of "
-                f"{_loss_names[0]!r} records its events on the run's own clock "
-                "from 0. Drop t_start, or use engine='pwl' / 'trbdf2'.")
+        # a fresh t_start run is the 0-start run relabelled by t_start (the
+        # engine's clock runs from 0): its loss events are shifted with it
         integrator = "rk45"
     if resume_from is not None:
         if initial_state is not None:
@@ -768,7 +772,19 @@ def run_dsed_from_builder(
                 "simulate(engine='dsed', resume_from=..., initial_state=...): the "
                 "snapshot is the state; pass one of them.")
         _check_resume_snapshot(resume_from, integrator, t_start)
-        if integrator == "auto" and not ticks:
+        if _auto_snapshot(resume_from):
+            # task 20.2: written by PEDSimulatorAuto, continued by it only
+            if integrator not in (None, "auto") or ticks:
+                raise unsupported(
+                    "dsed", "resume_from", message=
+                    "simulate(engine='dsed', resume_from=...): the snapshot was "
+                    "written by integrator='auto' (the per-mode RK45/BDF2 "
+                    "integrator), and this run would take the event-driven one "
+                    f"(integrator={integrator!r}{', control ticks' if ticks else ''}"
+                    "), which cannot continue its step history. Resume with the "
+                    "first segment's options.")
+            integrator = "auto"
+        elif integrator == "auto" and not ticks:
             # diodes and loss ports made it 'rk45' above, ticks do below:
             # anything else is 'auto' choosing PEDSimulatorAuto, which
             # cannot continue an event-driven snapshot
@@ -779,8 +795,8 @@ def run_dsed_from_builder(
                 "which cannot continue the event-driven integrator's snapshot. "
                 "Pass integrator='rk45' or leave integrator unset (a resume then "
                 "runs on the integrator that wrote the snapshot).")
-        # unset: the integrator that wrote the snapshot (the event-driven one)
-        integrator = "rk45"
+        else:   # unset: the integrator that wrote the snapshot (the event-driven one)
+            integrator = "rk45"
     # Device kinds: the kernel's capability table, before any adapter
     # is built (the Python adapter below would extract the LTI system
     # with every Newton device silently ABSENT). The native adapter
@@ -1073,6 +1089,7 @@ def run_dsed_from_builder(
                     store_every=opts.store_every, event_log=False,
                     settle_round_cap=SETTLE_ROUND_CAP, diode_law_rel=DIODE_LAW_REL,
                     loop_feed=feed_slot.feed,
+                    t_offset=float(opts.t_start or 0.0) if resume_from is None else 0.0,
                     **shadow_kw,
                     **({"tick_fns": [f for f, _p, _o in ticks],
                         "tick_periods": [float(p) for _f, p, _o in ticks],
@@ -1089,12 +1106,14 @@ def run_dsed_from_builder(
                     store_every=opts.store_every, event_log=False)
             else:  # 'auto'
                 native_res = run_auto_b11(
-                    native_adapter, sf, x0, t_window,
+                    native_adapter, sf, x0,
+                    float(t_end) if resume_from is not None else t_window,
                     rtol=opts.rtol, atol=opts.atol,
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
                     h_bdf2=opts.h_bdf2,
                     stiffness_threshold=opts.stiffness_threshold,
-                    store_every=opts.store_every, event_log=False)
+                    store_every=opts.store_every, event_log=False,
+                    **({"resume": resume_from} if resume_from is not None else {}))
             res = _result_from_native(
                 native_res, 0.0 if resume_from is not None else opts.t_start)
             if "final_snapshot" in native_res and (

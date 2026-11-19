@@ -48,6 +48,10 @@
 #include <cmath>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -140,6 +144,94 @@ template <class System, class MaskT>
 ///
 /// Templated on `System` (must satisfy `HasLTIPerMode` + provide
 /// ``rhs(t, x)``) and `SwitchFn` (must satisfy `HasNextEdge`).
+///
+/// Snapshot / resume (add-exact-propagator-strategy task 20.2, session 26):
+/// `final_state()` is the committed end instant as an `AutoResumeState`, and
+/// `simulate(x0, t_end, &state)` continues it on the absolute clock, landing
+/// first what the uninterrupted run did at that instant (a gate edge or
+/// source corner the first run left at its t_end), as PEDSimulator does.
+template <class MaskT>
+struct AutoResumeState {
+    /// The payload's first value: tells it from ExactResumeState's (version 1),
+    /// which travels under the same controller kind (Exact = 3, pickle field 14).
+    static constexpr Real kTag = Real{101};
+    Real t = Real{0};
+    Vector x;                      // the reduced state
+    MaskT mask{};                  // integrated at t (an edge at t not yet applied)
+    Real h_rk45 = Real{0};         // the numeric path's next step (0: dt_init)
+    Real err_prev = Real{1};       // its PI controller's memory
+    std::uint64_t step_phase = 0;  // accepted steps mod store_every
+    std::vector<Real> fast_t;      // fast samples still ahead (plan_fast_samples_)
+    bool last_exact = true;        // the last step took the exact path (its landing rule)
+    bool bdf2_history = false;     // BDF2's y_{n-1}
+    Real bdf2_prev_t = Real{0};
+    Vector bdf2_prev;
+
+    [[nodiscard]] std::vector<Real> flatten() const {
+        std::vector<Real> o{kTag, t, static_cast<Real>(x.size())};
+        o.insert(o.end(), x.data(), x.data() + x.size());
+        o.insert(o.end(), {h_rk45, err_prev, static_cast<Real>(step_phase),
+                           static_cast<Real>(fast_t.size())});
+        o.insert(o.end(), fast_t.begin(), fast_t.end());
+        o.insert(o.end(), {Real(last_exact), Real(bdf2_history), bdf2_prev_t,
+                           static_cast<Real>(bdf2_prev.size())});
+        o.insert(o.end(), bdf2_prev.data(), bdf2_prev.data() + bdf2_prev.size());
+        return o;
+    }
+
+    /// Reads `flatten`'s layout; a truncated, padded or foreign payload is
+    /// refused by name (never a silent partial resume).
+    static AutoResumeState unflatten(const std::vector<Real>& v) {
+        std::size_t k = 0;
+        const auto bad = [](const char* why) {
+            return std::invalid_argument(
+                std::string("dsed(integrator='auto', resume_from=...): the snapshot's "
+                            "payload ") + why);
+        };
+        const auto next = [&]() {
+            if (k >= v.size()) throw bad("is truncated");
+            return v[k++];
+        };
+        const auto count = [&]() {   // an integer the payload can hold; NaN refused
+            const Real c = next();
+            if (!(c >= Real{0}) || c != std::floor(c) || c > static_cast<Real>(v.size())) {
+                throw bad("is corrupt");
+            }
+            return static_cast<std::size_t>(c);
+        };
+        const auto flag = [&]() {
+            const Real c = next();
+            if (c != Real{0} && c != Real{1}) throw bad("is corrupt");
+            return c == Real{1};
+        };
+        AutoResumeState s;
+        if (next() != kTag) {
+            throw bad("was not written by integrator='auto' (PEDSimulatorAuto)");
+        }
+        s.t = next();
+        s.x.resize(static_cast<Index>(count()));
+        for (Index i = 0; i < s.x.size(); ++i) s.x[i] = next();
+        s.h_rk45 = next();
+        s.err_prev = next();
+        {
+            const Real c = next();
+            if (!(c >= Real{0}) || c != std::floor(c) || c > Real{9007199254740992.0}) {
+                throw bad("is corrupt");
+            }
+            s.step_phase = static_cast<std::uint64_t>(c);
+        }
+        s.fast_t.resize(count());
+        for (auto& f : s.fast_t) f = next();
+        s.last_exact = flag();
+        s.bdf2_history = flag();
+        s.bdf2_prev_t = next();
+        s.bdf2_prev.resize(static_cast<Index>(count()));
+        for (Index i = 0; i < s.bdf2_prev.size(); ++i) s.bdf2_prev[i] = next();
+        if (k != v.size()) throw bad("has trailing values");
+        return s;
+    }
+};
+
 template <class System, class SwitchFn>
     requires HasLTIPerMode<System> && HasNextEdge<SwitchFn>
 class PEDSimulatorAuto {
@@ -163,23 +255,24 @@ public:
           h_bdf2_{h_bdf2},
           store_every_{store_every} {}
 
-    [[nodiscard]] PEDResultAuto<MaskT> simulate(const Vector& x0, Real t_end) {
+    [[nodiscard]] PEDResultAuto<MaskT> simulate(const Vector& x0, Real t_end,
+                                                const AutoResumeState<MaskT>* resume = nullptr) {
         using clock = std::chrono::high_resolution_clock;
         const auto t0_wall = clock::now();
 
-        Vector x = x0;
-        Real t = Real{0};
+        Vector x = resume != nullptr ? resume->x : x0;
+        Real t = resume != nullptr ? resume->t : Real{0};
         if constexpr (requires { system_.set_max_step(dt_max_); }) {
             system_.set_max_step(dt_max_);
         }
         if constexpr (requires { system_.set_horizon(t_end); }) {
             system_.set_horizon(t_end);
         }
-        Real h_rk45 = dt_init_;
+        Real h_rk45 = resume != nullptr && resume->h_rk45 > Real{0} ? resume->h_rk45 : dt_init_;
 
-        MaskT mask = switch_fn_(t);
+        MaskT mask = resume != nullptr ? resume->mask : switch_fn_(t);
         system_.set_mask(mask);
-        reinit_(t, x);
+        if (resume == nullptr) reinit_(t, x);   // a snapshot's state is its mode's already
 
         // Pick integrator for the initial mode-segment.
         IntegratorChoice choice = detector_.select(
@@ -188,9 +281,27 @@ public:
         RK45State rk_state;
         BDF2State bdf2_state;
         PEDResultAuto<MaskT> result;
-        ped_push_sample(result, t, x, system_.current_mask(),
-                        system_.current_mask(), nullptr);
         std::size_t step_idx = 0;
+        bool last_exact = true;
+        // a resume's row 0 is the landing's row of the uninterrupted run
+        MaskT row0_mask = system_.current_mask();
+        bool landed = false;
+        if (resume != nullptr) {
+            rk45_controller_.set_err_prev(resume->err_prev);
+            step_idx = static_cast<std::size_t>(resume->step_phase);
+            fast_t_ = resume->fast_t;
+            fast_k_ = 0;
+            last_exact = resume->last_exact;
+            if (resume->bdf2_history) {
+                bdf2_state.y_prev = resume->bdf2_prev;
+                bdf2_state.y_prev_t = resume->bdf2_prev_t;
+            }
+            landed = resume_landing_(t, x, h_rk45, choice, last_exact, rk_state, bdf2_state,
+                                     result);
+        }
+        ped_push_sample(result, t, x, system_.current_mask(),
+                        landed ? row0_mask : system_.current_mask(),
+                        landed && (last_exact || x_pre_ != x) ? &x_pre_ : nullptr);
         MaskT step_mask = system_.current_mask();
 
         constexpr std::size_t kMaxSteps = 10'000'000;
@@ -286,6 +397,7 @@ public:
                     bdf2_state.invalidate();
                     ++result.n_accept;
                     ++result.n_exact_steps;
+                    last_exact = true;
                     bool fired = false;
                     if (t_gate < t_end && near_time(t, t_gate)) {
                         if (at_corner) t = t_gate;
@@ -441,6 +553,7 @@ public:
                 h_rk45 = h_next_rk45;
             }
             ++result.n_accept;
+            last_exact = false;
 
             // 4. Did we land on a gate edge?
             bool fired = false;
@@ -476,6 +589,24 @@ public:
             ped_push_sample(result, t, x, system_.current_mask(),
                             step_mask, nullptr);
         }
+        {   // the committed end instant (final_state)
+            final_ = AutoResumeState<MaskT>{};
+            final_.t = t;
+            final_.x = x;
+            final_.mask = system_.current_mask();
+            final_.h_rk45 = h_rk45;
+            final_.err_prev = rk45_controller_.err_prev();
+            final_.step_phase = static_cast<std::uint64_t>(step_idx % store_every_);
+            final_.fast_t.assign(fast_t_.begin() + static_cast<std::ptrdiff_t>(
+                                     std::min(fast_k_, fast_t_.size())),
+                                 fast_t_.end());
+            final_.last_exact = last_exact;
+            final_.bdf2_history = bdf2_state.y_prev.has_value();
+            if (final_.bdf2_history) {
+                final_.bdf2_prev = *bdf2_state.y_prev;
+                final_.bdf2_prev_t = bdf2_state.y_prev_t;
+            }
+        }
 
         const auto t1_wall = clock::now();
         result.cpu_time_seconds =
@@ -495,7 +626,45 @@ public:
         return detector_;
     }
 
+    /// The last run's committed end instant (snapshot / resume).
+    [[nodiscard]] const AutoResumeState<MaskT>& final_state() const noexcept { return final_; }
+
 private:
+    /// What the uninterrupted run did at its landing on t and the first run,
+    /// stopping there, did not: a gate edge / source corner at t (asked of the
+    /// oracles from t − time_margin(t), as the landing step asked from its
+    /// start), fired from the left limit; then the landing step's rules (the
+    /// exact path resets h_rk45, a numeric one only from BDF2 to DOPRI5).
+    bool resume_landing_(Real& t, Vector& x, Real& h_rk45, IntegratorChoice& choice,
+                         bool last_exact, RK45State& rk_state, BDF2State& bdf2_state,
+                         PEDResultAuto<MaskT>& result) {
+        const Real tq = t - time_margin(t);
+        const Real te = switch_fn_.next_edge_after(tq);
+        Real t_gate = std::isfinite(te) ? te : std::numeric_limits<Real>::infinity();
+        bool at_corner = false;
+        if constexpr (requires { system_.next_source_corner_after(t); }) {
+            const Real t_c = system_.next_source_corner_after(tq);
+            at_corner = t_c < t_gate;
+            t_gate = std::min(t_gate, t_c);
+        }
+        if (!(std::isfinite(t_gate) && near_time(t, t_gate))) return false;
+        if (at_corner) t = t_gate;
+        const MaskT before = system_.current_mask();
+        const IntegratorChoice prev_choice = choice;
+        x_pre_ = x;
+        fire_gate_event_(t_gate, x, rk_state, bdf2_state, prev_choice, result);
+        choice = detector_.select(resolve_mode_id(system_, system_.current_mask()),
+                                  system_.A_matrix(), dt_max_);
+        if (last_exact || (prev_choice == IntegratorChoice::BDF2
+                           && choice == IntegratorChoice::DOPRI5)) {
+            h_rk45 = dt_init_;
+        }
+        if (last_exact) {   // only the exact path plans them at a landing
+            plan_fast_samples_(t, at_corner || !(system_.current_mask() == before));
+        }
+        return true;
+    }
+
     /// After a gate edge that changed the mode or a source corner, the
     /// exact path also stops at the instants resolving the new mode's
     /// fast transient (scheduler.hpp, plan_fast_samples_).
@@ -558,6 +727,7 @@ private:
     std::vector<Real> fast_t_;   // plan_fast_samples_
     std::size_t fast_k_ = 0;
     Vector x_pre_;                 // the state before a gate event
+    AutoResumeState<MaskT> final_; // final_state()
     Real h_bdf2_;
     std::size_t store_every_;
     // T1.3 — consecutive RK45 NaN/Inf streak counter (BDF2 throws on

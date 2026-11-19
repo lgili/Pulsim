@@ -237,10 +237,10 @@ def _rc():
 
 
 def test_a_run_on_a_route_that_keeps_no_snapshot_names_why_at_resume():
-    """'auto' on a diode-free circuit (PEDSimulatorAuto) and a fresh t_start
-    run keep no snapshot: the resume is refused with the cause and the
-    workaround, not as a bare "not valid"."""
-    for kw, word in ((dict(), "integrator='auto'"), (dict(integrator="bdf2"), "integrator='bdf2'"),
+    """'bdf2' and a fresh t_start run keep no snapshot: the resume is refused
+    with the cause and the workaround, not as a bare "not valid". ('auto'
+    writes one since session 26: test_exact_auto_resume.)"""
+    for kw, word in ((dict(integrator="bdf2"), "integrator='bdf2'"),
                      (dict(integrator="rk45", t_start=1e-4), "t_start")):
         a = p.simulate(_rc(), 2e-3, engine="dsed", **kw)
         assert not a.final_snapshot.valid and word in a.final_snapshot.invalid_reason

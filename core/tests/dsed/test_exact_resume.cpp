@@ -10,6 +10,7 @@
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/dsed/builder_adapter.hpp"
 #include "pulsim/dsed/scheduler.hpp"
+#include "pulsim/dsed/scheduler_auto.hpp"
 #include "pulsim/events/event_queue.hpp"
 #include "pulsim/models/switched_diode.hpp"
 #include "pulsim/pwl/cache.hpp"
@@ -186,6 +187,48 @@ TEST_CASE("ExactResumeState round-trips its payload and refuses a corrupt one",
     auto nan = v;   // last_fired_index (after version, t, n, x): a NaN is refused, never cast
     nan[3 + 3 + 1] = std::numeric_limits<Real>::quiet_NaN();
     CHECK_THROWS_AS(Resume::unflatten(nan), std::invalid_argument);
+}
+
+TEST_CASE("AutoResumeState round-trips its payload and refuses a corrupt or foreign one",
+          "[dsed][resume]") {
+    using Auto = dsed::AutoResumeState<topology::SwitchStateMask>;
+    Auto s;
+    s.t = 1.25e-4;
+    s.x = Vector::LinSpaced(3, -1.0, 2.0);
+    s.h_rk45 = 2e-7;
+    s.err_prev = 0.3;
+    s.step_phase = 2;
+    s.fast_t = {1.26e-4, 1.3e-4};
+    s.last_exact = false;
+    s.bdf2_history = true;
+    s.bdf2_prev_t = 1.24e-4;
+    s.bdf2_prev = Vector::LinSpaced(3, 0.5, 1.5);
+    const auto v = s.flatten();
+    const auto b = Auto::unflatten(v);
+    CHECK(b.t == s.t);
+    CHECK(b.x == s.x);
+    CHECK(b.h_rk45 == s.h_rk45);
+    CHECK(b.err_prev == s.err_prev);
+    CHECK(b.step_phase == 2);
+    CHECK(b.fast_t == s.fast_t);
+    CHECK(!b.last_exact);
+    CHECK(b.bdf2_history);
+    CHECK(b.bdf2_prev_t == s.bdf2_prev_t);
+    CHECK(b.bdf2_prev == s.bdf2_prev);
+    auto cut = v;
+    cut.pop_back();
+    CHECK_THROWS_AS(Auto::unflatten(cut), std::invalid_argument);
+    auto pad = v;
+    pad.push_back(0.0);
+    CHECK_THROWS_AS(Auto::unflatten(pad), std::invalid_argument);
+    auto nan = v;   // the state count (after tag, t): a NaN is refused, never cast
+    nan[2] = std::numeric_limits<Real>::quiet_NaN();
+    CHECK_THROWS_AS(Auto::unflatten(nan), std::invalid_argument);
+    // each integrator reads only its own payload (the first value tells them apart)
+    CHECK_THROWS_AS(Resume::unflatten(v), std::invalid_argument);
+    Resume e;
+    e.x = Vector::Zero(2);
+    CHECK_THROWS_AS(Auto::unflatten(e.flatten()), std::invalid_argument);
 }
 
 TEST_CASE("A buck split at a gate edge or mid-interval continues the uninterrupted run",

@@ -607,8 +607,10 @@ direction and sub-step count), `coss_history` (3), `lauritzen_history`
   that pair it rang and aborted at the next edge). TR-BDF2 resumes from
   it.
 * `engine='dsed'` (`'exact'`) writes a snapshot on its event-driven
-  integrator (the one diodes, loss ports and controllers use; pass
-  `integrator='rk45'` for a circuit that would otherwise run on `'auto'`):
+  integrator (the one diodes, loss ports and controllers use) and on the
+  default `'auto'` integrator of a diode-free circuit (its own payload,
+  first value 101: a resume continues on `'auto'`, and another integrator
+  or control ticks with it are refused by name; `'bdf2'` writes none):
   the reduced state, the mode and the schedule position travel in the
   controller block with kind 3 (no new pickle field), the loss tracker's
   state in field 17, the control ticks' grid in fields 15-16. A resume at
@@ -619,8 +621,8 @@ direction and sub-step count), `coss_history` (3), `lauritzen_history`
   snapshot's `t`. A pwl / trbdf2 snapshot resumes on it where its full
   state is one state of its stamped mode (the modes are decided at `t` as
   at a start); its snapshot is refused by name on pwl and trbdf2 (no
-  companion history to continue from), as is an in-loop recorder's state
-  on it.
+  companion history to continue from). An in-loop recorder's state
+  (field 18) is continued on the event-driven integrator.
 * An invalid snapshot, or one whose device layout does not match the
   circuit, is refused by name (the first block that differs) rather
   than resumed from zero. A snapshot without a layout (2.0 pickle,
