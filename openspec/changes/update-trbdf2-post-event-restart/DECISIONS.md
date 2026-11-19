@@ -527,3 +527,50 @@ The open questions of `design.md` had no answer and none was marked
    edges, probed OFF inside the L·g_off transient); this fix does not
    address it. Next in order: that tie, then the conditioning floor keyed
    on the pre-settle mode.
+
+19. **A re-initialisation step overran a diode turn-off (2026-11-19).** On
+   the ideal twin of `diode_rectifier` (branch-form diode, R_on = 0) the
+   exact scoreboard put trbdf2 at 0.0044 for rtol 1e-6, 1e-8 and 1e-10
+   (flat: a decision, not integration error), departing at the truth's
+   25.0101 us D1 turn-off. Trace: the 24.3755 us turn-on was landed
+   correctly; the ON mode ties the capacitor to the source (a dependent
+   mode), so the next step is the SDIRK re-initialisation, and that step
+   locates no crossing (the shortcut above the crossing detector). It ran
+   a full 1 us (h_max of the 2 ms span), past the turn-off, ended with
+   I(D1) = -7.07 A, and the held-diode path turned D1 off at 25.3755 us,
+   0.37 us late at V(out) 9.9305 V instead of 9.9963 V. Fix: a reinit
+   step that ends with a diode on its forbidden side, allowed at the step
+   start (`x_sig`), beyond `held_tolerance` and the predicate's round-off
+   bound, is rejected and retaken at h/10 (floor h_lo), so it ends before
+   the crossing and the next ordinary step locates it (a diode forbidden
+   from the start, or riding its boundary in noise, is not shrunk: no
+   shorter step cures it; reviewer 2026-11-19).
+   Measured (`exact`, ideal twin, old / new; truth = the mpmath ideal
+   truth): rtol 1e-6 0.0044 / 4.5e-10, 1e-8 0.0044 / 4.3e-10, 1e-10
+   0.0044 / 5.8e-10 (pwl+restart dt/16: 7.7e-7). Regression:
+   `test_trbdf2_ideal_rectifier_reinit.py` (closed form with g_off, 2 ms:
+   0.0658 V before at rtol 1e-5/1e-6/1e-8, 1e-7..2.6e-7 V after; bound
+   5e-4 V = 8x the event-location error of one sample at a turn-on landed
+   within its 1e-4 h bracket). To reverse: delete the `overrun` block.
+   With it, the two follow-ups of #18: (a) the interpolated turn-off
+   landing reads its start signal on `x_ta` (the state the line starts
+   from), not `x_sig`, so the secant root lies on the interpolated line;
+   (b) after a chatter-guard break re-decides the bits from x_1, `x_sig`
+   is a probe at t under the new bits, not x_1, which is h later -- but
+   x_1 still when that probe reads a diode on the side its new bit
+   forbids (a g_off-pinned inductor at -1e-7 A): s0 from it would re-arm
+   the guard at t (one reject and h/100 per break; seen as the doc
+   flyback's refusal recording 1.20 M samples against its 1.1 M bound
+   before this condition). Neither follow-up changes a strict reference
+   cell (REFERENCE_STATUS.md unchanged). PSFB (`psfb_table.py`, 1.8-2.0 ms
+   mean, truth 24.066 V): rtol 1e-5 23.966 -> 23.966, 1e-7 24.004 ->
+   24.018 V; still not convergent (note 43's tie is untouched).
+
+20. **`high_q_rlc_ringdown` at 0.0057 is phase error, not a defect.** Q =
+   316, 50 periods in 10 ms. `exact` against the truth: default rtol
+   (1e-5) 0.0057, 1e-6 0.0012, 1e-7 2.6e-4, 1e-8 5.6e-5 (rate ~
+   rtol^(2/3), the LTE controller's order). Split by a fit over the last
+   ms: frequency -1.44e-4 relative at the default (0.046 rad behind at
+   10 ms), amplitude within 5e-5: the method's dispersion, not its
+   damping. A ringdown over N periods needs N * 2pi * (dw/w) below the
+   accuracy wanted: rtol <= 1e-6 for 1e-3 over 50 periods.
