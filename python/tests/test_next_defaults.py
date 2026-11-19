@@ -67,6 +67,9 @@ def test_cell_cache_round_trip_and_resume(tmp_path, monkeypatch):
     d = ndr.load_unit(unit)
     d["cells"]["pwl"] = {"config": "pwl", "outcome": "agree", "err_rms": 1e-4}
     ndr.save_unit(d)
+    assert ndr.missing(unit, ["pwl", "dsed"]) == ["pwl", "dsed"]   # no signature: rerun
+    d["cells"]["pwl"]["sig"] = ndr.signature("pwl")
+    ndr.save_unit(d)
     assert ndr.missing(unit, ["pwl", "dsed"]) == ["dsed"]
     assert ndr.load_unit(unit)["cells"]["pwl"]["err_rms"] == 1e-4
     text = next(tmp_path.glob("*.json")).read_text(encoding="utf-8")
@@ -80,6 +83,22 @@ def test_cell_cache_round_trip_and_resume(tmp_path, monkeypatch):
     ({"outcome": "agree", "exact": 1e-6}, {"outcome": "agree", "exact": 1.9e-6}, None),
     ({"outcome": "agree", "exact": 1e-6}, {"outcome": "agree", "exact": 4e-7}, "better"),
     ({"outcome": "unverified"}, {"outcome": "agree"}, None),
+    ({"outcome": "refused"}, {"outcome": "error"}, "worse"),
+    # strict error grows past 2x with no truth: worse on the reference
+    ({"outcome": "agree", "err_rms": 1e-4, "tol": 1e-3}, {"outcome": "agree", "err_rms": 5e-4, "tol": 1e-3},
+     "worse"),
+    # below 1 % of the tolerance a 2x move is noise
+    ({"outcome": "agree", "err_rms": 1e-7, "tol": 1e-3}, {"outcome": "agree", "err_rms": 5e-7, "tol": 1e-3},
+     None),
+    # better samples on a sparser grid (strict error up) is not better
+    ({"outcome": "agree", "exact": 1e-6, "err_rms": 1e-4, "tol": 1e-3},
+     {"outcome": "agree", "exact": 1e-7, "err_rms": 5e-4, "tol": 1e-3}, "worse"),
 ])
 def test_compare(a, b, verdict):
     assert ndr.compare(a, b) == verdict
+
+
+def test_judge_basis():
+    assert ndr.judge({"outcome": "agree", "exact": 1e-6}, {"outcome": "agree", "exact": 3e-6}) == (
+        "worse", "truth")
+    assert ndr.judge({"outcome": "agree"}, {"outcome": "disagree"}) == ("worse", "outcome")

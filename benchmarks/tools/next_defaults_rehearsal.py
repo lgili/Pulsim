@@ -58,7 +58,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT.parent / ".scratch" / "rehearsal" / "cells"
 PYTEST_SUMMARY = ROOT.parent / ".scratch" / "rehearsal" / "pytest_profile.json"
 OUT = ROOT / "NEXT_DEFAULTS_REHEARSAL.md"
-RANK = {"agree": 0, "unverified": 0, "disagree": 1, "refused": 2, "error": 2, "timeout": 2}
+RANK = {"agree": 0, "unverified": 0, "disagree": 1, "refused": 2, "error": 3, "timeout": 4}
 
 
 def expected_a(section: str) -> dict:
@@ -95,6 +95,14 @@ def configs() -> dict:
 
 
 CONFIGS = configs()
+
+
+def signature(name) -> str:
+    """What a cached cell was measured with: its configuration and the profile."""
+    import hashlib
+    blob = json.dumps([CONFIGS[name], [(e, k, repr(x.value)) for e, k, x in nd.table()]],
+                      sort_keys=True, default=repr)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
 # the same run as an (a) cell; the split alone is refused by run_transient (it needs the rule)
 ALIAS = {"pwl:restart": "pwl+restart", "pwl:split": "pwl+split"}
 
@@ -171,10 +179,10 @@ def run_cell(case, name):
         with warnings.catch_warnings(), nd.builder_form(spec["form"]):
             warnings.simplefilter("ignore")
             if spec.get("route"):
+                b1, sw1, obs = case.build()     # one build: a closed loop's sw and observer share a PI
+
                 def build():
-                    b, sw, _ = case.build()
-                    return b, sw
-                _, _, obs = case.build()
+                    return b1, sw1
                 x0 = None
                 if not case.uic:
                     b0, sw0, _ = case.build()
@@ -240,7 +248,7 @@ def circuit_worker(unit, names, emit):
             except Exception as ex:  # noqa: BLE001 - the measure failed, said so
                 rec["exact_error"] = f"{type(ex).__name__}: {ex}"[:200]
         rec.pop("worst", None)
-        d["cells"][name] = {k: v for k, v in rec.items() if v is not None}
+        d["cells"][name] = {k: v for k, v in rec.items() if v is not None} | {"sig": signature(name)}
         save_unit(d)
         emit(f"DONE {name}")
 
@@ -258,7 +266,7 @@ def analytic_worker(unit, names, emit):
         try:
             if eng == "auto" and not spec.get("route"):
                 rec.update(outcome="n/a", message="the analytic cases name their engine")
-                d["cells"][name] = rec
+                d["cells"][name] = rec | {"sig": signature(name)}
                 save_unit(d)
                 emit(f"DONE {name}")
                 continue
@@ -281,7 +289,7 @@ def analytic_worker(unit, names, emit):
         except Exception as ex:  # noqa: BLE001 - classified
             rec.update(outcome="error", message=f"{type(ex).__name__}: {ex}"[:300])
         rec.update(wall_s=round(time.perf_counter() - t0, 3), **info)
-        d["cells"][name] = {k: v for k, v in rec.items() if v is not None}
+        d["cells"][name] = {k: v for k, v in rec.items() if v is not None} | {"sig": signature(name)}
         save_unit(d)
         emit(f"DONE {name}")
 
@@ -298,8 +306,8 @@ def worker_main(unit, names):
 # -------------------------------------------------------------- supervisor ---
 def missing(unit, names):
     have = load_unit(unit)["cells"]
-    out = [n for n in names if n not in have and n not in ALIAS]
-    return out
+    return [n for n in names if n not in ALIAS
+            and (n not in have or have[n].get("sig") != signature(n))]
 
 
 def supervise(unit, names, cell_timeout, ref_timeout, log):
@@ -335,10 +343,11 @@ def supervise(unit, names, cell_timeout, ref_timeout, log):
             if phase in (None, "reference"):
                 for n in todo:            # nothing graded without a reference
                     d["cells"][n] = dict(config=n, outcome="timeout" if killed else "error",
-                                         message=f"reference phase: {why}")
+                                         message=f"reference phase: {why}", sig=signature(n))
             else:
                 d["cells"].setdefault(phase, dict(config=phase, outcome="timeout" if killed else "error",
-                                                  message=why, wall_s=limit if killed else None))
+                                                  message=why, wall_s=limit if killed else None,
+                                                  sig=signature(phase)))
             save_unit(d)
         print(f"{unit}: {len(d['cells'])} cells", flush=True)
 
@@ -360,11 +369,24 @@ def cmd_run(args):
 KINDS = ("agree", "disagree", "error", "refused", "unverified", "timeout")
 
 
+STALE: list = []
+
+
 def collect():
+    """Cells by unit; a cell whose signature is not today's is left out (STALE).
+    An analytic cell's err_rms is against its closed form: it is its `exact`."""
     diff, ana = {}, {}
+    STALE.clear()
     for f in sorted(CACHE.glob("*.json")):
         d = json.loads(f.read_text(encoding="utf-8"))
-        cells = dict(d["cells"])
+        cells = {}
+        for n, c in d["cells"].items():
+            if n not in CONFIGS or c.get("sig") != signature(n):
+                STALE.append((d["unit"], n))
+                continue
+            if d["unit"].startswith("analytic:") and "err_rms" in c:
+                c = dict(c, exact=c["err_rms"])
+            cells[n] = c
         for a, b in ALIAS.items():
             if b in cells:
                 cells[a] = dict(cells[b], config=a)
@@ -386,22 +408,36 @@ def _err(c):
     return s + (f" / ex {c['exact']:.2g}" if "exact" in c else "")
 
 
-def compare(a, b):
-    """'worse' / 'better' / None for cell b against cell a (same circuit)."""
+def judge(a, b):
+    """(verdict, basis) for cell b against cell a of the same circuit: verdict
+    'worse' / 'better' / None; basis 'outcome' (the harness reference), 'truth'
+    (`exact` beyond 2x; an improvement only when the strict error did not grow
+    past 2x, so a sparser grid cannot count as better) or 'reference' (the strict
+    err_rms beyond 2x of the base's, above 1 % of the tolerance)."""
     if a is None or b is None or "n/a" in (a["outcome"], b["outcome"]):
-        return None
+        return None, None
     ra, rb = RANK[a["outcome"]], RANK[b["outcome"]]
-    if rb > ra:
-        return "worse"
-    if rb < ra:
-        return "better"
+    if rb != ra:
+        return ("worse" if rb > ra else "better"), "outcome"
+    sa, sb = a.get("err_rms"), b.get("err_rms")
+    big = sa is not None and sb is not None and max(sa, sb) > (b.get("tol") or 1e-3) / 100
+    up, down = big and sb > 2 * sa, big and sa > 2 * sb
     ea, eb = a.get("exact"), b.get("exact")
     if ea is not None and eb is not None and max(ea, eb) > 1e-12:
         if eb > 2 * ea:
-            return "worse"
-        if ea > 2 * eb:
-            return "better"
-    return None
+            return "worse", "truth"
+        if ea > 2 * eb and not up:
+            return "better", "truth"
+    if up:
+        return "worse", "reference"
+    if down:
+        return "better", "reference"
+    return None, None
+
+
+def compare(a, b):
+    """'worse' / 'better' / None (judge without the basis)."""
+    return judge(a, b)[0]
 
 
 def _why(c):
@@ -418,25 +454,27 @@ def _repro(unit, eng, opt_names):
 
 
 def changes(units_, eng):
-    """Rows (unit, verdict, base, full, responsible singles) for engine eng
-    ('auto': auto+next against auto, responsible singles = the route alone)."""
+    """Rows (unit, verdict, base, full, responsible singles, basis) for engine eng
+    ('auto': auto+next against auto, the single = the route alone)."""
     base_n, full = (eng, f"{eng}+next")
     singles = [n for n, s in CONFIGS.items() if s["group"] == "b" and s["engine"] == eng]
     out = []
     for unit, u in sorted(units_.items()):
         base, cf = u["cells"].get(base_n), u["cells"].get(full)
-        v = compare(base, cf)
+        v, basis = judge(base, cf)
         if v:
             resp = [n for n in singles if compare(base, u["cells"].get(n)) == v]
-            out.append((unit, v, base, cf, resp))
+            out.append((unit, v, base, cf, resp, basis))
     return out
 
 
-WORSE_CLASSES = ("fails", "samples wrong (truth)", "disagree, no truth", "less accurate, still agrees",
-                 "strict gate only (samples within tol of the truth)")
+WORSE_CLASSES = ("fails (refused / error / timeout)", "samples wrong (truth)", "disagree, no truth",
+                 "less accurate at the samples (truth, > 2x), still agrees",
+                 "strict gate only (disagrees; RMS error of the samples against the truth within tol)",
+                 "strict error > 2x the base's, still agrees")
 
 
-def worse_class(b):
+def worse_class(b, basis="truth"):
     """Why a worse cell is worse, ranked (index into WORSE_CLASSES)."""
     if b["outcome"] in ("refused", "error", "timeout"):
         return 0
@@ -445,7 +483,7 @@ def worse_class(b):
         if ex is None:
             return 2
         return 1 if ex > b.get("tol", 1e-3) else 4
-    return 3
+    return 3 if basis == "truth" else 5
 
 
 def render():
@@ -485,7 +523,7 @@ def render():
               f"Configuration (a) reproduces REFERENCE_STATUS.md's analytic counts: **{'yes' if ok else 'NO'}**.", ""]
     allu = {**diff, **ana}
     L += ["## Each configuration against today's default of its engine", "",
-          "Same rule as below (outcome rank, else `exact` beyond 2x); `auto+next` against `auto`,",
+          "Same rule as below (outcome rank, else `exact` or the strict err_rms beyond 2x); `auto+next` against `auto`,",
           "the esdirk columns against `trbdf2`. Circuits and analytic cases together.", "",
           "`moved` = cells whose err_rms is not bit-equal to the base's (the option reached the",
           "run); `mode` = the `mode_selection='auto'` choices recorded by the runs (lcp / legacy).", "",
@@ -506,25 +544,27 @@ def render():
     L.append("")
     rows = {e: changes(allu, e) for e in (*ENGINES, "auto")}
     L += ["## Worse under the full profile than under today's default for that engine", "",
-          "Worse = outcome rank up (agree/unverified < disagree < refused/error/timeout), or the",
-          "`exact` error (truth) more than 2x larger. Responsible = the single options (b) that",
-          "alone make the same cell worse; `combination` when none does alone.", "",
+          "Worse = outcome rank up (agree/unverified < disagree < refused < error < timeout), or the",
+          "`exact` error (truth; for the analytic set the closed-form err_rms) more than 2x larger,",
+          "or the strict err_rms more than 2x the base's (above 1 % of the tolerance). Responsible =",
+          "the single options (b) that alone make the same cell worse; `combination` when none does.", "",
           "| circuit | engine | today | full profile | responsible | class; message |", "|---|---|---|---|---|---|"]
     for e in rows:
-        for unit, v, a, b, resp in rows[e]:
+        for unit, v, a, b, resp, basis in rows[e]:
             if v == "worse":
                 L.append(f"| {unit.removeprefix('circuits/')} | {e} | {a['outcome']} {_err(a)} | "
                          f"{b['outcome']} {_err(b)} | {', '.join(resp) or 'combination'} | "
-                         f"{WORSE_CLASSES[worse_class(b)]}; {_why(b)} |")
+                         f"{WORSE_CLASSES[worse_class(b, basis)]}; {_why(b)} |")
     L += ["", "## Better under the full profile", "",
-          "Better = outcome rank down against the harness reference, or the `exact` error (truth)",
-          "more than 2x smaller.", "",
-          "| circuit | engine | today | full profile | responsible |", "|---|---|---|---|---|"]
+          "Better = outcome rank down (basis `outcome`, the harness reference), or the `exact` error",
+          "more than 2x smaller with the strict err_rms not grown past 2x (basis `truth`), or the",
+          "strict err_rms more than 2x smaller (basis `reference`, no truth or truth unchanged).", "",
+          "| circuit | engine | today | full profile | responsible | basis |", "|---|---|---|---|---|---|"]
     for e in rows:
-        for unit, v, a, b, resp in rows[e]:
+        for unit, v, a, b, resp, basis in rows[e]:
             if v == "better":
                 L.append(f"| {unit.removeprefix('circuits/')} | {e} | {a['outcome']} {_err(a)} | "
-                         f"{b['outcome']} {_err(b)} | {', '.join(resp) or 'combination'} |")
+                         f"{b['outcome']} {_err(b)} | {', '.join(resp) or 'combination'} | {basis} |")
     L += ["", "## engine='auto' under the profile", "",
           "`auto` = today (no dt: trbdf2, or a refusal naming the blocker); `auto+next` = the",
           "release route (no dt). The exact engine without dt samples at its 10 us default ceiling,",
@@ -559,27 +599,36 @@ def blockers(allu, rows):
          "Rehearsal of the number-changing release on `feat/core-integration` fe75ee01 (method and",
          "tables below the blocker list).", "",
          "## Ranked blocker list", "",
-         "### 1. Cells worse under the profile than under today's default, by class (classes 1-3 are engine fixes before the release)", ""]
-    worse = [(u, e, a, b, r) for e in rows for (u, v, a, b, r) in rows[e] if v == "worse"]
-    worse.sort(key=lambda x: (worse_class(x[3]), x[1], x[0]))
+         "### 1. Cells worse under the profile than under today's default, by class",
+         "", "The first three classes (fails, samples wrong, disagree without a truth) are engine",
+         "fixes before the release; the last three need a decision or a re-baseline with evidence.", ""]
+    worse = [(u, e, a, b, r, worse_class(b, bs)) for e in rows for (u, v, a, b, r, bs) in rows[e]
+             if v == "worse"]
+    worse.sort(key=lambda x: (x[5], x[1], x[0]))
     i, cls = 0, None
-    gate_only = [x for x in worse if worse_class(x[3]) == 4]
-    for u, e, a, b, resp in worse:
-        if worse_class(b) != cls:
-            cls = worse_class(b)
+    for u, e, a, b, resp, k in worse:
+        if k != cls:
+            cls = k
             L += ["", f"**{WORSE_CLASSES[cls]}**", ""]
+            if cls in (4, 5):      # one cause per class here: one entry listing the circuits
+                grp = [x for x in worse if x[5] == cls]
+                i += 1
+                exs = [x[3]["exact"] for x in grp if "exact" in x[3]]
+                L.append(f"{i}. {len(grp)} cells ({', '.join(sorted({x[1] for x in grp}))}). "
+                         + (f"Largest `exact` (RMS of the samples against the truth) {max(exs):.2g}. "
+                            if exs else "") +
+                         ("On `auto` the exact engine runs without dt: 10 us default output ceiling; "
+                          "the strict gate interpolates linearly between those samples. "
+                          if all(x[1] == "auto" for x in grp) else "") +
+                         "Circuits (today -> profile): "
+                         + "; ".join(f"`{x[0].removeprefix('circuits/')}` {x[2]['outcome']} {_err(x[2])} -> "
+                                     f"{x[3]['outcome']} {_err(x[3])}" for x in grp)
+                         + (f". Repro (any of them): `next_defaults_rehearsal._no_dt_run(v1_reader.load("
+                            f"'benchmarks/{grp[0][0]}'), '{grp[0][3].get('route', 'dsed')}')`"
+                            if grp[0][1] == "auto" else ""))
+        if cls in (4, 5):
+            continue
         i += 1
-        if cls == 4:            # one cause, one entry: the samples are right, the grid is not
-            ex = max(x[3].get("exact", 0.0) for x in gate_only)
-            L.append(f"{i}. {len(gate_only)} cells ({', '.join(sorted({x[1] for x in gate_only}))}): "
-                     f"the samples are within the tolerance of the truth (largest `exact` {ex:.2g}), "
-                     "the strict gate (linear interpolation between samples) is not. On `auto` this is "
-                     "the exact engine's output grid without dt (10 us default ceiling). Circuits: "
-                     + ", ".join(f"`{x[0].removeprefix('circuits/')}`" for x in gate_only)
-                     + ". Repro (any of them): "
-                     + (f"`next_defaults_rehearsal._no_dt_run(v1_reader.load('benchmarks/{gate_only[0][0]}'), 'dsed')`"
-                        " then compare `res.times` spacing with the netlist dt."))
-            break
         if e == "auto":
             route = "route alone" if resp else "the profile on the routed engine"
             repro = (f"`with nd.builder_form({not resp}): next_defaults_rehearsal._no_dt_run("
@@ -595,11 +644,12 @@ def blockers(allu, rows):
                  f"{_why(b)} Repro: {_repro(u, e, opts)}")
     if not worse:
         L.append("(none)")
-    better = [(u, e, a, b, r) for e in rows for (u, v, a, b, r) in rows[e] if v == "better"]
-    L += ["", f"### 2. Accepted changes of number ({len(better)} cells better under the profile)", "",
-          "Each is listed in 'Better under the full profile' below; the evidence is the harness",
-          "reference (outcome) or the mpmath truth (`exact` > 2x smaller). The CHANGELOG migration",
-          "note of the release cites these.", ""]
+    L += suite_refusals()
+    better = collections.Counter((e, bs) for e in rows for (u, v, a, b, r, bs) in rows[e] if v == "better")
+    L += ["", f"### 2. Accepted changes of number ({sum(better.values())} cells better under the profile)", "",
+          "By engine and basis: " + ", ".join(f"{e} {bs} {n}" for (e, bs), n in sorted(better.items()))
+          + ". Each is listed in 'Better under the full profile' below with its basis; the CHANGELOG",
+          "migration note of the release cites them.", ""]
     L += ["### 3. Owner decisions (add-kernel-simulation-object DECISIONS 23, branch "
           "feat/core-p3-simulation-object; undriven switches first)", "",
           "1. No `switch_fn` (measured on fe75ee01): pwl all CLOSED + a warning (v(o) = 0.999 V), "
@@ -622,6 +672,38 @@ def blockers(allu, rows):
           "diode drop's release (its DECISIONS OQ6); the TR-BDF2 step grid (factor-reuse 5.6: "
           "accuracy sign-off).", ""]
     return "\n".join(L) + "\n"
+
+
+# Refusals the profile raises in python/tests, by root cause (message substring, owning option).
+SUITE_ROOTS = (
+    ("period map / integrals", "form='branch'",
+     "the exact period map / integrals (periodic_steady_state, sensitivities, shooting) refuse a "
+     "branch-form diode: the flip of `add_diode` takes them away. Engine fix (branch current in the "
+     "period map) or keep those diodes conductance-form"),
+    ("mmc_arms=...", "discontinuity_restart",
+     "`mmc_arms` refuses the restart rule (full-dt Thevenin stamp at dt/2): the flip breaks every MMC "
+     "arm run. Engine fix or the rule off under `mmc_arms`"),
+    ("cannot take the parameter", "form='branch'",
+     "a branch-form switch refuses a bound `g_on` (`bind_param`): scoped / parametrised circuits break"),
+    ("cannot simulate", "form='branch'",
+     "bdf1 and ac_sweep cannot simulate a branch-form switch / diode"),
+    ("requires discontinuity_restart", "enable_substep_state_correction",
+     "a caller that sets `discontinuity_restart=False` is refused once the split defaults on: the split's "
+     "default must follow the rule's"),
+)
+
+
+def suite_refusals():
+    if not PYTEST_SUMMARY.exists():
+        return ["", "### 1b. Refusals in the test suite: pytest under the profile not run", ""]
+    fails = json.loads(PYTEST_SUMMARY.read_text(encoding="utf-8"))["failures"]
+    L = ["", "### 1b. Refusals the profile raises in `python/tests` (engine fixes or owner decisions)", ""]
+    for i, (pat, opt, what) in enumerate(SUITE_ROOTS, 1):
+        hit = [f["nodeid"] for f in fails if pat in f["msg"]]
+        if hit:
+            L.append(f"{i}. {len(hit)} test{'s' * (len(hit) > 1)}, option `{opt}`: {what}. Repro: `{hit[0]}` under "
+                     "`-p next_defaults_pytest`.")
+    return L
 
 
 def pytest_section():
