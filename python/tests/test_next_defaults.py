@@ -1,6 +1,6 @@
-"""The next-defaults profile helper and the rehearsal's cell cache
-(benchmarks/tools/next_defaults.py, next_defaults_rehearsal.py). Tooling only:
-no library default is read or changed here."""
+"""The defaults profile (benchmarks/tools/next_defaults.py: current = the
+library's defaults, legacy = the pre-release ones) and the rehearsal's cell
+cache (next_defaults_rehearsal.py)."""
 from __future__ import annotations
 
 import sys
@@ -38,6 +38,8 @@ def test_every_profile_entry_cites_its_change():
 
 def test_configuration_a_is_reference_status_unchanged():
     for name, (eng, kw) in rs.CONFIGS.items():
+        if name == "auto":      # runs without the netlist dt: no rehearsal column
+            continue
         c = ndr.CONFIGS[name]
         assert (c["engine"], c["kw"], c["form"], c["group"]) == (eng, kw, False, "a")
 
@@ -51,12 +53,28 @@ def test_one_single_per_option_and_the_full_profile():
         assert full["kw"] == nd.profile_kwargs(eng) and full["form"] is True
 
 
+def test_the_library_defaults_are_the_profile():
+    assert nd.check_current() == []
+
+
 def test_plan_defaults_set_and_restore_the_library_defaults():
     from pulsim import _plan
-    assert (_plan.DEFAULT_UNDRIVEN, _plan.UNIFORM_ENGINE_RULES) == (None, False)  # today
+    assert (_plan.DEFAULT_UNDRIVEN, _plan.UNIFORM_ENGINE_RULES) == ("refuse", True)
     with nd.plan_defaults():
         assert _plan.DEFAULT_UNDRIVEN == "refuse" and _plan.UNIFORM_ENGINE_RULES is True
-    assert (_plan.DEFAULT_UNDRIVEN, _plan.UNIFORM_ENGINE_RULES) == (None, False)
+    assert (_plan.DEFAULT_UNDRIVEN, _plan.UNIFORM_ENGINE_RULES) == ("refuse", True)
+
+
+def test_legacy_patches_and_restores():
+    from pulsim import _plan
+    sim, sw, load = pulsim.simulate, pulsim.CircuitBuilder.add_switch, pulsim.load_yaml_file
+    with nd.legacy():
+        assert _plan.UNIFORM_ENGINE_RULES is False
+        assert pulsim.simulate is not sim and pulsim.CircuitBuilder.add_switch is not sw
+        assert pulsim.load_yaml_file is not load
+    assert (pulsim.simulate, pulsim.CircuitBuilder.add_switch, pulsim.load_yaml_file) == (sim, sw, load)
+    assert _plan.UNIFORM_ENGINE_RULES is True and nd.check_current() == []
+    assert nd.legacy_route(1e-6) == "pwl" and nd.legacy_route(None) == "trbdf2"
 
 
 def test_builder_form_patches_and_restores():
