@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### esdirk43 runs the stateful kinds and the losses; the exact engine's loss port
+
+* **Added** `integrator='esdirk43'` (engine `trbdf2`) runs the nonlinear
+  capacitor, the saturable inductor (atan and table laws), external devices
+  and the in-kernel loss tracker (refused by name before). The Lauritzen
+  diode, the IGBT tail, machines and the Jiles-Atherton law stay refused by
+  name.
+* **Fixed** on `integrator='esdirk43'` a capacitor's in-loop `i()` / `p()`
+  reading after an interpolated event landing misses KCL by ~1e-8 of the
+  node scale instead of 7e-5 (the refusal of that reading is removed).
+* **Added** the exact engine (`engine='exact'` / `'dsed'`) tracks device
+  losses (`set_device_losses`): switching energy on each event's two limits,
+  conduction as the exact integral of v·i per mode, impulsive energy to the
+  commutating device. Refused by name (feature `device_losses`): a junction
+  or heat node, a `V_on` table, time-varying sources, `integrator='bdf2'`,
+  `t_start`, `resume_from`.
+* **Changed** (benchmark harness only) the analytic reference of `rl_step`
+  and `inductor_chain_step` is the closed form of the source's 1 ns ramp;
+  engine outputs are unchanged.
+
 ### Event queue: one locator, gate counts, a resume exactly at a gate edge
 
 * **Fixed** a `trbdf2` run resumed (`resume_from=`) exactly at a gate edge
