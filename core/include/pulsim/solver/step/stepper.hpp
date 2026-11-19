@@ -32,8 +32,11 @@
 // (PULSIM_STEP_DRIVER): an adapter left out of line costs a call per phase
 // and two closure hops per captured local, and a driver inlined into the
 // engine's own large body runs slower than the same driver alone
-// (refactor-unified-transient-stepper DECISIONS 14). Empty on MSVC, as the
-// other forced-inline macros of the code base.
+// (refactor-unified-transient-stepper DECISIONS 14) on the fixed engine.
+// The TR-BDF2 engine measured the opposite (DECISIONS 16): its phases touch
+// so many engine locals that an out-of-line driver's closure hops cost more,
+// so both its drivers are PULSIM_STEP_PHASE. Measure per engine. Empty on
+// MSVC, as the other forced-inline macros of the code base.
 #if defined(__GNUC__) || defined(__clang__)
 #define PULSIM_STEP_PHASE __attribute__((always_inline))
 #define PULSIM_STEP_DRIVER __attribute__((noinline))

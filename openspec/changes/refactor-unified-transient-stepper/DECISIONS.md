@@ -529,3 +529,63 @@ says where the implementation departs from them or what it settled.
     bisection) and written in `tb_commit` / `tb_after`, so seeding it from
     the snapshot is one statement in setup plus the snapshot field;
     behaviour not changed here.
+
+16. **Slice 3b's speed cost, found: the out-of-line driver's closure
+    hops; both TR-BDF2 drivers are forced inline (2026-11-19).** Found by
+    the extension's disassembly (`otool -tvV`, base 9fb2f13e against the
+    tip of 15) and two bisect builds measured with `.scratch/instr_inproc.py`.
+
+    Cause. At the tip of 15 the legacy loop was its own out-of-line
+    function (`run_legacy`, `PULSIM_STEP_DRIVER`, rule 14 (2)) with the
+    phases inlined into it. Every engine local a phase touches (`t`, `h`,
+    `x`, `st`, `opts`, the queue, the histories, the hoisted 21, …) is
+    then reached as closure → phase closure → pointer → value: the driver
+    spills its own closure pointer (`str x0, [sp, #0x68]`), keeps a few
+    phase-closure pointers in callee-saved registers and RELOADS the
+    captured pointer from the phase closure after every opaque call (the
+    closures live in the engine frame and escape into the out-of-line
+    driver, so no call can be proved not to change them). In the base the
+    same access is one `ldr` off `sp`. Static histogram of the hot code
+    (engine body + driver against the base body): `ldr` +342, `ldp` +197,
+    `add` −329 (address formation `add xN, sp, #off` replaced by pointer
+    loads), ~85–170 instructions per step. Not the masks, not the twin's
+    presence (bisects A / B of 15).
+
+    Fix. `run_legacy` AND `run_twin` are `PULSIM_STEP_PHASE` (forced
+    inline into `run_transient_trbdf2`): no closure escapes, SROA removes
+    them, and the locals are the engine frame's again (the engine body
+    holds both loops, 26.3k instructions against 16.9k; no out-of-line
+    lambda14 / 15; `ldr`:`add` back at the base's ratio). Build C of 15
+    (legacy inline, twin still out of line) was WORSE because the twin's
+    out-of-line closure still captured the phases, so they stayed
+    escaped. The dispatch tests `!twin` first (the legacy loop is the
+    fall-through: with the twin first, the twin hit the base exactly and
+    the legacy loop sat at +0.4–0.6 %). Code layout only; one shared body,
+    no copy of the loop. Rule 14 (2) is per engine: pwl's phases touch few
+    locals and its drivers stay out of line.
+
+    Instructions per accepted step (three runs each, min of 3 per run):
+
+    | case | base 9fb2f13e | tip of 15 | this tip | Δ base | twin / default |
+    |---|---|---|---|---|---|
+    | buck_trbdf2 | 10816 / 10819 / 10824 | 10905 / 10922 / 10924 | 10854 / 10856 / 10856 | +0.35 % | 1.0001–1.0006 |
+    | bridge (floating bus) | 12578 / 12591 / 12592 | 12698 / 12704 / 12709 | 12622 / 12623 / 12630 | +0.35 % | 1.0004–1.0007 |
+    | shockbuck_trbdf2 | 72204 / 72205 / 72205 | 72391 / 72398 / 72414 | 72276 / 72277 / 72284 | +0.10 % | 0.9995–0.9997 |
+
+    Gates met: default ≤ base + 0.5 %, twin ≤ 1.01× default. The fixed
+    engine re-checked on the same two binaries (default unchanged; its
+    codegen does not see the `decides` branch; tip vs base, min of 3): buck_pwl 3034 vs 3034,
+    vsi_pwl 4703 vs 4707, vsi_pwl_restart 4863 vs 4864. Its twin / default
+    on buck_pwl is 1.012 on BOTH (vsi 1.006–1.008): over 14's 1.01 since
+    the merge of `fix/ci-147-l`, not this slice — open for the pwl twin.
+
+    For the default-switch slice: the twin path IS the cheaper of the
+    two when it is the fall-through (twin-first build: bridge 12580 = base,
+    buck 10838 = +0.2 %), so making `step::run<TrBdf2>` the only driver is
+    expected to cost nothing; measure it with the legacy loop deleted, not
+    beside it. The inline macros are empty on MSVC and their placement on
+    lambdas is compiled by Apple clang only: Linux / Windows unverified.
+    Reviewer (fresh, read-only): no divergence; nits — a `Retry` / `Abort`
+    verdict would stop the twin where legacy continues (no phase returns
+    either), and `BodyClock::frame()` is sized from the proposal before
+    `begin` changes `h` (no phase reads the frame).

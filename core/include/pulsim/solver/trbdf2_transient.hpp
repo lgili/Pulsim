@@ -3907,11 +3907,15 @@ inline SimulationResult run_transient_trbdf2(
                 }
             }
         };
-        // The two drivers (DECISIONS 14: each ONE out-of-line function with the
-        // phases inlined into it): the legacy loop (default) and the step
-        // skeleton (`step::run<TrBdf2>`), selected only by the internal
-        // PULSIM_TRBDF2_STEPPER_TWIN=1 (read once per run; no option).
-        auto run_legacy = [&]() PULSIM_STEP_DRIVER {
+        // The two drivers: the legacy loop (default) and the step skeleton
+        // (`step::run<TrBdf2>`), selected only by the internal
+        // PULSIM_TRBDF2_STEPPER_TWIN=1 (read once per run; no option). BOTH
+        // are forced inline into this function, unlike the fixed engine's
+        // (DECISIONS 16): out of line, every engine local a phase touches was
+        // reached through the driver's closure and the phase's closure (a
+        // pointer reloaded after each opaque call, +0.3-1 % per step); inline,
+        // no closure escapes and the locals are this frame's again.
+        auto run_legacy = [&]() PULSIM_STEP_PHASE {
             while (tb_live()) {
                 if (!tb_poll()) {
                     break;   // partial trace preserved
@@ -3935,7 +3939,7 @@ inline SimulationResult run_transient_trbdf2(
         // after_solve ended without one (a zero-time cascade, a retake at
         // the same h): t did not move then, and no hook fires. The start
         // state is copied only with a listener.
-        auto run_twin = [&]() PULSIM_STEP_DRIVER {
+        auto run_twin = [&]() PULSIM_STEP_PHASE {
             const bool hook_step = hooks != nullptr && hooks->has_step();
             Vector x_start;
             SwitchStateMask mask_start;
@@ -3958,10 +3962,10 @@ inline SimulationResult run_transient_trbdf2(
             step::BodyClock clock{tb_live, lte_ctrl, t, opts.t_end};
             (void)step::run<step::TrBdf2>(clock, body);
         };
-        if (trbdf2_stepper_twin) {
-            run_twin();
-        } else {
+        if (!trbdf2_stepper_twin) {
             run_legacy();
+        } else {
+            run_twin();
         }
         // A run stopped by should_continue right after an event: the
         // record ends on the committed state, as the snapshot does.
