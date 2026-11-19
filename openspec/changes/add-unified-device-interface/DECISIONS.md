@@ -1278,3 +1278,26 @@
     sweep of the twin equals the built-in Lauritzen sweep (linearize's
     local row) to rtol 1e-9 at 1 kHz-100 MHz, with the charge pole visible
     (H moves > 1 % between the ends).
+
+64. **Slice 11b verification, cost, review and hand-off.** Seen passing on
+    this tip's code: full pytest 5824 passed (the 4 test_stubs failures
+    appear only under the components()-recording plugin, which wraps the
+    method; test_stubs passes without it); `-m reference` 382 passed;
+    reference_status exit 0, REFERENCE_STATUS.md unchanged; AC 53/53
+    identical to the merged base, pwl 379 / trbdf2 371 identical,
+    stateful identical, res.i 124 keys worst rel 0; openspec 78/78; ruff;
+    stubs and page `--check`; C++ builder, yaml, analysis, layer4, xdev,
+    layer5_v3, layer4_v3, record on Eigen 5 and 3.4.0 (trees deleted).
+    Full ctest not run. Cost (instructions per accepted step, min of 6
+    interleaved runs, base = merged tip 7f5ec31f): buck_pwl 3079.2 →
+    3078.3, vsi_pwl 4765.0 → 4760.4, buck_trbdf2 11026.0 → 11018.3,
+    bridge_trbdf2 12772.6 → 12768.6 (all within ±0.1 %; the earlier
+    +0.6 % buck_pwl was one round: its rounds spread 3078-3098 on both
+    packages). Reviewer (fresh context, read-only): no correctness defect;
+    the `listed` rows match the removed hand-written scalars kind by kind;
+    fixed its claim and test findings (b500f12b). Hand-off: (1) the
+    #56 loop hunk (Lauritzen at the DC start) with its failing test;
+    (2) the flux-table inductor in YAML (12.2) and a YAML reference page
+    (12.4) remain; (3) a builder-time bound would need the pinned builder
+    contracts (negative R, m = 0, ideal g_off = 0) to become separate
+    kinds or explicit opt-outs first.
