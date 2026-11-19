@@ -2032,11 +2032,58 @@ _SIM_RUN_BASE_KW = frozenset(("switch_fn", "start_from_dc_op",
                               "enable_nonlinear_refresh"))
 
 
-def _run_on_simulation(circuit, run_opts, kw):
+class _OnCacheView:
+    """What simulate(on_cache=hook) hands the hook: the run's own cache
+    (its refactors reach the pool the run solves; refactor_parametric
+    checks the branch's kind), minus the calls that would desynchronise it
+    from the run: build / build_lazy re-key every factor on another dt.
+    Writes through the caller's builder never reach a run (the run solves
+    its own copy, add-immutable-circuit-ir): resolve ids there, write here.
+    """
+
+    __slots__ = ("_cache",)
+    _REFUSED = frozenset(("build", "build_lazy"))
+
+    def __init__(self, cache):
+        self._cache = cache
+
+    def __getattr__(self, name):
+        if name in _OnCacheView._REFUSED:
+            raise _options_error("on_cache",
+                f"simulate(on_cache=...): the hook called cache.{name}(), "
+                "which would rebuild the run's factors on another step "
+                "and desynchronise them from the run; refused")
+        return getattr(self._cache, name)
+
+
+def _check_run_numbering(caller, run, keyword):
+    """The hooks (mmc_arms, on_cache) resolve branch / node ids on the
+    CALLER's builder and write through the run's cache: refuse, naming the
+    keyword, unless the run's builder numbers the caller's nodes and
+    branches the same (preflight ties may only append branches)."""
+    g = getattr(caller, "graph", None)
+    if g is None:  # a Circuit: the run's builder is its own lowering
+        return
+    h = run.graph
+    n = g.num_branches
+    if (h.num_nodes != g.num_nodes or h.num_branches < n
+            or h.branches[:n] != g.branches
+            or any(h.branch_name(i) != g.branch_name(i) for i in range(n))
+            or any(h.node_name(i) != g.node_name(i)
+                   for i in range(g.num_nodes))):
+        raise _options_error(keyword,
+            f"simulate({keyword}=...): the run's circuit numbers the "
+            "nodes / branches differently from your builder, so the "
+            "hook's branch and node ids would address other devices; "
+            "this is a kernel defect, please report it")
+
+
+def _run_on_simulation(circuit, run_opts, kw, sim=None):
     """One pwl run through the kernel object, with simulate()'s resolved
     driver keywords (`kw`, as `run_transient` takes them). Returns
     ``(result, builder)``."""
-    sim = Simulation(circuit, run_opts, True)
+    if sim is None:  # (simulate() builds it first for the cache hooks)
+        sim = Simulation(circuit, run_opts, True)
     sim.set_switch_fn(kw["switch_fn"])
     if not kw.keys() - _SIM_RUN_BASE_KW:  # the common call: nothing else
         return _pulsim_module._run_simulation(sim), sim.builder
@@ -3293,16 +3340,6 @@ def simulate(
     # mask. This also makes the docs (gotchas.md "lazy-build is
     # the default") true — they previously described intent, not
     # behaviour.
-    # add-kernel-simulation-object 11.1: the run goes through the kernel
-    # object (sim::Simulation, which owns the cache) unless a hook needs
-    # the cache before the run or sweep() replays a recipe.
-    # (an if, not a boolean expression: simulate() pays on every call)
-    _via_sim = False
-    if _run_circuit is not None and _kernel_run is None and not mmc_arms \
-            and on_cache is None and _PWL_RECIPE.get() is None:
-        _via_sim = True
-    cache = None if _via_sim else _new_pwl_cache(builder, _run_circuit, dt)
-
     # v2.0 Phase 3 "obra №2" — GGJ Thevenin MMC arms. The driver
     # needs THIS cache (its observer refactors these factors in
     # place on gating events) and the run's dt, which is why the
@@ -3371,45 +3408,6 @@ def simulate(
         # A failed step must FAIL (SimulationAborted carries the
         # partial trace), not silently retry with a wrong-dt arm.
         max_dt_halvings = 0
-        from .mmc_thevenin import make_mmc_thevenin_driver
-        _mmc_obs, _mmc_b, _mmc_finalize = make_mmc_thevenin_driver(
-            mmc_arms, _caller_builder, cache, dt,
-            builder.pool.state_size(builder.graph))
-        # With kernel ticks the drivers run before the ticks, as before.
-        if _plan._kernel_ticks:
-            _plan.tick_before, b_extra_fn = _compose_step_hooks(
-                _plan.tick_before, b_extra_fn, _mmc_obs, _mmc_b,
-                builder.pool.state_size(builder.graph), "mmc_arms")
-        else:
-            step_observer, b_extra_fn = _compose_step_hooks(
-                step_observer, b_extra_fn, _mmc_obs, _mmc_b,
-                builder.pool.state_size(builder.graph), "mmc_arms")
-
-    # v2.0 Phase 4 C.2 — hand the caller the cache the run will use,
-    # so a hook can refactor parameters mid-run (the bidirectional
-    # electro-thermal observer does this for temperature-dependent
-    # resistances). Same shape as the MMC driver above: the hook
-    # returns an (observer, b_extra) pair that composes with the
-    # user's own.
-    if on_cache is not None:
-        _hooked = on_cache(cache)
-        if _hooked is not None:
-            try:
-                _hk_obs, _hk_b = _hooked
-            except (TypeError, ValueError):
-                raise TypeError(
-                    "simulate(on_cache=...): the hook must return "
-                    "(step_observer, b_extra_fn) or None, got "
-                    f"{type(_hooked).__name__}") from None
-            if _plan._kernel_ticks:
-                _plan.tick_before, b_extra_fn = _compose_step_hooks(
-                    _plan.tick_before, b_extra_fn, _hk_obs, _hk_b,
-                    builder.pool.state_size(builder.graph), "on_cache")
-            else:
-                step_observer, b_extra_fn = _compose_step_hooks(
-                    step_observer, b_extra_fn, _hk_obs, _hk_b,
-                    builder.pool.state_size(builder.graph), "on_cache")
-
     # Construct options: the kernel resolves them from one RunOptions
     # (sim::to_simulation_options; every default in sim::Defaults).
     if store_every is not None and int(store_every) < 1:
@@ -3446,8 +3444,71 @@ def simulate(
         resolution_diagnostics=resolution_diagnostics,
         inductor_freeze_di_max=inductor_freeze_di_max,
         inductor_abs_clamp=inductor_abs_clamp)
+    # add-kernel-simulation-object 11.1: the run goes through the kernel
+    # object (sim::Simulation, which owns the cache) unless sweep() replays
+    # a recipe. The hooks (mmc_arms, on_cache) take the OBJECT's cache, so
+    # their refactors reach the pool the run solves; the object is built
+    # first for them, on the same RunOptions.
+    # (an if, not a boolean expression: simulate() pays on every call)
+    _via_sim = False
+    if _run_circuit is not None and _kernel_run is None \
+            and _PWL_RECIPE.get() is None:
+        _via_sim = True
+    _sim = cache = None
+    if mmc_arms or on_cache is not None:
+        if _via_sim:
+            _sim = Simulation(_run_circuit, _run_opts, True)
+            builder = _sim.builder
+            cache = _sim.cache
+            _check_run_numbering(_caller_builder, builder,
+                                 "mmc_arms" if mmc_arms else "on_cache")
+        else:
+            cache = _new_pwl_cache(builder, _run_circuit, dt)
+    elif not _via_sim:
+        cache = _new_pwl_cache(builder, _run_circuit, dt)
     opts = (None if _via_sim
             else _pulsim_module._to_simulation_options(_run_opts))
+
+    if mmc_arms:
+        from .mmc_thevenin import make_mmc_thevenin_driver
+        _mmc_obs, _mmc_b, _mmc_finalize = make_mmc_thevenin_driver(
+            mmc_arms, _caller_builder, cache, dt,
+            builder.pool.state_size(builder.graph))
+        # With kernel ticks the drivers run before the ticks, as before.
+        if _plan._kernel_ticks:
+            _plan.tick_before, b_extra_fn = _compose_step_hooks(
+                _plan.tick_before, b_extra_fn, _mmc_obs, _mmc_b,
+                builder.pool.state_size(builder.graph), "mmc_arms")
+        else:
+            step_observer, b_extra_fn = _compose_step_hooks(
+                step_observer, b_extra_fn, _mmc_obs, _mmc_b,
+                builder.pool.state_size(builder.graph), "mmc_arms")
+
+    # v2.0 Phase 4 C.2 — hand the caller the cache the run will use,
+    # so a hook can refactor parameters mid-run (the bidirectional
+    # electro-thermal observer does this for temperature-dependent
+    # resistances). Same shape as the MMC driver above: the hook
+    # returns an (observer, b_extra) pair that composes with the
+    # user's own.
+    if on_cache is not None:
+        _hooked = on_cache(_OnCacheView(cache))
+        if _hooked is not None:
+            try:
+                _hk_obs, _hk_b = _hooked
+            except (TypeError, ValueError):
+                raise TypeError(
+                    "simulate(on_cache=...): the hook must return "
+                    "(step_observer, b_extra_fn) or None, got "
+                    f"{type(_hooked).__name__}") from None
+            if _plan._kernel_ticks:
+                _plan.tick_before, b_extra_fn = _compose_step_hooks(
+                    _plan.tick_before, b_extra_fn, _hk_obs, _hk_b,
+                    builder.pool.state_size(builder.graph), "on_cache")
+            else:
+                step_observer, b_extra_fn = _compose_step_hooks(
+                    step_observer, b_extra_fn, _hk_obs, _hk_b,
+                    builder.pool.state_size(builder.graph), "on_cache")
+
 
     # Default switch_fn: all switches closed (v1.x behaviour).
     #
@@ -3589,7 +3650,8 @@ def simulate(
         if step_observer is not None and not _plan.fixed_tick_kwargs() \
         else None
     if cxx_chain is not None and _via_sim:  # the raw chain entry point
-        cache = _new_pwl_cache(builder, _run_circuit, dt)
+        if cache is None:  # (a hook's run keeps the object's cache/builder)
+            cache = _new_pwl_cache(builder, _run_circuit, dt)
         opts = _pulsim_module._to_simulation_options(_run_opts)
     if cxx_chain is not None:
         from . import _pulsim as _k  # type: ignore[import-not-found]
@@ -3653,7 +3715,7 @@ def simulate(
                 res = _kernel_run.result
             elif _via_sim:
                 res, builder = _run_on_simulation(_run_circuit, _run_opts,
-                                                  kwargs)
+                                                  kwargs, _sim)
             else:
                 res = run_transient(
                     cache, builder.graph, builder.pool, opts, **kwargs)

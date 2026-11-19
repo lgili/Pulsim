@@ -376,3 +376,61 @@ def test_the_trbdf2_route_rows_are_the_blockers_own():
             "store_every": 2, "integrator": "rk45"}
     assert set(ro.refused(ro.TRBDF2_ROUTE, vals)) == {"store_every", "progress"}
     assert set(ro.refused("trbdf2", vals)) > set(ro.refused(ro.TRBDF2_ROUTE, vals))
+
+
+def _hook_rc():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 1.0)
+    b.add_resistor("R", "in", "out", 1.0e3)
+    b.add_capacitor("C", "out", "gnd", 1.0e-6)
+    return b
+
+
+def test_on_cache_hook_writes_reach_the_run_and_rebuilds_are_refused():
+    # add-kernel-simulation-object 17: the hook gets the object's cache
+    # (a checked view): its refactor reaches the solve; build/build_lazy
+    # would re-key the factors on another dt and are refused by name.
+    b = _hook_rc()
+    rid = b.branch_id_of("R")
+    def hook(cache):
+        cache.refactor_parametric(rid, 1.0e2)  # tau 1 ms -> 0.1 ms
+
+    def v_end(r):
+        return float(np.asarray(r.v("out"))[-1])
+
+    base = p.simulate(b, t_end=2e-4, dt=1e-6)
+    assert v_end(p.simulate(b, t_end=2e-4, dt=1e-6, on_cache=hook)) \
+        > v_end(base) + 0.1
+    for name in ("build", "build_lazy"):
+        with pytest.raises(ValueError, match=f"cache.{name}"):
+            p.simulate(b, t_end=2e-5, dt=1e-6,
+                       on_cache=lambda c, n=name: getattr(c, n)(1e-7))
+
+
+def test_hook_numbering_check_refuses_a_renumbered_builder():
+    from pulsim import _check_run_numbering
+    a, other = _hook_rc(), p.CircuitBuilder()
+    other.add_voltage_source("V", "in", "gnd", 1.0)
+    other.add_capacitor("C", "out", "gnd", 1.0e-6)
+    other.add_resistor("R", "in", "out", 1.0e3)
+    _check_run_numbering(a, _hook_rc(), "mmc_arms")  # same numbering: ok
+    with pytest.raises(ValueError, match="mmc_arms"):
+        _check_run_numbering(a, other, "mmc_arms")
+
+
+def test_a_hook_on_the_chain_fast_path_keeps_one_cache():
+    # DECISIONS 17's trap: a hook that returns None leaves the C++ chain
+    # observer in place; the chain then runs on the object's builder and
+    # the cache the hook was handed (not a second one), bit for bit.
+    def run(**kw):
+        b = _hook_rc()
+        ch = p.MixedDomainBlockChain(rate=p.Rate(1e-5))
+        ch.add("g", p.Gain(k=0.5), inputs=dict(x="out"), output="y")
+        obs = ch.make_step_observer(b)
+        assert getattr(obs, "_cxx_chain", None) is not None
+        return p.simulate(b, 1e-4, engine="pwl", dt=1e-6,
+                          step_observer=obs, **kw)
+    seen = []
+    plain, hooked = run(), run(on_cache=seen.append)
+    assert np.array_equal(np.asarray(plain.states), np.asarray(hooked.states))
+    assert seen and seen[0].num_built_segments() >= 1  # the run used it
