@@ -22,6 +22,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <algorithm>
+
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/solver/bdf1.hpp"
 #include "pulsim/solver/run_transient.hpp"
@@ -350,6 +352,7 @@ struct HookLog {
     std::vector<Ev> ev;
     std::vector<St> st;
     Size n_dev = 0;
+    std::vector<Real> dev_t;
     void attach(events::StepHooks& h) {
         h.on_event([this](Real t, const Vector& xl, const topology::SwitchStateMask& ml,
                           const Vector& xr, const topology::SwitchStateMask& mr) {
@@ -359,8 +362,9 @@ struct HookLog {
                          Real t1, const Vector& x1, const topology::SwitchStateMask&) {
             st.push_back({t0, t1, x0, x1});
         });
-        h.on_device_state([this](Real, const Vector&, const pwl::StatefulHistories&) {
+        h.on_device_state([this](Real t, const Vector&, const pwl::StatefulHistories&) {
             ++n_dev;
+            dev_t.push_back(t);
         });
     }
 };
@@ -452,7 +456,14 @@ TEST_CASE("Step hooks on the default driver: TR-BDF2",
         {}, {}, nullptr, {}, &hooks);
     REQUIRE(r.times.size() > 10);
     check_events(rig, log, 1e-9);
-    REQUIRE(log.n_dev == log.st.size());
+    // device_state: once per committed time (step ends, and the post-event
+    // probe commits / landings the external-device trace needs, ABI #35),
+    // strictly increasing, and at every step's end
+    REQUIRE(log.n_dev >= log.st.size());
+    for (Size k = 1; k < log.dev_t.size(); ++k) REQUIRE(log.dev_t[k] > log.dev_t[k - 1]);
+    for (const auto& s : log.st) {
+        REQUIRE(std::binary_search(log.dev_t.begin(), log.dev_t.end(), s.t1));
+    }
     REQUIRE(log.st.size() > 10);
     // R1: chained, except where an event's post-edge restart was committed
     // between two steps (then an event was reported at the earlier end).
@@ -471,5 +482,35 @@ TEST_CASE("Step hooks on the default driver: TR-BDF2",
         bool at_event = false;
         for (const auto& e : log.ev) at_event = at_event || e.t == a.t1;
         REQUIRE(at_event);
+    }
+}
+
+TEST_CASE("Step hooks: device_state once per committed time on esdirk43",
+          "[v2][record][trbdf2][stepper][esdirk43]") {
+    // integration 14k: the ESDIRK landings and the forced SDIRK steps commit
+    // through the same sites; the external-device trace (ABI #35) needs the
+    // same strictly increasing rows as on the default integrator
+    Rig rig;
+    pwl::PwlStateSpaceCache cache{rig.b.graph(), rig.b.pool()};
+    cache.build_lazy(1e-6);
+    solver::TrBdf2Options o;
+    o.t_start = 0.0;
+    o.t_end = 3e-3;
+    o.integrator = 1;
+    solver::TrBdf2Stats stats;
+    events::StepHooks hooks;
+    HookLog log;
+    log.attach(hooks);
+    const auto r = solver::run_transient_trbdf2(
+        cache, rig.b.graph(), rig.b.pool(), o,
+        [&](Real t) { return rig.gate(t); }, {}, std::nullopt, &stats, {}, {},
+        {}, {}, nullptr, {}, &hooks);
+    REQUIRE(r.times.size() > 10);
+    REQUIRE(stats.n_diode_events > 0);
+    REQUIRE(log.st.size() > 10);
+    REQUIRE(log.n_dev >= log.st.size());
+    for (Size k = 1; k < log.dev_t.size(); ++k) REQUIRE(log.dev_t[k] > log.dev_t[k - 1]);
+    for (const auto& s : log.st) {
+        REQUIRE(std::binary_search(log.dev_t.begin(), log.dev_t.end(), s.t1));
     }
 }

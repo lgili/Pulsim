@@ -117,10 +117,10 @@ inline Real stamp_saturable_inductor(
                                  i_L_new, e.i_L_old, e.params)
                      + kc.c2 * models::SaturableInductor::flux_increment(
                                    e.i_gamma, e.i_L_old, e.params)) / h
-        : be
+        : be   // (lambda_offset: an esdirk43 stage's base, else 0)
             ? (v_from - v_to)
-                  - models::SaturableInductor::flux_increment(
-                        i_L_new, e.i_L_old, e.params) / h
+                  - (models::SaturableInductor::flux_increment(
+                         i_L_new, e.i_L_old, e.params) - e.lambda_offset) / h
             : (v_from - v_to) + e.V_L_old
                   - d_coef * models::SaturableInductor::flux_increment(
                                  i_L_new, e.i_L_old, e.params);

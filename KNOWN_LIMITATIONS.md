@@ -563,6 +563,12 @@ The gate of `bind_pi_to_switch` declares its edges (G23).
   resume_from=half.final_snapshot)` resumes the circuit from `half` and
   the controller from the other run (found by the batch-11 review, not
   yet reproduced in a test). Resume only from the run just made.
+- **External devices: no sandbox, no events, no PWL modes.** A model
+  library is native code with your privileges (a YAML netlist loads only a
+  library listed in `allow_native_code=[...]`). A model declaring event
+  functions is refused (no engine locates an external zero crossing yet);
+  external devices are Newton devices only (no PWL switching kind) and the
+  exact engine and `bdf1` refuse them. OSDI / Verilog-A is not hosted.
 
 ### TR-BDF2 still refactors on every new step size
 

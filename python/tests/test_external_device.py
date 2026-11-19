@@ -198,13 +198,16 @@ def _ramp_exact(t, R=1e3, G=1e-3):
 
 
 @pytest.mark.parametrize("which", ["contract", "contract_v1"])
-@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2", "esdirk43"])
 def test_a_time_dependent_law_reads_the_solve_time(libs, which, engine):
     """The law g(t) is algebraic, so v_a at every output time is the closed
     form at THAT time: with t stuck at 0 v_a would stay at 0.5 V. The
-    library built against the header as of c90fc07f gets the time too."""
+    library built against the header as of c90fc07f gets the time too
+    (esdirk43: each of the five stages at its own time)."""
     b = _ramp(libs[which])
-    kw = dict(rtol=1e-6) if engine == "trbdf2" else {}
+    kw = dict(rtol=1e-6) if engine != "pwl" else {}
+    if engine == "esdirk43":
+        engine, kw["integrator"] = "trbdf2", "esdirk43"
     res = p.simulate(b, engine=engine, t_end=1e-3, dt=1e-5, **kw)
     t = np.asarray(res.times)
     v = np.asarray(res.states)[:, b.node_id_of("a")]
@@ -229,13 +232,27 @@ def test_the_static_path_hands_the_model_the_solve_time(libs):
     assert np.max(np.abs(v[1:] - _ramp_exact(t[1:]))) <= 1e-9   # Newton's tolerance
 
 
-def test_esdirk43_refuses_an_external_device_by_name(libs):
-    # its stages take no arbitrary pseudo-previous state yet (integration 14h)
-    with pytest.raises(p.UnsupportedError) as e:
-        p.simulate(_ramp(libs["contract"]), engine="trbdf2", t_end=1e-5,
-                   integrator="esdirk43")
-    assert (e.value.feature, e.value.device, e.value.kind) == (
-        "integrator=esdirk43", "X", "ExternalDevice")
+@pytest.mark.parametrize("make", [_satind, _rectifier])
+def test_twin_equals_the_builtin_law_on_esdirk43(libs, make):
+    # integrator='esdirk43': the external device's q rows take the stage
+    # form (base ψ, backward Euler of γh). The twin against the built-in law
+    # on the same integrator (same steps), and the built-in against TR-BDF2
+    # under a 100 ns ceiling at rtol 1e-10 (the truth here)
+    kw = dict(t_end=2e-3, dt=1e-6, rtol=1e-8, atol=1e-11, engine="trbdf2",
+              device_path="interface", integrator="esdirk43")
+    builtin = p.simulate(make(libs, False), **kw)
+    ext = p.simulate(make(libs, True), **kw)
+    ref = p.simulate(make(libs, False), **{**kw, "integrator": None, "dt": 1e-7,
+                                           "rtol": 1e-10, "atol": 1e-13})
+    xb, xe, xr = (np.asarray(r.states) for r in (builtin, ext, ref))
+    scale = np.maximum(np.abs(xr).max(axis=0), 1e-9)
+    twin = (np.abs(xe[-1] - xb[-1]) / scale).max()
+    truth = (np.abs(xb[-1] - xr[-1]) / scale).max()
+    # measured: twin 1e-15 / 0 (<= 1e-12 locally; 1e-9 for other libm, CI
+    # lesson); truth 1.3e-8 / 5.3e-9, the reference's own error (a 50 ns
+    # ceiling quarters it: 3.3e-9 / 1.7e-9)
+    assert twin <= 1e-9
+    assert truth <= 1e-7
 
 
 # ---- DC operating point: f(x), df/dx with the storage terms dropped -------
@@ -521,3 +538,385 @@ def test_recorders_with_an_external_device_in_the_circuit(libs, engine):
         p.simulate(_rectifier(libs, True), 2e-3, engine=engine,
                    device_path="interface", **kw,
                    recorders=[p.Recorder("r", ["i(D)"])])
+
+
+# ---- 3.1 internal unknown: the Lauritzen diode with its charge as a row ---
+
+LAUR = dict(I_S=1e-12, n=1.0, V_T=0.025852, tau=1e-7, T_M=1e-8, G_min=1e-12)
+
+
+def _recovery(libs, external):
+    """The double-pulse test of test_lauritzen_diode: 20 A freewheeling in
+    D1 until S1 turns on at 1 us and commutates it (reverse recovery)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdc", "dc", "gnd", 400.0)
+    b.add_inductor("Lload", "dc", "sw", 200e-6, i0=20.0)
+    b.add_inductor("Lstray", "d2", "dc", 50e-9, i0=20.0)
+    if external:
+        b.add_external_device("D1", ["sw", "d2"], libs["twins"], "lauritzen_twin", LAUR)
+    else:
+        b.add_lauritzen_diode("D1", "sw", "d2", **LAUR)
+    b.add_switch("S1", "sw", "gnd", 1e3, 1e-9)
+    b.add_resistor("Rsnub", "sw", "gnd", 1e5)
+    n, k = b.graph.num_switches, b.switch_index_of("S1")
+
+    def sf(t):
+        m = p.SwitchStateMask(n)
+        if t >= 1e-6:
+            m.set(k, True)
+        return m
+    return b, sf
+
+
+def _recovery_err(a, b):
+    """Worst relative gap of the node voltages and the two inductor
+    currents (the external run has one more state column, q_M)."""
+    worst = 0.0
+    for get, keys in ((a.v, ("dc", "sw", "d2")), (a.i, ("Lload", "Lstray"))):
+        for key in keys:
+            ya = np.asarray(get(key))
+            yb = np.asarray((b.v if get == a.v else b.i)(key))
+            worst = max(worst, float(np.max(np.abs(ya - yb)) / max(np.max(np.abs(ya)), 1e-9)))
+    return worst
+
+
+@pytest.mark.parametrize("path", ["legacy", "interface"])
+def test_lauritzen_twin_with_an_internal_charge_equals_the_builtin_on_pwl(libs, path):
+    kw = dict(t_end=1.5e-6, dt=2e-10, engine="pwl", device_path=path)
+    bb, sf = _recovery(libs, False)
+    builtin = p.simulate(bb, switch_fn=sf, **kw)
+    be, sf = _recovery(libs, True)
+    ext = p.simulate(be, switch_fn=sf, **kw)
+    assert np.array_equal(np.asarray(builtin.times), np.asarray(ext.times))
+    assert np.asarray(ext.i("Lstray")).min() < -1.0   # it recovers
+    # local gate 1e-10 (spec); 1e-9 for another compiler's libm (CI lesson)
+    assert _recovery_err(builtin, ext) <= 1e-9
+
+
+def test_lauritzen_twin_on_trbdf2(libs):
+    kw = dict(t_end=1.5e-6, dt=2e-10, engine="trbdf2", rtol=1e-6, device_path="interface")
+    bb, sf = _recovery(libs, False)
+    builtin = p.simulate(bb, switch_fn=sf, **kw)
+    be, sf = _recovery(libs, True)
+    ext = p.simulate(be, switch_fn=sf, **kw)
+    t = np.asarray(builtin.times)
+    ia = np.asarray(builtin.i("Lstray"))
+    ib = np.interp(t, np.asarray(ext.times), np.asarray(ext.i("Lstray")))
+    assert ib.min() < -1.0
+    assert np.max(np.abs(ia - ib)) <= 1e-3 * np.max(np.abs(ia))   # interpolation margin
+
+
+# ---- 2.2 charge only: the junction capacitor --------------------------------
+
+JCAP = dict(C0=2e-9, V0=25.0, m=0.5)
+
+
+def _charge(libs, external, record=False):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 400.0)
+    b.add_resistor("R", "in", "a", 10.0)
+    if external:
+        b.add_external_device("C", ["a", "gnd"], libs["twins"], "junction_cap_twin", JCAP,
+                              record=record)
+        # the built-in stamps G_min = 1e-12 S on each of its nodes (assemble.hpp:
+        # a Coss row is structurally empty otherwise): 4e-10 A at 400 V
+        b.add_resistor("Gmin", "a", "gnd", 1e12)
+    else:
+        b.add_nonlinear_capacitor("C", "a", "gnd", JCAP["C0"], JCAP["V0"], JCAP["m"])
+    return b
+
+
+@pytest.mark.parametrize("path", ["legacy", "interface"])
+def test_junction_capacitor_twin_equals_add_nonlinear_capacitor_on_pwl(libs, path):
+    kw = dict(t_end=2e-6, dt=1e-9, engine="pwl", device_path=path)
+    builtin = p.simulate(_charge(libs, False), **kw)
+    ext = p.simulate(_charge(libs, True), **kw)
+    assert np.array_equal(np.asarray(builtin.times), np.asarray(ext.times))
+    assert _err(builtin, ext) <= 1e-12   # the spec gate; measured 2.8e-15
+    # the charge that entered the device: the integral of its own pin current
+    # (the generic reading, q-row companion current). Not the resistor's
+    # current: its t = 0 sample (40 A, v = 0) is a value no step integrated.
+    rec = p.simulate(_charge(libs, True, record=True), **kw)
+    t = np.asarray(rec.times)
+    q = float(np.trapezoid(np.asarray(rec.device_output("C", "i(pos)")), t))
+    assert np.asarray(ext.v("a"))[-1] == pytest.approx(400.0, abs=1e-6)
+    assert q == pytest.approx(312.31e-9, rel=2e-5)
+
+
+# ---- 3.2 kernel-owned state: rejected steps, resume, steady state ---------
+
+def _metered(libs, record=False):
+    b = _satind(libs, True)
+    b.add_external_device("M", ["in", "gnd"], libs["contract"], "metered_resistor",
+                          {"G": 1e-3}, record=record)
+    return b
+
+
+def test_rejected_trbdf2_steps_leave_no_trace_in_the_model_state(libs):
+    """accept runs only for accepted steps: the meter's energy (rectangle
+    rule over the accepted steps, x at each step's end) is reproduced from
+    the stored grid alone, on a run that rejected steps."""
+    b = _rectifier(libs, True)   # the diode's turn-on rejects steps; the smooth satind does not
+    b.add_external_device("M", ["in", "gnd"], libs["contract"], "metered_resistor", {"G": 1e-3})
+    res = p.simulate(b, engine="trbdf2", t_end=2e-3, dt=1e-5, rtol=1e-6,
+                     device_path="interface")
+    assert res.stats.n_reject > 0
+    t = np.asarray(res.times)
+    v = np.asarray(res.v("in"))
+    e = float(np.sum(np.diff(t) * 1e-3 * v[1:] ** 2))
+    meter = float(np.asarray(res.final_snapshot.dev_state)[-1])
+    assert meter == pytest.approx(e, rel=1e-12)
+
+
+def test_trbdf2_snapshot_resume_carries_the_model_state(libs):
+    kw = dict(engine="trbdf2", dt=1e-6, rtol=1e-6, device_path="interface")
+    full = p.simulate(_metered(libs), t_end=1e-3, **kw)
+    first = p.simulate(_metered(libs), t_end=5e-4, **kw)
+    snap = pickle.loads(pickle.dumps(first.final_snapshot))
+    second = p.simulate(_metered(libs), t_end=1e-3, resume_from=snap, **kw)
+    a = np.asarray(second.final_snapshot.dev_state)
+    b = np.asarray(full.final_snapshot.dev_state)
+    # the resumed run restarts its step controller at the snapshot: the
+    # same physics on another grid, not the same bits (measured 1.2e-4)
+    np.testing.assert_allclose(a, b, rtol=1e-3, atol=1e-12)
+    # exact on its own grid: the meter resumed from the snapshot's energy and
+    # added the rectangle rule over the second run's accepted steps only
+    e0 = float(np.asarray(first.final_snapshot.dev_state)[-1])
+    t = np.asarray(second.times)
+    v = np.asarray(second.v("in"))
+    assert e0 > 0
+    assert a[-1] == pytest.approx(e0 + float(np.sum(np.diff(t) * 1e-3 * v[1:] ** 2)), rel=1e-12)
+
+
+@pytest.mark.parametrize("kw", [dict(engine="pwl", dt=1e-6),
+                                dict(engine="trbdf2", rtol=1e-7, atol=1e-10),
+                                # integration 14k: device_state per committed time
+                                # through the ESDIRK landings and forced SDIRK steps
+                                dict(engine="trbdf2", rtol=1e-7, atol=1e-10,
+                                     integrator="esdirk43")])
+def test_device_output_covers_a_pwm_run_with_gate_edges_and_a_diode(libs, kw):
+    """trbdf2 commits a step, then a gate-edge restart moves t in the same
+    iteration: every committed sample needs its trace row (review #1)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_mosfet("Q1", "vin", "sw")
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "vout", 100e-6)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", 10.0)
+    b.add_external_device("M", ["vout", "gnd"], libs["contract"], "metered_resistor",
+                          {"G": 1e-3}, record=True)
+    fn = p.make_pwm_switch_fn(100e3, 0.5, b.switch_index_of("Q1"), b.graph.num_switches)
+    res = p.simulate(b, switch_fn=fn, t_end=2e-4, **kw)
+    v = np.asarray(res.v("vout"))
+    assert np.all(np.diff(np.asarray(res.times)) > 0)
+    np.testing.assert_allclose(res.device_output("M", "i(a)"), 1e-3 * v, rtol=0, atol=1e-15)
+
+
+def test_steady_state_refuses_the_model_state_by_name(libs):
+    """The period map copies named state blocks only; the external block is
+    not one yet, so steady_state refuses instead of restarting the model's
+    state every period (the affine map would see no state at all)."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
+    b.add_resistor("R", "in", "a", 0.5)
+    b.add_inductor("L", "a", "gnd", 1e-3)
+    b.add_external_device("M", ["in", "gnd"], libs["contract"], "metered_resistor", {"G": 1e-3})
+    with pytest.raises(NotImplementedError, match="external_device"):
+        p.steady_state(b, period=1e-3, dt=1e-6, device_path="interface")
+    with pytest.raises(p.UnsupportedError, match="stateful"):
+        p.steady_state(b, period=1e-3)      # no dt: periodic_steady_state
+
+
+# ---- 3.4 readings: pin currents, power, named outputs ----------------------
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_device_output_reads_the_generic_readings_and_the_named_outputs(libs, engine):
+    kw = dict(rtol=1e-6) if engine == "trbdf2" else {}
+    res = p.simulate(_metered(libs, record=True), engine=engine, t_end=1e-3, dt=1e-6,
+                     device_path="interface", **kw)
+    t = np.asarray(res.times)
+    v = np.asarray(res.v("in"))
+    np.testing.assert_allclose(res.device_output("M", "i(a)"), 1e-3 * v, rtol=0, atol=1e-15)
+    np.testing.assert_allclose(res.device_output("M", "i(b)"), -1e-3 * v, rtol=0, atol=1e-15)
+    np.testing.assert_allclose(res.device_output("M", "power"), 1e-3 * v * v, rtol=0, atol=1e-13)
+    np.testing.assert_allclose(res.device_output("M", "p_law"), 1e-3 * v * v, rtol=0, atol=1e-13)
+    e = np.concatenate([[0.0], np.cumsum(np.diff(t) * 1e-3 * v[1:] ** 2)])
+    np.testing.assert_allclose(res.device_output("M", "energy"), e, rtol=1e-12, atol=1e-18)
+    with pytest.raises(KeyError, match="has"):
+        res.device_output("M", "nope")
+    with pytest.raises(ValueError, match="not recorded"):
+        res.device_output("L", "power")
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_named_outputs_with_an_in_loop_recorder(libs, engine):
+    """Integration 14j: the recorders' feed and the record=True trace share
+    one hook set. With both, the recorder runs in the loop and
+    device_output is the run without recorders; a probe cannot name an
+    output (the grammar has v/i/p only) and i()/p() of the device are
+    refused by name."""
+    kw = dict(rtol=1e-6) if engine == "trbdf2" else {}
+    run = dict(engine=engine, t_end=1e-3, dt=1e-6, device_path="interface", **kw)
+    ref = p.simulate(_metered(libs, record=True), **run)
+    res = p.simulate(_metered(libs, record=True), **run,
+                     recorders=[p.Recorder("r", ["v(in)"])])
+    assert res.recorder_feed["mode"] == "in-loop", res.recorder_feed
+    for key in ("i(a)", "power", "p_law", "energy"):
+        np.testing.assert_array_equal(res.device_output("M", key),
+                                      ref.device_output("M", key))
+    with pytest.raises(ValueError, match="energy"):
+        p.simulate(_metered(libs, record=True), **run,
+                   recorders=[p.Recorder("r", ["energy"])])
+    for probe, exc, frag in (("i(M)", NotImplementedError, "'M'"),
+                             ("p(M)", ValueError, r"p\(M\) of a external_device")):
+        with pytest.raises(exc, match=frag):
+            p.simulate(_metered(libs, record=True), **run,
+                       recorders=[p.Recorder("r", [probe])])
+
+
+def test_device_output_pin_current_includes_the_charge_rate(libs):
+    """A q-only device: its pin current is the committed dq/dt, which the
+    series resistor carries (KCL), to Newton's tolerance."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 400.0)
+    b.add_resistor("R", "in", "a", 10.0)
+    b.add_external_device("C", ["a", "gnd"], libs["twins"], "junction_cap_twin", JCAP,
+                          record=True)
+    res = p.simulate(b, engine="pwl", t_end=2e-7, dt=1e-9)
+    i_r = (400.0 - np.asarray(res.v("a"))) / 10.0
+    i_c = res.device_output("C", "i(pos)")
+    np.testing.assert_allclose(i_c[1:], i_r[1:], rtol=0, atol=1e-6 * np.max(np.abs(i_r)))
+
+
+def test_device_output_without_record_is_refused(libs):
+    res = p.simulate(_metered(libs), t_end=1e-5, dt=1e-6)
+    with pytest.raises(ValueError, match="record=True"):
+        res.device_output("M", "power")
+
+
+@pytest.mark.parametrize("model, frag", [("liar_output_name", "generic reading"),
+                                         ("liar_events", "event functions")])
+def test_outputs_block_refusals(libs, model, frag):
+    b = p.CircuitBuilder()
+    with pytest.raises(ValueError, match=frag):
+        b.add_external_device("X", ["a", "gnd"], libs["contract"], model)
+
+
+def test_a_library_built_before_the_outputs_block_has_no_outputs(libs):
+    """contract_v1 (the header as of c90fc07f) has no appended block: its
+    energy meter loads, records the generic readings and nothing more."""
+    b = _satind(libs, True)
+    b.add_external_device("M", ["in", "gnd"], libs["contract_v1"], "energy_meter",
+                          {"G": 1e-3}, record=True)
+    res = p.simulate(b, t_end=1e-4, dt=1e-6)
+    assert list(res._xdev_trace.columns("M")) == ["i(a)", "i(b)", "power"]
+    with pytest.raises(ValueError, match="no model 'metered_resistor'"):
+        p.CircuitBuilder().add_external_device("M", ["a", "gnd"], libs["contract_v1"],
+                                               "metered_resistor")
+
+
+# ---- 1.6 components(): the library and its content hash -------------------
+
+def test_components_entry_names_the_library_and_its_hash(libs):
+    b = _rectifier(libs, True)
+    d = next(c for c in b.components() if c["name"] == "D")
+    assert d["kind"] == "external_device"
+    assert d["model"] == "shockley_twin"
+    assert os.path.samefile(d["library"], libs["twins"])
+    h = d["library_hash"]
+    assert h.startswith("fnv1a64:") and len(h) == len("fnv1a64:") + 16
+    assert d["params"]["I_S"] == SHOCK["I_S"] and d["params"]["n"] == SHOCK["n"]
+    assert [p_ for p_ in d["pins"]] == [b.node_id_of("a"), b.node_id_of("out")]
+
+
+# ---- 1.7 YAML: native code only from libraries the caller lists -----------
+
+def _netlist(lib, extra=""):
+    return f"""
+circuit:
+  devices:
+    - {{type: voltage_source, name: V, from: in, to: gnd, V: 5.0}}
+    - {{type: resistor, name: Rs, from: in, to: a, R: 1.0}}
+    - type: external_device
+      name: D
+      nodes: [a, out]
+      lib: {lib}
+      model: shockley_twin
+      params: {{I_S: 1.0e-12, n: [1.0, ""], V_T: [0.025852, V]}}{extra}
+    - {{type: resistor, name: R, from: out, to: gnd, R: 10.0}}
+simulation: {{t_end: 1.0e-5, dt: 1.0e-6}}
+"""
+
+
+def test_yaml_external_device_is_refused_without_an_allow_list(libs):
+    with pytest.raises(RuntimeError, match=r"D.*allow_native_code=\["):
+        p.load_yaml_string(_netlist(libs["twins"]))
+
+
+def test_yaml_allow_native_code_true_is_refused(libs):
+    with pytest.raises(ValueError, match="pass the library paths"):
+        p.load_yaml_string(_netlist(libs["twins"]), allow_native_code=True)
+    for one in (libs["twins"], pathlib.Path(libs["twins"])):   # a list, not one path
+        with pytest.raises(TypeError, match="not one path"):
+            p.load_yaml_string(_netlist(libs["twins"]), allow_native_code=one)
+
+
+def test_yaml_external_device_loads_a_listed_library_or_directory(libs, tmp_path):
+    lib = pathlib.Path(libs["twins"])
+    for allow in ([str(lib)], [lib.parent]):
+        lc = p.load_yaml_string(_netlist(lib), allow_native_code=allow)
+        d = next(c for c in lc.builder.components() if c["name"] == "D")
+        assert d["kind"] == "external_device" and d["params"]["I_S"] == 1e-12
+    # a relative lib: is taken from the file's folder; symlinks are followed
+    # before the comparison
+    if sys.platform != "win32":
+        link = tmp_path / f"alias{lib.suffix}"
+        link.symlink_to(lib)
+        f = tmp_path / "net.yaml"
+        f.write_text(_netlist(link.name), encoding="utf-8")
+        lc = p.load_yaml_file(str(f), allow_native_code=[lib])
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "in", "gnd", 5.0)
+        b.add_resistor("Rs", "in", "a", 1.0)
+        b.add_external_device("D", ["a", "out"], str(lib), "shockley_twin",
+                              {"I_S": 1e-12})
+        b.add_resistor("R", "out", "gnd", 10.0)
+        ra = p.simulate(lc.builder, t_end=1e-5, dt=1e-6)
+        rb = p.simulate(b, t_end=1e-5, dt=1e-6)
+        assert np.array_equal(np.asarray(ra.states), np.asarray(rb.states))
+        # the link's directory is not the library's: listing it allows nothing
+        with pytest.raises(RuntimeError, match="not in allow_native_code"):
+            p.load_yaml_file(str(f), allow_native_code=[tmp_path])
+
+
+def test_yaml_external_device_in_a_subsystem_takes_the_block_nodes(libs):
+    lib = libs["twins"]
+    doc = f"""
+circuit:
+  devices:
+    - {{type: voltage_source, name: V, from: in, to: gnd, V: 5.0}}
+    - {{type: resistor, name: R, from: out, to: gnd, R: 10.0}}
+  subsystems:
+    - name: blk
+      ports: {{p: in, n: out}}
+      devices:
+        - {{type: resistor, name: Rs, from: p, to: a, R: 1.0}}
+        - {{type: external_device, name: D, nodes: [a, n], lib: {lib},
+           model: shockley_twin, params: {{I_S: 1.0e-12}}}}
+"""
+    c = p.load_yaml_string(doc, allow_native_code=[lib]).builder.build()
+    assert c.nodes == ["in", "out", "blk/a"]   # the port n is out, a is scoped
+
+
+def test_yaml_external_device_keys_are_strict(libs):
+    lib = libs["twins"]
+    with pytest.raises(RuntimeError, match="unknown key 'code'"):
+        p.load_yaml_string(_netlist(lib, "\n      code: 'return 0;'"),
+                           allow_native_code=[lib])
+    bad = _netlist(lib).replace("I_S: 1.0e-12", "I_SS: 1.0e-12")
+    with pytest.raises(ValueError, match="no parameter 'I_SS'"):
+        p.load_yaml_string(bad, allow_native_code=[lib])
+    bad = _netlist(lib).replace("V_T: [0.025852, V]", "V_T: [25.852, mV]")
+    with pytest.raises(ValueError, match="declares 'V'"):
+        p.load_yaml_string(bad, allow_native_code=[lib])

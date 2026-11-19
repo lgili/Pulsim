@@ -130,6 +130,86 @@ struct SatIndHand : SatIndTwin {
         dq[0] = -lam.deriv(0);
     }
 };
+// The Lauritzen–Mattsson diode of device/laws.hpp with its stored charge
+// q_M as an INTERNAL unknown (the built-in condenses it as a local row):
+// f = {i, −i, A·q_M − q_E/T_M}, q = {0, 0, q_M}, i = (q_E − q_M)/T_M +
+// G_min·v, A = 1/T_M + 1/τ, q_E = τ·i_shockley(v) (no G_min, no breakdown).
+struct LauritzenTwin {
+    static constexpr const char* kName = "lauritzen_twin";
+    static constexpr std::uint32_t n_pins = 2, n_internal = 1;
+    static constexpr std::uint32_t kClaims = PULSIM_XDEV_CLAIM_SMOOTH;
+    static constexpr std::array<const char*, 2> kPins{"anode", "cathode"};
+    static constexpr std::array<pulsim_xdev_field, 7> kFields{{
+        {"I_S", "A", 1e-12, 1e-30, 1.0},
+        {"n", "", 1.0, 0.1, 10.0},
+        {"V_T", "V", 0.025852, 1e-3, 1.0},
+        {"tau", "s", 1e-7, 1e-15, 1.0},
+        {"T_M", "s", 1e-8, 1e-15, 1.0},
+        {"G_min", "S", 1e-12, 0.0, 1.0},
+        {"i_lim", "A", 1e6, 1e-6, 1e12},
+    }};
+    static constexpr Pattern<3> kF{{{true, true, true}, {true, true, true}, {true, true, true}}};
+    static constexpr Pattern<3> kQ{{{false, false, false}, {false, false, false}, {false, false, true}}};
+    static constexpr std::array<double, 3> kProbeLo{-1, -1, -1e-6}, kProbeHi{1, 1, 1e-6};
+    template <class S>
+    static void eval(const double* p, const std::array<S, 3>& x, std::array<S, 3>& f,
+                     std::array<S, 3>& q) {
+        const double sp[6] = {p[0], p[1], p[2], 0.0, p[6], 0.0};   // ShockleyTwin's fields
+        const S v = x[0] - x[1];
+        const S qm = x[2];
+        const S qe = S{p[3]} * ShockleyTwin::branch(v, sp);
+        const double inv_tm = 1.0 / p[4];
+        const S i = (qe - qm) * inv_tm + v * p[5];
+        f[0] = i;
+        f[1] = -i;
+        f[2] = (inv_tm + 1.0 / p[3]) * qm - qe * inv_tm;
+        q[0] = S{0};
+        q[1] = S{0};
+        q[2] = qm;
+    }
+};
+
+// The junction capacitor of add_nonlinear_capacitor (q only), with its hand
+// Jacobian, as the built-in law: Q = C0·V0/(1−m)·((1+u)·(1+u)^(−m) − 1),
+// u = v/V0 clamped at v_floor; dQ/dv = C0·(1+u)^(−m) (C(floor) below it).
+struct JunctionCapTwin {
+    static constexpr const char* kName = "junction_cap_twin";
+    static constexpr std::uint32_t n_pins = 2, n_internal = 0;
+    static constexpr std::uint32_t kClaims =
+        PULSIM_XDEV_CLAIM_SMOOTH | PULSIM_XDEV_CLAIM_PASSIVE | PULSIM_XDEV_CLAIM_RECIPROCAL;
+    static constexpr std::array<const char*, 2> kPins{"pos", "neg"};
+    static constexpr std::array<pulsim_xdev_field, 4> kFields{{
+        {"C0", "F", 2e-9, 1e-18, 1.0},
+        {"V0", "V", 25.0, 1e-3, 1e5},
+        {"m", "", 0.5, 0.0, 0.99},
+        {"v_floor", "", -0.9, -0.999, 0.0},
+    }};
+    static constexpr Pattern<2> kF{};
+    static constexpr Pattern<2> kQ{{{true, true}, {true, true}}};
+    // above the floor (v > -0.9·V0 at the defaults): the clamp is not C1
+    static constexpr std::array<double, 2> kProbeLo{0, -1}, kProbeHi{400, 1};
+    template <class S>
+    static void eval(const double*, const std::array<S, 2>&, std::array<S, 2>&,
+                     std::array<S, 2>&) {}   // eval_jac is the law
+    static void eval_jac(const double* p, const double* x, double* f, double* q, double* df,
+                         double* dq) {
+        (void)df;
+        double u = (x[0] - x[1]) / p[1];
+        if (u < p[3]) u = p[3];
+        // the built-in's expressions, in its order (bit-identical law)
+        const double e = 1.0 - p[2];
+        const double qq = p[0] * p[1] / e * (std::pow(1.0 + u, e) - 1.0);
+        const double c = p[0] / std::pow(1.0 + u, p[2]);
+        f[0] = 0;
+        f[1] = 0;
+        q[0] = qq;
+        q[1] = -qq;
+        dq[0] = c;
+        dq[1] = -c;
+        dq[2] = -c;
+        dq[3] = c;
+    }
+};
 }  // namespace
 
-PULSIM_XDEV_MODELS(SatIndTwin, ShockleyTwin, SatIndHand)
+PULSIM_XDEV_MODELS(SatIndTwin, ShockleyTwin, SatIndHand, LauritzenTwin, JunctionCapTwin)

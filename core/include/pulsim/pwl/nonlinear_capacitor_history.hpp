@@ -200,6 +200,29 @@ public:
     [[nodiscard]] std::vector<Entry>& mutable_entries() noexcept {
         return entries_;
     }
+
+    // ---- the stage form (βh, ψ) of integrator='esdirk43' ----
+    // One q row per device: q = Q(v), q̇ = the committed current. A stage is
+    // backward Euler of βh from the base q_prev = ψ (the stamps' BE rule).
+    [[nodiscard]] Size stage_rows() const noexcept { return entries_.size(); }
+    void stage_start(Real hh, Real* q0, Real* hqd0) const {
+        for (const auto& e : entries_) {
+            *q0++ = e.q_prev;
+            *hqd0++ = hh * e.i_prev;
+        }
+    }
+    void stage_base(const Real* psi, const Real* /*dpsi*/) {
+        for (auto& e : entries_) e.q_prev = *psi++;
+    }
+    void stage_increment(const Vector& x, const Real* psi, Real* d) const {
+        for (const auto& e : entries_) {
+            const Real v = stamping::read_node_voltage(x, e.from)
+                         - stamping::read_node_voltage(x, e.to);
+            *d++ = models::NonlinearCapacitor::charge(e.params, v) - *psi++;
+        }
+    }
+    void stage_clear() noexcept {}
+
     /// Commit under the rule the solve stamped (BDF2 stage: the stage
     /// commit; backward Euler: the restart rule).
     void commit(const Vector& x, Real h, TrBdf2Stage stage) {

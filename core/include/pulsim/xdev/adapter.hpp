@@ -149,6 +149,7 @@ struct Table {
         &eval, &validate,
         nullptr, nullptr, nullptr, nullptr,
         {nullptr, nullptr, nullptr, nullptr},
+        0u, 0u, nullptr, nullptr,   // no named outputs, no events
     };
 };
 

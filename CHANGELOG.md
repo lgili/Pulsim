@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### esdirk43 runs the stateful kinds and the losses; the exact engine's loss port
+
+* **Added** `integrator='esdirk43'` (engine `trbdf2`) runs the nonlinear
+  capacitor, the saturable inductor (atan and table laws), external devices
+  and the in-kernel loss tracker (refused by name before). The Lauritzen
+  diode, the IGBT tail, machines and the Jiles-Atherton law stay refused by
+  name.
+* **Fixed** on `integrator='esdirk43'` a capacitor's in-loop `i()` / `p()`
+  reading after an interpolated event landing misses KCL by ~1e-8 of the
+  node scale instead of 7e-5 (the refusal of that reading is removed).
+* **Added** the exact engine (`engine='exact'` / `'dsed'`) tracks device
+  losses (`set_device_losses`): switching energy on each event's two limits,
+  conduction as the exact integral of v·i per mode, impulsive energy to the
+  commutating device. Refused by name (feature `device_losses`): a junction
+  or heat node, a `V_on` table, time-varying sources, `integrator='bdf2'`,
+  `t_start`, `resume_from`.
+* **Changed** (benchmark harness only) the analytic reference of `rl_step`
+  and `inductor_chain_step` is the closed form of the source's 1 ns ramp;
+  engine outputs are unchanged.
+
+### Event queue: one locator, gate counts, a resume exactly at a gate edge
+
+* **Fixed** a `trbdf2` run resumed (`resume_from=`) exactly at a gate edge
+  that its snapshot did not commit now lands that edge with an `h_min`
+  first step, as an edge one ulp after `t_start` is (an opaque-gate buck
+  split at its turn-off: 3.7e-4 V off the uninterrupted run before,
+  5e-7 V after). Every other run is unchanged.
+* **Added** `res.counters['n_gate_events']` and
+  `['n_gate_events_unresolved']` on the fixed engine's event split
+  (`enable_substep_state_correction=True` with an edge oracle; 0
+  elsewhere); `simulate` warns when step events merged within
+  `split_snap*dt`.
+* **Added** opt-in `Rate::closed_end` (C++): a tick at exactly `t_end`
+  fires (the default stays half-open).
+
 ### In-kernel event losses on trbdf2; impulsive energy in the junction; resume
 
 * **Added** loss ports (`set_device_losses`) on `engine="trbdf2"`: conduction
@@ -22,6 +57,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Added** a resumed run continues the loss record and the heat in flight
   (snapshot pickle version 5 field 17; 17-field tuples still load); loss
   ports are part of the circuit IR's hashes.
+
+### External devices: equations to C (`pulsim.xdev`), inline `code=`
+
+* **Added** `pulsim.xdev`: a device law declared with SymPy (`pins`,
+  `internal`, `params`, `state`) compiled to plain C99 (Jacobian pattern,
+  CSE, `expm1` / `log1p`) through the per-user native cache and loaded as an
+  external device; a smoothness lint refuses kinks of the unknowns
+  (`allow_nonsmooth=True` drops the SMOOTH claim) and accepts a two-piece
+  `Piecewise` it proves C¹; `xdev.scan_monotone` finds non-monotone regions
+  a sampled check cannot (the raw Langevin law near 0). Optional extra
+  `pulsim[codegen]` (SymPy); the `dev` extra carries it for the tests.
+* **Added** `pulsim.add_external_device(builder, name, nodes, lib= | code=)`:
+  `code=` compiles a whole C / C++ model source through the native cache.
+
+### External devices: state, outputs, YAML behind an allow list; the native cache
+
+* **Added** `type: external_device` in YAML netlists, loaded only when the
+  load call lists the library or its directory:
+  `load_yaml_file(path, allow_native_code=[...])` (paths resolved with
+  symlinks followed; anything else refused by name; `allow_native_code=True`
+  is refused — pass the paths). Strict keys; parameters by the model's fields.
+* **Added** named outputs (an appended descriptor block, ABI version still 1;
+  older libraries load unchanged) and `add_external_device(..., record=True)`
+  with `res.device_output(name, key)`: pin currents `i(<pin>)`, `power`, and
+  the model's outputs at every stored sample of a pwl / trbdf2 run. A model
+  declaring event functions (`n_events > 0`) is refused: no engine locates
+  an external zero crossing yet.
+* **Added** `components()` lists external devices with their parameters,
+  model, library path and the hash of the library's bytes.
+* **Changed** the C-block compile cache code moved to
+  `pulsim._native_cache`; a cached library that another user owns, that
+  others can write, or that is a symlink is now deleted and REBUILT instead
+  of refused (the cache directory itself is still refused when it is not
+  yours and private).
 
 ### External devices: time, DC operating point, AC sweep
 
