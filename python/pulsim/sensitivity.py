@@ -1443,11 +1443,7 @@ def value_and_grad(objective, params: Sequence[str]):
     return f
 
 
-# n_steps=1: the solver's own step ceiling (dt_max = T). At T/50 the exact
-# stepper's diode settle kept the boost DCM diode ON past its turn-off in
-# 18 of 25 runs within 3e-10 V of the orbit (shooting DECISIONS 22, a
-# request to the exact-engine track); the propagators are exact at any h.
-def orbit_sensitivities(res, solver, names, n_steps=1):
+def orbit_sensitivities(res, solver, names, n_steps=50):
     """Steady-state gradients (D5) on a solved orbit: one more period run
     from ``x*`` (``res.n_period_runs`` counts it), ``dP/dp = S(T)`` with
     ``S(0) = 0``, ``dx*/dp = (I - M)^-1 dP/dp``, and the orbit's

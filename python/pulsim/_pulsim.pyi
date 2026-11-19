@@ -318,6 +318,9 @@ class DeviceLossRecord:
     def E_cond_table(self) -> float:
         ...
     @property
+    def E_impulse(self) -> float:
+        ...
+    @property
     def E_off(self) -> float:
         ...
     @property
@@ -2275,6 +2278,10 @@ class SimulationResult:
     recorded: dict[str, typing.Any]
     """``simulate(recorders=[...])`` only: ``pulsim.Recording`` per
     recorder name (kernel probes and exact windowed statistics)."""
+    recorder_feed: dict[str, typing.Any]
+    """``simulate(recorders=[...])`` only: the feed that ran (``mode``:
+    ``'in-loop'`` with ``n_steps`` / ``n_events`` / ``n_jumps`` /
+    ``n_dropped``, or ``'stored-arrays'`` with ``why``)."""
     step_loop_python_callbacks: tuple[str, ...]
     """Names of the Python callables :func:`pulsim.simulate` installed in
     the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,
@@ -2523,11 +2530,13 @@ class SimulationResult:
         ...
     def device_energy(self, device: str) -> dict[str, float]:
         """
-        ``{"E_on", "E_off", "E_cond_electrical", "E_cond_table", "n_on",
-        "n_off"}`` of ``device`` (energies in J). ``E_cond_electrical`` is
-        the device's ``∫v·i`` (always), ``E_cond_table`` the on-state
-        table's (0 without one); the spec's ``conduction`` says which one
-        was deposited as heat.
+        ``{"E_on", "E_off", "E_cond_electrical", "E_cond_table",
+        "E_impulse", "n_on", "n_off"}`` of ``device`` (energies in J).
+        ``E_cond_electrical`` is the device's ``∫v·i`` (always),
+        ``E_cond_table`` the on-state table's (0 without one); the spec's
+        ``conduction`` says which one was deposited as heat. ``E_impulse`` is
+        the impulsive re-initialisation energy booked to the device
+        (``result.reinit_records`` whose ``cause`` it is), deposited as heat.
         """
         ...
     def plot(self, *signals: str, save: str | None = None, show: bool | None = None, **kwargs: typing.Any) -> typing.Any:
@@ -2827,7 +2836,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, typing.Any, tuple[float, int, float, bool], typing.Any, list[float], list[int]]:
+    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, typing.Any, tuple[float, int, float, bool], typing.Any, list[float], list[int], list[float]]:
         ...
     def __init__(self) -> None:
         ...
@@ -4214,6 +4223,8 @@ class Simulation:
         ...
     def set_live_ring(self, ring: LiveRingHandle) -> None:
         ...
+    def set_loop_feed(self, feed: typing.Any) -> None:
+        ...
     def set_source_term(self, b_extra_fn: typing.Any) -> None:
         ...
     def set_step_observer(self, step_observer: typing.Any) -> None:
@@ -4251,6 +4262,37 @@ class Simulation:
         ...
     @property
     def trbdf2_stats(self) -> dict[typing.Any, typing.Any]:
+        ...
+class _LoopFeed:
+    """
+    In-loop recorder feed (add-probes-and-recorders 0b.6); use pulsim.simulate(..., recorders=[...]).
+    """
+    def __init__(self, reading_names: collections.abc.Sequence[str], readings: collections.abc.Sequence[tuple[collections.abc.Sequence[int], collections.abc.Sequence[float], float, bool, collections.abc.Sequence[int], collections.abc.Sequence[float], float]], recorders: collections.abc.Sequence[tuple[collections.abc.Sequence[str], str, int, collections.abc.Sequence[tuple[float, float]], float, float, collections.abc.Sequence[float]]]) -> None:
+        ...
+    def arm(self, bracket_events: bool) -> None:
+        """
+        Register on the feed's own hooks; Simulation.set_loop_feed passes them.
+        """
+    def finish(self) -> None:
+        ...
+    def reserve(self, n_samples: int, t_last: float, n_events: int = 0) -> None:
+        ...
+    def result(self, k: int) -> dict[typing.Any, typing.Any]:
+        ...
+    @property
+    def armed(self) -> bool:
+        ...
+    @property
+    def n_dropped(self) -> int:
+        ...
+    @property
+    def n_events(self) -> int:
+        ...
+    @property
+    def n_jumps(self) -> int:
+        ...
+    @property
+    def n_steps(self) -> int:
         ...
 def _branch_form_capabilities() -> dict[typing.Any, typing.Any]:
     """

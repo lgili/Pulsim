@@ -113,7 +113,7 @@ TEST_CASE("a circuit without a loss port carries no record",
     CHECK(r.heat_pending == 0.0);
 }
 
-TEST_CASE("set_device_losses refuses by name; other engines refuse the port",
+TEST_CASE("set_device_losses refuses by name; trbdf2 honours the port",
           "[thermal][device_losses]") {
     auto b = chopper();
     thermal::DeviceLossSpec s;
@@ -139,14 +139,12 @@ TEST_CASE("set_device_losses refuses by name; other engines refuse the port",
     solver::TrBdf2Options o;
     o.t_start = 0.0;
     o.t_end = 1e-4;
-    try {
-        (void)solver::run_transient_trbdf2(cache, b.graph(), b.pool(), o, gate);
-        FAIL("trbdf2 ran a circuit with a loss port");
-    } catch (const UnsupportedError& e) {
-        CHECK(e.engine() == "trbdf2");
-        CHECK(e.feature() == "device_losses");
-        CHECK(e.device() == "S1");
-    }
+    // trbdf2 honours the port (task 3.1): one record, its events booked
+    const auto r = solver::run_transient_trbdf2(cache, b.graph(), b.pool(), o, gate);
+    REQUIRE(r.device_losses.size() == 1);
+    CHECK(r.device_losses[0].device == "S1");
+    CHECK(r.device_losses[0].n_on + r.device_losses[0].n_off >= 1);
+    CHECK(near(r.heat_injected + r.heat_pending, r.device_losses[0].E_cond_electrical, 1e-12));
 }
 
 TEST_CASE("a junction without capacitance is refused when the run starts",

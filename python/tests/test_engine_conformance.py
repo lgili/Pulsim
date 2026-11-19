@@ -1598,8 +1598,8 @@ def test_allow_implicit_segments_is_refused_off_the_exact_engine(engine):
 
 
 # add-in-kernel-event-losses: a device loss port is honoured on the
-# fixed-step engine only; every other engine refuses it by name, with the
-# device, before a step is taken (task 3.1 brings trbdf2 and dsed in).
+# fixed-step and the variable-step engines (task 3.1); every other engine
+# refuses it by name, with the device, before a step is taken.
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "bdf1", "auto"))
 def test_device_losses_cell(engine):
     b = _rc()
@@ -1608,7 +1608,7 @@ def test_device_losses_cell(engine):
     b.add_resistor("Rth", "tj", "amb", 1.0)
     b.add_capacitor("Cth", "tj", "amb", 1e-3)
     b.set_device_losses("S", junction="tj")
-    if engine != "pwl":
+    if engine in ("dsed", "bdf1"):
         with pytest.raises(p.UnsupportedError) as ei:
             if engine == "bdf1":
                 k.run_transient_bdf1(
@@ -1616,12 +1616,16 @@ def test_device_losses_cell(engine):
                     lambda _t: p.SwitchStateMask(b.graph.num_switches))
             else:
                 _sim(engine, b)
-        assert (ei.value.feature, ei.value.device) == ("device_losses", "S")
-        # 'auto' names the engine it resolved to
-        assert ei.value.engine == engine or (
-            engine == "auto" and ei.value.engine in ("trbdf2", "dsed"))
+        assert (ei.value.feature, ei.value.device, ei.value.engine) == (
+            "device_losses", "S", engine)
         return
-    r = _sim(engine, b)
+    try:
+        r = _sim(engine, b)
+    except p.UnsupportedError as e:
+        # 'auto' names the engine it resolved to when that one refuses
+        assert engine == "auto" and (e.feature, e.device, e.engine) == (
+            "device_losses", "S", "dsed")
+        return
     assert r.device_energy("S")["E_cond_electrical"] > 0.0
     # 'auto' with a step routes to pwl and honours the port
     r = _sim("auto", b, dt=1e-6)

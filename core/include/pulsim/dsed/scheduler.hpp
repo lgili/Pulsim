@@ -1586,6 +1586,8 @@ private:
         if constexpr (requires { system_.port_scale_full(Vector{}); })
             scale = system_.port_scale_full(Vector{}).vscale;
         const Real tol_w = Real{1e-6} * scale;
+        scale_floor_x_ = &x_held;   // signal_bound_ on a projection residue (settle_and_project_)
+        const FloorReset_ reset_floor{scale_floor_x_};
         for (int pass = 0; pass <= 4; ++pass) {
             const Real band = tie_band_(t, x);
             std::string flipped;
@@ -1746,12 +1748,15 @@ private:
             if (has_diodes_) {
                 const std::size_t mark = reinit_log_size_();
                 const bool track = reinit_tracked_();
-                if (track) settle_x0_ = x;
+                settle_x0_ = x;
                 mask = settle_diode_cascade_(t, x);
                 project_(t, x);
                 bool changed = false;
+                const FloorReset_ reset_floor{scale_floor_x_};
                 for (int pass = 0; pass < 4; ++pass) {
+                    scale_floor_x_ = &settle_x0_;
                     const MaskT m2 = settle_diode_cascade_(t, x);
+                    scale_floor_x_ = nullptr;
                     if (m2 == mask) {
                         break;
                     }
@@ -2071,7 +2076,7 @@ private:
 
     /// Decisions at an event are taken on the candidate mode's slow
     /// manifold: x carried exactly through the current mode's parasitic
-    /// transient (exact_settle_length over the run's step dt_max_), inside
+    /// transient (exact_settle_length over resolved_scale_), inside
     /// which no predicate is read. A diode left OFF at its located current
     /// zero keeps the root's residual ε in its inductor, which g_off reads
     /// as ε/g_off volts (kV at µA) for ~L·g_off: its sign is rounding. The
@@ -2090,7 +2095,7 @@ private:
         if constexpr (HasExactStep<System>) {
             if constexpr (requires { system_.exact_settle_length(Real{}); }) {
                 if (system_.has_exact_step()) {
-                    Real d = system_.exact_settle_length(dt_max_);
+                    Real d = system_.exact_settle_length(resolved_scale_(t));
                     // never read past the next scheduled event: the gate edge is
                     // the physics that comes next (a cap shorter than the decay
                     // decides on the state at the cap)
@@ -2279,7 +2284,11 @@ private:
                 const Real e = system_.exact_step_error();
                 const Real V = std::max(std::abs(d.V_f), std::abs(d.V_th));
                 const Real v = signal_abs_(d, t, x);
-                return gn * (std::max(signal_scale_(d, t, x), s0) + V)
+                // a projection residue (1e-18 A of a cut inductor) collapses S with
+                // it: the floor is the same sum on the state before the projection
+                Real S = std::max(signal_scale_(d, t, x), s0);
+                if (scale_floor_x_) S = std::max(S, signal_scale_(d, t, *scale_floor_x_));
+                return gn * (S + V)
                        + e * (std::max({v, v0, system_.node_pair_voltage_forced(d.from, d.to)}) + V);
             }
         }
@@ -2307,13 +2316,25 @@ private:
         return !(g <= signal_bound_(d, t, x, Real{0}, Real{0}));
     }
 
-    /// The ladder's cap at a mode decision: the next resolved time scale, the
-    /// run's step dt_max or half the time to the next scheduled event.
+    /// The resolved time scale of a decision at t: the schedule's interval that
+    /// holds t (the last gate edge / corner fired, or the run's start, to the next
+    /// scheduled event or the run's end). Not the step ceiling dt_max: the same
+    /// state at the same instant gets the same decision whatever the ceiling. At
+    /// dt_max = T/50 the boost-DCM all-OFF mode's g_off rate (~5e12 /s) fell
+    /// under the cut 1e6/dt_max, the turn-off was read on the unsettled state and
+    /// D1 stayed ON in 18 of 25 runs (exact engine session 18).
+    [[nodiscard]] Real resolved_scale_(Real t) const {
+        const Real lo = std::isfinite(last_time_event_t_) ? last_time_event_t_ : Real{0};
+        return next_time_event_(t) - std::min(lo, t);
+    }
+
+    /// The ladder's cap at a mode decision: half the time to the next scheduled
+    /// event (the run's end at the latest), not the step ceiling (resolved_scale_).
+    /// dt_max only at a decision on the run's last instant, where nothing is ahead.
     [[nodiscard]] Real decision_cap_(Real t) const {
         const Real te = next_time_event_(t);
-        Real cap = dt_max_;
-        if (std::isfinite(te) && te > t) cap = std::min(cap, Real{0.5} * (te - t));
-        return cap;
+        if (std::isfinite(te) && te > t) return Real{0.5} * (te - t);
+        return dt_max_;
     }
 
     /// The scheduler diode of a predicate's switch index, or nullptr.
@@ -2644,6 +2665,11 @@ private:
     // Exact-path workspaces: a step reuses them (no allocation).
     mutable Vector x_new_, x_evt_, x_tmp_;
     Vector x_lad_;             // ladder_sign_'s rung state
+    const Vector* scale_floor_x_ = nullptr;   // signal_bound_'s pre-projection state
+    struct FloorReset_ {   // a throw inside a settle leaves no dangling floor
+        const Vector*& p;
+        ~FloorReset_() { p = nullptr; }
+    };
     Vector x_set_, x_off_;     // settled_: the cascade's and the OFF probe's
     bool settle_decisions_ = false;   // fire_event_: a located diode event
     Vector event_sample_;             // D1: the settled state stored at a located diode event

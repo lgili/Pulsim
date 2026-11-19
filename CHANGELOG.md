@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### In-kernel event losses on trbdf2; impulsive energy in the junction; resume
+
+* **Added** loss ports (`set_device_losses`) on `engine="trbdf2"`: conduction
+  per committed step with the integrator's stage quadrature, commutations
+  from the engine's left / right limits (the same reading rule and tables
+  as `pwl`), heat into the junction within the run. `dsed` / `exact` still
+  refuse a loss port by name.
+* **Changed** an impulsive re-initialisation booked to a device with a loss
+  port is deposited in its junction (`device_energy(...)["E_impulse"]`);
+  that step's conduction is its end power. The warnings of `simulate()` and
+  `device_loss_summary` about it are gone (`impulse_in_junction=True`).
+  Numbers move on `pwl` only for such circuits (the capacitor loop's port
+  read -38.6 uJ of conduction and cooled the junction).
+* **Added** a resumed run continues the loss record and the heat in flight
+  (snapshot pickle version 5 field 17; 17-field tuples still load); loss
+  ports are part of the circuit IR's hashes.
+
 ### External devices: time, DC operating point, AC sweep
 
 * **Added** an external device's law receives the solve's time in

@@ -483,10 +483,23 @@ res.device_energy("Q1")        # E_on, E_off, E_cond_electrical, E_cond_table, n
   own electrical dissipation per step, as `device_loss_summary` reads it
   (energy balance closes); `"table"` with `V_on(|i|, T_j)·|i|` over the
   on-state ends of the step, trapezoidal. Both are reported.
+* `engine="trbdf2"` runs the same tracker: conduction with the
+  integrator's stage quadrature (TR-BDF2 weights `(w, w, d)` at
+  `(0, γh, h)`, SDIRK `(1-γs, γs)`, trapezoid on landings and probes), a
+  commutation from the engine's left and right limits at the landed
+  instant (the same reading rule and table call as `pwl`), and the heat as
+  a power over the next step, consumed in proportion to the committed
+  length (a landing keeps the rest owed).
+* Impulsive re-initialisation (an ideal switch closing a capacitor loop,
+  opening a cut-set): the record's `dW` is booked to the device it names
+  (`cause`) as `device_energy(...)["E_impulse"]` and heats its junction;
+  that step's conduction is its end power only, as `device_loss_summary`
+  reads the pulse step.
+* A resumed run (`resume_from=`) continues the tracker: the heat in flight,
+  the ledgers and the events travel in the snapshot (pickle field 17).
 * Refusals by name (`UnsupportedError` / `ValueError`, naming the
-  device): `trbdf2`, `dsed`, `bdf1`, and `auto` when it does not route
-  to `pwl` (no `dt=`), refuse a circuit with a
-  loss port; an unknown device, a device that is not a PWL switch or
+  device): `dsed` / `exact`, `bdf1`, and `auto` when it resolves to
+  `dsed`, refuse a circuit with a loss port; an unknown device, a device that is not a PWL switch or
   diode, both or neither of `junction` / `Tj`, `conduction="table"`
   without `V_on`, and a deposit node without a capacitor on it.
 * YAML: a `losses:` block on a `switch`, `diode`, `mosfet`,
@@ -503,9 +516,7 @@ flips twice inside one outer step (a commutation split) records no
 event, since only the step's end masks are compared; a thermal
 capacitor to ground starts at 0 °C from a zero initial state, and the
 first events read that (tie the capacitors to the ambient node, as
-above, or start from a DC operating point); a resumed run
-(`resume_from=`) drops the heat of the step in flight; the circuit's IR
-and content hash do not include the loss ports.
+above, or start from a DC operating point).
 
 ## Device-level switching energy — `add_power_mosfet`
 

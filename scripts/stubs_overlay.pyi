@@ -41,6 +41,10 @@ class SimulationResult:
     recorded: dict[str, typing.Any]
     """``simulate(recorders=[...])`` only: ``pulsim.Recording`` per
     recorder name (kernel probes and exact windowed statistics)."""
+    recorder_feed: dict[str, typing.Any]
+    """``simulate(recorders=[...])`` only: the feed that ran (``mode``:
+    ``'in-loop'`` with ``n_steps`` / ``n_events`` / ``n_jumps`` /
+    ``n_dropped``, or ``'stored-arrays'`` with ``why``)."""
     step_loop_python_callbacks: tuple[str, ...]
     """Names of the Python callables :func:`pulsim.simulate` installed in
     the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,

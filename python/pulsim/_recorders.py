@@ -8,18 +8,30 @@ time-weighted integral, average, RMS, minimum and maximum with their
 times; and both limits of every probe at each event where the engine
 stored a right limit.
 
-FEEDING MODE (today): a kernel-side pass over the stored result arrays,
-on every engine (``pulsim._pulsim._record_pass``). The arithmetic is the
-kernel recorder's (``core/include/pulsim/record/recorder.hpp``): windows
+FEEDING MODES (``Recording.feeding``, ``result.recorder_feed``):
+
+* ``'in-loop'`` — pwl and trbdf2 through the kernel Simulation object:
+  the recorders are fed from the engine's step hooks while it runs
+  (``core/include/pulsim/record/loop_feed.hpp``), so they see every
+  accepted step whatever ``store_every`` keeps. Readings must be functions
+  of the state vector alone: ``v()``, ``i()`` of a state column or a
+  resistor, ``p()`` of those.
+* ``'stored-arrays'`` — a kernel-side pass over the stored result
+  (``pulsim._pulsim._record_pass``): the exact engine (its stored right
+  limits are exact), routes that bypass the object, other readings. With
+  ``store_every > 1`` such a run is refused (the arrays would alias).
+
+The arithmetic is the kernel recorder's (``record/recorder.hpp``): windows
 clipped exactly, each step the straight line from its start (the right
-limit where the engine stored one: ``engine='exact'``) to its end, exact
-integrals of the line and of its square. pwl and trbdf2 store no right
-limit, so their event rows are not reported (the record is continuous
-there); the in-loop feeding of the unified stepper will replace this
-pass without changing the numbers' definition.
+limit where the engine has one) to its end, exact integrals of the line
+and of its square. Event rows carry both limits and a resolution:
+``'exact'`` (exact engine), ``'settled'`` (trbdf2's settled post-event
+state at the instant), ``'within_dt'`` (a bracket: left at ``event_t``,
+right at ``event_t_right``, the end of the first step under the new mode).
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Sequence
 
@@ -65,28 +77,48 @@ class Recorder:
     times: Sequence[float] = ()
 
 
+_RESOLUTION = ("exact", "settled", "within_dt")
+
+
 class Recording:
     """One recorder's output: named arrays.
 
     ``rec["v(out)"]`` / ``rec.values[...]``: kept samples at ``rec.times``.
     ``rec.event_t`` with ``rec.event_left[p]`` / ``rec.event_right[p]``:
-    both limits at each event (exact engine). ``rec.windows[p]`` and
+    both limits at each event, ``rec.event_resolution`` ('exact' /
+    'settled' / 'within_dt') and ``rec.event_t_right`` say how the right
+    value was obtained. ``rec.windows[p]`` and
     ``rec.periods[p]``: dicts of arrays ``t0 t1 integral avg rms min t_min
     max t_max``, one entry per window / complete period.
-    ``rec.feeding`` names the feeding mode.
+    ``rec.feeding`` names the feeding mode: ``'in-loop'`` (fed from the
+    engine's step hooks while it ran: pwl and trbdf2 through the kernel
+    Simulation object) or ``'stored-arrays'`` (a pass over the stored
+    result: the exact engine, routes without the object, readings that
+    are not functions of the state alone).
     """
 
-    feeding = "stored-arrays"
-
-    def __init__(self, spec: Recorder, out: dict):
+    def __init__(self, spec: Recorder, out: dict,
+                 feeding: str = "stored-arrays"):
         names = list(spec.probes)
         self.spec = spec
+        self.feeding = feeding
         self.probes = names
         self.n_samples = int(out["n_samples"])
         self.times = np.asarray(out["times"])
         self.interpolated = np.asarray(out["interpolated"], dtype=bool)
         self.values = {p: out["values"][:, j] for j, p in enumerate(names)}
         self.event_t = np.asarray(out["event_t"])
+        # where / how each event row's right value was taken: the exact
+        # engine's right limit ('exact'), trbdf2's settled post-event state
+        # at the instant ('settled'), or pwl's bracket ('within_dt': the
+        # right value is the end of the first step under the new mode, at
+        # event_t_right, up to one dt after event_t)
+        self.event_t_right = np.asarray(out.get("event_t_right",
+                                                out["event_t"]))
+        self.event_resolution = np.asarray(
+            [_RESOLUTION[int(k)] for k in out.get(
+                "event_resolution", np.zeros(self.event_t.size, np.uint8))],
+            dtype=object)
         self.event_left = {p: out["event_left"][:, j]
                            for j, p in enumerate(names)}
         self.event_right = {p: out["event_right"][:, j]
@@ -193,13 +225,6 @@ def _refuse(kw: dict, recs: "list[Recorder]", t_start: float,
             t_end: float) -> None:
     from . import _pulsim
     who = ", ".join(repr(r.name) for r in recs)
-    se = kw.get("store_every")
-    if se is not None and int(se) > 1:
-        raise ValueError(
-            f"simulate(recorders=[{who}], store_every={se}): the recorders "
-            "are fed from the stored arrays (stored-array mode) and need "
-            "every accepted step; use Recorder(keep='decimate', "
-            f"every={se}) to keep fewer rows")
     if kw.get("resume_from") is not None:
         raise ValueError(
             f"simulate(recorders=[{who}], resume_from=...): recorder state "
@@ -320,19 +345,22 @@ def record_result(res, recs: "list[Recorder]") -> dict:
             np.ascontiguousarray(left), [int(k) for k in idx],
             np.ascontiguousarray(right),
             [float(x) for x in np.asarray(r.times, dtype=float).reshape(-1)])
-        if int(d["n_times_unreached"]):
-            raise ValueError(
-                f"recorder {r.name!r}: {int(d['n_times_unreached'])} of times "
-                f"lie outside the record [{t[0]!r}, {t[-1]!r}]")
-        rec = Recording(r, d)
-        bad = [k for k in range(len(r.windows))
-               if not d["windows"]["complete"][k, 0]]
-        if bad:
-            raise ValueError(
-                f"recorder {r.name!r}: windows {bad} are not covered by the "
-                f"record [{t[0]!r}, {t[-1]!r}]")
-        out[r.name] = rec
+        out[r.name] = _checked(r, d, t[0], t[-1], "stored-arrays")
     return out
+
+
+def _checked(r: "Recorder", d: dict, t0, t1, feeding: str) -> "Recording":
+    if int(d["n_times_unreached"]):
+        raise ValueError(
+            f"recorder {r.name!r}: {int(d['n_times_unreached'])} of times "
+            f"lie outside the record [{t0!r}, {t1!r}]")
+    bad = [k for k in range(len(r.windows))
+           if not d["windows"]["complete"][k, 0]]
+    if bad:
+        raise ValueError(
+            f"recorder {r.name!r}: windows {bad} are not covered by the "
+            f"record [{t0!r}, {t1!r}]")
+    return Recording(r, d, feeding)
 
 
 def _run_at_user_frame(simulate: Callable[..., Any], kw: dict) -> Any:
@@ -374,6 +402,146 @@ def _run_at_user_frame(simulate: Callable[..., Any], kw: dict) -> Any:
     return res
 
 
+# ---- in-loop feeding (task 0b.6) ----------------------------------------
+
+# Set by simulate_with_recorders for the inner simulate() call; the pwl and
+# trbdf2 routes through the kernel Simulation object attach the feed.
+_LOOP_PLAN: "ContextVar[Optional[_LoopPlan]]" = ContextVar(
+    "pulsim_recorder_loop_plan", default=None)
+
+
+class _LoopPlan:
+    def __init__(self, recs, caller, kw):
+        self.recs, self.caller, self.feed = recs, caller, None
+        self.t_start = float(kw.get("t_start") or 0.0)
+        self.t_end = kw.get("t_end")
+        self.dt = kw.get("dt")
+        self.why_not = "this run's route does not go through the kernel " \
+                       "Simulation object"
+
+
+def _atoms_of(recs) -> "list[str]":
+    from . import _pulsim
+    atoms: list[str] = []
+    for r in recs:
+        for p in r.probes:
+            for a in _pulsim._probe_atoms(p):
+                if a not in atoms:
+                    atoms.append(a)
+    return atoms
+
+
+def _node_terms(builder, caller, name: str):
+    alias = getattr(caller, "_resolve_alias", None)
+    alias = alias(name) if alias is not None else None
+    if alias is not None and alias[0] == "node":
+        name = alias[1]
+    idx = int(builder.node_id_of(name))
+    return ([], []) if idx < 0 else ([idx], [1.0])
+
+
+def _branch(builder, caller, name: str):
+    alias = getattr(caller, "_resolve_alias", None)
+    alias = alias(name) if alias is not None else None
+    if alias is not None and alias[0] == "branch":
+        name = alias[1]
+    return int(builder.branch_index_of(name))
+
+
+def _column(fn, b_id: int, graph):
+    """``fn(b_id, graph)`` or None when the branch is another kind."""
+    if fn is None:
+        return None
+    try:
+        return int(fn(b_id, graph))
+    except Exception:  # noqa: BLE001 - another kind
+        return None
+
+
+def _state_reading(builder, caller, atom: str):
+    """``(cols, coef, div)`` or a product ``((..), (..))`` of the reading
+    as a function of the state vector alone, or None. The same column /
+    law as ``res.v`` / ``res.i`` read from a stored sample."""
+    kind, arg = atom[0], atom[2:-1]
+    try:
+        if kind == "v":
+            parts = arg.split(",")
+            if len(parts) == 1:
+                c, w = _node_terms(builder, caller, parts[0])
+                return (c, w, 1.0)
+            ca, wa = _node_terms(builder, caller, parts[0])
+            cb, wb = _node_terms(builder, caller, parts[1])
+            return (ca + cb, wa + [-x for x in wb], 1.0)
+        b_id = _branch(builder, caller, arg)
+        d = None
+        for x in builder.components():
+            if int(x.get("branch_id", -1)) == b_id:
+                d = x
+                break
+        if d is None:
+            return None
+        i_lin = None
+        # res.i's fast path, in its order: a state column of the branch
+        for acc in ("branch_var_id_for_inductor", "branch_var_id_for_source",
+                    "branch_var_id_for_switch"):
+            k = _column(getattr(builder.pool, acc, None), b_id, builder.graph)
+            if k is not None and k >= 0:
+                i_lin = ([k], [1.0], 1.0)
+                break
+        f, to = (int(n) for n in d["nodes"][:2])
+        v_lin = ([n for n in (f, to) if n >= 0],
+                 [w for n, w in ((f, 1.0), (to, -1.0)) if n >= 0], 1.0)
+        if i_lin is None and d.get("kind") == "resistor":
+            i_lin = (v_lin[0], v_lin[1], float(d["params"]["R_ohms"]))
+        if i_lin is None:
+            return None
+        if kind == "i":
+            return i_lin
+        if kind == "p" and d.get("kind") in _P_KINDS:
+            return (v_lin, i_lin)
+    except Exception:  # noqa: BLE001 - unknown name: the stored pass names it
+        return None
+    return None
+
+
+def attach_loop_feed(sim, engine: str) -> None:
+    """Called by simulate()'s Simulation routes (pwl, trbdf2) before the
+    run: when recorders are declared and every reading is a function of the
+    state, feed them from the run's step hooks."""
+    plan = _LOOP_PLAN.get()
+    if plan is None:
+        return
+    from . import _pulsim
+    builder = sim.builder
+    atoms = _atoms_of(plan.recs)
+    specs = []
+    for a in atoms:
+        r = _state_reading(builder, plan.caller, a)
+        if r is None:
+            plan.why_not = (f"reading {a} is not a function of the state "
+                            "vector alone (a switched or Newton device's law)")
+            return
+        if len(r) == 2:
+            (ca, wa, da), (cb, wb, db) = r
+            specs.append((ca, wa, da, True, cb, wb, db))
+        else:
+            specs.append((r[0], r[1], r[2], False, [], [], 1.0))
+    feed = _pulsim._LoopFeed(atoms, specs, [
+        (list(r.probes), r.keep, int(r.every),
+         [(float(a), float(b)) for a, b in r.windows],
+         float(r.period or 0.0), float(r.offset),
+         [float(x) for x in np.asarray(r.times, dtype=float).reshape(-1)])
+        for r in plan.recs])
+    if plan.t_end is not None:
+        n = 0
+        if engine == "pwl" and plan.dt:
+            n = int(round((float(plan.t_end) - plan.t_start) / float(plan.dt))) + 1
+        feed.reserve(n, float(plan.t_end))
+    feed.arm(engine == "pwl")
+    sim.set_loop_feed(feed)
+    plan.feed = feed
+
+
 def simulate_with_recorders(simulate: Callable[..., Any], kw: dict,
                             recorders) -> Any:
     recs = _normalise(recorders)
@@ -381,10 +549,46 @@ def simulate_with_recorders(simulate: Callable[..., Any], kw: dict,
     t_start = float(kw.get("t_start") or 0.0)
     if t_end is not None:
         _refuse(kw, recs, t_start, float(t_end))
-    res = _run_at_user_frame(simulate, kw)
+    caller = getattr(kw.get("builder"), "builder", kw.get("builder"))
+    plan = _LoopPlan(recs, caller, kw)
+    token = _LOOP_PLAN.set(plan)
+    try:
+        res = _run_at_user_frame(simulate, kw)
+    finally:
+        _LOOP_PLAN.reset(token)
+    t = np.asarray(res.times, dtype=float)
     if t_end is None:  # a LoadedCircuit supplied the run window
-        _refuse(kw, recs, float(res.times[0]), float(res.times[-1]))
+        _refuse(kw, recs, float(t[0]), float(t[-1]))
+    feed = plan.feed
+    if feed is not None and feed.n_dropped > 0:
+        # an event report the feed could not place: never a silent in-loop
+        # record with a missing limit (the stored pass, or the refusal)
+        plan.why_not = (f"{int(feed.n_dropped)} event report(s) of the engine "
+                        "could not be placed in the record")
+        feed = None
+    if feed is not None and feed.n_steps > 0:
+        feed.finish()
+        res.recorder_feed = {
+            "mode": "in-loop", "n_steps": int(feed.n_steps),
+            "n_events": int(feed.n_events), "n_jumps": int(feed.n_jumps),
+            "n_dropped": int(feed.n_dropped)}
+        res.recorded = {r.name: _checked(r, feed.result(k), t[0], t[-1],
+                                         "in-loop")
+                        for k, r in enumerate(recs)}
+        return res
+    se = kw.get("store_every")
+    if se is not None and int(se) > 1:
+        who = ", ".join(repr(r.name) for r in recs)
+        why = plan.why_not if feed is None else \
+            "the engine's step hook did not fire (the static or legacy path)"
+        raise ValueError(
+            f"simulate(recorders=[{who}], store_every={se}): the recorders "
+            f"could not be fed in the loop ({why}), and the stored arrays "
+            "of a decimated run would alias; record with store_every=1 and "
+            f"Recorder(keep='decimate', every={se}) to keep fewer rows")
     res.recorded = record_result(res, recs)
+    res.recorder_feed = {"mode": "stored-arrays", "why": plan.why_not if
+                         feed is None else "the step hook did not fire"}
     return res
 
 
