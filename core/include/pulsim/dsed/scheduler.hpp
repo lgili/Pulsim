@@ -1620,10 +1620,10 @@ private:
             project_(t, x);
         }
         if (changed && reinit_tracked_() && reinit_log_size_() > mark) {
+            // an abandoned mode's impulsive jump is not physics (settle_and_project_)
             truncate_reinit_log_(mark);
-            held_tmp_ = x_held;
-            if constexpr (requires { system_.reinit_to_constraint(t, held_tmp_); })
-                system_.reinit_to_constraint(t, held_tmp_);
+            x = x_held;
+            project_(t, x);
         }
     }
 
@@ -1760,12 +1760,15 @@ private:
                     project_(t, x);
                 }
                 if (track && changed && reinit_log_size_() > mark) {
-                    // a trial mode's projection left records behind: the result
-                    // keeps those of the settled mode alone, from the pre-event
-                    // state (the iterated state itself is unchanged)
+                    // a trial mode's projection left records behind: that jump is
+                    // not physics, so the settled mode starts again from the
+                    // pre-event state (its own records alone). Keeping the iterated
+                    // state carried a cut-set trial's i_L = 0 into the freewheel
+                    // mode it settled in, with no record (the decision on the
+                    // projection's 1e-18 A residue is rounding: MSVC, R = 10·(1−u))
                     truncate_reinit_log_(mark);
-                    if constexpr (requires { system_.reinit_to_constraint(t, settle_x0_); })
-                        system_.reinit_to_constraint(t, settle_x0_);
+                    x = settle_x0_;
+                    project_(t, x);
                 }
                 return;
             }
@@ -2631,7 +2634,6 @@ private:
     std::vector<std::pair<Index, Index>> shadow_nodes_;
     Vector shadow_x_;
     Vector held_x_;            // guard: the held state, constraint re-initialised
-    Vector held_tmp_;          // resettle: the held state's dry-run re-initialisation
     int settle_rounds_ = 0;
     int settle_round_cap_ = 64;
     std::size_t max_steps_ = 10'000'000;
