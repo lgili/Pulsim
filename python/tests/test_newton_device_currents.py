@@ -181,5 +181,6 @@ def test_adaptive_grid_loss_equals_the_fixed_grid_loss(kind):
         e[eng] = [d for d in p.device_loss_summary(b, r) if d["name"] == "X"][0]["E_total"]
         h[eng] = np.diff(np.asarray(r.times, float))
     assert e["pwl"] > 1e-4                         # it dissipates (control)
-    assert h["trbdf2"].max() > 5 * h["trbdf2"].min()   # the grid did adapt
+    # the grid did adapt: far more points than the 20 steps at its ceiling
+    assert h["trbdf2"].size > 100 and np.median(h["trbdf2"]) < 0.5 * 1e-4
     assert abs(e["trbdf2"] / e["pwl"] - 1) <= 5e-3, e

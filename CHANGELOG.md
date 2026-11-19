@@ -20,7 +20,9 @@ unit and description, and drives:
   `add_*` method's;
 * the `components()` params: generated from the rows marked listed, which
   are exactly the scalars it listed before, so its output is unchanged
-  (byte-for-byte over every call in the test suite, and the pinned digest);
+  (equal over every call in the test suite, compared per test, apart from
+  an external device's per-session library path and hash; and the pinned
+  digest);
   `Circuit.devices()` already listed every row;
 * the generated device reference, `docs/device-reference.md`
   (`scripts/generate_device_reference.py`; a test fails when it is stale);

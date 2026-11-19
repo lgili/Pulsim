@@ -1,8 +1,8 @@
 """add-unified-device-interface group 12: the device field tables.
 
 One table per kind (``ir::kKindFields``: name, unit, bound, default,
-description) drives the builder's bound check, the ``components()``
-params, the YAML registry keys and the generated device reference
+description) drives the bound check of ``with_value`` / ``bind_param`` /
+the YAML reader (not the ``add_*`` methods'), the ``components()`` params, the YAML registry keys and the generated device reference
 (``docs/device-reference.md``, kept current by
 ``scripts/generate_device_reference.py --check``, which this module runs).
 """
@@ -105,6 +105,7 @@ def test_the_builder_does_not_apply_the_table_bounds():
     b = p.CircuitBuilder()
     b.add_resistor("Rn", "a", "gnd", -5.0)
     b.add_nonlinear_capacitor("C", "a", "gnd", 1e-9, 10.0, 0.0)
+    b.add_switch("S", "a", "gnd", form="branch")       # ideal: g_off = 0
     c = b.build()
     with pytest.raises(ValueError, match=r'field R of device "Rn" must be a finite number > 0'):
         c.with_value("Rn.R", -1.0)
