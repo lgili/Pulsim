@@ -3,10 +3,12 @@
 Code: `core/include/pulsim/solver/step/esdirk43.hpp` (the integrator),
 `core/tests/step/mna_stage_body.hpp` (a test body that plays the engine on
 dense MNA systems), `core/tests/step/test_esdirk43.cpp` (tests; the hidden
-tags `[.esdirk_measure]` and `[.esdirk_measure_long]` print every number
+tags `[.esdirk_measure]`, `[.esdirk_measure_long]`, `[.esdirk_measure_nlq]`
+(entries 10–12) and `[.esdirk_measure_energy]` (13–14) print every number
 below). Truths: `probes/esdirk43_truth.py` (mpmath expm for the ladder,
 mpmath odefun for the RC closed form, scipy Radau/DOP853 at 1e-13 for the
-Shockley clamp), closed forms in the test, `probes/esdirk43_dense.py`.
+Shockley clamp), closed forms in the test, `probes/esdirk43_dense.py`,
+`probes/esdirk43_nonlinear_q.py` (saturable inductor, Coss, buck).
 
 ## 1. Method: ESDIRK4(3)6L[2]SA as designed (D1)
 
@@ -152,17 +154,27 @@ At equal error ESDIRK needs 4–10× fewer solves (factorizations ≈ steps +
 rejects for both). Not measured: an event-dominated circuit (the
 proposal's honest limit: 6 solves per step against 3).
 
-## 8. Newton: one Jacobian per attempt, stage predictor, one refresh
+## 8. Newton: one Jacobian per attempt, stage predictor, refresh on slow contraction
 
 Simplified Newton per stage on the step's factor (Jacobian at x0);
 predictor = quadratic extrapolation through the last three known
 (t, value) points (previous step's c = 0.62, 0.85 stages and x0, then
-this step's stages); after an event only x0 (no history). A stage that
-stalls (8 iterations) gets one Jacobian refresh at its last iterate, then
-fails the step (h/4). Clamp at rtol 1e-7: 5 stages per attempt, 2.55
-Newton iterations per stage, max 5, 0 refreshes, 0 failures; at rtol
-1e-4…1e-6 refreshes appear (34, 24, 3) and a few failures (3, 1, 0).
-Test bounds carry ≥ 30 % margin.
+this step's stages); after an event only x0 (no history).
+
+Revised 2026-11-19 (entry 12): the first version refreshed once, after 8
+stalled iterations, then failed the step. A saturable inductor
+(λ' falls by 1e3 across the knee) defeats that at every fixed step
+size: the stale Jacobian contracts at ~0.999, and the refreshed full
+Newton 2-cycles on the tanh law (−11 A ↔ +261 A, seen). Now: refresh at
+the last finite iterate as soon as an iteration contracts by less than
+θ = 0.5 (or a pass runs out), up to 10 refreshes per stage; after a
+refresh, backtrack on the residual norm; convergence is judged on the
+FULL (undamped) step, and a refresh with no descent direction counts as
+a stall. The refreshed factor is kept for the rest of the step.
+Clamp at rtol 1e-7 unchanged: 2.55 iterations per stage, max 5, 0
+refreshes, 0 failures; at rtol 1e-4…1e-6 refreshes 56, 27, 3 (were 34,
+24, 3) and failures 0, 0, 0 (were 3, 1, 0); max iterations per stage
+(across passes) 18 at 1e-4. Test bounds carry ≥ 30 % margin.
 
 ## 9. Restart
 
@@ -173,6 +185,161 @@ engine's post-event solve (test: null-space projection keeping q). The
 step end is consistent (stiffly accurate; algebraic residual < 1e-12 ×
 100 A at the first step after each of 9 events).
 
+## 10. Nonlinear charge and flux: stages in q, step end on the q quadrature
+
+Body: `q(x) = C·x + q_n(x)`, Jacobian `G + ∂g + dq/dx·(2/factor_dt)`;
+stage residual `(q(Y) − ψ)/(γh) + f(Y, t)`; x recovered by the stage
+Newton with the device's own dq/dx. Truths:
+`probes/esdirk43_nonlinear_q.py` (scipy Radau and LSODA at rtol 1e-13,
+spread printed; mpmath odefun 25 digits agrees with Radau within 4e-14
+on A, k = 10, at 5 and 10 ms).
+
+Circuits: saturable inductor `λ = Ls·i + (L0 − Ls)·Is·tanh(i/Is)`,
+`Ls = L0/k` (smooth, monotone, no cancellation; λ' = Ls + (L0 − Ls)/cosh²);
+junction Coss `q = 2·C0·v/(√(1 + v/φ) + 1)`.
+A `sat_series`: 10 sin(2π50 t) − 1 Ω − L (10 mH, 1 A), k = 10 and 1000
+(iL to 10·Is; λ' to L0/k). Algebraic vs, vm, iV are LINEAR in iL.
+B `nl_tank`: 10 V − 0.1 Ω − node m − L (100 µH, 1 A, k 100; iL to 16 A)
+− node v − Coss (10 µF, 0.7 V) ∥ 100 Ω, plus a limiter 2 A·tanh(vm/5 V)
+from m to ground: the algebraic vm is a NONLINEAR function of iL.
+`sat_ideal`: the inductor straight across the sine (R = 0), closed form
+λ = (V/ω)(1 − cos ωt), iL = λ⁻¹ (to ~5000 A).
+
+Observed global orders (fixed steps, rtol = atol = 1e-10, Newton 0.01:
+1e-12 A absolute; the default 1e-9·1e-6 floor is BELOW the conditioning
+of i(λ) in saturation, ulp(λ)/Ls ≈ 1.7e-13 A, and stalls Newton):
+
+| circuit | n (steps) | errors | orders |
+|---|---|---|---|
+| A k=10, iL and vm at 20 ms | 80…1280 | 7.8e-6 … 1.2e-10 | 4.05, 4.01, 4.01, 4.00, 4.00 |
+| A k=1000 | 80…1280 | 1.7e-5 … 3.0e-10 | 3.90, 3.95, 3.97, 3.99 |
+| A k=1000, carry_q | 160…2560 | identical to 3 digits | same |
+| B iL / v / vm at 200 µs | 3200→6400 | 3.9e-9→2.3e-10 (iL) | 4.11 / 4.08 / 4.11 |
+
+B is pre-asymptotic below 3200 steps (slopes 2.5–7.3) and the 12800
+point (8.7e-12) is below the reference spread (3.4e-11): ONE clean ratio.
+The last A points (n = 2560, 7e-12 / 2e-11) sit at the reference spread
+(3.5e-12) and the Newton floor: not used. The fixed clock fails Newton on
+B at n = 100 (no retry ladder; the adaptive clock recovers by h/4).
+
+Dense output, local error at θ = 0.5 of one step from the exact state on
+the knee (t0 = 2.6 ms), h = 4e-4 … 2.5e-5:
+
+| | combined in q, then x by from_q | combined in x |
+|---|---|---|
+| sat_ideal k=10 | slopes 5.44, 5.27, 5.08, (5.46) | 4.39, 1.48, 2.88, 3.01 |
+| sat_ideal k=1000 | 5.04, 5.02, 5.01, 5.00 | 0.083 A at every h (no convergence: Δi per step 15–300 A) |
+| sat_series k=10 (state-coupled) | 5.18, 5.02, 5.16, 5.10 | 2.40, 3.20, 3.14, 3.08 |
+
+## 11. Flux balance: what is structural, what leaks, and the x form
+
+Reviewed (fresh context, 2026-11-19); the reviewer's corrections are
+folded in. Per step, with x1 = Y6 (stiffly accurate):
+
+- `q(x1) − q(x0)` equals the b-weighted stage increments to 5e-16
+  relative. TRUE BY CONSTRUCTION (the increments are q(Y) − ψ and ψ is
+  built from them): a wiring check only.
+- Against the quadrature `h·Σ b_i·q̇(Y_i)` (q̇ = −f at the stage values)
+  it is off by the stages' Newton residuals: 5.9e-10 of V/ω per step at
+  Newton tolerance 0.03, 1.8e-11 at 1e-3; they do NOT cancel: λ drifts
+  1.2e-6 (V/ω units) after 1000 periods of `sat_ideal` (40 steps per
+  period), 1.0e-8 at 1e-3.
+- `carry_q`: end the step on `q1 = q0 + h·Σ b_i·q̇(Y_i)` and recover x1
+  by `from_q` (1.2 Newton iterations per step, damped): λ back to 0
+  within 3.7e-13 after 1000 periods. On `sat_ideal` the source does not
+  depend on the state, so ANY q-form update with an exact quadrature
+  returns (the reviewer's forward Euler in q: 2e-12): this checks the
+  recovery, not accuracy. On the state-coupled `sat_series`, `carry_q`
+  has the q form's errors to 3 digits and keeps order 4 (tests).
+- The same tableau on x (`i' = v/λ'(i)`), and the trapezoidal rule on x:
+  on `sat_ideal` below ~2560 steps per period the stage equation near the
+  knee has several roots (or none) and the solution jumps branch: λ off
+  by 0.55–1.27 of V/ω after one period (trapezoid at 160 per period:
+  −0.59 with every stage solve converged; ESDIRK at 40/160/640: 1/1/2
+  stage solves without a root). From 2560 per period both converge
+  (ESDIRK 2.2e-5, trapezoid 1.5e-13). With damping (`sat_series`) the x
+  form is NOT worse: same order, error 0.79× (k = 1000) to 2.5× (k = 10)
+  the q form's. The q form matters where nothing restores the flux: an
+  inductor (magnetizing branch) driven by a voltage source.
+
+## 12. Newton through the knee, events landing in saturation
+
+Adaptive, against TR-BDF2 (solves = stage + filter; factors include
+refreshes). `sat_series` k = 1000, 0–20 ms, max |ΔiL| at 5/10/15/20 ms:
+
+| rtol | ESDIRK steps/rej, solves, it/stage, factors/attempt, err | TR-BDF2 steps/rej, solves, err |
+|---|---|---|
+| 1e-5 | 104/50, 4252, 5.32, 2.10, 8.2e-6 | 333/83, 3332, 5.1e-5 |
+| 1e-6 | 153/56, 5443, 5.01, 1.41, 7.0e-6 | 709/32, 4943, 1.2e-5 |
+| 1e-7 | 274/68, 8235, 4.62, 1.14, 3.1e-7 | 1568/31, 10148, 2.6e-6 |
+| 1e-8 | 502/77, 12654, 4.17, 1.01, 1.0e-7 | 3452/26, 20783, 5.8e-7 |
+
+`nl_tank` (max of |ΔiL|, |Δv|/10): ESDIRK 1e-7 4.7e-6 at 9222 solves
+against TR-BDF2 1e-8 9.3e-6 at 30850; at 1e-6 9.4e-5 / 6179 against
+1.4e-4 / 7711. Square-wave drive (±10 V every 5 ms, each edge lands at
+iL = ±10 A, λ' = L0/1000), edges handled as events (land, flip,
+consistent solve, restart):
+
+| rtol | ESDIRK solves, it/stage, refreshes, fails, err; 4 edges: attempts, it/stage | TR-BDF2 solves, err |
+|---|---|---|
+| 1e-5 | 8617, 5.89, 578, 0, 6.6e-5; 26, 9.0 | 5946, 3.5e-5 |
+| 1e-6 | 9054, 5.64, 333, 1, 1.2e-6; 18, 8.7 | 8174, 9.2e-6 |
+| 1e-7 | 13421, 5.31, 232, 0, 2.3e-7; 15, 8.3 | 15203, 2.2e-6 |
+| 1e-8 | 19097, 4.82, 77, 0, 2.6e-8; 13, 8.3 | 29198, 4.9e-7 |
+
+Every run converges (one stage failure at 1e-6, retried at h/4). The
+price of the long steps is Newton: 4–6 iterations per stage and up to
+2.1 factors per attempt at loose tolerance; TR-BDF2 stays at 2.5–3.5 and
+1.0. At equal error ESDIRK wins 2.5–3.3× at rtol ≤ 1e-7, 1.0–1.25× at
+1e-5…1e-6, and LOSES ~1.5× on the square wave at 1e-5.
+
+## 13. Energy on the lossless LC (task 2.4)
+
+Fixed steps at equal solves per period (no filter solve): loss per period
+`1 − ρ^(2n)`, ρ the spectral radius of the one-step propagator in energy
+coordinates; a 1000-period simulation reproduces it to 4 digits.
+
+| solves/period | ESDIRK (steps) | TR-BDF2 (steps) | trapezoidal (steps) |
+|---|---|---|---|
+| 50 | 2.82e-5 (10) | 7.26e-4 (25) | 0 (50) |
+| 100 | 9.99e-7 (20) | 9.15e-5 (50) | 0 (100) |
+| 200 | 3.23e-8 (40) | 1.15e-5 (100) | 0 (200) |
+| 400 | 1.02e-9 (80) | 1.43e-6 (200) | 0 (400) |
+
+(trapezoidal: |loss| ≤ 4e-14, round-off; it conserves energy and rings
+on stiff modes, 5b.2). Adaptive, 1000 periods, total energy loss:
+ESDIRK 7.1e-2 / 4.7e-3 / 2.69e-4 / 1.48e-5 / 8.1e-7 at rtol 1e-4…1e-8
+(53 / 90 / 165 / 282 / 504 solves per period); TR-BDF2 4.9e-2 / 4.9e-3 /
+4.8e-4 / 4.7e-5 / 4.7e-6 (257 / 506 / 1051 / 2221 / 4751). Task 2.4:
+2.69e-4 = 0.027 % ≤ 0.035 % at rtol 1e-6. At rtol 1e-4 ESDIRK loses MORE
+energy than TR-BDF2 (7.1 % vs 4.9 %) on 5× fewer solves.
+
+## 14. Event-dominated: buck at 100 kHz
+
+Synchronous buck, ideal switch node (a PWL source 12 V / 0), D = 0.4,
+L 10 µH + 10 mΩ, C 10 µF ∥ 1 Ω, from rest, 20 periods (40 edges, each
+an event: land, flip, consistent solve, restart). Error: max of |ΔiL|,
+|Δvo| at the end of periods 5/10/15/20 against mpmath expm.
+
+| rtol | ESDIRK steps/period, solves, err | TR-BDF2 steps/period, solves, err |
+|---|---|---|
+| 1e-1 | 2.2, 264, 4.4e-4 | 2.2, 135, 5.0e-2 |
+| 1e-2 | 2.2, 264, 4.4e-4 | 4.0, 237, 5.5e-2 |
+| 1e-3 | 2.2, 264, 4.4e-4 | 5.5, 375, 6.4e-3 |
+| 1e-5 | 3.1, 378, 5.5e-5 | 21.6, 1356, 3.2e-4 |
+| 1e-6 | 5.2, 624, 9.7e-6 | 44.3, 2715, 7.3e-5 |
+| 1e-7 | 9.2, 1104, 1.0e-6 | 95.4, 5787, 1.5e-5 |
+| 1e-8 | 14.5, 1746, 8.5e-8 | 203.9, 12300, 3.3e-6 |
+| 1e-9 | 24.8, 2988, 8.8e-9 | 437.0, 26280, 7.1e-7 |
+
+Solves per accepted step: ESDIRK 6.00–6.06, TR-BDF2 3.00–3.44. At the
+event floor (2.2 steps per period: one per interval plus the start)
+ESDIRK costs 1.96× the solves — for 114× less error. At equal error it
+needs 2.5–15× fewer. The case where it loses is a user tolerance looser
+than what one ESDIRK step per interval delivers (here 4.4e-4).
+Not measured: state events (DCM, diode commutation) located by re-steps,
+6 solves per re-step against 3.
+
 ## Hand-off (what the engine-switch step needs)
 
 1. Body services: `solve_stage` for `{BackwardEuler, h/2, γh}` with an
@@ -182,11 +349,19 @@ step end is consistent (stiffly accurate; algebraic residual < 1e-12 ×
 2. Factor key h/2 in `solve_at`; nonlinear: one Jacobian per attempt,
    refresh on stall (DECISIONS 8).
 3. Events: dense output only to bracket; land by re-steps (DECISIONS 6);
-   combine q, not x, when q is nonlinear, then re-solve x (DECISIONS 3).
+   combine q, not x, when q is nonlinear, then re-solve x (DECISIONS 3,
+   10).
 4. Post-event: consistent solve before q̇0 (DECISIONS 9).
 5. Option `integrator='esdirk43'` default off; refuse with the fixed
    clock (design applicability rules). Not done here: no engine runs on
    the skeleton yet (loop freeze).
-6. Open: 2003-paper cross-check of the tableau (SUNDIALS match only);
-   energy-loss bound of task 2.4; event-dominated cost measurement;
-   tasks 3–5 (nonlinear devices through `f`, `q`, resonant converters).
+6. Nonlinear q (DECISIONS 10–12): stage unknowns in q; END THE STEP ON
+   THE q QUADRATURE and recover x (`carry_q`): with x1 = Y6 the flux
+   balance leaks the Newton residuals (1.2e-6 of V/ω per 1000 periods).
+   Newton: refresh on slow contraction, backtracking after a refresh,
+   convergence on the undamped step; the absolute Newton tolerance must
+   stay above ulp(q)/q'(x) (1.7e-13 A for this inductor in saturation).
+7. Selection guidance: design.md D5b.
+8. Open: 2003-paper cross-check of the tableau (SUNDIALS match only);
+   state-event-dominated cost (DCM, diode commutations); tasks 3–5 on
+   the engine (devices through `f`, `q`; resonant converters).

@@ -21,7 +21,7 @@ Reference values (`probes/`; ideal LC: 100 µH, 100 nF, 10 V,
 - [x] 2.1 Stage loop on the `(G, C, b)` split with `solve_at(mask, h/2)`; five stage derivatives stored; stiffly accurate update (on the step skeleton with a test body, `tests/step/mna_stage_body.hpp`, dt-keyed factor; `solve_at` itself is the engine-switch step)
 - [x] 2.2 Embedded error, stiff filter, RMS norm on capacitor voltages and inductor currents, I-controller with exponent −1/4
 - [x] 2.3 Tests, fixed step: LC amplitude error after 10 periods 5.16e-4, 3.24e-5, 2.02e-6 at `T₀/20, /40, /80` within 5 %, observed order ≥ 3.9; RC charged in steps of `h = 100·τ`: remaining error 7.57 % of the step after one step, positive (no overshoot), below 0.05 % after three
-- [ ] 2.4 Tests, adaptive on the LC over 1000 periods: at rtol 1e-6 at most 32 steps per period, energy loss at most 0.035 %, max error at most 0.25 V; at rtol 1e-8 at most 100 steps per period and max error at most 2.5e-3 V (steps and errors measured on 1000 periods and met, DECISIONS 7; the ctest runs 20 periods; energy loss NOT measured)
+- [x] 2.4 Tests, adaptive on the LC over 1000 periods: at rtol 1e-6 at most 32 steps per period, energy loss at most 0.035 %, max error at most 0.25 V; at rtol 1e-8 at most 100 steps per period and max error at most 2.5e-3 V (all met on 1000 periods: 27.5 steps, 0.027 %, 0.178 V; 84 steps, 1.68e-3 V; DECISIONS 7, 13; the ctest runs 20 periods: energy loss 5.4e-6; energy at equal solves against TR-BDF2 and trapezoidal, DECISIONS 13)
 - [x] 2.5 Test: Prothero–Robinson `y' = λ(y − sin t) + cos t`, `λ = −1e6`: record the observed order (expected between 2 and 3) and assert it is at least 2
 - [x] 2.6 Measurement gate (counters, LC, 1000 periods, equal rtol ∈ {1e-5, 1e-6, 1e-8}): linear solves per period at most one quarter of TR-BDF2's (prototype: 4.7, 5.4, 7.6 times fewer); factorizations per accepted step at most 1
 
@@ -49,6 +49,10 @@ Reference values (`probes/`; ideal LC: 100 µH, 100 nF, 10 V,
 - [x] 5b.5 Newton: one Jacobian per attempt, stage predictor, counts as bounds (DECISIONS 8)
 - [x] 5b.6 Restart: no history; consistent algebraic unknowns after an event (DECISIONS 9)
 
+- [x] 5b.7 Nonlinear q on the test body: saturable inductor and junction Coss, stages in q, x by Newton with dq/dx; orders 4 on states and on a nonlinear algebraic unknown; dense output combined in q (local order 5 vs 3 in x); flux balance and `carry_q`; the x formulation compared (DECISIONS 10, 11; reviewed)
+- [x] 5b.8 Newton through a 1e3 slope collapse and edges landing in saturation: refresh on slow contraction, backtracking, counts against TR-BDF2 (DECISIONS 8, 12)
+- [x] 5b.9 Event-dominated buck at 100 kHz against TR-BDF2; selection guidance in design.md D5b (DECISIONS 14)
+
 ## 6. Docs and verification
-- [ ] 6.1 Integrator guide: when fourth order pays (accuracy-limited steps), when it does not (event-limited steps, PWL circuits that the exact strategy covers), order reduction on index-2 unknowns
+- [ ] 6.1 Integrator guide: when fourth order pays (accuracy-limited steps), when it does not (event-limited steps, PWL circuits that the exact strategy covers), order reduction on index-2 unknowns (the measured content is in design.md D5b; the user-facing page waits for `integrator='esdirk43'` in `simulate()`, task 3.3)
 - [ ] 6.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check
