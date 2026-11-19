@@ -147,7 +147,9 @@ def build() -> str:
           "- The release profile is not the default: `+next` columns apply it through the harness "
           "(`benchmarks/tools/next_defaults.py`); a plain `simulate()` call does not get it. Its branch form "
           "reaches `add_switch` / `add_diode` called with the netlist's values only (not MOSFET / IGBT "
-          "helpers, Shockley diodes or calls with extra arguments).",
+          "helpers, Shockley diodes or calls with extra arguments). `+next` also applies the `PLAN` library "
+          "defaults (`next_defaults.plan_defaults`); the scoreboard cells pass the netlist dt, so the "
+          "`output_rtol` listed for `dsed+next` there is ignored (the rule runs only without dt).",
           "- The analytic set (closed forms) is in `NEXT_DEFAULTS_REHEARSAL.md`, not in the tables above."]
     return "\n".join(L) + "\n"
 

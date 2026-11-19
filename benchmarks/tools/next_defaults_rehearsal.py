@@ -728,10 +728,12 @@ def suite_refusals():
         return ["", "### 1b. Refusals in the test suite: pytest under the profile not run", ""]
     fails = json.loads(PYTEST_SUMMARY.read_text(encoding="utf-8"))["failures"]
     L = ["", "### 1b. Refusals the profile raises in `python/tests` (engine fixes or owner decisions)", ""]
-    for i, (pat, opt, what) in enumerate(SUITE_ROOTS, 1):
+    n = 0
+    for pat, opt, what in SUITE_ROOTS:
         hit = [f["nodeid"] for f in fails if pat in f["msg"]]
         if hit:
-            L.append(f"{i}. {len(hit)} test{'s' * (len(hit) > 1)}, option `{opt}`: {what}. Repro: `{hit[0]}` under "
+            n += 1
+            L.append(f"{n}. {len(hit)} test{'s' * (len(hit) > 1)}, option `{opt}`: {what}. Repro: `{hit[0]}` under "
                      "`-p next_defaults_pytest`.")
     return L
 

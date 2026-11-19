@@ -1,6 +1,6 @@
 # Next-defaults rehearsal
 
-Rehearsal of the number-changing release, rendered on `642573e2` from the cell cache of `run`
+Rehearsal of the number-changing release, rendered on `e86fee57` from the cell cache of `run`
 (method and tables below the blocker list; where the cells and the pytest blast radius ran: `## Notes`).
 
 ## Ranked blocker list
@@ -25,9 +25,9 @@ fixes before the release; the last three need a decision or a re-baseline with e
 
 ### 1b. Refusals the profile raises in `python/tests` (engine fixes or owner decisions)
 
-4. 1 test, option `form='branch'`: bdf1 (retired) refuses a branch-form switch / diode by name and names pwl / trbdf2 (update-number-changing-release 1.7; ac_sweep runs them since): at the flip bdf1 keeps the conductance form or the test moves off bdf1. Repro: `python/tests/test_engine_conformance.py::test_device_cell[Switch-bdf1]` under `-p next_defaults_pytest`.
-6. 72 tests, option `output_rtol`: the exact engine's sensitivity run refuses `output_rtol` by name (it keeps its own grid): with `output_rtol` in the profile every exact `sensitivities=` call without dt is refused. Engine work (the rule on the sensitivity run) or the profile leaves `output_rtol` off when `sensitivities=` is set. Repro: `python/tests/test_branch_form_period_map.py::test_transient_sensitivities_equal_central_differences[L.L]` under `-p next_defaults_pytest`.
-7. 24 tests, option `_plan.DEFAULT_UNDRIVEN`: a test that relies on an undriven controlled switch (all closed today on pwl and the exact engine) is refused by name once `undriven='refuse'` is the default: it passes `undriven='closed'` or drives the switch (update-number-changing-release DECISIONS 4). Repro: `python/tests/test_cache_budget.py::test_result_total_bytes_covers_more_than_states` under `-p next_defaults_pytest`.
+1. 1 test, option `form='branch'`: bdf1 (retired) refuses a branch-form switch / diode by name and names pwl / trbdf2 (update-number-changing-release 1.7; ac_sweep runs them since): at the flip bdf1 keeps the conductance form or the test moves off bdf1. Repro: `python/tests/test_engine_conformance.py::test_device_cell[Switch-bdf1]` under `-p next_defaults_pytest`.
+2. 72 tests, option `output_rtol`: the exact engine's sensitivity run refuses `output_rtol` by name (it keeps its own grid): with `output_rtol` in the profile every exact `sensitivities=` call without dt is refused. Engine work (the rule on the sensitivity run) or the profile leaves `output_rtol` off when `sensitivities=` is set. Repro: `python/tests/test_branch_form_period_map.py::test_transient_sensitivities_equal_central_differences[L.L]` under `-p next_defaults_pytest`.
+3. 24 tests, option `_plan.DEFAULT_UNDRIVEN`: a test that relies on an undriven controlled switch (all closed today on pwl and the exact engine) is refused by name once `undriven='refuse'` is the default: it passes `undriven='closed'` or drives the switch (update-number-changing-release DECISIONS 4). Repro: `python/tests/test_cache_budget.py::test_result_total_bytes_covers_more_than_states` under `-p next_defaults_pytest`.
 
 ### 2. Accepted changes of number
 
@@ -710,7 +710,7 @@ Hand-written; kept by `render`.
   from the `E` lines and is a heuristic (a failure can sit in a neighbouring class).
 - **`pwl:split` is `pwl+split`**: `enable_substep_state_correction=True` alone is refused by
   `run_transient` (it requires the restart rule), so the split's single column is the rule plus the split.
-- **ll06 (blocker 1).** Graded column by column (`exact_scoreboard.grade`): `V(sw)` 1.1e-2, `V(n_l)`
+- **ll06 (blocker 1 of the run without `output_rtol`; class 3 above under the profile).** Graded column by column (`exact_scoreboard.grade`): `V(sw)` 1.1e-2, `V(n_l)`
   1.1e-2, `V(out)` 3.8e-7, `I(L1)` 1.6e-5. The first departure is the sample at the D1 turn-off event
   (t = 1.825982343832e-5 s, 99 % of span). Time-weighted `V(out)` over [1, 2] ms: 21.773493 V without dt,
   21.774224 V with the netlist dt (part of that is the trapezoid on sparse samples; the per-sample
