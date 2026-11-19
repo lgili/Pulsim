@@ -155,6 +155,42 @@ limited by accuracy, not by events.
   controller rather than by an event cap; if more than half are, and
   the exact strategy does not apply, switch to `Esdirk43`.
 
+### D5b. Selection guidance (measured on the test body, DECISIONS 7, 10–14)
+
+Choose `integrator='esdirk43'` when steps are set by ACCURACY:
+
+- resonant and filter waveforms between events, tight tolerances: LC tank
+  4.7–9.4× fewer solves than TR-BDF2 at equal error; stiff ladder and a
+  Shockley clamp 4–10×; a buck at 100 kHz once rtol ≤ 1e-5 (9–15×; at
+  rtol 1e-7 ESDIRK reaches 1e-6 with 1104 solves, TR-BDF2 does not reach
+  it at 26280);
+- energy on lightly damped resonances: at 100 solves per period the LC
+  loses 1.0e-6 of its energy per period against TR-BDF2's 9.2e-5 (92×
+  less; both L-stable, both damp; the trapezoidal rule loses 0 but rings
+  on stiff modes);
+- nonlinear charge / flux at rtol ≤ 1e-7 (saturable inductor, junction
+  Coss): 2.5–3.3× fewer solves at equal error. Stages are in q and the
+  step ends on the q quadrature (`carry_q`, DECISIONS 10); dense output
+  is combined in q and re-solved for x.
+
+Keep TR-BDF2 when steps are set by EVENTS or the tolerance is loose:
+
+- at the event floor (one step per switching interval) ESDIRK costs
+  1.96× the solves (6 per step against 3) for accuracy nobody asked for
+  (buck: 264 vs 135 solves; 4.4e-4 vs 5.0e-2 error);
+- saturating magnetics at rtol ≥ 1e-5: Newton needs 5–6 iterations per
+  stage and 1.1–2.1 factors per attempt (long steps cross the knee on
+  one Jacobian); the advantage shrinks to 1.0–1.25×, and with an edge
+  landing in saturation every 5 ms (square-wave drive) TR-BDF2 wins at
+  rtol 1e-5 (5946 solves for 3.5e-5 against 8617 for 6.6e-5);
+- event location by re-steps costs 6 solves per re-step against 3 (not
+  measured on a state-event-dominated circuit: DCM, diode commutations);
+- PWL circuits the exact strategy covers: neither.
+
+Rule of thumb for the docs: ESDIRK pays when TR-BDF2 at the requested
+tolerance takes more than ~4 steps per smooth interval between events;
+below 2 it costs up to twice as much.
+
 ## Applicability rules
 
 Selected only on request (D5). Refused, naming the reason:

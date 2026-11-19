@@ -1,7 +1,10 @@
 #pragma once
 
 // add-high-order-stiff-integrator: a body for the step skeleton on small
-// dense MNA systems  C·x' + G·x + g(x) = b(t)  (q = C·x, f = G·x + g − b).
+// dense MNA systems  q(x)' + G·x + g(x) = b(t)  (q = C·x + q_n(x),
+// f = G·x + g − b). A nonlinear q (saturable flux, junction charge) is
+// integrated in q: the stage unknowns are q, x is recovered by Newton
+// with the device's own dq/dx.
 // It plays the engine's part for Esdirk43 and TrBdf2 (one factor per
 // (h, Jacobian) key, simplified Newton per stage, stage predictors,
 // filtered error), so the two integrators are compared on the same
@@ -13,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <vector>
 
 #include "pulsim/solver/step/esdirk43.hpp"
@@ -31,6 +35,8 @@ struct Circuit {
     std::function<Vec(Real)> b;
     std::function<Vec(const Vec&)> g;    // nonlinear currents (optional)
     std::function<Mat(const Vec&)> dg;   // their Jacobian
+    std::function<Vec(const Vec&)> qn;   // nonlinear charge / flux (optional), added to C·x
+    std::function<Mat(const Vec&)> dqn;  // its Jacobian
     std::vector<int> norm_vars;          // differential unknowns: the error norm
     [[nodiscard]] Vec f(const Vec& x, Real t) const {
         Vec r = G * x - b(t);
@@ -38,17 +44,19 @@ struct Circuit {
         return r;
     }
     [[nodiscard]] Mat jac(const Vec& x) const { return dg ? Mat(G + dg(x)) : G; }
-    [[nodiscard]] bool linear() const { return !g; }
-    [[nodiscard]] bool alg_row(Eigen::Index i) const { return C.row(i).cwiseAbs().maxCoeff() == 0; }
-    [[nodiscard]] bool alg_col(Eigen::Index j) const { return C.col(j).cwiseAbs().maxCoeff() == 0; }
-    /// The engine's consistent solve: x + Z·y with C·Z = 0 (q unchanged)
-    /// and the algebraic combinations N^T·f = 0 (N^T·C = 0) at t; index 1
+    [[nodiscard]] Vec q(const Vec& x) const { return qn ? Vec(C * x + qn(x)) : Vec(C * x); }
+    [[nodiscard]] Mat dq(const Vec& x) const { return dqn ? Mat(C + dqn(x)) : C; }
+    [[nodiscard]] bool linear() const { return !g && !qn; }
+    /// The engine's consistent solve: x + Z·y with dq·Z = 0 (q unchanged)
+    /// and the algebraic combinations N^T·f = 0 (N^T·dq = 0) at t; index 1
     /// makes N^T·J·Z nonsingular. Newton for a nonlinear g.
+    /// shortcut: Z, N from dq at x (structural zeros of a nonlinear q).
     [[nodiscard]] Vec consistent(const Vec& x, Real t) const {
-        const Eigen::FullPivLU<Mat> lc(C);
-        if (lc.rank() == C.rows()) return x;
+        const Mat D = dq(x);
+        const Eigen::FullPivLU<Mat> lc(D);
+        if (lc.rank() == D.rows()) return x;
         const Mat Z = lc.kernel();
-        const Mat N = Eigen::FullPivLU<Mat>(C.transpose()).kernel();
+        const Mat N = Eigen::FullPivLU<Mat>(D.transpose()).kernel();
         Vec y = Vec::Zero(Z.cols());
         for (int k = 0; k < 30; ++k) {
             const Vec xc = x + Z * y;
@@ -57,6 +65,37 @@ struct Circuit {
             if (dy.norm() <= 1e-15 * (1 + y.norm())) break;
         }
         return x + Z * y;
+    }
+    /// x from a target charge: R^T·(q(x) − q_t) = 0 on the range of dq and
+    /// N^T·f(x, t) = 0 on its left null space (the consistent solve with q
+    /// given). Newton with the device's own dq/dx from the guess x, damped
+    /// by backtracking on |F| (tanh-type laws 2-cycle undamped). Returns
+    /// false when it did not converge (x is then the last iterate).
+    [[nodiscard]] bool from_q(const Vec& qt, Vec& x, Real t, Size* iters = nullptr) const {
+        const Mat D0 = dq(x);
+        const Mat R = Eigen::FullPivLU<Mat>(D0).image(D0);
+        const Mat N = Eigen::FullPivLU<Mat>(D0.transpose()).kernel();
+        const Eigen::Index n = x.size(), r = R.cols();
+        const auto F = [&](const Vec& z) {
+            Vec v(n);
+            v.head(r) = R.transpose() * (q(z) - qt);
+            if (r < n) v.tail(n - r) = N.transpose() * f(z, t);
+            return v;
+        };
+        for (int k = 0; k < 50; ++k) {
+            Mat J(n, n);
+            J.topRows(r) = R.transpose() * dq(x);
+            if (r < n) J.bottomRows(n - r) = N.transpose() * jac(x);
+            const Vec F0 = F(x);
+            Vec dx = J.fullPivLu().solve(F0);
+            if (iters) ++*iters;
+            const bool small = dx.norm() <= 1e-12 * (1 + x.norm());
+            for (int j = 0; j < 30 && !small && !(F(Vec(x - dx)).norm() < F0.norm()); ++j) dx *= Real{0.5};
+            x -= dx;
+            if (!x.allFinite()) return false;
+            if (small) return true;
+        }
+        return false;
     }
 };
 
@@ -69,13 +108,27 @@ struct Body {
     Real rtol = 1e-6, atol = 1e-9;
     Real newton_tol = 0.03;   // weighted RMS of a Newton update, in tolerance units
     int newton_max = 8;
+    // Jacobian refresh: when an iteration contracts by less than
+    // `theta_refresh` (|dy_k| > θ·|dy_{k−1}|, k ≥ 2) or a pass runs out of
+    // iterations, refactor at the last finite iterate; at most `max_refresh`
+    // per stage, then the stage fails the step.
+    Real theta_refresh = 0.5;
+    int max_refresh = 10;
     bool filter = true;
     bool restart = true;      // no previous step to extrapolate from
+    // End the step on the quadrature q1 = q0 + h·Σ b_i·q̇(Y_i) (q̇ = −f at the
+    // stage values) and recover x1 from it (from_q), instead of x1 = Y_6:
+    // the flux / charge balance then holds to round-off whatever the
+    // stages' Newton residuals (ESDIRK only).
+    bool carry_q = false;
+    Vec x_end;
+    Size n_recover = 0;   // from_q iterations (each one a solve)
     std::array<Vec, 5> Y, d;  // stage values; increments q(Y) − ψ
     Vec hqd0, qd_g;
     // counters
     Size n_factor = 0, n_solve = 0, n_newton = 0, n_stage = 0, max_newton = 0;
     Size n_refresh = 0, n_newton_fail = 0;
+    Size n_resid = 0;   // residual evaluations of the backtracking (no solve)
     // factor cache: one entry keyed by (factor_dt, linearisation point)
     Eigen::PartialPivLU<Mat> lu;
     Real lu_dt = -1;
@@ -112,7 +165,7 @@ struct Body {
     void factor(Real factor_dt, Real t0) {
         // linear: the dt-keyed cache (solve_at); nonlinear: one Jacobian per step
         if (factor_dt == lu_dt && (m.linear() || t0 == lu_t)) return;
-        lu.compute(m.jac(x0) + (Real{2} / factor_dt) * m.C);
+        lu.compute(m.jac(x0) + (Real{2} / factor_dt) * m.dq(x0));
         lu_dt = factor_dt;
         lu_t = t0;
         ++n_factor;
@@ -133,30 +186,53 @@ struct Body {
                + ((tau - ta) * (tau - tb) / ((tc - ta) * (tc - tb))) * xc;
     }
     // Simplified Newton on r(Y) = 0 with the cached factor; r's Jacobian is
-    // the factor's matrix (up to the linearisation point).
-    // A stage that does not converge on the step's Jacobian gets one
-    // refresh at its last finite iterate (counted), then fails the step.
+    // the factor's matrix (up to the linearisation point). The factor is the
+    // step's (one Jacobian per attempt) until a stage contracts slowly (a
+    // saturating flux: λ' falls by 1e3 across the knee) or stalls; then it
+    // is refreshed at the stage's last finite iterate (counted) and kept for
+    // the rest of the step.
     template <class R>
     bool newton(Vec& y, Real factor_dt, R&& residual) {
         ++n_stage;
         const Vec y_pred = y;
-        for (int pass = 0; pass < 2; ++pass) {
+        int its = 0;
+        for (int pass = 0; pass <= max_refresh; ++pass) {
             Vec y_ok = y;
+            Real w_prev = std::numeric_limits<Real>::infinity();
             for (int k = 1; k <= newton_max; ++k) {
-                const Vec dy = lu.solve(residual(y));
+                const Vec r = residual(y);
+                Vec dy = lu.solve(r);
                 ++n_solve;
                 ++n_newton;
+                ++its;
+                // convergence is judged on the FULL step, before any damping
+                const Real w = m.linear() ? 0 : wnorm(dy, Vec(y - dy), Vec(y - dy), nullptr);
+                if (pass > 0 && w > newton_tol) {
+                    // after a refresh: backtrack on the residual norm (a
+                    // sigmoidal law such as tanh makes plain Newton 2-cycle);
+                    // no descent on this Jacobian is a stall (refresh / fail)
+                    const Real r0 = r.norm();
+                    bool descent = false;
+                    for (int j = 0; j < 30 && !descent; ++j) {
+                        ++n_resid;
+                        descent = residual(Vec(y - dy)).norm() < r0;
+                        if (!descent) dy *= Real{0.5};
+                    }
+                    if (!descent) break;
+                }
                 y -= dy;
                 if (!y.allFinite()) break;
                 y_ok = y;
-                if (m.linear() || wnorm(dy, y, y, nullptr) <= newton_tol) {
-                    max_newton = std::max<Size>(max_newton, static_cast<Size>(k));
+                if (w <= newton_tol) {
+                    max_newton = std::max<Size>(max_newton, static_cast<Size>(its));
                     return true;
                 }
+                if (k >= 2 && w > theta_refresh * w_prev) break;   // slow: refresh now
+                w_prev = w;
             }
-            if (pass == 1 || m.linear()) break;
+            if (pass == max_refresh || m.linear()) break;
             ++n_refresh;
-            lu.compute(m.jac(y_ok) + (Real{2} / factor_dt) * m.C);
+            lu.compute(m.jac(y_ok) + (Real{2} / factor_dt) * m.dq(y_ok));
             ++n_factor;
             y = y_ok.allFinite() ? y_ok : y_pred;
         }
@@ -177,7 +253,7 @@ struct Body {
         }
         pts.emplace_back(f.t0, x0);
         hqd0 = -h * m.f(x0, f.t0);
-        const Vec q0 = m.C * x0;
+        const Vec q0 = m.q(x0);
         if constexpr (is_esdirk) {
             for (int s = 0; s < I::n_stages; ++s) {
                 const step::StageSpec sp = I::stage(h, s);
@@ -186,11 +262,21 @@ struct Body {
                 const Real ts = f.t0 + sp.t_off;
                 const Real gh = sp.ctx_h;
                 Vec y = predict(ts);
-                if (!newton(y, sp.factor_dt, [&](const Vec& v) { return Vec((m.C * v - psi) / gh + m.f(v, ts)); }))
+                if (!newton(y, sp.factor_dt, [&](const Vec& v) { return Vec((m.q(v) - psi) / gh + m.f(v, ts)); }))
                     return false;
                 Y[s] = y;
-                d[s] = m.C * y - psi;
+                d[s] = m.q(y) - psi;
                 pts.emplace_back(ts, y);
+            }
+            if (carry_q) {
+                Vec q1 = q0 + I::b(0) * hqd0;
+                for (int s = 0; s < I::n_stages; ++s)
+                    q1 -= (h * I::b(s + 1)) * m.f(Y[static_cast<std::size_t>(s)], f.t0 + I::c(s + 1) * h);
+                x_end = Y[I::n_stages - 1];
+                if (!m.from_q(q1, x_end, f.t1, &n_recover)) {
+                    ++n_newton_fail;
+                    return false;
+                }
             }
         } else {
             using H = pulsim::pwl::HistoryState;
@@ -200,16 +286,16 @@ struct Body {
             const Vec qd0 = hqd0 / h;
             Vec yg = predict(tg);
             if (!newton(yg, s0.factor_dt, [&](const Vec& v) {
-                    return Vec(Real{2} * (m.C * v - q0) / gh - qd0 + m.f(v, tg));
+                    return Vec(Real{2} * (m.q(v) - q0) / gh - qd0 + m.f(v, tg));
                 }))
                 return false;
             Y[0] = yg;
             pts.emplace_back(tg, yg);
             if constexpr (I::n_stages == 1) return true;   // Trapezoidal
             Vec y1 = predict(f.t1);
-            const Vec hist = H::trbdf2_c2() * (m.C * yg) + H::trbdf2_c3() * q0;
+            const Vec hist = H::trbdf2_c2() * m.q(yg) + H::trbdf2_c3() * q0;
             if (!newton(y1, s0.factor_dt, [&](const Vec& v) {
-                    return Vec((H::trbdf2_c1() * (m.C * v) + hist) / h + m.f(v, f.t1));
+                    return Vec((H::trbdf2_c1() * m.q(v) + hist) / h + m.f(v, f.t1));
                 }))
                 return false;
             Y[1] = y1;
@@ -217,7 +303,12 @@ struct Body {
         }
         return true;
     }
-    [[nodiscard]] const Vec& result() const { return Y[I::n_stages - 1]; }
+    [[nodiscard]] const Vec& result() const {
+        if constexpr (is_esdirk) {
+            if (carry_q) return x_end;
+        }
+        return Y[I::n_stages - 1];
+    }
 
     /// The error vector in x units (filtered unless `filter` is off).
     [[nodiscard]] Vec error_vector(const step::StepFrame& f) {
@@ -240,8 +331,9 @@ struct Body {
             ++n_solve;
             return lu.solve(scale * eq);
         }
-        Vec e = Vec::Zero(eq.size());   // raw: C must be diagonal on the norm
-        for (const int k : m.norm_vars) e[k] = eq[k] / m.C(k, k);
+        Vec e = Vec::Zero(eq.size());   // raw: dq must be diagonal on the norm
+        const Mat D = m.dq(x0);
+        for (const int k : m.norm_vars) e[k] = eq[k] / D(k, k);
         return e;
     }
     Real error(const step::StepFrame& f) {
@@ -255,10 +347,26 @@ struct Body {
         restart = false;
     }
     /// Dense output inside the step just taken (Esdirk43 only).
-    [[nodiscard]] Vec dense(Real theta) const { return I::dense(theta, x0, Y); }
-    /// The same with the algebraic unknowns re-solved at t0 + θh (q kept).
+    /// With carry_q the committed end state stands for the last stage value.
+    [[nodiscard]] Vec dense(Real theta) const {
+        std::array<Vec, 5> y = Y;
+        y[4] = result();
+        return I::dense(theta, x0, y);
+    }
+    /// Dense output of q (the conserved variable), stage-value form.
+    [[nodiscard]] Vec dense_q(Real theta) const {
+        std::array<Vec, 5> qy;
+        for (std::size_t s = 0; s < qy.size(); ++s) qy[s] = m.q(s + 1 == qy.size() ? result() : Y[s]);
+        return I::dense(theta, Vec(m.q(x0)), qy);
+    }
+    /// The same with the algebraic unknowns re-solved at t0 + θh (q kept);
+    /// a nonlinear q is combined in q, then x is recovered from it.
     [[nodiscard]] Vec dense_consistent(Real theta) const {
-        return m.consistent(dense(theta), t_start + theta * h_step);
+        const Real tt = t_start + theta * h_step;
+        if (!m.qn) return m.consistent(dense(theta), tt);
+        Vec x1 = dense(theta);
+        if (!m.from_q(dense_q(theta), x1, tt)) x1.setConstant(std::numeric_limits<Real>::quiet_NaN());
+        return x1;
     }
 };
 
