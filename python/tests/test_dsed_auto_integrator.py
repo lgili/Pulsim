@@ -74,7 +74,14 @@ def test_bdf2_starts_each_segment_with_backward_euler():
     assert v.min() >= 0.0                               # was -99.98 V
 
 
-def test_a_mode_without_an_exact_stepper_still_runs_on_auto():
+@pytest.mark.parametrize("rule", [
+    {"output_rtol": 0},
+    pytest.param({}, marks=pytest.mark.xfail(strict=True, reason=(
+        "release finding F-3-6: under the default output_rtol=1e-5 the documented step "
+        "counters n_exact/n_rk45/n_bdf2_steps all read 0 on numerically integrated segments "
+        "(2022 RK45 steps with output_rtol=0; same samples)"))),
+], ids=["grid_off", "default"])
+def test_a_mode_without_an_exact_stepper_still_runs_on_auto(rule):
     # A user b_extra_fn has no closed-form propagator (sine, pulse and PWM
     # sources do), so 'auto' integrates numerically (DOPRI5/BDF2) and must
     # still match the fixed engine. The callable adds zero: the physics is
@@ -91,7 +98,7 @@ def test_a_mode_without_an_exact_stepper_still_runs_on_auto():
         bd = build()
         zero = [0.0] * bd.pool.state_size(bd.graph)
         rd = p.simulate(bd, t_end=2e-3, engine="dsed", b_extra_fn=lambda _t: zero,
-                        allow_implicit_segments=True)
+                        allow_implicit_segments=True, **rule)
         rp = p.simulate(build(), t_end=2e-3, engine="pwl", dt=1e-7)
     assert rd.n_exact_steps == 0
     assert rd.n_rk45_steps + rd.n_bdf2_steps > 0
