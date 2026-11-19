@@ -108,7 +108,9 @@ def _switch(on):
     b.add_voltage_source("V", "in", "gnd", 10.0)
     b.add_resistor("Rb", "in", "gnd", 1e3)  # keeps "in" stamped either way
     if on:
-        b.add_switch("Sd", "in", "a", 1e3, 1e-9)
+        # CELLS hold the conductance form's rows (FORM_CELLS the branch form's):
+        # explicit since the release made the branch form the builder default
+        b.add_switch("Sd", "in", "a", 1e3, 1e-9, form="conductance")
     b.add_resistor("R1", "a", "o", 1e3)
     b.add_capacitor("C", "o", "gnd", 100e-9)
     return b
@@ -299,7 +301,7 @@ CELLS = {
     "Capacitor": (_cap, "o", "Cd", 5e-4, 1e-7, False),
     "Inductor": (_ind, "o", "Ld", 5e-4, 1e-7, False),
     "Diode": (_clamp(lambda b: b.add_diode("Dd", "o", "gnd", 1e3, 1e-9,
-                                           0.701, 0.7)),
+                                           0.701, 0.7, form="conductance")),
               "o", "Dd", 2e-3, 2e-7, False),
     "NonlinearDiode": (_ndiode_clamp, "o", "Dd", 2e-4, 1e-7, False),
     "CurrentSource": (_isrc, "o", "Id", 5e-4, 1e-7, False),
@@ -814,10 +816,10 @@ def test_mode_selection_refused_on_a_diode_free_rk45_dsed_run(mode):
     assert (ei.value.engine, ei.value.feature) == ("dsed", "mode_selection")
 
 
-def _half_wave():
+def _half_wave(**form):
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 500.0)
-    b.add_diode("D", "in", "o", 1e3, 1e-9)
+    b.add_diode("D", "in", "o", 1e3, 1e-9, **form)
     b.add_resistor("R", "o", "gnd", 100.0)
     b.add_capacitor("C", "o", "gnd", 1e-6)
     return b
@@ -854,7 +856,10 @@ def test_mode_guard_diagnostics_on_pwl_and_dsed(engine):
     # The default-mode guard (add-complementarity-mode-selection task 4,
     # 4b.3 on pwl) judges every settled diode mode and reports there;
     # trbdf2 has no hook yet and carries no such key.
-    r = _sim(engine, _half_wave())
+    # Legacy subject: the guard watches the settle (mode_selection='legacy'; 'auto' picks
+    # 'lcp') of a conductance-form diode (pwl keeps it off for a branch-form diode).
+    cf = {"form": "conductance"}
+    r = _sim(engine, _half_wave(**cf), mode_selection="legacy")
     g = (getattr(r, "diagnostics", None) or {}).get("mode_guard")
     if engine == "trbdf2":
         assert g is None
@@ -863,7 +868,7 @@ def test_mode_guard_diagnostics_on_pwl_and_dsed(engine):
     assert g["settle_caps"] == 0 and g["lcp"]["capped"] == 0     # DECISIONS #24, #25
     rec = {"class": "passive_reciprocal", "device": "", "kind": ""}
     assert g["passivity"] == rec        # task 5.1 class
-    r = _sim(engine, _half_wave(), mode_selection="lcp")
+    r = _sim(engine, _half_wave(**cf), mode_selection="lcp")
     assert r.diagnostics["mode_selection"]["lcp_count"] > 0
     assert r.diagnostics["mode_selection"]["capped"] == 0
     assert r.diagnostics["mode_selection"]["passivity"] == rec
@@ -1420,7 +1425,8 @@ def test_dependent_states_cell(engine, restart):
         m = p.SwitchStateMask(1)
         m.set(0, t < 2e-4)
         return m
-    kw = dict(discontinuity_restart=True) if restart else {}
+    # restart=False is the legacy fixed step: explicit since the release made the rule the default
+    kw = dict(discontinuity_restart=restart) if engine == "pwl" else {}
     if engine in ("pwl", "dsed"):
         kw["dt"] = 5e-6
     try:
@@ -1603,11 +1609,18 @@ def test_exact_engine_cells_are_identical_under_both_names(cell):
     assert np.array_equal(out["dsed"][1], out["exact"][1])
 
 
-@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto"))
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto_dt"))
 def test_allow_implicit_segments_is_refused_off_the_exact_engine(engine):
+    kw = dict(engine="auto", dt=1e-6) if engine == "auto_dt" else dict(engine=engine)
     with pytest.raises(p.UnsupportedError) as ei:
-        _sim(engine, allow_implicit_segments=True)
+        _sim(allow_implicit_segments=True, **kw)
     assert ei.value.feature == "allow_implicit_segments"
+
+
+def test_allow_implicit_segments_takes_auto_to_the_exact_engine():
+    # since the release 'auto' without dt routes a piecewise-linear circuit to the exact
+    # engine, which honours the keyword (with dt it is the fixed engine: refused above)
+    assert _sim("auto", allow_implicit_segments=True).engine_used == "dsed"
 
 
 # add-in-kernel-event-losses: a device loss port is honoured on the
