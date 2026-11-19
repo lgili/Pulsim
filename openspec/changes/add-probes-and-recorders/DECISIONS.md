@@ -437,6 +437,131 @@ counts (the caller sizes it; the in-loop test covers None and Decimate).
   `stats.time_average` delegation, `live_stream` over `RingSink`, the
   result reference page.
 
+## 22. Cost of a recorder fed in the loop (0b.10, slice 5, 2026-11-19)
+
+- **Method.** Instructions retired (`proc_pid_rusage`), in-process around
+  `simulate()`, min of 4-5; buck of the golden set (pwl dt = 1e-7, 20000
+  steps; trbdf2 3299 stored steps, 2471 hook steps, 829 event rows). The
+  per-step and fixed parts were separated by running 1x / 2x / 4x the
+  length; the C++ feed was isolated by RECORDING the hook calls of a real
+  run and replaying them into a `LoopFeed` in a standalone binary
+  (instructions per hook step), then ablating pieces of it. Tools (not
+  committed): `.scratch/instr2.py`, `.scratch/bench/replay.cpp`.
+- **Where the instructions went, before** (pwl, 1 probe, per step):
+  loop side + hook dispatch ~170 (an ablation whose feed returns at once:
+  the `device_state` / `accepted` / mask bookkeeping in the loop and the
+  `std::function` hop — outside `record/`); `LoopFeed::on_step` ~280;
+  `Recorder::sample` ~200 (no window) / +185 with a period (two `floor`,
+  three window visits with 4-ulp snaps per piece) / +85 keep every;
+  and, the largest item with `keep='every'`, ~770 per KEPT ROW in Python:
+  `snap.recorder_state = feed.save()` built a Python list of every saved
+  double (kept rows, event rows) and converted it back to a vector — on
+  every run, not only on resume. On trbdf2 also ~1.2k instructions per
+  EVENT ROW in `Recording.__init__` (a Python loop over the resolution
+  codes) and ~176 per step of fixed Python setup at this run length.
+- **Changes** (all in `record/`, `record_bindings.cpp`, `_recorders.py`;
+  no loop-file hunk):
+  1. `LoopFeed.save_to(snapshot, spec)` writes the state in C++; the
+     resolution labels are one numpy take.
+  2. Flat reading tables: a reading that is one state entry (v(n), a state
+     column) is `{column, destination}` (`0 + x[c]`, the general sum bit
+     for bit, -0 included); linear forms (v(a,b), a resistor's current)
+     one CSR table with the general path's operation order; products and
+     device readings keep the general path.
+  3. `LoopFeed::on_step` fast step: no report pending, no event row at the
+     start, the same mode, the start state bit for bit the last sample's
+     (one vectorised pass) — exactly what the general path does there,
+     without its branches; the general path out of line.
+  4. `Recorder::sample` forced inline with its helpers; a per-probe source
+     table for plain probes; cold throws out of line; the start copied in
+     place (no `vector::operator=`); `piece()` only when there are
+     statistics.
+  5. Period windows: a fast path for a piece inside the current window's
+     interior (64 ulps from its edges, beyond the 4-ulp snap of it and of
+     its neighbours' shared edges; only once the windows a piece there
+     could request exist): the same operations as `accumulate` on that
+     window alone. Oracle test: period windows equal the same windows
+     declared (which visit every window on every piece) on a jittered grid
+     with samples within ±6 ulps of the edges and events — 0 mismatching
+     windows bit for bit over 117 grids with both the old and the new
+     header (`.scratch/bench/oracle.cpp`); the committed test uses 1e-12.
+- **Identity.** Recorder outputs on 12 cases (buck pwl / trbdf2 with ten
+  probes incl. i(D1), i(C), p(C), products, period + declared windows,
+  store_every = 10 with decimate + times, vsi, Shockley buck, MOSFET,
+  saturable inductor, 16-node RLC) — kept rows, event rows (both limits,
+  resolution, t_right), windows, periods, counters AND the snapshot's
+  recorder state: bit-identical to 2b61202d; recorder on vs off: the same
+  step sequence (times and states hashes) on all 12. Goldens 22/22
+  identical (no recorder: the default path untouched).
+- **Cost after** (instructions per accepted step; base = no recorder):
+
+  | buck, 1 probe | pwl before | pwl after | trbdf2 before | trbdf2 after |
+  |---|---|---|---|---|
+  | none (base) | 3095 | 3080 | 10986 | 10989 |
+  | keep='every' | 4626 (+49 %) | 3569 (+15.9 %) | 13401 (+22 %) | 11700 (+6.5 %) |
+  | keep='none', period 1e-4 | 3950 (+28 %) | 3573 (+16.0 %) | 12802 (+17 %) | 11743 (+6.9 %) |
+  | keep='every', 4x length | — | +450 (+14.7 %) | — | +559 (+5.6 %) |
+
+  Each extra plain probe (v(n) / state column), 4x length: pwl 26
+  (keep='none') / 49 (keep='every'), trbdf2 50 / 67; in the replayed feed
+  alone 36 per probe on pwl (16 probes, a third of them v(a,b)).
+- **Targets NOT met** (+5 % pwl, +3 % trbdf2). What remains, pwl, one
+  probe, keep='every' (~450 per step at 4x): ~170 outside `record/` (loop
+  bookkeeping with a listener + the `std::function` hop: measured by the
+  return-at-once ablation; changing it is a loop-file edit); in the feed
+  (replay 335 per hook step): dispatch ~45, the jump test + state copy
+  ~75 (5 entries; it decides whether a jump row is due and cannot be
+  dropped without changing event rows), the recorder ~70-90, the
+  readings ~15, the 447 event steps through the general path and the
+  branches the rest; Python ~25 per kept row (snapshot copy, arrays).
+  trbdf2 (replay 566 per hook step): one event row per three hook steps
+  (each: two readings of both sides, the event row, the general path of
+  the next step) and ~170 per step of fixed Python setup at 3299 steps
+  (recorder construction, reading resolution, result arrays), ~45 at 4x.
+
+## 23. Leftovers of slice 5: 4.2, 8.3, 1.4 (2026-11-19)
+
+- **4.2.** `stats.time_average` / `time_rms` (and so `steady_state_stats`
+  mean / rms) are the kernel recorder's window statistics
+  (`_pulsim._record_pass` over the clipped trace with the window it
+  covers exactly): one implementation. `time_window` keeps the clipping,
+  the refusals and the repeated-timestamp rule (a duplicate start is
+  dropped; an inner duplicate is a zero-length piece in both). Results
+  move at rounding level only (different summation order). NOT
+  delegated: `_result_views.pl_integral*` — they take per-step right
+  limits (`y_start`) and `|y|`, which `_record_pass` does not express
+  without event rows per step; the loss paths keep them.
+- **8.3.** `Recorder(stream=NativeLiveStream(...))`: the stream is
+  attached with one column per probe (probe texts as channel names) and
+  its ring handed to the recorder's `RingSink` — `LoopFeed::stream_to`
+  in the loop (pwl, trbdf2: rows arrive while the engine runs), the
+  `ring=` argument of `_record_pass` on the stored-array pass (exact
+  engine: after it). `NativeLiveStream.attach` now resets its reader
+  counters (a re-attached stream read nothing from its new ring before).
+  Test: the consumer reads exactly the recording's kept rows on the three
+  engines, and only the second run's rows after a re-run.
+- **1.4.** `docs/result-reference.md` (nav: Result Reference), with the
+  note on a run that throws (the feed is detached; re-run with the same
+  or fresh `Recorder` objects).
+- **Reviewer items left recorded:** the right side read at a diode
+  landing (20) and the Coss right side: neither is a small change
+  provable against an analytic value in this slice (both need the
+  device-state law at the event instant, i.e. R2 of the stepper track).
+- **Fresh-context review** (opus, read-only, diff from 2b61202d): no
+  bit-identity defect in the fast paths (plain / linear tables, the
+  on_step fast step, the cached period window, save / restore). Fixed:
+  a loop feed that fell back to the stored pass (`n_dropped > 0`)
+  re-attached the stream and pushed every row again into a new ring (now
+  the loop's rows stay); a window a few ulps wide averaged to -0 (the
+  recorder snaps its edges together; the helpers use the line there,
+  test added); docs: the stream's `decimate` applies, `recorder_feed`
+  keys per mode, re-attach per run. Left: `save_to` needs a bound
+  `SolverSnapshot` (every route that reaches it returns one today); no
+  test drives the fast step through a jump / bracket mask change / restore
+  mid-window against the general path (covered by the 12-case bit-identity
+  compare, not by a committed test); time_average sums step by step
+  (CHANGELOG note).
+
 ## Requests to the stepper track
 
 - **R1.** One per-accepted-step call for all engines, after commit:
@@ -546,3 +671,17 @@ Slice 2 (this branch, after 2b18f11a):
   step); R5 (exact engine in the loop); 4.2 delegation, 8.3 `live_stream`
   over `RingSink`, 1.4 result reference page. Eigen 3.4.0: record / perf / step / thermal targets 29/29 at 98419f48.
 
+
+## Hand-off (slice 5, 2026-11-19)
+
+- Done: 0b.10 cost work (22; targets still NOT met: pwl +16 %, trbdf2
+  +6.5 % for one probe keep='every'), 4.2 for `time_average` /
+  `time_rms` (23), 8.3 `Recorder(stream=)` (23), 1.4 result reference
+  page (23). No loop-file hunk in this slice.
+- Open: 0b.10 remainder (~170 instructions per pwl step outside
+  `record/`: loop bookkeeping + the `std::function` hop, a loop-file
+  change; the jump test + state copy), `pl_integral*` delegation, R5
+  (exact engine in the loop), the diode-landing / Coss right sides (R2).
+- Verified on this tip: pytest full, `-m reference`, REFERENCE_STATUS.md
+  unchanged, ruff, openspec --strict, stubs --check; record + perf + step
+  targets on Eigen 3.4.0 (record + perf on Eigen 5). Full ctest NOT run.

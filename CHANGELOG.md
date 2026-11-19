@@ -241,6 +241,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stored arrays (`store_every > 1` and `resume_from` are refused with
   recorders, by name). Without `recorders` nothing changes.
 
+### Recorder streaming and statistics (add-probes-and-recorders, slice 5)
+
+* **Added** `Recorder(stream=pulsim.NativeLiveStream(...))`: kept rows
+  pushed into the stream's ring while pwl / trbdf2 run (after the run on
+  the exact engine). `NativeLiveStream.attach` resets its reader position,
+  so a re-attached stream reads its new ring.
+* **Changed** `time_average` / `time_rms` (and `steady_state_stats`) are
+  computed by the kernel recorder: the same piecewise-linear integral,
+  summed step by step instead of numpy's pairwise sum — results move in
+  the last bits.
+* **Performance** a recorder fed in the loop costs +16 % per pwl step and
+  +6.5 % per trbdf2 step for one probe (was +49 % / +22 %), with
+  recorded values bit-identical.
+
 ### One result type (add-probes-and-recorders, second slice)
 
 * **BREAKING** (class identity) `simulate(engine='exact' / 'dsed')`

@@ -384,3 +384,27 @@ def test_event_rows_against_the_bridge_truth(eng):
                 assert abs(r.event_right["v(dp,dn)"][k] - vC) <= 1e-2
             found += 1
     assert found == 11, found
+
+
+@pytest.mark.parametrize("eng", sorted(RUNS))
+def test_stream_delivers_the_recorders_kept_rows(eng):
+    # task 8.3: Recorder(stream=NativeLiveStream) pushes each kept row into
+    # the stream's ring; the consumer reads the rows the recording holds
+    rec_probes = ["v(dp,dn)", "i(D1)"]
+    st = p.NativeLiveStream(capacity=200_000, decimate=1)
+    rec = p.Recorder("bus", rec_probes, keep="every", stream=st)
+    res = p.simulate(_rectifier(), t_end=20e-3, recorders=[rec], **RUNS[eng])
+    r = res.recorded["bus"]
+    assert r.feeding == FEEDING[eng]
+    assert st.channel_names == rec_probes
+    got = st.get_new_samples()
+    assert got is not None
+    t_s, x_s = got
+    assert r.times.size > 10
+    np.testing.assert_array_equal(t_s, r.times)
+    for j, pr in enumerate(rec_probes):
+        np.testing.assert_array_equal(x_s[:, j], r.values[pr])
+    # a second run re-attaches: the consumer reads that run's rows only
+    res2 = p.simulate(_rectifier(), t_end=10e-3, recorders=[rec], **RUNS[eng])
+    t2, _ = st.get_new_samples()
+    np.testing.assert_array_equal(t2, res2.recorded["bus"].times)

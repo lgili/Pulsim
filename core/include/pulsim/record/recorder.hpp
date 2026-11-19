@@ -57,6 +57,21 @@
 #include <string_view>
 #include <vector>
 
+// Forced inline on the per-step path (Recorder::sample and its helpers into
+// LoopFeed's step): a call per helper was a third of a step's cost. Empty
+// on MSVC, as the code base's other forced-inline macros. NOINLINE keeps
+// the rare paths (events, jumps) out of the step's frame.
+#if defined(__GNUC__) || defined(__clang__)
+#define PULSIM_RECORD_INLINE __attribute__((always_inline)) inline
+#define PULSIM_RECORD_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define PULSIM_RECORD_INLINE inline
+#define PULSIM_RECORD_NOINLINE __declspec(noinline)
+#else
+#define PULSIM_RECORD_INLINE inline
+#define PULSIM_RECORD_NOINLINE
+#endif
+
 namespace pulsim::record {
 
 struct Window {
@@ -125,6 +140,7 @@ public:
                 declared_[w * np + p].t1 = spec_.windows[w].t1;
             }
         }
+        stats_ = !spec_.windows.empty() || spec_.period > 0;
         left_.resize(np);
         start_.resize(np);
         right_.resize(np);
@@ -137,8 +153,10 @@ public:
         Size max_atoms = 0;
         cols_.clear();
         offs_.clear();
+        src_.clear();
         for (const auto& pr : probes_) {
             offs_.push_back(cols_.size());
+            const Size first = cols_.size();
             for (const auto& a : pr.atoms()) {
                 const auto it = std::find(reading_names.begin(), reading_names.end(), a);
                 if (it == reading_names.end()) {
@@ -147,6 +165,8 @@ public:
                 }
                 cols_.push_back(static_cast<Size>(it - reading_names.begin()));
             }
+            // a plain probe IS one reading: a load and a store per sample
+            src_.push_back(pr.plain() ? cols_[first] : kNotPlain);
             max_atoms = std::max(max_atoms, pr.atoms().size());
         }
         offs_.push_back(cols_.size());
@@ -189,22 +209,31 @@ public:
     }
 
     /// The left limit at `t`: the end of an accepted step.
-    void sample(Real t, std::span<const Real> readings) {
+    PULSIM_RECORD_INLINE void sample(Real t, std::span<const Real> readings) {
         require_bound(readings);
-        if (n_samples_ > 0 && !(t >= t_prev_)) {
-            throw std::invalid_argument(std::format(
-                "recorder: sample at t = {} before the previous one at {}", t, t_prev_));
+        if (n_samples_ > 0 && !(t >= t_prev_)) [[unlikely]] {
+            bad_order(t);
         }
         eval_into(readings, left_);
-        if (n_samples_ > 0 && t > t_prev_) piece(t_prev_, t);
-        if (spec_.keep == RecorderSpec::Keep::Times) {
+        if (stats_ && n_samples_ > 0 && t > t_prev_) {
+            if (spec_.windows.empty() && in_fast_window(t_prev_, t)) {
+                accumulate_window(t_prev_, t);
+            } else {
+                piece(t_prev_, t);
+            }
+        }
+        if (spec_.keep == RecorderSpec::Keep::Every) {
+            keep_row(t, left_);
+        } else if (spec_.keep == RecorderSpec::Keep::Times) {
             emit_times(t);
-        } else if (spec_.keep == RecorderSpec::Keep::Every ||
-                   (spec_.keep == RecorderSpec::Keep::Decimate &&
-                    n_samples_ % spec_.every_n == 0)) {
+        } else if (spec_.keep == RecorderSpec::Keep::Decimate &&
+                   n_samples_ % spec_.every_n == 0) {
             keep_row(t, left_);
         }
-        start_ = left_;
+        const Size np = left_.size();
+        Real* const st = start_.data();
+        const Real* const lf = left_.data();
+        for (Size p = 0; p < np; ++p) st[p] = lf[p];
         t_prev_ = t;
         ++n_samples_;
     }
@@ -270,7 +299,7 @@ public:
         const auto put = [&](Real v) { out.push_back(v); };
         const auto vec = [&](const auto& v) {
             put(static_cast<Real>(v.size()));
-            for (const auto x : v) put(static_cast<Real>(x));
+            out.insert(out.end(), v.begin(), v.end());   // one pass (kept rows are long)
         };
         put(static_cast<Real>(probes_.size()));
         put(t_prev_);
@@ -350,6 +379,7 @@ public:
                 throw std::invalid_argument("recorder state: other declared windows");
             }
             ws->resize(n);
+            kc_np_ = kNoWindow;   // the period fast path re-finds its window
             for (auto& w : *ws) {
                 w.t0 = get(); w.t1 = get(); w.integral = get(); w.sq3 = get();
                 w.min = get(); w.t_min = get(); w.max = get(); w.t_max = get();
@@ -389,9 +419,18 @@ public:
 private:
     std::vector<Probe> probes_;
     RecorderSpec spec_;
+    static constexpr Size kNotPlain = static_cast<Size>(-1);
+    static constexpr Size kNoWindow = static_cast<Size>(-1);
     std::vector<Size> cols_, offs_;
+    std::vector<Size> src_;   // per probe: its reading for a plain probe, else kNotPlain
     Size n_readings_ = 0;
     bool bound_ = false;
+    bool stats_ = false;      // declared windows or periods
+    // Period fast path: the window holding the last piece's end (its
+    // first entry, k * n_probes) and the open interval in which a piece
+    // can only touch that window, without a snap (see piece()).
+    Size kc_np_ = kNoWindow;
+    Real fast_lo_ = 0, fast_hi_ = 0;
     std::vector<Real> scratch_, left_, start_, right_, row_;
     Real t_prev_ = 0;
     Size n_samples_ = 0;
@@ -411,9 +450,9 @@ private:
         event_right_.insert(event_right_.end(), right_.begin(), right_.end());
     }
 
-    void keep_row(Real t, const std::vector<Real>& v, bool interp = false) {
+    PULSIM_RECORD_INLINE void keep_row(Real t, const std::vector<Real>& v, bool interp = false) {
         times_.push_back(t);
-        values_.insert(values_.end(), v.begin(), v.end());
+        for (const Real x : v) values_.push_back(x);
         if (spec_.keep == RecorderSpec::Keep::Times) interpolated_.push_back(interp ? 1 : 0);
         if (ring_ != nullptr && ring_->should_decimate()) ring_->push(t, v.data(), v.size());
     }
@@ -439,18 +478,26 @@ private:
         }
     }
 
-    void require_bound(std::span<const Real> readings) const {
-        if (!bound_) throw std::logic_error("recorder: bind() before feeding");
-        if (readings.size() != n_readings_) {
-            throw std::invalid_argument(std::format(
-                "recorder: {} readings fed, {} bound", readings.size(), n_readings_));
+    PULSIM_RECORD_INLINE void require_bound(std::span<const Real> readings) const {
+        if (!bound_ || readings.size() != n_readings_) [[unlikely]] {
+            bad_feed(readings.size());
         }
     }
+    [[noreturn]] void bad_feed(Size n) const {
+        if (!bound_) throw std::logic_error("recorder: bind() before feeding");
+        throw std::invalid_argument(
+            std::format("recorder: {} readings fed, {} bound", n, n_readings_));
+    }
+    [[noreturn]] void bad_order(Real t) const {
+        throw std::invalid_argument(std::format(
+            "recorder: sample at t = {} before the previous one at {}", t, t_prev_));
+    }
 
-    void eval_into(std::span<const Real> readings, std::vector<Real>& out) {
-        for (Size p = 0; p < probes_.size(); ++p) {
-            if (probes_[p].plain()) {
-                out[p] = readings[cols_[offs_[p]]];
+    PULSIM_RECORD_INLINE void eval_into(std::span<const Real> readings, std::vector<Real>& out) {
+        const Size np = probes_.size();
+        for (Size p = 0; p < np; ++p) {
+            if (src_[p] != kNotPlain) {
+                out[p] = readings[src_[p]];
                 continue;
             }
             const Size n = offs_[p + 1] - offs_[p];
@@ -512,6 +559,31 @@ private:
         w.seen_t1 = w.seen_t1 || hi == w.t1;
     }
 
+    // Period fast path: the piece lies inside one window, farther than the
+    // margin from its edges, so piece()'s general loop would skip every
+    // other window, snap nothing and clip nothing (lo = ta, hi = tb): the
+    // same operations as accumulate() on that window alone.
+    [[nodiscard]] PULSIM_RECORD_INLINE bool in_fast_window(Real ta, Real tb) const noexcept {
+        return kc_np_ != kNoWindow && ta > fast_lo_ && tb < fast_hi_;
+    }
+    PULSIM_RECORD_INLINE void accumulate_window(Real ta, Real tb) noexcept {
+        const Size np = probes_.size();
+        const Real h = tb - ta;
+        WindowStat* const ws = periodic_.data() + kc_np_;
+        const Real* const st = start_.data();
+        const Real* const lf = left_.data();
+        for (Size p = 0; p < np; ++p) {
+            WindowStat& w = ws[p];
+            const Real a = st[p], b = lf[p];
+            w.integral += 0.5 * (a + b) * h;
+            w.sq3 += (a * a + a * b + b * b) * h;
+            if (a < w.min) { w.min = a; w.t_min = ta; }
+            if (b < w.min) { w.min = b; w.t_min = tb; }
+            if (a > w.max) { w.max = a; w.t_max = ta; }
+            if (b > w.max) { w.max = b; w.t_max = tb; }
+        }
+    }
+
     void piece(Real ta, Real tb) {
         const Size np = probes_.size();
         for (Size w = 0; w < spec_.windows.size(); ++w) {
@@ -520,6 +592,10 @@ private:
             }
         }
         if (spec_.period <= 0 || tb <= spec_.offset) return;
+        if (in_fast_window(ta, tb)) {
+            accumulate_window(ta, tb);
+            return;
+        }
         const Real T = spec_.period;
         const Real ka = std::max(Real{0}, std::floor((ta - spec_.offset) / T));
         const auto k0 = static_cast<Size>(ka);
@@ -537,6 +613,26 @@ private:
             for (Size p = 0; p < np; ++p) {
                 accumulate(periodic_[k * np + p], ta, tb, start_[p], left_[p]);
             }
+        }
+        // The window that holds tb strictly inside it is the fast path's
+        // next window. Margin: 64 ulps of its edges, beyond the 4-ulp snap
+        // of this window and of its neighbours' edges (each within a snap of
+        // the shared multiplied edge), so a piece inside the margins touches
+        // no other window and moves no edge. Only when the windows a piece
+        // there could ask for (k1 + 1 <= kc + 3) exist already: the fast path
+        // never grows the window table.
+        kc_np_ = kNoWindow;
+        for (Size k = k0 == 0 ? 0 : k0 - 1; k <= k1; ++k) {
+            const WindowStat& w0 = periodic_[k * np];
+            if (!(w0.t0 < tb && tb < w0.t1)) continue;
+            const Real m = 64 * std::numeric_limits<Real>::epsilon() *
+                           std::max(std::abs(w0.t0), std::abs(w0.t1));
+            if (w0.t0 + m < w0.t1 - m && periodic_.size() >= (k + 3) * np) {
+                kc_np_ = k * np;
+                fast_lo_ = w0.t0 + m;
+                fast_hi_ = w0.t1 - m;
+            }
+            break;
         }
     }
 };

@@ -187,6 +187,9 @@ class NativeLiveStream:
             capacity=self._capacity,
             state_size=self._state_size,
             decimate=self._decimate)
+        # a fresh ring starts at head 0: a re-attached stream reads it from the start
+        self._last_read = 0
+        self._dropped_samples = 0
         if names is not None:
             self._channel_names = list(names)
             # Sanity: lengths must match. We tolerate names too short

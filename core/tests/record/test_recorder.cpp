@@ -8,6 +8,7 @@
 #include "pulsim/record/recorder.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <numbers>
 #include <string>
@@ -465,4 +466,144 @@ TEST_CASE("LoopFeed settled mode: a committed post-event probe merged into one h
     REQUIRE(r.event_times() == std::vector<Real>{2});
     CHECK(r.event_left() == std::vector<Real>{2});
     CHECK(r.event_right() == std::vector<Real>{4});
+}
+
+TEST_CASE("recorder: period windows equal the same windows declared (fast path oracle)",
+          "[record]") {
+    // The period path skips the windows a piece cannot touch and, inside a
+    // window's interior, accumulates that window alone. Declared windows
+    // visit every window on every piece: with the period windows' own
+    // multiplied edges they are the oracle (bit for bit here; a tolerance
+    // for other compilers' contraction) — on a jittered
+    // grid with samples within a few ulps of the edges and events.
+    for (const Real off : {0.0, 3.7e-7, -2.5e-5}) {
+        const Real T = 1e-4;
+        const Size K = 40;
+        RecorderSpec ps;
+        ps.keep = RecorderSpec::Keep::None;
+        ps.period = T;
+        ps.offset = off;
+        RecorderSpec ds;
+        ds.keep = RecorderSpec::Keep::None;
+        for (Size k = 0; k < K; ++k) {
+            ds.windows.push_back({off + static_cast<Real>(k) * T, off + static_cast<Real>(k + 1) * T});
+        }
+        auto a = make({"v(x)", "v(y)"}, ps, {"v(x)", "v(y)"});
+        auto b = make({"v(x)", "v(y)"}, ds, {"v(x)", "v(y)"});
+        const Real t_last = off + static_cast<Real>(K) * T;
+        a.reserve(0, t_last);
+        std::uint64_t s = 12345;
+        const auto rnd = [&]() {  // splitmix64 -> [0, 1)
+            s += 0x9E3779B97F4A7C15ull;
+            std::uint64_t z = s;
+            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+            z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+            return static_cast<Real>((z ^ (z >> 31)) >> 11) * 0x1.0p-53;
+        };
+        Real t = off;
+        std::vector<Real> row(2);
+        Size k_edge = 1;
+        while (t < t_last) {
+            row[0] = std::sin(1e4 * t) + rnd();
+            row[1] = rnd() - 0.5;
+            a.sample(t, row);
+            b.sample(t, row);
+            if (rnd() < 0.02) {  // an event: a right limit at t
+                row[0] += 1;
+                a.event(row);
+                b.event(row);
+            }
+            Real tn = t + 1e-6 * (0.2 + 2 * rnd());
+            const Real edge = off + static_cast<Real>(k_edge) * T;
+            if (tn >= edge - 1e-6) {
+                // land on the edge, or a few ulps either side of it
+                const int ulps = static_cast<int>(rnd() * 13) - 6;
+                tn = edge;
+                for (int u = 0; u < std::abs(ulps); ++u) {
+                    tn = std::nextafter(tn, ulps < 0 ? -1.0 : 1.0);
+                }
+                if (!(tn > t)) tn = std::nextafter(t, 1.0);
+                ++k_edge;
+            }
+            t = tn;
+        }
+        a.sample(t, row);
+        b.sample(t, row);
+        REQUIRE(a.periods().size() >= 2 * K);
+        for (Size k = 0; k < K; ++k) {
+            for (Size p = 0; p < 2; ++p) {
+                const auto& x = a.periods()[k * 2 + p];
+                const auto& y = b.windows()[k * 2 + p];
+                INFO("offset " << off << " window " << k << " probe " << p);
+                CHECK(x.t0 == y.t0);
+                CHECK(x.t1 == y.t1);
+                CHECK(x.integral == Catch::Approx(y.integral).epsilon(1e-12).margin(1e-300));
+                CHECK(x.sq3 == Catch::Approx(y.sq3).epsilon(1e-12).margin(1e-300));
+                CHECK(x.min == Catch::Approx(y.min).epsilon(1e-12).margin(1e-300));
+                CHECK(x.max == Catch::Approx(y.max).epsilon(1e-12).margin(1e-300));
+                CHECK((x.t_min == y.t_min || (std::isnan(x.t_min) && std::isnan(y.t_min))));
+                CHECK((x.t_max == y.t_max || (std::isnan(x.t_max) && std::isnan(y.t_max))));
+                CHECK(x.complete() == y.complete());
+            }
+        }
+    }
+}
+
+TEST_CASE("LoopFeed: the flat reading tables read what StateReading::eval reads",
+          "[record][loop_feed]") {
+    // v(n) / a state column (one entry, coefficient 1: the unit table),
+    // v(a,b) and a resistor's current (a linear form with a divisor: the
+    // linear table) and a product (the general path), on the fast step and
+    // on steps the general path takes (the first, a jump), with -0 and NaN
+    // entries in the state.
+    using topology::SwitchStateMask;
+    std::vector<record::StateReading> rs(4);
+    rs[0].a.cols = {1};
+    rs[0].a.coef = {1.0};
+    rs[1].a.cols = {0, 2};
+    rs[1].a.coef = {1.0, -1.0};
+    rs[2].a.cols = {0, 1};
+    rs[2].a.coef = {1.0, -1.0};
+    rs[2].a.div = 4.7;
+    rs[3].a = rs[1].a;
+    rs[3].product = true;
+    rs[3].b.cols = {2};
+    rs[3].b.coef = {1.0};
+    const std::vector<std::string> names{"v(b)", "v(a,c)", "i(R)", "p(X)"};
+    record::RecorderSpec spec;
+    spec.keep = record::RecorderSpec::Keep::Every;
+    std::vector<record::Probe> ps;
+    for (const auto& n : names) ps.push_back(record::Probe::compile(n));
+    std::vector<record::Recorder> recs;
+    recs.emplace_back(ps, spec);
+    record::LoopFeed feed(names, rs, std::move(recs));
+    feed.attach_own(true);
+    auto& h = feed.hooks();
+    SwitchStateMask m(1);
+    const auto vec = [](Real a, Real b, Real c) { Vector y(3); y << a, b, c; return y; };
+    const Real nan = std::numeric_limits<Real>::quiet_NaN();
+    const std::vector<Vector> xs{vec(1, -0.0, 2), vec(0.5, 3, -1), vec(-0.0, nan, 4),
+                                 vec(2, 1, 1), vec(7, -0.0, 0.25)};
+    h.step(0, xs[0], m, 1, xs[1], m);
+    h.step(1, xs[1], m, 2, xs[2], m);
+    h.step(2, xs[2], m, 3, xs[3], m);
+    h.step(3, xs[0], m, 4, xs[4], m);  // a jump: the general path
+    feed.finish();
+    const auto& r = feed.recorders().front();
+    REQUIRE(r.times().size() == 5);
+    CHECK(feed.n_jumps() == 1);
+    const std::vector<Size> at{0, 1, 2, 3, 4};
+    for (Size row = 0; row < at.size(); ++row) {
+        for (Size j = 0; j < rs.size(); ++j) {
+            const Real want = rs[j].eval(xs[at[row]]);
+            const Real got = r.values()[row * rs.size() + j];
+            INFO("row " << row << " reading " << names[j]);
+            if (std::isnan(want)) {
+                CHECK(std::isnan(got));
+            } else {
+                CHECK(got == Catch::Approx(want).epsilon(1e-15).margin(1e-300));
+                CHECK(std::signbit(got) == std::signbit(want));
+            }
+        }
+    }
 }
