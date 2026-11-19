@@ -124,6 +124,7 @@ engine accepts a keyword and ignores it. The defaults are
 | `mode_selection` | yes | yes | yes | None ('legacy') |
 | `allow_implicit_segments` | refused | refused | yes | None |
 | `output_rtol` | refused | refused | yes | None (today's samples) |
+| `undriven` | yes | yes | yes | None (each engine's own) |
 | `recorders` | yes | yes | yes | None |
 | `control_tick` | yes | yes | yes | 'label' |
 | `device_path` | yes | yes | refused | 'legacy' |

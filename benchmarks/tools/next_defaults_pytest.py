@@ -6,7 +6,8 @@ No library or test edit. For the whole session it
 (1) wraps ``pulsim.simulate`` so that every call gets the profile's keywords
     for the engine it lands on, only where the call did not set them (the
     restart rule and the step split instead set the library's own defaults,
-    ``pulsim._plan.DEFAULT_*``, which ``simulate()`` resolves per run);
+    ``pulsim._plan.DEFAULT_*``, which ``simulate()`` resolves per run; the
+    ``PLAN`` attributes of next_defaults.py are set the same way);
     ``engine='auto'`` without ``dt`` takes the release route, approximated
     as: trbdf2 when the exact engine cannot take the circuit structurally (a
     Newton device, a ``b_extra_fn``), else the exact engine, and trbdf2 when
@@ -97,6 +98,8 @@ def _install():
     from pulsim import _plan
     for k, attr in LIBRARY_DEFAULTS.items():
         setattr(_plan, attr, nd.PROFILE["pwl"][k].value)
+    for attr, entry in nd.PLAN.items():     # undriven='refuse', the uniform rules
+        setattr(_plan, attr, entry.value)
     orig = pulsim.simulate
 
     @functools.wraps(orig)
