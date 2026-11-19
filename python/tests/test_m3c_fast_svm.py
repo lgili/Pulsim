@@ -1207,15 +1207,27 @@ class TestL1CostLoop:
     # ---- output current consistency -----------------------------------
 
     def test_output_current_matches_heuristic(
-        self, params: M3cParams, cost_run,
+        self, params: M3cParams, monkeypatch,
     ) -> None:
         """Because the SVM voltage solver produces the same terminal
         voltages for *any* valid configuration containing the short,
         the cost-loop output current must match the heuristic open-
         loop output to within numerical precision of the matrix
         system. (Only the *internal* module-current allocation
-        differs.)"""
-        cost_result, _ = cost_run
+        differs.)
+
+        That invariance is the restart-less trapezoid's: the release
+        restart rule takes SDIRK steps after every mask change, internal
+        ones included, so the two runs part by discretisation error
+        (0.51 % of peak at dt, 0.064 % at dt/8; both 1.05 % from a dt/8
+        reference vs 1.63 % without the rule). Pinned legacy for both runs."""
+        import functools
+
+        import pulsim
+        monkeypatch.setattr(pulsim, "simulate", functools.partial(
+            pulsim.simulate, discontinuity_restart=False))
+        cost_result, _ = run_l1_cost_loop(build_l1_plant(params), params,
+                                          t_end=200e-3, dt=25e-6)
         plant_h = build_l1_plant(params)
         heur_result = run_l1_open_loop(
             plant_h, params, t_end=200e-3, dt=25e-6,
