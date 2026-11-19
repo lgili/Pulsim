@@ -386,6 +386,10 @@ from .losses import (
 from .c_block import (
     add_c_block, CBlockHandle, CBLOCK_ABI, wire_c_blocks_from_yaml)
 from .c_export import export_c, CExport
+# External devices: equations to C (SymPy, the `codegen` extra) and the free
+# function add_external_device(builder, ..., lib= | code=).
+from . import xdev as xdev  # noqa: F401  (re-export submodule)
+from .xdev import add_external_device
 # Records the true per-step switch mask at simulate-time so closed-loop
 # loss/thermal summaries don't re-evaluate a stateful switch_fn post-hoc.
 from ._result_views import SwitchMaskRecorder
@@ -527,6 +531,7 @@ __all__ = [
     "ResolutionWarning",
     "ai_guide",
     "get_include",
+    "add_external_device",
     "Circuit",
     "CircuitBuilder",
     "Parameter",
@@ -865,6 +870,9 @@ def _warn_unlocated_edges(res):
       step (an edge exactly on the grid is not counted);
     * ``split_event_overflows`` (L5): steps with more events than the
       split takes; the rest were taken unsplit (first order there);
+    * ``n_gate_events_unresolved`` (tasks 3.4/5.5): step events (gate
+      edges, source and declared b_extra_fn jumps) merged into an earlier
+      one closer than ``split_snap*dt``;
     * ``stage2_retry_failures`` (M3): restart stage-2 backward-Euler
       re-tries that failed, so the SDIRK stage 2 they were checking was
       kept (it may carry an overshoot of the diode mode change).
@@ -888,6 +896,15 @@ def _warn_unlocated_edges(res):
             "had more events than the event split takes (8 per step); "
             "the events beyond it were taken unsplit, first order there. "
             "Reduce dt. See res.counters['split_event_overflows'].",
+            UserWarning, stacklevel=3)
+    n = c.get("n_gate_events_unresolved", 0)
+    if n:
+        warnings.warn(
+            f"simulate(enable_substep_state_correction=True): {n} step "
+            "event(s) fell closer than split_snap*dt to an earlier one and "
+            "were merged into it (a gate pulse or a source / b_extra_fn jump "
+            "that close is lost). "
+            "Reduce dt. See res.counters['n_gate_events_unresolved'].",
             UserWarning, stacklevel=3)
     n = c.get("stage2_retry_failures", 0)
     if n:
@@ -1731,6 +1748,7 @@ SimulationResult.rms = _rec_mod.result_rms            # type: ignore[attr-define
 SimulationResult.integral = _rec_mod.result_integral  # type: ignore[attr-defined]
 SimulationResult.minmax = _rec_mod.result_minmax      # type: ignore[attr-defined]
 SimulationResult.at = _rec_mod.result_at              # type: ignore[attr-defined]
+SimulationResult.device_output = _rec_mod.result_device_output  # type: ignore[attr-defined]
 
 
 def _result_plot(self, *signals, save=None, show=None, **kwargs):
@@ -2120,8 +2138,9 @@ def _run_on_simulation(circuit, run_opts, kw, sim=None):
         sim = Simulation(circuit, run_opts, True)
     sim.set_switch_fn(kw["switch_fn"])
     _rec_mod.attach_loop_feed(sim, "pwl")  # recorders in the loop (0b.6)
+    trace = _rec_mod.attach_xdev_trace(sim)  # record=True external devices
     if not kw.keys() - _SIM_RUN_BASE_KW:  # the common call: nothing else
-        return _pulsim_module._run_simulation(sim), sim.builder
+        return _with_trace(_pulsim_module._run_simulation(sim), trace), sim.builder
     get = kw.get
     if get("b_extra_fn") is not None:
         sim.set_source_term(kw["b_extra_fn"])
@@ -2150,7 +2169,13 @@ def _run_on_simulation(circuit, run_opts, kw, sim=None):
             "Simulation setter (a kernel defect, please report it)")
     # simulate() attaches the handles; the result reads the builder whose
     # pool the run stamped device state into.
-    return _pulsim_module._run_simulation(sim), sim.builder
+    return _with_trace(_pulsim_module._run_simulation(sim), trace), sim.builder
+
+
+def _with_trace(res, trace):
+    if trace is not None:
+        res._xdev_trace = trace
+    return res
 
 
 def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
@@ -3322,6 +3347,7 @@ def simulate(
                 _sim = Simulation(_run_circuit, _tro, True)
                 _sim.set_switch_fn(switch_fn)
                 _rec_mod.attach_loop_feed(_sim, "trbdf2")
+                _xtrace = _rec_mod.attach_xdev_trace(_sim)
                 if b_extra_fn is not None:
                     _sim.set_source_term(b_extra_fn)
                 if initial_state is not None:
@@ -3335,7 +3361,7 @@ def simulate(
                         _plan.tick_offsets or [0.0] * len(_plan.ticks),
                         _monitor_flags(_plan.ticks), strict=True):
                     _sim.add_tick(_p, _f, _o, _m)
-                res = _pulsim_module._run_simulation(_sim)
+                res = _with_trace(_pulsim_module._run_simulation(_sim), _xtrace)
                 _stats = _sim.trbdf2_stats
                 builder = _sim.builder  # the pool the run stamped state into
             else:

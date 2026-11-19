@@ -532,3 +532,131 @@ same count and same instants on a PWM buck with a freewheel diode.
   limit at t. (e) The restart-rule "declared edge one step late" strict
   xfail (`test_gated_device_seams.py`, owner this track) passes with fix
   B; it stays an xfail here until the edge-placement rule is chosen.
+
+## 15. One locator, one mode-set service (group 8, 2026-11-19)
+
+- **`events/locate.hpp`** (8.1): `Bracket` + `illinois(bracket, max_iter,
+  skip, trial, moved, done)`. The caller owns the trial (TR-BDF2: a
+  trapezoidal or ESDIRK re-step from the committed state) and the signal;
+  the locator owns the secant point clamped to the inner 90 %, the side
+  test, the Illinois halving and the stop order (skip before a trial, a
+  failed trial ends with the bracket as is, `done` after a move). The
+  TR-BDF2 crossing localisation runs on it; `Vector x_ta = x;` (the
+  committed state at `ta`) stays at the call site, before the bracket is
+  built, and the `moved` callback is the only writer of `x_ta` / `x_tb`.
+  Unit tests on analytic crossings (`tests/modes/test_locate.cpp`, tag
+  `[event_locate]`: linear, sin at pi, a convex exponential that needs the
+  halving, the inner-90 % clamp, skip / failed trial).
+- **`events/mode_set.hpp`** (8.2): `crossing_signal` / `forbidden` /
+  `held_tolerance` (moved from `detail_trbdf2`, which keeps them as
+  using-declarations), `redecide` (the floored re-decision), `MaskCycle<N>`
+  (the masks of ONE settle call: `reset` per call, `repeat` = cycle or
+  record, `seen` for the ideal-loop release check) and `settle(max, round)`
+  with a `SettleReport{rounds, settled, cycle, stopped}`; a round returns
+  `Round::{Settled, Flipped, Cycle, Stop}`.
+- **Callers** (8.3): the five TR-BDF2 zero-time cascades (initial,
+  step-boundary, crossing, landing, gate edge) are `events::settle`; the DC
+  operating point's diode loop is `events::settle`; the fixed engine's
+  event iteration (dynamic and static path) uses `MaskCycle` and
+  `redecide`. The restart-stage rule (a stage stops only on a cycle found
+  in its own call) is now structural: `masks_seen.reset()` at every call.
+- **The fixed engine keeps its own do-while.** `events::settle` in that
+  loop cost +57 to +63 instructions per accepted step (buck_pwl 3100 ->
+  3163, vsi_pwl 4763 -> 4827, +1.8 %: spills from the second round
+  counter, even with the round lambda forced inline); a variant on the
+  caller's counter (`settle_counted`) still cost +1.0 % (vsi 4762 ->
+  4812). With the do-while kept and `MaskCycle` + `redecide` in it: buck
+  3095 / 3095, vsi 4767 / 4764 (min of 2 interleaved rounds). The loop
+  shape is one comment-marked place in each path.
+- **Not moved**: the DSED predictor (out of this slice, see below), the
+  TR-BDF2 chatter guard and noise holds (engine policy, not the service).
+- **What the exact engine needs to call 8.1 / 8.2** (not touched here;
+  `dsed/` belongs to the exact-engine agent). `dsed/event_predictor.hpp`
+  has two locators: `illinois(g, ta, tb, ga, gb, tol, max_iter)` (the
+  UNCLAMPED secant `(ta·gb − tb·ga)/(gb − ga)`, stop on |g| < tol or
+  bracket < tol, returns the secant point, throws when not bracketed or not
+  converged; also called from `scheduler.hpp` on the Hermite interpolant)
+  and `locate_root_bracket` (time bracket only, every fourth step a
+  bisection, returns tb). `events::illinois` covers the iteration but
+  fixes the trial point (TR-BDF2's clamped secant `ta − sa(tb − ta)/(sb −
+  sa)`, a different rounding). To move them without changing their
+  numbers: add an optional `propose(bracket, it) -> t` hook (default: the
+  clamped secant) — unclamped secant for the first, "bisect every fourth"
+  for the second — and keep the throws and the return point at the call
+  site; `trial` = g(t) returning true, `moved` = nothing, `done` = the
+  caller's stop. The exact engine's mode settle (`settle_and_project_`) is
+  a projection with its own cycle rule; `events::settle` fits its outer
+  loop if its round returns `Round`.
+
+## 16. SampledGate (group 3, 2026-11-19)
+
+- **`events/sampled_gate.hpp`** (3.1/3.2): TR-BDF2's opaque-gate state and
+  its three jobs (pulse-width learning, the period / pulse step caps, the
+  sampling + bisection of a step) moved verbatim into `SampledGate`, owned
+  by the run (a local of `run_transient_trbdf2`, as the vectors were).
+  Accessors `resolution()` (h_max / 4, the declared spacing),
+  `n_gate_undersampled()`, `gate_pulse_min()`, `gate_spacing_max()`.
+  Goldens, stateful, engines, step sequences, 390/390 and 371/371
+  byte-identical. Not carried by the snapshot: a resumed run relearns
+  (unchanged; DECISIONS 14 (b) asks for it, needs a pickle index).
+- **3.3 left open**: DSED is out of this slice. What it needs: construct a
+  `SampledGate` over its segment (it has the same `switch_fn` and the
+  h_min / h_max pair) and call `locate` where `dsed_bindings.cpp` samples
+  today; the learned caps then bound its segment length.
+- **3.4 (trbdf2)**: it already warns on `n_gate_undersampled`; the pwl
+  diagnostic comes with the fixed engine's gate counts (section 17).
+
+## 17. Resume at an edge, an instant at t_end, gate counts (2026-11-19)
+
+- **Resume exactly at a gate edge (DECISIONS 14 (a))**: one change in the
+  step clamp. A resumed run whose snapshot committed no edge
+  (`post_edge_derivatives` false) and whose first step reads other gates
+  than its x was solved under lands that edge with an h_min step, as an
+  edge one ulp after t_start is. Opaque buck split at 4.3 T (the gate is
+  still ON at the split instant by one ulp): 3.19e-4 V off the
+  uninterrupted run with 7 rejects before, 9.1e-7 V and 0 rejects after.
+  Declared-edge splits (4 T, 4.15 T, 4.3 T) unchanged.
+- **An instant at t_end (DECISIONS 14 (c))**: opt-in `Rate::closed_end`
+  (default false, the half-open rule). The queue takes a closed rate's
+  instant up to `t_end_closed` (`start`'s new optional argument, NaN =
+  t_end). The fixed engine passes t_end + tick_tol: its last observer call
+  is labelled t_end (state x_{n-1}, as every tick), so no extra call is
+  needed (the note in 14 (c) that it was "at t_n-1's step" read the loop
+  wrong). A resumed run does not fire it again (its `k0` is past it).
+  Tests: `[event_queue]` closed_end queue case and the fixed-engine case
+  in `test_zero_alloc.cpp` (5 ticks, the last at t_end; the resume fires
+  4, from 125 us).
+  TR-BDF2 not done: its ticks come from `observer_*` options, not from a
+  `TickPlan`; it needs an option and `fire_due_ticks` to stop at
+  t_end + h_min for closed sources.
+- **Gate counts on the fixed engine (5.3/5.5)**: `counters['n_gate_events']`
+  and `['n_gate_events_unresolved']`, counted on the event-split path with
+  an edge oracle only (where the step walks the oracle; 0 elsewhere, so the
+  default path costs nothing). An edge inside the step counts when the
+  gate changes across it; an edge within snap before the step end or
+  exactly on it counts without a gate read (a read is a counted
+  switch_fn call and would move the goldens' counters). Unresolved = step
+  events merged into an earlier one closer than snap. Analytic constants
+  (0.3/5.4, `test_gate_event_counts.py`): PWM buck over 5.15 periods,
+  2 edges per period x 5 = 10 on pwl and on trbdf2; a 40 ns pulse
+  (narrower than the 68.7 ns step, both edges inside one step in some
+  periods) 2 x 5 + 1 (its sixth fall is before t_end), 0 unresolved; a
+  0.2 ns pulse: 11 counted, 5 unresolved (the first fall is taken at the
+  step start), warned. DSED not done (out). Cost: none on the default
+  path (no splitting); pwl buck/vsi instructions per step unchanged.
+- **3.4 (pwl)**: `simulate` warns on `counters['n_gate_events_unresolved']`
+  (events merged within split_snap*dt: a pulse that narrow is lost).
+- **Moved test**: `test_trbdf2_resume_controller.py::test_an_explicit_h_init_still_wins`
+  split at 10 T, exactly at an opaque edge: its 1e-9 first step was the
+  defect (1.0e-4 V off the uninterrupted run; 3.5e-7 V with the edge
+  landed). It now splits at 10.2 T, where the explicit h_init still wins.
+- **Hand-off (slice 3, not done)**: (1) the resume-edge test compares the
+  gate bits with the snapshot's mask, so a gated device (IGBT, thyristor)
+  whose gate bit the zero-time settle already moved may not see the edge
+  (review finding; plain switches are fine): compare with the gates held
+  before the settle, or carry them in the snapshot. (2) `closed_end` on
+  TR-BDF2 (an `observer_*` option + `fire_due_ticks` / monitors up to
+  t_end + h_min for closed sources) and in the bindings. (3) DSED: 3.3,
+  3.4, 5.3 and the dsed column of 5.4. (4) Group 10 (samples as events)
+  not started. (5) `n_gate_events` without event splitting (the default
+  fixed path) is 0: counting there costs a mask compare per step.

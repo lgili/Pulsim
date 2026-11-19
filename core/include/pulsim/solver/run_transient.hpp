@@ -55,6 +55,7 @@
 #include "pulsim/pwl/saturable_inductor_history.hpp"
 #include "pulsim/solver/loss_tracker.hpp"
 #include "pulsim/events/event_queue.hpp"
+#include "pulsim/events/mode_set.hpp"
 #include "pulsim/events/step_hooks.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
@@ -470,7 +471,10 @@ inline SimulationResult run_transient(
         }
         // t0_tol = the take tolerance: a tick a previous run left out at
         // its t_end (within tick_tol of it) is a resumed run's first.
-        tick_queue.start(opts.t_start, opts.t_end - tick_tol, tick_tol);
+        // A closed_end rate's instant at t_end fires at the last observer
+        // call (labelled t_end, as every tick: the state there is x_{n-1}).
+        tick_queue.start(opts.t_start, opts.t_end - tick_tol, tick_tol,
+                         opts.t_end + tick_tol);
         result.control_tick_counts.assign(ticks->rates.size(), 0);
     }
     const StepObserverFn step_observer = !has_ticks ? StepObserverFn{} :
@@ -1449,8 +1453,7 @@ inline SimulationResult run_transient(
     const bool may_roll_back = dt_retry_can_help ||
         opts.discontinuity_restart || opts.enable_substep_state_correction;
     // Event-iteration cycle scratch, hoisted (reset per iteration).
-    std::array<topology::SwitchStateMask, 64> masks_seen{};
-    Size n_masks_seen = 0;
+    events::MaskCycle<64> masks_seen;
     // `switch_fn` once per distinct solve time within an outer step:
     // the observer runs before the first read, so a schedule that is a
     // function of t and of observer-written state sees the same masks.
@@ -1835,6 +1838,7 @@ inline SimulationResult run_transient(
                                 // not an event.
                                 const auto& m = gate_at(e);
                                 if (!(m == gate_mask)) {
+                                    ++result.n_gate_events;
                                     if (e < t_prev + snap) {
                                         gate_t = e;
                                     } else {
@@ -1842,6 +1846,10 @@ inline SimulationResult run_transient(
                                     }
                                     gate_mask = m;
                                 }
+                            } else {
+                                // taken by the sample at t (no gate read
+                                // here: it would be a counted switch_fn call)
+                                ++result.n_gate_events;
                             }
                             edge_from = e;
                             e = next_edge_fn(e);
@@ -1849,6 +1857,9 @@ inline SimulationResult run_transient(
                         }
                         ev_overflow = ev_overflow || e < t - snap;
                     }
+                    // an edge exactly on the grid point t: the next step's
+                    // oracle query (strictly after t) skips it
+                    if (edge_next == t) ++result.n_gate_events;
                 }
                 if (has_jump_sources) {
                     Real e = sources::next_source_jump_after(pool, graph, t_prev);
@@ -1879,7 +1890,9 @@ inline SimulationResult run_transient(
                 std::sort(ev_t.begin(), ev_t.begin() + n_ev);
                 // Events closer than `snap` merge into the earlier one,
                 // which samples the gate at the cluster's last event (a
-                // dead-time pair < snap apart lands both edges).
+                // dead-time pair < snap apart lands both edges). The
+                // unresolved count is of every step event merged here:
+                // gate edges, source and declared b_extra_fn jumps alike.
                 Size m = 0;
                 for (Size q = 0; q < n_ev; ++q) {
                     if (m == 0 || ev_t[q] - ev_t[m - 1] >= snap) {
@@ -1887,6 +1900,7 @@ inline SimulationResult run_transient(
                         ++m;
                     } else {
                         ev_s[m - 1] = ev_t[q];
+                        ++result.n_gate_events_unresolved;
                     }
                 }
                 n_ev = m;
@@ -1958,7 +1972,7 @@ inline SimulationResult run_transient(
             // Full mask copies (Phase 1: masks can exceed 64 bits; a
             // copy is 2 inline words for <=128 switches — still no
             // heap in the loop).
-            n_masks_seen = 0;
+            masks_seen.reset();
 
             // add-newton-roundoff-acceptance: a dynamic-path Newton
             // solve that exhausts its budget at row roundoff is
@@ -2029,7 +2043,7 @@ inline SimulationResult run_transient(
             // `event_iteration_breaches` — and would let
             // `strict_event_iterations` be violated in silence, which
             // is the opposite of what that flag is for.
-            n_masks_seen = 0;
+            masks_seen.reset();
             // Diode on-bits consistent with the most recent solve
             // (captured BEFORE update_from_state advances them) —
             // restored on breach so x and the diode state agree
@@ -2063,6 +2077,9 @@ inline SimulationResult run_transient(
                 flipped = false;
                 return;
             }
+            // The settle loop stays a do-while here: events::settle (or a
+            // counted variant) in this loop cost 1.0-1.8 % instructions per
+            // step (add-unified-event-queue DECISIONS 15).
             do {
                 auto mask = gate_at(restart_rule ? gate_t : at_t);
                 if (has_diodes) {
@@ -2076,12 +2093,7 @@ inline SimulationResult run_transient(
                 // A release back onto a mask already solved this step is the
                 // loop forward-biasing the diode: refuse rather than let the
                 // cycle detector turn it into a breach (review H1).
-                if (released && !nl_refresh_effective &&
-                    std::find(masks_seen.begin(),
-                              masks_seen.begin() +
-                                  static_cast<std::ptrdiff_t>(n_masks_seen),
-                              mask) != masks_seen.begin() +
-                                  static_cast<std::ptrdiff_t>(n_masks_seen)) {
+                if (released && !nl_refresh_effective && masks_seen.seen(mask)) {
                     const Index d = loop_released.back();
                     throw UnsupportedError(
                         "pwl", "ideal_voltage_loop",
@@ -2105,25 +2117,14 @@ inline SimulationResult run_transient(
                 // different iterate can legitimately converge
                 // (adversarial-review finding P0-R3); there the
                 // iteration budget alone bounds the cost.
-                if (!nl_refresh_effective) {
-                    // A cycle of THIS call: `mask_cycle` stays set from an
-                    // earlier stage or sub-step of the outer step, and
-                    // breaking on it skipped this stage's solve (x stayed
-                    // at the earlier stage's time, committed as this one).
-                    bool cycle_here = false;
-                    for (Size ms = 0; ms < n_masks_seen; ++ms) {
-                        if (masks_seen[ms] == mask) {
-                            cycle_here = true;
-                            break;
-                        }
-                    }
-                    if (cycle_here) {
-                        mask_cycle = true;
-                        break;
-                    }
-                    if (n_masks_seen < masks_seen.size()) {
-                        masks_seen[n_masks_seen++] = mask;
-                    }
+                // A cycle of THIS call (`masks_seen` is reset per call):
+                // `mask_cycle` stays set from an earlier stage or sub-step
+                // of the outer step, and breaking on it skipped this
+                // stage's solve (x stayed at the earlier stage's time,
+                // committed as this one).
+                if (!nl_refresh_effective && masks_seen.repeat(mask)) {
+                    mask_cycle = true;
+                    break;
                 }
                 if (nl_refresh_effective) {
                     if (for_dt == opts.dt && !newton_only_rows) {
@@ -2192,7 +2193,7 @@ inline SimulationResult run_transient(
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
-                flipped = !single && has_diodes && diodes.update_from_state_floored(x);
+                flipped = !single && has_diodes && events::redecide(diodes, x);
                 ++iters;
             } while (flipped && iters < max_iters);
             if (mode_site) {
@@ -3275,7 +3276,7 @@ inline SimulationResult run_transient(
             // Full mask copies (Phase 1: masks can exceed 64 bits; a
             // copy is 2 inline words for <=128 switches — still no
             // heap in the loop).
-            n_masks_seen = 0;
+            masks_seen.reset();
 
             // One step of `for_dt` ending at `at_t`: solve, let the
             // PWL diodes re-decide from the result, re-solve until
@@ -3322,17 +3323,9 @@ inline SimulationResult run_transient(
                 // different iterate can legitimately converge
                 // (adversarial-review finding P0-R3); there the
                 // iteration budget alone bounds the cost.
-                if (!nl_refresh_effective) {
-                    for (Size ms = 0; ms < n_masks_seen; ++ms) {
-                        if (masks_seen[ms] == mask) {
-                            mask_cycle = true;
-                            break;
-                        }
-                    }
-                    if (mask_cycle) break;
-                    if (n_masks_seen < masks_seen.size()) {
-                        masks_seen[n_masks_seen++] = mask;
-                    }
+                if (!nl_refresh_effective && masks_seen.repeat(mask)) {
+                    mask_cycle = true;
+                    break;
                 }
                 if (nl_refresh_effective) {
                     const auto& seg = nominal_segment(mask);
@@ -3352,8 +3345,7 @@ inline SimulationResult run_transient(
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
-                flipped = has_diodes &&
-                          diodes.update_from_state_floored(x);
+                flipped = has_diodes && events::redecide(diodes, x);
                 ++iters;
             } while (flipped && iters < max_iters);
             if (mode_site_s && opts.mode_selection != 2) {

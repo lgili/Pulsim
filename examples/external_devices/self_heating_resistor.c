@@ -81,6 +81,7 @@ static const pulsim_xdev_descriptor MODELS[1] = {{
     PULSIM_XDEV_CLAIM_SMOOTH | PULSIM_XDEV_CLAIM_PASSIVE,
     PINS, FIELDS, FR, FC, QR, QC, LO, HI, NULL,
     eval, validate, NULL, NULL, NULL, NULL, {NULL, NULL, NULL, NULL},
+    0, 0, NULL, NULL,   /* no named outputs, no events */
 }};
 
 PULSIM_XDEV_EXTERN_C PULSIM_XDEV_EXPORT const pulsim_xdev_descriptor *CALL

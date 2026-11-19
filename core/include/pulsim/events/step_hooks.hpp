@@ -90,7 +90,10 @@ public:
                                       Real t, const Vector& x_end,
                                       const topology::SwitchStateMask& mask_end)>;
     // device interface DECISIONS #31: right after the stateful histories'
-    // commit of an accepted step, `t` the accepted time.
+    // commit of an accepted step, `t` the accepted time. TR-BDF2 fires it
+    // once per committed time: each step end and also each post-event
+    // probe commit and diode landing (external-device ABI #35), so it can
+    // fire more often than `step`, never twice at one time.
     using DeviceStateFn = std::function<void(Real t, const Vector& x,
                                              const pwl::StatefulHistories&)>;
     // probes R2 (slice 3c, DECISIONS 17): at an event, after the settle,

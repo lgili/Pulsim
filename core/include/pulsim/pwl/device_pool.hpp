@@ -145,6 +145,7 @@ public:
         std::shared_ptr<const xdev::Instance> inst;
         std::vector<Index> pins;       ///< node index per pin
         std::vector<Index> branches;   ///< [0] = the device's branch; one per internal unknown
+        bool record = false;           ///< its readings are traced in a run (res.device_output)
     };
 
     struct SwitchParams {

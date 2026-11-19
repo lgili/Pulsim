@@ -851,6 +851,39 @@ TEST_CASE("fixed engine: a tick instant within 1e-9*dt of t_end does not fire",
     CHECK(r.control_tick_counts[0] == 4);
 }
 
+TEST_CASE("fixed engine: a closed_end tick at t_end fires, once",
+          "[event_queue]") {
+    SwitchedRC f;
+    f.cache->build_lazy(Real{1e-6});
+    solver::SimulationOptions opts;
+    opts.t_start = 0.0;
+    opts.t_end = 1e-4;
+    opts.dt = 1e-6;
+    solver::SwitchScheduleFn sw = [](Real) { return SwitchStateMask(2); };
+    events::TickPlan plan;
+    plan.rates = {events::Rate{2.5e-5}};   // 0, 25, 50, 75 us and 100 us
+    plan.rates[0].closed_end = true;
+    std::vector<Real> at;
+    plan.fn = [&](std::uint32_t, const events::TickInfo& info, Real,
+                  const Vector&) { at.push_back(info.scheduled_t); };
+    auto r = solver::run_transient(*f.cache, f.g, f.pool, opts, sw, {}, false,
+                                   {}, {}, nullptr, {}, nullptr, {}, {}, &plan);
+    REQUIRE(at.size() == 5);
+    CHECK(at.back() == 1e-4);
+    CHECK(r.control_tick_counts[0] == 5);
+    // resumed from the end: the t_end tick is not fired again
+    solver::SimulationOptions o2 = opts;
+    o2.t_start = 1e-4;
+    o2.t_end = 2e-4;
+    plan.rates[0].origin = r.final_snapshot.tick_origin[0];
+    plan.rates[0].k0 = r.final_snapshot.tick_next_k[0];
+    at.clear();
+    (void)solver::run_transient(*f.cache, f.g, f.pool, o2, sw, {}, false,
+                                {}, {}, nullptr, {}, nullptr, {}, {}, &plan);
+    REQUIRE(at.size() == 4);   // 125, 150, 175, 200 us
+    CHECK(std::abs(at.front() - 1.25e-4) < 1e-18);
+}
+
 TEST_CASE("stored-charge kinds (Lauritzen, IGBT tail): allocation count is "
           "O(1) on both device paths",
           "[v2][perf][zero_alloc][device_path]") {

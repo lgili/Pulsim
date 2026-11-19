@@ -110,6 +110,7 @@ if(PULSIM_BUILD_TESTS)
         tests/modes/test_mode_selector.cpp
         tests/modes/test_event_queue.cpp  # add-unified-event-queue
         tests/modes/test_gate_source.cpp  # add-unified-event-queue
+        tests/modes/test_locate.cpp  # add-unified-event-queue 8.1 / 8.2
         tests/modes/test_pwl_mode_ports.cpp
     )
     target_link_libraries(pulsim_core_mode_tests
