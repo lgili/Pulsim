@@ -23,6 +23,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (snapshot pickle version 5 field 17; 17-field tuples still load); loss
   ports are part of the circuit IR's hashes.
 
+### External devices: time, DC operating point, AC sweep
+
+* **Added** an external device's law receives the solve's time in
+  `ctx->t` (`ctx->host_features & PULSIM_XDEV_HOST_TIME`); the stable
+  header grows by that one macro (ABI version 1, sizes unchanged).
+* **Added** external devices in the DC operating point
+  (`start_from_dc_op`, `compute_dc_operating_point`: their `f` and
+  `∂f/∂x` with the storage terms dropped) and in the kernel AC sweep
+  (linearised at the DC point from the declared Jacobians); `dsed` and
+  `bdf1` still refuse them by name.
+* **Changed** registration also refuses a model whose result depends on
+  the previous call or on concurrent calls (not reentrant); a model that
+  does not claim SMOOTH may declare either one-sided slope at a kink; a
+  library rebuilt with the same size and timestamp is detected by its
+  bytes; a finite output set whose sum overflows is no longer refused.
+* **Added** `examples/external_devices/self_heating_resistor.c` and
+  `examples/scripts/run_external_self_heating_resistor.py`.
+
 ### Periodic steady state: the stop rule bounds the orbit error
 
 * **Changed** `periodic_steady_state` stops when the error estimate
@@ -222,6 +240,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Results in `res.recorded[name]`. Fed by a kernel-side pass over the
   stored arrays (`store_every > 1` and `resume_from` are refused with
   recorders, by name). Without `recorders` nothing changes.
+
+### Recorder streaming and statistics (add-probes-and-recorders, slice 5)
+
+* **Added** `Recorder(stream=pulsim.NativeLiveStream(...))`: kept rows
+  pushed into the stream's ring while pwl / trbdf2 run (after the run on
+  the exact engine). `NativeLiveStream.attach` resets its reader position,
+  so a re-attached stream reads its new ring.
+* **Changed** `time_average` / `time_rms` (and `steady_state_stats`) are
+  computed by the kernel recorder: the same piecewise-linear integral,
+  summed step by step instead of numpy's pairwise sum — results move in
+  the last bits.
+* **Performance** a recorder fed in the loop costs +16 % per pwl step and
+  +6.5 % per trbdf2 step for one probe (was +49 % / +22 %), with
+  recorded values bit-identical.
 
 ### One result type (add-probes-and-recorders, second slice)
 

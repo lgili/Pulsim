@@ -12,6 +12,7 @@
 #include "pulsim/solver/unsupported.hpp"
 
 #include <string>
+#include <string_view>
 
 using namespace pulsim;
 using namespace pulsim::pwl;
@@ -48,7 +49,10 @@ TEST_CASE("kKindCaps has one row per StoredKind, named as the enum",
         if (row.newton()) {
             REQUIRE_FALSE(row.supports(Engine::Dsed));
             REQUIRE_FALSE(row.supports(Engine::Bdf1));
-            REQUIRE_FALSE(row.supports(Engine::AcSweep));
+            // add-external-device-abi: the AC sweep linearises an external
+            // device at the DC point from its declared Jacobians
+            REQUIRE(row.supports(Engine::AcSweep)
+                    == (std::string_view(row.name) == "ExternalDevice"));
         }
     }
 }

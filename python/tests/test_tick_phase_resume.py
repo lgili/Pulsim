@@ -105,7 +105,7 @@ def test_pickle_version_5_keeps_the_tick_phase_and_reads_version_3():
     assert list(back.tick_origin) == list(snap.tick_origin) == [0.0]
     assert list(back.tick_next_k) == list(snap.tick_next_k) == [6]
     state = snap.__getstate__()
-    assert state[0] == "SolverSnapshot" and state[1] == 5 and len(state) == 18
+    assert state[0] == "SolverSnapshot" and state[1] == 5 and len(state) == 19
     cls = type(snap)
     v3 = cls.__new__(cls)
     v3.__setstate__(("SolverSnapshot", 3) + tuple(state[2:13]))

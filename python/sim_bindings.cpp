@@ -92,6 +92,7 @@ py::dict trbdf2_dict(const solver::TrBdf2Options& o) {
     d["newton_roundoff_budget"] = o.newton_roundoff_budget;
     d["on_impulse_error"] = o.on_impulse_error;
     d["mode_selection"] = o.mode_selection;
+    d["integrator"] = o.integrator;
     return d;
 }
 
@@ -364,6 +365,9 @@ void init_module(py::module_& m) {
                     {{"legacy", sim::ModeSelection::Legacy},
                      {"shadow", sim::ModeSelection::Shadow},
                      {"lcp", sim::ModeSelection::Lcp}}, "mode_selection");
+            } else if (key == "integrator") {
+                o.integrator_esdirk43 = parse_enum<bool>(v.cast<std::string>(),
+                    {{"esdirk43", true}}, "integrator");
             } else if (key == "on_impulse") {
                 o.on_impulse = parse_enum<sim::OnImpulse>(v.cast<std::string>(),
                     {{"record", sim::OnImpulse::Record},
@@ -508,10 +512,19 @@ void init_module(py::module_& m) {
                 // add-probes-and-recorders 0b.6: the recorders' hooks; the
                 // object holds the feed so the hooks outlive every run
                 auto& f = feed.cast<record::LoopFeed&>();
+                auto& s = self.cast<sim::Simulation&>();
+                f.set_circuit(s.builder().graph(), s.builder().pool());
                 self.attr("_held_feed") = feed;
-                self.cast<sim::Simulation&>().set_hooks(&f.hooks());
+                s.set_hooks(&f.hooks());
             },
             py::arg("feed"))
+        .def("clear_loop_feed",
+            [](py::object self) {
+                // after a run (it may have thrown): the next run on this
+                // object must not feed a finished record
+                self.cast<sim::Simulation&>().set_hooks(nullptr);
+                self.attr("_held_feed") = py::none();
+            })
         .def("set_live_ring", &sim::Simulation::set_live_ring,
              py::arg("ring"))
         .def_property_readonly("cache", &sim::Simulation::cache,

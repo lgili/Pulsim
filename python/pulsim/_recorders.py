@@ -37,6 +37,8 @@ from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
 
+from ._refusal import UnsupportedError, unsupported
+
 __all__ = ["Recorder", "Recording"]
 
 _FIELDS = ("t0", "t1", "integral", "avg", "rms", "min", "t_min", "max",
@@ -65,6 +67,17 @@ class Recorder:
     period, offset
         Statistics per period ``[offset + kT, offset + (k+1)T]``; only
         complete periods are reported.
+    stream
+        A :class:`pulsim.NativeLiveStream` (task 8.3, the RingSink): every
+        kept row is pushed into its ring as ``(t, one value per probe)``
+        (attached with ``state_size = len(probes)``, the probe texts as
+        channel names; the stream's own ``decimate`` applies). In the loop
+        (pwl, trbdf2) the rows arrive while the engine runs; on the
+        stored-array pass (the exact engine, the routes without the
+        Simulation object) after it. ``keep='none'`` pushes nothing. Its
+        stop / pause act on the run only through ``should_continue``. Each
+        run re-attaches it (a new ring); a run whose loop feed had to fall
+        back to the stored pass keeps the rows the loop pushed.
     """
 
     name: str
@@ -75,6 +88,15 @@ class Recorder:
     period: Optional[float] = None
     offset: float = 0.0
     times: Sequence[float] = ()
+    stream: Any = None
+
+
+def _ring_of(r: "Recorder"):
+    """Attach r.stream for r's probes and return its native ring (or None)."""
+    if r.stream is None:
+        return None
+    r.stream.attach(len(r.probes), names=list(r.probes))
+    return r.stream.native_ring
 
 
 _RESOLUTION = ("exact", "settled", "within_dt")
@@ -115,10 +137,10 @@ class Recording:
         # event_t_right, up to one dt after event_t)
         self.event_t_right = np.asarray(out.get("event_t_right",
                                                 out["event_t"]))
-        self.event_resolution = np.asarray(
-            [_RESOLUTION[int(k)] for k in out.get(
-                "event_resolution", np.zeros(self.event_t.size, np.uint8))],
-            dtype=object)
+        # one take, not a Python loop over the event rows
+        self.event_resolution = np.asarray(_RESOLUTION, dtype=object)[
+            np.asarray(out.get("event_resolution",
+                               np.zeros(self.event_t.size, np.uint8)), dtype=np.intp)]
         self.event_left = {p: out["event_left"][:, j]
                            for j, p in enumerate(names)}
         self.event_right = {p: out["event_right"][:, j]
@@ -168,20 +190,18 @@ _P_KINDS = frozenset({
     "resistor", "inductor", "diode", "switch", "shockley_diode",
     "voltage_source", "pwm_voltage_source", "sine_voltage_source",
     "pulse_voltage_source"})
-# i() on a stored result is not exact (or not available) for these kinds:
-# refused before the run, with the reason.
-_I_REFUSED = {
-    "capacitor": "its current is the derivative of the stored voltage, not "
-                 "the companion law (add-probes-and-recorders section 6); "
-                 "put a 1 mOhm series resistor and read i() of it",
-    "nonlinear_capacitor": "no per-sample current law on a stored result",
-    "mosfet_level1": "no per-sample current law on a stored result",
-    "igbt_level1": "no per-sample current law on a stored result",
-    "nonlinear_diode": "no per-sample current law on a stored result",
-    "lauritzen_diode": "no per-sample current law on a stored result",
-    "vcvs": "no per-sample current law on a stored result",
-    "saturable_inductor": "no per-sample current law on a stored result",
-}
+# Readings of these kinds exist only IN THE LOOP (item 1, DECISIONS 20):
+# the committed companion current of a capacitor (KCL-consistent), a Newton
+# law at the committed state, a VCVS's current column. A stored result has
+# no such reading (a capacitor's would be the derivative of its voltage),
+# so the stored-array pass refuses them by name.
+_LOOP_ONLY = frozenset({
+    "capacitor", "nonlinear_capacitor", "mosfet_level1", "igbt_level1",
+    "nonlinear_diode", "lauritzen_diode", "vcvs", "saturable_inductor"})
+_LOOP_ONLY_WHY = (
+    "is read at the committed step only when the recorders are fed in the "
+    "loop (pwl / trbdf2 through the Simulation object); a stored result has "
+    "no such reading")
 
 
 def _descriptor(builder, name: str):
@@ -200,7 +220,8 @@ def _descriptor(builder, name: str):
     return None
 
 
-def _check_device_atoms(builder, r: "Recorder", p: str, atoms) -> None:
+def _check_device_atoms(builder, r: "Recorder", p: str, atoms,
+                        engine=None, integrator=None) -> None:
     if builder is None or not hasattr(builder, "components"):
         return
     for a in atoms:
@@ -210,11 +231,23 @@ def _check_device_atoms(builder, r: "Recorder", p: str, atoms) -> None:
         if d is None:
             continue
         kind = d.get("kind", "?")
-        if kind in _I_REFUSED:
-            raise ValueError(
-                f"recorder {r.name!r}, probe {p!r}: {a} of a {kind}: "
-                f"{_I_REFUSED[kind]}")
-        if a[0] == "p" and kind not in _P_KINDS:
+        if kind == "capacitor" and integrator == "esdirk43":
+            # integration 14i: on the first step after an event the ESDIRK
+            # commit's companion current misses KCL by ~1e-5 of the node's
+            raise unsupported(
+                "trbdf2", "integrator=esdirk43",
+                f"recorder {r.name!r}, probe {p!r}: {a} of a capacitor is "
+                "not read in the loop on integrator='esdirk43' (its companion "
+                "current is not KCL-consistent on the first step after an "
+                "event); use integrator='trbdf2' or read the other devices of "
+                "the node", device=a[2:-1], kind=kind)
+        if kind in _LOOP_ONLY and engine in ("exact", "dsed"):
+            raise unsupported(
+                str(engine), "recorders",
+                f"recorder {r.name!r}, probe {p!r}: {a} of a {kind} "
+                f"{_LOOP_ONLY_WHY}; engine={engine!r} is fed from its "
+                "stored arrays", device=a[2:-1], kind=kind)
+        if a[0] == "p" and kind not in _P_KINDS and kind not in _LOOP_ONLY:
             raise ValueError(
                 f"recorder {r.name!r}, probe {p!r}: {a} of a {kind} is not "
                 "a two-terminal power this pass knows the sign of; write "
@@ -224,12 +257,6 @@ def _check_device_atoms(builder, r: "Recorder", p: str, atoms) -> None:
 def _refuse(kw: dict, recs: "list[Recorder]", t_start: float,
             t_end: float) -> None:
     from . import _pulsim
-    who = ", ".join(repr(r.name) for r in recs)
-    if kw.get("resume_from") is not None:
-        raise ValueError(
-            f"simulate(recorders=[{who}], resume_from=...): recorder state "
-            "is not part of the snapshot, so a window or period spanning "
-            "the resume would be cut; record the whole run")
     for r in recs:
         if r.keep not in ("every", "decimate", "none", "times"):
             raise ValueError(
@@ -256,12 +283,15 @@ def _refuse(kw: dict, recs: "list[Recorder]", t_start: float,
                 raise ValueError(f"recorder {r.name!r}: {e}") from None
             _check_device_atoms(
                 getattr(kw.get("builder"), "builder", kw.get("builder")),
-                r, p, atoms)
+                r, p, atoms, kw.get("engine"),
+                kw.get("integrator") or getattr(kw.get("solver"), "integrator", None))
         for k, (a, b) in enumerate(r.windows):
-            if not (t_start <= a < b <= t_end):
+            # a window may end after t_end: it is reported open (NaN) and a
+            # run resumed from final_snapshot continues it (task 0b.7)
+            if not (t_start <= a < b and a < t_end):
                 raise ValueError(
                     f"recorder {r.name!r}: windows[{k}] = ({a!r}, {b!r}) "
-                    f"must satisfy t_start <= t0 < t1 <= t_end "
+                    f"must satisfy t_start <= t0 < t1 and t0 < t_end "
                     f"([{t_start!r}, {t_end!r}])")
         if r.period is not None and not (np.isfinite(r.period)
                                          and r.period > 0):
@@ -283,11 +313,15 @@ def _reading(res, atom: str) -> np.ndarray:
             return (np.asarray(res.v(parts[0]), dtype=float)
                     - np.asarray(res.v(parts[1]), dtype=float))
         raise ValueError(f"reading {atom!r}: v() takes one or two nodes")
+    builder = getattr(res, "_builder", None)
+    d = None if builder is None or kind not in "ip" else _descriptor(builder, arg)
+    if d is not None and d.get("kind") in _LOOP_ONLY:
+        raise unsupported("stored-arrays", "recorders",
+                          f"reading {atom!r} of a {d.get('kind')} {_LOOP_ONLY_WHY}",
+                          device=arg, kind=str(d.get("kind")))
     if kind == "i":
         return np.asarray(res.i(arg), dtype=float)
     if kind == "p":
-        builder = getattr(res, "_builder", None)
-        d = None if builder is None else _descriptor(builder, arg)
         if d is None or d.get("kind") not in _P_KINDS:
             raise ValueError(
                 f"reading {atom!r}: power of a "
@@ -301,7 +335,7 @@ def _reading(res, atom: str) -> np.ndarray:
     raise ValueError(f"reading {atom!r} is not supported")
 
 
-def record_result(res, recs: "list[Recorder]") -> dict:
+def record_result(res, recs: "list[Recorder]", stream: bool = True) -> dict:
     """Run the kernel recorders over a finished result."""
     from . import _pulsim
     from ._result_views import with_right_limits
@@ -344,7 +378,8 @@ def record_result(res, recs: "list[Recorder]") -> dict:
             float(r.period or 0.0), float(r.offset), atoms, t,
             np.ascontiguousarray(left), [int(k) for k in idx],
             np.ascontiguousarray(right),
-            [float(x) for x in np.asarray(r.times, dtype=float).reshape(-1)])
+            [float(x) for x in np.asarray(r.times, dtype=float).reshape(-1)],
+            _ring_of(r) if stream else None)
         out[r.name] = _checked(r, d, t[0], t[-1], "stored-arrays")
     return out
 
@@ -354,8 +389,15 @@ def _checked(r: "Recorder", d: dict, t0, t1, feeding: str) -> "Recording":
         raise ValueError(
             f"recorder {r.name!r}: {int(d['n_times_unreached'])} of times "
             f"lie outside the record [{t0!r}, {t1!r}]")
-    bad = [k for k in range(len(r.windows))
-           if not d["windows"]["complete"][k, 0]]
+    done = d["windows"]["complete"]
+    bad = [k for k, (_, b) in enumerate(r.windows)
+           if not done[k, 0] and b <= t1]
+    for k, (_, b) in enumerate(r.windows):
+        if not done[k, 0] and b > t1:
+            # open: it ends after this record (continued by a resume); its
+            # statistics so far are not a window's statistics
+            for f in _FIELDS[2:]:
+                d["windows"][f][k, :] = np.nan
     if bad:
         raise ValueError(
             f"recorder {r.name!r}: windows {bad} are not covered by the "
@@ -418,6 +460,10 @@ class _LoopPlan:
         self.dt = kw.get("dt")
         self.why_not = "this run's route does not go through the kernel " \
                        "Simulation object"
+        self.resume = kw.get("resume_from")
+        self.sim = None       # the Simulation the feed is attached to
+        self.n_steps0 = 0     # the feed's steps before this run (a resume)
+        self.resumed = None   # what a resume did with the recorder state
 
 
 def _atoms_of(recs) -> "list[str]":
@@ -494,14 +540,51 @@ def _state_reading(builder, caller, atom: str):
         if i_lin is None and d.get("kind") == "resistor":
             i_lin = (v_lin[0], v_lin[1], float(d["params"]["R_ohms"]))
         if i_lin is None:
-            return None
+            if kind == "p" and d.get("kind") not in _P_KINDS | _LOOP_ONLY:
+                return None
+            # a device law under the committed mode (the kernel resolves it
+            # from the pool's kind and refuses a kind it has no law for)
+            val = float(d.get("params", {}).get("I", 0.0)) \
+                if d.get("kind") == "current_source" else 0.0
+            return ("dev", b_id, kind == "p", val, v_lin)
         if kind == "i":
             return i_lin
-        if kind == "p" and d.get("kind") in _P_KINDS:
+        if kind == "p" and d.get("kind") in _P_KINDS | _LOOP_ONLY:
             return (v_lin, i_lin)
     except Exception:  # noqa: BLE001 - unknown name: the stored pass names it
         return None
     return None
+
+
+def _spec_signature(recs) -> str:
+    """What a snapshot's recorder state must have been written by."""
+    return repr([(r.name, list(r.probes), r.keep, int(r.every),
+                  [(float(a), float(b)) for a, b in r.windows],
+                  float(r.period or 0.0), float(r.offset),
+                  [float(x) for x in np.asarray(r.times, dtype=float).reshape(-1)])
+                 for r in recs])
+
+
+def _resume_state(plan):
+    """The snapshot's recorder state for these recorders, or None (and why)."""
+    snap = plan.resume
+    if snap is None:
+        return None
+    st = list(getattr(snap, "recorder_state", None) or [])
+    if not st:
+        plan.resumed = ("started at the resume instant t = "
+                        f"{float(snap.t)!r}: the snapshot carries no recorder "
+                        "state (an older pickle, or a run without in-loop "
+                        "recorders); a window or period before it is not in "
+                        "this record")
+        return None
+    if snap.recorder_spec != _spec_signature(plan.recs):
+        raise unsupported(
+            "any", "resume_from",
+            "simulate(recorders=..., resume_from=...): the snapshot's recorder "
+            f"state was written by other recorders ({snap.recorder_spec}); "
+            "declare the same recorders to continue them")
+    return st
 
 
 def attach_loop_feed(sim, engine: str) -> None:
@@ -521,24 +604,42 @@ def attach_loop_feed(sim, engine: str) -> None:
             plan.why_not = (f"reading {a} is not a function of the state "
                             "vector alone (a switched or Newton device's law)")
             return
-        if len(r) == 2:
+        if r[0] == "dev":
+            _, b_id, power, val, (cv, wv, dv) = r
+            specs.append((cv, wv, dv, False, [], [], 1.0, b_id, power, val))
+        elif len(r) == 2:
             (ca, wa, da), (cb, wb, db) = r
-            specs.append((ca, wa, da, True, cb, wb, db))
+            specs.append((ca, wa, da, True, cb, wb, db, -1, False, 0.0))
         else:
-            specs.append((r[0], r[1], r[2], False, [], [], 1.0))
+            specs.append((r[0], r[1], r[2], False, [], [], 1.0, -1, False, 0.0))
     feed = _pulsim._LoopFeed(atoms, specs, [
         (list(r.probes), r.keep, int(r.every),
          [(float(a), float(b)) for a, b in r.windows],
          float(r.period or 0.0), float(r.offset),
          [float(x) for x in np.asarray(r.times, dtype=float).reshape(-1)])
         for r in plan.recs])
+    st = _resume_state(plan)
+    if st is not None:
+        feed.restore(st)        # before reserve(): restore resizes the windows
+        plan.resumed = ("continued from the snapshot's recorder state at t = "
+                        f"{float(plan.resume.t)!r}")
+    plan.n_steps0 = int(feed.n_steps)
     if plan.t_end is not None:
         n = 0
         if engine == "pwl" and plan.dt:
             n = int(round((float(plan.t_end) - plan.t_start) / float(plan.dt))) + 1
         feed.reserve(n, float(plan.t_end))
+    try:
+        sim.set_loop_feed(feed)   # binds the circuit: a kind with no law raises
+    except ValueError as e:
+        plan.why_not = str(e)
+        return
+    plan.sim = sim
+    for k, r in enumerate(plan.recs):
+        ring = _ring_of(r)
+        if ring is not None:
+            feed.stream_to(k, ring)
     feed.arm(engine == "pwl")
-    sim.set_loop_feed(feed)
     plan.feed = feed
 
 
@@ -556,6 +657,9 @@ def simulate_with_recorders(simulate: Callable[..., Any], kw: dict,
         res = _run_at_user_frame(simulate, kw)
     finally:
         _LOOP_PLAN.reset(token)
+        if plan.sim is not None:
+            # a later run on that object (after a throw too) feeds nothing
+            plan.sim.clear_loop_feed()
     t = np.asarray(res.times, dtype=float)
     if t_end is None:  # a LoadedCircuit supplied the run window
         _refuse(kw, recs, float(t[0]), float(t[-1]))
@@ -566,16 +670,33 @@ def simulate_with_recorders(simulate: Callable[..., Any], kw: dict,
         plan.why_not = (f"{int(feed.n_dropped)} event report(s) of the engine "
                         "could not be placed in the record")
         feed = None
-    if feed is not None and feed.n_steps > 0:
+    if feed is not None and feed.n_steps > plan.n_steps0:   # fed by THIS run
+        snap = getattr(res, "final_snapshot", None)
+        if snap is not None:
+            # task 0b.7: the record continues across simulate(resume_from=)
+            try:
+                # before finish(): no flush
+                feed.save_to(snap, _spec_signature(recs))
+            except RuntimeError as e:   # an event report pending at the end
+                plan.resumed = f"final_snapshot without recorder state: {e}"
         feed.finish()
         res.recorder_feed = {
             "mode": "in-loop", "n_steps": int(feed.n_steps),
             "n_events": int(feed.n_events), "n_jumps": int(feed.n_jumps),
             "n_dropped": int(feed.n_dropped)}
+        if plan.resumed is not None:
+            res.recorder_feed["resume"] = plan.resumed
         res.recorded = {r.name: _checked(r, feed.result(k), t[0], t[-1],
                                          "in-loop")
                         for k, r in enumerate(recs)}
         return res
+    if plan.resume is not None and list(
+            getattr(plan.resume, "recorder_state", None) or []):
+        raise unsupported(
+            "any", "resume_from",
+            "simulate(recorders=..., resume_from=...): the snapshot carries "
+            "recorder state, but this run could not be fed in the loop "
+            f"({plan.why_not}), so the record cannot be continued")
     se = kw.get("store_every")
     if se is not None and int(se) > 1:
         who = ", ".join(repr(r.name) for r in recs)
@@ -586,9 +707,21 @@ def simulate_with_recorders(simulate: Callable[..., Any], kw: dict,
             f"could not be fed in the loop ({why}), and the stored arrays "
             "of a decimated run would alias; record with store_every=1 and "
             f"Recorder(keep='decimate', every={se}) to keep fewer rows")
-    res.recorded = record_result(res, recs)
-    res.recorder_feed = {"mode": "stored-arrays", "why": plan.why_not if
-                         feed is None else "the step hook did not fire"}
+    why = plan.why_not if feed is None else "the step hook did not fire"
+    # rows the loop already pushed stay the stream's (no restart, no repeat)
+    pushed = plan.feed is not None and plan.feed.n_steps > plan.n_steps0
+    try:
+        res.recorded = record_result(res, recs, stream=not pushed)
+    except UnsupportedError as e:
+        if _LOOP_ONLY_WHY not in str(e):
+            raise
+        raise unsupported(e.engine, e.feature, f"{e}; this run was not fed in "
+                          f"the loop: {why}", device=e.device, kind=e.kind) from None
+    res.recorder_feed = {"mode": "stored-arrays", "why": why}
+    if plan.resume is not None:
+        res.recorder_feed["resume"] = (
+            f"started at the resume instant t = {float(plan.resume.t)!r}: the "
+            "snapshot carries no recorder state")
     return res
 
 

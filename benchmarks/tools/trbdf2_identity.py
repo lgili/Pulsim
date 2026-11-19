@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""The variable-step engine's old loop against its twin on the step skeleton
-(refactor-unified-transient-stepper, slice 3b): run one circuit on both
-paths and compare every array bit for bit and every stats key.
+"""The variable-step engine's results against a STORED baseline (the
+comparison is ``pwl_identity``'s: digests of every array bit for bit and
+every stats key, recorded at the base commit, compared at the tip).
 
-    trbdf2_twin_identity.py --goldens      # golden_baseline.py's trbdf2 cases
-    trbdf2_twin_identity.py --reference [--circuits GLOB,...] [--modes '',lcp,shadow]
-    trbdf2_twin_identity.py --extra        # examples, stateful, ticks + monitor,
-                                           # resume across the paths (4 ways)
+    trbdf2_identity.py record|compare DIR --goldens   # golden_baseline.py's trbdf2 cases
+    trbdf2_identity.py record|compare DIR --reference [--circuits GLOB,...] [--modes '',lcp,shadow]
+    trbdf2_identity.py record|compare DIR --extra     # examples, stateful, ticks + monitor,
+                                                       # resume (two split points)
 
-The twin (the skeleton driver) is the default since slice 3c; the old loop
-is selected by the internal environment variable
-``PULSIM_TRBDF2_STEPPER_LEGACY=1`` (read once per run by
-``run_transient_trbdf2``; not a public option). Bit identity between two
-code paths is a LOCAL gate (this machine, this build); the CI test compares
-at 1e-12 of scale. The comparison is ``pwl_twin_identity``'s.
+The refactor-unified-transient-stepper identity gate since the legacy loops
+were deleted (DECISIONS 20). Bit identity is a LOCAL gate (this machine,
+this build).
 """
 
 from __future__ import annotations
@@ -22,7 +19,6 @@ import argparse
 import fnmatch
 import sys
 import types
-import warnings
 from pathlib import Path
 
 import pulsim as p
@@ -30,13 +26,7 @@ import pulsim as p
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(HERE.parent)]
-import pwl_twin_identity as pt  # noqa: E402
-
-ENV = "PULSIM_TRBDF2_STEPPER_LEGACY"
-
-
-def check(name, fn) -> bool:
-    return pt.check(name, fn, ENV)
+import pwl_identity as pt  # noqa: E402
 
 
 def golden_cases():
@@ -97,34 +87,12 @@ def _ticks_and_monitor():
     return types.SimpleNamespace(result=pt.fingerprint(r), monitor_seen=seen)
 
 
-def _resume(split, t_end, first_twin, second_twin):
+def _resume(split, t_end=2e-3):
     b = _buck()
-    with pt.twin(first_twin, ENV):
-        a = p.simulate(b, split, engine="trbdf2", switch_fn=_pwm(b))
-    with pt.twin(second_twin, ENV):
-        return p.simulate(b, t_end, engine="trbdf2", switch_fn=_pwm(b),
-                          resume_from=a.final_snapshot), a
-
-
-def resume_cases():
-    # 1.02 ms + 1 ns: one nanosecond after a turn-off edge (the run ends
-    # inside the post-edge restart); 1.0333 ms: between edges.
-    out = []
-    for split in (1.02e-3 + 1e-9, 1.0333e-3):
-        ends = {}
-        for ft in (False, True):
-            for st in (False, True):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    second, first = _resume(split, 2e-3, ft, st)
-                ends[(ft, st)] = (pt.fingerprint(first), pt.fingerprint(second))
-        base = ends[(False, False)]
-        for key, (f1, f2) in ends.items():
-            d = pt.first_difference(base[0], f1) or pt.first_difference(base[1], f2)
-            name = f"resume split={split:.7g} first_twin={key[0]} second_twin={key[1]}"
-            print(f"DIFFER {name}: {d}" if d else f"IDENTICAL {name}", flush=True)
-            out.append(d is None)
-    return out
+    a = p.simulate(b, split, engine="trbdf2", switch_fn=_pwm(b))
+    r = p.simulate(b, t_end, engine="trbdf2", switch_fn=_pwm(b),
+                   resume_from=a.final_snapshot)
+    return types.SimpleNamespace(first=pt.fingerprint(a), second=pt.fingerprint(r))
 
 
 def extra_cases():
@@ -150,10 +118,16 @@ def extra_cases():
             return p.simulate(lc, t_end=min(lc.t_end, lc.t_start + 2e-3),
                               engine="trbdf2", switch_fn=lambda t: off)
         yield f"example {path.name}", fn
+    # 1.02 ms + 1 ns: one nanosecond after a turn-off edge (the run ends
+    # inside the post-edge restart); 1.0333 ms: between edges.
+    for split in (1.02e-3 + 1e-9, 1.0333e-3):
+        yield f"resume split={split:.7g}", (lambda split=split: _resume(split))
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("mode", choices=("record", "compare"))
+    ap.add_argument("dir", type=Path)
     ap.add_argument("--goldens", action="store_true")
     ap.add_argument("--reference", action="store_true")
     ap.add_argument("--extra", action="store_true")
@@ -167,11 +141,7 @@ def main(argv=None) -> int:
         cases += list(reference_cases(a.circuits.split(","), a.modes.split(",")))
     if a.extra:
         cases += list(extra_cases())
-    ok = [check(n, fn) for n, fn in cases]
-    if a.extra:
-        ok += resume_cases()
-    print(f"{sum(ok)}/{len(ok)} identical")
-    return 0 if all(ok) else 1
+    return pt.record_or_compare(a.mode, a.dir / "trbdf2_identity.json", cases)
 
 
 if __name__ == "__main__":

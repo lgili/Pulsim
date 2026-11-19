@@ -47,6 +47,7 @@
 
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/pwl_branch_law.hpp"
 #include "pulsim/stamping/branch_coord.hpp"
 #include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -77,26 +78,12 @@ public:
             }
             using K = pwl::DevicePool::StoredKind;
             const auto k = pool.kind_of(d.branch);
-            d.diode = k == K::Diode;
-            if (k != K::Switch && !d.diode) {
+            if (k != K::Switch && k != K::Diode) {
                 throw std::invalid_argument(std::format(
                     "device losses: '{}' is a {}, not a PWL switch or diode",
                     s.device, pwl::stored_kind_name(k)));
             }
-            const auto& br = graph.branch(d.branch);
-            d.from = br.from;
-            d.to = br.to;
-            d.var = pool.branch_var_id_for_switch(d.branch, graph);
-            if (d.diode) {
-                const auto& p = pool.diode_params(d.branch);
-                d.g_on = p.g_on;
-                d.g_off = p.g_off;
-                d.v_f = p.V_f;
-            } else {
-                d.g_on = pool.switch_g_on(d.branch);
-                d.g_off = pool.switch_g_off(d.branch);
-            }
-            d.bit = switch_bit_(graph, d.branch);
+            d.law = pwl::PwlBranchLaw::of(graph, pool, d.branch);
             const auto& node_name = s.deposit_node();
             if (!node_name.empty()) {
                 d.node = find_node_(graph, node_name);
@@ -119,7 +106,7 @@ public:
     /// The state the run starts from and the mask it was stamped under.
     void begin(const Vector& x0, const topology::SwitchStateMask& m0) {
         for (auto& d : devs_) {
-            d.on = m0.get(static_cast<Size>(d.bit));
+            d.on = m0.get(static_cast<Size>(d.law.bit));
             d.v = v_of_(d, x0);
             d.i = i_of_(d, x0, d.on);
             if (d.node >= 0 && d.spec.closed_loop()) {
@@ -143,7 +130,7 @@ public:
         for (const auto& n : now_) injected_.add(n.e);
         now_.clear();
         for (auto& d : devs_) {
-            const bool on1 = mask.get(static_cast<Size>(d.bit));
+            const bool on1 = mask.get(static_cast<Size>(d.law.bit));
             const Real v1 = v_of_(d, x1);
             const Real i1 = i_of_(d, x1, on1);
             const Real tj0 = tj_of_(d);   // T_j(x⁻): before this step's state
@@ -211,7 +198,7 @@ public:
         }
         if (frac == Real{1}) now_.clear();
         for (auto& d : devs_) {
-            const bool on1 = mask.get(static_cast<Size>(d.bit));
+            const bool on1 = mask.get(static_cast<Size>(d.law.bit));
             if (d.ev_pending && t0 >= d.ev_t) {
                 // the first step after an event: under its right side it
                 // starts from the right limit; otherwise the event is stale
@@ -278,7 +265,7 @@ public:
     void event(Real t, const Vector& x_l, const topology::SwitchStateMask& m_l,
                const Vector& x_r, const topology::SwitchStateMask& m_r) {
         for (auto& d : devs_) {
-            const auto bit = static_cast<Size>(d.bit);
+            const auto bit = static_cast<Size>(d.law.bit);
             const bool on_l = m_l.get(bit), on_r = m_r.get(bit);
             if (on_l == on_r) continue;
             // the same flip already booked at t (a stale left mask after a
@@ -346,10 +333,8 @@ public:
 private:
     struct Dev {
         thermal::DeviceLossSpec spec;   // a copy: the pool may grow mid-run
-        Index branch = -1, from = -1, to = -1, var = -1, node = -1;
-        long bit = -1;
-        bool diode = false;
-        Real g_on = 1, g_off = 0, v_f = 0;
+        Index branch = -1, node = -1;
+        pwl::PwlBranchLaw law;   // v and i under the stamped mode (one law)
         bool on = false;     // state at the last accepted step
         Real v = 0, i = 0;   // device voltage / current there
         Real x_tj = 0;       // junction temperature there (closed loop)
@@ -391,15 +376,9 @@ private:
         Real e;   // J
     };
 
-    [[nodiscard]] static Real v_of_(const Dev& d, const Vector& x) {
-        return stamping::read_node_voltage(x, d.from) -
-               stamping::read_node_voltage(x, d.to);
-    }
+    [[nodiscard]] static Real v_of_(const Dev& d, const Vector& x) { return d.law.v(x); }
     [[nodiscard]] static Real i_of_(const Dev& d, const Vector& x, bool on) {
-        if (d.var >= 0) return x[d.var];
-        const Real v = v_of_(d, x);
-        if (d.diode) return on ? d.g_on * (v - d.v_f) : d.g_off * v;
-        return v * (on ? d.g_on : d.g_off);
+        return d.law.i(x, on);
     }
     [[nodiscard]] static Real tj_of_(const Dev& d) {
         return d.spec.closed_loop() ? d.x_tj : d.spec.tj;
@@ -425,13 +404,6 @@ private:
             if (g.node(n).name == name) return n;
         }
         return -1;
-    }
-    static long switch_bit_(const topology::Graph& g, Index branch) {
-        long bit = 0;
-        for (Index b = 0; b < branch; ++b) {
-            if (g.branch(b).kind == topology::BranchKind::Switch) ++bit;
-        }
-        return bit;
     }
     /// The deposit node must absorb an impulse: a capacitor on it, and
     /// no voltage source holding it (the heat would leave through it).

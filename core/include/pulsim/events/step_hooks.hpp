@@ -42,6 +42,7 @@
 
 namespace pulsim::pwl {
 class StatefulHistories;
+class HistoryState;
 }
 
 namespace pulsim::events {
@@ -54,6 +55,18 @@ struct Commutation {
     const Vector& x_after;
 };
 
+/// add-probes-and-recorders item 1: what a listener may READ during a
+/// run besides a hook's arguments: the linear companion history (a
+/// capacitor's committed current `i_prev`, the KCL-consistent one), the
+/// stateful devices' histories, and the step of the last post-event
+/// probe (TR-BDF2: the probe that produced an event's right side).
+/// Set by the engine once per run; null where an engine has none.
+struct StepRunView {
+    const pwl::HistoryState* history = nullptr;
+    const pwl::StatefulHistories* stateful = nullptr;
+    const Real* probe_dt = nullptr;
+};
+
 class StepHooks {
 public:
     using AcceptFn = std::function<void(Real t_prev, Real t, const Vector& x,
@@ -64,7 +77,7 @@ public:
     void on_commutation(CommutationFn f) { commut_.push_back(std::move(f)); }
 
     // refactor-unified-transient-stepper slice 3a: called by the step
-    // skeleton only (the fixed engine's twin today; DECISIONS 13).
+    // skeleton, the only driver of both engines (DECISIONS 13, 17, 20).
     // probes R1: once per accepted step, after commit, with the state the
     // step started from and its mask beside the end state and the mask the
     // step was stamped under. On the fixed engine `x_start` is the
@@ -125,9 +138,18 @@ public:
         return accept_.empty() && commut_.empty();
     }
 
+    using RunView = StepRunView;
+    [[nodiscard]] const RunView& run_view() const noexcept { return view_; }
+    /// The run's start state and stamp, with the run view already set (a
+    /// recorder seeds the readings that depend on the histories there).
+    using StartFn = std::function<void(const Vector& x0, const topology::SwitchStateMask& mask0)>;
+    void on_start(StartFn f) { start_.push_back(std::move(f)); }
+
     /// Arms the hooks for a run: the initial state and the mask it was
     /// stamped under are the "previous step" of the first accepted step.
-    void start(const Vector& x0, const topology::SwitchStateMask& mask0) {
+    void start(const Vector& x0, const topology::SwitchStateMask& mask0, RunView view = {}) {
+        view_ = view;
+        for (const auto& f : start_) f(x0, mask0);
         if (empty()) return;
         x_prev_ = x0;          // sizes the buffer (the only allocation)
         mask_prev_ = mask0;
@@ -165,8 +187,10 @@ private:
     std::vector<StepFn> step_;
     std::vector<DeviceStateFn> device_state_;
     std::vector<EventFn> event_;
+    std::vector<StartFn> start_;
     Vector x_prev_;
     topology::SwitchStateMask mask_prev_;
+    RunView view_;
     bool armed_ = false;
     Size n_commutations_ = 0;
 };

@@ -88,6 +88,11 @@ public:
             rewritten += c;
             ++i;
         }
+        // a probe that IS one reading (`v(n)`) is read directly, not
+        // through the expression (item 3: the per-step cost)
+        p.plain_ = p.atoms_.size() == 1 &&
+                   rewritten.find_first_not_of(' ') == rewritten.find("__a0") &&
+                   rewritten.find_last_not_of(' ') == rewritten.find("__a0") + 3;
         p.expr_ = ir::Expr::compile(
             rewritten,
             [&](std::string_view n) -> std::optional<std::uint32_t> {
@@ -109,8 +114,10 @@ public:
     [[nodiscard]] std::span<const std::string> atoms() const noexcept { return atoms_; }
     /// The probe's value from its readings (in `atoms()` order).
     [[nodiscard]] Real eval(std::span<const Real> atom_values) const {
-        return expr_.eval(atom_values);
+        return plain_ ? atom_values[0] : expr_.eval(atom_values);
     }
+    /// The probe is one reading, unchanged.
+    [[nodiscard]] bool plain() const noexcept { return plain_; }
 
 private:
     static bool ident(char c) noexcept {
@@ -120,6 +127,7 @@ private:
     std::string text_;
     std::vector<std::string> atoms_;
     ir::Expr expr_;
+    bool plain_ = false;
 };
 
 }  // namespace pulsim::record

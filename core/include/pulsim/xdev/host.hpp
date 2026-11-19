@@ -14,6 +14,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/xdev/pulsim_xdev.h"
 
+#include <fstream>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -64,6 +65,12 @@ public:
         const int n = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
         std::wstring w(n > 0 ? static_cast<std::size_t>(n) : 0u, L'\0');
         if (n > 0) MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, w.data(), n);
+        if (!w.empty() && w.back() == L'\0') w.pop_back();
+        // MAX_PATH (260) and longer: the extended-length prefix (absolute, backslashes
+        // already); \\server\share becomes \\?\UNC\server\share
+        if (w.size() >= MAX_PATH && w.rfind(L"\\\\?\\", 0) != 0) {
+            w = w.rfind(L"\\\\", 0) == 0 ? L"\\\\?\\UNC\\" + w.substr(2) : L"\\\\?\\" + w;
+        }
         // the model's folder and the system folders only: no CWD / PATH planting
         handle_ = reinterpret_cast<void*>(LoadLibraryExW(
             w.c_str(), nullptr,
@@ -101,6 +108,7 @@ public:
     struct FileId {
         std::uintmax_t size = 0;
         std::filesystem::file_time_type mtime{};
+        std::uint64_t hash = 0;   ///< FNV-1a of the bytes: same size and mtime, new code
         bool operator==(const FileId&) const = default;
     };
     [[nodiscard]] const FileId& identity() const noexcept { return id_; }
@@ -110,6 +118,16 @@ public:
         FileId id;
         id.size = std::filesystem::file_size(p, ec);
         id.mtime = std::filesystem::last_write_time(p, ec);
+        std::ifstream in(p, std::ios::binary);
+        std::uint64_t h = 1469598103934665603ULL;
+        char buf[1 << 16];
+        while (in) {
+            in.read(buf, sizeof buf);
+            for (std::streamsize k = 0; k < in.gcount(); ++k) {
+                h = (h ^ static_cast<unsigned char>(buf[k])) * 1099511628211ULL;
+            }
+        }
+        id.hash = h;
         return id;
     }
     [[nodiscard]] const pulsim_xdev_descriptor* get(std::uint32_t i) const noexcept {
@@ -162,8 +180,8 @@ private:
 /// old image mapped (glibc never unloads a library with STB_GNU_UNIQUE
 /// symbols, which C++ template statics produce), loading the rebuild is
 /// refused as well; if the old image is gone, the new build loads.
-/// Not seen: a rebuild with the same size and the same modification time
-/// (1-second timestamps, reproducible builds).
+/// The identity includes a hash of the bytes, so a rebuild with the same
+/// size and modification time (1-second timestamps) is seen too.
 [[nodiscard]] inline std::shared_ptr<const Library> open_library(const std::string& given) {
     struct Entry {
         std::weak_ptr<const Library> lib;
@@ -188,7 +206,7 @@ private:
         if (mapped) {
             throw ContractError("external device library '" + path
                                 + "' changed on disk since it was loaded in this process "
-                                  "(size or modification time) and the old build is still "
+                                  "(size, modification time or content) and the old build is still "
                                   "mapped: the loader would keep running the old code. "
                                   "Release every circuit using it, or restart the process");
         }
@@ -451,8 +469,9 @@ public:
     /// One evaluation at x with the committed model state. The non-finite
     /// check is ONE comparison (the sum of every output); only a failure
     /// scans to name the entry.
-    void eval(const Real* x, const Real* state, EvalOut& o) const {
-        const pulsim_xdev_ctx c = ctx_(state);
+    /// `t`: the time of the solve (ctx->t; the checks run at t = 0).
+    void eval(const Real* x, const Real* state, EvalOut& o, Real t = 0) const {
+        const pulsim_xdev_ctx c = ctx_(state, t);
         poison_(o);   // an output the model leaves unwritten reads NaN, not the last point's value
         const int32_t st = call_(c, x, o.f.data(), o.q.data(), o.df.data(), o.dq.data());
         if (st != PULSIM_XDEV_OK) {
@@ -464,13 +483,13 @@ public:
         for (Real v : o.df) sum += v;
         for (Real v : o.dq) sum += v;
         if (!std::isfinite(sum)) name_nonfinite_(x, o);
-        if (debug_) check_jacobian_at(x, state, o, "run-time debug check");
+        if (debug_) check_jacobian_at(x, state, o, "run-time debug check", t);
     }
 
     /// Jacobian of `o` (evaluated at x) against Richardson-extrapolated
     /// central differences of f and q; refuses naming the worst entry.
     void check_jacobian_at(const Real* x, const Real* state, const EvalOut& o,
-                           const char* where) const {
+                           const char* where, Real t = 0) const {
         const std::size_t R = rows();
         const auto& d = m_->d();
         const auto Jf = dense_(o.df, d.f_rows, d.f_cols, d.nnz_f);
@@ -481,20 +500,31 @@ public:
         size(b);
         for (std::size_t c = 0; c < R; ++c) {
             const Real h = Real{1e-4} * std::max(Real{1e-3}, std::abs(x[c]));
-            auto diff = [&](Real hh, std::vector<Real>& df_, std::vector<Real>& dq_) {
+            // one-sided quotients too (fp_/fm_: forward / backward), for a
+            // model that does not claim SMOOTH: at its kink the central
+            // quotient averages the two sides and matches neither
+            auto diff = [&](Real hh, std::vector<Real>& df_, std::vector<Real>& dq_,
+                            std::vector<Real>& fp_, std::vector<Real>& fm_,
+                            std::vector<Real>& qp_, std::vector<Real>& qm_) {
                 xp[c] = x[c] + hh;
-                raw_eval_(xp.data(), state, a);
+                raw_eval_(xp.data(), state, a, t);
                 xp[c] = x[c] - hh;
-                raw_eval_(xp.data(), state, b);
+                raw_eval_(xp.data(), state, b, t);
                 xp[c] = x[c];
                 for (std::size_t r = 0; r < R; ++r) {
                     df_[r] = (a.f[r] - b.f[r]) / (2 * hh);
                     dq_[r] = (a.q[r] - b.q[r]) / (2 * hh);
+                    fp_[r] = (a.f[r] - o.f[r]) / hh;
+                    fm_[r] = (o.f[r] - b.f[r]) / hh;
+                    qp_[r] = (a.q[r] - o.q[r]) / hh;
+                    qm_[r] = (o.q[r] - b.q[r]) / hh;
                 }
             };
-            std::vector<Real> f1(R), q1(R), f2(R), q2(R);
-            diff(h, f1, q1);
-            diff(h / 2, f2, q2);
+            std::vector<Real> f1(R), q1(R), f2(R), q2(R), fp1(R), fm1(R), qp1(R), qm1(R),
+                fp2(R), fm2(R), qp2(R), qm2(R);
+            diff(h, f1, q1, fp1, fm1, qp1, qm1);
+            diff(h / 2, f2, q2, fp2, fm2, qp2, qm2);
+            const bool smooth = (d.claims & PULSIM_XDEV_CLAIM_SMOOTH) != 0;
             for (std::size_t r = 0; r < R; ++r) {
                 // the difference quotient's own rounding (eps·|value|/h, times
                 // the Richardson weights), not an absolute floor: a 0.1 pF
@@ -502,10 +532,13 @@ public:
                 const Real eps = std::numeric_limits<Real>::epsilon();
                 const Real nf = 64 * eps * (std::abs(o.f[r]) + std::abs(a.f[r]) + std::abs(b.f[r])) / h;
                 const Real nq = 64 * eps * (std::abs(o.q[r]) + std::abs(a.q[r]) + std::abs(b.q[r])) / h;
+                // Richardson of a one-sided (first-order) quotient: 2·D(h/2) − D(h)
+                const Real one_f[2] = {2 * fp2[r] - fp1[r], 2 * fm2[r] - fm1[r]};
+                const Real one_q[2] = {2 * qp2[r] - qp1[r], 2 * qm2[r] - qm1[r]};
                 compare_(where, "f", r, c, Jf[r * R + c], (4 * f2[r] - f1[r]) / 3,
-                         row_scale_(Jf, r), nf, x);
+                         row_scale_(Jf, r), nf, x, smooth ? nullptr : one_f);
                 compare_(where, "q", r, c, Jq[r * R + c], (4 * q2[r] - q1[r]) / 3,
-                         row_scale_(Jq, r), nq, x);
+                         row_scale_(Jq, r), nq, x, smooth ? nullptr : one_q);
             }
         }
     }
@@ -557,10 +590,11 @@ public:
     /// registration happens before any run of the instance).
     mutable bool guard_inputs_ = false;
 
-    [[nodiscard]] pulsim_xdev_ctx ctx_(const Real* state) const noexcept {
+    [[nodiscard]] pulsim_xdev_ctx ctx_(const Real* state, Real t = 0) const noexcept {
         pulsim_xdev_ctx c{};
         c.struct_size = static_cast<std::uint32_t>(sizeof(pulsim_xdev_ctx));
-        c.t = 0;
+        c.host_features = PULSIM_XDEV_HOST_TIME;
+        c.t = t;
         c.p = p_.data();
         c.state = m_->d().n_state ? state : nullptr;
         c.instance = inst_;
@@ -573,8 +607,8 @@ public:
         std::fill(o.df.begin(), o.df.end(), nan);
         std::fill(o.dq.begin(), o.dq.end(), nan);
     }
-    void raw_eval_(const Real* x, const Real* state, EvalOut& o) const {
-        const pulsim_xdev_ctx c = ctx_(state);
+    void raw_eval_(const Real* x, const Real* state, EvalOut& o, Real t = 0) const {
+        const pulsim_xdev_ctx c = ctx_(state, t);
         poison_(o);
         if (call_(c, x, o.f.data(), o.q.data(), o.df.data(), o.dq.data()) != PULSIM_XDEV_OK) {
             refuse_("eval returned an error status at x = " + vec(x, rows()));
@@ -588,10 +622,18 @@ private:
         for (std::size_t k = 0; k < R; ++k) s = std::max(s, std::abs(J[r * R + k]));
         return s;
     }
+    /// `one_sided` (forward, backward; only for a model that does not claim
+    /// SMOOTH): the declared entry may equal either side's derivative instead.
     void compare_(const char* where, const char* which, std::size_t r, std::size_t c, Real declared,
-                  Real fd, Real scale, Real noise, const Real* x) const {
+                  Real fd, Real scale, Real noise, const Real* x,
+                  const Real* one_sided = nullptr) const {
         // 1e-5 of the row scale (design.md) plus the difference's rounding
         const Real tol = Real{1e-5} * std::max(scale, std::abs(fd)) + noise + Real{1e-300};
+        auto within = [&](Real q, Real n) {
+            return std::abs(declared - q) <= Real{1e-5} * std::max(scale, std::abs(q)) + n + Real{1e-300};
+        };
+        // a one-sided quotient's rounding is twice the central one's per unit h
+        if (one_sided && (within(one_sided[0], 2 * noise) || within(one_sided[1], 2 * noise))) return;
         if (!(std::abs(declared - fd) <= tol)) {
             refuse_(std::string(where) + ": declared d" + which + "[" + std::to_string(r)
                     + "]/dx[" + std::to_string(c) + "] = " + num(declared)
@@ -614,13 +656,24 @@ private:
         scan("q", o.q);
         scan("df", o.df);
         scan("dq", o.dq);
-        refuse_("eval outputs overflow when summed at x = " + vec(x, rows()));
+        // every output finite: only their sum overflowed (|outputs| ~ 1e308) — not a refusal
     }
 
     std::string device_;
     std::shared_ptr<const Model> m_;
     std::vector<Real> p_;
     void* inst_ = nullptr;
+    std::vector<Real> p_frozen_ = p_;   ///< `verify_params_unchanged` compares p_ to it
+
+public:
+    /// Always on, once per accepted step (cheap: n_fields reals): eval or
+    /// accept wrote through the const ctx->p during the run.
+    void verify_params_unchanged() const {
+        if (!p_.empty() && std::memcmp(p_.data(), p_frozen_.data(), p_.size() * sizeof(Real)) != 0) {
+            refuse_("the model wrote through its const ctx->p (the parameters) during the run");
+        }
+    }
+private:
     bool debug_ = false;
 };
 

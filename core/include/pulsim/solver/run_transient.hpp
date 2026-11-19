@@ -576,6 +576,7 @@ inline SimulationResult run_transient(
     // `initial_state` so the first Newton refresh does not see zeros;
     // resume WINS over a builder-IC seed: the snapshot is the state.
     pwl::StatefulHistories hs;
+    hs.get<pwl::ExternalDeviceHistory>().set_start_time(opts.t_start);   // ctx->t of init
     hs.init(graph, pool);
     hs.set_path(opts.device_path, graph, pool, "run_transient");
     if (initial_state != nullptr) hs.seed_from_dc_op(x);
@@ -586,7 +587,7 @@ inline SimulationResult run_transient(
     // (run_event_iteration), including the dt-retry sub-steps, the
     // commutation split and the SDIRK stages of discontinuity_restart
     // (BackwardEuler over the γ·h each stage advances).
-    pwl::StepCtx step_ctx{opts.dt, pwl::TrBdf2Stage::Trapezoidal};
+    pwl::StepCtx step_ctx{opts.dt, pwl::TrBdf2Stage::Trapezoidal, opts.t_start};
 
     // The Newton refresh is built by the kernel (add-unified-device-
     // interface step 2): the static stamps (with no callback from the
@@ -793,6 +794,8 @@ inline SimulationResult run_transient(
         x = std::move(dc.x);
         history.seed_from_dc_op(x);
         hs.get<pwl::PmsmMnaHistory>().seed_from_dc_op(x);   // λ, i, θ at the held DC point (D19)
+        // the external devices' charges and model state at the DC point
+        hs.get<pwl::ExternalDeviceHistory>().seed_from_dc_op(x);
         seed_held_machine_capacitors(graph, pool, dc.mask, opts.t_start, x,
                                      hs.get<pwl::PmsmMnaHistory>(), history);
         initial_mask = dc.mask;
@@ -1576,11 +1579,6 @@ inline SimulationResult run_transient(
     Size k_reached = 0;   // grid index of t_reached (snapshot)
     try {
 
-    // Read once per run, both paths (slice 3c, DECISIONS 17).
-    const bool pwl_stepper_legacy = [] {
-        const char* e = std::getenv("PULSIM_PWL_STEPPER_LEGACY");  // NOLINT(concurrency-mt-unsafe)
-        return e != nullptr && e[0] == '1' && e[1] == '\0';
-    }();
     if (cache.dt() > Real{0}) {
         // ----------- DYNAMIC PATH ---------------------------------------
         //
@@ -1629,7 +1627,7 @@ inline SimulationResult run_transient(
             }
         }
 
-        if (hooks) hooks->start(x, stamped_mask);
+        if (hooks) hooks->start(x, stamped_mask, {&history, &hs, nullptr});
 
         // ---- discontinuity restart (add-discontinuity-restart-rule) --
         // The next step restarts: the first step of a run that does
@@ -1712,12 +1710,9 @@ inline SimulationResult run_transient(
 
         // ---- refactor-unified-transient-stepper slice 3a (DECISIONS 13) --
         // The step is five phases (begin, take, after_solve, commit,
-        // record), each ONE lambda that both drivers call: the step
-        // skeleton (`step::run<Trapezoidal>(FixedController, PhaseBody)`,
-        // the default since slice 3c, DECISIONS 17) and the legacy loop,
-        // kept until its deletion slice behind the internal
-        // PULSIM_PWL_STEPPER_LEGACY=1 (never a public option; the slice-3a
-        // PULSIM_PWL_STEPPER_TWIN is accepted and ignored).
+        // record), each ONE lambda that the step skeleton calls
+        // (`step::run<Trapezoidal>(FixedController, IndexPhaseBody)`; the
+        // only driver since the legacy loop's deletion, DECISIONS 19).
         // The step's locals that cross phases live here, (re)set at the
         // program point where the loop body declared them. The step's
         // times are re-read into a const local at the top of each phase:
@@ -1740,8 +1735,8 @@ inline SimulationResult run_transient(
         bool restart = false;
         bool committed_be = false;
         Real be_commit_h = kGamma * opts.dt;
-        // The step hooks, called in the shared phases (both drivers; slice
-        // 3c, DECISIONS 17): probes R1 (`StepHooks::step`, the step's start
+        // The step hooks, called in the shared phases (slice 3c,
+        // DECISIONS 17): probes R1 (`StepHooks::step`, the step's start
         // state and mask), R2 (`on_event`, the stamps on each side of a
         // commutation) and the device interface's #31 (`device_state` after
         // the commit). The start mask is copied only with a listener, at
@@ -2025,6 +2020,7 @@ inline SimulationResult run_transient(
             // for_dt (= 2γh); the devices are told the interval and the rule.
             step_ctx = backward_euler ? step::BackwardEuler::on_factor(for_dt).ctx()
                                       : step::Trapezoidal::stage(for_dt).ctx();
+            step_ctx.t = at_t;   // the external devices' ctx->t
             iters = 0;
             flipped = false;
             // NOT reset: a mask cycle in ANY sub-step of a retry is a
@@ -3160,13 +3156,13 @@ inline SimulationResult run_transient(
             }
         };  // step_record
 
-        // The skeleton driver (the default): the loop's own phases in the
+        // The driver, the step skeleton: the loop's own phases in the
         // skeleton's order and clock (the run's step k = 1 .. n_steps - 1;
-        // the clock's k0 = k_off puts them on the run's grid). Each driver
-        // is one out-of-line function with the phases inlined into it
+        // the clock's k0 = k_off puts them on the run's grid). It is one
+        // out-of-line function with the phases inlined into it
         // (DECISIONS 14). The body is built HERE, outside the driver, so
-        // the driver reaches the phases through memory as the legacy loop
-        // does: built inside it, its references were nine values live
+        // the driver reaches the phases through memory as the deleted loop
+        // did: built inside it, its references were nine values live
         // across the loop that spilled (+0.8-1.4 % per step, DECISIONS 18).
         auto body = step::index_phase_body(step_cancelled, step_begin, step_take,
                                            step_after_solve, step_commit, step_record);
@@ -3176,23 +3172,7 @@ inline SimulationResult run_transient(
                                         .n_steps = n_steps};
             (void)step::run<step::Trapezoidal>(clock, body);
         };
-        auto run_legacy = [&]() PULSIM_STEP_DRIVER {
-            for (Size k = 1; k < n_steps; ++k) {
-                if (step_cancelled()) {
-                    break;
-                }
-                step_begin(k);
-                step_take();
-                step_after_solve();
-                step_commit();
-                step_record(k);
-            }
-        };
-        if (!pwl_stepper_legacy) {
-            run_twin();
-        } else {
-            run_legacy();
-        }
+        run_twin();
         if (diag && rd_steps > 0) {
             rd.unestimated_fraction =
                 static_cast<Real>(rd_unest) / static_cast<Real>(rd_steps);
@@ -3220,8 +3200,8 @@ inline SimulationResult run_transient(
         }
         // ---- slice 3c (DECISIONS 17): the static path's step, cut in place
         // into four phases (begin, take, after_solve, record; nothing to
-        // commit: no history) that both drivers call. The first solve
-        // (k = 0) is the start sample, before either driver's steps, as the
+        // commit: no history) that the skeleton calls. The first solve
+        // (k = 0) is the start sample, before the skeleton's steps, as the
         // dynamic path's IC sample; the skeleton runs k = 1 .. n_steps - 1
         // on the dynamic path's FixedController. The static path never
         // polled cancellation, and still does not (the poll is `true`).
@@ -3284,6 +3264,7 @@ inline SimulationResult run_transient(
         };
         auto st_take = [&]() PULSIM_STEP_PHASE {
             const Real t = st_t;
+            step_ctx.t = t;   // the external devices' ctx->t (this path solves at t)
             const Real gate_t = st_gate_t;
             Size& iters = st_iters;
             bool& flipped = st_flipped;
@@ -3501,7 +3482,7 @@ inline SimulationResult run_transient(
             // The static path's first solve (k = 0) is the start state.
             if (hooks) {
                 if (k == 0) {
-                    hooks->start(x, stamped_mask);
+                    hooks->start(x, stamped_mask, {&history, &hs, nullptr});
                 } else {
                     hooks->accepted(t_prev, t, x, stamped_mask);
                 }
@@ -3511,14 +3492,6 @@ inline SimulationResult run_transient(
                 result.states.push_back(x);
                 result.event_iteration_count.push_back(iters - 1);
                 result.record_switch_state(stamped_mask);
-            }
-        };
-        auto st_run_legacy = [&]() PULSIM_STEP_PHASE {
-            for (Size k = 0; k < n_steps; ++k) {
-                st_begin(k);
-                st_take();
-                st_after(k);
-                st_record(k);
             }
         };
         auto st_run_skeleton = [&]() PULSIM_STEP_PHASE {
@@ -3533,7 +3506,7 @@ inline SimulationResult run_transient(
             };
             auto sk_take = [&](const step::StepFrame&) PULSIM_STEP_PHASE {
                 st_take();
-                return true;   // a failed solve throws (the legacy loop's rule)
+                return true;   // a failed solve throws
             };
             auto sk_after = [&](step::StepFrame& f) PULSIM_STEP_PHASE {
                 st_after(f.k);
@@ -3550,11 +3523,7 @@ inline SimulationResult run_transient(
                                         .n_steps = n_steps};
             (void)step::run<step::Trapezoidal>(clock, body);
         };
-        if (!pwl_stepper_legacy) {
-            st_run_skeleton();
-        } else {
-            st_run_legacy();
-        }
+        st_run_skeleton();
     }
 
     }  // try

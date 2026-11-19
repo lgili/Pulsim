@@ -92,16 +92,54 @@ public:
         for (auto& d : devices_) start_(d, &x);
     }
 
+    /// The time every later evaluation hands the model (ctx->t): the
+    /// driver's step context, whose `t` each solve sets. Unbound: 0.
+    void bind_time(const Real* t) noexcept { t_ = t; }
+    /// The time of the evaluations before a binding (init at the run's
+    /// start, the DC solve, the AC linearisation): t_start / t_eval.
+    void set_start_time(Real t) noexcept { t0_ = t; }
+
     /// The Newton contribution of every device under (h, stage).
     Real stamp(const Vector& x, sparse::Matrix& J_nl, Vector& f_nl, Real h,
                TrBdf2Stage st) const {
-        const device::StepCtx c{Real{0}, formula_of_(st), h};
+        return stamp_(x, J_nl, f_nl, device::StepCtx{time_(), formula_of_(st), h});
+    }
+
+    /// The DC operating point's stamp (Formula::Dc): f(x) and ∂f/∂x, the
+    /// storage terms dropped (q̇ = 0), at the time `t`.
+    Real stamp_dc(const Vector& x, sparse::Matrix& J_nl, Vector& f_nl, Real t) const {
+        return stamp_(x, J_nl, f_nl, device::StepCtx{t, device::Formula::Dc, Real{0}});
+    }
+
+    /// The small-signal model at x: G += ∂f/∂x, E += ∂q/∂x (the AC sweep's
+    /// jω·E + G), on the active rows and columns.
+    void linearise(const Vector& x, sparse::Matrix& G, sparse::Matrix& E, Real t) const {
+        for (const auto& d : devices_) {
+            const std::size_t NP = d.inst->model().d().n_pins;
+            gather_(d, x);
+            eval_(d, t);
+            const auto& md = d.inst->model().d();
+            auto on = [&](std::size_t r) { return r >= NP || stamping::node_is_active(d.at[r]); };
+            for (std::uint32_t k = 0; k < md.nnz_f; ++k) {
+                const auto r = md.f_rows[k], col = md.f_cols[k];
+                if (on(r) && on(col)) G.coeffRef(d.at[r], d.at[col]) += d.o.df[k];
+            }
+            for (std::uint32_t k = 0; k < md.nnz_q; ++k) {
+                const auto r = md.q_rows[k], col = md.q_cols[k];
+                if (on(r) && on(col)) E.coeffRef(d.at[r], d.at[col]) += d.o.dq[k];
+            }
+        }
+    }
+
+private:
+    Real stamp_(const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
+                const device::StepCtx& c) const {
         const Real a = device::formula_a(c);
         Real worst = Real{0};
         for (const auto& d : devices_) {
             const std::size_t R = d.inst->rows(), NP = d.inst->model().d().n_pins;
             gather_(d, x);
-            d.inst->eval(d.x.data(), state_(d), d.o);
+            eval_(d, c.t);
             const auto& md = d.inst->model().d();
             const Real* qn = &cells_[d.off];
             const Real* qd = qn + R;
@@ -130,6 +168,7 @@ public:
         return worst;
     }
 
+public:
     /// J(r, c) through a cached value offset: valid only while the slot
     /// still holds (r, c) in the matrix's CURRENT pattern (checked: inside
     /// column c's stored range and row index r), else coeffRef resolves it
@@ -148,12 +187,12 @@ public:
     }
 
     void commit(const Vector& x, Real h, TrBdf2Stage st) {
-        const device::StepCtx c{Real{0}, formula_of_(st), h};
+        const device::StepCtx c{time_(), formula_of_(st), h};
         const Real a = device::formula_a(c);
         for (auto& d : devices_) {
             const std::size_t R = d.inst->rows(), NP = d.inst->model().d().n_pins;
             gather_(d, x);
-            d.inst->eval(d.x.data(), state_(d), d.o);
+            eval_(d, c.t);
             Real* qn = &cells_[d.off];
             Real* qd = qn + R;
             const Real* qg = qd + R;
@@ -163,6 +202,8 @@ public:
                 qn[r] = d.o.q[r];
                 qd[r] = dot;
             }
+            d.inst->verify_params_unchanged();
+            gather_(d, x);   // accept sees x even if eval wrote into its copy
             accept_(d, h);
         }
     }
@@ -171,7 +212,7 @@ public:
         for (auto& d : devices_) {
             const std::size_t R = d.inst->rows();
             gather_(d, xg);
-            d.inst->eval(d.x.data(), state_(d), d.o);
+            eval_(d, time_());
             std::copy(d.o.q.begin(), d.o.q.end(), cells_.begin() + static_cast<std::ptrdiff_t>(d.off + 2 * R));
         }
     }
@@ -180,7 +221,7 @@ public:
     void extrapolate_previous(const Vector& x1, Real c) {
         for (auto& d : devices_) {
             gather_(d, x1);
-            d.inst->eval(d.x.data(), state_(d), d.o);
+            eval_(d, time_());
             for (std::size_t r = 0; r < d.inst->rows(); ++r) {
                 cells_[d.off + r] += c * (d.o.q[r] - cells_[d.off + r]);
             }
@@ -194,7 +235,7 @@ public:
         for (auto& d : devices_) {
             const std::size_t R = d.inst->rows(), NP = d.inst->model().d().n_pins;
             gather_(d, x_probe);
-            d.inst->eval(d.x.data(), state_(d), d.o);
+            eval_(d, time_());
             for (std::size_t r = 0; r < R; ++r) {
                 Real& dot = cells_[d.off + R + r];
                 if (r >= NP) dot = -d.o.f[r];
@@ -241,7 +282,7 @@ private:
                 return md.init(&c, d.x.data(), s);
             }, "init");
         }
-        d.inst->eval(d.x.data(), state_(d), d.o);
+        eval_(d, time_());
         for (std::size_t r = 0; r < R; ++r) {
             cells_[d.off + r] = d.o.q[r];
             cells_[d.off + R + r] = r >= NP ? -d.o.f[r] : Real{0};
@@ -265,7 +306,7 @@ private:
         std::copy(st, st + NS, d.scratch.begin());
         const Real guard = Real{-7.25e-301};
         d.scratch[NS] = guard;
-        const pulsim_xdev_ctx c = d.inst->ctx_(st);
+        const pulsim_xdev_ctx c = d.inst->ctx_(st, time_());
         if (fn(c, d.scratch.data()) != PULSIM_XDEV_OK) {
             d.inst->refuse_(std::string(what) + " returned an error status");
         }
@@ -282,8 +323,25 @@ private:
         std::copy(d.scratch.begin(), d.scratch.begin() + static_cast<std::ptrdiff_t>(NS), st);
     }
 
+    [[nodiscard]] Real time_() const noexcept { return t_ ? *t_ : t0_; }
+    /// One evaluation in a run. A stateful model's committed state is
+    /// compared after the call (n_state reals; nothing for n_state = 0): a
+    /// write through the const ctx->state is refused by name, always on.
+    void eval_(const Device& d, Real t) const {
+        const std::size_t NS = d.inst->n_state();
+        const Real* st = state_(d);
+        if (NS) std::copy(st, st + NS, d.scratch.begin());
+        d.inst->eval(d.x.data(), st, d.o, t);
+        if (NS && std::memcmp(st, d.scratch.data(), NS * sizeof(Real)) != 0) {
+            d.inst->refuse_("eval wrote through its const ctx->state (the committed state) "
+                            "during the run");
+        }
+    }
+
     std::vector<Device> devices_;
     std::vector<Real> cells_;
+    const Real* t_ = nullptr;
+    Real t0_ = Real{0};
 };
 
 }  // namespace pulsim::pwl

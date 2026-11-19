@@ -2727,6 +2727,18 @@ def simulate(
                              f"simulate(device_path={device_path!r}): "
                              "expected 'legacy' or 'interface'")
     _device_path = getattr(DevicePath, device_path.capitalize())
+    # add-high-order-stiff-integrator: ESDIRK4(3) takes the variable-step
+    # engine's steps; the fixed clock and the exact engine refuse it by name.
+    if integrator == "esdirk43" and engine in ("pwl", "dsed"):
+        raise _unsupported(
+            engine, "integrator",
+            f"simulate(engine={engine!r}, integrator='esdirk43'): the "
+            "fourth-order ESDIRK takes the steps of the variable-step engine; "
+            + ("the fixed-step engine has one step size and its own "
+               "integrator" if engine == "pwl" else
+               "the exact engine propagates its segments with its own "
+               "integrators ('auto', 'rk45', 'bdf2')")
+            + ". Use engine='trbdf2'.")
     _dsed = _dsed_dispatch_module
     _dsed._validate_engine_kwargs(
         engine=engine,
@@ -3203,6 +3215,13 @@ def simulate(
     # honour is refused by name (they used to be warned about and ignored:
     # rtol / atol / dt_init on the fixed step, the exact engine's
     # integrator / stiffness_threshold / h_bdf2 on both MNA engines).
+    if engine == "trbdf2" and integrator not in (None, "esdirk43"):
+        raise _unsupported(
+            "trbdf2", "integrator",
+            f"simulate(engine={_engine_asked!r}, integrator={integrator!r}): "
+            "this run lands on engine='trbdf2', whose integrators are TR-BDF2 "
+            "(the default: omit integrator) and 'esdirk43'. The exact "
+            "engine's integrators run on engine='exact'.")
     _refused = _ro.refused(engine, _opt_values)
     if _refused:
         _routed = ("" if engine == _engine_asked else
@@ -3271,7 +3290,7 @@ def simulate(
             enable_newton_lm=enable_newton_lm,
             newton_roundoff_budget=newton_roundoff_budget,
             on_impulse=on_impulse, device_path=device_path,
-            mode_selection=mode_selection)
+            mode_selection=mode_selection, integrator=integrator)
         _n_sw = builder.graph.num_switches
         if switch_fn is None:
             # No driver: all-OPEN here (the v2.0 semantics; the
@@ -3341,6 +3360,7 @@ def simulate(
                     on_impulse_error=_to["on_impulse_error"],
                     device_path=_device_path,
                     mode_selection=_to["mode_selection"],
+                    integrator=_to["integrator"],
                 )
         except SimulationAborted as _aborted:
             try:

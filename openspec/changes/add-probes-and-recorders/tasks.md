@@ -18,14 +18,17 @@ states at equal times.
 - [x] 0b.4 Tests: C++ closed forms (triangle on a clustered grid, windows mid-step, periods; square wave with both limits; decimation; capacity unchanged over 2e5 samples; in-loop on the fixed engine: no per-step allocation, windows equal the stored-array pass); Python: RC charge closed form on pwl / trbdf2 / exact, rectified sine with commutations inside the window, both limits against `right_limit_states`, the bridge truth 311.343881428885841697 V on the three engines, `time_average` / `time_rms` agreement to 1e-12
 - [x] 0b.5 (DECISIONS 10) `recorders` row in `sim::kRunOptionTable` (every engine, `Unset::Always`: composed above the dispatch, where `store_every > 1` / `resume_from` are refused by name) — done at integration batch 14c
 - [x] 0b.6 (DECISIONS 19) In-loop feeding for Python on the stepper's per-step hook (`record/loop_feed.hpp`, `Simulation::set_hooks`): pwl and trbdf2 through the Simulation object; the exact engine keeps the stored-array pass (its scheduler hook has no right limits); the `store_every` refusal lifted when the feed is in-loop (refused by name otherwise)
-- [ ] 0b.7 Recorder state in the snapshot (new pickle index) so `resume_from` works with recorders; refused by name until then (not started in slice 2: needs `Recorder` state export / import of the partial windows and the start row, a SolverSnapshot field at index 17 with a reader branch and the five field-count tests; no loop edit)
+- [x] 0b.9 (DECISIONS 20) Device readings in the loop under the committed mode: PWL switch / diode, capacitor (KCL-consistent), Shockley / smooth / Lauritzen diode, MOSFET, IGBT, saturable inductor, nonlinear capacitor, current sources, VCVS; `p()` of those; the rest refused by name
+- [x] 0b.7 (DECISIONS 21: pickle field 18) Recorder state in the snapshot (new pickle index) so `resume_from` works with recorders
+- [ ] 0b.10 (DECISIONS 21) Cost of an attached recorder ≤ +5 % (pwl) / +3 % (trbdf2) per accepted step for one plain statistics-only probe — NOT met (+28 % / +17 %); first steps done. Slice 5 (DECISIONS 22): one probe keep='every' +49 % → +16 % (pwl), +22 % → +6.5 % (trbdf2); statistics-only +28 % → +16 % / +17 % → +6.9 %; extra probe 26–67 instr; recorded values bit-identical on 12 cases; still NOT met
+- [ ] 0b.11 (request R5) The exact engine fed in the loop — waits for a per-segment step / event call in `dsed/scheduler.hpp`
 - [x] 0b.8 `Times` / `t_eval` sampling (`keep='times'`, linear, `land=false`; landing waits for the event queue in the loop), `RingSink` (`Recorder::stream_to(LiveRing*)`, C++), `at(t)` (`res.at`) (DECISIONS 16)
 
 ## 1. One constructible result type
 - [x] 1.1 `SimulationResult` default-constructible with fill methods used by kernel adapters only; binding exposes construction for adapters and tests
 - [x] 1.2 The DSED adapter fills a `SimulationResult`; delete `_PEDSimulationResult` (`_dsed_dispatch.py:330-476`); `n_accept`, `n_reject`, `n_events`, `n_rk45_steps`, `n_bdf2_steps`, `cpu_time_seconds` become read-only properties
 - [x] 1.3 Oracle: every dsed test passes unmodified; `isinstance(res, pulsim.SimulationResult)` on the three engines; `device_loss_summary` on a switch + diode buck unchanged on dsed
-- [ ] 1.4 Docs: result reference; CHANGELOG (**BREAKING**: class identity) — CHANGELOG done; the result reference page not written
+- [x] 1.4 Docs: result reference; CHANGELOG (**BREAKING**: class identity) — CHANGELOG done; `docs/result-reference.md` (DECISIONS 23)
 
 ## 2. Grid kind and typed statistics
 - [x] 2.1 `record/grid.hpp`: `GridKind`; `RunStats`; `res.grid`, `res.stats`
@@ -40,7 +43,7 @@ states at equal times.
 
 ## 4. Measures on the result
 - [x] 4.1 (as Python methods over the C++ recorder pass, DECISIONS 16) `avg`, `rms`, `integral`, `at`, `minmax` (piecewise-linear, right-limit aware, exact `h·(a² + ab + b²)/3` for the square)
-- [ ] 4.2 (methods done; the `stats.time_average` / `pl_integral` delegation not done) Python methods; `stats.time_average`, `stats.time_rms`, `_result_views.pl_integral*` delegate
+- [ ] 4.2 (methods done; `stats.time_average` / `time_rms` delegate to the recorder (DECISIONS 23); `pl_integral*` NOT delegated: per-step right limits and |y|) Python methods; `stats.time_average`, `stats.time_rms`, `_result_views.pl_integral*` delegate
 - [ ] 4.3 (done: rectified sine on three engines equals time_average / time_rms to 1e-12; not done: the PR #140 six-run check) Tests: analytic triangle and PWM waveforms on a uniform and on a clustered grid give the same `avg` / `rms` to 1e-12; the PR #140 circuit: six runs agree within 0.3 % through `res.avg`
 - [ ] 4.4 Docs: `AI_GUIDE.md` trap on `.mean()`; measurement page; examples use `res.avg`
 
@@ -51,8 +54,8 @@ states at equal times.
 - [ ] 5.4 Oracle: `res.i` unchanged to 1e-12 for each ported kind on the harness; `test_device_loss_summary.py`, `test_loss_window.py` green
 
 ## 6. Capacitor current (own PR, **BREAKING**, pending the owner's answer)
-- [ ] 6.1 `i(C)` from the companion law; `res.derived.i_smooth(name)` keeps the previous derivative form
-- [ ] 6.2 Tests: `∫i dt = C·Δv` to 1e-12 per step on both engines
+- [ ] 6.1 (recorders, in the loop: DONE — DECISIONS 20, the committed companion current, KCL-consistent; `res.i('C')` on a stored result still the derivative, not done; `res.derived.i_smooth` not done) `i(C)` from the companion law; `res.derived.i_smooth(name)` keeps the previous derivative form
+- [ ] 6.2 (recorders: KCL at every sample on three circuits, ∫i dt vs C·Δv over mid-step windows and an energy balance from recorder outputs on pwl / trbdf2 / exact — `test_recorder_device_readings.py`; the per-step 1e-12 check on `res.i` not done) Tests: `∫i dt = C·Δv` to 1e-12 per step on both engines
 - [ ] 6.3 Docs: CHANGELOG migration note; known-limitations entry on trapezoidal ripple
 
 ## 7. In-kernel recording
@@ -68,7 +71,7 @@ states at equal times.
 ## 8. Sampling policies and sinks
 - [ ] 8.1 (store_every lifted for in-loop recorders, DECISIONS 19; trbdf2 refuses store_every itself, so the accepted-grid `Decimate` is the Recorder's keep='decimate') `Decimate{n}`: fixed grid identical to `store_every`; accepted grid keeps every n-th step and all event rows; lift the `store_every` refusal on the variable-step engine
 - [ ] 8.2 (`land=false` done as 0b.8; landing waits for the event queue in the loop) `Times{t}` / `Period{T}`: landing through `OutputSample` events when `add-unified-event-queue` is present; linear interpolation with the `interpolated` flag otherwise or when `land = false`
-- [ ] 8.3 (C++ `RingSink` done; `live_stream` on every engine waits for 0b.6) `RingSink` over `LiveRing`; `live_stream` on every engine
+- [x] 8.3 (`Recorder(stream=NativeLiveStream)` on pwl, trbdf2 in the loop and exact on the stored pass; DECISIONS 23) `RingSink` over `LiveRing`; `live_stream` on every engine
 - [ ] 8.4 Tests: `store_every` goldens on the fixed engine; a decimated accepted-grid record gives the same `avg` as the full record to 1e-12; `t_eval` samples equal the states of a run with gate edges at those times; a `live_stream` consumer sees the same rows on pwl and trbdf2
 - [ ] 8.5 Oracle: conformance matrix cells for `store_every` / `live_stream` updated in this PR only
 

@@ -9,6 +9,7 @@
 
 #include "pulsim/record/loop_feed.hpp"
 #include "pulsim/record/recorder.hpp"
+#include "pulsim/solver/result.hpp"
 
 #include <memory>
 #include <string>
@@ -126,10 +127,12 @@ void init_module(py::module_& m) {
              Size every_n, const std::vector<std::pair<Real, Real>>& windows, Real period,
              Real offset, const std::vector<std::string>& reading_names, const F64& t,
              const F64& readings, const std::vector<Size>& event_rows, const F64& right,
-             const std::vector<Real>& sample_times) {
+             const std::vector<Real>& sample_times,
+             std::shared_ptr<pulsim::streaming::LiveRing> ring) {
               rec::Recorder r = make_recorder(probe_texts, keep, every_n, windows, period,
                                               offset, sample_times);
               r.bind(reading_names);
+              r.stream_to(ring.get());
               const Size m_r = reading_names.size();
               {
                   py::gil_scoped_release nogil;
@@ -142,12 +145,15 @@ void init_module(py::module_& m) {
           py::arg("probes"), py::arg("keep"), py::arg("every_n"), py::arg("windows"),
           py::arg("period"), py::arg("offset"), py::arg("reading_names"), py::arg("t"),
           py::arg("readings"), py::arg("event_rows"), py::arg("right"),
-          py::arg("sample_times") = std::vector<Real>{},
+          py::arg("sample_times") = std::vector<Real>{}, py::arg("ring") = nullptr,
           "Kernel recorder pass over stored arrays (add-probes-and-recorders); "
           "use pulsim.simulate(..., recorders=[...]).");
 
+    // (a cols, a coef, a div, product, b cols, b coef, b div, device branch
+    // or -1, device power, constant source current)
     using ReadingSpec = std::tuple<std::vector<pulsim::Index>, std::vector<Real>, Real, bool,
-                                   std::vector<pulsim::Index>, std::vector<Real>, Real>;
+                                   std::vector<pulsim::Index>, std::vector<Real>, Real,
+                                   pulsim::Index, bool, Real>;
     using RecSpec = std::tuple<std::vector<std::string>, std::string, Size,
                                std::vector<std::pair<Real, Real>>, Real, Real, std::vector<Real>>;
     py::class_<rec::LoopFeed>(m, "_LoopFeed",
@@ -157,11 +163,14 @@ void init_module(py::module_& m) {
                          const std::vector<ReadingSpec>& readings,
                          const std::vector<RecSpec>& specs) {
                  std::vector<rec::StateReading> rs;
-                 for (const auto& [ca, wa, da, prod, cb, wb, db] : readings) {
+                 for (const auto& [ca, wa, da, prod, cb, wb, db, dev, dev_p, dev_v] : readings) {
                      rec::StateReading r;
                      r.a = linear(ca, wa, da);
                      r.product = prod;
                      r.b = linear(cb, wb, db);
+                     r.dev.branch = dev;
+                     r.dev.power = dev_p;
+                     r.dev.value = dev_v;
                      rs.push_back(std::move(r));
                  }
                  std::vector<rec::Recorder> recs;
@@ -176,6 +185,26 @@ void init_module(py::module_& m) {
         .def("arm", &rec::LoopFeed::attach_own, py::arg("bracket_events"),
              "Register on the feed's own hooks; Simulation.set_loop_feed passes them.")
         .def("finish", &rec::LoopFeed::finish)
+        .def("save", &rec::LoopFeed::save, "The feed's run state (snapshot field 18).")
+        .def("save_to",
+             [](const rec::LoopFeed& f, pulsim::solver::SolverSnapshot& snap,
+                const std::string& spec) {
+                 // in C++: a Python list of the state would cost O(kept rows)
+                 // Python floats on every run
+                 snap.recorder_state = f.save();
+                 snap.recorder_spec = spec;
+             },
+             py::arg("snapshot"), py::arg("spec"),
+             "save() into snapshot.recorder_state, spec into recorder_spec.")
+        .def("stream_to",
+             [](rec::LoopFeed& f, Size k, std::shared_ptr<pulsim::streaming::LiveRing> ring) {
+                 f.stream_to(k, ring.get());
+             },
+             py::arg("k"), py::arg("ring"), py::keep_alive<1, 3>(),
+             "Push recorder k's kept rows into a LiveRingHandle while the run goes.")
+        .def("restore", [](rec::LoopFeed& f, const std::vector<Real>& s) { f.restore(s); },
+             py::arg("state"), "Continue from save()'s output.")
+        .def_property_readonly("restored", &rec::LoopFeed::restored)
         .def_property_readonly("armed", &rec::LoopFeed::attached)
         .def_property_readonly("n_steps", &rec::LoopFeed::n_steps)
         .def_property_readonly("n_jumps", &rec::LoopFeed::n_jumps)

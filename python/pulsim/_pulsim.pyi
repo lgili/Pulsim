@@ -2836,7 +2836,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, typing.Any, tuple[float, int, float, bool], typing.Any, list[float], list[int], list[float]]:
+    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, typing.Any, tuple[float, int, float, bool], typing.Any, list[float], list[int], list[float], typing.Any]:
         ...
     def __init__(self) -> None:
         ...
@@ -2967,6 +2967,22 @@ class SolverSnapshot:
         """
     @post_edge_derivatives.setter
     def post_edge_derivatives(self, arg0: bool) -> None:
+        ...
+    @property
+    def recorder_spec(self) -> str:
+        """
+        Signature of the recorders that wrote recorder_state.
+        """
+    @recorder_spec.setter
+    def recorder_spec(self, arg0: str) -> None:
+        ...
+    @property
+    def recorder_state(self) -> list[float]:
+        """
+        The in-loop recorders' state at the snapshot (pickle field 18; simulate(recorders=..., resume_from=) continues them). Empty: no recorder fed in the loop, or an older snapshot.
+        """
+    @recorder_state.setter
+    def recorder_state(self, arg0: collections.abc.Sequence[float]) -> None:
         ...
     @property
     def restart_pending(self) -> bool:
@@ -4211,6 +4227,8 @@ class Simulation:
         """
         A tick at t_start + offset + k*period. monitor=True: a Kind::Monitor (trbdf2 neither lands on it nor re-samples the gate after it; pwl ticks it on its grid as any tick).
         """
+    def clear_loop_feed(self) -> None:
+        ...
     def restore(self, snapshot: SolverSnapshot, at_snapshot_time: bool = True) -> None:
         ...
     def run(self) -> SimulationResult:
@@ -4267,7 +4285,7 @@ class _LoopFeed:
     """
     In-loop recorder feed (add-probes-and-recorders 0b.6); use pulsim.simulate(..., recorders=[...]).
     """
-    def __init__(self, reading_names: collections.abc.Sequence[str], readings: collections.abc.Sequence[tuple[collections.abc.Sequence[int], collections.abc.Sequence[float], float, bool, collections.abc.Sequence[int], collections.abc.Sequence[float], float]], recorders: collections.abc.Sequence[tuple[collections.abc.Sequence[str], str, int, collections.abc.Sequence[tuple[float, float]], float, float, collections.abc.Sequence[float]]]) -> None:
+    def __init__(self, reading_names: collections.abc.Sequence[str], readings: collections.abc.Sequence[tuple[collections.abc.Sequence[int], collections.abc.Sequence[float], float, bool, collections.abc.Sequence[int], collections.abc.Sequence[float], float, int, bool, float]], recorders: collections.abc.Sequence[tuple[collections.abc.Sequence[str], str, int, collections.abc.Sequence[tuple[float, float]], float, float, collections.abc.Sequence[float]]]) -> None:
         ...
     def arm(self, bracket_events: bool) -> None:
         """
@@ -4277,8 +4295,24 @@ class _LoopFeed:
         ...
     def reserve(self, n_samples: int, t_last: float, n_events: int = 0) -> None:
         ...
+    def restore(self, state: collections.abc.Sequence[float]) -> None:
+        """
+        Continue from save()'s output.
+        """
     def result(self, k: int) -> dict[typing.Any, typing.Any]:
         ...
+    def save(self) -> list[float]:
+        """
+        The feed's run state (snapshot field 18).
+        """
+    def save_to(self, snapshot: SolverSnapshot, spec: str) -> None:
+        """
+        save() into snapshot.recorder_state, spec into recorder_spec.
+        """
+    def stream_to(self, k: int, ring: LiveRingHandle) -> None:
+        """
+        Push recorder k's kept rows into a LiveRingHandle while the run goes.
+        """
     @property
     def armed(self) -> bool:
         ...
@@ -4293,6 +4327,9 @@ class _LoopFeed:
         ...
     @property
     def n_steps(self) -> int:
+        ...
+    @property
+    def restored(self) -> bool:
         ...
 def _branch_form_capabilities() -> dict[typing.Any, typing.Any]:
     """
@@ -4366,7 +4403,7 @@ def _probe_atoms(text: str) -> list[str]:
     """
     The readings of a probe expression, normalised, in first-use order (add-probes-and-recorders). Raises ValueError naming the probe.
     """
-def _record_pass(probes: collections.abc.Sequence[str], keep: str, every_n: int, windows: collections.abc.Sequence[tuple[float, float]], period: float, offset: float, reading_names: collections.abc.Sequence[str], t: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], readings: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], event_rows: collections.abc.Sequence[int], right: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], sample_times: collections.abc.Sequence[float] = []) -> dict[typing.Any, typing.Any]:
+def _record_pass(probes: collections.abc.Sequence[str], keep: str, every_n: int, windows: collections.abc.Sequence[tuple[float, float]], period: float, offset: float, reading_names: collections.abc.Sequence[str], t: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], readings: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], event_rows: collections.abc.Sequence[int], right: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], sample_times: collections.abc.Sequence[float] = [], ring: LiveRingHandle | None = None) -> dict[typing.Any, typing.Any]:
     """
     Kernel recorder pass over stored arrays (add-probes-and-recorders); use pulsim.simulate(..., recorders=[...]).
     """
@@ -4566,7 +4603,7 @@ def run_transient_bdf1(builder: CircuitBuilder, opts: SimulationOptions, switch_
     """
     BDF1 (implicit Euler) transient simulation. Use when the trapezoidal path rings on stiff problems — BDF1 is L-stable (adds artificial damping that kills numerical oscillation). Slower than trap because it assembles + factors per step; intended for ROBUSTNESS over speed.
     """
-def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int | None = None, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int | None = None, tol_newton_dx: float = -1.0, tol_newton_res: float = -1.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = [], newton_roundoff_budget: int | None = None, on_impulse_error: bool = False, observer_offsets: collections.abc.Sequence[float] = [], observer_origin: float = ..., observer_monitors: collections.abc.Sequence[bool] = [], observer_origins: collections.abc.Sequence[float] = [], observer_next_k: collections.abc.Sequence[int] = [], device_path: DevicePath = DevicePath.Legacy, mode_selection: int = 0) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
+def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int | None = None, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int | None = None, tol_newton_dx: float = -1.0, tol_newton_res: float = -1.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = [], newton_roundoff_budget: int | None = None, on_impulse_error: bool = False, observer_offsets: collections.abc.Sequence[float] = [], observer_origin: float = ..., observer_monitors: collections.abc.Sequence[bool] = [], observer_origins: collections.abc.Sequence[float] = [], observer_next_k: collections.abc.Sequence[int] = [], device_path: DevicePath = DevicePath.Legacy, mode_selection: int = 0, integrator: int = 0) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
     """
     Variable-step TR-BDF2 transient (engine='auto'): L-stable, 2nd order, LTE-controlled step, gate edges landed by bisection, diode crossings localized by Illinois. Returns (SimulationResult, stats dict). `observers[j]` ticks at t_start + observer_offsets[j] + k*observer_periods[j] (ceil((span - offset_j)/T_j) times, index order when coincident; offsets default to 0); observer_origin (NaN = t_start) moves the grid's origin, so a resumed run ticks where the uninterrupted one would; stats['control_tick_counts'] counts each.
     """
