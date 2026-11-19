@@ -3481,7 +3481,8 @@ def simulate(
     # wrap. Saves ~10-30 % wall time on chains > 5 blocks.
     # (Not with kernel tick sources: the chain entry point takes none.)
     cxx_chain = getattr(step_observer, "_cxx_chain", None) \
-        if step_observer is not None and not _plan.fixed_tick_kwargs() \
+        if step_observer is not None and not (_plan._kernel_ticks
+                                              or _plan._queue_groups) \
         else None
     if cxx_chain is not None:
         from . import _pulsim as _k  # type: ignore[import-not-found]
@@ -3528,12 +3529,8 @@ def simulate(
         if resume_from is not None:
             kwargs["resume_from"] = resume_from
         # Python tick sources: scheduled by the kernel's event queue.
-        kwargs.update(_plan.fixed_tick_kwargs())
-        _origins = _resume_tick_origins(resume_from,
-                                        len(kwargs.get("tick_periods", ())))
-        if _origins:   # a resume keeps the run's tick grid
-            kwargs["tick_origins"] = _origins
-            kwargs["tick_next_ks"] = _resume_tick_next_k(resume_from, len(_origins))
+        kwargs.update(_plan.fixed_tick_kwargs(float(dt), float(t_start),
+                                              resume_from))
         if _PWL_RECIPE.get() is not None:  # sweep(circuit, ...) replays it
             _PWL_RECIPE.get().update(
                 opts=opts, dt=dt, kwargs=dict(kwargs), mmc=bool(mmc_arms),
@@ -3623,7 +3620,7 @@ def simulate(
             switch_fn=switch_fn, b_extra_fn=b_extra_fn,
             # the chain fast path runs the observer's C++ chain; the
             # kernel's Python tick sources are step-loop observers too
-            step_observer=(_plan.fixed_tick_kwargs().get("tick_fns")
+            step_observer=([f for f, _p in _plan._kernel_ticks]
                            or (None if cxx_chain is not None
                                else step_observer)),
             should_continue=should_continue,

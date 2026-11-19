@@ -23,6 +23,10 @@ Measured 2026-11-18 (macOS arm64), max |v(kT) - ref| / span:
   ll15_boost_closed_loop  2.9e-8        5.0e-7  3.9e-5   3.0e-2  9.9e-6 (3.0e-2)     6.8e-7
   ll16_flyback (coupled)  9.5e-8        8.2e-7  3.0e-5   2.5e-2  2.9e-4 (2.6e-2)     1.8e-5
 pwl converges at first order (label time: the helper samples x(kT - dt)).
+Rows 'pwl+split state' (control_tick='state', G30 / G32) and 'dsed' added
+2026-11-18: cl_buck_pi 8.4e-6 / 5.5e-11, cl_buck_aggressive_pi 8.3e-5 /
+1.4e-11, cl_boost_pi 4.0e-5 / 8.4e-8; dsed refuses the Shockley-diode
+circuits (ll14-ll16).
 cl_boost_pi before: trbdf2 hit max_steps; OPAQUE pwl+split is skipped (a
 Python gate x 1e7 steps). Only v(out) and the duty are compared here; the
 V(sw) / I(L) figures in G23 are engine vs trbdf2 rtol 1e-10.
@@ -259,6 +263,8 @@ def main():
             ("trbdf2 default", "trbdf2", {}),
             ("pwl", "pwl", {}), ("pwl+restart", "pwl", dict(discontinuity_restart=True)),
             ("pwl+split", "pwl", split),
+            ("pwl+split state", "pwl", dict(control_tick="state", **split)),
+            ("dsed", "dsed", {}),
             ("pwl dt/4 split", "pwl", dict(dt=case.dt / 4, **split)),
             ("pwl dt/16 split", "pwl", dict(dt=case.dt / 16, **split)),
             ("pwl dt/4 restart", "pwl", dict(dt=case.dt / 4, discontinuity_restart=True)),

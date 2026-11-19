@@ -202,7 +202,7 @@ def _sat_buck():
     return b, loop
 
 
-def test_closed_loop_with_stateful_devices_resumes_and_its_pickle_is_refused():
+def test_closed_loop_with_stateful_devices_resumes_and_from_its_pickle():
     """The control graph's resume state and the device interface's flat
     device-state vector (pickle version 3) in one snapshot."""
     t1, t2, dt = 1.53e-3, 3e-3, 1e-6
@@ -223,8 +223,14 @@ def test_closed_loop_with_stateful_devices_resumes_and_its_pickle_is_refused():
     assert np.abs(xf[:n] - xs[:n]).max() <= 1e-9 * np.abs(xf).max()
     copy = pickle.loads(pickle.dumps(snap))
     assert list(copy.dev_state) == list(snap.dev_state)
-    with pytest.raises(p.UnsupportedError, match="was pickled"):
-        p.simulate(b, t2, dt=dt, closed_loops=[lp], resume_from=copy)
+    # the controllers' state pickles too (G33): new controllers built the
+    # same way continue as the in-memory resume did
+    b2, lp2 = _sat_buck()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        third = p.simulate(b2, t2, dt=dt, closed_loops=[lp2], resume_from=copy)
+    assert [d for _, d in lp2.duty_history] == [d for _, d in lp.duty_history]
+    assert np.asarray(third.states).tobytes() == xs.tobytes()
 
 
 def test_a_twelve_field_version_3_pickle_still_loads():

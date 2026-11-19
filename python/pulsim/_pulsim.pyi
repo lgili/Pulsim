@@ -2540,7 +2540,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, bool, tuple[float, int, float, bool], typing.Any, list[float], list[int]]:
+    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, typing.Any, tuple[float, int, float, bool], typing.Any, list[float], list[int]]:
         ...
     def __init__(self) -> None:
         ...
@@ -3331,6 +3331,14 @@ class CxxBlockChain:
         """
         Order the blocks (direct-feedthrough topological order, ties by insertion); raises ControlGraphBuildError on an algebraic loop.
         """
+    def drop_horizon_state(self) -> None:
+        """
+        Forget the tick the last run's horizon left out (a run that does not resume the snapshot holding it).
+        """
+    def dump_state(self, state: CxxBlockChainState) -> bytes:
+        """
+        A state saved from this graph as bytes (what a pickled snapshot carries; read back on the same machine and build).
+        """
     def get_channel(self, name: str) -> float:
         ...
     def get_channel_history(self, name: str) -> numpy.typing.NDArray[numpy.float64]:
@@ -3341,10 +3349,18 @@ class CxxBlockChain:
         """
         Return the parallel time vector — one entry per recorded step. Same length as each channel history.
         """
+    def group_next_k(self, group: int) -> int:
+        """
+        Rate group `group`'s next tick index on the graph's grid.
+        """
     def group_offset(self, group: int) -> float:
         ...
     def group_period(self, group: int) -> float:
         ...
+    def load_state(self, data: bytes) -> CxxBlockChainState:
+        """
+        The state dump_state wrote, restorable into this graph (ValueError: bytes of another graph). The graph is unchanged.
+        """
     def make_b_extra_fn(self, state_size: int) -> collections.abc.Callable[[float], typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]]:
         """
         Return a b_extra_fn(t) callable for run_transient. Use together with make_step_observer when the chain has motor blocks that inject back-EMF / current values per step.
@@ -3352,6 +3368,10 @@ class CxxBlockChain:
     def make_pwm_gate(self, num_switches: int, legs: collections.abc.Sequence[tuple[str, int, float, float]]) -> CxxChainPwmGate:
         """
         A switch_fn (C++, no GIL): for each (channel, switch_idx, period, phase) the bit is ON while pulsim.control.pwm_on(t, period, duty, phase) with duty = what the channel's sinks see.
+        """
+    def make_queue_tick(self, group: int) -> CxxChainTick:
+        """
+        The kernel tick source of rate group `group` (C++, no GIL): marks it due for the graph's next fixed-step pass.
         """
     def make_signal_gate(self, num_switches: int, mapping: collections.abc.Sequence[tuple[str, int]]) -> CxxChainSignalGate:
         """
@@ -3423,6 +3443,10 @@ class CxxBlockChain:
         """
         Set a signal and what its circuit sinks see before the first tick (call after compile()).
         """
+    def set_queue_driven(self, on: bool) -> None:
+        """
+        Fixed engine: the kernel's event queue decides when a rate group ticks (make_queue_tick); the graph's observer runs the marked groups.
+        """
     def set_solver_dt(self, dt: float) -> None:
         ...
     def sink_value(self, name: str) -> float:
@@ -3440,11 +3464,21 @@ class CxxBlockChain:
         Blocks holding state that save_state() does not copy.
         """
     @property
+    def grid_t0(self) -> float:
+        """
+        The tick grid's t0 (the first observer call's time).
+        """
+    @property
     def has_rates(self) -> bool:
         ...
     @property
     def label_time(self) -> bool:
         ...
+    @property
+    def last_call_t(self) -> float:
+        """
+        The label of the last observer call.
+        """
     @property
     def n_block_evals(self) -> int:
         ...
@@ -3455,6 +3489,9 @@ class CxxBlockChain:
         """
     @property
     def n_evals(self) -> int:
+        ...
+    @property
+    def queue_driven(self) -> bool:
         ...
     @property
     def tick_jitter_max(self) -> float:
@@ -3950,7 +3987,7 @@ def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typ
     """
     Bridge.11 — native PEDSimulator (DOPRI5) over a NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all execute in C++ without GIL roundtrips; the only Python callback is `switch_fn` at gate edges (rare). v2.0 Phase 3: PWL diodes are commutated by auto-derived event predicates on the reconstructed branch voltage, and every event projects the state onto the new mode's slow manifold (consistent reinitialization; pass enable_event_projection=False for the raw pre-projection behaviour).
     """
-def run_transient(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: typing.Any, b_extra_fn: typing.Any = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, step_observer: typing.Any = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None, tick_periods: collections.abc.Sequence[float] = [], tick_fns: collections.abc.Sequence[collections.abc.Callable[[float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]], None]] = [], tick_before: typing.Any = None, tick_origin: float = ..., tick_origins: collections.abc.Sequence[float] = [], tick_next_ks: collections.abc.Sequence[int] = []) -> SimulationResult:
+def run_transient(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: typing.Any, b_extra_fn: typing.Any = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, step_observer: typing.Any = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None, tick_periods: collections.abc.Sequence[float] = [], tick_fns: collections.abc.Sequence[typing.Any] = [], tick_before: typing.Any = None, tick_origin: float = ..., tick_origins: collections.abc.Sequence[float] = [], tick_next_ks: collections.abc.Sequence[int] = []) -> SimulationResult:
     """
     Run a fixed-dt transient simulation. switch_fn(t) → SwitchStateMask; b_extra_fn(t) → Vector adds to b_constant at each step. `step_observer(t, x)` (optional) is a void callback fired at the start of every step BEFORE switch_fn/b_extra_fn evaluate — use it to update Python-side controller state (PI, comparator, etc.) so the next switch_fn call reads the new duty. A `b_extra_fn` may declare its jump instants with a `next_jump_after(t)` attribute (first jump strictly after t, inf when none): with discontinuity_restart they restart the step and are read at their left limit; an undeclared jump is not restarted. `enable_nonlinear_refresh`: None (default) lets the kernel stamp the Newton devices (smooth / Shockley diode, MOSFET, IGBT) when the circuit has any; True is the same (deprecated); False with such devices raises UnsupportedError.
     """
