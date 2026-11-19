@@ -1366,7 +1366,11 @@ void init_module(py::module_& m) {
                         const NativeAdapter* ad = &adapter;
                         const pulsim::Index from = d.from;
                         const pulsim::Index to = d.to;
-                        const pulsim::Index var = d.var;
+                        // an ideal diode's ON law is its solved current; with
+                        // R_on > 0 v_D carries it (SchedulerDiode::reads_current)
+                        const pulsim::Index var =
+                            d.var >= 0 && adapter.pool().branch_R_on(d.branch_id) == Real{0}
+                                ? d.var : pulsim::Index{-1};
                         const auto prm = d.params();
                         pred.add_predicate(pulsim::dsed::EventPredicate{
                             .name = label + " turns ON",

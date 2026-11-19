@@ -1113,7 +1113,10 @@ public:
                     }
                     if ((WTa * st).cwiseAbs().maxCoeff()
                         > Real{1e-9} * std::max(Real{1}, WTa.cwiseAbs().maxCoeff())) {
-                        throw std::runtime_error(std::format(
+                        // refused by name (dsed-only extractor): the capacitor-source
+                        // loop of an ON ideal diode (v_C = v_s(t) - V_f) is not posed
+                        throw UnsupportedError("dsed", "source_capacitor_loop",
+                            std::string{graph_.branch_name(bid)}, "Source", std::format(
                             "compute_lti_state_space: the time-varying source {} sits "
                             "in a capacitor loop / inductor cut-set: the dependent "
                             "state follows the source's derivative, which the exact "

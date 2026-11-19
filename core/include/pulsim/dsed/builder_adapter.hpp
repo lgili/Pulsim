@@ -562,13 +562,21 @@ public:
         const Vector kq = Q.transpose() * e.constraint_k;
         const DenseMatrix Kq = Q.transpose() * K;
         const Vector x0 = x;
+        // significance on the CIRCUIT's scale, not on the residue's own size: a
+        // located zero of an ideal diode's current (1e-15 A left in a cut inductor)
+        // is not an impulsive event and writes no record
+        const auto sc = port_scale(t, x0);
+        Vector xs(x0.size());
+        for (Index i = 0; i < x0.size(); ++i)
+            xs[i] = std::max(std::abs(x0[i]),
+                             e.state_is_cap[static_cast<Size>(i)] ? sc.vscale : sc.iscale);
         std::vector<ReinitRecord> recs;
         for (Index j = 0; j < d; ++j) {
             const Real lam = r[j] / es.eigenvalues()[j];
             x.noalias() -= EiKt * Q.col(j) * lam;
             const Real scale = Kq.row(j).cwiseAbs().maxCoeff();
             const Real tol = Real{1e-9}
-                * (Kq.row(j).cwiseAbs().dot(x0.cwiseAbs()) + std::abs(kq[j]));
+                * (Kq.row(j).cwiseAbs().dot(xs) + std::abs(kq[j]));
             if (!(std::abs(r[j]) > tol) || scale == Real{0}) {
                 continue;
             }

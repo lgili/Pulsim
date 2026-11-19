@@ -258,17 +258,6 @@ def test_branch_switch_refused_by_name(engine):
         engine, "branch_form", "S", "Switch")
 
 
-@pytest.mark.parametrize("engine", ["dsed"])
-def test_branch_diode_refused_by_name(engine):
-    b = p.CircuitBuilder()
-    b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 1e3)
-    b.add_diode("D", "a", "o", form="branch", R_on=1e-3, g_off=1e-9)
-    b.add_resistor("R", "o", "gnd", 10.0)
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim(b, t_end=1e-3, switch_fn=lambda t: p.SwitchStateMask(1), engine=engine)
-    assert (ei.value.feature, ei.value.device, ei.value.kind) == ("branch_form", "D", "Diode")
-
-
 def test_branch_switch_refused_by_the_ac_sweep():
     b = _rl()
     with pytest.raises(p.UnsupportedError) as ei:

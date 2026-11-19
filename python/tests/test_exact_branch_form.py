@@ -178,6 +178,8 @@ def test_an_ideal_half_wave_rl_rectifier_matches_its_closed_form():
     np.testing.assert_allclose(i, ref, rtol=0, atol=1e-9)
     # the turn-off is located on the current itself: the event instant is beta
     assert np.min(np.abs(np.asarray(r.event_times) - beta)) < 1e-12
+    # a located zero of i followed by i = 0 is not impulsive: no record
+    assert len(r.reinit_records) == 0
 
 
 def test_an_ideal_boost_in_dcm_matches_its_closed_form():
@@ -212,6 +214,7 @@ def test_an_ideal_boost_in_dcm_matches_its_closed_form():
     et = np.asarray(r.event_times)
     for tz in t_off:
         assert np.min(np.abs(et - tz)) < 1e-12
+    assert len(r.reinit_records) == 0   # ten located turn-offs, none impulsive
 
 
 def test_an_ideal_diode_forward_across_a_source_is_refused_by_name():
@@ -235,3 +238,77 @@ def test_a_branch_form_diode_with_its_own_r_on_divides_the_sine():
     t, v = np.asarray(r.times), np.asarray(r.v("k"))
     ref = np.maximum(10.0 * np.sin(2 * np.pi * 50.0 * t), 0.0) * 10.0 / 11.0
     np.testing.assert_allclose(v, ref, rtol=0, atol=1e-9)
+
+
+def _doubler(form):
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, 12.0, 100.0)
+    b.add_capacitor("C1", "ac", "cp", 100e-6, 0.0)
+    for name, a, c in (("D2", "gnd", "cp"), ("D1", "cp", "out")):
+        if form == "branch":
+            b.add_diode(name, a, c, None, 1e-6, form="branch", R_on=1 / 200.0)
+        else:
+            b.add_diode(name, a, c, 200.0, 1e-6)
+    b.add_capacitor("Cout", "out", "gnd", 470e-6, 0.0)
+    b.add_resistor("R", "out", "gnd", 1e3)
+    return b
+
+
+def test_a_branch_diode_with_r_on_is_the_conductance_diode():
+    """R_on > 0: v_D = V_f + R_on*i is read across the nodes, as the conductance form
+    reads it. Read as its current, D2's turn-on (i = 0 tied with the OFF side, a
+    5e-7 s R_on*C1 pole) chattered 32 times at 3.4557 ms."""
+    rb, rc = (_run(_doubler(f), 0.05, None, dt=50e-6) for f in ("branch", "conductance"))
+    tb, tc = np.asarray(rb.times), np.asarray(rc.times)
+    vb = np.interp(tc, tb, np.asarray(rb.v("out")))
+    np.testing.assert_allclose(vb, np.asarray(rc.v("out")), rtol=0, atol=1e-6)
+
+
+@pytest.mark.parametrize("mode_selection", [None, "lcp"])
+def test_two_ideal_diodes_in_parallel_split_by_an_admissible_mode(mode_selection):
+    """Both ON is a loop of closed ideal elements (no mode to pose); one ON and one
+    OFF is admissible (the OFF one sits at v_D = 0): the run takes it, it is not
+    refused. The split itself is not unique."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 50.0)
+    _ideal_diode(b, "D1", "a", "k")
+    _ideal_diode(b, "D2", "a", "k")
+    b.add_resistor("R", "k", "gnd", 10.0)
+    kw = {} if mode_selection is None else {"mode_selection": mode_selection}
+    r = _run(b, 0.02, None, **kw)
+    t = np.asarray(r.times)
+    np.testing.assert_allclose(np.asarray(r.v("k")),
+                               np.maximum(10 * np.sin(2 * np.pi * 50 * t), 0.0), rtol=0, atol=1e-9)
+    i1, i2 = np.asarray(r.i("D1")), np.asarray(r.i("D2"))
+    np.testing.assert_allclose(i1 + i2, np.asarray(r.v("k")) / 10.0, rtol=0, atol=1e-9)
+    assert min(i1.min(), i2.min()) > -1e-9
+
+
+def test_an_ideal_clamp_onto_a_lower_source_is_refused_by_name():
+    """D1 from the sine and D2 clamping onto 3 V: above 3 V no mode is admissible
+    (both ON short the two sources; either OFF breaks its law)."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 50.0)
+    _ideal_diode(b, "D1", "a", "k")
+    b.add_resistor("R", "k", "gnd", 10.0)
+    b.add_voltage_source("V2", "m", "gnd", 3.0)
+    _ideal_diode(b, "D2", "k", "m")
+    with pytest.raises(p.UnsupportedError) as ei:
+        _run(b, 0.02, None)
+    assert ei.value.feature == "ideal_voltage_loop"
+
+
+def test_the_periodic_steady_state_refuses_an_ideal_diode_by_name():
+    """The exact period map reads a diode's current as g*v: a branch-form diode is
+    refused there by name (it was a 'grazing' refusal: R_on = 0 zeroes g*v)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_inductor("L", "vin", "sw", 100e-6)
+    b.add_ideal_switch("S", "sw", "gnd", 0.0, 0.0)
+    _ideal_diode(b, "D", "sw", "out")
+    b.add_capacitor("C", "out", "gnd", 47e-6, 30.0)
+    b.add_resistor("R", "out", "gnd", 500.0)
+    sf = p.make_pwm_switch_fn(1e5, 0.5, b.switch_index_of("S"), b.graph.num_switches)
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.periodic_steady_state(b, period=1e-5, switch_fn=sf)
+    assert ei.value.feature == "branch_form" and ei.value.device.startswith("D")
