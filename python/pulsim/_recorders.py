@@ -263,7 +263,8 @@ def _refuse(kw: dict, recs: "list[Recorder]", t_start: float,
                 raise ValueError(f"recorder {r.name!r}: {e}") from None
             _check_device_atoms(
                 getattr(kw.get("builder"), "builder", kw.get("builder")),
-                r, p, atoms, kw.get("engine"), kw.get("integrator"))
+                r, p, atoms, kw.get("engine"),
+                kw.get("integrator") or getattr(kw.get("solver"), "integrator", None))
         for k, (a, b) in enumerate(r.windows):
             # a window may end after t_end: it is reported open (NaN) and a
             # run resumed from final_snapshot continues it (task 0b.7)

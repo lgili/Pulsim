@@ -269,3 +269,8 @@ def test_device_readings_on_esdirk43_agree_with_trbdf2_and_refuse_the_capacitor(
                    recorders=[p.Recorder("r", ["i(C)"])])
     assert (err.value.feature, err.value.device, err.value.kind) == (
         "integrator=esdirk43", "C", "capacitor")
+    # the same through the SolverOptions bundle
+    with pytest.raises(p.UnsupportedError, match="esdirk43"):
+        p.simulate(b, t_end, switch_fn=fn, **_RUNS["trbdf2"],
+                   solver=p.SolverOptions(integrator="esdirk43"),
+                   recorders=[p.Recorder("r", ["p(C)"])])
