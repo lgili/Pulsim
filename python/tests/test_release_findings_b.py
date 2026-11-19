@@ -38,6 +38,10 @@ F_PWL_SAMPLES = pytest.mark.xfail(strict=True, reason=(
 F_64 = pytest.mark.xfail(strict=True, reason=(
     "release finding F-6-4: the loss port integrates a restart step as the trapezoid "
     "of its end powers"))
+F_44 = pytest.mark.xfail(strict=True, reason=(
+    "release finding F-4-4: the in-loop recorder (LoopFeed) is fed the restart step's "
+    "ends only; a capacitor reading is the companion's END current at every point, so "
+    "the step's lines need the stage currents (C·(X1 − x0)/(γh)) fed with them"))
 F_65 = pytest.mark.xfail(strict=True, reason=(
     "release finding F-6-5: res.i(source) reads the waveform's right value at a row "
     "the restart rule solved with the left limit"))
@@ -309,3 +313,28 @@ def test_f57_pwl_duty_credits_the_part_of_a_step_before_a_commutation(V_th):
                                        switch_fn=pwm)}["D1"]["duty_conducting"]
          for r in (r_pwl, r_ex)]
     assert abs(d[0] - d[1]) < 2e-3, d
+
+
+# ---------------------------------------------------------------------------
+# F-4-4: the in-loop recorder's window integrals on restart steps
+# ---------------------------------------------------------------------------
+
+@F_44
+def test_f44_recorder_window_charge_on_restart_steps():
+    """∫i_C over a window = C·Δv_C (the integrator's own identity; 2e-4 is
+    the trapezoidal engine's residue at the window ends). Restart rule:
+    4e-4 off on this buck."""
+    import test_recorder_device_readings as m
+    b, fn, t_end, _, _ = m._buck()
+    wins = [(0.07 * t_end + 1.234e-9, 0.29 * t_end + 4.321e-9),
+            (0.31 * t_end + 2.2e-9, 0.97 * t_end)]
+    kw = dict(PWL_REL, dt=1e-6, switch_fn=fn)
+    res = _quiet(p.simulate, b, t_end, recorders=[
+        p.Recorder("r", ["i(C)", "v(out)"], windows=wins)], **kw)
+    res2 = _quiet(p.simulate, b, t_end, recorders=[
+        p.Recorder("r", ["v(out)"], keep="times", times=[x for w in wins for x in w])], **kw)
+    q = res.recorded["r"].windows["i(C)"]["integral"]
+    ends = res2.recorded["r"]["v(out)"]
+    for k in range(len(wins)):
+        dq = 10e-6 * (ends[2 * k + 1] - ends[2 * k])
+        assert abs(q[k] - dq) <= 2e-4 * abs(dq) + 1e-12, (k, q[k], dq)
