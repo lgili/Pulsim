@@ -471,7 +471,10 @@ inline SimulationResult run_transient(
         }
         // t0_tol = the take tolerance: a tick a previous run left out at
         // its t_end (within tick_tol of it) is a resumed run's first.
-        tick_queue.start(opts.t_start, opts.t_end - tick_tol, tick_tol);
+        // A closed_end rate's instant at t_end fires at the last observer
+        // call (labelled t_end, as every tick: the state there is x_{n-1}).
+        tick_queue.start(opts.t_start, opts.t_end - tick_tol, tick_tol,
+                         opts.t_end + tick_tol);
         result.control_tick_counts.assign(ticks->rates.size(), 0);
     }
     const StepObserverFn step_observer = !has_ticks ? StepObserverFn{} :
