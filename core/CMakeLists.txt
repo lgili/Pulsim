@@ -93,6 +93,7 @@ if(PULSIM_BUILD_TESTS)
         tests/step/test_integrators.cpp
         tests/step/test_controllers.cpp
         tests/step/test_stepper.cpp
+        tests/step/test_esdirk43.cpp  # add-high-order-stiff-integrator
     )
     target_link_libraries(pulsim_core_step_tests
         PRIVATE
