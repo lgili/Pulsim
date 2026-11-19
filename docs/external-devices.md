@@ -94,7 +94,10 @@ excluded). Every model must be reentrant; there is no serial-only mode.
   modification time or bytes changed — the file is hashed at each load, so a
   same-size same-second rebuild is seen too): the loader would otherwise keep
   running the old code. Release those circuits (or restart) to load the new
-  build. Windows locks a loaded DLL, so it cannot change there; a path of
+  build. Replace the file as a linker does (a new file renamed over the
+  path): copying over a loaded library in place truncates it, and on Linux
+  the process then crashes at its next call into the old image, which no
+  host can prevent. Windows locks a loaded DLL, so it cannot change there; a path of
   MAX_PATH (260) characters or more is loaded with the `\\?\` prefix.
 
 ## Python
