@@ -463,6 +463,26 @@ public:
     void stage_clear() noexcept {
         for (auto& e : entries_) e.lam_off = {};
     }
+    // ---- TR-BDF2's q rows (the error estimate) ----
+    /// λ − λ_old at γ (the stage-1 capture) and at the step end, in the
+    /// increment form `commit`'s law is exact in.
+    void trbdf2_increments(const Vector& x1, Real* dqg, Real* dq1) const {
+        for (const auto& e : entries_) {
+            const auto dl = delta_lambda(e, x1);
+            for (Size k = 0; k < 3; ++k) {
+                *dq1++ = dl[k] - e.lam_off[k];
+                *dqg++ = e.dlam_gamma[k];
+            }
+        }
+    }
+    /// atol_q / atol per row: the stator self-inductance (λ = L·i).
+    void q_scales(Real* s) const {
+        for (const auto& e : entries_) {
+            const Real L = e.induction ? e.im.L_ls + e.im.L_m
+                                       : std::max(e.params.L_d, e.params.L_q);
+            for (Size k = 0; k < 3; ++k) *s++ = L;
+        }
+    }
     /// The slot refresh reads the probe's voltages, not its step.
     void refresh_derivatives(const Vector& x_probe, Real /*h*/) {
         refresh_derivatives(x_probe);

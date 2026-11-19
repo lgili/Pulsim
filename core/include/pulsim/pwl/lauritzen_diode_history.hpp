@@ -283,6 +283,22 @@ public:
         }
     }
     void stage_clear() noexcept {}
+    // ---- TR-BDF2's q rows (the error estimate) ----
+    /// q − q_n at γ (the stage-1 capture) and at the step end (the BDF2
+    /// stage's K0/K1, as `commit` computes it).
+    void trbdf2_increments(const Vector& x1, Real* dqg, Real* dq1) const {
+        for (const auto& e : entries_) {
+            const Real v = stamping::read_node_voltage(x1, e.from)
+                         - stamping::read_node_voltage(x1, e.to);
+            *dq1++ = e.k0 + e.k1 * models::LauritzenDiode::junction_charge<Real>(v, e.params)
+                     - e.q_m_prev;
+            *dqg++ = e.q_m_gamma - e.q_m_prev;
+        }
+    }
+    /// atol_q / atol per row: q_M = τ·i on the steady-state curve.
+    void q_scales(Real* s) const {
+        for (const auto& e : entries_) *s++ = e.params.tau;
+    }
 
     /// Flat (q_M, f) pairs, for `SolverSnapshot`. The gamma point
     /// is deliberately NOT carried: it lives only between the two

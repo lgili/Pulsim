@@ -151,6 +151,7 @@ inline pybind11::dict trbdf2_stats_dict(const pulsim::solver::TrBdf2Stats& st) {
     d["n_filtered_estimates"] = st.n_filtered_estimates;
     d["n_interp_floor_landings"] = st.n_interp_floor_landings;
     d["n_roundoff_floor_accepts"] = st.n_roundoff_floor_accepts;
+    if (!st.forced_trace.empty()) d["forced_trace"] = st.forced_trace;
     d["n_noise_held_decisions"] = st.n_noise_held_decisions;
     d["n_probe_noise_retakes"] = st.n_probe_noise_retakes;
     d["n_factor_builds"] = st.n_factor_builds;

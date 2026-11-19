@@ -35,3 +35,10 @@
 ## 7. Verification
 - [ ] 7.1 `ruff check`, `pytest` (throttled), `ctest`, stub check
 - [ ] 7.2 `openspec validate update-trbdf2-error-control --strict` and `openspec validate --all --strict`
+
+## 8. Stateful kinds in the estimate (DECISIONS 10)
+- [ ] 8.1 Per kind: `trbdf2_increments` (q − q_n at γ and at the step end, by the kind's own law) and `q_scales` (atol_q / atol from the device's parameters); folds in `StatefulHistories`
+- [ ] 8.2 One q block in the shared error phase for both integrators (TR-BDF2: Bank's estimate on the stage-implied derivatives; esdirk43: the embedded difference); the esdirk43 floor `1e-3·max|q|` and `ed_sqmax` removed
+- [ ] 8.3 Proof per kind against its truth over rtol 1e-4 … 1e-10 (`probes/q_rows_order.py`); `test_trbdf2_stateful_error_norm.py`
+- [ ] 8.4 An idle stateful device takes the same steps (both integrators)
+- [ ] 8.5 Every moved case listed with its truth; circuits without a stateful kind byte-identical; cost within 0.5 %

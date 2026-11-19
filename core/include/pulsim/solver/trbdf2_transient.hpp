@@ -260,6 +260,9 @@ struct TrBdf2Options {
     /// DECISIONS 17): 0 TR-BDF2's rule as before (an all-positive noise
     /// right-hand side), 1 alternating signs. ESDIRK always takes 1.
     int roundoff_floor = 0;
+    /// Diagnostic (low-level binding only): record each forced accept in
+    /// `TrBdf2Stats::forced_trace`. Off: nothing is recorded.
+    bool trace_forced = false;
     /// The integrator of the variable step (add-high-order-stiff-integrator):
     /// 0 TR-BDF2, 1 ESDIRK4(3)6L[2]SA (`simulate(integrator='esdirk43')`).
     /// The phases are shared; only the stages, the estimate and the history
@@ -358,6 +361,10 @@ struct TrBdf2Stats {
     /// through each entry), not within atol + rtol*|y|: the requested
     /// tolerance is below what the solve can resolve at that state.
     Size n_roundoff_floor_accepts = 0;
+    /// With `trace_forced`: per forced accept {t, h, err, who, w}, `who` the
+    /// branch id of the entry with the largest |estimate / scale| (or
+    /// −1 − r for stateful q row r) and `w` that ratio.
+    std::vector<std::array<Real, 5>> forced_trace;
     /// Diode flips a zero-time cascade or a landing declined because the
     /// crossing signal was within that solve's own round-off bound (a
     /// node held only by OFF conductances at a tiny probe step).
@@ -2275,8 +2282,19 @@ inline SimulationResult run_transient_trbdf2(
         // landing.)
         std::vector<Real> ed_sq0, ed_shd0, ed_spsi, ed_sdpsi, ed_spsi5, ed_sdpsi5;
         std::array<std::vector<Real>, step::Esdirk43::n_stages> ed_sd;
-        std::vector<Real> ed_sqmax;   // per q row: the largest |q| so far (estimate floor)
         pwl::StatefulHistories::Snapshot ed_hs_snap;
+        // The q rows in the error norm, both integrators (tb_error): TR-BDF2's
+        // q_n, q̇_n and the increments at γ and at the step end; per row
+        // atol_q / atol (set on the first estimate of the run).
+        const bool q_rows = hs.any();
+        std::vector<Real> q_n, q_fn, q_dg, q_d1, q_atol;
+        // TR-BDF2's rows join from the first committed step: before it the
+        // kinds' derivative slots are init's zeros (a resume carries real
+        // ones), an O(h) error no step can shrink below Newton's reach (a
+        // nonlinear capacitor from x = 0 behind a 60 V source aborted at
+        // h_min). ESDIRK keeps its first-step estimate (DECISIONS 17): a
+        // machine started from rest needs it.
+        bool q_live = resume_from != nullptr || esdirk;
         // The five stages of one ESDIRK4(3) step on the factor of h/2
         // (G + C/(γh)): stage s is backward Euler of γh from the pseudo
         // previous state ψ_s (the entries' state slots, derivative slots 0),
@@ -2895,12 +2913,14 @@ inline SimulationResult run_transient_trbdf2(
         // error: the LTE and the controller's verdict (reject, forced accept)
         auto tb_error = [&]<bool kE = false>() PULSIM_STEP_PHASE {
             (void)ed_hd0; (void)ed_d; (void)ed_y0;   // captured outside kE (MSVC)
-            (void)ed_sf; (void)ed_sq0; (void)ed_shd0; (void)ed_sd; (void)ed_spsi5; (void)ed_sqmax;
+            (void)ed_sf; (void)ed_sq0; (void)ed_shd0; (void)ed_sd; (void)ed_spsi5;
 
             // ---- LTE over the differential variables ----
             Real err_sq = Real{0};
-            Real q_sq = Real{0};   // the q rows' share (esdirk43), kept for the floor
+            Real q_sq = Real{0};   // the stateful q rows' share, kept for the floor
             Size n_q = 0;
+            Real q_wmax = Real{-1};   // the largest q-row ratio (trace_forced)
+            Size q_who = 0;
             Size n_err = 0;
             est_v.assign(entries.size(), Real{0});
             est_sc.assign(entries.size(), Real{1});
@@ -3029,42 +3049,71 @@ inline SimulationResult run_transient_trbdf2(
                 err_sq += w * w;
                 ++n_err;
             }
-            if constexpr (kE) {
-                // The stateful kinds' q rows join the norm (DECISIONS 17): a
-                // circuit whose dynamics live only there (a Lauritzen diode
-                // behind a resistor, a hysteretic core) had no estimate and
-                // sat at its step ceiling at any rtol. Same embedded weights
-                // on the q increments; scale rtol·max(|q0|, |q1|) with a
-                // floor at 1e-3 of the row's largest |q| so far (no atol:
-                // a charge or a flux has no unit in common with it).
-                if (ed_sf && !sdirk) {
-                    using E = step::Esdirk43;
-                    const Size nq = ed_sq0.size();
-                    ed_sqmax.resize(nq, Real{0});
-                    for (Size r = 0; r < nq; ++r) {
-                        Real ee = E::err_explicit_weight() * ed_shd0[r];
+            // The stateful kinds' q rows join the norm on both integrators
+            // (update-trbdf2-error-control DECISIONS 10): a circuit whose
+            // dynamics live only there (a Lauritzen recovery, an IGBT tail)
+            // had no estimate and sat at its ceiling at any rtol. Per row the
+            // integrator's own estimate of q, scale atol·s + rtol·max(|q_n|,
+            // |q_1|) with s the device's capacitance / inductance / time
+            // constant (`q_scales`), so a row that stays 0 keeps a finite
+            // scale. Not on an SDIRK restart step (its stages are not the
+            // method the estimate is for; the entries use their own there).
+            if (q_rows && q_live && !sdirk) {
+                const Size nq = hs.stage_rows();
+                if (q_atol.size() != nq) {
+                    q_atol.resize(nq);
+                    hs.q_scales(q_atol.data());
+                }
+                if (!kE) {
+                    q_n.resize(nq);
+                    q_fn.resize(nq);
+                    q_dg.resize(nq);
+                    q_d1.resize(nq);
+                    hs.stage_start(Real{1}, q_n.data(), q_fn.data());
+                    hs.trbdf2_increments(x_1, q_dg.data(), q_d1.data());
+                }
+                for (Size r = 0; r < nq; ++r) {
+                    Real ee, q0, q1;
+                    if constexpr (kE) {
+                        using E = step::Esdirk43;
+                        ee = E::err_explicit_weight() * ed_shd0[r];
                         for (int j = 0; j < E::n_stages; ++j) {
                             ee += E::err_weight(j) * ed_sd[static_cast<std::size_t>(j)][r];
                         }
-                        const Real q1 = ed_spsi5[r] + ed_sd[E::n_stages - 1][r];
-                        const Real qm = std::max(std::abs(ed_sq0[r]), std::abs(q1));
-                        // the max reads committed values only (q0): a rejected
-                        // trial's q1 must not loosen later scales
-                        ed_sqmax[r] = std::max(ed_sqmax[r], std::abs(ed_sq0[r]));
-                        const Real sc = opts.rtol * std::max(qm, Real{1e-3} * ed_sqmax[r])
-                                        + std::numeric_limits<Real>::min();
-                        const Real w = ee / sc;
-                        q_sq += w * w;
-                        ++n_q;
+                        q0 = ed_sq0[r];
+                        q1 = ed_spsi5[r] + ed_sd[E::n_stages - 1][r];
+                    } else {
+                        // the derivatives the stage rules imply: trapezoidal
+                        // q_g = q_n + γh/2 (f_n + f_g), BDF2 f_1 = (c1 q_1 +
+                        // c2 q_g + c3 q_n)/h with c1 + c2 + c3 = 0
+                        const Real f_n = q_fn[r];
+                        const Real f_g = Real{2} * q_dg[r] / hg - f_n;
+                        const Real f_1 = (c1 * q_d1[r] + c2 * q_dg[r]) / h;
+                        ee = step::TrBdf2::lte(h, f_n, f_g, f_1);
+                        q0 = q_n[r];
+                        q1 = q0 + q_d1[r];
+                    }
+                    const Real sc = opts.atol * q_atol[r]
+                                    + opts.rtol * std::max(std::abs(q0), std::abs(q1))
+                                    + std::numeric_limits<Real>::min();
+                    const Real w = ee / sc;
+                    q_sq += w * w;
+                    ++n_q;
+                    if (std::abs(w) > q_wmax) {
+                        q_wmax = std::abs(w);
+                        q_who = r;
                     }
                 }
             }
-            err_sq += q_sq;
-            n_err += n_q;
-            err =
-                n_err > 0 ? std::sqrt(err_sq
-                                       / static_cast<Real>(n_err))
-                           : Real{0};
+            // The q rows as their own RMS, joined by max: they can tighten the
+            // step, never loosen it (one RMS over both diluted the entries'
+            // error: a saturable LC took larger steps and got 6 % worse).
+            // Without q rows (n_q = 0) this is the entries' RMS, bit for bit.
+            {
+                const Real e_ent = n_err > 0 ? err_sq / static_cast<Real>(n_err) : Real{0};
+                const Real e_q = n_q > 0 ? q_sq / static_cast<Real>(n_q) : Real{0};
+                err = std::sqrt(e_q > e_ent || std::isnan(e_q) ? e_q : e_ent);
+            }
             // Roundoff floor of the estimate. A node tied to the rest of
             // the circuit only through OFF conductances (a SEPIC with its
             // switch and diode both off: sw and mid held by 2 x 1e-6 S)
@@ -3158,7 +3207,9 @@ inline SimulationResult run_transient_trbdf2(
                 // never accepts a step on a stateful kind's error (today
                 // unreachable: a stateful kind sets nl_effective; kept so a
                 // future relaxation of that guard cannot drop them)
-                const Real err_n = std::sqrt((e2 + q_sq) / static_cast<Real>(entries.size() + n_q));
+                const Real e_ent = e2 / static_cast<Real>(entries.size());
+                const Real e_q = n_q > 0 ? q_sq / static_cast<Real>(n_q) : Real{0};
+                const Real err_n = std::sqrt(e_q > e_ent || std::isnan(e_q) ? e_q : e_ent);
                 if (err_n <= Real{1}) {
                     // Not clamped to 1 (keep h): measured, the SEPIC at
                     // rtol 1e-8 then took 662,366 steps instead of
@@ -3191,6 +3242,18 @@ inline SimulationResult run_transient_trbdf2(
                 // Cannot shrink further: accept, but CONFESS —
                 // silence here would be an unbounded-error hole.
                 ++st.n_forced_accepts;
+                if (opts.trace_forced) {   // which unknown forced it
+                    Real wmax = q_wmax;
+                    Real who = -Real{1} - static_cast<Real>(q_who);
+                    for (Size i = 0; i < entries.size(); ++i) {
+                        const Real w = std::abs(est_v[i] / est_sc[i]);
+                        if (w > wmax) {
+                            wmax = w;
+                            who = static_cast<Real>(entries[i].branch_id);
+                        }
+                    }
+                    st.forced_trace.push_back({t, h, err, who, wmax});
+                }
             }
             if (err > Real{1} && h > h_lo * Real{1.0001}) {
                 // reject: elementary controller, order-3 exponent
@@ -3932,6 +3995,7 @@ inline SimulationResult run_transient_trbdf2(
                 } else {
                 hs.commit(x_1, h, pwl::TrBdf2Stage::Bdf2Stage2);
                 }
+                q_live = true;
                 if (structure.active()) x_pre = x;
                 const Real t_pre = t;
                 x = x_1;
