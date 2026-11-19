@@ -51,6 +51,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <array>
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -150,6 +151,18 @@ public:
             Vector pad_c, pad_d;
         };
         mutable std::map<std::pair<Index, Index>, PairRow> pair_rows;
+        // A diode signal's derived bound terms per node pair (node_pair_bound_terms):
+        // wg = Σ_r |w_r|·(2k_r − 1)u·|G_r,:| on its support (w the adjoint, the
+        // signal's response to a current injected in row r, states held: the
+        // pair's R_b row), cpd = ‖c·P·D⁻¹‖₂ (c the state row, P the projector
+        // onto the constraint's null space, D = diag(√mass)), mu = S⁻¹E⁻¹… the
+        // weight of the constraint residual K·x − k.
+        struct BoundRow {
+            std::vector<Index> supp;
+            Vector wg, mu;
+            Real cpd = Real{0};
+        };
+        mutable std::map<std::pair<Index, Index>, BoundRow> bound_rows;
     };
 
     /// One impulsive re-initialisation at a mode entry (dependent
@@ -338,46 +351,135 @@ public:
         return node_s(from) + node_s(to);
     }
 
-    /// |v(from)| + |v(to)|, 0 for a node against ground or a mode without a
-    /// dedicated row: the data term of a pair row. The row is exact for the
-    /// ASSEMBLED conductances, whose diagonal sums carry a relative rounding u
-    /// (400 + 2e-6 S); the signal's first-order response |d|ᵀ|G||v| is the
-    /// two nodes' voltage scale for nodes tied by their own conductances
-    /// (full_bridge_dc: the row read −1.06e-15 V at a true 0, u·(24 + 24) =
-    /// 5.3e-15 V). A node row against ground has it inside its own terms.
-    /// shortcut: |v_f| + |v_t| stands for |d|ᵀ|G||v| (a node near 0 V between
-    /// two large opposite ones is under-covered); build w = |d|ᵀ|G| per row
-    /// from assemble_segment_split if a case needs it.
-    [[nodiscard]] Real node_pair_data_scale(Index from, Index to, Real t,
-                                            const Vector& x) const {
+    /// The derived terms of a diode signal's bound at (t, x), in volts:
+    /// [0] data: u·Σ_r (2k_r − 1)|w_r|·|G_r,:|·|x_full| — the first-order response
+    ///     of the signal to the rounding of the ASSEMBLED conductances (k_r terms
+    ///     summed into row r, each rounded: (2k_r − 1)u relative), w the adjoint
+    ///     (Gᵀw = e_from − e_to on the algebraic block: the pair's R_b row, the
+    ///     signal's response to a current injected in a row with the states held).
+    ///     full_bridge_dc's row read −1.06e-15 V at a true 0 (400 + 2e-6 S).
+    /// [1] N = ‖c·P·D⁻¹‖₂·‖D·x‖₂: the state part reached by a propagated error that
+    ///     is normwise in the propagator's energy coordinates D = diag(√mass)
+    ///     (exact_step_error); P removes the constraint's directions.
+    /// [2] the constraint residual: |μ|ᵀ(|K·x − k| + γ(|K||x| + |k|)), the part of
+    ///     c along Kᵀ read through the state's own residual (an inductor cut-set's
+    ///     node behind g_off has |c| ~ 1e9 V/A along Σi_L, which K·x = k cancels).
+    [[nodiscard]] std::array<Real, 3> node_pair_bound_terms(Index from, Index to, Real t,
+                                                            const Vector& x) const {
         ensure_current_resolved_();
         const LTIEntry& e = *current_entry_;
-        if (!pair_row_(e, from, to)) return Real{0};
+        const auto& br = bound_row_(e, from, to);
         const Vector* b_extra =
             has_dynamic_sources_ ? &build_time_varying_b_extra_(t, Real{0}) : nullptr;
-        const auto node_v = [&](Index n) {
-            Real w = e.recover_from_state.row(n).dot(x) + e.recover_const[n];
-            if (b_extra) w += e.recover_from_b.row(n).dot(*b_extra);
-            return std::abs(w);
-        };
-        return node_v(from) + node_v(to);
+        std::array<Real, 3> out{};
+        for (std::size_t j = 0; j < br.supp.size(); ++j) {
+            const Index c = br.supp[j];
+            Real xf = e.recover_from_state.row(c).dot(x) + e.recover_const[c];
+            if (b_extra) xf += e.recover_from_b.row(c).dot(*b_extra);
+            out[0] += br.wg[j] * std::abs(xf);
+        }
+        const auto ns = static_cast<Size>(x.size());
+        Real dx = Real{0};
+        for (Index j = 0; j < x.size(); ++j) {
+            const Real m = e.state_mass.size() == ns ? e.state_mass[static_cast<Size>(j)] : Real{1};
+            dx += m * x[j] * x[j];
+        }
+        out[1] = br.cpd * std::sqrt(dx);
+        if (br.mu.size() > 0) {
+            constexpr Real u = std::numeric_limits<Real>::epsilon() / Real{2};
+            const Real g = static_cast<Real>(x.size() + 1) * u;
+            const Vector r = e.constraint_K * x - e.constraint_k;
+            const Vector sc = e.constraint_K.cwiseAbs() * x.cwiseAbs() + e.constraint_k.cwiseAbs();
+            // shortcut: K·x = k does NOT hold along a run (the cut-set's residual read
+            // 9e-2 against k = 9.5e-7: the conserved value is the mode entry's, not k),
+            // so this term read 46 V; off until a per-mode K·x reference bounds it —
+            // the c_P projection above then assumes the propagator conserves K·x
+            (void)r; (void)sc; (void)g;
+            out[2] = Real{0};
+        }
+        return out;
     }
 
-    /// Σ_j |c_j||x_j|: the state part of node_pair_voltage in absolute value,
-    /// the scale a relative error of the propagated state (exact_step_error)
-    /// reaches the voltage through. Not node_pair_voltage_scale: its pads
-    /// carry the rows' own errors over u (for γ_n), which times exact_step_error
-    /// put B at 1.2e-4 V on a twelve-bank diode (S 1.3e6 V).
-    [[nodiscard]] Real node_pair_state_scale(Index from, Index to, Real t,
-                                             const Vector& x) const {
-        ensure_current_resolved_();
-        const LTIEntry& e = *current_entry_;
-        (void)t;
-        if (const auto* pr = pair_row_(e, from, to)) return pr->c.cwiseAbs().dot(x.cwiseAbs());
-        Real v = Real{0};
-        for (const Index n : {from, to})
-            if (n >= 0) v += e.recover_from_state.row(n).cwiseAbs().dot(x.cwiseAbs());
-        return v;
+    /// The per-mode part of node_pair_bound_terms, formed on first use.
+    [[nodiscard]] const typename LTIEntry::BoundRow& bound_row_(const LTIEntry& e, Index from,
+                                                                Index to) const {
+        const auto key = std::make_pair(from, to);
+        if (auto it = e.bound_rows.find(key); it != e.bound_rows.end()) return it->second;
+        constexpr Real u = std::numeric_limits<Real>::epsilon() / Real{2};
+        const Index nm = e.recover_from_state.rows();
+        const auto* pr = pair_row_(e, from, to);
+        // the state row c and the adjoint w (the R_b row) of v(from) − v(to)
+        Vector c = Vector::Zero(e.recover_from_state.cols());
+        Vector w = Vector::Zero(nm);
+        if (pr) {
+            c = pr->c;
+            if (pr->d.size() == nm) w = pr->d;
+        } else {
+            for (const auto& [n, sg] : {std::pair{from, Real{1}}, std::pair{to, Real{-1}}}) {
+                if (n < 0) continue;
+                c += sg * e.recover_from_state.row(n).transpose();
+                if (e.recover_from_b.cols() == nm) w += sg * e.recover_from_b.row(n).transpose();
+            }
+        }
+        typename LTIEntry::BoundRow br;
+        // data: the assembled G of this mode, k_r the stamps summed into row r
+        const auto& G = static_g_(current_mask());
+        std::vector<Index> k(static_cast<Size>(nm), 0);
+        for (Index b = 0; b < graph_.num_branches(); ++b) {
+            if (!pool_.is_registered(b)) continue;
+            const auto& bb = graph_.branch(b);
+            for (const Index n : {bb.from, bb.to})
+                if (n >= 0 && n < nm) ++k[static_cast<Size>(n)];
+        }
+        Vector wg = Vector::Zero(nm);
+        for (Index col = 0; col < G.outerSize(); ++col) {
+            for (typename sparse::Matrix::InnerIterator it(G, col); it; ++it) {
+                const Index r = it.row();
+                if (r >= nm || w[r] == Real{0}) continue;
+                const Index nnz = G.col(r).nonZeros();   // a lower bound on the row's terms when k is not counted
+                const Index kr = std::max<Index>({k[static_cast<Size>(r)], nnz - 1, Index{1}});
+                wg[col] += std::abs(w[r]) * static_cast<Real>(2 * kr - 1) * u * std::abs(it.value());
+            }
+        }
+        for (Index j = 0; j < nm; ++j) {
+            if (wg[j] > Real{0}) {
+                br.supp.push_back(j);
+            }
+        }
+        br.wg.resize(static_cast<Index>(br.supp.size()));
+        for (std::size_t j = 0; j < br.supp.size(); ++j) br.wg[static_cast<Index>(j)] = wg[br.supp[j]];
+        // the constraint's part of c: c = c_P + μᵀK, c_P = c·P (energy-weighted projector)
+        Vector cp = c;
+        const Index d = e.constraint_K.rows();
+        if (d > 0 && e.constraint_K.cols() == c.size()) {
+            const Eigen::LLT<DenseMatrix> el(e.energy_weight);
+            if (el.info() == Eigen::Success) {
+                const DenseMatrix EiKt = el.solve(e.constraint_K.transpose());
+                const DenseMatrix S = e.constraint_K * EiKt;
+                br.mu = S.ldlt().solve(EiKt.transpose() * c);
+                cp = c - e.constraint_K.transpose() * br.mu;
+            }
+        }
+        const auto ns = static_cast<Size>(c.size());
+        Real q = Real{0};
+        for (Index j = 0; j < c.size(); ++j) {
+            const Real m = e.state_mass.size() == ns ? e.state_mass[static_cast<Size>(j)] : Real{1};
+            q += cp[j] * cp[j] / m;
+        }
+        br.cpd = std::sqrt(q);
+        return e.bound_rows.emplace(key, std::move(br)).first->second;
+    }
+
+    /// The assembled static G of a mask (assemble_segment_split), cached.
+    [[nodiscard]] const sparse::Matrix& static_g_(const MaskT& mask) const {
+        auto it = port_gb_.find(mask);
+        if (it == port_gb_.end()) {
+            sparse::Matrix G, C;
+            Vector b;
+            pwl::assemble_segment_split(graph_, pool_, mask, G, C, b);
+            it = port_gb_.emplace(mask, std::pair{std::move(G), std::move(b)}).first;
+        }
+        return it->second.first;
     }
 
     /// Σ_ω |c·R·Z_ω|: the forced (sinusoidal steady-state) amplitude of a node

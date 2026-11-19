@@ -41,7 +41,7 @@ def test_an_on_diode_row_is_the_size_of_its_current():
     u = np.finfo(float).eps / 2
     for _ in range(5):
         x = rng.uniform(-10.0, 10.0, ad.n_state) * np.r_[30.0, np.ones(ad.n_state - 1)]
-        s_row, n, _, _ = ad._node_pair_bound_terms(fr, to, 1e-3, x)
+        s_row, n = ad._node_pair_bound_terms(fr, to, 1e-3, x)[:2]
         s_old = (ad._node_pair_bound_terms(fr, -1, 1e-3, x)[0]
                  + ad._node_pair_bound_terms(to, -1, 1e-3, x)[0])
         v_row = ad.node_pair_voltage(fr, to, 1e-3, x)
@@ -81,12 +81,14 @@ def test_a_pair_row_bound_covers_the_assembled_conductances():
     x = np.zeros(ad.n_state)
     exact = float(-F(24) * 2 * F(1e-6) / (F(400) + 2 * F(1e-6)))
     v = ad.node_pair_voltage(ix["load_n"], ix["vcc"], 0.0, x)
-    s, n, _, _ = ad._node_pair_bound_terms(ix["load_n"], ix["vcc"], 0.0, x)
+    s, n, _, _, data, _, _ = ad._node_pair_bound_terms(ix["load_n"], ix["vcc"], 0.0, x)
     u = np.finfo(float).eps / 2
-    # the row's own terms do not cover it; the data term 2u(|v_f| + |v_t|) does
+    # the row's own terms do not cover it; the assembled data's adjoint term
+    # u*sum_r (2k_r - 1)|w_r||G_r,:||x_full| does, with no tuned factor
     assert abs(v - exact) > n * u * s
-    data = abs(ad.node_pair_voltage(ix["load_n"], -1, 0.0, x)) + abs(ad.node_pair_voltage(ix["vcc"], -1, 0.0, x))
-    assert abs(v - exact) <= n * u * s + 2 * u * data
+    assert abs(v - exact) <= n * u * s + data
+    # and it is a first-order bound, not a blanket: measured 45x the error it covers
+    assert data < 100 * abs(v - exact)
 
 
 def test_full_bridge_dc_turns_both_freewheel_diodes_off_at_the_zero():

@@ -599,3 +599,34 @@ dsedall, the full scoreboard, banks 1/9/10/12 (20 ms) on both selections, ten-ba
 ### Hand-off (session 19)
 1. Fix the two pytest regressions of the rows (both on 7c4a86eb): trace the turn-off at 1.8877 us of `test_double_crossing_inside_one_step_is_seen` (D, pair t–k, a dedicated row) — review #1 first.
 2. Then review #3 (‖c‖₁‖x‖∞) and the whole bar (scripts as session 18), cost via `.scratch/s21/cost.py` with a 2b1d808e .so.
+
+## Session 20 (exact engine 19): gaps 1 and 2 — WIP, bar NOT met (2026-11-19)
+
+### Event tables of the two failing tests (50b5b3ab, traced)
+- `test_double_crossing_inside_one_step_is_seen` (t_end 10 us; passes at t_end 1.9 us): the turn-off root at 1.8877214714 us was located right; the settle's OFF-mode ladder read the ON-mode root's error as a forward bias (an ON row compresses v_D by G_R/g_on = 1e-6, so |g_ON| <= B_ON = 4e-15 V leaves v_t - 9.5 uncertain by 4e-9 V; loc_dx_ carried only the bisection's 1e-18 s) -> sg = +1 at the first rung, D kept ON; the next step's DiodeOff started at exactly 0 and was "last fired": the whole step skipped. Gap 1's skip HID it; the cause is the root's error.
+- `test_inductor_cut_set_runs_and_agrees_with_pwl`: NOT gap 1. Dtb's B was 1.9e-3 V for 0.4 ms: the e-term read sum|c_j||x_j| = 2.2e9 V (a node behind g_off in an inductor cut-set, |c| ~ 1e9 V/A along sum i_L); the crossing inside B was never confirmed, the drift exit fired at -2.06 A.
+
+### Built (uncommitted parts committed here as WIP)
+- Root error = the band where |g| <= B around the located root (x4 expansion, both sides), carried as state AND time shift (tw) into the settle's ladder and the locator's case (iii). Fixes the double crossing (4 events, 1e-16 s of the reference).
+- Gap 1: the three start cases; (iii) fires at t0 off a settle instant; at a settle instant it is read where the settle read (max(settled_ length, deciding rung)) plus the root error, and must PERSIST to decision_cap_ (without persistence: chatter at 1e-17 s rungs on a floating bridge's tie, D1/D4 turned ON at D1's root, 3e-13 s before D4's own crossing).
+- Gap 2: node_pair_bound_terms = [D, N, K]: D = u sum_r (2k_r - 1)|w_r||G_r,:||x_full| (w the R_b row = the adjoint, G from assemble_segment_split per mask, k_r incident stamps), N = ||c P D^-1||_2 ||D x||_2 (energy coordinates of exact_step_error, P the cut-set projector), K (constraint residual) DISABLED: K x = k does not hold along a run (residual 9e-2 vs k 9.5e-7), the term read 46 V.
+
+### Measured on this tip
+| item | result |
+|---|---|
+| double crossing (V_th 0, 1e-3) | right, 4 events each |
+| cut-set vs pwl dt 1e-7 | 1.07e-2 V (bar 3e-2) |
+| full_bridge_dc D term vs the 1.06e-15 V data error | 4.8e-14 V (45x margin, no tuned factor) |
+| bridge1_vf07 (D term) | both diodes OFF together at each turn-off (8 events); pwl dt 1e-7 + split keeps the second ON 0.23 ms (12 events, as 2b1d808e): 21284 grid points > 1e-6 vs baseline. D in the all-OFF floating mode is 1.9e-7 V and swallows the second diode's +1e-10 V |
+| bridge1_vf07 without D | as WIP (12 events), but the double crossing then chatters on a -2.2e-16 V data-rounding reverse current (B 1.7e-20 V): D is needed |
+| targeted pytest (3 files) | 2 FAIL: test_ten_paralleled_bridges_agree_with_pwl[None/lcp] (Dt0c OFF forward-biased 0.447 V at 17.56 ms), new on this tip |
+| full pytest, goldens, banks, truths, C++ | NOT run |
+
+### What blocks
+1. The rigorous data term vs floating islands: D bounds the distance to the decimal-data circuit, which on a g_off-held island is 1e-8..1e-7 V; decisions inside it lose the g_off-level physics pwl and the truth convention (fewest flips) keep. Needs a ruling: D for the law check / case (iii) only (rounding of the assembled circuit is not an event), the decisions on the rounded circuit's own trajectory (gn S + e N)?
+2. Ten banks regress (0.447 V, new): not traced.
+3. K term: needs a per-mode K x reference (the value at mode entry).
+
+### Hand-off (session 20)
+Trace the ten-bank failure first (likely D or persistence); then rule on (1); the root-band and N changes look sound on their own.
+

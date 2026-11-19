@@ -1211,14 +1211,16 @@ void init_module(py::module_& m) {
                 const Real S = self.node_pair_voltage_scale(from, to, t, x);
                 const auto n = self.node_pair_voltage_terms();
                 const Real F = self.node_pair_voltage_forced(from, to);
-                return py::make_tuple(S, n, e, F);
+                const auto bt = self.node_pair_bound_terms(from, to, t, x);
+                return py::make_tuple(S, n, e, F, bt[0], bt[1], bt[2]);
             },
             py::arg("from_node"), py::arg("to_node"), py::arg("t"), py::arg("x"),
             "Diagnostics of a diode predicate's significance bound B = "
-            "n·u·(S + V) + e·(max(|v|, F) + V) under the active mask: "
-            "(S, n, e, F) — the rounding scale S of the predicate row, its "
+            "n·u·(S + V) + D + K + e·max(N, F) under the active mask: "
+            "(S, n, e, F, D, N, K) — the rounding scale S of the predicate row, its "
             "term count n, the exact step's stated error e, the forced "
-            "amplitude F.")
+            "amplitude F, the assembled data's term D, the propagated state's "
+            "scale N, the constraint residual's term K.")
         .def("reduced_state_from_full",
             [](const NativeAdapter& ad, const Vector& x) {
                 // A full-MNA vector (a DC operating point) read the way the
