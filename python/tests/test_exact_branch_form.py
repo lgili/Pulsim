@@ -345,9 +345,11 @@ def test_an_ideal_clamp_onto_a_lower_source_is_refused_by_name():
     assert ei.value.feature == "ideal_voltage_loop"
 
 
-def test_the_periodic_steady_state_refuses_an_ideal_diode_by_name():
-    """The exact period map reads a diode's current as g*v: a branch-form diode is
-    refused there by name (it was a 'grazing' refusal: R_on = 0 zeroes g*v)."""
+def test_the_periodic_steady_state_refuses_a_dependent_state_mode_by_name():
+    """The exact period map reads a branch-form diode on its current
+    (update-number-changing-release 1.4), but this boost's open g_off = 0 switch with
+    the diode OFF leaves L in a cut-set: that mode is refused by its existing name
+    (no Jacobian of the transient's projection). It was refused as 'branch_form'."""
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 12.0)
     b.add_inductor("L", "vin", "sw", 100e-6)
@@ -358,7 +360,7 @@ def test_the_periodic_steady_state_refuses_an_ideal_diode_by_name():
     sf = p.make_pwm_switch_fn(1e5, 0.5, b.switch_index_of("S"), b.graph.num_switches)
     with pytest.raises(p.UnsupportedError) as ei:
         p.periodic_steady_state(b, period=1e-5, switch_fn=sf)
-    assert ei.value.feature == "branch_form" and ei.value.device.startswith("D")
+    assert ei.value.feature == "dependent_states"
 
 
 def test_an_ideal_body_diode_across_its_closed_switch_does_not_chatter(tmp_path):

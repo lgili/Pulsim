@@ -37,6 +37,7 @@
 #include "pulsim/models/switched_diode.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/pwl/branch_structure.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/pwl/row_names.hpp"
@@ -51,6 +52,7 @@
 #include <complex>
 #include <cstdio>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <numeric>
 #include <stdexcept>
@@ -131,35 +133,73 @@ template <class AdapterT>
         return out;
     }
     out.owned = census.diode_owned_bits();
+    // An OFF ideal diode across a path of closed ideal elements has v_D = 0
+    // structurally: its turn-on is held below zero while that holds (the
+    // same rule as the transient's predicates in dsed_bindings.cpp).
+    std::shared_ptr<pwl::BranchStructureChecker> shorted;
+    try {
+        shorted = std::make_shared<pwl::BranchStructureChecker>(
+            adapter.graph(), adapter.pool(), "dsed");
+        if (!shorted->active()) shorted.reset();
+    } catch (const std::exception&) {
+        shorted.reset();   // the state-space extraction refuses it by name
+    }
     for (const auto& d : census.entries()) {
         std::string label = pwl::branch_label(adapter.graph(), d.branch_id);
-        if (d.var >= 0)   // its current is a solved unknown, not g·v: not posed here
-            throw UnsupportedError("dsed", "branch_form", label, "Diode",
-                                   "the exact period map / integrals read a diode's current as "
-                                   "g·v; '" + label + "' is a branch-form (ideal) diode. Use "
-                                   "simulate(engine='dsed') or the conductance form.");
         const AdapterT* ad = &adapter;
         const Index from = d.from;
         const Index to = d.to;
+        // a branch-form diode's ON law is its solved current (census g_on = 1:
+        // the signal V_f + i − V_f = i, amperes); OFF it reads v_D as any diode
+        const Index var = d.var;
+        const Real R_on_b = var >= 0 ? adapter.pool().branch_R_on(d.branch_id)
+                                     : Real{0};
         const auto prm = d.params();
-        for (const bool on : {false, true}) {
-            const auto type = on ? PredicateType::DiodeOff
-                                 : PredicateType::DiodeOn;
-            pred.add_predicate(EventPredicate{
-                .name = label + (on ? " turns OFF" : " turns ON"),
-                .fn = [ad, from, to, prm, on](Real t, const Vector& x) {
-                    return models::SwitchedDiode::crossing_signal(
-                        on, ad->node_pair_voltage(from, to, t, x), prm);
-                },
-                .type = type,
-                .priority = default_priority(type),
-                .aux_index = static_cast<int>(d.switch_idx),
-                .required_bit = on ? 1 : 0,
-            });
-        }
-        out.list.push_back(SchedulerDiode{d.switch_idx, d.from, d.to, d.g_on,
+        const auto chk = var >= 0 && R_on_b == Real{0} ? shorted : nullptr;
+        const Size sw = d.switch_idx;
+        pred.add_predicate(EventPredicate{
+            .name = label + " turns ON",
+            .fn = [ad, from, to, prm, chk, sw](Real t, const Vector& x) {
+                if (chk) {
+                    auto m = ad->current_mask();
+                    m.set(sw, true);
+                    try {
+                        const std::size_t with = chk->check(m, true).loop_diodes.size();
+                        m.set(sw, false);
+                        const std::size_t without = chk->check(m, true).loop_diodes.size();
+                        if (with > without
+                            && std::abs(ad->node_pair_voltage(from, to, t, x))
+                                   <= Real{1e-9} * ad->port_scale(t, x).vscale)
+                            return Real{-1};
+                    } catch (const std::exception&) {
+                        // a floating node of the candidate: the law decides
+                    }
+                }
+                return models::SwitchedDiode::crossing_signal(
+                    false, ad->node_pair_voltage(from, to, t, x), prm);
+            },
+            .type = PredicateType::DiodeOn,
+            .priority = default_priority(PredicateType::DiodeOn),
+            .aux_index = static_cast<int>(sw),
+            .required_bit = 0,
+        });
+        pred.add_predicate(EventPredicate{
+            .name = label + " turns OFF",
+            .fn = [ad, from, to, var, prm](Real t, const Vector& x) {
+                return models::SwitchedDiode::crossing_signal(
+                    true,
+                    var >= 0 ? prm.V_f + ad->node_pair_voltage(var, -1, t, x)
+                             : ad->node_pair_voltage(from, to, t, x),
+                    prm);
+            },
+            .type = PredicateType::DiodeOff,
+            .priority = default_priority(PredicateType::DiodeOff),
+            .aux_index = static_cast<int>(sw),
+            .required_bit = 1,
+        });
+        out.list.push_back(SchedulerDiode{d.switch_idx, d.from, d.to, prm.g_on,
                                           d.g_off, d.V_th, d.V_f,
-                                          std::move(label)});
+                                          std::move(label), var, R_on_b});
     }
     return out;
 }
@@ -492,9 +532,16 @@ template <class AdapterT, class MaskT>
             if (er.old_mask == er.new_mask) {
                 continue;   // the settle kept the mode: f+ = f-, S = I
             }
+            // ∇g in the reduced coordinates of the old mode: a branch-form
+            // diode's turn-OFF predicate is its solved current x_full[var]
+            // (row var of the recovery), every other one v_D
             Vector grad = Vector::Zero(n);
-            if (dd->from >= 0) grad += eo.Rx.row(dd->from).transpose();
-            if (dd->to >= 0) grad -= eo.Rx.row(dd->to).transpose();
+            if (er.type == PredicateType::DiodeOff && dd->reads_current()) {
+                grad = eo.Rx.row(dd->var).transpose();
+            } else {
+                if (dd->from >= 0) grad += eo.Rx.row(dd->from).transpose();
+                if (dd->to >= 0) grad -= eo.Rx.row(dd->to).transpose();
+            }
             const Vector fm = eo.A * x + eo.b;
             const Vector fp = en.A * x + en.b;
             const Real den = grad.dot(fm);

@@ -686,7 +686,9 @@ SUITE_ROOTS = (
     ("cannot take the parameter", "form='branch'",
      "a branch-form switch refuses a bound `g_on` (`bind_param`): scoped / parametrised circuits break"),
     ("cannot simulate", "form='branch'",
-     "bdf1 and ac_sweep cannot simulate a branch-form switch / diode"),
+     "bdf1 (retired) refuses a branch-form switch / diode by name and names pwl / trbdf2 "
+     "(update-number-changing-release 1.7; ac_sweep runs them since): at the flip bdf1 keeps the "
+     "conductance form or the test moves off bdf1"),
     ("requires discontinuity_restart", "enable_substep_state_correction",
      "a caller that sets `discontinuity_restart=False` is refused once the split defaults on: the split's "
      "default must follow the rule's"),

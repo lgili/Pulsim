@@ -215,6 +215,7 @@ class _FakeCtx:
     def __init__(self, fm, fp):
         self._f = {"old": fm, "new": fp}
         self.diodes = {7: dict(name="D9", nodes=(0, -1))}
+        self.current_row = {}     # no branch-form diode
         m = type("M", (), {"dsc": np.ones(3)})()
         self.modes = {"old": m, "new": m}
 

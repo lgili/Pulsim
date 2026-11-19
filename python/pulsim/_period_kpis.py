@@ -89,20 +89,25 @@ def spec_for(b, output, loss_options, extra_nodes=(), on_state=()):
             col = b.pool.branch_var_id_for_inductor(bid, b.graph)
             s.add(("i", name), [(col, 1.0)], extrema=True)
         elif kind in ("switch", "diode"):
-            g_on, g_off = float(p["g_on"]), float(p["g_off"])
-            if not (math.isfinite(g_on) and math.isfinite(g_off)):
-                return f"{kind} {name!r} without finite conductances"
             w = [(nodes[0], 1.0), (nodes[1], -1.0)]
             s.add(("v", name), w, extrema=True)
-            s.add(("i", name), w, bits[bid], g_on, g_off,
-                  float(p.get("V_f", 0.0)) if kind == "diode" else 0.0,
-                  extrema=True)
+            if p.get("branch_form"):
+                # its current is a solved unknown in both modes (R_on = 0 legal)
+                iw = [(b.pool.branch_var_id_for_switch(bid, b.graph), 1.0)]
+                s.add(("i", name), iw, extrema=True)
+                if name in on_state:
+                    s.add(("ion", name), iw, bits[bid], 1.0, 0.0, extrema=True)
+            else:
+                g_on, g_off = float(p["g_on"]), float(p["g_off"])
+                if not (math.isfinite(g_on) and math.isfinite(g_off)):
+                    return f"{kind} {name!r} without finite conductances"
+                vf = float(p.get("V_f", 0.0)) if kind == "diode" else 0.0
+                s.add(("i", name), w, bits[bid], g_on, g_off, vf, extrema=True)
+                if name in on_state:
+                    s.add(("ion", name), w, bits[bid], g_on, 0.0, vf,
+                          extrema=True)
             s.pairs.append((s.idx[("i", name)], s.idx[("v", name)]))
             s.semis.append((name, kind, bits[bid]))
-            if name in on_state:
-                s.add(("ion", name), w, bits[bid], g_on, 0.0,
-                      float(p.get("V_f", 0.0)) if kind == "diode" else 0.0,
-                      extrema=True)
     for name in ((output,) if output is not None else ()) + tuple(extra_nodes):
         try:
             k = int(b.node_id_of(name))

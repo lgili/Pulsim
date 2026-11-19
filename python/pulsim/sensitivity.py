@@ -302,16 +302,26 @@ def _duty_period(sf, bit, t_end, name, nsw=0):
 # Assembly snapshots and their exact derivatives
 # ----------------------------------------------------------------------
 
+def _branch_diode_vars(builder):
+    """``[(branch_id, var)]`` of the branch-form diodes: the MNA row of
+    each one's solved current (its turn-OFF predicate)."""
+    return [(int(c["branch_id"]), int(builder.pool.branch_var_id_for_switch(
+        c["branch_id"], builder.graph))) for c in builder.components()
+        if c["kind"] == "diode" and c["params"].get("branch_form")]
+
+
 def _snapshot(builder, masks, h_max, ic):
-    """Per mask: ``Ab`` (n+1, n+1) and the node-voltage recovery
-    ``R`` (n_nodes, n+1) with ``v = R . xb``; plus the reduced initial
-    state when ``ic``. One flat vector per mask (and one for ic)."""
+    """Per mask: ``Ab`` (n+1, n+1) and the recovery ``R`` (n_nodes +
+    n_branch_diodes, n+1) of the node voltages, then of each branch-form
+    diode's current, with ``v = R . xb``; plus the reduced initial state
+    when ``ic``. One flat vector per mask (and one for ic)."""
     from . import PwlStateSpaceCache
     from . import _pulsim
     cache = PwlStateSpaceCache(builder.graph, builder.pool)
     cache.build_lazy(h_max)
     ad = _pulsim._NativeCircuitBuilderAdapter(builder, cache, None)
-    nn = int(builder.graph.num_nodes)
+    rows = list(range(int(builder.graph.num_nodes))) + [
+        v for _bid, v in _branch_diode_vars(builder)]
     out = {}
     for key, m in masks.items():
         ad.set_mask(m)
@@ -319,14 +329,14 @@ def _snapshot(builder, masks, h_max, ic):
         Ab = np.zeros((n + 1, n + 1))
         Ab[:n, :n] = np.asarray(ad.A_matrix(), dtype=float)
         Ab[:n, n] = np.asarray(ad.b_vector(0.0), dtype=float)
-        R = np.empty((nn, n + 1))
+        R = np.empty((len(rows), n + 1))
         z = np.zeros(n)
-        for node in range(nn):
-            v0 = float(ad.node_pair_voltage(node, -1, 0.0, z))
+        for node, row in enumerate(rows):
+            v0 = float(ad.node_pair_voltage(row, -1, 0.0, z))
             for j in range(n):
                 e = z.copy()
                 e[j] = 1.0
-                R[node, j] = float(ad.node_pair_voltage(node, -1, 0.0, e)) - v0
+                R[node, j] = float(ad.node_pair_voltage(row, -1, 0.0, e)) - v0
             R[node, n] = v0
         out[key] = np.concatenate([Ab.ravel(), R.ravel()])
     if ic:
@@ -620,10 +630,18 @@ def _run(builder, sf, x0, t_end, dt_max, dt_init, ic_from_builder):
     if ad.has_dynamic_sources:
         raise _unsup("sensitivities", "sensitivities: the circuit has "
                      "time-varying sources; this slice covers DC sources.")
+    guard = {}
+    if _branch_diode_vars(builder):
+        # an ideal branch-form diode needs the kernel's diode-mode guard, as
+        # simulate's and periodic_steady_state's runs set it (a conductance-
+        # form circuit keeps its run unchanged)
+        from ._dsed_dispatch import MODE_GUARD, _shadow_h_e
+        if MODE_GUARD:
+            guard = {"mode_guard_h_e": _shadow_h_e(builder, sf, t_end)}
     r = _pulsim.run_ped_native_builder(
         ad, sf, x0, t_end, rtol=1e-11, atol=1e-14, dt_init=dt_init,
         dt_max=dt_max, store_every=1, enable_event_projection=False,
-        diode_law_rel=0.0, event_log=True)
+        diode_law_rel=0.0, event_log=True, **guard)
     if int(r["n_exact_steps"]) != int(r["n_accept"]):
         raise _unsup(
             "sensitivities", "sensitivities: the exact stepper took "
@@ -689,7 +707,10 @@ class _Context:
                 mass[i] = float(pr.get("C_farads", pr.get("L_henries", 1.0)))
         dsc = np.ones(n + 1)
         dsc[:n] = np.sqrt(mass)
-        nn = int(builder.graph.num_nodes)
+        # recovery rows: the nodes, then the branch-form diodes' currents
+        self.current_row = {bid: int(builder.graph.num_nodes) + j for j, (bid, _v)
+                            in enumerate(_branch_diode_vars(builder))}
+        nn = int(builder.graph.num_nodes) + len(self.current_row)
         n1 = n + 1
         hmax = {}
         for k in range(len(traj.times) - 1):
@@ -763,6 +784,9 @@ def _jump(ctx, ev, x, S, params):
     elif ev["type"] in (_DIODE_ON, _DIODE_OFF):
         c = ctx.diode_of(ev["name"])
         a, k = (int(v) for v in c["nodes"])
+        if ev["type"] == _DIODE_OFF and c.get("branch_id") in ctx.current_row:
+            # an ON branch-form diode turns off on its solved current
+            a, k = ctx.current_row[c["branch_id"]], -1
         row, drow = ctx.pair_row(ko, a, k)
         grad = row[:-1]
         den = float(grad @ fm)
@@ -1261,8 +1285,11 @@ def _near_misses(ctx, traj, K=8):
                 cur = dict(on=on, own_start=own or k == 0, pts=[],
                            mins=[])
             mode = ctx.modes[key]
-            row = ctx.pair_row(key, a, k_)[0]
-            thr = V_f if on else (V_th if V_f == 0.0 else max(V_th, V_f))
+            if on and bid in ctx.current_row:   # branch form: g = its current
+                row, thr = ctx.pair_row(key, ctx.current_row[bid], -1)[0], 0.0
+            else:
+                row = ctx.pair_row(key, a, k_)[0]
+                thr = V_f if on else (V_th if V_f == 0.0 else max(V_th, V_f))
             h = traj.times[k + 1] - traj.times[k]
             xb = np.append(traj.states[k], 1.0)
             if mode.tier == 1:

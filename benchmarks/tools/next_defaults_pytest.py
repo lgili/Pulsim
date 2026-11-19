@@ -4,7 +4,9 @@
 
 No library or test edit. For the whole session it
 (1) wraps ``pulsim.simulate`` so that every call gets the profile's keywords
-    for the engine it lands on, only where the call did not set them;
+    for the engine it lands on, only where the call did not set them (the
+    restart rule and the step split instead set the library's own defaults,
+    ``pulsim._plan.DEFAULT_*``, which ``simulate()`` resolves per run);
     ``engine='auto'`` without ``dt`` takes the release route, approximated
     as: trbdf2 when the exact engine cannot take the circuit structurally (a
     Newton device, a ``b_extra_fn``), else the exact engine, and trbdf2 when
@@ -36,13 +38,21 @@ _STATS = collections.Counter()
 _FAILS: list = []
 
 
+# Options whose default the library resolves itself (pulsim._plan): the
+# profile sets the library default instead of the keyword, so the split
+# follows the rule and mmc_arms turns the rule's default off, as at the release.
+LIBRARY_DEFAULTS = {"discontinuity_restart": "DEFAULT_DISCONTINUITY_RESTART",
+                    "enable_substep_state_correction": "DEFAULT_SUBSTEP_STATE_CORRECTION"}
+
+
 def _inject(eng, kw):
     """The profile for ``eng`` on the keywords the call left unset, a ``solver=``
     bundle included (simulate() reads a bundle field only when the keyword is None)."""
     solver = kw.get("solver")
-    set_by_bundle = {k for k in nd.profile_kwargs(eng)
+    prof = {k: v for k, v in nd.profile_kwargs(eng).items() if k not in LIBRARY_DEFAULTS}
+    set_by_bundle = {k for k in prof
                      if solver is not None and getattr(solver, k, None) is not None}
-    return {**{k: v for k, v in nd.profile_kwargs(eng).items() if k not in set_by_bundle}, **kw}
+    return {**{k: v for k, v in prof.items() if k not in set_by_bundle}, **kw}
 
 
 def _exact_structurally(pulsim, b, kw):
@@ -84,6 +94,9 @@ def _route_kwargs(pulsim, args, kw):
 
 def _install():
     import pulsim
+    from pulsim import _plan
+    for k, attr in LIBRARY_DEFAULTS.items():
+        setattr(_plan, attr, nd.PROFILE["pwl"][k].value)
     orig = pulsim.simulate
 
     @functools.wraps(orig)

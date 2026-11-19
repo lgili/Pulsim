@@ -1587,10 +1587,9 @@ inline constexpr auto kKindCaps = std::to_array<KindCaps>({
 });
 /// add-branch-form-ideal-switch D7 / task 4.3: the BRANCH form of the
 /// Switch and Diode kinds (a form, not a kind: one row each, by the
-/// kind's name). The fixed trapezoid runs both; TR-BDF2 runs the
-/// controlled switch (its diode decision sites read the voltage only);
-/// dsed runs the controlled switch (task 8: its diode sites read the
-/// conductance law); bdf1 and the AC sweep refuse by name
+/// kind's name). The fixed trapezoid, TR-BDF2 and dsed run both; the AC
+/// sweep stamps both at the caller's mask with the transient's assembler
+/// (a linear constraint row per device); bdf1 (retired) refuses by name
 /// (`feature='branch_form'`).
 struct FormCaps {
     std::string_view name;      // "Switch" / "Diode"
@@ -1604,11 +1603,13 @@ inline constexpr auto kBranchFormCaps = std::to_array<FormCaps>({
     {"Switch", DevicePool::StoredKind::Switch,
      static_cast<std::uint8_t>(engine_bit(Engine::FixedTrap) |
                                engine_bit(Engine::TrBdf2) |
-                               engine_bit(Engine::Dsed))},
+                               engine_bit(Engine::Dsed) |
+                               engine_bit(Engine::AcSweep))},
     {"Diode", DevicePool::StoredKind::Diode,
      static_cast<std::uint8_t>(engine_bit(Engine::FixedTrap) |
                                engine_bit(Engine::TrBdf2) |
-                               engine_bit(Engine::Dsed))},
+                               engine_bit(Engine::Dsed) |
+                               engine_bit(Engine::AcSweep))},
 });
 
 /// add-pwl-igbt-and-thyristor: the GATED forms of the Diode kind (IGBT /

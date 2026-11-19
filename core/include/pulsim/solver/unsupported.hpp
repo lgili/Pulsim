@@ -72,6 +72,18 @@ inline void require_branch_form_supported(const topology::Graph& graph,
         const auto k = pool.kind_of(b);
         for (const auto& row : pwl::kBranchFormCaps) {
             if (row.kind != k || row.supports(e)) continue;
+            if (e == pwl::Engine::Bdf1) {
+                throw UnsupportedError(
+                    "bdf1", "branch_form", std::string(graph.branch_name(b)),
+                    std::string(row.name),
+                    std::format(
+                        "engine 'bdf1' cannot simulate '{}', a {} in branch "
+                        "form: bdf1 is retired (no event iteration, so the "
+                        "device's state would stay frozen at what switch_fn "
+                        "returns). Use engine='pwl' (the fixed-step "
+                        "trapezoidal engine) or engine='trbdf2'.",
+                        graph.branch_name(b), row.name));
+            }
             throw UnsupportedError(
                 std::string(pwl::engine_name(e)), "branch_form",
                 std::string(graph.branch_name(b)), std::string(row.name),

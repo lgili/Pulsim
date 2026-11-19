@@ -265,16 +265,30 @@ public:
             const auto hit = branch_index_.find(device_dot_field.substr(0, dot));
             const auto field = device_dot_field.substr(dot + 1);
             if (hit != branch_index_.end() && pool_.is_branch_form(hit->second) &&
-                field != "V_th" && field != "V_f") {
+                field != "V_th" && field != "V_f" && field != "g_on" &&
+                field != "g_off") {
                 throw std::invalid_argument(std::format(
                     "bind_param(\"{}\"): device \"{}\" is in branch form; a "
-                    "parameter cannot drive its {} yet (set it with "
-                    "with_value / set_value)", device_dot_field,
-                    device_dot_field.substr(0, dot), field));
+                    "parameter drives its g_on (as R_on = 1/g_on), g_off, V_th "
+                    "or V_f, not {} (set it with with_value / set_value)",
+                    device_dot_field, device_dot_field.substr(0, dot), field));
             }
         }
         const auto r = resolve_field_("bind_param", device_dot_field);
         const Real v = params_[pi].value;
+        if (branch_rate_field_(r)) {
+            // a branch-form g_on drives R_on = 1/g_on (g_on = inf: R_on = 0),
+            // g_off may be 0: the branch form's own checks, not the table's
+            auto params = pool_.params_of(r.branch);
+            Real R_on = pool_.branch_R_on(r.branch);
+            set_branch_rate_("bind_param", device_dot_field, params, r, v, R_on);
+            pool_.params_of_mut(r.branch) = std::move(params);
+            pool_.set_branch_form(r.branch, R_on);
+            unbind_(r.branch, r.field);
+            bindings_.push_back(ParamBinding{r.branch, r.field,
+                                             static_cast<std::uint32_t>(pi)});
+            return;
+        }
         if (!ir::within(r.spec->bound, v)) {
             throw std::invalid_argument(std::format(
                 "bind_param(\"{}\"): field {} of device \"{}\" must be {} "
@@ -337,6 +351,7 @@ public:
         for (const auto& bd : bindings_) {
             if (!moved[bd.param]) continue;
             const auto& spec = ir::fields_of(pool_.kind_of(bd.branch))[bd.field];
+            if (branch_rate_field_(FieldRef_{bd.branch, bd.field, &spec})) continue;
             if (!ir::within(spec.bound, vals[bd.param])) {
                 throw std::invalid_argument(std::format(
                     "parameter \"{}\" = {}: field {} of device \"{}\" must "
@@ -346,6 +361,7 @@ public:
         }
         // Every driven device checked on a copy first (all, or nothing).
         std::vector<std::pair<Index, pwl::DevicePool::ParamsVariant>> next;
+        std::vector<std::pair<Index, Real>> next_R_on;   // branch-form devices
         for (const auto& bd : bindings_) {
             if (!moved[bd.param]) continue;
             const Real value = vals[bd.param];
@@ -356,6 +372,17 @@ public:
                 it = std::prev(next.end());
             }
             const auto& spec = ir::fields_of(pool_.kind_of(bd.branch))[bd.field];
+            if (const FieldRef_ fr{bd.branch, bd.field, &spec}; branch_rate_field_(fr)) {
+                auto jt = std::find_if(next_R_on.begin(), next_R_on.end(),
+                    [&](const auto& x) { return x.first == bd.branch; });
+                if (jt == next_R_on.end()) {
+                    next_R_on.emplace_back(bd.branch, pool_.branch_R_on(bd.branch));
+                    jt = std::prev(next_R_on.end());
+                }
+                set_branch_rate_(params_[bd.param].name, spec.name, it->second,
+                                 fr, value, jt->second);
+                continue;
+            }
             spec.set(it->second, value);
             try {
                 ir::check_device(it->second, spec.name);
@@ -371,6 +398,7 @@ public:
             pool_.params_of_mut(b) = std::move(params);
             pool_.sync_derived_values(b);
         }
+        for (const auto& [b, R_on] : next_R_on) pool_.set_branch_form(b, R_on);
     }
 
     /// Read one value field (`"R1.R"`), as `set_value` resolves it.
@@ -3354,6 +3382,44 @@ private:
         return true;
     }
 
+    /// A branch-form switch / diode's g_on or g_off field (bindable: a
+    /// parameter's g_on drives R_on = 1/g_on).
+    [[nodiscard]] bool branch_rate_field_(const FieldRef_& r) const {
+        return pool_.is_branch_form(r.branch) &&
+               (r.spec->name == "g_on" || r.spec->name == "g_off");
+    }
+
+    /// Write a parameter's value to a branch-form g_on (R_on = 1/g_on, an
+    /// infinite g_on is R_on = 0) or g_off on `params`, checked as the
+    /// branch form's builder checks it; `R_on` is the device's, updated.
+    void set_branch_rate_(std::string_view fn, std::string_view what,
+                          pwl::DevicePool::ParamsVariant& params,
+                          const FieldRef_& r, Real value, Real& R_on) const {
+        Real* g_on = nullptr;
+        Real* g_off = nullptr;
+        std::visit([&](auto& prm) {
+            if constexpr (requires { prm.g_on; prm.g_off; }) {
+                g_on = &prm.g_on;
+                g_off = &prm.g_off;
+            }
+        }, params);
+        const auto dev = graph_.branch_name(r.branch);
+        if (r.spec->name == "g_on") {
+            if (!(value > Real{0})) {
+                throw std::invalid_argument(std::format(
+                    "{}(\"{}\"): g_on of branch-form device \"{}\" must be "
+                    "> 0 (it sets R_on = 1/g_on), got {}", fn, what, dev, value));
+            }
+            // a parameter is finite (a document never holds an infinity), so
+            // the ideal limit R_on = 0 is set as set_value("<dev>.R_on", 0)
+            R_on = Real{1} / value;
+        } else {
+            *g_off = value;
+        }
+        require_branch_values_(fn, dev, R_on, *g_off);
+        *g_on = branch_g_on_(R_on);
+    }
+
     bool set_branch_form_value_(std::string_view fn,
                                 std::string_view device_dot_field, Real value) {
         const auto dot = device_dot_field.rfind('.');
@@ -3392,7 +3458,12 @@ private:
         require_branch_values_(fn, dev, R_on, *g_off);
         *g_on = branch_g_on_(R_on);
         pool_.params_of_mut(b) = std::move(params);
-        pool_.set_branch_form(b, R_on);   // R_on / g_off are never bound
+        pool_.set_branch_form(b, R_on);
+        // a set value wins over a binding of the field it moves (R_on is g_on's)
+        if (const auto* sp = ir::find_field(pool_.kind_of(b),
+                                            field == "R_on" ? "g_on" : "g_off")) {
+            unbind_(b, static_cast<std::uint16_t>(sp - ir::fields_of(pool_.kind_of(b)).data()));
+        }
         return true;
     }
 
