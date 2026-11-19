@@ -339,10 +339,10 @@ def test_every_pickle_layout_resumes_the_stored_charge_kinds_on_both_paths(path)
                  v5[:17], v5[:18], v5]
     no_grid = [("SolverSnapshot", 3) + core,
                ("SolverSnapshot", 3) + core + (marker,),
-               old, old[:11], old[:10]]
+               old, old[:11]]
 
-    def resume(s):
-        return np.asarray(_pwl(1e-4, resume_from=s, device_path=path).states)
+    def resume(s, **kw):
+        return np.asarray(_pwl(1e-4, resume_from=s, device_path=path, **kw).states)
 
     def load(state):
         s = SolverSnapshot.__new__(SolverSnapshot)
@@ -356,3 +356,7 @@ def test_every_pickle_layout_resumes_the_stored_charge_kinds_on_both_paths(path)
     ref = resume(snap)
     for state in no_grid:
         assert np.array_equal(resume(load(state)), ref), len(state)
+    # legacy subject: the 10-field 2.0 layout has no stamped mask, so the restart
+    # rule (default) restarts at the resume (3 extra steps); 2.0 ran without it
+    legacy = dict(discontinuity_restart=False)
+    assert np.array_equal(resume(load(old[:10]), **legacy), resume(snap, **legacy))
