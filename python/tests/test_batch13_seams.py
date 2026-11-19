@@ -162,14 +162,11 @@ def test_trbdf2_resume_matches_to_tolerance_or_is_refused_by_name(case):
     _, _, full = _run(factory, "trbdf2", t2, None)
     b, kw, first = _run(factory, "trbdf2", t1, None)
     snap = first.final_snapshot
-    try:
-        _, _, second = _run(factory, "trbdf2", t2, None, builder=b, kw=kw,
-                            t_start=snap.t, resume_from=snap)
-    except p.UnsupportedError as e:
-        # t1 is between two ticks by construction: the named refusal
-        assert case in ("closed_loop", "c_block") and "between two" in str(e), str(e)
-        return
-    assert case not in ("closed_loop", "c_block"), "a between-ticks resume ran"
+    # t1 is between two ticks for closed_loop / c_block by construction:
+    # since batch 14a (event queue 3: the tick phase in the snapshot) that
+    # resume runs on the original tick grid instead of being refused
+    _, _, second = _run(factory, "trbdf2", t2, None, builder=b, kw=kw,
+                        t_start=snap.t, resume_from=snap)
     xs = np.asarray(second.states)[-1]
     xf = np.array([np.interp(second.times[-1], full.times, col)
                    for col in np.asarray(full.states).T])
@@ -182,7 +179,7 @@ def test_every_snapshot_pickles_and_the_copy_resumes_or_refuses_by_name():
         b, kw, first = _run(factory, "pwl", t1, dt)
         snap = first.final_snapshot
         copy = pickle.loads(pickle.dumps(snap))
-        assert copy.__getstate__()[:2] == ("SolverSnapshot", 4)
+        assert copy.__getstate__()[:2] == ("SolverSnapshot", 5)
         assert list(copy.dev_state) == list(snap.dev_state)
         try:
             _, _, a = _run(factory, "pwl", t2, dt, builder=b, kw=kw, t_start=snap.t,

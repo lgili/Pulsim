@@ -20,7 +20,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | pwl+restart | 87 | 21 | 1 | 0 | 0 |
 | pwl+split | 89 | 19 | 1 | 0 | 0 |
 | trbdf2 | 106 | 2 | 1 | 0 | 0 |
-| dsed | 97 | 0 | 0 | 12 | 0 |
+| dsed | 100 | 0 | 0 | 9 | 0 |
 
 ### Fixed engine: restart rule and split (circuits where any of the three does not agree)
 
@@ -150,9 +150,9 @@ cell disagrees by edge timing; edge err above it: the states differ.
 
 | circuit | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
-| closed_loop/cl_boost_pi.yaml | 0.0582 | 0.0579 | 8.55e-05 | 1.31e-06 | refused |
-| closed_loop/cl_buck_aggressive_pi.yaml | 0.00662 | 0.00709 | 0.00404 | 3.72e-05 | refused |
-| closed_loop/cl_buck_pi.yaml | 0.0121 | 0.0123 | 0.00049 | 1.88e-05 | refused |
+| closed_loop/cl_boost_pi.yaml | 0.0582 | 0.0579 | 8.55e-05 | 1.31e-06 | 1.29e-06 |
+| closed_loop/cl_buck_aggressive_pi.yaml | 0.00662 | 0.00709 | 0.00404 | 3.72e-05 | 3.24e-05 |
+| closed_loop/cl_buck_pi.yaml | 0.0121 | 0.0123 | 0.00049 | 1.88e-05 | 1.77e-05 |
 | closed_loop/ll14_buck_closed_loop.yaml | 0.249 | 0.221 | 0.188 | 0.000547 | refused |
 | closed_loop/ll15_boost_closed_loop.yaml | 0.22 | 0.0659 | 0.05 | 0.000264 | refused |
 | closed_loop/ll16_flyback_closed_loop.yaml | 0.112 | 0.208 | 0.115 | 0.000363 | refused |
@@ -243,7 +243,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | 0.05 | 0.05 | 0.05 | 9.18e-05 | 0.000127 |
 | switching/isolated/active_clamp_forward.yaml | 0.00425 | 0.00375 | 0.00374 | 0.000117 | 1.24e-06 |
 | switching/isolated/dual_active_bridge.yaml | 0.000265 | 2.4e-06 | 2.4e-06 | 3.49e-05 | 1.86e-06 |
-| switching/isolated/flyback_converter.yaml | 0.949 | 0.11 | 0.11 | 4.29e-05 | 2.72e-06 |
+| switching/isolated/flyback_converter.yaml | 0.949 | 0.11 | 0.11 | 4.29e-05 | 2.7e-06 |
 | switching/isolated/forward_converter.yaml | 0.707 | 0.092 | 0.092 | 2.17e-05 | 1.12e-06 |
 | switching/isolated/full_bridge_dc.yaml | 0.0828 | 0.0815 | 0.0815 | 0.000141 | 2.66e-05 |
 | switching/isolated/ll11_llc_resonant_converter.yaml | error | error | error | error | refused |

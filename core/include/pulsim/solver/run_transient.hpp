@@ -58,6 +58,8 @@
 #include "pulsim/events/step_hooks.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
+#include "pulsim/solver/step/controllers.hpp"
+#include "pulsim/solver/step/integrators.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
@@ -514,6 +516,8 @@ inline SimulationResult run_transient(
         t_origin = resume_snap->grid_origin;
         k_off = resume_snap->grid_step;
     }
+    // The grid point k of this run: t_origin + (k_off + k)·dt.
+    const step::FixedClock fixed_grid{t_origin, opts.dt};
 
     // The five stateful-device histories (Coss, Lauritzen, PMSM, IGBT
     // tail, saturable inductor), one object: every operation below visits
@@ -522,6 +526,7 @@ inline SimulationResult run_transient(
     // resume WINS over a builder-IC seed: the snapshot is the state.
     pwl::StatefulHistories hs;
     hs.init(graph, pool);
+    hs.set_path(opts.device_path, graph, pool, "run_transient");
     if (initial_state != nullptr) hs.seed_from_dc_op(x);
     if (resume_snap != nullptr) hs.load(*resume_snap, history, "run_transient");
 
@@ -540,7 +545,7 @@ inline SimulationResult run_transient(
     // run_event_iteration sets before every solve. `nl_refresh` is a
     // deprecated override of the static stamps only.
     const pwl::NonlinearRefreshFn nl_static =
-        pwl::static_device_refresh(pool, nl_refresh);
+        pwl::static_device_refresh(pool, nl_refresh, opts.device_path);
     const pwl::NonlinearRefreshFn nl_refresh_effective =
         pwl::build_device_refresh(nl_static, hs, step_ctx,
                                   /*sat_increment_form=*/false);
@@ -966,7 +971,7 @@ inline SimulationResult run_transient(
             mode_prev_on, mode_x0, for_dt, h_site, bx, mode_Z, mode_u, mode_xj, mode_coords,
             x_site);
     };
-    // The quiet-site test of 'lcp' (DECISIONS #30): every diode's crossing
+    // The quiet-site test of 'lcp' (DECISIONS #40): every diode's crossing
     // signal on the start solve `xs` clear of zero by kQuietBand of the
     // circuit scale (10× the selector's tie tolerance, with its σ·C_max/h
     // term): the LCP reads the same signals from the same solve.
@@ -1004,7 +1009,7 @@ inline SimulationResult run_transient(
         return true;
     };
     // 'lcp': the LCP decides the site; one solve under its mode. Returns
-    // whether the mode changed from the start bits (DECISIONS #30). The start
+    // whether the mode changed from the start bits (DECISIONS #40). The start
     // mode is solved first (`x_start`: given by the caller, or solved here).
     //   * quiet site — any site whose start solve gives every diode's
     //     crossing signal (ON: the current; OFF: the gap to V_on) clear of
@@ -1187,9 +1192,7 @@ inline SimulationResult run_transient(
                                 const topology::SwitchStateMask& gates, Real for_dt,
                                 bool be, const Vector& bx, Size rounds, bool cycle) {
         auto& r = result.mode_report;
-        // A later stage entered with the previous stage's mask cycle never
-        // solves (run_event_iteration breaks before round 1): no settled
-        // mode to compare, and the cycle was counted at that stage.
+        // No solve at this site: no settled mode to compare.
         if (last_solved_bits.size() != diodes.entries().size()) return;
         mode_count_site(r, kind);
         r.settle_rounds_total += rounds;
@@ -1644,12 +1647,10 @@ inline SimulationResult run_transient(
             if (should_continue && !should_continue()) {
                 break;
             }
-            const Real t = t_origin +
-                            static_cast<Real>(k_off + k) * opts.dt;
+            const Real t = fixed_grid.at(k_off + k);
             t_reached = t;
             k_reached = k;
-            const Real t_prev = t_origin +
-                                 static_cast<Real>(k_off + k - 1) * opts.dt;
+            const Real t_prev = fixed_grid.at(k_off + k - 1);
             // The heat the previous step queued, as this step's power.
             if (lt) lt->advance(opts.dt);
 
@@ -1897,10 +1898,8 @@ inline SimulationResult run_transient(
             // no rollback of its flux.)
             // A restart stage advances for_dt/2 (= γh) on the factor of
             // for_dt (= 2γh); the devices are told the interval and the rule.
-            step_ctx.h = backward_euler ? for_dt * Real{0.5} : for_dt;
-            step_ctx.stage = backward_euler
-                ? pwl::TrBdf2Stage::BackwardEuler
-                : pwl::TrBdf2Stage::Trapezoidal;
+            step_ctx = backward_euler ? step::BackwardEuler::on_factor(for_dt).ctx()
+                                      : step::Trapezoidal::stage(for_dt).ctx();
             iters = 0;
             flipped = false;
             // NOT reset: a mask cycle in ANY sub-step of a retry is a
@@ -1986,13 +1985,21 @@ inline SimulationResult run_transient(
                 // (adversarial-review finding P0-R3); there the
                 // iteration budget alone bounds the cost.
                 if (!nl_refresh_effective) {
+                    // A cycle of THIS call: `mask_cycle` stays set from an
+                    // earlier stage or sub-step of the outer step, and
+                    // breaking on it skipped this stage's solve (x stayed
+                    // at the earlier stage's time, committed as this one).
+                    bool cycle_here = false;
                     for (Size ms = 0; ms < n_masks_seen; ++ms) {
                         if (masks_seen[ms] == mask) {
-                            mask_cycle = true;
+                            cycle_here = true;
                             break;
                         }
                     }
-                    if (mask_cycle) break;
+                    if (cycle_here) {
+                        mask_cycle = true;
+                        break;
+                    }
                     if (n_masks_seen < masks_seen.size()) {
                         masks_seen[n_masks_seen++] = mask;
                     }
@@ -3023,13 +3030,11 @@ inline SimulationResult run_transient(
                 "the thermal network.");
         }
         for (Size k = 0; k < n_steps; ++k) {
-            const Real t = t_origin +
-                            static_cast<Real>(k_off + k) * opts.dt;
+            const Real t = fixed_grid.at(k_off + k);
             t_reached = t;
             k_reached = k;
             const Real t_prev = k > 0
-                ? (t_origin +
-                    static_cast<Real>(k_off + k - 1) * opts.dt)
+                ? fixed_grid.at(k_off + k - 1)
                 : opts.t_start;
             // Sub-step bisection snapshot (Layer 5 V2.2). At
             // k=0 we don't have a prev step; just use the
@@ -3332,6 +3337,12 @@ inline SimulationResult run_transient(
     // last step was stored), for a resume's row 0.
     result.final_snapshot.stamped_mask =
         stamped_known ? mask_bits(stamped_mask) : std::vector<bool>{};
+    if (has_ticks) {   // the tick sources are ids 0..n-1
+        for (std::uint32_t j = 0; j < ticks->rates.size(); ++j) {
+            result.final_snapshot.tick_origin.push_back(tick_queue.grid_origin(j));
+            result.final_snapshot.tick_next_k.push_back(tick_queue.next_k(j));
+        }
+    }
     result.final_snapshot.valid = true;
     result.newton = newton_ws.take_counters();
     if (lt) lt->write(result);

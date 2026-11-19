@@ -217,6 +217,16 @@ inline ADRealN<N> log(const ADRealN<N>& x) noexcept {
     return ADRealN<N>{lv, d};
 }
 
+/// log(1 + x), accurate near 0 (the VDMOS C_gd charge law uses it).
+template <Size N>
+inline ADRealN<N> log1p(const ADRealN<N>& x) noexcept {
+    const Real lv = std::log1p(x.value());
+    const Real inv = Real{1} / (Real{1} + x.value());
+    std::array<Real, N> d{};
+    for (Size i = 0; i < N; ++i) d[i] = x.deriv(i) * inv;
+    return ADRealN<N>{lv, d};
+}
+
 template <Size N>
 inline ADRealN<N> sqrt(const ADRealN<N>& x) noexcept {
     const Real sv = std::sqrt(x.value());

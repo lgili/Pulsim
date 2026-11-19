@@ -1,4 +1,4 @@
-"""Cost gate of mode_selection='lcp' on pwl (DECISIONS #30 of add-branch-form-ideal-switch).
+"""Cost gate of mode_selection='lcp' on pwl (DECISIONS #40 of add-branch-form-ideal-switch).
 
     PYTHONPATH=<worktree>/python:<worktree>/benchmarks python3 lcp_cost_gate.py [--reps 7]
         [--configs pwl,pwl+restart,pwl+split] [--save out.npz] [--compare base.npz] [--circuits GLOB]

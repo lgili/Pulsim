@@ -608,8 +608,15 @@ def run_dsed_from_builder(
     builder_initial_state: Optional[Any] = None,
     mode_selection: Optional[str] = None,
     allow_implicit_segments: bool = True,
+    ticks: Optional[Any] = None,
 ):
     """Run a PED simulation from a :class:`pulsim.CircuitBuilder`.
+
+    ``ticks`` (``[(fn, period, offset), ...]``): control ticks scheduled
+    by the event-driven integrator's event queue, ``fn(t, x_full)`` at
+    every ``offset + k*period`` before ``t_end`` (add-unified-event-queue
+    group 3). They need the native adapter and the event-driven
+    integrator; anything else refuses them by name.
 
     ``builder_initial_state`` (not None) says the builder declared
     ``c0=`` / ``i0=`` / ``set_initial`` values; they are mapped per
@@ -696,6 +703,23 @@ def run_dsed_from_builder(
     # with every Newton device silently ABSENT). The native adapter
     # repeats the check for C++ callers.
     _kern._require_supported(builder.graph, builder.pool, "dsed")
+    ticks = list(ticks or [])
+    if ticks:
+        if integrator not in (None, "auto", "rk45"):
+            raise unsupported(
+                "dsed", "step_observer", message=
+                f"simulate(engine='dsed', integrator={integrator!r}): control "
+                "ticks run on the event-driven integrator only. Drop integrator.")
+        monitors_only = all(getattr(f, "_pulsim_monitor", False) for f, _p, _o in ticks)
+        if monitors_only and _n_diodes == 0 and integrator != "rk45":
+            # routing to rk45 would change the run the Monitor promises not to touch
+            raise unsupported(
+                "dsed", "step_observer", message=
+                "simulate(engine='dsed') with a Monitor: monitors run on the "
+                "event-driven integrator, and this circuit would otherwise run "
+                "on the 'auto' one, so the Monitor would change the run. Pass "
+                "integrator='rk45' (then the run is the same with or without it).")
+        integrator = "rk45"
 
     opts = _resolve_dsed_options(
         dt=dt,
@@ -926,7 +950,13 @@ def run_dsed_from_builder(
                     rtol=opts.rtol, atol=opts.atol,
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
                     store_every=opts.store_every, event_log=False,
-                    settle_round_cap=SETTLE_ROUND_CAP, **shadow_kw)
+                    settle_round_cap=SETTLE_ROUND_CAP, **shadow_kw,
+                    **({"tick_fns": [f for f, _p, _o in ticks],
+                        "tick_periods": [float(p) for _f, p, _o in ticks],
+                        "tick_offsets": [float(o) for _f, _p, o in ticks],
+                        "tick_monitors": [bool(getattr(f, "_pulsim_monitor", False))
+                                          for f, _p, _o in ticks]}
+                       if ticks else {}))
             elif opts.integrator == "bdf2":
                 native_res = run_bdf2_b11(
                     native_adapter, sf, x0, t_window,
@@ -944,6 +974,8 @@ def run_dsed_from_builder(
             res.initial_condition_adjustment = ic_adjustment
             if mode_auto is not None:
                 res.diagnostics["mode_selection_auto"] = mode_auto
+            res.control_tick_counts = [int(n) for n in native_res.get(
+                "control_tick_counts", ())]
             return res
         except (UnsupportedError, _InconsistentInitialState, ConvergenceError):
             # A refusal is an answer, not a reason to try the next
@@ -952,7 +984,7 @@ def run_dsed_from_builder(
             # (the next bridge would re-run it without the refusal of
             # implicit segments).
             raise
-        except (RuntimeError, ValueError):
+        except (RuntimeError, ValueError) as e:
             # Bridge.11 native adapter rejected the circuit (e.g. nonlinear
             # device that the C++ extractor can't handle). Silently fall
             # through to Bridge.10 — the Python adapter has identical
@@ -968,10 +1000,22 @@ def run_dsed_from_builder(
             # run it numerically (an untyped kernel error mid-run, e.g. a
             # root finder that did not converge, would come back as a
             # silent numeric run; integration batch 9 review).
+            if ticks:
+                raise unsupported(
+                    "dsed", "step_observer", message=
+                    "simulate(engine='dsed'): control ticks run on the native "
+                    f"adapter only, which rejected this circuit ({e}). Use "
+                    "engine='pwl' or 'trbdf2'.") from e
             if _n_diodes > 0 or (not adapter_rejected and not allow_implicit_segments
                                  and opts.integrator != "bdf2"):
                 raise
 
+    if ticks:
+        raise unsupported(
+            "dsed", "step_observer", message=
+            "simulate(engine='dsed'): control ticks run on the native adapter "
+            "only, which is not available for this circuit. Use engine='pwl' "
+            "or 'trbdf2'.")
     if full_x0 is not None and ambiguous:
         x0 = full_x0          # the non-native bridges read it as reduced, as before
     elif full_x0 is not None:

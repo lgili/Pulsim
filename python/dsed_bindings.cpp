@@ -37,6 +37,7 @@
 #include <utility>
 #include <vector>
 
+#include "pulsim/blockchain/chain.hpp"
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/dsed/builder_adapter.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
@@ -1283,8 +1284,28 @@ void init_module(py::module_& m) {
            Real mode_lcp_h_e,
            Real mode_guard_h_e,
            bool mode_guard_refuse,
-           int settle_round_cap) {
+           int settle_round_cap,
+           std::vector<Real> tick_periods,
+           std::vector<Real> tick_offsets,
+           std::vector<py::object> tick_fns,
+           std::vector<bool> tick_monitors) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
+            // add-unified-event-queue group 3: control ticks on the
+            // scheduler's queue; each gets the full MNA state.
+            if (tick_fns.size() != tick_periods.size()
+                || (!tick_offsets.empty() && tick_offsets.size() != tick_periods.size())) {
+                throw std::invalid_argument(
+                    "run_ped_native_builder: tick_fns, tick_periods and tick_offsets "
+                    "must have the same length");
+            }
+            std::vector<std::function<void(Real, const Vector&)>> tick_cbs;
+            for (const auto& ob : tick_fns) {
+                if (py::isinstance<pulsim::blockchain::ChainTick>(ob)) {   // control graph: C++
+                    tick_cbs.push_back(ob.cast<pulsim::blockchain::ChainTick&>().fn);
+                } else {
+                    tick_cbs.push_back(ob.cast<std::function<void(Real, const Vector&)>>());
+                }
+            }
             sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(dt_max));
             PIController ctrl(rtol, atol);
@@ -1378,6 +1399,20 @@ void init_module(py::module_& m) {
             }
             sim.set_event_projection(enable_event_projection);
             sim.set_settle_round_cap(settle_round_cap);
+            if (!tick_cbs.empty()) {
+                pulsim::events::TickPlan plan;
+                for (std::size_t j = 0; j < tick_periods.size(); ++j) {
+                    plan.rates.push_back(pulsim::events::Rate{
+                        tick_periods[j], tick_offsets.empty() ? Real{0} : tick_offsets[j]});
+                }
+                plan.monitor = tick_monitors;   // empty = every rate a ControlTick
+                plan.fn = [&adapter, &tick_cbs](std::uint32_t j, const pulsim::events::TickInfo&,
+                                                Real t, const Vector& x) {
+                    const Vector full = adapter.recover_full(t, x);
+                    tick_cbs[j](t, full);
+                };
+                sim.set_ticks(std::move(plan));
+            }
             std::vector<std::string> diode_names;
             if (mode_shadow_h_e > Real{0}) {
                 pulsim::pwl::DiodeEventState census(adapter.graph(), adapter.pool());
@@ -1404,6 +1439,7 @@ void init_module(py::module_& m) {
             auto res = sim.simulate(x0, t_end);
             py::gil_scoped_acquire acquire;
             auto d = ped_result_to_dict(res, event_log);
+            if (!tick_cbs.empty()) d["control_tick_counts"] = sim.tick_counts();
             d["exact"] = exact_report_dict(adapter, res.n_predicate_evals);
             if (mode_shadow_h_e > Real{0}) {
                 d["mode_shadow"] = mode_shadow_dict(res.mode_shadow, diode_names,
@@ -1453,6 +1489,10 @@ void init_module(py::module_& m) {
         py::arg("mode_guard_h_e") = Real{0},
         py::arg("mode_guard_refuse") = false,
         py::arg("settle_round_cap") = 64,
+        py::arg("tick_periods") = std::vector<Real>{},
+        py::arg("tick_offsets") = std::vector<Real>{},
+        py::arg("tick_fns") = std::vector<py::object>{},
+        py::arg("tick_monitors") = std::vector<bool>{},
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "
