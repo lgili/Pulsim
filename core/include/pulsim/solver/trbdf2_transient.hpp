@@ -3540,7 +3540,7 @@ inline SimulationResult run_transient_trbdf2(
                             return t_loc - t <= dt_floor || (b.tb - b.ta) <= h_min;
                         },
                         [&](Real t_loc, Real& sm) {
-                        (void)ed_slots; (void)ed_it; (void)sdirk;   // captured outside kE (MSVC)
+                        (void)ed_stages; (void)ed_slots; (void)ed_it; (void)sdirk;   // captured outside kE (MSVC)
                         const Real dts = t_loc - t;
                         bool trial_ok = true;
                         try {
@@ -3577,7 +3577,7 @@ inline SimulationResult run_transient_trbdf2(
                         },
                         [&](events::BracketEnd e) {
                             (e == events::BracketEnd::A ? x_ta : x_tb) = x_trial;
-                            (void)ed_ia; (void)ed_ib; (void)ed_it;   // captured outside kE (MSVC)
+                            (void)ed_ia; (void)ed_ib; (void)ed_it; (void)sdirk;   // captured outside kE (MSVC)
                             // the slots of the end that moved: its trial's stage 5
                             if constexpr (kE) {
                                 if (!sdirk) (e == events::BracketEnd::A ? ed_ia : ed_ib) = ed_it;
