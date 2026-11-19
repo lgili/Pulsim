@@ -220,6 +220,10 @@ struct SolverSnapshot {
     /// version 4.
     std::vector<Real> tick_origin;
     std::vector<std::uint64_t> tick_next_k;
+    /// add-in-kernel-event-losses: the loss tracker's run state
+    /// (LossTracker::save): pending heat, ledgers, events. Empty: no loss
+    /// port, or a snapshot without the field (pickle field 17).
+    std::vector<Real> loss_state;
     /// MNA unknowns at `t`.
     Vector x;
     /// Every device state the run carries (add-unified-device-interface

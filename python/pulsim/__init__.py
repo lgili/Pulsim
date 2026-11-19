@@ -1964,33 +1964,6 @@ def _warn_impulses(res) -> None:
         UserWarning, stacklevel=3)
 
 
-def _warn_impulse_heat(res, builder) -> None:
-    """A loss port (set_device_losses) heats its junction with the table
-    energies only: an impulsive re-initialisation booked to the same device
-    (E_impulse_total, losses.impulse_losses) is not in heat_injected / T_j.
-    shortcut: warned, not wired; owner: the in-kernel event-losses track."""
-    if not getattr(res, "reinit_records", None):
-        return
-    names = getattr(builder, "_device_loss_names", None)
-    ported = set(names()) if callable(names) else set()
-    if not ported:
-        return
-    from .losses import impulse_losses
-    hit = {n: v["E_impulse_total"] for n, v in impulse_losses(builder, res).items()
-           if n in ported}
-    if hit:
-        import warnings
-        who = ", ".join(f"'{n}' ({e:.6g} J)" for n, e in hit.items())
-        warnings.warn(
-            f"simulate(): the loss port(s) of {who} do not carry their impulsive "
-            "re-initialisation energy (E_impulse_total), and their conduction "
-            "integral across the impulse step is not physical (it can be "
-            "negative): heat_injected and the junction temperature are wrong "
-            "around an impulse. Add losses.impulse_losses(...) to the thermal "
-            "network yourself.",
-            UserWarning, stacklevel=3)
-
-
 def _carry_jumps(fn, parts):
     """Give a composed b_extra_fn the declared jumps of its parts.
 
@@ -4053,7 +4026,6 @@ def simulate(
     # the trace it was solved against.
     if _mmc_finalize is not None and len(res.states) > 0:
         _mmc_finalize(res.times[-1], res.states[-1])
-    _warn_impulse_heat(res, builder)
     _save_control_state(_plan.graphs, res)
     return res
 

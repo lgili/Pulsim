@@ -297,7 +297,12 @@ def test_a_version_3_pickle_loads_and_resumes_on_a_restarted_grid():
     exactly as the same snapshot without a grid."""
     snap = _pwl(4.2e-5).final_snapshot
     v4 = snap.__getstate__()
-    assert v4[1] == 5 and len(v4) == 17
+    assert v4[1] == 5 and len(v4) == 18
+    # version 5 before field 17 (the loss tracker's state) still loads
+    v17 = SolverSnapshot.__new__(SolverSnapshot)
+    v17.__setstate__(tuple(v4[:17]))
+    assert np.array_equal(np.asarray(_pwl(1e-4, resume_from=v17).states),
+                          np.asarray(_pwl(1e-4, resume_from=snap).states))
     old = SolverSnapshot.__new__(SolverSnapshot)
     old.__setstate__(("SolverSnapshot", 3) + tuple(v4[2:12]))
     assert np.isnan(old.grid_origin) and not old.post_edge_derivatives
@@ -310,7 +315,7 @@ def test_a_version_3_pickle_loads_and_resumes_on_a_restarted_grid():
 @pytest.mark.parametrize("path", ["legacy", "interface"])
 def test_every_pickle_layout_resumes_the_stored_charge_kinds_on_both_paths(path):
     """Every layout this Pulsim reads (2.0: 10/11/12 fields; version 3:
-    12/13; version 4: 13/14/15; version 5: 17) loads a snapshot holding a Lauritzen
+    12/13; version 4: 13/14/15; version 5: 17/18) loads a snapshot holding a Lauritzen
     diode and an IGBT tail taken on either device path, and resumes on
     that path exactly as the snapshot it came from (the layouts without a
     grid as the same snapshot without one)."""
@@ -318,7 +323,7 @@ def test_every_pickle_layout_resumes_the_stored_charge_kinds_on_both_paths(path)
     assert list(snap.lauritzen_history)[0] != 0.0     # charge really stored
     assert list(snap.igbt_tail_history)[0] != 0.0
     v5 = snap.__getstate__()
-    assert v5[1] == 5 and len(v5) == 17
+    assert v5[1] == 5 and len(v5) == 18
     old = (snap.t, list(snap.x), list(snap.history), list(snap.diode_on),
            list(snap.saturable_history), list(snap.coss_history),
            list(snap.lauritzen_history), list(snap.igbt_tail_history),

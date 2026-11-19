@@ -395,15 +395,18 @@ def loss_events(self, device):
 
 
 def device_energy(self, device):
-    """``{"E_on", "E_off", "E_cond_electrical", "E_cond_table", "n_on",
-    "n_off"}`` of ``device`` (energies in J). ``E_cond_electrical`` is
-    the device's ``∫v·i`` (always), ``E_cond_table`` the on-state
-    table's (0 without one); the spec's ``conduction`` says which one
-    was deposited as heat."""
+    """``{"E_on", "E_off", "E_cond_electrical", "E_cond_table",
+    "E_impulse", "n_on", "n_off"}`` of ``device`` (energies in J).
+    ``E_cond_electrical`` is the device's ``∫v·i`` (always),
+    ``E_cond_table`` the on-state table's (0 without one); the spec's
+    ``conduction`` says which one was deposited as heat. ``E_impulse`` is
+    the impulsive re-initialisation energy booked to the device
+    (``result.reinit_records`` whose ``cause`` it is), deposited as heat."""
     r = _record(self, device)
     return {"E_on": r.E_on, "E_off": r.E_off,
             "E_cond_electrical": r.E_cond_electrical,
             "E_cond_table": r.E_cond_table,
+            "E_impulse": r.E_impulse,
             "n_on": int(r.n_on), "n_off": int(r.n_off)}
 
 

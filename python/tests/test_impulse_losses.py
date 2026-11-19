@@ -199,27 +199,42 @@ def test_thermal_summary_reports_ideal_elements_with_their_impulse():
     assert e["P_total_avg"] == pytest.approx(e["P_cond_avg"] + e["P_impulse_avg"], rel=1e-12)
 
 
-def test_a_loss_port_on_an_ideal_switch_says_its_impulse_is_not_in_the_junction():
-    # the capacitor loop with a loss port on S (a thermal RC on its own nodes)
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_a_loss_port_on_an_ideal_switch_carries_its_impulse_into_the_junction(engine):
+    """Item 3 of the in-kernel event losses: the capacitor loop's impulsive
+    energy ½·C1C2/(C1+C2)·ΔV² is a loss of the switch that closed it. With a
+    loss port on S it is booked as E_impulse, joins the heat ledger and
+    reaches the junction (C_th·ΔT + leak), and the summary says so."""
     b = p.CircuitBuilder()
     b.add_capacitor("C1", "x", "gnd", C1, V1)
     b.add_capacitor("C2", "y", "gnd", C2, V2)
     b.add_ideal_switch("S", "x", "y", 0.0, 1e-9)
     b.add_voltage_source("Vamb", "amb", "gnd", 25.0)
-    b.add_resistor("Rth", "tj", "amb", 2.0)
-    b.add_capacitor("Cth", "tj", "amb", 1e-3)
+    b.add_resistor("Rth", "tj", "amb", 1e9)        # adiabatic
+    c_th = 1e-6
+    b.add_capacitor("Cth", "tj", "amb", c_th)
     t = p.LossTable(v_axis=[10.0], i_axis=[1.0], tj_axis=[25.0], energy=np.full((1, 1, 1), 1e-9))
     m = p.SwitchStateMask(b.graph.num_switches)
     m.set(b.switch_index_of("S"), True)
+    kw = dict(dt=1e-7, discontinuity_restart=True) if engine == "pwl" else {}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         b.set_device_losses("S", junction="tj", E_on=t, E_off=t)
-        r = p.simulate(b, t_end=50e-7 + 1e-10, engine="pwl", dt=1e-7, switch_fn=lambda _: m,
-                       discontinuity_restart=True, auto_regularize=False)
-    assert r.reinit_records
-    with pytest.warns(RuntimeWarning, match="not in its loss port"):
-        by = {e["name"]: e for e in device_loss_summary(b, r)}
-    assert by["S"]["impulse_in_junction"] is False
+        r = p.simulate(b, t_end=50e-7 + 1e-10, engine=engine, switch_fn=lambda _: m,
+                       auto_regularize=False, **kw)
+    dW = 0.5 * C1 * C2 / (C1 + C2) * (V1 - V2) ** 2
+    assert sum(x.dW for x in r.reinit_records) == pytest.approx(dW, rel=1e-9)
+    e = r.device_energy("S")
+    assert e["E_impulse"] == pytest.approx(dW, rel=1e-9)
+    heat = e["E_on"] + e["E_off"] + e["E_cond_electrical"] + e["E_impulse"]
+    assert r.heat_injected + r.heat_pending == pytest.approx(heat, rel=1e-12)
+    assert r.heat_injected == pytest.approx(dW, rel=1e-6)   # + 1e-9 J of table
+    tj = np.asarray(r.v("tj"))                  # row 0 is the unsolved seed
+    assert c_th * (tj[-1] - tj[1]) == pytest.approx(r.heat_injected, rel=1e-6)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        by = {x["name"]: x for x in device_loss_summary(b, r)}
+    assert by["S"]["impulse_in_junction"] is True
 
 
 def test_a_decimated_pulse_interval_moves_no_row():

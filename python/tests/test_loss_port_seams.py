@@ -91,15 +91,16 @@ def test_sweep_of_a_circuit_carries_or_refuses_the_loss_port():
         assert all('"S1" has a loss port' in str(m) for _, m in r.failed)
 
 
-def test_a_resumed_run_drops_the_heat_pending_at_the_split():
+def test_a_resumed_run_carries_the_heat_pending_at_the_split():
     full = p.simulate(_builder(), 5e-4, dt=1e-6, switch_fn=_fn())
     a = p.simulate(_builder(), 2.503e-4, dt=1e-6, switch_fn=_fn())
     snap = pickle.loads(pickle.dumps(a.final_snapshot))   # the snapshot pickles
     b = p.simulate(_builder(), 5e-4, dt=1e-6, switch_fn=_fn(), resume_from=snap)
     assert a.heat_pending == pytest.approx(1e-3, rel=1e-5)
-    lost = full.heat_injected - (a.heat_injected + b.heat_injected)
-    # pinned gap: exactly the pending energy of the first segment is lost
-    assert lost == pytest.approx(a.heat_pending, rel=1e-5)
+    # the tracker travels in the snapshot (field 17): the resumed record is
+    # the uninterrupted one, heat in flight included (same binary, same path)
+    assert b.heat_injected == full.heat_injected
+    assert b.heat_pending == full.heat_pending
 
 
 # ---- seam C: every stateful stamp survives beside a loss port ----------------
@@ -156,12 +157,15 @@ def test_stateful_stamps_and_a_loss_port_compose_on_pwl():
     assert abs(lin - out[-1]) > 1e3 * 1e-9 * abs(out[-1])
 
 
-def test_stateful_stamps_compose_on_trbdf2_and_its_loss_port_is_refused():
+def test_stateful_stamps_compose_on_trbdf2_with_and_without_its_loss_port():
     r = _end("trbdf2", False)
     assert np.asarray(r.v("out"))[-1] == pytest.approx(17.08541162982808, rel=1e-5)
     assert np.asarray(r.i("L"))[-1] == pytest.approx(3.3922212010816595, rel=1e-5)
-    with pytest.raises(p.UnsupportedError, match="loss port of 'S'"):
-        _end("trbdf2", True)
+    # the port heats only the thermal node: the electrical end state is r's
+    # to the step controller's tolerance (the junction is in its error norm)
+    rl = _end("trbdf2", True)
+    assert np.asarray(rl.v("out"))[-1] == pytest.approx(17.08541162982808, rel=1e-4)
+    assert rl.heat_injected > 0
 
 
 # ---- seam D: a Circuit and a snapshot both cross to process workers ----------
@@ -241,7 +245,7 @@ def test_a_twelve_field_version_3_pickle_still_loads():
                       ).final_snapshot
     st = snap.__getstate__()
     # version 5: the marker is field 12, the grid field 13
-    assert st[:2] == ("SolverSnapshot", 5) and len(st) == 17 and st[12] is False
+    assert st[:2] == ("SolverSnapshot", 5) and len(st) == 18 and st[12] is False
     v3 = ("SolverSnapshot", 3) + tuple(st[2:12])
     old = type(snap).__new__(type(snap))
     old.__setstate__(v3)

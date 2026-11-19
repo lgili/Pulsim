@@ -1621,7 +1621,13 @@ inline SimulationResult run_transient(
         if (step_observer || step_observer_in) {
             (has_ticks ? step_observer : step_observer_in)(opts.t_start, x);
         }
-        if (lt) lt->begin(x, stamped_mask);
+        if (lt) {
+            if (resume_from != nullptr && !resume_from->loss_state.empty()) {
+                lt->restore(resume_from->loss_state);   // the heat in flight too
+            } else {
+                lt->begin(x, stamped_mask);
+            }
+        }
 
         if (hooks) hooks->start(x, stamped_mask);
 
@@ -3142,6 +3148,7 @@ inline SimulationResult run_transient(
                                   ? static_cast<long>(result.times.size()) - 1
                                   : -1L,
                               opts.on_impulse_error, "pwl", result);
+                if (lt) lt->impulses(result.reinit_records);
             }
             if (hook_mask) {
                 if (hook_event && mask_start_known && !(stamped_mask == mask_start)) {
@@ -3599,6 +3606,7 @@ inline SimulationResult run_transient(
         }
     }
     result.final_snapshot.valid = true;
+    if (lt) result.final_snapshot.loss_state = lt->save();
     result.newton = newton_ws.take_counters();
     if (lt) lt->write(result);
     result.gate_mask_fn = nullptr;   // it reads this frame's diode state
