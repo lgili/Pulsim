@@ -179,8 +179,11 @@
     builder, so their writes reach the solve; through the object they
     would reach a different pool. Checked for `mmc_arms`: its driver
     writes only through `cache.refactor_parametric` (mmc_thevenin.py
-    ~line 201, "the caller's builder is not touched"), so it can move
-    first; the `on_cache` hooks are user code and the shipped ones are
+    ~line 206, "the caller's builder is not touched"), but it reads the
+    caller builder's `branch_id` / `node_from` / `node_to` and checks
+    `a._builder is not builder`, so it can move first only once the
+    object's builder (`circuit.to_builder()`, after the preflight ties)
+    is shown to keep that numbering; the `on_cache` hooks are user code and the shipped ones are
     unchecked. The successor must route their pool access through
     `sim.builder` (or prove they only touch the cache) before `_via_sim` drops its `not mmc_arms and on_cache is
     None` clause, then compare `test_mmc*`, `test_electrothermal*` and
@@ -193,3 +196,14 @@
     belongs to the object's builder, so that path must keep its own
     cache (or the chain must move onto the object) before `mmc_arms`
     goes through `Simulation`.
+
+18. **Hand-off list (2026-11-18).** Next, in order: (a) the exact engine on
+    the object (16), after `feat/core-a-complementarity` is integrated;
+    (b) `mmc_arms` through `Simulation` (17: builder numbering, the chain
+    fast path); (c) `on_cache` (17: user hooks and the pool); (d) Stage A
+    (tasks 1-7). Seen in passing, not fixed: `losses.impulse_losses`
+    reads `rec.t` but the exact engine's reinit records reach Python as
+    `SimpleNamespace` from dicts (`_dsed_dispatch._result_from_native`),
+    which is fine; a raw `run_*_native_builder` dict record would not be.
+    Not verified here: Eigen 3.4.0 (the C++ touched is option plumbing,
+    no sparse code).
