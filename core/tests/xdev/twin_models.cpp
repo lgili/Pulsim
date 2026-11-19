@@ -103,6 +103,33 @@ struct ShockleyTwin {
         q[1] = S{0};
     }
 };
+
+// The same saturable inductor with a HAND Jacobian (the adapter's eval_jac
+// path): λ and dλ/di from one tangent, as the built-in law's eval_jac.
+// df in pattern order (0,2) (1,2) (2,0) (2,1); dq (2,2).
+struct SatIndHand : SatIndTwin {
+    static constexpr const char* kName = "satind_hand";
+    static void eval_jac(const double* p, const double* x, double* f, double* q, double* df,
+                         double* dq) {
+        using AD1 = pulsim::ad::ADRealN<1>;
+        using std::atan;
+        const double L0 = p[0], Is = p[1], Lr = p[2];
+        const double i = x[2];
+        f[0] = i;
+        f[1] = -i;
+        f[2] = x[0] - x[1];
+        const AD1 u{i, {1.0}};
+        const AD1 lam = Lr * u + (L0 - Lr) * Is * atan(u / Is);
+        q[0] = 0;
+        q[1] = 0;
+        q[2] = -lam.value();
+        df[0] = 1;
+        df[1] = -1;
+        df[2] = 1;
+        df[3] = -1;
+        dq[0] = -lam.deriv(0);
+    }
+};
 }  // namespace
 
-PULSIM_XDEV_MODELS(SatIndTwin, ShockleyTwin)
+PULSIM_XDEV_MODELS(SatIndTwin, ShockleyTwin, SatIndHand)

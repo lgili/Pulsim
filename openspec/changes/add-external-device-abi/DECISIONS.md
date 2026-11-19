@@ -111,6 +111,77 @@
     returns the old code (dlopen refcount); the debug check's 1e-12 absolute floor
     misses sub-pF capacitances.
 
+## Slice 2 — portability, CI wiring, cost, reviewer items (2026-11-19)
+
+11. **Layout asserted in the stable header.** `pulsim_xdev.h` now asserts
+    (C11 `_Static_assert`, C++ `static_assert`, C99 / MSVC-default-C negative
+    array) the offsets of every field group and both frozen V1 sizes, for
+    8-byte and 4-byte pointers: descriptor V1 = 200 / 120 bytes, ctx V1 =
+    40 / 28, field 40 / 32. No `long`, `size_t` or enum field and no padding
+    anywhere (a `#pragma pack(1)` changes nothing), so LP64 and LLP64 share
+    one layout. Only asserts were added: layout and version 1 unchanged.
+    Seen compiling with `-Wall -Wextra -Wpedantic -Werror`: header and
+    `contract_models.c` as C99 / C11 / C17 on Apple clang 21, GCC 15, LLVM
+    clang (Homebrew), and as C++17 / 20 / 23 on the same three; the header
+    `-fsyntax-only -ffreestanding` cross-targeted (LLVM clang) to
+    x86_64 / i686 / aarch64 Windows MSVC, x86_64 MinGW, x86_64 / i686 /
+    aarch64 / armv7 Linux, C99 / C11 / C++17. Negative control: a header with
+    one extra field fails all three language modes.
+12. **Windows, by reading (not run).** Export: `PULSIM_XDEV_EXPORT` =
+    `__declspec(dllexport)` on `pulsim_xdev_get` in the C models and the
+    adapter macro; `__cdecl` on every function pointer type and every
+    function assigned to one (C models via `CALL`, adapter statics). C models
+    use no VLA / complex (`-Wvla` clean), only C99 math MSVC has. Fixed:
+    `LoadLibraryExW` with `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR` needs a fully
+    qualified BACKSLASH path — the absolute path is now `make_preferred()`;
+    `C_STANDARD_REQUIRED` dropped for the C model (MSVC has no C99 switch);
+    MODULE output fixed at `<build>/xdev_test_models` with `$<0:>` so the
+    Visual Studio generator adds no `Release/`; the Python finder ignores
+    `.lib/.exp/.pdb`. No pointer-to-member template argument in the xdev code.
+13. **CI runs the twin tests instead of skipping them (not yet seen on CI).**
+    The two test model libraries are defined OUTSIDE the test block
+    (`PULSIM_BUILD_XDEV_TEST_MODELS`, default ON), so the wheel build CI
+    already runs (`pip install ".[dev]"`, scikit-build-core, `build-dir =
+    build/{wheel_tag}`) builds them into `build/<tag>/xdev_test_models`; they
+    are never installed into the wheel. `test_external_device.py` takes
+    `PULSIM_XDEV_TEST_LIBDIR`, else the newest `build*/[*/]xdev_test_models`,
+    else compiles with `cc`, and FAILS (not skips) when `CI` is set and none
+    is found. The wheel ships the stable header only, at
+    `pulsim/include/pulsim/xdev/pulsim_xdev.h`; `pulsim.get_include()`.
+14. **Cost: the 1.49–2.14× was mostly the probe.** The old probe rebuilt the
+    circuit inside the timed loop, so every repetition paid the REGISTRATION
+    checks (now ~1.0e8 instructions per satind circuit, 6.7e7 per Shockley:
+    a per-circuit cost, ~30 ms). Built once and simulated 1+K times
+    (`.scratch/xdev_loop2.py`, `xdev_instr2.sh`, K = 40, three runs), the
+    per-step ratios on the slice-1 code were satind 1.13–1.14×, Shockley
+    1.08–1.09×. Table after each step in #15.
+
+15. **Cost after each step** (instructions retired per accepted step, built
+    once, K = 40, three runs each, macOS / Apple clang; external / built-in):
+
+    | step | satind (AD) | satind (hand Jacobian) | Shockley rectifier |
+    |---|---|---|---|
+    | slice-1 code, old probe (registration in the loop) | 2.14 | — | 1.49 |
+    | slice-1 code, probe fixed | 1.143 / 1.129 / 1.137 | — | 1.092 / 1.081 / 1.076 |
+    | (a) cached, validated matrix slots | 1.136 / 1.104 / 1.169 | — | 1.093 / 1.084 / 1.055 |
+    | (b) adapter hand Jacobian (`eval_jac`) | — | 1.124 / 1.119 / 1.130 | (built-in is AD too) |
+
+    Target ≤ 1.2× met on both twins. (a) and (b) are within the run-to-run
+    noise (±3 %, the built-in itself reads 18.6k–19.5k): neither is a
+    measured gain on one instance; both kept (the slot cache is validated
+    per use — column range and row index — so it cannot return a wrong
+    entry after any insertion or rebuild; `eval_jac` lets a model skip AD).
+    What remains (~2.3k instructions per step on satind, ~1.1k on Shockley)
+    is structural: the external kind is a STATEFUL kind on every model, so
+    it evaluates again at each commit and carries q history, where the
+    built-in Shockley is stateless. (c) **No batch entry**: both twins have
+    ONE instance, so a batch call cannot move their ratio, and an ABI field
+    is frozen forever. Decided, not built: when a many-instance case
+    measures the indirect call, `eval_batch` is APPENDED after `reserved`
+    (read only when `struct_size` covers it; ABI version stays 1; the host
+    falls back to `eval` for every older library). The reserved slots stay
+    NULL-only.
+
 ## Requests to other tracks
 
 - **Stepper track**: (a) the DC operating point needs the stateful fold (an

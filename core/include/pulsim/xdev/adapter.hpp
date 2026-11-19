@@ -24,8 +24,13 @@
 //   };
 //   PULSIM_XDEV_MODELS(MyLaw)            // exports pulsim_xdev_get
 //
-// Optional members: `kMonotone` (std::array<pulsim_xdev_monotone, K>) and
-// `static int validate(const double* p, char* msg, std::uint32_t len)`.
+// Optional members: `kMonotone` (std::array<pulsim_xdev_monotone, K>),
+// `static int validate(const double* p, char* msg, std::uint32_t len)`, and
+// a HAND Jacobian `static void eval_jac(const double* p, const double* x,
+// double* f, double* q, double* df, double* dq)` writing df / dq in pattern
+// order (row-major over kF / kQ). With eval_jac the library calls it instead
+// of the full-width AD; the host's registration checks (central differences,
+// lines) still verify it, so a wrong hand Jacobian is refused by name.
 
 #include "pulsim/ad/ad_scalar.hpp"
 #include "pulsim/xdev/pulsim_xdev.h"
@@ -73,6 +78,14 @@ struct Table {
     static int32_t PULSIM_XDEV_CALL eval(const pulsim_xdev_ctx* c, const double* x,
                                          double* f, double* q, double* df,
                                          double* dq) noexcept {
+        if constexpr (requires { L::eval_jac(c->p, x, f, q, df, dq); }) {
+            try {
+                L::eval_jac(c->p, x, f, q, df, dq);
+            } catch (...) {
+                return -1;
+            }
+            return PULSIM_XDEV_OK;
+        }
         using AD = ad::ADRealN<R>;
         try {
             std::array<AD, R> xs{}, fo{}, qo{};

@@ -51,6 +51,9 @@ public:
         std::size_t off = 0;     ///< into cells_: q_n[R], q̇_n[R], q_γ[R], state[n_state]
         mutable xdev::EvalOut o;
         mutable std::vector<Real> x, scratch;
+        /// Each pattern entry's offset into J_nl's value array, validated
+        /// before every use (-1: not resolved yet).
+        mutable std::vector<std::ptrdiff_t> fslot, qslot;
     };
 
     void init(const topology::Graph& graph, const DevicePool& pool) {
@@ -70,6 +73,8 @@ public:
             p.inst->size(d.o);
             d.x.assign(R, Real{0});
             d.scratch.assign(d.inst->n_state() + 1, Real{0});
+            d.fslot.assign(d.inst->model().d().nnz_f, -1);
+            d.qslot.assign(d.inst->model().d().nnz_q, -1);
             cells_.resize(cells_.size() + 3 * R + d.inst->n_state(), Real{0});
             devices_.push_back(std::move(d));
         }
@@ -113,16 +118,33 @@ public:
             }
             for (std::uint32_t k = 0; k < md.nnz_f; ++k) {
                 const auto r = md.f_rows[k], col = md.f_cols[k];
-                if (on(r) && on(col)) J_nl.coeffRef(d.at[r], d.at[col]) += d.o.df[k];
+                if (on(r) && on(col)) slot_(J_nl, d.fslot[k], d.at[r], d.at[col]) += d.o.df[k];
             }
             if (a != Real{0}) {
                 for (std::uint32_t k = 0; k < md.nnz_q; ++k) {
                     const auto r = md.q_rows[k], col = md.q_cols[k];
-                    if (on(r) && on(col)) J_nl.coeffRef(d.at[r], d.at[col]) += a * d.o.dq[k];
+                    if (on(r) && on(col)) slot_(J_nl, d.qslot[k], d.at[r], d.at[col]) += a * d.o.dq[k];
                 }
             }
         }
         return worst;
+    }
+
+    /// J(r, c) through a cached value offset: valid only while the slot
+    /// still holds (r, c) in the matrix's CURRENT pattern (checked: inside
+    /// column c's stored range and row index r), else coeffRef resolves it
+    /// again. Any insertion, reallocation or rebuild is therefore safe.
+    static Real& slot_(sparse::Matrix& J, std::ptrdiff_t& k, Index r, Index c) {
+        static_assert(!sparse::Matrix::IsRowMajor);
+        if (k >= 0) {
+            const auto beg = J.outerIndexPtr()[c];
+            const auto end = J.innerNonZeroPtr() ? beg + J.innerNonZeroPtr()[c]
+                                                 : J.outerIndexPtr()[c + 1];
+            if (k >= beg && k < end && J.innerIndexPtr()[k] == r) return J.valuePtr()[k];
+        }
+        Real& v = J.coeffRef(r, c);
+        k = &v - J.valuePtr();
+        return v;
     }
 
     void commit(const Vector& x, Real h, TrBdf2Stage st) {

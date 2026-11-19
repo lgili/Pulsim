@@ -130,6 +130,38 @@ typedef struct pulsim_xdev_descriptor {
     (offsetof(pulsim_xdev_descriptor, reserved) + 4 * sizeof(pulsim_xdev_reserved_fn))
 #define PULSIM_XDEV_CTX_V1_SIZE (offsetof(pulsim_xdev_ctx, instance) + sizeof(const void *))
 
+/* The layout, asserted wherever this header is compiled (the host AND every
+ * library): no `long`, `size_t` or enum field, so LP64 (Linux, macOS) and
+ * LLP64 (Windows) share the 64-bit offsets; 32-bit targets share theirs.
+ * Every field is naturally aligned (no padding, so packing pragmas change
+ * nothing); a compiler laying a struct out differently fails to compile
+ * here instead of loading and reading garbage. */
+#if defined(__cplusplus)
+#define PULSIM_XDEV_LAYOUT(cond, tag) static_assert(cond, "pulsim_xdev.h layout: " #tag)
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define PULSIM_XDEV_LAYOUT(cond, tag) _Static_assert(cond, "pulsim_xdev.h layout: " #tag)
+#else /* C99 / MSVC's default C: a negative array size fails */
+#define PULSIM_XDEV_LAYOUT(cond, tag) typedef char pulsim_xdev_layout_##tag[(cond) ? 1 : -1]
+#endif
+#define PULSIM_XDEV_P8_P4(a, b) (sizeof(void *) == 8 ? (size_t)(a) : (size_t)(b))
+PULSIM_XDEV_LAYOUT(sizeof(void *) == 8 || sizeof(void *) == 4, pointer_width);
+PULSIM_XDEV_LAYOUT(sizeof(pulsim_xdev_field) == PULSIM_XDEV_P8_P4(40, 32), field_size);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_field, def) == PULSIM_XDEV_P8_P4(16, 8), field_def);
+PULSIM_XDEV_LAYOUT(sizeof(pulsim_xdev_monotone) == 8, monotone_size);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_ctx, t) == 8, ctx_t);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_ctx, p) == 16, ctx_p);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_ctx, state) == PULSIM_XDEV_P8_P4(24, 20), ctx_state);
+PULSIM_XDEV_LAYOUT(PULSIM_XDEV_CTX_V1_SIZE == PULSIM_XDEV_P8_P4(40, 28), ctx_v1_size);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_descriptor, name) == 8, desc_name);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_descriptor, n_pins) == PULSIM_XDEV_P8_P4(16, 12), desc_n_pins);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_descriptor, claims) == PULSIM_XDEV_P8_P4(44, 40), desc_claims);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_descriptor, pin_names) == PULSIM_XDEV_P8_P4(48, 44), desc_pin_names);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_descriptor, monotone) == PULSIM_XDEV_P8_P4(112, 76), desc_monotone);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_descriptor, eval) == PULSIM_XDEV_P8_P4(120, 80), desc_eval);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_descriptor, accept) == PULSIM_XDEV_P8_P4(160, 100), desc_accept);
+PULSIM_XDEV_LAYOUT(offsetof(pulsim_xdev_descriptor, reserved) == PULSIM_XDEV_P8_P4(168, 104), desc_reserved);
+PULSIM_XDEV_LAYOUT(PULSIM_XDEV_DESCRIPTOR_V1_SIZE == PULSIM_XDEV_P8_P4(200, 120), desc_v1_size);
+
 /* The ONE exported symbol: the index-th model of the library (0, 1, ...),
  * NULL past the last. The returned descriptor lives as long as the library. */
 #define PULSIM_XDEV_ENTRY "pulsim_xdev_get"

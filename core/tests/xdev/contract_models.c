@@ -128,6 +128,39 @@ static int32_t CALL liar_outside(const pulsim_xdev_ctx *c, const double *x, doub
     if (V > 3) df[0] *= 2; /* wrong Jacobian outside the probe box */
     return 0;
 }
+static int32_t CALL liar_writes_x(const pulsim_xdev_ctx *c, const double *x, double *f,
+                                  double *q, double *df, double *dq) {
+    good(c, x, f, q, df, dq);
+    ((double *)x)[0] = -x[0]; /* casts const away: at x = 0 only the sign bit moves */
+    return 0;
+}
+static int32_t CALL liar_writes_p(const pulsim_xdev_ctx *c, const double *x, double *f,
+                                  double *q, double *df, double *dq) {
+    good(c, x, f, q, df, dq);
+    ((double *)c->p)[0] = -G; /* casts const away: negates the parameter */
+    return 0;
+}
+static int32_t CALL liar_offaxis(const pulsim_xdev_ctx *c, const double *x, double *f,
+                                 double *q, double *df, double *dq) {
+    good(c, x, f, q, df, dq);
+    /* wrong only near the diagonal x0 = x1 away from the centre: no axis
+     * line through the centre reaches it, a random probe almost never */
+    if (fabs(x[0] - x[1]) < 1e-3 && fabs(x[0]) > 0.25) df[0] *= 2;
+    return 0;
+}
+/* a 0.1 pF capacitor (q = C·V) beside the resistor; dq doubled outside the box */
+static int32_t CALL tiny_cap_outside(const pulsim_xdev_ctx *c, const double *x, double *f,
+                                     double *q, double *df, double *dq) {
+    const double C = 1e-13, k = V > 3 ? 2.0 : 1.0;
+    good(c, x, f, q, df, dq);
+    q[0] = C * V;
+    q[1] = -q[0];
+    dq[0] = k * C;
+    dq[1] = -k * C;
+    dq[2] = -k * C;
+    dq[3] = k * C;
+    return 0;
+}
 static int32_t CALL meter_init(const pulsim_xdev_ctx *c, const double *x, double *s) {
     (void)c;
     (void)x;
@@ -171,6 +204,11 @@ static const pulsim_xdev_descriptor MODELS[] = {
     PLAIN("nan_outside", nan_outside, SMOOTH, 0),
     PLAIN("liar_outside", liar_outside, SMOOTH, 0),
     DESC("energy_meter", good, SMOOTH | PASSIVE, 0, 4, 0, NULL, NULL, 1, meter_init, meter_accept,
+         PULSIM_XDEV_ABI_VERSION),
+    PLAIN("liar_writes_x", liar_writes_x, SMOOTH, 0),
+    PLAIN("liar_writes_p", liar_writes_p, SMOOTH, 0),
+    PLAIN("liar_offaxis", liar_offaxis, 0, 0),
+    DESC("tiny_cap_outside", tiny_cap_outside, SMOOTH | PASSIVE, 0, 4, 4, QR, QC, 0, NULL, NULL,
          PULSIM_XDEV_ABI_VERSION),
 };
 

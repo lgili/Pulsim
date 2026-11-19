@@ -37,11 +37,32 @@ At registration, inside the model's declared probe box: buffers written
 within their declared sizes; finite outputs; purity (two calls agree to the
 bit); KCL (pin `f` and pin `q` sum to 0); the declared Jacobian against
 central differences at 17 points and along a fine line per unknown (also
-between the points, down to 1e-15 of the box around 0); the declared claims
+between the points, down to 1e-15 of the box around 0) and along two diagonals
+and four fixed-seed directions through the box centre; no write through the
+`const` inputs `x`, `ctx->p`, `ctx->state` (copies compared after every call);
+the declared claims
 SMOOTH, PASSIVE, RECIPROCAL and monotone pairs; model state written within
 `n_state`. During a run: every evaluation is checked for non-finite output
 (one comparison), every `accept` for writes past `n_state`;
-`debug_jacobian=True` re-checks the Jacobian at every evaluation.
+`debug_jacobian=True` re-checks the Jacobian at every evaluation (tolerance:
+1e-5 of the row plus the difference quotient's own rounding, so a 0.1 pF
+capacitance is checked, not floored away) and the `const` inputs.
+
+## Building a model, platforms
+
+- Compile against the installed package: `cc -std=c99 -shared -fPIC
+  -I"$(python -c 'import pulsim; print(pulsim.get_include())')" model.c -o
+  libmodel.so` (Windows: a DLL exporting `pulsim_xdev_get`; `PULSIM_XDEV_EXPORT`
+  is `__declspec(dllexport)` there). The wheel ships only the stable header.
+- The header asserts its own layout at compile time (`offsetof` for every
+  field group, 64-bit and 32-bit): no `long`, `size_t` or enum field, so
+  Linux / macOS (LP64) and Windows (LLP64) share one layout, with no padding.
+  A compiler that would lay it out differently fails to compile.
+- One loaded copy per path per process. Rebuilding a library while a circuit
+  in the same process still uses it is refused by name (its size or
+  modification time changed): the loader would otherwise keep running the old
+  code. Release those circuits (or restart) to load the new build. Windows
+  locks a loaded DLL, so it cannot change there.
 
 ## Python
 

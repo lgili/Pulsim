@@ -23,7 +23,9 @@
 #include <system_error>
 #include <type_traits>
 #include <limits>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -54,7 +56,8 @@ struct ContractError : std::invalid_argument {
 /// One loaded library; closed when the last model of it is released.
 class Library {
 public:
-    explicit Library(const std::string& given) : path_(absolute_file_(given)) {
+    explicit Library(const std::string& given)
+        : path_(absolute_file(given)), id_(identity_of(path_)) {
         const std::string& path = path_;
 #if defined(_WIN32)
         // UTF-8 path → wide (MultiByteToWideChar), so non-ASCII paths load
@@ -93,14 +96,29 @@ public:
     ~Library() { close_(); }
 
     [[nodiscard]] const std::string& path() const noexcept { return path_; }
+
+    /// The file's identity when it was loaded (size, modification time).
+    struct FileId {
+        std::uintmax_t size = 0;
+        std::filesystem::file_time_type mtime{};
+        bool operator==(const FileId&) const = default;
+    };
+    [[nodiscard]] const FileId& identity() const noexcept { return id_; }
+    [[nodiscard]] static FileId identity_of(const std::string& path) {
+        std::error_code ec;
+        const std::filesystem::path p(std::u8string(path.begin(), path.end()));
+        FileId id;
+        id.size = std::filesystem::file_size(p, ec);
+        id.mtime = std::filesystem::last_write_time(p, ec);
+        return id;
+    }
     [[nodiscard]] const pulsim_xdev_descriptor* get(std::uint32_t i) const noexcept {
         return get_(i);
     }
 
-private:
     /// The library is loaded by absolute path of an existing regular file
     /// only: a bare name would be searched for (LD_LIBRARY_PATH, PATH, CWD).
-    static std::string absolute_file_(const std::string& given) {
+    static std::string absolute_file(const std::string& given) {
         std::error_code ec;
         const std::filesystem::path p(std::u8string(given.begin(), given.end()));   // UTF-8 on every platform
         if (!std::filesystem::is_regular_file(p, ec)) {
@@ -108,8 +126,9 @@ private:
                                 + "': not an existing file (a library is loaded only "
                                   "from the path you name, never searched for)");
         }
-        const auto a = std::filesystem::absolute(p, ec);
+        auto a = std::filesystem::absolute(p, ec);
         if (ec) return given;
+        a.make_preferred();   // LoadLibraryExW with SEARCH_DLL_LOAD_DIR wants backslashes
         const auto u = a.u8string();
         return std::string(u.begin(), u.end());
     }
@@ -122,10 +141,37 @@ private:
 #endif
         handle_ = nullptr;
     }
+private:
     std::string path_;
+    FileId id_;
     void* handle_ = nullptr;
     pulsim_xdev_get_fn get_ = nullptr;
 };
+
+/// The process's one Library per path. dlopen of a path already open
+/// returns the image already mapped (macOS by path, glibc by inode), so a
+/// library REBUILT at the same path while an earlier load is alive would
+/// silently run the old code: refused by name instead. Once every circuit
+/// using it is gone the library is closed and a rebuild loads normally.
+[[nodiscard]] inline std::shared_ptr<const Library> open_library(const std::string& given) {
+    static std::mutex m;
+    static std::map<std::string, std::weak_ptr<const Library>> live;
+    const std::string path = Library::absolute_file(given);
+    const std::lock_guard<std::mutex> lock(m);
+    if (auto lib = live[path].lock()) {
+        if (lib->identity() != Library::identity_of(path)) {
+            throw ContractError("external device library '" + path
+                                + "' changed on disk since it was loaded in this process "
+                                  "(size or modification time): the loader would keep running "
+                                  "the old code. Release every circuit using it, or restart "
+                                  "the process, to load the new build");
+        }
+        return lib;
+    }
+    auto lib = std::make_shared<const Library>(path);
+    live[path] = lib;
+    return lib;
+}
 
 // ---- the model (a validated descriptor) ------------------------------------
 /// The version-1 prefix of the descriptor: a library's struct must be at
@@ -307,7 +353,7 @@ private:
 
 [[nodiscard]] inline std::shared_ptr<const Model> load_model(const std::string& path,
                                                             const std::string& name) {
-    return Model::find(std::make_shared<const Library>(path), name);
+    return Model::find(open_library(path), name);
 }
 
 // ---- one instance -----------------------------------------------------------
@@ -375,10 +421,9 @@ public:
     /// check is ONE comparison (the sum of every output); only a failure
     /// scans to name the entry.
     void eval(const Real* x, const Real* state, EvalOut& o) const {
-        const auto& d = m_->d();
         const pulsim_xdev_ctx c = ctx_(state);
         poison_(o);   // an output the model leaves unwritten reads NaN, not the last point's value
-        const int32_t st = d.eval(&c, x, o.f.data(), o.q.data(), o.df.data(), o.dq.data());
+        const int32_t st = call_(c, x, o.f.data(), o.q.data(), o.df.data(), o.dq.data());
         if (st != PULSIM_XDEV_OK) {
             refuse_("eval returned status " + std::to_string(st) + " at x = " + vec(x, rows()));
         }
@@ -420,10 +465,16 @@ public:
             diff(h, f1, q1);
             diff(h / 2, f2, q2);
             for (std::size_t r = 0; r < R; ++r) {
+                // the difference quotient's own rounding (eps·|value|/h, times
+                // the Richardson weights), not an absolute floor: a 0.1 pF
+                // capacitance's dq/dx (1e-13) stays checkable
+                const Real eps = std::numeric_limits<Real>::epsilon();
+                const Real nf = 64 * eps * (std::abs(o.f[r]) + std::abs(a.f[r]) + std::abs(b.f[r])) / h;
+                const Real nq = 64 * eps * (std::abs(o.q[r]) + std::abs(a.q[r]) + std::abs(b.q[r])) / h;
                 compare_(where, "f", r, c, Jf[r * R + c], (4 * f2[r] - f1[r]) / 3,
-                         row_scale_(Jf, r), x);
+                         row_scale_(Jf, r), nf, x);
                 compare_(where, "q", r, c, Jq[r * R + c], (4 * q2[r] - q1[r]) / 3,
-                         row_scale_(Jq, r), x);
+                         row_scale_(Jq, r), nq, x);
             }
         }
     }
@@ -453,6 +504,28 @@ public:
         return s + "]";
     }
 
+    /// The model's eval. Under registration (`guard_inputs_`) and
+    /// `debug_jacobian` every call also proves the model did not write
+    /// through its const inputs (x, p, state): copies compared after.
+    int32_t call_(const pulsim_xdev_ctx& c, const Real* x, Real* f, Real* q, Real* df,
+                  Real* dq) const {
+        const auto& d = m_->d();
+        if (!debug_ && !guard_inputs_) return d.eval(&c, x, f, q, df, dq);
+        const std::size_t NS = d.n_state && c.state ? d.n_state : 0;
+        const std::vector<Real> x0(x, x + rows()), s0(c.state, c.state + NS), p0 = p_;
+        const int32_t st = d.eval(&c, x, f, q, df, dq);
+        auto same = [](const Real* a, const std::vector<Real>& b) {
+            return b.empty() || std::memcmp(a, b.data(), b.size() * sizeof(Real)) == 0;
+        };
+        if (!same(x, x0)) refuse_("eval wrote through its const x (the unknowns)");
+        if (!same(p_.data(), p0)) refuse_("eval wrote through its const ctx->p (the parameters)");
+        if (!same(c.state, s0)) refuse_("eval wrote through its const ctx->state (the committed state)");
+        return st;
+    }
+    /// Set by `check_contract` for the registration calls (single-threaded:
+    /// registration happens before any run of the instance).
+    mutable bool guard_inputs_ = false;
+
     [[nodiscard]] pulsim_xdev_ctx ctx_(const Real* state) const noexcept {
         pulsim_xdev_ctx c{};
         c.struct_size = static_cast<std::uint32_t>(sizeof(pulsim_xdev_ctx));
@@ -472,8 +545,7 @@ public:
     void raw_eval_(const Real* x, const Real* state, EvalOut& o) const {
         const pulsim_xdev_ctx c = ctx_(state);
         poison_(o);
-        if (m_->d().eval(&c, x, o.f.data(), o.q.data(), o.df.data(), o.dq.data())
-            != PULSIM_XDEV_OK) {
+        if (call_(c, x, o.f.data(), o.q.data(), o.df.data(), o.dq.data()) != PULSIM_XDEV_OK) {
             refuse_("eval returned an error status at x = " + vec(x, rows()));
         }
     }
@@ -486,9 +558,9 @@ private:
         return s;
     }
     void compare_(const char* where, const char* which, std::size_t r, std::size_t c, Real declared,
-                  Real fd, Real scale, const Real* x) const {
-        // 1e-5 of the row scale (design.md), with a floor for an all-zero row
-        const Real tol = Real{1e-5} * std::max(scale, std::abs(fd)) + Real{1e-12};
+                  Real fd, Real scale, Real noise, const Real* x) const {
+        // 1e-5 of the row scale (design.md) plus the difference's rounding
+        const Real tol = Real{1e-5} * std::max(scale, std::abs(fd)) + noise + Real{1e-300};
         if (!(std::abs(declared - fd) <= tol)) {
             refuse_(std::string(where) + ": declared d" + which + "[" + std::to_string(r)
                     + "]/dx[" + std::to_string(c) + "] = " + num(declared)

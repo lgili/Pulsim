@@ -3,10 +3,13 @@
 Twins: the saturable inductor and the Shockley diode re-implemented as an
 EXTERNAL model (core/tests/xdev/twin_models.cpp, through the C++ helper)
 and loaded at run time; they must give the built-in law's numbers. The
-test models are compiled here with the system compilers (or taken from
-``PULSIM_XDEV_TEST_LIBDIR``, a directory holding the CMake-built
-``pulsim_xdev_twins`` / ``pulsim_xdev_contract`` modules); without a
-compiler the tests skip. The libraries are illustrations, not part models.
+test models are the CMake-built ``pulsim_xdev_twins`` /
+``pulsim_xdev_contract`` modules: every build (the wheel build included)
+puts them in ``<build>/xdev_test_models``; ``PULSIM_XDEV_TEST_LIBDIR``
+names another directory. Failing both, they are compiled here with the
+system compilers; without one the tests skip locally and FAIL on CI (a
+skipped portability test proves nothing). The libraries are
+illustrations, not part models.
 """
 import os
 import pathlib
@@ -44,22 +47,43 @@ def _compile(tmp, src, out, cxx):
     return str(out)
 
 
-@pytest.fixture(scope="module")
-def libs(tmp_path_factory):
+def _built_libs():
+    """The CMake-built modules: PULSIM_XDEV_TEST_LIBDIR, else the newest
+    <repo>/build*/[<wheel tag>/]xdev_test_models (pip's build-dir)."""
     d = os.environ.get("PULSIM_XDEV_TEST_LIBDIR")
-    if d:
+    dirs = [pathlib.Path(d)] if d else sorted(
+        [*ROOT.glob("build/*/xdev_test_models"), *ROOT.glob("build*/xdev_test_models")],
+        key=lambda q: q.stat().st_mtime, reverse=True)
+    for lib_dir in dirs:
         found = {}
-        for f in pathlib.Path(d).iterdir():
+        for f in lib_dir.iterdir():
+            if f.suffix not in (".so", ".dll", ".dylib"):
+                continue   # .lib / .exp / .pdb beside a Windows .dll
             for key in ("twins", "contract"):
                 if f"pulsim_xdev_{key}" in f.name:
                     found[key] = str(f)
+        if len(found) == 2:
+            return found
+    return None
+
+
+@pytest.fixture(scope="module")
+def libs(tmp_path_factory):
+    found = _built_libs()
+    if found:
         return found
     tmp = tmp_path_factory.mktemp("xdev")
-    return {
-        "twins": _compile(tmp, SRC / "twin_models.cpp", tmp / f"twins{EXT}", True),
-        "contract": _compile(tmp, SRC / "contract_models.c",
-                             tmp / f"contract{EXT}", False),
-    }
+    try:
+        return {
+            "twins": _compile(tmp, SRC / "twin_models.cpp", tmp / f"twins{EXT}", True),
+            "contract": _compile(tmp, SRC / "contract_models.c",
+                                 tmp / f"contract{EXT}", False),
+        }
+    except pytest.skip.Exception:
+        if os.environ.get("CI"):
+            pytest.fail("CI must build the external-device test models "
+                        "(<build>/xdev_test_models): none found, no compiler")
+        raise
 
 
 SAT = dict(L_0=1e-3, I_sat=1.0, L_residual=1e-4)
@@ -75,6 +99,17 @@ def _satind(libs, external):
     else:
         b.add_saturable_inductor("L", "a", "gnd", SAT["L_0"], SAT["I_sat"],
                                  SAT["L_residual"])
+    return b
+
+
+def _satind_hand(libs, external):
+    """The same inductor through the adapter's hand-Jacobian path."""
+    if not external:
+        return _satind(libs, False)
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
+    b.add_resistor("R", "in", "a", 0.5)
+    b.add_external_device("L", ["a", "gnd"], libs["twins"], "satind_hand", SAT)
     return b
 
 
@@ -105,7 +140,7 @@ def _err(a, b):
 KW = dict(t_end=2e-3, dt=1e-6)
 
 
-@pytest.mark.parametrize("make", [_satind, _rectifier])
+@pytest.mark.parametrize("make", [_satind, _satind_hand, _rectifier])
 def test_twin_equals_the_builtin_law_on_pwl(libs, make):
     builtin = p.simulate(make(libs, False), device_path="interface", **KW)
     ext = p.simulate(make(libs, True), device_path="interface", **KW)
@@ -197,3 +232,48 @@ def test_parameters_by_name_with_units(libs):
                               {"L0": 1e-3})
     with pytest.raises(ValueError, match="has no model 'nope'"):
         b.add_external_device("L", ["a", "gnd"], libs["twins"], "nope")
+
+
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows locks a loaded DLL: it cannot change on disk")
+def test_a_library_rebuilt_while_loaded_is_refused_not_silently_stale(libs, tmp_path):
+    import gc
+    lib = tmp_path / f"copy{EXT}"
+    shutil.copyfile(libs["contract"], lib)
+    keep = p.CircuitBuilder()
+    keep.add_external_device("X", ["a", "gnd"], str(lib), "good_resistor")
+    with open(lib, "ab") as fh:   # a "rebuild": same path, new size
+        fh.write(b"\0" * 64)
+    b = p.CircuitBuilder()
+    with pytest.raises(ValueError, match="changed on disk since it was loaded"):
+        b.add_external_device("Y", ["a", "gnd"], str(lib), "good_resistor")
+    del keep, b
+    gc.collect()   # the last user gone: the library closes, the new file loads
+    p.CircuitBuilder().add_external_device("Z", ["a", "gnd"], str(lib), "good_resistor")
+
+
+def test_get_include_holds_the_stable_header():
+    inc = pathlib.Path(p.get_include())
+    assert (inc / "pulsim" / "xdev" / "pulsim_xdev.h").is_file()
+
+
+def test_threaded_sweep_with_an_external_device_equals_the_serial_run(libs):
+    """The host is reentrant: per-instance buffers and state, no globals
+    but the mutex-guarded library registry. Eight points on eight threads
+    (each registers its own instance concurrently) equal the serial run to
+    the bit (same code path, same machine)."""
+    def factory(R):
+        b = _rectifier(libs, True)
+        b.add_resistor("Rx", "out", "gnd", R)
+        return b
+
+    def kpi(res, _):
+        x = np.asarray(res.states)
+        return {"last": float(x[-1].sum()), "peak": float(np.abs(x).max())}
+
+    grid = dict(params={"R": [50.0 + 10 * k for k in range(8)]}, kpi_fn=kpi,
+                verbose=False, t_end=5e-4, dt=1e-6)
+    serial = p.sweep(factory, **grid)
+    threaded = p.sweep(factory, parallel=True, backend="thread", n_workers=8, **grid)
+    for k in ("last", "peak"):
+        assert np.array_equal(serial.kpis[k], threaded.kpis[k])

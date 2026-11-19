@@ -519,9 +519,12 @@ from .plot import scope  # noqa: E402,F811
 # ``python -m pulsim.guide`` warn that the module is already loaded.
 from ._ai_guide import ai_guide  # noqa: E402
 
+
+
 __all__ = [
     "ResolutionWarning",
     "ai_guide",
+    "get_include",
     "Circuit",
     "CircuitBuilder",
     "Parameter",
@@ -4640,6 +4643,21 @@ def _auto_attach_motor_traces(
 # v_amplitude, frequency, phase as keyword args.
 
 __version__ = "2.0.0"
+
+
+def get_include() -> str:
+    """Directory to pass as ``-I`` when compiling an external device model.
+
+    It holds ``pulsim/xdev/pulsim_xdev.h``, the stable C header of the
+    external device ABI (``#include <pulsim/xdev/pulsim_xdev.h>``); the
+    wheel ships it, a source checkout finds it in ``core/include``.
+    """
+    import pathlib
+    here = pathlib.Path(__file__).resolve().parent
+    for d in (here / "include", here.parents[1] / "core" / "include"):
+        if (d / "pulsim" / "xdev" / "pulsim_xdev.h").is_file():
+            return str(d)
+    raise FileNotFoundError("pulsim_xdev.h is not installed with this pulsim")
 
 
 # ---------------------------------------------------------------------------

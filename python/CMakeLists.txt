@@ -161,6 +161,12 @@ install(TARGETS _pulsim
     LIBRARY DESTINATION pulsim
 )
 
+# add-external-device-abi: the stable C header ships with the wheel, so a
+# model compiles against the installed package (`pulsim.get_include()`).
+# Only this header: the C++ helper (xdev/adapter.hpp) is not stable.
+install(FILES ${PROJECT_SOURCE_DIR}/core/include/pulsim/xdev/pulsim_xdev.h
+    DESTINATION pulsim/include/pulsim/xdev)
+
 # Auto-discover all top-level .py / .pyi files in pulsim/ so we don't
 # silently forget new modules (snubber.py shipped broken because it
 # wasn't added to the explicit FILES list when it landed in f1b6a86).

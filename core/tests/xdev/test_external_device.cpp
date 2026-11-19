@@ -31,13 +31,14 @@ bool has(const std::string& s, const std::string& sub) {
 }  // namespace
 
 TEST_CASE("xdev: honest models and both twins pass registration", "[xdev]") {
-    CHECK(refusal(PULSIM_XDEV_CONTRACT, "good_resistor").empty());
-    CHECK(refusal(PULSIM_XDEV_CONTRACT, "energy_meter").empty());
-    CHECK(refusal(PULSIM_XDEV_CONTRACT, "nan_outside").empty());   // lie outside the box
-    CHECK(refusal(PULSIM_XDEV_CONTRACT, "liar_outside").empty());  // lie outside the box
-    CHECK(refusal(PULSIM_XDEV_TWINS, "satind_twin", {1e-3, 1.0, 1e-4}).empty());
+    CHECK(refusal(PULSIM_XDEV_CONTRACT, "good_resistor") == std::string{});
+    CHECK(refusal(PULSIM_XDEV_CONTRACT, "energy_meter") == std::string{});
+    CHECK(refusal(PULSIM_XDEV_CONTRACT, "nan_outside") == std::string{});   // lie outside the box
+    CHECK(refusal(PULSIM_XDEV_CONTRACT, "liar_outside") == std::string{});  // lie outside the box
+    CHECK(refusal(PULSIM_XDEV_CONTRACT, "tiny_cap_outside") == std::string{});  // lie outside the box
+    CHECK(refusal(PULSIM_XDEV_TWINS, "satind_twin", {1e-3, 1.0, 1e-4}) == std::string{});
     CHECK(refusal(PULSIM_XDEV_TWINS, "shockley_twin", {1e-12, 1.0, 0.025852, 1e-12, 1e6, 0.0})
-              .empty());
+               == std::string{});
 }
 
 TEST_CASE("xdev: every lie inside the probe box is refused by name", "[xdev]") {
@@ -57,6 +58,9 @@ TEST_CASE("xdev: every lie inside the probe box is refused by name", "[xdev]") {
         {"liar_overrun", "wrote past the end of df"},
         {"liar_state", "wrote past the declared n_state"},
         {"liar_abi", "ABI version 99"},
+        {"liar_writes_x", "wrote through its const x"},
+        {"liar_writes_p", "wrote through its const ctx->p"},
+        {"liar_offaxis", "off the axes"},
     };
     for (const auto& c : cases) {
         INFO(c.model);
@@ -110,5 +114,17 @@ TEST_CASE("xdev: run-time finiteness and the debug Jacobian check", "[xdev]") {
         FAIL("the debug check must catch the Jacobian outside the box");
     } catch (const xdev::ContractError& e) {
         CHECK(has(e.what(), "run-time debug check"));
+    }
+    // a 0.1 pF capacitance: dq/dx = 1e-13, below the old absolute 1e-12 floor
+    auto cap = xdev::load_model(PULSIM_XDEV_CONTRACT, "tiny_cap_outside");
+    xdev::Instance c("Xc", cap, {1e-3}, /*debug_jacobian=*/true);
+    c.size(o);
+    const Real in_box[2] = {0.5, 0.0};
+    CHECK_NOTHROW(c.eval(in_box, nullptr, o));
+    try {
+        c.eval(y, nullptr, o);
+        FAIL("the debug check must catch a doubled sub-pF capacitance");
+    } catch (const xdev::ContractError& e) {
+        CHECK(has(e.what(), "declared dq[0]/dx[0]"));
     }
 }
