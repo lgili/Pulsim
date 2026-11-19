@@ -25,18 +25,17 @@
 #include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/solver/step/integrators.hpp"
 
-// A phase of an engine's step that both its legacy loop and the skeleton
-// call, and every adapter between them (`run`, `step_once`, the body's
-// forwarders): forced inline into the DRIVER that calls it. Each driver
-// (the legacy loop, the skeleton's `run`) is one out-of-line function
-// (PULSIM_STEP_DRIVER): an adapter left out of line costs a call per phase
-// and two closure hops per captured local, and a driver inlined into the
-// engine's own large body runs slower than the same driver alone
-// (refactor-unified-transient-stepper DECISIONS 14) on the fixed engine.
-// The TR-BDF2 engine measured the opposite (DECISIONS 16): its phases touch
-// so many engine locals that an out-of-line driver's closure hops cost more,
-// so both its drivers are PULSIM_STEP_PHASE. Measure per engine. Empty on
-// MSVC, as the other forced-inline macros of the code base.
+// A phase of an engine's step that the skeleton calls, and every adapter
+// between them (`run`, `step_once`, the body's forwarders): forced inline
+// into the DRIVER that calls it. The fixed engine's driver (the skeleton's
+// `run` over its phases) is one out-of-line function (PULSIM_STEP_DRIVER):
+// an adapter left out of line costs a call per phase and two closure hops
+// per captured local, and a driver inlined into the engine's own large body
+// runs slower than the same driver alone (refactor-unified-transient-stepper
+// DECISIONS 14). The TR-BDF2 engine measured the opposite (DECISIONS 16):
+// its phases touch so many engine locals that an out-of-line driver's
+// closure hops cost more, so its driver is PULSIM_STEP_PHASE. Measure per
+// engine. Empty on MSVC, as the other forced-inline macros of the code base.
 #if defined(__GNUC__) || defined(__clang__)
 #define PULSIM_STEP_PHASE __attribute__((always_inline))
 #define PULSIM_STEP_DRIVER __attribute__((noinline))
@@ -314,10 +313,10 @@ PULSIM_STEP_PHASE inline StepStatus step_once(C& ctrl, Body& body) {
 }
 
 /// A body made of an engine's phase callables (slice 3a, DECISIONS 13):
-/// the fixed engine's loop phases, the SAME callables its legacy loop
-/// calls, so the two paths cannot diverge. The event landing is inside
-/// the engine's `take` (pwl splits a step at its events itself), so
-/// `clamp` keeps the clock's step and `after_solve` never cuts.
+/// the fixed engine's loop phases (its static path since slice 3c). The
+/// event landing is inside the engine's `take` (pwl splits a step at its
+/// events itself), so `clamp` keeps the clock's step and `after_solve`
+/// never cuts.
 template <class Poll, class Begin, class Take, class After, class Commit, class OnStep>
 struct PhaseBody {
     Poll& poll_;
@@ -378,10 +377,10 @@ IndexPhaseBody<Cancelled, Begin, Take, After, Commit, Record> index_phase_body(
 }
 
 /// A deciding body made of an engine's phase callables (slice 3b): the
-/// TR-BDF2 loop's phases, the SAME callables its legacy loop calls. They
-/// take no frame (the engine reads its own t and h); clamp returns the
-/// step it landed; take, error and after_solve return the Verdict; on_step
-/// runs after every accepted step, whichever phase committed it.
+/// TR-BDF2 loop's phases. They take no frame (the engine reads its own t
+/// and h); clamp returns the step it landed; take, error and after_solve
+/// return the Verdict; on_step runs after every accepted step, whichever
+/// phase committed it.
 template <class Poll, class Begin, class Clamp, class Take, class Error, class After,
           class Commit, class OnStep>
 struct DecidingPhaseBody {

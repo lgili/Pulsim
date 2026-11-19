@@ -1726,8 +1726,8 @@ inline SimulationResult run_transient(
         bool restart = false;
         bool committed_be = false;
         Real be_commit_h = kGamma * opts.dt;
-        // The step hooks, called in the shared phases (both drivers; slice
-        // 3c, DECISIONS 17): probes R1 (`StepHooks::step`, the step's start
+        // The step hooks, called in the shared phases (slice 3c,
+        // DECISIONS 17): probes R1 (`StepHooks::step`, the step's start
         // state and mask), R2 (`on_event`, the stamps on each side of a
         // commutation) and the device interface's #31 (`device_state` after
         // the commit). The start mask is copied only with a listener, at
@@ -3145,13 +3145,13 @@ inline SimulationResult run_transient(
             }
         };  // step_record
 
-        // The skeleton driver (the default): the loop's own phases in the
+        // The driver, the step skeleton: the loop's own phases in the
         // skeleton's order and clock (the run's step k = 1 .. n_steps - 1;
-        // the clock's k0 = k_off puts them on the run's grid). Each driver
-        // is one out-of-line function with the phases inlined into it
+        // the clock's k0 = k_off puts them on the run's grid). It is one
+        // out-of-line function with the phases inlined into it
         // (DECISIONS 14). The body is built HERE, outside the driver, so
-        // the driver reaches the phases through memory as the old loop
-        // does: built inside it, its references were nine values live
+        // the driver reaches the phases through memory as the deleted loop
+        // did: built inside it, its references were nine values live
         // across the loop that spilled (+0.8-1.4 % per step, DECISIONS 18).
         auto body = step::index_phase_body(step_cancelled, step_begin, step_take,
                                            step_after_solve, step_commit, step_record);
@@ -3189,8 +3189,8 @@ inline SimulationResult run_transient(
         }
         // ---- slice 3c (DECISIONS 17): the static path's step, cut in place
         // into four phases (begin, take, after_solve, record; nothing to
-        // commit: no history) that both drivers call. The first solve
-        // (k = 0) is the start sample, before either driver's steps, as the
+        // commit: no history) that the skeleton calls. The first solve
+        // (k = 0) is the start sample, before the skeleton's steps, as the
         // dynamic path's IC sample; the skeleton runs k = 1 .. n_steps - 1
         // on the dynamic path's FixedController. The static path never
         // polled cancellation, and still does not (the poll is `true`).

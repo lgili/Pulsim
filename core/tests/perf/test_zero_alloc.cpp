@@ -858,12 +858,12 @@ TEST_CASE("fixed engine on the step skeleton: its hooks, no per-step allocation"
         return std::pair{d, std::move(r)};
     };
     run(2e-3);      // warm-up
-    auto [d2, r2] = run(2e-3);
+    const std::size_t d2 = run(2e-3).first;
     CHECK(n_acc == 2000);
     CHECK(n_step == 2000);
     CHECK(n_dev == 2000);
     CHECK(bad == 0);
-    auto [d4, r4] = run(4e-3);
+    const std::size_t d4 = run(4e-3).first;
     CHECK(n_step == 4000);
     INFO("operator-new: 2000 steps " << d2 << ", 4000 steps " << d4);
     if (kCountsMeaningful) {

@@ -2424,7 +2424,7 @@ inline SimulationResult run_transient_trbdf2(
         bool commutated = false;
         // The loop body, cut IN PLACE into the step's phases (slice 3b of
         // refactor-unified-transient-stepper, DECISIONS 15): each phase is ONE
-        // lambda that both drivers call, so a hunk in any of them reaches both.
+        // lambda that the step skeleton calls (the only driver, DECISIONS 20).
         // One call of the phases is one ATTEMPT: a rejected attempt (the old
         // loop's `continue`) is not rolled back, the next attempt starts at the
         // cancellation poll and re-runs begin and clamp.
@@ -3919,7 +3919,7 @@ inline SimulationResult run_transient_trbdf2(
         // reached through the driver's closure and the phase's closure (a
         // pointer reloaded after each opaque call, +0.3-1 % per step); inline,
         // no closure escapes and the locals are this frame's again.
-        // Hooks only the skeleton calls (as slice 3a's): probes R1
+        // Hooks the driver calls (as slice 3a's): probes R1
         // (`StepHooks::step`: this engine's start state is the committed
         // state at the step start, a right limit: the post-event restart
         // committed it) and the device interface's #31 (`device_state` after
