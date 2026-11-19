@@ -13,11 +13,14 @@
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
 #include "pulsim/pwl/row_names.hpp"
+#include "pulsim/record/recorder.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -58,7 +61,8 @@ struct Run {
 
 // Buck: 24 V, switch, PWL freewheel diode, 1 mH, 47 uF || 10 ohm.
 Run run_buck(Real t_end, std::vector<events::Rate> rates, std::vector<bool> monitor,
-             bool hooks_on, bool write_duty) {
+             bool hooks_on, bool write_duty,
+             const std::function<void(events::StepHooks&)>& more_hooks = {}) {
     builder::CircuitBuilder b;
     b.add_voltage_source("Vin", "in", "gnd", 24.0);
     b.add_switch("Q", "in", "sw", 1e2, 1e-9);
@@ -109,6 +113,10 @@ Run run_buck(Real t_end, std::vector<events::Rate> rates, std::vector<bool> moni
         hooks.on_commutation([&](const events::Commutation& c) {
             out.commutation_t.push_back(c.t);
         });
+        sim.set_hooks(&hooks);
+    }
+    if (more_hooks) {
+        more_hooks(hooks);
         sim.set_hooks(&hooks);
     }
     if (!rates.empty()) {
@@ -193,4 +201,57 @@ TEST_CASE("Exact engine: on_commutation fires at every change of the integrated 
     REQUIRE(changes > 100);           // gate edges and diode turn-offs over 100 periods
     CHECK(r.commutations == changes);
     CHECK(r.commutation_t == t_changes);
+}
+
+TEST_CASE("exact engine: a recorder fed in-loop through set_hooks equals the stored-array pass",
+          "[dsed][record]") {
+    // add-probes-and-recorders: the scheduler's accepted-step hook carries
+    // the LEFT limit at an event sample (the stored row there is the right
+    // limit; pre_event_states holds the left one), so the in-loop record
+    // is the left-limit table: same samples, same arithmetic.
+    record::RecorderSpec spec;
+    spec.windows = {{0.2e-3 + 1.3e-9, 0.9e-3 - 2.1e-9}};
+    spec.period = 1e-5;
+    spec.offset = 0.5e-3;
+    auto make = [&] {
+        std::vector<record::Probe> ps{record::Probe::compile("v(x0)"),
+                                      record::Probe::compile("v(x1)*v(x1)")};
+        record::Recorder r(std::move(ps), spec);
+        const std::vector<std::string> names{"v(x0)", "v(x1)"};
+        r.bind(names);
+        return r;
+    };
+    auto live = make();
+    const Run run = run_buck(1e-3, {}, {}, false, false, [&](events::StepHooks& h) {
+        record::attach(h, live, {0, 1});
+    });
+    const auto& res = run.res;
+    REQUIRE(res.times.size() > 100);
+    REQUIRE(!res.pre_event_index.empty());   // the diode and the switch commute
+    // the hook starts at the end of the first step: feed from row 1
+    std::vector<Real> t(res.times.begin() + 1, res.times.end()), x;
+    std::vector<Vector> rows(res.states.begin() + 1, res.states.end());
+    for (std::size_t j = 0; j < res.pre_event_index.size(); ++j) {
+        if (res.pre_event_index[j] >= 1) rows[res.pre_event_index[j] - 1] = res.pre_event_states[j];
+    }
+    for (const auto& r : rows) x.insert(x.end(), {r[0], r[1]});
+    auto stored = make();
+    record::feed_table(stored, t, x, 2, {}, {});
+    REQUIRE(live.n_samples() == stored.n_samples());
+    for (std::size_t k = 0; k < live.windows().size(); ++k) {
+        const auto& a = live.windows()[k];
+        const auto& b = stored.windows()[k];
+        CHECK(a.complete());
+        CHECK(std::abs(a.integral - b.integral) <= 1e-12 * std::abs(b.integral) + 1e-300);
+        CHECK(std::abs(a.sq3 - b.sq3) <= 1e-12 * std::abs(b.sq3) + 1e-300);
+    }
+    // period storage is pre-sized by feed_table's reserve and grown lazily
+    // in-loop: compare the windows both hold (the trailing ones are empty)
+    const std::size_t np = std::min(live.periods().size(), stored.periods().size());
+    REQUIRE(np >= 2 * 40);
+    for (std::size_t k = 0; k < np; ++k) {
+        CHECK(live.periods()[k].complete() == stored.periods()[k].complete());
+        CHECK(std::abs(live.periods()[k].integral - stored.periods()[k].integral)
+              <= 1e-12 * std::abs(stored.periods()[k].integral) + 1e-300);
+    }
 }

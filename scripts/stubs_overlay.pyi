@@ -38,6 +38,9 @@ class SimulationResult:
     engine_route_reason: str | None
     """Why ``engine="auto"`` did not take the variable-step path, or
     ``None`` when it did (or when the engine was chosen explicitly)."""
+    recorded: dict[str, typing.Any]
+    """``simulate(recorders=[...])`` only: ``pulsim.Recording`` per
+    recorder name (kernel probes and exact windowed statistics)."""
     step_loop_python_callbacks: tuple[str, ...]
     """Names of the Python callables :func:`pulsim.simulate` installed in
     the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,

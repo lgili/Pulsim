@@ -36,4 +36,7 @@ class Simulation(_pulsim.Simulation):
         res._builder = self._builder
         res.engine_used = plan["engine"]
         res.engine_route_reason = "; ".join(plan["route_reasons"]) or None
+        from . import _set_run_info  # res.grid / res.stats, as simulate() sets them
+        eng = plan["engine"]
+        _set_run_info(res, eng, self.trbdf2_stats if eng == "trbdf2" else None)
         return res

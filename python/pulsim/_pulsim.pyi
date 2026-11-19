@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePath', 'DevicePool', 'DtRetry', 'DutyRegister', 'EventIterationBreach', 'FluxMapDQ', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'OptionsError', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PulsimError', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'RunOptions', 'Simulation', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_carrier_pwm_fn', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_edge_list_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_option_defaults', 'run_option_table', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePath', 'DevicePool', 'DtRetry', 'DutyRegister', 'EventIterationBreach', 'FluxMapDQ', 'Graph', 'GridKind', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'OptionsError', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PulsimError', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'RunOptions', 'RunStats', 'Simulation', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_carrier_pwm_fn', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_edge_list_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_option_defaults', 'run_option_table', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class PulsimError(Exception):
     pass
 class ConvergenceError(RuntimeError, PulsimError):
@@ -1923,12 +1923,164 @@ class ResolutionRecord:
     @property
     def unestimated_fraction(self) -> float:
         ...
+class GridKind:
+    """
+    What grid a result's rows sit on (add-probes-and-recorders D3).
+
+    Members:
+
+      Uniform
+
+      Accepted
+
+      Requested
+    """
+    Accepted: typing.ClassVar[GridKind]
+    Requested: typing.ClassVar[GridKind]
+    Uniform: typing.ClassVar[GridKind]
+    __members__: typing.ClassVar[dict[str, GridKind]]
+    def __eq__(self, other: object) -> bool:
+        ...
+    def __getstate__(self) -> int:
+        ...
+    def __hash__(self) -> int:
+        ...
+    def __index__(self) -> int:
+        ...
+    def __init__(self, value: int) -> None:
+        ...
+    def __int__(self) -> int:
+        ...
+    def __ne__(self, other: object) -> bool:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def __setstate__(self, state: int) -> None:
+        ...
+    def __str__(self) -> str:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def value(self) -> int:
+        ...
+class RunStats:
+    """
+    Engine-independent run counters; zero where an engine does not report one. `engine` names the engine that filled them.
+    """
+    @property
+    def cpu_time_seconds(self) -> float:
+        ...
+    @property
+    def engine(self) -> str:
+        ...
+    @property
+    def gate_pulse_min(self) -> float:
+        ...
+    @property
+    def gate_sample_spacing_max(self) -> float:
+        ...
+    @property
+    def n_accept(self) -> int:
+        ...
+    @property
+    def n_bdf2_steps(self) -> int:
+        ...
+    @property
+    def n_chatter_breaks(self) -> int:
+        ...
+    @property
+    def n_ctrl_ticks(self) -> int:
+        ...
+    @property
+    def n_exact_steps(self) -> int:
+        ...
+    @property
+    def n_factorizations(self) -> int:
+        ...
+    @property
+    def n_forced_accepts(self) -> int:
+        ...
+    @property
+    def n_gate_events(self) -> int:
+        ...
+    @property
+    def n_gate_undersampled(self) -> int:
+        ...
+    @property
+    def n_mode_events(self) -> int:
+        ...
+    @property
+    def n_newton_iterations(self) -> int:
+        ...
+    @property
+    def n_newton_retries(self) -> int:
+        ...
+    @property
+    def n_reject(self) -> int:
+        ...
+    @property
+    def n_rk45_steps(self) -> int:
+        ...
+    @property
+    def n_solves(self) -> int:
+        ...
+    @property
+    def n_state_events(self) -> int:
+        ...
+    @property
+    def n_steps(self) -> int:
+        ...
 class SimulationResult:
     """
     Output of run_transient: parallel `times` and `states` arrays, plus event diagnostics.
     """
+    def __init__(self) -> None:
+        """
+        An empty result. Kernel adapters fill it (`_adapter_fill`, `_set_run_info`); every engine returns this type.
+        """
+    def _adapter_fill(self, times: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], states: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], switch_states: typing.Any = None, reinit_records: list[typing.Any] = []) -> None:
+        """
+        Adapter use only: fill an empty result from arrays (times, states, the per-sample mask, re-initialisation dicts).
+        """
+    def _set_run_info(self, engine: str, grid: GridKind, stats: dict[typing.Any, typing.Any]) -> None:
+        """
+        Adapter use only: set the grid kind and the run statistics.
+        """
+    def at(self, probe: str, t):
+        """
+        ``probe`` at time(s) ``t``: linear on the step that holds it, the
+        right limit at an event instant where the engine stored one. A scalar
+        for a scalar ``t``; an array for an increasing 1-D ``t``.
+        """
+    def avg(self, probe: str, t0 = None, t1 = None) -> float:
+        """
+        Time average of ``probe`` over [t0, t1] (default: the whole run):
+        the integral of the engines' dense output (linear between samples,
+        from the right limit where one is stored) divided by ``t1 - t0``,
+        windows clipped exactly. Correct on any grid, unlike ``.mean()``.
+        """
+    def empty(self) -> bool:
+        """
+        True when nothing was recorded.
+        """
+    def integral(self, probe: str, t0 = None, t1 = None) -> float:
+        """
+        Integral of ``probe`` over [t0, t1] (see :meth:`avg`).
+        """
+    def minmax(self, probe: str, t0 = None, t1 = None) -> 'tuple[float, float]':
+        """
+        (min, max) of ``probe`` over [t0, t1], both limits of an event
+        inside the window included.
+        """
     def num_steps(self) -> int:
         ...
+    def rms(self, probe: str, t0 = None, t1 = None) -> float:
+        """
+        RMS of ``probe`` over [t0, t1]: exact for the linear dense output
+        (``h(a^2 + ab + b^2)/3`` per step).
+        """
     @property
     def _device_losses(self) -> list[DeviceLossRecord]:
         """
@@ -1941,6 +2093,11 @@ class SimulationResult:
     def counters(self) -> dict[typing.Any, typing.Any]:
         """
         Fixed-step loop counters (pwl engine; 0 elsewhere): `switch_fn_calls` (schedule evaluations in the step loop, one per distinct solve time), `segment_searches` (segment lookups not absorbed by the last-segment memo), `rollback_snapshots` (steps whose pre-step state was copied for a possible rollback).
+        """
+    @property
+    def cpu_time_seconds(self):
+        """
+        Exact engine only: res.stats.cpu_time_seconds.
         """
     @property
     def dt_retries(self) -> list[DtRetry]:
@@ -1962,6 +2119,11 @@ class SimulationResult:
     def gate_states(self) -> typing.Any:
         """
         Per-sample record of the COMMANDED gate bit each gated PWL device (IGBT, GTO, thyristor, TRIAC) was decided under, in the layout of switch_states (column j = builder.switch_index_of(name); False for every other column). switch_states holds the stamped conduction state. None in a circuit without a gated device.
+        """
+    @property
+    def grid(self) -> GridKind:
+        """
+        GridKind of the rows: Uniform (pwl), Accepted (trbdf2, dsed) or Requested. A plain .mean() over an Accepted grid is not a time average: use pulsim.time_average.
         """
     @property
     def heat_injected(self) -> float:
@@ -1994,6 +2156,31 @@ class SimulationResult:
         add-complementarity-mode-selection on pwl: 'mode_shadow' / 'mode_selection' counters and the default guard's 'mode_guard' (simulate() copies them to res.diagnostics).
         """
     @property
+    def n_accept(self):
+        """
+        Exact engine only: res.stats.n_accept.
+        """
+    @property
+    def n_bdf2_steps(self):
+        """
+        Exact engine only: res.stats.n_bdf2_steps.
+        """
+    @property
+    def n_events(self):
+        """
+        Exact engine only: res.stats.n_mode_events.
+        """
+    @property
+    def n_exact_steps(self):
+        """
+        Exact engine only: res.stats.n_exact_steps.
+        """
+    @property
+    def n_reject(self):
+        """
+        Exact engine only: res.stats.n_reject.
+        """
+    @property
     def n_restart_factorizations(self) -> int:
         """
         Factorisations made for the restart stages: one per mask at 2*gamma*dt (more only if the segment byte budget evicts), plus every refactor for a restart stage of another size (event-split sub-intervals, the stage-2 re-try). 0 with the rule off.
@@ -2002,6 +2189,11 @@ class SimulationResult:
     def n_restart_steps(self) -> int:
         """
         Steps taken as SDIRK(2,2) restart steps (discontinuity_restart). 0 with the rule off.
+        """
+    @property
+    def n_rk45_steps(self):
+        """
+        Exact engine only: res.stats.n_rk45_steps.
         """
     @property
     def n_split_steps(self) -> int:
@@ -2045,6 +2237,11 @@ class SimulationResult:
         Bytes held by the contiguous sample buffer.
         """
     @property
+    def stats(self) -> RunStats:
+        """
+        RunStats: engine-independent counters (zero where the engine does not report one).
+        """
+    @property
     def switch_states_bytes(self) -> int:
         """
         Bytes held by the stamped-mask record.
@@ -2066,6 +2263,9 @@ class SimulationResult:
     engine_route_reason: str | None
     """Why ``engine="auto"`` did not take the variable-step path, or
     ``None`` when it did (or when the engine was chosen explicitly)."""
+    recorded: dict[str, typing.Any]
+    """``simulate(recorders=[...])`` only: ``pulsim.Recording`` per
+    recorder name (kernel probes and exact windowed statistics)."""
     step_loop_python_callbacks: tuple[str, ...]
     """Names of the Python callables :func:`pulsim.simulate` installed in
     the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,
@@ -4103,6 +4303,14 @@ def _lcp_lemke(M: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n
 def _min_source_period(graph: Graph, pool: DevicePool) -> float:
     """
     Shortest period of the sine / PWM sources (inf when none): T_ref of the shadow LCP's event step (add-complementarity-mode-selection D5).
+    """
+def _probe_atoms(text: str) -> list[str]:
+    """
+    The readings of a probe expression, normalised, in first-use order (add-probes-and-recorders). Raises ValueError naming the probe.
+    """
+def _record_pass(probes: collections.abc.Sequence[str], keep: str, every_n: int, windows: collections.abc.Sequence[tuple[float, float]], period: float, offset: float, reading_names: collections.abc.Sequence[str], t: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], readings: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], event_rows: collections.abc.Sequence[int], right: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], sample_times: collections.abc.Sequence[float] = []) -> dict[typing.Any, typing.Any]:
+    """
+    Kernel recorder pass over stored arrays (add-probes-and-recorders); use pulsim.simulate(..., recorders=[...]).
     """
 def _require_supported(graph: Graph, pool: DevicePool, engine: str) -> None:
     """

@@ -52,6 +52,7 @@
 #include "pulsim/pwl/nonlinear_refresh_diode.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/record/recorder.hpp"
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -659,6 +660,84 @@ TEST_CASE("fixed engine: control ticks from the queue and step hooks",
     INFO("operator-new: 2000 steps " << d2 << ", 4000 steps " << d4);
     if (kCountsMeaningful) {
         CHECK(d4 <= d2 + 2);          // no per-step or per-tick allocation
+    }
+}
+
+TEST_CASE("fixed engine: a recorder fed in-loop from the step hooks does not allocate per step",
+          "[v2][perf][zero_alloc][record]") {
+    // add-probes-and-recorders: statistics-only and decimating recorders
+    // on the accepted-step hook; their windows equal the kernel-side pass
+    // over the stored states (the same samples, the same arithmetic).
+    SwitchedRC f;
+    f.cache->build_lazy(Real{1e-6});
+    solver::SimulationOptions opts;
+    opts.t_start = 0.0;
+    opts.dt = 1e-6;
+    opts.resolution_diagnostics = false;
+    solver::SwitchScheduleFn switch_fn = [](Real t) {
+        SwitchStateMask m(2);
+        const auto k = static_cast<int>(t / 1e-6 + 0.5);
+        m.set(0, (k / 10) % 2 != 0);
+        return m;
+    };
+    auto make = [](record::RecorderSpec::Keep keep) {
+        record::RecorderSpec spec;
+        spec.keep = keep;
+        spec.every_n = 50;
+        spec.windows = {{1.05e-4, 1.8995e-3}};
+        spec.period = 2e-5;
+        spec.offset = 0.5e-6;
+        record::Recorder r({record::Probe::compile("v(vout)"),
+                            record::Probe::compile("v(vin) - v(vout)")},
+                           spec);
+        const std::vector<std::string> names{"v(vin)", "v(vout)"};
+        r.bind(names);
+        r.reserve(4100, 4e-3);
+        return r;
+    };
+    auto run = [&](Real t_end, record::Recorder& rec) {
+        opts.t_end = t_end;
+        events::StepHooks hooks;
+        record::attach(hooks, rec, {0, 1});
+        const std::size_t b0 = g_new_count.load();
+        auto r = solver::run_transient(*f.cache, f.g, f.pool, opts, switch_fn, {}, false,
+                                       {}, {}, nullptr, {}, nullptr, {}, {}, nullptr, &hooks);
+        return std::pair{g_new_count.load() - b0, std::move(r)};
+    };
+    for (const auto keep : {record::RecorderSpec::Keep::None, record::RecorderSpec::Keep::Decimate}) {
+        auto warm = make(keep);
+        (void)run(2e-3, warm);   // lazy masks
+        auto r2 = make(keep);
+        auto r4 = make(keep);
+        auto [d2, res2] = run(2e-3, r2);
+        auto [d4, res4] = run(4e-3, r4);
+        INFO("operator-new: 2000 steps " << d2 << ", 4000 steps " << d4);
+        if (kCountsMeaningful) {
+            CHECK(d4 <= d2 + 2);
+        }
+        if (keep == record::RecorderSpec::Keep::Decimate) {
+            CHECK(r4.values().capacity() == 2 * (4100 / 50 + 1));   // reserved, never regrown
+            CHECK(r4.times().size() == 80);                         // steps 0, 50, ... of 4000
+        } else {
+            CHECK(r4.values().capacity() == 0);
+        }
+        // the same windows from the stored states (row 0 = t_start is not
+        // an accepted step: the hook record starts at the first step's end)
+        auto table = make(keep);
+        const Size n = res2.times.size(), m = static_cast<Size>(res2.states.cols());
+        std::vector<Real> rd;
+        for (Size k = 1; k < n; ++k) {
+            rd.push_back(res2.states.data()[k * m + 0]);
+            rd.push_back(res2.states.data()[k * m + 1]);
+        }
+        record::feed_table(table, std::span<const Real>(res2.times).subspan(1), rd, 2, {}, {});
+        REQUIRE(r2.n_samples() == n - 1);
+        for (Size p = 0; p < 2; ++p) {
+            CHECK(r2.windows()[p].complete());
+            CHECK(r2.windows()[p].integral == Approx(table.windows()[p].integral).epsilon(1e-12));
+            CHECK(r2.windows()[p].max == table.windows()[p].max);
+        }
+        CHECK(r2.periods()[10 * 2].avg() == Approx(table.periods()[10 * 2].avg()).epsilon(1e-12));
     }
 }
 

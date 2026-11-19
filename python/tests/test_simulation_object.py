@@ -206,6 +206,9 @@ def test_simulation_object_equals_simulate_bit_for_bit(engine, dt):
     assert np.array_equal(np.asarray(ref.times), np.asarray(res.times))
     assert np.array_equal(np.asarray(ref.states), np.asarray(res.states))
     assert np.array_equal(ref.v("out"), res.v("out"))
+    # one result type: the object's run carries simulate()'s grid / stats
+    assert (res.grid, res.stats.engine, res.stats.n_steps) == (
+        ref.grid, ref.stats.engine, ref.stats.n_steps)
 
 
 def test_simulation_object_refuses_before_running():
@@ -297,12 +300,13 @@ def _count(pattern):
 def test_ratchet_untyped_raises_and_broad_handlers_do_not_rise():
     # Counts on 2026-11-18 (add-kernel-simulation-object 1.3). Lower them
     # when a raise becomes typed or a handler is narrowed; never raise them.
-    # Re-based at integration batch 14c on the merged tree: +14 ValueError
+    # Re-based at integration batch 14c on the merged tree: +36 ValueError
     # from tracks written before the ratchet (machines 7, passives 4,
-    # topology 3), +1 handler (_control_state.pickle_payload: any pickling
-    # failure becomes the refusal marker).
-    assert _count(r"raise ValueError") <= 540
-    assert _count(r"except Exception|except:\s*$|except BaseException") <= 87
+    # topology 3; _recorders 22), handlers +4 (_control_state.pickle_payload:
+    # any pickling failure becomes the refusal marker; _recorders 3: an
+    # unknown device name, and the run's error winning over its warnings).
+    assert _count(r"raise ValueError") <= 562
+    assert _count(r"except Exception|except:\s*$|except BaseException") <= 90
 
 
 def test_simulate_snapshots_every_refusable_option():

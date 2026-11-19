@@ -120,6 +120,7 @@ engine accepts a keyword and ignores it. The defaults are
 | `sensitivities` | refused | refused | yes | None |
 | `mode_selection` | yes | yes | yes | None ('legacy') |
 | `allow_implicit_segments` | refused | refused | yes | None |
+| `recorders` | yes | yes | yes | None |
 | `control_tick` | yes | yes | yes | 'label' |
 | `device_path` | yes | yes | refused | 'legacy' |
 | `t_end` | yes | yes | yes | required |

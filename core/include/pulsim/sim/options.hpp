@@ -71,7 +71,7 @@ struct OptionSpec {
 /// the order refusals are listed in). Python reads it through
 /// `pulsim._pulsim.run_option_table()`; a test asserts its names equal
 /// simulate()'s parameters.
-inline constexpr std::array<OptionSpec, 49> kRunOptionTable{{
+inline constexpr std::array<OptionSpec, 50> kRunOptionTable{{
     {"engine", kEvery, Unset::Always, "'auto'", ""},
     {"rtol", kTrBdf2 | kExact, Unset::None, "1e-5 (trbdf2), 1e-6 (exact)",
      "rtol bounds a variable step's error estimate; a fixed step has none"},
@@ -161,6 +161,10 @@ inline constexpr std::array<OptionSpec, 49> kRunOptionTable{{
      "mode_selection='shadow' / 'lcp' needs a settle hook this engine lacks"},
     {"allow_implicit_segments", kExact, Unset::None, "None",
      "allow_implicit_segments governs the exact engine's numeric segments"},
+    // Every engine: a kernel recorder pass over the stored arrays, composed
+    // above the dispatch (pulsim._recorders); store_every > 1 and
+    // resume_from are refused with it there, by name.
+    {"recorders", kEvery, Unset::Always, "None", ""},
     {"control_tick", kEvery, Unset::Always, "'label'", ""},
     {"device_path", kPwl | kTrBdf2, Unset::Legacy, "'legacy'",
      "device_path selects which code stamps the Newton devices; the exact "
