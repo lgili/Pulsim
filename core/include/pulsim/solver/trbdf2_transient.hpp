@@ -3047,6 +3047,33 @@ inline SimulationResult run_transient_trbdf2(
             // impulse); a diode left on its forbidden side is re-decided at
             // the start of the next step (the held-diode path). Upgrade by
             // landing with an SDIRK sub-step.
+            // So a re-initialisation step must not overrun a crossing: an
+            // ideal rectifier diode turned on at 24.38 us took a 1 us reinit
+            // step past its 25.01 us turn-off and ended at -7 A, then turned
+            // off there (V_out 0.066 V low for the rest of the run, at every
+            // rtol). A diode on its forbidden side at the step's end: retake
+            // it shorter, until it ends before the crossing or h is h_lo.
+            // Only a side change inside the step (allowed at x_sig), past the
+            // detector's own bounds: shrinking cures nothing else.
+            if (has_diodes && reinit_step && h > h_lo * Real{1.0001}) {
+                bool overrun = false;
+                if (!nl_effective) predicate_noise(x_1, mask_step, hg);
+                for (Size d = 0; d < diodes.entries().size() && !overrun; ++d) {
+                    const Real s1 =
+                        detail_trbdf2::crossing_signal(diodes, d, x_1);
+                    overrun = detail_trbdf2::forbidden(diodes, d, s1)
+                        && !detail_trbdf2::forbidden(diodes, d,
+                               detail_trbdf2::crossing_signal(diodes, d, x_sig))
+                        && std::abs(s1)
+                               > detail_trbdf2::held_tolerance(diodes, d, x_1)
+                        && (nl_effective || std::abs(s1) > pn_bound[d]);
+                }
+                if (overrun) {
+                    h = std::max(h * Real{0.1}, h_lo);
+                    ++st.n_reject;
+                    continue;
+                }
+            }
             if (has_diodes && !reinit_step) {
                 Real t_star = opts.t_end + span;   // earliest
                 Size cross_idx = Size(-1);
@@ -3296,7 +3323,30 @@ inline SimulationResult run_transient_trbdf2(
                                 ++st.n_chatter_breaks;   // once per t
                                 (void)noise_at(0);   // fills nb1
                                 if (diodes.update_from_state(x_1, nb1)) {
-                                    x_sig = x_1;
+                                    // The next step's signals start at t: a
+                                    // probe there under the bits just taken,
+                                    // not x_1, h later (reviewer on #18).
+                                    const SwitchStateMask m_br = mask_at(t);
+                                    x_trial = x;
+                                    bool p_ok = false;
+                                    try {
+                                        p_ok = probe_solve(m_br, t, h_probe_floor,
+                                                           x_trial);
+                                    } catch (const std::runtime_error& e) {
+                                        if (!is_singular_error(e)) throw;
+                                    }
+                                    // A probe reading a diode on the side its
+                                    // new bit forbids (the -1e-7 A g_off-pinned
+                                    // inductor above) would re-arm the guard: x_1.
+                                    bool p_fits = p_ok && x_trial.allFinite();
+                                    for (Size d = 0; p_fits && d < diodes.entries().size(); ++d) {
+                                        const Real sp = detail_trbdf2::crossing_signal(
+                                            diodes, d, x_trial);
+                                        p_fits = !detail_trbdf2::forbidden(diodes, d, sp)
+                                            || std::abs(sp) <= detail_trbdf2::held_tolerance(
+                                                   diodes, d, x_trial);
+                                    }
+                                    x_sig = p_fits ? x_trial : x_1;
                                     continue;
                                 }
                             }
@@ -3430,6 +3480,11 @@ inline SimulationResult run_transient_trbdf2(
                     // shortcut: the capacitor current is the bracket's
                     // (i_C = 2C/dt (v - v_n) - i_n of an interpolated v),
                     // exact to O(bracket * di_C/dt).
+                    // Both signals are read on the two states the line runs
+                    // between: sa_raw starts as x_sig's, which after a
+                    // cascade or a chatter break is not x_ta (reviewer on #18).
+                    sa_raw = detail_trbdf2::crossing_signal(
+                        diodes, cross_idx, x_ta);
                     const bool interp_land = turn_off && !nl_effective
                         && !spike_ok(sb_raw) && sa_raw != sb_raw
                         && (sa_raw > Real{0}) != (sb_raw > Real{0})
