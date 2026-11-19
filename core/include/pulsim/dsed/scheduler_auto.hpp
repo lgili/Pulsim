@@ -228,6 +228,19 @@ struct AutoResumeState {
         s.bdf2_prev.resize(static_cast<Index>(count()));
         for (Index i = 0; i < s.bdf2_prev.size(); ++i) s.bdf2_prev[i] = next();
         if (k != v.size()) throw bad("has trailing values");
+        // values the run would silently misread: a NaN clock runs nothing, a
+        // PI memory outside its clamp [0.1, 1] rescales h, a BDF2 history of
+        // another size reads past the state
+        const auto finite = [](const auto& r) {
+            for (const Real e : r) if (!std::isfinite(e)) return false;
+            return true;
+        };
+        if (!std::isfinite(s.t) || !finite(s.x) || !std::isfinite(s.h_rk45)
+            || s.h_rk45 < Real{0} || !(s.err_prev >= Real{0.1} && s.err_prev <= Real{1})
+            || !finite(s.fast_t) || !std::isfinite(s.bdf2_prev_t) || !finite(s.bdf2_prev)
+            || (s.bdf2_history && s.bdf2_prev.size() != s.x.size())) {
+            throw bad("is corrupt");
+        }
         return s;
     }
 };

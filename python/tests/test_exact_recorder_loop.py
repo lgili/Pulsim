@@ -83,7 +83,25 @@ def _rect_rec(t_end, keep="every"):
                        keep=keep, windows=[(7.3e-3, 33.1e-3)], period=10e-3)]
 
 
+def _pulse_rc():
+    """A pulse source's corners change no mask (no event hook): the record
+    still has them as event rows, and its corner at t_end as the left limit."""
+    b = p.CircuitBuilder()
+    b.add_pulse_voltage_source("Vp", "in", "gnd", 0.0, 10.0, 0.0, 1e-4, 2e-4, 0.0, 0.0)
+    b.add_resistor("R", "in", "a", 100.0)
+    b.add_capacitor("C", "a", "gnd", 1e-7)
+    b.add_diode("D1", "a", "o", 1e3, 1e-9)
+    b.add_resistor("RL", "o", "gnd", 1e3)
+    return b, None
+
+
+def _pulse_rec(t_end, keep="every"):
+    return [p.Recorder("r", ["v(in)", "v(a)", "v(o)", "v(in)*v(a)"],
+                       keep=keep, windows=[(0.0, t_end), (1.5e-4, 4.5e-4)], period=2e-4)]
+
+
 CASES = {
+    "pulse_corners": (_pulse_rc, 6e-4, _pulse_rec),
     "rectifier": (_rect, 40e-3, _rect_rec),
     "buck_ccm_losses": (_ccm_losses, 200e-6, _buck_rec),
     "buck_ccm": (_ccm, 200e-6, _buck_rec),
@@ -117,6 +135,9 @@ def test_in_loop_recorders_match_the_stored_pass_on_the_same_run(name):
     _same(loop.event_t, stored.event_t)
     assert list(loop.event_resolution) == list(stored.event_resolution)
     assert set(loop.event_resolution) <= {"exact"}
+    if name == "pulse_corners":   # v(in) is 10 V on half of every period: rms sqrt(50)
+        assert len(loop.event_t) >= 5
+        np.testing.assert_allclose(loop.windows["v(in)"]["rms"][0], np.sqrt(50.0), rtol=1e-12)
     for pr in loop.probes:
         _same(loop.event_left[pr], stored.event_left[pr])
         _same(loop.event_right[pr], stored.event_right[pr])

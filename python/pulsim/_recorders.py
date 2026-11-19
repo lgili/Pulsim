@@ -670,8 +670,9 @@ def attach_loop_feed(sim, engine: str) -> None:
 
 def _exact_rows(d: dict, exact: bool) -> dict:
     """The exact engine's event rows are its exact limits at the instant
-    (the feed writes them as 'settled'; with no jump every row is an event
-    the engine reported: resolution 'exact', as the stored pass says)."""
+    (the feed writes them as 'settled'; dsed/loop_feed_adapter.hpp gives it
+    every event row the stored arrays have, both limits read as they read
+    them: resolution 'exact', as the stored pass says)."""
     if exact:
         r = np.asarray(d["event_resolution"]).copy()
         r[r == _RESOLUTION.index("settled")] = _RESOLUTION.index("exact")
@@ -707,12 +708,6 @@ def simulate_with_recorders(simulate: Callable[..., Any], kw: dict,
                         "could not be placed in the record")
         feed = None
     exact = isinstance(plan.sim, ExactFeedSlot)
-    if feed is not None and exact and feed.n_jumps > 0:
-        # the exact engine reports every change of its state as an event: a
-        # jump the feed saw is a report it missed, never relabelled
-        plan.why_not = (f"{int(feed.n_jumps)} state jump(s) of the exact engine "
-                        "had no event report")
-        feed = None
     if feed is not None and feed.n_steps > plan.n_steps0:   # fed by THIS run
         snap = getattr(res, "final_snapshot", None)
         if snap is not None:

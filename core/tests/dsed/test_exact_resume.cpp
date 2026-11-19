@@ -224,6 +224,19 @@ TEST_CASE("AutoResumeState round-trips its payload and refuses a corrupt or fore
     auto nan = v;   // the state count (after tag, t): a NaN is refused, never cast
     nan[2] = std::numeric_limits<Real>::quiet_NaN();
     CHECK_THROWS_AS(Auto::unflatten(nan), std::invalid_argument);
+    // values the run would misread: a NaN clock, a PI memory outside its
+    // clamp, a BDF2 history of another size than the state
+    auto nan_t = v;
+    nan_t[1] = std::numeric_limits<Real>::quiet_NaN();
+    CHECK_THROWS_AS(Auto::unflatten(nan_t), std::invalid_argument);
+    Auto pi = s;
+    pi.err_prev = 0.0;
+    CHECK_THROWS_AS(Auto::unflatten(pi.flatten()), std::invalid_argument);
+    Auto hist = s;
+    hist.bdf2_prev = Vector::Zero(2);
+    CHECK_THROWS_AS(Auto::unflatten(hist.flatten()), std::invalid_argument);
+    hist.bdf2_history = false;   // no history: its vector is not read
+    CHECK_NOTHROW(Auto::unflatten(hist.flatten()));
     // each integrator reads only its own payload (the first value tells them apart)
     CHECK_THROWS_AS(Resume::unflatten(v), std::invalid_argument);
     Resume e;

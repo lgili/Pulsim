@@ -776,3 +776,60 @@ Tasks: 20.1 ticked (seen passing); 20.2-20.4 and add-in-kernel-event-losses 3.3 
   - Request for `record/`: `LoopFeed` hard-codes `Resolution::Settled` for settled events; the exact engine wants `Exact` (a constructor flag).
 - Goal 4, loss-port refusals: V_on tables, time-varying sources, t_start.
 - The flips / scoreboard / banks / Eigen 3.4.0 runs and a fresh-context review of this session's diff.
+
+## Session 26 (exact engine 25): the bar on a2c15e76, recorders in the loop, the 'auto' snapshot (2026-11-19)
+
+### Step 1 — the bar on a2c15e76 (extension proven from the tree: incremental build 0 steps, .so sha equal)
+| check | result |
+|---|---|
+| full pytest | 5856 passed / 110 skipped / 9 xfailed |
+| `-m reference` | 383 |
+| reference_status | exit 0; strict pwl 81/27/1/0/0, pwl+restart 89/19/1/0/0, pwl+split 91/17/1/0/0, trbdf2 106/2/1/0/0, dsed 100/0/0/9/0 |
+| goldens / bit-identity | ALL IDENTICAL / 34/36 (default and shadow) |
+| flips | default 100/9, branch 100/9 (edge ok 100); no verdict or err_rms change vs a2 |
+| exact scoreboard | 81/81 < 1e-3, worst 4.87e-6, 0 entries changed |
+| banks 1/9/10 | 2.541e-5 / 5.843e-4 / 2.117e-4; 12 raises as at baseline |
+| fuzz / truths / orbit | as baseline (bridge bus err -4.089e-10, orbit err 6.681e-11) |
+| dsed dsedall | 340 passed |
+| C++ Eigen 5 and 3.4.0 | dsed 139 cases / 40908 assertions, layer4_v3 29, mode 40, thermal 9, record 17: all pass |
+| ruff / openspec / stubs | clean / 78 passed / up to date |
+
+### Fresh-context review of f1d7e6ab..a2c15e76 (opus medium, read-only)
+- Nothing double-books or loses heat (event, rejected trial, settle, resume, sampling checked by reading).
+- M2 (row 0 of a resumed run lacks the landing edge's heat): REFUTED by a trace — the resumed run's row 0 T_j equals the uninterrupted run's row at the split edge bit for bit (buck, 100 us); pinned in `test_a_resumed_run_carries_the_junction_temperatures`.
+- M1 (a control tick / the gate sample at a step's END reads the state before that step's heat kick; the stored sample has it): read, not reproduced; recorded. A controller reading T_j there is one step late — the same one-step lag the pwl / trbdf2 heat injection has. Fixing it means booking the step's heat before the end-of-step events, which moves the event energies by one step (a loss-port number change): not done.
+- L1 (a cascade that unbooks an event returns its heat one step late), L2 (a deposit node whose response reaches an electrical predicate's states is not refused; the kick lands after the decisions), L3 (step_heat_ is O(n1^3) complex exp per node per step): recorded, not fixed.
+- The u·‖x‖ floor: a floor, not a hole (≈ 9e-23 at 400 K against a 1e-9 bound); it also applies with no junction (a run refused at ~1e-22 before now passes; no number changes).
+
+### Step 2 — recorders fed in the loop on the exact engine (R5 / task 0b.11; task 20.4)
+- **Construction:** `dsed/loop_feed_adapter.hpp` `ExactFeedAdapter` registers on the scheduler's `StepHooks` (the same object as the loss port's) and drives the feed's own hooks (`record::LoopFeed::hooks()`): every state through `recover_full` under its own mask; a step's start is the last step's end or the right limit of an event at that instant; an event reported inside the step it ends is held and forwarded right after that step's sample (the feed's `Settled` path: an event row at t); events before `start` (ticks at t = 0) are not the record's; a resume's landing event an ulp off the snapshot's instant is reported at the snapshot's instant (the stored arrays' row 0 is there). `run_ped_native_builder(loop_feed=)` binds the circuit and attaches it; Python `_recorders.ExactFeedSlot` + `attach_loop_feed(slot, "dsed")` in `_dsed_dispatch` (rk45 branch only).
+- **No scheduler.hpp change.** No `record/` change: the feed writes event rows as 'settled'; `_recorders._exact_rows` relabels them 'exact' on the exact engine, and only when the feed saw no jump (a jump on the exact engine means a missed report: the run falls back to the stored pass naming it).
+- **Exact vs sampled:** kept rows and both limits of event rows are the engine's exact states (1e-12 against the stored pass on the same run, six cases). Window / period statistics are the recorder's exact integrals of the LINE between accepted states (sampled). Not done: the exact window integral from the modal form (the loss port's quadratic form) — it needs a Recorder entry taking a step's ∫r / ∫r² (`record/`, owned by the probes track): recorded as a request.
+- **Not in the loop on the exact engine (stored pass, `recorder_feed['why']` names it):** integrator 'auto' / 'bdf2' (no step hooks), the junction temperature loop (its kick moves the state after the hooks), a fresh run with t_start. `store_every` stays refused on dsed by the option table (`sim::kRunOptionTable`, not this track's).
+
+### Step 3 — the default 'auto' integrator writes and reads a snapshot (task 20.2, the auto half)
+- **Payload:** `AutoResumeState` (dsed/scheduler_auto.hpp), under the same controller kind (Exact = 3, field 14; still 19 fields): first value 101 (ExactResumeState's is its version 1), t, the reduced state, h_rk45, the PI memory, the step phase mod store_every, the fast samples ahead, which path took the last step (the landing rule differs: the exact path resets h_rk45 and plans fast samples, a numeric one resets h only from BDF2 to DOPRI5), the BDF2 history y_{n-1}. Truncated / padded / NaN / foreign payloads are refused by name in both readers (each refuses the other's).
+- **The resume:** `PEDSimulatorAuto::simulate(x0, t_end, &state)` on the absolute clock; `resume_landing_` fires what the uninterrupted run fired at its landing on t (the gate edge / source corner asked of the oracles from t − time_margin(t)) from the left limit, re-selects the integrator, row 0 = the landing's row. The integrator choice is re-derived (the detector is a pure function of the mode); the RK45 FSAL stage is not carried (rounding on a numeric segment only, as session 24).
+- **Routing:** an unset integrator resumes on the integrator that wrote the snapshot (payload tag); an explicit other integrator, or control ticks (which force rk45), with an auto snapshot is refused by name; `_mark_no_snapshot` keeps 'bdf2', a fresh t_start, the Python bridges.
+
+### Step 4 — the loss port's smaller refusals
+- **t_start: done.** A fresh exact run with `t_start` is the zero-start run relabelled (measured: states equal, times shifted by t_start, 6.8e-21 s); the loss port books the zero-start ledgers with `LossEvent::t` shifted (`run_ped_native_builder(t_offset=)`, the only time-carrying ledger field). Test `test_a_fresh_t_start_run_books_the_zero_start_ledgers_relabelled`.
+- **V_on tables, time-varying sources: not attempted** (budget); still refused by name.
+
+### Fresh-context review of 37e12ba9..90dc4cd6 (opus medium, read-only) and what was done
+- **H1 (fixed, reproduced first by the reviewer):** the adapter read every step end at the sources' RIGHT value; the stored arrays read an event sample and the last sample at the LEFT limit (`left_by`), and a same-mask source corner fires no event hook (fire_event_ returns early) though the stored pass has an event row there. A pulse 0/10 V RC-diode case read v(in) rms 7.0593 with 0 events in the loop against sqrt(50) = 7.0711 and 5 events stored, labelled in-loop. Fix (adapter only): a step's end reads its sources' left limit (half the step back, as reconstruct_full_states), a held event's left limit is that end, and a step end whose left and right reads differ with no event is a source-corner event forwarded when the next step starts (none at t_end, as stored). After: 5 events, rms sqrt(50); new case `pulse_corners` (corners at every half period and at t_end) equals the stored pass at 1e-12.
+- **H2 (fixed by removing the claim):** the `n_jumps` check in `_recorders` could never fire (the adapter hands the feed its own start state); removed, and the adapter header states what correctness rests on (every change of the state is an event hook or a source corner; state projection is never set from Python; the junction kick is refused).
+- **M1 (fixed):** an event reported a few ulps past its step's end was held until the run ended; it now snaps to the step's end (`near_time`), the stored sample's instant.
+- **M2 + Low (fixed):** `AutoResumeState::unflatten` refuses a NaN / infinite clock, state, h, fast sample or history, a PI memory outside its clamp [0.1, 1], and a BDF2 history of another size than the state (C++ test).
+- **Recorded, not fixed:** M3 (an edge 4-8 ulps before the first run's t_end is snapped away by that run and not asked by the landing, which asks from t - time_margin(t); PEDSimulator's landing has the same band); two reports at one instant after the step's accept (the `h_use <= 0` branch) become two event rows; on the DOPRI5 path a same-mask corner keeps a possibly stale FSAL k1 in the uninterrupted run (an existing staleness), so a resume there differs by rounding; a snapshot with recorder state resumed without recorders drops that state silently.
+
+### Functions changed in `dsed/`
+- `loop_feed_adapter.hpp` (new): `ExactFeedAdapter`.
+- `scheduler_auto.hpp`: new `AutoResumeState`; `PEDSimulatorAuto::simulate` (resume argument, row 0, final state), new `resume_landing_`, new `final_state`.
+- `scheduler.hpp`: no change.
+
+### Not verified
+- The numeric-path landing rules of an 'auto' resume (DOPRI5, BDF2): the test circuit took exact steps only.
+- The exact window integral from the modal form (needs a `record/` entry: request).
+- V_on tables and time-varying sources on the loss port.
+- Full ctest (not run on this tip); the trbdf2 VSI thermal defect stays a strict xfail.
