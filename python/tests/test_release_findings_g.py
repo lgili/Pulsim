@@ -5,7 +5,7 @@
 
 F-2-1: ``device_thermal_summary`` read a branch-form switch / diode's own
 v·i and never applied ``conduction_specs`` (0.0998 W where the closed
-form is 7.991 W) while ``device_loss_summary`` applied it. Both now take
+form V_f0·I + r_on·I² is 7.991 W for r_on = 0.01) while ``device_loss_summary`` applied it. Both now take
 a device's conduction loss from the same loss-summary entry, so they agree
 for every device kind and form; the T_j trace follows the same model.
 """
@@ -34,24 +34,39 @@ def _quiet(f):
 # F-2-1 / F-6-3: closed form on a diode carrying a known current
 # ---------------------------------------------------------------------------
 
-def _dc_diode(form):
+def _dc_device(form, device):
+    """10 V into a conducting element with R_on = 1 mOhm (g_on = 1e3) and
+    1 Ohm: a constant current, the element's own name 'D'."""
     b = p.CircuitBuilder()
     b.add_voltage_source("Vdc", "vin", "gnd", 10.0)
-    b.add_diode("D", "vin", "mid", 1.0e3, 1.0e-9, 0.0, form=form)
+    sf = None
+    if device == "diode":
+        b.add_diode("D", "vin", "mid", 1.0e3, 1.0e-9, 0.0, form=form)
+    else:
+        b.add_switch("D", "vin", "mid", 1.0e3, 1.0e-9, form=form)
+        m = p.SwitchStateMask(b.graph.num_switches)
+        m.set(b.switch_index_of("D"), True)
+        sf = lambda t: m  # noqa: E731
     b.add_resistor("Rload", "mid", "gnd", 1.0)
-    return b, _quiet(lambda: p.simulate(b, 2e-3, 1e-6, start_from_dc_op=True))
+    return b, _quiet(lambda: p.simulate(b, 2e-3, 1e-6, switch_fn=sf,
+                                        start_from_dc_op=True)), sf
 
 
+def _dc_diode(form):
+    b, res, _ = _dc_device(form, "diode")
+    return b, res
+
+
+@pytest.mark.parametrize("device", ["diode", "switch"])
 @pytest.mark.parametrize("form", ["conductance", "branch"])
-def test_thermal_summary_applies_the_conduction_model_closed_form(form):
-    b, res = _dc_diode(form)
-    # 10 V into 1 mOhm (g_on = 1e3, V_th = 0) + 1 Ohm: a constant current
+def test_thermal_summary_applies_the_conduction_model_closed_form(form, device):
+    b, res, sf = _dc_device(form, device)
     i_d = 10.0 / (1.0 + 1e-3)
     P = COND["V_f0"] * i_d + COND["r_on"] * i_d * i_d         # V_f0*I_avg + r_on*I_rms^2
     R_th = 2.0
     th = _quiet(lambda: p.device_thermal_summary(
         b, res, thermal_specs={"D": {"stages": [p.FosterStage(R_th, 1e-9)]}},
-        conduction_specs={"D": COND}))[0]
+        switch_fn=sf, conduction_specs={"D": COND}))[0]
     assert th["P_cond_avg"] == pytest.approx(P, rel=1e-9)
     # tau << dt: the junction follows the power, T_j = T_amb + R_th*P(t)
     assert th["T_j_trace"][-1] == pytest.approx(25.0 + R_th * P, rel=1e-9)
@@ -143,15 +158,16 @@ def test_thermal_power_equals_loss_summary(case, form, sw, engine, cond, window)
     assert {r["name"] for r in th} == {n for n in ts if n in loss}
     P_max = max(r["P_total_avg"] for r in th)
     for r in th:
-        e = loss[r["name"]]
-        ref = e.get("P_cond_model_avg", e.get("P_avg", 0.0))
-        assert r["P_cond_avg"] == pytest.approx(ref, rel=1e-12, abs=1e-300), r["name"]
-        # The T_j trace is driven by the same model: with tau << dt it is
-        # T_amb + R_th*P(t), so its time average is R_th*P_total_avg (the
-        # sample mean of a switching waveform: within 3 % of the largest).
+        P_loss = p.losses.conduction_power_avg(loss[r["name"]])
+        assert r["P_cond_avg"] == P_loss          # the shared reading
+        # The T_j trace is the thermal summary's own per-kind reconstruction:
+        # with tau << dt it is T_amb + R_th*P(t), so its time average must be
+        # R_th times the LOSS SUMMARY's power, per device (a sample mean of a
+        # switching waveform: 3 %; before the fix 1.01 W against 2.56 W).
         dT = r["T_j_avg"] - r["T_ambient_C"]
-        assert dT == pytest.approx(R_th * r["P_total_avg"],
-                                   abs=0.03 * R_th * P_max), r["name"]
+        P_ref = P_loss + r["P_total_avg"] - r["P_cond_avg"]   # + switching / impulse
+        assert dT == pytest.approx(R_th * P_ref, rel=0.03,
+                                   abs=1e-6 * R_th * P_max), r["name"]
 
 
 # ---------------------------------------------------------------------------

@@ -872,7 +872,7 @@ def device_thermal_summary(
                     "callable you used in simulate().")
             warnings.warn(
                 f"device_thermal_summary: {name!r} ({kind}) has no entry in "
-                "device_loss_summary (see its warning); it is left out.",
+                "device_loss_summary (no loss reconstruction for it in this result); it is left out.",
                 RuntimeWarning, stacklevel=2)
             continue
         P_sw_avg = float(loss.get("P_sw_avg", 0.0))

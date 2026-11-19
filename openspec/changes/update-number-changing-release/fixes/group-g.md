@@ -66,3 +66,18 @@ text. Cause: a queue-driven graph is not given the solver step before the run; `
 the exception. Fix: `_control_plan.for_fixed_step` runs the same check on each queue-driven graph's
 group periods before the run (`_check_graph_periods`, `ControlGraphBuildError`). It only raises;
 `set_solver_dt` is NOT called on that path, so no state of the graph changes (byte-identical runs).
+
+## Review (fresh-context, read-only) and what was done
+- The matrix test's average check was a tautology after the fix: it now checks the thermal summary's
+  OWN T_j trace (tau << dt: T_j - T_amb = R_th*P(t)) against R_th times the LOSS summary's power, per
+  device, 3 %. Against the PR head's thermal.py this check alone fails all 16 branch-form x
+  conduction_specs cases (and passes the other 48). The closed form now also covers a switch
+  (conductance and branch form) through `conduction_specs`.
+- The "no entry" warning no longer points to a loss-summary warning that is not always raised.
+- Left: a conductance-form device booked impulsive energy would not get it in the thermal offset
+  (only branch-form devices add `P_impulse_avg`, as before; not verified whether that can happen).
+  The F-3-5 pre-check refuses three edge cases the in-run C++ check let through (a one-step run, a
+  resume, a graph reused after a label run) — in each the refusal is the physically right verdict.
+  CHANGELOG not edited (shared file; for the integration batch): `device_thermal_summary` now refuses
+  `thermal_specs` on kinds without a loss model (lauritzen diode, saturable inductor, machines ...)
+  where it used to return no row.
