@@ -39,11 +39,14 @@ struct ControllerState {
 
 /// The fixed engine's grid point k: t0 + k·dt (one expression, as the
 /// loop always wrote it, so the rounding of every grid time is unchanged).
+/// `k0` offsets the counter (a resumed run counts its own steps from 0 on
+/// the original grid: at(k) is grid point k0 + k, the same expression).
 struct FixedClock {
     Real t0 = Real{0};
     Real dt = Real{0};
+    Size k0 = 0;
     [[nodiscard]] Real at(Size k) const noexcept {
-        return t0 + static_cast<Real>(k) * dt;
+        return t0 + static_cast<Real>(k0 + k) * dt;
     }
 };
 

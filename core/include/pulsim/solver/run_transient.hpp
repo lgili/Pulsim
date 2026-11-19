@@ -3153,37 +3153,20 @@ inline SimulationResult run_transient(
             }
         };  // step_record
 
-        // The skeleton driver (the default): the same phases in the
-        // skeleton's order and clock (grid step k = k_off + 1 .. k_off +
-        // n_steps - 1 of the run's grid). Each driver is one out-of-line
-        // function with the phases inlined into it (DECISIONS 14); the
-        // hooks live in the shared phases, so this driver's closure holds
-        // only the phases and the clock (DECISIONS 17: a twin that also
-        // held the hooks spilled ~90 more stack reloads, +1 % per step).
+        // The skeleton driver (the default): the loop's own phases in the
+        // skeleton's order and clock (the run's step k = 1 .. n_steps - 1;
+        // the clock's k0 = k_off puts them on the run's grid). Each driver
+        // is one out-of-line function with the phases inlined into it
+        // (DECISIONS 14). The body is built HERE, outside the driver, so
+        // the driver reaches the phases through memory as the legacy loop
+        // does: built inside it, its references were nine values live
+        // across the loop that spilled (+0.8-1.4 % per step, DECISIONS 18).
+        auto body = step::index_phase_body(step_cancelled, step_begin, step_take,
+                                           step_after_solve, step_commit, step_record);
         auto run_twin = [&]() PULSIM_STEP_DRIVER {
-            auto tw_begin = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
-                step_begin(f.k - k_off);
-            };
-            auto tw_take = [&](const step::StepFrame&) PULSIM_STEP_PHASE {
-                step_take();
-                return true;   // a failed step throws (the legacy loop's rule)
-            };
-            auto tw_after = [&](step::StepFrame&) PULSIM_STEP_PHASE {
-                step_after_solve();
-                return true;   // pwl lands its events inside take
-            };
-            auto tw_commit = [&](const step::StepFrame&) PULSIM_STEP_PHASE {
-                step_commit();
-            };
-            auto tw_record = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
-                step_record(f.k - k_off);
-            };
-            auto tw_poll = [&]() PULSIM_STEP_PHASE { return !step_cancelled(); };
-            auto body = step::phase_body(tw_poll, tw_begin, tw_take, tw_after,
-                                         tw_commit, tw_record);
-            step::FixedController clock{.clock = fixed_grid,
-                                        .k = k_off + 1,
-                                        .n_steps = k_off + n_steps};
+            step::FixedController clock{.clock = {fixed_grid.t0, fixed_grid.dt, k_off},
+                                        .k = 1,
+                                        .n_steps = n_steps};
             (void)step::run<step::Trapezoidal>(clock, body);
         };
         auto run_legacy = [&]() PULSIM_STEP_DRIVER {
@@ -3539,25 +3522,25 @@ inline SimulationResult run_transient(
             st_record(0);
             auto sk_poll = []() PULSIM_STEP_PHASE { return true; };
             auto sk_begin = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
-                st_begin(f.k - k_off);
+                st_begin(f.k);
             };
             auto sk_take = [&](const step::StepFrame&) PULSIM_STEP_PHASE {
                 st_take();
                 return true;   // a failed solve throws (the legacy loop's rule)
             };
             auto sk_after = [&](step::StepFrame& f) PULSIM_STEP_PHASE {
-                st_after(f.k - k_off);
+                st_after(f.k);
                 return true;
             };
             auto sk_commit = [](const step::StepFrame&) PULSIM_STEP_PHASE {};
             auto sk_record = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
-                st_record(f.k - k_off);
+                st_record(f.k);
             };
             auto body = step::phase_body(sk_poll, sk_begin, sk_take, sk_after,
                                          sk_commit, sk_record);
-            step::FixedController clock{.clock = fixed_grid,
-                                        .k = k_off + 1,
-                                        .n_steps = k_off + n_steps};
+            step::FixedController clock{.clock = {fixed_grid.t0, fixed_grid.dt, k_off},
+                                        .k = 1,
+                                        .n_steps = n_steps};
             (void)step::run<step::Trapezoidal>(clock, body);
         };
         if (!pwl_stepper_legacy) {

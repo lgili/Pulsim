@@ -73,7 +73,7 @@ at equal times or time-weighted measures, never sample means.
 - [ ] 8.2 Port the five cases of `test_zero_alloc.cpp` to the stepper
 - [x] 8.3 Switch `engine='pwl'` and `engine='auto'` with `dt`; keep `engine='pwl-legacy'` and the raw `run_transient` binding on the old function
   - Slice 3c (DECISIONS 17): the skeleton driver is the default of `run_transient` (dynamic AND static path, the raw binding included); the old loop is kept only behind the internal `PULSIM_PWL_STEPPER_LEGACY=1`, no public `pwl-legacy` name (brief). Static path cut in place into four phases on the same `FixedController`. Probes R2 (`StepHooks::on_event`) on both engines; R1 / #31 in the fixed engine's shared phases
-  - OPEN: the cost gate (new default within 0.5 % of the old) is NOT met on pwl: buck +1.4 %, VSI +0.8 %, RLC +0.55 % (static, Shockley and every trbdf2 case within it); cause located (the skeleton driver's register pressure, 253 vs 152 stack reloads), not removed. Tip on `wip/core-p3-stepper-3c`
+  - Cost gate closed (DECISIONS 18): the skeleton body is built outside the out-of-line driver and holds the loop's own phase callables (`step::IndexPhaseBody`); the clock counts the run's own step (`FixedClock::k0`). Deleting the legacy drivers alone did NOT close it (buck +1.6 %). New default vs 67fef260 on two builds per side: see DECISIONS 18 for the table; the skeleton driver costs nothing over the legacy loop inside one build. Owed before deletion (task 13): CI compile of the inline macros on GCC, Clang + libc++, MSVC
 - [ ] 8.4 Oracle: goldens bit-identical; counter gate equal; ns/step rows 1–3 not above 0.2; build time within +10 %
 - [ ] 8.5 Docs: `docs/mental-model.md`, `docs/solvers.md`, `AI_GUIDE.md` engine section, CHANGELOG
 

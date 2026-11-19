@@ -729,3 +729,135 @@ says where the implementation departs from them or what it settled.
     (now `mask_start_known`); R2's unreported cases documented in
     step_hooks.hpp. Accepted: TR-BDF2's R1 / #31 stay skeleton-only (its
     legacy loop is silent); the `…_TWIN` variables are silently ignored.
+
+18. **Slice 3c verified and landed; the pwl cost (2026-11-19).**
+
+    Verification of b6600dd4 as it stood (owed by 17):
+    - C++ targets `pulsim_core_step_tests` / `_dsed_tests` / `_perf_tests`,
+      Eigen 5 and Eigen 3.4.0: all pass (step 27 cases / 518 assertions,
+      dsed 128 / 36567 — the two new "Step hooks on the default driver"
+      cases included — perf 13 / 2089, the edited zero-alloc case included).
+    - pytest (repo root): default 5560 passed / 108 skipped / 8 xfailed;
+      the same in each of PULSIM_PWL_STEPPER_LEGACY=1,
+      PULSIM_TRBDF2_STEPPER_LEGACY=1 and both; `pytest -m reference` 377;
+      `reference_status` exit 0; examples (PULSIM_RUN_EXAMPLES=1) 136;
+      openspec strict 78/78; stubs and ruff clean. Static path 11/11.
+      Nothing failed; nothing to fix.
+
+    Cost, measured again (`.scratch/ab2.sh`: the old binary and the new
+    interleaved in separate processes, default path only, each run the min
+    of 6 simulate() calls; three runs; OLD = 67fef260 rebuilt from
+    `git archive` with the same flags):
+    | case | OLD | b6600dd4 | ratio |
+    | buck_pwl | 3030/3034/3036 | 3056/3078/3069 | 1.0087 |
+    | vsi_pwl | 4702/4702/4698 | 4739/4741/4737 | 1.0084 |
+    | vsi_pwl_restart | 4867/4868/4861 | 4907/4904/4901 | 1.0082 |
+    | shockbuck_pwl | 18633/18632/18623 | 18661/18658/18660 | 1.0019 |
+    | rlc152_pwl | 18487/18446/18428 | 18488/18495/18429 | 1.0001 |
+
+    Experiment (a), legacy fixed-step drivers (dynamic AND static) DELETED
+    (throw-away build of b6600dd4 minus `run_legacy` / `st_run_legacy` /
+    the env read), same harness:
+    | buck_pwl | OLD 3040/3040/3024 | (a) 3076/3074/3076 | 1.0164 |
+    | vsi_pwl | 4704/4702/4710 | 4741/4739/4748 | 1.0080 |
+    | vsi_pwl_restart | 4866/4867/4871 | 4902/4904/4908 | 1.0072 |
+    | shockbuck_pwl | 18626/18644/18643 | 18674/18660/18677 | 1.0018 |
+    | rlc152_pwl | 18467/18472/18491 | 18483/18464/18499 | 0.9999 |
+    The gap does not close: not an artefact of carrying both drivers.
+    Disassembly (b6600dd4, `objdump` of the two out-of-line dynamic
+    drivers): the skeleton driver's prologue loads its closure's nine
+    captures (the five phase closures, cancellation, k_off, the grid,
+    n_steps) ONCE, because the `tw_*` adapters and the PhaseBody are locals
+    of the driver whose reference members SROA turns into SSA values; nine
+    values live across the whole loop take the callee-saved registers, and
+    they are spilled and reloaded from four stack slots 112 times (sp+0x98
+    alone, the take phase's closure, 58). The legacy loop reaches the same
+    closures through its one spilled `this` (21 reloads of sp+0x58). Stack
+    reloads 202 vs 101.
+
+    (b) b12 = adapters + PhaseBody built OUTSIDE the driver (its closure
+    captures the body, the grid, k_off, n_steps; the body is memory the
+    driver reaches through one pointer, as the legacy loop reaches its
+    closures) + FixedClock::k0 (the skeleton's clock counts the run's own
+    step k, so no adapter subtracts k_off): skeleton driver 4176
+    instructions (legacy 4238), stack reloads 86 (legacy 101).
+    | buck_pwl | OLD 3039/3030/3037 | b12 3060/3041/3059 | 1.0038 |
+    | vsi_pwl | 4701/4702/4702 | 4721/4722/4722 | 1.0042 |
+    | vsi_pwl_restart | 4867/4867/4866 | 4883/4887/4882 | 1.0033 |
+    | shockbuck_pwl | 18630/18624/18624 | 18666/18654/18644 | 1.0011 |
+    | rlc152_pwl | 18461/18452/18448 | 18471/18448/18468 | 1.0000 |
+    b5 = b12 with the tw_* adapters removed: `step::IndexPhaseBody` (in
+    stepper.hpp) holds the loop's OWN phase callables and calls them with
+    the clock's step (`begin(f.k)`, `record(f.k)`, poll = !cancelled):
+    driver 4170 instructions, 925 ldr (legacy 4238 / 945), 86 stack
+    reloads (legacy 101).
+    | buck_pwl | OLD 3039/3019/3032 | b5 3054/3053/3034 | 1.0051 | (b12 same round 3052/3055/3058, 1.0111)
+    | vsi_pwl | 4702/4701/4702 | 4717/4716/4717 | 1.0032 | (b12 1.0039)
+    | vsi_pwl_restart | 4868/4866/4867 | 4879/4881/4879 | 1.0027 | (b12 1.0037)
+    | shockbuck_pwl | 18628/18635/18631 | 18648/18660/18650 | 1.0011 |
+    | rlc152_pwl | 18446/18442/18473 | 18478/18440/18453 | 0.9999 |
+    Skeleton vs legacy loop INSIDE the b5 build (same binary): buck
+    3058/3049 vs 3028/3049, VSI 4714/4717 vs 4715/4712 — the skeleton
+    driver now costs nothing over the legacy loop; what remains against
+    OLD is shared by both drivers (the shared-phase hooks of 3c).
+    Re-check, OLD vs b5: static_pwl 2300.2 vs 2299.2 (0.9996),
+    buck_trbdf2 10855.8 vs 10857.8 (1.0002), bridge_trbdf2 12621.5 vs
+    12631.0 (1.0008), shockbuck_trbdf2 72271.6 vs 72255.8 (0.9998).
+
+    THE GATE, two independent builds per side (the second of each with a
+    layout shake: a small used function prepended to python/bindings.cpp),
+    interleaved, min of 3 runs each:
+    | case | OLD | OLD shaken | NEW (b5) | NEW shaken | NEW/OLD | NEWs/OLDs |
+    | buck_pwl | 3035.7 | 3036.1 | 3049.8 | 3050.6 | 1.0046 | 1.0048 |
+    | vsi_pwl | 4701.7 | 4699.2 | 4716.5 | 4717.1 | 1.0031 | 1.0038 |
+    | vsi_pwl_restart | 4864.0 | 4863.5 | 4882.0 | 4878.7 | 1.0037 | 1.0031 |
+    | shockbuck_pwl | 18639.3 | 18639.7 | 18656.0 | 18654.0 | 1.0009 | 1.0008 |
+    | rlc152_pwl | 18454.7 | 18441.7 | 18426.4 | 18405.4 | 0.9985 | 0.9980 |
+    Gate met on every case on both pairs (buck the tightest, +0.46-0.49 %).
+
+    What changed (b5, this tip): `step::IndexPhaseBody` / `index_phase_body`
+    in stepper.hpp; `FixedClock::k0` (default 0, so every existing clock is
+    unchanged; test_controllers checks the offset clock is the same
+    expression on the same grid point); run_transient builds the body
+    outside `run_twin` and runs the clock on the run's own k (dynamic and
+    static path). The phases, the legacy loop and every number are
+    unchanged. The hooks' no-listener cost is one test per step (`if
+    (hook_mask)`, a run-invariant flag; the record phase's `if (hooks)` was
+    there before), shared by both drivers; not specialised further (the
+    whole remaining residual, buck +0.46 %, is within the gate).
+
+    Reviewer (fresh, read-only, opus medium) on 67fef260..this tip: no
+    divergence of results, records, stats, snapshots, exceptions,
+    cancellation (`k_reached` / `grid_step`), resume across drivers,
+    `store_every` (the phases get the run's own k as before), the static
+    path (n_steps 0 / 1 / 2). Noted, accepted: TR-BDF2's R1 / #31 fire on
+    the skeleton only (as 17 recorded), so its LEGACY switch drops them
+    while pwl's does not; on a TR-BDF2 commit that also commits a post-edge
+    probe, two rows / two `accepted` but one `step` / one `device_state`;
+    hook order differs between the engines (pwl `device_state` before
+    `accepted`; TR-BDF2 R2 before the landing row, pwl after); latent:
+    `FixedController::advance` never advances k on a NaN grid point (the
+    old `for` always ended) — unreachable today (`valid()` requires finite
+    `t_start` / `dt`, the snapshot origin is checked); the zero-alloc test
+    leaves `PULSIM_PWL_STEPPER_LEGACY=0` set (harmless).
+
+    The committed tip itself (a third NEW build: b5 + comments), same
+    harness, min of 3: buck_pwl 3036.3 → 3050.5 (1.0047), vsi_pwl 4696.1 →
+    4710.5 (1.0031), vsi_pwl_restart 4860.3 → 4874.0 (1.0028), shockbuck_pwl
+    1.0008, rlc152_pwl 1.0009, static_pwl 0.9996, buck_trbdf2 1.0000,
+    bridge_trbdf2 1.0008, shockbuck_trbdf2 0.9998.
+
+    Identity (this tip, macOS clang, LOCAL gate): default AND both-legacy
+    byte-identical to 67fef260's default on the four compares (goldens,
+    stateful, engines, step sequences; baselines recorded with the old
+    binary); `pwl_twin_identity.py --goldens --reference` 379/379;
+    `trbdf2_twin_identity.py --goldens --extra` 50/50 and `--reference
+    --modes ',lcp,shadow'` 327/327; static path 11/11; the twin tests
+    24 passed / 1 skipped.
+
+    Lands on `feat/core-p3-stepper` with the legacy loops KEPT (behind the
+    internal variables) until CI has compiled the skeleton's inline macros
+    on GCC, Clang + libc++ and MSVC (empty on MSVC; placement on lambdas
+    compiled by Apple clang only: Linux / Windows unverified). Their
+    deletion is prepared on `wip/core-p3-stepper-delete-legacy` if it
+    exists (not for integration until the orchestrator says so).
