@@ -43,6 +43,7 @@ counted. Several: reported, the one with fewest flips is followed (a
 from __future__ import annotations
 
 import argparse
+import bisect
 import gzip
 import itertools
 import json
@@ -245,8 +246,14 @@ class Wave:
 
     def _state_side(self, t, side):
         tt = fr_of(t)
+        # an event time is the edge rounded to dps digits: snap it, or the right
+        # limit reads the old level (the stored gate trace lost its edges)
+        eps = Fr(1, 10 ** (mp.mp.dps - 5)) * max(abs(tt), Fr(1, 10 ** 9))
+        e = self.sch.next_edge(tt - eps)
+        if e is not None and abs(e - tt) <= eps:
+            tt = e
         if side < 0:
-            tt -= Fr(1, 10 ** 40)
+            tt -= Fr(1, 10 ** (mp.mp.dps + 20))
         return self.hi if self.sch.state(tt) else self.lo
 
     def next_break(self, t: Fr):
@@ -1925,10 +1932,18 @@ def truth(path, form="conductance", dps=(30, 60), out_dir=TRUTH_DIR, write=True,
     # precision doubling on the output grid
     g1 = out_grid(hi, ck.dt / store)          # the stored trace: dt/store, events two-sided
     th, yh = _floats(hi, cols, g1)
-    gc = out_grid(hi)                         # precision doubling on the netlist grid
-    vl = lo.sample(cols, out_grid(lo))
-    vh = hi.sample(cols, gc)
-    same_grid = len(vl[cols[0]]) == len(vh[cols[0]])
+    # precision doubling on the netlist grid, away from events: a grid point on a
+    # gate edge falls on either side of it depending on the precision
+    near = sorted(e["t"] for e in hi.events[1:])
+    gap = mpf(Fr(ck.dt)) * mp.mpf(10) ** -9
+    gr = [mpf(k * Fr(ck.dt)) for k in range(int(ck.t_end / Fr(ck.dt)) + 1)]
+    gr = [t for t in gr if not near or abs(near[min(bisect.bisect(near, t), len(near) - 1)] - t) > gap
+          and abs(near[max(bisect.bisect(near, t) - 1, 0)] - t) > gap]
+    mp.mp.dps = dps[0]
+    vl = lo.sample(cols, [mpf(t) for t in gr])
+    mp.mp.dps = dps[-1]
+    vh = hi.sample(cols, gr)
+    same_grid = len(lo.events) == len(hi.events)
     if same_grid:
         dmax = max(max(abs(a - b) for a, b in zip(vl[c], vh[c])) /
                    max(max(abs(x) for x in vh[c]), mp.mpf(10) ** -30) for c in cols)
