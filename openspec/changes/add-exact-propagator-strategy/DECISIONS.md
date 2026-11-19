@@ -455,3 +455,43 @@ C++ dsed / layer4_v3 / mode targets pass on Eigen 5 and 3.4.0; full pytest 1 fai
 3. Passivity test: are the two D1 repairs at 1.05e-7 V the settle's or the judge's threshold.
 4. Cap `settled_`'s δ at the next time event.
 5. Re-run `bar.sh` and the scoreboard at this tip; then step 3 of the session-15 brief.
+
+## Session 16 (exact engine 15): D1–D3 applied, the bar met, pushed (2026-11-19)
+
+### D1 — the law check reads the state the decision read (applied in the form that keeps the trajectory the exact map)
+Storing the settled state as the event's right-limit sample broke 10 sensitivity tests (the replay propagates every step from the stored sample: relative 5.4e-9 mismatch); carrying it (the run advances by δ) broke them too (the event must have a sample at its own time; `_attach_events`, `kEventSampleTol`). Applied: at a located diode event the settled state is kept beside the sample (`law_settled_`) and `check_diode_law` reads it at that row, ONLY where the stored sample breaks a diode law beyond B (substituting everywhere refused ten banks k = 8: 11 kV in the settled state of a sample that held). Ten banks ×11 at 1e-15: 11/11 on both selections (k = 4 ran). The stored waveform still shows the 1e-13 s g_off spike (it is the PWL model's exact state at t+).
+OPEN (review #1): a real current forced into g_off at a located event also drains inside the settle; gating the substitution on the root's error (|g(x+dx) − g(x)|) refused k = 4 again (its −4.66 µA is the drift exit's insignificant current, not the root's dx). The right gate is the pre-event ON bound (|i| ≤ B_on·g_on); not built.
+
+### D2 — the guard's judge uses B
+`judge_` compares the decision's signal (v_D − V_on, V) with `signal_bound_` at its two horizons (1e2, 1e4 h_e). The ideal-transformer bridge still makes 3 repairs: D1 at 5.981 / 25.981 ms judged at 1.05e-7 V > B (so not inside the bound: the brief's premise did not hold) and D4 at 21.79 ms by 0.32 V. Truth (pwl+split at dt 1e-8, `.scratch/s19/pas_truth.py`): D1/D4 tie at 5.981 ms (they chatter for 0.27 µs, then both block): either mode is admissible; the D4 turn-on at 21.7896 ms is real, the settle's D4-OFF there an error. The test pins exactly that (repairs 1–4; the 21.79 ms repair > 0.1 V; any other at the tie phases < 1e-6 V). A ladder-form judge (the decision's whole rule, first significant rung) was built and measured: it removes the D4 repair (an event at the same instant turns D4 on) but breaks 7 guard/LCP tests (forward converter: the held-state violation lives inside the fast transient the ladder reads first). Not taken.
+OPEN (review #2): `first_departure_` (the selector's horizon) still uses 1e-9·vscale; one `violates_` helper for both.
+
+### D3 — the settle never reads past the next time event
+δ = min(40/ρ_min, ½(t_e − t)) (half, as `decision_cap_`: a ladder read from t_e itself would skip that edge, review #4). No test moved by it.
+
+### Review (fresh context, opus medium) — fixed: #4, #6 (event context reset at simulate start). Open, ranked: #1 (above), #2 (above), #3 zero-start ladder starts its scan at the deciding rung (a decade unscanned), #5 drift branch offset uses bound_at(ta) against a test at tb, #7 `law_settled_` lives in the simulator, not the result (check_diode_law on an edited result), bare constants table (locator t_tol 1e-12·h, 1e-15 s ties, zero_band_tol_/tie_band_ 1e-12·vscale, re-settle 1e-6, law-check floors) — derive each from B or ulp(t); no end-to-end test of the guard-refusal path left.
+
+### The bar at 56289859 (pushed)
+
+| Item | Result |
+|---|---|
+| dsed / layer4_v3 / mode C++ targets, Eigen 5 and 3.4.0 | 129 / 22 / 32 cases pass, identical counts |
+| full pytest | 0 failed: 5082 passed, 108 skipped, 6 xfailed |
+| `pytest -m reference` | 373 passed |
+| `reference_status` | exit 0; strict dsed 97 / 0 / 0 / 12 / 0 (unchanged; REFERENCE_STATUS.md not moved) |
+| ruff / openspec strict / stubs | clean / 78 passed / up to date |
+| goldens + bit-identity (base s12m) | pwl / trbdf2 byte-identical (default and shadow); dsed moves as at 35fff44a: 8 arrays (bridge1_vf07, bridge3, bridge3_vf07, buck_ccm, buck_dcm), golden `syncbuck_dsed` 2.7e-14 |
+| `dsedall.sh` | 307 / 307 |
+| banks (20 ms; 12 banks 10 ms) | 1, 9, 10 banks run on both selections; 12 banks refused BY NAME on both (Db7c ON at −7.45e-6 A, 6.8796 ms) — D4 is its cure, not started |
+| ten banks ×11 at 1e-15 | 11 / 11 on both selections (default 3 mode sequences, lcp 2; end-state spread 5.3e-5) |
+| engine fuzz `fuzz_engine.py 21` | 12 configurations × 21 runs, 0 errors, 1 mode sequence each |
+| ten banks vs 50-digit truth (0.1 ms) | bus −1.387e-9 V, i(L0a) 7.7e-12 A, both selections |
+| floating-bus bridge vs 311.343881428885841697 V | −4.09e-10 V both; worst event time 1.12e-11 s |
+| boost-DCM orbit | v* 36.5944008378648, 6.68e-11 V from the orbit, 21 runs |
+| design-thermal 125 °C | passes |
+| exact scoreboard dsed vs mpmath truth | 81 / 81 < 1e-3, worst `diode_half_wave_rl_load` 4.87e-6; every circuit identical to 81f2991a (ratio 1) |
+
+### Hand-off (session 16)
+1. Merge `origin/feat/core-integration` (e3ee5341; conflicts in scheduler.hpp, `_dsed_dispatch.py`, `dsed_bindings.cpp`, `_pulsim.pyi`, REFERENCE_STATUS.md, `test_mode_shadow.py`, `test_engine_conformance.py`; the PR line's strict dsed is 100/0/0/9 — ours must be ≥ after).
+2. D4: dedicated predicate rows (c = e_from − e_to formed from the refined hi + lo recovery in `refine_schur_`, which today rounds X once and drops lo), then twelve banks must run and match pwl+split.
+3. Review #1 and #2 above; the bare-constant table.
