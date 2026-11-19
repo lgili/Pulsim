@@ -1222,7 +1222,7 @@ inline SimulationResult run_transient_trbdf2(
 
     // ---- complementarity mode selection at a zero-time cascade ----
     // (add-complementarity-mode-selection 4.2 / 4b.3 on trbdf2; DECISIONS
-    // #36.) trbdf2 decides diode modes only at its zero-time cascades (the
+    // #47.) trbdf2 decides diode modes only at its zero-time cascades (the
     // initial settle, a gate edge, a diode event, a landing): those are its
     // sites. The site's system is the cascade's last probe, a trap step of
     // last_probe_dt from the committed state under the gates of t_gates,
