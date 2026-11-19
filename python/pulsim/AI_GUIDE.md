@@ -2,7 +2,7 @@
 
 This file ships in the `pulsim` package and describes its version.
 `python -m pulsim.guide` prints it with the installed version on the
-first line; `pulsim.ai_guide()` returns the same text. The guide beats
+first line; `pulsim.ai_guide()` returns it. The guide beats
 your memory: Pulsim 2 changed behaviour but kept most 1.x names. Every
 `python` block runs in the test suite; printed numbers are its output.
 
@@ -623,10 +623,9 @@ abort (trap 5), a part file without provenance, a mismatched snapshot.
 
 ## 7. Coming from Pulsim 1.x or pre-1.0
 
-Retired names still raise `AttributeError` with a hint (e.g.
+Retired names raise `AttributeError` with a hint (e.g.
 `Circuit`, `Simulator`, `YamlParser`, `Preset`, `PulseParams` from
-pre-1.0; the `v2` sub-namespace of 0.10). Changes that keep
-names but change results:
+pre-1.0; the `v2` sub-namespace of 0.10). Same names, new results:
 
 | 1.x habit | 2.x |
 |---|---|
@@ -655,9 +654,9 @@ with the checks in its section 6 before reporting it.
 
 ## 9. Where to read more
 
-- `docs/getting-started.md`; `docs/tutorials/01-rc-charging.md` ...
-  `09-magnetic-networks.md`.
+- `docs/getting-started.md`, `docs/tutorials/`.
 - `docs/api-reference.md`, `docs/gotchas.md`, `docs/troubleshooting.md`,
-  `docs/losses-and-thermal.md`,
-  `docs/loss-thermal.md`, `docs/mental-model.md`, `docs/how-pulsim-works/`.
+  `docs/losses-and-thermal.md`, `docs/loss-thermal.md`,
+  `docs/mental-model.md`, `docs/how-pulsim-works/`.
 - `CHANGELOG.md`: what changed and why.
+- Changing `simulate()`: put it in the plan (`docs/internals/run-planning.md`).

@@ -54,6 +54,7 @@ from typing import Any, Callable, Optional, Sequence
 import numpy as np
 
 from . import _native_cache
+from ._circuit_ir import c_blocks_of  # (module level: simulate() pays per call)
 
 __all__ = ["CBlock", "CBlockHandle", "add_c_block", "wire_c_blocks_from_yaml",
            "CBLOCK_ABI"]
@@ -302,7 +303,6 @@ def static_state_hold(builder, observers=()):
     """Hold the static-state C libraries of one run: ``builder``'s C
     blocks and those inside the caller's graphs (``observers``). None
     without any."""
-    from ._circuit_ir import c_blocks_of
     blocks = [getattr(h, "block", None) for h in c_blocks_of(builder)]
     for obs in observers:
         g = getattr(obs, "_graph", None)
@@ -625,7 +625,6 @@ def _c_graph_of(builder):
     through its handles (a builder's ``_c_blocks``, a Circuit's
     ControlDecls: a run's builder from Circuit.to_builder() carries no
     Python attribute); None without C blocks."""
-    from ._circuit_ir import c_blocks_of
     return next((g for h in c_blocks_of(builder)
                  if (g := getattr(getattr(h, "block", None), "_graph", None))
                  is not None), None)
