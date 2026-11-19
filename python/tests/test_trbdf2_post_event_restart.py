@@ -310,8 +310,9 @@ def test_a_learned_probe_floor_leaves_the_turn_offs_unchanged():
         b.add_capacitor("C", "vout", "gnd", C)
         b.add_resistor("RL", "vout", "gnd", 20.0)
         if island:
-            b.add_diode("Dx", "x", "gnd", GON, 1e-9)
-            b.add_diode("Dy", "gnd", "y", GON, 1e-9)
+            # legacy subject: the conductance form's 1e-9 S OFF leakage makes the pivot
+            b.add_diode("Dx", "x", "gnd", GON, 1e-9, form="conductance")
+            b.add_diode("Dy", "gnd", "y", GON, 1e-9, form="conductance")
             b.add_capacitor("Cf", "x", "y", 1e-6)
         n, k = b.graph.num_switches, b.switch_index_of("S")
 
