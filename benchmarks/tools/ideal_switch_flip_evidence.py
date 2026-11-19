@@ -209,6 +209,32 @@ def converged_reference(case, cols, tol):
     return tr, meta
 
 
+def analytic_reference(case, cols):
+    """The circuit's closed form as a trace, when its validation block declares
+    it exact for the netlist as built (``exact: true``; benchmark_runner's model,
+    the source's edge included), else None. Uncertainty 0. Dense on the edge and
+    geometric after it (ratio 1 + 7e-5): its linear interpolation adds < 1e-9 of
+    the span. rl_step / inductor_chain_step: the converged ladder interpolated its
+    own 31 / 156 ns grid across the 1 ns edge and graded the exact engine
+    (1e-11 of the closed form) a disagreement (exact engine session 21)."""
+    val = case.validation
+    if val.get("type") != "analytical" or not val.get("exact") or cols != [val.get("observable")]:
+        return None
+    import numpy as np
+
+    import benchmark_runner as br
+    if val.get("model") != "rl_step":
+        return None
+    p = val.get("params") or {}
+    tr = br.parse_value(p.get("t_rise", 0.0))
+    t1 = case.t_end
+    t = np.union1d(np.linspace(0.0, tr, 201) if tr > 0 else [0.0],
+                   np.geomspace(max(tr, t1 * 1e-9), t1, 200001))
+    y = np.asarray(br.analytical_rl_step(list(t), br.parse_value(p["v0"]), br.parse_value(p["r"]),
+                                         br.parse_value(p["l"]), tr))
+    return (t, {cols[0]: y}, None)
+
+
 def default_reference(case, cols, tol):
     """The gate's own reference (dr.reference, unchanged) and its uncertainty:
     trbdf2 rtol 1e-8 against 1e-9, or pwl dt/2 against dt/4 (the symmetric
@@ -261,7 +287,11 @@ def run_circuit(rel, entry, want=VARIANTS, have=None):
     variants = [v for v in VARIANTS if v in want]
     ref, rmeta = default_reference(case, cols, tol)
     iref, imeta = None, {"name": None, "uncertainty": None}
-    if any(v.startswith("ideal") for v in variants):
+    an = analytic_reference(case, cols) if any(v.startswith("ideal") for v in variants) else None
+    if an is not None:
+        iref, imeta = an, {"name": f"analytic {case.validation['model']} (closed form)",
+                           "uncertainty": 0.0}
+    elif any(v.startswith("ideal") for v in variants):
         try:
             with ideal_form():
                 iref, imeta = converged_reference(case, cols, tol)
