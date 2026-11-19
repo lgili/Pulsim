@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Device field tables: one source for validation, `components()` and the reference
+
+Every value field of every device kind (`ir::kKindFields`) now carries its
+unit and description, and drives:
+
+* the bound `with_value`, `bind_param` / `set_param` and the YAML registry
+  reader enforce (each names the device and the field). The `add_*` methods
+  keep their own checks, unchanged: a builder-time table check was tried and
+  refused 250 tests' pinned contracts (a negative resistor, `m = 0`, an
+  ideal switch's `g_off = 0` / `R_on = 0`, NaN caught at emit). The Shockley
+  and Lauritzen diodes' errors now name the device too, like every other
+  `add_*` method's;
+* the `components()` params: generated from the rows marked listed, which
+  are exactly the scalars it listed before, so its output is unchanged
+  (byte-for-byte over every call in the test suite, and the pinned digest);
+  `Circuit.devices()` already listed every row;
+* the generated device reference, `docs/device-reference.md`
+  (`scripts/generate_device_reference.py`; a test fails when it is stale);
+* `pulsim.device_fields(kind)`, the same rows in Python, and the same shape
+  for an external device model's field list.
+
+The YAML registry entries (`type: shockley_diode | lauritzen_diode |
+nonlinear_capacitor | pmsm_mna` with `pins:`) already read these rows; they
+now have round-trip tests (YAML to `Circuit.devices()` fields equal to the
+builder's, and a bit-identical run).
+
 ### `res.i` and the loss summaries read the Newton devices' laws
 
 `res.i(name)` of a level-1 MOSFET, a level-1 IGBT without a tail and a

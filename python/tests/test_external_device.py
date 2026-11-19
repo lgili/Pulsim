@@ -589,6 +589,32 @@ def test_lauritzen_twin_on_trbdf2(libs):
     assert np.max(np.abs(ia - ib)) <= 1e-3 * np.max(np.abs(ia))   # interpolation margin
 
 
+
+def _laur_bias(libs, external):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 1.0)
+    b.add_resistor("R", "in", "a", 1.0)
+    if external:
+        b.add_external_device("D1", ["a", "gnd"], libs["twins"], "lauritzen_twin", LAUR)
+    else:
+        b.add_lauritzen_diode("D1", "a", "gnd", **LAUR)
+    return b
+
+
+def test_ac_sweep_of_the_lauritzen_twin_linearises_its_internal_charge(libs):
+    """The twin's q_M is an internal unknown (a circuit row); the built-in's
+    is a local row of linearize. Biased forward (~0.3 A), both sweeps must
+    agree, and the charge dynamics must show: H moves between the low- and
+    high-frequency ends (1/T_M = 1e8 rad/s)."""
+    f = np.array([1e3, 1e5, 1e6, 1e7, 1e8])
+    out = {}
+    for ext in (False, True):
+        b = _laur_bias(libs, ext)
+        out[ext] = np.asarray(p.run_mna_sweep(b, output_idx=b.node_id_of("a"), freqs=f,
+                                              v_in_branch_id=b.branch_id_of("V")).H)
+    np.testing.assert_allclose(out[True], out[False], rtol=1e-9)
+    assert abs(out[True][-1] - out[True][0]) > 1e-2 * abs(out[True][0])
+
 # ---- 2.2 charge only: the junction capacitor --------------------------------
 
 JCAP = dict(C0=2e-9, V0=25.0, m=0.5)

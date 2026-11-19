@@ -1299,7 +1299,12 @@ public:
             .I_S = I_S, .n = n, .V_T = V_T,
             .G_min = G_min, .BV = BV,
         };
-        models::ShockleyDiode::validate(p);
+        try {   // add-unified-device-interface 12.1: name the device
+            models::ShockleyDiode::validate(p);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::format(
+                "add_shockley_diode(\"{}\"): {}", name, e.what()));
+        }
         const Index a_idx = resolve_node_(anode);
         const Index c_idx = resolve_node_(cathode);
         const Index b_id = add_branch_(
@@ -1349,7 +1354,12 @@ public:
             .I_S = I_S, .n = n, .V_T = V_T,
             .tau = tau, .T_M = T_M, .G_min = G_min,
         };
-        models::LauritzenDiode::validate(p);
+        try {   // add-unified-device-interface 12.1: name the device
+            models::LauritzenDiode::validate(p);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::format(
+                "add_lauritzen_diode(\"{}\"): {}", name, e.what()));
+        }
         const Index a_idx = resolve_node_(anode);
         const Index c_idx = resolve_node_(cathode);
         const Index b_id = add_branch_(

@@ -144,3 +144,42 @@ def test_kinds_with_a_stored_charge_still_name_the_recipe(add):
         r = p.simulate(b, 1e-4, dt=1e-6, engine="pwl")
     with pytest.raises(NotImplementedError, match="1 mOhm"):
         r.i("X")
+
+
+def _inductive(kind):
+    """The sense-resistor circuit behind a 2 mH inductor: a state, so
+    trbdf2's step control has something to refine (a purely resistive
+    circuit runs at its step ceiling)."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
+    b.add_inductor("Lx", "in", "m", 2e-3)
+    b.add_resistor("R", "m", "s", 5.0)
+    b.add_resistor("Rs", "s", "a", RS)
+    if kind == "mosfet_level1":
+        b.add_voltage_source("Vg", "g", "gnd", 6.0)
+        b.add_mosfet_level1("X", "a", "gnd", "g", K=0.2, V_T=2.0, with_body_diode=False)
+    elif kind == "igbt_level1":
+        b.add_voltage_source("Vg", "g", "gnd", 15.0)
+        b.add_igbt_level1("X", "a", "gnd", "g")
+    else:
+        b.add_shockley_diode("X", "a", "gnd")
+    return b
+
+
+@pytest.mark.parametrize("kind", ["mosfet_level1", "igbt_level1", "shockley_diode"])
+def test_adaptive_grid_loss_equals_the_fixed_grid_loss(kind):
+    # 9.4: the summary integrates v·i time-weighted (product of the
+    # piecewise-linear traces), so a trbdf2 grid gives the pwl figure.
+    # The retired non-passive smooth diode is left out: behind an inductor
+    # its pwl run aborts (Newton), so there is nothing to compare.
+    e, h = {}, {}
+    for eng, kw in (("pwl", dict(dt=2.5e-7)), ("trbdf2", dict(dt=1e-4))):
+        b = _inductive(kind)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            r = p.simulate(b, 2e-3, engine=eng, **kw)
+        e[eng] = [d for d in p.device_loss_summary(b, r) if d["name"] == "X"][0]["E_total"]
+        h[eng] = np.diff(np.asarray(r.times, float))
+    assert e["pwl"] > 1e-4                         # it dissipates (control)
+    assert h["trbdf2"].max() > 5 * h["trbdf2"].min()   # the grid did adapt
+    assert abs(e["trbdf2"] / e["pwl"] - 1) <= 5e-3, e

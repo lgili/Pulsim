@@ -1120,6 +1120,36 @@
     (v = R·i + ω_e·(∂L·i + λ'_pm)) is the right law; tested against the
     closed form at ω0 = 40 rad/s on both paths (1e-12).
 
+    **The loop hunk, for the next agent (one place, two lines; not applied
+    in slice 11 — LOOP FREEZE).** File `core/include/pulsim/solver/
+    run_transient.hpp`, the `if (start_from_dc_op)` block of `run_transient`
+    (the pwl engine; trbdf2 refuses `start_from_dc_op`), merged tip
+    7f5ec31f lines ~786-802:
+    (a) the call `pwl::compute_dc_operating_point(graph, pool,
+        switch_fn(opts.t_start), nl_static, …)` passes `nl_static`; pass
+        `nl_refresh ? nl_static : pwl::dc_device_refresh(pool, true,
+        opts.device_path)` instead (`nl_refresh` is the deprecated
+        caller override, which must keep winning). On `DevicePath::Legacy`
+        `dc_device_refresh` returns `standard_static_refresh(Legacy)`, the
+        same function `nl_static` is, so the default path stays
+        byte-identical;
+    (b) after `history.seed_from_dc_op(x);` the block seeds only the PMSM
+        and external-device histories; add
+        `hs.get<pwl::LauritzenDiodeHistory>().seed_from_dc_op(x);` so q_M
+        starts on its DC curve (q_M = q_e·τ/(τ + T_M), dq_M/dt = 0) rather
+        than at 0 — without (b), (a) gives the right sample 0 and then a
+        recovery transient from an empty charge.
+    The test that must fail before and pass after: V = 2 V, R = 1 Ω,
+    `add_lauritzen_diode("D", "a", "gnd", tau=1e-4, T_M=5e-5)`,
+    `simulate(b, 1e-6, dt=1e-7, engine="pwl", start_from_dc_op=True,
+    device_path="interface")`: `r.v("a")[0]` must equal
+    `compute_dc_operating_point(…, device_path=Interface).x[a]` = 0.73096 V
+    (measured on 7f5ec31f: 2.000 V, the open diode, on both paths), and
+    `r.v("a")` should then stay at it over the run (a consistent start has
+    no transient; this flatness is expected, not measured — gate it at
+    1e-6 and tighten once seen); on `device_path="legacy"` sample 0 stays 2.000 V
+    (no default number moves).
+
 57. **trbdf2's error control did not refine a small sine** (observation for
     the TR-BDF2 track, not chased here). The junction-capacitor case at
     10 kHz with a 5 mV sine on 5 V: rtol 1e-8, 1e-10 and 1e-12 all gave

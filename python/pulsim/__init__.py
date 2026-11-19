@@ -369,6 +369,7 @@ from . import datasheet as datasheet  # noqa: F401  (re-export submodule)
 from .double_pulse import DoublePulseResult, double_pulse_metrics, double_pulse_test
 from .stream import LiveStream, NativeLiveStream
 from ._exact_route import exact_route
+from ._fields import device_fields
 from .electrothermal import (
     TempCoResistance,
     make_bidirectional_observer,
@@ -577,6 +578,7 @@ __all__ = [
     "simulate",
     # add-exact-propagator-strategy D11 (report only).
     "exact_route",
+    "device_fields",
     # add-python-named-lookups (v1.5).
     "NameNotFoundError",
     # add-python-builder-ergonomics (v1.5).
