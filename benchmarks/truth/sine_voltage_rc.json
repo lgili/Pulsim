@@ -43,7 +43,7 @@
   "src:Vsig": "0.000121309606728563"
  },
  "energy_balance_rel": "7.43e-62",
- "precision_doubling_rel": "3.8e-31",
+ "precision_doubling_rel": "2.28e-30",
  "event_time_diff_s": "0",
  "u_stored_trace": 3.7933346141070383e-07,
  "uniform_dt_floor": 2.4312992597839758e-05,

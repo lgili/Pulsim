@@ -439,7 +439,7 @@
   "src:Vdc": "0.0227401756781686"
  },
  "energy_balance_rel": "-4.28e-61",
- "precision_doubling_rel": "1.16e-30",
+ "precision_doubling_rel": "1.26e-30",
  "event_time_diff_s": "0.0",
  "u_stored_trace": 7.818706012467252e-09,
  "uniform_dt_floor": 5.012005311986364e-07,

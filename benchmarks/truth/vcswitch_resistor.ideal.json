@@ -5,6 +5,10 @@
  "observables": [
   "V(out)"
  ],
+ "dps": [
+  30,
+  60
+ ],
  "wall_s": 0.0,
  "events": [
   {

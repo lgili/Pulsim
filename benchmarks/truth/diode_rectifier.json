@@ -5,7 +5,11 @@
  "observables": [
   "V(out)"
  ],
- "wall_s": 3.5,
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 6.1,
  "events": [
   {
    "t": "0.000005020131951248001360013138",
@@ -1633,7 +1637,7 @@
   "src:Vac": "0.00244824335755287"
  },
  "energy_balance_rel": "3.31e-58",
- "precision_doubling_rel": "3.83e-21",
+ "precision_doubling_rel": "6.0e-31",
  "event_time_diff_s": "3.9e-24",
  "u_stored_trace": 2.7029382203934393e-05,
  "uniform_dt_floor": 0.0011970977418858456,

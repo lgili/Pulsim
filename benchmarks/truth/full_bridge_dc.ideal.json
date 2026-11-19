@@ -1,0 +1,453 @@
+{
+ "circuit": "circuits/switching/isolated/full_bridge_dc.yaml",
+ "form": "ideal",
+ "supported": true,
+ "observables": [
+  "V(load_p)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.9,
+ "events": [
+  {
+   "t": "0.00001000000000000000081803054",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.00002000000000000000163606108",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.00003000000000000000245409162",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.00004000000000000000327212216",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0000500000000000000040901527",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.00006000000000000000490818323",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.00007000000000000000572621377",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.00008000000000000000654424431",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.00009000000000000000736227485",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001000000000000000081803054",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001100000000000000089983359",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001200000000000000098163665",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.000130000000000000010634397",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001400000000000000114524275",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001500000000000000122704581",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001600000000000000130884886",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001700000000000000139065192",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001800000000000000147245497",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001900000000000000155425802",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002000000000000000163606108",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002100000000000000171786413",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002200000000000000179966719",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002300000000000000188147024",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002400000000000000196327329",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002500000000000000204507635",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.000260000000000000021268794",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002700000000000000220868246",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002800000000000000229048551",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002900000000000000237228856",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003000000000000000245409162",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003100000000000000253589467",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003200000000000000261769773",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003300000000000000269950078",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003400000000000000278130383",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003500000000000000286310689",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003600000000000000294490994",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003700000000000000302671299",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003800000000000000310851605",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.000390000000000000031903191",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004000000000000000327212216",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004100000000000000335392521",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004200000000000000343572826",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004300000000000000351753132",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004400000000000000359933437",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004500000000000000368113743",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004600000000000000376294048",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004700000000000000384474353",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004800000000000000392654659",
+   "change": "Q1+ Q2+ Q3- Q4-",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004900000000000000400834964",
+   "change": "Q1- Q2- Q3+ Q4+",
+   "cause": "schedule",
+   "strict": 0,
+   "candidates": 4,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 49,
+ "n_events": 49,
+ "ambiguous": [],
+ "weak_only": 50,
+ "start_mode": "Q1+ Q2+ Q3- Q4- D1- D2- D3- D4-",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "0.0",
+ "max_eigvec_cond": "50.0",
+ "windows": {
+  "full": {
+   "V(load_p)": {
+    "mean": "12.00000000000000073183647",
+    "rms": "16.97056274847714110310679",
+    "d_prec": "5.92e-31"
+   }
+  },
+  "last20": {
+   "V(load_p)": {
+    "mean": "12.00000000000000073183647",
+    "rms": "16.97056274847714110310679",
+    "d_prec": "5.92e-31"
+   }
+  }
+ },
+ "energy_J": {
+  "Rload": "0.00224355479472925",
+  "Q1": "1.44e-7",
+  "Q2": "1.44e-7",
+  "Q3": "1.44e-7",
+  "Q4": "1.44e-7",
+  "D1": "1.44e-7",
+  "D2": "1.44e-7",
+  "D3": "1.44e-7",
+  "D4": "1.44e-7",
+  "src:Vdc": "0.00230620984763506"
+ },
+ "energy_balance_rel": "-2.36e-60",
+ "precision_doubling_rel": "0.0",
+ "event_time_diff_s": "0.0",
+ "u_stored_trace": 0.0,
+ "uniform_dt_floor": 0.0808649435363165,
+ "dt": 2e-07,
+ "stored_dt": 2.5e-08
+}

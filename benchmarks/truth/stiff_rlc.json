@@ -43,7 +43,7 @@
   "src:Vdc": "-1.36382508378529e-67"
  },
  "energy_balance_rel": "-1.09e-59",
- "precision_doubling_rel": "1.33e-31",
+ "precision_doubling_rel": "1.58e-31",
  "event_time_diff_s": "0",
  "u_stored_trace": 0.0,
  "uniform_dt_floor": 0.0,

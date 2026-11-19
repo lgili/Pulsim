@@ -10,7 +10,11 @@
   "V(ctrl)",
   "I(L1)"
  ],
- "wall_s": 7.1,
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 16.4,
  "events": [
   {
    "t": "0.000006900000000000000907975951",
@@ -4018,7 +4022,7 @@
    "dE": "4.0570315864e-5"
   }
  ],
- "impulsive_loss_J": "-0.00828686760486911",
+ "impulsive_loss_J": "9.08195283389404e-7",
  "max_dae_residual": "1.51e-59",
  "max_eigvec_cond": "103.0",
  "windows": {
@@ -4087,11 +4091,11 @@
   "D1": "1.71842098172606e-14",
   "src:Vin": "0.0108721556432505"
  },
- "energy_balance_rel": "-6.36e-59",
- "precision_doubling_rel": "1.0",
+ "energy_balance_rel": "-1.29e-59",
+ "precision_doubling_rel": "1.94e-26",
  "event_time_diff_s": "1.65e-26",
- "u_stored_trace": 0.007071103168470554,
- "uniform_dt_floor": 0.0813601553002008,
+ "u_stored_trace": 7.592411981244223e-05,
+ "uniform_dt_floor": 0.08152047472471574,
  "dt": 2e-07,
  "stored_dt": 2.5e-08
 }

@@ -1,0 +1,529 @@
+{
+ "circuit": "circuits/switching/multilevel/t_type_3level_halfbridge.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.2,
+ "events": [
+  {
+   "t": "0.00001000000000000000081803054",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00002000000000000000163606108",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00003000000000000000245409162",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00004000000000000000327212216",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0000500000000000000040901527",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00006000000000000000490818323",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00007000000000000000572621377",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00008000000000000000654424431",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00009000000000000000736227485",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001000000000000000081803054",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001100000000000000089983359",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001200000000000000098163665",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000130000000000000010634397",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001400000000000000114524275",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001500000000000000122704581",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001600000000000000130884886",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001700000000000000139065192",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001800000000000000147245497",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001900000000000000155425802",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002000000000000000163606108",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002100000000000000171786413",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002200000000000000179966719",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002300000000000000188147024",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002400000000000000196327329",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002500000000000000204507635",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000260000000000000021268794",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002700000000000000220868246",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002800000000000000229048551",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002900000000000000237228856",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003000000000000000245409162",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003100000000000000253589467",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003200000000000000261769773",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003300000000000000269950078",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003400000000000000278130383",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003500000000000000286310689",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003600000000000000294490994",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003700000000000000302671299",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003800000000000000310851605",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000390000000000000031903191",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004000000000000000327212216",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004100000000000000335392521",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004200000000000000343572826",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004300000000000000351753132",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004400000000000000359933437",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004500000000000000368113743",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004600000000000000376294048",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004700000000000000384474353",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004800000000000000392654659",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004900000000000000400834964",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000500000000000000040901527",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005100000000000000417195575",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000520000000000000042537588",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005300000000000000433556186",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005400000000000000441736491",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005500000000000000449916797",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005600000000000000458097102",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005700000000000000466277407",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005800000000000000474457713",
+   "change": "S1+ S4-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005900000000000000482638018",
+   "change": "S1- S4+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 59,
+ "n_events": 59,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "S1+ S2+ S4-",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "8.3e-61",
+ "max_eigvec_cond": "2.17e+3",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "24.0246775331691134860581",
+    "rms": "30.12430149702996728738441",
+    "d_prec": "3.3e-30"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "23.94861325440527459393978",
+    "rms": "30.05538732493403691316853",
+    "d_prec": "3.28e-30"
+   }
+  }
+ },
+ "energy_J": {
+  "R_t": "8.41457301680784",
+  "Rload": "0.0405823703234441",
+  "S1": "2.08595286206263",
+  "S2": "4.20728650840392",
+  "S4": "2.12011345024764",
+  "src:Vdc": "16.9164108372246"
+ },
+ "energy_balance_rel": "1.84e-61",
+ "precision_doubling_rel": "1.78e-31",
+ "event_time_diff_s": "0.0",
+ "u_stored_trace": 2.3826861745551234e-08,
+ "uniform_dt_floor": 0.07274022660525843,
+ "dt": 2e-07,
+ "stored_dt": 2.5e-08
+}

@@ -44,7 +44,7 @@
   "src:Vac": "0.000821565372968275"
  },
  "energy_balance_rel": "-1.1e-58",
- "precision_doubling_rel": "9.71e-30",
+ "precision_doubling_rel": "1.94e-29",
  "event_time_diff_s": "0",
  "u_stored_trace": 4.941625986996602e-05,
  "uniform_dt_floor": 0.003153273210632053,

@@ -9,7 +9,7 @@
   30,
   60
  ],
- "wall_s": 1.4,
+ "wall_s": 1.5,
  "events": [
   {
    "t": "0.002501350722752747911362675",
@@ -198,7 +198,7 @@
   "src:Vac": "0.0524157055156929"
  },
  "energy_balance_rel": "8.25e-54",
- "precision_doubling_rel": "3.31e-21",
+ "precision_doubling_rel": "1.84e-23",
  "event_time_diff_s": "2.33e-21",
  "u_stored_trace": 2.4189540630184445e-07,
  "uniform_dt_floor": 2.688954706867411e-05,

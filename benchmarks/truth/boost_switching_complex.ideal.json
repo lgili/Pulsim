@@ -5,7 +5,11 @@
  "observables": [
   "V(out)"
  ],
- "wall_s": 2.3,
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 5.9,
  "events": [
   {
    "t": "0.000005699999999999999977779276",
@@ -1413,7 +1417,7 @@
    "dE": "3.02800241648e-5"
   }
  ],
- "impulsive_loss_J": "-0.00211166141816158",
+ "impulsive_loss_J": "2.5506273639524e-7",
  "max_dae_residual": "2.56e-57",
  "max_eigvec_cond": "83.0",
  "windows": {
@@ -1440,8 +1444,8 @@
   "D1": "1.15199986804808e-14",
   "src:Vdc": "0.00289795024421221"
  },
- "energy_balance_rel": "-1.49e-58",
- "precision_doubling_rel": "1.45e-25",
+ "energy_balance_rel": "-1.19e-59",
+ "precision_doubling_rel": "2.23e-31",
  "event_time_diff_s": "2.55e-27",
  "u_stored_trace": 3.005426799160064e-10,
  "uniform_dt_floor": 0.01958931090576676,

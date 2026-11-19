@@ -1,0 +1,224 @@
+{
+ "circuit": "circuits/switching/basic/chopper_with_rc_snubber.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(sw)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 2.2,
+ "events": [
+  {
+   "t": "0.0001000000000000000047921736",
+   "change": "S1-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001005870406689560925667046",
+   "change": "Dfw+",
+   "cause": "Dfw root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002000000000000000095843472",
+   "change": "S1+ Dfw-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003000000000000000143765208",
+   "change": "S1-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003003968607426705172010496",
+   "change": "Dfw+",
+   "cause": "Dfw root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004000000000000000191686944",
+   "change": "S1+ Dfw-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.000500000000000000023960868",
+   "change": "S1-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005003746867519075515504907",
+   "change": "Dfw+",
+   "cause": "Dfw root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006000000000000000287530416",
+   "change": "S1+ Dfw-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007000000000000000335452152",
+   "change": "S1-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007003717556227212287047665",
+   "change": "Dfw+",
+   "cause": "Dfw root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008000000000000000383373888",
+   "change": "S1+ Dfw-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009000000000000000431295624",
+   "change": "S1-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009003713620298682806370609",
+   "change": "Dfw+",
+   "cause": "Dfw root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001000000000000000047921736",
+   "change": "S1+ Dfw-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.00110000000000000005271391",
+   "change": "S1-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.001100371309067289279836007",
+   "change": "Dfw+",
+   "cause": "Dfw root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001200000000000000057506083",
+   "change": "S1+ Dfw-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001300000000000000062298257",
+   "change": "S1-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00130037130193853999009096",
+   "change": "Dfw+",
+   "cause": "Dfw root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.00140000000000000006709043",
+   "change": "S1+ Dfw-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 21,
+ "n_events": 21,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "S1+ Dfw-",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "1.09e-59",
+ "max_eigvec_cond": "62.9",
+ "windows": {
+  "full": {
+   "V(sw)": {
+    "mean": "10.66733717644944855711989",
+    "rms": "14.60286967001208314707736",
+    "d_prec": "1.58e-30"
+   }
+  },
+  "last20": {
+   "V(sw)": {
+    "mean": "13.33149684176760269375821",
+    "rms": "16.32582370599453277765675",
+    "d_prec": "1.97e-30"
+   }
+  }
+ },
+ "energy_J": {
+  "Rload": "0.0153592489706227",
+  "Rsn": "0.000268239394009127",
+  "S1": "5.00385533297098e-6",
+  "Dfw": "3.28716426323784e-6",
+  "src:Vcc": "0.016704115618938"
+ },
+ "energy_balance_rel": "4.82e-61",
+ "precision_doubling_rel": "2.78e-31",
+ "event_time_diff_s": "2.72e-25",
+ "u_stored_trace": 7.790689041797892e-09,
+ "uniform_dt_floor": 0.015329681365406665,
+ "dt": 1e-07,
+ "stored_dt": 1.25e-08
+}

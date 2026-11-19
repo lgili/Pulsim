@@ -43,7 +43,7 @@
   "src:Vac": "4.07440140814425e-7"
  },
  "energy_balance_rel": "-1.48e-61",
- "precision_doubling_rel": "1.95e-30",
+ "precision_doubling_rel": "3.38e-30",
  "event_time_diff_s": "0",
  "u_stored_trace": 1.6774986860693283e-06,
  "uniform_dt_floor": 0.00010751407194969569,

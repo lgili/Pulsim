@@ -1,0 +1,837 @@
+{
+ "circuit": "circuits/three_phase/three_phase_diode_rectifier.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 5.1,
+ "events": [
+  {
+   "t": "0.00003149527811209569767964529",
+   "change": "Dbh-",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001614604657750288868871817",
+   "change": "Dah+",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001666666670475555840367448",
+   "change": "Dbl+",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.002517672337734582287625937",
+   "change": "Dah-",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.003333333340951111680734896",
+   "change": "Dcl-",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.005",
+   "change": "Dal+",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.005555976044454940984799605",
+   "change": "Dch+",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.005851005678685693823562746",
+   "change": "Dch-",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.006666666670475555840367448",
+   "change": "Dbl-",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.008333333340951111680734896",
+   "change": "Dcl+",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.008889309374473957272575231",
+   "change": "Dbh+",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.009184339008210122306962886",
+   "change": "Dbh-",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.01",
+   "change": "Dal-",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.01166666667047555584036745",
+   "change": "Dbl+",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.01222264270399841452743034",
+   "change": "Dah+",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.01251767233773458228762594",
+   "change": "Dah-",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0133333333409511116807349",
+   "change": "Dcl-",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.015",
+   "change": "Dal+",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0155559760444549409847996",
+   "change": "Dch+",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.01585100567868569382356275",
+   "change": "Dch-",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.01666666667047555584036745",
+   "change": "Dbl-",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0183333333409511116807349",
+   "change": "Dcl+",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.01888930937447395727257523",
+   "change": "Dbh+",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.01918433900821012230696289",
+   "change": "Dbh-",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02",
+   "change": "Dal-",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02166666667047555584036745",
+   "change": "Dbl+",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02222264270399841452743034",
+   "change": "Dah+",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02251767233773458228762594",
+   "change": "Dah-",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0233333333409511116807349",
+   "change": "Dcl-",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.025",
+   "change": "Dal+",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0255559760444549409847996",
+   "change": "Dch+",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02585100567868569382356275",
+   "change": "Dch-",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02666666667047555584036745",
+   "change": "Dbl-",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0283333333409511116807349",
+   "change": "Dcl+",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02888930937447395727257523",
+   "change": "Dbh+",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02918433900821012230696289",
+   "change": "Dbh-",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03",
+   "change": "Dal-",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03166666667047555584036745",
+   "change": "Dbl+",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03222264270399841452743034",
+   "change": "Dah+",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03251767233773458228762594",
+   "change": "Dah-",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0333333333409511116807349",
+   "change": "Dcl-",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.035",
+   "change": "Dal+",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0355559760444549409847996",
+   "change": "Dch+",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03585100567868569382356275",
+   "change": "Dch-",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03666666667047555584036745",
+   "change": "Dbl-",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0383333333409511116807349",
+   "change": "Dcl+",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03888930937447395727257523",
+   "change": "Dbh+",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03918433900821012230696289",
+   "change": "Dbh-",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.04",
+   "change": "Dal-",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.04166666667047555584036745",
+   "change": "Dbl+",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.04222264270399841452743034",
+   "change": "Dah+",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.04251767233773458228762594",
+   "change": "Dah-",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0433333333409511116807349",
+   "change": "Dcl-",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.045",
+   "change": "Dal+",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0455559760444549409847996",
+   "change": "Dch+",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.04585100567868569382356275",
+   "change": "Dch-",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.04666666667047555584036745",
+   "change": "Dbl-",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0483333333409511116807349",
+   "change": "Dcl+",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.04888930937447395727257523",
+   "change": "Dbh+",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.04918433900821012230696289",
+   "change": "Dbh-",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.05",
+   "change": "Dal-",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.05166666667047555584036745",
+   "change": "Dbl+",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.05222264270399841452743034",
+   "change": "Dah+",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.05251767233773458228762594",
+   "change": "Dah-",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0533333333409511116807349",
+   "change": "Dcl-",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.055",
+   "change": "Dal+",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0555559760444549409847996",
+   "change": "Dch+",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.05585100567868569382356275",
+   "change": "Dch-",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.05666666667047555584036745",
+   "change": "Dbl-",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0583333333409511116807349",
+   "change": "Dcl+",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.05888930937447395727257523",
+   "change": "Dbh+",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.05918433900821012230696289",
+   "change": "Dbh-",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.06",
+   "change": "Dal-",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.06166666667047555584036745",
+   "change": "Dbl+",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.06222264270399841452743034",
+   "change": "Dah+",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.06251767233773458228762594",
+   "change": "Dah-",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0633333333409511116807349",
+   "change": "Dcl-",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.065",
+   "change": "Dal+",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0655559760444549409847996",
+   "change": "Dch+",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.06585100567868569382356275",
+   "change": "Dch-",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.06666666667047555584036745",
+   "change": "Dbl-",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0683333333409511116807349",
+   "change": "Dcl+",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.06888930937447395727257523",
+   "change": "Dbh+",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.06918433900821012230696289",
+   "change": "Dbh-",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.07",
+   "change": "Dal-",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.07166666667047555584036745",
+   "change": "Dbl+",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.07222264270399841452743034",
+   "change": "Dah+",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.07251767233773458228762594",
+   "change": "Dah-",
+   "cause": "Dah root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0733333333409511116807349",
+   "change": "Dcl-",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.075",
+   "change": "Dal+",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0755559760444549409847996",
+   "change": "Dch+",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.07585100567868569382356275",
+   "change": "Dch-",
+   "cause": "Dch root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.07666666667047555584036745",
+   "change": "Dbl-",
+   "cause": "Dbl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0783333333409511116807349",
+   "change": "Dcl+",
+   "cause": "Dcl root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.07888930937447395727257523",
+   "change": "Dbh+",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.07918433900821012230696289",
+   "change": "Dbh-",
+   "cause": "Dbh root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.08",
+   "change": "Dal-",
+   "cause": "Dal root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 97,
+ "n_events": 97,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "Dah- Dbh+ Dch- Dal- Dbl- Dcl+",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "4.56e-62",
+ "max_eigvec_cond": "9.6e+3",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "23.74309295166577286910985",
+    "rms": "23.74897420511258451309387",
+    "d_prec": "5.36e-30"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "23.82094576280553997546242",
+    "rms": "23.82119285709931751676382",
+    "d_prec": "7.02e-30"
+   }
+  }
+ },
+ "energy_J": {
+  "Rload": "0.225605510318041",
+  "Dah": "0.000193912143347892",
+  "Dbh": "0.21532321928261",
+  "Dch": "9.61372008556139e-5",
+  "Dal": "2304.00001152",
+  "Dbl": "2304.00001152",
+  "Dcl": "2304.00001152",
+  "src:Va": "2304.1490335499",
+  "src:Vb": "2304.50206552491",
+  "src:Vc": "2304.07577809777"
+ },
+ "energy_balance_rel": "2.51e-61",
+ "precision_doubling_rel": "6.25e-31",
+ "event_time_diff_s": "1.35e-21",
+ "u_stored_trace": 0.0004747472338853566,
+ "uniform_dt_floor": 0.0005744331964235124,
+ "dt": 5e-05,
+ "stored_dt": 6.25e-06
+}

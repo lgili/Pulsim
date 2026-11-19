@@ -1,0 +1,52 @@
+{
+ "circuit": "circuits/linear/rlc_series_resonant.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "1.56e-61",
+ "max_eigvec_cond": "21.1",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "-0.02810005802016870002620725",
+    "rms": "4.204160338606265417389754",
+    "d_prec": "7.74e-32"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "-0.02465377293829892576028213",
+    "rms": "4.467770269334043954600817",
+    "d_prec": "1.62e-32"
+   }
+  }
+ },
+ "energy_J": {
+  "R1": "0.000438615664487108",
+  "src:Vac": "0.000458615367034273"
+ },
+ "energy_balance_rel": "4.66e-62",
+ "precision_doubling_rel": "1.55e-29",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 4.729113399695922e-07,
+ "uniform_dt_floor": 3.0327607897490842e-05,
+ "dt": 1e-06,
+ "stored_dt": 1.25e-07
+}
