@@ -862,6 +862,8 @@ TEST_CASE("fixed engine twin on the step skeleton: the legacy run, its own hooks
     hooks.on_device_state([&](Real, const Vector&, const pwl::StatefulHistories&) { ++n_dev; });
     auto run = [&](bool twin, Real t_end) {
         set_pwl_twin(twin);
+        // back to the default even if the run throws (the variable is process-wide)
+        struct Restore { ~Restore() { set_pwl_twin(true); } } restore;
         opts.t_end = t_end;
         n_acc = n_step = n_dev = bad = 0;
         const std::size_t b0 = g_new_count.load();
@@ -869,7 +871,6 @@ TEST_CASE("fixed engine twin on the step skeleton: the legacy run, its own hooks
                                        switch_fn, {}, false, {}, {}, nullptr,
                                        {}, nullptr, {}, {}, nullptr, &hooks);
         const std::size_t d = g_new_count.load() - b0;
-        set_pwl_twin(true);   // back to the default
         return std::pair{d, std::move(r)};
     };
     auto [d_old, r_old] = run(false, 2e-3);
