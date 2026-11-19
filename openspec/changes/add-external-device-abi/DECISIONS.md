@@ -445,8 +445,8 @@ of 7e2860eb was not rebuilt. Full ctest not run on this tip.
 38. **The lint and a C¹ Piecewise (the decision).** A `Piecewise` whose
     conditions involve an unknown is accepted as C¹ — and the model keeps
     SMOOTH — only when it has two pieces, its condition is ONE relational
-    (`<`, `<=`, `>`, `>=`) that `sympy.solve` solves for one unknown with a
-    single solution, and `simplify` proves the pieces' difference and every
+    (`<`, `<=`, `>`, `>=`) that is AFFINE in one unknown (non-zero slope free of it) and solved
+    for it, and `simplify` proves the pieces' difference and every
     component of its gradient zero on that boundary. Everything else is
     refused (three pieces, `And`, an unsolvable boundary, a proof `simplify`
     cannot close): conservative, never optimistic. A non-smooth construct
@@ -535,6 +535,28 @@ of 7e2860eb was not rebuilt. Full ctest not run on this tip.
     time (`ctx->t`) in the law; no MSVC command line in the cache. No C++
     change was needed: no request to other tracks.
 
+47. **Review of 799bcfdf (fresh-context, read-only) and what changed.**
+    (1) BUG: the C¹ proof accepted a jump — `solve(tan(u), a)` returns one
+    root, so `Piecewise((u², tan(u) > 0), (0, True))` kept SMOOTH; the
+    boundary must now be affine in the solved unknown (test). (2) BUG: with
+    `allow_nonsmooth`, SymPy's three-piece `sign` / `Heaviside` rewrites gave
+    J = 0 (sign(u)·u) and 1/2 (Heaviside(u)·u) AT the kink, neither side;
+    now two-piece forms taking the right-hand value (test at the kink for
+    sign, Heaviside, Abs, frac, Mod). (3) `frac` / `Mod` could not be
+    differentiated: rewritten through `floor`; that exposed SymPy wrapping
+    the floor derivative in `Subs`, which the "strict" C printer PRINTED as
+    text (`Subs(0, xi_1_…)`, a compile error): `Subs` is now evaluated after
+    the derivative rule and the printer refuses `Subs` / `Derivative` /
+    `Integral`. (4) TRUST: string laws went through `sympify` (Python eval):
+    `sympify(strict=True)` everywhere (test with an `__import__` init).
+    (5) `I` reached the C: refused as complex-valued (test). (6) `load` /
+    `eval` now refuse a descriptor shorter than version 1 or with NULL
+    eval / pattern / fields / probe arrays, and a state of the wrong length.
+    (7) dead tuple-return branch fixed. SymPy floor raised to 1.13 (the
+    printer's `strict` setting). LEFT: MSVC never compiles the generated C
+    (Windows skips; no MSVC command line in the cache); asymmetric-Jacobian
+    coverage relies on `mixed_law` (kept).
+
 ## Requests to other tracks
 
 - **Stepper track** (DONE in slice 3, #17/#18 — kept for the record): (a) the DC operating point needs the stateful fold (an
@@ -542,6 +564,24 @@ of 7e2860eb was not rebuilt. Full ctest not run on this tip.
   until then #5 refuses. (b) `t` in `pulsim_xdev_ctx` is always 0: the refresh
   signature carries no time; a time-dependent external law needs the solve's t
   passed to `NonlinearRefreshFn` (or `pwl::StepCtx`).
+
+## Hand-off (2026-11-19, slice 5)
+
+- Done: section 4 (`pulsim.xdev`), 1.6's free function with `code=`, the docs
+  section and `examples/scripts/run_xdev_sympy_diode.py` with its claims.
+  Python only; the next slice that rebuilds the extension should merge
+  `feat/core-integration` (cc37304a's test fix is already here by hand: expect
+  a trivial conflict-free merge of the same lines).
+- Open, in order: **3.3 events** (#29), **3.2's steady-state copy**,
+  `wire_c_blocks_from_yaml` behind the allow list (#35 (10)), section 5
+  (OSDI); an MSVC command line in `_native_cache` (then the codegen tests can
+  run on Windows); optional: generated monotone pairs / PASSIVE claims,
+  `ctx->t` in a SymPy law (`xdev.t`).
+- Verified on this tip (macOS arm64 only): full pytest (see the commit),
+  `-m reference` 382, `ruff check python/`, openspec 78/78 --strict, stubs
+  --check unchanged, the generated C of every test law with `-std=c99
+  -pedantic -Wall -Wextra -Werror` on Apple clang and gcc 15. NOT run:
+  full ctest, Linux, Windows, MSVC.
 
 ## Hand-off (2026-11-20, slice 4)
 

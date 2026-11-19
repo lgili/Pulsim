@@ -340,6 +340,37 @@ def test_lint_accepts_a_proved_c1_piecewise_and_parameter_only_kinks():
         _kinked(lambda u: sp.Piecewise((2 * u - 1, u > 1), (u, True)))
 
 
+def test_lint_does_not_prove_a_jump_on_a_periodic_boundary():
+    """solve(tan(u), a) returns ONE root; the Piecewise jumps at u = pi."""
+    with pytest.raises(ValueError, match="not C1"):
+        _kinked(lambda u: sp.Piecewise((u ** 2, sp.tan(u) > 0), (0, True)))
+
+
+@pytest.mark.parametrize("law, right", [
+    (lambda u: sp.sign(u) * u, 1.0),          # |u|: slopes -1 / +1
+    (lambda u: sp.Heaviside(u) * u, 1.0),     # slopes 0 / +1
+    (lambda u: sp.Abs(u), 1.0),
+    (lambda u: sp.frac(u + 0.25), 1.0),       # frac / Mod through floor
+    (lambda u: sp.Mod(u + 0.25, 2), 1.0),
+])
+def test_allow_nonsmooth_jacobian_at_a_kink_is_the_right_hand_slope(law, right):
+    dev = _kinked(law, allow_nonsmooth=True)
+    J = dev.eval([0.0, 0.0])[2][0, 0]
+    assert J == pytest.approx(1e-3 * right + 1e-9, rel=1e-12, abs=0)
+
+
+def test_strings_and_complex_laws_are_refused():
+    a, k = xdev.pins("a", "k")
+    with pytest.raises(sp.SympifyError):          # never eval'd as Python
+        xdev.compile("strlaw", [a, k], ["1+1", "0"])
+    with pytest.raises(sp.SympifyError):
+        xdev.compile("strinit", [a, k], [a - k, k - a],
+                     update={xdev.state("S", init="__import__('os').getpid()"): 0})
+    G = xdev.params(G=(1.0, "S", 1e-9, 1.0))
+    with pytest.raises(ValueError, match="complex"):
+        xdev.compile("cplx", [a, k], [sp.sqrt(-G) * (a - k), -sp.sqrt(-G) * (a - k)])
+
+
 # ---- 4.4: the monotonicity scan --------------------------------------------
 
 def test_scan_monotone_finds_the_langevin_cancellation_near_zero():

@@ -218,6 +218,11 @@ def _proves_c1(sp, pw, unknowns) -> bool:
             sols = sp.solve(g, s)
         except (NotImplementedError, ValueError, TypeError):
             continue
+        # affine in s: exactly one boundary point per line (solve() returns
+        # ONE root of tan(u) and would "prove" a jump at u = pi)
+        slope = sp.diff(g, s)
+        if slope == 0 or s in slope.free_symbols:
+            continue
         if len(sols) != 1 or s in sols[0].free_symbols:
             continue
         checks = [d] + [sp.diff(d, y) for y in unknowns]
@@ -256,18 +261,30 @@ def _lint(sp, expr, unknowns) -> list:
 def _to_piecewise(sp, expr):
     """Non-smooth functions as Piecewise, so their derivative is the derivative
     of the branch the value takes (a one-sided Jacobian, consistent)."""
+    def two_piece(e):
+        z = e.args[0]
+        if isinstance(e, sp.sign):        # the right-hand value at 0 (SymPy's is 0)
+            return sp.Piecewise((-1, z < 0), (1, True))
+        if isinstance(e, sp.Heaviside):   # likewise (SymPy's H(0) is 1/2)
+            return sp.Piecewise((0, z < 0), (1, True))
+        return e.rewrite(sp.Piecewise)
+
+    expr = expr.replace(lambda e: isinstance(e, sp.frac),
+                        lambda e: e.args[0] - sp.floor(e.args[0]))
+    expr = expr.replace(lambda e: isinstance(e, sp.Mod),
+                        lambda e: e.args[0] - e.args[1] * sp.floor(e.args[0] / e.args[1]))
     kinds = (sp.Abs, sp.sign, sp.Max, sp.Min, sp.Heaviside)
-    return expr.replace(lambda e: isinstance(e, kinds),
-                        lambda e: e.rewrite(sp.Piecewise))
+    return expr.replace(lambda e: isinstance(e, kinds), two_piece)
 
 
 def _diff(sp, expr, x):
     d = sp.diff(expr, x)
-    # floor / ceiling / frac / Mod are piecewise constant (+ identity): their
-    # derivative away from the jump is 0 (frac, Mod: the identity part stays)
+    # floor / ceiling are piecewise constant: derivative 0 away from the jump
+    # (frac and Mod were rewritten through floor before this)
     d = d.replace(lambda e: isinstance(e, sp.Derivative)
                   and isinstance(e.expr, (sp.floor, sp.ceiling)), lambda e: sp.S.Zero)
-    if d.has(sp.Derivative) or d.has(sp.DiracDelta):
+    d = d.replace(lambda e: isinstance(e, sp.Subs), lambda e: e.doit())  # chain rule wrapper
+    if d.has(sp.Derivative, sp.Subs, sp.DiracDelta):
         raise XdevError(f"xdev: cannot differentiate {expr} by {x} in closed form")
     return d
 
@@ -294,6 +311,14 @@ def _printer(sp):
             raise XdevError("xdev: the law evaluates to an infinity symbolically")
 
         _print_NegativeInfinity = _print_ComplexInfinity = _print_NaN = _print_Infinity
+
+        def _print_Subs(self, e):       # StrPrinter would print them as text
+            raise XdevError(f"xdev: unevaluated calculus cannot be emitted: {e}")
+
+        _print_Derivative = _print_Integral = _print_Subs
+
+        def _print_ImaginaryUnit(self, e):
+            raise XdevError("xdev: the law is complex-valued (I appears); a device law is real")
 
         # SymPy rewrites coth as (e^x + e^-x)/(e^x - e^-x): a cancellation of
         # its own near 0. The reciprocals of the C functions are accurate.
@@ -361,7 +386,7 @@ def _accurate(sp, e):
 def _emit_body(sp, printer, assigns) -> str:
     """CSE over the (target, expression) pairs, then C statements."""
     if not assigns:
-        return ""
+        return "", ""
     exprs = [_accurate(sp, e) for _, e in assigns]
     temps, reduced = sp.cse(exprs, symbols=sp.numbered_symbols("t"), order="canonical")
     decls, stmts = [], []
@@ -432,6 +457,8 @@ class Device:
             raise XdevError(f"xdev: {self.name}: unknown parameter(s) {sorted(given)}")
         P = (ctypes.c_double * max(len(p), 1))(*p)
         ns = d.n_state
+        if state is not None and len(state) != ns:
+            raise XdevError(f"xdev: {self.name}: state needs {ns} values, got {len(state)}")
         S = (ctypes.c_double * max(ns, 1))(*(list(state) if state is not None else [0.0] * ns))
         ctx = _Ctx(ctypes.sizeof(_Ctx), 0, 0.0, P, S if ns else None, None)
         f = np.zeros(R)
@@ -485,8 +512,8 @@ def compile(name: str, pins: Sequence, f: Sequence, q: Sequence | None = None, *
     if len(set(unk)) != len(unk) or not pins:
         raise XdevError(f"xdev: {name}: at least one pin, and no unknown twice")
     R = len(unk)
-    f = [sp.sympify(e) for e in f]
-    q = [sp.sympify(e) for e in (q if q is not None else [0] * R)]
+    f = [sp.sympify(e, strict=True) for e in f]
+    q = [sp.sympify(e, strict=True) for e in (q if q is not None else [0] * R)]
     if len(f) != R or len(q) != R:
         raise XdevError(f"xdev: {name}: f and q need {R} rows (pins, then internal "
                          f"unknowns); got {len(f)} and {len(q)}")
@@ -494,11 +521,11 @@ def compile(name: str, pins: Sequence, f: Sequence, q: Sequence | None = None, *
     for s in update:
         if not (isinstance(s, ns["Var"]) and s.xkind == "s"):
             raise TypeError(f"xdev: {name}: update keys must come from xdev.state, got {s!r}")
-    update = {s: sp.sympify(e) for s, e in update.items()}
+    update = {s: sp.sympify(e, strict=True) for s, e in update.items()}
     outs = {}
     for k, v in (outputs or {}).items():
         e, unit = v if isinstance(v, tuple) else (v, "")
-        outs[_check_name("output", k)] = (sp.sympify(e), _check_unit(k, unit))
+        outs[_check_name("output", k)] = (sp.sympify(e, strict=True), _check_unit(k, unit))
 
     # every symbol must be one of ours
     every = set()
@@ -518,7 +545,7 @@ def compile(name: str, pins: Sequence, f: Sequence, q: Sequence | None = None, *
     for s in sts:
         if s not in update:
             raise XdevError(f"xdev: {name}: state {s.name!r} needs an update expression")
-        init = sp.sympify(s.meta)
+        init = sp.sympify(s.meta, strict=True)
         if init.free_symbols - set(unk) - {v for v in init.free_symbols if getattr(v, "xkind", None) == "p"}:
             raise XdevError(f"xdev: {name}: the init of state {s.name!r} may use only the "
                              "unknowns and parameters")
@@ -561,7 +588,7 @@ def compile(name: str, pins: Sequence, f: Sequence, q: Sequence | None = None, *
     sub[ns["h"]] = sp.Symbol("h", positive=True)
 
     def c(e):
-        return sp.sympify(e).xreplace(sub)
+        return sp.sympify(e, strict=True).xreplace(sub)
 
     pr = _printer(sp)
     probe = dict(probe or {})
@@ -603,7 +630,7 @@ def compile(name: str, pins: Sequence, f: Sequence, q: Sequence | None = None, *
     init_fn = accept_fn = outputs_fn = "NULL"
     if sts:
         src.append(_c_function(sp, pr, "init_", ["double *state"], bool(prm), False,
-                               [(f"state[{k}]", c(sp.sympify(s.meta)))
+                               [(f"state[{k}]", c(sp.sympify(s.meta, strict=True)))
                                 for k, s in enumerate(sts)]))
         src.append(_c_function(sp, pr, "accept_", ["double h", "double *state"], bool(prm),
                                True, [(f"state[{k}]", c(update[s]))
@@ -724,6 +751,16 @@ def _find_model(lib: str, model: str | None):
     if d.abi_version != _ABI:
         raise XdevError(f"xdev: {lib}: model {d.name.decode()!r} speaks ABI "
                          f"{d.abi_version}, not {_ABI}")
+    rows = d.n_pins + d.n_internal
+    missing = [nm for nm, bad in (
+        ("struct_size", d.struct_size < ctypes.sizeof(_Desc)), ("eval", not d.eval),
+        ("pin_names", d.n_pins and not d.pin_names), ("fields", d.n_fields and not d.fields),
+        ("f pattern", d.nnz_f and not (d.f_rows and d.f_cols)),
+        ("q pattern", d.nnz_q and not (d.q_rows and d.q_cols)),
+        ("probe box", rows and not (d.probe_lo and d.probe_hi))) if bad]
+    if missing:
+        raise XdevError(f"xdev: {lib}: model {d.name.decode()!r} has a malformed "
+                        f"descriptor ({', '.join(missing)})")
     return cdll, d
 
 

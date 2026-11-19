@@ -250,7 +250,7 @@ refused with the offending sub-expression. A function of parameters only
 (`Abs(G)·v`, `Piecewise((…, BV > 0), (0, True))`) is no kink in the
 unknowns and is accepted. A `Piecewise` is accepted as C¹ — and the model
 keeps its SMOOTH claim — when it has two pieces, its condition is one
-relational that SymPy solves for one unknown, and the two pieces agree in
+relational affine in one unknown (one boundary point per line), and the two pieces agree in
 value and in gradient on that boundary (proved with `simplify`): the
 tangent continuation above is such a case. Anything else (three pieces, an
 `And`, a boundary SymPy cannot solve, a proof `simplify` cannot close) is
@@ -258,7 +258,8 @@ refused: the proof is conservative. `allow_nonsmooth=True` accepts the law;
 the model then does not claim SMOOTH, the non-smooth functions are written
 as `Piecewise`, and the Jacobian is the derivative of the branch the value
 takes (one-sided at a kink, which the registration check accepts for a
-model without the claim). Two kinks at the same point may take opposite
+model without the claim; `sign` and `Heaviside` take their right-hand value
+at the jump, `frac` and `Mod` go through `floor`). Two kinks at the same point may take opposite
 sides there (SymPy orders `Max`'s arguments canonically).
 
 **Monotonicity.** The lint sees constructs, not rounding. A law written
@@ -278,7 +279,9 @@ your process. Names that reach the C (model, pins, parameters, states,
 outputs) must match `[A-Za-z][A-Za-z0-9_]*` (≤ 63 characters) and not be C
 keywords (nor `near` / `far`); units are ≤ 32 characters of letters,
 digits, space and `_ . / * ^ ( ) % + -`; expressions reach the C only
-through SymPy's printer from SymPy objects (no user text is pasted); the
+through SymPy's printer from SymPy objects (a string law is refused, never
+evaluated: `sympify(strict=True)`; no user text is pasted; unevaluated
+`Derivative` / `Subs` and complex values are refused before printing); the
 compiler runs from an argument list, never a shell; the cache rules above
 apply unchanged.
 
