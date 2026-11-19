@@ -605,8 +605,21 @@ direction and sub-step count), `coss_history` (3), `lauritzen_history`
   post-edge ones, and the fixed engine refuses it by name (started from
   that pair it rang and aborted at the next edge). TR-BDF2 resumes from
   it.
-* `engine='dsed'` has no snapshot of its own and refuses `resume_from=`
-  by name.
+* `engine='dsed'` (`'exact'`) writes a snapshot on its event-driven
+  integrator (the one diodes, loss ports and controllers use; pass
+  `integrator='rk45'` for a circuit that would otherwise run on `'auto'`):
+  the reduced state, the mode and the schedule position travel in the
+  controller block with kind 3 (no new pickle field), the loss tracker's
+  state in field 17, the control ticks' grid in fields 15-16. A resume at
+  an instant the uninterrupted run also stops at (a gate edge, a located
+  event, a control tick) continues it bit for bit on one machine; a split
+  mid-interval takes another step grid until the next gate edge, so the
+  two agree to rounding. `t_end` is absolute and `t_start` must be 0 or the
+  snapshot's `t`. A pwl / trbdf2 snapshot resumes on it where its full
+  state is one state of its stamped mode (the modes are decided at `t` as
+  at a start); its snapshot is refused by name on pwl and trbdf2 (no
+  companion history to continue from), as is an in-loop recorder's state
+  on it.
 * An invalid snapshot, or one whose device layout does not match the
   circuit, is refused by name (the first block that differs) rather
   than resumed from zero. A snapshot without a layout (2.0 pickle,

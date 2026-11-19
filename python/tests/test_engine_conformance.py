@@ -989,11 +989,18 @@ def test_two_closed_loops_on_dsed():
     assert list(r.control_tick_counts) == [200, 20]
 
 
-def test_resume_from_refused_on_dsed():
-    snap = _sim("pwl").final_snapshot
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim("dsed", resume_from=snap)
-    assert ei.value.feature == "resume_from"
+def test_an_exact_engine_snapshot_is_refused_by_name_on_pwl_and_trbdf2():
+    # session 24: the exact engine writes a snapshot (controller kind 3) the
+    # trapezoidal engines cannot continue (no companion history)
+    snap = _sim("dsed", integrator="rk45").final_snapshot
+    assert snap.valid and snap.controller_state[0] == 3
+    for eng in ("pwl", "trbdf2"):
+        with pytest.raises(p.UnsupportedError) as ei:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                p.simulate(_rc(), 4e-3, engine=eng, resume_from=snap,
+                           **({"dt": 1e-6} if eng == "pwl" else {}))
+        assert ei.value.feature == "resume_from"
 
 
 def test_refusal_is_a_value_error_and_carries_four_fields():

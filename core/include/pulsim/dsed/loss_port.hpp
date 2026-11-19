@@ -24,6 +24,7 @@
 // or heat node (the temperature loop: the exact step has no input for the
 // heat; DECISIONS session 23), a V_on conduction table (not a quadratic form),
 // time-varying sources (the closed form takes the mode's constant input).
+// A resumed run restores the tracker's state (pickle field 17) in place of begin.
 // With no loss port nothing here is built: the run is unchanged.
 
 #include "pulsim/dsed/period_integrals.hpp"
@@ -101,7 +102,7 @@ public:
 
     void attach(events::StepHooks& h) {
         h.on_start([this](const Vector& x0, const MaskT& m0) {
-            lt_.begin(full_(Real{0}, x0, m0), m0);
+            if (!resumed_) lt_.begin(full_(Real{0}, x0, m0), m0);
             n_seen_ = ad_.reinit_log().size();   // the start's records: not a commutation (as pwl)
             x_last_ = x0;
             started_ = true;
@@ -123,6 +124,18 @@ public:
             x_last_ = x1;
             flush_(t1);
         });
+    }
+
+    /// A resumed run continues the snapshot's ledgers (pickle field 17): the
+    /// tracker's state replaces `begin` at the run's start.
+    void restore(const std::vector<Real>& s) {
+        lt_.restore(s);
+        resumed_ = true;
+    }
+    /// The tracker's state at the run's end (every event booked first).
+    [[nodiscard]] std::vector<Real> save() {
+        flush_(std::numeric_limits<Real>::infinity());
+        return lt_.save();
     }
 
     template <class Out>
@@ -265,6 +278,7 @@ private:
     Eigen::MatrixXcd P2_;
     Vector x_last_;   // the next step's start: the last step's end or an event's right limit
     bool started_ = false;
+    bool resumed_ = false;
 };
 
 }  // namespace pulsim::dsed

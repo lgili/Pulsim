@@ -2845,13 +2845,15 @@ def simulate(
                 "or a SolverSnapshot() built by hand and never "
                 "populated). Resuming from it would start from zero "
                 "without saying so.")
-        if engine == "dsed":
+        _cs = resume_from.controller_state
+        if engine != "dsed" and _cs is not None and _cs[0] == 3:
             raise _unsupported(
-                "dsed", "resume_from",
-                'simulate(engine="dsed"): resume_from is not supported '
-                "by the event-driven engine, which has no snapshot of "
-                'its own; use engine="pwl" (exact resume) or '
-                'engine="trbdf2" / "auto" (resume to tolerance).')
+                engine, "resume_from",
+                f"simulate(engine={engine!r}, resume_from=...): the snapshot was "
+                "written by the exact engine, whose state has no companion "
+                "history (the trapezoidal i_C / v_L this engine's step needs), so "
+                "it does not map one to one onto this engine's state. Resume with "
+                "engine='dsed'.")
     _ic_from_builder = False
     # A snapshot IS the state: builder ICs (i0=/c0=) must not be
     # synthesised alongside it, or the engines re-seed the stateful
@@ -2935,8 +2937,7 @@ def simulate(
             "enable_newton_line_search": enable_newton_line_search,
             "enable_newton_lm": enable_newton_lm,
             "newton_roundoff_budget": newton_roundoff_budget,
-            "should_continue": should_continue,
-            "resume_from": resume_from})
+            "should_continue": should_continue})
         if _offending:
             raise _unsupported(
                 "dsed", _offending[0],
@@ -2964,7 +2965,25 @@ def simulate(
                 "simulate(engine='dsed', sensitivities=...) with controllers: "
                 "the sensitivity run has no control ticks, so the loop would "
                 "run open. Drop sensitivities or the controllers.")
-        if _plan.ticks and float(t_start) != 0.0:
+        if sensitivities is not None and resume_from is not None:
+            raise _unsupported(
+                "dsed", "resume_from",
+                "simulate(engine='dsed', sensitivities=..., resume_from=...): the "
+                "sensitivity run starts from t = 0 and carries no snapshot. Drop "
+                "one of them.")
+        if (resume_from is not None and _plan.ticks
+                and len(_resume_tick_origins(resume_from, len(_plan.ticks)))
+                != len(_plan.ticks)):
+            # without the first run's grid the ticks would restart at the
+            # snapshot's t: the controllers would leave their grid silently
+            raise _unsupported(
+                "dsed", "resume_from",
+                f"simulate(engine='dsed', resume_from=...): this run has "
+                f"{len(_plan.ticks)} control tick source(s) and the snapshot "
+                f"carries the grid of {len(list(resume_from.tick_origin))}: the "
+                "ticks cannot continue the first run's grid. Resume with the "
+                "controllers of the run that wrote the snapshot.")
+        if _plan.ticks and float(t_start) != 0.0 and resume_from is None:
             raise _unsupported(
                 "dsed", "step_observer",
                 "simulate(engine='dsed', t_start != 0) with controllers: the "
@@ -3017,7 +3036,11 @@ def simulate(
                 allow_implicit_segments=bool(allow_implicit_segments),
                 ticks=[(f, p, o) for (f, p), o in zip(
                     _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
+                resume_from=resume_from,
+                tick_origins=_resume_tick_origins(resume_from, len(_plan.ticks)),
+                tick_next_k=_resume_tick_next_k(resume_from, len(_plan.ticks)),
             )
+            _save_control_state(_plan.graphs, _dsed_res)
         try:
             _dsed_res._preflight = _preflight_report
             _dsed_res._run_plan = _run_plan

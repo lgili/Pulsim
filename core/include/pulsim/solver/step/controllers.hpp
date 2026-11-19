@@ -31,7 +31,9 @@ namespace pulsim::step {
 /// controller's layout (see its `save`). Empty = no controller state:
 /// the resumed controller starts from its initial step.
 struct ControllerState {
-    enum class Kind : std::uint8_t { None = 0, Fixed = 1, Lte = 2 };
+    /// Exact: the exact engine's committed instant (dsed::ExactResumeState::
+    /// flatten; its step memory and schedule position), read by engine='dsed' only.
+    enum class Kind : std::uint8_t { None = 0, Fixed = 1, Lte = 2, Exact = 3 };
     Kind kind = Kind::None;
     std::vector<Real> v;
     [[nodiscard]] bool empty() const noexcept { return kind == Kind::None; }

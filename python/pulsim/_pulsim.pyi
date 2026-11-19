@@ -2060,6 +2060,10 @@ class SimulationResult:
         """
         The exact engine's loss records (dsed loss port).
         """
+    def _set_final_snapshot(self, snapshot: SolverSnapshot) -> None:
+        """
+        The exact engine's end-of-run snapshot (dsed).
+        """
     def _set_run_info(self, engine: str, grid: GridKind, stats: dict[typing.Any, typing.Any]) -> None:
         """
         Adapter use only: set the grid kind and the run statistics.
@@ -2859,7 +2863,7 @@ class SolverSnapshot:
     @property
     def controller_state(self) -> typing.Any:
         """
-        The step-size controller's state (step::ControllerState): ``(kind, values)`` with kind 1 = fixed, 2 = LTE (TR-BDF2; layout [h, h_mem_gate0, h_mem_gate1, pending_gate_slot, diode_slot, gate_parity, h_mem_diode...]), or None: the resumed engine then restarts its controller.
+        The step-size controller's state (step::ControllerState): ``(kind, values)`` with kind 1 = fixed, 2 = LTE (TR-BDF2; layout [h, h_mem_gate0, h_mem_gate1, pending_gate_slot, diode_slot, gate_parity, h_mem_diode...]), 3 = the exact engine's committed instant (reduced state, schedule position, step memory; engine='dsed' resumes from it, the others refuse it), or None: the resumed engine then restarts its controller.
         """
     @property
     def coss_history(self) -> list[float]:
@@ -4595,7 +4599,7 @@ def run_ped_native(system: typing.Any, switch_fn: typing.Any, x0: typing.Annotat
     """
     Native PEDSimulator (DOPRI5 + adaptive PI + event scan) running the C++ scheduler inner loop. `system` and `switch_fn` are still invoked via Python callbacks per step (GIL overhead), but the scheduler control flow runs natively. Returns a dict with times, states, n_accept, n_reject, n_events, cpu_time_seconds, event_log.
     """
-def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, store_every: int = 1, enable_event_projection: bool = True, event_log: bool = True, mode_shadow_h_e: float = 0.0, mode_lcp_h_e: float = 0.0, mode_guard_h_e: float = 0.0, mode_guard_refuse: bool = False, settle_round_cap: int = 64, diode_law_rel: float = 0.001, tick_periods: collections.abc.Sequence[float] = [], tick_offsets: collections.abc.Sequence[float] = [], tick_fns: collections.abc.Sequence[typing.Any] = [], tick_monitors: collections.abc.Sequence[bool] = []) -> dict[typing.Any, typing.Any]:
+def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, store_every: int = 1, enable_event_projection: bool = True, event_log: bool = True, mode_shadow_h_e: float = 0.0, mode_lcp_h_e: float = 0.0, mode_guard_h_e: float = 0.0, mode_guard_refuse: bool = False, settle_round_cap: int = 64, diode_law_rel: float = 0.001, tick_periods: collections.abc.Sequence[float] = [], tick_offsets: collections.abc.Sequence[float] = [], tick_fns: collections.abc.Sequence[typing.Any] = [], tick_monitors: collections.abc.Sequence[bool] = [], resume: SolverSnapshot | None = None, tick_origins: collections.abc.Sequence[float] = [], tick_next_k: collections.abc.Sequence[int] = []) -> dict[typing.Any, typing.Any]:
     """
     Bridge.11 — native PEDSimulator (DOPRI5) over a NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all execute in C++ without GIL roundtrips; the only Python callback is `switch_fn` at gate edges (rare). v2.0 Phase 3: PWL diodes are commutated by auto-derived event predicates on the reconstructed branch voltage, and every event projects the state onto the new mode's slow manifold (consistent reinitialization; pass enable_event_projection=False for the raw pre-projection behaviour).
     """

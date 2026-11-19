@@ -58,6 +58,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/cache.hpp"
+#include "pulsim/solver/result.hpp"
 #include "pulsim/dsed/time_eps.hpp"
 #include "pulsim/events/mode_selector.hpp"
 #include "pulsim/sources/native_pwm_switch_fn.hpp"
@@ -1320,7 +1321,10 @@ void init_module(py::module_& m) {
            std::vector<Real> tick_periods,
            std::vector<Real> tick_offsets,
            std::vector<py::object> tick_fns,
-           std::vector<bool> tick_monitors) {
+           std::vector<bool> tick_monitors,
+           const pulsim::solver::SolverSnapshot* resume,
+           std::vector<Real> tick_origins,
+           std::vector<std::uint64_t> tick_next_k) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             // add-unified-event-queue group 3: control ticks on the
             // scheduler's queue; each gets the full MNA state.
@@ -1357,6 +1361,7 @@ void init_module(py::module_& m) {
             // cascade settles instantaneous consequences (a buck's
             // freewheel diode at gate-off).
             std::vector<pulsim::dsed::SchedulerDiode> sched_diodes;
+            std::vector<pulsim::Size> diode_sw;   // census order (the snapshot's mask)
             pulsim::topology::SwitchStateMask diode_owned{0};
             {
                 pulsim::pwl::DiodeEventState census(
@@ -1377,6 +1382,7 @@ void init_module(py::module_& m) {
                         shorted.reset();   // compute_lti_state_space refuses it by name
                     }
                     for (const auto& d : census.entries()) {
+                        diode_sw.push_back(d.switch_idx);
                         std::string label =
                             pulsim::pwl::branch_label(
                                 adapter.graph(), d.branch_id);
@@ -1487,6 +1493,9 @@ void init_module(py::module_& m) {
                 for (std::size_t j = 0; j < tick_periods.size(); ++j) {
                     plan.rates.push_back(pulsim::events::Rate{
                         tick_periods[j], tick_offsets.empty() ? Real{0} : tick_offsets[j]});
+                    // a resume continues the first run's grid (its origin and index)
+                    if (j < tick_origins.size()) plan.rates.back().origin = tick_origins[j];
+                    if (j < tick_next_k.size()) plan.rates.back().k0 = tick_next_k[j];
                 }
                 plan.monitor = tick_monitors;   // empty = every rate a ControlTick
                 plan.fn = [&adapter, &tick_cbs](std::uint32_t j, const pulsim::events::TickInfo&,
@@ -1524,12 +1533,62 @@ void init_module(py::module_& m) {
                 loss->attach(loss_hooks);
                 sim.set_hooks(&loss_hooks);
             }
+            // session 24: resume at a snapshot's committed instant
+            using ResumeT = pulsim::dsed::ExactResumeState<pulsim::topology::SwitchStateMask>;
+            std::optional<ResumeT> rs;
+            const auto n_sw = static_cast<pulsim::Size>(adapter.graph().num_switches());
+            if (resume != nullptr) {
+                if (resume->controller.kind == pulsim::step::ControllerState::Kind::Exact) {
+                    rs = ResumeT::unflatten(resume->controller.v);
+                    if (rs->x.size() != x0.size()) {
+                        throw std::invalid_argument(
+                            "dsed(resume_from=...): the snapshot belongs to a different "
+                            "circuit: its exact-engine state has "
+                            + std::to_string(rs->x.size()) + " entries, this circuit's "
+                            + std::to_string(x0.size()));
+                    }
+                } else {   // another engine's snapshot: x0 is its state, reduced
+                    rs.emplace();
+                    rs->t = resume->t;
+                    rs->x = x0;
+                    rs->decide = true;
+                }
+                if (resume->stamped_mask.size() != n_sw) {
+                    throw std::invalid_argument(
+                        "dsed(resume_from=...): the snapshot's stamped mask has "
+                        + std::to_string(resume->stamped_mask.size())
+                        + " bits, this circuit has " + std::to_string(n_sw)
+                        + " switch-kind branches");
+                }
+                pulsim::topology::SwitchStateMask m(n_sw);
+                for (pulsim::Size i = 0; i < n_sw; ++i) m.set(i, resume->stamped_mask[i]);
+                rs->mask = m;
+                rs->diode_bits = m;   // only the owned bits are read
+                if (loss && !resume->loss_state.empty()) loss->restore(resume->loss_state);
+            }
             // Release the GIL during simulate(); the C++ scheduler
             // only re-acquires it at gate edges to call switch_fn.
             py::gil_scoped_release release;
-            auto res = sim.simulate(x0, t_end);
+            auto res = sim.simulate(x0, t_end, rs ? &*rs : nullptr);
             py::gil_scoped_acquire acquire;
             auto d = ped_result_to_dict(res, event_log);
+            {   // the end instant as a snapshot (pickle version 5; field 14 kind Exact)
+                const auto& f = sim.final_state();
+                pulsim::solver::SolverSnapshot snap;
+                snap.t = f.t;
+                if (!(adapter.current_mask() == f.mask)) adapter.set_mask(f.mask);
+                snap.x = adapter.recover_full(f.t, f.x);
+                snap.stamped_mask.resize(n_sw);
+                for (pulsim::Size i = 0; i < n_sw; ++i) snap.stamped_mask[i] = f.mask.get(i);
+                for (const auto sw : diode_sw) snap.mask.push_back(f.mask.get(sw));
+                snap.controller.kind = pulsim::step::ControllerState::Kind::Exact;
+                snap.controller.v = f.flatten();
+                snap.tick_origin = sim.tick_origins();
+                snap.tick_next_k = sim.tick_next_k();
+                if (loss) snap.loss_state = loss->save();
+                snap.valid = true;
+                d["final_snapshot"] = py::cast(std::move(snap));
+            }
             if (loss) {
                 struct {
                     std::vector<pulsim::thermal::DeviceLossRecord> device_losses;
@@ -1595,6 +1654,9 @@ void init_module(py::module_& m) {
         py::arg("tick_offsets") = std::vector<Real>{},
         py::arg("tick_fns") = std::vector<py::object>{},
         py::arg("tick_monitors") = std::vector<bool>{},
+        py::arg("resume") = static_cast<const pulsim::solver::SolverSnapshot*>(nullptr),
+        py::arg("tick_origins") = std::vector<Real>{},
+        py::arg("tick_next_k") = std::vector<std::uint64_t>{},
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "
