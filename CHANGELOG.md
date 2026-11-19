@@ -6,6 +6,86 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration batch 14b-1: machines leftovers, TR-BDF2 tracks 9–10, device interface 4, ideal switch 6–7 merged
+
+* **Changed** the MNA PMSM and induction-machine flux rows use the
+  increment form (λ − λ_n from the step's increment, rebased on resume):
+  no dt retries at 10 ns / 1 ns steps near full flux. Machine numbers
+  move by round-off (≤ 2.6e-9 absolute on the stateful PMSM cells).
+* **Added** a DC operating point with held mechanics for the MNA machines
+  (`omega0` / `theta0`, also as YAML keys); YAML types `pmsm` and `bldc`;
+  `SimulationResult.gate_states` (the gate record of gated devices); the
+  snapshot mask carries one gate bit per gated device (either length
+  restores).
+* **Added** `mode_selection='shadow' | 'lcp'` on `engine='trbdf2'` (was
+  refused); the default stays off.
+* **Fixed** trbdf2: a Newton circuit from a zero start aborted at t = 0
+  (one retry from the step's linear solve, counted in
+  `n_newton_start_retries`); a gate edge within 64 h_min of `t_end` is
+  not landed when nothing in the gap needs it (no final sliver).
+* **Added** `device_path='interface'` runs the Lauritzen diode and the
+  IGBT tail (local rows), and the gated diode with its gate bit; the
+  default stays `'legacy'`.
+* **Changed** the `SolverSnapshot` reader also loads the device-interface
+  branch's last version-4 layout (15 fields: marker, grid, controller).
+
+### Ideal switch 7: loss and thermal summaries of ideal elements, references with an uncertainty (no default flipped)
+
+* **Fixed** `device_thermal_summary` dropped a branch-form switch / diode
+  silently (its `g_on` is infinite). It now reports it (`form='branch'`,
+  `P_cond_avg` from the solved `v·i`, 0 W for an ideal element,
+  `P_impulse_avg`) and heats it with the impulsive re-initialisation
+  energy as a constant offset.
+* **Changed** `device_loss_summary` gives every ideal (`R_on = 0`)
+  branch-form element the impulsive category (`E_impulse_total`, `n_impulses`, `P_impulse_avg`)
+  even when nothing was booked to it (0). On a device with a kernel loss
+  port and booked impulsive energy the entry carries `impulse_in_junction=False` and a
+  `RuntimeWarning` says the port's junction does not get that energy
+  (known limitation).
+* **Changed** `add_switch` / `add_diode(form='branch')` refuse `R_on`
+  together with `g_on` (`ValueError`); `g_on` used to be dropped.
+* **Changed** (harness) the edge diagnostic of `differential_runner` is
+  symmetric in the two traces (`metrics.err_rms_symmetric`); the gate is
+  unchanged. `REFERENCE_STATUS.md` edge column regenerated.
+* **Changed** (harness) `ideal_switch_flip_evidence.py`: one command for
+  every variant, resumable (`--resume DIR`); ideal-twin references must
+  show their convergence (two tools refined, Richardson estimate with the
+  measured order) and every reference states its uncertainty.
+* **Performance** `mode_selection='lcp'`: the mode selector keeps its
+  hybrid-LCP factor, its widened-pass pivots and its driving-point
+  resistances while their inputs repeat bit for bit. Results unchanged
+  (bit-identical on the 102 reference cells); NPC three-level ~4.8x →
+  ~2.0-2.4x the default, boost PFC ~1.8x → ~1.5x.
+
+### Ideal switch 6: `form=` on every switch / diode creator, `mode_selection='auto'` (no default flipped)
+
+* **Added** `form='conductance' | 'branch'` (default `'conductance'`,
+  unchanged numbers) on `add_switch`, `add_mosfet`,
+  `add_mosfet_with_body_diode`, `add_igbt` (not with
+  `reverse_blocking=True`: a gated diode has no branch form),
+  `add_mosfet_level1` / `add_igbt_level1` (their body / freewheel diode),
+  `add_bridge_rectifier`, `add_three_phase_vsi`, `add_buck`, `add_boost`,
+  `add_flyback`, and as `form:` on the YAML types `mosfet`,
+  `mosfet_with_body_diode`, `igbt`, `mosfet_level1`, `igbt_level1`.
+  `add_switch(form='branch')` takes `R_on` (default 0, the ideal switch;
+  a given `g_on` means `R_on = 1/g_on`) and `g_off` (default 0): the same
+  element as `add_ideal_switch`. A misspelt form is refused by name.
+* **BREAKING** `add_three_phase_vsi(R_on=0)` (or `R_d=0`) used to become
+  1 mOhm silently; it now raises (the conductance form needs a positive
+  resistance) unless `form='branch'`, where 0 is the ideal element.
+  `R_off <= 0` (which silently became 1 nS) is refused too.
+* **Added** `simulate(mode_selection='auto')`: `'lcp'` wherever it
+  applies, the legacy settle where `'lcp'` would refuse (no PWL diode, a
+  gated device, a Newton device, `engine='trbdf2'`, `sensitivities=`,
+  `max_event_iterations=0`); the choice and reason in
+  `result.diagnostics['mode_selection_auto']`, a warning only for
+  `max_event_iterations=0`. A failure of `'lcp'` during the run is not
+  caught. Not the default.
+* **Changed** the DC operating point of a circuit whose ideal
+  (`R_on = 0`) switch is closed at the start in a loop of voltage sources
+  and inductors is refused by name (`UnsupportedError`,
+  `feature='ideal_voltage_loop'`, the loop listed); it was a bare
+  `RuntimeError` after a solve of 1e13 A.
 ### Integration batch 14a: event queue 3, device interface 3, unified stepper 2, ideal switch 5, TR-BDF2 track 8 merged
 
 * **Changed** the `SolverSnapshot` pickle is version 5, one layout with

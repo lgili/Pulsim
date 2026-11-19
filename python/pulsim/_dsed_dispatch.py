@@ -650,6 +650,7 @@ def run_dsed_from_builder(
     ``opts.integrator``, and the NotImplementedError disappears.
     """
     import numpy as np
+    mode_auto = None   # mode_selection='auto' resolved: its record
 
     # ------------------------------------------------------------------
     # v2.0 Phase 3 — structural refusal, BEFORE any work happens.
@@ -916,6 +917,15 @@ def run_dsed_from_builder(
                 x0, ic_adjustment = native_adapter.reduced_initial_state(
                     builder)
             shadow_kw = {}
+            if mode_selection == "auto":
+                # 'lcp' where it applies (diodes), else the settle. A diode
+                # circuit always reaches here on rk45: 'auto' became 'rk45'
+                # and 'bdf2' was refused above (the census of _n_diodes).
+                from . import _mode_auto_record
+                if _n_diodes == 0:
+                    mode_selection, mode_auto = _mode_auto_record(None, "no_diodes")
+                else:
+                    mode_selection, mode_auto = _mode_auto_record("lcp", None)
             if mode_selection in ("shadow", "lcp") and (
                     opts.integrator != "rk45" or _n_diodes == 0):
                 raise unsupported(
@@ -964,6 +974,8 @@ def run_dsed_from_builder(
             res.initial_condition_adjustment = ic_adjustment
             res.control_tick_counts = [int(n) for n in native_res.get(
                 "control_tick_counts", ())]
+            if mode_auto is not None:
+                res.diagnostics["mode_selection_auto"] = mode_auto
             return res
         except (UnsupportedError, _InconsistentInitialState, ConvergenceError):
             # A refusal is an answer, not a reason to try the next
@@ -1011,6 +1023,10 @@ def run_dsed_from_builder(
             f"simulate(engine='dsed'): initial_state has shape {full_x0.shape}, "
             f"expected ({n_state},); a full-MNA vector is accepted only on the "
             "native adapter.")
+    if mode_selection == "auto":
+        from . import _mode_auto_record
+        mode_selection, mode_auto = _mode_auto_record(
+            None, "no_diodes")  # only reached without diodes (re-raised above)
     if mode_selection in ("shadow", "lcp"):
         raise unsupported(
             "dsed", "mode_selection", message=
@@ -1069,7 +1085,7 @@ def run_dsed_from_builder(
         times = [float(t) + float(opts.t_start) for t in times_arr]
         states = [np.asarray(states_arr[i], dtype=float)
                   for i in range(len(times))]
-        return _PEDSimulationResult(
+        out = _PEDSimulationResult(
             times=times,
             states=states,
             n_accept=native_res.get("n_accept", 0),
@@ -1080,6 +1096,9 @@ def run_dsed_from_builder(
             n_exact_steps=native_res.get("n_exact_steps", 0),
             cpu_time_seconds=native_res.get("cpu_time_seconds", 0.0),
         )
+        if mode_auto is not None:
+            out.diagnostics = {"mode_selection_auto": mode_auto}
+        return out
 
     # ---- No fallback. ----
     # The Bridge.11 native-builder path and the Bridge.10

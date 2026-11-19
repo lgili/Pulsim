@@ -504,11 +504,11 @@ class CircuitBuilder:
         """
         Add an IDEAL transformer: v_s = n*v_p, i_p = -n*i_s, n = N_s/N_p. The secondary is the branch (i(name) is its current); the primary is a node pair receiving the reflected current. It transforms DC -- add a magnetising inductance across the primary if the real device has one.
         """
-    def add_igbt(self, name: str, collector: str, emitter: str, R_on: float = 0.01, R_off: float = 1000000000.0, *, V_ce0: float = 0.0, reverse_blocking: bool | None = None, V_th: float = 0.0) -> CircuitBuilder:
+    def add_igbt(self, name: str, collector: str, emitter: str, R_on: float = 0.01, R_off: float = 1000000000.0, *, V_ce0: float = 0.0, reverse_blocking: bool | None = None, V_th: float = 0.0, form: str = 'conductance') -> CircuitBuilder:
         """
         Add a PWL IGBT (collector → emitter), its mask bit the gate. reverse_blocking=True: ON while the gate is on and i = (v_CE - V_ce0)/R_on > 0, turned on at v_CE >= max(V_th, V_ce0); conduction power V_ce0*i + R_on*i^2. reverse_blocking=False: a switch that conducts both ways (V_ce0 must be 0). Not given: False with a FutureWarning (True when V_ce0 > 0). V_ce0, R_on: a straight line through two points of the datasheet V_CE(I_C) curve. No anti-parallel diode: add_diode(..., V_f=...) separately.
         """
-    def add_igbt_level1(self, name: str, collector: str, emitter: str, gate: str, V_CE_sat: float = 1.5, R_CE_sat: float = 0.05, V_T: float = 5.0, kappa: float = 10.0, v_knee: float = 0.01, with_fwd: bool = False, tau_tail: float = 0.0, k_tail: float = 0.0, V_F: float = 0.7) -> CircuitBuilder:
+    def add_igbt_level1(self, name: str, collector: str, emitter: str, gate: str, V_CE_sat: float = 1.5, R_CE_sat: float = 0.05, V_T: float = 5.0, kappa: float = 10.0, v_knee: float = 0.01, with_fwd: bool = False, tau_tail: float = 0.0, k_tail: float = 0.0, V_F: float = 0.7, *, form: str = 'conductance') -> CircuitBuilder:
         """
         Add a 3-terminal IGBT Level 1 (linear-conduction model with cutoff sigmoid). Collector-emitter is a Nonlinear branch; gate is an ideal voltage reference (no gate current). On-state I_C = (V_CE-V_CE_sat) / R_CE_sat, clamped to I_C >= 0 with a knee of width `v_knee` — an IGBT is a minority-carrier device and cannot conduct in reverse. Pass `with_fwd=True` for the co-packaged anti-parallel freewheeling diode, which an inductive load needs: without it there is no path for the freewheeling current and the solve fails. `V_F` is that diode's CONDUCTION DROP (v = V_F + i/1e3 S while on; it turns on at V_F). The transient engines stamp the device per Newton iteration. `tau_tail`/`k_tail` add the TURN-OFF TAIL: when the gate falls below threshold the MOS channel cuts off in nanoseconds, but the carriers stored in the n- drift region can only recombine, and that tail is 40-70% of an IGBT's turn-off energy. `k_tail` is the fraction of on-state current still flowing just after cutoff and `tau_tail` its decay constant (0.1-10 us) — both read straight off a datasheet turn-off waveform, and they must be given together. They default to OFF, unlike the MOSFET's body diode, because NPT/PT/trench/field-stop parts differ by orders of magnitude, so any default would put a fabricated number in your loss report. The DC curve is unchanged either way.
         """
@@ -543,15 +543,15 @@ class CircuitBuilder:
         """
         Magnetic resistance R_m [S = A/V]: F = R_m*dPhi/dt, loss R_m*(dPhi/dt)^2 inside the solve (classical eddy loss; a lamination: R_m = sigma*d^2*l/(12*A)). Seen from a winding of N turns it is a resistance N^2/R_m across the winding.
         """
-    def add_mosfet(self, name: str, drain: str, source: str, R_on: float = 0.001, R_off: float = 1000000000.0, body_diode: bool = True, V_F: float = 0.7) -> CircuitBuilder:
+    def add_mosfet(self, name: str, drain: str, source: str, R_on: float = 0.001, R_off: float = 1000000000.0, body_diode: bool = True, V_F: float = 0.7, *, form: str = 'conductance') -> CircuitBuilder:
         """
         Add an n-channel power MOSFET: a controlled switch (drain → source) PLUS its intrinsic anti-parallel body diode (source → drain), named `<name>_body`, which is on by DEFAULT. No vertical power MOSFET exists without one, and a gate-off device in an inductive path has no freewheeling route without it. Pass `body_diode=False` for an eGaN HEMT (which conducts in reverse through the channel, not a p-n junction) or for a bare switch. Defaults: R_on=1mΩ, R_off=1GΩ, body V_F=0.7 V. V_F is the body diode's CONDUCTION DROP (add_diode's V_f): v_SD = V_F + i/1e3 S while on, and it turns on at V_F.
         """
-    def add_mosfet_level1(self, name: str, drain: str, source: str, gate: str, K: float, V_T: float, lambda_: float = 0.02, kappa: float = 15.0, with_body_diode: bool = True, V_F: float = 0.7) -> CircuitBuilder:
+    def add_mosfet_level1(self, name: str, drain: str, source: str, gate: str, K: float, V_T: float, lambda_: float = 0.02, kappa: float = 15.0, with_body_diode: bool = True, V_F: float = 0.7, *, form: str = 'conductance') -> CircuitBuilder:
         """
         Add a 3-terminal SH1 MOSFET (Shichman-Hodges Level 1). Cutoff/triode/saturation regions blended via sigmoid for C¹-smooth Newton convergence. K [A/V²], V_T [V], lambda_ [1/V] channel-length modulation, kappa [1/V] sigmoid sharpness. Drain → source is a Nonlinear branch; gate is a node reference (no gate current — ideal gate). The intrinsic anti-parallel body diode (source→drain, named `<name>_body`) is added BY DEFAULT — it is what carries the current when the gate is off and an inductive load would otherwise have no path. Set `with_body_diode=False` for an eGaN HEMT, which has no p-n body diode. `V_F` is the body diode's CONDUCTION DROP (v_SD = V_F + i/1e3 S while on; it turns on at V_F). The transient engines stamp the MOSFET each Newton iteration.
         """
-    def add_mosfet_with_body_diode(self, name: str, drain: str, source: str, R_on: float = 0.001, R_off: float = 1000000000.0, V_F: float = 0.7, g_on_diode: float = 1000.0, g_off_diode: float = 1e-09) -> CircuitBuilder:
+    def add_mosfet_with_body_diode(self, name: str, drain: str, source: str, R_on: float = 0.001, R_off: float = 1000000000.0, V_F: float = 0.7, g_on_diode: float = 1000.0, g_off_diode: float = 1e-09, *, form: str = 'conductance') -> CircuitBuilder:
         """
         Add an n-channel power MOSFET WITH intrinsic anti-parallel body diode. Adds TWO branches: switch (drain→source) + diode (source→drain). V_F is the body diode's CONDUCTION DROP (add_diode's V_f): v_SD = V_F + i/g_on_diode while on, and it turns on at V_F.
         """
@@ -645,9 +645,9 @@ class CircuitBuilder:
         """
         Add a sinusoidal AC voltage source. Output is v_dc + v_amplitude·sin(2π·f·t + φ). `phase` is in RADIANS. The time-varying value is automatically overlaid by run_transient — no b_extra_fn lambda needed. Used for AC mains analysis, rectifier studies, audio-amp testing.
         """
-    def add_switch(self, name: str, n_pos: str, n_neg: str, g_on: float, g_off: float) -> CircuitBuilder:
+    def add_switch(self, name: str, n_pos: str, n_neg: str, g_on: float | None = None, g_off: float | None = None, *, form: str = 'conductance', R_on: float | None = None) -> CircuitBuilder:
         """
-        Add a controlled switch (driven by switch_fn at simulation time).
+        Add a controlled switch (driven by switch_fn at simulation time). form='conductance' (default): g_on/g_off in siemens, both required. form='branch': its own current unknown, R_on >= 0 in series when closed (default 0 = ideal; a given g_on means R_on = 1/g_on), g_off >= 0 when open (default 0) — the same element as add_ideal_switch.
         """
     def add_thyristor(self, name: str, anode: str, cathode: str, R_on: float = 0.001, R_off: float = 1000000000.0, *, V_f: float = 0.0, I_H: float = 0.0, V_th: float = 0.0) -> CircuitBuilder:
         """
@@ -2004,7 +2004,10 @@ class SimulationResult:
     diagnostics: dict[str, typing.Any]
     """Complementarity mode-selection counters of a ``pwl`` run
     (``'mode_shadow'``, ``'mode_selection'``, ``'mode_guard'``): a copy of
-    ``mode_diagnostics``. Set by :func:`pulsim.simulate` on ``pwl``."""
+    ``mode_diagnostics``. Set by :func:`pulsim.simulate` on ``pwl``. With
+    ``mode_selection='auto'`` it also holds ``'mode_selection_auto'``
+    (``requested``, ``chosen`` ``'lcp'`` / ``'legacy'``, ``reason``), on
+    every engine."""
     control_tick_counts: list[int]
     """Controller ticks per tick source, in registration order (closed
     loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by
@@ -3780,6 +3783,10 @@ def _gated_capabilities() -> dict[typing.Any, typing.Any]:
 def _junction_fixed_point(on_pts: collections.abc.Sequence[typing.Annotated[collections.abc.Sequence[float], "FixedSize(2)"]], off_pts: collections.abc.Sequence[typing.Annotated[collections.abc.Sequence[float], "FixedSize(2)"]], on: LossTable3D, off: LossTable3D, period: float, p_fixed: float, r_th: float, t_amb: float, cond: ConductionTable, q1: float = 0.0, q2: float = 0.0, i_max: float = 0.0) -> dict[typing.Any, typing.Any]:
     """
     Smallest T_j >= t_amb with T_j = t_amb + r_th P(T_j), P the device's loss on a fixed orbit: p_fixed + (sum E_on + sum E_off) / period over the commutation points (|v|, |i|), plus a conduction table's (a q1 + b q2) / period. Returns runaway, tj, p, residual, slope (r_th dP/dT), evaluations, e_on, e_off, p_cond_table.
+    """
+def _lcp_circuit_refusal(arg0: Graph, arg1: DevicePool) -> tuple[str, str]:
+    """
+    (reason, device): why mode_selection='lcp' refuses this circuit on pwl — '' (it applies), 'no_diodes', 'gated', 'newton'. Read by mode_selection='auto'.
     """
 def _lcp_enumerate(M: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, n]"], q: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> tuple[int, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]]:
     """

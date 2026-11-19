@@ -123,7 +123,7 @@ struct DCOperatingPoint {
     const char* engine = "dc") {
     // Before the direct solve: its failure handler walks the cascade and
     // re-wraps every error as "no DC operating point".
-    require_no_dc_voltage_loop(graph, pool, opts.t_eval, engine);
+    require_no_dc_voltage_loop(graph, pool, opts.t_eval, engine, &user_mask);
 
     const bool has_diodes =
         diodes != nullptr && diodes->num_diodes() > 0;

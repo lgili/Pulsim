@@ -46,6 +46,7 @@ no special handling.
 from __future__ import annotations
 
 import math
+import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Union
@@ -735,6 +736,13 @@ def device_thermal_summary(
     * A Shockley diode (``add_shockley_diode``) dissipates
       ``v_D · i_D`` with ``i_D`` its exponential law at the recorded
       ``v_D``.
+    * A branch-form switch / diode (``form='branch'``, ``R_on >= 0``)
+      dissipates its solved ``v · i`` (0 W for an ideal one) plus its
+      impulsive re-initialisation energy as a constant offset
+      (``P_impulse_avg``, :func:`pulsim.losses.impulse_losses`); its entry
+      carries ``form='branch'`` and ``P_impulse_avg``. A kernel loss port
+      (``set_device_losses``) does not carry that energy into its own
+      junction (``device_loss_summary`` warns).
     """
     if not thermal_specs:
         return []
@@ -838,8 +846,32 @@ def device_thermal_summary(
         P_core_avg = float(loss.get("P_core_avg", 0.0))
         P_constant = P_sw_avg + P_core_avg
 
+        P_impulse_avg = None
         # Reconstruct P_cond(t) per kind.
-        if kind == "resistor":
+        if kind in ("switch", "diode") and desc.get("params", {}).get("branch_form"):
+            # A branch-form element has no conductance law: its conduction
+            # is the solved v·i (0 W for an ideal one, R_on = 0, V_f = 0) and
+            # its switching loss the impulsive category; both are what
+            # device_loss_summary reported for it (E_total, P_impulse_avg).
+            # The impulse is a constant offset, as P_sw_avg.
+            if "E_total" not in loss:
+                warnings.warn(
+                    f"device_thermal_summary: branch-form {kind} {name!r} has no "
+                    "entry in device_loss_summary (no branch current in this "
+                    "result); it is left out.", RuntimeWarning, stacklevel=2)
+                continue
+            col = int(builder.pool.branch_var_id_for_switch(bid, builder.graph))
+            from_id, to_id = desc.get("nodes", (None, None))
+            v_B = (_views.node_voltage_trace(states, int(from_id))
+                   - _views.node_voltage_trace(states, int(to_id)))
+            v_B_s = (_views.node_voltage_trace(states_s, int(from_id))
+                     - _views.node_voltage_trace(states_s, int(to_id)))
+            P_cond_t = v_B * states[:, col]
+            P_start_t = v_B_s * states_s[:, col]
+            E_cond = float(loss["E_total"])
+            P_impulse_avg = float(loss.get("P_impulse_avg", 0.0))
+            P_constant += P_impulse_avg
+        elif kind == "resistor":
             R = float(desc.get("params", {}).get("R_ohms", float("nan")))
             from_id, to_id = desc.get("nodes", (None, None))
             if not (np.isfinite(R) and R > 0) or from_id is None \
@@ -1013,7 +1045,10 @@ def device_thermal_summary(
         T = win.span if times.size > 1 else 1.0
         P_cond_avg = (float(E_cond) / T if T > 0 and times.size > 1
                       else float(P_cond_t.mean()))
+        extra = {} if P_impulse_avg is None else {"form": "branch",
+                                                  "P_impulse_avg": P_impulse_avg}
         out.append({
+            **extra,
             "branch_id": int(bid),
             "kind": kind,
             "name": name,

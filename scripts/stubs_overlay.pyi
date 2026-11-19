@@ -46,7 +46,10 @@ class SimulationResult:
     diagnostics: dict[str, typing.Any]
     """Complementarity mode-selection counters of a ``pwl`` run
     (``'mode_shadow'``, ``'mode_selection'``, ``'mode_guard'``): a copy of
-    ``mode_diagnostics``. Set by :func:`pulsim.simulate` on ``pwl``."""
+    ``mode_diagnostics``. Set by :func:`pulsim.simulate` on ``pwl``. With
+    ``mode_selection='auto'`` it also holds ``'mode_selection_auto'``
+    (``requested``, ``chosen`` ``'lcp'`` / ``'legacy'``, ``reason``), on
+    every engine."""
     control_tick_counts: list[int]
     """Controller ticks per tick source, in registration order (closed
     loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by

@@ -702,7 +702,7 @@ behind TR-BDF2 tracks 6-8, which took 24-33.)
     shown by a test: that the leg's residual is nonzero on a given
     platform (the C++ case injects ±1e-13 into the selector; the Python
     leg no longer claims it). Held and released short ports are counted
-    (`mode_diagnostics` `shorted_held` / `shorted_released`, #33). The
+    (`mode_diagnostics` `shorted_held` / `shorted_released`, #43). The
     judge reads the law voltage (`V_f + i_s` for an ON branch-form diode,
     so an ON ideal diode is judged on i_s; conductance entries: same
     bits). The default guard stays off on branch-form circuits (it would
@@ -750,7 +750,7 @@ behind TR-BDF2 tracks 6-8, which took 24-33.)
     to −2.57e-5 at τ/20 and −6.48e-6 at τ/40 on pwl (second order, taken
     around the pulse step: across it the sample quadrature is first
     order), −3.2e-7 on trbdf2. The pulse step itself is partitioned
-    exactly (#32): dW at its start, conduction at its end power. The cause is searched
+    exactly (#42): dW at its start, conduction at its end power. The cause is searched
     among the structure's own elements (a gate first, then a diode),
     never a switch toggling elsewhere on the step (review finding).
     → Reverse: drop the field and the keys.
@@ -813,6 +813,11 @@ behind TR-BDF2 tracks 6-8, which took 24-33.)
     cost item before `'lcp'` can be a default.
 
 ## Ideal switch 5 (feat/core-a-ideal-switch, 2026-11-18)
+
+(Ideal switch 5 and 6 were numbered 30-34 and 39-41 on the branch;
+renumbered 40-47 when the branch took integration batch 13, which numbers
+TR-BDF2 tracks 6-8 24-33 and ideal switch 4 34-39. Ideal switch 6-7, 45-52 on the branch, are 51-58
+since integration batch 14b, behind TR-BDF2 tracks 8 (part 2) to 10, 45-50.)
 
 40. **`'lcp'` poses the LCP only where its answer can differ from a known
     one.** Question: `'lcp'` cost 4.4–5.6× the default on pwl (one LCP and
@@ -1138,3 +1143,185 @@ the branch; renumbered 47-50 at integration batch 14b.)
     (seen only with the reverted #48 attempt). `decide_probe`'s failed
     retake restores `b_stage` (#47 leftover; reachable only on a Newton
     circuit, which 'lcp' refuses).
+
+## Ideal switch 6 (feat/core-a-ideal-switch, 2026-11-18)
+
+51. **Design D6 against the code: `form=` on every creator, no new
+    numeric defaults.** Question: D6 row 1 assumed `add_switch(name, a, b)`
+    defaults `g_on = 1e3`, `g_off = 1e-9`; they are required (migration
+    audit F2), so a flip has no "default conductances" to convert, and
+    nobody could pin today's numbers through a helper (F3). Decision:
+    `form='conductance' | 'branch'` (default `'conductance'`, bit-identical)
+    on `add_switch`, `add_mosfet`, `add_mosfet_with_body_diode`, `add_igbt`,
+    `add_mosfet_level1`, `add_igbt_level1` (body / freewheel diode),
+    `add_bridge_rectifier`, `add_three_phase_vsi`, `add_buck`, `add_boost`,
+    `add_flyback` and YAML `form:` on the matching types. The conductance
+    form keeps `g_on`/`g_off` required; the branch form reads `R_on` (else
+    `1/g_on`, else 0 = ideal) and `g_off` (else 0) — so after the flip a
+    call that gives `g_on` maps to `R_on = 1/g_on` (D6 row 2) and a call
+    that gives nothing is the ideal element. A helper's resistance
+    parameters map as written (`R_on`, `g_off = 1/R_off`, body diode
+    `R_on = 1/g_on_diode`; `g_on = inf` is the ideal element). Gated
+    devices (reverse-blocking IGBT, thyristor, GTO, TRIAC) have no branch
+    form (`kBranchFormCaps`): `add_igbt(form='branch', reverse_blocking=True)`
+    is refused by name and the others take no `form=`. The C++ builder
+    helpers take `form` as a trailing parameter; `add_switch`/`add_diode`
+    themselves stay conductance in C++ (`add_ideal_switch` /
+    `add_diode_branch` are the C++ branch spellings). The circuit IR needs
+    nothing: it hashes the pool's branch form per branch (test added for
+    a switch and a MOSFET). `add_three_phase_vsi(R_on=0)` (and `R_d=0`,
+    `R_off<=0`) silently became 1 mOhm / 1 nS: now refused under the
+    conductance form, passed through under the branch form (BREAKING,
+    CHANGELOG). → Reverse: drop the keyword (no caller outside the
+    tests uses it yet).
+
+52. **Passivity gate of the 'lcp' fast paths (review of slice 5): not
+    fixed here, needs a loop edit.** The cached and quiet-with-ideal-ON
+    paths are Lemke's answer only on a positive semidefinite port matrix;
+    `passivity_of` names VCVS and negative R/C/L but reads VCCS / CCCS /
+    CCVS and a non-PSD inductor coupling as passive. Widening
+    `passivity_of` was tried and reverted: run_transient copies the same
+    flag into `ModeSelector::passive`, which also decides the D3
+    enumeration of the DEFAULT guard (`mode_selector.hpp:626`), so the
+    default would change on those circuits. The edit: run_transient keeps
+    two flags — the narrow class for the selector, the wide one (the four
+    kinds plus an eigenvalue test of one inductance matrix over every
+    coupled winding) for the fast paths at `run_transient.hpp:1015/1026`.
+    Also corrected: "passive ⇒ one LCP solution" is false — a PSD matrix
+    gives a unique *strictly complementary* solution, not a unique
+    solution (parallel ideal diodes, Z_jj = 0 have several); the comment
+    at `run_transient.hpp:~980` says otherwise. The reviewer's two loop
+    findings (the multi-port loop search runs on a non-passive
+    enumeration that found no mode; it can name a loop for ports at zero
+    bias) need loop edits too: migration audit 6b.
+
+53. **DC operating point with a closed ideal switch in a voltage loop.**
+    The ideal twins of ll10 / ll15 failed with a bare `RuntimeError` after
+    a solve of 1.2e13 A: their switch is closed at t = 0 in a loop of the
+    source and inductors (shorts at DC), which has no DC solution (its
+    conductance twin "solved" it at 24 kA through 1 mOhm). The structural
+    loop check now takes the starting mask and treats a closed branch-form
+    switch with R_on = 0 as a 0 V branch: refused by name
+    (`feature='ideal_voltage_loop'`, the loop listed). Diodes are left out
+    on purpose: their DC bit is a trial of the diode iteration, which turns
+    a reverse-biased ideal diode in such a loop OFF; flagging it would
+    refuse a solvable point. Without such a loop the DC system with branch
+    unknowns is solved as before. → Reverse: the `mask` argument of
+    `find_dc_voltage_loop`.
+
+## Ideal switch 7 (feat/core-a-ideal-switch, 2026-11-18)
+
+54. **A symmetric edge diagnostic; the gate stays one-sided.** Question:
+    `boost_switching_complex` (ideal twin) graded 0.030 with the pwl dt/16
+    trace under test against trbdf2 and 0.0023 the other way. Cause, measured:
+    `err_rms` drops the initial sample of the trace under test only and
+    divides by the reference's span. `V(out)` holds 24 V with 6 mV of
+    ripple, so the span is the 1e-3 floor (24 mV) one way; the other way the
+    reference's own initial sample (0 V at t = 0, the stored initial state)
+    is interpolated into the window up to the other trace's first sample
+    (14.4 V at 5 ns), which inflates the span 600x and hides the error.
+    Decision: the edge DIAGNOSTIC is symmetric
+    (`metrics.err_rms_symmetric`: both traces lose their initial samples,
+    the span is the larger of the two; `diagnose` takes its window start
+    from both traces too): `diagnose(a, b) == diagnose(b, a)` bit for bit,
+    pinned with the 24 V case in `test_benchmark_harness.py`. On the real
+    cell the symmetric measure reads 0.030 both ways and 8.1e-6 with the
+    switching steps left out. The gate (`compare`, the `interp` measure) is
+    unchanged, as ordered: making it symmetric moves every graded cell and
+    belongs to the release's re-baseline (migration audit 6c).
+
+55. **References with a shown convergence and a stated uncertainty.**
+    Question: which reference may grade an ideal-twin cell? Decision
+    (`ideal_switch_flip_evidence.converged_reference`): two independent
+    tools, trbdf2 refined by rtol (1e-8, 1e-9, 1e-10) and pwl + restart
+    refined by dt (dt/8 ... dt/256), each until its error estimate is at most
+    tol/10. The estimate is Richardson's with the order measured from the
+    last two moves, not the last move: the interp measure converges at order
+    ~0.5 across a jump (a ramp over one step, rms ~ J·sqrt(h/T); measured
+    0.0030 → 0.0021 → 0.0015 → 0.0011 on `boost_switching_complex`,
+    0.0158 → 0.0112 → 0.0079 → 0.0056 on ll07's `V(ctrl)`), where the last
+    move understates the error 2.4x. The reference is the tool with the
+    smaller estimate; when the other tool's own estimate is below half of
+    the two tools' distance, that distance is a real disagreement and
+    becomes the uncertainty (ll07's ideal twin: trbdf2's estimate stays at
+    0.069 at rtol 1e-10, pwl's is 0.013 at dt/256, the two differ by 0.04). A cell is graded only when the
+    uncertainty is at most its tol/10, else `not comparable` with the
+    number. The gate's own reference keeps `differential_runner.reference`
+    and gets its uncertainty measured (trbdf2 1e-8 against 1e-9, or pwl dt/2
+    against dt/4); both are in the References table of
+    `IDEAL_SWITCH_FLIP_EVIDENCE.md`. Not a gate change.
+
+56. **One command for the evidence, resumable per circuit.**
+    `ideal_switch_flip_evidence.py --resume DIR` measures every variant
+    (default, branch, lcp, branch+lcp, auto, ideal, ideal+lcp) on every
+    configuration in one run, writes each circuit's cells to `DIR` once that
+    circuit is done (atomic rename), and a restarted run measures only the
+    missing cells, never cells stamped with another tree (commit + a digest
+    of the uncommitted tracked diff); cached cells and the ideal-twin
+    reference of variants not asked for are kept. A ladder whose last two
+    settings give identical output is saturated, not exact: its estimate is
+    the previous move. The rendered file names the tree it measured.
+
+57. **Loss and thermal summaries of branch-form elements.**
+    `device_loss_summary` always gives an ideal (`R_on = 0`) branch-form
+    element the impulsive category (`E_impulse_total`, `n_impulses`, `P_impulse_avg`; 0 when
+    nothing was booked to it) next to its solved `v·i` (0 W of conduction for
+    an ideal one). `device_thermal_summary` used to drop a branch-form
+    element silently (its `g_on` is infinite): it now reports it
+    (`form='branch'`, `P_impulse_avg`) and heats it with the impulsive energy
+    as a constant offset, as `P_sw_avg`. A kernel loss port
+    (`set_device_losses`) still does not carry that energy into its own
+    junction (pinned at integration batch 13 as a known limitation): the
+    loss summary marks such entries with booked impulsive energy
+    `impulse_in_junction=False` and warns. A branch-form element with
+    `R_on > 0` is a conductance switch to the loss summary (`g_on = 1/R_on`)
+    and gets the impulsive keys only when energy was booked to it.
+    The wiring is the in-kernel event-losses track's. Also:
+    `add_switch` / `add_diode` with `form='branch'` refuse `R_on` together
+    with `g_on` (one resistance given twice; `g_on` was dropped), and the
+    dsed `mode_selection='auto'` branch for an integrator other than rk45 is
+    removed: a diode circuit reaches it only on rk45 (`'auto'` is routed to
+    rk45 and `'bdf2'` refused before it).
+
+58. **The `'lcp'` cost: exact memos, not a Lemke warm start.** Question:
+    where do the 3.9-5.4x cells (NPC three-level half bridge, boost PFC)
+    spend the time, and can a warm start remove it without changing a
+    result? Measured (macOS `sample`, NPC on pwl, 10 s): the site driver
+    is 73 % of the run; inside it `hybrid_lcp` 30 %, the driving-point
+    resistance of the tie pins 20 %, the hysteresis loop 11 %, of which
+    Lemke itself 3 %; 39 % of all samples are `malloc` / `free` from those
+    small dense temporaries. Lemke pivots 187 times in 3704 LCPs (0.05 per
+    LCP): the problem is already posed in the previous mode's coordinates
+    (the hybrid LCP), so an unchanged active set is `q >= 0`, a trivial
+    solve with 0 pivots — that IS the warm start, and a Lemke warm start
+    from the previous basis has nothing left to save. Not done, so the
+    question of a warm start that ends on another solution of a degenerate
+    LCP does not arise: every result comes from the same cold Lemke as
+    before. Decision: three exact memos in `ModeSelector`, each returning
+    what its computation returns on bit-equal inputs (the same code made
+    the stored values, so a hit and a recomputation give the same bits):
+    (a) `hybrid_lcp`'s factor (H, the LU of I + ZΓ, B, c) per
+    (Z, ports, coordinates) compared bitwise, and q per u — the site's Z is
+    already one per (mask, dt) (`PwlModePorts`), so a quiet stretch pays one
+    back-substitution and a widened pass on the site's own (Z, u) nothing;
+    (b) the widened passes' principal pivots per (H generation, target
+    coordinates), q pivoted with the stored blocks by the same expressions;
+    (c) the driving-point resistance per (H generation, pivot set, port).
+    A generation number names one H content: equal generations, equal H.
+    Pinned: `[modes][memo]` (one selector over repeated / new (Z, u), plain
+    and coordinate-anchored ports, against a fresh selector per site: the
+    decision, counters, current and gap equal to the bit; pivot and
+    resistance memos hit) and the 102-cell byte check (`lcp_cost_gate
+    --compare` against the merged tree's `'lcp'` run: ALL bit-identical, in
+    each of 3 rounds). Cost (`lcp_cost_gate --reps 7`, 3 rounds alternating
+    the old and new build, median of the rounds' medians, load average
+    10-16 on a shared 16 GB Mac): NPC three-level 4.84 / 4.16 / 3.40x →
+    2.03 / 2.44 / 2.13x (pwl / restart / split), boost PFC 1.83 / 1.75 /
+    1.33x → 1.53 / 1.54 / 1.48x; the median cell is unchanged (1.06 / 1.06
+    / 1.06 → 1.06 / 1.09 / 1.06); cells above 1.2x: 6 / 6 / 7 → 8 / 8 / 10
+    of 34, the extra ones cells with no LCP work whose ratio moves by 2x
+    between rounds at this load (noise, not the memos). Target <= 1.2x NOT
+    met on NPC and PFC: what remains is outside these two headers (the
+    selector is about a quarter of NPC's samples after the change; the rest
+    of the site is the step loop's per-site port callbacks in the frozen
+    `run_transient.hpp`).

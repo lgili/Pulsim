@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <cstring>
 #include <random>
 #include <string>
 #include <vector>
@@ -391,4 +392,72 @@ TEST_CASE("An ideal port is decided from its crossing signals in OFF coordinates
         CHECK_THAT(sel.last_current()[0], Catch::Matchers::WithinAbs(1.86, 1e-12));
         CHECK_THAT(sel.last_gap()[0], Catch::Matchers::WithinAbs(0.0, 1e-12));
     }
+}
+
+TEST_CASE("The selector's memos return what a fresh selector computes",
+          "[modes][memo]") {
+    // add-branch-form-ideal-switch DECISIONS #58: hybrid_lcp's factor, the
+    // widened passes' principal pivots and the driving-point resistances are
+    // kept while their inputs repeat bit for bit. One selector over a run of
+    // sites (repeated Z with new u, repeated (Z, u), new Z) against a fresh
+    // selector per site: the same answer to the bit.
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<double> U(-1.0, 1.0);
+    ModeSelector kept;
+    long reuses = 0;
+    for (int trial = 0; trial < 40; ++trial) {
+        const int k = 3 + trial % 4;
+        DenseMatrix A(k, k);
+        for (int r = 0; r < k; ++r)
+            for (int c = 0; c < k; ++c) A(r, c) = U(rng);
+        const DenseMatrix Z = A * A.transpose() + 1e-3 * DenseMatrix::Identity(k, k);   // PSD port
+        std::vector<DiodePort> p;
+        for (int j = 0; j < k; ++j) p.push_back({1e-2 * (1 + j), 1e-9, 0.3 * (j % 2), 0.0});
+        std::vector<char> prev(static_cast<std::size_t>(k));
+        for (int j = 0; j < k; ++j) prev[static_cast<std::size_t>(j)] = (trial >> j) & 1;
+        for (int site = 0; site < 6; ++site) {
+            Vector u(k);
+            for (int j = 0; j < k; ++j) u[j] = (site % 3 == 2 ? 1e-9 : 2.0) * U(rng);   // near ties too
+            for (int rep = 0; rep < 2; ++rep) {              // the same (Z, u) twice
+                CircuitScale sc{2.0, 2.0, 1e-6};
+                ModeSelector fresh;
+                ModeSelection a, b;
+                if (trial % 2 == 0) {
+                    auto port = [&](Real, DenseMatrix& Zp, Vector& up) { Zp = Z; up = u; };
+                    a = kept.select(p, prev, port, 1e-6, sc);
+                    b = fresh.select(p, prev, port, 1e-6, sc);
+                } else {   // anchored: the port depends on the coordinates, and on h
+                    auto port = [&](Real h, const std::vector<char>& m, DenseMatrix& Zp, Vector& up) {
+                        Zp = Z * (1.0 + h);
+                        for (int j = 0; j < k; ++j) Zp(j, j) += 1e-3 * m[static_cast<std::size_t>(j)];
+                        up = u;
+                    };
+                    a = kept.select(p, prev, port, 1e-6, sc);
+                    b = fresh.select(p, prev, port, 1e-6, sc);
+                }
+                INFO("trial " << trial << " site " << site << " rep " << rep);
+                CHECK(a.on == b.on);
+                CHECK(a.status == b.status);
+                CHECK(a.pivots_total == b.pivots_total);
+                CHECK(a.lcps == b.lcps);
+                CHECK(a.ties == b.ties);
+                CHECK(a.leak_pins == b.leak_pins);
+                // the last solve's port values; a call whose every LCP failed (a ray)
+                // writes none and leaves them as they were (the fresh one's are empty)
+                for (auto v : {&ModeSelector::last_current, &ModeSelector::last_gap}) {
+                    const Vector& va = (kept.*v)();
+                    const Vector& vb = (fresh.*v)();
+                    if (vb.size() == 0) break;
+                    REQUIRE(va.size() == vb.size());
+                    CHECK(std::memcmp(va.data(), vb.data(),
+                                      sizeof(Real) * static_cast<std::size_t>(va.size())) == 0);
+                }
+            }
+        }
+        reuses = kept.memo_stats().hybrid_reuses;
+    }
+    CHECK(reuses > 50);   // 40 Z x 12 sites: one build per Z (and coordinates), the rest reused
+    // the widened passes' memos were exercised, not only skipped
+    CHECK(kept.memo_stats().pivot_reuses > 0);
+    CHECK(kept.memo_stats().resistance_reuses > 0);
 }
