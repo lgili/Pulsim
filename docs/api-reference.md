@@ -116,6 +116,40 @@ strictly uniform at `m · dt` (so FFT / harmonic analysis on the
 result remains valid), and memory drops by the same factor.
 `opts.expected_sample_count()` reports what a run will store.
 
+Every keyword is checked against the engine the run lands on before
+anything is solved: honoured, or refused with `UnsupportedError`
+(`feature` = the keyword). `pulsim.option_capabilities()` returns the
+option x engine table ([known limitations](known-limitations.md#option-capability-matrix)).
+Every pulsim error derives from `pulsim.PulsimError` and keeps its
+standard base (`ValueError`, `RuntimeError`, `KeyError`).
+
+## `Simulation(circuit, options)` — the kernel run object
+
+```python
+import pulsim as p
+c = b.build()               # b: a CircuitBuilder; c: an immutable pulsim.Circuit
+sim = p.Simulation(c, p.RunOptions(t_end=2e-4, dt=2e-7, engine="pwl"))
+sim.set_switch_fn(p.make_pwm_switch_fn(50e3, 0.4, 0, 1))
+first = sim.run_until(1e-4)                    # split run ...
+rest = sim.run()                               # ... equals one run
+print(sim.plan, sim.diagnostics)
+```
+
+The constructor plans the run: preflight ties on its own copy (the
+caller's circuit is unchanged), routing (`plan['engine']`,
+`plan['route_reasons']`), the option and device refusals. `RunOptions`
+fields are the `simulate()` keywords; `None` means "not set" and the
+default comes from one kernel table (`sim::Defaults`). Attachments:
+`set_switch_fn`, `add_tick(period, fn, offset=0.0)`, `set_source_term`,
+`set_step_observer` and `set_tick_before` (`pwl`), `set_live_ring`,
+`set_cancel`, `set_initial_state`; `cache` is the run's PWL cache (built
+on first use); `snapshot()` / `restore()` continue a run exactly.
+Engines `'pwl'` and `'trbdf2'` — `simulate()` itself runs them through
+this object; `'exact'` is refused, and so are C blocks unless
+`controls_composed=True` says the attachments drive them (use
+`simulate()`, which composes them). Invalid values raise
+`pulsim.OptionsError` (`.option`).
+
 ## `CircuitBuilder`
 
 Top-level fluent builder. Stores a `Graph` (topology) + `DevicePool` (per-device parameters) + an internal node-name → node-id map.
@@ -343,6 +377,36 @@ What they do:
   NaN/inf inside the window. `steady_state_stats` also requires
   exactly one of `t_from=` / `last=`: averaging from `t = 0` would
   fold the start-up transient into a "steady-state" figure.
+
+### Kernel recorders (`simulate(recorders=...)`)
+
+The same arithmetic, computed by the kernel for probe expressions, per
+declared window and per period, with both limits at events:
+
+```python
+rec = p.Recorder("bus", ["v(dp) - v(dn)", "v(dp,dn)*i(RL)"],
+                 keep="none",                  # 'every' | 'decimate' (every=n) | 'none'
+                 windows=[(30e-3, 40e-3)],     # clipped exactly
+                 period=20e-3, offset=0.0)     # complete periods only
+res = p.simulate(b, t_end=40e-3, recorders=[rec])
+r = res.recorded["bus"]
+r.windows["v(dp) - v(dn)"]["avg"]   # also integral, rms, min, t_min, max, t_max, t0, t1
+r.periods["v(dp) - v(dn)"]["rms"]
+r.event_t, r.event_left[...], r.event_right[...]   # both limits (engine='exact')
+```
+
+- A window that starts exactly on an event starts from the right limit,
+  one that ends on an event ends on the left limit, and min / max see
+  both limits of events inside it. Only `engine='exact'` stores right
+  limits; pwl and trbdf2 records are continuous (no event rows).
+- RMS integrates the line between samples exactly, `h(a² + ab + b²)/3`;
+  a product probe is linear between its own samples, as
+  `time_average` of the product trace is.
+- **Feeding mode today:** a kernel-side pass over the stored result
+  arrays, on every engine, so `store_every > 1` and `resume_from` are
+  refused with recorders (by name); `keep="decimate"` keeps fewer rows
+  with statistics from every step. In-loop feeding moves to the unified
+  stepper's per-step hook without changing these definitions.
 - `steady_state_stats(result, "name")` looks the name up as a node
   (`result.v`) and as a branch (`result.i`); a name that is both raises
   and asks for `kind='v'` / `kind='i'`. An array must be sampled on

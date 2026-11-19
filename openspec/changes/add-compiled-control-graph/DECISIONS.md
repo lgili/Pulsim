@@ -697,6 +697,94 @@ Each entry: question → option taken → evidence → how to reverse.
   clean.
 - **Reverse.** Restore the old netlist and the `suspect` entry.
 
+## G32. pwl graphs tick on the kernel's event queue (control_tick="state")
+
+- **Question.** Task 6.1: trbdf2 and dsed ticked a graph's rate groups
+  from the queue (add-unified-event-queue); pwl still let each graph
+  decide its own ticks inside its observer.
+- **Taken.** With `control_tick="state"` on pwl every rate group of every
+  run graph (closed-loop helpers, C blocks, a chain as `step_observer`)
+  is a kernel tick source (`run_transient(tick_fns=)`, after the Python
+  sources): `CxxBlockChain.make_queue_tick(g)` (C++, no GIL) marks group
+  g, and the graph's observer, run after the queue's ticks in the same
+  kernel call, runs the marked groups in one pass
+  (`set_queue_driven`). The pwl observer call labelled t_n carries
+  x(t_{n-1}), so a source ticks at origin `t0 + offset + dt`: the call
+  whose t_{n-1} >= tau, i.e. state time. Origin and next k come from the
+  graph's own grid (`grid_t0`, `group_next_k`), so a resume continues it;
+  the snapshot's `tick_origin` / `tick_next_k` list them after the
+  Python sources. `run_transient(tick_fns=)` now takes a `CxxChainTick`
+  as well as a callable. Default (`"label"`) unchanged: graphs tick
+  themselves.
+- **Evidence.** Byte-identical to the graph's own state-time ticking on
+  the cl_buck_pi loop (pwl+split and plain, duty history, v(out), tick
+  counts) and on a two-rate chain with offsets (recorded ticks, both
+  channels, v(out)); label runs byte-identical to the tree before.
+  `test_control_graph_queue_resume.py::test_state_mode_ticks_the_graph_from_the_kernel_queue`.
+- **Split one step after a tick.** The queue never takes an instant at
+  or after its t_end, so a state-time tick at tau = t_end - dt is not
+  taken by the stopping run; the graph sees it due on its own grid at that
+  last call and keeps the call's state (as G33's label stash), and the
+  resumed run's priming call (its queue fires there, from the graph's
+  next k) serves it with that state. A graph reused by a new run whose
+  time goes back registers its sources from t_start (it rearms).
+- **Reverse.** Drop `_queue_groups` in `_control_plan.py` and the
+  chain's `queued_`.
+
+## G33. Controllers' state in the pickled snapshot; a label resume on a tick
+
+- **Question.** G26 left a pickled snapshot of a run with controllers
+  refusing the resume (field 12 a marker). Separately, a pwl label-time
+  closed loop resumed exactly on a tick served that tick from the resumed
+  run's priming call with x(T1); the run that did not stop serves it at
+  label T1 with x(T1 - dt) (duty 7.3e-5 off at tick 37 of cl_buck_pi).
+- **Taken (pickle).** Field 12 of the version-5 tuple (still 17 fields)
+  is either the old bool marker or `("pulsim.controllers", 1, [(bytes,
+  parts)])`: each graph's kernel state as bytes
+  (`CxxBlockChain.dump_state` / `load_state`; a captured block state is
+  its bytes when trivially copyable, else its `fields()` — DelayBlock,
+  TransferFunction, LookupTable1D, MovingAverageFilter, Mechanical), its
+  Python-held parts (object `__dict__` copies, C-block state / buffers)
+  as they are. Written only when every part pickles, else the marker
+  (refused by name as before). A resume matches graphs by position and
+  checks each by structure (block names, channels, groups: ValueError ->
+  `UnsupportedError` "other controllers"); new controller objects built
+  the same way take the state. Bytes are for the machine and build that
+  wrote them (no endianness / layout tag beyond a magic).
+- **Taken (label resume).** A label-time pass that leaves a due tick out
+  only because of the horizon keeps that call's state; the next call at
+  the same label (the resumed run's priming call) serves the tick with it.
+  Part of the graph state (and of the bytes). Only a resume uses it: a
+  plain run (G22 carry-over, even one starting at the last t_end) drops
+  it, so a hand-chained run keeps its numbers. A pickle written by this
+  build fails to load on an older build (field 12 is not a bool there).
+- **Evidence.** cl_buck_pi loop, uninterrupted to 60T vs split at 37T (on
+  a tick), 37.05T (one pwl step after one) and 37.3T (between): pwl label and pwl state (split), in-memory
+  and pickled into fresh controllers: duty history, times and v(out)
+  bytes identical. trbdf2 rtol 1e-8: pickled resume = in-memory resume
+  byte for byte; against the run that did not stop 5.7e-9 (on) / 4.9e-9
+  (between) in duty, 4.9e-8 / 3.1e-8 V in v(end) (its steps depend on
+  the span). dsed has no snapshot (hook request below).
+  `test_control_graph_queue_resume.py`.
+- **Reverse.** Field 12 back to `bool(control_state)`; drop the stash.
+
+## Closed-loop reference, per engine (2026-11-18)
+
+max |v(kT) - ref| / span against `probes/closed_loop_reference.py`:
+trbdf2 1e-10 1.8e-8, 1e-8 3.5e-7, default 1.1e-5; pwl 3.6e-2; pwl+split
+1.4e-3; pwl+split state (queue) 8.4e-6; dsed 5.5e-11 (cl_buck_pi).
+ll14_buck_closed_loop: trbdf2 1e-10 6.9e-9, default 7.6e-7; pwl 4.1e-2;
+pwl+split 3.0e-4; state 7.8e-5; dsed refuses (Shockley diode).
+cl_boost_pi: trbdf2 1e-10 1.2e-7, default 1.4e-6; pwl 2.0e-1; pwl+split
+4.2e-4; state 4.0e-5; dsed 8.4e-8. cl_buck_aggressive_pi: trbdf2 1e-10
+2.9e-8, default 4.3e-5; pwl 1.4e-2; pwl+split 1.9e-2; state 8.3e-5; dsed
+1.4e-11. ll15_boost_closed_loop: trbdf2 1e-10 2.7e-8; pwl+split and
+state 9.9e-6; dsed refuses. ll16_flyback: trbdf2 1e-10 5.9e-8; pwl+split
+2.9e-4; state 3.1e-4 (the tree before this change gives the same 3.104e-4
+with the probe's dt; G30's 3.27e-5 is not reproduced by this probe run —
+not chased); dsed refuses. The state column equals the tree before (graphs
+then ticked themselves): the queue path changed no number.
+
 ## Hooks for task groups 6–7 (not in this slice)
 
 - **6.1 tick events.** Done for the snapshot (G26). The graph's ticks
@@ -714,3 +802,24 @@ Each entry: question → option taken → evidence → how to reverse.
   interface `next_event_after(t)` that the graph implements; today the
   ticks reach `pwl` through the observer and `trbdf2` through
   `observer_periods`, and comparator crossings are not located.
+- **Hook requests (2026-11-18, routed around, loops frozen).**
+  (1) dsed: no `final_snapshot` / `resume_from` (the exact engine owns
+  `dsed/scheduler.hpp`): a dsed closed loop cannot be resumed at all.
+  (2) `run_transient`: the queue's last instant is `< t_end`; graphs
+  keep the last call's state themselves (G32 / G33), the Python tick
+  sources cannot: in label time their tick at a split instant presumably
+  runs at the resumed priming call with x(T1) (not measured).
+  (3) 6.2 / 7.1 / 7.3: continuous blocks need a stamping hook
+  `(x, h) -> rows` in both loops. (4) 7.2: a comparator gate as a state
+  event needs a located queue source (`add_located`) fed by a crossing
+  locator over the step's state interpolant, i.e. a loop hook.
+- **Hand-off (2026-11-18, after G32 / G33).** Open: 6.2 and group 7
+  (hook requests (3) / (4): loop hooks, frozen loops); a dsed snapshot
+  (request (1)); 10.1 docs (control guide: `control_tick='state'` on the
+  queue, pickled controller state). Verified on this tip (macOS): ruff,
+  full pytest (5197 passed + the 3 stub tests after regenerating the
+  stub), `pytest -m reference` 368 passed, `reference_status` exit 0 with
+  the table unchanged, openspec strict, stub `--check`, the cl_buck_pi
+  label / state runs and a two-rate chain byte-identical to the tree
+  before. The full ctest had not finished building when this was written:
+  run it before pushing.

@@ -201,13 +201,26 @@ def test_resume_restores_the_snapshots_loop_whatever_ran_between(engine, kw, t1)
         assert xs[-1, j] == pytest.approx(xf[-1, j], rel=1e-6)
 
 
-def test_a_pickled_snapshot_of_a_closed_loop_is_refused():
+def test_a_pickled_snapshot_of_an_opaque_controller_is_refused():
+    # a closed loop's state pickles (G33); a block over a mutable closure
+    # does not, so its pickled snapshot refuses by name
     b = _buck()
-    lp = _loop(b)
-    first = p.simulate(b, 1e-3, dt=DT, closed_loops=[lp])
+    hist = []
+
+    def opaque(x):
+        hist.append(x)
+        return x
+
+    ch = p.MixedDomainBlockChain()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ch.add("f", p.PythonBlock(opaque), inputs=dict(x="node:out"),
+               output="y", rate=p.Rate(1e-4))
+    obs = ch.make_step_observer(b)
+    first = p.simulate(b, 1e-3, dt=DT, step_observer=obs)
     snap = pickle.loads(pickle.dumps(first.final_snapshot))
     with pytest.raises(p.UnsupportedError) as e:
-        p.simulate(b, 2e-3, dt=DT, closed_loops=[lp], resume_from=snap)
+        p.simulate(b, 2e-3, dt=DT, step_observer=obs, resume_from=snap)
     assert e.value.feature == "controller_state" and "pickled" in str(e.value)
     # without controllers the pickled snapshot still resumes
     sw = p.make_pwm_switch_fn(10e3, 0.5, b.switch_index_of("Q"),
@@ -234,19 +247,22 @@ def test_closing_the_loop_on_an_open_loop_snapshot_starts_it_fresh():
     assert lp.duty_history[0][1] != 0.0 and len(lp.duty_history) == 10
 
 
-def test_trbdf2_refuses_a_loop_resumed_between_two_ticks():
-    # its ticks would fall at t_start + k*T, off the loop's grid (before:
-    # ticks at 1.63, 1.73 ms ... instead of 1.6, 1.7 ms, duty 1 % off)
+def test_trbdf2_resumes_a_loop_between_two_ticks_on_its_grid():
+    # the snapshot carries the tick grid's origin (add-unified-event-queue
+    # DECISIONS 13): the resumed ticks fall on 1.6, 1.7 ms, as in the
+    # uninterrupted run (before: refused; before that, 1.63, 1.73 ms ...)
+    bf = _buck()
+    lf = _loop(bf)
+    p.simulate(bf, 3e-3, engine="trbdf2", closed_loops=[lf], rtol=1e-9)
     b = _buck()
     lp = _loop(b)
-    first = p.simulate(b, 1.53e-3, engine="trbdf2", closed_loops=[lp])
-    with pytest.raises(p.UnsupportedError) as e:
-        p.simulate(b, 3e-3, engine="trbdf2", closed_loops=[lp],
-                   resume_from=first.final_snapshot)
-    assert e.value.feature == "resume_from" and "between two" in str(e.value)
-    # auto names the blocker (and asks for a dt, the pwl route)
-    with pytest.raises(ValueError, match="between two of its ticks"):
-        p.simulate(b, 3e-3, closed_loops=[lp], resume_from=first.final_snapshot)
+    first = p.simulate(b, 1.53e-3, engine="trbdf2", closed_loops=[lp],
+                       rtol=1e-9)
+    p.simulate(b, 3e-3, engine="trbdf2", closed_loops=[lp], rtol=1e-9,
+               resume_from=first.final_snapshot)
+    assert [t for t, _ in lp.duty_history] == [t for t, _ in lf.duty_history]
+    assert [d for _, d in lp.duty_history] == pytest.approx(
+        [d for _, d in lf.duty_history], rel=1e-6)
 
 
 def test_a_graph_block_over_a_closure_is_refused_in_a_sweep():
@@ -295,19 +311,20 @@ def test_resume_from_a_snapshot_without_this_loops_state_is_refused():
                    resume_from=first.final_snapshot)
 
 
-def test_trbdf2_refuses_a_resume_off_any_groups_grid():
-    # groups at 100 us and 300 us; resumed at 0.1 ms the fast group is on
-    # its grid, the slow one (next due 0.3 ms) is not
+def test_trbdf2_resumes_off_a_groups_grid_on_that_grid():
+    # groups at 100 us and 300 us; resumed at 0.1 ms the slow one (next due
+    # 0.3 ms) is off t_start's grid; the snapshot's origin keeps it on its own
     b = _buck()
     ch = p.MixedDomainBlockChain()
     ch.add("i1", p.Integrator(gain=1.0), inputs=dict(x="node:out", dt="dt"),
            output="y1", rate=p.Rate(1e-4))
     ch.add("i2", p.Integrator(gain=1.0), inputs=dict(x="node:out", dt="dt"),
            output="y2", rate=p.Rate(3e-4))
+    ch.record_channel("y2")
     obs = ch.make_step_observer(b)
     sw = p.make_pwm_switch_fn(10e3, 0.4, b.switch_index_of("Q"),
                               b.graph.num_switches)
     first = p.simulate(b, 1e-4, engine="trbdf2", step_observer=obs, switch_fn=sw)
-    with pytest.raises(p.UnsupportedError, match="between two"):
-        p.simulate(b, 1e-3, engine="trbdf2", step_observer=obs, switch_fn=sw,
-                   resume_from=first.final_snapshot)
+    p.simulate(b, 1e-3, engine="trbdf2", step_observer=obs, switch_fn=sw,
+               resume_from=first.final_snapshot)
+    assert list(ch._cxx_chain.tick_counts())[1:] == [10, 4]   # [0]: every call

@@ -27,6 +27,11 @@ struct Mechanical {
     Real omega_rad_s = Real{0};
     Real theta_rad   = Real{0};
 
+    // the pickled-snapshot state (T_load_fn is the run's wiring, not state)
+    template <class F> void fields(F&& f) {
+        f(J_kgm2); f(B_Nms_per_rad); f(T_load_Nm); f(omega_rad_s); f(theta_rad);
+    }
+
     void reset() noexcept {
         omega_rad_s = Real{0};
         theta_rad   = Real{0};

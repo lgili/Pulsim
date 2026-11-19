@@ -734,6 +734,9 @@ struct DCStructuralDefect {
 /// whose EMF is zero (a 0 V source at t_eval, inductors in parallel) has
 /// finite solutions and is not flagged. Controlled sources (VCVS, CCVS,
 /// gyrator) do not fix a voltage by themselves and are not followed.
+/// With `mask`, an ideal (branch-form, R_on = 0) switch that is ON in it
+/// fixes its voltage too (0 V): an ideal closed switch is a short at DC
+/// (add-branch-form-ideal-switch).
 struct DCVoltageLoop {
     bool present = false;
     Real emf = Real{0};                 //!< the KVL mismatch around it [V]
@@ -742,7 +745,8 @@ struct DCVoltageLoop {
 
 [[nodiscard]] inline DCVoltageLoop find_dc_voltage_loop(
     const topology::Graph& graph, const DevicePool& pool,
-    Real t_eval = Real{0}) {
+    Real t_eval = Real{0},
+    const topology::SwitchStateMask* mask = nullptr) {
     using SK = DevicePool::StoredKind;
     const Index nn = graph.num_nodes();
     const auto slot = [nn](Index n) { return n == kGround ? nn : n; };
@@ -823,9 +827,20 @@ struct DCVoltageLoop {
     };
     struct Xfmr { Index br; Index pf, pt; Real n; bool p_done, s_done; };
     std::vector<Xfmr> xfmrs;
+    Size sw_idx = 0;    // mask bit of a Switch-kind branch, as dc_assemble counts
     for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        if (!pool.is_registered(b_id)) continue;
         const auto& br = graph.branch(b_id);
+        const bool sw_bit = br.kind == topology::BranchKind::Switch
+            && mask != nullptr && sw_idx < mask->size() && mask->get(sw_idx);
+        if (br.kind == topology::BranchKind::Switch) ++sw_idx;
+        if (!pool.is_registered(b_id)) continue;
+        // switches only: a diode's DC bit is a trial of the diode iteration,
+        // which turns a reverse-biased ideal diode in such a loop OFF
+        if (sw_bit && pool.kind_of(b_id) == SK::Switch && pool.is_branch_form(b_id)
+            && pool.branch_R_on(b_id) == Real{0}) {
+            if (!add(br.from, br.to, Real{0}, b_id)) return out;
+            continue;
+        }
         Real d = Real{0};
         bool fixed = true;
         switch (pool.kind_of(b_id)) {
@@ -910,23 +925,40 @@ struct DCVoltageLoop {
 
 /// Refuse a DC operating point that `find_dc_voltage_loop` shows has no
 /// finite solution, naming the loop's devices and what to do instead.
-inline void require_no_dc_voltage_loop(const topology::Graph& graph,
-                                       const DevicePool& pool, Real t_eval,
-                                       const std::string& engine) {
-    const auto loop = find_dc_voltage_loop(graph, pool, t_eval);
+inline void require_no_dc_voltage_loop(
+    const topology::Graph& graph, const DevicePool& pool, Real t_eval,
+    const std::string& engine,
+    const topology::SwitchStateMask* mask = nullptr) {
+    const auto loop = find_dc_voltage_loop(graph, pool, t_eval, mask);
     if (!loop.present) return;
     std::string names;
     Index device = loop.branches.front();
     bool have_source = false;
+    Index ideal = kInvalidIndex;    // an ideal closed switch in the loop
     for (const Index b : loop.branches) {
         if (!names.empty()) names += ", ";
         names += std::string{graph.branch_name(b)};
         const auto k = pool.kind_of(b);
+        if (ideal == kInvalidIndex && pool.is_branch_form(b)) ideal = b;
         if (!have_source && k != DevicePool::StoredKind::Inductor
             && k != DevicePool::StoredKind::SaturableInductor) {
             device = b;
             have_source = true;
         }
+    }
+    if (ideal != kInvalidIndex) {
+        throw UnsupportedError(
+            engine, "ideal_voltage_loop", std::string{graph.branch_name(ideal)},
+            std::string{stored_kind_name(pool.kind_of(ideal))},
+            std::format(
+                "no DC operating point: {} form a loop of voltage sources, "
+                "inductors (shorts at DC) and ideal switches closed in the "
+                "starting mask (R_on = 0: shorts) whose voltages do not sum "
+                "to zero ({:.6g} V around it), so its DC current is "
+                "infinite. Start the transient from zero state or from "
+                "explicit initial conditions instead of the DC operating "
+                "point, or give the switch R_on > 0.",
+                names, loop.emf));
     }
     throw UnsupportedError(
         engine, "dc_operating_point", std::string{graph.branch_name(device)},
@@ -1010,7 +1042,7 @@ inline Vector compute_dc_op(const topology::Graph& graph,
                               const topology::SwitchStateMask& mask,
                               Real t_eval = Real{0},
                               Real gmin = kDefaultGmin) {
-    require_no_dc_voltage_loop(graph, pool, t_eval, "dc");
+    require_no_dc_voltage_loop(graph, pool, t_eval, "dc", &mask);
     sparse::Matrix J;
     Vector b;
     dc_assemble(graph, pool, mask, J, b, t_eval);
@@ -1099,7 +1131,7 @@ inline Vector compute_dc_op_newton(
     if (!refresh) {
         return compute_dc_op(graph, pool, mask, t_eval, gmin);
     }
-    require_no_dc_voltage_loop(graph, pool, t_eval, "dc");
+    require_no_dc_voltage_loop(graph, pool, t_eval, "dc", &mask);
 
     // Structural check against the system Newton actually solves.
     // Doing it here rather than inheriting `compute_dc_op`'s

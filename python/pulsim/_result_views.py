@@ -117,6 +117,36 @@ def recorded_switch_states(result, builder=None):
     return arr, ""
 
 
+def _reinit_step_starts(result, states: np.ndarray, masks):
+    """Rows ``k - 1`` of the pulse steps replaced by their end rows ``k``
+    (see :func:`step_start_states`); the inputs unchanged (no copy) when
+    the result has no re-initialisation record."""
+    recs = getattr(result, "reinit_records", None) or []
+    # dsed records (dicts) come with the run's own right limits
+    if not recs or states.ndim != 2 or isinstance(recs[0], dict):
+        return states, masks
+    t = np.asarray(result.times, dtype=float)
+    if t.shape[0] != states.shape[0]:
+        return states, masks
+    ks = set()
+    for rec in recs:
+        # only when the stored interval (t[k-1], t[k]] is the pulse step itself:
+        # under store_every > 1 it spans several steps (the earlier ones
+        # conducted from the pre-jump state), and sample < 0 is no row at all
+        k = int(getattr(rec, "sample", -1))
+        if 0 < k < t.shape[0] and abs(t[k - 1] - float(rec.t)) <= 1e-6 * (t[k] - t[k - 1]):
+            ks.add(k)
+    if not ks:
+        return states, masks
+    st = np.array(states, dtype=float, copy=True)
+    mk = None if masks is None else np.array(masks, copy=True)
+    for k in sorted(ks):
+        st[k - 1] = states[k]
+        if mk is not None and mk.shape[0] == st.shape[0]:
+            mk[k - 1] = masks[k]
+    return st, mk
+
+
 def step_start_states(result, states: np.ndarray,
                       masks: "np.ndarray | None" = None):
     """``(states_start, masks_start)``: per sample ``k``, the state and
@@ -136,7 +166,17 @@ def step_start_states(result, states: np.ndarray,
     ``k`` itself and the inputs are returned unchanged (no copy).
 
     A time integral over step ``(t[k-1], t[k]]`` runs from
-    ``states_start[k-1]`` to ``states[k]``; see :func:`pl_integral`."""
+    ``states_start[k-1]`` to ``states[k]``; see :func:`pl_integral`.
+
+    A re-initialisation (``result.reinit_records``, pwl / trbdf2) jumps the
+    state at the START of the step that carries it: the record's ``dW`` is
+    the energy of that jump, and the step runs under the new mode from the
+    projected state. That step starts from its own end sample (the stored
+    pulse step holds the post-jump state: the conduction over it is the
+    end power times h), so the jump and the conduction integral partition
+    the step instead of a line from the pre-jump sample counting part of
+    ``dW`` twice (add-branch-form-ideal-switch DECISIONS #42)."""
+    states, masks = _reinit_step_starts(result, states, masks)
     idx = getattr(result, "right_limit_index", None)
     rl_st = getattr(result, "right_limit_states", None)
     if idx is None or rl_st is None:
@@ -160,6 +200,30 @@ def step_start_states(result, states: np.ndarray,
     return st, mk
 
 
+class _ResultView:
+    """``result`` with some attributes replaced on the view: everything
+    else is read from ``result``, and the result type's Python methods
+    (``v``, ``i``, ...) run against the view, so they see the replaced
+    per-sample arrays. (A kernel result's arrays are read-only
+    properties: it cannot be copied and patched.)"""
+
+    def __init__(self, result):
+        object.__setattr__(self, "_result", result)
+
+    def __getattr__(self, name):
+        import types
+        attr = getattr(type(self._result), name, None)
+        if isinstance(attr, types.FunctionType):
+            return attr.__get__(self)
+        return getattr(self._result, name)
+
+    def num_steps(self) -> int:
+        return len(self.times)
+
+    def empty(self) -> bool:
+        return len(self.times) == 0
+
+
 def with_right_limits(result):
     """A shallow copy of ``result`` whose trace shows each jump on both
     sides: after every sample in ``result.right_limit_index`` a sample
@@ -175,8 +239,6 @@ def with_right_limits(result):
     working. This is how the reference harness compares a jump side
     for side (a variable-step reference stores the left limit at t and
     the right limit one tiny step later)."""
-    import copy
-
     idx = getattr(result, "right_limit_index", None)
     rl = getattr(result, "right_limit_states", None)
     if idx is None or rl is None or len(idx) == 0:
@@ -184,7 +246,7 @@ def with_right_limits(result):
     idx = np.asarray(idx, dtype=np.int64)
     t = np.asarray(result.times, dtype=float)
     pos = idx + 1
-    out = copy.copy(result)
+    out = _ResultView(result)
     out.times = np.insert(t, pos, np.nextafter(t[idx], np.inf))
     out.states = np.insert(np.asarray(result.states), pos,
                            np.asarray(rl, dtype=float), axis=0)

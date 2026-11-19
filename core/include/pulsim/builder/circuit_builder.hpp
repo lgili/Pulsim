@@ -548,7 +548,11 @@ public:
         Real lambda = Real{0.02},
         Real kappa  = Real{15.0},
         bool with_body_diode = true,
-        Real V_F = Real{0.7}) {
+        Real V_F = Real{0.7},
+        std::string_view form = "conductance") {
+        const bool branch = is_branch_form_("add_mosfet_level1", name, form);
+        require_form_target_("add_mosfet_level1", name, branch, with_body_diode,
+                             "with_body_diode");
         if (with_body_diode) require_diode_drop_("add_mosfet_level1", name, V_F);
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
@@ -583,6 +587,7 @@ public:
                 /*g_on=*/Real{1e3},
                 /*g_off=*/Real{1e-9},
                 /*V_th=*/Real{0}, /*V_f=*/V_F);
+            if (branch) pool_.set_branch_form(body_b, Real{1} / Real{1e3});
         }
         return *this;
     }
@@ -1180,7 +1185,10 @@ public:
         bool with_fwd = false,
         Real tau_tail = Real{0},
         Real k_tail   = Real{0},
-        Real V_F      = Real{0.7}) {
+        Real V_F      = Real{0.7},
+        std::string_view form = "conductance") {
+        const bool branch = is_branch_form_("add_igbt_level1", name, form);
+        require_form_target_("add_igbt_level1", name, branch, with_fwd, "with_fwd");
         if (with_fwd) require_diode_drop_("add_igbt_level1", name, V_F);
         if (!(R_CE_sat > Real{0})) {
             throw std::invalid_argument(std::format(
@@ -1249,6 +1257,7 @@ public:
                 /*g_on=*/Real{1e3},
                 /*g_off=*/Real{1e-9},
                 /*V_th=*/Real{0}, /*V_f=*/V_F);
+            if (branch) pool_.set_branch_form(fwd_b, Real{1} / Real{1e3});
         }
         return *this;
     }
@@ -2054,16 +2063,23 @@ public:
         Real R_on  = Real{1e-3},
         Real R_off = Real{1e9},
         bool body_diode = true,
-        Real V_F        = Real{0.7}) {
-        require_conductances_("add_mosfet", name, Real{1} / R_on,
-                              Real{1} / R_off, "R_on", "R_off", R_on, R_off);
-        if (!body_diode) {
-            return add_switch(name, drain, source,
-                                Real{1} / R_on,
-                                Real{1} / R_off);
+        Real V_F        = Real{0.7},
+        std::string_view form = "conductance") {
+        if (is_branch_form_("add_mosfet", name, form)) {
+            require_branch_values_("add_mosfet", name, R_on, Real{1} / R_off);
+            if (!body_diode)
+                return add_ideal_switch(name, drain, source, R_on, Real{1} / R_off);
+        } else {
+            require_conductances_("add_mosfet", name, Real{1} / R_on,
+                                  Real{1} / R_off, "R_on", "R_off", R_on, R_off);
+            if (!body_diode) {
+                return add_switch(name, drain, source,
+                                    Real{1} / R_on,
+                                    Real{1} / R_off);
+            }
         }
         return add_mosfet_with_body_diode(
-            name, drain, source, R_on, R_off, V_F);
+            name, drain, source, R_on, R_off, V_F, Real{1e3}, Real{1e-9}, form);
     }
 
     /// Add an n-channel power MOSFET WITH its intrinsic
@@ -2081,14 +2097,26 @@ public:
         Real R_off       = Real{1e9},
         Real V_F         = Real{0.7},
         Real g_on_diode  = Real{1e3},
-        Real g_off_diode = Real{1e-9}) {
+        Real g_off_diode = Real{1e-9},
+        std::string_view form = "conductance") {
+        // form='branch': the switch is R_on in series, the body diode
+        // R_on = 1/g_on_diode (g_on_diode = inf: the ideal diode).
+        const bool branch =
+            is_branch_form_("add_mosfet_with_body_diode", name, form);
         require_diode_drop_("add_mosfet_with_body_diode", name, V_F);
-        require_conductances_("add_mosfet_with_body_diode", name,
-                              Real{1} / R_on, Real{1} / R_off, "R_on",
-                              "R_off", R_on, R_off);
-        require_conductances_("add_mosfet_with_body_diode", name,
-                              g_on_diode, g_off_diode, "g_on_diode",
-                              "g_off_diode");
+        if (branch) {
+            require_branch_values_("add_mosfet_with_body_diode", name, R_on,
+                                   Real{1} / R_off);
+            require_branch_values_("add_mosfet_with_body_diode", name,
+                                   Real{1} / g_on_diode, g_off_diode);
+        } else {
+            require_conductances_("add_mosfet_with_body_diode", name,
+                                  Real{1} / R_on, Real{1} / R_off, "R_on",
+                                  "R_off", R_on, R_off);
+            require_conductances_("add_mosfet_with_body_diode", name,
+                                  g_on_diode, g_off_diode, "g_on_diode",
+                                  "g_off_diode");
+        }
         const Index drain_idx  = resolve_node_(drain);
         const Index source_idx = resolve_node_(source);
         // Main switch (drain → source).
@@ -2096,8 +2124,9 @@ public:
             name, drain_idx, source_idx,
             topology::BranchKind::Switch);
         pool_.add_switch(b_switch,
-                          Real{1} / R_on,
+                          branch ? branch_g_on_(R_on) : Real{1} / R_on,
                           Real{1} / R_off);
+        if (branch) pool_.set_branch_form(b_switch, R_on);
         // Body diode (source → drain — anti-parallel).
         const std::string body_name = std::string{name} + "_body";
         const Index b_body = add_branch_(
@@ -2105,6 +2134,7 @@ public:
             topology::BranchKind::Switch);
         pool_.add_diode(b_body, g_on_diode,
                           g_off_diode, /*V_th=*/Real{0}, /*V_f=*/V_F);
+        if (branch) pool_.set_branch_form(b_body, Real{1} / g_on_diode);
         (void)name;
         return *this;
     }
@@ -2129,9 +2159,21 @@ public:
         Real R_off = Real{1e9},
         Real V_ce0 = Real{0},
         bool reverse_blocking = false,
-        Real V_th = Real{0}) {
-        require_conductances_("add_igbt", name, Real{1} / R_on,
-                              Real{1} / R_off, "R_on", "R_off", R_on, R_off);
+        Real V_th = Real{0},
+        std::string_view form = "conductance") {
+        const bool branch = is_branch_form_("add_igbt", name, form);
+        if (branch && reverse_blocking) {
+            throw std::invalid_argument(std::format(
+                "add_igbt(\"{}\"): form='branch' with reverse_blocking=True: "
+                "a gated PWL diode has no branch form (capability table "
+                "kBranchFormCaps); use form='conductance'.", name));
+        }
+        if (branch) {
+            require_branch_values_("add_igbt", name, R_on, Real{1} / R_off);
+        } else {
+            require_conductances_("add_igbt", name, Real{1} / R_on,
+                                  Real{1} / R_off, "R_on", "R_off", R_on, R_off);
+        }
         if (!(V_ce0 >= Real{0}) || !std::isfinite(V_ce0)) {
             throw std::invalid_argument(std::format(
                 "add_igbt(\"{}\"): V_ce0 = {} must be a finite number >= 0 V.",
@@ -2144,6 +2186,7 @@ public:
                 "reverse current against the drop.", name, V_ce0));
         }
         require_finite_("add_igbt", name, "V_th", V_th);
+        if (branch) return add_ideal_switch(name, collector, emitter, R_on, Real{1} / R_off);
         if (!reverse_blocking) {
             return add_switch(std::move(name),
                                 std::move(collector),
@@ -2898,6 +2941,29 @@ private:
         return *this;
     }
 
+    /// `form=` of every helper that builds a PWL switch or diode
+    /// (add-branch-form-ideal-switch D6): true for 'branch'.
+    static bool is_branch_form_(std::string_view fn, std::string_view name,
+                                std::string_view form) {
+        if (form == "branch") return true;
+        if (form == "conductance") return false;
+        throw std::invalid_argument(std::format(
+            "{}(\"{}\"): form='{}'; expected 'conductance' or 'branch'.", fn,
+            name, form));
+    }
+
+    /// form='branch' names the helper's PWL diode: without one it would be
+    /// silently ignored, so it is refused.
+    static void require_form_target_(std::string_view fn, std::string_view name,
+                                     bool branch, bool has_diode,
+                                     std::string_view flag) {
+        if (branch && !has_diode) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): form='branch' applies to the PWL diode, but {}=false "
+                "builds none; drop form= or set {}=true.", fn, name, flag, flag));
+        }
+    }
+
     static void require_diode_drop_(std::string_view fn,
                                     std::string_view name, Real V_F) {
         if (!(V_F >= Real{0}) || !std::isfinite(V_F)) {
@@ -2933,6 +2999,9 @@ private:
         }
     }
 
+    /// Smallest nonzero branch-form R_on (Ohm): DECISIONS #41.
+    static constexpr Real kBranchRonMin = Real{1e-9};
+
     static void require_branch_values_(std::string_view fn,
                                        std::string_view name, Real R_on,
                                        Real g_off) {
@@ -2940,6 +3009,17 @@ private:
             throw std::invalid_argument(std::format(
                 "{}(\"{}\"): R_on = {} is invalid: the branch form needs a "
                 "finite R_on >= 0 (0 is the ideal switch).", fn, name, R_on));
+        }
+        // 0 is decided exactly everywhere (structure, port coordinates); an
+        // R_on below kBranchRonMin is neither: its ON port row 1/R_on is
+        // past any circuit's conductance scale (add-branch-form-ideal-switch
+        // DECISIONS #41).
+        if (R_on > Real{0} && R_on < kBranchRonMin) {
+            throw std::invalid_argument(std::format(
+                "{}(\"{}\"): R_on = {} is invalid: a branch-form R_on below {} "
+                "Ohm is past the round-off resolution of the port. Give R_on = 0 "
+                "for the ideal switch, or R_on >= {} Ohm.", fn, name, R_on,
+                kBranchRonMin, kBranchRonMin));
         }
         if (!(g_off >= Real{0}) || !std::isfinite(g_off)) {
             throw std::invalid_argument(std::format(

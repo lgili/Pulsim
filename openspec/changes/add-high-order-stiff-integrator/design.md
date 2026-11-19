@@ -20,8 +20,9 @@ no explicit method as a fallback; tolerances mean what they say.
   limited by accuracy; no per-device code.
 - Non-Goals: replacing TR-BDF2 as the default; orders above four;
   fully implicit methods (Radau, Gauss); symplectic integration;
-  multistep (BDF/NDF) with variable order; a continuous extension of
-  fourth order.
+  multistep (BDF/NDF) with variable order. (A continuous extension of
+  fourth order was a non-goal; it came for free in stage-value form,
+  DECISIONS 3, and events are landed on re-steps, DECISIONS 6.)
 
 ## Decisions
 

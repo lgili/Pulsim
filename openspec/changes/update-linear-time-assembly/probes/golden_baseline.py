@@ -39,6 +39,20 @@ def _wrap_cache(*a, **k):
 
 p.__dict__["PwlStateSpaceCache"] = _wrap_cache
 
+# pwl / trbdf2 runs keep their cache inside the kernel object
+# (sim::Simulation::cache): capture the objects, read .cache after the run
+_sims: list = []
+_orig_sim = p.Simulation
+
+
+class _CapturingSimulation(_orig_sim):
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        _sims.append(self)
+
+
+p.__dict__["Simulation"] = _CapturingSimulation
+
 
 # ---- circuits ---------------------------------------------------------------
 def buck():
@@ -193,6 +207,7 @@ def run_case(name):
     factory, kw = CASES[name]
     b, fn = factory()
     _caches.clear()
+    _sims.clear()
     arrays: dict = {}
     counters: dict = {}
     t0 = time.perf_counter()
@@ -231,10 +246,11 @@ def run_case(name):
         for k in ("solves", "iterations", "analyses", "factorizations",
                   "partial_refactors", "lm_attempts"):
             counters[f"newton.{k}"] = int(getattr(nw, k))
-    for i, c in enumerate(_caches):
+    caches = _caches + [s.cache for s in _sims]   # a run builds its object's cache
+    for c in caches:
         for k, v in _int_fields(c.metrics()).items():
             counters[f"cache.{k}"] = counters.get(f"cache.{k}", 0) + v
-    counters["n_caches"] = len(_caches)
+    counters["n_caches"] = len(caches)
     return arrays, counters, wall, len(arrays["times"])
 
 

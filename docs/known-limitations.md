@@ -61,6 +61,72 @@ unless called with `allow_non_passive=True`.
 | InductionMachineMna | NewtonStateful | yes | yes | no | no | no |
 <!-- engine-capabilities:end -->
 
+## Option capability matrix
+
+Which engine honours which `simulate()` keyword. This table is the
+kernel's (`sim::kRunOptionTable`, `pulsim.option_capabilities()`);
+`test_simulation_object.py` checks that it equals this page and that
+every "refused" cell raises `pulsim.UnsupportedError` naming the engine
+and the keyword (`feature`) when the keyword is set to a value that asks
+for something (`None`, `False`, `store_every=1`, `max_dt_halvings=0`,
+`mode_selection='legacy'`, `control_tick='label'` ask for nothing). No
+engine accepts a keyword and ignores it. The defaults are
+`sim::Defaults` (`core/include/pulsim/sim/defaults.hpp`).
+
+<!-- option-capabilities:begin -->
+| Keyword | pwl | trbdf2 | exact (dsed) | default |
+|---|---|---|---|---|
+| `engine` | yes | yes | yes | 'auto' |
+| `rtol` | refused | yes | yes | 1e-5 (trbdf2), 1e-6 (exact) |
+| `atol` | refused | yes | yes | 1e-8 (trbdf2), 1e-9 (exact) |
+| `dt_init` | refused | yes | yes | kernel's choice (trbdf2), 1e-9 (exact) |
+| `integrator` | refused | refused | yes | 'auto' (exact) |
+| `stiffness_threshold` | refused | refused | yes | 10.0 |
+| `h_bdf2` | refused | refused | yes | 1e-6 |
+| `t_start` | yes | yes | yes | 0.0 |
+| `switch_fn` | yes | yes | yes | None |
+| `b_extra_fn` | yes | yes | yes | None |
+| `step_observer` | yes | yes | yes | None |
+| `start_from_dc_op` | yes | refused | refused | False |
+| `enable_nonlinear_refresh` | yes | yes | refused | None (stamp the Newton devices when there are any) |
+| `max_newton_iterations` | yes | yes | refused | 50 |
+| `max_event_iterations` | yes | yes | refused | 16 |
+| `strict_event_iterations` | yes | refused | refused | False |
+| `max_dt_halvings` | yes | refused | refused | 6 |
+| `voltage_sanity_factor` | yes | yes | yes | 100 |
+| `store_every` | yes | refused | refused | 1 |
+| `auto_regularize` | yes | yes | yes | True |
+| `tol_newton_dx` | yes | yes | refused | 1e-9 |
+| `tol_newton_res` | yes | yes | refused | 1e-9 |
+| `enable_newton_line_search` | yes | yes | refused | False |
+| `enable_newton_lm` | yes | yes | refused | False |
+| `newton_roundoff_budget` | yes | yes | refused | 130 |
+| `enable_substep_state_correction` | yes | refused | refused | False |
+| `discontinuity_restart` | yes | refused | refused | False |
+| `resolution_diagnostics` | yes | refused | refused | False |
+| `on_impulse` | yes | yes | yes | 'record' |
+| `inductor_freeze_di_max` | yes | refused | refused | None (off) |
+| `inductor_abs_clamp` | yes | refused | refused | None (off) |
+| `progress` | yes | refused | yes | False |
+| `initial_state` | yes | yes | yes | None (the circuit's ICs) |
+| `should_continue` | yes | yes | refused | None |
+| `closed_loops` | yes | yes | yes | None |
+| `live_stream` | yes | refused | refused | None |
+| `mmc_arms` | yes | refused | refused | None |
+| `on_cache` | yes | refused | refused | None |
+| `controller_period` | yes | yes | yes | None |
+| `resume_from` | yes | yes | refused | None |
+| `solver` | yes | yes | yes | None |
+| `sensitivities` | refused | refused | yes | None |
+| `mode_selection` | yes | yes | yes | None ('legacy') |
+| `allow_implicit_segments` | refused | refused | yes | None |
+| `recorders` | yes | yes | yes | None |
+| `control_tick` | yes | yes | yes | 'label' |
+| `device_path` | yes | yes | refused | 'legacy' |
+| `t_end` | yes | yes | yes | required |
+| `dt` | yes | yes | yes | None (pwl: required; trbdf2: kernel ceiling; exact: 1e-5) |
+<!-- option-capabilities:end -->
+
 The charge laws `ChargeLaw.table` / `.vdmos_cgd` are the
 NonlinearCapacitor row. `add_power_mosfet` is a composite of the
 MosfetLevel1, Capacitor, NonlinearCapacitor, Resistor, Inductor and
@@ -107,8 +173,9 @@ energies. `I_H > 0` chops an inductive current into `R_off` (a voltage
 Circuit-level limits, also raised as `UnsupportedError` (with `feature`
 set): coupled inductors (`add_transformer`, `add_inductor_coupling`) on
 `dsed` and `bdf1`; PWL diodes with `integrator='bdf2'` on `dsed`;
-capacitor loops (parallel capacitors) on `dsed`; C blocks, controllers
-(`step_observer`, `closed_loops`), `start_from_dc_op`, `store_every`,
+capacitor loops (parallel capacitors) on `dsed`; C blocks, an every-step
+`step_observer` (no `controller_period`), `device_path='interface'`,
+`start_from_dc_op`, `store_every`,
 `live_stream`, `max_dt_halvings`, `mmc_arms`, `on_cache`, the inductor
 guards, `enable_substep_state_correction` and `discontinuity_restart` on
 `dsed`; the fixed-step keywords (`discontinuity_restart` among them) on

@@ -146,9 +146,7 @@ def test_dsed_clean_rc_still_runs():
     """Make sure the NaN guard doesn't false-positive on a healthy
     simulation.
 
-    DSED returns ``_PEDSimulationResult`` (not the kernel
-    ``SimulationResult``), so the assertion walks ``res.states``
-    directly. The cap voltage in this single-state plant lives in
+    The assertion walks ``res.states`` directly. The cap voltage in this single-state plant lives in
     ``states[:, 0]``.
     """
     import math

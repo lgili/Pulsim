@@ -22,6 +22,7 @@
 
 #include "pulsim/device/device_path.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/sim/defaults.hpp"
 
 #include <cmath>
 #include <string>
@@ -48,7 +49,7 @@ struct SimulationOptions {
     /// recorded only when `(expected_step_count() - 1)` is a
     /// multiple of `store_every`; choose a divisor of the step
     /// count when the exact end state matters (or leave it at 1).
-    Size store_every = 1;
+    Size store_every = sim::Defaults::store_every;
 
     /// Per-step event-iteration cap. After each cache.solve,
     /// Layer 5 V2.1 re-solves with the updated diode state until
@@ -56,7 +57,7 @@ struct SimulationOptions {
     ///
     /// Default 16 — comfortable for typical PE workloads.
     /// Set to 0 to disable iteration (V2 behaviour).
-    Size max_event_iterations = Size{16};
+    Size max_event_iterations = sim::Defaults::max_event_iterations;
 
     /// Phase-0 fix #9 — behaviour when the event iteration hits a
     /// mask CYCLE (diode pair flip-flopping A→B→A, which no budget
@@ -84,7 +85,7 @@ struct SimulationOptions {
     /// Max Newton iterations per step. Default 50 — comfortable
     /// for the smooth-blend IdealDiode and other PE-typical
     /// nonlinearities.
-    Size max_newton_iterations = Size{50};
+    Size max_newton_iterations = sim::Defaults::max_newton_iterations;
 
     /// Newton convergence tolerance on ||dx||_inf. Default 1e-9.
     /// ABSOLUTE on purpose: an absolute step test is what keeps
@@ -97,11 +98,11 @@ struct SimulationOptions {
     /// stagnate there are accepted on a row-wise backward error of at
     /// most 8ε instead (pwl::NewtonRoundoffAcceptance, counted in
     /// SimulationResult::newton_roundoff_accepts). DC never is.
-    Real tol_newton_dx = Real{1e-9};
+    Real tol_newton_dx = sim::Defaults::tol_newton_dx;
 
     /// Newton convergence tolerance on ||residual||_inf.
     /// Default 1e-9. Absolute; same caveat as tol_newton_dx.
-    Real tol_newton_res = Real{1e-9};
+    Real tol_newton_res = sim::Defaults::tol_newton_res;
 
     /// Enable backtracking line search inside Newton
     /// (Layer 4 V4 / globalization). When `false` (default),
@@ -123,7 +124,7 @@ struct SimulationOptions {
     /// between them (add-newton-roundoff-acceptance DECISIONS 10d). One
     /// more raises NewtonRoundoffBudgetExceeded, which no retry ladder
     /// swallows. A test handle; 130 = 10x the worst honest run.
-    Size newton_roundoff_budget = Size{130};
+    Size newton_roundoff_budget = sim::Defaults::newton_roundoff_budget;
 
     /// v2.0 Phase 2 (B.4) — local time-step reduction on a failed
     /// step.
@@ -149,7 +150,7 @@ struct SimulationOptions {
     /// are entitled to know about.
     ///
     /// 0 disables the retry and restores the pre-v2.0 hard failure.
-    Size max_dt_halvings = Size{6};   // dt/64 floor
+    Size max_dt_halvings = sim::Defaults::max_dt_halvings;   // dt/64 floor
 
     /// Fixed-step event splitting (add-fixed-step-event-splitting).
     ///
@@ -290,11 +291,11 @@ struct SimulationOptions {
 
     /// Relative tolerance for adaptive RK integrators. Ignored
     /// by `"kernel"`.
-    Real rtol = Real{1e-5};
+    Real rtol = sim::Defaults::rtol_variable;
 
     /// Absolute tolerance for adaptive RK integrators. Ignored
     /// by `"kernel"`.
-    Real atol = Real{1e-8};
+    Real atol = sim::Defaults::atol_variable;
 
     /// Initial step-size for adaptive RK integrators (0 ⇒ auto
     /// via Hairer/Wanner heuristic). Ignored by `"kernel"`.

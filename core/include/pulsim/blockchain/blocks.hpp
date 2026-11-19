@@ -217,6 +217,7 @@ struct MovingAverageFilter {
 
     std::deque<Real> buf;
     Real running_sum = Real{0};
+    template <class F> void fields(F&& f) { f(window); f(buf); f(running_sum); }
 
     void reset() noexcept {
         buf.clear();

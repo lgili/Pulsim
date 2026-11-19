@@ -30,8 +30,10 @@
 // high-fidelity run no longer has to hold every sample.
 
 #include "pulsim/numeric/dense.hpp"
+#include "pulsim/sim/error.hpp"
 #include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/record/grid.hpp"
 #include "pulsim/solver/state_trajectory.hpp"
 #include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/thermal/device_losses.hpp"
@@ -104,10 +106,14 @@ struct ModeReport {
     Size ties = 0, widenings = 0, leak_pins = 0, pin_judgements = 0;
     Size capped = 0;               ///< tie passes shortened to the mode's next event (#24)
     Size unfixed = 0, enumerations = 0, nonunique_modes = 0, released = 0;
+    Size shorted_held = 0, shorted_released = 0;   ///< ideal ports shorted by a loop (#34)
     Size settle_rounds_total = 0;  ///< 'lcp': 0 (the settle never runs)
     Size mask_cycles = 0;          ///< 'lcp': 0
     Size inconsistent = 0;         ///< 'lcp': selected modes the site's solve violates (D6 step 4)
     Size port_solves = 0;
+    Size port_matrices = 0;        ///< port matrices Z built (one per (mask, dt); reused after)
+    Size quiet_sites = 0;          ///< 'lcp': sites whose start mode was kept (its solve reused)
+    Size cached_sites = 0;         ///< 'lcp': sites decided by the LCP's last answer from that start mask
     Size errors = 0;
     std::string last_error;
     std::string passivity, passivity_device, passivity_kind;
@@ -207,6 +213,13 @@ struct InductorGuardAction {
 /// segment restarts from h_init.
 struct SolverSnapshot {
     Real t = Real{0};
+    /// Per control-tick source of the run, in registration order: its
+    /// grid's origin and the index of its next instant (add-unified-
+    /// event-queue). A resume passes the origins back, so the ticks stay
+    /// on the run's grid. Empty: no ticks, or a snapshot older than pickle
+    /// version 4.
+    std::vector<Real> tick_origin;
+    std::vector<std::uint64_t> tick_next_k;
     /// MNA unknowns at `t`.
     Vector x;
     /// Every device state the run carries (add-unified-device-interface
@@ -322,7 +335,8 @@ public:
     /// The step-size controller's state at `t`
     /// (refactor-unified-transient-stepper task 12): the variable-step
     /// engine's step memory. Empty (`Kind::None`) from the fixed engine,
-    /// an older snapshot or a pickle: the resumed controller then starts
+    /// an older snapshot or a pickle older than version 5 (or than the
+    /// device interface's 15-field version 4): the resumed controller starts
     /// from its initial step (exact in state, to tolerance in trajectory).
     step::ControllerState controller;
     /// The controllers' state at `t` (control graphs, C blocks), owned
@@ -566,6 +580,11 @@ struct SimulationResult {
     Real newton_roundoff_omega_max = 0;
     Index newton_roundoff_row = kInvalidIndex;
 
+    /// add-probes-and-recorders D3: the grid the rows sit on and the run's
+    /// engine-independent counters (set by the engine adapter).
+    record::GridKind grid = record::GridKind::Uniform;
+    record::RunStats stats;
+
     /// Start the record for a circuit with `num_switches` mask bits.
     /// Call once, before the first sample is stored.
     void begin_switch_state_record(Size num_switches, Size n_reserve = 0) {
@@ -697,7 +716,7 @@ struct SimulationResult {
 /// truncated result as if it were a whole one is exactly the silent
 /// wrong answer this project keeps removing; a caller who wants the
 /// partial trace has to ask for it by catching this type.
-class SimulationAborted : public std::runtime_error {
+class SimulationAborted : public std::runtime_error, public PulsimError {
 public:
     SimulationAborted(const std::string& what,
                        SimulationResult partial,

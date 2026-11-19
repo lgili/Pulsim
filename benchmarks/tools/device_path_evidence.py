@@ -241,9 +241,9 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     recs = (law_circuits(a.repeats) + differential(a.circuits.split(","), a.repeats)
             + analytic(a.repeats))
-    OUT.write_text(render(recs))
+    OUT.write_text(render(recs), encoding="utf-8")
     if a.json:
-        Path(a.json).write_text(json.dumps(recs, indent=1, default=str))
+        Path(a.json).write_text(json.dumps(recs, indent=1, default=str), encoding="utf-8")
     print(f"wrote {OUT}")
     return 0
 

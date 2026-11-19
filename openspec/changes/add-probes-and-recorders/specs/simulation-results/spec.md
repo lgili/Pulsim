@@ -146,6 +146,17 @@ SHALL produce a warning that names the time-weighted measure.
 - **THEN** the two results agree within the variable-step tolerance,
   while the unweighted sample means differ
 
+#### Scenario: Windows are clipped exactly on the limits
+- **GIVEN** a record with an event at `t_e` carrying distinct left and
+  right limits, and windows whose edges fall mid-step, at `t_e`, or
+  within rounding of a sample time
+- **WHEN** a recorder computes the window statistics
+- **THEN** a mid-step edge is interpolated on the step that straddles
+  it, a window starting at `t_e` starts from the right limit, one ending
+  at `t_e` ends on the left limit, min and max inside a window see both
+  limits, and the average equals `pulsim.time_average` on the same
+  samples to round-off
+
 #### Scenario: Engines agree on the turn-off regression
 - **GIVEN** the diode turn-off circuit with a series inductor of the
   2026-09 regression

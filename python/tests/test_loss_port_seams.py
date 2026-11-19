@@ -202,7 +202,7 @@ def _sat_buck():
     return b, loop
 
 
-def test_closed_loop_with_stateful_devices_resumes_and_its_pickle_is_refused():
+def test_closed_loop_with_stateful_devices_resumes_and_from_its_pickle():
     """The control graph's resume state and the device interface's flat
     device-state vector (pickle version 3) in one snapshot."""
     t1, t2, dt = 1.53e-3, 3e-3, 1e-6
@@ -223,8 +223,14 @@ def test_closed_loop_with_stateful_devices_resumes_and_its_pickle_is_refused():
     assert np.abs(xf[:n] - xs[:n]).max() <= 1e-9 * np.abs(xf).max()
     copy = pickle.loads(pickle.dumps(snap))
     assert list(copy.dev_state) == list(snap.dev_state)
-    with pytest.raises(p.UnsupportedError, match="was pickled"):
-        p.simulate(b, t2, dt=dt, closed_loops=[lp], resume_from=copy)
+    # the controllers' state pickles too (G33): new controllers built the
+    # same way continue as the in-memory resume did
+    b2, lp2 = _sat_buck()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        third = p.simulate(b2, t2, dt=dt, closed_loops=[lp2], resume_from=copy)
+    assert [d for _, d in lp2.duty_history] == [d for _, d in lp.duty_history]
+    assert np.asarray(third.states).tobytes() == xs.tobytes()
 
 
 def test_a_twelve_field_version_3_pickle_still_loads():
@@ -234,10 +240,15 @@ def test_a_twelve_field_version_3_pickle_still_loads():
     snap = p.simulate(b, 2e-4, dt=1e-6, switch_fn=lambda t, n=b.graph.num_switches: p.SwitchStateMask(n)
                       ).final_snapshot
     st = snap.__getstate__()
-    # version 4 (batch 13): the 13 fields of version 3 + the grid
-    assert st[:2] == ("SolverSnapshot", 4) and len(st) == 14 and st[12] is False
+    # version 5: the marker is field 12, the grid field 13
+    assert st[:2] == ("SolverSnapshot", 5) and len(st) == 17 and st[12] is False
+    v3 = ("SolverSnapshot", 3) + tuple(st[2:12])
     old = type(snap).__new__(type(snap))
-    old.__setstate__(("SolverSnapshot", 3) + tuple(st[2:12]))
+    old.__setstate__(v3)
+    assert list(old.dev_state) == list(snap.dev_state)
+    assert old._control_state is None
+    old = type(snap).__new__(type(snap))
+    old.__setstate__(v3 + (False,))
     assert list(old.dev_state) == list(snap.dev_state)
     assert old._control_state is None
 
@@ -260,7 +271,8 @@ def test_trbdf2_resume_of_an_offset_group_checks_the_offset_grid():
     """Ticks at 30 us + k*100 us. The queue resumes them at t_start +
     offset + k*T: from 1.5 ms (on the grid, next tick 1.53 ms) it lands
     them; from 1.53 ms (a tick instant, but 30 us past the grid origin)
-    they would fall at 1.56, 1.66 ms, so it is refused by name."""
+    they would fall at 1.56, 1.66 ms: the snapshot's tick origin keeps
+    them on the run's grid (event-queue DECISIONS 13; before: refused)."""
     b, ch, obs, first = _offset_chain_run(1.5e-3)
     p.simulate(b, 2e-3, engine="trbdf2", step_observer=obs,
                resume_from=first.final_snapshot)
@@ -268,9 +280,11 @@ def test_trbdf2_resume_of_an_offset_group_checks_the_offset_grid():
     np.testing.assert_allclose(t, 3e-5 + np.arange(len(t)) * 1e-4, atol=1e-12)
     assert len(t) == 20
     b, ch, obs, first = _offset_chain_run(1.53e-3)
-    with pytest.raises(p.UnsupportedError, match="between two"):
-        p.simulate(b, 2e-3, engine="trbdf2", step_observer=obs,
-                   resume_from=first.final_snapshot)
+    p.simulate(b, 2e-3, engine="trbdf2", step_observer=obs,
+               resume_from=first.final_snapshot)
+    t = np.asarray(ch._cxx_chain.get_recording_times())
+    np.testing.assert_allclose(t, 3e-5 + np.arange(len(t)) * 1e-4, atol=1e-12)
+    assert len(t) == 20
 
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2"))

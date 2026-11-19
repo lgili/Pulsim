@@ -60,10 +60,12 @@
 #include "pulsim/solver/voltage_sanity.hpp"
 #include "pulsim/mmc/thevenin_arm.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/mode_ports.hpp"
 #include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/run_transient.hpp"
+#include "pulsim/sim/simulation.hpp"
 #include "pulsim/solver/trbdf2_transient.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/errors/convergence.hpp"
@@ -79,6 +81,7 @@
 #include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/sources/spwm_pair_fn.hpp"
 #include "pulsim/sources/switch_schedule.hpp"
+#include "pulsim/events/gate_source.hpp"   // DutyRegister, CarrierPwm, EdgeList
 #include "pulsim/sources/three_phase_spwm_fn.hpp"
 #include "pulsim/streaming/live_ring.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -91,27 +94,7 @@ using namespace pybind11::literals;  // for "name"_a kwarg shorthand
 
 namespace pulsim_kernel_bindings {
 
-/// A b_extra_fn argument as (fn, next_jump_after). A control graph's
-/// CxxChainBExtra runs in C++ (no GIL per call); any other callable goes
-/// through pybind's functional caster, its optional next_jump_after too.
-inline void resolve_b_extra(const py::object& obj,
-                            pulsim::solver::BExtraFn& fn,
-                            std::function<pulsim::Real(pulsim::Real)>& next_jump) {
-    if (obj.is_none()) return;
-    if (py::isinstance<pulsim::blockchain::ChainBExtra>(obj)) {
-        const auto& c = obj.cast<const pulsim::blockchain::ChainBExtra&>();
-        fn = c.fn;
-        next_jump = [ch = c.chain](pulsim::Real t) {
-            return ch->next_jump_after(t);
-        };
-        return;
-    }
-    fn = obj.cast<pulsim::solver::BExtraFn>();
-    if (py::hasattr(obj, "next_jump_after")) {
-        next_jump = obj.attr("next_jump_after")
-                        .cast<std::function<pulsim::Real(pulsim::Real)>>();
-    }
-}
+using pulsim_bindings_common::resolve_b_extra;
 
 /// The static Newton chain for a transient driver. The kernel always
 /// builds it when the pool needs one, so `None` and `True` are the same
@@ -121,25 +104,8 @@ inline pulsim::pwl::NonlinearRefreshFn transient_refresh(
     const pulsim::topology::Graph& graph,
     const pulsim::pwl::DevicePool& pool, std::optional<bool> enable,
     const char* engine) {
-    using pulsim::pwl::SolveClass;
-    if (!enable.has_value()) return {};
-    // True: what the kernel builds by itself (pwl::static_device_refresh).
-    if (*enable) return {};
-    for (pulsim::Index b = 0; b < graph.num_branches(); ++b) {
-        if (!pool.is_registered(b)
-            || pulsim::pwl::kind_caps(pool.kind_of(b)).cls
-                   != SolveClass::NewtonStatic) {
-            continue;
-        }
-        const std::string name(graph.branch_name(b));
-        throw pulsim::UnsupportedError(engine, "enable_nonlinear_refresh",
-            name, std::string(pulsim::pwl::stored_kind_name(pool.kind_of(b))),
-            std::string(engine) + ": enable_nonlinear_refresh=False would "
-            "simulate '" + name + "' (a Newton device: smooth / Shockley "
-            "diode, MOSFET, IGBT) as an open circuit. Pass None (the "
-            "default) or True.");
-    }
-    return {};
+    // One rule for every entry point (add-kernel-simulation-object).
+    return pulsim::sim::transient_refresh(graph, pool, enable, engine);
 }
 
 void init_module(py::module_& m) {
@@ -157,8 +123,6 @@ void init_module(py::module_& m) {
     // `pulsim.Cancelled` (defined in
     // `python/pulsim/_builder_ergonomics.py`) catches this and
     // re-raises with its own attribute layout.
-    static py::object cancelled_exc = py::register_exception<
-        analysis::Cancelled>(m, "_CxxCancelled", PyExc_RuntimeError);
 
     // v2.0 Phase 2: a transient that dies part-way brings the run
     // with it. `py::register_exception` can only carry a message, so
@@ -172,8 +136,26 @@ void init_module(py::module_& m) {
     // `ConvergenceError` (add-parameter-sensitivities, task 5a) is the
     // common base of every non-convergence: a RuntimeError, so the
     // `except RuntimeError` of callers keeps working.
-    static py::object convergence_exc = py::exception<void>(
-        m, "ConvergenceError", PyExc_RuntimeError);
+    //
+    // add-kernel-simulation-object (8.1): every pulsim error is also a
+    // `PulsimError`, so one `except pulsim.PulsimError` catches them all
+    // while each keeps its standard base (ValueError, RuntimeError, ...).
+    static py::object pulsim_exc = py::exception<void>(
+        m, "PulsimError", PyExc_Exception);
+    const auto pulsim_error_type = [&m](const char* name, PyObject* base) {
+        py::object t = py::reinterpret_borrow<py::object>(
+            reinterpret_cast<PyObject*>(&PyType_Type))(
+            name, py::make_tuple(py::handle(base), pulsim_exc),
+            py::dict(py::arg("__module__") = m.attr("__name__")));
+        m.attr(name) = t;
+        return t;
+    };
+    static py::object convergence_exc =
+        pulsim_error_type("ConvergenceError", PyExc_RuntimeError);
+    // The kernel's Cancelled (`pulsim.Cancelled` catches and re-raises it
+    // with its own attributes); a PulsimError too.
+    static py::object cancelled_exc =
+        pulsim_error_type("_CxxCancelled", PyExc_RuntimeError);
     static py::object aborted_exc = py::exception<void>(
         m, "SimulationAborted", convergence_exc);
     // The run's Newton roundoff-acceptance budget ran out: a
@@ -213,8 +195,13 @@ void init_module(py::module_& m) {
     // The typed refusal (add-engine-conformance-matrix). A ValueError,
     // so `except ValueError` keeps working; the four fields say which
     // engine refused which device or feature.
-    static py::object unsupported_exc = py::exception<void>(
-        m, "UnsupportedError", PyExc_ValueError);
+    static py::object unsupported_exc =
+        pulsim_error_type("UnsupportedError", PyExc_ValueError);
+    // A RunOptions value no engine can take (sim::OptionsError): a
+    // ValueError naming the option.
+    static py::object options_exc =
+        pulsim_error_type("OptionsError", PyExc_ValueError);
+    options_exc.attr("option") = "";
     for (const char* a : {"engine", "feature", "device", "kind"}) {
         unsupported_exc.attr(a) = "";
     }
@@ -232,6 +219,12 @@ void init_module(py::module_& m) {
                 inst.attr("device") = e.device();
                 inst.attr("kind") = e.kind();
                 PyErr_SetObject(unsupported_exc.ptr(), inst.ptr());
+            } catch (const analysis::Cancelled& e) {
+                PyErr_SetString(cancelled_exc.ptr(), e.what());
+            } catch (const sim::OptionsError& e) {
+                py::object inst = options_exc(e.what());
+                inst.attr("option") = e.option();
+                PyErr_SetObject(options_exc.ptr(), inst.ptr());
             }
         });
 
@@ -333,6 +326,14 @@ void init_module(py::module_& m) {
         "The gated PWL devices' engine column (add-pwl-igbt-and-"
         "thyristor): {'GateHeld'|'Latching': {engine: bool}}; False "
         "refuses with UnsupportedError(feature='gated_diode').");
+    m.def("_lcp_circuit_refusal",
+        [](const topology::Graph& graph, const pwl::DevicePool& pool) {
+            const auto r = pwl::lcp_circuit_refusal(graph, pool);
+            return py::make_tuple(r.reason, r.device);
+        },
+        "(reason, device): why mode_selection='lcp' refuses this circuit on "
+        "pwl — '' (it applies), 'no_diodes', 'gated', 'newton'. Read by "
+        "mode_selection='auto'.");
     m.def("_require_supported",
         [](const topology::Graph& graph, const pwl::DevicePool& pool,
            const std::string& engine_in) {
@@ -1296,6 +1297,7 @@ void init_module(py::module_& m) {
               py::arg("tau_tail") = 0.0,
               py::arg("k_tail")   = 0.0,
               py::arg("V_F")      = 0.7,
+              py::kw_only(), py::arg("form") = "conductance",
               py::return_value_policy::reference,
               "Add a 3-terminal IGBT Level 1 (linear-"
               "conduction model with cutoff sigmoid). "
@@ -1336,6 +1338,7 @@ void init_module(py::module_& m) {
               py::arg("kappa")   = 15.0,
               py::arg("with_body_diode") = true,
               py::arg("V_F") = 0.7,
+              py::kw_only(), py::arg("form") = "conductance",
               py::return_value_policy::reference,
               "Add a 3-terminal SH1 MOSFET (Shichman-Hodges "
               "Level 1). Cutoff/triode/saturation regions "
@@ -1513,6 +1516,11 @@ void init_module(py::module_& m) {
                   // add-branch-form-ideal-switch: form='branch' (R_on,
                   // g_off default 0; a given g_on means R_on = 1/g_on).
                   if (form == "branch") {
+                      if (R_on && g_on) {   // one resistance, two values: refuse, never drop one
+                          throw py::value_error(std::format(
+                              "add_diode(\"{}\"): form='branch' takes R_on or g_on "
+                              "(R_on = 1/g_on), not both.", name));
+                      }
                       const double r = R_on ? *R_on
                                      : g_on ? 1.0 / *g_on : 0.0;
                       return self.add_diode_branch(name, anode, cathode, r,
@@ -1564,13 +1572,50 @@ void init_module(py::module_& m) {
               "g_off >= 0 in parallel when open (0 = ideal). Engines and "
               "refusals: the capability table (add-branch-form-ideal-switch).")
         .def("add_switch",
-              &builder::CircuitBuilder::add_switch,
+              [](builder::CircuitBuilder& self, std::string_view name,
+                 std::string_view n_pos, std::string_view n_neg,
+                 std::optional<double> g_on, std::optional<double> g_off,
+                 std::string_view form,
+                 std::optional<double> R_on) -> builder::CircuitBuilder& {
+                  // add-branch-form-ideal-switch D6: as add_diode — the
+                  // branch form takes R_on (else 1/g_on, else 0) and g_off
+                  // (else 0); the conductance form needs g_on and g_off.
+                  if (form == "branch") {
+                      if (R_on && g_on) {   // one resistance, two values: refuse, never drop one
+                          throw py::value_error(std::format(
+                              "add_switch(\"{}\"): form='branch' takes R_on or g_on "
+                              "(R_on = 1/g_on), not both.", name));
+                      }
+                      const double r = R_on ? *R_on
+                                     : g_on ? 1.0 / *g_on : 0.0;
+                      return self.add_ideal_switch(name, n_pos, n_neg, r,
+                                                   g_off.value_or(0.0));
+                  }
+                  if (form != "conductance") {
+                      throw py::value_error(std::format(
+                          "add_switch(\"{}\"): form='{}'; expected "
+                          "'conductance' or 'branch'.", name, form));
+                  }
+                  if (!g_on || !g_off || R_on) {
+                      throw py::value_error(std::format(
+                          "add_switch(\"{}\"): the conductance form takes g_on "
+                          "and g_off (R_on is the branch form's: "
+                          "form='branch').", name));
+                  }
+                  return self.add_switch(name, n_pos, n_neg, *g_on, *g_off);
+              },
               py::arg("name"), py::arg("n_pos"),
-              py::arg("n_neg"), py::arg("g_on"),
-              py::arg("g_off"),
+              py::arg("n_neg"), py::arg("g_on") = py::none(),
+              py::arg("g_off") = py::none(), py::kw_only(),
+              py::arg("form") = "conductance",
+              py::arg("R_on") = py::none(),
               py::return_value_policy::reference,
-              "Add a controlled switch (driven by switch_fn "
-              "at simulation time).")
+              "Add a controlled switch (driven by switch_fn at simulation "
+              "time). form='conductance' (default): g_on/g_off in siemens, "
+              "both required. form='branch': its own current unknown, "
+              "R_on >= 0 in series when closed (default 0 = ideal; a given "
+              "g_on means R_on = 1/g_on), g_off >= 0 when open (default 0) "
+              "— the same element as add_ideal_switch.")
         // ---- Layer 2 V1: power-device helpers ----
         .def("add_mosfet",
               &builder::CircuitBuilder::add_mosfet,
@@ -1580,6 +1625,7 @@ void init_module(py::module_& m) {
               py::arg("R_off") = 1e9,
               py::arg("body_diode") = true,
               py::arg("V_F") = 0.7,
+              py::kw_only(), py::arg("form") = "conductance",
               py::return_value_policy::reference,
               "Add an n-channel power MOSFET: a controlled "
               "switch (drain → source) PLUS its intrinsic "
@@ -1604,6 +1650,7 @@ void init_module(py::module_& m) {
               py::arg("V_F") = 0.7,
               py::arg("g_on_diode") = 1e3,
               py::arg("g_off_diode") = 1e-9,
+              py::kw_only(), py::arg("form") = "conductance",
               py::return_value_policy::reference,
               "Add an n-channel power MOSFET WITH "
               "intrinsic anti-parallel body diode. Adds "
@@ -1655,7 +1702,7 @@ void init_module(py::module_& m) {
                  std::string_view collector, std::string_view emitter,
                  double R_on, double R_off, double V_ce0,
                  std::optional<bool> reverse_blocking,
-                 double V_th) -> builder::CircuitBuilder& {
+                 double V_th, std::string_view form) -> builder::CircuitBuilder& {
                   // add-pwl-igbt-and-thyristor stage 1: the default stays
                   // the bidirectional switch for one release, with a
                   // warning (a knee implies reverse blocking).
@@ -1673,7 +1720,7 @@ void init_module(py::module_& m) {
                   return self.add_igbt(name, collector, emitter, R_on, R_off,
                                        V_ce0,
                                        reverse_blocking.value_or(V_ce0 > 0.0),
-                                       V_th);
+                                       V_th, form);
               },
               py::arg("name"), py::arg("collector"),
               py::arg("emitter"),
@@ -1683,6 +1730,7 @@ void init_module(py::module_& m) {
               py::arg("V_ce0") = 0.0,
               py::arg("reverse_blocking") = py::none(),
               py::arg("V_th") = 0.0,
+              py::arg("form") = "conductance",
               py::return_value_policy::reference,
               "Add a PWL IGBT (collector → emitter), its mask bit the "
               "gate. reverse_blocking=True: ON while the gate is on and "
@@ -3195,6 +3243,29 @@ void init_module(py::module_& m) {
                        &SimulationResult::Resolution::n_branches_covered)
         .def_readonly("ringing", &SimulationResult::Resolution::ringing);
 
+    py::enum_<record::GridKind>(m, "GridKind",
+        "What grid a result's rows sit on (add-probes-and-recorders D3).")
+        .value("Uniform", record::GridKind::Uniform)
+        .value("Accepted", record::GridKind::Accepted)
+        .value("Requested", record::GridKind::Requested);
+    {
+        auto rs = py::class_<record::RunStats>(m, "RunStats",
+            "Engine-independent run counters; zero where an engine does not "
+            "report one. `engine` names the engine that filled them.");
+        rs.def_readonly("engine", &record::RunStats::engine);
+#define PULSIM_RUNSTAT(f) rs.def_readonly(#f, &record::RunStats::f);
+        PULSIM_RUNSTAT(n_steps) PULSIM_RUNSTAT(n_accept) PULSIM_RUNSTAT(n_reject)
+        PULSIM_RUNSTAT(n_solves) PULSIM_RUNSTAT(n_factorizations)
+        PULSIM_RUNSTAT(n_gate_events) PULSIM_RUNSTAT(n_state_events)
+        PULSIM_RUNSTAT(n_mode_events) PULSIM_RUNSTAT(n_ctrl_ticks)
+        PULSIM_RUNSTAT(n_newton_iterations) PULSIM_RUNSTAT(n_newton_retries)
+        PULSIM_RUNSTAT(n_forced_accepts) PULSIM_RUNSTAT(n_chatter_breaks)
+        PULSIM_RUNSTAT(n_gate_undersampled) PULSIM_RUNSTAT(n_rk45_steps)
+        PULSIM_RUNSTAT(n_bdf2_steps) PULSIM_RUNSTAT(n_exact_steps)
+        PULSIM_RUNSTAT(gate_pulse_min) PULSIM_RUNSTAT(gate_sample_spacing_max)
+        PULSIM_RUNSTAT(cpu_time_seconds)
+#undef PULSIM_RUNSTAT
+    }
     py::class_<SimulationResult>(m, "SimulationResult",
         "Output of run_transient: parallel `times` and "
         "`states` arrays, plus event diagnostics.",
@@ -3249,10 +3320,15 @@ void init_module(py::module_& m) {
                     d["enumerations"] = m.enumerations;
                     d["nonunique_modes"] = m.nonunique_modes;
                     d["hysteresis_released"] = m.released;
+                    d["shorted_held"] = m.shorted_held;
+                    d["shorted_released"] = m.shorted_released;
                     d["settle_rounds_total"] = m.settle_rounds_total;
                     d["mask_cycles"] = m.mask_cycles;
                     d["inconsistent"] = m.inconsistent;
                     d["port_solves"] = m.port_solves;
+                    d["port_matrices"] = m.port_matrices;
+                    d["quiet_sites"] = m.quiet_sites;
+                    d["cached_sites"] = m.cached_sites;
                     d["port_model_problems"] = m.lcps;
                     d["errors"] = m.errors;
                     d["last_error"] = m.last_error;
@@ -3538,7 +3614,124 @@ void init_module(py::module_& m) {
                        &SimulationResult::newton_roundoff_omega_max)
         .def_readonly("newton_roundoff_row",
                        &SimulationResult::newton_roundoff_row)
-        .def("num_steps", &SimulationResult::num_steps);
+        .def("num_steps", &SimulationResult::num_steps)
+        .def("empty", &SimulationResult::empty, "True when nothing was recorded.")
+        // add-probes-and-recorders D3: one result type on every engine.
+        .def(py::init<>(),
+             "An empty result. Kernel adapters fill it (`_adapter_fill`, "
+             "`_set_run_info`); every engine returns this type.")
+        .def("_adapter_fill",
+            [](SimulationResult& r,
+               py::array_t<Real, py::array::c_style | py::array::forcecast> t,
+               py::array_t<Real, py::array::c_style | py::array::forcecast> x,
+               py::object sw, py::list reinit) {
+                if (!r.times.empty() || r.states.rows() != 0) {
+                    throw std::logic_error("_adapter_fill: the result is already filled");
+                }
+                if (t.ndim() != 1 || x.ndim() != 2
+                    || (t.shape(0) != 0 && x.shape(0) != t.shape(0))) {
+                    throw std::invalid_argument(
+                        "_adapter_fill: times must be 1-D and states 2-D with one row per time");
+                }
+                const auto rows = static_cast<Size>(t.shape(0));
+                const auto cols = static_cast<Index>(x.shape(1));
+                r.times.assign(t.data(), t.data() + rows);
+                r.states.set_state_size(cols);
+                r.states.reserve(rows);
+                for (Size k = 0; k < rows; ++k) {
+                    r.states.push_back(Eigen::Map<const Vector>(
+                        x.data() + k * static_cast<Size>(cols), cols));
+                }
+                if (!sw.is_none()) {
+                    auto b = py::array_t<bool, py::array::c_style | py::array::forcecast>::ensure(sw);
+                    if (!b || b.ndim() != 2 || static_cast<Size>(b.shape(0)) != rows) {
+                        throw std::invalid_argument(
+                            "_adapter_fill: switch_states must be (len(times), n_switches) bool");
+                    }
+                    const auto nb = static_cast<Size>(b.shape(1));
+                    r.begin_switch_state_record(nb, rows);
+                    const bool* src = b.data();
+                    for (Size k = 0; k < rows; ++k) {
+                        for (Size byte = 0; byte < r.switch_state_stride; ++byte) {
+                            std::uint8_t v = 0;
+                            for (Size j = byte * 8; j < std::min(nb, byte * 8 + 8); ++j) {
+                                v |= static_cast<std::uint8_t>(src[k * nb + j] ? 1U : 0U) << (j % 8);
+                            }
+                            r.switch_state_bits.push_back(v);
+                        }
+                    }
+                }
+                for (const auto& item : reinit) {
+                    const auto d = item.cast<py::dict>();
+                    ReinitRecord rr;
+                    rr.t = d["t"].cast<Real>();
+                    rr.kind = d["kind"].cast<std::string>();
+                    rr.devices = d["devices"].cast<std::vector<std::string>>();
+                    rr.states = d["states"].cast<std::vector<std::string>>();
+                    rr.lambda = d["lambda"].cast<Real>();
+                    rr.dW = d["dW"].cast<Real>();
+                    rr.projection_gap = d["projection_gap"].cast<Real>();
+                    rr.sample = d["sample"].cast<long>();
+                    if (d.contains("cause")) rr.cause = d["cause"].cast<std::string>();
+                    r.reinit_records.push_back(std::move(rr));
+                }
+            },
+            "times"_a, "states"_a, "switch_states"_a = py::none(),
+            "reinit_records"_a = py::list(),
+            "Adapter use only: fill an empty result from arrays (times, "
+            "states, the per-sample mask, re-initialisation dicts).")
+        .def("_set_run_info",
+            [](SimulationResult& r, const std::string& engine, record::GridKind grid,
+               const py::dict& d) {
+                r.grid = grid;
+                auto& s = r.stats;
+                s = record::RunStats{};
+                s.engine = engine;
+                // decltype, not `Size record::RunStats::*`: MSVC rejects that spelling in a template argument
+                using SizeMember = decltype(&record::RunStats::n_steps);
+                using RealMember = decltype(&record::RunStats::gate_pulse_min);
+                const std::pair<const char*, SizeMember> sizes[] = {
+                    {"n_steps", &record::RunStats::n_steps},
+                    {"n_accept", &record::RunStats::n_accept},
+                    {"n_reject", &record::RunStats::n_reject},
+                    {"n_solves", &record::RunStats::n_solves},
+                    {"n_factorizations", &record::RunStats::n_factorizations},
+                    {"n_gate_events", &record::RunStats::n_gate_events},
+                    {"n_state_events", &record::RunStats::n_state_events},
+                    {"n_mode_events", &record::RunStats::n_mode_events},
+                    {"n_ctrl_ticks", &record::RunStats::n_ctrl_ticks},
+                    {"n_newton_iterations", &record::RunStats::n_newton_iterations},
+                    {"n_newton_retries", &record::RunStats::n_newton_retries},
+                    {"n_forced_accepts", &record::RunStats::n_forced_accepts},
+                    {"n_chatter_breaks", &record::RunStats::n_chatter_breaks},
+                    {"n_gate_undersampled", &record::RunStats::n_gate_undersampled},
+                    {"n_rk45_steps", &record::RunStats::n_rk45_steps},
+                    {"n_bdf2_steps", &record::RunStats::n_bdf2_steps},
+                    {"n_exact_steps", &record::RunStats::n_exact_steps}};
+                const std::pair<const char*, RealMember> reals[] = {
+                    {"gate_pulse_min", &record::RunStats::gate_pulse_min},
+                    {"gate_sample_spacing_max", &record::RunStats::gate_sample_spacing_max},
+                    {"cpu_time_seconds", &record::RunStats::cpu_time_seconds}};
+                std::size_t used = 0;
+                for (const auto& [k, m] : sizes) {
+                    if (d.contains(k)) { s.*m = d[k].cast<Size>(); ++used; }
+                }
+                for (const auto& [k, m] : reals) {
+                    if (d.contains(k)) { s.*m = d[k].cast<Real>(); ++used; }
+                }
+                if (used != d.size()) {
+                    throw std::invalid_argument("_set_run_info: unknown RunStats key");
+                }
+            },
+            "engine"_a, "grid"_a, "stats"_a,
+            "Adapter use only: set the grid kind and the run statistics.")
+        .def_readonly("grid", &SimulationResult::grid,
+            "GridKind of the rows: Uniform (pwl), Accepted (trbdf2, dsed) "
+            "or Requested. A plain .mean() over an Accepted grid is not a "
+            "time average: use pulsim.time_average.")
+        .def_readonly("stats", &SimulationResult::stats,
+            "RunStats: engine-independent counters (zero where the engine "
+            "does not report one).");
 
     // ---- run_transient ---------------------------------------------------
     //
@@ -3796,6 +3989,87 @@ void init_module(py::module_& m) {
         "at that point, so an on-time of a whole number of "
         "steps is exactly that many steps in every period. "
         "Usable as `switch_fn=` in simulate / run_transient.");
+
+    // add-unified-event-queue task 6.1: the modulator primitives.
+    py::class_<events::DutyRegister, std::shared_ptr<events::DutyRegister>>(
+        m, "DutyRegister",
+        "A duty a controller writes (`write(value, t)`) and a "
+        "make_carrier_pwm_fn modulator reads. latch='immediate' takes a "
+        "write at once; latch='carrier_start' holds it until the next "
+        "start of the carrier (period, phase), which must equal the "
+        "modulator's.")
+        .def(py::init([](Real value, const std::string& latch, Real period,
+                         Real phase) {
+                 events::DutyRegister r{value};
+                 if (latch == "carrier_start") {
+                     if (!(period > Real{0})) {
+                         throw std::invalid_argument(
+                             "DutyRegister: latch='carrier_start' needs period > 0");
+                     }
+                     r.latch = events::LatchPolicy::AtCarrierStart;
+                     r.T = period;
+                     r.phase = phase;
+                 } else if (latch != "immediate") {
+                     throw std::invalid_argument(
+                         "DutyRegister: latch must be 'immediate' or "
+                         "'carrier_start'; got '" + latch + "'");
+                 }
+                 return std::make_shared<events::DutyRegister>(r);
+             }),
+             py::arg("value") = 0.0, py::arg("latch") = "immediate",
+             py::arg("period") = 0.0, py::arg("phase") = 0.0)
+        .def("write", &events::DutyRegister::write, py::arg("value"), py::arg("t"),
+             "Write a duty; `t` is the tick's scheduled instant.")
+        .def("read", &events::DutyRegister::read, py::arg("t"),
+             "The duty in force at t.")
+        .def_property_readonly("value",
+             [](const events::DutyRegister& r) { return r.value; },
+             "The latched duty (a 'carrier_start' write not yet latched "
+             "is not in it).");
+
+    m.def("make_carrier_pwm_fn",
+        [](Real period, std::shared_ptr<events::DutyRegister> duty,
+           Index switch_idx, Size num_switches, Index low_side, Real dead_time,
+           Real phase) {
+            if (!duty) throw std::invalid_argument("make_carrier_pwm_fn: duty is None");
+            events::GateSet set(num_switches);
+            set.add(events::CarrierPwm{period, phase, duty.get(), switch_idx,
+                                       low_side, dead_time}, "carrier_pwm");
+            const auto s = set.to_schedule();
+            // the schedule holds the register: it lives as long as the gate
+            sources::SwitchSchedule out{
+                [s, duty](Real t) { return s(t); },
+                [s, duty](Real t) { return s.next_edge_after(t); }};
+            out.follows_controller = true;
+            return out;
+        },
+        py::arg("period"), py::arg("duty"), py::arg("switch_idx"),
+        py::arg("num_switches"), py::arg("low_side") = -1,
+        py::arg("dead_time") = 0.0, py::arg("phase") = 0.0,
+        "A SwitchSchedule: a sawtooth carrier of `period` (starting at "
+        "`phase` seconds) compared with the DutyRegister `duty`; "
+        "`switch_idx` is ON while the carrier is below the duty. With "
+        "`low_side` >= 0 a complementary leg with `dead_time`. For a "
+        "constant duty it equals make_pwm_switch_fn / "
+        "make_dead_time_pwm_pair_fn exactly. Its edges are those of the "
+        "duty held now: write the register from a controller tick "
+        "(closed_loops / a step_observer with a period) and every engine "
+        "re-asks the edge after the tick.");
+
+    m.def("make_edge_list_fn",
+        [](const std::vector<std::tuple<Real, Index, bool>>& edges,
+           Size num_switches) {
+            std::vector<events::EdgeList::Edge> e;
+            e.reserve(edges.size());
+            for (const auto& [t, bit, on] : edges) e.push_back({t, bit, on});
+            events::GateSet set(num_switches);
+            set.add(events::EdgeList{std::move(e)}, "edge_list");
+            return set.to_schedule();
+        },
+        py::arg("edges"), py::arg("num_switches"),
+        "A SwitchSchedule from explicit gate edges (t, switch_idx, on): "
+        "the bit takes `on` at t and holds it until its next edge, OFF "
+        "before its first. Engines land every edge exactly.");
 
     m.def("make_phase_control_fn",
         &sources::make_phase_control_fn,
@@ -4071,6 +4345,13 @@ void init_module(py::module_& m) {
             [](const SolverSnapshot& s) { return s.mask; },
             [](SolverSnapshot& s, std::vector<bool> v) { s.mask = std::move(v); },
             "Deprecated name of ``mask``.")
+        .def_readwrite("tick_origin", &SolverSnapshot::tick_origin,
+            "Per control-tick source, in registration order: the origin of "
+            "its grid (ticks at origin + offset + k*period). simulate("
+            "resume_from=) passes it back so the resumed ticks stay on the "
+            "run's grid. Empty: no ticks, or an older snapshot.")
+        .def_readwrite("tick_next_k", &SolverSnapshot::tick_next_k,
+            "Per control-tick source: the index k of its next instant.")
         .def_readwrite("stamped_mask", &SolverSnapshot::stamped_mask,
             "The switch / diode mask stamped for the solve that "
             "produced ``x`` (one bool per SwitchStateMask bit): the "
@@ -4205,16 +4486,18 @@ void init_module(py::module_& m) {
         .def(py::pickle(
             [](const SolverSnapshot& s) {
                 // A tag first, so it never reads as the 2.0 tuples
-                // (which start with t). Version 4 = version 3 + the
-                // controllers'-state marker (field 12) + the grid and the
-                // edge flag (field 13). Read: v3 with 12 or 13 fields
-                // (13 = the marker), v4 with 13 (grid at 12, the
-                // device-interface branch) or 14 fields; 15 = the step
-                // controller's block (DECISIONS #24), written only when
-                // filled, so an empty one keeps the 14-field version 4.
+                // (which start with t). Version 5 (batch 14a) is the one
+                // layout that carries every block, always written:
+                //   0 tag, 1 version, 2-10 as version 3, 11 legacy payload
+                //   or None, 12 the controllers'-state marker, 13 the grid
+                //   (origin, step, dt, post_edge_derivatives), 14 the step
+                //   controller (kind, values) or None, 15 tick_origin,
+                //   16 tick_next_k.
+                // Version 4 had four layouts on parallel branches (13, 14
+                // or 15 fields; field 12 a bool or a tuple); all still load.
                 const auto& L = s.legacy;
-                py::tuple out = py::make_tuple(
-                    std::string("SolverSnapshot"), 4, s.t, s.x, s.dev_state,
+                return py::make_tuple(
+                    std::string("SolverSnapshot"), 5, s.t, s.x, s.dev_state,
                     s.dev_layout, s.layout_signature, s.mask, s.stamped_mask,
                     s.restart_steps_left, s.valid,
                     s.is_legacy()
@@ -4223,35 +4506,77 @@ void init_module(py::module_& m) {
                               L.lauritzen_history, L.igbt_tail_history,
                               L.pmsm_history))
                         : py::object(py::none()),
-                    // the controllers' state does not pickle: a resume
-                    // from the copy refuses by name instead of
-                    // continuing whatever the graphs hold
-                    static_cast<bool>(s.control_state),
+                    // the controllers' state as bytes where every part
+                    // has them (pulsim._control_state.pickle_payload),
+                    // else True: a resume from the copy refuses by name
+                    // instead of continuing whatever the graphs hold
+                    s.control_state
+                        ? py::module_::import("pulsim._control_state")
+                              .attr("pickle_payload")(
+                                  *static_cast<py::object*>(s.control_state.get()))
+                        : py::object(py::bool_(false)),
                     py::make_tuple(s.grid_origin, s.grid_step, s.grid_dt,
-                                   s.post_edge_derivatives));
-                if (s.controller.empty()) return out;
-                return py::tuple(out + py::make_tuple(py::make_tuple(
-                    static_cast<int>(s.controller.kind), s.controller.v)));
+                                   s.post_edge_derivatives),
+                    s.controller.empty()
+                        ? py::object(py::none())
+                        : py::object(py::make_tuple(
+                              static_cast<int>(s.controller.kind),
+                              s.controller.v)),
+                    s.tick_origin, s.tick_next_k);
             },
             [](py::tuple t) {
+              try {
                 SolverSnapshot s;
                 if (t.size() >= 2 && py::isinstance<py::str>(t[0])) {
                     const int ver = t[1].cast<int>();
+                    const std::size_t n = t.size();
                     if (t[0].cast<std::string>() != "SolverSnapshot"
-                        || !((ver == 3 && (t.size() == 12 || t.size() == 13))
-                             || (ver == 4 && t.size() >= 13 && t.size() <= 15))) {
+                        || !((ver == 3 && (n == 12 || n == 13))
+                             || (ver == 4 && n >= 13 && n <= 15)
+                             || (ver == 5 && n == 17))) {
                         throw std::runtime_error(
                             "SolverSnapshot: pickle version "
                             + std::to_string(ver) + " with "
-                            + std::to_string(t.size())
+                            + std::to_string(n)
                             + " fields; this Pulsim reads version 3 "
-                              "(12 or 13 fields) and 4 (13 to 15 fields)");
+                              "(12 or 13 fields), 4 (13 to 15) and 5 (17)");
                     }
-                    if (ver == 4) {
-                        auto G = t[t.size() == 13 ? 12 : 13].cast<py::tuple>();
+                    // Where each block sits (npos = absent). Version 4's
+                    // variants differ in field 12: a bool there is the
+                    // marker (the PR's 14 fields: grid at 13; the event
+                    // queue's 15: the tick phase at 13-14; the device
+                    // interface's 15: grid 13, controller 14), a tuple is the
+                    // grid (the device interface: marker at 13, controller
+                    // at 14).
+                    constexpr std::size_t npos = std::size_t(-1);
+                    std::size_t marker = npos, grid = npos, ctrl = npos,
+                                ticks = npos;
+                    if (ver == 3) {
+                        if (n == 13) marker = 12;
+                    } else if (ver == 5) {
+                        marker = 12; grid = 13; ctrl = 14; ticks = 15;
+                    } else if (n == 13) {
+                        grid = 12;
+                    } else if (py::isinstance<py::bool_>(t[12])) {
+                        marker = 12;
+                        if (n == 14) {
+                            grid = 13;
+                        } else if (py::isinstance<py::tuple>(t[13])) {
+                            // the device interface's last v4 (52f82c08):
+                            // marker, grid, controller
+                            grid = 13; ctrl = 14;
+                        } else {
+                            ticks = 13;
+                        }
+                    } else {
+                        grid = 12; marker = 13;
+                        if (n == 15) ctrl = 14;
+                    }
+                    if (grid != npos) {
+                        auto G = t[grid].cast<py::tuple>();
                         if (G.size() != 4) {
                             throw std::runtime_error(
-                                "SolverSnapshot: the version-4 grid field "
+                                "SolverSnapshot: the grid field "
                                 "has " + std::to_string(G.size())
                                 + " values, expected 4");
                         }
@@ -4259,6 +4584,29 @@ void init_module(py::module_& m) {
                         s.grid_step = G[1].cast<Size>();
                         s.grid_dt = G[2].cast<Real>();
                         s.post_edge_derivatives = G[3].cast<bool>();
+                    }
+                    if (ctrl != npos && !t[ctrl].is_none()) {
+                        auto C = t[ctrl].cast<py::tuple>();
+                        const int kind = C.size() == 2 ? C[0].cast<int>() : -1;
+                        if (kind < 1 || kind > 2) {
+                            throw std::runtime_error(
+                                "SolverSnapshot: the controller-state field "
+                                "must be (kind, values) with kind 1 (fixed) "
+                                "or 2 (LTE)");
+                        }
+                        s.controller.kind =
+                            static_cast<pulsim::step::ControllerState::Kind>(kind);
+                        s.controller.v = C[1].cast<std::vector<Real>>();
+                    }
+                    if (ticks != npos) {
+                        s.tick_origin = t[ticks].cast<std::vector<Real>>();
+                        s.tick_next_k =
+                            t[ticks + 1].cast<std::vector<std::uint64_t>>();
+                        if (s.tick_origin.size() != s.tick_next_k.size()) {
+                            throw std::runtime_error(
+                                "SolverSnapshot: tick_origin and tick_next_k "
+                                "differ in length");
+                        }
                     }
                     s.t = t[2].cast<Real>();
                     s.x = t[3].cast<Vector>();
@@ -4286,24 +4634,17 @@ void init_module(py::module_& m) {
                         g.igbt_tail_history = L[4].cast<std::vector<Real>>();
                         g.pmsm_history = L[5].cast<std::vector<Real>>();
                     }
-                    // the marker: field 12 of a 13-field v3 or a 14/15-field v4
-                    const bool has_marker = (ver == 3 && t.size() == 13)
-                                            || (ver == 4 && t.size() >= 14);
-                    if (ver == 4 && t.size() == 15 && !t[14].is_none()) {
-                        // the step controller's block (DECISIONS #24)
-                        auto C = t[14].cast<py::tuple>();
-                        const int kind = C.size() == 2 ? C[0].cast<int>() : -1;
-                        if (kind < 1 || kind > 2) {
-                            throw std::runtime_error(
-                                "SolverSnapshot: the controller-state field "
-                                "must be (kind, values) with kind 1 (fixed) "
-                                "or 2 (LTE)");
-                        }
-                        s.controller.kind =
-                            static_cast<pulsim::step::ControllerState::Kind>(kind);
-                        s.controller.v = C[1].cast<std::vector<Real>>();
-                    }
-                    if (has_marker && t[12].cast<bool>()) {
+                    if (marker != npos && !py::isinstance<py::bool_>(t[marker])
+                        && !t[marker].is_none()) {
+                        // the controllers' state (pulsim._control_state)
+                        s.control_state = std::shared_ptr<void>(
+                            new py::object(py::reinterpret_borrow<py::object>(t[marker])),
+                            [](void* p) {
+                                if (!Py_IsInitialized()) return;
+                                py::gil_scoped_acquire gil;
+                                delete static_cast<py::object*>(p);
+                            });
+                    } else if (marker != npos && t[marker].cast<bool>()) {
                         // a marker the resume refuses by name (pulsim._control_state)
                         s.control_state = std::shared_ptr<void>(
                             new py::object(py::str("dropped by pickling")),
@@ -4348,6 +4689,18 @@ void init_module(py::module_& m) {
                             : t[11].cast<Size>();
                 }
                 return s;
+              } catch (const py::cast_error& e) {
+                // a malformed tuple: the named error, not pybind's cast message
+                throw std::runtime_error(
+                    std::string("SolverSnapshot: malformed pickle state (a "
+                                "field has the wrong type): ") + e.what());
+              } catch (py::error_already_set& e) {
+                // a field that is not a sequence where one is read (tuple(bool))
+                if (!e.matches(PyExc_TypeError)) throw;
+                throw std::runtime_error(
+                    std::string("SolverSnapshot: malformed pickle state (a "
+                                "field has the wrong type): ") + e.what());
+              }
             }));
 
     m.def("run_transient",
@@ -4365,20 +4718,39 @@ void init_module(py::module_& m) {
            std::shared_ptr<streaming::LiveRing> live_ring,
            py::object resume_from_obj,
            std::vector<Real> tick_periods,
-           std::vector<std::function<void(Real, const Vector&)>> tick_fns,
+           std::vector<py::object> tick_fn_objs,
            py::object tick_before_obj,
-           Real tick_origin) {
+           Real tick_origin,
+           std::vector<Real> tick_origins,
+           std::vector<std::uint64_t> tick_next_ks) {
             // add-unified-event-queue group 5: Python tick sources, which
             // the kernel's queue schedules (source j calls tick_fns[j]).
+            // a graph's queue tick (CxxChainTick) runs in C++, no GIL
+            std::vector<std::function<void(Real, const Vector&)>> tick_fns;
+            for (const auto& o : tick_fn_objs) {
+                tick_fns.push_back(
+                    py::isinstance<pulsim::blockchain::ChainTick>(o)
+                        ? o.cast<pulsim::blockchain::ChainTick&>().fn
+                        : o.cast<std::function<void(Real, const Vector&)>>());
+            }
             if (tick_periods.size() != tick_fns.size()) {
                 throw std::invalid_argument(
                     "run_transient: tick_periods and tick_fns must have the "
                     "same length");
             }
+            if (!tick_origins.empty() && tick_origins.size() != tick_periods.size()) {
+                throw std::invalid_argument(
+                    "run_transient: tick_origins must be empty or as long as "
+                    "tick_periods");
+            }
             pulsim::events::TickPlan tick_plan;
-            for (const Real T : tick_periods) {
-                tick_plan.rates.push_back(
-                    pulsim::events::Rate{T, Real{0}, tick_origin});
+            for (std::size_t j = 0; j < tick_periods.size(); ++j) {
+                tick_plan.rates.push_back(pulsim::events::Rate{
+                    tick_periods[j], Real{0},
+                    tick_origins.empty() ? tick_origin : tick_origins[j],
+                    tick_next_ks.size() == tick_periods.size() && !tick_origins.empty()
+                        ? tick_next_ks[j]
+                        : std::numeric_limits<std::uint64_t>::max()});
             }
             tick_plan.fn = [&tick_fns](std::uint32_t j, const pulsim::events::TickInfo&,
                                        Real t, const Vector& xs) {
@@ -4501,10 +4873,11 @@ void init_module(py::module_& m) {
         py::arg("live_ring") = std::shared_ptr<streaming::LiveRing>{},
         py::arg("resume_from") = py::none(),
         py::arg("tick_periods") = std::vector<Real>{},
-        py::arg("tick_fns") =
-            std::vector<std::function<void(Real, const Vector&)>>{},
+        py::arg("tick_fns") = std::vector<py::object>{},
         py::arg("tick_before") = py::none(),
         py::arg("tick_origin") = std::numeric_limits<Real>::quiet_NaN(),
+        py::arg("tick_origins") = std::vector<Real>{},
+        py::arg("tick_next_ks") = std::vector<std::uint64_t>{},
         "Run a fixed-dt transient simulation. switch_fn(t) "
         "→ SwitchStateMask; b_extra_fn(t) → Vector adds "
         "to b_constant at each step. `step_observer(t, x)` "
@@ -5160,6 +5533,17 @@ void init_module(py::module_& m) {
             "A copy of the graph's run state (snapshot / resume).")
         .def("restore_state", &BlockChain::restore_state, py::arg("state"),
             "Put back a state saved from this graph.")
+        .def("dump_state", [](BlockChain& self, const BlockChain::State& s) {
+                return py::bytes(self.dump_state(s));
+            }, py::arg("state"),
+            "A state saved from this graph as bytes (what a pickled "
+            "snapshot carries; read back on the same machine and build).")
+        .def("load_state", [](BlockChain& self, const py::bytes& b) {
+                const std::string buf = b;
+                return self.load_state(buf);
+            }, py::arg("data"),
+            "The state dump_state wrote, restorable into this graph "
+            "(ValueError: bytes of another graph). The graph is unchanged.")
         .def("next_due_per_group", &BlockChain::next_due_per_group,
             "Each rate group's next tick instant (group 1, 2, ...).")
         .def("next_due", &BlockChain::next_due,
@@ -5210,7 +5594,7 @@ void init_module(py::module_& m) {
         .def("make_pwm_gate",
             [](BlockChain& self, Size num_switches,
                const std::vector<std::tuple<std::string, Index, Real, Real>>& legs) {
-                ChainPwmGate g{&self, num_switches, {}};
+                ChainPwmGate g{num_switches, {}};
                 for (const auto& [ch, idx, period, phase] : legs) {
                     if (idx < 0 || static_cast<Size>(idx) >= num_switches ||
                         !(period > Real{0})) {
@@ -5218,7 +5602,7 @@ void init_module(py::module_& m) {
                             "make_pwm_gate: switch index out of range or "
                             "period <= 0");
                     }
-                    g.legs.push_back({self.slot(ch), idx, period, phase});
+                    g.add_leg(self, self.slot(ch), idx, period, phase);
                 }
                 return g;
             }, py::arg("num_switches"), py::arg("legs"), py::keep_alive<0, 1>(),
@@ -5244,6 +5628,31 @@ void init_module(py::module_& m) {
                 return ChainTick{&self, self.make_tick_observer()};
             }, py::keep_alive<0, 1>(),
             "Tick callback for the variable-step engine (exact protocol).")
+        .def("set_queue_driven", &BlockChain::set_queue_driven, py::arg("on"),
+            "Fixed engine: the kernel's event queue decides when a rate "
+            "group ticks (make_queue_tick); the graph's observer runs the "
+            "marked groups.")
+        .def_property_readonly("queue_driven", &BlockChain::queue_driven)
+        .def("drop_horizon_state", &BlockChain::drop_horizon_state,
+            "Forget the tick the last run's horizon left out (a run that "
+            "does not resume the snapshot holding it).")
+        .def_property_readonly("last_call_t", &BlockChain::last_call_t,
+            "The label of the last observer call.")
+        .def_property_readonly("grid_t0", &BlockChain::grid_t0,
+            "The tick grid's t0 (the first observer call's time).")
+        .def("group_next_k", &BlockChain::group_next_k, py::arg("group"),
+            "Rate group `group`'s next tick index on the graph's grid.")
+        .def("make_queue_tick", [](BlockChain& self, int group) {
+                if (group < 1 || static_cast<Size>(group) >= self.n_groups()) {
+                    throw std::invalid_argument("make_queue_tick: no such rate group");
+                }
+                BlockChain* ch = &self;
+                return ChainTick{ch, [ch, group](Real, const Vector&) {
+                    ch->mark_queued(group);
+                }};
+            }, py::arg("group"), py::keep_alive<0, 1>(),
+            "The kernel tick source of rate group `group` (C++, no GIL): "
+            "marks it due for the graph's next fixed-step pass.")
         .def_property_readonly("n_evals", &BlockChain::n_evals)
         .def_property_readonly("n_block_evals", &BlockChain::n_block_evals)
         .def("get_channel", &BlockChain::get_channel, py::arg("name"))
@@ -6074,21 +6483,24 @@ void init_module(py::module_& m) {
            py::object switch_fn_obj,
            py::object b_extra_obj,
            py::object initial_state,
-           Size max_event_iterations,
+           std::optional<Size> max_event_iterations,
            solver::ShouldContinueFn should_continue,
            Real observer_period,
            py::object observer_obj,
            std::optional<bool> enable_nonlinear_refresh,
-           Size max_newton_iterations,
+           std::optional<Size> max_newton_iterations,
            Real tol_newton_dx, Real tol_newton_res,
            bool enable_newton_line_search, bool enable_newton_lm,
            py::object resume_from,
            std::vector<Real> observer_periods,
            std::vector<py::object> observers,
-           Size newton_roundoff_budget, bool on_impulse_error,
+           std::optional<Size> newton_roundoff_budget, bool on_impulse_error,
            std::vector<Real> observer_offsets,
            Real observer_origin,
-           device::DevicePath device_path) {
+           std::vector<bool> observer_monitors,
+           std::vector<Real> observer_origins,
+           std::vector<std::uint64_t> observer_next_k,
+           device::DevicePath device_path, int mode_selection) {
             solver::BExtraFn b_extra_fn;
             std::function<Real(Real)> unused_next_jump;  // trbdf2 lands its ticks
             resolve_b_extra(b_extra_obj, b_extra_fn, unused_next_jump);
@@ -6100,8 +6512,18 @@ void init_module(py::module_& m) {
             o.atol    = atol;
             o.h_init  = h_init;
             o.h_max   = h_max;
-            if (max_event_iterations > 0) {
-                o.max_event_iterations = max_event_iterations;
+            // add-kernel-simulation-object: None keeps the kernel's
+            // default (sim::Defaults); every value is a value. The variable
+            // step has no off switch for its event localisation, so 0 is
+            // refused rather than replaced.
+            if (max_event_iterations) {
+                if (*max_event_iterations == 0) {
+                    throw UnsupportedError("trbdf2", "max_event_iterations",
+                        "", "", "run_transient_trbdf2: max_event_iterations=0 "
+                        "(no event localisation) is not available on the "
+                        "variable step; pass None for the default.");
+                }
+                o.max_event_iterations = *max_event_iterations;
             }
             o.observer_period = observer_period;
             if (observers.size() != observer_periods.size()) {
@@ -6111,22 +6533,39 @@ void init_module(py::module_& m) {
             }
             o.observer_periods = std::move(observer_periods);
             o.observer_offsets = std::move(observer_offsets);
-            o.observer_origin = observer_origin;
-            if (max_newton_iterations > 0) {
-                o.max_newton_iterations = max_newton_iterations;
+            if (!observer_monitors.empty()
+                && observer_monitors.size() != o.observer_periods.size()) {
+                throw std::invalid_argument(
+                    "run_transient_trbdf2: observer_monitors must be empty or "
+                    "as long as observer_periods");
             }
-            if (tol_newton_dx > Real{0}) {
+            o.observer_monitors.assign(observer_monitors.begin(), observer_monitors.end());
+            o.observer_origin = observer_origin;
+            o.observer_origins = std::move(observer_origins);
+            o.observer_next_k = std::move(observer_next_k);
+            if (max_newton_iterations) {
+                if (*max_newton_iterations == 0) {
+                    throw sim::OptionsError("max_newton_iterations",
+                        "run_transient_trbdf2: max_newton_iterations must be "
+                        ">= 1 (None = the default)");
+                }
+                o.max_newton_iterations = *max_newton_iterations;
+            }
+            // A value when >= 0 (simulate() passes the resolved one); the
+            // negative default keeps the kernel's (sim::Defaults).
+            if (tol_newton_dx >= Real{0}) {
                 o.tol_newton_dx = tol_newton_dx;
             }
-            if (tol_newton_res > Real{0}) {
+            if (tol_newton_res >= Real{0}) {
                 o.tol_newton_res = tol_newton_res;
             }
             o.enable_newton_line_search = enable_newton_line_search;
             o.enable_newton_lm = enable_newton_lm;
-            if (newton_roundoff_budget > 0) {
-                o.newton_roundoff_budget = newton_roundoff_budget;
+            if (newton_roundoff_budget) {
+                o.newton_roundoff_budget = *newton_roundoff_budget;
             }
             o.on_impulse_error = on_impulse_error;
+            o.mode_selection = mode_selection;
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "trbdf2");
             std::optional<Vector> x0;
@@ -6189,42 +6628,8 @@ void init_module(py::module_& m) {
                     x0, &st, next_edge_fn, should_continue,
                     observer_fn, nl_refresh, resume_ptr, tick_fn);
             }
-            py::dict d;
-            d["n_accept"]       = st.n_accept;
-            d["n_reject"]       = st.n_reject;
-            d["n_gate_events"]  = st.n_gate_events;
-            d["n_diode_events"] = st.n_diode_events;
-            d["n_solves"]       = st.n_solves;
-            d["n_chatter_breaks"] = st.n_chatter_breaks;
-            d["n_forced_accepts"] = st.n_forced_accepts;
-            d["n_ctrl_ticks"]     = st.n_ctrl_ticks;
-            d["control_tick_counts"] = st.ctrl_tick_counts;
-            d["n_newton_retries"] = st.n_newton_retries;
-            d["gate_pulse_min"]   = st.gate_pulse_min;
-            d["n_gate_undersampled"] = st.n_gate_undersampled;
-            d["gate_sample_spacing_max"] = st.gate_sample_spacing_max;
-            d["n_held_diode_redecided"] = st.n_held_diode_redecided;
-            d["probe_floor_used"] = st.probe_floor_used;
-            d["n_gate_boundary_settles"] = st.n_gate_boundary_settles;
-            d["h_max_basis"] = st.h_max_basis;
-            d["n_source_breakpoints"] = st.n_source_breakpoints;
-            d["n_derivative_refreshes"] = st.n_derivative_refreshes;
-            d["n_refresh_probes"] = st.n_refresh_probes;
-            d["h_post_event_min"] = st.h_post_event_min;
-            d["n_probe_newton_retries"] = st.n_probe_newton_retries;
-            d["n_sdirk_steps"] = st.n_sdirk_steps;
-            d["n_reinit_steps"] = st.n_reinit_steps;
-            d["n_filtered_estimates"] = st.n_filtered_estimates;
-            d["n_interp_floor_landings"] = st.n_interp_floor_landings;
-            d["n_roundoff_floor_accepts"] = st.n_roundoff_floor_accepts;
-            d["n_noise_held_decisions"] = st.n_noise_held_decisions;
-            d["n_probe_noise_retakes"] = st.n_probe_noise_retakes;
-            d["n_factor_builds"] = st.n_factor_builds;
-            d["n_factor_refactors"] = st.n_factor_refactors;
-            d["n_factor_hits"] = st.n_factor_hits;
-            d["n_conditioning_rejects"] = st.n_conditioning_rejects;
-            d["h_conditioning_floor"] = st.h_conditioning_floor;
-            return py::make_tuple(std::move(res), std::move(d));
+            return py::make_tuple(std::move(res),
+                pulsim_bindings_common::trbdf2_stats_dict(st));
         },
         py::arg("cache"), py::arg("graph"), py::arg("pool"),
         py::arg("t_start"), py::arg("t_end"),
@@ -6233,24 +6638,28 @@ void init_module(py::module_& m) {
         py::arg("switch_fn"),
         py::arg("b_extra_fn") = py::none(),
         py::arg("initial_state") = py::none(),
-        py::arg("max_event_iterations") = Size{0},
+        py::arg("max_event_iterations") = py::none(),
         py::arg("should_continue") = solver::ShouldContinueFn{},
         py::arg("observer_period") = Real{0},
         py::arg("step_observer") = py::none(),
         py::arg("enable_nonlinear_refresh") = py::none(),
-        py::arg("max_newton_iterations") = Size{0},
-        py::arg("tol_newton_dx") = Real{0},
-        py::arg("tol_newton_res") = Real{0},
+        py::arg("max_newton_iterations") = py::none(),
+        py::arg("tol_newton_dx") = Real{-1},
+        py::arg("tol_newton_res") = Real{-1},
         py::arg("enable_newton_line_search") = false,
         py::arg("enable_newton_lm") = false,
         py::arg("resume_from") = py::none(),
         py::arg("observer_periods") = std::vector<Real>{},
         py::arg("observers") = std::vector<py::object>{},
-        py::arg("newton_roundoff_budget") = Size{0},
+        py::arg("newton_roundoff_budget") = py::none(),
         py::arg("on_impulse_error") = false,
         py::arg("observer_offsets") = std::vector<Real>{},
         py::arg("observer_origin") = std::numeric_limits<Real>::quiet_NaN(),
+        py::arg("observer_monitors") = std::vector<bool>{},
+        py::arg("observer_origins") = std::vector<Real>{},
+        py::arg("observer_next_k") = std::vector<std::uint64_t>{},
         py::arg("device_path") = device::DevicePath::Legacy,
+        py::arg("mode_selection") = 0,
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "
@@ -6620,6 +7029,12 @@ namespace pulsim_dsed_bindings {
 namespace pulsim_ir_bindings {  // add-immutable-circuit-ir (ir_bindings.cpp)
     void init_module(pybind11::module_& m);
 }
+namespace pulsim_sim_bindings {  // add-kernel-simulation-object (sim_bindings.cpp)
+    void init_module(pybind11::module_& m);
+}
+namespace pulsim_record_bindings {  // add-probes-and-recorders (record_bindings.cpp)
+    void init_module(pybind11::module_& m);
+}
 
 PYBIND11_MODULE(_pulsim, m) {
     m.doc() = "Pulsim — power-electronics simulator. Header-only C++23 "
@@ -6628,4 +7043,6 @@ PYBIND11_MODULE(_pulsim, m) {
     pulsim_kernel_bindings::init_module(m);
     pulsim_dsed_bindings::init_module(m);
     pulsim_ir_bindings::init_module(m);
+    pulsim_sim_bindings::init_module(m);
+    pulsim_record_bindings::init_module(m);
 }

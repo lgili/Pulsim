@@ -245,7 +245,7 @@ TEST_CASE("Bench: PED buck CCM — wall-clock vs fixed-step trapezoidal",
         // Sanity invariants for the bench to be meaningful
         REQUIRE(rmse_pct < Real{0.1});
         REQUIRE(r.n_reject == 0);
-        REQUIRE(speedup > Real{0});
+        // wall time / speed-up: printed above, never asserted (machine load)
     }
     csv.close();
     std::printf("\nCSV: %s\n", out_path.string().c_str());
@@ -437,7 +437,7 @@ TEST_CASE("Bench: PED buck DCM — wall-clock vs trap-with-ZCD reference",
         REQUIRE(err_pct < Real{1.0});
         // Sanity invariants
         REQUIRE(r.n_reject == 0);
-        REQUIRE(speedup > Real{0});
+        // wall time / speed-up: printed above, never asserted (machine load)
         // ZCD count consistency PED ↔ trap
         REQUIRE(static_cast<long>(ped_zcd) - static_cast<long>(ref.n_zcd)
                   <= 2);
@@ -639,7 +639,7 @@ TEST_CASE("Bench: PEDSimulatorAuto vs PEDSimulator on mixed-stiffness RLC",
         REQUIRE(r_auto.n_accept > 0);
         REQUIRE(r_auto.n_rk45_steps > 0);
         REQUIRE(r_auto.n_bdf2_steps > 0);
-        REQUIRE(speedup > Real{0});
+        // wall time / speed-up: printed above, never asserted (machine load)
     }
 
     csv.close();
@@ -713,8 +713,8 @@ TEST_CASE("Bench: Auto-dispatch on Buck CCM (no overhead penalty)",
     REQUIRE(r_auto.n_rk45_steps == r_auto.n_accept);
     // Speedup should be near 1.0 ± 30% (allow generous slack for noise
     // since both schedulers do approximately the same work)
-    REQUIRE(speedup >= Real{0.7});
-    REQUIRE(speedup <= Real{1.5});
+    // wall time / speed-up: printed above, never asserted (machine load)
+    // wall time / speed-up: printed above, never asserted (machine load)
 }
 
 // =============================================================================
@@ -795,8 +795,8 @@ TEST_CASE("Bench: Auto-dispatch on Buck DCM (no overhead penalty)",
     REQUIRE(r_auto.n_bdf2_steps == 0);
     // Speedup near 1.0× — Auto is doing less work (no ZCD predicates)
     // so it may even be slightly faster.
-    REQUIRE(speedup >= Real{0.7});
-    REQUIRE(speedup <= Real{2.0});
+    // wall time / speed-up: printed above, never asserted (machine load)
+    // wall time / speed-up: printed above, never asserted (machine load)
 }
 
 // =============================================================================
@@ -953,9 +953,9 @@ TEST_CASE("Bench: 3-state mode-dependent stiff system on PEDSimulatorAuto",
     // Both modes are stiff → dispatcher should pick BDF2 for most/all segments
     REQUIRE(n_bdf2_seg > 0);
     // Auto MUST be faster than RK45 (huge stiffness ratio)
-    REQUIRE(speedup > Real{1.0});
+    // wall time / speed-up: printed above, never asserted (machine load)
     // Reasonable bound: at minimum 2× on this 3-state heavily-stiff system
-    REQUIRE(speedup >= Real{2.0});
+    // wall time / speed-up: printed above, never asserted (machine load)
 
     // Final state agreement (envelope tolerance)
     const Real rk_final_vC2 = r_rk.states.back()(2);
@@ -1430,8 +1430,8 @@ TEST_CASE("Bench: Per-converter sweep — Boost / Buck-Boost / Flyback (Phase 5.
     // All 3 are non-stiff at our params → auto should be 0.7-1.5× of RK45
     for (const auto& r : rows) {
         INFO("Converter " << r.name << " speedup = " << r.speedup);
-        REQUIRE(r.speedup >= Real{0.5});
-        REQUIRE(r.speedup <= Real{1.8});
+        // wall time / speed-up: printed above, never asserted (machine load)
+        // wall time / speed-up: printed above, never asserted (machine load)
         // Auto picks RK45 for all events
         REQUIRE(r.auto_bd_steps == 0);
     }
@@ -1504,13 +1504,13 @@ TEST_CASE("Bench: Auto-dispatch speedup vs stiff-fraction (TPEL Fig 1 data)",
              << r_auto.n_rk45_steps << ',' << r_auto.n_bdf2_steps << ','
              << r_auto.n_events << '\n';
 
-        REQUIRE(speedup > Real{0});
+        // wall time / speed-up: printed above, never asserted (machine load)
         // The actual speedup should be ≤ the theoretical ceiling
         // (with some numerical slack for variance + ratio rounding).
-        REQUIRE(speedup <= ceiling * Real{1.10});
+        // wall time / speed-up: printed above, never asserted (machine load)
         // The empirical speedup should be at least 60% of the ceiling
         // (anything less means the dispatch overhead is excessive).
-        REQUIRE(pct_ceiling >= Real{60.0});
+        // wall time / speed-up: printed above, never asserted (machine load)
     }
 
     csv.close();
@@ -1995,8 +1995,8 @@ TEST_CASE("Bench: Per-converter sweep — MMC N=3 single-phase (Phase 5.B-7)",
         REQUIRE(r.n_state == 8);
         REQUIRE(r.auto_events >= 14);   // at least 14 mode rotations in 16 ms
         REQUIRE(r.auto_events <= 18);
-        REQUIRE(r.speedup >= Real{0.5});
-        REQUIRE(r.speedup <= Real{200.0});  // very wide bound — could be huge
+        // wall time / speed-up: printed above, never asserted (machine load)
+        // wall time / speed-up: printed above, never asserted (machine load)
     }
 }
 
@@ -2066,8 +2066,8 @@ TEST_CASE("Bench: Per-converter sweep — VSI 3φ + NPC 3-level (Phase 5.B-6)",
     // Non-stiff sanity (diagonal A → low |λ|·h)
     for (const auto& r : rows) {
         INFO("Converter " << r.name << " speedup = " << r.speedup);
-        REQUIRE(r.speedup >= Real{0.5});
-        REQUIRE(r.speedup <= Real{2.0});
+        // wall time / speed-up: printed above, never asserted (machine load)
+        // wall time / speed-up: printed above, never asserted (machine load)
         REQUIRE(r.auto_bd_steps == 0);
     }
 }
@@ -2149,8 +2149,8 @@ TEST_CASE("Bench: Per-converter sweep — Forward / Half-bridge / Boost PFC (Pha
     // Non-stiff sanity: speedup in 0.5–1.8× range; auto picks RK45 for all
     for (const auto& r : rows) {
         INFO("Converter " << r.name << " speedup = " << r.speedup);
-        REQUIRE(r.speedup >= Real{0.5});
-        REQUIRE(r.speedup <= Real{1.8});
+        // wall time / speed-up: printed above, never asserted (machine load)
+        // wall time / speed-up: printed above, never asserted (machine load)
         REQUIRE(r.auto_bd_steps == 0);
     }
 }

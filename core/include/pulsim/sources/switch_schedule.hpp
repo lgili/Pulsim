@@ -26,6 +26,7 @@
 
 #include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/sources/pwm_leg.hpp"  // detail::stamp_leg, pair_state
 #include "pulsim/solver/run_transient.hpp"  // SwitchScheduleFn alias
 #include "pulsim/topology/switch_state.hpp"
 
@@ -87,36 +88,5 @@ struct SwitchSchedule {
         [mask](Real /*t*/) { return mask; },
         [](Real /*t*/) { return std::numeric_limits<Real>::infinity(); }};
 }
-
-namespace detail {
-
-/// Thresholds of one complementary HS/LS leg, as fractions of the
-/// carrier period: HS on for u < hs_end, LS on for ls_start <= u <
-/// ls_end, both off otherwise (dead time).
-struct PairThresholds {
-    Real hs_end;
-    Real ls_start;
-    Real ls_end;
-};
-
-enum class LegState : unsigned char { Off, High, Low };
-
-[[nodiscard]] inline LegState pair_state(
-    const pwm_phase::CyclePosition& p, const PairThresholds& th) noexcept {
-    if (!pwm_phase::reached(p, th.hs_end)) return LegState::High;
-    if (pwm_phase::reached(p, th.ls_start) &&
-        !pwm_phase::reached(p, th.ls_end)) {
-        return LegState::Low;
-    }
-    return LegState::Off;
-}
-
-inline void stamp_leg(topology::SwitchStateMask& mask, LegState s,
-                      Size hs, Size ls) {
-    if (s == LegState::High) mask.set(hs, true);
-    if (s == LegState::Low) mask.set(ls, true);
-}
-
-}  // namespace detail
 
 }  // namespace pulsim::sources

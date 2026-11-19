@@ -64,22 +64,25 @@ struct LteController {
     /// run's instead of restarting at 0.
     Size gate_parity = 0;
 
-    /// Factor on a rejected step: elementary controller, exponent
-    /// −1/3 (TR-BDF2, order 2) or −1/2 (the embedded SDIRK(2,2) estimate).
-    [[nodiscard]] static Real reject_factor(Real err, bool sdirk) noexcept {
-        return std::clamp(
-            Real{0.9} * std::pow(err, sdirk ? Real{-0.5}
-                                            : Real{-1.0 / 3.0}),
-            Real{0.1}, Real{0.9});
+    /// Factor on a rejected step: elementary controller with the
+    /// integrator's exponent (`err_exponent`: −1/3 for TR-BDF2, order 2;
+    /// −1/2 for an O(h^2) estimate such as the embedded SDIRK(2,2) one).
+    [[nodiscard]] static Real reject_factor(Real err, Real exponent) noexcept {
+        return std::clamp(Real{0.9} * std::pow(err, exponent), Real{0.1},
+                          Real{0.9});
     }
     /// Factor on an accepted step (err floored at 1e-4: growth ≤ 5×).
-    [[nodiscard]] static Real accept_factor(Real err, bool sdirk) noexcept {
+    [[nodiscard]] static Real accept_factor(Real err, Real exponent) noexcept {
         const Real e_used = std::max(err, Real{1e-4});
-        return std::clamp(
-            Real{0.9}
-                * std::pow(e_used, sdirk ? Real{-0.5}
-                                         : Real{-1.0 / 3.0}),
-            Real{0.2}, Real{5.0});
+        return std::clamp(Real{0.9} * std::pow(e_used, exponent), Real{0.2},
+                          Real{5.0});
+    }
+    /// The TR-BDF2 driver's spelling: `sdirk` picks −1/2, else −1/3.
+    [[nodiscard]] static Real reject_factor(Real err, bool sdirk) noexcept {
+        return reject_factor(err, sdirk ? Real{-0.5} : Real{-1.0 / 3.0});
+    }
+    [[nodiscard]] static Real accept_factor(Real err, bool sdirk) noexcept {
+        return accept_factor(err, sdirk ? Real{-0.5} : Real{-1.0 / 3.0});
     }
 
     /// Layout: [h, h_mem_gate[0], h_mem_gate[1], pending_gate_slot,

@@ -36,6 +36,16 @@ def _run(monkeypatch, budget=None):
         return c
 
     monkeypatch.setitem(pulsim.__dict__, "PwlStateSpaceCache", wrap)
+    orig_sim = pulsim.Simulation
+
+    def wrap_sim(*a, **k):  # simulate() runs through the kernel object
+        s = orig_sim(*a, **k)
+        if budget is not None:
+            s.cache.set_segment_budget_bytes(budget)
+        caches.append(s.cache)
+        return s
+
+    monkeypatch.setitem(pulsim.__dict__, "Simulation", wrap_sim)
     b, fn = _vsi()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

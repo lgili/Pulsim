@@ -425,15 +425,20 @@ inline void load_device(
         ? dev["name"].as<std::string>()
         : std::string{"<unnamed>"};
 
-    // add-branch-form-ideal-switch: `form` is conductance | branch, on a
-    // switch or a diode only (a typo must not fall back silently).
+    // add-branch-form-ideal-switch: `form` is conductance | branch, on
+    // every type that builds a PWL switch or ungated diode (a typo must
+    // not fall back silently).
+    const std::string form = string_or(dev, "form", "conductance");
     if (dev["form"]) {
-        const std::string form = string_or(dev, "form", "");
         if ((form != "conductance" && form != "branch") ||
-            (type != "switch" && type != "diode")) {
+            (type != "switch" && type != "diode" && type != "mosfet" &&
+             type != "mosfet_with_body_diode" && type != "igbt" &&
+             type != "mosfet_level1" && type != "igbt_level1")) {
             throw std::runtime_error(std::format(
                 "yaml::load: device {}: form: '{}' is not supported; use "
-                "form: conductance or form: branch on a switch or a diode.",
+                "form: conductance or form: branch on a switch, diode, "
+                "mosfet, mosfet_with_body_diode, igbt, mosfet_level1 or "
+                "igbt_level1.",
                 device_label(dev, idx, type), form));
         }
     }
@@ -492,7 +497,7 @@ inline void load_device(
             real_or(dev, "lambda", Real{0.02}),
             real_or(dev, "kappa",  Real{15.0}),
             bool_or(dev, "with_body_diode", true),
-            real_or(dev, "V_F",    Real{0.7}));
+            real_or(dev, "V_F",    Real{0.7}), form);
     } else if (type == "vcvs") {
         b.add_vcvs(
             name,
@@ -642,7 +647,7 @@ inline void load_device(
             real_or(dev, "v_knee",   Real{0.01}),
             bool_or(dev, "with_fwd", false),
             Real{0}, Real{0},
-            real_or(dev, "V_F",      Real{0.7}));
+            real_or(dev, "V_F",      Real{0.7}), form);
     } else if (type == "resistor") {
         b.add_resistor(
             name,
@@ -846,7 +851,7 @@ inline void load_device(
             real_or(dev, "R_on",  Real{1e-3}),
             real_or(dev, "R_off", Real{1e9}),
             /*body_diode=*/true,
-            real_or(dev, "V_F",   Real{0.7}));
+            real_or(dev, "V_F",   Real{0.7}), form);
     } else if (type == "mosfet_with_body_diode") {
         b.add_mosfet_with_body_diode(
             name,
@@ -856,13 +861,13 @@ inline void load_device(
             real_or(dev, "R_off",        Real{1e9}),
             real_or(dev, "V_F",          Real{0.7}),
             real_or(dev, "g_on_diode",   Real{1e3}),
-            real_or(dev, "g_off_diode",  Real{1e-9}));
+            real_or(dev, "g_off_diode",  Real{1e-9}), form);
     } else if (type == "igbt") {
         // add-pwl-igbt-and-thyristor: V_ce0, reverse_blocking (default
         // False, True when V_ce0 > 0 — the builder's stage-1 default).
         require_only_keys(dev, idx, type, {"collector", "emitter", "R_on", "R_off",
                                            "V_ce0", "reverse_blocking", "V_th",
-                                           "losses"});   // load_losses, below
+                                           "losses", "form"});   // load_losses, below
         const Real V_ce0 = real_or(dev, "V_ce0", Real{0});
         b.add_igbt(
             name,
@@ -872,7 +877,7 @@ inline void load_device(
             real_or(dev, "R_off", Real{1e9}),
             V_ce0,
             bool_or(dev, "reverse_blocking", V_ce0 > Real{0}),
-            real_or(dev, "V_th", Real{0}));
+            real_or(dev, "V_th", Real{0}), form);
     } else if (type == "thyristor" || type == "gto" || type == "triac") {
         const bool tri = type == "triac";
         const bool gto = type == "gto";
@@ -1744,7 +1749,7 @@ inline void load_simulation_options(
     // trace (the loader accepts unknown keys, so an unparsed option
     // would just vanish — the exact silent-drop pattern Phase 0
     // eliminated elsewhere).
-    opts.store_every = size_or(sim, "store_every", Size{1});
+    opts.store_every = size_or(sim, "store_every", pulsim::sim::Defaults::store_every);
     if (opts.store_every == 0) {
         throw std::invalid_argument(
             "simulation.store_every must be >= 1 "
@@ -1758,18 +1763,20 @@ inline void load_simulation_options(
         bool_or(sim, "enable_substep_state_correction",
                  false);
     opts.max_event_iterations =
-        size_or(sim, "max_event_iterations", Size{16});
+        size_or(sim, "max_event_iterations",
+                pulsim::sim::Defaults::max_event_iterations);
     opts.max_newton_iterations =
-        size_or(sim, "max_newton_iterations", Size{50});
+        size_or(sim, "max_newton_iterations",
+                pulsim::sim::Defaults::max_newton_iterations);
     opts.tol_newton_dx =
-        real_or(sim, "tol_newton_dx", Real{1e-9});
+        real_or(sim, "tol_newton_dx", pulsim::sim::Defaults::tol_newton_dx);
     opts.tol_newton_res =
-        real_or(sim, "tol_newton_res", Real{1e-9});
+        real_or(sim, "tol_newton_res", pulsim::sim::Defaults::tol_newton_res);
     // Phase 2.4 adaptive RK selector (schema v1.5, wiring v1.6).
     opts.integrator =
         string_or(sim, "integrator", std::string{"kernel"});
-    opts.rtol    = real_or(sim, "rtol",    Real{1e-5});
-    opts.atol    = real_or(sim, "atol",    Real{1e-8});
+    opts.rtol    = real_or(sim, "rtol",    pulsim::sim::Defaults::rtol_variable);
+    opts.atol    = real_or(sim, "atol",    pulsim::sim::Defaults::atol_variable);
     opts.dt_init = real_or(sim, "dt_init", Real{0});
 }
 

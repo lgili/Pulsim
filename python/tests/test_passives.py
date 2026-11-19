@@ -363,8 +363,8 @@ def test_odd_charge_table_known_bias_law():
     assert W == pytest.approx(0.8047e-3, rel=1e-4)
     for x in (0.3, 7.0, 20.0, 55.0):          # odd Q, even C, tails included
         # to rounding: each segment is evaluated from its left knot
-        assert t.charge(-x) == pytest.approx(-t.charge(x), rel=1e-14)
-        assert t.capacitance(-x) == pytest.approx(t.capacitance(x), rel=1e-14)
+        assert t.charge(-x) == pytest.approx(-t.charge(x), rel=1e-12)   # mirrored segments: two expressions
+        assert t.capacitance(-x) == pytest.approx(t.capacitance(x), rel=1e-12)   # mirrored segments: two expressions
 
 
 def test_odd_charge_table_is_strictly_increasing_at_1_pV():
@@ -393,7 +393,7 @@ def test_fit_mlcc_dc_bias_reproduces_its_curve_and_is_odd():
     t = fit.table
     for x in v:
         assert t.capacitance(float(x)) == pytest.approx(10e-6 / (1 + (x / 10) ** 2), rel=1e-3)
-        assert t.charge(-float(x)) == pytest.approx(-t.charge(float(x)), rel=1e-14, abs=1e-30)
+        assert t.charge(-float(x)) == pytest.approx(-t.charge(float(x)), rel=1e-12, abs=1e-30)   # mirrored segments
     assert t.charge(20.0) == pytest.approx(110.71e-6, rel=2e-3)   # coarse 9-point curve
     with pytest.raises(ValueError, match="C_nominal"):
         fit_mlcc_dc_bias(v, ratio, 0.0)
