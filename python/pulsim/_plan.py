@@ -29,7 +29,7 @@ FEATURE_KW = ("switch_fn", "b_extra_fn", "step_observer", "closed_loops",
               "controller_period", "should_continue", "live_stream",
               "mmc_arms", "on_cache", "progress", "initial_state",
               "resume_from", "start_from_dc_op", "sensitivities",
-              "store_every", "recorders")
+              "store_every")  # (recorders= runs through simulate_with_recorders)
 
 
 class ResolvedFrom(Mapping):
@@ -201,7 +201,8 @@ class SimPlan:
     def features(self) -> frozenset:
         """The features in play: FEATURE_KW keywords that are set, and
         "builder_ics" when the builder's i0= / c0= seed the state."""
-        out = {k for k in FEATURE_KW if self.resolved_from[k] != "default"}
+        out = {k for k in FEATURE_KW
+               if self.resolved_from.get(k, "default") != "default"}
         if self.initial.from_builder:
             out.add("builder_ics")
         return frozenset(out)
