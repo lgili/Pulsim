@@ -495,3 +495,22 @@ OPEN (review #2): `first_departure_` (the selector's horizon) still uses 1e-9·v
 1. Merge `origin/feat/core-integration` (e3ee5341; conflicts in scheduler.hpp, `_dsed_dispatch.py`, `dsed_bindings.cpp`, `_pulsim.pyi`, REFERENCE_STATUS.md, `test_mode_shadow.py`, `test_engine_conformance.py`; the PR line's strict dsed is 100/0/0/9 — ours must be ≥ after).
 2. D4: dedicated predicate rows (c = e_from − e_to formed from the refined hi + lo recovery in `refine_schur_`, which today rounds X once and drops lo), then twelve banks must run and match pwl+split.
 3. Review #1 and #2 above; the bare-constant table.
+
+## Session 17 (exact engine 16): the PR line merged (2026-11-19)
+
+### The merge of origin/feat/core-integration (e3ee5341) at 7a4d5f24
+Conflicts, both sides kept: `dsed/scheduler.hpp` (`set_horizon` then `start_time_events_`; the event queue's `next_time_event_` already bounds the settle / ladder / judge horizons by the next control tick), `dsed_bindings.cpp` and `_dsed_dispatch.py` (`diode_law_rel` beside the tick arguments), the branch-form DECISIONS (this track's entry 40 renumbered 59), `_pulsim.pyi` regenerated. `test_mode_shadow.py`, `test_engine_conformance.py`, REFERENCE_STATUS.md merged without conflict. D1's settled state lives only in `law_settled_` (read by `check_diode_law`): the stored samples, `right_limit_index` / `right_limit_states` the recorders and the one-result adapter read are the exact map's states as on the PR line (`test_recorders.py`, `test_result_type.py`, the control-graph and tick tests: 753 passed).
+
+| Item (merged tip 7a4d5f24) | Result |
+|---|---|
+| dsed / layer4_v3 / mode C++ targets | 133 / 29 / 35 cases pass on Eigen 5 and on 3.4.0 |
+| full pytest | 0 failed: 5539 passed, 107 skipped, 8 xfailed |
+| `pytest -m reference` / `reference_status` | 382 passed / exit 0, strict dsed 100/0/0/9/0 = the PR line's; REFERENCE_STATUS.md differs from the PR line's only in buck_ccm's dsed error 3.84e-15 → 3.92e-15 |
+| ruff / openspec strict / stubs | clean / 78 passed / up to date |
+| goldens + bit-identity against the PR line's own (e3ee5341 built in `.scratch/prline`) | pwl / trbdf2 byte-identical (default and shadow); dsed moves only in this track's 9 arrays (bridge1_vf07, bridge3, bridge3_vf07, buck_ccm, buck_dcm) and golden `syncbuck_dsed` |
+| `dsedall.sh` | 315 / 315 |
+| banks | 1, 9, 10 run on both selections; 12 refused by name (Db7c ON at −7.45e-6 A, 6.8796 ms) |
+| ten banks ×11 at 1e-15 / engine fuzz 12 × 21 | 11/11 both (3 / 2 sequences, spread 5.32e-5) / 0 errors, 1 sequence each |
+| truths | ten banks −1.387e-9 V, i(L0a) 7.66e-12 A; bridge −4.089e-10 V (event time 1.12e-11 s); boost orbit 6.68e-11 V |
+| closed loops on dsed (closed_loop_reference.py) | cl_buck_pi 5.50e-11, cl_buck_aggressive_pi 1.40e-11, cl_boost_pi 8.37e-8 (PR line: 5.5e-11 / 1.4e-11 / 8.4e-8) |
+| exact scoreboard (sb_dsed.py) | 81 / 81 < 1e-3, worst diode_half_wave_rl_load 4.87e-6; no circuit worse than at 986371ba |
