@@ -65,6 +65,31 @@ def test_rl_cut_set_is_reinitialised_and_recorded_exactly():
     assert e["S"]["E_impulse_total"] == pytest.approx(0.5e-3 * i5 ** 2, rel=1e-9)
 
 
+@pytest.mark.parametrize("v_rl, recorded", [(1e-7, False), (1e-3, True)])
+def test_a_cut_set_is_recorded_only_above_1e_9_of_the_current_scale(v_rl, recorded):
+    """The record threshold: 1e-9 of the circuit's current scale (here 1e4 A, set
+    by an independent current source). A 1e-7 A cut is projected without a record;
+    a 1e-3 A cut is recorded with lambda = L*i."""
+    _, fn = _rl(open_at=5e-3)   # S is switch 0 in both circuits
+    b2 = p.CircuitBuilder()
+    b2.add_voltage_source("V", "vin", "gnd", v_rl)
+    b2.add_ideal_switch("S", "vin", "a", 0.0, 0.0)
+    b2.add_resistor("R", "a", "b", 1.0)
+    b2.add_inductor("L", "b", "gnd", 1e-3)
+    b2.add_current_source("Ibig", "gnd", "big", 1e4)
+    b2.add_resistor("Rbig", "big", "gnd", 1e-3)
+    r = _run(b2, 6e-3, fn)
+    i5 = v_rl * (1.0 - math.exp(-5.0))
+    recs = list(r.reinit_records)
+    i = np.asarray(r.i("L"))
+    assert np.max(np.abs(i[np.asarray(r.times) > 5e-3 + 1e-9])) <= 1e-9 * i5   # projected either way
+    if recorded:
+        (rec,) = recs
+        assert rec.kind == "cut_set" and abs(rec.lambda_) == pytest.approx(1e-3 * i5, rel=1e-6)
+    else:
+        assert recs == []
+
+
 def test_capacitor_loop_lands_on_four_volts_and_books_24_uj_to_the_switch():
     b = p.CircuitBuilder()
     b.add_capacitor("C1", "x", "gnd", 1e-6, 10.0)
@@ -312,3 +337,4 @@ def test_the_periodic_steady_state_refuses_an_ideal_diode_by_name():
     with pytest.raises(p.UnsupportedError) as ei:
         p.periodic_steady_state(b, period=1e-5, switch_fn=sf)
     assert ei.value.feature == "branch_form" and ei.value.device.startswith("D")
+

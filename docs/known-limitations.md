@@ -142,7 +142,9 @@ whose ideal elements (`R_on = 0` or `g_off = 0`) make a state dependent
 `discontinuity_restart=True` and on `trbdf2` (always: three SDIRK(2,2)
 steps after the entry), and an impulsive entry is recorded in
 `res.reinit_records` (`on_impulse='error'` refuses it with
-`feature='impulse'`); on `pwl` without the rule, and on `trbdf2` with a
+`feature='impulse'`; on `dsed` a jump is recorded only above 1e-9 of the
+circuit's current or voltage scale, so a tiny cut in a circuit with a
+very large current scale is projected without a record); on `pwl` without the rule, and on `trbdf2` with a
 Coss, Lauritzen, IGBT-tail, PMSM or saturable-inductor history, it is
 refused with `feature='dependent_states'`; a node bounded only by open ideal elements with
 `g_off = 0` is refused with `feature='floating_node'`, a loop of closed
