@@ -675,3 +675,72 @@ TEST_CASE("Exact: a degenerate-cluster bridge mode to a 60-digit exponential",
     REQUIRE(est <= kExactTierBound);
     REQUIRE(est >= Real{0.5} * err);   // an estimate (1.3-10x above on probes), not a bound
 }
+
+namespace {
+// max over τ ∈ [0, δ] (fine grid) of |x_j(τ) − chord_j(τ)| / tol_j
+Real chord_ratio(const ExactLTI& e, const Vector& x, const Vector& b, Real d, const Vector& tol) {
+    const Vector xd = exact_advance(e, x, b, d);
+    Real worst = 0.0;
+    for (int i = 1; i < 400; ++i) {
+        const Real f = i / 400.0;
+        const Vector xt = exact_advance(e, x, b, f * d);
+        for (Eigen::Index j = 0; j < x.size(); ++j) {
+            worst = std::max(worst, std::abs(xt[j] - ((1 - f) * x[j] + f * xd[j])) / tol[j]);
+        }
+    }
+    return worst;
+}
+}  // namespace
+
+TEST_CASE("Exact: the output rule's step is a chord bound for every mode structure",
+          "[v2][dsed][exact_lti][output_rule]") {
+    // a slow RC charging a state that a 1e12 /s mode slaves to it (a parasitic mode;
+    // from x2 = 1e-14 its amplitude is the lag ẋ1/1e12 = 5e-9, 1e-9 of the scale)
+    DenseMatrix A1(2, 2);
+    A1 << -1e3, 0.0, 1e12, -1e12;
+    Vector b1(2);
+    b1 << 5e3, 0.0;
+    // a damped resonance (complex pair), and a growing mode next to a decaying one
+    DenseMatrix A2(2, 2);
+    A2 << 0.0, 1.0, -4e8, -2e3;
+    DenseMatrix A3(2, 2);
+    A3 << 5e2, 0.0, 1e3, -1e4;
+    const Vector zero = Vector::Zero(2);
+    struct Case { DenseMatrix A; Vector b; Vector x; Real h; };
+    Vector x1(2), x1_alive(2), x2(2), x3(2);
+    x1 << 0.0, 1e-14;
+    x1_alive << 0.0, 1.0;   // the fast mode right after an event: alive
+    x2 << 1.0, 0.0;
+    x3 << 1.0, 1.0;
+    const Case cases[] = {{A1, b1, x1, 1e-4}, {A1, b1, x1_alive, 1e-4},
+                          {A2, zero, x2, 1e-4}, {A3, zero, x3, 1e-3}};
+    ChordWork w;
+    for (const auto& c : cases) {
+        const auto e = make_exact_lti(c.A, c.b);
+        REQUIRE(e.valid);
+        REQUIRE(e.tier == 1);
+        const Vector tol = Vector::Constant(2, 1e-5 * 5.0);
+        Vector x = c.x;
+        for (int s = 0; s < 20; ++s) {   // twenty consecutive cut steps from the start
+            bool bounded = false;
+            const Real d = exact_chord_step(e, x, nullptr, nullptr, tol, c.h, bounded, w);
+            REQUIRE(bounded);
+            REQUIRE(d > 0.0);
+            REQUIRE(d <= c.h);
+            INFO("A(1,0) = " << c.A(1, 0) << " step " << s << " d = " << d);
+            REQUIRE(chord_ratio(e, x, c.b, d, tol) <= 1.0);
+            x = exact_advance(e, x, c.b, d);
+        }
+    }
+    // the parasitic mode at rounding does not set the step: the slow curvature does
+    // (5e6 V/s² at the start: δ = (8·5e-5/5e6)^½ ≈ 8.9e-6 s; λ²·5e-9 in the bound gave 3e-10)
+    const auto e1 = make_exact_lti(A1, b1);
+    bool bounded = false;
+    const Real d1 = exact_chord_step(e1, x1, nullptr, nullptr, Vector::Constant(2, 5e-5), 1e-4,
+                                     bounded, w);
+    REQUIRE(d1 > 4e-6);
+    // alive (amplitude 1) it does
+    const Real d1a = exact_chord_step(e1, x1_alive, nullptr, nullptr, Vector::Constant(2, 5e-5),
+                                      1e-4, bounded, w);
+    REQUIRE(d1a < 1e-10);
+}

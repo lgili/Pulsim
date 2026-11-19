@@ -2682,7 +2682,10 @@ def simulate(
         ``res.diagnostics['output_grid']``: ``n_output_capped`` (intervals
         where the 4096-sample cap bit) and ``n_output_unbounded`` (steps of
         a mode without a diagonalising basis, which keep the step cap's
-        grid); both warn. Ignored with ``dt`` / ``store_every`` /
+        grid); both warn. ``output_budget_t`` is the time the run's sample
+        budget (2e6 cut steps, ``pulsim._dsed_dispatch.OUTPUT_BUDGET``) ran
+        out, from where the step cap's grid holds (warns; ``None`` when it
+        did not). Ignored with ``dt`` / ``store_every`` /
         recorders; refused by name on the other engines, with
         ``integrator='bdf2'``, sensitivities, and the non-native fallback.
 

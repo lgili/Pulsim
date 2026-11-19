@@ -476,36 +476,42 @@ public:
     /// The output-grid rule's step from (t, x) (exact_chord_step) on the
     /// augmented state: `tol` per circuit state, `rtol` for each oscillator
     /// state (amplitude 1: a sine source's own chord). h when the mode has no
-    /// tier-1 basis (`bounded` = false).
+    /// tier-1 basis (`bounded` = false). `w` holds the work arrays (no
+    /// allocation once sized).
     [[nodiscard]] Real exact_output_step(Real t, const Vector& x, const Vector& tol,
-                                         Real rtol, Real h, bool& bounded) const {
+                                         Real rtol, Real h, bool& bounded,
+                                         ChordWork& w) const {
         ensure_current_resolved_();
         ensure_exact_built_(*current_entry_);
         const LTIEntry& e = *current_entry_;
         const auto n = x.size();
         const auto k = static_cast<Index>(e.aug_omegas.size());
-        Vector xa(n + 2 * k), ta(n + 2 * k);
-        xa.head(n) = x;
-        ta.head(n) = tol;
+        w.xa.resize(n + 2 * k);
+        w.ta.resize(n + 2 * k);
+        w.xa.head(n) = x;
+        w.ta.head(n) = tol;
         for (Index j = 0; j < k; ++j) {
-            const Real w = e.aug_omegas[static_cast<Size>(j)];
-            xa[n + 2 * j] = std::sin(w * t);
-            xa[n + 2 * j + 1] = std::cos(w * t);
-            ta[n + 2 * j] = ta[n + 2 * j + 1] = rtol;
+            const Real om = e.aug_omegas[static_cast<Size>(j)];
+            w.xa[n + 2 * j] = std::sin(om * t);
+            w.xa[n + 2 * j + 1] = std::cos(om * t);
+            w.ta[n + 2 * j] = w.ta[n + 2 * j + 1] = rtol;
         }
         if (pwl_sources_.empty()) {
-            return exact_chord_step(e.exact, xa, nullptr, nullptr, ta, h, bounded);
+            return exact_chord_step(e.exact, w.xa, nullptr, nullptr, w.ta, h, bounded, w);
         }
         const auto m = static_cast<Index>(pwl_sources_.size());
-        Vector v(m), s(m), c0 = Vector::Zero(n + 2 * k), c1 = Vector::Zero(n + 2 * k);
+        w.v.resize(m);
+        w.s.resize(m);
+        w.c0.setZero(n + 2 * k);
+        w.c1.setZero(n + 2 * k);
         for (Index j = 0; j < m; ++j) {
             const auto [vj, sj] = pwl_value_slope_(pwl_sources_[static_cast<Size>(j)], t);
-            v[j] = vj;
-            s[j] = sj;
+            w.v[j] = vj;
+            w.s[j] = sj;
         }
-        c0.head(n) = e.pwl_cols * v;
-        c1.head(n) = e.pwl_cols * s;
-        return exact_chord_step(e.exact, xa, &c0, &c1, ta, h, bounded);
+        w.c0.head(n).noalias() = e.pwl_cols * w.v;
+        w.c1.head(n).noalias() = e.pwl_cols * w.s;
+        return exact_chord_step(e.exact, w.xa, &w.c0, &w.c1, w.ta, h, bounded, w);
     }
 
     /// The current mode's settle length for decisions (exact_settle_length).
