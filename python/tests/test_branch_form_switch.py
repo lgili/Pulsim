@@ -223,7 +223,9 @@ def test_api_values_and_components():
     with pytest.raises(ValueError, match="form="):
         b.add_diode("Y", "a", "b", 1e3, 1e-9, form="ideal")
     with pytest.raises(ValueError, match="conductance form takes g_on"):
-        b.add_diode("Y", "a", "b")
+        b.add_diode("Y", "a", "b", form="conductance")   # legacy form named: branch is the default
+    b.add_diode("Y", "a", "b")                       # the release default: an ideal branch-form diode
+    assert {c["name"]: c["params"] for c in b.components()}["Y"]["branch_form"] == 1
 
 
 def test_yaml_form_branch():
