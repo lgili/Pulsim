@@ -2400,14 +2400,7 @@ inline SimulationResult run_transient_trbdf2(
     };
 
     try {
-        // The skeleton driver is the default since slice 3c (DECISIONS 17);
-        // the legacy loop stays until its deletion slice behind the internal
-        // PULSIM_TRBDF2_STEPPER_LEGACY=1 (no option; the slice-3b
-        // PULSIM_TRBDF2_STEPPER_TWIN is accepted and ignored).
-        const bool trbdf2_stepper_legacy = [] {
-            const char* e = std::getenv("PULSIM_TRBDF2_STEPPER_LEGACY");  // NOLINT(concurrency-mt-unsafe)
-            return e != nullptr && e[0] == '1' && e[1] == '\0';
-        }();
+        // The skeleton driver is the only driver (DECISIONS 19).
         // The attempt's locals that cross phases, (re)set where the loop body
         // declared them (class types by an in-place reset or a move: DECISIONS
         // 14 (1)).
@@ -3920,30 +3913,12 @@ inline SimulationResult run_transient_trbdf2(
                 }
             }
         };
-        // The two drivers: the step skeleton (`step::run<TrBdf2>`, the
-        // default, the dispatch's fall-through) and the legacy loop, selected
-        // only by the internal PULSIM_TRBDF2_STEPPER_LEGACY=1 (read once per
-        // run; no option). BOTH
-        // are forced inline into this function, unlike the fixed engine's
+        // The driver: the step skeleton (`step::run<TrBdf2>`). It is
+        // forced inline into this function, unlike the fixed engine's
         // (DECISIONS 16): out of line, every engine local a phase touches was
         // reached through the driver's closure and the phase's closure (a
         // pointer reloaded after each opaque call, +0.3-1 % per step); inline,
         // no closure escapes and the locals are this frame's again.
-        auto run_legacy = [&]() PULSIM_STEP_PHASE {
-            while (tb_live()) {
-                if (!tb_poll()) {
-                    break;   // partial trace preserved
-                }
-                tb_begin();
-                tb_clamp();
-                step::Verdict v = tb_take();
-                if (v == step::Verdict::Accept) v = tb_error();
-                if (v == step::Verdict::Accept) v = tb_after();
-                if (v == step::Verdict::End) break;
-                if (v != step::Verdict::Accept) continue;
-                tb_commit();
-            }
-        };
         // Hooks only the skeleton calls (as slice 3a's): probes R1
         // (`StepHooks::step`: this engine's start state is the committed
         // state at the step start, a right limit: the post-event restart
@@ -3976,11 +3951,7 @@ inline SimulationResult run_transient_trbdf2(
             step::BodyClock clock{tb_live, lte_ctrl, t, opts.t_end};
             (void)step::run<step::TrBdf2>(clock, body);
         };
-        if (!trbdf2_stepper_legacy) {
-            run_twin();
-        } else {
-            run_legacy();
-        }
+        run_twin();
         // A run stopped by should_continue right after an event: the
         // record ends on the committed state, as the snapshot does.
         drop_superseded_event_sample(-std::numeric_limits<Real>::infinity());
