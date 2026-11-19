@@ -70,10 +70,14 @@ def _gate_bit(index, period):
 
 def boost_mosfet_coss_saturable():
     """MOSFET L1 + Coss + saturable inductor + Shockley rectifier."""
+    return _boost(3e-7, 4.0)
+
+
+def _boost(edge, kappa):
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 12.0)
     b.add_saturable_inductor("L", "vin", "sw", 47e-6, 4.0, 2e-6)
-    b.add_mosfet_level1("M", "sw", "gnd", "g", K=0.5, V_T=3.0, kappa=4.0,
+    b.add_mosfet_level1("M", "sw", "gnd", "g", K=0.5, V_T=3.0, kappa=kappa,
                         with_body_diode=False)
     b.add_nonlinear_capacitor("Coss", "sw", "gnd", 200e-12, 0.7, 0.45)
     b.add_resistor("Rs", "sw", "gnd", 2e3)
@@ -81,8 +85,32 @@ def boost_mosfet_coss_saturable():
     b.add_capacitor("C", "out", "gnd", 10e-6)
     b.add_resistor("R", "out", "gnd", 12.0)
     b.add_pulse_voltage_source("Vg", "g", "gnd", 0.0, 12.0, 0.0, 6e-6,
-                               10e-6, 3e-7, 3e-7)
+                               10e-6, edge, edge)
     return b
+
+
+def mosfet_reverse_conduction_ac():
+    """MOSFET L1 held on (V_GS = 12 V, far above threshold) carrying an AC
+    current: V_DS crosses zero both ways — the reverse branch and the C¹
+    point of DECISIONS #39 — where the two laws agree to rounding (the
+    leak the interface law drops is K·a²·e^{-κa} ≈ 1e-14 A here)."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 50e3, 0.0)
+    b.add_resistor("R", "in", "a", 2.0)
+    b.add_inductor("L", "a", "d", 20e-6)
+    b.add_mosfet_level1("M", "d", "gnd", "g", K=0.5, V_T=3.0, kappa=4.0,
+                        with_body_diode=False)
+    b.add_voltage_source("Vg", "g", "gnd", 12.0)
+    return b
+
+
+def boost_mosfet_fast_gate():
+    """The boost with 1 ns gate edges and κ = 15: no fixed-step sample sits
+    on a ramp, and off (a = −3 V) the model's leak K·a²·σ(κa)σ(−κa) is
+    1e-19 A — the control of the recorded boost difference (DECISIONS #39;
+    at κ = 4 the off-state leak at V_DS ≈ 0 is 28 µA, and the paths part by
+    5e-9 of scale after every turn-off even with fast edges)."""
+    return _boost(1e-9, 15.0)
 
 
 def chopper_igbt_vdmos():
@@ -136,10 +164,23 @@ def saturable_permeance_core():
 
 CIRCUITS = {
     "boost_mosfet_coss_saturable": boost_mosfet_coss_saturable,
+    "boost_mosfet_fast_gate": boost_mosfet_fast_gate,
     "chopper_igbt_vdmos": chopper_igbt_vdmos,
+    "mosfet_reverse_conduction_ac": mosfet_reverse_conduction_ac,
     "chopper_igbt_tail_lauritzen": chopper_igbt_tail_lauritzen,
     "saturable_permeance_core": saturable_permeance_core,
 }
+# The boost passes its soft (κ = 4) MOSFET through threshold with V_DS near
+# zero (0.3 µs gate ramps; the off state right after each turn-off): there
+# the interface law drops the model's leak at V_DS = 0 (DECISIONS #39), so
+# its two paths part BY DESIGN. Recorded below, not gated at 1e-12;
+# `boost_mosfet_fast_gate` is its control. Every other circuit is gated.
+RECORDED = {"boost_mosfet_coss_saturable"}
+GATED = sorted(set(CIRCUITS) - RECORDED)
+# TR-BDF2 compares at the times both runs accepted, which a gate edge
+# provides; the AC circuit has none (4 common times of 2757), so its
+# TR-BDF2 cell is the conformance MosfetLevel1 cell (AC, interpolated).
+GATED_TRBDF2 = [n for n in GATED if n != "mosfet_reverse_conduction_ac"]
 
 
 def _run(make, path, **kw):
@@ -148,7 +189,7 @@ def _run(make, path, **kw):
                       **kw)
 
 
-@pytest.mark.parametrize("name", sorted(CIRCUITS))
+@pytest.mark.parametrize("name", GATED)
 def test_fixed_step_trajectories_agree_to_1e12(name):
     make = CIRCUITS[name]
     kw = dict(t_end=200e-6, dt=20e-9, engine="pwl")
@@ -158,7 +199,7 @@ def test_fixed_step_trajectories_agree_to_1e12(name):
     _assert_paths_agree(name, a, i)
 
 
-@pytest.mark.parametrize("name", sorted(CIRCUITS))
+@pytest.mark.parametrize("name", GATED_TRBDF2)
 def test_trbdf2_trajectories_agree_to_rtol(name):
     make = CIRCUITS[name]
     rtol = 1e-6
@@ -180,10 +221,29 @@ def test_trbdf2_trajectories_agree_to_rtol(name):
 
 @pytest.mark.parametrize("name", sorted(CIRCUITS))
 def test_dc_operating_points_agree(name):
+    # every circuit, the recorded boost too: its DC point (gate low, V_DS =
+    # 12 V) is e^{-48} of the leak away from V_DS = 0
     b = CIRCUITS[name]()
     xa = p.compute_dc_op(b, device_path="legacy")
     xi = p.compute_dc_op(b, device_path="interface")
     assert np.max(np.abs(xa - xi) / np.maximum(np.abs(xa), 1.0)) <= 1e-9   # 1e-12 measured
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_the_soft_boost_parts_by_the_mosfet_leak_only(engine):
+    """Measured 2026-11-18: 2.5e-3 of scale (pwl), 2.1e-4 (trbdf2), largest
+    on the first turn-on ramp (V_DS ≈ 0, a through threshold; the leak
+    peaks at 0.439·K/κ² = 13.7 mA). Visible — the fix is live — and of the
+    leak's order, not of a wrong law's; the control agrees to 1e-12."""
+    kw = (dict(t_end=200e-6, dt=20e-9, engine="pwl") if engine == "pwl"
+          else dict(t_end=200e-6, engine="trbdf2", rtol=1e-6, atol=1e-9))
+    a = _run(boost_mosfet_coss_saturable, "legacy", **kw)
+    i = _run(boost_mosfet_coss_saturable, "interface", **kw)
+    ta, ti = np.asarray(a.times), np.asarray(i.times)
+    xa, xi = np.asarray(a.states), np.asarray(i.states)
+    _, ia, ii = np.intersect1d(ta, ti, return_indices=True)
+    err = np.max(np.abs(xa[ia] - xi[ii]) / _scale(xa))
+    assert 1e-6 < err < 1e-2, f"legacy vs interface {err:.2e} of scale"
 
 
 def test_dc_operating_point_with_every_static_kind_conducting():
