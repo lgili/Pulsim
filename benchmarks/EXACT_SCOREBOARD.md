@@ -390,7 +390,7 @@ Cells moved by more than 2x (table above): none got worse.
 - flyback_converter / forward_converter on pwl+restart and pwl+split, 0.11 / 0.092 ->
   2.55e-6 / 4.9e-6: FIX A of the restart rule (`run_restart` re-runs stage 2 with backward
   Euler when the SDIRK stage 2 turns ON a diode that conducted at the step start), recorded
-  in `/Users/lgili/pulsim_wt/OVERNIGHT_PLAN.md` ("FIX A") with the same numbers.
+  in the orchestrator's batch log `OVERNIGHT_PLAN.md` ("FIX A"; outside this repository) with the same numbers.
 - half_bridge_transformer_dc on pwl+restart and pwl+split, 1.13e-3 -> 1.28e-4: cause not
   identified. Not bisected (only the a67d3994 extension is available); FIX A above is in the
   range and touches only these two configurations, which is not a verification.
