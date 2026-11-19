@@ -48,14 +48,13 @@ def test_bridge_behind_an_ideal_transformer_is_passive_nonreciprocal():
     # The guard judges against the decision's significance bound (exact engine session 16).
     # Truth (pwl+split, dt 1e-8): at 5.981 / 25.981 ms D1 and D4 tie (they chatter for 0.27 us,
     # then both block), so either mode is admissible there and the repairs are ~1e-7 V; at
-    # 21.7896 ms D4 turns on, and the settle's D4-OFF is a real error (repaired, 0.32 V).
+    # 21.7896 ms D4 turns on. The settle's D4-OFF there was a real error the guard repaired
+    # (0.32 V) until exact engine session 18: decisions read the parasitic cluster cut at the
+    # schedule's interval, not at dt_max, and the settle now turns D4 on itself.
     g = r.diagnostics["mode_guard"]
     assert 1 <= g["repairs"] <= 4
-    real = [v for tr, v in zip(g["repair_times"], g["repair_violations"]) if abs(tr - 21.7896e-3) < 1e-6]
-    assert real and min(real) > 0.1
     for tr, v in zip(g["repair_times"], g["repair_violations"]):
-        assert abs(tr - 21.7896e-3) < 1e-6 or (
-            min(abs(tr - 5.98113e-3), abs(tr - 25.98113e-3)) < 1e-7 and v < 1e-6)
+        assert min(abs(tr - 5.98113e-3), abs(tr - 25.98113e-3)) < 1e-7 and v < 1e-6
     # The engine's zero band at 100 V (1e-12 of the largest node voltage): inside it a diode is
     # a tie. Since the guard repair of session 6 (complementarity DECISIONS #34), D2 is ON from
     # the 20 ms repair carrying down to -6.4e-8 A (-6.4e-11 V, inside the band), while the bus

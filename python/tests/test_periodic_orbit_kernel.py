@@ -204,3 +204,21 @@ def test_loss_table_total_equals_the_numpy_sum():
         assert t.total(v, i, tj) == float(np.sum(t(v, i, tj)))
     with pytest.raises(ValueError, match="non-finite"):
         t.total([np.nan], [1.0], [25.0])
+
+
+@pytest.mark.parametrize("frac", [1.0, 0.1, 0.02])
+def test_boost_dcm_turn_off_does_not_depend_on_the_step_ceiling(frac):
+    """The exact engine's decision at D1's own turn-off reads the state after the
+    mode's parasitic cluster has decayed; the cluster was cut at 1e6/dt_max, so at
+    dt_max = T/50 the all-OFF mode's g_off rate (~5e12 /s) was taken for physics
+    and D1 stayed ON for the rest of the period in 18 of 25 runs within
+    +-3e-10 V of the orbit (exact-engine DECISIONS session 18)."""
+    b, sf = _boost(500.0, 0.0)
+    s = pss_mod._Solver(b, T, sf)
+    xt = np.array([36.594400837798241633, -1.2594400838109683447e-8])
+    for dv in np.linspace(-3e-10, 3e-10, 25):
+        r = s._run_native(s.ad, s.sf, xt + [dv, 0.0], T, rtol=1e-11, atol=1e-14,
+                          dt_init=T * 1e-6, dt_max=T * frac, store_every=1,
+                          enable_event_projection=False, diode_law_rel=0.0)
+        st = np.asarray(r["states"]).reshape(len(r["times"]), -1)
+        assert abs(st[-1][1]) < 1e-6, (dv, st[-1])
