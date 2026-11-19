@@ -1,0 +1,57 @@
+{
+ "circuit": "circuits/three_phase/three_phase_balanced_rl_load.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "I(L_a)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.1,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "1.3e-56",
+ "max_eigvec_cond": "517.0",
+ "windows": {
+  "full": {
+   "I(L_a)": {
+    "mean": "0.01092168005113258660599043",
+    "rms": "8.339154789071735029637862",
+    "d_prec": "8.42e-25"
+   }
+  },
+  "last20": {
+   "I(L_a)": {
+    "mean": "-1.337527446407889505088417",
+    "rms": "8.369109423810663861179489",
+    "d_prec": "1.03e-22"
+   }
+  }
+ },
+ "energy_J": {
+  "R_a": "69.5415025960981",
+  "R_b": "68.7223835492002",
+  "R_c": "68.8319908665036",
+  "R_neutral": "1.37456328636604e-21",
+  "src:Va": "69.5534308420296",
+  "src:Vb": "69.0319589062554",
+  "src:Vc": "69.0319590688225"
+ },
+ "energy_balance_rel": "1.3e-56",
+ "precision_doubling_rel": "7.7e-23",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 3.047546177185193e-08,
+ "uniform_dt_floor": 1.9461589668421732e-06,
+ "dt": 2e-05,
+ "stored_dt": 2.5e-06
+}

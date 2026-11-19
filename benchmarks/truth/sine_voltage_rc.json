@@ -1,0 +1,52 @@
+{
+ "circuit": "circuits/linear/sine_voltage_rc.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "0.0",
+ "max_eigvec_cond": "4.95",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "0.07760802450849277547819375",
+    "rms": "0.5821720534371052953100568",
+    "d_prec": "4.08e-33"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "0.0001125610751961454687665471",
+    "rms": "0.5557036571180469582760509",
+    "d_prec": "7.99e-33"
+   }
+  }
+ },
+ "energy_J": {
+  "R1": "0.000121008456455157",
+  "src:Vsig": "0.000121309606728563"
+ },
+ "energy_balance_rel": "7.43e-62",
+ "precision_doubling_rel": "2.28e-30",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 3.7933346141070383e-07,
+ "uniform_dt_floor": 2.4312992597839758e-05,
+ "dt": 5e-06,
+ "stored_dt": 6.25e-07
+}

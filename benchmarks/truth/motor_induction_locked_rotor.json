@@ -1,0 +1,53 @@
+{
+ "circuit": "circuits/motors/motor_induction_locked_rotor.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "I(L_ls_a)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "4.15e-62",
+ "max_eigvec_cond": "134.0",
+ "windows": {
+  "full": {
+   "I(L_ls_a)": {
+    "mean": "3.444072902601703949670512",
+    "rms": "48.53723800491062812982827",
+    "d_prec": "3.75e-30"
+   }
+  },
+  "last20": {
+   "I(L_ls_a)": {
+    "mean": "-9.525505987459178480878438",
+    "rms": "50.53607977163492773658738",
+    "d_prec": "3.77e-30"
+   }
+  }
+ },
+ "energy_J": {
+  "R_s_a": "117.793173657267",
+  "R_r_a": "108.510857511452",
+  "src:Va": "232.451132058695"
+ },
+ "energy_balance_rel": "-2.68e-62",
+ "precision_doubling_rel": "4.37e-30",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 2.654003524993553e-08,
+ "uniform_dt_floor": 1.7015414242065147e-06,
+ "dt": 2e-05,
+ "stored_dt": 2.5e-06
+}

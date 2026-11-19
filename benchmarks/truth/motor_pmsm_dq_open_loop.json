@@ -1,0 +1,55 @@
+{
+ "circuit": "circuits/motors/motor_pmsm_dq_open_loop.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "I(L_q)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "0.0",
+ "max_eigvec_cond": "18.0",
+ "windows": {
+  "full": {
+   "I(L_q)": {
+    "mean": "7.680000000004444153139019",
+    "rms": "7.75628777187071021362553",
+    "d_prec": "1.39e-34"
+   }
+  },
+  "last20": {
+   "I(L_q)": {
+    "mean": "7.999999996724374914282252",
+    "rms": "7.999999996724374915310909",
+    "d_prec": "2.98e-41"
+   }
+  }
+ },
+ "energy_J": {
+  "R_s_d": "0.0",
+  "R_s_q": "3.00800000000356",
+  "src:V_d": "0.0",
+  "src:V_q": "9.21600000000533",
+  "src:V_emf_q": "-6.14400000000356"
+ },
+ "energy_balance_rel": "-1.9e-62",
+ "precision_doubling_rel": "9.38e-32",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 1.2582798376283272e-09,
+ "uniform_dt_floor": 8.06951554747033e-08,
+ "dt": 1e-05,
+ "stored_dt": 1.25e-06
+}
