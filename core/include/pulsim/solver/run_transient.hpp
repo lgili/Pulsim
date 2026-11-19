@@ -2216,12 +2216,13 @@ inline SimulationResult run_transient(
                 accumulate_b_extra(t_from + h, dt_eq, true);
                 run_event_iteration(t_from + h, dt_eq, true);
                 const Size iters_2 = iters;
-                // Only a diode stage 1 conducts and stage 2 turns off,
-                // with no diode turning on: the overshoot mechanism. A
+                // A diode stage 1 conducts and stage 2 turns off, with no
+                // diode turning on: the overshoot mechanism (`on_to_off`
+                // also covers the undo below). A
                 // turn-on in stage 2 (e.g. round-off at a zero start,
                 // buck CCM at t = 0) keeps the SDIRK stage, unless it
                 // undoes stage 1's turn-off of a diode that conducted at
-                // the step start: R(z) < 0 for z < -1/(1-2γ) flips the
+                // the interval start: R(z) < 0 for z < -1/(1-2γ) flips the
                 // sign of a stiff residual (a transformer cut by its
                 // switch, g_off) and the flip forward-biases the diode
                 // again. Kept, the flyback trapped 0.04-0.12 A in its
