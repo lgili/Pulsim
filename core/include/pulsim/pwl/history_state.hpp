@@ -500,6 +500,11 @@ public:
         return entries_;
     }
 
+    /// Add `d` to entry k's stored current: the loss tracker's right limit
+    /// of a heat power that changes at a step start (solver/loss_tracker.hpp,
+    /// add-in-kernel-event-losses DECISIONS 17). Capacitor entries only.
+    void add_to_i_prev(Size k, Real d) noexcept { entries_[k].i_prev += d; }
+
     // ----- Layer 5 V3: snapshot/restore for substep correction -----
     //
     // `snapshot()` returns a deep copy of the per-device
