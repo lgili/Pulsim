@@ -92,4 +92,10 @@ TEST_CASE("FixedClock: grid times from an integer counter", "[step]") {
     const Real expect = t0 + static_cast<Real>(k) * dt;
     CHECK(c.at(0) == t0);
     CHECK(c.at(k) == expect);
+    // an offset clock (a resumed run counting its own steps) is the same
+    // expression on the same grid point
+    volatile pulsim::Size k0 = 7;
+    const step::FixedClock r{t0, dt, k0};
+    CHECK(r.at(k - k0) == expect);
+    CHECK(r.at(0) == c.at(k0));
 }

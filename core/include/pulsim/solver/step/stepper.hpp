@@ -341,6 +341,42 @@ PhaseBody<Poll, Begin, Take, After, Commit, OnStep> phase_body(
     return {p, b, t, a, c, o};
 }
 
+/// A fixed engine's body made of its loop's OWN phase callables, called
+/// with the clock's step index (slice 3c, DECISIONS 18): `cancelled()`,
+/// `begin(k)`, `take()`, `after()`, `commit()`, `record(k)`. No adapter
+/// between the skeleton and the phases; every phase is whole (take and
+/// after_solve never fail or cut: the engine throws on a failed step).
+template <class Cancelled, class Begin, class Take, class After, class Commit,
+          class Record>
+struct IndexPhaseBody {
+    Cancelled& cancelled_;
+    Begin& begin_;
+    Take& take_;
+    After& after_;
+    Commit& commit_;
+    Record& record_;
+    PULSIM_STEP_PHASE bool poll() { return !cancelled_(); }
+    PULSIM_STEP_PHASE void begin(const StepFrame& f) { begin_(f.k); }
+    Real clamp(const StepFrame&, Real h) const noexcept { return h; }
+    PULSIM_STEP_PHASE bool take(const StepFrame&) {
+        take_();
+        return true;
+    }
+    PULSIM_STEP_PHASE bool after_solve(StepFrame&) {
+        after_();
+        return true;
+    }
+    PULSIM_STEP_PHASE void commit(const StepFrame&) { commit_(); }
+    PULSIM_STEP_PHASE void on_step(const StepFrame& f) { record_(f.k); }
+};
+
+template <class Cancelled, class Begin, class Take, class After, class Commit,
+          class Record>
+IndexPhaseBody<Cancelled, Begin, Take, After, Commit, Record> index_phase_body(
+    Cancelled& x, Begin& b, Take& t, After& a, Commit& c, Record& r) {
+    return {x, b, t, a, c, r};
+}
+
 /// A deciding body made of an engine's phase callables (slice 3b): the
 /// TR-BDF2 loop's phases, the SAME callables its legacy loop calls. They
 /// take no frame (the engine reads its own t and h); clamp returns the

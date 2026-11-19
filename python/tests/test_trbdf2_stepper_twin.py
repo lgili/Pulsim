@@ -1,6 +1,7 @@
 """refactor-unified-transient-stepper slice 3b: the variable-step engine's
-legacy loop and its twin on the step skeleton (selected by the internal
-``PULSIM_TRBDF2_STEPPER_TWIN=1``) give the same run.
+legacy loop (selected by the internal ``PULSIM_TRBDF2_STEPPER_LEGACY=1``)
+and its twin on the step skeleton (the default since slice 3c) give the same
+run.
 
 Between two code paths CI compares at 1e-12 of each float array's scale
 (every count, mask and string exactly); bit identity is the LOCAL gate,

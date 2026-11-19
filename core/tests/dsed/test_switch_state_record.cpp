@@ -328,3 +328,148 @@ TEST_CASE("Stamped-mask record: a resume's row 0 is the snapshot's "
         REQUIRE(rig.gate(o1.t_start).get(static_cast<Size>(rig.s_bit)));
     }
 }
+
+// ---- refactor-unified-transient-stepper slice 3c (DECISIONS 17): the step
+// hooks on the DEFAULT driver (the skeleton). probes R2 (`on_event`): each
+// side of a commutation is a solve under its own mask; R1 (`on_step`): the
+// start state of step k + 1 is the end state of step k, except across an
+// event that committed a post-event restart. device interface #31
+// (`device_state`) once per accepted step.
+namespace {
+
+struct HookLog {
+    struct Ev {
+        Real t;
+        Vector xl, xr;
+        topology::SwitchStateMask ml, mr;
+    };
+    struct St {
+        Real t0, t1;
+        Vector x0, x1;
+    };
+    std::vector<Ev> ev;
+    std::vector<St> st;
+    Size n_dev = 0;
+    void attach(events::StepHooks& h) {
+        h.on_event([this](Real t, const Vector& xl, const topology::SwitchStateMask& ml,
+                          const Vector& xr, const topology::SwitchStateMask& mr) {
+            ev.push_back({t, xl, xr, ml, mr});
+        });
+        h.on_step([this](Real t0, const Vector& x0, const topology::SwitchStateMask&,
+                         Real t1, const Vector& x1, const topology::SwitchStateMask&) {
+            st.push_back({t0, t1, x0, x1});
+        });
+        h.on_device_state([this](Real, const Vector&, const pwl::StatefulHistories&) {
+            ++n_dev;
+        });
+    }
+};
+
+// Largest residual of the circuit's two mask-dependent laws (diode current
+// = inductor current; KCL at x through S1) for state x under mask m.
+Real law_residual(const Rig& rig, const Vector& x, const topology::SwitchStateMask& m) {
+    const bool d_on = m.get(static_cast<Size>(rig.d_bit));
+    const bool s_on = m.get(static_cast<Size>(rig.s_bit));
+    const Real i_d = (d_on ? kGon : kGoff) * (x[rig.n_a] - x[rig.n_k]);
+    const Real i_s = (s_on ? kGon : kGoff) * (x[rig.n_m] - x[rig.n_x]);
+    return std::max(std::abs(i_d - x[rig.i_l_var]), std::abs(i_s - x[rig.n_x] / 20.0));
+}
+
+// Distance from t to the nearest S1 edge (every half period of kFsw).
+Real to_edge(Real t) {
+    const Real half = 0.5 / kFsw;
+    return std::abs(t - std::round(t / half) * half);
+}
+
+// R2: each side solved under its own mask, the masks differ, a switch
+// event sits on (TR-BDF2) or within one step of (fixed: `edge_tol`) an edge.
+void check_events(const Rig& rig, const HookLog& log, Real edge_tol) {
+    REQUIRE(log.ev.size() > 4);
+    Size n_s = 0;
+    Size n_bracket = 0;
+    for (const auto& e : log.ev) {
+        INFO("t=" << e.t);
+        REQUIRE_FALSE(e.ml == e.mr);
+        const Real tol = 1e-6;   // A: the laws hold to the solve's round-off
+        REQUIRE(law_residual(rig, e.xl, e.ml) <= tol);
+        REQUIRE(law_residual(rig, e.xr, e.mr) <= tol);
+        const auto s = static_cast<Size>(rig.s_bit);
+        if (e.ml.get(s) != e.mr.get(s)) {
+            ++n_s;
+            REQUIRE(to_edge(e.t) <= edge_tol);
+            // the right side is NOT the left mask's solution (when S1
+            // carries current: with the diode off it carries none)
+            if (law_residual(rig, e.xr, e.ml) > 1e3 * tol) ++n_bracket;
+        }
+    }
+    REQUIRE(n_s > 2);
+    REQUIRE(n_bracket > 0);
+}
+
+}  // namespace
+
+TEST_CASE("Step hooks on the default driver: fixed engine",
+          "[v2][record][run_transient][stepper]") {
+    Rig rig;
+    constexpr Real dt = 1e-6;
+    pwl::PwlStateSpaceCache cache{rig.b.graph(), rig.b.pool()};
+    cache.build(dt);
+    solver::SimulationOptions opts{.t_start = 0.0, .t_end = 3e-3, .dt = dt};
+    events::StepHooks hooks;
+    HookLog log;
+    log.attach(hooks);
+    const auto r = solver::run_transient(
+        cache, rig.b.graph(), rig.b.pool(), opts,
+        [&](Real t) { return rig.gate(t); }, {}, false, {}, {}, nullptr, {},
+        nullptr, {}, {}, nullptr, &hooks);
+    REQUIRE(r.times.size() == opts.expected_sample_count());
+    check_events(rig, log, dt * (1.0 + 1e-9));
+    // R1: one call per grid step, chained (the fixed engine commits no
+    // separate post-event state: x_start is always the last x_end).
+    REQUIRE(log.st.size() + 1 == r.times.size());
+    REQUIRE(log.n_dev == log.st.size());
+    for (Size k = 1; k < log.st.size(); ++k) {
+        REQUIRE(log.st[k].t0 == log.st[k - 1].t1);
+        REQUIRE(log.st[k].x0 == log.st[k - 1].x1);
+    }
+}
+
+TEST_CASE("Step hooks on the default driver: TR-BDF2",
+          "[v2][record][trbdf2][stepper]") {
+    Rig rig;
+    pwl::PwlStateSpaceCache cache{rig.b.graph(), rig.b.pool()};
+    cache.build_lazy(1e-6);
+    solver::TrBdf2Options o;
+    o.t_start = 0.0;
+    o.t_end = 3e-3;
+    solver::TrBdf2Stats stats;
+    events::StepHooks hooks;
+    HookLog log;
+    log.attach(hooks);
+    const auto r = solver::run_transient_trbdf2(
+        cache, rig.b.graph(), rig.b.pool(), o,
+        [&](Real t) { return rig.gate(t); }, {}, std::nullopt, &stats, {}, {},
+        {}, {}, nullptr, {}, &hooks);
+    REQUIRE(r.times.size() > 10);
+    check_events(rig, log, 1e-9);
+    REQUIRE(log.n_dev == log.st.size());
+    REQUIRE(log.st.size() > 10);
+    // R1: chained, except where an event's post-edge restart was committed
+    // between two steps (then an event was reported at the earlier end).
+    // Today the restart commits inside the landing step's commit, so that
+    // step's x_end is the post-edge state and the chain does not break;
+    // the edge's left limit is R2's.
+    for (Size k = 1; k < log.st.size(); ++k) {
+        const auto& a = log.st[k - 1];
+        const auto& b = log.st[k];
+        INFO("k=" << k << " t1=" << a.t1 << " t0=" << b.t0);
+        REQUIRE(b.t0 >= a.t1);
+        if (b.t0 == a.t1) {
+            REQUIRE(b.x0 == a.x1);
+            continue;
+        }
+        bool at_event = false;
+        for (const auto& e : log.ev) at_event = at_event || e.t == a.t1;
+        REQUIRE(at_event);
+    }
+}
