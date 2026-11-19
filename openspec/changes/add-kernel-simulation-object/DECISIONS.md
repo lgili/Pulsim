@@ -277,3 +277,21 @@
     refusals and the count checks (it used to be built before them): a
     run with a bad option AND a circuit whose cache cannot be built now
     reports the option. The view also refuses `share_symbolic`.
+
+22. **Hand-off (2026-11-18, 22:15).** Done this session (all Python;
+    no C++ touched since 9fbbdb2a): 19 (gate under base), 20 (mmc_arms /
+    on_cache / chain on the object), 21, Stage A 1.4 and the simulate()
+    part of 1.3. LOCAL, not pushed: 73adff8b, 0a45b8a4, 832e11d5,
+    ae449172 and this commit, on 3835a4ac. The full ctest build
+    (`zsh .scratch/build.sh ctest`, log `.scratch/build-ctest.log`) stood
+    at 28/146 under a load average of ~80; the Python verification set
+    (`zsh .scratch/dod.sh fin2`, logs `.scratch/*_fin2.log`) was running.
+    Next agent: when both are green, push the tip; if the build is still
+    running, let it finish (it is incremental). Then, in order: (a) the
+    exact engine on the object (16) once `feat/core-a-complementarity` is
+    integrated; (b) `sweep()`'s native replay (`_run_pwl_points` with a
+    `SimulationOptions` recipe, sweep.py ~359-386) onto `RunOptions` /
+    the object, a C++ binding job; (c) Stage A 1.3's one-level-down
+    broad-handler scan; (d) Stage A 2-7 only if the owner still wants a
+    Python plan (DECISIONS 6: the kernel resolves options; the route,
+    compose and finalize still live in simulate()).
