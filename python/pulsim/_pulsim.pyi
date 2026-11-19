@@ -318,6 +318,9 @@ class DeviceLossRecord:
     def E_cond_table(self) -> float:
         ...
     @property
+    def E_impulse(self) -> float:
+        ...
+    @property
     def E_off(self) -> float:
         ...
     @property
@@ -2523,11 +2526,13 @@ class SimulationResult:
         ...
     def device_energy(self, device: str) -> dict[str, float]:
         """
-        ``{"E_on", "E_off", "E_cond_electrical", "E_cond_table", "n_on",
-        "n_off"}`` of ``device`` (energies in J). ``E_cond_electrical`` is
-        the device's ``∫v·i`` (always), ``E_cond_table`` the on-state
-        table's (0 without one); the spec's ``conduction`` says which one
-        was deposited as heat.
+        ``{"E_on", "E_off", "E_cond_electrical", "E_cond_table",
+        "E_impulse", "n_on", "n_off"}`` of ``device`` (energies in J).
+        ``E_cond_electrical`` is the device's ``∫v·i`` (always),
+        ``E_cond_table`` the on-state table's (0 without one); the spec's
+        ``conduction`` says which one was deposited as heat. ``E_impulse`` is
+        the impulsive re-initialisation energy booked to the device
+        (``result.reinit_records`` whose ``cause`` it is), deposited as heat.
         """
         ...
     def plot(self, *signals: str, save: str | None = None, show: bool | None = None, **kwargs: typing.Any) -> typing.Any:
@@ -2827,7 +2832,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, typing.Any, tuple[float, int, float, bool], typing.Any, list[float], list[int]]:
+    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, typing.Any, tuple[float, int, float, bool], typing.Any, list[float], list[int], list[float]]:
         ...
     def __init__(self) -> None:
         ...

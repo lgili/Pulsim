@@ -208,8 +208,8 @@ record unless you pass `t_from=` / `t_to=` (seconds; bounds interpolated
 on any grid, edges counted when they start inside; trap 13's whole run
 reads 17x the 80-100 ms diode loss). `T_j_trace` starts at `T_ambient_C`
 and settles after a few of the largest `tau`.
-In-run (`pwl`): `b.set_device_losses("Q1", junction="tj", E_on=, E_off=)`
-heats `tj` (a capacitor on it) per edge; `Tj=125` reads fixed.
+In-run (pwl, trbdf2): `b.set_device_losses("Q1", junction="tj", E_on=, E_off=)`
+heats `tj` (a capacitor on it) per edge; `Tj=125`: fixed.
 
 ```python
 b = p.CircuitBuilder()

@@ -102,6 +102,7 @@
 #include "pulsim/pwl/reinit.hpp"
 #include "pulsim/models/switched_diode.hpp"
 #include "pulsim/models/transformer.hpp"
+#include "pulsim/solver/loss_tracker.hpp"
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/solver/step/integrators.hpp"
@@ -490,7 +491,10 @@ inline SimulationResult run_transient_trbdf2(
             "run_transient_trbdf2: switch_fn is required (pass an "
             "all-open mask function for uncontrolled circuits)");
     }
-    refuse_device_losses(pool, "trbdf2");   // add-in-kernel-event-losses 3.1
+    // add-in-kernel-event-losses 3.1: the loss ports' tracker (null: none)
+    std::optional<LossTracker> loss_tracker;
+    if (!pool.device_losses().empty()) loss_tracker.emplace(graph, pool, "trbdf2");
+    LossTracker* const lt = loss_tracker ? &*loss_tracker : nullptr;
 
     // ---- scope census ----
     // Nonlinear devices are fine: each stage becomes a Newton
@@ -765,6 +769,7 @@ inline SimulationResult run_transient_trbdf2(
                                                       be_iwave);
             out += be_iwave;
         }
+        if (lt) lt->inject(out);   // the heat owed, on every solve
     };
 
     // ---- the single solve point ----
@@ -1546,6 +1551,13 @@ inline SimulationResult run_transient_trbdf2(
     result.event_iteration_count.push_back(0);
     result.record_switch_state(initial_mask, !initial_seeded);
     if (hooks) hooks->start(x, initial_mask);
+    if (lt) {
+        if (resume_from != nullptr && !resume_from->loss_state.empty()) {
+            lt->restore(resume_from->loss_state);   // the heat in flight too
+        } else {
+            lt->begin(x, initial_mask);
+        }
+    }
 
     // Coupling-aware inductor di/dt for the LTE (a coupled winding's
     // v = L·di/dt + M·di_other/dt, so f ≠ v/L there). Resolved once.
@@ -2083,6 +2095,7 @@ inline SimulationResult run_transient_trbdf2(
         if (hooks != nullptr && hooks->has_event() && !(m_probe == x_mask)) {
             hooks->event(t, x, x_mask, x_trial, m_probe);
         }
+        if (lt && !(m_probe == x_mask)) lt->event(t, x, x_mask, x_trial, m_probe);
         const Real dtp = last_probe_dt;
         ++st.n_derivative_refreshes;
         post_event_pending = true;
@@ -2115,6 +2128,8 @@ inline SimulationResult run_transient_trbdf2(
         result.event_iteration_count.push_back(0);
         result.record_switch_state(m_probe);
         if (hooks) hooks->accepted(t_hook0, t, x, m_probe);
+        // the probe is a trapezoidal step
+        if (lt) lt->accept_step(t_hook0, t, x, m_probe, nullptr, 0.5, 0, 0.5);
         if (structure.active()) reinit.note(m_probe);
         x_mask = m_probe;
         x_mask_known = true;
@@ -2753,6 +2768,7 @@ inline SimulationResult run_transient_trbdf2(
                 zero_derivatives(hist_s1);
                 history.restore(hist_s1);
             }
+            if (lt) lt->advance(h);  // the heat owed, as a power over h
             history.compute_b_extra(hg, b_stage);
             accumulate_sources(t + h_pt, b_src);
             b_stage += b_src;
@@ -3685,6 +3701,7 @@ inline SimulationResult run_transient_trbdf2(
                         if (hooks != nullptr && hooks->has_event()) {
                             hooks->event(t, x, mask_step, x_trial, gates_decided);
                         }
+                        if (lt) lt->event(t, x, mask_step, x_trial, gates_decided);
                     }
                     newton_at_start = false;   // a committed step
                     // a post-event record ahead of this landing goes
@@ -3701,6 +3718,8 @@ inline SimulationResult run_transient_trbdf2(
                     // g_on·(v − V_f) from the post-flip bits.
                     result.record_switch_state(mask_step);
                     if (hooks) hooks->accepted(t_hook0, t, x, mask_step);
+                    // the landing is a trapezoidal sub-step
+                    if (lt) lt->accept_step(t_hook0, t, x, mask_step, nullptr, 0.5, 0, 0.5);
                     if (structure.active()) reinit.note(mask_step);
                     x_mask = mask_step;
                     x_mask_known = true;
@@ -3782,12 +3801,23 @@ inline SimulationResult run_transient_trbdf2(
                 // Both TR-BDF2 stages solved under mask_step.
                 result.record_switch_state(mask_step);
                 if (hooks) hooks->accepted(t_pre, t, x, mask_step);
+                if (lt) {
+                    // the stage weights: SDIRK(2,2) b = (1 - gs, gs) at
+                    // (gs h, h); TR-BDF2 b = (w, w, d) at (0, γh, h)
+                    const Real w = Real{0.5} / (Real{2} - gamma);
+                    if (sdirk) {
+                        lt->accept_step(t_pre, t, x, mask_step, &x_g, 0, Real{1} - gs, gs);
+                    } else {
+                        lt->accept_step(t_pre, t, x, mask_step, &x_g, w, w, Real{1} - Real{2} * w);
+                    }
+                }
                 if (structure.active()) {
                     // D4 record (pwl/reinit.hpp, the fixed engine's code):
                     // the explicit projection from the step's start state.
                     reinit.record(structure, mask_step, x_pre, x, t_pre,
                                   static_cast<long>(result.times.size()) - 1,
                                   opts.on_impulse_error, "trbdf2", result);
+                    if (lt) lt->impulses(result.reinit_records);
                 }
                 x_mask = mask_step;
                 x_mask_known = true;
@@ -4053,8 +4083,10 @@ inline SimulationResult run_transient_trbdf2(
     if (end_cut_h > Real{0}) h = std::max(h, end_cut_h);
     result.final_snapshot.controller = lte_ctrl.save();
     result.final_snapshot.valid = true;
+    if (lt) result.final_snapshot.loss_state = lt->save();
     result.newton = newton_ws.take_counters();
     result.gate_mask_fn = nullptr;   // it reads this frame's diode state
+    if (lt) lt->write(result);
     return result;
 }
 

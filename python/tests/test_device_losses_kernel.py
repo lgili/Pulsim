@@ -265,7 +265,7 @@ def test_energy_balance_electrical_heat_record():
     assert network == pytest.approx(ledger, rel=2 * 1e-5 / t_end)
 
 
-@pytest.mark.parametrize("engine", ["trbdf2", "dsed", "bdf1"])
+@pytest.mark.parametrize("engine", ["dsed", "bdf1"])   # trbdf2 runs it (3.1)
 def test_other_engines_refuse_a_loss_port_by_name(engine):
     b = _diode_rig()
     b.set_device_losses("D1", junction="tj")

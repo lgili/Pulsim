@@ -113,11 +113,9 @@ CASES = {
     "induction_machine": (_induction_machine, 0.03, 0.06, 5e-5),
     "loss_port": (_loss_port, 2.53e-4, 5e-4, DT),
 }
-# trbdf2: the loss port is a pwl feature, refused by name (feature
-# device_losses); a resume between two controller ticks of a closed loop
-# or C block is refused by name (event-queue track: the snapshot lacks the
-# tick origin)
-TRBDF2_REFUSED = {"loss_port": "device_losses"}
+# trbdf2 runs every case since the loss port reached it (in-kernel event
+# losses 3.1)
+TRBDF2_REFUSED: dict[str, str] = {}
 
 
 def _run(factory, engine, t_end, dt, builder=None, kw=None, **extra):
@@ -143,13 +141,15 @@ def test_pwl_resume_continues_the_grid_bit_for_bit(case):
     assert tf[k] == ts[0] and len(tf) - k == len(ts)
     np.testing.assert_array_equal(tf[k:], ts)
     xf, xs = np.asarray(full.states)[k:], np.asarray(second.states)
-    if case == "loss_port":
-        # the heat in flight at the split is dropped (pinned gap, owner:
-        # the event-losses track): the electrical node is bit-identical,
-        # the junction is not
-        np.testing.assert_array_equal(np.asarray(full.v("o"))[k:], np.asarray(second.v("o")))
-        return
     np.testing.assert_array_equal(xf, xs)
+    if case == "loss_port":
+        # the heat in flight, the ledgers and the events travel in the
+        # snapshot (in-kernel event losses item 4): the junction is
+        # bit-identical above, and so is the record
+        ef, es = full.device_energy("S1"), second.device_energy("S1")
+        assert ef == es
+        assert full.heat_injected == second.heat_injected
+        assert full.heat_pending == second.heat_pending
 
 
 @pytest.mark.parametrize("case", sorted(CASES))
@@ -259,9 +259,12 @@ def test_ideal_branch_switch_beside_an_igbt_on_trbdf2():
         rp = p.simulate(bp, 2e-4, dt=1e-8, switch_fn=fn, discontinuity_restart=True)
     v, vp = np.asarray(r.v("out"))[-1], np.interp(r.times[-1], rp.times, rp.v("out"))
     assert v == pytest.approx(vp, rel=2e-3)
+    # trbdf2 honours the loss port since in-kernel event losses 3.1
     bl, _ = _ideal_with_igbt(loss=True)
-    with pytest.raises(p.UnsupportedError, match="device_losses"):
-        p.simulate(bl, 2e-5, engine="trbdf2", switch_fn=fn)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        rl = p.simulate(bl, 2e-5, engine="trbdf2", switch_fn=fn)
+    assert rl.device_energy("S")["n_on"] + rl.device_energy("S")["n_off"] >= 0
 
 
 def test_ideal_branch_circuit_round_trips_yaml_and_pickle():
@@ -361,11 +364,11 @@ def test_a_linear_magnetic_circuit_on_the_exact_route():
     assert i == pytest.approx(1.0 * (1 - math.exp(-t_end * 10.0 / L)), rel=1e-6)
 
 
-def test_impulse_energy_on_a_loss_port_device_is_warned_not_heat():
-    """Batch 13 review: a loss port does not carry the 24 uJ an ideal
-    switch's capacitor loop dissipates (E_impulse_total), and its electrical
-    conduction integral across the impulse step is not physical. simulate()
-    now warns (it was silent); the numbers are pinned below."""
+def test_impulse_energy_on_a_loss_port_device_heats_its_junction():
+    """Batch 13 review gap, closed by the in-kernel event-losses track: the
+    24 uJ an ideal switch's capacitor loop dissipates is booked to S's loss
+    port (E_impulse) and heats its junction; the impulse step's conduction
+    is its end power (0 W for the ideal switch), not the -38.6 uJ it read."""
     b = p.CircuitBuilder()
     b.add_capacitor("C1", "x", "gnd", 1e-6, 10.0)
     b.add_capacitor("C2", "y", "gnd", 3e-6, 2.0)
@@ -386,13 +389,10 @@ def test_impulse_energy_on_a_loss_port_device_is_warned_not_heat():
                        switch_fn=lambda t: m, auto_regularize=False)
     imp = p.losses.impulse_losses(b, r)
     assert imp["S"]["E_impulse_total"] == pytest.approx(24e-6, rel=1e-9)
-    assert any("do not carry their impulsive" in str(x.message) for x in w)
-    # the heat is the table energy (1e-5 J per event) only, not the 24 uJ
-    # Pinned gap: the switch is ON from t = 0 (no table event) and the
-    # electrical conduction integral across the impulse step reads -38.6 uJ,
-    # so the junction COOLS below ambient (24.96 degC). Owner: the in-kernel
-    # event-losses track (skip v*i across a re-initialisation step and
-    # deposit dW instead); a fix shows up here.
+    assert not any("impulsive" in str(x.message) and "loss port" in str(x.message) for x in w)
     e = r.device_energy("S")
-    assert e["n_on"] == 0 and e["E_cond_electrical"] < 0.0
-    assert r.heat_injected == pytest.approx(e["E_cond_electrical"], rel=1e-12)
+    assert e["n_on"] == 0 and e["E_impulse"] == pytest.approx(24e-6, rel=1e-9)
+    assert abs(e["E_cond_electrical"]) < 1e-3 * 24e-6
+    assert r.heat_injected + r.heat_pending == pytest.approx(
+        e["E_cond_electrical"] + e["E_impulse"], rel=1e-12)
+    assert np.asarray(r.v("tj"))[-1] > 25.0
