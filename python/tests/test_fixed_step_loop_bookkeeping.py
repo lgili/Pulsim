@@ -48,7 +48,15 @@ def _run(n_steps, **kw):
     return res, calls[0]
 
 
-@pytest.mark.parametrize("kw", [{}, dict(discontinuity_restart=True)])
+# The restart-less loop (discontinuity_restart=False: the pre-release default)
+# and the restart rule without the split (its pre-release explicit form) read
+# the schedule once per step; the release default adds the split's one read
+# per gate edge.
+ONE_READ = [dict(discontinuity_restart=False),
+            dict(discontinuity_restart=True, enable_substep_state_correction=False)]
+
+
+@pytest.mark.parametrize("kw", ONE_READ)
 def test_switch_fn_is_read_once_per_step(kw):
     """calls(2N) − calls(N) == N: one evaluation per step (two before:
     one for the pre-event mask and one per event iteration)."""
@@ -61,23 +69,41 @@ def test_switch_fn_is_read_once_per_step(kw):
     assert c2 == r2.counters["switch_fn_calls"] + 1
 
 
+def test_the_split_adds_one_read_per_gate_edge():
+    """Release default (restart + split): one evaluation per step plus one
+    per gate edge after t = 0 (100 kHz, two edges a period: 20 in 1000 steps)."""
+    r1, c1 = _run(1000)
+    r2, c2 = _run(2000)
+    assert not r1.dt_retries and not r2.dt_retries
+    assert c2 - c1 == 1000 + 20
+    assert r2.counters["switch_fn_calls"] == 2000 + 39
+    assert c2 == r2.counters["switch_fn_calls"] + 1
+
+
 def test_segment_memo_absorbs_repeated_lookups():
-    """Default engine: 81 searches for 2000 steps (one per solve, >= 2000,
-    before); with the restart rule 40. A search happens only when the
-    mask differs from the previous solve's."""
+    """Release default (the restart rule on): 40 searches for 2000 steps (one
+    per solve, >= 2000, before the memo); the restart-less loop 81. A search
+    happens only when the mask differs from the previous solve's."""
     res, _ = _run(2000)
-    assert res.counters["segment_searches"] == 81
+    assert res.counters["segment_searches"] == 40
     res, _ = _run(2000, discontinuity_restart=True)
     assert res.counters["segment_searches"] == 40
+    # legacy subject: the restart-less loop (the pre-release default)
+    res, _ = _run(2000, discontinuity_restart=False)
+    assert res.counters["segment_searches"] == 81
 
 
 def test_rollback_snapshots_only_when_a_rollback_path_exists():
     res, _ = _run(500)
     assert res.counters["rollback_snapshots"] == 500
+    # the restart rule (default) keeps a rollback path without dt halvings
     res, _ = _run(500, max_dt_halvings=0)
-    assert res.counters["rollback_snapshots"] == 0
+    assert res.counters["rollback_snapshots"] == 500
     res, _ = _run(500, max_dt_halvings=0, discontinuity_restart=True)
     assert res.counters["rollback_snapshots"] == 500
+    # legacy subject: the restart-less loop has none
+    res, _ = _run(500, max_dt_halvings=0, discontinuity_restart=False)
+    assert res.counters["rollback_snapshots"] == 0
 
 
 def test_memo_survives_eviction_between_steps():
