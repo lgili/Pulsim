@@ -499,7 +499,14 @@ def test_transformer_energy_balance_is_exact_on_the_grid():
     E_store = sum(0.5 * P * (res.v(a) - res.v(b)) ** 2
                   for P, a, b in ((PSP, "a", "gnd"), (PC, "a", "b"), (PSS, "b", "gnd")))
     resid = E_in - E_load - (E_store[1:] - E_store[0])
-    assert np.max(np.abs(resid)) <= 1e-9 * np.max(np.abs(E_in))
+    # The fixed engine starts with its SDIRK restart (n_restart_steps steps),
+    # which is not the trapezoid whose midpoint products the balance sums:
+    # every trapezoid step after it must conserve exactly. The start's own
+    # residual is the restart's local error (8.2e-11 J at dt = 2e-7 s,
+    # 2.3e-15 J at 2e-8 s). Measured after it: 9e-14 of E_in.
+    k = res.n_restart_steps
+    assert k == 3
+    assert np.max(np.abs(resid[k:] - resid[k - 1])) <= 1e-9 * np.max(np.abs(E_in))
 
 
 def _tanh_coenergy_integral(law_max, law_min, v0, F):
@@ -712,6 +719,15 @@ def test_energy_balance_of_the_multi_leg_cases_is_exact_on_the_grid(case):
     E_in = sum(np.cumsum(h * mid(v(e)) * mid(res.i(w, port=1))) for e, w in ports)
     E_store = sum(0.5 * P * (v(a) - v(c)) ** 2 for P, a, c in perms)
     resid = E_in - (E_store[1:] - E_store[0])
-    # Measured 1.0e-10 (three-limb: a per-step residual on the yoke that
-    # accumulates over 2000 steps, as in the flux check) and 8.6e-14 (EE).
-    assert np.max(np.abs(resid)) <= 1e-8 * np.max(np.abs(E_store))
+    # Every trapezoid step after the SDIRK restart start (n_restart_steps;
+    # the first interval's midpoint also reads the sources' t = 0 left limit,
+    # 0 V, while they drive the whole step) conserves exactly. Measured
+    # 1.0e-10 (three-limb: a per-step residual on the yoke that accumulates
+    # over 2000 steps, as in the flux check) and 1.1e-13 (EE).
+    k = res.n_restart_steps
+    assert k == 3
+    assert np.max(np.abs(resid[k:] - resid[k - 1])) <= 1e-8 * np.max(np.abs(E_store))
+    if case == "ee":
+        # 1 V on W1, W2 open: the flux ramps, E = t^2 / (2 L), L = N^2 Po1 (Pctr + Po2) / sum
+        L = 10 ** 2 * 2e-6 * 2.5e-6 / 4.5e-6
+        assert E_store[-1] == pytest.approx(0.5 * 2e-5 ** 2 / L, rel=1e-9)   # measured 1.1e-13
