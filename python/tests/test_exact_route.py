@@ -256,11 +256,9 @@ def test_ten_paralleled_bridges_agree_with_pwl(mode):
     the predicate of Dt0a read 3e-5 V of noise, keeping it ON 4.6 us past its current zero.
     The double-double refined reduction (exact engine 8) runs it on either selection, within
     the 5-bank test's 1e-3 V of pwl+split.
-    The right answer OR the law check's named refusal, never a wrong answer: a diode leaving at
-    its own located current zero is decided by the rounding of the root (1 run in 11 perturbed
-    at 1e-15 was refused, DECISIONS session 9), so another platform's rounding may refuse. The
-    strict form (must run) is the local identity gate probes/ten_banks_strict.py."""
-    from pulsim._dsed_dispatch import DiodeModeInconsistentError
+    Strict since exact engine session 16: 11 of 11 runs perturbed at 1e-15 run on both selections
+    (the law check reads, at a located diode event, the settled state the decision read; the
+    un-relaxed g_off spike of 1e-13 s refused 1 in 11 before)."""
     kw = {} if mode is None else {"mode_selection": mode}
     t_end = 0.02
     tg = np.linspace(0.0, t_end, 2001)
@@ -269,11 +267,7 @@ def test_ten_paralleled_bridges_agree_with_pwl(mode):
         return np.interp(tg, r.times, np.asarray(r.v("p")) - np.asarray(r.v("n")))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        try:
-            r = p.simulate(_paralleled_bridges(10), t_end=t_end, engine="exact", **kw)
-        except DiodeModeInconsistentError as e:
-            assert "the diode law" in str(e)
-            return
+        r = p.simulate(_paralleled_bridges(10), t_end=t_end, engine="exact", **kw)
         ref = _ten_bridges_pwl()
     assert np.abs(bus(r) - np.interp(tg, *ref)).max() <= 1e-3
 

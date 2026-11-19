@@ -365,6 +365,10 @@ public:
         RK45State rk_state;
         PEDResult<MaskT> result;
         law_settled_.clear();
+        // a run that threw inside fire_event_ must not leak its event context
+        settle_decisions_ = false;
+        has_event_sample_ = false;
+        loc_dx_.resize(0);
         {
             MaskT m0 = system_.current_mask();
             const MaskT prev0 = diode_bits_;
@@ -1838,7 +1842,22 @@ private:
         if (settle_decisions_) {
             Real ts = t_event;
             const Vector& xs = settled_(t_event, x, event_sample_, ts);
-            if (&xs == &event_sample_ && ts > t_event) has_event_sample_ = true;
+            // only where the stored sample breaks a law at all (D1's case: a sample
+            // that holds, keeps being read as stored). OPEN (review s16 #1): a real
+            // current forced into g_off drains inside the settle too; telling it from
+            // the located root's insignificant current needs the pre-event bound.
+            if (&xs == &event_sample_ && ts > t_event) {
+                bool breaks = false;
+                if constexpr (HasNodePairVoltage<System>) {
+                    for (const auto& d : diodes_) {
+                        const bool on = system_.current_mask().get(d.switch_idx);
+                        const Real v = system_.node_pair_voltage(d.from, d.to, t_event, x);
+                        const Real g = on ? -(v - d.V_f) : v - std::max(d.V_th, d.V_f);
+                        if (g > signal_bound_(d, t_event, x, Real{0}, Real{0})) { breaks = true; break; }
+                    }
+                }
+                has_event_sample_ = breaks;
+            }
         }
         settle_decisions_ = false;
         loc_dx_.resize(0);
@@ -1941,7 +1960,9 @@ private:
                     // the physics that comes next (a cap shorter than the decay
                     // decides on the state at the cap)
                     const Real te = next_time_event_(t);
-                    if (std::isfinite(te) && te > t) d = std::min(d, te - t);
+                    // half-way, as decision_cap_: the ladder read from t + d must still
+                    // see the edge ahead of it (from t + d = te it would skip it)
+                    if (std::isfinite(te) && te > t) d = std::min(d, Real{0.5} * (te - t));
                     if (d > Real{0}) {
                         advance_(t, x, d, out);
                         ts = t + d;
