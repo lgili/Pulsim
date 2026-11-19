@@ -460,6 +460,32 @@ def test_pmsm_at_rest_motional_impedance():
         assert abs(Ht - H[kf]) / abs(H[kf]) < 1e-3, (f, Ht, H[kf])
 
 
+def test_pmsm_held_rotor_with_load_stiffness():
+    # A DC current i_a0 at rest, balanced by T_load: the torque now varies
+    # with θ, a stiffness S = ∂(Σ K_k i_k)/∂θ = pp²·ψ·cos(θ_e)·i_a0 in the
+    # shaft row (θ̂ = ω̂/jω): D gains S/(jω). Probes the θ column.
+    V, th0 = 1.0, 0.2
+    i_a0 = V / (PM["Rx"] + PM["R_s"])
+    K = PM["pp"] * PM["psi"] * np.sin(PM["pp"] * th0 + OFF)
+    S = PM["pp"] ** 2 * PM["psi"] * np.cos(PM["pp"] * th0) * i_a0
+    Z = PM["R_s"] + 1j * W * PM["L"]
+
+    def h(stiff):
+        D = 1j * W * PM["J"] + PM["B"] + stiff / (1j * W) + (K[1] ** 2 + K[2] ** 2) / Z
+        Zin = Z + K[0] ** 2 / D
+        return Zin / (PM["Rx"] + Zin)
+
+    b = _pmsm(V, 0.0, 1.0, theta0=th0, T_load=-K[0] * i_a0)
+    H = _sweep(b, "a")
+    assert _rel(H, h(S)) < 1e-9, (H, h(S))
+    assert abs(H[0] - h(0.0)[0]) / abs(H[0]) > 1e-6   # the stiffness is seen
+
+
+def test_pmsm_balance_tolerates_a_femto_torque():
+    # 1e-12 V bias: a 3e-14 N·m residual is G_min-scale, not an imbalance
+    _sweep(_pmsm(1e-12, 0.0, 1.0), "a")
+
+
 def test_pmsm_spinning_is_refused_by_name():
     with pytest.raises(p.UnsupportedError) as ei:
         _sweep(_pmsm(0.0, 0.0, 1.0, omega0=50.0), "a")

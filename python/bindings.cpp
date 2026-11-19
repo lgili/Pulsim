@@ -5403,6 +5403,11 @@ void init_module(py::module_& m) {
             }
             const auto s = states.unchecked<2>();
             const auto n_rows = s.shape(0), n_cols = s.shape(1);
+            if (n_cols < static_cast<py::ssize_t>(pool.state_size(graph))) {
+                throw py::value_error(std::format(
+                    "static_device_readings: states has {} columns, the circuit "
+                    "needs {}", n_cols, pool.state_size(graph)));
+            }
             py::array_t<double> cur(n_rows), pw(n_rows);
             auto c = cur.mutable_unchecked<1>();
             auto w = pw.mutable_unchecked<1>();

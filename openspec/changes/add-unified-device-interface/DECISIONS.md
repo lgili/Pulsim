@@ -1172,3 +1172,25 @@
     error: MOSFET 2e-13 / 4e-15, IGBT 1.7e-12 / 2e-13, smooth diode
     1.7e-12 / 3e-13, Shockley 1.5e-12 / 3e-13, saturable L 1.1e-12 /
     5e-14 (worst of pwl and trbdf2).
+
+60. **Slice 11 review (fresh-context reviewer, read-only) and hand-off.**
+    No existing AC, DC or `res.i` number changed; no refusal was lifted
+    without an analytic test; no kind linearised at a wrong point. Fixed:
+    the PMSM torque-balance check refused a 3e-14 N·m residual at a 1e-12 V
+    bias (relative-only tolerance); it now has an absolute floor of the
+    torque of 1 nA through the PM flux. Added a held-rotor test with a DC
+    current and a balancing `T_load` (the θ stiffness S = pp²ψ cos θ_e i_a0
+    in the shaft row, against the closed form to 1e-9). The
+    `static_device_readings` binding refuses a states array narrower than
+    the circuit's state; `device_thermal_summary` warns when it skips a
+    tailed IGBT. Left: (a) `simulate(device_path='interface',
+    start_from_dc_op=True)` still starts from `nl_static`, which does not
+    stamp the Lauritzen law, so its DC point differs from
+    `compute_dc_operating_point(device_path=Interface)` — the loop hunk of
+    #56, not done (LOOP FREEZE); (b) the saturable table test uses a
+    straight-line table and the 1 pA case sits at L_0, so only the 1 A case
+    probes the operating point; (c) the conformance AC cells for the
+    composites check finiteness and presence only (the analytic numbers are
+    in test_ac_linearize.py). Next slice: 9.1 (per-sample pin currents in
+    the loop) lets 9.2 delete the Python ladder and cover the stored-charge
+    kinds; group 12 (field tables) not started.

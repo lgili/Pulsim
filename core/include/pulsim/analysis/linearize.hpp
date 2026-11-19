@@ -191,7 +191,10 @@ inline void require_pmsm_equilibrium(const topology::Graph& graph,
     device::eval<Law>(pwl::iface::pmsm_aux(e), Law::from(e.params), xl, o);
     res += o.f[4];
     scale = std::max({scale, std::abs(o.f[4]), std::abs(e.params.T_load)});
-    if (std::abs(res) > Real{1e-9} * scale) {
+    // absolute floor: the torque of 1 nA through the PM flux, so a residual
+    // at a femto-ampere bias (G_min leakage) is not refused as imbalance
+    const Real floor = Real{1e-9} * std::abs(e.params.pole_pairs * e.params.psi_pm);
+    if (std::abs(res) > Real{1e-9} * scale + floor) {
         refuse(graph, pool, b0, "",
                std::format("run_mna_sweep: the PMSM '{}' is not in torque balance at the "
                            "DC point (shaft-row residual {:.3e} N·m, largest term "

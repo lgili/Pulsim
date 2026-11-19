@@ -117,6 +117,19 @@ def test_newton_current_and_energy_against_a_sense_resistor(kind, engine):
         assert th[0]["P_cond_avg"] == pytest.approx(P_avg, rel=1e-4, abs=1e-4 * e_abs / t[-1])
 
 
+def test_thermal_summary_warns_on_a_tailed_igbt():
+    b = _base()
+    b.add_voltage_source("Vg", "g", "gnd", 15.0)
+    b.add_igbt_level1("X", "a", "gnd", "g", tau_tail=1e-6, k_tail=0.3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 1e-4, dt=1e-6, engine="pwl")
+    st = [p.FosterStage(R_th_K_per_W=0.5, tau_s=1e-4)]
+    with pytest.warns(UserWarning, match="stored charge"):
+        out = p.device_thermal_summary(b, r, thermal_specs={"X": {"stages": st}})
+    assert out == []
+
+
 @pytest.mark.parametrize("add", [
     lambda b: b.add_lauritzen_diode("X", "a", "gnd"),
     lambda b: b.add_nonlinear_capacitor("X", "a", "gnd", 1e-6, 1.0),

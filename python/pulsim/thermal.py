@@ -921,6 +921,11 @@ def device_thermal_summary(
             rd_s = _kmod.static_device_readings(builder.graph, builder.pool,
                                                 states_s, int(bid))
             if rd is None or rd_s is None or from_id is None or to_id is None:
+                warnings.warn(
+                    f"device_thermal_summary: {name!r} ({kind}) is skipped: its "
+                    f"current needs a stored charge (an IGBT tail). Put a 1 mOhm "
+                    f"resistor in series and give its v*i to the thermal model.",
+                    stacklevel=2)
                 continue
             v_D = (_views.node_voltage_trace(states, int(from_id))
                    - _views.node_voltage_trace(states, int(to_id)))
