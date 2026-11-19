@@ -4776,7 +4776,7 @@ void init_module(py::module_& m) {
                 pulsim_bindings_common::adapt_switch_fn(switch_fn_obj);
             const SwitchScheduleFn switch_fn = std::move(adapted.fn);
             // add-fixed-step-event-splitting: the schedule's edges, read
-            // only when enable_substep_state_correction splits steps.
+            // by the split and by the restart rule without it.
             // A Python schedule may declare its edges the same way, with a
             // `next_edge_after(t)` method (the DSED engine reads it too).
             std::function<Real(Real)> next_edge_fn =

@@ -120,7 +120,19 @@ exactly at that point, on the dynamic path and on the static path (no
 inductor or capacitor) alike. `SimulationResult::switch_state_bits`
 SHALL keep recording, for every stored sample, the mask that sample was
 solved under. With the rule off the engine SHALL keep stamping the step
-with `switch_fn(t_k)`.
+with `switch_fn(t_k)`. Without the event split, a step in which the
+schedule DECLARES an edge (its `next_edge_after` oracle) strictly inside
+`(t_{k−1}, t_k)` SHALL be stamped with the gate's left limit at `t_k`;
+on the dynamic path it SHALL keep `switch_fn(t_{k−1})` when a switch bit
+that changed at `t_{k−1}` is back at its earlier value by `t_k` (a pulse
+narrower than the step). A schedule without an oracle keeps
+`switch_fn(t_{k−1})`.
+
+#### Scenario: A declared edge inside a step
+- **GIVEN** a switch and a resistor whose schedule declares a turn-off
+  1.5 ns after a grid point, with the rule on and no split
+- **WHEN** the step holding the edge is solved
+- **THEN** its sample is solved with the switch off, as plain pwl does
 
 #### Scenario: Right-continuous PWM on the grid
 - **GIVEN** the RL circuit above and a schedule that is closed for

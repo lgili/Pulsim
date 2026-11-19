@@ -1527,6 +1527,45 @@ inline SimulationResult run_transient(
     const bool split = opts.enable_substep_state_correction;
     // Events this close to a step boundary are taken at it (design D4).
     const Real snap = opts.dt * opts.split_snap;
+    // Restart rule without the split: the gate of step (t_prev, t] is read
+    // at t_prev (design D4), unless the schedule's oracle has an edge
+    // after it and before t - max(snap, left_by). An edge within snap of
+    // t_prev is read at the edge (as the split takes it); one further
+    // inside is past at the sample t, so the step reads the gate's left
+    // limit at t: the edge is placed at t_prev instead of t (first order
+    // either way) and the sample at t is solved in the mode of t (exact
+    // truth: a resistive load read the pre-edge mode for a whole sample at
+    // every off-grid edge). Opaque closures (no oracle) keep D4.
+    // `dynamic`: the dynamic path (its oracle memo; the static path asks
+    // anew). There, a step in which a bit turns at t_prev and is back by
+    // t (a pulse narrower than the step from a grid point, e.g. a closed
+    // loop at its minimum duty, one leg of a dead-time pair) keeps D4: the
+    // left limit at t would drop the pulse's charge, D4 widens it to the
+    // step (both first order; the split places it).
+    auto restart_gate_time = [&](Real t_from, Real t_to, bool dynamic) -> Real {
+        if (!next_edge_fn) return t_from;
+        if (!dynamic || !(edge_from <= t_from && t_from < edge_next)) {
+            edge_from = t_from;
+            edge_next = next_edge_fn(t_from);
+        }
+        Real g = t_from;
+        Real e = edge_next;
+        const Real end = t_to - std::max(snap, left_by);
+        for (Size q = 0; q < 4 * kMaxStepEvents && e < end; ++q) {
+            g = e < t_from + snap ? e : t_to - left_by;
+            e = next_edge_fn(e);
+        }
+        if (dynamic && g == t_to - left_by) {
+            // per bit: one that is back at its pre-step value and differed at t_from
+            const topology::SwitchStateMask after = gate_at(g);
+            const topology::SwitchStateMask before = gate_at(t_from - left_by);
+            const auto& d4 = gate_at(t_from);
+            for (Size i = 0; i < after.size(); ++i) {
+                if (after.get(i) == before.get(i) && d4.get(i) != before.get(i)) return t_from;
+            }
+        }
+        return g;
+    };
     // A source jump snapped to the step end (t - snap <= tau < t): the
     // solve AT `src_end_at` reads the built-in sources at `src_end_read`
     // (= tau, so value_at(tau - left_by) is the pre-jump level). NaN
@@ -1726,7 +1765,8 @@ inline SimulationResult run_transient(
             // so the user can update a Python-side PI / sampler /
             // comparator with `x_prev` and have `switch_fn(t)`
             // read the new duty / mask. Under the restart rule the
-            // gate is sampled at the step START (design D4); the
+            // gate is sampled at the step START (design D4; an oracle
+            // edge inside the step: restart_gate_time); the
             // observer keeps its (t_k, x_{k-1}) label, whose move to
             // t_{k-1} belongs to fix-control-tick-semantics.
             Real gate_t = restart_rule ? t_prev : t;
@@ -1741,6 +1781,7 @@ inline SimulationResult run_transient(
                 bj_next = -std::numeric_limits<Real>::infinity();
             }
             gate_memo_n = 0;
+            if (restart_rule && !split) gate_t = restart_gate_time(t_prev, t, true);
             // ---- add-fixed-step-event-splitting: the step's events ----
             // Gate edges from the schedule's oracle and built-in source
             // jumps inside [t_prev + snap, t - snap), in time order. One
@@ -3129,7 +3170,8 @@ inline SimulationResult run_transient(
             // path — sample k reads the gate at t_{k-1} and the jumping
             // sources at their left limit — so adding a capacitor does
             // not shift the recorded mask by one sample. (k = 0: t.)
-            const Real gate_t = restart_rule && k > 0 ? t_prev : t;
+            const Real gate_t =
+                restart_rule && k > 0 ? (split ? t_prev : restart_gate_time(t_prev, t, false)) : t;
             const Real src_left = k > 0 ? left_by : Real{0};
             b_extra.setZero();
             if (b_extra_fn) {
