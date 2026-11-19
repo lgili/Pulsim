@@ -1539,6 +1539,11 @@ private:
 /// simulate it. Every "does this circuit need Newton" and "can engine E
 /// run kind K" decision is derived from this table; a new kind is one
 /// added row (the static_assert below fails the build until it exists).
+// add-unified-device-interface 10.2: the Newton kinds the AC sweep
+// linearises at the DC operating point from their Device law
+// (analysis/linearize.hpp), each with its analytic small-signal test.
+inline constexpr std::uint8_t kNewtonAc =
+    static_cast<std::uint8_t>(kNewtonEngines | engine_bit(Engine::AcSweep));
 inline constexpr auto kKindCaps = std::to_array<KindCaps>({
     {"Resistor",           SolveClass::Linear,         kAllEngines},
     {"VoltageSource",      SolveClass::Source,         kAllEngines},
@@ -1547,19 +1552,19 @@ inline constexpr auto kKindCaps = std::to_array<KindCaps>({
     {"Inductor",           SolveClass::Linear,         kAllEngines},
     // BDF1 has no diode event iteration: the bit would stay frozen.
     {"Diode",              SolveClass::PwlDiode,       kAllEngines & ~engine_bit(Engine::Bdf1)},
-    {"NonlinearDiode",     SolveClass::NewtonStatic,   kNewtonEngines},
+    {"NonlinearDiode", SolveClass::NewtonStatic, kNewtonAc},
     {"CurrentSource",      SolveClass::Source,         kAllEngines},
     {"PWMVoltageSource",   SolveClass::Source,         kAllEngines},
     {"SineVoltageSource",  SolveClass::Source,         kAllEngines},
     {"PulseVoltageSource", SolveClass::Source,         kAllEngines},
-    {"MosfetLevel1",       SolveClass::NewtonStatic,   kNewtonEngines},
-    {"IgbtLevel1",         SolveClass::NewtonStatic,   kNewtonEngines},
+    {"MosfetLevel1", SolveClass::NewtonStatic, kNewtonAc},
+    {"IgbtLevel1", SolveClass::NewtonStatic, kNewtonAc},
     {"VCVS",               SolveClass::Linear,         kAllEngines},
-    {"SaturableInductor",  SolveClass::NewtonStateful, kNewtonEngines},
-    {"NonlinearCapacitor", SolveClass::NewtonStateful, kNewtonEngines},
-    {"ShockleyDiode",      SolveClass::NewtonStatic,   kNewtonEngines},
-    {"LauritzenDiode",     SolveClass::NewtonStateful, kNewtonEngines},
-    {"PmsmMna",            SolveClass::NewtonStateful, kNewtonEngines},
+    {"SaturableInductor", SolveClass::NewtonStateful, kNewtonAc},
+    {"NonlinearCapacitor", SolveClass::NewtonStateful, kNewtonAc},
+    {"ShockleyDiode", SolveClass::NewtonStatic, kNewtonAc},
+    {"LauritzenDiode", SolveClass::NewtonStateful, kNewtonAc},
+    {"PmsmMna", SolveClass::NewtonStateful, kNewtonAc},
     {"IdealTransformer",   SolveClass::Linear,         kAllEngines},
     // add-controlled-source-set: linear stamps in the cached matrix and
     // current waveforms overlaid on the node rows (no AC excitation).

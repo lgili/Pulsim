@@ -8,7 +8,9 @@ curve for circuits it did not model, with no error (|H| at 100 Hz /
   (the hand-written mass matrix had no mutual terms);
 * RC through a switch meant closed: 0 / 0 / 0 (all-OFF mask forced);
 * Shockley diode, saturable inductor, junction capacitor: 1, 0.5, 0.9999
-  flat (Newton branches dropped by the static assembler);
+  flat (Newton branches dropped by the static assembler) — refused by name
+  by this change, linearised at the DC point since
+  add-unified-device-interface 10.2 (test_ac_linearize.py);
 * any kernel exception was swallowed by a broad ``except`` and the call
   fell through to the impulse-FFT path.
 """
@@ -72,41 +74,6 @@ def test_switch_state_is_the_callers_mask():
 def test_switches_without_a_mask_are_refused_by_name():
     with pytest.raises(ValueError, match=r"mask.*\bS\b|\bS\b.*mask"):
         _sweep(_rc_switch(), "o")
-
-
-def _shockley():
-    b = p.CircuitBuilder()
-    b.add_voltage_source("V", "in", "gnd", 1.7)
-    b.add_resistor("R", "in", "a", 1.0)
-    b.add_shockley_diode("D", "a", "gnd")
-    return b, "a", "D", "ShockleyDiode"
-
-
-def _saturable():
-    b = p.CircuitBuilder()
-    b.add_voltage_source("V", "in", "gnd", 0.0)
-    b.add_resistor("R", "in", "a", 10.0)
-    b.add_saturable_inductor("L", "a", "o", 1e-3, 1.0)
-    b.add_resistor("RL", "o", "gnd", 10.0)
-    return b, "o", "L", "SaturableInductor"
-
-
-def _junction_cap():
-    b = p.CircuitBuilder()
-    b.add_voltage_source("V", "in", "gnd", 0.0)
-    b.add_resistor("R", "in", "o", 100.0)
-    b.add_nonlinear_capacitor("C", "o", "gnd", 1e-6, 1.0)
-    b.add_resistor("RL", "o", "gnd", 1e6)
-    return b, "o", "C", "NonlinearCapacitor"
-
-
-@pytest.mark.parametrize("make", [_shockley, _saturable, _junction_cap])
-def test_newton_devices_are_refused_with_name_and_kind(make):
-    b, out, name, kind = make()
-    with pytest.raises(ValueError) as exc:
-        _sweep(b, out)
-    msg = str(exc.value)
-    assert f"'{name}'" in msg and kind in msg, msg
 
 
 def test_a_kernel_failure_reaches_the_caller(monkeypatch):

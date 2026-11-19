@@ -1063,3 +1063,91 @@
 - Task groups 5–14: every open box carries its reason in tasks.md. Next
   candidates without a loop edit: 10.x (AC/DC from f and q), 12.x (field
   tables). No new stepper request this slice (#49's two stand).
+
+## Slice 11 — AC and DC from f and q (2026-11-19)
+
+55. **`linearize` (task 10.1/10.2): what is linearised, where, and what is
+    refused.** `analysis/linearize.hpp`. The linear part is the sweep's own
+    assembly (`linear_part`: `assemble_segment_split` at the caller's mask,
+    E = C_split/2), unchanged operation for operation; a circuit with no
+    Newton device returns it before anything else runs (62 sweep outputs of
+    the existing tests byte-identical against the merged tip; C++ test
+    "a linear circuit is the sweep's linear part, bit for bit"). External
+    devices keep their path (same calls, same order). Every built-in
+    Newton kind adds ∂f/∂x to G and ∂q/∂x to C from ONE forward-AD
+    evaluation of its `Device` law at x0. The operating point: the DC point
+    of the caller's mask through the device laws
+    (`dc_device_refresh(…, Interface)`), PWL diodes held at the mask (as the
+    external path always did); internal unknowns (the saturable inductor's
+    current, the PMSM's phase currents, θ, ω) are read from that x0; a
+    LOCAL charge (Lauritzen q_M, IGBT-tail Q) is taken at its DC value
+    (its affine row solved at q̇ = 0) and kept as an EXTRA unknown after the
+    circuit's — condensing it would give an ω-dependent admittance, not a
+    real (G, C) pair. Refused by name (`UnsupportedError(engine='ac_sweep')`):
+    InductionMachineMna (kind table; no analytic small-signal test written);
+    a Jiles–Atherton inductor (`feature='hysteretic_core'`: the incremental
+    L depends on the direction of the excursion, a minor loop — no unique
+    small-signal model); a nonlinear capacitor on a magnetic node
+    (`feature='nonlinear_permeance'`: its DC point needs a nonlinear
+    flux-conservation row the DC assembly lacks — it used to fail as "no DC
+    operating point"); a PMSM held at ω ≠ 0 (abc quantities rotate: no
+    equilibrium) or whose shaft row of the FREE system, (G·x0 + b)_ω +
+    f_ω(x0), is not 0 to 1e-9 of its largest term (the DC point holds the
+    mechanics, so it does not enforce T = T_load by itself). The two
+    conformance PMSM cells (BLDC harmonics, flux map) are driven, so not in
+    torque balance: they are refused with that reason. The IGBT-tail
+    conformance cell's DC point has the gate at 0 V (IGBT off), so the tail
+    has nothing to linearise there: presence is not asserted for it (the
+    conducting tail is the analytic test).
+
+56. **The DC point through the device contract (task 10.3).** What
+    `Formula::Dc` (q̇ = 0) means per kind, and what the code does:
+    static kinds — already their laws on the interface path; saturable
+    inductor — the DC assembly's short IS the law at DC (f₂ = v = 0);
+    nonlinear capacitor — open IS the law (q only); IGBT tail — its DC
+    current is exactly 0 (Q = τ·k·i_ss, i_tail = Q/τ − k·i_ss): no stamp;
+    Lauritzen diode — the hand path has NO DC stamp (an open circuit: a
+    1.7 V source behind 1 Ω reads 1.700 V at the anode, the law 0.7242 V);
+    `dc_device_refresh` on `DevicePath::Interface` now stamps its law at
+    DC (local row condensed, `iface::stamp_local` at `Formula::Dc`), mpmath
+    bisection agrees to 1e-12. The default path is untouched (no default
+    number moves). NOT done: `run_transient(start_from_dc_op)` on the
+    interface path builds its DC refresh inside the loop file
+    (`nl_static`), so it still opens the Lauritzen diode — a one-line loop
+    hunk (use `dc_device_refresh(pool, …, path)` there) left for the
+    stepper owner / the release. PMSM — `Formula::Dc` would be WRONG at a
+    held speed (q̇ = ω·∂λ/∂θ ≠ 0); the DC assembly's held-mechanics stamp
+    (v = R·i + ω_e·(∂L·i + λ'_pm)) is the right law; tested against the
+    closed form at ω0 = 40 rad/s on both paths (1e-12).
+
+57. **trbdf2's error control did not refine a small sine** (observation for
+    the TR-BDF2 track, not chased here). The junction-capacitor case at
+    10 kHz with a 5 mV sine on 5 V: rtol 1e-8, 1e-10 and 1e-12 all gave
+    1004 accepted points (span/1000, the default ceiling) and the same
+    8.6e-4 error of the fitted fundamental; the ceiling alone sets the
+    accuracy (1.5e-4 at h_max = 1 µs, 1.5e-6 at 0.1 µs, 9.8e-8 at 25 ns).
+    The local error per step there is ~amp·(ωh)³/12 ≈ 1e-7 V against
+    rtol·|x| = 5e-10 V, so the estimate does not see it. The cross-check
+    tests pass `dt = T/400` (the ceiling).
+
+58. **Measured errors (task 10.4).** |H_sweep − H_ref|/|H_ref| at
+    100 Hz / 1 kHz / 10 kHz; closed form | small-signal trbdf2 transient
+    (1e-3·bias sine, h_max = T/400, whole periods after ≥ 2 ms, cubic
+    spline + Simpson, time-weighted):
+    Shockley at 1 A 6.9e-13 6.8e-13 3.6e-13 | 6.8e-7 1.8e-6 8.5e-6;
+    saturable L(I) 5.7e-12 5.7e-13 5.8e-14 | 1.1e-5 1.0e-5 5.0e-6;
+    junction C(V) 1.0e-10 9.7e-11 5.3e-11 | 2.7e-7 2.5e-6 9.3e-6;
+    transformer k = 0.99 1.4e-17 1.4e-16 5.9e-16 | 1.9e-6 1.3e-6 3.0e-7;
+    RC through the closed switch < 1e-9 (asserted) | < 1e-3 (asserted);
+    Lauritzen 7.0e-13 7.1e-13 7.1e-13 | 7.6e-7 3.1e-6 2.8e-6;
+    IGBT static 1.3e-10 ×3 | 8.7e-9 ×3; IGBT + tail 1.3e-10 ×3 |
+    3.2e-7 2.5e-6 1.5e-6; MOSFET L1 1.7e-9 1.5e-9 7.2e-10 |
+    6.5e-7 5.0e-6 9.9e-6; smooth ideal diode 3.2e-10 3.2e-10 2.3e-10 |
+    1.2e-7 9.8e-7 7.0e-6; PMSM at rest (motional impedance) < 1e-9 |
+    2.2e-6 2.3e-7 7.5e-8. MOSFET / IGBT / ideal diode take g from a central
+    difference of two DC points (their closed form needs the law's
+    smoothing); the others from the law's own closed form. Tiny-bias
+    linearisations: Shockley at 1 pA (g itself, 1.6e-9: the 1/H − 1 extraction cancels) and the saturable
+    inductor at 1e-12 A (L_0 to 1e-9) match. Gates: closed form 1e-9
+    (1e-6 for the central-difference kinds, 1e-10 Lauritzen), transient
+    1e-3.

@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### The kernel AC sweep linearises the Newton devices
+
+* **Added** `run_mna_sweep(freqs=, v_in_branch_id=)` linearises the smooth,
+  Shockley and Lauritzen diodes, the level-1 MOSFET and IGBT (tail
+  included), the saturable inductor (atan and table laws), the nonlinear
+  capacitor and the PMSM at rest at the DC operating point of `mask`, from
+  each device law (`analysis/linearize.hpp`: `G += ∂f/∂x`, `E += ∂q/∂x`; a
+  stored charge is an extra unknown). They were refused by name; each kind
+  is checked against its closed form and a small-signal transient at
+  100 Hz / 1 kHz / 10 kHz (`test_ac_linearize.py`). Still refused by name:
+  the induction machine, a Jiles-Atherton inductor, a nonlinear permeance
+  on a magnetic node, a PMSM at speed or out of torque balance. A linear
+  circuit's sweep is unchanged to the bit.
+* **Added** `compute_dc_operating_point(device_path=DevicePath.Interface)`
+  solves a Lauritzen diode through its law at DC (`i = τ/(τ+T_M)·i_S(v) +
+  G_min·v`); the default path still opens it (unchanged until the
+  number-changing release).
+
 ### In-kernel event losses on trbdf2; impulsive energy in the junction; resume
 
 * **Added** loss ports (`set_device_losses`) on `engine="trbdf2"`: conduction

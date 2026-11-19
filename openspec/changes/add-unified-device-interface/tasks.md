@@ -80,11 +80,11 @@ machine (`-j2`, `nice`).
 - [ ] 9.5 Docs: `AI_GUIDE.md` (remove the "add a 1 mΩ resistor" advice), `docs/known-limitations.md`, CHANGELOG, stubs — SKIPPED: depends on 9.1
 
 ## 10. AC and DC from f and q
-- [ ] 10.1 `analysis/linearize.hpp`: `Linearization{G, C}` at `(x0, mask)` — NOT STARTED (slice 10): no loop edit needed; the next candidate for this track (a new analysis module plus the five analytic AC cases did not fit this slice)
-- [ ] 10.2 `run_mna_sweep` on `linearize`; remove the Newton-kind refusal of `fix-mna-sweep-correctness` — NOT STARTED: after 10.1
-- [ ] 10.3 DC operating point through `Formula::Dc` for every Newton kind; `PmsmMna` DC test — NOT STARTED: after 10.1
-- [ ] 10.4 Tests: the five analytic cases (coupled transformer k = 0.99, RC through a closed switch, Shockley at 1 A, saturable L, nonlinear capacitor) at 100 Hz, 1 kHz, 10 kHz within 1e-3 relative; DC operating points of the harness unchanged to 1e-9 — NOT STARTED: after 10.1
-- [ ] 10.5 Docs: AC analysis page, CHANGELOG — NOT STARTED: after 10.1
+- [x] 10.1 `analysis/linearize.hpp`: `Linearization{G, C}` at `(x0, mask)` — slice 11: the linear part is the sweep's own assembly; every Newton kind with a law adds ∂f/∂x, ∂q/∂x from one AD evaluation; local charges (Lauritzen, IGBT tail) are extra unknowns (DECISIONS #55)
+- [x] 10.2 `run_mna_sweep` on `linearize`; remove the Newton-kind refusal of `fix-mna-sweep-correctness` — slice 11: lifted for NonlinearDiode, ShockleyDiode, MosfetLevel1, IgbtLevel1 (+tail), SaturableInductor (atan, table), NonlinearCapacitor, LauritzenDiode, PmsmMna (at rest, in torque balance); still refused by name: InductionMachineMna, a Jiles–Atherton inductor, a nonlinear permeance on a magnetic node (#55); 62 existing sweep outputs byte-identical
+- [x] 10.3 DC operating point through `Formula::Dc` for every Newton kind; `PmsmMna` DC test — slice 11 (#56): interface path adds the Lauritzen law at DC (the hand path still opens it: default unchanged); static kinds were already laws; saturable = short, nonlinear capacitor = open, IGBT tail = 0 are the laws at DC; the PMSM's held-mechanics stamp is the right DC law (not q̇ = 0), tested against the closed form on both paths
+- [x] 10.4 Tests: the five analytic cases (coupled transformer k = 0.99, RC through a closed switch, Shockley at 1 A, saturable L, nonlinear capacitor) at 100 Hz, 1 kHz, 10 kHz within 1e-3 relative; DC operating points of the harness unchanged to 1e-9 — slice 11: `test_ac_linearize.py`, every kind against its closed form (≤ 1.7e-9) and a small-signal trbdf2 transient (≤ 1.1e-5), table #58; the default-path DC is unchanged (no default-path DC code touched; goldens / identity byte-identical)
+- [x] 10.5 Docs: AC analysis page, CHANGELOG — slice 11: `run_mna_sweep` docstring, `docs/known-limitations.md` (capability table + the AC-sweep row), AI guide line, CHANGELOG
 
 ## 11. Static and mode kinds through the registry
 - [ ] 11.1 `StaticDevice::stamp_static` for R, L, C, sources, VCVS, ideal transformer; `ModeDevice::stamp_mode` for `Switch` and `SwitchedDiode` — SKIPPED (slice 10): `Switch` / `SwitchedDiode` mode stamps are the ideal-switch / complementarity track's (`mode_ports.hpp`), and `assemble.hpp` is what the stepper skeleton consumes while it moves the loops — cross-track, needs the orchestrator's scheduling

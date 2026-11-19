@@ -131,13 +131,16 @@ def run_mna_sweep(builder,
         ``(jw*E + G) x = e_in`` with ``(G, E)`` from the transient
         assembler. It covers R, L, C, coupled and multi-winding
         transformers, ideal transformers, VCVS, sources, and switches /
-        PWL diodes held at ``mask``. It refuses (``ValueError`` naming the
-        branch and its kind) any Newton device (smooth, Shockley and
-        Lauritzen diodes, level-1 MOSFET/IGBT, saturable inductor,
-        junction capacitor, PMSM): it does not linearise them (an
-        external device, ``add_external_device``, is the exception: it is
-        linearised at the DC operating point from its declared
-        Jacobians), so for those use
+        PWL diodes held at ``mask``. A Newton device (smooth, Shockley and
+        Lauritzen diodes, level-1 MOSFET/IGBT with or without the tail,
+        saturable inductor with the atan or table law, nonlinear capacitor,
+        PMSM at rest, external device) is linearised at the DC operating
+        point of ``mask`` from its device law (``G += df/dx``,
+        ``E += dq/dx``; a stored charge is an extra unknown). Refused with
+        :class:`UnsupportedError` naming the device: the induction machine,
+        a Jiles-Atherton (hysteretic) inductor, a nonlinear permeance on a
+        magnetic node, and a PMSM held at speed or not in torque balance
+        (no equilibrium). For those use
         :func:`run_ac_sweep`, :func:`pulsim.fra.run_fra`,
         :func:`frequency_response`, or this function with
         ``use_kernel=False`` (impulse-FFT, needs ``dt`` and ``t_end``).

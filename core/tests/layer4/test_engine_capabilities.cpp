@@ -49,10 +49,11 @@ TEST_CASE("kKindCaps has one row per StoredKind, named as the enum",
         if (row.newton()) {
             REQUIRE_FALSE(row.supports(Engine::Dsed));
             REQUIRE_FALSE(row.supports(Engine::Bdf1));
-            // add-external-device-abi: the AC sweep linearises an external
-            // device at the DC point from its declared Jacobians
+            // add-external-device-abi / add-unified-device-interface 10.2:
+            // the AC sweep linearises every Newton kind at the DC point
+            // except the induction machine (no small-signal test yet)
             REQUIRE(row.supports(Engine::AcSweep)
-                    == (std::string_view(row.name) == "ExternalDevice"));
+                    == (std::string_view(row.name) != "InductionMachineMna"));
         }
     }
 }

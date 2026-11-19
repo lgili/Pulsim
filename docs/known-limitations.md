@@ -24,8 +24,10 @@ Which engine simulates which device kind. This table is the kernel's
 that it equals this page and that every "yes" agrees with `engine='pwl'`
 within 1 % of the observable's span and every "no" raises
 `pulsim.UnsupportedError` naming the engine and the branch. `ac_sweep` is
-the kernel AC sweep (`run_mna_sweep` with `freqs=`), which refuses every
-Newton device. `NonlinearDiode` is retired: `add_nonlinear_diode` refuses
+the kernel AC sweep (`run_mna_sweep` with `freqs=`): a "yes" Newton kind is
+linearised at the DC operating point from its device law
+(`test_ac_linearize.py` checks each against its closed form and a
+small-signal transient). `NonlinearDiode` is retired: `add_nonlinear_diode` refuses
 unless called with `allow_non_passive=True`.
 
 <!-- engine-capabilities:begin -->
@@ -37,19 +39,19 @@ unless called with `allow_non_passive=True`.
 | Capacitor | Linear | yes | yes | yes | yes | yes |
 | Inductor | Linear | yes | yes | yes | yes | yes |
 | Diode | PwlDiode | yes | yes | yes | no | yes |
-| NonlinearDiode | NewtonStatic | yes | yes | no | no | no |
+| NonlinearDiode | NewtonStatic | yes | yes | no | no | yes |
 | CurrentSource | Source | yes | yes | yes | yes | yes |
 | PWMVoltageSource | Source | yes | yes | yes | yes | yes |
 | SineVoltageSource | Source | yes | yes | yes | yes | yes |
 | PulseVoltageSource | Source | yes | yes | yes | yes | yes |
-| MosfetLevel1 | NewtonStatic | yes | yes | no | no | no |
-| IgbtLevel1 | NewtonStatic | yes | yes | no | no | no |
+| MosfetLevel1 | NewtonStatic | yes | yes | no | no | yes |
+| IgbtLevel1 | NewtonStatic | yes | yes | no | no | yes |
 | VCVS | Linear | yes | yes | yes | yes | yes |
-| SaturableInductor | NewtonStateful | yes | yes | no | no | no |
-| NonlinearCapacitor | NewtonStateful | yes | yes | no | no | no |
-| ShockleyDiode | NewtonStatic | yes | yes | no | no | no |
-| LauritzenDiode | NewtonStateful | yes | yes | no | no | no |
-| PmsmMna | NewtonStateful | yes | yes | no | no | no |
+| SaturableInductor | NewtonStateful | yes | yes | no | no | yes |
+| NonlinearCapacitor | NewtonStateful | yes | yes | no | no | yes |
+| ShockleyDiode | NewtonStatic | yes | yes | no | no | yes |
+| LauritzenDiode | NewtonStateful | yes | yes | no | no | yes |
+| PmsmMna | NewtonStateful | yes | yes | no | no | yes |
 | IdealTransformer | Linear | yes | yes | yes | yes | yes |
 | VCCS | Linear | yes | yes | yes | yes | yes |
 | CCCS | Linear | yes | yes | yes | yes | yes |
@@ -219,7 +221,7 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **The kernel AC sweep (`run_mna_sweep` with `freqs=` and `v_in_branch_id=`) does not linearise anything.** It covers R, L, C, coupled and multi-winding transformers, ideal transformers, VCVS, VCCS, CCCS, CCVS, gyrators, sources (waveform current sources add no AC excitation), and switches / PWL diodes held at the `mask=` you pass. A Newton device (smooth, Shockley or Lauritzen diode, level-1 MOSFET/IGBT, saturable inductor, junction capacitor, PMSM) is refused with `UnsupportedError` (a `ValueError`) naming the branch and its kind; switches without `mask=` are refused too. | Shockley diode biased at 1 A behind 1 Ω: refused (it used to read `|H| = 1`; the small-signal value is 0.0252). | Time domain: `run_ac_sweep`, `pulsim.fra.run_fra`, `frequency_response`, or `run_mna_sweep(..., use_kernel=False, dt=, t_end=)`. |
+| **The kernel AC sweep (`run_mna_sweep` with `freqs=` and `v_in_branch_id=`) linearises at the DC operating point only the kinds marked `ac_sweep` in the table above.** It covers R, L, C, coupled and multi-winding transformers, ideal transformers, VCVS, VCCS, CCCS, CCVS, gyrators, sources (waveform current sources add no AC excitation), switches / PWL diodes held at the `mask=` you pass, and the Newton devices (smooth, Shockley and Lauritzen diodes, level-1 MOSFET/IGBT with the tail, saturable inductor with the atan or table law, nonlinear capacitor, PMSM at rest, external devices) through their device law at the DC point of `mask`. Refused with `UnsupportedError` naming the device: the induction machine; a Jiles-Atherton inductor (no unique incremental inductance); a nonlinear permeance on a magnetic node (no DC point yet); a PMSM held at speed or not in torque balance (no equilibrium). Switches without `mask=` are refused too. | Shockley diode at 1 A behind 1 Ω: `|H| = 0.0252` (it used to read 1, then was refused). | Time domain: `run_ac_sweep`, `pulsim.fra.run_fra`, `frequency_response`, or `run_mna_sweep(..., use_kernel=False, dt=, t_end=)`. |
 
 ## Periodic steady state
 
@@ -309,7 +311,7 @@ event where the signal jumps.
 |---|---|---|
 | **The π-section line overshoots an ideal step by 27 % at any section count.** `b.add_transmission_line(model="pi")` is a lumped ladder; the exact (Bergeron) line is not implemented and `model="bergeron"` is refused (it waits for the unified device interface; DECISIONS D12). | 50 Ω, 100 ns, source-matched, open end: far-end peak 1.271 V with 50 sections (exact 1.000 V). With a 20 ns edge and `recommend_line_sections` (55) the peak is 1.046 V. | Give the source a realistic rise time and use `p.passives.recommend_line_sections(delay, t_rise)` sections. |
 | **YAML has no `transmission_line` type, and `rac:` takes ladder cells only.** `rac: {R_dc, L_hf, R: [...], L: [...]}` is read; an `(f, R_ac)` curve is refused by name (fitting needs Python). `nonlinear_capacitor` takes `law:` or `dc_bias: {v, C}` (no residual check: `dc_bias` points become knots as given). Other unknown per-device keys of the older types are still ignored without a warning. | — | Fit with `p.passives.fit_rac_ladder` / `fit_mlcc_dc_bias` in Python and write the cells or the table. |
-| One ESR value (no frequency dependence), single-pair line (no coupled three-phase cable). The DC-bias capacitor is a Newton device (`pwl` / `trbdf2`; dsed, bdf1 and the AC sweep refuse it by name) and integrates the small-signal curve: no hysteresis, no ageing, no temperature. | — | Read ESR at the switching frequency; fit `R_ac(f)` of windings with `fit_rac_ladder`; the MLCC curve with `fit_mlcc_dc_bias`. |
+| One ESR value (no frequency dependence), single-pair line (no coupled three-phase cable). The DC-bias capacitor is a Newton device (`pwl` / `trbdf2` and the AC sweep, linearised at the DC point; dsed and bdf1 refuse it by name) and integrates the small-signal curve: no hysteresis, no ageing, no temperature. | — | Read ESR at the switching frequency; fit `R_ac(f)` of windings with `fit_rac_ladder`; the MLCC curve with `fit_mlcc_dc_bias`. |
 | **ESL resonance on the fixed step.** `esl` in series with `C` resonates at `1/(2π√(esl·C))`; a fixed step that does not resolve it rings at the Nyquist rate. | — | `dt <= 1/(20·f_res)`, or `engine="trbdf2"`. |
 | **A winding with an `rac=` ladder cannot be coupled.** `add_inductor_coupling` refuses it with `UnsupportedError` (feature `rac`): coupling the main inductor alone would leave the cells' flux uncoupled. | — | Couple windings built with `esr=`, or use `add_transformer`. |
 
