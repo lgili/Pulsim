@@ -3,6 +3,8 @@
 'lcp' replaces the settle: the LCP on the diode ports decides the mode at t = 0 and at every event
 (DECISIONS.md #13). The default keeps the settle and judges each settled mode; an inconsistent one
 is decided by the LCP instead and recorded in ``diagnostics['mode_guard']`` (DECISIONS.md #15).
+Since the number-changing release the default ('auto') IS 'lcp' on dsed for a circuit with a PWL
+diode; the guarded settle these tests compare against is ``mode_selection='legacy'``.
 
 References: trbdf2 at rtol 1e-10 (probes/guard_survey.out, probes/extra_circuits.out) or the
 prototype's exact LCP simulation (test_mode_selection_today.py). The bridges compare p - n: their
@@ -66,6 +68,8 @@ def _sim(b, t_end, fn=None, guard=True, **kw):
     the wrong mode instead of returning it)."""
     if fn is not None:
         kw["switch_fn"] = fn
+    # legacy subject: "the default" here is the guarded settle (pre-release default)
+    kw.setdefault("mode_selection", "legacy")
     saved = DD.MODE_GUARD, DD.DIODE_LAW_REL
     DD.MODE_GUARD = guard
     if not guard:
@@ -330,7 +334,8 @@ def test_a_widened_pass_does_not_release_a_diode_before_its_own_turn_off(mode):
         warnings.simplefilter("ignore")
         a, b2 = (buses(p.simulate(_bridge_bank(n), t_end=t_end, engine="pwl", dt=dt))
                  for dt in (5e-7, 2.5e-7))
-        kw = {} if mode is None else {"mode_selection": mode}
+        # None: the guarded settle (mode_selection='legacy'; 'auto' is 'lcp' since the release)
+        kw = {"mode_selection": "legacy" if mode is None else mode}
         r = p.simulate(_bridge_bank(n), t_end=t_end, engine="dsed", **kw)
     ref = [2 * y - x for x, y in zip(a, b2)]
     dev = max(np.abs(v - e).max() for v, e in zip(buses(r), ref))
@@ -407,7 +412,8 @@ def test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp(cap, monkeypatch
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         a, b2 = (bus(p.simulate(bank(), t_end=t_end, engine="pwl", dt=dt)) for dt in (5e-7, 2.5e-7))
-        r = p.simulate(bank(), t_end=t_end, engine="dsed")
+        # legacy subject: the settle's round cap (mode_selection='legacy'; 'auto' is 'lcp')
+        r = p.simulate(bank(), t_end=t_end, engine="dsed", mode_selection="legacy")
     assert np.abs(bus(r) - (2 * b2 - a)).max() <= 1e-3
     if cap == 1:
         assert r.diagnostics["mode_guard"]["settle_caps"] > 0
