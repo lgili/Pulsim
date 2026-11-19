@@ -5,6 +5,7 @@ off): opened on an inductor carrying 9.93 A it leaves the inductor's companion w
 the fixed engine rings at +-397 V while TR-BDF2 reaches ~1e9 V, with no warning. That is the
 defect the branch form's re-initialisation removes (task 5); these tests pin it until then.
 """
+import math
 import warnings
 
 import numpy as np
@@ -16,7 +17,8 @@ import pulsim as p
 def _rl(g_on, g_off, closed, engine, **kw):
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "vin", "gnd", 10.0)
-    b.add_switch("S", "vin", "a", g_on, g_off)
+    # The conductance form is the subject (branch is the release default): pinned.
+    b.add_switch("S", "vin", "a", g_on, g_off, form="conductance")
     b.add_resistor("R", "a", "b", 1.0)
     b.add_inductor("L", "b", "gnd", 1e-3)
     n = b.graph.num_switches
@@ -34,11 +36,16 @@ def _rl(g_on, g_off, closed, engine, **kw):
 
 def test_closed_switch_control_conducts():
     r = _rl(1e3, 1e-9, lambda t: True, "pwl", dt=5e-5)
-    assert r.i("L")[-1] == pytest.approx(9.98955, abs=1e-5)
+    # Closed form of the RL behind 1 mOhm. The restart-less trapezoidal start
+    # was 1.06e-5 low (pinned 9.98955 +- 1e-5); the release start: 9.3e-7.
+    exact = 10 / 1.001 * (1 - math.exp(-10e-3 * 1.001 / 1e-3))
+    assert r.i("L")[-1] == pytest.approx(exact, abs=2e-6)
 
 
 def test_goff_zero_opened_on_an_inductor_rings_on_pwl():
-    r = _rl(1e3, 0.0, lambda t: t < 5e-3, "pwl", dt=5e-5)
+    # The restart-less trapezoid's +-397 V alternation is the subject (with the
+    # release restart rule the same defect rings at 958 V): pinned legacy.
+    r = _rl(1e3, 0.0, lambda t: t < 5e-3, "pwl", dt=5e-5, discontinuity_restart=False)
     v = np.asarray(r.v("b"))
     i = np.asarray(r.i("L"))
     assert np.all(np.isfinite(v))
