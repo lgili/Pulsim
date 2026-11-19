@@ -1417,6 +1417,11 @@ inline SimulationResult run_transient_trbdf2(
             *resume_from, static_cast<Size>(graph.num_switches()),
             initial_mask);
     }
+    // The first step lands an edge at t_start (see the clamp's gate-edge
+    // landing) only on a snapshot that knows its x's mask and committed
+    // no edge at its end.
+    bool edge_at_resume = resume_from != nullptr && !initial_seeded
+        && !resume_from->post_edge_derivatives;
     // The mask the current x was solved under (final_snapshot).
     SwitchStateMask x_mask = initial_mask;
     bool x_mask_known = !initial_seeded;
@@ -2524,6 +2529,22 @@ inline SimulationResult run_transient_trbdf2(
 
             // ---- gate-edge landing ----
             landed_on_edge = false;
+            // A resumed run whose first step reads other gates than its x
+            // was solved under, from a snapshot that committed no edge,
+            // starts AT that edge: land it with an h_min step, as an edge
+            // one ulp after t_start is (the zero-time settle alone left
+            // the pre-edge derivatives in the history: 3.2e-4 V off the
+            // uninterrupted run on a buck, an opaque gate resumed at its
+            // turn-off, and the edge uncounted).
+            // On every attempt of the first step (a rejected one retries).
+            if (edge_at_resume) {
+                if (t == opts.t_start) {
+                    landed_on_edge = gates_differ(sw_now, initial_mask);
+                    if (landed_on_edge) h = h_min;
+                } else {
+                    edge_at_resume = false;
+                }
+            }
             // The oracle is asked again only when its edge is passed or
             // a tick invalidated it; a located edge is dropped when passed.
             const Real next_edge_t = queue.next_after(edge_src, t);
