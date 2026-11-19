@@ -34,6 +34,7 @@ children; run the whole command under ``nice -n 15``.
 from __future__ import annotations
 
 import argparse
+import collections
 import fnmatch
 import json
 import os
@@ -58,13 +59,24 @@ CACHE = ROOT.parent / ".scratch" / "rehearsal" / "cells"
 PYTEST_SUMMARY = ROOT.parent / ".scratch" / "rehearsal" / "pytest_profile.json"
 OUT = ROOT / "NEXT_DEFAULTS_REHEARSAL.md"
 RANK = {"agree": 0, "unverified": 0, "disagree": 1, "refused": 2, "error": 2, "timeout": 2}
-EXPECTED_A = {"pwl": (81, 27, 1, 0, 0), "pwl+restart": (89, 19, 1, 0, 0),
-              "pwl+split": (91, 17, 1, 0, 0), "trbdf2": (106, 2, 1, 0, 0), "dsed": (100, 0, 0, 9, 0)}
+
+
+def expected_a(section: str) -> dict:
+    """The strict counts of REFERENCE_STATUS.md's first table under ``section``."""
+    text = rs.OUT.read_text(encoding="utf-8").split(section, 1)[1]
+    out = {}
+    for ln in text.splitlines():
+        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+        if cells and cells[0] in rs.CONFIGS and len(cells) == 6:
+            out[cells[0]] = tuple(int(c) for c in cells[1:])
+        elif out and not ln.startswith("|"):
+            break
+    return out
 ENGINES = ("pwl", "trbdf2", "dsed")
 
 
 def configs() -> dict:
-    """name -> dict(engine, kw, form, group, option); kw None = the auto+next route."""
+    """name -> dict(engine, kw, form, group, option, route, profile)."""
     C = {k: dict(engine=e, kw=dict(kw), form=False, group="a") for k, (e, kw) in rs.CONFIGS.items()}
     for eng in ENGINES:
         for k, e in {**nd.PROFILE[eng], **nd.BUILDER}.items():
@@ -76,7 +88,9 @@ def configs() -> dict:
     C["trbdf2+next+esdirk43"] = dict(engine="trbdf2", kw={**nd.profile_kwargs("trbdf2"), **kw},
                                      form=True, group="extra")
     C["auto"] = dict(engine="auto", kw={}, form=False, group="d")
-    C["auto+next"] = dict(engine="auto", kw=None, form=True, group="d")
+    # the release route alone (today's options) isolates the route from the options
+    C["auto:route"] = dict(engine="auto", kw={}, form=False, group="b", option="route", route=True)
+    C["auto+next"] = dict(engine="auto", kw={}, form=True, group="d", route=True, profile=True)
     return C
 
 
@@ -128,14 +142,15 @@ def _no_dt_run(case, engine, **kw):
     return pulsim.simulate(b, case.t_end, **{**args, **kw})
 
 
-def route_next(build, t_end, **kw):
+def route_next(build, t_end, profile=True, **kw):
     """(engine, reason): the release route of engine='auto' without dt."""
     import pulsim
     b, sw = build()
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            r = pulsim.exact_route(b, t_end, switch_fn=sw, **kw, **nd.profile_kwargs("dsed"))
+            r = pulsim.exact_route(b, t_end, switch_fn=sw, **kw,
+                                   **(nd.profile_kwargs("dsed") if profile else {}))
     except dr.REFUSAL as e:
         return "trbdf2", f"exact_route refused: {getattr(e, 'feature', '')}: {str(e).splitlines()[0][:120]}"
     return ("dsed", None) if r["exact"] else ("trbdf2", f"segment not exact: {r['reason']}")
@@ -155,7 +170,7 @@ def run_cell(case, name):
     try:
         with warnings.catch_warnings(), nd.builder_form(spec["form"]):
             warnings.simplefilter("ignore")
-            if spec["kw"] is None:
+            if spec.get("route"):
                 def build():
                     b, sw, _ = case.build()
                     return b, sw
@@ -166,9 +181,10 @@ def run_cell(case, name):
                     x0 = case._dc_start(b0, sw0)
                 kw = dict(t_start=case.t_start, **({"step_observer": obs} if obs else {}),
                           **({"initial_state": x0} if x0 is not None else {}))
-                eng, why = route_next(build, case.t_end, **kw)
+                prof = spec.get("profile", False)
+                eng, why = route_next(build, case.t_end, prof, **kw)
                 info.update(route=eng, route_reason=why)
-                res = _no_dt_run(case, eng, **nd.profile_kwargs(eng))
+                res = _no_dt_run(case, eng, **(nd.profile_kwargs(eng) if prof else {}))
             elif spec["engine"] == "auto":
                 res = case.run("auto")
             else:
@@ -240,7 +256,7 @@ def analytic_worker(unit, names, emit):
         eng = spec["engine"]
         rec = dict(config=name)
         try:
-            if eng == "auto" and spec["kw"] is not None:
+            if eng == "auto" and not spec.get("route"):
                 rec.update(outcome="n/a", message="the analytic cases name their engine")
                 d["cells"][name] = rec
                 save_unit(d)
@@ -249,10 +265,11 @@ def analytic_worker(unit, names, emit):
             with warnings.catch_warnings(), nd.builder_form(spec["form"]):
                 warnings.simplefilter("ignore")
                 kw = spec["kw"]
-                if kw is None:
-                    eng, why = route_next(lambda: c.build(1.0), c.t_end)
+                if spec.get("route"):
+                    prof = spec.get("profile", False)
+                    eng, why = route_next(lambda: c.build(1.0), c.t_end, prof)
                     info.update(route=eng, route_reason=why)
-                    kw = nd.profile_kwargs(eng)
+                    kw = nd.profile_kwargs(eng) if prof else {}
                 with rs.extra_kwargs(kw):
                     r = c.run(eng)
             ceil = rs.ANALYTIC[c.id].get(eng, {}).get("ceiling", 1e-3)
@@ -401,11 +418,13 @@ def _repro(unit, eng, opt_names):
 
 
 def changes(units_, eng):
-    """Rows (unit, verdict, base, full, responsible singles) for engine eng."""
-    full, singles = f"{eng}+next", [n for n, s in CONFIGS.items() if s["group"] == "b" and s["engine"] == eng]
+    """Rows (unit, verdict, base, full, responsible singles) for engine eng
+    ('auto': auto+next against auto, responsible singles = the route alone)."""
+    base_n, full = (eng, f"{eng}+next")
+    singles = [n for n, s in CONFIGS.items() if s["group"] == "b" and s["engine"] == eng]
     out = []
     for unit, u in sorted(units_.items()):
-        base, cf = u["cells"].get(eng), u["cells"].get(full)
+        base, cf = u["cells"].get(base_n), u["cells"].get(full)
         v = compare(base, cf)
         if v:
             resp = [n for n in singles if compare(base, u["cells"].get(n)) == v]
@@ -413,10 +432,26 @@ def changes(units_, eng):
     return out
 
 
+WORSE_CLASSES = ("fails", "samples wrong (truth)", "disagree, no truth", "less accurate, still agrees",
+                 "strict gate only (samples within tol of the truth)")
+
+
+def worse_class(b):
+    """Why a worse cell is worse, ranked (index into WORSE_CLASSES)."""
+    if b["outcome"] in ("refused", "error", "timeout"):
+        return 0
+    ex = b.get("exact")
+    if b["outcome"] == "disagree":
+        if ex is None:
+            return 2
+        return 1 if ex > b.get("tol", 1e-3) else 4
+    return 3
+
+
 def render():
     diff, ana = collect()
-    L = ["# Next-defaults rehearsal", "",
-         "Generated by `benchmarks/tools/next_defaults_rehearsal.py render` (do not edit) from the",
+    L = ["## Method", "",
+         "Generated by `benchmarks/tools/next_defaults_rehearsal.py render` (do not edit above `## Notes`) from the",
          "cell cache of `run`; the profile is `benchmarks/tools/next_defaults.py` (`--list`).",
          "Nothing here changes a library default: every option is applied by the harness.", ""]
     L += ["## Profile", "", "| engine | option | value | change | decision |", "|---|---|---|---|---|"]
@@ -431,36 +466,61 @@ def render():
     for n, s in CONFIGS.items():
         cnt, tot = _counts(diff, n)
         wall = sum(u["cells"][n].get("wall_s") or 0 for u in diff.values() if n in u["cells"])
-        L.append(f"| {n} | {s['group']} | " + " | ".join(map(str, cnt)) + f" | {tot} | {wall:.0f} |")
-    ok = all(tuple(_counts(diff, n)[0][:5]) == v and _counts(diff, n)[0][5] == 0
-             for n, v in EXPECTED_A.items())
+        L.append(f"| {n} | {s['group']} | " + " | ".join(map(str, cnt)) + f" | {tot} | {wall:.1f} |")
+    exp = expected_a("## Differential matrix")
+    ok = len(exp) == 5 and all(tuple(_counts(diff, n)[0][:5]) == v and _counts(diff, n)[0][5] == 0
+                               for n, v in exp.items())
     L += ["", f"Configuration (a) reproduces REFERENCE_STATUS.md's strict counts: **{'yes' if ok else 'NO'}**"
-          f" (expected {EXPECTED_A}).", ""]
+          f" (read from that file: {exp}).", ""]
     if ana:
         L += [f"## Counts, analytic set ({len(ana)} cases; closed-form truth, frozen ceilings)", "",
               "| configuration | " + " | ".join(KINDS) + " |", "|---|" + "---:|" * len(KINDS)]
         for n in CONFIGS:
             cnt, tot = _counts(ana, n)
-            if tot:
+            if sum(cnt):
                 L.append(f"| {n} | " + " | ".join(map(str, cnt)) + " |")
-        L.append("")
+        exp = expected_a("## Analytic set")
+        ok = len(exp) == 5 and all(tuple(_counts(ana, n)[0][:5]) == v for n, v in exp.items())
+        L += ["", "`auto` (today) has no analytic rows: the cases name their engine; the route rows route them.",
+              f"Configuration (a) reproduces REFERENCE_STATUS.md's analytic counts: **{'yes' if ok else 'NO'}**.", ""]
     allu = {**diff, **ana}
-    rows = {e: changes(allu, e) for e in ENGINES}
+    L += ["## Each configuration against today's default of its engine", "",
+          "Same rule as below (outcome rank, else `exact` beyond 2x); `auto+next` against `auto`,",
+          "the esdirk columns against `trbdf2`. Circuits and analytic cases together.", "",
+          "`moved` = cells whose err_rms is not bit-equal to the base's (the option reached the",
+          "run); `mode` = the `mode_selection='auto'` choices recorded by the runs (lcp / legacy).", "",
+          "| configuration | base | better | worse | compared | moved | mode |", "|---|---|---:|---:|---:|---:|---|"]
+    for n, s in CONFIGS.items():
+        if s["group"] == "a":
+            continue
+        base = "auto" if s["engine"] == "auto" else s["engine"]
+        v = [compare(u["cells"].get(base), u["cells"].get(n)) for u in allu.values()]
+        nc = sum(base in u["cells"] and n in u["cells"] and "n/a" not in
+                 (u["cells"][base]["outcome"], u["cells"][n]["outcome"]) for u in allu.values())
+        pairs = [(u["cells"][base], u["cells"][n]) for u in allu.values()
+                 if base in u["cells"] and n in u["cells"]]
+        moved = sum("err_rms" in x and "err_rms" in y and x["err_rms"] != y["err_rms"] for x, y in pairs)
+        modes = collections.Counter(y.get("mode_chosen") for _, y in pairs if y.get("mode_chosen"))
+        L.append(f"| {n} | {base} | {v.count('better')} | {v.count('worse')} | {nc} | {moved} | "
+                 + ", ".join(f"{k} {m}" for k, m in sorted(modes.items())) + " |")
+    L.append("")
+    rows = {e: changes(allu, e) for e in (*ENGINES, "auto")}
     L += ["## Worse under the full profile than under today's default for that engine", "",
           "Worse = outcome rank up (agree/unverified < disagree < refused/error/timeout), or the",
           "`exact` error (truth) more than 2x larger. Responsible = the single options (b) that",
           "alone make the same cell worse; `combination` when none does alone.", "",
-          "| circuit | engine | today | full profile | responsible | message |", "|---|---|---|---|---|---|"]
-    for e in ENGINES:
+          "| circuit | engine | today | full profile | responsible | class; message |", "|---|---|---|---|---|---|"]
+    for e in rows:
         for unit, v, a, b, resp in rows[e]:
             if v == "worse":
                 L.append(f"| {unit.removeprefix('circuits/')} | {e} | {a['outcome']} {_err(a)} | "
-                         f"{b['outcome']} {_err(b)} | {', '.join(resp) or 'combination'} | {_why(b)} |")
+                         f"{b['outcome']} {_err(b)} | {', '.join(resp) or 'combination'} | "
+                         f"{WORSE_CLASSES[worse_class(b)]}; {_why(b)} |")
     L += ["", "## Better under the full profile", "",
           "Better = outcome rank down against the harness reference, or the `exact` error (truth)",
           "more than 2x smaller.", "",
           "| circuit | engine | today | full profile | responsible |", "|---|---|---|---|---|"]
-    for e in ENGINES:
+    for e in rows:
         for unit, v, a, b, resp in rows[e]:
             if v == "better":
                 L.append(f"| {unit.removeprefix('circuits/')} | {e} | {a['outcome']} {_err(a)} | "
@@ -487,29 +547,80 @@ def render():
                  + " | ".join(_err(u["cells"].get(n)) for n in CONFIGS) + " |")
     body = "\n".join(L) + "\n"
     head = blockers(allu, rows) + pytest_section()
-    OUT.write_text(head.replace("\n# Next", "\n") + body, encoding="utf-8")
+    old = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
+    notes = old.split("\n## Notes\n", 1)[1] if "\n## Notes\n" in old else "\n(none)\n"
+    OUT.write_text(head + body + "\n## Notes\n" + notes, encoding="utf-8")
     print(f"wrote {OUT}")
     return 0
 
 
 def blockers(allu, rows):
-    L = ["# Next-defaults rehearsal: blockers", "",
+    L = ["# Next-defaults rehearsal", "",
+         "Rehearsal of the number-changing release on `feat/core-integration` fe75ee01 (method and",
+         "tables below the blocker list).", "",
          "## Ranked blocker list", "",
-         "### 1. Engine fixes before the release (worked today, refused / error / wrong under the profile)", ""]
-    worse = [(u, e, a, b, r) for e in ENGINES for (u, v, a, b, r) in rows[e] if v == "worse"]
-    worse.sort(key=lambda x: (-RANK[x[3]["outcome"]], x[0]))
-    for i, (u, e, a, b, resp) in enumerate(worse, 1):
+         "### 1. Cells worse under the profile than under today's default, by class (classes 1-3 are engine fixes before the release)", ""]
+    worse = [(u, e, a, b, r) for e in rows for (u, v, a, b, r) in rows[e] if v == "worse"]
+    worse.sort(key=lambda x: (worse_class(x[3]), x[1], x[0]))
+    i, cls = 0, None
+    gate_only = [x for x in worse if worse_class(x[3]) == 4]
+    for u, e, a, b, resp in worse:
+        if worse_class(b) != cls:
+            cls = worse_class(b)
+            L += ["", f"**{WORSE_CLASSES[cls]}**", ""]
+        i += 1
+        if cls == 4:            # one cause, one entry: the samples are right, the grid is not
+            ex = max(x[3].get("exact", 0.0) for x in gate_only)
+            L.append(f"{i}. {len(gate_only)} cells ({', '.join(sorted({x[1] for x in gate_only}))}): "
+                     f"the samples are within the tolerance of the truth (largest `exact` {ex:.2g}), "
+                     "the strict gate (linear interpolation between samples) is not. On `auto` this is "
+                     "the exact engine's output grid without dt (10 us default ceiling). Circuits: "
+                     + ", ".join(f"`{x[0].removeprefix('circuits/')}`" for x in gate_only)
+                     + ". Repro (any of them): "
+                     + (f"`next_defaults_rehearsal._no_dt_run(v1_reader.load('benchmarks/{gate_only[0][0]}'), 'dsed')`"
+                        " then compare `res.times` spacing with the netlist dt."))
+            break
+        if e == "auto":
+            route = "route alone" if resp else "the profile on the routed engine"
+            repro = (f"`with nd.builder_form({not resp}): next_defaults_rehearsal._no_dt_run("
+                     f"v1_reader.load('benchmarks/{u}'), '{b.get('route', 'dsed')}'"
+                     + ("" if resp else f", **nd.profile_kwargs('{b.get('route', 'dsed')}')") + ")`")
+            L.append(f"{i}. `{u.removeprefix('circuits/')}` on auto -> {b.get('route')}: {a['outcome']} "
+                     f"({_err(a)}) -> {b['outcome']} ({_err(b)}); responsible: {route}. {_why(b)} "
+                     f"Repro: {repro}")
+            continue
         opts = {CONFIGS[n]["option"] for n in resp} or set(nd.profile_kwargs(e)) | {"form"}
         L.append(f"{i}. `{u.removeprefix('circuits/')}` on {e}: {a['outcome']} ({_err(a)}) -> "
                  f"{b['outcome']} ({_err(b)}); responsible: {', '.join(resp) or 'combination'}. "
                  f"{_why(b)} Repro: {_repro(u, e, opts)}")
     if not worse:
         L.append("(none)")
-    better = [(u, e, a, b, r) for e in ENGINES for (u, v, a, b, r) in rows[e] if v == "better"]
+    better = [(u, e, a, b, r) for e in rows for (u, v, a, b, r) in rows[e] if v == "better"]
     L += ["", f"### 2. Accepted changes of number ({len(better)} cells better under the profile)", "",
           "Each is listed in 'Better under the full profile' below; the evidence is the harness",
           "reference (outcome) or the mpmath truth (`exact` > 2x smaller). The CHANGELOG migration",
           "note of the release cites these.", ""]
+    L += ["### 3. Owner decisions (add-kernel-simulation-object DECISIONS 23, branch "
+          "feat/core-p3-simulation-object; undriven switches first)", "",
+          "1. No `switch_fn` (measured on fe75ee01): pwl all CLOSED + a warning (v(o) = 0.999 V), "
+          "trbdf2 refuses (`UnsupportedError`, 'the two engines' undriven-switch defaults "
+          "differ'), dsed all CLOSED + a warning, `auto` without dt refuses (ValueError). Under "
+          "the release route `auto` would send it to dsed: CLOSED with a warning instead of a "
+          "refusal. One policy (task 11.3 there). Repro: "
+          "`b = pulsim.CircuitBuilder(); b.add_voltage_source('V', 'a', '0', 1.0); "
+          "b.add_switch('S', 'a', 'o', 1e3, 1e-9); b.add_resistor('R', 'o', '0', 1.0)`, then "
+          "`pulsim.simulate(b, 1e-5, 1e-7, engine=e)` for e in pwl / trbdf2 / dsed.",
+          "2. `mmc_arms` / `on_cache` compose on the run's own cache (pwl only).",
+          "3. `progress` / `live_stream` wired after (1) on pwl.",
+          "4. `resume_from` continues time on pwl / trbdf2 only (dsed refuses it).",
+          "5. `mode_selection='auto'`: resolved while routing on pwl / trbdf2, in the "
+          "dispatcher on dsed; on trbdf2 it is the settle (no 'auto' rule there).",
+          "6. `on_impulse='error'`: pwl refuses at the event, dsed after the run, trbdf2 never records.",
+          "7. Option value checks in Python for pwl only.",
+          "8. `sweep()`'s recipe read once while planning.",
+          "", "Also open for the owner: one voltage-sanity check (task 6.2 there); the composite "
+          "diode drop's release (its DECISIONS OQ6); the TR-BDF2 step grid (factor-reuse 5.6: "
+          "accuracy sign-off).", ""]
     return "\n".join(L) + "\n"
 
 

@@ -102,8 +102,8 @@ NOT_APPLIED = (
     ("trbdf2", "filter_error_estimate / sdirk_after_settle", "update-trbdf2-post-event-restart",
      "DECISIONS 9-10: C++-only TrBdf2Options, no simulate() keyword; both stay off"),
     ("pwl, trbdf2", "composite diode V_F as a conduction drop", "update-composite-diode-forward-drop",
-     "a builder default of add_mosfet / Level-1 builders (DECISIONS OQ3/OQ4), no run "
-     "option; the v1 netlists do not use those builders' V_F"),
+     "nothing to flip: already the default on this tree (the add_mosfet / Level-1 docstrings "
+     "read V_F as the body diode's CONDUCTION DROP); a builder default, not a run option"),
     ("all", "one undriven-switch policy and blocks 2-8", "add-kernel-simulation-object",
      "DECISIONS 23 (branch feat/core-p3-simulation-object): owner decisions, not options"),
 )
