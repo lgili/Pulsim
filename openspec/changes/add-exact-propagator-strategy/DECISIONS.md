@@ -833,3 +833,6 @@ Tasks: 20.1 ticked (seen passing); 20.2-20.4 and add-in-kernel-event-losses 3.3 
 - The exact window integral from the modal form (needs a `record/` entry: request).
 - V_on tables and time-varying sources on the loss port.
 - Full ctest (not run on this tip); the trbdf2 VSI thermal defect stays a strict xfail.
+
+### The bar on b7c7858f (extension built from the tree, .so sha f3c2bb68 equal installed)
+full pytest 5873 passed / 110 skipped / 9 xfailed; `-m reference` 383; reference_status exit 0, its JSON identical to b1's; goldens ALL IDENTICAL; bit-identity 34/36 default and shadow; exact scoreboard 324 values, 0 changed vs b1; flips identical to b1 except wall times; banks 1/9/10 2.541e-5 / 5.843e-4 / 2.117e-4, 12 raises as at baseline; fuzz / truths / orbit as baseline; dsedall 340; C++ on Eigen 5 and 3.4.0: dsed 140 cases / 40927 assertions, layer4_v3 29, mode 40, thermal 9, record 17, all pass; ruff clean, openspec 78, stubs up to date. Full ctest not run.
