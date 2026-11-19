@@ -356,7 +356,13 @@
       7. *Option value checks.* `store_every < 1`, `max_event_iterations < 0`,
          `max_dt_halvings < 0` and the six `mmc_arms` combinations are
          checked in Python for pwl only (the table / kernel refuse them on
-         the other engines).
+         the other engines). Since feat/core-branch-form-coverage the same
+         pwl block first resolves the tri-state defaults of
+         `discontinuity_restart` and the step split (`_plan.DEFAULT_*`, False
+         today): the rule's default is not applied under `mmc_arms` (one
+         `route_reasons` entry says so; an explicit True is still refused),
+         and the split's default is on only where the rule resolved on
+         (update-number-changing-release blockers 1.5 / 1.8).
       8. *`sweep()`'s recipe.* `_PWL_RECIPE` is now read once while planning
          (`plan.recipe`) instead of again in the run; equal unless a hook
          sets that context variable mid-call.

@@ -34,6 +34,16 @@ from typing import Any, Iterator, Mapping, NamedTuple, Optional
 new = tuple.__new__
 
 
+# The fixed-step defaults of discontinuity_restart and of the step split
+# (enable_substep_state_correction), resolved in _plan_run when the call
+# leaves them None: the restart rule first (OFF under mmc_arms, with a
+# diagnostic), then the split, which defaults ON only where the rule is on.
+# False today; the number-changing release sets both True
+# (update-number-changing-release task 3.1).
+DEFAULT_DISCONTINUITY_RESTART = False
+DEFAULT_SUBSTEP_STATE_CORRECTION = False
+
+
 # plan.features: the keywords that put a feature in the run (set, not
 # default), plus "builder_ics" when the builder's i0= / c0= seed the state.
 FEATURE_KW = ("switch_fn", "b_extra_fn", "step_observer", "closed_loops",

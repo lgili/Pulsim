@@ -3534,6 +3534,20 @@ def _plan_run(
         # AROUND whatever hooks are already in place: the MMC observer
         # runs first (it mutates pool/cache before the solve), and the
         # b_extra vectors sum.
+        # The tri-state defaults (None = this run's default): the restart
+        # rule's, then the split's, which follows the rule (_plan.py). Under
+        # mmc_arms the rule's default is not applied (the arm's full-dt
+        # Thevenin stamp); an explicit True is still refused below.
+        if discontinuity_restart is None and _planning.DEFAULT_DISCONTINUITY_RESTART:
+            if mmc_arms:
+                _route_reasons = [*_route_reasons, (
+                    "mmc_arms: the restart rule's default is not applied (the "
+                    "arm's full-dt Thevenin stamp cannot re-solve at dt/2)")]
+            else:
+                discontinuity_restart = True
+        if enable_substep_state_correction is None and discontinuity_restart \
+                and _planning.DEFAULT_SUBSTEP_STATE_CORRECTION:
+            enable_substep_state_correction = True
         if mmc_arms:
             # Combinations the arm bookkeeping cannot honour yet — each
             # would return plausible-looking wrong capacitor voltages
