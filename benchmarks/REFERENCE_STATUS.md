@@ -204,7 +204,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | stress/stiff_rlc.yaml | 3.97e-09 | 3.72e-09 | 3.72e-09 | 0 | 3.56e-09 |
 | stress/stiff_two_timescale_rc.yaml | 7.85e-05 | 1.19e-06 | 1.19e-06 | 7.79e-07 | 4.64e-07 |
 | switching/basic/chopper_with_rc_snubber.yaml | 0.0187 | 0.0153 | 0.0153 | 3.81e-05 | 2.91e-05 |
-| switching/basic/mosfet_nmos_dc.yaml | 0 | 0 | 0 | 0 | refused |
+| switching/basic/mosfet_nmos_dc.yaml | 3.55e-15 | 0 | 0 | 0 | refused |
 | switching/basic/pwm_voltage_rc.yaml | 0.000883 | 9.98e-09 | 9.98e-09 | 8.98e-09 | 1.15e-07 |
 | switching/basic/pwm_voltage_rl_filter.yaml | 0.00429 | 6.93e-06 | 6.93e-06 | 6.53e-05 | 2.26e-06 |
 | switching/basic/snubber_rc.yaml | 0.000561 | 0.000561 | 0.000561 | 1.65e-07 | 1.73e-07 |

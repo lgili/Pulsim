@@ -15,6 +15,9 @@ Newton tolerance. ``_assert_paths_agree`` therefore asserts 1e-12 of scale
 when the per-solve iteration counts are equal, and the converged tolerance
 (``tol_newton_dx``, absolute) otherwise (DECISIONS #26, #29).
 """
+import math
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -92,8 +95,7 @@ def _boost(edge, kappa):
 def mosfet_reverse_conduction_ac():
     """MOSFET L1 held on (V_GS = 12 V, far above threshold) carrying an AC
     current: V_DS crosses zero both ways — the reverse branch and the C¹
-    point of DECISIONS #39 — where the two laws agree to rounding (the
-    leak the interface law drops is K·a²·e^{-κa} ≈ 1e-14 A here)."""
+    point of DECISIONS #44."""
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 50e3, 0.0)
     b.add_resistor("R", "in", "a", 2.0)
@@ -106,10 +108,8 @@ def mosfet_reverse_conduction_ac():
 
 def boost_mosfet_fast_gate():
     """The boost with 1 ns gate edges and κ = 15: no fixed-step sample sits
-    on a ramp, and off (a = −3 V) the model's leak K·a²·σ(κa)σ(−κa) is
-    1e-19 A — the control of the recorded boost difference (DECISIONS #39;
-    at κ = 4 the off-state leak at V_DS ≈ 0 is 28 µA, and the paths part by
-    5e-9 of scale after every turn-off even with fast edges)."""
+    on a ramp (the soft boost's 0.3 µs ramps put V_DS ≈ 0 through threshold,
+    where the raw mirror jumped; both paths now run the C¹ law, #44)."""
     return _boost(1e-9, 15.0)
 
 
@@ -170,13 +170,9 @@ CIRCUITS = {
     "chopper_igbt_tail_lauritzen": chopper_igbt_tail_lauritzen,
     "saturable_permeance_core": saturable_permeance_core,
 }
-# The boost passes its soft (κ = 4) MOSFET through threshold with V_DS near
-# zero (0.3 µs gate ramps; the off state right after each turn-off): there
-# the interface law drops the model's leak at V_DS = 0 (DECISIONS #39), so
-# its two paths part BY DESIGN. Recorded below, not gated at 1e-12;
-# `boost_mosfet_fast_gate` is its control. Every other circuit is gated.
-RECORDED = {"boost_mosfet_coss_saturable"}
-GATED = sorted(set(CIRCUITS) - RECORDED)
+# Every circuit is gated, the soft boost too: its MOSFET passes through
+# threshold with V_DS near zero, and both paths run ONE law there (#44).
+GATED = sorted(CIRCUITS)
 # TR-BDF2 compares at the times both runs accepted, which a gate edge
 # provides; the AC circuit has none (4 common times of 2757), so its
 # TR-BDF2 cell is the conformance MosfetLevel1 cell (AC, interpolated).
@@ -221,29 +217,10 @@ def test_trbdf2_trajectories_agree_to_rtol(name):
 
 @pytest.mark.parametrize("name", sorted(CIRCUITS))
 def test_dc_operating_points_agree(name):
-    # every circuit, the recorded boost too: its DC point (gate low, V_DS =
-    # 12 V) is e^{-48} of the leak away from V_DS = 0
     b = CIRCUITS[name]()
     xa = p.compute_dc_op(b, device_path="legacy")
     xi = p.compute_dc_op(b, device_path="interface")
     assert np.max(np.abs(xa - xi) / np.maximum(np.abs(xa), 1.0)) <= 1e-9   # 1e-12 measured
-
-
-@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
-def test_the_soft_boost_parts_by_the_mosfet_leak_only(engine):
-    """Measured 2026-11-18: 2.5e-3 of scale (pwl), 2.1e-4 (trbdf2), largest
-    on the first turn-on ramp (V_DS ≈ 0, a through threshold; the leak
-    peaks at 0.439·K/κ² = 13.7 mA). Visible — the fix is live — and of the
-    leak's order, not of a wrong law's; the control agrees to 1e-12."""
-    kw = (dict(t_end=200e-6, dt=20e-9, engine="pwl") if engine == "pwl"
-          else dict(t_end=200e-6, engine="trbdf2", rtol=1e-6, atol=1e-9))
-    a = _run(boost_mosfet_coss_saturable, "legacy", **kw)
-    i = _run(boost_mosfet_coss_saturable, "interface", **kw)
-    ta, ti = np.asarray(a.times), np.asarray(i.times)
-    xa, xi = np.asarray(a.states), np.asarray(i.states)
-    _, ia, ii = np.intersect1d(ta, ti, return_indices=True)
-    err = np.max(np.abs(xa[ia] - xi[ii]) / _scale(xa))
-    assert 1e-6 < err < 1e-2, f"legacy vs interface {err:.2e} of scale"
 
 
 def test_dc_operating_point_with_every_static_kind_conducting():
@@ -294,22 +271,6 @@ def test_a_gated_diode_runs_on_interface_with_its_gate_bit():
         np.abs(np.asarray(i.i("Qd"))))
 
 
-def test_an_unported_kind_refuses_interface_by_name():
-    b = p.CircuitBuilder()
-    b.add_voltage_source("V", "a", "gnd", 1.0)
-    b.add_resistor("Ra", "a", "pa", 10.0)
-    b.add_resistor("Rb", "a", "pb", 10.0)
-    b.add_resistor("Rc", "a", "pc", 10.0)
-    b.add_pmsm_mna("M", "pa", "pb", "pc", "n", "w", "th", 0.5, 1e-3, 1e-3,
-                   0.05, 2, 1e-3, 1e-4)
-    b.add_resistor("Rn", "n", "gnd", 1e6)
-    with pytest.raises(ValueError, match="PmsmMna"):
-        p.simulate(b, t_end=1e-6, dt=1e-8, engine="pwl",
-                   device_path="interface")
-    with pytest.raises(ValueError, match="PmsmMna"):
-        p.simulate(b, t_end=1e-6, engine="trbdf2", device_path="interface")
-
-
 def test_interface_is_refused_by_the_exact_engine_and_bad_names():
     b = boost_mosfet_coss_saturable()
     with pytest.raises(ValueError, match="device_path"):
@@ -320,3 +281,227 @@ def test_interface_is_refused_by_the_exact_engine_and_bad_names():
 
 def test_default_path_is_legacy():
     assert p.SimulationOptions().device_path == p.DevicePath.Legacy
+
+
+# ---- the MNA machines (15.6, DECISIONS #42) ---------------------------------
+# PMSM (constant L with saliency, flux map) and induction machine through
+# their `Device` laws: q = −λ on the stator current rows (the flux, never
+# L·i), increment form, conductance-form rows. Parameters are the machine
+# tests' synthetic sets (test_pmsm_mna, test_induction_machine_mna,
+# test_pmsm_flux_map), not a real part.
+
+def _sine3(b, v_peak, f_e):
+    for k, node in enumerate(("ua", "ub", "uc")):
+        b.add_sine_voltage_source(
+            f"Vs_{'abc'[k]}", node, "gnd", v_dc=0.0, v_amplitude=v_peak,
+            frequency=f_e, phase=-2.0 * math.pi / 3.0 * k)
+
+
+def pmsm_sine_start():
+    """Salient PMSM (L_d = 1 mH, L_q = 3 mH) started from rest by a 30 Hz
+    sine: θ, ω and the reluctance torque all move."""
+    b = p.CircuitBuilder()
+    _sine3(b, 12.0, 30.0)
+    b.add_pmsm_mna("M1", "ua", "ub", "uc", "nn", "w", "th", R_s=0.5,
+                   L_d=1e-3, L_q=3e-3, psi_pm=0.05, pole_pairs=4, J=1e-3,
+                   B=1e-4)
+    return b
+
+
+def pmsm_locked_rotor():
+    """The salient PMSM with ω held at 0 by a source (rotor locked) and a
+    stepped dq voltage: the stator rows alone, θ fixed at θ0 = 0.3 rad."""
+    b = p.CircuitBuilder()
+    for k, (node, v) in enumerate(zip(("ua", "ub", "uc"), (6.0, -1.0, -5.0))):
+        b.add_pulse_voltage_source(f"V{'abc'[k]}", node, "gnd", 0.0, v, 0.0,
+                                   1.0, rise_time=50e-6)
+    b.add_pmsm_mna("M1", "ua", "ub", "uc", "nn", "w", "th", R_s=0.5,
+                   L_d=1e-3, L_q=3e-3, psi_pm=0.05, pole_pairs=4, J=1.0,
+                   theta0=0.3)
+    b.add_voltage_source("Vw", "w", "gnd", 0.0)
+    return b
+
+
+def _sat_map():
+    g = np.arange(-30.0, 30.0 + 0.75, 1.5)
+    D, Q = np.meshgrid(g, g, indexing="ij")
+    r = np.hypot(D, Q) / 10.0
+    f = np.where(r < 1e-3, 1e-3 * (1 - r * r / 3),
+                 1e-3 * np.tanh(r) / np.where(r < 1e-3, 1.0, r))
+    return p.FluxMapDQ.from_tables(g, g, 0.05 + f * D, 2e-3 * Q + f * Q,
+                                   source="synthetic: log-cosh test map")
+
+
+def flux_map_saturated_start():
+    """Cross-coupled, saturating flux-map PMSM (|i| > 2·I_sat) started from
+    rest — test_pmsm_flux_map's energy-balance circuit."""
+    b = p.CircuitBuilder()
+    _sine3(b, 12.0, 20.0)
+    b.add_pmsm_flux_map("M1", "ua", "ub", "uc", "nn", "w", "th", R_s=0.5,
+                        flux_map=_sat_map(), pole_pairs=4, J=2e-4, B=1e-4)
+    return b
+
+
+_IM = dict(R_s=0.5, L_ls=2e-3, R_r=0.4, L_lr=2e-3, L_m=60e-3, pole_pairs=2)
+_W_SYNC = 2 * math.pi * 60.0 / 2
+
+
+def _im(b, J, omega0=0.0):
+    b.add_induction_machine_mna("M", "ua", "ub", "uc", "nn", "w", J=J,
+                                omega0=omega0, **_IM)
+    return b
+
+
+def im_sine_start():
+    """Induction machine, direct-on-line 100 V rms 60 Hz start (J = 0.01)."""
+    b = p.CircuitBuilder()
+    _sine3(b, 100.0 * math.sqrt(2), 60.0)
+    return _im(b, 0.01)
+
+
+def im_generator_held_speed():
+    """Induction machine held 5 % ABOVE synchronous speed by a source on ω:
+    generating (negative slip), the source sinks the shaft torque. J is
+    small (its companion 2J/h·ω would round at 1e-9 A in the source current,
+    and a held shaft does not read J)."""
+    b = p.CircuitBuilder()
+    _sine3(b, 100.0 * math.sqrt(2), 60.0)
+    w = 1.05 * _W_SYNC
+    _im(b, 1e-3, omega0=w)
+    b.add_voltage_source("Vw", "w", "gnd", w)
+    return b
+
+
+class _SixStep:
+    """Six-step (180°) gating of the bridge at 60 Hz, switch order (a+, a-,
+    b+, b-, c+, c-), with the edge oracle TR-BDF2 lands its grid on."""
+
+    T = 1.0 / 60.0
+
+    def __call__(self, t):
+        s = int(math.floor(t / (self.T / 6) + 1e-9)) % 6
+        m = p.SwitchStateMask(6)
+        for leg, shift in enumerate((0, 4, 2)):
+            up = ((s + shift) % 6) < 3
+            m.set(2 * leg, up)
+            m.set(2 * leg + 1, not up)
+        return m
+
+    def next_edge_after(self, t):
+        return (math.floor(t / (self.T / 6) + 1e-9) + 1) * self.T / 6
+
+
+def im_inverter_start():
+    """Induction machine started by a six-step 300 V bridge (ideal switches
+    1 mΩ / 1 µS): every 1/360 s the stator voltages jump."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdc", "dc", "gnd", 300.0)
+    for x in ("a", "b", "c"):
+        b.add_switch(f"S{x}p", "dc", f"u{x}", 1e3, 1e-6)
+        b.add_switch(f"S{x}n", f"u{x}", "gnd", 1e3, 1e-6)
+    return _im(b, 0.01)
+
+
+# name: (builder, t_end, dt, switch_fn, the quantity that must move)
+MACHINES = {
+    "pmsm_sine_start": (pmsm_sine_start, 0.03, 5e-6, None, "w"),
+    "pmsm_locked_rotor": (pmsm_locked_rotor, 5e-3, 1e-6, None, "M1_a"),
+    "flux_map_saturated_start": (flux_map_saturated_start, 0.02, 2e-6, None,
+                                 "w"),
+    "im_sine_start": (im_sine_start, 0.03, 2e-5, None, "w"),
+    "im_generator_held_speed": (im_generator_held_speed, 0.05, 5e-5, None,
+                                "M_a"),
+    "im_inverter_start": (im_inverter_start, 0.03, 1e-5, _SixStep(), "w"),
+}
+
+
+def _run_machine(name, path, engine="pwl"):
+    make, t_end, dt, sw, _ = MACHINES[name]
+    kw = dict(dt=dt) if engine == "pwl" else dict(rtol=1e-6, atol=1e-9)
+    if sw is not None:
+        kw["switch_fn"] = sw
+    return p.simulate(make(), t_end=t_end, engine=engine, device_path=path,
+                      **kw)
+
+
+def _trace(res, what):
+    return np.asarray(res.v(what) if what == "w" else res.i(what))
+
+
+def _neutral_column(res):
+    x, vn = np.asarray(res.states), np.asarray(res.v("nn"))
+    return next(c for c in range(x.shape[1]) if np.array_equal(x[:, c], vn))
+
+
+def _without(res, col):
+    x = np.asarray(res.states)
+    return SimpleNamespace(states=np.delete(x, col, axis=1), times=res.times,
+                           newton=res.newton)
+
+
+@pytest.mark.parametrize("name", sorted(MACHINES))
+def test_machine_paths_agree_to_1e12_on_pwl(name):
+    """Every state but a floating neutral to 1e-12 of its scale (measured
+    2026-11-18: ≤ 2.5e-14). A floating neutral is physically 0 V (no
+    zero-sequence flux): what it reads (1e-11 V) is linear-solve round-off
+    on the a·L entries of the stator rows, different in the last bits on the
+    two paths; it is checked to be zero on both, to 1e-9 of the phase
+    voltages."""
+    a = _run_machine(name, "legacy")
+    i = _run_machine(name, "interface")
+    what = MACHINES[name][4]
+    assert np.ptp(_trace(a, what)) > 1.0, f"{name}: control: {what} never moved"
+    v_phase = max(np.max(np.abs(np.asarray(a.v(x)))) for x in ("ua", "ub", "uc"))
+    if np.max(np.abs(np.asarray(a.v("nn")))) <= 1e-9 * v_phase:   # floating
+        assert np.max(np.abs(np.asarray(i.v("nn")))) <= 1e-9 * v_phase
+        n = _neutral_column(a)
+        a, i = _without(a, n), _without(i, n)
+    _assert_paths_agree(name, a, i)
+
+
+@pytest.mark.parametrize("name", ["pmsm_sine_start", "flux_map_saturated_start",
+                                  "im_inverter_start"])
+def test_machine_paths_agree_to_rtol_on_trbdf2(name):
+    """At the end (both grids land on t_end; they part within a few steps,
+    so earlier common times are rare), to 10·rtol of scale; a floating
+    neutral is left out as on pwl."""
+    a = _run_machine(name, "legacy", "trbdf2")
+    i = _run_machine(name, "interface", "trbdf2")
+    assert a.times[-1] == i.times[-1]
+    xa, xi = np.asarray(a.states), np.asarray(i.states)
+    scale = _scale(xa)
+    if name != "im_inverter_start":   # floating neutral
+        n = _neutral_column(a)
+        xa, xi, scale = (np.delete(v, n, axis=-1) for v in (xa, xi, scale))
+    err = np.max(np.abs(xa[-1] - xi[-1]) / scale)
+    assert err <= 10 * 1e-6, f"{name}: legacy vs interface {err:.2e} of scale"
+
+
+def _flux_map_energy_residual(res, fm, J=2e-4, B=1e-4, R_s=0.5):
+    t = np.asarray(res.times)
+    vn = np.asarray(res.v("nn"))
+    cur = [np.asarray(res.i(f"M1_{x}")) for x in "abc"]
+    v = [np.asarray(res.v(n)) - vn for n in ("ua", "ub", "uc")]
+    w = np.asarray(res.v("w"))
+    i_d = np.asarray(res.signal("M1.i_d"))
+    i_q = np.asarray(res.signal("M1.i_q"))
+    ev = np.array([fm.evaluate(a, c) for a, c in zip(i_d, i_q)])
+    w_field = 1.5 * (ev[:, 1] * i_d + ev[:, 2] * i_q - ev[:, 0])
+    e_in = np.trapezoid(sum(vk * ik for vk, ik in zip(v, cur)), t)
+    e_out = (np.trapezoid(R_s * sum(ik * ik for ik in cur), t)
+             + (w_field[-1] - w_field[0]) + 0.5 * J * (w[-1] ** 2 - w[0] ** 2)
+             + B * np.trapezoid(w * w, t))
+    return e_in, e_in - e_out
+
+
+def test_machine_energy_balance_is_the_same_on_both_paths():
+    """The saturated flux-map start conserves energy on 'interface' as on
+    'legacy' (the residual is the trapezoidal rule's, ~1e-9 of the input):
+    the law integrates the flux, so no ratchet adds or removes energy."""
+    fm = _sat_map()
+    ea, ra = _flux_map_energy_residual(_run_machine(
+        "flux_map_saturated_start", "legacy"), fm)
+    ei, ri = _flux_map_energy_residual(_run_machine(
+        "flux_map_saturated_start", "interface"), fm)
+    assert abs(ri) <= 2e-8 * abs(ei), (ei, ri)
+    assert abs(ri - ra) <= 1e-3 * abs(ra) + 1e-12 * abs(ea), (ra, ri)

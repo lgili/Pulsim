@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <concepts>
 #include <cstddef>
@@ -232,6 +233,14 @@ inline constexpr bool has_f_v = [] {
     if constexpr (requires { D::kHasF; }) return static_cast<bool>(D::kHasF);
     else return true;
 }();
+/// A law whose `q` lives on internal rows only declares `kPinQ = false`
+/// (the saturable inductor, the machines): its commit then takes no time
+/// formula at all (q̇_n of a pin row is 0, of an internal row −f).
+template <class D>
+inline constexpr bool pin_q_v = [] {
+    if constexpr (requires { D::kPinQ; }) return static_cast<bool>(D::kPinQ);
+    else return true;
+}();
 
 /// One device's Newton contribution under `c`, dense: F[r] = f + a·q + r
 /// and J[r][k] = ∂F[r]/∂x[k], from one AD evaluation. `q_n`, `qdot_n`,
@@ -373,6 +382,14 @@ Out<Real, rows_v<D>> commit_fq(const aux_t<D>& aux,
                                const std::array<Real, rows_v<D>>& q_gamma) {
     Out<Real, rows_v<D>> o;
     device::eval<D>(aux, p, x, o);
+    if constexpr (!pin_q_v<D>) {
+        for (std::size_t r = 0; r < rows_v<D>; ++r) {
+            assert(r >= D::n_pins || o.q[r] == Real{0});
+            qdot_n[r] = r >= D::n_pins ? -o.f[r] : Real{0};
+        }
+        q_n = o.q;
+        return o;
+    }
     const Real a = formula_a(c);
     for (std::size_t r = 0; r < rows_v<D>; ++r) {
         const Real qd = r >= D::n_pins

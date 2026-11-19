@@ -633,18 +633,215 @@
     wall time under load (other agents, this slice's own C++ build): not
     evidence; (a) is.
 
-### Hand-off (2026-11-18)
+## Slice 7 — the machines on the interface (2026-11-18/19)
 
-- Step 5 of the brief NOT started (context budget): merge
-  `origin/feat/core-p5-machines` (33dbd853 at hand-off; `git merge-tree`
-  shows ONE conflict, `python/tests/test_engine_conformance.py` — both sides
-  append a block at the end of the file (this branch: the device-path cells;
-  machines: `test_machine_dc_held_cell` …): keep both), then port the MNA
-  PMSM and the induction machine in the machines branch's increment form
-  (`pwl/pmsm_mna_history.hpp`: `lambda_of`, `delta_lambda`, `lam_off`,
-  `dlam_gamma`, `c_theta` / `c_rotor`) per #34; 'interface' refuses both by
-  name until then.
-- `StepHooks::on_device_state` (#31) is still the stepper track's call;
-  origin/feat/core-p3-stepper (8fa641df) has no hook yet.
-- The MOSFET law's sub-threshold band and corner (#39) are release-list
-  items, as is a quiet-machine wall-time check (#38).
+42. **The MNA machines on the `Device` contract (15.6; supersedes #34).**
+    Merged `origin/feat/core-p5-machines` 0e1f549b first (f9158ffb: the
+    flux-map PMSM, the increment-form stator rows). `device/machine_laws.hpp`:
+    `PmsmMna` (rows a, b, c, n, ω, θ | i_a, i_b, i_c; constant L(θ) with PM
+    harmonics, or the flux map) and `InductionMachine` (a, b, c, n, ω, λ_rα,
+    λ_rβ | i_a..i_c). The stator rows' conserved quantity is the FLUX:
+    q = −λ(i, θ) / −λ(i, λ_r), f = (v − v_n) − R_s·i, so the row is
+    conductance form J = −R·δ − a·∂λ/∂i (a = 2/h, 1/h, c1/h; never h-scaled)
+    and the engines pass a·(q − q_n) as the history's closed-form increment
+    −(Δλ − lam_off) (BDF2: −dlam_gamma) — the hand row term for term. The
+    angular momentum J·ω, the angle θ and the IM rotor fluxes are the charges
+    of the builder's linear capacitors on those nodes (the engines integrate
+    them like any capacitor); the law injects their rates (−(T − T_load),
+    −C_θ·ω, −C_r·g). λ, T, g and their partials are the model's Real
+    functions in the hand stamp's operation order, spread over the AD slots by
+    `chain_n` (exact on the engines' unit seeds); the law's parameters are
+    R_s and T_load (exact ∂/∂p), the flux law sits in `Aux`. Commit through
+    `commit_fq`: λ_n ← λ(x) (bitwise the hand commit's), dλ/dt_n ← f(x); the
+    reference point and v_n stay the history's bookkeeping; `capture_gamma`
+    is the history's increment. `iface::history_covers` lets the machine
+    history cover the `InductionMachineMna` row (set_path, the binding).
+    `PmsmMna::torque` gained overloads taking L(θ) and λ_pm′, λ_pm″ (one
+    `lambda_pm_all` trig pass); the hand path routes through them (same
+    values). The adapter computes L(θ_e) once for the law and the increment
+    (`Aux::ind`, a cache of the model at that call's θ).
+    Gates (`test_device_path_equivalence.py`, machine section; the machine
+    tests' synthetic parameter sets): pwl legacy vs interface, same Newton
+    counts, every state ≤ 2.5e-14 of scale — salient-PMSM sine start, locked
+    rotor (ω held, θ0 = 0.3), saturated flux-map start, IM sine start, IM
+    generator at 1.05·ω_sync held, IM six-step inverter start. A FLOATING
+    neutral is physically 0 V (no zero-sequence flux) and reads ~1e-11 V of
+    solve round-off on both paths: left out of the 1e-12 gate, checked ≤
+    1e-9·v_phase on both (the inverter's neutral is a real 200 V state and
+    stays gated). The held-speed IM uses J = 1e-3 (J = 1 made the source
+    current round at ulp(2J/h·ω) = 9e-10 A, a 2e-11 single-step spike).
+    TR-BDF2 (three circuits): end states ≤ 10·rtol. Energy balance of the
+    saturated flux-map start: residual ≤ 2e-8 of the input on 'interface',
+    equal to legacy's to 1e-3 of itself. C++ (`test_device_laws.cpp`): the
+    laws stamp to 32 ulp (F) / 16 ulp (J), commit bitwise and capture
+    identically against `refresh_pmsm_mna` for all three machines × three
+    formulas (grounded star point included); the stator block equals −R·δ −
+    a·∂λ/∂i (central difference); the whole x-Jacobian against central
+    differences of the law's Real eval (independent of the hand partials);
+    ∂/∂(R_s, T_load) by AD. Conformance: the PmsmMna / InductionMachineMna /
+    harmonics / flux-map device-path cells run (none refused).
+    Speed (instructions retired per accepted step, `.scratch/instr.sh`, 5×
+    longer runs, K = 6): PMSM sine start 1.016, locked rotor 1.009,
+    flux-map start 1.001–1.003; induction machine 1.04 (inverter) and 1.084–
+    1.086 (sine start, held generator) — OVER the 3 % gate. Microbench: the
+    IM stamp 131 → 227 ns, of which the law's eval at AD width 10 is 104 ns
+    (the hand stamp writes ~55 known coefficients; the law propagates 10
+    tangents through every operation); computing J on `kPattern` entries
+    only changed nothing (reverted). Lever, not taken: evaluate at the 6
+    inputs the IM's nonlinear terms read (i, λ_r, ω) and spread with the
+    seed map known at compile time. Recorded for the release; the default
+    path is untouched.
+    Reviewer (fresh context, read-only): no law defect; fixed — test gaps
+    (BDF2 commit, capture, grounded star point, independent FD Jacobian),
+    the neutral's explanation, a hard-coded R_s in the energy test. Open:
+    `run_transient.hpp:128` (`seed_held_machine_capacitors`) still calls the
+    hand `refresh_pmsm_mna` on both paths (same values; loop freeze — the
+    stepper track ports it before the hand stamps go); the "unported kind
+    refuses by name" test lost its fixture (every Newton kind is ported now;
+    the refusal stays covered by `set_path` code, not by a test).
+43. **Readings describe the law that was stamped (item 4).**
+    `for_each_static_reading(graph, pool, x, path, fn)` takes the run's
+    `DevicePath`: a legacy run reads the MOSFET model body
+    (`laws::MosfetLevel1Model`, leak included — what
+    `refresh_mosfets_level1` stamps), an interface run the C¹ law; the other
+    static kinds are one body on both. Test: at the leak's peak (a = 2.4/κ,
+    V_DS = 0.1 mV) the legacy reading equals `models::MosfetLevel1::current`
+    bitwise, the interface reading the law bitwise, and they differ by
+    > 0.4·K/κ² (control). Also corrected here: #39's claim that the slope at
+    V_DS = 0 is negative "on both paths" for a ∈ (−1.3/κ, 0) — on the law it
+    is Kσa·[κ(1−σ²)a + 2σ] (λ aside), negative only for a ∈ (≈ −0.75/κ, 0)
+    (+0.105·K/κ at a = −1/κ); the test asserted it at −1/κ and failed on all
+    three devices (never run after #39). Now asserted at −0.5/κ (law) and
+    −1/κ (model). (Superseded by #44: one body again, no `path`.)
+
+## Slice 8 — one MOSFET law on both paths (2026-11-19)
+
+44. **The C¹ correction moves into the model; both paths run it.** Two
+    corrections existed: (a) this branch's interface law (#39),
+    h = f − f(a, 0)·e^{−κ|V_DS|} mirrored, written with expm1 for κd ≤ 1;
+    (b) `origin/feat/core-p5-passives-mosfet` 8aa40070, legacy model only:
+    the V_DS < 0 branch adds `2·f(V_OV − V_DS/2, 0)`. Merged (b) with
+    `--no-ff`, then measured both against the raw mirror
+    (`.scratch/mosfet_laws_sweep.py`, K = 1.43, V_T = 3, λ = 0.01, κ = 15,
+    V_OV ∈ [−10/κ, 10/κ] in 0.01/κ steps, |V_DS| ≤ 2 V on a 1 mV grid):
+
+    | law | max abs i(0) | jump at 0 | max abs ∂i/∂V_DS(0⁺) − ∂i/∂V_DS(0⁻) | min i·v | ∂i/∂V_DS(0) < 0 for κ·V_OV in | min ∂i/∂V_DS |
+    |---|---|---|---|---|---|---|
+    | raw mirror | 2.79e-3 A | 5.6e-3 A | 2.9e-2 S | −2.91e-4 W | (jumps) | −4.43e-2 S |
+    | (b) | 2.79e-3 A | 3.8e-13 A | 1.0e-6 S (FD noise) | −2.26e-3 W | [−2.20, 0] | −4.83e-2 S |
+    | (a) | 0 | 3.8e-13 A | 1.1e-6 S (FD noise) | −2.91e-4 W | [−0.72, 0] | −3.95e-2 S |
+
+    Same sweep at the soft boost's K = 0.5, κ = 4, λ = 0: max abs i(0)
+    13.7 mA (raw, b) vs 0 (a); min i·v −5.35 mW (raw), −41.7 mW (b),
+    −5.36 mW (a); slope-at-zero window κ·V_OV ∈ [−2.21, 0] (b) vs
+    [−0.72, 0] (a).
+    Both are C¹. (b) is not passive at V_DS = 0: i(0) = L(a), up to
+    0.439·K/κ² (2.8 mA here), and its added term makes the worst i·v 7.8×
+    the raw law's (−2.26 mW at κ·V_OV = −6.3, κ·V_DS = −6.5). (a) has
+    i(0) = 0 exactly, a third of (b)'s slope-at-zero window, and its worst
+    i·v is the raw forward law's own (the triode polynomial past
+    saturation onset, κ·V_OV = −3.0, κ·V_DS = −3.2, mirrored), not one it
+    adds. **Chosen: (a)**, as `MosfetLevel1::forward_c1_` in
+    `models/mosfet_level1.hpp`, both quadrants. One addition keeps the model's
+    bits where the correction is below rounding: when the subtracted term is
+    ≤ 2⁻⁵⁴·|f| (≤ half an ulp) it returns f itself, so a fully-on channel
+    (κ·V_OV ≳ 37) and any |V_DS| ≫ 1/κ are the raw forward law to the bit
+    (and the third quadrant its exact mirror, as (b) was). `laws::MosfetLevel1`
+    is the model body again (`CurrentLaw`); `MosfetLevel1Model` and the
+    readings' `path` argument (#43) are removed — a reading is the law both
+    paths stamp. The soft boost (`boost_mosfet_coss_saturable`, RECORDED since
+    #39) is gated at 1e-12 again; `test_the_soft_boost_parts_by_the_mosfet_leak_only`
+    is deleted (nothing parts). Not removed (release list, unchanged in
+    kind): the negative slope near threshold and past saturation onset —
+    the triode polynomial at small overdrive, in the forward law both
+    corrections share; it is not free to remove (it changes the law at
+    every V_DS, not only near 0).
+    Legacy numbers that moved (default path, against (b) as the baseline):
+    golden compare vs `golden_m13` — every case byte-identical except
+    `mosl1_trbdf2`, whose golden is the pre-(b) abort at t = 0 (it runs
+    under (b) and here). Against a (b) build of this tree (header swapped,
+    `.scratch/mosl1_cmp.py`): `mosl1_pwl` byte-identical; `mosl1_trbdf2`
+    3175 accepted points vs (b)'s 3191, states at the 118 common times
+    within 4.8e-7 of each column's range, end state within 8.4e-10. Stateful
+    bit-identity (`sbit_m14`) unchanged. Reference cells: one moved,
+    `switching/basic/mosfet_nmos_dc` pwl error 0 → 3.55e-15 (trbdf2 0, dsed
+    refused, unchanged). Every pinned Python and C++ test passes (5281
+    pytest, 375 reference; layer2 and layer5 on Eigen 5 and 3.4.0).
+
+45. **The saturable-inductor commit (item 3; the open item of #38/#41).**
+    Measured first (`.scratch/bench_commit2.cpp`, 64 atan entries, best of
+    31): hand commit 3.3–3.5 ns per entry, interface 10.2–11.1 ns, the law's
+    eval alone 3.5–3.8 ns — so the 7 ns were `commit_fq`'s time formula, not
+    λ. Hoisting the formula switch (`history_terms` once) changed nothing
+    (10.7–11.1 ns; reverted). Fix: a law whose q lives on internal rows only
+    declares `kPinQ = false` (saturable inductor, PMSM, induction machine);
+    `commit_fq` then takes no formula (q̇_n ← 0 on a pin row, −f on an
+    internal one; every caller discards the pin rows, debug-asserted q = 0
+    there). Interface commit 3.4–3.6 ns (1.02–1.07× the hand); machines:
+    PMSM commit 67 → 53 ns (hand 43), IM 23 → 15.6 ns (hand 6.6). The
+    PMSM commit's h = 0 guard (a pin row's 2/h·0) is gone with it.
+    Instructions per accepted step, satind_pwl (`.scratch/instr.sh`, K = 20,
+    three runs): interface 17 115 / 17 109 / 17 107 (was 17 306 in #41),
+    legacy 16 624 / 16 828 / 16 807 → ratios 1.030, 1.017, 1.018 (were
+    1.023–1.031). Under the gate on two of three, NOT clearly under: the
+    legacy baseline alone moves ±0.6 % run to run, and the interface's
+    remaining ~300 instructions per step are in the stamp (per Newton
+    iteration), not the commit. Recorded, not chased further here.
+
+46. **Evidence regenerated at 2e60463b (item 5).** Instructions retired per
+    accepted step (`.scratch/instr.sh`, K = 20; machines: 5× longer runs,
+    K = 6):
+
+    | case | legacy | interface | ratio | #41 / #42 |
+    |---|---|---|---|---|
+    | saturable inductor (pwl) | 16 722 | 16 974 | 1.015 | 1.023–1.031 |
+    | Coss (pwl) | 13 808 | 13 711 | 0.993 | 0.988 |
+    | IGBT tail + Lauritzen chopper (pwl) | 28 608 | 27 025 | 0.945 | 0.959 |
+    | IGBT tail + Lauritzen chopper (trbdf2) | 90 719 | 85 143 | 0.939 | 0.910 |
+    | soft boost MOSFET + Coss + saturable (pwl) | 35 083 | 30 463 | 0.868 | 0.918 |
+    | soft boost (trbdf2) | 128 168 | 108 384 | 0.846 | 0.897 |
+    | boost, 1 ns edges, κ = 15 (pwl) | 35 757 | 31 148 | 0.871 | 0.911 |
+    | MOSFET on, AC reverse conduction (pwl) | 24 652 | 22 783 | 0.924 | 0.968 |
+    | PMSM sine start | 64 694 | 64 854 | 1.002 | 1.016 |
+    | PMSM locked rotor | 56 529 | 56 670 | 1.002 | 1.009 |
+    | flux-map saturated start | 247 292 | 249 270 | 1.008 | 1.001–1.003 |
+    | IM sine start | 63 664 | 68 255 | 1.072 | 1.086 |
+    | IM generator, held speed | 65 491 | 69 630 | 1.063 | 1.084 |
+    | IM six-step inverter start | 92 407 | 96 751 | 1.047 | 1.040 |
+
+    The MOSFET rows' ratios fell because LEGACY got dearer with #44 (the
+    model now evaluates forward(a, d), forward(a, 0) and an exp: soft boost
+    legacy 33 674 → 35 083, +4.2 %; AC reverse conduction 21 905 → 24 652,
+    +12.5 %) — a cost of the default path, not of the interface. The
+    commit fix (#45) brought the PMSM to 1.002; the induction machine stays
+    over the gate (the AD-width-10 stamp, #42).
+    `benchmarks/DEVICE_PATH_EVIDENCE.md` regenerated: 289 cells on both
+    paths, 289 with the same outcome and error to 3 significant digits, 0
+    refused (#41: 277, 274, 4 refused — the MOSFET cells that parted under
+    #39 agree again with one law). `law:` rows, pwl: soft boost 2.86e-14
+    (was 2.49e-3), every other ≤ 7.5e-14 except the IM inverter start
+    2.43e-13; trbdf2 ≤ 5.8e-7 (soft boost; was 2.08e-4). The tool now
+    leaves a floating machine neutral out as the test gate does (it read
+    0.15 "of scale" on a 1e-11 V node).
+
+### Hand-off (2026-11-19)
+
+- Done this session: merged `feat/core-p5-machines` (f9158ffb) and
+  `feat/core-p5-passives-mosfet` (952ff46c, #44); the machines on the
+  interface (#42); one MOSFET law (#44); the readings argument (#43, then
+  removed by #44); commit without a time formula (#45); evidence (#46);
+  task 7.4's test.
+- Open, new: #44 made the LEGACY MOSFET dearer (+4.2 % instructions per step
+  on the soft boost, +12.5 % on the AC reverse-conduction circuit: two
+  forward evaluations and an exp per call). A cheap pre-test (skip the leak
+  when σ(−κ·V_OV)·e^{−κ|V_DS|} is far below ulp, from κ·(V_OV + |V_DS|)
+  alone) would recover most of it; not done. The saturable inductor reads
+  1.015–1.030× (#45): at the gate, not clearly under it.
+- Open, recorded: the induction machine's instruction ratio 1.04–1.09 (over
+  the 3 % gate; lever in #42); `run_transient.hpp:128`
+  (`seed_held_machine_capacitors`) calls the hand `refresh_pmsm_mna` on both
+  paths (loop freeze); the "unported kind refuses by name" test has no
+  fixture (every Newton kind is ported).
+- `StepHooks::on_device_state` (#31) is still the stepper track's call.
+- Release list: the MOSFET's negative slope near threshold and past
+  saturation onset (#44), a quiet-machine wall-time check (#38).

@@ -178,6 +178,10 @@ Each entry: question → option taken → why → how to reverse.
     slope of the law below threshold (−2.2e-5 A per 0.5 mV step at
     V_GS = 2.85 V, V_DS = −0.1 V before the fix; −2.4e-5 after, at 2.6 V,
     −0.35 V). The clean fix is a forward law with forward(V_OV, 0) = 0.
+    → Superseded 2026-11-19 (add-unified-device-interface DECISIONS #44):
+    both quadrants now run forward − forward(V_OV, 0)·e^{−κ|V_DS|}, zero at
+    V_DS = 0 and C¹, the forward law's bits where that term is below half
+    an ulp; the `2·L(V_OV − V_DS/2)` term is gone.
     → Reverse: drop the added term in `MosfetLevel1::current`.
 
 20. **Task 1.6 (charge conservation at 1e-9): met, with the measurement

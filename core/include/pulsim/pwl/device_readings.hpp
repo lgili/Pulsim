@@ -129,7 +129,8 @@ void for_each_stateful_reading(const StatefulHistories& hs, const Vector& x, Fn&
 }
 
 /// Visit every static Newton branch (smooth / Shockley diode, MOSFET and
-/// IGBT level 1) at x.
+/// IGBT level 1) at x: each law is its model's body, the one both device
+/// paths stamp (#44).
 template <class Fn>
 void for_each_static_reading(const topology::Graph& graph, const DevicePool& pool,
                              const Vector& x, Fn&& fn) {

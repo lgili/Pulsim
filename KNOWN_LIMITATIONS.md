@@ -761,16 +761,18 @@ closure `make_thyristor_switch_fn` with `i_holding = 0` turns off only
 if a sample lands within 1 pA of the current zero (60 Hz half-wave at
 dt = 10 µs: −2.140 V mean instead of 29.699 V); use `add_thyristor`.
 
-### Level-1 MOSFET: zero-voltage current near threshold
+### Level-1 MOSFET: negative slope near threshold
 
-The logistic blend of `add_mosfet_level1` / `add_power_mosfet` leaks the
-saturation term at V_DS = 0: `i = α(1−β)·K·V_OV²` (2.6 mA at V_GS = 3.2 V,
-0.44 µA at 4 V for K = 1.43, κ = 15). Since 2026-11-18 the law is
-continuous across V_DS = 0 (it used to jump by twice that, and a current
-crossing zero through a partly-on channel aborted both engines), so the
-zero-current point sits at V_DS ≈ −L/g (−4.6 mV at 3.2 V). Removing the
-leak changes the forward law and every pinned result; it is an owner
-decision (add-power-mosfet-datasheet-device DECISIONS 19).
+The logistic blend of `add_mosfet_level1` / `add_power_mosfet` leaked the
+saturation term at V_DS = 0 (`α(1−β)·K·V_OV²`, 2.6 mA at V_GS = 3.2 V for
+K = 1.43, κ = 15). Since 2026-11-19 each quadrant subtracts it times
+e^{−κ|V_DS|}: zero current at zero voltage, C¹ across V_DS = 0, the old
+law to the bit where the channel is fully on or |V_DS| ≫ 1/κ
+(add-unified-device-interface DECISIONS #44). Left: the triode
+polynomial at small or negative overdrive. dI/dV_DS < 0 at V_DS = 0 for
+V_OV in (≈ −0.72/κ, 0), and just past saturation onset at any overdrive
+(down to −0.040 S for K = 1.43, κ = 15). There `i·v` reaches −0.29 mW, at
+V_OV = −3/κ, V_DS = −3.2/κ.
 
 ## Open OpenSpec proposals as of v1.3.0
 

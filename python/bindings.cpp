@@ -292,7 +292,7 @@ void init_module(py::module_& m) {
                     const pwl::StatefulHistories kinds;
                     kinds.for_each([&](const auto& k) {
                         using K = std::remove_cvref_t<decltype(k)>;
-                        if (K::kStoredKind == sk) ported = pwl::iface::kPorted<K>;
+                        if (pwl::iface::history_covers<K>(sk)) ported = pwl::iface::kPorted<K>;
                     });
                     out[py::str(std::string(c.name))] = ported;
                 }

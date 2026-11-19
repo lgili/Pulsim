@@ -276,6 +276,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   refused; a plain Python tick source resumed on pwl keeps the run's
   grid instead of restarting it at `t_start`.
 
+### Unified device interface: the machines, one MOSFET law
+
+* **Changed** the Level-1 MOSFET (`add_mosfet_level1`, `add_power_mosfet`)
+  carries no current at V_DS = 0: each quadrant subtracts the blend's
+  zero-voltage leak `α(1−β)·K·V_OV²` times e^{−κ|V_DS|} (it was up to
+  0.439·K/κ², 2.8 mA for K = 1.43, κ = 15, with V_DS = 0). C¹ across
+  V_DS = 0, as the `2·forward(V_OV − V_DS/2, 0)` term below was, and the
+  same law on `device_path='legacy'` and `'interface'`. Where the term is
+  below half an ulp (channel fully on, or |V_DS| ≫ 1/κ) the current is the
+  old law's to the bit.
+  Pinned results are unchanged except the Level-1 buck on trbdf2 (an
+  adaptive grid of 3175 instead of 3191 points, states within 4.8e-7 of
+  range) and the `mosfet_nmos_dc` reference cell (pwl error 0 → 3.6e-15).
+* **Added** the MNA PMSM (harmonic and flux-map) and the induction machine
+  on `device_path='interface'`: legacy and interface agree within 2.5e-14
+  of scale on pwl. Every Newton kind now runs on both paths.
+
 ### Unified device interface, slice 3: the dual device path
 
 * **Added** `simulate(..., device_path='interface')` (and

@@ -6,13 +6,16 @@
 // Jacobian (C(v), L(i)) and the law's AD derivative are the same function
 // evaluated two ways, equal to a few ulp.
 
+#include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/device/laws.hpp"
+#include "pulsim/device/machine_laws.hpp"
 #include "pulsim/models/charge_table.hpp"
 #include "pulsim/models/device_model.hpp"
 #include "pulsim/models/flux_table.hpp"
 #include "pulsim/models/jiles_atherton.hpp"
 #include "pulsim/pwl/device_readings.hpp"
 #include "pulsim/pwl/device_refresh.hpp"
+#include "pulsim/pwl/nonlinear_refresh_pmsm_mna.hpp"
 #include "pulsim/sparse/matrix.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -141,8 +144,7 @@ TEST_CASE("static laws equal the hand AD stamp", "[device][laws]") {
     sd.BV = 5.0;
     check_static<L::ShockleyDiode, models::ShockleyDiode>(sd, -6.0, 0.9, 1);
     check_static<L::IdealDiode, models::IdealDiode>({}, -5.0, 5.0, 2);
-    // MosfetLevel1: the law departs from the model by the documented leak
-    // (DECISIONS #39), checked in "the MOSFET law is the model minus its leak".
+    check_static<L::MosfetLevel1, models::MosfetLevel1>({}, -8.0, 12.0, 3);
     check_static<L::IgbtLevel1, models::IgbtLevel1>({}, -2.0, 20.0, 4);
 }
 
@@ -317,6 +319,12 @@ TEST_CASE("the saturable-inductor law stamps, commits and captures as the "
                                         dense(Jh, r, c), 16));
                         }
                     }
+                    // 7.4: conductance form — the flux row's diagonal is
+                    // −a·L(i) (a = 2/h, 1/h, c1/h), never h-scaled.
+                    const Real a = device::formula_a(pwl::iface::ctx_of(h, st));
+                    const Real Li = pwl::SaturableInductorHistory::flux_and_inductance(
+                        e, x[2], st).second;
+                    CHECK(close(dense(Ji, 2, 2), -a * Li, a * Li, 16));
                     if (inc) continue;
                     auto hl = hist, hi = hist;
                     hl.commit(x, h, st);
@@ -383,8 +391,6 @@ TEST_CASE("Params<Real> evaluates the legacy law to rounding",
         device::Out<Real, 3> o;
         L::MosfetLevel1::eval(lp, v, o);
         const Real ref = models::MosfetLevel1::current<Real>(v.data(), mp);
-        // Far from threshold (V_OV = 3, κ = 15) the leak the MOSFET law
-        // drops is K·9·e^{-45}; its expression is another order (#39).
         CHECK(close(o.f[0], ref, Real{1}, 8));
     }
 }
@@ -627,8 +633,7 @@ void check_params_real_bit_identical(const typename Model::Params& mp, Real lo, 
         const auto pa = device::seed_params<Law, Law::n_params>(lp);
         device::Out<ad::ADRealN<Law::n_params>, NT> o;
         Law::eval(pa, v, o);
-        // The MOSFET law is the model minus its V_DS = 0 leak (DECISIONS #39).
-        if constexpr (!std::is_same_v<Law, L::MosfetLevel1>) CHECK(close(o.f[0].value(), a, a, 4));
+        CHECK(close(o.f[0].value(), a, a, 4));
     }
 }
 }  // namespace
@@ -646,8 +651,18 @@ TEST_CASE("Params<Real> is bit-identical to the model's own Params (legacy body)
 // ---- the MOSFET law: C¹ through V_DS = 0 (DECISIONS #39) -------------------
 namespace {
 
-/// The model's current at V_DS = 0⁺ (the leak) times e^{−κ|V_DS|}, mirrored
-/// as the model mirrors its law: legacy − interface, to rounding.
+/// The raw terminal-swap mirror of the forward law (the model before #44):
+/// it jumps by 2·f(a, 0) at V_DS = 0.
+template <class S>
+S raw_mirror(const std::array<S, 3>& v, const models::MosfetLevel1::Params& p) {
+    const S vds = v[0] - v[1];
+    const S vov = v[2] - v[1] - p.V_T;
+    if (vds < Real{0}) return -models::MosfetLevel1::forward_current_<S>(vov - vds, -vds, p);
+    return models::MosfetLevel1::forward_current_<S>(vov, vds, p);
+}
+
+/// The raw forward law's current at V_DS = 0⁺ (the leak) times e^{−κ|V_DS|},
+/// mirrored: raw mirror − law, to rounding.
 template <class S>
 S mosfet_leak(const std::array<S, 3>& v, const models::MosfetLevel1::Params& p) {
     using std::exp;
@@ -684,7 +699,7 @@ const std::array<models::MosfetLevel1::Params, 3> kMosfets{
 
 }  // namespace
 
-TEST_CASE("the MOSFET law is the model minus its leak at V_DS = 0",
+TEST_CASE("the MOSFET law is the raw mirror minus its leak at V_DS = 0",
           "[device][laws][mosfet]") {
     // Value and Jacobian against the model's AD minus the leak's AD, over
     // the whole range (threshold band included). The tolerance is a
@@ -698,7 +713,7 @@ TEST_CASE("the MOSFET law is the model minus its leak at V_DS = 0",
             using A = ad::ADRealN<3>;
             const std::array<A, 3> xa{A{vds, {1.0, 0.0, 0.0}}, A{0.0, {0.0, 1.0, 0.0}},
                                       A{vgs, {0.0, 0.0, 1.0}}};
-            const A ref = models::MosfetLevel1::current<A>(xa.data(), mp) - mosfet_leak<A>(xa, mp);
+            const A ref = raw_mirror<A>(xa, mp) - mosfet_leak<A>(xa, mp);
             const auto [i, g] = law_at(mp, vds, vgs);
             const Real scale = mp.K * (1.0 + vds * vds + vgs * vgs);
             INFO("vds " << vds << " vgs " << vgs << " law " << i << " ref " << ref.value());
@@ -709,7 +724,7 @@ TEST_CASE("the MOSFET law is the model minus its leak at V_DS = 0",
     }
 }
 
-TEST_CASE("the MOSFET law is C1 through V_DS = 0 and the model is not",
+TEST_CASE("the MOSFET law is C1 through V_DS = 0 and the raw mirror is not",
           "[device][laws][mosfet]") {
     for (const auto& mp : kMosfets) {
         // overdrives across the threshold band, in units of 1/κ
@@ -737,12 +752,11 @@ TEST_CASE("the MOSFET law is C1 through V_DS = 0 and the model is not",
                 }
             }
         }
-        // Control: the model jumps by 2·f(a, 0) at a = 2.4/κ, the leak's peak
-        // 0.439·K/κ² (DECISIONS #39) — the probe sees a discontinuity.
+        // Control: the raw mirror jumps by 2·f(a, 0) at a = 2.4/κ, the leak's
+        // peak 0.439·K/κ² (DECISIONS #39) — the probe sees a discontinuity.
         const Real vgs = mp.V_T + 2.4 / mp.kappa;
         const std::array<Real, 3> vp{1e-12, 0.0, vgs}, vm{-1e-12, 0.0, vgs};
-        const Real jump = models::MosfetLevel1::current<Real>(vp.data(), mp)
-                          - models::MosfetLevel1::current<Real>(vm.data(), mp);
+        const Real jump = raw_mirror<Real>(vp, mp) - raw_mirror<Real>(vm, mp);
         CHECK(jump > 2.0 * 0.43 * mp.K / (mp.kappa * mp.kappa));
     }
 }
@@ -750,7 +764,7 @@ TEST_CASE("the MOSFET law is C1 through V_DS = 0 and the model is not",
 TEST_CASE("the MOSFET law is monotone in V_DS around zero, to 1 pA",
           "[device][laws][mosfet]") {
     for (const auto& mp : kMosfets) {
-        // on, near-on and off; NOT the band a ∈ (≈ −1.3/κ, 0) (below)
+        // on, near-on and off; NOT the band a ∈ (≈ −0.75/κ, 0) (below)
         for (Real xk : {0.5, 2.4, 8.0, 60.0, -4.0, -8.0}) {
             const Real vgs = mp.V_T + xk / mp.kappa;
             // a symmetric grid: log-spaced from 1e-13 V, then linear to
@@ -774,14 +788,281 @@ TEST_CASE("the MOSFET law is monotone in V_DS around zero, to 1 pA",
                 prev = s.i;
             }
         }
-        // The band: the slope at V_DS = 0 is negative on BOTH paths (the
-        // triode polynomial at negative overdrive; release list, #39).
-        const Real vgs = mp.V_T - 1.0 / mp.kappa;
-        const auto s = law_at(mp, 0.0, vgs);
+        // The band: the slope at V_DS = 0 is negative (the triode polynomial
+        // at negative overdrive; release list, #44). On the law it is
+        // Kσa·[κ(1−σ²)a + 2σ] (λ aside), negative for a ∈ (≈ −0.75/κ, 0) —
+        // the subtracted leak raises it, so at a = −1/κ it is +0.105·K/κ —
+        // and on the raw forward law (≈ −1.3/κ, 0) (control).
+        const auto s = law_at(mp, 0.0, mp.V_T - 0.5 / mp.kappa);
         CHECK(s.g[0] < 0.0);
+        CHECK(law_at(mp, 0.0, mp.V_T - 1.0 / mp.kappa).g[0] > 0.0);
+        const Real vgs = mp.V_T - 1.0 / mp.kappa;
         const Real h = 1e-6 / mp.kappa;
         const std::array<Real, 3> vp{h, 0.0, vgs}, v0{2.0 * h, 0.0, vgs};
-        CHECK(models::MosfetLevel1::current<Real>(v0.data(), mp)
-              < models::MosfetLevel1::current<Real>(vp.data(), mp));
+        CHECK(raw_mirror<Real>(v0, mp) < raw_mirror<Real>(vp, mp));
+    }
+}
+
+TEST_CASE("a static reading describes the law both paths stamp",
+          "[device][laws][mosfet]") {
+    // V_GS at the leak's peak (a = 2.4/κ), V_DS = 0.1 mV: where the raw
+    // mirror and the law differ by f(a, 0)·e^{−κd} ≈ 0.439·K/κ² (#44).
+    builder::CircuitBuilder b;
+    const Real K = 0.5, V_T = 3.0, lam = 0.02, kappa = 4.0;
+    b.add_mosfet_level1("M", "d", "gnd", "g", K, V_T, lam, kappa);
+    b.add_shockley_diode("D", "a", "gnd", 1e-12, 1.2, 0.025852);
+    Vector x = Vector::Zero(b.graph().num_nodes() + b.graph().num_branches());
+    const Real vds = 1e-4, vgs = V_T + 2.4 / kappa, va = 0.62;
+    x[b.node_id_of("d")] = vds;
+    x[b.node_id_of("g")] = vgs;
+    x[b.node_id_of("a")] = va;
+    models::MosfetLevel1::Params mp{};
+    mp.K = K; mp.V_T = V_T; mp.lambda = lam; mp.kappa = kappa;
+    const std::array<Real, 3> v{vds, 0.0, vgs};
+    device::Out<Real, 3> lo;
+    device::eval<L::MosfetLevel1>({}, L::MosfetLevel1::from(mp), v, lo);
+    Real i_m = 0, i_d = 0;
+    int n = 0;
+    pwl::for_each_static_reading(b.graph(), b.pool(), x, [&](const pwl::DeviceReading& r) {
+        ++n;
+        if (r.kind == "MosfetLevel1") i_m = r.i_pin[0];
+        if (r.kind == "ShockleyDiode") i_d = r.i_pin[0];
+    });
+    CHECK(n == 2);
+    CHECK(i_m == lo.f[0]);
+    CHECK(i_m == models::MosfetLevel1::current<Real>(v.data(), mp));   // one body
+    CHECK(raw_mirror<Real>(v, mp) - i_m > 0.4 * K / (kappa * kappa));  // control: the leak
+    CHECK(i_d > 0.0);
+}
+
+// ---- the MNA machines (15.6, DECISIONS #42) --------------------------------
+namespace {
+
+// One flux-map cell over [-40, 40]²: W' = ψ i_d + ½L_d i_d² + ½L_q i_q² plus
+// a softening, cross-coupling cubic (test_pmsm_flux_map.cpp's `one_cell`).
+std::shared_ptr<models::FluxMapDQ> sat_cell() {
+    auto f = std::make_shared<models::FluxMapDQ>();
+    f->kd = {-40, 40};
+    f->kq = {-40, 40};
+    f->source = "synthetic: test";
+    Real a[4][4] = {};
+    a[1][0] = 0.05; a[2][0] = 0.5e-3; a[0][2] = 1.5e-3;
+    a[3][0] = -0.5e-6; a[2][1] = 0.75e-6; a[1][2] = -0.25e-6; a[0][3] = -1e-6;
+    a[1][1] = 2e-4;
+    const Real x0 = -40, y0 = -40;
+    const Real bn[4][4] = {{1, 0, 0, 0}, {1, 1, 0, 0}, {1, 2, 1, 0}, {1, 3, 3, 1}};
+    f->coef.assign(16, 0);
+    for (int m = 0; m < 4; ++m)
+        for (int n = 0; n < 4; ++n)
+            for (int q = m; q < 4; ++q)
+                for (int r = n; r < 4; ++r)
+                    f->coef[4 * m + n] += a[q][r] * bn[q][m] * bn[r][n]
+                                          * std::pow(x0, q - m) * std::pow(y0, r - n);
+    f->validate();
+    return f;
+}
+
+// Machine 0: salient PMSM with PM harmonics; 1: flux map; 2: induction.
+pwl::PmsmMnaHistory::Entry machine_entry(int kind, Lcg& rng) {
+    pwl::PmsmMnaHistory::Entry e{};
+    e.phase_node = {0, 1, 2};
+    e.neutral = 3;
+    e.omega_node = 4;
+    if (kind == 2) {
+        e.induction = true;
+        e.rotor_node = {5, 6};
+        e.cur_row = {7, 8, 9};
+        e.im = {.R_s = 0.5, .L_ls = 2e-3, .R_r = 0.4, .L_lr = 2e-3, .L_m = 60e-3,
+                .pole_pairs = 2, .T_load = 3.0};
+        e.im_sm = models::InductionMachineMna::stator(e.im);
+        e.c_rotor = {1.0, 2.5};
+        e.lr_old = {rng(-0.5, 0.5), rng(-0.5, 0.5)};
+    } else {
+        e.theta_node = 5;
+        e.cur_row = {6, 7, 8};
+        e.params = {.R_s = 0.5, .L_d = 1e-3, .L_q = 3e-3, .psi_pm = 0.05,
+                    .pole_pairs = 3, .T_load = 0.7};
+        if (kind == 0) {
+            e.params.harmonics = std::make_shared<const std::vector<
+                models::PmsmMna::PmHarmonic>>(std::vector<models::PmsmMna::PmHarmonic>{
+                {1, 0.05, 0}, {5, 0.004, 0.3}});
+        } else {
+            e.params.flux_map = sat_cell();
+        }
+        e.c_theta = 1.7;
+        e.theta_old = rng(-3.0, 3.0);
+    }
+    const Real imax = kind == 1 ? 15.0 : 30.0;
+    for (int k = 0; k < 3; ++k) {
+        e.i_old[k] = rng(-imax, imax);
+        e.dlam_old[k] = rng(-200.0, 200.0);
+        e.dlam_gamma[k] = rng(-1e-3, 1e-3);
+    }
+    e.lambda_old = pwl::PmsmMnaHistory::lambda_of(e, e.i_old, e.theta_old, e.lr_old);
+    return e;
+}
+
+}  // namespace
+
+TEST_CASE("the machine laws stamp, commit and capture as the hand stamp",
+          "[device][laws][machines]") {
+    for (int kind = 0; kind < 3; ++kind) {
+        INFO("machine " << kind);
+        Lcg rng{77u + static_cast<std::uint64_t>(kind)};
+        const Index n = kind == 2 ? 10 : 9;
+        for (int t = 0; t < 40; ++t) {
+            pwl::PmsmMnaHistory hist;
+            auto e = machine_entry(kind, rng);
+            if (t % 2 == 1) {   // an SDIRK offset between restart and commit
+                for (int k = 0; k < 3; ++k) e.lam_off[k] = rng(-1e-4, 1e-4);
+            }
+            if (t % 4 == 3) e.neutral = -1;   // a grounded star point
+            hist.mutable_entries().push_back(e);
+            Vector x(n);
+            for (Index r = 0; r < 4; ++r) x[r] = rng(-300.0, 300.0);
+            x[4] = rng(-200.0, 200.0);
+            if (kind == 2) {
+                x[5] = e.lr_old[0] + rng(-0.01, 0.01);
+                x[6] = e.lr_old[1] + rng(-0.01, 0.01);
+            } else {
+                x[5] = e.theta_old + rng(-0.01, 0.01);
+            }
+            for (int k = 0; k < 3; ++k) {
+                x[e.cur_row[k]] = e.i_old[k] + rng(-0.5, 0.5);
+            }
+            const Real h = rng(1e-8, 1e-5);
+            for (auto st : {pwl::TrBdf2Stage::Trapezoidal, pwl::TrBdf2Stage::BackwardEuler,
+                            pwl::TrBdf2Stage::Bdf2Stage2}) {
+                INFO("stage " << static_cast<int>(st));
+                sparse::Matrix Jh(n, n), Ji(n, n);
+                Vector fh = Vector::Zero(n), fi = Vector::Zero(n);
+                const Real mh = pwl::refresh_pmsm_mna(x, Jh, fh, hist, h, st);
+                const Real mi = pwl::iface::stamp(hist, x, Ji, fi, h, st, true);
+                CHECK(mi == mh);
+                // A flux row sums v, R·i, dλ/dt_n and a·Δλ: its round-off
+                // scales with the largest.
+                Real rs = 0;
+                for (Index r = 0; r < n; ++r) rs = std::max(rs, std::abs(fh[r]));
+                for (int k = 0; k < 3; ++k) rs = std::max(rs, std::abs(e.dlam_old[k]));
+                rs = std::max(rs, Real{600});
+                for (Index r = 0; r < n; ++r) {
+                    CHECK(close(fi[r], fh[r], rs, 32));
+                    for (Index c = 0; c < n; ++c) {
+                        INFO("J " << r << "," << c);
+                        CHECK(close(dense(Ji, r, c), dense(Jh, r, c), dense(Jh, r, c), 16));
+                    }
+                }
+                // Conductance form (7.4): the stator block is −R·δ − a·∂λ/∂i,
+                // a = 2/h, 1/h, c1/h, never h-scaled.
+                const Real a = device::formula_a(pwl::iface::ctx_of(h, st));
+                const Real R_s = kind == 2 ? e.im.R_s : e.params.R_s;
+                const Real eps_i = 1e-6;
+                for (int j = 0; j < 3; ++j) {
+                    auto ip = e.i_old, im = e.i_old;
+                    ip[j] += eps_i;
+                    im[j] -= eps_i;
+                    const auto lp = pwl::PmsmMnaHistory::lambda_of(e, ip, e.theta_old, e.lr_old);
+                    const auto lm = pwl::PmsmMnaHistory::lambda_of(e, im, e.theta_old, e.lr_old);
+                    for (int k = 0; k < 3; ++k) {
+                        // at x = the reference point the law's ∂λ/∂i is the
+                        // model's; compare with a central difference
+                        Vector x0 = x;
+                        for (int q = 0; q < 3; ++q) x0[e.cur_row[q]] = e.i_old[q];
+                        if (kind == 2) { x0[5] = e.lr_old[0]; x0[6] = e.lr_old[1]; }
+                        else x0[5] = e.theta_old;
+                        sparse::Matrix J0(n, n);
+                        Vector f0 = Vector::Zero(n);
+                        (void)pwl::iface::stamp(hist, x0, J0, f0, h, st, true);
+                        const Real dldi = (lp[k] - lm[k]) / (2 * eps_i);
+                        const Real want = -a * dldi - (j == k ? R_s : Real{0});
+                        CHECK(std::abs(dense(J0, e.cur_row[k], e.cur_row[j]) - want)
+                              <= 1e-6 * std::max(std::abs(want), a * 1e-3));
+                    }
+                }
+                auto hl = hist, hi = hist;
+                hl.capture_gamma(x);
+                pwl::iface::capture_gamma(hi, x);
+                for (int k = 0; k < 3; ++k) {
+                    CHECK(hi.entries()[0].dlam_gamma[k] == hl.entries()[0].dlam_gamma[k]);
+                }
+                hl.commit(x, h, st);
+                pwl::iface::commit(hi, x, h, st);
+                const auto& el = hl.entries()[0];
+                const auto& ei = hi.entries()[0];
+                for (int k = 0; k < 3; ++k) {
+                    CHECK(ei.lambda_old[k] == el.lambda_old[k]);   // the same law, bitwise
+                    CHECK(ei.i_old[k] == el.i_old[k]);
+                    CHECK(ei.v_old[k] == el.v_old[k]);
+                    CHECK(ei.dlam_old[k] == el.dlam_old[k]);
+                    CHECK(ei.lam_off[k] == Real{0});
+                }
+                CHECK(ei.theta_old == el.theta_old);
+                CHECK(ei.lr_old == el.lr_old);
+            }
+        }
+    }
+    // The law's whole x-Jacobian (∂λ/∂θ with harmonics and the flux map,
+    // ∂T, the rotor rows) against central differences of its Real eval —
+    // independent of the hand stamp, whose partials chain_n restates.
+    {
+        Lcg r2{9u};
+        for (int kind = 0; kind < 3; ++kind) {
+            INFO("FD machine " << kind);
+            const auto e = machine_entry(kind, r2);
+            auto check = [&](auto law, const auto& aux, const auto& prm) {
+                using D = decltype(law);
+                constexpr std::size_t R = device::rows_v<D>;
+                std::array<Real, R> x{};
+                for (std::size_t r = 0; r < R; ++r) x[r] = r2(-50.0, 50.0);
+                for (std::size_t k = 0; k < 3; ++k) x[D::n_pins + k] = r2(-10.0, 10.0);
+                if (kind == 2) { x[5] = r2(-0.5, 0.5); x[6] = r2(-0.5, 0.5); }
+                else x[5] = r2(-3.0, 3.0);
+                std::array<ad::ADRealN<R>, R> xs{};
+                for (std::size_t k = 0; k < R; ++k) {
+                    std::array<Real, R> d{};
+                    d[k] = 1;
+                    xs[k] = ad::ADRealN<R>{x[k], d};
+                }
+                device::Out<ad::ADRealN<R>, R> o;
+                device::eval<D>(aux, prm, xs, o);
+                for (std::size_t k = 0; k < R; ++k) {
+                    const Real hk = 1e-6 * std::max(Real{1}, std::abs(x[k]));
+                    auto xp = x, xm = x;
+                    xp[k] += hk;
+                    xm[k] -= hk;
+                    device::Out<Real, R> op, om;
+                    device::eval<D>(aux, prm, xp, op);
+                    device::eval<D>(aux, prm, xm, om);
+                    for (std::size_t r = 0; r < R; ++r) {
+                        INFO("row " << r << " col " << k);
+                        const Real cf = (op.f[r] - om.f[r]) / (2 * hk);
+                        const Real cq = (op.q[r] - om.q[r]) / (2 * hk);
+                        CHECK(std::abs(o.f[r].deriv(k) - cf)
+                              <= 1e-5 * std::max(Real{1}, std::abs(cf)));
+                        CHECK(std::abs(o.q[r].deriv(k) - cq)
+                              <= 1e-5 * std::max(Real{1e-3}, std::abs(cq)));
+                    }
+                }
+            };
+            if (kind == 2) {
+                check(L::InductionMachine{}, pwl::iface::im_aux(e), L::InductionMachine::from(e.im));
+            } else {
+                check(L::PmsmMna{}, pwl::iface::pmsm_aux(e), L::PmsmMna::from(e.params));
+            }
+        }
+    }
+    // ∂/∂(R_s, T_load) by AD against central differences
+    Lcg rng{5u};
+    for (int kind = 0; kind < 3; ++kind) {
+        const auto e = machine_entry(kind, rng);
+        if (kind == 2) {
+            check_param_tangent<L::InductionMachine>(
+                pwl::iface::im_aux(e), L::InductionMachine::from(e.im),
+                {100, -50, -40, 3, 150, 0.4, -0.2, 12, -5, -7});
+        } else {
+            check_param_tangent<L::PmsmMna>(pwl::iface::pmsm_aux(e),
+                                            L::PmsmMna::from(e.params),
+                                            {100, -50, -40, 3, 150, 0.8, 12, -5, -7});
+        }
     }
 }

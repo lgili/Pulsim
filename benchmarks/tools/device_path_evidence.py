@@ -162,6 +162,25 @@ def law_circuits(repeats):
             rec.update(circuit=f"law:{name}", engine=eng)
             out.append(rec)
             print(_line(rec), flush=True)
+    # the MNA machines (DECISIONS #42): their pwl gate circuits
+    for name in sorted(getattr(T, "MACHINES", {})):
+        make, t_end, dt, sw, _ = T.MACHINES[name]
+        kw = dict(t_end=t_end, dt=dt, engine="pwl")
+        if sw is not None:
+            kw["switch_fn"] = sw
+
+        def run(make=make, kw=kw):
+            res = pulsim.simulate(make(), **kw)
+            # a floating neutral (physically 0 V, ~1e-11 V of round-off) is
+            # left out, as in the test's 1e-12 gate
+            v_ph = max(np.max(np.abs(np.asarray(res.v(n)))) for n in ("ua", "ub", "uc"))
+            if np.max(np.abs(np.asarray(res.v("nn")))) <= 1e-9 * v_ph:
+                return T._without(res, T._neutral_column(res))
+            return res
+        rec = _pair(run, repeats, lambda res: (None, "ran"))
+        rec.update(circuit=f"law:{name}", engine="pwl")
+        out.append(rec)
+        print(_line(rec), flush=True)
     return out
 
 

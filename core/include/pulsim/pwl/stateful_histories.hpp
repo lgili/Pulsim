@@ -151,7 +151,7 @@ public:
                 bool covered = false;
                 for_each([&](const auto& k) {
                     using K = std::remove_cvref_t<decltype(k)>;
-                    if (iface::kPorted<K> && K::kStoredKind == sk) covered = true;
+                    if (iface::kPorted<K> && iface::history_covers<K>(sk)) covered = true;
                 });
                 if (!covered) add(stored_kind_name(sk));
             }

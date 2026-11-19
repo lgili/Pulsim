@@ -150,7 +150,8 @@ TEST_CASE("MosfetLevel1 — continuous and C1 across V_DS = 0 at every gate driv
     // zero crossing of a current through a partly-on channel
     // (openspec/changes/add-power-mosfet-datasheet-device/probes/
     // vds_zero_jump.py). Value and the three AD partials must now match
-    // on both sides of V_DS = 0.
+    // on both sides of V_DS = 0, and the current at V_DS = 0 is zero
+    // (passive; DECISIONS #44 of add-unified-device-interface).
     MosfetLevel1::Params p{.K = 1.43, .V_T = 3.0, .lambda = 0.02, .kappa = 15.0};
     for (int k = 0; k <= 120; ++k) {
         const Real vgs = 1.0 + 0.05 * k;               // 1 .. 7 V
@@ -168,6 +169,7 @@ TEST_CASE("MosfetLevel1 — continuous and C1 across V_DS = 0 at every gate driv
         const auto [i_hi, d_hi] = at(e);
         const auto [i_p3, d_p3] = at(3.0 * e);
         INFO("V_GS = " << vgs << " i(-e) = " << i_lo << " i(+e) = " << i_hi);
+        REQUIRE(iD(p, vgs, 0.0) == 0.0);
         const Real slope = std::max(std::abs(i_p3 - i_hi), std::abs(i_lo - i_m3));
         REQUIRE(std::abs(i_hi - i_lo) <= 1.5 * slope + 1e-15);
         for (int j = 0; j < 3; ++j) {
@@ -178,9 +180,10 @@ TEST_CASE("MosfetLevel1 — continuous and C1 across V_DS = 0 at every gate driv
                     <= 1.5 * curv + 1e-4 * std::abs(d_hi[j]) + 1e-14);   // AD rounding ~1e-6 rel
         }
     }
-    // V_DS >= 0 is the forward law, unchanged; fully on, the third quadrant
-    // is the plain mirror to the last bit (the added term is below one ulp).
+    // Fully on, both quadrants are the raw forward law to the last bit (the
+    // subtracted leak is below half an ulp) and the third is its mirror.
     REQUIRE(iD(p, 12.0, -0.5) == -iD(p, 12.5, 0.5));
+    REQUIRE(iD(p, 12.0, 0.01) == MosfetLevel1::forward_current_<Real>(9.0, 0.01, p));
 }
 
 TEST_CASE("MosfetLevel1 — V_GS sweep: monotonic I_D in saturation",
