@@ -1561,6 +1561,8 @@ def out_grid(sol, dt=None):
         ts.append(mpf(ck.t_end))
     for e in sol.events[1:]:
         ts += [e["t"], e["t"]]
+        # fast modes start at events (a g_off node rings in ns): geometric points after it
+        ts += [e["t"] + mpf(dt) / 2 ** k for k in range(1, 11) if e["t"] + mpf(dt) / 2 ** k < mpf(ck.t_end)]
     for s in sol.segs[1:]:
         ts += [s.t0, s.t0]
     ts.sort()
