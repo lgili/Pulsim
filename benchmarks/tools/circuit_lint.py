@@ -138,7 +138,7 @@ def inductor_cutsets(edges):
 
 
 def lint(path: Path):
-    doc = yaml.safe_load(path.read_text())
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
     edges = edges_of(doc.get("components", []))
     found = [("source_free", f"{n} never carries current (every loop through it "
               "is source-free; an uncoupled winding?)") for n in source_free(edges)]

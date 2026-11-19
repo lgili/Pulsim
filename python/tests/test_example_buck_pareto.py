@@ -54,7 +54,7 @@ def test_32_designs_without_pymoo(ex, capsys, monkeypatch):
 
 def test_parts_are_flagged_synthetic(ex):
     assert all(part.is_synthetic for part in ex.PARTS.values())
-    assert "SYNTHETIC" in EXAMPLE.read_text()
+    assert "SYNTHETIC" in EXAMPLE.read_text(encoding="utf-8")
 
 
 def test_nsga2_path_when_pymoo_is_installed(ex):

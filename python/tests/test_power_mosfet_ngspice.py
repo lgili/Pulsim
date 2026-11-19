@@ -23,7 +23,7 @@ import pytest
 import pulsim as p
 
 DECKS = Path(__file__).resolve().parents[2] / "benchmarks" / "spice" / "ngspice"
-REF = json.loads((DECKS / "power_mosfet_reference.json").read_text())
+REF = json.loads((DECKS / "power_mosfet_reference.json").read_text(encoding="utf-8"))
 K, V_T, KAPPA = 1.43, 3.0, 15.0
 
 

@@ -28,9 +28,9 @@ def _hunks(text):
 
 
 def test_the_hook_patch_still_applies_to_the_scheduler():
-    patch = (PROBES / "saltation_hook.patch").read_text()
+    patch = (PROBES / "saltation_hook.patch").read_text(encoding="utf-8")
     target = patch.splitlines()[0].removeprefix("--- a/")
-    header = (ROOT / target).read_text()
+    header = (ROOT / target).read_text(encoding="utf-8")
     if "HasEventRegister" in header:              # landed: the call is there
         assert "switch_fn_.register_event(t_event, name, ptype, aux_index)" \
             in header
@@ -39,5 +39,5 @@ def test_the_hook_patch_still_applies_to_the_scheduler():
     assert len(hunks) == 2
     for old in hunks:
         assert "\n".join(old) in header, old[0]
-    check = (PROBES / "saltation_hook_check.cpp").read_text()
+    check = (PROBES / "saltation_hook_check.cpp").read_text(encoding="utf-8")
     assert "register_event" in check and "saltation_hook.patch" in check
