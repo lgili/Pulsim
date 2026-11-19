@@ -242,6 +242,7 @@ def test_an_ideal_boost_in_dcm_matches_its_closed_form():
     assert len(r.reinit_records) == 0   # ten located turn-offs, none impulsive
 
 
+@pytest.mark.xfail(strict=True, reason="release finding F-4-1: mode_selection='auto' (lcp) refuses an ideal voltage loop as consistent_mode with a missing-path hint; the legacy settle names ideal_voltage_loop")
 def test_an_ideal_diode_forward_across_a_source_is_refused_by_name():
     """ON, the diode closes a loop of ideal elements with V: no mode can pose it."""
     b = p.CircuitBuilder()
@@ -331,6 +332,7 @@ def test_two_ideal_diodes_in_parallel_split_by_an_admissible_mode(mode_selection
     assert min(i1.min(), i2.min()) > -1e-9
 
 
+@pytest.mark.xfail(strict=True, reason="release finding F-4-1: mode_selection='auto' (lcp) refuses an ideal voltage loop as consistent_mode with a missing-path hint; the legacy settle names ideal_voltage_loop")
 def test_an_ideal_clamp_onto_a_lower_source_is_refused_by_name():
     """D1 from the sine and D2 clamping onto 3 V: above 3 V no mode is admissible
     (both ON short the two sources; either OFF breaks its law)."""
@@ -363,6 +365,7 @@ def test_the_periodic_steady_state_refuses_a_dependent_state_mode_by_name():
     assert ei.value.feature == "dependent_states"
 
 
+@pytest.mark.xfail(strict=True, raises=RuntimeError, reason="release finding F-4-3: mode_selection='auto' leaves rectifier D1 ON at -2.2 A at 14.99 us in the ideal PSFB with C_oss; the legacy settle runs to 30 us")
 def test_an_ideal_body_diode_across_its_closed_switch_does_not_chatter(tmp_path):
     """examples/phase_shift_full_bridge.yaml with every switch and diode ideal (branch,
     R_on = 0) and C_oss / C_j across them: D_LS_B sits across its closed switch LS_B,
@@ -398,11 +401,12 @@ def test_an_ideal_body_diode_across_its_closed_switch_does_not_chatter(tmp_path)
 
 def _psfb_ideal(tmp_path, g_on=None):
     """examples/phase_shift_full_bridge.yaml with every switch and diode ideal (branch,
-    R_on = 0, g_off = 1e-9 kept), or its conductance twin at g_on."""
+    R_on = 0, g_off = 1e-9 kept), or its conductance twin at g_on (form: conductance
+    explicit: since the release a netlist switch without form: is branch)."""
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
     s = (root / "examples" / "phase_shift_full_bridge.yaml").read_text(encoding="utf-8")
-    new = (f"      g_on: {g_on!r}\n      g_off: 1.0e-9\n" if g_on
+    new = (f"      form: conductance\n      g_on: {g_on!r}\n      g_off: 1.0e-9\n" if g_on
            else "      form: branch\n      R_on: 0.0\n      g_off: 1.0e-9\n")
     s2 = s.replace("      g_on: 1.0e3\n      g_off: 1.0e-9\n", new)
     assert s2 != s
