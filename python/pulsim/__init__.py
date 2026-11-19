@@ -1507,7 +1507,7 @@ def _result_i(self, name: str, t=None, *, port=None):
         return _finalize(_hold_unsolved(v_sw * G_arr))
 
     # ------------- static Newton kinds: the kernel's law ---------------
-    if kind in ("mosfet_level1", "igbt_level1", "nonlinear_diode"):
+    if kind in ("mosfet_level1", "igbt_level1", "nonlinear_diode", "excess_loss"):
         # add-unified-device-interface 9.2: the device law at each stored
         # state (the reading the in-loop recorders take); drain / collector
         # / anode current. A MOSFET's body diode is its own branch.
@@ -1527,7 +1527,7 @@ def _result_i(self, name: str, t=None, *, port=None):
         f"sine / pulse / pwl), vccs, cccs, ccvs, gyrator, "
         f"diode, shockley_diode, switch, saturable_inductor, "
         f"nonlinear_diode, mosfet_level1, igbt_level1 (without a "
-        f"tail). To measure this device's "
+        f"tail), excess_loss. To measure this device's "
         f"current, put a small resistor in series with it (1 mOhm) "
         f"and read `res.i(<that resistor>)`; its loss is then the "
         f"time average of v_device * i over a window "

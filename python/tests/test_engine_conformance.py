@@ -333,6 +333,12 @@ CELLS = {
     "PmsmMna": (_pmsm, "ua2", "Md", 2e-2, 1e-5, False),
     "InductionMachineMna": (_induction, "ua2", "Md", 2e-2, 1e-5, False),
     "ExternalDevice": (lambda on: _external(on), "o", "Rd", 5e-4, 1e-7, False),
+    # add-permeance-magnetic-domain 4.2: a one-turn winding across the
+    # clamped node onto an excess-loss segment (i = c·√|v| above eps)
+    "ExcessLoss": (_clamp(lambda b: (
+        b.add_winding("Wd", "o", "gnd", "md", "gnd", 1.0),
+        b.add_excess_loss("Xd", "md", "gnd", 3e-3, 1e-2))),
+        "o", "Xd", 2e-3, 2e-7, False),
     "IdealTransformer": (_xfmr, "o", "Td", 5e-4, 1e-7, False),
     "VCCS": (_ctl(lambda b: b.add_vccs("Gd", "a", "gnd", "x", "gnd", 5e-3)),
              "o", "Gd", 5e-4, 1e-7, False),

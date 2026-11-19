@@ -195,9 +195,12 @@ core-loss model is not validated against measurement.
 `add_hysteretic_permeance(name, a, b, area, length, Ms, a, alpha, c, k)`
 puts a Jiles-Atherton segment in the network (its MMF is `res.i(name)`,
 its flux rate `res.v(name + ".e")`); `p.fit_core_loss_elements` turns
-sine loss data into `R_m` (and the excess coefficient `c`). Excess loss
-in the network form is not available yet; use a Steinmetz / iGSE
-estimate after the run for it (see the losses page).
+sine loss data into `R_m` and the excess coefficient `c`, and
+`add_excess_loss(name, a, b, c, eps)` puts that excess term in series
+(permeance, then eddy resistance, then excess element): its MMF is
+`res.i(name)`, its flux rate `res.v(name + ".e")`, and its loss
+`(3/4)·(eps/Û)²` below the square-root law at a flux-rate amplitude
+`Û` — choose `eps ≤ 1.15e-3·Û`.
 
 ## Limits
 

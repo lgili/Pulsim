@@ -61,7 +61,7 @@ inline constexpr std::array<std::string_view, pwl::DevicePool::kNumKinds> kKindY
     "shockley_diode", "lauritzen_diode", "pmsm_mna", "ideal_transformer",
     "vccs", "cccs", "ccvs", "gyrator", "sine_current_source",
     "pulse_current_source", "pwl_current_source", "induction_machine_mna",
-    "external_device"};
+    "external_device", "excess_loss"};
 
 namespace yaml_detail {
 
@@ -103,7 +103,7 @@ namespace m = ::pulsim::models;
         case K::NonlinearDiode: case K::MosfetLevel1: case K::IgbtLevel1:
         case K::SaturableInductor: case K::NonlinearCapacitor:
         case K::ShockleyDiode: case K::LauritzenDiode: case K::PmsmMna:
-        case K::InductionMachineMna: case K::ExternalDevice:
+        case K::InductionMachineMna: case K::ExternalDevice: case K::ExcessLoss:
             return BK::Nonlinear;
         default:
             return BK::Source;
@@ -989,6 +989,7 @@ private:
             } else if constexpr (std::is_same_v<P, m::NonlinearCapacitor::Params>) {
                 pool.add_nonlinear_capacitor(bi, charge(n, who));
             } else if constexpr (std::is_same_v<P, m::ShockleyDiode::Params>) pool.add_shockley_diode(bi, p);
+            else if constexpr (std::is_same_v<P, m::ExcessLoss::Params>) pool.add_excess_loss(bi, p);
             else if constexpr (std::is_same_v<P, m::LauritzenDiode::Params>) pool.add_lauritzen_diode(bi, p);
             else if constexpr (std::is_same_v<P, m::PmsmMna::Params>) {
                 if (const auto hn = n["harmonics"]) {

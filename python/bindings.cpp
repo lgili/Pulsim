@@ -1041,6 +1041,20 @@ void init_module(py::module_& m) {
               py::return_value_policy::reference,
               "Air gap: permeance mu0*area/length (area [m^2], length [m]; "
               "no fringing).")
+        .def("add_excess_loss", &builder::CircuitBuilder::add_excess_loss,
+              py::arg("name"), py::arg("m_a"), py::arg("m_b"), py::arg("c"),
+              py::arg("eps"),
+              py::return_value_policy::reference,
+              "Excess (anomalous) core loss between magnetic nodes m_a, m_b: "
+              "F = c*u/(u^2 + eps^2)^0.25 for the flux rate u [V] through it "
+              "(m_a -> m_b), Bertotti's square-root law c*sign(u)*|u|^0.5 "
+              "(c = k_x*l/sqrt(A) [A/V^0.5]) made linear below |u| ~ eps [V]. "
+              "Sine loss within (3/4)*(eps/U)^2 of c*U^1.5*0.55641 at flux-rate "
+              "amplitude U: eps <= 1.15e-3*U for 1e-6. A unit winding "
+              "'<name>.w' on the internal node '<name>.e' (its voltage is u) "
+              "and the ExcessLoss conductance '<name>' (i(name) is F). Newton "
+              "engines (pwl, trbdf2) and the AC sweep; the exact engine "
+              "refuses it by name.")
         .def("add_magnetic_resistance",
               &builder::CircuitBuilder::add_magnetic_resistance,
               py::arg("name"), py::arg("m_a"), py::arg("m_b"), py::arg("R_m"),
@@ -2144,6 +2158,8 @@ void init_module(py::module_& m) {
                               kind_str = "nonlinear_capacitor"; break;
                           case K::ShockleyDiode:
                               kind_str = "shockley_diode"; break;
+                          case K::ExcessLoss:
+                              kind_str = "excess_loss"; break;
                           case K::LauritzenDiode:
                               kind_str = "lauritzen_diode"; break;
                           case K::ExternalDevice: {
@@ -2738,7 +2754,8 @@ void init_module(py::module_& m) {
         .value("PulseCurrentSource",  pwl::DevicePool::StoredKind::PulseCurrentSource)
         .value("PwlCurrentSource",    pwl::DevicePool::StoredKind::PwlCurrentSource)
         .value("InductionMachineMna", pwl::DevicePool::StoredKind::InductionMachineMna)
-        .value("ExternalDevice", pwl::DevicePool::StoredKind::ExternalDevice);
+        .value("ExternalDevice", pwl::DevicePool::StoredKind::ExternalDevice)
+        .value("ExcessLoss", pwl::DevicePool::StoredKind::ExcessLoss);
 
     // ---- Phase 4 C.4: exact B–H replay for the in-loop JA device ----------
     m.def("ja_replay",

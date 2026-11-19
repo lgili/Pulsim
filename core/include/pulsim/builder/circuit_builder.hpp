@@ -1086,6 +1086,36 @@ public:
                                             M0);
     }
 
+    /// Excess (anomalous) loss of a core segment (add-permeance-magnetic-
+    /// domain 4.2) between magnetic nodes m_a, m_b: the MMF drop
+    /// F = c·u/(u² + ε²)^¼ for the flux rate u through it (m_a → m_b), the
+    /// square-root law c·sign(u)·|u|^½ of Bertotti's k_x·|dB/dt|^1.5
+    /// (c = k_x·l/√A) made smooth below |u| ≈ ε [V]. Under a sine flux
+    /// rate of amplitude Û its loss is within (3/4)·(ε/Û)² of
+    /// c·Û^1.5·0.55641: pick ε ≤ 1.15e-3·Û for 1e-6. Built as the
+    /// hysteretic permeance is: a unit winding `{name}.w` on the internal
+    /// node `{name}.e` (its voltage is u) and the excess-loss conductance
+    /// `{name}` (`res.i(name)` is F) to ground. Newton engines only.
+    CircuitBuilder& add_excess_loss(std::string_view name, std::string_view m_a,
+                                    std::string_view m_b, Real c, Real eps) {
+        const models::ExcessLoss::Params p{.c = c, .eps = eps};
+        try {   // validate before the winding is added (no half-built element)
+            models::ExcessLoss::validate(p);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::format(
+                "add_excess_loss(\"{}\"): {}", name, e.what()));
+        }
+        const std::string n{name};
+        // ports swapped: the flux rate enters at m_a, leaves at m_b
+        add_winding(n + ".w", n + ".e", "gnd", m_b, m_a, Real{1});
+        const Index e_idx = resolve_node_(n + ".e");
+        const Index g_idx = resolve_node_("gnd");
+        const Index b_id = add_branch_(name, e_idx, g_idx,
+                                       topology::BranchKind::Nonlinear);
+        pool_.add_excess_loss(b_id, p);
+        return *this;
+    }
+
     /// One secondary of a saturable transformer: terminals, turns,
     /// and its own leakage inductance.
     struct SecondaryWinding {

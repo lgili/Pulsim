@@ -1,4 +1,5 @@
 Status (closeout 2026-11-19): open boxes — section 5 only (the Bergeron line, 5.1–5.10): NOT DONE, needs a contract extension of the stateful-kind interface (5.1, D17). Everything else is done.
+Status (2026-11-19, feat/core-p5-line-and-excess): section 5 is DESIGNED, not implemented — the five design questions (fixed-step lookup and its error, the variable-step bound / estimator / commit rule, the exact engine, the snapshot block, the AC two-port and the DC point) are answered with derivations in DECISIONS D18; no line code is on the branch and `model="bergeron"` still refuses by name.
 
 ## 1. ESR, ESL, parallel capacitance
 - [x] 1.1 `CircuitBuilder::add_capacitor(..., esr, esl)` and `add_inductor(..., esr, c_par)`: composite expansion with internal nodes only for non-zero values; sub-element names `{name}.esr`, `{name}.esl`, `{name}.cpar`; validation by name (finite, ≥ 0) — Python wrappers installed on `CircuitBuilder` (`python/pulsim/passives.py`, DECISIONS D1)

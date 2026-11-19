@@ -270,10 +270,11 @@ for the v1.4 cycle.
 ## Magnetic networks (2.x)
 
 - Gyrator–capacitor form only: no fringing, no core-shape library, and
-  the in-loop loss is classical eddy loss (`add_magnetic_resistance`) and
-  the Jiles-Atherton loop (`add_hysteretic_permeance`). The excess-loss
-  element is not shipped (it needs a new Newton law). No loss model is
-  validated against measurement.
+  the in-loop loss is classical eddy loss (`add_magnetic_resistance`),
+  the Jiles-Atherton loop (`add_hysteretic_permeance`) and Bertotti's
+  excess loss (`add_excess_loss`, regularised below a flux rate `eps`:
+  its sine loss is (3/4)·(eps/Û)² below the square-root law). No loss
+  model is validated against measurement.
 - A magnetic island without a node on `gnd` is refused; no tie resistor
   is inserted on a magnetic node.
 - DC flux rows are linear: a saturable permeance on an internal

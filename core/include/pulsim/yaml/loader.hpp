@@ -690,11 +690,11 @@ inline void load_device(
                                    require_real(dev, idx, type, "length"), ja,
                                    /*substeps_min=*/8, real_or(dev, "M0", Real{0}));
     } else if (type == "excess_loss") {
-        throw std::runtime_error(
-            "yaml::load: device " + device_label(dev, idx) + " has type '" +
-            type + "', which add-permeance-magnetic-domain defines but has not "
-            "shipped yet (it needs a new Newton device kind). Use "
-            "magnetic_resistance for in-loop eddy loss.");
+        require_only_keys(dev, idx, type, {"from", "to", "c", "eps"});
+        b.add_excess_loss(name, require_string(dev, idx, type, "from"),
+                          require_string(dev, idx, type, "to"),
+                          require_real(dev, idx, type, "c"),
+                          require_real(dev, idx, type, "eps"));
     } else if (type == "sine_current_source") {
         require_only_keys(dev, idx, type, {"from", "to", "i_dc", "i_amplitude",
                                            "frequency", "phase"});
@@ -1510,7 +1510,7 @@ inline void load_device(
             "ideal_transformer, saturable_transformer, induction_motor, "
             "induction_machine, dc_machine, pmsm, bldc, winding, permeance, "
             "air_gap, magnetic_resistance, saturable_permeance, "
-            "hysteretic_permeance");
+            "hysteretic_permeance, excess_loss");
     }
     if (dev["losses"]) load_losses(b, dev, idx, type, name);
 }

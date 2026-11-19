@@ -26,6 +26,7 @@
 #include "pulsim/models/device_model.hpp"
 #include "pulsim/models/ideal_diode.hpp"
 #include "pulsim/models/igbt_level1.hpp"
+#include "pulsim/models/magnetic_loss.hpp"
 #include "pulsim/models/mosfet_level1.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -146,7 +147,20 @@ make_combined_diode_mosfet_refresh() {
             },
             detail::mosfet_level1_terminals);
 
-        return std::max({i_diode, i_shockley, i_igbt, i_mosfet});
+        // add-permeance-magnetic-domain 4.2: the excess-loss conductance
+        // (its pass is skipped where the kind is absent: no branch walk)
+        const Real i_excess = pool.num_excess_loss() == 0 ? Real{0}
+            : stamp_nonlinear_branches<models::ExcessLoss>(
+                x, J_nl, f_nl, graph, pool,
+                DevicePool::StoredKind::ExcessLoss,
+                [](const DevicePool& p, Index b) {
+                    return p.excess_loss_params(b);
+                },
+                [](const DevicePool&, const auto& branch) {
+                    return std::array<Index, 2>{branch.from, branch.to};
+                });
+
+        return std::max({i_diode, i_shockley, i_igbt, i_mosfet, i_excess});
     };
 }
 

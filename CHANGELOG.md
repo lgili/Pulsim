@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Excess core loss in the permeance network
+
+* **Added** `CircuitBuilder.add_excess_loss(name, m_a, m_b, c, eps)`:
+  Bertotti's excess loss of a core segment, `F = c·u/(u² + eps²)^¼` for
+  the flux rate `u` (the square-root law `c·sign(u)·|u|^½`, linear below
+  `eps`). A unit winding plus the new Newton kind `StoredKind.ExcessLoss`
+  (a static law on both device paths): pwl, trbdf2, esdirk43 and the AC
+  sweep (at zero flux rate the conductance `c/√eps`); the exact engine
+  refuses it by name. `res.i(name)` is the MMF, `device_loss_summary`
+  lists it under `core_loss`, the in-loop recorder reads `p(name)`. YAML
+  type `excess_loss` (refused by name before); IR kind `excess_loss`.
+  Sine loss within `(3/4)·(eps/Û)²` of `c·Û^1.5·0.556418`.
+* **Fixed** `fit_core_loss_elements`'s excess coefficient: the mean of
+  `|cos|^1.5` is `Γ(5/4)/(√π·Γ(7/4)) = 0.5564179`, not 0.5563852 (the
+  fitted `c` was 5.9e-5 high).
+
 ### Thermal networks on the variable-step engine; the exact engine's output grid
 
 * **Fixed** `engine='trbdf2'` (and `integrator='esdirk43'`) with a loss

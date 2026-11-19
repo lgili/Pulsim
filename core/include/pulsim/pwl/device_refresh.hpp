@@ -85,6 +85,11 @@ struct StepCtx {
                     x, J_nl, f_nl, std::array<Index, 2>{br.from, br.to},
                     L::ShockleyDiode::from(pool.shockley_diode_params(br.id))));
                 break;
+            case SK::ExcessLoss:
+                m = std::max(m, iface::stamp_one_static<L::ExcessLoss>(
+                    x, J_nl, f_nl, std::array<Index, 2>{br.from, br.to},
+                    L::ExcessLoss::from(pool.excess_loss_params(br.id))));
+                break;
             case SK::IgbtLevel1:
                 m = std::max(m, iface::stamp_one_static<L::IgbtLevel1>(
                     x, J_nl, f_nl, detail::igbt_level1_terminals(pool, br),

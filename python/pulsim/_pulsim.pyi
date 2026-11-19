@@ -546,6 +546,10 @@ class CircuitBuilder:
         """
         Add a binary switched diode (V2's SwitchedDiode). g_on/g_off in siemens. V_f: forward drop while ON (PSIM's diode voltage drop), in volts: v = V_f + i/g_on; must be finite and >= 0. V_th: turn-on threshold in volts, effectively max(V_th, V_f) when V_f > 0; V_th > V_f is a hysteresis band. OFF is plain g_off.
         """
+    def add_excess_loss(self, name: str, m_a: str, m_b: str, c: float, eps: float) -> CircuitBuilder:
+        """
+        Excess (anomalous) core loss between magnetic nodes m_a, m_b: F = c*u/(u^2 + eps^2)^0.25 for the flux rate u [V] through it (m_a -> m_b), Bertotti's square-root law c*sign(u)*|u|^0.5 (c = k_x*l/sqrt(A) [A/V^0.5]) made linear below |u| ~ eps [V]. Sine loss within (3/4)*(eps/U)^2 of c*U^1.5*0.55641 at flux-rate amplitude U: eps <= 1.15e-3*U for 1e-6. A unit winding '<name>.w' on the internal node '<name>.e' (its voltage is u) and the ExcessLoss conductance '<name>' (i(name) is F). Newton engines (pwl, trbdf2) and the AC sweep; the exact engine refuses it by name.
+        """
     def add_external_device(self, name: str, nodes: collections.abc.Sequence[str], lib: str, model: str, params: typing.Any = None, *, check_contract: bool = True, debug_jacobian: bool = False, record: bool = False) -> CircuitBuilder:
         """
         Add an instance of an EXTERNAL device model (add-external-device-abi): `lib` is a shared library built against pulsim_xdev.h; loading it runs arbitrary native code with your privileges (no sandbox). `nodes` are its pins in the model's order; `params` maps field names to a value or (value, unit) (the unit must equal the declared one). The model's contract (Jacobian, finiteness, KCL, declared claims) is checked here and refused by name; `debug_jacobian=True` re-checks the Jacobian at every evaluation of the run. `record=True` traces the device's readings at every accepted step of a pwl / trbdf2 run: res.device_output(name, key) with key 'i(<pin>)', 'power' or one of the model's named outputs.
@@ -1244,12 +1248,15 @@ class StoredKind:
       InductionMachineMna
 
       ExternalDevice
+
+      ExcessLoss
     """
     CCCS: typing.ClassVar[StoredKind]
     CCVS: typing.ClassVar[StoredKind]
     Capacitor: typing.ClassVar[StoredKind]
     CurrentSource: typing.ClassVar[StoredKind]
     Diode: typing.ClassVar[StoredKind]
+    ExcessLoss: typing.ClassVar[StoredKind]
     ExternalDevice: typing.ClassVar[StoredKind]
     Gyrator: typing.ClassVar[StoredKind]
     IdealTransformer: typing.ClassVar[StoredKind]

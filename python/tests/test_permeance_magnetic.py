@@ -567,7 +567,8 @@ def test_yaml_types_build_the_same_circuit():
     ("{type: winding, name: W, e_pos: e, e_neg: gnd, m_pos: m1, m_neg: gnd, turns: 25, N: 3}", "N"),
     ("{type: air_gap, name: G, from: m1, to: gnd, area: 1.0e-4}", "length"),
     ("{type: hysteretic_permeance, name: H, from: m1, to: gnd}", "Ms"),
-    ("{type: excess_loss, name: X, from: m1, to: gnd}", "has not shipped"),
+    ("{type: excess_loss, name: X, from: m1, to: gnd, c: 0.01}", "eps"),
+    ("{type: excess_loss, name: X, from: m1, to: gnd, c: 0.01, eps: 0.0}", "eps must be positive"),
 ])
 def test_yaml_magnetic_types_are_strict(bad, needle):
     text = ("circuit:\n  devices:\n    - {type: voltage_source, name: V, from: e, to: gnd, V: 1.0}\n"
@@ -828,7 +829,11 @@ def test_fit_core_loss_elements_round_trip():
     assert fit.beta == pytest.approx(2.3, rel=1e-6)
     assert fit.k_h == pytest.approx(40.0, rel=1e-6)
     assert fit.R_m == pytest.approx(0.6 * seg_l / (2 * math.pi ** 2 * A), rel=1e-6)
-    want_c = 1.8 * seg_l / ((2 * math.pi) ** 1.5 * 0.5563852309207994 * math.sqrt(A))
+    # mean|cos|^1.5 = Gamma(5/4)/(sqrt(pi)*Gamma(7/4)) = 0.5564178944 (the
+    # closeout's 0.5563852309 was 5.9e-5 off; test_excess_loss.py runs it)
+    K15 = math.gamma(1.25) / (math.sqrt(math.pi) * math.gamma(1.75))
+    assert K15 == pytest.approx(0.5564178944493822, rel=1e-14)
+    want_c = 1.8 * seg_l / ((2 * math.pi) ** 1.5 * K15 * math.sqrt(A))
     assert fit.c == pytest.approx(want_c, rel=1e-6)
     assert fit.residual < 1e-6
     assert len(fit.fitted_on) == f.size          # the points are reported fitted

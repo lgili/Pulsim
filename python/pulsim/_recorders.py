@@ -198,7 +198,8 @@ _P_KINDS = frozenset({
 # so the stored-array pass refuses them by name.
 _LOOP_ONLY = frozenset({
     "capacitor", "nonlinear_capacitor", "mosfet_level1", "igbt_level1",
-    "nonlinear_diode", "lauritzen_diode", "vcvs", "saturable_inductor"})
+    "nonlinear_diode", "lauritzen_diode", "vcvs", "saturable_inductor",
+    "excess_loss"})
 _LOOP_ONLY_WHY = (
     "is read at the committed step only when the recorders are fed in the "
     "loop (pwl / trbdf2 through the Simulation object); a stored result has "

@@ -27,6 +27,7 @@
 #include "pulsim/models/pmsm_mna.hpp"
 #include "pulsim/models/induction_machine_mna.hpp"
 #include "pulsim/models/shockley_diode.hpp"
+#include "pulsim/models/magnetic_loss.hpp"
 #include "pulsim/models/saturable_inductor.hpp"
 #include "pulsim/models/resistor.hpp"
 #include "pulsim/models/current_source.hpp"
@@ -136,6 +137,9 @@ public:
         InductionMachineMna = 27,
         // add-external-device-abi: a law from a loaded model library
         ExternalDevice     = 28,
+        // add-permeance-magnetic-domain 4.2: the excess-loss law seen
+        // through a unit winding (i = c·v/(v²+ε²)^¼, models/magnetic_loss.hpp)
+        ExcessLoss         = 29,
     };
 
     /// One external device (add-external-device-abi): the checked model
@@ -232,6 +236,17 @@ public:
                              models::ShockleyDiode::Params p) {
         entries_[branch_id] = Entry{p};
     }
+
+    /// Register an excess-loss conductance (add-permeance-magnetic-domain
+    /// 4.2). The branch MUST be `BranchKind::Nonlinear`.
+    void add_excess_loss(Index branch_id, models::ExcessLoss::Params p) {
+        models::ExcessLoss::validate(p);
+        entries_[branch_id] = Entry{p};
+        ++num_excess_loss_;
+    }
+    /// How many excess-loss branches were added: the hand stamp skips its
+    /// pass on 0 (no per-iteration branch walk where the kind is absent).
+    [[nodiscard]] Size num_excess_loss() const noexcept { return num_excess_loss_; }
 
     /// Register a Lauritzen-Mattsson diode — Phase 4 C.1. Unlike
     /// every other diode it carries STATE (the stored charge), so
@@ -937,6 +952,12 @@ public:
             branch_id, "shockley_diode_params", "a ShockleyDiode");
     }
 
+    [[nodiscard]] const models::ExcessLoss::Params&
+    excess_loss_params(Index branch_id) const {
+        return require_params_<models::ExcessLoss::Params>(
+            branch_id, "excess_loss_params", "an ExcessLoss");
+    }
+
     /// Iterate diode branch ids in insertion (= branch) order.
     [[nodiscard]] std::span<const Index> diode_branches() const noexcept {
         return std::span<const Index>{diode_branches_.data(),
@@ -1315,7 +1336,8 @@ private:
                                 models::PulseCurrentSource::Params,
                                 models::PwlCurrentSource::Params,
                                 models::InductionMachineMna::Params,
-                                ExternalDeviceParams>;
+                                ExternalDeviceParams,
+                                models::ExcessLoss::Params>;
 
 public:
     /// Number of device kinds; `kKindCaps` must have this many rows.
@@ -1376,8 +1398,8 @@ private:
     static constexpr bool kind_maps_to_ = std::is_same_v<
         std::variant_alternative_t<static_cast<std::size_t>(K), Entry>, P>;
 
-    static_assert(std::variant_size_v<Entry> == 29,
-        "StoredKind has 29 values; Entry must list 29 alternatives in the "
+    static_assert(std::variant_size_v<Entry> == 30,
+        "StoredKind has 30 values; Entry must list 30 alternatives in the "
         "same order — update both together.");
     static_assert(kind_maps_to_<StoredKind::Resistor,           models::Resistor::Params>);
     static_assert(kind_maps_to_<StoredKind::VoltageSource,      models::VoltageSource::Params>);
@@ -1408,6 +1430,7 @@ private:
     static_assert(kind_maps_to_<StoredKind::PwlCurrentSource,   models::PwlCurrentSource::Params>);
     static_assert(kind_maps_to_<StoredKind::InductionMachineMna, models::InductionMachineMna::Params>);
     static_assert(kind_maps_to_<StoredKind::ExternalDevice,     ExternalDeviceParams>);
+    static_assert(kind_maps_to_<StoredKind::ExcessLoss,         models::ExcessLoss::Params>);
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -1518,6 +1541,7 @@ private:
     std::vector<PmsmMnaMachine> pmsm_mna_machines_;
     std::vector<InductionMachine> induction_machines_;
     std::vector<Index> igbt_level1_branches_;
+    Size num_excess_loss_ = 0;
 
     // Layer 2 V2: transformer coupling registry. Each entry
     // pairs two already-added inductor branches with the
@@ -1584,6 +1608,11 @@ inline constexpr auto kKindCaps = std::to_array<KindCaps>({
     // ac_sweep: linearised at the DC operating point (∂f/∂x, ∂q/∂x)
     {"ExternalDevice",     SolveClass::NewtonStateful,
      kNewtonEngines | engine_bit(Engine::AcSweep)},
+    // add-permeance-magnetic-domain 4.2: a static law on pwl / trbdf2 (and
+    // esdirk43's stage form); not LTI, so the exact engine refuses it; the
+    // AC sweep linearises it at the DC point (at zero flux rate: the
+    // regularised core, a magnetic resistance c/√ε).
+    {"ExcessLoss",         SolveClass::NewtonStatic,   kNewtonAc},
 });
 /// add-branch-form-ideal-switch D7 / task 4.3: the BRANCH form of the
 /// Switch and Diode kinds (a form, not a kind: one row each, by the

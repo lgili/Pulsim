@@ -270,7 +270,7 @@ def core_loss(B,
 # ---------------------------------------------------------------------------
 
 #: mean of |cos|^1.5 over a period, Gamma(1.25)/(sqrt(pi)*Gamma(1.75))
-_MEAN_ABS_COS_1P5 = 0.5563852309207994
+_MEAN_ABS_COS_1P5 = math.gamma(1.25) / (math.sqrt(math.pi) * math.gamma(1.75))  # 0.556418
 
 
 @dataclass(frozen=True)
