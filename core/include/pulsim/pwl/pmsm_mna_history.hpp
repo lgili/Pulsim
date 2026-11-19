@@ -431,6 +431,38 @@ public:
     void commit(const Vector& x, Real h, TrBdf2Stage stage) {
         update_from_state(x, h, stage);
     }
+
+    // ---- the stage form (βh, ψ) of integrator='esdirk43' ----
+    // Three q rows per machine: q = λ_k, q̇ = dλ_k/dt. A stage is backward
+    // Euler of βh from the base λ_old = ψ; the increment form reads λ(x) − ψ
+    // as Δλ(x; step-start reference) − lam_off with lam_off = ψ − λ_old
+    // carried exactly (as extrapolate_previous sets it).
+    [[nodiscard]] Size stage_rows() const noexcept { return 3 * entries_.size(); }
+    void stage_start(Real hh, Real* q0, Real* hqd0) const {
+        for (const auto& e : entries_) {
+            for (Size k = 0; k < 3; ++k) {
+                *q0++ = e.lambda_old[k];
+                *hqd0++ = hh * e.dlam_old[k];
+            }
+        }
+    }
+    void stage_base(const Real* psi, const Real* dpsi) {
+        for (auto& e : entries_) {
+            for (Size k = 0; k < 3; ++k) {
+                e.lambda_old[k] = *psi++;
+                e.lam_off[k] = *dpsi++;
+            }
+        }
+    }
+    void stage_increment(const Vector& x, const Real* /*psi*/, Real* d) const {
+        for (const auto& e : entries_) {
+            const auto dl = delta_lambda(e, x);
+            for (Size k = 0; k < 3; ++k) *d++ = dl[k] - e.lam_off[k];
+        }
+    }
+    void stage_clear() noexcept {
+        for (auto& e : entries_) e.lam_off = {};
+    }
     /// The slot refresh reads the probe's voltages, not its step.
     void refresh_derivatives(const Vector& x_probe, Real /*h*/) {
         refresh_derivatives(x_probe);
