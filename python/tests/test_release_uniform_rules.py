@@ -201,10 +201,20 @@ def test_a_resume_continues_the_snapshots_clock_and_the_plan_says_so(engine):
     assert plan.t_start == 5e-6 and plan.resolved_from["t_start"] == "explicit"
 
 
-def test_the_exact_engine_refuses_a_resume_by_name():
-    snap = p.simulate(_rc(), 1e-5, engine="pwl", dt=1e-6).final_snapshot
+def test_the_exact_engine_resumes_on_its_own_clock():
+    """Since the exact engine's snapshot / resume (integration batch 14o): it
+    continues a snapshot on its ABSOLUTE clock (t_end absolute), so the plan
+    does not take t_start from the snapshot there; the run starts at the
+    snapshot's instant; an explicit t_start other than 0 or the snapshot's t
+    is refused by name. (Its own snapshot: a pwl / trbdf2 snapshot of this
+    switchless circuit carries no stamped mask and is refused by name.)"""
+    snap = p.simulate(_rc(), 1e-5, engine="exact").final_snapshot
+    plan = _plan_of(_rc(), 2e-5, engine="exact", resume_from=snap)
+    assert plan.t_start == 0.0 and plan.resolved_from["t_start"] == "default"
+    r = p.simulate(_rc(), 2e-5, engine="exact", resume_from=snap)
+    assert r.times[0] == pytest.approx(float(snap.t), rel=1e-15)
     with pytest.raises(p.UnsupportedError) as ei:
-        p.simulate(_rc(), 2e-5, engine="exact", resume_from=snap)
+        p.simulate(_rc(), 2e-5, engine="exact", resume_from=snap, t_start=5e-6)
     assert (ei.value.engine, ei.value.feature) == ("dsed", "resume_from")
 
 

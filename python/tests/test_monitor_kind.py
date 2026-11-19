@@ -103,4 +103,6 @@ def test_sensitivities_with_controllers_refused_on_dsed():
     with pytest.raises(p.UnsupportedError) as ei:
         p.simulate(b, 1e-4, engine="dsed", switch_fn=fn, sensitivities=["R.value"],
                    step_observer=lambda t, x: None, controller_period=1e-5)
-    assert ei.value.feature == "sensitivities"
+    # closed loops of a control graph are differentiated now (G34); a Python
+    # observer drives no gate, so its effect has no derivative: refused there
+    assert ei.value.feature == "closed_loop" and "no derivative" in str(ei.value)

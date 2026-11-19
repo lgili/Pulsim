@@ -160,8 +160,7 @@ inline constexpr std::array<OptionSpec, 52> kRunOptionTable{{
      "whatever it was closing (an electro-thermal loop, usually) would "
      "silently stay open"},
     {"controller_period", kEvery, Unset::Always, "None", ""},
-    {"resume_from", kPwl | kTrBdf2, Unset::None, "None",
-     "resume_from needs a snapshot the exact engine does not keep"},
+    {"resume_from", kEvery, Unset::Always, "None", ""},
     {"solver", kEvery, Unset::Always, "None", ""},
     {"sensitivities", kExact, Unset::None, "None",
      "sensitivities are computed on the exact path only"},
@@ -172,8 +171,8 @@ inline constexpr std::array<OptionSpec, 52> kRunOptionTable{{
     // decided above the dispatch (pulsim._undriven_policy, task 11.3).
     {"undriven", kEvery, Unset::Always, "None ('refuse')", ""},
     // Every engine: a kernel recorder pass over the stored arrays, composed
-    // above the dispatch (pulsim._recorders); store_every > 1 and
-    // resume_from are refused with it there, by name.
+    // above the dispatch (pulsim._recorders); a resume_from continues the
+    // record from the snapshot's recorder state (task 0b.7).
     {"recorders", kEvery, Unset::Always, "None", ""},
     // update-number-changing-release: without dt the exact engine's samples
     // are chosen by rule (a dt, store_every or recorders keep today's samples)

@@ -279,6 +279,25 @@ inline ADRealN<N> abs(const ADRealN<N>& x) noexcept {
     return ADRealN<N>{std::abs(x.value()), d};
 }
 
+// C's names, for the C99 block laws instantiated on the AD scalar
+// (blockchain/block_laws.h): fabs is abs; fmod(x, c) = x - trunc(x/c)·c
+// has d/dx = 1 away from the wrap (the laws mark the wrap as a kink).
+template <Size N>
+inline ADRealN<N> fabs(const ADRealN<N>& x) noexcept { return abs(x); }
+
+template <Size N>
+inline ADRealN<N> fmod(const ADRealN<N>& x, Real c) noexcept {
+    return ADRealN<N>{std::fmod(x.value(), c), x.derivatives()};
+}
+
+template <Size N>
+inline ADRealN<N> fmod(const ADRealN<N>& x, const ADRealN<N>& c) noexcept {
+    const Real q = std::trunc(x.value() / c.value());
+    std::array<Real, N> d{};
+    for (Size i = 0; i < N; ++i) d[i] = x.deriv(i) - q * c.deriv(i);
+    return ADRealN<N>{std::fmod(x.value(), c.value()), d};
+}
+
 template <Size N>
 inline ADRealN<N> sin(const ADRealN<N>& x) noexcept {
     const Real cv = std::cos(x.value());

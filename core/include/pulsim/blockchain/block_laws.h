@@ -21,14 +21,80 @@
 #define PL_INLINE static inline
 #endif
 
+/* The real-valued laws are written once on `pl_real`: double in C. In
+ * C++ they are templates on the scalar: a double call instantiates the C
+ * law exactly, and the control graph's tick Jacobian
+ * (blockchain/tick_jacobian.hpp) instantiates them on the AD scalar.
+ * Every comparison that picks a branch of a law is written PL_LT / PL_GT /
+ * PL_LE / PL_GE / PL_NE, and PL_KINK marks a kink with no branch (|x|):
+ * in C and on a double they are the plain comparison (PL_KINK nothing);
+ * on another scalar they also report (a, b, the side taken, the law) to
+ * the thread's pl_kink_sink: how a derivative says which side of a kink
+ * it took, and refuses one taken ON the kink. */
+#ifdef __cplusplus
+#include <type_traits>
+template <class S>
+struct pl_kink_sink {
+    virtual ~pl_kink_sink() = default;
+    virtual void note(const S& a, const S& b, bool side, const char* law) = 0;
+    static pl_kink_sink*& current() noexcept {
+        static thread_local pl_kink_sink* s = nullptr;
+        return s;
+    }
+};
+template <class A, class B>
+inline bool pl_cmp_note(const A& a, const B& b, bool side, const char* law) {
+    if constexpr (!(std::is_arithmetic_v<A> && std::is_arithmetic_v<B>)) {
+        using S = std::conditional_t<std::is_arithmetic_v<A>, B, A>;
+        if (pl_kink_sink<S>* k = pl_kink_sink<S>::current()) k->note(S(a), S(b), side, law);
+    }
+    return side;
+}
+#define PL_TPL template <class pl_real>
+#define PL_LT(a, b) pl_cmp_note((a), (b), (a) < (b), __func__)
+#define PL_GT(a, b) pl_cmp_note((a), (b), (a) > (b), __func__)
+#define PL_LE(a, b) pl_cmp_note((a), (b), (a) <= (b), __func__)
+#define PL_GE(a, b) pl_cmp_note((a), (b), (a) >= (b), __func__)
+#define PL_NE(a, b) pl_cmp_note((a), (b), (a) != (b), __func__)
+#define PL_KINK(a, b) ((void)pl_cmp_note((a), (b), (a) < (b), __func__))
+#else
+#define PL_TPL
+#define pl_real double
+#define PL_LT(a, b) ((a) < (b))
+#define PL_GT(a, b) ((a) > (b))
+#define PL_LE(a, b) ((a) <= (b))
+#define PL_GE(a, b) ((a) >= (b))
+#define PL_NE(a, b) ((a) != (b))
+#define PL_KINK(a, b) ((void)0)
+#endif
+
 /* Python's min(a, b) / max(a, b): the first argument unless the second
  * is strictly smaller / larger. */
+#ifdef __cplusplus
+template <class A, class B>
+inline auto pl_min(const A& a, const B& b) -> decltype(a + b) {
+    using R = decltype(a + b);
+    return PL_LT(b, a) ? R(b) : R(a);
+}
+template <class A, class B>
+inline auto pl_max(const A& a, const B& b) -> decltype(a + b) {
+    using R = decltype(a + b);
+    return PL_GT(b, a) ? R(b) : R(a);
+}
+/* max(lo, min(hi, u)) */
+template <class L, class H, class U>
+inline auto pl_clamp(const L& lo, const H& hi, const U& u) -> decltype(lo + hi + u) {
+    using R = decltype(lo + hi + u);
+    return R(pl_max(lo, pl_min(hi, u)));
+}
+#else
 PL_INLINE double pl_min(double a, double b) { return b < a ? b : a; }
 PL_INLINE double pl_max(double a, double b) { return b > a ? b : a; }
 /* max(lo, min(hi, u)) */
 PL_INLINE double pl_clamp(double lo, double hi, double u) {
     return pl_max(lo, pl_min(hi, u));
 }
+#endif
 
 /* cos and sin through volatile pointers: a compiler fuses cos(x) and
  * sin(x) into one sincos call, which differs from the two by an ulp on
@@ -46,32 +112,37 @@ PL_INLINE double pl_sin(double x) {
     double (*volatile f)(double) = pl_sin_call;
     return f(x);
 }
+#ifdef __cplusplus
+/* another scalar (the AD one): its own cos / sin, found by ADL */
+template <class T> inline T pl_cos(const T& x) { return cos(x); }
+template <class T> inline T pl_sin(const T& x) { return sin(x); }
+#endif
 
-PL_INLINE double pl_gain(double k, double x) { return k * x; }
-PL_INLINE double pl_subtract(double a, double b) { return a - b; }
+PL_TPL PL_INLINE pl_real pl_gain(pl_real k, pl_real x) { return k * x; }
+PL_TPL PL_INLINE pl_real pl_subtract(pl_real a, pl_real b) { return a - b; }
 
 /* sum(w_i * x_i), left to right from 0 */
-PL_INLINE double pl_sum(const double* w, const double* x, int n) {
-    double acc = 0.0;
+PL_TPL PL_INLINE pl_real pl_sum(const pl_real* w, const pl_real* x, int n) {
+    pl_real acc = 0.0;
     int i;
     for (i = 0; i < n; ++i) {
-        const double term = w[i] * x[i];
+        const pl_real term = w[i] * x[i];
         acc = acc + term;
     }
     return acc;
 }
 
 /* PIController: trapezoidal integral, conditional anti-windup. */
-PL_INLINE double pl_pi(double Kp, double Ki, double lo, double hi,
-                       double* integral, double* prev_error,
-                       double setpoint, double measured, double dt) {
-    const double err = setpoint - measured;
-    double new_int = *integral + Ki * dt * 0.5 * (err + *prev_error);
-    double u = Kp * err + new_int;
-    if (u > hi && err > 0.0) {
+PL_TPL PL_INLINE pl_real pl_pi(pl_real Kp, pl_real Ki, pl_real lo, pl_real hi,
+                       pl_real* integral, pl_real* prev_error,
+                       pl_real setpoint, pl_real measured, pl_real dt) {
+    const pl_real err = setpoint - measured;
+    pl_real new_int = *integral + Ki * dt * 0.5 * (err + *prev_error);
+    pl_real u = Kp * err + new_int;
+    if (PL_GT(u, hi) && PL_GT(err, 0.0)) {
         new_int = *integral;
         u = Kp * err + new_int;
-    } else if (u < lo && err < 0.0) {
+    } else if (PL_LT(u, lo) && PL_LT(err, 0.0)) {
         new_int = *integral;
         u = Kp * err + new_int;
     }
@@ -81,21 +152,21 @@ PL_INLINE double pl_pi(double Kp, double Ki, double lo, double hi,
 }
 
 /* PIDController: trapezoidal I, filtered D on the error. */
-PL_INLINE double pl_pid(double Kp, double Ki, double Kd, double alpha,
-                        double lo, double hi, double* integ, double* deriv,
-                        double* prev_error, double setpoint, double measured,
-                        double dt) {
-    const double error = setpoint - measured;
-    double new_int = *integ + Ki * dt * 0.5 * (error + *prev_error);
-    const double d_raw = dt > 0.0 ? (error - *prev_error) / dt : 0.0;
-    const double da = alpha * d_raw;
-    const double db = (1.0 - alpha) * *deriv;
-    const double new_deriv = da + db;
-    double u = Kp * error + new_int + Kd * new_deriv;
-    if (u > hi && error > 0.0) {
+PL_TPL PL_INLINE pl_real pl_pid(pl_real Kp, pl_real Ki, pl_real Kd, pl_real alpha,
+                        pl_real lo, pl_real hi, pl_real* integ, pl_real* deriv,
+                        pl_real* prev_error, pl_real setpoint, pl_real measured,
+                        pl_real dt) {
+    const pl_real error = setpoint - measured;
+    pl_real new_int = *integ + Ki * dt * 0.5 * (error + *prev_error);
+    const pl_real d_raw = PL_GT(dt, 0.0) ? (error - *prev_error) / dt : (pl_real)0.0;
+    const pl_real da = alpha * d_raw;
+    const pl_real db = (1.0 - alpha) * *deriv;
+    const pl_real new_deriv = da + db;
+    pl_real u = Kp * error + new_int + Kd * new_deriv;
+    if (PL_GT(u, hi) && PL_GT(error, 0.0)) {
         new_int = *integ;
         u = Kp * error + new_int + Kd * new_deriv;
-    } else if (u < lo && error < 0.0) {
+    } else if (PL_LT(u, lo) && PL_LT(error, 0.0)) {
         new_int = *integ;
         u = Kp * error + new_int + Kd * new_deriv;
     }
@@ -106,75 +177,75 @@ PL_INLINE double pl_pid(double Kp, double Ki, double Kd, double alpha,
 }
 
 /* Integrator: forward Euler; the state holds when it would pass a limit. */
-PL_INLINE double pl_integrator(double gain, double lo, double hi,
-                               double* state, double x, double dt) {
-    double nw = *state + gain * dt * x;
-    if (nw > hi && x > 0.0) nw = *state;
-    else if (nw < lo && x < 0.0) nw = *state;
+PL_TPL PL_INLINE pl_real pl_integrator(pl_real gain, pl_real lo, pl_real hi,
+                               pl_real* state, pl_real x, pl_real dt) {
+    pl_real nw = *state + gain * dt * x;
+    if (PL_GT(nw, hi) && PL_GT(x, 0.0)) nw = *state;
+    else if (PL_LT(nw, lo) && PL_LT(x, 0.0)) nw = *state;
     nw = pl_clamp(lo, hi, nw);
     *state = nw;
     return nw;
 }
 
-PL_INLINE double pl_differentiator(double alpha, double* state,
-                                   double* prev_x, double x, double dt) {
-    const double d_raw = dt > 0.0 ? (x - *prev_x) / dt : 0.0;
-    const double a = alpha * d_raw;
-    const double b = (1.0 - alpha) * *state;
+PL_TPL PL_INLINE pl_real pl_differentiator(pl_real alpha, pl_real* state,
+                                   pl_real* prev_x, pl_real x, pl_real dt) {
+    const pl_real d_raw = PL_GT(dt, 0.0) ? (x - *prev_x) / dt : (pl_real)0.0;
+    const pl_real a = alpha * d_raw;
+    const pl_real b = (1.0 - alpha) * *state;
     *state = a + b;
     *prev_x = x;
     return *state;
 }
 
 /* MovingAverageFilter (an exponential average). */
-PL_INLINE double pl_ema(double alpha, double* state, double x) {
-    const double a = alpha * *state;
-    const double b = (1.0 - alpha) * x;
+PL_TPL PL_INLINE pl_real pl_ema(pl_real alpha, pl_real* state, pl_real x) {
+    const pl_real a = alpha * *state;
+    const pl_real b = (1.0 - alpha) * x;
     *state = a + b;
     return *state;
 }
 
-PL_INLINE double pl_low_pass(double tau, double* state, double x, double dt) {
-    if (tau <= 0.0) {
+PL_TPL PL_INLINE pl_real pl_low_pass(pl_real tau, pl_real* state, pl_real x, pl_real dt) {
+    if (PL_LE(tau, 0.0)) {
         *state = x;
     } else {
-        const double alpha = dt / (tau + dt);
+        const pl_real alpha = dt / (tau + dt);
         *state += alpha * (x - *state);
     }
     return *state;
 }
 
-PL_INLINE double pl_limiter(double lo, double hi, double x) {
+PL_TPL PL_INLINE pl_real pl_limiter(pl_real lo, pl_real hi, pl_real x) {
     return pl_clamp(lo, hi, x);
 }
 
 /* Comparator (Schmitt trigger); *state is 0 or 1. */
-PL_INLINE double pl_comparator(double threshold, double hysteresis,
-                               double high, double low, double* state,
-                               double x) {
-    const double half_band = 0.5 * hysteresis;
+PL_TPL PL_INLINE pl_real pl_comparator(pl_real threshold, pl_real hysteresis,
+                               pl_real high, pl_real low, pl_real* state,
+                               pl_real x) {
+    const pl_real half_band = 0.5 * hysteresis;
     if (*state != 0.0) {
-        if (x < threshold - half_band) *state = 0.0;
+        if (PL_LT(x, threshold - half_band)) *state = 0.0;
     } else {
-        if (x > threshold + half_band) *state = 1.0;
+        if (PL_GT(x, threshold + half_band)) *state = 1.0;
     }
     return *state != 0.0 ? high : low;
 }
 
-PL_INLINE double pl_rate_limiter(double up, double down, double* state,
-                                 double target, double dt) {
-    double delta = target - *state;
-    const double max_up = up * dt;
-    const double max_down = down * dt;
-    if (delta > max_up) delta = max_up;
-    else if (delta < -max_down) delta = -max_down;
+PL_TPL PL_INLINE pl_real pl_rate_limiter(pl_real up, pl_real down, pl_real* state,
+                                 pl_real target, pl_real dt) {
+    pl_real delta = target - *state;
+    const pl_real max_up = up * dt;
+    const pl_real max_down = down * dt;
+    if (PL_GT(delta, max_up)) delta = max_up;
+    else if (PL_LT(delta, -max_down)) delta = -max_down;
     *state += delta;
     return *state;
 }
 
-PL_INLINE double pl_sample_hold(double period, double* state, double* last_t,
-                                double x, double t) {
-    if (t - *last_t >= period) {
+PL_TPL PL_INLINE pl_real pl_sample_hold(pl_real period, pl_real* state, pl_real* last_t,
+                                pl_real x, pl_real t) {
+    if (PL_GE(t - *last_t, period)) {
         *state = x;
         *last_t = t;
     }
@@ -183,31 +254,31 @@ PL_INLINE double pl_sample_hold(double period, double* state, double* last_t,
 
 /* TransferFunction: xh / yh newest first, *nx <= nn, *ny <= max(1, nd);
  * the buffers hold nn and max(1, nd) doubles. */
-PL_INLINE double pl_transfer_function(const double* num, int nn,
-                                      const double* den, int nd,
-                                      double* xh, int* nx, double* yh,
-                                      int* ny, double x) {
-    double num_part = 0.0, den_part = 0.0, y;
+PL_TPL PL_INLINE pl_real pl_transfer_function(const pl_real* num, int nn,
+                                      const pl_real* den, int nd,
+                                      pl_real* xh, int* nx, pl_real* yh,
+                                      int* ny, pl_real x) {
+    pl_real num_part = 0.0, den_part = 0.0, y;
     const int ycap = nd > 1 ? nd : 1;
     int i;
     if (nn > 0) {
         const int keep = *nx < nn ? *nx : nn - 1;
-        memmove(xh + 1, xh, (size_t)keep * sizeof(double));
+        memmove(xh + 1, xh, (size_t)keep * sizeof(*xh));
         xh[0] = x;
         *nx = keep + 1;
     }
     for (i = 0; i < nn; ++i) {
-        const double term = num[i] * (i < *nx ? xh[i] : 0.0);
+        const pl_real term = num[i] * (i < *nx ? xh[i] : 0.0);
         num_part = num_part + term;
     }
     for (i = 0; i < nd; ++i) {
-        const double term = den[i] * (i < *ny ? yh[i] : 0.0);
+        const pl_real term = den[i] * (i < *ny ? yh[i] : 0.0);
         den_part = den_part + term;
     }
     y = num_part - den_part;
     {
         const int keep = *ny < ycap ? *ny : ycap - 1;
-        memmove(yh + 1, yh, (size_t)keep * sizeof(double));
+        memmove(yh + 1, yh, (size_t)keep * sizeof(*yh));
         yh[0] = y;
         *ny = keep + 1;
     }
@@ -215,40 +286,40 @@ PL_INLINE double pl_transfer_function(const double* num, int nn,
 }
 
 /* StateMachine: mode 0 toggle, 1 level, 2 SR latch. */
-PL_INLINE double pl_state_machine(int mode, double threshold, double high,
-                                  double low, double* state,
-                                  double* trigger_prev, double trigger,
-                                  double set_, double reset_) {
+PL_TPL PL_INLINE pl_real pl_state_machine(int mode, pl_real threshold, pl_real high,
+                                  pl_real low, pl_real* state,
+                                  pl_real* trigger_prev, pl_real trigger,
+                                  pl_real set_, pl_real reset_) {
     if (mode == 0) {
-        if (*trigger_prev <= threshold && trigger > threshold) {
+        if (PL_LE(*trigger_prev, threshold) && PL_GT(trigger, threshold)) {
             *state = *state == high ? low : high;
         }
         *trigger_prev = trigger;
     } else if (mode == 1) {
-        *state = trigger > threshold ? high : low;
+        *state = PL_GT(trigger, threshold) ? high : low;
     } else {
-        if (set_ > threshold) *state = high;
-        else if (reset_ > threshold) *state = low;
+        if (PL_GT(set_, threshold)) *state = high;
+        else if (PL_GT(reset_, threshold)) *state = low;
     }
     return *state;
 }
 
-PL_INLINE double pl_op_amp(double gain, double rail_min, double rail_max,
-                           double in_pos, double in_neg) {
-    const double u = gain * (in_pos - in_neg);
+PL_TPL PL_INLINE pl_real pl_op_amp(pl_real gain, pl_real rail_min, pl_real rail_max,
+                           pl_real in_pos, pl_real in_neg) {
+    const pl_real u = gain * (in_pos - in_neg);
     return pl_max(rail_min, pl_min(rail_max, u));
 }
 
-PL_INLINE double pl_lookup_1d(const double* xs, const double* ys, int n,
-                              double x) {
+PL_TPL PL_INLINE pl_real pl_lookup_1d(const pl_real* xs, const pl_real* ys, int n,
+                              pl_real x) {
     int i;
     if (n == 0) return 0.0;
-    if (x <= xs[0]) return ys[0];
-    if (x >= xs[n - 1]) return ys[n - 1];
+    if (PL_LE(x, xs[0])) return ys[0];
+    if (PL_GE(x, xs[n - 1])) return ys[n - 1];
     for (i = 0; i + 1 < n; ++i) {
-        if (xs[i] <= x && x < xs[i + 1]) {
-            const double t = (x - xs[i]) / (xs[i + 1] - xs[i]);
-            const double dy = t * (ys[i + 1] - ys[i]);
+        if (PL_LE(xs[i], x) && PL_LT(x, xs[i + 1])) {
+            const pl_real t = (x - xs[i]) / (xs[i + 1] - xs[i]);
+            const pl_real dy = t * (ys[i + 1] - ys[i]);
             return ys[i] + dy;
         }
     }
@@ -256,15 +327,15 @@ PL_INLINE double pl_lookup_1d(const double* xs, const double* ys, int n,
 }
 
 /* MathBlock: op 0 add 1 sub 2 mul 3 div 4 abs 5 neg 6 sqrt 7 pow2. */
-PL_INLINE double pl_math(int op, double a, double b) {
+PL_TPL PL_INLINE pl_real pl_math(int op, pl_real a, pl_real b) {
     switch (op) {
         case 0: return a + b;
         case 1: return a - b;
         case 2: return a * b;
-        case 3: return b != 0.0 ? a / b : 0.0;
-        case 4: return fabs(a);
+        case 3: return PL_NE(b, 0.0) ? a / b : (pl_real)0.0;
+        case 4: PL_KINK(a, 0.0); return fabs(a);
         case 5: return -a;
-        case 6: return a >= 0.0 ? sqrt(a) : 0.0;
+        case 6: return PL_GE(a, 0.0) ? sqrt(a) : (pl_real)0.0;
         default: return a * a;
     }
 }
@@ -295,65 +366,66 @@ PL_INLINE double pl_pwm(double frequency, double phase, double duty,
 }
 
 /* SpaceVectorModulator: min/max injection, duties clamped to [0, 1]. */
-PL_INLINE void pl_svm(double v_dc, double v_alpha, double v_beta,
-                      double* d_a, double* d_b, double* d_c) {
-    const double v3 = sqrt(3.0);
-    const double u_a = v_alpha;
-    const double u_b = (-v_alpha + v3 * v_beta) / 2.0;
-    const double u_c = (-v_alpha - v3 * v_beta) / 2.0;
-    const double u_max = pl_max(pl_max(u_a, u_b), u_c);
-    const double u_min = pl_min(pl_min(u_a, u_b), u_c);
-    const double u_zero = 0.5 * (u_max + u_min);
-    const double vdc = v_dc > 0.0 ? v_dc : 1.0;
+PL_TPL PL_INLINE void pl_svm(pl_real v_dc, pl_real v_alpha, pl_real v_beta,
+                      pl_real* d_a, pl_real* d_b, pl_real* d_c) {
+    const pl_real v3 = sqrt(3.0);
+    const pl_real u_a = v_alpha;
+    const pl_real u_b = (-v_alpha + v3 * v_beta) / 2.0;
+    const pl_real u_c = (-v_alpha - v3 * v_beta) / 2.0;
+    const pl_real u_max = pl_max(pl_max(u_a, u_b), u_c);
+    const pl_real u_min = pl_min(pl_min(u_a, u_b), u_c);
+    const pl_real u_zero = 0.5 * (u_max + u_min);
+    const pl_real vdc = PL_GT(v_dc, 0.0) ? v_dc : (pl_real)1.0;
     *d_a = pl_max(0.0, pl_min(1.0, 0.5 + (u_a - u_zero) / vdc));
     *d_b = pl_max(0.0, pl_min(1.0, 0.5 + (u_b - u_zero) / vdc));
     *d_c = pl_max(0.0, pl_min(1.0, 0.5 + (u_c - u_zero) / vdc));
 }
 
-PL_INLINE void pl_clarke(double a, double b, double c, double* alpha,
-                         double* beta, double* zero) {
-    const double v3 = sqrt(3.0);
+PL_TPL PL_INLINE void pl_clarke(pl_real a, pl_real b, pl_real c, pl_real* alpha,
+                         pl_real* beta, pl_real* zero) {
+    const pl_real v3 = sqrt(3.0);
     *alpha = (2.0 / 3.0) * (a - 0.5 * b - 0.5 * c);
     *beta = (2.0 / 3.0) * (v3 / 2.0) * (b - c);
     *zero = (1.0 / 3.0) * (a + b + c);
 }
 
-PL_INLINE void pl_inverse_clarke(double alpha, double beta, double zero,
-                                 double* a, double* b, double* c) {
-    const double v3 = sqrt(3.0);
+PL_TPL PL_INLINE void pl_inverse_clarke(pl_real alpha, pl_real beta, pl_real zero,
+                                 pl_real* a, pl_real* b, pl_real* c) {
+    const pl_real v3 = sqrt(3.0);
     *a = alpha + zero;
     *b = -0.5 * alpha + (v3 / 2.0) * beta + zero;
     *c = -0.5 * alpha - (v3 / 2.0) * beta + zero;
 }
 
-PL_INLINE void pl_park(double alpha, double beta, double theta, double* d,
-                       double* q) {
-    const double c = pl_cos(theta), s = pl_sin(theta);
+PL_TPL PL_INLINE void pl_park(pl_real alpha, pl_real beta, pl_real theta, pl_real* d,
+                       pl_real* q) {
+    const pl_real c = pl_cos(theta), s = pl_sin(theta);
     *d = alpha * c + beta * s;
     *q = -alpha * s + beta * c;
 }
 
-PL_INLINE void pl_inverse_park(double d, double q, double theta,
-                               double* alpha, double* beta) {
-    const double c = pl_cos(theta), s = pl_sin(theta);
+PL_TPL PL_INLINE void pl_inverse_park(pl_real d, pl_real q, pl_real theta,
+                               pl_real* alpha, pl_real* beta) {
+    const pl_real c = pl_cos(theta), s = pl_sin(theta);
     *alpha = d * c - q * s;
     *beta = d * s + q * c;
 }
 
 /* PLL: cross-product detector, PI on q, angle wrapped to [0, 2*pi). */
-PL_INLINE void pl_pll(double f_nominal, double Kp, double Ki, double* theta,
-                      double* omega, double* integ, double v_alpha,
-                      double v_beta, double dt) {
-    const double two_pi = 2.0 * 3.141592653589793;
-    const double c = pl_cos(*theta), s = pl_sin(*theta);
-    const double q = -v_alpha * s + v_beta * c;
-    double domega;
+PL_TPL PL_INLINE void pl_pll(pl_real f_nominal, pl_real Kp, pl_real Ki, pl_real* theta,
+                      pl_real* omega, pl_real* integ, pl_real v_alpha,
+                      pl_real v_beta, pl_real dt) {
+    const pl_real two_pi = 2.0 * 3.141592653589793;
+    const pl_real c = pl_cos(*theta), s = pl_sin(*theta);
+    const pl_real q = -v_alpha * s + v_beta * c;
+    pl_real domega;
     *integ += Ki * dt * q;
     domega = Kp * q + *integ;
     *omega = two_pi * f_nominal + domega;
     *theta += *omega * dt;
+    PL_KINK(fmod(*theta, two_pi), 0.0);   /* the wrap: theta jumps by 2 pi */
     *theta = fmod(*theta, two_pi);
-    if (*theta < 0.0) *theta += two_pi;
+    if (PL_LT(*theta, 0.0)) *theta += two_pi;
 }
 
 #endif /* PULSIM_BLOCK_LAWS_H */

@@ -376,6 +376,33 @@
          lifting it into `_route` would order it before the census refusal
          and the tick checks). A candidate for the plan when the exact
          engine runs through it (16).
+      10. *`resume_from` on the exact engine (add-exact-propagator-strategy
+         sessions 24-25, merged after 061e4099).* Item 4's guard stays (dsed
+         resumes on its own absolute clock, so `t_start` is not rewritten).
+         In the plan, above the route: an invalid snapshot whose run named why
+         it kept none (`invalid_reason`) is refused by name (feature
+         `resume_from`), and an exact-engine snapshot (controller kind 3) is
+         refused by name on pwl / trbdf2. `_route` no longer lists
+         `resume_from` among dsed's refused keywords (its table row is every
+         engine). Engine-specific, in `_compose_for`'s dsed branch:
+         `sensitivities` with `resume_from`, a tick grid the snapshot does not
+         carry, and the `t_start` tick refusal skipped on a resume; in
+         `run_dsed_from_builder`: bdf2, a relabelling `t_start`, recorder
+         state, `initial_state`, an explicit `integrator='auto'` that would not
+         reach the event-driven integrator, stateful-device histories; in
+         `_run_dsed`: the snapshot's tick grid passed down and the
+         controllers' state saved into the result's snapshot.
+      11. *The exact engine's in-loop recorders, 'auto' snapshot, loss port
+         with t_start (add-exact-propagator-strategy session 26).* Engine-
+         specific, in `run_dsed_from_builder` (rk45 branch): the recorder feed
+         is attached through `_recorders.ExactFeedSlot` (`attach_loop_feed(slot,
+         "dsed")`; a fresh `t_start` run keeps the stored pass); the field-18
+         refusal is gone (the feed continues the record; `simulate(recorders=)`
+         refuses a snapshot's recorder state when this run cannot feed it); an
+         'auto'-written snapshot (payload tag 101) resumes on 'auto' only (an
+         explicit other integrator or control ticks are refused by name);
+         `_mark_no_snapshot` no longer names 'auto'; the loss port's `t_start`
+         refusal is gone (`t_offset` shifts its event times).
     - **6.2 left open.** `_finalize` already runs `_auto_check_voltage_sanity`
       on dsed results today (the arrays path); what differs is pwl's own
       inline check (`find_implausible_voltage` on the result, one broad
@@ -593,7 +620,9 @@
        line: `test_one_voltage_check_names_the_callers_line_on_every_
        engine`). `resume_from` / `t_start` (item 4): pwl and trbdf2 start at
        the snapshot's t when t_start is left 0.0 (an explicit t_start wins:
-       the snapshot's state at that clock); the exact engine refuses by name;
+       the snapshot's state at that clock); the exact engine refuses by name
+       (amended at integration batch 14o: the exact engine now resumes, on
+       its own absolute clock, so its plan keeps `t_start`);
        one rule in `_plan_run`, and `plan.resolved_from['t_start']` reads
        `'resume_from'` when it applied.
 

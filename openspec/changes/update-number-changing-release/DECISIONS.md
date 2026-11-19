@@ -203,11 +203,11 @@ data in `benchmarks/tools/next_defaults.py` section `PLAN`:
 | 6 `on_impulse` | refused at the event (kernel) / same / after the run, `kind=''`; `integrator='bdf2'` ignores it | bdf2 refuses `on_impulse` by name; the exact refusal names the kind | `_plan.UNIFORM_ENGINE_RULES` | same entry |
 | 5 `mode_selection='auto'` | one place now (`_route`) | — (done, no caller-visible change) | none | none |
 | 6.2 voltage check | one function on every engine now (the exact engine had it already) | — (done) | none | none |
-| 4 `resume_from` clock | snapshot's t unless t_start is set / same / refused | — (one rule, `plan.resolved_from`) | none | none |
+| 4 `resume_from` clock | snapshot's t unless t_start is set / same / own absolute clock (refused before integration batch 14o) | — (one rule, `plan.resolved_from`) | none | none |
 | 2, 3, 9 `mmc_arms` / `on_cache`, `progress` / `live_stream`, the exact loss port | per engine | kept per engine (engine-inherent), refused by name elsewhere | option table | none |
 
 C++: one row of `sim::kRunOptionTable` (`undriven`). Blast radius of the
-profile on `python/tests` with the two new entries: section 3 below (hand-off).
+profile on `python/tests` with the two new entries: section 4 below (hand-off).
 
 ## 4. Blast radius with `PLAN` (hand-off, feat/core-release-options)
 

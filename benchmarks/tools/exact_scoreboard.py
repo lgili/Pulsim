@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """The exact scoreboard: every circuit the exact truth solves (conductance
-form) x the five harness configurations, graded with the ``exact`` measure
+form) x the five harness configurations and the extra ones below, graded with the ``exact`` measure
 against the truth, beside the strict ``interp`` verdict of the harness.
 
     exact_scoreboard.py run [--circuits GLOB,...]   # per-circuit records (resumable)
     exact_scoreboard.py twins                       # ideal twins: which converged tool is wrong
-    exact_scoreboard.py render                      # EXACT_SCOREBOARD.md + exact_scoreboard.json
+    exact_scoreboard.py render [--previous REV]     # EXACT_SCOREBOARD.md + exact_scoreboard.json
+                                                    # (+ cells moved > 2x against REV's json)
 
 The ``exact`` measure (``metrics.err_exact``): per graded column, the
 time-weighted RMS over the engine's OWN samples of the distance to the
@@ -40,6 +41,7 @@ import numpy as np
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1])]
 import exact_truth as et  # noqa: E402
 import metrics  # noqa: E402
+import next_defaults as nd  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT.parent / ".scratch" / "exact_scoreboard"
@@ -51,9 +53,22 @@ ONSET = 0.05                     # the error's onset: first sample off by 5 % of
 # solved directly (20,000 schedule events, ~20 s); `truth` writes no record for it (its dt/32 CSV is 3.2 M rows)
 EXTRA = ("circuits/thermal/long_run_drift_buck.yaml",)
 # Scored here only, never by the strict reference gate (reference_status.CONFIGS):
-# ESDIRK4(3) on the variable-step engine (add-high-order-stiff-integrator).
-EXTRA_CONFIGS = {"trbdf2+esdirk43": ("trbdf2", {"integrator": "esdirk43"})}
+# (engine, simulate() keywords, branch form via next_defaults.builder_form).
+# ESDIRK4(3) on the variable-step engine (add-high-order-stiff-integrator), and
+# `<engine>+next` = the release profile of that engine (next_defaults.py: its
+# keywords + form='branch' + the PLAN library defaults), the same cells as the
+# rehearsal's `<engine>+next`.
+# On the release branch the profile IS the default: no `+next` cells (the strict columns are the
+# release defaults, the `@legacy` columns of reference_status the pre-release ones).
+EXTRA_CONFIGS = {"trbdf2+esdirk43": ("trbdf2", dict(nd.EXTRA["esdirk43"][1]), False)}
+THRESHOLDS = (1e-3, 1e-6, 1e-9)
 TWINS = ("circuits/diodes/diode_rectifier.yaml", "circuits/switching/isolated/flyback_converter.yaml")
+
+
+def all_configs():
+    """label -> (engine, simulate() keywords, branch form): the strict five, then the extras."""
+    import reference_status as rs
+    return {**{k: (e, dict(kw), False) for k, (e, kw) in rs.CONFIGS.items()}, **EXTRA_CONFIGS}
 
 
 def solved_circuits():
@@ -178,17 +193,17 @@ def run_circuit(rel):
     if ref is not None:
         rec["reference"].update(grade(sol, ref, g, sp, case.dt, min(tols.values())))
     rec["cells"] = {}
-    for cfg in {**rs.CONFIGS, **EXTRA_CONFIGS}:
+    for cfg, (eng, kw, form) in all_configs().items():
         t0 = time.perf_counter()
         if cfg in EXTRA_CONFIGS:
-            eng, kw = EXTRA_CONFIGS[cfg]
-            with rs.extra_kwargs(kw):
+            with rs.extra_kwargs(kw), nd.builder_form(form), nd.plan_defaults(form):
                 kind, res, _, msg = dr.run_cell(case, eng)
-        else:
+        else:                                  # reference_status's own cell (its @legacy columns too)
             kind, res, msg, eng = rs.run_cell(case, cfg)
         wall = time.perf_counter() - t0
         tol = tols.get(eng, min(tols.values()))
-        cell = dict(config=cfg, circuit=rel, reference=ref_name, tol=tol, message=msg, wall_s=round(wall, 3))
+        cell = dict(config=cfg, circuit=rel, reference=ref_name, tol=tol, message=msg, wall_s=round(wall, 3),
+                    engine=eng, kwargs=kw, form="branch" if form else None)
         if kind != "ran":
             cell["outcome"] = kind
         elif ref is None:
@@ -257,27 +272,38 @@ def _g(x):
     return "" if x is None else f"{x:.2g}"
 
 
-def render():
-    import reference_status as rs
+def _git(*args):
+    import subprocess
+    return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True,
+                          encoding="utf-8", check=True).stdout
+
+
+def render(previous=None):
     recs = [json.loads(f.read_text(encoding="utf-8")) for f in sorted(RAW.glob("*.json"))
             if not f.name.startswith("_")]
     recs = [r for r in recs if "cells" in r]
     twin = json.loads((RAW / "_twins.json").read_text(encoding="utf-8")) if (RAW / "_twins.json").exists() else {}
-    cfgs = list(rs.CONFIGS)
+    defs = all_configs()
+    cfgs = [k for k in defs if any(k in r["cells"] for r in recs)]
     for r in recs:
         for c in r["cells"].values():
             c["class"] = _cls(c)
-    OUT_JSON.write_text(json.dumps(dict(delta_steps=DELTA, circuits=recs, twins=twin), indent=1) + "\n",
-                        encoding="utf-8")
+    head = _git("rev-parse", "--short=8", "HEAD").strip()
+    configs = {k: dict(engine=defs[k][0], kwargs=defs[k][1], form="branch" if defs[k][2] else None) for k in cfgs}
+    OUT_JSON.write_text(json.dumps(dict(delta_steps=DELTA, commit=head, configs=configs, circuits=recs, twins=twin),
+                                   indent=1) + "\n", encoding="utf-8")
     cells = [(r, cfg, r["cells"][cfg]) for r in recs for cfg in cfgs if cfg in r["cells"]]
     selfs = [c.get("self") for _, _, c in cells if c.get("self") is not None]
     selfs += [r["reference"]["self"] for r in recs if "self" in r.get("reference", {})]
     L = ["# Exact scoreboard", "",
-         "Generated by `benchmarks/tools/exact_scoreboard.py render` from `run` records "
-         "(do not edit). Every circuit the exact truth solves (conductance form) x the "
-         "harness configurations of reference_status (the release defaults, `auto` without dt, "
-         "and the `@legacy` columns), graded with the `exact` measure against the truth "
+         f"Generated by `benchmarks/tools/exact_scoreboard.py render`, rendered on `{head}` from `run` records "
+         "(the tree the runs used is named under `## Notes`; do not edit above `## Notes`). Every circuit the exact truth solves (conductance form) x "
+         "the harness configurations of `reference_status.py` (the release defaults, `auto` without dt, and the "
+         "`@legacy` columns) and the extra configurations below, graded with the `exact` measure against the truth "
          "(`benchmarks/tools/exact_truth.py`), beside the strict `interp` verdict (unchanged).", "",
+         "| configuration | engine | simulate() keywords | builder form |", "|---|---|---|---|",
+         *[f"| {k} | {v['engine']} | {', '.join(f'`{a}={b!r}`' for a, b in v['kwargs'].items()) or '(defaults)'} "
+           f"| {v['form'] or '(default)'} |" for k, v in configs.items()], "",
          "`exact`: per graded column, sqrt(sum w_i e_i^2 / sum w_i) / span over the engine's own "
          "samples (w_i trapezoid time weights, first sample excluded), e_i the distance to the "
          f"nearest one-sided truth value at t_i (every truth segment within {DELTA:g} dt, continued "
@@ -291,14 +317,18 @@ def render():
          f"scores at most {max(selfs):.1e} over {len(selfs)} grids (median {np.median(selfs):.1e}).", ""]
     L += findings(recs, cfgs)
     L += ["", "## Summary per configuration", "",
-          "| configuration | cells | exact < 1e-3 | 1e-3 .. 1e-2 | >= 1e-2 | worst five |",
-          "|---|---:|---:|---:|---:|---|"]
+          "`graded` = cells that ran and were graded; `not graded` = refused / error (no `exact`).", "",
+          "| configuration | graded | not graded | exact < 1e-3 | < 1e-6 | < 1e-9 | >= 1e-2 | worst five |",
+          "|---|---:|---:|---:|---:|---:|---:|---|"]
     for cfg in cfgs:
         xs = sorted(((c["exact"], r["circuit"]) for r, k, c in cells if k == cfg and "exact" in c), reverse=True)
         e = np.array([x for x, _ in xs])
+        ng = sum(1 for _, k, c in cells if k == cfg and "exact" not in c)
         top = ", ".join(f"{Path(n).stem} {x:.2g}" for x, n in xs[:5])
-        L.append(f"| {cfg} | {len(xs)} | {int((e < 1e-3).sum())} | {int(((e >= 1e-3) & (e < 1e-2)).sum())} "
-                 f"| {int((e >= 1e-2).sum())} | {top} |")
+        L.append(f"| {cfg} | {len(xs)} | {ng} | " + " | ".join(str(int((e < t).sum())) for t in THRESHOLDS)
+                 + f" | {int((e >= 1e-2).sum())} | {top} |")
+    if previous:
+        L += moved_section(recs, cfgs, previous)
     dis = [(r, k, c) for r, k, c in cells if c["outcome"] == "disagree"]
     ee = sum(c["class"] == "engine error" for _, _, c in dis)
     ms = sum(c["class"] == "measure" for _, _, c in dis)
@@ -331,9 +361,15 @@ def render():
             if all(fin.values()):
                 a, b = fin["rtol"][0], fin["pwl+restart"][0]
                 bad, good = (a, b) if a["exact"] > b["exact"] else (b, a)
+                verdict = (f"{'trbdf2' if bad is a else 'pwl+restart'} converges to a wrong waveform"
+                           if bad["exact"] > 1e-3 else "both finest runs are within 1e-3 of the ideal truth")
+                for fam in ("rtol", "pwl+restart"):
+                    xs = [x for x in rows if x["run"].startswith(fam) and "exact" in x]
+                    if len(xs) > 1 and xs[-1]["exact"] > 2 * xs[0]["exact"]:
+                        verdict += (f"; the {fam} error grows under refinement ({xs[0]['run']} "
+                                    f"{xs[0]['exact']:.2g} -> {xs[-1]['run']} {xs[-1]['exact']:.2g})")
                 L += [f"- {rel.removeprefix('circuits/')}: the finest {bad['run']} is {bad['exact']:.2g} from "
-                      f"the ideal truth, the finest {good['run']} {good['exact']:.2g}: "
-                      f"{'trbdf2' if bad is a else 'pwl+restart'} converges to a wrong waveform."]
+                      f"the ideal truth, the finest {good['run']} {good['exact']:.2g}: {verdict}."]
         L += ["", "| circuit | run | exact | worst column | departs at [s] | truth event |", "|---|---|---:|---|---:|---|"]
         for rel, rows in twin.items():
             for x in rows:
@@ -360,7 +396,59 @@ def render():
     skipped = [s for s in skipped if "cells" not in s]
     if skipped:
         L += ["", "Not graded: " + ", ".join(f"{s['circuit']} ({s.get('skip')})" for s in skipped) + "."]
-    OUT_MD.write_text("\n".join(L) + "\n", encoding="utf-8")
+    old = OUT_MD.read_text(encoding="utf-8") if OUT_MD.exists() else ""
+    notes = old.split("\n## Notes\n", 1)[1] if "\n## Notes\n" in old else "\n(none)\n"
+    OUT_MD.write_text("\n".join(L) + "\n\n## Notes\n" + notes, encoding="utf-8")
+
+
+def moved_section(recs, cfgs, rev):
+    """Cells whose `exact` moved by more than 2x against the json stored at git ``rev``."""
+    old = json.loads(_git("show", f"{rev}:benchmarks/exact_scoreboard.json"))
+    before = {(r["circuit"], k): c for r in old["circuits"] for k, c in r.get("cells", {}).items()}
+    rows, same, quiet, quiet_worse, new = [], 0, 0, 0, 0
+    rank = {"agree": 0, "unverified": 0, "disagree": 1, "refused": 2, "error": 3}
+    for r in recs:
+        for k in cfgs:
+            a, b = before.get((r["circuit"], k)), r["cells"].get(k)
+            if b is None:
+                continue
+            if a is None:
+                new += 1
+                continue
+            ea, eb = a.get("exact"), b.get("exact")
+            if ea is None or eb is None or a["outcome"] != b["outcome"]:
+                if (ea is None) != (eb is None) or a["outcome"] != b["outcome"]:
+                    ra, rb = rank.get(a["outcome"], 3), rank.get(b["outcome"], 3)
+                    worse = rb > ra if rb != ra else eb is None
+                    rows.append((r["circuit"], k, a, b, "worse" if worse else "better"))
+                else:
+                    same += 1
+                continue
+            if max(ea, eb) > 2 * max(min(ea, eb), 1e-300):
+                if max(ea, eb) < 1e-12:      # both at the truth's own resolution (self-score ~1e-13)
+                    quiet += 1
+                    quiet_worse += eb > ea
+                    continue
+                rows.append((r["circuit"], k, a, b, "worse" if eb > ea else "better"))
+            else:
+                same += 1
+
+    def v(c):
+        return f"{c['exact']:.3g} ({c['outcome'][:3]})" if "exact" in c else c["outcome"]
+    L = ["", "## Cells moved by more than 2x against the previous scoreboard", "",
+         f"Previous: `benchmarks/exact_scoreboard.json` at `{rev}` "
+         f"({old.get('commit', 'commit not recorded in that file')}). "
+         f"{sum(x[4] == 'worse' for x in rows)} worse, {sum(x[4] == 'better' for x in rows)} better, "
+         f"{same} within 2x (same outcome), {quiet} moved > 2x with both values < 1e-12 (not listed; "
+         f"{quiet_worse} of them worse), {new} cells with no previous value (configuration new since), "
+         f"{len(before) - len([1 for r in recs for k in cfgs if (r['circuit'], k) in before])} previous cells "
+         "with no current one. A change of strict outcome is listed whatever the ratio. Worse first; what is "
+         "known about the causes is in `## Notes`.", "",
+         "| circuit | configuration | before | after | ratio |", "|---|---|---:|---:|---:|"]
+    for circ, k, a, b, d in sorted(rows, key=lambda x: (x[4] != "worse", x[0], cfgs.index(x[1]))):
+        ratio = f"{b['exact'] / a['exact']:.3g}" if "exact" in a and "exact" in b and a["exact"] > 0 else ""
+        L.append(f"| {circ.removeprefix('circuits/')} | {k} | {v(a)} | {v(b)} | {ratio} |")
+    return L
 
 
 def findings(recs, cfgs):
@@ -398,7 +486,8 @@ def main(argv=None) -> int:
     r.add_argument("--circuits", default="*")
     r.add_argument("--force", action="store_true")
     sub.add_parser("twins")
-    sub.add_parser("render")
+    rd = sub.add_parser("render")
+    rd.add_argument("--previous", help="git revision whose exact_scoreboard.json the diff section compares with")
     a = ap.parse_args(argv)
     warnings.simplefilter("ignore")
     sys.stdout.reconfigure(line_buffering=True)
@@ -421,7 +510,7 @@ def main(argv=None) -> int:
     elif a.cmd == "twins":
         twins()
     else:
-        render()
+        render(a.previous)
     return 0
 
 

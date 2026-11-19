@@ -127,7 +127,7 @@ def test_a_pulsim_2_tuple_still_loads():
 
 @pytest.mark.parametrize("block", [
     (0, [1.0]),          # kind None is not a filled block
-    (3, [1.0]),          # unknown kind
+    (4, [1.0]),          # unknown kind (3 is the exact engine's)
     (2, [1.0], "x"),     # three values
 ])
 def test_a_malformed_block_is_refused(block):

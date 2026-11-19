@@ -29,6 +29,7 @@ benchmarks/IDEAL_SWITCH_FLIP_EVIDENCE.md (and ``--json``):
 
     PYTHONPATH=python:benchmarks python3 benchmarks/tools/ideal_switch_flip_evidence.py \
         [--resume DIR] [--circuits GLOB,...] [--json out.json] [--from-json out.json]
+        [--previous REV]   # + the rows that changed against REV's IDEAL_SWITCH_FLIP_EVIDENCE.md
 
 One command regenerates every variant on one tree; ``--resume DIR`` keeps each
 circuit's cells in ``DIR`` as they are measured, so a killed run started again
@@ -580,6 +581,51 @@ def _render_ideal(by, circuits, cfgs):
     return L
 
 
+def _tables(md):
+    """{(section, key): row} of every table row; the key is the identifying columns
+    (circuit / config / variant, configuration / variant, or circuit)."""
+    out, sec, width, keep = {}, None, 0, []
+    for ln in md.splitlines():
+        if ln.startswith("#"):
+            sec, width = ln.lstrip("# ").split(" (")[0], 0
+        elif ln.startswith("|") and not ln.startswith("|---"):
+            cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+            if not width:
+                width = 3 if cells[:3] == ["circuit", "config", "variant"] else \
+                    2 if cells[:2] == ["configuration", "variant"] else 1
+                keep = [i for i, h in enumerate(cells) if i >= width and "wall" not in h]  # wall: one-run noise
+                continue
+            out[(sec, tuple(cells[:width]))] = " | ".join(cells[i] for i in keep if i < len(cells))
+    return out
+
+
+def previous_section(md, rev):
+    """Rows that differ from the report stored at git ``rev`` (same sections)."""
+    root = Path(__file__).resolve().parents[2]
+    old = subprocess.run(["git", "-C", str(root), "show", f"{rev}:benchmarks/IDEAL_SWITCH_FLIP_EVIDENCE.md"],
+                         capture_output=True, text=True, encoding="utf-8", check=True).stdout
+    a, b = _tables(old), _tables(md)
+    secs = list(dict.fromkeys(k[0] for k in [*a, *b]))
+    L = ["", "## Changes against the previous evidence", "",
+         f"Every table row above compared with the report stored at `{rev}` (rows keyed by circuit / "
+         "configuration / variant; the one-run wall-ratio column is left out; `removed` = the row is no longer listed, e.g. a cell that is no "
+         "longer worse; `added` = newly listed).", "",
+         "| section | unchanged | changed | added | removed |", "|---|---:|---:|---:|---:|"]
+    rows = []
+    for sec in secs:
+        ka = {k[1] for k in a if k[0] == sec}
+        kb = {k[1] for k in b if k[0] == sec}
+        ch = sorted(k for k in ka & kb if a[(sec, k)] != b[(sec, k)])
+        L.append(f"| {sec} | {len(ka & kb) - len(ch)} | {len(ch)} | {len(kb - ka)} | {len(ka - kb)} |")
+        rows += [(sec, "changed", k, a[(sec, k)], b[(sec, k)]) for k in ch]
+        rows += [(sec, "added", k, "", b[(sec, k)]) for k in sorted(kb - ka)]
+        rows += [(sec, "removed", k, a[(sec, k)], "") for k in sorted(ka - kb)]
+    L += ["", "| section | change | row | before | after |", "|---|---|---|---|---|"]
+    L += [f"| {sec} | {c} | {' / '.join(k)} | {x.replace('|', '/')} | {y.replace('|', '/')} |"
+          for sec, c, k, x, y in rows]
+    return "\n".join(L) + "\n"
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--circuits", default="*")
@@ -590,6 +636,7 @@ def main(argv=None) -> int:
     ap.add_argument("--resume", metavar="DIR",
                     help="per-circuit cell cache: a killed run started again with the same "
                          "DIR measures only the missing cells (same tree only)")
+    ap.add_argument("--previous", metavar="REV", help="append the rows that changed against REV's report")
     a = ap.parse_args(argv)
     warnings.simplefilter("ignore")
     if a.from_json:
@@ -601,7 +648,8 @@ def main(argv=None) -> int:
         if a.json:
             Path(a.json).write_text(json.dumps({"tree": list(tree), "refs": refs, "cells": recs},
                                                indent=1), encoding="utf-8")
-    Path(a.out).write_text(render(recs, refs, tree), encoding="utf-8")
+    md = render(recs, refs, tree)
+    Path(a.out).write_text(md + (previous_section(md, a.previous) if a.previous else ""), encoding="utf-8")
     return 0
 
 

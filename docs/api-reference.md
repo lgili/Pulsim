@@ -414,14 +414,16 @@ r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
   | engine | mode | |
   |---|---|---|
   | `pwl`, `trbdf2` | `'in-loop'` | fed from the engine's step hooks while it runs: every accepted step, whatever `store_every` keeps |
-  | `exact` | `'stored-arrays'` | a pass over the stored result (its stored right limits are exact) |
+  | `exact` (event-driven integrator: diodes, loss ports, controllers, `integrator='rk45'`) | `'in-loop'` | fed from its step hooks: full MNA states, event rows at their exact instants (resolution `'exact'`); not with the junction temperature loop or a fresh `t_start` run |
+  | `exact` (`integrator='auto'` / `'bdf2'`) | `'stored-arrays'` | a pass over the stored result (its stored right limits are exact) |
 
   In-loop readings are functions of the state alone: `v()`, `i()` of an
   inductor / voltage source / branch-form switch or diode / resistor, and
   `p()` of those; any other reading, and runs that bypass the kernel
   Simulation object, use the stored-array pass (`res.recorder_feed["why"]`).
   `store_every > 1` works with in-loop recorders (statistics equal the
-  full run's) and is refused by name otherwise; `resume_from` is refused.
+  full run's) and is refused by name otherwise; `resume_from` continues the
+  record from the snapshot's recorder state.
   `keep="decimate"` keeps fewer rows with statistics from every step.
 - `steady_state_stats(result, "name")` looks the name up as a node
   (`result.v`) and as a branch (`result.i`); a name that is both raises
@@ -605,8 +607,23 @@ direction and sub-step count), `coss_history` (3), `lauritzen_history`
   post-edge ones, and the fixed engine refuses it by name (started from
   that pair it rang and aborted at the next edge). TR-BDF2 resumes from
   it.
-* `engine='dsed'` has no snapshot of its own and refuses `resume_from=`
-  by name.
+* `engine='dsed'` (`'exact'`) writes a snapshot on its event-driven
+  integrator (the one diodes, loss ports and controllers use) and on the
+  default `'auto'` integrator of a diode-free circuit (its own payload,
+  first value 101: a resume continues on `'auto'`, and another integrator
+  or control ticks with it are refused by name; `'bdf2'` writes none):
+  the reduced state, the mode and the schedule position travel in the
+  controller block with kind 3 (no new pickle field), the loss tracker's
+  state in field 17, the control ticks' grid in fields 15-16. A resume at
+  an instant the uninterrupted run also stops at (a gate edge, a located
+  event, a control tick) continues it bit for bit on one machine; a split
+  mid-interval takes another step grid until the next gate edge, so the
+  two agree to rounding. `t_end` is absolute and `t_start` must be 0 or the
+  snapshot's `t`. A pwl / trbdf2 snapshot resumes on it where its full
+  state is one state of its stamped mode (the modes are decided at `t` as
+  at a start); its snapshot is refused by name on pwl and trbdf2 (no
+  companion history to continue from). An in-loop recorder's state
+  (field 18) is continued on the event-driven integrator.
 * An invalid snapshot, or one whose device layout does not match the
   circuit, is refused by name (the first block that differs) rather
   than resumed from zero. A snapshot without a layout (2.0 pickle,

@@ -118,7 +118,7 @@ engine accepts a keyword and ignores it. The defaults are
 | `mmc_arms` | yes | refused | refused | None |
 | `on_cache` | yes | refused | refused | None |
 | `controller_period` | yes | yes | yes | None |
-| `resume_from` | yes | yes | refused | None |
+| `resume_from` | yes | yes | yes | None |
 | `solver` | yes | yes | yes | None |
 | `sensitivities` | refused | refused | yes | None |
 | `mode_selection` | yes | yes | yes | None ('auto') |
@@ -245,7 +245,7 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| `engine="pwl"` and `engine="trbdf2"` read loss tables inside the run. `dsed` / `exact` reads them at a fixed `Tj=` (switching energy at each event, conduction as the exact ∫v·i of each mode, impulsive energy booked to the switch) and refuses by name a junction or heat node (no temperature loop), a `V_on` conduction table, time-varying sources, `integrator='bdf2'`, `t_start` and `resume_from`; `bdf1` refuses every loss port (`UnsupportedError`, feature `device_losses`, the device). | Conformance cell `test_device_losses_cell`. | `engine="pwl"` or `"trbdf2"`, or the post-hoc `device_loss_summary` / the periodic-orbit evaluator on the exact engine. |
+| `engine="pwl"` and `engine="trbdf2"` read loss tables inside the run. `dsed` / `exact` reads them at a fixed `Tj=` (switching energy at each event, conduction as the exact ∫v·i of each mode, impulsive energy booked to the switch) runs the junction temperature loop (a `junction=` / `heat_node=` node: each step's heat as the network's exact response, each event's energy as an impulse; the reconstructed current of a branch the heat flows through at once, e.g. the ambient source's, excludes that heat current), and refuses by name a deposit node an algebraic node voltage reads instantly, a `V_on` conduction table, time-varying sources, and `integrator='bdf2'` (a `resume_from` continues the ledgers, field 17; a fresh `t_start` run books the zero-start run's ledgers with event times shifted by `t_start`); `bdf1` refuses every loss port (`UnsupportedError`, feature `device_losses`, the device). | Conformance cell `test_device_losses_cell`. | `engine="pwl"` or `"trbdf2"`, or the post-hoc `device_loss_summary` / the periodic-orbit evaluator on the exact engine. |
 | The event energy is not drawn from the circuit: the PWL switch is ideal, the table energy only heats the junction. | By design, as in PLECS and PSIM. | Model the transition (`add_power_mosfet`) when the electrical side must see it. |
 | `T_j` does not feed back into the device (`V_f`, `g_on` stay fixed). | Task 4.1 (optional) not done. | Re-run with `V_f` / `g_on` at the settled `T_j`. |
 

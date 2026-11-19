@@ -2660,9 +2660,11 @@ def simulate(
         per-period statistics (time-weighted, clipped exactly at the
         window edges), kept samples (every / every n-th / none) and both
         limits at events (exact engine). Read ``res.recorded[name]``
-        (:class:`pulsim.Recording`). Fed today by a kernel-side pass over
-        the stored arrays, so ``store_every > 1`` and ``resume_from``
-        are refused with recorders, by name. Without it nothing changes.
+        (:class:`pulsim.Recording`). Fed in the loop where the engine
+        allows it, otherwise by a kernel-side pass over the stored arrays
+        (``res.recorder_feed["why"]``; ``store_every > 1`` is refused by
+        name there). ``resume_from`` continues the record from the
+        snapshot's recorder state. Without it nothing changes.
 
     output_rtol
         ``engine='exact'`` only. Default ``None``: ``1e-5``
@@ -2943,7 +2945,8 @@ def _compose(builder, closed_loops, step_observer, controller_period,
 
 
 def _compose_for(engine, _plan, *, t_start, t_end, dt, sensitivities,
-                 switch_fn, step_observer, b_extra_fn, closed_loops):
+                 switch_fn, step_observer, b_extra_fn, closed_loops,
+                 resume_from=None):
     """The control plan for the engine the run landed on (Stage A, task
     5): its tick sources on the variable-step event queue (trbdf2, dsed)
     or the fixed grid (pwl), the gates merged into one switch_fn. Returns
@@ -2963,13 +2966,25 @@ def _compose_for(engine, _plan, *, t_start, t_end, dt, sensitivities,
                 "controller_period=<T_ctrl seconds> and the ticks are "
                 "scheduled exactly. A ClosedLoop from bind_pi_to_switch "
                 "carries its own period.")
-        if _plan.ticks and sensitivities is not None:
+        if sensitivities is not None and resume_from is not None:
             raise _unsupported(
-                "dsed", "sensitivities",
-                "simulate(engine='dsed', sensitivities=...) with controllers: "
-                "the sensitivity run has no control ticks, so the loop would "
-                "run open. Drop sensitivities or the controllers.")
-        if _plan.ticks and float(t_start) != 0.0:
+                "dsed", "resume_from",
+                "simulate(engine='dsed', sensitivities=..., resume_from=...): the "
+                "sensitivity run starts from t = 0 and carries no snapshot. Drop "
+                "one of them.")
+        if (resume_from is not None and _plan.ticks
+                and len(_resume_tick_origins(resume_from, len(_plan.ticks)))
+                != len(_plan.ticks)):
+            # without the first run's grid the ticks would restart at the
+            # snapshot's t: the controllers would leave their grid silently
+            raise _unsupported(
+                "dsed", "resume_from",
+                f"simulate(engine='dsed', resume_from=...): this run has "
+                f"{len(_plan.ticks)} control tick source(s) and the snapshot "
+                f"carries the grid of {len(list(resume_from.tick_origin))}: the "
+                "ticks cannot continue the first run's grid. Resume with the "
+                "controllers of the run that wrote the snapshot.")
+        if _plan.ticks and float(t_start) != 0.0 and resume_from is None:
             raise _unsupported(
                 "dsed", "step_observer",
                 "simulate(engine='dsed', t_start != 0) with controllers: the "
@@ -3052,8 +3067,7 @@ def _route(
             "enable_newton_line_search": enable_newton_line_search,
             "enable_newton_lm": enable_newton_lm,
             "newton_roundoff_budget": newton_roundoff_budget,
-            "should_continue": should_continue,
-            "resume_from": resume_from})
+            "should_continue": should_continue})
 
     _auto_exact = []
     if engine == "auto" and (dt is None or dt <= 0) and not _AUTO_EXACT_OFF.get():
@@ -3591,19 +3605,28 @@ def _plan_run(
     # and an invalid snapshot resumed from zero.
     if resume_from is not None:
         if not getattr(resume_from, "valid", False):
+            _why = getattr(resume_from, "invalid_reason", "")
+            if _why:   # the run that produced it said why it kept none
+                raise _unsupported(
+                    "dsed", "resume_from",
+                    f"simulate(resume_from=...): the snapshot is not valid: {_why}.")
             raise ValueError(
                 "simulate(resume_from=...): the snapshot is not valid — "
                 "it came from a run that produced none (an aborted run, "
-                "or a SolverSnapshot() built by hand and never "
-                "populated). Resuming from it would start from zero "
-                "without saying so.")
-        if engine == "dsed":
+                "a SolverSnapshot() built by hand and never populated, or an "
+                "engine='dsed' run on a route that keeps none: integrator "
+                "'bdf2' or a fresh t_start, whose cause an unpickled "
+                "snapshot no longer carries). Resuming from it would start "
+                "from zero without saying so.")
+        _cs = resume_from.controller_state
+        if engine != "dsed" and _cs is not None and _cs[0] == 3:
             raise _unsupported(
-                "dsed", "resume_from",
-                'simulate(engine="dsed"): resume_from is not supported '
-                "by the event-driven engine, which has no snapshot of "
-                'its own; use engine="pwl" (exact resume) or '
-                'engine="trbdf2" / "auto" (resume to tolerance).')
+                engine, "resume_from",
+                f"simulate(engine={engine!r}, resume_from=...): the snapshot was "
+                "written by the exact engine, whose state has no companion "
+                "history (the trapezoidal i_C / v_L this engine's step needs), so "
+                "it does not map one to one onto this engine's state. Resume with "
+                "engine='dsed'.")
     _ic_from_builder = False
     # A snapshot IS the state: builder ICs (i0=/c0=) must not be
     # synthesised alongside it, or the engines re-seed the stateful
@@ -3658,7 +3681,7 @@ def _plan_run(
             "settle; a mode chosen by the complementarity problem has no "
             "derivative here. Drop mode_selection.")
 
-    # (engine 'dsed' refuses resume_from above, so this is the other two)
+    # (engine 'dsed' resumes on its own absolute clock: t_end is absolute there)
     if engine != "dsed" and resume_from is not None and t_start == 0.0:
         # Resuming means TIME continues too: a sine source
         # restarted from phase zero makes the second segment see a
@@ -3668,7 +3691,8 @@ def _plan_run(
         # The ONE clock rule of a resume (DECISIONS 26): pwl and trbdf2 start
         # at the snapshot's t when t_start is left at 0.0 (an explicit
         # t_start wins: the snapshot's state at that clock); the exact engine
-        # refuses resume_from by name above. plan.resolved_from says which.
+        # resumes on its own absolute clock (t_end absolute), so its plan
+        # keeps t_start ('default'). plan.resolved_from says which.
         try:
             t_start = float(resume_from.t)
             _resolved.mark("t_start", "resume_from")
@@ -3706,7 +3730,7 @@ def _plan_run(
         engine, _plan, t_start=t_start, t_end=t_end, dt=dt,
         sensitivities=sensitivities, switch_fn=switch_fn,
         step_observer=step_observer, b_extra_fn=b_extra_fn,
-        closed_loops=closed_loops)
+        closed_loops=closed_loops, resume_from=resume_from)
     if engine == "dsed":
         # ---- engine='dsed': the exact step (run by _run_dsed). ----
         # For engine='dsed', `integrator` ∈ {'auto', 'rk45', 'bdf2', None}.
@@ -3979,7 +4003,9 @@ def _run_dsed(plan):
             t_start=t_start, switch_fn=switch_fn,
             initial_state=None if _ic_from_builder else initial_state,
             ic_from_builder=_ic_from_builder, dt_init=dt_init,
-            b_extra_fn=b_extra_fn, integrator=integrator)
+            b_extra_fn=b_extra_fn, integrator=integrator,
+            ticks=[(f, p, o) for (f, p), o in zip(
+                _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))])
         if _mode_auto is not None:
             _diag = getattr(_dsed_res, "diagnostics", None)
             if isinstance(_diag, dict):
@@ -4015,9 +4041,13 @@ def _run_dsed(plan):
                                   and plan.resolved_from["output_rtol"] == "explicit"),
             ticks=[(f, p, o) for (f, p), o in zip(
                 _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
+            resume_from=i.resume_from,
+            tick_origins=_resume_tick_origins(i.resume_from, len(_plan.ticks)),
+            tick_next_k=_resume_tick_next_k(i.resume_from, len(_plan.ticks)),
             undriven=plan.undriven[0] if plan.undriven is not None else None,
             mode_auto=_mode_auto,
         )
+        _save_control_state(_plan.graphs, _dsed_res)   # the snapshot's controllers
     return _planning.new(_planning.RunOutcome, (
         _dsed_res, builder, switch_fn, b_extra_fn, None, None, None, None,
         None))
