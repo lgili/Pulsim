@@ -147,11 +147,13 @@ def test_gated_commutations_are_recorded_under_the_restart_rule():
                 for e in r.commutation_events
                 if e.branch_id == bid and e.t_estimated < 9.5e-4]
 
-    plain = run()
+    # Legacy subject: the restart-less step against the restart rule ALONE (the release
+    # default restarts and splits: both named explicitly)
+    plain = run(discontinuity_restart=False)
     assert len(plain) == 20   # control: both edges of 10 periods, at t_prev
     # the restart rule takes each edge at its instant, one step later
-    assert run(discontinuity_restart=True) == [(k + 1 if k else 0, s)
-                                               for k, s in plain]
+    assert run(discontinuity_restart=True, enable_substep_state_correction=False) == [
+        (k + 1 if k else 0, s) for k, s in plain]
 
 
 # ---------------------------------------------------------------------
@@ -194,7 +196,9 @@ def test_the_split_fires_a_declared_gate_edge_on_time():
     "60 deg edge fires one 1 us step late (0.80 of the 10 V span at that "
     "sample). The split lands it (test above)."))
 def test_the_restart_rule_fires_a_declared_gate_edge_on_time():
-    assert _scr_halfwave_error(discontinuity_restart=True) < 1e-9
+    # the rule alone: the split follows the rule by default since the release
+    assert _scr_halfwave_error(discontinuity_restart=True,
+                               enable_substep_state_correction=False) < 1e-9
 
 
 def _rect(alpha_deg, width):
