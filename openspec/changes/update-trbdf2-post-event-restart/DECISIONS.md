@@ -574,3 +574,152 @@ The open questions of `design.md` had no answer and none was marked
    10 ms), amplitude within 5e-5: the method's dispersion, not its
    damping. A ringdown over N periods needs N * 2pi * (dw/w) below the
    accuracy wanted: rtol <= 1e-6 for 1e-3 over 50 periods.
+
+21. **The PSFB example does not converge in rtol on trbdf2: result of the
+   investigation (tracks 12-17, 2026-11-19).** Circuit:
+   `examples/phase_shift_full_bridge.yaml` (phi = pi/2, 100 ns dead time).
+   Metric: mean of v(vout) - v(rect_neg) over 1.8-2.0 ms. Reference:
+   `engine='exact'` 24.0661693 V (dt 2e-8 and 5e-9 agree to 1e-9 V). No
+   independent truth exists over the full span: the mpmath tool (truth2)
+   refuses at 2.4 us at dps 30 and at 1.01994 ms at dps 50 (a diode-mode
+   tie its Taylor-sign test cannot break). Hand-offs:
+   `.scratch/t12..t17/HANDOFF.md` on this worktree (not in git).
+   Cells: mean V / forced accepts / zero-time current jumps.
+
+   Tip b4b71492 (t14, "tip"):
+
+   | rtol | 1e-5 | 1e-6 | 1e-7 | 1e-8 |
+   |---|---|---|---|---|
+   | tip | 23.96631 / 15.9k / 2455 | 23.96243 / 29.3k / 3009 | 24.01813 / 104k / 3206 | 23.94767 / 495k / 9129 |
+
+   H0, the first wrong decision (t12). At the 2.4 us freewheel edge the
+   committed trapezoidal edge probe is 15 tau of a parasitic mode
+   (|lambda| = 1.146e15, tau 0.87 fs, L * g_off) that exists in the
+   D2/D3-OFF mode only; its ring flips D2/D3 16 times. BE probes at
+   located events plus a retaken undo-probe fix that decision (16 -> 0
+   rounds) but not the run: 24.0659 / 24.0553 / 24.0786 / 24.0944 V at
+   rtol 1e-5..1e-8, jumps 2253..8483.
+
+   H1, L-stable first step after events (t13: BE edge commit, SDIRK(2,2)
+   restarts, BE landing, all gated by a trap-vs-BE `rings()` test):
+
+   | variant | 1e-5 | 1e-6 | 1e-7 | 1e-8 |
+   |---|---|---|---|---|
+   | BE probes (b9adb6ad) | 24.0659 / - / 2253 | 24.0553 / - / 3466 | 24.0786 / - / 4298 | 24.0944 / - / 8483 |
+   | + pieces 1-4 (64b3c549) | 24.06617 / 1.1k / 112 | 24.0749 / 29.5k / 624 | 24.1068 / 116k / 1237 | 24.1228 / 583k / 8712 |
+
+   Insufficient: the parasitic mode exists for the WHOLE OFF interval;
+   at 329.92 us (rtol 1e-7, no event) an ordinary TR-BDF2 step's
+   trapezoidal stage re-excites it, v_D2 reads -1.4e6 V, D2/D3 turn on.
+
+   H2, filtered Hosea-Shampine estimate on every step (t14):
+
+   | variant | 1e-5 | 1e-6 | 1e-7 | 1e-8 |
+   |---|---|---|---|---|
+   | tip + filter | 23.94597 / 10.9k / 1682 | 23.94314 / 36.6k / 1994 | 23.96828 / 50.9k / 2780 | 23.96746 / 148k / 3407 |
+   | 64b3c549 + filter | 24.06616 / 0 / 3 | 24.06538 / 24.9k / 375 | 24.06661 / 95.9k / 680 | 24.05637 / 321k / 1922 |
+
+   Necessary with the H1 pieces, not sufficient: forced accepts grow
+   with tighter rtol; 94 % of them (rtol 1e-6) sit in the LS_A-off dead
+   time, D_HS_A <-> D_LS_A chatter, at h_chatter = 2e-12 s. Derivative
+   history ruled out from the code (t14 H2): ordinary steps already
+   commit the BDF2-stage derivative (`history_state.hpp` commit_trbdf2).
+
+   H3, ideal branch-form devices (t15: R_on 1e-3, g_off 0, 1 GOhm
+   gauges; reference engine='exact' with gauges 24.0661634 V; the
+   g_off -> 0 limit is known to ~4e-5 V only):
+
+   | rtol | mean / error | forced | jumps |
+   |---|---|---|---|
+   | 1e-5 | 24.0661611 / -2.3e-6 | 82 | 0 |
+   | 1e-6 | abort: max_steps 10M at 0.644 ms | - | - |
+   | 1e-7 | 24.0661613 / -2.1e-6 | 94.6k | 0 |
+   | 1e-8 | 24.0661612 / -2.2e-6 | 66.0k | 0 |
+
+   The mean is right; the step count is not. A diode in series with an
+   inductance turns off at zero current; the right successor is "all
+   OFF" (inductor current a dependent zero); trbdf2 alternates the two
+   complementary diodes ({D1,D4} <-> {D3} at 0.363 ms; D_HS_A <-> D_LS_A
+   at 1.140 ms). `mode_selection='lcp'` refuses at 2.40002 us.
+
+   H4, device capacitances (t16: C_oss 300 pF per bridge switch, C_j
+   100 pF per rectifier diode, C_w 20 pF across the primary winding
+   pri_pos-mid_b; "w" = with C_w; scale x0.1/x1/x10; no reference:
+   engine='exact' fails on every capacitance variant):
+
+   | variant | rtol | mean | forced | jumps |
+   |---|---|---|---|---|
+   | C_oss+C_j x1 | 1e-5 | 24.08758379 | 224 | 0 |
+   | C_oss+C_j x1 | 1e-6 / 1e-7 / 1e-8 | grind abort 0.306 ms / 16.3 us / 31 ns | - | - |
+   | + C_w, x1 | 1e-5 | 24.30480 | 450 | 0 ; 1e-6, 1e-7: max_steps 10M |
+   | + C_w, x10 | 1e-5 | 24.58916735 | 4 | 0 |
+   | + C_w, x10 | 1e-6 | 24.59055120 | 13 | 0 |
+
+   C_oss + C_j remove the diode alternation (jumps 0) but the run grinds
+   at pri_pos, the node between L_leak and T1.p (only inductors on it:
+   an inductor cutset, index-2 node voltage). Short-span ladders:
+   + C_w x10, 0.2-0.4 ms, rtol 1e-5..1e-8: 37.41944600 / .42144290 /
+   .42175393 / .42185842 V, forced 2/2/2/4; + C_w x1, 0.05-0.1 ms,
+   1e-5..1e-9: 6.42782653 .. 6.42813727 V, forced 35..539; C_w alone
+   (no C_oss/C_j) x1: forced 0..10762, not monotone in rtol.
+   Fuzz 1e-13, 6 draws: + C_w x10 rtol 1e-6 spread 2e-8 V, forced 4-27,
+   all monotone; C_oss+C_j x1 rtol 1e-6 6/6 grind.
+
+   H5, index-2 components out of the error norm (t17,
+   `lte_index2='exclude'`, structural per-mode classification):
+
+   | variant | rtol | include | exclude |
+   |---|---|---|---|
+   | C_oss+C_j x1 | 1e-5 | 24.08758379 / 224 | 24.08758387 / 103 |
+   | C_oss+C_j x1 | 1e-6 / 1e-7 | grind 0.3061 ms / 16.28 us | grind 0.2854 ms / 16.21 us |
+   | example | 1e-5 | 23.96630899 / 15897 | 24.02625216 / 15129 |
+
+   Refuted. The norm already holds only capacitor voltages and inductor
+   currents; the noise is in the solved currents: at h = 2e-16 s,
+   std(diff i) 1.5e-8..3.7e-8 A against eps|i| = 1e-15 A, because the
+   +-500 V round-off of pri_pos drives di = h/L dv.
+
+   Mechanism chain: no capacitance at the switch and rectifier nodes ->
+   L * g_off modes of ~1 fs in every mode with an OFF device in series
+   with an inductance -> the trapezoidal stage re-excites them (H1) ->
+   a zero-current diode turn-off has no right successor but "all OFF",
+   which the settle does not select (H3) -> with device capacitances the
+   grind moves to the all-inductor node pri_pos, whose voltage is solved
+   to round-off at h ~ 2e-16 s (admittance h/2L ~ 1e-10 S against g_on
+   1e3) (H4, H5).
+
+   What converges: device C_oss + C_j AND a winding capacitance on
+   pri_pos, at x10 of the values above (forced 4-27, fuzz spread 2e-8 V,
+   rtol ladder settling to 1e-4 V). At x1 it still exhausts max_steps at
+   rtol 1e-6.
+
+   Remaining engine defects (for whoever takes them next):
+   (1) a diode zero-crossing event landing next to an all-inductor node
+   drives h to the 2e-16 s floor and h never grows back;
+   (2) the round-off-floor accept rule's noise bound applies J^-1, with
+   its signs, to a positive |J||x| vector and misses this noise.
+
+   Unverified WIP (not for integration):
+   - `origin/wip/core-p2-trbdf2-psfb` 0a99483b: b9adb6ad BE probes at
+     located diode events + undo read at a longer horizon; 64b3c549
+     `rings()` detector, BE edge commit, SDIRK(2,2) raw restarts with the
+     filtered estimate, BE landing sub-step; 0a99483b TEMPORARY env
+     toggles (PULSIM_X_*).
+   - `origin/wip/core-p2-trbdf2-lte-index2` eb6ea19b: `lte_index2`
+     option, `solver::index2_nodes` per-mode classification, debug
+     toggles, an unbuilt C++ test.
+
+   Fixed on the way, in the PR line: the Illinois bracket starting from
+   a trial state (#18); the re-initialisation step that skipped the
+   crossing detector (#19, b4b71492); a post-event record sample that
+   could go backward in time (e50e7972, landing record order).
+
+   `test_example_psfb_completes_with_a_bounded_step_count` pins 22.851
+   +- 0.2 V over 1.0-1.2 ms of this non-converged run: a completion /
+   bounded-step-count test, not a correctness claim.
+
+   Release list: the trbdf2 PSFB claim of the example moves to a variant
+   with device and winding capacitances; a structural refusal/warning
+   for all-inductor nodes is NOT viable as tried (a simple rule flags
+   ~35 of 109 healthy reference circuits: `_inductor_only_nodes` marks
+   49 nodes, every buck/boost/half-bridge switch node).
