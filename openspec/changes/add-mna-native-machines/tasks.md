@@ -38,7 +38,7 @@
 ## 5. Deprecation
 - [x] 5.1 (DECISIONS D4, D18) `DeprecationWarning` in `add_dc_motor`, `add_pmsm`, `add_bldc`, `add_induction_motor` and the `make_*_observer` functions, naming the native replacement and the measured first-order error
 - [x] 5.2 `im_parameters_from_nameplate` result labelled `estimated` (`_diagnostics["status"]`, D18)
-- [ ] 5.3 Next release: YAML `induction_motor` default `model: mna` (BREAKING, CHANGELOG)
+- [ ] 5.3 Next release: YAML `induction_motor` default `model: mna` (BREAKING, CHANGELOG) — RELEASE: flips with the number-changing release (`update-number-changing-release` 3.7)
 
 ## 6. Documentation
 - [x] 6.1 `AI_GUIDE.md` (machine table: native versus observer, which engine), `docs/motors-induction.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (non-goals; no machine is validated against measurement), `CHANGELOG.md` — AI_GUIDE migration rows (native machines, DC machine), motors-induction see-also, both limitation pages (machines + flux-map row), CHANGELOG (induction machine, harmonics/BLDC, flux maps, DC point). A flux-map row in AI_GUIDE does not fit the guide's 32 KiB budget (`test_ai_guide`); the docstrings carry it

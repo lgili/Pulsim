@@ -1055,6 +1055,37 @@ public:
         return add_saturable_inductor_params_(name, from, to, p);
     }
 
+    /// Hysteretic permeance (add-permeance-magnetic-domain 4.1): a core
+    /// segment of `area` [m²], `length` [m] with the Jiles-Atherton law
+    /// between magnetic nodes m_a, m_b. The dual of a one-turn
+    /// `add_hysteretic_core_inductor`: a unit winding `{name}.w` whose
+    /// electrical port is the internal node `{name}.e` (to ground) and the
+    /// JA inductor `{name}` (N = 1, no gap) across it, so the MMF across
+    /// the segment is the inductor's current (`res.i(name)`, H = F/length),
+    /// the flux through it its flux linkage (Φ = A·B) and the flux rate the
+    /// voltage of `{name}.e`. Existing kinds only: every engine treats it
+    /// as a gyrator plus a JA inductor (Newton engines; the others refuse
+    /// it by name).
+    CircuitBuilder& add_hysteretic_permeance(
+        std::string_view name, std::string_view m_a, std::string_view m_b,
+        Real area, Real length, const models::JilesAthertonParams& ja,
+        int substeps_min = 8, Real M0 = Real{0}) {
+        require_geometry_("add_hysteretic_permeance", name, area, length);
+        const std::string n{name};
+        // validate before the winding is added (no half-built element)
+        models::JilesAthertonCore::Params c;
+        c.N = Real{1}; c.Ae = area; c.le = length; c.lg = Real{0}; c.ja = ja;
+        c.substeps_min = substeps_min; c.M0 = M0;
+        models::JilesAthertonCore::validate(
+            c, std::format("add_hysteretic_permeance(\"{}\")", name));
+        // magnetic ports swapped: the flux rate v_e enters at m_a and
+        // leaves at m_b, so F(m_a) − F(m_b) is the inductor's current
+        add_winding(n + ".w", n + ".e", "gnd", m_b, m_a, Real{1});
+        return add_hysteretic_core_inductor(n, n + ".e", "gnd", Real{1}, area,
+                                            length, Real{0}, ja, substeps_min,
+                                            M0);
+    }
+
     /// One secondary of a saturable transformer: terminals, turns,
     /// and its own leakage inductance.
     struct SecondaryWinding {

@@ -1218,7 +1218,24 @@ def _magnetic(saturable):
     return build
 
 
+def _magnetic_hysteretic(on):
+    # add-permeance-magnetic-domain 4.1: a JA core segment (unit winding +
+    # one-turn JA inductor) in series with the gap
+    b = _magnetic(False)(False)
+    if on:
+        ja = p.reference_material("ferrite_n87")
+        b.add_winding("Wd", "o", "gnd", "m1", "gnd", 25)
+        b.add_magnetic_resistance("Rm", "m1", "m2", 0.625)
+        b.add_hysteretic_permeance("Core", "m2", "m3", 76e-6, 72e-3, ja.Ms,
+                                   ja.a, ja.alpha, ja.c, ja.k)
+        b.add_air_gap("Gap", "m3", "gnd", 76e-6, 0.5e-3)
+    return b
+
+
 MAGNETIC_CELLS = {
+    "magnetic[hysteretic_permeance]": (
+        (_magnetic_hysteretic, "o", "Core", 5e-4, 1e-7, False),
+        ("Gyrator", "Capacitor", "SaturableInductor", "Resistor")),
     "magnetic[linear]": (
         (_magnetic(False), "o", "Core", 5e-4, 1e-7, False),
         ("Gyrator", "Capacitor", "Resistor")),
@@ -2059,3 +2076,14 @@ def test_gated_device_dc_operating_point(name):
             # point's 1e-12 S node floor
             g_off = n_branches * 1e-9
             assert v0 == pytest.approx(10.0 / (1e-6 + g_off + 1e-12), rel=1e-9)
+
+
+def test_hysteretic_permeance_refused_by_the_ac_sweep():
+    # a Jiles-Atherton law has no unique small-signal model (minor loops):
+    # the sweep refuses its inductor by name, as for the inductor form
+    b = _magnetic_hysteretic(True)
+    with pytest.raises(p.UnsupportedError, match="Jiles-Atherton") as ei:
+        k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
+    assert ei.value.device == "Core"

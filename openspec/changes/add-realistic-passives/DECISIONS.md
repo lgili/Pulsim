@@ -184,3 +184,26 @@ Each entry: question → option taken → why → how to reverse.
   static and coupled cases as "ran although refused" (the case table and
   the manifest disagree there; not this change's to settle).
 - Reverse: delete the case, its manifest entry and golden; count back to 20.
+
+## D17. Bergeron line after the device interface landed (closeout 2026-11-19)
+
+- Question: D12 deferred section 5 to the device interface; it has
+  landed (`device::StatefulKind`, `pwl::StatefulKinds`). Is section 5
+  doable now without touching a time loop?
+- Finding: not on the contract as it stands. A stateful kind declares
+  `kFlatPerDevice`, which must equal its block's compile-time
+  `reals_per_instance` (`StatefulCheck::reals`); a delay line carries
+  `ceil(τ/dt) + 1` samples of `(v, i)` per end, fixed per run but not per
+  kind. And every stateful kind must sit on a Newton row of `kKindCaps`
+  (`StatefulCheck::newton`); the line is linear (`1/Z0` in the cached
+  matrix, history sources in `b`), so as a Newton kind it would push every
+  circuit holding a line onto the Newton path.
+- What closes it: a variable-length state block (the in-run rollback and
+  the snapshot's flat vector are already `std::vector<Real>`; the block
+  table and the reader need a per-instance length), a linear "b-source"
+  category whose stamp adds to `b` only (the cached matrix keeps `1/Z0`
+  from the build), then tasks 5.1–5.10 unchanged. The trbdf2 step cap at
+  τ can be set by the run plan as `dt_max` (above the dispatch, no loop
+  hunk); stage-time lookup reads `StepCtx::t`.
+- Option: left open as NOT DONE (not attempted in the closeout session);
+  `model="bergeron"` keeps refusing by name.

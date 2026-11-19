@@ -92,3 +92,51 @@ Implementation decisions taken while applying the change (2026-11-18).
    whose m_pos both face the same yoke drive flux in opposite senses
    around the window: their coupling is negative (k = −0.8 in the EE
    test). Reversing one magnetic port reverses its dot.
+
+10. **Hysteretic permeance = unit winding + one-turn JA inductor (4.1,
+   closeout 2026-11-19).** `add_hysteretic_permeance(name, m_a, m_b,
+   area, length, Ms, a, alpha, c, k)` builds the gyrator `{name}.w`
+   (g = 1, magnetic ports swapped) on the internal node `{name}.e` and the
+   existing `add_hysteretic_core_inductor` `{name}` with N = 1, no gap,
+   across it. By gyrator duality an inductor behind a unit gyrator is a
+   capacitor-type element: the MMF F(m_a) − F(m_b) is the JA inductor's
+   current (H = F/l, the JA law's own H for N = 1), the flux through the
+   segment is its flux linkage (Φ = A·B) and the flux rate the voltage of
+   `{name}.e`. No new kind (decision 1 again): the IR, YAML round trip,
+   snapshot (the saturable-inductor block), conformance table and
+   refusals are the gyrator's and the JA inductor's (dsed / bdf1 / AC
+   refuse the JA kind by name, naming `{name}`). Measured against
+   `add_hysteretic_core_inductor` with N = 100 on the 50 Hz drive of
+   `test_hysteretic_core_in_loop.py`: currents 1.0e-9 (pwl) / 1.3e-9
+   (trbdf2) of the peak; ∮F·dΦ over the steady cycle equals the absorbed
+   electrical energy to 1.1e-9. `res.flux` / `b_field` / `h_field` refuse
+   it by name (KeyError from `magnetic_element`): Φ depends on the JA state,
+   not on F alone; the message gives the MMF and flux-rate recipe. YAML
+   type `hysteretic_permeance` (keys `from`, `to`, `area`, `length`,
+   `Ms`, `a`, `alpha`, `c`, `k`, optional `M0`) builds the same circuit.
+
+11. **Loss-element fitter (4.4).** `pulsim.fit_core_loss_elements(f, B,
+   P_v, *, geometry)` fits the Bertotti split at sinusoidal flux,
+   `k_h·f·B^β + k_e·f²·B² + k_x·f^1.5·B^1.5`, by non-negative least squares
+   on the relative error inside a bounded 1-D search over β, and maps
+   `k_e → R_m = k_e·l/(2π²A)`, `k_x → c = k_x·l/((2π)^1.5·0.5564·√A)`.
+   The hysteresis term is reported (it belongs to the JA law, not to these
+   elements). The result lists every point it was fitted on; nothing
+   reports agreement with them. Round trip 1e-6 on synthetic data; the
+   fitted `R_m` dissipates its eddy share `k_e·f²·B²·volume` in a run
+   within 1e-4.
+
+12. **Excess-loss element not done (4.2, 4.3, 4.5).** It needs a new
+   Newton law, which no existing kind provides: by the same duality as
+   decision 10 the design's current-controlled law F(u) = c·u/(u²+ε²)^¼
+   becomes a VOLTAGE-controlled conductance i = F(v) on an internal node
+   behind a unit winding (v = u = dΦ/dt; dF/du > 0 everywhere, so the
+   Jacobian is never singular), i.e. one new two-terminal NewtonStatic
+   kind. A new kind reaches the pool (`StoredKind`, entry, `kKindCaps`
+   row decided for every engine and the AC sweep), `ir/fields.hpp`, the
+   hand stamp (`nonlinear_refresh_*`) and the interface law
+   (`device/laws.hpp`), `device_readings` / `loop_feed`,
+   `analysis/linearize.hpp`, the IR and YAML emitter, the loader, the
+   bindings and stubs, the generated device reference, and every test that
+   lists the kinds exactly. Not attempted in the closeout session for its
+   size; 4.3 and 4.5 (which uses the element) wait for it.

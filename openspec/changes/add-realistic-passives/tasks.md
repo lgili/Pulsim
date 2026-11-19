@@ -1,3 +1,5 @@
+Status (closeout 2026-11-19): open boxes — section 5 only (the Bergeron line, 5.1–5.10): NOT DONE, needs a contract extension of the stateful-kind interface (5.1, D17). Everything else is done.
+
 ## 1. ESR, ESL, parallel capacitance
 - [x] 1.1 `CircuitBuilder::add_capacitor(..., esr, esl)` and `add_inductor(..., esr, c_par)`: composite expansion with internal nodes only for non-zero values; sub-element names `{name}.esr`, `{name}.esl`, `{name}.cpar`; validation by name (finite, ≥ 0) — Python wrappers installed on `CircuitBuilder` (`python/pulsim/passives.py`, DECISIONS D1)
 - [x] 1.2 Identity test: every existing `add_capacitor` / `add_inductor` call (all parameters zero) is bit-identical (states, node count, benchmark hashes) — states and node count bit-identical (zero parameters call the native method); benchmark hashes not run
@@ -29,20 +31,20 @@
 - [x] 4.5 YAML: `nonlinear_capacitor` with `table:` or `dc_bias:` curve — `law:` (the power-MOSFET charge-law map, `law: table` included) or `dc_bias: {v, C}` (mirrored odd, knots as given; no residual check — use `fit_mlcc_dc_bias` for one)
 
 ## 5. Bergeron line
-- [ ] 5.1 `models/transmission_line.hpp` (params, validation, `R ≪ Z0` check) and `pwl/transmission_line_history.hpp` (ring buffer of both ends, delayed-value lookup with linear interpolation, snapshot) — NOT DONE: kernel device; does not fit today's step loop without touching it (D6)
-- [ ] 5.2 Stamp: `1/Z0` across each port in the cached matrix; history sources into `b` each step; `R/4`, `R/2`, `R/4` composite
-- [ ] 5.3 `pwl`: refuse `dt > τ` naming the line; test (matched source, open end, `τ/dt` = 100) → 0 V before `τ`, 1.000 V after, peak ≤ 1.000 V + 1e-9
-- [ ] 5.4 Lattice test: 1 V step, 10 Ω source, open end → far end 1.667, 0.556, 1.296 V after `τ`, `3τ`, `5τ` (1e-9)
-- [ ] 5.5 Non-integer `τ/dt` (e.g. 100.5): steps within 2 % of their value; documentation recommends a divisor
-- [ ] 5.6 `trbdf2`: step capped at `τ`, stage-time history lookup; lattice test (1e-3)
-- [ ] 5.7 DC operating point: series resistance; history initialised from it; a line carrying DC current starts the transient with no wave (far-end voltage constant to 1e-9)
-- [ ] 5.8 Lossy line: `R` = 1 Ω on a 50 Ω line, matched at both ends → far-end step attenuated to `Z0/(2·Z0 + R)` = 0.4950 V in steady state (1e-6)
-- [ ] 5.9 Refusals through the conformance error: `dsed`, the exact propagator, periodic-steady-state shooting, AC (message names `model="pi"`)
-- [ ] 5.10 Binding, stubs, YAML type `transmission_line`
+- [ ] 5.1 `models/transmission_line.hpp` (params, validation, `R ≪ Z0` check) and `pwl/transmission_line_history.hpp` (ring buffer of both ends, delayed-value lookup with linear interpolation, snapshot) — NOT DONE (all of section 5, D17): the device interface has landed, but its stateful-kind contract does not describe this kind — `device::StatefulKind` fixes the reals per instance (`kFlatPerDevice` = `kStateBlocks[...].reals_per_instance`, a compile-time constant; a delay line's ring buffer has τ/dt + 1 samples per end) and admits only Newton rows of `kKindCaps` (`StatefulCheck::newton`; the line is linear: `1/Z0` in the cached matrix plus a history source in `b`). Closing it needs a variable-length state block (and its snapshot reader branch) and a linear b-source category in `device/kind.hpp` / `device_state.hpp` / `pwl/stateful_histories.hpp`; the trbdf2 step cap at τ can be a plan-level `dt_max` (no loop hunk). Not attempted in the closeout session
+- [ ] 5.2 Stamp: `1/Z0` across each port in the cached matrix; history sources into `b` each step; `R/4`, `R/2`, `R/4` composite — NOT DONE: part of section 5 (see 5.1, D17)
+- [ ] 5.3 `pwl`: refuse `dt > τ` naming the line; test (matched source, open end, `τ/dt` = 100) → 0 V before `τ`, 1.000 V after, peak ≤ 1.000 V + 1e-9 — NOT DONE: part of section 5 (see 5.1, D17)
+- [ ] 5.4 Lattice test: 1 V step, 10 Ω source, open end → far end 1.667, 0.556, 1.296 V after `τ`, `3τ`, `5τ` (1e-9) — NOT DONE: part of section 5 (see 5.1, D17)
+- [ ] 5.5 Non-integer `τ/dt` (e.g. 100.5): steps within 2 % of their value; documentation recommends a divisor — NOT DONE: part of section 5 (see 5.1, D17)
+- [ ] 5.6 `trbdf2`: step capped at `τ`, stage-time history lookup; lattice test (1e-3) — NOT DONE: part of section 5 (see 5.1, D17)
+- [ ] 5.7 DC operating point: series resistance; history initialised from it; a line carrying DC current starts the transient with no wave (far-end voltage constant to 1e-9) — NOT DONE: part of section 5 (see 5.1, D17)
+- [ ] 5.8 Lossy line: `R` = 1 Ω on a 50 Ω line, matched at both ends → far-end step attenuated to `Z0/(2·Z0 + R)` = 0.4950 V in steady state (1e-6) — NOT DONE: part of section 5 (see 5.1, D17)
+- [ ] 5.9 Refusals through the conformance error: `dsed`, the exact propagator, periodic-steady-state shooting, AC (message names `model="pi"`) — NOT DONE: part of section 5 (see 5.1, D17)
+- [ ] 5.10 Binding, stubs, YAML type `transmission_line` — NOT DONE: part of section 5 (see 5.1, D17)
 
 ## 6. Conformance and documentation
 - [x] 6.1 Rows in the matrix of `add-engine-conformance-matrix`: `capacitor[esr/esl]`, `inductor[esr/c_par/rac]`, `nonlinear_capacitor[odd table]`, `transmission_line[pi]`, `transmission_line[bergeron]` × {pwl, trbdf2, dsed, DC, AC} — `test_engine_conformance.py::PASSIVE_CELLS` × {pwl, trbdf2, dsed, bdf1} plus the AC sweep (composites run and agree with pwl; the odd table is refused by name on dsed, bdf1 and AC). DC: the composites are their R, L, C. No `bergeron` row: the model is refused when the circuit is built (section 5, D12)
-- [ ] 6.2 `AI_GUIDE.md` (which datasheet number goes where; the step needed for an ESL resonance; π versus Bergeron), `docs/losses-and-thermal.md` (ESR and ladder loss rows), `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (single-pair line, no coupled cable, one ESR value, large-signal ceramic behaviour), `CHANGELOG.md` — PARTIAL: AI_GUIDE (signatures and one note), losses-and-thermal, both limitation pages, CHANGELOG; π-versus-Bergeron and ESL step guidance in the limitation pages only
+- [x] 6.2 `AI_GUIDE.md` (which datasheet number goes where; the step needed for an ESL resonance; π versus Bergeron), `docs/losses-and-thermal.md` (ESR and ladder loss rows), `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (single-pair line, no coupled cable, one ESR value, large-signal ceramic behaviour), `CHANGELOG.md` — AI_GUIDE (signatures; closeout: datasheet ESR / ESL / C_par, the fixed step `dt <= 1/(20·f_res)` for an ESL resonance, `model='pi'` only with `recommend_line_sections`), losses-and-thermal, both limitation pages, CHANGELOG
 
 ## 7. Verification
 - [x] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check

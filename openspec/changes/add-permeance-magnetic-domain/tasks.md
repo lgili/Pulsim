@@ -1,3 +1,5 @@
+Status (closeout 2026-11-19): open boxes — 4.2 NOT DONE (the excess-loss element: one new Newton kind, DECISIONS 12); 4.3 and 4.5 wait for it.
+
 ## 1. Linear magnetic networks (after `add-controlled-source-set`)
 - [x] 1.1 `add_winding` (gyrator `g = 1/N`, `turns > 0` refused otherwise by name), `add_permeance`, `add_air_gap` (`P = μ₀·A/l`), `add_magnetic_resistance`; builder registry of magnetic nodes
 - [x] 1.2 Preflight: a magnetic island without a reference node is refused naming one of its nodes; no tie resistor is inserted on a magnetic node
@@ -21,12 +23,12 @@
 - [x] 3.5 Three-limb transformer with saturable limbs under unbalanced load (tutorial case; flux in each limb recorded) — tutorial 09
 
 ## 4. Hysteresis and excess loss (after `add-unified-device-interface`)
-Deferred: add-unified-device-interface is not on this branch's base (DECISIONS 7).
-- [ ] 4.1 `add_hysteretic_permeance` on the existing JA law; test against `add_hysteretic_core_inductor` for the same core within 1e-6; loop area equals `∮F·dΦ` within 1e-6
-- [ ] 4.2 `models/magnetic_loss.hpp`: excess-loss element with the flux rate as its unknown; `dF/du` against finite differences (1e-7); monotone at 1e-12 spacing around `u = 0`
-- [ ] 4.3 Test: `c = 0.01`, `ε = 0.01 V`, N = 10, 100 V peak sine → 0.1759 W within 0.5 %
-- [ ] 4.4 `fit_core_loss_elements(f, B, P_v, *, geometry)`; round-trip on synthetic loss data (1e-6); the fitted points are excluded from any reported agreement
-- [ ] 4.5 Consistency report (not a validation): JA + eddy + excess fitted on sine data, compared with iGSE on a triangular flux; the difference is reported, not gated
+add-unified-device-interface has landed (DECISIONS 7 no longer applies); closeout 2026-11-19: DECISIONS 10–12.
+- [x] 4.1 `add_hysteretic_permeance` on the existing JA law; test against `add_hysteretic_core_inductor` for the same core within 1e-6; loop area equals `∮F·dΦ` within 1e-6 — unit winding + one-turn JA inductor (DECISIONS 10); measured 1.0e-9 (pwl) / 1.3e-9 (trbdf2) of the peak current, ∮F·dΦ = absorbed electrical energy to 1.1e-9, B–H replay within its 5 % (`test_hysteretic_permeance_*`); YAML `hysteretic_permeance`; conformance cell `magnetic[hysteretic_permeance]`
+- [ ] 4.2 `models/magnetic_loss.hpp`: excess-loss element with the flux rate as its unknown; `dF/du` against finite differences (1e-7); monotone at 1e-12 spacing around `u = 0` — NOT DONE: needs one new two-terminal NewtonStatic kind (a voltage-controlled conductance behind a unit winding) on every surface; not attempted in the closeout session (DECISIONS 12)
+- [ ] 4.3 Test: `c = 0.01`, `ε = 0.01 V`, N = 10, 100 V peak sine → 0.1759 W within 0.5 % — NOT DONE: waits for 4.2
+- [x] 4.4 `fit_core_loss_elements(f, B, P_v, *, geometry)`; round-trip on synthetic loss data (1e-6); the fitted points are excluded from any reported agreement — `pulsim.fit_core_loss_elements` (DECISIONS 11); round trip of β, k_h, R_m, c to 1e-6; the fitted R_m dissipates its eddy share k_e·f²·B²·volume in a run within 1e-4; `fitted_on` lists every point
+- [ ] 4.5 Consistency report (not a validation): JA + eddy + excess fitted on sine data, compared with iGSE on a triangular flux; the difference is reported, not gated — NOT DONE: waits for 4.2 (the excess element)
 
 ## 5. Outputs and surface
 - [x] 5.1 `res.flux(name)`, `res.b_field(name)`, `res.h_field(name)`; loss elements in `device_loss_summary` under `core_loss`

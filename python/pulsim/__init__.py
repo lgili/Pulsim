@@ -297,6 +297,8 @@ from .magnetic import (
     steinmetz_loss_density,
     igse_loss_density,
     core_loss,
+    CoreLossElements,
+    fit_core_loss_elements,
 )
 from .switchgear import (
     add_rc_snubber,
@@ -758,6 +760,8 @@ __all__ = [
     "steinmetz_loss_density",
     "igse_loss_density",
     "core_loss",
+    "CoreLossElements",
+    "fit_core_loss_elements",
     # Switchgear & protection (Phase C.4).
     "add_rc_snubber",
     "make_thyristor_switch_fn",

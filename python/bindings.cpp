@@ -876,6 +876,30 @@ void init_module(py::module_& m) {
               "tangent in the Jacobian -- no dummy source, no observer, no "
               "one-step lag. i(name) is the winding current; replay the "
               "B-H trajectory from it with pulsim.compute_bh_loop.")
+        .def("add_hysteretic_permeance",
+              [](builder::CircuitBuilder& b, const std::string& name,
+                 const std::string& m_a, const std::string& m_b,
+                 double area, double length,
+                 double Ms, double a, double alpha, double c, double k,
+                 int substeps_min, double M0) -> builder::CircuitBuilder& {
+                  models::JilesAthertonParams ja;
+                  ja.Ms = Ms; ja.a = a; ja.alpha = alpha; ja.c = c; ja.k = k;
+                  return b.add_hysteretic_permeance(
+                      name, m_a, m_b, area, length, ja, substeps_min, M0);
+              },
+              py::arg("name"), py::arg("m_a"), py::arg("m_b"),
+              py::arg("area"), py::arg("length"),
+              py::arg("Ms"), py::arg("a"), py::arg("alpha"), py::arg("c"),
+              py::arg("k"), py::arg("substeps_min") = 8, py::arg("M0") = 0.0,
+              py::return_value_policy::reference,
+              "Hysteretic permeance: a core segment (area [m^2], length [m]) "
+              "with the Jiles-Atherton law (Ms, a, alpha, c, k) between "
+              "magnetic nodes m_a, m_b -- the dual of a one-turn "
+              "add_hysteretic_core_inductor: a unit winding '<name>.w' on "
+              "the internal node '<name>.e' and the JA inductor '<name>' "
+              "(N = 1, no gap). The MMF F(m_a) - F(m_b) is i(name) (H = "
+              "F/length), the flux rate is v('<name>.e'). Newton engines "
+              "(pwl, trbdf2) only.")
         .def("add_multi_winding_transformer",
               [](builder::CircuitBuilder& b, const std::string& name,
                  const std::vector<std::tuple<std::string, std::string, double>>& windings,
@@ -1089,6 +1113,17 @@ void init_module(py::module_& m) {
                   } else if (mag && k == K::Gyrator) {
                       d["kind"] = "winding";
                       d["turns"] = Real{1} / pool.gyrator_params(bid).g;
+                  } else if (k == K::SaturableInductor &&
+                             br.from != topology::Graph::ground() &&
+                             g.node(br.from).name == std::string{name} + ".e") {
+                      // add_hysteretic_permeance: Φ depends on the JA state,
+                      // not on F alone
+                      throw py::key_error(std::format(
+                          "'{}' is a hysteretic permeance: its flux depends on "
+                          "the Jiles-Atherton state, so flux / b_field / "
+                          "h_field are not derived from F. Read the MMF as "
+                          "res.i('{}') and the flux rate as res.v('{}.e')",
+                          name, name, name));
                   } else {
                       throw py::key_error(std::format(
                           "'{}' is not a magnetic element (winding, permeance, "

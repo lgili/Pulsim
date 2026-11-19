@@ -566,7 +566,7 @@ def test_yaml_types_build_the_same_circuit():
 @pytest.mark.parametrize("bad,needle", [
     ("{type: winding, name: W, e_pos: e, e_neg: gnd, m_pos: m1, m_neg: gnd, turns: 25, N: 3}", "N"),
     ("{type: air_gap, name: G, from: m1, to: gnd, area: 1.0e-4}", "length"),
-    ("{type: hysteretic_permeance, name: H, from: m1, to: gnd}", "unified device interface"),
+    ("{type: hysteretic_permeance, name: H, from: m1, to: gnd}", "Ms"),
     ("{type: excess_loss, name: X, from: m1, to: gnd}", "has not shipped"),
 ])
 def test_yaml_magnetic_types_are_strict(bad, needle):
@@ -715,3 +715,147 @@ def test_energy_balance_of_the_multi_leg_cases_is_exact_on_the_grid(case):
     # Measured 1.0e-10 (three-limb: a per-step residual on the yoke that
     # accumulates over 2000 steps, as in the flux check) and 8.6e-14 (EE).
     assert np.max(np.abs(resid)) <= 1e-8 * np.max(np.abs(E_store))
+
+
+# ---------------------------------------------------------------------
+# 4.1 Hysteretic permeance: the Jiles-Atherton law as a core segment.
+# Reference: add_hysteretic_core_inductor with the same core and N turns
+# (an independent device: the JA inductor seen from the winding), on the
+# 50 Hz drive of test_hysteretic_core_in_loop.py (B_pk 0.32 T, steady
+# cycle 60-80 ms, source started at its peak).
+# ---------------------------------------------------------------------
+
+N_H, A_H, L_H = 100, 1e-4, 0.05
+
+
+def _ja_run(perm, engine="pwl", t_end=0.08):
+    ja = p.reference_material("ferrite_n87")
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vs", "a", "gnd", 0.0, 1.0, 50.0, math.pi / 2)
+    b.add_resistor("Rs", "a", "n1", 0.1)
+    if perm:
+        b.add_winding("W", "n1", "gnd", "m1", "gnd", N_H)
+        b.add_hysteretic_permeance("Core", "m1", "gnd", A_H, L_H, ja.Ms,
+                                   ja.a, ja.alpha, ja.c, ja.k)
+    else:
+        b.add_hysteretic_core_inductor("Core", "n1", "gnd", float(N_H), A_H,
+                                       L_H, 0.0, ja.Ms, ja.a, ja.alpha, ja.c,
+                                       ja.k)
+    r = p.simulate(b, t_end=t_end, engine=engine, dt=5e-6)
+    i = r.i("W", port=1) if perm else r.i("Core")
+    return np.asarray(r.times), np.asarray(i), r
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_hysteretic_permeance_equals_the_ja_inductor(engine):
+    t_ref, i_ref, _ = _ja_run(False, engine)
+    t, i, _ = _ja_run(True, engine)
+    assert np.max(np.abs(i_ref)) > 0.05           # the core is driven
+    assert rel(np.interp(t_ref, t, i), i_ref) < 1e-6
+
+
+def test_hysteretic_permeance_loop_area_is_the_absorbed_energy():
+    # ∮F·dΦ of the segment (F = res.i(name), dΦ/dt = v(name.e)) over the
+    # steady cycle equals the electrical energy the JA inductor absorbs,
+    # ∮v·i dt; the loop is open (hysteresis loss > 0), and the replay of the
+    # B-H trajectory (pulsim.compute_bh_loop, an independent integration of
+    # the JA ODE) agrees within its own 5 % (test_hysteretic_core_in_loop).
+    t_ref, i_ref, r_ref = _ja_run(False)
+    t, _, r = _ja_run(True)
+    m = (t_ref >= 0.06) & (t_ref <= 0.08)
+    W_el = float(np.trapezoid(np.asarray(r_ref.v("n1"))[m] * i_ref[m], t_ref[m]))
+    m = (t >= 0.06) & (t <= 0.08)
+    F = np.asarray(r.i("Core"))
+    W_loop = float(np.trapezoid(F[m] * np.asarray(r.v("Core.e"))[m], t[m]))
+    assert W_el > 0.0
+    assert abs(W_loop - W_el) < 1e-6 * W_el
+    ja = p.reference_material("ferrite_n87")
+    loop = p.compute_bh_loop(F / N_H, t, params=ja, N_turns=N_H, l_m=L_H,
+                             A_core=A_H, period=0.02)
+    W_bh = float(loop.energy_per_cycle_per_m3) * A_H * L_H
+    assert abs(W_bh - W_el) < 0.05 * W_el
+
+
+def test_hysteretic_permeance_surfaces():
+    ja = p.reference_material("ferrite_n87")
+    b = p.CircuitBuilder()
+    b.add_hysteretic_permeance("Core", "m1", "gnd", A_H, L_H, ja.Ms, ja.a,
+                               ja.alpha, ja.c, ja.k)
+    assert b.magnetic_nodes() == ["m1"]
+    names = {d["name"]: d["kind"] for d in b.components()}
+    assert names["Core.w"] == "gyrator" and names["Core"] == "saturable_inductor"
+    with pytest.raises(KeyError, match="hysteretic permeance"):
+        b.magnetic_element("Core")
+    with pytest.raises(ValueError, match="add_hysteretic_permeance.*area"):
+        p.CircuitBuilder().add_hysteretic_permeance(
+            "X", "m1", "gnd", 0.0, L_H, ja.Ms, ja.a, ja.alpha, ja.c, ja.k)
+    # the exact engine refuses the JA kind by name
+    b.add_winding("W", "e", "gnd", "m1", "gnd", N_H)
+    b.add_sine_voltage_source("V", "e", "gnd", 0.0, 1.0, 50.0)
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(b, t_end=1e-3, engine="dsed", dt=1e-5)
+    assert ei.value.device == "Core"
+    # YAML builds the same circuit
+    y = ("circuit:\n  devices:\n"
+         f"    - {{type: hysteretic_permeance, name: Core, from: m1, to: gnd, "
+         f"area: {A_H}, length: {L_H}, Ms: {ja.Ms}, a: {ja.a}, "
+         f"alpha: {ja.alpha}, c: {ja.c}, k: {ja.k}}}\n")
+    lc = p.load_yaml_string(y)
+    b2 = p.CircuitBuilder()
+    b2.add_hysteretic_permeance("Core", "m1", "gnd", A_H, L_H, ja.Ms, ja.a,
+                                ja.alpha, ja.c, ja.k)
+    assert lc.builder.components() == b2.components()
+    assert lc.builder.build().value_hash() == b2.build().value_hash()
+
+
+# ---------------------------------------------------------------------
+# 4.4 fit_core_loss_elements: round trip on loss data generated from known
+# coefficients (a synthetic illustration, not a material), and the fitted
+# R_m reproducing its own eddy share in a run (closed form 2π²·k_inst·f²B²).
+# ---------------------------------------------------------------------
+
+def _loss_data(k_h=40.0, beta=2.3, k_e=0.6, k_x=1.8):
+    f = np.repeat([25e3, 50e3, 100e3, 200e3], 3)
+    B = np.tile([0.05, 0.1, 0.2], 4)
+    P = k_h * f * B ** beta + k_e * f ** 2 * B ** 2 + k_x * f ** 1.5 * B ** 1.5
+    return f, B, P
+
+
+def test_fit_core_loss_elements_round_trip():
+    f, B, P = _loss_data()
+    A, seg_l = 76e-6, 72e-3
+    fit = p.fit_core_loss_elements(f, B, P, geometry=(A, seg_l))
+    assert fit.beta == pytest.approx(2.3, rel=1e-6)
+    assert fit.k_h == pytest.approx(40.0, rel=1e-6)
+    assert fit.R_m == pytest.approx(0.6 * seg_l / (2 * math.pi ** 2 * A), rel=1e-6)
+    want_c = 1.8 * seg_l / ((2 * math.pi) ** 1.5 * 0.5563852309207994 * math.sqrt(A))
+    assert fit.c == pytest.approx(want_c, rel=1e-6)
+    assert fit.residual < 1e-6
+    assert len(fit.fitted_on) == f.size          # the points are reported fitted
+    with pytest.raises(ValueError, match="at least four"):
+        p.fit_core_loss_elements(f[:3], B[:3], P[:3], geometry=(A, seg_l))
+    with pytest.raises(ValueError, match="misses the data"):
+        p.fit_core_loss_elements(f, B, P * (1 + 0.5 * np.sin(np.arange(f.size))),
+                                 geometry=(A, seg_l))
+
+
+def test_fitted_magnetic_resistance_dissipates_its_eddy_share():
+    # one winding (N = 10) on a segment of the fitted R_m in series with a
+    # permeance; a 100 V, 50 kHz sine gives B_pk = V/(ωNA) and the
+    # resistance's in-loop loss must equal k_e·f²·B²·volume
+    f, B, P = _loss_data()
+    A, seg_l = 76e-6, 72e-3
+    fit = p.fit_core_loss_elements(f, B, P, geometry=(A, seg_l))
+    fr, V, N = 50e3, 100.0, 10
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "e", "gnd", 0.0, V, fr)
+    b.add_winding("W", "e", "gnd", "m1", "gnd", N)
+    b.add_magnetic_resistance("Rm", "m1", "m2", fit.R_m)
+    b.add_permeance("Pc", "m2", "gnd", 2e-6)
+    r = p.simulate(b, t_end=4 / fr, dt=1 / (fr * 2000))
+    t = np.asarray(r.times)
+    u = np.asarray(r.v("e")) / N                     # dΦ/dt
+    m = t >= 2 / fr
+    P_sim = float(np.trapezoid(fit.R_m * u[m] ** 2, t[m]) / (t[m][-1] - t[m][0]))
+    B_pk = V / (2 * math.pi * fr * N * A)
+    assert P_sim == pytest.approx(fit.k_e * fr ** 2 * B_pk ** 2 * A * seg_l, rel=1e-4)

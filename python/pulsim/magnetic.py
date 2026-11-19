@@ -263,3 +263,112 @@ def core_loss(B,
     else:
         P_v = igse_loss_density(B, frequency_or_t, material)
     return float(P_v * volume_m3)
+
+
+# ---------------------------------------------------------------------------
+# add-permeance-magnetic-domain 4.4: loss data -> in-loop loss elements
+# ---------------------------------------------------------------------------
+
+#: mean of |cos|^1.5 over a period, Gamma(1.25)/(sqrt(pi)*Gamma(1.75))
+_MEAN_ABS_COS_1P5 = 0.5563852309207994
+
+
+@dataclass(frozen=True)
+class CoreLossElements:
+    """Result of :func:`fit_core_loss_elements`.
+
+    ``R_m`` [S] is the magnetic resistance (``add_magnetic_resistance``,
+    classical eddy loss ``R_m·(dΦ/dt)²``) and ``c`` [A/V^0.5] the
+    excess-loss coefficient of ``F = c·sign(u)·|u|^0.5``, ``u = dΦ/dt``, for
+    the segment of the given geometry. ``k_h``, ``beta`` are the
+    hysteresis term ``k_h·f·B^beta`` of the same fit: hysteresis belongs to
+    the Jiles-Atherton law (``fit_ja_from_bh_curve``), not to these
+    elements, and is reported only so the split is visible. ``k_e``,
+    ``k_x`` are the sine-loss coefficients (``k_e·f²·B²``,
+    ``k_x·f^1.5·B^1.5``, W/m³). ``residual`` is the largest relative error
+    of the three-term model on the fitted points; ``fitted_on`` lists those
+    points (index, f, B) — they are FITTED, and no agreement with them is
+    a validation of the model.
+    """
+    R_m: float
+    c: float
+    k_h: float
+    beta: float
+    k_e: float
+    k_x: float
+    residual: float
+    fitted_on: tuple
+    area: float
+    length: float
+
+
+def fit_core_loss_elements(f, B, P_v, *, geometry, tol=0.05,
+                           beta_bounds=(1.0, 3.0)):
+    """Fit the in-loop loss elements of a core segment to sine loss data.
+
+    Model (Bertotti's split at sinusoidal flux of peak ``B`` and
+    frequency ``f``, volumetric loss ``P_v`` in W/m³)::
+
+        P_v = k_h·f·B^beta + k_e·f²·B² + k_x·f^1.5·B^1.5
+
+    ``k_h, k_e, k_x >= 0`` by non-negative least squares on the relative
+    error for each ``beta`` of a bounded 1-D search. For a segment of
+    ``geometry = (area [m²], length [m])`` the elements are, with
+    ``<(dB/dt)²> = 2π²f²B²`` and ``<|dB/dt|^1.5> = (2πfB)^1.5·0.5564``::
+
+        R_m = k_e·length / (2π²·area)
+        c   = k_x·length / ((2π)^1.5·0.5564·sqrt(area))
+
+    Raises ``ValueError`` naming the cause when the inputs are not
+    positive and finite, fewer than four points are given, or the
+    residual exceeds ``tol``.
+    """
+    from scipy.optimize import minimize_scalar, nnls
+
+    f = np.asarray(f, dtype=float).ravel()
+    B = np.asarray(B, dtype=float).ravel()
+    P = np.asarray(P_v, dtype=float).ravel()
+    if not (f.shape == B.shape == P.shape):
+        raise ValueError("fit_core_loss_elements: f, B and P_v must have "
+                         "the same length.")
+    if f.size < 4:
+        raise ValueError("fit_core_loss_elements: needs at least four "
+                         f"(f, B, P_v) points (got {f.size}).")
+    for name, x in (("f", f), ("B", B), ("P_v", P)):
+        if not np.all(np.isfinite(x) & (x > 0)):
+            raise ValueError(f"fit_core_loss_elements: {name} must be "
+                             "positive and finite.")
+    area, length = (float(v) for v in geometry)
+    if not (area > 0 and length > 0 and np.isfinite(area)
+            and np.isfinite(length)):
+        raise ValueError("fit_core_loss_elements: geometry = (area, "
+                         "length) must be positive and finite.")
+
+    def solve(beta):
+        A = np.column_stack((f * B ** beta, f ** 2 * B ** 2,
+                             f ** 1.5 * B ** 1.5)) / P[:, None]
+        k, _ = nnls(A, np.ones_like(P))
+        return k, float(np.max(np.abs(A @ k - 1.0)))
+
+    lo, hi = beta_bounds
+    best = minimize_scalar(lambda b: float(np.sum(
+        (solve(b)[0] @ np.vstack((f * B ** b, f ** 2 * B ** 2,
+                                  f ** 1.5 * B ** 1.5)) / P - 1.0) ** 2)),
+        bounds=(lo, hi), method="bounded",
+        options={"xatol": 1e-12, "maxiter": 500})
+    beta = float(best.x)
+    (k_h, k_e, k_x), residual = solve(beta)
+    if residual > tol:
+        raise ValueError(
+            f"fit_core_loss_elements: the three-term model misses the data "
+            f"by {residual:.3g} (relative) > tol = {tol}; the data are not a "
+            f"hysteresis + eddy + excess split at sinusoidal flux.")
+    R_m = k_e * length / (2.0 * np.pi ** 2 * area)
+    c = k_x * length / ((2.0 * np.pi) ** 1.5 * _MEAN_ABS_COS_1P5
+                        * np.sqrt(area))
+    return CoreLossElements(
+        R_m=float(R_m), c=float(c), k_h=float(k_h), beta=beta,
+        k_e=float(k_e), k_x=float(k_x), residual=residual,
+        fitted_on=tuple((int(i), float(f[i]), float(B[i]))
+                        for i in range(f.size)),
+        area=area, length=length)
