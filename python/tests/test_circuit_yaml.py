@@ -59,8 +59,23 @@ def _same_run(c, c2, **kw):
     np.testing.assert_array_equal(np.asarray(a.states), np.asarray(b.states))
 
 
-ALL_CELLS = {**CELLS, **{n: c[0] for n, c in VARIANT_CELLS.items()},
+# An external device never goes through YAML (its law is native code a
+# netlist must not load): refused both ways, test below.
+NO_YAML = {"ExternalDevice"}
+ALL_CELLS = {**{n: c for n, c in CELLS.items() if n not in NO_YAML},
+             **{n: c[0] for n, c in VARIANT_CELLS.items()},
              **{f"{n}[branch]": c for n, c in FORM_CELLS.items()}}
+
+
+def test_external_device_is_refused_by_yaml_both_ways():
+    build = CELLS["ExternalDevice"][0]
+    c = build(True).build()
+    with pytest.raises(ValueError, match="not written to YAML"):
+        c.to_yaml()
+    doc = ("circuit:\n  devices:\n    - {name: X, type: external_device, "
+           "pins: [a, gnd]}\n")
+    with pytest.raises(Exception, match="external_device"):
+        p.load_yaml_string(doc)
 
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
@@ -83,7 +98,8 @@ def test_every_registry_kind_has_a_yaml_entry():
     for build, *_ in ALL_CELLS.values():
         kinds |= set(re.findall(r"kind: (\w+)", build(True).build().to_yaml()))
     squash = {n.replace("_", "").lower() for n in kinds}
-    assert squash == {n.lower() for n in k.StoredKind.__members__}
+    assert squash == {n.lower() for n in k.StoredKind.__members__} - {
+        n.lower() for n in NO_YAML}
 
 
 def test_every_registry_kind_loads_in_a_netlist():
@@ -107,7 +123,7 @@ def test_every_registry_kind_loads_in_a_netlist():
                 p.load_yaml_string(doc)
             except Exception as e:  # noqa: BLE001 — authoring keys differ
                 assert "unknown type" not in str(e), (d["type"], e)
-    assert len(seen) == len(k.StoredKind.__members__)
+    assert len(seen) == len(k.StoredKind.__members__) - len(NO_YAML)
 
 
 def test_from_yaml_applies_the_authoring_bounds():

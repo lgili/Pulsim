@@ -107,7 +107,9 @@ KINDS = {
 # The PWL current source's knots are a table, not a scalar field: it has
 # no `with_value` field in this slice (DECISIONS.md 4) and is refused by
 # name — checked in test_table_kind_is_refused_by_name.
-TABLE_KINDS = {"PwlCurrentSource"}
+# kinds without scalar field rows: a table, or an external device whose
+# fields are its model's (add-external-device-abi)
+TABLE_KINDS = {"PwlCurrentSource", "ExternalDevice"}
 
 
 def _build(kind, v):

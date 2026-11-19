@@ -325,6 +325,9 @@ inline constexpr std::array kPulseI{
 // The PWL current source's knots are a table, not a scalar field: it has
 // no row entries (a parameter cannot bind to it; `with_value` names it).
 inline constexpr std::array<FieldSpec, 0> kPwlI{};
+// An external device's parameters live in its model's field table (run-time
+// names), not in scalar rows; its values are hashed by content (circuit.hpp).
+inline constexpr std::array<FieldSpec, 0> kExternal{};
 
 }  // namespace detail
 
@@ -340,7 +343,7 @@ inline constexpr std::array<std::span<const FieldSpec>, pwl::DevicePool::kNumKin
         detail::kPmsm,         detail::kIdealXfmr,     detail::kVccs,
         detail::kCccs,         detail::kCcvs,          detail::kGyrator,
         detail::kSineI,        detail::kPulseI,        detail::kPwlI,
-        detail::kInductionMachine};
+        detail::kInductionMachine, detail::kExternal};
 static_assert(kKindFields.size() == pwl::kKindCaps.size(),
               "every device kind needs a row in ir::kKindFields");
 

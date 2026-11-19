@@ -1490,6 +1490,51 @@ void init_module(py::module_& m) {
               "drops smoothly toward L_residual as |i| → I_sat. "
               "Requires Newton refresh — `simulate()` enables "
               "it automatically.")
+        .def("add_external_device",
+              [](builder::CircuitBuilder& b, const std::string& name,
+                 const std::vector<std::string>& nodes, const std::string& lib,
+                 const std::string& model, const py::object& params,
+                 bool check_contract, bool debug_jacobian) -> builder::CircuitBuilder& {
+                  // add-external-device-abi: loading `lib` runs its native
+                  // code; this call (the user naming the path) is the opt-in.
+                  auto m = xdev::load_model(lib, model);
+                  std::vector<xdev::NamedParam> given;
+                  if (!params.is_none()) {
+                      for (const auto& [k, v] : params.cast<py::dict>()) {
+                          xdev::NamedParam np;
+                          np.name = py::cast<std::string>(k);
+                          if (py::isinstance<py::tuple>(v)) {
+                              const auto t = v.cast<py::tuple>();
+                              if (t.size() != 2) {
+                                  throw py::value_error("add_external_device(\"" + name
+                                      + "\"): parameter '" + np.name
+                                      + "' must be a number or (value, unit)");
+                              }
+                              np.value = t[0].cast<double>();
+                              np.unit = t[1].cast<std::string>();
+                              np.has_unit = true;
+                          } else {
+                              np.value = v.cast<double>();
+                          }
+                          given.push_back(std::move(np));
+                      }
+                  }
+                  auto p = xdev::resolve_params(*m, name, given);
+                  return b.add_external_device(name, nodes, std::move(m), std::move(p),
+                                               check_contract, debug_jacobian);
+              },
+              py::arg("name"), py::arg("nodes"), py::arg("lib"), py::arg("model"),
+              py::arg("params") = py::none(), py::kw_only(),
+              py::arg("check_contract") = true, py::arg("debug_jacobian") = false,
+              py::return_value_policy::reference,
+              "Add an instance of an EXTERNAL device model (add-external-device-abi): "
+              "`lib` is a shared library built against pulsim_xdev.h; loading it runs "
+              "arbitrary native code with your privileges (no sandbox). `nodes` are "
+              "its pins in the model's order; `params` maps field names to a value "
+              "or (value, unit) (the unit must equal the declared one). The model's "
+              "contract (Jacobian, finiteness, KCL, declared claims) is checked here "
+              "and refused by name; `debug_jacobian=True` re-checks the Jacobian at "
+              "every evaluation of the run.")
         .def("add_saturable_inductor_table",
               &builder::CircuitBuilder::add_saturable_inductor_table,
               py::arg("name"), py::arg("n_pos"), py::arg("n_neg"),
@@ -2602,7 +2647,8 @@ void init_module(py::module_& m) {
         .value("SineCurrentSource",   pwl::DevicePool::StoredKind::SineCurrentSource)
         .value("PulseCurrentSource",  pwl::DevicePool::StoredKind::PulseCurrentSource)
         .value("PwlCurrentSource",    pwl::DevicePool::StoredKind::PwlCurrentSource)
-        .value("InductionMachineMna", pwl::DevicePool::StoredKind::InductionMachineMna);
+        .value("InductionMachineMna", pwl::DevicePool::StoredKind::InductionMachineMna)
+        .value("ExternalDevice", pwl::DevicePool::StoredKind::ExternalDevice);
 
     // ---- Phase 4 C.4: exact B–H replay for the in-loop JA device ----------
     m.def("ja_replay",

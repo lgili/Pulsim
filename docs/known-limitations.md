@@ -59,6 +59,7 @@ unless called with `allow_non_passive=True`.
 | PulseCurrentSource | Source | yes | yes | yes | yes | yes |
 | PwlCurrentSource | Source | yes | yes | yes | yes | yes |
 | InductionMachineMna | NewtonStateful | yes | yes | no | no | no |
+| ExternalDevice | NewtonStateful | yes | yes | no | no | no |
 <!-- engine-capabilities:end -->
 
 ## Option capability matrix

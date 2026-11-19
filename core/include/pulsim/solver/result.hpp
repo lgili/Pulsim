@@ -298,6 +298,7 @@ struct SolverSnapshot {
     }
 
 private:
+    std::vector<Real> legacy_external_;
     [[nodiscard]] const std::vector<Real>& legacy_field(device::StateBlock b) const {
         return const_cast<SolverSnapshot*>(this)->legacy_field_ref(b);
     }
@@ -309,6 +310,10 @@ private:
         case device::StateBlock::LauritzenDiode: return legacy.lauritzen_history;
         case device::StateBlock::IgbtTail: return legacy.igbt_tail_history;
         case device::StateBlock::PmsmMna: return legacy.pmsm_history;
+        // add-external-device-abi: no 2.0 field; held here, not pickled in
+        // the legacy payload (a legacy-converted external state then fails
+        // the device's own size check on resume, by name)
+        case device::StateBlock::ExternalDevice: return legacy_external_;
         }
         // A block appended after 2.0 has no named field: never alias one.
         throw std::logic_error(

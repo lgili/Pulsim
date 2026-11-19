@@ -332,6 +332,7 @@ CELLS = {
         "Dd", "o", "gnd")), "o", "Dd", 2e-3, 2e-7, False),
     "PmsmMna": (_pmsm, "ua2", "Md", 2e-2, 1e-5, False),
     "InductionMachineMna": (_induction, "ua2", "Md", 2e-2, 1e-5, False),
+    "ExternalDevice": (lambda on: _external(on), "o", "Rd", 5e-4, 1e-7, False),
     "IdealTransformer": (_xfmr, "o", "Td", 5e-4, 1e-7, False),
     "VCCS": (_ctl(lambda b: b.add_vccs("Gd", "a", "gnd", "x", "gnd", 5e-3)),
              "o", "Gd", 5e-4, 1e-7, False),
@@ -362,6 +363,44 @@ def _switch_fn(b, needs):
     if callable(needs):   # a gate schedule built for this circuit
         return needs(b)
     return _Closed(b.graph.num_switches) if needs else None
+
+
+_XDEV = {}
+
+
+def _external(on):
+    """add-external-device-abi: an external 1 kOhm (the C test model
+    `good_resistor`) where `_res` has its resistor; compiled once with the
+    system C compiler, or taken from PULSIM_XDEV_TEST_LIBDIR."""
+    import os
+    import pathlib
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+    b = _res(False)
+    if not on:
+        return b
+    if "lib" not in _XDEV:
+        d = os.environ.get("PULSIM_XDEV_TEST_LIBDIR")
+        if d:
+            _XDEV["lib"] = next(str(f) for f in pathlib.Path(d).iterdir()
+                                if "pulsim_xdev_contract" in f.name)
+        else:
+            cc = shutil.which(os.environ.get("CC") or "cc")
+            if cc is None or sys.platform == "win32":
+                pytest.skip("no C compiler for the external device test model")
+            root = pathlib.Path(__file__).resolve().parents[2]
+            out = pathlib.Path(tempfile.mkdtemp()) / "contract.so"
+            subprocess.run([cc, "-std=c99", "-shared", "-fPIC",
+                            f"-I{root / 'core' / 'include'}",
+                            str(root / "core/tests/xdev/contract_models.c"),
+                            "-o", str(out), "-lm"],
+                           check=True, capture_output=True, text=True)
+            _XDEV["lib"] = str(out)
+    b.add_external_device("Rd", ["o", "gnd"], _XDEV["lib"], "good_resistor",
+                          {"G": 1e-3})
+    return b
 
 
 def _run(build, node, t_end, dt, needs_sw, engine, on=True):
@@ -1105,6 +1144,7 @@ STATEFUL_CELLS = {
     "pmsm_mna": "PmsmMna",
     "igbt_tail": "IgbtLevel1[tail]",
     "saturable_inductor": "SaturableInductor",
+    "external_device": "ExternalDevice",
 }
 
 

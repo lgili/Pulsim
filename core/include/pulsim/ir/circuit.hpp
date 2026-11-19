@@ -556,7 +556,13 @@ private:
             };
             std::visit([&](const auto& p) {
                 using P = std::decay_t<decltype(p)>;
-                if constexpr (std::is_same_v<P, models::PwlCurrentSource::Params>) {
+                if constexpr (std::is_same_v<P, pwl::DevicePool::ExternalDeviceParams>) {
+                    // the model by name and library path, the values by content
+                    for (const char ch : p.inst->model().name()) v.word(static_cast<unsigned char>(ch));
+                    for (const char ch : p.inst->model().library_path()) v.word(static_cast<unsigned char>(ch));
+                    reals(p.inst->params());
+                } else if constexpr (std::is_same_v<P, models::PwlCurrentSource::Params>) {
+
                     v.word(p.w.t.size());
                     for (const Real t : p.w.t) v.real(t);
                     for (const Real y : p.w.v) v.real(y);

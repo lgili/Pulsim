@@ -43,6 +43,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/xdev/checks.hpp"
 #include "pulsim/pwl/preflight.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -2510,6 +2511,40 @@ public:
         p.I_sat = I_sat;
         p.L_residual = L_residual;
         return add_saturable_inductor_params_(name, from, to, p);
+    }
+
+    /// add-external-device-abi: an instance of an external model (a law
+    /// from a model library, `xdev::load_model`). `nodes` are its pins in
+    /// the model's pin order. The model's contract is CHECKED here
+    /// (`xdev::check_contract`, refusals name the device) unless `check`
+    /// is false; `debug_jacobian` re-checks the Jacobian at every
+    /// evaluation of the run. Branches: `name` (pin 0 → pin 1), carrying
+    /// internal unknown 0 if any; `name#k` for internal unknown k ≥ 1.
+    CircuitBuilder& add_external_device(
+        std::string_view name, const std::vector<std::string>& nodes,
+        std::shared_ptr<const xdev::Model> model, std::vector<Real> params,
+        bool check = true, bool debug_jacobian = false) {
+        auto inst = std::make_shared<const xdev::Instance>(
+            std::string(name), std::move(model), std::move(params), debug_jacobian);
+        const auto& d = inst->model().d();
+        if (nodes.size() != d.n_pins || d.n_pins < 2) {
+            throw std::invalid_argument(std::format(
+                "add_external_device(\"{}\"): model '{}' has {} pins, got {} nodes "
+                "(a device needs at least 2 pins)", name, inst->model().name(),
+                d.n_pins, nodes.size()));
+        }
+        if (check) xdev::check_contract(*inst);
+        pwl::DevicePool::ExternalDeviceParams p;
+        p.inst = inst;
+        for (const auto& n : nodes) p.pins.push_back(resolve_node_(n));
+        const std::size_t nb = std::max<std::size_t>(1, d.n_internal);
+        for (std::size_t k = 0; k < nb; ++k) {
+            const std::string bn = k == 0 ? std::string(name) : std::format("{}#{}", name, k);
+            p.branches.push_back(add_branch_(bn, p.pins[0], p.pins[1],
+                                             topology::BranchKind::Nonlinear));
+        }
+        pool_.add_external_device(std::move(p));
+        return *this;
     }
 
     /// Shared tail of the three saturable-inductor entry points

@@ -20,9 +20,36 @@ target_link_libraries(pulsim_core
     INTERFACE
         Eigen3::Eigen
         yaml-cpp::yaml-cpp
+        ${CMAKE_DL_LIBS}   # add-external-device-abi: dlopen of model libraries
 )
 
 add_library(pulsim::core ALIAS pulsim_core)
+
+# =============================================================================
+# add-external-device-abi: two test model libraries loaded at run time
+# (MODULE: .so / .dll per platform). Built by EVERY configuration, the
+# Python wheel build included, so the Python twin tests find them in
+# <build>/xdev_test_models on every CI platform instead of skipping. They
+# are test illustrations: never installed, never shipped in the wheel.
+# =============================================================================
+option(PULSIM_BUILD_XDEV_TEST_MODELS "Build the external-device test model libraries" ON)
+if(PULSIM_BUILD_XDEV_TEST_MODELS)
+    enable_language(C)
+    add_library(pulsim_xdev_twins MODULE tests/xdev/twin_models.cpp)
+    target_include_directories(pulsim_xdev_twins PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_features(pulsim_xdev_twins PRIVATE cxx_std_20)
+    add_library(pulsim_xdev_contract MODULE tests/xdev/contract_models.c)
+    target_include_directories(pulsim_xdev_contract PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    # no C_STANDARD_REQUIRED: MSVC has no C99 switch (its default C is a superset)
+    set_target_properties(pulsim_xdev_contract PROPERTIES C_STANDARD 99)
+    # "$<0:>" stops multi-config generators (Visual Studio) adding Release/
+    set_target_properties(pulsim_xdev_twins pulsim_xdev_contract PROPERTIES
+        C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/xdev_test_models$<0:>")
+    if(NOT WIN32)
+        target_link_libraries(pulsim_xdev_contract PRIVATE m)
+    endif()
+endif()
 
 # =============================================================================
 # Tests
@@ -495,6 +522,21 @@ if(PULSIM_BUILD_TESTS)
         pulsim_apply_target_defaults(pulsim_core_layer5_v3_tests)
     endif()
     catch_discover_tests(pulsim_core_layer5_v3_tests)
+
+    # add-external-device-abi: the test that loads the two model libraries
+    # (defined above the test block) through the paths CMake hands it.
+    if(TARGET pulsim_xdev_twins)
+        add_executable(pulsim_core_xdev_tests tests/xdev/test_external_device.cpp)
+        target_link_libraries(pulsim_core_xdev_tests PRIVATE pulsim::core Catch2::Catch2WithMain)
+        add_dependencies(pulsim_core_xdev_tests pulsim_xdev_twins pulsim_xdev_contract)
+        target_compile_definitions(pulsim_core_xdev_tests PRIVATE
+            PULSIM_XDEV_TWINS="$<TARGET_FILE:pulsim_xdev_twins>"
+            PULSIM_XDEV_CONTRACT="$<TARGET_FILE:pulsim_xdev_contract>")
+        if(COMMAND pulsim_apply_target_defaults)
+            pulsim_apply_target_defaults(pulsim_core_xdev_tests)
+        endif()
+        catch_discover_tests(pulsim_core_xdev_tests)
+    endif()
 
     # =============================================================================
     # pulsim_core_builder_tests — pulsim-v2-builder-api

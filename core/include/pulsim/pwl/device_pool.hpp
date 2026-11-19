@@ -56,6 +56,8 @@
 #include <iterator>
 #include <string_view>
 #include <variant>
+#include <memory>
+#include "pulsim/xdev/host.hpp"
 #include <vector>
 
 namespace pulsim::pwl {
@@ -132,6 +134,17 @@ public:
         PwlCurrentSource   = 26, // overlaid on the node rows
         // add-mna-native-machines group 2 (stator branches of the machine)
         InductionMachineMna = 27,
+        // add-external-device-abi: a law from a loaded model library
+        ExternalDevice     = 28,
+    };
+
+    /// One external device (add-external-device-abi): the checked model
+    /// instance, its pin nodes and the branches that carry its internal
+    /// unknowns. Every branch of the device holds this same entry.
+    struct ExternalDeviceParams {
+        std::shared_ptr<const xdev::Instance> inst;
+        std::vector<Index> pins;       ///< node index per pin
+        std::vector<Index> branches;   ///< [0] = the device's branch; one per internal unknown
     };
 
     struct SwitchParams {
@@ -464,6 +477,30 @@ public:
     /// it, and `pwl::stamp_saturable_inductor` stamps the
     /// nonlinear flux-rule constraint per Newton iteration —
     /// λ(i_new) − λ_old, not L(i_new)·Δi.
+    /// Register an external device whose branches the builder created
+    /// (`p.branches`, all `BranchKind::Nonlinear`). Branch k ≥ 0 carries
+    /// internal unknown k on the inductor numbering (a device without
+    /// internal unknowns has one branch and no unknown).
+    void add_external_device(ExternalDeviceParams p) {
+        const std::size_t ni = p.inst->model().d().n_internal;
+        for (std::size_t k = 0; k < p.branches.size(); ++k) {
+            entries_[p.branches[k]] = Entry{p};
+            if (k < ni) {
+                inductor_branch_var_id_[p.branches[k]] =
+                    static_cast<Index>(num_inductors_++);
+            }
+        }
+        external_device_branches_.push_back(p.branches[0]);
+    }
+    [[nodiscard]] const std::vector<Index>&
+    external_device_branches() const noexcept {
+        return external_device_branches_;
+    }
+    [[nodiscard]] const ExternalDeviceParams& external_device_params(Index b) const {
+        return require_params_<ExternalDeviceParams>(
+            b, "external_device_params", "an external device branch");
+    }
+
     void add_saturable_inductor(
         Index branch_id,
         models::SaturableInductor::Params p) {
@@ -1276,7 +1313,8 @@ private:
                                 models::SineCurrentSource::Params,
                                 models::PulseCurrentSource::Params,
                                 models::PwlCurrentSource::Params,
-                                models::InductionMachineMna::Params>;
+                                models::InductionMachineMna::Params,
+                                ExternalDeviceParams>;
 
 public:
     /// Number of device kinds; `kKindCaps` must have this many rows.
@@ -1337,8 +1375,8 @@ private:
     static constexpr bool kind_maps_to_ = std::is_same_v<
         std::variant_alternative_t<static_cast<std::size_t>(K), Entry>, P>;
 
-    static_assert(std::variant_size_v<Entry> == 28,
-        "StoredKind has 28 values; Entry must list 28 alternatives in the "
+    static_assert(std::variant_size_v<Entry> == 29,
+        "StoredKind has 29 values; Entry must list 29 alternatives in the "
         "same order — update both together.");
     static_assert(kind_maps_to_<StoredKind::Resistor,           models::Resistor::Params>);
     static_assert(kind_maps_to_<StoredKind::VoltageSource,      models::VoltageSource::Params>);
@@ -1368,6 +1406,7 @@ private:
     static_assert(kind_maps_to_<StoredKind::PulseCurrentSource, models::PulseCurrentSource::Params>);
     static_assert(kind_maps_to_<StoredKind::PwlCurrentSource,   models::PwlCurrentSource::Params>);
     static_assert(kind_maps_to_<StoredKind::InductionMachineMna, models::InductionMachineMna::Params>);
+    static_assert(kind_maps_to_<StoredKind::ExternalDevice,     ExternalDeviceParams>);
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -1472,6 +1511,7 @@ private:
     // iterate just the saturable inductors without scanning
     // every Nonlinear branch.
     std::vector<Index> saturable_inductor_branches_;
+    std::vector<Index> external_device_branches_;
     std::vector<Index> nonlinear_capacitor_branches_;
     std::vector<Index> lauritzen_diode_branches_;
     std::vector<PmsmMnaMachine> pmsm_mna_machines_;
@@ -1533,6 +1573,9 @@ inline constexpr auto kKindCaps = std::to_array<KindCaps>({
     // Speed-dependent (bilinear ω·λ_r): not LTI between events, so no
     // exact propagator; no small-signal stamp in the AC sweep yet.
     {"InductionMachineMna", SolveClass::NewtonStateful, kNewtonEngines},
+    // add-external-device-abi: Newton through its own law on pwl / trbdf2;
+    // the exact engine and the AC sweep refuse it by name (never linearised).
+    {"ExternalDevice",     SolveClass::NewtonStateful, kNewtonEngines},
 });
 /// add-branch-form-ideal-switch D7 / task 4.3: the BRANCH form of the
 /// Switch and Diode kinds (a form, not a kind: one row each, by the

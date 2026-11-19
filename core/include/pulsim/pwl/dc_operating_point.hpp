@@ -33,6 +33,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/dc_strategy.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/solver/unsupported.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
 #include "pulsim/pwl/gmin.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
@@ -124,6 +125,16 @@ struct DCOperatingPoint {
     // Before the direct solve: its failure handler walks the cascade and
     // re-wraps every error as "no DC operating point".
     require_no_dc_voltage_loop(graph, pool, opts.t_eval, engine, &user_mask);
+    // add-external-device-abi: the DC solve stamps the static kinds only;
+    // an external device (a stateful kind) would be silently missing.
+    if (!pool.external_device_branches().empty()) {
+        const auto& p = pool.external_device_params(pool.external_device_branches().front());
+        throw UnsupportedError(
+            engine, "dc_operating_point", p.inst->device(), "ExternalDevice",
+            std::string(who) + ": external device '" + p.inst->device()
+                + "' has no DC operating-point stamp yet (the DC solve has no "
+                  "stateful-kind hook); start from zero initial conditions instead");
+    }
 
     const bool has_diodes =
         diodes != nullptr && diodes->num_diodes() > 0;

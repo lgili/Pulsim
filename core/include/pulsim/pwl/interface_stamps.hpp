@@ -24,6 +24,7 @@
 #include "pulsim/device/machine_laws.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/pwl/external_device_history.hpp"
 #include "pulsim/pwl/igbt_tail_history.hpp"
 #include "pulsim/pwl/lauritzen_diode_history.hpp"
 #include "pulsim/pwl/nonlinear_capacitor_history.hpp"
@@ -541,6 +542,17 @@ template <> inline constexpr bool kPorted<SaturableInductorHistory> = true;
 template <> inline constexpr bool kPorted<LauritzenDiodeHistory> = true;
 template <> inline constexpr bool kPorted<IgbtTailHistory> = true;
 template <> inline constexpr bool kPorted<PmsmMnaHistory> = true;
+template <> inline constexpr bool kPorted<ExternalDeviceHistory> = true;
+
+// ---- external devices (add-external-device-abi): the law is their only stamp
+inline Real stamp(ExternalDeviceHistory& k, const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
+                  Real h, TrBdf2Stage st, bool /*inc*/) {
+    return k.stamp(x, J_nl, f_nl, h, st);
+}
+inline void commit(ExternalDeviceHistory& k, const Vector& x, Real h, TrBdf2Stage st) {
+    k.commit(x, h, st);
+}
+inline void capture_gamma(ExternalDeviceHistory& k, const Vector& xg) { k.capture_gamma(xg); }
 
 /// The kind-table rows a stateful history runs: its `kStoredKind`, and for
 /// the machine history also the induction machine (DECISIONS #34).
