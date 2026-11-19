@@ -2056,6 +2056,10 @@ class SimulationResult:
         """
         Adapter use only: fill an empty result from arrays (times, states, the per-sample mask, re-initialisation dicts).
         """
+    def _set_device_losses(self, records: collections.abc.Sequence[DeviceLossRecord], heat_injected: float, heat_pending: float) -> None:
+        """
+        The exact engine's loss records (dsed loss port).
+        """
     def _set_run_info(self, engine: str, grid: GridKind, stats: dict[typing.Any, typing.Any]) -> None:
         """
         Adapter use only: set the grid kind and the run statistics.
@@ -3856,7 +3860,7 @@ class _NativeCircuitBuilderAdapter:
         """
         Continuous-time A matrix for the active mask.
         """
-    def __init__(self, builder: CircuitBuilder, cache: PwlStateSpaceCache, b_extra_fn: typing.Any = None) -> None:
+    def __init__(self, builder: CircuitBuilder, cache: PwlStateSpaceCache, b_extra_fn: typing.Any = None, loss_port: bool = False) -> None:
         ...
     def _mode_select_at(self, mask: SwitchStateMask, t: float, x_full: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], h_e: float, tol: float = 1e-09) -> dict[typing.Any, typing.Any]:
         """
@@ -4407,9 +4411,9 @@ def _record_pass(probes: collections.abc.Sequence[str], keep: str, every_n: int,
     """
     Kernel recorder pass over stored arrays (add-probes-and-recorders); use pulsim.simulate(..., recorders=[...]).
     """
-def _require_supported(graph: Graph, pool: DevicePool, engine: str) -> None:
+def _require_supported(graph: Graph, pool: DevicePool, engine: str, loss_port: bool = False) -> None:
     """
-    Raise UnsupportedError for the first branch `engine` cannot simulate (the capability table's column).
+    Raise UnsupportedError for the first branch `engine` cannot simulate (the capability table's column). loss_port: the caller is the dsed event-driven run, which honours a loss port.
     """
 def _run_options_kw(t_end: float, dt: float | None, engine: str, t_start: float, **kwargs) -> RunOptions:
     ...

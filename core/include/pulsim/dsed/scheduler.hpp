@@ -2061,6 +2061,9 @@ private:
         const MaskT old_mask = system_.current_mask();
         const MaskT prev_bits = diode_bits_;
         if (ptype == PredicateType::GateEdge) last_time_event_t_ = t_event;   // next_time_event_
+        // the event's left limit for a step hook listening to events (the loss port)
+        const bool hook_event = hooks_ != nullptr && hooks_->has_event();
+        if (hook_event) hook_x_left_ = x;
 
         // Notify switch_fn of non-gate (diode/ZCD) events so it can
         // latch the post-event mode for the remainder of this cycle.
@@ -2195,6 +2198,11 @@ private:
             .new_mask = final_mask,
         });
         ++result.n_events;
+        if constexpr (std::is_same_v<MaskT, topology::SwitchStateMask>) {
+            // the two limits once the event is final (settled, projected, its
+            // trial records truncated): left under old_mask, right under final_mask
+            if (hook_event) hooks_->event(t_event, hook_x_left_, old_mask, x, final_mask);
+        }
     }
 
     // ----- v2.0 Phase 3: diode-commutation machinery -----------------
@@ -2881,6 +2889,7 @@ private:
     std::uint32_t gate_src_ = 0;
     std::uint32_t corner_src_ = 0;
     events::StepHooks* hooks_ = nullptr;
+    Vector hook_x_left_;
     std::vector<Real> fast_t_;     // plan_fast_samples_
     std::size_t fast_k_ = 0;
     Real dt_init_;

@@ -47,6 +47,7 @@
 #include "pulsim/dsed/scheduler_bdf2.hpp"
 #include "pulsim/dsed/scheduler_auto.hpp"
 #include "pulsim/dsed/period_integrals.hpp"
+#include "pulsim/dsed/loss_port.hpp"
 #include "pulsim/dsed/periodic_orbit.hpp"
 #include "pulsim/dsed/design_batch.hpp"
 #include "pulsim/dsed/period_thermal.hpp"
@@ -1120,7 +1121,7 @@ void init_module(py::module_& m) {
         .def(py::init([](
                 const pulsim::builder::CircuitBuilder& builder,
                 pulsim::pwl::PwlStateSpaceCache& cache,
-                py::object b_extra_fn) {
+                py::object b_extra_fn, bool loss_port) {
                 std::function<Vector(Real)> cpp_b_extra;
                 if (!b_extra_fn.is_none()) {
                     // Wrap the Python callable into std::function. The
@@ -1134,11 +1135,13 @@ void init_module(py::module_& m) {
                 }
                 return std::make_unique<NativeAdapter>(
                     builder.graph(), builder.pool(), cache,
-                    std::move(cpp_b_extra));
+                    std::move(cpp_b_extra), loss_port);
             }),
             py::arg("builder"),
             py::arg("cache"),
             py::arg("b_extra_fn") = py::none(),
+            // the loss port is honoured by run_ped_native_builder only
+            py::arg("loss_port") = false,
             // the adapter holds the builder's graph/pool and the cache by reference
             py::keep_alive<1, 2>(), py::keep_alive<1, 3>())
         .def("set_refuse_implicit", &NativeAdapter::set_refuse_implicit,
@@ -1513,12 +1516,30 @@ void init_module(py::module_& m) {
                 for (const auto& dd : census.entries())
                     diode_names.push_back(pulsim::pwl::branch_label(adapter.graph(), dd.branch_id));
             }
+            // add-in-kernel-event-losses 3.2: the loss port on the step hooks
+            std::optional<pulsim::dsed::ExactLossPort<NativeAdapter>> loss;
+            pulsim::events::StepHooks loss_hooks;
+            if (!adapter.pool().device_losses().empty()) {
+                loss.emplace(adapter);
+                loss->attach(loss_hooks);
+                sim.set_hooks(&loss_hooks);
+            }
             // Release the GIL during simulate(); the C++ scheduler
             // only re-acquires it at gate edges to call switch_fn.
             py::gil_scoped_release release;
             auto res = sim.simulate(x0, t_end);
             py::gil_scoped_acquire acquire;
             auto d = ped_result_to_dict(res, event_log);
+            if (loss) {
+                struct {
+                    std::vector<pulsim::thermal::DeviceLossRecord> device_losses;
+                    Real heat_injected = 0, heat_pending = 0;
+                } out;
+                loss->write(out);
+                d["device_losses"] = py::cast(out.device_losses);
+                d["heat_injected"] = out.heat_injected;
+                d["heat_pending"] = out.heat_pending;
+            }
             if (!tick_cbs.empty()) d["control_tick_counts"] = sim.tick_counts();
             d["exact"] = exact_report_dict(adapter, res.n_predicate_evals);
             if (mode_shadow_h_e > Real{0}) {

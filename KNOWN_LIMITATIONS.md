@@ -30,8 +30,9 @@ can pick it up without re-discovering the context.
 
 `CircuitBuilder.set_device_losses` (add-in-kernel-event-losses) reads
 `E_on` / `E_off` / `V_on` tables inside the `pwl` time loop and heats a
-thermal node. `trbdf2`, `dsed`, `bdf1` and `auto` without `dt=` refuse a loss port by
-name until the unified event queue gives them one commutation hook. `periodic_steady_state` by shooting (pwl / trbdf2)
+thermal node; `trbdf2` does too. `dsed` books the energies at a fixed `Tj=`
+and refuses a junction / heat node, a `V_on` table and time-varying sources by
+name; `bdf1` refuses a loss port by name. `periodic_steady_state` by shooting (pwl / trbdf2)
 refuses one too: each period is a fresh run. The
 event energy is not drawn from the circuit, `T_j` does not change the
 device, and a resumed run drops the heat still pending at the split

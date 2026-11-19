@@ -184,9 +184,12 @@ public:
     /// w1·p(x1) (the integrator's stage weights, Σw = 1; xg may be null
     /// when wg = 0). The start is the last accepted end, or the right
     /// limit of an event() whose mask this step carries.
+    /// `e_exact` (one per device, in set_device_losses order): the step's
+    /// exact ∫v·i, which replaces the quadrature (the exact engine, whose
+    /// impulses are at event instants: they never replace a step's energy).
     void accept_step(Real t0, Real t1, const Vector& x1,
                      const topology::SwitchStateMask& mask, const Vector* xg,
-                     Real w0, Real wg, Real w1) {
+                     Real w0, Real wg, Real w1, const Real* e_exact = nullptr) {
         const Real h = t1 - t0;
         // the power E/h_now_ reached the network over h of this step: a
         // committed step shorter than the attempt (a landing) keeps the rest
@@ -197,7 +200,8 @@ public:
             n.e -= e;
         }
         if (frac == Real{1}) now_.clear();
-        for (auto& d : devs_) {
+        for (std::size_t k = 0; k < devs_.size(); ++k) {
+            auto& d = devs_[k];
             const bool on1 = mask.get(static_cast<Size>(d.law.bit));
             if (d.ev_pending && t0 >= d.ev_t) {
                 // the first step after an event: under its right side it
@@ -227,7 +231,9 @@ public:
                 if (d.node >= 0 && d.spec.closed_loop())
                     tjg = stamping::read_node_voltage(*xg, d.node);
             }
-            if (same) {
+            if (e_exact != nullptr) {
+                e_el = e_exact[k];
+            } else if (same) {
                 e_el = h * (w0 * d.v * d.i + wg * vg * ig + w1 * v1 * i1);
             } else {
                 e_el = h * (d.v * d.i + v1 * i1) / Real{2};
@@ -248,7 +254,7 @@ public:
                 if (d.spec.conduction == thermal::ConductionHeat::Table) heat = e_t;
             }
             if (d.spec.conduction == thermal::ConductionHeat::Electrical) heat = e_el;
-            d.last = {h, e_el, e_t, false};
+            d.last = {h, e_el, e_t, e_exact != nullptr};
             // a flip no event() reported: the reading rule on the step's ends
             if (!same) heat += book_(d, t0, on1, d.v, d.i, v1, i1, tj0);
             if (d.node >= 0) add_(queue_, d.node, heat);

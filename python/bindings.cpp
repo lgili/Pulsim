@@ -341,21 +341,23 @@ void init_module(py::module_& m) {
         "mode_selection='auto'.");
     m.def("_require_supported",
         [](const topology::Graph& graph, const pwl::DevicePool& pool,
-           const std::string& engine_in) {
+           const std::string& engine_in, bool loss_port) {
             // 'exact' is the canonical name of the dsed column (add-exact-propagator-strategy 13.2)
             const std::string engine = engine_in == "exact" ? std::string("dsed") : engine_in;
             for (std::size_t e = 0; e < pwl::kEngineNames.size(); ++e) {
                 if (pwl::kEngineNames[e] == engine) {
                     require_supported(graph, pool,
-                                      static_cast<pwl::Engine>(e));
+                                      static_cast<pwl::Engine>(e), loss_port);
                     return;
                 }
             }
             throw std::invalid_argument("unknown engine '" + engine + "'");
         },
         py::arg("graph"), py::arg("pool"), py::arg("engine"),
+        py::arg("loss_port") = false,
         "Raise UnsupportedError for the first branch `engine` cannot "
-        "simulate (the capability table's column).");
+        "simulate (the capability table's column). loss_port: the caller "
+        "is the dsed event-driven run, which honours a loss port.");
 
     // ---- SwitchStateMask -------------------------------------------------
     py::class_<topology::SwitchStateMask>(m, "SwitchStateMask",
@@ -3611,6 +3613,15 @@ void init_module(py::module_& m) {
         .def_readonly("_device_losses", &SimulationResult::device_losses,
                        "add-in-kernel-event-losses: one DeviceLossRecord per "
                        "loss port (read with loss_events / device_energy).")
+        .def("_set_device_losses",
+             [](SimulationResult& r, std::vector<thermal::DeviceLossRecord> recs,
+                Real injected, Real pending) {
+                 r.device_losses = std::move(recs);
+                 r.heat_injected = injected;
+                 r.heat_pending = pending;
+             },
+             py::arg("records"), py::arg("heat_injected"), py::arg("heat_pending"),
+             "The exact engine's loss records (dsed loss port).")
         .def_readonly("heat_injected", &SimulationResult::heat_injected,
                        "J of heat the run deposited into thermal nodes.")
         .def_readonly("heat_pending", &SimulationResult::heat_pending,

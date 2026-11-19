@@ -194,13 +194,15 @@ inline std::string fmt(Real v) {
 template <class AdapterT, class MaskT>
 [[nodiscard]] PeriodMode make_period_mode(
     AdapterT& ad, const MaskT& mask,
-    const std::vector<PeriodObservable>& obs) {
+    const std::vector<PeriodObservable>& obs, bool integrals_only = false) {
     ad.set_mask(mask);
+    // integrals_only (the exact engine's loss port): a mode with dependent
+    // states still has the step's closed form (entered after its projection)
     if constexpr (requires { ad.n_constraints(); }) {
         // K x = k: the map has no Jacobian of the mode-entry projection and
         // the constraint is a Floquet multiplier of exactly 1 (the Python
         // map refuses it in _ExactPeriod.A; the kernel map must too)
-        if (ad.n_constraints() > 0) {
+        if (!integrals_only && ad.n_constraints() > 0) {
             throw UnsupportedError(
                 "periodic_steady_state", "dependent_states", "", "",
                 "periodic_steady_state: a mode of the period has dependent "

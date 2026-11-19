@@ -110,6 +110,8 @@ def _run(engine, **kw):
     # pwl reads an edge's two sides one dt apart: first order in dt
     ("pwl", dict(dt=1e-7), 1.5e-3, 1.5e-3),
     ("trbdf2", dict(rtol=1e-6, atol=1e-9, dt=2.5e-7), 2e-5, 2.5e-5),
+    # the exact engine: the event limits and ∫v·i in closed form (measured 2e-15)
+    ("dsed", {}, 1e-12, 1e-12),
 ])
 def test_event_and_conduction_energy_converge_to_the_closed_form_truth(engine, kw, tol_ev, tol_cond):
     ev, cond = _truth()
