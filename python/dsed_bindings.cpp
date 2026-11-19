@@ -757,11 +757,17 @@ py::dict exact_report_dict(const AdapterT& adapter,
         row["kappa"] = r.kappa;
         row["norm_Ah"] = r.norm_Ah;
         row["reason"] = r.reason;
+        row["defect"] = r.defect;
+        row["backward_error"] = r.backward;
+        row["refined"] = r.refined;
+        row["balanced"] = r.balanced;
+        row["pade_defect"] = r.pade_defect;
         masks.append(row);
     }
     py::dict d;
     d["masks"] = masks;
     d["n_eig"] = adapter.n_eig();
+    d["build_seconds"] = adapter.build_seconds();
     d["n_pade"] = adapter.n_pade();
     d["n_phi_cache_hits"] = adapter.n_pade_hits();
     d["n_predicate_evals"] = n_predicate_evals;
@@ -833,6 +839,24 @@ inline py::dict mode_shadow_dict(const pulsim::dsed::ModeShadowReport& r,
 }
 
 void init_module(py::module_& m) {
+    // A stored sample broke the PWL diode law (PEDSimulator's end-of-run
+    // check): typed, with the diode and the first sample's time.
+    static py::object diode_law_exc = py::exception<void>(
+        m, "DiodeModeInconsistentError", PyExc_RuntimeError);
+    diode_law_exc.attr("device") = "";
+    diode_law_exc.attr("t_failed") = 0.0;
+    py::register_exception_translator([](std::exception_ptr pe) {
+        if (!pe) return;
+        try {
+            std::rethrow_exception(pe);
+        } catch (const pulsim::dsed::DiodeLawViolation& e) {
+            py::object inst = diode_law_exc(e.what());
+            inst.attr("device") = e.diode();
+            inst.attr("t_failed") = e.time();
+            PyErr_SetObject(diode_law_exc.ptr(), inst.ptr());
+        }
+    });
+
     // add-complementarity-mode-selection task 2: the dense Lemke solver,
     // for the oracle comparison against tests/oracles/lcp_reference.py.
     m.def("_lcp_lemke",
@@ -1133,6 +1157,10 @@ void init_module(py::module_& m) {
                 return self.A_matrix();
             },
             "Continuous-time A matrix for the active mask.")
+        .def("energy_scale",
+            [](const NativeAdapter& self) { return self.energy_scale(); },
+            "D's diagonal (sqrt of each state's C or L) for the active mask: "
+            "the energy coordinates the exact propagator's bounds are stated in.")
         .def("n_constraints", &NativeAdapter::n_constraints,
             "Rows of the dependent-state constraint K x = k on the active "
             "mask (a capacitor loop or an inductor cut-set; 0 otherwise).")
@@ -1146,7 +1174,8 @@ void init_module(py::module_& m) {
             py::arg("t"), py::arg("x"),
             "Continuous-time RHS: dx/dt = A·x + b(t).")
         .def("node_pair_voltage",
-            &NativeAdapter::node_pair_voltage,
+            [](const NativeAdapter& self, pulsim::Index from, pulsim::Index to, Real t,
+               const pulsim::Vector& x) { return self.node_pair_voltage(from, to, t, x); },
             py::arg("from_node"), py::arg("to_node"),
             py::arg("t"), py::arg("x"),
             "v(from_node) − v(to_node) recovered from the reduced "
@@ -1283,7 +1312,7 @@ void init_module(py::module_& m) {
            Real mode_lcp_h_e,
            Real mode_guard_h_e,
            bool mode_guard_refuse,
-           int settle_round_cap,
+           int settle_round_cap, Real diode_law_rel,
            std::vector<Real> tick_periods,
            std::vector<Real> tick_offsets,
            std::vector<py::object> tick_fns,
@@ -1398,6 +1427,7 @@ void init_module(py::module_& m) {
             }
             sim.set_event_projection(enable_event_projection);
             sim.set_settle_round_cap(settle_round_cap);
+            sim.set_diode_law_check(diode_law_rel);
             if (!tick_cbs.empty()) {
                 pulsim::events::TickPlan plan;
                 for (std::size_t j = 0; j < tick_periods.size(); ++j) {
@@ -1488,6 +1518,7 @@ void init_module(py::module_& m) {
         py::arg("mode_guard_h_e") = Real{0},
         py::arg("mode_guard_refuse") = false,
         py::arg("settle_round_cap") = 64,
+        py::arg("diode_law_rel") = Real{1e-3},
         py::arg("tick_periods") = std::vector<Real>{},
         py::arg("tick_offsets") = std::vector<Real>{},
         py::arg("tick_fns") = std::vector<py::object>{},
@@ -1647,6 +1678,7 @@ void init_module(py::module_& m) {
             }
         }
         sim.set_event_projection(false);
+        sim.set_diode_law_check(0.0);   // judged by the period map's own residual
         auto res = sim.simulate(x0, period);
         return pulsim::dsed::period_map_from_run(adapter, res, diodes, obs,
                                                  pairs, monodromy);

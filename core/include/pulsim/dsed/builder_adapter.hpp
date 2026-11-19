@@ -38,6 +38,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/dsed/event_projection.hpp"
 #include "pulsim/dsed/exact_lti.hpp"
+#include "pulsim/events/islands.hpp"
 #include "pulsim/events/mode_refusal.hpp"
 #include "pulsim/events/mode_selector.hpp"
 #include "pulsim/pwl/cache.hpp"
@@ -50,6 +51,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <chrono>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -109,6 +111,13 @@ public:
         ExactLTI exact;
         Vector exact_b;                 // reduced, augmented-const b
         std::vector<Real> aug_omegas;   // one per oscillator pair
+        // Z_ω = (iωI − A)⁻¹(q_cos − i·q_sin), one column per ω: the states'
+        // forced (sinusoidal steady-state) response. The augmented propagator
+        // carries the oscillator states, which reach x as this particular
+        // solution (cancelled by the free response at rest), so a propagated
+        // signal's error is relative to its forced amplitude |c·R·Z_ω| too, not
+        // to the instantaneous state alone (node_pair_voltage_scale).
+        Eigen::MatrixXcd forced_z;
         bool exact_built = false;       // lazy — see item 4 note
         std::vector<Real> state_mass;   // C or L per state (energy scale)
         // add-exact-propagator-strategy D14: one reduced column per
@@ -178,7 +187,7 @@ public:
         if (!has_dynamic_sources_) {
             return current_entry_->b_constant;
         }
-        Vector b_extra = build_time_varying_b_extra_(t);
+        const Vector& b_extra = build_time_varying_b_extra_(t);
         return current_entry_->b_constant
                + current_entry_->b_projection * b_extra;
     }
@@ -191,7 +200,7 @@ public:
         } else {
             // Inline the b_vector logic to avoid building b_extra
             // twice if rhs() is called inside a tight RK45 stage.
-            Vector b_extra = build_time_varying_b_extra_(t);
+            const Vector& b_extra = build_time_varying_b_extra_(t);
             r += current_entry_->b_constant
                 + current_entry_->b_projection * b_extra;
         }
@@ -255,27 +264,71 @@ public:
     /// and two more of length n_mna. Illinois calls this ~30 times
     /// per located event; events are sparse, so correctness beats
     /// caching here.
+    /// `left_by` > 0 reads a source jumping at t at its left limit
+    /// (build_time_varying_b_extra_).
     [[nodiscard]] Real node_pair_voltage(Index from, Index to,
                                            Real t,
-                                           const Vector& x) const {
+                                           const Vector& x,
+                                           Real left_by = Real{0}) const {
         ensure_current_resolved_();
         const LTIEntry& e = *current_entry_;
-        Vector b_extra;
-        if (has_dynamic_sources_) {
-            b_extra = build_time_varying_b_extra_(t);
-        }
+        const Vector* b_extra =
+            has_dynamic_sources_ ? &build_time_varying_b_extra_(t, left_by) : nullptr;
         auto node_v = [&](Index n) -> Real {
             if (n < 0) {
                 return Real{0};
             }
             Real v = e.recover_from_state.row(n).dot(x)
                      + e.recover_const[n];
-            if (has_dynamic_sources_) {
-                v += e.recover_from_b.row(n).dot(b_extra);
+            if (b_extra) {
+                v += e.recover_from_b.row(n).dot(*b_extra);
             }
             return v;
         };
         return node_v(from) - node_v(to);
+    }
+
+    /// The rounding scale of node_pair_voltage: the same sums with every
+    /// term taken in absolute value, |c|ᵀ(|R||x| + |r| + |R_b||b|). Times the
+    /// unit round-off (and the summation length) it bounds the error of the
+    /// recovered voltage (the inner-product bound).
+    [[nodiscard]] Real node_pair_voltage_scale(Index from, Index to, Real t,
+                                               const Vector& x) const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        const Vector* b_extra =
+            has_dynamic_sources_ ? &build_time_varying_b_extra_(t, Real{0}) : nullptr;
+        auto node_s = [&](Index n) -> Real {
+            if (n < 0) return Real{0};
+            Real v = e.recover_from_state.row(n).cwiseAbs().dot(x.cwiseAbs())
+                     + std::abs(e.recover_const[n]);
+            if (b_extra) v += e.recover_from_b.row(n).cwiseAbs().dot(b_extra->cwiseAbs());
+            return v;
+        };
+        return node_s(from) + node_s(to);
+    }
+
+    /// Σ_ω |c·R·Z_ω|: the forced (sinusoidal steady-state) amplitude of a node
+    /// pair's voltage in the current mode (LTIEntry::forced_z); 0 without
+    /// sine sources or before the mode's propagator is built.
+    [[nodiscard]] Real node_pair_voltage_forced(Index from, Index to) const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        Real forced = Real{0};
+        for (Index j = 0; j < e.forced_z.cols(); ++j) {
+            std::complex<Real> c{0};
+            if (from >= 0) c += e.recover_from_state.row(from).template cast<std::complex<Real>>().dot(e.forced_z.col(j));
+            if (to >= 0) c -= e.recover_from_state.row(to).template cast<std::complex<Real>>().dot(e.forced_z.col(j));
+            forced += std::abs(c);
+        }
+        return forced;
+    }
+
+    /// The summation length of node_pair_voltage (state plus source terms).
+    [[nodiscard]] Index node_pair_voltage_terms() const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        return e.recover_from_state.cols() + (has_dynamic_sources_ ? e.recover_from_b.cols() : 0) + 1;
     }
 
     /// v2.0 Phase 3 item 2 — the current mode's exact stepper, or
@@ -419,6 +472,21 @@ public:
         pulsim::dsed::exact_fast_samples(current_entry_->exact, t_e, h, out);
     }
 
+    /// The current mode's settle length for decisions (exact_settle_length).
+    [[nodiscard]] Real exact_settle_length(Real t_res) const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        return pulsim::dsed::exact_settle_length(current_entry_->exact, t_res);
+    }
+
+    /// The current mode's propagator error per unit of state, as the
+    /// propagator states it (exact_step_error).
+    [[nodiscard]] Real exact_step_error() const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        return pulsim::dsed::exact_step_error(current_entry_->exact);
+    }
+
     /// The tier-1 bound's longest step (D2); the scheduler sets its
     /// dt_max. Changing it rebuilds the propagators lazily.
     void set_max_step(Real h) {
@@ -426,6 +494,20 @@ public:
             return;
         }
         h_max_ = h;
+        for (auto& [m, e] : mask_cache_) {
+            e.exact_built = false;
+            e.exact = ExactLTI{};
+        }
+    }
+
+    /// The run's length: tier 1's propagator_defect is stated over it
+    /// (an eigenvalue error of a conserved mode grows with it). The
+    /// scheduler sets t_end; changing it rebuilds the propagators lazily.
+    void set_horizon(Real T) {
+        if (T == horizon_) {
+            return;
+        }
+        horizon_ = T;
         for (auto& [m, e] : mask_cache_) {
             e.exact_built = false;
             e.exact = ExactLTI{};
@@ -638,6 +720,11 @@ public:
         Real kappa;
         Real norm_Ah;
         std::string reason;
+        Real defect;
+        Real backward;
+        int refined;
+        bool balanced;
+        Real pade_defect;
     };
     [[nodiscard]] std::vector<ExactReportRow> exact_report() const {
         std::vector<ExactReportRow> rows;
@@ -645,7 +732,9 @@ public:
             if (e.exact_built) {
                 rows.push_back({m, e.exact.tier, e.exact.kappa,
                                 e.exact.norm_A1 * h_max_,
-                                e.exact.reason});
+                                e.exact.reason, e.exact.defect, e.exact.backward,
+                                e.exact.refined, e.exact.balanced,
+                                e.exact.pade_defect});
             }
         }
         return rows;
@@ -653,6 +742,8 @@ public:
     /// Eigendecompositions built, Padé exponentials evaluated, Padé
     /// cache hits — summed over the visited masks.
     [[nodiscard]] std::size_t n_eig() const noexcept { return n_eig_; }
+    /// Wall time spent building propagators (eig, pair judgement, Padé setup).
+    [[nodiscard]] Real build_seconds() const noexcept { return build_seconds_; }
     [[nodiscard]] std::size_t n_pade() const {
         std::size_t s = 0;
         for (const auto& [m, e] : mask_cache_) s += e.exact.n_pade;
@@ -780,11 +871,17 @@ private:
         if (entry.exact_built) {
             return;
         }
+        const auto t0 = std::chrono::steady_clock::now();
+        ensure_exact_built_impl_(entry);
+        build_seconds_ += std::chrono::duration<Real>(std::chrono::steady_clock::now() - t0).count();
+    }
+
+    void ensure_exact_built_impl_(LTIEntry& entry) const {
         entry.exact_built = true;
         if (!has_dynamic_sources_) {
             entry.exact_b = entry.b_constant;
             entry.exact = make_exact_lti(entry.A, entry.exact_b,
-                                         energy_scale_(entry, 0), h_max_);
+                                         energy_scale_(entry, 0), h_max_, horizon_);
             ++n_eig_;
         } else if (!b_extra_fn_) {
             // sine pairs augmented (voltage or current); PWM / pulse /
@@ -795,7 +892,7 @@ private:
             } else {
                 entry.exact_b = entry.b_constant;
                 entry.exact = make_exact_lti(entry.A, entry.exact_b,
-                                             energy_scale_(entry, 0), h_max_);
+                                             energy_scale_(entry, 0), h_max_, horizon_);
             }
             ++n_eig_;
             const auto m = static_cast<Index>(pwl_sources_.size());
@@ -1024,6 +1121,16 @@ private:
         }
 
         const auto k = static_cast<Index>(omegas.size());
+        entry.forced_z = Eigen::MatrixXcd::Zero(n, k);
+        for (Index j = 0; j < k; ++j) {
+            const auto js = static_cast<Size>(j);
+            const Eigen::MatrixXcd M = std::complex<Real>(Real{0}, omegas[js])
+                    * Eigen::MatrixXcd::Identity(n, n) - entry.A.template cast<std::complex<Real>>();
+            const Eigen::VectorXcd q = q_cos[js].template cast<std::complex<Real>>()
+                    - std::complex<Real>(Real{0}, Real{1}) * q_sin[js].template cast<std::complex<Real>>();
+            const Eigen::VectorXcd z = M.partialPivLu().solve(q);
+            if (z.allFinite()) entry.forced_z.col(j) = z;
+        }
         DenseMatrix A_aug =
             DenseMatrix::Zero(n + 2 * k, n + 2 * k);
         A_aug.topLeftCorner(n, n) = entry.A;
@@ -1042,7 +1149,7 @@ private:
             entry.b_constant + entry.b_projection * b_dc_mna;
 
         entry.exact = make_exact_lti(A_aug, b_aug,
-                                     energy_scale_(entry, 2 * k), h_max_);
+                                     energy_scale_(entry, 2 * k), h_max_, horizon_);
         entry.exact_b = std::move(b_aug);
         entry.aug_omegas = std::move(omegas);
     }
@@ -1107,57 +1214,18 @@ public:
         // common mode to ε·(internal current)/G_tie, about tol_w on a bridge
         // with every diode OFF, so rounding picked modes. Each island's KCL
         // sum (boundary conductances only) is imposed exactly.
+        // Shared with pwl (events/islands.hpp): the joint correction behind a
+        // weak tie, a failed joint factor falls back to the sequential one.
         const auto& islands = port_islands_of_(mask);
-        std::vector<Vector> ws;
-        std::vector<Real> kap;
-        for (const auto& isl : islands) {
+        events::IslandCorrection corr;
+        corr.prepare(islands, [&](Index ref, Vector& w) {
             rhs = -b_c;
-            rhs[isl.ref] -= Real{1};          // J·w = e_ref
-            port_solve_(mask, dt, rhs, port_w_);
-            ws.push_back(port_w_);
-            kap.push_back(island_dot_(isl, port_w_));
-        }
-        // Several islands: K(m, n) = g_m·w_n is the identity in exact arithmetic
-        // (disjoint islands); solved jointly as pwl/mode_ports.hpp does, where the
-        // sequential correction left 6.5e-9 V. Here the two-bus fixture measures
-        // the same either way (7.1e-10 V at a 1e7 Ω tie, [dsed_ports]).
-        bool joint = false;
-        Eigen::PartialPivLU<DenseMatrix> klu;
-        if (islands.size() > 1) {
-            const auto ni = static_cast<Index>(islands.size());
-            DenseMatrix K(ni, ni);
-            for (Index m = 0; m < ni; ++m)
-                for (Index n = 0; n < ni; ++n)
-                    K(m, n) = island_dot_(islands[static_cast<std::size_t>(m)],
-                                          ws[static_cast<std::size_t>(n)]);
-            if (K.allFinite()) {
-                klu.compute(K);
-                joint = std::isfinite(klu.rcond())
-                        && klu.rcond() > Real{1e3} * std::numeric_limits<Real>::epsilon();
-            }
-        }
-        // J·s = f: σ = g·(base + s) − Σ_S f, with Σ_S f = src(island)
-        auto fix = [&](Vector& s, const Vector* base, auto&& src) {
-            if (joint) {
-                Vector sig(static_cast<Index>(islands.size()));
-                for (std::size_t m = 0; m < islands.size(); ++m) {
-                    sig[static_cast<Index>(m)] = island_dot_(islands[m], s) - src(islands[m]);
-                    if (base) sig[static_cast<Index>(m)] += island_dot_(islands[m], *base);
-                }
-                const Vector a = klu.solve(sig);
-                for (std::size_t m = 0; m < islands.size(); ++m)
-                    s -= ws[m] * a[static_cast<Index>(m)];
-                return;
-            }
-            for (std::size_t m = 0; m < islands.size(); ++m) {
-                Real sig = island_dot_(islands[m], s) - src(islands[m]);
-                if (base) sig += island_dot_(islands[m], *base);
-                if (kap[m] != Real{0} && std::isfinite(kap[m])) s -= ws[m] * (sig / kap[m]);
-            }
-        };
+            rhs[ref] -= Real{1};          // J·w = e_ref
+            port_solve_(mask, dt, rhs, w);
+        });
         // J·δ = −(G·x + b): summed over an island, g·(x + δ) = 0 (no source
         // sits on an island's boundary, internal ones cancel)
-        fix(sol, &xf, [](const PortIsland&) { return Real{0}; });
+        corr.fix(islands, sol, [](const events::Island&) { return Real{0}; }, &xf);
         const auto k = static_cast<Eigen::Index>(ports.size());
         auto vp = [&](const Vector& s, std::size_t j) {
             const auto [a, c] = ports[j];
@@ -1176,9 +1244,8 @@ public:
             if (a >= 0) rhs[a] += Real{1};
             if (c >= 0) rhs[c] -= Real{1};
             port_solve_(mask, dt, rhs, sol);
-            fix(sol, nullptr, [&](const PortIsland& isl) {   // Σ_S(−E_j)
-                return Real((c >= 0 && isl.in[static_cast<Size>(c)]) ? 1 : 0)
-                     - Real((a >= 0 && isl.in[static_cast<Size>(a)]) ? 1 : 0);
+            corr.fix(islands, sol, [&](const events::Island& isl) {   // Σ_S(−E_j)
+                return events::island_unit_sum(isl, a, c);
             });
             for (Eigen::Index i = 0; i < k; ++i)
                 Z(i, j) = -vp(sol, static_cast<std::size_t>(i));
@@ -1259,7 +1326,7 @@ public:
         sc.vscale = vs;
         // A resistor stiffer than every ON switching element (a 1 µΩ ground
         // link) does not set the current scale: vs·G = 4.8e7 A on a 48 V
-        // flyback let the judge and the LCP read 0.05 A of reverse current in
+        // flyback let the judge and the LCP read 7.7 mA of reverse current in
         // an ON clamp diode as rounding. The ON conductances bound what flows.
         if (gon_max > Real{0}) gmax = std::min(gmax, gon_max);
         sc.iscale = std::max(is, vs * gmax);
@@ -1376,19 +1443,9 @@ private:
     mutable Vector port_x_full_, port_rhs_, port_sol_;
     mutable std::size_t n_port_solves_ = 0;
 
-    /// A floating island of the port companion (DECISIONS #30): nodes
-    /// joined by strong elements only, tied to the rest through weak
-    /// conductances (OFF switches / diodes, resistors ≤ 1 µS). `g`: the
-    /// island's KCL sum as a row over the MNA unknowns, from the boundary
-    /// branches alone (every internal stamp, C/h included, cancels
-    /// analytically and is left out).
-    struct PortIsland {
-        Index ref = -1;                         // an island node (the correction's injection row)
-        std::vector<std::pair<Index, Real>> g;  // (column, Σ_S G_column) of the boundary
-        std::vector<char> in;                   // in[node]: node belongs to the island
-    };
-    mutable std::unordered_map<MaskT, std::vector<PortIsland>> port_islands_;
-    mutable Vector port_w_;
+    /// The floating islands of the port companion per mask (DECISIONS #30,
+    /// events/islands.hpp).
+    mutable std::unordered_map<MaskT, std::vector<events::Island>> port_islands_;
 
     /// `solve_at` of the port problem. Its factor numerically singular on a
     /// floating island is the bound of DECISIONS #27 exceeded (the
@@ -1399,9 +1456,18 @@ private:
         try {
             cache_.solve_at(mask, dt, rhs, out);
         } catch (const std::runtime_error& e) {
-            const std::string msg = e.what();
+            refuse_on_island_(mask, e.what(), "the diode port problem's factor");
+            throw;
+        }
+    }
+
+    /// A factor or reduction "numerically singular" on a mask with a floating
+    /// island: the typed refusal (DECISIONS #27), naming the island node the
+    /// message names (else the first island's reference node). Else returns.
+    void refuse_on_island_(const MaskT& mask, const std::string& msg, const char* what) const {
+        {
             const auto& islands = port_islands_of_(mask);
-            if (islands.empty() || msg.find("numerically singular") == std::string::npos) throw;
+            if (islands.empty() || msg.find("numerically singular") == std::string::npos) return;
             std::string node;
             for (const auto& isl : islands) {
                 for (Size i = 0; i < isl.in.size(); ++i) {
@@ -1420,7 +1486,7 @@ private:
             if (node.empty()) node = graph_.node(islands.front().ref).name;
             throw UnsupportedError(
                 "dsed", "floating_island", node, "Node",
-                "dsed: the diode port problem's factor is numerically singular on the "
+                std::string("dsed: ") + what + " is numerically singular on the "
                 "floating island at node " + node + ": its tie to ground is too weak for "
                 "the cancellation on the island's pivot to stay under the selector's tie "
                 "tolerance (add-complementarity-mode-selection DECISIONS #27). Tie the "
@@ -1430,110 +1496,17 @@ private:
     }
 
     /// The islands of `mask` (empty when the circuit has a device the
-    /// rule below does not classify, or none floats).
-    const std::vector<PortIsland>& port_islands_of_(const MaskT& mask) const {
+    /// shared rule does not classify, or none floats). Resistors at or below
+    /// 1 µS are ties (1 MΩ, the builder's 1 GΩ); pwl's rule is 1e-3 S.
+    const std::vector<events::Island>& port_islands_of_(const MaskT& mask) const {
         auto it = port_islands_.find(mask);
         if (it != port_islands_.end()) return it->second;
-        std::vector<PortIsland> out;
-        const Index nn = graph_.num_nodes();
-        std::vector<Index> up(static_cast<Size>(nn + 1));   // union-find; nn = ground
-        for (Index i = 0; i <= nn; ++i) up[static_cast<Size>(i)] = i;
-        auto root = [&](Index i) {
-            const Index v = i < 0 ? nn : i;
-            Index r = v;
-            while (up[static_cast<Size>(r)] != r) r = up[static_cast<Size>(r)];
-            return r;
-        };
-        auto join = [&](Index a, Index b) { up[static_cast<Size>(root(a))] = root(b); };
-        struct Weak { Index a, b; Real g; };
-        std::vector<Weak> weak;
-        constexpr Real kWeakResistor = Real{1e-6};   // siemens: ties (1 MΩ) and the builder's 1 GΩ
-        using K = pwl::DevicePool::StoredKind;
+        constexpr Real kWeakResistor = Real{1e-6};
         // a user b_extra_fn can inject a net current into an island: its KCL
         // sum would need that source term (reviewer finding), so no islands
-        bool known = !static_cast<bool>(b_extra_fn_);
-        Index sw = 0;
-        for (Index b = 0; b < graph_.num_branches() && known; ++b) {
-            const auto& br = graph_.branch(b);
-            K kind;
-            try {
-                kind = pool_.kind_of(b);
-            } catch (const std::out_of_range&) {
-                known = false;
-                break;
-            }
-            if (br.kind == topology::BranchKind::Switch) {
-                const bool on = mask.get(static_cast<Size>(sw++));
-                if (kind == K::Diode || kind == K::Switch) {
-                    if (on) join(br.from, br.to);
-                    else weak.push_back({br.from, br.to, kind == K::Diode
-                        ? pool_.diode_params(b).g_off : pool_.switch_g_off(b)});
-                } else {
-                    known = false;
-                }
-                continue;
-            }
-            switch (kind) {
-            case K::Resistor: {
-                const Real g = pool_.resistor_params(b).G;
-                if (std::abs(g) <= kWeakResistor) weak.push_back({br.from, br.to, g});
-                else join(br.from, br.to);
-                break;
-            }
-            case K::Capacitor: case K::Inductor: case K::VoltageSource:
-            case K::PWMVoltageSource: case K::SineVoltageSource: case K::PulseVoltageSource:
-            case K::CurrentSource: case K::SineCurrentSource: case K::PulseCurrentSource:
-            case K::PwlCurrentSource:
-                // strong, or a source: an island never has one on its boundary,
-                // so its source terms cancel in the KCL sum too
-                join(br.from, br.to);
-                break;
-            default:
-                known = false;
-            }
-        }
-        if (known) {
-            std::vector<Index> rt(static_cast<Size>(nn));
-            std::unordered_map<Index, Index> size;
-            for (Index i = 0; i < nn; ++i) ++size[rt[static_cast<Size>(i)] = root(i)];
-            const Index gr = root(-1);
-            std::unordered_map<Index, Size> slot;
-            for (Index i = 0; i < nn; ++i) {
-                const Index r = rt[static_cast<Size>(i)];
-                if (r == gr || size[r] < 2) continue;   // grounded, or nothing internal to cancel
-                auto [s, fresh] = slot.try_emplace(r, out.size());
-                if (fresh) {
-                    out.emplace_back();
-                    out.back().ref = i;
-                    out.back().in.assign(static_cast<Size>(nn), 0);
-                }
-                out[s->second].in[static_cast<Size>(i)] = 1;
-            }
-            for (auto& isl : out) {
-                std::unordered_map<Index, Real> col;
-                for (const auto& w : weak) {
-                    const bool ia = w.a >= 0 && isl.in[static_cast<Size>(w.a)];
-                    const bool ib = w.b >= 0 && isl.in[static_cast<Size>(w.b)];
-                    if (ia == ib) continue;   // internal, or not touching the island
-                    const Index i = ia ? w.a : w.b, o = ia ? w.b : w.a;
-                    col[i] += w.g;
-                    if (o >= 0) col[o] -= w.g;
-                }
-                isl.g.assign(col.begin(), col.end());
-                std::sort(isl.g.begin(), isl.g.end());   // a fixed summation order
-            }
-            std::erase_if(out, [](const PortIsland& isl) { return isl.g.empty(); });
-        }
-        return port_islands_.emplace(mask, std::move(out)).first->second;
-    }
-
-    /// Impose island `isl`'s KCL sum exactly on `s`, a solution of
-    /// J·s = f with Σ_S f = `src` (DECISIONS #30): s −= w·σ/(g·w),
-    /// σ = g·s − src, w = J⁻¹·e_ref.
-    static Real island_dot_(const PortIsland& isl, const Vector& s) {
-        Real a = Real{0};
-        for (const auto& [j, g] : isl.g) a += g * s[j];
-        return a;
+        return port_islands_.emplace(mask, b_extra_fn_
+            ? std::vector<events::Island>{}
+            : events::find_islands(graph_, pool_, mask, kWeakResistor)).first->second;
     }
 
     /// Sum sine + PWM + pulse + user-supplied contributions at time t.
@@ -1543,11 +1516,17 @@ private:
     /// `left_by` > 0: a source that jumps exactly at t reads its LEFT
     /// limit, value_at(t − left_by) (a stored event sample is the left
     /// limit of the step that ended there).
-    [[nodiscard]] Vector build_time_varying_b_extra_(Real t, Real left_by = Real{0}) const {
-        Vector b;
+    /// Memoised on (t, left_by): the locator and the judges read it once per
+    /// diode at the same instant (boost_pfc: 443022 predicate evaluations,
+    /// each walking the device pool). A user b_extra_fn is never memoised.
+    /// The reference is to ONE buffer: copy it before a second call (f(t1) −
+    /// f(t2) through two references reads 0).
+    [[nodiscard]] const Vector& build_time_varying_b_extra_(Real t, Real left_by = Real{0}) const {
+        if (bx_valid_ && t == bx_t_ && left_by == bx_left_) return bx_;
+        Vector& b = bx_;
         sources::compute_pwm_b_extra(pool_, graph_, t, b, left_by);
         b += sources::compute_sine_b_extra(pool_, graph_, t);
-        Vector w;
+        Vector& w = bx_w_;
         sources::compute_pulse_b_extra(pool_, graph_, t, w, left_by);
         b += w;
         sources::compute_current_waveform_b_extra(pool_, graph_, t, w, left_by);
@@ -1555,8 +1534,14 @@ private:
         if (b_extra_fn_) {
             b += b_extra_fn_(t);
         }
+        bx_t_ = t;
+        bx_left_ = left_by;
+        bx_valid_ = !b_extra_fn_;
         return b;
     }
+    mutable Vector bx_, bx_w_;
+    mutable Real bx_t_ = Real{0}, bx_left_ = Real{0};
+    mutable bool bx_valid_ = false;
 
     /// Lazily resolve the per-mask LTI entry. Sets the hot pointer
     /// `current_entry_` so subsequent calls skip the map lookup.
@@ -1568,7 +1553,20 @@ private:
         }
         auto it = mask_cache_.find(current_mask_);
         if (it == mask_cache_.end()) {
-            auto lti = cache_.compute_lti_state_space(current_mask_);
+            auto lti = [&] {
+                try {
+                    return cache_.compute_lti_state_space(current_mask_);
+                } catch (const std::runtime_error& e) {
+                    refuse_on_island_(current_mask_, e.what(), "the mode's reduction");
+                    if (std::string_view{e.what()}.find("numerically singular")
+                        != std::string_view::npos)
+                        throw UnsupportedError(
+                            "dsed", "extraction", "", "",
+                            std::string("dsed: ") + e.what()
+                                + " Use engine='pwl' or 'trbdf2'.");
+                    throw;
+                }
+            }();
             if (b_extra_fn_ && lti.constraint_K.rows() > 0) {
                 // the flow keeps K·x' = 0, so a user injection on a
                 // constraint row would break K·x = k unseen (no closed form)
@@ -1633,7 +1631,9 @@ private:
     mutable std::unordered_map<MaskT, int> mode_ids_;
     mutable LTIEntry* current_entry_ = nullptr;
     Real h_max_ = Real{1e-5};
+    Real horizon_ = Real{0};
     mutable std::size_t n_eig_ = 0;
+    mutable Real build_seconds_ = 0;
     mutable Vector aug_in_, aug_out_;
 };
 

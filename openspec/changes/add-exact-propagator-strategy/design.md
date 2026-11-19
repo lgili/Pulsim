@@ -72,7 +72,7 @@ e^s − 1 = expm1(a)·cos b − 2·sin²(b/2) + i·e^a·sin b
 | Tier | Method | Accepted when | Cost |
 |---|---|---|---|
 | 1 | eigendecomposition in energy coordinates, modal stepping | `u·κ₂(Ṽ) ≤ 1e-10` (κ₂ by SVD, once per mask) | O(n³) once, O(n) per step, O(n²) per recorded sample |
-| 2 | Padé [13/13] scaling and squaring (Higham 2005) of `[[A, b],[0, 0]]·h`, cached per `(mask, h)` | tier 1 refused and `u·‖A·h‖₁ ≤ 1e-10` | O(n³) per distinct `h` |
+| 2 | Padé [13/13] scaling and squaring (Higham 2005) of `[[A, b],[0, 0]]·h`, squared as `e^X − I` (`expm_aug`), cached per `(mask, h)` (LRU, 64) | tier 1 refused and `pade_defect ≤ 1e-10` (max over `h_max·2⁻ᵏ` of `‖E(h) − E(h/3)³‖` and of `E` under two u-relative perturbations of the matrix; an estimate, exact engine 7; was `u·‖A·h‖₁ ≤ 1e-10`) | O(n³) per distinct `h`; the judgement ~3 exponentials per squaring level at build |
 | 3 | implicit strategy for the steps taken under that mask | otherwise | as the implicit engine |
 
 `u = 2.2e-16`. Measured basis for the two bounds

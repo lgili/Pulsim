@@ -51,16 +51,15 @@ def test_banded_circuits_report_no_disagreement(fam, V_th, t_end):
     assert ms["hysteresis_released"] > 0      # the band is exercised: held OFF, then released
 
 
-def test_zero_threshold_boost_disagreements_are_the_settles_errors():
-    """dsed's boost with V_th = 0 stays ON at the DCM current zero (1.01 V low after 400 T,
-    test_mode_selection_today.py). The shadow finds those events; at each the LCP's mode is
-    consistent over 100 h_e and 1e4 h_e and the settle's is not."""
+def test_zero_threshold_boost_settle_agrees_with_the_lcp():
+    """dsed's boost with V_th = 0 stayed ON at the DCM current zero (1.01 V low after 400 T);
+    the shadow found those events, at each the LCP's mode consistent and the settle's not.
+    Since the settle decides a located event on the settled state with the significance ladder
+    (exact engine sessions 10-13) it agrees with the LCP at all 258 events of 100 T.
+    Re-pinned (was: every disagreement is the settle's error)."""
     ms = _run("boost_500", 0.0, 100 * T, "shadow").diagnostics["mode_shadow"]
-    dis = ms["disagreements"]
-    assert len(dis) > 0 and ms["errors"] == 0
-    for d in dis:
-        assert d["lcp_consistent"] is True and d["settle_consistent"] is False, d
-        assert d["settle_mode"] == (True,) and d["lcp_mode"] == (False,)
+    assert ms["errors"] == 0 and ms["disagreements"] == []
+    assert ms["events"] > 200
     assert ms["max_pivots_per_event"] <= 2
 
 

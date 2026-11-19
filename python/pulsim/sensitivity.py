@@ -623,7 +623,7 @@ def _run(builder, sf, x0, t_end, dt_max, dt_init, ic_from_builder):
     r = _pulsim.run_ped_native_builder(
         ad, sf, x0, t_end, rtol=1e-11, atol=1e-14, dt_init=dt_init,
         dt_max=dt_max, store_every=1, enable_event_projection=False,
-        event_log=True)
+        diode_law_rel=0.0, event_log=True)
     if int(r["n_exact_steps"]) != int(r["n_accept"]):
         raise _unsup(
             "sensitivities", "sensitivities: the exact stepper took "

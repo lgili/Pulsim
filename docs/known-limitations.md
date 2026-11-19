@@ -150,7 +150,7 @@ ideal elements and voltage sources with `feature='ideal_voltage_loop'`.
 <!-- branch-form-capabilities:begin -->
 | Form | pwl | trbdf2 | dsed | bdf1 | ac_sweep |
 |---|---|---|---|---|---|
-| Switch | yes | yes | no | no | no |
+| Switch | yes | yes | yes | no | no |
 | Diode | yes | yes | no | no | no |
 <!-- branch-form-capabilities:end -->
 

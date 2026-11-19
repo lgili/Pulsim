@@ -244,7 +244,8 @@ def test_yaml_form_branch():
 # ---------------------------------------------------------------------------------------------
 # 4.3 the engine column of the branch form (no silent cell)
 # ---------------------------------------------------------------------------------------------
-@pytest.mark.parametrize("engine", ["dsed", "bdf1"])
+# dsed runs the controlled branch switch since task 8 (test_exact_branch_form.py)
+@pytest.mark.parametrize("engine", ["bdf1"])
 def test_branch_switch_refused_by_name(engine):
     b = _rl()
     with pytest.raises(p.UnsupportedError) as ei:

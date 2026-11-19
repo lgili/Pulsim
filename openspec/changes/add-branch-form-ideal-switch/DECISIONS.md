@@ -1325,3 +1325,38 @@ the branch; renumbered 47-50 at integration batch 14b.)
     selector is about a quarter of NPC's samples after the change; the rest
     of the site is the step loop's per-site port callbacks in the frozen
     `run_transient.hpp`).
+
+## Exact engine 6 (feat/core-a-complementarity, 2026-11-18; numbered 40 on its branch, renumbered 59 at the merge)
+
+59. **Task 8, first slice: the controlled ideal switch on the exact engine
+    (exact engine 6, 2026-11-18).** Question: what does dsed need to run a
+    branch-form switch? → The LTI extraction already treats the branch
+    current as an algebraic row (Schur-eliminated, recovered by
+    `recover_from_state`), and an ideal switch that closes a capacitor loop
+    or opens an inductor cut-set is the dependent-state mode the exact engine
+    already projects and records. Done: (a) `kBranchFormCaps` lets dsed run
+    the `Switch` row; the `Diode` row stays refused (`branch_form`) because
+    every dsed diode site reads the conductance law `g_on·(v − V_f)` on node
+    voltages, which reads 0 A for an ON diode with R_on = 0 (settle, the
+    kernel law check, the look-ahead judges, the LCP ports, the period-map
+    observables: the next slice moves them onto `DiodeEventState::law_voltage`
+    and `pwl::select_site`). (b) The per-mode structural pass
+    (`BranchStructureChecker`, engine name "dsed") runs inside
+    `PwlStateSpaceCache::compute_lti_state_space`, the one extractor both the
+    native and the Python adapter call, so `floating_node`,
+    `ideal_voltage_loop` and `dependent_states` refuse with the pwl names and
+    devices. (c) Re-initialisation records name devices as pwl does (`states`
+    = capacitors / inductors, `devices` = the switch) instead of MNA row
+    labels; `impulse_losses` books the energy to the switch. Evidence
+    (`python/tests/test_exact_branch_form.py`): RL 10 V / 1 Ω / 1 mH closed,
+    i(10 ms) = 10(1 − e⁻¹⁰) within 1e-9 relative, `res.i("S")` is the solved
+    unknown; opened at 5 ms, |Λ| = L·i(5 ms) and ΔW = ½L·i(5 ms)² within 1e-9
+    of the closed form i(5 ms) = 10(1 − e⁻⁵) (no step-size error, unlike the
+    fixed-step oracle), i_L = 0 after; capacitor loop 4 V, 6 µC, 24 µJ within
+    1e-9, booked to S; the two structural circuits of
+    `test_branch_form_switch.py` refused by the same feature, kind and
+    device; the capability table in docs/known-limitations.md and the
+    conformance cells (`test_dependent_states_cell` now records on dsed/exact)
+    follow. Not done: the ideal diode (DCM buck orbit, clamp release, CCM RL
+    loop release, half-bridge leg at V_f = 0), the 54 reference cells,
+    reduced-state saltation and Floquet multipliers (8.1, 8.2).

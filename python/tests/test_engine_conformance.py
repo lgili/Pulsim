@@ -1348,8 +1348,8 @@ def test_branch_form_cell(kind, engine):
 
 # Dependent modes (a switch opening an inductor cut-set, task 5.5): pwl
 # re-initialises under the restart rule, trbdf2 always (three SDIRK
-# steps); pwl without the rule refuses by name, dsed/bdf1 because the
-# branch form is refused.
+# steps), dsed/exact by projection at mode entry (branch-form task 8); pwl
+# without the rule refuses by name, bdf1 because the branch form is refused.
 _DEP_REFUSAL = {"pwl": "dependent_states",
                 "dsed": "branch_form", "bdf1": "branch_form"}
 
@@ -1383,12 +1383,13 @@ def test_dependent_states_cell(engine, restart):
         assert (e.engine, e.feature, e.device) == (named, _DEP_REFUSAL[named], "S")
         assert not (engine == "pwl" and restart), f"pwl+restart refused: {e}"
         return
-    assert (engine == "pwl" and restart) or engine == "trbdf2", (
+    assert (engine == "pwl" and restart) or engine in ("trbdf2", "dsed", "exact"), (
         f"{engine} ran a dependent mode silently")
     assert len(r.reinit_records) == 1
 
 
-@pytest.mark.parametrize("kind", list(FORM_CELLS))
+@pytest.mark.parametrize("kind", [kd for kd in FORM_CELLS
+                                  if not k._branch_form_capabilities()[kd]["dsed"]])
 def test_branch_form_exact_alias_refuses_like_dsed(kind):
     out = {}
     for eng in ("dsed", "exact"):

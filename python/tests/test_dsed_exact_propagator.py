@@ -327,7 +327,7 @@ def test_consistent_initial_conditions_report_no_adjustment():
 
 
 # Integration batch 4: the zero-band settle can keep a diode in a mode its
-# law forbids; check_diode_modes turns that silent answer into a named error.
+# law forbids; the kernel's diode-law check turns that silent answer into a named error.
 def _boost(v_th, R):
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 12.0)
@@ -343,28 +343,26 @@ def _boost(v_th, R):
 @pytest.mark.parametrize("v_th,R,v_end", [(0.0, 50.0, 24.5295), (1e-3, 50.0, 24.5296),
                                           (0.0, 500.0, 45.4835)])
 def test_boost_with_a_wrong_settled_mode_is_repaired_or_named(v_th, R, v_end):
-    # The settle alone holds D1 ON at -1.07 A (R = 50, V_th = 0; 0.76 V low at
-    # R = 500). Batch 4: the stored-sample guard named it. Since the
-    # complementarity guard (batch 6a) the kernel repairs those events and
-    # the run lands on trbdf2 rtol 1e-10 (end v(vout) to 1e-4, measured
-    # <= 1e-5); with the kernel guard off the stored-sample guard still
-    # names it. Re-pin: raise -> repaired run.
+    # The settle alone held D1 ON at -1.07 A (R = 50, V_th = 0; 0.76 V low at
+    # R = 500). Batch 4: the stored-sample guard named it; batch 6a: the
+    # complementarity guard repaired those events; with the kernel guard off
+    # the settle was judged and refused (DECISIONS #26). Exact engine session
+    # 11: decisions at a located diode event are read on the candidate mode's
+    # slow manifold (its parasitic transient settled first), so the settle takes those events OFF itself: no repair, and the run with
+    # the guard off lands on the same trbdf2 rtol 1e-10 value (end v(vout) to
+    # 1e-4, measured <= 1e-5). Re-pin: repaired run -> no repair needed.
     import pulsim._dsed_dispatch as DD
     b, fn = _boost(v_th, R)
     r = p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
-    assert r.diagnostics["mode_guard"]["repairs"] > 0
+    assert r.diagnostics["mode_guard"]["repairs"] == 0
     assert np.asarray(r.v("vout"))[-1] == pytest.approx(v_end, abs=1e-4)
-    # Merge re-pin (DECISIONS #26 of add-complementarity-mode-selection): with the kernel guard
-    # off the settle is still judged and refuses at its first wrong event, before the
-    # stored-sample guard reads a sample (was: DiodeModeInconsistentError naming D1).
     b, fn = _boost(v_th, R)
     DD.MODE_GUARD = False
     try:
-        with pytest.raises(p.UnsupportedError) as ei:
-            p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
+        r_off = p.simulate(b, 3e-3, engine="dsed", switch_fn=fn)
     finally:
         DD.MODE_GUARD = True
-    assert (ei.value.feature, ei.value.device.split()[0]) == ("consistent_mode", "D1")
+    assert np.asarray(r_off.v("vout"))[-1] == pytest.approx(v_end, abs=1e-4)
 
 
 def test_boost_with_a_threshold_band_runs_and_agrees():
@@ -378,8 +376,10 @@ def test_boost_with_a_threshold_band_runs_and_agrees():
 
 
 def test_half_wave_rl_rectifier_with_a_zero_band_diode_is_repaired_or_named():
-    # Re-pin (batch 6a): the kernel guard repairs the one wrong event; the
-    # stored-sample guard still names it with the kernel guard off.
+    # Batch 6a: the kernel guard repaired the one wrong event; with the guard
+    # off the settle was refused by name. Exact engine session 11: the diode's
+    # zero is decided on the OFF mode's slow manifold, so the settle is
+    # right on its own (no repair) and the guard-off run is the same run.
     import pulsim._dsed_dispatch as DD
 
     def build():
@@ -390,20 +390,17 @@ def test_half_wave_rl_rectifier_with_a_zero_band_diode_is_repaired_or_named():
         b.add_inductor("L", "b", "gnd", 1e-3)
         return b
     r = p.simulate(build(), 3e-3, engine="dsed")
-    assert r.diagnostics["mode_guard"]["repairs"] == 1
-    # The repaired run against trbdf2 rtol 1e-10 (batch 6b, checkpoint review M2): mean i(L)
+    assert r.diagnostics["mode_guard"]["repairs"] == 0
+    # The run against trbdf2 rtol 1e-10 (batch 6b, checkpoint review M2): mean i(L)
     # 0.2937666 vs 0.2937670 A (measured 3.7e-7), v(a) on dsed's samples within 5.8e-5 V.
     ref = p.simulate(build(), 3e-3, engine="trbdf2", rtol=1e-10, atol=1e-13)
     t, tr = np.asarray(r.times), np.asarray(ref.times)
     assert np.trapezoid(r.i("L"), t) / 3e-3 == pytest.approx(
         np.trapezoid(ref.i("L"), tr) / 3e-3, abs=1e-4)
     assert np.abs(np.interp(t, tr, ref.v("a")) - np.asarray(r.v("a"))).max() < 1e-4
-    # merge re-pin as in the boost test above (was: DiodeModeInconsistentError, 'D' ON while
-    # carrying reverse current): the judged settle refuses first, naming D
     DD.MODE_GUARD = False
     try:
-        with pytest.raises(p.UnsupportedError) as ei:
-            p.simulate(build(), 3e-3, engine="dsed")
+        r_off = p.simulate(build(), 3e-3, engine="dsed")
     finally:
         DD.MODE_GUARD = True
-    assert (ei.value.feature, ei.value.device.split()[0]) == ("consistent_mode", "D")
+    assert np.array_equal(np.asarray(r_off.states), np.asarray(r.states))

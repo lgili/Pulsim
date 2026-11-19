@@ -62,18 +62,18 @@ def _half_wave_rl():
 
 def _sim(b, t_end, fn=None, guard=True, **kw):
     """guard=False: the settle alone, with BOTH guards off (the kernel's
-    MODE_GUARD and the stored-sample check_diode_modes, which would name
+    MODE_GUARD and the stored-sample diode-law check, which would name
     the wrong mode instead of returning it)."""
     if fn is not None:
         kw["switch_fn"] = fn
-    check = DD.check_diode_modes
+    saved = DD.MODE_GUARD, DD.DIODE_LAW_REL
     DD.MODE_GUARD = guard
     if not guard:
-        DD.check_diode_modes = lambda *a, **k: None
+        DD.DIODE_LAW_REL = 0.0
     try:
         return p.simulate(b, t_end=t_end, engine="dsed", **kw)
     finally:
-        DD.MODE_GUARD, DD.check_diode_modes = True, check
+        DD.MODE_GUARD, DD.DIODE_LAW_REL = saved
 
 
 def _end(r, node):
@@ -121,44 +121,45 @@ BOOST = {20.0: (23.786198209, 852, 856), 50.0: (23.806428021, 969, 978), 500.0: 
 
 @pytest.mark.parametrize("R", list(BOOST))
 def test_lcp_and_guard_fix_the_zero_threshold_boost(R):
-    """With V_th = 0 the settle keeps D1 ON through the DCM current zero (-0.86 / -1.07 / -1.18 A
-    at R = 20 / 50 / 500 ohm); 'lcp' and the guarded default decide those events OFF."""
+    """With V_th = 0 the settle kept D1 ON through the DCM current zero (-0.86 / -1.07 / -1.18 A
+    at R = 20 / 50 / 500 ohm), and with the guard off it refused there (DECISIONS #26). Since
+    exact engine session 11 decisions at a located diode event are read on the candidate mode's slow manifold (its parasitic transient settled first),
+    so the settle alone, the guarded default and 'lcp' take the same events to the last bit,
+    with no repair."""
     ref, ev_settle, ev_lcp = BOOST[R]
     b, fn = _boost(R)
-    # the settle alone kept D1 ON (> 3e-2 V off ref); judged, it refuses there (DECISIONS #26)
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim(b, 400 * T, fn, guard=False)
-    assert (ei.value.engine, ei.value.feature, ei.value.device.split()[0]) == ("dsed", "consistent_mode", "D1")
+    r_set = _sim(b, 400 * T, fn, guard=False)
     r_lcp = _sim(b, 400 * T, fn, mode_selection="lcp")
     r_def = _sim(b, 400 * T, fn)
     assert _end(r_lcp, "out") == pytest.approx(ref, abs=2e-5)          # measured -1.5e-6 .. -1.24e-5
     assert r_lcp.n_events == ev_lcp
     assert np.array_equal(np.asarray(r_lcp.states), np.asarray(r_def.states))
-    g = r_def.diagnostics["mode_guard"]
-    assert g["repairs"] > 0 and len(g["repair_times"]) == g["repairs"]
-    assert {d.split()[0] for d in g["repair_diodes"]} == {"D1"}
+    assert np.array_equal(np.asarray(r_set.states), np.asarray(r_def.states))
+    assert r_def.diagnostics["mode_guard"]["repairs"] == 0
 
 
-def test_guard_fixes_the_half_wave_rl_rectifier():
-    """The settle held D1 OFF through a forward bias of 10 V (mean v(out) 1.06 V low); the guard
-    repairs the start (and, depending on rounding, one more event) and every stored OFF sample is
-    reverse-biased."""
+def test_half_wave_rl_rectifier_matches_the_exact_truth():
+    """Against the exact truth (truth2 benchmarks/tools/exact_truth.py, diode_half_wave_rl_load,
+    50 digits): D1 ON from t = 0, OFF at 10.0999172, 30.0999172, 50.0999172 ms, ON at 20 and
+    40 ms + 1 us; mean v(out) 3.18069264315 V. The settle once held D1 OFF at t = 0 (1.06 V
+    low; fixed by the significance ladder) and then kept it ON at the 30.0999 ms turn-off: the
+    OFF probe read the root's residual (5e-15 A through g_off: +5e-9 V for ~1 ns), which is the
+    located root's own error, now part of the ladder's bound. The settle alone (no guard, no
+    law check) decides every event; the guard repairs nothing."""
     b = _half_wave_rl()
-    # the settle alone read 1.06 V low; judged, it refuses at its first wrong event (#26)
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim(b, 60e-3, guard=False)
-    assert (ei.value.feature, ei.value.device.split()[0]) == ("consistent_mode", "D1")
-    r = _sim(b, 60e-3)
-    ref = 3.180662149                                                   # trbdf2 rtol 1e-10
-    assert _tw_mean(r, "out") == pytest.approx(ref, abs=1e-4)          # measured +2.3e-5
-    # The t = 0 repair is the one the mean needs. A second one at 30.0999 ms (1 us before the
-    # turn-off, gap 0.063 V) is rounding: the settle gets that event wrong on macOS arm64 and right
-    # on Linux; the stored waveform is the same either way (means 3.1806847866436305 / ...363).
-    g = r.diagnostics["mode_guard"]
-    assert g["repair_times"][0] == 0.0 and g["repairs"] in (1, 2)
-    on = np.asarray(r.switch_states)[:, b.switch_index_of("D1")].astype(bool)
-    vd = np.asarray(r.v("in")) - np.asarray(r.v("out"))
-    assert vd[~on].max() < 1e-3
+    truth_off = [10.0999172e-3, 30.0999172e-3, 50.0999172e-3]
+    truth_on = [20.000001e-3, 40.000001e-3]
+    for guard in (False, True):
+        r = _sim(b, 60e-3, guard=guard)
+        assert _tw_mean(r, "out") == pytest.approx(3.18069264315096, abs=1e-6)   # measured -1.1e-8
+        et, ty = np.asarray(r.event_times), np.asarray(r.event_types)
+        assert len(et) == 5
+        assert et[ty == 2] == pytest.approx(truth_off, abs=1e-9)
+        assert et[ty == 1] == pytest.approx(truth_on, abs=1e-9)
+        on = np.asarray(r.switch_states)[:, b.switch_index_of("D1")].astype(bool)
+        vd = np.asarray(r.v("in")) - np.asarray(r.v("out"))
+        assert vd[~on].max() < 1e-3
+    assert r.diagnostics["mode_guard"]["repairs"] == 0
     r_lcp = _sim(b, 60e-3, mode_selection="lcp")
     assert np.array_equal(np.asarray(r_lcp.states), np.asarray(r.states))
 
@@ -339,32 +340,67 @@ def test_a_widened_pass_does_not_release_a_diode_before_its_own_turn_off(mode):
     assert sel["capped"] > 0
 
 
+def _paralleled_bank(n):
+    b = p.CircuitBuilder()
+    for k in range(n):
+        for ph, ang in (("a", 0.0), ("b", -120.0), ("c", 120.0)):
+            b.add_sine_voltage_source(f"V{k}{ph}", f"s{k}{ph}", "gnd", 0.0, 100.0, 50.0,
+                                      np.deg2rad(ang + 6.0 * k))
+            b.add_inductor(f"L{k}{ph}", f"s{k}{ph}", f"x{k}{ph}", 0.2e-3)
+            b.add_diode(f"Dt{k}{ph}", f"x{k}{ph}", "p", 1e3, 1e-9, 0.0)
+            b.add_diode(f"Db{k}{ph}", "n", f"x{k}{ph}", 1e3, 1e-9, 0.0)
+    b.add_capacitor("C", "p", "n", 2e-3)
+    b.add_resistor("R", "p", "n", 5.0)
+    b.add_resistor("Rg", "n", "gnd", 1e6)
+    return b
+
+
+@pytest.mark.parametrize("n", [3, 5])
+def test_paralleled_bridges_run_their_cluster_modes_on_the_pade_tier(n):
+    """add-exact-propagator-strategy D2 (exact engine 7): identical paralleled bridges reach
+    modes whose eigenpairs miss the defect bar (a degenerate cluster near -5 /s: defect 3.3e-7
+    with three banks, backward error 3.8 u). Those modes take the Pade tier, accepted on its
+    own estimated error (two scalings, a u-perturbed matrix; max over h_max/2^k): measured
+    2.8e-11 (three) and 4.1e-11 (five), the true error of one such mode against a 60-digit
+    exponential 0.9e-11 / 1.7e-11. Bus voltage against pwl+split at dt = 1e-7 (dt/2 moves it
+    1.1e-4 V with three banks, 1.3e-6 V with five): 1.1e-4 V, the same offset two banks show
+    on eigenpairs alone (test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp)."""
+    t_end = 0.02
+    tg = np.linspace(0.0, t_end, 2001)
+
+    def bus(r):
+        return np.interp(tg, r.times, np.asarray(r.v("p")) - np.asarray(r.v("n")))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(_paralleled_bank(n), t_end=t_end, engine="dsed")
+        ref = p.simulate(_paralleled_bank(n), t_end=t_end, engine="pwl", dt=1e-7,
+                         discontinuity_restart=True, enable_substep_state_correction=True)
+    rows = r.exact["masks"]
+    # which modes miss the eigenpair bar depends on the eigensolver's basis inside the
+    # cluster; whatever their tier, each stated its bar
+    assert rows and all(m["tier"] in (1, 2) for m in rows)
+    assert all(m["defect"] <= 1e-10 for m in rows if m["tier"] == 1)
+    assert all(m["pade_defect"] <= 1e-10 for m in rows if m["tier"] == 2)
+    assert np.abs(bus(r) - bus(ref)).max() <= 1e-3
+
+
 @pytest.mark.parametrize("cap", [64, 1])
 def test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp(cap, monkeypatch):
-    """DECISIONS #25. Five bridges paralleled on one 2 mF || 5 ohm bus: at rest every diode
-    pair fights over the bus, and on macOS the settle raised "did not settle after 64
-    rounds" at t = 1.8e-26 s (on Linux / Windows the same fight settles: 0 caps, a
-    rounding outcome). With the guard on, such an event is decided by the LCP from the
-    held state. The engine's own cap at 1 round (the test hook) throws at any event
-    where a diode flips, so the give-up is forced on any platform; either way the result is within 1e-3 V of pwl extrapolated in dt
-    (measured 1.5e-4 V), and the forced cap is counted."""
+    """DECISIONS #25. Bridges paralleled on one 2 mF || 5 ohm bus: at rest every diode
+    pair fights over the bus, and on macOS five of them made the settle raise "did not
+    settle after 64 rounds" at t = 1.8e-26 s (on Linux / Windows the same fight settles:
+    0 caps, a rounding outcome). With the guard on, such an event is decided by the LCP
+    from the held state. The engine's own cap at 1 round (the test hook) throws at any
+    event where a diode flips, so the give-up is forced on any platform; either way the
+    result is within 1e-3 V of pwl extrapolated in dt (measured 1.1e-4 V), and the forced
+    cap is counted. Five bridges again since the cluster modes of identical banks take the
+    Pade tier (exact engine 7; slices 5-6 had cut it to two while those modes were refused)."""
     monkeypatch.setattr(DD, "SETTLE_ROUND_CAP", cap)
     t_end, n = 0.02, 5
     tg = np.linspace(0.0, t_end, 2001)
 
     def bank():
-        b = p.CircuitBuilder()
-        for k in range(n):
-            for ph, ang in (("a", 0.0), ("b", -120.0), ("c", 120.0)):
-                b.add_sine_voltage_source(f"V{k}{ph}", f"s{k}{ph}", "gnd", 0.0, 100.0, 50.0,
-                                          np.deg2rad(ang + 6.0 * k))
-                b.add_inductor(f"L{k}{ph}", f"s{k}{ph}", f"x{k}{ph}", 0.2e-3)
-                b.add_diode(f"Dt{k}{ph}", f"x{k}{ph}", "p", 1e3, 1e-9, 0.0)
-                b.add_diode(f"Db{k}{ph}", "n", f"x{k}{ph}", 1e3, 1e-9, 0.0)
-        b.add_capacitor("C", "p", "n", 2e-3)
-        b.add_resistor("R", "p", "n", 5.0)
-        b.add_resistor("Rg", "n", "gnd", 1e6)
-        return b
+        return _paralleled_bank(n)
 
     def bus(r):
         return np.interp(tg, r.times, np.asarray(r.v("p")) - np.asarray(r.v("n")))

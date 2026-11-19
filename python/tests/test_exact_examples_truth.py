@@ -55,7 +55,8 @@ def test_flyback_with_q1_on_keeps_the_output_at_its_leakage_level():
             warnings.simplefilter("ignore")
             r = p.simulate(lc, t_end=2e-4, engine=eng, switch_fn=_q1_on(lc), **kw)
         out[eng] = float(np.asarray(r.v("vout"))[-1] - np.asarray(r.v("sec_neg"))[-1])
-    # D1 is reverse-biased: only its 1 nS leak reaches the output (~-1e-8 V here)
+    # D1 is reverse-biased: only its 1 nS leak reaches the output (~-1e-8 V here).
+    # The defect this guards put 8.3e-5 V there, ~1e6x the margin.
     assert abs(out["pwl"]) < 1e-7
     assert abs(out["exact"] - out["pwl"]) < 1e-9
 
@@ -84,10 +85,10 @@ def test_flyback_as_documented_runs_and_matches_the_fixed_engine():
 
 
 def test_phase_shift_full_bridge_output_with_balancing_where_it_hurts():
-    """Balancing is kept per mode only when its eigenpairs have the smaller
-    residual: on two of this bridge's modes the scaling back (up to 4e6)
-    amplified the balanced eigenvectors' error, the propagator was 1.5e-3 off
-    and V_out settled at 24.33 V. Truth: pwl with event splitting at dt/32,
+    """Balanced eigenpairs are used only where the plain ones fail the
+    propagator check (pair_quality): on two of this bridge's modes the scaling
+    back (up to 4e6) amplified the balanced eigenvectors' error, the propagator
+    was 1.5e-3 off and V_out settled at 24.33 V. Truth: pwl with event splitting at dt/32,
     24.0662 V (mean over 1.8-2.0 ms, benchmarks/EXACT_ROUTE_EVIDENCE.md)."""
     lc = _load("phase_shift_full_bridge")
     si, n = lc.builder.switch_index_of, len(lc.switch_names)
