@@ -392,21 +392,37 @@ res = p.simulate(b, t_end=40e-3, recorders=[rec])
 r = res.recorded["bus"]
 r.windows["v(dp) - v(dn)"]["avg"]   # also integral, rms, min, t_min, max, t_max, t0, t1
 r.periods["v(dp) - v(dn)"]["rms"]
-r.event_t, r.event_left[...], r.event_right[...]   # both limits (engine='exact')
+r.event_t, r.event_left[...], r.event_right[...]   # both limits at each event
+r.event_resolution, r.event_t_right                # 'exact' | 'settled' | 'within_dt'
+r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
 ```
 
 - A window that starts exactly on an event starts from the right limit,
   one that ends on an event ends on the left limit, and min / max see
-  both limits of events inside it. Only `engine='exact'` stores right
-  limits; pwl and trbdf2 records are continuous (no event rows).
+  both limits of events inside it.
+- Event rows say how the right value was obtained (`event_resolution`):
+  `'exact'` — the exact engine's right limit at the instant; `'settled'`
+  — trbdf2's settled post-event state at the instant (the next line starts
+  from it); `'within_dt'` — a bracket: the left limit at `event_t`, the
+  end of the first step under the new mode at `event_t_right` (pwl always,
+  trbdf2 where its settle did not report). No right limit is invented.
 - RMS integrates the line between samples exactly, `h(a² + ab + b²)/3`;
   a product probe is linear between its own samples, as
   `time_average` of the product trace is.
-- **Feeding mode today:** a kernel-side pass over the stored result
-  arrays, on every engine, so `store_every > 1` and `resume_from` are
-  refused with recorders (by name); `keep="decimate"` keeps fewer rows
-  with statistics from every step. In-loop feeding moves to the unified
-  stepper's per-step hook without changing these definitions.
+- **Feeding mode per engine** (`r.feeding`, `res.recorder_feed`):
+
+  | engine | mode | |
+  |---|---|---|
+  | `pwl`, `trbdf2` | `'in-loop'` | fed from the engine's step hooks while it runs: every accepted step, whatever `store_every` keeps |
+  | `exact` | `'stored-arrays'` | a pass over the stored result (its stored right limits are exact) |
+
+  In-loop readings are functions of the state alone: `v()`, `i()` of an
+  inductor / voltage source / branch-form switch or diode / resistor, and
+  `p()` of those; any other reading, and runs that bypass the kernel
+  Simulation object, use the stored-array pass (`res.recorder_feed["why"]`).
+  `store_every > 1` works with in-loop recorders (statistics equal the
+  full run's) and is refused by name otherwise; `resume_from` is refused.
+  `keep="decimate"` keeps fewer rows with statistics from every step.
 - `steady_state_stats(result, "name")` looks the name up as a node
   (`result.v`) and as a branch (`result.i`); a name that is both raises
   and asks for `kind='v'` / `kind='i'`. An array must be sampled on

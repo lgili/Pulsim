@@ -2275,6 +2275,10 @@ class SimulationResult:
     recorded: dict[str, typing.Any]
     """``simulate(recorders=[...])`` only: ``pulsim.Recording`` per
     recorder name (kernel probes and exact windowed statistics)."""
+    recorder_feed: dict[str, typing.Any]
+    """``simulate(recorders=[...])`` only: the feed that ran (``mode``:
+    ``'in-loop'`` with ``n_steps`` / ``n_events`` / ``n_jumps`` /
+    ``n_dropped``, or ``'stored-arrays'`` with ``why``)."""
     step_loop_python_callbacks: tuple[str, ...]
     """Names of the Python callables :func:`pulsim.simulate` installed in
     the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,
@@ -4214,6 +4218,8 @@ class Simulation:
         ...
     def set_live_ring(self, ring: LiveRingHandle) -> None:
         ...
+    def set_loop_feed(self, feed: typing.Any) -> None:
+        ...
     def set_source_term(self, b_extra_fn: typing.Any) -> None:
         ...
     def set_step_observer(self, step_observer: typing.Any) -> None:
@@ -4251,6 +4257,37 @@ class Simulation:
         ...
     @property
     def trbdf2_stats(self) -> dict[typing.Any, typing.Any]:
+        ...
+class _LoopFeed:
+    """
+    In-loop recorder feed (add-probes-and-recorders 0b.6); use pulsim.simulate(..., recorders=[...]).
+    """
+    def __init__(self, reading_names: collections.abc.Sequence[str], readings: collections.abc.Sequence[tuple[collections.abc.Sequence[int], collections.abc.Sequence[float], float, bool, collections.abc.Sequence[int], collections.abc.Sequence[float], float]], recorders: collections.abc.Sequence[tuple[collections.abc.Sequence[str], str, int, collections.abc.Sequence[tuple[float, float]], float, float, collections.abc.Sequence[float]]]) -> None:
+        ...
+    def arm(self, bracket_events: bool) -> None:
+        """
+        Register on the feed's own hooks; Simulation.set_loop_feed passes them.
+        """
+    def finish(self) -> None:
+        ...
+    def reserve(self, n_samples: int, t_last: float, n_events: int = 0) -> None:
+        ...
+    def result(self, k: int) -> dict[typing.Any, typing.Any]:
+        ...
+    @property
+    def armed(self) -> bool:
+        ...
+    @property
+    def n_dropped(self) -> int:
+        ...
+    @property
+    def n_events(self) -> int:
+        ...
+    @property
+    def n_jumps(self) -> int:
+        ...
+    @property
+    def n_steps(self) -> int:
         ...
 def _branch_form_capabilities() -> dict[typing.Any, typing.Any]:
     """

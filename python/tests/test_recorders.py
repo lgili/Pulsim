@@ -42,6 +42,10 @@ RUNS = {
 # inconsistent t = 0 state (owner note fixed-engine-first-order-start): its
 # first step lags by V*dt/(2*tau), and that offset decays with tau, so the
 # window average is off by ~1.3e-3 V at dt = 1e-6 (bound V*dt/tau = 1e-2).
+# pwl / trbdf2 run through the kernel Simulation object, whose step hooks
+# feed the recorders while the engine runs; the exact engine stores exact
+# right limits, which its scheduler hook does not carry: stored-array pass.
+FEEDING = {"pwl": "in-loop", "trbdf2": "in-loop", "exact": "stored-arrays"}
 RC_BOUND = {"pwl": V * 1e-6 / TAU, "trbdf2": 2e-5 * V, "exact": 2e-5 * V}
 
 
@@ -50,7 +54,7 @@ def test_rc_charge_window_clipped_mid_step(eng):
     rec = p.Recorder("rc", ["v(out)", "v(in,out)/1e3"], windows=[(A, B)])
     res = p.simulate(_rc(), t_end=3e-3, recorders=[rec], **RUNS[eng])
     r = res.recorded["rc"]
-    assert r.feeding == "stored-arrays"
+    assert r.feeding == FEEDING[eng]
     avg, rms = _rc_truth(A, B)
     w = r.windows["v(out)"]
     bound = RC_BOUND[eng]
@@ -169,7 +173,6 @@ def test_decimation_keeps_rows_not_accuracy():
 
 
 @pytest.mark.parametrize("kw,match", [
-    (dict(store_every=2, dt=1e-6, engine="pwl"), "store_every"),
     (dict(engine="pwl", dt=1e-6, resume_from=object()), "resume_from"),
 ])
 def test_unhonourable_options_are_refused_by_name(kw, match):
@@ -199,3 +202,183 @@ def test_unknown_node_names_the_reading():
     with pytest.raises(KeyError, match="nope"):
         p.simulate(_rc(), t_end=1e-3, dt=1e-6, engine="pwl",
                    recorders=[p.Recorder("x", ["v(nope)"])])
+
+
+# ---- in-loop feeding (task 0b.6) and event semantics (item 2) ----------
+
+def _buck():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_mosfet("Q1", "vin", "sw")
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "vout", 100e-6)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", 10.0)
+    fn = p.make_pwm_switch_fn(100e3, 0.5, b.switch_index_of("Q1"),
+                              b.graph.num_switches)
+    return b, fn
+
+
+_STATS = ("integral", "avg", "rms", "min", "t_min", "max", "t_max")
+_CASES = {
+    "rc": (_rc, 3e-3, ["v(out)", "v(in,out)/1e3", "i(R1)", "p(R1)", "i(V1)"],
+           [(A, B)], None, 0.0),
+    "rect": (_rectifier, 40e-3, ["v(dp,dn)", "v(s)", "i(RL)"],
+             [(7.3e-3, 33.1e-3)], 10e-3, 5e-3),
+    "bridge": (lambda: _bridge(np.zeros(6), "conductance"), 40e-3,
+               ["v(dp) - v(dn)", "i(Ls)"], [(30e-3, 40e-3)], None, 0.0),
+    # PWM gate edges: trbdf2 lands them and commits the post-edge probe
+    "buck": (_buck, 1e-3, ["v(vout)", "i(L)", "p(RL)"],
+             [(0.2e-3 + 3.3e-9, 0.9e-3 - 1.7e-9)], 1e-5, 0.0),
+}
+_LOOP_RUNS = {"pwl": dict(engine="pwl", dt=1e-6),
+              "trbdf2": dict(engine="trbdf2", rtol=1e-7, atol=1e-10)}
+
+
+@pytest.mark.parametrize("case", sorted(_CASES))
+@pytest.mark.parametrize("eng", sorted(_LOOP_RUNS))
+def test_in_loop_feeding_equals_the_stored_array_pass(eng, case):
+    """The same run read two ways: the hooks while it ran, and the pass over
+    its stored arrays. On pwl the samples are the same (bit-identical on
+    this machine; 1e-9 across platforms). trbdf2 stores the settled
+    post-event probe as an extra sample where the in-loop record starts the
+    next line from the same settled state as an event row: the rectifier's
+    windows differ there by ~5e-10 relative."""
+    from pulsim._recorders import record_result
+    fac, te, probes, win, per, off = _CASES[case]
+    rec = p.Recorder("r", probes, windows=win, period=per, offset=off)
+    built = fac()
+    b0, fn = built if isinstance(built, tuple) else (built, None)
+    res = p.simulate(b0, t_end=te, recorders=[rec], switch_fn=fn,
+                     **_LOOP_RUNS[eng])
+    a = res.recorded["r"]
+    b = record_result(res, [rec])["r"]
+    assert a.feeding == "in-loop" and b.feeding == "stored-arrays"
+    assert res.recorder_feed["mode"] == "in-loop"
+    assert res.recorder_feed["n_dropped"] == 0
+    # trbdf2 stores its settled post-event probe as a sample: the line from
+    # the left limit to it (stored) vs from the settled state (in-loop)
+    rtol = 1e-6 if eng == "trbdf2" and case in ("rect", "buck") else 1e-9
+    for q in probes:
+        for st in (lambda r: r.windows[q], lambda r: r.periods[q]):
+            sa, sb = st(a), st(b)
+            if sb["rms"].size == 0:
+                continue
+            # a scale floor: a sine's period integral is physically zero
+            scale = float(np.max(sb["rms"]))
+            span = float(np.max(sb["t1"] - sb["t0"]))
+            # min / max (and their times) are limit-aware: a period that
+            # starts at a settled event starts on its right limit in-loop,
+            # while the stored pass has no event row there (the DCM buck's
+            # inductor current: -1.46e-8 A left, -5.5e-11 A right at 0.24 ms)
+            fields = _STATS if rtol == 1e-9 else ("integral", "avg", "rms")
+            for f in fields:
+                atol = rtol * scale * (span if f == "integral" else 1.0)
+                if f.startswith("t_"):
+                    atol = rtol * span
+                np.testing.assert_allclose(sa[f], sb[f], rtol=rtol,
+                                           atol=atol, err_msg=f"{q} {f}")
+    if eng == "pwl" or case not in ("rect", "buck"):
+        np.testing.assert_array_equal(a.times, b.times)
+        for q in probes:
+            np.testing.assert_allclose(a[q], b[q], rtol=1e-9, atol=1e-12)
+
+
+def test_store_every_gives_the_full_runs_statistics():
+    """A decimated run's recorders see every accepted step: the windows,
+    periods and event rows of store_every=50 equal those of the full run
+    (the same step sequence), and a statistics-only recorder keeps no row."""
+    mk = lambda: p.Recorder("s", ["v(dp,dn)", "i(RL)"], keep="none",  # noqa: E731
+                            windows=[(7.3e-3, 33.1e-3)], period=10e-3,
+                            offset=5e-3)
+    full = p.simulate(_rectifier(), t_end=40e-3, engine="pwl", dt=1e-6,
+                      recorders=[mk()])
+    dec = p.simulate(_rectifier(), t_end=40e-3, engine="pwl", dt=1e-6,
+                     store_every=50, recorders=[mk()])
+    assert len(full.times) == 40001 and len(dec.times) == 801
+    np.testing.assert_array_equal(full.times[::50], dec.times)
+    a, b = full.recorded["s"], dec.recorded["s"]
+    assert b.feeding == "in-loop" and b.times.size == 0
+    for q in a.probes:
+        for f in _STATS:
+            np.testing.assert_array_equal(a.windows[q][f], b.windows[q][f])
+            np.testing.assert_array_equal(a.periods[q][f], b.periods[q][f])
+        np.testing.assert_array_equal(a.event_right[q], b.event_right[q])
+    np.testing.assert_array_equal(a.event_t, b.event_t)
+    assert a.periods["v(dp,dn)"]["avg"].size == 3
+
+
+def test_store_every_without_in_loop_feeding_is_refused_by_name():
+    # a Shockley diode's current is a law of the voltage, not a state column
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V1", "in", "gnd", 1.0)
+    b.add_resistor("R1", "in", "a", 10.0)
+    b.add_shockley_diode("D1", "a", "gnd")
+    with pytest.raises(ValueError, match=r"store_every=2.*could not be fed in the loop"):
+        p.simulate(b, t_end=1e-5, dt=1e-6, engine="pwl", store_every=2,
+                   recorders=[p.Recorder("x", ["i(D1)"])])
+
+
+# the 11 commutations' (i_L, v_C) at the event, from
+# benchmarks/tools/bridge_ground_truth.py run(params(), dps=30)
+_TRUTH_STATES = [
+    (3.329968943405992e-07, 332.9968976609098),
+    (-2.9589476677125644e-07, 295.89476677125634),
+    (-0.0002765293634114608, 276.2531103011596),
+    (-0.0003444643908292179, 344.12027056718364),
+    (-3.1633577693666694e-07, 316.33577693675653),
+    (2.931086676394856e-07, 293.10866763948553),
+    (3.3529305742994196e-07, 335.2930755044125),
+    (-3.0898050256049306e-07, 308.98050256049294),
+    (-0.0002874449184521423, 287.1577606914508),
+    (-0.0003389918909732532, 338.6532377471501),
+    (-3.118711722901159e-07, 311.8711722901191),
+]
+
+
+@pytest.mark.parametrize("eng", ["pwl", "trbdf2", "exact"])
+def test_event_rows_against_the_bridge_truth(eng):
+    """Both limits where the engine has them, flagged: 'exact' (the exact
+    engine's right limits), 'settled' (trbdf2's post-event state at the
+    instant), 'within_dt' (a bracket: the left limit at event_t, the end of
+    the first step under the new mode at event_t_right; pwl always, trbdf2
+    where its settle did not report). Never a fabricated right limit."""
+    from .test_bridge_ground_truth import EVENTS
+    kw = dict(_LOOP_RUNS, exact=dict(engine="exact"))[eng]
+    rec = p.Recorder("e", ["i(Ls)", "v(dp,dn)"], keep="none")
+    res = p.simulate(_bridge(np.zeros(6), "conductance"), t_end=40e-3,
+                     recorders=[rec], **kw)
+    r = res.recorded["e"]
+    res_set = set(r.event_resolution.tolist())
+    assert res_set <= {"exact": {"exact"}, "pwl": {"within_dt"},
+                       "trbdf2": {"settled", "within_dt"}}[eng], res_set
+    assert np.all(r.event_t_right >= r.event_t)
+    sett = r.event_resolution != "within_dt"
+    assert np.all(r.event_t_right[sett] == r.event_t[sett])
+    found = 0
+    for (t, _), (iL, vC) in zip(EVENTS, _TRUTH_STATES):
+        if eng == "exact":
+            k = int(np.argmin(np.abs(r.event_t - t)))
+            assert abs(r.event_t[k] - t) <= 1e-10
+            for side in (r.event_left, r.event_right):
+                assert abs(side["v(dp,dn)"][k] - vC) <= 1e-6
+            assert abs(r.event_left["i(Ls)"][k] - iL) <= 1e-9
+            found += 1
+        elif eng == "pwl":
+            # a bracket holds the truth (the stored engine's grid is 1 us)
+            hit = (r.event_t <= t + 1e-9) & (t <= r.event_t_right + 1e-9)
+            assert hit.any(), t
+            k = int(np.nonzero(hit)[0][0])
+            assert abs(r.event_left["v(dp,dn)"][k] - vC) <= 1e-2
+            assert abs(r.event_right["v(dp,dn)"][k] - vC) <= 1e-2
+            found += 1
+        else:
+            # trbdf2 lands every commutation within ~30 ns here; the left
+            # limit is the landing, the right one settled or a bracket
+            k = int(np.argmin(np.abs(r.event_t - t)))
+            assert abs(r.event_t[k] - t) <= 2e-7, (t, r.event_t[k])
+            assert abs(r.event_left["v(dp,dn)"][k] - vC) <= 1e-2
+            if r.event_resolution[k] == "settled":
+                assert abs(r.event_right["v(dp,dn)"][k] - vC) <= 1e-2
+            found += 1
+    assert found == 11, found
