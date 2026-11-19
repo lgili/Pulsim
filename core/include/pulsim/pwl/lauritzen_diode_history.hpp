@@ -43,6 +43,7 @@
 // exactly why stamping the wrong one converges and lies.
 
 #include "pulsim/models/lauritzen_diode.hpp"
+#include "pulsim/device/device.hpp"
 #include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
@@ -284,6 +285,12 @@ public:
             entries_[k].f_prev   = flat[2 * k + 1];
         }
     }
+
+    /// The step of the last interface-path stamp (pwl/interface_stamps.hpp):
+    /// `iface::capture_gamma` solves the local charge row at the stage point
+    /// under it, as the hand path reads K0/K1 from the last `begin_step`.
+    /// Set before every interface solve; not state (never rolled back).
+    device::StepCtx iface_ctx{};
 
 private:
     std::vector<Entry> entries_;

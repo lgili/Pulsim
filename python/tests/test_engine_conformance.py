@@ -1626,7 +1626,8 @@ def _run_path(cell, engine, path):
         warnings.simplefilter("ignore")
         r = p.simulate(b, t_end, engine=engine, switch_fn=_switch_fn(b, sw),
                        device_path=path, **kw)
-    return np.asarray(r.times, float), np.asarray(r.v(node), float)
+    return (np.asarray(r.times, float), np.asarray(r.v(node), float),
+            np.asarray(r.newton.iterations_per_solve))
 
 
 def test_every_newton_kind_has_a_device_path_cell():
@@ -1642,11 +1643,11 @@ def test_device_path_cell(name, engine):
     block = _BLOCK_OF.get(name)
     ported = _NEWTON_PORTED[base] and _BLOCKS_PORTED.get(block, True)
     try:
-        ta, va = _run_path(cell, engine, "legacy")
+        ta, va, na = _run_path(cell, engine, "legacy")
     except p.UnsupportedError:
         pytest.skip(f"{name} is not on {engine} (kind table)")
     try:
-        ti, vi = _run_path(cell, engine, "interface")
+        ti, vi, ni = _run_path(cell, engine, "interface")
     except ValueError as e:
         assert not ported, f"{name} on {engine}: refused but ported: {e}"
         assert "not on the device interface yet" in str(e)
@@ -1657,7 +1658,14 @@ def test_device_path_cell(name, engine):
     if engine == "pwl":
         assert np.array_equal(ta, ti)
         err = float(np.max(np.abs(vi - va)))
-        assert err <= 1e-12 * span, f"{name}: {err:.3g} vs span {span:.3g}"
+        # 1e-12 is a rounding claim while both paths take the same Newton
+        # iterations; one iteration apart they differ by up to the Newton
+        # tolerance (1e-9 absolute by default; DECISIONS #29).
+        tol = 1e-12 * span if np.array_equal(na, ni) else 1e-8
+        if not np.array_equal(na, ni):   # a stopping difference, not a law one
+            assert na.shape == ni.shape and np.count_nonzero(na != ni) <= max(
+                3, na.size // 100), f"{name}: Newton counts differ widely"
+        assert err <= tol, f"{name}: {err:.3g} vs span {span:.3g}"
     else:
         err = float(np.max(np.abs(np.interp(ta, ti, vi) - va)))
         assert err <= TOL * span, f"{name}: {err:.3g} vs span {span:.3g}"

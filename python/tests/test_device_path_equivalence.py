@@ -7,6 +7,13 @@ at 1e-9 for other compilers); TR-BDF2
 within an rtol-proportional tolerance (its accepted step sequence may
 differ by rounding); DC operating points within 1e-12; an unported kind
 refuses ``'interface'`` by name.
+
+The fixed-step gate is a ROUNDING claim only while both paths take the same
+Newton iterations: a path that stops one iteration apart (another
+platform's last bits deciding a convergence test) differs by up to the
+Newton tolerance. ``_assert_paths_agree`` therefore asserts 1e-12 of scale
+when the per-solve iteration counts are equal, and the converged tolerance
+(``tol_newton_dx``, absolute) otherwise (DECISIONS #26, #29).
 """
 import numpy as np
 import pytest
@@ -20,6 +27,45 @@ def _scale(states):
 
 def _gate(n_sw):
     return dict(switch_fn=lambda _t: p.SwitchStateMask(n_sw)) if n_sw else {}
+
+
+TOL_NEWTON_DX = 1e-9   # the engines' default absolute Newton step tolerance
+
+
+def _assert_paths_agree(name, a, i):
+    xa, xi = np.asarray(a.states), np.asarray(i.states)
+    assert xa.shape == xi.shape
+    assert np.array_equal(np.asarray(a.times), np.asarray(i.times))
+    same_iterations = np.array_equal(
+        np.asarray(a.newton.iterations_per_solve),
+        np.asarray(i.newton.iterations_per_solve))
+    if same_iterations:
+        err = np.max(np.abs(xa - xi) / _scale(xa))
+        # <= 1e-12 measured on macOS; through libm another compiler (FMA)
+        # differs in the last bits: bound at 1e-9 (the CI lesson)
+        assert err <= 1e-9, f"{name}: legacy vs interface {err:.2e} of scale"
+    else:
+        # A stopping difference touches a few solves; a wrong Jacobian
+        # (still converging, more slowly) moves the counts everywhere.
+        na = np.asarray(a.newton.iterations_per_solve)
+        ni = np.asarray(i.newton.iterations_per_solve)
+        assert na.shape == ni.shape, f"{name}: solve counts differ"
+        assert np.count_nonzero(na != ni) <= max(3, na.size // 100), (
+            f"{name}: Newton iteration counts differ on "
+            f"{np.count_nonzero(na != ni)} of {na.size} solves")
+        err = np.max(np.abs(xa - xi))
+        assert err <= 10 * TOL_NEWTON_DX, (
+            f"{name}: Newton iteration counts differ and the paths are "
+            f"{err:.2e} apart (converged tolerance {TOL_NEWTON_DX:g})")
+
+
+def _gate_bit(index, period):
+    """Gate `index` on for the first half of every `period`."""
+    def fn(t):
+        m = p.SwitchStateMask(index + 1)
+        m.set(index, (t % period) < 0.5 * period)
+        return m
+    return fn
 
 
 def boost_mosfet_coss_saturable():
@@ -56,9 +102,43 @@ def chopper_igbt_vdmos():
     return b
 
 
+def chopper_igbt_tail_lauritzen():
+    """IGBT L1 WITH its turn-off tail (stored charge, a local row) and a
+    Lauritzen freewheel diode (stored charge q_M, a local row) that
+    recovers when the IGBT turns back on."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdc", "dc", "gnd", 100.0)
+    b.add_igbt_level1("Q", "dc", "e", "g", V_T=5.0, kappa=4.0, v_knee=0.01,
+                      tau_tail=2e-6, k_tail=0.4)
+    b.add_lauritzen_diode("Dfw", "gnd", "e", tau=2e-7, T_M=2e-8)
+    b.add_inductor("L", "e", "o", 100e-6)
+    b.add_resistor("R", "o", "gnd", 5.0)
+    b.add_resistor("Rsn", "e", "gnd", 1e4)
+    b.add_pulse_voltage_source("Vg", "g", "gnd", 0.0, 15.0, 0.0, 10e-6,
+                               25e-6, 1e-7, 1e-7)
+    return b
+
+
+def saturable_permeance_core():
+    """A winding on a saturable permeance (the nonlinear capacitor's tanh
+    law in the magnetic domain) and an air gap, driven past the knee by a
+    unipolar square wave: the core's Q(F) = Φ law on its Newton row."""
+    b = p.CircuitBuilder()
+    b.add_pulse_voltage_source("V", "e", "gnd", 0.0, 24.0, 0.0, 50e-6,
+                               100e-6, 1e-7, 1e-7)
+    b.add_resistor("R", "e", "w", 0.5)
+    b.add_winding("W", "w", "gnd", "m1", "gnd", 25)
+    b.add_saturable_permeance("Core", "m1", "gnd", 76e-6, 72e-3, mu_r=2000.0,
+                              B_sat=0.35)
+    b.add_air_gap("G", "m1", "gnd", 76e-6, 0.1e-3)   # in parallel: DC-solvable
+    return b
+
+
 CIRCUITS = {
     "boost_mosfet_coss_saturable": boost_mosfet_coss_saturable,
     "chopper_igbt_vdmos": chopper_igbt_vdmos,
+    "chopper_igbt_tail_lauritzen": chopper_igbt_tail_lauritzen,
+    "saturable_permeance_core": saturable_permeance_core,
 }
 
 
@@ -74,13 +154,8 @@ def test_fixed_step_trajectories_agree_to_1e12(name):
     kw = dict(t_end=200e-6, dt=20e-9, engine="pwl")
     a = _run(make, "legacy", **kw)
     i = _run(make, "interface", **kw)
-    xa, xi = np.asarray(a.states), np.asarray(i.states)
-    assert xa.shape == xi.shape and xa.shape[0] > 9000
-    assert np.array_equal(np.asarray(a.times), np.asarray(i.times))
-    err = np.max(np.abs(xa - xi) / _scale(xa))
-    # <= 1e-12 measured on macOS; two law implementations through Newton can
-    # stop an iteration apart on another compiler (FMA): bound at 1e-9
-    assert err <= 1e-9, f"{name}: legacy vs interface {err:.2e} of scale"
+    assert np.asarray(a.states).shape[0] > 9000
+    _assert_paths_agree(name, a, i)
 
 
 @pytest.mark.parametrize("name", sorted(CIRCUITS))
@@ -132,15 +207,46 @@ def test_dc_operating_point_with_every_static_kind_conducting():
     assert np.max(np.abs(xa - xi) / np.maximum(np.abs(xa), 1.0)) <= 1e-9   # 1e-12 measured
 
 
+def test_a_gated_diode_runs_on_interface_with_its_gate_bit():
+    """The gated diode (PWL IGBT, gate held) is a MODE kind: its gate bit and
+    latch are discrete state in the switch mask and the mode selector, the
+    same code on both paths; the Newton kinds beside it go through the
+    interface. The gate must switch the device (its control: gate off)."""
+    def build():
+        b = p.CircuitBuilder()
+        b.add_sine_voltage_source("V", "in", "gnd", 0.0, 20.0, 20e3, 0.0)
+        b.add_resistor("R", "in", "o", 5.0)
+        b.add_igbt("Qd", "o", "k", 1e-3, 1e9, V_ce0=0.7, reverse_blocking=True,
+                   V_th=0.701)
+        b.add_lauritzen_diode("DL", "k", "gnd")
+        b.add_nonlinear_capacitor("Cj", "o", "gnd", 1e-9, 0.7, 0.45)
+        return b
+    kw = dict(t_end=200e-6, dt=20e-9, engine="pwl",
+              switch_fn=_gate_bit(0, 37e-6))
+    a = p.simulate(build(), device_path="legacy", **kw)
+    i = p.simulate(build(), device_path="interface", **kw)
+    _assert_paths_agree("gated", a, i)
+    on = np.asarray(a.switch_states)[:, 0]
+    assert on.any() and not on.all(), "the gate never switched the device"
+    off = p.simulate(build(), device_path="interface", t_end=200e-6, dt=20e-9,
+                     engine="pwl", switch_fn=lambda _t: p.SwitchStateMask(1))
+    assert np.max(np.abs(np.asarray(off.i("Qd")))) < 1e-6 < np.max(
+        np.abs(np.asarray(i.i("Qd"))))
+
+
 def test_an_unported_kind_refuses_interface_by_name():
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "a", "gnd", 1.0)
-    b.add_resistor("R", "a", "k", 10.0)
-    b.add_lauritzen_diode("DL", "k", "gnd")
-    with pytest.raises(ValueError, match="LauritzenDiode"):
+    b.add_resistor("Ra", "a", "pa", 10.0)
+    b.add_resistor("Rb", "a", "pb", 10.0)
+    b.add_resistor("Rc", "a", "pc", 10.0)
+    b.add_pmsm_mna("M", "pa", "pb", "pc", "n", "w", "th", 0.5, 1e-3, 1e-3,
+                   0.05, 2, 1e-3, 1e-4)
+    b.add_resistor("Rn", "n", "gnd", 1e6)
+    with pytest.raises(ValueError, match="PmsmMna"):
         p.simulate(b, t_end=1e-6, dt=1e-8, engine="pwl",
                    device_path="interface")
-    with pytest.raises(ValueError, match="LauritzenDiode"):
+    with pytest.raises(ValueError, match="PmsmMna"):
         p.simulate(b, t_end=1e-6, engine="trbdf2", device_path="interface")
 
 

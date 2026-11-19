@@ -4278,7 +4278,8 @@ void init_module(py::module_& m) {
                     // Where each block sits (npos = absent). Version 4's
                     // variants differ in field 12: a bool there is the
                     // marker (the PR's 14 fields: grid at 13; the event
-                    // queue's 15: the tick phase at 13-14), a tuple is the
+                    // queue's 15: the tick phase at 13-14; the device
+                    // interface's 15: grid 13, controller 14), a tuple is the
                     // grid (the device interface: marker at 13, controller
                     // at 14).
                     constexpr std::size_t npos = std::size_t(-1);
@@ -4292,7 +4293,15 @@ void init_module(py::module_& m) {
                         grid = 12;
                     } else if (py::isinstance<py::bool_>(t[12])) {
                         marker = 12;
-                        if (n == 14) grid = 13; else ticks = 13;
+                        if (n == 14) {
+                            grid = 13;
+                        } else if (py::isinstance<py::tuple>(t[13])) {
+                            // the device interface's last v4 (52f82c08):
+                            // marker, grid, controller
+                            grid = 13; ctrl = 14;
+                        } else {
+                            ticks = 13;
+                        }
                     } else {
                         grid = 12; marker = 13;
                         if (n == 15) ctrl = 14;
