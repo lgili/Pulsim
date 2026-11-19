@@ -112,16 +112,12 @@ public:
             // booked once the step that ENDS at t is accepted: the scheduler
             // fires an event inside the step it ends, before that step's hook,
             // and the tracker's next accept_step must see the step's own mask
-            pend_.push_back({t, full_(t, xl, ml), ml, full_(t, xr, mr), mr, {}});
+            pend_.push_back({t, full_(t, xl, ml), ml, full_(t, xr, mr), mr, xr, {}});
             impulses_of_(ml, mr, pend_.back().imp);
-            ev_t_ = t;
-            ev_x_ = xr;
-            has_ev_ = true;
         });
         h.on_accept([this](Real t0, Real t1, const Vector& x1, const MaskT& m) {
             flush_(t0);   // an event at the step's start (a zero-length gate edge)
-            const Vector& x0 = has_ev_ && ev_t_ == t0 ? ev_x_ : x_last_;
-            energies_(t0, t1, x0, x1, m);
+            energies_(t0, t1, x_last_, x1, m);
             lt_.accept_step(t0, t1, full_(t1, x1, m), m, nullptr, Real{0.5}, Real{0},
                             Real{0.5}, e_.data());
             x_last_ = x1;
@@ -213,6 +209,7 @@ private:
             lt_.event(e.t, e.xl, e.ml, e.xr, e.mr);
             imp_.insert(imp_.end(), e.imp.begin(), e.imp.end());
             lt_.impulses(imp_);
+            x_last_ = e.xr_red;   // the next step starts from the event's right limit
         }
         pend_.erase(pend_.begin(), pend_.begin() + static_cast<std::ptrdiff_t>(k));
     }
@@ -251,6 +248,7 @@ private:
         MaskT ml;
         Vector xr;
         MaskT mr;
+        Vector xr_red;   // the right limit in the scheduler's (reduced) state
         std::vector<Impulse> imp;
     };
 
@@ -265,9 +263,8 @@ private:
     std::vector<Pending> pend_;
     std::size_t n_seen_ = 0;
     Eigen::MatrixXcd P2_;
-    Vector x_last_, ev_x_;
-    Real ev_t_ = 0;
-    bool has_ev_ = false, started_ = false;
+    Vector x_last_;   // the next step's start: the last step's end or an event's right limit
+    bool started_ = false;
 };
 
 }  // namespace pulsim::dsed

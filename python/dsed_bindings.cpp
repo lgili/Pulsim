@@ -1614,6 +1614,8 @@ void init_module(py::module_& m) {
            Real h_fixed,
            std::size_t store_every,
            bool event_log) {
+            // no loss tracking here: an adapter built with loss_port refuses by name
+            pulsim::refuse_device_losses(adapter.pool(), "dsed");
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(h_fixed));
@@ -1651,6 +1653,8 @@ void init_module(py::module_& m) {
            Real stiffness_threshold,
            std::size_t store_every,
            bool event_log) {
+            // no loss tracking here: an adapter built with loss_port refuses by name
+            pulsim::refuse_device_losses(adapter.pool(), "dsed");
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(dt_max));
@@ -1810,6 +1814,8 @@ void init_module(py::module_& m) {
            Real period, py::list observables,
            std::vector<std::pair<int, int>> pairs, bool monodromy,
            Real rtol, Real atol, Real mode_guard_h_e) {
+            // no loss tracking here: an adapter built with loss_port refuses by name
+            pulsim::refuse_device_losses(adapter.pool(), "dsed");
             if (adapter.has_dynamic_sources()) {
                 throw py::value_error(
                     "dsed_period_map: time-varying sources are not "
@@ -1855,6 +1861,8 @@ void init_module(py::module_& m) {
            std::vector<std::pair<int, int>> pairs, Real rtol,
            int max_period_runs, int n_relax, Real run_rtol, Real run_atol,
            Real mode_guard_h_e) {
+            // no loss tracking here: an adapter built with loss_port refuses by name
+            pulsim::refuse_device_losses(adapter.pool(), "dsed");
             if (adapter.has_dynamic_sources()) {
                 throw py::value_error(
                     "dsed_periodic_orbit: time-varying sources are not "

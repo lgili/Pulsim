@@ -100,7 +100,9 @@ def test_the_buck_energy_balance_closes():
 
 def test_a_capacitor_loop_impulse_is_booked_to_the_switch_that_closed_it():
     """½·C1C2/(C1+C2)·ΔV² of the loop the ideal switch closes at 1 µs is its
-    E_impulse, as on trbdf2."""
+    E_impulse, as on trbdf2. It opens at 2 µs: the step after the projection
+    ends at an event, and its integral starts from the projected state
+    (reviewer: it started from the pre-projection one and was refused)."""
     c1, c2, v1, v2 = 1e-6, 3e-6, 10.0, 2.0
     out = {}
     for engine in ("dsed", "trbdf2"):
@@ -112,7 +114,7 @@ def test_a_capacitor_loop_impulse_is_booked_to_the_switch_that_closed_it():
 
         def fn(t, k=k, n=b.graph.num_switches):
             m = p.SwitchStateMask(n)
-            m.set(k, t >= 1e-6)
+            m.set(k, 1e-6 <= t < 2e-6)
             return m
         tab = p.LossTable(v_axis=[10.0], i_axis=[1.0], tj_axis=[25.0],
                           energy=np.full((1, 1, 1), 1e-9))
@@ -123,7 +125,7 @@ def test_a_capacitor_loop_impulse_is_booked_to_the_switch_that_closed_it():
         out[engine] = r.device_energy("S")
     dw = 0.5 * c1 * c2 / (c1 + c2) * (v1 - v2) ** 2
     e = out["dsed"]
-    assert (e["n_on"], e["n_off"]) == (1, 0)
+    assert (e["n_on"], e["n_off"]) == (1, 1)
     assert e["E_impulse"] == pytest.approx(dw, rel=1e-8)
     assert e["E_impulse"] == pytest.approx(out["trbdf2"]["E_impulse"], rel=1e-9)
 
