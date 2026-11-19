@@ -184,3 +184,24 @@ def test_adaptive_grid_loss_equals_the_fixed_grid_loss(kind):
     # the grid did adapt: far more points than the 20 steps at its ceiling
     assert h["trbdf2"].size > 100 and np.median(h["trbdf2"]) < 0.5 * 1e-4
     assert abs(e["trbdf2"] / e["pwl"] - 1) <= 5e-3, e
+
+
+@pytest.mark.parametrize("route", ["esdirk43", "exact"])
+def test_mosfet_current_on_esdirk43_and_the_exact_engine(route):
+    # integration 14l: the static-law reading on the other two routes.
+    # esdirk43 runs the Level-1 MOSFET, so res.i must match the sense
+    # resistor; the exact engine refuses a Newton kind by name at simulate().
+    b, name, _ = _mosfet()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        if route == "exact":
+            with pytest.raises(p.UnsupportedError) as ei:
+                p.simulate(b, 2e-3, engine="exact")
+            assert name in str(ei.value)
+            return
+        r = p.simulate(b, 2e-3, engine="trbdf2", integrator="esdirk43")
+    i_dev = np.asarray(r.i(name), float)
+    i_ref = np.asarray(r.i("Rs"), float)
+    scale = float(np.max(np.abs(i_ref)))
+    assert scale > 1e-2, "the device must conduct (control)"
+    np.testing.assert_allclose(i_dev[1:], i_ref[1:], rtol=0, atol=1e-6 * scale)

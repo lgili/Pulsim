@@ -138,7 +138,7 @@ def test_shockley_diode_at_one_ampere():
     I0 = (bias - v0) / R
     assert 0.9 < I0 < 1.1
     # DC point (task 10.3) against the bisection
-    assert abs(_node(make(bias, 0, 1), _dc(make(bias, 0, 1)), "a") - v0) < 1e-12
+    assert abs(_node(make(bias, 0, 1), _dc(make(bias, 0, 1)), "a") - v0) < 1e-11  # measured <= 2e-14 (Newton tol_dx); 1e-11: CI lesson, nothing <= 1e-12 through libm
     gd = I_S / (n * VT) * float(mp.e ** (v0 / (n * VT))) + Gm
     # the small-signal resistance n·V_T/(I + I_S) (G_min aside)
     assert abs(1 / (gd - Gm) - n * VT / (I0 - v0 * Gm + I_S)) < 1e-12
@@ -180,7 +180,7 @@ def test_saturable_inductor_incremental_inductance():
     I0 = bias / R   # DC: the inductor is a short
     b = make(bias, 0, 1)
     x = _dc(b)
-    assert abs(x[b.pool.branch_var_id_for_inductor(b.branch_id_of("L"), b.graph)] - I0) < 1e-12
+    assert abs(x[b.pool.branch_var_id_for_inductor(b.branch_id_of("L"), b.graph)] - I0) < 1e-11  # measured <= 2e-14 (Newton tol_dx); 1e-11: CI lesson, nothing <= 1e-12 through libm
     L = Lr + (L0 - Lr) / (1 + (I0 / Isat) ** 2)
     exact = 1j * W * L / (R + 1j * W * L)
     _check(make, "a", bias, exact, 1e-9)
@@ -332,7 +332,7 @@ def test_lauritzen_diode_charge_dynamics():
     g = lambda v: (bias - v) / R - (ratio * I_S * (mp.e ** (v / (n * VT)) - 1) + v * Gm)  # noqa: E731
     v0 = float(mp.findroot(g, (mp.mpf("0.4"), mp.mpf("0.95")), solver="bisect", tol=1e-30))
     b = make(bias, 0, 1)
-    assert abs(_node(b, _dc(b, k.DevicePath.Interface), "a") - v0) < 1e-12
+    assert abs(_node(b, _dc(b, k.DevicePath.Interface), "a") - v0) < 1e-11  # measured <= 2e-14 (Newton tol_dx); 1e-11: CI lesson, nothing <= 1e-12 through libm
     # q_E = τ·i_S(v); q̇_M = q_E/T_M − A·q_M; i = (q_E − q_M)/T_M + G_min·v
     gs = I_S / (n * VT) * float(mp.e ** (v0 / (n * VT)))
     A = 1 / TM + 1 / tau
@@ -513,7 +513,8 @@ def test_pmsm_dc_point_at_held_speed():
         x = _dc(b, path)
         got = [x[b.pool.branch_var_id_for_inductor(b.branch_id_of(f"M_{c}"), b.graph)]
                for c in "abc"]
-        np.testing.assert_allclose(got, [i_a, *i_bc], rtol=1e-12, atol=1e-14)
+        # measured 3e-14 of 1.9 A; rtol 1e-11: CI lesson (np.sin vs std::sin)
+        np.testing.assert_allclose(got, [i_a, *i_bc], rtol=1e-11, atol=1e-14)
         assert _node(b, x, "w") == pytest.approx(w0, rel=1e-15)
         assert _node(b, x, "th") == pytest.approx(th0, rel=1e-15)
 
@@ -537,3 +538,23 @@ def test_induction_machine_stays_refused_by_name():
                  "SaturableInductor", "NonlinearCapacitor", "LauritzenDiode",
                  "PmsmMna", "ExternalDevice"):
         assert caps[kind]["ac_sweep"], kind
+
+
+def test_sweep_ignores_the_transient_integrator():
+    # integration 14l: the sweep has no integrator; running the same
+    # circuit's transient with integrator='esdirk43' leaves it unchanged.
+    def make():
+        b = p.CircuitBuilder()
+        _source(b, 1.7, 0.0, 1.0)
+        b.add_resistor("R", "in", "a", 1.0)
+        b.add_shockley_diode("D", "a", "gnd")
+        b.add_capacitor("C", "a", "gnd", 1e-3)
+        return b
+    b = make()
+    before = _sweep(b, "a")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        p.simulate(b, 1e-4, engine="trbdf2", integrator="esdirk43")
+    assert np.array_equal(_sweep(b, "a"), before)
+    assert np.array_equal(_sweep(make(), "a"), before)
+    assert np.all(np.isfinite(before))
