@@ -1203,6 +1203,22 @@ void init_module(py::module_& m) {
             "(the builder's c0= / i0= / set_initial), and the largest capacitor-voltage "
             "adjustment the charge-conserving projection made (0 when the "
             "declared values are consistent).")
+        .def("_node_pair_bound_terms",
+            [](const NativeAdapter& self, pulsim::Index from, pulsim::Index to, Real t,
+               const pulsim::Vector& x) {
+                // sequenced: exact_step_error builds the propagator forced reads
+                const Real e = self.exact_step_error();
+                const Real S = self.node_pair_voltage_scale(from, to, t, x);
+                const auto n = self.node_pair_voltage_terms();
+                const Real F = self.node_pair_voltage_forced(from, to);
+                return py::make_tuple(S, n, e, F);
+            },
+            py::arg("from_node"), py::arg("to_node"), py::arg("t"), py::arg("x"),
+            "Diagnostics of a diode predicate's significance bound B = "
+            "n·u·(S + V) + e·(max(|v|, F) + V) under the active mask: "
+            "(S, n, e, F) — the rounding scale S of the predicate row, its "
+            "term count n, the exact step's stated error e, the forced "
+            "amplitude F.")
         .def("reduced_state_from_full",
             [](const NativeAdapter& ad, const Vector& x) {
                 // A full-MNA vector (a DC operating point) read the way the

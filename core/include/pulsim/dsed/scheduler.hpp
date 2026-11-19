@@ -2277,7 +2277,8 @@ private:
                 const Real V = std::max(std::abs(d.V_f), std::abs(d.V_th));
                 const Real v = signal_abs_(d, t, x);
                 return gn * (std::max(signal_scale_(d, t, x), s0) + V)
-                       + e * (std::max({v, v0, system_.node_pair_voltage_forced(d.from, d.to)}) + V);
+                       + e * (std::max({v, v0, std::max(signal_scale_(d, t, x), s0),
+                                        system_.node_pair_voltage_forced(d.from, d.to)}) + V);
             }
         }
         return zero_band_tol_(t, x);

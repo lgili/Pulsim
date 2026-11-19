@@ -3828,6 +3828,10 @@ class _NativeCircuitBuilderAdapter:
         """
         add-complementarity-mode-selection: the diode-port LCP of the backward-Euler companion at step h_e from the full-MNA state x_full held at t, posed in the previous mode (the diode bits of `mask`), and the selector's answer. Test/probe surface.
         """
+    def _node_pair_bound_terms(self, from_node: int, to_node: int, t: float, x: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> tuple[float, int, float, float]:
+        """
+        Diagnostics of a diode predicate's significance bound B = n·u·(S + V) + e·(max(|v|, F) + V) under the active mask: (S, n, e, F) — the rounding scale S of the predicate row, its term count n, the exact step's stated error e, the forced amplitude F.
+        """
     def b_vector(self, t: float) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
         """
         Continuous-time b vector at time `t` (DC + sine + PWM + pulse + user-supplied overlay).

@@ -59,6 +59,7 @@
 #include <numbers>
 #include <functional>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <cctype>
 #include <string>
@@ -130,6 +131,25 @@ public:
         DenseMatrix energy_weight;
         std::vector<std::string> constraint_devices;
         std::vector<std::string> state_labels;
+        // D4: the recovery map's low parts (ContinuousLTI::recover_lo_*),
+        // empty when the mode's solves were not all refined
+        DenseMatrix recover_lo_state;
+        Vector recover_lo_const;
+        DenseMatrix recover_lo_b;
+        Vector recover_lo_err_state, recover_lo_err_b;   // per column, absolute
+        Real recover_lo_err_const = Real{0};
+        // D4: a node pair's dedicated predicate row v(from) − v(to) =
+        // c·x + k + d·b_extra, formed once per mode from the refined map
+        // (the difference taken before rounding, so c is the quantity's
+        // own row, not two node rows cancelling). `pad` is each term's
+        // weight in the rounding scale: 2|c| (the sum and c's own rounding)
+        // plus the refinement's remaining error over u.
+        struct PairRow {
+            Vector c, d;
+            Real k = Real{0}, pad_k = Real{0};
+            Vector pad_c, pad_d;
+        };
+        mutable std::map<std::pair<Index, Index>, PairRow> pair_rows;
     };
 
     /// One impulsive re-initialisation at a mode entry (dependent
@@ -274,6 +294,11 @@ public:
         const LTIEntry& e = *current_entry_;
         const Vector* b_extra =
             has_dynamic_sources_ ? &build_time_varying_b_extra_(t, left_by) : nullptr;
+        if (const auto* pr = pair_row_(e, from, to)) {
+            Real v = pr->c.dot(x) + pr->k;
+            if (b_extra) v += pr->d.dot(*b_extra);
+            return v;
+        }
         auto node_v = [&](Index n) -> Real {
             if (n < 0) {
                 return Real{0};
@@ -298,6 +323,11 @@ public:
         const LTIEntry& e = *current_entry_;
         const Vector* b_extra =
             has_dynamic_sources_ ? &build_time_varying_b_extra_(t, Real{0}) : nullptr;
+        if (const auto* pr = pair_row_(e, from, to)) {   // the row's own terms (D4)
+            Real v = pr->pad_c.dot(x.cwiseAbs()) + pr->pad_k;
+            if (b_extra) v += pr->pad_d.dot(b_extra->cwiseAbs());
+            return v;
+        }
         auto node_s = [&](Index n) -> Real {
             if (n < 0) return Real{0};
             Real v = e.recover_from_state.row(n).cwiseAbs().dot(x.cwiseAbs())
@@ -315,7 +345,12 @@ public:
         ensure_current_resolved_();
         const LTIEntry& e = *current_entry_;
         Real forced = Real{0};
+        const auto* pr = pair_row_(e, from, to);
         for (Index j = 0; j < e.forced_z.cols(); ++j) {
+            if (pr) {
+                forced += std::abs(pr->c.template cast<std::complex<Real>>().dot(e.forced_z.col(j)));
+                continue;
+            }
             std::complex<Real> c{0};
             if (from >= 0) c += e.recover_from_state.row(from).template cast<std::complex<Real>>().dot(e.forced_z.col(j));
             if (to >= 0) c -= e.recover_from_state.row(to).template cast<std::complex<Real>>().dot(e.forced_z.col(j));
@@ -329,6 +364,47 @@ public:
         ensure_current_resolved_();
         const LTIEntry& e = *current_entry_;
         return e.recover_from_state.cols() + (has_dynamic_sources_ ? e.recover_from_b.cols() : 0) + 1;
+    }
+
+    /// D4: the dedicated row of v(from) − v(to) in the entry's mode, formed
+    /// on first use: (R_f + L_f) − (R_t + L_t) per entry, summed error-free
+    /// and rounded once (R the recovery map, L its low part), so the row is
+    /// the quantity's own and its terms are the quantity's size. nullptr
+    /// (two node rows differenced, as before) for a node against ground or
+    /// a mode without low parts.
+    [[nodiscard]] const typename LTIEntry::PairRow* pair_row_(const LTIEntry& e, Index from,
+                                                              Index to) const {
+        if (from < 0 || to < 0 || e.recover_lo_const.size() == 0) return nullptr;
+        const auto key = std::make_pair(from, to);
+        if (auto it = e.pair_rows.find(key); it != e.pair_rows.end()) return &it->second;
+        constexpr Real u = std::numeric_limits<Real>::epsilon() / Real{2};
+        const auto diff = [](Real a, Real b, Real la, Real lb) {
+            Real s = a, c = Real{0};
+            for (const Real y : {-b, la, -lb}) {   // TwoSum
+                const Real t = s + y;
+                const Real bp = t - s;
+                c += (s - (t - bp)) + (y - bp);
+                s = t;
+            }
+            return s + c;
+        };
+        // the scale is multiplied by γ_n ≥ u: an error err enters as err/u
+        const auto form = [&](const DenseMatrix& R, const DenseMatrix& L, const Vector& err,
+                              Vector& c, Vector& pad) {
+            c.resize(R.cols());
+            pad.resize(R.cols());
+            for (Index j = 0; j < R.cols(); ++j) {
+                c[j] = diff(R(from, j), R(to, j), L(from, j), L(to, j));
+                pad[j] = Real{2} * (std::abs(c[j]) + err[j] / u);
+            }
+        };
+        typename LTIEntry::PairRow pr;
+        form(e.recover_from_state, e.recover_lo_state, e.recover_lo_err_state, pr.c, pr.pad_c);
+        form(e.recover_from_b, e.recover_lo_b, e.recover_lo_err_b, pr.d, pr.pad_d);
+        pr.k = diff(e.recover_const[from], e.recover_const[to], e.recover_lo_const[from],
+                    e.recover_lo_const[to]);
+        pr.pad_k = Real{2} * (std::abs(pr.k) + e.recover_lo_err_const / u);
+        return &e.pair_rows.emplace(key, std::move(pr)).first->second;
     }
 
     /// v2.0 Phase 3 item 2 — the current mode's exact stepper, or
@@ -1593,6 +1669,12 @@ private:
             entry.energy_weight = std::move(lti.energy_weight);
             entry.constraint_devices = std::move(lti.constraint_devices);
             entry.state_labels = std::move(lti.state_labels);
+            entry.recover_lo_state = std::move(lti.recover_lo_state);
+            entry.recover_lo_const = std::move(lti.recover_lo_const);
+            entry.recover_lo_b = std::move(lti.recover_lo_b);
+            entry.recover_lo_err_state = std::move(lti.recover_lo_err_state);
+            entry.recover_lo_err_b = std::move(lti.recover_lo_err_b);
+            entry.recover_lo_err_const = lti.recover_lo_err_const;
             // The exact stepper's eigendecomposition is built
             // LAZILY, on the first exact_advance_state call —
             // measured at N = 400 states it is 252 ms of the

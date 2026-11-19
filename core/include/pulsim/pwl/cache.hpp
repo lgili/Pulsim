@@ -406,12 +406,27 @@ public:
     /// bit for bit.
     /// `solve(r, x)` applies the plain G_aa⁻¹ (the sparse LU, or the general
     /// path's SVD inverse when G_aa has full rank there).
+    /// The low parts of the refined X, xb, Ginv (exact engine D4): the
+    /// refined solve minus the operator refine_schur_ leaves in place, so
+    /// operator + lo is the refined value to ~u². `refined` is false when a
+    /// column kept its plain solve (no low part is then accurate).
+    struct RefinedLo {
+        DenseMatrix X, Ginv;
+        Vector xb;
+        // the error left in each refined column (the last correction the
+        // iteration computed, applied or refused as stalled), absolute
+        Vector eX, eG;
+        Real exb = Real{0};
+        bool refined = true;
+    };
+
     template <class Solve>
     static void refine_schur_(const sparse::Matrix& Gaa, const sparse::Matrix& Gas,
                               const sparse::Matrix& Gsa, const sparse::Matrix& Gss,
                               const Vector& ba, const Vector& bs, Solve&& solve,
                               DenseMatrix& X, Vector& xb, DenseMatrix& Ginv,
-                              DenseMatrix& S, Vector& Sb, DenseMatrix& GsaGinv) {
+                              DenseMatrix& S, Vector& Sb, DenseMatrix& GsaGinv,
+                              RefinedLo* lo_out = nullptr) {
         const auto na = Gaa.rows();
         const auto ns = Gsa.rows();
         // s + c += a·b, product and sum both error-free
@@ -424,6 +439,7 @@ public:
             s = t;
         };
         Vector s(na), c(na), rho(na), d;
+        Real col_err = Real{0};
         // x = G_aa⁻¹·r as hi + lo, starting from the plain solve in hi
         const auto refine = [&](const Vector& r, Vector& hi, Vector& lo) {
             lo.setZero(na);
@@ -442,6 +458,7 @@ public:
                 rho = s + c;
                 solve(rho, d);
                 const Real dn = d.cwiseAbs().maxCoeff();
+                col_err = dn;
                 if (!(dn < Real{0.5} * last)) break;   // stalled: keep what we have
                 // a second, smaller correction shows the iteration contracts
                 if (it > 0) converged = true;
@@ -462,6 +479,7 @@ public:
             if (!converged) {   // never trade the plain column for a non-contracting one
                 hi = plain;
                 lo.setZero(na);
+                if (lo_out) lo_out->refined = false;
             }
         };
         const DenseMatrix Gss_d = DenseMatrix(Gss);
@@ -479,13 +497,26 @@ public:
             out = ps + pc;
         };
         DenseMatrix Xr(na, X.cols()), Gr(na, na), Sr(ns, S.cols()), Pr(ns, na);
-        Vector xbr, Sbr, hi, lo, col, r;
+        DenseMatrix Xl, Gl;
+        Vector xbr, xbl, Sbr, hi, lo, col, r;
+        if (lo_out) {
+            Xl.resize(na, X.cols());
+            Gl.resize(na, na);
+            lo_out->eX.resize(X.cols());
+            lo_out->eG.resize(na);
+        }
+        // (hi + lo) − fl(hi + lo): exact up to u·|lo|
+        const auto low = [&](const Vector& rounded) -> Vector { return (hi - rounded) + lo; };
         for (Eigen::Index j = 0; j < X.cols(); ++j) {
             r.setZero(na);
             for (sparse::Matrix::InnerIterator e(Gas, j); e; ++e) r[e.row()] = e.value();
             hi = X.col(j);
             refine(r, hi, lo);
             Xr.col(j) = hi + lo;
+            if (lo_out) {
+                Xl.col(j) = low(Xr.col(j));
+                lo_out->eX[j] = col_err;
+            }
             col = -Gss_d.col(j);
             product(hi, lo, col);
             Sr.col(j) = col;
@@ -493,6 +524,10 @@ public:
         hi = xb;
         refine(ba, hi, lo);
         xbr = hi + lo;
+        if (lo_out) {
+            xbl = low(xbr);
+            lo_out->exb = col_err;
+        }
         Sbr = -bs;
         product(hi, lo, Sbr);
         for (Eigen::Index j = 0; j < na; ++j) {
@@ -501,6 +536,10 @@ public:
             hi = Ginv.col(j);
             refine(r, hi, lo);
             Gr.col(j) = hi + lo;
+            if (lo_out) {
+                Gl.col(j) = low(Gr.col(j));
+                lo_out->eG[j] = col_err;
+            }
             col.setZero(ns);
             product(hi, lo, col);
             Pr.col(j) = col;
@@ -513,16 +552,111 @@ public:
             }
             return false;
         };
-        if (!(moved(S, Sr) || moved(Sb, Sbr) || moved(GsaGinv, Pr) || moved(X, Xr)
-              || moved(xb, xbr) || moved(Ginv, Gr))) {
-            return;
+        const bool keep_plain = !(moved(S, Sr) || moved(Sb, Sbr) || moved(GsaGinv, Pr)
+                                  || moved(X, Xr) || moved(xb, xbr) || moved(Ginv, Gr));
+        if (lo_out) {   // relative to the operator left in place (the plain one: + its offset)
+            // (r − p) + l with r − p by TwoSum: exact where Sterbenz fails too
+            const auto off = [](Real r, Real p, Real l) {
+                const Real d = r - p;
+                const Real bp = d - r;
+                return d + (((r - (d - bp)) + (-p - bp)) + l);
+            };
+            lo_out->X = keep_plain ? DenseMatrix(X.rows(), X.cols()) : std::move(Xl);
+            if (keep_plain)
+                for (Eigen::Index i = 0; i < X.size(); ++i)
+                    lo_out->X.data()[i] = off(Xr.data()[i], X.data()[i], Xl.data()[i]);
+            lo_out->xb = keep_plain ? Vector(xb.size()) : std::move(xbl);
+            if (keep_plain)
+                for (Eigen::Index i = 0; i < xb.size(); ++i) lo_out->xb[i] = off(xbr[i], xb[i], xbl[i]);
+            lo_out->Ginv = keep_plain ? DenseMatrix(Ginv.rows(), Ginv.cols()) : std::move(Gl);
+            if (keep_plain)
+                for (Eigen::Index i = 0; i < Ginv.size(); ++i)
+                    lo_out->Ginv.data()[i] = off(Gr.data()[i], Ginv.data()[i], Gl.data()[i]);
         }
+        if (keep_plain) return;
         X = std::move(Xr);
         xb = std::move(xbr);
         Ginv = std::move(Gr);
         S = std::move(Sr);
         Sb = std::move(Sbr);
         GsaGinv = std::move(Pr);
+    }
+
+    /// s + c += a·b, product and sum both error-free (TwoProduct + TwoSum).
+    static void acc_(Real& s, Real& c, Real a, Real b) {
+        const Real p = a * b;
+        const Real pe = std::fma(a, b, -p);
+        const Real t = s + p;
+        const Real bp = t - s;
+        c += (s - (t - bp)) + (p - bp) + pe;
+        s = t;
+    }
+
+    /// D4: the recovery map's low parts after a tree transform T (0/1, so
+    /// its products are exact): L ← T·(H + L)·(Tᵀ) − R, summed error-free,
+    /// for the state map, the constant and the source map (two-sided). H is
+    /// the map before T, R the rounded product the map keeps.
+    static void tree_lo_(const DenseMatrix& T, const DenseMatrix& Hs, const Vector& Hc,
+                         const DenseMatrix& Hb, const DenseMatrix& Rs, const Vector& Rc,
+                         const DenseMatrix& Rb, DenseMatrix& Ls, Vector& Lc, DenseMatrix& Lb) {
+        const Index n = T.rows(), ns = Rs.cols();
+        std::vector<std::vector<Index>> nz(static_cast<std::size_t>(n));
+        for (Index i = 0; i < n; ++i)
+            for (Index k = 0; k < n; ++k)
+                if (T(i, k) != Real{0}) nz[static_cast<std::size_t>(i)].push_back(k);
+        DenseMatrix ls(n, ns), lb(n, n);
+        Vector lc(n);
+        for (Index i = 0; i < n; ++i) {
+            const auto& ni = nz[static_cast<std::size_t>(i)];
+            for (Index j = 0; j < ns; ++j) {
+                Real s = Real{0}, c = Real{0};
+                acc_(s, c, Real{-1}, Rs(i, j));
+                for (Index k : ni) {
+                    acc_(s, c, T(i, k), Hs(k, j));
+                    acc_(s, c, T(i, k), Ls(k, j));
+                }
+                ls(i, j) = s + c;
+            }
+            if (Rc.size() > 0) {
+                Real s = Real{0}, c = Real{0};
+                acc_(s, c, Real{-1}, Rc[i]);
+                for (Index k : ni) {
+                    acc_(s, c, T(i, k), Hc[k]);
+                    acc_(s, c, T(i, k), Lc[k]);
+                }
+                lc[i] = s + c;
+            }
+            for (Index j = 0; j < n; ++j) {
+                Real s = Real{0}, c = Real{0};
+                acc_(s, c, Real{-1}, Rb(i, j));
+                for (Index k : ni)
+                    for (Index l : nz[static_cast<std::size_t>(j)]) {
+                        const Real w = T(i, k) * T(j, l);
+                        acc_(s, c, w, Hb(k, l));
+                        acc_(s, c, w, Lb(k, l));
+                    }
+                lb(i, j) = s + c;
+            }
+        }
+        Ls = std::move(ls);
+        if (Rc.size() > 0) Lc = std::move(lc);
+        Lb = std::move(lb);
+    }
+
+    /// D4: the column errors of a map after a tree transform T: the state
+    /// and constant columns are sums of at most k rows (k = T's largest row
+    /// count), a source column j sums the pre-T columns T's row j names.
+    static void tree_err_(const DenseMatrix& T, Vector& es, Real& ec, Vector& eb) {
+        Index k = 1;
+        for (Index i = 0; i < T.rows(); ++i)
+            k = std::max<Index>(k, static_cast<Index>((T.row(i).array() != Real{0}).count()));
+        es *= static_cast<Real>(k);
+        ec *= static_cast<Real>(k);
+        Vector out = Vector::Zero(eb.size());
+        for (Index j = 0; j < T.rows(); ++j)
+            for (Index l = 0; l < T.cols(); ++l)
+                if (T(j, l) != Real{0}) out[j] += static_cast<Real>(k) * eb[l];
+        eb = std::move(out);
     }
 
     // -------------------------------------------------------------
@@ -600,6 +734,17 @@ public:
         DenseMatrix energy_weight;              // n_state × n_state
         std::vector<std::string> constraint_devices;
         std::vector<std::string> state_labels;
+        // The recovery map's low parts (exact engine D4): recover_* +
+        // recover_lo_* is the refined map to ~u², from which dsed forms
+        // each diode's predicate row once per mode. Empty when a solve
+        // kept its plain column or the mode took the general path.
+        DenseMatrix recover_lo_state;
+        Vector recover_lo_const;
+        DenseMatrix recover_lo_b;
+        // the absolute error left in each column of recover_* + recover_lo_*
+        // (the refinement's last correction, through the tree transform)
+        Vector recover_lo_err_state, recover_lo_err_b;
+        Real recover_lo_err_const = Real{0};
     };
 
     /// The device names of an MNA row for a re-initialisation record, as the
@@ -997,14 +1142,17 @@ public:
             // f(x, u) = Af·x + Fs·u_s + Fa·u_a
             DenseMatrix Af(ns, ns), Fs(ns, ns), Fa(ns, na);
             DenseMatrix PGas = P * Gas;
+            RefinedLo glo;
+            glo.refined = false;   // set by the refined solves below (D4)
             if (ns > 0) {
                 DenseMatrix S = Gsa * PGas - Gss, GsaP = Gsa * P;
                 if (d == 0 && na > 0) {   // regular G_aa: the solves refined as above
                     Vector xb = Vector::Zero(na), Sb = Vector::Zero(ns);
+                    glo.refined = true;
                     refine_schur_(Gaa.sparseView(), Gas.sparseView(), Gsa.sparseView(),
                                   Gss.sparseView(), Vector::Zero(na), Vector::Zero(ns),
                                   [&](const Vector& r, Vector& o) { o = P * r; },
-                                  PGas, xb, P, S, Sb, GsaP);
+                                  PGas, xb, P, S, Sb, GsaP, &glo);
                 }
                 Af = mlu.solve(S);
                 Fs = -mlu.inverse();
@@ -1135,7 +1283,41 @@ public:
             Vector rc = rb * b_orig;
             ContinuousLTI out{std::move(Af), std::move(b_red), std::move(srows), std::move(scap),
                               std::move(Bp), std::move(rs), std::move(rc), std::move(rb),
-                              std::move(smass), {}, {}, {}, {}, {}};
+                              std::move(smass), {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}};
+            if (glo.refined) {   // D4: the low parts, through the same scatter and Tg
+                DenseMatrix ls = DenseMatrix::Zero(n, ns), lb = DenseMatrix::Zero(n, n);
+                Vector lc;
+                for (int i = 0; i < na; ++i) {
+                    ls.row(arows[static_cast<Size>(i)]) = -glo.X.row(i);
+                    for (int j = 0; j < na; ++j)
+                        lb(arows[static_cast<Size>(i)], arows[static_cast<Size>(j)]) = -glo.Ginv(i, j);
+                }
+                tree_lo_(Tg, Y, Vector(), Yb, out.recover_from_state, Vector(), out.recover_from_b,
+                         ls, lc, lb);
+                lc.resize(n);   // rc = rb·b: (rb + lb)·b − rc, error-free
+                for (Index i = 0; i < n; ++i) {
+                    Real s = Real{0}, c = Real{0};
+                    acc_(s, c, Real{-1}, out.recover_const[i]);
+                    for (Index j = 0; j < n; ++j) {
+                        acc_(s, c, out.recover_from_b(i, j), b_orig[j]);
+                        acc_(s, c, lb(i, j), b_orig[j]);
+                    }
+                    lc[i] = s + c;
+                }
+                out.recover_lo_state = std::move(ls);
+                out.recover_lo_const = std::move(lc);
+                out.recover_lo_b = std::move(lb);
+                Vector eb = Vector::Zero(n);
+                for (int i = 0; i < na; ++i) eb[arows[static_cast<Size>(i)]] = glo.eG[i];
+                Vector es = glo.eX;
+                Real ec = Real{0};
+                tree_err_(Tg, es, ec, eb);
+                // rc = rb·b: its columns' errors weighted by |b|
+                for (Index j = 0; j < n; ++j) ec += eb[j] * std::abs(b_orig[j]);
+                out.recover_lo_err_state = std::move(es);
+                out.recover_lo_err_b = std::move(eb);
+                out.recover_lo_err_const = ec;
+            }
             out.constraint_K = std::move(K);
             out.constraint_k = std::move(kc);
             out.energy_weight = std::move(E);
@@ -1193,7 +1375,7 @@ public:
             return ContinuousLTI{DenseMatrix(0, 0), Vector(0), {}, {},
                                  DenseMatrix(0, n_mna), DenseMatrix(n_mna, 0),
                                  std::move(rec_const0), DenseMatrix(-Ginv), {},
-                                 {}, {}, {}, {}, {}};
+                                 {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}};
         }
 
         // Declared OUTSIDE the n_cap > 0 block so it stays in scope
@@ -1463,6 +1645,14 @@ public:
         for (int i = 0; i < n_state; ++i) {
             rec_state(state_rows[i], i) = Real{1};   // the scatter
         }
+        // the recovery map's low parts (dsed predicate rows, D4); the
+        // scatter rows are exact, so zero unless the solves fill them
+        RefinedLo rlo;
+        Vector err_state = Vector::Zero(n_state), err_b = Vector::Zero(n_mna);
+        Real err_const = Real{0};
+        DenseMatrix lo_state = DenseMatrix::Zero(n_mna, n_state);
+        Vector lo_const = Vector::Zero(n_mna);
+        DenseMatrix lo_b = DenseMatrix::Zero(n_mna, n_mna);
 
         if (n_alg > 0) {
             auto solver = sparse::make_default_solver();
@@ -1543,7 +1733,7 @@ public:
             DenseMatrix Gsa_Ginv = Gsa_sp * Ginv;
             refine_schur_(Gaa_sp, Gas_sp, Gsa_sp, Gss_sp, b_a_v, b_s,
                           [&](const Vector& r, Vector& o) { solver->solve(r, o); },
-                          Ginv_Gas, Ginv_ba, Ginv, Schur_G, Schur_b, Gsa_Ginv);
+                          Ginv_Gas, Ginv_ba, Ginv, Schur_G, Schur_b, Gsa_Ginv, &rlo);
             for (int j = 0; j < n_alg; ++j) {
                 B.col(alg_rows[j]) = Gsa_Ginv.col(j);
             }
@@ -1560,6 +1750,23 @@ public:
                 for (int j = 0; j < n_alg; ++j) {
                     rec_b(alg_rows[i], alg_rows[j]) = -Ginv(i, j);
                 }
+            }
+            if (rlo.refined) {   // the same scatter for the low parts
+                lo_state.setZero(n_mna, n_state);
+                lo_const.setZero(n_mna);
+                lo_b.setZero(n_mna, n_mna);
+                for (int i = 0; i < n_alg; ++i) {
+                    lo_state.row(alg_rows[i]) = -rlo.X.row(i);
+                    lo_const[alg_rows[i]] = -rlo.xb[i];
+                    for (int j = 0; j < n_alg; ++j) lo_b(alg_rows[i], alg_rows[j]) = -rlo.Ginv(i, j);
+                    err_b[alg_rows[i]] = rlo.eG[i];
+                }
+                err_state = rlo.eX;
+                err_const = rlo.exb;
+            } else {   // a plain column: no accurate low part (the predicate rows fall back)
+                lo_state.resize(0, 0);
+                lo_const.resize(0);
+                lo_b.resize(0, 0);
             }
         } else {
             Schur_G = -DenseMatrix(Gss_sp);
@@ -1578,9 +1785,17 @@ public:
         // vector back out — x_original = T·y.
         if (!t_is_identity) {
             B = B * T.transpose();
+            const bool lo = lo_const.size() > 0;
+            const DenseMatrix H_state = lo ? rec_state : DenseMatrix(), H_b = lo ? rec_b : DenseMatrix();
+            const Vector H_const = lo ? rec_const : Vector();
             rec_state = T * rec_state;
             rec_const = T * rec_const;
             rec_b     = T * rec_b * T.transpose();
+            if (lo) {
+                tree_lo_(T, H_state, H_const, H_b, rec_state, rec_const, rec_b,
+                         lo_state, lo_const, lo_b);
+                tree_err_(T, err_state, err_const, err_b);
+            }
         }
 
         // ---------------------------------------------------------
@@ -1673,7 +1888,7 @@ public:
                 -llt.solve(DenseMatrix(B.middleRows(n_cap, n_ind)));
         }
 
-        return ContinuousLTI{
+        ContinuousLTI out{
             std::move(A),
             std::move(b_reduced),
             std::move(state_rows),
@@ -1689,7 +1904,15 @@ public:
                 return m;
             }(),
             {}, {}, {}, {}, {},   // no constraint on a structural mode
+            {}, {}, {}, {}, {}, {},
         };
+        out.recover_lo_state = std::move(lo_state);
+        out.recover_lo_const = std::move(lo_const);
+        out.recover_lo_b = std::move(lo_b);
+        out.recover_lo_err_state = std::move(err_state);
+        out.recover_lo_err_b = std::move(err_b);
+        out.recover_lo_err_const = err_const;
+        return out;
     }
 
     /// Number of segments currently cached. In eager mode this

@@ -526,3 +526,38 @@ Effect, measured: every number of the merged-tip bar unchanged (full pytest 5540
 
 ### PSFB with node capacitances (TR-BDF2 track 16's circuits, 2 ms, rtol 1e-5) on the merged tip
 rect (C_j only): RUNS, mean 23.96842 V (capacitor-free 23.966). all (C_oss + C_j): refused at 1.00742 ms, D1 ON at −48.66 mA: the DiodeOff predicate is located by the drift branch at g = −B with B ≈ 4.87e-5 V (the trajectory's bound, s0 / v0, ~5e-7 of the 100 V scale), i.e. 48.7 mA at g_on = 1e3, while the law check allows 1e-3·i_pk = 22.4 mA (i_pk 22.4 A); the pointwise B the law check now reads is smaller than the locator's trajectory B (review #5): the locator's bound is loose on these rows, which is D4's subject. nonew (C_w only): refused at 35.509 µs, D1 OFF at +0.47 V at a located event sample (9 guard repairs on D1 / D_LS_A in the 0.15 µs before it, 3.3e-7…5e-5 V), D1 turns ON 0.63 ns later at its own predicate. allw: 4 guard repairs in the first 7.3 ps from rest, then one 20 ns step, refused at 20.0009 ns (D_HS_A ON −0.347 A). leg (C_oss only): refused at t = 0 (κ₂(V) = 1.0e6, Padé defect 2.2e-9: no exact step); with allow_implicit_segments: no progress in 100 000 steps at t = 0 (the explicit fallback grinds on the fs g_off modes). The 1e-6·dt_max separation is not what fails in any of them; the first three are the decision's resolution B against the law check's (D4), the last is the propagator's (no exact step for a near-defective mode). Not fixed.
+
+## Session 18 (exact engine 17): D4 dedicated predicate rows — WIP, bar NOT met (2026-11-19)
+
+### What is built (uncommitted on the track branch; pushed only to wip/core-a-complementarity)
+- `refine_schur_` (pwl/cache.hpp) takes an optional `RefinedLo*`: the low parts of the refined X, xb, Ginv relative to the operator it leaves in place (keep-plain offset by TwoSum) and each column's remaining error (the last correction computed, applied or refused as stalled). Default argument = old path: pwl/trbdf2 never call `compute_lti_state_space`, so they cannot move (bit-identity confirmed on the first version: pwl/trbdf2 arrays identical).
+- `compute_lti_state_space` (main path and the SVD general path, d = 0) carries them through the scatter and the 0/1 tree transform (`tree_lo_`, `tree_err_`, compensated sums) into `ContinuousLTI::recover_lo_*` / `recover_lo_err_*`; empty when a column kept its plain solve.
+- The dsed adapter forms per mode, lazily, one row per node pair (both nodes non-ground): c = (R_f + L_f) − (R_t + L_t) summed error-free, rounded once; `node_pair_voltage`, `_scale` (Σ(2|c_j| + 2·err_j/u)|x_j| + …), `_forced` read it. Node-to-ground pairs keep the old path. `signal_bound_`'s e-term now includes the row's scale (e is per unit of state; review #1). Binding `_node_pair_bound_terms` (S, n, e, F) for diagnostics; test `test_exact_predicate_rows.py`.
+- NOT kept: the drift branch's single bound (review #5) — reverted while bisecting, not re-applied.
+
+### Measured
+| item | before (2b1d808e) | after |
+|---|---|---|
+| Db7c ON row, 12 banks | S 4.86e7 V, γ_n·S 9.9e-7 V | S 3.15e-6 V, γ_n·S 6.4e-20 V (OFF rows: 5.25e7 → 363 V) |
+| 12 banks, 20 ms (rows version 1) | refused (Db7c ON −1.08 mA, 6.892 ms) | RUNS both selections, 151 events; bus vs pwl+restart/split (dt 1e-7, 5e-8) max 2.77e-4 V; 18–20 ms mean 202.097922 vs 202.097924 |
+| cost | bank12 to 6.8 ms 9.9 s wall, build 1.33 s; ten banks 0.46 s / 0.28 s; bridge 0.14 s | bank12 20 ms 28.1 s, build 2.46 s (default) / 1.48 s (lcp); before/after at equal spans not re-measured |
+| PSFB all (C_oss + C_j) | refused 1.007415 ms D1 ON −48.66 mA | UNCHANGED. D1's row was already tight (S 5e-3 V, γ_n·S 7e-18 V): not a bound defect. The step 1.0074052–1.0074252 ms has n_scan = 1 (exact_scan_step = T/8 of the 30.5 Mrad/s C_j–L_leak ring = 25.8 ns > h = 20 ns); D1's predicate is +1.33e-4 V at both ends and dips to ≈ −4.9e-5 V inside (a missed double crossing). Cure: a curvature (modal amplitude) bound per row on each scan interval, subdividing when min(|ga|,|gb|) < M·Δt²/8 — not built. |
+| nonew (C_w) | refused 35.509 µs D1 OFF +0.47 V | unchanged: the settle at a gate time event picks D1 OFF at +0.47 V (≫ B); a settle defect, not a row |
+| allw | refused 20.0009 ns D_HS_A ON −0.347 A | unchanged (≫ B; settle) |
+| leg | t = 0 no exact step (κ₂(V) 1e6, Padé 2.2e-9) | unchanged (propagator) |
+| rect | runs, 23.96842 V | runs, 23.96842038 V |
+| C++ dsed / layer4_v3 / mode, Eigen 5 + 3.4.0 (rows version 1) | 133/29/35 | 133/29/35 pass |
+| scoreboard sb_dsed (rows version 1) | 81/81 < 1e-3 | 80/81: **full_bridge_dc.yaml REGRESSES** — D3 ON at −23.76 mA, 15.0965 µs (791 samples), after two time events 1.8 ps apart at 14.8965 µs where D3's signal reads exactly 0: the decision there (ladder / settle on a degenerate zero) goes the other way once the row is exact. Still failing with the review fixes; the drift change is not the cause (bisected). boost_switching_complex 2.75e-15 → 4.66e-15, triple_sync_buck 4.9e-14 → 6.0e-14 (rounding). |
+| dsed bit-identity (rows version 1) | — | 25/36 arrays identical; the moved list was not extracted |
+
+### Review (fresh context, opus medium) — applied: #1 e-term on the row's scale, #2 per-column achieved refinement error replaces the crude u² stop in `pad`, #3 binding argument order, #4 keep-plain offset by TwoSum, #6 H copies guarded. Open: #5 (pad after T uses post-T maxima — now per-column errors × T's row count), #7 drift single bound (reverted), #8 the capacitor-IC projection reads pair rows while samples come from recover_full (1 ulp).
+
+### Not verified on the final WIP state
+Full pytest, `pytest -m reference`, reference_status, goldens / bit-identity, dsedall, banks 1/9/10, ten-bank fuzz, engine fuzz, truths, closed loops, C++ targets: only the first rows version was run through C++ targets, bit-identity and the scoreboard.
+
+### Hand-off (session 18)
+1. full_bridge_dc: trace the decision at the 14.8965 µs time-event pair (`.scratch/s21/v1ev.py circuits/switching/isolated/full_bridge_dc.yaml D3 …`); the ladder / settle reads an exact 0 where it read noise before. Fix before anything is pushed to the track branch.
+2. Then the whole bar (scripts: `.scratch/ct.sh`, `.scratch/pyfull.sh`, `BASE=pr .scratch/bitid.sh check`, `.scratch/s14/dsedall.sh`, `.scratch/s18/bar.sh`, `.scratch/s18/sb_dsed.py`, `.scratch/s21/b12cmp.py`, `.scratch/s21/cost.py`, `.scratch/s21/sbprobe.py`).
+3. PSFB all: the scan curvature bound (above).
+4. NEW item from the orchestrator (periodic-steady-state track, DECISIONS 22 of add-periodic-steady-state-shooting on origin/feat/core-p4-optimisation 039878a7; reproducer /Users/lgili/pulsim_wt/p4-pss/.scratch/p6/sens_run.py): boost-DCM orbit, dt_max = T/50 takes the wrong branch at the diode's own turn-off in 18/25 runs within ±3e-10 V of the orbit (0/25 at dt_max = T): the decision depends on the step ceiling (parasitic cut 1/(1e-6·dt_max), settle cap, ladder cap min(dt_max, ½·next event)). Bar: 0 wrong-branch runs at T/50, T/10, T. Truth: 36.594400837798 V, diode off at t/T = 0.743942. Before the ideal diode.
+5. Ideal diode (slice 7): with dedicated rows the ideal diode's predicate is the same row with g_off → 0 — the plan did not need to change beyond reading the row; not started.
