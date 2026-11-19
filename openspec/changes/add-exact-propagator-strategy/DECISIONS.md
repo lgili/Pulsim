@@ -660,7 +660,14 @@ NOT D, NOT persistence: the normwise e-term N = ‖c·P·D⁻¹‖₂‖D·x‖�
 | five-case + route + lcp test files | 99 passed |
 | banks vs pwl + split dt 1e-7, 20 ms, both selections | 1: 2.5e-5 V; 9: 1.7e-4; 10: 2.1e-4; 12: 2.8e-4 V (twelve RUN, 151 events). wall default/lcp 0.25/0.24, 25.9/26.4, 32.5/27.7, 51.5/49.5 s; build_seconds 0/0, 1.1/0.6, 1.8/0.9, 3.0/1.7 |
 | five banks | 2.2e-6 V vs pwl + split (was 0.237 V at 958bc6b9 + split thresholds) |
-| NOT run | scoreboard, goldens / bit-identity (the PR-line baseline is being rebuilt), C++ targets (Eigen 5 / 3.4.0), closed loops, cost before/after, reference_status, `-m reference` |
+| `-m reference` / reference_status | 1 failed (fail 2) / 381 passed; exit 0, strict dsed 100/0/0/9/0 |
+| floor-free scoreboard (dsed) | 80 scored, 80 < 1e-3, worst 4.87e-6; no circuit worse than 2b1d808e (`tip.json`) beyond 2x |
+| goldens + bit-identity vs a baseline rebuilt at 7ebb3c4c | goldens ALL IDENTICAL; pwl / trbdf2 arrays identical; dsed moved: boost 5.4e-10, bridge3 6.5e-10, bridge3_vf07 6.4e-10 (rounding), bridge1_vf07 0.209 max, 8492 grid points > 1e-6 (toward pwl + split NOT shown: the PR line's own turn-off time not read) |
+| ten banks 1e-15 fuzz | 11/11 both selections, 1 mode sequence, end spread 5.4e-5 |
+| engine fuzz 12 x 21 | 11 configs clean; bridge_tie V_f 0.7 errors 21/21 both selections (fail 1's chatter); bridge1 V_f 0 event-time spread 1.23e-4 s (session 15: 3.7e-15 s) — a decision on the floating island now depends on 1e-15 data perturbations (the ruling's B_c reads g_off-level biases) |
+| truths | floating bridge 4.1e-10 V, ten banks 1.4e-9 V, boost orbit 8.3e-11 V |
+| closed loop | cl_buck_pi dsed 1.47e-11 rms (only that circuit run) |
+| NOT run | C++ targets Eigen 5 / 3.4.0 (build was in progress at parking), the other closed loops, cost before/after (twelve banks are refused at 7ebb3c4c; ten banks before not measured), the step-ceiling item |
 
 ### Hand-off (session 21)
 The ruling holds on the five cases. Open: the data gap — where the rounded circuit's ON and OFF zeros differ (by the ON row's data error amplified by 1 + R·g_on), no mode is consistent for a width the decision threshold cannot see; case (3) resolves it in one extra (unlogged) settle, the tied bridge with V_f loops. This is the case the ruling asked to write down: a decision inside D that has to be re-taken. Trace fail 1 first (print the ladder's g / B_c / b_loc at 6.8696 us), then fail 2; then the bar.
