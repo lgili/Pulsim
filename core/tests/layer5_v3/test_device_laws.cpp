@@ -319,6 +319,12 @@ TEST_CASE("the saturable-inductor law stamps, commits and captures as the "
                                         dense(Jh, r, c), 16));
                         }
                     }
+                    // 7.4: conductance form — the flux row's diagonal is
+                    // −a·L(i) (a = 2/h, 1/h, c1/h), never h-scaled.
+                    const Real a = device::formula_a(pwl::iface::ctx_of(h, st));
+                    const Real Li = pwl::SaturableInductorHistory::flux_and_inductance(
+                        e, x[2], st).second;
+                    CHECK(close(dense(Ji, 2, 2), -a * Li, a * Li, 16));
                     if (inc) continue;
                     auto hl = hist, hi = hist;
                     hl.commit(x, h, st);

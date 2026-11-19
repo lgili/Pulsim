@@ -61,7 +61,7 @@ machine (`-j2`, `nice`).
 - [ ] 7.1 Saturable inductor (atan law), then `FluxTable` and `GappedCore` through `ad::chain`
 - [ ] 7.2 Jiles–Atherton core: `State` + `accept`; the saturable transformer's magnetising branch
 - [ ] 7.3 `PmsmMna` (three current unknowns, torque on the mechanical node)
-- [ ] 7.4 Unit test: the stamped flux-row diagonal equals `−a·L(i)` for trapezoidal and the BDF2 stage (conductance form)
+- [x] 7.4 Unit test: the stamped flux-row diagonal equals `−a·L(i)` for trapezoidal and the BDF2 stage (conductance form) — on the interface stamp: saturable inductor (atan, table, Jiles–Atherton; trapezoidal, backward Euler, BDF2 stage; 16 ulp) in `test_device_laws.cpp`, the machines' stator block in the machine case (#42)
 - [ ] 7.5 Oracle: `test_saturable_inductor_flux_closure.py`, the JA loop tests, the PMSM tests green; the strict xfail `test_engines_agree_below_saturation` keeps its status; delete `saturable_inductor_history.hpp`, `pmsm_mna_history.hpp` and their refreshes
 
 ## 8. Delete the legacy plumbing
@@ -121,6 +121,7 @@ machine (`-j2`, `nice`).
 - [x] 15.6 Port the Lauritzen diode, the IGBT tail, the MNA PMSM and the induction machine — Lauritzen and IGBT tail (local rows, DECISIONS #28); PMSM, flux-map PMSM and induction machine (flux as q, increment form, DECISIONS #42): pwl ≤ 2.5e-14 of scale; speed: PMSM within 3 %, the induction machine 1.04–1.09× (over the gate, lever recorded in #42)
 - [x] 15.11 Readings follow the stamped law: `for_each_static_reading` took the path (DECISIONS #43); since #44 one MOSFET body on both paths, the argument is gone
 - [x] 15.13 Commit without a time formula for laws whose q is internal (`kPinQ = false`; DECISIONS #45): saturable-inductor commit 10.5 → 3.5 ns per entry (hand 3.4); satind_pwl instructions 1.017–1.030× legacy
+- [x] 15.14 Evidence at 2e60463b (DECISIONS #46): `DEVICE_PATH_EVIDENCE.md` 289/289 cells agree, 0 refused; instruction ratios per case recorded
 - [x] 15.12 One MOSFET L1 law on both paths (DECISIONS #44): the C¹, zero-at-V_DS = 0 form (#39) moved into `models::MosfetLevel1` after merging `feat/core-p5-passives-mosfet` (its `2·L(V_OV − V_DS/2)` correction replaced); the soft boost is gated at 1e-12 again
 - [x] 15.7 Speed within 3 % on every case — measured reason (DECISIONS #38): instructions retired per accepted step on 'interface' are 0.86–1.02× legacy on the six law circuits (same Newton counts); per call every stamp but Lauritzen 1.19× / tail 1.10× is faster (#27); wall time on this shared machine cannot resolve 3 % — a quiet-machine timing stays on the release checklist; RE-MEASURED at slice 6 (#41): 0.90–0.98× on every case but the saturable inductor, 1.023–1.031× over three runs — at the gate's edge, its `commit_fq` λ re-evaluation is the open lever
 - [ ] 15.8 At the release: flip the default, delete the hand stamps (list in DECISIONS #25)

@@ -170,7 +170,13 @@ def law_circuits(repeats):
             kw["switch_fn"] = sw
 
         def run(make=make, kw=kw):
-            return pulsim.simulate(make(), **kw)
+            res = pulsim.simulate(make(), **kw)
+            # a floating neutral (physically 0 V, ~1e-11 V of round-off) is
+            # left out, as in the test's 1e-12 gate
+            v_ph = max(np.max(np.abs(np.asarray(res.v(n)))) for n in ("ua", "ub", "uc"))
+            if np.max(np.abs(np.asarray(res.v("nn")))) <= 1e-9 * v_ph:
+                return T._without(res, T._neutral_column(res))
+            return res
         rec = _pair(run, repeats, lambda res: (None, "ran"))
         rec.update(circuit=f"law:{name}", engine="pwl")
         out.append(rec)

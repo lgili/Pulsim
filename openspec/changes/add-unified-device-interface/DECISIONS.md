@@ -788,11 +788,55 @@
     remaining ~300 instructions per step are in the stamp (per Newton
     iteration), not the commit. Recorded, not chased further here.
 
+46. **Evidence regenerated at 2e60463b (item 5).** Instructions retired per
+    accepted step (`.scratch/instr.sh`, K = 20; machines: 5× longer runs,
+    K = 6):
+
+    | case | legacy | interface | ratio | #41 / #42 |
+    |---|---|---|---|---|
+    | saturable inductor (pwl) | 16 722 | 16 974 | 1.015 | 1.023–1.031 |
+    | Coss (pwl) | 13 808 | 13 711 | 0.993 | 0.988 |
+    | IGBT tail + Lauritzen chopper (pwl) | 28 608 | 27 025 | 0.945 | 0.959 |
+    | IGBT tail + Lauritzen chopper (trbdf2) | 90 719 | 85 143 | 0.939 | 0.910 |
+    | soft boost MOSFET + Coss + saturable (pwl) | 35 083 | 30 463 | 0.868 | 0.918 |
+    | soft boost (trbdf2) | 128 168 | 108 384 | 0.846 | 0.897 |
+    | boost, 1 ns edges, κ = 15 (pwl) | 35 757 | 31 148 | 0.871 | 0.911 |
+    | MOSFET on, AC reverse conduction (pwl) | 24 652 | 22 783 | 0.924 | 0.968 |
+    | PMSM sine start | 64 694 | 64 854 | 1.002 | 1.016 |
+    | PMSM locked rotor | 56 529 | 56 670 | 1.002 | 1.009 |
+    | flux-map saturated start | 247 292 | 249 270 | 1.008 | 1.001–1.003 |
+    | IM sine start | 63 664 | 68 255 | 1.072 | 1.086 |
+    | IM generator, held speed | 65 491 | 69 630 | 1.063 | 1.084 |
+    | IM six-step inverter start | 92 407 | 96 751 | 1.047 | 1.040 |
+
+    The MOSFET rows' ratios fell because LEGACY got dearer with #44 (the
+    model now evaluates forward(a, d), forward(a, 0) and an exp: soft boost
+    legacy 33 674 → 35 083, +4.2 %; AC reverse conduction 21 905 → 24 652,
+    +12.5 %) — a cost of the default path, not of the interface. The
+    commit fix (#45) brought the PMSM to 1.002; the induction machine stays
+    over the gate (the AD-width-10 stamp, #42).
+    `benchmarks/DEVICE_PATH_EVIDENCE.md` regenerated: 289 cells on both
+    paths, 289 with the same outcome and error to 3 significant digits, 0
+    refused (#41: 277, 274, 4 refused — the MOSFET cells that parted under
+    #39 agree again with one law). `law:` rows, pwl: soft boost 2.86e-14
+    (was 2.49e-3), every other ≤ 7.5e-14 except the IM inverter start
+    2.43e-13; trbdf2 ≤ 5.8e-7 (soft boost; was 2.08e-4). The tool now
+    leaves a floating machine neutral out as the test gate does (it read
+    0.15 "of scale" on a 1e-11 V node).
+
 ### Hand-off (2026-11-19)
 
 - Done this session: merged `feat/core-p5-machines` (f9158ffb) and
-  `feat/core-p5-passives-mosfet` (#44); the machines on the interface (#42);
-  one MOSFET law (#44); the readings argument (#43, then removed by #44).
+  `feat/core-p5-passives-mosfet` (952ff46c, #44); the machines on the
+  interface (#42); one MOSFET law (#44); the readings argument (#43, then
+  removed by #44); commit without a time formula (#45); evidence (#46);
+  task 7.4's test.
+- Open, new: #44 made the LEGACY MOSFET dearer (+4.2 % instructions per step
+  on the soft boost, +12.5 % on the AC reverse-conduction circuit: two
+  forward evaluations and an exp per call). A cheap pre-test (skip the leak
+  when σ(−κ·V_OV)·e^{−κ|V_DS|} is far below ulp, from κ·(V_OV + |V_DS|)
+  alone) would recover most of it; not done. The saturable inductor reads
+  1.015–1.030× (#45): at the gate, not clearly under it.
 - Open, recorded: the induction machine's instruction ratio 1.04–1.09 (over
   the 3 % gate; lever in #42); `run_transient.hpp:128`
   (`seed_held_machine_capacitors`) calls the hand `refresh_pmsm_mna` on both
