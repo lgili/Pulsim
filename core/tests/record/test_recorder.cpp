@@ -4,6 +4,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "pulsim/record/loop_feed.hpp"
 #include "pulsim/record/recorder.hpp"
 
 #include <cmath>
@@ -384,4 +385,84 @@ TEST_CASE("recorder: several requested times within 4 ulps of the last sample al
     record::feed_table(r, t, x, 1, {}, {});
     CHECK(r.values() == std::vector<Real>{2.0, 2.0});
     CHECK(r.n_times_unreached() == 0);
+}
+
+TEST_CASE("LoopFeed settled mode: reported, unreported and jump events in the record",
+          "[record][loop_feed]") {
+    // the variable-step engine's conventions, driven by hand: a settled
+    // on_event after the step that lands t (both limits at t, the next line
+    // starts from the right one); a mode change without a report (bracketed
+    // with the first step under the new mode); a restart from another state
+    // than committed (a settled jump row).
+    using topology::SwitchStateMask;
+    record::RecorderSpec spec;
+    spec.keep = record::RecorderSpec::Keep::Every;
+    spec.windows = {{0.0, 5.0}};
+    std::vector<record::Recorder> recs;
+    recs.emplace_back(std::vector<record::Probe>{record::Probe::compile("v(a)")}, spec);
+    record::StateReading va;
+    va.a.cols = {0};
+    va.a.coef = {1.0};
+    record::LoopFeed feed({"v(a)"}, {va}, std::move(recs));
+    feed.attach_own(false);
+    auto& h = feed.hooks();
+    SwitchStateMask m0(1), m1(1);
+    m1.set(0, true);
+    auto x = [](Real v) { Vector y(1); y[0] = v; return y; };
+    h.step(0, x(0), m0, 1, x(1), m0);
+    h.event(1, x(1), m0, x(3), m1);       // settled at t = 1: 1 -> 3
+    h.step(1, x(1), m1, 2, x(3), m1);     // starts from the committed x: no jump row
+    h.step(2, x(3), m1, 3, x(3), m0);     // solved under a new mode, not reported: bracket [2, 3]
+    h.step(3, x(3), m0, 4, x(5), m0);
+    h.step(4, x(7), m0, 5, x(7), m0);     // restarted from 7, committed 5: jump
+    feed.finish();
+    const auto& r = feed.recorders().front();
+    using R = record::Recorder::Resolution;
+    REQUIRE(r.event_times() == std::vector<Real>{1, 2, 4});
+    CHECK(r.event_t_right() == std::vector<Real>{1, 3, 4});
+    CHECK(r.event_resolution() == std::vector<std::uint8_t>{
+        static_cast<std::uint8_t>(R::Settled), static_cast<std::uint8_t>(R::WithinDt),
+        static_cast<std::uint8_t>(R::Settled)});
+    CHECK(r.event_left() == std::vector<Real>{1, 3, 5});
+    CHECK(r.event_right() == std::vector<Real>{3, 3, 7});
+    CHECK(feed.n_jumps() == 1);
+    CHECK(feed.n_events() == 2);
+    // the line: [0,1] 0->1, [1,2] 3->3 (from the right limit), [2,3] 3->3,
+    // [3,4] 3->5 (a bracket does not move the line), [4,5] 7->7
+    CHECK(r.windows()[0].integral == Catch::Approx(0.5 + 3 + 3 + 4 + 7).epsilon(1e-15));
+    CHECK(r.times() == std::vector<Real>{0, 1, 2, 3, 4, 5});
+    CHECK_THROWS_AS(feed.attach_own(false), std::logic_error);
+}
+
+TEST_CASE("LoopFeed settled mode: a committed post-event probe merged into one hook step",
+          "[record][loop_feed]") {
+    // trbdf2 at a landed gate edge: on_event(t_ev) BEFORE the one step hook
+    // that covers [t0, t_ev + dtp]; the left limit at t_ev comes from the
+    // event, and the line restarts from the settled right side.
+    using topology::SwitchStateMask;
+    record::RecorderSpec spec;
+    spec.keep = record::RecorderSpec::Keep::Every;
+    std::vector<record::Recorder> recs;
+    recs.emplace_back(std::vector<record::Probe>{record::Probe::compile("v(a)")}, spec);
+    record::StateReading va;
+    va.a.cols = {0};
+    va.a.coef = {1.0};
+    record::LoopFeed feed({"v(a)"}, {va}, std::move(recs));
+    feed.attach_own(false);
+    auto& h = feed.hooks();
+    SwitchStateMask m0(1), m1(1);
+    m1.set(0, true);
+    auto x = [](Real v) { Vector y(1); y[0] = v; return y; };
+    h.step(0, x(0), m0, 1, x(1), m0);
+    h.event(2, x(2), m0, x(4), m1);
+    h.step(1, x(1), m0, 2.5, x(4), m1);
+    h.step(2.5, x(4), m1, 3, x(4), m1);
+    const auto& r = feed.recorders().front();
+    CHECK(feed.n_dropped() == 0);
+    CHECK(feed.n_jumps() == 0);
+    CHECK(r.times() == std::vector<Real>{0, 1, 2, 2.5, 3});
+    CHECK(r.values() == std::vector<Real>{0, 1, 2, 4, 4});
+    REQUIRE(r.event_times() == std::vector<Real>{2});
+    CHECK(r.event_left() == std::vector<Real>{2});
+    CHECK(r.event_right() == std::vector<Real>{4});
 }

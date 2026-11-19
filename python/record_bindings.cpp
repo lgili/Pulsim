@@ -7,9 +7,12 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "pulsim/record/loop_feed.hpp"
 #include "pulsim/record/recorder.hpp"
 
+#include <memory>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -54,6 +57,60 @@ py::dict stats(const std::vector<rec::WindowStat>& w, Size np) {
     return d;
 }
 
+
+rec::Recorder make_recorder(const std::vector<std::string>& probe_texts, const std::string& keep,
+                            Size every_n, const std::vector<std::pair<Real, Real>>& windows,
+                            Real period, Real offset, const std::vector<Real>& sample_times) {
+    std::vector<rec::Probe> probes;
+    probes.reserve(probe_texts.size());
+    for (const auto& s : probe_texts) probes.push_back(rec::Probe::compile(s));
+    rec::RecorderSpec spec;
+    if (keep == "every") spec.keep = rec::RecorderSpec::Keep::Every;
+    else if (keep == "decimate") spec.keep = rec::RecorderSpec::Keep::Decimate;
+    else if (keep == "none") spec.keep = rec::RecorderSpec::Keep::None;
+    else if (keep == "times") spec.keep = rec::RecorderSpec::Keep::Times;
+    else throw std::invalid_argument("keep must be 'every', 'decimate', 'none' or 'times'");
+    spec.sample_times = sample_times;
+    spec.every_n = every_n;
+    for (const auto& [a, b] : windows) spec.windows.push_back({a, b});
+    spec.period = period;
+    spec.offset = offset;
+    return rec::Recorder(std::move(probes), std::move(spec));
+}
+
+py::dict recording_dict(const rec::Recorder& r) {
+    const Size np = r.n_probes();
+    const auto ne = static_cast<py::ssize_t>(r.event_times().size());
+    py::dict out;
+    out["times"] = py::array_t<Real>(static_cast<py::ssize_t>(r.times().size()), r.times().data());
+    out["values"] = matrix(r.values(), r.times().size(), np);
+    out["event_t"] = py::array_t<Real>(ne, r.event_times().data());
+    out["event_t_right"] = py::array_t<Real>(ne, r.event_t_right().data());
+    py::array_t<std::uint8_t> res(ne);
+    std::copy(r.event_resolution().begin(), r.event_resolution().end(), res.mutable_data());
+    out["event_resolution"] = res;
+    out["event_left"] = matrix(r.event_left(), r.event_times().size(), np);
+    out["event_right"] = matrix(r.event_right(), r.event_times().size(), np);
+    out["windows"] = stats(r.windows(), np);
+    out["periods"] = stats(r.periods(), np);
+    out["n_samples"] = r.n_samples();
+    py::array_t<bool> interp(static_cast<py::ssize_t>(r.interpolated().size()));
+    std::copy(r.interpolated().begin(), r.interpolated().end(), interp.mutable_data());
+    out["interpolated"] = interp;
+    out["n_times_unreached"] = r.n_times_unreached();
+    out["capacity"] = py::make_tuple(r.times().capacity(), r.values().capacity());
+    return out;
+}
+
+rec::LinearReading linear(const std::vector<pulsim::Index>& cols, const std::vector<Real>& coef,
+                          Real div) {
+    rec::LinearReading l;
+    l.cols = cols;
+    l.coef = coef;
+    l.div = div;
+    return l;
+}
+
 }  // namespace
 
 void init_module(py::module_& m) {
@@ -70,22 +127,8 @@ void init_module(py::module_& m) {
              Real offset, const std::vector<std::string>& reading_names, const F64& t,
              const F64& readings, const std::vector<Size>& event_rows, const F64& right,
              const std::vector<Real>& sample_times) {
-              std::vector<rec::Probe> probes;
-              probes.reserve(probe_texts.size());
-              for (const auto& s : probe_texts) probes.push_back(rec::Probe::compile(s));
-              rec::RecorderSpec spec;
-              if (keep == "every") spec.keep = rec::RecorderSpec::Keep::Every;
-              else if (keep == "decimate") spec.keep = rec::RecorderSpec::Keep::Decimate;
-              else if (keep == "none") spec.keep = rec::RecorderSpec::Keep::None;
-              else if (keep == "times") spec.keep = rec::RecorderSpec::Keep::Times;
-              else throw std::invalid_argument(
-                  "keep must be 'every', 'decimate', 'none' or 'times'");
-              spec.sample_times = sample_times;
-              spec.every_n = every_n;
-              for (const auto& [a, b] : windows) spec.windows.push_back({a, b});
-              spec.period = period;
-              spec.offset = offset;
-              rec::Recorder r(std::move(probes), std::move(spec));
+              rec::Recorder r = make_recorder(probe_texts, keep, every_n, windows, period,
+                                              offset, sample_times);
               r.bind(reading_names);
               const Size m_r = reading_names.size();
               {
@@ -94,23 +137,7 @@ void init_module(py::module_& m) {
                                   {readings.data(), static_cast<Size>(readings.size())}, m_r,
                                   event_rows, {right.data(), static_cast<Size>(right.size())});
               }
-              const Size np = r.n_probes();
-              py::dict out;
-              out["times"] = py::array_t<Real>(static_cast<py::ssize_t>(r.times().size()),
-                                               r.times().data());
-              out["values"] = matrix(r.values(), r.times().size(), np);
-              out["event_t"] = py::array_t<Real>(static_cast<py::ssize_t>(r.event_times().size()),
-                                                 r.event_times().data());
-              out["event_left"] = matrix(r.event_left(), r.event_times().size(), np);
-              out["event_right"] = matrix(r.event_right(), r.event_times().size(), np);
-              out["windows"] = stats(r.windows(), np);
-              out["periods"] = stats(r.periods(), np);
-              out["n_samples"] = r.n_samples();
-              py::array_t<bool> interp(static_cast<py::ssize_t>(r.interpolated().size()));
-              std::copy(r.interpolated().begin(), r.interpolated().end(), interp.mutable_data());
-              out["interpolated"] = interp;
-              out["n_times_unreached"] = r.n_times_unreached();
-              return out;
+              return recording_dict(r);
           },
           py::arg("probes"), py::arg("keep"), py::arg("every_n"), py::arg("windows"),
           py::arg("period"), py::arg("offset"), py::arg("reading_names"), py::arg("t"),
@@ -118,6 +145,44 @@ void init_module(py::module_& m) {
           py::arg("sample_times") = std::vector<Real>{},
           "Kernel recorder pass over stored arrays (add-probes-and-recorders); "
           "use pulsim.simulate(..., recorders=[...]).");
+
+    using ReadingSpec = std::tuple<std::vector<pulsim::Index>, std::vector<Real>, Real, bool,
+                                   std::vector<pulsim::Index>, std::vector<Real>, Real>;
+    using RecSpec = std::tuple<std::vector<std::string>, std::string, Size,
+                               std::vector<std::pair<Real, Real>>, Real, Real, std::vector<Real>>;
+    py::class_<rec::LoopFeed>(m, "_LoopFeed",
+                     "In-loop recorder feed (add-probes-and-recorders 0b.6); "
+                     "use pulsim.simulate(..., recorders=[...]).")
+        .def(py::init([](const std::vector<std::string>& names,
+                         const std::vector<ReadingSpec>& readings,
+                         const std::vector<RecSpec>& specs) {
+                 std::vector<rec::StateReading> rs;
+                 for (const auto& [ca, wa, da, prod, cb, wb, db] : readings) {
+                     rec::StateReading r;
+                     r.a = linear(ca, wa, da);
+                     r.product = prod;
+                     r.b = linear(cb, wb, db);
+                     rs.push_back(std::move(r));
+                 }
+                 std::vector<rec::Recorder> recs;
+                 for (const auto& [pr, keep, every, win, period, offset, times] : specs) {
+                     recs.push_back(make_recorder(pr, keep, every, win, period, offset, times));
+                 }
+                 return std::make_unique<rec::LoopFeed>(names, std::move(rs), std::move(recs));
+             }),
+             py::arg("reading_names"), py::arg("readings"), py::arg("recorders"))
+        .def("reserve", &rec::LoopFeed::reserve,
+             py::arg("n_samples"), py::arg("t_last"), py::arg("n_events") = 0)
+        .def("arm", &rec::LoopFeed::attach_own, py::arg("bracket_events"),
+             "Register on the feed's own hooks; Simulation.set_loop_feed passes them.")
+        .def("finish", &rec::LoopFeed::finish)
+        .def_property_readonly("armed", &rec::LoopFeed::attached)
+        .def_property_readonly("n_steps", &rec::LoopFeed::n_steps)
+        .def_property_readonly("n_jumps", &rec::LoopFeed::n_jumps)
+        .def_property_readonly("n_events", &rec::LoopFeed::n_events)
+        .def_property_readonly("n_dropped", &rec::LoopFeed::n_dropped)
+        .def("result", [](const rec::LoopFeed& f, Size k) { return recording_dict(f.recorders().at(k)); },
+             py::arg("k"));
 }
 
 }  // namespace pulsim_record_bindings

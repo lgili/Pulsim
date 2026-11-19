@@ -17,7 +17,7 @@ states at equal times.
 - [x] 0b.3 Python: `simulate(recorders=[pulsim.Recorder(...)])` on every engine, `res.recorded[name]` (`pulsim.Recording`, named arrays); `store_every > 1`, `resume_from`, `p()` readings, bad windows refused by name before the run
 - [x] 0b.4 Tests: C++ closed forms (triangle on a clustered grid, windows mid-step, periods; square wave with both limits; decimation; capacity unchanged over 2e5 samples; in-loop on the fixed engine: no per-step allocation, windows equal the stored-array pass); Python: RC charge closed form on pwl / trbdf2 / exact, rectified sine with commutations inside the window, both limits against `right_limit_states`, the bridge truth 311.343881428885841697 V on the three engines, `time_average` / `time_rms` agreement to 1e-12
 - [x] 0b.5 (DECISIONS 10) `recorders` row in `sim::kRunOptionTable` (every engine, `Unset::Always`: composed above the dispatch, where `store_every > 1` / `resume_from` are refused by name) — done at integration batch 14c
-- [ ] 0b.6 (waits for stepper R1-R3) In-loop feeding for Python on the stepper's per-step hook (DECISIONS requests R1-R3); then lift the `store_every` refusal
+- [x] 0b.6 (DECISIONS 19) In-loop feeding for Python on the stepper's per-step hook (`record/loop_feed.hpp`, `Simulation::set_hooks`): pwl and trbdf2 through the Simulation object; the exact engine keeps the stored-array pass (its scheduler hook has no right limits); the `store_every` refusal lifted when the feed is in-loop (refused by name otherwise)
 - [ ] 0b.7 Recorder state in the snapshot (new pickle index) so `resume_from` works with recorders; refused by name until then (not started in slice 2: needs `Recorder` state export / import of the partial windows and the start row, a SolverSnapshot field at index 17 with a reader branch and the five field-count tests; no loop edit)
 - [x] 0b.8 `Times` / `t_eval` sampling (`keep='times'`, linear, `land=false`; landing waits for the event queue in the loop), `RingSink` (`Recorder::stream_to(LiveRing*)`, C++), `at(t)` (`res.at`) (DECISIONS 16)
 
@@ -33,7 +33,7 @@ states at equal times.
 - [x] 2.3 Oracle: suite green; identical warnings
 
 ## 3. Event rows on every engine
-- [ ] 3.1 (loop freeze, DECISIONS 18) `EventRows` in the result; the fixed and variable-step drivers store the right-limit state and the next-step mask at every instant where the mask or a source changed
+- [ ] 3.1 (recorder event rows on every engine with a resolution flag: DECISIONS 19; the result-level `EventRows` not done) `EventRows` in the result; the fixed and variable-step drivers store the right-limit state and the next-step mask at every instant where the mask or a source changed
 - [ ] 3.2 `_result_views.step_start_states` reads `res.events` for every engine
 - [ ] 3.3 Tests: DCM boost diode average current 0.0535 A on pwl, trbdf2 and dsed; `times`, `states` and the mode record bit-identical to before
 - [ ] 3.4 Oracle: goldens bit-identical; zero-alloc tests green (event rows pre-reserved from the gate-event estimate, chunked otherwise)
@@ -66,7 +66,7 @@ states at equal times.
 - [ ] 7.8 Docs: probes page, YAML reference, stubs
 
 ## 8. Sampling policies and sinks
-- [ ] 8.1 (waits for 0b.6) `Decimate{n}`: fixed grid identical to `store_every`; accepted grid keeps every n-th step and all event rows; lift the `store_every` refusal on the variable-step engine
+- [ ] 8.1 (store_every lifted for in-loop recorders, DECISIONS 19; trbdf2 refuses store_every itself, so the accepted-grid `Decimate` is the Recorder's keep='decimate') `Decimate{n}`: fixed grid identical to `store_every`; accepted grid keeps every n-th step and all event rows; lift the `store_every` refusal on the variable-step engine
 - [ ] 8.2 (`land=false` done as 0b.8; landing waits for the event queue in the loop) `Times{t}` / `Period{T}`: landing through `OutputSample` events when `add-unified-event-queue` is present; linear interpolation with the `interpolated` flag otherwise or when `land = false`
 - [ ] 8.3 (C++ `RingSink` done; `live_stream` on every engine waits for 0b.6) `RingSink` over `LiveRing`; `live_stream` on every engine
 - [ ] 8.4 Tests: `store_every` goldens on the fixed engine; a decimated accepted-grid record gives the same `avg` as the full record to 1e-12; `t_eval` samples equal the states of a run with gate edges at those times; a `live_stream` consumer sees the same rows on pwl and trbdf2

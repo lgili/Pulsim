@@ -2128,6 +2128,7 @@ def _run_on_simulation(circuit, run_opts, kw, sim=None):
     if sim is None:  # (simulate() builds it first for the cache hooks)
         sim = Simulation(circuit, run_opts, True)
     sim.set_switch_fn(kw["switch_fn"])
+    _rec_mod.attach_loop_feed(sim, "pwl")  # recorders in the loop (0b.6)
     if not kw.keys() - _SIM_RUN_BASE_KW:  # the common call: nothing else
         return _pulsim_module._run_simulation(sim), sim.builder
     get = kw.get
@@ -3310,6 +3311,7 @@ def simulate(
                 # add-kernel-simulation-object 11.1: through the kernel object.
                 _sim = Simulation(_run_circuit, _tro, True)
                 _sim.set_switch_fn(switch_fn)
+                _rec_mod.attach_loop_feed(_sim, "trbdf2")
                 if b_extra_fn is not None:
                     _sim.set_source_term(b_extra_fn)
                 if initial_state is not None:

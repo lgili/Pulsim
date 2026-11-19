@@ -60,6 +60,8 @@ mode is a possible follow-up.
 
 ## 5. Feeding modes (which one is active)
 
+(Superseded for pwl / trbdf2 by 19, slice 3.)
+
 - **Python (active on every engine): stored-array pass.** After the run,
   `_recorders.record_result` evaluates each reading over the stored
   result (`res.v`, `res.i` — the existing per-kind laws under the
@@ -74,6 +76,8 @@ mode is a possible follow-up.
   `set_hooks` but no test feeds a recorder from it here.
 
 ## 6. Right limits per engine
+
+(Superseded for pwl / trbdf2 by 19, slice 3.)
 
 Only the exact engine stores right limits; pwl and trbdf2 store one row
 per accepted step and their record is continuous, so no event rows are
@@ -97,6 +101,8 @@ fields). `simulate(recorders=..., resume_from=...)` is refused by name
 (tasks 0b.7).
 
 ## 9. store_every
+
+(Superseded for pwl / trbdf2 by 19, slice 3.)
 
 A stored-array pass on a decimated record would alias (the comment on
 `switch_state_bits` measures +14 %), so `store_every > 1` with recorders is
@@ -251,6 +257,64 @@ counts (the caller sizes it; the in-loop test covers None and Decimate).
   arithmetic) and every in-tree `.mean()` over those results would warn;
   it needs its own PR with the suite run under `-W error::GridWarning`.
 
+## 19. In-loop feeding (0b.6) and event semantics (slice 3, 2026-11-20)
+
+- **Feeding mode per engine** (`Recording.feeding`, `res.recorder_feed`):
+  pwl and trbdf2 through the kernel `Simulation` object: **in-loop**
+  (`record/loop_feed.hpp`, `LoopFeed` on `StepHooks::step` / `on_event`;
+  `Simulation::set_hooks`; Python `_recorders.attach_loop_feed`, called by
+  `_run_on_simulation` and the trbdf2 object route). Stored-array pass
+  (the fallback, unchanged numbers): the exact engine (its scheduler's
+  hook carries `accepted` only, left limits; the stored right limits are
+  exact, so the pass is the better feed there), the routes that bypass
+  the object (`_kernel_run`, sweep recipes, `control_tick='state'` queue
+  groups, the static and legacy loops — the hook does not fire), and any
+  reading that is not a function of the state vector alone. In-loop
+  readings: `v(n)`, `v(a,b)`, `i()` of a state column (inductor, voltage
+  sources, branch-form switch / diode) or a resistor, `p()` of those
+  (product of two linear forms) — the same columns / laws `res.v` /
+  `res.i` read from a stored sample.
+- **Agreement, same run, both feeds** (`test_in_loop_feeding_equals_the_
+  stored_array_pass`): pwl bit-identical on RC, rectifier, bridge (kept
+  rows, windows, periods). trbdf2 bit-identical on RC and bridge; the
+  rectifier differs by 5.5e-10 relative in the window statistics, a
+  legitimate difference: trbdf2 STORES its settled post-event probe as an
+  extra sample (4 ns after each zero crossing: 1007 stored vs 1004
+  accepted steps), while the in-loop record starts the next line from the
+  same settled state as an event row.
+- **store_every lifted** when the feed is in-loop: the recorders see every
+  accepted step, so store_every = 50 gives bit-identical windows / periods
+  / event rows to the full run (pwl rectifier; C++ `LoopFeed` test with
+  store_every = 10, statistics-only keeps capacity 0, event rows reserved,
+  no per-step allocation). When the run cannot be fed in-loop,
+  `store_every > 1` is refused AFTER the run (the route is decided inside
+  simulate()), naming why. trbdf2 refuses store_every itself.
+- **Event rows** (`event_t`, `event_t_right`, `event_resolution`):
+  `exact` (the exact engine's stored right limit), `settled` (trbdf2's
+  `on_event`: the settled post-event state at the instant; the next line
+  starts from it), `within_dt` (a bracket: left limit at `event_t`, the end
+  of the first step under the new mode at `event_t_right`; the line is not
+  moved, no right limit is fabricated) — pwl always (its `on_event`);
+  trbdf2 where its settle did not report (a gate edge with
+  refresh_after_event off, a landing without a net flip, an entry into a
+  mode with dependent states: the step was solved under a mask other than
+  the previous step's, with no settled report; bracket [t0, t] of that
+  step). A restart from a state other than the committed one is a
+  `settled` row (`n_jumps`; none seen on the validation circuits).
+- **Bridge truth table** (mpmath, 11 commutations; `test_event_rows_
+  against_the_bridge_truth`): exact 11/11 rows `exact`, |dt| <= 1.1e-11 s,
+  v_C both limits <= 7.4e-8 V; pwl dt = 1e-6: 787 rows (diode chatter),
+  every truth instant inside a bracket, v_C limits <= 7.6e-3 V; trbdf2
+  rtol 1e-7 (after the review fixes): 17 rows, 3 `settled` + 14
+  `within_dt`; every truth instant has a row whose left limit is within
+  2.6e-8 s of it (v_C left <= 1.6e-3 V); the `within_dt` rights are the
+  end of the first step under the new mode (v_C up to 0.25 V off where that
+  step is 40 us long).
+- **Pure observer**: the feed reads its arguments only; `Simulation`
+  passes the hooks pointer, the loops' hook tests are the existing
+  run-invariant ones. Verified by the step-sequence compare (see the
+  hand-off) and the goldens with no recorder.
+
 ## Requests to the stepper track
 
 - **R1.** One per-accepted-step call for all engines, after commit:
@@ -299,3 +363,34 @@ Slice 2 (this branch, after 2b18f11a):
   0b.6 (stepper R1-R3), 0b.7 (snapshot index 17, see tasks), 1.4 result
   reference page, 3, 4.2 delegation of `stats.time_average`, 4.3 PR #140
   check, 5-10 (see 18).
+
+## Hand-off (slice 3, 2026-11-20)
+
+- Done: 0b.6 in-loop feeding (19), event resolution on every engine (19),
+  `near` -> `close_to` in `recorder.hpp`, api-reference feeding table.
+- Cost per accepted step (instructions retired, in-process, min of 6):
+  no recorder — buck pwl 3096.1 (baseline 3093.7, +0.08 %), buck trbdf2
+  10959.9 (baseline 10963.1, -0.03 %); one statistics-only recorder (one
+  probe, period 1e-4) — pwl 4031.6 (+935, +30 %), trbdf2 12375.5 (+1416,
+  +13 %). Not optimised: the probe is evaluated through `ir::Expr`, every
+  piece walks the period windows k0-1..k1, and the jump check compares
+  the whole state vector.
+- Open (not started in this slice):
+  - item 3 / section 6: KCL-consistent `i(C)` / `p(C)` and the nonlinear
+    kinds' readings at commit through `device_state`
+    (`pwl/device_readings.hpp`: `for_each_static_reading`,
+    `for_each_stateful_reading`), then the energy-balance test on three
+    circuits; until then those readings are refused / stored-array.
+  - 0b.7 snapshot: a new pickle index after the 17 fields with a reader
+    branch (`python/bindings.cpp` ~4589-4752, SolverSnapshot pickle;
+    field-count tests: test_device_state_snapshot, test_loss_port_seams,
+    test_snapshot_controller_block, test_switch_state_record,
+    test_tick_phase_resume); needs `Recorder` state export / import
+    (partial windows, period index, start row, LoopFeed's last state and
+    mask); `resume_from` stays refused.
+  - 4.2 `stats.time_average` delegation, 8.3 `live_stream` from Python
+    over `RingSink`, 1.4 result reference page.
+  - The exact engine stays on the stored-array pass: its scheduler hook
+    (`set_hooks`) calls `accepted` only (left limits); feeding it in-loop
+    needs its `step` / `event` calls in `dsed/scheduler.hpp` (owned by the
+    exact-engine agent).

@@ -217,6 +217,9 @@ public:
         live_ring_ = std::move(ring);
     }
     void set_cancel(solver::ShouldContinueFn fn) { cancel_ = std::move(fn); }
+    /// Accepted-step / event / device-state listeners for both engines (the
+    /// recorders' in-loop feed). Not owned: it must outlive every run.
+    void set_hooks(events::StepHooks* hooks) noexcept { hooks_ = hooks; }
     void set_initial_state(Vector x) { x0_ = std::move(x); }
 
     // ---- Queries -----------------------------------------------------------
@@ -349,7 +352,7 @@ public:
             }
             res = solver::run_transient(cache, g, p, so, switch_fn, b_extra_,
                     dc_op, refresh_, observer, x0, cancel, resume, next_jump_,
-                    next_edge_, ticks_.empty() ? nullptr : &tp);
+                    next_edge_, ticks_.empty() ? nullptr : &tp, hooks_);
         } else {
             auto to = to_trbdf2_options(opts_);
             to.t_start = t_cursor_;
@@ -370,7 +373,7 @@ public:
             if (x0 != nullptr) x0o = *x0;
             res = solver::run_transient_trbdf2(cache, g, p, to, switch_fn,
                     b_extra_, x0o, &stats_, next_edge_, cancel_, {}, refresh_,
-                    resume, tick_fn);
+                    resume, tick_fn, hooks_);
         }
         ran_ = true;  // only a completed call: a retry after a throw starts over
         snapshot_ = res.final_snapshot;
@@ -519,6 +522,7 @@ private:
     std::vector<TickFn> ticks_;
     solver::StepObserverFn tick_before_;
     std::shared_ptr<streaming::LiveRing> live_ring_;
+    events::StepHooks* hooks_ = nullptr;
     std::optional<pwl::PwlStateSpaceCache> cache_;
     bool ran_ = false;
     bool dc_with_resume_ = false;
