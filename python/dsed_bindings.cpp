@@ -1532,6 +1532,11 @@ void init_module(py::module_& m) {
                 loss.emplace(adapter);
                 loss->attach(loss_hooks);
                 sim.set_hooks(&loss_hooks);
+                if (loss->has_heat()) {   // the junction loop: the step's heat into the state
+                    sim.set_state_kick([&loss](pulsim::Vector& x, pulsim::Vector* xl) {
+                        return loss->kick(x, xl);
+                    });
+                }
             }
             // session 24: resume at a snapshot's committed instant
             using ResumeT = pulsim::dsed::ExactResumeState<pulsim::topology::SwitchStateMask>;

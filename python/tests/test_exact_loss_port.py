@@ -146,16 +146,12 @@ def _refused(b, fn=None, **kw):
     return ei.value
 
 
-@pytest.mark.parametrize("what", ["junction", "table", "sine", "bdf2", "t_start"])
+# a junction / heat node runs (the temperature loop, test_exact_junction_loop)
+@pytest.mark.parametrize("what", ["table", "sine", "bdf2", "t_start"])
 def test_what_the_exact_port_cannot_honour_is_refused_by_name(what):
     b, fn, _ = _buck()
     kw = {}
-    if what == "junction":
-        b.add_voltage_source("Vamb", "amb", "gnd", 25.0)
-        b.add_resistor("Rth", "tj", "amb", 1.0)
-        b.add_capacitor("Cth", "tj", "amb", 1e-3)
-        b.set_device_losses("Q1", junction="tj", E_on=E_ON)
-    elif what == "table":
+    if what == "table":
         b.set_device_losses("Q1", Tj=25.0, conduction="table",
                             V_on=p.ConductionTable([10.0], [25.0, 125.0], [1.0, 1.2]))
     else:

@@ -1605,7 +1605,8 @@ def test_allow_implicit_segments_is_refused_off_the_exact_engine(engine):
 
 
 # add-in-kernel-event-losses: a device loss port is honoured on the
-# fixed-step and the variable-step engines (task 3.1); every other engine
+# fixed-step, the variable-step and the exact engines (tasks 3.1-3.3, the
+# junction loop on dsed: add-exact-propagator-strategy session 25); bdf1
 # refuses it by name, with the device, before a step is taken.
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed", "bdf1", "auto"))
 def test_device_losses_cell(engine):
@@ -1615,7 +1616,7 @@ def test_device_losses_cell(engine):
     b.add_resistor("Rth", "tj", "amb", 1.0)
     b.add_capacitor("Cth", "tj", "amb", 1e-3)
     b.set_device_losses("S", junction="tj")
-    if engine in ("dsed", "bdf1"):
+    if engine == "bdf1":
         with pytest.raises(p.UnsupportedError) as ei:
             if engine == "bdf1":
                 k.run_transient_bdf1(

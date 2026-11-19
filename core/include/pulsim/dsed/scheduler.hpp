@@ -680,6 +680,7 @@ public:
                     ++result.n_accept;
                     ++result.n_exact_steps;
                     hook_accepted_(t_step0, t, step_fired ? x_pre_event : x, step_mask);
+                    if (state_kick_) state_kick_(x, step_fired ? &x_pre_event : nullptr);
                     ++step_idx;
                     if (step_idx % store_every_ == 0) {
                         ped_push_sample(result, t, x,
@@ -868,6 +869,9 @@ public:
 
             // 8. Record
             hook_accepted_(t_step0, t, step_fired ? x_pre_event : x, step_mask);
+            if (state_kick_ && state_kick_(x, step_fired ? &x_pre_event : nullptr)) {
+                rk_state.invalidate();   // FSAL's k1 was f(t, x) before the correction
+            }
             ++step_idx;
             if (step_idx % store_every_ == 0) {
                 ped_push_sample(result, t, x, system_.current_mask(),
@@ -1189,6 +1193,13 @@ public:
     /// Step hooks (events/step_hooks.hpp): on_accept per accepted step,
     /// on_commutation at every change of the integrated mask. Not owned.
     void set_hooks(events::StepHooks* hooks) noexcept { hooks_ = hooks; }
+
+    /// A correction of the state at each accepted step's end, after its
+    /// hooks: `fn(x, x_left)` (x_left: the pre-event record when an event
+    /// ended the step, else null) returns whether it changed anything. The
+    /// exact loss port's junction heat (dsed/loss_port.hpp): the thermal
+    /// states respond to the step's heat; no electrical state moves.
+    void set_state_kick(std::function<bool(Vector&, Vector*)> fn) { state_kick_ = std::move(fn); }
 
     /// Control ticks scheduled by the run's event queue: `fn(j, info, t, x)`
     /// with the reduced state x at each instant of `rates[j]` before t_end;
@@ -3114,6 +3125,7 @@ private:
     std::uint32_t gate_src_ = 0;
     std::uint32_t corner_src_ = 0;
     events::StepHooks* hooks_ = nullptr;
+    std::function<bool(Vector&, Vector*)> state_kick_;
     Vector hook_x_left_;
     std::vector<Real> fast_t_;     // plan_fast_samples_
     std::size_t fast_k_ = 0;
