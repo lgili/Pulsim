@@ -1,0 +1,82 @@
+{
+ "circuit": "circuits/switching/basic/vcswitch_resistor.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "wall_s": 0.0,
+ "events": [
+  {
+   "t": "1.499999999996112780677529e-9",
+   "change": "SW1-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00002000050000000000273241672",
+   "change": "SW1+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00005000149999999999850886748",
+   "change": "SW1-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00007000050000000000512850352",
+   "change": "SW1+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 4,
+ "n_events": 4,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "SW1+",
+ "dc_start_modes": 1,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "4.72e-59",
+ "max_eigvec_cond": "1.0",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "6.000140398579972869624355",
+    "rms": "7.746018330600615655415206",
+    "d_prec": "1.53e-31"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "9.999900000999990000097917",
+    "rms": "9.999900000999990000097917",
+    "d_prec": "1.21e-31"
+   }
+  }
+ },
+ "energy_J": {
+  "Rload": "6.00007999780008e-5",
+  "SW1": "6.04007798980044e-10",
+  "src:Vin": "6.00014039857997e-5"
+ },
+ "energy_balance_rel": "-7.91e-62",
+ "precision_doubling_rel": "1.21e-32",
+ "event_time_diff_s": "2.26e-36",
+ "u_stored_trace": 0.0,
+ "uniform_dt_floor": 0.03125271353333498,
+ "dt": 1e-07,
+ "stored_dt": 1.25e-08
+}

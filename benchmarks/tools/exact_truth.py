@@ -1946,7 +1946,7 @@ def truth(path, form="conductance", dps=(30, 60), out_dir=TRUTH_DIR, write=True,
         with gzip.open(out_dir / f"{stem}.csv.gz", "wt", encoding="utf-8", newline="") as f:
             f.write("time," + ",".join(cols) + "\n")
             for i in range(len(th)):
-                f.write(f"{th[i]!r}," + ",".join(repr(float(yh[c][i])) for c in cols) + "\n")
+                f.write(f"{float(th[i])!r}," + ",".join(repr(float(yh[c][i])) for c in cols) + "\n")
         (out_dir / f"{stem}.json").write_text(json.dumps(rec, indent=1), encoding="utf-8")
     return rec
 
