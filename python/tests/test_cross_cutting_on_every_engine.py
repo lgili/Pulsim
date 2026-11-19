@@ -67,15 +67,18 @@ def _undriven():
 
 
 @pytest.mark.parametrize("engine", ["pwl", "exact"])
-def test_an_undriven_switch_is_closed_with_a_warning(engine):
-    r, w = _run(_undriven(), engine)
-    assert any("no switch_fn was given" in m for m in w)
+def test_an_undriven_switch_runs_closed_when_asked(engine):
+    # legacy subject: the pre-release pwl / exact behaviour, restored by undriven='closed'
+    r, _ = _run(_undriven(), engine, undriven="closed")
+    assert r.diagnostics["undriven"] == {"policy": "closed", "switches": ["S"]}
     assert float(np.asarray(r.v("out"))[-1]) == pytest.approx(1.0, rel=2e-3)
 
 
-def test_an_undriven_switch_is_refused_on_trbdf2():
-    with pytest.raises(p.UnsupportedError, match="no switch_fn"):
-        p.simulate(_undriven(), 1e-5, **ENGINES["trbdf2"])
+@pytest.mark.parametrize("engine", ENGINES)
+def test_an_undriven_switch_is_refused_on_every_engine(engine):
+    # since the release (DECISIONS 26.1) every engine refuses it by name
+    with pytest.raises(p.UnsupportedError, match=r"undriven='refuse'.*have no driver: S\."):
+        p.simulate(_undriven(), 1e-5, **ENGINES[engine])
 
 
 @pytest.mark.parametrize("engine", ENGINES)
