@@ -80,6 +80,11 @@ struct Rate {
     /// tolerance: a tick inside the gap between the two runs' tolerances
     /// was otherwise fired by neither run.
     std::uint64_t k0 = std::numeric_limits<std::uint64_t>::max();
+    /// Opt-in closed run end: an instant AT t_end (within the engine's
+    /// take tolerance) fires too, [t0, t_end] (DECISIONS 14 (c)). Default
+    /// false: the half-open rule of fix-control-tick-semantics. A resumed
+    /// run does not fire it again (its `k0` is past it).
+    bool closed_end = false;
 };
 
 /// What a tick handler is told (task 4.1): the instant the tick was
@@ -166,8 +171,12 @@ public:
     /// A periodic source with an `origin` starts at its first instant
     /// >= t0 - t0_tol (t0_tol: the engine's take tolerance, so a tick the
     /// previous run left out at its t_end is the resumed run's first).
-    void start(Real t0, Real t_end, Real t0_tol = Real{0}) {
+    /// `t_end_closed`: the last instant a `closed_end` rate fires at
+    /// (NaN = t_end).
+    void start(Real t0, Real t_end, Real t0_tol = Real{0},
+               Real t_end_closed = std::numeric_limits<Real>::quiet_NaN()) {
         t_end_ = t_end;
+        t_end_closed_ = std::isnan(t_end_closed) ? t_end : t_end_closed;
         taken_buf_.resize(slots_.size());   // the only allocation, here
         for (auto& s : slots_) {
             s.k = 0;
@@ -388,13 +397,14 @@ private:
 
     void set_periodic(Slot& s) const noexcept {
         const Real tk = s.base + static_cast<Real>(s.k) * s.rate.period;
-        s.valid = tk < t_end_;
+        s.valid = s.rate.closed_end ? tk <= t_end_closed_ : tk < t_end_;
         s.pending = s.valid ? tk : kNone;
     }
 
     std::vector<Slot> slots_;
     std::vector<TimeEvent> taken_buf_;
     Real t_end_ = kNone;
+    Real t_end_closed_ = kNone;
 };
 
 }  // namespace pulsim::events
