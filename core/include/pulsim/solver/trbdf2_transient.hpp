@@ -2238,6 +2238,11 @@ inline SimulationResult run_transient_trbdf2(
         }
     };
     auto record_post_event = [&]() {
+        // A record still pending is an earlier event's at this same t (every
+        // commit drops or settles it): this event supersedes it. Kept, its
+        // probe step could exceed this one's and the record went backward
+        // (PSFB under 1e-15 fuzz: a post-event sample 8e-16 s before it).
+        drop_superseded_event_sample(t);
         if (!restart_ok() || n_sdirk_diode == 0 || !last_probe_ok
             || !x_sig.allFinite()) {
             sdirk_event = false;   // the jump was not shown instant
