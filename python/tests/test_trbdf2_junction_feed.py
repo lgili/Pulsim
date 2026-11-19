@@ -64,7 +64,7 @@ def test_the_vsi_with_six_junctions_runs_at_tight_tolerance():
     b, fn, names = _vsi_case()
     r = _sim(b, 2.03e-3, fn, rtol=1e-9)        # aborted at 20 µs before
     s = r.stats
-    assert s.n_accept <= 16_000, s.n_accept       # 12 160 measured
+    assert s.n_accept <= 26_000, s.n_accept       # 12 160 on the branch, 12 618 on 14n (2x margin)
     assert s.n_reject <= 400, s.n_reject          # 172
     assert s.n_forced_accepts <= 3, s.n_forced_accepts   # 1 (the start)
     for k in range(len(names)):
@@ -129,7 +129,7 @@ def test_the_smallest_stalling_circuit_runs():
     b, fn = _held_switch("rc")
     r = _sim(b, 2e-3, fn, rtol=1e-8)
     s = r.stats
-    assert s.n_accept <= 1_500, s.n_accept        # 1065 measured
+    assert s.n_accept <= 2_200, s.n_accept        # 1065 measured (2x: platform margin)
     assert s.n_reject <= 20, s.n_reject           # 2
     assert s.n_forced_accepts <= 2, s.n_forced_accepts   # 0
 

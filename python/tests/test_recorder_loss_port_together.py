@@ -78,3 +78,37 @@ def test_a_recorder_leaves_a_heat_injecting_port_untouched(eng):
     assert np.asarray(both.states).tobytes() == np.asarray(port_only.states).tobytes()
     _same_losses(both, port_only)
     assert both.heat_injected > 0.0
+
+
+@pytest.mark.parametrize("eng", ["pwl", "trbdf2", "esdirk43"])
+def test_a_recorder_reads_the_junction_it_heats(eng):
+    """The in-loop recorder (the batched step feed) probing the junction
+    node itself: the T_j trace is the same with the recorder on or off,
+    and every recorded sample is a value of that trace at its time
+    (add-in-kernel-event-losses DECISIONS 17 puts the heat's right limit
+    in the thermal capacitor's history: the recorder must see committed
+    states only)."""
+    run = dict(_RUNS.get(eng, _RUNS["trbdf2"]))
+    if eng == "esdirk43":
+        run["integrator"] = "esdirk43"
+    b0, fn0 = _rl_chopper(losses=True, thermal=(5.0, 1e-4))
+    b1, fn1 = _rl_chopper(losses=True, thermal=(5.0, 1e-4))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        off = p.simulate(b0, T_END, switch_fn=fn0, **run)
+        on = p.simulate(b1, T_END, switch_fn=fn1, **run,
+                        recorders=[p.Recorder("tj", ["v(tj)"], keep="every")])
+    assert on.recorder_feed["mode"] == "in-loop"
+    assert on.recorder_feed["n_dropped"] == 0
+    assert np.asarray(on.times).tobytes() == np.asarray(off.times).tobytes()
+    tj = np.asarray(off.v("tj"))
+    assert np.asarray(on.v("tj")).tobytes() == tj.tobytes()
+    assert tj.max() > 26.0                     # the junction really heats
+    seen = {}
+    for t, v in zip(np.asarray(off.times), tj):
+        seen.setdefault(float(t), set()).add(float(v))
+    rec = on.recorded["tj"]
+    rt, rv = np.asarray(rec.times), np.asarray(rec["v(tj)"])
+    assert rt.size > 100
+    for t, v in zip(rt, rv):
+        assert float(v) in seen.get(float(t), ()), (eng, t, v)
