@@ -737,6 +737,24 @@ def test_device_output_covers_a_pwm_run_with_gate_edges_and_a_diode(libs, kw):
     v = np.asarray(res.v("vout"))
     assert np.all(np.diff(np.asarray(res.times)) > 0)
     np.testing.assert_allclose(res.device_output("M", "i(a)"), 1e-3 * v, rtol=0, atol=1e-15)
+    # integration 14m: with a recorder's step sink (batched on pwl, 200
+    # steps cross a 128-row batch) the named outputs are the same rows
+    b2 = p.CircuitBuilder()
+    b2.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b2.add_mosfet("Q1", "vin", "sw")
+    b2.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b2.add_inductor("L", "sw", "vout", 100e-6)
+    b2.add_capacitor("C", "vout", "gnd", 47e-6)
+    b2.add_resistor("RL", "vout", "gnd", 10.0)
+    b2.add_external_device("M", ["vout", "gnd"], libs["contract"], "metered_resistor",
+                           {"G": 1e-3}, record=True)
+    fn2 = p.make_pwm_switch_fn(100e3, 0.5, b2.switch_index_of("Q1"), b2.graph.num_switches)
+    res2 = p.simulate(b2, switch_fn=fn2, t_end=2e-4, recorders=[p.Recorder("r", ["v(vout)"])], **kw)
+    assert res2.recorder_feed["mode"] == "in-loop", res2.recorder_feed
+    np.testing.assert_array_equal(np.asarray(res2.times), np.asarray(res.times))
+    np.testing.assert_array_equal(np.asarray(res2.device_output("M", "i(a)")),
+                                  np.asarray(res.device_output("M", "i(a)")))
+    np.testing.assert_array_equal(res2.recorded["r"].times, np.asarray(res.times))
 
 
 def test_steady_state_refuses_the_model_state_by_name(libs):
