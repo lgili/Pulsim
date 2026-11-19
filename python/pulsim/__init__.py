@@ -2744,8 +2744,6 @@ def simulate(
         should_continue, closed_loops, live_stream, mmc_arms, on_cache,
         controller_period, resume_from, control_tick, solver, sensitivities,
         mode_selection, allow_implicit_segments, undriven, recorders, output_rtol)))
-    if plan.engine_asked != "auto" or plan.engine != "dsed":
-        return _finalize(_ENGINES[plan.engine](plan), plan)
     try:
         return _finalize(_ENGINES[plan.engine](plan), plan)
     except UnsupportedError as e:   # 'auto' took the exact engine, which refused by name
@@ -2761,7 +2759,10 @@ def _auto_exact_fallback(builder, plan, err):
     """engine='auto' routed a run to the exact engine and it refused by name:
     the same call again with the exact route off (trbdf2, or the 'auto'
     rule's own refusal), the refusal kept as the first route reason. A
-    refusal raised mid-run has already called the run's callbacks once."""
+    refusal raised mid-run has already called the run's callbacks once.
+    Any other run's refusal is re-raised unchanged."""
+    if plan.engine_asked != "auto" or plan.engine != "dsed":
+        raise err
     tok = _AUTO_EXACT_OFF.set(True)
     try:
         plan2 = _plan_run(builder, *plan.resolved_from._args)
@@ -3065,7 +3066,9 @@ def _route(
         # falls back to trbdf2 (simulate()).
         try:
             _pulsim_module._require_supported(builder.graph, builder.pool, "exact")
-            _exact_ok = _opt_values["b_extra_fn"] is None and not _dsed_refused()
+            # a user b_extra_fn: the exact engine refuses it by name at the
+            # run, and simulate() falls back to trbdf2
+            _exact_ok = not _dsed_refused()
         except UnsupportedError:
             _exact_ok = False
         if _exact_ok:
@@ -3456,7 +3459,6 @@ def _plan_run(
         "mode_selection": mode_selection,
         "allow_implicit_segments": allow_implicit_segments,
         "output_rtol": output_rtol,
-        "b_extra_fn": b_extra_fn,   # the caller's (an Always row: read by the route)
     }
 
     # ---- Validate first — fail fast on user mistakes (DSED side). ----

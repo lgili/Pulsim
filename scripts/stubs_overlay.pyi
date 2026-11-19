@@ -65,6 +65,25 @@ class SimulationResult:
     """Largest lateness of a controller tick [s]: below ``dt`` on
     ``pwl`` (0 when every period is a multiple of ``dt``), 0 on
     ``trbdf2``."""
+    states_reduced: numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]] | None
+    """Exact engine (``'dsed'``) only: the reduced state per sample."""
+    has_full_states: bool
+    """Exact engine only: whether ``states`` holds the full MNA vector."""
+    exact: dict[str, typing.Any] | None
+    """Exact engine, native builder path: per visited mask the propagator
+    tier, kappa2 and reason, plus the eig / Pade / cache counters; else ``None``."""
+    initial_condition_adjustment: dict[str, typing.Any] | None
+    """Exact engine: the projection applied to an inconsistent initial state, or ``None``."""
+    event_times: numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]] | None
+    """Exact engine, native builder path: the event instants; else ``None``."""
+    event_types: typing.Any
+    """Exact engine, native builder path: the predicate type of each event; else ``None``."""
+    right_limit_index: numpy.ndarray[typing.Any, numpy.dtype[numpy.int64]] | None
+    """Exact engine: sample indices that hold a left limit, whose right limit follows."""
+    right_limit_states: numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]] | None
+    """Exact engine: the right-limit state at each ``right_limit_index``."""
+    right_limit_switch_states: numpy.ndarray[typing.Any, numpy.dtype[numpy.bool_]] | None
+    """Exact engine: the switch states after each ``right_limit_index`` event."""
     @typing.overload
     def v(self, name: str, t: None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
     @typing.overload

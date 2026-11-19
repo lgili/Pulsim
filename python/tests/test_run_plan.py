@@ -212,8 +212,8 @@ def test_plan_fields_and_immutability():
     assert plan.events.on_impulse == "record"
     assert type(plan.initial).__name__ == "Initial"
     assert type(plan.drive).__name__ == "Drive"
-    assert plan.device_path == "legacy"
-    assert plan.device_path_enum == p.DevicePath.Legacy
+    assert plan.device_path == "interface"      # the release default (_plan.DEFAULT_DEVICE_PATH)
+    assert plan.device_path_enum == p.DevicePath.Interface
     assert plan.voltage_sanity_factor is None and plan.auto_regularize is True
     assert plan.resolved_from["dt"] == "explicit"
     assert plan.diagnostics == ()
