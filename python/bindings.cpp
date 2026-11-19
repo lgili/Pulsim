@@ -3687,7 +3687,10 @@ void init_module(py::module_& m) {
                 auto& s = r.stats;
                 s = record::RunStats{};
                 s.engine = engine;
-                const std::pair<const char*, Size record::RunStats::*> sizes[] = {
+                // decltype, not `Size record::RunStats::*`: MSVC rejects that spelling in a template argument
+                using SizeMember = decltype(&record::RunStats::n_steps);
+                using RealMember = decltype(&record::RunStats::gate_pulse_min);
+                const std::pair<const char*, SizeMember> sizes[] = {
                     {"n_steps", &record::RunStats::n_steps},
                     {"n_accept", &record::RunStats::n_accept},
                     {"n_reject", &record::RunStats::n_reject},
@@ -3705,7 +3708,7 @@ void init_module(py::module_& m) {
                     {"n_rk45_steps", &record::RunStats::n_rk45_steps},
                     {"n_bdf2_steps", &record::RunStats::n_bdf2_steps},
                     {"n_exact_steps", &record::RunStats::n_exact_steps}};
-                const std::pair<const char*, Real record::RunStats::*> reals[] = {
+                const std::pair<const char*, RealMember> reals[] = {
                     {"gate_pulse_min", &record::RunStats::gate_pulse_min},
                     {"gate_sample_spacing_max", &record::RunStats::gate_sample_spacing_max},
                     {"cpu_time_seconds", &record::RunStats::cpu_time_seconds}};
