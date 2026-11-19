@@ -100,8 +100,9 @@ def test_the_forward_converter_rectifier_follows_the_transformer(monkeypatch):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         ref = case.run("trbdf2", rtol=1e-9, atol=1e-12)
-        r = case.run("exact")
-    assert r.diagnostics["mode_guard"]["repairs"] >= 1
+        r = case.run("exact")                             # release mode selection
+        # The settle's guard is the legacy mode selection: pinned for its counter.
+        assert case.run("exact", mode_selection="legacy").diagnostics["mode_guard"]["repairs"] >= 1
     # the end value to the reference's own accuracy (measured 2.8e-8), the trace within
     # the interpolation between sparse event-driven samples (5.5e-6; was err_rms 0.648)
     assert r.v("out")[-1] == pytest.approx(ref.v("out")[-1], rel=1e-6)
@@ -173,6 +174,7 @@ def test_the_phase_shift_full_bridge_starts_inside_the_zero_band(mode):
     # the shipped example (no switch_fn: every switch closed).
     kw = {} if mode is None else {"mode_selection": mode}
     # The breach was at t = 0, so a short run covers it (the full run takes 3 s per mode).
+    # undriven='closed': the policy this run means (refused by name since the release).
     r = p.simulate(p.load_yaml_file(str(ROOT / "examples/phase_shift_full_bridge.yaml")),
-                   2e-5, engine="exact", **kw)
+                   2e-5, engine="exact", undriven="closed", **kw)
     assert np.all(np.isfinite(np.asarray(r.states)))
