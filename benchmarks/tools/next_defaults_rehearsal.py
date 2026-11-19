@@ -600,7 +600,7 @@ def blockers(allu, rows):
                           text=True, encoding="utf-8", check=True).stdout.strip()
     L = ["# Next-defaults rehearsal", "",
          f"Rehearsal of the number-changing release, rendered on `{head}` from the cell cache of `run`",
-         "(method and tables below the blocker list; the pytest blast radius states its own run).", ""]
+         "(method and tables below the blocker list; where the cells and the pytest blast radius ran: `## Notes`).", ""]
     if not any("output_rtol" in d for d in nd.PROFILE.values()):
         L += ["The profile at this head has no `output_rtol` (the exact engine's output-grid rule is not",
               "integrated yet): `auto+next` runs the exact engine without dt at its default output",

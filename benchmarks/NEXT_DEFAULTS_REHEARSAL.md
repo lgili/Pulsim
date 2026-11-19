@@ -1,7 +1,12 @@
 # Next-defaults rehearsal
 
-Rehearsal of the number-changing release on `feat/core-integration` fe75ee01 (method and
-tables below the blocker list).
+Rehearsal of the number-changing release, rendered on `52aa918a` from the cell cache of `run`
+(method and tables below the blocker list; where the cells and the pytest blast radius ran: `## Notes`).
+
+The profile at this head has no `output_rtol` (the exact engine's output-grid rule is not
+integrated yet): `auto+next` runs the exact engine without dt at its default output
+ceiling, so its strict counts are expected to stay where the previous rehearsal put them
+(80 / 28 / 1); the measured counts are in the tables below.
 
 ## Ranked blocker list
 
@@ -31,9 +36,9 @@ fixes before the release; the last three need a decision or a re-baseline with e
 
 4. 1 test, option `form='branch'`: bdf1 (retired) refuses a branch-form switch / diode by name and names pwl / trbdf2 (update-number-changing-release 1.7; ac_sweep runs them since): at the flip bdf1 keeps the conductance form or the test moves off bdf1. Repro: `python/tests/test_engine_conformance.py::test_device_cell[Switch-bdf1]` under `-p next_defaults_pytest`.
 
-### 2. Accepted changes of number (118 cells better under the profile)
+### 2. Accepted changes of number
 
-By engine and basis: auto outcome 1, auto reference 3, auto truth 25, pwl outcome 11, pwl reference 13, pwl truth 65. Each is listed in 'Better under the full profile' below with its basis; the CHANGELOG
+118 cells better under the profile. By engine and basis: auto outcome 1, auto reference 3, auto truth 25, pwl outcome 11, pwl reference 13, pwl truth 65. Each is listed in 'Better under the full profile' below with its basis; the CHANGELOG
 migration note of the release cites them.
 
 ### 3. Owner decisions (add-kernel-simulation-object DECISIONS 23, branch feat/core-p3-simulation-object; undriven switches first)
@@ -51,12 +56,12 @@ Also open for the owner: one voltage-sanity check (task 6.2 there); the composit
 
 ## Pytest blast radius under the profile
 
-Full `python/tests` with the profile injected by `benchmarks/tools/next_defaults_pytest.py`: 5409 passed, 479 failed, 110 skipped, 3 xfailed. Profile applications: {'branch:add_switch': 108775, 'branch:add_diode': 9127, 'applied:pwl': 4909, 'applied:trbdf2': 1225, 'applied:dsed': 1809, 'auto: exact refused -> trbdf2': 7}.
+Full `python/tests` with the profile injected by `benchmarks/tools/next_defaults_pytest.py`: 5470 passed, 480 failed, 110 skipped, 3 xfailed. Profile applications: {'branch:add_switch': 108785, 'branch:add_diode': 9148, 'applied:trbdf2': 1288, 'applied:pwl': 4942, 'applied:dsed': 1809, 'auto: exact refused -> trbdf2': 7}.
 
 | class | failures |
 |---|---:|
 | numeric assertion on an old value | 193 |
-| other assertion | 101 |
+| other assertion | 102 |
 | engine route / result layout | 71 |
 | circuit digest (IR / YAML path not patched: harness artefact) | 50 |
 | warning / raise expectation | 28 |
@@ -123,43 +128,46 @@ Not applied (not expressible through the harness on this tree):
 - pwl, trbdf2: composite diode V_F as a conduction drop (`update-composite-diode-forward-drop`): nothing to flip: already the default on this tree (the add_mosfet / Level-1 docstrings read V_F as the body diode's CONDUCTION DROP); a builder default, not a run option
 - all: one undriven-switch policy and blocks 2-8 (`add-kernel-simulation-object`): DECISIONS 23 (branch feat/core-p3-simulation-object): owner decisions, not options
 
-## Counts, differential matrix (109 circuits)
+## Counts, differential matrix
 
+109 circuits.
 Graded as `REFERENCE_STATUS.md` (strict gate, harness tolerances, suspect -> unverified).
 `timeout`: the cell passed the per-cell limit and was killed.
 
 | configuration | group | agree | disagree | error | refused | unverified | timeout | cells | wall (s) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| pwl | a | 81 | 27 | 1 | 0 | 0 | 0 | 109 | 0.4 |
-| pwl+restart | a | 89 | 19 | 1 | 0 | 0 | 0 | 109 | 0.5 |
-| pwl+split | a | 91 | 17 | 1 | 0 | 0 | 0 | 109 | 0.5 |
+| pwl | a | 81 | 27 | 1 | 0 | 0 | 0 | 109 | 0.5 |
+| pwl+restart | a | 89 | 19 | 1 | 0 | 0 | 0 | 109 | 0.6 |
+| pwl+split | a | 91 | 17 | 1 | 0 | 0 | 0 | 109 | 0.6 |
 | trbdf2 | a | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 1.0 |
-| dsed | a | 100 | 0 | 0 | 9 | 0 | 0 | 109 | 2.2 |
-| pwl:restart | b | 89 | 19 | 1 | 0 | 0 | 0 | 109 | 0.5 |
-| pwl:split | b | 91 | 17 | 1 | 0 | 0 | 0 | 109 | 0.5 |
+| dsed | a | 100 | 0 | 0 | 9 | 0 | 0 | 109 | 2.5 |
+| pwl:restart | b | 89 | 19 | 1 | 0 | 0 | 0 | 109 | 0.6 |
+| pwl:split | b | 91 | 17 | 1 | 0 | 0 | 0 | 109 | 0.6 |
 | pwl:mode_auto | b | 81 | 27 | 1 | 0 | 0 | 0 | 109 | 0.4 |
 | pwl:tick_state | b | 81 | 27 | 1 | 0 | 0 | 0 | 109 | 0.4 |
-| pwl:dev_interface | b | 81 | 27 | 1 | 0 | 0 | 0 | 109 | 0.3 |
-| pwl:branch | b | 81 | 27 | 1 | 0 | 0 | 0 | 109 | 1.2 |
-| pwl+next | c | 91 | 17 | 1 | 0 | 0 | 0 | 109 | 0.6 |
-| trbdf2:mode_auto | b | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 1.0 |
-| trbdf2:tick_state | b | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 0.9 |
-| trbdf2:dev_interface | b | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 0.9 |
-| trbdf2:branch | b | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 1.1 |
-| trbdf2+next | c | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 1.1 |
-| dsed:mode_auto | b | 100 | 0 | 0 | 9 | 0 | 0 | 109 | 2.1 |
-| dsed:tick_state | b | 100 | 0 | 0 | 9 | 0 | 0 | 109 | 2.1 |
-| dsed:branch | b | 100 | 0 | 0 | 9 | 0 | 0 | 109 | 2.3 |
-| dsed+next | c | 100 | 0 | 0 | 9 | 0 | 0 | 109 | 2.3 |
-| trbdf2+esdirk43 | extra | 102 | 6 | 1 | 0 | 0 | 0 | 109 | 1.6 |
-| trbdf2+next+esdirk43 | extra | 102 | 6 | 1 | 0 | 0 | 0 | 109 | 1.7 |
-| auto | d | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 1.0 |
-| auto:route | b | 80 | 28 | 1 | 0 | 0 | 0 | 109 | 6.0 |
-| auto+next | d | 80 | 28 | 1 | 0 | 0 | 0 | 109 | 7.4 |
+| pwl:dev_interface | b | 81 | 27 | 1 | 0 | 0 | 0 | 109 | 0.4 |
+| pwl:branch | b | 81 | 27 | 1 | 0 | 0 | 0 | 109 | 1.4 |
+| pwl+next | c | 91 | 17 | 1 | 0 | 0 | 0 | 109 | 0.7 |
+| trbdf2:mode_auto | b | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 1.1 |
+| trbdf2:tick_state | b | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 1.1 |
+| trbdf2:dev_interface | b | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 1.2 |
+| trbdf2:branch | b | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 1.2 |
+| trbdf2+next | c | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 1.2 |
+| dsed:mode_auto | b | 100 | 0 | 0 | 9 | 0 | 0 | 109 | 2.6 |
+| dsed:tick_state | b | 100 | 0 | 0 | 9 | 0 | 0 | 109 | 2.5 |
+| dsed:branch | b | 100 | 0 | 0 | 9 | 0 | 0 | 109 | 2.7 |
+| dsed+next | c | 100 | 0 | 0 | 9 | 0 | 0 | 109 | 2.9 |
+| trbdf2+esdirk43 | extra | 102 | 6 | 1 | 0 | 0 | 0 | 109 | 1.9 |
+| trbdf2+next+esdirk43 | extra | 102 | 6 | 1 | 0 | 0 | 0 | 109 | 1.9 |
+| auto | d | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 1.1 |
+| auto:route | b | 80 | 28 | 1 | 0 | 0 | 0 | 109 | 5.6 |
+| auto+next | d | 80 | 28 | 1 | 0 | 0 | 0 | 109 | 6.4 |
 
 Configuration (a) reproduces REFERENCE_STATUS.md's strict counts: **yes** (read from that file: {'pwl': (81, 27, 1, 0, 0), 'pwl+restart': (89, 19, 1, 0, 0), 'pwl+split': (91, 17, 1, 0, 0), 'trbdf2': (106, 2, 1, 0, 0), 'dsed': (100, 0, 0, 9, 0)}).
 
-## Counts, analytic set (27 cases; closed-form truth, frozen ceilings)
+## Counts, analytic set
+
+27 cases; closed-form truth, frozen ceilings.
 
 | configuration | agree | disagree | error | refused | unverified | timeout |
 |---|---:|---:|---:|---:|---:|---:|
@@ -715,6 +723,16 @@ Hand-written; kept by `render`.
   built circuit only, without the case's own keywords (e.g. a `b_extra_fn`); the run that follows does pass
   them, and a refusal there is recorded as such.
 - **Left from the review** (one fresh-context reviewer, opus, medium): a `timeout` cell is cached and not
-  retried on resume (delete the cell to retry); the tree id in the header is a constant (fe75ee01, the
-  extension this rehearsal ran), not read from the extension; the cache signature covers the configuration
-  and the profile table, not the library build.
+  retried on resume (delete the cell to retry); the cache signature covers the configuration and the
+  profile table, not the library build. (The header's commit is now read from git at render time.)
+- **This regeneration (2026-11-19).** Every cell re-measured from an empty cache (`run --jobs 1`, `nice -n 15`)
+  with the extension built at the library commit a67d3994 (`feat/core-integration`, batch 14m) on branch
+  `docs/core-evidence-refresh` (a67d3994 + tooling-only commits), macOS arm64, CPython 3.13; no timeout. The
+  pytest blast radius was re-run on the same tree. Every table from `## Each configuration against today's
+  default` down to here is byte-identical to the previous report (fe75ee01 cells); only the wall times above
+  it moved. The previous report's numbers in this section (39 lcp units; 56 / 65 / 45 cells moved by the branch
+  form) are read from those identical tables. Blast radius: 480 failed / 0 errors (was 479 at 492349fe). The one
+  new failure is `test_device_fields.py::test_the_device_reference_page_is_current` (the page generated
+  from the device field tables differs while `add_switch` / `add_diode` are patched to the branch form: a
+  harness artefact of the patch, like the circuit digests; it passes without the profile). No earlier
+  failure went away.
