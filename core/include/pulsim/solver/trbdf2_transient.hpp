@@ -2027,6 +2027,56 @@ inline SimulationResult run_transient_trbdf2(
     // cascade that settled, solved under gates_decided); otherwise one
     // probe is taken here. With `commit` false, or no room before
     // t_end, only the derivative slots are replaced (states kept).
+    bool edge_be_committed = false;   // the last edge commit was BE
+    // A trapezoidal and a backward-Euler solve over the same dt from the
+    // committed state differ beyond the step tolerance only where an
+    // excited mode with a time constant near or below dt rings in the
+    // trapezoidal one (amplification -> -1, BE's -> 0): the post-event
+    // mode has a parasitic mode (the PSFB's 0.87 fs L*g_off). x_tr: the
+    // trapezoidal solve if already taken; ring_be gets the BE one.
+    Vector ring_tr, ring_be;
+    auto rings = [&](const SwitchStateMask& m, Real dt, const Vector* x_tr) {
+        if (nl_effective || hs.any()) return false;
+        bool ok = true;
+        try {
+            if (x_tr == nullptr) {
+                ring_tr = x;
+                ok = trap_solve(m, t, dt, ring_tr) && ring_tr.allFinite();
+                x_tr = &ring_tr;
+            }
+            if (ok) {
+                ring_be = *x_tr;
+                probe_be = true;
+                ok = trap_solve(m, t, Real{2} * dt, ring_be) && ring_be.allFinite();
+            }
+        } catch (const std::runtime_error&) {
+            ok = false;
+        }
+        probe_be = false;
+        for (Eigen::Index i = 0; ok && i < ring_be.size(); ++i) {
+            const Real a = ring_be[i], b = (*x_tr)[i];
+            if (std::abs(a - b) > opts.atol
+                    + opts.rtol * std::max(std::abs(a), std::abs(b))) {
+                return true;
+            }
+        }
+        return false;
+    };
+    // Commit a solve over dt to the history; `be`: it was the BE one (its
+    // slots are the BE derivatives: the companion at 2 dt, slots zeroed).
+    auto update_history = [&](const Vector& xs, Real dt, bool be) {
+        if (!be) {
+            history.update_from_state(xs, dt);
+            return;
+        }
+        history.snapshot_into(hist_be0);
+        hist_be = hist_be0;
+        for (auto& e : hist_be) {
+            (e.kind == pwl::DevicePool::StoredKind::Capacitor ? e.i_prev : e.v_prev) = Real{0};
+        }
+        history.restore(hist_be);
+        history.update_from_state(xs, Real{2} * dt);
+    };
     bool post_event_pending = false;
     // Where the probe whose derivatives replaced the slots without a
     // commit reached (snapshot: x is then the pre-edge solve, the slots
@@ -2072,7 +2122,21 @@ inline SimulationResult run_transient_trbdf2(
             slots_only_t = t + dtp;   // where the unused probe reached
             return;
         }
-        history.update_from_state(x_trial, dtp);
+        // The probe is a trapezoidal step: on an excited mode with a time
+        // constant below dtp it rings, (1 - dtp/2tau)/(1 + dtp/2tau) -> -1.
+        // The PSFB's first freewheel edge left an OFF rectifier diode at
+        // -5.3 V where its slow value is +13 mV (tau = 0.87 fs, L against
+        // g_off, dtp = 15 tau), and every later decision there read the
+        // ring. Where the backward-Euler solve over the same dtp differs
+        // from the probe beyond the step tolerance, commit that solve
+        // (L-stable, 1/(1 + dtp/tau)) with its own derivative slots. The
+        // decision at the edge stays the trapezoidal probe's.
+        bool be_commit = false;
+        edge_be_committed = false;
+        be_commit = rings(m_probe, dtp, &x_trial);
+        if (be_commit) x_trial = ring_be;
+        edge_be_committed = be_commit;
+        update_history(x_trial, dtp, be_commit);
         hs.commit(x_trial, dtp, pwl::TrBdf2Stage::Trapezoidal);
         // The toggle is at the edge, not at the next step's start
         // (t + dtp): dtp differs per edge and biased gate_pulse_min.
@@ -2132,7 +2196,13 @@ inline SimulationResult run_transient_trbdf2(
     // Not at gate edges: there that transient is the physics.
     const bool be_events = !nl_effective && sdirk_possible;
     bool sdirk_event = false;   // the pending restart came from such an event
-    auto restart_ok = [&]() { return sdirk_ok || sdirk_event; };
+    // A turn-off whose jump is not instant on the trace still restarts
+    // with SDIRK(2,2): derivative-free and L-stable, where a TR-BDF2 step
+    // reads the pre-event slots and its trapezoidal stage rings an
+    // L*g_off mode (PSFB: v_D -4e5 V, D2/D3 back on). Its estimate is
+    // not filtered and nothing is recorded: the transient is the step's.
+    bool sdirk_raw = false;
+    auto restart_ok = [&]() { return sdirk_ok || sdirk_event || sdirk_raw; };
     // A diode with g_off > 0 turned off (an ideal branch-form diode leaves
     // no L*g_off mode; its entries re-initialise by D4).
     auto turned_off = [&](const std::vector<bool>& before) {
@@ -2229,6 +2299,23 @@ inline SimulationResult run_transient_trbdf2(
         }
     };
     auto record_post_event = [&]() {
+        // A post-event mode with a parasitic mode restarts with SDIRK(2,2)
+        // (derivative-free, L-stable) after a turn-on too: a TR-BDF2 step
+        // reads the pre-event slots and its trapezoidal stage rings it.
+        bool ring = false;
+        if (be_events && n_sdirk_diode > 0 && last_probe_ok) {
+            SwitchStateMask m_ring = has_diodes
+                ? switch_fn(t).overlay(diodes.current_diode_mask(),
+                                       diodes.diode_owned_bits())
+                : switch_fn(t);
+            settle_mode(m_ring);
+            ring = rings(m_ring, std::max(h_probe_floor, Real{1e-6} * h),
+                         nullptr);
+        }
+        if (ring && !sdirk_event) {
+            sdirk_raw = true;   // unfiltered estimate, no record
+            return;
+        }
         if (!restart_ok() || n_sdirk_diode == 0 || !last_probe_ok
             || !x_sig.allFinite()) {
             sdirk_event = false;   // the jump was not shown instant
@@ -2247,20 +2334,25 @@ inline SimulationResult run_transient_trbdf2(
             settle_mode(*m_rec);
             const Real dt_rec = std::max({h_min, Real{1e-4} * h,
                                           h_probe_learned});
-            bool instant = be_solve(*m_rec, dt_rec, x_rec)
-                           && be_solve(*m_rec, Real{2} * dt_rec, x_rec2);
-            for (Size i = 0; instant && i < entries.size(); ++i) {
-                const auto& e = entries[i];
-                const bool cap = e.kind == pwl::DevicePool::StoredKind::Capacitor;
-                const Real ya = cap ? entry_v(e, x_rec)
-                                    : x_rec[e.inductor_branch_var_id];
-                const Real yb = cap ? entry_v(e, x_rec2)
-                                    : x_rec2[e.inductor_branch_var_id];
-                instant = std::abs(ya - yb) <= opts.atol
-                    + opts.rtol * std::max(std::abs(ya), std::abs(yb));
-            }
+            auto instant_at = [&](Real dt) {
+                bool ok = be_solve(*m_rec, dt, x_rec)
+                          && be_solve(*m_rec, Real{2} * dt, x_rec2);
+                for (Size i = 0; ok && i < entries.size(); ++i) {
+                    const auto& e = entries[i];
+                    const bool cap = e.kind == pwl::DevicePool::StoredKind::Capacitor;
+                    const Real ya = cap ? entry_v(e, x_rec)
+                                        : x_rec[e.inductor_branch_var_id];
+                    const Real yb = cap ? entry_v(e, x_rec2)
+                                        : x_rec2[e.inductor_branch_var_id];
+                    ok = std::abs(ya - yb) <= opts.atol
+                        + opts.rtol * std::max(std::abs(ya), std::abs(yb));
+                }
+                return ok;
+            };
+            const bool instant = instant_at(dt_rec);
             if (!instant) {
-                sdirk_event = false;   // TR-BDF2 steps, no record
+                sdirk_event = false;   // no record; raw SDIRK if it rings
+                sdirk_raw = ring;
                 return;
             }
             tp = t + dt_rec;
@@ -2883,7 +2975,7 @@ inline SimulationResult run_transient_trbdf2(
             // Also inside the window after the chatter guard gave up: there
             // the raw estimate reads the L*g_off mode as error at any h (see
             // h_lo), and every step sat at h_chatter as a forced accept.
-            if ((opts.filter_error_estimate || (sdirk && sdirk_event && !reinit_step)
+            if ((opts.filter_error_estimate || (sdirk && (sdirk_event || sdirk_raw) && !reinit_step)
                  || t - chatter_exhaust_t <= Real{1e3} * h_chatter)
                 && !nl_effective
                 && !entries.empty()) {
@@ -3250,6 +3342,7 @@ inline SimulationResult run_transient_trbdf2(
                                      diodes.entries()[cross_idx]
                                          .is_on});
                                 ++st.n_diode_events;
+                                sdirk_raw = false;
                                 sdirk_event = sdirk_off_lin
                                     && turned_off(bits0);
                                 sdirk_left = n_sdirk_diode;
@@ -3475,6 +3568,7 @@ inline SimulationResult run_transient_trbdf2(
                         // exhausted refinement still lands with a solve
                         && tb - ta <= Real{2} * dt_floor;
                     bool land_ok = true;
+                    bool land_be = false;
                     if (interp_land) {
                         const Real th = sa_raw / (sa_raw - sb_raw);
                         const Real t_lin = ta + th * (tb - ta);
@@ -3493,6 +3587,10 @@ inline SimulationResult run_transient_trbdf2(
                         if (dt_land > t_lin - t) ++st.n_interp_floor_landings;
                     } else {
                         land_ok = trap_solve(mask_step, t, dt_land, x_trial);
+                        // A landing sub-step that rings a parasitic mode of
+                        // the pre-event mode is committed as BE (as an edge).
+                        land_be = land_ok && rings(mask_step, dt_land, &x_trial);
+                        if (land_be) x_trial = ring_be;
                     }
                     if (!land_ok) {
                         // Newton failed on the landing sub-step: x_trial
@@ -3519,7 +3617,7 @@ inline SimulationResult run_transient_trbdf2(
                               "pre-commutation mask is singular at "
                               "this step size");
                     }
-                    history.update_from_state(x_trial, dt_land);
+                    update_history(x_trial, dt_land, land_be);
                     // The stateful devices land here too. Only the
                     // linear companion history was committed at an
                     // event landing, so the Coss, Lauritzen, IGBT
@@ -3622,6 +3720,7 @@ inline SimulationResult run_transient_trbdf2(
                     gates_decided = mask_step;
                     if (net_flip) {
                         ++st.n_diode_events;
+                        sdirk_raw = false;
                         sdirk_event = sdirk_off_lin
                             && turned_off(bits_land);
                         sdirk_left = n_sdirk_diode;
@@ -3657,7 +3756,7 @@ inline SimulationResult run_transient_trbdf2(
                     history.restore(hist_s2);
                     history.update_from_state(x_1, hg);
                     if (sdirk_left > 0) --sdirk_left;
-                    if (sdirk_left == 0) sdirk_event = false;
+                    if (sdirk_left == 0) sdirk_event = sdirk_raw = false;
                     if (reinit_step) {
                         reinit_left = kReinitSteps - 1;
                         ++st.n_reinit_steps;
@@ -3779,6 +3878,12 @@ inline SimulationResult run_transient_trbdf2(
                     }
                     restart_after_gate_event(settled, t + h_probe,
                                              h_probe, /*commit=*/true);
+                    // Its slots hold the fs mode's BE derivative: the next step is
+                    // the derivative-free L-stable SDIRK(2,2) restart.
+                    if (edge_be_committed) {
+                        sdirk_raw = true;
+                        sdirk_left = n_sdirk_diode;
+                    }
                     // Post-edge restart: use the h remembered for
                     // this edge PARITY (rising/falling alternate);
                     // first cycle keeps the controller's h.
@@ -3817,6 +3922,12 @@ inline SimulationResult run_transient_trbdf2(
                             std::max(h_probe_floor, h_done * Real{1e-6});
                         restart_after_gate_event(false, t + hp, hp,
                                                  /*commit=*/true);
+                        // Its slots hold the fs mode's BE derivative: the next step is
+                        // the derivative-free L-stable SDIRK(2,2) restart.
+                        if (edge_be_committed) {
+                            sdirk_raw = true;
+                            sdirk_left = n_sdirk_diode;
+                        }
                     } else if (pending_gate_slot >= 0 && !reinit_step) {
                         // Not from the re-init step: its estimate skips the
                         // dependent states, so its proposal (5x when all
