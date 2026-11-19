@@ -46,8 +46,8 @@ def _dc_diode(form):
 def test_thermal_summary_applies_the_conduction_model_closed_form(form):
     b, res = _dc_diode(form)
     # 10 V into 1 mOhm (g_on = 1e3, V_th = 0) + 1 Ohm: a constant current
-    I = 10.0 / (1.0 + 1e-3)
-    P = COND["V_f0"] * I + COND["r_on"] * I * I          # V_f0*I_avg + r_on*I_rms^2
+    i_d = 10.0 / (1.0 + 1e-3)
+    P = COND["V_f0"] * i_d + COND["r_on"] * i_d * i_d         # V_f0*I_avg + r_on*I_rms^2
     R_th = 2.0
     th = _quiet(lambda: p.device_thermal_summary(
         b, res, thermal_specs={"D": {"stages": [p.FosterStage(R_th, 1e-9)]}},

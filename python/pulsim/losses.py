@@ -543,6 +543,15 @@ def _conduction_model_energy(times: np.ndarray, i_arr: np.ndarray,
                      times, i_arr, i_arr, i_start, i_start))
 
 
+def conduction_power_avg(entry: Mapping[str, Any]) -> float:
+    """A device's average conduction loss from its
+    :func:`device_loss_summary` entry: the ``conduction_specs`` model where
+    one was applied (``P_cond_model_avg``), else the solved ``P_avg`` (0 for
+    an inductor). The ONE reading both summaries use, so they cannot
+    disagree (release finding F-2-1)."""
+    return float(entry.get("P_cond_model_avg", entry.get("P_avg", 0.0)))
+
+
 def _interp_energy_curve(x_query, curve) -> np.ndarray:
     """Interpolate a datasheet switching-energy curve ``E(I)``.
 
@@ -2216,6 +2225,11 @@ def device_loss_summary(
             rd_s = _kmod.static_device_readings(builder.graph, builder.pool,
                                                 states_s, int(bid))
             if rd is None or rd_s is None or nodes[0] is None or nodes[1] is None:
+                warnings.warn(
+                    f"device_loss_summary: {name!r} ({kind}) is left out: its "
+                    "current needs a stored charge (an IGBT tail). Put a 1 mOhm "
+                    "resistor in series and read its v*i.", RuntimeWarning,
+                    stacklevel=2)
                 continue
             v_D, v_D_s = win.cont(_branch_v(states, nodes), _branch_v(states_s, nodes))
             i_D, i_D_s = win.cont(np.asarray(rd[0], float), np.asarray(rd_s[0], float))
@@ -2366,8 +2380,13 @@ def device_loss_summary(
             if switch_fn is None and not (
                     kernel_masks is not None
                     and 0 <= sw_bit < kernel_masks.shape[1]):
-                # Honest skip — no recorded mask and no switch_fn: no
-                # way to know the per-step state.
+                # No recorded mask and no switch_fn: no way to know the
+                # per-step state.
+                warnings.warn(
+                    f"device_loss_summary: switch {name!r} is left out: the "
+                    "result carries no record of the stamped switch mask and "
+                    "switch_fn= was not given (pass the callable used in "
+                    "simulate()).", RuntimeWarning, stacklevel=2)
                 switch_seq_idx += 1
                 continue
             nodes = desc.get("nodes", (None, None))
