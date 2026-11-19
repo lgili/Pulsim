@@ -443,6 +443,8 @@ public:
                 solve(rho, d);
                 const Real dn = d.cwiseAbs().maxCoeff();
                 if (!(dn < Real{0.5} * last)) break;   // stalled: keep what we have
+                // a second, smaller correction shows the iteration contracts
+                if (it > 0) converged = true;
                 last = dn;
                 for (Eigen::Index i = 0; i < na; ++i) {  // (hi, lo) += d
                     const Real t = hi[i] + d[i];
@@ -457,7 +459,7 @@ public:
                     break;
                 }
             }
-            if (!converged) {   // never trade the plain column for an unconverged one
+            if (!converged) {   // never trade the plain column for a non-contracting one
                 hi = plain;
                 lo.setZero(na);
             }
