@@ -542,9 +542,9 @@ class CircuitBuilder:
         ``{name}.th`` from the speed node into a 1 F capacitor ``{name}.ct``,
         so ``v(theta_node) = ∫ω dt`` (starting at 0).
         """
-    def add_diode(self, name: str, anode: str, cathode: str, g_on: float | None = None, g_off: float | None = None, V_th: float = 0.0, V_f: float = 0.0, *, form: str = 'conductance', R_on: float | None = None) -> CircuitBuilder:
+    def add_diode(self, name: str, anode: str, cathode: str, g_on: float | None = None, g_off: float | None = None, V_th: float = 0.0, V_f: float = 0.0, *, form: str = 'branch', R_on: float | None = None) -> CircuitBuilder:
         """
-        Add a binary switched diode (V2's SwitchedDiode). g_on/g_off in siemens. V_f: forward drop while ON (PSIM's diode voltage drop), in volts: v = V_f + i/g_on; must be finite and >= 0. V_th: turn-on threshold in volts, effectively max(V_th, V_f) when V_f > 0; V_th > V_f is a hysteresis band. OFF is plain g_off.
+        Add a binary switched diode (V2's SwitchedDiode). form='branch' (default since the number-changing release): R_on (default 0; a given g_on means R_on = 1/g_on) and g_off (default 0); form='conductance' (the pre-release default): g_on/g_off in siemens, both required. V_f: forward drop while ON (PSIM's diode voltage drop), in volts: v = V_f + i/g_on; must be finite and >= 0. V_th: turn-on threshold in volts, effectively max(V_th, V_f) when V_f > 0; V_th > V_f is a hysteresis band. OFF is plain g_off.
         """
     def add_external_device(self, name: str, nodes: collections.abc.Sequence[str], lib: str, model: str, params: typing.Any = None, *, check_contract: bool = True, debug_jacobian: bool = False, record: bool = False) -> CircuitBuilder:
         """
@@ -724,9 +724,9 @@ class CircuitBuilder:
         """
         Add a sinusoidal AC voltage source. Output is v_dc + v_amplitude·sin(2π·f·t + φ). `phase` is in RADIANS. The time-varying value is automatically overlaid by run_transient — no b_extra_fn lambda needed. Used for AC mains analysis, rectifier studies, audio-amp testing.
         """
-    def add_switch(self, name: str, n_pos: str, n_neg: str, g_on: float | None = None, g_off: float | None = None, *, form: str = 'conductance', R_on: float | None = None) -> CircuitBuilder:
+    def add_switch(self, name: str, n_pos: str, n_neg: str, g_on: float | None = None, g_off: float | None = None, *, form: str = 'branch', R_on: float | None = None) -> CircuitBuilder:
         """
-        Add a controlled switch (driven by switch_fn at simulation time). form='conductance' (default): g_on/g_off in siemens, both required. form='branch': its own current unknown, R_on >= 0 in series when closed (default 0 = ideal; a given g_on means R_on = 1/g_on), g_off >= 0 when open (default 0) — the same element as add_ideal_switch.
+        Add a controlled switch (driven by switch_fn at simulation time). form='branch' (default since the number-changing release): its own current unknown, R_on >= 0 in series when closed (default 0 = ideal; a given g_on means R_on = 1/g_on), g_off >= 0 when open (default 0) — the same element as add_ideal_switch. form='conductance' (the pre-release default): g_on/g_off in siemens, both required.
         """
     def add_thyristor(self, name: str, anode: str, cathode: str, R_on: float = 0.001, R_off: float = 1000000000.0, *, V_f: float = 0.0, I_H: float = 0.0, V_th: float = 0.0) -> CircuitBuilder:
         """

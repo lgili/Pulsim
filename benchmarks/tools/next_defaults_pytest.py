@@ -1,33 +1,21 @@
-"""Pytest plugin: the blast radius of the next-defaults profile on the suite.
+"""Pytest plugin: the number-changing release's no-op check and failure classifier.
 
     PYTHONPATH=python:benchmarks/tools python3 -m pytest python/tests -p next_defaults_pytest
 
-No library or test edit. For the whole session it
-(1) wraps ``pulsim.simulate`` so that every call gets the profile's keywords
-    for the engine it lands on, only where the call did not set them (the
-    restart rule and the step split instead set the library's own defaults,
-    ``pulsim._plan.DEFAULT_*``, which ``simulate()`` resolves per run; the
-    ``PLAN`` attributes of next_defaults.py are set the same way);
-    ``engine='auto'`` without ``dt`` takes the release route, approximated
-    as: trbdf2 when the exact engine cannot take the circuit structurally (a
-    Newton device, a ``b_extra_fn``), else the exact engine, and trbdf2 when
-    that run refuses by name (D11's per-segment rule approximated by the whole
-    run; a refusal raised mid-run repeats the run's side effects on trbdf2);
-    with ``dt`` (or a YAML that sets one) it is pwl. A ``solver=`` bundle's
-    fields count as set;
-(2) builds ``add_switch`` / ``add_diode`` in the branch form when the call
-    names no ``form`` (a given ``g_on`` means ``R_on = 1/g_on``; an unset value
-    takes the branch form's own default); YAML / IR-lowered circuits are not
-    reached (their digests then differ from a patched builder's);
-then classifies every failure and writes ``.scratch/rehearsal/pytest_profile.json``
-(read by ``next_defaults_rehearsal.py render``). Calls made inside pulsim go
-through the wrapper too (the release default would reach them as well).
+Before the release this plugin injected the candidate "next defaults" profile
+into every ``simulate()`` call (keywords per engine, the ``engine='auto'``
+route, branch-form ``add_switch`` / ``add_diode``) to measure its blast radius.
+Since the release (update-number-changing-release R1) that profile IS the
+library default, so the plugin injects nothing: at configure time it asserts
+``next_defaults.check_current()`` is empty (the flip is the profile; a
+mismatch aborts the session), and a run with it equals a run without it. It
+still classifies every failure and writes
+``.scratch/rehearsal/pytest_profile.json`` (the input of the R2 bucket map).
 """
 
 from __future__ import annotations
 
 import collections
-import functools
 import json
 import re
 from pathlib import Path
@@ -39,100 +27,13 @@ _STATS = collections.Counter()
 _FAILS: list = []
 
 
-# Options whose default the library resolves itself (pulsim._plan): the
-# profile sets the library default instead of the keyword, so the split
-# follows the rule and mmc_arms turns the rule's default off, as at the release.
-LIBRARY_DEFAULTS = {"discontinuity_restart": "DEFAULT_DISCONTINUITY_RESTART",
-                    "enable_substep_state_correction": "DEFAULT_SUBSTEP_STATE_CORRECTION"}
-
-
-def _inject(eng, kw):
-    """The profile for ``eng`` on the keywords the call left unset, a ``solver=``
-    bundle included (simulate() reads a bundle field only when the keyword is None)."""
-    solver = kw.get("solver")
-    prof = {k: v for k, v in nd.profile_kwargs(eng).items() if k not in LIBRARY_DEFAULTS}
-    set_by_bundle = {k for k in prof
-                     if solver is not None and getattr(solver, k, None) is not None}
-    return {**{k: v for k, v in prof.items() if k not in set_by_bundle}, **kw}
-
-
-def _exact_structurally(pulsim, b, kw):
-    """False when the exact engine cannot take the circuit at all (a Newton
-    device, a user source function): decided before any run, no side effect."""
-    if kw.get("b_extra_fn") is not None:
-        return False
-    try:
-        if isinstance(b, pulsim.Circuit):
-            b = b.to_builder()
-        pulsim._pulsim._require_supported(b.graph, b.pool, "exact")
-    except pulsim.UnsupportedError:
-        return False
-    except Exception:  # noqa: BLE001 - a stand-in object: let the run decide
-        return True
-    return True
-
-
-def _route_kwargs(pulsim, args, kw):
-    eng = nd.engine_key(kw.get("engine", "auto"))
-    if eng != "auto":
-        return [(eng, _inject(eng, kw))]
-    dt = args[2] if len(args) > 2 else kw.get("dt")
-    b = args[0] if args else kw.get("builder")
-    if dt is None and isinstance(b, pulsim.LoadedCircuit):
-        try:
-            dt = pulsim._resolve_loaded_circuit(b, kw.get("t_end", args[1] if len(args) > 1 else None),
-                                                None, 0.0, None)[2]
-        except Exception:  # noqa: BLE001 - leave the call to raise its own error
-            dt = None
-        b = getattr(b, "builder", b)
-    if dt:
-        return [("pwl", _inject("pwl", {**kw, "engine": "pwl"}))]
-    trb = ("trbdf2", _inject("trbdf2", {**kw, "engine": "trbdf2"}))
-    if not _exact_structurally(pulsim, b, kw):
-        return [trb]
-    return [("dsed", _inject("dsed", {**kw, "engine": "dsed"})), trb]
-
-
 def _install():
-    import pulsim
-    from pulsim import _plan
-    for k, attr in LIBRARY_DEFAULTS.items():
-        setattr(_plan, attr, nd.PROFILE["pwl"][k].value)
-    for attr, entry in nd.PLAN.items():     # undriven='refuse', the uniform rules
-        setattr(_plan, attr, entry.value)
-    orig = pulsim.simulate
-
-    @functools.wraps(orig)
-    def simulate(*args, **kw):
-        routes = _route_kwargs(pulsim, args, kw)
-        for i, (eng, k) in enumerate(routes):
-            try:
-                out = orig(*args, **k)
-                _STATS[f"applied:{eng}"] += 1
-                return out
-            except pulsim.UnsupportedError:
-                if i == len(routes) - 1:
-                    raise
-                _STATS["auto: exact refused -> trbdf2"] += 1
-    pulsim.simulate = simulate
-
-    cb = pulsim.CircuitBuilder
-    sw, di = cb.add_switch, cb.add_diode
-
-    def add_switch(self, name, a, b, g_on=None, g_off=None, **k):
-        if "form" in k:
-            return sw(self, name, a, b, g_on, g_off, **k)
-        _STATS["branch:add_switch"] += 1
-        return sw(self, name, a, b, g_on, g_off, form="branch", **k)
-
-    def add_diode(self, name, a, c, g_on=None, g_off=None, V_th=0.0, V_f=0.0, **k):
-        if "form" in k:
-            return di(self, name, a, c, g_on, g_off, V_th, V_f, **k)
-        _STATS["branch:add_diode"] += 1
-        if g_on is not None and k.get("R_on") is None:
-            k["R_on"] = 1.0 / g_on
-        return di(self, name, a, c, None, g_off, V_th, V_f, form="branch", **k)
-    cb.add_switch, cb.add_diode = add_switch, add_diode
+    bad = nd.check_current()
+    if bad:
+        import pytest
+        raise pytest.UsageError("next_defaults_pytest: the library defaults are not the "
+                                "release profile:\n  " + "\n  ".join(bad))
+    _STATS["profile == library defaults"] += 1
 
 
 def classify(text: str) -> str:
@@ -183,7 +84,17 @@ def pytest_runtest_logreport(report):
         text = str(report.longrepr)
         last = [ln for ln in text.splitlines() if ln.startswith("E ")]
         msg = "\n".join(last[:4]) or (text.splitlines()[-1] if text else "")
-        _FAILS.append(dict(nodeid=report.nodeid, when=report.when, msg=msg[:600]))
+        # the files the traceback passes through (a shared helper or conftest
+        # that needs changing belongs to bucket 0 of the R2 map)
+        entries = getattr(getattr(report.longrepr, "reprtraceback", None), "reprentries", None) or []
+        paths = []
+        for e in entries:
+            loc = getattr(getattr(e, "reprfileloc", None), "path", None)
+            if loc and loc not in paths:
+                paths.append(str(loc))
+        crash = getattr(report.longrepr, "reprcrash", None)
+        _FAILS.append(dict(nodeid=report.nodeid, when=report.when, msg=msg[:600], tb=paths[:12],
+                           crash=f"{crash.path}:{crash.lineno}" if crash else ""))
 
 
 def pytest_sessionfinish(session, exitstatus):

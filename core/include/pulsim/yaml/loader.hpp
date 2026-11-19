@@ -74,6 +74,11 @@
 
 namespace pulsim::yaml {
 
+/// update-number-changing-release: the `form` of a `switch` / `diode` that
+/// names none (the branch form; `form: conductance` builds the pre-release
+/// element). MOSFET / IGBT types keep their own default.
+inline constexpr const char* kDefaultSwitchForm = "branch";
+
 /// Result type: a populated builder + simulation options.
 struct LoadedCircuit {
     builder::CircuitBuilder    builder;
@@ -99,6 +104,10 @@ struct LoadOptions {
     /// Where a relative `lib:` is taken from (the YAML file's folder for
     /// `load_file`; the working directory for `load_string`).
     std::string base_dir;
+    /// The `form` of a `switch` / `diode` that names none: "branch" (the
+    /// default since the number-changing release) or "conductance" (the
+    /// pre-release netlist meaning, for the legacy period).
+    std::string default_switch_form{kDefaultSwitchForm};
 };
 
 namespace detail {
@@ -107,6 +116,12 @@ namespace detail {
 /// reached by `load_device` at any nesting (subsystems) without threading
 /// them through every loader signature.
 inline thread_local const LoadOptions* tl_load_options = nullptr;
+
+/// The form a `switch` / `diode` without `form:` builds (LoadOptions).
+[[nodiscard]] inline std::string default_switch_form() {
+    return tl_load_options ? tl_load_options->default_switch_form
+                           : std::string{kDefaultSwitchForm};
+}
 
 [[nodiscard]] inline std::string device_label(
     const YAML::Node& dev, std::size_t idx,
@@ -884,7 +899,7 @@ inline void load_device(
             b.add_current_source(name + ".tl", "gnd", omega, T_load);
         }
     } else if (type == "diode" &&
-               string_or(dev, "form", "conductance") == "branch") {
+               string_or(dev, "form", default_switch_form()) == "branch") {
         // add-branch-form-ideal-switch: `form: branch` (R_on, g_off
         // default 0 = ideal; a given g_on means R_on = 1/g_on).
         b.add_diode_branch(
@@ -934,7 +949,7 @@ inline void load_device(
             require_string(dev, idx, type, "cathode"),
             p);
     } else if (type == "switch" &&
-               string_or(dev, "form", "conductance") == "branch") {
+               string_or(dev, "form", default_switch_form()) == "branch") {
         b.add_ideal_switch(
             name,
             require_string(dev, idx, type, "from"),

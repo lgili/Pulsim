@@ -560,6 +560,7 @@ def run_dsed_from_builder(
     output_rtol: Optional[float] = None,
     undriven: Optional[str] = None,
     mode_auto: Optional[dict] = None,
+    output_rtol_explicit: bool = True,
 ):
     """Run a PED simulation from a :class:`pulsim.CircuitBuilder`.
 
@@ -681,6 +682,8 @@ def run_dsed_from_builder(
     # update-number-changing-release: the output-grid rule cuts the
     # event-driven integrator's exact steps; 'auto' becomes 'rk45' as for
     # diodes (the exact segments are the same propagator), 'bdf2' refuses.
+    if output_rtol and integrator == "bdf2" and not output_rtol_explicit:
+        output_rtol = None   # the release default: the old samples where it cannot act
     if output_rtol:
         if integrator == "bdf2":
             raise unsupported(
@@ -1025,7 +1028,7 @@ def run_dsed_from_builder(
             "simulate(engine='dsed'): control ticks run on the native adapter "
             "only, which is not available for this circuit. Use engine='pwl' "
             "or 'trbdf2'.")
-    if output_rtol:
+    if output_rtol and output_rtol_explicit:
         raise unsupported(
             "dsed", "output_rtol", message=
             "simulate(engine='dsed', output_rtol=...): the output-grid rule runs "

@@ -151,17 +151,24 @@ def golden_cases():
         yield name, fn
 
 
+# The fixed-engine configurations this tool records (the pre-release names of
+# reference_status; run them under next_defaults.legacy() for the old meaning).
+CONFIGS = {"pwl": ("pwl", {}), "pwl+restart": ("pwl", {"discontinuity_restart": True}),
+           "pwl+split": ("pwl", {"discontinuity_restart": True,
+                                 "enable_substep_state_correction": True})}
+
+
 def reference_cases(patterns, configs):
     sys.path[:0] = [str(Path(__file__).resolve().parent), str(ROOT)]
     import differential_runner as dr  # noqa: PLC0415
-    import reference_status as rs  # noqa: PLC0415
+    import reference_status as rs  # noqa: PLC0415  (extra_kwargs)
     import v1_reader  # noqa: PLC0415
     for rel, entry in sorted(dr.load_triage().items()):
         if entry["status"] != "runs" or not any(fnmatch.fnmatch(rel, p) for p in patterns):
             continue
         case = v1_reader.load(ROOT / rel)
         for cfg in configs:
-            eng, kw = rs.CONFIGS[cfg]
+            eng, kw = CONFIGS[cfg]
 
             def fn(case=case, eng=eng, kw=kw):
                 with rs.extra_kwargs(kw):

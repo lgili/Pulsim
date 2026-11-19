@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
-"""The candidate "next defaults" profile of the number-changing release, as data.
+"""The defaults of the number-changing release, as data: legacy -> current.
 
-    next_defaults.py --list        # print the table (option, value, engine, owner)
+    next_defaults.py --list        # print the table (option, current, legacy, engine, owner)
 
-Nothing here changes a library default: the profile is applied by a harness
-(``apply_profile`` to a ``simulate()`` call's keywords, ``builder_form`` to the
-builder calls) and only to keywords the caller did not set. Each entry names the
-OpenSpec change and the decision that owns it (CORE_ROADMAP decision 3: one
-release flips them all).
+Since the release (update-number-changing-release R1) ``PROFILE`` / ``PLAN`` /
+``BUILDER`` / ``ROUTE`` are the LIBRARY DEFAULTS (``check_current()`` proves it:
+an empty list); each entry names the OpenSpec change and decision that owns it
+and the explicit value that restores the pre-release behaviour (``legacy``).
+
+``LEGACY`` is the harness profile of the legacy period: the explicit options
+that reproduce the pre-release numbers (``legacy_kwargs`` / ``install_legacy``:
+every ``simulate()`` call gets them where it did not set the keyword,
+``engine='auto'`` becomes the pre-release route, ``add_switch`` /
+``add_diode`` build the conductance form). The old goldens stay checkable
+with it. Before the release ``apply_profile`` / ``builder_form`` /
+``plan_defaults`` injected the then-candidate profile; they still do (now
+redundant with the defaults, kept for the rehearsal tool).
 
 ``form='branch'`` is not a ``simulate()`` keyword: it is a builder-time choice.
 The harness applies it by patching ``CircuitBuilder.add_switch`` /
@@ -109,7 +117,9 @@ BUILDER = {"form": Entry("branch", "add-branch-form-ideal-switch",
 
 # engine='auto' under the profile: the route the release gives (not a keyword).
 ROUTE = Entry(
-    "exact if every segment is exact (exact_route), else trbdf2; an explicit dt -> pwl",
+    "without dt: exact if the kernel's exact capability table takes every device, no "
+    "b_extra_fn and no keyword the exact engine refuses, else trbdf2 (and trbdf2 when the "
+    "exact run refuses by name); an explicit dt -> pwl",
     "add-exact-propagator-strategy",
     "D11 + 'Route report and the default-flip gate' (2026-11-18); task 19.1 (open)",
     "auto")
@@ -133,6 +143,115 @@ NOT_APPLIED = (
      "DECISIONS 26.3: kept per engine (they need the fixed engine's own cache / per-step "
      "ring); every other engine refuses them by name (option table)"),
 )
+
+
+# The legacy period (one release): per engine the explicit simulate() keywords
+# that restore the pre-release behaviour of every flipped default. undriven:
+# the old per-engine behaviour (pwl / exact ran undriven switches CLOSED with a
+# warning, trbdf2 refused); output_rtol=0 is the rule's explicit off.
+LEGACY = {
+    "pwl": {"discontinuity_restart": False, "enable_substep_state_correction": False,
+            "mode_selection": "legacy",
+            "control_tick": "label", "device_path": "legacy", "undriven": "closed"},
+    "trbdf2": {"mode_selection": "legacy", "control_tick": "label",
+               "device_path": "legacy", "undriven": "refuse"},
+    "dsed": {"mode_selection": "legacy", "control_tick": "label", "output_rtol": 0,
+             "undriven": "closed"},
+}
+LEGACY_BUILDER = {"form": "conductance"}        # add_switch / add_diode (YAML: `form: conductance`)
+LEGACY_YAML = {"switch_form": "conductance"}    # load_yaml_file / load_yaml_string: a netlist's default
+# No keyword: the uniform rules change only refusal order and messages.
+LEGACY_PLAN = {"UNIFORM_ENGINE_RULES": False}
+
+
+def legacy_route(dt) -> str:
+    """The pre-release ``engine='auto'``: pwl with a dt, else trbdf2."""
+    return "pwl" if dt else "trbdf2"
+
+
+def legacy_kwargs(engine: str) -> dict:
+    return dict(LEGACY.get(engine_key(engine), {}))
+
+
+@contextlib.contextmanager
+def legacy():
+    """The legacy profile for the duration: every ``pulsim.simulate`` call takes
+    ``LEGACY`` for its engine where it did not set the keyword (``engine='auto'``
+    first takes ``legacy_route``; a ``solver=`` bundle's set fields count as
+    set), ``add_switch`` / ``add_diode`` without ``form`` build the conductance
+    form, YAML netlists load with ``LEGACY_YAML``, ``LEGACY_PLAN`` is set.
+    Restored after."""
+    import pulsim
+    from pulsim import _plan
+    orig, cb = pulsim.simulate, pulsim.CircuitBuilder
+    sw, di = cb.add_switch, cb.add_diode
+    old_plan = {k: getattr(_plan, k) for k in LEGACY_PLAN}
+
+    def simulate(*args, **kw):
+        eng = kw.get("engine", "auto")
+        if eng == "auto":
+            dt = args[1] if len(args) > 1 else kw.get("dt")
+            b = args[0] if args else kw.get("builder")
+            if dt is None and isinstance(b, pulsim.LoadedCircuit):
+                dt = b.options.dt or None
+            eng = kw["engine"] = legacy_route(dt)
+        solver = kw.get("solver")
+        add = {k: v for k, v in legacy_kwargs(eng).items()
+               if k not in kw and not (solver is not None and getattr(solver, k, None) is not None)}
+        return orig(*args, **add, **kw)
+
+    def add_switch(self, *a, **k):
+        k.setdefault("form", LEGACY_BUILDER["form"])
+        return sw(self, *a, **k)
+
+    def add_diode(self, *a, **k):
+        k.setdefault("form", LEGACY_BUILDER["form"])
+        return di(self, *a, **k)
+    yf, ys = pulsim.load_yaml_file, pulsim.load_yaml_string
+
+    def load_yaml_file(*a, **k):
+        return yf(*a, **{**LEGACY_YAML, **k})
+
+    def load_yaml_string(*a, **k):
+        return ys(*a, **{**LEGACY_YAML, **k})
+    pulsim.simulate, cb.add_switch, cb.add_diode = simulate, add_switch, add_diode
+    pulsim.load_yaml_file, pulsim.load_yaml_string = load_yaml_file, load_yaml_string
+    for k, v in LEGACY_PLAN.items():
+        setattr(_plan, k, v)
+    try:
+        yield
+    finally:
+        pulsim.simulate, cb.add_switch, cb.add_diode = orig, sw, di
+        pulsim.load_yaml_file, pulsim.load_yaml_string = yf, ys
+        for k, v in old_plan.items():
+            setattr(_plan, k, v)
+
+
+def check_current() -> list:
+    """The release is the profile: every PROFILE / PLAN / BUILDER entry is the
+    library's default. Returns the mismatches (empty = the flip is the profile)."""
+    import inspect
+
+    import pulsim
+    from pulsim import _plan
+    sig = inspect.signature(pulsim.simulate).parameters
+    resolved = {  # keyword -> the value simulate() runs with when the call leaves it unset
+        "discontinuity_restart": _plan.DEFAULT_DISCONTINUITY_RESTART,
+        "enable_substep_state_correction": _plan.DEFAULT_SUBSTEP_STATE_CORRECTION,
+        "mode_selection": _plan.DEFAULT_MODE_SELECTION,
+        "device_path": _plan.DEFAULT_DEVICE_PATH,
+        "output_rtol": _plan.DEFAULT_OUTPUT_RTOL,
+        "control_tick": sig["control_tick"].default,
+    }
+    bad = [f"{eng}.{k}: library {resolved.get(k)!r} != profile {e.value!r}"
+           for eng, rows in PROFILE.items() for k, e in rows.items() if resolved.get(k) != e.value]
+    bad += [f"_plan.{k}: library {getattr(_plan, k)!r} != profile {e.value!r}"
+            for k, e in PLAN.items() if getattr(_plan, k) != e.value]
+    for meth in ("add_switch", "add_diode"):
+        doc = getattr(pulsim.CircuitBuilder, meth).__doc__ or ""
+        if f"form: str = '{BUILDER['form'].value}'" not in doc:
+            bad.append(f"CircuitBuilder.{meth}: default form is not {BUILDER['form'].value!r}")
+    return bad
 
 
 def engine_key(engine: str) -> str:
@@ -193,9 +312,15 @@ def main(argv=None) -> int:
     if not args.list:
         ap.print_help()
         return 0
-    print("| engine | option | value | change | decision |\n|---|---|---|---|---|")
+    print("| engine | option | current | legacy (explicit) | change | decision |\n"
+          "|---|---|---|---|---|---|")
     for eng, k, e in table():
-        print(f"| {eng} | `{k}` | `{e.value!r}` | `{e.change}` | {e.decision} |")
+        old = (LEGACY.get(eng, {}).get(k) if eng in LEGACY else LEGACY_BUILDER.get(k)
+               if k in LEGACY_BUILDER else "explicit engine=" if k == "route" else
+               LEGACY_PLAN.get(k.removeprefix("_plan."), "-"))
+        if k == "_plan.DEFAULT_UNDRIVEN":
+            old = "undriven= per engine (LEGACY)"
+        print(f"| {eng} | `{k}` | `{e.value!r}` | `{old!r}` | `{e.change}` | {e.decision} |")
     print("\nNot applied by the harness:\n")
     for eng, what, ch, why in NOT_APPLIED:
         print(f"- {eng}: {what} (`{ch}`): {why}")

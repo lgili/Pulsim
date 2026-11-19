@@ -104,8 +104,8 @@ engine accepts a keyword and ignores it. The defaults are
 | `enable_newton_line_search` | yes | yes | refused | False |
 | `enable_newton_lm` | yes | yes | refused | False |
 | `newton_roundoff_budget` | yes | yes | refused | 130 |
-| `enable_substep_state_correction` | yes | refused | refused | False |
-| `discontinuity_restart` | yes | refused | refused | False |
+| `enable_substep_state_correction` | yes | refused | refused | None (pwl: follows discontinuity_restart) |
+| `discontinuity_restart` | yes | refused | refused | None (pwl: True; not under mmc_arms) |
 | `resolution_diagnostics` | yes | refused | refused | False |
 | `on_impulse` | yes | yes | yes | 'record' |
 | `inductor_freeze_di_max` | yes | refused | refused | None (off) |
@@ -121,13 +121,13 @@ engine accepts a keyword and ignores it. The defaults are
 | `resume_from` | yes | yes | refused | None |
 | `solver` | yes | yes | yes | None |
 | `sensitivities` | refused | refused | yes | None |
-| `mode_selection` | yes | yes | yes | None ('legacy') |
+| `mode_selection` | yes | yes | yes | None ('auto') |
 | `allow_implicit_segments` | refused | refused | yes | None |
-| `undriven` | yes | yes | yes | None (each engine's own) |
+| `undriven` | yes | yes | yes | None ('refuse') |
 | `recorders` | yes | yes | yes | None |
-| `output_rtol` | refused | refused | yes | None (today's samples) |
-| `control_tick` | yes | yes | yes | 'label' |
-| `device_path` | yes | yes | refused | 'legacy' |
+| `output_rtol` | refused | refused | yes | None (1e-5 without dt; 0 = off) |
+| `control_tick` | yes | yes | yes | 'state' |
+| `device_path` | yes | yes | refused | None ('interface') |
 | `t_end` | yes | yes | yes | required |
 | `dt` | yes | yes | yes | None (pwl: required; trbdf2: kernel ceiling; exact: 1e-5) |
 <!-- option-capabilities:end -->

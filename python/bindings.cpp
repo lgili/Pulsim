@@ -96,6 +96,11 @@ using namespace pybind11::literals;  // for "name"_a kwarg shorthand
 
 namespace pulsim_kernel_bindings {
 
+// update-number-changing-release: THE default `form` of add_switch /
+// add_diode (the YAML loader's is yaml::kDefaultSwitchForm). The branch form
+// since the release; form='conductance' builds the pre-release element.
+inline constexpr const char* kDefaultSwitchForm = "branch";
+
 using pulsim_bindings_common::resolve_b_extra;
 
 /// The static Newton chain for a transient driver. The kernel always
@@ -1605,11 +1610,15 @@ void init_module(py::module_& m) {
               py::arg("cathode"), py::arg("g_on") = py::none(),
               py::arg("g_off") = py::none(), py::arg("V_th") = 0.0,
               py::arg("V_f") = 0.0, py::kw_only(),
-              py::arg("form") = "conductance",
+              py::arg("form") = kDefaultSwitchForm,
               py::arg("R_on") = py::none(),
               py::return_value_policy::reference,
               "Add a binary switched diode (V2's "
-              "SwitchedDiode). g_on/g_off in siemens. "
+              "SwitchedDiode). form='branch' (default since the "
+              "number-changing release): R_on (default 0; a given g_on "
+              "means R_on = 1/g_on) and g_off (default 0); "
+              "form='conductance' (the pre-release default): g_on/g_off "
+              "in siemens, both required. "
               "V_f: forward drop while ON (PSIM's diode voltage "
               "drop), in volts: v = V_f + i/g_on; must be finite "
               "and >= 0. V_th: turn-on threshold in volts, "
@@ -1667,15 +1676,16 @@ void init_module(py::module_& m) {
               py::arg("name"), py::arg("n_pos"),
               py::arg("n_neg"), py::arg("g_on") = py::none(),
               py::arg("g_off") = py::none(), py::kw_only(),
-              py::arg("form") = "conductance",
+              py::arg("form") = kDefaultSwitchForm,
               py::arg("R_on") = py::none(),
               py::return_value_policy::reference,
               "Add a controlled switch (driven by switch_fn at simulation "
-              "time). form='conductance' (default): g_on/g_off in siemens, "
-              "both required. form='branch': its own current unknown, "
-              "R_on >= 0 in series when closed (default 0 = ideal; a given "
-              "g_on means R_on = 1/g_on), g_off >= 0 when open (default 0) "
-              "— the same element as add_ideal_switch.")
+              "time). form='branch' (default since the number-changing "
+              "release): its own current unknown, R_on >= 0 in series when "
+              "closed (default 0 = ideal; a given g_on means R_on = 1/g_on), "
+              "g_off >= 0 when open (default 0) — the same element as "
+              "add_ideal_switch. form='conductance' (the pre-release "
+              "default): g_on/g_off in siemens, both required.")
         // ---- Layer 2 V1: power-device helpers ----
         .def("add_mosfet",
               &builder::CircuitBuilder::add_mosfet,
@@ -3935,13 +3945,28 @@ void init_module(py::module_& m) {
         for (const auto& e : a) o.allow_native_code.push_back(os.attr("fspath")(e).cast<std::string>());
         return o;
     };
+    // update-number-changing-release: `switch_form` is the form of a
+    // `switch` / `diode` that names none ('conductance' = the pre-release
+    // netlist meaning, for the legacy period).
+    auto load_options = [native_allow](const py::object& allow_native_code,
+                                       const std::string& switch_form) {
+        if (switch_form != "branch" && switch_form != "conductance") {
+            throw py::value_error("switch_form='" + switch_form
+                                  + "': expected 'branch' or 'conductance'");
+        }
+        auto o = native_allow(allow_native_code);
+        o.default_switch_form = switch_form;
+        return o;
+    };
     m.def("load_yaml_string",
-        [emit_load_warnings, native_allow](const std::string& yaml_text,
-                                           const py::object& allow_native_code) {
-            auto lc = yaml::load_string(yaml_text, native_allow(allow_native_code));
+        [emit_load_warnings, load_options](const std::string& yaml_text,
+                                           const py::object& allow_native_code,
+                                           const std::string& switch_form) {
+            auto lc = yaml::load_string(yaml_text, load_options(allow_native_code, switch_form));
             emit_load_warnings(lc);
             return lc;
         }, py::arg("yaml_text"), py::kw_only(), py::arg("allow_native_code") = py::none(),
+        py::arg("switch_form") = yaml::kDefaultSwitchForm,
         "Parse a YAML circuit description from an in-memory "
         "string. Returns LoadedCircuit(builder, options). Warns on "
         "unknown top-level / `circuit:` / `simulation:` keys; refuses "
@@ -3949,14 +3974,18 @@ void init_module(py::module_& m) {
         "`allow_native_code`: the shared libraries (paths or directories, "
         "symlinks followed) an `external_device` entry may load; without "
         "it every such entry is refused (a relative `lib:` is taken from "
-        "the working directory).");
+        "the working directory). `switch_form`: the form of a `switch` / "
+        "`diode` that names none ('branch', the default; 'conductance' "
+        "restores the pre-release meaning).");
     m.def("load_yaml_file",
-        [emit_load_warnings, native_allow](const std::string& path,
-                                           const py::object& allow_native_code) {
-            auto lc = yaml::load_file(path, native_allow(allow_native_code));
+        [emit_load_warnings, load_options](const std::string& path,
+                                           const py::object& allow_native_code,
+                                           const std::string& switch_form) {
+            auto lc = yaml::load_file(path, load_options(allow_native_code, switch_form));
             emit_load_warnings(lc);
             return lc;
         }, py::arg("path"), py::kw_only(), py::arg("allow_native_code") = py::none(),
+        py::arg("switch_form") = yaml::kDefaultSwitchForm,
         "Parse a YAML circuit description from disk. "
         "Returns LoadedCircuit(builder, options); errors and "
         "warnings name the path. Same key checks as "

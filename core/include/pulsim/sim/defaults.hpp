@@ -6,6 +6,7 @@
 // (through pulsim._pulsim.run_option_defaults()) and simulate() all read
 // them here; a test asserts they agree.
 
+#include "pulsim/device/device_path.hpp"
 #include "pulsim/numeric/types.hpp"
 
 namespace pulsim::sim {
@@ -35,6 +36,16 @@ struct Defaults {
     /// control_tick='state': a split edge moves by at most this many dt
     /// (G30; the driver's own default is 0.01).
     static constexpr Real split_snap_state = 1e-6;
+
+    // update-number-changing-release: the flipped defaults of a run (the
+    // old value of each stays reachable by an explicit option: RunOptions
+    // discontinuity_restart = false, control_tick_state = false,
+    // device_path = Legacy). mode_selection 'auto' is resolved by simulate()
+    // (the kernel has no 'auto' rule: RunOptions keeps Legacy = the settle).
+    static constexpr bool discontinuity_restart = true;
+    static constexpr bool substep_state_correction = true;
+    static constexpr bool control_tick_state = true;
+    static constexpr device::DevicePath device_path = device::DevicePath::Interface;
 };
 
 }  // namespace pulsim::sim

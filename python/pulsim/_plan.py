@@ -38,19 +38,32 @@ new = tuple.__new__
 # (enable_substep_state_correction), resolved in _plan_run when the call
 # leaves them None: the restart rule first (OFF under mmc_arms, with a
 # diagnostic), then the split, which defaults ON only where the rule is on.
-# False today; the number-changing release sets both True
-# (update-number-changing-release task 3.1).
-DEFAULT_DISCONTINUITY_RESTART = False
-DEFAULT_SUBSTEP_STATE_CORRECTION = False
+# True since the number-changing release (update-number-changing-release
+# task 3.1); discontinuity_restart=False restores the old fixed step.
+DEFAULT_DISCONTINUITY_RESTART = True
+DEFAULT_SUBSTEP_STATE_CORRECTION = True
+
+# THE run defaults the number-changing release flipped that simulate()
+# resolves when the call leaves the keyword None (one place: the plan).
+# mode_selection: 'auto' on every engine (mode_selection='legacy' restores
+# the settle); device_path: 'interface' on pwl / trbdf2 (device_path=
+# 'legacy' restores the hand stamps; the exact engine stamps its own);
+# output_rtol: the exact engine's output-grid rule where the engine picks
+# the samples (no dt / store_every / recorders / sensitivities, not
+# integrator='bdf2'); output_rtol=0 restores the 10 us default grid.
+DEFAULT_MODE_SELECTION = "auto"
+DEFAULT_DEVICE_PATH = "interface"
+DEFAULT_OUTPUT_RTOL = 1e-5
 
 # simulate(undriven=None): the policy for controlled switches nothing drives
 # (no switch_fn, no closed loop's gate), read only when the call leaves it
 # None. None = today's per-engine behaviour (pwl and the exact engine run
 # them all CLOSED with a warning; trbdf2 refuses them by name; 'auto' without
 # dt refuses, with dt it is pwl). 'refuse' | 'open' | 'closed' hold on every
-# engine and through 'auto'. The number-changing release sets 'refuse'
-# (add-kernel-simulation-object DECISIONS 26, task 11.3).
-DEFAULT_UNDRIVEN = None
+# engine and through 'auto'. 'refuse' since the number-changing release
+# (add-kernel-simulation-object DECISIONS 26, task 11.3); undriven='closed'
+# restores the old fixed-step / exact behaviour (without its warning).
+DEFAULT_UNDRIVEN = "refuse"
 
 # The engines' remaining position-dependent rules made uniform, one switch
 # (DECISIONS 26): the count checks (store_every, max_event_iterations,
@@ -58,8 +71,9 @@ DEFAULT_UNDRIVEN = None
 # the mmc_arms combinations; on_impulse='warn'/'error' refused by name where
 # the run cannot detect an impulse (the exact engine's integrator='bdf2');
 # the exact engine's impulse refusal names the device kind as the kernel's.
-# False today; True at the number-changing release.
-UNIFORM_ENGINE_RULES = False
+# True since the number-changing release (refusal order and messages only:
+# no number depends on it; False is the pre-release behaviour, no keyword).
+UNIFORM_ENGINE_RULES = True
 
 
 # plan.features: the keywords that put a feature in the run (set, not

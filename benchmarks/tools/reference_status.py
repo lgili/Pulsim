@@ -5,12 +5,16 @@ the analytic set per engine configuration.
     reference_status.py [--circuits GLOB,...] [--json out.json]
     reference_status.py --from-json out.json      # re-render only
 
-Configurations: ``pwl`` (defaults), ``pwl+restart``
-(``discontinuity_restart=True``), ``pwl+split`` (the rule and
-``enable_substep_state_correction=True``), ``trbdf2`` and ``dsed`` (harness
-defaults). Cells are classified exactly as differential_runner.py does,
-against one reference per circuit (computed once, without the flag).
-Text below the ``## Notes`` heading of the existing file is kept.
+Configurations (since the number-changing release): ``pwl``, ``trbdf2``,
+``dsed`` (the library defaults, netlist dt as the harness passes it) and
+``auto`` (``engine='auto'`` WITHOUT the netlist dt: the release route), then
+the legacy period's columns ``pwl@legacy``, ``pwl+restart@legacy``,
+``pwl+split@legacy``, ``trbdf2@legacy``, ``dsed@legacy``: the pre-release
+defaults reproduced by ``next_defaults.legacy()`` (explicit options), so the
+old counts stay checkable. Cells are classified exactly as
+differential_runner.py does, against one reference per circuit computed once
+under the legacy profile (the judge does not move with the defaults it
+judges). Text below the ``## Notes`` heading of the existing file is kept.
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ import yaml
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1])]
 import differential_runner as dr  # noqa: E402
 import metrics  # noqa: E402
+import next_defaults as nd  # noqa: E402
 import v1_reader  # noqa: E402
 from analytic import CASES  # noqa: E402
 
@@ -37,10 +42,37 @@ import pulsim  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "REFERENCE_STATUS.md"
 ANALYTIC = yaml.safe_load((ROOT / "manifests" / "analytic.yaml").read_text(encoding="utf-8"))["cases"]
-CONFIGS = {"pwl": ("pwl", {}), "pwl+restart": ("pwl", {"discontinuity_restart": True}),
-           "pwl+split": ("pwl", {"discontinuity_restart": True,
-                                 "enable_substep_state_correction": True}),
-           "trbdf2": ("trbdf2", {}), "dsed": ("dsed", {})}
+CONFIGS = {"pwl": ("pwl", {}), "trbdf2": ("trbdf2", {}), "dsed": ("dsed", {}),
+           "auto": ("auto", {}),
+           "pwl@legacy": ("pwl", {}), "pwl+restart@legacy": ("pwl", {"discontinuity_restart": True}),
+           "pwl+split@legacy": ("pwl", {"discontinuity_restart": True,
+                                        "enable_substep_state_correction": True}),
+           "trbdf2@legacy": ("trbdf2", {}), "dsed@legacy": ("dsed", {})}
+LEGACY = "@legacy"
+# 'auto' runs without the netlist dt (a script that passes none): no analytic row.
+ANALYTIC_CONFIGS = [k for k in CONFIGS if k != "auto"]
+
+
+def profile_of(cfg):
+    """The context a configuration runs in: the legacy profile or the defaults."""
+    return nd.legacy() if cfg.endswith(LEGACY) else contextlib.nullcontext()
+
+
+def run_cell(case, cfg):
+    """(kind, res, msg, engine landed on) of one differential cell."""
+    eng, kw = CONFIGS[cfg]
+    with profile_of(cfg), extra_kwargs(kw):
+        if eng != "auto":
+            kind, res, _, msg = dr.run_cell(case, eng)
+            return kind, res, msg, eng
+        import next_defaults_rehearsal as ndr
+        try:
+            res = ndr._no_dt_run(case, "auto")
+        except dr.REFUSAL as ex:
+            return "refused", None, f"{type(ex).__name__}: {ex}"[:300], "auto"
+        except Exception as ex:  # noqa: BLE001 - classified, never swallowed
+            return "error", None, f"{type(ex).__name__}: {ex}"[:300], "auto"
+        return "ran", res, None, dr._alias(res.engine_used)
 KINDS = ("agree", "disagree", "error", "refused", "unverified")
 
 
@@ -85,17 +117,21 @@ def differential(patterns):
                                          for k in ('"diode"', '"pwm"', '"pulse"'))
         cols = dr.observables_of(case)
         tols = {e: entry.get("tol", {}).get(e, dr.default_tol(e, switched)) for e in dr.ENGINES}
-        ref_name, ref = dr.reference(case, cols, min(tols.values()))
-        for cfg, (eng, kw) in CONFIGS.items():
-            with extra_kwargs(kw):
-                kind, res, _, msg = dr.run_cell(case, eng)
-            rec = dict(circuit=rel, config=cfg, reference=ref_name, tol=tols[eng], message=msg)
+        with nd.legacy():
+            ref_name, ref = dr.reference(case, cols, min(tols.values()))
+        for cfg in CONFIGS:
+            kind, res, msg, eng = run_cell(case, cfg)
+            tol = tols.get(eng, min(tols.values()))
+            rec = dict(circuit=rel, config=cfg, reference=ref_name, tol=tol, message=msg)
+            if cfg == "auto":
+                rec["engine_used"] = eng
             if kind != "ran":
                 rec["outcome"] = kind
             elif ref is None:
                 rec.update(outcome="error", message="no converged reference")
             else:
-                dr.classify(rec, res, case, cols, ref, tols[eng], case.dt if eng == "pwl" else None)
+                dr.classify(rec, res, case, cols, ref, tol,
+                            case.dt if eng == "pwl" and cfg != "auto" else None)
             out.append(_annotate(rec, entry))
             print(f"{rec['outcome']:9s} {cfg:12s} {rel} {rec.get('err_rms', '')}", flush=True)
     return out
@@ -104,12 +140,13 @@ def differential(patterns):
 def analytic():
     out = []
     for c in CASES:
-        for cfg, (eng, kw) in CONFIGS.items():
+        for cfg in ANALYTIC_CONFIGS:
+            eng, kw = CONFIGS[cfg]
             spec = ANALYTIC[c.id].get(eng, {})
             rec = dict(case=c.id, config=cfg, frozen=next(
                 (f"{k}: {spec[k]}" for k in ("ceiling", "known", "refused") if k in spec), ""))
             try:
-                with extra_kwargs(kw):
+                with profile_of(cfg), extra_kwargs(kw):
                     r = c.run(eng)
                 e = metrics.err_rms(np.asarray(r.times), c.observe(r), c.exact,
                                     abs_scale=c.abs_scale, exclude_t0=c.exclude_t0)
@@ -123,9 +160,9 @@ def analytic():
     return out
 
 
-def _counts(recs):
+def _counts(recs, configs=CONFIGS):
     rows = []
-    for cfg in CONFIGS:
+    for cfg in configs:
         n = [sum(r["config"] == cfg and r["outcome"] == k for r in recs) for k in KINDS]
         rows.append(f"| {cfg} | " + " | ".join(map(str, n)) + " |")
     return ["| configuration | " + " | ".join(KINDS) + " |", "|---|" + "---:|" * len(KINDS), *rows]
@@ -167,12 +204,15 @@ def render(diff, ana, notes):
          "is graded. Every configuration has its own `known:` freeze; a frozen `disagree`",
          f"fails when its err_rms grows past {dr.GROWTH:g}x the frozen `known_err:`.",
          "", f"## Differential matrix ({len(circuits)} circuits)", "", *_counts(diff), "",
-         "### Fixed engine: restart rule and split (circuits where any of the three does not agree)", "",
-         "| circuit | tol | pwl | pwl+restart | pwl+split |", "|---|---:|---:|---:|---:|"]
+         "### Fixed engine: the default against the legacy columns (circuits where any does not agree)",
+         "", "| circuit | tol | pwl | pwl@legacy | pwl+restart@legacy | pwl+split@legacy |",
+         "|---|---:|---:|---:|---:|---:|"]
+    fixed = ("pwl", "pwl@legacy", "pwl+restart@legacy", "pwl+split@legacy")
     for c in circuits:
-        a, b, sp = by[(c, "pwl")], by[(c, "pwl+restart")], by[(c, "pwl+split")]
-        if a["outcome"] != "agree" or b["outcome"] != "agree" or sp["outcome"] != "agree":
-            L.append(f"| {c.removeprefix('circuits/')} | {a['tol']:g} | {_e(a)} | {_e(b)} | {_e(sp)} |")
+        cells = [by[(c, k)] for k in fixed]
+        if any(r["outcome"] != "agree" for r in cells):
+            L.append(f"| {c.removeprefix('circuits/')} | {cells[0]['tol']:g} | "
+                     + " | ".join(_e(r) for r in cells) + " |")
     L += ["", "### Every cell that differs from its frozen `known:` entry (every configuration)", "",
           "| circuit | config | frozen | now | err_rms | why |", "|---|---|---|---|---:|---|"]
     for r in diff:
@@ -208,12 +248,13 @@ def render(diff, ana, notes):
     for c in circuits:
         L.append(f"| {c.removeprefix('circuits/')} | " + " | ".join(_e(by[(c, k)]) for k in CONFIGS) + " |")
     L += ["", f"## Analytic set ({len(CASES)} cases; agree = within the frozen ceiling, 1e-3 when none)",
-          "", *_counts(ana), "", "| case | " + " | ".join(CONFIGS) + " |", "|---|" + "---:|" * len(CONFIGS)]
+          "", *_counts(ana, ANALYTIC_CONFIGS), "", "| case | " + " | ".join(ANALYTIC_CONFIGS) + " |",
+          "|---|" + "---:|" * len(ANALYTIC_CONFIGS)]
     aby = {(r["case"], r["config"]): r for r in ana}
     for c in CASES:
         L.append(f"| {c.id} | " + " | ".join(
             f"{_e(aby[(c.id, k)])}{' ✗' if aby[(c.id, k)]['outcome'] in ('disagree', 'error') else ''}"
-            for k in CONFIGS) + " |")
+            for k in ANALYTIC_CONFIGS) + " |")
     return "\n".join(L) + "\n\n## Notes\n" + notes
 
 

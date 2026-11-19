@@ -230,7 +230,8 @@ void init_module(py::module_& m) {
             })
         .def_property("device_path",
             [](const RunOptions& o) {
-                return std::string(o.device_path == device::DevicePath::Interface
+                return std::string(o.device_path.value_or(sim::Defaults::device_path)
+                                       == device::DevicePath::Interface
                                        ? "interface" : "legacy");
             },
             [](RunOptions& o, const std::string& v) {

@@ -4,6 +4,35 @@ All notable changes to Pulsim are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased — defaults changed
+
+**BREAKING (numbers move).** The number-changing release (OpenSpec
+`update-number-changing-release`): every improvement that was behind an option
+defaulting OFF is now the default, all together. Every old behaviour stays
+reachable for one release (the legacy period) by an explicit value:
+
+| What | Old default | New default | Restores the old behaviour |
+|---|---|---|---|
+| Fixed-step engine (`pwl`): discontinuity restart rule | `False` | `True` (not applied under `mmc_arms`: a route reason says so) | `discontinuity_restart=False` |
+| Fixed-step engine: event step split | `False` | follows the restart rule (`True` with it) | `discontinuity_restart=False` (or `enable_substep_state_correction=False`) |
+| `add_switch` / `add_diode` model (Python builder, YAML `switch` / `diode`) | `form='conductance'` (`g_on` / `g_off` required) | `form='branch'` (`R_on` default 0, `g_off` default 0; a given `g_on` means `R_on = 1/g_on`) | `form='conductance'` (YAML: `form: conductance`) |
+| `mode_selection` (every engine) | `None` = the settle | `'auto'` (`'lcp'` where it applies; the settle elsewhere, reason in `diagnostics['mode_selection_auto']`) | `mode_selection='legacy'` |
+| `control_tick` | `'label'` | `'state'` | `control_tick='label'` |
+| `device_path` (`pwl`, `trbdf2`) | `'legacy'` (hand stamps) | `'interface'` (the unified device interface) | `device_path='legacy'` |
+| `engine='auto'` without `dt` | `trbdf2` (fixed-step blockers: a ValueError) | the exact engine when every device has an exact segment, no `b_extra_fn` and no keyword it refuses; `trbdf2` otherwise or when the exact run refuses by name (the refusal is the first route reason) | an explicit `engine='trbdf2'` |
+| `engine='auto'` with `dt` | `pwl` | `pwl` (unchanged) | — |
+| Exact engine without `dt` / `store_every` / recorders / sensitivities: output samples | one per 10 µs step cap | `output_rtol=1e-5`: every event instant plus a rule grid (linear interpolation within 1e-5 of each state's range); the integrator `'auto'` becomes `'rk45'` under the rule | `output_rtol=0` |
+| Controlled switches nothing drives (`undriven`) | `pwl` / exact: all CLOSED with a warning; `trbdf2`: refused | `'refuse'` on every engine (`UnsupportedError`, `feature='switch_fn'`, naming them) | `undriven='closed'` (fixed-step / exact behaviour, no warning) |
+| Count checks / `on_impulse` with the exact engine's `integrator='bdf2'` | per engine | one rule (`pulsim._plan.UNIFORM_ENGINE_RULES`): messages and refusal order only | no keyword (no number depends on it) |
+| Kernel `sim::RunOptions` (C++ / `pulsim.RunOptions`) | restart unset = off, `control_tick_state = false`, `device_path = Legacy` | `sim::Defaults`: restart on (split follows), `control_tick_state = true`, `device_path` unset = Interface | set the field explicitly |
+
+Not flipped: `integrator='esdirk43'` (opt-in), the TR-BDF2 step grid (its
+option does not exist yet), the MOSFET / IGBT helpers' own `form`, the kernel's
+`mode_selection` (`'auto'` is resolved by `simulate()`; `RunOptions` keeps the
+settle). The harness's `legacy` profile (`benchmarks/tools/next_defaults.py`
+`legacy()`) reproduces the pre-release numbers through the explicit values
+above.
+
 ## [Unreleased]
 
 ### Thermal networks on the variable-step engine; the exact engine's output grid

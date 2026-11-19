@@ -31,6 +31,7 @@ For full control, fall back to the explicit pipeline:
 
 from __future__ import annotations
 
+import contextvars
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
@@ -2343,7 +2344,7 @@ def simulate(
     discontinuity_restart: Optional[bool] = None,
     resolution_diagnostics: Optional[bool] = None,
     on_impulse: str = "record",
-    device_path: str = "legacy",
+    device_path: Optional[str] = None,
     inductor_freeze_di_max: Optional[float] = None,
     inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
@@ -2355,7 +2356,7 @@ def simulate(
     on_cache=None,
     controller_period: Optional[float] = None,
     resume_from=None,
-    control_tick: str = "label",
+    control_tick: str = "state",
     # --- SolverOptions bundle (v1.5 Round 2 ergonomics polish) ---
     solver: Optional["SolverOptions"] = None,
     # --- forward parameter sensitivities (exact path only) ---
@@ -2499,7 +2500,14 @@ def simulate(
         defaults to 10 µs); the grid is variable either way.
     engine
         ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'exact'`` —
-        see above. ``'exact'`` is the canonical name of the event-driven
+        see above. Since the number-changing release ``'auto'`` without
+        ``dt`` runs a circuit whose every device has an exact segment
+        (switches, PWL diodes, linear devices; no ``b_extra_fn``; no
+        keyword the exact engine refuses) on the exact engine, and on
+        ``'trbdf2'`` when the exact engine refuses it by name (before or
+        during the run) or when a Newton device is present; with ``dt`` it
+        is ``'pwl'``. Pass an explicit ``engine=`` for the old route
+        (``'trbdf2'`` without ``dt``). ``'exact'`` is the canonical name of the event-driven
         exact engine; ``'dsed'`` is its alias (one engine: the result's
         ``engine_used`` and refusals name ``'dsed'``).
         :func:`pulsim.exact_route` reports which segments of a run are
@@ -2588,8 +2596,10 @@ def simulate(
         a finite difference: see :mod:`pulsim.sensitivity`.
 
     mode_selection
-        How PWL diodes are decided at an event. ``None`` / ``'legacy'``
-        (default): today's settle; on ``engine='dsed'`` a guard judges
+        How PWL diodes are decided at an event. ``None`` (default):
+        ``'auto'`` since the number-changing release
+        (``pulsim._plan.DEFAULT_MODE_SELECTION``). ``'legacy'``: the
+        settle; on ``engine='dsed'`` a guard judges
         each settled mode on its own exact trajectory and re-decides an
         event whose mode violates a diode's law with the complementarity
         problem (LCP) — counted in ``result.diagnostics['mode_guard']``.
@@ -2621,18 +2631,17 @@ def simulate(
 
     undriven
         Controlled switches that nothing drives (no ``switch_fn``, no
-        closed loop's gate). ``None`` (default): today's per-engine
-        behaviour — ``pwl`` and ``'exact'`` run them all CLOSED with a
-        warning (the exact engine's ``sensitivities=`` run refuses),
-        ``'trbdf2'`` refuses them by name, ``'auto'`` without ``dt``
-        refuses, with ``dt`` it is ``pwl``. The policy applies when nothing
+        closed loop's gate). ``None`` (default): ``'refuse'`` since the
+        number-changing release (``pulsim._plan.DEFAULT_UNDRIVEN``; before
+        it ``pwl`` and ``'exact'`` ran them all CLOSED with a warning and
+        ``'trbdf2'`` refused them: pass ``undriven='closed'`` for the old
+        fixed-step / exact behaviour). The policy applies when nothing
         drives any switch (a partial drive is the drive's). ``'refuse'``:
         :class:`UnsupportedError` (``feature='switch_fn'``) naming every
         undriven switch, on every engine. ``'open'`` / ``'closed'``: they
         run OPEN / CLOSED on every engine and through ``'auto'`` (which
         may then take ``trbdf2``), with one entry in
-        ``result.diagnostics['undriven']`` instead of a warning. The
-        number-changing release makes ``'refuse'`` the default.
+        ``result.diagnostics['undriven']`` instead of a warning.
 
     resolution_diagnostics
         ``engine='pwl'`` only, default OFF (it costs 5-14 %): ``True``
@@ -2656,9 +2665,12 @@ def simulate(
         are refused with recorders, by name. Without it nothing changes.
 
     output_rtol
-        ``engine='exact'`` only, default ``None`` (today's samples: one per
-        10 us step cap without ``dt``). Without ``dt``, ``store_every`` or
-        recorders, the exact engine returns every event instant (both
+        ``engine='exact'`` only. Default ``None``: ``1e-5``
+        (``pulsim._plan.DEFAULT_OUTPUT_RTOL``) where the rule can act, since
+        the number-changing release; ``0`` turns the rule off (the old
+        samples: one per 10 us step cap without ``dt``). Without ``dt``,
+        ``store_every``, recorders or sensitivities (and not with
+        ``integrator='bdf2'``), the exact engine returns every event instant (both
         limits where the state jumps) and between events samples spaced so
         that linear interpolation between consecutive samples is within
         ``output_rtol`` of each STATE's scale (its range so far, floored at
@@ -2732,7 +2744,34 @@ def simulate(
         should_continue, closed_loops, live_stream, mmc_arms, on_cache,
         controller_period, resume_from, control_tick, solver, sensitivities,
         mode_selection, allow_implicit_segments, undriven, recorders, output_rtol)))
-    return _finalize(_ENGINES[plan.engine](plan), plan)
+    if plan.engine_asked != "auto" or plan.engine != "dsed":
+        return _finalize(_ENGINES[plan.engine](plan), plan)
+    try:
+        return _finalize(_ENGINES[plan.engine](plan), plan)
+    except UnsupportedError as e:   # 'auto' took the exact engine, which refused by name
+        return _auto_exact_fallback(builder, plan, e)
+
+
+# Set while 'auto' re-plans a run the exact engine refused: the route then
+# keeps the variable step (update-number-changing-release).
+_AUTO_EXACT_OFF = contextvars.ContextVar("pulsim_auto_exact_off", default=False)
+
+
+def _auto_exact_fallback(builder, plan, err):
+    """engine='auto' routed a run to the exact engine and it refused by name:
+    the same call again with the exact route off (trbdf2, or the 'auto'
+    rule's own refusal), the refusal kept as the first route reason. A
+    refusal raised mid-run has already called the run's callbacks once."""
+    tok = _AUTO_EXACT_OFF.set(True)
+    try:
+        plan2 = _plan_run(builder, *plan.resolved_from._args)
+    finally:
+        _AUTO_EXACT_OFF.reset(tok)
+    why = (f"engine='auto': the exact engine refused the run "
+           f"({getattr(err, 'feature', '') or type(err).__name__}: "
+           f"{str(err).splitlines()[0][:160]})")
+    plan2 = plan2._replace(route_reasons=(why, *plan2.route_reasons))
+    return _finalize(_ENGINES[plan2.engine](plan2), plan2)
 
 
 # Stage A's plan.resolved_from compares each keyword with these: taken from
@@ -3000,19 +3039,8 @@ def _route(
     fixed step), the mode-selection 'auto' rule, and the refusals of the
     engine landed on. Returns ``(engine, route_reasons, mode_selection,
     mode_auto)``."""
-    if engine == "dsed":
-        # Hard-fail on kwargs the DSED path cannot honor. Silently
-        # dropping these is the worst failure mode a simulator can
-        # have: a closed-loop circuit would run OPEN-loop and return
-        # plausible-looking (wrong) waveforms. C blocks were a warning
-        # followed by an open-loop run until add-engine-conformance-
-        # matrix; they change the physics, so they refuse too.
-        # The option x engine table (sim::kRunOptionTable): every keyword
-        # the exact engine cannot honour, plus C blocks (they drive the
-        # circuit through b_extra, which this engine does not consume).
-        # Controllers (closed_loops, controller_period, a periodic
-        # step_observer, control_tick) tick on its event queue: rows.
-        _offending = _ro.refused("dsed", {
+    def _dsed_refused():
+        return _ro.refused("dsed", {
             **_opt_values, "c_blocks": bool(_c_blocks_of(builder)),
             "device_path": device_path,
             "enable_nonlinear_refresh": enable_nonlinear_refresh,
@@ -3025,6 +3053,38 @@ def _route(
             "newton_roundoff_budget": newton_roundoff_budget,
             "should_continue": should_continue,
             "resume_from": resume_from})
+
+    _auto_exact = []
+    if engine == "auto" and (dt is None or dt <= 0) and not _AUTO_EXACT_OFF.get():
+        # update-number-changing-release (add-exact-propagator-strategy D11,
+        # the rule of benchmarks/tools/next_defaults.py ROUTE): without dt,
+        # 'auto' takes the exact engine when every device has an exact
+        # segment (the kernel's exact capability table: no Newton device), no
+        # user source function and no keyword the exact engine refuses; else
+        # the variable step as before. A refusal by name during the exact run
+        # falls back to trbdf2 (simulate()).
+        try:
+            _pulsim_module._require_supported(builder.graph, builder.pool, "exact")
+            _exact_ok = _opt_values["b_extra_fn"] is None and not _dsed_refused()
+        except UnsupportedError:
+            _exact_ok = False
+        if _exact_ok:
+            engine = "dsed"
+            _auto_exact = ["engine='auto' without dt: every device has an exact "
+                           "segment, so the exact engine runs it"]
+    if engine == "dsed":
+        # Hard-fail on kwargs the DSED path cannot honor. Silently
+        # dropping these is the worst failure mode a simulator can
+        # have: a closed-loop circuit would run OPEN-loop and return
+        # plausible-looking (wrong) waveforms. C blocks were a warning
+        # followed by an open-loop run until add-engine-conformance-
+        # matrix; they change the physics, so they refuse too.
+        # The option x engine table (sim::kRunOptionTable): every keyword
+        # the exact engine cannot honour, plus C blocks (they drive the
+        # circuit through b_extra, which this engine does not consume).
+        # Controllers (closed_loops, controller_period, a periodic
+        # step_observer, control_tick) tick on its event queue: rows.
+        _offending = _dsed_refused()
         if _offending:
             raise _unsupported(
                 "dsed", _offending[0],
@@ -3038,7 +3098,7 @@ def _route(
         if mode_selection == "auto":   # the one place, as below
             mode_selection, _mode_auto = _resolve_mode_auto(
                 builder, engine, None, _opt_values["sensitivities"])
-        return engine, [], mode_selection, _mode_auto
+        return engine, _auto_exact, mode_selection, _mode_auto
     _route_reasons: "list[str]" = []
     if engine in ("auto", "trbdf2"):
         _route_reasons = _trbdf2_blockers(
@@ -3377,6 +3437,9 @@ def _plan_run(
     # locals(): simulate() has ~150 locals and pays on every call. The rows
     # only the exact engine refuses are read in its branch, below.
     # test_simulation_object keeps both literals equal to the table.
+    # The release defaults the plan resolves (_plan.py, one place).
+    if mode_selection is None:
+        mode_selection = _planning.DEFAULT_MODE_SELECTION
     _opt_values = {
         "rtol": rtol, "atol": atol, "dt_init": dt_init,
         "integrator": integrator, "stiffness_threshold": stiffness_threshold,
@@ -3393,6 +3456,7 @@ def _plan_run(
         "mode_selection": mode_selection,
         "allow_implicit_segments": allow_implicit_segments,
         "output_rtol": output_rtol,
+        "b_extra_fn": b_extra_fn,   # the caller's (an Always row: read by the route)
     }
 
     # ---- Validate first — fail fast on user mistakes (DSED side). ----
@@ -3416,11 +3480,12 @@ def _plan_run(
             "own behaviour), 'refuse', 'open' or 'closed'"))
     # add-unified-device-interface (dual path): which code stamps the
     # Newton kinds; 'interface' refuses an unported kind by name.
-    if device_path not in ("legacy", "interface"):
+    # None: _plan.DEFAULT_DEVICE_PATH on the engine the run lands on (the
+    # exact engine stamps its own: resolved after the route).
+    if device_path is not None and device_path not in ("legacy", "interface"):
         raise _options_error("device_path",
                              f"simulate(device_path={device_path!r}): "
                              "expected 'legacy' or 'interface'")
-    _device_path = getattr(DevicePath, device_path.capitalize())
     # add-high-order-stiff-integrator: ESDIRK4(3) takes the variable-step
     # engine's steps; the fixed clock and the exact engine refuse it by name.
     if integrator == "esdirk43" and engine in ("pwl", "dsed"):
@@ -3624,6 +3689,9 @@ def _plan_run(
         enable_nonlinear_refresh, max_newton_iterations, tol_newton_dx,
         tol_newton_res, enable_newton_line_search, enable_newton_lm,
         newton_roundoff_budget, should_continue, _undriven_plan)))
+    if device_path is None:
+        device_path = "legacy" if engine == "dsed" else _planning.DEFAULT_DEVICE_PATH
+    _device_path = getattr(DevicePath, device_path.capitalize())
     if _planning.UNIFORM_ENGINE_RULES:   # the release's uniform rules (DECISIONS 26)
         _uniform_checks(engine, store_every, max_event_iterations,
                         max_dt_halvings, on_impulse, integrator)
@@ -3646,10 +3714,15 @@ def _plan_run(
         # update-number-changing-release: the output-grid rule acts only where
         # the engine picks the samples (no dt, no store_every, no recorders);
         # anything explicit keeps today's samples exactly.
+        # The release default (None -> _plan.DEFAULT_OUTPUT_RTOL) only where
+        # the rule can act; 0 is the explicit off (the old samples).
+        if output_rtol is None and sensitivities is None and integrator != "bdf2":
+            output_rtol = _planning.DEFAULT_OUTPUT_RTOL
         if output_rtol is not None:
-            if isinstance(output_rtol, bool) or not 0.0 < output_rtol < float("inf"):
-                raise ValueError(f"simulate(output_rtol={output_rtol!r}): must be > 0 (None = off)")
-            if dt is not None or recorders or (store_every or 1) != 1:
+            if isinstance(output_rtol, bool) or not 0.0 <= output_rtol < float("inf"):
+                raise ValueError(f"simulate(output_rtol={output_rtol!r}): must be >= 0 "
+                                 "(0 = off: the old samples; None = the default)")
+            if not output_rtol or dt is not None or recorders or (store_every or 1) != 1:
                 output_rtol = None
         step = _planning.new(_planning.ExactStep, (
             dt, rtol, atol, dt_init, integrator, stiffness_threshold, h_bdf2,
@@ -3714,16 +3787,18 @@ def _plan_run(
         # rule's, then the split's, which follows the rule (_plan.py). Under
         # mmc_arms the rule's default is not applied (the arm's full-dt
         # Thevenin stamp); an explicit True is still refused below.
-        if discontinuity_restart is None and _planning.DEFAULT_DISCONTINUITY_RESTART:
-            if mmc_arms:
+        # Resolved to a bool here (the kernel's RunOptions has the same
+        # defaults, sim::Defaults; an explicit value reaches it either way).
+        if discontinuity_restart is None:
+            discontinuity_restart = _planning.DEFAULT_DISCONTINUITY_RESTART
+            if discontinuity_restart and mmc_arms:
                 _route_reasons = [*_route_reasons, (
                     "mmc_arms: the restart rule's default is not applied (the "
                     "arm's full-dt Thevenin stamp cannot re-solve at dt/2)")]
-            else:
-                discontinuity_restart = True
-        if enable_substep_state_correction is None and discontinuity_restart \
-                and _planning.DEFAULT_SUBSTEP_STATE_CORRECTION:
-            enable_substep_state_correction = True
+                discontinuity_restart = False
+        if enable_substep_state_correction is None:
+            enable_substep_state_correction = bool(
+                discontinuity_restart and _planning.DEFAULT_SUBSTEP_STATE_CORRECTION)
         if mmc_arms:
             # Combinations the arm bookkeeping cannot honour yet — each
             # would return plausible-looking wrong capacitor voltages
@@ -3934,6 +4009,8 @@ def _run_dsed(plan):
             mode_selection=mode_selection,
             allow_implicit_segments=bool(allow_implicit_segments),
             output_rtol=s.output_rtol,
+            output_rtol_explicit=(s.output_rtol is not None
+                                  and plan.resolved_from["output_rtol"] == "explicit"),
             ticks=[(f, p, o) for (f, p), o in zip(
                 _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
             undriven=plan.undriven[0] if plan.undriven is not None else None,

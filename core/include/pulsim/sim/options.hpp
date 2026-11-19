@@ -72,6 +72,8 @@ struct OptionSpec {
 /// `pulsim._pulsim.run_option_table()`; a test asserts its names equal
 /// simulate()'s parameters.
 inline constexpr std::array<OptionSpec, 52> kRunOptionTable{{
+    // 'auto' (update-number-changing-release): with dt pwl; without dt the
+    // exact engine when every device has an exact segment, else trbdf2.
     {"engine", kEvery, Unset::Always, "'auto'", ""},
     {"rtol", kTrBdf2 | kExact, Unset::None, "1e-5 (trbdf2), 1e-6 (exact)",
      "rtol bounds a variable step's error estimate; a fixed step has none"},
@@ -129,9 +131,11 @@ inline constexpr std::array<OptionSpec, 52> kRunOptionTable{{
     {"newton_roundoff_budget", kPwl | kTrBdf2, Unset::None, "130",
      "newton_roundoff_budget bounds a Newton roundoff acceptance the exact "
      "engine does not make"},
-    {"enable_substep_state_correction", kPwl, Unset::Falsy, "False",
+    {"enable_substep_state_correction", kPwl, Unset::Falsy,
+     "None (pwl: follows discontinuity_restart)",
      "enable_substep_state_correction is the fixed-step commutation split"},
-    {"discontinuity_restart", kPwl, Unset::Falsy, "False",
+    {"discontinuity_restart", kPwl, Unset::Falsy,
+     "None (pwl: True; not under mmc_arms)",
      "discontinuity_restart is the fixed-step engine's restart rule"},
     {"resolution_diagnostics", kPwl, Unset::Falsy, "False",
      "resolution_diagnostics estimates a fixed step's truncation"},
@@ -161,22 +165,23 @@ inline constexpr std::array<OptionSpec, 52> kRunOptionTable{{
     {"solver", kEvery, Unset::Always, "None", ""},
     {"sensitivities", kExact, Unset::None, "None",
      "sensitivities are computed on the exact path only"},
-    {"mode_selection", kEvery, Unset::Legacy, "None ('legacy')", ""},
+    {"mode_selection", kEvery, Unset::Legacy, "None ('auto')", ""},
     {"allow_implicit_segments", kExact, Unset::None, "None",
      "allow_implicit_segments governs the exact engine's numeric segments"},
     // Every engine: the policy for controlled switches nothing drives,
     // decided above the dispatch (pulsim._undriven_policy, task 11.3).
-    {"undriven", kEvery, Unset::Always, "None (each engine's own)", ""},
+    {"undriven", kEvery, Unset::Always, "None ('refuse')", ""},
     // Every engine: a kernel recorder pass over the stored arrays, composed
     // above the dispatch (pulsim._recorders); store_every > 1 and
     // resume_from are refused with it there, by name.
     {"recorders", kEvery, Unset::Always, "None", ""},
     // update-number-changing-release: without dt the exact engine's samples
     // are chosen by rule (a dt, store_every or recorders keep today's samples)
-    {"output_rtol", kExact, Unset::None, "None (today's samples)",
+    // 0 = off (the old samples): not a request, so no engine refuses it.
+    {"output_rtol", kExact, Unset::Falsy, "None (1e-5 without dt; 0 = off)",
      "output_rtol is the exact engine's output-grid rule"},
-    {"control_tick", kEvery, Unset::Always, "'label'", ""},
-    {"device_path", kPwl | kTrBdf2, Unset::Legacy, "'legacy'",
+    {"control_tick", kEvery, Unset::Always, "'state'", ""},
+    {"device_path", kPwl | kTrBdf2, Unset::Legacy, "None ('interface')",
      "device_path selects which code stamps the Newton devices; the exact "
      "engine stamps its own"},
     // simulate()'s signature also has `dt` and `t_end` (every engine; the
@@ -233,7 +238,7 @@ struct RunOptions {
     bool mode_guard = true;
     /// control_tick='state' (G30): controllers read the state at their
     /// instant; the fixed engine then snaps split edges by 1e-6 dt.
-    bool control_tick_state = false;
+    bool control_tick_state = Defaults::control_tick_state;
 
     // Fixed step (pwl).
     std::optional<Size> max_dt_halvings;
@@ -245,7 +250,9 @@ struct RunOptions {
     std::optional<Real> inductor_freeze_di_max, inductor_abs_clamp;
 
     /// Which code stamps the Newton kinds (add-unified-device-interface).
-    device::DevicePath device_path = device::DevicePath::Legacy;
+    /// Unset: Defaults::device_path (a request only when set: the exact
+    /// engine refuses an explicit 'interface', stamps its own otherwise).
+    std::optional<device::DevicePath> device_path;
 
     // Every engine.
     bool auto_regularize = true;
@@ -294,7 +301,8 @@ requested_options(const RunOptions& o) {
     on(o.integrator_esdirk43, "integrator");
     on(o.mode_selection != ModeSelection::Legacy, "mode_selection");
     on(o.control_tick_state, "control_tick");
-    on(o.device_path != device::DevicePath::Legacy, "device_path");
+    on(o.device_path.value_or(device::DevicePath::Legacy) != device::DevicePath::Legacy,
+       "device_path");
     // Keep table order (the order refusals are listed in).
     std::vector<std::string_view> ordered;
     for (const auto& spec : kRunOptionTable) {
@@ -353,15 +361,17 @@ to_simulation_options(const RunOptions& o) {
     if (o.newton_roundoff_budget) {
         s.newton_roundoff_budget = *o.newton_roundoff_budget;
     }
-    if (o.enable_substep_state_correction) {
-        s.enable_substep_state_correction = *o.enable_substep_state_correction;
-    }
+    // The restart rule's default, then the split's, which follows the rule
+    // (as simulate() resolves them; mmc_arms runs pass the rule explicitly).
+    s.discontinuity_restart =
+        o.discontinuity_restart.value_or(Defaults::discontinuity_restart);
+    s.enable_substep_state_correction = o.enable_substep_state_correction.value_or(
+        s.discontinuity_restart && Defaults::substep_state_correction);
     if (o.control_tick_state) s.split_snap = Defaults::split_snap_state;
-    if (o.discontinuity_restart) s.discontinuity_restart = *o.discontinuity_restart;
     s.on_impulse_error = o.on_impulse == OnImpulse::Error;
     s.mode_selection = static_cast<int>(o.mode_selection);
     s.mode_guard = o.mode_guard;
-    s.device_path = o.device_path;
+    s.device_path = o.device_path.value_or(Defaults::device_path);
     if (o.resolution_diagnostics) {
         s.resolution_diagnostics = *o.resolution_diagnostics;
     }
@@ -416,7 +426,7 @@ to_trbdf2_options(const RunOptions& o) {
         s.newton_roundoff_budget = *o.newton_roundoff_budget;
     }
     s.on_impulse_error = o.on_impulse == OnImpulse::Error;
-    s.device_path = o.device_path;
+    s.device_path = o.device_path.value_or(Defaults::device_path);
     s.mode_selection = static_cast<int>(o.mode_selection);
     s.integrator = o.integrator_esdirk43 ? 1 : 0;
     return s;
