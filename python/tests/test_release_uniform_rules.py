@@ -1,7 +1,8 @@
 """The per-engine blocks of add-kernel-simulation-object DECISIONS 23, made
 uniform for the number-changing release (DECISIONS 26). Each rule is pinned
-twice: today's per-engine behaviour (the default, `_plan.UNIFORM_ENGINE_RULES`
-False) and the release behaviour (True: the value `next_defaults.py` sets)."""
+twice: the pre-release per-engine behaviour (`_plan.UNIFORM_ENGINE_RULES`
+False, pinned by the `today` fixture since the flip) and the release
+behaviour (True: the default since the flip)."""
 
 import inspect
 import warnings
@@ -19,6 +20,12 @@ ENGINES = {"pwl": dict(engine="pwl", dt=1e-6), "trbdf2": dict(engine="trbdf2"),
 @pytest.fixture
 def release(monkeypatch):
     monkeypatch.setattr(_plan, "UNIFORM_ENGINE_RULES", True)
+
+
+@pytest.fixture
+def today(monkeypatch):
+    # The legacy per-engine rules are the subject: pin LEGACY_PLAN.
+    monkeypatch.setattr(_plan, "UNIFORM_ENGINE_RULES", False)
 
 
 def _rc():
@@ -42,7 +49,7 @@ PWL = "(0 disables event iteration)"
 
 
 @pytest.mark.parametrize("engine", ["pwl", "trbdf2", "auto"])
-def test_max_event_iterations_today_each_engine_words_its_own(engine):
+def test_max_event_iterations_today_each_engine_words_its_own(today, engine):
     with pytest.raises(p.OptionsError) as ei:
         p.simulate(_rc(), 1e-5, **ENGINES[engine], max_event_iterations=-1)
     assert ei.value.option == "max_event_iterations"
@@ -79,7 +86,7 @@ def _mmc():
     return b, arm
 
 
-def test_a_bad_count_with_mmc_arms_today_reads_as_the_mmc_combination():
+def test_a_bad_count_with_mmc_arms_today_reads_as_the_mmc_combination(today):
     b, arm = _mmc()
     with pytest.raises(ValueError, match="decimation can drop"):
         p.simulate(b, t_end=1e-4, dt=1e-6, mmc_arms=[arm], store_every=0)
@@ -113,7 +120,7 @@ def _ideal_cut():
 
 
 @pytest.mark.parametrize("on_impulse", ["warn", "error"])
-def test_exact_bdf2_today_cannot_detect_an_impulse_and_runs(on_impulse):
+def test_exact_bdf2_today_cannot_detect_an_impulse_and_runs(today, on_impulse):
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         r = p.simulate(_cap_loop(), 1e-4, engine="exact", dt=1e-6, integrator="bdf2",
