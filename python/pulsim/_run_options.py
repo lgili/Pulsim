@@ -65,6 +65,19 @@ _NOT_HONOURED = {e: _split(tuple(
     if e not in r["engines"] and r["unset"] != "always")) for e in _ENGINES}
 _ORDER = {n: k for k, n in enumerate(TABLE)}
 
+#: A pseudo-engine for `refused`: the trbdf2 rows that make `engine='auto'`
+#: route to pwl (simulate()'s `_trbdf2_blockers`). Not every fixed-step-only
+#: row: `mode_selection` set on a dt-less 'auto' run is refused, not routed.
+TRBDF2_ROUTE = "trbdf2 route"
+_NOT_HONOURED[TRBDF2_ROUTE] = tuple(
+    tuple(n for n in rows if n in (
+        "start_from_dc_op", "strict_event_iterations", "max_dt_halvings",
+        "store_every", "enable_substep_state_correction",
+        "discontinuity_restart", "resolution_diagnostics",
+        "inductor_freeze_di_max", "inductor_abs_clamp", "progress",
+        "live_stream", "mmc_arms", "on_cache"))
+    for rows in _NOT_HONOURED["trbdf2"])
+
 
 def refused(engine: str, values: Mapping[str, Any]) -> "list[str]":
     """The options of `values` that `engine` cannot honour, in table order."""
@@ -73,9 +86,9 @@ def refused(engine: str, values: Mapping[str, Any]) -> "list[str]":
     # nearly every value is unset); only the set ones reach is_requested.
     get = values.get
     out = list(compress(falsy, map(truth, map(get, falsy))))
-    out += [n for n in compress(other, map(is_not, map(get, other),
-                                           repeat(None)))
-            if is_requested(n, get(n), engine)]
+    asked = list(compress(other, map(is_not, map(get, other), repeat(None))))
+    if asked:
+        out += [n for n in asked if is_requested(n, get(n), engine)]
     if len(out) > 1:
         out.sort(key=_ORDER.__getitem__)
     return out

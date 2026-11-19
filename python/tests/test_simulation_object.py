@@ -366,3 +366,13 @@ def test_simulation_object_reads_device_path_monitors_and_the_tick_grid():
     assert list(s.snapshot().tick_origin) == [0.0]
     s.run()
     assert hits == [k * T for k in range(8)]
+
+
+def test_the_trbdf2_route_rows_are_the_blockers_own():
+    # simulate() hands _trbdf2_blockers its _opt_values: the pseudo-engine
+    # must judge only the 13 routing rows (mode_selection is refused on a
+    # dt-less 'auto' run, not routed).
+    vals = {"progress": True, "mode_selection": "lcp", "rtol": 1e-6,
+            "store_every": 2, "integrator": "rk45"}
+    assert set(ro.refused(ro.TRBDF2_ROUTE, vals)) == {"store_every", "progress"}
+    assert set(ro.refused("trbdf2", vals)) > set(ro.refused(ro.TRBDF2_ROUTE, vals))

@@ -2026,12 +2026,20 @@ def _new_pwl_cache(builder, circuit, dt):
     return cache
 
 
+# simulate()'s driver keywords that always reach _run_on_simulation (the
+# options carry the last two): any other key needs a setter.
+_SIM_RUN_BASE_KW = frozenset(("switch_fn", "start_from_dc_op",
+                              "enable_nonlinear_refresh"))
+
+
 def _run_on_simulation(circuit, run_opts, kw):
     """One pwl run through the kernel object, with simulate()'s resolved
     driver keywords (`kw`, as `run_transient` takes them). Returns
     ``(result, builder)``."""
     sim = Simulation(circuit, run_opts, True)
     sim.set_switch_fn(kw["switch_fn"])
+    if not kw.keys() - _SIM_RUN_BASE_KW:  # the common call: nothing else
+        return _pulsim_module._run_simulation(sim), sim.builder
     get = kw.get
     if get("b_extra_fn") is not None:
         sim.set_source_term(kw["b_extra_fn"])
@@ -2931,7 +2939,7 @@ def simulate(
             resolution_diagnostics=resolution_diagnostics,
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
-            switch_fn=switch_fn)
+            switch_fn=switch_fn, opt_values=_opt_values)
         # the tick sources trbdf2 registers (for_variable_step's count)
         _tick_origins = _resume_tick_origins(resume_from, len(_plan.ticks) + len(
             _plan.rate_ticks) + len(getattr(_plan.c_graph, "_rate_ticks", None) or []))
@@ -3035,7 +3043,7 @@ def simulate(
     # Reject other choices with a clear pointer at the deferred
     # cache refactor so users get actionable feedback instead of a
     # silent default-back to "kernel".
-    if engine == "pwl" and integrator not in ("kernel", "default", None):
+    if integrator not in ("kernel", "default", None) and engine == "pwl":
         if integrator not in ("dopri5", "radau"):
             raise _unsupported("pwl", "integrator",
                 f"simulate(integrator={integrator!r}): unknown "
@@ -3288,9 +3296,11 @@ def simulate(
     # add-kernel-simulation-object 11.1: the run goes through the kernel
     # object (sim::Simulation, which owns the cache) unless a hook needs
     # the cache before the run or sweep() replays a recipe.
-    _via_sim = (_run_circuit is not None and _kernel_run is None
-                and not mmc_arms and on_cache is None
-                and _PWL_RECIPE.get() is None)
+    # (an if, not a boolean expression: simulate() pays on every call)
+    _via_sim = False
+    if _run_circuit is not None and _kernel_run is None and not mmc_arms \
+            and on_cache is None and _PWL_RECIPE.get() is None:
+        _via_sim = True
     cache = None if _via_sim else _new_pwl_cache(builder, _run_circuit, dt)
 
     # v2.0 Phase 3 "obra №2" — GGJ Thevenin MMC arms. The driver
@@ -4123,7 +4133,7 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                       enable_substep_state_correction,
                       inductor_freeze_di_max, inductor_abs_clamp,
                       switch_fn, discontinuity_restart=None,
-                      resolution_diagnostics=None):
+                      resolution_diagnostics=None, opt_values=None):
     """Why the variable-step engine cannot serve this run.
 
     Returns a list of human-readable reasons — empty means it can.
@@ -4168,7 +4178,8 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     # dropped a real blocker in silence. It is a plain check now.
     # The fixed-step-only keywords: the rows of the option x engine table
     # (sim::kRunOptionTable) that pwl honours and trbdf2 does not.
-    for n in _ro.refused("trbdf2", {
+    # simulate() passes its `_opt_values` (same values; no second dict).
+    for n in _ro.refused(_ro.TRBDF2_ROUTE, opt_values if opt_values is not None else {
             "start_from_dc_op": start_from_dc_op,
             "strict_event_iterations": strict_event_iterations,
             "max_dt_halvings": max_dt_halvings, "store_every": store_every,
