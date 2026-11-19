@@ -1890,7 +1890,9 @@ inline SimulationResult run_transient(
                 std::sort(ev_t.begin(), ev_t.begin() + n_ev);
                 // Events closer than `snap` merge into the earlier one,
                 // which samples the gate at the cluster's last event (a
-                // dead-time pair < snap apart lands both edges).
+                // dead-time pair < snap apart lands both edges). The
+                // unresolved count is of every step event merged here:
+                // gate edges, source and declared b_extra_fn jumps alike.
                 Size m = 0;
                 for (Size q = 0; q < n_ev; ++q) {
                     if (m == 0 || ev_t[q] - ev_t[m - 1] >= snap) {

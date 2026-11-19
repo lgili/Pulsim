@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Event queue: one locator, gate counts, a resume exactly at a gate edge
+
+* **Fixed** a `trbdf2` run resumed (`resume_from=`) exactly at a gate edge
+  that its snapshot did not commit now lands that edge with an `h_min`
+  first step, as an edge one ulp after `t_start` is (an opaque-gate buck
+  split at its turn-off: 3.7e-4 V off the uninterrupted run before,
+  5e-7 V after). Every other run is unchanged.
+* **Added** `res.counters['n_gate_events']` and
+  `['n_gate_events_unresolved']` on the fixed engine's event split
+  (`enable_substep_state_correction=True` with an edge oracle; 0
+  elsewhere); `simulate` warns when step events merged within
+  `split_snap*dt`.
+* **Added** opt-in `Rate::closed_end` (C++): a tick at exactly `t_end`
+  fires (the default stays half-open).
+
 ### In-kernel event losses on trbdf2; impulsive energy in the junction; resume
 
 * **Added** loss ports (`set_device_losses`) on `engine="trbdf2"`: conduction
