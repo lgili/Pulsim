@@ -22,6 +22,8 @@ import pulsim as p
 from pulsim.passives import RacLadder
 
 ON = dict(discontinuity_restart=True)
+# The rule is the release default; every "off" measurement below pins the legacy option.
+OFF = dict(discontinuity_restart=False)
 GON, GOFF = 1e3, 1e-9
 TE = 2e-6
 
@@ -74,7 +76,7 @@ def test_a_pulse_current_source_jump_restarts():
     assert n == 6                                    # start + edge (3 before the fix)
     assert all(r >= 3.5 for r in on), on             # 3.61 3.81
     assert abs(y_on[0] - exact) < 0.3                # 0.260 V
-    off, y_off, _ = _ratios(_pulse_i_rc, dts)
+    off, y_off, _ = _ratios(_pulse_i_rc, dts, **OFF)
     assert all(abs(r - 2) < 0.1 for r in off), off   # 1.95 1.98
     assert abs(y_off[0] - exact) > 17.0              # 17.8 V
 
@@ -103,7 +105,7 @@ def test_continuous_current_sources_only_restart_at_the_start(fn):
     end where it starts) and a sine has no jump: only the start window."""
     dts = (1e-7, 5e-8, 2.5e-8)
     on, y_on, n = _ratios(fn, dts, **ON)
-    off, y_off, _ = _ratios(fn, dts)
+    off, y_off, _ = _ratios(fn, dts, **OFF)
     assert n == 3
     assert abs(on[0] - 4) < 0.1 and abs(off[0] - 4) < 0.1, (on, off)
     assert abs(y_on[-1] - y_off[-1]) < 2e-5 * abs(y_off[-1])
@@ -141,7 +143,7 @@ def test_controlled_sources_through_a_restart():
     dts = (1e-7, 5e-8, 2.5e-8, 1.25e-8)
     on, _, n = _ratios(_controlled, dts, **ON)
     assert n == 6 and all(r >= 3.5 for r in on), on       # 3.59 3.81
-    off, _, _ = _ratios(_controlled, dts)
+    off, _, _ = _ratios(_controlled, dts, **OFF)
     assert all(r < 2.7 for r in off), off                 # 2.61 2.35
 
 
@@ -162,7 +164,7 @@ def test_charge_laws_integrate_q_equals_i_t(law):
     Q(v(t)) = I t like the junction law."""
     lw = _LAWS[law]()
     rel = {}
-    for name, kw in (("off", {}), ("on", ON)):
+    for name, kw in (("off", OFF), ("on", ON)):
         b = p.CircuitBuilder()
         b.add_current_source("Isrc", "n", "gnd", 6.0)
         b.add_nonlinear_capacitor("Coss", "n", "gnd", lw)
@@ -197,7 +199,7 @@ def test_power_mosfet_turn_on_through_a_restart(c_gd, c_ds):
     dts = (2.5e-10, 1.25e-10, 6.25e-11, 3.125e-11)
     on, _, n = _ratios(_pmos(c_gd, c_ds), dts, **ON)
     assert n == 6 and all(3.5 <= r <= 4.6 for r in on), on   # 4.08 4.01 / 3.99 4.01
-    off, _, _ = _ratios(_pmos(c_gd, c_ds), dts)
+    off, _, _ = _ratios(_pmos(c_gd, c_ds), dts, **OFF)
     assert all(abs(r - 2) < 0.15 for r in off), off           # 1.99 2.00
 
 
@@ -224,7 +226,7 @@ def test_dc_machine_through_a_restart():
     assert on[0][1] == 6
     assert abs(err_on[0]) < 3e-3                                   # 2.59e-3
     assert all(a / b > 3.8 for a, b in zip(err_on, err_on[1:]))    # 3.94 3.97
-    err_off = [_dcm(dt)[0] - exact for dt in dts]
+    err_off = [_dcm(dt, **OFF)[0] - exact for dt in dts]
     assert abs(err_off[0]) > 0.6                                   # 0.663 rad/s
     assert all(abs(a / b - 2) < 0.05 for a, b in zip(err_off, err_off[1:]))
 
@@ -272,7 +274,7 @@ def _retired_diode(dt, **kw):
 def test_composites_through_a_restart(fn, dts):
     on, _, n = _ratios(fn, dts, **ON)
     assert n == 6 and all(3.5 <= r <= 4.6 for r in on), on
-    off, _, _ = _ratios(fn, dts)
+    off, _, _ = _ratios(fn, dts, **OFF)
     assert all(abs(r - 2) < 0.1 for r in off), off
 
 
@@ -280,7 +282,7 @@ def test_composites_through_a_restart(fn, dts):
 def test_controller_ticks_are_unchanged_and_the_gate_moves_one_step():
     """With the rule the gate of step (t_{k-1}, t_k] is switch_fn(t_{k-1}):
     tick instants, counts and jitter are the flag-off ones; the recorded
-    gate edges move one sample later."""
+    on-grid gate edges move one sample later."""
     def run(**kw):
         b = p.CircuitBuilder()
         b.add_voltage_source("Vin", "in", "gnd", 24.0)
@@ -298,14 +300,18 @@ def test_controller_ticks_are_unchanged_and_the_gate_moves_one_step():
                  step_observer=lambda t, x: calls.append(t),
                  controller_period=50e-6, **kw)
         return r, lp, calls
-    r0, l0, c0 = run()
+    r0, l0, c0 = run(**OFF)
     r1, l1, c1 = run(**ON)
     assert list(r0.control_tick_counts) == list(r1.control_tick_counts) == [40, 40]
     assert c0 == c1 and [d[0] for d in l0.duty_history] == [d[0] for d in l1.duty_history]
     assert r0.control_tick_jitter_max == r1.control_tick_jitter_max == 0.0
     e0 = np.flatnonzero(np.diff(np.asarray(r0.switch_states)[:, 0].astype(int)))
     e1 = np.flatnonzero(np.diff(np.asarray(r1.switch_states)[:, 0].astype(int)))
-    assert e1[0] == e0[0] + 1                  # 12 -> 13 (same duty)
+    # The default event split (follows the rule) lands the off-grid duty edge
+    # at its own instant (12 -> 12); the on-grid period-start edge, sampled at
+    # the step start, moves one sample later (49 -> 50). Without the split
+    # (enable_substep_state_correction=False) the duty edge moved too: 12 -> 13.
+    assert (e1[0], e1[1]) == (e0[0], e0[1] + 1)
 
 
 # --- snapshot consumers ---------------------------------------------------------------
