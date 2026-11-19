@@ -7,6 +7,7 @@
 // classes onto `pulsim.PulsimError` subclasses.
 
 #include <exception>
+#include <stdexcept>
 
 namespace pulsim {
 
@@ -23,6 +24,14 @@ protected:
     PulsimError() = default;
     PulsimError(const PulsimError&) = default;
     PulsimError& operator=(const PulsimError&) = default;
+};
+
+/// An engine broke one of its own invariants (e.g. a sample time below the
+/// previous one): a bug in pulsim, raised instead of returning a corrupt
+/// result. Python: `pulsim.InternalError` (a RuntimeError).
+class InternalError : public std::logic_error, public PulsimError {
+public:
+    using std::logic_error::logic_error;
 };
 
 }  // namespace pulsim

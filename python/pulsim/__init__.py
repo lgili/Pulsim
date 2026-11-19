@@ -53,6 +53,8 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # the refusal of a RunOptions value (a ValueError carrying `option`).
     PulsimError,
     OptionsError,
+    # An engine broke its own invariant (a pulsim bug; a RuntimeError).
+    InternalError,
     engine_capabilities,
     # add-compiled-control-graph: algebraic loop / two writers / unknown
     # block kind, raised when a control graph is built.
@@ -579,6 +581,7 @@ __all__ = [
     "UnsupportedError",
     "PulsimError",
     "OptionsError",
+    "InternalError",
     "ControlGraphBuildError",
     "value_and_grad",
     "KpiValue",
