@@ -940,6 +940,11 @@ inline SimulationResult run_transient_trbdf2(
     // One TRAP solve over `dt` from the current committed state —
     // used for event localization trials, the event-landing
     // sub-step, and the zero-time initial-bit settle.
+    // probe_be: the solve is backward Euler over dt/2 (the trapezoidal
+    // companion at dt with the derivative slots zeroed), set only around
+    // the cascades at a located diode event (see `be_probe_dt`).
+    bool probe_be = false;
+    std::vector<pwl::HistoryEntry> hist_be, hist_be0;
     auto trap_solve = [&](const SwitchStateMask& m, Real t0, Real dt,
                            Vector& out_x) -> bool {
         // EVERY trapezoidal solve tells the stateful devices which
@@ -958,7 +963,18 @@ inline SimulationResult run_transient_trbdf2(
         // choke point all trapezoidal solves pass through, is the
         // same fix run_transient applies to its `step_ctx`.
         step_ctx = {dt, pwl::TrBdf2Stage::Trapezoidal};
-        history.compute_b_extra(dt, b_stage);
+        if (probe_be) {
+            history.snapshot_into(hist_be0);
+            hist_be = hist_be0;
+            for (auto& e : hist_be) {
+                (e.kind == pwl::DevicePool::StoredKind::Capacitor ? e.i_prev : e.v_prev) = Real{0};
+            }
+            history.restore(hist_be);
+            history.compute_b_extra(dt, b_stage);
+            history.restore(hist_be0);
+        } else {
+            history.compute_b_extra(dt, b_stage);
+        }
         accumulate_sources(t0 + dt, b_src);
         b_stage += b_src;
         const bool ok = solve_dispatch(m, dt, b_stage, out_x);
@@ -1168,8 +1184,43 @@ inline SimulationResult run_transient_trbdf2(
     // the committed step drained both inductors through g_off, and the
     // run lost the first cycle's energy (0.17 % on V_out at 2 ms). Such a
     // probe is retaken 10x longer, up to span·1e-6, as a singular one is.
+    // Set with probe_be: the bits before the located event, and the
+    // longest probe (the step that located it).
+    std::vector<bool> be_ref;
+    Real be_cap = Real{0};
     auto decide_probe = [&](Vector& xp, const SwitchStateMask& m,
                             Real t0) -> bool {
+        // A probe that would undo the event's own flip is read again at
+        // 10x the horizon, up to the located step: until then the value is
+        // inside the transient the event left (rule: keep the mode until
+        // the predicate is significant at a longer horizon). The PSFB's D2
+        // turn-on read -7e-9 A at 4e-16 s (the pre-event ring's g_off-scale
+        // loop current) and the cascade alternated to its cap.
+        auto undoes = [&](const Vector& xs) {
+            const auto ents = diodes.entries();
+            for (Size d = 0; d < ents.size() && d < be_ref.size(); ++d) {
+                const auto& e = ents[d];
+                if (e.is_on != be_ref[d]
+                    && models::SwitchedDiode::decide(
+                           e.is_on, e.law_voltage(xs, e.is_on), e.params())
+                           != e.is_on) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        while (probe_be && last_probe_dt < be_cap && undoes(xp)) {
+            const Vector x_prev = xp;
+            const Vector b_prev = b_stage;
+            const Real dt_prev = last_probe_dt;
+            if (!probe_solve(m, t0, std::min(dt_prev * Real{10}, be_cap), xp)) {
+                xp = x_prev;
+                b_stage = b_prev;
+                last_probe_dt = dt_prev;
+                last_probe_ok = true;
+                break;
+            }
+        }
         if (nl_effective || !proposes_flip(xp)) {
             return decide_diodes(xp, m, last_probe_dt);
         }
@@ -2071,6 +2122,15 @@ inline SimulationResult run_transient_trbdf2(
     // away from the event records (add-branch-form-ideal-switch DECISIONS 24).
     const bool sdirk_off_lin = opts.sdirk_after_turn_off && sdirk_possible
                                && !nl_effective && !sdirk_ok;
+    // At an event located as a diode predicate's zero (a landing, or a
+    // crossing within the localisation floor of t) the cascade decides on
+    // backward-Euler probes over that floor, dt_floor = max(h_min, 1e-4 h):
+    // L-stable, they read each candidate mode past its L*g_off transient
+    // (fs on a g_off = 1 nS rectifier diode), which a trapezoidal probe of
+    // 2e-17 s reads at its start (+951 V forward on an OFF PSFB rectifier
+    // diode whose slow value is +13 mV) and one longer than it rings.
+    // Not at gate edges: there that transient is the physics.
+    const bool be_events = !nl_effective && sdirk_possible;
     bool sdirk_event = false;   // the pending restart came from such an event
     auto restart_ok = [&]() { return sdirk_ok || sdirk_event; };
     // A diode with g_off > 0 turned off (an ideal branch-form diode leaves
@@ -3148,6 +3208,9 @@ inline SimulationResult run_transient_trbdf2(
                                 diodes.snapshot_on_bits();
                             const Vector x_sig0 = x_sig;
                             bool settled = false;
+                            probe_be = be_events;
+                            be_ref = bits0;
+                            be_cap = Real{2} * h;
                             for (const Real h_first : {h_probe_floor, dt_floor}) {
                                 settled = false;
                                 for (Size it2 = 0;
@@ -3157,8 +3220,9 @@ inline SimulationResult run_transient_trbdf2(
                                     gates_decided = mask_at(t);
                                     require_probe(
                                         probe_solve(gates_decided, t,
-                                                    it2 == 0 ? h_first
-                                                             : h_probe_floor,
+                                                    be_events ? Real{2} * dt_floor
+                                                    : it2 == 0 ? h_first
+                                                               : h_probe_floor,
                                                     x_trial),
                                         "a diode event,", t);
                                     const bool flipped = decide_probe(
@@ -3169,7 +3233,7 @@ inline SimulationResult run_transient_trbdf2(
                                         break;
                                     }
                                 }
-                                if (diodes.snapshot_on_bits() != bits0) {
+                                if (be_events || diodes.snapshot_on_bits() != bits0) {
                                     break;
                                 }
                             }
@@ -3177,6 +3241,7 @@ inline SimulationResult run_transient_trbdf2(
                                           gates_decided)) {
                                 x_sig = x_trial;
                             }
+                            probe_be = false;
                             if (diodes.snapshot_on_bits() != bits0) {
                                 result.commutation_events.push_back(
                                     {t,
@@ -3487,9 +3552,12 @@ inline SimulationResult run_transient_trbdf2(
                     // Zero-time cascade at t (fixed point over the
                     // remaining diodes, tiny-dt trap pins state).
                     if (flipped) {
-                        const Real h_zero =
-                            std::max(h_probe_floor,
-                                      dt_land * Real{1e-6});
+                        const Real h_zero = be_events
+                            ? Real{2} * dt_floor
+                            : std::max(h_probe_floor, dt_land * Real{1e-6});
+                        probe_be = be_events;
+                        be_ref = bits_land;
+                        be_cap = Real{2} * h;
                         bool settled = false;
                         for (Size it2 = 0;
                              it2 < opts.max_event_iterations;
@@ -3511,6 +3579,7 @@ inline SimulationResult run_transient_trbdf2(
                                       gates_decided)) {
                             x_sig = x_trial;
                         }
+                        probe_be = false;
                     }
                     // A cascade that undid the landing's flip decided
                     // on a probe at h_zero, which for a node held only
