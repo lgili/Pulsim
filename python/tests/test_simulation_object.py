@@ -309,16 +309,30 @@ def test_ratchet_untyped_raises_and_broad_handlers_do_not_rise():
     assert _count(r"except Exception|except:\s*$|except BaseException") <= 90
 
 
-def test_simulate_snapshots_every_refusable_option():
+# simulate()'s body since add-kernel-simulation-object Stage A: the planner,
+# the three engine runners and finalize.
+_SIMULATE_BODY = ("simulate", "_plan_run", "_apply_ties", "_compose", "_route",
+                  "_compose_for", "_run_pwl", "_run_trbdf2", "_run_dsed",
+                  "_finalize")
+
+
+def _simulate_body_nodes():
     import ast
     import pathlib
     src = (pathlib.Path(p.__file__).resolve().parent / "__init__.py").read_text(
         encoding="utf-8")
-    fn = next(n for n in ast.walk(ast.parse(src))
-              if isinstance(n, ast.FunctionDef) and n.name == "simulate")
-    snap = next(n.value for n in ast.walk(fn) if isinstance(n, ast.Assign)
-                and getattr(n.targets[0], "id", "") == "_opt_values")
-    dsed = next(c.args[1] for c in ast.walk(fn) if isinstance(c, ast.Call)
+    return [x for fn in ast.parse(src).body
+            if isinstance(fn, ast.FunctionDef) and fn.name in _SIMULATE_BODY
+            for x in ast.walk(fn)]
+
+
+def test_simulate_snapshots_every_refusable_option():
+    import ast
+    nodes = _simulate_body_nodes()
+    snap = next(n.value for n in nodes if isinstance(n, ast.Assign)
+                and getattr(n.targets[0], "id", "") == "_opt_values"
+                and isinstance(n.value, ast.Dict))
+    dsed = next(c.args[1] for c in nodes if isinstance(c, ast.Call)
                 and getattr(c.func, "attr", "") == "refused"
                 and isinstance(c.args[0], ast.Constant)
                 and c.args[0].value == "dsed")
@@ -450,14 +464,9 @@ def test_simulate_swallows_no_kernel_error():
     """1.3: a broad handler in simulate() re-raises, except the listed
     post-run diagnostic (a finished run is not broken by its own check)."""
     import ast
-    import pathlib
-    src = (pathlib.Path(p.__file__).resolve().parent / "__init__.py").read_text(
-        encoding="utf-8")
-    fn = next(n for n in ast.walk(ast.parse(src))
-              if isinstance(n, ast.FunctionDef) and n.name == "simulate")
     allowed = {"_volt = None"}  # find_implausible_voltage, after the run
     swallowing = []
-    for h in ast.walk(fn):
+    for h in _simulate_body_nodes():
         if not isinstance(h, ast.ExceptHandler):
             continue
         kind = ast.unparse(h.type) if h.type is not None else ""
