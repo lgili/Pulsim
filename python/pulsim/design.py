@@ -2160,9 +2160,13 @@ def _settle_error(b, run, T, n):
         return 0.0
     ks = (n // 2, (3 * n) // 4, n - 2, n - 1, n)
     if all(np.min(np.abs(t - k * T)) <= 1e-9 * T for k in ks):
-        # the engine landed every period start: the state there is exact
-        xs = np.array([[np.interp(k * T, t, X[:, j])
-                        for j in range(X.shape[1])] for k in ks])
+        # the engine landed every period start: the state there is exact.
+        # The landing sample itself, the left limit at an edge there: an
+        # interpolation at kT from a landing a few ulps EARLY mixed in the
+        # next sample across the edge's jump (an OFF branch's 2.4e-8 A
+        # read 1.4e-10 A off, a settled run 1.3e-4 "not settled")
+        js = [int(np.argmin(np.abs(t - k * T))) for k in ks]
+        xs = X[js, :]
     else:
         # an edge between two samples: interpolating across its kink
         # reads 1e-4 of the state (trbdf2, PWM source); the mean over

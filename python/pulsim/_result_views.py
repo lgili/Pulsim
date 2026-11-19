@@ -266,6 +266,30 @@ def with_right_limits(result):
     return out
 
 
+def with_event_limits(result):
+    """The result's trace with BOTH limits of every event (public
+    accessor, ``pulsim.with_event_limits``).
+
+    Storage convention (every engine): ``result.times`` holds one row
+    per stored sample, and a sample at an event instant is the LEFT
+    limit there (the state the step that ended at it produced). Where a
+    quantity jumps at an event (a diode's turn-on through V_th, a switch
+    current at a gate edge) its RIGHT limit, where the next step starts,
+    is kept beside the samples (``result.right_limit_index`` /
+    ``right_limit_states`` / ``right_limit_switch_states``). ``res.v()``
+    / ``res.i()`` and ``np.interp`` over ``result.times`` therefore see
+    the left limits only, and a trapezoid over them spreads each jump
+    as a ramp over the following step.
+
+    The view returned here inserts each right limit as its own row one
+    ulp after the event (``nextafter(t, +inf)``), so ``view.times`` is
+    strictly increasing and ``view.v()`` / ``view.i()`` /
+    ``pulsim.time_average(view.times, view.i(name))`` integrate every
+    jump as a jump. A result without right limits is returned as it
+    is."""
+    return with_right_limits(result)
+
+
 def pl_integral(times: np.ndarray, y: np.ndarray,
                 y_start: "np.ndarray | None" = None) -> float:
     """``∫ y dt`` over the run, each step ``(t[k-1], t[k]]`` integrated

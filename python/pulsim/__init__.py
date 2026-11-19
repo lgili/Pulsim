@@ -222,6 +222,7 @@ from .periodic import (
 )
 from .stats import TimeStats, time_window, time_average, time_rms, steady_state_stats
 from ._recorders import Recorder, Recording
+from ._result_views import with_event_limits
 from .kpi import (
     KpiGate,
     KpiReport,
@@ -687,6 +688,7 @@ __all__ = [
     "Recording",
     "time_rms",
     "steady_state_stats",
+    "with_event_limits",
     # KPI gates + baselines (Phase E.5).
     "KpiGate",
     "KpiReport",
