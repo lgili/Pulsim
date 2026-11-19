@@ -221,7 +221,7 @@ TEST_CASE("the AD functions the device laws need match finite differences",
 
 TEST_CASE("the stateful-kind registry: one rollback vector carries every "
           "real, stage scratch included", "[device][registry]") {
-    static_assert(pwl::StatefulKinds::size == 5);
+    static_assert(pwl::StatefulKinds::size == 6);   // + ExternalDeviceHistory (add-external-device-abi)
     static_assert(device::kNumStateBlocks == pwl::StatefulKinds::size + 1);
     using topology::BranchKind;
     using topology::Graph;
