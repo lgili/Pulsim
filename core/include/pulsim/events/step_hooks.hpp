@@ -40,6 +40,10 @@
 #include <functional>
 #include <vector>
 
+namespace pulsim::pwl {
+class StatefulHistories;
+}
+
 namespace pulsim::events {
 
 struct Commutation {
@@ -58,6 +62,35 @@ public:
 
     void on_accept(AcceptFn f) { accept_.push_back(std::move(f)); }
     void on_commutation(CommutationFn f) { commut_.push_back(std::move(f)); }
+
+    // refactor-unified-transient-stepper slice 3a: called by the step
+    // skeleton only (the fixed engine's twin today; DECISIONS 13).
+    // probes R1: once per accepted step, after commit, with the state the
+    // step started from and its mask beside the end state and the mask the
+    // step was stamped under. On the fixed engine `x_start` is the
+    // committed state at t_prev and `mask_start` the previous step's stamp
+    // (the LEFT limit: pwl solves no separate right limit at a grid-point
+    // edge; its re-initialisation is inside the step), the first step's the
+    // run's initial stamp.
+    using StepFn = std::function<void(Real t_prev, const Vector& x_start,
+                                      const topology::SwitchStateMask& mask_start,
+                                      Real t, const Vector& x_end,
+                                      const topology::SwitchStateMask& mask_end)>;
+    // device interface DECISIONS #31: right after the stateful histories'
+    // commit of an accepted step, `t` the accepted time.
+    using DeviceStateFn = std::function<void(Real t, const Vector& x,
+                                             const pwl::StatefulHistories&)>;
+    void on_step(StepFn f) { step_.push_back(std::move(f)); }
+    void on_device_state(DeviceStateFn f) { device_state_.push_back(std::move(f)); }
+    [[nodiscard]] bool has_step() const noexcept { return !step_.empty(); }
+    void step(Real t_prev, const Vector& x_start,
+              const topology::SwitchStateMask& mask_start, Real t,
+              const Vector& x_end, const topology::SwitchStateMask& mask_end) const {
+        for (const auto& f : step_) f(t_prev, x_start, mask_start, t, x_end, mask_end);
+    }
+    void device_state(Real t, const Vector& x, const pwl::StatefulHistories& h) const {
+        for (const auto& f : device_state_) f(t, x, h);
+    }
 
     [[nodiscard]] bool empty() const noexcept {
         return accept_.empty() && commut_.empty();
@@ -100,6 +133,8 @@ public:
 private:
     std::vector<AcceptFn> accept_;
     std::vector<CommutationFn> commut_;
+    std::vector<StepFn> step_;
+    std::vector<DeviceStateFn> device_state_;
     Vector x_prev_;
     topology::SwitchStateMask mask_prev_;
     bool armed_ = false;

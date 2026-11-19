@@ -248,3 +248,87 @@ says where the implementation departs from them or what it settled.
     when the loop's state is owned by the skeleton; the pickle carries it
     when `feat/core-p3-device-interface` defines the block (not there at
     385b4229).
+
+13. **Slice 3a: the fixed engine's dynamic loop on the skeleton, as a
+    twin; the phase map (the contract for slice 3b).** The loop body of
+    `run_transient`'s dynamic path is cut, in place, into five lambdas
+    that BOTH drivers call (nothing copied; each block's text moved
+    only by its lambda header, so the ideal-switch track's hunks apply
+    once and reach both paths). The per-step locals that cross phases
+    are hoisted above them and (re)set where the body declared them
+    (`commit_backward_euler`, used by take and commit, moved up with
+    them). The legacy loop (`for k { if (step_cancelled()) break;
+    step_begin(k); step_take(); step_after_solve(); step_commit();
+    step_record(k); }`) stays the default; the twin is
+    `step::run<step::Trapezoidal>(FixedController{fixed_grid, k_off+1,
+    k_off+n_steps}, step::phase_body(...))`, selected only by the
+    internal environment variable `PULSIM_PWL_STEPPER_TWIN=1` (read once
+    per run; no option, no binding).
+
+    | old-loop phase (dynamic path; line ranges at f69a2cbd) | skeleton slot | shared / copied |
+    |---|---|---|
+    | setup: IC / DC start sample 0, observer priming, `lt->begin`, `hooks->start`, restart window seed (`restart_left`), Newton round-off budget, resolution-diagnostics workspace (1574–1697) | before `run` (engine setup, not a slot) | shared (unchanged, runs before either driver) |
+    | grid: `k = 1 .. n_steps−1`, `t = fixed_grid.at(k_off + k)` (1699, 1706–1709) | `FixedController` (clock = the run's `fixed_grid`, `k` global from `k_off + 1`); `begin` recomputes `t`, `t_prev` from the same clock at `f.k − k_off` | shared |
+    | cancellation `should_continue` (1703) | `poll` | shared (`step_cancelled`) |
+    | step start: `lt->advance`, `x_prev`, ideal-diode previous bits, observer / control ticks (queue), oracle and `b_extra_fn` jump caches reset, gate memo, the step's events (gate edges, source jumps, declared jumps; merge within `snap`), V3 rollback snapshots, `mask_pre`, unlocated-gate and overflow counters, diode combine (1710–1873) | `begin` | shared (`step_begin(k)`) |
+    | — | `clamp` | identity: pwl places its events INSIDE the step (event split), never by shortening the frame |
+    | solve: round-off note, `mode_solve`, `run_event_iteration` (diode event iteration + mode-selection sites), restart trigger and SDIRK(2,2) restart with the stage-2 fallback, `split_step` (sub-intervals per located event), the nominal attempt and the halving ladder (1891–2699) | `take` (returns true; a failed step throws, as the legacy loop) | shared (`step_take()`) |
+    | — | `error`, retry branch, rollback copy | not compiled (`FixedController::uses_lte == false`, body does not localize) |
+    | event-iteration breach (strict throw, or accept + bit resync + record), commutation records (2701–2830) | `after_solve` (never cuts: returns true) | shared (`step_after_solve()`) |
+    | inductor freeze guard / clamp, deferred history commit (trapezoidal or backward Euler), restart counter, loss tracker `accept` (2832–2941) | `commit` | shared (`step_commit()`); twin adds `hooks->device_state` |
+    | resolution diagnostics, `hooks->accepted`, `store_every` record, dependent-mode re-initialisation record (2943–3061) | `on_step` | shared (`step_record(k)`); twin adds `hooks->step` (R1) |
+    | `++k` | `FixedController::advance` (k advances: no partial interval, `t1 == t_lim` always) | skeleton |
+    | end: diagnostics finalisation, `restart_steps_left`, restart factorisations, outer catch, final snapshot `grid_step = k_off + k_reached` (3063–3075, ~3380) | after `run` | shared |
+    | STATIC path (no dynamic device, 3075–3370) | not on the skeleton | the legacy loop on both settings |
+
+    Copied: nothing of the loop; the twin's six one-line adapters
+    (`tw_*`, `f.k − k_off`). For 3b (trbdf2) the map says what the
+    skeleton must grow: `clamp` real (edge / crossing landing), `error`
+    (`TrBdf2::lte`), the retry and rollback (the LTE clock), and
+    `after_solve` cutting (localisation) — pwl needed none of them.
+    Requests from other tracks, as of this slice:
+
+    | request | slot | call |
+    |---|---|---|
+    | probes R1 (per accepted step, x_start + mask_start beside x_end) | `on_step` | yes, twin only: `StepHooks::step(t_prev, x_prev, mask_start, t, x, stamped_mask)`; `mask_start` (the previous stamp) copied only with a listener. Gap: pwl delivers the LEFT limit at t_prev (committed state, previous stamp); it solves no right limit at a grid-point edge (its re-initialisation happens inside the step), so the recorder's right limit at such an edge still needs a solve the engine does not make |
+    | probes R2 (`on_event` after the settle) | inside `take` (pwl's events are sub-intervals of `split_step`) | no: needs a call in `split_step`, i.e. in shared code; not added |
+    | probes R3 (pin currents at commit) | `commit` | via #31: a `device_state` listener calls `pwl/device_readings.hpp` |
+    | device interface #31 (`on_device_state` after the histories' commit) | `commit` | yes, twin only: `StepHooks::device_state(t, x, hs)` |
+    | device interface: `seed_held_machine_capacitors` hand PMSM refresh | setup (DC start), not the loop | not a slot; untouched |
+    | ideal switch §6b L1–L7 | the mode helpers (`mode_lcp_site`, passivity flags) above the loop, called from `take` | shared code: applies once to both paths; not made (number changes) |
+    | control graph: no queue instant at `t_end`; stamping hook `(x, h) → rows`; located crossing source | `begin` (queue) / `take` (stamping, crossing) | no |
+    | high-order integrator hand-off 1–7 | variable-step slice | nothing added contradicts it (`PhaseBody` is pwl's; `run_stages` / `StageSpec` untouched) |
+
+    Hooks only the skeleton calls are zero-cost without a listener (an
+    emptiness test) and allocate nothing per step
+    (`test_zero_alloc.cpp`, "fixed engine twin on the step skeleton").
+
+    **Speed gate NOT met (why this slice is on a WIP branch).**
+    Instructions retired per accepted step, in-process
+    (`proc_pid_rusage` `ri_instructions` around `simulate()` only,
+    min of 3–6 alternating runs; `.scratch/instr_inproc.py`; noise ≤ 0.2 %
+    — f69a2cbd against itself reads 0.9990–1.0010):
+
+    | case | f69a2cbd | default after | twin | default Δ | twin / default |
+    |---|---|---|---|---|---|
+    | buck_pwl | 3096 | 3138 | 3258 | +1.4 % | 1.038 |
+    | vsi_pwl_restart | 4853 | 4966 | 5062 | +2.3 % | 1.019 |
+    | vsi_pwl | 4705 | 4793 | 4894 | +1.9 % | 1.021 |
+    | shockbuck_pwl | 18696 | 18724 | 18847 | +0.15 % | 1.007 |
+    | rlc152_pwl | 18484 | 18494 | 18621 | +0.05 % | 1.007 |
+
+    Gates: default ≤ 0.5 %, twin ≤ 1 %. Tried: (1) phases left to the
+    inliner: default +1.9 % buck / +2.2 % VSI; (2) phases forced inline at
+    both call sites: +0.4 % / +2.0 %, twin +4.4 % / +2.0 %; (3) (2) with
+    the twin driver out of line: +1.0 % / +1.9 %; (4) (3) with the step
+    times and `edge_restart` re-read into const locals per phase: no
+    change. The default cost scales with switch / diode count (buck
+    +32–42, VSI +88–113 instructions per step; none on the RLC ladder or
+    the Shockley buck), so it is in per-switch work of a phase, not in the
+    clock; not located. Next: compare the per-step disassembly of the
+    default loop at f69a2cbd and here (`-S` of `ir_bindings.cpp`, the
+    smallest TU that instantiates `run_transient`) around the
+    commutation-record loop and `mask_pre`'s copy-assignment (a
+    `SwitchStateMask` holds a `std::vector`; the loop body copy-
+    CONSTRUCTED it per step).
+

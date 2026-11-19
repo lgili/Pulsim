@@ -25,6 +25,18 @@
 #include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/solver/step/integrators.hpp"
 
+// A phase of an engine's step that both its legacy loop and the skeleton
+// call: forced inline into the legacy loop; the twin driver is kept out of
+// line (PULSIM_STEP_TWIN) so its copy does not take the loop's inlining
+// budget. Measured cost is still open (DECISIONS 13).
+#if defined(__GNUC__) || defined(__clang__)
+#define PULSIM_STEP_PHASE __attribute__((always_inline))
+#define PULSIM_STEP_TWIN __attribute__((noinline))
+#else
+#define PULSIM_STEP_PHASE
+#define PULSIM_STEP_TWIN
+#endif
+
 namespace pulsim::step {
 
 template <class I>
@@ -234,6 +246,34 @@ StepStatus step_once(C& ctrl, Body& body) {
     ctrl.accepted(proposal);
     ctrl.advance(f);
     return StepStatus::Accepted;
+}
+
+/// A body made of an engine's phase callables (slice 3a, DECISIONS 13):
+/// the fixed engine's loop phases, the SAME callables its legacy loop
+/// calls, so the two paths cannot diverge. The event landing is inside
+/// the engine's `take` (pwl splits a step at its events itself), so
+/// `clamp` keeps the clock's step and `after_solve` never cuts.
+template <class Poll, class Begin, class Take, class After, class Commit, class OnStep>
+struct PhaseBody {
+    Poll& poll_;
+    Begin& begin_;
+    Take& take_;
+    After& after_;
+    Commit& commit_;
+    OnStep& on_step_;
+    bool poll() { return poll_(); }
+    void begin(const StepFrame& f) { begin_(f); }
+    Real clamp(const StepFrame&, Real h) const noexcept { return h; }
+    bool take(const StepFrame& f) { return take_(f); }
+    bool after_solve(StepFrame& f) { return after_(f); }
+    void commit(const StepFrame& f) { commit_(f); }
+    void on_step(const StepFrame& f) { on_step_(f); }
+};
+
+template <class Poll, class Begin, class Take, class After, class Commit, class OnStep>
+PhaseBody<Poll, Begin, Take, After, Commit, OnStep> phase_body(
+    Poll& p, Begin& b, Take& t, After& a, Commit& c, OnStep& o) {
+    return {p, b, t, a, c, o};
 }
 
 /// The run: steps until the clock is done, the body stops it or a step
