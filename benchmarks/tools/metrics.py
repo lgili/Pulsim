@@ -95,3 +95,57 @@ def err_max(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = 
     if len(exclude):
         d = d[~_inside(g, exclude)]
     return float(d.max() / span)
+
+
+
+def exact_dev(y, cand) -> np.ndarray:
+    """|y_i − nearest candidate truth value at t_i| (``cand``: one row per
+    sample, NaN-padded; see ``exact_truth.Solver.at_float``). A non-finite
+    sample is an infinite deviation."""
+    y = np.asarray(y, dtype=float)
+    d = np.abs(np.asarray(cand, dtype=float) - y[:, None])
+    e = np.nanmin(np.where(np.isnan(d), np.inf, d), axis=1)
+    return np.where(np.isfinite(y), e, np.inf)
+
+
+def err_exact(t, y, cand, *, span: float, gap=None, exclude_t0: bool = True) -> float:
+    """The ``exact`` measure: ``sqrt((Σ w_i e_i² + Σ c_i) / Σ w_i) / span``
+    over the trace's OWN samples, e_i = :func:`exact_dev`, w_i the trapezoid
+    time weight of sample i (half of each adjacent interval). No
+    interpolation of the trace, so a perfect trace scores the truth's
+    evaluation error on any grid (no floor); what a trace does between its
+    samples is not graded.
+
+    ``gap`` (from ``at_float(..., gaps=True)``): a sample that matches a
+    truth branch across an event (gap g_i > 0, the event displaced by g_i)
+    is charged the L2 of that displacement, c_i = (jump at t_i)² g_i, so the
+    snap window hides no timing error (two samples inside one displaced
+    interval are both charged: conservative). Gaps within 4 ulp of t_i are
+    not charged: a float time cannot place an event closer."""
+    t = np.asarray(t, dtype=float)
+    cand = np.asarray(cand, dtype=float)
+    if np.any(np.diff(t) < 0):
+        raise ValueError("times must be non-decreasing")
+    e = exact_dev(y, cand)
+    c = np.zeros(t.size)
+    if gap is not None and np.all(np.isfinite(e)):
+        rows = np.arange(t.size)
+        d = np.abs(cand - np.asarray(y, dtype=float)[:, None])
+        k = np.nanargmin(np.where(np.isnan(d), np.inf, d), axis=1)
+        g = np.where(np.isnan(gap), np.inf, gap)
+        g = np.where(g <= 4 * np.spacing(np.abs(t))[:, None], 0.0, g)   # below the float time's own resolution
+        kc = np.argmin(g, axis=1)                   # the segment holding t_i
+        jump = cand[rows, kc] - cand[rows, k]
+        c = np.where(k != kc, np.nan_to_num(jump * jump * g[rows, k], posinf=np.inf), 0.0)
+    if exclude_t0:
+        k0 = int(np.searchsorted(t, t[0], side="right"))
+        t, e, c = t[k0:], e[k0:], c[k0:]
+    if t.size < 2 or span <= 0.0:
+        raise ValueError("need >= 2 graded samples and span > 0")
+    if not np.all(np.isfinite(e)):
+        return float("inf")
+    h = np.diff(t)
+    w = np.zeros(t.size)
+    w[:-1] += h / 2
+    w[1:] += h / 2
+    return float(np.sqrt((np.sum(w * e * e) + np.sum(c)) / w.sum()) / span)

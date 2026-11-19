@@ -1458,6 +1458,84 @@ class Solver:
                 out[c].append(v)
         return out
 
+    def at_float(self, cols, t, delta=0.0, rel=1e-13, gaps=False):
+        """The truth at float times ``t`` for the ``exact`` measure:
+        ``{col: (len(t), m) array}``, one column per segment whose interval
+        reaches within ``delta`` of t_i, each segment's own formula continued
+        to t_i (NaN pads). Away from events m = 1; near one, both one-sided
+        branches are candidates, so a left- or right-limit sample is compared
+        with its own side. Evaluated in float; a value whose cancellation
+        bound (4 eps sum|a_k e^{lam_k tau}|) exceeds ``rel`` x the column's
+        peak is recomputed in mpmath. ``gaps=True`` also returns the
+        (len(t), m) time distance from t_i to each candidate's interval
+        (0 for the segment holding t_i)."""
+        import numpy as np
+        t = np.asarray(t, dtype=float)
+        segs = self.segs
+        t0 = np.array([float(s.t0) for s in segs])
+        t1 = np.array([float(s.t0 + s.tau) for s in segs])
+        j_lo = np.clip(np.searchsorted(t1, t - delta, side="left"), 0, len(segs) - 1)
+        j_hi = np.clip(np.searchsorted(t0, t + delta, side="right") - 1, j_lo, len(segs) - 1)
+        m = int((j_hi - j_lo).max()) + 1 if t.size else 1
+        rows = {c: self.obs_row(c) for c in cols}
+        out = {c: np.full((t.size, m), np.nan) for c in cols}
+        bnd = {c: np.zeros((t.size, m)) for c in cols}
+        coef = {}
+        for o in range(m):
+            jj = j_lo + o
+            ok = jj <= j_hi
+            for j in np.unique(jj[ok]):
+                idx = np.flatnonzero(ok & (jj == j))
+                seg = segs[j]
+                hi = float(seg.t0)
+                tau = (t[idx] - hi) - float(seg.t0 - mp.mpf(hi))
+                for c, (r, waves) in rows.items():
+                    if seg.x:
+                        v = np.array([float((r * (seg.dyn.X * seg.y(mp.mpf(float(x)))))[0]) for x in tau])
+                        b = np.zeros(idx.size)
+                    else:
+                        if (j, c) not in coef:
+                            a = seg.coef(r * seg.dyn.X)
+                            coef[j, c] = (np.array([complex(x) for x in a]),
+                                          np.array([complex(x) for x in seg.dyn.lam]))
+                        a, lam = coef[j, c]
+                        with np.errstate(over="ignore", invalid="ignore"):
+                            ex = np.exp(np.outer(tau, lam)) * a
+                            v = ex.sum(axis=1).real
+                            b = 4 * np.finfo(float).eps * np.abs(ex).sum(axis=1)
+                    if waves:
+                        v = v + np.array([self._wave_part(waves, seg, x) for x in t[idx]])
+                    out[c][idx, o], bnd[c][idx, o] = v, b
+        valid = (j_lo[:, None] + np.arange(m)[None, :]) <= j_hi[:, None]
+        single = j_lo == j_hi
+        for c, (r, waves) in rows.items():
+            v = np.abs(out[c][single, 0])
+            v = v[np.isfinite(v)]
+            peak = float(v.max()) if v.size else 1.0
+            bad = valid & (~np.isfinite(out[c]) | (bnd[c] > rel * max(peak, 1e-300)))
+            for i, o in zip(*np.nonzero(bad)):
+                seg = segs[j_lo[i] + o]
+                tau = mp.mpf(float(t[i])) - seg.t0
+                if seg.x:
+                    v = (r * (seg.dyn.X * seg.y(tau)))[0]
+                else:
+                    a = seg.coef(r * seg.dyn.X)
+                    v = mp.re(mp.fsum(ak * mp.exp(lk * tau) for ak, lk in zip(a, seg.dyn.lam)))
+                out[c][i, o] = float(v) + (self._wave_part(waves, seg, t[i]) if waves else 0.0)
+        if not gaps:
+            return out
+        jj = np.minimum(j_lo[:, None] + np.arange(m)[None, :], len(segs) - 1)
+        gap = np.maximum(np.maximum(t0[jj] - t[:, None], t[:, None] - t1[jj]), 0.0)
+        return out, np.where(valid, gap, np.nan)
+
+    def _wave_part(self, waves, seg, x):
+        """Source-node part of a column on ``seg``, its time clamped to the
+        segment (a continuation reads the source's one-sided value)."""
+        x = mp.mpf(float(x))
+        a, b = seg.t0, seg.t0 + seg.tau
+        tt, side = (a, 1) if x <= a else ((b, -1) if x >= b else (x, -1))
+        return float(sum(s * wv.value(tt, side) for wv, s in waves))
+
     def window(self, cols, w0, w1):
         """Exact time-weighted mean and RMS of each column over [w0, w1]."""
         rows = {c: self.obs_row(c) for c in cols}
