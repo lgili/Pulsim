@@ -358,3 +358,66 @@ TEST_CASE("add_mosfet_level1 with_body_diode=false is the bare device",
     REQUIRE(b.pool().kind_of(0) ==
               DevicePool::StoredKind::MosfetLevel1);
 }
+
+namespace {
+// The law as 4aa3b15e wrote it (DECISIONS #44), with no shared or skipped
+// work: the reference the #47 restructuring must reproduce.
+template <class S, class P>
+S c1_reference(const S& a, const S& d, const P& p) {
+    using std::exp; using std::expm1;
+    using M = pulsim::models::MosfetLevel1;
+    const S f = M::forward_current_<S>(a, d, p);
+    const S kd = p.kappa * d;
+    const S leak = M::forward_current_<S>(a, S{0}, p) * exp(S(-kd));
+    if (leak <= pulsim::Real{0x1p-54} * f && -leak <= pulsim::Real{0x1p-54} * f) return f;
+    if (kd > pulsim::Real{1}) return f - leak;
+    const S u = a - d;
+    const S alpha = pulsim::numeric::logistic(S(p.kappa * a));
+    const S one_minus_alpha = pulsim::numeric::logistic(S(-(p.kappa * a)));
+    const S beta_u = pulsim::numeric::logistic(S(p.kappa * u));
+    const S one_minus_beta_u = pulsim::numeric::logistic(S(-(p.kappa * u)));
+    const S E = -expm1(S(-kd));
+    const S bracket = p.lambda * d * (a * a - beta_u * u * u)
+                      + a * a * one_minus_alpha * E
+                      + alpha * d * (pulsim::Real{2} * a - d)
+                      + u * u * alpha * one_minus_beta_u * E;
+    return alpha * p.K * bracket;
+}
+}  // namespace
+
+TEST_CASE("MosfetLevel1 — shared exponentials and early exits keep the "
+          "law's values (unified-device-interface #47)",
+          "[v2][layer2][mosfet_level1]") {
+    // The model now shares σ(z)/σ(−z) exponentials, decides the leak exits
+    // on values and skips work the exits make dead; the arithmetic of each
+    // result is unchanged. Bit-identity is checked on the development
+    // machine (.scratch/mos_pretest_sweep.cpp, 1.66e8 points); here a few
+    // ulp, across both pre-test thresholds and every branch.
+    using M = pulsim::models::MosfetLevel1;
+    using AD = pulsim::ad::ADRealN<3>;
+    const auto close = [](double u, double v) {
+        return std::abs(u - v) <= 4e-16 * std::abs(v) + 1e-300;
+    };
+    for (const M::Params p : {M::Params{1.43, 3.0, 0.01, 15.0}, M::Params{0.5, 3.0, 0.0, 4.0},
+                              M::Params{50.0, 3.0, 0.02, 15.0}}) {
+        for (int i = -100; i <= 300; i += 3) {
+            const double vgs = p.V_T + i * 0.1 / p.kappa;
+            for (int j = -150; j <= 150; ++j) {
+                const double vds = j * std::abs(j) * 1e-4;   // dense near 0, up to ±2.25 V
+                double v[3] = {vds, 0.0, vgs};
+                const double a = vgs - p.V_T;
+                const double ref = vds < 0 ? -c1_reference<double>(a - vds, -vds, p)
+                                           : c1_reference<double>(a, vds, p);
+                INFO("vgs " << vgs << " vds " << vds);
+                CHECK(close(M::current<double>(v, p), ref));
+                AD w[3] = {AD(vds, {1, 0, 0}), AD(0.0, {0, 1, 0}), AD(vgs, {0, 0, 1})};
+                const AD V_OV = (w[2] - w[1]) - p.V_T, V_DS = w[0] - w[1];
+                const AD r = V_DS < AD{0} ? -c1_reference<AD>(V_OV - V_DS, -V_DS, p)
+                                          : c1_reference<AD>(V_OV, V_DS, p);
+                const AD q = M::current<AD>(w, p);
+                CHECK(close(q.value(), r.value()));
+                for (int k = 0; k < 3; ++k) CHECK(close(q.deriv(k), r.deriv(k)));
+            }
+        }
+    }
+}

@@ -983,6 +983,8 @@ TEST_CASE("the machine laws stamp, commit and capture as the hand stamp",
                 hl.capture_gamma(x);
                 pwl::iface::capture_gamma(hi, x);
                 for (int k = 0; k < 3; ++k) {
+                    // iface::capture_gamma IS the history's capture_gamma (one
+                    // function): exact equality cannot depend on FMA contraction.
                     CHECK(hi.entries()[0].dlam_gamma[k] == hl.entries()[0].dlam_gamma[k]);
                 }
                 hl.commit(x, h, st);
@@ -990,10 +992,23 @@ TEST_CASE("the machine laws stamp, commit and capture as the hand stamp",
                 const auto& el = hl.entries()[0];
                 const auto& ei = hi.entries()[0];
                 for (int k = 0; k < 3; ++k) {
-                    CHECK(ei.lambda_old[k] == el.lambda_old[k]);   // the same law, bitwise
-                    CHECK(ei.i_old[k] == el.i_old[k]);
-                    CHECK(ei.v_old[k] == el.v_old[k]);
-                    CHECK(ei.dlam_old[k] == el.dlam_old[k]);
+                    // λ and v − R·i come from two code paths (the law's eval vs the
+                    // hand commit): a compiler may contract one of them to an FMA,
+                    // so a few ulp, not bit equality (bitwise on macOS clang).
+                    // λ sums L·i terms (+ M·λ_r, λ_pm) that can cancel: scale by
+                    // the terms (L ≤ 62 mH in machine_entry → 0.1 H·max|i|).
+                    const Real i_max = std::max({std::abs(el.i_old[0]), std::abs(el.i_old[1]),
+                                                 std::abs(el.i_old[2])});
+                    const Real lam_scale = std::max({std::abs(el.lambda_old[0]),
+                                                     std::abs(el.lambda_old[1]),
+                                                     std::abs(el.lambda_old[2]),
+                                                     Real{0.1} * i_max, Real{1}});
+                    CHECK(close(ei.lambda_old[k], el.lambda_old[k], lam_scale, 8));
+                    CHECK(ei.i_old[k] == el.i_old[k]);   // copies of x (set_reference)
+                    CHECK(ei.v_old[k] == el.v_old[k]);   // one subtraction, no contraction
+                    const Real ri = std::abs((kind == 2 ? e.im.R_s : e.params.R_s) * ei.i_old[k]);
+                    CHECK(close(ei.dlam_old[k], el.dlam_old[k],
+                                std::max(std::abs(el.v_old[k]), ri), 8));
                     CHECK(ei.lam_off[k] == Real{0});
                 }
                 CHECK(ei.theta_old == el.theta_old);
@@ -1048,6 +1063,83 @@ TEST_CASE("the machine laws stamp, commit and capture as the hand stamp",
                 check(L::InductionMachine{}, pwl::iface::im_aux(e), L::InductionMachine::from(e.im));
             } else {
                 check(L::PmsmMna{}, pwl::iface::pmsm_aux(e), L::PmsmMna::from(e.params));
+            }
+        }
+    }
+    // The induction machine's hand Jacobian (`eval_jac`, DECISIONS #48) and
+    // commit rows (`eval_internal`) against its AD eval: the same values.
+    {
+        using IM = L::InductionMachine;
+        Lcg r3{11u};
+        const auto e = machine_entry(2, r3);
+        const auto aux = pwl::iface::im_aux(e);
+        const auto prm = IM::from(e.im);
+        for (int trial = 0; trial < 20; ++trial) {
+            std::array<Real, 10> x{};
+            for (auto& v : x) v = r3(-50.0, 50.0);
+            x[5] = r3(-0.5, 0.5);
+            x[6] = r3(-0.5, 0.5);
+            std::array<ad::ADRealN<10>, 10> xs{};
+            for (std::size_t k = 0; k < 10; ++k) {
+                std::array<Real, 10> d{};
+                d[k] = 1;
+                xs[k] = ad::ADRealN<10>{x[k], d};
+            }
+            device::Out<ad::ADRealN<10>, 10> o;
+            device::eval<IM>(aux, prm, xs, o);
+            device::Out<Real, 10> oi;
+            IM::eval_internal(aux, prm, x, oi);
+            for (const Real a : {2.0 / 1e-6, 1.0 / 1e-6, 1.7 / 1e-6}) {
+                device::Out<Real, 10> oh;
+                std::array<std::array<Real, 10>, 10> J{};
+                IM::eval_jac(aux, prm, x, a, oh, J);
+                for (std::size_t r = 0; r < 10; ++r) {
+                    INFO("trial " << trial << " row " << r << " a " << a);
+                    const auto close = [](Real u, Real v) {
+                        return std::abs(u - v) <= 1e-14 * std::max(Real{1}, std::abs(v));
+                    };
+                    CHECK(close(oh.f[r], o.f[r].value()));
+                    CHECK(close(oh.q[r], o.q[r].value()));
+                    if (r >= IM::n_pins) {
+                        CHECK(close(oi.f[r], o.f[r].value()));
+                        CHECK(close(oi.q[r], o.q[r].value()));
+                    }
+                    for (std::size_t k = 0; k < 10; ++k) {
+                        INFO("col " << k);
+                        CHECK(close(J[r][k], o.f[r].deriv(k) + a * o.q[r].deriv(k)));
+                    }
+                }
+            }
+        }
+    }
+    // The saturable inductor's hand Jacobian (atan law, DECISIONS #50).
+    {
+        using SL = L::SaturableInductor;
+        const SL::Params<Real> sp{1e-3, 2.0, 1e-5};
+        for (const Real i : {-7.0, -2.0, -0.3, 0.0, 0.4, 1.9, 6.5}) {
+            const std::array<Real, 3> x{1.5, -0.25, i};
+            std::array<ad::ADRealN<3>, 3> xs{};
+            for (std::size_t k = 0; k < 3; ++k) {
+                std::array<Real, 3> d{};
+                d[k] = 1;
+                xs[k] = ad::ADRealN<3>{x[k], d};
+            }
+            device::Out<ad::ADRealN<3>, 3> o;
+            device::eval<SL>(SL::Aux{}, sp, xs, o);
+            for (const Real a : {2.0 / 1e-7, 1.0 / 1e-7, 1.7 / 1e-7}) {
+                device::Out<Real, 3> oh;
+                std::array<std::array<Real, 3>, 3> J{};
+                SL::eval_jac(SL::Aux{}, sp, x, a, oh, J);
+                for (std::size_t r = 0; r < 3; ++r) {
+                    INFO("i " << i << " row " << r << " a " << a);
+                    const auto close = [](Real u, Real v) {
+                        return std::abs(u - v) <= 1e-15 * std::abs(v);
+                    };
+                    CHECK(close(oh.f[r], o.f[r].value()));
+                    CHECK(close(oh.q[r], o.q[r].value()));
+                    for (std::size_t k = 0; k < 3; ++k)
+                        CHECK(close(J[r][k], o.f[r].deriv(k) + a * o.q[r].deriv(k)));
+                }
             }
         }
     }

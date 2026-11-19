@@ -351,6 +351,25 @@ struct SaturableInductor {
             return flux<std::remove_cvref_t<decltype(u)>>(a, p, u);
         });
     }
+
+    /// `eval` in Real with J = ∂f/∂x + a·∂q/∂x written out (`stamp_fq`'s
+    /// hand-Jacobian branch, DECISIONS #50): λ and dλ/di from the same
+    /// one-tangent flux `univariate` runs, the five structural entries as
+    /// fd + a·qd of the AD tangents (exact zeros dropped). J arrives zeroed.
+    static void eval_jac(const Aux& a, const Params<Real>& p, const std::array<Real, 3>& x,
+                         Real fa, Out<Real, 3>& o, std::array<std::array<Real, 3>, 3>& J) {
+        const Real i = x[2];
+        o.f[0] = i;
+        o.f[1] = -i;
+        o.f[2] = x[0] - x[1];
+        const auto r = flux<ad::ADRealN<1>>(a, p, ad::ADRealN<1>{i, {Real{1}}});
+        o.q[2] = -r.value();
+        J[0][2] = Real{1};
+        J[1][2] = Real{-1};
+        J[2][0] = Real{1};
+        J[2][1] = Real{-1};
+        J[2][2] = fa * -r.deriv(0);
+    }
 };
 
 // ---- stored-charge kinds: one LOCAL row (condensed by stamp_fq_local) -----

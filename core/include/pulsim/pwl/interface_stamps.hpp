@@ -477,7 +477,7 @@ PULSIM_IFACE_INLINE inline Real stamp_machine(const PmsmMnaHistory::Entry& e,
     return m;
 }
 
-inline Real stamp(PmsmMnaHistory& k, const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
+inline Real stamp(const PmsmMnaHistory& k, const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
                   Real h, TrBdf2Stage st, bool /*inc: the machines always stamp the
                                                  increment form*/) {
     if (k.empty() || !(h > Real{0})) return Real{0};

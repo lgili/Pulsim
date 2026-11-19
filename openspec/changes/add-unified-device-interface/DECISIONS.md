@@ -824,24 +824,242 @@
     leaves a floating machine neutral out as the test gate does (it read
     0.15 "of scale" on a 1e-11 V node).
 
-### Hand-off (2026-11-19)
+## Slice 9 — default-path cost, machine speed, stepper request (2026-11-19)
 
-- Done this session: merged `feat/core-p5-machines` (f9158ffb) and
-  `feat/core-p5-passives-mosfet` (952ff46c, #44); the machines on the
-  interface (#42); one MOSFET law (#44); the readings argument (#43, then
-  removed by #44); commit without a time formula (#45); evidence (#46);
-  task 7.4's test.
-- Open, new: #44 made the LEGACY MOSFET dearer (+4.2 % instructions per step
-  on the soft boost, +12.5 % on the AC reverse-conduction circuit: two
-  forward evaluations and an exp per call). A cheap pre-test (skip the leak
-  when σ(−κ·V_OV)·e^{−κ|V_DS|} is far below ulp, from κ·(V_OV + |V_DS|)
-  alone) would recover most of it; not done. The saturable inductor reads
-  1.015–1.030× (#45): at the gate, not clearly under it.
-- Open, recorded: the induction machine's instruction ratio 1.04–1.09 (over
-  the 3 % gate; lever in #42); `run_transient.hpp:128`
-  (`seed_held_machine_capacitors`) calls the hand `refresh_pmsm_mna` on both
-  paths (loop freeze); the "unported kind refuses by name" test has no
-  fixture (every Newton kind is ported).
-- `StepHooks::on_device_state` (#31) is still the stepper track's call.
+47. **The default path's MOSFET cost of #44, recovered where the law
+    allows it — bit-identical to 4aa3b15e.** `models::MosfetLevel1::
+    forward_c1_` keeps 4aa3b15e's arithmetic for every result and changes
+    only shared and skipped work: (a) σ(z) and σ(−z) from one exponential
+    (`LogisticPair`, each half formed on demand with `numeric::logistic`'s
+    own operations; z = ±0 / NaN fall back to the two calls); (b) the exits
+    are decided on Real values (an AD value is the Real computation's
+    value), and the AD f and forward(a, 0) are formed only on the exits
+    that return them; (c) a pre-test `leak_below_half_ulp_` — no exp, no
+    forward(a, 0) — that is a SUFFICIENT condition for the "leak ≤ 2⁻⁵⁴·f"
+    exit (bound fl(leak) ≤ 16·|K|·a²·e^{−κ|a|−κd}, tested with a factor 4
+    of margin, f normal; proof in the header); (d) for κd ≤ 1 with
+    |forward(a, 0)|/4 above half an ulp of f, the exit is impossible
+    (e^{−κd} ≥ e^{−1}), so its exp is skipped. Proof of identity: the
+    dense sweep `.scratch/mos_pretest_sweep.cpp` compares bit patterns
+    against a verbatim copy of 4aa3b15e's body — five parameter sets
+    (K, V_T, λ, κ) = (1.43, 3, 0.01, 15), (0.5, 3, 0, 4), (50, 3, 0.02, 15),
+    (1e-3, 2, 0.02, 100), (2, 1.5, −0.01, 1); V_OV ∈ [−60/κ, 200/κ] step
+    0.05/κ × V_DS ∈ [−3, 3] V on 1 mV, plus a log grid 1e-15…3 V of both
+    signs, ±{10, 48, 400, 1e4} V, and, for every V_GS where the pre-test
+    flips along V_DS, the 129 adjacent doubles around the flip on both
+    signs (13 178 flips, 3.4 M points): 165 593 109 Real evaluations, the
+    AD-x (width 3) and AD-parameter (width 4) tangents on a subset, 0
+    differing bits, 0 points where the pre-test passed and the original
+    exit did not (it catches 120.4 M of the 126.2 M original exits). C++
+    test: `test_mosfet_level1.cpp` "shared exponentials and early exits"
+    (the 4aa3b15e body inline, a few ulp — the bit gate is this machine's).
+    Instructions per accepted step, legacy (`.scratch/instr1.sh`, K = 20,
+    three runs; "before #44" = add3b90a built in `.scratch/src_pre44`):
+
+    | case | before #44 | 4aa3b15e | this slice | vs before |
+    |---|---|---|---|---|
+    | soft boost (pwl) | 33 568 / 33 650 / 33 655 | 34 858 / 35 037 / 35 199 | 34 398 / 34 740 / 34 489 | +2.7 % |
+    | AC reverse conduction (pwl) | 21 921 / 21 782 / 21 758 | 24 360 / 24 481 / 24 370 | 22 763 / 22 721 / 22 704 | +4.2 % |
+
+    NOT within 1 %: in both circuits the on-state points carry a leak the
+    law does not drop. With κ = 4 and V_GS = 12 V, κ·V_OV = 36 and the
+    computed 1 − σ(36) = 2⁻⁵² (true e⁻³⁶ = 2.3e-16), so forward(a, 0) ≈
+    0.5·81·2.2e-16 = 9e-15 A against half an ulp of a 1 A current
+    (1.1e-16 A): the correction moves the result by ~50 ulp and 4aa3b15e's
+    law computes it at every such point (κd ≤ 1: the expm1 form, three
+    exponentials; κd > 1: f − leak, one more exp). Per law call (AD 3,
+    `.scratch/bench_mos_instr.cpp`): raw mirror 339 instructions;
+    4aa3b15e 504 where the exit is taken, 936 where the expm1 form runs;
+    now 480 and 717. The rest is that arithmetic, which bit-identity
+    forbids changing. Lever (a NUMBER change, not taken): drop the leak
+    when it is below a relative 1e-12 of f instead of half an ulp — every
+    on-state point then takes the cheap exit (≈ before-#44 cost) and the
+    default numbers move by ≤ 1e-12 relative; an owner decision for the
+    number-changing release.
+
+48. **The induction machine off AD width 10 (#42's lever).** A law may
+    now give `stamp_fq` its Jacobian by hand: `eval_jac(aux, p, x, a, o, J)`
+    writes the Real values in `o` and the nonzero entries of J = ∂f/∂x +
+    a·∂q/∂x (each as fd + a·qd of what the AD tangents were, an exact zero
+    dropped — so the same values up to the sign of an exact zero); the
+    AD branch is unchanged for every other law and stays the path for
+    ∂/∂p. `InductionMachine::terms` computes λ, the rotor rate g, the
+    torque and their partials in u = (i, λ_r, ω) once, in the hand stamp's
+    operation order; `eval` spreads them with `chain_n` as before,
+    `eval_jac` writes them (rows 0–3 ±1, stator rows 1, −1, −R_s + a·(−L),
+    a·(−M); rotor rows −C_r·∂g; speed row −∂T). The commit gained
+    `eval_internal` (q and f of the internal rows only — all `commit_fq`
+    keeps when `kPinQ = false`), and `commit_fq` is force-inlined.
+    Instructions per call (`.scratch/bench_im_instr.cpp`): stamp hand 3 305,
+    interface 3 860 → 3 474; commit hand 184, interface 334 → 206.
+    Interface results are BYTE-identical to 4aa3b15e's on every machine
+    case (`.scratch/iface_ident.py`). Tests: `test_device_laws.cpp` —
+    `eval_jac` against the AD eval for 20 random states × three a (1e-14),
+    `eval_internal` against `eval`'s internal rows; the existing stamp /
+    commit / capture gates against `refresh_pmsm_mna` (32 / 16 ulp) now run
+    through the new branch. Instructions per accepted step, interface /
+    legacy (`.scratch/instr.sh`, K = 6, 5× longer runs, PYTHONHASHSEED=0),
+    runs 1–3: IM sine start 1.005 / 1.010 / 1.014 (was 1.059 / 1.070 /
+    1.066 at 4aa3b15e, same probe); held generator 0.998 / 1.007 / 1.038,
+    two more runs 0.984 / 1.006 (run 3's LEGACY baseline was 2.8 % below
+    its other four — the probe's run-to-run noise here is ±1.5 %); six-step
+    inverter 1.010 / 1.007 / 1.002 (was 1.038 / 1.055 / 1.040). Under the
+    3 % gate on every run but the one legacy outlier.
+
+49. **Requests to the stepper track (loop freeze).**
+    (1) `solver/run_transient.hpp:128`, in `seed_held_machine_capacitors`:
+    the line `(void)pwl::refresh_pmsm_mna(x, J_nl, f_nl, pmsm, Real{1});`
+    becomes, behind the run's path,
+    `if (path == device::DevicePath::Interface) (void)pwl::iface::stamp(pmsm,
+    x, J_nl, f_nl, Real{1}, TrBdf2Stage::Trapezoidal, /*inc=*/true); else`
+    the existing call — with `device::DevicePath path` added as the
+    function's last parameter and passed `opts.device_path` (or
+    `hs.path()`) at its one call site (`run_transient.hpp:782`).
+    `iface::stamp` takes a `const PmsmMnaHistory&` since this slice for it.
+    Only the mechanical rows (ω, θ) are read there, which carry no q, so h
+    and the formula do not enter; the law's rows equal the hand rows to
+    32 ulp (#42). TR-BDF2 has no such seed. Until it lands both paths seed
+    from the hand stamp (same values to rounding).
+    (2) Unchanged: `StepHooks::on_device_state` (#31).
+    The "unported kind is refused by name" test: not rebuilt. The refusal
+    in `StatefulHistories::set_path` walks the compile-time kind lists
+    (`StatefulKinds`, `kPorted`, `static_kind_ported`); every shipped
+    Newton kind is ported, and a test cannot add an unported dummy kind to
+    those lists without a test-only kind in the production headers (task
+    8.4's `TestRcDevice`, not built). The equivalence module's docstring no
+    longer claims the test; the refusal stays exercised only by code review
+    until 8.4.
+
+50. **The saturable inductor at the gate: located, partly recovered.**
+    A C++ driver of the golden `satind_pwl` circuit through
+    `solver::run_transient` (`.scratch/satrun.cpp`, instructions per step
+    from 20 000 vs 120 000 steps, minimum of five runs; same results to the
+    bit on both paths) separates the phases by substitution: with the
+    interface path's stamp swapped for the hand stamp the two paths cost
+    the same (16 868 / 16 887); with the commit swapped nothing moves —
+    the whole gap is the stamp. Per call in isolation the interface stamp
+    is CHEAPER (289 vs 337 instructions, one grounded instance,
+    `.scratch/bench_sat_instr.cpp`); in the run it is ~70 dearer per call
+    (about 4.3 stamps per step): code generation inside the refresh, not
+    arithmetic — forcing `iface::stamp` inline brought the isolated whole-
+    kind call 436 → 294 and moved nothing in the run (reverted);
+    `noinline` made it worse. Kept: the law's hand Jacobian (`eval_jac`,
+    #48's mechanism; λ and dλ/di from the one-tangent flux `univariate`
+    already runs, five entries): run 16 776 / 17 128 (1.021) → 16 838 /
+    17 112 (1.016). Test: `test_device_laws.cpp`, against the AD eval at
+    seven currents × three a (1e-15). Python probe (`.scratch/instr.sh`,
+    K = 20, three runs): 1.020 / 1.021 / 1.016 (#46: 1.015; #45: 1.017–
+    1.030). NOT clearly under 1.02: the remaining ~70 instructions per stamp
+    call are in how the stamp is compiled inside the refresh, which the
+    isolated benchmarks do not reproduce; next lever, untried: a
+    `kPinQ = false` assembly that skips the pin rows' a·q + history (zeros
+    there), and building the stamp's q_n / q̇_n arrays once per kind.
+
+### Hand-off (2026-11-19, slice 9)
+
+- Done: item-1 verification of 4aa3b15e (pytest 5281 passed / 108 skipped /
+  7 xfailed; reference 375 passed; reference_status exit 0; goldens vs
+  golden_m13 differ only in `mosl1_trbdf2`, as #44 recorded; stateful
+  compare identical). #47 (legacy MOSFET cost, bit-identical), #48 (IM off
+  AD width 10: 1.00–1.01×), #49 (stepper request; the refusal test not
+  rebuilt), #50 (saturable inductor 1.016–1.021×). Default path: goldens
+  and stateful compares BYTE-identical to 4aa3b15e; both paths' runs of the
+  machine, saturable and MOSFET cases byte-identical to 4aa3b15e's.
+- Open: the legacy MOSFET stays +2.7 % (soft boost) / +4.2 % (AC) over
+  before-#44 — the rest is the C¹ correction's own arithmetic at points
+  where it changes the result (#47; the lever is a number change). The
+  saturable inductor is not clearly under 1.02 (#50, levers named).
+- Open, unchanged: `StepHooks::on_device_state` (#31) and #49's seed call
+  are the stepper track's.
 - Release list: the MOSFET's negative slope near threshold and past
-  saturation onset (#44), a quiet-machine wall-time check (#38).
+  saturation onset (#44), a quiet-machine wall-time check (#38), #47's
+  relative leak cut-off.
+
+## Slice 10 — integration merge, evidence labels, restart cause (2026-11-19)
+
+51. **What the evidence table's above-1e-12 cells are.**
+    (a) `analytic:im_locked_rotor` / `im_free_acceleration` pwl 0.0355 /
+    0.0389 (trbdf2 1.3e-4 / 2.3e-5) were NOT the analytic error (that is the
+    `err` columns, equal on both paths) and not a law difference: the worst
+    column is state 3, the floating star point, max |v| 3.0e-11 / 5.8e-11 V
+    (physically 0), measured against its own round-off through the 1e-9
+    floor; the absolute difference 3.5e-11 / 3.9e-11 V is 2.5e-13 / 2.0e-13
+    of the 141 / 195 V phases (`.scratch/probe_2a_im.py`). The law-circuit
+    block already dropped such a neutral; the analytic block did not. Tool
+    fixed: a state at round-off level (max ≤ 1e-12 of the circuit's largest)
+    is measured against the circuit's largest — 1e-12, not a looser cut, so a
+    small-unit state (a 3e-8 C stored charge next to 400 V) keeps its own
+    scale (reviewer); the table gained a `grid` column and the
+    header says what each column means.
+    (b) The trbdf2 law cells (1.02e-12 … 5.77e-7) are grid-driven, not law
+    differences (`.scratch/probe_2a.py`): in every one the accepted step
+    sequences part early by a rounding of the error estimate — coss+saturable
+    boost at step 6 (t = 23 ns; difference before the parting 7.9e-18 of
+    scale), fast-gate boost step 60 (2.7e-15), IGBT+VDMOS chopper step 68
+    (1.1e-11), permeance core step 3 (3.9e-22), tail+Lauritzen step 1 (0) —
+    same accepted-point counts, Newton counts equal until well after the
+    parting. After it each run carries its own truncation error; at the
+    common times the difference is ≤ 0.58·rtol (rtol 1e-6). Gate: the
+    existing `test_trbdf2_trajectories_agree_to_rtol` (10·rtol); the table
+    now marks those cells `parted`.
+
+52. **`mosl1_pwl_restart` moves ≤ 4.8e-6 of scale: the restart stage solves
+    inside the gate ramp.** Experiment (`.scratch/probe_2b.py`, old law =
+    `.scratch/pypre44`, add3b90a): the golden `mos_l1` circuit (0.1 µs gate
+    edges) with `discontinuity_restart=True` differs from the old law from
+    the first sample (4.83e-6 at t = 0.1 µs, V_DS = 345 µV, decaying to
+    3.5e-6 by 0.4 µs); plain `mosl1_pwl` is byte-identical although it too
+    sits at V_DS = 169 µV at t = 0.1 µs with V_GS = 10 V. With 1 ns gate edges
+    (`.scratch/probe_2b_fast.py`) BOTH runs are byte-identical under the two
+    laws. So the integration verifier's reading is half right: the leak band
+    is V_DS ≈ 0, but the discriminator is V_GS — the SDIRK restart stage
+    (2γ·dt after the edge) solves inside the 0.1 µs ramp, at an intermediate
+    V_GS where κ·V_OV is small and the leak f(a, 0)·e^{−κ|V_DS|} is far above
+    half an ulp of the current; at V_GS = 10 V (κ·V_OV = 15·7 = 105) it is below it
+    and #47's exit returns the old value bit for bit. Expected, not chased.
+
+53. **The machine commit gate no longer needs bit equality across two code
+    paths.** `test_device_laws.cpp` "the machine laws stamp, commit and
+    capture as the hand stamp": `dlam_gamma` stays `==` (`iface::capture_gamma`
+    for the machine IS the history's `capture_gamma`, one function — a
+    comment says so); `lambda_old` (law eval vs model) and `dlam_old`
+    (v − R·i in two functions) now compare to 8 ulp of the three phases'
+    flux terms (max(|λ_k|, 0.1 H·max|i|, 1 Wb): λ sums L·i terms that can
+    cancel) / of max(|v|, |R·i|) — a compiler that contracts one side to an
+    FMA passes. Built and run on Eigen 5 and 3.4.0. (The machines' ∂/∂p
+    against central differences already existed, `check_param_tangent` at
+    the end of the same test; add-parameter-sensitivities 4.2 is annotated
+    with the coverage.)
+
+54. **The saturable inductor after the integration merge: NOT under 1.02.**
+    Python probe (`.scratch/instr.sh satind_pwl`, K = 20, merged tree
+    d386a013): 16 843 → 17 283 (1.026), 16 790 → 17 228 (1.026),
+    16 842 → 17 156 (1.019). The standalone C++ driver of the same circuit
+    (`.scratch/satrun.cpp`, `-O3 -ffp-contract=off`, min of five) on the
+    same sources: 16 889 → 17 087 (1.012). The interface path's extra cost
+    per step is ≈ 440 instructions in the extension and ≈ 200 in the driver
+    for the same code, so about half of it is how the extension's
+    translation unit compiles the refresh (inlining budget in the large
+    binding TU, the default `-ffp-contract`), not the law — consistent with
+    #50 (cheaper in isolation, dearer in place). Not fixed this slice;
+    next step: compare the two builds' `build_device_refresh` interface
+    lambda (`-Rpass-missed=inline` on the binding TU that instantiates
+    `run_transient`), then #50's untried levers.
+
+### Hand-off (2026-11-19, slice 10)
+
+- Merged `origin/feat/core-integration` e3ee5341 (d386a013, no conflicts;
+  stubs `--check` clean, REFERENCE_STATUS.md regenerated unchanged). Python
+  set on the merge: pytest 5524 passed / 107 skipped / 8 xfailed, reference
+  377, reference_status exit 0, ruff, openspec 78/78; goldens vs
+  `golden_4aa` differ only in the trbdf2 stat key (`n_newton_start_retries`,
+  33 → 34 keys) and `syncbuck_dsed`'s zero Newton counters (both accepted in
+  the integration); stateful compare identical.
+- #51 (evidence labels: analytic IM cells were a floating neutral; trbdf2
+  law cells are parted grids, tolerance-bounded; regenerated: 289/289 cells
+  agree, 0 same-grid cells above 1e-12, 7 parted), #52 (restart cell: the
+  restart stage solves inside the gate ramp), #53 (machine commit gate
+  FMA-safe), #54 (saturable inductor 1.019–1.026, open).
+- Task groups 5–14: every open box carries its reason in tasks.md. Next
+  candidates without a loop edit: 10.x (AC/DC from f and q), 12.x (field
+  tables). No new stepper request this slice (#49's two stand).
