@@ -861,3 +861,24 @@ says where the implementation departs from them or what it settled.
     compiled by Apple clang only: Linux / Windows unverified). Their
     deletion is prepared on `wip/core-p3-stepper-delete-legacy` if it
     exists (not for integration until the orchestrator says so).
+
+19. **Deletion of both legacy loops, prepared (2026-11-19; NOT for
+    integration until CI has compiled the skeleton's inline macros on GCC,
+    Clang + libc++ and MSVC).** Branch `wip/core-p3-stepper-delete-legacy`
+    on top of the slice-3c tip (DECISIONS 18).
+
+    Deleted: the fixed engine's `run_legacy` (dynamic) and `st_run_legacy`
+    (static), the TR-BDF2 `run_legacy`, both environment reads
+    (`PULSIM_PWL_STEPPER_LEGACY`, `PULSIM_TRBDF2_STEPPER_LEGACY`; a script
+    that still sets them now runs the skeleton), and the two Python twin
+    tests (`test_pwl_stepper_twin.py`, `test_trbdf2_stepper_twin.py`: with
+    one driver they compared it with itself). Kept, owed to the integration
+    of this branch: the identity tools `pwl_twin_identity.py` /
+    `trbdf2_twin_identity.py` (they now compare the skeleton with itself;
+    delete or repoint them), the zero-alloc case's `set_pwl_twin` (sets a
+    variable nothing reads; the case still holds, both iterations run the
+    skeleton; NOT recompiled on this branch).
+
+    Identity, with no twin left: the default of this branch against the
+    stored OLD baselines (67fef260's default): byte-identical on the four compares (goldens, stateful, engines, step sequences); `pytest -m reference` pytest -m reference 377 passed; full pytest on the branch tree 5535 passed / 108 skipped / 8 xfailed (the 25 twin tests gone; one skip more than expected, not yet identified). Cost
+    (instructions per step, OLD vs this branch, min of 3): buck_pwl 3035.8 → 3050.5 (1.0048), vsi_pwl 4700.9 → 4714.3 (1.0029), vsi_pwl_restart 4865.2 → 4881.3 (1.0033), shockbuck_pwl 1.0009, rlc152_pwl 0.9996, static_pwl 1.0009, buck_trbdf2 0.9994, bridge_trbdf2 1.0000, shockbuck_trbdf2 0.9997 — the same as the 3c tip with the loops kept (one build; no shake build of this branch).

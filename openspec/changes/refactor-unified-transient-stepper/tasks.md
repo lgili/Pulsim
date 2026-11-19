@@ -105,6 +105,7 @@ at equal times or time-weighted measures, never sample means.
 
 ## 13. Delete the legacy drivers (one release after 8.3)
 - [ ] 13.1 Delete `pwl-legacy`, `trbdf2-legacy`, the hidden names, the bodies of `run_transient` and `run_transient_trbdf2`
+  - Prepared on `wip/core-p3-stepper-delete-legacy` (DECISIONS 19): both legacy loops (fixed dynamic + static, TR-BDF2) and their internal environment variables deleted; byte-identical to 67fef260's default on the four compares and the reference set; not integrated until CI compiles the skeleton's inline macros on GCC, Clang + libc++, MSVC
 - [ ] 13.2 Oracle: matrix; harness; suite; counter gate
 - [ ] 13.3 Final measurement table: lines of transient driver code before and after, ns/step rows 1–3 and 5–9, build time; update `openspec/CORE_ROADMAP.md`
 
