@@ -37,6 +37,7 @@ from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
 
+from . import _pulsim  # type: ignore[attr-defined]
 from ._refusal import UnsupportedError, unsupported
 
 __all__ = ["Recorder", "Recording"]
@@ -773,7 +774,6 @@ def attach_xdev_trace(sim):
     """Called by simulate()'s Simulation routes after the recorders: trace
     the external devices added with ``record=True``. Returns the trace or
     None (no such device: nothing is attached)."""
-    from . import _pulsim
     if not _pulsim._XdevTrace.wanted(sim.builder):
         return None
     tr = _pulsim._XdevTrace()
