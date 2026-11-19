@@ -814,3 +814,88 @@ TEST_CASE("stored-charge kinds (Lauritzen, IGBT tail): allocation count is "
         }
     }
 }
+
+namespace {
+// The fixed engine's twin on the step skeleton is internal: selected by
+// PULSIM_PWL_STEPPER_TWIN=1 (refactor-unified-transient-stepper DECISIONS 13).
+void set_pwl_twin(bool on) {
+#ifdef _WIN32
+    _putenv_s("PULSIM_PWL_STEPPER_TWIN", on ? "1" : "0");
+#else
+    setenv("PULSIM_PWL_STEPPER_TWIN", on ? "1" : "0", 1);
+#endif
+}
+}  // namespace
+
+TEST_CASE("fixed engine twin on the step skeleton: the legacy run, its own hooks, no per-step allocation",
+          "[v2][perf][zero_alloc][stepper]") {
+    SwitchedRC f;
+    f.cache->build_lazy(Real{1e-6});
+    solver::SimulationOptions opts;
+    opts.t_start = 0.0;
+    opts.dt = 1e-6;
+    opts.resolution_diagnostics = false;
+    solver::SwitchScheduleFn switch_fn = [](Real t) {
+        SwitchStateMask m(2);
+        const auto k = static_cast<int>(t / 1e-6 + 0.5);
+        m.set(0, (k / 10) % 2 != 0);   // toggles every 10 steps
+        return m;
+    };
+    events::StepHooks hooks;
+    std::size_t n_acc = 0, n_step = 0, n_dev = 0, bad = 0;
+    Vector x_end_prev;
+    Real t_end_prev = 0.0;
+    hooks.on_accept([&](Real, Real, const Vector&, const SwitchStateMask&) { ++n_acc; });
+    // probes R1: the step's start state is the previous step's end state
+    hooks.on_step([&](Real t0, const Vector& x0, const SwitchStateMask&, Real t1,
+                      const Vector& x1, const SwitchStateMask&) {
+        bad += !(t1 > t0);
+        if (n_step > 0) {
+            bad += t0 != t_end_prev;
+            bad += !(x0.size() == x_end_prev.size() && x0 == x_end_prev);
+        }
+        x_end_prev = x1;   // same size after the first step: no allocation
+        t_end_prev = t1;
+        ++n_step;
+    });
+    hooks.on_device_state([&](Real, const Vector&, const pwl::StatefulHistories&) { ++n_dev; });
+    auto run = [&](bool twin, Real t_end) {
+        set_pwl_twin(twin);
+        opts.t_end = t_end;
+        n_acc = n_step = n_dev = bad = 0;
+        const std::size_t b0 = g_new_count.load();
+        auto r = solver::run_transient(*f.cache, f.g, f.pool, opts,
+                                       switch_fn, {}, false, {}, {}, nullptr,
+                                       {}, nullptr, {}, {}, nullptr, &hooks);
+        const std::size_t d = g_new_count.load() - b0;
+        set_pwl_twin(false);
+        return std::pair{d, std::move(r)};
+    };
+    auto [d_old, r_old] = run(false, 2e-3);
+    CHECK(n_acc == 2000);
+    CHECK(n_step == 0);   // the legacy loop never calls the skeleton's hooks
+    CHECK(n_dev == 0);
+    run(true, 2e-3);      // warm-up
+    auto [d2, r2] = run(true, 2e-3);
+    CHECK(n_acc == 2000);
+    CHECK(n_step == 2000);
+    CHECK(n_dev == 2000);
+    CHECK(bad == 0);
+    // Two code paths: within 1e-12 of scale here (bit identity is the
+    // local gate, benchmarks/tools/pwl_twin_identity.py).
+    REQUIRE(r2.times.size() == r_old.times.size());
+    REQUIRE(r2.states.size() == r_old.states.size());
+    Real worst = 0.0, scale = 0.0;
+    for (std::size_t i = 0; i < r_old.states.size(); ++i) {
+        CHECK(r2.times[i] == Catch::Approx(r_old.times[i]).margin(1e-18));
+        worst = std::max(worst, (r2.states[i] - r_old.states[i]).cwiseAbs().maxCoeff());
+        scale = std::max(scale, r_old.states[i].cwiseAbs().maxCoeff());
+    }
+    CHECK(worst <= 1e-12 * scale);
+    auto [d4, r4] = run(true, 4e-3);
+    CHECK(n_step == 4000);
+    INFO("operator-new: twin 2000 steps " << d2 << ", 4000 steps " << d4 << ", legacy " << d_old);
+    if (kCountsMeaningful) {
+        CHECK(d4 <= d2 + 2);   // no per-step allocation on the twin
+    }
+}

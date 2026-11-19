@@ -224,3 +224,32 @@ while applying it.
 - **Reverse.** → Delete the `has_diodes && iters_2 > 1` block in
   `run_restart` and set `be_commit_h` back to γh; the two rectifier
   tests then fail.
+
+## Stage-2 turn-on that undoes stage 1 (exact-truth scoreboard, 2026-11-19)
+
+- **Defect.** → The 50-digit exact truth scored `flyback_converter`
+  0.11 and `forward_converter` 0.092 on pwl+restart and pwl+split, not
+  converging with dt (flyback 0.11 / 0.10 / 0.067 at dt, dt/4, dt/16).
+  Measured mechanism, flyback's first switch-off (8 µs, coupling 0.95,
+  g_off = 1e-6): stage 1 (BE) drains the flux through g_off and turns
+  the rectifier OFF (exact: OFF 58 ps after the gate); stage 2 from x0*
+  flips the sign of the stiff residual (R(z) < 0 for z < −1/(1−2γ)),
+  forward-biases the rectifier and turns it back ON. The fallback only
+  re-tried a stage-2 turn-OFF, so the SDIRK stage stood: the secondary
+  kept −0.040 A (dt), −0.032 A (dt/4), −0.117 A (dt/16) at every
+  switch-off (exact: +1.6e-6 A, the g_off leakage).
+- **Fix chosen.** → A stage-2 turn-on is re-tried like a turn-off when
+  it undoes stage 1's turn-off of a diode that conducted at the step
+  start (bits at stage 1's start, `rs_bits0`). A turn-on of a diode that
+  was off at the step start keeps the SDIRK stage (H1 unchanged: buck
+  CCM zero start bit-identical). → exact V(out): flyback 2.6e-6 (dt) /
+  1.1e-5 (dt/4); forward 5.0e-6 / 1.2e-4. Test:
+  `test_restart_stiff_overshoot.py`.
+- **Rejected.** → Re-trying every stage-2 turn-on: forward 5.6e-7 at
+  dt/4, but it re-opens H1 (dt-independent 7e-10 A on the buck CCM).
+- **Left.** → Two residuals of the same R(z) < 0 below dt/4, both far
+  under the 0.02 tolerance: a step whose stages keep the mode still
+  leaves a sign-flipped residual that the NEXT step's stage 1 reads as a
+  turn-on (flyback dt/16: 2.1e-4); a physical re-turn-on of the forward
+  rectifier (exact: ON again at 8.0067 µs) starts with −3e-4 A instead
+  of −1e-5 A (forward dt/4: 1.2e-4).

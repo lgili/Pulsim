@@ -33,12 +33,12 @@ at equal times or time-weighted measures, never sample means.
 ## 4. Integrators as stage tables
 - [ ] 4.1 `solver/step/integrators.hpp`: `Trapezoidal`, `BackwardEuler`, `TrBdf2` (`stage`, `lte` moved from `trbdf2_transient.hpp:1286-1375`)
   - Done: the stage tables; `TrBdf2::lte` (the per-component estimate, called by the driver); `err_exponent`; `Sdirk22`; `hermite` dense output. Open: the driver's embedded SDIRK estimate (its γs = γ/2, DECISIONS 4) and the W⁻¹ filter
-- [ ] 4.2 Both drivers obtain their `StageSpec`s from the tables
+- [x] 4.2 Both drivers obtain their `StageSpec`s from the tables (fixed: `step::Trapezoidal::stage` / `BackwardEuler::on_factor` for every solve's step context; TR-BDF2: `step::TrBdf2::stage`)
 - [x] 4.3 Unit tests: both TR-BDF2 stages return the same `factor_dt`; `BackwardEuler::stage(h/2)` returns `factor_dt == h`; every stage's `h_elapsed` sums to `h` (as `t_off`: the last stage ends at `h`, DECISIONS 3; `core/tests/step/test_integrators.cpp`)
 - [ ] 4.4 Oracle: goldens; step-identical; counter gate equal
 
 ## 5. Controllers and policies as types
-- [ ] 5.1 `solver/step/controllers.hpp`: `Fixed` (integer counter), `Lte` (moved from `trbdf2_transient.hpp:1710-1810` with the step memory), `ControllerState`
+- [x] 5.1 `solver/step/controllers.hpp`: `Fixed` (integer counter), `Lte` (moved from `trbdf2_transient.hpp:1710-1810` with the step memory), `ControllerState` (`FixedClock` is the fixed engine's grid; `LteController` the TR-BDF2 step memory and factor laws; both drivers use them)
 - [ ] 5.2 `solver/step/policies.hpp`: `IterateAtStepEnd`, `Localize`, `HalvingLadder`, `ShrinkAndRepeat`, `GuardPolicy`, `RestartPolicy` (`None` plus whatever Phase 2 has landed), each extracted in place and called by its driver
 - [ ] 5.3 Oracle: goldens; step-identical; `dt_retries`, `event_iteration_breaches`, `inductor_guard_actions` records identical
 
@@ -53,6 +53,7 @@ at equal times or time-weighted measures, never sample means.
 
 ## 7. The fixed-step stepper, feature by feature
 - [ ] 7.1 `Stepper<Trapezoidal, Fixed>` as `pwl-next` for plain runs (linear, switches, PWL diodes, Newton devices, `should_continue`, `b_extra_fn`, `initial_state`, `resume_from`)
+  - Slice 3a (DECISIONS 13), done: the dynamic loop cut into five phase lambdas that the legacy loop and the twin `step::run<Trapezoidal>(FixedController, PhaseBody)` both call, so every feature of 7.1–7.11 runs on the skeleton at once (internal `PULSIM_PWL_STEPPER_TWIN=1`, not an engine name); bit-identical to the legacy loop on 379 runs (52 goldens, 109 reference circuits × pwl / pwl+restart / pwl+split), the four byte compares and resumes across the two paths; `benchmarks/tools/pwl_twin_identity.py`, `python/tests/test_pwl_stepper_twin.py`, `test_zero_alloc.cpp` "fixed engine twin on the step skeleton". Speed gate met after the cause was found (DECISIONS 14: a hoisted mask's per-step copy-ASSIGNMENT called `vector::assign` out of line; the twin's adapters were out of line): default path at or below f69a2cbd on buck / VSI / VSI+restart / Shockley buck / RLC ladder, twin ≤ 1.01× the default (three runs each). Open: the `pwl-next` name / route, the static (no dynamic device) path, probes R2
 - [ ] 7.2 `start_from_dc_op`
 - [ ] 7.3 Recorder hooks: `store_every`, `progress`, `live_stream`
 - [ ] 7.4 `strict_event_iterations`

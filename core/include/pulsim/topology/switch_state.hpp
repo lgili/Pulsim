@@ -65,7 +65,19 @@ public:
     SwitchStateMask() = default;
     SwitchStateMask(const SwitchStateMask&)            = default;
     SwitchStateMask(SwitchStateMask&&) noexcept        = default;
-    SwitchStateMask& operator=(const SwitchStateMask&) = default;
+    // Inline when neither side holds the heap words: the defaulted form
+    // calls vector::assign out of line on every copy, and a step loop
+    // that reuses a mask (copy-assign instead of copy-construct) pays
+    // it per step (refactor-unified-transient-stepper DECISIONS 14).
+    SwitchStateMask& operator=(const SwitchStateMask& o) {
+        size_      = o.size_;
+        nwords_    = o.nwords_;
+        inline_[0] = o.inline_[0];
+        inline_[1] = o.inline_[1];
+        static_assert(kInlineWords == 2, "copy every inline word");
+        if (!ext_.empty() || !o.ext_.empty()) ext_ = o.ext_;
+        return *this;
+    }
     SwitchStateMask& operator=(SwitchStateMask&&) noexcept = default;
 
     // -------------------------------------------------------------------------

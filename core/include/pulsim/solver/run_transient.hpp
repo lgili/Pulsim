@@ -60,6 +60,7 @@
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/solver/step/integrators.hpp"
+#include "pulsim/solver/step/stepper.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
@@ -75,6 +76,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cmath>
 #include <limits>
 #include <format>
@@ -834,6 +836,7 @@ inline SimulationResult run_transient(
     // run_restart): x1, its diode bits and the histories at x0.
     Vector rs_x1, rs_x2;
     std::vector<bool> rs_bits, rs_bits2, rs_bits_be, rs_solved2;
+    std::vector<bool> rs_bits0;   // the diode bits at stage 1's start
     // The diode bits after stage 1 of a restart that starts at the step
     // start: a branch-form flip already there was forced at t_prev.
     std::vector<bool> rs_bits_first;
@@ -1696,17 +1699,54 @@ inline SimulationResult run_transient(
             rd.lte.reserve(result.times.capacity());
         }
 
-        for (Size k = 1; k < n_steps; ++k) {
-            // User-cancellation check (Phase: live scope). Lets a
-            // GUI / external watchdog stop the simulation early
-            // while preserving the partial trace.
-            if (should_continue && !should_continue()) {
-                break;
-            }
-            const Real t = fixed_grid.at(k_off + k);
+        // ---- refactor-unified-transient-stepper slice 3a (DECISIONS 13) --
+        // The step is five phases (begin, take, after_solve, commit,
+        // record), each ONE lambda that both drivers call: the legacy loop
+        // below (the default) and the step skeleton's twin
+        // (`step::run<Trapezoidal>(FixedController, PhaseBody)`, selected by
+        // the internal PULSIM_PWL_STEPPER_TWIN=1, never a public option).
+        // The step's locals that cross phases live here, (re)set at the
+        // program point where the loop body declared them. The step's
+        // times are re-read into a const local at the top of each phase:
+        // a hoisted, mutable `t` is reloaded after every opaque call (the
+        // commutation-record loop runs per diode), a const local is not.
+        const bool pwl_stepper_twin = [] {
+            const char* e = std::getenv("PULSIM_PWL_STEPPER_TWIN");  // NOLINT(concurrency-mt-unsafe)
+            return e != nullptr && e[0] == '1' && e[1] == '\0';
+        }();
+        Real t_step = Real{0};
+        Real t_prev_step = Real{0};
+        Real gate_t = Real{0};
+        Size n_ev = 0;
+        bool ev_overflow = false;
+        bool capture_first = false;
+        Real gate_t0 = Real{0};
+        topology::SwitchStateMask mask_pre;
+        Size iters = 0;
+        bool flipped = false;
+        bool mask_cycle = false;
+        Real committed_dt = opts.dt;
+        bool step_retried = false;
+        bool edge_restart_step = false;
+        bool restart = false;
+        bool committed_be = false;
+        Real be_commit_h = kGamma * opts.dt;
+        auto commit_backward_euler = [&](Real h_e) {
+            history.update_from_state_backward_euler(x, h_e);
+            hs.commit(x, h_e, pwl::TrBdf2Stage::BackwardEuler);
+        };
+        // User-cancellation check (Phase: live scope). Lets a
+        // GUI / external watchdog stop the simulation early
+        // while preserving the partial trace.
+        auto step_cancelled = [&]() PULSIM_STEP_PHASE {
+            return should_continue && !should_continue();
+        };
+
+        auto step_begin = [&](Size k) PULSIM_STEP_PHASE {
+            const Real t = t_step = fixed_grid.at(k_off + k);
             t_reached = t;
             k_reached = k;
-            const Real t_prev = fixed_grid.at(k_off + k - 1);
+            const Real t_prev = t_prev_step = fixed_grid.at(k_off + k - 1);
             // The heat the previous step queued, as this step's power.
             if (lt) lt->advance(opts.dt);
 
@@ -1728,7 +1768,7 @@ inline SimulationResult run_transient(
             // gate is sampled at the step START (design D4); the
             // observer keeps its (t_k, x_{k-1}) label, whose move to
             // t_{k-1} belongs to fix-control-tick-semantics.
-            Real gate_t = restart_rule ? t_prev : t;
+            gate_t = restart_rule ? t_prev : t;
             if (step_observer || step_observer_in) {
                 (has_ticks ? step_observer : step_observer_in)(t, x_prev);
                 // An observer (or a control tick) may mutate the
@@ -1747,9 +1787,9 @@ inline SimulationResult run_transient(
             // a source jump triggers the restart below), one after it at
             // t (the next step's; a source jump is read at its left
             // limit by this step's last solve).
-            Size n_ev = 0;
-            bool ev_overflow = false;
-            bool capture_first = false;   // keep the first solve (diode split)
+            n_ev = 0;
+            ev_overflow = false;
+            capture_first = false;   // keep the first solve (diode split)
             if (split) {
                 src_end_at = std::numeric_limits<Real>::quiet_NaN();
                 auto push_ev = [&](Real e) {
@@ -1831,7 +1871,7 @@ inline SimulationResult run_transient(
                 }
                 n_ev = m;
             }
-            const Real gate_t0 = gate_t;
+            gate_t0 = gate_t;
             // V3 snapshots — taken regardless of whether
             // correction fires (cheap; vectors are small per
             // dynamic-branch). Restored only if a commutation
@@ -1850,7 +1890,7 @@ inline SimulationResult run_transient(
             // Pre-event mask: what mask we'd use BEFORE any
             // diode flip during this step. Captured before
             // event iteration runs.
-            topology::SwitchStateMask mask_pre = gate_at(gate_t);
+            mask_pre = gate_at(gate_t);
             if (split && !next_edge_fn) {
                 // An opaque switch_fn: a gate change between two grid
                 // samples was not located (review M3).
@@ -1871,7 +1911,11 @@ inline SimulationResult run_transient(
             if (has_diodes) {
                 mask_pre = diodes.combine(mask_pre);
             }
+        };  // step_begin
 
+        auto step_take = [&]() PULSIM_STEP_PHASE {
+            const Real t = t_step;
+            const Real t_prev = t_prev_step;
             // Accumulate b_extra into the reused buffer (audit #6), in the
             // same left-to-right order as before so the result is
             // bit-identical: history, then the optional user fn, then only the
@@ -1888,9 +1932,9 @@ inline SimulationResult run_transient(
             // If `nl_refresh` was supplied, the inner solve uses
             // Newton (with the trap-companion `b_extra`); else
             // it's the cached linear solve.
-            Size iters = 0;
-            bool flipped = false;
-            bool mask_cycle = false;
+            iters = 0;
+            flipped = false;
+            mask_cycle = false;
             // Full mask copies (Phase 1: masks can exceed 64 bits; a
             // copy is 2 inline words for <=128 switches — still no
             // heap in the loop).
@@ -2172,8 +2216,8 @@ inline SimulationResult run_transient(
             // step; the retry's sub_dt when a step had to be
             // re-taken. Also distinguishes the corrected path — no
             // separate flag is needed.
-            Real committed_dt = opts.dt;
-            bool step_retried = false;
+            committed_dt = opts.dt;
+            step_retried = false;
             mask_cycle = false;    // per OUTER step, not per sub-step
             // a gated device's record compares with the last OUTER step's
             // stamp: restart stages and split sub-steps re-stamp in between
@@ -2191,7 +2235,7 @@ inline SimulationResult run_transient(
             // either side) restarts the step.
             // a gate edge at the step start (stamps its forced flips there):
             // the gate bits changed, the diode bits read as committed
-            const bool edge_restart =
+            edge_restart_step =
                 restart_rule && stamped_known && has_ideal_diode &&
                 !(mask_pre == combine_masks(stamped_mask, diodes.current_diode_mask(),
                                             diode_owned));
@@ -2207,16 +2251,12 @@ inline SimulationResult run_transient(
                          : b_jump_after(t_prev - left_by) < t - left_by)))) {
                 restart_left = kRestartSteps;
             }
-            bool restart = restart_left > 0;
+            restart = restart_left > 0;
             if (restart) --restart_left;
             // The final solve of this step was a restart stage, so the
             // deferred commit below is a backward-Euler one (at γh).
-            bool committed_be = false;
-            Real be_commit_h = kGamma * opts.dt;   // set by run_restart
-            auto commit_backward_euler = [&](Real h_e) {
-                history.update_from_state_backward_euler(x, h_e);
-                hs.commit(x, h_e, pwl::TrBdf2Stage::BackwardEuler);
-            };
+            committed_be = false;
+            be_commit_h = kGamma * opts.dt;   // set by run_restart
             // One Alexander SDIRK(2,2) step of h from t_from (γ = 1 −
             // 1/√2, L-stable, order 2). Both stages are backward-Euler-
             // like solves of size γh — conductance C/(γh), i.e. the
@@ -2247,6 +2287,7 @@ inline SimulationResult run_transient(
                 const Real dt_eq = Real{2} * h_s;
                 be_commit_h = h_s;
                 accumulate_b_extra(t_from + h_s, dt_eq, true);
+                if (has_diodes) diodes.snapshot_on_bits_into(rs_bits0);
                 run_event_iteration(t_from + h_s, dt_eq, true);
                 const Size iters_1 = iters;
                 const bool breach_1 = flipped;
@@ -2270,19 +2311,27 @@ inline SimulationResult run_transient(
                 accumulate_b_extra(t_from + h, dt_eq, true);
                 run_event_iteration(t_from + h, dt_eq, true);
                 const Size iters_2 = iters;
-                // Only a diode stage 1 conducts and stage 2 turns off,
-                // with no diode turning on: the overshoot mechanism. A
+                // A diode stage 1 conducts and stage 2 turns off, with no
+                // diode turning on: the overshoot mechanism (`on_to_off`
+                // also covers the undo below). A
                 // turn-on in stage 2 (e.g. round-off at a zero start,
-                // buck CCM at t = 0) keeps the SDIRK stage.
+                // buck CCM at t = 0) keeps the SDIRK stage, unless it
+                // undoes stage 1's turn-off of a diode that conducted at
+                // the interval start: R(z) < 0 for z < -1/(1-2γ) flips the
+                // sign of a stiff residual (a transformer cut by its
+                // switch, g_off) and the flip forward-biases the diode
+                // again. Kept, the flyback trapped 0.04-0.12 A in its
+                // secondary at every switch-off (exact error 0.11, not
+                // converging with dt).
                 bool on_to_off = false;
                 if (has_diodes && iters_2 > 1) {
                     diodes.snapshot_on_bits_into(rs_bits2);
                     for (Size q = 0; q < rs_bits.size(); ++q) {
-                        if (!rs_bits[q] && rs_bits2[q]) {
+                        if (!rs_bits[q] && rs_bits2[q] && !rs_bits0[q]) {
                             on_to_off = false;
                             break;
                         }
-                        on_to_off = on_to_off || (rs_bits[q] && !rs_bits2[q]);
+                        on_to_off = on_to_off || (rs_bits[q] != rs_bits2[q]);
                     }
                 }
                 if (on_to_off) {
@@ -2697,7 +2746,12 @@ inline SimulationResult run_transient(
                             : ""));
                 }
             }
+        };  // step_take
 
+        auto step_after_solve = [&]() PULSIM_STEP_PHASE {
+            const Real t = t_step;
+            const Real t_prev = t_prev_step;
+            const bool edge_restart = edge_restart_step;
             if (flipped || mask_cycle) {
                 if (opts.strict_event_iterations) {
                     // v2.0 Phase 1: name the diodes that were still
@@ -2828,7 +2882,11 @@ inline SimulationResult run_transient(
             for (const auto& ev : step_events) {
                 result.commutation_events.push_back(ev);
             }
+        };  // step_after_solve
 
+        auto step_commit = [&]() PULSIM_STEP_PHASE {
+            const Real t = t_step;
+            const Real t_prev = t_prev_step;
             // 4b. Floating-inductor freeze guard (Layer 5 V5).
             //
             // When ``opts.inductor_freeze_di_max > 0``, walk every
@@ -2939,7 +2997,11 @@ inline SimulationResult run_transient(
             // add-in-kernel-event-losses: the step is accepted; read its
             // commutations and conduction energy (reading rule).
             if (lt) lt->accept(t_prev, t, x, stamped_mask);
+        };  // step_commit
 
+        auto step_record = [&](Size k) PULSIM_STEP_PHASE {
+            const Real t = t_step;
+            const Real t_prev = t_prev_step;
             if (diag) {
                 const bool src_jump = (has_pwm || has_pulse || has_iwave) &&
                     sources::next_source_jump_after(pool, graph, t_prev) <= t;
@@ -3059,6 +3121,64 @@ inline SimulationResult run_transient(
                                   : -1L,
                               opts.on_impulse_error, "pwl", result);
             }
+        };  // step_record
+
+        // The twin: the same phases in the skeleton's order and clock
+        // (grid step k = k_off + 1 .. k_off + n_steps - 1 of the run's
+        // grid). Hooks only the skeleton calls (DECISIONS 13): probes R1
+        // (`StepHooks::step`, the step's start state and mask) and the
+        // device interface's #31 (`device_state` after the commit). Each
+        // driver is one out-of-line function with the phases inlined into
+        // it (DECISIONS 14).
+        auto run_twin = [&]() PULSIM_STEP_DRIVER {
+            const bool hook_step = hooks != nullptr && hooks->has_step();
+            topology::SwitchStateMask mask_start;
+            auto tw_begin = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
+                if (hook_step) mask_start = stamped_mask;
+                step_begin(f.k - k_off);
+            };
+            auto tw_take = [&](const step::StepFrame&) PULSIM_STEP_PHASE {
+                step_take();
+                return true;   // a failed step throws (the legacy loop's rule)
+            };
+            auto tw_after = [&](step::StepFrame&) PULSIM_STEP_PHASE {
+                step_after_solve();
+                return true;   // pwl lands its events inside take
+            };
+            auto tw_commit = [&](const step::StepFrame&) PULSIM_STEP_PHASE {
+                step_commit();
+                if (hooks != nullptr) hooks->device_state(t_step, x, hs);
+            };
+            auto tw_record = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
+                step_record(f.k - k_off);
+                if (hook_step) {
+                    hooks->step(t_prev_step, x_prev, mask_start, t_step, x, stamped_mask);
+                }
+            };
+            auto tw_poll = [&]() PULSIM_STEP_PHASE { return !step_cancelled(); };
+            auto body = step::phase_body(tw_poll, tw_begin, tw_take, tw_after,
+                                         tw_commit, tw_record);
+            step::FixedController clock{.clock = fixed_grid,
+                                        .k = k_off + 1,
+                                        .n_steps = k_off + n_steps};
+            (void)step::run<step::Trapezoidal>(clock, body);
+        };
+        auto run_legacy = [&]() PULSIM_STEP_DRIVER {
+            for (Size k = 1; k < n_steps; ++k) {
+                if (step_cancelled()) {
+                    break;
+                }
+                step_begin(k);
+                step_take();
+                step_after_solve();
+                step_commit();
+                step_record(k);
+            }
+        };
+        if (pwl_stepper_twin) {
+            run_twin();
+        } else {
+            run_legacy();
         }
         if (diag && rd_steps > 0) {
             rd.unestimated_fraction =
