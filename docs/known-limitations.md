@@ -153,8 +153,8 @@ ideal elements and voltage sources with `feature='ideal_voltage_loop'`.
 <!-- branch-form-capabilities:begin -->
 | Form | pwl | trbdf2 | dsed | bdf1 | ac_sweep |
 |---|---|---|---|---|---|
-| Switch | yes | yes | yes | no | no |
-| Diode | yes | yes | yes | no | no |
+| Switch | yes | yes | yes | no | yes |
+| Diode | yes | yes | yes | no | yes |
 <!-- branch-form-capabilities:end -->
 
 The gated PWL devices are a form of the Diode row with their own column

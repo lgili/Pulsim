@@ -69,6 +69,46 @@ def test_switch_state_is_the_callers_mask():
     assert abs(_sweep(b, "o", mask=off).H[0]) < 1e-5
 
 
+def _rc_ideal(R_on=0.0, g_on=None):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 0.0)
+    if g_on is None:
+        b.add_switch("S", "in", "a", form="branch", R_on=R_on, g_off=1e-9)
+        b.add_diode("D", "a", "gnd", form="branch", R_on=0.0, g_off=0.0)
+    else:
+        b.add_switch("S", "in", "a", g_on, 1e-9)
+        b.add_diode("D", "a", "gnd", g_on, 0.0)
+    b.add_resistor("R", "a", "o", 100.0)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    return b
+
+
+def _closed_s(b):
+    m = p.SwitchStateMask(b.graph.num_switches)
+    m.set(b.switch_index_of("S"), True)     # D stays OFF (reverse-biased)
+    return m
+
+
+def test_branch_form_rc_through_a_closed_ideal_switch_is_the_closed_form():
+    b = _rc_ideal()
+    _close(_sweep(b, "o", mask=_closed_s(b)).H, 1.0 / (1.0 + 1j * W * 100.0 * 1e-6))
+    # R_on > 0 is a series resistance; the conductance twin is its limit
+    b = _rc_ideal(R_on=5.0)
+    _close(_sweep(b, "o", mask=_closed_s(b)).H, 1.0 / (1.0 + 1j * W * 105.0 * 1e-6))
+    tw = _rc_ideal(g_on=1e6)
+    np.testing.assert_allclose(_sweep(_rc_ideal(), "o", mask=_closed_s(b)).H,
+                               _sweep(tw, "o", mask=_closed_s(tw)).H, rtol=1e-7)
+
+
+def test_branch_form_sweep_refuses_an_unposed_mask_by_the_transients_name():
+    b = _rc_ideal()
+    m = _closed_s(b)
+    m.set(b.switch_index_of("D"), True)     # S and D closed: a short of V
+    with pytest.raises(p.UnsupportedError) as ei:
+        _sweep(b, "o", mask=m)
+    assert (ei.value.engine, ei.value.feature) == ("ac_sweep", "ideal_voltage_loop")
+
+
 def test_switches_without_a_mask_are_refused_by_name():
     with pytest.raises(ValueError, match=r"mask.*\bS\b|\bS\b.*mask"):
         _sweep(_rc_switch(), "o")

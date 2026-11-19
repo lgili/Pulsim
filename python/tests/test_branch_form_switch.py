@@ -256,14 +256,18 @@ def test_branch_switch_refused_by_name(engine):
             _sim(b, t_end=1e-4, dt=1e-6, switch_fn=lambda t: _mask(b, ["S"]), engine=engine)
     assert (ei.value.engine, ei.value.feature, ei.value.device, ei.value.kind) == (
         engine, "branch_form", "S", "Switch")
+    # the message says the engine is retired and names the ones to use
+    assert "retired" in str(ei.value) and "engine='pwl'" in str(ei.value) \
+        and "engine='trbdf2'" in str(ei.value)
 
 
-def test_branch_switch_refused_by_the_ac_sweep():
+def test_branch_switch_runs_in_the_ac_sweep():
+    # stamped at the mask with the transient's assembler (update-number-
+    # changing-release 1.7); the closed forms are in test_mna_sweep_correctness
     b = _rl()
-    with pytest.raises(p.UnsupportedError) as ei:
-        p._pulsim.run_mna_sweep_kernel(b.graph, b.pool, _mask(b, ["S"]), [1e2, 1e3],
+    H = p._pulsim.run_mna_sweep_kernel(b.graph, b.pool, _mask(b, ["S"]), [1e2, 1e3],
                                        b.node_id_of("vin"), b.node_id_of("b"))
-    assert (ei.value.engine, ei.value.feature) == ("ac_sweep", "branch_form")
+    assert np.all(np.isfinite(np.asarray(H.H)))
 
 
 @pytest.mark.parametrize("R_on, g_off", [(0.0, 0.0), (1e-3, 0.0)])

@@ -33,6 +33,7 @@
 
 #pragma once
 
+#include "pulsim/pwl/branch_structure.hpp"
 #include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -173,8 +174,23 @@ assemble_sweep_matrices(const topology::Graph& graph,
     Size output_node_idx,
     const ShouldContinueFn& should_continue = {}) {
 
-    // 1. Newton devices are refused, not dropped.
+    // 1. Newton devices are refused, not dropped; an ideal branch-form
+    //    element that leaves a node floating or closes a voltage loop at
+    //    this mask is refused by the transient's names.
     detail::require_linear_for_sweep(graph, pool);
+    if (pwl::BranchStructureChecker chk{graph, pool, "ac_sweep"}; chk.active()) {
+        // an ON ideal diode closing a loop: the sweep poses the mode it is
+        // given (no event iteration), so it refuses it as the dsed cache does
+        if (const auto& ms = chk.check(mask, true); !ms.loop_diodes.empty()) {
+            const std::string d{graph.branch_name(ms.loop_diodes.front())};
+            throw UnsupportedError(
+                "ac_sweep", "ideal_voltage_loop", d, "Diode",
+                "run_mna_sweep: the ideal diode '" + d + "' (R_on = 0), ON in "
+                "the mask, closes a loop of voltage sources and closed ideal "
+                "elements (loop: " + ms.loop_texts.front() + "): its current "
+                "is undefined. Open it in the mask or give it R_on > 0.");
+        }
+    }
 
     // 2. (G, E) from the transient assembler at the caller's mask. The
     //    descriptor form reads E·dx/dt + G·x + b = 0; substituting
