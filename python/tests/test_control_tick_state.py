@@ -32,14 +32,14 @@ def test_state_time_puts_pwl_split_on_the_trbdf2_duties():
     ref = _run("trbdf2", rtol=1e-10, atol=1e-14)
     split = dict(dt=T / 50, discontinuity_restart=True,
                  enable_substep_state_correction=True)
-    label = _run("pwl", **split)
+    label = _run("pwl", control_tick="label", **split)   # legacy tick, named
     state = _run("pwl", control_tick="state", **split)
     n = min(len(ref), len(label), len(state))
     e_label = np.abs(label[:n] - ref[:n]).max()
     e_state = np.abs(state[:n] - ref[:n]).max()
     assert e_state < e_label / 10, (e_label, e_state)
-    # the default is the label-time run
-    assert _run("pwl", **split).tobytes() == label.tobytes()
+    # the default is the state-time run since the release (DECISIONS G30)
+    assert _run("pwl", **split).tobytes() == state.tobytes()
 
 
 def test_control_tick_takes_label_or_state():
