@@ -4,7 +4,7 @@ Branch `release/r2-bucket-2` (from `origin/release/core-next-defaults` d2a15c91)
 `so_release_r1`. Baseline: `test_switch_state_record.py` alone 52 failed / 63 passed (the map's
 52, same tests); the other 15 files run one by one before their fix showed exactly the map's 25
 (77 in all). After: the 16 files collect 245 tests: **227 passed, 0 failed, 18 xfailed**
-(16 new strict xfails for 4 findings, plus 2 that were already xfail in the tree).
+(all 18 are the new strict xfails of the 4 findings: F-2-1 1, F-2-2 13, F-2-3 2, F-2-4 2).
 
 No test deleted or skipped. No shared helper / conftest touched; nothing needed from bucket 0.
 
