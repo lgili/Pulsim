@@ -110,6 +110,7 @@ jumps, the sources' impulsive work minus the stored-energy change (E dx = A s).
 | circuits/linear/capacitor_natural_discharge.yaml | conductance | 0 | 0 | 0 | 0.0 | 1.09e-31 | 0.0 | 1.1e-08 | 7.27e-07 | 0.001 / 0.001 |
 | circuits/switching/boost/cascaded_boost_buck.yaml | conductance | 478 | 0 | 0 | 0.0 | 5.0e-24 | -2.06e-53 | 3.8e-08 | 2.45e-06 | 0.02 / 0.001 |
 | circuits/switching/buck/cascaded_buck_buck.yaml | conductance | 79 | 0 | 0 | 0.0 | 1.89e-30 | 3.33e-60 | 1.1e-08 | 7.31e-07 | 0.02 / 0.001 |
+| circuits/switching/multilevel/cascaded_h_bridge_5level.yaml | conductance | 29 | 0 | 0 | 0.0 | 1.07e-31 | 1.21e-61 | 0 | 0.022 | 0.02 / 0.001 |
 | circuits/switching/basic/chopper_with_rc_snubber.yaml | conductance | 21 | 0 | 0 | 0.0 | 2.78e-31 | 4.82e-61 | 7.8e-09 | 0.0153 | 0.02 / 0.001 |
 | circuits/magnetics/core_loss_steinmetz_sine.yaml | conductance | 0 | 0 | 0 | 0.0 | 3.38e-30 | -1.48e-61 | 1.7e-06 | 0.000108 | 0.001 / 0.001 |
 | circuits/switching/buck_boost/cuk_converter.yaml | conductance | 286 | 0 | 0 | 3.70467021921453e-45 | 1.76e-14 | -8.92e-51 | 1.7e-08 | 1.06e-06 | 0.02 / 0.001 |
@@ -126,6 +127,7 @@ jumps, the sources' impulsive work minus the stored-energy change (E dx = A s).
 | circuits/switching/isolated/flyback_converter.yaml | ideal | 398 | 0 | 0 | 0.0 | 1.86e-16 | 5.16e-47 | 1.4e-08 | 8.88e-07 | 0.02 / 0.001 |
 | circuits/switching/isolated/flyback_converter.yaml | conductance | 398 | 0 | 0 | 0.0 | 3.19e-16 | -8.33e-45 | 1.4e-08 | 8.86e-07 | 0.02 / 0.001 |
 | circuits/switching/multilevel/flying_capacitor_3level.yaml | conductance | 79 | 0 | 0 | 0.0 | 6.96e-30 | 7.8e-61 | 3.9e-08 | 0.0414 | 0.02 / 0.001 |
+| circuits/switching/isolated/forward_converter.yaml | conductance | 598 | 0 | 0 | 0.0 | 4.36e-17 | 1.64e-43 | 3.6e-09 | 2.3e-07 | 0.02 / 0.001 |
 | circuits/switching/isolated/full_bridge_dc.yaml | ideal | 49 | 0 | 50 | 0.0 | 0.0 | -2.36e-60 | 0 | 0.0809 | 0.02 / 0.001 |
 | circuits/switching/isolated/full_bridge_dc.yaml | conductance | 98 | 0 | 0 | 0.0 | 2.5e-31 | -4.03e-61 | 2e-10 | 0.0808 | 0.02 / 0.001 |
 | circuits/switching/inverter/half_bridge_inverter.yaml | conductance | 199 | 0 | 0 | 0.0 | 3.12e-30 | 1.45e-60 | 7.8e-10 | 5.02e-08 | 0.02 / 0.001 |
@@ -163,6 +165,7 @@ jumps, the sources' impulsive work minus the stored-energy change (E dx = A s).
 | circuits/switching/buck/sync_buck_500khz.yaml | conductance | 200 | 0 | 0 | 0.0 | 9.8e-31 | 2.08e-61 | 2.9e-08 | 1.83e-06 | 0.02 / 0.001 |
 | circuits/switching/boost/synchronous_boost.yaml | conductance | 999 | 0 | 0 | 0.0 | 4.08e-24 | -2.59e-56 | 1.5e-10 | 9.76e-09 | 0.02 / 0.001 |
 | circuits/switching/buck/synchronous_buck.yaml | conductance | 49 | 0 | 0 | 0.0 | 7.6e-31 | 2.94e-60 | 7.8e-09 | 4.98e-07 | 0.02 / 0.001 |
+| circuits/switching/isolated/synchronous_flyback.yaml | conductance | 399 | 0 | 0 | 0.0 | 3.35e-16 | -2.27e-45 | 1.9e-09 | 1.19e-07 | 0.02 / 0.001 |
 | circuits/switching/multilevel/t_type_3level_halfbridge.yaml | ideal | 59 | 0 | 0 | 0.0 | 0.0 | -2.34e-61 | 0 | 0.081 | 0.02 / 0.001 |
 | circuits/switching/multilevel/t_type_3level_halfbridge.yaml | conductance | 59 | 0 | 0 | 0.0 | 1.78e-31 | 1.84e-61 | 2.4e-08 | 0.0727 | 0.02 / 0.001 |
 | circuits/switching/boost/textbook_erickson_boost_ccm.yaml | conductance | 191 | 0 | 0 | 0.0 | 6.41e-26 | -1.05e-56 | 5.9e-09 | 3.78e-07 | 0.02 / 0.001 |
@@ -216,6 +219,19 @@ the truth needs that cell's trace: not computed (no engine runs here).
 | flying_capacitor_3level | unique, 79 commutations | pwl cells 0.047 to 0.050 against the floor 0.041: measure. |
 | mmc_4cell_chain | unique, 29 commutations, piecewise-constant output (u stored 0) | pwl cells 0.026 against the floor 0.022: measure. |
 | three_phase_diode_rectifier | unique, 97 commutations | pwl 1.51 is an engine error (floor 5.7e-4); restart and split 0.0063 pass. |
+| forward_converter | unique, 598 commutations | pwl 0.707 and pwl+restart / split 0.092 are engine errors (floor 2.3e-7). trbdf2 2.2e-5 and dsed 1.1e-6 agree. |
+| synchronous_flyback | 399 gate commutations (no diode) | pwl 0.207 is an engine error (floor 1.2e-7); restart and split 1e-6 agree. |
+| cascaded_h_bridge_5level | 29 commutations, piecewise-constant output | pwl cells 0.027 against the floor 0.022: measure. |
+
+The 30- vs 60-digit agreement is 1e-16 to 1e-13 on five circuits:
+flyback (3e-16), synchronous_flyback (3e-16), cuk (2e-14), sepic (1e-15)
+and active_clamp_forward (4e-13). The flyback's eigenvector condition is
+9e9; the others were not inspected. Every other circuit agrees to 5e-17 or
+better. Even 4e-13
+is far below any graded quantity.
+
+Not solved: thermal/long_run_drift_buck. It has 100 000 netlist steps and
+was stopped after 24 minutes.
 
 ### What "the stored reference's error" means here
 
@@ -315,6 +331,7 @@ Cells: `err_rms` of the phase0 evidence cache (default variant) against `trbdf2 
 | linear/capacitor_natural_discharge.yaml | 7.27e-07 | 1.1e-08 | 6.05e-07 | 0.000798 | 7.52e-07 | 7.52e-07 | 5.63e-06 | 6.11e-07 | every cell within tol |
 | switching/boost/cascaded_boost_buck.yaml | 2.45e-06 | 3.8e-08 | 1.25e-06 | 0.000399 | 3.97e-06 | 2.24e-06 | 5.95e-05 | 2.24e-06 | every cell within tol |
 | switching/buck/cascaded_buck_buck.yaml | 7.31e-07 | 1.1e-08 | 1.31e-06 | 0.00126 | 1.16e-06 | 1.16e-06 | 1.42e-05 | 1.46e-06 | every cell within tol |
+| switching/multilevel/cascaded_h_bridge_5level.yaml | 0.022 | 0 | 0 | 0.0274 | 0.0269 | 0.0269 | 0 | 5.69e-05 | pwl ~floor; pwl+restart ~floor; pwl+split ~floor |
 | switching/basic/chopper_with_rc_snubber.yaml | 0.0153 | 7.8e-09 | 1.85e-05 | 0.0187 | 0.0153 | 0.0153 | 3.81e-05 | 2.91e-05 | every cell within tol |
 | magnetics/core_loss_steinmetz_sine.yaml | 0.000108 | 1.7e-06 | 3.32e-06 | 0.000228 | 0.000227 | 0.000227 | 0.000123 | 3.5e-06 | every cell within tol |
 | switching/buck_boost/cuk_converter.yaml | 1.06e-06 | 1.7e-08 | 1.89e-06 | 0.000854 | 7.85e-06 | 6.2e-06 | 9.25e-05 | 2.51e-06 | every cell within tol |
@@ -329,6 +346,7 @@ Cells: `err_rms` of the phase0 evidence cache (default variant) against `trbdf2 
 | thermal/electrothermal_resistor_self_heating.yaml | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | every cell within tol |
 | switching/isolated/flyback_converter.yaml | 8.86e-07 | 1.4e-08 | 5.35e-07 | 0.949 | 0.11 | 0.11 | 4.29e-05 | 2.72e-06 | pwl above floor; pwl+restart above floor; pwl+split above floor |
 | switching/multilevel/flying_capacitor_3level.yaml | 0.0414 | 3.9e-08 | 2.55e-05 | 0.0466 | 0.05 | 0.05 | 6.78e-05 | 3.71e-05 | pwl ~floor; pwl+restart ~floor; pwl+split ~floor |
+| switching/isolated/forward_converter.yaml | 2.3e-07 | 3.6e-09 | 1.1e-06 | 0.707 | 0.092 | 0.092 | 2.17e-05 | 1.12e-06 | pwl above floor; pwl+restart above floor; pwl+split above floor |
 | switching/isolated/full_bridge_dc.yaml | 0.0808 | 2e-10 | 2.16e-05 | 0.0828 | 0.0815 | 0.0815 | 0.000141 | 2.66e-05 | pwl ~floor; pwl+restart ~floor; pwl+split ~floor |
 | switching/inverter/half_bridge_inverter.yaml | 5.02e-08 | 7.8e-10 | 1.05e-06 | 0.000376 | 1.16e-06 | 1.16e-06 | 9.06e-07 | 1.2e-06 | every cell within tol |
 | switching/inverter/half_bridge_inverter_lc.yaml | 1.2e-06 | 1.9e-08 | 2.38e-06 | 0.00103 | 7.91e-06 | 7.91e-06 | 0.000303 | 3.89e-06 | every cell within tol |
@@ -364,6 +382,7 @@ Cells: `err_rms` of the phase0 evidence cache (default variant) against `trbdf2 
 | switching/buck/sync_buck_500khz.yaml | 1.83e-06 | 2.9e-08 | 1.18e-06 | 0.00167 | 3.77e-06 | 3.77e-06 | 1.71e-05 | 1.98e-06 | every cell within tol |
 | switching/boost/synchronous_boost.yaml | 9.76e-09 | 1.5e-10 | 2.19e-07 | 6.31e-05 | 2.93e-07 | 2.93e-07 | 8.19e-08 | 3.07e-07 | every cell within tol |
 | switching/buck/synchronous_buck.yaml | 4.98e-07 | 7.8e-09 | 1.26e-06 | 0.00132 | 1.05e-06 | 1.05e-06 | 3.14e-06 | 1.35e-06 | every cell within tol |
+| switching/isolated/synchronous_flyback.yaml | 1.19e-07 | 1.9e-09 | 9.37e-07 | 0.207 | 1.01e-06 | 1.01e-06 | 9.15e-06 | 1.02e-06 | pwl above floor |
 | switching/multilevel/t_type_3level_halfbridge.yaml | 0.0727 | 2.4e-08 | 2.21e-05 | 0.0782 | 0.0771 | 0.0771 | 0.000112 | 4.24e-05 | pwl ~floor; pwl+restart ~floor; pwl+split ~floor |
 | switching/boost/textbook_erickson_boost_ccm.yaml | 3.78e-07 | 5.9e-09 | 4.71e-07 | 0.000313 | 1.03e-06 | 3.93e-07 | 9.53e-06 | 7.02e-07 | every cell within tol |
 | switching/buck/textbook_erickson_buck_ccm.yaml | 3.97e-07 | 6.2e-09 | 3.95e-07 | 0.000771 | 1.76e-06 | 4.21e-07 | 9.87e-06 | 4.3e-07 | every cell within tol |
