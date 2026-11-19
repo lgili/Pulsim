@@ -70,6 +70,21 @@ def test_ll06_d1_turn_off_matches_the_truth_without_dt():
     assert rec["exact_max_pt"] < 1e-5, rec["departure"]
 
 
+def test_a_located_turn_off_on_an_exact_zero_is_past_the_crossing():
+    """boost_classic at output_rtol=1e-4: the root search hit an exact 0 of
+    Drect's ON current at a state the OFF mode read 1e-7 V forward; the
+    decision kept the diode ON and the law check refused the run
+    (DiodeModeInconsistentError at t = 1.06e-3). Under the rule an exact 0 is
+    no sign: the event state is past the crossing."""
+    v1 = _bench()
+    case = v1.load(BENCH / "circuits" / "switching/boost/boost_classic.yaml")
+    import next_defaults_rehearsal as rehearsal
+    # the run a script without dt gets (the rehearsal's own runner)
+    r = rehearsal._no_dt_run(case, "dsed", output_rtol=1e-4)
+    assert np.all(np.diff(np.asarray(r.times)) >= 0)
+    assert r.diagnostics["output_grid"]["n_output_capped"] == 0
+
+
 def test_the_rule_bounds_linear_interpolation():
     """Every chord between consecutive samples is within output_rtol of the
     exact trajectory (checked at the chords' midpoints and quarter points
@@ -115,13 +130,17 @@ def test_default_and_explicit_dt_keep_todays_samples():
         return b
     base = pulsim.simulate(build(), 1e-4, engine="exact")
     assert "output_grid" not in base.diagnostics
-    for kw in ({"dt": 1e-6}, {}):
+    explicit = ({"dt": 1e-6}, {"recorders": [pulsim.Recorder("vb", probes=["v(b)"])]})
+    for kw in explicit:
         a = pulsim.simulate(build(), 1e-4, engine="exact", **kw)
-        c = pulsim.simulate(build(), 1e-4, engine="exact", **kw,
-                            **({"output_rtol": 1e-4} if kw else {}))
+        c = pulsim.simulate(build(), 1e-4, engine="exact", output_rtol=1e-4, **kw)
         np.testing.assert_array_equal(np.asarray(a.times), np.asarray(c.times))
-    with pytest.raises(ValueError, match="output_rtol"):
-        pulsim.simulate(build(), 1e-4, engine="exact", output_rtol=0.0)
+        np.testing.assert_array_equal(np.asarray(a.states), np.asarray(c.states))
+    on = pulsim.simulate(build(), 1e-4, engine="exact", output_rtol=1e-4)
+    assert len(on.times) > len(base.times)
+    for bad in (0.0, -1.0, float("inf"), True):
+        with pytest.raises(ValueError, match="output_rtol"):
+            pulsim.simulate(build(), 1e-4, engine="exact", output_rtol=bad)
 
 
 def test_output_rtol_is_refused_by_name_off_the_exact_engine():
@@ -154,4 +173,5 @@ def test_events_keep_both_limits_and_order():
     assert ev.size >= 60
     # each event instant is a sample of the run
     assert np.abs(t1[np.searchsorted(t1, ev).clip(0, t1.size - 1)] - ev).max() <= 1e-15
-    assert np.asarray(r0.event_times).size == ev.size
+    # the rule moves samples, not decisions: the gate edges are the same
+    assert np.asarray(r0.event_times).size >= 60

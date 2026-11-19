@@ -2606,6 +2606,23 @@ def simulate(
         the stored arrays, so ``store_every > 1`` and ``resume_from``
         are refused with recorders, by name. Without it nothing changes.
 
+    output_rtol
+        ``engine='exact'`` only, default ``None`` (today's samples: one per
+        10 us step cap without ``dt``). Without ``dt``, ``store_every`` or
+        recorders, the exact engine returns every event instant (both
+        limits where the state jumps) and between events samples spaced so
+        that linear interpolation between consecutive samples is within
+        ``output_rtol`` of each STATE's scale (its range so far, floored at
+        1e-3 of its peak and at ``atol``; an observable that is a difference of large
+        states gets that absolute error, not ``output_rtol`` of itself). The
+        event projection then removes only the parasitic cluster. Read
+        ``res.diagnostics['output_grid']``: ``n_output_capped`` (intervals
+        where the 4096-sample cap bit) and ``n_output_unbounded`` (steps of
+        a mode without a diagonalising basis, which keep the step cap's
+        grid); both warn. Ignored with ``dt`` / ``store_every`` /
+        recorders; refused by name on the other engines, with
+        ``integrator='bdf2'``, sensitivities, and the non-native fallback.
+
     Returns
     -------
     SimulationResult
@@ -3483,7 +3500,7 @@ def _plan_run(
         # the engine picks the samples (no dt, no store_every, no recorders);
         # anything explicit keeps today's samples exactly.
         if output_rtol is not None:
-            if not output_rtol > 0.0:
+            if isinstance(output_rtol, bool) or not 0.0 < output_rtol < float("inf"):
                 raise ValueError(f"simulate(output_rtol={output_rtol!r}): must be > 0 (None = off)")
             if dt is not None or recorders or (store_every or 1) != 1:
                 output_rtol = None
@@ -3707,6 +3724,11 @@ def _run_dsed(plan):
     # which the warning tells every user to read — is not a
     # PWL-only attribute.
     if sensitivities is not None:
+        if s.output_rtol is not None:
+            raise _unsupported(
+                "dsed", "output_rtol",
+                "simulate(engine='exact', sensitivities=..., output_rtol=...): the "
+                "sensitivity run keeps its own grid. Drop output_rtol, or pass dt.")
         from .sensitivity import simulate_sensitivities
         _dsed_res = simulate_sensitivities(
             builder, t_end, sensitivities=sensitivities, dt=dt,

@@ -380,6 +380,8 @@ public:
         settle_decisions_ = false;
         has_event_sample_ = false;
         loc_dx_.resize(0);
+        output_lo_.resize(0);   // the output rule's state is per run
+        output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = 0;
         {
             MaskT m0 = system_.current_mask();
             const MaskT prev0 = diode_bits_;
@@ -484,7 +486,7 @@ public:
                     if (fast_k_ < fast_t_.size()) {
                         h_ex = std::min(h_ex, fast_t_[fast_k_] - t);
                     }
-                    if (output_rtol_ > Real{0}) h_ex = output_step_(t, x, h_ex, result.n_events);
+                    if (output_rtol_ > Real{0}) h_ex = output_step_(t, x, h_ex, result.n_events, t_target);
                     // no sliver step short of the edge (scheduler_auto.hpp)
                     if (h_ex < t_target - t && near_time(t + h_ex, t_target)) {
                         h_ex = t_target - t;
@@ -1183,7 +1185,7 @@ private:
                 if (ga * gb < Real{0}) {
                     // coming back from past the threshold is no event
                     if (starts_admissible_(p.type, ga) && confirmed())
-                        root = locate_root_bracket(g_at, ta, tb, ga, gb, t_tol);
+                        root = locate_root_bracket(g_at, ta, tb, ga, gb, t_tol, output_rtol_ == Real{0});
                 } else if (gb == Real{0}) {
                     // zero to zero is no crossing (a diode at rest)
                     if (ga != Real{0} && starts_admissible_(p.type, ga) && confirmed())
@@ -1196,7 +1198,8 @@ private:
                         const Real ga_s = ga + off;
                         root = ga_s == Real{0} ? ta
                             : locate_root_bracket([&](Real tau) { return g_at(tau) + off; },
-                                                  ta, tb, ga_s, gb + off, t_tol);
+                                                  ta, tb, ga_s, gb + off, t_tol,
+                                                  output_rtol_ == Real{0});
                     }
                 }
                 ga = gb;
@@ -2903,32 +2906,44 @@ private:
     Real output_rtol_ = Real{0};
     Real output_atol_ = Real{0};
     std::size_t output_cap_ = 0, output_count_ = 0, output_events_ = 0;
+    Real output_target_ = Real{0};   // the interval's next time event
     std::size_t n_output_capped_ = 0, n_output_unbounded_ = 0;
-    Vector output_scale_, output_tol_, output_end_;
+    Vector output_lo_, output_hi_, output_tol_, output_end_;   // range of each state so far
 
     /// The exact step from (t, x) cut by the output rule (exact_chord_step).
-    Real output_step_(Real t, const Vector& x, Real h, std::size_t n_events) {
+    Real output_step_(Real t, const Vector& x, Real h, std::size_t n_events, Real t_target) {
         if constexpr (requires(bool& b) { system_.exact_output_step(t, x, x, Real{}, h, b); }) {
-            if (n_events != output_events_) {   // a new interval
+            // a new interval: an event fired, or a time event (tick, edge, corner) passed
+            if (n_events != output_events_ || t_target != output_target_) {
                 output_events_ = n_events;
+                output_target_ = t_target;
                 output_count_ = 0;
             }
             if (output_count_ >= output_cap_) return h;
-            if (output_scale_.size() != x.size()) output_scale_ = Vector::Zero(x.size());
+            if (output_lo_.size() != x.size()) {
+                output_lo_ = x;
+                output_hi_ = x;
+            }
             // the scale of the interval ahead too: a state starting from rest
             // would otherwise be cut to its atol floor
             advance_(t, x, h, output_end_);
-            output_scale_ = output_scale_.cwiseMax(x.cwiseAbs()).cwiseMax(output_end_.cwiseAbs());
-            output_tol_ = output_scale_.cwiseMax(Vector::Constant(x.size(), output_atol_)) * output_rtol_;
+            output_lo_ = output_lo_.cwiseMin(x).cwiseMin(output_end_);
+            output_hi_ = output_hi_.cwiseMax(x).cwiseMax(output_end_);
+            // relative to each state's range so far (a ripple on a large DC level
+            // is what a plot reads), floored at 1e-3 of its peak and at atol
+            output_tol_ = (output_hi_ - output_lo_)
+                              .cwiseMax(Real{1e-3} * output_hi_.cwiseAbs().cwiseMax(output_lo_.cwiseAbs()))
+                              .cwiseMax(Vector::Constant(x.size(), output_atol_)) * output_rtol_;
             bool bounded = true;
             const Real d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded);
             if (!bounded) ++n_output_unbounded_;
             if (!(d < h)) return h;
             if (++output_count_ == output_cap_) ++n_output_capped_;
             // never below the time's own resolution (a zero tolerance is floored by atol)
-            return std::max(d, Real{64} * std::numeric_limits<Real>::epsilon() * std::max(Real{1}, std::abs(t)));
+            return std::min(h, std::max(d, Real{64} * std::numeric_limits<Real>::epsilon()
+                                               * std::max(Real{1}, std::abs(t))));
         }
-        (void)t; (void)x; (void)n_events;
+        (void)t; (void)x; (void)n_events; (void)t_target;
         return h;
     }
     Real probe_t_end_ = std::numeric_limits<Real>::infinity();   // next_time_event_

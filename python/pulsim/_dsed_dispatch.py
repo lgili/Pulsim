@@ -483,10 +483,11 @@ def _result_from_native(native_res, t_start: float):
     if "n_output_capped" in native_res:   # the output-grid rule (output_rtol)
         og = {k: int(native_res[k]) for k in ("n_output_capped", "n_output_unbounded")}
         res.diagnostics["output_grid"] = og
-        if og["n_output_capped"]:
+        if og["n_output_capped"] or og["n_output_unbounded"]:
             warnings.warn(
                 f"simulate(engine='exact', output_rtol=...): the output grid's sample cap "
-                f"bit in {og['n_output_capped']} interval(s): linear interpolation between "
+                f"bit in {og['n_output_capped']} interval(s) and {og['n_output_unbounded']} "
+                "step(s) had no diagonalising basis to bound: linear interpolation between "
                 "those samples is NOT within output_rtol (diagnostics['output_grid']). "
                 "Pass dt for a fixed output step.", RuntimeWarning, stacklevel=4)
     # dependent states: the impulsive re-initialisations at mode entry
@@ -1019,6 +1020,12 @@ def run_dsed_from_builder(
             "simulate(engine='dsed'): control ticks run on the native adapter "
             "only, which is not available for this circuit. Use engine='pwl' "
             "or 'trbdf2'.")
+    if output_rtol:
+        raise unsupported(
+            "dsed", "output_rtol", message=
+            "simulate(engine='dsed', output_rtol=...): the output-grid rule runs "
+            "on the native adapter only, which is not available for this circuit. "
+            "Drop output_rtol, or pass dt.")
     if full_x0 is not None and ambiguous:
         x0 = full_x0          # the non-native bridges read it as reduced, as before
     elif full_x0 is not None:
