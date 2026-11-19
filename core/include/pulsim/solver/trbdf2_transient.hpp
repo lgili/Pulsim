@@ -78,6 +78,8 @@
 
 #include "pulsim/sim/defaults.hpp"
 #include "pulsim/events/event_queue.hpp"
+#include "pulsim/events/locate.hpp"
+#include "pulsim/events/mode_set.hpp"
 #include "pulsim/events/step_hooks.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
@@ -373,69 +375,11 @@ struct TrBdf2Stats {
 
 namespace detail_trbdf2 {
 
-/// Per-direction diode crossing signal at a solved state. The
-/// existing post-hoc watcher in run_transient uses v_D − V_on for
-/// BOTH directions, which biases turn-OFF by the V_th − V_f band (its
-/// own doc comment admits i_D is the right signal); with
-/// i_D = g_on·(v_D − V_f) the ON→OFF zero is v_D = V_f, so this
-/// watches v_D − V_f for ON and v_D − V_on for OFF
-/// (`SwitchedDiode::crossing_signal`).
-inline Real crossing_signal(const pwl::DiodeEventState& diodes,
-                             Size entry_idx, const Vector& x) {
-    const auto& e = diodes.entries()[entry_idx];
-    // A branch-form diode reads its solved current i_s while ON (D5).
-    const Real v_d = e.law_voltage(x, e.is_on);
-    return models::SwitchedDiode::crossing_signal(e.is_on, v_d, e.params());
-}
-
-/// True when `s` (the diode's crossing_signal) puts it on the side its
-/// own commutation rule would leave — `SwitchedDiode::
-/// decide`: ON stays iff g_on·(v_D − V_f) > 0, OFF stays iff
-/// v_D < V_on.
-inline bool forbidden(const pwl::DiodeEventState& diodes,
-                      Size entry_idx, Real s) {
-    return diodes.entries()[entry_idx].is_on ? (s <= Real{0})
-                                             : (s >= Real{0});
-}
-
-/// What counts as numerical noise in a forbidden-side signal: 1e-8 of
-/// the diode's terminal voltages (plus V_th, V_f and 1 V). A V_th = 0 diode
-/// riding its zero-current boundary sits there (the chatter guard owns
-/// that case); a missed commutation leaves it volts away.
-inline Real held_tolerance(const pwl::DiodeEventState& diodes,
-                           Size entry_idx, const Vector& x) {
-    const auto& e = diodes.entries()[entry_idx];
-    // An ON branch-form diode's signal is its current (review L5).
-    if (e.is_on && e.var >= 0) {
-        return Real{1e-8} * (Real{1} + std::abs(e.V_f) + std::abs(x[e.var]));
-    }
-    // An ON conductance-form diode's signal is V_f + i/g_on: 1e-8 of the
-    // node voltages is i = 0.7 mA at g_on = 1e3 on a 36 V boost, so a step
-    // from +0.37 to -0.71 mA was "riding the boundary", never landed, and
-    // the diode turned off later carrying -0.7 mA (sw at -3.5e5 V, 9577
-    // floor-accepted steps). Its noise is a leakage-scale current,
-    // g_off * (1 + |v_D|) (a bridge diode riding at -1.6e-7 A against
-    // 3.3e-7 A), read as voltage through 1/g_on, plus the round-off of
-    // forming v_D from its node voltages; a DCM buck's 9e-7 A overshoot
-    // (446 V over g_off) is then a crossing. v_D, not the node voltages:
-    // a diode floating at 10 kV common mode had a floor of 2e-8 V, a
-    // 2e-5 A reverse current taken for noise.
-    if (e.is_on && e.g_on > Real{0}) {
-        constexpr Real eps = std::numeric_limits<Real>::epsilon();
-        const Real va = stamping::read_node_voltage(x, e.from);
-        const Real vk = stamping::read_node_voltage(x, e.to);
-        // a latch with its gate off holds down to I_H: its threshold sits
-        // I_H/g_on above V_f (add-pwl-igbt-and-thyristor 4.2; 0 ungated)
-        return e.g_off / e.g_on
-                   * (Real{1} + std::abs(e.V_th) + std::abs(e.V_f)
-                      + std::abs(e.I_H) / e.g_on + std::abs(va - vk))
-               + Real{64} * eps * (std::abs(va) + std::abs(vk));
-    }
-    return Real{1e-8}
-           * (Real{1} + std::abs(e.V_th) + std::abs(e.V_f)
-              + std::abs(stamping::read_node_voltage(x, e.from))
-              + std::abs(stamping::read_node_voltage(x, e.to)));
-}
+// The diode crossing signal, its forbidden side and its noise band are the
+// mode-set service's (add-unified-event-queue 8.2).
+using events::crossing_signal;
+using events::forbidden;
+using events::held_tolerance;
 
 }  // namespace detail_trbdf2
 
@@ -1509,25 +1453,21 @@ inline SimulationResult run_transient_trbdf2(
         // Outside the run's try: the budget abort is typed here too.
         try {
             const std::vector<bool> bits0 = diodes.snapshot_on_bits();
-            bool settled = false;
             SwitchStateMask m_site = initial_mask;
-            for (Size it = 0; it < opts.max_event_iterations; ++it) {
+            bool settled = events::settle(opts.max_event_iterations, [&](Size) {
                 // A failed (Newton) probe leaves x_trial unwritten —
                 // unsized on this first call: keep the bits (it read
                 // null, SIGSEGV).
                 const SwitchStateMask m0 = mask_at(t_gates);
                 m_site = m0;
                 if (!probe_solve(m0, opts.t_start, h_probe, x_trial)) {
-                    break;
+                    return events::Round::Stop;
                 }
                 const bool flipped =
                     decide_probe(x_trial, m0, opts.t_start);
                 x_sig = x_trial;
-                if (!flipped) {
-                    settled = true;
-                    break;
-                }
-            }
+                return flipped ? events::Round::Flipped : events::Round::Settled;
+            }).settled;
             if (mode_site(opts.t_start, t_gates, bits0, settled,
                           opts.h_init > Real{0} ? opts.h_init : h_max / Real{100},
                           m_site)) {
@@ -2713,10 +2653,8 @@ inline SimulationResult run_transient_trbdf2(
                 // An edge at this step boundary that no step landed
                 // (see gates_decided): settle the diodes under the
                 // gates the step will use, as a landed edge does.
-                bool settled = false;
                 const std::vector<bool> bits0 = diodes.snapshot_on_bits();
-                for (Size it = 0; it < opts.max_event_iterations;
-                     ++it) {
+                bool settled = events::settle(opts.max_event_iterations, [&](Size) {
                     gates_decided = mask_at(t + Real{0.5} * h_min);
                     require_probe(probe_solve(gates_decided, t,
                                               h_probe_floor, x_trial),
@@ -2724,11 +2662,8 @@ inline SimulationResult run_transient_trbdf2(
                     const bool flipped =
                         decide_probe(x_trial, gates_decided, t);
                     x_sig = x_trial;
-                    if (!flipped) {
-                        settled = true;
-                        break;
-                    }
-                }
+                    return flipped ? events::Round::Flipped : events::Round::Settled;
+                }).settled;
                 if (mode_site(t, t + Real{0.5} * h_min, bits0, settled, h,
                               gates_decided)) {
                     x_sig = x_trial;
@@ -3544,10 +3479,7 @@ inline SimulationResult run_transient_trbdf2(
                             const Vector x_sig0 = x_sig;
                             bool settled = false;
                             for (const Real h_first : {h_probe_floor, dt_floor}) {
-                                settled = false;
-                                for (Size it2 = 0;
-                                     it2 < opts.max_event_iterations;
-                                     ++it2) {
+                                settled = events::settle(opts.max_event_iterations, [&](Size it2) {
                                     // Probe, not a committed step.
                                     gates_decided = mask_at(t);
                                     require_probe(
@@ -3559,11 +3491,8 @@ inline SimulationResult run_transient_trbdf2(
                                     const bool flipped = decide_probe(
                                         x_trial, gates_decided, t);
                                     x_sig = x_trial;
-                                    if (!flipped) {
-                                        settled = true;
-                                        break;
-                                    }
-                                }
+                                    return flipped ? events::Round::Flipped : events::Round::Settled;
+                                }).settled;
                                 if (diodes.snapshot_on_bits() != bits0) {
                                     break;
                                 }
@@ -3692,8 +3621,6 @@ inline SimulationResult run_transient_trbdf2(
                             sb = sg;
                         }
                     }
-                    Real t_loc = t_star;
-                    int side = 0;
                     // A turn-off landed past its current zero leaves the
                     // overshoot current in the inductor with only g_off to
                     // go through: v = i/g_off. The time bracket alone
@@ -3727,16 +3654,13 @@ inline SimulationResult run_transient_trbdf2(
                     // then -20 V in one step, a floating bridge +1.76 V).
                     Vector x_ta = x;
                     Vector x_tb = tb < t + h ? x_g : x_1;
-                    for (int it = 0; it < 40; ++it) {
-                        t_loc = std::clamp(
-                            ta - sa * (tb - ta) / (sb - sa),
-                            ta + Real{0.05} * (tb - ta),
-                            tb - Real{0.05} * (tb - ta));
+                    events::Bracket br{ta, sa, tb, sb, sa_raw, sb_raw, 0};
+                    (void)events::illinois(br, 40,
+                        [&](Real t_loc, const events::Bracket& b) {
+                            return t_loc - t <= dt_floor || (b.tb - b.ta) <= h_min;
+                        },
+                        [&](Real t_loc, Real& sm) {
                         const Real dts = t_loc - t;
-                        if (dts <= dt_floor
-                            || (tb - ta) <= h_min) {
-                            break;
-                        }
                         bool trial_ok = true;
                         try {
                             // A failed Newton trial leaves x_trial at
@@ -3761,32 +3685,23 @@ inline SimulationResult run_transient_trbdf2(
                             // Ill-conditioned trial (tiny-dt trap
                             // on a near-singular mask): abandon
                             // refinement, land on the bracket end.
-                            break;
+                            return false;
                         }
-                        const Real sm =
-                            detail_trbdf2::crossing_signal(
-                                diodes, cross_idx, x_trial);
-                        if ((sm > Real{0}) == (sa > Real{0})) {
-                            ta = t_loc;
-                            sa = sm;
-                            sa_raw = sm;
-                            x_ta = x_trial;
-                            if (side == -1) { sb *= Real{0.5}; }
-                            side = -1;
-                        } else {
-                            tb = t_loc;
-                            sb = sm;
-                            sb_raw = sm;
-                            x_tb = x_trial;
-                            if (side == +1) { sa *= Real{0.5}; }
-                            side = +1;
-                        }
-                        if ((tb - ta) < std::max(h_min,
-                                                  Real{1e-4} * h)
-                            && spike_ok(sb_raw)) {
-                            break;
-                        }
-                    }
+                        sm = detail_trbdf2::crossing_signal(
+                            diodes, cross_idx, x_trial);
+                        return true;
+                        },
+                        [&](events::BracketEnd e) {
+                            (e == events::BracketEnd::A ? x_ta : x_tb) = x_trial;
+                        },
+                        [&](const events::Bracket& b) {
+                            return (b.tb - b.ta) < std::max(h_min,
+                                                             Real{1e-4} * h)
+                                && spike_ok(b.sb_raw);
+                        });
+                    ta = br.ta;
+                    tb = br.tb;
+                    sb_raw = br.sb_raw;
                     // Land the step at t* = tb (the post-crossing
                     // side, so decide_next_state sees the crossed
                     // signal), commit the trap sub-step there.
@@ -3908,10 +3823,7 @@ inline SimulationResult run_transient_trbdf2(
                         const Real h_zero =
                             std::max(h_probe_floor,
                                       dt_land * Real{1e-6});
-                        bool settled = false;
-                        for (Size it2 = 0;
-                             it2 < opts.max_event_iterations;
-                             ++it2) {
+                        bool settled = events::settle(opts.max_event_iterations, [&](Size) {
                             gates_decided = mask_at(t);
                             require_probe(
                                 probe_solve(gates_decided, t, h_zero,
@@ -3920,11 +3832,8 @@ inline SimulationResult run_transient_trbdf2(
                             const bool flipped2 =
                                 decide_probe(x_trial, gates_decided, t);
                             x_sig = x_trial;
-                            if (!flipped2) {
-                                settled = true;
-                                break;
-                            }
-                        }
+                            return flipped2 ? events::Round::Flipped : events::Round::Settled;
+                        }).settled;
                         if (mode_site(t, t, bits_land, settled, h,
                                       gates_decided)) {
                             x_sig = x_trial;
@@ -4135,9 +4044,7 @@ inline SimulationResult run_transient_trbdf2(
                     bool settled = false;
                     if (has_diodes) {
                         const std::vector<bool> bits0 = diodes.snapshot_on_bits();
-                        for (Size it = 0;
-                             it < opts.max_event_iterations;
-                             ++it) {
+                        settled = events::settle(opts.max_event_iterations, [&](Size) {
                             gates_decided = mask_at(t + h_probe);
                             require_probe(
                                 probe_solve(gates_decided, t, h_probe,
@@ -4146,11 +4053,8 @@ inline SimulationResult run_transient_trbdf2(
                             const bool flipped =
                                 decide_probe(x_trial, gates_decided, t);
                             x_sig = x_trial;
-                            if (!flipped) {
-                                settled = true;
-                                break;
-                            }
-                        }
+                            return flipped ? events::Round::Flipped : events::Round::Settled;
+                        }).settled;
                         if (mode_site(t, t + h_probe, bits0, settled, h,
                                       gates_decided)) {
                             x_sig = x_trial;

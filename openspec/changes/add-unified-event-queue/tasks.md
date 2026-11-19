@@ -56,10 +56,10 @@ conformance test of `add-engine-conformance-matrix`.
 - [ ] 7.2 Oracle: pulse-driven RC on TR-BDF2: error below 1.8e-4 V and decreasing with `rtol`; fixed goldens bit-identical
 
 ## 8. State events
-- [ ] 8.1 `events/locate.hpp`: Illinois over a trial evaluator; unit tests on analytic crossings
-- [ ] 8.2 `events/mode_set.hpp`: `redecide`, `crossing_signal`, `settle` with cycle report
-- [ ] 8.3 TR-BDF2 localisation, the DSED predictor, the fixed-step event iteration and the DC operating point call 8.1 / 8.2
-- [ ] 8.4 Oracle: `commutation_events`, `event_iteration_count`, `event_iteration_breaches`, `n_diode_events` identical on the harness; the resistive half-wave conduction instants (223 µs, 9.777 ms) unchanged on every engine
+- [x] 8.1 `events/locate.hpp`: Illinois over a trial evaluator; unit tests on analytic crossings — `core/tests/modes/test_locate.cpp` `[event_locate]` (DECISIONS 15)
+- [x] 8.2 `events/mode_set.hpp`: `redecide`, `crossing_signal`, `settle` with cycle report — plus `forbidden`, `held_tolerance`, `MaskCycle<N>` (per-call cycle memory) (DECISIONS 15)
+- [ ] 8.3 TR-BDF2 localisation, the DSED predictor, the fixed-step event iteration and the DC operating point call 8.1 / 8.2 — partial: TR-BDF2 localisation (`events::illinois`) and its five zero-time cascades (`events::settle`), the DC operating point (`events::settle`), the fixed engine's event iteration on both paths (`MaskCycle`, `redecide`; its do-while stays: `settle` there cost 1.0–1.8 % per step). NOT the DSED predictor (another track owns `dsed/`; what it needs is in DECISIONS 15)
+- [x] 8.4 Oracle: `commutation_events`, `event_iteration_count`, `event_iteration_breaches`, `n_diode_events` identical on the harness; the resistive half-wave conduction instants (223 µs, 9.777 ms) unchanged on every engine — pwl/trbdf2 byte-identical (goldens with counters, stateful, engines, step sequences, `pwl_identity` 390/390, `trbdf2_identity` 371/371, every result attribute hashed); dsed untouched by this change
 
 ## 9. Remove the legacy inputs (one release later)
 - [ ] 9.1 Delete `next_edge_fn`, `observer_period`, the callable-only driver parameters and their adapters
