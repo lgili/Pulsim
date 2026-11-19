@@ -171,6 +171,12 @@ class PeriodicSteadyStateResult:
     #: section after the verification period (resume a transient from
     #: it); ``None`` on the exact path.
     full_state: Any = field(default=None, repr=False)
+    #: ``max|(I - M)^-1 (P(x0) - x0)|`` at the accepted iterate: the
+    #: next Newton correction, i.e. the first-order distance of ``x0``
+    #: from the computed map's fixed point (the residual divided by about
+    #: ``1 - |mu|``; the map's own error is not in it). The stop rule
+    #: holds every component of it within ``rtol``.
+    orbit_error_estimate: float = float("nan")
 
     @property
     def orbit(self):
@@ -462,6 +468,14 @@ def _scaled(v, x, scale, rtol):
         q = np.where(v == 0.0, 0.0, np.abs(v) / np.where(
             den > 0, den, 1e-300))
     return float(q.max())
+
+
+def _rounding_floor(IM, scale):
+    """``|(I - M)^-1| (u scale)``: one ulp of each state's scale, amplified.
+    The period map's rounding is at least that; a residual that comes out
+    exactly zero does not make the orbit exact (|mu| = 1 - 1e-9 returned a
+    zero estimate 260x outside rtol=1e-9)."""
+    return np.abs(np.linalg.inv(IM)) @ (np.finfo(float).eps * scale)
 
 
 def _divides(P, T):
@@ -1067,6 +1081,14 @@ def _kernel_orbit(s, x, rtol, max_period_runs, n_relax, spec):
             "never decay to it (a lossless loop or an undamped "
             "integrator). States of the marginal direction: "
             f"{s.name_states(d['marginal_direction'], scale)}.")
+    if st == "noise_floor":
+        mu_max = float(np.abs(mu_last).max())
+        raise _conv(
+            f"the orbit error estimate |(I - M)^-1 G| = "
+            f"{float(d['orbit_error_estimate']):.3e} stopped decreasing "
+            f"above the requested rtol={rtol:g}: the period map's "
+            f"rounding, amplified by 1/(1 - |mu|) (max|mu| = "
+            f"{mu_max:.9g}), is above the tolerance. Loosen rtol.")
     if st == "grazing":
         raise _conv(str(d["message"]))
     if st == "run_failed":
@@ -1083,7 +1105,7 @@ def _kernel_orbit(s, x, rtol, max_period_runs, n_relax, spec):
     traj = s._traj(x0, period)
     return (x0, np.asarray(d["monodromy"], dtype=float),
             np.asarray(d["multipliers"]), traj, history, patterns, period,
-            float(d["residual"]))
+            float(d["residual"]), float(d["orbit_error_estimate"]))
 
 
 def _classify(mu):
@@ -1160,12 +1182,15 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
         Periods of plain transient taken when no backtracking step is
         accepted (at most three such rounds).
     rtol
-        Scaled-norm tolerance: stop when every
-        ``|G_i| <= rtol (scale_i + |x_i|)``, ``scale_i`` the largest
-        ``|x_i(t)|`` seen over the period runs, AND the Newton step
-        meets the same bound (or one step has been taken from such a
-        residual): with a slow mode the state error is about
-        ``|G| / (1 - |mu|)``, not ``|G|``.
+        Scaled-norm tolerance on the ORBIT ERROR: stop when every
+        ``|G_i| <= rtol (scale_i + |x_i|)`` AND every component of the
+        error estimate ``(I - M)^-1 G`` (the next Newton correction)
+        meets the same bound; ``scale_i`` is the largest ``|x_i(t)|``
+        seen over the period runs. With a slow mode the state error is
+        about ``|G| / (1 - |mu|)``, not ``|G|``; the estimate is
+        ``orbit_error_estimate``. When rounding of the period map,
+        amplified by ``1 / (1 - |mu|)``, keeps the estimate above the
+        tolerance, ``ConvergenceError`` says so.
 
     sensitivities
         Parameter names (``"<component>.<field>"``: ``R``, ``L``, ``C``,
@@ -1219,10 +1244,10 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
     if s._orbit is not None and not _python_loop:
         # the whole Newton loop in the kernel, GIL released (DECISIONS 19)
         s.loop = "kernel"
-        x0, M, mu, traj, history, patterns, period, residual = \
+        x0, M, mu, traj, history, patterns, period, residual, err_est = \
             _kernel_orbit(s, x, rtol, max_period_runs, n_relax, _observables)
         return _result(builder, s, x0, M, mu, traj, history, patterns,
-                       period, residual, sensitivities)
+                       period, residual, sensitivities, err_est=err_est)
 
     scale = np.zeros(n)
 
@@ -1251,7 +1276,9 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
 
     traj = s.run(x)
     relax_rounds = 0
-    polished = False
+    # the estimate a FULL step (lambda = 1) from r <= 1 started at; -1: none
+    polished = -1.0
+    err_est = float("nan")
     while True:
         r = norm(traj)
         history.append(float(np.abs(traj.x_end - traj.x0).max()))
@@ -1268,15 +1295,30 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
         if r <= 1.0:
             # A small residual is not a small state error: with a slow
             # mode (|mu| -> 1) the error is about residual/(1 - |mu|).
-            # Stop when the Newton step itself is within tolerance, or
-            # once one step has been taken from a converged residual
-            # (exact on a linear map; with |mu| -> 1 the step is
-            # rounding noise times 1/(1 - |mu|) and never gets
-            # smaller). A marginal orbit is left to the multiplier
-            # check below the loop.
-            if singular or polished or _scaled(
-                    np.linalg.solve(IM, G), traj.x0, scale, rtol) <= 1.0:
+            # The error estimate is the next Newton correction
+            # (I - M)^-1 G; stop when IT is within tolerance. A marginal
+            # orbit is left to the multiplier check below the loop.
+            if singular:
+                err_est = float("nan")
                 break
+            corr = np.abs(np.linalg.solve(IM, G)) + _rounding_floor(IM, scale)
+            est = _scaled(corr, traj.x0, scale, rtol)
+            err_est = float(corr.max())
+            if est <= 1.0:
+                break
+            # a full Newton step whose correction did not halve is the
+            # map's rounding over (1 - |mu|) (NaN fails `<=`)
+            if polished >= 0.0 and not est <= 0.5 * polished:
+                raise _conv(
+                    f"the orbit error estimate |(I - M)^-1 G| = "
+                    f"{err_est:.3e} stopped decreasing above the requested "
+                    f"rtol={rtol:g} ({est:.3g} times it): the period map's "
+                    f"rounding, amplified by 1/(1 - |mu|) (max|mu| = "
+                    f"{float(np.abs(mu).max()):.9g}), is above the "
+                    "tolerance. Loosen rtol.")
+            polished = est
+        else:
+            polished = -1.0
         if singular:
             _refuse_dependent_states(s, traj.x0)
             raise _conv(
@@ -1294,7 +1336,8 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
             r_new = norm(tt)
             if r_new <= (1.0 - _ARMIJO * lam) * norm(traj) or (
                     r <= 1.0 and r_new <= 1.0):
-                polished = r <= 1.0
+                if lam < 1.0:   # damped: contracts by ~(1 - lam)
+                    polished = -1.0
                 traj = tt
                 accepted = True
                 break
@@ -1308,6 +1351,7 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
                 f"{n_relax} relaxation periods. Residual history "
                 f"max|P(x)-x|: {[f'{h:.3e}' for h in history]}; last "
                 f"pattern: {last['pattern']}; multipliers: {last['mu']}.")
+        polished = -1.0
         for _ in range(n_relax):
             budget()
             traj = s.run(traj.x_end)
@@ -1351,11 +1395,11 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
             f"(the last Newton residual was {history[-1]:.3e}): the "
             "map is not reproducible between runs.")
     return _result(builder, s, x0, M, mu, traj, history, patterns, period,
-                   residual, sensitivities, orbit)
+                   residual, sensitivities, orbit, err_est)
 
 
 def _result(builder, s, x0, M, mu, traj, history, patterns, period,
-            residual, sensitivities, orbit=None):
+            residual, sensitivities, orbit=None, err_est=float("nan")):
     if orbit is None:
         from . import simulate as _simulate
 
@@ -1371,7 +1415,7 @@ def _result(builder, s, x0, M, mu, traj, history, patterns, period,
         unstable_multipliers=unstable, pattern=s.pattern(traj),
         residual=residual, residual_history=history,
         pattern_history=patterns, n_period_runs=s.n_runs, n_engine_steps=s.n_steps,
-        period=s.T, _ctx=s, _period=period)
+        period=s.T, _ctx=s, _period=period, orbit_error_estimate=err_est)
     s.orbit_traj = traj
     if sensitivities is not None:
         from .sensitivity import orbit_sensitivities

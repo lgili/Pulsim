@@ -94,6 +94,74 @@ TEST_CASE("Orbit loop: an affine map converges in one Newton step",
     CHECK(mu == std::vector<Real>{0.3, 0.5});
 }
 
+TEST_CASE("Orbit loop: the stop rule bounds the orbit error, not the residual",
+          "[v2][dsed][periodic_orbit]") {
+    // P(x) = 0.999 x + 0.001 (orbit x* = 1, slow multiplier 0.999) whose
+    // run reports M = 0.9985: each Newton step leaves 1/3 of the error,
+    // and the residual G = 0.001 (1 - x) is 1000x smaller than the error.
+    // The old rule (one step after the residual met rtol) stopped 6.7e-7
+    // away; the error estimate (I - M)^-1 G must meet rtol instead.
+    struct Slow {
+        Map operator()(const Vector& x, bool) const {
+            Map r;
+            r.x_end = 0.999 * x + Vector::Constant(1, 0.001);
+            r.monodromy = DenseMatrix::Constant(1, 1, 0.9985);
+            r.scale = x.cwiseAbs().cwiseMax(r.x_end.cwiseAbs());
+            r.n_steps = 1;
+            return r;
+        }
+    };
+    const auto r = dsed::periodic_orbit_newton<SSM>(Slow{}, Vector::Zero(1), 1.0, {});
+    REQUIRE(r.status == dsed::OrbitStatus::Converged);
+    const Real tol = 1e-9 * (1.0 + 1.0);    // rtol (scale + |x|)
+    // the rule bounds the ESTIMATE; with this inexact M the true error is
+    // (1 - 0.9985)/(1 - 0.999) = 1.5x it
+    CHECK(std::abs(r.x0[0] - 1.0) <= 1.5 * tol);
+    CHECK(r.orbit_error_estimate <= tol);
+    // the estimate is the next correction, 2/3 of the true error here (to
+    // the cancellation in G = P(x) - x: ~1e-16 / (1 - M) absolute)
+    CHECK(std::abs(r.orbit_error_estimate - std::abs(1.0 - r.x0[0]) * 2.0 / 3.0)
+          <= 1e-2 * r.orbit_error_estimate + 1e-12);
+
+    SECTION("an estimate that stops decreasing is the noise floor, not an orbit") {
+        // the reported M makes every step overshoot to the mirror point:
+        // the error never shrinks, so the tolerance cannot be met
+        struct Stuck {
+            Map operator()(const Vector& x, bool) const {
+                Map r;
+                r.x_end = 0.999 * x + Vector::Constant(1, 0.001);
+                r.monodromy = DenseMatrix::Constant(1, 1, 0.9995);
+                r.scale = Vector::Constant(1, 1e9);    // r <= 1 at once
+                r.n_steps = 1;
+                return r;
+            }
+        };
+        const auto s = dsed::periodic_orbit_newton<SSM>(Stuck{}, Vector::Zero(1), 1.0, {});
+        CHECK(s.status == dsed::OrbitStatus::NoiseFloor);
+        CHECK(!s.has_period);
+    }
+
+    SECTION("an exactly-zero residual still carries the map's rounding") {
+        // G = 0.0 exactly with |mu| = 1 - 1e-9: one ulp of the scale,
+        // amplified 1e9x (2.2e-7), is far above rtol (1e-9 x 2): the
+        // estimate must not report 0 and the solve must refuse
+        // (shooting DECISIONS 22: a sine into 1 uF || 1 TOhm did)
+        struct Exact {
+            Map operator()(const Vector& x, bool) const {
+                Map r;
+                r.x_end = x;
+                r.monodromy = DenseMatrix::Constant(1, 1, 1.0 - 1e-9);
+                r.scale = Vector::Constant(1, 1.0);
+                r.n_steps = 1;
+                return r;
+            }
+        };
+        const auto s = dsed::periodic_orbit_newton<SSM>(Exact{}, Vector::Ones(1), 1.0, {});
+        CHECK(s.status == dsed::OrbitStatus::NoiseFloor);
+        CHECK(!s.has_period);
+    }
+}
+
 TEST_CASE("Orbit loop: every non-converged outcome is a status, never an orbit",
           "[v2][dsed][periodic_orbit]") {
     SECTION("singular I - M (a multiplier equal to 1)") {

@@ -22,6 +22,17 @@ difference; without saltation it is off by 3.1e-5); 8.1's guides are a
 section of `docs/api-reference.md` (there is no separate steady-state or
 Bode guide).
 
+Stop rule (DECISIONS 21): `rtol` bounds the orbit error estimate
+`(I − M)⁻¹·G`, reported as `orbit_error_estimate`; the boost DCM orbit
+is the mpmath value `probes/boost_dcm_truth.py` (36.594400837798 V) to
+7e-11 V. On the exact engine's own settle (DECISIONS 22, 2b1d808e) the
+branch's scheduler hunk is gone: 0 of 25 wrong-branch period runs, the
+orbit 6.7e-11 V from mpmath, and the estimate carries the map's rounding
+floor |(I − M)⁻¹|·(u·scale). Open request to the exact track: the same
+settle at dt_max = T/50 (18 of 25 wrong). Open groups 6 and 7 need the event queue / device interface /
+control graph in `x₀`; orbits on `engine='trbdf2'` with a frozen step
+grid inside the loop wait for the loop freeze to lift.
+
 ## 1. Characterisation (no behaviour change)
 - [x] 1.1 Tests that pin today's behaviour on the two bucks: `steady_state` CCM passes, DCM raises "no periodic orbit found"; `run_periodic_shooting` DCM returns 8.8998 V (−1.07 %); mark the DCM cases as the ones this change flips
 - [x] 1.2 Port `probes/shooting_dcm.py` and `probes/peak_current_mode.py` into the test tree as reference implementations (numpy only), with the table above as constants

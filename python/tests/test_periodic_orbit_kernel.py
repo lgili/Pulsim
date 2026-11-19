@@ -63,12 +63,13 @@ CASES = {
     "buck DCM": (lambda: _buck(50.0, 0.3), ref.DCM_ORBIT[1]),
     "boost CCM": (lambda: _boost(20.0, 0.0), 24.0536294841),
     # DCM: the orbit by mpmath (50 digits, three exact LTI segments, the
-    # diode-off instant bisected, Newton to 1e-40) is 36.594400837798 V,
+    # diode-off instant bisected, Newton to 1e-40; add-periodic-steady-
+    # state-shooting/probes/boost_dcm_truth.py) is 36.594400837798 V,
     # diode off at t/T = 0.743942. V_th is a commutation threshold, not
     # a drop: the same orbit at 1 mV.
-    "boost DCM": (lambda: _boost(500.0, 0.0), 36.5944008378),
+    "boost DCM": (lambda: _boost(500.0, 0.0), 36.594400837798),
     "boost CCM, V_th 1 mV": (lambda: _boost(20.0, 1e-3), 24.0536294841),
-    "boost DCM, V_th 1 mV": (lambda: _boost(500.0, 1e-3), 36.5944008378),
+    "boost DCM, V_th 1 mV": (lambda: _boost(500.0, 1e-3), 36.594400837798),
 }
 
 
@@ -86,14 +87,33 @@ def test_kernel_loop_equals_the_python_loop(name):
     k, q = _solve(make, False), _solve(make, True)
     assert k._ctx.loop == "kernel" and q._ctx.loop == "python"
     lab = k.state_labels
-    # Newton stops on its residual r, and with a slow multiplier the
-    # state is only within r / (1 - |mu|) of the orbit: the DCM boost has
-    # |mu| = 0.99894, so r = 1.1e-9 V is 1.07e-6 V of state. Which side
-    # of the stop rule the last step lands on is rounding (21 runs and
-    # 1e-10 V on the pinning builds, 25 runs and -1.07e-6 V on macOS
-    # arm64 with Eigen 3.4.0), so the bound is the run's own, 5x.
-    tol = max(1e-8, 5 * k.residual_history[-1] / (1 - k.floquet_radius))
-    assert k.x0[lab.index("v(vout)")] == pytest.approx(v_out, abs=tol)
+    # The stop rule bounds the orbit error estimate (I - M)^-1 G (the
+    # next correction, |G| / (1 - |mu|)), not the residual G: every
+    # component within rtol (scale + |x|) = 1e-9 x ~73 V here. It used
+    # to stop one step after G met rtol, and with the DCM boost's
+    # |mu| = 0.99894 that left r = 1.1e-9 V as 1.07e-6 V of state on
+    # some builds (DECISIONS 21). The rule guarantees the distance to the
+    # computed map's fixed point to its estimate (<= ~7e-8 V); that fixed
+    # point is 7e-11 V from mpmath on the boost (the map's own bias), and
+    # Newton is quadratic, so the estimates land near 1e-11 V. Bound:
+    # 1e-8 V, or twice the run's own estimate if a step lands higher.
+    v0 = k.x0[lab.index("v(vout)")]
+    assert abs(v0 - v_out) <= max(1e-8, 2 * k.orbit_error_estimate)
+    for r in (k, q):
+        # the kernel's orbit_traj is the verification run, not the Newton
+        # run the estimate came from: G is a few ulps there, so compare
+        # at 10 eps of the scale over (1 - |mu|), not bit for bit
+        corr = np.linalg.solve(np.eye(len(r.x0)) - r.monodromy,
+                               r._ctx.orbit_traj.x_end - r.x0)
+        sc_max = float(np.abs(r._ctx.orbit_traj.scale).max())
+        assert r.orbit_error_estimate == pytest.approx(
+            float(np.abs(corr).max()), rel=1e-6,
+            abs=10 * np.finfo(float).eps * sc_max / (1 - r.floquet_radius))
+        # the rule's scale_i is the max over ALL period runs (the start-up
+        # periods' current peaks raise it); the orbit's own is a lower
+        # bound, so 10x on it
+        sc = np.abs(r._ctx.orbit_traj.scale) + np.abs(r.x0)
+        assert (np.abs(corr) <= 10 * 1e-9 * sc).all()
     scale = float(np.abs(q._ctx.orbit_traj.scale).max())
     assert np.abs(k.x0 - q.x0).max() <= 1e-12 * scale
     # the same Newton path, run for run

@@ -258,7 +258,8 @@ class TransientMap:
 def solve(m, x, *, rtol, max_period_runs, n_relax):
     """Newton shooting on ``m`` from ``x``: ``(x0, M, mu, history,
     full_state, residual, last run)`` or a ``ConvergenceError``."""
-    from .periodic_steady_state import _ARMIJO, _N_LAMBDA, _conv
+    from .periodic_steady_state import (_ARMIJO, _N_LAMBDA, _conv,
+                                        _rounding_floor)
     n = m.n
     scale = np.zeros(n)
     history: list = []
@@ -300,7 +301,11 @@ def solve(m, x, *, rtol, max_period_runs, n_relax):
     M = jac(x, xe)
     fresh = True
     relax_rounds = 0
-    polished = False
+    # the estimate a full step from r <= 1 started at (-1: none), and how
+    # many such steps in a row did not halve it: with a difference M the
+    # convergence is linear at |M - M_fd| / (1 - |mu|), not quadratic
+    polished, stalls = -1.0, 0
+    err_est = float("nan")
     I_n = np.eye(n)
     while True:
         r = norm(xe, sc, x)
@@ -313,9 +318,29 @@ def solve(m, x, *, rtol, max_period_runs, n_relax):
         sig = np.linalg.svd(IM, compute_uv=False)
         singular = sig[-1] <= m.marginal * max(1.0, sig[0])
         if r <= 1.0:
-            if singular or polished or scaled(np.linalg.solve(IM, G), x,
-                                               ) <= 1.0:
+            # stop on the orbit error estimate (I - M)^-1 G, the next
+            # correction (|G| / (1 - |mu|) with a slow mode), not on |G|
+            if singular:
+                err_est = float("nan")
                 break
+            corr = np.abs(np.linalg.solve(IM, G)) + _rounding_floor(IM, scale)
+            est = scaled(corr, x)
+            err_est = float(corr.max())
+            if est <= 1.0:
+                break
+            stalls = stalls + 1 if polished >= 0.0 and not (
+                est <= 0.5 * polished) else 0
+            if stalls >= 3:
+                raise _conv(
+                    f"the orbit error estimate |(I - M)^-1 G| = "
+                    f"{err_est:.3e} stopped decreasing above the requested "
+                    f"rtol on engine={m.engine!r}: the period map's "
+                    "rounding (or the difference Jacobian's error), "
+                    "amplified by 1/(1 - |mu|), is above the tolerance. "
+                    "Loosen rtol.")
+            polished = est
+        else:
+            polished, stalls = -1.0, 0
         if singular:
             if not fresh:
                 M, fresh = jac(x, xe), True
@@ -337,7 +362,8 @@ def solve(m, x, *, rtol, max_period_runs, n_relax):
             r_new = norm(xte, tsc, xt)
             if r_new <= (1.0 - _ARMIJO * lam) * norm(xe, sc, x) or (
                     r <= 1.0 and r_new <= 1.0):
-                polished = r <= 1.0
+                if lam < 1.0:   # damped: contracts by ~(1 - lam)
+                    polished, stalls = -1.0, 0
                 # Broyden on G = P - x: J += (dG - J s) s^T / s^T s
                 s_ = xt - x
                 J = M - I_n
@@ -357,6 +383,7 @@ def solve(m, x, *, rtol, max_period_runs, n_relax):
             M, fresh = jac(x, xe), True
             continue
         relax_rounds += 1
+        polished, stalls = -1.0, 0
         if relax_rounds > 3:
             raise _conv(
                 "Newton made no progress after three rounds of "
@@ -388,7 +415,7 @@ def solve(m, x, *, rtol, max_period_runs, n_relax):
     from ._result_views import states_as_array
     full = np.array(states_as_array(last)[-1], dtype=float)
     vrun = last
-    return x, M, mu, history, full, residual, vrun
+    return x, M, mu, history, full, residual, vrun, err_est
 
 
 def periodic_steady_state_on(builder, *, period, switch_fn, engine, dt,
@@ -412,7 +439,7 @@ def periodic_steady_state_on(builder, *, period, switch_fn, engine, dt,
     if x.shape != (n,):
         raise _err(f"start_from has {x.size} entries; the state has {n} "
                    f"({m.labels}).")
-    x0, M, mu, history, full, residual, vrun = solve(
+    x0, M, mu, history, full, residual, vrun, err_est = solve(
         m, x, rtol=rtol, max_period_runs=max_period_runs, n_relax=n_relax)
     unstable = [(i, complex(v), _classify(v)) for i, v in enumerate(mu)
                 if abs(v) >= 1.0]
@@ -421,5 +448,6 @@ def periodic_steady_state_on(builder, *, period, switch_fn, engine, dt,
         multipliers=mu, stable=not unstable, unstable_multipliers=unstable,
         pattern=[], residual=residual, residual_history=history,
         pattern_history=[], n_period_runs=m.n_runs,
-        n_engine_steps=m.n_steps, period=m.T, _ctx=m, full_state=full)
+        n_engine_steps=m.n_steps, period=m.T, _ctx=m, full_state=full,
+        orbit_error_estimate=err_est)
     return res

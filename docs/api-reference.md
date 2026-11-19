@@ -624,9 +624,23 @@ r.x0, r.state_labels, r.orbit        # state at t=0; one period (simulate result
 r.multipliers, r.stable              # Floquet multipliers; max|mu| < 1
 r.pattern                            # [(event, instant/T)] at the orbit
 r.n_period_runs, r.residual_history  # the cost meter, Newton residuals
+r.orbit_error_estimate               # max|(I - M)^-1 (P(x0) - x0)|
 sm = r.sampled_model(inputs=[("duty", "S")], outputs=["vout"])
 sm.response([0.0])                   # H(z=1): d v_out / d D = 23.09 V
 ```
+
+* **Tolerance.** `rtol` (default 1e-9) bounds the ORBIT ERROR, not
+  the residual: Newton stops when every component of `G = P(x0) − x0`
+  and of the error estimate `(I − M)⁻¹·G` (the next correction) is
+  within `rtol·(scale_i + |x0_i|)`. With a slow multiplier the error
+  is `|G|/(1 − |μ|)`: on a DCM boost (|μ| = 0.99894) a residual of
+  1.1e-9 V is 1.07e-6 V of state. The estimate includes the map's
+  rounding floor `|(I − M)⁻¹|·(u·scale)` (u the double-precision unit
+  roundoff): a residual that happens to be exactly 0 does not make
+  the orbit exact. When the map's rounding, amplified
+  by `1/(1 − |μ|)`, keeps the estimate above `rtol`, the solve raises
+  `ConvergenceError` (loosen `rtol`) instead of returning an orbit it
+  cannot vouch for.
 
 * **Other engines.** `engine="pwl", dt=T/100` (a gate edge at
   `t = 0`, `T/dt` an integer) or `engine="trbdf2"` (step ceiling `dt`,

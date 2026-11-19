@@ -14,7 +14,8 @@
 //   G(x0) = P(x0) − x0,   (I − M)·δ = G,   x0 ← x0 + λ·δ (Armijo, λ = 2^-k)
 //
 // with the scaled norm max_i |G_i| / (rtol·(scale_i + |x0_i|)), the stopping
-// rule on the Newton STEP (or one polish step from a converged residual),
+// rule on the ORBIT ERROR ESTIMATE (I − M)⁻¹·G — the next Newton correction,
+// i.e. the residual amplified by about 1/(1 − |μ|) — next to the residual,
 // three rounds of `n_relax` relaxation periods when no λ is accepted, the
 // period-run budget, the singular (I − M) and non-isolated (|μ| = 1) checks,
 // the Floquet multipliers of M, and a verification period carrying the
@@ -36,6 +37,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -67,6 +69,7 @@ enum class OrbitStatus {
     Grazing,          // a period without M (an event tangent to its surface)
     RunFailed,        // a period run threw PeriodRunFailed
     Irreproducible,   // the verification period did not return to x0
+    NoiseFloor,       // the error estimate stopped decreasing above rtol
 };
 
 inline const char* to_string(OrbitStatus s) {
@@ -79,6 +82,7 @@ inline const char* to_string(OrbitStatus s) {
         case OrbitStatus::Grazing: return "grazing";
         case OrbitStatus::RunFailed: return "run_failed";
         case OrbitStatus::Irreproducible: return "irreproducible";
+        case OrbitStatus::NoiseFloor: return "noise_floor";
     }
     return "?";
 }
@@ -99,6 +103,8 @@ struct OrbitResult {
     Vector marginal_direction;        // |v| of the singular / marginal mode
     std::complex<Real> marginal_mu{0, 0};
     Real residual = Real{0};          // max|P(x0) − x0| of the verification
+    // max|(I − M)⁻¹·(P(x0) − x0)| at the accepted iterate (NaN: not formed)
+    Real orbit_error_estimate = std::numeric_limits<Real>::quiet_NaN();
     int n_runs = 0;
     int n_iterations = 0;
     int n_relax_rounds = 0;
@@ -192,7 +198,8 @@ template <class MaskT, class RunFn>
     }
     const DenseMatrix I = DenseMatrix::Identity(n, n);
     int relax_rounds = 0;
-    bool polished = false;
+    // the estimate a FULL step (λ = 1) from r <= 1 started at; −1: none
+    Real polished = Real{-1};
     for (;;) {
         ++out.n_iterations;
         const Real r = norm(traj, tx);
@@ -221,10 +228,33 @@ template <class MaskT, class RunFn>
         const Vector delta = IM.partialPivLu().solve(G);
         if (r <= Real{1}) {
             // a small residual is not a small state error with a slow mode
-            // (|μ| → 1): stop on the Newton step, or after one polish step
-            if (singular || polished || scaled(delta, tx) <= Real{1}) {
+            // (|μ| → 1): the error estimate is the next Newton correction
+            if (singular) {
+                out.orbit_error_estimate = std::numeric_limits<Real>::quiet_NaN();
                 break;
             }
+            // plus the map's rounding: one ulp of each state's scale,
+            // amplified by |(I − M)⁻¹| (an exactly-zero residual does not
+            // make the orbit exact; Python `_rounding_floor`)
+            const Vector bound =
+                delta.cwiseAbs()
+                + IM.inverse().cwiseAbs()
+                      * (std::numeric_limits<Real>::epsilon() * out.scale);
+            const Real est = scaled(bound, tx);
+            out.orbit_error_estimate = max_abs(bound);
+            if (est <= Real{1}) {
+                break;
+            }
+            // a full Newton step whose correction did not halve is the
+            // map's rounding over (1 − |μ|): the tolerance cannot be met
+            // (NaN fails `<=`)
+            if (polished >= Real{0} && !(est <= Real{0.5} * polished)) {
+                out.status = OrbitStatus::NoiseFloor;
+                return fail(tx);
+            }
+            polished = est;
+        } else {
+            polished = Real{-1};
         }
         if (singular) {
             out.status = OrbitStatus::Singular;
@@ -242,7 +272,10 @@ template <class MaskT, class RunFn>
             const Real r_new = norm(tt, xl);
             if (r_new <= (Real{1} - opt.armijo * lam) * norm(traj, tx)
                 || (r <= Real{1} && r_new <= Real{1})) {
-                polished = r <= Real{1};
+                // a damped step contracts by ~(1 − λ), not quadratically
+                if (k > 0) {
+                    polished = Real{-1};
+                }
                 traj = std::move(tt);
                 tx = xl;
                 accepted = true;
@@ -255,6 +288,7 @@ template <class MaskT, class RunFn>
         }
         ++relax_rounds;
         out.n_relax_rounds = relax_rounds;
+        polished = Real{-1};
         if (relax_rounds > opt.max_relax_rounds) {
             out.status = OrbitStatus::NoProgress;
             return fail(tx);
