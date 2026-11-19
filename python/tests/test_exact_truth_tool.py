@@ -5,7 +5,8 @@ small netlist exactly (mpmath, 30 digits) and compares it with a closed form
 written from the circuit's own equations: RC / RL / RLC steps, a sine-driven
 RC, a PWM buck's periodic orbit in DCM (the diode turn-off by root finding),
 an ideal diode feeding R-L (the extinction angle), charge conservation when
-an ideal switch parallels two capacitors, and an ideal switch closing a DC
+an ideal switch parallels two capacitors, the impulsive loss when one closes
+a source onto a capacitor, and an ideal switch closing a DC
 source onto an inductor and an RC driven by a finite pulse edge (the
 matrix-exponential path). The tool's values are
 compared after conversion to float: both sides agree to ~1e-20, so 1e-12
@@ -26,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmarks" / "too
 import exact_truth as et  # noqa: E402
 
 CASES = ["RC step", "RL step", "RLC step", "RC sine", "buck DCM orbit", "ideal half-wave RL",
-         "capacitor jump", "ideal L ramp (expm path)", "RC ramp edge"]
+         "capacitor jump", "source jump", "ideal L ramp (expm path)", "RC ramp edge"]
 
 
 @pytest.mark.parametrize("case", CASES)

@@ -1005,6 +1005,34 @@ class Solver:
             v = dyn.H * v
         return 0
 
+    def jump_source_work(self, mode, xm, xp):
+        """Impulsive work of the voltage sources in a state jump: integrating
+        E x' = A x + B w across it, E (x+ - x-) = A s with s the impulse weights;
+        a source of voltage v delivers -v s_I. A is singular when a node holds
+        only capacitors (its voltage impulse is free): the minimum-norm s, and
+        None when that freedom reaches a source current or A s misses."""
+        ck = self.ck
+        A, b = to_mp(ck.stamp(mode)[0]), self.Em * (xp - xm)
+        U, S, V = mp.svd_r(A)
+        cut = max(S) * mp.mpf(10) ** (-mp.mp.dps // 2)
+        keep = [i for i in range(len(S)) if S[i] > cut]
+        ub = U.T * b
+        s = mp.zeros(A.rows, 1)
+        for i in keep:
+            s += V[i, :].T * (ub[i] / S[i])
+        if mp.norm(A * s - b) > cut * (1 + mp.norm(b)):
+            return None
+        w = mp.mpf(0)
+        for src in ck.vsrc:
+            nm, na, nb = src[:3]
+            k = ck.ix.get(f"Is({nm})")
+            if k is not None:
+                if any(abs(V[i, k]) > cut for i in range(len(S)) if i not in keep):
+                    return None
+                v = sum(sg * xp[ck._vi(nd)] for nd, sg in ((na, 1), (nb, -1)) if nd != "gnd")
+                w -= v * s[k]
+        return w
+
     def select(self, t, Ex, sw, prev_dio, skey, k_event):
         """Enumerate candidate diode modes at (t, Ex): returns (dio, info)."""
         ck = self.ck
@@ -1165,7 +1193,8 @@ class Solver:
             xp = dy.X * y
             dE = self.stored(xp) - self.stored(xm)
             if abs(dE) > self.tol * (1 + abs(self.stored(xm))):
-                self.jumps.append(dict(t=t, dE=dE, x_minus=xm, x_plus=xp, mode=mode))
+                self.jumps.append(dict(t=t, dE=dE, x_minus=xm, x_plus=xp, mode=mode,
+                                       w_src=self.jump_source_work(mode, xm, xp)))
             info.update(cause=cause, prev=prev, mode=mode)
             self.events.append(info)
             if verbose:
@@ -1768,7 +1797,33 @@ def case_cap_jump(dps):
     d0 = 10 * mp.exp(-g * (1 / C1 + 1 / C2) * t0)
     loss = C1 * C2 / (C1 + C2) * d0 ** 2 / 2
     return [("V after", _at(sol, "V(n1)", 2e-6), 10 * C1 / (C1 + C2)),
-            ("impulsive loss", -sum(j["dE"] for j in sol.jumps), loss)], sol
+            ("impulsive loss", impulsive_loss(sol), loss)], sol
+
+
+def case_src_jump(dps):
+    """An ideal switch closing 10 V onto 1 uF: the source's impulsive work
+    C V dv, the loss C dv^2 / 2 (dv: the jump, v(t0) from the OFF leakage)."""
+    C, V, g, t0 = mp.mpf(1e-6), mp.mpf(10), mp.mpf(1e-9), mp.mpf(1e-6)
+    sol = Solver(Circuit(_net("srcjump", [
+        _Vdc("V", "a", 10.0),
+        dict(type="voltage_source", name="Vg", nodes=["g", 0],
+             waveform=dict(type="pulse", v_initial=0.0, v_pulse=10.0, t_delay=1e-6, t_width=1.0,
+                           period=2.0)),
+        dict(type="vcswitch", name="S", nodes=["g", "a", "n"], v_threshold=5.0, g_on=1e3,
+             g_off=1e-9),
+        dict(type="capacitor", name="C", nodes=["n", 0], value=1e-6)],
+        2e-6, 1e-8, ["V(n)"]), form="ideal"), dps).run()
+    dv = V * mp.exp(-g / C * t0)
+    return [("V after", _at(sol, "V(n)", 2e-6), V),
+            ("source impulsive work", sum(j["w_src"] for j in sol.jumps), C * V * dv),
+            ("impulsive loss", impulsive_loss(sol), C * dv ** 2 / 2)], sol
+
+
+def impulsive_loss(sol):
+    """Energy lost in the state jumps: sources' impulsive work - stored change."""
+    if any(j["w_src"] is None for j in sol.jumps):
+        return None
+    return sum((j["w_src"] - j["dE"] for j in sol.jumps), mp.mpf(0))
 
 
 def case_ramp(dps):
@@ -1813,7 +1868,8 @@ def case_rc_edge(dps):
 CASES = [("ideal L ramp (expm path)", case_ramp), ("RC ramp edge", case_rc_edge), ("RC step", case_rc), ("RL step", case_rl), ("RLC step", case_rlc),
          ("RC sine", case_sine_rc), ("floating bridge", case_bridge),
          ("buck CCM orbit", case_buck_ccm), ("buck DCM orbit", case_buck_dcm),
-         ("ideal half-wave RL", case_halfwave_rl), ("capacitor jump", case_cap_jump)]
+         ("ideal half-wave RL", case_halfwave_rl), ("capacitor jump", case_cap_jump),
+         ("source jump", case_src_jump)]
 
 
 def validate(dps=50, names=None):
@@ -1914,7 +1970,7 @@ def truth(path, form="conductance", dps=(30, 60), out_dir=TRUTH_DIR, write=True,
     rec["dc_start_modes"] = hi.n_dc
     rec["notes"] = hi.notes
     rec["jumps"] = [dict(t=mp.nstr(j["t"], 20), dE=mp.nstr(j["dE"], 12)) for j in hi.jumps]
-    rec["impulsive_loss_J"] = mp.nstr(-sum((j["dE"] for j in hi.jumps), mp.mpf(0)), 15)
+    rec["impulsive_loss_J"] = mp.nstr(impulsive_loss(hi), 15) if impulsive_loss(hi) is not None else None
     rec["max_dae_residual"] = mp.nstr(max(d.dae_residual for d in hi.dyns.values()
                                           if isinstance(d, Dyn)), 3)
     rec["max_eigvec_cond"] = mp.nstr(max(d.cond for d in hi.dyns.values() if isinstance(d, Dyn)), 3)
@@ -2059,11 +2115,9 @@ def report(out=REPORT, truth_dir=TRUTH_DIR, dps=50):
           "difference of the 30- and 60-digit runs (45 / 90 where 30 cannot select the mode) on the netlist grid, relative to the column's",
           "peak. `modes`: events at which more than one mode is consistent (followed: the one",
           "with the fewest flips); `weak`: events where only a mode with a device pinned at its",
-          "boundary (v = 0 identically) is consistent. `-dE jumps`: minus the stored-energy change",
-          "summed over the state jumps; the impulsive loss when no source takes part in a jump",
-          "(an ideal switch closing a capacitor onto a source also draws the source's impulsive",
-          "work, not computed).", "",
-          "| circuit | form | commutations | modes non-unique | weak | -dE jumps [J] | prec | "
+          "boundary (v = 0 identically) is consistent. `impulsive loss`: energy lost in the state",
+          "jumps, the sources' impulsive work minus the stored-energy change (E dx = A s).", "",
+          "| circuit | form | commutations | modes non-unique | weak | impulsive loss [J] | prec | "
           "energy bal. | u stored | floor | tol pwl / trbdf2 |",
           "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
     for r in recs:
