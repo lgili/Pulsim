@@ -293,3 +293,20 @@ conservative option was taken unless the design states a decision.
    refuted). The lever is the event: the "all OFF" successor of a
    zero-current diode turn-off, or physical device capacitance. Recorded in
    docs/known-limitations.md; not fixed here.
+
+12. **Goal 3 (commutation energy as a thermal state jump) was not started:
+   hand-off.** Budget went to the verification of entry 10 and to entry 11.
+   State on this tip: trbdf2's `LossTracker` (solver/loss_tracker.hpp)
+   queues an event's energy and `advance(h_next)` turns it into a
+   rectangular current E/h_next into the deposit node over the NEXT step
+   (one-step lag, exact in sum; add-in-kernel-event-losses DECISIONS 5
+   and its open item (i)). The exact engine already takes the same queue
+   as an impulse through `take_heat()`. Candidate for trbdf2: at the
+   accept that books an event, apply the jump Δv = E / C_node on the
+   deposit node's capacitor (the walk's nodes and the capacitors' history
+   re-derived as in that open item) instead of `advance()`'s rectangle,
+   then restart the step (the post-event SDIRK restart already exists).
+   Accept: the RL chopper's single RC node in closed form, buck and VSI
+   T_j against trbdf2 rtol 1e-10 within 1e-4 of the rise, energy in =
+   loss booked. Interaction with entry 10: a thermal capacitor is an
+   entry row, not a q row, so the joining rule is not involved.
