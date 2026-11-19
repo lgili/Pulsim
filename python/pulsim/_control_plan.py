@@ -21,6 +21,12 @@ import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional, Tuple
 
+# Module level, not in compose_control: simulate() pays every import on
+# every call (task 7.2 of add-kernel-simulation-object).
+from ._pulsim import make_combined_switch_fn  # type: ignore[import-not-found]
+from ._control_state import start_run
+from .c_block import _c_graph_observer, static_state_hold
+
 TickFn = Callable[[float, object], None]
 
 
@@ -260,8 +266,6 @@ class ControlPlan:
 def compose_control(builder, closed_loops, step_observer, controller_period,
                     switch_fn, resume: bool = False,
                     snapshot=None, control_tick: str = "label") -> ControlPlan:
-    from ._pulsim import make_combined_switch_fn  # type: ignore[import-not-found]
-
     loops = list(closed_loops or [])
     plan = ControlPlan(switch_fn=switch_fn)
     gates = [loop.switch_fn for loop in loops if loop.switch_fn is not None]
@@ -320,12 +324,10 @@ def compose_control(builder, closed_loops, step_observer, controller_period,
             plan.rate_offsets = list(step_observer._rate_offsets)
             plan.rate_delays = list(step_observer._rate_delays)
         plan.b_extra_fn = getattr(step_observer, "_b_extra_fn", None)
-    from .c_block import _c_graph_observer, static_state_hold
     plan.static_hold = static_state_hold(           # G27: one run at a time
         builder, plan.inner_observers)
     plan.c_graph = _c_graph_observer(builder, fresh=not resume)
     # every graph from its declared initial state, or the snapshot's
-    from ._control_state import start_run
     plan.graphs = start_run(plan, snapshot if resume else None)
     plan.control_tick = control_tick
     # control_tick='state' (G30): the label-time graphs (closed-loop

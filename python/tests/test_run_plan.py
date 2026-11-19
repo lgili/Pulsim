@@ -150,3 +150,115 @@ def test_helpers_one_level_down_swallow_no_kernel_error():
                 if not any(isinstance(x, ast.Raise) for x in ast.walk(h)):
                     found.add((fname, name))
     assert found <= _SWALLOWING_HELPERS, sorted(found - _SWALLOWING_HELPERS)
+
+
+def _star_names(call):
+    """The names of a call `f(*((a, b, ...) + (c, ...)))`, in order."""
+    assert not call.args[:-1] or all(isinstance(a, ast.Name) for a in call.args[:-1])
+    names = [a.id for a in call.args if isinstance(a, ast.Name)]
+    star = [a for a in call.args if isinstance(a, ast.Starred)]
+    assert len(star) == 1 and not call.keywords, ast.unparse(call)
+    expr = star[0].value
+    parts = []
+    while isinstance(expr, ast.BinOp):
+        parts.insert(0, expr.right)
+        expr = expr.left
+    parts.insert(0, expr)
+    for t in parts:
+        assert isinstance(t, ast.Tuple) and len(t.elts) <= 30, ast.unparse(t)
+        names += [e.id for e in t.elts]
+    return names
+
+
+def test_positional_plan_calls_follow_the_signatures():
+    """7.2 (fixed overhead): simulate() -> _plan_run, _plan_run's captured
+    values and _plan_run -> _route pass their values positionally (locals()
+    and > 30-keyword calls cost per call); each name list must equal the
+    callee's parameters, in order, in tuples of <= 30 names."""
+    names = list(inspect.signature(p.simulate).parameters)
+    assert list(inspect.signature(p._plan_run).parameters) == names
+    assert list(p._SIMULATE_DEFAULTS) == names[1:]
+    fns = _functions(_PKG / "__init__.py", {"simulate", "_plan_run"})
+
+    def call_to(fn, callee):
+        hits = [c for c in ast.walk(fn) if isinstance(c, ast.Call)
+                and isinstance(c.func, ast.Name) and c.func.id == callee]
+        assert len(hits) == 1, callee
+        return hits[0]
+
+    assert _star_names(call_to(fns["simulate"], "_plan_run")) == names
+    captured = call_to(fns["_plan_run"], "_resolved_from").args[0]
+    assert _star_names(ast.Call(func=ast.Name("f"), keywords=[],
+                                args=[ast.Starred(captured)])) == names[1:]
+    assert _star_names(call_to(fns["_plan_run"], "_route")) == list(
+        inspect.signature(p._route).parameters)
+
+
+def test_plan_fields_and_immutability():
+    """The plan's records are NamedTuples built positionally: each field
+    holds what its name says, and none can be set from the outside."""
+    b = _rc()
+    plan = _plan(b, 1e-4, 1e-6, engine="pwl")
+    assert plan.caller_builder is b and plan.builder is not b
+    assert isinstance(plan.circuit, p.Circuit)
+    assert isinstance(plan.circuit_plan, p.RunPlan)
+    assert plan.circuit_plan.preflight is plan.preflight
+    assert plan.kernel_run is None and plan.recipe is None
+    assert (plan.engine, plan.engine_asked, plan.route_reasons) == ("pwl", "pwl", ())
+    assert (plan.t_start, plan.t_end) == (0.0, 1e-4)
+    assert type(plan.step).__name__ == "FixedStep" and plan.step.dt == 1e-6
+    assert type(plan.newton).__name__ == "NewtonOptions"
+    assert type(plan.events).__name__ == "EventOptions"
+    assert plan.events.on_impulse == "record"
+    assert type(plan.initial).__name__ == "Initial"
+    assert type(plan.drive).__name__ == "Drive"
+    assert plan.device_path == "legacy"
+    assert plan.device_path_enum == p.DevicePath.Legacy
+    assert plan.voltage_sanity_factor is None and plan.auto_regularize is True
+    assert plan.resolved_from["dt"] == "explicit"
+    assert plan.diagnostics == ()
+    for rec, field in ((plan, "engine"), (plan.step, "dt"), (plan.drive, "switch_fn"),
+                       (plan.newton, "tol_dx"), (plan.events, "strict"),
+                       (plan.initial, "state")):
+        with pytest.raises(AttributeError):
+            setattr(rec, field, None)
+        with pytest.raises(AttributeError):
+            rec.new_attribute = 1
+    routed = _plan(b, 1e-4, 1e-6)   # 'auto' with dt: routed to pwl, with a reason
+    assert routed.engine == "pwl" and routed.engine_asked == "auto"
+    assert [d.message for d in routed.diagnostics] == list(routed.route_reasons)
+
+
+def test_every_positional_record_has_its_arity():
+    """`_planning.new(_planning.X, (...))` (tuple.__new__, no check of its
+    own) passes exactly X's fields."""
+    import pulsim._plan as planning
+    tree = ast.parse((_PKG / "__init__.py").read_text(encoding="utf-8"))
+    seen = set()
+    for c in ast.walk(tree):
+        if isinstance(c, ast.Call) and ast.unparse(c.func) == "_planning.new":
+            cls, values = c.args
+            assert isinstance(values, ast.Tuple), ast.unparse(c)
+            name = ast.unparse(cls).removeprefix("_planning.")
+            assert len(values.elts) == len(getattr(planning, name)._fields), name
+            seen.add(name)
+    assert seen == {"SimPlan", "NewtonOptions", "EventOptions", "Initial", "Drive",
+                    "FixedStep", "VariableStep", "ExactStep", "RunOutcome"}
+
+
+def test_run_outcome_fields():
+    """RunOutcome, built positionally by each runner: each field holds what
+    its name says (pwl and trbdf2)."""
+    obs = []
+    plan = _plan(_rc(), 1e-5, 1e-6, engine="pwl",
+                 step_observer=lambda t, x: obs.append(t))
+    out = p._run_pwl(plan)
+    assert len(out.result.times) > 1 and out.builder is not None
+    assert callable(out.switch_fn) and out.b_extra_fn is None
+    assert callable(out.step_observer) and out.should_continue is None
+    assert out.stats is None and out.cxx_chain is None and out.mmc_finalize is None
+    assert plan.drive.user_step_observer is not None
+    plan = _plan(_rc(), 1e-5, engine="trbdf2")
+    out = p._run_trbdf2(plan)
+    assert isinstance(out.stats, dict) and "control_tick_counts" in out.stats
+    assert out.cxx_chain is None and out.mmc_finalize is None

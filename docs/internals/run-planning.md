@@ -14,12 +14,24 @@ def simulate(builder, t_end=None, dt=None, **kw):
 | run | `_run_pwl` / `_run_trbdf2` / `_run_dsed` | build the kernel object or cache, attach what needs the run's own cache, run; they read **only** the plan |
 | finalize | `_finalize` | the result's handles (`_builder`, `plan`, `engine_used`, `engine_route_reason`), the post-run checks and warnings |
 
-The plan is a frozen `pulsim._plan.SimPlan`: `engine`, `engine_asked`,
+The plan is an immutable `pulsim._plan.SimPlan`: `engine`, `engine_asked`,
 `route_reasons`, `features`, `step` (`FixedStep` / `VariableStep` /
 `ExactStep`), `newton`, `events`, `initial`, `drive`, and `resolved_from`
 (one entry per keyword: `explicit`, `solver`, `yaml` or `default`). It is
 not `pulsim.RunPlan`, the circuit record a result carries (`result.plan`);
 the plan holds that one as `circuit_plan`.
+
+Every record of the plan is a `typing.NamedTuple`: a tuple with no
+`__dict__`, so a field cannot be set or deleted and no attribute can be
+added (`AttributeError`). Not frozen dataclasses: their `__init__` pays one
+`object.__setattr__` per field, and the plan is built on every
+`simulate()` call (task 7.2 keeps that call's fixed overhead near its
+pre-Stage A value; `test_simulate_overhead.py` is a local bytecode
+ratchet). `simulate()` builds the records with `tuple.__new__` and every
+field in order, and passes its keywords to `_plan_run` and `_route`
+positionally; `test_run_plan.py` checks each of those name lists against
+the signature and each record's arity. The objects the plan holds (the
+builder, the control plan, the user's callables) are not immutable.
 
 ## The rule: put it in the plan
 

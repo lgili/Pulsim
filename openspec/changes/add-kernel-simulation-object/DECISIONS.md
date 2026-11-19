@@ -403,3 +403,53 @@
     of 23, `plan.undriven`, 7.2's overhead clause. `simulate()` is 375
     lines (306 docstring, 69 code; was 1846). Not run: `ctest` (no C++
     changed), mkdocs build.
+
+25. **Task 7.2's overhead clause: most of Stage A's cost removed, not all.**
+    Measured per function (`sys.settrace` opcode events, warm call, 2-switch
+    buck, same `.so`; `.scratch/opcount_all.py`): pre-Stage A (214947c1)
+    pwl 2551 / trbdf2 3380 / dsed 3993 bytecodes; Stage A as landed
+    (b348f331) 3609 / 4413 / 5051; now 2834 / 3683 / 4348. Where Stage A's
+    +1058 (pwl) went: the frozen dataclasses' `__init__` (one
+    `object.__setattr__` per field) +502; `**locals()` into `_plan_run`
+    and `dict(locals())` for `resolved_from` (1 bytecode each, but ~1 us
+    each: `locals()` of a 50-parameter frame); the 45-keyword `_route`
+    call and the 22-keyword plan constructor (CPython compiles a call with
+    more than 30 stack slots to a dict built name by name: ~2 bytecodes per
+    keyword); the runners' and `_finalize`'s prologues re-reading the plan;
+    the eager `plan.diagnostics` tuple.
+    - **Removed:** the records are `typing.NamedTuple`s built with
+      `tuple.__new__` and every field in order (`_planning.new`): no Python
+      frame, no keyword dict. Immutability: a tuple has no `__dict__`, a
+      field cannot be set or deleted, `AttributeError` (frozen dataclasses
+      raised `FrozenInstanceError`, a subclass of it). `simulate()` passes
+      its arguments to `_plan_run`, and `_plan_run` to `_route`,
+      positionally as two tuples of <= 30 names concatenated and starred;
+      `resolved_from` keeps the values as a tuple (captured at call time,
+      compared lazily). `plan.diagnostics` is a property over
+      `route_reasons` (a tuple of strings). Fields read on rare paths are
+      read where used in `_run_pwl` / `_finalize`. On the path but not
+      Stage A's: six function-level `from . import` hoisted to module level
+      (each costs `importlib._bootstrap.parent` / `_handle_fromlist`),
+      `np.any(a != 0)` -> `(a != 0).any()` (numpy's Python wrapper).
+      Checks: `test_positional_plan_calls_follow_the_signatures` (each name
+      list equals the callee's parameters, by `ast`),
+      `test_every_positional_record_has_its_arity`,
+      `test_plan_fields_and_immutability`, `test_run_outcome_fields`.
+    - **What remains (+283 pwl, +303 trbdf2, +355 dsed):** the cost of the
+      layout itself: five calls instead of one body, the plan built and
+      read back field by field. Removing it means merging the functions
+      back; not done. Wall time, best of 9x300 on an RC (information only,
+      the shared Mac swings +-20 %): pwl 41.1 -> 57.0 -> 44.9 us, trbdf2
+      ~210-240 us in all three (noise larger than the difference).
+    - **Gate:** `python/tests/test_simulate_overhead.py`, a LOCAL-only
+      ratchet (CPython 3.13 on darwin, skipped when `CI` is set): pwl <=
+      2890, trbdf2 <= 3760, counted in a fresh interpreter (inside the
+      suite, state earlier tests leave behind adds ~190). Lower the
+      ceilings when the count drops.
+    - Oracles vs b348f331 (clean `git archive` extract, same `.so`): pytest
+      5784 -> 5788 passed (new tests; one skip fewer: `test_no_home_paths`
+      skips outside a git checkout), warning set 418 = 418, goldens /
+      stateful / engines / options / hooks identical, `pwl_identity`
+      390/390, `trbdf2_identity` 370/371 (the one difference is the
+      extract's absolute path inside a YAML loader message; equal with the
+      path substituted).

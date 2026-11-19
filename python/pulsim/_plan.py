@@ -8,9 +8,14 @@ an initial state, a route or a drive that is resolved below the dispatch
 applies to one engine only: that is the defect class this layout exists
 to prevent (see docs/internals/run-planning.md).
 
-The plan is frozen; the objects it holds (the builder, the control plan,
-the user's callables) are not, and Stage A keeps today's order of every
-side effect on them (DECISIONS 23).
+The plan is immutable: every record here is a ``typing.NamedTuple`` (a
+tuple: no ``__dict__``, a field cannot be set or deleted; assigning one
+raises ``AttributeError``). Not frozen dataclasses: their ``__init__``
+pays one ``object.__setattr__`` per field, ~500 bytecodes per call on a
+path parameter sweeps call thousands of times (task 7.2). The objects it
+holds (the builder, the control plan, the user's callables) are not
+immutable, and Stage A keeps today's order of every side effect on them
+(DECISIONS 23).
 
 Not ``pulsim.RunPlan``: that public name is the circuit record a result
 carries (``result.plan``: circuit, ties, preflight); this plan holds it as
@@ -19,8 +24,14 @@ carries (``result.plan``: circuit, ties, preflight); this plan holds it as
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Iterator, Mapping, Optional
+from typing import Any, Iterator, Mapping, NamedTuple, Optional
+
+
+# The records' constructor on simulate()'s path: ``new(Record, (v, ...))``
+# with every field, in order (tuple.__new__: no Python frame, no keyword
+# dict; test_run_plan checks the arity of every call). ``Record(...)``
+# works too, with keywords and defaults.
+new = tuple.__new__
 
 
 # plan.features: the keywords that put a feature in the run (set, not
@@ -35,13 +46,15 @@ FEATURE_KW = ("switch_fn", "b_extra_fn", "step_observer", "closed_loops",
 class ResolvedFrom(Mapping):
     """``plan.resolved_from``: keyword -> 'explicit' | 'solver' | 'yaml' |
     'default', computed when read, so a run that never reads it pays one
-    dict copy. 'explicit' = not the signature's default (an explicit
-    default reads 'default'); 'yaml' / 'solver' = filled from a
-    LoadedCircuit / SolverOptions (`mark`)."""
+    tuple. ``args``: the values as passed (captured at call time), in the
+    order of ``defaults`` (simulate()'s parameters after ``builder``).
+    'explicit' = not the signature's default (an explicit default reads
+    'default'); 'yaml' / 'solver' = filled from a LoadedCircuit /
+    SolverOptions (`mark`)."""
 
     __slots__ = ("_args", "_defaults", "_marks", "_d")
 
-    def __init__(self, args: dict, defaults: dict):
+    def __init__(self, args: tuple, defaults: dict):
         self._args, self._defaults, self._marks, self._d = args, defaults, {}, None
 
     def mark(self, key: str, source: str) -> None:
@@ -51,8 +64,8 @@ class ResolvedFrom(Mapping):
     def _dict(self) -> dict:
         if self._d is None:
             out = {}
-            for k, d in self._defaults.items():
-                v = self._args[k]
+            for (k, d), v in zip(self._defaults.items(), self._args,
+                                 strict=True):
                 out[k] = ("default" if v is d or (
                     d is not None and type(v) is type(d) and v == d)
                     else "explicit")
@@ -73,16 +86,14 @@ class ResolvedFrom(Mapping):
         return f"ResolvedFrom({self._dict()!r})"
 
 
-@dataclass(frozen=True)
-class Diagnostic:
+class Diagnostic(NamedTuple):
     """One planning fact a caller may want to read (Stage B routes the
     warnings through these; Stage A records the route's reasons)."""
     code: str
     message: str
 
 
-@dataclass(frozen=True)
-class NewtonOptions:
+class NewtonOptions(NamedTuple):
     max_iterations: Optional[int] = None
     tol_dx: Optional[float] = None
     tol_res: Optional[float] = None
@@ -92,8 +103,7 @@ class NewtonOptions:
     nonlinear_refresh: Optional[bool] = None
 
 
-@dataclass(frozen=True)
-class EventOptions:
+class EventOptions(NamedTuple):
     max_iterations: Optional[int] = None
     strict: bool = False
     mode_selection: Optional[str] = None
@@ -103,8 +113,7 @@ class EventOptions:
     substep_state_correction: Optional[bool] = None
 
 
-@dataclass(frozen=True)
-class FixedStep:
+class FixedStep(NamedTuple):
     """engine 'pwl': the grid, and the kernel options it resolved."""
     dt: float
     store_every: Optional[int]
@@ -113,8 +122,7 @@ class FixedStep:
     via_simulation: bool        # through sim::Simulation (else the raw driver)
 
 
-@dataclass(frozen=True)
-class VariableStep:
+class VariableStep(NamedTuple):
     """engine 'trbdf2': dt is the step ceiling (None: the kernel picks)."""
     dt: Optional[float]
     rtol: Optional[float]
@@ -124,8 +132,7 @@ class VariableStep:
     run_options: Any
 
 
-@dataclass(frozen=True)
-class ExactStep:
+class ExactStep(NamedTuple):
     """engine 'dsed' (canonical 'exact'): dt is the step cap dt_max."""
     dt: Optional[float]
     rtol: Optional[float]
@@ -138,8 +145,7 @@ class ExactStep:
     allow_implicit_segments: Optional[bool]
 
 
-@dataclass(frozen=True)
-class Initial:
+class Initial(NamedTuple):
     """Where the run starts: an explicit / builder (i0=, c0=) state, a
     snapshot, or the DC operating point (pwl)."""
     state: Any = None
@@ -148,8 +154,7 @@ class Initial:
     start_from_dc_op: bool = False
 
 
-@dataclass(frozen=True)
-class Drive:
+class Drive(NamedTuple):
     """What drives the circuit, composed above the dispatch (the control
     plan's gates, graphs and ticks; the user's callables merged into it).
     ``user_*`` are the callables as passed (motor-trace attachment walks
@@ -169,8 +174,7 @@ class Drive:
     progress: Any = False
 
 
-@dataclass(frozen=True)
-class SimPlan:
+class SimPlan(NamedTuple):
     """One run, resolved. ``resolved_from`` has one entry per
     ``simulate()`` keyword: 'explicit' | 'solver' | 'yaml' | 'default'."""
     builder: Any
@@ -194,8 +198,14 @@ class SimPlan:
     device_path_enum: Any            # pulsim.DevicePath
     voltage_sanity_factor: Optional[float]
     auto_regularize: bool
-    diagnostics: tuple = ()
-    resolved_from: Mapping[str, str] = field(default_factory=dict)
+    resolved_from: Mapping[str, str]
+
+    @property
+    def diagnostics(self) -> tuple:
+        """The planning facts (Stage A: the route's reasons), built when
+        read from ``route_reasons`` (a tuple of strings, fixed at call
+        time)."""
+        return tuple(Diagnostic("route", str(r)) for r in self.route_reasons)
 
     @property
     def features(self) -> frozenset:
@@ -208,8 +218,7 @@ class SimPlan:
         return frozenset(out)
 
 
-@dataclass(frozen=True)
-class RunOutcome:
+class RunOutcome(NamedTuple):
     """What an engine runner hands ``_finalize``: the result and the drive
     as the run finally composed it (pwl composes its cache hooks, the
     default switch_fn and the live stream's cancel hook at run time, and

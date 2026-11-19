@@ -1000,6 +1000,7 @@ load_yaml_string = _yaml_retired_as_retired_error(load_yaml_string)
 load_yaml_file = _yaml_retired_as_retired_error(load_yaml_file)
 from ._refusal import unsupported as _unsupported  # noqa: E402
 from ._control_plan import compose_control as _compose_control  # noqa: E402
+from ._control_plan import monitor_flags as _monitor_flags  # noqa: E402
 from ._control_state import save_into as _save_control_state  # noqa: E402
 from ._pulsim import RunOptions  # type: ignore[import-not-found]  # noqa: E402
 from . import _run_options as _ro  # noqa: E402
@@ -1931,8 +1932,10 @@ def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
     `SwitchSchedule` with an edge oracle (a combination that holds a
     Python callable has none). Any other non-None hook is Python.
     """
-    from ._pulsim import (  # type: ignore[import-not-found]
-        CxxChainBExtra, CxxChainPwmGate, CxxChainTick)
+    _k = _pulsim_module  # (not an import: simulate() pays on every call)
+    CxxChainBExtra = _k.CxxChainBExtra
+    CxxChainPwmGate = _k.CxxChainPwmGate
+    CxxChainTick = _k.CxxChainTick
     out = []
     for name, fn in hooks.items():
         if fn is None:
@@ -2204,9 +2207,9 @@ _SOLVER_KW = ("enable_nonlinear_refresh", "max_newton_iterations",
               "rtol", "atol", "dt_init")
 
 
-def _resolved_from(args: dict) -> "_planning.ResolvedFrom":
-    # (a copy: before 3.13 a tracer re-syncs a frame's locals() dict)
-    return _planning.ResolvedFrom(dict(args), _SIMULATE_DEFAULTS)
+def _resolved_from(args: tuple) -> "_planning.ResolvedFrom":
+    # args: simulate()'s values after `builder`, in signature order
+    return _planning.ResolvedFrom(args, _SIMULATE_DEFAULTS)
 
 
 def _apply_ties(builder, run_circuit, kernel_run, ties):
@@ -2643,7 +2646,24 @@ def simulate(
     # add-kernel-simulation-object Stage A: plan -> engine table -> finalize.
     # Whatever applies to every engine is resolved in _plan_run, above the
     # dispatch; an engine runner reads only the plan (test_run_plan.py).
-    plan = _plan_run(**locals())
+    # Positional, not **locals(): locals() of this frame costs ~1 us per
+    # call. Two tuples of <= 30 names each: a longer call or tuple literal
+    # compiles to one LIST_APPEND per name. test_run_plan keeps both
+    # halves, and _plan_run's tuple, equal to the signature's order.
+    plan = _plan_run(builder, *((
+        t_end, dt, engine, rtol, atol, dt_init, integrator,
+        stiffness_threshold, h_bdf2, t_start, switch_fn, b_extra_fn,
+        step_observer, start_from_dc_op, enable_nonlinear_refresh,
+        max_newton_iterations, max_event_iterations, strict_event_iterations,
+        max_dt_halvings, voltage_sanity_factor, store_every, auto_regularize,
+        tol_newton_dx, tol_newton_res, enable_newton_line_search) + (
+        enable_newton_lm, newton_roundoff_budget,
+        enable_substep_state_correction, discontinuity_restart,
+        resolution_diagnostics, on_impulse, device_path,
+        inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
+        should_continue, closed_loops, live_stream, mmc_arms, on_cache,
+        controller_period, resume_from, control_tick, solver, sensitivities,
+        mode_selection, allow_implicit_segments, recorders)))
     return _finalize(_ENGINES[plan.engine](plan), plan)
 
 
@@ -2814,18 +2834,19 @@ def _compose_for(engine, _plan, *, t_start, t_end, dt, sensitivities,
             _b_extra_fn_user, _closed_loops_user)
 
 
-def _route(engine, builder, _dsed, _plan, _opt_values, *, dt, t_start,
-           resume_from, step_observer, closed_loops, controller_period,
-           live_stream, progress, start_from_dc_op, strict_event_iterations,
-           max_dt_halvings, store_every, mmc_arms, on_cache,
-           enable_substep_state_correction, discontinuity_restart,
-           resolution_diagnostics, inductor_freeze_di_max,
-           inductor_abs_clamp, switch_fn, rtol, atol, dt_init, integrator,
-           stiffness_threshold, h_bdf2, allow_implicit_segments,
-           mode_selection, _mode_auto, max_event_iterations, _engine_asked,
-           device_path, enable_nonlinear_refresh, max_newton_iterations,
-           tol_newton_dx, tol_newton_res, enable_newton_line_search,
-           enable_newton_lm, newton_roundoff_budget, should_continue):
+def _route(
+    engine, builder, _dsed, _plan, _opt_values, dt, t_start, resume_from,
+    step_observer, closed_loops, controller_period, live_stream, progress,
+    start_from_dc_op, strict_event_iterations, max_dt_halvings, store_every,
+    mmc_arms, on_cache, enable_substep_state_correction, discontinuity_restart,
+    resolution_diagnostics, inductor_freeze_di_max, inductor_abs_clamp,
+    switch_fn, rtol, atol, dt_init, integrator, stiffness_threshold, h_bdf2,
+    allow_implicit_segments, mode_selection, _mode_auto, max_event_iterations,
+    _engine_asked, device_path, enable_nonlinear_refresh,
+    max_newton_iterations, tol_newton_dx, tol_newton_res,
+    enable_newton_line_search, enable_newton_lm, newton_roundoff_budget,
+    should_continue,
+):
     """The route (add-kernel-simulation-object Stage A, task 4): the engine
     the run lands on and why, from the option x engine table
     (sim::kRunOptionTable via _run_options) and the engines' capability
@@ -3042,15 +3063,15 @@ def _route(engine, builder, _dsed, _plan, _opt_values, *, dt, t_start,
     return engine, _route_reasons, mode_selection, _mode_auto
 
 
-def _plan_run(builder, t_end, dt, *,
-    engine, rtol, atol, dt_init, integrator, stiffness_threshold, h_bdf2,
-    t_start, switch_fn, b_extra_fn, step_observer, start_from_dc_op,
-    enable_nonlinear_refresh, max_newton_iterations, max_event_iterations,
-    strict_event_iterations, max_dt_halvings, voltage_sanity_factor,
-    store_every, auto_regularize, tol_newton_dx, tol_newton_res,
-    enable_newton_line_search, enable_newton_lm, newton_roundoff_budget,
-    enable_substep_state_correction, discontinuity_restart,
-    resolution_diagnostics, on_impulse, device_path,
+def _plan_run(
+    builder, t_end, dt, engine, rtol, atol, dt_init, integrator,
+    stiffness_threshold, h_bdf2, t_start, switch_fn, b_extra_fn, step_observer,
+    start_from_dc_op, enable_nonlinear_refresh, max_newton_iterations,
+    max_event_iterations, strict_event_iterations, max_dt_halvings,
+    voltage_sanity_factor, store_every, auto_regularize, tol_newton_dx,
+    tol_newton_res, enable_newton_line_search, enable_newton_lm,
+    newton_roundoff_budget, enable_substep_state_correction,
+    discontinuity_restart, resolution_diagnostics, on_impulse, device_path,
     inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
     should_continue, closed_loops, live_stream, mmc_arms, on_cache,
     controller_period, resume_from, control_tick, solver, sensitivities,
@@ -3059,7 +3080,21 @@ def _plan_run(builder, t_end, dt, *,
     """simulate()'s keywords resolved, above the engine dispatch
     (add-kernel-simulation-object Stage A): every statement here applies
     to every engine. Takes exactly simulate()'s parameters."""
-    _resolved = _resolved_from(locals())
+    # The values as passed, captured now (tuples, not locals(): ~1 us).
+    _resolved = _resolved_from((
+        t_end, dt, engine, rtol, atol, dt_init, integrator,
+        stiffness_threshold, h_bdf2, t_start, switch_fn, b_extra_fn,
+        step_observer, start_from_dc_op, enable_nonlinear_refresh,
+        max_newton_iterations, max_event_iterations, strict_event_iterations,
+        max_dt_halvings, voltage_sanity_factor, store_every, auto_regularize,
+        tol_newton_dx, tol_newton_res, enable_newton_line_search) + (
+        enable_newton_lm, newton_roundoff_budget,
+        enable_substep_state_correction, discontinuity_restart,
+        resolution_diagnostics, on_impulse, device_path,
+        inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
+        should_continue, closed_loops, live_stream, mmc_arms, on_cache,
+        controller_period, resume_from, control_tick, solver, sensitivities,
+        mode_selection, allow_implicit_segments, recorders))
     # ---- LoadedCircuit (YAML) + the run window. ----
     # Above everything else, so every engine sees the same t_end / dt.
     # A YAML whose run settings did not load (no top-level
@@ -3360,7 +3395,9 @@ def _plan_run(builder, t_end, dt, *,
         try:
             import numpy as _np_check
             candidate = builder.initial_state()
-            if _np_check.any(_np_check.asarray(candidate) != 0.0):
+            # (the ndarray method: np.any's Python wrapper costs ~60
+            # bytecodes per call)
+            if (_np_check.asarray(candidate) != 0.0).any():
                 initial_state = candidate
                 _ic_from_builder = True
         except ValueError:
@@ -3408,33 +3445,21 @@ def _plan_run(builder, t_end, dt, *,
             pass
 
     _engine_asked = engine
-    engine, _route_reasons, mode_selection, _mode_auto = _route(
-        engine, builder, _dsed, _plan, _opt_values, dt=dt, t_start=t_start,
-        resume_from=resume_from, step_observer=step_observer,
-        closed_loops=closed_loops, controller_period=controller_period,
-        live_stream=live_stream, progress=progress,
-        start_from_dc_op=start_from_dc_op,
-        strict_event_iterations=strict_event_iterations,
-        max_dt_halvings=max_dt_halvings, store_every=store_every,
-        mmc_arms=mmc_arms, on_cache=on_cache,
-        enable_substep_state_correction=enable_substep_state_correction,
-        discontinuity_restart=discontinuity_restart,
-        resolution_diagnostics=resolution_diagnostics,
-        inductor_freeze_di_max=inductor_freeze_di_max,
-        inductor_abs_clamp=inductor_abs_clamp, switch_fn=switch_fn,
-        rtol=rtol, atol=atol, dt_init=dt_init, integrator=integrator,
-        stiffness_threshold=stiffness_threshold, h_bdf2=h_bdf2,
-        allow_implicit_segments=allow_implicit_segments,
-        mode_selection=mode_selection, _mode_auto=_mode_auto,
-        max_event_iterations=max_event_iterations,
-        _engine_asked=_engine_asked, device_path=device_path,
-        enable_nonlinear_refresh=enable_nonlinear_refresh,
-        max_newton_iterations=max_newton_iterations,
-        tol_newton_dx=tol_newton_dx, tol_newton_res=tol_newton_res,
-        enable_newton_line_search=enable_newton_line_search,
-        enable_newton_lm=enable_newton_lm,
-        newton_roundoff_budget=newton_roundoff_budget,
-        should_continue=should_continue)
+    # Positional, in _route's parameter order (test_run_plan): 45 keywords
+    # compiled to a dict built name by name on every call.
+    engine, _route_reasons, mode_selection, _mode_auto = _route(*((
+        engine, builder, _dsed, _plan, _opt_values, dt, t_start, resume_from,
+        step_observer, closed_loops, controller_period, live_stream, progress,
+        start_from_dc_op, strict_event_iterations, max_dt_halvings,
+        store_every, mmc_arms, on_cache, enable_substep_state_correction,
+        discontinuity_restart, resolution_diagnostics) + (
+        inductor_freeze_di_max, inductor_abs_clamp, switch_fn, rtol, atol,
+        dt_init, integrator, stiffness_threshold, h_bdf2,
+        allow_implicit_segments, mode_selection, _mode_auto,
+        max_event_iterations, _engine_asked, device_path,
+        enable_nonlinear_refresh, max_newton_iterations, tol_newton_dx,
+        tol_newton_res, enable_newton_line_search, enable_newton_lm,
+        newton_roundoff_budget, should_continue)))
     if engine == "pwl":
         # ---- engine='pwl' from here on ----
         # mypy/pyright: narrow Optional[float] → float.
@@ -3451,9 +3476,9 @@ def _plan_run(builder, t_end, dt, *,
         # The DSED dispatcher owns its own validation; main's Phase 2.4
         # adaptive-RK selector below is PWL-specific and must NOT apply
         # to DSED integrator names.
-        step = _planning.ExactStep(
+        step = _planning.new(_planning.ExactStep, (
             dt, rtol, atol, dt_init, integrator, stiffness_threshold, h_bdf2,
-            sensitivities, allow_implicit_segments)
+            sensitivities, allow_implicit_segments))
     elif engine == "trbdf2":
         # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse
         #      MNA kernel. L-stable, LTE-controlled — no dt to
@@ -3490,8 +3515,8 @@ def _plan_run(builder, t_end, dt, *,
         _n_sw = builder.graph.num_switches
         if switch_fn is None:
             switch_fn = _undriven("trbdf2", builder)
-        step = _planning.VariableStep(dt, rtol, atol, dt_init, integrator,
-                                      _tro)
+        step = _planning.new(_planning.VariableStep, (
+            dt, rtol, atol, dt_init, integrator, _tro))
     else:
         # Build the PWL cache — LAZY by default (Phase-0 fix #7).
         # A PWM converter visits only a handful of the 2^N switch
@@ -3619,37 +3644,35 @@ def _plan_run(builder, t_end, dt, *,
         if _run_circuit is not None and _kernel_run is None \
                 and _PWL_RECIPE.get() is None and not _plan._queue_groups:
             _via_sim = True
-        step = _planning.FixedStep(dt, store_every, max_dt_halvings,
-                                   _run_opts, _via_sim)
-    return _planning.SimPlan(
-        builder=builder, caller_builder=_caller_builder, circuit=_run_circuit,
-        circuit_plan=_run_plan, preflight=_preflight_report,
-        kernel_run=_kernel_run, recipe=_PWL_RECIPE.get(), engine=engine,
-        engine_asked=_engine_asked, route_reasons=tuple(_route_reasons),
-        t_start=t_start, t_end=t_end, step=step,
-        newton=_planning.NewtonOptions(
+        step = _planning.new(_planning.FixedStep, (
+            dt, store_every, max_dt_halvings, _run_opts, _via_sim))
+    # Positional, in each record's field order (test_run_plan checks the
+    # arity of every _planning.new and each field of a plan): keywords
+    # compile to a dict built name by name, and the NamedTuple __new__ is a
+    # Python frame; tuple.__new__ is neither.
+    return _planning.new(_planning.SimPlan, (
+        builder, _caller_builder, _run_circuit,  # builder, caller_builder, circuit
+        _run_plan, _preflight_report,            # circuit_plan, preflight
+        _kernel_run, _PWL_RECIPE.get(),          # kernel_run, recipe
+        engine, _engine_asked, tuple(_route_reasons),  # engine, engine_asked, route_reasons
+        t_start, t_end, step,
+        _planning.new(_planning.NewtonOptions, (
             max_newton_iterations, tol_newton_dx, tol_newton_res,
             enable_newton_line_search, enable_newton_lm,
-            newton_roundoff_budget, enable_nonlinear_refresh),
-        events=_planning.EventOptions(
+            newton_roundoff_budget, enable_nonlinear_refresh)),
+        _planning.new(_planning.EventOptions, (
             max_event_iterations, strict_event_iterations, mode_selection,
             _mode_auto, on_impulse, discontinuity_restart,
-            enable_substep_state_correction),
-        initial=_planning.Initial(initial_state, _ic_from_builder, resume_from,
-                                  start_from_dc_op),
-        drive=_planning.Drive(
-            control=_plan, switch_fn=switch_fn, b_extra_fn=b_extra_fn,
-            step_observer=step_observer, should_continue=should_continue,
-            closed_loops=closed_loops, user_step_observer=_step_observer_user,
-            user_b_extra_fn=_b_extra_fn_user,
-            user_closed_loops=_closed_loops_user, mmc_arms=mmc_arms,
-            on_cache=on_cache, live_stream=live_stream, progress=progress),
-        device_path=device_path, device_path_enum=_device_path,
-        voltage_sanity_factor=voltage_sanity_factor,
-        auto_regularize=auto_regularize,
-        diagnostics=tuple(_planning.Diagnostic("route", str(r))
-                          for r in _route_reasons),
-        resolved_from=_resolved)
+            enable_substep_state_correction)),
+        _planning.new(_planning.Initial, (
+            initial_state, _ic_from_builder, resume_from, start_from_dc_op)),
+        _planning.new(_planning.Drive, (
+            _plan, switch_fn, b_extra_fn,                # control, ...
+            step_observer, should_continue, closed_loops,
+            _step_observer_user, _b_extra_fn_user,       # user_step_observer, ...
+            _closed_loops_user, mmc_arms, on_cache, live_stream, progress)),
+        device_path, _device_path,        # device_path, device_path_enum
+        voltage_sanity_factor, auto_regularize, _resolved))  # ..., resolved_from
 
 
 def _run_dsed(plan):
@@ -3713,14 +3736,15 @@ def _run_dsed(plan):
             ticks=[(f, p, o) for (f, p), o in zip(
                 _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
         )
-    return _planning.RunOutcome(_dsed_res, builder, switch_fn, b_extra_fn)
+    return _planning.new(_planning.RunOutcome, (
+        _dsed_res, builder, switch_fn, b_extra_fn, None, None, None, None,
+        None))
 
 
 def _run_trbdf2(plan):
     """engine 'trbdf2': the variable-step TR-BDF2 engine, through the kernel
     object (sim::Simulation) unless sweep() replays a run. Reads only the
     plan."""
-    from ._control_plan import monitor_flags as _monitor_flags
     s, d, i = plan.step, plan.drive, plan.initial
     builder = plan.builder; t_end = plan.t_end; t_start = plan.t_start
     _run_circuit = plan.circuit; _kernel_run = plan.kernel_run
@@ -3823,8 +3847,9 @@ def _run_trbdf2(plan):
                     "snubber) or use engine='pwl' with a fixed dt."),
                 ) + tuple(_aborted.args[1:])
         raise
-    return _planning.RunOutcome(res, builder, switch_fn, b_extra_fn,
-                                d.step_observer, should_continue, _stats)
+    return _planning.new(_planning.RunOutcome, (
+        res, builder, switch_fn, b_extra_fn, d.step_observer, should_continue,
+        _stats, None, None))
 
 
 def _run_pwl(plan):
@@ -3833,19 +3858,19 @@ def _run_pwl(plan):
     (mmc_arms, on_cache) compose here because they need the run's own cache.
     Reads only the plan."""
     s, d, i = plan.step, plan.drive, plan.initial
-    builder = plan.builder; _caller_builder = plan.caller_builder
+    # (fields read on rare paths only are read where they are used:
+    # simulate() pays every read on every call)
+    builder = plan.builder
     _run_circuit = plan.circuit; _kernel_run = plan.kernel_run
-    t_end = plan.t_end; t_start = plan.t_start
+    t_start = plan.t_start
     dt = s.dt; _run_opts = s.run_options; _via_sim = s.via_simulation
     switch_fn = d.switch_fn; b_extra_fn = d.b_extra_fn
     step_observer = d.step_observer; should_continue = d.should_continue
     _plan = d.control; mmc_arms = d.mmc_arms; on_cache = d.on_cache
     live_stream = d.live_stream; progress = d.progress
     initial_state = i.state; resume_from = i.resume_from
-    start_from_dc_op = i.start_from_dc_op; _ic_from_builder = i.from_builder
+    start_from_dc_op = i.start_from_dc_op
     enable_nonlinear_refresh = plan.newton.nonlinear_refresh
-    auto_regularize = plan.auto_regularize
-    _preflight_report = plan.preflight; _run_plan = plan.circuit_plan
     _mmc_finalize = None
     _sim = cache = None
     if mmc_arms or on_cache is not None:
@@ -3853,7 +3878,7 @@ def _run_pwl(plan):
             _sim = Simulation(_run_circuit, _run_opts, True)
             builder = _sim.builder
             cache = _sim.cache
-            _check_run_numbering(_caller_builder, builder,
+            _check_run_numbering(plan.caller_builder, builder,
                                  "mmc_arms" if mmc_arms else "on_cache")
         else:
             cache = _new_pwl_cache(builder, _run_circuit, dt)
@@ -3865,7 +3890,7 @@ def _run_pwl(plan):
     if mmc_arms:
         from .mmc_thevenin import make_mmc_thevenin_driver
         _mmc_obs, _mmc_b, _mmc_finalize = make_mmc_thevenin_driver(
-            mmc_arms, _caller_builder, cache, dt,
+            mmc_arms, plan.caller_builder, cache, dt,
             builder.pool.state_size(builder.graph))
         # With kernel ticks the drivers run before the ticks, as before.
         if _plan._kernel_ticks:
@@ -3947,7 +3972,7 @@ def _run_pwl(plan):
         _start = _time.perf_counter()
         # Mutable state for closure.
         _last_pct_printed = [-1]
-        _t_total = float(t_end - t_start)
+        _t_total = float(plan.t_end - t_start)
         _user_observer = step_observer
 
         def _progress_observer(t, x):
@@ -4076,8 +4101,8 @@ def _run_pwl(plan):
             plan.recipe.update(
                 opts=opts, dt=dt, kwargs=dict(kwargs), mmc=bool(mmc_arms),
                 on_cache=on_cache is not None,
-                ic_from_builder=_ic_from_builder,
-                auto_regularize=bool(auto_regularize))
+                ic_from_builder=i.from_builder,
+                auto_regularize=bool(plan.auto_regularize))
         try:
             if _kernel_run is not None:
                 res = _kernel_run.result
@@ -4098,15 +4123,15 @@ def _run_pwl(plan):
             try:
                 _partial = _aborted.partial
                 _partial._builder = builder
-                _partial._preflight = _preflight_report
-                _partial._run_plan = _run_plan
+                _partial._preflight = plan.preflight
+                _partial._run_plan = plan.circuit_plan
                 _partial._switch_fn = kwargs.get("switch_fn")
             except AttributeError:  # pragma: no cover — defensive
                 pass
             raise
-    return _planning.RunOutcome(res, builder, switch_fn, b_extra_fn,
-                                step_observer, should_continue, None,
-                                cxx_chain, _mmc_finalize)
+    return _planning.new(_planning.RunOutcome, (
+        res, builder, switch_fn, b_extra_fn, step_observer, should_continue,
+        None, cxx_chain, _mmc_finalize))
 
 
 # The engine table: simulate() = _plan_run -> _ENGINES[plan.engine] -> _finalize.
@@ -4121,14 +4146,13 @@ def _finalize(out, plan):
     per engine: what differs between them is recorded in DECISIONS 23."""
     res = out.result; builder = out.builder; switch_fn = out.switch_fn
     b_extra_fn = out.b_extra_fn; step_observer = out.step_observer
-    should_continue = out.should_continue; _stats = out.stats
+    should_continue = out.should_continue
     cxx_chain = out.cxx_chain; _mmc_finalize = out.mmc_finalize
     d = plan.drive
-    engine = plan.engine; _engine_asked = plan.engine_asked
+    engine = plan.engine
     _preflight_report = plan.preflight; _run_plan = plan.circuit_plan
     voltage_sanity_factor = plan.voltage_sanity_factor
     on_impulse = plan.events.on_impulse
-    mode_selection = plan.events.mode_selection
     _mode_auto = plan.events.mode_auto; _route_reasons = plan.route_reasons
     _plan = d.control; closed_loops = d.closed_loops; progress = d.progress
     dt = plan.step.dt
@@ -4181,12 +4205,13 @@ def _finalize(out, plan):
         res._preflight = _preflight_report
         res._run_plan = _run_plan
         res._switch_fn = switch_fn
+        _stats = out.stats
         res._trbdf2_stats = _stats   # alias of res.stats for one release
         _set_run_info(res, "trbdf2", _stats)
         res.control_tick_counts = list(_stats["control_tick_counts"])
         res.control_tick_jitter_max = 0.0
         res.engine_used = "trbdf2"
-        if mode_selection in ("shadow", "lcp"):
+        if plan.events.mode_selection in ("shadow", "lcp"):
             res.diagnostics = dict(res.mode_diagnostics)
         res.engine_route_reason = None
         if _mode_auto is not None:
@@ -4206,7 +4231,7 @@ def _finalize(out, plan):
         # auto return.
         _auto_check_voltage_sanity(res, builder,
                                     voltage_sanity_factor)
-        _trbdf2_warn_stats(res, builder, _stats, _engine_asked)
+        _trbdf2_warn_stats(res, builder, _stats, plan.engine_asked)
         if on_impulse == "warn":
             _warn_impulses(res)
         _save_control_state(_plan.graphs, res)
@@ -4943,7 +4968,7 @@ def _auto_attach_motor_traces(
     misbehaving custom step_observer must not break the post-sim
     result.
     """
-    from .motors import MotorObserverBundle as _Bundle
+    _Bundle = MotorObserverBundle  # (module level: simulate() pays per call)
     seen: set = set()
 
     def _visit(obj) -> None:
