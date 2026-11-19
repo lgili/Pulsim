@@ -47,7 +47,7 @@ def classify(text: str) -> str:
             r"^E\s+ValueError: .*(cannot|not supported|refus|requires|branch form|=True\): the)", t, re.M):
         return "new refusal by name"
     if re.search(r"'sha|digest", t):
-        return "circuit digest (IR / YAML path not patched: harness artefact)"
+        return "circuit digest (branch-form circuit)"
     if re.search(r"engine_used|engine_route_reason|'trbdf2'|'dsed'|'pwl'|_trbdf2_stats|"
                  r"^E\s+(AttributeError|KeyError)", t, re.M):
         return "engine route / result layout"

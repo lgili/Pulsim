@@ -31,6 +31,8 @@ ROOT = Path(__file__).resolve().parents[4]
 TESTS = ROOT / "python" / "tests"
 CTESTS = ROOT / "core" / "tests"
 N = 6
+# The plugin's label predates the YAML loader's flip: a digest now changes for real.
+RENAME = {"circuit digest (IR / YAML path not patched: harness artefact)": "circuit digest (branch-form circuit)"}
 RULE = {
     "numeric assertion on an old value": "(a) physics: pass under the new defaults against its truth "
     "(tighten where earned, never loosen); a pinned old number of a legacy SUBJECT: (b) pin the legacy option",
@@ -41,7 +43,7 @@ RULE = {
     "warning / raise expectation": "(d) expected warnings / refusals follow the new behaviour",
     "snapshot / layout": "(b)/(d) snapshot of a run whose defaults changed: re-record against the new defaults "
     "or pin the legacy options the snapshot was taken with",
-    "circuit digest (IR / YAML path not patched: harness artefact)": "(d) digests of branch-form circuits: "
+    "circuit digest (branch-form circuit)": "(d) digests of branch-form circuits: "
     "re-pin; check the YAML and builder paths build the same circuit",
     "other assertion": "read the assertion: classify as (a)-(d)",
     "exception": "read the traceback: an engine finding is reported, not patched",
@@ -99,6 +101,7 @@ def main(argv=None) -> int:
     resolved = []
     fails = []
     for f in d["failures"]:
+        f["cls"] = RENAME.get(f["cls"], f["cls"])
         why = next((w for k, w in resolved_rules if f["nodeid"].startswith(k)), None)
         (resolved.append((f, why)) if why else fails.append(f))
     n_all = len(d["failures"])
@@ -174,7 +177,8 @@ def main(argv=None) -> int:
     L += ["", f"C++: {n_cpp} failing test cases (classified per bucket below by reading).", "",
           "## Bucket 0 — shared helpers (R1 fixes these)", ""]
     if resolved:
-        L += [f"Resolved in R1 ({len(resolved)} failures of the run; in no bucket):", "",
+        L += [f"Resolved in R1, or owned by R1 where the entry says `R1 owns` ({len(resolved)} failures of "
+              "the run; in no bucket):", "",
               "| test | class | fixed by |", "|---|---|---|"]
         L += [f"| `{f['nodeid']}` | {f['cls']} | {w} |" for f, w in resolved]
         L.append("")
