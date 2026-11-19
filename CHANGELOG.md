@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Probes and recorders (add-probes-and-recorders, first slice)
+
+* **Added** `simulate(recorders=[pulsim.Recorder(...)])` on every engine:
+  kernel probes (`"v(dp) - v(dn)"`, `"v(out)*i(L1)"`) with exact
+  windowed and per-period statistics (integral, average, RMS, min / max
+  with their times; windows clipped exactly; the right limit at a window
+  that starts on an event, both limits inside), kept samples (every /
+  every n-th / none) and both limits at the exact engine's events.
+  Results in `res.recorded[name]`. Fed by a kernel-side pass over the
+  stored arrays (`store_every > 1` and `resume_from` are refused with
+  recorders, by name). Without `recorders` nothing changes.
+
 ### Integration batch 14a: event queue 3, device interface 3, unified stepper 2, ideal switch 5, TR-BDF2 track 8 merged
 
 * **Changed** the `SolverSnapshot` pickle is version 5, one layout with

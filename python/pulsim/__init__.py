@@ -213,6 +213,7 @@ from .periodic import (
     run_periodic_shooting,
 )
 from .stats import TimeStats, time_window, time_average, time_rms, steady_state_stats
+from ._recorders import Recorder, Recording
 from .kpi import (
     KpiGate,
     KpiReport,
@@ -655,6 +656,8 @@ __all__ = [
     "TimeStats",
     "time_window",
     "time_average",
+    "Recorder",
+    "Recording",
     "time_rms",
     "steady_state_stats",
     # KPI gates + baselines (Phase E.5).
@@ -2070,6 +2073,7 @@ def simulate(
     sensitivities: "Optional[Sequence[str]]" = None,
     mode_selection: Optional[str] = None,
     allow_implicit_segments: Optional[bool] = None,
+    recorders=None,
 ) -> SimulationResult:
     """Build the cache and run a transient simulation.
 
@@ -2327,6 +2331,16 @@ def simulate(
         exists or over half the steps are unestimated. An estimate, not
         an error bound; the states are the same bit for bit either way.
 
+    recorders
+        Every engine. A list of :class:`pulsim.Recorder`: kernel probes
+        (``"v(dp) - v(dn)"``, ``"v(out)*i(L1)"``) with exact windowed /
+        per-period statistics (time-weighted, clipped exactly at the
+        window edges), kept samples (every / every n-th / none) and both
+        limits at events (exact engine). Read ``res.recorded[name]``
+        (:class:`pulsim.Recording`). Fed today by a kernel-side pass over
+        the stored arrays, so ``store_every > 1`` and ``resume_from``
+        are refused with recorders, by name. Without it nothing changes.
+
     Returns
     -------
     SimulationResult
@@ -2359,6 +2373,12 @@ def simulate(
         PED today with a user-supplied LTI system, use
         :func:`pulsim.dsed.run_user_lti` directly.
     """
+    # add-probes-and-recorders: above every engine dispatch, so every
+    # engine's result goes through the same kernel recorder pass.
+    if recorders:
+        _kw = {k: v for k, v in locals().items() if k != "recorders"}
+        from ._recorders import simulate_with_recorders as _with_rec
+        return _with_rec(simulate, _kw, recorders)
     # ---- LoadedCircuit (YAML) + the run window. ----
     # Above everything else, so every engine sees the same t_end / dt.
     # A YAML whose run settings did not load (no top-level

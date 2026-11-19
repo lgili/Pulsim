@@ -67,6 +67,7 @@ pybind11_add_module(_pulsim
     bindings.cpp
     dsed_bindings.cpp
     ir_bindings.cpp
+    record_bindings.cpp
 )
 
 target_link_libraries(_pulsim

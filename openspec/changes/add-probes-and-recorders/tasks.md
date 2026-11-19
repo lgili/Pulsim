@@ -11,6 +11,16 @@ states at equal times.
 - [ ] 0.1 `add-unified-device-interface` section 9 merged (generic pin currents, power, `outputs()`)
 - [ ] 0.2 Record: stored bytes per sample and ns/step for audit rows 1 and 20; `res.i('D1')` first-call time at 100k samples (43 ms); the count of result-attribute assignments in `__init__.py` (19)
 
+## 0b. Kernel probes and recorders, stored-array feeding (track feat/core-p3-probes-recorders; see DECISIONS.md)
+- [x] 0b.1 `record/probe.hpp`: `Probe::compile` cuts the readings `v(n)`, `v(a,b)`, `i(dev)`, `p(dev)` out lexically and compiles the rest with `ir::Expr` (one parser); normalised, de-duplicated atoms
+- [x] 0b.2 `record/recorder.hpp`: `Recorder` (keep every / every n-th / none; event rows with both limits; declared and per-period windows with integral, avg, exact-line RMS, min / max with times; exact clipping, right limit at a window start on an event, left limit at its end); `feed_table` (kernel-side pass over stored arrays); `attach(StepHooks&)` (in-loop, state columns)
+- [x] 0b.3 Python: `simulate(recorders=[pulsim.Recorder(...)])` on every engine, `res.recorded[name]` (`pulsim.Recording`, named arrays); `store_every > 1`, `resume_from`, `p()` readings, bad windows refused by name before the run
+- [x] 0b.4 Tests: C++ closed forms (triangle on a clustered grid, windows mid-step, periods; square wave with both limits; decimation; capacity unchanged over 2e5 samples; in-loop on the fixed engine: no per-step allocation, windows equal the stored-array pass); Python: RC charge closed form on pwl / trbdf2 / exact, rectified sine with commutations inside the window, both limits against `right_limit_states`, the bridge truth 311.343881428885841697 V on the three engines, `time_average` / `time_rms` agreement to 1e-12
+- [ ] 0b.5 `recorders` row in `sim::kRunOptionTable` (every engine) when `add-kernel-simulation-object` is integrated (its test compares the table to simulate()'s parameters)
+- [ ] 0b.6 In-loop feeding for Python on the stepper's per-step hook (DECISIONS requests R1-R3); then lift the `store_every` refusal
+- [ ] 0b.7 Recorder state in the snapshot (new pickle index) so `resume_from` works with recorders; refused by name until then
+- [ ] 0b.8 `Times` / `t_eval` sampling, `RingSink`, `at(t)` (section 8)
+
 ## 1. One constructible result type
 - [ ] 1.1 `SimulationResult` default-constructible with fill methods used by kernel adapters only; binding exposes construction for adapters and tests
 - [ ] 1.2 The DSED adapter fills a `SimulationResult`; delete `_PEDSimulationResult` (`_dsed_dispatch.py:330-476`); `n_accept`, `n_reject`, `n_events`, `n_rk45_steps`, `n_bdf2_steps`, `cpu_time_seconds` become read-only properties

@@ -6687,6 +6687,9 @@ namespace pulsim_dsed_bindings {
 namespace pulsim_ir_bindings {  // add-immutable-circuit-ir (ir_bindings.cpp)
     void init_module(pybind11::module_& m);
 }
+namespace pulsim_record_bindings {  // add-probes-and-recorders (record_bindings.cpp)
+    void init_module(pybind11::module_& m);
+}
 
 PYBIND11_MODULE(_pulsim, m) {
     m.doc() = "Pulsim — power-electronics simulator. Header-only C++23 "
@@ -6695,4 +6698,5 @@ PYBIND11_MODULE(_pulsim, m) {
     pulsim_kernel_bindings::init_module(m);
     pulsim_dsed_bindings::init_module(m);
     pulsim_ir_bindings::init_module(m);
+    pulsim_record_bindings::init_module(m);
 }

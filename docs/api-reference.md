@@ -343,6 +343,36 @@ What they do:
   NaN/inf inside the window. `steady_state_stats` also requires
   exactly one of `t_from=` / `last=`: averaging from `t = 0` would
   fold the start-up transient into a "steady-state" figure.
+
+### Kernel recorders (`simulate(recorders=...)`)
+
+The same arithmetic, computed by the kernel for probe expressions, per
+declared window and per period, with both limits at events:
+
+```python
+rec = p.Recorder("bus", ["v(dp) - v(dn)", "v(dp,dn)*i(RL)"],
+                 keep="none",                  # 'every' | 'decimate' (every=n) | 'none'
+                 windows=[(30e-3, 40e-3)],     # clipped exactly
+                 period=20e-3, offset=0.0)     # complete periods only
+res = p.simulate(b, t_end=40e-3, recorders=[rec])
+r = res.recorded["bus"]
+r.windows["v(dp) - v(dn)"]["avg"]   # also integral, rms, min, t_min, max, t_max, t0, t1
+r.periods["v(dp) - v(dn)"]["rms"]
+r.event_t, r.event_left[...], r.event_right[...]   # both limits (engine='exact')
+```
+
+- A window that starts exactly on an event starts from the right limit,
+  one that ends on an event ends on the left limit, and min / max see
+  both limits of events inside it. Only `engine='exact'` stores right
+  limits; pwl and trbdf2 records are continuous (no event rows).
+- RMS integrates the line between samples exactly, `h(a² + ab + b²)/3`;
+  a product probe is linear between its own samples, as
+  `time_average` of the product trace is.
+- **Feeding mode today:** a kernel-side pass over the stored result
+  arrays, on every engine, so `store_every > 1` and `resume_from` are
+  refused with recorders (by name); `keep="decimate"` keeps fewer rows
+  with statistics from every step. In-loop feeding moves to the unified
+  stepper's per-step hook without changing these definitions.
 - `steady_state_stats(result, "name")` looks the name up as a node
   (`result.v`) and as a branch (`result.i`); a name that is both raises
   and asks for `kind='v'` / `kind='i'`. An array must be sampled on
