@@ -49,17 +49,21 @@ def test_resume_reproduces_a_continuous_run_exactly():
 
 def test_initial_state_alone_does_not(and_that_is_the_point=None):
     """The defect this exists to fix, pinned so it cannot be
-    mistaken for a resume."""
-    full = p.simulate(_rlc(), t_end=2e-4, dt=DT, engine="pwl")
-    first = p.simulate(_rlc(), t_end=1e-4, dt=DT, engine="pwl")
-    x_mid = np.asarray(first.states)[-1].copy()
-    second = p.simulate(_rlc(), t_end=1e-4, dt=DT, engine="pwl",
-                         initial_state=x_mid)
-    err = float(np.abs(np.asarray(full.states)[-1]
-                        - np.asarray(second.states)[-1]).max())
+    mistaken for a resume. The defect is the restart-less step's (pinned
+    legacy): the release restart rule takes an initial_state start as an
+    inconsistent one and continues to 5.8e-10 (still not resume_from's 0)."""
+    def err(**kw):
+        full = p.simulate(_rlc(), t_end=2e-4, dt=DT, engine="pwl", **kw)
+        first = p.simulate(_rlc(), t_end=1e-4, dt=DT, engine="pwl", **kw)
+        x_mid = np.asarray(first.states)[-1].copy()
+        second = p.simulate(_rlc(), t_end=1e-4, dt=DT, engine="pwl",
+                             initial_state=x_mid, **kw)
+        return float(np.abs(np.asarray(full.states)[-1]
+                            - np.asarray(second.states)[-1]).max())
     # It is close — which is exactly why it went unnoticed — but
-    # it is not the same run.
-    assert 1e-6 < err < 1e-2
+    # it is not the same run (2.26e-4).
+    assert 1e-6 < err(discontinuity_restart=False) < 1e-2
+    assert 0.0 < err() < 1e-8
 
 
 def test_snapshot_carries_the_companion_history():

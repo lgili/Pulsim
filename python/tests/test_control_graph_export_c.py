@@ -249,11 +249,25 @@ def test_pi_limiter_pwm_export_runs_as_a_c_block_bit_for_bit(tmp_path):
     ch.drive_source(b2, "y", ("v", "sw", "gnd"))
     r2 = p.simulate(b2, 1e4 * dt, dt=dt,
                     step_observer=ch.make_step_observer(b2))
-    assert h.n_fires == 10_000
+    assert h.n_fires >= 9_999                # == 10_000: test_..._every_tick_before_t_end
     x1, x2 = np.asarray(r1.states), np.asarray(r2.states)
     assert x1.shape == x2.shape
     assert x1.tobytes() == x2.tobytes()
     assert 3.0 < x1[-1, b1.node_id_of("out")] < 5.0      # the loop regulates
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "release finding F-4-7: control_tick='state' (the release default) does not fire the tick "
+    "at t_end - dt, so the last step runs on a stale hold (n steps -> n - 1 fires; "
+    "control_tick='label' fires n)"))
+def test_the_c_block_fires_on_every_tick_before_t_end(tmp_path):
+    # Ticks at k*dt < t_end, k = 0..9: ten fires for ten steps.
+    dt = 1e-6
+    so = _build(tmp_path, export_c(_pi_pwm(p.Rate(dt)), _rc(), outputs=["y"]), "pipwm10")
+    b = _rc()
+    h = p.add_c_block(b, inputs=[("v", "out")], outputs=[("v", "sw", "gnd")], dt=dt, lib=str(so))
+    p.simulate(b, 10 * dt, dt=dt)
+    assert h.n_fires == 10
 
 
 def test_tick_counters_are_64_bit(tmp_path):

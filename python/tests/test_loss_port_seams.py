@@ -93,7 +93,9 @@ def test_sweep_of_a_circuit_carries_or_refuses_the_loss_port():
 
 def test_a_resumed_run_carries_the_heat_pending_at_the_split():
     full = p.simulate(_builder(), 5e-4, dt=1e-6, switch_fn=_fn())
-    a = p.simulate(_builder(), 2.503e-4, dt=1e-6, switch_fn=_fn())
+    # The gate of step (t_k-1, t_k] is sampled at its start (the release restart
+    # rule), so the 250 us edge's energy is booked at 251 us: split just after it.
+    a = p.simulate(_builder(), 2.513e-4, dt=1e-6, switch_fn=_fn())
     snap = pickle.loads(pickle.dumps(a.final_snapshot))   # the snapshot pickles
     b = p.simulate(_builder(), 5e-4, dt=1e-6, switch_fn=_fn(), resume_from=snap)
     assert a.heat_pending == pytest.approx(1e-3, rel=1e-5)
@@ -130,9 +132,10 @@ def _stateful_with_loss(loss, coss=True):
     return b, fn
 
 
-def _end(engine, loss, coss=True):
+def _end(engine, loss, coss=True, **kw):
     b, fn = _stateful_with_loss(loss, coss)
-    kw = {"dt": 1e-7} if engine == "pwl" else {}
+    if engine == "pwl":
+        kw["dt"] = 1e-7
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         r = p.simulate(b, 4e-4, engine=engine, switch_fn=fn, **kw)
@@ -144,12 +147,15 @@ def test_stateful_stamps_and_a_loss_port_compose_on_pwl():
     (e2e55a71, byte-equal there and here on macOS); 1e-9 holds them across
     platforms and is far below what a lost stamp moves (Coss as a linear
     capacitor moves v(out) by more, asserted)."""
+    # The byte pins are the restart-less engine's (a regression record, not a
+    # truth): pinned legacy. The composition checks below run on the release default.
+    rl = _end("pwl", True, discontinuity_restart=False)
+    assert np.asarray(rl.v("out"))[-1] == pytest.approx(17.070994170735837, rel=1e-9)
+    assert np.asarray(rl.i("L"))[-1] == pytest.approx(3.387895462470447, rel=1e-9)
+    assert np.asarray(rl.v("tj"))[-1] == pytest.approx(28.557469446748136, rel=1e-9)
+    assert rl.heat_injected == pytest.approx(0.00392922192281983, rel=1e-9)
     r, r0 = _end("pwl", True), _end("pwl", False)
     out = np.asarray(r.v("out"))
-    assert out[-1] == pytest.approx(17.070994170735837, rel=1e-9)
-    assert np.asarray(r.i("L"))[-1] == pytest.approx(3.387895462470447, rel=1e-9)
-    assert np.asarray(r.v("tj"))[-1] == pytest.approx(28.557469446748136, rel=1e-9)
-    assert r.heat_injected == pytest.approx(0.00392922192281983, rel=1e-9)
     # the loss port only heats the thermal node: the electrical trace is r0's
     # (bit-equal on macOS and Linux; MSVC differs by 9.6e-15 relative)
     np.testing.assert_allclose(out, np.asarray(r0.v("out")), rtol=1e-12, atol=0.0)

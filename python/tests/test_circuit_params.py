@@ -27,8 +27,10 @@ KINDS = {
         _src(b), b.add_resistor("X", "a", "gnd", v))),
     "VoltageSource": ("X.V", 5.0, 7.5, lambda b, v: (
         b.add_voltage_source("X", "a", "gnd", v), b.add_resistor("R", "a", "gnd", 10.0))),
-    "Switch": ("X.g_on", 1e3, 2e3, lambda b, v: (
-        _src(b), b.add_switch("X", "a", "o", v, 1e-9), b.add_resistor("R", "o", "gnd", 10.0))),
+    # branch form (the release default): its field is R_on, not g_on
+    "Switch": ("X.R_on", 1e-3, 5e-4, lambda b, v: (
+        _src(b), b.add_switch("X", "a", "o", R_on=v, g_off=1e-9),
+        b.add_resistor("R", "o", "gnd", 10.0))),
     "Capacitor": ("X.C", 1e-6, 4.7e-6, lambda b, v: (
         _src(b), b.add_resistor("R", "a", "o", 10.0), b.add_capacitor("X", "o", "gnd", v))),
     "Inductor": ("X.L", 1e-3, 2.2e-3, lambda b, v: (
@@ -110,11 +112,15 @@ KINDS = {
 # kinds without scalar field rows: a table, or an external device whose
 # fields are its model's (add-external-device-abi)
 TABLE_KINDS = {"PwlCurrentSource", "ExternalDevice"}
+# the legacy conductance form's g_on keeps its row for the legacy period
+LEGACY_ROWS = {"Switch[conductance]": ("X.g_on", 1e3, 2e3, lambda b, v: (
+    _src(b), b.add_switch("X", "a", "o", v, 1e-9, form="conductance"),
+    b.add_resistor("R", "o", "gnd", 10.0)))}
 
 
 def _build(kind, v):
     b = p.CircuitBuilder()
-    KINDS[kind][3](b, v)
+    {**KINDS, **LEGACY_ROWS}[kind][3](b, v)
     return b
 
 
@@ -132,16 +138,16 @@ def _run(c):
             return f"{type(exc).__name__}: {exc}"
 
 
-@pytest.mark.parametrize("kind", sorted(KINDS))
+@pytest.mark.parametrize("kind", sorted(KINDS) + sorted(LEGACY_ROWS))
 def test_with_value_equals_rebuilding(kind):
-    field, old, new, _ = KINDS[kind]
+    field, old, new, _ = {**KINDS, **LEGACY_ROWS}[kind]
     receiver = _build(kind, old).build()
     h0 = receiver.value_hash()
     derived = receiver.with_value(field, new)
     rebuilt = _build(kind, new).build()
     # The kind under test is the one edited.
     dev = field.rsplit(".", 1)[0]
-    assert next(d for d in derived.devices() if d["name"] == dev)["kind"] == kind
+    assert next(d for d in derived.devices() if d["name"] == dev)["kind"] == kind.split("[")[0]
     assert derived.get_value(field) == new
     assert derived.value_hash() == rebuilt.value_hash()
     assert derived.structure_hash() == receiver.structure_hash()

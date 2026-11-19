@@ -67,8 +67,10 @@ def test_tabulated_turn_on_energy_of_an_ideal_switch():
     # Ideal elements: only the g_off leak dissipates (3.5e-10 / 2.3e-10 W measured); the
     # v-line x i-line product across each commutation step read 0.038 W.
     assert abs(sw["P_avg"]) < 1e-8 and abs(d["P_avg"]) < 1e-8
-    assert sw["duty_closed"] == pytest.approx(0.399, abs=1e-12)
-    assert d["duty_conducting"] == pytest.approx(0.601, abs=1e-12)
+    # The gate's duty, 0.4 (the restart-less step read 0.399 / 0.601: the stored gate
+    # state was one sample off at each edge; the release step samples it at the step start)
+    assert sw["duty_closed"] == pytest.approx(0.4, abs=1e-12)
+    assert d["duty_conducting"] == pytest.approx(0.6, abs=1e-12)
 
 
 def test_commutation_events_include_the_ideal_diode_turn_off():

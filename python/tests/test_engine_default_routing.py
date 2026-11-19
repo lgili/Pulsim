@@ -64,12 +64,16 @@ def test_default_is_auto():
 
 
 def test_no_dt_linear_takes_the_variable_engine():
+    # Since the release a piecewise-linear circuit without dt routes to the
+    # exact engine (DECISIONS s5 of update-number-changing-release); the test
+    # name keeps the pre-release wording ('variable' = not the fixed step).
     res = p.simulate(_rc(), t_end=1e-3)      # no engine, no dt
-    assert res.engine_used == "trbdf2"
+    assert res.engine_used == "dsed"
     assert res.engine_route_reason is None
     t = np.asarray(res.times)
     ref = 5.0 * (1.0 - np.exp(-t / 1e-3))
-    assert np.abs(np.asarray(res.v("n1")) - ref).max() < 1e-3
+    # the closed form: 1e-3 on trbdf2; the exact engine measured 7.3e-14
+    assert np.abs(np.asarray(res.v("n1")) - ref).max() < 1e-11
 
 
 def test_explicit_dt_still_means_fixed_step():
