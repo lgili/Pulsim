@@ -1986,8 +1986,11 @@ def truth(path, form="conductance", dps=(30, 60), out_dir=TRUTH_DIR, write=True,
     rec["energy_J"] = {k: mp.nstr(v, 15) for k, v in en["per"].items()}
     rec["energy_balance_rel"] = mp.nstr(en["balance_rel"], 3)
     # precision doubling on the output grid
-    g1 = out_grid(hi, ck.dt / store)          # the stored trace: dt/store, events two-sided
-    th, yh = _floats(hi, cols, g1)
+    # every float sample from the low run: the check below bounds it far under 1 ulp
+    mp.mp.dps = dps[0]
+    g1 = out_grid(lo, ck.dt / store)          # the stored trace: dt/store, events two-sided
+    th, yh = _floats(lo, cols, g1)
+    mp.mp.dps = dps[-1]
     # precision doubling on the netlist grid, away from events: a grid point on a
     # gate edge falls on either side of it depending on the precision
     near = sorted(e["t"] for e in hi.events[1:])
@@ -2011,6 +2014,7 @@ def truth(path, form="conductance", dps=(30, 60), out_dir=TRUTH_DIR, write=True,
                                 if len(tl) == len(ev) else f"{len(tl)} vs {len(ev)} commutations")
     # stored-trace uncertainty and the uniform-grid floor (harness measures)
     met = _harness_metrics()
+    mp.mp.dps = dps[0]
     g4 = out_grid(lo, ck.dt / (4 * store))
     t4, y4 = _floats(lo, cols, g4)
     n = int(ck.t_end / Fr(ck.dt))
