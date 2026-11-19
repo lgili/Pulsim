@@ -1785,8 +1785,17 @@ private:
                 ++reopened;
                 rejected_loop_ = e;
                 x = x_held;
-                pose_or_open_loops_(t, x_held, mask, mask);
-                project_(t, x);
+                try {
+                    pose_or_open_loops_(t, x_held, mask, mask);
+                    project_(t, x);
+                } catch (const UnsupportedError& e2) {
+                    if (!candidate_refusal_(e2)) throw;
+                    throw UnsupportedError(
+                        "dsed", e2.feature(), e2.device(), e2.kind(),
+                        "dsed at t = " + sci_(t) + " s: the re-settle flipped " + flipped
+                        + " into a mode that cannot be posed, and reopening the decision "
+                        "found none: " + e2.what());
+                }
             }
         }
         if (changed && reinit_tracked_() && reinit_log_size_() > mark) {
@@ -2312,10 +2321,11 @@ private:
                 const auto prm = d.params();
                 const bool by_value =
                     models::SwitchedDiode::decide(on, v_d, prm);
-                // the zero band in the signal's unit (amperes for an ON branch diode)
+                // the zero band in the signal's unit (amperes for an ON branch diode);
+                // a volt-read diode keeps the band of the state the cascade began on
                 const bool in_band =
-                    std::abs(models::SwitchedDiode::crossing_signal(
-                        on, v_d, prm)) <= signal_bound_(d, ts, *xs, Real{-1}, Real{0});
+                    std::abs(models::SwitchedDiode::crossing_signal(on, v_d, prm))
+                    <= (d.reads_current() ? signal_bound_(d, ts, *xs, Real{-1}, Real{0}) : tol);
                 // A flip is confirmed on the OFF-mode trajectory: in
                 // the OFF mode g_off turns a rounding-level current
                 // into volts of v_D (1e-18 A → 1e-9 V at 1 nS), so the
