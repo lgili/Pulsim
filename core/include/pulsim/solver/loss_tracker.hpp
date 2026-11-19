@@ -399,6 +399,16 @@ public:
     /// impulse at its instant) takes it in place of advance() / inject().
     [[nodiscard]] std::vector<std::pair<Index, Real>> take_heat() {
         std::vector<std::pair<Index, Real>> out;
+        // A tracker restored from another engine's snapshot (field 17) may
+        // still owe the rest of a step's energy (now_) and hold a variable-step
+        // engine's predicted conduction power (pred_). Neither is delivered
+        // here by inject(): the owed energy goes out now, once, and the
+        // prediction is dropped (accept_step would otherwise book it each step
+        // and take it back out of the queue: heat lost). Empty on a run that
+        // started on this engine.
+        pred_.clear();
+        for (const auto& n : now_) add_(queue_, n.node, n.e);   // one entry per node
+        now_.clear();
         for (const auto& q : queue_) {
             if (q.e == Real{0}) continue;
             injected_.add(q.e);

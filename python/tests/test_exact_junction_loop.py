@@ -217,3 +217,27 @@ def test_a_deposit_node_read_instantly_by_an_algebraic_unknown_is_refused():
     b.set_device_losses("S1", junction="mid", E_on=_kvi(KON), E_off=_kvi(KOFF))
     with pytest.raises(Exception):
         _sim(b, T_END, fn, "dsed")
+
+
+def test_a_trbdf2_snapshot_resumed_on_the_exact_engine_delivers_its_heat_once():
+    """Integration batch 14o: a trbdf2 snapshot's tracker state carries the
+    predicted conduction power of trbdf2's next step (its thermal fix); the
+    exact engine delivers conduction heat in closed form and must drop it.
+    It booked it every step and took it back out of the queue: the RL
+    chopper's junction lost heat, 2.5e-4 of the rise after 500 us. The
+    resumed run follows the single RC node's closed form; pwl's snapshot as
+    the control."""
+    edge = 0.5 / FSW
+    ts = round(0.5 * T_END / edge) * edge
+    for eng, kw in (("trbdf2", dict(rtol=1e-11, atol=1e-13)), ("pwl", dict(dt=1e-9))):
+        b, fn = _rl_chopper(thermal=(R_TH, C_TH))
+        a = _sim(b, ts, fn, eng, **kw)
+        b, fn = _rl_chopper(thermal=(R_TH, C_TH))
+        r = _sim(b, T_END, fn, "dsed", resume_from=a.final_snapshot)
+        t = np.asarray(r.times)
+        off = np.abs(t / edge - np.round(t / edge)) > 1e-6
+        truth = _rc_truth(t[off])
+        rise = truth.max() - T_AMB
+        np.testing.assert_allclose(np.asarray(r.v("tj"))[off], truth, rtol=0, atol=1e-5 * rise,
+                                   err_msg=eng)
+        assert r.heat_pending == 0.0
