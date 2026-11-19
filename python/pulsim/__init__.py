@@ -2188,6 +2188,25 @@ def _resolved_from(args: dict) -> dict:
     return out
 
 
+def _apply_ties(builder, run_circuit, kernel_run, ties):
+    """The topology preflight's regularising ties: the ONE place a run
+    changes its circuit. Returns ``(run_circuit, report, ties)``: the run's
+    own circuit with the ties (the caller's builder and Circuit are never
+    changed), or a stand-in builder regularised in place (test doubles);
+    sweep(circuit, ...) hands the ties of the run it already made."""
+    report = None
+    if kernel_run is not None:
+        report, ties = kernel_run.preflight, kernel_run.ties
+    elif run_circuit is not None:
+        run_circuit, report, ties = (
+            run_circuit.with_preflight(
+                PreflightOptions(auto_regularize=True)))
+    else:  # a builder stand-in (test doubles)
+        report = builder.run_preflight(
+            PreflightOptions(auto_regularize=True))
+    return run_circuit, report, ties
+
+
 def _mark_resolved(resolved: dict, source: str, keys, was, now) -> None:
     for k, a, b in zip(keys, was, now):
         if a is not b:
@@ -2621,109 +2640,10 @@ def simulate(
     _opt_values = _p._opt_values; engine = _p.engine
     _device_path = _p._device_path; _dsed = _p._dsed
     mode_selection = _p.mode_selection; _mode_auto = _p._mode_auto
+    _preflight_report = _p._preflight_report; _ties = _p._ties
+    _kernel_run = _p._kernel_run; _run_plan = _p._run_plan
+    initial_state = _p.initial_state; _ic_from_builder = _p._ic_from_builder
 
-    # ---- Topology preflight (v2.0 Phase 2) --------------------------
-    #
-    # Placed BEFORE the engine dispatch so every engine runs the
-    # regularised circuit. The ties go on the RUN's circuit
-    # (add-immutable-circuit-ir): the caller's builder is never
-    # changed, `result.plan.ties` lists them and `result.circuit` is
-    # the circuit that ran.
-    #
-    # `None` means "not set"; resolve it here rather than relying on
-    # an `is not False` identity test, which would silently treat
-    # numpy.False_ or 0 as opt-IN.
-    if auto_regularize is None:
-        auto_regularize = True
-    _preflight_report = None
-    _ties = []
-    _kernel_run = _KERNEL_RUN.get()  # sweep(circuit, ...): already ran
-    if auto_regularize:
-        if _kernel_run is not None:
-            _preflight_report, _ties = _kernel_run.preflight, _kernel_run.ties
-        elif _run_circuit is not None:
-            _run_circuit, _preflight_report, _ties = (
-                _run_circuit.with_preflight(
-                    PreflightOptions(auto_regularize=True)))
-        else:  # a builder stand-in (test doubles)
-            _preflight_report = builder.run_preflight(
-                PreflightOptions(auto_regularize=True))
-        if not _preflight_report.empty():
-            import warnings
-            warnings.warn(
-                "simulate(): " + _preflight_report.summary() +
-                "\n  These ties give the MNA a voltage reference "
-                "without loading the circuit (1 GΩ draws nanoamps). "
-                "They were added to this run's own copy of the circuit "
-                "(result.plan.ties, result.circuit); your builder is "
-                "unchanged, so auto_regularize=False on it raises the "
-                "original singular-matrix error.",
-                stacklevel=2)
-    _run_plan = None
-    if _run_circuit is not None:
-        builder = (_kernel_run.builder if _kernel_run is not None
-                   else _run_circuit.to_builder())
-        _run_plan = RunPlan(circuit=_run_circuit, ties=tuple(
-            Tie(*t) for t in _ties), preflight=_preflight_report)
-
-    # add-python-builder-ergonomics: if the caller didn't pass an
-    # explicit initial_state, ask the builder for its recorded ICs.
-    # The C++ `initial_state()` synthesises from `c0=` / `i0=` /
-    # `set_initial` calls. Returns an all-zero vector when no ICs
-    # were set; we only override the simulate path when there's at
-    # least one non-zero entry to avoid forcing a needless copy.
-    #
-    # This runs BEFORE the engine dispatch, and it has to. It used
-    # to sit ~200 lines further down, past both early-return
-    # branches, so `engine='dsed'` and `engine='trbdf2'` never saw
-    # the builder's ICs at all: an inductor declared `i0=5.0` began
-    # its run at 0 A. Nothing raised — the run converged and
-    # produced a perfectly plausible exponential from the WRONG
-    # state, and the same circuit gave two different answers
-    # depending on which engine the router picked.
-    #
-    # It must also stay AFTER the preflight above, which may add
-    # regularizing ties and therefore change the state vector's
-    # length; asking the builder before that would size the vector
-    # for a different circuit. Nothing between here and the PWL
-    # cache mutates the graph, so one placement serves all three
-    # engines.
-    # ---- resume_from: refuse by name what cannot be honoured, ABOVE
-    # the engine dispatch (three early returns below; a check placed
-    # after the first applies to one engine only). Before this the
-    # DSED engine silently ignored the snapshot and started at t = 0,
-    # and an invalid snapshot resumed from zero.
-    if resume_from is not None:
-        if not getattr(resume_from, "valid", False):
-            raise ValueError(
-                "simulate(resume_from=...): the snapshot is not valid — "
-                "it came from a run that produced none (an aborted run, "
-                "or a SolverSnapshot() built by hand and never "
-                "populated). Resuming from it would start from zero "
-                "without saying so.")
-        if engine == "dsed":
-            raise _unsupported(
-                "dsed", "resume_from",
-                'simulate(engine="dsed"): resume_from is not supported '
-                "by the event-driven engine, which has no snapshot of "
-                'its own; use engine="pwl" (exact resume) or '
-                'engine="trbdf2" / "auto" (resume to tolerance).')
-    _ic_from_builder = False
-    # A snapshot IS the state: builder ICs (i0=/c0=) must not be
-    # synthesised alongside it, or the engines re-seed the stateful
-    # devices from x after the restore (measured: an IGBT's 17.7 A
-    # tail current lost on resume when its load inductor had i0=).
-    if initial_state is None and resume_from is None:
-        try:
-            import numpy as _np_check
-            candidate = builder.initial_state()
-            if _np_check.any(_np_check.asarray(candidate) != 0.0):
-                initial_state = candidate
-                _ic_from_builder = True
-        except ValueError:
-            raise   # capacitor ICs that break KVL: a refusal, not a mock
-        except AttributeError:  # a builder stand-in without initial_state
-            pass
 
     # ---- Controllers: one composition for every engine ----
     # (fix-control-tick-semantics). Above the dispatch so its refusals
@@ -4142,6 +4062,101 @@ def _plan_run(builder, t_end, dt, *,
             "must be an integer >= 1 (consecutive Newton solves accepted at roundoff "
             "before NewtonRoundoffBudgetExceeded; default 130).")
 
+    # ---- Topology preflight (v2.0 Phase 2) --------------------------
+    #
+    # Placed BEFORE the engine dispatch so every engine runs the
+    # regularised circuit. The ties go on the RUN's circuit
+    # (add-immutable-circuit-ir): the caller's builder is never
+    # changed, `result.plan.ties` lists them and `result.circuit` is
+    # the circuit that ran.
+    #
+    # `None` means "not set"; resolve it here rather than relying on
+    # an `is not False` identity test, which would silently treat
+    # numpy.False_ or 0 as opt-IN.
+    if auto_regularize is None:
+        auto_regularize = True
+    _preflight_report = None
+    _ties = []
+    _kernel_run = _KERNEL_RUN.get()  # sweep(circuit, ...): already ran
+    if auto_regularize:
+        _run_circuit, _preflight_report, _ties = _apply_ties(
+            builder, _run_circuit, _kernel_run, _ties)
+        if not _preflight_report.empty():
+            import warnings
+            warnings.warn(
+                "simulate(): " + _preflight_report.summary() +
+                "\n  These ties give the MNA a voltage reference "
+                "without loading the circuit (1 GΩ draws nanoamps). "
+                "They were added to this run's own copy of the circuit "
+                "(result.plan.ties, result.circuit); your builder is "
+                "unchanged, so auto_regularize=False on it raises the "
+                "original singular-matrix error.",
+                stacklevel=3)  # (one frame below simulate)
+    _run_plan = None
+    if _run_circuit is not None:
+        builder = (_kernel_run.builder if _kernel_run is not None
+                   else _run_circuit.to_builder())
+        _run_plan = RunPlan(circuit=_run_circuit, ties=tuple(
+            Tie(*t) for t in _ties), preflight=_preflight_report)
+
+    # add-python-builder-ergonomics: if the caller didn't pass an
+    # explicit initial_state, ask the builder for its recorded ICs.
+    # The C++ `initial_state()` synthesises from `c0=` / `i0=` /
+    # `set_initial` calls. Returns an all-zero vector when no ICs
+    # were set; we only override the simulate path when there's at
+    # least one non-zero entry to avoid forcing a needless copy.
+    #
+    # This runs BEFORE the engine dispatch, and it has to. It used
+    # to sit ~200 lines further down, past both early-return
+    # branches, so `engine='dsed'` and `engine='trbdf2'` never saw
+    # the builder's ICs at all: an inductor declared `i0=5.0` began
+    # its run at 0 A. Nothing raised — the run converged and
+    # produced a perfectly plausible exponential from the WRONG
+    # state, and the same circuit gave two different answers
+    # depending on which engine the router picked.
+    #
+    # It must also stay AFTER the preflight above, which may add
+    # regularizing ties and therefore change the state vector's
+    # length; asking the builder before that would size the vector
+    # for a different circuit. Nothing between here and the PWL
+    # cache mutates the graph, so one placement serves all three
+    # engines.
+    # ---- resume_from: refuse by name what cannot be honoured, ABOVE
+    # the engine dispatch (three early returns below; a check placed
+    # after the first applies to one engine only). Before this the
+    # DSED engine silently ignored the snapshot and started at t = 0,
+    # and an invalid snapshot resumed from zero.
+    if resume_from is not None:
+        if not getattr(resume_from, "valid", False):
+            raise ValueError(
+                "simulate(resume_from=...): the snapshot is not valid — "
+                "it came from a run that produced none (an aborted run, "
+                "or a SolverSnapshot() built by hand and never "
+                "populated). Resuming from it would start from zero "
+                "without saying so.")
+        if engine == "dsed":
+            raise _unsupported(
+                "dsed", "resume_from",
+                'simulate(engine="dsed"): resume_from is not supported '
+                "by the event-driven engine, which has no snapshot of "
+                'its own; use engine="pwl" (exact resume) or '
+                'engine="trbdf2" / "auto" (resume to tolerance).')
+    _ic_from_builder = False
+    # A snapshot IS the state: builder ICs (i0=/c0=) must not be
+    # synthesised alongside it, or the engines re-seed the stateful
+    # devices from x after the restore (measured: an IGBT's 17.7 A
+    # tail current lost on resume when its load inductor had i0=).
+    if initial_state is None and resume_from is None:
+        try:
+            import numpy as _np_check
+            candidate = builder.initial_state()
+            if _np_check.any(_np_check.asarray(candidate) != 0.0):
+                initial_state = candidate
+                _ic_from_builder = True
+        except ValueError:
+            raise   # capacitor ICs that break KVL: a refusal, not a mock
+        except AttributeError:  # a builder stand-in without initial_state
+            pass
     return _types.SimpleNamespace(resolved_from=_resolved,
         builder=builder, t_end=t_end, dt=dt, t_start=t_start,
         store_every=store_every, _run_circuit=_run_circuit,
@@ -4160,7 +4175,10 @@ def _plan_run(builder, t_end, dt, *,
         inductor_abs_clamp=inductor_abs_clamp, integrator=integrator,
         rtol=rtol, atol=atol, dt_init=dt_init, _opt_values=_opt_values,
         engine=engine, _device_path=_device_path, _dsed=_dsed,
-        mode_selection=mode_selection, _mode_auto=_mode_auto)
+        mode_selection=mode_selection, _mode_auto=_mode_auto,
+        _preflight_report=_preflight_report, _ties=_ties,
+        _kernel_run=_kernel_run, _run_plan=_run_plan,
+        initial_state=initial_state, _ic_from_builder=_ic_from_builder)
 
 
 def _resume_tick_origins(resume_from, n: int) -> "list[float]":

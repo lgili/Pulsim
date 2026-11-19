@@ -311,8 +311,9 @@ def test_ratchet_untyped_raises_and_broad_handlers_do_not_rise():
 
 # simulate()'s body since add-kernel-simulation-object Stage A: the planner,
 # the three engine runners and finalize.
-_SIMULATE_BODY = ("simulate", "_plan_run", "_run_pwl", "_run_trbdf2",
-                  "_run_dsed", "_finalize")
+_SIMULATE_BODY = ("simulate", "_plan_run", "_apply_ties", "_compose", "_route",
+                  "_compose_for", "_run_pwl", "_run_trbdf2", "_run_dsed",
+                  "_finalize")
 
 
 def _simulate_body_nodes():

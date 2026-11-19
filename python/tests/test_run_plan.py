@@ -14,7 +14,8 @@ import pulsim as p
 _PKG = pathlib.Path(p.__file__).resolve().parent
 _RUNNERS = ("_run_pwl", "_run_trbdf2", "_run_dsed")
 # simulate()'s own body since Stage A: the planner, the runners, finalize.
-_SIMULATE_BODY = ("simulate", "_plan_run", *_RUNNERS, "_finalize")
+_SIMULATE_BODY = ("simulate", "_plan_run", "_apply_ties", "_compose", "_route",
+                  "_compose_for", *_RUNNERS, "_finalize")
 # Ambient inputs a runner must take from the plan, never read itself.
 _AMBIENT = {"_KERNEL_RUN", "_PWL_RECIPE"}
 
