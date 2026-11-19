@@ -39,7 +39,8 @@ def test_an_empty_block_writes_the_14_field_version_4():
 
 def test_older_version_4_and_version_3_pickles_still_load():
     state = _snap().__getstate__()
-    for t in (state[:13], state, state + (None,)):
+    # 13 fields = the device-interface branch's own v4 (grid at 12, no marker)
+    for t in (state[:12] + (state[13],), state, state + (None,)):
         s = _load(t)
         assert s.controller_state is None and s.valid
     v3 = ("SolverSnapshot", 3) + tuple(state[2:12])

@@ -577,3 +577,86 @@ behind this branch's 13–15, and 19 at batch 11 behind 16–18. Since 14 the gr
   sin cos tan atan sinh cosh tanh pow ^ atan2`) is compared on
   bit-identical arguments to 4 ulp of the Python reference
   (`LIBM_ULPS`), which covers glibc, macOS and MSVC.
+
+## 22. Domains (group 9)
+
+- **Option:** a node carries `ir::Domain` (electrical, thermal,
+  mechanical; magnetic reserved for add-permeance-magnetic-domain and
+  refused). It is declared (`builder.node(name, domain)`, YAML
+  `{name, domain}`) or implied by a typed pin (PMSM `omega` rad/s,
+  `theta` rad); every other node is electrical. All domains stay in the
+  one MNA system: the tag never reaches a stamp, so a tagged circuit and
+  its untagged twin give bit-identical samples (tested on pwl and
+  trbdf2, and on a DC machine with its shaft tagged mechanical).
+- **Pin table, coarse on purpose.** Two classes, not a per-kind table:
+  electrical-only kinds (switch, diode, MOSFET / IGBT level 1, the
+  nonlinear diodes, saturable inductor, nonlinear capacitor, PMSM
+  phases) and domain-generic kinds whose pins come in pairs
+  (`from`/`to`, then each control pair), each pair within one domain. A
+  VCVS sensing a temperature and driving an electrical node is legal by
+  construction. A domain spreads along generic pairs (union-find, in
+  branch order) from declared and typed nodes; a group nothing reaches
+  is electrical. Only two decided domains meeting in one pair are
+  refused, at `build()`, naming device, pin and node (`device "D1": pin
+  from (electrical) is connected to node "tj", which is thermal
+  (declared)`). Without the spreading, a user's case node behind a
+  helper's junction, a two-mass shaft behind a PMSM or a gearbox
+  transformer would be refused (final review). A device whose physics
+  spans two domains in one pair (none shipped) would need its own row.
+- **Preflight per domain:** `with_preflight` labels each finding with
+  its subnet's domain; a floating thermal network reads
+  `thermal-domain: ...` (`finding.domain`).
+- **Units:** `Circuit.unit_of(node)` (V, degC, rad/s, rad). Result
+  traces carry no unit yet (known-limitations); task 9.2's "units on
+  probes" is met at the circuit, not at the result.
+- **Hashes:** a declared non-electrical tag is structure (sorted by
+  node index, hashed only when present): an untagged circuit and one
+  that declares nodes electrical hash as before (V-R-C pins hold).
+  Implied tags follow from the kinds already hashed.
+- **Helpers (9.3, 9.4):** the PMSM's speed/angle nodes are implied by
+  its pins (no code in the helper); `add_foster_network`,
+  `add_cauer_thermal_network` and `add_shared_heatsink` declare their
+  nodes thermal, only on a real `CircuitBuilder` (a subsystem proxy gets
+  names as before), after their devices, so the node order (every
+  state index) is the untagged helper's (tested). Done here, not in
+  separate PRs: each is a few lines
+  and the oracle (PMSM and electro-thermal suites unchanged) runs with
+  the check.
+- **Evidence:** `test_circuit_domains.py` and the C++ `[ir]` case; the
+  full suite with the helpers tagging.
+- **Final review fixes:** domain spreading (above); helpers tag after
+  their devices; an infinite parameter bound is stored as none (it made
+  `to_yaml` / pickle refuse a circuit); `min` / `max` keep the first
+  operand on a tie (Python's rule) so the signed zero of the exact fuzz
+  does not depend on the libm's `fmin`, and the exact fuzz compares
+  bits; every emitter section names its entry in a non-finite refusal;
+  a YAML `{name, domain}` node entry is strict. Left: an explicit
+  `node(n, "electrical")` is neither hashed nor written, so after a
+  round trip a later `node(n, "thermal")` is accepted where the original
+  builder refused it.
+- **Reverse:** delete `node(name, Domain)`, `resolve_domains_` and the
+  YAML key; nothing else reads the tag.
+
+## 23. Overhead of the IR path (final measurement)
+
+`probes/ir_overhead.py`, Apple M-series, Release, interleaved, 15 reps
+(min / median):
+
+| circuit | simulate(builder) | build() + simulate(circuit) | build() | with_value per point |
+|---|---|---|---|---|
+| small, 6 branches, 2000 steps | 0.278 / 0.294 ms | 0.278 / 0.292 ms | 1.6 us | 2.7 us (0.9 % of a run) |
+| ladder, 1502 branches, 200 steps | 4.697 / 8.830 ms | 4.506 / 7.112 ms | 328 us | 190-337 us (4-7 % of the min run) |
+
+- `build() + simulate(circuit)` costs what `simulate(builder)` costs (equal minimums;
+  the medians are noise on a shared machine).
+- Lazy tables cut `with_value` on the ladder from 657 us to one builder
+  clone (190 us measured alone; `to_builder` 294 us with the Python
+  wrapper). The clone copies five name tables (graph node and branch
+  names, `node_map_`, `branch_names_`, `branch_index_`) and the
+  per-node branch lists, ~0.13 us per branch.
+- That is above "a few percent" only for very short runs (200 steps of
+  a 1502-branch ladder). Removing it means sharing the immutable name
+  tables between a circuit and its derivations (copy-on-write in
+  `CircuitBuilder`): a builder refactor, left for the device-interface
+  migration that owns the builder's storage. Recorded as the one
+  overhead finding of this change.

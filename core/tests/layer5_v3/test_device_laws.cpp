@@ -156,10 +156,11 @@ TEST_CASE("the Coss law stamps, commits and captures as the hand stamp",
         tq.push_back(models::NonlinearCapacitor::charge(jn, tv.back()));
         tc.push_back(models::NonlinearCapacitor::capacitance(jn, tv.back()));
     }
-    const std::array<models::NonlinearCapacitor::Params, 3> laws{
+    const std::array<models::NonlinearCapacitor::Params, 4> laws{
         jn, models::NonlinearCapacitor::vdmos_cgd(2e-9, 1e-10, 0.3),
         models::NonlinearCapacitor::from_table(
-            std::make_shared<const models::ChargeTable>(tv, tq, tc, "t"))};
+            std::make_shared<const models::ChargeTable>(tv, tq, tc, "t")),
+        models::NonlinearCapacitor::tanh_law(2e-6, 1e-7, 5.0)};
     for (std::size_t law = 0; law < laws.size(); ++law) {
         const auto& mp = laws[law];
         INFO("law " << law);
@@ -177,7 +178,7 @@ TEST_CASE("the Coss law stamps, commits and captures as the hand stamp",
             Vector x(2);
             // the junction above its floor (v ≥ −0.5 V); VDMOS on both
             // sides of x = −1 (v/A < −1); the table inside and past it
-            x[0] = law == 1 ? rng(-20.0, 40.0) : rng(0.0, 40.0);
+            x[0] = law == 1 || law == 3 ? rng(-20.0, 40.0) : rng(0.0, 40.0);
             x[1] = rng(-0.5, 0.5);
             const Real h = rng(1e-9, 1e-6);
             for (auto st : {pwl::TrBdf2Stage::Trapezoidal,
@@ -221,17 +222,17 @@ TEST_CASE("the Coss law stamps, commits and captures as the hand stamp",
                             std::max(qterm, hl.q_gamma()[0]), 4));
             }
         }
-        if (law < 2) {
+        if (law != 2) {
             check_param_tangent<L::NonlinearCapacitor>(
                 L::NonlinearCapacitor::aux_from(mp), L::NonlinearCapacitor::from(mp),
-                {law == 0 ? 12.0 : 3.0, 0.0});
+                {law == 0 ? 12.0 : law == 3 ? 4.0 : 3.0, 0.0});
             check_param_tangent<L::NonlinearCapacitor>(
                 L::NonlinearCapacitor::aux_from(mp), L::NonlinearCapacitor::from(mp),
                 {law == 0 ? -0.2 : -9.0, 0.1});
         }
         // the table law has no parameter tangent, and says so
         CHECK(L::NonlinearCapacitor::param_tangent(L::NonlinearCapacitor::aux_from(mp))
-              == (law < 2));
+              == (law != 2));
     }
 }
 

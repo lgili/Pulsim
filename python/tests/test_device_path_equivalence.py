@@ -116,10 +116,26 @@ def chopper_igbt_tail_lauritzen():
     return b
 
 
+def saturable_permeance_core():
+    """A winding on a saturable permeance (the nonlinear capacitor's tanh
+    law in the magnetic domain) and an air gap, driven past the knee by a
+    unipolar square wave: the core's Q(F) = Φ law on its Newton row."""
+    b = p.CircuitBuilder()
+    b.add_pulse_voltage_source("V", "e", "gnd", 0.0, 24.0, 0.0, 50e-6,
+                               100e-6, 1e-7, 1e-7)
+    b.add_resistor("R", "e", "w", 0.5)
+    b.add_winding("W", "w", "gnd", "m1", "gnd", 25)
+    b.add_saturable_permeance("Core", "m1", "gnd", 76e-6, 72e-3, mu_r=2000.0,
+                              B_sat=0.35)
+    b.add_air_gap("G", "m1", "gnd", 76e-6, 0.1e-3)   # in parallel: DC-solvable
+    return b
+
+
 CIRCUITS = {
     "boost_mosfet_coss_saturable": boost_mosfet_coss_saturable,
     "chopper_igbt_vdmos": chopper_igbt_vdmos,
     "chopper_igbt_tail_lauritzen": chopper_igbt_tail_lauritzen,
+    "saturable_permeance_core": saturable_permeance_core,
 }
 
 

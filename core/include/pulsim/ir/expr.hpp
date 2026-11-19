@@ -82,8 +82,10 @@ public:
                 case Op::Mul: --sp; s[sp - 1] = s[sp - 1] * s[sp]; break;
                 case Op::Div: --sp; s[sp - 1] = s[sp - 1] / s[sp]; break;
                 case Op::Pow: --sp; s[sp - 1] = std::pow(s[sp - 1], s[sp]); break;
-                case Op::Min: --sp; s[sp - 1] = std::fmin(s[sp - 1], s[sp]); break;
-                case Op::Max: --sp; s[sp - 1] = std::fmax(s[sp - 1], s[sp]); break;
+                // the first operand unless the second is strictly smaller / larger
+                // (Python's min / max): fmin's sign of zero is the libm's choice
+                case Op::Min: --sp; if (s[sp] < s[sp - 1]) s[sp - 1] = s[sp]; break;
+                case Op::Max: --sp; if (s[sp] > s[sp - 1]) s[sp - 1] = s[sp]; break;
                 case Op::Atan2: --sp; s[sp - 1] = std::atan2(s[sp - 1], s[sp]); break;
                 case Op::Abs: s[sp - 1] = std::fabs(s[sp - 1]); break;
                 case Op::Sqrt: s[sp - 1] = std::sqrt(s[sp - 1]); break;

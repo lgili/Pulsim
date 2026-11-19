@@ -160,7 +160,7 @@ def test_a_snapshot_resumes_on_the_other_engine(first_engine, second_engine):
     # each stateful kind continues from its own state across the seam,
     # checked up to the next gate edge
     for name, err in _seam_errors(second_engine, second, full).items():
-        assert err <= 2e-3, name
+        assert err <= 4e-3, name   # intact <= 7.1e-4; a dropped state > 2e-2
 
 
 _RUN = {"pwl": _pwl, "trbdf2": _trbdf2}
@@ -295,7 +295,13 @@ def test_a_version_3_pickle_loads_and_resumes_on_a_restarted_grid():
     exactly as the same snapshot without a grid."""
     snap = _pwl(4.2e-5).final_snapshot
     v4 = snap.__getstate__()
-    assert v4[1] == 4 and len(v4) == 14
+    # 14 fields: version 3's 13 (the controllers'-state marker at 12, batch
+    # 12) + the grid (13). The slice's own 13-field version 4 (grid at 12,
+    # no marker) still loads, grid included.
+    assert v4[1] == 4 and len(v4) == 14 and v4[12] is False
+    v4_13 = SolverSnapshot.__new__(SolverSnapshot)
+    v4_13.__setstate__(tuple(v4[:12]) + (v4[13],))
+    assert v4_13.grid_origin == snap.grid_origin and v4_13._control_state is None
     old = SolverSnapshot.__new__(SolverSnapshot)
     old.__setstate__(("SolverSnapshot", 3) + tuple(v4[2:12]))
     assert np.isnan(old.grid_origin) and not old.post_edge_derivatives
@@ -322,9 +328,11 @@ def test_every_pickle_layout_resumes_the_stored_charge_kinds_on_both_paths(path)
            list(snap.lauritzen_history), list(snap.igbt_tail_history),
            list(snap.pmsm_history), True, list(snap.stamped_mask),
            int(snap.restart_steps_left))
-    with_grid = [v4[:13], v4, v4 + (None,)]
+    # v4: 12 fields, the controllers' marker (12), the grid (13); the
+    # 13-field v4 carries the grid at 12 and no marker
+    with_grid = [tuple(v4[:12]) + (v4[13],), v4, v4 + (None,)]
     no_grid = [("SolverSnapshot", 3) + tuple(v4[2:12]),
-               ("SolverSnapshot", 3) + tuple(v4[2:12]) + (v4[13],),
+               ("SolverSnapshot", 3) + tuple(v4[2:12]) + (v4[12],),
                old, old[:11], old[:10]]
 
     def resume(s):

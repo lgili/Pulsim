@@ -475,3 +475,22 @@
     (3) the relaxed branch of the equivalence gate (#29) is not Jacobian
     evidence for a defect confined to a few transients — the C++ law tests
     are.
+37. **Batch 13 merged (integration 02bf7506).** Pickle: integration's
+    version 4 layout is adopted (fields 0–11, the controllers' marker at 12,
+    the grid at 13), plus the step controller's block as an optional 15th
+    field (#24); the 13-field version 4 of this branch (grid at 12, no
+    marker) still loads. Batch 14a unifies the layout again; this branch
+    takes its layout then. The saturable permeance (the nonlinear
+    capacitor's `Tanh` law) runs on 'interface': the law takes the model's
+    charge expression in the same operation order; the Coss law test gains
+    it (stamp, commit, capture, ∂/∂p), the equivalence suite a saturating
+    winding-on-core circuit (pwl, trbdf2, DC). Before the port the merged
+    law would have fallen through to the junction formula silently. The
+    batch made no registry entries for the gated diode or the induction
+    machine to replace (kind.hpp is unchanged by it; the gated diode is a
+    MODE kind, #30). Default path: golden 21 and stateful 40 identical to
+    an integration-based build (p5-machines at 33dbd853 = 02bf7506 +
+    machines) except the four PMSM cases that branch changes; against this
+    branch's previous baselines, every pwl / dsed case identical and the
+    trbdf2 cases moved by integration's TR-BDF2 tracks 7–8. New baselines
+    `golden_m13` / `sbit_m13`.

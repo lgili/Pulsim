@@ -297,3 +297,32 @@ TEST_CASE("IR: circuits of one structure share one symbolic analysis", "[ir]") {
     CHECK(other.build().symbolic_plan() != c.symbolic_plan());
     CHECK(mixed_circuit().build().symbolic_plan() != c.symbolic_plan());
 }
+
+TEST_CASE("IR: node domains tag, refuse across domains, never solve", "[ir]") {
+    using Catch::Matchers::ContainsSubstring;
+    auto thermal = [](bool tag) {
+        CircuitBuilder b;
+        if (tag) { (void)b.node("tj", ir::Domain::Thermal); (void)b.node("ta", ir::Domain::Thermal); }
+        b.add_voltage_source("Ta", "ta", "gnd", 25.0);
+        b.add_current_source("P", "gnd", "tj", 10.0);
+        b.add_resistor("R", "tj", "ta", 0.5);
+        return b;
+    };
+    const auto t = thermal(true).build(), u = thermal(false).build();
+    CHECK(t.node_info("tj").domain == ir::Domain::Thermal);
+    CHECK(t.node_info("tj").unit == "degC");
+    CHECK(u.node_info("tj").domain == ir::Domain::Electrical);
+    CHECK(t.structure_hash() != u.structure_hash());
+    auto e = thermal(false);
+    (void)e.node("tj", ir::Domain::Electrical);   // the default: no hash moves
+    CHECK(e.build().structure_hash() == u.structure_hash());
+    auto bad = thermal(true);
+    bad.add_diode("D", "tj", "gnd", 1e3, 1e-9);
+    CHECK_THROWS_WITH(bad.build(), ContainsSubstring("device \"D\": pin from (electrical) is "
+                                                     "connected to node \"tj\", which is thermal"));
+    CircuitBuilder r;
+    (void)r.node("t", ir::Domain::Thermal);
+    CHECK_THROWS_WITH(r.node("t", ir::Domain::Mechanical),
+                      ContainsSubstring("already declared thermal, now mechanical"));
+    CHECK_THROWS_WITH(r.node("gnd", ir::Domain::Thermal), ContainsSubstring("ground is the reference"));
+}

@@ -70,6 +70,11 @@ struct ReinitRecord {
     Real dW = 0;                     ///< energy removed [J], >= 0
     Real projection_gap = 0;         ///< max |x_proj - x(t+h)| over states
     long sample = -1;                ///< stored sample of the pulse, or -1
+    /// The switch the impulsive energy is booked to (task 6.4): the gated
+    /// element of the structure whose state changed on the step, else any
+    /// gated element that changed (a gate forcing a diode into the mode),
+    /// else the structure's first element. Empty: not attributed.
+    std::string cause;
 };
 
 /// add-complementarity-mode-selection on pwl: one decision site where the

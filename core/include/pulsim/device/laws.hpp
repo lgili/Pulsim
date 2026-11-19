@@ -229,6 +229,11 @@ struct NonlinearCapacitor {
             const Real vv = value_of(v);
             return ad::chain(v, a.table->charge(vv), a.table->capacitance(vv));
         }
+        if (a.law == models::ChargeLawKind::Tanh) {
+            // the saturable permeance (add-permeance-magnetic-domain): the
+            // model's charge, same operation order
+            return p.cgd_min * v + (p.cgd_max - p.cgd_min) * p.V0 * tanh(v / p.V0);
+        }
         if (a.law == models::ChargeLawKind::VdmosCgd) {
             const auto s = (p.cgd_max - p.cgd_min)
                            / (Real{1} + std::numbers::pi_v<Real> / Real{2});
