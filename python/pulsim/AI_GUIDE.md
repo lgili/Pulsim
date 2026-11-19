@@ -120,14 +120,14 @@ DT = 1e-7
 
 b = p.CircuitBuilder()
 b.add_voltage_source("Vin", "vin", "gnd", 24.0)
-b.add_mosfet("Q1", "vin", "sw")              # also adds diode "Q1_body"
-b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)    # g_on, g_off; V_th = 0
+b.add_mosfet("Q1", "vin", "sw")            # also adds diode "Q1_body"
+b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)  # g_on, g_off; V_th = 0
 b.add_inductor("L", "sw", "vout", 100e-6)
 b.add_capacitor("C", "vout", "gnd", 47e-6)
 b.add_resistor("RL", "vout", "gnd", 10.0)
 
-q1 = b.switch_index_of("Q1")                 # never count bits by hand
-n_sw = b.graph.num_switches                  # Q1, Q1_body, D1 -> 3
+q1 = b.switch_index_of("Q1")               # never count bits by hand
+n_sw = b.graph.num_switches                # Q1, Q1_body, D1 -> 3
 pwm = p.make_pwm_switch_fn(100e3, 0.5, q1, n_sw)   # f, D, bit, size
 
 res = p.simulate(b, t_end=10e-3, dt=DT, switch_fn=pwm)
