@@ -2350,6 +2350,7 @@ def simulate(
     mode_selection: Optional[str] = None,
     allow_implicit_segments: Optional[bool] = None,
     recorders=None,
+    output_rtol: Optional[float] = None,
 ) -> SimulationResult:
     """Build the cache and run a transient simulation.
 
@@ -2625,6 +2626,23 @@ def simulate(
         the stored arrays, so ``store_every > 1`` and ``resume_from``
         are refused with recorders, by name. Without it nothing changes.
 
+    output_rtol
+        ``engine='exact'`` only, default ``None`` (today's samples: one per
+        10 us step cap without ``dt``). Without ``dt``, ``store_every`` or
+        recorders, the exact engine returns every event instant (both
+        limits where the state jumps) and between events samples spaced so
+        that linear interpolation between consecutive samples is within
+        ``output_rtol`` of each STATE's scale (its range so far, floored at
+        1e-3 of its peak and at ``atol``; an observable that is a difference of large
+        states gets that absolute error, not ``output_rtol`` of itself). The
+        event projection then removes only the parasitic cluster. Read
+        ``res.diagnostics['output_grid']``: ``n_output_capped`` (intervals
+        where the 4096-sample cap bit) and ``n_output_unbounded`` (steps of
+        a mode without a diagonalising basis, which keep the step cap's
+        grid); both warn. Ignored with ``dt`` / ``store_every`` /
+        recorders; refused by name on the other engines, with
+        ``integrator='bdf2'``, sensitivities, and the non-native fallback.
+
     Returns
     -------
     SimulationResult
@@ -2660,7 +2678,8 @@ def simulate(
     # add-probes-and-recorders: above every engine dispatch, so every
     # engine's result goes through the same kernel recorder pass.
     if recorders:
-        _kw = {k: v for k, v in locals().items() if k != "recorders"}
+        # a recorder samples on its own grid: the output-grid rule stays off
+        _kw = {k: v for k, v in locals().items() if k not in ("recorders", "output_rtol")}
         from ._recorders import simulate_with_recorders as _with_rec
         return _with_rec(simulate, _kw, recorders)
     # add-kernel-simulation-object Stage A: plan -> engine table -> finalize.
@@ -2683,7 +2702,7 @@ def simulate(
         inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
         should_continue, closed_loops, live_stream, mmc_arms, on_cache,
         controller_period, resume_from, control_tick, solver, sensitivities,
-        mode_selection, allow_implicit_segments, recorders)))
+        mode_selection, allow_implicit_segments, recorders, output_rtol)))
     return _finalize(_ENGINES[plan.engine](plan), plan)
 
 
@@ -3095,7 +3114,7 @@ def _plan_run(
     inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
     should_continue, closed_loops, live_stream, mmc_arms, on_cache,
     controller_period, resume_from, control_tick, solver, sensitivities,
-    mode_selection, allow_implicit_segments, recorders,
+    mode_selection, allow_implicit_segments, recorders, output_rtol,
 ):
     """simulate()'s keywords resolved, above the engine dispatch
     (add-kernel-simulation-object Stage A): every statement here applies
@@ -3114,7 +3133,7 @@ def _plan_run(
         inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
         should_continue, closed_loops, live_stream, mmc_arms, on_cache,
         controller_period, resume_from, control_tick, solver, sensitivities,
-        mode_selection, allow_implicit_segments, recorders))
+        mode_selection, allow_implicit_segments, recorders, output_rtol))
     # ---- LoadedCircuit (YAML) + the run window. ----
     # Above everything else, so every engine sees the same t_end / dt.
     # A YAML whose run settings did not load (no top-level
@@ -3264,6 +3283,7 @@ def _plan_run(
         "on_cache": on_cache, "sensitivities": sensitivities,
         "mode_selection": mode_selection,
         "allow_implicit_segments": allow_implicit_segments,
+        "output_rtol": output_rtol,
     }
 
     # ---- Validate first — fail fast on user mistakes (DSED side). ----
@@ -3496,9 +3516,17 @@ def _plan_run(
         # The DSED dispatcher owns its own validation; main's Phase 2.4
         # adaptive-RK selector below is PWL-specific and must NOT apply
         # to DSED integrator names.
+        # update-number-changing-release: the output-grid rule acts only where
+        # the engine picks the samples (no dt, no store_every, no recorders);
+        # anything explicit keeps today's samples exactly.
+        if output_rtol is not None:
+            if isinstance(output_rtol, bool) or not 0.0 < output_rtol < float("inf"):
+                raise ValueError(f"simulate(output_rtol={output_rtol!r}): must be > 0 (None = off)")
+            if dt is not None or recorders or (store_every or 1) != 1:
+                output_rtol = None
         step = _planning.new(_planning.ExactStep, (
             dt, rtol, atol, dt_init, integrator, stiffness_threshold, h_bdf2,
-            sensitivities, allow_implicit_segments))
+            sensitivities, allow_implicit_segments, output_rtol))
     elif engine == "trbdf2":
         # ---- v2.0 Phase 3: variable-step TR-BDF2 on the sparse
         #      MNA kernel. L-stable, LTE-controlled — no dt to
@@ -3730,6 +3758,11 @@ def _run_dsed(plan):
     # which the warning tells every user to read — is not a
     # PWL-only attribute.
     if sensitivities is not None:
+        if s.output_rtol is not None:
+            raise _unsupported(
+                "dsed", "output_rtol",
+                "simulate(engine='exact', sensitivities=..., output_rtol=...): the "
+                "sensitivity run keeps its own grid. Drop output_rtol, or pass dt.")
         from .sensitivity import simulate_sensitivities
         _dsed_res = simulate_sensitivities(
             builder, t_end, sensitivities=sensitivities, dt=dt,
@@ -3767,6 +3800,7 @@ def _run_dsed(plan):
             progress=progress,
             mode_selection=mode_selection,
             allow_implicit_segments=bool(allow_implicit_segments),
+            output_rtol=s.output_rtol,
             ticks=[(f, p, o) for (f, p), o in zip(
                 _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
         )
