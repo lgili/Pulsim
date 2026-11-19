@@ -312,3 +312,71 @@ Each entry: question → option taken → why → how to reverse.
   smoothness requirements (memory: device laws must be smooth to
   1e-12). Not started in this batch; tasks 4.1–4.5 and the
   `pmsm_mna[flux_map]` conformance row stay open.
+
+## D22. Flux maps (group 4)
+
+- Law: `models::FluxMapDQ` (new header `models/flux_map_dq.hpp`), a C²
+  bicubic co-energy `W'(i_d, i_q)` stored per cell in power form
+  (16 coefficients, `u = i_d − kd[a]`, `v = i_q − kq[b]`). λ = ∇W',
+  incremental inductances = the Hessian: reciprocal by construction,
+  λ C¹. `PmsmMna::Params::flux_map` (null = the constant-L machine,
+  every existing path untouched; hashes change only when a map is set).
+  New statics `PmsmMna::flux_map_state` (λ_abc, ∂λ/∂i = T⁻¹·Hb·T,
+  ∂λ/∂θ_e, T_em = (3/2)·pp·(λ_d·i_q − λ_q·i_d) and its partials) and
+  `flux_map_increment`; the stamp branches into
+  `detail::refresh_flux_map_entry_` (additive; the constant-L stamp and
+  its functions are not restructured).
+- Increment form (D16) kept: λ(θ, i) − λ(θ0, i0) = C⁻¹·ΔPᵀ·λ_dq0(x0) +
+  T⁻¹·(λ_dq0(x) − λ_dq0(x0)); the gradient difference is ∫H along the
+  segment, split at knot lines, 3-point Gauss (exact: H is degree ≤ 4
+  along a line in a cell). The direct difference of two evaluations
+  carries ~1e-15 Wb of cell-join round-off (W' ~ 1 J differenced into
+  λ ~ 0.06 Wb); the increment's round-off scales with the step.
+- Past the grid: second-order Taylor extension of W' across the boundary
+  (per axis, so corners too) — C², reciprocal, consistent with its
+  Hessian, so Newton iterates outside are on a smooth law. Continuing the
+  boundary cubic instead made λ_d FALL 14 A past a saturating map's grid
+  (the picoampere test caught it). The Taylor extension is not PD
+  arbitrarily far out either (reviewer: indefinite 10 A past a 32 A grid,
+  the mixed terms grow with the overshoot), so the law is DEFINED on the
+  grid plus a band of `kBand` = 0.1 × each axis span: `validate` checks
+  PD on that whole region (4 samples per cell, 8 across each band), and
+  `PmsmMnaHistory::update_from_state` refuses an ACCEPTED state outside
+  it by name (machine, map, grid). `validate` also refuses knots,
+  coefficient count, non-C² joins (rel 1e-11).
+- Fit (Python `FluxMapDQ.from_tables` = `machines.flux_map_from_tables`,
+  numpy only): clamped cubic B-splines with knots at the table grid,
+  least squares on both tables + W'(corner) = 0. Gradient data leave
+  free spline modes (7 on a 7×7 grid; `2n² > (n+2)²` is not enough):
+  fixed in the data matrix's null space by not-a-knot conditions (W' C³
+  across the first and last interior knot lines, exact for a cubic), so
+  the data fit is untouched; still undetermined (2×2 grid) → refused by
+  name. `smooth > 0` adds second differences of the coefficients.
+- Reciprocity: the design's fit residual / flux range is kept (stored as
+  `fit_residual`), but it is dominated by the PM and self terms: λ_q × 1.1
+  (cross terms off 10 %) scored 0.16 %, under the 2 % default. Added a
+  direct measure on the TABLES: max |∂λ_d/∂i_q − ∂λ_q/∂i_d| (central
+  differences, interior) over the cross inductance (floor 5 % of the self
+  inductance), same `tol`: 9.1 % for the ×1.1 table (refused by name),
+  0.19 % for the reciprocal one on a 1 A grid (truncation), 2.0 % at
+  ×1.02.
+- Numbers (synthetic maps): linear map vs constant-L run 3.0e-14 (pwl),
+  8.5e-14 (trbdf2) relative; reciprocity 6.9e-14 H; saturated
+  locked-rotor step vs SciPy (analytic law) 2.57e-4 A of 20 A on pwl and
+  trbdf2 = the 1 A-grid fit error (pwl vs the fitted-map ODE 7.1e-7 /
+  1.8e-7 A at 2 / 1 µs); energy balance of a saturated start 1.4e-9 of
+  E_in at 2 µs (5.5e-9 at 4 µs).
+- `add_pmsm_mna(flux_map=)` requires `L_d`, `L_q`, `psi_pm` equal to the
+  map's values at i = 0 (refused naming the machine otherwise);
+  `add_pmsm_flux_map` (Python) passes them. With a map: harmonics refused;
+  DC held point only at ω0 = 0 (linear `v = R·i`), ω0 ≠ 0 refused by name;
+  `yaml.emit` refuses (no YAML form); `ir::fields` reports L_d, L_q,
+  psi_pm as unread. `<name>.T_em` trace from the map.
+- Hand-off (2026-11-19): open in this change only 1.2 (no `components()`
+  composite entry, D2) and 5.3 (BREAKING default flip, next release).
+  Not done, by design.md's non-goals: saturation of the induction
+  machine's magnetising branch. Not verified: the full ctest on this tip
+  (integration batch), Windows/Linux, the Windows Newton stall on
+  `test_inverter_fed_start_agrees_on_pwl_and_trbdf2` (no Windows here).
+  The flux-map stamp is NOT yet a `Device`-contract law (the port agent
+  takes `refresh_flux_map_entry_` with the rest).

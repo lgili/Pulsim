@@ -353,6 +353,7 @@ from .spice_import import (
 )
 # add-power-mosfet-datasheet-device: charge laws, double pulse, fitters.
 from ._pulsim import ChargeLaw, ChargeTable  # type: ignore[import-not-found]
+from ._pulsim import FluxMapDQ  # type: ignore[import-not-found]
 # add-in-kernel-event-losses: kernel datasheet tables (LossTable.to_kernel()).
 from ._pulsim import ConductionTable, LossTable3D  # type: ignore[import-not-found]
 from . import datasheet as datasheet  # noqa: F401  (re-export submodule)
@@ -774,6 +775,7 @@ __all__ = [
     "spice_to_builder",
     "ChargeLaw",
     "ChargeTable",
+    "FluxMapDQ",
     "LossTable3D",
     "ConductionTable",
     "DoublePulseResult",
@@ -964,6 +966,7 @@ from ._control_state import save_into as _save_control_state  # noqa: E402
 # composite of existing kernel elements, solved inside the matrix).
 from . import machines as _machines  # noqa: E402
 _machines.install(CircuitBuilder)
+FluxMapDQ.from_tables = staticmethod(_machines.flux_map_from_tables)  # type: ignore[attr-defined]
 
 # add-realistic-passives: esr / esl / c_par / rac keywords on
 # add_capacitor / add_inductor and add_transmission_line (composites).
@@ -4283,7 +4286,13 @@ def _attach_native_machine_traces(result, builder) -> None:
         # dq torque, identical to the abc co-energy expression.
         t_em = 1.5 * pp * (psi * i_q + (L_d - L_q) * i_d * i_q)
         harm = m["params"].get("harmonics") or []
-        if harm:
+        fmap = m["params"].get("flux_map")
+        if fmap is not None:
+            # (3/2)·pp·(λ_d·i_q − λ_q·i_d) from the map's own co-energy.
+            lam = _np.array([fmap.evaluate(float(a), float(b))[1:3]
+                             for a, b in zip(i_d, i_q)]).reshape(-1, 2)
+            t_em = 1.5 * pp * (lam[:, 0] * i_q - lam[:, 1] * i_d)
+        elif harm:
             # PM part from the series: pp·Σ_k dλ_pm,k/dθ_e·i_k (phases b, c
             # at θ_e ∓ 2π/3), plus the same reluctance term.
             t_em = 1.5 * pp * (L_d - L_q) * i_d * i_q

@@ -189,6 +189,69 @@ inline Real refresh_induction_entry_(
     return max_i;
 }
 
+/// Flux-map PMSM entry (group 4): the constant-L stamp's rows with
+/// λ = T⁻¹·∇W' (`PmsmMna::flux_map_state`): ∂R_k/∂i_j = −R δ_kj − d·∂λ_k/∂i_j,
+/// ∂R_k/∂θ_m = −d·pp·∂λ_k/∂θ_e; torque and θ couplings as the constant-L ones.
+inline Real refresh_flux_map_entry_(
+    const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
+    const PmsmMnaHistory::Entry& e, Real d_coef, bool bdf2, bool be,
+    Real h) {
+    const auto& p = e.params;
+    const auto kc = trbdf2_coeffs();
+    const Real theta_e = PmsmMnaHistory::theta_e_of(e, x);
+    std::array<Real, 3> i{}, v{};
+    const Real v_n = stamping::read_node_voltage(x, e.neutral);
+    for (Size k = 0; k < 3; ++k) {
+        i[k] = x[e.cur_row[k]];
+        v[k] = stamping::read_node_voltage(x, e.phase_node[k]) - v_n;
+    }
+    const auto st = models::PmsmMna::flux_map_state(p, theta_e, i);
+    const auto dlam = PmsmMnaHistory::delta_lambda(e, x);
+    const bool n_act = stamping::node_is_active(e.neutral);
+    const bool th_act = stamping::node_is_active(e.theta_node);
+    const bool om_act = stamping::node_is_active(e.omega_node);
+    Real max_i = Real{0};
+    for (Size k = 0; k < 3; ++k) {
+        const Real R_row = flux_row_(v[k] - p.R_s * i[k], dlam[k], e, k,
+                                     d_coef, bdf2, be, h, kc);
+        const Index row = e.cur_row[k];
+        const bool ph_act = stamping::node_is_active(e.phase_node[k]);
+        f_nl[row] += R_row;
+        if (ph_act) J_nl.coeffRef(row, e.phase_node[k]) += Real{1};
+        if (n_act)  J_nl.coeffRef(row, e.neutral) -= Real{1};
+        for (Size j = 0; j < 3; ++j) {
+            Real d = -d_coef * st.dlam_di[k][j];
+            if (j == k) d -= p.R_s;
+            J_nl.coeffRef(row, e.cur_row[j]) += d;
+        }
+        if (th_act) {
+            J_nl.coeffRef(row, e.theta_node) += -d_coef * p.pole_pairs * st.dlam_dth[k];
+        }
+        if (ph_act) {
+            f_nl[e.phase_node[k]] += i[k];
+            J_nl.coeffRef(e.phase_node[k], row) += Real{1};
+        }
+        if (n_act) {
+            f_nl[e.neutral] -= i[k];
+            J_nl.coeffRef(e.neutral, row) -= Real{1};
+        }
+        max_i = std::max(max_i, std::abs(i[k]));
+    }
+    if (om_act) {
+        f_nl[e.omega_node] -= (st.T - p.T_load);
+        for (Size j = 0; j < 3; ++j) {
+            J_nl.coeffRef(e.omega_node, e.cur_row[j]) -= st.dT_di[j];
+        }
+        if (th_act) J_nl.coeffRef(e.omega_node, e.theta_node) -= st.dT_dtheta_m;
+    }
+    if (th_act && om_act) {
+        const Real omega = stamping::read_node_voltage(x, e.omega_node);
+        f_nl[e.theta_node] -= e.c_theta * omega;
+        J_nl.coeffRef(e.theta_node, e.omega_node) -= e.c_theta;
+    }
+    return max_i;
+}
+
 }  // namespace detail
 
 /// Stamp every MNA-native PMSM. Returns the largest |i_phase|
@@ -215,6 +278,11 @@ inline Real refresh_pmsm_mna(
     for (const auto& e : history.entries()) {
         if (e.induction) {
             max_i = std::max(max_i, detail::refresh_induction_entry_(
+                                        x, J_nl, f_nl, e, d_coef, bdf2, be, h));
+            continue;
+        }
+        if (e.params.flux_map) {
+            max_i = std::max(max_i, detail::refresh_flux_map_entry_(
                                         x, J_nl, f_nl, e, d_coef, bdf2, be, h));
             continue;
         }

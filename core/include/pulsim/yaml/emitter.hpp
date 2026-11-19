@@ -330,6 +330,12 @@ namespace yaml_detail {
                 e.add("omega", node(pm->omega_node)).add("theta", node(pm->theta_node));
                 if (pm->omega0 != Real{0}) e.add("omega0", num(pm->omega0));
                 if (pm->theta0 != Real{0}) e.add("theta0", num(pm->theta0));
+                if (pm->params.flux_map) {
+                    throw std::invalid_argument(std::format(
+                        "yaml::emit: PMSM '{}' has a flux map, which has no YAML "
+                        "form yet; emitting it would drop the saturation",
+                        g.branch_name(ids[0])));
+                }
                 if (const auto& hs = pm->params.harmonics) {
                     std::vector<Real> flat;  // h, psi, phi per term
                     for (const auto& t : *hs) flat.insert(flat.end(), {t.h, t.psi, t.phi});

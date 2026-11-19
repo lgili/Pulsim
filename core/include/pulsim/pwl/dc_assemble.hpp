@@ -263,6 +263,16 @@ inline void stamp_machines_dc(const topology::Graph& graph,
         const auto& p = m.params;
         const Real th_e = p.pole_pairs * m.theta0;
         const Real w_e = p.pole_pairs * m.omega0;
+        if (p.flux_map && w_e != Real{0}) {
+            // v = R·i + ω_e·∂λ/∂θ_e(i) is nonlinear in i with a map; the DC
+            // point here is linear (no Newton). At ω0 = 0 it is v = R·i.
+            throw std::invalid_argument(std::format(
+                "DC operating point: the flux-map PMSM '{}' is held at "
+                "omega0 = {} rad/s; its held-mechanics DC point is only "
+                "available at omega0 = 0 (the stator law is nonlinear in i "
+                "when spinning). Start from zero state instead.",
+                graph.branch_name(m.branch_id[0]), m.omega0));
+        }
         const auto ind = models::PmsmMna::inductance(p, th_e);
         const auto lp1 = models::PmsmMna::lambda_pm(p, th_e, 1);
         std::array<Real, 3> emf{};
