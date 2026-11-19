@@ -15,42 +15,51 @@ unchanged.
   - Done (2026-11-19, merged f220a1da, before Stage A): `simulate()` 1846 lines (306 of them the docstring), 50 parameters; `raise ValueError` 560 in `python/pulsim` (ratchet 562), broad handlers 90 (13 in `__init__.py`; ratchet 90), `warnings.warn(` 65 (21 in `__init__.py`). Fixed overhead, information only (never asserted): bytecodes per call (`.scratch/opcount.py`, 2-switch buck) pwl 2480, trbdf2 3317; best of 300 wall, RC, 2 steps: pwl 34.4 us, trbdf2 194 us. The suite's warning set: 414 warnings recorded per test as (test, category, message, file; line when outside pulsim) by a pytest plugin (`pytest_warning_recorded`), compared after every Stage A group.
 
 ## 1. Stage A — tests first
-- [ ] 1.1 `test_plan_resolves_every_kwarg`: `set(plan.resolved_from) == set(signature(simulate).parameters) − {"builder"}` (xfail until 2.x lands)
+- [x] 1.1 `test_plan_resolves_every_kwarg`: `set(plan.resolved_from) == set(signature(simulate).parameters) − {"builder"}` (xfail until 2.x lands)
   - Stands in: `test_the_table_covers_every_simulate_parameter` (every keyword is a row of the kernel's option table; the options are resolved by the kernel, DECISIONS 6). Open: a Python `plan.resolved_from`, if Stage A is built.
-- [ ] 1.2 `test_engine_branches_read_only_the_plan`: `ast` check on `_run_pwl`, `_run_trbdf2`, `_run_dsed` (xfail until 7)
+  - Done (2026-11-19): `python/tests/test_run_plan.py`; passes since group 2 (also the `solver=` / YAML marks).
+- [x] 1.2 `test_engine_branches_read_only_the_plan`: `ast` check on `_run_pwl`, `_run_trbdf2`, `_run_dsed` (xfail until 7)
+  - Done: `test_run_plan.py` (one argument `plan`; free names are module globals or builtins; never `_KERNEL_RUN` / `_PWL_RECIPE`); passes since group 7, with `test_simulate_is_plan_table_finalize`.
 - [x] 1.3 Ratchets: `raise ValueError` and broad-handler counts in `python/pulsim` may not rise; no broad handler without re-raise around a kernel call on the `simulate()` call path (one level deep)
   - Done: the two count ratchets (`test_simulation_object.py`; broad handlers 89 -> 86); `test_simulate_swallows_no_kernel_error` (no broad handler in `simulate()`'s own body swallows, except the post-run voltage-sanity check; three narrowed to `AttributeError`). One level down: `test_helpers_one_level_down_swallow_no_kernel_error` (`test_run_plan.py`): the helpers that `simulate()`'s body calls may not add a swallowing broad handler; today's five are listed by name (census of test doubles, a bundle's `attach_to_result`, the post-run voltage check), shrink-only.
 - [x] 1.4 `test_cross_cutting_on_every_engine`: builder ICs, `resume_from` validation, preflight ties, undriven-switch behaviour and voltage sanity asserted per engine against today's behaviour
   - Done: `python/tests/test_cross_cutting_on_every_engine.py` (15 cases, pwl / trbdf2 / exact; also green on 656b894f).
 
 ## 2. Stage A — plan the options
-- [ ] 2.1 `python/pulsim/_plan.py`: `RunPlan` (frozen), `NewtonOptions`, `EventOptions`, `FixedStep` / `VariableStep` / `ExactStep`, `Diagnostic`
-- [ ] 2.2 Move `LoadedCircuit` resolution, the `solver=` merge and keyword validation (`__init__.py:1815-1900`) into `_plan_run`; fill `resolved_from`
-- [ ] 2.3 Oracle: goldens bit-identical; warning set unchanged; 1.1 passes
+- [x] 2.1 `python/pulsim/_plan.py`: `RunPlan` (frozen), `NewtonOptions`, `EventOptions`, `FixedStep` / `VariableStep` / `ExactStep`, `Diagnostic`
+  - Done: named `SimPlan` (`pulsim.RunPlan` is the public circuit record; DECISIONS 23), with `Initial`, `Drive`, `RunOutcome`.
+- [x] 2.2 Move `LoadedCircuit` resolution, the `solver=` merge and keyword validation (`__init__.py:2575-2768` at f220a1da; now the head of `_plan_run`, `__init__.py:3038-3249`) into `_plan_run`; fill `resolved_from`
+- [x] 2.3 Oracle: goldens bit-identical; warning set unchanged; 1.1 passes
 
 ## 3. Stage A — plan the state
-- [ ] 3.1 Preflight in `_plan_run` returning `plan.ties`; `_apply_ties(plan)` is the single mutation site
-- [ ] 3.2 `resume_from` validation and the initial condition (`__init__.py:1956-1988`) → `plan.initial`
-- [ ] 3.3 Oracle: `test_initial_conditions_across_engines.py`, `test_snapshot_resume*.py`; goldens
+- [x] 3.1 Preflight in `_plan_run` returning `plan.ties`; `_apply_ties(plan)` is the single mutation site
+  - Done: `_apply_ties(builder, run_circuit, kernel_run, ties)` (`__init__.py:2187`); the ties are on `plan.circuit_plan` (`pulsim.RunPlan`).
+- [x] 3.2 `resume_from` validation and the initial condition (`__init__.py:2769-2871` at f220a1da; now `:3287-3344`) → `plan.initial`
+- [x] 3.3 Oracle: `test_initial_conditions_across_engines.py`, `test_snapshot_resume*.py`; goldens
 
 ## 4. Stage A — plan the route
-- [ ] 4.1 `_trbdf2_blockers`, `_dsed_unsupported` and the `auto` rule → one `_route(plan_inputs)` that consults the conformance table; `plan.engine`, `plan.route_reasons`, `plan.features`
-- [ ] 4.2 Oracle: `test_engine_auto.py`, `test_engine_default_routing.py`, `test_engine_auto_closed_loop.py`; matrix unchanged
+- [x] 4.1 `_trbdf2_blockers`, `_dsed_unsupported` and the `auto` rule → one `_route(plan_inputs)` that consults the conformance table; `plan.engine`, `plan.route_reasons`, `plan.features`
+  - Done: `_route` (`__init__.py:2792`, called at `:3386`).
+- [x] 4.2 Oracle: `test_engine_auto.py`, `test_engine_default_routing.py`, `test_engine_auto_closed_loop.py`; matrix unchanged
 
 ## 5. Stage A — plan the drive
-- [ ] 5.1 One `_compose(plan_inputs)` for closed loops, observers, user `switch_fn`, `b_extra_fn` (the single function of `fix-control-tick-semantics`, or `__init__.py:2215-2283` and `:2420-2455` if it has not landed); gate drives composed by switch index
-- [ ] 5.2 One `_undriven(plan_inputs)` keeping today's per-engine behaviour (`:2304`, `:2664-2673`, `_dsed_dispatch.py:617-630`)
-- [ ] 5.3 Oracle: `test_closed_loops_compose_switch_fn.py`, `test_closed_loop_helper.py`, the tests of `fix-control-tick-semantics`; goldens
+- [x] 5.1 One `_compose(plan_inputs)` for closed loops, observers, user `switch_fn`, `b_extra_fn` (the single function of `fix-control-tick-semantics`, or `__init__.py:2215-2283` and `:2420-2455` if it has not landed); gate drives composed by switch index
+  - Done: `_compose` (`__init__.py:2693`) and `_compose_for(engine, ...)` (`:2716`).
+- [x] 5.2 One `_undriven(plan_inputs)` keeping today's per-engine behaviour (now `__init__.py:2631`, called at `:3467` (trbdf2), `:3892` (pwl), `_dsed_dispatch.py:698`)
+  - Done: positions still differ per engine (DECISIONS 23, item 1).
+- [x] 5.3 Oracle: `test_closed_loops_compose_switch_fn.py`, `test_closed_loop_helper.py`, the tests of `fix-control-tick-semantics`; goldens
 
 ## 6. Stage A — finalize once
-- [ ] 6.1 `_finalize(result, plan)`: handles, `engine_used`, `engine_route_reason`, stats warnings, voltage sanity, for every engine
+- [x] 6.1 `_finalize(result, plan)`: handles, `engine_used`, `engine_route_reason`, stats warnings, voltage sanity, for every engine
 - [ ] 6.2 Separate PR: voltage sanity on `dsed` (**BREAKING**: a new warning); CHANGELOG note
 - [ ] 6.3 Oracle: goldens; warning set unchanged in 6.1, plus the documented new warning in 6.2
+  - Done for 6.1 (`_finalize(out, plan)`, `__init__.py:4090`): goldens identical, warning set 414 = 414. Open: 6.2 (for the release; DECISIONS 23).
 
 ## 7. Stage A — dispatch table
-- [ ] 7.1 `_run_dsed(plan)`, `_run_trbdf2(plan)`, `_run_pwl(plan)`; `simulate()` = plan → table → finalize
+- [x] 7.1 `_run_dsed(plan)`, `_run_trbdf2(plan)`, `_run_pwl(plan)`; `simulate()` = plan → table → finalize
 - [ ] 7.2 Oracle: 1.2 passes; goldens bit-identical; fixed overhead not above 0.2
-- [ ] 7.3 Docs: `docs/internals` page "how a run is planned"; update the owner note's rule in `AI_GUIDE.md` ("put it in the plan")
+  - Done: 1.2 passes; goldens bit-identical. Open: the overhead clause (pwl 2480 -> 3538 bytecodes per call, 34.4 -> 49.1 us; DECISIONS 23).
+- [x] 7.3 Docs: `docs/internals` page "how a run is planned"; update the owner note's rule in `AI_GUIDE.md` ("put it in the plan")
 
 ## 8. Stage B — typed errors and diagnostics in Python
 - [ ] 8.1 `python/pulsim/errors.py`: `PulsimError`, `NetlistError`, `OptionsError`, `ConvergenceError`, `SingularError`; the Phase 0 `UnsupportedError`, `SimulationAborted`, `Cancelled` and `NameNotFoundError` re-based under `PulsimError`; exported from `pulsim`

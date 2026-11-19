@@ -295,3 +295,111 @@
     broad-handler scan; (d) Stage A 2-7 only if the owner still wants a
     Python plan (DECISIONS 6: the kernel resolves options; the route,
     compose and finalize still live in simulate()).
+
+23. **Stage A built (tasks 1-7): plan -> engine table -> finalize.** DECISIONS 6
+    said Stage A would not be built; the owner asked for it on 2026-11-19, as a
+    Python-only refactor with an absolute invariant (results, warnings,
+    refusals and result attributes unchanged). `simulate()` is now
+    `plan = _plan_run(**locals())` and `_finalize(_ENGINES[plan.engine](plan),
+    plan)`; the pieces, in `__init__.py`: `_plan_run` (keywords, `solver=`,
+    `LoadedCircuit`, validation, preflight via `_apply_ties`, `resume_from`,
+    the initial state, `_compose`, the sensitivity refusals, `_route`,
+    `_compose_for`, the engine's kernel options), the runners `_run_pwl` /
+    `_run_trbdf2` / `_run_dsed` (they read only `plan`), `_finalize(out,
+    plan)`; the dataclasses in `python/pulsim/_plan.py`.
+    - **Name.** The plan class is `SimPlan`, not D1's `RunPlan`: `pulsim.RunPlan`
+      is public (the circuit record `result.plan` carries) and is not renamed;
+      the plan holds it as `circuit_plan`.
+    - **`_finalize(out, plan)`, not `(result, plan)`.** The pwl run composes
+      part of its drive at run time (below), so a runner returns a
+      `RunOutcome` (result + the drive as finally composed + the kernel
+      object's builder).
+    - **Warnings keep their location.** Every `warnings.warn` that moved one
+      frame deeper got `stacklevel + 1` (each helper is called from one
+      depth only), so a warning still names the caller's line, and Python's
+      once-per-location filter counts the same warnings. Oracle: a pytest
+      plugin records (test, category, message, file, line outside pulsim)
+      for the whole suite; identical to the base after every group. Two
+      tests call `_trbdf2_warn_stats` directly: their warnings now point one
+      pytest frame deeper (inside pytest either way).
+    - **The plan is frozen, not pure.** It holds mutable objects (builder,
+      control plan, the user's callables), and planning keeps today's side
+      effects in today's order: `_apply_ties` regularises a builder stand-in
+      in place (test doubles); pwl's `for_fixed_step` sets the control
+      graphs' solver dt / horizon. Purity comes with
+      `add-immutable-circuit-ir` / Stage B.
+    - **Position-dependent blocks found (kept per engine, bit for bit; for the
+      number-changing release):**
+      1. *No `switch_fn` (`_undriven`, one function).* trbdf2 decides while
+         planning (all open, silent). pwl decides in the run AFTER the cache
+         hooks: the `on_cache` hook (user code), the MMC driver and the
+         `Simulation` constructor can raise or warn before the
+         "ALL CLOSED" warning. dsed decides inside `run_dsed_from_builder`
+         after `_require_supported`, the tick refusals and the cache build.
+         Lifting either into the plan would reorder that warning against
+         those refusals. (Open question 1 / task 11.3 decides the policy.)
+      2. *`mmc_arms` / `on_cache` (pwl).* Their composition needs the run's
+         own cache (the `Simulation` object's), so it stays in `_run_pwl`;
+         `plan.drive` holds the drive before them, `RunOutcome` after.
+      3. *`progress` and `live_stream` (pwl).* Wired in the run after (1):
+         `live_stream.attach()` is a side effect on the caller's object and
+         can supply `should_continue`.
+      4. *`resume_from` continues time on pwl / trbdf2 only.* It sat after
+         the dsed return; dsed refuses `resume_from` earlier, so the planner
+         guards it with `engine != "dsed"` (same behaviour, now explicit).
+      5. *`mode_selection='auto'`.* pwl / trbdf2: resolved by `_route` (a
+         warning for `max_event_iterations=0`, ordered before the integrator
+         and table refusals, so `_route` keeps it inside). dsed: resolved in
+         the dispatcher, except with `sensitivities` (planned).
+      6. *`on_impulse='error'`.* pwl's kernel refuses at the event; dsed
+         refuses in `_finalize` after the run; trbdf2 never records.
+      7. *Option value checks.* `store_every < 1`, `max_event_iterations < 0`,
+         `max_dt_halvings < 0` and the six `mmc_arms` combinations are
+         checked in Python for pwl only (the table / kernel refuse them on
+         the other engines).
+      8. *`sweep()`'s recipe.* `_PWL_RECIPE` is now read once while planning
+         (`plan.recipe`) instead of again in the run; equal unless a hook
+         sets that context variable mid-call.
+    - **6.2 left open.** `_finalize` already runs `_auto_check_voltage_sanity`
+      on dsed results today (the arrays path); what differs is pwl's own
+      inline check (`find_implausible_voltage` on the result, one broad
+      handler). Unifying them changes warnings: for the release.
+    - **Not done:** `plan.undriven` (D1's tuple of undriven switches; (1)
+      decides it in the run), C++ `Simulation` for the exact engine (16).
+    - **Fresh-context review (one reviewer, read-only, diff from f220a1da).**
+      No engine sees a different option value, initial state, drive or
+      refusal, or a different order. Fixed: `plan.features` listed
+      `recorders` (never reachable: `recorders=` runs through
+      `simulate_with_recorders` first) and raised `KeyError` on a plan built
+      without `resolved_from`. Left, recorded:
+      1. With `sensitivities=` (dsed), the near-miss warning of
+         `sensitivity._compute` (`stacklevel=3`, public module, not moved)
+         now names `_run_dsed`'s line instead of `simulate`'s. Both are in
+         `__init__.py`, one call site each, so the user's view and the
+         once-per-location count are unchanged. A warning the C++ engine
+         raises during a run is likewise attributed to the runner's line.
+      2. `_warn_newton_roundoff` via `_trbdf2_warn_stats` names `simulate`'s
+         frame, not the user's (as before: an existing off-by-one, kept).
+      3. `resolved_from` reads `explicit` for an inert value that is not
+         the default (`progress=None`, `closed_loops=[]`), and the
+         `yaml` / `solver` marks compare by identity (a YAML `t_start: 0.0`
+         reads `yaml`). Metadata only; no engine reads it.
+    - **Overhead (information; task 7.2 asks "not above 0.2").** Bytecodes
+      per call (`.scratch/opcount.py`, 2-switch buck): pwl 2480 -> 3538,
+      trbdf2 3317 -> 4351; ~670 of that is the frozen dataclasses'
+      `__init__`. Best of 300, RC, 2 steps: pwl 34.4 -> 49.1 us, trbdf2
+      194 -> 210 us. 7.2 stays open on that clause.
+
+24. **Hand-off (2026-11-19, Stage A).** Built: tasks 2, 3, 4, 5, 6.1, 7 (one
+    commit or more per group on `feat/core-p3-simulation-object`, each a
+    pure move named in its message). Oracles after every group against the
+    f220a1da base: full pytest (5705 -> 5710 passed, the new tests), the
+    suite's warning set (414 = 414, per test, category, message, file, user
+    line), golden / stateful / engines / options / hooks byte compares,
+    `pwl_identity` 390/390, `trbdf2_identity` 371/371, `-m reference` 382,
+    `reference_status` (file unchanged), examples 137, ruff, openspec,
+    stubs. Open, for the number-changing release: 6.2 (one voltage check),
+    11.3 (one undriven policy: item 1 of 23), the per-engine blocks 2-8
+    of 23, `plan.undriven`, 7.2's overhead clause. `simulate()` is 375
+    lines (306 docstring, 69 code; was 1846). Not run: `ctest` (no C++
+    changed), mkdocs build.
