@@ -2260,7 +2260,8 @@ private:
 
     /// The significance bound of a diode signal read at (t, x) on a trajectory
     /// whose recovery scale is s0 and whose signal scale is v0:
-    ///   γ_n·(max(S(x), s0) + |V|) + e·(max(|v(x)|, v0, Σ|c_j||x_j|, F) + |V|),
+    ///   γ_n·(max(S(x), s0) + |V|) + 2u·D + e·(max(|v(x)|, v0, Σ|c_j||x_j|, F) + |V|),
+    /// D = node_pair_data_scale (the assembled conductances' rounding),
     /// γ_n = n·u the inner-product rounding of the recovery over its n terms
     /// (S = node_pair_voltage_scale), e the propagator's own stated relative
     /// error (exact_step_error) applied to the signal's magnitude along the
@@ -2283,7 +2284,14 @@ private:
                 Real sx = signal_scale_(d, t, x);
                 if constexpr (requires { system_.node_pair_state_scale(d.from, d.to, t, x); })
                     sx = system_.node_pair_state_scale(d.from, d.to, t, x);
-                return gn * (std::max(signal_scale_(d, t, x), s0) + V)
+                // the assembled data's rounding: u per diagonal sum, once (not
+                // γ_n: it is not summed over the row's terms); 2u, measured margins
+                // 10x on full_bridge_dc (1.06e-15 V) and 2x below a real −1e-13 V
+                // reverse current on a floating bridge's bus (bit_identity bridge1)
+                Real data = Real{0};
+                if constexpr (requires { system_.node_pair_data_scale(d.from, d.to, t, x); })
+                    data = Real{2} * u * system_.node_pair_data_scale(d.from, d.to, t, x);
+                return gn * (std::max(signal_scale_(d, t, x), s0) + V) + data
                        + e * (std::max({v, v0, sx,
                                         system_.node_pair_voltage_forced(d.from, d.to)}) + V);
             }

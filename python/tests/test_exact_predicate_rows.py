@@ -48,10 +48,8 @@ def test_an_on_diode_row_is_the_size_of_its_current():
         v_old = ad.node_pair_voltage(fr, -1, 1e-3, x) - ad.node_pair_voltage(to, -1, 1e-3, x)
         # the same quantity, within the old reading's own rounding bound
         assert abs(v_row - v_old) <= n * u * s_old
-        # the row's terms: an ON diode's voltage is its current over g_on, plus the
-        # data term (the two node voltages: the assembled conductances' rounding)
-        data = abs(ad.node_pair_voltage(fr, -1, 1e-3, x)) + abs(ad.node_pair_voltage(to, -1, 1e-3, x))
-        assert s_row - data < 1e-3 * s_old
+        # the row's terms: an ON diode's voltage is its current over g_on
+        assert s_row < 1e-3 * s_old
         assert s_row >= abs(v_row)
 
 
@@ -85,7 +83,10 @@ def test_a_pair_row_bound_covers_the_assembled_conductances():
     v = ad.node_pair_voltage(ix["load_n"], ix["vcc"], 0.0, x)
     s, n, _, _ = ad._node_pair_bound_terms(ix["load_n"], ix["vcc"], 0.0, x)
     u = np.finfo(float).eps / 2
-    assert abs(v - exact) <= n * u * s
+    # the row's own terms do not cover it; the data term 2u(|v_f| + |v_t|) does
+    assert abs(v - exact) > n * u * s
+    data = abs(ad.node_pair_voltage(ix["load_n"], -1, 0.0, x)) + abs(ad.node_pair_voltage(ix["vcc"], -1, 0.0, x))
+    assert abs(v - exact) <= n * u * s + 2 * u * data
 
 
 def test_full_bridge_dc_turns_both_freewheel_diodes_off_at_the_zero():

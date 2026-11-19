@@ -326,18 +326,7 @@ public:
         if (const auto* pr = pair_row_(e, from, to)) {   // the row's own terms (D4)
             Real v = pr->pad_c.dot(x.cwiseAbs()) + pr->pad_k;
             if (b_extra) v += pr->pad_d.dot(b_extra->cwiseAbs());
-            // the data term: the row is exact for the ASSEMBLED conductances,
-            // which carry a relative rounding u (a node's stamps summed,
-            // 400 + 2e-6 S); the signal's first-order response is |d|ᵀ|G||x|,
-            // the two nodes' voltage scale for nodes tied by their own
-            // conductances. full_bridge_dc: the row read −1.06e-15 V at a true
-            // 0 (u·(24 + 24) = 5.3e-15 V) and decided D3's mode on it.
-            const auto node_v = [&](Index n) {
-                Real w = e.recover_from_state.row(n).dot(x) + e.recover_const[n];
-                if (b_extra) w += e.recover_from_b.row(n).dot(*b_extra);
-                return std::abs(w);
-            };
-            return v + node_v(from) + node_v(to);
+            return v;
         }
         auto node_s = [&](Index n) -> Real {
             if (n < 0) return Real{0};
@@ -347,6 +336,31 @@ public:
             return v;
         };
         return node_s(from) + node_s(to);
+    }
+
+    /// |v(from)| + |v(to)|, 0 for a node against ground or a mode without a
+    /// dedicated row: the data term of a pair row. The row is exact for the
+    /// ASSEMBLED conductances, whose diagonal sums carry a relative rounding u
+    /// (400 + 2e-6 S); the signal's first-order response |d|ᵀ|G||v| is the
+    /// two nodes' voltage scale for nodes tied by their own conductances
+    /// (full_bridge_dc: the row read −1.06e-15 V at a true 0, u·(24 + 24) =
+    /// 5.3e-15 V). A node row against ground has it inside its own terms.
+    /// shortcut: |v_f| + |v_t| stands for |d|ᵀ|G||v| (a node near 0 V between
+    /// two large opposite ones is under-covered); build w = |d|ᵀ|G| per row
+    /// from assemble_segment_split if a case needs it.
+    [[nodiscard]] Real node_pair_data_scale(Index from, Index to, Real t,
+                                            const Vector& x) const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        if (!pair_row_(e, from, to)) return Real{0};
+        const Vector* b_extra =
+            has_dynamic_sources_ ? &build_time_varying_b_extra_(t, Real{0}) : nullptr;
+        const auto node_v = [&](Index n) {
+            Real w = e.recover_from_state.row(n).dot(x) + e.recover_const[n];
+            if (b_extra) w += e.recover_from_b.row(n).dot(*b_extra);
+            return std::abs(w);
+        };
+        return node_v(from) + node_v(to);
     }
 
     /// Σ_j |c_j||x_j|: the state part of node_pair_voltage in absolute value,

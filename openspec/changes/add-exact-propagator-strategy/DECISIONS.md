@@ -561,3 +561,41 @@ Full pytest, `pytest -m reference`, reference_status, goldens / bit-identity, ds
 3. PSFB all: the scan curvature bound (above).
 4. NEW item from the orchestrator (periodic-steady-state track, DECISIONS 22 of add-periodic-steady-state-shooting on origin/feat/core-p4-optimisation 039878a7; reproducer /Users/lgili/pulsim_wt/p4-pss/.scratch/p6/sens_run.py): boost-DCM orbit, dt_max = T/50 takes the wrong branch at the diode's own turn-off in 18/25 runs within ±3e-10 V of the orbit (0/25 at dt_max = T): the decision depends on the step ceiling (parasitic cut 1/(1e-6·dt_max), settle cap, ladder cap min(dt_max, ½·next event)). Bar: 0 wrong-branch runs at T/50, T/10, T. Truth: 36.594400837798 V, diode off at t/T = 0.743942. Before the ideal diode.
 5. Ideal diode (slice 7): with dedicated rows the ideal diode's predicate is the same row with g_off → 0 — the plan did not need to change beyond reading the row; not started.
+
+## Session 19 (exact engine 18): full_bridge_dc fixed; the WIP has two more regressions — bar NOT met (2026-11-19)
+
+### full_bridge_dc (the regression of session 18) — cause and fix
+- The events at 14.8965 us are NOT gate events: two DiodeOff events 1.8e-18 s apart (not ps). Truth (`truth/full_bridge_dc.json`): D3 and D4 carry the same current and turn OFF TOGETHER at 14.8964700582364510 us (cause "D3 root").
+- Cause: D3's dedicated row (load_n − vcc, the Q3‖D3 node against the 24 V rail) read −1.06e-15 V at a true 0 (fractions: −24·2e-6/(400 + 2e-6)); the row is exact for the ASSEMBLED conductances (diagonal 400 + 2e-6 S, rounded), its bound covered only its own terms (S 2.4e-7 V, γ_n·S 3e-22 V). D3's row crossed 1.8e-18 s early; at D4's (accurate, node-to-ground) root the OFF-mode ladder called +1.27e-15 V significant at its first rung and kept D3 ON; its ON row then started on its event side (no event) and broke the law 0.2 us later.
+- Fix: a data term 2u·(|v_f| + |v_t|) in `signal_bound_` (`node_pair_data_scale`, pair rows only; node rows against ground carry it in S). First version put it inside S (×γ_n): that made a floating bridge's D2 (bit_identity bridge1_vf07) stay ON at −1e-10 A (−1e-13 V, γ_n·198 V = 1.5e-13 V) for 31 ms (bus common mode off by 0.2 V). Outside γ_n at 2u: margins 10× (full_bridge) and 2× (bridge1). shortcut: |v_f| + |v_t| stands for |d|ᵀ|G||v| (reviewer #2: under-covers a node near 0 V between large opposite ones); the rigorous form is w = |d|ᵀ|G| per row from `assemble_segment_split`.
+- Twelve banks FAILED on the WIP tip itself (A/B build of 7c4a86eb: Dt0a ON −0.118 A at 0.1 ms): review s18 #1 put S into the e-term; S's pads carry err_j/u (S 1.3e6 V, e 9e-11 → B 1.2e-4 V). The e-term now reads `node_pair_state_scale` = Σ|c_j||x_j|. 12 banks to 2 ms run on both selections (2268 samples); 20 ms not re-run on the final build.
+- Review s16 #5 (s18 #7): the drift branch tests and offsets with ONE bound, max(B(ta), B(tb)).
+- Tests: `test_exact_predicate_rows.py` (row bound on the assembled data; full_bridge_dc both OFF, event within 1e-15 s of the truth).
+
+### Measured on 3dc4dcda (data term inside S) unless noted
+| item | result |
+|---|---|
+| C++ dsed / layer4_v3 / mode, Eigen 5 + 3.4.0 | 133 / 29 / 35 pass both |
+| full pytest | 2 failed, 5541 passed, 107 skipped, 8 xfailed — both failures ALSO on the WIP tip 7c4a86eb (A/B build): `test_double_crossing_inside_one_step_is_seen` (D ON −6.96 mA at 2.8877 us: the turn-off at 1.8877 us kept D ON) and `test_inductor_cut_set_runs_and_agrees_with_pwl` (Dtb ON −2.06 A at 15.9 ms); still failing on the final build |
+| pytest -m reference / reference_status / ruff / openspec | 382 passed / exit 0 / clean / 78 passed |
+| pwl + trbdf2 goldens and bit-identity vs golden_pr / bitid_pr.npz (final build) | BYTE-IDENTICAL |
+| golden compare | ONE difference: syncbuck_dsed states max 2.665e-14 (counters unmoved) |
+| dsed bit-identity (final build) | 11 of 12 dsed arrays move (buck_dcm/t identical): boost t 2e-17 / x 6.8e-12; buck_ccm t 5e-20 / x 2.3e-14; buck_dcm x 3.6e-15; bridge3_vf07 t 3.7e-15 / x 1.5e-10; bridge3 40024 → 40010 samples (interp 6.5e-10 of 8.7e4); bridge1_vf07 40010 → 40008 samples, interp 0.177 V at 35.37 ms on 76 of 4e5 grid points (a local edge-time shift; with the data term inside S it was a 31 ms common-mode change, 9566 points) |
+| scoreboard full_bridge_dc | 4.56e-17 (2b1d808e 4.73e-17) |
+| reviewer #5 (pad after T) | derived, not crude: T is 0/1, an entry after T sums ≤ k rows (k = T's largest row count), so k × the column's max error bounds it; the column error is the last refinement correction (an estimate when contracting, not a proof) |
+| reviewer #8 (IC projection 1 ulp) | no test in the full pytest sees it (no failure names it) |
+
+### Review (fresh context, opus medium) of 2b1d808e..3dc4dcda — open, ranked
+1. A predicate that starts significantly on its event side is never an event (locator `continue` after a −s ladder, the last-fired skip skips the whole step); only the opt-in guard or the end-of-run law check catch it. Likely the mechanism of both pytest failures (not confirmed). Fix: a zero-length decision event at t0 / skip only the zero rung for the last fired.
+2. The data term is a proxy (above); node-to-ground rows of a g_on cluster held by g_off are not covered.
+3. The e-term mixes componentwise Σ|c||x| with a normwise e (exact_step_error = u·κ₂(V)): ‖c‖₁‖x‖∞ is the safe form.
+4. The bound reads the right limit, the law check the left limit at a source corner.
+5. The drift root can land inside B(t_root); re-check after locating.
+6. `_node_pair_bound_terms` returns neither the data nor the state scale.
+
+### Not run on the final build
+dsedall, the full scoreboard, banks 1/9/10/12 (20 ms) on both selections, ten-bank fuzz, engine fuzz, the three truths, closed loops, cost before/after; C++ targets and full pytest were on 3dc4dcda. Items 5a/5b/5c not started.
+
+### Hand-off (session 19)
+1. Fix the two pytest regressions of the rows (both on 7c4a86eb): trace the turn-off at 1.8877 us of `test_double_crossing_inside_one_step_is_seen` (D, pair t–k, a dedicated row) — review #1 first.
+2. Then review #3 (‖c‖₁‖x‖∞) and the whole bar (scripts as session 18), cost via `.scratch/s21/cost.py` with a 2b1d808e .so.
