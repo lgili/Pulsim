@@ -91,8 +91,11 @@ def test_max_event_iterations_zero_warns():
 
 
 def test_trbdf2_falls_back_to_the_settle():
-    with pytest.raises(UnsupportedError):
-        p.simulate(_rect(), t_end=1e-4, engine="trbdf2", mode_selection="lcp")
+    # explicit 'lcp' / 'shadow' run on trbdf2; only 'auto' has no rule there
+    rl = p.simulate(_rect(), t_end=1e-4, engine="trbdf2", mode_selection="lcp")
+    assert rl.diagnostics["mode_selection"]["lcp_count"] > 0
+    rs = p.simulate(_rect(), t_end=1e-4, engine="trbdf2", mode_selection="shadow")
+    assert rs.diagnostics["mode_shadow"]["lcp_count"] > 0
     ra = p.simulate(_rect(), t_end=1e-4, engine="trbdf2", mode_selection="auto")
     assert _auto(ra) == {"requested": "auto", "chosen": "legacy",
                          "reason": "engine 'trbdf2' (no 'auto' rule there yet)"}

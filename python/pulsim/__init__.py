@@ -2517,8 +2517,9 @@ def simulate(
         disagreements in ``result.diagnostics['mode_shadow']``.
         ``'auto'``: ``'lcp'`` wherever it applies, the legacy settle where
         ``'lcp'`` would refuse (no PWL diode, a gated device, a Newton
-        device, ``engine='trbdf2'`` (no 'auto' rule there yet), ``sensitivities=``,
-        ``max_event_iterations=0``); the choice and its reason in
+        device, ``sensitivities=``, ``max_event_iterations=0``) and on
+        ``engine='trbdf2'``, where an explicit ``'lcp'`` runs but there
+        is no 'auto' rule yet; the choice and its reason in
         ``result.diagnostics['mode_selection_auto']``, with a warning for
         ``max_event_iterations=0`` only. A failure of the LCP during
         the run is not caught (it raises as under ``'lcp'``).
