@@ -144,8 +144,7 @@ TEST_CASE("static laws equal the hand AD stamp", "[device][laws]") {
     sd.BV = 5.0;
     check_static<L::ShockleyDiode, models::ShockleyDiode>(sd, -6.0, 0.9, 1);
     check_static<L::IdealDiode, models::IdealDiode>({}, -5.0, 5.0, 2);
-    // MosfetLevel1: the law departs from the model by the documented leak
-    // (DECISIONS #39), checked in "the MOSFET law is the model minus its leak".
+    check_static<L::MosfetLevel1, models::MosfetLevel1>({}, -8.0, 12.0, 3);
     check_static<L::IgbtLevel1, models::IgbtLevel1>({}, -2.0, 20.0, 4);
 }
 
@@ -386,8 +385,6 @@ TEST_CASE("Params<Real> evaluates the legacy law to rounding",
         device::Out<Real, 3> o;
         L::MosfetLevel1::eval(lp, v, o);
         const Real ref = models::MosfetLevel1::current<Real>(v.data(), mp);
-        // Far from threshold (V_OV = 3, κ = 15) the leak the MOSFET law
-        // drops is K·9·e^{-45}; its expression is another order (#39).
         CHECK(close(o.f[0], ref, Real{1}, 8));
     }
 }
@@ -630,8 +627,7 @@ void check_params_real_bit_identical(const typename Model::Params& mp, Real lo, 
         const auto pa = device::seed_params<Law, Law::n_params>(lp);
         device::Out<ad::ADRealN<Law::n_params>, NT> o;
         Law::eval(pa, v, o);
-        // The MOSFET law is the model minus its V_DS = 0 leak (DECISIONS #39).
-        if constexpr (!std::is_same_v<Law, L::MosfetLevel1>) CHECK(close(o.f[0].value(), a, a, 4));
+        CHECK(close(o.f[0].value(), a, a, 4));
     }
 }
 }  // namespace
@@ -649,8 +645,18 @@ TEST_CASE("Params<Real> is bit-identical to the model's own Params (legacy body)
 // ---- the MOSFET law: C¹ through V_DS = 0 (DECISIONS #39) -------------------
 namespace {
 
-/// The model's current at V_DS = 0⁺ (the leak) times e^{−κ|V_DS|}, mirrored
-/// as the model mirrors its law: legacy − interface, to rounding.
+/// The raw terminal-swap mirror of the forward law (the model before #44):
+/// it jumps by 2·f(a, 0) at V_DS = 0.
+template <class S>
+S raw_mirror(const std::array<S, 3>& v, const models::MosfetLevel1::Params& p) {
+    const S vds = v[0] - v[1];
+    const S vov = v[2] - v[1] - p.V_T;
+    if (vds < Real{0}) return -models::MosfetLevel1::forward_current_<S>(vov - vds, -vds, p);
+    return models::MosfetLevel1::forward_current_<S>(vov, vds, p);
+}
+
+/// The raw forward law's current at V_DS = 0⁺ (the leak) times e^{−κ|V_DS|},
+/// mirrored: raw mirror − law, to rounding.
 template <class S>
 S mosfet_leak(const std::array<S, 3>& v, const models::MosfetLevel1::Params& p) {
     using std::exp;
@@ -687,7 +693,7 @@ const std::array<models::MosfetLevel1::Params, 3> kMosfets{
 
 }  // namespace
 
-TEST_CASE("the MOSFET law is the model minus its leak at V_DS = 0",
+TEST_CASE("the MOSFET law is the raw mirror minus its leak at V_DS = 0",
           "[device][laws][mosfet]") {
     // Value and Jacobian against the model's AD minus the leak's AD, over
     // the whole range (threshold band included). The tolerance is a
@@ -701,7 +707,7 @@ TEST_CASE("the MOSFET law is the model minus its leak at V_DS = 0",
             using A = ad::ADRealN<3>;
             const std::array<A, 3> xa{A{vds, {1.0, 0.0, 0.0}}, A{0.0, {0.0, 1.0, 0.0}},
                                       A{vgs, {0.0, 0.0, 1.0}}};
-            const A ref = models::MosfetLevel1::current<A>(xa.data(), mp) - mosfet_leak<A>(xa, mp);
+            const A ref = raw_mirror<A>(xa, mp) - mosfet_leak<A>(xa, mp);
             const auto [i, g] = law_at(mp, vds, vgs);
             const Real scale = mp.K * (1.0 + vds * vds + vgs * vgs);
             INFO("vds " << vds << " vgs " << vgs << " law " << i << " ref " << ref.value());
@@ -712,7 +718,7 @@ TEST_CASE("the MOSFET law is the model minus its leak at V_DS = 0",
     }
 }
 
-TEST_CASE("the MOSFET law is C1 through V_DS = 0 and the model is not",
+TEST_CASE("the MOSFET law is C1 through V_DS = 0 and the raw mirror is not",
           "[device][laws][mosfet]") {
     for (const auto& mp : kMosfets) {
         // overdrives across the threshold band, in units of 1/κ
@@ -740,12 +746,11 @@ TEST_CASE("the MOSFET law is C1 through V_DS = 0 and the model is not",
                 }
             }
         }
-        // Control: the model jumps by 2·f(a, 0) at a = 2.4/κ, the leak's peak
-        // 0.439·K/κ² (DECISIONS #39) — the probe sees a discontinuity.
+        // Control: the raw mirror jumps by 2·f(a, 0) at a = 2.4/κ, the leak's
+        // peak 0.439·K/κ² (DECISIONS #39) — the probe sees a discontinuity.
         const Real vgs = mp.V_T + 2.4 / mp.kappa;
         const std::array<Real, 3> vp{1e-12, 0.0, vgs}, vm{-1e-12, 0.0, vgs};
-        const Real jump = models::MosfetLevel1::current<Real>(vp.data(), mp)
-                          - models::MosfetLevel1::current<Real>(vm.data(), mp);
+        const Real jump = raw_mirror<Real>(vp, mp) - raw_mirror<Real>(vm, mp);
         CHECK(jump > 2.0 * 0.43 * mp.K / (mp.kappa * mp.kappa));
     }
 }
@@ -777,27 +782,25 @@ TEST_CASE("the MOSFET law is monotone in V_DS around zero, to 1 pA",
                 prev = s.i;
             }
         }
-        // The band: the slope at V_DS = 0 is negative on both paths (the
-        // triode polynomial at negative overdrive; release list, #39). On
-        // the law it is Kσa·[κ(1−σ²)a + 2σ] (λ aside), negative for a ∈
-        // (≈ −0.75/κ, 0) — the subtracted leak raises it, so at a = −1/κ
-        // it is +0.105·K/κ — and on the model (≈ −1.3/κ, 0) (DECISIONS #43).
+        // The band: the slope at V_DS = 0 is negative (the triode polynomial
+        // at negative overdrive; release list, #44). On the law it is
+        // Kσa·[κ(1−σ²)a + 2σ] (λ aside), negative for a ∈ (≈ −0.75/κ, 0) —
+        // the subtracted leak raises it, so at a = −1/κ it is +0.105·K/κ —
+        // and on the raw forward law (≈ −1.3/κ, 0) (control).
         const auto s = law_at(mp, 0.0, mp.V_T - 0.5 / mp.kappa);
         CHECK(s.g[0] < 0.0);
         CHECK(law_at(mp, 0.0, mp.V_T - 1.0 / mp.kappa).g[0] > 0.0);
         const Real vgs = mp.V_T - 1.0 / mp.kappa;
         const Real h = 1e-6 / mp.kappa;
         const std::array<Real, 3> vp{h, 0.0, vgs}, v0{2.0 * h, 0.0, vgs};
-        CHECK(models::MosfetLevel1::current<Real>(v0.data(), mp)
-              < models::MosfetLevel1::current<Real>(vp.data(), mp));
+        CHECK(raw_mirror<Real>(v0, mp) < raw_mirror<Real>(vp, mp));
     }
 }
 
-TEST_CASE("a static reading describes the law the run's path stamped",
+TEST_CASE("a static reading describes the law both paths stamp",
           "[device][laws][mosfet]") {
-    // V_GS at the leak's peak (a = 2.4/κ), V_DS = 0.1 mV: the hand stamp's
-    // model body carries f(a, 0)·e^{−κd} ≈ 0.439·K/κ² that the interface
-    // law drops (#39), so the two readings must differ by it.
+    // V_GS at the leak's peak (a = 2.4/κ), V_DS = 0.1 mV: where the raw
+    // mirror and the law differ by f(a, 0)·e^{−κd} ≈ 0.439·K/κ² (#44).
     builder::CircuitBuilder b;
     const Real K = 0.5, V_T = 3.0, lam = 0.02, kappa = 4.0;
     b.add_mosfet_level1("M", "d", "gnd", "g", K, V_T, lam, kappa);
@@ -812,24 +815,18 @@ TEST_CASE("a static reading describes the law the run's path stamped",
     const std::array<Real, 3> v{vds, 0.0, vgs};
     device::Out<Real, 3> lo;
     device::eval<L::MosfetLevel1>({}, L::MosfetLevel1::from(mp), v, lo);
-    Real i_m[2] = {0, 0}, i_d[2] = {0, 0};
-    int n[2] = {0, 0};
-    for (int k = 0; k < 2; ++k) {
-        const auto path = k == 0 ? device::DevicePath::Legacy : device::DevicePath::Interface;
-        pwl::for_each_static_reading(b.graph(), b.pool(), x, path,
-                                     [&](const pwl::DeviceReading& r) {
-            ++n[k];
-            if (r.kind == "MosfetLevel1") i_m[k] = r.i_pin[0];
-            if (r.kind == "ShockleyDiode") i_d[k] = r.i_pin[0];
-        });
-    }
-    CHECK(n[0] == 2);
-    CHECK(n[1] == 2);
-    CHECK(i_m[0] == models::MosfetLevel1::current<Real>(v.data(), mp));   // legacy: the model
-    CHECK(i_m[1] == lo.f[0]);                                            // interface: the law
-    CHECK(i_m[0] - i_m[1] > 0.4 * K / (kappa * kappa));                  // control: the leak
-    CHECK(i_d[0] == i_d[1]);   // one body on both paths
-    CHECK(i_d[0] > 0.0);
+    Real i_m = 0, i_d = 0;
+    int n = 0;
+    pwl::for_each_static_reading(b.graph(), b.pool(), x, [&](const pwl::DeviceReading& r) {
+        ++n;
+        if (r.kind == "MosfetLevel1") i_m = r.i_pin[0];
+        if (r.kind == "ShockleyDiode") i_d = r.i_pin[0];
+    });
+    CHECK(n == 2);
+    CHECK(i_m == lo.f[0]);
+    CHECK(i_m == models::MosfetLevel1::current<Real>(v.data(), mp));   // one body
+    CHECK(raw_mirror<Real>(v, mp) - i_m > 0.4 * K / (kappa * kappa));  // control: the leak
+    CHECK(i_d > 0.0);
 }
 
 // ---- the MNA machines (15.6, DECISIONS #42) --------------------------------

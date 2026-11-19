@@ -712,20 +712,72 @@
     is Kσa·[κ(1−σ²)a + 2σ] (λ aside), negative only for a ∈ (≈ −0.75/κ, 0)
     (+0.105·K/κ at a = −1/κ); the test asserted it at −1/κ and failed on all
     three devices (never run after #39). Now asserted at −0.5/κ (law) and
-    −1/κ (model).
+    −1/κ (model). (Superseded by #44: one body again, no `path`.)
 
-### Hand-off (2026-11-18)
+## Slice 8 — one MOSFET law on both paths (2026-11-19)
 
-- Step 5 of the brief NOT started (context budget): merge
-  `origin/feat/core-p5-machines` (33dbd853 at hand-off; `git merge-tree`
-  shows ONE conflict, `python/tests/test_engine_conformance.py` — both sides
-  append a block at the end of the file (this branch: the device-path cells;
-  machines: `test_machine_dc_held_cell` …): keep both), then port the MNA
-  PMSM and the induction machine in the machines branch's increment form
-  (`pwl/pmsm_mna_history.hpp`: `lambda_of`, `delta_lambda`, `lam_off`,
-  `dlam_gamma`, `c_theta` / `c_rotor`) per #34; 'interface' refuses both by
-  name until then.
-- `StepHooks::on_device_state` (#31) is still the stepper track's call;
-  origin/feat/core-p3-stepper (8fa641df) has no hook yet.
-- The MOSFET law's sub-threshold band and corner (#39) are release-list
-  items, as is a quiet-machine wall-time check (#38).
+44. **The C¹ correction moves into the model; both paths run it.** Two
+    corrections existed: (a) this branch's interface law (#39),
+    h = f − f(a, 0)·e^{−κ|V_DS|} mirrored, written with expm1 for κd ≤ 1;
+    (b) `origin/feat/core-p5-passives-mosfet` 8aa40070, legacy model only:
+    the V_DS < 0 branch adds `2·f(V_OV − V_DS/2, 0)`. Merged (b) with
+    `--no-ff`, then measured both against the raw mirror
+    (`.scratch/mosfet_laws_sweep.py`, K = 1.43, V_T = 3, λ = 0.01, κ = 15,
+    V_OV ∈ [−10/κ, 10/κ] in 0.01/κ steps, |V_DS| ≤ 2 V on a 1 mV grid):
+
+    | law | max abs i(0) | jump at 0 | max abs ∂i/∂V_DS(0⁺) − ∂i/∂V_DS(0⁻) | min i·v | ∂i/∂V_DS(0) < 0 for κ·V_OV in | min ∂i/∂V_DS |
+    |---|---|---|---|---|---|---|
+    | raw mirror | 2.79e-3 A | 5.6e-3 A | 2.9e-2 S | −2.91e-4 W | (jumps) | −4.43e-2 S |
+    | (b) | 2.79e-3 A | 3.8e-13 A | 1.0e-6 S (FD noise) | −2.26e-3 W | [−2.20, 0] | −4.83e-2 S |
+    | (a) | 0 | 3.8e-13 A | 1.1e-6 S (FD noise) | −2.91e-4 W | [−0.72, 0] | −3.95e-2 S |
+
+    Same sweep at the soft boost's K = 0.5, κ = 4, λ = 0: max abs i(0)
+    13.7 mA (raw, b) vs 0 (a); min i·v −5.35 mW (raw), −41.7 mW (b),
+    −5.36 mW (a); slope-at-zero window κ·V_OV ∈ [−2.21, 0] (b) vs
+    [−0.72, 0] (a).
+    Both are C¹. (b) is not passive at V_DS = 0: i(0) = L(a), up to
+    0.439·K/κ² (2.8 mA here), and its added term makes the worst i·v 7.8×
+    the raw law's (−2.26 mW at κ·V_OV = −6.3, κ·V_DS = −6.5). (a) has
+    i(0) = 0 exactly, a third of (b)'s slope-at-zero window, and its worst
+    i·v is the raw forward law's own (the triode polynomial past
+    saturation onset, κ·V_OV = −3.0, κ·V_DS = −3.2, mirrored), not one it
+    adds. **Chosen: (a)**, as `MosfetLevel1::forward_c1_` in
+    `models/mosfet_level1.hpp`, both quadrants. One addition keeps the model's
+    bits where the correction is below rounding: when the subtracted term is
+    ≤ 2⁻⁵⁴·|f| (≤ half an ulp) it returns f itself, so a fully-on channel
+    (κ·V_OV ≳ 37) and any |V_DS| ≫ 1/κ are the raw forward law to the bit
+    (and the third quadrant its exact mirror, as (b) was). `laws::MosfetLevel1`
+    is the model body again (`CurrentLaw`); `MosfetLevel1Model` and the
+    readings' `path` argument (#43) are removed — a reading is the law both
+    paths stamp. The soft boost (`boost_mosfet_coss_saturable`, RECORDED since
+    #39) is gated at 1e-12 again; `test_the_soft_boost_parts_by_the_mosfet_leak_only`
+    is deleted (nothing parts). Not removed (release list, unchanged in
+    kind): the negative slope near threshold and past saturation onset —
+    the triode polynomial at small overdrive, in the forward law both
+    corrections share; it is not free to remove (it changes the law at
+    every V_DS, not only near 0).
+    Legacy numbers that moved (default path, against (b) as the baseline):
+    golden compare vs `golden_m13` — every case byte-identical except
+    `mosl1_trbdf2`, whose golden is the pre-(b) abort at t = 0 (it runs
+    under (b) and here). Against a (b) build of this tree (header swapped,
+    `.scratch/mosl1_cmp.py`): `mosl1_pwl` byte-identical; `mosl1_trbdf2`
+    3175 accepted points vs (b)'s 3191, states at the 118 common times
+    within 4.8e-7 of each column's range, end state within 8.4e-10. Stateful
+    bit-identity (`sbit_m14`) unchanged. Reference cells: one moved,
+    `switching/basic/mosfet_nmos_dc` pwl error 0 → 3.55e-15 (trbdf2 0, dsed
+    refused, unchanged). Every pinned Python and C++ test passes (5281
+    pytest, 375 reference; layer2 and layer5 on Eigen 5 and 3.4.0).
+
+### Hand-off (2026-11-19)
+
+- Done this session: merged `feat/core-p5-machines` (f9158ffb) and
+  `feat/core-p5-passives-mosfet` (#44); the machines on the interface (#42);
+  one MOSFET law (#44); the readings argument (#43, then removed by #44).
+- Open, recorded: the induction machine's instruction ratio 1.04–1.09 (over
+  the 3 % gate; lever in #42); `run_transient.hpp:128`
+  (`seed_held_machine_capacitors`) calls the hand `refresh_pmsm_mna` on both
+  paths (loop freeze); the "unported kind refuses by name" test has no
+  fixture (every Newton kind is ported).
+- `StepHooks::on_device_state` (#31) is still the stepper track's call.
+- Release list: the MOSFET's negative slope near threshold and past
+  saturation onset (#44), a quiet-machine wall-time check (#38).

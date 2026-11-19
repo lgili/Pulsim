@@ -203,7 +203,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | stress/stiff_rlc.yaml | 3.97e-09 | 3.72e-09 | 3.72e-09 | 0 | 3.56e-09 |
 | stress/stiff_two_timescale_rc.yaml | 7.85e-05 | 1.19e-06 | 1.19e-06 | 7.79e-07 | 4.64e-07 |
 | switching/basic/chopper_with_rc_snubber.yaml | 0.0187 | 0.0153 | 0.0153 | 3.81e-05 | 2.91e-05 |
-| switching/basic/mosfet_nmos_dc.yaml | 0 | 0 | 0 | 0 | refused |
+| switching/basic/mosfet_nmos_dc.yaml | 3.55e-15 | 0 | 0 | 0 | refused |
 | switching/basic/pwm_voltage_rc.yaml | 0.000883 | 9.98e-09 | 9.98e-09 | 8.98e-09 | 1.15e-07 |
 | switching/basic/pwm_voltage_rl_filter.yaml | 0.00429 | 6.93e-06 | 6.93e-06 | 6.53e-05 | 2.26e-06 |
 | switching/basic/snubber_rc.yaml | 0.000561 | 0.000561 | 0.000561 | 1.65e-07 | 1.73e-07 |
@@ -259,19 +259,20 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | three_phase/three_phase_balanced_rl_load.yaml | 1.82e-06 | 1.83e-06 | 1.83e-06 | 4.22e-05 | 6.01e-07 |
 | three_phase/three_phase_diode_rectifier.yaml | 1.51 | 0.00632 | 0.00631 | 5.51e-05 | 0.00034 |
 
-## Analytic set (26 cases; agree = within the frozen ceiling, 1e-3 when none)
+## Analytic set (27 cases; agree = within the frozen ceiling, 1e-3 when none)
 
 | configuration | agree | disagree | error | refused | unverified |
 |---|---:|---:|---:|---:|---:|
-| pwl | 25 | 1 | 0 | 0 | 0 |
-| pwl+restart | 25 | 1 | 0 | 0 | 0 |
-| pwl+split | 26 | 0 | 0 | 0 | 0 |
-| trbdf2 | 26 | 0 | 0 | 0 | 0 |
-| dsed | 21 | 0 | 0 | 5 | 0 |
+| pwl | 26 | 1 | 0 | 0 | 0 |
+| pwl+restart | 26 | 1 | 0 | 0 | 0 |
+| pwl+split | 27 | 0 | 0 | 0 | 0 |
+| trbdf2 | 27 | 0 | 0 | 0 | 0 |
+| dsed | 22 | 0 | 0 | 5 | 0 |
 
 | case | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
 | rc_charge | 0.00159 | 1.84e-06 | 1.84e-06 | 2.26e-07 | 1.55e-14 |
+| rc_esr_charge | 0.000144 | 1.35e-08 | 1.35e-08 | 1.63e-07 | 4.19e-14 |
 | rc_discharge | 0.00159 | 1.84e-06 | 1.84e-06 | 6.6e-07 | 1.18e-14 |
 | rl_step | 0.00112 | 1.3e-06 | 1.3e-06 | 6.25e-07 | 1.9e-15 |
 | rlc_underdamped | 0.000613 | 1.42e-05 | 1.42e-05 | 5.78e-05 | 5.1e-15 |

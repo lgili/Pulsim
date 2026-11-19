@@ -280,6 +280,41 @@ def test_charge_is_conserved_over_a_closed_cycle(law, engine):
     assert abs(q_res - q_cap) < tol * moved
 
 
+@pytest.mark.parametrize("law", ["junction", "table", "vdmos_cgd"])
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_charge_is_conserved_to_1e9_under_the_engines_own_rule(law, engine):
+    """Task 1.6 at 1e-9. The law in series with a 10 nF linear capacitor (a
+    charge meter): both are stamped in charge form by the same rule and carry
+    the same current at every solve, so the charge the law moved over the
+    0 → 400 V → 0 cycle equals the meter's C·Δv under the engine's OWN
+    quadrature (the output-grid trapezoid of the test above is not trbdf2's).
+    Two engine terms enter the balance at the meter node and are accounted
+    for, not hidden: no auto-regularize bleeder (a 1 GΩ tie leaks 2.3e-9 of
+    the charge), and the 1e-12 S placeholder pwl/assemble.hpp puts on every
+    NonlinearCapacitor node (the same 2.3e-9; it is what made the trapezoid
+    test above read 2.2e-8 at 400 V). Measured 2026-11-18 (balance / charge
+    moved): pwl 7e-14..4e-12, trbdf2 8.7e-11 (table), 1.8e-10 (vdmos_cgd),
+    5.6e-10 (junction; 2.2e-9 at rtol 1e-7, not explained). Bound 1e-9 on
+    pwl, 2e-9 on trbdf2 (adaptive steps)."""
+    lw = _laws()[law]
+    b = p.CircuitBuilder()
+    b.add_pulse_voltage_source("Vs", "s", "gnd", 0.0, 400.0, 1e-6, 20e-6, 0.0, 2e-6, 2e-6)
+    b.add_resistor("R", "s", "c", 1e3)
+    b.add_nonlinear_capacitor("C", "c", "m", lw)
+    b.add_capacitor("Cm", "m", "gnd", 10e-9)
+    kw = dict(dt=2e-9) if engine == "pwl" else {}
+    r = p.simulate(b, t_end=60e-6, engine=engine, auto_regularize=False,
+                   initial_state=np.zeros(len(b.state_var_names())), **kw)
+    t = np.asarray(r.times)
+    v = np.asarray(r.v("c")) - np.asarray(r.v("m"))
+    vm = np.asarray(r.v("m"))
+    assert v.max() > 300.0 and abs(v[-1]) < 1.0
+    q_law = lw.charge(float(v[-1])) - lw.charge(float(v[0]))
+    q_meter = 10e-9 * float(vm[-1] - vm[0]) + 1e-12 * float(np.trapezoid(vm, t))
+    tol = 1e-9 if engine == "pwl" else 2e-9
+    assert abs(q_law - q_meter) < tol * lw.charge(float(v.max()))
+
+
 def test_charge_law_objects():
     lw = _laws()
     assert lw["junction"].kind == "junction" and lw["table"].kind == "table"
@@ -476,3 +511,93 @@ def test_power_mosfet_lookup_by_number(tmp_path):
         assert q.power_mosfet_kwargs()["K"] == 1.43
         with pytest.raises(ValueError, match="power_mosfet"):
             lib.power_mosfet("SYN-PLAIN", allow_synthetic=True, paths=[tmp_path])
+
+
+# ---------------------------------------------------------------------------
+# Order across a gate-driven threshold crossing (probes/threshold_order.py)
+# ---------------------------------------------------------------------------
+def _threshold_case():
+    """Gate driven by 6 − 6·cos(2π·2 MHz·t) through R_g = 10 Ω into C_gs = 1 nF
+    and a VDMOS C_gd; drain 400 V behind 40 Ω. The channel turns on through its
+    own charge dynamics (no source edge, no switch event). Returns the builder,
+    its start state and an independent reference: scipy Radau at rtol 1e-12
+    on the same two node equations (the Level-1 law and the vdmos_cgd law
+    written out here)."""
+    import math
+    solve_ivp = pytest.importorskip("scipy.integrate").solve_ivp
+    K, VT, KAP, CGS, RG, RL, VDD, F = 1.43, 3.0, 15.0, 1e-9, 10.0, 40.0, 400.0, 2e6
+    cmax, cmin, a = 1e-9, 50e-12, 0.5
+    s_ = (cmax - cmin) / (1 + math.pi / 2)
+
+    def lg(z):
+        return 0.5 * (1 + math.tanh(0.5 * z))
+
+    def fwd(vov, vds):
+        al, be = lg(KAP * vov), lg(KAP * (vov - vds))
+        return al * (be * K * (2 * vov * vds - vds * vds) + (1 - be) * K * vov * vov)
+
+    def rhs(t, y):
+        vg, vd = y
+        u = vg - vd
+        c = cmax - s_ + s_ * (math.tanh(a * u) if u > 0 else math.atan(a * u))
+        vov = vg - VT
+        i = (-fwd(vov - vd, -vd) + 2 * fwd(vov - 0.5 * vd, 0.0)) if vd < 0 else fwd(vov, vd)
+        drv = 6 - 6 * math.cos(2 * math.pi * F * t)
+        return np.linalg.solve([[CGS + c, -c], [-c, c]], [(drv - vg) / RG, (VDD - vd) / RL - i])
+
+    ref = solve_ivp(rhs, (0, 250e-9), [0.0, VDD], method="Radau", rtol=1e-12,
+                    atol=1e-12, dense_output=True).sol
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdd", "vdd", "gnd", VDD)
+    b.add_resistor("RL", "vdd", "d", RL)
+    b.add_sine_voltage_source("Vg", "drv", "gnd", 6.0, 6.0, F, -math.pi / 2)
+    b.add_power_mosfet("M", "d", "gnd", "drv", K=K, V_T=VT, lambda_=0.0, kappa=KAP,
+                       C_gs=CGS, C_gd=p.ChargeLaw.vdmos_cgd(cmax, cmin, a), C_ds=0.0, R_g=RG)
+    names = b.state_var_names()
+    x0 = np.array(b.initial_state(), dtype=float).ravel()
+    x0[names.index("V(d)")] = x0[names.index("V(vdd)")] = VDD
+    return b, x0, ref
+
+
+def _threshold_error(b, x0, ref, **kw):
+    r = p.simulate(b, t_end=250e-9, initial_state=x0, **kw)
+    t = np.asarray(r.times)
+    y = np.column_stack([np.asarray(r.v("M.g")), np.asarray(r.v("d"))])
+    return float(np.max(np.abs(y - ref(t).T))), t.size - 1
+
+
+def test_gate_driven_threshold_crossing_is_second_order():
+    """The orchestrator's suspected first-order defect at a gate-driven
+    threshold crossing does not reproduce (measured 2026-11-18): pwl 2.00 per
+    halving from 250 ps, trbdf2 1.6–2.2 against its step count. Error over the
+    engine's own samples against the Radau reference."""
+    b, x0, ref = _threshold_case()
+    e = [_threshold_error(b, x0, ref, engine="pwl", dt=dt)[0]
+         for dt in (2.5e-10, 1.25e-10, 6.25e-11)]
+    for e0, e1 in zip(e, e[1:]):
+        assert 1.8 < np.log2(e0 / e1) < 2.2, e
+    assert e[-1] < 1e-4
+    (e6, n6), (e8, n8) = (_threshold_error(b, x0, ref, engine="trbdf2", rtol=rt,
+                                           atol=rt * 1e-3, dt=250e-9) for rt in (1e-6, 1e-8))
+    assert np.log(e6 / e8) / np.log(n8 / n6) > 1.5, (e6, n6, e8, n8)
+    assert e8 < 1e-3
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+@pytest.mark.parametrize("vgs", [3.2, 4.0])
+def test_current_through_a_partly_on_channel_crosses_zero(engine, vgs):
+    """The Level-1 law jumped by 2·α(1−β)K·V_OV² across V_DS = 0 (5.2 mA at
+    V_GS = 3.2 V); a ±10 mA sine through the channel had no solution at its
+    zero crossing and both engines aborted (probes/vds_zero_jump.py)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vg", "g", "gnd", vgs)
+    b.add_sine_current_source("I", "gnd", "d", 0.0, 10e-3, 1e3)
+    b.add_capacitor("C", "d", "gnd", 1e-9)
+    b.add_mosfet_level1("M", "d", "gnd", "g", K=1.43, V_T=3.0, lambda_=0.0, kappa=15.0,
+                        with_body_diode=False)
+    kw = dict(dt=1e-6) if engine == "pwl" else {}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=2e-3, engine=engine, **kw)
+    v = np.asarray(r.v("d"))
+    assert v.min() < 0 < v.max() and np.max(np.abs(v)) < 0.05

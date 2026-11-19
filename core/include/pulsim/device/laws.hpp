@@ -11,8 +11,8 @@
 //
 // The static kinds (smooth / Shockley diode, MOSFET and IGBT level 1) ARE
 // their model's `current<S, P>` body: the law passes its own `Params<S>`
-// (same member names), so there is one body for both paths — except the
-// MOSFET, whose law drops the model's leak at V_DS = 0 (C¹; #39). The charge and
+// (same member names), so there is one body for both paths (the MOSFET's
+// C¹, passive form at V_DS = 0 lives in the model, #44). The charge and
 // flux laws below repeat the model's expression in the same operation
 // order, so their Real values equal the model's to rounding; the hand
 // stamp's Jacobian (C(v), L(i)) and the law's AD derivative agree to a few
@@ -157,87 +157,15 @@ template <class S> struct MosfetL1Params {
         return MosfetL1Params<decltype(f(K))>{f(K), f(V_T), f(lambda), f(kappa)};
     }
 };
-/// Pins {drain, source, gate}.
-///
-/// NOT the model body (the one static law that departs from it, interface
-/// path only; DECISIONS #39). The model's forward law f(a, d) = α(a)·K·
-/// (1+λd)·[a² − β(a−d)·(a−d)²] (a = V_OV, d = V_DS, α = β = σ(κ·)) does not
-/// vanish at d = 0: f(a, 0) = K·a²·σ(κa)·σ(−κa) (the near-threshold leak,
-/// peak 0.439·K/κ² at a = 2.4/κ), so the mirrored reverse branch
-/// −f(a−d, −d) JUMPS by 2·f(a, 0) at V_DS = 0. This law is
-///   h(a, d) = f(a, d) − f(a, 0)·e^{−κd},  mirrored the same way:
-/// h(·, 0) = 0 and both one-sided derivatives at V_DS = 0 are
-/// ∂f/∂d(a, 0) + κ·f(a, 0) (∂/∂V_GS: 0 on both sides), so it is C¹; the
-/// subtracted term only RAISES the slope (f(a, 0) ≥ 0) and dies within a
-/// few 1/κ of V_DS = 0, so off-state leakage and every V_DS ≫ 1/κ are the
-/// model's to the bit (the term underflows its ulp). For κd ≤ 1 h is
-/// written without the subtraction (expm1, no cancellation at small d):
-///   α·K·{λd·[a² − β(u)u²] + a²(1−α)·E + α·d·(2a − d) + u²·α·(1−β(u))·E},
-///   u = a − d, E = 1 − e^{−κd}.
-/// NOT fixed (both paths, release list): the slope at V_DS = 0 is negative
-/// for a ∈ (≈ −0.75/κ, 0) here, (≈ −1.3/κ, 0) on the model — the triode
-/// polynomial at negative overdrive (DECISIONS #43).
-struct MosfetLevel1 {
-    static constexpr std::size_t n_pins = 3;
-    static constexpr std::size_t n_internal = 0;
-    static constexpr bool kHasQ = false;
-    static constexpr bool kParamTangent = true;
-    static constexpr Pattern<3> kPattern = current_pattern<3>();
+/// Pins {drain, source, gate}. The model body: C¹ and zero current at
+/// V_DS = 0 (forward_c1_, DECISIONS #44).
+struct MosfetLevel1 : CurrentLaw<models::MosfetLevel1, 3, MosfetL1Params> {
     /// Parameter names in `Params` declaration order (sensitivity refusals).
     static constexpr std::array<std::string_view, 4> kParamNames{"K", "V_T", "lambda", "kappa"};
     static constexpr std::size_t n_params = 4;
     template <class S> using Params = MosfetL1Params<S>;
     [[nodiscard]] static Params<Real> from(const models::MosfetLevel1::Params& m) {
         return {m.K, m.V_T, m.lambda, m.kappa};
-    }
-
-    /// h(a, d) for d >= 0.
-    template <class T, class P>
-    [[nodiscard]] static T forward(const T& a, const T& d, const P& p) {
-        using std::exp; using std::expm1;
-        using M = models::MosfetLevel1;
-        const T kd = p.kappa * d;
-        if (kd > Real{1}) {
-            return M::forward_current_<T>(a, d, p)
-                   - M::forward_current_<T>(a, T{0}, p) * exp(T(-kd));
-        }
-        const T u = a - d;
-        const T alpha = numeric::logistic(T(p.kappa * a));
-        const T one_minus_alpha = numeric::logistic(T(-(p.kappa * a)));
-        const T beta_u = numeric::logistic(T(p.kappa * u));
-        const T one_minus_beta_u = numeric::logistic(T(-(p.kappa * u)));
-        const T E = -expm1(T(-kd));
-        const T bracket = p.lambda * d * (a * a - beta_u * u * u)
-                          + a * a * one_minus_alpha * E
-                          + alpha * d * (Real{2} * a - d)
-                          + u * u * alpha * one_minus_beta_u * E;
-        return alpha * p.K * bracket;
-    }
-
-    template <class P, class X, class O>
-    static void eval(const Params<P>& p, const std::array<X, 3>& x, O& o) {
-        using T = promote_t<P, X>;
-        const T vd = T(x[0]), vs = T(x[1]), vg = T(x[2]);
-        const T V_DS = vd - vs;
-        const T V_OV = vg - vs - p.V_T;
-        // d = 0 takes the forward branch; both sides have the same slope.
-        const T i = V_DS < Real{0} ? T(-forward<T>(T(V_OV - V_DS), T(-V_DS), p))
-                                   : forward<T>(V_OV, V_DS, p);
-        o.f[0] = i;
-        o.f[1] = -i;
-    }
-};
-
-/// The model's own body, leak at V_DS = 0 included: the law the HAND stamp
-/// runs (`refresh_mosfets_level1`), so a reading of a legacy run describes
-/// what was stamped (`for_each_static_reading`, DECISIONS #43). Not a
-/// Newton law of the interface path.
-struct MosfetLevel1Model : CurrentLaw<models::MosfetLevel1, 3, MosfetL1Params> {
-    static constexpr std::array<std::string_view, 4> kParamNames = MosfetLevel1::kParamNames;
-    static constexpr std::size_t n_params = 4;
-    template <class S> using Params = MosfetL1Params<S>;
-    [[nodiscard]] static Params<Real> from(const models::MosfetLevel1::Params& m) {
-        return MosfetLevel1::from(m);
     }
 };
 
@@ -515,7 +443,6 @@ struct IgbtTail {
 static_assert(Device<ShockleyDiode>);
 static_assert(Device<IdealDiode>);
 static_assert(Device<MosfetLevel1>);
-static_assert(Device<MosfetLevel1Model>);
 static_assert(Device<IgbtLevel1>);
 static_assert(Device<NonlinearCapacitor>);
 static_assert(Device<SaturableInductor>);

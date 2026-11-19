@@ -26,7 +26,6 @@
 // (`StepHooks::device_state(t, x, histories)` after `commit`).
 
 #include "pulsim/device/device.hpp"
-#include "pulsim/device/device_path.hpp"
 #include "pulsim/device/device_state.hpp"
 #include "pulsim/pwl/interface_stamps.hpp"
 #include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
@@ -130,13 +129,11 @@ void for_each_stateful_reading(const StatefulHistories& hs, const Vector& x, Fn&
 }
 
 /// Visit every static Newton branch (smooth / Shockley diode, MOSFET and
-/// IGBT level 1) at x, read from the law the run's `path` STAMPED: the
-/// MOSFET's interface law drops the model's leak at V_DS = 0 (#39), so a
-/// legacy run reads the model body (`MosfetLevel1Model`), an interface run
-/// the C¹ law; the other three kinds are one body on both paths (#43).
+/// IGBT level 1) at x: each law is its model's body, the one both device
+/// paths stamp (#44).
 template <class Fn>
 void for_each_static_reading(const topology::Graph& graph, const DevicePool& pool,
-                             const Vector& x, device::DevicePath path, Fn&& fn) {
+                             const Vector& x, Fn&& fn) {
     namespace rd = readings_detail;
     namespace L = device::laws;
     using SK = DevicePool::StoredKind;
@@ -164,16 +161,10 @@ void for_each_static_reading(const topology::Graph& graph, const DevicePool& poo
         case SK::ShockleyDiode:
             two(L::ShockleyDiode{}, L::ShockleyDiode::from(pool.shockley_diode_params(br.id)), 1);
             break;
-        case SK::MosfetLevel1: {
-            const auto& mp = pool.mosfet_level1_params(br.id);
-            const auto at = detail::mosfet_level1_terminals(pool, br);
-            if (path == device::DevicePath::Interface) {
-                three(L::MosfetLevel1{}, L::MosfetLevel1::from(mp), at, 2);
-            } else {
-                three(L::MosfetLevel1Model{}, L::MosfetLevel1Model::from(mp), at, 2);
-            }
+        case SK::MosfetLevel1:
+            three(L::MosfetLevel1{}, L::MosfetLevel1::from(pool.mosfet_level1_params(br.id)),
+                  detail::mosfet_level1_terminals(pool, br), 2);
             break;
-        }
         case SK::IgbtLevel1:
             three(L::IgbtLevel1{}, L::IgbtLevel1::from(pool.igbt_level1_params(br.id)),
                   detail::igbt_level1_terminals(pool, br), 3);

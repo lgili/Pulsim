@@ -17,6 +17,16 @@ cases:
     dsed:
       ceiling: 1.0e-06
       measured: 1.545e-15
+  rc_esr_charge:
+    pwl:
+      ceiling: 0.000288
+      measured: 0.0001441
+    trbdf2:
+      ceiling: 3.25e-07
+      measured: 1.627e-07
+    dsed:
+      ceiling: 1.0e-06
+      measured: 4.195e-14
   rc_discharge:
     pwl:
       ceiling: 0.00318

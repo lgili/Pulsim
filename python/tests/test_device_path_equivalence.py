@@ -92,8 +92,7 @@ def _boost(edge, kappa):
 def mosfet_reverse_conduction_ac():
     """MOSFET L1 held on (V_GS = 12 V, far above threshold) carrying an AC
     current: V_DS crosses zero both ways — the reverse branch and the C¹
-    point of DECISIONS #39 — where the two laws agree to rounding (the
-    leak the interface law drops is K·a²·e^{-κa} ≈ 1e-14 A here)."""
+    point of DECISIONS #44."""
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 50e3, 0.0)
     b.add_resistor("R", "in", "a", 2.0)
@@ -106,10 +105,8 @@ def mosfet_reverse_conduction_ac():
 
 def boost_mosfet_fast_gate():
     """The boost with 1 ns gate edges and κ = 15: no fixed-step sample sits
-    on a ramp, and off (a = −3 V) the model's leak K·a²·σ(κa)σ(−κa) is
-    1e-19 A — the control of the recorded boost difference (DECISIONS #39;
-    at κ = 4 the off-state leak at V_DS ≈ 0 is 28 µA, and the paths part by
-    5e-9 of scale after every turn-off even with fast edges)."""
+    on a ramp (the soft boost's 0.3 µs ramps put V_DS ≈ 0 through threshold,
+    where the raw mirror jumped; both paths now run the C¹ law, #44)."""
     return _boost(1e-9, 15.0)
 
 
@@ -170,13 +167,9 @@ CIRCUITS = {
     "chopper_igbt_tail_lauritzen": chopper_igbt_tail_lauritzen,
     "saturable_permeance_core": saturable_permeance_core,
 }
-# The boost passes its soft (κ = 4) MOSFET through threshold with V_DS near
-# zero (0.3 µs gate ramps; the off state right after each turn-off): there
-# the interface law drops the model's leak at V_DS = 0 (DECISIONS #39), so
-# its two paths part BY DESIGN. Recorded below, not gated at 1e-12;
-# `boost_mosfet_fast_gate` is its control. Every other circuit is gated.
-RECORDED = {"boost_mosfet_coss_saturable"}
-GATED = sorted(set(CIRCUITS) - RECORDED)
+# Every circuit is gated, the soft boost too: its MOSFET passes through
+# threshold with V_DS near zero, and both paths run ONE law there (#44).
+GATED = sorted(CIRCUITS)
 # TR-BDF2 compares at the times both runs accepted, which a gate edge
 # provides; the AC circuit has none (4 common times of 2757), so its
 # TR-BDF2 cell is the conformance MosfetLevel1 cell (AC, interpolated).
@@ -221,29 +214,10 @@ def test_trbdf2_trajectories_agree_to_rtol(name):
 
 @pytest.mark.parametrize("name", sorted(CIRCUITS))
 def test_dc_operating_points_agree(name):
-    # every circuit, the recorded boost too: its DC point (gate low, V_DS =
-    # 12 V) is e^{-48} of the leak away from V_DS = 0
     b = CIRCUITS[name]()
     xa = p.compute_dc_op(b, device_path="legacy")
     xi = p.compute_dc_op(b, device_path="interface")
     assert np.max(np.abs(xa - xi) / np.maximum(np.abs(xa), 1.0)) <= 1e-12
-
-
-@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
-def test_the_soft_boost_parts_by_the_mosfet_leak_only(engine):
-    """Measured 2026-11-18: 2.5e-3 of scale (pwl), 2.1e-4 (trbdf2), largest
-    on the first turn-on ramp (V_DS ≈ 0, a through threshold; the leak
-    peaks at 0.439·K/κ² = 13.7 mA). Visible — the fix is live — and of the
-    leak's order, not of a wrong law's; the control agrees to 1e-12."""
-    kw = (dict(t_end=200e-6, dt=20e-9, engine="pwl") if engine == "pwl"
-          else dict(t_end=200e-6, engine="trbdf2", rtol=1e-6, atol=1e-9))
-    a = _run(boost_mosfet_coss_saturable, "legacy", **kw)
-    i = _run(boost_mosfet_coss_saturable, "interface", **kw)
-    ta, ti = np.asarray(a.times), np.asarray(i.times)
-    xa, xi = np.asarray(a.states), np.asarray(i.states)
-    _, ia, ii = np.intersect1d(ta, ti, return_indices=True)
-    err = np.max(np.abs(xa[ia] - xi[ii]) / _scale(xa))
-    assert 1e-6 < err < 1e-2, f"legacy vs interface {err:.2e} of scale"
 
 
 def test_dc_operating_point_with_every_static_kind_conducting():
