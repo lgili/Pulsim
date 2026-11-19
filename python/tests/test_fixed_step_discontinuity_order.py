@@ -33,6 +33,8 @@ from scipy.optimize import brentq
 import pulsim as p
 
 ON = dict(discontinuity_restart=True)
+# The rule is the release default; every "without the rule" measurement below pins the legacy option.
+OFF = dict(discontinuity_restart=False)
 GON, GOFF = 1e3, 1e-9
 
 
@@ -77,7 +79,7 @@ def test_gate_edge_on_the_grid_is_second_order():
     assert abs(on[1]) <= 2e-6, on                 # engine: +1.012e-06
     assert all(f >= 3.7 for f in _factors(on)), on
     # Without the rule: the edge lands half a step off, first order.
-    _, _, err, shift = _rl_edge(2e-6)
+    _, _, err, shift = _rl_edge(2e-6, **OFF)
     assert err == pytest.approx(6.057e-3, rel=1e-3)
     assert shift == pytest.approx(0.500, abs=2e-3)
 
@@ -156,7 +158,7 @@ def test_buck_ccm_converges_at_second_order():
     on = [_buck_err(1.0, 0.5, N, **ON) for N in (50, 100, 200)]
     assert abs(on[0]) <= 2.5e-7, on               # engine: +1.17e-07
     assert all(f >= 3.8 for f in _factors(on)), on
-    off = [_buck_err(1.0, 0.5, N) for N in (50, 100)]
+    off = [_buck_err(1.0, 0.5, N, **OFF) for N in (50, 100)]
     assert off[0] == pytest.approx(1.18e-2, rel=0.02)   # first order
     assert 1.9 < off[0] / off[1] < 2.1
 
@@ -206,7 +208,7 @@ def _dcm_idle(N, **kw):
 def test_no_alternation_in_the_idle_interval_of_a_dcm_buck(N):
     vsw, vo = _dcm_idle(N, **ON)
     assert np.abs(vsw - vo).max() <= 0.01 * vo        # engine: 0.05 %
-    vsw_off, vo_off = _dcm_idle(N)
+    vsw_off, vo_off = _dcm_idle(N, **OFF)
     assert vsw_off.min() < 1.0 and vsw_off.max() > 25.0   # 0.38 / 26.27 V
 
 
@@ -246,7 +248,7 @@ def test_hard_switched_capacitor_current_does_not_ring():
     i_on, P = _caploop(1e-8, **ON)
     assert np.abs(i_on - exact).max() <= 0.01, (i_on.min(), i_on.max())
     assert P == pytest.approx(p_exact, rel=0.02)
-    i_off, P_off = _caploop(1e-8)
+    i_off, P_off = _caploop(1e-8, **OFF)
     assert i_off.min() < -9.0 and i_off.max() > 29.0      # -9.8 / +29.8 A
     assert P_off > 4 * p_exact                            # 0.197 W
 
@@ -258,7 +260,7 @@ def test_hard_switched_capacitor_at_a_finer_step():
     i_on, P = _caploop(1e-9, **ON)
     assert np.abs(i_on - exact).max() <= 0.02, (i_on.min(), i_on.max())   # 6e-3 A
     assert P == pytest.approx(exact ** 2 / GON * 0.46, rel=0.02)          # 0.0460 W
-    i_off, _ = _caploop(1e-9)
+    i_off, _ = _caploop(1e-9, **OFF)
     assert np.abs(i_off - exact).max() > 50.0             # -79 / +99 A
 
 
@@ -278,7 +280,7 @@ def test_source_step_on_the_grid_is_second_order():
     on = [_rc_pulse(1e-6 / n, **ON) for n in (10, 20, 40)]
     assert on[0] <= 5e-3, on                          # engine: 2.63e-03
     assert all(f >= 3.5 for f in _factors(on)), on
-    assert _rc_pulse(1e-7) == pytest.approx(0.476, rel=0.01)
+    assert _rc_pulse(1e-7, **OFF) == pytest.approx(0.476, rel=0.01)
 
 
 def test_a_pwm_source_jump_restarts_and_reads_its_left_limit():
@@ -302,7 +304,7 @@ def test_a_consistent_dc_start_is_untouched():
         b.add_inductor("L", "a", "m", 1e-3)
         b.add_resistor("R2", "m", "gnd", 10.0)
         return b
-    off = p.simulate(build(), t_end=1e-3, dt=1e-6, engine="pwl", start_from_dc_op=True)
+    off = p.simulate(build(), t_end=1e-3, dt=1e-6, engine="pwl", start_from_dc_op=True, **OFF)
     on = p.simulate(build(), t_end=1e-3, dt=1e-6, engine="pwl", start_from_dc_op=True, **ON)
     assert np.array_equal(np.asarray(off.states), np.asarray(on.states))
     assert on.n_restart_steps == 0
@@ -317,16 +319,16 @@ def test_smooth_segments_stay_trapezoidal():
     w = 1 / math.sqrt(1e-3 * 1e-6)
     Tp = 2 * math.pi / w
     total, after = {}, {}
-    for kw in ({}, ON):
+    for kw in (OFF, ON):
         b = p.CircuitBuilder()
         b.add_inductor("L", "a", "gnd", 1e-3, i0=1.0)
         b.add_capacitor("C", "a", "gnd", 1e-6)
         r = p.simulate(b, t_end=1000 * Tp, dt=Tp / 50, engine="pwl", **kw)
         i, v = np.asarray(r.i("L")), np.asarray(r.v("a"))
         E = 0.5 * 1e-3 * i ** 2 + 0.5 * 1e-6 * v ** 2
-        total[bool(kw)] = abs(E[-1] / E[0] - 1)
-        after[bool(kw)] = abs(E[-1] / E[3] - 1)
-        assert r.n_restart_steps == (3 if kw else 0)
+        total[kw is ON] = abs(E[-1] / E[0] - 1)
+        after[kw is ON] = abs(E[-1] / E[3] - 1)
+        assert r.n_restart_steps == (3 if kw is ON else 0)
     assert after[True] < 1e-10 and after[False] < 1e-10      # 2.7e-11, 2.8e-11
     assert total[True] < 1e-5, total                          # 5.49e-06
     assert total[False] == pytest.approx(3.932e-3, rel=1e-3)  # the half-step start
@@ -354,9 +356,9 @@ def _tank_peak(N, **kw):
 def test_a_resonant_tank_keeps_its_peak_through_the_restarts():
     """Gate: flag-on peak error within 1.5x the flag-off error at T/50
     and T/100 (the BE pair: -11.9 % / -3.1 %, 14x and 56x)."""
-    ref = _tank_peak(1600)[0]                       # 100.658 A
+    ref = _tank_peak(1600, **OFF)[0]                # 100.658 A
     for N, err_off in ((50, -0.855e-2), (100, -0.055e-2)):
-        pk_off = _tank_peak(N)[0]
+        pk_off = _tank_peak(N, **OFF)[0]
         pk_on, r = _tank_peak(N, **ON)
         assert pk_off / ref - 1 == pytest.approx(err_off, rel=0.02)
         assert abs(pk_on / ref - 1) <= 1.5 * abs(pk_off / ref - 1), (N, pk_on, pk_off, ref)
@@ -383,7 +385,7 @@ def _isolated_lc(**kw):
 def test_an_isolated_pwm_source_does_not_drain_an_lc():
     """Gate: the LC's energy after 100 periods within 0.5 % of flag-off
     (the BE pair kept 0.019 of it)."""
-    e_off, _ = _isolated_lc()
+    e_off, _ = _isolated_lc(**OFF)
     e_on, r = _isolated_lc(**ON)
     assert e_off == pytest.approx(0.9961, abs=2e-4)
     assert abs(e_on - e_off) <= 5e-3, (e_on, e_off)   # engine: 0.9973
@@ -485,7 +487,7 @@ def test_one_factor_per_mask_and_no_refactor():
     analysis."""
     caches = []
     runs = [_buck(1.0, 0.5, 100, nper=1000, on_cache=caches.append, **kw)
-            for kw in ({}, ON)]
+            for kw in (OFF, ON)]
     assert runs[1].n_restart_steps >= 6000        # 3 steps x two edges per period
     assert runs[1].n_restart_factorizations == 4
     assert runs[0].n_restart_factorizations == 0
@@ -513,7 +515,7 @@ def test_substep_correction_requires_the_restart_rule():
     b.add_capacitor("C", "c", "gnd", 1e-6)
     with pytest.raises(p.UnsupportedError, match="requires discontinuity_restart") as ei:
         p.simulate(b, t_end=1e-5, dt=1e-6, engine="pwl",
-                   enable_substep_state_correction=True)
+                   enable_substep_state_correction=True, **OFF)
     assert (ei.value.engine, ei.value.feature) == ("pwl", "enable_substep_state_correction")
     p.simulate(b, t_end=1e-5, dt=1e-6, engine="pwl",
                enable_substep_state_correction=True, **ON)
@@ -534,7 +536,7 @@ def test_the_observer_keeps_its_label_under_the_rule():
                          step_observer=lambda t, x: calls.append((t, float(x[1]))), **kw)
         return calls, np.asarray(res.v("a"))
     calls, v = run(**ON)
-    off_calls, _ = run()
+    off_calls, _ = run(**OFF)
     assert [c[0] for c in calls] == [c[0] for c in off_calls]
     assert [c[0] for c in calls] == pytest.approx([0, 1e-6, 2e-6, 3e-6, 4e-6, 5e-6], abs=1e-15)
     assert [c[1] for c in calls] == pytest.approx([v[0]] + list(v[:-1]), abs=1e-15)
@@ -580,7 +582,7 @@ def _sat_edge(dt, **kw):
 def test_saturable_inductor_across_an_edge_is_second_order():
     on = [_sat_edge(dt, **ON) for dt in (4e-6, 2e-6, 1e-6, 5e-7)]
     assert all(f >= 3.7 for f in _factors(on)), on     # engine: 4.94e-5 ... 7.82e-7
-    off = _sat_edge(2e-6)
+    off = _sat_edge(2e-6, **OFF)
     assert abs(off) >= 20 * abs(on[1]), (off, on[1])    # 1.07e-2 vs 1.24e-5
 
 
@@ -659,7 +661,7 @@ def test_stateful_devices_are_second_order_through_a_restart(fn, dts, off_ratio)
     on, n = _richardson(fn, dts, **ON)
     assert all(3.5 <= r <= 4.6 for r in on), on
     assert n == 6                                   # start window + the edge window
-    off, _ = _richardson(fn, dts)
+    off, _ = _richardson(fn, dts, **OFF)
     assert all(abs(r - off_ratio) <= 0.2 for r in off), off
 
 
@@ -800,7 +802,7 @@ def test_rectifier_with_the_rule_agrees_with_trbdf2_better_than_without(classic)
         t, v = _rect3(50e-6, classic, **kw)
         return float(np.max(abs(v - np.interp(t, tr, vr))))
 
-    off, on = err(), err(**ON)
+    off, on = err(**OFF), err(**ON)
     # engine, max |error| over 40 ms: off 13.45 / 17.84 V; on 0.762 /
     # 3.441 V (16.66 / 18.35 V before the stage-2 fallback)
     assert on < 0.3 * off, (on, off)
