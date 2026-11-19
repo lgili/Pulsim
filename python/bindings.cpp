@@ -6556,7 +6556,7 @@ void init_module(py::module_& m) {
            std::vector<bool> observer_monitors,
            std::vector<Real> observer_origins,
            std::vector<std::uint64_t> observer_next_k,
-           device::DevicePath device_path, int mode_selection) {
+           device::DevicePath device_path, int mode_selection, int integrator) {
             solver::BExtraFn b_extra_fn;
             std::function<Real(Real)> unused_next_jump;  // trbdf2 lands its ticks
             resolve_b_extra(b_extra_obj, b_extra_fn, unused_next_jump);
@@ -6622,6 +6622,7 @@ void init_module(py::module_& m) {
             }
             o.on_impulse_error = on_impulse_error;
             o.mode_selection = mode_selection;
+            o.integrator = integrator;
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "trbdf2");
             std::optional<Vector> x0;
@@ -6716,6 +6717,7 @@ void init_module(py::module_& m) {
         py::arg("observer_next_k") = std::vector<std::uint64_t>{},
         py::arg("device_path") = device::DevicePath::Legacy,
         py::arg("mode_selection") = 0,
+        py::arg("integrator") = 0,
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "

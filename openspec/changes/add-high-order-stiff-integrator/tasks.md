@@ -26,14 +26,14 @@ Reference values (`probes/`; ideal LC: 100 µH, 100 nF, 10 V,
 - [x] 2.6 Measurement gate (counters, LC, 1000 periods, equal rtol ∈ {1e-5, 1e-6, 1e-8}): linear solves per period at most one quarter of TR-BDF2's (prototype: 4.7, 5.4, 7.6 times fewer); factorizations per accepted step at most 1
 
 ## 3. Integrator in the unified stepper (needs `refactor-unified-transient-stepper`, `add-unified-device-interface`)
-- [ ] 3.1 `Esdirk43` behind the integrator interface; general stage context `(β·h, ψ)` for devices; stage predictors
-- [ ] 3.2 Newton per stage with the existing acceptance rules; failure of a stage rejects the step
-- [ ] 3.3 `integrator='esdirk43'` in `simulate()`; refusal with the fixed controller; conformance-table rows
-- [ ] 3.4 Tests: Shockley rectifier and a Level-1 MOSFET buck agree with TR-BDF2 at rtol 1e-9 within 1e-5; a saturable-inductor LC agrees within 1e-5; `engine='auto'` results unchanged
+- [x] 3.1 `Esdirk43` behind the integrator interface: the engine's take / error / after_solve / commit phases instantiated per integrator (`step::run<Esdirk43>`), stages through the linear companion histories with an arbitrary ψ (DECISIONS 15). NOT done: the device interface's general `(β·h, ψ)` stage for stateful Newton kinds (refused by name), stage predictors
+- [x] 3.2 Newton per stage with the existing acceptance rules (the engine's own Newton per stage solve); failure of a stage rejects the step (h/4). NOT done: one Jacobian per attempt with the refresh rule of DECISIONS 8
+- [x] 3.3 `integrator='esdirk43'` in `simulate()` on `engine='trbdf2'` (default off); refused by name on pwl and on the exact engine, on the legacy loop, and per device for stateful Newton histories (`feature='integrator=esdirk43'`); the `integrator` row of `kRunOptionTable` honoured on trbdf2
+- [ ] 3.4 (partly: the Shockley clamp against scipy Radau and an LC of order 4 through the engine, DECISIONS 15; the MOSFET buck agreement and the saturable-inductor LC wait for stateful histories, refused today) Tests: Shockley rectifier and a Level-1 MOSFET buck agree with TR-BDF2 at rtol 1e-9 within 1e-5; a saturable-inductor LC agrees within 1e-5; `engine='auto'` results unchanged
 
 ## 4. Events (needs `update-trbdf2-post-event-restart`)
-- [ ] 4.1 First stage from the consistent post-event solve; never reused across an event
-- [ ] 4.2 Hermite bracket, Illinois on the interpolant, landing re-step
+- [x] 4.1 First stage from the consistent post-event solve; never reused across an event (a step whose slots belong to another mode is the shared SDIRK(2,2) step, its estimate filtered; DECISIONS 15)
+- [ ] 4.2 (partly: bracket on the stage values (t, t + h/2, t + h), Illinois on ESDIRK re-steps, ESDIRK landing re-step; no dense-output bracket yet) Hermite bracket, Illinois on the interpolant, landing re-step
 - [ ] 4.3 Tests: CCM and DCM bucks of `numerics/p2_buck.py` within 1e-6 V and 1e-8 A of the 50-digit references of `add-exact-propagator-strategy` at rtol 1e-8; gate edges landed within 1e-12 s; the TR-BDF2 event tests pass on this integrator
 
 ## 5. Resonant converters with Newton devices

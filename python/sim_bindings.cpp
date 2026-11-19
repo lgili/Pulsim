@@ -92,6 +92,7 @@ py::dict trbdf2_dict(const solver::TrBdf2Options& o) {
     d["newton_roundoff_budget"] = o.newton_roundoff_budget;
     d["on_impulse_error"] = o.on_impulse_error;
     d["mode_selection"] = o.mode_selection;
+    d["integrator"] = o.integrator;
     return d;
 }
 
@@ -364,6 +365,9 @@ void init_module(py::module_& m) {
                     {{"legacy", sim::ModeSelection::Legacy},
                      {"shadow", sim::ModeSelection::Shadow},
                      {"lcp", sim::ModeSelection::Lcp}}, "mode_selection");
+            } else if (key == "integrator") {
+                o.integrator_esdirk43 = parse_enum<bool>(v.cast<std::string>(),
+                    {{"esdirk43", true}}, "integrator");
             } else if (key == "on_impulse") {
                 o.on_impulse = parse_enum<sim::OnImpulse>(v.cast<std::string>(),
                     {{"record", sim::OnImpulse::Record},

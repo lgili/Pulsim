@@ -81,7 +81,7 @@ engine accepts a keyword and ignores it. The defaults are
 | `rtol` | refused | yes | yes | 1e-5 (trbdf2), 1e-6 (exact) |
 | `atol` | refused | yes | yes | 1e-8 (trbdf2), 1e-9 (exact) |
 | `dt_init` | refused | yes | yes | kernel's choice (trbdf2), 1e-9 (exact) |
-| `integrator` | refused | refused | yes | 'auto' (exact) |
+| `integrator` | refused | yes | yes | 'auto' (exact), TR-BDF2 (trbdf2) |
 | `stiffness_threshold` | refused | refused | yes | 10.0 |
 | `h_bdf2` | refused | refused | yes | 1e-6 |
 | `t_start` | yes | yes | yes | 0.0 |
