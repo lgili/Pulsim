@@ -189,6 +189,16 @@ symmetric errors against the truth.
 
 ## Notes
 
+Engine runs graded against these truths, with a measure that has no floor
+(`exact`: the engine's own samples, one-sided at events), are in
+`EXACT_SCOREBOARD.md` (`exact_scoreboard.py`). The items marked "not
+computed" below (the stored reference's error, which converged tool is wrong
+on the two ideal twins) are computed there. `thermal/long_run_drift_buck` is
+graded there too: its plain `Solver.run` takes ~20 s (20,000 schedule
+events; the 24 minutes were the `truth` record's dt/32 CSV); 30 vs 60
+digits agree to 1.5e-31 of the range, 50-100 ms mean V(out)
+11.98801198807187 V.
+
 ### Verdicts on the eight circuits
 
 | circuit | truth | verdict on the graded cells |

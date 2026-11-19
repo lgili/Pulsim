@@ -1491,7 +1491,8 @@ class Solver:
                 tau = (t[idx] - hi) - float(seg.t0 - mp.mpf(hi))
                 for c, (r, waves) in rows.items():
                     if seg.x:
-                        v = np.array([float((r * (seg.dyn.X * seg.y(mp.mpf(float(x)))))[0]) for x in tau])
+                        xs = self._x_states(seg, t[idx])
+                        v = np.array([float((r * x)[0]) for x in xs])
                         b = np.zeros(idx.size)
                     else:
                         if (j, c) not in coef:
@@ -1527,6 +1528,29 @@ class Solver:
         jj = np.minimum(j_lo[:, None] + np.arange(m)[None, :], len(segs) - 1)
         gap = np.maximum(np.maximum(t0[jj] - t[:, None], t[:, None] - t1[jj]), 0.0)
         return out, np.where(valid, gap, np.nan)
+
+    def _x_states(self, seg, ts):
+        """x at float times ts on an expm segment: stepped in time order,
+        one expm(H h) per distinct exact gap h (an engine grid has few)."""
+        import numpy as np
+        key = (id(seg), ts.tobytes())
+        if getattr(self, "_xs_key", None) == key:
+            return self._xs_val
+        out = [None] * len(ts)
+        y, tp, cache = None, None, {}
+        for q in np.argsort(ts, kind="stable"):
+            tq = mp.mpf(float(ts[q]))
+            if y is None:
+                y = seg.y(tq - seg.t0)
+            elif tq != tp:
+                h = tq - tp
+                if h not in cache:
+                    cache[h] = mp.expm(seg.dyn.H * h)
+                y = cache[h] * y
+            tp = tq
+            out[q] = seg.dyn.X * y
+        self._xs_key, self._xs_val = key, out
+        return out
 
     def _wave_part(self, waves, seg, x):
         """Source-node part of a column on ``seg``, its time clamped to the

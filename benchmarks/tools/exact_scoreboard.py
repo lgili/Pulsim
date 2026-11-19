@@ -46,6 +46,8 @@ RAW = ROOT.parent / ".scratch" / "exact_scoreboard"
 OUT_MD = ROOT / "EXACT_SCOREBOARD.md"
 OUT_JSON = ROOT / "exact_scoreboard.json"
 DELTA = 1e-3                     # snap window, in netlist steps
+SELF_N = 5000                    # self-score: samples kept besides those near events
+ONSET = 0.05                     # the error's onset: first sample off by 5 % of tol
 # solved directly (20,000 schedule events, ~20 s); `truth` writes no record for it (its dt/32 CSV is 3.2 M rows)
 EXTRA = ("circuits/thermal/long_run_drift_buck.yaml",)
 TWINS = ("circuits/diodes/diode_rectifier.yaml", "circuits/switching/isolated/flyback_converter.yaml")
@@ -116,16 +118,27 @@ def grade(sol, tr, cols, sp, dt, tol, self_score=True):
         over = np.flatnonzero(e > tol)
         if over.size and (dep is None or t[k0 + over[0]] < dep["t"]):
             dep = dict(t=float(t[k0 + over[0]]), col=c, dev=float(e[over[0]]))
+        low = np.flatnonzero(e > ONSET * tol)
+        if over.size and low.size and (dep.get("onset_t") is None or t[k0 + low[0]] < dep["onset_t"]):
+            dep["onset_t"] = float(t[k0 + low[0]])
     if dep:
         dep["event"] = event_near(sol, dep["t"] + DELTA * dt)
+        if dep.get("onset_t") is not None:
+            dep["onset_event"] = event_near(sol, dep["onset_t"] + DELTA * dt)
     worst = max(per, key=per.get)
     rec = dict(exact=per[worst], exact_col=worst, exact_per_col=per, exact_max_pt=worst_pt,
                n_samples=int(t.size), departure=dep)
     if self_score:
-        # the truth itself (mpmath, a different code path) on this grid
-        v = sol.sample(cols, [mp.mpf(float(x)) for x in t])
-        rec["self"] = max(metrics.err_exact(t, np.array([float(x) for x in v[c]]), cand[c], span=sp[c], gap=gap)
-                          for c in cols)
+        # the truth itself (mpmath `sample`, a different code path) on this grid: every
+        # sample near an event, the rest strided to <= SELF_N (expm segments cost one expm each)
+        near = np.isfinite(gap).sum(axis=1) > 1
+        keep_s = near | (np.arange(t.size) % max(1, t.size // SELF_N) == 0)
+        keep_s[:2] = True
+        ts = t[keep_s]
+        v = sol.sample(cols, [mp.mpf(float(x)) for x in ts])
+        rec["self"] = max(metrics.err_exact(ts, np.array([float(x) for x in v[c]]), cand[c][keep_s],
+                                            span=sp[c], gap=gap[keep_s]) for c in cols)
+        rec["self_n"] = int(ts.size)
     return rec
 
 
@@ -196,7 +209,8 @@ def twins():
                     rows.append(dict(run=label, error=f"{type(ex).__name__}: {ex}"[:200]))
                     continue
             r = grade(sol, dr.traces(res, g), g, sp, case.dt, 1e-3, self_score=False)
-            rows.append(dict(run=label, exact=r["exact"], exact_col=r["exact_col"], n=r["n_samples"]))
+            rows.append(dict(run=label, exact=r["exact"], exact_col=r["exact_col"], n=r["n_samples"],
+                             departure=r["departure"]))
             print(rel, label, r["exact"], flush=True)
         out[rel] = rows
     RAW.mkdir(parents=True, exist_ok=True)
@@ -288,11 +302,16 @@ def render():
     if twin:
         L += ["", "## Ideal twins: the two converged tools that disagree", "",
               "Each tool's refinement on the ideal twin (`ideal_switch_flip_evidence.ideal_form`), "
-              "graded against the ideal truth.", "", "| circuit | run | exact | worst column |", "|---|---|---:|---|"]
+              "graded against the ideal truth (`departs`: first sample off by more than 1e-3 of span, "
+              "and the truth event before it).", "",
+              "| circuit | run | exact | worst column | departs at [s] | truth event |", "|---|---|---:|---|---:|---|"]
         for rel, rows in twin.items():
             for x in rows:
+                d = x.get("departure") or {}
+                e = d.get("event") or {}
                 L.append(f"| {rel.removeprefix('circuits/')} | {x['run']} | {_g(x.get('exact'))} "
-                         f"| {x.get('exact_col', x.get('error', ''))} |")
+                         f"| {x.get('exact_col', x.get('error', ''))} | {_g(d.get('t'))} "
+                         f"| {_g(e.get('t'))} {e.get('cause', '')} {e.get('flips', '')} |")
     L += ["", "## Full table", "", "exact (strict verdict, interp err).", "",
           "| circuit | ref exact | " + " | ".join(cfgs) + " |", "|---|---:|" + "---|" * len(cfgs)]
     for r in recs:
@@ -316,9 +335,10 @@ def render():
 
 def findings(recs, cfgs):
     L = ["## Findings for the engine tracks", "",
-         "The five largest engine errors per configuration (exact > tol). `departs`: the first "
-         "sample whose own deviation exceeds tol (fraction of span); `truth event`: the last truth "
-         "event at or before it (time, cause, the devices that flip there).", ""]
+         "The five largest engine errors per configuration (exact > tol). `onset`: the first "
+         f"sample whose own deviation exceeds {ONSET:g} tol (fraction of span), and the last truth "
+         "event at or before it (time, cause, the devices that flip there): where the engine "
+         "starts to depart. `departs`: the same at tol.", ""]
     for cfg in cfgs:
         xs = [(c["exact"], r, c) for r in recs for k, c in r["cells"].items()
               if k == cfg and "exact" in c and c["exact"] > c["tol"]]
@@ -327,14 +347,16 @@ def findings(recs, cfgs):
         if not xs:
             L += ["None above tol.", ""]
             continue
-        L += ["| circuit | exact | column | departs at [s] | dev | truth event [s] | cause | truth flips |",
-              "|---|---:|---|---:|---:|---:|---|---|"]
+        L += ["| circuit | exact | column | onset [s] | truth event at onset | departs [s] | truth event there |",
+              "|---|---:|---|---:|---|---:|---|"]
+
+        def ev(e):
+            return f"{_g(e.get('t'))} {e.get('cause', '')}: {e.get('flips', '')}" if e else "start"
         for x, r, c in xs[:5]:
             d = c.get("departure") or {}
-            e = d.get("event") or {}
             L.append(f"| {r['circuit'].removeprefix('circuits/')} | {x:.3g} | {c['exact_col']} | "
-                     f"{_g(d.get('t'))} | {_g(d.get('dev'))} | {_g(e.get('t'))} | {e.get('cause', '')} | "
-                     f"{e.get('flips', '')} |")
+                     f"{_g(d.get('onset_t'))} | {ev(d.get('onset_event'))} | {_g(d.get('t'))} | "
+                     f"{ev(d.get('event'))} |")
         L.append("")
     return L
 
