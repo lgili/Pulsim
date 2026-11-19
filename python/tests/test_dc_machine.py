@@ -102,14 +102,15 @@ def test_start_up_settles_to_the_analytic_speed_and_current():
     assert r.i("M.la")[-1] == pytest.approx(i_ss, rel=1e-6)
 
 
-def _energy_residual(r, B, T_load):
+def _energy_residual(r, B, T_load, k0=0):
     """Electrical energy in minus (copper + friction + load + stored),
-    relative to the energy in. Products are taken of interval averages:
-    for the trapezoidal rule that is the discrete energy identity."""
-    t = np.asarray(r.times)
+    relative to the energy in, from sample k0 on. Products are taken of
+    interval averages: for the trapezoidal rule that is the discrete energy
+    identity."""
+    t = np.asarray(r.times)[k0:]
     h = np.diff(t)
     avg = lambda y: 0.5 * (np.asarray(y)[1:] + np.asarray(y)[:-1])  # noqa: E731
-    i, w, v = r.i("M.la"), r.v("w"), r.v("a")
+    i, w, v = (np.asarray(y)[k0:] for y in (r.i("M.la"), r.v("w"), r.v("a")))
     ia, wa = avg(i), avg(w)
     e_in = np.sum(h * avg(v) * ia)
     e_out = (np.sum(h * R * ia ** 2) + np.sum(h * B * wa ** 2)
@@ -126,9 +127,12 @@ def test_power_is_conserved_through_the_coupling():
     b.add_dc_machine("M", "a", "gnd", "w", R_a=R, L_a=L, K=K, J=J,
                      B=B, T_load=T_load)
     r = p.simulate(b, t_end=T_END, dt=12.5e-6, engine="pwl")
-    # Measured 4.2e-9 (roundoff over 1600 steps): the interval-average
-    # products are the trapezoidal rule's own discrete energy identity.
-    assert _energy_residual(r, B, T_load) <= 1e-8
+    # The interval-average products are the trapezoidal rule's own discrete
+    # energy identity. The release restart rule takes the first three steps
+    # as SDIRK steps (not trapezoidal); past them the identity holds to
+    # 7.7e-15 (the restart-less engine: 4.2e-9 over the whole run).
+    assert r.n_restart_steps == 3
+    assert _energy_residual(r, B, T_load, k0=3) <= 1e-11
     # TR-BDF2's BDF2 stage does not satisfy that identity exactly;
     # measured 5.5e-6 (the design asked 1e-6; see DECISIONS.md D8).
     var = p.simulate(b, t_end=T_END, engine="trbdf2")
