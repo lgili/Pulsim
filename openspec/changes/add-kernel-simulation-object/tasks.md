@@ -59,7 +59,7 @@ unchanged.
 - [x] 7.1 `_run_dsed(plan)`, `_run_trbdf2(plan)`, `_run_pwl(plan)`; `simulate()` = plan → table → finalize
 - [ ] 7.2 Oracle: 1.2 passes; goldens bit-identical; fixed overhead not above 0.2
   - Done: 1.2 passes; goldens bit-identical. Open: the overhead clause (pwl 2480 -> 3538 bytecodes per call, 34.4 -> 49.1 us; DECISIONS 23).
-  - Overhead (DECISIONS 25): same counter and `.so`, pre-Stage A / Stage A / now: pwl 2551 / 3609 / 2834, trbdf2 3380 / 4413 / 3683, dsed 3993 / 5051 / 4348 bytecodes per call; RC wall pwl 41 / 57 / 45 us. NamedTuple records built with `tuple.__new__`, positional plan calls (no `locals()`), lazy diagnostics, hoisted imports. Still open: +283 (pwl) is the layout's own cost (five calls, the plan built and read back). Local-only ratchet `test_simulate_overhead.py`.
+  - Overhead (DECISIONS 25): same counter and `.so`, pre-Stage A / Stage A / now: pwl 2551 / 3609 / 2834, trbdf2 3380 / 4413 / 3683, dsed 3993 / 5051 / 4348 bytecodes per call; RC wall pwl 43.1 / 57.4 / 43.3 us (same `.so`, interleaved best-of). NamedTuple records built with `tuple.__new__`, positional plan calls (no `locals()`), lazy diagnostics, hoisted imports. Still open: +283 (pwl) is the layout's own cost (five calls, the plan built and read back). Local-only ratchet `test_simulate_overhead.py`.
 - [x] 7.3 Docs: `docs/internals` page "how a run is planned"; update the owner note's rule in `AI_GUIDE.md` ("put it in the plan")
 
 ## 8. Stage B — typed errors and diagnostics in Python

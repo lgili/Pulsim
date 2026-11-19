@@ -360,6 +360,16 @@
       8. *`sweep()`'s recipe.* `_PWL_RECIPE` is now read once while planning
          (`plan.recipe`) instead of again in the run; equal unless a hook
          sets that context variable mid-call.
+      9. *The exact engine's loss port (batch 14k, merged at fe75ee01).* A
+         circuit with `set_device_losses` on engine 'dsed' refuses
+         `integrator='bdf2'` and `t_start != 0` by name (feature
+         `device_losses`) inside `run_dsed_from_builder`: below the
+         dispatch, after the diode census's own `bdf2` refusal and before
+         `_require_supported`; pwl and trbdf2 honour both. Kept there (an
+         upstream hunk in the dispatcher, not in the old `simulate()` body;
+         lifting it into `_route` would order it before the census refusal
+         and the tick checks). A candidate for the plan when the exact
+         engine runs through it (16).
     - **6.2 left open.** `_finalize` already runs `_auto_check_voltage_sanity`
       on dsed results today (the arrays path); what differs is pwl's own
       inline check (`find_implausible_voltage` on the result, one broad
@@ -438,9 +448,11 @@
     - **What remains (+283 pwl, +303 trbdf2, +355 dsed):** the cost of the
       layout itself: five calls instead of one body, the plan built and
       read back field by field. Removing it means merging the functions
-      back; not done. Wall time, best of 9x300 on an RC (information only,
-      the shared Mac swings +-20 %): pwl 41.1 -> 57.0 -> 44.9 us, trbdf2
-      ~210-240 us in all three (noise larger than the difference).
+      back; not done. Wall time (information only; RC, 2 steps, best of
+      42 x 9 x 300 calls, the three trees interleaved, same `.so`): pwl
+      43.1 -> 57.4 -> 43.3 us, trbdf2 236.4 -> 255.2 -> 220.9 us: the wall
+      regression is gone within the machine's noise; the bytecodes that
+      remain are cheap ones.
     - **Gate:** `python/tests/test_simulate_overhead.py`, a LOCAL-only
       ratchet (CPython 3.13 on darwin, skipped when `CI` is set): pwl <=
       2890, trbdf2 <= 3760, counted in a fresh interpreter (inside the
@@ -453,3 +465,12 @@
       390/390, `trbdf2_identity` 370/371 (the one difference is the
       extract's absolute path inside a YAML loader message; equal with the
       path substituted).
+    - **Merged fe75ee01 (batch 14k) after this, no conflict** (the PR head
+      did not touch `__init__.py`). Oracles of the merged tip vs a clean
+      `git archive` extract of fe75ee01 with its `.so`: pytest 5819 -> 5831
+      passed (this branch's tests), warning set 425 = 425, goldens /
+      stateful / engines / options / hooks identical, `pwl_identity`
+      390/390, `trbdf2_identity` 370/371 (the same extract-path artifact),
+      `-m reference` 383. The loss-port refusals are item 9 of 23.
+      Bytecodes on the merged tip: 2834 / 3683 / 4374 (dsed: the PR head's
+      own +26, 3993 -> 4019).
