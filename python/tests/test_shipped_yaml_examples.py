@@ -195,8 +195,8 @@ def test_simulate_without_a_simulation_block_names_the_yaml(tmp_path):
     with pytest.raises(ValueError, match="no_sim.yaml") as ei:
         p.simulate(lc)
     assert "no top-level 'simulation:' block" in str(ei.value)
-    # Supplying t_end runs it (no dt -> the variable-step engine).
-    assert p.simulate(lc, t_end=1e-3).engine_used == "trbdf2"
+    # Supplying t_end runs it (no dt -> the exact engine since the release; trbdf2 before).
+    assert p.simulate(lc, t_end=1e-3).engine_used == "dsed"
 
 
 def test_simulate_from_options_of_an_empty_yaml_says_why():
