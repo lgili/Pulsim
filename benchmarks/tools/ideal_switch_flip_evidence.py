@@ -578,7 +578,7 @@ def _render_ideal(by, circuits, cfgs):
 def _tables(md):
     """{(section, key): row} of every table row; the key is the identifying columns
     (circuit / config / variant, configuration / variant, or circuit)."""
-    out, sec, width = {}, None, 0
+    out, sec, width, keep = {}, None, 0, []
     for ln in md.splitlines():
         if ln.startswith("#"):
             sec, width = ln.lstrip("# ").split(" (")[0], 0
@@ -587,8 +587,9 @@ def _tables(md):
             if not width:
                 width = 3 if cells[:3] == ["circuit", "config", "variant"] else \
                     2 if cells[:2] == ["configuration", "variant"] else 1
+                keep = [i for i, h in enumerate(cells) if i >= width and "wall" not in h]  # wall: one-run noise
                 continue
-            out[(sec, tuple(cells[:width]))] = " | ".join(cells[width:])
+            out[(sec, tuple(cells[:width]))] = " | ".join(cells[i] for i in keep if i < len(cells))
     return out
 
 
@@ -601,7 +602,7 @@ def previous_section(md, rev):
     secs = list(dict.fromkeys(k[0] for k in [*a, *b]))
     L = ["", "## Changes against the previous evidence", "",
          f"Every table row above compared with the report stored at `{rev}` (rows keyed by circuit / "
-         "configuration / variant; `removed` = the row is no longer listed, e.g. a cell that is no "
+         "configuration / variant; the one-run wall-ratio column is left out; `removed` = the row is no longer listed, e.g. a cell that is no "
          "longer worse; `added` = newly listed).", "",
          "| section | unchanged | changed | added | removed |", "|---|---:|---:|---:|---:|"]
     rows = []
