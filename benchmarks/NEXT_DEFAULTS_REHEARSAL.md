@@ -1,12 +1,12 @@
 # Next-defaults rehearsal
 
-Rehearsal of the number-changing release, rendered on `52aa918a` from the cell cache of `run`
+Rehearsal of the number-changing release, rendered on `56e31ab8` from the cell cache of `run`
 (method and tables below the blocker list; where the cells and the pytest blast radius ran: `## Notes`).
 
 The profile at this head has no `output_rtol` (the exact engine's output-grid rule is not
 integrated yet): `auto+next` runs the exact engine without dt at its default output
-ceiling, so its strict counts are expected to stay where the previous rehearsal put them
-(80 / 28 / 1); the measured counts are in the tables below.
+ceiling, so its strict counts were expected to stay where the previous rehearsal put them
+(agree / disagree / error 80 / 28 / 1). Measured here: 80 / 28 / 1 (`engine='auto'` today: 106 / 2 / 1).
 
 ## Ranked blocker list
 
@@ -734,5 +734,6 @@ Hand-written; kept by `render`.
   form) are read from those identical tables. Blast radius: 480 failed / 0 errors (was 479 at 492349fe). The one
   new failure is `test_device_fields.py::test_the_device_reference_page_is_current` (the page generated
   from the device field tables differs while `add_switch` / `add_diode` are patched to the branch form: a
-  harness artefact of the patch, like the circuit digests; it passes without the profile). No earlier
+  harness artefact of the patch, like the circuit digests; it passed in this tree's plain full
+  pytest run, 5945 passed / 110 skipped / 8 xfailed; that log is not stored). No earlier
   failure went away.

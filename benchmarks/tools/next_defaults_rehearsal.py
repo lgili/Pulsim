@@ -604,8 +604,14 @@ def blockers(allu, rows):
     if not any("output_rtol" in d for d in nd.PROFILE.values()):
         L += ["The profile at this head has no `output_rtol` (the exact engine's output-grid rule is not",
               "integrated yet): `auto+next` runs the exact engine without dt at its default output",
-              "ceiling, so its strict counts are expected to stay where the previous rehearsal put them",
-              "(80 / 28 / 1); the measured counts are in the tables below.", ""]
+              "ceiling, so its strict counts were expected to stay where the previous rehearsal put them",
+              "(agree / disagree / error 80 / 28 / 1). Measured here: "
+              + " / ".join(str(sum(u["cells"].get("auto+next", {}).get("outcome") == o for n, u in allu.items()
+                                   if not n.startswith("analytic:"))) for o in ("agree", "disagree", "error"))
+              + " (`engine='auto'` today: "
+              + " / ".join(str(sum(u["cells"].get("auto", {}).get("outcome") == o for n, u in allu.items()
+                                   if not n.startswith("analytic:"))) for o in ("agree", "disagree", "error"))
+              + ").", ""]
     L += [
          "## Ranked blocker list", "",
          "### 1. Cells worse under the profile than under today's default, by class",
