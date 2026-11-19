@@ -23,7 +23,13 @@ def _mask(*bits):
     return m
 
 
-def test_h1_forward_biased_ideal_diode_across_a_source_is_refused():
+@pytest.mark.parametrize("mode", [
+    "legacy",
+    pytest.param("auto", marks=pytest.mark.xfail(strict=True, reason=(
+        "release finding F-3-2: under mode_selection='lcp' (the release default here) the "
+        "refusal's .device is the label 'D (branch #1)', not the device name 'D'"))),
+])
+def test_h1_forward_biased_ideal_diode_across_a_source_is_refused(mode):
     # Before: released OFF, re-solved, cycle-detected as a breach on 100 of
     # 101 steps; the run went on with the diode stuck OFF.
     b = p.CircuitBuilder()
@@ -32,7 +38,7 @@ def test_h1_forward_biased_ideal_diode_across_a_source_is_refused():
     b.add_resistor("R", "a", "c", 1.0)
     b.add_capacitor("C", "c", "gnd", 1e-6)
     with pytest.raises(p.UnsupportedError) as ei:
-        _quiet(lambda: p.simulate(b, 1e-4, dt=1e-6, engine="pwl"))
+        _quiet(lambda: p.simulate(b, 1e-4, dt=1e-6, engine="pwl", mode_selection=mode))
     assert (ei.value.feature, ei.value.device, ei.value.kind) == (
         "ideal_voltage_loop", "D", "Diode")
 
@@ -60,10 +66,11 @@ def _rl_ideal():
 
 def test_h4_auto_routes_an_ideal_switch_like_any_circuit():
     """Task 5.5: trbdf2 runs the branch form, so engine='auto' routes an ideal-switch
-    circuit like any other (design D7): no dt -> trbdf2, dt -> pwl."""
+    circuit like any other (design D7): no dt -> the exact engine (since the release;
+    trbdf2 before), dt -> pwl."""
     fn = lambda t: _mask(True)  # noqa: E731
     r = _quiet(lambda: p.simulate(_rl_ideal(), 1e-4, engine="auto", switch_fn=fn))
-    assert r.engine_used == "trbdf2"
+    assert r.engine_used == "dsed"
     r = _quiet(lambda: p.simulate(_rl_ideal(), 1e-4, dt=1e-6, engine="auto", switch_fn=fn))
     assert r.engine_used == "pwl"
 
@@ -136,7 +143,10 @@ def test_m6_ccm_buck_ideal_pair_runs_without_the_restart_rule():
         m = p.SwitchStateMask(n)
         m.set(k, (t % T) < 0.5 * T)
         return m
-    r = _quiet(lambda: p.simulate(b, 20 * T, dt=T / 50, engine="pwl", switch_fn=fn))
+    # Legacy subject: the restart-less step and the settle's loop release (the release
+    # defaults restart and let the LCP decide D: same i_L, no release to count)
+    r = _quiet(lambda: p.simulate(b, 20 * T, dt=T / 50, engine="pwl", switch_fn=fn,
+                                  discontinuity_restart=False, mode_selection="legacy"))
     assert len(r.reinit_records) == 0
     assert r.counters["ideal_loop_releases"] > 0  # each turn-on releases D
     assert np.asarray(r.i("L"))[-1] > 0.5        # CCM: never reaches zero
