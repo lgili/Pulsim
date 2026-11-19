@@ -519,3 +519,11 @@ The open questions of `design.md` had no answer and none was marked
    onto t and land a no-op (no charge error, a wasted landing); reading
    both interpolation signals on the endpoint states is the next step. To
    reverse: `Vector x_ta = x_sig;`.
+   Hand-off (2026-11-18, after this fix): the PSFB example still does not
+   converge in rtol (`.scratch/t10/psfb_table.py`, 1.8-2.0 ms mean at rtol
+   1e-4 ... 1e-8: 23.966, 23.966, 23.966, 24.004, 24.005 V against
+   24.066 V; zero-time current jumps 1888 / 2415 / 2820 / 3566 / 6810).
+   The mechanism of track-10 note 43 stands (a D2/D3 tie at freewheel
+   edges, probed OFF inside the L·g_off transient); this fix does not
+   address it. Next in order: that tie, then the conditioning floor keyed
+   on the pre-settle mode.
