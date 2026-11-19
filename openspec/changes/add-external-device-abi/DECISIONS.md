@@ -321,3 +321,9 @@
   charge), 3.2–3.4, 1.5, stages 4–6.
 - #19 (built-in saturable inductor not seeded by pwl `start_from_dc_op`) is
   for the device-interface track.
+- Verified on 518e70c4 (macOS arm64 only): every C++ test target builds on
+  Eigen 5; xdev / yaml / layer5_v3 / step pass on Eigen 5 and Eigen 3.4.0;
+  full pytest 0 failed. The race model `liar_racy` needed `volatile` scratch:
+  at -O2 the store was forwarded and the 4-thread probe saw no race (the
+  probe was right, the test model was not). Full ctest, Linux, Windows not
+  run on this tip.
