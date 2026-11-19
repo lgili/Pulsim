@@ -335,7 +335,7 @@ No cell worse, none newly refused. The dsed `better` is
 `flyback_converter` (err 2.72e-6 → 2.69e-6, both agree: the 1 % rule). `benchmarks/IDEAL_SWITCH_FLIP_EVIDENCE.md` is regenerated with every variant
 on one tree in 6e.
 
-### 6e. Evidence regenerated, references with an uncertainty (tree `36a3936108`)
+### 6e. Evidence regenerated, references with an uncertainty (tree `e62faed4b8`)
 
 `ideal_switch_flip_evidence.py --resume DIR`, every variant in one run on the
 committed tree (`benchmarks/IDEAL_SWITCH_FLIP_EVIDENCE.md`). `branch`, `lcp`,
