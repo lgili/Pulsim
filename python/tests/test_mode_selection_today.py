@@ -85,26 +85,29 @@ def test_boost_zero_threshold_pwl_and_trbdf2_match_reference(R):
 
 
 @pytest.mark.parametrize("R,settle", [(500.0, 43.7090734186091), (50.0, 23.673043048750188)])
-def test_boost_zero_threshold_dsed_settle_is_wrong_and_the_guard_repairs_it(R, settle):
-    """The settle alone (the guard switched off) was silently wrong: 43.70907 / 23.67304 V
-    (`settle`, kept as the record). It is now judged and refuses at the first wrong event
-    (DECISIONS #26). Slice 2's default-mode guard (task 4) judges each settled mode and lets
-    the LCP decide the events it fails, and 'lcp' decides every event: both land on the
-    reference. Corrected pin (was: the default run == the settle's wrong number)."""
+def test_boost_zero_threshold_dsed_settle_alone_lands_on_the_reference(R, settle):
+    """The settle alone (the guard and the law check switched off) was silently wrong:
+    43.70907 / 23.67304 V (`settle`, kept as the record), then refused at its first wrong event
+    (DECISIONS #26) and repaired by the default-mode guard. Since the settle reads a located
+    event's decision on the settled state with the significance ladder (exact engine sessions
+    10-13), it stays right at every DCM current zero: measured 3.1e-6 / 5.1e-7 V from the
+    reference, the guard repairs nothing, and 'lcp' lands on the same number.
+    Re-pinned (was: the settle refuses, the guard repairs > 0)."""
     import pulsim._dsed_dispatch as DD
     b, fn = _boost(0.0, R)
     assert REF_BOOST[R] - settle > 0.1
     saved = DD.MODE_GUARD, DD.DIODE_LAW_REL
-    DD.MODE_GUARD, DD.DIODE_LAW_REL = False, 0.0  # isolate the settle's own refusal
+    DD.MODE_GUARD, DD.DIODE_LAW_REL = False, 0.0  # the settle on its own
     try:
-        with pytest.raises(p.UnsupportedError) as ei:
-            p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn)
+        r0 = p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn)
     finally:
         DD.MODE_GUARD, DD.DIODE_LAW_REL = saved
-    assert (ei.value.feature, ei.value.device.split()[0]) == ("consistent_mode", "D1")
+    assert _end(r0, "out") == pytest.approx(REF_BOOST[R], abs=1e-5)
+    b, fn = _boost(0.0, R)
     r = p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn)
     assert _end(r, "out") == pytest.approx(REF_BOOST[R], abs=1e-5)
-    assert r.diagnostics["mode_guard"]["repairs"] > 0
+    assert r.diagnostics["mode_guard"]["repairs"] == 0
+    b, fn = _boost(0.0, R)
     r_lcp = p.simulate(b, t_end=400 * T, engine="dsed", switch_fn=fn, mode_selection="lcp")
     assert _end(r_lcp, "out") == pytest.approx(REF_BOOST[R], abs=1e-5)
 

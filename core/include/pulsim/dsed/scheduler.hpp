@@ -784,24 +784,22 @@ private:
     }
 
     /// Whether a bracket that starts at `ga` can hold an event: a diode
-    /// predicate fires only when its signal LEAVES the admissible side.
-    /// One that starts past its threshold by more than the zero band
-    /// `band` and comes back is not an event: after a commutation the
-    /// projection leaves ~1e-14 A of rounding in an inductor in series
-    /// with an OFF diode, which g_off turns into 1e-5 V that relaxes in
-    /// L·g_off (1e-13 s). Firing on that return re-decided the same mode
-    /// until the chatter guard threw. A start inside the band is read
-    /// both ways, as before: an ON diode left at i = 0 (±1e-14 V) by a
-    /// series-pair turn-off whose current then drifts negative at leak
-    /// scale is caught by that crossing (the single-phase bridge with a
-    /// floating bus held D1 ON at −190 nA for 4.9 ms without it).
-    /// `band_of()` gives the zero band (zero_band_tol_ at the step
-    /// start); it is evaluated only for a start past the threshold.
-    template <class Band>
-    [[nodiscard]] static bool starts_admissible_(PredicateType t, Real ga,
-                                                 Band&& band_of) {
-        const Real s = ga * static_cast<Real>(admissible_sign_(t));
-        return !(s < Real{0}) || !(s < -band_of());
+    /// predicate fires only when its signal LEAVES the admissible side, so
+    /// a bracket that starts past the threshold (by any amount) and comes
+    /// back is never an event. Past it significantly, the mode was
+    /// inconsistent: the mode decision's case (as a zero start leaving on
+    /// its event side, zero_start_admissible_). Past it insignificantly,
+    /// the value is rounding: after a commutation the projection leaves
+    /// ~1e-14 A in an inductor in series with an OFF diode, which g_off
+    /// turns into 1e-5 V relaxing in L·g_off (1e-13 s), and the start-up
+    /// state reads 1e-21 V on the wrong side of a tie; firing on those
+    /// returns re-decided the same mode (the chatter guard threw, or a
+    /// burst of no-op events at 1e-17..5e-12 s). A signal that starts
+    /// inside its significance bound on the event side and drifts further
+    /// out is the scan's drift case, not a crossing. (This replaces the
+    /// zero band that bounded the skip: no threshold is needed.)
+    [[nodiscard]] static bool starts_admissible_(PredicateType t, Real ga) {
+        return !(ga * static_cast<Real>(admissible_sign_(t)) < Real{0});
     }
 
     /// The probe step for a predicate that starts a step exactly on
@@ -947,11 +945,6 @@ private:
         loc_t_tol_ = t_tol;
 
         const auto& preds = predictor_.predicates();
-        Real band = Real{-1};
-        const auto band_of = [&]() -> Real {
-            if (band < Real{0}) band = zero_band_tol_(t0, x0);
-            return band;
-        };
         for (std::size_t ip = 0; ip < preds.size(); ++ip) {
             const auto& p = preds[ip];
             if (p.required_bit >= 0 &&
@@ -1048,11 +1041,11 @@ private:
                 };
                 if (ga * gb < Real{0}) {
                     // coming back from past the threshold is no event
-                    if (starts_admissible_(p.type, ga, band_of) && confirmed())
+                    if (starts_admissible_(p.type, ga) && confirmed())
                         root = locate_root_bracket(g_at, ta, tb, ga, gb, t_tol);
                 } else if (gb == Real{0}) {
                     // zero to zero is no crossing (a diode at rest)
-                    if (ga != Real{0} && starts_admissible_(p.type, ga, band_of) && confirmed())
+                    if (ga != Real{0} && starts_admissible_(p.type, ga) && confirmed())
                         root = tb;
                 } else if (dio && static_cast<Real>(s) * gb < Real{0}
                            && !(static_cast<int>(ip) == last_fired_index_ && ta == last_fired_t_)) {
@@ -1670,11 +1663,6 @@ private:
         int best_priority = std::numeric_limits<int>::max();
 
         const auto& preds = predictor_.predicates();
-        Real band = Real{-1};
-        const auto band_of = [&]() -> Real {
-            if (band < Real{0}) band = zero_band_tol_(t0, x0);
-            return band;
-        };
         for (std::size_t ip = 0; ip < preds.size(); ++ip) {
             const auto& p = preds[ip];
             // v2.0 Phase 3 — state-dependent arming. A diode's
@@ -1707,7 +1695,7 @@ private:
                 }
                 ta = t0 + d;
             }
-            if (g0 * g1 >= Real{0} || !starts_admissible_(p.type, g0, band_of)) continue;
+            if (g0 * g1 >= Real{0} || !starts_admissible_(p.type, g0)) continue;
 
             // Locate root via Illinois on the Hermite interpolant.
             auto g_at = [&hermite_g, ta, t1, g0, g1](Real tau) -> Real {

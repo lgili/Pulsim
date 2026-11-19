@@ -26,4 +26,4 @@
 +            switch_fn_.register_event(t_event, name, ptype, aux_index);
          }
  
-         // State projection — clamp algebraic constraints at the event.
+         // The root's error as a state error (x along the pre-event mode over

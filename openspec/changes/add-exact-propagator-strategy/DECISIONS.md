@@ -398,3 +398,48 @@ Truth per example: a closed form, or trbdf2 at rtol 1e-10 and pwl with event spl
 1. Local commit only (bar not met). Debug code stripped.
 2. NEW, not diagnosed: 12 banks default (`fuzz10_lib.bank(12, 0)`, 10 ms, engine='exact') refused by the stored-sample law check: Db7c ON at −7.45e-6 A at 6.88 ms (27 samples). Not known whether b8ab1106 had it (session 13 never ran the banks). Bisect: toggle the `dx0` argument in `zero_band_on_` (the only decision change of this session).
 3. Then `test_a_signal_returning…[lcp]` (start-up bursts, both modes), then the whole bar of the session-14 brief (verify_t.sh, banks, truths, orbit, design-thermal, old band).
+
+## Session 15 (exact engine 14): the whole bar measured first (2026-11-19)
+
+### Step 1 — the bar at 81f2991a (measured before any change)
+
+| Item | Result at 81f2991a | Log |
+|---|---|---|
+| dsed / layer4_v3 / mode C++ targets, Eigen 5 | 129 / 22 / 32 cases pass (27773 / 124 / 4947 assertions) | `.scratch/logs/verify_s15a.out` |
+| same, Eigen 3.4.0 | identical counts, all pass | idem |
+| full pytest | **6 failed**, 5076 passed, 108 skipped, 6 xfailed. Failures: `test_a_signal_returning…[lcp]` (32 events ≥ 30); `test_bridge_behind_an_ideal_transformer_is_passive_nonreciprocal` (guard repairs 4, pinned 2; bus −4.0e-9 V from pwl, every diode law holds); `test_boost_zero_threshold_dsed_settle_is_wrong_and_the_guard_repairs_it[500/50]` (DID NOT RAISE: the settle alone is now RIGHT, 3.1e-6 / 5.1e-7 V from the reference, 0 repairs); `test_zero_threshold_boost_disagreements_are_the_settles_errors` (0 disagreements in 258 events: same cause); `test_the_hook_patch_still_applies_to_the_scheduler` (session 14's `loc_dx_` block sits between the hook's context lines) | `.scratch/pytest_s15a.log` |
+| `pytest -m reference` | 373 passed | verify log |
+| `reference_status` | exit 0; strict dsed 97 / 0 / 0 / 12 / 0 (base) | `.scratch/refstatus_s15a.json` |
+| ruff / openspec strict / stubs | clean / 78 passed / up to date | verify log |
+| pwl, trbdf2 goldens + bit-identity (base s12m) | byte-identical (every pwl/trbdf2 array, default and shadow) | `.scratch/logs/{golden,bitid}_tip.log` |
+| dsed goldens + bit-identity | golden: `syncbuck_dsed` states max 2.7e-14; bit-identity 8 dsed arrays moved: bridge1_vf07 2 events fewer (40010 → 40008 samples; end state 4.6e-14 of scale, 2.1e-3 only where interpolated across a shifted event), bridge3 4 fewer (8.4e-12), bridge3_vf07 3.1e-15, buck_ccm 2.1e-14, buck_dcm 1.5e-16 | `.scratch/s18/bitmag.py` |
+| banks (`fuzz10.py N 1`, 20 ms; 12 banks 10 ms) | 1 bank: default runs, **lcp refuses** (Dt0a chattering at 3.45e-13 s); **9 banks refuse on both** (Dt1c chattering at 1.6e-15 s); 10 banks run on both; 12 banks refused on both (Db7c ON at −7.45e-6 A, 6.88 ms) | `.scratch/logs/bar_banks_tip.log` |
+| ten banks × 11 at 1e-15 fuzz | 10 run, **k = 4 refused on both** (an OFF diode forward-biased by 2.03 kV at 0.946 ms, 1 sample); default 2 distinct mode sequences, end-state spread 3.2e-5 | idem |
+| tied bridge V_f = 0 / 0.7 × 21, bridge1, gated (`fuzz_engine.py 21`) | every run, 1 mode sequence each; event-time spread ≤ 2.9e-12 s; end-state spread ≤ 4.8e-11 | `.scratch/logs/bar_fuzz_tip.log` |
+| ten banks vs 50-digit truth (0.1 ms) | bus −1.39e-9 V, i(L0a) 8.6e-12 A (bound 1e-7 V) both selections | `.scratch/logs/bar_truths_tip.log` |
+| floating-bus bridge vs 311.343881428885841697 V | −4.09e-10 V both selections; worst event time 1.1e-11 s | idem |
+| boost-DCM orbit (`boost_orbit.py`) | v* 36.5944008378648 (6.7e-11 V from the orbit; kernel and python loop), 21 period runs | `.scratch/logs/bar_orbit_tip.log` |
+| design-thermal 125 °C at 1e-9 | passes (also in the full pytest) | `.scratch/logs/bar_thermal_tip.log` |
+| exact scoreboard, dsed column vs truth2's mpmath truth (driver `.scratch/s18/sb_dsed.py`, reads truth2 read-only) | 81 / 81 below 1e-3; worst `diode_half_wave_rl_load` 4.87e-6 (PR head 4.9e-6). No circuit worse beyond rounding: the largest ratios are 1.7× on 2.8e-15 (`boost_switching_complex`) and 1.2× on 4.9e-14 | `.scratch/s18/sb/tip.json`, `.scratch/s18/sb_cmp.py` |
+
+### B — the start-up bursts: crossings in the wrong direction (fixed)
+
+Not a wrong start-up mode: S0 is the same on both selections and none of the 6 (default) / 12 (lcp) events between 1.3e-17 and 5.2e-12 s changes a bit (`right_limit_switch_states` = S0 after each). Bridge 0's phase a sits at 0 V on a tie at t = 0; the unsettled start reads its OFF diodes' signals at ±2.1e-21 V on the EVENT side, and the first bracket goes to the admissible side. The locator took that sign change as a crossing (`starts_admissible_` skipped event-side starts only beyond the zero band 1e-12 × max |v|), `fire_event_` flipped the bit, the settle flipped it back. Fix (one rule, no threshold): a bracket that starts on the event side and comes back is never an event — significantly past, the mode was inconsistent (the decision's case, as a zero start leaving on its event side); insignificantly past, it is rounding; a drift further out is the scan's drift case. The zero band leaves `starts_admissible_` (both scans). After: 20 events on both selections, none before 1e-4 s; the 1-bank lcp and 9-bank refusals are the same defect (chatter at 1e-15…1e-13 s) and run. The brief's remedy (the t = 0 decision on the settled state, `settled_` at the start) was tried: no effect on the bursts, and it broke `test_a_short_pulse_counts_wherever_it_sits_in_the_period[1e-07]` (0.80000005 vs 0.80000019 W): the settle length 40/ρ_min is not capped at the next time event, and the 1 ps pulse's edge is inside it. Removed. LATENT: `settled_` at a located event has the same uncapped δ (an event within δ of a gate edge reads past the edge); not seen to fire.
+
+### A — twelve banks: a right turn-on, then a current the bound cannot see (diagnosed, not fixed)
+
+Bisect: not the root-error term (`dx0` off: identical refusal, −3.7e-6 A at 6.8776 ms), so b8ab1106 has it too; the cause is session 13's bound. Event table: Dt0a turns OFF at 6.877592200 ms (its located current zero); the settle reads Db7c's OFF-mode signal on the settled state at +1.6e-11 s: +1.566e-3 V against B = 9.9e-7 V, so ON is right (v_n jumps 0.27 V when the top rail loses Dt0a). In the ON mode Db7c's signal is then never significant: the ladder from the event reads 0, ±1.86e-9, −3.7e-9 V up to the cap (B = 9.9e-7 V), the current drifts to −1.07e-3 A over 14.7 µs (= −1.07e-6 V, the size of B) and leaves at 6.892 ms. B's terms (Db7c, ON): n = 184, S = 4.86e7 V, e = 5.4e-13, F = 0.43 V: γ_n·S = 9.9e-7 V is the whole bound. S is the recovery's no-cancellation scale (1/g_off entries of the node rows of n and x7c, which cancel in v_n − v_x7c); the observed noise is 1.86e-9 V (u·S ≈ 5.4e-9 V), 500× below γ_n·S. Two rules disagree: the law check (old band: 2.25e-7 A) sees −7.45e-6 A as a violation, the decisions (B·g_on = 1e-3 A) see nothing. Not patched: replacing the law check's band by B would turn this refusal into a silent 1 mA error in a leg whose own peak is 1 mA. The cure is a better-conditioned signal for an ON diode (its series inductor's current is a state: no cancellation), or a recovery row c = e_n − e_x formed once at build in the refined precision (S drops to |c R||x|) — a design change for the next session, not a threshold.
+
+### Ten banks k = 4: a turn-off at the drift exit stores the parasitic spike (diagnosed, not fixed)
+
+Db6b (Dt6b at 81f2991a) turns OFF at 0.94610409 ms by the drift case (no sign change; located where the signal leaves its bound, g = −B): the inductor carries −4.66 µA at that instant. With both diodes of the leg OFF the stored event sample holds that current through 2·g_off: v(x6b) at 2.2 kV, which relaxes in L·g_off = 2e-13 s (next sample: the −2.2e-7 A leak). The event projection is off by default, so the sample at the event is the un-relaxed state; the law check reads one OFF diode forward-biased by 2 kV. The physics of the PWL model would re-turn the diode on for femtoseconds; the energy is ~L·i²/2 = 2e-15 J. A decision between two rules (which instant a drift is located at, and what the event sample stores), written down, not patched.
+
+### D — the old band (1e-12 × max node voltage)
+
+- `starts_admissible_`: removed (B above); the direction rule needs no threshold.
+- The settle cascade's `in_band`: kept. With an exact step it only decides whether a diode whose value law agrees with its mode is re-read on the OFF-mode trajectory (a flip always is); the re-read itself is the ladder against B. Using B there would re-read every ON diode inside 1e-3 A in the 12-bank case each round; not changed without a measurement.
+- The stored-sample law check: kept, and on purpose not B: it is a refusal, and B (γ_n·S, a worst case 500× above the observed noise in the 12-bank case) would silence it where the engine is measurably wrong. It measures the diode law against the circuit's voltage scale, the scale every tolerance of the harness uses.
+
+### `test_bridge_behind_an_ideal_transformer_is_passive_nonreciprocal` (left failing)
+
+The answer is right (bus −4.0e-9 V from pwl at 1e-7, every diode law within 1e-13 V) but the guard repairs 3 events (81f2991a: 4; pinned 2). Repairs: D1 at 5.981 ms and 25.981 ms with a judged violation of 1.05e-7 V — just over the judge's 1e-9·vscale (≈ 1e-7 V), the same phase in two periods — and D4 at 21.790 ms by 0.32 V (a real settle error, repaired). The direction rule removed the fourth (a second D1 repair at 25.981 ms, 1e-18 s later). Not re-pinned: whether the two marginal D1 repairs are the settle's error or the judge's threshold is the open question (`.scratch/s18/pas.py`).
