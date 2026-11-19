@@ -174,7 +174,6 @@ def test_switch_current_matches_inductor_when_closed():
     res = p.simulate(b, t_end=2e-3, dt=1e-7, switch_fn=sf)
     i_Q = res.i("Q1")
     i_L = res.i("L1")
-    times = np.asarray(res.times)
 
     # The mask the kernel stamped at each sample: a sample AT a gate edge
     # is the left limit (event split), which re-evaluating sf(t) misreads.
