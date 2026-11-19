@@ -674,7 +674,20 @@ public:
         // this extractor is the exact engine's
         if (pool_.num_branch_switches() > 0) {
             BranchStructureChecker structure{graph_, pool_, "dsed"};
-            if (structure.active()) (void)structure.check(mask, true);
+            if (structure.active()) {
+                const auto& ms = structure.check(mask, true);
+                // an ON ideal diode closing a loop of sources and closed ideal
+                // elements: the implicit engines turn it OFF and re-decide; the
+                // exact engine poses the mode it is given, so it refuses it by name
+                if (!ms.loop_diodes.empty()) {
+                    const std::string d{graph_.branch_name(ms.loop_diodes.front())};
+                    throw UnsupportedError(
+                        "dsed", "ideal_voltage_loop", d, "Diode",
+                        "engine 'dsed': the ideal diode '" + d + "' (R_on = 0), ON, closes a "
+                        "loop of voltage sources and closed ideal elements (loop: "
+                        + ms.loop_texts.front() + "): its current is undefined.");
+                }
+            }
         }
         // ---------------------------------------------------------
         // Steps 1-2 (v2.0 Phase 1): EXACT (G, C, b) split from the

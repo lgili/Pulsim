@@ -1366,6 +1366,7 @@ void init_module(py::module_& m) {
                         const NativeAdapter* ad = &adapter;
                         const pulsim::Index from = d.from;
                         const pulsim::Index to = d.to;
+                        const pulsim::Index var = d.var;
                         const auto prm = d.params();
                         pred.add_predicate(pulsim::dsed::EventPredicate{
                             .name = label + " turns ON",
@@ -1388,13 +1389,19 @@ void init_module(py::module_& m) {
                         });
                         pred.add_predicate(pulsim::dsed::EventPredicate{
                             .name = label + " turns OFF",
-                            .fn = [ad, from, to, prm](
+                            // an ideal (branch-form) diode's ON law reads its
+                            // solved current: V_f + i (g_on = 1, the census's
+                            // law_voltage)
+                            .fn = [ad, from, to, var, prm](
                                       Real t, const Vector& x) {
                                 return pulsim::models::SwitchedDiode::
                                     crossing_signal(
                                         true,
-                                        ad->node_pair_voltage(
-                                            from, to, t, x),
+                                        var >= 0
+                                            ? prm.V_f + ad->node_pair_voltage(
+                                                  var, -1, t, x)
+                                            : ad->node_pair_voltage(
+                                                  from, to, t, x),
                                         prm);
                             },
                             .type = pulsim::dsed::PredicateType::DiodeOff,
@@ -1409,7 +1416,9 @@ void init_module(py::module_& m) {
                             pulsim::dsed::SchedulerDiode{
                                 d.switch_idx, d.from, d.to,
                                 d.g_on, d.g_off, d.V_th, d.V_f,
-                                std::move(label)});
+                                std::move(label), d.var,
+                                d.var >= 0 ? adapter.pool().branch_R_on(d.branch_id)
+                                           : Real{0}});
                     }
                 }
             }
