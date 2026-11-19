@@ -23,24 +23,48 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
   - Decided (orchestrator, DECISIONS 2): every event instant plus a rule grid, `output_rtol = 1e-5` in the profile; explicit dt / store_every / recorders keep today's samples (simulate() has no t_eval)
 
 ## 3. The flip
-- [ ] 3.1 Defaults in `simulate()` and `sim::kRunOptionTable` take the values of `benchmarks/tools/next_defaults.py` (`--list`)
-  - Includes the `PLAN` section: `pulsim._plan.DEFAULT_UNDRIVEN = 'refuse'`, `pulsim._plan.UNIFORM_ENGINE_RULES = True` (then delete the switch and the today-branches it guards).
-- [ ] 3.2 `add_switch` / `add_diode` default to `form='branch'` (design D6 of `add-branch-form-ideal-switch`); YAML loader the same
-- [ ] 3.3 `engine='auto'` route as `add-exact-propagator-strategy` D11 (task 19.1 there) once its default-flip gate holds
-- [ ] 3.4 Delete what the owning changes list at the flip (device-interface DECISIONS 25: the hand stamps)
+- [x] 3.1 Defaults in `simulate()` and `sim::kRunOptionTable` take the values of `benchmarks/tools/next_defaults.py` (`--list`)
+  - Includes the `PLAN` section: `pulsim._plan.DEFAULT_UNDRIVEN = 'refuse'`, `pulsim._plan.UNIFORM_ENGINE_RULES = True` (R1: flipped; deleting the switch and the today-branches it guards is R3).
+  - Done in R1 (DECISIONS 5): every old value restorable by an explicit keyword; `next_defaults.legacy()` reproduces the pre-release numbers (goldens, stateful, engines, steps, pwl_identity, trbdf2_identity byte-identical to a32b97ed).
+- [x] 3.2 `add_switch` / `add_diode` default to `form='branch'` (design D6 of `add-branch-form-ideal-switch`); YAML loader the same
+- [x] 3.3 `engine='auto'` route as `add-exact-propagator-strategy` D11 (task 19.1 there) once its default-flip gate holds
+- [ ] 3.4 Delete what the owning changes list at the flip (device-interface DECISIONS 25: the hand stamps) — R3
 - [ ] 3.5 Re-run the rehearsal on the release tree: configuration (a) is then the new default and must equal the regenerated `REFERENCE_STATUS.md`
 
 ## 4. Regeneration (one re-baseline)
-- [ ] 4.1 Goldens, `pwl_identity` / `trbdf2_identity` baselines
+- [x] 4.1 Goldens (R1: `benchmarks/goldens/pwl` regenerated, `pwl_legacy` kept, `RELEASE_GOLDEN_DIFF.md`; `stiff_rlc` and `back_to_back_diodes_sine` kept at their old golden: the new run is farther from the truth), `pwl_identity` / `trbdf2_identity` baselines (unchanged: they pin explicit configurations, compared under the legacy profile)
 - [ ] 4.2 `benchmarks/REFERENCE_STATUS.md` and the triage freezes (`known:` / `known_err:`) per configuration
 - [ ] 4.3 `benchmarks/EXACT_SCOREBOARD.md` and `exact_scoreboard.json`
-- [ ] 4.4 Tests that pin old numbers (the rehearsal's pytest blast radius, by file), each re-pinned against a reference or truth, never loosened
+- [ ] 4.4 (R2) Tests that pin old numbers (the rehearsal's pytest blast radius, by file), each re-pinned against a reference or truth, never loosened
 - [ ] 4.5 Docs and examples that print numbers; `python/pulsim/AI_GUIDE.md`
 
 ## 5. Migration and deprecation notes
-- [ ] 5.1 CHANGELOG: one BREAKING entry per flipped option with its old value and the keyword that restores it
+- [x] 5.1 CHANGELOG: one BREAKING entry per flipped option with its old value and the keyword that restores it
 - [ ] 5.2 Deprecation notes: the old values stay reachable for one release; `'dsed'` as an alias of `'exact'` (roadmap decision 8)
 - [ ] 5.3 `integrator='esdirk43'` documented as opt-in (not flipped)
 
 ## 6. Verification
 - [ ] 6.1 ruff, full pytest, full ctest, `pytest -m reference`, `reference_status` exit 0, `DO_NOT_TRACK=1 openspec validate --all --strict`, stubs `--check`, Eigen 3.4.0 for touched C++
+
+## R1. The flip (branch `release/core-next-defaults`)
+- [x] R1.1 Flip every default together, one place per layer (`_plan.py`, `sim::Defaults`, `kDefaultSwitchForm` in bindings and YAML loader); `next_defaults.check_current()` proves the layers agree
+- [x] R1.2 `next_defaults.py` = legacy -> current data; `legacy()` profile; legacy byte compare identical to a32b97ed
+- [x] R1.3 `R2_BUCKETS.md` from one full pytest and one full ctest run on the flipped tree (`probes/r2_buckets.py`)
+- [x] R1.4 Bucket 0: shared helpers / tools / stub overlay; pytest plugin = the no-op check
+- [x] R1.5 Goldens regenerated with `RELEASE_GOLDEN_DIFF.md`; analytic ceilings tightened where earned (none loosened)
+- [ ] R1.6 `REFERENCE_STATUS.md` + triage freezes and `EXACT_SCOREBOARD.md` regenerated; proofs B(ii) / B(iii)
+
+## R2. The red suite (six agents, `R2_BUCKETS.md`)
+- [ ] R2.1 Bucket 1 (files listed in `R2_BUCKETS.md`)
+- [ ] R2.2 Bucket 2
+- [ ] R2.3 Bucket 3
+- [ ] R2.4 Bucket 4
+- [ ] R2.5 Bucket 5
+- [ ] R2.6 Bucket 6
+- [ ] R2.7 Rules (a)-(e) of `R2_BUCKETS.md`; a bucket edits only its own files; a shared helper goes back to the orchestrator
+- [ ] R2.8 Findings the map hands to R2 as engine work, not test edits: `simulate()` fixed overhead (pwl 3056 > 2890 bytecodes; `auto` without dt now lands on the exact engine, 5456 > 3760), `test_golden[stiff_rlc]` / `[back_to_back_diodes_sine]` (new run farther from the truth)
+
+## R3. Delete the legacy paths (after one release)
+- [ ] R3.1 Remove the `legacy` values and the today-branches they keep: `form='conductance'` default paths, `mode_selection='legacy'`, `control_tick='label'`, `device_path='legacy'` (and the hand stamps, 3.4), `undriven=None` per-engine behaviour, `UNIFORM_ENGINE_RULES` switch
+- [ ] R3.2 Remove `benchmarks/goldens/pwl_legacy`, the `@legacy` reference columns and `next_defaults.legacy()`
+- [ ] R3.3 `bdf1` retirement (separate change)
