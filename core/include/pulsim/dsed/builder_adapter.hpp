@@ -111,6 +111,13 @@ public:
         ExactLTI exact;
         Vector exact_b;                 // reduced, augmented-const b
         std::vector<Real> aug_omegas;   // one per oscillator pair
+        // Z_ω = (iωI − A)⁻¹(q_cos − i·q_sin), one column per ω: the states'
+        // forced (sinusoidal steady-state) response. The augmented propagator
+        // carries the oscillator states, which reach x as this particular
+        // solution (cancelled by the free response at rest), so a propagated
+        // signal's error is relative to its forced amplitude |c·R·Z_ω| too, not
+        // to the instantaneous state alone (node_pair_voltage_scale).
+        Eigen::MatrixXcd forced_z;
         bool exact_built = false;       // lazy — see item 4 note
         std::vector<Real> state_mass;   // C or L per state (energy scale)
         // add-exact-propagator-strategy D14: one reduced column per
@@ -299,6 +306,22 @@ public:
             return v;
         };
         return node_s(from) + node_s(to);
+    }
+
+    /// Σ_ω |c·R·Z_ω|: the forced (sinusoidal steady-state) amplitude of a node
+    /// pair's voltage in the current mode (LTIEntry::forced_z); 0 without
+    /// sine sources or before the mode's propagator is built.
+    [[nodiscard]] Real node_pair_voltage_forced(Index from, Index to) const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        Real forced = Real{0};
+        for (Index j = 0; j < e.forced_z.cols(); ++j) {
+            std::complex<Real> c{0};
+            if (from >= 0) c += e.recover_from_state.row(from).template cast<std::complex<Real>>().dot(e.forced_z.col(j));
+            if (to >= 0) c -= e.recover_from_state.row(to).template cast<std::complex<Real>>().dot(e.forced_z.col(j));
+            forced += std::abs(c);
+        }
+        return forced;
     }
 
     /// The summation length of node_pair_voltage (state plus source terms).
@@ -1098,6 +1121,16 @@ private:
         }
 
         const auto k = static_cast<Index>(omegas.size());
+        entry.forced_z = Eigen::MatrixXcd::Zero(n, k);
+        for (Index j = 0; j < k; ++j) {
+            const auto js = static_cast<Size>(j);
+            const Eigen::MatrixXcd M = std::complex<Real>(Real{0}, omegas[js])
+                    * Eigen::MatrixXcd::Identity(n, n) - entry.A.template cast<std::complex<Real>>();
+            const Eigen::VectorXcd q = q_cos[js].template cast<std::complex<Real>>()
+                    - std::complex<Real>(Real{0}, Real{1}) * q_sin[js].template cast<std::complex<Real>>();
+            const Eigen::VectorXcd z = M.partialPivLu().solve(q);
+            if (z.allFinite()) entry.forced_z.col(j) = z;
+        }
         DenseMatrix A_aug =
             DenseMatrix::Zero(n + 2 * k, n + 2 * k);
         A_aug.topLeftCorner(n, n) = entry.A;

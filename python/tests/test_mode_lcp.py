@@ -139,22 +139,23 @@ def test_lcp_and_guard_fix_the_zero_threshold_boost(R):
 
 
 def test_guard_fixes_the_half_wave_rl_rectifier():
-    """The settle held D1 OFF through a forward bias of 10 V (mean v(out) 1.06 V low); the guard
-    repairs the start (and, depending on rounding, one more event) and every stored OFF sample is
-    reverse-biased."""
+    """The settle held D1 OFF through a forward bias of 10 V at t = 0 (mean v(out) 1.06 V low)
+    until the significance ladder (exact engine sessions 12-13): the OFF mode's first value
+    above its own error bound is forward, so the settle decides t = 0 itself. Left to the
+    guard: one event 1 us before the turn-off at 30.0999 ms (gap 0.063 V), a rounding outcome
+    (wrong on macOS arm64, where the settle alone is refused by name; right on Linux). Every
+    stored OFF sample is reverse-biased."""
     b = _half_wave_rl()
-    # the settle alone read 1.06 V low; judged, it refuses at its first wrong event (#26)
-    with pytest.raises(p.UnsupportedError) as ei:
+    try:
         _sim(b, 60e-3, guard=False)
-    assert (ei.value.feature, ei.value.device.split()[0]) == ("consistent_mode", "D1")
+    except p.UnsupportedError as ei:
+        assert (ei.feature, ei.device.split()[0]) == ("consistent_mode", "D1")
     r = _sim(b, 60e-3)
     ref = 3.180662149                                                   # trbdf2 rtol 1e-10
-    assert _tw_mean(r, "out") == pytest.approx(ref, abs=1e-4)          # measured +2.3e-5
-    # The t = 0 repair is the one the mean needs. A second one at 30.0999 ms (1 us before the
-    # turn-off, gap 0.063 V) is rounding: the settle gets that event wrong on macOS arm64 and right
-    # on Linux; the stored waveform is the same either way (means 3.1806847866436305 / ...363).
+    assert _tw_mean(r, "out") == pytest.approx(ref, abs=1e-4)          # measured +3.0e-5
     g = r.diagnostics["mode_guard"]
-    assert g["repair_times"][0] == 0.0 and g["repairs"] in (1, 2)
+    assert g["repairs"] in (0, 1)
+    assert all(abs(t - 0.0300999) < 1e-6 for t in g["repair_times"])
     on = np.asarray(r.switch_states)[:, b.switch_index_of("D1")].astype(bool)
     vd = np.asarray(r.v("in")) - np.asarray(r.v("out"))
     assert vd[~on].max() < 1e-3
