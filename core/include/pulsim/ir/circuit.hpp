@@ -594,6 +594,11 @@ private:
                             v.real(t.h); v.real(t.psi); v.real(t.phi);
                         }
                     }
+                    if (p.flux_map) {   // only then: existing hashes unchanged
+                        s.word(0x666c75786d6170ULL);
+                        reals(p.flux_map->kd); reals(p.flux_map->kq);
+                        reals(p.flux_map->coef);
+                    }
                 }
             }, params);
             d->devices.push_back(std::move(dev));

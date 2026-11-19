@@ -300,6 +300,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `CircuitBuilder.add_bldc_mna` (trapezoidal back-EMF, 0.40 % RMS from
   the ideal trapezoid at 25 harmonics) and
   `pulsim.machines.pm_harmonics_from_waveform` (fit a measured back-EMF).
+* **Added** saturating, cross-coupled PMSM flux maps:
+  `pulsim.FluxMapDQ.from_tables(i_d, i_q, lambda_d, lambda_q, source=...)`
+  fits ONE co-energy spline to both tables (reciprocal by construction,
+  `fit_residual` reported; non-positive-definite, too-coarse or
+  badly-fitting tables refused by name) and
+  `CircuitBuilder.add_pmsm_flux_map` (or `add_pmsm_mna(flux_map=)`)
+  stamps it with its analytic Jacobian on `pwl` and `trbdf2`. A linear
+  map reproduces the constant-L machine to round-off; a saturated
+  locked-rotor step agrees with an independent SciPy integration of the
+  analytic law within 1.3e-5 of the steady current (the 1 A-grid fit error),
+  and a saturated start closes its energy balance to 1.4e-9. Machines without a map are unchanged.
 * **Fixed** on `pwl` every step of an `add_pmsm_mna` machine failed at
   the requested `dt` (the cache cannot factorise the linear part, whose
   flux rows exist only in the Newton refresh) and was re-taken at `dt/2`

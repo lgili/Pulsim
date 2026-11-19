@@ -56,6 +56,7 @@
 #include "pulsim/topology/graph.hpp"
 
 #include <array>
+#include <format>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -101,6 +102,7 @@ public:
         std::array<Real, 2> c_rotor{1, 1};
         //! IM: the constant stator matrices of `im`, built once per run.
         models::InductionMachineMna::StatorMatrices im_sm{};
+        std::string name;   //!< phase-a branch name (flux-map refusals)
     };
 
     /// Σ C of the linear capacitors between `node` and ground. Any other
@@ -161,6 +163,11 @@ public:
             // IC ≠ 0 does not jump the flux (test_machine_dc_hold).
             e.lambda_old = models::PmsmMna::lambda_pm(
                 e.params, Real{0}, 0);
+            e.name = std::string{graph.branch_name(m.branch_id[0])};
+            if (e.params.flux_map) {   // λ(i = 0, θ = 0) of the map
+                e.lambda_old = models::PmsmMna::flux_map_state(
+                    e.params, Real{0}, {}).lam;
+            }
             entries_.push_back(e);
         }
         for (const auto& m : pool.induction_machines()) {
@@ -220,6 +227,9 @@ public:
             return lam;
         }
         const Real th = e.params.pole_pairs * theta_node;
+        if (e.params.flux_map) {
+            return models::PmsmMna::flux_map_state(e.params, th, i).lam;
+        }
         const auto ind = models::PmsmMna::inductance(e.params, th);
         const auto lpm = models::PmsmMna::lambda_pm(e.params, th, 0);
         for (Size k = 0; k < 3; ++k) {
@@ -263,6 +273,11 @@ public:
         const Real pp = e.params.pole_pairs;
         const Real th = stamping::read_node_voltage(x, e.theta_node);
         const Real th_e = pp * th;
+        if (e.params.flux_map) {
+            return models::PmsmMna::flux_map_increment(
+                e.params, th_e, pp * e.theta_old, pp * (th - e.theta_old),
+                e.i_old, di);
+        }
         const auto L = L_at_x != nullptr
                            ? *L_at_x
                            : models::PmsmMna::inductance(e.params, th_e).L;
@@ -312,6 +327,7 @@ public:
         const Vector& x, Real /*h*/,
         TrBdf2Stage /*stage*/ = TrBdf2Stage::Trapezoidal) {
         for (auto& e : entries_) {
+            if (!e.induction && e.params.flux_map) check_flux_map_band_(e, x);
             const auto lam = lambda_at(e, x);
             const Real v_n = stamping::read_node_voltage(x, e.neutral);
             set_reference(e, x);
@@ -329,6 +345,24 @@ public:
 
     /// SDIRK restart: pseudo previous flux λ0 + c·(λ1 − λ0), λ1 from
     /// the model's law at the stage-1 solve.
+    /// An accepted state of a flux-map machine must lie on the map's grid
+    /// plus its validity band (`FluxMapDQ::in_band`): past it the
+    /// extension is unmeasured and can lose positive definiteness.
+    static void check_flux_map_band_(const Entry& e, const Vector& x) {
+        const std::array<Real, 3> i{x[e.cur_row[0]], x[e.cur_row[1]], x[e.cur_row[2]]};
+        const auto st = models::PmsmMna::flux_map_state(
+            e.params, theta_e_of(e, x), i);
+        const auto& fm = *e.params.flux_map;
+        if (!fm.in_band(st.i_d, st.i_q)) {
+            throw std::invalid_argument(std::format(
+                "PMSM '{}': the accepted state (i_d, i_q) = ({}, {}) A left "
+                "flux map '{}' (grid i_d [{}, {}], i_q [{}, {}] A plus {} x "
+                "the span); extend the table", e.name, st.i_d, st.i_q,
+                fm.source, fm.kd.front(), fm.kd.back(), fm.kq.front(),
+                fm.kq.back(), models::FluxMapDQ::kBand));
+        }
+    }
+
     void extrapolate_previous(const Vector& x1, Real c) {
         for (auto& e : entries_) {
             const auto lam = lambda_at(e, x1);

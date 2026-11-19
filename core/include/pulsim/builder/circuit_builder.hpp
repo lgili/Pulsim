@@ -1382,7 +1382,8 @@ public:
         Real J, Real B = Real{0}, Real T_load = Real{0},
         Real L_0 = Real{0},
         Real omega0 = Real{0}, Real theta0 = Real{0},
-        const std::vector<std::array<Real, 3>>& harmonics = {}) {
+        const std::vector<std::array<Real, 3>>& harmonics = {},
+        std::shared_ptr<const models::FluxMapDQ> flux_map = {}) {
         if (!(J > Real{0})) {
             throw std::invalid_argument(std::format(
                 "add_pmsm_mna(\"{}\"): J must be > 0 (got {}); it is the "
@@ -1404,11 +1405,26 @@ public:
             p.harmonics = std::make_shared<
                 const std::vector<models::PmsmMna::PmHarmonic>>(std::move(hs));
         }
+        p.flux_map = std::move(flux_map);
         try {
             models::PmsmMna::validate(p);
         } catch (const std::invalid_argument& e) {
             throw std::invalid_argument(std::format(
                 "add_pmsm_mna(\"{}\"): {}", name, e.what()));
+        }
+        if (p.flux_map) {
+            // L_d, L_q, psi_pm must be the map's origin values: they set
+            // L_0's default and are what the pool reports.
+            const auto o = p.flux_map->eval(Real{0}, Real{0});
+            auto off = [](Real a, Real b) {
+                return std::abs(a - b) > Real{1e-9} * std::max(std::abs(b), Real{1e-12});
+            };
+            if (off(L_d, o.hdd) || off(L_q, o.hqq) || off(psi_pm, o.gd)) {
+                throw std::invalid_argument(std::format(
+                    "add_pmsm_mna(\"{}\"): with a flux map, L_d, L_q and "
+                    "psi_pm must equal the map's values at i = 0 ({}, {}, {}); "
+                    "got ({}, {}, {})", name, o.hdd, o.hqq, o.gd, L_d, L_q, psi_pm));
+            }
         }
         const Index n_idx = resolve_node_(neutral);
         const std::array<std::string_view, 3> ph{phase_a, phase_b,

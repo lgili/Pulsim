@@ -599,6 +599,59 @@ void init_module(py::module_& m) {
         "v before, i after; turn-off: the reverse).");
 
     // ---- add-power-mosfet-datasheet-device: charge laws ----------------
+    py::class_<models::FluxMapDQ, std::shared_ptr<models::FluxMapDQ>>(m, "FluxMapDQ",
+        "Saturating, cross-coupled PMSM dq flux map as the gradient of ONE "
+        "co-energy W'(i_d, i_q), a C2 bicubic spline: lambda_d = dW'/di_d, "
+        "lambda_q = dW'/di_q, incremental inductances = the Hessian "
+        "(symmetric: reciprocal by construction). Build it from flux tables "
+        "with `FluxMapDQ.from_tables` (Python, least-squares fit, refuses a "
+        "non-reciprocal or non-positive-definite table by name); this "
+        "constructor takes the fitted cells: knots_d, knots_q and 16 "
+        "power-basis coefficients per cell, W' = sum c[4m+n] u^m v^n with "
+        "u = i_d - knots_d[a], v = i_q - knots_q[b], cell (a, b) at "
+        "((a*(len(knots_q)-1)) + b)*16. Past the grid W' continues as "
+        "its second-order Taylor extension (smooth); the law is defined on "
+        "the grid plus a band of 0.1 x each axis span, positive definite "
+        "there (checked), and an accepted state outside it is refused by "
+        "name. Pass it as `flux_map=` to "
+        "`CircuitBuilder.add_pmsm_mna`.")
+        .def(py::init([](std::vector<Real> kd, std::vector<Real> kq,
+                          std::vector<Real> coef, std::string source,
+                          Real fit_residual) {
+                  auto f = std::make_shared<models::FluxMapDQ>();
+                  f->kd = std::move(kd);
+                  f->kq = std::move(kq);
+                  f->coef = std::move(coef);
+                  f->source = std::move(source);
+                  f->fit_residual = fit_residual;
+                  f->validate();
+                  return f;
+              }),
+              py::arg("knots_d"), py::arg("knots_q"), py::arg("coef"),
+              py::arg("source"), py::arg("fit_residual") = 0.0)
+        .def_readonly("knots_d", &models::FluxMapDQ::kd)
+        .def_readonly("knots_q", &models::FluxMapDQ::kq)
+        .def_readonly("coef", &models::FluxMapDQ::coef)
+        .def_readonly("source", &models::FluxMapDQ::source)
+        .def_readonly("fit_residual", &models::FluxMapDQ::fit_residual)
+        .def("evaluate",
+             [](const models::FluxMapDQ& f, Real i_d, Real i_q) {
+                 const auto e = f.eval(i_d, i_q);
+                 return py::make_tuple(e.W, e.gd, e.gq, e.hdd, e.hdq, e.hqq);
+             },
+             py::arg("i_d"), py::arg("i_q"),
+             "(W', lambda_d, lambda_q, L_dd, L_dq, L_qq) at (i_d, i_q): the "
+             "kernel's own evaluation.")
+        .def("increment",
+             [](const models::FluxMapDQ& f, Real i_d, Real i_q, Real d_d,
+                Real d_q) {
+                 const auto g = f.grad_increment(i_d, i_q, d_d, d_q);
+                 return py::make_tuple(g[0], g[1]);
+             },
+             py::arg("i_d"), py::arg("i_q"), py::arg("d_d"), py::arg("d_q"),
+             "lambda(i + d) - lambda(i), in the increment form the flux row "
+             "uses (round-off proportional to |d|).");
+
     py::class_<models::ChargeTable>(m, "ChargeTable",
         "Monotone charge law Q(v) for a nonlinear capacitor: knots "
         "(v, Q, C), cubic Hermite with C as exact tangents, so C(v) is the "
@@ -1115,7 +1168,19 @@ void init_module(py::module_& m) {
               "all — use `add_shockley_diode` for one rather than "
               "driving `tau` toward zero here.")
         .def("add_pmsm_mna",
-              &builder::CircuitBuilder::add_pmsm_mna,
+              [](builder::CircuitBuilder& b, std::string_view name,
+                 std::string_view pa, std::string_view pb, std::string_view pc,
+                 std::string_view n, std::string_view om, std::string_view th,
+                 Real R_s, Real L_d, Real L_q, Real psi_pm, Real pp, Real J,
+                 Real B, Real T_load, Real L_0, Real omega0, Real theta0,
+                 const std::vector<std::array<Real, 3>>& harmonics,
+                 std::shared_ptr<models::FluxMapDQ> flux_map)
+                  -> builder::CircuitBuilder& {
+                  return b.add_pmsm_mna(name, pa, pb, pc, n, om, th, R_s, L_d,
+                                        L_q, psi_pm, pp, J, B, T_load, L_0,
+                                        omega0, theta0, harmonics,
+                                        std::move(flux_map));
+              },
               py::arg("name"),
               py::arg("phase_a"), py::arg("phase_b"), py::arg("phase_c"),
               py::arg("neutral"),
@@ -1129,6 +1194,7 @@ void init_module(py::module_& m) {
               py::arg("omega0") = 0.0,
               py::arg("theta0") = 0.0,
               py::arg("harmonics") = std::vector<std::array<Real, 3>>{},
+              py::arg("flux_map") = py::none(),
               py::return_value_policy::reference,
               "Add an MNA-NATIVE PMSM (audit C.3): three stator "
               "branches `<name>_a/_b/_c` (phase -> neutral) stamped "
@@ -1154,7 +1220,11 @@ void init_module(py::module_& m) {
               "back-EMF with the torque from the same series; see "
               "`CircuitBuilder.add_bldc_mna`. The `<name>.i_d/i_q` "
               "traces stay on the theta_e axis, so they are off the "
-              "PM-fundamental axis by phi_1 when phi_1 != 0.")
+              "PM-fundamental axis by phi_1 when phi_1 != 0. "
+              "`flux_map=FluxMapDQ` replaces the constant L_d, L_q, psi_pm "
+              "by a saturating, cross-coupled co-energy map (L_d, L_q, "
+              "psi_pm must then equal the map's values at i = 0; see "
+              "`CircuitBuilder.add_pmsm_flux_map`, which passes them).")
         .def("add_induction_machine_mna",
               &builder::CircuitBuilder::add_induction_machine_mna,
               py::arg("name"),
@@ -2350,6 +2420,10 @@ void init_module(py::module_& m) {
                           }
                       }
                       pr["harmonics"] = hs;
+                      pr["flux_map"] = m.params.flux_map
+                          ? py::cast(std::const_pointer_cast<models::FluxMapDQ>(
+                                m.params.flux_map))
+                          : py::none();
                       d["params"] = pr;
                       out.append(d);
                   }

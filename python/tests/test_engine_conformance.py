@@ -1607,6 +1607,30 @@ def test_pmsm_harmonics_cell(engine):
                 engine, p.engine_capabilities()["PmsmMna"][engine])
 
 
+def _pmsm_flux_map(on):
+    b = _pmsm(False)
+    if on:
+        # SYNTHETIC saturating, cross-coupled co-energy (test_pmsm_flux_map)
+        g = np.arange(-30.0, 30.5, 2.0)
+        D, Q = np.meshgrid(g, g, indexing="ij")
+        x = np.hypot(D, Q) / 10.0
+        f = 1e-3 * np.tanh(x) / np.where(x == 0.0, 1.0, x) + np.where(x == 0.0, 1e-3, 0.0)
+        fm = p.FluxMapDQ.from_tables(g, g, 0.05 + f * D, 2e-3 * Q + f * Q,
+                                     source="synthetic: conformance")
+        b.add_pmsm_flux_map("Md", "ua2", "ub2", "uc2", "nn", "w", "th",
+                            R_s=0.5, flux_map=fm, pole_pairs=4, J=1e-3,
+                            B=1e-4)
+    return b
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_pmsm_flux_map_cell(engine):
+    # pmsm_mna[flux_map] (3.7): same kind, same table row
+    _check_cell("PmsmMna[flux_map]",
+                (_pmsm_flux_map, "ua2", "Md", 2e-2, 1e-5, False),
+                engine, p.engine_capabilities()["PmsmMna"][engine])
+
+
 def _dc_machine(on):
     # a 10 V supply through 1 Ohm, a 100 Ohm bleed: the machine's armature
     # current and back-EMF move the terminal voltage
@@ -1629,6 +1653,38 @@ def test_dc_machine_cell(engine):
     # column is theirs (dsed runs it, D10)
     _check_cell("dc_machine", (_dc_machine, "a", "Md", 2e-2, 1e-5, False),
                 engine, _composite_supported(_DC_MACHINE_KINDS, engine))
+
+
+@pytest.mark.parametrize("name", ["dc_machine", "PmsmMna[harmonics]",
+                                  "PmsmMna[flux_map]"])
+def test_machine_ac_sweep_cell(name):
+    # AC column of the machine rows (1.10, 3.7): the DC machine's linear
+    # composite is swept (presence: the machine moves the terminal
+    # impedance); the PMSM rows follow the kind's table entry, refused by
+    # name when unsupported
+    build, node, dev = {"dc_machine": (_dc_machine, "a", "Md"),
+                        "PmsmMna[harmonics]": (_bldc, "ua2", "Md"),
+                        "PmsmMna[flux_map]": (_pmsm_flux_map, "ua2", "Md")}[name]
+    supported = (_composite_supported(_DC_MACHINE_KINDS, "ac_sweep")
+                 if name == "dc_machine"
+                 else p.engine_capabilities()["PmsmMna"]["ac_sweep"])
+
+    def H(on):
+        b = build(on)
+        r = k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e1, 1e2, 1e3], b.node_id_of(node), b.node_id_of(node))
+        return np.asarray(r.H, dtype=complex)
+
+    off = H(False)
+    if not supported:
+        with pytest.raises(p.UnsupportedError) as ei:
+            H(True)
+        assert ei.value.engine == "ac_sweep"
+        assert ei.value.device == dev or ei.value.device.startswith(dev + "_")
+        return
+    on = H(True)
+    assert np.max(np.abs(on - off)) > PRESENCE * np.max(np.abs(on))
 
 
 def test_dc_machine_dc_cell():

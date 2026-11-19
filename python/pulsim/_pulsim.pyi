@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePool', 'DtRetry', 'EventIterationBreach', 'FluxMapDQ', 'Graph', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'thermal_voltage']
 class _CxxCancelled(RuntimeError):
     pass
 class ConvergenceError(RuntimeError):
@@ -332,6 +332,63 @@ class DeviceLossRecord:
     @property
     def node(self) -> str:
         ...
+class FluxMapDQ:
+    """
+    Saturating, cross-coupled PMSM dq flux map as the gradient of ONE co-energy W'(i_d, i_q), a C2 bicubic spline: lambda_d = dW'/di_d, lambda_q = dW'/di_q, incremental inductances = the Hessian (symmetric: reciprocal by construction). Build it from flux tables with `FluxMapDQ.from_tables` (Python, least-squares fit, refuses a non-reciprocal or non-positive-definite table by name); this constructor takes the fitted cells: knots_d, knots_q and 16 power-basis coefficients per cell, W' = sum c[4m+n] u^m v^n with u = i_d - knots_d[a], v = i_q - knots_q[b], cell (a, b) at ((a*(len(knots_q)-1)) + b)*16. Past the grid W' continues as its second-order Taylor extension (smooth); the law is defined on the grid plus a band of 0.1 x each axis span, positive definite there (checked), and an accepted state outside it is refused by name. Pass it as `flux_map=` to `CircuitBuilder.add_pmsm_mna`.
+    """
+    @staticmethod
+    def from_tables(i_d, i_q, lambda_d, lambda_q, *, source: str, tol: float = 0.02, smooth: float = 0.0):
+        """
+        Fit a :class:`FluxMapDQ` to flux tables ``lambda_d[a, b]``,
+        ``lambda_q[a, b]`` at ``(i_d[a], i_q[b])`` [A, Wb].
+
+        The map is the gradient of ONE co-energy ``W'(i_d, i_q)``, a C2 tensor
+        cubic B-spline with knots at the table grid, fitted to both tables at
+        once by least squares, so ``dlambda_d/di_q == dlambda_q/di_d`` holds by
+        construction. A measured table is never exactly reciprocal. Refused by
+        name (``source``):
+
+        * a reciprocity defect above ``tol``: max |dlambda_d/di_q -
+          dlambda_q/di_d| of the tables (central differences) over the cross
+          inductance (floor 5 % of the self inductance) -- the machine would
+          create or destroy energy over a current cycle;
+        * a fit residual above ``tol`` (max |fit - table| over the grid, as a
+          fraction of the larger flux range; stored as ``fit_residual``);
+        * a grid too coarse to determine the co-energy (rank-deficient fit;
+          pass ``smooth > 0`` to regularise it);
+        * an incremental inductance matrix that is not positive definite on
+          the grid or half a cell beyond it (checked by the kernel).
+
+        ``smooth`` adds a second-difference penalty on the spline
+        coefficients (weight ``smooth``, default 0 = pure least squares).
+        ``source`` records the provenance (FEA file, measurement, or
+        ``"synthetic: ..."``); no map ships with Pulsim.
+        """
+    def __init__(self, knots_d: collections.abc.Sequence[float], knots_q: collections.abc.Sequence[float], coef: collections.abc.Sequence[float], source: str, fit_residual: float = 0.0) -> None:
+        ...
+    def evaluate(self, i_d: float, i_q: float) -> tuple[float, float, float, float, float, float]:
+        """
+        (W', lambda_d, lambda_q, L_dd, L_dq, L_qq) at (i_d, i_q): the kernel's own evaluation.
+        """
+    def increment(self, i_d: float, i_q: float, d_d: float, d_q: float) -> tuple[float, float]:
+        """
+        lambda(i + d) - lambda(i), in the increment form the flux row uses (round-off proportional to |d|).
+        """
+    @property
+    def coef(self) -> list[float]:
+        ...
+    @property
+    def fit_residual(self) -> float:
+        ...
+    @property
+    def knots_d(self) -> list[float]:
+        ...
+    @property
+    def knots_q(self) -> list[float]:
+        ...
+    @property
+    def source(self) -> str:
+        ...
 class ChargeTable:
     """
     Monotone charge law Q(v) for a nonlinear capacitor: knots (v, Q, C), cubic Hermite with C as exact tangents, so C(v) is the exact derivative of Q(v). Not odd; linear tails at the end-knot slopes; one knot must sit at v = 0 with Q = 0. Fritsch-Carlson monotonicity is checked and a violating tangent clamped.
@@ -585,9 +642,18 @@ class CircuitBuilder:
         """
         Linear permeance P [H] between magnetic nodes (MMF [A] is the node potential, flux rate [V] the through variable): Phi = P*F. Every magnetic island needs one node tied to gnd.
         """
-    def add_pmsm_mna(self, name: str, phase_a: str, phase_b: str, phase_c: str, neutral: str, omega_node: str, theta_node: str, R_s: float, L_d: float, L_q: float, psi_pm: float, pole_pairs: float, J: float, B: float = 0.0, T_load: float = 0.0, L_0: float = 0.0, omega0: float = 0.0, theta0: float = 0.0, harmonics: collections.abc.Sequence[typing.Annotated[collections.abc.Sequence[float], "FixedSize(3)"]] = []) -> CircuitBuilder:
+    def add_pmsm_flux_map(self, name: str, phase_a: str, phase_b: str, phase_c: str, neutral: str, omega_node: str, theta_node: str, *, R_s: float, flux_map, pole_pairs: int, J: float, B: float = 0.0, T_load: float = 0.0, L_0: float = 0.0, omega0: float = 0.0, theta0: float = 0.0) -> 'CircuitBuilder':
         """
-        Add an MNA-NATIVE PMSM (audit C.3): three stator branches `<name>_a/_b/_c` (phase -> neutral) stamped per Newton iteration with the FULL theta-dependent inductance matrix L(theta) = T^-1 diag(L_d, L_q, L_0) T and the PM flux, so an IPM's d/q dynamics are exact and there is no one-step lag; mechanics are NODES (`omega_node` carries a capacitor J and a resistor 1/B, `theta_node` a 1 F capacitor fed by omega), so they get the same trapezoidal companion in the same solve. T_em comes from the co-energy of the same L(theta) — the reluctance torque appears because L(theta) is in the matrix. A speed-dependent load is just another element on `omega_node`. Read speed with res.v(omega_node), angle with res.v(theta_node), phase currents with res.i('<name>_a'). Compare with the observer-based `add_pmsm` + `make_pmsm_observer`, which uses one average L (tau_d +100 %, tau_q -33 % on a 1/3 mH IPM) and a first-order lag (-0.37 % of speed at dt=5e-5). `harmonics=[(h, psi_h, phi_h), ...]` replaces the PM flux psi_pm*cos(theta_e) by sum psi_h*cos(h*theta_e + phi_h) (phases b, c at theta_e -/+ 120 deg): a non-sinusoidal back-EMF with the torque from the same series; see `CircuitBuilder.add_bldc_mna`. The `<name>.i_d/i_q` traces stay on the theta_e axis, so they are off the PM-fundamental axis by phi_1 when phi_1 != 0.
+        Add an MNA-native PMSM whose dq law is the saturating,
+        cross-coupled ``flux_map`` (:func:`flux_map_from_tables`):
+        ``add_pmsm_mna`` with ``L_d``, ``L_q``, ``psi_pm`` set to the map's
+        values at ``i = 0``. Torque ``(3/2)·pp·(lambda_d·i_q - lambda_q·i_d)``
+        from the same co-energy. The held-mechanics DC point is available at
+        ``omega0 = 0`` only.
+        """
+    def add_pmsm_mna(self, name: str, phase_a: str, phase_b: str, phase_c: str, neutral: str, omega_node: str, theta_node: str, R_s: float, L_d: float, L_q: float, psi_pm: float, pole_pairs: float, J: float, B: float = 0.0, T_load: float = 0.0, L_0: float = 0.0, omega0: float = 0.0, theta0: float = 0.0, harmonics: collections.abc.Sequence[typing.Annotated[collections.abc.Sequence[float], "FixedSize(3)"]] = [], flux_map: FluxMapDQ | None = None) -> CircuitBuilder:
+        """
+        Add an MNA-NATIVE PMSM (audit C.3): three stator branches `<name>_a/_b/_c` (phase -> neutral) stamped per Newton iteration with the FULL theta-dependent inductance matrix L(theta) = T^-1 diag(L_d, L_q, L_0) T and the PM flux, so an IPM's d/q dynamics are exact and there is no one-step lag; mechanics are NODES (`omega_node` carries a capacitor J and a resistor 1/B, `theta_node` a 1 F capacitor fed by omega), so they get the same trapezoidal companion in the same solve. T_em comes from the co-energy of the same L(theta) — the reluctance torque appears because L(theta) is in the matrix. A speed-dependent load is just another element on `omega_node`. Read speed with res.v(omega_node), angle with res.v(theta_node), phase currents with res.i('<name>_a'). Compare with the observer-based `add_pmsm` + `make_pmsm_observer`, which uses one average L (tau_d +100 %, tau_q -33 % on a 1/3 mH IPM) and a first-order lag (-0.37 % of speed at dt=5e-5). `harmonics=[(h, psi_h, phi_h), ...]` replaces the PM flux psi_pm*cos(theta_e) by sum psi_h*cos(h*theta_e + phi_h) (phases b, c at theta_e -/+ 120 deg): a non-sinusoidal back-EMF with the torque from the same series; see `CircuitBuilder.add_bldc_mna`. The `<name>.i_d/i_q` traces stay on the theta_e axis, so they are off the PM-fundamental axis by phi_1 when phi_1 != 0. `flux_map=FluxMapDQ` replaces the constant L_d, L_q, psi_pm by a saturating, cross-coupled co-energy map (L_d, L_q, psi_pm must then equal the map's values at i = 0; see `CircuitBuilder.add_pmsm_flux_map`, which passes them).
         """
     def add_power_mosfet(self, name: str, drain: str, source: str, gate: str, *, K: float, V_T: float, lambda_: float = 0.0, kappa: float = 15.0, R_d: float = 0.0, C_gs: float, C_gd: typing.Any, C_ds: typing.Any, R_g: float = 0.0, L_s: float = 0.0, body_diode: typing.Any = None, T_j: float = 25.0, rds_tc1: float = 0.0, rds_tc2: float = 0.0, vt_tc: float = 0.0) -> CircuitBuilder:
         """
