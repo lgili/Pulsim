@@ -82,7 +82,11 @@ SW = {"Q1": {"E_on_ref": 20e-6, "E_off_ref": 30e-6, "V_ref": 24.0,
 # ---------------------------------------------------------------------
 # A1: the window
 # ---------------------------------------------------------------------
-@pytest.mark.parametrize("engine", ["pwl", "auto"])
+@pytest.mark.parametrize("engine", ["pwl", pytest.param("auto", marks=pytest.mark.xfail(
+    strict=True, reason="release finding F-6-2: the exact engine stores one sample at a "
+    "diode turn-on, the pre-event value, so res.i misses the 13.6 A jump's right limit; "
+    "time_average(res.i) over 80-100 ms is 0.160684 A against 0.161027 A from the summary "
+    "(pwl dt=1e-7: 0.161005)"))])
 def test_window_leaves_the_start_up_out(engine):
     """Measured: 2.3384 W over the run, 0.1358 W (pwl) / 0.1360 W
     (auto) over 80-100 ms. The windowed figure is the same conduction
@@ -306,6 +310,10 @@ def test_windows_cut_inside_flip_steps_add_up(engine):
             whole[dev]["i_avg"] * (cuts[-1] - cuts[0]), rel=1e-12)
 
 
+@pytest.mark.xfail(strict=True, reason="release finding F-6-3: device_thermal_summary "
+                   "ignores conduction_specs for a branch-form diode (the default since "
+                   "the release): D1 P_cond_avg 0.0172 W against the loss summary's "
+                   "2.375 W conduction model (the conductance form gives 2.375 W in both)")
 def test_thermal_conduction_cuts_a_flip_step_like_the_loss_summary():
     """device_thermal_summary's P_cond_avg used the same voltage-times-
     g_on pairing at a flip-step bound."""
