@@ -1106,6 +1106,10 @@ public:
                 "add_excess_loss(\"{}\"): {}", name, e.what()));
         }
         const std::string n{name};
+        if (branch_index_.contains(n)) {  // before the winding: no half-built element
+            throw std::invalid_argument(std::format(
+                "add_excess_loss(\"{}\"): the name is already used", name));
+        }
         // ports swapped: the flux rate enters at m_a, leaves at m_b
         add_winding(n + ".w", n + ".e", "gnd", m_b, m_a, Real{1});
         const Index e_idx = resolve_node_(n + ".e");

@@ -223,3 +223,15 @@ Implementation decisions taken while applying the change (2026-11-18).
      differ by −0.4 %, −0.4 %, −0.4 %, −0.1 % (the synthetic data are
      eddy-dominated, so both reduce to f²B² there). Two models of the same
      data agreeing is not a validation.
+   - Review (fresh-context, read-only) of the excess-loss diff: law,
+     constant (re-derived at 40 digits), surfaces and cost found clean.
+     Fixed: eps now refused below 1e-150 (eps² underflows near 1.5e-162,
+     F(0) = 0/0); a duplicate name is refused before the winding is added
+     (no half-built element); two libm-path test tolerances loosened to
+     1e-11 / 1e-12. LEFT for a hand-off: `num_excess_loss_` is a second
+     source of truth for the hand-path skip (correct today, both creation
+     paths go through `add_excess_loss`; a future path that bypasses it
+     would skip the stamp silently: add a count-equals-entries check);
+     `thermal_specs` on an `excess_loss` device is dropped silently by the
+     pre-existing `else: continue` in thermal.py (every kind without
+     thermal support behaves so).

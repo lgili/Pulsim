@@ -64,8 +64,7 @@ That union is pybind11's `float`, as in the stub.
   `p.double_pulse_test`, trbdf2 or `dt` <= 0.2 ns.
 - **Shared flux** (one path: `add_saturable_transformer`): `add_winding`
   (F=N*i), `add_permeance`, `add_air_gap`, `add_saturable_permeance`,
-  `add_magnetic_resistance` (eddy), `add_excess_loss` (c, eps: excess,
-  eps <= 1e-3 x flux-rate amplitude); node = MMF. Tie each island to gnd.
+  `add_magnetic_resistance`; node = MMF. Tie each island to gnd.
 - **Engines** (`p.simulate(..., engine=...)`):
 
 | engine | step | use it for |

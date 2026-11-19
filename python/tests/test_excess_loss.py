@@ -18,7 +18,7 @@ The circuit is algebraic in u (a voltage source across a winding forces
 u = v/N), so a solved sample is the law at that sample to Newton
 tolerance and the loss error is the time quadrature's; the trapezoid of
 a periodic analytic function converges geometrically once the step
-resolves eps/(omega*U) (4.5e-9 at 2000 samples per period, eps/U = 1e-3).
+resolves eps/(omega*U) (8.8e-9 at 2000 samples per period, eps/U = 1e-3).
 """
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ def test_excess_loss_under_sinusoidal_flux_matches_the_closed_form(engine):
     assert abs(P - P_REG_43) / P_REG_43 < 1e-6              # the regularised law
     # the ideal square-root law: (3/4)(eps/U)^2 = 7.5e-7 away (7.3e-7 exact)
     assert abs(P - P_IDEAL_43) / P_IDEAL_43 < 1e-6
-    assert P_IDEAL_43 == pytest.approx(0.01 * 10 ** 1.5 * K15, rel=1e-12)
+    assert P_IDEAL_43 == pytest.approx(0.01 * 10 ** 1.5 * K15, rel=1e-11)
     # the source supplies it (no storage in the circuit)
     p_in = r.v("e") * r.i("W", port=1)
     assert abs(period_mean(t, p_in, T, 2) - P) <= 1e-9 * P
@@ -197,11 +197,19 @@ def test_excess_loss_surfaces():
     # the parameters are validated by name before anything is added
     for c, eps, needle in ((0.0, 1e-3, "c must be positive"),
                            (0.01, 0.0, "eps must be positive"),
+                           (0.01, 1e-200, "eps must be positive"),
                            (float("nan"), 1e-3, "c must be positive")):
         bb = p.CircuitBuilder()
         with pytest.raises(ValueError, match=f"add_excess_loss.*{needle}"):
             bb.add_excess_loss("X", "m1", "gnd", c, eps)
         assert bb.graph.num_branches == 0
+    # a duplicate name is refused before the winding is added
+    bb = p.CircuitBuilder()
+    bb.add_resistor("X", "a", "gnd", 1.0)
+    n0 = bb.graph.num_branches
+    with pytest.raises(ValueError, match="add_excess_loss.*already used"):
+        bb.add_excess_loss("X", "m1", "gnd", 0.01, 1e-3)
+    assert bb.graph.num_branches == n0
     # the exact engine refuses it by name (a Newton kind)
     with pytest.raises(p.UnsupportedError) as ei:
         p.simulate(drive(perm=2e-6), t_end=1e-4, engine="dsed", dt=1e-6)

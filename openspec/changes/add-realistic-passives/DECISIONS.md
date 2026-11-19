@@ -228,8 +228,16 @@ t − τ the relation at t has no discretisation error.
 - Matrix: 1/Z0 across each port, in the CACHED matrix (mask independent);
   I_k, I_m enter b at the solve time, as a time-varying source does: no
   refactorisation, ever.
+- The committed times are NOT a uniform grid: dt-retry sub-steps,
+  discontinuity-restart stages and the post-event second sample (2) land
+  off k·dt (run_transient.hpp, the retry and restart paths). So the far
+  end is found by TIME on both engines — binary search of the committed
+  times for t − τ — and the index shortcut "sample n − k" is taken only
+  while every committed time since t − τ is exactly on the k·dt grid
+  (a flag cleared by any off-grid commit). From the review.
 - Lookup of the far end at t − τ: k = floor(τ/dt), θ = τ/dt − k. If
-  |θ| ≤ 64·eps·(τ/dt) (τ = k·dt to rounding) the stored sample n − k is
+  min(θ, 1 − θ) ≤ 64·eps·(τ/dt) (τ = k·dt, or (k+1)·dt, to rounding) the
+  stored sample at that time is
   used: no interpolation, and a line between resistors / sources is then
   EXACT — the lattice plateaus to rounding (gate 1e-12 relative, not
   bit-equality: two code paths). Otherwise linear interpolation between

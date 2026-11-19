@@ -60,12 +60,13 @@ struct ExcessLoss {
                 "ExcessLoss: c must be positive and finite (the coefficient "
                 "of F = c·sign(u)·|u|^0.5, in A/V^0.5)");
         }
-        if (!(p.eps > Real{0}) || !std::isfinite(p.eps)) {
+        // floor 1e-150: below ~1.5e-162 eps² underflows and F(0) = 0/0
+        if (!(p.eps >= Real{1e-150}) || !std::isfinite(p.eps)) {
             throw std::invalid_argument(
-                "ExcessLoss: eps must be positive and finite (the flux rate "
-                "[V] below which the law is linear; eps <= 1.15e-3 x the rated "
-                "flux-rate amplitude keeps the sine loss within 1e-6 of the "
-                "square-root law)");
+                "ExcessLoss: eps must be positive and finite, >= 1e-150 (the "
+                "flux rate [V] below which the law is linear; eps <= 1.15e-3 x "
+                "the rated flux-rate amplitude keeps the sine loss within 1e-6 "
+                "of the square-root law)");
         }
     }
 
