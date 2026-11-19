@@ -34,6 +34,10 @@ import pytest
 import pulsim as p
 
 T_SW = 1e-5    # 100 kHz
+# The subject here is the variable-step engine: since the release, engine='auto'
+# without dt sends these piecewise-linear circuits to the exact engine, so the
+# tests name engine='trbdf2' (TRB below).
+TRB = {"engine": "trbdf2"}
 
 
 def _py_pwm(bit, n, duty, t_on=0.0):
@@ -77,7 +81,7 @@ def test_opaque_pwm_on_a_long_run_lands_every_edge():
     events, steps of 20 µs, 589.97 V. The fixed engine gives 48.0380 V
     (dt = 2e-8, last 5 ms); this engine 48.0335 V."""
     b, pwm = _boost()
-    r, msgs = _run(b, 20e-3, switch_fn=pwm)
+    r, msgs = _run(b, 20e-3, switch_fn=pwm, **TRB)
     st = r._trbdf2_stats
     assert r.engine_used == "trbdf2"
     assert st["n_gate_events"] == 3999
@@ -103,7 +107,7 @@ def test_opaque_three_phase_spwm_matches_the_fixed_engine():
     spwm = p.make_three_phase_spwm_fn(
         10e3, 50.0, 0.8, p.ThreePhaseLegIndices(*v.switch_indices),
         b.graph.num_switches, 1e-6)
-    r, _ = _run(b, 20e-3, switch_fn=lambda t: spwm(t))
+    r, _ = _run(b, 20e-3, switch_fn=lambda t: spwm(t), **TRB)
     t = np.asarray(r.times)
     assert r._trbdf2_stats["n_gate_events"] == 1600
     assert p.time_rms(t, r.i("La"), t_from=15e-3) == pytest.approx(
@@ -145,7 +149,7 @@ def test_pulses_that_start_late_are_found_and_the_gap_confessed():
         return b, _py_pwm(0, b.graph.num_switches, 0.25, t_on=5e-3)
 
     b, pwm = build()
-    r, msgs = _run(b, 20e-3, switch_fn=pwm)
+    r, msgs = _run(b, 20e-3, switch_fn=pwm, **TRB)
     st = r._trbdf2_stats
     assert 2900 <= st["n_gate_events"] <= 3000
     assert st["n_gate_undersampled"] >= 1
@@ -200,7 +204,7 @@ def test_v_th_0_bridge_runs_full_wave():
     7.95 A against 7.92 A (a chatter-guard step the length of the
     controller's h had carried D1 OFF to 1.93 V of forward bias: an
     18.9 A turn-on)."""
-    r, msgs = _run(_bridge(0.0), 0.1)
+    r, msgs = _run(_bridge(0.0), 0.1, **TRB)
     ref, _ = _run(_bridge(0.0), 0.1, dt=1e-6)
     assert _avg(r, "dc", 0.08) == pytest.approx(_avg(ref, "dc", 0.08),
                                                 abs=0.02)
@@ -218,7 +222,7 @@ def test_line_inductance_bridge_holds_no_diode_against_its_rule():
     BR__D4 OFF while forward-biased by 45.1 V at t = 75.92 ms. Now no
     sample breaks the rule and V_dc agrees with dt = 1e-6 to 0.04 V
     (321.807 / 321.845 V)."""
-    r, msgs = _run(_bridge(0.7, l_line=1e-3), 0.1)
+    r, msgs = _run(_bridge(0.7, l_line=1e-3), 0.1, **TRB)
     ref, _ = _run(_bridge(0.7, l_line=1e-3), 0.1, dt=1e-6)
     _, _, rule = _diode_report(r)
     assert not rule, rule
@@ -234,7 +238,7 @@ def test_line_inductance_bridge_completes_a_long_run(v_th, ref_v):
     as error at every h) and aborted on max_steps after 73 s; V_th = 0
     did the same at 0.146 s. Now 0.5 s takes about 5k steps and lands
     on dt = 1e-6 (ref_v, measured: 321.865 / 321.870 V) to 0.04 V."""
-    r, _ = _run(_bridge(v_th, l_line=1e-3), 0.5)
+    r, _ = _run(_bridge(v_th, l_line=1e-3), 0.5, **TRB)
     assert r._trbdf2_stats["n_accept"] < 20_000
     assert _avg(r, "dc", 0.48) == pytest.approx(ref_v, abs=0.05)
 
@@ -243,7 +247,7 @@ def test_v_th_0_line_inductance_bridge_is_not_slow():
     """V_th = 0 behind 1 mH: 122,597 steps / 64k chatter breaks for
     0.1 s on the previous revision; now about 1.5k, on dt = 1e-6's
     321.850 V to 0.003 V."""
-    r, _ = _run(_bridge(0.0, l_line=1e-3), 0.1)
+    r, _ = _run(_bridge(0.0, l_line=1e-3), 0.1, **TRB)
     assert r._trbdf2_stats["n_accept"] < 5000
     assert _avg(r, "dc", 0.08) == pytest.approx(321.850, abs=0.05)
 
@@ -262,14 +266,17 @@ def _snubbed_boost():
     return b, _py_pwm(b.switch_index_of("Q1"), b.graph.num_switches, 0.5)
 
 
-def test_snubbed_boost_tracks_the_fixed_engine():
+@pytest.mark.parametrize("engine, used", [("auto", "dsed"), ("trbdf2", "trbdf2")])
+def test_snubbed_boost_tracks_the_fixed_engine(engine, used):
     """The task's headline E2c case. engine='auto' without dt ended at
     27.59 V at 3 ms on the base of this change; engine='pwl' at
-    dt = 1e-8 ends at 54.48 V (measured; too slow to rerun here)."""
+    dt = 1e-8 ends at 54.48 V (measured; too slow to rerun here). Since
+    the release 'auto' routes it to the exact engine (54.4820 V);
+    trbdf2 by name gives 54.4829 V."""
     b, pwm = _snubbed_boost()
-    r, _ = _run(b, 3e-3, switch_fn=pwm)
-    assert r.engine_used == "trbdf2"
-    assert float(r.v("out")[-1]) == pytest.approx(54.48, abs=0.1)
+    r, _ = _run(b, 3e-3, switch_fn=pwm, engine=engine)
+    assert r.engine_used == used
+    assert float(r.v("out")[-1]) == pytest.approx(54.48, abs=0.01)
 
 
 def test_sliding_mode_warning_names_the_engine_that_was_asked():
@@ -312,7 +319,7 @@ def test_floating_dc_side_runs_without_dt():
     (numerically singular) for mask 0b0000 N=4 (dt=6e-14) ... node dn".
     Now the probe step grows to 6e-10 s once and the run gives
     321.851 V across the rails against 321.852 V at dt = 1e-6."""
-    r, msgs = _run(_floating_dc_bridge(), 0.06)
+    r, msgs = _run(_floating_dc_bridge(), 0.06, **TRB)
     ref, _ = _run(_floating_dc_bridge(), 0.06, dt=1e-6)
     assert r.engine_used == "trbdf2"
     assert 0.0 < r._trbdf2_stats["probe_floor_used"] <= 0.06 * 1e-6
@@ -326,13 +333,17 @@ def test_floating_dc_side_runs_without_dt():
         return p.time_average(t, res.v("dp") - res.v("dn"), t_from=0.04)
 
     assert vdc(r) == pytest.approx(vdc(ref), abs=0.01)
+    # the release route: 'auto' without dt runs it on the exact engine (321.8520 V)
+    auto, _ = _run(_floating_dc_bridge(), 0.06)
+    assert auto.engine_used == "dsed"
+    assert vdc(auto) == pytest.approx(vdc(ref), abs=0.01)
 
 
 def test_floating_dc_side_leakage_is_not_a_commutation():
     """At t_end = 0.04 an ON bridge diode carrying g_off-scale leakage
     (-1.6e-7 A) was re-landed on every step: 318,068 steps, 317,101
     diode events. Now about 1.1k steps."""
-    r, _ = _run(_floating_dc_bridge(), 0.04)
+    r, _ = _run(_floating_dc_bridge(), 0.04, **TRB)
     assert r._trbdf2_stats["n_accept"] < 5000
 
 
@@ -347,7 +358,7 @@ def test_grounded_dc_side_raises_no_floating_warning():
                            dc_neg="gnd")
     b.add_capacitor("C", "dp", "gnd", 470e-6)
     b.add_resistor("RL", "dp", "gnd", 1e3)
-    r, msgs = _run(b, 0.02)
+    r, msgs = _run(b, 0.02, **TRB)
     assert r._trbdf2_stats["probe_floor_used"] == 0.0
     assert not [m for m in msgs if "reach the rest of the circuit" in m]
 
@@ -406,7 +417,7 @@ def test_one_shot_pulse_a_quarter_of_the_ceiling_wide_is_landed(k):
     every 5 µs, so a 5 µs one-shot pulse is landed at every phase
     (v_C peaks at 9.92 V)."""
     b, fn = _one_shot(10e-3 + k * 0.37e-6 * 7.3, 5e-6)
-    r, _ = _run(b, 20e-3, switch_fn=fn)
+    r, _ = _run(b, 20e-3, switch_fn=fn, **TRB)
     assert r._trbdf2_stats["n_gate_events"] == 2
     assert float(r.v("c").max()) > 9.0
 
@@ -419,7 +430,7 @@ def test_one_shot_pulse_narrower_than_a_quarter_of_the_ceiling_needs_dt():
     engine='pwl' at dt = 1e-7."""
     t_on = 10e-3 + 2 * 0.37e-6 * 7.3      # a phase that misses it
     b, fn = _one_shot(t_on, 2e-6)
-    r, msgs = _run(b, 20e-3, switch_fn=fn)
+    r, msgs = _run(b, 20e-3, switch_fn=fn, **TRB)
     assert r._trbdf2_stats["n_gate_events"] == 0
     assert float(r.v("c").max()) < 1e-3
     assert not [m for m in msgs if "gate pulse" in m], msgs
@@ -445,7 +456,7 @@ def test_smooth_spwm_over_many_cycles_raises_no_pulse_warning():
     spwm = p.make_three_phase_spwm_fn(
         10e3, 50.0, 0.8, p.ThreePhaseLegIndices(*v.switch_indices),
         b.graph.num_switches, 1e-6)
-    r, msgs = _run(b, 0.2, switch_fn=lambda t: spwm(t))
+    r, msgs = _run(b, 0.2, switch_fn=lambda t: spwm(t), **TRB)
     st = r._trbdf2_stats
     assert st["n_gate_events"] == 16000
     assert st["n_gate_undersampled"] == 0
@@ -468,7 +479,7 @@ def test_floating_bridge_with_choke_holds_no_diode():
     b.add_inductor("Lf", "dp", "dq", 1e-3)
     b.add_capacitor("C", "dq", "dn", 470e-6)
     b.add_resistor("RL", "dq", "dn", 1e3)
-    r, msgs = _run(b, 0.06, rtol=2e-5, atol=2e-8)
+    r, msgs = _run(b, 0.06, rtol=2e-5, atol=2e-8, **TRB)
     assert not [m for m in msgs if "commutation rule forbids" in m], msgs
     assert np.abs(np.asarray(r.v("dn"))).max() < 400.0
     assert r._trbdf2_stats["n_forced_accepts"] == 0
@@ -481,16 +492,19 @@ def test_floating_bridge_with_choke_holds_no_diode():
 # ---------------------------------------------------------------------
 
 def _buck_with_island(island, c_f=1e-6, g_off_island=1e-9, periods=20):
+    # Legacy subject: the island's conditioning floor is the conductance form's
+    # g_off stamp (the branch form leaves an OFF diode open: no floor, no refusal).
+    cf = {"form": "conductance"}
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 24.0)
-    b.add_switch("S", "vin", "sw", 1e3, 1e-9)
-    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9, **cf)
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9, **cf)
     b.add_inductor("L", "sw", "vout", 100e-6)
     b.add_capacitor("C", "vout", "gnd", 47e-6)
     b.add_resistor("RL", "vout", "gnd", 20.0)
     if island:
-        b.add_diode("Dx", "x", "gnd", 1e3, g_off_island)
-        b.add_diode("Dy", "gnd", "y", 1e3, g_off_island)
+        b.add_diode("Dx", "x", "gnd", 1e3, g_off_island, **cf)
+        b.add_diode("Dy", "gnd", "y", 1e3, g_off_island, **cf)
         b.add_capacitor("Cf", "x", "y", c_f)
     t0, n, k = 2e-6, b.graph.num_switches, b.switch_index_of("S")
 
