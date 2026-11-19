@@ -104,6 +104,7 @@
 #include "pulsim/models/transformer.hpp"
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/step/controllers.hpp"
+#include "pulsim/solver/step/esdirk43.hpp"
 #include "pulsim/solver/step/integrators.hpp"
 #include "pulsim/solver/step/stepper.hpp"
 #include "pulsim/solver/run_transient.hpp"   // combine_masks, SimulationAborted
@@ -251,6 +252,11 @@ struct TrBdf2Options {
     /// recorded only), 2 'lcp' (the LCP decides where the settle's answer
     /// can differ from it).
     int mode_selection = 0;
+    /// The integrator of the variable step (add-high-order-stiff-integrator):
+    /// 0 TR-BDF2, 1 ESDIRK4(3)6L[2]SA (`simulate(integrator='esdirk43')`).
+    /// The phases are shared; only the stages, the estimate and the history
+    /// commit differ (DECISIONS 15).
+    int integrator = 0;
 };
 
 struct TrBdf2Stats {
@@ -2429,6 +2435,185 @@ inline SimulationResult run_transient_trbdf2(
         bool reinit_step = false;
         bool sdirk = false;
         bool commutated = false;
+        // ---- integrator='esdirk43' (add-high-order-stiff-integrator) ----
+        // Runs on the skeleton only, with the companion histories of linear
+        // C, L and coupled windings: a stateful Newton history (Coss,
+        // Lauritzen diode, IGBT tail, machines, saturable inductor, external
+        // device) has no arbitrary-ψ backward-Euler stage yet.
+        const bool esdirk = opts.integrator == 1;
+        if (opts.integrator != 0 && !esdirk) {
+            throw std::invalid_argument(
+                "run_transient_trbdf2: integrator must be 0 (TR-BDF2) or 1 (ESDIRK4(3))");
+        }
+        if (esdirk && trbdf2_stepper_legacy) {
+            throw UnsupportedError(
+                "trbdf2", "integrator=esdirk43", "", "",
+                "engine 'trbdf2': integrator='esdirk43' runs on the step skeleton "
+                "only; PULSIM_TRBDF2_STEPPER_LEGACY=1 selects the legacy loop.");
+        }
+        if (esdirk && hs.any()) {
+            auto k = pwl::DevicePool::StoredKind::Resistor;
+            bool found = false;
+            hs.for_each([&](const auto& kk) {
+                using K = std::remove_cvref_t<decltype(kk)>;
+                if (!found && !kk.empty()) { k = K::kStoredKind; found = true; }
+            });
+            std::string name;
+            for (Index b = 0; b < graph.num_branches(); ++b) {
+                if (pool.kind_of(graph.branch(b).id) == k) { name = std::string(graph.branch_name(b)); break; }
+            }
+            throw UnsupportedError(
+                "trbdf2", "integrator=esdirk43", name,
+                std::string(pwl::stored_kind_name(k)),
+                std::format("engine 'trbdf2': integrator='esdirk43' takes its five "
+                            "backward-Euler stages through the linear companion "
+                            "histories (C, L, coupled windings); the {} '{}' keeps a "
+                            "Newton history whose stage takes no arbitrary "
+                            "pseudo-previous state yet. Drop integrator='esdirk43'.",
+                            pwl::stored_kind_name(k), name));
+        }
+        // The stages in entry space (capacitor v, inductor i): with a linear
+        // q the stage combinations in x are those in q (design D2).
+        std::vector<Real> ed_y0, ed_hd0, ed_psi;
+        std::array<std::vector<Real>, step::Esdirk43::n_stages> ed_d;
+        std::array<Vector, 4> ed_y;   // stages 1–4 (stage 5 is the output)
+        std::vector<pwl::HistoryEntry> ed_hist;
+        bool ed_land = false;   // the pending landing was an ESDIRK step
+        // The five stages of one ESDIRK4(3) step on the factor of h/2
+        // (G + C/(γh)): stage s is backward Euler of γh from the pseudo
+        // previous state ψ_s (the entries' state slots, derivative slots 0),
+        // ψ_s = y0 + a_{s+1,0}·h·ẏ0 + Σ_{j<s} (a_{s+1,j+1}/γ)·(Y_j − ψ_j).
+        // ẏ0 is the committed derivative slot: the companion current / the
+        // inductor's terminal voltage of the last solve, KCL-consistent at x
+        // (an evaluation, no solve). x_g = stage 1 (c = 1/2), x_1 = stage 5.
+        // One ESDIRK step of hh from (t, x, the committed history) under m:
+        // the five stages, the last into `out` (stiffly accurate). Leaves the
+        // history as committed; ed_hist keeps the last stage's ψ (the commit's
+        // base) and ed_d the increments (the estimate). A singular factor
+        // throws (the caller decides); false = a stage's Newton failed.
+        auto ed_stages = [&](const SwitchStateMask& m, Real hh, Vector& out,
+                             bool left_limit_last) -> bool {
+            using E = step::Esdirk43;
+            const Real fdt = Real{2} * E::gamma * hh;   // the factor of hh/2
+            history.snapshot_into(hist_snap);
+            const Size ne = hist_snap.size();
+            ed_y0.resize(ne);
+            ed_hd0.resize(ne);
+            ed_psi.resize(ne);
+            for (auto& d : ed_d) d.resize(ne);
+            for (Size i = 0; i < ne; ++i) {
+                const auto& e = hist_snap[i];
+                if (e.kind == pwl::DevicePool::StoredKind::Capacitor) {
+                    ed_y0[i] = e.v_prev;
+                    ed_hd0[i] = hh * e.i_prev / e.C_or_L;
+                } else {
+                    const Real vp = partner[i] == Size(-1) ? Real{0}
+                                                           : entries[partner[i]].v_prev;
+                    ed_y0[i] = e.i_prev;
+                    ed_hd0[i] = hh * inductor_didt(i, e.v_prev, vp, e.i_prev);
+                }
+            }
+            ed_hist = hist_snap;
+            bool ok = true;
+            try {
+                for (int s = 0; s < E::n_stages && ok; ++s) {
+                    const auto si = static_cast<std::size_t>(s);
+                    for (Size i = 0; i < ne; ++i) {
+                        Real psi = ed_y0[i] + E::explicit_weight(s) * ed_hd0[i];
+                        for (int j = 0; j < s; ++j) {
+                            psi += E::weight(s, j) * ed_d[static_cast<std::size_t>(j)][i];
+                        }
+                        ed_psi[i] = psi;
+                        auto& e = ed_hist[i];
+                        if (e.kind == pwl::DevicePool::StoredKind::Capacitor) {
+                            e.v_prev = psi;
+                            e.i_prev = Real{0};
+                        } else {
+                            e.i_prev = psi;
+                            e.v_prev = Real{0};
+                        }
+                    }
+                    history.restore(ed_hist);
+                    history.compute_b_extra(fdt, b_stage);
+                    const step::StageSpec spec = E::stage(hh, s);
+                    // the last stage on a source jump reads its LEFT limit (as
+                    // the TR-BDF2 stage 2 does)
+                    accumulate_sources(
+                        s == E::n_stages - 1 && left_limit_last
+                            ? t + hh - std::min(Real{0.5} * hh,
+                                  std::max(Real{1e-9} * hh,
+                                           Real{512} * std::numeric_limits<Real>::epsilon()
+                                               * (std::abs(t) + hh)))
+                            : t + spec.t_off,
+                        b_src);
+                    b_stage += b_src;
+                    Vector& ys = s == E::n_stages - 1 ? out : ed_y[si];
+                    ys = s == 0 ? x : ed_y[si - 1];   // warm start: the previous stage
+                    step_ctx = spec.ctx();
+                    ok = solve_dispatch(m, fdt, b_stage, ys);
+                    ++st.n_solves;
+                    if (!ok) break;
+                    for (Size i = 0; i < ne; ++i) {
+                        const auto& e = ed_hist[i];
+                        ed_d[si][i] = (e.kind == pwl::DevicePool::StoredKind::Capacitor
+                                           ? entry_v(e, ys)
+                                           : ys[e.inductor_branch_var_id])
+                                      - ed_psi[i];
+                    }
+                }
+            } catch (...) {
+                history.restore(hist_snap);
+                throw;
+            }
+            history.restore(hist_snap);
+            return ok;
+        };
+        // take, ESDIRK: one step of h; x_g = stage 1 (c = 1/2) for the
+        // crossing detector, x_1 = stage 5.
+        auto ed_take = [&]() -> step::Verdict {
+            if (landed_on_bp && t + h < bp_t - h_min) landed_on_bp = false;
+            hg = Real{2} * step::Esdirk43::gamma * h;
+            h_pt = Real{0.5} * h;
+            bool ok = true;
+            try {
+                ok = ed_stages(mask_step, h, x_1, landed_on_bp);
+            } catch (const std::runtime_error& e) {
+                if (!is_singular_error(e) || nl_effective) throw;
+                if (t + h >= t_stop && h <= Real{64} * h_min) {
+                    return step::Verdict::End;   // a final sliver ends the run
+                }
+                const bool landing = h < h_ctrl * (Real{1} - Real{1e-12});
+                if (landing || Real{4} * h > std::min(h_max, t_stop - t)) {
+                    throw std::runtime_error(std::format(
+                        "run_transient_trbdf2: at t = {} the step matrix is "
+                        "numerically singular at h = {} s (integrator "
+                        "'esdirk43'), and a longer step is not possible here: {}",
+                        t, h, e.what()));
+                }
+                ++st.n_solves;
+                ++st.n_reject;
+                ++st.n_conditioning_rejects;
+                h_cond = Real{4} * h;
+                h_cond_by_mode[mode_start] = h_cond;
+                st.h_conditioning_floor = std::max(st.h_conditioning_floor, h_cond);
+                h = h_cond;
+                return step::Verdict::Reject;
+            }
+            if (!ok) {
+                ++st.n_reject;
+                ++st.n_newton_retries;
+                if (h <= h_min * Real{1.0001}) {
+                    throw std::runtime_error(
+                        "run_transient_trbdf2: Newton failed at t = "
+                        + std::to_string(t) + " with h already at h_min (integrator "
+                          "'esdirk43') — " + newton_last_error);
+                }
+                h = std::max(h * Real{0.25}, h_min);
+                return step::Verdict::Reject;
+            }
+            x_g = ed_y[0];
+            return step::Verdict::Accept;
+        };
         // The loop body, cut IN PLACE into the step's phases (slice 3b of
         // refactor-unified-transient-stepper, DECISIONS 15): each phase is ONE
         // lambda that both drivers call, so a hunk in any of them reaches both.
@@ -2699,7 +2884,9 @@ inline SimulationResult run_transient_trbdf2(
             return h;
         };
         // take: the step mask, the re-initialisation decision, the two stages
-        auto tb_take = [&]() PULSIM_STEP_PHASE {
+        // (kE: integrator='esdirk43'; one instantiation per integrator,
+        // selected once per run in run_twin, no per-step branch)
+        auto tb_take = [&]<bool kE = false>() PULSIM_STEP_PHASE {
 
             // Step mask: sampled at the midpoint — piecewise-
             // constant gates are constant over (t, t+h) by the
@@ -2747,6 +2934,20 @@ inline SimulationResult run_transient_trbdf2(
                                || reinit_left > 0;
             // Where x_g sits in time (the crossing detector reads it).
             h_pt = sdirk ? gs * h : hg;
+            if constexpr (kE) {
+                // The explicit first stage reads the derivative slots, and the
+                // embedded estimate is nearly blind to them (b0 − b̂0 = 0.003
+                // against b0 = 0.158): slots of another mode (a diode landing
+                // commits under the pre-commutation mask) would pass as an
+                // O(h) error. Such a step, and every restart, is the shared
+                // SDIRK(2,2) step (backward-Euler stages, no slot read): its
+                // commit leaves slots consistent with this mode (item (v)).
+                if (!sdirk && mask_step == x_mask) return ed_take();
+                if (!sdirk) {
+                    sdirk = true;
+                    h_pt = gs * h;
+                }
+            }
             if (sdirk) {
                 history.snapshot_into(hist_snap);
                 hist_s1 = hist_snap;
@@ -2871,7 +3072,7 @@ inline SimulationResult run_transient_trbdf2(
             return step::Verdict::Accept;
         };
         // error: the LTE and the controller's verdict (reject, forced accept)
-        auto tb_error = [&]() PULSIM_STEP_PHASE {
+        auto tb_error = [&]<bool kE = false>() PULSIM_STEP_PHASE {
 
             // ---- LTE over the differential variables ----
             Real err_sq = Real{0};
@@ -2917,6 +3118,21 @@ inline SimulationResult run_transient_trbdf2(
                             est_v[i] = Real{0};
                         }
                     }
+                    continue;
+                }
+                if constexpr (kE) {
+                    // ESDIRK4(3): the embedded difference h·Σ(b − b̂)·ẏ_i
+                    // (O(h^4)), filtered below on the stage factor.
+                    using E = step::Esdirk43;
+                    Real ee = E::err_explicit_weight() * ed_hd0[i];
+                    for (int j = 0; j < E::n_stages; ++j) {
+                        ee += E::err_weight(j) * ed_d[static_cast<std::size_t>(j)][i];
+                    }
+                    est_v[i] = ee;
+                    est_sc[i] = opts.atol + opts.rtol
+                        * std::max(std::abs(ed_y0[i]),
+                                   std::abs(e.kind == pwl::DevicePool::StoredKind::Capacitor
+                                                ? v11 : x_1[e.inductor_branch_var_id]));
                     continue;
                 }
                 if (e.kind
@@ -2970,7 +3186,10 @@ inline SimulationResult run_transient_trbdf2(
             // Also inside the window after the chatter guard gave up: there
             // the raw estimate reads the L*g_off mode as error at any h (see
             // h_lo), and every step sat at h_chatter as a forced accept.
-            if ((opts.filter_error_estimate || (sdirk && sdirk_event && !reinit_step)
+            // ESDIRK: always (its embedded R̂(−∞) = −3/20 reads a damped
+            // stiff mode as error).
+            if (((kE && !sdirk) || opts.filter_error_estimate
+                 || (sdirk && sdirk_event && !reinit_step)
                  || t - chatter_exhaust_t <= Real{1e3} * h_chatter)
                 && !nl_effective
                 && !entries.empty()) {
@@ -2998,8 +3217,8 @@ inline SimulationResult run_transient_trbdf2(
             // floor (eps * J^-1 (|J||x| + |b|) through each entry's
             // estimate) joins the scale, and the step is accepted when the
             // estimate is within it. Steps that pass are unchanged.
-            if (err > Real{1} && !nl_effective && !sdirk
-                && !entries.empty()) {
+            if (!kE && err > Real{1} && !nl_effective && !sdirk
+                && !entries.empty()) {   // TR-BDF2's constants (kc, kl, clte)
                 const Vector* nbc = nullptr;
                 const sparse::Matrix* nJ =
                     cache.resident_event_matrix(mask_step, hg, &nbc);
@@ -3085,7 +3304,9 @@ inline SimulationResult run_transient_trbdf2(
             }
             if (err > Real{1} && h > h_lo * Real{1.0001}) {
                 // reject: elementary controller, order-3 exponent
-                const Real fac = step::LteController::reject_factor(err, sdirk);
+                const Real fac = kE && !sdirk
+                    ? step::LteController::reject_factor(err, step::Esdirk43::err_exponent)
+                    : step::LteController::reject_factor(err, sdirk);
                 h = std::max(h * fac, h_lo);
                 ++st.n_reject;
                 if (sdirk && sdirk_event && !reinit_step) {
@@ -3105,7 +3326,7 @@ inline SimulationResult run_transient_trbdf2(
         };
         // after_solve: diode crossings, the localisation and its landing (a
         // commutated step is committed here, at the landing)
-        auto tb_after = [&]() PULSIM_STEP_PHASE {
+        auto tb_after = [&]<bool kE = false>() PULSIM_STEP_PHASE {
 
             // ---- diode crossing detection on the accepted step ----
             commutated = false;
@@ -3495,8 +3716,16 @@ inline SimulationResult run_transient_trbdf2(
                         try {
                             // A failed Newton trial leaves x_trial at
                             // its warm start: never read it.
+                            // ESDIRK: the trial is a re-step of the
+                            // method itself (a trapezoidal trial over an
+                            // ESDIRK-sized bracket set the event 100x off)
+                            if constexpr (kE) {
+                                trial_ok = sdirk ? trap_solve(mask_step, t, dts, x_trial)
+                                                 : ed_stages(mask_step, dts, x_trial, false);
+                            } else {
                             trial_ok = trap_solve(mask_step, t, dts,
                                                   x_trial);
+                            }
                         } catch (const std::runtime_error& e) {
                             // A singular trial (see probe_solve) is
                             // ill-conditioned like a non-finite one.
@@ -3559,6 +3788,7 @@ inline SimulationResult run_transient_trbdf2(
                         // exhausted refinement still lands with a solve
                         && tb - ta <= Real{2} * dt_floor;
                     bool land_ok = true;
+                    if constexpr (kE) ed_land = false;
                     if (interp_land) {
                         const Real th = sa_raw / (sa_raw - sb_raw);
                         const Real t_lin = ta + th * (tb - ta);
@@ -3575,6 +3805,10 @@ inline SimulationResult run_transient_trbdf2(
                             (t + dt_land - ta) / (tb - ta)));
                         x_trial = x_ta + thp * (x_tb - x_ta);
                         if (dt_land > t_lin - t) ++st.n_interp_floor_landings;
+                    } else if constexpr (kE) {
+                        ed_land = !sdirk;
+                        land_ok = ed_land ? ed_stages(mask_step, dt_land, x_trial, false)
+                                          : trap_solve(mask_step, t, dt_land, x_trial);
                     } else {
                         land_ok = trap_solve(mask_step, t, dt_land, x_trial);
                     }
@@ -3603,7 +3837,17 @@ inline SimulationResult run_transient_trbdf2(
                               "pre-commutation mask is singular at "
                               "this step size");
                     }
+                    if constexpr (kE) {
+                        if (ed_land) {   // the ESDIRK landing: its BE commit
+                            history.restore(ed_hist);
+                            history.update_from_state_backward_euler(
+                                x_trial, step::Esdirk43::gamma * dt_land);
+                        } else {
+                            history.update_from_state(x_trial, dt_land);
+                        }
+                    } else {
                     history.update_from_state(x_trial, dt_land);
+                    }
                     // The stateful devices land here too. Only the
                     // linear companion history was committed at an
                     // event landing, so the Coss, Lauritzen, IGBT
@@ -3735,7 +3979,7 @@ inline SimulationResult run_transient_trbdf2(
             return step::Verdict::Accept;
         };
         // commit: the accepted step (history, state, record, proposal, post-edge restart)
-        auto tb_commit = [&]() PULSIM_STEP_PHASE {
+        auto tb_commit = [&]<bool kE = false>() PULSIM_STEP_PHASE {
 
             if (!commutated) {
                 // ---- accept ----
@@ -3755,6 +3999,13 @@ inline SimulationResult run_transient_trbdf2(
                         ++st.n_reinit_steps;
                     }
                     ++st.n_sdirk_steps;
+                } else if constexpr (kE) {
+                    // the last stage's base, derivative 0: the BE commit then
+                    // stores the stage's own derivative (Y5 − ψ5)/(γh), KCL-
+                    // consistent at x_1 (stiffly accurate: x_1 = Y5)
+                    history.restore(ed_hist);
+                    history.update_from_state_backward_euler(
+                        x_1, step::Esdirk43::gamma * h);
                 } else {
                     history.commit_trbdf2(x_1, h, x_g);
                 }
@@ -3878,7 +4129,9 @@ inline SimulationResult run_transient_trbdf2(
                     }
                     pending_gate_slot = slot;
                 } else {
-                    const Real fac = step::LteController::accept_factor(err, sdirk);
+                    const Real fac = kE && !sdirk
+                        ? step::LteController::accept_factor(err, step::Esdirk43::err_exponent)
+                        : step::LteController::accept_factor(err, sdirk);
                     const Real h_done = h;
                     h = h * fac;
                     if (sdirk && diode_slot != Size(-1)) {
@@ -3971,9 +4224,29 @@ inline SimulationResult run_transient_trbdf2(
                 hooks->device_state(t, x, hs);
                 if (hook_step) hooks->step(t_start, x_start, mask_start, t, x, x_mask);
             };
+            step::BodyClock clock{tb_live, lte_ctrl, t, opts.t_end};
+            if (esdirk) {
+                // integrator='esdirk43': the same phases; take / error /
+                // commit instantiated for the method (chosen once per run)
+                auto ed_take_p = [&]() PULSIM_STEP_PHASE {
+                    return tb_take.template operator()<true>();
+                };
+                auto ed_after_p = [&]() PULSIM_STEP_PHASE {
+                    return tb_after.template operator()<true>();
+                };
+                auto ed_error_p = [&]() PULSIM_STEP_PHASE {
+                    return tb_error.template operator()<true>();
+                };
+                auto ed_commit_p = [&]() PULSIM_STEP_PHASE {
+                    tb_commit.template operator()<true>();
+                };
+                auto ebody = step::phase_body(tb_poll, tw_begin, tb_clamp, ed_take_p,
+                                              ed_error_p, ed_after_p, ed_commit_p, tw_on_step);
+                (void)step::run<step::Esdirk43>(clock, ebody);
+                return;
+            }
             auto body = step::phase_body(tb_poll, tw_begin, tb_clamp, tb_take, tb_error,
                                          tb_after, tb_commit, tw_on_step);
-            step::BodyClock clock{tb_live, lte_ctrl, t, opts.t_end};
             (void)step::run<step::TrBdf2>(clock, body);
         };
         if (!trbdf2_stepper_legacy) {
