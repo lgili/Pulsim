@@ -517,10 +517,8 @@ inline void commit_machine(PmsmMnaHistory::Entry& e, const std::array<Index, R>&
 }
 
 inline void commit(PmsmMnaHistory& k, const Vector& x, Real h, TrBdf2Stage st) {
-    // The hand commit does not read h; a pin row's formula value would
-    // (2/h·0 is NaN at h = 0) though nothing keeps it: Dc there.
-    const auto c = h > Real{0} ? ctx_of(h, st)
-                               : device::StepCtx{Real{0}, device::Formula::Dc, Real{0}};
+    // kPinQ = false: the commit takes no time formula, so h = 0 is fine.
+    const auto c = ctx_of(h, st);
     for (auto& e : k.mutable_entries()) {
         if (e.induction) {
             commit_machine<ImLaw>(e, im_rows(e), im_aux(e), x, c);

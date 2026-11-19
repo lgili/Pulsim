@@ -82,6 +82,7 @@ void stator_f(const MachineParams<P>& p, const X& x, std::size_t i0, O& o) {
 struct PmsmMna {
     static constexpr std::array<std::string_view, 2> kParamNames{"R_s", "T_load"};
     static constexpr std::size_t n_pins = 6, n_internal = 3, n_params = 2;
+    static constexpr bool kPinQ = false;   // q = −λ on the stator rows only
     static constexpr bool kParamTangent = true;
     /// Rows a, b, c (0–2), n (3), ω (4), θ (5), i_a..i_c (6–8): the hand
     /// stamp's entries exactly.
@@ -178,6 +179,7 @@ struct PmsmMna {
 struct InductionMachine {
     static constexpr std::array<std::string_view, 2> kParamNames{"R_s", "T_load"};
     static constexpr std::size_t n_pins = 7, n_internal = 3, n_params = 2;
+    static constexpr bool kPinQ = false;   // q = −(M·λ_r + L·i) on the stator rows only
     static constexpr bool kParamTangent = true;
     /// Rows a, b, c (0–2), n (3), ω (4), λ_rα, λ_rβ (5, 6), i_a..i_c (7–9).
     static constexpr Pattern<10> kPattern = [] {

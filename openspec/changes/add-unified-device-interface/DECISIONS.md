@@ -768,6 +768,26 @@
     refused, unchanged). Every pinned Python and C++ test passes (5281
     pytest, 375 reference; layer2 and layer5 on Eigen 5 and 3.4.0).
 
+45. **The saturable-inductor commit (item 3; the open item of #38/#41).**
+    Measured first (`.scratch/bench_commit2.cpp`, 64 atan entries, best of
+    31): hand commit 3.3–3.5 ns per entry, interface 10.2–11.1 ns, the law's
+    eval alone 3.5–3.8 ns — so the 7 ns were `commit_fq`'s time formula, not
+    λ. Hoisting the formula switch (`history_terms` once) changed nothing
+    (10.7–11.1 ns; reverted). Fix: a law whose q lives on internal rows only
+    declares `kPinQ = false` (saturable inductor, PMSM, induction machine);
+    `commit_fq` then takes no formula (q̇_n ← 0 on a pin row, −f on an
+    internal one; every caller discards the pin rows, debug-asserted q = 0
+    there). Interface commit 3.4–3.6 ns (1.02–1.07× the hand); machines:
+    PMSM commit 67 → 53 ns (hand 43), IM 23 → 15.6 ns (hand 6.6). The
+    PMSM commit's h = 0 guard (a pin row's 2/h·0) is gone with it.
+    Instructions per accepted step, satind_pwl (`.scratch/instr.sh`, K = 20,
+    three runs): interface 17 115 / 17 109 / 17 107 (was 17 306 in #41),
+    legacy 16 624 / 16 828 / 16 807 → ratios 1.030, 1.017, 1.018 (were
+    1.023–1.031). Under the gate on two of three, NOT clearly under: the
+    legacy baseline alone moves ±0.6 % run to run, and the interface's
+    remaining ~300 instructions per step are in the stamp (per Newton
+    iteration), not the commit. Recorded, not chased further here.
+
 ### Hand-off (2026-11-19)
 
 - Done this session: merged `feat/core-p5-machines` (f9158ffb) and

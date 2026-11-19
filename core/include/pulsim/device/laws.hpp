@@ -306,6 +306,7 @@ struct SaturableInductor {
     /// Parameter names in `Params` declaration order (sensitivity refusals).
     static constexpr std::array<std::string_view, 3> kParamNames{"L_0", "I_sat", "L_residual"};
     static constexpr std::size_t n_pins = 2, n_internal = 1, n_params = 3;
+    static constexpr bool kPinQ = false;   // the flux is the internal row's
     static constexpr Pattern<3> kPattern{{{false, false, true},
                                           {false, false, true},
                                           {true, true, true}}};
