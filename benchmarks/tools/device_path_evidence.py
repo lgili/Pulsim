@@ -162,6 +162,19 @@ def law_circuits(repeats):
             rec.update(circuit=f"law:{name}", engine=eng)
             out.append(rec)
             print(_line(rec), flush=True)
+    # the MNA machines (DECISIONS #42): their pwl gate circuits
+    for name in sorted(getattr(T, "MACHINES", {})):
+        make, t_end, dt, sw, _ = T.MACHINES[name]
+        kw = dict(t_end=t_end, dt=dt, engine="pwl")
+        if sw is not None:
+            kw["switch_fn"] = sw
+
+        def run(make=make, kw=kw):
+            return pulsim.simulate(make(), **kw)
+        rec = _pair(run, repeats, lambda res: (None, "ran"))
+        rec.update(circuit=f"law:{name}", engine="pwl")
+        out.append(rec)
+        print(_line(rec), flush=True)
     return out
 
 

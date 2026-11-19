@@ -297,6 +297,37 @@ struct PmsmMna {
         return out;
     }
 
+    /// λ_pm and its first two θ_e-derivatives from one trig evaluation per
+    /// term: `lambda_pm(p, θ, 0..2)` to the bit.
+    struct PmFlux {
+        Vec3 d0{}, d1{}, d2{};
+    };
+    [[nodiscard]] static PmFlux lambda_pm_all(const Params& p, Real theta_e) noexcept {
+        PmFlux out;
+        for (Size k = 0; k < 3; ++k) {
+            const Real a = theta_e + phase_offset(k);
+            if (p.harmonics) {
+                Real a0 = 0, a1 = 0, a2 = 0;
+                for (const auto& t : *p.harmonics) {
+                    const Real arg = t.h * a + t.phi;
+                    const Real c = std::cos(arg);
+                    a0 += t.psi * c;
+                    a1 += -(t.h * t.psi) * std::sin(arg);
+                    a2 += -(t.h * t.h * t.psi) * c;
+                }
+                out.d0[k] = a0;
+                out.d1[k] = a1;
+                out.d2[k] = a2;
+                continue;
+            }
+            const Real c = std::cos(a);
+            out.d0[k] = p.psi_pm * c;
+            out.d1[k] = -p.psi_pm * std::sin(a);
+            out.d2[k] = -p.psi_pm * c;
+        }
+        return out;
+    }
+
     /// λ(θ_e, i) − λ(θ0_e, i0) without cancellation. `dth_e` = θ_e − θ0_e
     /// and `di` = i − i0 are passed in (node-voltage differences, exact
     /// when the two are close). The flux row multiplies this by 2/h, so
@@ -361,9 +392,17 @@ struct PmsmMna {
     };
     [[nodiscard]] static Torque torque(const Params& p, Real theta_e,
                                        const Vec3& i) noexcept {
-        const auto ind = inductance(p, theta_e);
-        const Vec3 lp1 = lambda_pm(p, theta_e, 1);
-        const Vec3 lp2 = lambda_pm(p, theta_e, 2);
+        return torque(p, inductance(p, theta_e), theta_e, i);
+    }
+    /// The same with `ind` = inductance(p, theta_e) already at hand.
+    [[nodiscard]] static Torque torque(const Params& p, const Inductance& ind,
+                                       Real theta_e, const Vec3& i) noexcept {
+        return torque(p, ind, lambda_pm(p, theta_e, 1), lambda_pm(p, theta_e, 2), i);
+    }
+    /// The same with λ_pm′ and λ_pm″ at hand too.
+    [[nodiscard]] static Torque torque(const Params& p, const Inductance& ind,
+                                       const Vec3& lp1, const Vec3& lp2,
+                                       const Vec3& i) noexcept {
         Torque t{};
         Real quad1 = 0, quad2 = 0, lin1 = 0, lin2 = 0;
         for (Size a = 0; a < 3; ++a) {

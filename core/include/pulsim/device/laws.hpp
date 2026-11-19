@@ -175,7 +175,8 @@ template <class S> struct MosfetL1Params {
 ///   α·K·{λd·[a² − β(u)u²] + a²(1−α)·E + α·d·(2a − d) + u²·α·(1−β(u))·E},
 ///   u = a − d, E = 1 − e^{−κd}.
 /// NOT fixed (both paths, release list): the slope at V_DS = 0 is negative
-/// for a ∈ (≈ −1.3/κ, 0) — the triode polynomial at negative overdrive.
+/// for a ∈ (≈ −0.75/κ, 0) here, (≈ −1.3/κ, 0) on the model — the triode
+/// polynomial at negative overdrive (DECISIONS #43).
 struct MosfetLevel1 {
     static constexpr std::size_t n_pins = 3;
     static constexpr std::size_t n_internal = 0;
@@ -224,6 +225,19 @@ struct MosfetLevel1 {
                                    : forward<T>(V_OV, V_DS, p);
         o.f[0] = i;
         o.f[1] = -i;
+    }
+};
+
+/// The model's own body, leak at V_DS = 0 included: the law the HAND stamp
+/// runs (`refresh_mosfets_level1`), so a reading of a legacy run describes
+/// what was stamped (`for_each_static_reading`, DECISIONS #43). Not a
+/// Newton law of the interface path.
+struct MosfetLevel1Model : CurrentLaw<models::MosfetLevel1, 3, MosfetL1Params> {
+    static constexpr std::array<std::string_view, 4> kParamNames = MosfetLevel1::kParamNames;
+    static constexpr std::size_t n_params = 4;
+    template <class S> using Params = MosfetL1Params<S>;
+    [[nodiscard]] static Params<Real> from(const models::MosfetLevel1::Params& m) {
+        return MosfetLevel1::from(m);
     }
 };
 
@@ -501,6 +515,7 @@ struct IgbtTail {
 static_assert(Device<ShockleyDiode>);
 static_assert(Device<IdealDiode>);
 static_assert(Device<MosfetLevel1>);
+static_assert(Device<MosfetLevel1Model>);
 static_assert(Device<IgbtLevel1>);
 static_assert(Device<NonlinearCapacitor>);
 static_assert(Device<SaturableInductor>);

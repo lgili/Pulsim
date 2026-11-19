@@ -633,6 +633,87 @@
     wall time under load (other agents, this slice's own C++ build): not
     evidence; (a) is.
 
+## Slice 7 — the machines on the interface (2026-11-18/19)
+
+42. **The MNA machines on the `Device` contract (15.6; supersedes #34).**
+    Merged `origin/feat/core-p5-machines` 0e1f549b first (f9158ffb: the
+    flux-map PMSM, the increment-form stator rows). `device/machine_laws.hpp`:
+    `PmsmMna` (rows a, b, c, n, ω, θ | i_a, i_b, i_c; constant L(θ) with PM
+    harmonics, or the flux map) and `InductionMachine` (a, b, c, n, ω, λ_rα,
+    λ_rβ | i_a..i_c). The stator rows' conserved quantity is the FLUX:
+    q = −λ(i, θ) / −λ(i, λ_r), f = (v − v_n) − R_s·i, so the row is
+    conductance form J = −R·δ − a·∂λ/∂i (a = 2/h, 1/h, c1/h; never h-scaled)
+    and the engines pass a·(q − q_n) as the history's closed-form increment
+    −(Δλ − lam_off) (BDF2: −dlam_gamma) — the hand row term for term. The
+    angular momentum J·ω, the angle θ and the IM rotor fluxes are the charges
+    of the builder's linear capacitors on those nodes (the engines integrate
+    them like any capacitor); the law injects their rates (−(T − T_load),
+    −C_θ·ω, −C_r·g). λ, T, g and their partials are the model's Real
+    functions in the hand stamp's operation order, spread over the AD slots by
+    `chain_n` (exact on the engines' unit seeds); the law's parameters are
+    R_s and T_load (exact ∂/∂p), the flux law sits in `Aux`. Commit through
+    `commit_fq`: λ_n ← λ(x) (bitwise the hand commit's), dλ/dt_n ← f(x); the
+    reference point and v_n stay the history's bookkeeping; `capture_gamma`
+    is the history's increment. `iface::history_covers` lets the machine
+    history cover the `InductionMachineMna` row (set_path, the binding).
+    `PmsmMna::torque` gained overloads taking L(θ) and λ_pm′, λ_pm″ (one
+    `lambda_pm_all` trig pass); the hand path routes through them (same
+    values). The adapter computes L(θ_e) once for the law and the increment
+    (`Aux::ind`, a cache of the model at that call's θ).
+    Gates (`test_device_path_equivalence.py`, machine section; the machine
+    tests' synthetic parameter sets): pwl legacy vs interface, same Newton
+    counts, every state ≤ 2.5e-14 of scale — salient-PMSM sine start, locked
+    rotor (ω held, θ0 = 0.3), saturated flux-map start, IM sine start, IM
+    generator at 1.05·ω_sync held, IM six-step inverter start. A FLOATING
+    neutral is physically 0 V (no zero-sequence flux) and reads ~1e-11 V of
+    solve round-off on both paths: left out of the 1e-12 gate, checked ≤
+    1e-9·v_phase on both (the inverter's neutral is a real 200 V state and
+    stays gated). The held-speed IM uses J = 1e-3 (J = 1 made the source
+    current round at ulp(2J/h·ω) = 9e-10 A, a 2e-11 single-step spike).
+    TR-BDF2 (three circuits): end states ≤ 10·rtol. Energy balance of the
+    saturated flux-map start: residual ≤ 2e-8 of the input on 'interface',
+    equal to legacy's to 1e-3 of itself. C++ (`test_device_laws.cpp`): the
+    laws stamp to 32 ulp (F) / 16 ulp (J), commit bitwise and capture
+    identically against `refresh_pmsm_mna` for all three machines × three
+    formulas (grounded star point included); the stator block equals −R·δ −
+    a·∂λ/∂i (central difference); the whole x-Jacobian against central
+    differences of the law's Real eval (independent of the hand partials);
+    ∂/∂(R_s, T_load) by AD. Conformance: the PmsmMna / InductionMachineMna /
+    harmonics / flux-map device-path cells run (none refused).
+    Speed (instructions retired per accepted step, `.scratch/instr.sh`, 5×
+    longer runs, K = 6): PMSM sine start 1.016, locked rotor 1.009,
+    flux-map start 1.001–1.003; induction machine 1.04 (inverter) and 1.084–
+    1.086 (sine start, held generator) — OVER the 3 % gate. Microbench: the
+    IM stamp 131 → 227 ns, of which the law's eval at AD width 10 is 104 ns
+    (the hand stamp writes ~55 known coefficients; the law propagates 10
+    tangents through every operation); computing J on `kPattern` entries
+    only changed nothing (reverted). Lever, not taken: evaluate at the 6
+    inputs the IM's nonlinear terms read (i, λ_r, ω) and spread with the
+    seed map known at compile time. Recorded for the release; the default
+    path is untouched.
+    Reviewer (fresh context, read-only): no law defect; fixed — test gaps
+    (BDF2 commit, capture, grounded star point, independent FD Jacobian),
+    the neutral's explanation, a hard-coded R_s in the energy test. Open:
+    `run_transient.hpp:128` (`seed_held_machine_capacitors`) still calls the
+    hand `refresh_pmsm_mna` on both paths (same values; loop freeze — the
+    stepper track ports it before the hand stamps go); the "unported kind
+    refuses by name" test lost its fixture (every Newton kind is ported now;
+    the refusal stays covered by `set_path` code, not by a test).
+43. **Readings describe the law that was stamped (item 4).**
+    `for_each_static_reading(graph, pool, x, path, fn)` takes the run's
+    `DevicePath`: a legacy run reads the MOSFET model body
+    (`laws::MosfetLevel1Model`, leak included — what
+    `refresh_mosfets_level1` stamps), an interface run the C¹ law; the other
+    static kinds are one body on both. Test: at the leak's peak (a = 2.4/κ,
+    V_DS = 0.1 mV) the legacy reading equals `models::MosfetLevel1::current`
+    bitwise, the interface reading the law bitwise, and they differ by
+    > 0.4·K/κ² (control). Also corrected here: #39's claim that the slope at
+    V_DS = 0 is negative "on both paths" for a ∈ (−1.3/κ, 0) — on the law it
+    is Kσa·[κ(1−σ²)a + 2σ] (λ aside), negative only for a ∈ (≈ −0.75/κ, 0)
+    (+0.105·K/κ at a = −1/κ); the test asserted it at −1/κ and failed on all
+    three devices (never run after #39). Now asserted at −0.5/κ (law) and
+    −1/κ (model).
+
 ### Hand-off (2026-11-18)
 
 - Step 5 of the brief NOT started (context budget): merge
