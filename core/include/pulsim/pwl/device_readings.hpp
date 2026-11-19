@@ -128,50 +128,73 @@ void for_each_stateful_reading(const StatefulHistories& hs, const Vector& x, Fn&
     local(hs.get<IgbtTailHistory>());
 }
 
+namespace readings_detail {
+/// The static Newton reading of branch `b` (if it is one): `fn(reading)`;
+/// `n` counts the instances per kind (the reading's `index`).
+template <class Fn>
+void static_branch(const topology::Graph& graph, const DevicePool& pool, const Vector& x,
+                   Index b, std::size_t (&n)[4], Fn&& fn) {
+    namespace L = device::laws;
+    using SK = DevicePool::StoredKind;
+    const auto& br = graph.branch(b);
+    if (br.kind != topology::BranchKind::Nonlinear || !pool.is_registered(br.id)) return;
+    const auto sk = pool.kind_of(br.id);
+    const auto two = [&](auto law, const auto& prm, std::size_t slot) {
+        using Law = decltype(law);
+        const std::array<Index, 2> at{br.from, br.to};
+        fn(make<Law, 2>(stored_kind_name(sk), n[slot]++, br.id, {}, prm,
+                        iface::gather<2>(x, at, 2), {}));
+    };
+    const auto three = [&](auto law, const auto& prm, const std::array<Index, 3>& at,
+                           std::size_t slot) {
+        using Law = decltype(law);
+        fn(make<Law, 3>(stored_kind_name(sk), n[slot]++, br.id, {}, prm,
+                        iface::gather<3>(x, at, 3), {}));
+    };
+    switch (sk) {
+    case SK::NonlinearDiode:
+        two(L::IdealDiode{}, L::IdealDiode::from(pool.nonlinear_diode_params(br.id)), 0);
+        break;
+    case SK::ShockleyDiode:
+        two(L::ShockleyDiode{}, L::ShockleyDiode::from(pool.shockley_diode_params(br.id)), 1);
+        break;
+    case SK::MosfetLevel1:
+        three(L::MosfetLevel1{}, L::MosfetLevel1::from(pool.mosfet_level1_params(br.id)),
+              detail::mosfet_level1_terminals(pool, br), 2);
+        break;
+    case SK::IgbtLevel1:
+        three(L::IgbtLevel1{}, L::IgbtLevel1::from(pool.igbt_level1_params(br.id)),
+              detail::igbt_level1_terminals(pool, br), 3);
+        break;
+    default: break;
+    }
+}
+}  // namespace readings_detail
+
 /// Visit every static Newton branch (smooth / Shockley diode, MOSFET and
 /// IGBT level 1) at x: each law is its model's body, the one both device
 /// paths stamp (#44).
 template <class Fn>
 void for_each_static_reading(const topology::Graph& graph, const DevicePool& pool,
                              const Vector& x, Fn&& fn) {
-    namespace rd = readings_detail;
-    namespace L = device::laws;
-    using SK = DevicePool::StoredKind;
     std::size_t n[4] = {0, 0, 0, 0};
     for (Index b = 0; b < graph.num_branches(); ++b) {
-        const auto& br = graph.branch(b);
-        if (br.kind != topology::BranchKind::Nonlinear || !pool.is_registered(br.id)) continue;
-        const auto sk = pool.kind_of(br.id);
-        const auto two = [&](auto law, const auto& prm, std::size_t slot) {
-            using Law = decltype(law);
-            const std::array<Index, 2> at{br.from, br.to};
-            fn(rd::make<Law, 2>(stored_kind_name(sk), n[slot]++, br.id, {}, prm,
-                                iface::gather<2>(x, at, 2), {}));
-        };
-        const auto three = [&](auto law, const auto& prm, const std::array<Index, 3>& at,
-                               std::size_t slot) {
-            using Law = decltype(law);
-            fn(rd::make<Law, 3>(stored_kind_name(sk), n[slot]++, br.id, {}, prm,
-                                iface::gather<3>(x, at, 3), {}));
-        };
-        switch (sk) {
-        case SK::NonlinearDiode:
-            two(L::IdealDiode{}, L::IdealDiode::from(pool.nonlinear_diode_params(br.id)), 0);
-            break;
-        case SK::ShockleyDiode:
-            two(L::ShockleyDiode{}, L::ShockleyDiode::from(pool.shockley_diode_params(br.id)), 1);
-            break;
-        case SK::MosfetLevel1:
-            three(L::MosfetLevel1{}, L::MosfetLevel1::from(pool.mosfet_level1_params(br.id)),
-                  detail::mosfet_level1_terminals(pool, br), 2);
-            break;
-        case SK::IgbtLevel1:
-            three(L::IgbtLevel1{}, L::IgbtLevel1::from(pool.igbt_level1_params(br.id)),
-                  detail::igbt_level1_terminals(pool, br), 3);
-            break;
-        default: break;
-        }
+        readings_detail::static_branch(graph, pool, x, b, n, fn);
     }
+}
+
+/// The static Newton reading of the one branch `b` at x (the recorders'
+/// per-step read: no walk over the other branches). False when `b` is not
+/// a static Newton branch; `out.index` is 0.
+[[nodiscard]] inline bool static_reading(const topology::Graph& graph, const DevicePool& pool,
+                                         const Vector& x, Index b, DeviceReading& out) {
+    std::size_t n[4] = {0, 0, 0, 0};
+    bool seen = false;
+    readings_detail::static_branch(graph, pool, x, b, n, [&](const DeviceReading& d) {
+        out = d;
+        seen = true;
+    });
+    return seen;
 }
 
 }  // namespace pulsim::pwl

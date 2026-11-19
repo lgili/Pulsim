@@ -1629,7 +1629,7 @@ inline SimulationResult run_transient(
             }
         }
 
-        if (hooks) hooks->start(x, stamped_mask);
+        if (hooks) hooks->start(x, stamped_mask, {&history, &hs, nullptr});
 
         // ---- discontinuity restart (add-discontinuity-restart-rule) --
         // The next step restarts: the first step of a run that does
@@ -3501,7 +3501,7 @@ inline SimulationResult run_transient(
             // The static path's first solve (k = 0) is the start state.
             if (hooks) {
                 if (k == 0) {
-                    hooks->start(x, stamped_mask);
+                    hooks->start(x, stamped_mask, {&history, &hs, nullptr});
                 } else {
                     hooks->accepted(t_prev, t, x, stamped_mask);
                 }

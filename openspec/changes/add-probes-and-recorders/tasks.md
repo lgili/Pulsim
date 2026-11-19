@@ -18,7 +18,10 @@ states at equal times.
 - [x] 0b.4 Tests: C++ closed forms (triangle on a clustered grid, windows mid-step, periods; square wave with both limits; decimation; capacity unchanged over 2e5 samples; in-loop on the fixed engine: no per-step allocation, windows equal the stored-array pass); Python: RC charge closed form on pwl / trbdf2 / exact, rectified sine with commutations inside the window, both limits against `right_limit_states`, the bridge truth 311.343881428885841697 V on the three engines, `time_average` / `time_rms` agreement to 1e-12
 - [x] 0b.5 (DECISIONS 10) `recorders` row in `sim::kRunOptionTable` (every engine, `Unset::Always`: composed above the dispatch, where `store_every > 1` / `resume_from` are refused by name) — done at integration batch 14c
 - [x] 0b.6 (DECISIONS 19) In-loop feeding for Python on the stepper's per-step hook (`record/loop_feed.hpp`, `Simulation::set_hooks`): pwl and trbdf2 through the Simulation object; the exact engine keeps the stored-array pass (its scheduler hook has no right limits); the `store_every` refusal lifted when the feed is in-loop (refused by name otherwise)
-- [ ] 0b.7 Recorder state in the snapshot (new pickle index) so `resume_from` works with recorders; refused by name until then (not started in slice 2: needs `Recorder` state export / import of the partial windows and the start row, a SolverSnapshot field at index 17 with a reader branch and the five field-count tests; no loop edit)
+- [x] 0b.9 (DECISIONS 20) Device readings in the loop under the committed mode: PWL switch / diode, capacitor (KCL-consistent), Shockley / smooth / Lauritzen diode, MOSFET, IGBT, saturable inductor, nonlinear capacitor, current sources, VCVS; `p()` of those; the rest refused by name
+- [x] 0b.7 (DECISIONS 21: pickle field 18) Recorder state in the snapshot (new pickle index) so `resume_from` works with recorders
+- [ ] 0b.10 (DECISIONS 21) Cost of an attached recorder ≤ +5 % (pwl) / +3 % (trbdf2) per accepted step for one plain statistics-only probe — NOT met (+28 % / +17 %); first steps done
+- [ ] 0b.11 (request R5) The exact engine fed in the loop — waits for a per-segment step / event call in `dsed/scheduler.hpp`
 - [x] 0b.8 `Times` / `t_eval` sampling (`keep='times'`, linear, `land=false`; landing waits for the event queue in the loop), `RingSink` (`Recorder::stream_to(LiveRing*)`, C++), `at(t)` (`res.at`) (DECISIONS 16)
 
 ## 1. One constructible result type
@@ -51,8 +54,8 @@ states at equal times.
 - [ ] 5.4 Oracle: `res.i` unchanged to 1e-12 for each ported kind on the harness; `test_device_loss_summary.py`, `test_loss_window.py` green
 
 ## 6. Capacitor current (own PR, **BREAKING**, pending the owner's answer)
-- [ ] 6.1 `i(C)` from the companion law; `res.derived.i_smooth(name)` keeps the previous derivative form
-- [ ] 6.2 Tests: `∫i dt = C·Δv` to 1e-12 per step on both engines
+- [ ] 6.1 (recorders, in the loop: DONE — DECISIONS 20, the committed companion current, KCL-consistent; `res.i('C')` on a stored result still the derivative, not done; `res.derived.i_smooth` not done) `i(C)` from the companion law; `res.derived.i_smooth(name)` keeps the previous derivative form
+- [ ] 6.2 (recorders: KCL at every sample on three circuits, ∫i dt vs C·Δv over mid-step windows and an energy balance from recorder outputs on pwl / trbdf2 / exact — `test_recorder_device_readings.py`; the per-step 1e-12 check on `res.i` not done) Tests: `∫i dt = C·Δv` to 1e-12 per step on both engines
 - [ ] 6.3 Docs: CHANGELOG migration note; known-limitations entry on trapezoidal ripple
 
 ## 7. In-kernel recording

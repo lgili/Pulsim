@@ -51,6 +51,7 @@
 #include <limits>
 #include <memory>
 #include <span>
+#include <type_traits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -261,6 +262,102 @@ public:
         ring_ = ring;
     }
 
+    // ---- snapshot (task 0b.7): everything a resumed run continues from ----
+    /// Append the recorder's run state to `out` (flat; see `restore`): the
+    /// last sample and the line's start (a partial window ends there), the
+    /// counters, kept rows, event rows and every window's statistics.
+    void save(std::vector<Real>& out) const {
+        const auto put = [&](Real v) { out.push_back(v); };
+        const auto vec = [&](const auto& v) {
+            put(static_cast<Real>(v.size()));
+            for (const auto x : v) put(static_cast<Real>(x));
+        };
+        put(static_cast<Real>(probes_.size()));
+        put(t_prev_);
+        put(static_cast<Real>(n_samples_));
+        put(static_cast<Real>(next_time_));
+        put(static_cast<Real>(unreached_));
+        vec(start_);
+        vec(left_);
+        vec(times_);
+        vec(values_);
+        vec(interpolated_);
+        vec(event_t_);
+        vec(event_t_right_);
+        vec(event_resolution_);
+        vec(event_left_);
+        vec(event_right_);
+        for (const auto* ws : {&declared_, &periodic_}) {
+            put(static_cast<Real>(ws->size()));
+            for (const auto& w : *ws) {
+                for (const Real v : {w.t0, w.t1, w.integral, w.sq3, w.min, w.t_min, w.max,
+                                     w.t_max, Real(w.seen_t0), Real(w.seen_t1)}) {
+                    put(v);
+                }
+            }
+        }
+    }
+    /// Read what `save` wrote from `in` at `pos` (advanced past it). Throws
+    /// std::invalid_argument when it does not fit this recorder.
+    void restore(std::span<const Real> in, Size& pos) {
+        const auto get = [&]() -> Real {
+            if (pos >= in.size()) throw std::invalid_argument("recorder state: truncated");
+            return in[pos++];
+        };
+        const auto count = [&]() {
+            const Real v = get();
+            if (!(v >= 0 && v <= static_cast<Real>(in.size()))) {
+                throw std::invalid_argument("recorder state: bad length");
+            }
+            return static_cast<Size>(v);
+        };
+        const auto vec = [&](auto& v) {
+            using T = typename std::remove_reference_t<decltype(v)>::value_type;
+            const Size n = count();
+            v.resize(n);
+            for (Size k = 0; k < n; ++k) v[k] = static_cast<T>(get());
+        };
+        if (count() != probes_.size()) {
+            throw std::invalid_argument("recorder state: another number of probes");
+        }
+        const auto counter = [&]() {   // a count, not a length: no size bound
+            const Real v = get();
+            if (!(v >= 0 && v <= Real{9007199254740992.0} && v == std::floor(v))) {
+                throw std::invalid_argument("recorder state: bad counter");
+            }
+            return static_cast<Size>(v);
+        };
+        t_prev_ = get();
+        n_samples_ = counter();
+        next_time_ = counter();
+        unreached_ = counter();
+        vec(start_);
+        vec(left_);
+        if (start_.size() != probes_.size() || left_.size() != probes_.size()) {
+            throw std::invalid_argument("recorder state: bad line");
+        }
+        vec(times_);
+        vec(values_);
+        vec(interpolated_);
+        vec(event_t_);
+        vec(event_t_right_);
+        vec(event_resolution_);
+        vec(event_left_);
+        vec(event_right_);
+        for (auto* ws : {&declared_, &periodic_}) {
+            const Size n = count();
+            if (ws == &declared_ && n != declared_.size()) {
+                throw std::invalid_argument("recorder state: other declared windows");
+            }
+            ws->resize(n);
+            for (auto& w : *ws) {
+                w.t0 = get(); w.t1 = get(); w.integral = get(); w.sq3 = get();
+                w.min = get(); w.t_min = get(); w.max = get(); w.t_max = get();
+                w.seen_t0 = get() != 0; w.seen_t1 = get() != 0;
+            }
+        }
+    }
+
     // ---- results ----
     [[nodiscard]] Size n_probes() const noexcept { return probes_.size(); }
     [[nodiscard]] const std::vector<Probe>& probes() const noexcept { return probes_; }
@@ -352,6 +449,10 @@ private:
 
     void eval_into(std::span<const Real> readings, std::vector<Real>& out) {
         for (Size p = 0; p < probes_.size(); ++p) {
+            if (probes_[p].plain()) {
+                out[p] = readings[cols_[offs_[p]]];
+                continue;
+            }
             const Size n = offs_[p + 1] - offs_[p];
             for (Size k = 0; k < n; ++k) scratch_[k] = readings[cols_[offs_[p] + k]];
             out[p] = probes_[p].eval(std::span<const Real>(scratch_.data(), n));
@@ -427,6 +528,12 @@ private:
         const auto k1 = static_cast<Size>(std::floor((tb - spec_.offset) / T)) + 1;
         ensure_period(k1 + 1);
         for (Size k = k0 == 0 ? 0 : k0 - 1; k <= k1; ++k) {
+            // a window wholly outside the piece (and not within the 4-ulp
+            // snap of its ends) takes nothing: skip it before the snaps
+            const WindowStat& w0 = periodic_[k * np];
+            if ((w0.t1 < ta && !close_to(w0.t1, ta)) || (w0.t0 > tb && !close_to(w0.t0, tb))) {
+                continue;
+            }
             for (Size p = 0; p < np; ++p) {
                 accumulate(periodic_[k * np + p], ta, tb, start_[p], left_[p]);
             }

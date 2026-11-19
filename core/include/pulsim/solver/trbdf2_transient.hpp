@@ -1550,7 +1550,7 @@ inline SimulationResult run_transient_trbdf2(
     result.states.push_back(x);
     result.event_iteration_count.push_back(0);
     result.record_switch_state(initial_mask, !initial_seeded);
-    if (hooks) hooks->start(x, initial_mask);
+    if (hooks) hooks->start(x, initial_mask, {&history, &hs, &last_probe_dt});
     if (lt) {
         if (resume_from != nullptr && !resume_from->loss_state.empty()) {
             lt->restore(resume_from->loss_state);   // the heat in flight too

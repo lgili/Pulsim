@@ -130,9 +130,11 @@ def test_times_rows_and_power_readings(eng):
     ("p(C1)", r"p\(C1\) of a capacitor"),
     ("i(C1)*2", r"i\(C1\) of a capacitor"),
 ])
-def test_inexact_device_readings_are_refused_before_the_run(probe, match):
-    with pytest.raises(ValueError, match=match):
-        p.simulate(_rc(), t_end=1e-3, dt=1e-6, engine="pwl",
+def test_loop_only_device_readings_are_refused_on_the_exact_engine(probe, match):
+    # read in the loop on pwl / trbdf2 (DECISIONS 20); the exact engine is
+    # fed from its stored arrays, which hold no such reading
+    with pytest.raises(p.UnsupportedError, match=match):
+        p.simulate(_rc(), t_end=1e-3, engine="exact",
                    recorders=[p.Recorder("x", [probe])])
 
 

@@ -315,6 +315,128 @@ counts (the caller sizes it; the in-loop test covers None and Decimate).
   run-invariant ones. Verified by the step-sequence compare (see the
   hand-off) and the goldens with no recorder.
 
+## 20. Device readings in the loop (item 1, slice 4, 2026-11-19)
+
+- **Definition (orchestrator):** a device's `i()` is read under the mode the
+  engine COMMITTED, at the committed state, in the step hook after commit
+  (`StepHooks::step`'s end mask is the stamp the step was solved under).
+  A capacitor's `i()` is the KCL-CONSISTENT current: the companion's
+  committed branch current (`HistoryState` entry `i_prev` after the
+  commit: trapezoidal `2C/h·Δv − i_n`, the restart's `C/h_e·Δv`, the
+  TR-BDF2 stage-2 derivative) — so Σ i = 0 at every node of a recorded
+  sample and the trapezoid of i_C over a trapezoidal step is C·Δv. Not
+  C·dv/dt from samples (the stored pass still refuses it).
+- **How a listener reads it:** `StepHooks::start(x0, mask0, RunView)`; the
+  `RunView` (`history`, `stateful`, `probe_dt`) is set once per run by the
+  two loops (the only loop hunks: `run_transient.hpp` and
+  `trbdf2_transient.hpp`, the `hooks->start` line); `on_start` listeners
+  seed the start row from the histories at t0.
+- **Laws (record/loop_feed.hpp `DeviceCurrent`, resolved from the pool's
+  kind by `LoopFeed::set_circuit`):** PWL switch / diode
+  `pwl::PwlBranchLaw` (the loss tracker's `v_of_` / `i_of_`, moved into
+  one header and used by both); capacitor (above); Shockley / smooth
+  diode, MOSFET, IGBT level 1 `pwl::static_reading` (one branch, the law
+  both device paths stamp); saturable inductor, nonlinear capacitor,
+  Lauritzen diode `for_each_stateful_reading` summed per branch (IGBT
+  tail included); current sources (constant, sine / pulse / table at t);
+  inductor, voltage sources, VCVS, branch-form switch / diode: the state
+  column (as before). `p()` = v(from, to)·i, or Σ v_pin·i_pin for a
+  Newton law (MOSFET / IGBT: drain-source and gate pins).
+- **Event right sides (TR-BDF2):** the right side is a settled probe; the
+  histories at the report are the left side's, so a capacitor's right
+  current is the probe's own companion current
+  `g_eq(probe_dt)(v_r − v_prev) − i_prev` (what `refresh_derivatives`
+  stores). A report at a step's end that arrives before the step hook
+  (the slots may be replaced by the probe's before the hook) keeps the
+  history readings taken at the report for the sample. Limitations: a
+  stateful device's right side uses the left committed rate (Coss's
+  current is its rate: its right value is the left one); at a diode
+  landing the right side is the h_zero cascade probe's companion current,
+  which the engine does not commit (no derivative refresh at diode
+  events): the next step starts from the landing's own committed current,
+  so the first piece after such a row is not exactly C·Δv and the right
+  value carries ~2C·eps·|v|/h_zero of noise.
+- **Refused by name (nothing else):** in the loop, kinds with no current
+  law here — VCCS, CCCS, CCVS, gyrator, ideal transformer, PMSM / IM,
+  external devices (`set_circuit` names the reading; the run falls back to
+  the stored-array pass, which reads what `res.i` reads); `p()` of a
+  current source (sign convention "out of n_pos": write it). On the
+  stored-array pass (exact engine, routes that bypass the Simulation
+  object): `i()` / `p()` of capacitor, nonlinear capacitor, MOSFET, IGBT,
+  nonlinear / Lauritzen diode, saturable inductor, VCVS — before the run
+  on `engine='exact'`, after it otherwise (the route is decided inside
+  simulate), naming why the run was not fed in the loop.
+- **Measured** (`test_recorder_device_readings.py`): KCL at every node of
+  every sample, RC / buck / capacitor-filtered rectifier, pwl and trbdf2:
+  ≤ 5.6e-11 of the node's current scale except where the solver's own
+  floor C·eps·|v|/h dominates (femtosecond trbdf2 steps near events:
+  8e-7 A at h = 1e-13 s); event right sides likewise. ∫ i_C dt vs C·Δv
+  over windows that start and end mid-step: pwl ≤ 2.3e-5 relative (RC
+  1e-9: the residue is the two partial steps), trbdf2 ≤ 4.5e-4 (the BDF2
+  stage). Energy balance from recorder outputs only (buck, window mid-step,
+  stored energy from `keep='times'` rows at the window ends): pwl
+  1.4e-5, trbdf2 3.8e-7, exact (stored-array pass, dt = 1e-6 samples)
+  1.1e-5 relative; Tellegen (Σ ∫p = 0 over the six devices) ≤ 1e-9.
+  Newton kinds against a series resistor (KCL at the terminal) on both
+  engines; VCVS and a sine current source.
+
+## 21. Recorder state in the snapshot (0b.7), cost, leftovers (slice 4)
+
+- **Pickle field 18** (version 5, 19 fields): `(recorder_spec, recorder_state)`
+  or None; `SolverSnapshot.recorder_state` / `recorder_spec`. Every older
+  layout still loads (2.0, v3, the v4 variants, 17- and 18-field v5). The
+  state is `LoopFeed::save()`: the last sample's state, mask, a settled
+  event at it, the counters, and each `Recorder::save()` — the line's
+  start (a partial window ends there), kept rows, event rows, every
+  window's and period's statistics. So a resumed run's `recorded` IS the
+  uninterrupted run's (not only from the seam on). Saved before
+  `finish()` (no `keep='times'` flush is counted twice). The spec
+  signature must match on resume (refused by name otherwise).
+- **Resume without state** (an older pickle, or a run without in-loop
+  recorders): the recorders start at the resume instant and
+  `res.recorder_feed["resume"]` says so; only complete periods are
+  reported; a declared window that began before the instant is refused
+  ("not covered"), never reported complete. A snapshot WITH state on a
+  run that cannot be fed in the loop is refused. A run that ends with an
+  event report pending writes no state and says so.
+- **Windows past t_end** are allowed now (`t0 < t_end`): reported open
+  (NaN statistics), continued by a resume.
+- Measured: pwl buck split at 0.43 ms (mid-window, mid-period), through
+  the pickle: kept rows, event rows, windows, periods bit-identical to
+  the uninterrupted run; trbdf2: the resumed controller takes its own
+  steps (2 rows fewer), statistics within 6.0e-6 relative.
+- **Cost (instructions per accepted step, in-process, min of 6; buck,
+  one statistics-only recorder, period 1e-4):**
+
+  | probes | pwl before | pwl now | trbdf2 before | trbdf2 now |
+  |---|---|---|---|---|
+  | 0 | 3091.9 | 3094.5–3102.8 (≤ +0.35 %) | 10983.6 | 10981.3–10990.3 (≤ +0.06 %) |
+  | 1 | 4033.2 (+30 %) | 3954.7–3957.1 (+28 %) | 12393.1 (+13 %) | 12800.7–12840.4 (+17 %) |
+  | 4 | — | 4504.7 | — | 14215.3 |
+  | 16 | — | 6555.8 | — | 19676.5 |
+
+  Per-step C++ cost of one probe (pwl, run length doubled): ~820
+  instructions; a microbenchmark of the feed alone: ~665 per step
+  (Recorder::sample ~200 with no window, +~190 with a period: two
+  floor() + three window visits with 4-ulp snaps; LoopFeed::on_step ~280:
+  std::function dispatch, the jump check, the state copy). Marginal per
+  extra probe: ~175 (pwl), ~470 (trbdf2, fewer steps: fixed Python setup
+  weighs more). Done: plain `v(n)` probes bypass `ir::Expr`; windows
+  wholly outside a piece are skipped before the snaps; the jump check
+  compares bitwise first. The +5 % / +3 % targets are NOT met: they need
+  a current-window fast path (cached window index and edges; snaps only
+  near an edge) and a leaner feed step — next slice.
+- **Exact engine in the loop (item 4): requested, not wired.** The
+  scheduler's hook calls `accepted` only (left limits;
+  `dsed/scheduler.hpp` `hook_accepted_`); no per-segment callback carries
+  both limits. Request R5 below; the stored-array pass stays.
+- **Leftovers done:** a Simulation's feed is detached after every run
+  (`clear_loop_feed`, in a `finally`: a run that threw cannot feed a later
+  run on that object); every column a reading reads is bounds-checked at
+  the run's start (the per-step reads stay unchecked). NOT done:
+  `stats.time_average` delegation, `live_stream` over `RingSink`, the
+  result reference page.
+
 ## Requests to the stepper track
 
 - **R1.** One per-accepted-step call for all engines, after commit:
@@ -332,6 +454,12 @@ counts (the caller sizes it; the in-loop test covers None and Decimate).
   (∫x dt, ∫x xᵀ dt over the LTI segment through
   `dsed/period_integrals.hpp`) so recorders can be exact rather than
   linear-between-samples there.
+- **R5 (exact engine, slice 4).** In `dsed/scheduler.hpp`, beside
+  `hook_accepted_`: `hooks_->step(t0, x_start, mask_start, t, x_left,
+  mask)` per accepted segment and `hooks_->event(t, x_left, mask_left,
+  x_right, mask_right)` where the scheduler stores a right limit — one
+  call each, so the exact engine can be fed in the loop (memory with
+  `store_every`).
 - All four: no allocation per step, zero cost with no listener (as
   `StepHooks::empty()`).
 
@@ -394,3 +522,27 @@ Slice 2 (this branch, after 2b18f11a):
     (`set_hooks`) calls `accepted` only (left limits); feeding it in-loop
     needs its `step` / `event` calls in `dsed/scheduler.hpp` (owned by the
     exact-engine agent).
+
+## Hand-off (slice 4, 2026-11-19)
+
+- Done: item 1 device readings in the loop (20), 0b.7 recorder state in
+  the snapshot (21, pickle field 18), first cost steps (21), leftovers
+  (feed detached after every run; column bounds at the run's start).
+- Loop hunks (each the existing `hooks->start` line, now passing the run
+  view): `solver/run_transient.hpp:1632` and `:3504` (static path),
+  `solver/trbdf2_transient.hpp:1553`. No per-step code in the loops.
+- Fresh-context review (opus, read-only): A committed-mode readings and
+  C pure observer — no defect; fixed: restore rejected counters above the
+  state length (a long `keep='none'` resume threw; test added), a resumed
+  run with no hook firing reported "in-loop" (now requires steps from THIS
+  run), the pwl bracket read a source at the report's t (now the step's
+  end row), the static path's `start` dropped the view, reserve before
+  restore (now after), the constant current source read from the pool.
+  Recorded, not fixed: the diode-landing right side (20). Checked after
+  the review: a split ON a gate edge (buck, 0.42 / 0.45 ms) gives the
+  uninterrupted run's 41 event rows on trbdf2 and pwl, one at the seam
+  on trbdf2 (no duplicate).
+- Open: cost targets (0b.10: a current-window fast path, a leaner feed
+  step); R5 (exact engine in the loop); 4.2 delegation, 8.3 `live_stream`
+  over `RingSink`, 1.4 result reference page; Eigen 3.4.0 for this slice's
+  C++ (not run).
