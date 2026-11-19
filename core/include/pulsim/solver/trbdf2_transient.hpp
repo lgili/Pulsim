@@ -235,6 +235,13 @@ struct TrBdf2Options {
     /// recorded only), 2 'lcp' (the LCP decides where the settle's answer
     /// can differ from it).
     int mode_selection = 0;
+    /// simulate(lte_index2='exclude'): the LTE of an inductor whose di/dt
+    /// reads an index-2 node voltage (a node with only inductors and OFF
+    /// switches on it in the step's mode) takes its stage derivatives from
+    /// its own currents (the integration formulas, as the capacitors do),
+    /// not from that voltage. Same estimate in exact arithmetic; the
+    /// voltage's roundoff no longer enters it. Default false: unchanged.
+    bool lte_index2_exclude = false;
 };
 
 struct TrBdf2Stats {
@@ -347,6 +354,50 @@ struct TrBdf2Stats {
     Size n_conditioning_rejects = 0;
     Real h_conditioning_floor = 0;
 };
+
+/// Nodes whose voltage is an index-2 variable in `mask`: every branch at
+/// the node is an inductor history entry or an OFF switch (its g_off is no
+/// path), and at least one is an inductor. The voltage is then set by
+/// di/dt alone (an inductor cutset), and the solve resolves it only to
+/// eps * (conductance elsewhere) / (h / L). Anything else at the node
+/// (capacitor, resistor of any value, source, ON switch, a branch kind not
+/// listed) keeps it index-1: the rule never flags a node it cannot read.
+inline std::vector<char> index2_nodes(
+    const topology::Graph& graph,
+    const std::vector<pwl::HistoryEntry>& entries,
+    const topology::SwitchStateMask& mask) {
+    const Index nb = graph.num_branches();
+    std::vector<char> inductive(static_cast<Size>(nb), 0);
+    for (const auto& e : entries) {
+        if (e.kind == pwl::DevicePool::StoredKind::Inductor
+            && e.branch_id >= 0 && e.branch_id < nb) {
+            inductive[static_cast<Size>(e.branch_id)] = 1;
+        }
+    }
+    std::vector<long> slot(static_cast<Size>(nb), -1L);
+    long s = 0;
+    for (Index b = 0; b < nb; ++b) {
+        if (graph.branch(b).kind == topology::BranchKind::Switch) {
+            slot[static_cast<Size>(b)] = s++;
+        }
+    }
+    std::vector<char> out(static_cast<Size>(graph.num_nodes()), 0);
+    for (Index n = 0; n < graph.num_nodes(); ++n) {
+        bool any_l = false;
+        bool path = false;
+        for (const Index b : graph.branches_of(n)) {
+            const auto ub = static_cast<Size>(b);
+            if (inductive[ub]) {
+                any_l = true;
+            } else if (slot[ub] < 0
+                       || mask.get(static_cast<Size>(slot[ub]))) {
+                path = true;
+            }
+        }
+        out[static_cast<Size>(n)] = static_cast<char>(any_l && !path);
+    }
+    return out;
+}
 
 namespace detail_trbdf2 {
 
@@ -1557,6 +1608,38 @@ inline SimulationResult run_transient_trbdf2(
         return stamping::read_node_voltage(xs, e.from)
                - stamping::read_node_voltage(xs, e.to);
     };
+    // lte_index2_exclude: per mode, the inductor entries whose di/dt reads
+    // an index-2 node voltage (own terminals or the coupled partner's).
+    std::unordered_map<SwitchStateMask, std::vector<char>> idx2_by_mode;
+    auto idx2_entries = [&](const SwitchStateMask& m)
+        -> const std::vector<char>& {
+        const auto it = idx2_by_mode.find(m);
+        if (it != idx2_by_mode.end()) return it->second;
+        const auto nodes = index2_nodes(graph, entries, m);
+        auto at = [&](Index n) {
+            return n >= 0 && nodes[static_cast<Size>(n)] != 0;
+        };
+        std::vector<char> f(entries.size(), 0);
+        for (Size i = 0; i < entries.size(); ++i) {
+            const auto& e = entries[i];
+            if (e.kind != pwl::DevicePool::StoredKind::Inductor) continue;
+            bool r = at(e.from) || at(e.to);
+            if (partner[i] != Size(-1)) {
+                r = r || at(entries[partner[i]].from)
+                    || at(entries[partner[i]].to);
+            }
+            f[i] = static_cast<char>(r);
+        }
+        return idx2_by_mode.emplace(m, std::move(f)).first->second;
+    };
+    // The previous accepted step's BDF2-formula di/dt per flagged entry,
+    // keyed by the (t, mode, i, v) it ended on: an event, a refresh or a
+    // landing changes one of them and the estimate falls back to v/L.
+    std::vector<Real> fy_f(entries.size(), Real{0});
+    std::vector<Real> fy_i(entries.size(), Real{0});
+    std::vector<Real> fy_v(entries.size(), Real{0});
+    Real fy_t = std::numeric_limits<Real>::quiet_NaN();
+    SwitchStateMask fy_mask;
 
     Real t = opts.t_start;
     t_now = &t;
@@ -2725,8 +2808,13 @@ inline SimulationResult run_transient_trbdf2(
             Size n_err = 0;
             est_v.assign(entries.size(), Real{0});
             est_sc.assign(entries.size(), Real{1});
+            const std::vector<char>* idx2 =
+                opts.lte_index2_exclude ? &idx2_entries(mask_step) : nullptr;
+            const bool fy_ok =
+                idx2 != nullptr && fy_t == t && fy_mask == mask_step;
             for (Size i = 0; i < entries.size(); ++i) {
                 const auto& e = entries[i];
+                const bool from_i = idx2 != nullptr && (*idx2)[i] != 0;
                 const Real vg1 = entry_v(e, x_g);
                 const Real v11 = entry_v(e, x_1);
                 Real f_n, f_g, f_1, y_old, y_new;
@@ -2750,6 +2838,11 @@ inline SimulationResult run_transient_trbdf2(
                         k2 = inductor_didt(i, v11, vp_1, Real{0});
                         y_old = e.i_prev;
                         y_new = x_1[e.inductor_branch_var_id];
+                        if (from_i) {   // the capacitor's formulas, dual
+                            const Real ig = x_g[e.inductor_branch_var_id];
+                            k1 = (Real{2} / hg) * (ig - e1.i_prev);
+                            k2 = (Real{2} / hg) * (y_new - e2.i_prev);
+                        }
                     }
                     const Real sc = opts.atol + opts.rtol
                         * std::max(std::abs(y_old), std::abs(y_new));
@@ -2798,6 +2891,21 @@ inline SimulationResult run_transient_trbdf2(
                     f_1 = inductor_didt(i, v11, vp_1, Real{0});
                     y_old = e.i_prev;
                     y_new = x_1[e.inductor_branch_var_id];
+                    if (from_i) {
+                        // TR and BDF2 relations on the current (the
+                        // capacitor's i_g, i_1 above, dual); f_n the last
+                        // step's f_1 when the history is that step's own.
+                        if (fy_ok && fy_i[i] == e.i_prev
+                            && fy_v[i] == e.v_prev) {
+                            f_n = fy_f[i];
+                        }
+                        const Real ig = x_g[e.inductor_branch_var_id];
+                        f_g = Real{2} * (ig - e.i_prev) / hg - f_n;
+                        f_1 = (c1 * y_new + c2 * ig + c3 * e.i_prev) / h;
+                        fy_f[i] = f_1;
+                        fy_i[i] = y_new;
+                        fy_v[i] = v11;
+                    }
                 }
                 // Factor 2 (Bank et al.): without it the estimate was
                 // half the true local error (true/estimate 1.97 at
@@ -2814,6 +2922,10 @@ inline SimulationResult run_transient_trbdf2(
                                      std::abs(y_new));
                 est_v[i] = lte;
                 est_sc[i] = sc;
+            }
+            if (idx2 != nullptr) {
+                fy_t = sdirk ? std::numeric_limits<Real>::quiet_NaN() : t + h;
+                fy_mask = mask_step;
             }
             // Hosea-Shampine filter: W^-1 est with W the stage matrix (the
             // (mask, gamma*h) factor both stages used). A stiff mode the

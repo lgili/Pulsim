@@ -861,3 +861,54 @@ TEST_CASE("TR-BDF2: step hooks see every landed gate edge as a commutation",
     CHECK(hooks.commutations() == t_com.size());
     (void)res;
 }
+
+TEST_CASE("TR-BDF2: index-2 nodes are the inductor cutsets of the mode",
+          "[v2][trbdf2]") {
+    // lte_index2='exclude' reads its inductors' estimates from their
+    // currents where this flags a node: a node with only inductors and
+    // OFF switches on it, never one with a capacitor or a conducting path.
+    auto flags = [](builder::CircuitBuilder& b,
+                    const topology::SwitchStateMask& m) {
+        pwl::HistoryState h(b.graph(), b.pool());
+        return solver::index2_nodes(b.graph(), h.entries(), m);
+    };
+    auto at = [](const std::vector<char>& f, Index n) {
+        return f[static_cast<Size>(n)] != 0;
+    };
+    {   // two inductors in series: the middle node is index-2
+        builder::CircuitBuilder b;
+        b.add_voltage_source("V", "in", "gnd", 10.0);
+        b.add_inductor("L1", "in", "m", 1e-6);
+        b.add_inductor("L2", "m", "out", 4e-6);
+        b.add_resistor("R", "out", "gnd", 1.0);
+        const auto f = flags(b, all_open(0));
+        REQUIRE(at(f, b.node_id_of("m")));
+        REQUIRE_FALSE(at(f, b.node_id_of("in")));
+        REQUIRE_FALSE(at(f, b.node_id_of("out")));
+        b.add_capacitor("Cm", "m", "gnd", 1e-12);   // the same node, with C
+        REQUIRE_FALSE(at(flags(b, all_open(0)), b.node_id_of("m")));
+    }
+    {   // buck switch node: index-2 only with the switch AND the diode OFF
+        builder::CircuitBuilder b;
+        b.add_voltage_source("V", "in", "gnd", 24.0);
+        b.add_switch("S", "in", "sw", 1e3, 1e-9);
+        b.add_diode("D", "gnd", "sw", 1e3, 1e-9, 0.7);
+        b.add_inductor("L", "sw", "out", 100e-6);
+        b.add_capacitor("C", "out", "gnd", 100e-6);
+        b.add_resistor("R", "out", "gnd", 5.0);
+        REQUIRE(b.graph().num_switches() == 2);
+        const Index sw = b.node_id_of("sw");
+        auto mask = [](bool s, bool d) {
+            topology::SwitchStateMask m(2);
+            m.set(0, s);
+            m.set(1, d);
+            return m;
+        };
+        REQUIRE_FALSE(at(flags(b, mask(true, false)), sw));
+        REQUIRE_FALSE(at(flags(b, mask(false, true)), sw));
+        REQUIRE(at(flags(b, mask(false, false)), sw));
+        REQUIRE_FALSE(at(flags(b, mask(false, false)), b.node_id_of("out")));
+        b.add_capacitor("Csw", "sw", "gnd", 100e-12);
+        REQUIRE_FALSE(at(flags(b, mask(false, false)), sw));
+    }
+}

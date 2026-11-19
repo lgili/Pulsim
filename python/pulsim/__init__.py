@@ -2061,6 +2061,7 @@ def simulate(
     sensitivities: "Optional[Sequence[str]]" = None,
     mode_selection: Optional[str] = None,
     allow_implicit_segments: Optional[bool] = None,
+    lte_index2: str = "include",
 ) -> SimulationResult:
     """Build the cache and run a transient simulation.
 
@@ -2297,6 +2298,14 @@ def simulate(
         counters in ``result.diagnostics['mode_selection']``.
         ``'shadow'``: the default run, plus the LCP solved beside it;
         disagreements in ``result.diagnostics['mode_shadow']``.
+    lte_index2
+        ``engine='trbdf2'`` only. ``'include'`` (default): today's local
+        error estimate. ``'exclude'``: an inductor whose di/dt reads an
+        index-2 node voltage (a node with only inductors and OFF switches on
+        it in the step's mode, e.g. between a leakage inductance and a
+        transformer winding) takes its estimate from its own currents, as
+        the capacitors do; that voltage's roundoff no longer pins the step
+        at its floor. The same estimate in exact arithmetic.
     allow_implicit_segments
         ``engine='exact'`` (alias ``'dsed'``) only. A segment whose mode the
         exact kernel cannot step (a user ``b_extra_fn``: ``feature='source'``;
@@ -2465,6 +2474,9 @@ def simulate(
     if on_impulse not in ("record", "warn", "error"):
         raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
                          "'record', 'warn' or 'error'")
+    if lte_index2 not in ("include", "exclude"):
+        raise ValueError(f"simulate(lte_index2={lte_index2!r}): expected "
+                         "'include' or 'exclude'")
     from . import _dsed_dispatch as _dsed
     _dsed._validate_engine_kwargs(
         engine=engine,
@@ -2628,6 +2640,13 @@ def simulate(
             ": the sensitivity run differentiates the legacy event "
             "settle; a mode chosen by the complementarity problem has no "
             "derivative here. Drop mode_selection.")
+
+    if lte_index2 == "exclude" and engine == "dsed":
+        raise _unsupported(
+            engine, "lte_index2",
+            "simulate(engine='dsed', lte_index2='exclude'): the keyword "
+            "governs the variable-step engine's error estimate; the exact "
+            "engine has none. Use engine='trbdf2', or drop it.")
 
     # ---- Engine dispatch: DSED takes the early-return path. ----
     # For engine='dsed', `integrator` ∈ {'auto', 'rk45', 'bdf2', None}.
@@ -2890,6 +2909,13 @@ def simulate(
             f"{allow_implicit_segments!r}): the keyword governs the exact "
             f"engine's numeric segments; this run lands on engine={engine!r}, "
             "which has no exact segments. Use engine='exact', or drop it.")
+    if lte_index2 == "exclude" and engine != "trbdf2":
+        raise _unsupported(
+            engine, "lte_index2",
+            f"simulate(engine={_engine_asked!r}, lte_index2='exclude'): the "
+            "keyword governs the variable-step engine's error estimate; this "
+            f"run lands on engine={engine!r}, which has none. Use "
+            "engine='trbdf2', or drop it.")
     if engine == "trbdf2":
         # The capability table by name (the branch form runs here).
         from . import _pulsim as _k  # type: ignore[import-not-found]
@@ -2983,6 +3009,7 @@ def simulate(
                 newton_roundoff_budget=int(newton_roundoff_budget or 0),
                 on_impulse_error=on_impulse == "error",
                 mode_selection={"shadow": 1, "lcp": 2}.get(mode_selection, 0),
+                lte_index2_exclude=lte_index2 == "exclude",
             )
         except SimulationAborted as _aborted:
             try:
