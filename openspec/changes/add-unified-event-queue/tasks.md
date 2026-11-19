@@ -18,11 +18,11 @@ conformance test of `add-engine-conformance-matrix`.
 - [ ] 1.3 Oracle: goldens bit-identical; TR-BDF2 counters identical; `test_pwm_grid_edges.py`; matrix unchanged or improved (`NativeMultiMaskPwm` exact on every engine)
 
 ## 2. The queue, used by TR-BDF2
-- [x] 2.1 `events/time_event.hpp`, `events/event_queue.hpp`: `Kind`, `TimeEvent`, `TimeSource`, `EventQueue` (fixed-size heap, `next_landing`, `take_at`, `invalidate`, counters) — done as one header with three source shapes, a linear scan and `take_due` (DECISIONS 1)
-- [x] 2.2 `events/gate_source.hpp`: `GateSource`, `ScheduleGate`, index composition with the overlap check (DECISIONS 7; engines consume it through `to_schedule()`)
-- [x] 2.3 Unit tests: k-way merge order, simultaneity order, integer-counter times (no drift over 10⁷ periods), no allocation after `start`
-- [x] 2.4 TR-BDF2 uses the queue for gate, tick and end-of-run landing; `next_edge_fn` / `observer_period` become adapters that register sources
-- [x] 2.5 Oracle: for every harness circuit with an analytic schedule, the accepted-step sequence and the states are identical to 0.2; zero-alloc tests green — oracle used: the 34-case byte compare against a50a2c77 (DECISIONS 2), not a committed baseline
+- [x] 2.1 `events/time_event.hpp`, `events/event_queue.hpp`: `Kind`, `TimeEvent`, `TimeSource`, `EventQueue` (fixed-size heap, `next_landing`, `take_at`, `invalidate`, counters) — done as one header with three source shapes, a linear scan and `take_due` (DECISIONS 1; e06d5d2d)
+- [x] 2.2 `events/gate_source.hpp`: `GateSource`, `ScheduleGate`, index composition with the overlap check (DECISIONS 7; engines consume it through `to_schedule()`; 95dca3a9, fda9cfb9)
+- [x] 2.3 Unit tests: k-way merge order, simultaneity order, integer-counter times (no drift over 10⁷ periods), no allocation after `start` — e06d5d2d
+- [x] 2.4 TR-BDF2 uses the queue for gate, tick and end-of-run landing; `next_edge_fn` / `observer_period` become adapters that register sources — e06d5d2d
+- [x] 2.5 Oracle: for every harness circuit with an analytic schedule, the accepted-step sequence and the states are identical to 0.2; zero-alloc tests green — oracle used: the 34-case byte compare against a50a2c77 (DECISIONS 2), not a committed baseline (e06d5d2d)
 
 ## 3. The opaque-callable adapter
 - [ ] 3.1 `events/sampled_gate.hpp`: move the sampling, pulse-width learning and bisection of `trbdf2_transient.hpp:960-1190` into `SampledGate` without changing the algorithm; `resolution()`, `n_gate_undersampled`, `gate_pulse_min`
@@ -44,10 +44,10 @@ conformance test of `add-engine-conformance-matrix`.
 - [ ] 5.5 Test: two edges of one bit inside one fixed step are counted and reported, not dropped silently
 
 ## 6. Modulators and duty registers
-- [x] 6.1 `events/modulator.hpp`: `DutyRegister`, `LatchPolicy`, `CarrierPwm` (single switch and complementary leg with dead time), `EdgeList`; Python bindings — `pulsim.DutyRegister`, `make_carrier_pwm_fn`, `make_edge_list_fn` (DECISIONS 12)
-- [x] 6.2 `bind_pi_to_switch` builds a `CarrierPwm` with `Immediate` latching; the tick handler writes the register; delete the throttle in `control.py:1350-1355` — through the control graph's `ChainPwmGate`, now `CarrierPwm` legs on chain-owned registers; the throttle was already gone (the loop is a rated graph) (DECISIONS 12)
+- [x] 6.1 `events/modulator.hpp`: `DutyRegister`, `LatchPolicy`, `CarrierPwm` (single switch and complementary leg with dead time), `EdgeList`; Python bindings — `pulsim.DutyRegister`, `make_carrier_pwm_fn`, `make_edge_list_fn` (DECISIONS 12; 57079368)
+- [x] 6.2 `bind_pi_to_switch` builds a `CarrierPwm` with `Immediate` latching; the tick handler writes the register; delete the throttle in `control.py:1350-1355` — through the control graph's `ChainPwmGate`, now `CarrierPwm` legs on chain-owned registers; the throttle was already gone (the loop is a rated graph) (DECISIONS 12; 57079368)
 - [ ] 6.3 C blocks and `BlockChain` register rates; delete the throttle in `c_block.py:387-390` and `BlockChain::make_step_observer`
-- [ ] 6.4 Oracle: closed-loop tests identical on pwl, within tolerance on trbdf2; analytic edges of `CarrierPwm` equal those of `make_pwm_switch_fn` for constant duty to 1 ulp
+- [x] 6.4 Oracle: closed-loop tests identical on pwl, within tolerance on trbdf2; analytic edges of `CarrierPwm` equal those of `make_pwm_switch_fn` for constant duty to 1 ulp — 57079368: `test_modulators.py` (mask and edges exactly equal at and beside every edge; a constant-duty run bit-identical to the helper on pwl/trbdf2), full Python set and goldens unchanged (DECISIONS 12)
 - [ ] 6.5 Measure the closed-loop buck ns/step before and after (estimate to verify: 1.3–2.5 µs → about 0.4 µs)
 - [ ] 6.6 Docs: closed-loop guide, `AI_GUIDE.md`, stubs
 
