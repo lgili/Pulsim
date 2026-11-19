@@ -188,3 +188,54 @@ Outside dsed:
 - `exact_output_step` and its `fits` allocate per step: there is a per-step augmented vector, and an `advance_` for the interval end. This is part of the +75 % wall time at 1e-5.
 - Tier-2 (Padé) segments are not bounded. They keep the dt_max grid and are counted as unbounded.
 - The tolerance is per state, not per observable. An observable that is a difference of large states gets that absolute error.
+
+## 3. The output rule's cost (`output_rtol`), 2026-11-19 — diagnosis
+
+Branch `fix/core-exact-output-rule-cost` (from `feat/core-integration` a32b97ed). Trigger:
+`test_exact_route.py::test_ten_paralleled_bridges_agree_with_pwl[None]` ran > 8 min with the
+release profile's `output_rtol=1e-5`.
+
+### Measured (extension of a32b97ed; shared Mac, 3 other agents building, single runs)
+
+Paralleled diode bridges (`_paralleled_bridges(n)`; states 3n inductors + bus + 2 oscillator):
+
+| banks | t_end | `output_rtol` | wall | samples | events | capped | unbounded |
+|---|---|---|---:|---:|---:|---:|---:|
+| 1 | 20 ms | None / 1e-4 / 1e-5 | 0.27 / 0.19 / 0.20 s | 20155 / 20460 / 21889 | 14 | 0 | 0 |
+| 2 | 20 ms | None / 1e-4 / 1e-5 | 0.78 / 0.77 / 1.10 s | 20315 / 22481 / 34393 | 31 | 0 | 0 |
+| 5 | 20 ms | None / 1e-4 / 1e-5 | 6.1 / 8.8 / 15.9 s | 20591 / 43234 / 99925 | 65 | 0 | 0 |
+| 10 | 20 ms | None | 31.3 s | 20909 | 111 | | |
+| 10 | 2 ms | None / 1e-4 / 1e-5 | 5.8 / 68.5 / 202.6 s | 2227 / 83523 / 261058 | 35 | 0 | 161 |
+
+- The cost is the SAMPLE COUNT: 10 banks at 1e-5 write 117x the samples of `None` (2 ms).
+  The full 20 ms run extrapolates to > 2.5 million samples, ~30 min.
+- The cost per sample does not grow with the rule (10 banks: 2.6 ms/sample `None`, 0.78 ms/sample
+  under the rule — cut steps are shorter, so the event scan has fewer points).
+- Samples grow with the number of banks; events grow only linearly.
+
+### Profile (`sample` on the 10-bank run, 10 s, 8483 samples in the run)
+
+- 86 % self time in `PEDSimulator::simulate` (inlined): the hot loop is a strided row dot
+  product plus a constant, i.e. the diode predicates `row·x + c` of the event scan (60 diodes).
+- 10 % `node_pair_voltage` / `node_pair_voltage_scale` / `node_pair_voltage_forced` (the same
+  predicates), 1.5 % `build_time_varying_b_extra_`.
+- The chord bound itself (`exact_chord_step`) and its allocations are not visible at this size:
+  every extra sample pays the whole event scan.
+
+### Cause
+
+- Inside one inter-event interval the rule's step is CONSTANT (5 banks, 20 ms: e.g.
+  1.23e-8 s for 0.3 ms, 24023 samples, while the trajectory is a slow sinusoid). A real
+  curvature would give a varying step.
+- The bound is `δ²/8 · Σ_k |V_jk z̈_k|` with `z̈_k = λ_k(λ_k z_k + w_k)`. A parasitic mode (the
+  1 Mohm bus tie, the 1 nS OFF diodes in series with 0.2 mH: |λ| up to ~5e12 /s) is projected at
+  each event, so its amplitude is rounding (~u·κ·|x|), but `λ²·noise` is large and constant:
+  it sets δ for the whole interval. The bound never lets a mode's contribution saturate at
+  its amplitude.
+- Reference set (100 circuits `auto` routes to the exact engine, best of 5, a32b97ed): rule
+  off 2.00 s, on 3.63 s (+82 %), samples 2,982,860 -> 3,600,621. Worst ratios: lcc 101x
+  (41 -> 15156 samples), transformer_leakage 57x, steinmetz 51x, high_freq_gan_buck 37x,
+  diode_rectifier 25x. These circuits' 10 us grid is far too coarse for 1e-5 (lcc: a sine at
+  1e-5 needs ~700 samples per period), so most of their samples are needed; their extra time
+  per sample is the rule's own per-step work (an extra `advance_` per step for the range,
+  allocations, O(n²) `hypot` per bisection probe).
