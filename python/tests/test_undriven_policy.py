@@ -14,7 +14,8 @@ from pulsim import _plan
 
 ENGINES = {"pwl": dict(engine="pwl", dt=1e-8), "trbdf2": dict(engine="trbdf2"),
            "exact": dict(engine="exact"), "auto": dict(engine="auto")}
-USED = {"pwl": "pwl", "trbdf2": "trbdf2", "exact": "dsed", "auto": "trbdf2"}
+# since the release engine='auto' without dt runs this piecewise-linear circuit on the exact engine
+USED = {"pwl": "pwl", "trbdf2": "trbdf2", "exact": "dsed", "auto": "dsed"}
 T_END = 5e-6
 
 
@@ -85,8 +86,15 @@ def test_refuse_names_every_undriven_switch(engine):
     assert "S_hi, S_lo" in str(ei.value) and "undriven='open'" in str(ei.value)
 
 
+@pytest.fixture
+def per_engine(monkeypatch):
+    """Legacy subject: the library default None (each engine's own rule), the default
+    before the release made it 'refuse'; reachable through the plan's module default."""
+    monkeypatch.setattr(_plan, "DEFAULT_UNDRIVEN", None)
+
+
 @pytest.mark.parametrize("engine", ["pwl", "exact"])
-def test_none_keeps_the_engines_own_all_closed_with_a_warning(engine):
+def test_none_keeps_the_engines_own_all_closed_with_a_warning(engine, per_engine):
     r, w = _run(_circuit(), engine)
     assert sum("no switch_fn was given" in m for m in w) == 1
     assert "undriven" not in (getattr(r, "diagnostics", None) or {})
@@ -95,11 +103,15 @@ def test_none_keeps_the_engines_own_all_closed_with_a_warning(engine):
                                rtol=1e-9)
 
 
-def test_none_keeps_trbdf2_and_auto_refusals():
+def test_none_keeps_trbdf2_and_auto_refusals(per_engine):
     with pytest.raises(p.UnsupportedError, match="no switch_fn"):
         p.simulate(_circuit(), T_END, engine="trbdf2")
-    with pytest.raises(ValueError, match="cannot use the variable-step engine"):
-        p.simulate(_circuit(), T_END)
+    # 'auto' without dt used to take trbdf2 and refuse; since the release it routes to the
+    # exact engine, whose own rule is all closed with the warning
+    ra, wa = _run(_circuit(), "auto")
+    assert ra.engine_used == "dsed" and sum("no switch_fn was given" in m for m in wa) == 1
+    re, _ = _run(_circuit(), "exact")
+    np.testing.assert_array_equal(np.asarray(ra.v("out")), np.asarray(re.v("out")))
     r, w = _run(_circuit(), "pwl")
     r2 = p.simulate(_circuit(), T_END, dt=1e-8)       # 'auto' with dt: pwl, closed
     assert r2.engine_used == "pwl"
