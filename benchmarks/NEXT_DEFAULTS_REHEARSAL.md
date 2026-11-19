@@ -29,11 +29,7 @@ fixes before the release; the last three need a decision or a re-baseline with e
 
 ### 1b. Refusals the profile raises in `python/tests` (engine fixes or owner decisions)
 
-1. 103 tests, option `form='branch'`: the exact period map / integrals (periodic_steady_state, sensitivities, shooting) refuse a branch-form diode: the flip of `add_diode` takes them away. Engine fix (branch current in the period map) or keep those diodes conductance-form. Repro: `python/tests/test_convergence_error.py::test_pss_non_convergence_is_typed_and_still_a_value_error` under `-p next_defaults_pytest`.
-2. 13 tests, option `discontinuity_restart`: `mmc_arms` refuses the restart rule (full-dt Thevenin stamp at dt/2): the flip breaks every MMC arm run. Engine fix or the rule off under `mmc_arms`. Repro: `python/tests/test_mmc_thevenin.py::test_parity_all_in_all_out_square` under `-p next_defaults_pytest`.
-3. 7 tests, option `form='branch'`: a branch-form switch refuses a bound `g_on` (`bind_param`): scoped / parametrised circuits break. Repro: `python/tests/test_circuit_scopes.py::test_the_scope_tree_is_data` under `-p next_defaults_pytest`.
-4. 3 tests, option `form='branch'`: bdf1 and ac_sweep cannot simulate a branch-form switch / diode. Repro: `python/tests/test_dc_operating_point.py::test_bdf1_refuses_pwl_diodes_as_well` under `-p next_defaults_pytest`.
-5. 1 test, option `enable_substep_state_correction`: a caller that sets `discontinuity_restart=False` is refused once the split defaults on: the split's default must follow the rule's. Repro: `python/tests/test_device_losses_kernel.py::test_energy_balance_of_switching_heat_with_and_without_restart[False-1e-11]` under `-p next_defaults_pytest`.
+4. 1 test, option `form='branch'`: bdf1 (retired) refuses a branch-form switch / diode by name and names pwl / trbdf2 (update-number-changing-release 1.7; ac_sweep runs them since): at the flip bdf1 keeps the conductance form or the test moves off bdf1. Repro: `python/tests/test_engine_conformance.py::test_device_cell[Switch-bdf1]` under `-p next_defaults_pytest`.
 
 ### 2. Accepted changes of number (118 cells better under the profile)
 
@@ -55,18 +51,18 @@ Also open for the owner: one voltage-sanity check (task 6.2 there); the composit
 
 ## Pytest blast radius under the profile
 
-Full `python/tests` with the profile injected by `benchmarks/tools/next_defaults_pytest.py`: 5195 passed, 615 failed, 27 error, 110 skipped, 3 xfailed. Profile applications: {'branch:add_switch': 105833, 'branch:add_diode': 8599, 'applied:pwl': 4863, 'applied:trbdf2': 1217, 'applied:dsed': 1382, 'auto: exact refused -> trbdf2': 7}.
+Full `python/tests` with the profile injected by `benchmarks/tools/next_defaults_pytest.py`: 5409 passed, 479 failed, 110 skipped, 3 xfailed. Profile applications: {'branch:add_switch': 108775, 'branch:add_diode': 9127, 'applied:pwl': 4909, 'applied:trbdf2': 1225, 'applied:dsed': 1809, 'auto: exact refused -> trbdf2': 7}.
 
 | class | failures |
 |---|---:|
-| numeric assertion on an old value | 191 |
-| other assertion | 118 |
-| engine route / result layout | 101 |
-| new refusal by name | 96 |
+| numeric assertion on an old value | 193 |
+| other assertion | 101 |
+| engine route / result layout | 71 |
 | circuit digest (IR / YAML path not patched: harness artefact) | 50 |
-| warning / raise expectation | 36 |
-| snapshot / layout | 27 |
-| exception | 23 |
+| warning / raise expectation | 28 |
+| exception | 24 |
+| snapshot / layout | 6 |
+| new refusal by name | 6 |
 
 | test file | failures | classes |
 |---|---:|---|
@@ -74,27 +70,27 @@ Full `python/tests` with the profile injected by `benchmarks/tools/next_defaults
 | python/tests/test_benchmark_harness.py | 51 | numeric assertion on an old value 32, other assertion 10, circuit digest (IR / YAML path not patched: harness artefact) 9 |
 | python/tests/test_switch_state_record.py | 49 | numeric assertion on an old value 28, other assertion 8, engine route / result layout 7, snapshot / layout 3, exception 2, warning / raise expectation 1 |
 | python/tests/test_trbdf2_robustness.py | 22 | engine route / result layout 20, numeric assertion on an old value 1, warning / raise expectation 1 |
-| python/tests/test_periodic_steady_state.py | 19 | new refusal by name 19 |
 | python/tests/test_fixed_step_discontinuity_order.py | 18 | numeric assertion on an old value 11, other assertion 6, warning / raise expectation 1 |
-| python/tests/test_engine_conformance.py | 15 | new refusal by name 4, other assertion 4, engine route / result layout 3, warning / raise expectation 2, exception 2 |
 | python/tests/test_diode_state_reconstruction.py | 14 | numeric assertion on an old value 7, other assertion 5, engine route / result layout 2 |
-| python/tests/test_sensitivity_kpi.py | 14 | new refusal by name 13, warning / raise expectation 1 |
 | python/tests/test_fixed_step_event_splitting.py | 13 | numeric assertion on an old value 7, other assertion 5, warning / raise expectation 1 |
-| python/tests/test_mmc_thevenin.py | 13 | new refusal by name 13 |
 | python/tests/test_restart_rule_integration.py | 12 | other assertion 8, numeric assertion on an old value 4 |
 | python/tests/test_switch_conductance_validation.py | 12 | new refusal by name 5, other assertion 3, warning / raise expectation 2, exception 2 |
-| python/tests/test_design_kernel_batch.py | 11 | snapshot / layout 10, other assertion 1 |
 | python/tests/test_diode_forward_drop.py | 11 | numeric assertion on an old value 8, other assertion 3 |
 | python/tests/test_fixed_step_resolution.py | 11 | numeric assertion on an old value 11 |
-| python/tests/test_design_evaluation.py | 10 | engine route / result layout 5, other assertion 4, warning / raise expectation 1 |
 | python/tests/test_mode_selector.py | 10 | numeric assertion on an old value 10 |
-| python/tests/test_periodic_orbit_kernel.py | 10 | new refusal by name 10 |
 | python/tests/test_engine_auto.py | 9 | engine route / result layout 5, warning / raise expectation 2, numeric assertion on an old value 1, other assertion 1 |
 | python/tests/test_mode_lcp.py | 9 | engine route / result layout 9 |
 | python/tests/test_newton_roundoff_floor.py | 9 | numeric assertion on an old value 8, other assertion 1 |
-| python/tests/test_sensitivity_exact.py | 9 | new refusal by name 8, warning / raise expectation 1 |
 | python/tests/test_mode_pwl.py | 8 | engine route / result layout 4, numeric assertion on an old value 2, other assertion 2 |
-| python/tests/test_circuit_scopes.py | 7 | new refusal by name 7 |
+| python/tests/test_stubs.py | 7 | other assertion 6, numeric assertion on an old value 1 |
+| python/tests/test_engine_conformance.py | 6 | warning / raise expectation 2, exception 2, new refusal by name 1, engine route / result layout 1 |
+| python/tests/test_first_step_order.py | 5 | exception 4, numeric assertion on an old value 1 |
+| python/tests/test_controlled_sources.py | 4 | numeric assertion on an old value 3, other assertion 1 |
+| python/tests/test_dsed_exact_propagator.py | 4 | engine route / result layout 4 |
+| python/tests/test_engine_auto_closed_loop.py | 4 | engine route / result layout 3, numeric assertion on an old value 1 |
+| python/tests/test_engine_default_routing.py | 4 | exception 2, engine route / result layout 1, warning / raise expectation 1 |
+| python/tests/test_fixed_step_loop_bookkeeping.py | 4 | other assertion 2, numeric assertion on an old value 2 |
+| python/tests/test_mode_passivity.py | 4 | engine route / result layout 3, warning / raise expectation 1 |
 
 ## Method
 
