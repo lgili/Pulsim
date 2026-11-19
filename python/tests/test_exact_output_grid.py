@@ -102,7 +102,8 @@ def test_the_rule_bounds_linear_interpolation():
     r = pulsim.simulate(build(), 2e-3, engine="exact", output_rtol=rtol)
     t = np.asarray(r.times)
     assert np.all(np.diff(t) > 0)
-    assert r.diagnostics["output_grid"] == {"n_output_capped": 0, "n_output_unbounded": 0}
+    assert r.diagnostics["output_grid"] == {"n_output_capped": 0, "n_output_unbounded": 0,
+                                            "output_budget_t": None}
     # the trajectory at the chords' interior points, from runs whose grid holds them
     q = np.sort(np.concatenate([t[:-1] + f * np.diff(t) for f in (0.25, 0.5, 0.75)]))
     dense = pulsim.simulate(build(), 2e-3, engine="exact", dt=2e-8)
@@ -198,3 +199,60 @@ def test_the_loss_port_does_not_depend_on_the_output_grid(case):
         assert (a["n_on"], a["n_off"]) == (c["n_on"], c["n_off"]), n
         for k in ("E_on", "E_off", "E_cond_electrical", "E_impulse"):
             assert c[k] == pytest.approx(a[k], rel=1e-10, abs=1e-18), (n, k)
+
+
+def _bridges(n):
+    b = pulsim.CircuitBuilder()
+    for k in range(n):
+        for ph, ang in (("a", 0.0), ("b", -120.0), ("c", 120.0)):
+            b.add_sine_voltage_source(f"V{k}{ph}", f"s{k}{ph}", "gnd", 0.0, 100.0, 50.0,
+                                      np.deg2rad(ang + 6.0 * k))
+            b.add_inductor(f"L{k}{ph}", f"s{k}{ph}", f"x{k}{ph}", 0.2e-3)
+            b.add_diode(f"Dt{k}{ph}", f"x{k}{ph}", "p", 1e3, 1e-9, 0.0)
+            b.add_diode(f"Db{k}{ph}", "n", f"x{k}{ph}", 1e3, 1e-9, 0.0)
+    b.add_capacitor("C", "p", "n", 2e-3)
+    b.add_resistor("R", "p", "n", 5.0)
+    b.add_resistor("Rg", "n", "gnd", 1e6)
+    return b
+
+
+def test_a_parasitic_mode_at_rounding_does_not_set_the_output_step():
+    """Two paralleled diode bridges: the 1 Mohm bus tie and the 1 nS OFF diodes make modes up
+    to ~5e12 /s that the event projection leaves at rounding. The chord bound of a32b97ed read
+    lambda^2 x rounding as curvature and cut every interval to a constant ~1e-8 s step (20 ms:
+    14078 samples over the 10 us grid at 1e-5; ten banks ran > 8 min). Each mode's contribution
+    now saturates at its amplitude (DECISIONS 3): 647 extra samples measured; bound 2x."""
+    off = pulsim.simulate(_bridges(2), 0.02, engine="exact")
+    on = pulsim.simulate(_bridges(2), 0.02, engine="exact", output_rtol=1e-5)
+    t = np.asarray(on.times)
+    assert np.all(np.diff(t) >= 0)
+    assert on.diagnostics["output_grid"] == {"n_output_capped": 0, "n_output_unbounded": 0,
+                                             "output_budget_t": None}
+    assert len(t) - len(off.times) <= 1300
+
+
+def test_the_run_budget_stops_the_rule_with_one_warning(monkeypatch):
+    """Past the run's sample budget the rule stops cutting (the default grid), names the time in
+    diagnostics['output_grid']['output_budget_t'] and warns once; event instants stay samples."""
+    from pulsim import _dsed_dispatch
+    b = pulsim.CircuitBuilder()
+    b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 2e3)
+    b.add_resistor("R", "a", "b", 2.0)
+    b.add_inductor("L", "b", "c", 100e-6)
+    b.add_capacitor("C", "c", "gnd", 1e-6)
+    b.add_resistor("Rl", "c", "gnd", 50.0)
+    full = pulsim.simulate(b, 2e-3, engine="exact", output_rtol=1e-4)
+    monkeypatch.setattr(_dsed_dispatch, "OUTPUT_BUDGET", 50)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        r = pulsim.simulate(b, 2e-3, engine="exact", output_rtol=1e-4)
+    budget = [x for x in w if "sample budget" in str(x.message)]
+    assert len(budget) == 1 and budget[0].category is RuntimeWarning
+    tb = r.diagnostics["output_grid"]["output_budget_t"]
+    assert tb is not None and 0.0 < tb < 2e-3
+    t = np.asarray(r.times)
+    assert np.all(np.diff(t) > 0)
+    assert len(t) < len(full.times)
+    # past the budget the default grid of a run without the rule (the last step ends at t_end)
+    grid = np.diff(np.asarray(pulsim.simulate(b, 2e-3, engine="exact").times)).max()
+    assert np.diff(t[t > tb])[:-1].min() >= 0.99 * grid

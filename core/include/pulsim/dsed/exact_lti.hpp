@@ -87,6 +87,23 @@ struct ExactLTI {
 
     // Workspaces: a step allocates nothing.
     mutable Vector z_re, z_im, zn_re, zn_im, y, c1_re, c1_im;
+
+    // The output rule's per-mode data (exact_chord_step), built on its first
+    // call: |V_jk|, and the modes ordered by their saturation level s_k
+    // (ascending, so the fastest decaying modes come first).
+    mutable DenseMatrix chord_vabs;
+    mutable std::vector<Eigen::Index> chord_order;
+    mutable Vector chord_s;
+};
+
+/// The output rule's work arrays (exact_chord_step, the adapter's
+/// exact_output_step), owned by the scheduler: a step allocates nothing once
+/// they have the run's size.
+struct ChordWork {
+    Vector xa, ta, c0, c1, v, s;            // the adapter's augmented state / sources
+    Vector cr, ci, a;                       // V⁻¹c (re, im); |z̈_k|·g_k
+    Eigen::VectorXcd zdd;
+    DenseMatrix S, B, C, A0;                // n × (n+1) sums per split (exact_chord_step)
 };
 
 /// eˢ − 1 for complex s without cancellation at any |s|.
@@ -773,49 +790,110 @@ inline constexpr Real kSettleTau = Real{40};
 
 /// The output-grid rule (update-number-changing-release): the longest step
 /// δ ≤ h from x whose chord x(0)→x(δ) stays within tol_j of x_j(τ) for every
-/// τ ∈ [0, δ] and every component j. Between events ẋ = Ax + b + c0 + c1·τ,
-/// so ẍ(τ) = Σ_k V_jk z̈_k e^{λ_k τ} with z̈ = V⁻¹ẍ(0), ẍ(0) = A(Ax + b + c0) + c1,
-/// and a chord's error is at most δ²/8 · max_τ |ẍ_j(τ)|. Two bounds of that
-/// max, both rigorous (g_k = e^{max(0, Re λ_k)δ}; complex pairs by modulus):
-///   B_j = Σ_k |V_jk z̈_k| g_k                     (triangle inequality)
-///   |ẍ_j(0)| + δ Σ_k |V_jk z̈_k| |λ_k| g_k        (|e^s − 1| ≤ |s| e^{max(0, Re s)})
-/// the second keeps the cancellation between modes at τ = 0 (a source's forced
-/// response cancelled by the free response at rest). δ is the largest step
-/// that either bound admits. Tier 1 only (a diagonalising basis); `bounded` =
-/// false and h returned otherwise. c0 / c1 nullable (no piecewise-linear source).
+/// τ ∈ [0, δ] and every component j.
+///
+/// Between events ẋ = Ax + b + c0 + c1·τ. In modal coordinates z = V⁻¹x each
+/// mode is z_k(τ) = α_k + β_k τ + γ_k e^{λ_k τ} with γ_k = z̈_k(0)/λ_k² (λ_k ≠ 0;
+/// λ_k = 0: z_k is quadratic with z̈_k = (V⁻¹c1)_k), z̈(0) = Λ(Λz + w + V⁻¹c0) + V⁻¹c1.
+/// The chord error is linear in the trajectory and zero on its linear part, so
+/// e_j(τ) = Σ_k Re(V_jk e_k(τ)) with e_k the chord error of the mode's
+/// exponential term, and per mode two rigorous bounds hold (the Peano kernel of
+/// the chord is ≥ 0 and integrates to ≤ δ²/8, so this holds for complex terms):
+///   |e_k| ≤ δ²/8 · |z̈_k| g_k,   g_k = e^{max(0, Re λ_k)·h}   (curvature; δ ≤ h)
+///   |e_k| ≤ 2|γ_k| = s_k |z̈_k|, s_k = 2/|λ_k|², Re λ_k ≤ 0     (|term|, |chord| ≤ |γ_k|)
+/// The second is the mode's amplitude: a projected parasitic mode whose
+/// amplitude is rounding contributes rounding, not λ²·rounding, so it no longer
+/// sets δ once it is gone (growing / zero modes: s_k = ∞). For a split of the
+/// modes into a fast set F (here the modes with s_k < δ²/8, a prefix of
+/// chord_order) and the rest S, with m_jk = |V_jk||z̈_k|g_k:
+///   |e_j| ≤ Σ_{k∈F} m_jk s_k + δ²/8 · min(Σ_{k∈S} m_jk,
+///                                       |Σ_{k∈S} V_jk z̈_k| + δ Σ_{k∈S} m_jk |λ_k|)
+/// (the S part bounds max|ẍ_j^S| by the triangle inequality, or by its value at
+/// τ = 0 plus |e^s − 1| ≤ |s|e^{max(0, Re s)}, which keeps the cancellation
+/// between modes at rest). With F empty this is the bound of a32b97ed except
+/// that a growing mode's g uses h instead of δ (larger: still a bound).
+/// Defective modes have no tier-1 basis: `bounded` = false and h returned.
+/// Any δ the bisection returns satisfies the bound (lo always fits), so the
+/// split need not make it monotone. c0 / c1 nullable (no piecewise-linear source).
+/// The per-mode data (|V|, the order by s_k) is cached on `e`; the per-step sums
+/// live in `w` (O(n²) per step, O(n) per probe of δ).
 [[nodiscard]] inline Real exact_chord_step(const ExactLTI& e, const Vector& x,
                                            const Vector* c0, const Vector* c1,
-                                           const Vector& tol, Real h, bool& bounded) {
+                                           const Vector& tol, Real h, bool& bounded,
+                                           ChordWork& w) {
     bounded = e.valid && e.tier == 1;
     if (!bounded || !(h > Real{0})) return h;
     const auto n = x.size();
-    // modal coordinates: z = V⁻¹x, ż = Λz + w (+ V⁻¹c0), z̈ = Λż (+ V⁻¹c1)
-    Eigen::VectorXcd zdd(n);
-    for (Eigen::Index k = 0; k < n; ++k) {
-        std::complex<Real> z{e.Vinv_re.row(k).dot(x), e.Vinv_im.row(k).dot(x)};
-        std::complex<Real> zd = e.lambda[k] * z + e.w[k];
-        if (c0 != nullptr) zd += std::complex<Real>{e.Vinv_re.row(k).dot(*c0), e.Vinv_im.row(k).dot(*c0)};
-        zdd[k] = e.lambda[k] * zd;
-        if (c1 != nullptr) zdd[k] += std::complex<Real>{e.Vinv_re.row(k).dot(*c1), e.Vinv_im.row(k).dot(*c1)};
-    }
-    // whether step d satisfies one of the two bounds for every component
-    auto fits = [&](Real d) {
-        for (Eigen::Index j = 0; j < n; ++j) {
-            Real B = Real{0}, C = Real{0}, a0 = Real{0};
-            for (Eigen::Index k = 0; k < n; ++k) {
-                const Real re = e.lambda[k].real();
-                const Real g = re > Real{0} ? std::exp(re * d) : Real{1};
-                const Real m = std::hypot(e.V_re(j, k), e.V_im(j, k)) * std::abs(zdd[k]) * g;
-                B += m;
-                C += m * std::abs(e.lambda[k]);
-                a0 += e.V_re(j, k) * zdd[k].real() - e.V_im(j, k) * zdd[k].imag();
-            }
-            if (d * d * std::min(B, std::abs(a0) + d * C) > Real{8} * tol[j]) return false;
+    constexpr Real kInf = std::numeric_limits<Real>::infinity();
+    if (e.chord_vabs.rows() != n) {   // per mode, once
+        e.chord_vabs = e.V_re.binaryExpr(e.V_im, [](Real a, Real b) { return std::hypot(a, b); });
+        Vector s(n);
+        for (Eigen::Index k = 0; k < n; ++k) {
+            const Real r = std::abs(e.lambda[k]);
+            s[k] = (e.lambda[k].real() <= Real{0} && r > Real{0}) ? Real{2} / (r * r) : kInf;
         }
-        return true;
+        e.chord_order.resize(static_cast<std::size_t>(n));
+        for (Eigen::Index k = 0; k < n; ++k) e.chord_order[static_cast<std::size_t>(k)] = k;
+        std::stable_sort(e.chord_order.begin(), e.chord_order.end(),
+                         [&](Eigen::Index a, Eigen::Index b) { return s[a] < s[b]; });
+        e.chord_s.resize(n);
+        for (Eigen::Index q = 0; q < n; ++q) e.chord_s[q] = s[e.chord_order[static_cast<std::size_t>(q)]];
+    }
+    // modal coordinates: z = V⁻¹x, ż = Λz + w (+ V⁻¹c0), z̈ = Λż (+ V⁻¹c1)
+    e.z_re.noalias() = e.Vinv_re * x;
+    e.z_im.noalias() = e.Vinv_im * x;
+    w.zdd.resize(n);
+    w.a.resize(n);
+    for (Eigen::Index k = 0; k < n; ++k) {
+        w.zdd[k] = e.lambda[k] * std::complex<Real>{e.z_re[k], e.z_im[k]} + e.w[k];
+    }
+    if (c0 != nullptr) {
+        w.cr.noalias() = e.Vinv_re * *c0;
+        w.ci.noalias() = e.Vinv_im * *c0;
+        for (Eigen::Index k = 0; k < n; ++k) w.zdd[k] += std::complex<Real>{w.cr[k], w.ci[k]};
+    }
+    for (Eigen::Index k = 0; k < n; ++k) w.zdd[k] *= e.lambda[k];
+    if (c1 != nullptr) {
+        w.cr.noalias() = e.Vinv_re * *c1;
+        w.ci.noalias() = e.Vinv_im * *c1;
+        for (Eigen::Index k = 0; k < n; ++k) w.zdd[k] += std::complex<Real>{w.cr[k], w.ci[k]};
+    }
+    for (Eigen::Index k = 0; k < n; ++k) {
+        const Real re = e.lambda[k].real();
+        w.a[k] = std::abs(w.zdd[k]) * (re > Real{0} ? std::exp(re * h) : Real{1});
+    }
+    // column i = the split F = chord_order[0, i): S / B / C / A0 as in the bound above
+    w.S.resize(n, n + 1);
+    w.B.resize(n, n + 1);
+    w.C.resize(n, n + 1);
+    w.A0.resize(n, n + 1);
+    w.S.col(0).setZero();
+    w.B.col(n).setZero();
+    w.C.col(n).setZero();
+    w.A0.col(n).setZero();
+    for (Eigen::Index q = n - 1; q >= 0; --q) {
+        const Eigen::Index k = e.chord_order[static_cast<std::size_t>(q)];
+        w.B.col(q) = w.B.col(q + 1) + e.chord_vabs.col(k) * w.a[k];
+        w.C.col(q) = w.C.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::abs(e.lambda[k]));
+        w.A0.col(q) = w.A0.col(q + 1) + e.V_re.col(k) * w.zdd[k].real() - e.V_im.col(k) * w.zdd[k].imag();
+    }
+    Eigen::Index n_sat = 0;   // modes with a finite s_k (only they can join F)
+    while (n_sat < n && e.chord_s[n_sat] < kInf) ++n_sat;
+    for (Eigen::Index q = 0; q < n_sat; ++q) {
+        const Eigen::Index k = e.chord_order[static_cast<std::size_t>(q)];
+        w.S.col(q + 1) = w.S.col(q) + e.chord_vabs.col(k) * (w.a[k] * e.chord_s[q]);
+    }
+    // whether step d satisfies the bound for every component
+    auto fits = [&](Real d) {
+        const Real q = d * d / Real{8};
+        const auto i = static_cast<Eigen::Index>(
+            std::lower_bound(e.chord_s.data(), e.chord_s.data() + n_sat, q) - e.chord_s.data());
+        return ((w.S.col(i).array()
+                 + q * w.B.col(i).array().min(w.A0.col(i).array().abs() + d * w.C.col(i).array()))
+                <= tol.array()).all();
     };
     if (fits(h)) return h;
-    // the admitted set is an interval [0, δ*] (both bounds grow with d): bisect in log d
+    // bisect in log d; lo always fits, so the result is a bound whatever the split does
     Real lo = h * Real{1e-12}, hi = h;
     if (!fits(lo)) return lo;
     for (int it = 0; it < 60 && hi > lo * Real{1.01}; ++it) {

@@ -482,7 +482,16 @@ def _result_from_native(native_res, t_start: float):
             res.diagnostics[key] = native_res[key]
     if "n_output_capped" in native_res:   # the output-grid rule (output_rtol)
         og = {k: int(native_res[k]) for k in ("n_output_capped", "n_output_unbounded")}
+        tb = native_res["output_budget_t"]
+        og["output_budget_t"] = None if tb != tb else tb + t_start   # NaN: not spent
         res.diagnostics["output_grid"] = og
+        if og["output_budget_t"] is not None:
+            warnings.warn(
+                f"simulate(engine='exact', output_rtol=...): the run's output sample budget "
+                f"ran out at t = {og['output_budget_t']:.6g} s; from there the samples are the "
+                "default grid and linear interpolation between them is NOT within output_rtol "
+                "(diagnostics['output_grid']['output_budget_t']). Raise output_rtol, or pass dt.",
+                RuntimeWarning, stacklevel=4)
         if og["n_output_capped"] or og["n_output_unbounded"]:
             warnings.warn(
                 f"simulate(engine='exact', output_rtol=...): the output grid's sample cap "
@@ -520,6 +529,9 @@ SETTLE_ROUND_CAP = 64
 # Relative threshold of the kernel's diode-law check (0 turns it off: tests that
 # isolate another refusal).
 DIODE_LAW_REL = 1e-3
+# The output rule's sample budget per run (cut steps; output_rtol): past it the rule stops
+# cutting, with diagnostics['output_grid']['output_budget_t'] and one RuntimeWarning.
+OUTPUT_BUDGET = 2_000_000
 
 
 def _shadow_h_e(builder: Any, switch_fn: Any, t_window: float) -> float:
@@ -949,7 +961,8 @@ def run_dsed_from_builder(
                     store_every=opts.store_every, event_log=False,
                     settle_round_cap=SETTLE_ROUND_CAP, diode_law_rel=DIODE_LAW_REL,
                     **shadow_kw,
-                    **({"output_rtol": float(output_rtol)} if output_rtol else {}),
+                    **({"output_rtol": float(output_rtol), "output_budget": int(OUTPUT_BUDGET)}
+                       if output_rtol else {}),
                     **({"tick_fns": [f for f, _p, _o in ticks],
                         "tick_periods": [float(p) for _f, p, _o in ticks],
                         "tick_offsets": [float(o) for _f, _p, o in ticks],
