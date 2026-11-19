@@ -190,7 +190,7 @@ def legacy():
     def simulate(*args, **kw):
         eng = kw.get("engine", "auto")
         if eng == "auto":
-            dt = args[1] if len(args) > 1 else kw.get("dt")
+            dt = args[2] if len(args) > 2 else kw.get("dt")  # simulate(builder, t_end, dt)
             b = args[0] if args else kw.get("builder")
             if dt is None and isinstance(b, pulsim.LoadedCircuit):
                 dt = b.options.dt or None

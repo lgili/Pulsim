@@ -2041,7 +2041,7 @@ public:
         std::string_view cathode, Real R_on = Real{0},
         Real g_off = Real{0}, Real V_th = Real{0}, Real V_f = Real{0}) {
         require_branch_values_("add_diode", name, R_on, g_off);
-        require_diode_drop_("add_diode", name, V_f);
+        require_diode_drop_("add_diode", name, V_f, "V_f");
         const Index a_idx = resolve_node_(anode);
         const Index k_idx = resolve_node_(cathode);
         const Index b_id = add_branch_(
@@ -3040,12 +3040,14 @@ private:
         }
     }
 
+    // `field` is the caller's own keyword (add_diode's is V_f, the helpers' V_F).
     static void require_diode_drop_(std::string_view fn,
-                                    std::string_view name, Real V_F) {
+                                    std::string_view name, Real V_F,
+                                    std::string_view field = "V_F") {
         if (!(V_F >= Real{0}) || !std::isfinite(V_F)) {
             throw std::invalid_argument(std::format(
-                "{}(\"{}\"): diode conduction drop V_F must be a finite "
-                "number >= 0 V (got {}).", fn, name, V_F));
+                "{}(\"{}\"): diode conduction drop {} must be a finite "
+                "number >= 0 V (got {}).", fn, name, field, V_F));
         }
     }
 

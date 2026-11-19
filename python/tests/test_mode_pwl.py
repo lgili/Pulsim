@@ -122,7 +122,8 @@ def _perturbed(fam, k):
             for _ in range(abs(k) - 1):
                 a[3] = float(np.nextafter(a[3], np.inf if k > 0 else -np.inf))
         parts.append((kind, *a))
-    return B.Family(fam, parts, f.run).builder(0.0)
+    # the release default form (the bridge builds the conductance form unless told)
+    return B.Family(fam, parts, f.run).builder(0.0, form="branch")
 
 
 @pytest.mark.parametrize("mode", [None, "lcp"], ids=["default", "lcp"])

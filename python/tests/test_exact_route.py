@@ -101,8 +101,9 @@ def test_inductor_cut_set_runs_and_agrees_with_pwl():
     with pwl+split at dt 1e-7 over 20 ms (pwl itself moves 6.3e-3 V from dt 2e-7 to 1e-7)."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        r = p.simulate(B.FAMILIES["bridge3_overlap"].builder(0.0), t_end=0.02, engine="exact")
-        q = p.simulate(B.FAMILIES["bridge3_overlap"].builder(0.0), t_end=0.02, engine="pwl", dt=1e-7,
+        # the release default form (the bridge builds the conductance form unless told)
+        r = p.simulate(B.FAMILIES["bridge3_overlap"].builder(0.0, form="branch"), t_end=0.02, engine="exact")
+        q = p.simulate(B.FAMILIES["bridge3_overlap"].builder(0.0, form="branch"), t_end=0.02, engine="pwl", dt=1e-7,
                        discontinuity_restart=True, enable_substep_state_correction=True)
     tg = np.linspace(0.0, 0.02, 4001)
 

@@ -21,20 +21,6 @@ K = pulsim._pulsim
 INSTANCES = json.load(open(os.path.join(os.path.dirname(__file__), "oracles", "lcp_instances.json")))
 
 
-@pytest.fixture
-def conductance_form(monkeypatch):
-    """Legacy subject: task 3 poses the port model on the conductance form, which is no longer the
-    builder default (the bridge's families pass no form=; bucket 0 owns that helper)."""
-    cb = pulsim.CircuitBuilder
-    for name in ("add_switch", "add_diode"):
-        real = getattr(cb, name)
-
-        def add(self, *a, _real=real, **k):
-            k.setdefault("form", "conductance")
-            return _real(self, *a, **k)
-        monkeypatch.setattr(cb, name, add)
-
-
 def test_cpp_lemke_reproduces_the_oracle_on_the_family_lcps():
     max_piv = 0
     for o in INSTANCES:
@@ -76,7 +62,6 @@ def test_cpp_lemke_secondary_ray_and_trivial():
 # Families with a leak-only island in some previous mode (the DC side of a bridge with every
 # diode OFF): the island's common-mode impedance (~2.5e8 ohm) is rounding-limited in BOTH
 # computations, so those port matrices are compared only where no island exists (max|H| < 1e8).
-@pytest.mark.usefixtures("conductance_form")
 @pytest.mark.parametrize("name", list(B.FAMILIES))
 def test_port_model_equals_the_prototype_port_lcp(name):
     fam = B.FAMILIES[name]
@@ -111,7 +96,6 @@ MODEL_DIFFERENCE = {"boost_50": 1, "boost_500": 1}
 LEAK_PINS = {"bridge3_cfilter": 12}
 
 
-@pytest.mark.usefixtures("conductance_form")
 @pytest.mark.parametrize("name", list(B.FAMILIES))
 def test_selected_mode_equals_the_prototype_mode_at_every_event(name):
     fam = B.FAMILIES[name]

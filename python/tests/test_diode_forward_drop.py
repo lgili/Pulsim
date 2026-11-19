@@ -532,10 +532,10 @@ def test_v_f_zero_matches_the_pre_v_f_engine(circuit, engine):
         assert np.array_equal(np.asarray(getattr(r0, a)), np.asarray(getattr(r1, a))), a
     assert p0 == p1
     # Legacy-period proof: the parent commit's numbers hold with the legacy
-    # options they were pinned under (the old auto route was trbdf2).
+    # options they were pinned under (legacy() routes auto without dt to trbdf2).
     ref = _V_F0_REF[(circuit, engine)]
     with next_defaults.legacy():
-        _, got = run("trbdf2" if engine == "auto" else engine, V_f=0.0)
+        _, got = run(engine, V_f=0.0)
     got = {k: got[k] for k in ref}
     rel = {"pwl": 1e-9, "dsed": 1e-3}.get(engine, 1e-6)
     if circuit == "bridge" and engine in ("trbdf2", "auto"):
@@ -707,9 +707,9 @@ def test_yaml_v_f_key_changes_the_result():
 @pytest.mark.parametrize("bad", [-0.1, float("nan"), float("inf")])
 def test_invalid_v_f_is_refused_by_name(bad):
     b = p.CircuitBuilder()
-    # the branch form (the default) names the drop V_F
+    # the branch form (the default) names the drop by its keyword, V_f
     with pytest.raises(ValueError,
-                       match=r'add_diode\("D_bad"\): diode conduction drop V_F must be a finite number >= 0 V'):
+                       match=r'add_diode\("D_bad"\): diode conduction drop V_f must be a finite number >= 0 V'):
         b.add_diode("D_bad", "a", "gnd", 1e3, 1e-9, V_f=bad)
 
 
