@@ -401,3 +401,131 @@ says where the implementation departs from them or what it settled.
     out first (`if (false && twin)`): it splits the cut's cost from the
     twin's presence; (4) compare against the base with the same
     non-loop fixes, not only the PR line.
+
+15. **Slice 3b: the variable-step loop on the skeleton, as a twin; the
+    phase map (2026-11-19).** The TR-BDF2 loop body
+    (`run_transient_trbdf2`, ~1,450 lines inside one `while`) is cut, in
+    place, into eight lambdas that BOTH drivers call (`tb_live`, `tb_poll`,
+    `tb_begin`, `tb_clamp`, `tb_take`, `tb_error`, `tb_after`,
+    `tb_commit`; each block's text moved only by its lambda header, so the
+    TR-BDF2 track's hunks apply once). The 21 locals that crossed phases
+    are hoisted above them and (re)set where the body declared them (three
+    `SwitchStateMask`s by move-assignment, `reinit_new` by `clear()`; the
+    compiler listed them: `-fsyntax-only` after the cut, every
+    "undeclared identifier"; a shadowing check found no phase-local that
+    hides an outer name another phase uses). The legacy loop (`run_legacy`)
+    stays the default; the twin (`run_twin`) is
+    `step::run<step::TrBdf2>(BodyClock{tb_live, lte_ctrl, t, t_end},
+    step::phase_body(tb_poll, tw_begin, tb_clamp, tb_take, tb_error,
+    tb_after, tb_commit, tw_on_step))`, selected only by the internal environment
+    variable `PULSIM_TRBDF2_STEPPER_TWIN=1` (read once per run).
+
+    The inventory (`grep -n` of the loop's control transfers, a brace
+    matcher for their targets; line numbers at the merge of b3bcfe32): the `while`
+    has NINE exits from the straight path — `break` 2401 (cancellation),
+    `break` 2727 (a singular final sliver ends the run), and `continue`
+    2797 (conditioning floor: h = 4h), 2816 (Newton failure: h/4), 3021
+    (non-finite: h/10), 3045 (LTE reject), 3079 (diode overrun: h/10),
+    3355 / 3362 (chatter guard: probe-and-retake, then h/100), 3534
+    (Newton failure on the landing: h_land/2). Every `continue` restarts
+    the WHOLE body: the next attempt re-polls `should_continue`, counts
+    `++steps`, re-runs the grind check, ticks, the caps and every landing
+    for the new h, and nothing is rolled back — the attempt's learning
+    (h, `h_cond_by_mode`, flipped diode bits, `chatter_*`, a dropped event
+    sample, `sdirk_left`) is carried into the next attempt. A localised
+    crossing is not a re-take either: `tb_after` solves the landing and
+    COMMITS the shortened step itself (`commutated`), and the ordinary
+    accept is skipped.
+
+    | old-loop phase (lines before the cut) | skeleton slot | shared / copied |
+    |---|---|---|
+    | setup: options, DC / IC start, gate learning state, queue, histories, snapshot resume, lambdas (…–2396) | before `run` | shared (unchanged) |
+    | loop condition `t < next(EndOfRun) − h_min && steps < max_steps` (2398) | `BodyClock::done` (= `!tb_live()`) | shared (`tb_live`) |
+    | `should_continue` (2400) | `poll` | shared (`tb_poll`) |
+    | `++steps`, grind refusal, ticks, monitors, `sw_now`, `h_lo`, `end_cut_h`, h clamp to `[h_lo, h_max]`, gate learning caps, `h_ctrl`, step-boundary settle (2403–2493) | `begin` | shared (`tb_begin`) |
+    | tick landing, source-breakpoint landing, gate-edge landing (oracle or sampled bisection), no final sliver (2494–2649) | `clamp` (REAL: returns the landed h) | shared (`tb_clamp`) |
+    | step mask, D4 entering test, SDIRK / TR stage 1, BDF2 / BE stage 2; conditioning floor and Newton failure → reject; singular final sliver → end (2651–2817) | `take` → Verdict Accept / Reject / End | shared (`tb_take`) |
+    | LTE, Hosea–Shampine filter, round-off floor; non-finite → reject; forced accept (counted); LTE reject (2819–3046) | `error` → Verdict (the estimate AND the decision: the decision needs `h_lo`, the chatter window, `sdirk_event`, which are the body's) | shared (`tb_error`) |
+    | crossing detection, overrun → reject, held / chatter guard, Illinois localisation on trial TRAP, the landing solve and its COMMIT + record (3048–3667) | `after_solve` → Verdict Accept (a commutated step is committed inside it) / Reject (a retake) | shared (`tb_after`) |
+    | ordinary accept: history commit, `x`, `t += h`, record, `hooks->accepted`, D4 record, gate / breakpoint restart, next proposal (3669–3850) | `commit` (skipped by the body when `commutated`) | shared (`tb_commit`) |
+    | — | `on_step` | twin only: the hooks (below); recording stays inside `commit` and the landing |
+    | end: superseded sample, last monitors, max_steps refusal, stats (3852–3877) | after `run` | shared |
+
+    What the skeleton grew (stepper.hpp): `Verdict::Reject` (the attempt
+    is discarded; the next one starts at poll, no rollback) and
+    `Verdict::End`, `StepStatus::Rejected`; `body_decides<B>()` (a body
+    with `static constexpr bool decides = true`); in `step_once` a
+    `decides` branch (one ATTEMPT: done → poll → begin → clamp → take →
+    error → after_solve → commit → on_step; `run` loops on Accepted or
+    Rejected); `BodyClock` (the body's time, end test and step memory
+    `LteController`); `DecidingPhaseBody` + an 8-callable `phase_body` (the eighth is `on_step`). The
+    fixed path's branch is the old `step_once` text in the `else` of an
+    `if constexpr` (unchanged codegen).
+
+    NOT grown, and why: the contract (13) expected a skeleton-owned retry
+    with rollback (`save` / `restore`) and an `after_solve` that cuts and
+    lets the skeleton re-take. The map says this loop has neither: its
+    rejections carry state forward and re-run begin and clamp; its cut is
+    solved and committed by the event policy itself. Moving the decision
+    into the controller (`LteClock::on_result`) and a real rollback are a
+    NUMBER change for this engine (the chatter window, the conditioning
+    floor and the forced accepts are part of the decision), so they wait
+    for the strategy work (task groups 14–15), not for this slice.
+
+    Identity (this tip, macOS clang, local gate): the DEFAULT path is
+    byte-identical to the merge baseline 9fb2f13e on the four compares
+    (goldens incl. buck / VSI / RLC / Shockley / MOSFET / transformer
+    trbdf2, stateful, engines, step sequences). The twin against the
+    legacy loop, `benchmarks/tools/trbdf2_twin_identity.py`, every array
+    and every stats key bit for bit: `--goldens --extra` 50/50 (7
+    golden_baseline trbdf2 cases, 3 stateful rectifiers, the turn-off
+    cases incl. the floating bridge, a closed loop with ticks AND a
+    monitor (the monitor's call times compared too), 26 shipped examples,
+    and resume across the drivers in all four combinations at two splits,
+    one 1 ns after a turn-off edge, i.e. a run that ends inside the
+    post-edge restart); `--reference --modes ',lcp,shadow'`: 327/327 (the 109
+    reference circuits × default / 'lcp' / 'shadow'; 151 of them are the
+    same refusal on both paths). A fresh reviewer found no divergence; its one
+    real finding (on_step fired for an attempt that after_solve ended
+    without a commit: a zero-time cascade or a retake at the same h) is
+    fixed (no hook when t did not move).
+
+    **Cost gate NOT met (default path).** Instructions retired per
+    accepted step (`.scratch/instr_inproc.py`, min of 3; the base column
+    is 9fb2f13e measured in the same process pattern, its own two columns
+    agree within 0.06 %):
+
+    | case | base | default | Δ | twin / default |
+    |---|---|---|---|---|
+    | buck_trbdf2 (events) | 10820 | 10906 | +0.80 % | 1.0016 |
+    | bridge (floating bus, turn-off case) | 12577 | 12709 | +1.0 % | 0.9997 |
+    | shockbuck_trbdf2 (Shockley, Newton) | 72214 | 72408 | +0.27 % | 1.0000 |
+
+    Bisected with three builds: (A) twin compiled out (`if (false &&`):
+    buck 10902, bridge 12718 — the twin's presence costs nothing, the cut
+    itself does; (B) A + an inline `SwitchStateMask` move-assignment (the
+    three hoisted masks are re-set by move): 10934 / 12705 — not the
+    masks (reverted); (C) the legacy loop forced INLINE into the engine
+    body instead of its own driver: 10964 / 12751 — worse, so rule 14 (2)
+    holds here too. Remaining suspect, not yet measured: the 21 hoisted
+    locals and the phase closures reached through the out-of-line
+    driver's closure (reloaded after every opaque call: switch_fn, the
+    solves), ~85–130 instructions per step independent of circuit size
+    (Shockley's +194 is 0.27 %). Next: per-step disassembly of
+    `run_legacy` against the base body (`otool -tvV`, count loads from the
+    closure), then re-read hot hoisted scalars into const locals at each
+    phase's top or pass them in one struct the driver owns.
+
+    Because the gate is not met this tip is on
+    `wip/core-p3-stepper-3b`, not on the track branch.
+
+    Hooks (twin only, zero cost without a listener): R1 `StepHooks::step`
+    and #31 `device_state` in on_step (after either commit). R2
+    (`on_event` after the settle): StepHooks has no such member; not
+    added (an API of the probes track). Event-queue request (a resume
+    exactly at a gate edge misses the edge; the edge cache belongs in the
+    snapshot): the cut makes it a one-place fix — the edge cache is read
+    only in `tb_clamp` (`queue.next_after(edge_src, t)` and the sampled
+    bisection) and written in `tb_commit` / `tb_after`, so seeding it from
+    the snapshot is one statement in setup plus the snapshot field;
+    behaviour not changed here.

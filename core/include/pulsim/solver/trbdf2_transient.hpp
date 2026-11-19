@@ -105,6 +105,7 @@
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/solver/step/integrators.hpp"
+#include "pulsim/solver/step/stepper.hpp"
 #include "pulsim/solver/run_transient.hpp"   // combine_masks, SimulationAborted
 #include "pulsim/sources/pwm_b_extra.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
@@ -2395,11 +2396,47 @@ inline SimulationResult run_transient_trbdf2(
     };
 
     try {
-        while (t < queue.next_of(events::Kind::EndOfRun) - h_min
-               && steps < opts.max_steps) {
-            if (should_continue && !should_continue()) {
-                break;   // partial trace preserved
-            }
+        const bool trbdf2_stepper_twin = [] {
+            const char* e = std::getenv("PULSIM_TRBDF2_STEPPER_TWIN");  // NOLINT(concurrency-mt-unsafe)
+            return e != nullptr && e[0] == '1' && e[1] == '\0';
+        }();
+        // The attempt's locals that cross phases, (re)set where the loop body
+        // declared them (class types by an in-place reset or a move: DECISIONS
+        // 14 (1)).
+        SwitchStateMask sw_now;
+        SwitchStateMask mode_start;
+        SwitchStateMask mask_step;
+        std::vector<const pwl::DependentStructure*> reinit_new;
+        Real h_lo = Real{0};
+        Real t_stop = Real{0};
+        Real h_ctrl = Real{0};
+        Real bp_t = Real{0};
+        Real h_pre_bp = Real{0};
+        Real hg = Real{0};
+        Real h_pt = Real{0};
+        Real err = Real{0};
+        bool landed_on_bp = false;
+        bool landed_on_edge = false;
+        bool gates_flat = false;
+        bool reinit_step = false;
+        bool sdirk = false;
+        bool commutated = false;
+        // The loop body, cut IN PLACE into the step's phases (slice 3b of
+        // refactor-unified-transient-stepper, DECISIONS 15): each phase is ONE
+        // lambda that both drivers call, so a hunk in any of them reaches both.
+        // One call of the phases is one ATTEMPT: a rejected attempt (the old
+        // loop's `continue`) is not rolled back, the next attempt starts at the
+        // cancellation poll and re-runs begin and clamp.
+        auto tb_live = [&]() PULSIM_STEP_PHASE {
+            return t < queue.next_of(events::Kind::EndOfRun) - h_min
+                   && steps < opts.max_steps;
+        };
+        auto tb_poll = [&]() PULSIM_STEP_PHASE {
+            return !(should_continue && !should_continue());
+        };
+        // begin: the attempt count, the grind refusal, ticks and monitors, the
+        // gates at the step start, the controller's caps, the step-boundary settle
+        auto tb_begin = [&]() PULSIM_STEP_PHASE {
             ++steps;
             // A grind is refused early, by name: 200,000 accepted steps that
             // advance less than 1e-4 of the span (the example flyback sat
@@ -2428,8 +2465,8 @@ inline SimulationResult run_transient_trbdf2(
             // as error at any h, and h sat at h_min until max_steps.
             // The gates as the step starts (one switch_fn call), and
             // the step cap the narrowest pulse seen so far implies.
-            SwitchStateMask sw_now = switch_fn(t + Real{0.5} * h_min);
-            const SwitchStateMask mode_start = has_diodes
+            sw_now = switch_fn(t + Real{0.5} * h_min);
+            mode_start = has_diodes
                 ? sw_now.overlay(diodes.current_diode_mask(),
                                  diodes.diode_owned_bits())
                 : sw_now;
@@ -2437,11 +2474,11 @@ inline SimulationResult run_transient_trbdf2(
                 const auto it = h_cond_by_mode.find(mode_start);
                 h_cond = it == h_cond_by_mode.end() ? Real{0} : it->second;
             }
-            const Real h_lo = std::max(
+            h_lo = std::max(
                 (t - chatter_exhaust_t <= Real{1e3} * h_chatter)
                     ? h_chatter : h_min,
                 h_cond);
-            const Real t_stop = queue.next_of(events::Kind::EndOfRun);
+            t_stop = queue.next_of(events::Kind::EndOfRun);
             // The proposal the end of the run cut short is what a resume
             // continues from (the snapshot's controller block).
             end_cut_h = t_stop - t < h ? h : Real{0};
@@ -2460,7 +2497,7 @@ inline SimulationResult run_transient_trbdf2(
             }
             // The step the controller and the caps chose; a landing below
             // shortens it (see the conditioning floor at stage 1).
-            const Real h_ctrl = h;
+            h_ctrl = h;
             if (has_diodes && gates_differ(sw_now, gates_decided)) {
                 // An edge at this step boundary that no step landed
                 // (see gates_decided): settle the diodes under the
@@ -2491,6 +2528,10 @@ inline SimulationResult run_transient_trbdf2(
                                          /*commit=*/false);
                 ++st.n_gate_boundary_settles;
             }
+        };
+        // clamp: the landings (tick, source breakpoint, gate edge) and the
+        // no-final-sliver rule; returns the step
+        auto tb_clamp = [&]() PULSIM_STEP_PHASE {
             // Land the next tick exactly, like a gate edge.
             const Real t_next_tick =
                 queue.next_of(events::Kind::ControlTick);
@@ -2498,9 +2539,9 @@ inline SimulationResult run_transient_trbdf2(
                 h = std::max(t_next_tick - t, h_min);
             }
             // ---- source-breakpoint landing ----
-            bool landed_on_bp = false;
-            Real bp_t = Real{0};
-            const Real h_pre_bp = h;
+            landed_on_bp = false;
+            bp_t = Real{0};
+            h_pre_bp = h;
             if (!corners.empty() || has_iwave) {
                 bp_t = next_breakpoint_after(t);
                 if (bp_t <= t + h) {
@@ -2510,7 +2551,7 @@ inline SimulationResult run_transient_trbdf2(
             }
 
             // ---- gate-edge landing ----
-            bool landed_on_edge = false;
+            landed_on_edge = false;
             // The oracle is asked again only when its edge is passed or
             // a tick invalidated it; a located edge is dropped when passed.
             const Real next_edge_t = queue.next_after(edge_src, t);
@@ -2521,7 +2562,7 @@ inline SimulationResult run_transient_trbdf2(
             // True when every switch_fn sample over (t, t + h] equals
             // sw_now, so the step's gate mask IS sw_now (the midpoint
             // was one of the samples).
-            bool gates_flat = false;
+            gates_flat = false;
             if (!landed_on_edge) {
                 // Samples per step: 4, or half the recent narrowest pulse
                 // apart in a lifted step (switch_fn calls only, no solves).
@@ -2647,12 +2688,16 @@ inline SimulationResult run_transient_trbdf2(
                 landed_on_edge = false;
                 gates_flat = true;
             }
+            return h;
+        };
+        // take: the step mask, the re-initialisation decision, the two stages
+        auto tb_take = [&]() PULSIM_STEP_PHASE {
 
             // Step mask: sampled at the midpoint — piecewise-
             // constant gates are constant over (t, t+h) by the
             // clamp above, so the midpoint is unambiguous. When the
             // samples above were all equal it was one of them.
-            SwitchStateMask mask_step =
+            mask_step =
                 gates_flat ? sw_now : switch_fn(t + Real{0.5} * h);
             if (has_diodes) {
                 mask_step = diodes.combine(mask_step);
@@ -2665,11 +2710,11 @@ inline SimulationResult run_transient_trbdf2(
             // at i = 0) but its trapezoidal stage still read the pre-event
             // derivative slot of the now-algebraic inductor current and was
             // rejected down to h_min: 5 steps below 1e-12 s per period.
-            std::vector<const pwl::DependentStructure*> reinit_new;
+            reinit_new.clear();
             if (structure.active()) {
                 reinit_new = reinit.entering(structure, mask_step, false);
             }
-            const bool reinit_step = !reinit_new.empty();
+            reinit_step = !reinit_new.empty();
             if (reinit_step && !sdirk_possible) {
                 const Index el = reinit_new.front()->elements.front();
                 throw UnsupportedError(
@@ -2689,11 +2734,11 @@ inline SimulationResult run_transient_trbdf2(
 
             // ---- stage 1: TR over γh (or SDIRK stage 1, BE over γ_s h) ----
             const step::StageSpec stage0 = step::TrBdf2::stage(h, 0);
-            const Real hg = stage0.factor_dt;   // gamma * h
-            const bool sdirk = (sdirk_left > 0 && restart_ok()) || reinit_step
+            hg = stage0.factor_dt;   // gamma * h
+            sdirk = (sdirk_left > 0 && restart_ok()) || reinit_step
                                || reinit_left > 0;
             // Where x_g sits in time (the crossing detector reads it).
-            const Real h_pt = sdirk ? gs * h : hg;
+            h_pt = sdirk ? gs * h : hg;
             if (sdirk) {
                 history.snapshot_into(hist_snap);
                 hist_s1 = hist_snap;
@@ -2724,7 +2769,7 @@ inline SimulationResult run_transient_trbdf2(
                     // the SDIRK stage swapped in derivative-free history:
                     // the run's final snapshot must hold the real one
                     if (sdirk) history.restore(hist_snap);
-                    break;
+                    return step::Verdict::End;   // a final sliver ends the run
                 }
                 const bool landing = h < h_ctrl * (Real{1} - Real{1e-12});
                 if (landing || Real{4} * h > std::min(h_max, t_stop - t)) {
@@ -2794,7 +2839,7 @@ inline SimulationResult run_transient_trbdf2(
                 h_cond_by_mode[mode_start] = h_cond;
                 st.h_conditioning_floor = std::max(st.h_conditioning_floor, h_cond);
                 h = h_cond;
-                continue;
+                return step::Verdict::Reject;
             }
             if (!stage_ok) {
                 // Newton did not converge at this h. Shrink and
@@ -2813,8 +2858,12 @@ inline SimulationResult run_transient_trbdf2(
                           "engine='pwl' with an explicit dt.");
                 }
                 h = std::max(h * Real{0.25}, h_min);
-                continue;
+                return step::Verdict::Reject;
             }
+            return step::Verdict::Accept;
+        };
+        // error: the LTE and the controller's verdict (reject, forced accept)
+        auto tb_error = [&]() PULSIM_STEP_PHASE {
 
             // ---- LTE over the differential variables ----
             Real err_sq = Real{0};
@@ -2925,7 +2974,7 @@ inline SimulationResult run_transient_trbdf2(
                 err_sq += w * w;
                 ++n_err;
             }
-            Real err =
+            err =
                 n_err > 0 ? std::sqrt(err_sq
                                        / static_cast<Real>(n_err))
                            : Real{0};
@@ -3018,7 +3067,7 @@ inline SimulationResult run_transient_trbdf2(
                         + " with h already at h_min — the circuit "
                           "is singular under this mask");
                 }
-                continue;
+                return step::Verdict::Reject;
             }
 
             if (err > Real{1} && h <= h_lo * Real{1.0001}) {
@@ -3042,11 +3091,16 @@ inline SimulationResult run_transient_trbdf2(
                     sdirk_event = false;
                     sdirk_left = 0;
                 }
-                continue;
+                return step::Verdict::Reject;
             }
+            return step::Verdict::Accept;
+        };
+        // after_solve: diode crossings, the localisation and its landing (a
+        // commutated step is committed here, at the landing)
+        auto tb_after = [&]() PULSIM_STEP_PHASE {
 
             // ---- diode crossing detection on the accepted step ----
-            bool commutated = false;
+            commutated = false;
             // shortcut: no crossing is located inside the re-initialisation
             // step (its landing would be a trapezoidal sub-step across the
             // impulse); a diode left on its forbidden side is re-decided at
@@ -3076,7 +3130,7 @@ inline SimulationResult run_transient_trbdf2(
                 if (overrun) {
                     h = std::max(h * Real{0.1}, h_lo);
                     ++st.n_reject;
-                    continue;
+                    return step::Verdict::Reject;
                 }
             }
             if (has_diodes && !reinit_step) {
@@ -3352,14 +3406,14 @@ inline SimulationResult run_transient_trbdf2(
                                                    diodes, d, x_trial);
                                     }
                                     x_sig = p_fits ? x_trial : x_1;
-                                    continue;
+                                    return step::Verdict::Reject;
                                 }
                             }
                             if (chatter_short_t != t) {
                                 chatter_short_t = t;
                                 h = std::max(h * Real{1e-2}, h_min);
                                 ++st.n_reject;
-                                continue;
+                                return step::Verdict::Reject;
                             }
                         }
                         // Guard exhausted: fall through and ACCEPT
@@ -3531,7 +3585,7 @@ inline SimulationResult run_transient_trbdf2(
                                 + newton_last_error);
                         }
                         h = std::max(Real{0.5} * dt_land, h_min);
-                        continue;
+                        return step::Verdict::Reject;
                     }
                     if (!x_trial.allFinite()) {
                         throw std::runtime_error(
@@ -3665,6 +3719,10 @@ inline SimulationResult run_transient_trbdf2(
                     }
                 }
             }
+            return step::Verdict::Accept;
+        };
+        // commit: the accepted step (history, state, record, proposal, post-edge restart)
+        auto tb_commit = [&]() PULSIM_STEP_PHASE {
 
             if (!commutated) {
                 // ---- accept ----
@@ -3848,6 +3906,62 @@ inline SimulationResult run_transient_trbdf2(
                     diode_slot = Size(-1);
                 }
             }
+        };
+        // The two drivers (DECISIONS 14: each ONE out-of-line function with the
+        // phases inlined into it): the legacy loop (default) and the step
+        // skeleton (`step::run<TrBdf2>`), selected only by the internal
+        // PULSIM_TRBDF2_STEPPER_TWIN=1 (read once per run; no option).
+        auto run_legacy = [&]() PULSIM_STEP_DRIVER {
+            while (tb_live()) {
+                if (!tb_poll()) {
+                    break;   // partial trace preserved
+                }
+                tb_begin();
+                tb_clamp();
+                step::Verdict v = tb_take();
+                if (v == step::Verdict::Accept) v = tb_error();
+                if (v == step::Verdict::Accept) v = tb_after();
+                if (v == step::Verdict::End) break;
+                if (v != step::Verdict::Accept) continue;
+                tb_commit();
+            }
+        };
+        // Hooks only the skeleton calls (as slice 3a's): probes R1
+        // (`StepHooks::step`: this engine's start state is the committed
+        // state at the step start, a right limit: the post-event restart
+        // committed it) and the device interface's #31 (`device_state` after
+        // the histories' commit). on_step runs after either commit (the
+        // ordinary accept or a localised landing) and after an attempt that
+        // after_solve ended without one (a zero-time cascade, a retake at
+        // the same h): t did not move then, and no hook fires. The start
+        // state is copied only with a listener.
+        auto run_twin = [&]() PULSIM_STEP_DRIVER {
+            const bool hook_step = hooks != nullptr && hooks->has_step();
+            Vector x_start;
+            SwitchStateMask mask_start;
+            Real t_start = Real{0};
+            auto tw_begin = [&]() PULSIM_STEP_PHASE {
+                t_start = t;
+                if (hook_step) {
+                    x_start = x;
+                    mask_start = x_mask;
+                }
+                tb_begin();
+            };
+            auto tw_on_step = [&]() PULSIM_STEP_PHASE {
+                if (hooks == nullptr || t == t_start) return;
+                hooks->device_state(t, x, hs);
+                if (hook_step) hooks->step(t_start, x_start, mask_start, t, x, x_mask);
+            };
+            auto body = step::phase_body(tb_poll, tw_begin, tb_clamp, tb_take, tb_error,
+                                         tb_after, tb_commit, tw_on_step);
+            step::BodyClock clock{tb_live, lte_ctrl, t, opts.t_end};
+            (void)step::run<step::TrBdf2>(clock, body);
+        };
+        if (trbdf2_stepper_twin) {
+            run_twin();
+        } else {
+            run_legacy();
         }
         // A run stopped by should_continue right after an event: the
         // record ends on the committed state, as the snapshot does.
