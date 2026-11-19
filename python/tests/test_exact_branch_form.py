@@ -280,10 +280,32 @@ def _doubler(form):
 
 
 def test_a_branch_diode_with_r_on_is_the_conductance_diode():
-    """R_on > 0: v_D = V_f + R_on*i is read across the nodes, as the conductance form
-    reads it. Read as its current, D2's turn-on (i = 0 tied with the OFF side, a
-    5e-7 s R_on*C1 pole) chattered 32 times at 3.4557 ms."""
+    """R_on > 0: ON is read on the solved current, decided on the conductance twin's
+    band (tol_w / R_on). On tol_i alone, D2's turn-on (the located root's -1e-8 V
+    residue / 5 mOhm = -2.1 uA) chattered 32 times at 3.4557 ms."""
     rb, rc = (_run(_doubler(f), 0.05, None, dt=50e-6) for f in ("branch", "conductance"))
+    tb, tc = np.asarray(rb.times), np.asarray(rc.times)
+    vb = np.interp(tc, tb, np.asarray(rb.v("out")))
+    np.testing.assert_allclose(vb, np.asarray(rc.v("out")), rtol=0, atol=1e-6)
+
+
+def _clamp(form):
+    b = p.CircuitBuilder()
+    b.add_pulse_voltage_source("Vin", "in", "gnd", 0.0, 15.0, 1e-3, 1.5e-3, 4e-3, 20e-6, 20e-6)
+    b.add_voltage_source("Vrail", "rail", "gnd", 5.0)
+    b.add_resistor("Rser", "in", "out", 100.0)
+    if form == "branch":
+        b.add_diode("Dclamp", "out", "rail", None, 1e-6, form="branch", R_on=1 / 200.0)
+    else:
+        b.add_diode("Dclamp", "out", "rail", 200.0, 1e-6)
+    return b
+
+
+def test_a_small_r_on_clamp_turns_off_at_its_current_zero():
+    """diode_clamp_overvoltage in branch form: R_on = 5 mOhm, no state. Its turn-off
+    is a zero of the solved current; read as v_D = R_on*i across nodes at 5 V it was
+    missed (ON at -3.75 mA for 5867 samples, the law check refused the run)."""
+    rb, rc = (_run(_clamp(f), 4e-3, None, dt=5e-6) for f in ("branch", "conductance"))
     tb, tc = np.asarray(rb.times), np.asarray(rc.times)
     vb = np.interp(tc, tb, np.asarray(rb.v("out")))
     np.testing.assert_allclose(vb, np.asarray(rc.v("out")), rtol=0, atol=1e-6)

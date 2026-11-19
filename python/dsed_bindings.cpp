@@ -1380,21 +1380,14 @@ void init_module(py::module_& m) {
                         const NativeAdapter* ad = &adapter;
                         const pulsim::Index from = d.from;
                         const pulsim::Index to = d.to;
-                        // an ideal diode's ON law is its solved current; with
-                        // R_on > 0 v_D carries it (SchedulerDiode::reads_current)
-                        const pulsim::Index var =
-                            d.var >= 0 && adapter.pool().branch_R_on(d.branch_id) == Real{0}
-                                ? d.var : pulsim::Index{-1};
-                        // a branch diode with R_on > 0 is the conductance diode
-                        // (it reads v_D across its nodes): its law's g_on is
-                        // 1/R_on, not the census's 1 (an ideal diode's current
-                        // read); with 1 its ON signal was volts against
-                        // ampere bands (diode_clamp_overvoltage: ON at -3.7 mA)
+                        // a branch-form diode's ON law is its solved current, R_on = 0
+                        // or not (SchedulerDiode::reads_current): V_f + i with the
+                        // census's g_on = 1, so the signal and its bands are amperes
+                        const pulsim::Index var = d.var;
                         const Real R_on_b = d.var >= 0
                             ? adapter.pool().branch_R_on(d.branch_id) : Real{0};
-                        auto prm = d.params();
-                        if (R_on_b > Real{0}) prm.g_on = Real{1} / R_on_b;
-                        const auto chk = var >= 0 ? shorted : nullptr;
+                        const auto prm = d.params();
+                        const auto chk = var >= 0 && R_on_b == Real{0} ? shorted : nullptr;
                         const pulsim::Index bid = d.branch_id;
                         const pulsim::Size sw = d.switch_idx;
                         pred.add_predicate(pulsim::dsed::EventPredicate{

@@ -261,12 +261,12 @@ struct SchedulerDiode {
     std::string label;        // named, Phase-1 style
     Index var = -1;           // branch form: the solved current's MNA row
     Real R_on = Real{0};      // branch form: its own ON resistance (0: ideal)
-    /// An ON ideal diode (R_on = 0) is read on its solved current: v_D is V_f
-    /// whatever flows. With R_on > 0, v_D = V_f + R_on·i is read across its nodes
-    /// as the conductance form reads it (same bounds, same tolerances): read as i,
-    /// a turn-on's zero current tied with the OFF side and the voltage doubler's
-    /// D2 chattered.
-    [[nodiscard]] bool reads_current() const noexcept { return var >= 0 && R_on == Real{0}; }
+    /// An ON branch-form diode is read on its solved current (the complementarity
+    /// pair on its own variables: ON the current, OFF v_D). With R_on > 0 the settle
+    /// decides it on the conductance twin's band (tol_w / R_on): a located turn-on
+    /// leaves v_D's residue / R_on in the current. Read as v_D across its nodes, a
+    /// 5 mOhm clamp's turn-off (19 uV) was missed: ON at -3.75 mA for 5867 samples.
+    [[nodiscard]] bool reads_current() const noexcept { return var >= 0; }
 
     [[nodiscard]] models::SwitchedDiode::Params params() const noexcept {
         return {.g_on = g_on, .g_off = g_off, .V_th = V_th, .V_f = V_f};
@@ -1502,7 +1502,7 @@ private:
                     // first whose opening leaves a mode its own trajectory keeps
                     std::vector<const SchedulerDiode*> cands;
                     for (const auto& d : diodes_)
-                        if (diode_bits_.get(d.switch_idx) && d.reads_current()) {
+                        if (diode_bits_.get(d.switch_idx) && d.reads_current() && d.R_on == Real{0}) {
                             if (d.label == e.device() || d.label.starts_with(e.device() + " ("))
                                 cands.insert(cands.begin(), &d);
                             else
@@ -1723,7 +1723,14 @@ private:
                 // no event will ever turn it ON, so only the rounding band protects it.
                 // A tied bridge (V_f = 0.7) left D1 OFF 3e-7 V above V_f, rising,
                 // and it stayed OFF while forward-biased by 1.1 V.
-                const Real tol = on ? std::max(band, d.reads_current() ? tol_i : tol_w) : band;
+                // an ON branch diode with R_on > 0 is read on its current but decided on
+                // the conductance twin's band (tol_w of v_D = V_f + R_on·i, in amperes):
+                // a located turn-on leaves v_D's residue / R_on in the current (the
+                // voltage doubler's D2, -1e-8 V / 5 mOhm = -2.1 uA against tol_i 1.2e-8 A
+                // chattered)
+                const Real tol = !on ? band
+                    : !d.reads_current() ? std::max(band, tol_w)
+                    : std::max({band, tol_i, d.R_on > Real{0} ? tol_w / d.R_on : Real{0}});
                 const Real v_d = law_v_(d, t, x);
                 const auto prm = d.params();
                 const bool by_value = models::SwitchedDiode::decide(on, v_d, prm);
