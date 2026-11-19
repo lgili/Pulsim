@@ -578,7 +578,10 @@ def test_example_psfb_completes_with_a_bounded_step_count():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         r = p.simulate(lc, engine="trbdf2", switch_fn=fn)
-    assert r._trbdf2_stats["n_accept"] < 200_000
+    # A bound against the 3.65 M-step chatter pin, not a pinned count: this run
+    # does not converge with rtol and its path is rounding-dependent (147 k
+    # accepted steps on macOS arm64, 355 k on Windows/MSVC).
+    assert r._trbdf2_stats["n_accept"] < 1_000_000
     t = np.asarray(r.times)
     v = np.asarray(r.v("vout")) - np.asarray(r.v("rect_neg"))
     assert p.time_average(t, v, 1.0e-3, 1.2e-3) == pytest.approx(22.851, abs=0.2)

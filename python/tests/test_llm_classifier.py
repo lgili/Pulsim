@@ -193,7 +193,7 @@ def test_successful_classification_writes_cache(
 
     cache_file = isolated_cache / "topology-cache.json"
     assert cache_file.exists()
-    data = json.loads(cache_file.read_text())
+    data = json.loads(cache_file.read_text(encoding="utf-8"))
     assert data["schema_version"] == CACHE_SCHEMA_VERSION
     assert len(data["entries"]) == 1
 

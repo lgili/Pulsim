@@ -26,7 +26,7 @@ _KEYS = ("V", "L", "L_p", "L_s", "C", "R", "k")
 
 def _psfb(values):
     """The PSFB example with {(device, key): value} substituted."""
-    blocks = re.split(r"(?m)^(?=    - type:)", _PSFB.read_text())
+    blocks = re.split(r"(?m)^(?=    - type:)", _PSFB.read_text(encoding="utf-8"))
     for i, blk in enumerate(blocks):
         name = re.search(r"(?m)^      name: (\S+)", blk)
         for (dev, key), v in values.items():
@@ -39,7 +39,7 @@ def _psfb(values):
 
 def _psfb_defaults():
     vals = {}
-    for blk in re.split(r"(?m)^(?=    - type:)", _PSFB.read_text()):
+    for blk in re.split(r"(?m)^(?=    - type:)", _PSFB.read_text(encoding="utf-8")):
         name = re.search(r"(?m)^      name: (\S+)", blk)
         for key in _KEYS:
             m = re.search(rf"(?m)^      {key}:\s*(\S+)", blk)

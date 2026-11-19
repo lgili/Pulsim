@@ -26,7 +26,7 @@ import sweep_probe  # noqa: E402
 
 pytest.importorskip("yaml")
 CIRCUITS = sweep_probe.circuits()
-RECORD = json.loads((PROBES / "components_baseline.json").read_text())
+RECORD = json.loads((PROBES / "components_baseline.json").read_text(encoding="utf-8"))
 
 
 def test_every_circuit_is_recorded():

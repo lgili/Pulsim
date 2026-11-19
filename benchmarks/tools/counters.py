@@ -125,7 +125,7 @@ def main(argv=None) -> int:
     ap.add_argument("--freeze", action="store_true")
     args = ap.parse_args(argv)
     warnings.simplefilter("ignore")
-    frozen = (yaml.safe_load(MANIFEST.read_text()) or {}).get("counters", {}) if MANIFEST.exists() else {}
+    frozen = (yaml.safe_load(MANIFEST.read_text(encoding="utf-8")) or {}).get("counters", {}) if MANIFEST.exists() else {}
     out, fails = {}, 0
     for name in CIRCUITS:
         out[name] = {}
@@ -145,7 +145,7 @@ def main(argv=None) -> int:
                     print(line)
             print(f"{name:28s} {engine:6s} {wall * 1e3:8.1f} ms (information only)")
     if args.freeze:
-        head = [line for line in MANIFEST.read_text().splitlines() if line.startswith("#")] \
+        head = [line for line in MANIFEST.read_text(encoding="utf-8").splitlines() if line.startswith("#")] \
             if MANIFEST.exists() else []
         MANIFEST.write_text("\n".join(head) + "\n" + yaml.safe_dump({"counters": out}, sort_keys=False))
     return 1 if fails else 0

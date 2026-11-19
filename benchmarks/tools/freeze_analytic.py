@@ -42,7 +42,7 @@ def main() -> int:
     ap.add_argument("--write", action="store_true")
     args = ap.parse_args()
     warnings.simplefilter("ignore")
-    old = yaml.safe_load(MANIFEST.read_text()) if MANIFEST.exists() else {"cases": {}}
+    old = yaml.safe_load(MANIFEST.read_text(encoding="utf-8")) if MANIFEST.exists() else {"cases": {}}
     out = {}
     for c in CASES:
         ent = {}
@@ -68,7 +68,7 @@ def main() -> int:
             print(f"{c.id:18s} {e:6s} {ent[e]}")
         out[c.id] = ent
     if args.write:
-        head = [ln for ln in MANIFEST.read_text().splitlines() if ln.startswith("#")] if MANIFEST.exists() else []
+        head = [ln for ln in MANIFEST.read_text(encoding="utf-8").splitlines() if ln.startswith("#")] if MANIFEST.exists() else []
         MANIFEST.write_text("\n".join(head) + "\n" + yaml.safe_dump({"cases": out}, sort_keys=False, width=100))
     return 0
 

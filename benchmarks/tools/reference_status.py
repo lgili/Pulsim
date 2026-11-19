@@ -36,7 +36,7 @@ import pulsim  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "REFERENCE_STATUS.md"
-ANALYTIC = yaml.safe_load((ROOT / "manifests" / "analytic.yaml").read_text())["cases"]
+ANALYTIC = yaml.safe_load((ROOT / "manifests" / "analytic.yaml").read_text(encoding="utf-8"))["cases"]
 CONFIGS = {"pwl": ("pwl", {}), "pwl+restart": ("pwl", {"discontinuity_restart": True}),
            "pwl+split": ("pwl", {"discontinuity_restart": True,
                                  "enable_substep_state_correction": True}),
@@ -225,7 +225,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     warnings.simplefilter("ignore")
     if args.from_json:
-        d = json.loads(Path(args.from_json).read_text())
+        d = json.loads(Path(args.from_json).read_text(encoding="utf-8"))
         if d.get("measure") != "interp":
             raise SystemExit(f"{args.from_json}: not written on the strict gate (measure "
                              f"{d.get('measure', d.get('metric'))!r}); re-run it")
