@@ -294,6 +294,269 @@
     law known only through f, q and their Jacobians at sampled points has no
     closed-form propagator. Documented as a limitation.
 
+## Slice 4 — state, outputs, YAML allow list, native cache (2026-11-20)
+
+24. **Merge of feat/core-integration b28f1e57** (real merge, 552c3086).
+    `pwl::StepCtx::t` is still written at every place the skeleton writes
+    the step context (pwl `run_event_iteration`; trbdf2 probe `trap_solve`,
+    stage 1, stage 2) — no new writer appeared. The time test
+    (`test_a_time_dependent_law_reads_the_solve_time`, ramp conductance, both
+    libraries, pwl and trbdf2) re-run: worst |v_a − closed form| = 1.1e-16 V on all four (pwl / trbdf2 × `contract` / `contract_v1`).
+25. **3.1 Lauritzen twin with an internal charge** (`lauritzen_twin`,
+    `twin_models.cpp`): f = {i, −i, A·q_M − q_E/T_M}, q = {0, 0, q_M} — the
+    device law's local row as an internal unknown of the circuit. Double
+    pulse (400 V, 20 A, 50 nH, S1 on at 1 µs), pwl dt = 0.2 ns: worst relative gap 1.5e-11 (legacy device path) / 1.3e-11 (interface), same grid, the stray current recovers to −105.8 A in both; trbdf2 (rtol 1e-6, both 7528 samples): 2.6e-7 relative on i(Lstray), interpolated.
+    The built-in condenses q_M (K0/K1, or the interface path's local row);
+    the external solves it as a circuit unknown with the 1e-12 branch
+    conductance (#7) — 1e-12·q_M ≈ 1e-19 A against 10 A terms.
+26. **2.2 junction capacitor** (`junction_cap_twin`, hand Jacobian, the
+    built-in's operation order and floor clamp; probe box above the floor,
+    where the clamp is not C1): gap 2.4e-15 (legacy) / 2.8e-15 (interface) relative on pwl dt = 1 ns once the test adds the built-in's structural G_min (assemble.hpp stamps 1e-12 S on each node of a nonlinear capacitor; without it the gap was 1.03e-11 — the built-in sits 4e-9 V under 400 V, the twin does not). Charge delivered at 400 V: ∫ i(pos) dt over the recorded generic reading = 312.3106 nC. The resistor-current trapezoid gives 332.3 nC: it counts the t = 0 sample (40 A at v = 0) that no step integrated.
+27. **3.2 state in the flat vector** — already true since slice 1 (cells =
+    q_n, q̇_n, q_γ per row, then n_state). Verified now: on trbdf2 the
+    rejected steps leave no trace (the meter's energy equals the rectangle
+    sum over the stored accepted steps, rectifier + meter, trbdf2 rtol 1e-6: 496 accepted, 39 rejected, |meter − sum| / sum = 1.6e-15), a trbdf2 snapshot /
+    resume carries the model state (resumed run vs straight run: 1.2e-4 relative at most (another step grid after the controller restart); on its own grid the resumed meter equals the snapshot energy plus the rectangle sum over the second run's steps (rel 1e-12 asserted)). Steady state: `steady_state` refuses by name (NotImplementedError naming the block `external_device`: its `_snapshot_like` copies only listed blocks) — the period map does not carry the model state yet; `periodic_steady_state` refuses stateful devices (UnsupportedError). Both tested. Copying the block in the period map is NOT done (the message counts the block's cells as "device(s)": 7 for one meter — another track's wording, left).
+28. **3.4 named outputs — appended descriptor block 1** (ABI version stays
+    1): `n_outputs`, `n_events` (reserved, must be 0), `outputs`
+    ({name, unit}, frozen element), `outputs_fn(ctx, x, out)`; size 224 / 136
+    (`PULSIM_XDEV_DESCRIPTOR_OUTPUTS_SIZE`, also the feature-test macro a
+    library compiled against either header can use), asserted in the header.
+    The host reads the block only when `struct_size` covers it (an older
+    library — `contract_v1` — loads unchanged and has no outputs); names are
+    unique, non-empty and not a generic key (`power`, `i(<pin>)`); outputs
+    are checked finite and pure at the probes. Readings: per device,
+    i(<pin>) = f + committed q̇ (the device interface's step-9 convention,
+    `pwl/device_readings.hpp`), power = Σ v·i, then the named outputs with
+    the committed state. NOT through `DeviceReading` (fixed 4 pins / 2 rows:
+    an external device has up to 64 rows): `ExternalDeviceHistory::reading`
+    computes the same quantities. Trace: `xdev::OutputTrace` on
+    `StepHooks::device_state` (after the commit; on the recorders' hook set
+    when there is one), only for devices added with `record=True` — a run
+    without one attaches nothing (no cost). The start row comes from a copy
+    of the history taken at the first accepted step (its start cells = init /
+    DC seed / restored snapshot) and the stored initial state.
+    `res.device_output(name, key)` maps the stored samples to traced rows by
+    exact time; a stored sample that is not a committed step (trbdf2's
+    post-event record of a probe solve) is refused by name, not
+    interpolated. Two trbdf2 commit sites stored a sample without the
+    `device_state` hook (the post-event probe commit and the diode landing):
+    the hook is now fired there (shared phases of trbdf2_transient.hpp, no
+    effect without hooks; nothing else consumes `device_state`).
+29. **3.3 events — left open; what is missing.** The engines locate only
+    their own kinds' crossings: pwl splits a step at gate edges (switch_fn
+    oracle bisection) and at switched-diode crossings found from the step's
+    first solve (`run_event_iteration` / `split_step`, `ev_t[]`); trbdf2
+    clamps to gate edges and localises a crossing by Illinois on trial
+    trapezoidal solves of ONE signal, `detail_trbdf2::crossing_signal(
+    diodes, idx, x)` (DiodeEventState only). `StepHooks::on_event` is a
+    REPORT after the settle, not a locator. Carrying an external g(x) needs,
+    in the shared phases: (a) a generic event-signal source on
+    `StatefulHistories` (per kind: `n_signals()`, `signal(k, x, t)`),
+    sampled at the step's end (pwl) / stage and end points (trbdf2); (b) the
+    pwl split to accept a crossing time from such a signal (secant on the
+    first solve, as the diode split) and commit the sub-interval; (c) the
+    trbdf2 Illinois loop to take `crossing_signal` from that source instead
+    of only `DiodeEventState`; (d) after the landing, the kind's `accept`
+    (where a latch flips its state). None exists without a loop edit, so the
+    header reserves `n_events` (refused when non-zero) and 3.3 stays open.
+30. **1.7 YAML** — owner decision: an ALLOW LIST. `load_yaml_string /
+    load_yaml_file(..., allow_native_code=[paths or directories])`; the
+    netlist's `lib:` (relative to the file's folder; the working directory
+    for a string) and each entry are `std::filesystem::canonical`
+    (symlinks followed) before the comparison; a directory entry admits
+    what lies under it; an entry that does not exist admits nothing; a
+    library outside the list is refused naming the device and the resolved
+    path; `allow_native_code=True` is refused (TypeError for a bare string).
+    The options reach `load_device` through a thread-local scope set by
+    `load_text` (no signature change through the subsystem loaders). Keys
+    strict (`type, name, nodes, lib, model, params`); parameters through
+    the model's field table (`resolve_params`: unknown name, repeated name,
+    wrong unit refused). Inline `code:` refused as an unknown key. The IR
+    emitter still refuses external devices (Circuit pickling unchanged).
+31. **1.6 components()** — `kind: external_device`, `params` by field name,
+    `model`, `library` (canonical path), `library_hash` =
+    `fnv1a64:<16 hex>` of the bytes read at load, `pins`, `internal_branch`.
+32. **1.5 cache** — the per-user cache already existed (merged from the
+    control-graph track, refusing a foreign or writable cached file). Now
+    factored into `pulsim/_native_cache.py` (`cache_dir`, `check_owned`,
+    `is_private`, `compiled`); `c_block` keeps its names as aliases; a
+    cached LIBRARY that is not private (foreign owner, group/world-writable,
+    symlink) is deleted and rebuilt; a cache DIRECTORY that is not private
+    is still refused (Pulsim cannot repair what another user controls).
+33. **Cost and byte comparisons on this tip.** Golden / stateful / engines
+    byte comparisons against the baseline recorded before slice 4: all
+    IDENTICAL. Newton buck, instructions per accepted step, K = 10, three
+    runs: pwl 28 944 / 31 204 / 31 056 (baseline 29 113 / 30 764 / 30 572),
+    trbdf2 59 297 / 59 848 / 59 610 (baseline 59 326 / 59 231 / 59 457) —
+    within the run-to-run spread. Twins, external / built-in, K = 40, three
+    runs: satind 1.111 / 1.185 / 1.121, satind hand Jacobian 1.138 / 1.155 /
+    1.161, Shockley rectifier 1.098 / 1.141 / 1.102 (≤ 1.2×; K = 10 runs
+    scatter 1.12–1.27 and are not used). A run without a `record=True`
+    device attaches no trace.
+34. **Section 4 (`pulsim.xdev` SymPy) not started** — goals 1–5 took the slice; nothing of section 4 exists.
+35. **Review of cad0720a (fresh-context, read-only) and what changed.**
+    (1) trbdf2 fired `device_state` once per ITERATION (`tw_on_step`), but a
+    step commit followed by a gate-edge or breakpoint restart in the same
+    `tb_commit` stores two samples: the first had no trace row and
+    `device_output` refused every PWM run on trbdf2. Fixed in the shared
+    phase: `device_state_once(t, x)` fires at each of the three commit
+    sites (step, post-event probe, diode landing) and at the iteration end
+    only if that time was not just fired (no double rows). Test: a PWM buck
+    with a diode on pwl and trbdf2. (2) `BlockNames::device` did not scope
+    the `nodes` list: an `external_device` inside a subsystem attached to
+    top-level names. Fixed, tested. (3) A `struct_size` inside block 1 copied
+    an unvalidated `n_outputs` (out-of-bounds read): the host now copies a
+    block only when the library's struct holds it whole (test model
+    `partial_block`). (4) `reading` called `eval` without the const-state
+    guard: routed through `eval_`. (5) an empty trace's message, (8) one
+    `Path` as `allow_native_code` (TypeError like one string), (9) the cache
+    returns only a regular file and removes its temp library after a failed
+    compile — fixed. (6)/(7) documented (relative entries are from the
+    working directory; a directory admits its subfolders — never list a
+    writable shared one). LEFT: (10) the older `wire_c_blocks_from_yaml`
+    still compiles / loads YAML `code`/`file`/`lib` without an allow list
+    (an explicit separate call; documented, not changed). trbdf2's
+    `record_post_event` display samples (not commits) are still refused by
+    `device_output` by name. After the fixes: byte comparisons all
+    IDENTICAL again; buck pwl 28 966 / 30 874 / 30 681, trbdf2 59 893 /
+    59 505 / 59 474 instructions per step (noise); full pytest 5690 passed.
+
+## Slice 5 — equations to C (`pulsim.xdev`), the free function (2026-11-19, real clock)
+
+Python only: no C++ header, `bindings.cpp` or C header changed; the extension
+of 7e2860eb was not rebuilt. Full ctest not run on this tip.
+
+36. **cc37304a applied by hand, not merged.** A merge of
+    `origin/feat/core-integration` brings C++ (bindings.cpp, solver headers)
+    and would make this worktree's installed extension stale for the tests;
+    the PR's test fix (`os.replace` of a new file with the flipped byte and the
+    same size / mtime, never `write_bytes` into the loaded library) and its
+    doc sentence were applied with `git apply` (b5918521).
+37. **Handles and determinism.** `xdev.pins / internal / params / state` return
+    `sympy.Dummy` subclasses (unique per declaration; attributes `xkind`,
+    `meta` — never `kind`, which is SymPy's own `Basic.kind`). No user name is
+    ever printed into the C: before emission every handle is replaced by a
+    plain symbol `x[i]` / `p[j]` / `s[k]` / `h`, so SymPy's canonical term order
+    (which for a Dummy depends on its process-global index) cannot reach the
+    text. Parameters and states are found in the expressions and ordered by
+    declaration. Test: the same law in another process that first makes 1000
+    Dummies gives a byte-identical source (sha256), and the same library path.
+38. **The lint and a C¹ Piecewise (the decision).** A `Piecewise` whose
+    conditions involve an unknown is accepted as C¹ — and the model keeps
+    SMOOTH — only when it has two pieces, its condition is ONE relational
+    (`<`, `<=`, `>`, `>=`) that is AFFINE in one unknown (non-zero slope free of it) and solved
+    for it, and `simplify` proves the pieces' difference and every
+    component of its gradient zero on that boundary. Everything else is
+    refused (three pieces, `And`, an unsolvable boundary, a proof `simplify`
+    cannot close): conservative, never optimistic. A non-smooth construct
+    of parameters / states only (`Abs(G)`, `Piecewise((…, BV > 0), (0, True))`)
+    is no kink in the unknowns and is accepted. The built-in Shockley's
+    tangent continuation passes (the proof uses `exp(log z) = z`). Also
+    refused besides the brief's list: `ceiling`, `frac`, `Mod`, `DiracDelta`.
+39. **allow_nonsmooth.** `Abs / sign / Max / Min / Heaviside` are rewritten as
+    `Piecewise` before differentiation, so value and Jacobian take the same
+    branch (`floor` / `ceiling`: derivative 0); the model does not claim
+    SMOOTH and the host's one-sided check accepts it (test: a law with two
+    kinks registers with `check_contract=True`, runs, and declares one side's
+    slope AT each kink). LIMIT, documented: two kinks at the SAME point can
+    take opposite sides at the tie (SymPy orders `Max`'s arguments
+    canonically: `Max(u, 0)` picks the 0 branch at u = 0, `Abs(u)` the u
+    branch) — the first test law had both at u = 0 and the centre probe
+    refused it (0.25e-3 declared, neither side). No general fix: "forward in
+    x_j" has no meaning for an expression of several unknowns.
+40. **expm1 / log1p by pattern, not SymPy's optimizer.** `sympy.codegen.
+    rewriting.log1p_opt` factors the log's argument: `log(1 + (a − b)²)` came
+    out as `log(a² − 2ab + b² + 1)` (a cancellation it introduced), and
+    `expm1_opt` also tries `factor()`. Replaced by two plain rewrites
+    (`c·exp(z) − c` in one Add → `c·expm1(z)`; `log(1 + z)` → `log1p(z)`).
+41. **Printer.** Numbers only: no `M_PI` / `M_E` (not C99; glibc hides them
+    under `-std=c99`), integers ≥ 2³¹ as double literals, an infinity / NaN in
+    the law refused; `coth` / `csch` / `sech` as `1/tanh` etc. — SymPy's C
+    printer writes `coth` as `(eˣ + e⁻ˣ)/(eˣ − e⁻ˣ)`, a cancellation of its own
+    (the raw Langevin law's decreasing region was |u| < 8.7e-6 with it,
+    |u| < 6.5e-8 with `1/tanh`). Piecewise as one line of nested ternaries.
+    `#pragma STDC FP_CONTRACT OFF` under `__clang__`: clang contracted
+    `1e-9·x0 − 1e-9·x1` into an FMA, so f ≠ 0 at x0 = x1 (1.6e-27) and the
+    registration's off-axis line refused the model; gcc's `-std=c99` does
+    not contract and warns on the pragma, hence the guard. Declarations
+    before statements (also clean under `-Wdeclaration-after-statement`).
+    NOT regrouped: SymPy distributes a NUMBER over a sum (`1e-9·(a − k)` →
+    `1e-9·a − 1e-9·k`), which an MNA stamp does as well; a law whose
+    accuracy needs the difference first should multiply by a parameter.
+42. **Measured (macOS arm64, Apple clang).** Generated C against mpmath
+    (lambdify, 30 digits) of the declared law and its SymPy derivatives,
+    1000 random points: worst pure-relative error on non-zero entries
+    4.7e-15 (Shockley, box widened to [−2, 2] V past v_lim = 1.07 V),
+    2.2e-16 (saturable inductor), 1.3e-14 (mixed law with expm1, log1p, an
+    internal unknown and charges); the test's bound is 1e-13 relative with a
+    floor of 1e-13 of the entry's scale over the points (libm differs between
+    platforms; a printer / CSE / pattern bug is O(1)). SymPy Shockley against
+    the built-in on pwl (20 V half-wave rectifier, 2 ms, dt 1 µs): 9.1e-14
+    of the voltage scale; saturable inductor against the hand-written twin
+    (`satind_twin`) 4.9e-15 and against the built-in 4.9e-15; the gate is 1e-12 on this machine,
+    1e-9 elsewhere (the existing twin tests' convention). State + outputs
+    against `metered_resistor`: `energy` and `p_law` equal to rtol 1e-12.
+    The generated C of the five test laws compiles with `-std=c99 -pedantic
+    -Wall -Wextra -Werror -Wdeclaration-after-statement` (and `-Wconversion
+    -Wshadow` by hand) on Apple clang and Homebrew gcc 15: zero warnings.
+43. **`scan_monotone(dev, pin, lo, hi, *, row, at, params, n=4001)`**:
+    `f[row]` (default the unknown's own row) on a uniform grid plus a
+    geometric run to 1e-15 of the width on each side of 0; a decrease counts
+    when it exceeds 4 ulps of f; grid points within 1e-9 relative of a
+    neighbour are dropped (linspace and the geometric run met within one ulp
+    at ±0.1 and ±0.01 and reported a one-ulp "decrease"). It evaluates the
+    library's own `eval` through ctypes (the descriptor's version-1 layout is
+    frozen by the header), so it works on any library model
+    (`xdev.load(lib, model)`, no SymPy); a model with `create` is refused.
+44. **Optional extra.** `codegen = ["sympy>=1.12"]`; SymPy also in `dev`, which
+    is how the project already carries optional test deps (PyYAML is in both
+    `lib` and `dev`; CI installs `.[dev]` on the three OS, `.[dev,fast]` in
+    the examples job). Codegen tests skip without SymPy / a compiler locally
+    and FAIL on CI; they skip on win32 (the native cache drives a gcc/clang
+    command line only). Missing SymPy → `ImportError` naming
+    `pip install pulsim[codegen]`; no compiler → `RuntimeError` naming what
+    was looked for.
+45. **1.6 free function.** `pulsim.add_external_device(builder, name, nodes,
+    *, lib=None, code=None, lang="c", model=None, params=None,
+    check_jacobian=True, record=False)` (pure Python, in `xdev.py`, re-exported):
+    `model` added — the brief's signature had no way to pick one of several
+    models; left out, the library's only model is used (several → refused
+    with their names). `check_jacobian` maps to `check_contract`. `code=` is
+    a whole translation unit (C99 or C++17) compiled through
+    `_native_cache` with `-I get_include()`. The stub file is unchanged
+    (`_pulsim.pyi` covers the extension only).
+46a. **Typed refusal.** Every refusal of `pulsim.xdev` is `xdev.XdevError`
+    (`ValueError` + `PulsimError`, like `OptionsError`): the untyped-raise
+    ratchet of `test_simulation_object.py` (≤ 562 `raise ValueError`) counted
+    the module's 28 and was not raised.
+46. **Not in this slice.** Generated models declare no monotone pairs and no
+    PASSIVE / RECIPROCAL claims (only SMOOTH, when proved), no `validate`, no
+    time (`ctx->t`) in the law; no MSVC command line in the cache. No C++
+    change was needed: no request to other tracks.
+
+47. **Review of 799bcfdf (fresh-context, read-only) and what changed.**
+    (1) BUG: the C¹ proof accepted a jump — `solve(tan(u), a)` returns one
+    root, so `Piecewise((u², tan(u) > 0), (0, True))` kept SMOOTH; the
+    boundary must now be affine in the solved unknown (test). (2) BUG: with
+    `allow_nonsmooth`, SymPy's three-piece `sign` / `Heaviside` rewrites gave
+    J = 0 (sign(u)·u) and 1/2 (Heaviside(u)·u) AT the kink, neither side;
+    now two-piece forms taking the right-hand value (test at the kink for
+    sign, Heaviside, Abs, frac, Mod). (3) `frac` / `Mod` could not be
+    differentiated: rewritten through `floor`; that exposed SymPy wrapping
+    the floor derivative in `Subs`, which the "strict" C printer PRINTED as
+    text (`Subs(0, xi_1_…)`, a compile error): `Subs` is now evaluated after
+    the derivative rule and the printer refuses `Subs` / `Derivative` /
+    `Integral`. (4) TRUST: string laws went through `sympify` (Python eval):
+    `sympify(strict=True)` everywhere (test with an `__import__` init).
+    (5) `I` reached the C: refused as complex-valued (test). (6) `load` /
+    `eval` now refuse a descriptor shorter than version 1 or with NULL
+    eval / pattern / fields / probe arrays, and a state of the wrong length.
+    (7) dead tuple-return branch fixed. SymPy floor raised to 1.13 (the
+    printer's `strict` setting). LEFT: MSVC never compiles the generated C
+    (Windows skips; no MSVC command line in the cache); asymmetric-Jacobian
+    coverage relies on `mixed_law` (kept).
+
 ## Requests to other tracks
 
 - **Stepper track** (DONE in slice 3, #17/#18 — kept for the record): (a) the DC operating point needs the stateful fold (an
@@ -301,6 +564,40 @@
   until then #5 refuses. (b) `t` in `pulsim_xdev_ctx` is always 0: the refresh
   signature carries no time; a time-dependent external law needs the solve's t
   passed to `NonlinearRefreshFn` (or `pwl::StepCtx`).
+
+## Hand-off (2026-11-19, slice 5)
+
+- Done: section 4 (`pulsim.xdev`), 1.6's free function with `code=`, the docs
+  section and `examples/scripts/run_xdev_sympy_diode.py` with its claims.
+  Python only; the next slice that rebuilds the extension should merge
+  `feat/core-integration` (cc37304a's test fix is already here by hand: expect
+  a trivial conflict-free merge of the same lines).
+- Open, in order: **3.3 events** (#29), **3.2's steady-state copy**,
+  `wire_c_blocks_from_yaml` behind the allow list (#35 (10)), section 5
+  (OSDI); an MSVC command line in `_native_cache` (then the codegen tests can
+  run on Windows); optional: generated monotone pairs / PASSIVE claims,
+  `ctx->t` in a SymPy law (`xdev.t`).
+- Verified on this tip (macOS arm64 only): full pytest (see the commit),
+  `-m reference` 382, `ruff check python/`, openspec 78/78 --strict, stubs
+  --check unchanged, the generated C of every test law with `-std=c99
+  -pedantic -Wall -Wextra -Werror` on Apple clang and gcc 15. NOT run:
+  full ctest, Linux, Windows, MSVC.
+
+## Hand-off (2026-11-20, slice 4)
+
+- Open, in order: **3.3 events** (#29 lists the four loop pieces: a generic
+  event-signal source on `StatefulHistories`, the pwl split, the trbdf2
+  Illinois signal, accept after the landing) — needs the stepper owners;
+  **3.2's steady-state copy** (`steady_state._snapshot_like` must copy the
+  `external_device` block; `periodic_steady_state` needs read/set of it);
+  1.6's `code=` free function; `wire_c_blocks_from_yaml` behind the same
+  allow list (#35 (10)); section 4 (SymPy, not started); section 5.
+- `device_output` refuses trbdf2's post-event display samples; a caller who
+  wants a dense reading should drop them (they are not committed states).
+- Verified on this tip (macOS arm64 only): xdev / yaml / layer5_v3 / step /
+  record pass on Eigen 5 and 3.4.0; full pytest, `-m reference`,
+  reference_status (REFERENCE_STATUS.md unchanged), openspec --strict,
+  `ruff check python/`, stubs --check. Full ctest, Linux, Windows not run.
 
 ## Hand-off (2026-11-20, slice 3)
 

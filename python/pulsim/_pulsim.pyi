@@ -546,9 +546,9 @@ class CircuitBuilder:
         """
         Add a binary switched diode (V2's SwitchedDiode). g_on/g_off in siemens. V_f: forward drop while ON (PSIM's diode voltage drop), in volts: v = V_f + i/g_on; must be finite and >= 0. V_th: turn-on threshold in volts, effectively max(V_th, V_f) when V_f > 0; V_th > V_f is a hysteresis band. OFF is plain g_off.
         """
-    def add_external_device(self, name: str, nodes: collections.abc.Sequence[str], lib: str, model: str, params: typing.Any = None, *, check_contract: bool = True, debug_jacobian: bool = False) -> CircuitBuilder:
+    def add_external_device(self, name: str, nodes: collections.abc.Sequence[str], lib: str, model: str, params: typing.Any = None, *, check_contract: bool = True, debug_jacobian: bool = False, record: bool = False) -> CircuitBuilder:
         """
-        Add an instance of an EXTERNAL device model (add-external-device-abi): `lib` is a shared library built against pulsim_xdev.h; loading it runs arbitrary native code with your privileges (no sandbox). `nodes` are its pins in the model's order; `params` maps field names to a value or (value, unit) (the unit must equal the declared one). The model's contract (Jacobian, finiteness, KCL, declared claims) is checked here and refused by name; `debug_jacobian=True` re-checks the Jacobian at every evaluation of the run.
+        Add an instance of an EXTERNAL device model (add-external-device-abi): `lib` is a shared library built against pulsim_xdev.h; loading it runs arbitrary native code with your privileges (no sandbox). `nodes` are its pins in the model's order; `params` maps field names to a value or (value, unit) (the unit must equal the declared one). The model's contract (Jacobian, finiteness, KCL, declared claims) is checked here and refused by name; `debug_jacobian=True` re-checks the Jacobian at every evaluation of the run. `record=True` traces the device's readings at every accepted step of a pwl / trbdf2 run: res.device_output(name, key) with key 'i(<pin>)', 'power' or one of the model's named outputs.
         """
     def add_gapped_core_inductor(self, name: str, n_pos: str, n_neg: str, N: float, Ae: float, le: float, lg: float, mu_r0: float = 2000.0, B_sat: float = 0.35, knots: int = 128) -> CircuitBuilder:
         """
@@ -2072,6 +2072,15 @@ class SimulationResult:
         the integral of the engines' dense output (linear between samples,
         from the right limit where one is stored) divided by ``t1 - t0``,
         windows clipped exactly. Correct on any grid, unlike ``.mean()``.
+        """
+    def device_output(self, name: str, key: str):
+        """
+        ``key`` of the external device ``name`` at every stored sample:
+        ``'i(<pin>)'`` (the current INTO the device at that pin, its law's
+        ``f`` plus the committed ``dq/dt``), ``'power'`` (the sum of pin voltage
+        times pin current) or one of the model's named outputs (evaluated with
+        the state committed at that step). The device must be added with
+        ``record=True`` and the run must go through pwl or trbdf2.
         """
     def empty(self) -> bool:
         """
@@ -4215,6 +4224,23 @@ class RunOptions:
     @voltage_sanity_factor.setter
     def voltage_sanity_factor(self, arg0: float | None) -> None:
         ...
+class _XdevTrace:
+    @staticmethod
+    def wanted(builder: CircuitBuilder) -> bool:
+        ...
+    def __init__(self) -> None:
+        ...
+    def columns(self, name: str) -> list[str]:
+        ...
+    def names(self) -> list[str]:
+        ...
+    def start_row(self, name: str, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t0: float) -> list[float]:
+        ...
+    def values(self, name: str) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, n]"]:
+        ...
+    @property
+    def times(self) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
+        ...
 class Simulation:
     """
     The kernel object that is a simulation: Simulation(circuit, options) plans the run (preflight on a private copy, routing, the option x engine refusals, the device capability check, the Newton stamps); attach gate sources, ticks and source terms; run() or run_until(t) + snapshot() / restore(). Engines 'pwl' and 'trbdf2'; the exact engine is refused (pulsim.simulate composes it). C blocks / graph-driven sources are refused (simulate composes them).
@@ -4255,6 +4281,8 @@ class Simulation:
         """
         pwl: runs at every tick instant before the ticks.
         """
+    def set_xdev_trace(self, trace: typing.Any) -> None:
+        ...
     def snapshot(self) -> SolverSnapshot:
         ...
     @property
@@ -4501,13 +4529,13 @@ def ja_replay(N: float, Ae: float, le: float, lg: float, Ms: float, a: float, al
     """
     Replay the in-loop Jiles-Atherton device on a current trace with the kernel's own integrator; returns (H, M, B) arrays.
     """
-def load_yaml_file(path: str) -> LoadedCircuit:
+def load_yaml_file(path: str, *, allow_native_code: typing.Any = None) -> LoadedCircuit:
     """
-    Parse a YAML circuit description from disk. Returns LoadedCircuit(builder, options); errors and warnings name the path. Same key checks as `load_yaml_string`.
+    Parse a YAML circuit description from disk. Returns LoadedCircuit(builder, options); errors and warnings name the path. Same key checks as `load_yaml_string`; a relative `lib:` of an `external_device` is taken from the file's folder.
     """
-def load_yaml_string(yaml_text: str) -> LoadedCircuit:
+def load_yaml_string(yaml_text: str, *, allow_native_code: typing.Any = None) -> LoadedCircuit:
     """
-    Parse a YAML circuit description from an in-memory string. Returns LoadedCircuit(builder, options). Warns on unknown top-level / `circuit:` / `simulation:` keys; refuses a `simulation:` block indented under `circuit:`.
+    Parse a YAML circuit description from an in-memory string. Returns LoadedCircuit(builder, options). Warns on unknown top-level / `circuit:` / `simulation:` keys; refuses a `simulation:` block indented under `circuit:`. `allow_native_code`: the shared libraries (paths or directories, symlinks followed) an `external_device` entry may load; without it every such entry is refused (a relative `lib:` is taken from the working directory).
     """
 def make_carrier_pwm_fn(period: float, duty: DutyRegister, switch_idx: int, num_switches: int, low_side: int = -1, dead_time: float = 0.0, phase: float = 0.0) -> SwitchSchedule:
     """

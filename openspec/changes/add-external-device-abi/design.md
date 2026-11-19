@@ -128,7 +128,13 @@ at fine spacing.
 - A shared library is arbitrary code with the user's privileges. It is
   loaded only when the user names it (`lib=`) or supplies the source.
   A YAML netlist with an `external_device` entry is refused by the
-  loader unless the call passes `allow_native_code=True`.
+  loader unless the call lists the library in an ALLOW LIST,
+  `allow_native_code=[path_or_directory, ...]`: the netlist's `lib:`
+  (relative to the YAML file's folder) and each entry are resolved with
+  symlinks followed, and a library outside the list is refused by
+  name. `allow_native_code=True` is refused with a message asking for
+  the paths: a netlist from an untrusted source must not choose the
+  library (owner decision, slice 4).
 
 ### Stage 2 — equations to C
 

@@ -628,6 +628,14 @@ inline SimulationResult run_transient_trbdf2(
     // rejected step never touches them and no rollback is needed.
     pwl::StatefulHistories hs;
     hs.get<pwl::ExternalDeviceHistory>().set_start_time(opts.t_start);   // ctx->t of init
+    // #31 device_state once per committed time: every commit site fires it,
+    // and the iteration's end (tw_on_step) only if its last commit did not
+    Real ds_t = std::numeric_limits<Real>::quiet_NaN();
+    auto device_state_once = [&](Real tc, const Vector& xc) {
+        if (hooks == nullptr || tc == ds_t) return;
+        ds_t = tc;
+        hooks->device_state(tc, xc, hs);
+    };
     hs.init(graph, pool);
     hs.set_path(opts.device_path, graph, pool, "run_transient_trbdf2");
     if (initial_state.has_value()) hs.seed_from_dc_op(x);
@@ -1906,6 +1914,7 @@ inline SimulationResult run_transient_trbdf2(
         result.states.push_back(x);
         result.event_iteration_count.push_back(0);
         result.record_switch_state(m_probe);
+        device_state_once(t, x);   // #31: the probe committed the histories
         if (hooks) hooks->accepted(t_hook0, t, x, m_probe);
         // the probe is a trapezoidal step
         if (lt) lt->accept_step(t_hook0, t, x, m_probe, nullptr, 0.5, 0, 0.5);
@@ -3633,6 +3642,7 @@ inline SimulationResult run_transient_trbdf2(
                     // current the solver carried, with no phantom
                     // g_on·(v − V_f) from the post-flip bits.
                     result.record_switch_state(mask_step);
+                    device_state_once(t, x);   // #31: the landing committed them
                     if (hooks) hooks->accepted(t_hook0, t, x, mask_step);
                     // the landing is a trapezoidal sub-step
                     if (lt) lt->accept_step(t_hook0, t, x, mask_step, nullptr, 0.5, 0, 0.5);
@@ -3723,6 +3733,7 @@ inline SimulationResult run_transient_trbdf2(
                 result.event_iteration_count.push_back(0);
                 // Both TR-BDF2 stages solved under mask_step.
                 result.record_switch_state(mask_step);
+                device_state_once(t, x);   // #31: before a restart in this commit moves t
                 if (hooks) hooks->accepted(t_pre, t, x, mask_step);
                 if (lt) {
                     // the stage weights: SDIRK(2,2) b = (1 - gs, gs) at
@@ -3900,7 +3911,7 @@ inline SimulationResult run_transient_trbdf2(
             };
             auto tw_on_step = [&]() PULSIM_STEP_PHASE {
                 if (hooks == nullptr || t == t_start) return;
-                hooks->device_state(t, x, hs);
+                device_state_once(t, x);
                 if (hook_step) hooks->step(t_start, x_start, mask_start, t, x, x_mask);
             };
             step::BodyClock clock{tb_live, lte_ctrl, t, opts.t_end};

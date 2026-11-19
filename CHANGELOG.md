@@ -23,6 +23,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (snapshot pickle version 5 field 17; 17-field tuples still load); loss
   ports are part of the circuit IR's hashes.
 
+### External devices: equations to C (`pulsim.xdev`), inline `code=`
+
+* **Added** `pulsim.xdev`: a device law declared with SymPy (`pins`,
+  `internal`, `params`, `state`) compiled to plain C99 (Jacobian pattern,
+  CSE, `expm1` / `log1p`) through the per-user native cache and loaded as an
+  external device; a smoothness lint refuses kinks of the unknowns
+  (`allow_nonsmooth=True` drops the SMOOTH claim) and accepts a two-piece
+  `Piecewise` it proves C¹; `xdev.scan_monotone` finds non-monotone regions
+  a sampled check cannot (the raw Langevin law near 0). Optional extra
+  `pulsim[codegen]` (SymPy); the `dev` extra carries it for the tests.
+* **Added** `pulsim.add_external_device(builder, name, nodes, lib= | code=)`:
+  `code=` compiles a whole C / C++ model source through the native cache.
+
+### External devices: state, outputs, YAML behind an allow list; the native cache
+
+* **Added** `type: external_device` in YAML netlists, loaded only when the
+  load call lists the library or its directory:
+  `load_yaml_file(path, allow_native_code=[...])` (paths resolved with
+  symlinks followed; anything else refused by name; `allow_native_code=True`
+  is refused — pass the paths). Strict keys; parameters by the model's fields.
+* **Added** named outputs (an appended descriptor block, ABI version still 1;
+  older libraries load unchanged) and `add_external_device(..., record=True)`
+  with `res.device_output(name, key)`: pin currents `i(<pin>)`, `power`, and
+  the model's outputs at every stored sample of a pwl / trbdf2 run. A model
+  declaring event functions (`n_events > 0`) is refused: no engine locates
+  an external zero crossing yet.
+* **Added** `components()` lists external devices with their parameters,
+  model, library path and the hash of the library's bytes.
+* **Changed** the C-block compile cache code moved to
+  `pulsim._native_cache`; a cached library that another user owns, that
+  others can write, or that is a symlink is now deleted and REBUILT instead
+  of refused (the cache directory itself is still refused when it is not
+  yours and private).
+
 ### External devices: time, DC operating point, AC sweep
 
 * **Added** an external device's law receives the solve's time in

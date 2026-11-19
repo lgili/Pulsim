@@ -9,6 +9,7 @@ from __future__ import annotations
 import ctypes
 import math
 import os
+import pathlib
 import subprocess
 import sys
 import warnings
@@ -338,6 +339,44 @@ def test_cblock_cache_is_per_user_and_private(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "getuid", lambda: os.stat(f).st_uid + 1)
     with pytest.raises(RuntimeError, match="owned by uid"):
         _check_owned(f)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX owners and modes")
+def test_a_foreign_or_writable_cached_library_is_rebuilt(tmp_path, monkeypatch):
+    """add-external-device-abi 1.5: a cached library that is not private is
+    deleted and rebuilt, never loaded (the directory is still refused)."""
+    from pulsim import _native_cache as nc
+    cc = _find_compiler("c")
+    if cc is None:
+        pytest.skip("no C compiler")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / ".cache"))
+
+    def build():
+        return nc.compiled("int f(void) { return 1; }\n", ".c",
+                           [cc, "-shared", "-fPIC"], ["probe"], sub="test",
+                           prefix="t", who="test")
+    so = build()
+    assert so.stat().st_mode & 0o777 == 0o700
+    so.write_bytes(b"planted")              # not a library: loading it would fail
+    os.chmod(so, 0o666)                     # writable by others
+    assert build() == so and so.read_bytes() != b"planted"
+    assert so.stat().st_mode & 0o777 == 0o700
+    so.write_bytes(b"planted")
+    real = pathlib.Path.lstat
+    foreign = os.getuid() + 1
+
+    def lstat(self, *a, **k):               # the file only: another user's
+        st = real(self, *a, **k)
+        if self == so:
+            return os.stat_result((st.st_mode, st.st_ino, st.st_dev, st.st_nlink,
+                                   foreign, st.st_gid, st.st_size, 0, 0, 0))
+        return st
+    monkeypatch.setattr(pathlib.Path, "lstat", lstat)
+    assert not nc.is_private(so)
+    assert build() == so
+    monkeypatch.undo()
+    assert so.read_bytes() != b"planted"
 
 
 def test_a_delay_that_breaks_a_loop_pushes_after_the_pass(tmp_path):

@@ -223,7 +223,9 @@ private:
 /// The version-1 prefix of the descriptor: a library's struct must be at
 /// least this long. Appended fields are read only when struct_size covers them.
 inline constexpr std::size_t kV1DescriptorSize = PULSIM_XDEV_DESCRIPTOR_V1_SIZE;
-static_assert(sizeof(pulsim_xdev_descriptor) == kV1DescriptorSize,
+/// With appended block 1 (named outputs): read only when struct_size covers it.
+inline constexpr std::size_t kOutputsDescriptorSize = PULSIM_XDEV_DESCRIPTOR_OUTPUTS_SIZE;
+static_assert(sizeof(pulsim_xdev_descriptor) == kOutputsDescriptorSize,
               "an appended descriptor field must be read behind a struct_size test");
 
 class Model {
@@ -239,6 +241,8 @@ public:
     [[nodiscard]] const std::string& name() const noexcept { return name_; }
     [[nodiscard]] std::size_t rows() const noexcept { return R_; }
     [[nodiscard]] std::string library_path() const { return lib_ ? lib_->path() : "<in-process>"; }
+    /// FNV-1a of the library's bytes when it was loaded (0 in-process).
+    [[nodiscard]] std::uint64_t library_hash() const noexcept { return lib_ ? lib_->identity().hash : 0; }
 
     /// The model called `name` in `lib`, refused by name if absent.
     static std::shared_ptr<const Model> find(const std::shared_ptr<const Library>& lib,
@@ -319,14 +323,47 @@ private:
         const std::uint32_t known = PULSIM_XDEV_CLAIM_SMOOTH | PULSIM_XDEV_CLAIM_PASSIVE
                                     | PULSIM_XDEV_CLAIM_RECIPROCAL;
         if (d_->claims & ~known) refuse_("unknown claim bits " + std::to_string(d_->claims & ~known));
+        if (d_->struct_size >= kOutputsDescriptorSize) validate_outputs_();
+    }
+    /// Appended block 1. Event functions are reserved: no engine locates an
+    /// external device's zero crossing yet, so a model declaring one is
+    /// refused instead of silently running without its events.
+    void validate_outputs_() {
+        if (d_->n_events != 0) {
+            refuse_("declares n_events = " + std::to_string(d_->n_events)
+                    + ": event functions are not supported by this Pulsim (no engine "
+                    "locates an external device's zero crossing yet)");
+        }
+        if (d_->n_outputs == 0) return;
+        if (d_->n_outputs > 256) refuse_("n_outputs = " + std::to_string(d_->n_outputs) + " > 256");
+        if (!d_->outputs) refuse_("n_outputs > 0 but outputs is NULL");
+        if (!d_->outputs_fn) refuse_("n_outputs > 0 but outputs_fn is NULL");
+        std::vector<std::string> seen;
+        for (std::uint32_t k = 0; k < d_->n_outputs; ++k) {
+            const auto& o = d_->outputs[k];
+            if (!o.name || !o.unit || !*o.name) {
+                refuse_("output #" + std::to_string(k) + " has a NULL or empty name, or a NULL unit");
+            }
+            const std::string n = o.name;
+            // the generic readings' keys (res.device_output)
+            if (n == "power" || (n.size() > 3 && n.rfind("i(", 0) == 0 && n.back() == ')')) {
+                refuse_("output name '" + n + "' is a generic reading's key (power, i(<pin>))");
+            }
+            if (std::find(seen.begin(), seen.end(), n) != seen.end()) {
+                refuse_("output name '" + n + "' declared twice");
+            }
+            seen.push_back(n);
+        }
     }
     /// Deep copy of the validated descriptor: the host never reads the
     /// library's (possibly writable) struct or arrays again.
     void own_() {
-        // only the bytes the LIBRARY's struct has (a later host's struct is
-        // longer than an old library's); fields it lacks stay zero
+        // only the blocks the LIBRARY's struct holds WHOLE (an older library's
+        // is shorter; a size inside block 1 is a partial block, unvalidated,
+        // so it is not read); fields it lacks stay zero
         desc_ = pulsim_xdev_descriptor{};
-        std::memcpy(&desc_, d_, std::min<std::size_t>(d_->struct_size, sizeof desc_));
+        std::memcpy(&desc_, d_, d_->struct_size >= kOutputsDescriptorSize ? sizeof desc_
+                                                                          : kV1DescriptorSize);
         const std::size_t R = R_;
         for (std::uint32_t k = 0; k < d_->n_pins; ++k) pin_s_.emplace_back(d_->pin_names[k]);
         for (const auto& n : pin_s_) pin_p_.push_back(n.c_str());
@@ -350,6 +387,15 @@ private:
         lo_ = cp(d_->probe_lo, R);
         hi_ = cp(d_->probe_hi, R);
         mono_ = cp(d_->monotone, d_->n_monotone);
+        if (desc_.n_outputs > 0) {   // zero unless the library's struct has block 1
+            for (std::uint32_t k = 0; k < d_->n_outputs; ++k) {
+                out_s_.emplace_back(d_->outputs[k].name);
+                out_s_.emplace_back(d_->outputs[k].unit);
+            }
+            for (std::uint32_t k = 0; k < d_->n_outputs; ++k) {
+                outs_.push_back({out_s_[2 * k].c_str(), out_s_[2 * k + 1].c_str()});
+            }
+        }
         desc_.struct_size = static_cast<std::uint32_t>(sizeof desc_);
         desc_.name = name_.c_str();
         desc_.pin_names = pin_p_.data();
@@ -361,6 +407,7 @@ private:
         desc_.probe_lo = lo_.data();
         desc_.probe_hi = hi_.data();
         desc_.monotone = mono_.data();
+        desc_.outputs = outs_.empty() ? nullptr : outs_.data();
         d_ = &desc_;
     }
     void check_pattern_(const char* which, std::uint32_t nnz, const std::uint32_t* rr,
@@ -398,6 +445,8 @@ private:
     std::vector<std::uint32_t> fr_, fc_, qr_, qc_;
     std::vector<double> lo_, hi_;
     std::vector<pulsim_xdev_monotone> mono_;
+    std::vector<std::string> out_s_;
+    std::vector<pulsim_xdev_output> outs_;
 };
 
 [[nodiscard]] inline std::shared_ptr<const Model> load_model(const std::string& path,
@@ -484,6 +533,24 @@ public:
         for (Real v : o.dq) sum += v;
         if (!std::isfinite(sum)) name_nonfinite_(x, o);
         if (debug_) check_jacobian_at(x, state, o, "run-time debug check", t);
+    }
+
+    /// The model's named outputs at x with the committed state into out
+    /// (n_outputs reals); a failed or non-finite call is refused by name.
+    void outputs(const Real* x, const Real* state, Real* out, Real t = 0) const {
+        const auto& d = m_->d();
+        if (d.n_outputs == 0) return;
+        std::fill(out, out + d.n_outputs, std::numeric_limits<Real>::quiet_NaN());
+        const pulsim_xdev_ctx c = ctx_(state, t);
+        if (d.outputs_fn(&c, x, out) != PULSIM_XDEV_OK) {
+            refuse_("outputs_fn returned an error status at x = " + vec(x, rows()));
+        }
+        for (std::uint32_t k = 0; k < d.n_outputs; ++k) {
+            if (!std::isfinite(out[k])) {
+                refuse_(std::string("outputs_fn returned a non-finite '") + d.outputs[k].name
+                        + "' = " + num(out[k]) + " at x = " + vec(x, rows()));
+            }
+        }
     }
 
     /// Jacobian of `o` (evaluated at x) against Richardson-extrapolated

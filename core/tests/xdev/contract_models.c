@@ -228,12 +228,28 @@ static int32_t CALL state_overrun(const pulsim_xdev_ctx *c, const double *x, dou
     return 0;
 }
 
+#ifdef PULSIM_XDEV_DESCRIPTOR_OUTPUTS_SIZE /* the header with appended block 1 */
+/* named outputs of the energy meter: its committed energy and its power G·v² */
+static const pulsim_xdev_output METER_OUT[2] = {{"energy", "J"}, {"p_law", "W"}};
+static int32_t CALL meter_outputs(const pulsim_xdev_ctx *c, const double *x, double *out) {
+    out[0] = c->state[0];
+    out[1] = G * V * V;
+    return 0;
+}
+static const pulsim_xdev_output BAD_OUT[1] = {{"power", "W"}}; /* a generic reading's key */
+#endif
+
 #define SMOOTH PULSIM_XDEV_CLAIM_SMOOTH
 #define PASSIVE PULSIM_XDEV_CLAIM_PASSIVE
+#ifdef PULSIM_XDEV_DESCRIPTOR_OUTPUTS_SIZE
+#define NO_OUTPUTS , 0, 0, NULL, NULL
+#else
+#define NO_OUTPUTS
+#endif
 #define DESC(nm, fn, claims, nmono, nf, nq, qr, qc, ns, init, acc, ver)                         \
     {(ver), (uint32_t)sizeof(pulsim_xdev_descriptor), (nm), 2, 0, 1, (ns), (nf), (nq), (nmono),   \
      (claims), PINS, FG, FR, FC, (qr), (qc), LO, HI, MONO, (fn), NULL, NULL, NULL, (init), (acc), \
-     {NULL, NULL, NULL, NULL}}
+     {NULL, NULL, NULL, NULL} NO_OUTPUTS}
 #define PLAIN(nm, fn, claims, nmono) \
     DESC(nm, fn, claims, nmono, 4, 0, NULL, NULL, 0, NULL, NULL, PULSIM_XDEV_ABI_VERSION)
 
@@ -269,10 +285,34 @@ static const pulsim_xdev_descriptor MODELS[] = {
     PLAIN("huge_outside", huge_outside, SMOOTH, 0),
 };
 
+#ifdef PULSIM_XDEV_DESCRIPTOR_OUTPUTS_SIZE
+#define DESC_OUT_SZ(sz, nm, nout, outs, ofn, nev)                                              \
+    {PULSIM_XDEV_ABI_VERSION, (uint32_t)(sz), (nm), 2, 0, 1, 1, 4, 0,                           \
+     0, SMOOTH | PASSIVE, PINS, FG, FR, FC, NULL, NULL, LO, HI, MONO, good, NULL, NULL, NULL,    \
+     meter_init, meter_accept, {NULL, NULL, NULL, NULL}, (nout), (nev), (outs), (ofn)}
+#define DESC_OUT(nm, nout, outs, ofn, nev) \
+    DESC_OUT_SZ(sizeof(pulsim_xdev_descriptor), nm, nout, outs, ofn, nev)
+static const pulsim_xdev_descriptor OUT_MODELS[] = {
+    DESC_OUT("metered_resistor", 2, METER_OUT, meter_outputs, 0),
+    DESC_OUT("liar_output_name", 1, BAD_OUT, meter_outputs, 0),
+    DESC_OUT("liar_events", 0, NULL, NULL, 1), /* event functions: not supported yet */
+    /* struct_size inside block 1: the partial block is not read (n_outputs
+       would index a NULL outputs) */
+    DESC_OUT_SZ(PULSIM_XDEV_DESCRIPTOR_V1_SIZE + 4, "partial_block", 3, NULL, NULL, 0),
+};
+#define N_OUT_MODELS (sizeof OUT_MODELS / sizeof OUT_MODELS[0])
+#else
+#define N_OUT_MODELS 0
+#endif
+
 PULSIM_XDEV_EXTERN_C PULSIM_XDEV_EXPORT const pulsim_xdev_descriptor *CALL
 pulsim_xdev_get(uint32_t index) {
     static pulsim_xdev_descriptor pattern_liar;
-    if (index >= sizeof MODELS / sizeof MODELS[0]) return NULL;
+    const uint32_t n = (uint32_t)(sizeof MODELS / sizeof MODELS[0]);
+#ifdef PULSIM_XDEV_DESCRIPTOR_OUTPUTS_SIZE
+    if (index >= n && index < n + N_OUT_MODELS) return &OUT_MODELS[index - n];
+#endif
+    if (index >= n) return NULL;
     if (index == 2) { /* declares 3 entries: (1, 1) is missing */
         pattern_liar = MODELS[2];
         pattern_liar.nnz_f = 3;
