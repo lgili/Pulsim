@@ -13,6 +13,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   machine, and `components()` gives its `{name}.em` entry the keys
   `composite`, `composite_name`, `sub_elements` and `composite_params`
   (read back from the members). `to_yaml` / `from_yaml` keep the record.
+  A `dc_machine` record must name `{name}.la`, `.em`, `.j` (and the
+  optional `.ra`, `.b`, `.tl`) with their kinds; anything else is refused
+  by name.
 
 ### Hysteretic permeance and the core-loss element fitter
 

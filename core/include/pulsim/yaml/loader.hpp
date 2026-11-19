@@ -693,7 +693,7 @@ inline void load_device(
         throw std::runtime_error(
             "yaml::load: device " + device_label(dev, idx) + " has type '" +
             type + "', which add-permeance-magnetic-domain defines but has not "
-            "shipped yet (it needs a current-controlled Newton law). Use "
+            "shipped yet (it needs a new Newton device kind). Use "
             "magnetic_resistance for in-loop eddy loss.");
     } else if (type == "sine_current_source") {
         require_only_keys(dev, idx, type, {"from", "to", "i_dc", "i_amplitude",

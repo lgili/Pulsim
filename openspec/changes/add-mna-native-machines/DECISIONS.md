@@ -395,7 +395,11 @@ Each entry: question → option taken → why → how to reverse.
   has to refuse member edits (unlike the power MOSFET, whose element values
   are derived from a datasheet record). `to_yaml` writes a `composites:`
   block and `from_yaml` reads it (value hash unchanged: the block is not
-  hashed, like the power-MOSFET record).
+  hashed, like the power-MOSFET record). A `dc_machine` record is checked
+  member by member (anchor `{name}.em`; `.la` inductor, `.em` ideal
+  transformer, `.j` capacitor required; `.ra`/`.b` resistor, `.tl` current
+  source optional; no foreign member), because `components()` reads them
+  and a hand-written YAML `composites:` block is untrusted.
 - Why not a separate entry: `components()` consumers index by
   `branch_id`; an entry without a branch would break them.
 - Reverse: drop the registry; the members stay as they are.

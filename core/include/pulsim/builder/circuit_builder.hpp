@@ -2592,6 +2592,7 @@ public:
                     name, m));
             }
         }
+        if (kind == "dc_machine") check_dc_machine_record_(name, anchor, members);
         composites_.push_back(CompositeRecord{std::string{kind}, std::string{name},
                                               std::string{anchor}, std::move(members)});
         return *this;
@@ -2600,6 +2601,50 @@ public:
     [[nodiscard]] const std::vector<CompositeRecord>& composites() const noexcept {
         return composites_;
     }
+
+private:
+    // components() reads a dc_machine's parameters from its members, so a
+    // record (hand-written YAML included) must name members of the right kind.
+    void check_dc_machine_record_(std::string_view name, std::string_view anchor,
+                                  const std::vector<std::string>& members) const {
+        using SK = pwl::DevicePool::StoredKind;
+        const std::string n{name};
+        if (anchor != n + ".em") {
+            throw std::invalid_argument(std::format(
+                "record_composite(\"{}\"): a dc_machine's anchor is \"{}.em\", not \"{}\"",
+                name, name, anchor));
+        }
+        struct Want { const char* sfx; SK kind; bool required; };
+        for (const Want w : {Want{".ra", SK::Resistor, false}, Want{".la", SK::Inductor, true},
+                             Want{".em", SK::IdealTransformer, true},
+                             Want{".j", SK::Capacitor, true}, Want{".b", SK::Resistor, false},
+                             Want{".tl", SK::CurrentSource, false}}) {
+            const std::string m = n + w.sfx;
+            const bool listed = std::find(members.begin(), members.end(), m) != members.end();
+            if (!listed) {
+                if (w.required) {
+                    throw std::invalid_argument(std::format(
+                        "record_composite(\"{}\"): a dc_machine needs the member \"{}\"",
+                        name, m));
+                }
+                continue;
+            }
+            if (pool_.kind_of(branch_index_.at(m)) != w.kind) {
+                throw std::invalid_argument(std::format(
+                    "record_composite(\"{}\"): member \"{}\" has the wrong kind for a dc_machine",
+                    name, m));
+            }
+        }
+        for (const auto& m : members) {
+            if (!m.starts_with(n + ".")) {
+                throw std::invalid_argument(std::format(
+                    "record_composite(\"{}\"): \"{}\" is not a dc_machine sub-element",
+                    name, m));
+            }
+        }
+    }
+
+public:
 
     /// The power-MOSFET record whose channel is `branch_id`, or nullptr.
     [[nodiscard]] const models::PowerMosfet::Record*

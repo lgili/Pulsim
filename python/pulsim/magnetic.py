@@ -302,6 +302,14 @@ class CoreLossElements:
     length: float
 
 
+def _fit_error(option, message):
+    """A typed `OptionsError` (a ValueError) naming the bad argument."""
+    from ._pulsim import OptionsError  # type: ignore[import-not-found]
+    err = OptionsError(message)
+    err.option = option
+    return err
+
+
 def fit_core_loss_elements(f, B, P_v, *, geometry, tol=0.05,
                            beta_bounds=(1.0, 3.0)):
     """Fit the in-loop loss elements of a core segment to sine loss data.
@@ -329,20 +337,20 @@ def fit_core_loss_elements(f, B, P_v, *, geometry, tol=0.05,
     B = np.asarray(B, dtype=float).ravel()
     P = np.asarray(P_v, dtype=float).ravel()
     if not (f.shape == B.shape == P.shape):
-        raise ValueError("fit_core_loss_elements: f, B and P_v must have "
-                         "the same length.")
+        raise _fit_error("P_v", "fit_core_loss_elements: f, B and P_v must "
+                         "have the same length.")
     if f.size < 4:
-        raise ValueError("fit_core_loss_elements: needs at least four "
+        raise _fit_error("f", "fit_core_loss_elements: needs at least four "
                          f"(f, B, P_v) points (got {f.size}).")
     for name, x in (("f", f), ("B", B), ("P_v", P)):
         if not np.all(np.isfinite(x) & (x > 0)):
-            raise ValueError(f"fit_core_loss_elements: {name} must be "
+            raise _fit_error(name, f"fit_core_loss_elements: {name} must be "
                              "positive and finite.")
     area, length = (float(v) for v in geometry)
     if not (area > 0 and length > 0 and np.isfinite(area)
             and np.isfinite(length)):
-        raise ValueError("fit_core_loss_elements: geometry = (area, "
-                         "length) must be positive and finite.")
+        raise _fit_error("geometry", "fit_core_loss_elements: geometry = "
+                         "(area, length) must be positive and finite.")
 
     def solve(beta):
         A = np.column_stack((f * B ** beta, f ** 2 * B ** 2,
@@ -359,8 +367,8 @@ def fit_core_loss_elements(f, B, P_v, *, geometry, tol=0.05,
     beta = float(best.x)
     (k_h, k_e, k_x), residual = solve(beta)
     if residual > tol:
-        raise ValueError(
-            f"fit_core_loss_elements: the three-term model misses the data "
+        raise _fit_error(
+            "tol", f"fit_core_loss_elements: the three-term model misses the data "
             f"by {residual:.3g} (relative) > tol = {tol}; the data are not a "
             f"hysteresis + eddy + excess split at sinusoidal flux.")
     R_m = k_e * length / (2.0 * np.pi ** 2 * area)

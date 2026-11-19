@@ -2253,9 +2253,9 @@ void init_module(py::module_& m) {
                               py::dict pd;
                               const auto ra = member(".ra");
                               pd["R_a"] = ra ? Real{1} / pool.resistor_params(*ra).G : Real{0};
-                              pd["L_a"] = pool.inductor_params(*member(".la")).L;
-                              pd["K"] = pool.ideal_transformer_params(*member(".em")).n;
-                              pd["J"] = pool.capacitor_params(*member(".j")).C;
+                              pd["L_a"] = pool.inductor_params(member(".la").value()).L;
+                              pd["K"] = pool.ideal_transformer_params(member(".em").value()).n;
+                              pd["J"] = pool.capacitor_params(member(".j").value()).C;
                               const auto bb = member(".b");
                               pd["B"] = bb ? pool.resistor_params(*bb).G : Real{0};
                               const auto tl = member(".tl");

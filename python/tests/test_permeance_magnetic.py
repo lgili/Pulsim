@@ -853,9 +853,27 @@ def test_fitted_magnetic_resistance_dissipates_its_eddy_share():
     b.add_magnetic_resistance("Rm", "m1", "m2", fit.R_m)
     b.add_permeance("Pc", "m2", "gnd", 2e-6)
     r = p.simulate(b, t_end=4 / fr, dt=1 / (fr * 2000))
-    t = np.asarray(r.times)
-    u = np.asarray(r.v("e")) / N                     # dΦ/dt
-    m = t >= 2 / fr
-    P_sim = float(np.trapezoid(fit.R_m * u[m] ** 2, t[m]) / (t[m][-1] - t[m][0]))
+    # the solved loss of the element (its MMF from the run), as reported
+    rows = p.device_loss_summary(b, r, t_from=2 / fr, t_to=4 / fr)
+    P_sim = next(x for x in rows if x["name"] == "Rm")["P_avg"]
     B_pk = V / (2 * math.pi * fr * N * A)
     assert P_sim == pytest.approx(fit.k_e * fr ** 2 * B_pk ** 2 * A * seg_l, rel=1e-4)
+
+
+def test_fit_core_loss_elements_refuses_by_argument():
+    f, B, P = _loss_data()
+    geo = (76e-6, 72e-3)
+    with pytest.raises(p.OptionsError, match="same length") as e:
+        p.fit_core_loss_elements(f[:-1], B, P, geometry=geo)
+    assert e.value.option == "P_v"
+    with pytest.raises(p.OptionsError, match="B must be positive") as e:
+        p.fit_core_loss_elements(f, -np.asarray(B), P, geometry=geo)
+    assert e.value.option == "B"
+    with pytest.raises(p.OptionsError, match="geometry") as e:
+        p.fit_core_loss_elements(f, B, P, geometry=(0.0, 1.0))
+    # data that are not a three-term split (random scatter) miss tol
+    rng = np.random.default_rng(0)
+    with pytest.raises(p.OptionsError, match="misses the data") as e:
+        p.fit_core_loss_elements(f, B, np.asarray(P) * rng.uniform(0.5, 2, len(P)),
+                                 geometry=geo)
+    assert e.value.option == "tol"

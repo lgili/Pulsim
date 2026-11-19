@@ -270,3 +270,11 @@ def test_record_composite_refuses_by_name():
         b.record_composite("dc_machine", "N", "M.em", ["M.em", "X"])
     with pytest.raises(ValueError, match="anchor"):
         b.record_composite("dc_machine", "N", "M.j", ["M.em"])
+    with pytest.raises(ValueError, match="needs the member \"M2.la\""):
+        b.add_capacitor("M2.em", "x", "gnd", 1e-6)
+        b.record_composite("dc_machine", "M2", "M2.em", ["M2.em"])
+    b.add_capacitor("M3.la", "y", "gnd", 1e-6)
+    b.add_capacitor("M3.em", "z", "gnd", 1e-6)
+    with pytest.raises(ValueError, match="member \"M3.la\" has the wrong kind"):
+        b.record_composite("dc_machine", "M3", "M3.em", ["M3.la", "M3.em"])
+    assert len(b.composites()) == 1
