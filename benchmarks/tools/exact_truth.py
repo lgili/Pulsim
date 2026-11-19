@@ -2059,8 +2059,11 @@ def report(out=REPORT, truth_dir=TRUTH_DIR, dps=50):
           "difference of the 30- and 60-digit runs (45 / 90 where 30 cannot select the mode) on the netlist grid, relative to the column's",
           "peak. `modes`: events at which more than one mode is consistent (followed: the one",
           "with the fewest flips); `weak`: events where only a mode with a device pinned at its",
-          "boundary (v = 0 identically) is consistent.", "",
-          "| circuit | form | commutations | modes non-unique | weak | impulsive loss [J] | prec | "
+          "boundary (v = 0 identically) is consistent. `-dE jumps`: minus the stored-energy change",
+          "summed over the state jumps; the impulsive loss when no source takes part in a jump",
+          "(an ideal switch closing a capacitor onto a source also draws the source's impulsive",
+          "work, not computed).", "",
+          "| circuit | form | commutations | modes non-unique | weak | -dE jumps [J] | prec | "
           "energy bal. | u stored | floor | tol pwl / trbdf2 |",
           "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
     for r in recs:
